@@ -6,7 +6,8 @@ import type {
   common_DesignPicture,
   common_MediaFull,
 } from 'api/proto-http/admin';
-import { MediaSlot } from 'components/managers/media/components/media-slot';
+import { MediaSelector } from 'components/managers/media/components/media-selector';
+import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 
@@ -14,7 +15,6 @@ import { VectorModal } from './modals';
 import { Reason } from './core';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
-import MediaComponent from 'ui/components/media';
 import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { batchCaption, pictureHandle } from './handles';
@@ -435,26 +435,119 @@ export type BenchSlotProps = {
 };
 
 /**
- * Формула появления тихих органов плиты: наведение ИЛИ фокус внутри плитки, всегда — на
- * устройстве без наведения. Та же, что у ячейки референсов (`hoverOnly`). Слушается
- * `group-focus-within`, а не собственный `focus-within` органа: у клавиатуры ховера не бывает,
- * и орган, видимый только пока фокус стоит на нём самом, было бы нечем найти.
+ * ═══ ОДНА ЯЧЕЙКА ПОЛОСЫ FLAT SLOTS — форма макета (`slotCell`, `_core.js`), данные продукта ═══
+ *
+ * Плита стоит в ГОРИЗОНТАЛЬНОЙ ПОЛОСЕ из шести ячеек по 138px (`.pstrip` макета), и у ячейки два
+ * лица:
+ *   · ЗАПОЛНЕННАЯ — сплошная чернильная рамка, кадр 1:1 без своей рамки, ПОДВАЛ (`.cap`) с именем
+ *     стороны и звёздочкой обязательной; никакой полосы происхождения — она уехала в `title`
+ *     подвала (`slotFootnote`), потому что макет её не рисует, а стереть факт нельзя;
+ *   · ПУСТАЯ — пунктирная рамка, имя стороны и строка жеста «click to fill · ⌘V · drop» прямо на
+ *     ячейке: состояние показывается, а не рассказывается абзацем под полосой.
+ *
+ * ⚠ ЖЕСТ «CLICK TO FILL» — ЭТО БИБЛИОТЕКА, ⌘V И БРОСОК, а не «первый свободный флэт из пула», как
+ * в прототипе (`f:fill` там — названное упрощение, см. `steps/flat.md`). На проводе слот берёт
+ * `picture_id` или `media_id` конкретной картинки; картинку полосы в слот кладёт пикер «— slot —»
+ * под плиткой истории (`slot-picker.tsx`). Ячейка держит три жеста ОДНИМ обработчиком, как всякий
+ * слот медиа админки: клик — `MediaSelector`, ⌘V и бросок — `useMediaIntake`.
+ *
+ * ⚠ КЛИК ПО СТОЯЩЕЙ ПЛИТЕ НЕ СНИМАЕТ ЕЁ. Макет делает всю плиту кнопкой `f:take`; у продукта
+ * поверхность плитки — закон углов `PictureTile` (владелец: «сделай везде одинаково … компонентом»):
+ * поверхность открывает просмотрщик, снимает угол `✕`, правит угол `edit`. Снятие — запись с CAS
+ * на сервер, и вешать её на голую поверхность, по которой промахиваются, значило бы платить
+ * записью за каждый неточный клик. Строка под полосой называет ✕.
  */
-const QUIET_ORGAN =
-  'opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100 ' +
-  'focus-visible:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none';
+
+/** Кожа кадра пустой ячейки — та же полосатая поверхность, что у всякого слота медиа. Рост
+ *  (138px, кадр 1:1 ленты) — инлайном: стенд читает CSS готовой сборки, где класса, которого не
+ *  было в дереве на момент сборки, нет; продовая сборка его выпустила бы, стенд — нет. */
+const CELL_PX = 138;
+const EMPTY_FACE_STYLE: React.CSSProperties = { ...PLACEHOLDER_SURFACE, minHeight: CELL_PX };
+const EMPTY_FACE =
+  'flex h-full w-full cursor-pointer flex-col items-center justify-center gap-1 px-2 text-center ' +
+  'text-labelColor hover:border-textColor hover:text-textColor ' +
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
 
 /**
- * Кожа углового органа плиты — та же, что у `SplitCornerButton` (рамка, белая подложка,
- * нано-капс), с видимым `focus-visible`: те же классы, что у примитива `Button`. Семь состояний:
- * покой (тихий — QUIET_ORGAN хозяина), наведение (чернеет), фокус (outline 2px), нажатие
- * (родное), выключен (`disabled:` — серый и некликабелен), занят (слот пишет — «saving…» в шапке
- * и мёртвый крестик), ошибка (отказ записи говорит снекбар шва `useDesignWrites`).
+ * ПУСТАЯ ЯЧЕЙКА — имя стороны, строка жеста, три входа. Локальный орган этого файла; макетный
+ * `slotCell` в пустом состоянии. Просится в `core`, если пустые ячейки понадобятся ещё одной
+ * полосе (у рендер-верстака свой файл, `render/side-row.tsx`).
  */
-const CORNER_ORGAN =
-  'pointer-events-auto border border-borderColor bg-bgColor px-1 text-nano uppercase tracking-label ' +
-  'text-labelColor hover:text-textColor disabled:cursor-not-allowed disabled:text-textInactiveColor ' +
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
+function EmptyCell({
+  label,
+  required,
+  requiredNote,
+  purpose,
+  disabled,
+  picking,
+  onPlaceMedia,
+}: {
+  label: string;
+  required?: boolean;
+  requiredNote?: string;
+  purpose: string;
+  disabled?: boolean;
+  picking?: boolean;
+  onPlaceMedia: (media: common_MediaFull) => void;
+}) {
+  const take = (media: common_MediaFull[]) => {
+    const first = media[0];
+    if (first?.id) onPlaceMedia(first);
+  };
+  const intake = useMediaIntake({
+    enabled: !disabled,
+    accept: 'image',
+    limit: 1,
+    purpose,
+    onMedia: take,
+  });
+  const face = (
+    <button
+      type='button'
+      aria-label={`${label} · empty — click to fill`}
+      disabled={disabled}
+      data-bench-empty={label}
+      style={EMPTY_FACE_STYLE}
+      className={cn(
+        placeholderClass({ dashed: true }),
+        EMPTY_FACE,
+        (intake.dragging || picking) && 'border-textColor text-textColor',
+        disabled && 'cursor-default hover:border-borderColor hover:text-labelColor',
+      )}
+    >
+      <span className='text-micro uppercase tracking-label text-textColor'>
+        {label}
+        {required && (
+          <span className='text-error' title={requiredNote}>
+            {' '}
+            *
+          </span>
+        )}
+      </span>
+      <span className='text-micro normal-case leading-tight tracking-normal'>
+        {intake.dragging ? 'drop the image' : disabled ? 'empty' : 'click to fill · ⌘V · drop'}
+      </span>
+    </button>
+  );
+  return (
+    <div {...(disabled ? {} : intake.regionHandlers)} className='flex h-full min-w-0 flex-col'>
+      {disabled ? (
+        face
+      ) : (
+        <MediaSelector
+          label={`+ fill ${label}`}
+          purpose={purpose}
+          aspectRatio={['Custom']}
+          allowMultiple={false}
+          showVideos={false}
+          saveSelectedMedia={take}
+          trigger={face}
+        />
+      )}
+      {intake.dialog}
+    </div>
+  );
+}
 
 export function BenchSlot(props: BenchSlotProps) {
   const [vectorOpen, setVectorOpen] = useState(false);
@@ -495,12 +588,7 @@ export function BenchSlot(props: BenchSlotProps) {
    *   the plate was never flattened (`layerRev === 0`) → nothing is stale; the marks are data, not
    *     ink. A run, the fabric render, the printed sheet and a minted version read the PICTURE —
    *     for them the marks do not exist until `edit → save as picture` runs them through the
-   *     canvas. (The fix cycle, which used to ship a marked copy at GENERATE, is removed — S-15 —
-   *     so the sentence below claims the plain half alone.)
-   *
-   * Only `layer_advanced` can fire on a LIVE plate at all: `content_hash` lives on a version's
-   * frozen plate, never on a live picture (which IS the current file, so a second copy could only
-   * disagree with the first).
+   *     canvas.
    */
   const layerRev = liveLayerRev(band.layers, picture?.media?.id);
   const layerOverPlate = provenance && typeof layerRev === 'number';
@@ -516,96 +604,93 @@ export function BenchSlot(props: BenchSlotProps) {
       : null;
 
   const mixedNote = provenance ? mixedInputNote(provenance) : null;
+  const footnote = picture ? slotFootnote(band, picture, shelfOrdinals) : '';
 
   return (
-    // `group` is load-bearing: the prototype reveals the slot's actions on hover (`.slotc:hover
-    // .tfoot .act`), and the group is what a child's `group-hover:` reaches for. Opacity, never
-    // display — the footer keeps its box either way, so nothing on this grid reflows under the
-    // pointer.
-    <div className='group flex min-w-0 flex-col gap-1'>
-      {/* ГАЛКИ НАД ПЛИТАМИ СНЯТЫ НАСОВСЕМ (S-14, владелец: «мы уже выбрали в флет сайтс — значит
-          всё ок уже»). Они были шортлистом починки (R-20) и умерли вместе с ней; лист читает сам
-          факт «плита стоит в слоте», и никакой другой писатель за галкой не стоял. */}
-      <div className='flex items-baseline gap-1'>
-        <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
-          {label}
-        </Text>
-        {required && (
-          <Text size='micro' component='span' className='text-error' title={requiredNote}>
-            *
-          </Text>
-        )}
-        {saving && (
-          <Text size='nano' variant='label' component='span' className='ml-auto uppercase'>
-            saving…
-          </Text>
-        )}
-      </div>
-
-      {url ? (
-        /* ЧЕТЫРЕ УГЛА ПЛИТЫ БОЛЬШЕ НЕ ЗАДАЮТСЯ ЗДЕСЬ. Владелец (круг 4, пункт 8): «сделай везде
-           одинаково включая кнопку сплит нахуя ты делаешь везде по разному может сделать это
-           компонентом». Раскладка переехала в примитив `PictureTile`, и задать другую нельзя —
-           пропа «где рисовать сплит» у него нет намеренно. Плита объявляет только РОЛИ:
-           ✕ очищает слот, split режет на виды, edit открывает векторный редактор штрихов.
-           `contain`, не `cover`: плита — ЧЕРТЁЖ, и кроп съедает контур изделия, ради которого
-           лист и печатают. */
-        <PictureTile
-          url={url}
-          alt={label}
-          badge={label}
-          aspect='4/5'
-          fit='contain'
-          selected={picking}
-          gallery={galleryItem}
-          onRemove={
-            !disabled && picture
-              ? {
-                  onClick: onUnmark,
-                  ariaLabel: `unmark ${label}`,
-                  title: 'unmark — empty this slot',
-                  disabled: saving,
-                }
-              : undefined
-          }
-          onEdit={
-            !disabled && editable && picture
-              ? {
-                  onClick: () => setVectorOpen(true),
-                  ariaLabel: `edit ${label} — draw over the plate`,
-                }
-              : undefined
-          }
-        />
+    // `group` is load-bearing: the quiet organs of the plate (the corner buttons of `PictureTile`,
+    // the «remove slot» door) reveal on hover of the whole cell, not of the frame alone.
+    <div className='group flex h-full min-w-0 flex-col gap-1' data-bench-slot={label}>
+      {url && picture ? (
+        /* ═══ ЗАПОЛНЕННАЯ — рамка на ЯЧЕЙКЕ, кадр без своей (`border-0`), подвал под кадром ═══ */
+        <div
+          className={cn(
+            'flex min-w-0 flex-col overflow-hidden border',
+            picking ? 'border-2 border-textColor' : 'border-textColor',
+          )}
+        >
+          {/* Углы — закон примитива (`PictureTile`): ✕ очищает слот, edit открывает векторный
+              редактор, zoom — общий просмотрщик студии. `contain`, не `cover`: плита — ЧЕРТЁЖ, и
+              кроп съедает контур изделия, ради которого лист и печатают. Угла `split` у плиты
+              нет (F-18): композит в слот не встаёт вовсе, сервер отвечает `composite_plate`. */}
+          <PictureTile
+            url={url}
+            alt={label}
+            aspect='1/1'
+            fit='contain'
+            className='border-0'
+            gallery={galleryItem}
+            onRemove={
+              !disabled
+                ? {
+                    onClick: onUnmark,
+                    ariaLabel: `unmark ${label}`,
+                    title: 'unmark — take this plate off the slot; it stays in the history',
+                    disabled: saving,
+                  }
+                : undefined
+            }
+            onEdit={
+              !disabled && editable
+                ? {
+                    onClick: () => setVectorOpen(true),
+                    ariaLabel: `edit ${label} — draw over the plate`,
+                  }
+                : undefined
+            }
+          />
+          {/* ПОДВАЛ — имя стороны и звёздочка; происхождение плиты (`AI · run 5 · a`) уехало в
+              `title`: макет его не печатает, а факт остаётся в одном наведении. */}
+          <div
+            className='flex min-w-0 items-baseline gap-1 border-t border-hairline px-1.5 py-1'
+            title={footnote || undefined}
+            data-bench-cap={label}
+          >
+            <Text
+              size='micro'
+              variant='uppercase'
+              tracking='label'
+              component='span'
+              className='min-w-0 truncate'
+            >
+              {label}
+            </Text>
+            {required && (
+              <Text size='micro' component='span' className='text-error' title={requiredNote}>
+                *
+              </Text>
+            )}
+            {saving && (
+              <Text size='nano' variant='label' component='span' className='ml-auto uppercase'>
+                saving…
+              </Text>
+            )}
+          </div>
+        </div>
       ) : (
-        <MediaSlot
-          aspectRatio={['Custom']}
-          frameAspect='4/5'
-          label={`+ add ${label}`}
-          hint={null}
+        <EmptyCell
+          label={label}
+          required={required}
+          requiredNote={requiredNote}
           purpose={`design bench · ${label}`}
-          showVideos={false}
-          editMode={!disabled}
-          onSelect={(media) => {
-            const first = media[0];
-            if (first?.id) onPlaceMedia(first);
-          }}
-          className={picking ? 'border-textColor' : undefined}
+          disabled={disabled}
+          picking={picking}
+          onPlaceMedia={onPlaceMedia}
         />
       )}
 
-      {/* ⚠ ВТОРОЙ ДВЕРИ ПУСТОГО СЛОТА («or mark a picture from the band») БОЛЬШЕ НЕТ — J-15,
-          владелец. Она была равной первой и вела в режим выбора по полосе.
-
-          ЖЕСТ «КАРТИНКА ПОЛОСЫ → СЛОТ» ПРИ ЭТОМ ЖИВ, обратным направлением того же глагола:
-          пикер «— slot —» под плиткой полосы (`slot-picker.tsx`) кладёт картинку в слот одним
-          жестом, а ✕ в углу занятой плиты освобождает слот под неё. Убрана ДВЕРЬ, а не дорога.
-
-          ⚠ ВЕТКА `picking` НИЖЕ ОСТАВЛЕНА, НО ВЗВЕСТИ ЕЁ БОЛЬШЕ НЕЧЕМ, и это надо сказать прямо:
-          `pick.start` звали ровно три двери (стороны, детали, ячейка минта), все три сняты этим же
-          пунктом. Пикер плитки режим НЕ взводит — он пишет в слот напрямую. Ветка сохранена вместе
-          с самим `PickModeProvider` (он же владеет Esc) как отдельный, названный след, а не как
-          живой орган. */}
+      {/* ⚠ ВЕТКА `picking` ОСТАВЛЕНА, НО ВЗВЕСТИ ЕЁ БОЛЬШЕ НЕЧЕМ (J-15): `pick.start` звали ровно три
+          двери, все три сняты. Пикер плитки режим НЕ взводит — он пишет в слот напрямую. Ветка
+          сохранена вместе с самим `PickModeProvider` (он же владеет Esc) как названный след. */}
       {!disabled && picking && (
         <div>
           <button
@@ -624,57 +709,30 @@ export function BenchSlot(props: BenchSlotProps) {
         <DetailNameField name={(slot?.detailName ?? '').trim()} disabled={disabled} onRename={onRename} />
       )}
 
-      <div className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5'>
-        {picture ? (
-          <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
-            {slotFootnote(band, picture, shelfOrdinals)}
-          </Text>
-        ) : (
-          <Text
-            size='nano'
-            component='span'
-            className={required ? 'text-error' : 'text-labelColor'}
+      {/* ДВЕРЬ СНОСА СЛОТА ДЕТАЛИ — другой глагол, чем ✕ (крестик очищает слот, эта кнопка сносит
+          сам слот), и рядом с плитой их путать нельзя. Появление — той же формулой прозрачности,
+          что у углов плитки: коробка на месте, полоса не дёргается под курсором. */}
+      {!disabled && detail && onDelete && (
+        <span
+          className={cn(
+            'flex flex-wrap items-center gap-1.5',
+            'opacity-0 transition-opacity duration-100 group-hover:opacity-100 focus-within:opacity-100',
+            '[@media(hover:none)]:opacity-100 motion-reduce:transition-none',
+          )}
+        >
+          <Button
+            variant='secondary'
+            size='xs'
+            title='remove this detail slot — not just its picture'
+            onClick={onDelete}
           >
-            <b>empty</b>
-            {required ? ` · ${requiredNote}` : ''}
-          </Text>
-        )}
-
-        {/* ПОДВАЛ ДЕЙСТВИЙ ПОЧТИ ПУСТ, и это снос, а не забывчивость (S-15): `fix ▸` выпилен со
-            всем циклом, `edit` и `unmark` (теперь ✕) переехали в углы самой плиты. Осталось одно
-            действие, у которого угла нет, — удаление слота ДЕТАЛИ: это другой глагол, чем ✕
-            (крестик очищает слот, эта кнопка сносит сам слот), и рядом с плитой их путать нельзя.
-            Появление — той же формулой прозрачности, что и раньше: коробка остаётся на месте,
-            сетка не дёргается под курсором; `focus-within` возвращает её клавиатуре,
-            `hover:none` — тачу. */}
-        {!disabled && detail && onDelete && (
-          <span
-            className={cn(
-              'ml-auto flex flex-wrap items-center gap-1.5',
-              'opacity-0 transition-opacity duration-100 group-hover:opacity-100 focus-within:opacity-100',
-              '[@media(hover:none)]:opacity-100 motion-reduce:transition-none',
-            )}
-          >
-            {/* ЗАПЕРТОГО СОСТОЯНИЯ У ЭТОЙ ДВЕРИ БОЛЬШЕ НЕТ. Запирал её ровно один довод — «слот
-                процитирован выпущенной версией листа», — а версий не существует: минт снесён по
-                слову владельца. Ветка «показать погашенную кнопку с причиной» осталась бы веткой,
-                в которую нечему привести. */}
-            <Button
-              variant='secondary'
-              size='xs'
-              title='remove this detail slot — not just its picture'
-              onClick={onDelete}
-            >
-              remove slot
-            </Button>
-          </span>
-        )}
-      </div>
+            remove slot
+          </Button>
+        </span>
+      )}
 
       {/* Векторный редактор монтируется у плиты, дверь — угол `edit` справа снизу. `editable`
-          снимает и дверь, и МОНТАЖ: модалка держит своё состояние холста и подписки на клавиши,
-          и оставить её висеть под плитой, у которой двери нет, значило бы платить за орган,
-          дойти до которого нельзя. */}
+          снимает и дверь, и МОНТАЖ: модалка держит своё состояние холста и подписки на клавиши. */}
       {!disabled && editable && picture && (
         <VectorModal
           open={vectorOpen}
@@ -687,6 +745,7 @@ export function BenchSlot(props: BenchSlotProps) {
         />
       )}
 
+      {/* Оговорки — только когда они есть: в покое под ячейкой ничего не стоит (макет). */}
       {mixedNote && (
         <Text size='nano' variant='label' component='span'>
           {mixedNote}
@@ -702,7 +761,6 @@ export function BenchSlot(props: BenchSlotProps) {
           {unflattened}
         </Text>
       )}
-
     </div>
   );
 }
@@ -758,6 +816,9 @@ function DetailNameField({
  *
  * ONE DOOR, NOT TWO, SINCE J-15 — «or mark from the band» was the second, and it went with its
  * twins on the slots themselves.
+ *
+ * ФОРМА — ТА ЖЕ ЯЧЕЙКА ПОЛОСЫ, что у пустой стороны (`EmptyCell`): с именем — живой слот на три
+ * жеста, без имени — та же пунктирная коробка, которая зовёт к полю имени под собой.
  */
 export function NewDetailCell({
   disabled,
@@ -777,26 +838,15 @@ export function NewDetailCell({
   };
 
   return (
-    <div className='flex min-w-0 flex-col gap-1'>
-      <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
-        new detail
-      </Text>
-
+    <div className='flex h-full min-w-0 flex-col gap-1' data-bench-slot='new detail'>
       {named && !disabled ? (
-        <MediaSlot
-          aspectRatio={['Custom']}
-          frameAspect='4/5'
-          label={`+ fill ${named}`}
-          hint={null}
+        <EmptyCell
+          label={named}
           purpose={`design bench · ${named}`}
-          showVideos={false}
-          onSelect={(media) => {
-            const first = media[0];
-            if (first?.id) {
-              onPlaceMedia(first, named);
-              setName('');
-              setBad(false);
-            }
+          onPlaceMedia={(media) => {
+            onPlaceMedia(media, named);
+            setName('');
+            setBad(false);
           }}
         />
       ) : (
@@ -805,14 +855,20 @@ export function NewDetailCell({
           disabled={disabled}
           onClick={demandName}
           aria-label='name the detail first'
-          style={{ ...PLACEHOLDER_SURFACE, aspectRatio: '4/5' }}
+          style={EMPTY_FACE_STYLE}
           className={cn(
             placeholderClass({ dashed: true }),
-            'w-full cursor-pointer flex-col gap-1 px-2 text-center text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+            EMPTY_FACE,
             bad && 'border-error text-error',
+            disabled && 'cursor-default hover:border-borderColor hover:text-labelColor',
           )}
         >
-          <span className='leading-tight'>+ detail</span>
+          <span className={cn('text-micro uppercase tracking-label', bad ? 'text-error' : 'text-textColor')}>
+            + detail
+          </span>
+          <span className='text-micro normal-case leading-tight tracking-normal'>
+            name it, then fill it
+          </span>
         </button>
       )}
 
@@ -828,14 +884,6 @@ export function NewDetailCell({
           if (e.target.value.trim()) setBad(false);
         }}
       />
-
-      {/* J-15: «or mark from the band» снята и здесь. Это была ВТОРАЯ ОРФОГРАФИЯ той же двери
-          (та же `pick.start`, другие слова), и оставить её значило бы закрыть жест на слотах и
-          оставить его на ячейке минта — одна дверь, две судьбы. */}
-
-      <Text size='nano' component='span' className={bad ? 'text-error' : 'text-labelColor'}>
-        <b>new</b> · name it, then fill it
-      </Text>
     </div>
   );
 }

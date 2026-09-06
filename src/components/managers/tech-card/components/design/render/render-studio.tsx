@@ -1,12 +1,14 @@
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
 import { useMemo, useState, type JSX } from 'react';
+import { Button } from 'ui/components/button';
+import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 
 import { colourPlanGate, planRecipe } from '../colour-plan/model';
 import { useColourPlan } from '../colour-plan/use-colour-plan';
 import { viewLabel } from '../views';
 import { useCardFit, useColourDraft } from './drafts';
-import { GenerateRow, RunRefusal } from './generate-row';
+import { GenerateRow, LockBar, RunRefusal } from './generate-row';
 import {
   hexIsPaintable,
   madeOfLine,
@@ -19,68 +21,49 @@ import {
 } from './model';
 import { OutputsSection } from './outputs';
 import { Palette } from './palette';
-import { SideRows } from './side-row';
+import { InputFlatsGroup, SidesGroup } from './side-row';
 import { useStartDesignRun } from './use-design-run';
 import { WhatModelGetsRenderModal } from './what-model-gets';
 
 /**
- * THE FABRIC RENDER STUDIO — the whole of the `render` view of the DESIGN band.
+ * THE FABRIC RENDER STUDIO — step 4 of the chain, ONE BLOCK, as the prototype draws it
+ * (`_step-render.js`, `RENDER['step-render']`):
  *
- * TWO BLOCKS, IN THIS ORDER, AND THE ORDER IS THE ARGUMENT. First what the render is MADE FROM (the
- * flats, with the line down the middle), then what it is made WITH (the fabric: photo, colour, words
- * — any of them, in any combination, ranked by the prompt and not by this screen). The
- * prototype puts the inputs above the menu on both generative screens for the same reason the bench
- * stands below the feed on FLAT: you look at the material before you decide what to do to it.
+ *   FABRIC RENDER · the cloth on the flats                                          [STEP 4]
+ *   ── INPUT FLATS ──── the flat bench, read only, one cell per side (6)
+ *   ── SIDES ────────── the render bench of the studio's colourway, THE writer of that axis
+ *   ── CLOTH AND COLOUR  one grid: cloth tiles and the colour tile
+ *   ── CLOTH IS ─────── weight g/m² · opaque · semi sheer · sheer, one line
+ *   ── IN WORDS ─────── the free text of the recipe
+ *   GENERATE · priced by the server on start · WHAT THE MODEL GETS ▸
  *
- * THE REFERENCES ARE NOT DRAWN HERE, and that is a rule of the band rather than a layout choice: a
- * fabric render is coloured over THE FLATS OF THIS CARD, and the model never sees the reference
- * photographs at all. Drawing them would put a section on screen that has no effect on the button
- * beneath it. They belong to FLAT, one click away.
+ * The rows are separated by group rules (`GroupLabel`), never by nested boxes: a block never
+ * contains another block (DESIGN.md). The order is the order of the work — first what the render is
+ * made FROM, then what came BACK, then what it is made WITH. Under the block stands the section of
+ * the card's renders (`OutputsSection`: `mark ▸`, split, apply splitted — the doors that put a
+ * render into a side from the card's own pictures), and under that the generation history.
  *
- * ONE RUN COMES BACK AS ONE SHEET OF SEVERAL VIEWS, and it is split into the slots afterwards —
- * the owner's answer of 2026-08-31. That is why there is no «pictures» count in the menu: the money
- * and the picture are both singular no matter how many sides the bench holds, and the plural is
- * created for free, later, by the split.
+ * ⚠ THE OWNER SAW THE BETA AND SAID «это не как в референсе». What stood here — a four-column table
+ * «flats in · renders back · 3D» and a block titled «generation — fabric render» — is gone; the
+ * organs are the same, the shape is the mockup's.
  *
- * ═══ FIT БОЛЬШЕ НЕ СТОИТ НА ЭТОМ ЭКРАНЕ (J-20) ═══════════════════════════════════════════════
+ * THE REFERENCES ARE NOT DRAWN HERE: a fabric render is coloured over THE FLATS OF THIS CARD, and
+ * the model never sees the reference photographs. They belong to FLAT, one click away.
  *
- * Владелец: «FIT полностью убираем отсюда». Здесь стоял read-only ряд, который печатал посадку
- * карточки и объяснял, почему её нельзя править, — то есть занимал строку настройки, ничего не
- * настраивая.
+ * ONE RUN COMES BACK AS ONE SHEET OF SEVERAL VIEWS (the owner's answer of 2026-08-31), split into
+ * the slots afterwards; that is why the shape line names one picture however many sides stand.
  *
- * ⚠ «ОТСЮДА» — ЭТО ЭКРАН, А НЕ ПРОВОД, И РАЗНИЦА ЗДЕСЬ ДЕНЕЖНАЯ. Сервер по-прежнему морозит
- * `fit` в снимок КАЖДОГО рендер-прогона и печатает его в платный промпт (`snapshot.go`,
- * `composePrompt`). Поэтому `useCardFit` остался и по-прежнему кормит модалку «what the model
- * gets»: инвентарь обязан называть ВСЁ, что уезжает, иначе экран говорит одно, а тело запроса
- * другое. Перестать ОТПРАВЛЯТЬ посадку — правка бэкенда и другой промпт на каждом рендере; это
- * отдельное решение владельца, и здесь оно не принимается молча.
- */
-/**
- * ═══ КОЛОРВЕЙ: ОРГАН УХОДИЛ, ОСЬ НЕ УХОДИЛА, ОРГАН ВЕРНУЛСЯ ДРУГИМ (E-16 → круг 19, C1) ══════
+ * ═══ FIT IS NOT ON THIS SCREEN (J-20), BUT IT IS ON THE WIRE ═══════════════════════════════════
+ * Владелец: «FIT полностью убираем отсюда». The server still freezes the card's fit into every
+ * render's snapshot and prints it into the paid prompt, so `useCardFit` stays and feeds the modal
+ * «what the model gets»: the inventory must name EVERYTHING that travels.
  *
- * КРУГ 16, дословно: «в GENERATION — FABRIC RENDER мы полностью убираем колорвеи только имена
- * остаются». Тем же кругом про соседний экран: «в MAKE A PATTERN оставь только имя убери колорвей»
- * (E-1). Отсюда тогда ушли `ColorwaySelect` из заголовочной линейки блока, проп `colorway`, засев
- * черновика тканью колорвея и подпись «this card has no colourways…», а экран стал адресовать
- * безколорвейный верстак — `0`.
- *
- * КРУГ 19, дословно: «колорвеи для рендеров … как пробрасывать паттерны … как сохранять». Ось
- * вернулась, и мирится это с E-16 РОВНО ОДНИМ УСЛОВИЕМ, которое здесь и соблюдено:
- *
- *   · ВЫБОР СТОИТ НЕ НА ЭТОМ ЭКРАНЕ. Заголовочная линейка блока пуста, как её и оставил E-16;
- *     число приходит ПРОПОМ сверху, из единственного органа — селекта в правом конце ряда
- *     представлений (`kinds-strip.tsx`), который на всю студию один;
- *   · «ТОЛЬКО ИМЕНА ОСТАЮТСЯ» НЕ ТРОНУТО: имя цвета в рецепте — по-прежнему СВОБОДНОЕ слово рядом
- *     с hex (H-8), артикульных жетонов промпт не видит, и колорвей его собой не подменяет;
- *   · ЗАСЕВ ТКАНЬЮ ЧЕРЕЗ `design_asset.colorway_id` НЕ ВЕРНУЛСЯ. Ссылка «одна ткань на колорвей»
- *     не выражает N тканей; засев теперь идёт от ПОСЛЕДНЕГО РЕЦЕПТА этого колорвея — тем же
- *     правилом, которым нулевой верстак засевается последним рецептом карточки.
- *
- * ⚠ И ЭТО ПО-ПРЕЖНЕМУ ОБЯЗАНО БЫТЬ ОДНО ЧИСЛО НА ВСЮ СТУДИЮ — довод не изменился ни на слово,
- * поменялась только его сторона. Верстак рендеров ПИШЕТСЯ ЗДЕСЬ (`FabricRenderSlots`,
- * `OutputsSection` → `mark ▸`), ЧИТАЕТСЯ на 3D (`threedSides`) и собирается СЕРВЕРОМ
- * (`designSelectBench`). Заведи этот экран своё состояние — и 3D смотрело бы в один верстак, пока
- * рендер наполняет другой. Поэтому владелец числа — композитор, а здесь оно только принимается.
+ * ═══ THE COLOURWAY IS ONE NUMBER FOR THE WHOLE STUDIO (round 19, C1) ═══════════════════════════
+ * The choice is on the rail, not here; the number arrives as a prop. The render bench is WRITTEN
+ * here (`SidesGroup`, `OutputsSection` → `mark ▸`), READ on 3D and ASSEMBLED by the server
+ * (`designSelectBench`); a second owner of the number would have 3D looking into one bench while
+ * the render fills another. `key={colorwayId}` on the composer remounts this screen on a change of
+ * colour, so `useColourDraft` seeds ONCE PER MOUNT and anew per colour.
  */
 export function RenderStudio({
   band,
@@ -96,142 +79,91 @@ export function RenderStudio({
   techCardId: number;
   disabled?: boolean;
   /**
-   * ЧЕЙ ЭТОТ РЕНДЕР. `0` — безколорвейный верстак: не пропуск, а НАСТОЯЩЕЕ, вечно законное
-   * значение, на котором стоит каждый рендер, сделанный до появления оси, и которое читает
-   * 3D-прогон, не назвавший колорвея. Умолчание пропа — оно же, поэтому композитор, не давший
-   * числа, получает ровно прежнее поведение.
+   * WHOSE render this is. `0` — the colourway-less bench: not a gap but a real, permanently legal
+   * value, the one every render made before the axis existed stands on.
    */
   colorwayId?: number;
-  /** Его строка — вторая половина засева («свой цвет колорвея», когда рендеров у него ещё нет). */
+  /** Its row — the second half of the seed («its own colour», when it has no renders yet). */
   colorwayRef?: common_AdminColorwayRef | null;
-  /** Его имя — для отказов и подписей выходов; `''` под `no colourway`, и это тоже утверждение. */
+  /** Its name — for refusals and captions; `''` under `no colourway`, and that is a statement too. */
   colorwayLabel?: string;
   /**
-   * ⚠ ИМ БОЛЬШЕ НЕ РАБОТАЮТ — И ЭТО ЕДИНСТВЕННОЕ, ЧТО ЭТОТ ЭКРАН ЗАПРЕЩАЕТ ПО ИМЕНИ ЦВЕТА.
-   * Резольвнутый ответ хука (`useColorwayChoice`), а не статус: предикат архива один на всю
-   * студию. Читают его ТОЛЬКО ворота — верстак, палитра, выходы и разрез мультивью работают под
-   * архивным колорвеем слово в слово как под живым, потому что архивный вернули в селект РАДИ ТОГО,
-   * чтобы его работа была достижима.
+   * ⚠ ARCHIVED COLOURWAYS ARE NOT WORKED ON, and this is the only thing this screen refuses by the
+   * name of a colour. Read by the GATE ONLY: the bench, the palette, the outputs and the split work
+   * under an archived colourway word for word as under a live one.
    */
   colorwayArchived?: boolean;
   /**
-   * Уйти на другое представление студии. Тем же пропом и по тому же доводу, что у `ThreedStudio`:
-   * состояние `kind` живёт в ОДНОМ месте на всю студию (`StudioTab`), и экран, заведший своё,
-   * рассинхронил бы полосу вкладок со своим же содержимым.
+   * Go to another step of the studio. The step lives in ONE place (`StudioTab`); a screen that kept
+   * its own would desynchronise the rail from its own content.
    */
   onGoToKind?: (kind: 'flat' | 'pattern' | 'render' | 'threed' | 'onmodel') => void;
-  // (`SideRows` зовёт его только с `'flat' | 'render'` — сужение на месте вызова законно.)
 }): JSX.Element {
   const draft = useColourDraft(band, colorwayId, colorwayRef);
   /**
-   * ⚠ ПЛАН ЖИВЁТ ЗДЕСЬ, А НЕ В ПАЛИТРЕ, И ПО ТОМУ ЖЕ ДОВОДУ, ЧТО ЧЕРНОВИК. Ворота и тело запроса
-   * читают его вместе с ведомостью цветов; два вызова хука дали бы два документа с разными
-   * ревизиями — экран сохранял бы под одной, а отказывал бы по другой.
+   * ⚠ THE PLAN LIVES HERE, NOT IN THE PALETTE, for the reason the draft does: the gate and the run
+   * body read it together with the parts row; two hooks would be two documents of different
+   * revisions — saving under one, refusing by the other.
    */
   const colourPlan = useColourPlan(techCardId, band);
   const cardFit = useCardFit();
   const run = useStartDesignRun(techCardId);
-  /** The prompt inventory. A modal is its own surface, so it is mounted beside the blocks. */
+  /** The prompt inventory. A modal is its own surface, so it is mounted beside the block. */
   const [inspecting, setInspecting] = useState(false);
 
   /**
-   * THE VIEWS THIS RUN ASKS FOR, IN SHEET ORDER — a walk around the garment (front, side L, back,
-   * side R), narrowed to the slots that actually hold a drawing.
-   *
-   * ⚠ THIS LIST IS SENT, PROMPTED AND SPLIT AS ONE. It travels as `params.views`; the store records
-   * it VERBATIM as «what is glued into this image» (`compositeViewsOf`); the prompt names it
-   * left-to-right; the splitter labels the cut frames off the record. Sorting it anywhere else in
-   * that chain would hand back a sheet whose frames are systematically mislabeled.
+   * THE VIEWS THIS RUN ASKS FOR, IN SHEET ORDER — a walk around the garment, narrowed to the slots
+   * that hold a drawing. ⚠ SENT, PROMPTED AND SPLIT AS ONE LIST (`params.views` → `compositeViewsOf`
+   * → the splitter's labels); sorting it anywhere else mislabels the cut frames.
    */
   const views = useMemo(() => renderSheetViews(band), [band]);
 
   /**
-   * ═══ ОДНА ТОЧКА КОМПОЗИЦИИ НА ВЕСЬ ЭКРАН ════════════════════════════════════════════════════
-   *
-   * Ворота, тело прогона, строка инвентаря и модалка «what the model gets» читают ОДИН объект.
-   * Собери его в четырёх местах — и первое же расхождение будет стоить купленной картинки: экран
-   * пообещал бы «semi-sheer, about 180 g/m²», ворота посчитали бы рецепт пустым, а уехало бы третье.
-   *
-   * ⚠ ВОРОТА ОБЯЗАНЫ СЧИТАТЬ ИМЕННО ЭТО, А НЕ `draft.recipe`. После H-13 прогон, заявленный ТОЛЬКО
-   * прозрачностью и граммажем, — законное заявление о ткани; ворота, читающие сырой рецепт, назвали
-   * бы его пустым и отказали бы человеку в том, что экран у него только что принял.
+   * ONE POINT OF COMPOSITION FOR THE WHOLE SCREEN. The gate, the run body, the shape line and the
+   * modal read ONE object; assembled in four places, the first divergence costs a bought picture.
+   * ⚠ THE GATE READS THIS, NOT `draft.recipe`: a run stated only by opacity and weight is a legal
+   * statement about the cloth (H-13).
    */
   const sent = useMemo(
     () => ({
       ...draft.recipe,
       words: statedWords(draft),
       /**
-       * ⚠ ИНВАРИАНТ ЦВЕТА ДЕРЖИТ ЭТА ДВЕРЬ, А НЕ ПОЛЕ: НА ПРОВОД НЕ УЕЗЖАЕТ HEX, КОТОРЫЙ ЭКРАН
-       * НАЗЫВАЕТ НЕ ЗАЯВЛЕННЫМ.
-       *
-       * Двe оси расходились и расходились уверенно. Клиентская — `hexIsPaintable` (три или шесть
-       * знаков ПОСЛЕ решётки). Серверная — `strings.TrimSpace(colourPhrase(code, hex)) != ""`
-       * (`renderprompt.go`), то есть ЛЮБОЙ непустой hex. Замерено пять значений из шести: при
-       * «a41f22» / «#ab» / «red» / «#a41f2» / «#GGG» экран рисовал штриховку, не называл цвета и
-       * говорил, что прогон сделан ИЗ СЛОВ, — а купленный промпт получал ранг 2 «THE STATED
-       * COLOUR … governs the COLOUR of this garment» с блоком цвета «a41f22» и ТЕРЯЛ
-       * утвердительную сольную клаузу, которую экран только что пообещал. Одно значение поля
-       * покупало другой промпт, чем показанный.
-       *
-       * ОДНА ГАРАНТИЯ У КОМПОЗИРУЮЩЕЙ ДВЕРИ МИРИТ ОБЕ ОСИ ПРИ ЛЮБОМ СОДЕРЖИМОМ ПОЛЯ, и держится
-       * она не порядком событий: `blur` поля (он тоже есть) можно обойти — а мимо этой строки не
-       * проходит ни один прогон. `sent` читают и ворота, и строка денег, и модалка, поэтому все
-       * они видят ровно то, что уедет.
-       *
-       * ⚠ ДВЕРЬ ПРОПУСКАЕТ, А НЕ ДОСТРАИВАЕТ, И РАЗНИЦА ЗАМЕРЕНА. Первая редакция звала здесь
-       * `normaliseTypedHex`, то есть ДОПИСЫВАЛА решётку: «a41f22» уезжало как «#a41f22». Оси при
-       * этом мирились лишь наполовину — свотч и `fabricStatement` читают СЫРОЙ черновик и
-       * продолжали говорить «цвет не заявлен», пока на провод уезжал цвет. Инвариант сформулирован
-       * не «привести к цвету», а «не везти то, чего экран не признаёт», и предикат здесь обязан
-       * быть ТОТ ЖЕ, которым экран признаёт (`hexIsPaintable`), а не похожий на него.
-       *
-       * ДОСТРАИВАНИЕ ЖИВЁТ У ПОЛЯ, НА `blur`, ГДЕ ЧЕЛОВЕК ВИДИТ РЕЗУЛЬТАТ. Там оно — услуга; здесь
-       * оно было бы тихой подменой в пользу значения, которого свотч не рисовал.
+       * ⚠ THE COLOUR INVARIANT IS HELD BY THIS DOOR, NOT BY THE FIELD: no hex the screen calls
+       * «not stated» travels. The client's predicate (`hexIsPaintable`) and the server's («any
+       * non-empty hex») disagreed on five values out of six, and one value of the field bought a
+       * different prompt than the one shown. The door PASSES OR DROPS, it does not repair —
+       * completing the `#` lives at the field's blur, where the person sees the result.
        */
       hex: hexIsPaintable(draft.recipe.hex) ? (draft.recipe.hex ?? '').trim() : '',
     }),
     [draft.recipe, draft.cloth],
   );
 
-  /**
-   * ЧТО УЕДЕТ НА САМОМ ДЕЛЕ — рецепт, ПОДМЕНЁННЫЙ ПЛАНОМ, когда с прогоном уезжают карты цветов.
-   * Без карт это `sent` байт в байт: непокрашенный прогон не изменился ни одним полем.
-   */
+  /** What will actually travel — the recipe SUBSTITUTED BY THE PLAN when colour maps ride along. */
   const wire = useMemo(
     () => planRecipe(band, colourPlan.plan, sent),
     [band, colourPlan.plan, sent],
   );
 
   const gate: Gate = useMemo(() => {
-    /* АРХИВНОЕ ИМЯ ОТКАЗЫВАЕТ ПЕРВЫМ — раньше даже пустого верстака: под снятым цветом «front and
-       back must hold a drawing» посылает чертить то, что всё равно не купится. Довод целиком — у
-       `archivedColorwayGate`. */
+    /* An archived name refuses first — even before an empty bench: under a retired colour «front
+       and back must hold a drawing» sends a person to draw what will not be bought anyway. */
     const base = renderGate(band, colorwayArchived, colorwayLabel);
     if (!base.ok) return base;
-    /* ⚠ ВОРОТА ПОКРАСКИ СТОЯТ ПЕРЕД ВОРОТАМИ РЕЦЕПТА, потому что покрашенный цвет без ткани — это
-       заявление ЧЕЛОВЕКА, оставшееся без ответа, а не пустой рецепт. Три из четырёх их отказов —
-       зеркало дверей сервера (ревью `5dbb3b5`): метка без карты, одна картинка в двух ролях,
-       и карта, которая уже уезжает плитой или референсом. Сервер откажет словами; экран обязан
-       не доводить до отказа. */
+    /* ⚠ THE PAINT GATE STANDS BEFORE THE RECIPE GATE: a painted colour without a cloth is a
+       person's statement left unanswered, not an empty recipe. Three of its four refusals mirror
+       the server's doors. */
     const painted = colourPlanGate(band, colourPlan.plan);
     if (!painted.ok) return painted;
-    /**
-     * ⚠ ПОД ПОКРАСКОЙ ЗАЯВЛЕНИЕ О ТКАНИ ЖИВЁТ ПО ДЕТАЛЯМ, А НЕ В СКАЛЯРАХ, И ЭТО НЕ ПОСЛАБЛЕНИЕ.
-     *
-     * `recipeIsStated` спрашивает ровно три СКАЛЯРА прогона — главную фотографию, цвет и слова. Это
-     * верно для прогона, у которого ткань одна на всё изделие. У покрашенного она другая на каждой
-     * детали: цвет и слова стоят НА СТРОКАХ, и прогон, где каждой детали назван свой простой цвет,
-     * имеет пустые скаляры и при этом заявлен полностью. Отказ здесь звал бы человека сказать про
-     * ткань то, что он только что сказал шесть раз.
-     *
-     * Пустым такой прогон быть не может: ворота выше уже отказали каждому покрашенному цвету, о
-     * котором не сказано ничего, — то есть непустой `colour_maps` уже означает «сказано про всё».
-     */
+    /* ⚠ UNDER PAINT THE STATEMENT ABOUT THE CLOTH LIVES PER PART, NOT IN THE SCALARS; a non-empty
+       `colour_maps` already means «everything is stated», because the gate above refused every
+       painted colour nothing was said about. */
     if ((wire.colourMaps ?? []).length === 0 && !recipeIsStated(wire)) {
       return {
         ok: false,
         reason:
-          'no fabric is stated yet — pick a cloth, pick a colour, say what the cloth is, or describe it in words above. Any one of them is enough, and they may be combined',
+          'no fabric is stated · pick a cloth, a colour, say what it is, or describe it. Any one is enough',
       };
     }
     return { ok: true };
@@ -243,116 +175,107 @@ export function RenderStudio({
       ask: '',
       params: {
         views,
-        // ─── КОЛОРВЕЙ ПРОГОНА (L-2). Осмыслен именно на `render`: мультивью, который сейчас
-        // покупается, — ЭТОГО цвета, и сервер копирует поле в живую колонку прогона, чтобы
-        // историю можно было нарезать по колорвею, а разрез и флэттен унаследовали атрибуцию
-        // кадрам. Число — ТО ЖЕ, что показывает селект в ряду представлений и по которому сужены
-        // выходы и верстак ниже: экран, покупающий не тот колорвей, который называет, заморозил
-        // бы в истории атрибуцию, которой человек не видел. `0` при этом — не пропуск, а «без
-        // колорвея»: ровно то, чем является каждый рендер, сделанный до появления оси, и
-        // единственное значение, при котором плиты прогона встают в безымянный верстак.
+        // THE COLOURWAY OF THE RUN (L-2): the sheet being bought is of THIS colour; the server copies
+        // the field onto the run so the history can be cut by colourway. `0` is «without a
+        // colourway» — what every render made before the axis is, and the one value under which
+        // the run's plates land on the unnamed bench.
         colorwayId,
-        // ─── ONE PICTURE, ALL THE VIEWS IN A ROW — the owner's own answer of 2026-08-31 to «что
-        // возвращает один прогон»: «Три вида в одной картинке… в слоты кладётся уже после разреза».
-        //
-        // IT USED TO BE `per_view`, AND THE DIFFERENCE IS NOT COSMETIC. `per_view` is one PAID CALL
-        // per view (see designgen/images.go, imageCalls), so a three-side card bought three
-        // pictures — three separate photographs of what is supposed to be one garment, each free to
-        // drift a shade of white, a neckline and a light. A sheet is one call, one cloth, one light,
-        // and the store's own compositeViewsOf records the row so the splitter can cut it into the
-        // slots afterwards. Cheaper AND more coherent, which is unusual enough to be worth the note.
-        // Деталей этот прогон не просит, и список пуст ЯВНО: сервер сверяет его длину с числом
-      // элементов `detail` в `views`, и «поле не задано» здесь означало бы то же, что пустой
-      // список, только молча.
-      detailSlotIds: [],
-      layout: 'one',
+        // ONE PICTURE, ALL THE VIEWS IN A ROW — the owner's own answer of 2026-08-31. `per_view`
+        // was one PAID CALL per view; a sheet is one call, one cloth, one light, and the store's
+        // `compositeViewsOf` records the row so the splitter can cut it afterwards.
+        detailSlotIds: [],
+        layout: 'one',
         colour: {
           ...wire,
-          // DERIVED AT THE DOOR, NOT HELD BY A CONTROL. `source` predates combination and cannot
-          // spell «a photo and a picked colour together»; it is written here purely so recipes
-          // already stored stay readable, and it never decides what travels — the three populated
-          // fields do.
+          // DERIVED AT THE DOOR, NOT HELD BY A CONTROL: `source` predates combination and never
+          // decides what travels — the populated fields do.
           source: wireColourSource(wire),
         },
         threed: undefined,
         fixTarget: '',
         extraInputMediaIds: [],
-        // NOT A FIX, AND SAID EXPLICITLY IN BOTH SPELLINGS. `fix_target` is the frozen scalar the
-        // history already states; `fix_targets`/`fix_slot_ids` are the selection a new run uses.
-        // Empty in all three is «this run corrects nothing», which is what these two screens do.
+        // NOT A FIX, AND SAID EXPLICITLY IN BOTH SPELLINGS.
         fixTargets: [],
         fixSlotIds: [],
-        // ASK FOR THE PROPOSED CUT. A render now comes back as ONE sheet of several views, and the
-        // whole point of the flag is that the human confirms frames instead of drawing rectangles
-        // from nothing. It cuts nothing by itself — the cut stays `SplitDesignPicture`'s and stays
-        // a person's — it only records that the guess was wanted.
+        // ASK FOR THE PROPOSED CUT. It cuts nothing by itself — the cut stays a person's — it only
+        // records that the guess was wanted.
         autoSplit: true,
         pattern: undefined,
         useFlatSlots: false,
-        // Поле НАРАЩИВАЕТ `use_flat_slots` и осмысленно только на kind=flat; здесь оно ИГНОРИРУЕТСЯ
-        // сервером, а пустой список и так значит «все заполненные». Стоит явно, потому что
-        // контракт требует назвать поле, а не потому, что этому прогону есть что им сказать.
+        // Meaningful on kind=flat only; named because the contract wants the field named.
         flatSlotIds: [],
       },
     });
   };
 
+  const shape = [
+    views.length > 1
+      ? `1 picture · ${views.length} views in a row`
+      : `1 picture · ${views.length === 1 ? viewLabel(views[0]) : 'no slot filled'}`,
+    madeOfLine(wire),
+    views.length > 1 ? 'split into the slots afterwards' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  /* THE DOOR OF A REFUSAL: where it is fixed, when that is another step. Missing flats → the flat
+     bench; the archived colourway → the select on the rail (no door here); everything else is this
+     screen's own input, a few rows up. */
+  const lockDoors =
+    !gate.ok && gate.next === 'flat' && onGoToKind ? (
+      <Button variant='secondary' size='xs' onClick={() => onGoToKind('flat')}>
+        the flat bench ›
+      </Button>
+    ) : null;
+
   return (
     <>
-      {/* ═══ ОДНА СТРОКА НА СТОРОНУ — Ф5 (WAVE2 п.7) ══════════════════════════════════════════
-          Здесь стояла лента флэтов (`RenderInputStrip`), а внизу экрана — `FabricRenderSlots`:
-          два верстака двумя рядами по шесть ячеек, и владелец прочёл их как одно и то же дважды.
-          Теперь один блок: строка на сторону — чертёж, что ушёл в рендер (читается), рендер, что
-          вернулся (пишется здесь), и идёт ли сторона в 3D (вывод). Под его разделителем — правая
-          половина прежней ленты флэтов, тем же органом. Стоит ПЕРВЫМ по тому же закону, по которому
-          стояла лента: на материал смотрят до меню. */}
-      <SideRows
-        band={band}
-        techCardId={techCardId}
-        disabled={disabled}
-        colorwayId={colorwayId}
-        colorwayLabel={colorwayLabel}
-        onGoToKind={onGoToKind}
-      />
-
       <Section
-        /* ЯКОРЬ ОБЪЯВЛЕН по тому же доводу, что у полосы входа: об этом блоке делаются
-           утверждения ОТСУТСТВИЯ (в нём нет пикера колорвея — E-16) и ПРИНАДЛЕЖНОСТИ (сетка
-           текстур живёт ИМЕННО здесь, а не во входе — E-7). */
-        id='design-fabric-menu'
-        title='generation — fabric render'
-        question='— the cloth: a texture, a colour, or both'
+        /* THE ANCHOR OF THE STEP'S ONE BLOCK: statements of absence («no colourway picker in this
+           block», E-16) and of belonging («the cloth grid lives HERE», E-7) are made about it. */
+        id='design-render-bench'
+        title='fabric render'
+        question='· the cloth on the flats'
+        action={<Pill tone='ink'>step 4</Pill>}
       >
-        <Palette
+        {/* ═══ INPUT FLATS — read only; the flat bench is written on FLAT and under the divider. */}
+        <InputFlatsGroup band={band} onGoToKind={onGoToKind} />
+
+        {/* ═══ SIDES — the render bench of this colourway, the one writer of that axis. Under its
+            strip: the divider and the sheets not yet raised into it (`RenderInputStrip`, bare). */}
+        <SidesGroup
           band={band}
           techCardId={techCardId}
           disabled={disabled}
-          draft={draft}
-          colourPlan={colourPlan}
-          /* K-16: вторая дверь у полки текстур. Приехала сюда вместе с самой полкой (E-7); без
-             `onGoToKind` её нет вовсе — кнопка, которой некуда вести, хуже её отсутствия. */
-          onMakePattern={onGoToKind && (() => onGoToKind('pattern'))}
+          colorwayId={colorwayId}
+          onGoToKind={onGoToKind}
         />
 
-        {/* ОТКАЗ ПОСЛЕДНЕГО НАЖАТИЯ, ДОСЛОВНО И СТОЙКО (Ф4). Этот экран его не рисовал вовсе —
-            отказ жил секунды всплывашки, а деньги при нём двигаются. Стоит НАД рядом GENERATE,
-            который его и снимает; форма общая с 3D — `RunRefusal`. */}
-        <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
+        {/* ═══ CLOTH AND COLOUR · CLOTH IS · IN WORDS — the recipe, three group rows. The palette
+            owns them because they write one draft (`useColourDraft`) and the gate above reads
+            the same one. ⚠ THE ANCHOR `#design-fabric-menu` STAYS ON THE GRID: E-7 («no cloth
+            placeholder in the input») and E-16 («no colourway picker in the menu») are asserted
+            against it. */}
+        <div id='design-fabric-menu'>
+          <Palette
+            band={band}
+            techCardId={techCardId}
+            disabled={disabled}
+            draft={draft}
+            colourPlan={colourPlan}
+            /* K-16: the second door of the cloth shelf. Without `onGoToKind` it does not exist —
+               a button with nowhere to lead is worse than none. */
+            onMakePattern={onGoToKind && (() => onGoToKind('pattern'))}
+          />
+        </div>
 
-        {/* СТРОКА ИНВЕНТАРЯ НАЗЫВАЕТ И ТКАНЬ (H-12). «made of pattern 2» — вторая половина работы
-            снесённого заголовка-заявления: правда прогона стоит в двух шагах от денег, там, где на
-            неё смотрят, а не над контролами, которые её же и правят. */}
+        {/* ═══ THE RUN DOORS — the prototype's `runDoors`: the LOCKED bar when the gate refuses,
+            the last refusal of the server verbatim, then GENERATE · WHAT THE MODEL GETS ▸ · money. */}
+        {!gate.ok && <LockBar reason={`locked · ${gate.reason}`}>{lockDoors}</LockBar>}
+        <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
         <GenerateRow
           gate={gate}
-          shape={[
-            views.length > 1
-              ? `1 picture · ${views.length} views in a row`
-              : `1 picture · ${views.length === 1 ? viewLabel(views[0]) : 'no slot filled'}`,
-            madeOfLine(wire),
-            views.length > 1 ? 'split into the slots afterwards' : '',
-          ]
-            .filter(Boolean)
-            .join(' · ')}
+          shape={shape}
           pending={run.isPending}
           disabled={disabled}
           onGenerate={generate}
@@ -360,10 +283,9 @@ export function RenderStudio({
         />
       </Section>
 
-      {/* The renders this page of the band holds — the outputs, where the mark «chosen» lives and
-          is SET. The owner's W-12 names 3D, but ARTIFACTS narrows its RENDERS segment to the
-          chosen ones too (W-14) — a mark that filters a list must be settable for that list, so
-          the same section stands on both generative screens. See `./outputs`. */}
+      {/* The renders this card holds — where `mark ▸`, `split ▸` and `apply splitted` live: the
+          doors that put a render into a side from the card's own pictures. `mark ▸` addresses the
+          bench of the PICTURE's colourway (see `./outputs`). */}
       <OutputsSection
         band={band}
         techCardId={techCardId}
@@ -373,27 +295,12 @@ export function RenderStudio({
         colorwayLabel={colorwayLabel}
       />
 
-      {/* ═══ FABRIC RENDER SLOTS ЗДЕСЬ БОЛЬШЕ НЕ СТОЯТ (Ф5) ═══════════════════════════════════
-          Рендер-слоты — колонка WHAT CAME BACK блока `SideRows` в голове экрана; заполняются они
-          по-прежнему из `RENDERS OF THIS CARD` выше (`mark ▸`, `apply splitted`) и дверью
-          `fill N empty sides ▸` в шапке блока. Второго органа того же верстака на экране нет. */}
-
-      {/* ═══ БЛОК ПРИМЕРКИ (FABRIC FITTING) СНЕСЁН ЦЕЛИКОМ — J-21 ══════════════════════════════
-          Владелец, дословно: «в FABRIC FITTING давай удалим полностью эту функцальность она
-          слишком громоздкая и плохо работает». Вместе с блоком ушли `render/placement/` целиком,
-          обе мутации меток (`assets/use-assets`) и три читателя разметки (`assets/model`).
-          Таблица, ручки сервера и поле `asset_placements` полосы ЖИВЫ и не тронуты: удаление
-          данных — отдельное решение владельца, и миграции этот круг не пишет.
-          ⚠ ДЕНЕЖНОЕ ПОСЛЕДСТВИЕ НАЗВАНО ВСЛУХ у `fabricUses` в `assets/model.ts`: `parts` теперь
-          пусты, и прогон с двумя тканями перестал сужаться правилом «It is used on: …». */}
-
       <WhatModelGetsRenderModal
         open={inspecting}
         onOpenChange={setInspecting}
         band={band}
         kind='render'
-        /* МОДАЛКА О ЧИПАХ НЕ ЗНАЕТ И НЕ ДОЛЖНА: ей отдаётся ТО ЖЕ предложение, что уедет на провод,
-           одной строкой слов. Иначе «что получит модель» показывало бы не то, что получит модель. */
+        /* THE MODAL KNOWS NOTHING OF CHIPS: it is handed the SAME sentence that travels. */
         recipe={wire}
         cardFit={cardFit}
       />

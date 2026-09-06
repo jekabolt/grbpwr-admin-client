@@ -1,10 +1,11 @@
 import { useEffect, useState, type JSX } from 'react';
 import { Chip, ChipRow } from 'ui/components/chip';
+import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
+import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
 import type { ColourDraft } from './drafts';
-import { FieldRow } from './field-row';
 import {
   CLOTH_GSM_MAX,
   CLOTH_GSM_MIN,
@@ -15,54 +16,32 @@ import {
 } from './model';
 
 /**
- * ═══ CLOTH IS — ЧТО ЗА ТКАНЬ, СКАЗАННОЕ НА ПРОГОНЕ (H-13) ════════════════════════════════════
+ * ═══ CLOTH IS — the weight and the transparency of the cloth, ONE LINE (H-13, mockup `r3IsRow`) ═══
  *
  * Владелец: «нам надо иметь возможность сказать на генерации фабрик рендеров что ткань
  * полупрозрачная например или имеет примерно такую грамматуру».
  *
- * ДВЕ ОСИ, И ОНИ РАЗНОЙ ПРИРОДЫ — ПОЭТОМУ И КОНТРОЛА ДВА.
+ * TWO AXES OF DIFFERENT NATURE, HENCE TWO CONTROLS: the transparency is a closed vocabulary of
+ * three words (chips: one chosen, a second press takes it off — «not said» is a legal answer), the
+ * weight is a NUMBER a person knows as a number («примерно ТАКУЮ грамматуру»), so it is a field and
+ * not a word ladder.
  *
- *  · ПРОЗРАЧНОСТЬ — закрытый словарь из трёх слов. У неё нет промежуточных значений, которые
- *    человек назвал бы точнее нашего, и поле свободного текста здесь дало бы двадцать написаний
- *    одного («see-through», «sheerish», «semi sheer») там, где промпту нужно одно. Чипы, потому что
- *    выбирают ОДНО и повторный клик снимает: ничего не выбрано — законное «не сказано», а не пробел.
+ * ONE ROW, NOT TWO STOREYS — the mockup's `.rowline`: the label and its 84px field are one
+ * unbreakable piece, the chips follow; a wrap, if it has to happen, happens BETWEEN the weight and
+ * the chips, never inside the label.
  *
- *  · ГРАММАЖ — число, и чипов-чисел здесь НЕТ СОЗНАТЕЛЬНО. Соседний круг (H-7) только что оплатил
- *    урок «голые числа непонятны» на раппорте — но там человек выбирал КРУПНОСТЬ МОТИВА, а
- *    миллиметры были лишь единицей ответа. Здесь наоборот: тот, кто спрашивает про граммаж, знает
- *    его числом («примерно ТАКУЮ грамматуру»), и словарь вроде «light / medium / heavy» отнял бы у
- *    него точность, ничего не объяснив. Приблизительность живёт в композиции — слово `about`.
+ * THE CLAMP LIVES AT THE DOOR, NOT AS A RED BORDER. A typo (18000 for 180) would ride into the
+ * prompt as «about 18000 g/m²» and cost the run; the value is settled on blur (`normaliseGsm`), as
+ * `normaliseRepeat` settles the pattern's repeat. The FLOOR is not clamped while typing — «180» is
+ * typed through «1» and «18», and a floor applied on every digit would turn the first one into 20
+ * under the finger; a weight under the floor is named by a pill in the group's header instead.
  *
- * КЛАМП У ДВЕРИ, А НЕ ВАЛИДАЦИЯ С КРАСНОЙ РАМКОЙ. Ошибка здесь — опечатка (18000 вместо 180),
- * и она уехала бы в промпт фразой «about 18000 g/m²», то есть стоила бы прогон. Тем же приёмом, что
- * `normaliseRepeat` на экране паттернов: значение приводится к смыслу в момент, когда поле теряет
- * фокус, а не отвергается.
+ * ⚠ THIS ROW DOES NOT WRITE `words`. It writes the draft's CLOTH fields, and `statedWords` — the one
+ * composer — joins them into the wire's `colour.words` at the door.
  *
- * ⚠ ЭТОТ РЯД НЕ ПИШЕТ `words`. Он пишет ПОЛЯ ЧЕРНОВИКА, а склейку делает `statedWords` — один
- * писатель на всю композицию. Ряд, писавший бы прямо в `recipe.words`, затирал бы свободный текст
- * соседнего ряда при каждом клике и расходился бы с ним при каждом порядке действий.
- *
- * ═══ E-2 — И ЭТО НЕ ПОЧИНКА ПОЛЯ, А ПЕРЕЕЗД ОДНОГО ПРЕДЛОЖЕНИЯ ═══════════════════════════════
- *
- * Владелец: «OPAQUE SEMI-SHEER SHEER видимо не попадают в пропмт тк никакой разницы нету в
- * генерации».
- *
- * ЗАМЕРЕНО НА БЕТЕ, И ПОЛЕ НЕ ТЕРЯЕТСЯ. Из восьми рендеров карточки слово прозрачности несут ТРИ,
- * и все три несут ЕЩЁ И ФОТОГРАФИЮ ТКАНИ. Промпт ранжирует источники (`renderFabricAuthority`,
- * `renderprompt.go`, сверено на `origin/beta`): СНИМОК → ЦВЕТ → СЛОВА, и ранг 1 читается дословно
- * «Read the cloth from that image and from nothing else», а ранг 3 сам говорит, что против
- * фотографии слово о прозрачности, весе и падении — «description and not instruction». То есть
- * прогонов БЕЗ фотографии владелец не делал ни разу, и случая, где эти чипы управляют, он не видел.
- * Без фотографии они управляют: дельта промпта между `semi-sheer` и `opaque` — ровно одно слово.
- *
- * ЗНАЧИТ ЧИНИТЬ НАДО ЭКРАН, А НЕ КОД. Утверждение о старшинстве на экране БЫЛО — тремя тихими
- * копиями сразу: подсказкой ряда `in words`, абзацем `data-words-rank` под плитками и ничем здесь.
- * Три тихих экземпляра складываются в шум, а не в громкость, и ни один из них не стоял ТАМ, ГДЕ
- * ПРИНИМАЮТ ОТМЕНЯЕМОЕ ИМИ РЕШЕНИЕ. Копия теперь ОДНА и стоит вплотную к чипам: человек, ткнувший
- * `sheer`, читает ответ про свой чип, не отводя глаз.
- *
- * ⚠ ЯКОРЬ `data-words-rank` СОХРАНЁН ИМЕННО ТОТ ЖЕ, А НЕ ЗАВЕДЁН НОВЫЙ: утверждение то же самое,
- * переехало только место, и второе имя для одного факта развело бы пробы по двум half-правдам.
+ * `data-words-rank` — the same anchor as before, on the row: which of the recipe's statements
+ * governs the cloth is computed by the model (`clothWordsRank`), read by this row and by the modal
+ * «what the model gets», so the two surfaces cannot part.
  */
 export function ClothIsRow({
   draft,
@@ -72,165 +51,99 @@ export function ClothIsRow({
   disabled?: boolean;
 }): JSX.Element {
   const { opacity, weightGsm } = draft.cloth;
-  /**
-   * КТО ПЕРЕБЬЁТ ЭТИ СЛОВА — ВЫЧИСЛЯЕТ МОДЕЛЬ, ЭКРАН ТОЛЬКО ГОВОРИТ. Читается ТА ЖЕ функция, что
-   * у модалки «what the model gets» и у строки денег: расхождение здесь стоит купленной картинки.
-   */
   const rank = clothWordsRank(draft.recipe);
 
   /**
-   * ═══ ПОЧЕМУ У ПОЛЯ СВОЙ ТЕКСТОВЫЙ БУФЕР, А НЕ `String(weightGsm)` ═══════════════════════════
-   *
-   * Граммаж — ЧИСЛО, и черновик держит число: складывать в него ещё и строку значило бы завести
-   * два поля, которые разъедутся. Но «180.» — ЗАКОННОЕ ПРОМЕЖУТОЧНОЕ СОСТОЯНИЕ НАБОРА, и числом
-   * оно не выражается вовсе: `String(180)` рисует «180», точка исчезает из-под пальцев, и
-   * следующая цифра приклеивается к целой части. Ровно это и покупало десятикратную ошибку.
-   *
-   * Поэтому редактируемое ПРЕДСТАВЛЕНИЕ принадлежит полю, а ЗНАЧЕНИЕ — черновику. Эффект ниже
-   * сводит их обратно ровно тогда, когда число изменилось НЕ ЭТИМ полем (засев, разбор строки
-   * прошлого прогона, видимый кламп на `blur`), и НЕ трогает буфер, пока он всё ещё описывает то
-   * же самое число: иначе «180.» схлопывалось бы в «180» на первом же перерисовывании.
+   * THE FIELD OWNS THE EDITABLE REPRESENTATION, THE DRAFT OWNS THE VALUE. «180.» is a legal state of
+   * typing and no number expresses it; `String(180)` would drop the point under the finger. The
+   * effect below resyncs the two only when the number changed NOT through this field (a seed, a
+   * recipe restored from history, the visible clamp on blur).
    */
   const [wrote, setWrote] = useState<string>(() => (weightGsm > 0 ? String(weightGsm) : ''));
   useEffect(() => {
     setWrote((prev) => (readGsm(prev) === weightGsm ? prev : weightGsm > 0 ? String(weightGsm) : ''));
   }, [weightGsm]);
 
+  const light = weightGsm > 0 && weightGsm < CLOTH_GSM_MIN;
+
   return (
-    <FieldRow label='cloth is' data-cloth-is>
-      <ChipRow>
-        {CLOTH_OPACITIES.map((word) => {
-          const on = opacity === word;
-          return (
-            <Chip
-              key={word}
-              nonForm
-              selected={on}
-              pressed={on}
-              disabled={disabled}
-              data-cloth-opacity={word}
-              title={
-                on
-                  ? `press again to say nothing about how much light this cloth lets through`
-                  : `this run is asked for a ${word} cloth`
-              }
-              onClick={() => draft.patchCloth({ opacity: on ? '' : word })}
+    <div data-cloth-is data-words-rank={rank.governs ? 'governs' : 'outranked'}>
+      <GroupLabel
+        action={
+          light ? (
+            <Pill
+              tone='attention'
+              title={`the weight is settled to ${CLOTH_GSM_MIN}…${CLOTH_GSM_MAX} g/m² when the run starts`}
             >
-              {word}
-            </Chip>
-          );
-        })}
-      </ChipRow>
-
-      {/* ПОДПИСЬ ПОЛЯ — В КАПСЛОКЕ, как велит DESIGN.md §3 («The Uppercase-Is-A-Label Rule»): это
-          ярлык в одно слово, а не предложение. Рядом стоит подпись самого ряда, и разный регистр у
-          двух подписей на одной строке читается как разный ранг, которого между ними нет. */}
-      <Text
-        size='micro'
-        variant='uppercase'
-        tracking='label'
-        component='span'
-        className='shrink-0 pl-2'
+              {CLOTH_GSM_MIN} to {CLOTH_GSM_MAX} g/m²
+            </Pill>
+          ) : undefined
+        }
       >
-        weight
-      </Text>
-      <div className='w-[72px]'>
-        <Input
-          name='design-cloth-weight'
-          data-cloth-weight
-          /**
-           * ⚠ `type='text'` С ЦИФРОВОЙ КЛАВИАТУРОЙ, А НЕ `type='number'` — ЗАМЕРЕННЫЙ ДЕФЕКТ.
-           *
-           * `<input type=number>` отдаёт `value === ''` для ЛЮБОГО промежуточного состояния, которое
-           * ещё не является числом, — в том числе для «12.» сразу после точки. Контролируемое поле
-           * читало эту пустоту как «не сказано», клало 0 и перерисовывало поле пустым: набранное
-           * стиралось под пальцами, и виноватым выглядел человек. `inputMode='numeric'` оставляет
-           * телефонам цифровую клавиатуру, а разбор ниже сам берёт из строки только цифры.
-           *
-           * ⚠ И ЭТОТ АБЗАЦ ОДНАЖДЫ КОНЧАЛСЯ СЛОВАМИ «граммаж — целое по определению, поэтому точка
-           * не теряет данных: она просто не является частью ответа». ЗАМЕРЕНО ЧЕРЕЗ ВСЮ ЦЕПОЧКУ ДО
-           * ПРОВОДА — НЕПРАВДА. Разбор был `replace(/[^\d]/g, '')`, то есть точка не отбрасывалась,
-           * а СКЛЕИВАЛА соседей: «180.5» становилось «1805» и покупало «about 1805 g/m²» — ошибку
-           * в десять раз, ВНУТРИ законного предела 20…2000, где кламп её не видит и видеть не
-           * может (1805 г/м² — правдоподобное тяжёлое сукно). Вставка «180.00 g/m²» со
-           * спецификации поставщика — самое вероятное действие на этом поле вообще — покупала
-           * «about 2000 g/m²», и выглядело это как сработавший кламп, а не как потеря данных.
-           *
-           * Разбор теперь понимает точку и запятую и берёт ПЕРВОЕ ЧИСЛО (`readGsm`), а целым
-           * граммаж становится округлением, а не отбрасыванием знаков.
-           */
-          type='text'
-          inputMode='numeric'
-          aria-label={`cloth weight in grams per square metre, ${CLOTH_GSM_MIN} to ${CLOTH_GSM_MAX}`}
-          value={wrote}
-          disabled={disabled}
-          placeholder='180'
-          /* НАБОР НЕ КЛАМПИТСЯ НА КАЖДОЙ ЦИФРЕ: человек, печатающий «180», проходит через «1» и
-             «18», и кламп по нижней границе превратил бы первую цифру в 20 у него под пальцами.
-             Ноль (пустое поле) во время набора — законное «ещё не сказано».
-             ⚠ ИНВАРИАНТ 20…2000 ДЕРЖИТ НЕ ЭТОТ `blur`, А КОМПОЗИТОР (`statedWords`): единственная
-             дверь на провод обязана применять его сама, иначе он держится порядком событий. Здесь
-             `blur` только ПРИБИРАЕТ поле, чтобы показанное и посылаемое сошлись. */
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-            /* ⚠ ИЗ БУФЕРА ВЫБРАСЫВАЕТСЯ ВСЁ, КРОМЕ ЦИФР И РАЗДЕЛИТЕЛЯ, — И ЭТО НЕ ТИХАЯ ПОДМЕНА.
-               Вставленное «180.00 g/m²» превращается в «180.00» НА ГЛАЗАХ, первым же кадром: единица
-               стоит подписью справа от поля, и её второй экземпляр внутри поля — не данные. Число
-               при этом не трогается ни на знак; склеивать цифры больше нечему. */
-            const next = e.target.value.replace(/[^\d.,]/g, '').slice(0, 8);
-            setWrote(next);
-            draft.patchCloth({ weightGsm: readGsm(next) });
-          }}
-          /* `blur` ПРИБИРАЕТ: показывает уже приведённое число, чтобы показанное и посылаемое
-             сошлись. Инвариант 20…2000 держит не он, а композитор (`statedWords`). */
-          onBlur={() => {
-            const settled = normaliseGsm(readGsm(wrote));
-            setWrote(settled > 0 ? String(settled) : '');
-            draft.patchCloth({ weightGsm: settled });
-          }}
-        />
-      </div>
-      {/* ⚠ ЕДИНИЦА — НЕ ЯРЛЫК, И КАПСЛОК ЕЙ ЗАПРЕЩЁН. `g/m²` регистро-значим: «G/M²» это уже не
-          грамм на квадратный метр. Правило DESIGN.md §3 про подписи сюда не распространяется, и
-          исключение названо здесь, чтобы следующая правка не «дочинила» его до единообразия. */}
-      <Text size='micro' variant='label' component='span' className='shrink-0'>
-        g/m²
-      </Text>
-
-      {/* ═══ ЕДИНСТВЕННАЯ СТРОКА О СТАРШИНСТВЕ, И ОНА СТОИТ ЗДЕСЬ (E-2) ═══════════════════════
-          Отступ переноса измерен, а не угадан: колонка подписи `FieldRow` — 92px плюс 8px зазора,
-          тот же, что у продолжения каждого ряда этой секции.
-
-          ⚠ КРУГ 20, B-23 — ВТОРАЯ ПОЛОВИНА ЭТОЙ СТРОКИ СНЯТА СЛОВОМ ВЛАДЕЛЬЦА. Дословно: «"A
-          texture picture rides on this run, and a photograph states transparency, weight and drape
-          as surely as it states the weave — so against it these words are description, not
-          instruction. Take the texture off above to let them govern the cloth." этот текст убрать».
-          Убрана ровно процитированная ветка — та, что печаталась ПОД ФОТОГРАФИЕЙ; ветка «слова
-          управляют» не названа и осталась дословно, потому что она говорит про ДРУГОЕ состояние.
-
-          Прежний довод («говорится ВСЕГДА, иначе строка читается как ошибка экрана») этим и
-          отменён: владелец третий круг подряд снимает объясняющие абзацы, и его слово сильнее
-          нашего правила. Теперь под фотографией не печатается ничего — а сам порядок старшинства
-          не потерян: его полностью перечисляет модалка «what the model gets», и обе поверхности
-          по-прежнему читают ОДНУ функцию `clothWordsRank`.
-
-          ⚠ ЯКОРЬ `data-words-rank` ОСТАЁТСЯ НА МЕСТЕ И В ОБОИХ СОСТОЯНИЯХ. Он и заведён не ради
-          текста, а ради сверки экрана с модалкой (`data-fabric-authority`): исчезни он вместе с
-          фразой — проба перестала бы отличать «под фотографией сказали лишнее» от «экран вообще
-          не знает, кто кого перебивает». Поэтому под фотографией узел ЕСТЬ и пуст, а `hidden`
-          снимает ему коробку целиком: ни строки, ни отступа, ни зазора флекса. */}
-      <div
-        className='w-full pl-[100px]'
-        data-words-rank={rank.governs ? 'governs' : 'outranked'}
-        hidden={!rank.governs}
-      >
-        {rank.governs && (
-          <Text size='micro' variant='label' component='p' className='normal-case'>
-            No texture picture rides on this run, so these words <b>govern the cloth</b>: the model
-            builds the weave, the weight, the surface and the drape from them. A stated colour
-            states colour and nothing else.
+        cloth is
+      </GroupLabel>
+      <div className='flex flex-wrap items-center gap-3'>
+        {/* The label and its field: one piece. `g/m²` is case-significant, so no uppercase on it. */}
+        <span className='flex shrink-0 items-center gap-1.5'>
+          <Text
+            size='micro'
+            variant='label'
+            tracking='label'
+            component='span'
+            className='whitespace-nowrap'
+          >
+            <span className='uppercase'>weight</span> g/m²
           </Text>
-        )}
+          <div className='w-[84px] shrink-0'>
+            <Input
+              name='design-cloth-weight'
+              data-cloth-weight
+              /* `type='text'` with the numeric keyboard, NOT `type='number'`: a number input reports
+                 `''` for «12.» and the controlled field would wipe the typing under the finger. */
+              type='text'
+              inputMode='numeric'
+              aria-label={`cloth weight in grams per square metre, ${CLOTH_GSM_MIN} to ${CLOTH_GSM_MAX}`}
+              value={wrote}
+              disabled={disabled}
+              placeholder='180'
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                const next = e.target.value.replace(/[^\d.,]/g, '').slice(0, 8);
+                setWrote(next);
+                draft.patchCloth({ weightGsm: readGsm(next) });
+              }}
+              onBlur={() => {
+                const settled = normaliseGsm(readGsm(wrote));
+                setWrote(settled > 0 ? String(settled) : '');
+                draft.patchCloth({ weightGsm: settled });
+              }}
+            />
+          </div>
+        </span>
+        <ChipRow>
+          {CLOTH_OPACITIES.map((word) => {
+            const on = opacity === word;
+            return (
+              <Chip
+                key={word}
+                nonForm
+                selected={on}
+                pressed={on}
+                disabled={disabled}
+                data-cloth-opacity={word}
+                title={
+                  on
+                    ? 'press again to say nothing about how much light this cloth lets through'
+                    : `this run is asked for a ${word} cloth`
+                }
+                onClick={() => draft.patchCloth({ opacity: on ? '' : word })}
+              >
+                {/* The wire word keeps its hyphen; the screen reads it as the mockup prints it. */}
+                {word.replace('-', ' ')}
+              </Chip>
+            );
+          })}
+        </ChipRow>
       </div>
-    </FieldRow>
+    </div>
   );
 }

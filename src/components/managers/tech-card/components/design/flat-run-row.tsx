@@ -3,37 +3,45 @@ import { useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { ViewSwitch } from 'ui/components/view-switch';
 
 import { displayDetailName, readBench } from './bench-slot';
 import { serverSpeaksDesign } from './capability';
+import { PRICED_LATER, latestRunOfKind } from './core';
 import { filledFlatSlots, sentFlatSlotIds, useFlatSlotsSend } from './flat-slots-send';
 import { markedPlatesOf } from './fix-markup';
+import { formatMoney } from './generation/money';
 import { useStartRun } from './generation/use-generation';
 import { WhatModelGetsModal } from './modals';
 import { GenerateRow, RunRefusal } from './render/generate-row';
 import { DETAIL_VIEW, SILHOUETTE_VIEWS, viewLabel } from './views';
 
 /**
- * ═══ ПОДВАЛ БЛОКА INPUT — REFERENCES: САМ ПРОГОН ФЛЭТА (SPEC п.7) ═══════════════════════════════
+ * ═══ РЯД ЗАПУСКА БЛОКА INPUT — REFERENCES (`runDoors('flat')` макета) ═══════════════════════════
  *
- * Здесь стояла ОТДЕЛЬНАЯ секция `generation — flat` (`generation/generation-form.tsx`), и под ней —
- * `input — references`. Две секции подряд про один жест: в первой человек клал картинки и слова,
- * во второй — тыкал виды и платил. Макет требует ОДИН блок: то, что модели дают, и то, что у неё
- * просят, — это один запрос, и рвать его заголовком значило рисовать две половины одного вопроса.
+ *   GENERATE · $0.38 · priced by the server on start ·                    WHAT THE MODEL GETS ▸
+ *
+ * Здесь стояла ОТДЕЛЬНАЯ секция `generation — flat`, потом — подвал `the flat run` с линейкой
+ * группы, чипами видов, переключателем раскладки и рядом. Макет (`_step-flat.js`, SPEC п.7) знает
+ * один блок и один ряд: то, что модели дают, и то, что у неё просят, — один запрос.
  *
  * ПОЧЕМУ ОТДЕЛЬНЫЙ КОМПОНЕНТ, А НЕ ВСТАВКА В `ReferencesSection`. Секция референсов уже несёт
  * два десятка хуков и приёмник рекола (`RecalledRunPrompt`), который при размонтировании стирает
  * выбор из реестра; всякий условный хук в её теле — риск сдвинуть их порядок. Органы прогона
- * живут своим состоянием (виды, галки деталей, раскладка, идемпотентный запуск) и монтируются
- * ВНУТРИ той же `Section` — на экране одна секция, в коде два компонента с независимыми хуками.
+ * живут своим состоянием и монтируются ВНУТРИ той же `Section`.
  *
- * ЧТО ЗДЕСЬ НЕТ И НЕ ДОЛЖНО ПОЯВИТЬСЯ: описи промпта на карточке (она в модалке «what the model
- * gets ▸» — SPEC п.4), переключателя «also send the flat slots» (он над этим подвалом, у самих
- * плит) и сворачивания (см. запрет в `references-section.tsx`).
+ * ⚠ РЯД ВИДОВ — ПРОДУКТОВЫЙ, У МАКЕТА ЕГО НЕТ. Прототипный прогон флэта возвращает «до двух
+ * свободных флэтов с видом» из фикстур; продуктовый `StartDesignRun` требует `params.views[]` —
+ * какие стороны рисовать — и `layout`. Спрятать выбор и слать всегда `front, back` значило бы
+ * решать за человека, за что он платит. Поэтому ряд остаётся, одной строкой над рядом запуска:
+ * ярлык `VIEWS`, чипы сторон и деталей, справа — раскладка ответа. Это названо в gaps.
+ *
+ * ⚠ ЦЕНА — ПОСЛЕДНЕГО ФЛЭТ-ПРОГОНА, И ЭТО СКАЗАНО СЛОВАМИ. Макет печатает `$0.38` из своего
+ * прейскуранта; на проводе цены прогона, которого ещё нет, не бывает (`price_estimate` и
+ * `price_actual` — поля прогона, выходные). Что есть — цена ПОСЛЕДНЕГО флэт-прогона карточки, факт,
+ * а не оценка; она печатается с приставкой «last flat run», а дальше — та же фраза, что на всех
+ * пяти рядах GENERATE (`PRICED_LATER`). Нет ни одного прогона — только фраза.
  */
 
 const LAYOUT_OPTIONS = [
@@ -87,6 +95,12 @@ export function FlatRunRow({
     [flatSend, filled],
   );
 
+  /* Цена последнего флэт-прогона — см. шапку. `priceActual` первым: это то, что списали. */
+  const lastRun = useMemo(() => latestRunOfKind(band.runs, 'flat'), [band.runs]);
+  const lastPrice = lastRun
+    ? formatMoney(lastRun.priceActual ?? lastRun.priceEstimate, lastRun.currency)
+    : '';
+
   const writesOff = !!disabled || !speaks;
   const noViews = ticked.length === 0;
   /* Ряд (`GenerateRow`) сам спрашивает `serverSpeaksDesign()` ПЕРВЫМ и печатает свою формулировку;
@@ -98,24 +112,6 @@ export function FlatRunRow({
       : noViews
         ? 'no views ticked — tick at least one'
         : null;
-
-  const tickedNames = [
-    ...tickedSides.map((v) => viewLabel(v)),
-    ...tickedDetails.map((d) => `detail · ${displayDetailName(bench.details, d)}`),
-  ];
-  /* Форма запроса ВЫВОДИТСЯ из двух органов (сколько галок × раскладка), а не задаётся третьим. */
-  const askShape =
-    ticked.length === 0
-      ? null
-      : ticked.length === 1
-        ? `one view · ${tickedNames[0]}`
-        : layout === 'one'
-          ? `${ticked.length} views · one picture`
-          : `${ticked.length} views · a picture each`;
-  const outputsLine =
-    layout === 'one' && ticked.length >= 2
-      ? `1 picture · ${ticked.length} views glued · split it before the slots read it`
-      : `${ticked.length} picture${ticked.length === 1 ? '' : 's'}`;
 
   const submit = () => {
     if (gateReason || startRun.isPending) return;
@@ -143,111 +139,122 @@ export function FlatRunRow({
   };
 
   return (
-    <div data-flat-run='' className='space-y-3 border-t border-hairline pt-3'>
-      <GroupLabel
-        flush
-        action={
-          askShape ? (
-            <Pill tone='mut' title='what the two controls below add up to'>
-              {askShape}
-            </Pill>
-          ) : undefined
-        }
-      >
-        the flat run
-      </GroupLabel>
+    <div data-flat-run='' className='space-y-2'>
       {!speaks && (
         <CalloutBox tone='note'>
           this server does not speak the design band yet — the controls are here, but nothing can be
           started against them.
         </CalloutBox>
       )}
-      {/* ПИКЕР ВИДОВ — ОДНА СТРОКА ЧИПОВ (T-4). Отмеченный чип заливается чернилами — это и есть
-          состояние; «slot filled / slot empty» живёт в title, потому что стенд с плитками стоит на
-          той же вкладке и показывает то же самое глазами. */}
-      <GroupLabel>views</GroupLabel>
-      <ChipRow>
-        {SILHOUETTE_VIEWS.map((view) => {
-          const on = !!views[view];
-          const slot = bench.sides.find((s) => s.view === view)?.slot ?? null;
-          const slotFilled = (slot?.pictureId ?? 0) > 0;
-          return (
-            <Chip
-              key={view}
-              selected={on}
-              pressed={on}
-              disabled={writesOff}
-              title={
-                slotFilled
-                  ? 'its slot in the pictures is already filled'
-                  : 'its slot in the pictures is empty'
-              }
-              onClick={() => setViews((prev) => ({ ...prev, [view]: !prev[view] }))}
-            >
-              {viewLabel(view)}
-            </Chip>
-          );
-        })}
-        {/* ДЕТАЛИ — ПО ГАЛКЕ НА КАЖДУЮ ОПИСАННУЮ (T-5): чипы — производная от bench.details. */}
-        {bench.details.map((d) => {
-          const id = d.id ?? 0;
-          if (id <= 0) return null;
-          const on = !!detailTicks[id];
-          return (
-            <Chip
-              key={`d:${id}`}
-              selected={on}
-              pressed={on}
-              disabled={writesOff}
-              title={`detail described in the pictures: ${displayDetailName(bench.details, d)}`}
-              onClick={() => setDetailTicks((prev) => ({ ...prev, [id]: !prev[id] }))}
-            >
-              detail · {displayDetailName(bench.details, d)}
-            </Chip>
-          );
-        })}
-        {bench.details.length === 0 && (
-          <Text size='nano' variant='label' component='span'>
-            details appear here once a reference above is given the role “detail”
-          </Text>
-        )}
-      </ChipRow>
-      <GroupLabel>how it comes back</GroupLabel>
-      <ViewSwitch
-        label='layout'
-        value={layout}
-        options={LAYOUT_OPTIONS}
-        disabled={writesOff}
-        onChange={setLayout}
-      />
-      {ticked.length <= 1 && (
-        <Text size='nano' variant='label' component='p'>
-          only one view is asked — both layouts return one picture, so this switch changes nothing
-          here.
+
+      {/* ═══ ВИДЫ — одна строка: ярлык, чипы сторон и деталей, справа раскладка ответа ═══════
+          Отмеченный чип заливается чернилами — это и есть состояние; «слот заполнен / пуст»
+          живёт в title, потому что лента FLAT SLOTS стоит на той же вкладке и показывает то же
+          глазами. Раскладка имеет смысл от двух видов; при одном она ничего не меняет и молчит
+          (`title`), а не пропадает: положение переключателя — предпочтение, оно переживает галки. */}
+      <div className='flex flex-wrap items-center gap-2' data-flat-views=''>
+        <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
+          views
         </Text>
-      )}
-      {/* РЯД — ОБЩИЙ ОРГАН (F-1). `disabled` ряду НЕ передаётся: право на запись уже названо в
-          `gateReason` и той же переменной заперт `submit`; второй путь — второй источник одного факта. */}
-      <GenerateRow
-        gate={gateReason ? { ok: false, reason: gateReason } : { ok: true }}
-        pending={startRun.isPending}
-        onGenerate={submit}
-        trailing={
-          <>
-            <Text size='micro' variant='label' component='span'>
-              {outputsLine}
-            </Text>
-            {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — единственное место, где человек видит ПОЛНЫЙ состав запроса до
-                того, как заплатит за прогон (SPEC п.4: опись живёт в модалке, не на карточке). */}
-            <Button variant='secondary' size='xs' onClick={() => setWmgOpen(true)}>
-              what the model gets ▸
-            </Button>
-            <Text size='micro' variant='label' component='span' className='ml-auto'>
-              priced on its history row
-            </Text>
-          </>
-        }
-      />
+        <ChipRow>
+          {SILHOUETTE_VIEWS.map((view) => {
+            const on = !!views[view];
+            const slot = bench.sides.find((s) => s.view === view)?.slot ?? null;
+            const slotFilled = (slot?.pictureId ?? 0) > 0;
+            return (
+              <Chip
+                key={view}
+                selected={on}
+                pressed={on}
+                disabled={writesOff}
+                title={
+                  slotFilled
+                    ? 'its flat slot below is already filled'
+                    : 'its flat slot below is empty'
+                }
+                onClick={() => setViews((prev) => ({ ...prev, [view]: !prev[view] }))}
+              >
+                {viewLabel(view)}
+              </Chip>
+            );
+          })}
+          {/* ДЕТАЛИ — ПО ГАЛКЕ НА КАЖДУЮ ОПИСАННУЮ (T-5): чипы — производная от bench.details. */}
+          {bench.details.map((d) => {
+            const id = d.id ?? 0;
+            if (id <= 0) return null;
+            const on = !!detailTicks[id];
+            return (
+              <Chip
+                key={`d:${id}`}
+                selected={on}
+                pressed={on}
+                disabled={writesOff}
+                title={`detail described in the flat slots: ${displayDetailName(bench.details, d)}`}
+                onClick={() => setDetailTicks((prev) => ({ ...prev, [id]: !prev[id] }))}
+              >
+                detail · {displayDetailName(bench.details, d)}
+              </Chip>
+            );
+          })}
+        </ChipRow>
+        <span
+          className='ml-auto'
+          title={
+            ticked.length <= 1
+              ? 'one view is asked — both layouts return one picture, so this changes nothing here'
+              : undefined
+          }
+        >
+          <ViewSwitch
+            label='layout'
+            value={layout}
+            options={LAYOUT_OPTIONS}
+            disabled={writesOff}
+            onChange={setLayout}
+          />
+        </span>
+      </div>
+
+      {/* ═══ РЯД ЗАПУСКА — ОБЩИЙ ОРГАН (F-1). `disabled` ряду НЕ передаётся: право на запись уже
+          названо в `gateReason` и той же переменной заперт `submit`. `shape` не называется:
+          хвост здесь свой — деньги слева от двери описи, дверь у правого края, как в макете.
+          `data-flat-generate` — якорь двери «the flat run ›» из FLAT SLOTS. */}
+      <div data-flat-generate=''>
+        <GenerateRow
+          gate={gateReason ? { ok: false, reason: gateReason } : { ok: true }}
+          pending={startRun.isPending}
+          onGenerate={submit}
+          trailing={
+            <>
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                className='min-w-0'
+                data-probe='run-price'
+              >
+                {lastPrice ? (
+                  <>
+                    <b className='text-textColor'>{lastPrice}</b> · last flat run ·{' '}
+                  </>
+                ) : null}
+                {PRICED_LATER}
+              </Text>
+              {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — единственное место, где человек видит ПОЛНЫЙ состав запроса
+                  до того, как заплатит (SPEC п.4: опись живёт в модалке, не на карточке). */}
+              <Button
+                variant='secondary'
+                size='sm'
+                className='ml-auto'
+                onClick={() => setWmgOpen(true)}
+              >
+                what the model gets ▸
+              </Button>
+            </>
+          }
+        />
+      </div>
+
       {/* МЕТКИ НЕ ЕДУТ, И СКАЗАНО ЭТО ТАМ, ГДЕ ТРАТЯТСЯ ДЕНЬГИ. Рисуется только пока метки есть. */}
       {marked.length > 0 && (
         <CalloutBox tone='note'>
@@ -259,10 +266,8 @@ export function FlatRunRow({
           </Text>
         </CalloutBox>
       )}
-      {/* ОТКАЗ ЗАПУСКА — СТОЙКАЯ ПОЛОСА, НЕ СНЕКБАР (CONTRACT §E), И ТОТ ЖЕ ОРГАН, ЧТО У FABRIC
-          RENDER И 3D: слова сервера дословно; «nothing was charged» только когда сервер ОТВЕТИЛ и сам
-          о деньгах не говорит; при сетевом сбое — правда про тот же `client_request_id` на повторе
-          (хук отдаёт ключ вместе с отказом, см. `generation/refusal.ts` и `RunRefusal`). */}
+      {/* ОТКАЗ ЗАПУСКА — СТОЙКАЯ ПОЛОСА, НЕ СНЕКБАР (CONTRACT §E), тот же орган, что у FABRIC RENDER
+          и 3D: слова сервера дословно, «nothing was charged» только когда сервер ОТВЕТИЛ. */}
       <RunRefusal refusal={startRun.refusal} onDismiss={startRun.dismissRefusal} />
       <WhatModelGetsModal open={wmgOpen} onOpenChange={setWmgOpen} band={band} />
     </div>

@@ -6,257 +6,365 @@ import type {
 } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { cn } from 'lib/utility';
-import { useMemo, useState, type JSX } from 'react';
+import { useMemo, useState, type JSX, type ReactNode } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
+import { GroupLabel } from 'ui/components/group-label';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
-import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
-import { Section } from 'ui/components/section';
+import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
-import { InertDoor, liveLayerRev, pictureUrl, slotFootnote } from '../bench-slot';
-import { shelfBatchOrdinals } from '../handles';
+import { InertDoor, pictureUrl } from '../bench-slot';
+import { Counter } from '../core';
 import { VectorModal } from '../modals';
 import { PictureTile } from '../picture-tile';
-import { mixedInputNote, slotProvenance } from '../provenance';
+import { readProvenance } from '../provenance';
 import { uploadItem } from '../upload-item';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
-import { CARDINAL_VIEWS, isCardinalView, viewLabel } from '../views';
-import { LockBar } from './generate-row';
+import { SILHOUETTE_VIEWS, isCardinalView, viewLabel } from '../views';
 import {
-  RENDER_MIN_VIEWS,
   benchSides,
   renderPlacements,
   slotOrigin,
-  slotOriginLine,
+  threedRevisions,
   threedSides,
   type BenchSide,
-  type Gate,
+  type RenderPlacement,
 } from './model';
 import { RenderInputStrip } from './render-input-strip';
 
 /**
- * ═══ ОДНА СТРОКА НА СТОРОНУ — Ф5 (WAVE2 п.7) ═════════════════════════════════════════════════
+ * ═══ THE TWO STRIPS OF THE FABRIC RENDER STEP, AND THE ONE STRIP OF 3D ═══════════════════════
  *
- * Владелец увидел «три ряда одинаковых ячеек по шесть сторон» и прочёл их как одно и то же,
- * показанное трижды. Три ряда были ТРЕМЯ ОРГАНАМИ одного и того же рендер-верстака: `FABRIC RENDER
- * SLOTS` (плиты 190px), лента `INPUT — RENDERS BY VIEW` на 3D (ячейки 132px) и дверь `mark ▸` в
- * `RENDERS OF THIS CARD`; плюс флэтовый верстак — лентой `INPUT — FLATS OF THIS CARD`. Два верстака
- * различаются ПО СУЩЕСТВУ (чертежи — вход рендера; рендеры — вход 3D), слить их в один значило бы
- * соврать. Поэтому — не один ряд, а ОДНА СТРОКА НА СТОРОНУ, четырьмя колонками:
+ * The prototype (`_step-render.js`, `_step-3d.js`) draws the sides of a card as HORIZONTAL STRIPS
+ * of slot cells — six per strip, one per silhouette view, the empty ones included — and it draws
+ * exactly two of them on FABRIC RENDER, because they read two DIFFERENT benches:
  *
- *   SIDE · WHAT WENT IN (flat) · WHAT CAME BACK (render) · 3D
+ *   INPUT FLATS ─── the flat bench (`benchSides(band, 'flat', 0)`): what the render is made from.
+ *                   READ ONLY here. Its writers are the bench on FLAT and the pool of unmarked
+ *                   drawings under the divider; a second writing door here would bring back the
+ *                   duplication that had the strip torn down once.
+ *   SIDES ───────── the render bench of the studio's colourway (`threedSides(band, colorwayId)`):
+ *                   what came back, and therefore what the 3D run reads. THE ONE WRITER of this
+ *                   axis: put a file in, take a plate off, fill the empty sides from the card's own
+ *                   renders. Every write is `setBenchSlot` / `registerUpload` with `kind: 'render'`
+ *                   spelled, NO `slotId` (a `oneof` with `viewKey`: a written zero refuses the whole
+ *                   write), and `expectedSlotRev` as the CAS of that one side.
  *
- * Связь «что во что превратилось» читается по строке, без догадки; ни одна сторона не показана
- * дважды.
+ * On 3D the SAME render bench is drawn once more, as INPUT · RENDERS BY VIEW — a READING with a door
+ * back to FABRIC RENDER on every empty cell. Nothing is marked there: a filled render slot IS the
+ * side's membership in the 3D run (`sides.filter(s => s.picture)`), there is no separate tick.
  *
- * ═══ ШЕСТЬ СТРОК, НЕ ЧЕТЫРЕ ═══════════════════════════════════════════════════════════════════
+ * ⚠ THE FOUR-COLUMN TABLE THAT STOOD HERE («SIDE · FLATS IN · RENDERS BACK · 3D») IS GONE. The owner
+ * saw the beta and said «это не как в референсе»: the mockup has no table, it has two strips.
  *
- * Макет нарисован четырьмя строками — таблицей примера, а не словарём. Верстак — шесть слотов
- * (`SILHOUETTE_VIEWS`, D-28), и `applyPlan` «неназванную занятую сторону очищает»: четыре строки над
- * шестисторонним верстаком дали бы двери `apply splitted`, вычищающей слоты, которых человек не
- * видит. Строки читаются из `benchSides` — то есть из словаря. Что 3D берёт только четыре из них
- * (`CARDINAL_VIEWS`), говорится СОСТОЯНИЕМ в колонке 3D, а не сокращением списка.
- *
- * ═══ КТО ЗДЕСЬ ПИШЕТ, А КТО ЧИТАЕТ ═════════════════════════════════════════════════════════════
- *
- *   · WHAT WENT IN (flat) — ЧИТАЕТСЯ. Единственные писатели флэт-оси — `Bench` на шаге FLAT, лента
- *     флэтов под разделителем ниже (та же `RenderInputStrip`, только без своих шести слотов) и
- *     рекол истории. В ячейке нет ни ✕, ни приёмной двери; у пустой — дверь на FLAT.
- *   · WHAT CAME BACK (render) — ПИШЕТСЯ ЗДЕСЬ: положить из медиатеки, снять, заполнить пустые из
- *     кадров карточки. Каждая запись — `setBenchSlot`/`registerUpload` с `kind: 'render'` и
- *     колорвеем студии; `slotId` НЕ передаётся (oneof, дописанный ноль = отказ всей записи);
- *     `expectedSlotRev` — CAS одной стороны, отказ одной не останавливает остальные.
- *   · 3D — ВЫВОД, не жест. Сторона, у которой рендер-слот заполнен, идёт в 3D-прогон; фронт
- *     обязателен (`no_front_render`, отказ до денег); трёхчетвертные 3D не читает вовсе. Разметки в
- *     этой колонке нет и быть не должно — макет её снял.
- *
- * Оси сравниваются РОВНО в `benchRowMatches` (через `benchSides` / `threedSides`) — колорвей и род
- * здесь не парсятся.
- *
- * ═══ ДВА МОНТАЖА ОДНОГО БЛОКА ═════════════════════════════════════════════════════════════════
- *
- * На FABRIC RENDER блок стоит первым (вход рендера — флэты — читается до меню; тот же закон, что
- * ставил здесь ленту флэтов) и ПИШЕТ рендер-ось; под разделителем — правая половина прежней ленты
- * флэтов: неразмеченные чертежи с `mark ▸`, колоды листов, фильтр происхождения, дверь `+ flat`,
- * дочитывание ленты до конца (`useWholeCardFeed`, D-5). На 3D тот же блок ЧИТАЕТ (`readOnly`):
- * ни одной записи, лента под разделителем не рисуется, а под строками стоит `LockBar` с дверями
- * прежней ленты 3D — причины отказа и куда идти.
- *
- * ⚠ `RenderStudio` монтируется с `key={colorway.colorwayId}` — ремоунт при смене цвета; у 3D
- * ремоунта нет намеренно (черновик подачи переживает смену цвета). Этот блок состояния, зависящего
- * от монтажа, не держит — только `busy`/`outcome`/`editingId`, которые смену цвета переживать не
- * обязаны.
+ * ONE CELL GRAMMAR (`SlotCell`) for all three strips, as the prototype's `slotCell` is one for the
+ * whole flow: a filled cell is a plate — picture, zoom, edit — with a footer naming the side and
+ * where the plate came from (`run r7` / `by hand`); an empty cell is a dashed box naming the side
+ * and the door that fills it. The cell is 138px wide, the mockup's own measure.
  */
 
-/** Ширина плиты в строке — та же, что у ячейки ленты (132px): один шаг на все полосы блока. */
-const PLATE = 'w-[132px] shrink-0';
-const PLATE_ASPECT = '4/5';
-
-const INERT_DOOR = 'flex w-full [&>button]:w-full';
+/** The strip's cell — the mockup's `.pstrip-i` (138px). One measure for all three strips. */
+const CELL = 'flex w-[138px] shrink-0 flex-col gap-1';
+/** The plate is square, as the mockup's `.ph`; a drawing is contained in it, never cropped. */
+const PLATE_ASPECT = '1/1';
 
 const READ_ONLY_REASON =
   'this card is read-only for you — putting a render into a side is an edit of the card';
 
-/** Знаки над плитой — те же три, что у `BenchSlot`, прочитанные с того же слоя правок. */
-function plateNotes(
-  band: GetDesignBandResponse,
-  picture: common_DesignPicture,
-): { stale: string | null; unflattened: string | null; mixed: string | null } {
-  const provenance = slotProvenance({ picture });
-  if (!provenance) return { stale: null, unflattened: null, mixed: null };
-  const layerRev = liveLayerRev(band.layers, picture.media?.id);
-  const over = typeof layerRev === 'number';
-  return {
-    stale:
-      over && provenance.layerRev > 0 && (layerRev as number) > provenance.layerRev
-        ? 'the edit layer has moved on — this picture is an older flattening'
-        : null,
-    unflattened:
-      over && provenance.layerRev === 0
-        ? 'edit marks sit on a layer over this plate — a run reads the plate alone until «save as picture» presses them in'
-        : null,
-    mixed: mixedInputNote(provenance),
-  };
+/** `run r7` / `by hand` — where a plate came from, as the mockup's origin pill spells it. */
+function originWord(band: GetDesignBandResponse, side: BenchSide): string {
+  const origin = slotOrigin(band, side);
+  if (origin.rrev > 0) return `run r${origin.rrev}`;
+  const provenance = side.picture ? readProvenance(side.picture) : null;
+  if (provenance?.runId) return `run ${provenance.runId}`;
+  return 'by hand';
 }
 
-function Notes({ band, picture }: { band: GetDesignBandResponse; picture: common_DesignPicture }) {
-  const { stale, unflattened, mixed } = plateNotes(band, picture);
+/**
+ * THE STRIP — `.pstrip`: a horizontal row that scrolls INSIDE its own box. A page that scrolls
+ * sideways to show six cells takes every other block with it (DESIGN.md: the page never scrolls
+ * sideways).
+ */
+function Strip({ children, ...rest }: { children: ReactNode; [k: `data-${string}`]: unknown }) {
   return (
-    <>
-      {mixed && (
-        <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
-          {mixed}
-        </Text>
-      )}
-      {stale && (
-        <Text size='nano' component='span' className='min-w-0 break-words text-warning'>
-          {stale}
-        </Text>
-      )}
-      {unflattened && (
-        <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
-          {unflattened}
-        </Text>
-      )}
-    </>
+    <div {...rest} className='flex items-stretch gap-2 overflow-x-auto pb-1'>
+      {children}
+    </div>
   );
 }
 
-/** Пустая коробка стороны — полосатая, со словом; дверь под ней даёт вызывающий. */
-function EmptyPlate({
+/**
+ * ONE FILLED PLATE. The frame is the studio's `PictureTile` (zoom into the shared viewer, the quiet
+ * corners `edit` / `✕` when the caller hands them in); under it the footer of the mockup's `.cap`:
+ * the side on the left, the origin pill on the right. The ink border around both is the mockup's
+ * «filled» weight against the dashed «empty» one.
+ */
+function Plate({
+  picture,
   label,
   required,
-  requiredNote,
+  origin,
+  alt,
+  onRemove,
+  onEdit,
+  saving,
+}: {
+  picture: common_DesignPicture;
+  label: string;
+  required?: boolean;
+  origin: string;
+  alt: string;
+  onRemove?: () => void;
+  onEdit?: () => void;
+  saving?: boolean;
+}): JSX.Element {
+  return (
+    <div className='flex flex-col border border-textColor bg-bgColor' data-slot-filled=''>
+      <PictureTile
+        url={pictureUrl(picture)}
+        alt={alt}
+        aspect={PLATE_ASPECT}
+        fit='contain'
+        gallery={picture.media ? mediaFullToViewerItem(picture.media) : undefined}
+        className='w-full border-0 bg-bgColor'
+        onRemove={
+          onRemove
+            ? {
+                onClick: onRemove,
+                ariaLabel: `unmark ${label}`,
+                title: 'unmark — empty this side; the render stays on the card',
+                disabled: saving,
+                pending: saving,
+              }
+            : undefined
+        }
+        onEdit={
+          onEdit
+            ? {
+                onClick: onEdit,
+                ariaLabel: `edit the render of ${label} — draw over this picture`,
+                title:
+                  'draw over this render — saving makes a NEW picture; the original is never overwritten',
+              }
+            : undefined
+        }
+      />
+      <div className='flex items-center justify-between gap-1 border-t border-hairline px-1.5 py-0.5'>
+        <Text
+          size='nano'
+          variant='uppercase'
+          tracking='label'
+          component='span'
+          className='min-w-0 truncate'
+        >
+          {label}
+          {required ? ' *' : ''}
+        </Text>
+        <Pill className='shrink-0'>{saving ? 'saving…' : origin}</Pill>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ONE EMPTY CELL — a dashed box naming the side and the door that fills it. A `<button>` when the
+ * cell is itself a door (3D: every empty side leads to FABRIC RENDER), a plain box otherwise.
+ */
+function EmptyBox({
+  label,
+  required,
+  hint,
+  onOpen,
   title,
 }: {
   label: string;
   required?: boolean;
-  requiredNote: string;
-  title: string;
+  hint: string;
+  onOpen?: () => void;
+  title?: string;
 }): JSX.Element {
-  return (
+  const body = (
     <>
-      <div
-        className={cn(placeholderClass({ dashed: true }), 'w-full flex-col gap-0.5 px-1 text-center')}
-        style={{ ...PLACEHOLDER_SURFACE, aspectRatio: PLATE_ASPECT }}
-        title={title}
-      >
-        <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
-          {label}
-        </Text>
-      </div>
-      <Text
-        size='nano'
-        component='span'
-        className={cn('min-w-0 break-words', required ? 'text-error' : 'text-labelColor')}
-      >
-        <b>empty</b>
-        {required ? ` · ${requiredNote}` : ''}
+      <Text size='micro' variant='uppercase' tracking='label' component='span'>
+        {label}
+        {required ? <span className='font-bold'> *</span> : null}
+      </Text>
+      <Text size='micro' variant='label' component='span' className='normal-case'>
+        {hint}
       </Text>
     </>
   );
+  const box =
+    'flex min-h-[96px] flex-1 flex-col items-center justify-center gap-0.5 border border-dashed border-borderColor bg-bgColor px-2 py-2.5 text-center';
+  if (onOpen) {
+    return (
+      <button
+        type='button'
+        title={title}
+        onClick={onOpen}
+        className={cn(
+          box,
+          'cursor-pointer hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+        )}
+      >
+        {body}
+      </button>
+    );
+  }
+  return (
+    <div className={box} title={title}>
+      {body}
+    </div>
+  );
 }
 
-/* Column heads are table headers — the 10px label size with its tracking (DESIGN.md §3), not the 9px
-   badge size the plates' footnotes use. */
-const HEAD = 'uppercase';
+/** «in the 3D run» / «not in the 3D run» — a fact derived from the plate, the prototype's third fact. */
+function ThreedWord({ side }: { side: BenchSide }): JSX.Element {
+  const cardinal = isCardinalView(side.view);
+  const has = !!side.picture;
+  if (!cardinal) {
+    return (
+      <Pill
+        title={`3D reads the four named sides — front, back, side L, side R; a ${viewLabel(side.view)} render stands on the bench but is not read`}
+      >
+        not read by 3D
+      </Pill>
+    );
+  }
+  return has ? (
+    <Pill tone='ink' data-threed-in=''>
+      in the 3D run
+    </Pill>
+  ) : (
+    <Pill>not in the 3D run</Pill>
+  );
+}
 
-export function SideRows({
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   INPUT FLATS — the flat bench, read only.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+
+export function InputFlatsGroup({
+  band,
+  onGoToKind,
+}: {
+  band: GetDesignBandResponse;
+  onGoToKind?: (kind: 'flat' | 'render' | 'threed') => void;
+}): JSX.Element {
+  const flats = useMemo(() => benchSides(band, 'flat', 0), [band]);
+  const filled = flats.filter((s) => !!s.picture).length;
+  return (
+    <div data-input-flats=''>
+      <GroupLabel
+        flush
+        action={
+          <span className='flex flex-wrap items-center gap-1.5'>
+            <Counter n={filled} noun='side' total={flats.length} />
+            {onGoToKind ? (
+              <Button variant='secondary' size='xs' onClick={() => onGoToKind('flat')}>
+                the flat bench ›
+              </Button>
+            ) : (
+              <InertDoor label='the flat bench ›' reason='the flat bench is on the FLAT step of the rail above' />
+            )}
+          </span>
+        }
+      >
+        input flats
+      </GroupLabel>
+      <Text size='micro' variant='label' component='p' className='mb-1.5 normal-case'>
+        what the render is made from · one per side
+      </Text>
+      <Strip data-input-flats-strip=''>
+        {flats.map((side) => {
+          const label = viewLabel(side.view);
+          const required = side.view === 'front';
+          return (
+            <div key={side.view} data-side-flat={side.view} className={CELL}>
+              {side.picture ? (
+                <Plate
+                  picture={side.picture}
+                  label={label}
+                  required={required}
+                  origin={originWord(band, side)}
+                  alt={`flat · ${label}`}
+                />
+              ) : (
+                <EmptyBox
+                  label={label}
+                  required={required}
+                  hint='nothing marked · the flat bench fills it'
+                  title={`no drawing is marked for ${label}. Mark one on FLAT, or below the line.`}
+                />
+              )}
+            </div>
+          );
+        })}
+      </Strip>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   SIDES — the render bench of the studio's colourway, the one writer of that axis.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+
+export function SidesGroup({
   band,
   techCardId,
   disabled,
   colorwayId = 0,
-  colorwayLabel = '',
   onGoToKind,
-  readOnly = false,
-  lock,
-  id = 'design-render-bench',
-  title = 'flats in · renders back',
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
-  /**
-   * ЧЕЙ РЕНДЕР-ВЕРСТАК. Одно число на всю студию (`useColorwayChoice`): под ним этот блок пишет,
-   * 3D читает (`threedSides`) и сервер собирает (`designSelectBench`). Флэт-ось колорвея не имеет
-   * (L-4) и читается под нулём всегда.
-   */
+  /** WHOSE render bench: one number for the whole studio (`useColorwayChoice`). */
   colorwayId?: number;
-  colorwayLabel?: string;
-  onGoToKind?: (kind: 'flat' | 'render') => void;
-  /**
-   * МОНТАЖ-ЧИТАТЕЛЬ (шаг 3D): ни одной записи рендер-оси, ленты флэтов под разделителем нет.
-   * Пустая сторона рисует дверь на FABRIC RENDER, где её заполняют.
-   */
-  readOnly?: boolean;
-  /** Отказ ворот 3D — рисуется полосой под строками, вместе со своими дверями (шаг 3D). */
-  lock?: Gate;
-  id?: string;
-  title?: string;
+  onGoToKind?: (kind: 'flat' | 'render' | 'threed') => void;
 }): JSX.Element {
   const writes = useDesignWrites(techCardId);
-  const flats = useMemo(() => benchSides(band, 'flat', 0), [band]);
   const renders = useMemo(() => threedSides(band, colorwayId), [band, colorwayId]);
-  const shelfOrdinals = useMemo(() => shelfBatchOrdinals(band.batches ?? []), [band.batches]);
-  /** Кадры карточки, которым есть куда встать: только ПУСТЫЕ стороны (довод у `renderPlacements`). */
+  /** The card's own renders that have a side to stand on — only EMPTY sides (see `renderPlacements`). */
   const placements = useMemo(() => renderPlacements(band, colorwayId), [band, colorwayId]);
+  const placementOf = (view: string): RenderPlacement | undefined =>
+    placements.find((p) => p.view === view);
 
-  const canWrite = !readOnly && !disabled;
-  const named = colorwayLabel.trim();
+  const canWrite = !disabled;
+  const filled = renders.filter((s) => !!s.picture).length;
 
-  const filled = renders.filter((side) => !!side.picture).length;
-  const intoThreed = renders.filter((side) => !!side.picture && isCardinalView(side.view)).length;
-
-  /** Для какой стороны идёт запись. Общий `isPending` сказал бы «saving» на всех шести. */
+  /** Which side a write is in flight for. A shared `isPending` would say «saving» on all six. */
   const [busy, setBusy] = useState<string | null>(null);
   const [filling, setFilling] = useState(false);
-  /** Исход последнего `fill` — состоянием рядом с плитами, пока не нажмут снова. */
   const [outcome, setOutcome] = useState<{
     done: string[];
     failed: { view: string; reason: string }[];
   } | null>(null);
-  /** Какую плиту рендер-оси правим в векторном редакторе. Ноль — закрыто. */
+  /** Which plate of the render axis is in the vector editor. Zero = closed. */
   const [editingId, setEditingId] = useState(0);
 
-  /* ⚠ `slotId` ОТСУТСТВУЕТ НАМЕРЕННО — oneof с `viewKey`; ноль в proto-JSON это ЗАДАННОЕ поле,
-     и сервер отверг бы запись целиком. Род спеллится всегда: пустое читается как flat. */
-  const sideRef = (view: string): DesignBenchSlotRef => ({
-    viewKey: view,
-    kind: 'render',
-    colorwayId,
-  });
+  /* ⚠ NO `slotId` — a `oneof` with `viewKey`; a zero is a SET field in proto-JSON and the server
+     refuses the whole write. The kind is always spelled: empty reads as flat. */
+  const sideRef = (view: string): DesignBenchSlotRef => ({ viewKey: view, kind: 'render', colorwayId });
 
   const unmark = (view: string, slotRev: number) => {
     setBusy(view);
     writes.setBenchSlot.mutate(
-      // `picture_id = 0` — освободить сторону, ничего не удаляя: плита остаётся на карточке.
       { slot: sideRef(view), pictureId: 0, expectedSlotRev: slotRev },
       { onSettled: () => setBusy(null) },
     );
   };
 
-  /** Файл из медиатеки прямо в пустую сторону — одной транзакцией (`RegisterDesignUpload` + target). */
+  const placeFromRun = (placement: RenderPlacement) => {
+    setBusy(placement.view);
+    writes.setBenchSlot.mutate(
+      { slot: sideRef(placement.view), pictureId: placement.picture.id ?? 0, expectedSlotRev: placement.slotRev },
+      { onSettled: () => setBusy(null) },
+    );
+  };
+
+  /** A file from the library straight into an empty side — one transaction (`RegisterDesignUpload` + target). */
   const placeMedia = (media: common_MediaFull, view: string, expectedSlotRev: number) => {
     const mediaId = media.id ?? 0;
     if (!mediaId) return;
@@ -272,10 +380,7 @@ export function SideRows({
     );
   };
 
-  /**
-   * Заполнить пустые стороны кадрами карточки — по одному слоту, своим CAS каждая; отказ одной не
-   * останавливает остальные, отката нет (довод целиком — у прежнего органа, `renderPlacements`).
-   */
+  /** Fill every empty side from the card's renders — one slot at a time, its own CAS each. */
   const fillEmpty = async () => {
     if (!placements.length || filling) return;
     setFilling(true);
@@ -301,337 +406,134 @@ export function SideRows({
     setOutcome(failed.length ? { done, failed } : null);
   };
 
-  const frameOf = (picture: common_DesignPicture | null) =>
-    picture?.media ? mediaFullToViewerItem(picture.media) : undefined;
-
-  /* ─────────────────────────── the three cells of a row ─────────────────────────── */
-
-  const flatCell = (side: BenchSide): JSX.Element => {
-    const label = viewLabel(side.view);
-    const required = RENDER_MIN_VIEWS.includes(side.view);
-    if (!side.picture) {
-      return (
-        <div data-side-flat={side.view} data-slot-empty='' className={cn('flex flex-col gap-1', PLATE)}>
-          <EmptyPlate
-            label={label}
-            required={required}
-            requiredNote='the render needs it'
-            title={`no drawing is marked for ${label}. Mark one below the line, or on FLAT.`}
-          />
-          {onGoToKind ? (
-            <div data-cell-doors='' className='mt-auto pt-0.5'>
-              <Button
-                variant='secondary'
-                size='xs'
-                className='w-full'
-                onClick={() => onGoToKind('flat')}
-                title={`draw or mark ${label} on FLAT`}
-              >
-                FLAT ▸
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      );
-    }
-    return (
-      <div data-side-flat={side.view} className={cn('flex flex-col gap-1', PLATE)}>
-        {/* ЧИТАЕТСЯ: ни ✕, ни `edit` — писатели флэт-оси стоят на FLAT и под разделителем ниже. */}
-        <PictureTile
-          url={pictureUrl(side.picture)}
-          alt={`flat · ${label}`}
-          badge={label}
-          aspect={PLATE_ASPECT}
-          fit='contain'
-          gallery={frameOf(side.picture)}
-          className='w-full bg-bgColor'
-        />
-        <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
-          {slotFootnote(band, side.picture, shelfOrdinals)}
-        </Text>
-        <Notes band={band} picture={side.picture} />
-      </div>
-    );
-  };
-
-  const renderCell = (side: BenchSide): JSX.Element => {
-    const label = viewLabel(side.view);
-    const required = side.view === 'front';
-    const saving = busy === side.view;
-    if (!side.picture) {
-      return (
-        <div
-          data-side-render={side.view}
-          data-slot-empty=''
-          data-slot-door={canWrite ? 'media' : undefined}
-          className={cn('flex flex-col gap-1', PLATE)}
-        >
-          {canWrite ? (
-            /* Коробка, которая и есть слот, принимает файл сама — как пустая плита верстака. */
-            <MediaSlot
-              aspectRatio={['Custom']}
-              frameAspect={PLATE_ASPECT}
-              label={`+ add ${label}`}
-              hint={null}
-              purpose={`design · render for the ${label} slot`}
-              showVideos={false}
-              editMode
-              onSelect={(media) => {
-                const first = media[0];
-                if (first?.id) placeMedia(first, side.view, side.slotRev);
-              }}
-            />
-          ) : (
-            <EmptyPlate
-              label={label}
-              required={required}
-              requiredNote='3D cannot start without it'
-              title={`no render stands in ${label}. Put one in on FABRIC RENDER.`}
-            />
-          )}
-          {canWrite && (
-            <Text size='nano' component='span' className={required ? 'text-error' : 'text-labelColor'}>
-              <b>empty</b>
-              {required ? ' · 3D cannot start without it' : ''}
-            </Text>
-          )}
-          {canWrite && (
-            <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
-              ⌘V · drop · browse
-            </Text>
-          )}
-          {saving && (
-            <Text size='nano' variant='label' component='span' className='uppercase'>
-              saving…
-            </Text>
-          )}
-          {readOnly && (
-            <div data-cell-doors='' className='mt-auto pt-0.5'>
-              {onGoToKind ? (
-                <Button
-                  variant='secondary'
-                  size='xs'
-                  className='w-full'
-                  onClick={() => onGoToKind('render')}
-                  title={`fill ${label} on FABRIC RENDER — from the renders of this card or from a file`}
-                >
-                  FABRIC RENDER ▸
-                </Button>
-              ) : (
-                <InertDoor
-                  className={INERT_DOOR}
-                  label='FABRIC RENDER ▸'
-                  reason='switch to FABRIC RENDER on the rail above: a side is filled there, from the renders of this card or from a file'
-                />
-              )}
-            </div>
-          )}
-        </div>
-      );
-    }
-    const origin = slotOrigin(band, side);
-    const line = slotOriginLine(origin);
-    const pictureId = side.picture.id ?? 0;
-    return (
-      <div data-side-render={side.view} className={cn('flex flex-col gap-1', PLATE)}>
-        <PictureTile
-          url={pictureUrl(side.picture)}
-          alt={`render · ${label}`}
-          badge={label}
-          aspect={PLATE_ASPECT}
-          fit='contain'
-          gallery={frameOf(side.picture)}
-          className='w-full bg-bgColor'
-          onRemove={
-            canWrite
-              ? {
-                  onClick: () => unmark(side.view, side.slotRev),
-                  ariaLabel: `unmark ${label}`,
-                  title: 'unmark — empty this side; the render stays on the card',
-                  disabled: saving,
-                  pending: saving,
-                }
-              : undefined
-          }
-          /* Правка — новая КАРТИНКА на карточке (`slot={null}` у редактора), не запись в слот. */
-          onEdit={
-            canWrite && pictureId > 0
-              ? {
-                  onClick: () => setEditingId(pictureId),
-                  ariaLabel: `edit render ${pictureId} — draw over this picture`,
-                  title:
-                    'draw over this render — saving makes a NEW picture; the original is never overwritten',
-                }
-              : undefined
-          }
-        />
-        <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
-          {slotFootnote(band, side.picture, shelfOrdinals)}
-        </Text>
-        {/* Ревизия и род прогона — со штампа самого слота (`run_rrev`/`run_kind`), не с ленты. */}
-        {line && (
-          <Text
-            size='nano'
-            component='span'
-            data-slot-origin={`${side.view}:${origin.runKind || 'none'}:${origin.rrev}`}
-            className={cn('min-w-0 break-words', origin.foreign ? 'text-warning' : 'text-labelColor')}
-          >
-            {line}
-          </Text>
-        )}
-        <Notes band={band} picture={side.picture} />
-        {saving && (
-          <Text size='nano' variant='label' component='span' className='uppercase'>
-            saving…
-          </Text>
-        )}
-      </div>
-    );
-  };
-
-  /**
-   * КОЛОНКА 3D — ВЫВОД. Сторона идёт в прогон ровно тогда, когда её рендер-слот заполнен и вид
-   * из четырёх, которые провайдер принимает (`CARDINAL_VIEWS`). Ни одной двери здесь нет.
-   */
-  const threedCell = (side: BenchSide): JSX.Element => {
-    const cardinal = isCardinalView(side.view);
-    const has = !!side.picture;
-    let word: JSX.Element;
-    // The verdict is a sentence, not a footnote: 10px, the hint size, where the plates' footnotes
-    // under a 132px frame stay at 9px.
-    if (!cardinal) {
-      word = (
-        <Text size='micro' variant='label' component='span' className='min-w-0 break-words'>
-          {has ? 'on the bench, not read by 3D' : 'not read by 3D'} — the provider takes{' '}
-          {CARDINAL_VIEWS.length} named sides
-        </Text>
-      );
-    } else if (has) {
-      word = (
-        <Text size='micro' component='span' className='min-w-0 break-words'>
-          <b>✓ goes into the 3D run</b>
-          {side.view === 'front' ? ' · required' : ''}
-        </Text>
-      );
-    } else if (side.view === 'front') {
-      word = (
-        <Text size='micro' component='span' className='min-w-0 break-words text-error'>
-          <b>required</b> · blocks 3D
-        </Text>
-      );
-    } else {
-      word = (
-        <Text size='micro' variant='label' component='span' className='min-w-0 break-words'>
-          optional
-        </Text>
-      );
-    }
-    return (
-      <div data-side-threed={side.view} data-threed-in={cardinal && has ? '' : undefined}>
-        {word}
-      </div>
-    );
-  };
+  const editing =
+    editingId > 0 ? renders.find((s) => (s.picture?.id ?? 0) === editingId)?.picture : null;
 
   const fillTitle = `${placements
     .map((p) => viewLabel(p.view))
     .join(', ')} take the newest render of this card that names them. A side that already holds a render is not touched.`;
 
-  const editing =
-    editingId > 0 ? renders.find((side) => (side.picture?.id ?? 0) === editingId)?.picture : null;
-
   return (
-    <Section
-      /* ЯКОРЬ ОБЪЯВЛЕН: об этом блоке делаются утверждения отсутствия (в колонке 3D нет разметки),
-         и такое утверждение стоит ровно столько, сколько стоит объявленная коробка. */
-      id={id}
-      title={title}
-      question={
-        named
-          ? `— one row per side: the drawing that went in, the render of ${named} that came back, and whether 3D reads it`
-          : '— one row per side: the drawing that went in, the render that came back, and whether 3D reads it'
-      }
-      action={
-        <span className='flex items-center gap-3'>
-          <Text size='micro' variant='label' component='span' className='uppercase' data-side-count=''>
-            render {filled} of {renders.length} · {intoThreed} of {CARDINAL_VIEWS.length} into 3D
-          </Text>
-          {!readOnly &&
-            placements.length > 0 &&
-            (disabled ? (
-              <InertDoor
-                label={`fill ${placements.length} empty side${placements.length === 1 ? '' : 's'} ▸`}
-                reason={READ_ONLY_REASON}
-              />
+    <div data-sides=''>
+      <GroupLabel
+        action={
+          <span className='flex flex-wrap items-center gap-1.5'>
+            <Counter n={filled} noun='side' total={renders.length} />
+            {placements.length > 0 &&
+              (canWrite ? (
+                <Button
+                  variant='secondary'
+                  size='xs'
+                  loading={filling}
+                  onClick={fillEmpty}
+                  title={fillTitle}
+                  data-fill-empty={placements.length}
+                >
+                  fill {placements.length} empty side{placements.length === 1 ? '' : 's'} ▸
+                </Button>
+              ) : (
+                <InertDoor
+                  label={`fill ${placements.length} empty side${placements.length === 1 ? '' : 's'} ▸`}
+                  reason={READ_ONLY_REASON}
+                />
+              ))}
+            {onGoToKind ? (
+              <>
+                <Button variant='secondary' size='xs' onClick={() => onGoToKind('flat')}>
+                  the flat bench ›
+                </Button>
+                <Button variant='secondary' size='xs' onClick={() => onGoToKind('threed')}>
+                  the next step ›
+                </Button>
+              </>
             ) : (
-              <Button
-                variant='secondary'
-                size='xs'
-                loading={filling}
-                onClick={fillEmpty}
-                title={fillTitle}
-              >
-                fill {placements.length} empty side{placements.length === 1 ? '' : 's'} ▸
-              </Button>
-            ))}
-        </span>
-      }
-    >
-      <div className='overflow-x-auto'>
-        <div
-          data-side-rows={renders.length}
-          className='grid items-start gap-x-4 gap-y-0'
-          /* Последняя дорожка забирает остаток (`1fr`), чтобы волосяная линия строки шла ВО ВСЮ
-             ширину блока: обрезанная на две трети, она читалась как незаконченная таблица. Текст
-             приговора при этом остаётся узким — предел стоит на самом тексте (`max-w-[24rem]`), а
-             не на дорожке, иначе он растянулся бы в строку на пол-экрана. Ниже ~540px вся сетка
-             скроллится ВНУТРИ блока (`overflow-x-auto` выше); страница вбок не едет. */
-          style={{ gridTemplateColumns: 'minmax(64px, max-content) 132px 132px minmax(160px, 1fr)' }}
-        >
-          {/* ЗАГОЛОВОК — ярлыки колонок, метрикой ярлыка (DESIGN.md §3). */}
-          <Text size='micro' variant='label' tracking='label' component='span' className={HEAD}>
-            side
-          </Text>
-          <Text size='micro' variant='label' tracking='label' component='span' className={HEAD}>
-            what went in (flat)
-          </Text>
-          <Text size='micro' variant='label' tracking='label' component='span' className={HEAD}>
-            what came back (render)
-          </Text>
-          <Text size='micro' variant='label' tracking='label' component='span' className={HEAD}>
-            3D
-          </Text>
-
-          {renders.map((side, i) => {
-            const flat = flats[i];
-            /* ONE RULE PER ROW, NOT ONE PER CELL. The row is a subgrid over the four columns, so the
-               hairline runs unbroken across the gutters; a border on each cell left a gap at every
-               `gap-x-4` and read as a dashed line. */
-            return (
-              <div
-                key={side.view}
-                data-side-row={side.view}
-                className='col-span-4 grid grid-cols-subgrid items-start border-t border-hairline py-2'
-              >
-                <div className='min-w-0'>
-                  <Text
-                    size='micro'
-                    variant='label'
-                    tracking='label'
-                    component='span'
-                    className='uppercase'
-                  >
-                    {viewLabel(side.view)}
+              <InertDoor label='the next step ›' reason='3D is the next cell of the rail above' />
+            )}
+          </span>
+        }
+      >
+        sides
+      </GroupLabel>
+      <Text size='micro' variant='label' component='p' className='mb-1.5 normal-case'>
+        a side that came back goes into the 3D run · there is nothing to mark
+      </Text>
+      <Strip data-sides-strip=''>
+        {renders.map((side) => {
+          const label = viewLabel(side.view);
+          const required = side.view === 'front';
+          const saving = busy === side.view;
+          const back = placementOf(side.view);
+          return (
+            <div
+              key={side.view}
+              data-side-render={side.view}
+              data-slot-empty={side.picture ? undefined : ''}
+              data-slot-door={!side.picture && canWrite ? 'media' : undefined}
+              className={CELL}
+            >
+              {side.picture ? (
+                <Plate
+                  picture={side.picture}
+                  label={label}
+                  required={required}
+                  origin={originWord(band, side)}
+                  alt={`render · ${label}`}
+                  saving={saving}
+                  onRemove={canWrite ? () => unmark(side.view, side.slotRev) : undefined}
+                  onEdit={canWrite ? () => setEditingId(side.picture?.id ?? 0) : undefined}
+                />
+              ) : canWrite ? (
+                <>
+                  {/* The box that IS the slot takes the file itself (J-17), as an empty bench plate. */}
+                  <MediaSlot
+                    aspectRatio={['Custom']}
+                    frameAspect={PLATE_ASPECT}
+                    label={`${label}${required ? ' *' : ''}`}
+                    hint={null}
+                    purpose={`design · render for the ${label} slot`}
+                    showVideos={false}
+                    editMode
+                    onSelect={(media) => {
+                      const first = media[0];
+                      if (first?.id) placeMedia(first, side.view, side.slotRev);
+                    }}
+                  />
+                  <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
+                    {saving
+                      ? 'saving…'
+                      : back
+                        ? 'empty · click below to fill from a past run'
+                        : 'empty · GENERATE below fills it'}
                   </Text>
-                </div>
-                <div>{flatCell(flat)}</div>
-                <div>{renderCell(side)}</div>
-                <div className='min-w-0 max-w-[24rem]'>{threedCell(side)}</div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+                  {back && (
+                    <Button
+                      variant='secondary'
+                      size='xs'
+                      className='w-full'
+                      disabled={saving || filling}
+                      onClick={() => placeFromRun(back)}
+                      data-fill-side={side.view}
+                      title={`put the newest render of ${label} on this card into the side`}
+                    >
+                      from run {(back.picture.runId ?? 0) > 0 ? back.picture.runId : ''} ▸
+                    </Button>
+                  )}
+                </>
+              ) : (
+                <EmptyBox
+                  label={label}
+                  required={required}
+                  hint='empty · GENERATE below fills it'
+                  title={`no render stands in ${label}.`}
+                />
+              )}
+              <span>
+                <ThreedWord side={side} />
+              </span>
+            </div>
+          );
+        })}
+      </Strip>
 
       {outcome && (
         <CalloutBox tone='error'>
@@ -649,18 +551,17 @@ export function SideRows({
         </CalloutBox>
       )}
 
-      {/* ═══ НИЖЕ РАЗДЕЛИТЕЛЯ — ТО, ЧТО СТОЯЛО СПРАВА ОТ ЛИНИИ ЛЕНТЫ ФЛЭТОВ (WAVE2 п.9) ══════════
-          Неразмеченные чертежи с `mark ▸`, колоды листов (`split ▸ / expand ▸ / apply splitted /
-          fold ▾`), фильтр происхождения, дверь `+ flat`, дочитывание ленты до конца (D-5). Тот же
-          орган, что и был (`RenderInputStrip`), без своих шести слотов — они теперь строки выше. */}
-      {!readOnly && (
-        <div className='border-t border-hairline pt-2' data-side-rows-pool=''>
+      {/* ═══ BELOW THE STRIP — THE DIVIDER AND THE SHEETS NOT YET RAISED INTO IT ══════════════════
+          The prototype's own words: «ниже полосы — разделитель и мультивью-листы, которые ещё не
+          подняты в полосу; под разделителем сырьё, над ним размеченный результат». The same organ
+          as before (`RenderInputStrip`, bare): the unmarked drawings with `mark ▸`, the sheets and
+          their decks, the `+ flat` door, the read to the end of the feed. */}
+      {canWrite && (
+        <div className='mt-2 border-t border-hairline pt-2' data-side-rows-pool=''>
           <RenderInputStrip band={band} techCardId={techCardId} disabled={disabled} bare />
         </div>
       )}
 
-      {/* ОДИН РЕДАКТОР НА БЛОК, ПО ИМЕНИ ЦЕЛИ. `slot={null}` — результат правки ложится на карточку
-          обычным рендером и не пишет в слот. */}
       {editing && (
         <VectorModal
           open
@@ -672,45 +573,90 @@ export function SideRows({
           disabled={disabled}
         />
       )}
-
-      {/* ═══ ПОЛОСА ПРИЧИН 3D — ПЕРЕЕХАЛА С ЛЕНТЫ 3D ВМЕСТЕ С ДВЕРЯМИ ═══════════════════════════
-          Пустой верстак (`next: 'render'`) полосу не рисует: шесть пустых сторон с «required ·
-          blocks 3D» и дверью на FABRIC RENDER и есть ответ (F-12). Остальные отказы говорят то,
-          чего по строкам не прочесть (номера ревизий, почему фронт), и остаются со своими дверями. */}
-      {lock && !lock.ok && lock.next !== 'render' && (
-        <LockBar reason={lock.reason}>
-          {onGoToKind ? (
-            <>
-              {lock.next === 'front-slot' && (
-                <Button variant='secondary' size='xs' onClick={() => onGoToKind('render')}>
-                  put a render into FRONT ▸
-                </Button>
-              )}
-              {lock.next === 'refill' && (
-                <Button variant='secondary' size='xs' onClick={() => onGoToKind('render')}>
-                  re-fill the odd sides on FABRIC RENDER ▸
-                </Button>
-              )}
-              {lock.next === 'flat' && (
-                <Button variant='secondary' size='xs' onClick={() => onGoToKind('flat')}>
-                  generate a flat ▸
-                </Button>
-              )}
-              {(lock.next === 'flat' || !lock.next) && (
-                <Button variant='secondary' size='xs' onClick={() => onGoToKind('render')}>
-                  generate a render ▸
-                </Button>
-              )}
-            </>
-          ) : (
-            <InertDoor
-              className={INERT_DOOR}
-              label='generate a render ▸'
-              reason='the way out is the rail above — FLAT draws the missing side, FABRIC RENDER colours it and puts it into a slot, and 3D turns what stands there'
-            />
-          )}
-        </LockBar>
-      )}
-    </Section>
+    </div>
   );
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   INPUT · RENDERS BY VIEW — 3D reads the render bench; every empty cell is a door back.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+
+export function RendersByViewGroup({
+  band,
+  colorwayId = 0,
+  onGoToKind,
+}: {
+  band: GetDesignBandResponse;
+  colorwayId?: number;
+  onGoToKind?: (kind: 'flat' | 'render') => void;
+}): JSX.Element {
+  const sides = useMemo(() => threedSides(band, colorwayId), [band, colorwayId]);
+  const filled = sides.filter((s) => !!s.picture).length;
+  const revisions = useMemo(() => threedRevisions(band, sides), [band, sides]);
+  const toRender = onGoToKind ? () => onGoToKind('render') : undefined;
+  return (
+    <div id='design-threed-input' data-renders-by-view=''>
+      <GroupLabel
+        flush
+        action={
+          <span className='flex flex-wrap items-center gap-1.5'>
+            <Counter n={filled} noun='side' total={sides.length} />
+            {revisions.length > 1 && (
+              <Pill
+                tone='attention'
+                title={`the sides on this bench come from different runs (${revisions.map((r) => `r${r}`).join(', ')}); a model stitched out of them may not match in colour`}
+              >
+                {revisions.length === 2 ? 'two' : revisions.length} revisions
+              </Pill>
+            )}
+            {toRender ? (
+              <Button variant='secondary' size='xs' onClick={toRender}>
+                fabric render ›
+              </Button>
+            ) : (
+              <InertDoor label='fabric render ›' reason='FABRIC RENDER is the previous cell of the rail above' />
+            )}
+          </span>
+        }
+      >
+        input · renders by view
+      </GroupLabel>
+      <Text size='micro' variant='label' component='p' className='mb-1.5 normal-case'>
+        fabric render slots, one per side
+      </Text>
+      <Strip data-threed-strip=''>
+        {sides.map((side) => {
+          const label = viewLabel(side.view);
+          const required = side.view === 'front';
+          return (
+            <div key={side.view} data-side-render={side.view} className={CELL}>
+              {side.picture ? (
+                <Plate
+                  picture={side.picture}
+                  label={label}
+                  required={required}
+                  origin={originWord(band, side)}
+                  alt={`render · ${label}`}
+                />
+              ) : (
+                <EmptyBox
+                  label={label}
+                  required={required}
+                  hint='empty · fill it on the fabric render'
+                  onOpen={toRender}
+                  title={`fill ${label} on FABRIC RENDER — from the renders of this card or from a file`}
+                />
+              )}
+              <span>
+                <ThreedWord side={side} />
+              </span>
+            </div>
+          );
+        })}
+      </Strip>
+    </div>
+  );
+}
+
+/** The silhouette order the strips walk — exported for callers that count what the strips draw. */
+export const STRIP_VIEWS = SILHOUETTE_VIEWS;

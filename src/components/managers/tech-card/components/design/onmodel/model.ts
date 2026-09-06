@@ -3,6 +3,8 @@ import type {
   common_DesignColourRecipe,
   common_DesignPicture,
   common_DesignRun,
+  common_Fitting,
+  common_MediaFull,
 } from 'api/proto-http/admin';
 
 import {
@@ -12,11 +14,19 @@ import {
   assetThumb,
   clothShelf,
   fabricUses,
+  normaliseHex,
 } from '../assets/model';
 import { cardOutputRows, runRepresentation } from '../bench-kinds';
 import { formatMoney } from '../generation/money';
 import { isPictureHidden } from '../visibility';
-import { fabricStatement, hexIsPaintable, wireColourSource, type Gate } from '../render/model';
+import {
+  EMPTY_RECIPE,
+  archivedColorwayGate,
+  fabricStatement,
+  hexIsPaintable,
+  wireColourSource,
+  type Gate,
+} from '../render/model';
 
 /**
  * ═══ ON MODEL — ЧТЕНИЕ ПОЛОСЫ ДЛЯ ЭКРАНА ПЕРЕКРАСКИ (K-17) ════════════════════════════════════
@@ -408,4 +418,253 @@ export function targetIsStated(recipe: common_DesignColourRecipe | null | undefi
   const stated = fabricStatement(recipe);
   if (stated.colour || stated.words) return true;
   return (recipe?.fabrics ?? []).some((f) => (f.mediaId ?? 0) > 0);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   ON MODEL · THE ASIDE — one photograph, one paint, one paid call (studio v3, `_step-aside.js`).
+
+   TWO AXES, BOTH SPOKEN OUT LOUD ON THE SCREEN:
+     WHAT IS REPAINTED   shot.source: fitting | library      ONE photograph per run
+     WHAT IT IS PAINTED  paint.mode:  texture | colour       exactly one of the two
+
+   THE SHOT IS ONE, AND THAT IS A GRAMMAR, NOT A CAP. «Changing the source REPLACES the photo» is
+   the grammar of a SLOT; a strip of up to 24 shots (the previous round's `RECOLOR_SOURCES_MAX`)
+   counted something that no longer exists on this screen. The wire still takes a list —
+   `extra_input_media_ids` — and one shot travels as a list of one; the server's contract is kept
+   untouched and the cap above is left in place for it.
+
+   THE COLOURWAY IS NOT REQUIRED. Under `colour` there is no colourway at all: the person named a
+   colour, not a pair «cloth and colour». It is a LINK written on the picture that comes back
+   (`params.colorway_id` → the output declares itself a render of that colourway), never a word in
+   the prompt — the studio's one colourway organ on the rail picks it; this screen reads it.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+
+export type ShotSource = 'fitting' | 'library';
+
+/** The photograph this run repaints, with what the card knows about it and does NOT send. */
+export type OnModelShot = {
+  media: common_MediaFull;
+  source: ShotSource;
+  /** The fitting the shot was taken from; `0` for a library picture. */
+  fittingId: number;
+  /** `12 Aug` — printed on the card, kept off the wire. Empty for a library picture. */
+  stamp: string;
+  /** `M` / `M · L` — the sample size(s) tried on. Empty when the fitting names none. */
+  size: string;
+};
+
+export type PaintMode = '' | 'texture' | 'colour';
+
+/**
+ * WHAT THE PHOTOGRAPH IS PAINTED IN — exactly one of two, held as STATE, not as click discipline:
+ * a texture pick clears the colour and a colour pick clears the texture (`useOnModelPaint`).
+ * `assetId` is a NUMBER, not a list: the server refuses two cloths (`one_cloth_only`) and a type
+ * that cannot express the second one is worth more than a rule that promises not to add it.
+ */
+export type OnModelPaint = {
+  mode: PaintMode;
+  assetId: number;
+  hex: string;
+};
+
+export const NO_PAINT: OnModelPaint = { mode: '', assetId: 0, hex: '' };
+
+/** One photograph of one fitting — what the «from the fittings» chooser lists. */
+export type FittingShot = {
+  fittingId: number;
+  round: number;
+  stamp: string;
+  size: string;
+  media: common_MediaFull;
+};
+
+const ZERO_TIMESTAMP = '0001-01-01T00:00:00Z';
+
+/** `12 Aug` — the day of a fitting, as the prototype prints it. Empty for an unset stamp. */
+export function fittingDayStamp(stamp?: string | null): string {
+  if (!stamp || stamp === ZERO_TIMESTAMP) return '';
+  const date = new Date(stamp);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(date);
+}
+
+/**
+ * THE PHOTOGRAPHS OF THIS CARD'S FITTINGS, one row per picture, newest fitting first — the order
+ * `ListFittings` already returns. A fitting without pictures contributes nothing: there is
+ * nothing on it to repaint. The sizes are named through the dictionary the composer holds.
+ */
+export function fittingShots(
+  fittings: readonly common_Fitting[] | undefined,
+  sizeName: (id: number) => string,
+): FittingShot[] {
+  const out: FittingShot[] = [];
+  for (const row of fittings ?? []) {
+    const f = row.fitting;
+    const id = row.id ?? 0;
+    if (id <= 0) continue;
+    const size = (f?.sizes ?? [])
+      .map((s) => sizeName(s.sizeId ?? 0))
+      .filter(Boolean)
+      .join(' · ');
+    const stamp = fittingDayStamp(f?.fittingDate);
+    for (const media of row.media ?? []) {
+      if ((media.id ?? 0) <= 0) continue;
+      out.push({ fittingId: id, round: f?.roundNumber ?? 0, stamp, size, media });
+    }
+  }
+  return out;
+}
+
+/** How many fittings of this card carry at least one photograph — the number on the chip. */
+export function fittingsWithShots(shots: readonly FittingShot[]): number {
+  return new Set(shots.map((s) => s.fittingId)).size;
+}
+
+/** `fitting on 12 Aug` / `fitting 2` / `picture 4012` — the name a shot goes by on this screen. */
+export function shotName(shot: OnModelShot | null): string {
+  if (!shot) return '';
+  if (shot.source === 'fitting') {
+    return shot.stamp ? `fitting on ${shot.stamp}` : `fitting ${shot.fittingId}`;
+  }
+  return `picture ${shot.media.id ?? 0}`;
+}
+
+/** `from fitting 12 Aug` / `from media library` — the origin pill under the slot. */
+export function shotOrigin(shot: OnModelShot): string {
+  if (shot.source === 'fitting') return shot.stamp ? `from fitting ${shot.stamp}` : 'from a fitting';
+  return 'from media library';
+}
+
+/**
+ * THE FLAT COLOURS THIS CARD ALREADY KNOWS — the tiles of «or a flat colour». Two sources, one
+ * list, deduplicated by normalised hex: the colour recipes its render runs used (`colour_recipes`,
+ * newest first) and the shelf cloths stated in colour alone (an asset with `colour_hex` and no
+ * picture is exactly «a flat colour · bruciato» of the prototype). Nothing is invented: a colourway
+ * ref carries no hex on this read, so the colourways are NOT painted here (see `paint-group.tsx`).
+ */
+export type FlatColour = { hex: string; name: string };
+
+export function flatColours(band: GetDesignBandResponse): FlatColour[] {
+  const out: FlatColour[] = [];
+  const seen = new Set<string>();
+  const push = (hex: string | undefined, name: string | undefined) => {
+    const norm = normaliseHex(hex);
+    if (!norm || seen.has(norm)) return;
+    seen.add(norm);
+    out.push({ hex: norm, name: (name ?? '').trim() || norm });
+  };
+  for (const r of band.colourRecipes ?? []) push(r.hex, r.code);
+  for (const a of band.assets ?? []) {
+    if ((a.mediaId ?? 0) > 0) continue;
+    push(a.colourHex, a.colourCode || a.name);
+  }
+  return out;
+}
+
+/**
+ * ═══ THE ONE OBJECT THE GATE JUDGES, THE ROW PRINTS AND THE WIRE CARRIES (J-31) ═══════════════
+ *
+ * `params.colour`, built from the paint by the same function that built it last round
+ * (`recolourWireColour`): under `texture` the cloth rides in `fabrics` (+ the `fabric_media_id`
+ * echo the worker reads), under `colour` the hex rides bare. `code` is stripped at this one door
+ * (E-11: no colour NAME leaves this screen); `words` stays empty — the prototype draws no free
+ * text here, and on this screen the field would mean COLOUR, never cloth (invariant 8).
+ */
+export function paintWire(
+  band: GetDesignBandResponse,
+  paint: OnModelPaint,
+): common_DesignColourRecipe {
+  const recipe: common_DesignColourRecipe = {
+    ...EMPTY_RECIPE,
+    hex: paint.mode === 'colour' ? paint.hex : '',
+  };
+  return {
+    ...recolourWireColour(band, recipe, paint.mode === 'texture' ? paint.assetId : 0),
+    code: '',
+  };
+}
+
+/**
+ * `texture "nylon twill"` / `colour #8D3A33` / `''` — the paint in words, ONE spelling for the
+ * live row and for the inventory. Empty means «nothing is stated», which the inventory prints as
+ * NOT SENT with its reason.
+ */
+export function paintText(colour: common_DesignColourRecipe): string {
+  const cloth = (colour.fabrics ?? []).find((f) => (f.mediaId ?? 0) > 0);
+  if (cloth) return `texture "${(cloth.name ?? '').trim() || 'the picked cloth'}"`;
+  const hex = normaliseHex(colour.hex);
+  if (hex) return `colour ${hex.toUpperCase()}`;
+  return '';
+}
+
+/** The words on the group pill: which of the modes is on, or that none is. */
+export function paintModeWord(paint: OnModelPaint): string {
+  if (paint.mode === 'texture' && paint.assetId > 0) return 'a cloth off the shelf';
+  if (paint.mode === 'colour' && hexIsPaintable(paint.hex)) return 'a flat colour';
+  return 'nothing picked';
+}
+
+/* ─────────────────────────── the gate, with its doors ─────────────────────────── */
+
+export type OnModelDoor = 'photo' | 'paint';
+
+export type OnModelGate =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: string;
+      /** Where the refusal is lifted. Absent = the exit is already on the rail (the colourway). */
+      door?: OnModelDoor;
+    };
+
+/**
+ * THE GATE ASKS EXACTLY TWO THINGS — is there something TO repaint, and something to repaint it
+ * WITH — after the one refusal that is about the NAME, not the material (an archived colourway,
+ * checked first: «add the shot» under a name that cannot buy is the wrong advice).
+ *
+ * The words are the prototype's; the conditions are the server's, mirrored so the person does
+ * not buy a round trip for what is visible on screen (`no_source_picture`, `no_target_colour`,
+ * `cloth_is_also_a_photograph` — this last one keeps `recolorGate`'s wording, which names the
+ * media number the person has to take out).
+ */
+export function onModelGate(
+  shotMediaId: number,
+  colour: common_DesignColourRecipe,
+  colorwayArchived: boolean,
+  colorwayLabel: string,
+): OnModelGate {
+  const named = archivedColorwayGate(colorwayArchived, colorwayLabel, 'on-model picture');
+  if (!named.ok) return { ok: false, reason: named.reason };
+  if (shotMediaId <= 0) {
+    return {
+      ok: false,
+      reason: 'nothing to repaint · pick a photo from the fittings or upload one',
+      door: 'photo',
+    };
+  }
+  const dup = (colour.fabrics ?? []).find((f) => (f.mediaId ?? 0) === shotMediaId);
+  if (dup) {
+    const server = recolorGate([shotMediaId], colour);
+    return {
+      ok: false,
+      reason: server.ok
+        ? `media ${shotMediaId} is both the photograph and the cloth to lay on it · pick another texture`
+        : server.reason,
+      door: 'paint',
+    };
+  }
+  if (!targetIsStated(colour)) {
+    return {
+      ok: false,
+      reason:
+        'nothing to paint with · pick a texture, make one, or choose a colour. Any one is enough',
+      door: 'paint',
+    };
+  }
+  return { ok: true };
+}
+
+/** The product's `Gate` shape of the same answer — what the shared generate row reads. */
+export function asRowGate(gate: OnModelGate): Gate {
+  return gate.ok ? { ok: true } : { ok: false, reason: gate.reason };
 }

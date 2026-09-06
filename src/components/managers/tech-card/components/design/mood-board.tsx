@@ -9,7 +9,6 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
-import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
@@ -20,6 +19,7 @@ import { create } from 'zustand';
 import type { TechCardFormData } from '../schema';
 import { CalloutRail, CalloutRowBody, type CalloutRailRow } from './callout-rail';
 import { serverSpeaksDesign } from './capability';
+import { Counter } from './core';
 import { ConstructionDraft } from './head/construction-draft';
 import { VectorModal } from './modals';
 import { useMoodCallouts } from './mood-callouts';
@@ -554,408 +554,447 @@ export function MoodBoard({
 
   const canEdit = !readOnly && speaks;
 
+  /* ═══ ПОРЯДОК ЭКРАНА — МАКЕТА, БЛОК ЗА БЛОКОМ (`_step-mood.js`, RENDER['step-mood']) ═══════════
+     Здесь был ОДИН блок доски, внутри которого лежали лента, описание и черновик, а справа —
+     указания. Владелец, увидев бету: «не как в референсе». Макет держит ПЯТЬ отдельных блоков:
+
+       [ MOODBOARD ……………………………………… ] [ CALLOUTS 340px ]   ← ряд: лента и панель к ней
+       [ DESCRIPTION · what this thing is ………………………………… ]   ← слова человека
+       [ CONSTRUCTION DRAFT · what the model proposes ……… ]   ← ответ машины (`head/construction-draft`)
+
+     Между блоками грунт — сильнейший разделитель системы; ни одна линейка внутри рамки такого не
+     делает. Описание и черновик — ДВА блока, а не один: слова человека и ответ машины разные вещи,
+     и держать их в одной рамке значит объявить их одним.
+
+     СВОРАЧИВАНИЕ ДОСКИ уносит с собой CALLOUTS, DESCRIPTION и CONSTRUCTION DRAFT; GENERAL
+     INFORMATION / CONSTRUCTION / MATERIAL SLOTS (соседи в стопке STUDIO) остаются. Описание и
+     черновик ПРЯЧУТСЯ, а не размонтируются: черновик держит ответ оплаченного прогона в своём
+     состоянии, и размонтировать его сворачиванием значило бы потерять ответ за один клик по
+     стрелке. `hidden` на обёртке `display:contents` побеждает `contents` (preflight ставит
+     `display:none !important`), а раскрытая обёртка не оставляет узла в потоке — оба блока
+     остаются прямыми детьми стопки и держат её 24px грунта. */
   return (
-    <SectionStack row>
-    <Section
-      title='moodboard'
-      question={`— the mood, not the prompt: nothing here is sent to generation · ${items.length} / ${MOOD_MAX}`}
-      className='min-w-0 flex-1'
-      action={
-        <button
-          type='button'
-          onClick={() => setOpen(!open)}
-          aria-expanded={open}
-          aria-controls={bodyId}
-          aria-label={open ? 'collapse the moodboard' : 'expand the moodboard'}
-          className='group cursor-pointer px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
-        >
-          {/* THE SAME SIGN EVERY FOLD IN THE ADMIN WEARS — `Section`'s arrow, turned 180° when
-              closed — not a pair of text triangles that read as a different control. The board
-              keeps its own toggle only because its two blocks fold together (this one and the
-              callouts beside it), which one `Section` cannot do. */}
-          <Arrow
-            aria-hidden
-            className={cn(
-              'shrink-0 text-labelColor group-hover:text-textColor',
-              !open && 'rotate-180',
-            )}
-          />
-        </button>
-      }
-    >
-      <div id={bodyId} className={open ? 'space-y-stack' : 'hidden'}>
-        {/* ПОЛОСА ВЗВОДА. Стоит НАД доской, а не под ней: она объясняет, почему плитки вдруг
-            обведены пунктиром, и объяснение обязано попасться на глаза раньше следствия. */}
-        {picking && (
-          <div className='flex flex-wrap items-center gap-2 border border-textColor px-2.5 py-1.5'>
-            <Text size='micro' variant='label' component='span'>
-              pick a moodboard picture — it becomes a reference too, the tile stays here
-            </Text>
-            <Chip onClick={() => pick.disarm()} className='ml-auto'>
-              esc to cancel
-            </Chip>
-          </div>
-        )}
-
-        <FocusedAnnotator
-          layout='grid'
-          // U-4: ВЫСОТА ОДНА НА ВСЕ КАДРЫ. `railWrap` (перенос по строкам ценой разной высоты)
-          // снят; его место занимает пара `gridRowHeight` + `wrapRows`, которая переносит по
-          // строкам, НЕ отпуская высоту.
-          railWrap={false}
-          gridRowHeight={rowHeight}
-          wrapRows={mode === 'grid'}
-          // U-3: виды указаний — слева, переключатель strip/grid — справа, на одном уровне.
-          kindsFirst
-          // Стрелки ‹ › в стрипе сняты по слову владельца; прокрутка остаётся жестом и
-          // скроллбаром. У эскиза рельса живёт со стрелками — потому это проп, а не правка рельсы.
-          railArrows={false}
-          // Кроп запрещён словами владельца: у медиа без записанных размеров кадр берёт пропорции
-          // самой картинки после загрузки, а не фолбэка, — иначе `object-cover` резал бы снимок.
-          preferNaturalAspect
-          // Текст пина — по наведению или фокусу на маркер, не постоянной легендой (R-9).
-          pinText='hover'
-          /* ═══ ВЫБОР, НАВЕДЕНИЕ И ВЗВОД — СНАРУЖИ (B-9) ═════════════════════════════════════
-             Три пары пропов на три половинчатых жеста: выбрать можно и на кадре, и строкой меню;
-             подсветить — наведя мышь на кадр или на строку; взвести «+ point» — кнопкой в меню,
-             а клик, которого она ждёт, приходит на кадр. Каждое второе состояние здесь дало бы
-             экран, где меню и картинка говорят про разные указания. */
-          selectedKey={selectedKey}
-          onSelectedChange={(key, opts) => {
-            setSelectedKey(key);
-            setAddingKey(null);
-            // ТРЕТИЙ ТАКТ ЖЕСТА «клик — клик — напиши, что это», и он же исполнение Enter: обе
-            // просьбы приходят от поверхности одним флагом и обе кончаются курсором в поле меню.
-            if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
-          }}
-          hoveredKey={hoverIndex == null ? null : callouts.keyOf(hoverIndex)}
-          addingKey={addingKey}
-          onAddingChange={setAddingKey}
-          viewControls={
-            <ChipRow>
-              {(['strip', 'grid'] as const).map((m) => (
-                <Chip
-                  key={m}
-                  nonForm
-                  selected={mode === m}
-                  pressed={mode === m}
-                  onClick={() => setMode(m)}
-                >
-                  {m}
-                </Chip>
-              ))}
-            </ChipRow>
-          }
-          tilePick={{
-            active: picking,
-            onPick: (view) => pickIntoInput(view.mediaId),
-            taken: (mediaId) => inputIds.has(mediaId),
-            label: (view, i) => `take picture ${i + 1} into the input`,
-            takenLabel: 'in the input',
-          }}
-          views={views}
-          // ПОДЛОЖКА ПОД ЛИНИЯМИ УКАЗАНИЙ — ЭТО ФОТОГРАФИИ. Чернильная линия на пёстром снимке
-          // тонет, и указание перестаёт быть видно ровно там, где его поставили.
-          halo
-          calloutsFor={callouts.calloutsFor}
-          onAddCallout={callouts.add}
-          onEditPoints={callouts.editPoints}
-          onMoveCallout={callouts.moveLabel}
-          onRemoveCallout={callouts.removeByKey}
-          onPickMedia={handleAddMedia}
-          onRemoveMedia={(view) => setPendingRemove(view.mediaId)}
-          readOnly={readOnly}
-          addLabel='+ picture'
-          purpose='moodboard reference'
-          carouselLabel='moodboard'
-          emptyLabel='nothing on the board yet. drop a picture, paste one with ⌘V, or browse the library — then pin notes on it'
-          mediaLabel={(view, i) => `moodboard picture ${i + 1}`}
-          // ПОДВАЛА У ПЛИТКИ НЕТ — ЕСТЬ НИЖНИЙ РЯД ОРГАНОВ НА САМОМ КАДРЕ (C-3). Слот подвала
-          // галерея отдаёт вызывающему, и он единственный, где можно встать на плитку; строка ПОД
-          // кадром при этом не рисуется — оба органа стоят накладкой на нижнем крае кадра, как на
-          // плитах листа (`PLATE_BADGE_BAR`): факт «эта картинка уже и во входе» — слева (R-5,
-          // единственный факт, который человеку нужен у плитки, — на непрозрачной подложке, потому
-          // что под ним снимок), тихая дверь `edit` — справа, там же, где у `PictureTile`.
-          // `bottom-2` = зазор колонки поверхности под кадром (4px) плюс отступ органа от края (4px).
-          renderFocusedFooter={(view, i) => (
+    <>
+      <SectionStack row>
+        <Section
+          id='mb-board'
+          title='moodboard'
+          question='— the mood, not the prompt'
+          className='min-w-0 flex-1'
+          action={
             <>
-              {inputIds.has(view.mediaId) && (
-                <span className='pointer-events-none absolute bottom-2 left-1 z-[6] inline-block bg-bgColor'>
-                  <Pill tone='ink'>in the input</Pill>
-                </span>
-              )}
-              {canEdit && view.full && (
-                <button
-                  type='button'
-                  data-mood-edit={view.mediaId}
-                  aria-label={`edit moodboard picture ${i + 1}`}
-                  title='edit — open the picture editor on this picture; the result joins the board right after it'
-                  onClick={() => setEditing({ mediaId: view.mediaId, full: view.full as common_MediaFull })}
-                  // Нажатие не доходит до кадра: иначе оно завело бы там жест панорамы или
-                  // постановки — тот же довод, что у `FrameButton` поверхности.
-                  onPointerDown={(e) => e.stopPropagation()}
-                  className={cn(TILE_CORNER, MOOD_QUIET, 'absolute bottom-2 right-1 z-[6]')}
-                >
-                  edit
-                </button>
-              )}
+              {/* СЧЁТ — ПИЛЮЛЕЙ В ШАПКЕ (`7 of 12 pictures`), как в макете; ноль — тон «не хватает». */}
+              <Counter n={items.length} noun='picture' total={MOOD_MAX} data-mb-count='' />
+              <button
+                type='button'
+                onClick={() => setOpen(!open)}
+                aria-expanded={open}
+                aria-controls={bodyId}
+                aria-label={open ? 'collapse the moodboard' : 'expand the moodboard'}
+                className='group cursor-pointer px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
+              >
+                {/* THE SAME SIGN EVERY FOLD IN THE ADMIN WEARS — `Section`'s arrow, turned 180°
+                    when closed. The board keeps its own toggle because FOUR blocks fold together
+                    (this one, the callouts beside it, the description and the draft under it),
+                    which one `Section` cannot do. */}
+                <Arrow
+                  aria-hidden
+                  className={cn(
+                    'shrink-0 text-labelColor group-hover:text-textColor',
+                    !open && 'rotate-180',
+                  )}
+                />
+              </button>
             </>
-          )}
-          /* ⚠ `renderEditor` ДОСКЕ БОЛЬШЕ НЕ ПЕРЕДАЁТСЯ — И ЭТО B-9, А НЕ ПОТЕРЯ. Здесь стоял
-             `AnnotationEditor` в узком корпусе (R-2), полосой под кадрами; вместе с ним стояла
-             «бровь» — его пустое состояние («no callout selected — …»), которую владелец назвал
-             дословно и снял. Вся правка мудбордного указания — текст, цвет, пунктир, штриховка,
-             наконечник, «+ point» и удаление — уехала в боковое меню справа (`./callout-rail`),
-             и второй редактор на те же поля означал бы драку за фокус и правку, которую не видно.
-             Вместе с полосой ушли `editorHeight` и `zoomEditorReserve`: и то и другое резервировало
-             высоту ПОД РЕДАКТОР, а кадру, у которого редактора нет ни в одном состоянии, дёргаться
-             не от чего — 108px вертикали доска получила назад. */
-          /* ═══ А В УВЕЛИЧЕННОМ ВИДЕ ПРАВКА ЕСТЬ, И ЭТО ТО ЖЕ САМОЕ ТЕЛО ═══════════════════════
-             Зум — Radix `Dialog`: оверлей, модальность, ловушка фокуса. Пока правка жила ТОЛЬКО в
-             меню справа, открытый зум делал её недостижимой физически — просьба поставить курсор
-             уезжала в textarea ЗА оверлеем, и фокус-скоуп немедленно утаскивал фокус обратно.
-             Поставленную в зуме записку нельзя было ни назвать, ни покрасить, ни дать ей второй
-             луч, ни удалить, не закрыв окно, — а ставят указание по миллиметровой детали именно в
-             зуме, и этот код так и говорит про себя (`zoom · pan · edit`).
+          }
+        >
+          <div id={bodyId} className={open ? 'space-y-stack' : 'hidden'}>
+            {/* ПОЛОСА ВЗВОДА. Стоит НАД доской, а не под ней: она объясняет, почему плитки вдруг
+                обведены пунктиром, и объяснение обязано попасться на глаза раньше следствия. */}
+            {picking && (
+              <div className='flex flex-wrap items-center gap-2 border border-textColor px-2.5 py-1.5'>
+                <Text size='micro' variant='label' component='span'>
+                  pick a moodboard picture — it becomes a reference too, the tile stays here
+                </Text>
+                <Chip onClick={() => pick.disarm()} className='ml-auto'>
+                  esc to cancel
+                </Chip>
+              </div>
+            )}
 
-             ⚠ ЭТО НЕ ВОСКРЕШЕНИЕ «БРОВИ» И НЕ ВТОРОЙ РЕДАКТОР. Возвращается не снятый орган
-             (`AnnotationEditor` + его пустое состояние), а РОВНО ТЕЛО СТРОКИ МЕНЮ — та же функция
-             `CalloutRowBody`, которую рисует `CalloutRail`. Правило по-прежнему в одном месте (в
-             том числе пара «вид + caps», которую B-9 и звал «двумя расходящимися местами»), а
-             достижимо одновременно ровно одно из двух: пока модалка открыта, меню за ней
-             недостижимо по построению. Пустого состояния у тела нет вовсе — без выбора поверхность
-             слот не рисует, — так что «брови» не появляется ни в одном состоянии. */
-          renderZoomEditor={(key, { arrows: zoomArrows }) => {
-            const row = callouts.at(key);
-            if (!row) return null;
-            return (
-              <CalloutRowBody
-                index={row.index}
-                c={row.value}
-                disabled={readOnly}
-                onRemove={
-                  readOnly
-                    ? undefined
-                    : (index) => {
-                        const k = callouts.keyOf(index);
-                        if (!k) return;
-                        callouts.removeByKey(k);
-                        // Выбор снимается ВМЕСТЕ со строкой — тот же довод, что у меню справа:
-                        // индекс под ним после удаления адресует уже соседнее указание.
-                        setSelectedKey(null);
-                        setAddingKey(null);
-                      }
-                }
-                /* ЛУЧИ БЕРУТСЯ У ПОВЕРХНОСТИ, А НЕ СЧИТАЮТСЯ ЗАНОВО: диалог отдаёт их слотом
-                   (`renderEditor(key, { arrows })`), посчитав ТОЙ ЖЕ `noteArrowsOf`, что и меню
-                   справа. Взвод при этом общий — `addingKey` живёт здесь, и «+ point», нажатый в
-                   зуме, ждёт клик по тому же кадру. */
-                arrows={zoomArrows}
-                /* НОМЕРА И ДЕТАЛИ КРОЯ У МУДБОРДНОГО УКАЗАНИЯ НЕТ — те же два пропа, что у меню
-                   справа, и по той же причине. */
-                detailFields={false}
-                caps
-              />
-            );
-          }}
-        />
-
-        {/* ОДНА ЗАПИСКА НА ДОСКУ — И ЭТО `concept` (V-16). Текст печатается в тех-паке и входит в
-            подпись DESIGN, поэтому подпись под полем называет обе судьбы вслух. Это по-прежнему НЕ
-            описание изделия для генерации: то — `garment description` блока референсов, уходит в
-            каждый прогон; этот текст генерация не видит (W-15), его читают человек, бумага и
-            черновик ниже. */}
-        {/* `data-field` — ЯКОРЬ ДВЕРИ, А НЕ УКРАШЕНИЕ. `revealField` (`utils/field-errors.ts:226`)
-            ищет поле по `[data-field="<путь>"]`, и этот штамп ставит `FormItem` из `ui/form`. Здесь
-            стоит ГОЛАЯ `Textarea`, потому что поле переехало из формы на доску (V-16) — вместе с
-            переездом якорь и пропал, а с ним онемели ОБЕ двери «what the model gets» (`edit the
-            description ▸` и `edit the concept ▸`): они отвечали «it is not on this tab», стоя на той
-            самой вкладке, где поле видно. Штамп возвращён руками ровно потому, что примитив формы
-            больше не участвует. */}
-        <div data-field='concept'>
-          <GroupLabel>concept & construction description</GroupLabel>
-          <label htmlFor={noteId} className='sr-only'>
-            concept & construction description
-          </label>
-          <Textarea
-            {...concept.field}
-            id={noteId}
-            disabled={readOnly}
-            value={concept.field.value ?? ''}
-            rows={4}
-            maxLength={CONCEPT_MAX}
-            placeholder='what this thing is — the idea, the reference, the purpose'
-            className='resize-none'
-          />
-          {/* ⚠ ПОДПИСИ ПОД ПОЛЕМ БОЛЬШЕ НЕТ — СНЯТА ВЛАДЕЛЬЦЕМ (круг 20, B-3), дословно:
-              «"printed for the factory ·
-              part of the DESIGN signature · read by «draft the idea»
-              below — the garment description for generation is a different field, in the input
-              block" убрать текст».
-
-              ЧТО ОНА ГОВОРИЛА И ЧТО ИЗ ЭТОГО УЦЕЛЕЛО. Три факта: текст печатается в тех-паке,
-              входит в подпись DESIGN и читается черновиком ниже; плюс оговорка «это не описание
-              изделия для генерации». Первые три — свойства поля, которые человек узнаёт по месту:
-              `ConstructionDraft` стоит той же секцией ниже и называет своё чтение сам, а печать и
-              подпись видны на бумаге и в блоке подписи. Четвёртый — различение двух документов —
-              живёт там, где его и путают: в панели WHAT THE MODEL GETS, у которой обе двери
-              (`edit the concept ▸` и `edit the description ▸`) названы поимённо, и в самом блоке
-              референсов, где `garment description` подписана «goes into every run».
-              Возвращать строку сюда — значит вернуть абзац прозы в блок, где владелец её снял. */}
-        </div>
-
-        {/* ЛЕГАСИ-ЗАПИСКА ДОСКИ. Существует только на карточках, писавших `moodNote` до слияния
-            V-16; после любой из двух дверей поле уезжает '' (командой «очисти») и орган исчезает.
-            Цитата стоит на экране целиком, поэтому «discard» не спрашивает второй раз. */}
-        {legacyNote !== '' && (
-          // CalloutBox, а не пунктирная рамка: пунктир в этой системе означает «добавить», а это —
-          // сообщение, которое стоит, пока его не разрешили одной из двух дверей (DESIGN.md §5).
-          <CalloutBox>
-            <div className='flex items-baseline justify-between gap-2'>
-              <Text size='micro' variant='label' component='span'>
-                the board’s old shared note — this field is retired; the description above is the
-                one note now
-              </Text>
-              {!readOnly && (
-                <ChipRow className='shrink-0'>
-                  <Chip nonForm onClick={takeLegacyNote} title='append it to the description above'>
-                    add to the description
-                  </Chip>
-                  <Chip nonForm onClick={dropLegacyNote} title='clear it — the text above is it'>
-                    discard
-                  </Chip>
+            <FocusedAnnotator
+              layout='grid'
+              // U-4: ВЫСОТА ОДНА НА ВСЕ КАДРЫ. `railWrap` (перенос по строкам ценой разной высоты)
+              // снят; его место занимает пара `gridRowHeight` + `wrapRows`, которая переносит по
+              // строкам, НЕ отпуская высоту.
+              railWrap={false}
+              gridRowHeight={rowHeight}
+              wrapRows={mode === 'grid'}
+              // U-3: виды указаний — слева, переключатель strip/grid — справа, на одном уровне.
+              kindsFirst
+              // Стрелки ‹ › в стрипе сняты по слову владельца; прокрутка остаётся жестом и
+              // скроллбаром. У эскиза рельса живёт со стрелками — потому это проп, а не правка рельсы.
+              railArrows={false}
+              // Кроп запрещён словами владельца: у медиа без записанных размеров кадр берёт пропорции
+              // самой картинки после загрузки, а не фолбэка, — иначе `object-cover` резал бы снимок.
+              preferNaturalAspect
+              // Текст пина — по наведению или фокусу на маркер, не постоянной легендой (R-9).
+              pinText='hover'
+              /* ═══ ВЫБОР, НАВЕДЕНИЕ И ВЗВОД — СНАРУЖИ (B-9) ═════════════════════════════════════
+                 Три пары пропов на три половинчатых жеста: выбрать можно и на кадре, и строкой меню;
+                 подсветить — наведя мышь на кадр или на строку; взвести «+ point» — кнопкой в меню,
+                 а клик, которого она ждёт, приходит на кадр. Каждое второе состояние здесь дало бы
+                 экран, где меню и картинка говорят про разные указания. */
+              selectedKey={selectedKey}
+              onSelectedChange={(key, opts) => {
+                setSelectedKey(key);
+                setAddingKey(null);
+                // ТРЕТИЙ ТАКТ ЖЕСТА «клик — клик — напиши, что это», и он же исполнение Enter: обе
+                // просьбы приходят от поверхности одним флагом и обе кончаются курсором в поле меню.
+                if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
+              }}
+              hoveredKey={hoverIndex == null ? null : callouts.keyOf(hoverIndex)}
+              addingKey={addingKey}
+              onAddingChange={setAddingKey}
+              viewControls={
+                <ChipRow>
+                  {(['strip', 'grid'] as const).map((m) => (
+                    <Chip
+                      key={m}
+                      nonForm
+                      selected={mode === m}
+                      pressed={mode === m}
+                      onClick={() => setMode(m)}
+                    >
+                      {m}
+                    </Chip>
+                  ))}
                 </ChipRow>
+              }
+              tilePick={{
+                active: picking,
+                onPick: (view) => pickIntoInput(view.mediaId),
+                taken: (mediaId) => inputIds.has(mediaId),
+                label: (view, i) => `take picture ${i + 1} into the input`,
+                takenLabel: 'in the input',
+              }}
+              views={views}
+              // ПОДЛОЖКА ПОД ЛИНИЯМИ УКАЗАНИЙ — ЭТО ФОТОГРАФИИ. Чернильная линия на пёстром снимке
+              // тонет, и указание перестаёт быть видно ровно там, где его поставили.
+              halo
+              calloutsFor={callouts.calloutsFor}
+              onAddCallout={callouts.add}
+              onEditPoints={callouts.editPoints}
+              onMoveCallout={callouts.moveLabel}
+              onRemoveCallout={callouts.removeByKey}
+              onPickMedia={handleAddMedia}
+              onRemoveMedia={(view) => setPendingRemove(view.mediaId)}
+              readOnly={readOnly}
+              addLabel='+ picture'
+              purpose='moodboard reference'
+              carouselLabel='moodboard'
+              emptyLabel='nothing on the board yet. drop a picture, paste one with ⌘V, or browse the library — then pin notes on it'
+              mediaLabel={(view, i) => `moodboard picture ${i + 1}`}
+              // ПОДВАЛА У ПЛИТКИ НЕТ — ЕСТЬ НИЖНИЙ РЯД ОРГАНОВ НА САМОМ КАДРЕ (C-3). Слот подвала
+              // галерея отдаёт вызывающему, и он единственный, где можно встать на плитку; строка ПОД
+              // кадром при этом не рисуется — оба органа стоят накладкой на нижнем крае кадра, как на
+              // плитах листа (`PLATE_BADGE_BAR`): факт «эта картинка уже и во входе» — слева (R-5,
+              // единственный факт, который человеку нужен у плитки, — на непрозрачной подложке, потому
+              // что под ним снимок), тихая дверь `edit` — справа, там же, где у `PictureTile`.
+              // `bottom-2` = зазор колонки поверхности под кадром (4px) плюс отступ органа от края (4px).
+              renderFocusedFooter={(view, i) => (
+                <>
+                  {inputIds.has(view.mediaId) && (
+                    <span className='pointer-events-none absolute bottom-2 left-1 z-[6] inline-block bg-bgColor'>
+                      <Pill tone='ink'>in the input</Pill>
+                    </span>
+                  )}
+                  {canEdit && view.full && (
+                    <button
+                      type='button'
+                      data-mood-edit={view.mediaId}
+                      aria-label={`edit moodboard picture ${i + 1}`}
+                      title='edit — open the picture editor on this picture; the result joins the board right after it'
+                      onClick={() =>
+                        setEditing({ mediaId: view.mediaId, full: view.full as common_MediaFull })
+                      }
+                      // Нажатие не доходит до кадра: иначе оно завело бы там жест панорамы или
+                      // постановки — тот же довод, что у `FrameButton` поверхности.
+                      onPointerDown={(e) => e.stopPropagation()}
+                      className={cn(TILE_CORNER, MOOD_QUIET, 'absolute bottom-2 right-1 z-[6]')}
+                    >
+                      edit
+                    </button>
+                  )}
+                </>
+              )}
+              /* ⚠ `renderEditor` ДОСКЕ БОЛЬШЕ НЕ ПЕРЕДАЁТСЯ — И ЭТО B-9, А НЕ ПОТЕРЯ. Здесь стоял
+                 `AnnotationEditor` в узком корпусе (R-2), полосой под кадрами; вместе с ним стояла
+                 «бровь» — его пустое состояние («no callout selected — …»), которую владелец назвал
+                 дословно и снял. Вся правка мудбордного указания — текст, цвет, пунктир, штриховка,
+                 наконечник, «+ point» и удаление — уехала в боковое меню справа (`./callout-rail`),
+                 и второй редактор на те же поля означал бы драку за фокус и правку, которую не видно.
+                 Вместе с полосой ушли `editorHeight` и `zoomEditorReserve`: и то и другое резервировало
+                 высоту ПОД РЕДАКТОР, а кадру, у которого редактора нет ни в одном состоянии, дёргаться
+                 не от чего — 108px вертикали доска получила назад. */
+              /* ═══ А В УВЕЛИЧЕННОМ ВИДЕ ПРАВКА ЕСТЬ, И ЭТО ТО ЖЕ САМОЕ ТЕЛО ═══════════════════════
+                 Зум — Radix `Dialog`: оверлей, модальность, ловушка фокуса. Пока правка жила ТОЛЬКО в
+                 меню справа, открытый зум делал её недостижимой физически — просьба поставить курсор
+                 уезжала в textarea ЗА оверлеем, и фокус-скоуп немедленно утаскивал фокус обратно.
+                 Поставленную в зуме записку нельзя было ни назвать, ни покрасить, ни дать ей второй
+                 луч, ни удалить, не закрыв окно, — а ставят указание по миллиметровой детали именно в
+                 зуме, и этот код так и говорит про себя (`zoom · pan · edit`).
+
+                 ⚠ ЭТО НЕ ВОСКРЕШЕНИЕ «БРОВИ» И НЕ ВТОРОЙ РЕДАКТОР. Возвращается не снятый орган
+                 (`AnnotationEditor` + его пустое состояние), а РОВНО ТЕЛО СТРОКИ МЕНЮ — та же функция
+                 `CalloutRowBody`, которую рисует `CalloutRail`. Правило по-прежнему в одном месте (в
+                 том числе пара «вид + caps», которую B-9 и звал «двумя расходящимися местами»), а
+                 достижимо одновременно ровно одно из двух: пока модалка открыта, меню за ней
+                 недостижимо по построению. Пустого состояния у тела нет вовсе — без выбора поверхность
+                 слот не рисует, — так что «брови» не появляется ни в одном состоянии. */
+              renderZoomEditor={(key, { arrows: zoomArrows }) => {
+                const row = callouts.at(key);
+                if (!row) return null;
+                return (
+                  <CalloutRowBody
+                    index={row.index}
+                    c={row.value}
+                    disabled={readOnly}
+                    onRemove={
+                      readOnly
+                        ? undefined
+                        : (index) => {
+                            const k = callouts.keyOf(index);
+                            if (!k) return;
+                            callouts.removeByKey(k);
+                            // Выбор снимается ВМЕСТЕ со строкой — тот же довод, что у меню справа:
+                            // индекс под ним после удаления адресует уже соседнее указание.
+                            setSelectedKey(null);
+                            setAddingKey(null);
+                          }
+                    }
+                    /* ЛУЧИ БЕРУТСЯ У ПОВЕРХНОСТИ, А НЕ СЧИТАЮТСЯ ЗАНОВО: диалог отдаёт их слотом
+                       (`renderEditor(key, { arrows })`), посчитав ТОЙ ЖЕ `noteArrowsOf`, что и меню
+                       справа. Взвод при этом общий — `addingKey` живёт здесь, и «+ point», нажатый в
+                       зуме, ждёт клик по тому же кадру. */
+                    arrows={zoomArrows}
+                    /* НОМЕРА И ДЕТАЛИ КРОЯ У МУДБОРДНОГО УКАЗАНИЯ НЕТ — те же два пропа, что у меню
+                       справа, и по той же причине. */
+                    detailFields={false}
+                    caps
+                  />
+                );
+              }}
+            />
+          </div>
+
+          <ConfirmationModal
+            open={pendingRemove != null}
+            onOpenChange={(open) => !open && setPendingRemove(null)}
+            onConfirm={confirmRemove}
+            onCancel={() => setPendingRemove(null)}
+            title='remove the picture'
+            confirmLabel='remove it'
+            width='sm'
+          >
+            <div className='space-y-2'>
+              {pendingCallouts > 0 && (
+                <Text size='control'>
+                  {pendingCallouts} note{pendingCallouts === 1 ? '' : 's'} pinned on this picture{' '}
+                  {pendingCallouts === 1 ? 'dies' : 'die'} with it — they live nowhere else.
+                </Text>
+              )}
+              {pendingAlsoInInput && (
+                <Text size='control'>
+                  The same picture also stands in the input — that reference is its own entry and
+                  stays there, with its role and its note.
+                </Text>
+              )}
+              {pendingCallouts === 0 && !pendingAlsoInInput && (
+                <Text size='control'>
+                  The picture comes off the board. The file itself stays in the library.
+                </Text>
               )}
             </div>
-            <Text size='micro' component='p' className='mt-1 whitespace-pre-wrap'>
-              {legacyNote}
-            </Text>
-          </CalloutBox>
-        )}
+          </ConfirmationModal>
 
-        {/* ЧЕРНОВИК CONSTRUCTION — `moodDraftHtml` прототипа, который зовёт его ПОСЛЕДНИМ внутри
-            доски (`proto.html:3271`), поэтому и здесь он стоит внизу этой же секции.
-            Здесь стоял черновик, собиравшийся В БРАУЗЕРЕ: он склеивал общую записку с текстами
-            указаний и называл это «read the board». Слова были честные, но органом прототипа это
-            не было — тот просит прозу у модели. Потом стоял `MoodDraft`: прогон уже был платный и
-            многомодальный, но ответ приходил ПРОЗОЙ и садился в одно поле — `concept`.
-            Теперь стоит `ConstructionDraft` (фича 9, слово владельца: «вместо кнопки DRAFT THE
-            IDEA мы генерируем ВЕСЬ construction info»): тот же один прогон, но ответ структурный и
-            раскладывается предложением на четыре группы, которые CONSTRUCTION рисует ниже. Ни одна
-            строка не попадает в форму сама — см. подпись органа. */}
+          {/* РЕДАКТОР КАРТИНКИ ДОСКИ (C-3) — тот же `VectorModal`, что открывает `edit` на плитке
+              истории, на плите листа и на верстаке: один редактор, вызванный с четвёртого экрана.
+              Монтируется только раскрытым: у модалки свои оконные слушатели клавиш. `slot` не
+              передаётся — доске некуда «поставить» результат, он входит строкой доски через
+              `placeEditedNextTo`. */}
+          {editing && (
+            <VectorModal
+              open
+              onOpenChange={(v) => !v && setEditing(null)}
+              techCardId={techCardId}
+              band={band}
+              base={pictureOfMedia(editing.full)}
+              slot={null}
+              disabled={readOnly}
+              onFlattened={(picture) => {
+                // Медиа берётся ИЗ ОТВЕТА СЕРВЕРА, а не из того, что клиент только что загрузил:
+                // строку доски заводит `appendBoardPictures` по `common_MediaFull`.
+                const full = picture.media;
+                if (full) placeEditedNextTo(editing.mediaId, full);
+              }}
+            />
+          )}
+        </Section>
+
+        {/* БОКОВОЕ МЕНЮ УКАЗАНИЙ (B-9) — ТОТ ЖЕ ОРГАН, что стоит справа от листа в ARTIFACTS, и
+            теперь буквально тот же: заголовок `callouts`, счётчик пилюлей, строка на указание,
+            правка выбранной строки внутри неё. Сворачивается вместе с доской: меню про то, что на
+            доске, и без доски ему не о чем. 340px и липкое от `lg` (макет: `flex:0 0 340px;
+            position:sticky`) — панель стоит рядом ровно с тем, что комментирует, и не уезжает,
+            пока человек листает ленту.
+            `caps` ПЕРЕДАЁТСЯ — у мудбордного указания редактор наконечника был всегда (он стоял в
+            `AnnotationEditor` под кадрами), и переезд правки в панель не имел права его терять.
+            ⚠ ЗДЕСЬ СТОЯЛО «в отличие от листа: у листа его нет, и чинит это та волна» — волна
+            прошла В ЭТОМ ЖЕ КРУГЕ: лист артефактов передаёт `caps` тем же пропом (B-8,
+            `artifacts-panel.tsx`). Оговорка звала чинить починенное, и это единственное, что
+            изменилось в этой строке. */}
+        {open && (
+          <Section
+            title='callouts'
+            question='— pinned on the board, not numbered'
+            action={
+              <Pill tone={railRows.length ? 'mut' : 'warn'} data-mb-callout-count=''>
+                {railRows.length} on the board
+              </Pill>
+            }
+            className='lg:sticky lg:top-gutter lg:w-[340px] lg:shrink-0'
+          >
+            <CalloutRail
+              rows={railRows}
+              selected={selectedIndex}
+              onSelect={(index) => {
+                setSelectedKey(index == null ? null : callouts.keyOf(index));
+                // Взвод принадлежит ОДНОЙ записке: перевыбор — уже другая строка.
+                setAddingKey(null);
+              }}
+              hoverIndex={hoverIndex}
+              onHover={setHoverIndex}
+              disabled={readOnly}
+              onRemove={
+                readOnly
+                  ? undefined
+                  : (index) => {
+                      const key = callouts.keyOf(index);
+                      if (!key) return;
+                      callouts.removeByKey(key);
+                      // Выбор снимается ВМЕСТЕ со строкой: индекс под ним после удаления адресует
+                      // уже соседнее указание, и оставленный выбор открыл бы правку чужого текста.
+                      setSelectedKey(null);
+                      setAddingKey(null);
+                    }
+              }
+              arrows={arrows}
+              focusToken={focusEditor}
+              /* НОМЕРА У МУДБОРДНОГО УКАЗАНИЯ НЕТ, И ДЕТАЛИ КРОЯ ТОЖЕ (см. шапку `mood-callouts.tsx`):
+                 оно про настроение, его не адресует ни деталь, ни операция, ни дефект. */
+              numbered={false}
+              detailFields={false}
+              caps
+              emptyLabel='none yet. A note is put on the picture itself — arm a kind above the board and click a picture; the row appears here the moment it exists, and this is where its text is written.'
+            />
+          </Section>
+        )}
+      </SectionStack>
+
+      <div hidden={!open} className='contents' data-mb-fold-body=''>
+        {/* ОДНА ЗАПИСКА НА ДОСКУ — И ЭТО `concept` (V-16), СВОИМ БЛОКОМ `DESCRIPTION`. Текст
+            печатается в тех-паке и входит в подпись DESIGN. Это по-прежнему НЕ описание изделия для
+            генерации: то — `garment description` блока референсов, уходит в каждый прогон; этот
+            текст генерация не видит (W-15), его читают человек, бумага и черновик ниже. */}
+        <Section title='description' question='— what this thing is'>
+          {/* `data-field` — ЯКОРЬ ДВЕРИ, А НЕ УКРАШЕНИЕ. `revealField` (`utils/field-errors.ts:226`)
+              ищет поле по `[data-field="<путь>"]`, и этот штамп ставит `FormItem` из `ui/form`. Здесь
+              стоит ГОЛАЯ `Textarea`, потому что поле переехало из формы на доску (V-16) — вместе с
+              переездом якорь и пропал, а с ним онемели ОБЕ двери «what the model gets» (`edit the
+              description ▸` и `edit the concept ▸`): они отвечали «it is not on this tab», стоя на той
+              самой вкладке, где поле видно. Штамп возвращён руками ровно потому, что примитив формы
+              больше не участвует. */}
+          <div data-field='concept'>
+            {/* Подпись поля — метрика подписи поля (10px, капслок, серый), не линейка группы:
+                в блоке одно поле, и линейка делила бы его с пустотой. */}
+            <label htmlFor={noteId} className='block'>
+              <Text
+                size='micro'
+                variant='label'
+                tracking='label'
+                component='span'
+                className='uppercase'
+              >
+                concept & construction description
+              </Text>
+            </label>
+            <Textarea
+              {...concept.field}
+              id={noteId}
+              disabled={readOnly}
+              value={concept.field.value ?? ''}
+              rows={4}
+              maxLength={CONCEPT_MAX}
+              placeholder='what this thing is — the idea, the reference, the purpose'
+              className='mt-1 resize-none'
+            />
+            {/* ⚠ ПОДПИСИ ПОД ПОЛЕМ БОЛЬШЕ НЕТ — СНЯТА ВЛАДЕЛЬЦЕМ (круг 20, B-3), дословно:
+                «"printed for the factory ·
+                part of the DESIGN signature · read by «draft the idea»
+                below — the garment description for generation is a different field, in the input
+                block" убрать текст».
+
+                ЧТО ОНА ГОВОРИЛА И ЧТО ИЗ ЭТОГО УЦЕЛЕЛО. Три факта: текст печатается в тех-паке,
+                входит в подпись DESIGN и читается черновиком ниже; плюс оговорка «это не описание
+                изделия для генерации». Первые три — свойства поля, которые человек узнаёт по месту:
+                `ConstructionDraft` стоит своим блоком ниже и называет своё чтение сам, а печать и
+                подпись видны на бумаге и в блоке подписи. Четвёртый — различение двух документов —
+                живёт там, где его и путают: в панели WHAT THE MODEL GETS, у которой обе двери
+                (`edit the concept ▸` и `edit the description ▸`) названы поимённо, и в самом блоке
+                референсов, где `garment description` подписана «goes into every run».
+                Возвращать строку сюда — значит вернуть абзац прозы в блок, где владелец её снял. */}
+          </div>
+
+          {/* ЛЕГАСИ-ЗАПИСКА ДОСКИ. Существует только на карточках, писавших `moodNote` до слияния
+              V-16; после любой из двух дверей поле уезжает '' (командой «очисти») и орган исчезает.
+              Цитата стоит на экране целиком, поэтому «discard» не спрашивает второй раз. */}
+          {legacyNote !== '' && (
+            // CalloutBox, а не пунктирная рамка: пунктир в этой системе означает «добавить», а это —
+            // сообщение, которое стоит, пока его не разрешили одной из двух дверей (DESIGN.md §5).
+            <CalloutBox>
+              <div className='flex items-baseline justify-between gap-2'>
+                <Text size='micro' variant='label' component='span'>
+                  the board’s old shared note — this field is retired; the description above is the
+                  one note now
+                </Text>
+                {!readOnly && (
+                  <ChipRow className='shrink-0'>
+                    <Chip nonForm onClick={takeLegacyNote} title='append it to the description above'>
+                      add to the description
+                    </Chip>
+                    <Chip nonForm onClick={dropLegacyNote} title='clear it — the text above is it'>
+                      discard
+                    </Chip>
+                  </ChipRow>
+                )}
+              </div>
+              <Text size='micro' component='p' className='mt-1 whitespace-pre-wrap'>
+                {legacyNote}
+              </Text>
+            </CalloutBox>
+          )}
+        </Section>
+
+        {/* ЧЕРНОВИК CONSTRUCTION — СВОИМ БЛОКОМ, ПОСЛЕДНИМ ИЗ ТРЁХ (макет `mbDraftBlock`).
+            Здесь стоял черновик, собиравшийся В БРАУЗЕРЕ; потом `MoodDraft` (проза в одно поле);
+            теперь `ConstructionDraft` (фича 9, слово владельца: «вместо кнопки DRAFT THE IDEA мы
+            генерируем ВЕСЬ construction info»): один платный прогон, ответ структурный и
+            раскладывается предложением на группы, которые рисуют блоки ниже. Ни одна строка не
+            попадает в форму сама — см. подпись органа. Секцию орган держит САМ: её шапка несёт
+            статус прогона, который знает только он. */}
         <ConstructionDraft techCardId={techCardId} disabled={readOnly} conceptMax={CONCEPT_MAX} />
       </div>
-
-      <ConfirmationModal
-        open={pendingRemove != null}
-        onOpenChange={(open) => !open && setPendingRemove(null)}
-        onConfirm={confirmRemove}
-        onCancel={() => setPendingRemove(null)}
-        title='remove the picture'
-        confirmLabel='remove it'
-        width='sm'
-      >
-        <div className='space-y-2'>
-          {pendingCallouts > 0 && (
-            <Text size='control'>
-              {pendingCallouts} note{pendingCallouts === 1 ? '' : 's'} pinned on this picture{' '}
-              {pendingCallouts === 1 ? 'dies' : 'die'} with it — they live nowhere else.
-            </Text>
-          )}
-          {pendingAlsoInInput && (
-            <Text size='control'>
-              The same picture also stands in the input — that reference is its own entry and stays
-              there, with its role and its note.
-            </Text>
-          )}
-          {pendingCallouts === 0 && !pendingAlsoInInput && (
-            <Text size='control'>
-              The picture comes off the board. The file itself stays in the library.
-            </Text>
-          )}
-        </div>
-      </ConfirmationModal>
-
-      {/* РЕДАКТОР КАРТИНКИ ДОСКИ (C-3) — тот же `VectorModal`, что открывает `edit` на плитке
-          истории, на плите листа и на верстаке: один редактор, вызванный с четвёртого экрана.
-          Монтируется только раскрытым: у модалки свои оконные слушатели клавиш. `slot` не
-          передаётся — доске некуда «поставить» результат, он входит строкой доски через
-          `placeEditedNextTo`. */}
-      {editing && (
-        <VectorModal
-          open
-          onOpenChange={(v) => !v && setEditing(null)}
-          techCardId={techCardId}
-          band={band}
-          base={pictureOfMedia(editing.full)}
-          slot={null}
-          disabled={readOnly}
-          onFlattened={(picture) => {
-            // Медиа берётся ИЗ ОТВЕТА СЕРВЕРА, а не из того, что клиент только что загрузил:
-            // строку доски заводит `appendBoardPictures` по `common_MediaFull`.
-            const full = picture.media;
-            if (full) placeEditedNextTo(editing.mediaId, full);
-          }}
-        />
-      )}
-    </Section>
-
-      {/* БОКОВОЕ МЕНЮ УКАЗАНИЙ (B-9) — ТОТ ЖЕ ОРГАН, что стоит справа от листа в ARTIFACTS, и
-          теперь буквально тот же: заголовок `callouts`, счётчик пилюлей, строка на указание,
-          правка выбранной строки внутри неё. Сворачивается вместе с доской: меню про то, что на
-          доске, и без доски ему не о чем.
-          `caps` ПЕРЕДАЁТСЯ — у мудбордного указания редактор наконечника был всегда (он стоял в
-          `AnnotationEditor` под кадрами), и переезд правки в панель не имел права его терять.
-          ⚠ ЗДЕСЬ СТОЯЛО «в отличие от листа: у листа его нет, и чинит это та волна» — волна
-          прошла В ЭТОМ ЖЕ КРУГЕ: лист артефактов передаёт `caps` тем же пропом (B-8,
-          `artifacts-panel.tsx`). Оговорка звала чинить починенное, и это единственное, что
-          изменилось в этой строке. */}
-      {open && (
-        <Section
-          title='callouts'
-          question='— pinned on the board, not numbered'
-          action={
-            <Pill tone='mut'>
-              {railRows.length} on the board
-            </Pill>
-          }
-          className='lg:w-[340px] lg:shrink-0'
-        >
-          <CalloutRail
-            rows={railRows}
-            selected={selectedIndex}
-            onSelect={(index) => {
-              setSelectedKey(index == null ? null : callouts.keyOf(index));
-              // Взвод принадлежит ОДНОЙ записке: перевыбор — уже другая строка.
-              setAddingKey(null);
-            }}
-            hoverIndex={hoverIndex}
-            onHover={setHoverIndex}
-            disabled={readOnly}
-            onRemove={
-              readOnly
-                ? undefined
-                : (index) => {
-                    const key = callouts.keyOf(index);
-                    if (!key) return;
-                    callouts.removeByKey(key);
-                    // Выбор снимается ВМЕСТЕ со строкой: индекс под ним после удаления адресует
-                    // уже соседнее указание, и оставленный выбор открыл бы правку чужого текста.
-                    setSelectedKey(null);
-                    setAddingKey(null);
-                  }
-            }
-            arrows={arrows}
-            focusToken={focusEditor}
-            /* НОМЕРА У МУДБОРДНОГО УКАЗАНИЯ НЕТ, И ДЕТАЛИ КРОЯ ТОЖЕ (см. шапку `mood-callouts.tsx`):
-               оно про настроение, его не адресует ни деталь, ни операция, ни дефект. */
-            numbered={false}
-            detailFields={false}
-            caps
-            emptyLabel='none yet. A note is put on the picture itself — arm a kind above the board and click a picture; the row appears here the moment it exists, and this is where its text is written.'
-          />
-        </Section>
-      )}
-    </SectionStack>
+    </>
   );
 }

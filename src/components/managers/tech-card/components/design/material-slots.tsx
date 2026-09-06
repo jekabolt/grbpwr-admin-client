@@ -11,6 +11,15 @@ import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
+
+import { Counter, EmptyState } from './core';
+import {
+  BoardMovedPill,
+  FromMoodboardPill,
+  ProvenancePill,
+  useProvenance,
+  type Provenance,
+} from './head/mood-organs';
 import ComboField from 'ui/form/fields/combo-field';
 import DecimalField from 'ui/form/fields/decimal-field';
 import InputField from 'ui/form/fields/input-field';
@@ -107,10 +116,12 @@ type Family = 'cloth' | 'thread' | 'hardware';
 
 const FAMILY_ORDER: Family[] = ['cloth', 'thread', 'hardware'];
 
+/** Слово семейства — на чипе рождения (`+ cloth`) и на пилюле вида в строке (макет: `CLOTH` ink,
+ *  `THREAD` / `HARDWARE` обычная). Одно слово, как в макете: «& trims» — не второе семейство. */
 const FAMILY_TITLE: Record<Family, string> = {
   cloth: 'cloth',
   thread: 'thread',
-  hardware: 'hardware & trims',
+  hardware: 'hardware',
 };
 
 /** Секция, которой рождается строка по нажатию чипа своего семейства. */
@@ -221,27 +232,46 @@ export function MaterialSlots({
   const goToLine = (line: Line) =>
     onGoTab?.('bom', line.lineKey?.trim() ? { bom: line.lineKey.trim() } : {});
 
+  // ПРОИСХОЖДЕНИЕ СТРОКИ — ИЗ ЖУРНАЛА ЧЕРНОВИКА (`head/mood-organs.tsx`): рождённая черновиком
+  // строка носит `drafted`, пока стоит на карточке; набранная рукой пилюли не носит вовсе.
+  const prov = useProvenance(techCardId ?? 0);
+  const provOf = (line: Line): Provenance =>
+    line.lineKey?.trim() ? prov({ kind: 'slot', lineKey: line.lineKey.trim() }) : null;
+  const drafted = lines.filter((l) => provOf(l) === 'drafted').length;
+
+  const addChips = readOnly ? null : (
+    <ChipRow>
+      {FAMILY_ORDER.map((family) => (
+        <Chip key={family} dashed data-b16-add={family} onClick={() => addSlot(family)}>
+          + {FAMILY_TITLE[family]}
+        </Chip>
+      ))}
+    </ChipRow>
+  );
+
   return (
     <Section
       title='material slots'
-      question='— the cloths, threads and hardware this style needs, before any article is chosen'
+      question='— what this is made of'
+      /* ПРАВЫЙ УГОЛ ШАПКИ — МАКЕТА: `FROM THE MOODBOARD · N OF M DRAFTED SLOTS · + CLOTH · + THREAD
+         · + HARDWARE · MOODBOARD MOVED ON`. Счётчик не рисуется при нуле строк. */
       action={
-        readOnly ? undefined : (
-          <ChipRow>
-            {FAMILY_ORDER.map((family) => (
-              <Chip key={family} dashed data-b16-add={family} onClick={() => addSlot(family)}>
-                + {FAMILY_TITLE[family]}
-              </Chip>
-            ))}
-          </ChipRow>
-        )
+        <>
+          <FromMoodboardPill />
+          {lines.length > 0 && (
+            <Counter n={drafted} noun='drafted slot' total={lines.length} data-b16-drafted='' />
+          )}
+          {addChips}
+          <BoardMovedPill techCardId={techCardId ?? 0} />
+        </>
       }
     >
       <div data-b16-slots=''>
         {lines.length === 0 ? (
-          <Text size='micro' variant='label' data-b16-empty=''>
-            no slots yet — draft the construction on the moodboard above, or add one by hand
-          </Text>
+          <EmptyState action={addChips ?? undefined} data-b16-empty=''>
+            <span className='uppercase text-textColor'>no material slots yet</span>
+            {readOnly ? '' : ' · draft the construction above, or add one by hand'}
+          </EmptyState>
         ) : (
           /**
            * ═══ EST USAGE — ЕДИНСТВЕННОЕ «СКОЛЬКО», КОТОРОЕ У СЛОТА ЕСТЬ, И ОНО СОВЕЩАТЕЛЬНОЕ ═════
@@ -276,30 +306,36 @@ export function MaterialSlots({
            * дайджест MATERIALS, и запись туда как побочный эффект набора совещательного числа
            * протухила бы подпись — ту самую, которую эта колонка обязана не трогать.
            */
-          <DataTable className='[&_td[data-b16-family]]:border-borderColor [&_td[data-b16-family]]:pt-3'>
+          <DataTable>
             <thead>
               <tr>
                 <th data-align='left'>component</th>
-                <th data-align='left'>fiber</th>
+                <th data-align='left'>from</th>
+                <th data-align='left'>composition</th>
                 <th className='w-[150px]'>est usage</th>
                 <th className='w-[120px]'>
                   <span className='sr-only'>row actions</span>
                 </th>
               </tr>
             </thead>
+            {/* ПЛОСКИЙ СПИСОК, ПИЛЮЛЯ ВИДА В КАЖДОЙ СТРОКЕ — как в макете; заголовков семейств
+                нет. Порядок — семействами (ткань, нитки, фурнитура), позициями формы. */}
             <tbody>
-              {families.map((family) => (
-                <SlotFamily
-                  key={family.key}
-                  family={family.key}
-                  rows={family.rows}
-                  lines={lines}
-                  readOnly={!!readOnly}
-                  onGo={onGoTab ? goToLine : undefined}
-                  onRemove={removeSlot}
-                  blockersOf={blockersOf}
-                />
-              ))}
+              {families.flatMap((family) =>
+                family.rows.map((index) => (
+                  <SlotRow
+                    key={lines[index].lineKey || `row-${index}`}
+                    index={index}
+                    family={family.key}
+                    prov={provOf(lines[index])}
+                    lines={lines}
+                    readOnly={!!readOnly}
+                    onGo={onGoTab ? goToLine : undefined}
+                    onRemove={removeSlot}
+                    blockersOf={blockersOf}
+                  />
+                )),
+              )}
             </tbody>
           </DataTable>
         )}
@@ -308,56 +344,10 @@ export function MaterialSlots({
   );
 }
 
-/** Заголовок семейства плюс его строки. Фрагмент, а не таблица: у семейства нет своей рамки. */
-function SlotFamily({
-  family,
-  rows,
-  lines,
-  readOnly,
-  onGo,
-  onRemove,
-  blockersOf,
-}: {
-  family: Family;
-  rows: number[];
-  lines: Line[];
-  readOnly: boolean;
-  onGo?: (line: Line) => void;
-  onRemove: (index: number) => void;
-  blockersOf: (line: Line) => Blocker[];
-}) {
-  return (
-    <>
-      <tr>
-        <td colSpan={4} data-align='left' data-b16-family={family}>
-          <Text
-            size='micro'
-            variant='label'
-            tracking='group'
-            component='span'
-            className='font-bold uppercase'
-          >
-            {FAMILY_TITLE[family]}
-          </Text>
-        </td>
-      </tr>
-      {rows.map((index) => (
-        <SlotRow
-          key={lines[index].lineKey || `row-${index}`}
-          index={index}
-          lines={lines}
-          readOnly={readOnly}
-          onGo={onGo}
-          onRemove={onRemove}
-          blockersOf={blockersOf}
-        />
-      ))}
-    </>
-  );
-}
-
 function SlotRow({
   index,
+  family,
+  prov,
   lines,
   readOnly,
   onGo,
@@ -365,6 +355,8 @@ function SlotRow({
   blockersOf,
 }: {
   index: number;
+  family: Family;
+  prov: Provenance;
   lines: Line[];
   readOnly: boolean;
   onGo?: (line: Line) => void;
@@ -462,6 +454,13 @@ function SlotRow({
             data-b16-name={index}
           />
         )}
+        {/* ВИД СЕМЕЙСТВА — ПИЛЮЛЕЙ В СТРОКЕ (макет: `CLOTH` ink, `THREAD`/`HARDWARE` обычная),
+            вместо заголовков семейств над группами строк. */}
+        <div className='mt-0.5'>
+          <Pill tone={family === 'cloth' ? 'ink' : 'mut'} data-b16-kind={family}>
+            {FAMILY_TITLE[family]}
+          </Pill>
+        </div>
         {/* ВТОРАЯ СТРОКА ЯЧЕЙКИ — ТА ОСЬ, КОТОРАЯ У СЕКЦИИ ЕСТЬ, И РОВНО ОДНА ИЗ ДВУХ. Назначение
             законно только на рулонной строке, вид — только вне рулонных и вне лейблов; сервер
             отвергает пару вроде «hardware + purpose=main» напрямую, поэтому контрол, которому
@@ -528,6 +527,10 @@ function SlotRow({
             </Pill>
           </div>
         )}
+      </td>
+      <td data-align='left' className='align-top' data-b16-from={index}>
+        {/* ОТКУДА СТРОКА — пилюля из журнала черновика; пусто, когда журнал о ней не знает. */}
+        <ProvenancePill state={prov} />
       </td>
       <td data-align='left' className='min-w-[180px] align-top' data-b16-fiber-cell={index}>
         {readOnly || linked ? (
@@ -618,7 +621,7 @@ function SlotRow({
               data-b16-go={index}
               onClick={() => onGo(line)}
             >
-              ›
+              bom ›
             </Button>
           )}
           {/* ✕ ИНЕРТЕН, А НЕ СПРЯТАН, КОГДА СТРОКУ РЕЖЕТ КОЛОРВЕЙ. Диалог со списком колорвеев уже

@@ -1,236 +1,95 @@
-import type {
-  GetDesignBandResponse,
-  common_DesignColourRecipe,
-  common_MediaFull,
-} from 'api/proto-http/admin';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 
-import { echoOf, mergeEcho, type ColourDraft, type TypedColour } from '../render/drafts';
-import { EMPTY_CLOTH, EMPTY_RECIPE, clampColourName, type ClothDraft } from '../render/model';
+import { hexIsPaintable } from '../render/model';
+import { NO_PAINT, type OnModelPaint, type OnModelShot } from './model';
 
 /**
- * ФОТОГРАФИИ, КОТОРЫЕ ЭТОТ ПРОГОН ПЕРЕКРАСИТ — состояние меню, а не данные карточки.
+ * ═══ THE TWO DRAFTS OF THE ASIDE — the shot and the paint — and nothing else ══════════════════
  *
- * ЭТО ЧЕРНОВИК ТОЙ ЖЕ ПРИРОДЫ, ЧТО `useColourDraft`: он живёт во вкладке, умирает вместе с ней и
- * доезжает до сервера ровно один раз, внутри `StartDesignRun.params.extra_input_media_ids`. Дальше
- * его хранит СНИМОК ВХОДОВ прогона, который собирает сервер, — то есть «какие фотографии мы
- * перекрашивали» навсегда отвечает история, а не эта переменная.
+ * BOTH LIVE IN THE TAB AND DIE WITH IT. Each reaches the server exactly once, inside
+ * `StartDesignRun.params` (`extra_input_media_ids` for the shot, `colour` for the paint); from
+ * then on the run's own input snapshot answers «what was repainted, in what» — never these two.
  *
- * ⚠ СНИМКИ НЕ ЗАВОДЯТСЯ КАК `DesignPicture` КАРТОЧКИ, И ЭТО РЕШЕНИЕ, А НЕ ЭКОНОМИЯ.
- * `RegisterDesignUpload` умеет ровно три рода — `flat | render | threed`, — и ни один из них не
- * значит «фотография вещи на живом человеке». Записать её флэтом значило бы соврать дважды: она
- * появилась бы в ленте кандидатов фабрик-рендера как чертёж и уехала бы в промпт как чертёж.
- * `extra_input_media_ids` — это FK на `media(id)`, и контракт называет их для рекола ПЕРВИЧНЫМ
- * входом, а не приложением: «on `recolor` they are THE PHOTOGRAPHS BEING RECOLOURED». Поэтому в
- * прогон едет медиа как медиа.
+ * ⚠ THE SHOT IS NOT FILED AS A `DesignPicture` OF THE CARD, and that is a decision. The upload
+ * verb knows three kinds — flat | render | threed — and none of them means «a photograph of the
+ * garment on a person». Filed as a flat it would appear on the render's candidate strip as a
+ * drawing and ride into the prompt as one. `extra_input_media_ids` is an FK on `media(id)` and the
+ * contract names it, for a recolour, THE PHOTOGRAPH BEING RECOLOURED — so the media travels as
+ * media.
  *
- * ЧЕРНОВИК НЕ ЗАСЕВАЕТСЯ ПРОШЛЫМ ПРОГОНОМ, в отличие от рецепта цвета. Цвет — свойство изделия и
- * повторяется; съёмка — событие, и подставить вчерашние кадры в сегодняшний платный прогон значило
- * бы купить их второй раз молча.
+ * ⚠ NEITHER DRAFT IS SEEDED FROM THE PAST. The paint is a property of THE SHOT («the paint is kept
+ * on the shot»), and a shot picked a minute ago has no past. Seeding the hex from the card's last
+ * recipe — the render draft's habit — is exactly how a screen came to open with an invisible cloth
+ * in its draft and a live GENERATE over an empty colour; the card's known colours stand as TILES
+ * instead (`flatColours`), visible and picked by hand.
+ *
+ * ⚠ `words` IS NOT HERE. On the wire it is one field with two meanings — cloth on FABRIC RENDER,
+ * colour on ON MODEL (invariant 8) — and this screen draws no free text at all; the wire field
+ * leaves empty. The render draft (`render/drafts.ts`) is not shared with this file and must not be.
  */
 
-export type RecolorSources = {
-  /** Кадры в порядке добавления. Порядок виден на полосе и уезжает на провод тем же. */
-  items: common_MediaFull[];
-  /** Идентификаторы для провода, в том же порядке; мусорные нули отброшены. */
-  mediaIds: number[];
-  add: (media: common_MediaFull[]) => void;
-  remove: (mediaId: number) => void;
+export type ShotDraft = {
+  shot: OnModelShot | null;
+  /** Replaces whatever stood in the slot. The question before a replacement is the caller's. */
+  put: (next: OnModelShot) => void;
   clear: () => void;
 };
 
-export function useRecolorSources(): RecolorSources {
-  const [items, setItems] = useState<common_MediaFull[]>([]);
-
-  const add = useCallback((media: common_MediaFull[]) => {
-    setItems((prev) => {
-      // ОДИН И ТОТ ЖЕ ФАЙЛ ДВАЖДЫ — ЭТО ДВА ПЛАТНЫХ ВЫЗОВА ЗА ОДНУ КАРТИНКУ. Библиотека охотно
-      // отдаёт один и тот же кадр повторно (человек выбирает по эскизу и не помнит, что уже брал
-      // его), а цена здесь линейна по числу снимков. Поэтому дубли снимаются по id, молча: их
-      // отказ не про человека, а про то, что второй экземпляр не добавляет ни одного пикселя.
-      const seen = new Set(prev.map((m) => m.id ?? 0));
-      const fresh = media.filter((m) => (m.id ?? 0) > 0 && !seen.has(m.id ?? 0));
-      return fresh.length ? [...prev, ...fresh] : prev;
-    });
-  }, []);
-
-  const remove = useCallback((mediaId: number) => {
-    setItems((prev) => prev.filter((m) => (m.id ?? 0) !== mediaId));
-  }, []);
-
-  const clear = useCallback(() => setItems([]), []);
-
+export function useOnModelShot(): ShotDraft {
+  const [shot, setShot] = useState<OnModelShot | null>(null);
   return {
-    items,
-    mediaIds: items.map((m) => m.id ?? 0).filter((id) => id > 0),
-    add,
-    remove,
-    clear,
+    shot,
+    put: useCallback((next: OnModelShot) => setShot((next.media.id ?? 0) > 0 ? next : null), []),
+    clear: useCallback(() => setShot(null), []),
   };
 }
 
-/* ─────────────────────────── ТКАНЬ, В КОТОРУЮ ПЕРЕОДЕВАЮТ (J-31) ─────────────────────────── */
-
-export type ClothChoiceDraft = {
-  /** Ассет-паттерн этой карточки. `0` — не выбрано, и это законное состояние прогона. */
-  assetId: number;
-  pick: (assetId: number) => void;
+export type PaintDraft = {
+  paint: OnModelPaint;
+  /** Toggle: the same texture again takes it off; another texture replaces it AND the colour. */
+  pickTexture: (assetId: number) => void;
+  /** Toggle — a TILE: the same colour again takes it off; another replaces it AND the texture. */
+  toggleColour: (hex: string) => void;
+  /** Set — the PICKER, which fires while the person drags: never a toggle. Empty takes it off. */
+  setColour: (hex: string) => void;
+  clear: () => void;
 };
 
 /**
- * ═══ ВЫБРАННАЯ ПЛИТКА — ЧИСЛО, А НЕ СПИСОК, И НЕ ЧАСТЬ РЕЦЕПТА ════════════════════════════════
- *
- * ⚠ ЧИСЛО, ПОТОМУ ЧТО ДВЕ ПЛИТКИ — ЭТО ПРОГОН, КОТОРЫЙ ЧЕЛОВЕК НЕ МОЖЕТ ЗАПУСТИТЬ. Сервер
- * отказывает `one_cloth_only` до резерва: «a recolour re-dresses the garment in ONE cloth … the
- * instruction names exactly one («the garment made of the cloth in image 2»)». Список с правилом
- * «мы кладём в него не больше одного» — это обещание; число — это тип, в котором второй не бывает.
- *
- * ⚠ И НЕ ЧАСТЬ ЧЕРНОВИКА ЦВЕТА, ХОТЯ НА ПРОВОДЕ ОНИ ОДИН ОБЪЕКТ. Черновик цвета ЗАСЕВАЕТСЯ
- * последним рецептом карточки, и ровно там жил замеренный дефект: карточка, рендерившаяся с
- * лоскутом, открывала ON MODEL с НЕВИДИМОЙ тканью в черновике, ворота открывались по ней, и
- * платный промпт получал ткань, которой человек не выбирал. Держать выбор ткани ОТДЕЛЬНЫМ
- * состоянием, у которого нет и не может быть засева, делает тот возврат невыразимым: `fabrics`
- * собирается из ЖЕСТА (`assetId`) в момент сборки тела, а не наследуется из прошлого.
- *
- * ЗАСЕВА ЗДЕСЬ НЕТ И НЕ БУДЕТ. Паттерн — это заказ, а не свойство карточки: подставить вчерашний
- * в сегодняшний платный прогон значило бы купить его второй раз молча. Тот же довод, по которому
- * не засеваются снимки.
+ * EXACTLY ONE OF TWO, KEPT BY THE STATE. Any gesture on one axis wipes the other: a person who
+ * picked a cloth and then a colour has said «a colour», and the group's pill says so too. The
+ * server would accept both at once (a re-clothed garment re-tinted); the aside speaks the
+ * prototype's grammar — «what it is repainted in · one of three» — and a pair is not one.
  */
-export function useClothChoice(): ClothChoiceDraft {
-  const [assetId, setAssetId] = useState(0);
+export function useOnModelPaint(): PaintDraft {
+  const [paint, setPaint] = useState<OnModelPaint>(NO_PAINT);
+  const sameHex = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
   return {
-    assetId,
-    pick: useCallback((next: number) => setAssetId(next > 0 ? next : 0), []),
-  };
-}
-
-/* ─────────────────────────── целевой цвет ─────────────────────────── */
-
-/**
- * ЦЕЛЕВОЙ ЦВЕТ ПЕРЕКРАСКИ — ТОТ ЖЕ `ColourDraft`, ЧТО У ФАБРИК-РЕНДЕРА, С ОДНИМ СУЖЕНИЕМ.
- *
- * ТИП ОДИН НАМЕРЕННО: цвет здесь тот же предмет, и орган выбора (`ColourStatementRow`) обязан быть
- * буквально тем же компонентом, а не похожим. Всё, чем этот черновик отличается, — ЧТО ОН МОЖЕТ
- * СОДЕРЖАТЬ.
- *
- * ⚠ ПОЧЕМУ НЕ `useColourDraft` ЦЕЛИКОМ — ЗАМЕРЕННЫЙ ДЕФЕКТ, А НЕ ЧИСТОПЛЮЙСТВО. Тот хук засевает
- * черновик ПОСЛЕДНИМ РЕЦЕПТОМ КАРТОЧКИ, а рецепт фабрик-рендера несёт ещё и `fabric_media_id` со
- * списком `fabrics` — фотографию ткани и полку тканей. На этом экране их нечем показать: ряда
- * CLOTHS здесь нет и быть не должно (перекрашивают снимок, а не шьют из ткани). То есть карточка,
- * рендерившаяся с лоскутом, открыла бы ON MODEL с невидимым лоскутом в черновике, отправила бы его
- * в промпт — и ворота открылись бы ПО НЕМУ: `recipeIsStated` считает фотографию достаточным
- * заявлением. Человек видел бы пустой цвет и живую кнопку GENERATE.
- *
- * Поэтому засев здесь СУЖЕН до двух полей, которые на обоих экранах значат одно и то же: кода и
- * hex. Ткань не переносится и не заводится вовсе — `fabricMediaId` и `fabrics` в этом черновике
- * пусты по построению, а не по забывчивости, — а `words` не переносится по отдельной причине,
- * которая стоит на месте засева: одно поле провода, два разных смысла.
- *
- * ЗАСЕВ ОДИН РАЗ И ТОЛЬКО ПОКА НЕ ТРОНУТО, как у соседа: любая запись на карточке инвалидирует
- * полосу, и без этого сторожа перечитывание залезло бы в наполовину сделанный выбор и заменило бы
- * его последним законченным.
- */
-export function useTargetColourDraft(band: GetDesignBandResponse): ColourDraft {
-  const [recipe, setRecipe] = useState<common_DesignColourRecipe>(EMPTY_RECIPE);
-  /**
-   * ═══ ПРОЗРАЧНОСТЬ И ГРАММАЖ ЖИВУТ И ЗДЕСЬ — НАСТОЯЩИМ СОСТОЯНИЕМ, А НЕ ЗАГЛУШКОЙ (H-13) ══════
-   *
-   * Ряда CLOTH IS на перекрасе НЕТ, и это решение, а не пробел: владелец назвал свойство ткани для
-   * ГЕНЕРАЦИИ ФАБРИК-РЕНДЕРОВ, а перекрас работает по уже снятой ткани — её граммаж на фотографии
-   * виден, и объявлять его словами значило бы спорить со снимком. Значит это состояние здесь никто
-   * не заполняет.
-   *
-   * Но пустой писатель (`patchCloth: () => {}`) был бы ХУЖЕ, чем настоящий: орган, смонтированный
-   * сюда однажды по недосмотру, молча съедал бы выбор человека и выглядел бы рабочим. Тип общий на
-   * оба экрана, поэтому и реализация общая; разница между экранами — в том, что смонтировано, а не
-   * в том, что молча не работает.
-   */
-  const [cloth, setCloth] = useState<ClothDraft>(EMPTY_CLOTH);
-  const touched = useRef(false);
-  const seeded = useRef(false);
-  /** Что человек набрал сам — то же правило ранга, что у соседа; довод целиком в `../render/drafts`. */
-  const owned = useRef({ code: false, hex: false, words: false });
-
-  const latest = (band.colourRecipes ?? [])[0];
-  useEffect(() => {
-    if (touched.current || seeded.current || !latest) return;
-    seeded.current = true;
-    // ТА ЖЕ ДВЕРЬ РАЗБОРА ИСТОЧНИКА, ЧТО У СОСЕДА (`echoOf`), И СУЖЕНИЕ ПОВЕРХ НЕЁ. Своё чтение
-    // полей прошлого рецепта было бы вторым написанием правила, которое уже однажды потерялось.
-    const echo = echoOf({ from: 'recipe', recipe: latest });
-    setRecipe({
-      ...EMPTY_RECIPE,
-      code: echo.code ?? '',
-      hex: echo.hex ?? '',
-      // ⚠ `words` НЕ ПЕРЕНОСИТСЯ, И ЭТО НЕ ЗАБЫВЧИВОСТЬ. Поле на проводе одно, а значит оно на
-      // двух экранах РАЗНОЕ: у фабрик-рендера это ТКАНЬ словами («heavy cotton twill»), здесь —
-      // ЦВЕТ словами («washed indigo, faded at the seams»). Засеянное «heavy cotton twill»
-      // уехало бы в перекраску инструкцией сменить МАТЕРИАЛ на фотографии — ровно то, чего
-      // перекраска делать не должна, и человек прочитал бы это как готовую строку, а не как
-      // чужую. Замерено на стенде: карточка, рендерившаяся твилом, открывала ON MODEL с твилом
-      // в поле «in words».
-    });
-  }, [latest]);
-
-  return {
-    recipe,
-    cloth,
-    patchCloth: (next) => {
-      touched.current = true;
-      setCloth((prev) => ({ ...prev, ...next }));
-    },
-    /**
-     * ТИПОВАННЫЙ ВХОД — БУКВА В БУКВУ ТОТ ЖЕ, ЧТО У СОСЕДА, И ТКАНЬ ЧЕРЕЗ НЕГО НЕ ПРОЛЕЗАЕТ УЖЕ
-     * ПО ТИПУ: `TypedColour` знает три скаляра и не знает ни `fabrics`, ни `fabric_media_id`.
-     * Раньше сужение держал `fabricMediaId: 0, fabrics: []` в теле — то есть надежда на то, что
-     * следующий редактор эту строку заметит.
-     */
-    typed: (next) => {
-      touched.current = true;
-      const clean: TypedColour = {};
-      // ⚠ ПРЕДЕЛ ИМЕНИ ПРИМЕНЯЕТСЯ И ЗДЕСЬ. Раньше его знал ТОЛЬКО черновик рендера, хотя орган
-      // выбора цвета у двух экранов ОДИН: `maxLength` держал набор с клавиатуры, а вставку — нет.
-      if (next.code !== undefined) clean.code = clampColourName(next.code);
-      if (next.hex !== undefined) clean.hex = next.hex;
-      if (next.words !== undefined) clean.words = next.words;
-      for (const key of ['code', 'hex', 'words'] as const) {
-        const value = clean[key];
-        if (value === undefined) continue;
-        owned.current[key] = value.trim() !== '';
-      }
-      setRecipe((prev) => ({ ...prev, ...clean }));
-    },
-    /**
-     * ⚠ ЭХО-ВХОД ЗДЕСЬ НАСТОЯЩИЙ, НО СУЖЕННЫЙ ДО ЦВЕТА — И СУЖЕНИЕ ЖИВЁТ У ДВЕРИ, А НЕ У
-     * ВЫЗЫВАЮЩЕГО. Пустой писатель (`echo: () => {}`) был бы ХУЖЕ: орган, смонтированный сюда
-     * однажды по недосмотру, молча съедал бы производное и выглядел бы рабочим.
-     *
-     * ЧТО ИМЕННО ОТБРАСЫВАЕТСЯ И ПОЧЕМУ:
-     *   · ТКАНЬ — ряда CLOTHS на перекрасе нет и быть не должно (перекрашивают снимок, а не шьют
-     *     из ткани), а `recipeIsStated` считает фотографию достаточным заявлением: невидимый
-     *     лоскут открыл бы ворота GENERATE при пустом цвете;
-     *   · СЛОВА — поле провода одно, а смысл у него на двух экранах РАЗНЫЙ: у фабрик-рендера это
-     *     ТКАНЬ словами («heavy cotton twill»), здесь — ЦВЕТ словами («washed indigo»). Замерено:
-     *     карточка, рендерившаяся твилом, открывала ON MODEL с твилом в поле «in words», то есть
-     *     перекрас получал приказ сменить МАТЕРИАЛ на фотографии.
-     */
-    echo: (source) => {
-      touched.current = true;
-      const values = echoOf(source);
-      setRecipe((prev) =>
-        mergeEcho(prev, { code: values.code, hex: values.hex }, owned.current),
+    paint,
+    pickTexture: useCallback((assetId: number) => {
+      setPaint((prev) =>
+        assetId <= 0 || (prev.mode === 'texture' && prev.assetId === assetId)
+          ? NO_PAINT
+          : { mode: 'texture', assetId, hex: '' },
       );
-    },
-    clear: (source) => {
-      touched.current = true;
-      if (source === 'colour') {
-        owned.current.code = false;
-        owned.current.hex = false;
-        setRecipe((prev) => ({ ...prev, code: '', hex: '' }));
-        return;
-      }
-      owned.current.words = false;
-      setRecipe((prev) => ({ ...prev, words: '' }));
-    },
+    }, []),
+    toggleColour: useCallback((hex: string) => {
+      const value = (hex ?? '').trim();
+      if (!hexIsPaintable(value)) return;
+      setPaint((prev) =>
+        prev.mode === 'colour' && sameHex(prev.hex, value)
+          ? NO_PAINT
+          : { mode: 'colour', assetId: 0, hex: value },
+      );
+    }, []),
+    setColour: useCallback((hex: string) => {
+      const value = (hex ?? '').trim();
+      setPaint((prev) => {
+        if (!value) return prev.mode === 'colour' ? NO_PAINT : prev;
+        if (prev.mode === 'colour' && prev.hex === value) return prev;
+        return { mode: 'colour', assetId: 0, hex: value };
+      });
+    }, []),
+    clear: useCallback(() => setPaint(NO_PAINT), []),
   };
 }

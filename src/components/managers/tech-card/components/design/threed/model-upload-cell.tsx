@@ -11,7 +11,6 @@ import { formatBytes, stripDataUrlPrefix } from 'utils/pattern';
 
 import { InertDoor } from '../bench-slot';
 import { TILE_CORNER, TILE_QUIET } from '../picture-tile';
-import { CELL_WIDTH, STRIP_FRAME_ASPECT } from '../render/strip-cell';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
 import { MODEL_FILE_ACCEPT, isGlbFile, modelFileError, modelUploadErrorMessage } from './model-file';
 
@@ -103,24 +102,6 @@ import { MODEL_FILE_ACCEPT, isGlbFile, modelFileError, modelUploadErrorMessage }
  * входов (`designSelectBench` берёт flat- или render-слоты, никогда threed). Экран этому зеркало:
  * двери `mark ▸` у рода `threed` в разделе выходов нет вовсе.
  */
-
-/** Глиф кадра. Куб, а не фотография: фотография обещала бы, что сюда кладут картинку. */
-function ModelGlyph({ className }: { className?: string }): JSX.Element {
-  return (
-    <svg
-      viewBox='0 0 24 24'
-      aria-hidden='true'
-      className={cn('h-5 w-5', className)}
-      fill='none'
-      stroke='currentColor'
-      strokeWidth='1.25'
-    >
-      <path d='M12 2.75 20.5 7v10L12 21.25 3.5 17V7z' />
-      <path d='M3.5 7 12 11.25 20.5 7' />
-      <path d='M12 11.25v10' />
-    </svg>
-  );
-}
 
 /**
  * ПРЕВЬЮ — ТРИ РАСТРА, КОТОРЫЕ ПРИНИМАЕТ СЕРВЕР: «sniffed by magic bytes (JPEG, PNG or WebP — the
@@ -322,13 +303,16 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
           ? 'drop the files'
           : staged.model
             ? staged.model.name
-            : '+ 3d model';
+            : 'bring your own';
 
   const cell = (
     <div
       data-model-upload=''
       data-model-staged={has || undefined}
-      className={cn('flex flex-col gap-1', CELL_WIDTH)}
+      /* THE MOCKUP'S DOOR IS WIDE (`p4Bring`, «BRING YOUR OWN · .glb up to 50 MB …»): one dashed
+         cell under its own rule, not a strip cell of 132px — it stands alone in its group, so the
+         width is its own. Capped so the hint does not become a ruler on a wide monitor. */
+      className='flex w-full max-w-[420px] flex-col gap-1'
     >
       {/* КАДР САМ И ЕСТЬ ДВЕРЬ, а не коробка с кнопкой под ней: тот же довод, что у пустого слота
           верстака — два органа на один слот заставляют выбирать между ними. Кадр остаётся дверью и
@@ -359,16 +343,13 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
             setDragging(false);
             take(Array.from(e.dataTransfer?.files ?? []));
           }}
-          style={{ ...PLACEHOLDER_SURFACE, aspectRatio: STRIP_FRAME_ASPECT }}
+          style={previewUrl ? { ...PLACEHOLDER_SURFACE, aspectRatio: '4/3' } : PLACEHOLDER_SURFACE}
           className={cn(
             placeholderClass({ dashed: true }),
             // ПОДПИСЬ — ЧИТАЕМЫЙ ТЕКСТ: `placeholderClass` красит содержимое в `textInactiveColor`
             // (#ccc), годный для рамок и выключенного, но на полосатом фоне дающий полтора к одному.
             // Здесь это единственное, что объясняет жест.
-            'relative w-full cursor-pointer flex-col gap-1 overflow-hidden px-2 text-center text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-            // Глиф прячется по ШИРИНЕ САМОЙ ЯЧЕЙКИ, а не по вкусу вызывающего — тем же приёмом, что
-            // в `MediaSlot`: в узкой рамке он съедает строку подписи.
-            '@container',
+            'relative min-h-[72px] w-full cursor-pointer flex-col gap-1 overflow-hidden px-3 py-3 text-center text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
             dragging && 'border-textColor text-textColor',
             busy && 'cursor-wait',
           )}
@@ -383,9 +364,24 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
               className='absolute inset-0 h-full w-full bg-bgColor object-contain'
             />
           ) : (
+            /* THE FACE OF THE DOOR — the mockup's two lines: the title, then the whole gesture in
+               one hint. No ⌘V: the clipboard does not carry a model file, and a promised gesture
+               that does nothing is worse than a missing one. */
             <>
-              <ModelGlyph className='hidden @[6rem]:block' />
-              <span className='line-clamp-2 break-all leading-tight'>{word}</span>
+              <Text
+                size='control'
+                variant='uppercase'
+                tracking='label'
+                component='span'
+                className='line-clamp-2 break-all leading-tight text-inherit'
+              >
+                {word}
+              </Text>
+              {!busy && !dragging && !staged.model && (
+                <Text size='nano' variant='label' component='span' className='normal-case'>
+                  .glb up to 50 MB · a preview picture is optional · click · drop
+                </Text>
+              )}
             </>
           )}
           {/* ЯРЛЫК — ТОТ ЖЕ, ЧТО У ПЛИТКИ (левый верх, чернила): говорит, что в кадре лежит, когда
@@ -477,17 +473,9 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
           </div>
         </>
       ) : (
-        <>
-          <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
-            <b>bring your own</b> · free
-          </Text>
-          <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
-            .glb + a preview picture
-          </Text>
-          <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
-            drop · browse
-          </Text>
-        </>
+        <Text size='nano' variant='label' component='span' className='min-w-0 normal-case'>
+          <b>free</b> · nothing is charged for a file you already have
+        </Text>
       )}
     </div>
   );

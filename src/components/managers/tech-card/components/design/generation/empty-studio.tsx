@@ -1,26 +1,23 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Button } from 'ui/components/button';
-import { Section } from 'ui/components/section';
-import Text from 'ui/components/text';
 
-import { InertDoor } from '../bench-slot';
-import { serverSpeaksDesign } from '../capability';
+import { EmptyState } from '../core';
 
 /**
- * THE EMPTY STUDIO — what a card says before anything has been generated or brought.
+ * THE EMPTY STUDIO — RETIRED FROM THE FLAT STEP, KEPT AS AN ORGAN.
  *
- * TWO EQUAL DOORS, AND THE EQUALITY IS THE STATEMENT. «+ add files» and «GENERATE ▸» stand side by
- * side at the same weight because nothing on this card requires a run: a technologist who brings
- * four photographs by hand gets the same bench, the same slots and the same sheet as one who
- * generates them. A screen that opened with a lone GENERATE would teach the opposite in the one
- * moment the human is looking for the rule.
+ * It used to be a whole block («pictures on this card · nothing here yet», two equal doors) drawn
+ * INSTEAD of the generation history on a card with no runs and no uploads. The redesigned flat
+ * step (`_step-flat.js`) has no such block: the history is always on screen and carries its own
+ * empty line («no runs to show · go to the run»), so `GenerationStudio` no longer mounts this.
  *
- * IT DESCRIBES WHAT WOULD HAPPEN, not what is missing. «No runs yet» is a status; «a run would open
- * a generation history here, with the ask and the price on every row» is an explanation of the
- * machine — and this is the only screen state where there is room to give one.
+ * WHY THE FILE STAYS. `generation/index.ts` re-exports it and that file is not this wave's to
+ * edit; an export that vanishes breaks the build of every importer at once. So the organ is kept,
+ * shrunk to the one honest thing it can still say — a single `EmptyState` line with the door to
+ * the input — and NOT a block: mounted anywhere, it must not become a second white slab saying
+ * what the history already says. Delete this file and its export together, in one move.
  */
-
 export function EmptyStudio({
   disabled,
   onGenerate,
@@ -28,20 +25,13 @@ export function EmptyStudio({
   band?: GetDesignBandResponse;
   techCardId?: number;
   disabled?: boolean;
-  /**
-   * Opens the generation form. Omitted when this block is mounted without one, in which case the
-   * door states its absence instead of doing nothing — a button that silently fails is the one
-   * outcome this band's own gate refuses to ship.
-   */
+  /** Opens the generation form when the caller has one; absent, only the input door is drawn. */
   onGenerate?: () => void;
 }) {
-  const speaks = serverSpeaksDesign();
   const { showMessage } = useSnackBarStore();
 
-  // Дверь ведёт в INPUT — REFERENCES: полка загрузок снесена владельцем (R-18), и «принести файлы»
-  // теперь значит «положить их во вход» — слот «+ reference» принимает клик в библиотеку, ⌘V и
-  // бросок файла, а склейку нескольких видов там же режет split. Якорь #design-input держит
-  // studio-tab.tsx; вести на #design-uploads значило бы жать живую кнопку в пустоту.
+  // The door leads to INPUT — REFERENCES: «bring files» means «put them into the input» since the
+  // uploads shelf was removed (R-18). The anchor `#design-input` is stamped by `studio-tab.tsx`.
   const gotoInput = () => {
     const el = document.getElementById('design-input');
     if (!el) {
@@ -52,71 +42,21 @@ export function EmptyStudio({
   };
 
   return (
-    <Section
-      id='design-studio-empty'
-      title='pictures on this card'
-      question='— a run writes history, hand-brought files land in the input; both feed the slots'
+    <EmptyState
       action={
-        <Text size='micro' variant='label' component='span'>
-          no runs · no files yet
-        </Text>
+        <span className='flex flex-wrap items-center gap-1'>
+          <Button variant='secondary' size='xs' onClick={gotoInput}>
+            + reference
+          </Button>
+          {onGenerate && (
+            <Button variant='secondary' size='xs' onClick={onGenerate} disabled={disabled}>
+              generate ▸
+            </Button>
+          )}
+        </span>
       }
     >
-      {/* NO BOX AROUND THIS. The prototype draws a dashed frame here, but a bordered box inside a
-          `Section` is box-in-box — the one thing DESIGN.md refuses outright — and the striped
-          `Placeholder` is the surface for a missing IMAGE, not for prose. The lead carries the
-          weight instead. */}
-      <div className='space-y-1'>
-        <Text size='micro' component='p' className='uppercase tracking-label'>
-          <b>nothing here yet</b>
-        </Text>
-        {/* ПУСТОЕ СОСТОЯНИЕ УЧИТ НОВОМУ ПУТИ (после сноса полки оно — единственный учитель):
-            вход → сплит → роли → слоты. Прежний текст обещал «полку загрузок», которой больше
-            нет, — учитель, показывающий на снесённую дверь, хуже молчания. «prompt», не «ask»:
-            поле ASK снято владельцем (T-3, круг 4), строка истории показывает настоящий
-            отправленный промпт — обещать здесь орган, которого больше нет, значило бы учить
-            снесённой двери второй раз. */}
-        <Text size='micro' variant='label' component='p' className='max-w-[82ch]'>
-          Nothing has been generated or brought. A run would open a <b>generation history</b> here,
-          with its prompt and price on every row. Files brought by hand go into{' '}
-          <b>input — references</b> above: a sheet of several views gets <b>split</b> into frames,
-          and each frame arrives in the input already marked with its view. A single view can also
-          be dropped straight onto its empty slot below.
-        </Text>
-      </div>
-
-      {/* `py-1` — тот же отступ ряда, что у трёх остальных рядов GENERATE (F-1, «и отступы»). */}
-      <div className='flex flex-wrap items-center gap-2 py-1'>
-        <Button variant='secondary' size='sm' onClick={gotoInput}>
-          + add files
-        </Button>
-        {/* ⚠ ОТСУТСТВИЕ `onGenerate` — ЭТО «ДВЕРИ ЗДЕСЬ НЕТ», А НЕ «ДВЕРЬ ВЫКЛЮЧЕНА».
-            Раньше обе ветки рисовали дверь, и после D-1 (форма перестала складываться и стоит
-            развёрнутой прямо над этим блоком) владелец снял проп — а блок нарисовал ПОГАШЕННУЮ
-            дверь с причиной «the generation form is not mounted on this screen», которая на
-            двести пикселей выше опровергается сама собой. Погашенная дверь обязана объяснять
-            невозможность; здесь она объясняла своё собственное отсутствие. */}
-        {onGenerate &&
-          (speaks ? (
-            <Button variant='main' size='sm' onClick={onGenerate} disabled={disabled}>
-              GENERATE ▸
-            </Button>
-          ) : (
-            <InertDoor
-              label='GENERATE ▸'
-              /* ⚠ `sm`, А НЕ УМОЛЧАНИЕ (F-1). Строкой выше стоит ЖИВАЯ кнопка `size='sm'` — эта
-                 дверь заменяет ИМЕННО ЕЁ, в том же ряду. Замерено: дверь была 20px с паддингом
-                 1/6, кнопка 26px с паддингом 4/10, и ряд подпрыгивал ровно на этой замене. */
-              size='sm'
-              reason='this server does not speak the design band yet — bring the pictures in by hand instead; the bench treats them identically.'
-            />
-          ))}
-        <Text size='micro' variant='label' component='span'>
-          {onGenerate
-            ? 'two equal doors — nothing on this card requires a run'
-            : 'nothing on this card requires a run — GENERATE stands in input — references above'}
-        </Text>
-      </div>
-    </Section>
+      nothing has been generated or brought yet
+    </EmptyState>
   );
 }

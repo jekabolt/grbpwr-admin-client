@@ -30,6 +30,17 @@ type CardMemory = {
   proposals: ProposedColourway[];
   /** Вердикт по предложению колорвея: подтверждён (с id продукта) или отклонён. */
   verdicts: Record<string, ColourwayVerdict>;
+  /**
+   * ДОСКА УШЛА ВПЕРЁД ПОСЛЕ ПОСЛЕДНЕГО ПРОГОНА — один флаг на три блока выхода.
+   *
+   * Считает его ЧЕРНОВИК (`construction-draft.tsx`, `stale`: слепок доски разошёлся с тем, что
+   * прочитал прогон), а показывают ТРИ других блока — GENERAL INFORMATION, CONSTRUCTION,
+   * MATERIAL SLOTS — пилюлей `moodboard moved on` в своей шапке (макет `_step-mood.js`, `zMoved`).
+   * Второго калькулятора у пилюли нет и быть не должно: флаг пишется в стор тем же местом, которое
+   * рисует `the moodboard has changed since` в ряду прогона, и оба органа не могут разойтись.
+   * Без прогона флаг ложен по построению (`boardMoved` без `draftRun` в макете = null).
+   */
+  boardMoved: boolean;
 };
 
 export type ColourwayVerdict =
@@ -41,7 +52,7 @@ export type ColourwayVerdict =
       recipeFailed?: string;
     };
 
-const EMPTY: CardMemory = { fills: [], proposals: [], verdicts: {} };
+const EMPTY: CardMemory = { fills: [], proposals: [], verdicts: {}, boardMoved: false };
 
 type Store = {
   byCard: Record<number, CardMemory>;
@@ -52,6 +63,7 @@ type Store = {
   patchProposal: (card: number, id: string, patch: Partial<ProposedColourway>) => void;
   patchSlot: (card: number, id: string, slot: number, patch: Partial<ProposedSlotColour>) => void;
   setVerdict: (card: number, id: string, verdict: ColourwayVerdict) => void;
+  setBoardMoved: (card: number, moved: boolean) => void;
 };
 
 function edit(state: Store, card: number, fn: (m: CardMemory) => CardMemory): Partial<Store> {
@@ -126,6 +138,14 @@ export const useDraftMemory = create<Store>((set) => ({
 
   setVerdict: (card, id, verdict) =>
     set((s) => edit(s, card, (m) => ({ ...m, verdicts: { ...m.verdicts, [id]: verdict } }))),
+
+  /** Запись без изменения — не запись: иначе эффект черновика перерисовывал бы читателей впустую. */
+  setBoardMoved: (card, moved) =>
+    set((s) => {
+      const cur = s.byCard[card] ?? EMPTY;
+      if (cur.boardMoved === moved) return {};
+      return edit(s, card, (m) => ({ ...m, boardMoved: moved }));
+    }),
 }));
 
 /** Память ЭТОЙ карточки. Одна и та же пустая ссылка для незнакомой — иначе бесконечный ререндер. */

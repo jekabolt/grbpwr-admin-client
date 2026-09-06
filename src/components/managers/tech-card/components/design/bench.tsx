@@ -11,7 +11,7 @@ import { mediaFullToViewerItem } from 'ui/components/media-viewer';
 import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
-import { Tiles } from 'ui/components/tiles';
+import { Button } from 'ui/components/button';
 import {
   BenchSlot,
   NewDetailCell,
@@ -24,6 +24,8 @@ import {
   viewLabel,
 } from './bench-slot';
 import { COLORWAY_NONE, type BenchKind } from './bench-kinds';
+import { Counter } from './core';
+import { LockBar } from './render/generate-row';
 import { shelfBatchOrdinals } from './handles';
 import { MixWarn } from './mixwarn';
 import { type PickTarget, usePickMode } from './pick-mode';
@@ -79,6 +81,14 @@ import { uploadItem } from './upload-item';
  * screen the RENDER front (rev 4, empty) to display and to echo against a flat write.
  */
 const FLAT_BENCH: BenchKind = 'flat';
+
+/**
+ * ЯЧЕЙКА ЛЕНТЫ — 138px (`.pstrip-i` макета), инлайном, а не классом: стенд читает CSS готовой
+ * сборки, где произвольного класса, которого не было в дереве на момент сборки, нет вовсе;
+ * ширина ячейки — геометрия ленты, не кожа, и зависеть от того, откуда сканер читает исходники,
+ * не должна. `flex: 0 0` — ячейка не сжимается, лента прокручивается внутри блока.
+ */
+const CELL_STYLE: React.CSSProperties = { width: 138, flex: '0 0 138px' };
 
 /**
  * ═══ И КОЛОРВЕЯ У ЭТОГО ВЕРСТАКА НЕТ — L-4, И ЭТО ГРАНИЦА, А НЕ ПРОБЕЛ ════════════════════════
@@ -410,91 +420,121 @@ export function Bench({
   const filledSides = bench.sides.filter(
     ({ view, slot }) => !!shownPicture(sideRef(view), slot?.picture),
   ).length;
+  const emptySides = bench.sides.length - filledSides;
 
-  /* РЯД ПРОСМОТРЩИКА БОЛЬШЕ НЕ СОБИРАЕТСЯ ЗДЕСЬ. Он собирался из плит ВЕРСТАКА и только из них,
-     поэтому «дальше» упиралось в последнюю плиту: за краем верстака ряду просто нечего было
-     показать. Теперь каждая плитка регистрируется в общий `PictureGalleryProvider` студии
-     (смонтирован в `studio-tab.tsx`), а порядок ряда берётся из порядка в документе — листается
-     ровно то, что человек видит, включая референсы и историю прогонов. */
+  /**
+   * СВОБОДНЫЕ ФЛЭТЫ — картинки полосы рода `flat`, не композиты, не стоящие ни в одном слоте
+   * (`fPool` макета). Пул пуст при пустых сторонах → полоса LOCKED под лентой с дверью к прогону:
+   * человек видит не «здесь пусто», а «всё, что вернулось, уже стоит — сгенерируй ещё».
+   */
+  const standing = useMemo(() => {
+    const ids = new Set<number>();
+    for (const row of band.bench ?? []) if ((row.pictureId ?? 0) > 0) ids.add(row.pictureId ?? 0);
+    return ids;
+  }, [band.bench]);
+  const pool = useMemo(
+    () => candidates.filter((p) => !standing.has(p.id ?? 0)),
+    [candidates, standing],
+  );
+
+  /**
+   * ДВЕРЬ «THE FLAT RUN ›» — прокрутка и фокус на GENERATE (`hist:togen` макета), без перерисовки.
+   * Ряд запуска стоит в INPUT — REFERENCES на этом же шаге и помечен `data-flat-generate`
+   * (`flat-run-row.tsx`); кнопка внутри — первая `<button>` ряда.
+   */
+  const gotoRun = () => {
+    const row = document.querySelector<HTMLElement>('[data-flat-generate]');
+    const door = row?.querySelector<HTMLButtonElement>('button');
+    if (!row) return;
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    door?.focus({ preventScroll: true });
+  };
+
+  /* РЯД ПРОСМОТРЩИКА БОЛЬШЕ НЕ СОБИРАЕТСЯ ЗДЕСЬ. Каждая плитка регистрируется в общий
+     `PictureGalleryProvider` студии (смонтирован в `studio-tab.tsx`), а порядок ряда берётся из
+     порядка в документе — листается ровно то, что человек видит. */
 
   return (
     <Section
       id='design-bench'
       title='flat slots'
-      question='— whatever is marked here is what the sheet and the tech pack read'
+      question='— what the tech pack reads'
       action={
-        mintingDetail ? (
-          <Text size='micro' variant='label' component='span' className='uppercase'>
-            adding a detail…
-          </Text>
-        ) : undefined
+        <>
+          {mintingDetail && (
+            <Text size='micro' variant='label' component='span' className='uppercase'>
+              adding a detail…
+            </Text>
+          )}
+          <Counter n={filledSides} noun='side' total={bench.sides.length} />
+        </>
       }
     >
-      {/* NO BANNER HERE. The composer (`studio-tab`) owns the one that says «choosing for FRONT —
-          click a picture in the band», because it owns both the asking side and the answering one.
-          What the bench adds instead is WHICH slot is armed — a thing said positionally, on the slot
-          itself, which a page-level banner cannot do. */}
-
-      {/* ШАПКА БЛОКА — строка о композиции целиком, до того как речь пойдёт об отдельном слоте:
-          чем нельзя поручиться за смесь происхождений. Строк было две: рядом стоял `SheetBar`,
-          и он был высказыванием о ПОСЛЕДНЕЙ ВЫПУЩЕННОЙ ВЕРСИИ листа — «v3 · столько-то плит,
-          верстак с тех пор разошёлся». Версии снесены целиком, вместе с бэкендом, поэтому бар
-          снят, а не переписан: пересказывать его текст без версии значило бы говорить о состоянии,
-          которого больше не существует. Полосы починки («fix several ▸») здесь тоже нет — цикл
-          снят (S-15). */}
+      {/* Строка о композиции целиком, до того как речь пойдёт об отдельном слоте: чем нельзя
+          поручиться за смесь происхождений. Рисуется только когда смесь есть. */}
       <MixWarn band={band} />
 
-      <GroupLabel
-        flush
-        action={
-          <Text size='micro' variant='label' component='span'>
-            {filledSides} of 4 · the sheet needs front and back
-          </Text>
-        }
+      {/* ═══ ЛЕНТА ШЕСТИ СТОРОН — `.pstrip` макета: горизонтальный ряд ячеек по 138px, прокрутка
+          внутри ленты, страница вбок не едет. `items-stretch` — пустые ячейки не короче
+          заполненных (у заполненной под кадром подвал). */}
+      <div
+        data-flat-strip=''
+        className='flex items-stretch gap-2 overflow-x-auto pb-1'
       >
-        sides
-      </GroupLabel>
-
-      <Tiles min={190}>
         {bench.sides.map(({ view, slot }) => {
           const ref: DesignBenchSlotRef = sideRef(view);
           const rev = slot?.slotRev ?? 0;
           const picture = shownPicture(ref, slot?.picture);
           const key = slotRefKey(ref);
           return (
-            <BenchSlot
-              key={view}
-              band={band}
-              techCardId={techCardId}
-              slotRef={ref}
-              slot={slot}
-              label={viewLabel(view)}
-              picture={picture}
-              slotRev={rev}
-              required={SHEET_MIN_VIEWS.includes(view)}
-              saving={isSaving(ref)}
-              picking={pickingKey === key}
-              disabled={disabled}
-              shelfOrdinals={shelfOrdinals}
-              onPlaceMedia={(media) => placeMedia(media, ref, rev)}
-              onCancelPick={pick.cancel}
-              onUnmark={() => unmark(ref, rev)}
-              /* ⚠ УГЛА `split` У ПЛИТЫ ВЕРСТАКА НЕТ (F-18). Владелец: «везде где картинка не
-                 мультивью флет или рендер там не должно на ховер показываться сплит».
-                 Здесь это не сужение по вкусу, а факт, гарантированный СЕРВЕРОМ: композит в слот
-                 не встаёт вовсе — `store/design/bench.go` отвечает `composite_plate` («picture %d
-                 is a composite and must be split first»). Значит КАЖДАЯ плита, стоящая в слоте,
-                 заведомо одновидовая, и дверь «разрезать на виды» обещала рез тому, у кого резать
-                 нечего. Вырезать деталь из плиты по-прежнему можно — это `crop`, другая дверь с
-                 другим исходом. */
-              galleryItem={
-                picture?.media ? mediaFullToViewerItem(picture.media as common_MediaFull) : undefined
-              }
-            />
+            <div key={view} className='min-w-0' style={CELL_STYLE}>
+              <BenchSlot
+                band={band}
+                techCardId={techCardId}
+                slotRef={ref}
+                slot={slot}
+                label={viewLabel(view)}
+                picture={picture}
+                slotRev={rev}
+                required={SHEET_MIN_VIEWS.includes(view)}
+                saving={isSaving(ref)}
+                picking={pickingKey === key}
+                disabled={disabled}
+                shelfOrdinals={shelfOrdinals}
+                onPlaceMedia={(media) => placeMedia(media, ref, rev)}
+                onCancelPick={pick.cancel}
+                onUnmark={() => unmark(ref, rev)}
+                galleryItem={
+                  picture?.media
+                    ? mediaFullToViewerItem(picture.media as common_MediaFull)
+                    : undefined
+                }
+              />
+            </div>
           );
         })}
-      </Tiles>
+      </div>
 
+      {/* Жест снятия — словами под лентой. `✕`, а не «клик по плите»: поверхность плиты — закон
+          углов `PictureTile` (зум), снятие — угол ✕; см. шапку `bench-slot.tsx`. */}
+      <Text size='nano' variant='label' component='p'>
+        click ✕ on a standing plate to take it off
+      </Text>
+
+      {/* Пустые стороны есть, а свободных флэтов нет: всё, что вернулось, уже стоит. Дверь ведёт
+          к ряду GENERATE этого же шага. */}
+      {!disabled && emptySides > 0 && pool.length === 0 && (
+        <LockBar reason='every flat that came back is already standing here'>
+          <Button variant='secondary' size='xs' onClick={gotoRun}>
+            the flat run ›
+          </Button>
+        </LockBar>
+      )}
+
+      {/* ═══ ДЕТАЛИ — продуктовая ось, которой у макета нет: именованные слоты (воротник, карман),
+          которые лист цитирует по имени и которые заводит роль `detail` референса. Та же лента,
+          те же ячейки; линейка группы — единственная в блоке, потому что это вторая ось, а не
+          вторая половина той же. */}
       <GroupLabel
         action={
           <Text size='micro' variant='label' component='span'>
@@ -505,34 +545,23 @@ export function Bench({
         details
       </GroupLabel>
 
-      <Tiles min={160}>
+      <div
+        data-flat-details=''
+        className='flex items-stretch gap-2 overflow-x-auto pb-1'
+      >
         {bench.details.map((slot, index) => {
-          /* ═══ СТРОКА БЕЗ ИДЕНТИФИКАТОРА ГОВОРИТ ЭТО ВСЛУХ, А НЕ ПРОПАДАЕТ (F-11b) ═══════════
-             `readBench` не фильтрует по `id`, и деталь без него — законно возможная форма ответа
-             (старый бинарь, недописанная строка). Раньше она молча уезжала в `detailRef(undefined)`
-             и рождала реф, не называющий НИ ОДНОЙ стороны oneof; теперь тип этого не позволяет, и
-             остаётся выбрать, ЧТО рисовать вместо ячейки.
-             Не `null`: пропавшая деталь — это потеря без следа, а плитка со всеми дверями была бы
-             четырьмя органами, каждый из которых промахивается. Поэтому — полосатая заглушка со
-             словами, ровно как у всякой неживой двери этого раздела.
-             ⚠ КЛЮЧ ПО ИНДЕКСУ ЗАКОНЕН РОВНО ЗДЕСЬ: `slot.id` и есть то, чего у строки нет, а
-             `bench.details` отсортирован по нему же — списку без личности другого ключа взять
-             негде. */
+          /* СТРОКА БЕЗ ИДЕНТИФИКАТОРА ГОВОРИТ ЭТО ВСЛУХ, А НЕ ПРОПАДАЕТ (F-11b): `readBench` не
+             фильтрует по `id`, и деталь без него — законно возможная форма ответа. Не `null`:
+             пропавшая деталь — это потеря без следа. Ключ по индексу законен ровно здесь. */
           const slotId = slot.id ?? 0;
           if (slotId <= 0)
             return (
               <div
                 key={`detail-without-id-${index}`}
-                className={cn(
-                  placeholderClass({ dashed: true, tone: 'error' }),
-                  'min-h-[120px] px-2 text-center',
-                )}
-                style={PLACEHOLDER_SURFACE}
+                className={cn(placeholderClass({ dashed: true, tone: 'error' }), 'px-2 text-center')}
+                style={{ ...PLACEHOLDER_SURFACE, ...CELL_STYLE, minHeight: 138 }}
                 title='the server sent this detail row without a slot id, so nothing on it can be addressed — reload the card, and report it if it comes back'
               >
-                {/* ЧЕТЫРЕ СЛОВА, А НЕ ПРЕДЛОЖЕНИЕ: коробка заглушки капслочит содержимое
-                    (`placeholderClass`), а капслок в этой системе разрешён ярлыку, но не фразе
-                    (DESIGN.md §3). Предложение целиком живёт в `title` над ним. */}
                 <Text size='micro' variant='errorLabel' component='span'>
                   ! detail without an id
                 </Text>
@@ -544,65 +573,54 @@ export function Bench({
           const picture = shownPicture(ref, slot.picture);
           const key = slotRefKey(ref);
           return (
-            <BenchSlot
-              key={slot.id}
-              band={band}
-              techCardId={techCardId}
-              slotRef={ref}
-              slot={slot}
-              label={name}
-              picture={picture}
-              slotRev={rev}
-              detail
-              saving={isSaving(ref)}
-              picking={pickingKey === key}
-              disabled={disabled}
-              shelfOrdinals={shelfOrdinals}
-              onPlaceMedia={(media) => placeMedia(media, ref, rev)}
-              onCancelPick={pick.cancel}
-              onUnmark={() => unmark(ref, rev)}
-              /* Тот же довод, что у сторон выше (F-18): в detail-слоте композит стоять не может,
-                 сервер его туда не пускает. */
-              onRename={(next) =>
-                writes.setBenchSlot.mutate({
-                  slot: ref,
-                  // A rename must ECHO the plate. `picture_id` is not optional and 0 means UNMARK,
-                  // so a rename that sent 0 would quietly empty the slot it was renaming.
-                  pictureId: slot.pictureId ?? 0,
-                  expectedSlotRev: rev,
-                  newDetailName: next,
-                })
-              }
-              // СНЯТИЕ ДЕТАЛИ БОЛЬШЕ НИЧЕМ НЕ ЗАПЕРТО ОТСЮДА. Здесь стояло `deleteBlocked` с
-              // единственной причиной — «выпущенный лист ссылается на этот слот по имени», и она
-              // читалась из плит последней ВЕРСИИ листа. Версий больше нет — снесены целиком,
-              // вместе с бэкендом, — а значит нет и замороженного состава, который мог бы
-              // цитировать слот. Придумать запрету вторую причину было бы хуже, чем снять его:
-              // запрет, который клиент назначает сам, разойдётся с сервером на первом же отказе.
-              onDelete={() => writes.deleteDetailSlot.mutate(slot.id ?? 0)}
-              galleryItem={
-                picture?.media ? mediaFullToViewerItem(picture.media as common_MediaFull) : undefined
-              }
-            />
+            <div key={slot.id} className='min-w-0' style={CELL_STYLE}>
+              <BenchSlot
+                band={band}
+                techCardId={techCardId}
+                slotRef={ref}
+                slot={slot}
+                label={name}
+                picture={picture}
+                slotRev={rev}
+                detail
+                saving={isSaving(ref)}
+                picking={pickingKey === key}
+                disabled={disabled}
+                shelfOrdinals={shelfOrdinals}
+                onPlaceMedia={(media) => placeMedia(media, ref, rev)}
+                onCancelPick={pick.cancel}
+                onUnmark={() => unmark(ref, rev)}
+                onRename={(next) =>
+                  writes.setBenchSlot.mutate({
+                    slot: ref,
+                    // A rename must ECHO the plate. `picture_id` is not optional and 0 means UNMARK,
+                    // so a rename that sent 0 would quietly empty the slot it was renaming.
+                    pictureId: slot.pictureId ?? 0,
+                    expectedSlotRev: rev,
+                    newDetailName: next,
+                  })
+                }
+                // СНЯТИЕ ДЕТАЛИ НИЧЕМ НЕ ЗАПЕРТО ОТСЮДА: единственный довод запрета («выпущенный
+                // лист ссылается на слот») умер вместе с версиями листа.
+                onDelete={() => writes.deleteDetailSlot.mutate(slot.id ?? 0)}
+                galleryItem={
+                  picture?.media
+                    ? mediaFullToViewerItem(picture.media as common_MediaFull)
+                    : undefined
+                }
+              />
+            </div>
           );
         })}
 
-        {/* J-15: у ячейки минта остался ОДИН вход — файл. `onPick` («or mark from the band») снят
-            вместе с двумя своими близнецами на слотах: одна дверь, одна судьба. */}
-        <NewDetailCell
-          disabled={disabled}
-          onPlaceMedia={(media, name) => placeMedia(media, mintDetailRef(), 0, name)}
-        />
-      </Tiles>
-
-      {/* J-16 (владелец): абзац «A slot takes a file three ways…» снят. Факты, которые он
-          пересказывал, стоят на самом слоте (плейсхолдер медиа и строка жестов), а третьей дороги
-          — «mark a picture the band already holds» — больше нет вовсе (J-15). */}
-
-      {/* ⚠ МОДАЛКИ СПЛИТА ЗДЕСЬ БОЛЬШЕ НЕТ — вместе с кнопкой, которая её открывала (F-18, разбор
-          у слотов выше). Комментарий переписан, а не снят, ровно потому, что старый описывал орган
-          как живой: следующий читатель восстановил бы по нему то, что убрано намеренно. */}
-
+        {/* J-15: у ячейки минта остался ОДИН вход — файл. */}
+        <div className='min-w-0' style={CELL_STYLE}>
+          <NewDetailCell
+            disabled={disabled}
+            onPlaceMedia={(media, name) => placeMedia(media, mintDetailRef(), 0, name)}
+          />
+        </div>
+      </div>
     </Section>
   );
 }

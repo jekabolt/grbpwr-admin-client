@@ -18,12 +18,14 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Chip } from 'ui/components/chip';
+import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../schema';
 import { findSlot } from './bench-slot';
+import { GapPill } from './generation/run-panel';
+import { isRunLive } from './generation/run-state';
 import { runHandle } from './handles';
 import type { DesignKind } from './bench-kinds';
 import {
@@ -656,9 +658,25 @@ function count(n: number, one: string, many = `${one}s`): string {
 }
 
 /**
- * ОБЕ ДВЕРИ И ВОПРОС ПЕРЕД НИМИ — ОДНИМ ОРГАНОМ, потому что чипов рекола на карточке два (строка
- * истории и раскрытая панель прогона), а вопрос обязан быть у них общий. Разъехавшись, две модалки
- * назвали бы одному жесту разные последствия — и вторая неизбежно оказалась бы короче первой.
+ * ОБЕ ДВЕРИ И ВОПРОС ПЕРЕД НИМИ — ОДНИМ ОРГАНОМ, потому что вопрос обязан быть один на карточку:
+ * две модалки назвали бы одному жесту разные последствия, и вторая неизбежно оказалась бы короче
+ * первой. С раскладкой макета орган стоит РОВНО В ОДНОМ месте — в мета-ряду строки истории; из
+ * раскрытой панели прогона он снят, панель теперь стоит прямо под этим рядом.
+ *
+ * ═══ ДВЕРЬ ЕСТЬ ВСЕГДА, И ПОГАШЕННАЯ ОБЪЯСНЯЕТ СЕБЯ РЯДОМ (макет, `histRow`) ══════════════════
+ * Раньше орган возвращал `null`, когда двери было нечего отдать, — и строка без двери читалась
+ * как строка, у которой рекола НЕТ, а не как строка, у которой ему НЕЧЕГО брать. Теперь обе двери
+ * стоят на каждой строке, а причина гашения — пилюлей-gap ПЕРЕД дверью, как в макете:
+ * `NOTHING WENT IN · [RECALL ▸]`, `NOTHING RASTER CAME BACK · [+ RESULTS ▸]`.
+ *
+ * ⚠ СМЫСЛ ДВЕРЕЙ — ПРОДУКТА, НЕ МАКЕТА. `+ results ▸` здесь ЗАМЕЩАЕТ INPUT — REFERENCES выходами
+ * прогона (J-4), а не ставит их в свободные ячейки верстака, как в макете; поэтому и причины у
+ * него свои: «its output is a model» (3D, J-11), «this run has not come back yet», «nothing raster
+ * came back», и «<kind> is not on screen» — приёмник того рода не смонтирован, а переключателя
+ * вида у этой сборки нет (`useStudioKindSwitch` композитор не зовёт).
+ *
+ * Векторный прогон дверей не имеет вовсе — исключение самого владельца (T-16, «рекола для
+ * генерации свг вектора не должно быть»): перерисовку начинают из редактора плиты.
  */
 export function RecallDoors({
   techCardId,
@@ -679,48 +697,56 @@ export function RecallDoors({
   const runId = run.id ?? 0;
   const handle = runHandle(runId) || 'that run';
   const kind = (run.kind ?? '').trim().toLowerCase();
-  /**
-   * ВЕКТОРНЫЙ ПРОГОН ДВЕРЕЙ НЕ ИМЕЕТ — исключение самого владельца (T-16, «рекола для генерации свг
-   * вектора не должно быть»): перерисовку начинают из редактора плиты, и её вход — эта плита.
-   */
   const isVector = kind === 'vector';
   const target = recallTargetKind(run, asking ?? 'input');
+  const inputTarget = recallTargetKind(run, 'input');
 
   /**
-   * ДВЕРЬ ВХОДА ПРЕДЛАГАЕТСЯ, ТОЛЬКО ЕСЛИ ПРОГОНУ ЕСТЬ ЧТО ОТДАТЬ ИМЕННО ЭТОМУ ЭКРАНУ.
+   * ДВЕРЬ ВХОДА ОТДАЁТ ЧТО-ТО, ТОЛЬКО ЕСЛИ ПРОГОНУ ЕСТЬ ЧТО ОТДАТЬ ИМЕННО ЭТОМУ ЭКРАНУ.
    *
    * Раньше хватало наличия снимка, и на флэт-прогоне без единого референса дверь открывала окно,
    * которое честно предлагало СТЕРЕТЬ промпт и не положить взамен ничего. Разрушение без выгоды —
-   * не выбор, а ловушка, и её место не в модалке, а в отсутствующей двери. У 3D мерка другая: там
-   * жест — это ещё и переход на свой экран, и он осмыслен сам по себе.
+   * не выбор, а ловушка, и её место — в погашенной двери с причиной. У 3D мерка другая: там жест —
+   * это ещё и переход на свой экран, и он осмыслен сам по себе.
    */
   const handsOver =
-    target === 'threed'
+    inputTarget === 'threed'
       ? true
-      : target === 'render'
+      : inputTarget === 'render'
         ? (run.inputs?.slots ?? []).some((s) => (s.mediaId ?? 0) > 0)
         : (run.inputs?.refs ?? []).length > 0 || !!(run.inputs?.garmentNote ?? '').trim();
-  const inputDoor = !!run.inputs && handsOver && !isVector && runId > 0 && !disabled;
   /**
-   * ═══ ПРОГОН 3D ЭТОЙ ДВЕРИ НЕ ИМЕЕТ ВОВСЕ (J-11) ═════════════════════════════════════════════
+   * ═══ ПРОГОН 3D ДВЕРИ РЕЗУЛЬТАТА НЕ ИМЕЕТ ВОВСЕ (J-11) ═══════════════════════════════════════
    *
    * Отсев `.glb` в `keptResults` — половина ответа, и одна она оставила бы дверь, которая на
    * прогоне 3D кладёт во вход ПОСТЕР: растр, «который стоит вместо модели там, где список обязан
    * нарисовать плитку» (`threedfal.go`), а не картинку, которую человек выбрал как результат. Это
    * ровно тот жест, на который владелец и жалуется — «модель не должна добавлятся в промпт», —
-   * только сделанный её тенью.
-   *
-   * ⚠ И ЭТО НЕ «ОСТОРОЖНОСТЬ», А ГРАНИЦА: единственный настоящий выход прогона 3D — файл модели,
-   * а файл модели в промпт картинок не едет по построению. Дверь без предмета — не дверь.
-   * Векторный прогон исключён отдельно и по другой причине (T-16, см. `isVector` выше).
+   * только сделанный её тенью. Единственный настоящий выход прогона 3D — файл модели, а файл модели
+   * в промпт картинок не едет по построению.
    */
   const isThreed = kind === 'threed';
-  const resultsDoor =
-    !isVector &&
-    !isThreed &&
-    runId > 0 &&
-    !disabled &&
-    (run.pictures ?? []).some((p) => p.media?.id != null && !pictureIsModel(p));
+  const live = isRunLive(run);
+  const raster = (run.pictures ?? []).some((p) => p.media?.id != null && !pictureIsModel(p));
+
+  /* Причины гашения — по одной на дверь, первая подходящая. Порядок несущий: «нечего брать»
+     стоит раньше «некому отдать», потому что вторая причина лечится переходом на другой шаг, а
+     первая — нет, и человек должен знать, что переход ему не поможет. */
+  const inputWhy =
+    !run.inputs || !handsOver
+      ? 'nothing went in'
+      : !answerable(inputTarget)
+        ? `${kindLabel(inputTarget)} is not on screen`
+        : null;
+  const resultsWhy = isThreed
+    ? 'its output is a model'
+    : live
+      ? 'this run has not come back yet'
+      : !raster
+        ? 'nothing raster came back'
+        : !answerable('flat')
+          ? 'flat is not on screen'
+          : null;
 
   /**
    * План считается ТОЛЬКО пока стоит вопрос. Считать его на каждый рендер строки значило бы
@@ -752,8 +778,7 @@ export function RecallDoors({
     return null;
   }, [asking, target, band, run]);
 
-  if (!inputDoor && !resultsDoor) return null;
-  if (!answerable('flat') && !answerable(target)) return null;
+  if (isVector || runId <= 0) return null;
 
   const confirmLabel =
     target === 'threed'
@@ -766,24 +791,44 @@ export function RecallDoors({
             'replace the input with its results'
           : 'replace the prompt';
 
+  const inputDark = !!disabled || !!inputWhy;
+  const resultsDark = !!disabled || !!resultsWhy;
+
   return (
     <>
-      {inputDoor && answerable(recallTargetKind(run, 'input')) && (
-        <Chip
-          onClick={() => setAsking('input')}
-          title={`take what ${handle} was given — its reference pictures and its words — into the ${kindLabel(recallTargetKind(run, 'input'))} input. It asks first: the prompt it replaces is not kept anywhere.`}
-        >
-          recall ▸
-        </Chip>
-      )}
-      {resultsDoor && answerable('flat') && (
-        <Chip
-          onClick={() => setAsking('results')}
-          title={`replace input — references with the pictures ${handle} produced. Everything standing in the input now — pictures, roles, notes — leaves it. It asks first.`}
-        >
-          + results ▸
-        </Chip>
-      )}
+      {inputWhy && <GapPill>{inputWhy}</GapPill>}
+      {/* `title` ТОЛЬКО У ЖИВОЙ ДВЕРИ: причина погашенной уже стоит словами перед ней (макет:
+          «title у погашенной не ставится никогда»). Стрелка не попадает в aria-label — читалка
+          произносила бы её юникодным именем. */}
+      <Button
+        variant='secondary'
+        size='xs'
+        disabled={inputDark}
+        onClick={() => setAsking('input')}
+        aria-label={`take the input of ${handle} back`}
+        title={
+          inputDark
+            ? undefined
+            : `take what ${handle} was given — its reference pictures and its words — into the ${kindLabel(inputTarget)} input. It asks first: the prompt it replaces is not kept anywhere.`
+        }
+      >
+        recall ▸
+      </Button>
+      {resultsWhy && <GapPill>{resultsWhy}</GapPill>}
+      <Button
+        variant='secondary'
+        size='xs'
+        disabled={resultsDark}
+        onClick={() => setAsking('results')}
+        aria-label={`put what ${handle} returned into the flat input`}
+        title={
+          resultsDark
+            ? undefined
+            : `replace input — references with the pictures ${handle} produced. Everything standing in the input now — pictures, roles, notes — leaves it. It asks first.`
+        }
+      >
+        + results ▸
+      </Button>
 
       <ConfirmationModal
         open={!!asking}
@@ -814,7 +859,7 @@ export function RecallDoors({
                 {handle} is a 3D run, so it belongs to the 3D studio and not to the flat prompt.
                 {canSwitch
                   ? ' The studio switches to 3D.'
-                  : ' Open 3D on the strip above to see it — this build does not switch views by itself.'}
+                  : ' Open 3D on the chain above to see it — this build does not switch views by itself.'}
               </Text>
               {/* ⚠ ЭТА СТРОКА БЫЛА ЛОЖЬЮ С КРУГА V-14 И ПЕРЕЖИЛА ДВА КРУГА. Она говорила «3D
                   reads the NEWEST render of each view, not a slot anybody can write» — а слоты
@@ -853,7 +898,8 @@ function FlatQuestion({
 }) {
   const removed: string[] = [];
   if (plan.clearRows.length) removed.push(count(plan.clearRows.length, 'picture'));
-  if (plan.clearRoles.length) removed.push(`${count(plan.clearRoles.length, 'role')} and their notes`);
+  if (plan.clearRoles.length)
+    removed.push(`${count(plan.clearRoles.length, 'role')} and their notes`);
   if (plan.clearCallouts) removed.push(count(plan.clearCallouts, 'callout'));
 
   /**
@@ -888,8 +934,7 @@ function FlatQuestion({
       {(plan.refused > 0 || plan.gone > 0 || plan.already > 0) && (
         <Text size='control' variant='label' component='p'>
           {[
-            plan.refused > 0 &&
-              `${plan.refused} will not fit — the input holds ${INPUT_MAX}`,
+            plan.refused > 0 && `${plan.refused} will not fit — the input holds ${INPUT_MAX}`,
             plan.already > 0 && `${plan.already} already in the input`,
             plan.gone > 0 && `${plan.gone} gone from the card, skipped`,
           ]
@@ -1112,7 +1157,9 @@ export function RecalledRunPrompt({
         const lost = callouts.length - kept.length;
         if (lost > 0) {
           form.setValue('callouts', kept as TechCardFormData['callouts'], { shouldDirty: true });
-          said.push(`${count(lost, 'callout')} removed with ${lost === 1 ? 'its' : 'their'} picture`);
+          said.push(
+            `${count(lost, 'callout')} removed with ${lost === 1 ? 'its' : 'their'} picture`,
+          );
         }
       }
 
@@ -1169,7 +1216,10 @@ export function RecalledRunPrompt({
           `${roleFailed} could not be given ${roleFailed === 1 ? 'its role' : 'their roles'} — set ${roleFailed === 1 ? 'it' : 'them'} by hand`,
         );
       if (plan.words) said.push('the description was taken from the run');
-      showMessage(said.join(' · '), stayed.size || roleFailed || result.refusal ? 'error' : 'success');
+      showMessage(
+        said.join(' · '),
+        stayed.size || roleFailed || result.refusal ? 'error' : 'success',
+      );
     })();
     // `form`, `showMessage` и `setReferenceRole` намеренно не в списке: приём взводится ВЫБОРОМ, и
     // перезапуск его от смены ссылки на мутацию был бы вторым приёмом того же жеста.
@@ -1274,8 +1324,11 @@ export function RecallBenchIntake({
           `${placed.join(', ')} ${placed.length === 1 ? 'holds' : 'hold'} ${handle}’s ${placed.length === 1 ? 'plate' : 'plates'} again`,
         );
       if (failed.length)
-        said.push(`${failed.join(', ')} did not take it — someone changed ${failed.length === 1 ? 'that slot' : 'those slots'} first`);
-      if (unresolved) said.push(`${count(unresolved, 'plate')} not on this page of the card, skipped`);
+        said.push(
+          `${failed.join(', ')} did not take it — someone changed ${failed.length === 1 ? 'that slot' : 'those slots'} first`,
+        );
+      if (unresolved)
+        said.push(`${count(unresolved, 'plate')} not on this page of the card, skipped`);
       showMessage(said.join(' · '), failed.length || unresolved ? 'error' : 'success');
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -26,11 +26,12 @@ import { ColourPicker } from '../assets/colour-picker';
 import { useAssetWrites } from '../assets/use-assets';
 import { PartsRow } from '../colour-plan/parts-row';
 import type { ColourPlanWrites } from '../colour-plan/use-colour-plan';
+import { InertDoor } from '../bench-slot';
+import { Counter } from '../core';
 import { PictureTile } from '../picture-tile';
 import { benchSides } from './model';
 import { ClothIsRow } from './cloth-is';
 import type { ColourDraft } from './drafts';
-import { FieldRow, Hint } from './field-row';
 import { COLOUR_NAME_MAX, fabricStatement, hexIsPaintable, statedWords } from './model';
 
 /**
@@ -144,6 +145,31 @@ function nextClothName(taken: common_DesignAsset[]): string {
 
 /** Пиктограмма — квадрат. Лоскут и набивка сами квадратные; портретная рамка резала бы их зря. */
 const TEXTURE_ASPECT = '1/1';
+
+/**
+ * THE CORNERS OF A TILE OF THE MOCKUP (`tile()`): the ROLE bottom left («cloth» / «colour»), the
+ * mark «in» top left. Ink labels on the frame, the same organ `PictureTile` draws its badge with —
+ * a second spelling of the corner would drift by a pixel on the first edit.
+ */
+function RoleLabel({ children }: { children: React.ReactNode }): JSX.Element {
+  return (
+    <span className='pointer-events-none absolute bottom-1 left-1 z-20 inline-block max-w-[calc(100%-8px)] bg-textColor px-1.5 py-0.5'>
+      <Text size='nano' variant='uppercase' component='span' className='!text-bgColor'>
+        {children}
+      </Text>
+    </span>
+  );
+}
+
+function InMark(): JSX.Element {
+  return (
+    <span className='pointer-events-none absolute left-1 top-1 z-20 inline-block bg-textColor px-1.5 py-0.5'>
+      <Text size='nano' variant='uppercase' component='span' className='!text-bgColor'>
+        in
+      </Text>
+    </span>
+  );
+}
 
 /**
  * ═══ СЕТКА ТЕКСТУР ════════════════════════════════════════════════════════════════════════════
@@ -280,7 +306,7 @@ function TextureGrid({
 
   return (
     <>
-      <Tiles min={104}>
+      <Tiles min={118}>
         {shelf.map((a) => {
           const id = a.id ?? 0;
           const name = assetLabel(a);
@@ -329,12 +355,16 @@ function TextureGrid({
                       ))}
                     </span>
                   ) : on ? (
-                    String(n)
+                    /* «in» — the mark of the mockup; with several cloths the ORDER is money (the
+                       prompt calls the first CLOTH 1), so the number rides with it. */
+                    chosen.length > 1 ? `in · ${n}` : 'in'
                   ) : undefined
                 }
                 /* ПОВЕРХНОСТЬ ВЫБИРАЕТ — ЖЕСТОМ МЫШИ. Объявленный орган — чип ниже; довод целиком
                    в шапке файла. */
                 onOpen={disabled ? undefined : () => pick(id)}
+                /* The role corner of the mockup's tile — «cloth» / «pattern», bottom left. */
+                children={<RoleLabel>{pattern ? 'pattern' : 'cloth'}</RoleLabel>}
                 gallery={
                   url
                     ? { src: assetFull(a) || url, thumbnail: url, type: 'image', alt: name }
@@ -400,14 +430,14 @@ function TextureGrid({
                   style={{ ...PLACEHOLDER_SURFACE, aspectRatio: TEXTURE_ASPECT }}
                   className={`${placeholderClass({ dashed: true })} w-full`}
                 >
-                  + texture
+                  + cloth
                 </span>
               </span>
             ) : (
               <MediaSlot
                 aspectRatio={['Custom']}
                 frameAspect={TEXTURE_ASPECT}
-                label='+ texture'
+                label='+ cloth'
                 hint={null}
                 purpose='design · cloth texture of this tech card'
                 showVideos={false}
@@ -602,22 +632,26 @@ function ColourTile({
            карточке была, и вернуть половину значило бы собрать пару, которой не было никогда. */
         onPickRecent={(hex, code) => state.typed({ hex, code })}
         face={
-          paintable ? (
-            <span
-              data-colour-swatch
-              aria-hidden='true'
-              className='block w-full border border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-              style={{ aspectRatio: TEXTURE_ASPECT, background: (recipe.hex ?? '').trim() }}
-            />
-          ) : (
-            <span
-              data-colour-swatch
-              style={{ ...PLACEHOLDER_SURFACE, aspectRatio: TEXTURE_ASPECT }}
-              className={`${placeholderClass({ dashed: true })} w-full`}
-            >
-              + colour
-            </span>
-          )
+          <span className='relative block w-full'>
+            {paintable ? (
+              <span
+                data-colour-swatch
+                aria-hidden='true'
+                className='block w-full border border-textColor'
+                style={{ aspectRatio: TEXTURE_ASPECT, background: (recipe.hex ?? '').trim() }}
+              />
+            ) : (
+              <span
+                data-colour-swatch
+                style={{ ...PLACEHOLDER_SURFACE, aspectRatio: TEXTURE_ASPECT }}
+                className={`${placeholderClass({ dashed: true })} w-full`}
+              >
+                + colour
+              </span>
+            )}
+            <RoleLabel>colour</RoleLabel>
+            {stated.colour && <InMark />}
+          </span>
         }
       />
 
@@ -739,22 +773,25 @@ export function Palette({
           гаснет вместе с планом: сервер, не знающий глагола, обязан быть назван словами, а не
           показан живой кнопкой, которая молча ничего не сделает. */}
       <GroupLabel
-        flush
         action={
-          !disabled && plan.plan && firstSide && !painted ? (
-            <Button
-              variant='secondary'
-              size='xs'
-              data-paint-parts=''
-              onClick={() => setPainting(firstSide)}
-              title='flood the drawing part by part in flat colours; each colour then picks its own cloth below'
-            >
-              paint the parts ▸
-            </Button>
-          ) : undefined
+          <span className='flex flex-wrap items-center gap-1.5'>
+            {/* `N of M cloths` — the cloths of this run against the shelf of the card. */}
+            <Counter n={(recipe.fabrics ?? []).length} noun='cloth' total={clothShelf(band).length} />
+            {!disabled && plan.plan && firstSide && !painted ? (
+              <Button
+                variant='secondary'
+                size='xs'
+                data-paint-parts=''
+                onClick={() => setPainting(firstSide)}
+                title='flood the drawing part by part in flat colours; each colour then picks its own cloth below'
+              >
+                paint the parts ▸
+              </Button>
+            ) : null}
+          </span>
         }
       >
-        texture &amp; colour
+        cloth and colour
       </GroupLabel>
 
       {/* ═══ ТЕКСТУРА И ЦВЕТ — ОДНОЙ СТРОКОЙ (D-8) ═══════════════════════════════════════════
@@ -774,8 +811,8 @@ export function Palette({
           сказал это ровно теми же словами, и повторить их в левой колонке значило бы напечатать
           одно и то же дважды подряд. Плитка цвета называет себя сама — дверью `+ colour` и полем
           имени цвета под ней. */}
-      <FieldRow label='texture' data-fabric-pair className='items-start'>
-        <div className='min-w-0 flex-1'>
+      <div data-fabric-pair>
+        <div className='min-w-0'>
           <TextureGrid
             band={band}
             techCardId={techCardId}
@@ -830,7 +867,7 @@ export function Palette({
             где опись читают целиком. Гарантия «одна поверхность не разойдётся с другой» при этом
             не потеряна и держится тем же, чем держалась: ОБЕ читают `clothWordsRank`. Проба
             сверяет `data-words-rank` экрана с `data-fabric-authority` модалки. */}
-      </FieldRow>
+      </div>
 
       {/* ═══ PARTS — ПОКРАШЕННЫЕ ЦВЕТА И ТКАНЬ КАЖДОГО (фича A) ══════════════════════════════
           Стоит ПОД сеткой, потому что читается сверху вниз как работа: вот полка тканей → вот
@@ -856,55 +893,55 @@ export function Palette({
           единственная строка о том, кто кого перебивает. */}
       <ClothIsRow draft={state} disabled={disabled} />
 
-      {/* ── THE WORDS — the lowest rank, and a legal statement entirely on its own. */}
-      <FieldRow label='in words'>
-        <div className='w-full max-w-[420px]'>
-          <Input
-            name='design-fabric-words'
-            value={recipe.words ?? ''}
-            disabled={disabled}
-            placeholder='fine rib jersey, matte…'
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              state.typed({ words: e.target.value })
-            }
-          />
-        </div>
-        {!disabled && stated.words && (
-          <Button variant='secondary' size='xs' onClick={() => state.clear('words')}>
-            clear
-          </Button>
-        )}
-        {/* ⚠ ЗДЕСЬ СТОЯЛА ТРЕТЬЯ КОПИЯ ОДНОГО УТВЕРЖДЕНИЯ О СТАРШИНСТВЕ (E-2). Владелец про него:
-            «этого не видно» — и он был прав дважды: сказано было тихо И в трёх местах сразу
-            (подсказка этого ряда, абзац под плитками, ряд `cloth is` молчал). Три тихих экземпляра
-            складываются не в громкость, а в шум. Утверждение переехало ЦЕЛИКОМ и ровно одно — к
-            чипам прозрачности, то есть туда, где принимают решение, которое оно отменяет. Здесь
-            осталось то, чего не говорит никто другой: как это поле склеивается с соседним. */}
-        <Hint>free text; it is joined to the opacity and the weight above into one sentence</Hint>
-      </FieldRow>
-
-      {/* ═══ ОДНА ЖИВАЯ ПОДПИСЬ — ЧТО ИМЕННО УЕДЕТ СЛОВАМИ ═══════════════════════════════════════
-          Не «предпросмотр» и не украшение: два контрола выше пишут ОДНО поле провода, и порядок
-          клауз в нём человек иначе не увидит до самой картинки. Строка показывает результат ДО
-          денег теми же словами, что и модалка «what the model gets», потому что читает ту же
-          функцию. Пустая композиция — законный ответ, и он тоже назван вслух. */}
-      <div className='space-y-0.5 pl-[100px] pt-1'>
-        <Text
-          size='micro'
-          variant='label'
-          component='p'
-          data-stated-words={willSay ? 'stated' : 'nothing'}
-          className='normal-case'
-        >
-          {willSay
-            ? `goes to the model as: «${willSay}»`
-            : clothAbove
-              ? 'nothing added — legal; the texture above already states the material'
-              : colourAbove
-                ? 'nothing added — only a colour is stated above, so the material is left to the model'
-                : 'nothing added — and nothing above states the cloth yet either'}
-        </Text>
-      </div>
+      {/* ── IN WORDS — the free text of the recipe: the lowest rank, and a legal statement on its
+          own (mockup `r3WordsRow`). The door FROM CONSTRUCTION ▸ stands where the mockup puts it,
+          INERT WITH ITS REASON: the render prompt is assembled by the SERVER from the card, and a
+          pasted part of the construction is not on the wire — there is nothing to paste it into. */}
+      <GroupLabel
+        action={
+          <span className='flex flex-wrap items-center gap-1.5'>
+            {!disabled && stated.words && (
+              <Button variant='secondary' size='xs' onClick={() => state.clear('words')}>
+                clear
+              </Button>
+            )}
+            <InertDoor
+              label='from construction ▸'
+              reason='the render prompt is assembled by the server from the card itself; a pasted part of the construction is not on the wire, so there is nothing here to paste it into'
+            />
+          </span>
+        }
+      >
+        in words
+      </GroupLabel>
+      <Input
+        name='design-fabric-words'
+        aria-label='the cloth in words'
+        value={recipe.words ?? ''}
+        disabled={disabled}
+        placeholder='fine rib jersey, matte'
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => state.typed({ words: e.target.value })}
+      />
+      {/* ONE LIVE LINE — WHAT TRAVELS AS WORDS. The controls above write ONE wire field; the line
+          shows the result BEFORE the money, in the words of the modal «what the model gets»,
+          because it reads the same function (`statedWords`). An empty composition is a legal
+          answer and is named too. */}
+      <Text
+        size='micro'
+        variant='label'
+        component='p'
+        data-stated-words={willSay ? 'stated' : 'nothing'}
+        className='mt-1 normal-case'
+      >
+        the words above travel with the recipe ·{' '}
+        {willSay
+          ? `goes to the model as «${willSay}»`
+          : clothAbove
+            ? 'nothing added · the cloth above already states the material'
+            : colourAbove
+              ? 'nothing added · only a colour is stated above, so the material is left to the model'
+              : 'nothing added · nothing above states the cloth yet either'}
+      </Text>
     </div>
   );
 }

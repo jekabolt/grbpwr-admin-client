@@ -1,294 +1,170 @@
-import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
+import type { common_MediaFull } from 'api/proto-http/admin';
 import { MediaRecropDialog } from 'components/managers/media/components/media-recrop-dialog';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
-import { useMemo, useState, type JSX } from 'react';
+import { useState, type JSX, type RefObject } from 'react';
 import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
+import Input from 'ui/components/input';
+import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
+import Text from 'ui/components/text';
 
-import { assetLabel, assetThumb, clothShelf } from '../assets/model';
-
-/**
- * ═══ КАДР ИСТОЧНИКА — 196 КВАДРАТНЫХ, А НЕ 132×148 ЛЕНТЫ (J-12) ═══════════════════════════════
- *
- * 132×148 — коробка ВХОДНОЙ ЛЕНТЫ: ею меряются ячейки верстака, флэты, ткани, — то есть вещи,
- * которых на экране много и которые перечисляют. Здесь картинка ОДНА, она обязательна, и она —
- * главный предмет экрана: в ленточной коробке она читалась как один из слотов какого-то ряда,
- * которого на этой вкладке нет вовсе.
- *
- * КВАДРАТ, А НЕ 132/148: источник — лоскут ткани, снятый как попало, и портретная рамка обрезала
- * бы его по вертикали ни за чем. Плитка, которая из него выйдет, тоже квадратная.
- */
-const SOURCE_WIDTH = 'w-[196px]';
+import { ASSET_NAME_MAX } from '../assets/model';
 
 /**
- * ═══ ВХОД ПЛИТКИ — РОВНО ОДНА КАРТИНКА, И ЭТО НЕ НАСТРОЙКА ════════════════════════════════════
+ * ═══ THE INPUT OF A TILE — ONE PICTURE AND ONE NAME, side by side ═══════════════════════════════
  *
- * Контракт называет число прямо: `pattern` требует РОВНО ОДНУ картинку в
- * `params.extra_input_media_ids`, и отказывает `one_source_picture` на любое другое — бесплатно,
- * до резервации. Довод там же и он физический: «плитка, склеенная из двух лоскутов, не может
- * состыковаться сама с собой».
+ * Two columns under the `SOURCE PICTURE` rule: the source cell on the left (≈220 px, square — a
+ * swatch photographed any old way, and a portrait frame would crop it for nothing), the NAME
+ * field on the right. Each of the two knows whether it TRAVELS TO THE MODEL, and says so on its
+ * own face: the filled cell carries `in the prompt`, the name carries `not sent` — the name is how
+ * YOU will find the tile, and it is not the model's.
  *
- * ПОЭТОМУ ЗДЕСЬ ОДИН СЛОТ, А НЕ СПИСОК С ВАЛИДАЦИЕЙ. Список, который потом ругается «выберите
- * одну», сначала предлагает сделать неправильное и лишь затем это запрещает; слот на один кадр
- * делает неправильное состояние невыразимым. Отказ `one_source_picture` при этом всё равно
- * нарисован экраном — прийти он может только с сервера (другая вкладка, другой клиент), и молчать
- * о нём нельзя.
+ * ═══ ONE DOOR, NOT TWO (owner) ═════════════════════════════════════════════════════════════════
  *
- * ДВЕ ДВЕРИ, ОДИН РЕЗУЛЬТАТ (K-16: «можно выбрать из библиотеки или же оно должно предлагать
- * сделать это как паттерн»).
- *   · `MediaSlot` — библиотека, ⌘V и бросок файла. Один модуль на все точки загрузки админки, и
- *     переписывать его здесь было бы четвёртой раскладкой одного и того же жеста.
- *   · РЯД ТКАНЕЙ КАРТОЧКИ — то, что уже лежит на её полке. Это половина K-16, повёрнутая к
- *     человеку, который пришёл СЮДА: лоскут, заведённый в FABRIC RENDER, становится источником
- *     плитки в один клик, и ему не надо искать тот же файл в библиотеке заново.
+ * The second door of the input — «or one of this card's cloths» — was taken off at the owner's
+ * word, and WITH IT WENT THE ABILITY, not only the row: a cloth of the card cannot be picked as a
+ * tile's source any more, a repeat is made only out of a picture of the library, the clipboard or
+ * a dropped file. Written down so it is not read later as an accidental loss; `sourceAssetId`
+ * therefore always travels as 0 («the source was a library file or a paste»).
  *
- * ⚠ ЧТО ЭТОТ РЯД НЕ ДЕЛАЕТ: он не заводит ассетов и ничего не удаляет. Полкой управляет ряд CLOTH
- * в INPUT фабрик-рендера; два писателя одной полки — ровно тот разрыв, который уже был оплачен
- * однажды (см. шапку `clothShelf`).
+ * ═══ EXACTLY ONE PICTURE, AND THAT IS NOT A SETTING ═════════════════════════════════════════════
  *
- * ═══ СВОЕЙ СЕКЦИИ У НЕГО БОЛЬШЕ НЕТ, И ЭТО ГЛАВНАЯ ПРАВКА РЕДИЗАЙНА (G-15) ════════════════════
+ * The contract names the number: `pattern` wants EXACTLY ONE picture in `extra_input_media_ids`
+ * and refuses `one_source_picture` on any other — free, before anything is reserved. The reason
+ * is physical: «a tile glued out of two swatches cannot join to itself». So this is ONE slot, not
+ * a list with validation: a slot for one frame makes the wrong state inexpressible.
  *
- * Владелец: «переделай юай создания паттернов сделай его максимально простым сейчас там хуй пойми
- * что». Экран стоял четырьмя секциями, из которых ТРИ описывали один жест: вход, меню и
- * мета-объяснение про полку. Три белых блока на сером грунте читаются как три равновесных
- * заявления — а заявление здесь одно: «одна картинка внутрь, повторяющаяся ткань наружу». Поэтому
- * вход стал ПЕРВЫМ РЯДОМ одной секции: `SectionStack` разделяет блоки 24-пиксельным грунтом, и
- * ставить туда разрыв внутри одного действия значит рвать действие пополам.
+ * ═══ THE CROP IS OFFERED RIGHT AFTER THE UPLOAD (owner, E-9) ═══════════════════════════════════
+ *
+ * The source is most often a PHOTOGRAPH of live cloth — and on it, besides the cloth, there is the
+ * table, a hand, the edge of the roll. The model reads the whole picture: what is extra in the
+ * frame travels into a paid run as a motif the cloth does not have. Cropping AFTER means buying
+ * the tile twice. The dialog opens from the upload door itself, and `crop ▸` stays under the frame
+ * for every later time. A crop files a NEW media; the original stays in the library untouched.
  */
 export function PatternInput({
-  band,
   source,
   onPick,
   onClear,
+  name,
+  onName,
+  nameRef,
+  slotRef,
   disabled,
-  children,
 }: {
-  band: GetDesignBandResponse;
-  /** Что сейчас поедет в прогон. `null` — ничего, и ворота GENERATE это скажут. */
+  /** What is about to travel. `null` — nothing, and the gate above the row says so. */
   source: common_MediaFull | null;
-  /** Второй довод — РОДСТВО (`source_asset_id`): чип полки знает свою строку, и терять
-   *  её здесь значит потерять «этот паттерн сделан из той ткани» навсегда. Библиотека и
-   *  буфер родителя не имеют и не передают ничего. */
-  onPick: (media: common_MediaFull, sourceAssetId?: number) => void;
+  onPick: (media: common_MediaFull) => void;
   onClear: () => void;
+  name: string;
+  onName: (next: string) => void;
+  /** The NAME field, so the gate's `name it ›` door can put the caret exactly there. */
+  nameRef: RefObject<HTMLInputElement | null>;
+  /** The source cell, so the gate's `+ picture ›` door opens the same picker the cell does. */
+  slotRef: RefObject<HTMLDivElement | null>;
   disabled?: boolean;
-  /**
-   * ═══ ДВЕРЬ И ЕЁ ПОДПИСЬ — В ТОЙ ЖЕ СТРОКЕ, ЧТО КАРТИНКА (J-12) ══════════════════════════════
-   *
-   * Замер, а не вкус: слот стал квадратом 196 px, а справа от него стояли ряд чипов и одна строка
-   * подсказки — то есть колонка высотой в три строки рядом с колонкой высотой в 196. Дверь при
-   * этом висела ПОД обеими, и между ними оставался пустой белый прямоугольник примерно 250 px
-   * высотой во всю ширину блока. Пустое поле внутри блока читается как «здесь что-то не
-   * загрузилось», а не как воздух.
-   *
-   * Теперь правая колонка держит всё, что не картинка, и заканчивается дверью: блок ровно такой
-   * высоты, какой предмет, о котором он говорит, и сама дверь стоит НА УРОВНЕ ГЛАЗ рядом с тем,
-   * что уедет, — не под сгибом.
-   *
-   * ⚠ КРУГ 19 ВЫНУЛ ИЗ ЭТОЙ КОЛОНКИ ВСЮ ПРОЗУ. Приписка «что уедет и почём» была ХВОСТОМ РЯДА
-   * (`GenerateRow trailing`) и снята вместе с ним — разбор в `pattern-studio.tsx`. Колонка
-   * держит теперь ровно три вещи, и две из них условны: чипы полки (пока кадр пуст), поле имени
-   * и дверь.
-   */
-  children?: React.ReactNode;
 }): JSX.Element {
-  const shelf = useMemo(() => clothShelf(band).filter((a) => (a.mediaId ?? 0) > 0), [band]);
   const sourceUrl = source?.media?.fullSize?.mediaUrl || source?.media?.thumbnail?.mediaUrl || '';
   const sourceId = source?.id ?? 0;
-
-  /**
-   * ═══ КРОП ПРЕДЛАГАЕТСЯ СРАЗУ ПОСЛЕ ЗАГРУЗКИ — E-9 ═══════════════════════════════════════════
-   *
-   * Владелец, дословно: «в MAKE A PATTERN предлагай сразу кропнуть картинку с текстурой на
-   * аплоуд».
-   *
-   * ПОЧЕМУ ЭТО НЕ ПРИДИРКА К ЛИШНЕМУ КЛИКУ, А ДЕНЬГИ. Источником плитки чаще всего служит
-   * ФОТОГРАФИЯ живой ткани — и на ней, кроме ткани, есть стол, рука, край рулона и половина
-   * мастерской. Модель «читает картинку целиком»: лишнее в кадре уезжает в оплаченный прогон
-   * мотивом, которого в ткани нет. Кадрировать ПОСЛЕ — значит купить плитку второй раз.
-   *
-   * ⚠ «НА АПЛОУД» — ЭТО РОВНО ДВЕРЬ ЗАГРУЗКИ, А НЕ ЛЮБОЕ ПОЯВЛЕНИЕ ИСТОЧНИКА, И РАЗЛИЧИЕ ЗДЕСЬ
-   * ЕСТЬ ЧЕМ СДЕЛАТЬ. Источник приходит ДВУМЯ путями: `MediaSlot` (загрузка, ⌘V, бросок,
-   * библиотека) и ЧИП ПОЛКИ — «или лоскут этой карточки». Лоскут уже кадрирован тем, кто его
-   * заводил; окно, распахивающееся на клик по чипу, было бы модалкой на ровном месте (PRODUCT.md:
-   * «Modal as first thought. Modals are usually laziness»). Поэтому окно поднимает САМ обработчик
-   * двери загрузки, а не эффект на изменение `sourceId`: эффект обоих путей не различает вовсе.
-   *
-   * ⚠ ДВЕРЬ `crop ▸` ПРИ ЭТОМ ВИДНА ВСЕГДА, пока есть что резать. Решение «обрезать» приходит и
-   * позже — уже посмотрев на лоскут, — а окно, которое нельзя открыть повторно, это тупик.
-   *
-   * ⚠ КРОП РОЖДАЕТ НОВОЕ МЕДИА, А НЕ ПРАВИТ СТАРОЕ, и это поведение диалога, а не наше решение.
-   * Оригинал остаётся в библиотеке нетронутым; сюда возвращается КОПИЯ и встаёт источником
-   * прогона. Сказано словами под кадром, потому что «обрезал и потерял оригинал» — самый дорогой
-   * из возможных здесь домыслов.
-   */
   const [cropping, setCropping] = useState(false);
 
   return (
-    <div
-      data-pattern-act='make'
-      className='flex flex-wrap items-start gap-3'
-    >
-      <div className={`flex flex-col gap-1 ${SOURCE_WIDTH}`}>
+    <div data-pattern-input='' className='grid grid-cols-1 gap-5 md:grid-cols-2'>
+      {/* ─── the source cell ────────────────────────────────────────────────────────────── */}
+      <div ref={slotRef} data-pattern-source={sourceId || 'empty'} className='flex max-w-[220px] flex-col gap-1'>
         {disabled && !sourceUrl ? (
           <span
             data-inert='this card is read-only for you — a run spends money, so attaching its input stops here too'
             title='this card is read-only for you — a run spends money, so attaching its input stops here too'
             className='block w-full'
           >
-            <Placeholder label='+ picture' dashed aspect='square' className='w-full' />
+            <Placeholder label='source picture' dashed aspect='square' className='w-full' />
           </span>
         ) : (
           <MediaSlot
             aspectRatio={['Custom']}
-            frameAspect='1/1'
-            label='+ picture'
-            /* ⚠ `hint` НЕ ПЕРЕДАЁТСЯ ВОВСЕ, И ЭТО ПРАВКА, А НЕ ПРОПУСК (круг 19). Владелец:
-               «переделай юай создания паттернов сделай его максимально простым сейчас там хуй
-               пойми что». Здесь стояло `hint={null}` — то есть собственная строка примитива
-               ГАСИЛАСЬ, а под кадром её переписывали своими словами («⌘V · drop · browse»),
-               третьей редакцией одного и того же жеста. Теперь строку говорит сам `MediaSlot`,
-               ровно так же, как во всех остальных слотах админки: один текст, одно место, где он
-               может измениться. */
+            /* THE EMPTY CELL IS SHORT — the height of the NAME column beside it, as on the
+               prototype — and the FILLED cell is the square the tile will be. A 220 px square of
+               stripes before anything is in it reads as a picture that failed to load. */
+            frameAspect={sourceUrl ? '1/1' : '4/1'}
+            label='source picture *'
+            hint='click to fill'
             purpose='design · the picture a pattern is made from'
             showVideos={false}
             editMode={!disabled}
             mediaUrl={sourceUrl || undefined}
-            alt='pattern source'
+            alt={sourceId ? `picture ${sourceId}` : 'source picture'}
             onSelect={(media) => {
               const first = media[0];
               if (!first?.id) return;
               onPick(first);
-              // «предлагай СРАЗУ кропнуть … НА АПЛОУД» — дословно. Окно поднимается здесь и
-              // только здесь; чип полки его не поднимает (довод у `cropping` выше).
+              // «offer the crop RIGHT AFTER the upload» — the dialog opens from this door only.
               setCropping(true);
             }}
             onClear={sourceUrl && !disabled ? onClear : undefined}
           />
         )}
-        {/* ═══ ЗДЕСЬ СТОЯЛИ ДВЕ ПОДПИСИ ПОД КАДРОМ, И ОБЕ СНЯТЫ (круг 19) ═══════════════════
-            Владелец: «переделай юай создания паттернов сделай его максимально простым сейчас там
-            хуй пойми что».
 
-            ПЕРВАЯ — `media 123` / `required · exactly one`. НОМЕР СТРОКИ В БАЗЕ НЕ ЕСТЬ СВЕДЕНИЕ:
-            человек, глядящий на свою картинку, не сверяет её идентификатор ни с чем, а когда
-            кадр пуст, слово «required» сообщает то же, что и пустая обязательная рамка. «Exactly
-            one» и вовсе описывало правило, которое ЗДЕСЬ НЕВЫРАЗИМО нарушить: слот один, и
-            второй картинке некуда лечь (довод целиком — в шапке файла).
-
-            ВТОРАЯ — `⌘V · drop · browse`. Это была ТРЕТЬЯ редакция одной фразы: `MediaSlot` пишет
-            её сам («⌘V · drag a file · click to browse»), и она гасилась `hint={null}` только
-            ради того, чтобы быть переписанной короче. Слово `read-only` из той же строки не
-            потеряно: замороженный кадр стоит `Placeholder`'ом с поводом в `data-inert`, а дверь
-            GENERATE в этом состоянии инертна и называет ту же причину своими словами. */}
-
-        {/* ДВЕРЬ КРОПА — ПОД КАДРОМ, ВИДИМАЯ, ВСЕГДА, ПОКА ЕСТЬ ЧТО РЕЗАТЬ (E-9). Окно
-            предлагается само один раз; кнопка отвечает за все следующие разы.
-            ⚠ ПОДПИСЬ ПОД НЕЙ СНЯТА («a crop is saved as a new file; this one is left as it is»):
-            она описывала ПОВЕДЕНИЕ ДИАЛОГА, а диалог показывает его сам — в кадре встаёт новая
-            миниатюра вместо старой, и оригинал остаётся там, откуда его взяли. Сама дверь и
-            авто-открытие на загрузку остаются: E-9 — слово владельца и деньги (шапка `cropping`). */}
-        {sourceId > 0 && !disabled && (
-          <Button
-            variant='secondary'
-            size='xs'
-            data-pattern-crop={sourceId}
-            onClick={() => setCropping(true)}
-            title='trim the picture down to the cloth itself — the table, the hand and the background reach the paid prompt as part of the motif'
-          >
-            crop ▸
-          </Button>
+        {/* THE CAPTION OF A FILLED CELL: the picture's name and where it goes. The API carries no
+            file name on a media row, so the picture is named by its number; `in the prompt` is
+            the fact that matters and it is a pill, not prose. */}
+        {sourceId > 0 && (
+          <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
+            <Text size='nano' variant='label' component='span' className='min-w-0 truncate uppercase'>
+              {`picture ${sourceId}`}
+            </Text>
+            <Pill data-in-the-prompt=''>in the prompt</Pill>
+            {!disabled && (
+              <Button
+                variant='secondary'
+                size='xs'
+                data-pattern-crop={sourceId}
+                onClick={() => setCropping(true)}
+                title='trim the picture down to the cloth itself — the table, the hand and the background reach the paid prompt as part of the motif'
+              >
+                crop ▸
+              </Button>
+            )}
+          </div>
         )}
       </div>
 
-      {/* ─── ТКАНИ КАРТОЧКИ КАК ИСТОЧНИК, В ОДИН КЛИК ─────────────────────────────────────── */}
-      <div className='flex min-w-0 flex-1 flex-col gap-2'>
-        {/* ═══ ЧИПЫ ПОЛКИ ВИДНЫ, ПОКА КАДР ПУСТ, И НИ СЕКУНДОЙ ДОЛЬШЕ (круг 19) ═════════════
-            Владелец: «сделай его максимально простым сейчас там хуй пойми что».
-
-            САМА ПОЛКА КАК ИСТОЧНИК ОСТАЁТСЯ — это K-16 («можно выбрать из библиотеки или же оно
-            должно предлагать сделать это как паттерн») и ЕДИНСТВЕННЫЙ путь, который сохраняет
-            родство `sourceAssetId`. Ушли ДВЕ вещи вокруг неё:
-
-              · ПОДПИСЬ `or a cloth`. Под пустым `+ picture` ряд миниатюрных чипов и так читается
-                как «или одна из этих»; заголовок над двумя чипами — это подпись к подписи.
-              · СУФФИКС `· N mm`. Число раппорта на этом экране больше не значит ничего: ряд
-                SCALE снят (J-12), прогон уезжает с нулём, и миллиметры чужой ткани стояли здесь
-                фактом, на который нечем ответить.
-
-            А ВЕСЬ РЯД ТЕПЕРЬ УСЛОВЕН ПО ПУСТОМУ КАДРУ. Пока источника нет, чипы — вторая дверь;
-            как только он встал в рамку, они превращаются в шум: выбор уже сделан и виден
-            картинкой. Вместе с условием ушло и СОСТОЯНИЕ ЧИПА (`selected`/`pressed` и снятие
-            выбора повторным нажатием): при непустом кадре ни один чип не может быть выбранным —
-            ряда попросту нет, — и ветка «нажали на выбранный» стала недостижимой. Снять источник
-            по-прежнему можно там же, где его видно: крестиком самого кадра. */}
-        {!sourceId && shelf.length > 0 ? (
-          <ChipRow>
-            {shelf.map((a) => {
-              const url = assetThumb(a);
-              return (
-                <Chip
-                  key={a.id}
-                  nonForm
-                  disabled={disabled}
-                  /* ⚠ ИМЯ АТРИБУТА — `data-source-cloth`, А НЕ `data-cloth-source`. Одно имя на
-                     два разных смысла — тот самый тихий разрыв, который замечают через месяц по
-                     неверно позеленевшей пробе. */
-                  data-source-cloth={a.id}
-                  title={`make the pattern out of ${assetLabel(a)}`}
-                  onClick={() => {
-                    if (disabled) return;
-                    /* АССЕТ ДЕРЖИТ РАЗРЕШЁННОЕ МЕДИА ЦЕЛИКОМ (`asset.media`), поэтому источник
-                       ставится без второго чтения. Ассет без разрешённого медиа сюда не попадает
-                       — ряд отфильтрован по `mediaId > 0` выше. */
-                    if (a.media) onPick(a.media, a.id ?? 0);
-                  }}
-                >
-                  <span className='flex items-center gap-1'>
-                    {url ? (
-                      <img src={url} alt='' aria-hidden='true' className='size-[12px] object-cover' />
-                    ) : null}
-                    {assetLabel(a)}
-                  </span>
-                </Chip>
-              );
-            })}
-          </ChipRow>
-        ) : null}
-
-        {/* ═══ ЗДЕСЬ СТОЯЛ АБЗАЦ ПРО ФОТОГРАФИЮ НАСТОЯЩЕЙ ТКАНИ, И ОН СНЯТ (круг 19) ════════
-            «a photograph of real cloth — folded, crumpled, shot at an angle — works as well as a
-            drawn motif. The model flattens it, completes the motif and makes it repeat
-            seamlessly.»
-
-            Владелец: «сделай его максимально простым сейчас там хуй пойми что». Это прозаический
-            блок — ровно тот род органа, который он вычёркивает третий круг подряд. Факт, который
-            абзац сообщал, НЕ ПОТЕРЯН: он живёт ТАМ, ГДЕ ДЕЙСТВУЕТ, — в самом промпте паттерна
-            (`designgen/patternprompt.go`, абзац про мятую ткань и достройку мотива). Обещание,
-            напечатанное на экране рядом с обещанием, напечатанным в промпте, — это два места, где
-            одно утверждение может разойтись, и разошлось бы оно молча.
-
-            ⚠ ВМЕСТЕ С АБЗАЦЕМ УШЛА И ВНУТРЕННЯЯ ЛИНИЯ `hairline` ВОКРУГ ХВОСТА КОЛОНКИ. Она
-            отделяла «из чего делаем» от «делаем» — то есть разделяла чипы и дверь. Чипов при
-            непустом кадре больше нет вовсе, и линия отделяла бы имя от пустоты. Единственная
-            линия этого экрана теперь та, что отбивает ряд-делатель от сетки готовых плиток. */}
-        {children}
+      {/* ─── the name ───────────────────────────────────────────────────────────────────── */}
+      <div className='flex min-w-0 flex-col gap-1'>
+        <label className='flex flex-col gap-0.5' htmlFor='design-pattern-name'>
+          <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+            name <b className='text-textColor'>*</b>
+          </Text>
+          <Input
+            ref={nameRef}
+            name='design-pattern-name'
+            data-pattern-name
+            aria-label='name'
+            value={name}
+            disabled={disabled}
+            // THE LIMIT LIVES IN ONE PLACE (`ASSET_NAME_MAX`): `design_asset.name` is VARCHAR(60),
+            // the door obeys the same rule, and the library screen reads the same constant.
+            maxLength={ASSET_NAME_MAX}
+            placeholder='twill repeat'
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => onName(e.target.value)}
+          />
+        </label>
+        <div className='flex flex-wrap items-center gap-1.5'>
+          <Pill data-name-not-sent=''>not sent</Pill>
+          <Text size='nano' variant='label' component='span'>
+            the name is how you will find it
+          </Text>
+        </div>
       </div>
 
-      {/* ⚠ ОКНО МОНТИРУЕТСЯ ТОЛЬКО ПРИ ЖИВОМ ИСТОЧНИКЕ. `MediaRecropDialog` тянет оригинал
-          блобом при каждом открытии; смонтированное впустую, оно било бы в сеть на каждой
-          отрисовке экрана, где картинки ещё нет. */}
+      {/* The dialog is mounted only with a live source: it pulls the original as a blob on every
+          open, and mounted for nothing it would hit the network on every draw of an empty screen. */}
       {source && (
         <MediaRecropDialog
           media={source}
           open={cropping}
           onOpenChange={setCropping}
-          /* КОПИЯ СТАНОВИТСЯ ИСТОЧНИКОМ ПРОГОНА. Родство (`sourceAssetId`) при этом ОБНУЛЯЕТСЯ, и
-             это правда: обрезанная копия — новый файл, и лоскутом карточки она уже не является.
-             Соврать здесь значило бы записать в родословную плитки ассет, из которого её на самом
-             деле не делали. */
-          onCropped={(cropped) => onPick(cropped, 0)}
+          onCropped={(cropped) => onPick(cropped)}
         />
       )}
     </div>

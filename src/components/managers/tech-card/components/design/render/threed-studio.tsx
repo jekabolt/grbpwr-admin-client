@@ -2,13 +2,17 @@ import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, useState, type JSX } from 'react';
+import { Button } from 'ui/components/button';
+import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
+import Text from 'ui/components/text';
 import { ViewSwitch } from 'ui/components/view-switch';
 
+import { InertDoor } from '../bench-slot';
+import { Counter } from '../core';
 import { useCardFit, useThreedDraft } from './drafts';
-import { FieldRow, Hint } from './field-row';
 import { GenerateRow, LockBar, RunRefusal } from './generate-row';
 import {
   PRESENTATIONS,
@@ -22,44 +26,39 @@ import {
 } from './model';
 import { BodyPicker } from './model-picker';
 import { OutputsSection } from './outputs';
-import { SideRows } from './side-row';
+import { RendersByViewGroup } from './side-row';
 import { useStartDesignRun } from './use-design-run';
 import { WhatModelGetsRenderModal } from './what-model-gets';
 
 /**
- * THE 3D STUDIO — the turntable, and the four sides it is turned from.
+ * THE 3D STUDIO — step 5 of the chain, as the prototype draws it (`_step-3d.js`):
  *
- * 3D IS BUILT FROM THE RENDERS, NOT FROM THE DRAWINGS. That single sentence is the whole shape of
- * this screen: its input strip lists RENDERS by view, not flats, and the screen is locked until the
- * FRONT is marked and every marked side comes from ONE revision. The second half of that condition
- * is the one worth stating out loud — sides of different revisions are different colours, and a
- * model stitched out of them looks right up until somebody notices the back is the wrong green.
+ *   3D · one model of this card                                                      [STEP 5]
+ *   ── INPUT · RENDERS BY VIEW ── the render bench, read only, a door back on every empty side
+ *   ── GENERATION ──── [1 MODEL · FROM N SIDES]
+ *      PRESENTATION  in the air | on a model    no figure · the garment stands alone
+ *      (on a model)  THE BODY: build chips + model tiles · GARMENT SIZE *
+ *      FIT  select · [REGULAR FROM THE CARD]
+ *      LOCKED …  · FILL THE EMPTY SIDES ›
+ *      GENERATE · priced by the server on start · WHAT THE MODEL GETS ▸
+ *   3D MODELS OF THIS CARD · built here or brought — the shelf, and BRING YOUR OWN (`./outputs`)
  *
- * ⚠ «СТОРОНА» — ЭТО СЛОТ ВЕРСТАКА, А НЕ «ПОСЛЕДНИЙ РЕНДЕР» (V-14). Экран считал вход сам, из ленты
- * прогонов, а сервер собирал тот же прогон из слотов `kind: render` — два списка без единого общего
- * писателя. Полоса входа теперь показывает ровно тот верстак, который читает сервер, и marking в
- * неё — явный жест человека. С Ф5 полосу заменил блок строк `./side-row.tsx`; здесь он читатель.
+ * 3D IS BUILT FROM THE RENDERS, NOT FROM THE DRAWINGS: the input lists the RENDER bench by view,
+ * and a filled render slot IS the side's membership in the run — there is no mark to set here
+ * (`sides.filter(s => s.picture)`). The bench is the SAME one the server assembles from
+ * (`designSelectBench`), keyed by the studio's one colourway number.
  *
- * «ON A MODEL» IS A WINDOW INTO AN EXISTING DICTIONARY. The models are the admin's own fit-model
- * profiles (`ListModels`), not a second list invented for this menu — and they are picked BY THEIR
- * PHOTOGRAPH (V-15), on the same `Tile` the models manager draws them with. Beside them stands the
- * other half of the same question, the BUILD: a person names a model when they know whose
- * photographs they want and a build when they only know the shape, and a run may state both.
+ * ⚠ ONE SIDE IS REQUIRED — THE FRONT (K-10/K-11): `multi-view-to-3d` builds a volume out of views,
+ * and the provider's free refusal lands on a missing front alone. The other sides make the volume
+ * better and are named as encouragement, not as a condition.
  *
- * LOCKED IS A STATE OF THE SCREEN, NOT ITS ABSENCE. A missing side draws a dashed cell that says
- * `required · blocks 3D` and offers the way out, and the bar under the strip names what is
- * missing. A technologist must be able to see why 3D is not available without pressing anything.
+ * TWO PRESENTATIONS, and the body is never mandatory: a card starts from the garment, not from a
+ * figure. In the air there is no body row and no size row, and neither of their gates. Switching
+ * the presentation does not wipe the body and the size — they stay in the draft and are simply not
+ * read in the air, by the screen, the inventory or the gate.
  *
- * ⚠ ОБЯЗАТЕЛЬНА ОДНА СТОРОНА — ФРОНТ (K-10/K-11). Четыре требовались, пока это был поворотный
- * стол; `multi-view-to-3d` строит объём из ВИДОВ, и бесплатный отказ провайдера ставится ровно на
- * отсутствие фронта. Остальные три делают объём лучше и названы поощрением, а не условием.
- *
- * THE FIT OVERRIDE IS A STATED DEVIATION. It applies to this submission only, and the contract
- * stamps whatever it produces — the card stays the single place of truth about the garment's
- * fit, which is why the override is worded as a badge rather than as a setting.
- *
- * ЗУМ ЗДЕСЬ ТОТ ЖЕ, ЧТО ВЕЗДЕ (T-8): плита объявляет кадр (`gallery`), а ряд собирает и показывает
- * общий `PictureGalleryProvider` студии. Своего просмотрщика этот экран не держит.
+ * LOCKED IS A STATE OF THE SCREEN, NOT ITS ABSENCE: the reason of a dead GENERATE is a visible bar
+ * with its door, never a `title` alone.
  */
 
 /** Radix forbids an empty item value, so every «nothing chosen» option here is a sentinel. */
@@ -70,11 +69,6 @@ export function ThreedStudio({
   band,
   techCardId,
   disabled,
-  /**
-   * Switch the band's strip to another representation — what the input strip's `ask for it ▸` and
-   * the doors of the lock bar do. The studio does not own the strip, so when the composer does not
-   * hand this in the doors become inert WITH THEIR REASON rather than vanishing.
-   */
   onGoToKind,
   colorwayId = 0,
   colorwayLabel = '',
@@ -83,35 +77,16 @@ export function ThreedStudio({
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /** Switch the studio to another step — the doors of the lock bar and of the empty sides. */
   onGoToKind?: (kind: 'flat' | 'render') => void;
   /**
-   * ═══ СКОУП СБОРКИ — ЧИСЛО СВЕРХУ, А НЕ КОНСТАНТА (J-27 → E-16 → круг 19, C1) ══════════════
-   *
-   * ТРИ СОСТОЯНИЯ У ОДНОЙ СТРОКИ, И ТРЕТЬЕ ЧИТАЕТСЯ ТОЛЬКО ВМЕСТЕ С ПЕРВЫМИ ДВУМЯ:
-   *   · до J-27 колорвей выбирали ЗДЕСЬ — свой пикер на экране 3D; владелец его снял;
-   *   · круг 16 снял и само общее состояние («в GENERATION — FABRIC RENDER мы полностью убираем
-   *     колорвеи»), и проп ушёл: значение стало ЖЁСТКИМ НУЛЁМ — правильно и ровно потому, что
-   *     FABRIC RENDER писал тогда ТОЛЬКО безымянный верстак. Читай 3D что-нибудь другое — и вход
-   *     показывал бы «0 of 4» над карточкой с четырьмя готовыми рендерами;
-   *   · круг 19 вернул ВЫБОР — один на всю студию, в ряду представлений. Писатель верстака снова
-   *     умеет писать именованный, значит и читатель обязан читать названный, а не ноль.
-   *
-   * ⚠ ЗНАЧЕНИЕ НЕСУЩЕЕ, И ДОВОД ТОТ ЖЕ, ЧТО БЫЛ. Оно адресует верстак, который прочитает СЕРВЕР
-   * (`designSelectBench`) и по членству в котором откроется ДВЕРЬ (`no_fabric_render`). Одно число
-   * на обе половины — но теперь потому, что оно ОДНО НА СТУДИЮ, а не потому, что выбора нет.
-   * Своего пикера здесь не заводится: J-27 не отменён, орган остаётся один и живёт наверху.
+   * THE BENCH BEING BUILT — one number for the whole studio (`useColorwayChoice`). It addresses the
+   * bench the SERVER reads (`designSelectBench`) and the set the door opens on (`no_fabric_render`).
    */
   colorwayId?: number;
-  /** Имя выбранного; `''` под `no colourway` — отказ двери говорит это словами, а не пустотой. */
+  /** Its human name; `''` under `no colourway` — the refusals say so in words. */
   colorwayLabel?: string;
-  /**
-   * ⚠ ИМ БОЛЬШЕ НЕ РАБОТАЮТ, И ДВЕРЬ 3D ЭТО ТЕПЕРЬ ИСПОЛНЯЕТ, А НЕ ОБЪЯВЛЯЕТ. Резольвнутый ответ
-   * единственного органа выбора (`useColorwayChoice` в `studio-tab.tsx`) — второго предиката
-   * архива в студии нет и заводить его здесь нельзя.
-   *
-   * ⚠ ЧИТАЮТ ЕГО ТОЛЬКО ВОРОТА. Полоса входа под архивным колорвеем показывает те же четыре
-   * стороны, разметку сторон и разрез — сборка запрещена, ЧТЕНИЕ и разметка нет.
-   */
+  /** ⚠ Read by the GATE only: reading and the input strip work under an archived colourway. */
   colorwayArchived?: boolean;
 }): JSX.Element {
   const { draft, patch } = useThreedDraft();
@@ -128,223 +103,174 @@ export function ThreedStudio({
   const sizeName = (id: number) =>
     (sizes.find((s) => s.id === id)?.name ?? '').trim() || (id ? `size ${id}` : '');
 
-  /**
-   * ДВА ОТКАЗА, А НЕ ОДИН, И РАЗНИЦА НЕ СЛОВЕСНАЯ: `input` — про то, чего не хватает НА ВХОДЕ (его
-   * полоса стоит под входом, где глаз), `gate` — весь отказ целиком, включая вопросы меню, и его
-   * читает кнопка. Одной полосой они выглядели бы одинаково и стояли бы не там: «pick a body» под
-   * полосой картинок — это указание не на тот орган.
-   */
+  /** The refusal over the INPUT — the render bench and the colourway; an obstacle of the chain. */
   const input: Gate = useMemo(
     () => threedGate(band, colorwayId, colorwayLabel, colorwayArchived),
     [band, colorwayId, colorwayLabel, colorwayArchived],
   );
 
+  /** The whole gate — the input first, then the screen's OWN questions (body, size). */
   const gate: Gate = useMemo(() => {
-    const base = input;
-    if (!base.ok) return base;
+    if (!input.ok) return input;
     if (draft.presentation === 'model') {
-      // ОДИН ВОПРОС — «на каком теле», — и ответить на него можно ЛЮБОЙ из двух половин. Требовать
-      // именно строку картотеки значило бы отказывать в законном прогоне «на атлетичном теле,
-      // человек не важен», который контракт разрешает прямым текстом.
+      // ONE QUESTION — «on what body» — answerable by EITHER half: a named model, or a build.
       if (!draft.modelId && !draft.bodyType) {
         return {
           ok: false,
           reason:
-            'say what body it sits on — pick one of our models, or name a build; or turn it in the air instead',
+            'say what body it sits on · pick one of our models, or name a build; or turn it in the air instead',
         };
       }
       if (!draft.garmentSizeId) {
         return {
           ok: false,
-          reason: 'pick which garment size sits on that body — a fit on a figure has to name one',
+          reason: 'pick which garment size sits on that body · a fit on a figure has to name one',
         };
       }
     }
     return { ok: true };
   }, [input, draft.presentation, draft.modelId, draft.bodyType, draft.garmentSizeId]);
 
-  /**
-   * ЧТО БУДЕТ КУПЛЕНО — В ЧИСЛЕ ВИДОВ, А НЕ КАДРОВ (K-11). «12 frames» описывало поворотный стол,
-   * которого больше нет; покупается ОДИН объём, собранный из отмеченных сторон, и единственное
-   * число, которое человеку тут полезно, — сколько сторон он в него положил.
-   */
+  /** WHAT IS BOUGHT — in sides, not frames (K-11): one volume, built from the standing sides. */
   const marked = useMemo(() => threedRunViews(sides), [sides]);
   const shape =
-    marked.length === 1
-      ? '1 model · from the front alone'
-      : `1 model · from ${marked.length} marked sides`;
+    marked.length === 0
+      ? '1 model · nothing came back yet'
+      : `1 model · from ${marked.length} ${marked.length === 1 ? 'side' : 'sides'}`;
 
   const fitOptions = useMemo(() => fitChoices(cardFit), [cardFit]);
+  const fitStated = (cardFit ?? '').trim();
+  const fitDiffers = !!draft.fitOverride && draft.fitOverride !== fitStated;
+
+  const named = !!draft.modelId || !!draft.bodyType;
+  const modelCount = (models ?? []).filter((m) => (m.id ?? 0) > 0).length;
 
   const generate = () => {
     const sourcePictureIds = turntableSourceIds(sides);
-    // The gate already refuses an incomplete set; this is the second, cheap guard, because sending
-    // a turntable with no sources would freeze a run nobody can ever read back.
+    // The gate already refuses an incomplete set; this is the second, cheap guard.
     if (!sourcePictureIds.length) return;
     run.start({
       kind: 'threed',
       ask: '',
       params: {
-        // ТОЛЬКО ОТМЕЧЕННЫЕ СТОРОНЫ. Здесь стоял полный список четырёх видов — заявление, что
-        // прогон просит все четыре, — и оно перестало быть правдой, когда обязательным остался
-        // один фронт: `views` замораживается в истории как «что просили», и четыре вида над двумя
-        // плитами были бы записью о запросе, которого не было.
+        // ONLY THE STANDING SIDES: `views` is frozen in the history as «what was asked».
         views: marked,
-        // Деталей этот прогон не просит, и список пуст ЯВНО: сервер сверяет его длину с числом
-        // элементов `detail` в `views`, и «поле не задано» здесь означало бы то же, что пустой
-        // список, только молча.
         detailSlotIds: [],
-        // КОЛОРВЕЙ СБОРКИ (L-3). Сервер читает ТОЛЬКО верстак этого колорвея (`designSelectBench`)
-        // и отказывает прогону, чей колорвей не значится в `render_bench_colorway_ids`. `0` —
-        // безколорвейный верстак: легаси-карточка собирается ровно как вчера, и смеси колорвеев
-        // не бывает ни при каком значении поля.
+        // THE COLOURWAY OF THE BUILD (L-3): the server reads ONLY this colourway's render bench.
         colorwayId,
         layout: '',
         colour: undefined,
         threed: {
-          // ЯВНЫЙ НОЛЬ — «не сказано» (K-11). Поле контракта живо, органа за ним больше нет, и
-          // отправлять 12 после того, как никто не поворачивает вещь на 12 кадров, значило бы
-          // заморозить в истории число, которого никто не просил.
+          // EXPLICIT ZERO — «not said» (K-11): nobody turns the garment by 12 frames any more.
           frames: 0,
           presentation: draft.presentation,
           modelId: draft.presentation === 'model' ? draft.modelId : 0,
           garmentSizeId: draft.presentation === 'model' ? draft.garmentSizeId : 0,
           fitOverride: draft.fitOverride,
-          // ТЕЛОСЛОЖЕНИЕ — ВЫБОР ЧЕЛОВЕКА, А НЕ ЗАГЛУШКА (V-15). Пустая строка на проводе читается
-          // ровно как «не сказано»: генератор тогда выбирает сам. Как и `model_id`, оно принадлежит
-          // подаче на фигуре — «в воздухе» тела нет, и говорить о его форме было бы ложью в
-          // замороженной истории.
+          // THE BUILD IS A PERSON'S CHOICE, NOT A STUB (V-15): '' reads as «not said».
           bodyType: draft.presentation === 'model' ? draft.bodyType : '',
           sourcePictureIds,
         },
         fixTarget: '',
         extraInputMediaIds: [],
-        // NOT A FIX, AND SAID EXPLICITLY IN BOTH SPELLINGS. `fix_target` is the frozen scalar the
-        // history already states; `fix_targets`/`fix_slot_ids` are the selection a new run uses.
-        // Empty in all three is «this run corrects nothing», which is what these two screens do.
         fixTargets: [],
         fixSlotIds: [],
-        // `auto_split` is only meaningful with layout = one, and neither of these screens produces
-        // a composite: a render comes back one picture per filled slot, a turntable frame by frame.
         autoSplit: false,
         pattern: undefined,
         useFlatSlots: false,
-        // Поле НАРАЩИВАЕТ `use_flat_slots` и осмысленно только на kind=flat; здесь оно ИГНОРИРУЕТСЯ
-        // сервером, а пустой список и так значит «все заполненные». Стоит явно, потому что
-        // контракт требует назвать поле, а не потому, что этому прогону есть что им сказать.
         flatSlotIds: [],
       },
     });
   };
 
+  /* THE DOOR OF THE LOCKED BAR — where the refusal is FIXED. The input refusals point at another
+     step; the screen's own (body, size) are fixed a few rows up, and a door there would point at
+     an organ a centimetre away. `colourway` — the exit is the select on the rail. */
+  const lockDoors = (() => {
+    if (gate.ok || input.ok) return null;
+    if (!onGoToKind) {
+      return (
+        <InertDoor
+          label='fill the empty sides ›'
+          reason='the way out is the rail above — FABRIC RENDER colours a side and puts it into a slot'
+        />
+      );
+    }
+    switch (input.ok ? undefined : input.next) {
+      case 'render':
+        return (
+          <Button variant='secondary' size='xs' onClick={() => onGoToKind('render')}>
+            fill the empty sides ›
+          </Button>
+        );
+      case 'front-slot':
+        return (
+          <Button variant='secondary' size='xs' onClick={() => onGoToKind('render')}>
+            put a render into front ›
+          </Button>
+        );
+      case 'refill':
+        return (
+          <Button variant='secondary' size='xs' onClick={() => onGoToKind('render')}>
+            re-fill the odd sides ›
+          </Button>
+        );
+      case 'flat':
+        return (
+          <>
+            <Button variant='secondary' size='xs' onClick={() => onGoToKind('flat')}>
+              generate a flat ›
+            </Button>
+            <Button variant='secondary' size='xs' onClick={() => onGoToKind('render')}>
+              generate a render ›
+            </Button>
+          </>
+        );
+      case 'colourway':
+        return null;
+      default:
+        return (
+          <Button variant='secondary' size='xs' onClick={() => onGoToKind('render')}>
+            fill the empty sides ›
+          </Button>
+        );
+    }
+  })();
+
   return (
     <>
-      {/* ═══ У ПОЛОСЫ СНОВА ЕСТЬ ОДНА ЗАПИСЬ, И ЭТО СЛОВО ВЛАДЕЛЬЦА (E-6) ═══════════════════════
-          Здесь стояла записка «`techCardId` и `disabled` больше не передаются»: полоса была
-          ЗЕРКАЛОМ верстака (J-26), у неё не осталось ни одной записи, и карточка, которую нечем
-          править, не нуждалась в слове «read-only».
-
-          Владелец: «в 3д INPUT — RENDERS BY VIEW мультивью карточек тоже должно отображаться и
-          если его расколапсить под мультивью кнока аплай сплитед и они уходят в инпут». Это
-          ЗАПИСЬ, и она возвращает пропы.
-
-          ⚠ ЧЕГО J-26 БОЯЛСЯ И ПОЧЕМУ ЭТОГО БОЛЬШЕ НЕТ. Он боялся ВТОРОГО ПИСАТЕЛЯ ОДНОГО СЛОТА на
-          двух вкладках: два экрана, две прочитанные полосы, два CAS-токена одной строки и ДВА
-          РАЗНЫХ СКОУПА — тот колорвей, что выбран здесь, и тот, что выбран там.
-
-          ⚠ ЗДЕСЬ СТОЯЛО «колорвей снят со всей студии (E-1/E-16), и обе вкладки адресуют ОДИН
-          верстак, `0`». КРУГ 19 ЭТО ОТМЕНИЛ: пикер вернулся. Четвёртого страха всё равно нет, но
-          по ДРУГОЙ причине, и её надо назвать точно — орган ОДИН НА ВСЮ СТУДИЮ
-          (`useColorwayChoice` в `studio-tab.tsx`, `ColorwaySelect` в ряду представлений), и обе
-          вкладки получают ОДНО И ТО ЖЕ число пропом сверху. То есть верстак снова один, но это
-          выбранный колорвей, а не ноль, и держится это ЕДИНСТВЕННОСТЬЮ ОРГАНА: заведи любая из
-          вкладок свой пикер — и скоупы разойдутся ровно так, как боялся J-26.
-
-          Остальные три — обычная цена любых двух писателей, и обе записи идут одним и тем же
-          вызовом одной и той же функции (`ApplySplitDoor`), а не двумя похожими.
-
-          ═══ Ф5 (WAVE2 п.7): ЛЕНТА 3D СНЯТА, ВХОД — ТОТ ЖЕ БЛОК СТРОК, ЧТО НА FABRIC RENDER ═══
-          Владелец прочёл три ряда одинаковых ячеек как одно и то же трижды. Верстак теперь один
-          орган — `SideRows` (строка на сторону: чертёж → рендер → идёт ли в 3D), и здесь он
-          ЧИТАЕТ (`readOnly`): записи рендер-оси остались на FABRIC RENDER, куда ведут двери пустых
-          сторон и полосы причин. Довод J-26 «второй писатель одного слота» этим монтажом
-          исполняется буквально: писатель один и он там. `LockBar` с дверями прежней ленты
-          («put a render into FRONT ▸», «re-fill the odd sides ▸», «generate a flat/render ▸»)
-          стоит под строками — причины отказа с экрана не ушли. */}
-      <SideRows
-        band={band}
-        techCardId={techCardId}
-        disabled={disabled}
-        colorwayId={colorwayId}
-        colorwayLabel={colorwayLabel}
-        onGoToKind={onGoToKind}
-        readOnly
-        lock={input}
-        id='design-threed-input'
-        title='input — renders by view'
-      />
-
       <Section
-        title='generation — 3D'
-        question='— what body it sits on, and how it is worn'
-        /* ОБЪЯВЛЕННЫЙ ЯКОРЬ МЕНЮ — тем же приёмом, что `id='design-bench'` у верстака. Проба
-           утверждает ОТСУТСТВИЕ органа («в этом меню нет выбора колорвея»), а утверждение об
-           отсутствии обязано быть скоуплено объявленной коробкой: без скоупа оно одинаково
-           зеленело бы и на снятом органе, и на пробе, смотрящей не туда. Класс для этого не
-           годится — он переживает правку смысла. */
         id='design-threed-generation'
+        title='3d'
+        question='· one model of this card'
+        action={<Pill tone='ink'>step 5</Pill>}
       >
-        {/* ═══ ПИКЕР КОЛОРВЕЯ СНЯТ (J-27) ══════════════════════════════════════════════════════
-            Владелец, дословно: «GENERATION — 3D не должно быть поля колорвей тк мы и так уже туда
-            передаем все что нужно в такой ткани как нужно все готово для рендера».
+        {/* ═══ INPUT · RENDERS BY VIEW — a READING of the render bench; every empty cell is a
+            door back to FABRIC RENDER, where a side is filled. */}
+        <RendersByViewGroup band={band} colorwayId={colorwayId} onGoToKind={onGoToKind} />
 
-            И это правда РОВНО В ТОМ СМЫСЛЕ, в каком он её говорит: ткань в 3D-прогон уезжает
-            ПИКСЕЛЯМИ — четырьмя рендерами верстака, — а `colorway_id` до модели не доходит ни
-            одним байтом (`Job.SurfaceSteer` собирается из `p.Colour` и подачи, и колорвея в нём
-            нет). То есть поле спрашивало про выбор, которого прогон не делает.
+        {/* ═══ GENERATION ═══════════════════════════════════════════════════════════════════ */}
+        <GroupLabel
+          action={
+            <Pill tone='ink' data-threed-shape=''>
+              {shape}
+            </Pill>
+          }
+        >
+          generation
+        </GroupLabel>
 
-            ⚠ ЗНАЧЕНИЕ ПРИ ЭТОМ ОСТАЁТСЯ, И СНЯТЬ ЕГО БЫЛО НЕЛЬЗЯ. `colorway_id` решает ДВЕ вещи,
-            обе денежные: какой верстак сервер прочитает (`designSelectBench`) и по членству в
-            каком множестве откроется дверь (`no_fabric_render`, бесплатный отказ ДО резерва).
-            Прибить его нулём значило бы убить 3D на всякой карточке, чьи рендер-слоты лежат под
-            колорвеем. Поэтому уходит ОРГАН, а на проводе — ноль изменений: то же `colorwayId`
-            скоупа студии, только теперь у него один источник и разъехаться ему не с чем.
-
-            ⚠ И МОЛЧАНИЯ ИЗ ЭТОГО НЕ ВЫШЛО. Прогон стоит $1.20, и экран, не называющий, ИЗ ЧЕГО
-            он собирается, продавал бы сборку вслепую. Название верстака осталось там, где стоит
-            сам верстак, — в вопросе полосы входа над этой секцией («the render bench of ROSSO»).
-            Это УТВЕРЖДЕНИЕ о том, что уедет, а не поле выбора; сменить колорвей можно ОДНИМ
-            органом на всю студию — селектом в правом конце ряда представлений (круг 19, C1).
-            Прежняя редакция звала за этим на FABRIC RENDER; там его больше нет, и адрес был бы
-            ложным. */}
-        {/* ═══ ПОЛОСА ПРИЧИН МЕНЮ — ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ОТКАЗ МЕНЮ ГОВОРИТСЯ СЛОВАМИ ═══════
-            Зов был снесён соседней волной с доводом «полоса всё равно рисовала `null`, потому что
-            `LockBar` повод не читала». Довод неверен, и это проверено, а не вспомнено:
-            `git show a9470fe7:…/generate-row.tsx` показывает подпись
-            `LockBar({ reason, children }: { reason: string; … })` — повод ДЕСТРУКТУРИРОВАЛСЯ и
-            печатался строкой, а раннего возврата `if (!children) return null` в том коммите не было
-            вовсе. То есть снос убрал не мёртвый орган, а работающий.
-
-            ЧТО ИМЕННО ПРОПАДАЛО. `input.ok && !gate.ok` — это отказ, рождённый НЕ входом, а МЕНЮ:
-            `presentation: 'model'` без тела («say what body it sits on…») и без размера. Верстак
-            при этом полон, полоса входа молчит по построению (`lock={input}`, а `input.ok`), и
-            повод оставался только в `title`/`data-inert` погашенной `GENERATE` — то есть по
-            наведению. Это был ЕДИНСТВЕННЫЙ из пяти экранов, где кнопка могла погаснуть без единой
-            видимой причины.
-
-            БЕЗ ДВЕРЕЙ — И ЭТО ПРАВИЛЬНО: жест, снимающий этот отказ, стоит В ЭТОЙ ЖЕ СЕКЦИИ, двумя
-            рядами ниже (пикер модели, тип фигуры, размер). Дверь «иди туда» указывала бы на орган
-            на расстоянии сантиметра. `LockBar` теперь рисует один повод без дверей и без заголовка
-            `what is missing` — разбор обоих решений в её шапке.
-
-            А то, чего не хватает на ВХОДЕ, по-прежнему говорит своя полоса под входом
-            (`SideRows lock={input}`) — и говорит РЯДОМ ДВЕРЕЙ. Две полосы взаимно
-            исключены условием `input.ok`: одновременно они не появляются никогда. */}
-        {input.ok && !gate.ok && <LockBar reason={gate.reason} />}
-
-        <FieldRow label='presentation'>
-          {/* A SEGMENTED STRIP, NOT A SELECT. Both options are on screen at all times, so the strip
-              states where you are rather than naming where you could go. */}
+        <div className='flex flex-wrap items-center gap-2' data-presentation=''>
+          <Text
+            size='micro'
+            variant='label'
+            tracking='label'
+            component='span'
+            className='uppercase'
+          >
+            presentation
+          </Text>
+          {/* A SEGMENTED STRIP, NOT A SELECT: both options on screen at all times. */}
           <ViewSwitch<Presentation>
             className='shrink-0'
             label='presentation'
@@ -353,44 +279,60 @@ export function ThreedStudio({
             options={PRESENTATIONS.map((p) => ({ value: p.value, label: p.label }))}
             onChange={(next) => patch({ presentation: next })}
           />
-          <Hint>
+          <Text size='micro' variant='label' component='span' className='ml-auto normal-case'>
             {draft.presentation === 'model'
-              ? 'a figure wears it — say whose body, or what build, below'
-              : 'no figure — the garment stands alone'}
-          </Hint>
-        </FieldRow>
+              ? 'a figure wears it · say whose body, or what build, below'
+              : 'no figure · the garment stands alone'}
+          </Text>
+        </div>
 
-        {/* ТЕЛО И РАЗМЕР ПОКАЗЫВАЮТСЯ ТОЛЬКО ДЛЯ «ON A MODEL». Пикер фигуры, которой нет в кадре, —
-            орган без действия, а снимок прогона заморозил бы модель, которой никто не пользовался. */}
+        {/* THE BODY AND THE SIZE ONLY ON «ON A MODEL»: a figure picker for a figure that is not in
+            the picture is an organ without an act. */}
         {draft.presentation === 'model' && (
           <>
-            <FieldRow label='the body' className='items-start'>
-              <BodyPicker
-                models={models}
-                loading={modelsLoading}
-                modelId={draft.modelId}
-                bodyType={draft.bodyType}
-                sizeName={sizeName}
-                disabled={disabled}
-                onModel={(id) => patch({ modelId: id })}
-                onBodyType={(value) => patch({ bodyType: value })}
-              />
-            </FieldRow>
-
-            <FieldRow label='garment size'>
-              <div className='w-[130px] shrink-0'>
+            <GroupLabel
+              action={
+                <span className='flex flex-wrap items-center gap-1.5'>
+                  {named ? <Pill tone='ink'>named</Pill> : <Pill>not named yet</Pill>}
+                  <Counter n={modelCount} noun='model' />
+                </span>
+              }
+            >
+              the body
+            </GroupLabel>
+            <BodyPicker
+              models={models}
+              loading={modelsLoading}
+              modelId={draft.modelId}
+              bodyType={draft.bodyType}
+              sizeName={sizeName}
+              disabled={disabled}
+              onModel={(id) => patch({ modelId: id })}
+              onBodyType={(value) => patch({ bodyType: value })}
+            />
+            <div className='flex flex-wrap items-center gap-2' data-garment-size=''>
+              <Text
+                size='micro'
+                variant='label'
+                tracking='label'
+                component='span'
+                className='uppercase'
+              >
+                garment size <span className='font-bold text-textColor'>*</span>
+              </Text>
+              <div className='w-[160px] shrink-0'>
                 <SelectComponent
                   name='design-threed-size'
                   value={draft.garmentSizeId ? String(draft.garmentSizeId) : NO_SIZE}
-                  placeholder='which size'
+                  placeholder='not set'
                   disabled={disabled}
                   items={[
-                    { value: NO_SIZE, label: '— size —' },
+                    { value: NO_SIZE, label: 'not set' },
                     ...sizes
                       .filter((s) => (s.id ?? 0) > 0)
                       .map((s) => ({
                         value: String(s.id),
-                        label: `size ${(s.name ?? '').trim() || s.id}`,
+                        label: (s.name ?? '').trim() || `size ${s.id}`,
                       })),
                   ]}
                   onValueChange={(value: string) =>
@@ -399,23 +341,33 @@ export function ThreedStudio({
                   fullWidth
                 />
               </div>
-              <Hint>
-                how it SITS: this garment size on that body — free to try, changes nothing on the
-                card
-              </Hint>
-            </FieldRow>
+              <Text size='micro' variant='label' component='span' className='normal-case'>
+                this garment size on that body · free to try, changes nothing on the card
+              </Text>
+            </div>
           </>
         )}
 
-        <FieldRow label='fit'>
+        {/* FIT — in both presentations: the garment hangs in the air and sits on a figure equally
+            cut. The override is a STATED DEVIATION for this run only; the card stays the truth. */}
+        <div className='flex flex-wrap items-center gap-2' data-fit=''>
+          <Text
+            size='micro'
+            variant='label'
+            tracking='label'
+            component='span'
+            className='uppercase'
+          >
+            fit
+          </Text>
           <div className='w-[210px] shrink-0'>
             <SelectComponent
               name='design-threed-fit'
               value={draft.fitOverride || CARD_FIT}
-              placeholder={`card · ${cardFit || 'not stated'}`}
+              placeholder='not set'
               disabled={disabled}
               items={[
-                { value: CARD_FIT, label: `card · ${cardFit || 'not stated'}` },
+                { value: CARD_FIT, label: fitStated ? `${fitStated} · from the card` : 'not set' },
                 ...fitOptions.map((fit) => ({ value: fit, label: fit })),
               ]}
               onValueChange={(value: string) =>
@@ -424,23 +376,21 @@ export function ThreedStudio({
               fullWidth
             />
           </div>
-          {draft.fitOverride ? (
-            <Pill tone='attention'>≠ card — the result will carry the badge</Pill>
+          {fitDiffers ? (
+            <Pill tone='attention' title='the result will carry the badge; the card is not changed'>
+              differs from the card
+            </Pill>
+          ) : fitStated ? (
+            <Pill tone='ink'>{fitStated} from the card</Pill>
           ) : (
-            <Pill>from classification</Pill>
+            <Pill>the card does not name a fit</Pill>
           )}
-          <Hint>
-            a one-run override for this submission only — the card stays the single place of truth
-          </Hint>
-        </FieldRow>
+        </div>
 
-        {/* ОТКАЗ ПОСЛЕДНЕГО НАЖАТИЯ, ДОСЛОВНО И СТОЙКО (Ф4). Этот экран его не рисовал вовсе —
-            отказ жил секунды всплывашки, а деньги при нём двигаются ($1.20 за прогон). Стоит НАД
-            рядом GENERATE, который его и снимает; форма общая с FABRIC RENDER — `RunRefusal`.
-            С `LockBar` выше не спорит: та говорит, почему нельзя нажать, эта — что ответил сервер
-            на нажатие; одновременно они появляются законно (нажали, получили отказ, сняли сторону). */}
+        {/* ═══ THE RUN DOORS — the LOCKED bar with its door, the server's last refusal verbatim,
+            then GENERATE · money · WHAT THE MODEL GETS ▸ (one row on every generative screen). */}
+        {!gate.ok && <LockBar reason={`locked · ${gate.reason}`}>{lockDoors}</LockBar>}
         <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
-
         <GenerateRow
           gate={gate}
           shape={shape}
@@ -451,8 +401,7 @@ export function ThreedStudio({
         />
       </Section>
 
-      {/* The turntables this page of the band holds — the outputs, where the mark «chosen» lives
-          and is SET (W-12). One shared section with FABRIC RENDER; see `./outputs`. */}
+      {/* ═══ 3D MODELS OF THIS CARD · built here or brought — the shelf and BRING YOUR OWN. */}
       <OutputsSection
         band={band}
         techCardId={techCardId}

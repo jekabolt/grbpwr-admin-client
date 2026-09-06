@@ -3,18 +3,27 @@ import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { GENDER_ENUM_TO_SLUG } from 'constants/constants';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useMemo, useRef, useState, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
 import { bornBomLine, upsertDetailText } from '../../form-writers';
 import type { TechCardFormData } from '../../schema';
 import { proposedColourways } from '../colourway-proposals-model';
-import { InventoryLine, NotSent, WmgGroup, WmgShell, WordsAsSent } from '../core';
+import {
+  Counter,
+  EmptyState,
+  InventoryLine,
+  NotSent,
+  WmgGroup,
+  WmgShell,
+  WordsAsSent,
+} from '../core';
 import { formatMoney } from '../generation/money';
 import { runOutputText } from '../generation/run-state';
 import { GenerateRow } from '../render/generate-row';
@@ -23,7 +32,9 @@ import { calloutWords, type CalloutLike } from '../render/what-model-gets';
 import { newClientRequestId } from '../use-design-band';
 import {
   diffProposal,
+  draftSays,
   parseConstructionDraft,
+  wordDiff,
   type ConstructionDraft,
   type FormSnapshot,
   type ProposalRow,
@@ -36,6 +47,7 @@ import {
   type Fill,
   type FillTarget,
 } from './draft-fills';
+import { Fold, GoTo, LockedBar, scrollToOrgan } from './mood-organs';
 import { useCardMemory, useDraftMemory } from './use-draft-fills';
 import { draftIdeaRefusal, useDraftDesignIdea } from './use-draft-idea';
 
@@ -88,11 +100,17 @@ import { draftIdeaRefusal, useDraftDesignIdea } from './use-draft-idea';
  * спрашивает, `diffProposal` их не рождает, ветки записи здесь нет. Ключ `callouts` жив в схеме
  * ответа — сохранённый прогон обязан разбираться на повторе, — но разобрать не значит показать.
  *
- * ЭТО НЕ БЛОК. Орган рисует под-структуру (`GroupLabel` + строки) и стоит ВНУТРИ блока мудборда.
- * Обёртка в `Section` дала бы блок в блоке. Ровно поэтому предложенные колорвеи (B-25) отсюда
- * УЕХАЛИ: свой блок им нужен, а внутри чужого его не бывает — они смонтированы своей секцией в
- * стопке STUDIO (`design/studio-tab.tsx`, D5), и связывает их с прогоном модульный стор, а не
- * соседство в разметке.
+ * ═══ ЭТО СВОЙ БЛОК — `CONSTRUCTION DRAFT · what the model proposes` (макет `_step-mood.js`) ═════
+ *
+ * Здесь стояло «ЭТО НЕ БЛОК: орган стоит ВНУТРИ блока мудборда». Владелец, увидев бету: «не как в
+ * референсе»; макет держит черновик ОТДЕЛЬНЫМ блоком под DESCRIPTION — слова человека и ответ
+ * машины разные вещи, и держать их в одной рамке значит объявить их одним. Поэтому `Section` теперь
+ * СВОЯ (шапка несёт статус прогона, который знает только этот орган), а `mood-board.tsx` монтирует
+ * орган соседом, не ребёнком. Внутри блока: ряд прогона (общий `GenerateRow`, состояние вшито в
+ * его хвост), под самой тяжёлой линейкой — очередь разбора: `TO DECIDE` с отметкой `take` и одной
+ * записью `write N taken ▸`, история (`written · dismissed · hints`) под одним раскрытием.
+ * Предложенные колорвеи (B-25) по-прежнему своим блоком под таблицей слотов; связывает их с
+ * прогоном модульный стор.
  */
 
 const hhmm = () =>
@@ -372,6 +390,9 @@ export function ConstructionDraft({
           // предложении может не быть вовсе. Принятое при этом никуда не делось — оно на карточке,
           // и новое сравнение покажет его как `same`.
           setReceipts({});
+          // Отметки и раскрытия строк — тоже про строки прошлого ответа.
+          setTaken({});
+          setShown({});
           // Колорвеи — ПРЕДЛОЖЕНИЕ, и они ждут клика: подтверждение создаёт продукт (B-25).
           setProposals(techCardId, proposedColourways(parsed));
           // …а поля карточки заполняются САМИ, и только пустые (B-14).
@@ -440,11 +461,16 @@ export function ConstructionDraft({
     };
   }
 
-  function remember(row: ProposalRow, done: { value: string; lineKey?: string }, at: string) {
+  /** Запись в журнал; возвращает АДРЕС записи — по нему строка журнала носит свою квитанцию. */
+  function remember(
+    row: ProposalRow,
+    done: { value: string; lineKey?: string },
+    at: string,
+  ): string | null {
     const target: FillTarget | null = done.lineKey
       ? { kind: 'slot', lineKey: done.lineKey }
       : targetOfRow(row);
-    if (!target) return;
+    if (!target) return null;
     record(techCardId, {
       id: fillIdOf(target),
       target,
@@ -457,6 +483,7 @@ export function ConstructionDraft({
       after: done.value,
       at,
     });
+    return fillIdOf(target);
   }
 
   /**
@@ -480,13 +507,8 @@ export function ConstructionDraft({
     }
   }
 
-  /** Клик по строке «TO DECIDE». Тот же писатель, та же запись журнала — разница только в жесте. */
-  function accept(row: ProposalRow) {
-    const done = applyRow(row);
-    if (!done.ok) return;
-    remember(row, done, hhmm());
-    setReceipts((prev) => ({ ...prev, [row.id]: row.state === 'replace' ? 'replaced' : 'added' }));
-  }
+  /* Клика «принять строку» здесь больше нет: строка ОТМЕЧАЕТСЯ (`take`), а пишет одна кнопка на
+     всю очередь (`writeTaken` ниже) — тем же писателем и с той же записью журнала. */
 
   /**
    * ОТКАТ ОДНОЙ ЗАПИСИ — ВОЗВРАТ ТОГО, ЧТО СТОЯЛО, А НЕ ОЧИСТКА ПОЛЯ.
@@ -561,322 +583,686 @@ export function ConstructionDraft({
   const nothingNew =
     rows.length > 0 && proposed === 0 && live.length === 0 && missing.length === 0;
 
-  return (
-    <div data-c19-draft=''>
-      <GroupLabel>draft of the construction</GroupLabel>
+  /* ═══ ОТМЕТКА, КОТОРАЯ НИЧЕГО НЕ ПИШЕТ (макет `_step-mood.js`: `mood:take` · `mood:mode` ·
+     `mood:write`) ═══════════════════════════════════════════════════════════════════════════════
+     Между «я это беру» и «в поле стоит другое» стоит ОДИН явный жест — `write N taken ▸`: строка
+     сначала отмечается, а пишет одна кнопка на всю очередь. Значение отметки — РЕЖИМ записи
+     (`replace` | `append`), а не `true`: режим есть свойство отметки, и вторая карта под него
+     однажды разошлась бы с первой. Отметки ключуются строкой предложения и обнуляются вместе с
+     ответом прогона, ровно как квитанции. Писатели при этом ТЕ ЖЕ (`applyRow`, `remember`) —
+     изменился жест, не запись. */
+  const [taken, setTaken] = useState<Record<string, 'replace' | 'append'>>({});
+  const [shown, setShown] = useState<Record<string, boolean>>({});
+  const [logOpen, setLogOpen] = useState(false);
+  /** Квитанция записи по АДРЕСУ ЖУРНАЛА — пилюля `added` / `replaced` в строке WRITTEN. */
+  const [receiptByFill, setReceiptByFill] = useState<Record<string, Receipt>>({});
 
-      {/* СТАНДАРТНЫЙ ХВОСТ РЯДА, КАК У ЧЕТЫРЁХ ШАГОВ (SPEC п.4: «дуплет обязателен и у черновика
-          мудборда»). Здесь стоял свой хвост без двери — на том основании, что «вход собирает сервер
-          сам, и панели у доски не существует». Первое верно и печатается ПЕРВОЙ строкой панели;
-          второе было отказом, а не фактом: что сервер ЧИТАЕТ (сколько картинок, сколько указаний,
-          есть ли описание) известно точно, и это опись ФАКТОВ, а не догадка о тексте. `shape`
-          называет состав, и строка про деньги — та же самая, дословно. */}
-      <GenerateRow
-        gate={gate}
-        label='draft the construction ▸'
-        pending={draftIdea.isPending}
-        disabled={readOnly}
-        onGenerate={askForDraft}
-        shape={`${items.length} picture${items.length === 1 ? '' : 's'} · ${boardNotes.length} note${
-          boardNotes.length === 1 ? '' : 's'
-        }`}
-        onInspect={() => setInspecting(true)}
-      />
-      <DraftInventoryModal
-        open={inspecting}
-        onOpenChange={setInspecting}
-        lastRun={lastRun}
-        items={items}
-        callouts={callouts}
-        concept={concept}
-        fit={fit}
-        category={categoryName}
-        gender={genderLabel}
-        sizeRun={sizeRun}
-        aspects={details}
-        bomItems={bomItems}
-        boardDirty={boardDirty}
-      />
+  /* ДОСКА УШЛА ВПЕРЁД — ОДИН ФЛАГ НА ТРИ БЛОКА ВЫХОДА. Считается здесь (`stale`), показывается там
+     (`BoardMovedPill` в GENERAL INFORMATION, CONSTRUCTION, MATERIAL SLOTS). Через стор, а не
+     контекст: те блоки стоят соседями в стопке STUDIO, а не детьми этого органа. */
+  const setBoardMoved = useDraftMemory((st) => st.setBoardMoved);
+  useEffect(() => {
+    setBoardMoved(techCardId, stale);
+  }, [techCardId, stale, setBoardMoved]);
 
-      {staged && (
-        <div className='mt-2'>
-          <div className='flex flex-wrap items-baseline gap-2'>
-            <Text size='micro' variant='label' component='span' data-c19-draft-head=''>
-              read {staged.readPictures} picture{staged.readPictures === 1 ? '' : 's'} ·{' '}
-              {staged.readNotes} note{staged.readNotes === 1 ? '' : 's'} · {staged.time}
-            </Text>
-            {stale && <Pill tone='attention'>the moodboard has changed since</Pill>}
-            {price && (
-              <Text size='nano' variant='label' component='span' className='ml-auto'>
-                {price}
-              </Text>
-            )}
-          </div>
+  /**
+   * ЗАПИСЬ «ПРИПИСАТЬ»: слова карточки остаются, черновик встаёт после них — режим отметки там,
+   * где черновик ПРОДОЛЖАЕТ текст (`draftSays().mode === 'add'`). Только у текстовых скаляров:
+   * `fit` словарный, у строки BOM режима нет вовсе (список только добавляет). Читается
+   * `getValues`, а не снимок рендера, — по тому же доводу, что у всех писателей этого файла.
+   */
+  function appendRow(row: ProposalRow): { ok: boolean; value: string } {
+    if (readOnly) return { ok: false, value: '' };
+    const w = row.write;
+    if (w.kind === 'detail') {
+      const cur = (
+        ((getValues('details') ?? []) as { key?: string; text?: string }[]).find(
+          (d) => d.key === w.key,
+        )?.text ?? ''
+      ).trimEnd();
+      const joined = cur ? `${cur}\n${w.text}` : w.text;
+      upsertDetailText(getValues, setValue, w.key, joined);
+      return { ok: true, value: joined };
+    }
+    if (w.kind === 'concept') {
+      const cur = ((getValues('concept') ?? '') as string).trimEnd();
+      const joined = cur ? `${cur}\n${w.text}` : w.text;
+      if (joined.length > conceptMax) {
+        showMessage(
+          `this does not fit — the description holds ${conceptMax} characters and with the draft appended it would be ${joined.length}`,
+          'error',
+        );
+        return { ok: false, value: '' };
+      }
+      setValue('concept', joined, { shouldDirty: true });
+      setStaged((prev) => (prev ? { ...prev, fingerprint: stampOf(joined) } : prev));
+      return { ok: true, value: joined };
+    }
+    return { ok: false, value: '' };
+  }
 
-          {nothingNew && (
-            <Text size='micro' variant='label' component='p' className='mt-1'>
-              nothing new — the card already says all of this
-            </Text>
-          )}
+  /** ЗАПИСЬ — ОДНА НА ВСЮ ОЧЕРЕДЬ: ровно отмеченное, каждой строке своим режимом. */
+  function writeTaken() {
+    const rows = open.filter((r) => taken[r.id]);
+    if (!rows.length || readOnly) return;
+    const at = hhmm();
+    for (const row of rows) {
+      const mode = taken[row.id];
+      const done = mode === 'append' ? appendRow(row) : applyRow(row);
+      if (!done.ok) continue;
+      const fillId = remember(row, done, at);
+      const receipt: Receipt = mode === 'append' || row.state !== 'replace' ? 'added' : 'replaced';
+      setReceipts((prev) => ({ ...prev, [row.id]: receipt }));
+      if (fillId) setReceiptByFill((prev) => ({ ...prev, [fillId]: receipt }));
+    }
+    setTaken({});
+    // Записанное уезжает под раскрытие — раскрытие ОТКРЫВАЕТСЯ, иначе жест выглядит исчезновением
+    // строк, а квитанции не видно нигде.
+    setLogOpen(true);
+  }
 
-          {/* ЧЕТЫРЁХ ГРУПП ПРИНЯТЫХ СТРОК ЗДЕСЬ БОЛЬШЕ НЕТ, И ЭТО B-14, А НЕ УПРОЩЕНИЕ. Написанное
-              видно ТАМ, ГДЕ ОНО ЖИВЁТ, — в поле, с записью в журнале ниже. Печатать его ещё и
-              списком значило бы держать на экране два ответа на один вопрос «что теперь на
-              карточке», и расходились бы они молча, как только человек поправит поле руками.
-              Остаётся ровно то, чего орган НЕ написал: спор со словами человека. */}
-          {open.length > 0 && (
-            <div className='mt-1.5' data-c19-draft-group='decide'>
-              <Text size='nano' variant='label' component='p' className='uppercase'>
-                to decide — the card already says otherwise
-              </Text>
-              {open.map((row) => (
-                <ProposalLine
-                  key={row.id}
-                  row={row}
-                  receipt={receipts[row.id]}
-                  readOnly={readOnly}
-                  onAccept={() => accept(row)}
-                  onDismiss={() =>
-                    setReceipts((prev) => ({ ...prev, [row.id]: 'dismissed' as Receipt }))
-                  }
-                />
-              ))}
-            </div>
-          )}
+  /** «keep mine» — отклонить навсегда: строка уходит из TO DECIDE в DISMISSED, с дверью обратно. */
+  function keepMine(row: ProposalRow) {
+    setTaken((prev) => {
+      const next = { ...prev };
+      delete next[row.id];
+      return next;
+    });
+    setReceipts((prev) => ({ ...prev, [row.id]: 'dismissed' as Receipt }));
+    setLogOpen(true);
+  }
+  function putBack(row: ProposalRow) {
+    setReceipts((prev) => {
+      const next = { ...prev };
+      delete next[row.id];
+      return next;
+    });
+  }
 
-          {/* ⚠ ВОССТАНОВЛЕНО В КРУГЕ 20 ПОСЛЕ АДВЕРСАРНОГО РЕВЮ. Этот блок был снесён ВМЕСТЕ с
-              группами предложений — молча, без единого слова обоснования, тогда как каждое другое
-              удаление в этом файле несёт абзац со словами владельца. Ревью опознало пропажу именно
-              по отсутствию абзаца: `diffProposal` продолжал `missing` ВЫЧИСЛЯТЬ, прото называет его
-              живым READ-ONLY советом, а разбор брал только `rows`. То есть владелец ПЛАТИЛ за
-              прогон, модель отвечала «шву кокетки нужна булавка на картинке 3», и фраза исчезала на
-              приёме — беззвучно, потому что на экране её не было никогда.
+  const kept = decide.filter((r) => receipts[r.id] === 'dismissed');
+  const takenRows = open.filter((r) => taken[r.id]);
+  const hasAnswer = !!staged && !draftIdea.isPending;
+  // Журнал живёт в сторе дольше ответа: раскрытие рисуется и без прогона, пока есть что вернуть.
+  const showLog = hasAnswer || live.length > 0;
 
-              ЭТО СОВЕТ, А НЕ ПРЕДЛОЖЕНИЕ, и поэтому у строк НЕТ ни `accept`, ни `✕`: принять их
-              некуда — на карточке нет поля, в которое булавка легла бы сама. Ставить сюда кнопку
-              значило бы обещать действие, которого организм не умеет.
+  /* СТАТУС В ШАПКЕ БЛОКА — только там, где заменить его нечем: прогона не было или он в полёте.
+     Прогон есть → шапка пуста, а «прогон был» стоит словами в ряду (`read N pictures · …`). */
+  const status = draftIdea.isPending ? (
+    <Pill tone='attention' data-c19-draft-status='flight'>
+      starting…
+    </Pill>
+  ) : staged ? null : (
+    <Pill tone='mut' data-c19-draft-status='fresh'>
+      not run yet
+    </Pill>
+  );
 
-              МЕСТО ВЫБРАНО, А НЕ НАЙДЕНО: после спорного («что решить») и ПЕРЕД счётчиком.
-              Счётчик считает РЕШЕНИЯ, а совет решением не является — попади он выше, он бы
-              притворился строкой, которую надо принять; попади ниже счётчика, он читался бы как
-              приписка к итогу. */}
-          {missing.length > 0 && (
-            <div className='mt-1.5' data-c19-draft-missing=''>
-              <Text size='nano' variant='label' component='p' className='uppercase'>
-                what deserves a pin
-              </Text>
-              {/* Ключ несёт позицию, а не текст: `missing` нигде не дедуплицируется (`diffProposal`
-                  только нормализует и отбрасывает пустые), и прото на уникальность не подписывался,
-                  в отличие от колорвеев. Повторённая моделью фраза дала бы столкновение ключей. */}
-              {missing.map((line, i) => (
-                <div key={`${i}:${line}`} className='border-b border-hairline py-1'>
-                  <Text size='micro' component='p' className='break-words'>
-                    {line}
-                  </Text>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className='mt-1 flex flex-wrap items-baseline gap-2'>
-            <Text size='nano' variant='label' component='span' data-c19-draft-count=''>
-              {live.length} written · {open.length} to decide · {dismissed} dismissed
-            </Text>
-            {/* ⚠ ДВЕРЬ ВЕДЁТ ТУДА, КУДА ПРАВДА УЕХАЛИ ЗНАЧЕНИЯ, — А ЭТО БЛОКИ НИЖЕ НА ЭТОЙ ЖЕ
-                СТРАНИЦЕ. Дизайн-документ называет `onGoTab('construction')`, но с круга 20 общие
-                сведения, аспекты и слоты ПЕРЕЕХАЛИ на STUDIO, а на одноимённой вкладке остались
-                операции и разбор. Уводить туда значило бы показать человеку экран без единого
-                поля, которое орган только что заполнил. Двери нет вовсе, пока некуда идти: якорь
-                ставит `ConstructionGeneralInfo` (`data-c19-general`), и его отсутствие — это
-                монтаж органа в одиночку, а не «кнопка не нарисовалась». */}
-            {live.length > 0 && (
-              <Button
-                type='button'
-                variant='underline'
-                size='xs'
-                data-c19-draft-go=''
-                onClick={() => {
-                  const target = document.querySelector('[data-c19-general]');
-                  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }}
-              >
-                see it on CONSTRUCTION ▸
-              </Button>
-            )}
-          </div>
-        </div>
+  /* ЧТО ПРОЧИТАЛ ПРОГОН — В ТОТ ЖЕ РЯД, ЧТО И КНОПКА (`trailing` общего `GenerateRow`). Два ряда
+     читались как два органа, хотя это одно: что я запускаю и на чём. */
+  const runState = hasAnswer && staged ? (
+    <>
+      <Text size='micro' variant='label' component='span' data-c19-draft-head=''>
+        read {staged.readPictures} picture{staged.readPictures === 1 ? '' : 's'} ·{' '}
+        {staged.readNotes} note{staged.readNotes === 1 ? '' : 's'} · {staged.time}
+      </Text>
+      {stale && (
+        <Pill tone='attention' data-c19-draft-stale=''>
+          the moodboard has changed since
+        </Pill>
       )}
+      {nothingNew && (
+        <Pill tone='mut' data-c19-draft-nothing-new=''>
+          nothing new · the card already says all of this
+        </Pill>
+      )}
+      {price && (
+        <Text size='micro' variant='label' component='span' data-c19-draft-price=''>
+          {price}
+        </Text>
+      )}
+    </>
+  ) : null;
 
-      {/* ЖУРНАЛ СТОИТ СНАРУЖИ `staged`, И ЭТО НЕ ВЁРСТКА, А СМЫСЛ. Ответ прогона живёт в состоянии
-          органа и умирает вместе с ним (студия монтируется условно); написанное на карточку живёт
-          в модульном сторе и умирать не должно. Спрятать журнал вместе с ответом значило бы
-          отобрать `✕` у человека, вернувшегося с COLORWAYS.
+  return (
+    /* СВОЙ БЛОК, А НЕ ПОДСТРУКТУРА ДОСКИ. Слова человека (DESCRIPTION) и ответ машины — разные
+       вещи, и держать их в одной рамке значит объявить их одним; между блоками грунт, и это самый
+       сильный разделитель системы. `#mb-draft` — адрес черновика для дверей соседей. */
+    <Section
+      id='mb-draft'
+      title='construction draft'
+      question='— what the model proposes'
+      action={status}
+    >
+      <div data-c19-draft=''>
+        {/* ВОРОТА — ВИДИМОЙ ПОЛОСОЙ, а не только `title` погашенной двери: причина никогда не живёт
+            в подсказке по наведению. Дверь `+ picture ›` — только у пустой доски: у «сохрани
+            карточку» двери здесь нет, сохранение — действие страницы. */}
+        {!gate.ok && (
+          <LockedBar
+            reason={gate.reason}
+            className='mb-2'
+            data-c19-draft-gate=''
+            door={
+              nothingToRead ? (
+                <GoTo onClick={() => scrollToOrgan('#mb-board')} data-c19-draft-to-board=''>
+                  + picture
+                </GoTo>
+              ) : undefined
+            }
+          />
+        )}
+        {/* ОДНА ДВЕРЬ НА ВСЕ ЭКРАНЫ — общий `GenerateRow`: `GENERATE`, дверь описи, строка про
+            деньги. Состояние прогона вшито в её ряд по шву `trailing`. */}
+        <GenerateRow
+          gate={gate}
+          label='GENERATE'
+          pending={draftIdea.isPending}
+          disabled={readOnly}
+          onGenerate={askForDraft}
+          shape={`${items.length} picture${items.length === 1 ? '' : 's'} · ${boardNotes.length} note${
+            boardNotes.length === 1 ? '' : 's'
+          }`}
+          onInspect={() => setInspecting(true)}
+          trailing={runState}
+        />
+        <DraftInventoryModal
+          open={inspecting}
+          onOpenChange={setInspecting}
+          lastRun={lastRun}
+          items={items}
+          callouts={callouts}
+          concept={concept}
+          fit={fit}
+          category={categoryName}
+          gender={genderLabel}
+          sizeRun={sizeRun}
+          aspects={details}
+          bomItems={bomItems}
+          boardDirty={boardDirty}
+        />
 
-          ⚠ БЛОК ПРЕДЛОЖЕННЫХ КОЛОРВЕЕВ ЗДЕСЬ БОЛЬШЕ НЕ МОНТИРУЕТСЯ. Ночь он простоял тут
-          подструктурой, пока `design/studio-tab.tsx` держала другая рука; теперь он свой `Section`
-          в стопке STUDIO, под таблицей слотов (D5). Отсюда в него уходит ровно одно — `setProposals`
-          в модульный стор выше по файлу: писатель и читатель разъехались по блокам, а стор их и
-          связывает, переживая и уход со вкладки, и размонтирование студии. */}
-      <DraftJournal
-        fills={live}
-        readOnly={readOnly}
-        onUndo={undo}
-        onUndoAll={() => {
-          for (const f of live) undo(f);
-          forgetMany(
-            techCardId,
-            live.map((f) => f.id),
-          );
-        }}
-      />
-    </div>
+        {/* САМАЯ ТЯЖЁЛАЯ ЛИНЕЙКА БЛОКА. Дверь прогона и ответ прогона — разные вещи, и внутри одной
+            рамки их развести нечем, кроме веса: 2px ink — вес заголовка блока. Под ней начинается
+            другой документ: ОЧЕРЕДЬ РАЗБОРА, на виду только работа (`to decide`), история под одним
+            раскрытием с числами в подписи.
+
+            ЧЕТЫРЁХ ГРУПП ПРИНЯТЫХ СТРОК ЗДЕСЬ НЕТ (B-14): написанное видно ТАМ, ГДЕ ОНО ЖИВЁТ, — в
+            поле, с пилюлей `drafted` у подписи и записью в журнале. Остаётся ровно то, чего орган
+            НЕ написал: спор со словами человека. */}
+        {hasAnswer && (
+          <div className='mt-3 border-t-2 border-textColor pt-3' data-c19-draft-cut=''>
+            <GroupLabel flush action={<Counter n={open.length} noun='line' />}>
+              to decide
+            </GroupLabel>
+            {open.length > 0 ? (
+              <div data-c19-draft-group='decide'>
+                {open.map((row) => (
+                  <DecideRow
+                    key={row.id}
+                    row={row}
+                    mark={taken[row.id] ?? ''}
+                    shown={!!shown[row.id]}
+                    readOnly={readOnly}
+                    onTake={() =>
+                      setTaken((prev) => {
+                        const next = { ...prev };
+                        if (next[row.id]) delete next[row.id];
+                        else next[row.id] = 'replace';
+                        return next;
+                      })
+                    }
+                    onMode={() =>
+                      setTaken((prev) => ({
+                        ...prev,
+                        [row.id]: prev[row.id] === 'append' ? 'replace' : 'append',
+                      }))
+                    }
+                    onShow={() => setShown((prev) => ({ ...prev, [row.id]: !prev[row.id] }))}
+                    onKeep={() => keepMine(row)}
+                  />
+                ))}
+                {/* ОДНА ЗАПИСЬ ВМЕСТО ШЕСТИ. Погашена ровно тогда, когда писать нечего, и причина
+                    стоит ВИДИМОЙ полосой. Вопроса об объёме НЕТ намеренно: запись обратима
+                    поштучно (`✕` в журнале) и целиком (`undo all`), а ядровый вопрос печатает
+                    «there is no undo» — для этой записи это ложь. */}
+                {takenRows.length === 0 && (
+                  <LockedBar
+                    reason='nothing is taken yet · mark a line with take'
+                    className='mt-1.5'
+                    data-c19-draft-write-lock=''
+                  />
+                )}
+                <div className='mb-3 mt-2 flex justify-end'>
+                  <Button
+                    type='button'
+                    variant='main'
+                    size='sm'
+                    disabled={takenRows.length === 0 || readOnly}
+                    onClick={writeTaken}
+                    data-c19-draft-write={takenRows.length}
+                    aria-label={`write ${takenRows.length} taken line${
+                      takenRows.length === 1 ? '' : 's'
+                    } into the card`}
+                  >
+                    write {takenRows.length} taken ▸
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <EmptyState className='py-1' data-c19-draft-nothing-to-decide=''>
+                <span className='uppercase text-textColor'>nothing to decide</span> · the draft did
+                not argue with a single written field
+              </EmptyState>
+            )}
+          </div>
+        )}
+
+        {/* ИСТОРИЯ УХОДИТ С ГЛАЗ: `written · dismissed · hints` под ОДНИМ раскрытием, числа в
+            подписи. Пустой раздел внутри раскрытия НЕ исчезает: исчезающий раздел врёт про объём.
+
+            ЖУРНАЛ СТОИТ И БЕЗ ОТВЕТА ПРОГОНА, и это смысл, а не вёрстка: ответ живёт в состоянии
+            органа и умирает вместе с ним (студия монтируется условно), написанное на карточку
+            живёт в модульном сторе и умирать не должно. Спрятать журнал вместе с ответом значило бы
+            отобрать `✕` у человека, вернувшегося с COLORWAYS. */}
+        {showLog && (
+          <Fold
+            className={hasAnswer ? undefined : 'mt-3'}
+            label={`written ${live.length} · dismissed ${kept.length} · hints ${missing.length}`}
+            open={logOpen}
+            onToggle={() => setLogOpen((v) => !v)}
+            data-c19-draft-log=''
+          >
+            <GroupLabel action={<Counter n={live.length} noun='write' />}>written</GroupLabel>
+            {live.length > 0 ? (
+              <div data-c19-journal=''>
+                {live.map((fill) => (
+                  <WrittenRow
+                    key={fill.id}
+                    fill={fill}
+                    receipt={receiptByFill[fill.id]}
+                    readOnly={readOnly}
+                    onUndo={() => undo(fill)}
+                  />
+                ))}
+                <div className='mt-1.5 flex flex-wrap justify-end gap-1.5'>
+                  {/* ДВЕРЬ ВЕДЁТ ТУДА, КУДА ПРАВДА УЕХАЛИ ЗНАЧЕНИЯ — блоки ниже на этой же
+                      странице. Якорь ставит `ConstructionGeneralInfo` (`data-c19-general`). */}
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='xs'
+                    data-c19-draft-go=''
+                    onClick={() => scrollToOrgan('[data-c19-general]')}
+                  >
+                    see it on CONSTRUCTION ▸
+                  </Button>
+                  {!readOnly && (
+                    <Button
+                      type='button'
+                      variant='secondary'
+                      size='xs'
+                      data-c19-undo-all=''
+                      onClick={() => {
+                        for (const f of live) undo(f);
+                        forgetMany(
+                          techCardId,
+                          live.map((f) => f.id),
+                        );
+                      }}
+                    >
+                      undo all {live.length} ▸
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <EmptyState className='py-1' data-c19-draft-nothing-written=''>
+                <span className='uppercase text-textColor'>nothing written</span> · the draft filled
+                no empty field on this card
+              </EmptyState>
+            )}
+
+            <GroupLabel action={<Counter n={kept.length} noun='line' />}>dismissed</GroupLabel>
+            {kept.length > 0 ? (
+              kept.map((row) => (
+                <KeptRow key={row.id} row={row} readOnly={readOnly} onReopen={() => putBack(row)} />
+              ))
+            ) : (
+              <EmptyState className='py-1' data-c19-draft-nothing-kept=''>
+                <span className='uppercase text-textColor'>nothing turned down</span> · every drafted
+                line is either written or still open
+              </EmptyState>
+            )}
+
+            {/* СОВЕТЫ МОДЕЛИ — «что заслуживает булавки» (`missing`). Это совет, а не
+                предложение: у строк нет ни `take`, ни `✕` — на карточке нет поля, в которое
+                булавка легла бы сама. Ставить сюда дверь значило бы обещать действие, которого
+                организм не умеет. Ключ несёт позицию: `missing` нигде не дедуплицируется. */}
+            <GroupLabel action={<Counter n={missing.length} noun='hint' />}>hints</GroupLabel>
+            {missing.length > 0 ? (
+              <div data-c19-draft-missing=''>
+                {missing.map((line, i) => (
+                  <div key={`${i}:${line}`} className='border-b border-hairline py-1'>
+                    <Text size='micro' component='p' className='break-words'>
+                      {line}
+                    </Text>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState className='py-1' data-c19-draft-nothing-missing=''>
+                <span className='uppercase text-textColor'>nothing to pin</span> · the draft named
+                no picture that wants a note
+              </EmptyState>
+            )}
+          </Fold>
+        )}
+      </div>
+    </Section>
   );
 }
 
 /**
- * ОДНА СТРОКА ПРЕДЛОЖЕНИЯ: нано-подпись поля-адресата, значение чернилами, ОДИН чип.
+ * СТРОКА РЕШЕНИЯ: ОДНО УТВЕРЖДЕНИЕ, ОДНА ОТМЕТКА (макет `mbAskRow`).
  *
- * `add` — поле на карточке пусто; `replace` — там стоит другое, и оно печатается приглушённым
- * `was: …` НА ТОЙ ЖЕ СТРОКЕ (это и есть весь дифф, без единого предложения прозы); `same` — уже
- * стоит, и чипов нет вовсе. После клика чип становится квитанцией.
+ *     FABRIC     draft adds "brushed inside"            [ take ]  [ show ▸ ]
  *
- * ⚠ `dismiss` НЕ ПУНКТИРНЫЙ: пунктир в этой системе означает «добавить», и «dismiss» в костюме
- * добавления читается ровно наоборот тому, что делает.
+ * `take` — переключатель, и он НИЧЕГО НЕ ПИШЕТ: пишет одна кнопка внизу очереди. `append` — не
+ * третья кнопка, а РЕЖИМ отметки, и только там, где он осмыслен: где черновик продолжает текст.
+ * Появляется он вместе с отметкой: режим записи, которой ещё не заказано, — орган без работы.
+ * `keep mine` — тихий орган ВНУТРИ раскрытия: не отмеченное и есть оставленное, а явное «отклонить»
+ * отличается от него тем, что уходит из работы (и держит дверь обратно).
+ *
+ * Тело раскрытой строки — ОБА текста целиком; расхождение отмечено ВЕСОМ, не цветом: палитра
+ * монохромная, и цветом состояние здесь не кодируется никогда.
  */
-function ProposalLine({
+function DecideRow({
   row,
-  receipt,
+  mark,
+  shown,
   readOnly,
-  onAccept,
-  onDismiss,
+  onTake,
+  onMode,
+  onShow,
+  onKeep,
 }: {
   row: ProposalRow;
-  receipt?: Receipt;
+  mark: '' | 'replace' | 'append';
+  shown: boolean;
   readOnly: boolean;
-  onAccept: () => void;
-  onDismiss: () => void;
+  onTake: () => void;
+  onMode: () => void;
+  onShow: () => void;
+  onKeep: () => void;
 }): JSX.Element {
+  const say = draftSays(row.current, row.value);
+  const canAppend = say.mode === 'add' && row.write.kind !== 'fit';
+  const d = wordDiff(row.current, row.value);
   return (
     <div
-      className='flex items-start gap-2 border-b border-hairline py-1'
+      className='border-b border-hairline py-1.5'
       data-c19-draft-row={row.id}
       data-state={row.state}
     >
-      <Text size='nano' variant='label' component='span' className='w-24 shrink-0 truncate'>
-        {row.label}
-      </Text>
-      <Text size='micro' component='span' className='min-w-0 flex-1 break-words'>
-        {row.value}
-        {row.state === 'replace' && row.current && (
-          <Text size='nano' variant='label' component='span' className='ml-2'>
-            was: {row.current}
-          </Text>
-        )}
-      </Text>
-      {receipt ? (
-        <Text size='nano' variant='label' component='span' className='shrink-0' data-c19-draft-receipt={receipt}>
-          {receipt}
+      <div className='flex flex-wrap items-center gap-3'>
+        <Text
+          size='micro'
+          variant='label'
+          tracking='label'
+          component='span'
+          className='w-[84px] shrink-0 truncate uppercase'
+        >
+          {row.label}
         </Text>
-      ) : row.state === 'same' ? (
-        <Pill tone='mut'>same</Pill>
-      ) : (
+        <Text
+          size='control'
+          component='span'
+          className='min-w-0 flex-1 truncate'
+          data-c19-draft-say={say.mode}
+        >
+          {say.plain}
+        </Text>
         <ChipRow className='shrink-0'>
           <Chip
             disabled={readOnly}
-            onClick={onAccept}
-            data-c19-draft-accept={row.id}
-            title={
-              row.state === 'replace'
-                ? 'replace the card’s value with this one'
-                : 'write this onto the card'
-            }
+            selected={!!mark}
+            pressed={!!mark}
+            onClick={onTake}
+            data-c19-draft-take={row.id}
+            title={`take the drafted ${row.label} · ${say.plain}`}
           >
-            {row.state === 'replace' ? 'replace' : 'add'}
+            take
           </Chip>
-          <Chip
-            disabled={readOnly}
-            onClick={onDismiss}
-            data-c19-draft-dismiss={row.id}
-            title='this one is not wanted'
-          >
-            dismiss
-          </Chip>
+          {mark && canAppend && (
+            <Chip
+              disabled={readOnly}
+              selected={mark === 'append'}
+              pressed={mark === 'append'}
+              onClick={onMode}
+              data-c19-draft-append={row.id}
+              title={`keep the ${row.label} of the card and put the drafted words after it`}
+            >
+              append
+            </Chip>
+          )}
         </ChipRow>
+        <Button
+          type='button'
+          variant='secondary'
+          size='xs'
+          aria-expanded={shown}
+          onClick={onShow}
+          data-c19-draft-show={row.id}
+        >
+          {shown ? 'hide ▾' : 'show ▸'}
+        </Button>
+      </div>
+      {shown && (
+        <>
+          <div className='mt-1 grid grid-cols-[40px_minmax(0,1fr)] items-baseline gap-x-2 gap-y-px'>
+            <Text
+              size='nano'
+              variant='label'
+              tracking='label'
+              component='span'
+              className='uppercase'
+            >
+              card
+            </Text>
+            <Text
+              size='micro'
+              variant='label'
+              component='span'
+              className='min-w-0 break-words'
+              data-c19-draft-card=''
+            >
+              <Whole tok={d.A} p={d.p} s={d.s} />
+            </Text>
+            <Text
+              size='nano'
+              variant='label'
+              tracking='label'
+              component='span'
+              className='uppercase'
+            >
+              draft
+            </Text>
+            <Text
+              size='micro'
+              variant='label'
+              component='span'
+              className='min-w-0 break-words'
+              data-c19-draft-draft=''
+            >
+              <Whole tok={d.B} p={d.p} s={d.s} />
+            </Text>
+          </div>
+          {!readOnly && (
+            <div className='mt-1.5 flex justify-end'>
+              <Button
+                type='button'
+                variant='secondary'
+                size='xs'
+                onClick={onKeep}
+                data-c19-draft-dismiss={row.id}
+                title={`file the drafted ${row.label} away and keep the one on the card`}
+              >
+                keep mine
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
 }
+
+/** Полный текст стороны с отмеченным ВЕСОМ расхождением (общее начало · разница · общий хвост). */
+function Whole({ tok, p, s }: { tok: string[]; p: number; s: number }): JSX.Element {
+  const head = tok.slice(0, p).join('');
+  const mid = tok.slice(p, tok.length - s).join('');
+  const tail = tok.slice(tok.length - s).join('');
+  return (
+    <>
+      {head}
+      {mid && <b className='text-textColor'>{mid}</b>}
+      {tail}
+    </>
+  );
+}
+
+/** Где на карточке живёт запись — пилюля области в строке журнала. */
+function areaOf(target: FillTarget): string {
+  switch (target.kind) {
+    case 'detail':
+      return target.key === 'silhouette' || target.key === 'fabric'
+        ? 'general information'
+        : 'construction';
+    case 'fit':
+      return 'general information';
+    case 'concept':
+      return 'description';
+    case 'slot':
+      return 'material slots';
+  }
+}
+
+const cutTo = (t: string, n: number): string =>
+  t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t;
 
 /**
  * ЖУРНАЛ «БЫЛО → СТАЛО» — ЭТО И ЕСТЬ «ПОДСВЕЧИВАТЬ ЧТО ЗАПОЛНИЛО И ЕСЛИ МЫ ЗАХОТИМ ТО УДАЛИМ».
  *
  * ⚠ ОН НЕ УКРАШЕНИЕ И НЕ ЛОГ. Запись без `было` даёт кнопку, которая может только ОЧИСТИТЬ поле,
  * — а очистка поля, где до черновика стояли слова человека, это ровно та потеря, от которой
- * стережёт весь файл, только сделанная его же рукой. Поэтому строка называет обе половины: что
- * стоит теперь и что стояло до. `—` в позиции «было» — законный ответ «не стояло ничего», и он
- * ПЕЧАТАЕТСЯ, а не опускается: пустота, названная словом, отличима от пустоты забытой.
- *
- * СТРОКИ ТОЛЬКО ЖИВЫЕ. Заполнение, чей текст человек с тех пор поправил, сюда не приходит вовсе:
- * его `✕` унёс бы вместе с машинными и ЕГО слова (см. `isLive`).
+ * стережёт весь файл, только сделанная его же рукой. `—` в позиции «было» — законный ответ «не
+ * стояло ничего», и он ПЕЧАТАЕТСЯ, а не опускается. `✕` возвращает то, что стояло, ПОШТУЧНО.
+ * Строки только живые: заполнение, чей текст человек поправил, сюда не приходит (см. `isLive`).
  */
-function DraftJournal({
-  fills,
+function WrittenRow({
+  fill,
+  receipt,
   readOnly,
   onUndo,
-  onUndoAll,
 }: {
-  fills: Fill[];
+  fill: Fill;
+  receipt?: Receipt;
   readOnly: boolean;
-  onUndo: (fill: Fill) => void;
-  onUndoAll: () => void;
-}): JSX.Element | null {
-  if (fills.length === 0) return null;
+  onUndo: () => void;
+}): JSX.Element {
   return (
-    <div className='mt-3' data-c19-journal=''>
-      <GroupLabel
-        action={
-          !readOnly && (
-            <Button type='button' variant='underline' size='xs' data-c19-undo-all='' onClick={onUndoAll}>
-              undo all {fills.length} ▸
-            </Button>
-          )
-        }
+    <div
+      className='flex flex-wrap items-center gap-2 border-b border-hairline py-1'
+      data-c19-fill={fill.id}
+    >
+      <Text
+        size='nano'
+        variant='label'
+        tracking='label'
+        component='span'
+        className='w-[88px] shrink-0 truncate uppercase'
       >
-        written by the draft
-      </GroupLabel>
-      {fills.map((fill) => (
-        <div
-          key={fill.id}
-          className='flex items-start gap-2 border-b border-hairline py-1'
-          data-c19-fill={fill.id}
+        {fill.label}
+      </Text>
+      <Text size='micro' component='span' className='min-w-0 flex-[1_1_220px] break-words'>
+        {cutTo(fill.after, 92)}
+        <Text
+          size='nano'
+          variant='label'
+          component='span'
+          className='ml-2'
+          data-c19-fill-before={fill.id}
         >
-          <Text size='nano' variant='label' component='span' className='w-24 shrink-0 truncate'>
-            {fill.label}
-          </Text>
-          <Text size='micro' component='span' className='min-w-0 flex-1 break-words'>
-            {fill.after}
-            <Text
-              size='nano'
-              variant='label'
-              component='span'
-              className='ml-2'
-              data-c19-fill-before={fill.id}
-            >
-              was: {fill.before || '—'}
-            </Text>
-          </Text>
-          <ChipRow className='shrink-0'>
-            <Chip
-              disabled={readOnly}
-              onRemove={() => onUndo(fill)}
-              data-c19-undo={fill.id}
-              title='written by the draft — ✕ puts back what stood here'
-            >
-              drafted
-            </Chip>
-          </ChipRow>
-        </div>
-      ))}
+          was: {fill.before || '—'}
+        </Text>
+      </Text>
+      {receipt && receipt !== 'dismissed' && (
+        <Pill tone='ink' data-c19-draft-receipt={receipt}>
+          {receipt}
+        </Pill>
+      )}
+      <Pill tone='mut'>{areaOf(fill.target)}</Pill>
+      {!readOnly && (
+        <Button
+          type='button'
+          variant='secondary'
+          size='xs'
+          data-c19-undo={fill.id}
+          onClick={onUndo}
+          aria-label={
+            fill.before
+              ? `put back the ${fill.label} that stood before`
+              : `take back the drafted ${fill.label}`
+          }
+          title='written by the draft — ✕ puts back what stood here'
+        >
+          ✕
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** Отклонённая строка: ушла из работы, но держит дверь обратно — отметка без обратной двери это ловушка. */
+function KeptRow({
+  row,
+  readOnly,
+  onReopen,
+}: {
+  row: ProposalRow;
+  readOnly: boolean;
+  onReopen: () => void;
+}): JSX.Element {
+  return (
+    <div
+      className='flex flex-wrap items-center gap-2 border-b border-hairline py-1'
+      data-c19-draft-kept={row.id}
+    >
+      <Text
+        size='nano'
+        variant='label'
+        tracking='label'
+        component='span'
+        className='w-[88px] shrink-0 truncate uppercase'
+      >
+        {row.label}
+      </Text>
+      <Text size='micro' variant='label' component='span' className='min-w-0 flex-[1_1_220px] truncate'>
+        {draftSays(row.current, row.value).plain}
+      </Text>
+      <Pill tone='ink'>kept</Pill>
+      {!readOnly && (
+        <Button
+          type='button'
+          variant='secondary'
+          size='xs'
+          onClick={onReopen}
+          data-c19-draft-reopen={row.id}
+          title={`put the drafted ${row.label} back among the lines to decide`}
+        >
+          put it back
+        </Button>
+      )}
     </div>
   );
 }

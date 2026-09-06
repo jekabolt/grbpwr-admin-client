@@ -1,12 +1,15 @@
 import type {
   GetDesignBandResponse,
+  common_AdminColorwayRef,
   common_DesignAsset,
+  common_DesignColourRecipe,
   common_DesignPicture,
   common_DesignRun,
 } from 'api/proto-http/admin';
 
-import { ASSETS_PER_CARD_MAX, ASSET_PATTERN, shelfOf } from '../assets/model';
+import { ASSETS_PER_CARD_MAX, ASSET_PATTERN, assetLabel, shelfOf } from '../assets/model';
 import { cardOutputRows } from '../bench-kinds';
+import { colorwayLabel } from '../colorway-picker';
 import type { Gate } from '../render';
 
 /**
@@ -147,7 +150,7 @@ export const SEAM_WORDS =
 export const REFUSAL_ADVICE: Record<string, string> = {
   no_source_picture:
     'a tile is made out of one picture, and this run named none. Attach a picture above — from the ' +
-    'library, from the clipboard, or one of this card’s cloths.',
+    'library or from the clipboard.',
   one_source_picture:
     'a tile is made out of EXACTLY one picture — two swatches glued together cannot be made to ' +
     'join to themselves. Leave one attached above.',
@@ -168,27 +171,121 @@ export function refusalAdvice(message: string): string {
 /* ─────────────────────────── ворота ─────────────────────────── */
 
 /**
- * ЧЕГО НЕ ХВАТАЕТ, ЧТОБЫ НАЖАТЬ GENERATE.
+ * THE GATE'S REFUSAL PLUS THE DOOR THAT FIXES IT. `Gate` is the band's shared shape (the generate
+ * row reads `ok`/`reason`); `door` is this screen's own addition, read by the lock bar above the
+ * row to draw the ONE door that repairs the refusal — the source slot for `picture`, the name
+ * field for `name`. A refusal is only ever spoken as a visible bar with a door, never as a
+ * button's `title` alone (SPEC §8).
+ */
+export type PatternGate = Gate & { door?: 'picture' | 'name' };
+
+/**
+ * A TILE ON THIS CARD THAT ALREADY CARRIES THIS NAME — case-insensitively, because the person who
+ * will look for the tile by eye reads «Chevron» and «chevron» as one word. `skipAssetId` lets a
+ * rename skip the tile being renamed.
+ */
+export function patternTwin(
+  band: GetDesignBandResponse,
+  name: string,
+  skipAssetId = 0,
+): common_DesignAsset | undefined {
+  const key = (name ?? '').trim().toLowerCase();
+  if (!key) return undefined;
+  return patternAssets(band).find(
+    (a) => (a.id ?? 0) !== skipAssetId && assetLabel(a).trim().toLowerCase() === key,
+  );
+}
+
+/**
+ * ЧЕГО НЕ ХВАТАЕТ, ЧТОБЫ НАЖАТЬ GENERATE — три отказа, в порядке проверки и словами макета.
+ *
+ *   1. источник: ровно одна картинка (`a repeating tile is made out of exactly one picture`);
+ *   2. имя пустое — имя ОБЯЗАТЕЛЬНО и не уезжает к модели: это то, по чему плитку найдут
+ *      (`a pattern is found by its name · give it one`);
+ *   3. тёзка на полке без регистра (`a pattern called "…" already stands here`).
+ *
+ * `name` необязателен в подписи ради читателей, которым известен только источник (рельс: там
+ * отказ по имени «own» и цепь не запирает); экран передаёт его всегда.
  *
  * ДЕНЕГ В ЭТИХ ВОРОТАХ НЕТ ВОВСЕ, И У ДВУХ СОСЕДЕЙ ТОЖЕ. Здесь стоял отказ по исчерпанному
  * дневному потолку; потолок снесён с обеих сторон провода («убери потолок»), и ворота, которые
- * читали бы его остатки, отказывали бы по факту, которого больше не бывает.
+ * читали бы его остатки, отказывали бы по факту, которого больше не бывает. ПОЛКА В 40 АССЕТОВ
+ * ВОРОТАМИ ТОЖЕ НЕ СЧИТАЕТСЯ: прогон идёт и оплачивается, а плитка падает в «made earlier, not
+ * kept», где `keep it` гаснет под своей полосой.
  *
  * ЧИСЛО КАРТИНОК ПРОВЕРЯЕТСЯ ЗДЕСЬ, ХОТЯ ЕГО ПРОВЕРЯЕТ И СЕРВЕР. Это не дубль правила: сервер
  * отвечает `one_source_picture` бесплатно, ДО резервации, — но отвечает он по сети и с задержкой,
  * а человек тем временем уже нажал кнопку с надписью «это стоит денег». Клиентская проверка не
  * заменяет серверную и ничего не гарантирует; она только не даёт нажать заведомо мёртвое.
  */
-export function patternGate(band: GetDesignBandResponse, sourceMediaId: number): Gate {
+export function patternGate(
+  band: GetDesignBandResponse,
+  sourceMediaId: number,
+  name?: string,
+): PatternGate {
   if (!sourceMediaId || sourceMediaId <= 0) {
     return {
       ok: false,
-      reason:
-        'no picture is attached — a repeating tile is made out of exactly one picture. Attach one ' +
-        'above: from the library, from the clipboard, or one of this card’s cloths',
+      reason: 'a repeating tile is made out of exactly one picture',
+      door: 'picture',
     };
   }
+  if (name !== undefined) {
+    const nm = name.trim();
+    if (!nm) {
+      return { ok: false, reason: 'a pattern is found by its name · give it one', door: 'name' };
+    }
+    const twin = patternTwin(band, nm);
+    if (twin) {
+      return {
+        ok: false,
+        reason: `a pattern called "${assetLabel(twin)}" already stands here`,
+        door: 'name',
+      };
+    }
+  }
   return { ok: true };
+}
+
+/* ─────────────────────────── цвет, который уезжает к модели ─────────────────────────── */
+
+/** The paintable hex of a colourway, or '' when its development record names none. */
+export function colourwayHex(ref?: common_AdminColorwayRef | null): string {
+  const hex = (ref?.devHex ?? '').trim();
+  return /^#?[0-9a-f]{6}$/i.test(hex) ? (hex.startsWith('#') ? hex : `#${hex}`) : '';
+}
+
+/**
+ * THE COLOUR AS THE RUN CARRIES IT — `params.colour`, the SAME field the render and the recolour
+ * state theirs in. The server writes it into every kind's prompt without looking at the kind
+ * (`designgen/snapshot.go`: `if c := p.Colour; c != nil { write("colour", colourStatement(c)) }`),
+ * and its phrase is `colourway ROSSO — the exact value is #8d3a33`; with no hex on the colourway
+ * the name alone still travels. Nothing else of the recipe is stated: a tile has no cloth list and
+ * no colour maps, and an empty list here is an empty list on the wire, not a second spelling.
+ */
+export function patternColourRecipe(ref: common_AdminColorwayRef): common_DesignColourRecipe {
+  return {
+    source: '',
+    code: colorwayLabel(ref),
+    hex: colourwayHex(ref),
+    words: '',
+    fabricMediaId: 0,
+    fabrics: [],
+    colourMaps: [],
+  };
+}
+
+/** Живые колорвеи карточки для выбора цвета и привязки; архивный — только пока он уже выбран. */
+export function pickableColourways(
+  refs: readonly common_AdminColorwayRef[] | undefined,
+  keepId: number,
+  archived: (ref: common_AdminColorwayRef) => boolean,
+): common_AdminColorwayRef[] {
+  return (refs ?? []).filter((c) => {
+    const cid = c.colorwayId ?? 0;
+    if (cid <= 0) return false;
+    return !archived(c) || cid === keepId;
+  });
 }
 
 /* ─────────────────────────── плитка как ассет карточки ─────────────────────────── */

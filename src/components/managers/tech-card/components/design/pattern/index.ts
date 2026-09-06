@@ -41,6 +41,9 @@ export { PatternInput } from './pattern-input';
    что бы во вкладке паттернс мы могли привзать паттерн к колорвею») вернул орган — уже селектом, а
    не строкой, — и фраза снова описывает экран. Название органа здесь поэтому точное, а не общее. */
 export { PatternLibrary } from './pattern-library';
+export { ColourTiles, WornByChips, usePatternColourways } from './colourways';
+export { CornerLabel, GoToStep, TiledFace } from './organs';
+export type { PatternGate } from './model';
 /* `useStartPatternRun` ЖИЛ ЗДЕСЬ НЕДЕЛЮ И СНЕСЁН. Он минтил СВОЙ ключ идемпотентности по СВОЕМУ
    отпечатку — то есть держал второй ответ на вопрос «то же ли это нажатие, что и прошлое», а
    именно на этом вопросе и разъезжается оплаченный дважды прогон. Плитка стартует тем же
@@ -52,12 +55,16 @@ export {
   SEAM_CODE,
   SEAM_WORDS,
   assetOfMedia,
+  colourwayHex,
   nextPatternName,
   normaliseRepeat,
   patternAssets,
+  patternColourRecipe,
   patternGate,
   patternOutputs,
   patternRuns,
+  patternTwin,
+  pickableColourways,
   pictureFull,
   pictureThumb,
   refusalAdvice,

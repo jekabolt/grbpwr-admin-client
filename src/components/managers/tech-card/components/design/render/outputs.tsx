@@ -8,11 +8,14 @@ import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-v
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
+import { GroupLabel } from 'ui/components/group-label';
+import { Tiles } from 'ui/components/tiles';
 
 import SelectComponent from 'ui/components/select';
 
 import { InertDoor } from '../bench-slot';
 import { colorwayOf, refColorwayFor, slotHolding } from '../bench-kinds';
+import { Counter } from '../core';
 import { serverSpeaksDesign } from '../capability';
 import { cropFamilies, type CropFamilies } from '../generation/composite';
 import { CropDeck, DECK_PEEK_MAX } from '../generation/crop-deck';
@@ -705,6 +708,8 @@ export function OutputsSection({
           deckSheet ? () => setOpenDeck((current) => (current === (picture.id ?? 0) ? null : picture.id ?? 0)) : undefined
         }
         cellPictureId={picture.id}
+        /* On the 3D shelf the cell is a GRID track, not a strip cell: it takes the track's width. */
+        className={kind === 'threed' ? 'w-full' : undefined}
         /* E-4: зум чужой карточки складывает открытую колоду; своя и её куски — нет. */
         onZoom={() => foldOnForeignZoom(picture.id ?? 0)}
         /* Толстая рамка — «этот экран это ЧИТАЕТ». У рендеров пометка больше ничего не
@@ -1119,8 +1124,8 @@ export function OutputsSection({
            ленты, и признаться в этом теперь может только вопрос. */
         kind === 'threed'
           ? stated
-            ? '— the models of this whole card, and which of them is the chosen one'
-            : '— the models on this page of the feed, and which of them is the chosen one'
+            ? '· built here or brought'
+            : '· built here or brought · this page of the feed'
           : stated
             ? // ГОВОРИТ ПРО КАРТОЧКУ ЦЕЛИКОМ И ПРО ОБА ПРОИСХОЖДЕНИЯ. В списке теперь стоят и
               // загруженные руками плиты (у них нет прогона вовсе), а «came back» — слово о
@@ -1144,9 +1149,10 @@ export function OutputsSection({
         /* ДВА ЧЛЕНА, А НЕ ОБЁРТКА: слот `action` у `SectionHeader` сам по себе flex-ряд с gap —
            лишний span здесь был бы коробкой внутри коробки на ровном месте. */
         <>
+          {/* 3D: the mockup's counter pill (`0 MODELS`); renders: the count as before. */}
+          {kind === 'threed' && <Counter n={rows.length} noun='model' />}
           <Text size='micro' variant='label' component='span' className='uppercase'>
-            {rows.length} {noun}
-            {rows.length === 1 ? '' : 's'}
+            {kind === 'threed' ? '' : `${rows.length} ${noun}${rows.length === 1 ? '' : 's'}`}
             {colorwayLabel?.trim() ? ` · ${colorwayLabel.trim()}` : ''}
             {/* СЧЁТ ПОМЕЧЕННЫХ — ТОЛЬКО ТАМ, ГДЕ ПОМЕТКУ СТАВЯТ (J-23). У рендеров двери больше
                 нет, и число «· 2 selected» над списком без единого органа читалось бы как
@@ -1194,97 +1200,133 @@ export function OutputsSection({
           failed — press again», полный разбор по сторонам в `title`), и уходит вместе с колодой.
           Один орган — один отчёт; второе написание здесь стояло ровно до этой фазы. */}
 
-      <Strip>
-        {/* ═══ ДВЕРЬ СТОИТ ПЕРВОЙ, И ЭТО ЗАМЕР, А НЕ ВКУС (E-13) ══════════════════════════════
-            Сервер отдаёт выходы `ORDER BY o.id DESC` — новейшее первым, — поэтому только что
-            принесённая модель становится строкой НОЛЬ. Дверь в хвосте горизонтального скроллера
-            уводила бы собственный ответ за край экрана: человек нажал, что-то произошло, и ничего
-            не видно. Первой она к тому же НЕ ПЕРЕЕЗЖАЕТ между пустой и полной полосой — один орган
-            стоит в одном месте, — и это ровно та позиция, что у `+ flat` в полосе входа рендера:
-            голова того списка, в который она добавляет. */}
-        {bringsOwnModel && <Bay>{bring.cell}</Bay>}
-        {/* ═══ ЖИВОЙ ПРОГОН — В ГОЛОВЕ РЯДА, И ЭТО АДРЕС ОТВЕТА, А НЕ «НОВОЕ СВЕРХУ» ═══════════
-            Сервер отдаёт выходы `ORDER BY o.id DESC`, значит вернувшаяся плита встанет строкой
-            НОЛЬ — и дыра обязана стоять ровно там, иначе плита появится не на месте своей дыры.
+      {kind === 'threed' ? (
+        /* ═══ THE SHELF — `.fgrid`, minmax 148px: the models built here and the ones brought, one
+           grid, told apart by their corner. Empty → the mockup's one dashed line. */
+        rows.length === 0 && pending.length === 0 ? (
+          <div
+            data-outputs-empty=''
+            className='flex flex-wrap items-baseline gap-2 border border-dashed border-borderColor bg-bgColor px-2.5 py-2'
+          >
+            <Text size='control' variant='uppercase' tracking='label' component='span'>
+              no model on this card yet
+            </Text>
+            <Text size='micro' variant='label' component='span' className='normal-case'>
+              · <b>GENERATE above, or bring a .glb below</b>
+            </Text>
+          </div>
+        ) : (
+          <Tiles min={148}>
+            {pending.map((run) => (
+              <Bay key={`live-${run.id ?? run.startedAt ?? ''}`}>
+                <PendingCell run={run} />
+              </Bay>
+            ))}
+            {rows.map((row) => (
+              <Bay key={row.picture.id ?? 0}>{cell(row)}</Bay>
+            ))}
+          </Tiles>
+        )
+      ) : (
+        <Strip>
+          {/* ═══ ЖИВОЙ ПРОГОН — В ГОЛОВЕ РЯДА, И ЭТО АДРЕС ОТВЕТА, А НЕ «НОВОЕ СВЕРХУ» ═══════════
+              Сервер отдаёт выходы `ORDER BY o.id DESC`, значит вернувшаяся плита встанет строкой
+              НОЛЬ — и дыра обязана стоять ровно там, иначе плита появится не на месте своей дыры.
 
-            ПОСЛЕ ДВЕРИ «принести свою модель», А НЕ ПЕРЕД НЕЙ: у той стоит собственный замер
-            («один орган стоит в одном месте», она не переезжает между пустой и полной полосой),
-            и пустить дыру вперёд значило бы двигать дверь всякий раз, когда идёт прогон. */}
-        {pending.map((run) => (
-          <Bay key={`live-${run.id ?? run.startedAt ?? ''}`}>
-            <PendingCell run={run} />
-          </Bay>
-        ))}
-        {rows.map((row) => {
-          const rootId = row.picture.id ?? 0;
-          // Кусок рисуется ТОЛЬКО под своим листом — иначе закрытая колода показала бы его вопреки
-          // собственной двери, а открытая дважды.
-          if (families.rootOf.has(rootId)) return null;
-          const members = families.membersOf.get(rootId) ?? [];
-          const open = openDeck === rootId;
-          if (!members.length) return <Bay key={rootId}>{cell(row)}</Bay>;
-          return (
-            <Bay key={rootId} groupOf={open ? rootId : 0}>
-              <CropDeck
-                rootId={rootId}
-                count={members.length}
-                peeks={members.map((member) => ({
-                  id: member.id ?? 0,
-                  url: pictureThumb(member),
-                  alt: `render ${member.ordinal ?? ''}`,
-                }))}
-                /* ПОЛОСА — НЕ СЕТКА: ячейка здесь фиксированной ширины (`CELL_WIDTH` = 132px), и
-                   ширина колоды считается явно, а не спанится дорожками. Формула — та же, что в
-                   ленте: лист плюс по трети на каждый выглядывающий кусок. */
-                sheetWidth={`${STRIP_CELL_PX}px`}
-                frameAspect={STRIP_FRAME_ASPECT}
-                className='shrink-0'
-                style={
-                  open
-                    ? undefined
-                    : {
-                        width: `calc(${STRIP_CELL_PX}px + ${Math.min(
-                          members.length,
-                          DECK_PEEK_MAX,
-                        )} * ${STRIP_CELL_PX}px / ${DECK_PEEK_MAX})`,
-                      }
-                }
-                open={open}
-                onToggle={() => setOpenDeck((current) => (current === rootId ? null : rootId))}
-                /* Дверь колоды — в ряду дверей ячейки (`expand ▸` / `apply splitted` + `▾`), а не своей
-                   строкой под кадром: F-9, разбор у ветки `deck` в `cell`. */
-                hostDoor
-              >
-                {cell(row, { open })}
-              </CropDeck>
-              {open &&
-                members.map((member) => {
-                  const memberRow = rowById.get(member.id ?? 0);
-                  return memberRow ? <Fragment key={member.id}>{cell(memberRow)}</Fragment> : null;
-                })}
+              ПОСЛЕ ДВЕРИ «принести свою модель», А НЕ ПЕРЕД НЕЙ: у той стоит собственный замер
+              («один орган стоит в одном месте», она не переезжает между пустой и полной полосой),
+              и пустить дыру вперёд значило бы двигать дверь всякий раз, когда идёт прогон. */}
+          {pending.map((run) => (
+            <Bay key={`live-${run.id ?? run.startedAt ?? ''}`}>
+              <PendingCell run={run} />
             </Bay>
-          );
-        })}
-      </Strip>
-
-      {/* ⚠ «ПУСТО» ГОВОРИТСЯ СЛОВОМ, И СЛОВО НАЗЫВАЕТ ВТОРОЙ ПУТЬ. Полоса из одной пунктирной
-          ячейки читается как «сюда кладут модели», но НЕ отвечает на вопрос, который человек
-          задаёт следующим: а разве их не делает генерация? Отвечает эта строка — один раз, без
-          мастера и без уговоров. */}
-      {rows.length === 0 && bringsOwnModel && (
-        <Text
-          size='micro'
-          variant='label'
-          component='p'
-          data-outputs-empty=''
-          /* ПРЕДЕЛ ДЛИНЫ СТРОКИ. Блок тянется во всю ширину монитора, и без потолка это полторы
-             сотни знаков в строке — глаз теряет начало следующей. */
-          className='max-w-[70ch] normal-case'
-        >
-          No model on this card yet. GENERATION — 3D builds one out of the marked render sides and
-          charges for it; the cell on the left takes a .glb you already have, and costs nothing.
-        </Text>
+          ))}
+          {rows.map((row) => {
+            const rootId = row.picture.id ?? 0;
+            // Кусок рисуется ТОЛЬКО под своим листом — иначе закрытая колода показала бы его вопреки
+            // собственной двери, а открытая дважды.
+            if (families.rootOf.has(rootId)) return null;
+            const members = families.membersOf.get(rootId) ?? [];
+            const open = openDeck === rootId;
+            if (!members.length) return <Bay key={rootId}>{cell(row)}</Bay>;
+            return (
+              <Bay key={rootId} groupOf={open ? rootId : 0}>
+                <CropDeck
+                  rootId={rootId}
+                  count={members.length}
+                  peeks={members.map((member) => ({
+                    id: member.id ?? 0,
+                    url: pictureThumb(member),
+                    alt: `render ${member.ordinal ?? ''}`,
+                  }))}
+                  /* ПОЛОСА — НЕ СЕТКА: ячейка здесь фиксированной ширины (`CELL_WIDTH` = 132px), и
+                     ширина колоды считается явно, а не спанится дорожками. Формула — та же, что в
+                     ленте: лист плюс по трети на каждый выглядывающий кусок. */
+                  sheetWidth={`${STRIP_CELL_PX}px`}
+                  frameAspect={STRIP_FRAME_ASPECT}
+                  className='shrink-0'
+                  style={
+                    open
+                      ? undefined
+                      : {
+                          width: `calc(${STRIP_CELL_PX}px + ${Math.min(
+                            members.length,
+                            DECK_PEEK_MAX,
+                          )} * ${STRIP_CELL_PX}px / ${DECK_PEEK_MAX})`,
+                        }
+                  }
+                  open={open}
+                  onToggle={() => setOpenDeck((current) => (current === rootId ? null : rootId))}
+                  /* Дверь колоды — в ряду дверей ячейки (`expand ▸` / `apply splitted` + `▾`), а не своей
+                     строкой под кадром: F-9, разбор у ветки `deck` в `cell`. */
+                  hostDoor
+                >
+                  {cell(row, { open })}
+                </CropDeck>
+                {open &&
+                  members.map((member) => {
+                    const memberRow = rowById.get(member.id ?? 0);
+                    return memberRow ? <Fragment key={member.id}>{cell(memberRow)}</Fragment> : null;
+                  })}
+              </Bay>
+            );
+          })}
+        </Strip>
       )}
+
+      {/* ═══ BRING YOUR OWN — the second door to the same shelf, under its own rule (E-13, mockup
+          `p4Bring`): «построить» и «принести» — две равные двери к одной полке. FREE, and the
+          count of the models that came by hand (no run behind them). */}
+      {kind === 'threed' && (
+        <>
+          <GroupLabel
+            action={
+              <span className='flex flex-wrap items-center gap-1.5'>
+                <Pill tone='ink'>free</Pill>
+                <Counter
+                  n={rows.filter((r) => (r.run.id ?? 0) === 0).length}
+                  noun='brought model'
+                />
+              </span>
+            }
+          >
+            bring your own
+          </GroupLabel>
+          {bringsOwnModel ? (
+            bring.cell
+          ) : (
+            <InertDoor
+              label='bring your own'
+              reason={
+                disabled
+                  ? 'this card is read-only for you — filing a model is an edit of the card'
+                  : 'this server does not answer the design routes'
+              }
+            />
+          )}
+        </>
+      )}
+
 
       {/* ОДНО ОКНО РЕЗА НА ВЕСЬ РАЗДЕЛ. Оно рисуется хуком и монтируется только когда цель
           выбрана; кадры размечает человек, а `for_input: false` уезжает на провод из самого хука

@@ -1,33 +1,31 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
-import { useState } from 'react';
 
-import { EmptyStudio } from './empty-studio';
-import { hasAnyPictures } from './generation-form';
 import { GenerationHistory } from './generation-history';
 
 /**
- * THE GENERATIVE HALF, COMPOSED — the prototype's own assembly rule, in one place.
+ * THE GENERATIVE HALF OF THE FLAT STEP, COMPOSED — and since the studio redesign it composes ONE
+ * organ: the generation history.
  *
- * `proto.html:3873` (`briefContent`) is the normative line, and it is not obvious enough to be
- * left to memory:
+ * WHAT STOOD HERE. The prototype's old assembly rule (`proto.html:3873`, `briefContent`) chose
+ * between the history and an EMPTY STUDIO block («pictures on this card · nothing here yet») by
+ * whether the band held any runs or uploads. The redesign's step screen (`_step-flat.js`,
+ * `RENDER['step-flat']`) has no such block: the order is INPUT — REFERENCES → GENERATION HISTORY →
+ * FLAT SLOTS, always, and the history carries its own empty states («no runs to show», «every run
+ * on this card is archived — open the archived shelf above», «no flat generations among the loaded
+ * runs»). A second block saying «nothing here yet» above a block already saying it would be the
+ * same sentence twice, in two boxes.
  *
- *   paramsVisible = «this card has a flat run» OR «the human asked for the form»
- *   anyContent    = runs OR uploads exist
+ * WHY THE HISTORY IS ALWAYS MOUNTED, EVEN ON A CARD WITH NOTHING. `GenerationHistory` mounts
+ * `useRunPolling` — the one place a live run is re-read from — and `RecallBenchIntake`, the home
+ * of the recall gesture. A card whose first run has just been started has zero pictures and one
+ * live run; unmounting the history over «no pictures» would leave that run un-polled and
+ * «starting…» standing forever. That defect existed exactly once (E-21…E-23) and this file is
+ * where it was closed.
  *
- *   form      → drawn when paramsVisible
- *   history   → drawn when anyContent; otherwise the EMPTY STUDIO, but only while the form is shut
- *   the doors → drawn when there IS content but the form is shut  (they live inside the form)
- *
- * The consequence worth stating: THE EMPTY STUDIO AND THE OPEN FORM ARE MUTUALLY EXCLUSIVE. Once
- * the human has asked for the form, the «nothing here yet» block has nothing left to say and the
- * form is the answer to its own question.
- *
- * This composer is offered so the rule cannot drift; every part of it is exported separately for a
- * page that wants to arrange them differently.
- *
- * IT DOES NOT MOUNT `FixContextProvider`. A fix is STARTED from a bench slot and CARRIED OUT by the
- * form, so the provider has to sit above both — mounting one here would shadow an outer one and
- * silently split the state in two. Put `FixContextProvider` beside `PickModeProvider`.
+ * `defaultRep='flat'` — owner, verbatim: «в FLAT — SHEET GENERATION HISTORY REPRESENTATION по
+ * дефолту фильтр на флеты только». `defaultOpen` — the flat has no outputs strip of its own («the
+ * bench slot IS the choice for a flat»), so the history is the only place a run's result is seen,
+ * and folding it would hide the result behind a click.
  */
 export function GenerationStudio({
   band,
@@ -38,42 +36,13 @@ export function GenerationStudio({
   techCardId: number;
   disabled?: boolean;
 }) {
-  /* ⚠ ФОРМЫ ФЛЭТА ЗДЕСЬ БОЛЬШЕ НЕТ (SPEC п.7). Органы прогона — чипы видов, раскладка, ряд
-     GENERATE с дверью «what the model gets ▸» — стоят подвалом секции INPUT — REFERENCES
-     (`../flat-run-row.tsx`), которая монтируется над этой студией в `studio-tab.tsx`. Студии
-     осталось решать ровно одно: лента истории или пустой стенд. */
-  const anyContent = hasAnyPictures(band);
-
   return (
-    <>
-      {anyContent ? (
-        /* ═══ ЛЕНТА ФЛЭТА ОТКРЫВАЕТСЯ НА ФЛЭТАХ И РАЗВЁРНУТОЙ (E-14, и НЕ E-21…E-23) ══════════
-         *
-         * `defaultRep='flat'` — владелец, дословно: «в FLAT — SHEET GENERATION HISTORY
-         * REPRESENTATION по дефолту фильтр на флеты только». Это НАЧАЛЬНОЕ положение сегмента, а
-         * не запрет: все шесть его положений достижимы, и `'all'` в одном нажатии. Тем самым
-         * последняя из пяти вкладок перестала открываться на «all» — правило J-12/J-18/J-31
-         * («каждая открывается на своём роде») стало общим, без исключения.
-         *
-         * ⚠ И РАЗВЁРНУТОЙ — ЭТО ВТОРАЯ ПОЛОВИНА ТОГО ЖЕ РЕШЕНИЯ, И ОНА ЯВНАЯ, А НЕ УМОЛЧАНИЕ.
-         * Владелец свернул ленту на четырёх вкладках (E-21…E-23) и НЕ назвал FLAT — потому что
-         * над лентой здесь нет раздела выходов: у флэта их не бывает («the bench slot IS the
-         * choice for a flat»), и лента — единственное место, где видно, что прогон вернул.
-         * Свернуть её тут значило бы спрятать сам результат генерации за нажатием.
-         */
-        <GenerationHistory
-          band={band}
-          techCardId={techCardId}
-          disabled={disabled}
-          defaultRep='flat'
-          defaultOpen
-        />
-      ) : (
-        /* ПУСТОЙ СТЕНД рисуется, когда на карточке НЕЧЕГО показывать. Дверь `GENERATE ▸` ему не
-           нужна: ряд GENERATE стоит в подвале INPUT — REFERENCES прямо над ним, и вести к нему
-           нажатием значило бы вести к тому, что уже видно. */
-        <EmptyStudio band={band} techCardId={techCardId} disabled={disabled} />
-      )}
-    </>
+    <GenerationHistory
+      band={band}
+      techCardId={techCardId}
+      disabled={disabled}
+      defaultRep='flat'
+      defaultOpen
+    />
   );
 }

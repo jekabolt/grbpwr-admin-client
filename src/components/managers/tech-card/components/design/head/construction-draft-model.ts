@@ -464,3 +464,62 @@ export function diffProposal(
  * стоит там, где ему и место: на самой секции (`design/material-slots.tsx`). Ключи групп живы в
  * `ProposalRow['group']` и по-прежнему различают строки.
  */
+
+/* ═══ РАЗНИЦА, СХЛОПНУТАЯ ДО УТВЕРЖДЕНИЯ (макет `_step-mood.js`, `mbSay` / `mbDiff`) ═══════════
+ *
+ * Строка «TO DECIDE» существует ради ОДНОГО: что именно изменится, если взять черновик. Два ряда
+ * текста человек всё равно сличал бы глазами, поэтому в ряду стоит ПРЕДЛОЖЕНИЕ, а оба текста
+ * целиком — под раскрытием. Три исхода, и все три выводятся из уже посчитанной разницы:
+ *   · черновик ПРОДОЛЖАЕТ текст (карточка — начало черновика с точностью до хвостовой пунктуации)
+ *     → `draft adds "…"`, добавленное названо дословно; это единственный исход, где осмыслен режим
+ *     «append» — приписать продолжение к тому, что стоит;
+ *   · есть общее начало, дальше расходятся → `draft rewrites the tail`;
+ *   · общего начала нет вовсе → `draft says it differently`.
+ * Кавычки прямые. Файл чистый, как и всё выше: стенд считает ЭТИ функции, а не их пересказ.
+ */
+export type DraftSay = { mode: 'add' | 'tail' | 'other'; plain: string };
+
+const sayTokens = (t?: string | null): string[] => String(t ?? '').match(/\S+\s*/g) ?? [];
+
+/** Общее начало и общий хвост двух текстов, в словах. `p` — длина начала, `s` — хвоста. */
+export function wordDiff(
+  a?: string | null,
+  b?: string | null,
+): { A: string[]; B: string[]; p: number; s: number } {
+  const A = sayTokens(a);
+  const B = sayTokens(b);
+  let p = 0;
+  while (p < A.length && p < B.length && A[p] === B[p]) p++;
+  let s = 0;
+  while (
+    s < A.length - p &&
+    s < B.length - p &&
+    A[A.length - 1 - s] === B[B.length - 1 - s]
+  ) {
+    s++;
+  }
+  return { A, B, p, s };
+}
+
+const cutTo = (t: string, n: number): string =>
+  t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t;
+
+export function draftSays(was?: string | null, now?: string | null): DraftSay {
+  const a = String(was ?? '').trim();
+  const b = String(now ?? '').trim();
+  // «Продолжает» меряется БЕЗ хвостовой пунктуации: «…and cuff.» против «…and cuff, brushed
+  // inside.» отличается точкой, ставшей запятой, и побуквенное сравнение назвало бы это
+  // переписыванием хвоста.
+  const stem = a.replace(/[.,;:!?\s]+$/, '');
+  if (stem && b.length > stem.length && b.slice(0, stem.length) === stem) {
+    const add = b
+      .slice(stem.length)
+      .replace(/^[.,;:\s]+/, '')
+      .replace(/[.,;:!?\s]+$/, '');
+    if (add) return { mode: 'add', plain: `draft adds "${cutTo(add, 46)}"` };
+  }
+  const d = wordDiff(a, b);
+  return d.p > 0
+    ? { mode: 'tail', plain: 'draft rewrites the tail' }
+    : { mode: 'other', plain: 'draft says it differently' };
+}
