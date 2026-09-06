@@ -1,7 +1,6 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 
 import { cn } from 'lib/utility';
-import { useSnackBarStore } from 'lib/stores/store';
 import { type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
@@ -11,7 +10,7 @@ import Text from 'ui/components/text';
 import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
 
 import type { TechCardFormData } from '../schema';
-import { pictureRepresentation, type DesignKind } from './bench-kinds';
+import { pictureRepresentation } from './bench-kinds';
 import {
   ASIDE,
   STEPS,
@@ -25,7 +24,6 @@ import {
   type StepState,
 } from './core/chain';
 import { Counter } from './core';
-import { openDoor } from './doors';
 import { LockBar } from './render/generate-row';
 import { countThreedResults } from './threed/media';
 
@@ -35,10 +33,11 @@ import { countThreedResults } from './threed/media';
  * It REPLACES `KindsStrip` (the five-cell strip of representations) rather than standing beside it:
  * two navigators for one gesture — «go to that step» — would be two places that can disagree about
  * where a person is. What the strip did, the rail still does, cell for cell:
- *   · a cell IS the navigation. Clicking a switched step opens it (`onKindChange`), exactly as
- *     `RepCell` did; clicking CARD DETAILS or MOODBOARD — which are always on screen above the rail
- *     and are steps all the same — scrolls to them through the same `openDoor` every other door of
- *     the band uses;
+ *   · a cell IS the navigation, and every cell navigates the same way: it opens its step
+ *     (`onStepChange`), CARD DETAILS and MOODBOARD included. The rail stands at the TOP of the
+ *     studio and under it there is ONE step at a time — the prototype's `render()` is exactly
+ *     `railBlock() + RENDER[S.step]()`, and `ACTIONS['go']` sets `S.step` for any cell. There is
+ *     no scrolling door left: nothing is «always on screen above the rail» any more;
  *   · the counters are the strip's counters, computed by the same single classifier
  *     (`pictureRepresentation`, `bench-kinds.ts`) — imported, not re-derived. Hidden frames are
  *     filtered out separately for the same reason the strip filtered them: invisibility is its own
@@ -170,39 +169,74 @@ function StepCell({
 }
 
 /**
- * Where a click on an always-on-screen step lands. Both anchors are stamped by the composer
- * (`studio-tab.tsx`) on the wrapper of the step's blocks, so `openDoor` — the same `revealField`
- * every other door of the band uses — scrolls to the TOP of the step. The fields inside stamp their
- * own `data-field`s, but landing on `name` would skip the block header, and the board stamps only
- * its description textarea, below the pictures.
+ * ═══ WHAT THE CHAIN READS, BUILT ONCE — the composer calls this and hands the result down ═════════
+ *
+ * The rail used to build the context itself, from the form and the band. It moved out for one
+ * reason: the composer needs the SAME context before the rail is drawn, to decide which step a card
+ * opens on (`defaultStep`, core/chain.ts), and two builders of one context are two places that can
+ * disagree about whether the card is done. `now` is left `null` here: the composer fills it in
+ * (`{ ...ctx, now: step }`) once the step is known — the default rule wants it empty.
+ *
+ * LIVE NUMBERS FROM THE FORM. The card fields decide whether step 0 is done and the board count
+ * whether step 1 is; read through the form, not a frozen copy, so the rail never names the previous
+ * state after an edit. ALL FOUR PICTURE COUNTS FROM ONE CLASSIFIER (G-1): renders, tiles, 3D models
+ * and recolours are bucketed by `pictureRepresentation`; the 3D count folds the `.glb` and its
+ * raster thumbnail into one result through `countThreedResults` (`threed/media.ts`). Hidden frames
+ * are filtered out for the reason the strip filtered them: a hidden render is still a render, only
+ * uncounted.
  */
-const SCROLL_DOOR: Partial<Record<StepId, { path: string; where: string }>> = {
-  card: { path: 'design.step.card', where: 'card details' },
-  mood: { path: 'design.step.mood', where: 'the moodboard' },
-};
-
-export function ChainRail({
+export function useChainCtx({
   band,
   bandless,
-  kind = 'flat',
-  onKindChange,
-  onScrollStep,
   colorway,
-  action,
 }: {
   band: GetDesignBandResponse;
   /** The server does not serve the band; every band-derived state is «unknown», never «locked». */
   bandless: boolean;
-  /** Which switched screen is on. The composer holds it (`state.kind` of the prototype). */
-  kind?: DesignKind;
-  onKindChange?: (kind: DesignKind) => void;
-  /**
-   * Called just before the rail scrolls to an always-on-screen step (card details, moodboard). The
-   * composer folds step 0 away on a filled card; without this the door would land on the fold.
-   */
-  onScrollStep?: (id: StepId) => void;
   /** The one colourway axis of the studio (`useColorwayChoice`), read for the 3D and render gates. */
   colorway: { id: number; label: string; archived: boolean };
+}): ChainCtx {
+  const { control } = useFormContext<TechCardFormData>();
+  const moodPictures = (
+    (useWatch({ control, name: 'moodboardMedia' }) as unknown[] | undefined) ?? []
+  ).length;
+  const name = (useWatch({ control, name: 'name' }) as string | undefined) ?? '';
+  const styleNumber = (useWatch({ control, name: 'styleNumber' }) as string | undefined) ?? '';
+  const categoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
+  const baseSampleSizeId = Number(useWatch({ control, name: 'baseSampleSizeId' }) ?? 0);
+  const pastIdea =
+    ((useWatch({ control, name: 'stage' }) as string | undefined) ?? '') !==
+    'TECH_CARD_STAGE_IDEA';
+
+  const shown = (band.runs ?? []).flatMap((r) => r.pictures ?? []).filter((p) => !p.hiddenAt);
+  const repOf = (p: (typeof shown)[number]) => pictureRepresentation(band, p);
+  const counts = {
+    pattern: shown.filter((p) => repOf(p) === 'pattern').length,
+    render: shown.filter((p) => repOf(p) === 'render').length,
+    threed: countThreedResults(shown.filter((p) => repOf(p) === 'threed')),
+    onmodel: shown.filter((p) => repOf(p) === 'onmodel').length,
+  };
+
+  return {
+    band,
+    bandless,
+    now: null,
+    card: { name, styleNumber, categoryId, baseSampleSizeId, pastIdea },
+    moodPictures,
+    counts,
+    colorway,
+  };
+}
+
+export function ChainRail({
+  ctx,
+  onStepChange,
+  action,
+}: {
+  /** What the chain reads, `now` filled in — see `useChainCtx`. */
+  ctx: ChainCtx;
+  /** A cell was pressed. The composer holds the step (`S.step` of the prototype) and switches. */
+  onStepChange: (id: StepId) => void;
   /**
    * ═══ THE RIGHT END OF THE ROW — ONE FILTER, HANDED IN BY THE COMPOSER (round 19, C1) ═══════════
    *
@@ -226,47 +260,10 @@ export function ChainRail({
   action?: JSX.Element | null;
 }): JSX.Element {
   const { control } = useFormContext<TechCardFormData>();
-  const { showMessage } = useSnackBarStore();
-
-  // LIVE NUMBERS FROM THE FORM. The callout count changes the instant the sheet does; the card
-  // fields decide whether step 0 is done. Read through the form, not a frozen copy, for the same
-  // reason the strip read them so: the rail must not name the previous count after an edit.
+  // The one number the chain itself does not read: the callout count is the flat cell's sub-line,
+  // a label, and it changes the instant the sheet does — read live for the same reason as the rest.
   const callouts = (useWatch({ control, name: 'callouts' }) as unknown[] | undefined) ?? [];
-  const moodPictures = (
-    (useWatch({ control, name: 'moodboardMedia' }) as unknown[] | undefined) ?? []
-  ).length;
-  const name = (useWatch({ control, name: 'name' }) as string | undefined) ?? '';
-  const styleNumber = (useWatch({ control, name: 'styleNumber' }) as string | undefined) ?? '';
-  const categoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
-  const baseSampleSizeId = Number(useWatch({ control, name: 'baseSampleSizeId' }) ?? 0);
-  const pastIdea =
-    ((useWatch({ control, name: 'stage' }) as string | undefined) ?? '') !==
-    'TECH_CARD_STAGE_IDEA';
-
-  /**
-   * ═══ ALL FOUR NUMBERS FROM ONE CLASSIFIER (G-1) — moved here from `kinds-strip.tsx` verbatim ═══
-   * Renders, tiles, 3D models and recolours are all bucketed by `pictureRepresentation`; the 3D
-   * count then folds the `.glb` and its raster thumbnail into one result through
-   * `countThreedResults` (`threed/media.ts`), the one place that rule is written.
-   */
-  const shown = (band.runs ?? []).flatMap((r) => r.pictures ?? []).filter((p) => !p.hiddenAt);
-  const repOf = (p: (typeof shown)[number]) => pictureRepresentation(band, p);
-  const counts = {
-    pattern: shown.filter((p) => repOf(p) === 'pattern').length,
-    render: shown.filter((p) => repOf(p) === 'render').length,
-    threed: countThreedResults(shown.filter((p) => repOf(p) === 'threed')),
-    onmodel: shown.filter((p) => repOf(p) === 'onmodel').length,
-  };
-
-  const ctx: ChainCtx = {
-    band,
-    bandless,
-    kind,
-    card: { name, styleNumber, categoryId, baseSampleSizeId, pastIdea },
-    moodPictures,
-    counts,
-    colorway,
-  };
+  const { moodPictures, counts } = ctx;
 
   const plural = (n: number, noun: string, many = `${noun}s`) => `${n} ${n === 1 ? noun : many}`;
   const subOf = (id: StepId): string => {
@@ -292,20 +289,10 @@ export function ChainRail({
     }
   };
 
-  const open = (step: Step): (() => void) | undefined => {
-    const scroll = SCROLL_DOOR[step.id];
-    if (scroll) {
-      return () => {
-        onScrollStep?.(step.id);
-        openDoor(scroll.path, scroll.where, showMessage);
-      };
-    }
-    if (step.kind && onKindChange) {
-      const k = step.kind;
-      return () => onKindChange(k);
-    }
-    return undefined;
-  };
+  // Every cell opens its step; the one on display is drawn as a place, not a control (`StepCell`).
+  function open(step: Step): () => void {
+    return () => onStepChange(step.id);
+  }
 
   const cell = (step: Step, className?: string) => {
     const state = stepState(step.id, ctx);
@@ -360,12 +347,7 @@ export function ChainRail({
       {block && blockStep && (
         <LockBar reason={`locked · ${blockStep.label} · ${block.why}`}>
           {doorStep && (
-            <Button
-              variant='secondary'
-              size='xs'
-              onClick={open(doorStep)}
-              disabled={!open(doorStep)}
-            >
+            <Button variant='secondary' size='xs' onClick={open(doorStep)}>
               go to {doorStep.label} ▸
             </Button>
           )}

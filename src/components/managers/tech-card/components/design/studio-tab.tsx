@@ -1,11 +1,10 @@
 import type { common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { cn } from 'lib/utility';
-import { Arrow } from 'ui/icons/arrow';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { FIELD_REVEAL_EVENT } from 'utils/field-errors';
+import { useSearchParams } from 'react-router-dom';
+import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 import type { EditHistory } from 'ui/components/annotation/history';
 import Text from 'ui/components/text';
 import { Section, SectionStack } from 'ui/components/section';
@@ -17,8 +16,15 @@ import { ColorwaySelect, useColorwayChoice } from './colorway-picker';
 import { ColourwayProposals } from './colourway-proposals';
 import { GenerationStudio } from './generation';
 import type { DesignKind } from './bench-kinds';
-import { ChainRail } from './chain-rail';
-import { cardMissingFields, stepDone } from './core/chain';
+import { ChainRail, useChainCtx } from './chain-rail';
+import {
+  defaultStep,
+  isStepId,
+  kindOfStep,
+  stepOfField,
+  stepOfKind,
+  type StepId,
+} from './core/chain';
 import { RenderStudio, ThreedStudio } from './render';
 import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
@@ -37,8 +43,24 @@ import { useDesignBand } from './use-design-band';
  * THE STUDIO — the composed DESIGN band, and the only place that knows the order of its organs.
  *
  * The organs themselves are written independently against frozen signatures; this file is where
- * they meet. It holds no state of its own beyond the two providers, on purpose: anything it stored
- * would become a fifth place to look for the truth about a card.
+ * they meet. It holds ONE state of its own — which STEP is on screen — and nothing else: anything
+ * more it stored would become a fifth place to look for the truth about a card.
+ *
+ * ═══ THE SHAPE IS THE PROTOTYPE'S, BLOCK FOR BLOCK (`design-flow.html`, `_core.js` `render`) ═════
+ *
+ *     stage = railBlock() + RENDER[S.step]()
+ *
+ * The CHAIN RAIL stands at the TOP — «where this card stands», six cells and the aside, the LOCKED
+ * bar under them — and under the rail there is EXACTLY ONE STEP:
+ *   · step 0 CARD DETAILS  → the header of the card (`cardDetails`, a slot from `index.tsx`);
+ *   · step 1 MOODBOARD     → the board with callouts, description and the construction draft
+ *                            inside, then GENERAL INFORMATION, CONSTRUCTION, MATERIAL SLOTS (and
+ *                            the colourway proposals, a product block the prototype has no row for);
+ *   · steps 2–5 and the aside → the generative screens (flat · pattern · fabric render · 3D · on
+ *                            model), each with its own input, GENERATE and history.
+ * Nothing is «always on screen above the rail» any more: the previous build stacked steps 0 and 1
+ * over the rail and switched only the screens below it, and the owner, seeing it, said «не как в
+ * референсе». Clicking a cell — any cell — switches the step, as `ACTIONS['go']` sets `S.step`.
  *
  * ONE READ FEEDS ALL OF THEM. `useDesignBand` is called here, once, and the band object is passed
  * down. Organs that called it separately would each get their own cache entry and the bench could
@@ -77,740 +99,468 @@ export function StudioTab({
   /**
    * ПЕРЕХОД НА СОСЕДНЮЮ ВКЛАДКУ — ЧУЖОЙ ПИСАТЕЛЬ, А НЕ СВОЙ.
    *
-   * ⚠ ЗДЕСЬ СТОЯЛА ЗАПИСКА О СОБСТВЕННОЙ КОПИИ `navTo`, КОТОРУЮ ЯКОБЫ СНЕСЛИ ОТСЮДА. КОПИИ НЕ
-   * БЫЛО НИ В ОДНОМ ВЫПУЩЕННОМ ДЕРЕВЕ: на предыдущем коммите (`a9470fe7`) этот файл не упоминает
-   * ни `useSearchParams`, ни `goTab`, ни самого пропа — вкладка CONSTRUCTION приехала в студию
-   * ЭТИМ коммитом, вместе с `navTo` сразу пропом. Записка описывала ход мысли, а не историю
-   * файла, и читалась как замер.
+   * Писатель `?tab=` ровно один и живёт у владельца адреса (`components/index.tsx`, `navTo`),
+   * читатель у него тоже один — тот же файл берёт оттуда активную вкладку. Заведи студия своё
+   * письмо `?tab=`, и писателей стало бы два: первая же правка правила («не ронять ещё и `?bom=`»,
+   * «пушить, а не replace») попала бы в одного из двух, и вкладка вела бы себя по-разному в
+   * зависимости от того, какая кнопка её открыла, — расхождение, которого не видно ни в типах, ни
+   * в сборке. Поэтому переход на вкладку — проп, а не импорт.
    *
-   * ПРАВИЛО ПРИ ЭТОМ ЖИВОЕ, И РАДИ НЕГО АБЗАЦ ОСТАЁТСЯ. Писатель `?tab=` ровно один и живёт у
-   * владельца адреса (`components/index.tsx:453`), читатель у него тоже один — тот же файл берёт
-   * оттуда активную вкладку. Заведи студия своё чтение `useSearchParams`, и писателей стало бы
-   * два: первая же правка правила («не ронять ещё и `?bom=`», «пушить, а не replace») попала бы в
-   * одного из двух, и вкладка вела бы себя по-разному в зависимости от того, какая кнопка её
-   * открыла, — расхождение, которого не видно ни в типах, ни в сборке.
+   * ⚠ ЭТО НЕ ЗАПРЕТ НА ЧТЕНИЕ АДРЕСА. Студия ПИШЕТ СВОЙ параметр — `?step=` (ниже, `goStep`) — и
+   * у НЕГО писатель тоже ровно один, этот файл: `navTo` его не трогает (сохраняет при смене
+   * вкладки), а `index.tsx` не читает. Два параметра, по одному владельцу на каждый.
    *
    * Проп ОБЯЗАТЕЛЕН, а не «не задан — двери нет»: дверь отсюда — это работа, а не украшение, и
-   * композитор, смонтированный без адресата, обязан не собраться, а не тихо её потерять.
-   *
-   * ⚠ КРУГ 20: ЧИТАТЕЛЕЙ У ЭТОГО ПРОПА СЕЙЧАС НОЛЬ, И ОН ВСЁ РАВНО ОСТАЁТСЯ. Обе двери, которые
-   * им пользовались, сняты словом владельца в один вечер: «связать материал ›» — вместе с блоком
-   * спецификации (B-12), размерный ряд — вместе с SIZE RANGE (B-4). Снять следом контракт значило
-   * бы переписать сигнатуру композитора ради одного вечера: на место спецификации в ЭТУ ЖЕ секцию
-   * приходит таблица слотов материалов (B-16/B-19/B-20), и первое, что ей понадобится, — та же
-   * дверь на вкладку BOM. Проп держится как ОБЪЯВЛЕННЫЙ адрес секции, а не как забытый аргумент.
+   * композитор, смонтированный без адресата, обязан не собраться, а не тихо её потерять. Его
+   * читатель — таблица слотов материалов (`›` ведёт в редактор строки на вкладке BOM).
    */
   navTo: (tab: string, extra?: Record<string, string>) => void;
   /**
-   * ═══ АСПЕКТЫ СБОРКИ, ВСТАВЛЯЕМЫЕ ПОД МУДБОРД (K-8) ═══════════════════════════════════════════
-   *
-   * Владелец: «помести карточку CONSTRUCTION — described aspect by aspect; prints after the
-   * concept под мудборд». Сейчас она стоит НАД ним, и не по решению этого файла: конец шапки
-   * карточки (`components/index.tsx`) физически предшествует началу студии, а мудборд — первый
-   * орган студии. Смежность «вплотную сверху» была ровно тем, что дал V-17 прошлой волной.
+   * ═══ АСПЕКТЫ СБОРКИ — БЛОК CONSTRUCTION ШАГА MOODBOARD (K-8) ═══════════════════════════════════
    *
    * ПОЧЕМУ ПРОП, А НЕ ИМПОРТ `DetailsEditor` ЗДЕСЬ. Редактор аспектов держит СВОЁ локальное
    * состояние показанных аспектов, и два всегда-смонтированных экземпляра уже расходились им
-   * (U-9). Смонтировав второй здесь, мы получили бы ту же поломку под новым именем. Значит
-   * экземпляр обязан остаться ОДИН, а переехать может только его МЕСТО — и отдать его может
-   * только владелец шапки. Пока он этого не сделал, слот пуст и не рисует ничего: полустрочка
-   * `{constructionAspects}` ниже — это `undefined`, а не пустая секция.
+   * (U-9). Экземпляр обязан остаться ОДИН, а отдать его может только владелец шапки
+   * (`components/index.tsx`). Пустой слот не рисует ничего: полустрочка `{constructionAspects}`
+   * ниже — это `undefined`, а не пустая секция.
    *
-   * `Section`-ОБЁРТКА ЖИВЁТ ЗДЕСЬ, А НЕ У ВЫЗЫВАЮЩЕГО, и это не мелочь: порядок и материал блоков
-   * полосы DESIGN — решение этого файла (он и заведён как «единственное место, которое знает
-   * порядок своих органов»). Вызывающий отдаёт СОДЕРЖИМОЕ; имя печатной секции, её вопрос и белый
-   * грунт под ним назначаются тут. `DetailsEditor` рисует голый div — без обёртки его карточки
-   * аспектов стояли бы прямо на сером грунте страницы (DESIGN.md, Filled-Block Rule).
+   * `Section`-ОБЁРТКА ЖИВЁТ ЗДЕСЬ, А НЕ У ВЫЗЫВАЮЩЕГО: порядок и материал блоков полосы DESIGN —
+   * решение этого файла. Вызывающий отдаёт СОДЕРЖИМОЕ; имя печатной секции, её вопрос и белый
+   * грунт под ним назначаются тут (`DetailsEditor` рисует голый div — без обёртки его карточки
+   * стояли бы прямо на сером грунте страницы, DESIGN.md, Filled-Block Rule).
    */
   constructionAspects?: ReactNode;
   /**
    * ═══ CARD DETAILS — STEP 0 OF THE CHAIN, AS A SLOT, NOT A MOVE (WAVE2 p.1) ═══════════════════
    *
    * The header of the card (identification / classification / base model / roles / linked products)
-   * is the first step of the rail and is drawn FIRST in the studio's stack, above the moodboard. It
-   * arrives as a node from the owner of the header (`components/index.tsx`), by the same device as
-   * `constructionAspects` below, and for two reasons that are correctness, not taste:
+   * is the first step of the rail and is drawn as ITS OWN SCREEN, under the rail, when step 0 is
+   * open. It arrives as a node from the owner of the header (`components/index.tsx`), by the same
+   * device as `constructionAspects`, and for two reasons that are correctness, not taste:
    *   · the fields inside it (`name`, `styleNumber`, …) must render on a card that DOES NOT EXIST
    *     YET — otherwise a new card cannot be created at all. The studio has three states
-   *     (`!techCardId`, `isLoading`, loaded); a header living inside one of them would vanish exactly
-   *     when it is the only thing a person can fill. Hence the slot is drawn by the ONE return, above
-   *     whichever body the state picks (Ф6: three returns gave it three different parents, and React
-   *     remounted its fields on every transition);
+   *     (`!techCardId`, `isLoading`, loaded), and step 0 is drawn in ALL of them: it is the one step
+   *     that hangs off the form alone and needs no band;
    *   · `StyleFactsField` — the ONE writer of brand / collection / season / targetGender through its
    *     own `UpdateStyle` — stays in `index.tsx`, mounted unconditionally. Moved under
    *     `activeTab === 'studio'` it would silently roll those fields back on every other tab.
-   *
-   * The slot is wrapped in a `data-field='design.step.card'` anchor so the rail's STEP 0 cell can
-   * scroll to it through `openDoor`; the wrapper is a flex column with the stack's own gutter so the
-   * blocks inside keep the 24px rhythm they had as direct children of the header's `SectionStack`.
    */
   cardDetails?: ReactNode;
 }) {
-  // ВИД — состояние студии, как `state.kind` в прототипе. Живёт здесь, у композитора: полоса
-  // представлений его показывает, а экраны читают, и третьего владельца у него быть не должно.
-  //
-  // СТОИТ ВЫШЕ ЛЮБОГО РАННЕГО ВОЗВРАТА, и это не стиль. Ниже них он простоял ровно один прогон, и
-  // этого хватило: пока полоса грузится, компонент выходит раньше и хук не исполняется, а после
-  // загрузки исполняется — хуков становится БОЛЬШЕ, чем в прошлый раз. React отвечает ошибкой 310
-  // и сносит ВСЁ дерево: вкладка уходит в белое целиком, потому что границы ошибок над ней нет.
-  const [kind, setKind] = useState<DesignKind>('flat');
-  /* РЕКОЛ ПЕРЕКЛЮЧАЕТ ВИД СТУДИИ (V-12в, владелец: «если мы нажимаем на рекол из генерации
-     допустим фабрик рендера оно должно переключатся на фабрик рендер а не пихать их во флеты»).
-     Владелец вида — этот композитор, и второго источника правды заводить нельзя; поэтому наружу
-     отдаётся не копия состояния, а ссылка на владельца. Без этой строки жест не врёт, а честно
-     говорит «откройте вкладку сами» — но говорить это владельцу, который попросил обратного,
-     было бы отказом, а не решением. */
-  useStudioKindSwitch(techCardId ?? 0, kind, setKind);
+  /* ═══ EVERY HOOK STANDS ABOVE THE ONE RETURN, AND THERE IS NO EARLY RETURN LEFT ═══════════════
+     Below an early return a hook runs on some renders and not on others; React answers with
+     error 310 and takes the WHOLE tree down — the tab went white for exactly that once. The three
+     states of the studio (`!techCardId`, `isLoading`, loaded) are branches of `body` below, not
+     returns. */
   const { band, isLoading, serverSpeaks, error } = useDesignBand(techCardId);
 
-  /* ═══ ЧТО НУЖНО БЛОКАМ CONSTRUCTION, И ПОЧЕМУ ОНО ЧИТАЕТСЯ ЗДЕСЬ ══════════════════════════════
-     ВСЕ ТРИ ХУКА СТОЯТ ВЫШЕ РАННИХ ВОЗВРАТОВ (их два: «карточка ещё не создана» и «полоса
-     грузится»). Ниже них число хуков зависело бы от загрузки — React отвечает ошибкой 310 и
-     сносит вкладку в белое целиком; ровно этот довод записан у `useState` выше, и он тот же.
-
-     СОСТОЯНИЕ НЕ ПЕРЕЕЗЖАЕТ ВМЕСТЕ С БЛОКАМИ, И ЭТО ГЛАВНОЕ. Все поля, которые они правят
-     (`fit`, `categoryId`, `details[]`), живут в ОДНОЙ форме тех-карты и берутся через
-     `useFormContext`. Переезд — это смена места монтажа, а не второй путь к данным: ни один проп
-     ниже не заводит копию состояния.
-
-     ⚠ КРУГ 20 (B-12): ЗДЕСЬ СТОЯЛ ЕЩЁ `useTechCard(techCardId)`, И ОН СНЯТ ВМЕСТЕ СО СВОИМ
-     ЕДИНСТВЕННЫМ ЧИТАТЕЛЕМ. Снимок карточки нужен был спецификации ради колорвейных рецептов
-     (столбец «est usage»), которых в форме нет; блока спецификации на этой секции больше нет,
-     и подписка, у которой не осталось читателя, — это лишний рендер студии на каждую
-     инвалидацию ключа карточки, а не запас на будущее. Новой таблице слотов (B-16) снимок
-     понадобится — тогда она и попросит его СЕБЕ, у своего места монтажа. */
+  /* Что нужно блокам шага MOODBOARD. Все поля, которые они правят (`fit`, `categoryId`,
+     `details[]`, `bomItems[]`), живут в ОДНОЙ форме тех-карты и берутся через `useFormContext`:
+     ни один проп ниже не заводит копию состояния. */
   const { control } = useFormContext<TechCardFormData>();
   const purpose = useWatch({ control, name: 'purpose' }) as string | undefined;
   const isAux = purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
   const { canWrite } = usePermissions();
   const canWriteCard = canWrite(SECTION.techCards);
 
-  /* ═══ ЧЕЙ ЭТО РЕНДЕР — ОДНО ЧИСЛО НА ВСЮ СТУДИЮ, И ОНО ВЕРНУЛОСЬ (круг 19, C1) ═══════════════
-     Владелец, круг 19: «колорвеи для рендеров … как пробрасывать паттерны … как сохранять».
-
-     ⚠ КРУГ 16 СНЯЛ ЭТОТ ЖЕ ХУК ЕГО ЖЕ РУКАМИ (E-1 + E-16: «в MAKE A PATTERN оставь только имя
-     убери колорвей», «в GENERATION — FABRIC RENDER мы полностью убираем колорвеи только имена
-     остаются»), и два приказа мирятся ровно одним способом: ВОЗВРАЩАЕТСЯ ОСЬ, А НЕ ОРГАНЫ.
-     Восстановленный орган отвечает на ОДИН вопрос — ЧЕЙ ЭТО РЕНДЕР — и ни на один больше. Ничего
-     из выброшенного кругом 16 назад не едет: ряда колорвея на MAKE A PATTERN нет (прогон-плитка
-     по-прежнему шлёт `colorway_id: 0`), чипов «worn by ROSSO» нет, засева тканью по ссылке
-     `design_asset.colorway_id` нет, а имя цвета в рецепте остаётся СВОБОДНЫМ («только имена
-     остаются»), а не артикульным жетоном. Второй сущности «рендерный колорвей» тоже нет: ось —
-     это продуктовый колорвей карточки, тот самый, которым уже ключуются верстак, ворота 3D и
-     история.
-
-     ПОЧЕМУ ВЛАДЕЛЕЦ ХУКА — КОМПОЗИТОР, А НЕ ЭКРАН. Довод тот же, что у `kind`, и он записан в
-     шапке самого хука: «ОДНО СОСТОЯНИЕ НА ВСЮ СТУДИЮ, И ЖИВЁТ ОНО У КОМПОЗИТОРА». Верстак
-     рендеров ПИШЕТ FABRIC RENDER, ЧИТАЕТ 3D, а СЕРВЕР по нему собирает (`designSelectBench`);
-     заведи второго владельца — и полоса входа 3D показывала бы ROSSO, пока прогон уезжает за
-     OLIVE. Ровно поэтому число раздаётся вниз ПРОПОМ, а экраны его не выбирают. */
+  /* ═══ ЧЕЙ ЭТО РЕНДЕР — ОДНО ЧИСЛО НА ВСЮ СТУДИЮ (круг 19, C1) ═════════════════════════════════
+     Ось — продуктовый колорвей карточки, тот самый, которым ключуются верстак рендеров, ворота 3D и
+     история. Владелец хука — композитор, не экран: верстак рендеров ПИШЕТ FABRIC RENDER, ЧИТАЕТ 3D,
+     а СЕРВЕР по нему собирает (`designSelectBench`); заведи второго владельца — и полоса входа 3D
+     показывала бы ROSSO, пока прогон уезжает за OLIVE. Число раздаётся вниз ПРОПОМ. */
   const colorway = useColorwayChoice(techCardId, band);
 
   const readOnly = !!disabled;
 
-  // WHAT SURVIVES A SERVER THAT DOES NOT SPEAK THE BAND.
-  //
-  // The moodboard, the kinds strip and the description are fields of the tech card form: they save
-  // through the ordinary UpdateTechCard and touch not one design RPC. Hiding them behind the band
-  // read — which is what an early return here would do — would mean that on a contour whose binary
-  // predates the band, the studio is empty AND the old moodboard tab is folded away, i.e. the human
-  // loses a screen that works. The band's own organs degrade; these three do not.
+  // WHAT SURVIVES A SERVER THAT DOES NOT SPEAK THE BAND: the moodboard step and the card step are
+  // fields of the tech card form — they save through the ordinary UpdateTechCard and touch not one
+  // design RPC. On a contour whose binary predates the band the generative steps degrade to a
+  // notice; these two do not.
   const bandless = !serverSpeaks;
 
-  /* ═══ STEP 0 FOLDS — THE ONE ANSWER TO «1100px ABOVE THE FIRST PAID DOOR» (Ф6, mockup risk G-1) ═══
-     CARD DETAILS stands above the moodboard, which stands above the draft's GENERATE. On a 900px
-     screen the person who opens a FILLED card scrolls past five blocks they will not touch today
-     before reaching the first thing they came for. The mockup names the risk and forbids the two
-     easy cures: the moodboard is «one to one as today» (WAVE2 p.5), and the fold state must not
-     live in localStorage (no memory in this zone, by decision). So the fold is a STATE OF THIS
-     MOUNT, decided once: a card that is not saved yet opens (there is nothing else to fill), a
-     saved card opens when step 0 is not done and closes when it is — by the SAME predicate the
-     rail uses to paint step 0 `done` (`stepDone('card')`, core/chain.ts), imported, not re-derived.
+  /* ═══ THE STEP — `S.step` OF THE PROTOTYPE, THE ONE STATE OF THIS COMPOSER ═══════════════════════
 
-     ⚠ DECIDED ONCE, NOT FOLLOWED LIVE, and the difference is a hand on the keyboard: followed live,
-     the fold would close under a person the instant they typed the last missing field. The latch
-     waits for the form to be SEEDED (`name` is required to save, so an empty name on a saved card
-     means the reset has not landed yet), then fixes the default for the life of the mount. The
-     person's own toggle wins from then on.
+     WHERE IT LIVES: in the address, `?step=…`, and nowhere else. The prototype keeps it in the URL
+     hash (`render()` ends with `history.replaceState(null, '', '#' + S.step + …)`, `boot()` reads it
+     back), so that a reload lands where the person was. There is no `localStorage` in this zone by
+     decision, and a `useState` beside the URL would be a second owner that the URL contradicts on
+     the first reload. Writer: `goStep` below, the only one; reader: this line. `?tab=` stays with
+     `index.tsx` (see the `navTo` prop) — two parameters, one owner each.
 
-     THE BLOCKS STAY MOUNTED. Hidden with `hidden`, not unmounted — the same device `SectionStack`
-     uses for tab panels, and for the same reason: fields hold registration and local state
-     (validation messages, open pickers) that an unmount would throw away. */
-  const cardName = (useWatch({ control, name: 'name' }) as string | undefined) ?? '';
-  const cardStyleNumber = (useWatch({ control, name: 'styleNumber' }) as string | undefined) ?? '';
-  const cardCategoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
-  const cardBaseSizeId = Number(useWatch({ control, name: 'baseSampleSizeId' }) ?? 0);
-  const cardPastIdea =
-    ((useWatch({ control, name: 'stage' }) as string | undefined) ?? '') !==
-    'TECH_CARD_STAGE_IDEA';
-  // Only `.card` is read for step 0 (see `stepDone`); the rest is the honest shape of the context,
-  // filled with what this composer already holds, and zeros where it holds nothing.
-  const cardCtx = {
+     WHAT IT MEANS WHEN THE ADDRESS SAYS NOTHING — the opening step, `boot()`'s «otherwise the first
+     step», read as the first step WITH WORK LEFT (`defaultStep`, core/chain.ts): a card that has
+     drawn nothing opens on CARD DETAILS, a card with pictures on the first link not yet done.
+
+     ⚠ DECIDED ONCE PER CARD, NOT FOLLOWED LIVE, and the difference is a hand on the keyboard:
+     followed live, the step would jump under a person the moment a run finished or a picture was
+     pinned. The latch waits for what the rule reads to have ARRIVED — the band (`!isLoading`) and
+     the seeded form (`name` is required to save, so an empty name on a saved card means the reset
+     has not landed yet) — then fixes the answer for the life of this card on this mount. It is
+     RESET IN THE BODY OF THE RENDER when the card changes (invariant 12: the composer is not
+     remounted between cards), never in an effect. A card that does not exist yet has one step —
+     and KEEPS it when its id arrives: the person who just pressed Save on a new card is on the
+     header, and the header must not blink out while the (empty) band is read for the first time.
+
+     UNDECIDED IS NOT «CARD DETAILS FOR NOW». While the address says nothing and the latch has not
+     fired, no step is drawn — the screen says «loading…» under the rail — rather than the header
+     being shown and then swapped for the decided step a moment later. A step that is on screen
+     must be a step the person can stay on; the cells are live throughout, so CARD DETAILS is one
+     click away at any moment (and that click writes the address, which then wins). */
+  const [params, setParams] = useSearchParams();
+  const urlStep = params.get('step');
+  const chain = useChainCtx({
     band,
     bandless,
-    kind,
-    card: {
-      name: cardName,
-      styleNumber: cardStyleNumber,
-      categoryId: cardCategoryId,
-      baseSampleSizeId: cardBaseSizeId,
-      pastIdea: cardPastIdea,
-    },
-    moodPictures: 0,
-    counts: { pattern: 0, render: 0, threed: 0, onmodel: 0 },
     colorway: { id: colorway.colorwayId, label: colorway.label, archived: colorway.archived },
-  };
-  // THE TICK AND THE LIST ARE ONE PREDICATE (`core/chain.ts`): the strip used to count four fields
-  // while `stepDone` counted two, so «— filled» stood over an empty style number and «to fill:
-  // …, base size» over a card the chain called done.
-  const cardDone = stepDone('card', cardCtx);
-  const cardMissing = cardMissingFields(cardCtx);
-  const [cardFoldManual, setCardFoldManual] = useState<boolean | null>(null);
-  const cardFoldAuto = useRef<boolean | null>(null);
-  if (cardFoldAuto.current === null) {
-    if (!techCardId) cardFoldAuto.current = true;
-    else if (cardName.trim()) cardFoldAuto.current = !cardDone;
+  });
+  const opened = useRef<{ id: number | undefined; step: StepId | null }>({
+    id: techCardId,
+    step: null,
+  });
+  if (opened.current.id !== techCardId) {
+    opened.current = { id: techCardId, step: opened.current.id === undefined ? 'card' : null };
   }
-  const cardOpen = cardFoldManual ?? cardFoldAuto.current ?? true;
-  const cardBodyId = useId();
-  // A REFUSAL MUST REACH THE FIELD EVEN WHEN THE FOLD IS CLOSED. The fold closes itself once the
-  // card is named and categorised, and the schema still refuses a blank style number past IDEA —
-  // so a Save could fail on a field under `hidden`, where `setFocus` is inert and the pulse paints
-  // nothing. `revealField` (utils/field-errors) sends `FIELD_REVEAL_EVENT` up from a hidden anchor;
-  // this container is the ancestor that answers, by opening. The listener is imperative because
-  // React attaches no custom events from JSX — and it lives on the wrapper, not the strip, so an
-  // anchor anywhere under step 0 reaches it.
-  const stepCardRef = useRef<HTMLDivElement | null>(null);
-  const hasCardDetails = !!cardDetails;
-  useEffect(() => {
-    const node = stepCardRef.current;
-    if (!node) return;
-    const open = () => setCardFoldManual(true);
-    node.addEventListener(FIELD_REVEAL_EVENT, open);
-    return () => node.removeEventListener(FIELD_REVEAL_EVENT, open);
-  }, [hasCardDetails]);
-
-  /* ═══ STEP 0 HAS ONE SET OF ANCESTORS IN EVERY BRANCH (Ф6 task 1, review BLOCKER) ═════════════
-     The header used to be drawn inside each of three returns — under `SectionStack > div` in the
-     two early ones and under `DesignCapabilityProvider > … > SectionStack > div` in the third. Same
-     element, different parents: React reconciles by position AND type from the root down, so every
-     `!techCardId → loaded` and `isLoading → loaded` transition UNMOUNTED the fields and mounted
-     fresh ones. RHF values survive that; local state does not — the season picker a person had
-     open closed by itself the moment the band finished loading.
-
-     Now there is ONE return: `SectionStack > [stepCard, body]`. `stepCard` is the first child of
-     the same stack in every state; only `body` changes type. The providers of the loaded branch
-     render no DOM, so the blocks they wrap are still direct children of the stack and keep the
-     24px gutter — including the pick banner, which was the stack's sibling and is now its first
-     row (sticky works the same inside a flex column). */
-  const stepCard = cardDetails ? (
-    <div ref={stepCardRef} data-field='design.step.card' className='flex flex-col gap-gutter'>
-      {/* THE FOLD IS ONE NODE IN BOTH STATES — a strip that is a block by itself, never around the
-          blocks (box-in-box). The whole strip is the door, as `Section` does when collapsed, and
-          it is safe for the same reason: nothing else interactive stands inside it. One node, one
-          focus: the arrow turns, the button under the finger stays. Not drawn before the card is
-          saved — there is nothing to fold away from and the person is here to fill it. */}
-      {techCardId ? (
-        <section className='border border-borderColor bg-bgColor'>
-          <button
-            type='button'
-            onClick={() => setCardFoldManual(!cardOpen)}
-            aria-expanded={cardOpen}
-            aria-controls={cardBodyId}
-            data-step-fold='card'
-            data-step-fold-open={cardOpen ? '' : undefined}
-            className='group flex w-full cursor-pointer items-center justify-between gap-2 px-block py-2.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
-          >
-            <span className='flex min-w-0 flex-wrap items-baseline gap-x-2'>
-              <Text
-                component='h3'
-                variant='uppercase'
-                tracking='section'
-                className='min-w-0 break-words font-bold'
-              >
-                card details
-              </Text>
-              <Text size='micro' variant='label' component='span' className='min-w-0 break-words'>
-                {cardDone
-                  ? '— filled'
-                  : `— to fill: ${cardMissing.join(', ')}`}
-                {cardOpen ? '' : ' · show'}
-              </Text>
-            </span>
-            <Arrow
-              aria-hidden
-              className={cn(
-                'shrink-0 text-labelColor group-hover:text-textColor',
-                !cardOpen && 'rotate-180',
-              )}
-            />
-          </button>
-        </section>
-      ) : null}
-      <div id={cardBodyId} hidden={!cardOpen} className='flex flex-col gap-gutter'>
-        {cardDetails}
-      </div>
-    </div>
-  ) : null;
-
-  let body: ReactNode;
-  if (!techCardId) {
-    // A card that has not been created yet has no band and cannot have one: every write below is
-    // keyed by tech_card_id. Saying so is more useful than rendering seven empty organs.
-    body = (
-      <Section title='studio' question='— what this style looks like, before it is frozen'>
-        <Text variant='inactive' size='control'>
-          Save this tech card first. The studio hangs off the card, so there is nothing to hang it on
-          yet.
-        </Text>
-      </Section>
+  if (opened.current.step === null) {
+    if (!techCardId) opened.current.step = 'card';
+    else if (!isLoading && chain.card.name.trim()) opened.current.step = defaultStep(chain);
+  }
+  const decided: StepId | null = isStepId(urlStep) ? urlStep : opened.current.step;
+  const ctx = { ...chain, now: decided };
+  const goStep = (next: StepId) =>
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.set('step', next);
+        return p;
+      },
+      // `replace`, as the prototype's `replaceState`: Back leaves the card, it does not walk the
+      // rail backwards one cell at a time.
+      { replace: true },
     );
-  } else if (isLoading) {
-    body = (
+
+  /* ═══ THE GENERATIVE KIND IS DERIVED FROM THE STEP, NEVER HELD BESIDE IT ═════════════════════════
+     `kind` was the studio's state (`state.kind` of the old prototype); now the step is, and the
+     kind is what the step says it opens (`kindOfStep`). CARD DETAILS and MOODBOARD open no
+     generative screen — `kind` is undefined there, and that is a value, not a gap. Two states here
+     would be two places that can disagree about which screen is on. */
+  const kind: DesignKind | undefined = decided ? kindOfStep(decided) : undefined;
+  const goKind = (next: DesignKind) => goStep(stepOfKind(next).id);
+  /* РЕКОЛ ПЕРЕКЛЮЧАЕТ ЭКРАН СТУДИИ (V-12в, владелец: «если мы нажимаем на рекол из генерации
+     допустим фабрик рендера оно должно переключатся на фабрик рендер а не пихать их во флеты»).
+     Наружу отдаётся не копия состояния, а дверь к владельцу: `goKind` — это `goStep` через таблицу
+     шагов. ⚠ РЕГИСТРИРУЕТСЯ ТОЛЬКО ПОКА ОТКРЫТ ГЕНЕРАТИВНЫЙ ЭКРАН: запись в реестре — это «на
+     экране стоит вид `kind`», и на CARD DETAILS / MOODBOARD такого вида нет. Сказать реестру
+     `'flat'`, стоя на мудборде, значило бы соврать всем его читателям («уже на флэте — не
+     переключать»); контракт хука для «нечего регистрировать» — нулевая карточка, и здесь она
+     означает ровно это. Ни одна дверь рекола с этих двух шагов не открывается (история прогонов
+     стоит только на генеративных), так что читателей у пустой записи нет. */
+  useStudioKindSwitch(kind ? techCardId ?? 0 : 0, kind ?? 'flat', goKind);
+
+  /* ═══ A REFUSAL AIMED AT A FIELD OF ANOTHER STEP SWITCHES TO THAT STEP ═════════════════════════
+     One step is on screen at a time, so `revealField` (utils/field-errors) finds NO anchor for a
+     field of a step that is not open — a Save refused over `fit` while the flat is on, a server
+     violation on `bomItems.2.name` from the BOM tab (ERROR_TAB in index.tsx routes it to STUDIO,
+     and this is where the route ends). Rather than say «not on this tab» over a field that IS on
+     this tab, one step away, `revealField` asks the document who can bring it on, and this listener
+     answers from the step map (`stepOfField`): claim (`preventDefault`) and switch. The reveal
+     then waits frames for the step to mount and pulses the field. Not claimed: a path this map does
+     not know, or a field of the step already open (a hidden anchor there is its own container's
+     business) — `revealField` keeps its honest `false`. Imperative because React attaches no
+     custom events from JSX; on `document` because a missing anchor has nothing to bubble from. */
+  const stepRef = useRef(decided);
+  stepRef.current = decided;
+  const goRef = useRef(goStep);
+  goRef.current = goStep;
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const path = (e as CustomEvent<FieldRevealDetail>).detail?.path ?? '';
+      const home = stepOfField(path);
+      if (!home || home === stepRef.current) return;
+      e.preventDefault();
+      goRef.current(home);
+    };
+    document.addEventListener(FIELD_REVEAL_EVENT, onAsk);
+    return () => document.removeEventListener(FIELD_REVEAL_EVENT, onAsk);
+  }, []);
+
+  /* ═══ THE RAIL — FIRST CHILD OF THE STACK IN EVERY STATE ═══════════════════════════════════════
+     Drawn before the band is read and before the card exists: while the band loads every
+     band-derived state is «unknown» (`bandless`), never «locked», and the cells still navigate. The
+     `action` slot — `ColorwaySelect`, «whose render is this» — stands on the three steps keyed by
+     that number (render writes the bench, 3D reads it, on-model freezes it in the run) and on none
+     other: the flat has no colour axis by nature, the pattern by the owner's word (E-1). Bandless,
+     the select has no bench to read and is not drawn. */
+  const rail = (
+    <ChainRail
+      ctx={ctx}
+      onStepChange={goStep}
+      action={
+        !bandless && (decided === 'render' || decided === 'threed' || decided === 'aside') ? (
+          <ColorwaySelect band={band} choice={colorway} disabled={readOnly} />
+        ) : null
+      }
+    />
+  );
+
+  /* ═══ ONE RETURN, ONE STACK: `SectionStack > [rail, screen]` ═══════════════════════════════════
+     The header used to be drawn inside each of three returns — same element, different parents —
+     and React remounted its fields on every `!techCardId → loaded` and `loading → loaded`
+     transition (the season picker a person had open closed by itself when the band arrived). Now
+     the screen of step 0 is the SAME node at the SAME position in all three states, because step 0
+     is decided BEFORE the state is looked at: a card that does not exist yet and a card whose band
+     is loading both draw the header, untouched. Only the other steps have a «save first» and a
+     «loading…» face. The wrapper is `display: contents`, so the blocks inside stay direct flex
+     items of the stack and keep its 24px gutter. */
+  let screen: ReactNode;
+  if (decided === null || (decided !== 'card' && techCardId && isLoading)) {
+    screen = (
       <Section title='studio'>
         <Text variant='inactive' size='control'>
           loading…
         </Text>
       </Section>
     );
+  } else if (decided === 'card') {
+    screen = cardDetails ? (
+      <div data-step-screen='card' className='contents'>
+        {cardDetails}
+      </div>
+    ) : null;
+  } else if (!techCardId) {
+    // A card that has not been created yet has no band and cannot have one: every write below is
+    // keyed by tech_card_id. Saying so is more useful than rendering seven empty organs.
+    screen = (
+      <Section title='studio' question='— what this style looks like, before it is frozen'>
+        <Text variant='inactive' size='control'>
+          Save this tech card first. The studio hangs off the card, so there is nothing to hang it
+          on yet — card details is the one step it has.
+        </Text>
+      </Section>
+    );
   } else {
-    body = (
-    <DesignCapabilityProvider value={!bandless}>
-      {/* ОДИН ПРОСМОТРЩИК НА ВСЮ СТУДИЮ, и он монтируется ЗДЕСЬ, потому что это единственное
-          место, откуда видны сразу все органы полосы: референсы, история прогонов, верстак.
-          Владелец (круг 4, пункт 8): «что бы можно было в зум вью по всем картинкам из всех
-          генераций итерироваться не только этой».
+    const step: StepId = decided;
+    screen = (
+      <DesignCapabilityProvider value={!bandless}>
+        {/* ОДИН ПРОСМОТРЩИК НА ВСЮ СТУДИЮ, и он монтируется ЗДЕСЬ, потому что это единственное
+            место, откуда видны сразу все органы полосы: референсы, история прогонов, верстак.
+            Владелец (круг 4, пункт 8): «что бы можно было в зум вью по всем картинкам из всех
+            генераций итерироваться не только этой». Ряд собирают сами плитки (`PictureTile`), а
+            порядок берётся из документа, поэтому листается ровно то, что видно. */}
+        <PictureGalleryProvider techCardId={techCardId} band={band}>
+          <PickModeProvider>
+            <div data-step-screen={step} className='contents'>
+              <PickBanner />
+              {/* ═══ STEP 1 · MOODBOARD — the board (callouts, description and the construction
+                  draft live inside it), then what the draft writes into: GENERAL INFORMATION,
+                  CONSTRUCTION, MATERIAL SLOTS. The order is the prototype's step screen
+                  (`_step-mood.js`) top to bottom, and reads as a story: what the style looks like,
+                  what it is, how it is made, what it is made of.
 
-          До этого в полосе жило ПЯТЬ отдельных `MediaViewer`, и каждый получал свой список — тот,
-          что в истории, получал список ОДНОГО прогона. Стрелка «дальше» упиралась в край прогона
-          не по решению, а потому что дальше ничего не было передано. Ряд собирают сами плитки
-          (`PictureTile`), а порядок берётся из документа, поэтому листается ровно то, что видно. */}
-      <PictureGalleryProvider techCardId={techCardId} band={band}>
-      <PickModeProvider>
-        {/* `FixContextProvider` здесь БОЛЬШЕ НЕ МОНТИРУЕТСЯ: цикл починки снят (S-15), взводить
-            контекст стало некому. Сам `fix-context.tsx` жив — `generation-form` читает
-            `useFixContext` и получает инертный дефолт («no fix armed»), что и задумано его же
-            шапкой как отказоустойчивая поза вне провайдера. */}
-        <PickBanner />
-          {/* ПОРЯДОК — ПРОТОТИПА, И СВЕРЕН СО СБОРЩИКОМ (`proto.html:3875-3893`), А НЕ С ПАМЯТЬЮ:
-                topRow → moodboard → kinds → references → ГЕНЕРАЦИЯ → SLOTS → concept.
-              Шапка карточки (`topRowHtml`) стоит выше, в `index.tsx`: она первый ряд СТУДИИ.
-              Генерация — это форма запуска, история прогонов и пустое состояние, и собирает их
-              `GenerationStudio` по правилу самого прототипа (`briefContent`).
-              Полоса листа и предупреждение о смеси — части блока слотов (`slotsHtml` зовёт
-              `sheetbarHtml` и `mixwarnHtml` в своей шапке), поэтому стоят вплотную над верстаком.
-              Верстак ПОСЛЕДНИЙ: сначала материал, потом сборка. Описание — после всего, оно
-              пишется по тому, что выше.
-              КОЛОНКИ UPLOADS ЗДЕСЬ БОЛЬШЕ НЕТ — снесена решением владельца (R-18). Прототип её
-              ещё несёт; расхождение сознательное и записано в описи `qa-parity.mjs`. Принесённое
-              руками входит через слот «+ reference» блока INPUT и через «+ add …» пустых слотов
-              верстака; кадры сплита приезжают во вход уже с ролью вида (R-17), поэтому полки им
-              не нужно. Единственная роль полки, которую больше некому играть, — отвечать режиму
-              выбора за пачечные картинки — живёт в `PickTray` над верстаком. */}
-          {/* ═══ STEP 0 · CARD DETAILS — the header, first — is `stepCard`, drawn by the ONE return
-              below, outside this branch (WAVE2 p.1; argument on the prop and above). ═══ */}
-          {/* ═══ STEP 1 · MOODBOARD. The anchor is the rail's door to this step: the board stamps
-              only its description textarea, and landing there would skip the pictures. */}
-          <div data-field='design.step.mood'>
-            <MoodBoard techCardId={techCardId} disabled={readOnly} />
-          </div>
-          {/* ═══ CONSTRUCTION — СРАЗУ ПОД МУДБОРДОМ (K-8, довод у пропа `constructionAspects`) ═══
-              Порядок читается как рассказ: сначала чем стиль выглядит, потом чем он собран.
-
-              КРУГ 20, ПУНКТЫ 5-8. Владелец назвал цель ЦИТАТОЙ ЗАГОЛОВКА И ПОДЗАГОЛОВКА —
-              «в CONSTRUCTION — described aspect by aspect; prints after the concept», то есть
-              именно эту секцию СТУДИИ, а не одноимённую вкладку. Прошлая сессия собрала три блока
-              (общие сведения, таблица указаний, спецификация) и смонтировала их на ВКЛАДКЕ
-              CONSTRUCTION; здесь они переезжают на названное место, а со вкладки сняты. Монтаж
-              ОДИН на каждый блок: два всегда-смонтированных писателя над одной формой — это
-              дефект U-9 под новым именем.
-
-              ⚠ КРУГ 20, B-11 И B-12 — ИЗ ЧЕТЫРЁХ БЛОКОВ ОСТАЛОСЬ ДВА, И ЭТО СЛОВО ВЛАДЕЛЬЦА.
-              Дословно: «CALLOUTS — every numbered note on the sketch, with the step and the stitch
-              behind it - этот блок полностью убрать» (B-11) и «BILL OF MATERIALS — the BOM lines of
-              this card, read as a spec sheet - этот блок полностью убрать» (B-12). Сняты ОБА
-              монтажа и ОБА файла (`construction-callout-table.tsx`, `construction-bom-table.tsx`) —
-              не спрятаны за флагом: спрятанный блок возвращается следующим вызывающим.
-
-              ⚠ B-12 СНИМАЕТ БЛОК, А НЕ ПОНЯТИЕ. На место спецификации в этой же секции приходит
-              ТАБЛИЦА СЛОТОВ МАТЕРИАЛОВ (B-16/B-19/B-20 того же сообщения: «в место BILL OF
-              MATERIALS оно должно распозновать сколько видов тканей и какие у нас слоты могут
-              быть»), и её собирает соседняя рука этой же волны.
-
-              ⚠ ЗДЕСЬ СТОЯЛО «`pantone-picker.tsx` И `pantone-swatches.ts` ОСТАЛИСЬ — НОВАЯ ТАБЛИЦА
-              БЕРЁТ ИХ СЕБЕ», И ЭТО НЕ СБЫЛОСЬ. Таблица слотов колонку цвета взяла и НЕ ПОКАЗЫВАЕТ
-              осознанно (B-20 дословно требует снять COLOR и PANTONE; разбор — в шапке
-              `design/material-slots.tsx`), так что оба файла остались без единого вызывающего во
-              всём `src/`. Они сняты вместе с блоком, который их звал, — по тому же правилу, что и
-              сами блоки: спрятанный орган возвращается следующим вызывающим, а мёртвый файл под
-              обещанием «его возьмут» живёт кругами.
-
-              ПОЛЕ `bomItems[].pantone` ЖИВО, И ЕГО ЕДИНСТВЕННЫЙ ПИСАТЕЛЬ ТЕПЕРЬ — МОДЕЛЬ: черновик
-              construction (`head/construction-draft-model.ts`) кладёт пантон на строку, схема и
-              мапперы возят его против потери (0363), а ЧЕЛОВЕК выбирает цвет там, где у цвета есть
-              адрес, — на колорвее. Ручного редактора у поля в этом клиенте нет ни на одной вкладке.
-
-              ДВА БЛОКА, А НЕ ОДИН С ДВУМЯ ЯРУСАМИ ВНУТРИ. `Section` запрещает коробку в коробке
-              дословно («A block NEVER contains another block», ui/components/section.tsx). Значит
-              порядок владельца («общие сведения → аспекты») выражается соседством в
-              `SectionStack`, а не вложением.
-
-              Слот аспектов по-прежнему может быть пуст (`components/index.tsx` отдаёт сюда свой
-              единственный `DetailsEditor`); пустой он не рисует ни секции, ни отступа, а сосед
-              рисуется в любом случае: общие сведения — это поля формы, а не содержимое слота. */}
-          <Section
-            title='general information'
-            question='— what this style is, before how it is made'
-          >
-            <ConstructionGeneralInfo isAux={isAux} readOnly={readOnly || !canWriteCard} />
-          </Section>
-          {constructionAspects && (
-            <Section
-              title='construction'
-              question='— described aspect by aspect; prints after the concept'
-            >
-              {constructionAspects}
-            </Section>
-          )}
-          {/* ═══ ТАБЛИЦА СЛОТОВ — НА МЕСТО СНЯТОЙ СПЕЦИФИКАЦИИ (B-16 / B-19 / B-20) ═════════════
-              Владелец назвал место сам: «в место BILL OF MATERIALS». Значит третий блок ЭТОГО
-              ряда, сразу после аспектов, в порядке «общие сведения → аспекты → спецификация», —
-              а не орган внутри мудборда: черновик construction стоит ВНУТРИ блока доски, и
-              таблица там была бы блоком в блоке.
-
-              Блок рисуется ВСЕГДА, даже на пустой карточке, и это не оплошность: пустая
-              спецификация — такое же утверждение о карточке, как непустая, и именно её пустота
-              зовёт нажать «draft the construction» выше. `Section`-обёртку блок держит СВОЮ
-              (в отличие от аспектов, которым её выдаёт этот файл): у него есть собственный
-              `action` — три пунктирных чипа рождения слота, — и заголовок с ними связан.
-
-              `navTo` СНОВА ЖИВОЙ ПОСЛЕ КРУГА 20: обе прежние двери сняты словом владельца
-              (B-12 и B-4), и первым, кто вернул пропу читателя, стала эта таблица — `›` ведёт в
-              редактор ЭТОЙ строки на вкладке BOM, где выбирают артикул. */}
-          <MaterialSlots
-            techCardId={techCardId}
-            readOnly={readOnly || !canWriteCard}
-            onGoTab={navTo}
-          />
-          {/* ═══ КОЛОРВЕИ, ПРЕДЛОЖЕННЫЕ ЧЕРНОВИКОМ — ЧЕТВЁРТЫЙ БЛОК РЯДА (B-25, D5) ════════════
-              Владелец: «…и это было отдельным блоком». Место названо соседством, а не вкусом:
-              цвета предлагаются ПО СЛОТАМ, поэтому блок стоит сразу под таблицей слотов и читается
-              её продолжением — «вот слоты; вот чем их красят».
-
-              ⚠ ОДНУ НОЧЬ ЭТОТ ОРГАН ПРОСТОЯЛ ПОДСТРУКТУРОЙ ВНУТРИ ЧЕРНОВИКА, и не по замыслу:
-              этот файл в тот момент держала другая рука. Черновик сам живёт внутри блока мудборда,
-              то есть колорвеи оказывались БЛОКОМ В БЛОКЕ — дословный запрет DESIGN.md. Монтаж
-              переехал сюда; связь с прогоном держит модульный стор, а не соседство в разметке,
-              поэтому предложения переживают и уход на COLORWAYS, и возврат.
-
-              `Section`-ОБЁРТКУ БЛОК ДЕРЖИТ СВОЮ — как соседняя таблица слотов, и по своей причине:
-              блока НЕТ ВОВСЕ, пока черновик ничего не предложил. Условие знает только орган (оно
-              в модульном сторе), и вытащить его сюда значило бы завести второго читателя того же
-              стора ради пустой белой рамки на каждой карточке. */}
-          <ColourwayProposals techCardId={techCardId} readOnly={readOnly || !canWriteCard} />
-          {/* ═══ ФИЛЬТР «ЧЕЙ ЭТО РЕНДЕР» — В РЯДУ ПРЕДСТАВЛЕНИЙ, НА ТРЁХ ВИДАХ ИЗ ПЯТИ ══════════
-              ГЕЙТ — ЭТО ДВА РАЗНЫХ «НЕТ», И ОБА НАЗВАНЫ:
-                · `flat` — у листа оси НЕТ ПО ПРИРОДЕ: чертёж один на все цвета, и колорвейного
-                  верстака у флэтов не существует ни в базе, ни в контракте;
-                · `pattern` — E-1, слово владельца круга 16 («в MAKE A PATTERN оставь только имя
-                  убери колорвей»). Плитка ложится на полку карточки ничьей, прогон шлёт `0`, и
-                  вернуть сюда селект значило бы отменить прямой приказ ради симметрии ряда.
-              На остальных трёх орган стоит, потому что все трое ключуются ЭТИМ числом: рендер
-              ПИШЕТ верстак, 3D его ЧИТАЕТ, перекрас родит картинки этого же колорвея.
-
-              ПОЛОСА БЕЗ ПОЛОСЫ: `bandless` (сервер не умеет полосу) орган не рисует — читать
-              `renderBenchColorwayIds` не у кого, а селект без точек и без верстака предлагал бы
-              выбор, за которым ничего нет. */}
-          {/* ═══ THE CHAIN — THE ONE NAVIGATOR OF THE STUDIO (Ф1) ═══════════════════════════════
-              It stands AFTER the blocks of steps 0 and 1 (always on screen) and BEFORE the switched
-              screen — where `KindsStrip` stood. The strip is gone: two navigators for one gesture
-              would be two places disagreeing about where a person is. The rail's cells navigate,
-              carry the strip's counters (one classifier, `pictureRepresentation`), name a state, and
-              under them a visible bar names the nearest obstacle with its door (`core/chain.ts`).
-              The `action` slot — `ColorwaySelect` on three views of five — is the strip's, unchanged. */}
-          <ChainRail
-            band={band}
-            bandless={bandless}
-            kind={kind}
-            onKindChange={setKind}
-            // The rail's door to step 0 lands on the fold strip when the step is folded; opening it
-            // first is the difference between «here it is» and «here is a closed door».
-            onScrollStep={(id) => {
-              if (id === 'card') setCardFoldManual(true);
-            }}
-            colorway={{ id: colorway.colorwayId, label: colorway.label, archived: colorway.archived }}
-            action={
-              !bandless && (kind === 'render' || kind === 'threed' || kind === 'onmodel') ? (
-                <ColorwaySelect band={band} choice={colorway} disabled={readOnly} />
-              ) : null
-            }
-          />
-          {bandless ? (
-            <Section title='bench' question='— the flats this style is drawn from'>
-              <Text variant='inactive' size='control'>
-                {error
-                  ? `The bench could not be read: ${error.message}`
-                  : 'This server does not serve the design band yet, so the bench and the ' +
-                    'reference roles are not available here. The moodboard and the description ' +
-                    'above save normally.'}
-              </Text>
-            </Section>
-          ) : (
-            <>
-              {/* ВХОДНАЯ СЕКЦИЯ ПЕРЕКЛЮЧАЕТСЯ ВМЕСТЕ С ВИДОМ — это правило самого прототипа
-                  (`proto.html:3891`, «референсы рисуются только у FLAT; в render и 3D они в одном
-                  клике, не на экране»): у рендера вход — слоты верстака, у 3D — рендеры. */}
-              {kind === 'flat' && (
+                  ⚠ THE ONE `useFieldArray` OVER `callouts` LIVES IN THE BOARD (`mood-callouts.tsx`),
+                  and this is the only step that mounts it — zero or one in the tree, never two
+                  (invariant 1: two instances over one name do not synchronise in RHF 7.62, rows are
+                  lost). `moodboardMedia` and `bomItems` are written by root `setValue` only; the BOM
+                  tab's own `useFieldArray` over `bomItems` stays mounted in `index.tsx` (`hidden`),
+                  untouched by which step is open here. */}
+              {step === 'mood' && (
                 <>
-                  {/* ЯКОРЬ #design-input — снаружи, а не внутри блока: файл референсов чужой
-                      (дорожка E2), а на якорь смотрят двери «+ add files» пустой студии и свёрнутой
-                      формы генерации, которые до сноса полки вели на #design-uploads. Обёртка —
-                      законный ребёнок SectionStack: это flex с gap, и div наследует ритм 24px. */}
-                  <div id='design-input'>
-                    <ReferencesSection techCardId={techCardId} band={band} disabled={readOnly} />
-                  </div>
-                  {/* Чип `fix: …` стоял здесь, над формой. Ушёл вместе с циклом починки (S-15):
-                      взводить заявку больше нечем, а чип без писателя — орган, который не может
-                      загореться никогда. */}
-                  <GenerationStudio band={band} techCardId={techCardId} disabled={readOnly} />
-                </>
-              )}
-              {/* ═══ PATTERN — ТРЕТИЙ ГЕНЕРАТИВНЫЙ ЭКРАН, ПО ТОЙ ЖЕ СБОРКЕ (K-13) ═════════════
-                  Экран плюс ОБЩАЯ история прогонов — ровно как у рендера и 3D ниже, и не ради
-                  симметрии: `GenerationHistory` монтирует `useRunPolling`, то есть это ЕДИНСТВЕННОЕ
-                  место полосы, откуда перечитывается живой прогон. Вид без неё показывал бы
-                  «making a tile…» вечно — до тех пор, пока человек не тронет карточку сам.
-                  Лента при этом одна на карточку и показывает все рода: прогон-плитка стоит в ней
-                  теми же деньгами и тем же временем, что рендер, и заводить ей вторую историю
-                  значило бы завести второй ответ на вопрос «во что обошлась эта карточка». */}
-              {kind === 'pattern' && (
-                <>
-                  {/* ПАТТЕРН НЕ ПОКАЗЫВАЕТ ПИКЕРА И РЕМОУНТА НЕ ТРЕБУЕТ, и довод переписан УЖЕ
-                      ТРИЖДЫ — каждый раз потому, что переживал свою причину. Сегодня он такой, и
-                      он ОДИН, а не «как у соседей»: круг 19 вернул ось на render / 3D / on-model,
-                      а сюда НЕ вернул — E-1 стоит дословно («в MAKE A PATTERN оставь только имя
-                      убери колорвей»). Прогон-плитка шлёт ноль, плитка ложится на полку карточки
-                      ничьей, и это правильно: набивка — материал КАРТОЧКИ, её кладут на любой
-                      колорвей на экране рендера. Ремоунт сторожил бы засев, которого тут нет. */}
-                  <PatternStudio band={band} techCardId={techCardId} disabled={readOnly} />
-                  {/* ЛЕНТА ОТКРЫВАЕТСЯ НА СВОЁМ РОДЕ, А НЕ НА «ALL» (J-12). Переключатель при этом
-                      остаётся — владелец просил «с возможностью переключить», — и `defaultRep`
-                      это именно НАЧАЛЬНОЕ положение, к которому лента возвращается при смене
-                      карточки, а не запрет. */}
-                  {/* ═══ И ЗАКРЫТОЙ (E-21) ═══════════════════════════════════════════════════
-                      Владелец: «в PATTERN GENERATION HISTORY по дефолту заколапшена».
-                      Довод общий для четырёх вкладок и записан один раз — у пропа `defaultOpen`
-                      в `generation-history.tsx`: над лентой здесь стоит `PATTERNS OF THIS CARD`,
-                      то есть те же плитки крупнее и ближе к работе. Свёрнута только ЧАСТЬ БЛОКА:
-                      опрос живого прогона идёт, и шапка продолжает называть его. */}
-                  <GenerationHistory
-                    band={band}
+                  <MoodBoard techCardId={techCardId} disabled={readOnly} />
+                  {/* ДВА БЛОКА, А НЕ ОДИН С ДВУМЯ ЯРУСАМИ ВНУТРИ: `Section` запрещает коробку в
+                      коробке («A block NEVER contains another block»), поэтому порядок «общие
+                      сведения → аспекты → слоты» выражается соседством в стеке, а не вложением.
+                      Слот аспектов может быть пуст (владелец шапки отдаёт сюда свой единственный
+                      `DetailsEditor`); пустой он не рисует ни секции, ни отступа. */}
+                  <Section
+                    title='general information'
+                    question='— what this style is, before how it is made'
+                  >
+                    <ConstructionGeneralInfo isAux={isAux} readOnly={readOnly || !canWriteCard} />
+                  </Section>
+                  {constructionAspects && (
+                    <Section
+                      title='construction'
+                      question='— described aspect by aspect; prints after the concept'
+                    >
+                      {constructionAspects}
+                    </Section>
+                  )}
+                  {/* ТАБЛИЦА СЛОТОВ — НА МЕСТЕ СНЯТОЙ СПЕЦИФИКАЦИИ (B-16 / B-19 / B-20). Рисуется
+                      ВСЕГДА, даже пустой: пустая спецификация — такое же утверждение о карточке, и
+                      именно её пустота зовёт нажать «draft the construction» выше. `Section` у
+                      блока СВОЯ: у него собственный `action` — чипы рождения слота. `navTo` — его
+                      дверь `›` в редактор ЭТОЙ строки на вкладке BOM. */}
+                  <MaterialSlots
                     techCardId={techCardId}
-                    disabled={readOnly}
-                    defaultRep='pattern'
-                    defaultOpen={false}
+                    readOnly={readOnly || !canWriteCard}
+                    onGoTab={navTo}
+                  />
+                  {/* КОЛОРВЕИ, ПРЕДЛОЖЕННЫЕ ЧЕРНОВИКОМ (B-25, D5) — продуктовый блок, которого в
+                      макете нет; стоит сразу под таблицей слотов и читается её продолжением: «вот
+                      слоты; вот чем их красят». Блока НЕТ ВОВСЕ, пока черновик ничего не предложил —
+                      условие знает только орган (модульный стор), поэтому обёртка у него своя. */}
+                  <ColourwayProposals
+                    techCardId={techCardId}
+                    readOnly={readOnly || !canWriteCard}
                   />
                 </>
               )}
-              {/* У РЕНДЕРА И 3D СВОЙ ЭКРАН И ТА ЖЕ ИСТОРИЯ ПРОГОНОВ: прототип собирает их как
-                  `studioRenderHtml() + generationHistoryHtml() + slotsHtml()`. Полки загрузок в
-                  этих видах нет — принесённый руками файл кладут во флэт. */}
-              {kind === 'render' && (
-                <>
-                  {/* ═══ `key` — РЕМОУНТ ПРИ СМЕНЕ КОЛОРВЕИ, И ОН ВЕРНУЛСЯ ВМЕСТЕ С ОСЬЮ ══════
-                      Круг 16 снял эту строку вместе с пикером: сторожить было нечего, потому что
-                      переключать было нечего. Круг 19 вернул переключатель — значит вернулось и
-                      событие, ради которого строка писалась.
-
-                      ЧТО ИМЕННО ОНА СТОРОЖИТ, ТОЧНО: `useColourDraft` засевает рецепт ОДИН РАЗ ЗА
-                      МОНТАЖ (`seeded`/`touched` — рефы), и это правило верное само по себе: рефетч
-                      полосы иначе затирал бы наполовину сделанный выбор. Но «однажды за монтаж» и
-                      «заново при смене цвета» — два РАЗНЫХ правила, и сложить их в одно условие
-                      значило бы отменить первое. Без ремоунта экран под именем OLIVE показывал бы
-                      рецепт ROSSO — и человек платил бы за него, читая чужое имя над кнопкой.
-
-                      ⚠ ЭТО НЕ МАСКА НАД ПРОТУХШИМ КЭШЕМ, И ЭТО ПРОВЕРЕНО, А НЕ ПРИНЯТО НА ВЕРУ.
-                      Кэшу здесь протухать негде: `useDesignBand` читается ОДИН РАЗ на всю студию и
-                      ключуется карточкой, а не колорвеем; полоса приходит вниз пропом; всё
-                      сужение по колорвею — чистые селекторы над этим объектом (`threedSides`,
-                      `outputsOfKind`, `renderBenchOccupied`), которые пересчитываются от смены
-                      аргумента сами. Единственное, что смену НЕ ПЕРЕЖИВАЕТ, — время жизни рефа
-                      засева, а оно и есть монтаж.
-
-                      ⚠ И ОН ТУПОЙ, НАЗЫВАЕМ ВСЛУХ: неотправленный рецепт ROSSO теряется, если
-                      просто заглянуть в OLIVE. Это цена, а не дефект — за неё платят однажды и
-                      видимо; замена (карта черновиков по колорвею внутри `useColourDraft`) —
-                      удобство, и заводить его до того, как владелец переключателем попользовался,
-                      значило бы усложнить механизм под догадку. */}
-                  {/* ⚠ `colorwayArchived` — ОДИН ПРЕДИКАТ АРХИВА НА ВСЮ СТУДИЮ, ПОСЧИТАННЫЙ ХУКОМ
-                      (`useColorwayChoice`), и три генеративных экрана получают ТОТ ЖЕ булев, что
-                      рисует подпись `(archived)` в селекте. Поэтому подсказка органа и отказ двери
-                      разойтись не могут — а до этой волны они и расходились: подсказка обещала
-                      запрет, которого ворота не знали. Считать статус в трёх экранах заново значило
-                      бы завести три места, где эта пара снова разъедется. */}
-                  <RenderStudio
-                    key={colorway.colorwayId}
-                    band={band}
-                    techCardId={techCardId}
-                    disabled={readOnly}
-                    onGoToKind={setKind}
-                    colorwayId={colorway.colorwayId}
-                    colorwayRef={colorway.current}
-                    colorwayLabel={colorway.label}
-                    colorwayArchived={colorway.archived}
-                  />
-                  {/* J-18: «в GENERATION HISTORY по дефолту должен быть фильтр по фабрик
-                      рендерам с возможностью переключить».
-                      E-22: «в FABRIC RENDER GENERATION HISTORY по дефолту заколапшена» — над ней
-                      стоит `RENDERS OF THIS CARD`. */}
-                  <GenerationHistory
-                    band={band}
-                    techCardId={techCardId}
-                    disabled={readOnly}
-                    defaultRep='render'
-                    defaultOpen={false}
-                  />
-                </>
-              )}
-              {kind === 'threed' && (
-                <>
-                  {/* ⚠ 3D ПОЛУЧАЕТ ТО ЖЕ ЧИСЛО И ПО ТОЙ ЖЕ ПРИЧИНЕ, ПО КОТОРОЙ ЕГО У НЕГО ЗАБРАЛИ.
-                      Круг 16: «оставь здесь прежнее умолчание, и вход 3D показывал бы 0 of 4 на
-                      карточке с четырьмя готовыми рендерами» — верно ровно потому, что FABRIC
-                      RENDER писал тогда ТОЛЬКО нулевой верстак. Теперь он пишет ТОТ, ЧТО НАЗВАН
-                      сверху, и 3D обязано читать ТОТ ЖЕ: одно число на писателя и на читателя.
-
-                      РЕМОУНТА ЗДЕСЬ НЕТ, И ЭТО НЕ ЗАБЫТАЯ СТРОКА. Черновик 3D — подача, модель,
-                      тело, размер — НЕ ЦВЕТ: он про то, как вещь стоит в кадре, и обязан пережить
-                      смену колорвея, а не быть за неё стёртым. Всё, что от колорвея зависит
-                      (`threedSides`, ворота двери, тело прогона), — селекторы над полосой и
-                      пересчитываются от смены пропа сами. */}
-                  <ThreedStudio
-                    band={band}
-                    techCardId={techCardId}
-                    disabled={readOnly}
-                    onGoToKind={setKind}
-                    colorwayId={colorway.colorwayId}
-                    colorwayLabel={colorway.label}
-                    colorwayArchived={colorway.archived}
-                  />
-                  {/* E-23: «в 3D GENERATION HISTORY по дефолту заколапшена и также в on model».
-                      Над ней стоит `3D MODELS OF THIS CARD`. */}
-                  <GenerationHistory
-                    band={band}
-                    techCardId={techCardId}
-                    disabled={readOnly}
-                    defaultRep='threed'
-                    defaultOpen={false}
-                  />
-                </>
-              )}
-              {/* ═══ ON MODEL — ПЕРЕКРАС ФОТОГРАФИИ НА ЖИВОМ ЧЕЛОВЕКЕ (K-17) ══════════════════
-                  Ячейка полосы была МЁРТВОЙ и объясняла, почему такого экрана нет; теперь он есть,
-                  и объяснение снято вместе с механизмом (полоса `kinds-strip.tsx` с тех пор сама снесена — её место занял рельс `chain-rail.tsx`).
-                  История — та же и по той же причине, что у трёх соседей выше: без неё
-                  `useRunPolling` не смонтирован, и перекрас показывал бы `pending` бесконечно. */}
-              {kind === 'onmodel' && (
-                <>
-                  {/* ⚠ РЕМОУНТА ЗДЕСЬ НЕТ, И ЭТО ЗАМЕРЕННОЕ РЕШЕНИЕ, А НЕ ЗАБЫТАЯ СТРОКА.
-                      `key={colorwayId}` стоял здесь ровно один круг и был снят, потому что на ЭТОМ
-                      экране он ничего не сторожил. Замер: `useTargetColourDraft` засевается
-                      последним рецептом ВСЕЙ карточки (колорвеем не сужается), полоса входа
-                      показывает медиа библиотеки, а не рендеры колорвея, и выходы тоже
-                      общекарточные. То есть сторожить нечего — ни один seed не привязан к имени, —
-                      а платить пришлось бы набранными снимками (`useRecolorSources`), выбранной
-                      тканью и целевым цветом: смена имени в селекторе молча чистила бы четыре
-                      загруженные фотографии.
-                      ⚠ НА РЕНДЕРЕ РЕМОУНТ ОСТАЛСЯ, и это не расхождение: там `useColourDraft`
-                      держит mount-scoped `seeded`, который смену колорвея пережить не может.
-                      Довод «перекрас атрибутируется колорвеем» верен и не оспаривается — но он
-                      про то, ЧТО пишется в прогон, а не про то, надо ли ронять форму. */}
-                  {/* ⚠ ИМЯ И АРХИВ ЕДУТ СЮДА ПО ТОЙ ЖЕ ПРИЧИНЕ, ПО КОТОРОЙ СЮДА ЕДЕТ ЧИСЛО. Верстака
-                      этот экран не читает, но `colorwayId` он ЗАМОРАЖИВАЕТ в прогоне — значит и
-                      отказывать по имени обязан он же, а не только два соседа. */}
-                  <OnModelStudio
-                    band={band}
-                    techCardId={techCardId}
-                    disabled={readOnly}
-                    colorwayId={colorway.colorwayId}
-                    colorwayLabel={colorway.label}
-                    colorwayArchived={colorway.archived}
-                  />
-                  {/* J-31: «GENERATION HISTORY в этой вкладке по дефолту сортирует в on model».
-                      E-23, вторая половина: «и также в on model» — над ней стоит
-                      `ON-MODEL PICTURES OF THIS CARD`. */}
-                  <GenerationHistory
-                    band={band}
-                    techCardId={techCardId}
-                    disabled={readOnly}
-                    defaultRep='onmodel'
-                    defaultOpen={false}
-                  />
-                </>
-              )}
-              {/* ПОЛОСА ЛИСТА И ПРЕДУПРЕЖДЕНИЕ О СМЕСИ БОЛЬШЕ НЕ СТОЯТ ЗДЕСЬ. Это строки ШАПКИ
-                  блока слотов (`slotsHtml` зовёт `sheetbarHtml` и `mixwarnHtml` внутри себя), и
-                  тремя отдельными блоками они читались как три равновесных заявления, хотя два из
-                  них — про третье. Монтирует их теперь `Bench`. */}
-              {/* ⚠ ЛОТОК ВЫБОРА СМОНТИРОВАН, НО ВЗВЕСТИ ЕГО БОЛЬШЕ НЕЧЕМ — сказать это прямо честнее,
-                  чем оставить прежнее объяснение. J-15 снял все три двери `pick.start` (стороны,
-                  детали, ячейка минта), и других вызывающих у режима нет: `PickTray` теперь всегда
-                  рисует null, а `PickModeProvider` держит только свой Esc.
-
-                  ПОЧЕМУ ОРГАН ВСЁ РАВНО ЗДЕСЬ: снос `pick-mode.tsx` целиком — отдельный след, и
-                  он про Esc-обработчик, а не про эту волну. Оставлено ПОД ГЕЙТОМ FLAT вместе с
-                  верстаком, чтобы мёртвый орган хотя бы не монтировался на четырёх чужих вкладках.
-
-                  Жест «картинка полосы → слот» при этом ЖИВ и идёт встречным направлением: пикер
-                  «— slot —» под плиткой (`slot-picker.tsx`) пишет `SetDesignBenchSlot` напрямую,
-                  минуя режим выбора вовсе. */}
-              {/* ═══ СЕКЦИЯ ASSETS СНЯТА С ЭКРАНА ЦЕЛИКОМ (Y-11) ═══════════════════════════════
-                  Владелец, дословно: «ASSETS в студио давай пока полностью выпилим». Слово «пока»
-                  здесь несущее: снимается ЭКРАН, а не подсистема. Серверные ручки
-                  (`UpsertDesignAsset`, `DeleteDesignAsset`, обе про метки) и поля полосы
-                  (`band.assets`, `band.assetPlacements`) стоят нетронутыми на СЕРВЕРЕ, и карточки,
-                  у которых ассеты уже заведены, читаются как читались.
-                  ЕДИНСТВЕННЫЙ ЧИТАТЕЛЬ, КОТОРЫЙ ОТ ЭТОГО МОГ ОСИРОТЕТЬ, — ряд CLOTHS в FABRIC
-                  RENDER: он берёт ткани с полки, а заводила их только эта секция. Поэтому дверь
-                  загрузки фактуры не исчезла, а ПЕРЕЕХАЛА в «input — flats of this card» (Y-12),
-                  и цепочка «загрузили → chip в CLOTHS → `params.colour.fabrics`» осталась целой.
-                  ЧЕГО БОЛЬШЕ НЕТ НИГДЕ: разметка тканей на флэтах (`assetPlacement`) и полка
-                  фурнитуры. ⚠ КРУГ 15 (J-21) ДОВЁЛ ПЕРВОЕ ДО КОНЦА: клиент больше не ЧИТАЕТ метки
-                  вовсе — `parts` уезжает пустым, и промпт рендера перестал сужаться разметкой,
-                  которой ни один экран не показывает. Таблица и ручки сервера живы; удаление
-                  данных — отдельное решение владельца.
-                  Полка паттернов при этом ВЕРНУЛАСЬ и живёт на вкладке PATTERN
-                  (`patterns of this card`), где ей и место. */}
-              {/* ═══ ВЕРСТАК СТОИТ ТОЛЬКО НА FLAT — ОДНА СТРОКА, ТРИ ПУНКТА ВЛАДЕЛЬЦА ══════════
-                  J-14 («во вкладке паттернс мы не должны показывать FLAT SLOTS в принципе»),
-                  J-18 («во вкладке FABRIC RENDER нам не нужен FLAT SLOTS») и J-30 («в 3Д вкладке
-                  не должно показывать FLAT SLOTS так же и во вкладке ON MODEL») — это ОДИН орган,
-                  смонтированный СНАРУЖИ переключателя вида, и потому видимый на всех пяти.
-                  Плоские слоты — вход ФЛЭТА: лист и тех-пак читают их, а рендер, паттерн, 3D и
-                  перекраска берут вход из своих собственных полос («input — flats of this card»,
-                  «input — renders by view»). Гейт стоит ЗДЕСЬ, а не внутри `Bench`, потому что род
-                  знает композитор — сам верстак читает ровно одну полосу и про вкладку не знает.
-
-                  `RecallBenchIntake` (в `generation-history.tsx`) пишет слоты ЧЕРЕЗ API, а не
-                  через этот орган, поэтому рекол на вкладке рендера не задет. */}
-              {kind === 'flat' && (
-                <>
-                  <PickTray band={band} />
-                  <Bench techCardId={techCardId} band={band} disabled={readOnly} />
-                </>
-              )}
-            </>
-          )}
-      </PickModeProvider>
-      </PictureGalleryProvider>
-    </DesignCapabilityProvider>
+              {step !== 'mood' &&
+                (bandless ? (
+                  <Section title='bench' question='— the flats this style is drawn from'>
+                    <Text variant='inactive' size='control'>
+                      {error
+                        ? `The bench could not be read: ${error.message}`
+                        : 'This server does not serve the design band yet, so the bench and the ' +
+                          'reference roles are not available here. The card details and the ' +
+                          'moodboard save normally.'}
+                    </Text>
+                  </Section>
+                ) : (
+                  <>
+                    {/* ═══ STEP 2 · FLAT — input (references, words, GENERATE), the history, the
+                        flat slots. The input section is THIS step's (prototype: «референсы
+                        рисуются только у FLAT; в render и 3D они в одном клике, не на экране»).
+                        `#design-input` is the anchor the doors «+ add files» of the empty studio
+                        and of the folded generation form lead to. */}
+                    {step === 'flat' && (
+                      <>
+                        <div id='design-input'>
+                          <ReferencesSection
+                            techCardId={techCardId}
+                            band={band}
+                            disabled={readOnly}
+                          />
+                        </div>
+                        <GenerationStudio band={band} techCardId={techCardId} disabled={readOnly} />
+                      </>
+                    )}
+                    {/* ═══ STEP 3 · PATTERN — the screen plus the SHARED run history, as on every
+                        generative step, and not for symmetry: `GenerationHistory` mounts
+                        `useRunPolling`, the one place a live run is re-read from; without it
+                        «making a tile…» would stand forever. No colourway picker here (E-1: «в MAKE
+                        A PATTERN оставь только имя убери колорвей»); the history opens on its own
+                        kind (J-12) and closed (E-21). */}
+                    {step === 'pattern' && (
+                      <>
+                        <PatternStudio band={band} techCardId={techCardId} disabled={readOnly} />
+                        <GenerationHistory
+                          band={band}
+                          techCardId={techCardId}
+                          disabled={readOnly}
+                          defaultRep='pattern'
+                          defaultOpen={false}
+                        />
+                      </>
+                    )}
+                    {/* ═══ STEP 4 · FABRIC RENDER. `key={colorwayId}` — a REMOUNT on a change of
+                        colourway, and it guards one thing exactly: `useColourDraft` seeds the recipe
+                        ONCE PER MOUNT (`seeded`/`touched` refs — a refetch of the band must not wipe
+                        a half-made choice), and «once per mount» and «anew on a change of colour»
+                        are two different rules. Without the remount the screen named OLIVE would
+                        show ROSSO's recipe. The unsent recipe of ROSSO is lost by a glance at OLIVE —
+                        a price paid once and visibly, not a defect. `colorwayArchived` is the ONE
+                        archive predicate of the studio (`useColorwayChoice`), so the hint and the
+                        refusal cannot part. */}
+                    {step === 'render' && (
+                      <>
+                        <RenderStudio
+                          key={colorway.colorwayId}
+                          band={band}
+                          techCardId={techCardId}
+                          disabled={readOnly}
+                          onGoToKind={goKind}
+                          colorwayId={colorway.colorwayId}
+                          colorwayRef={colorway.current}
+                          colorwayLabel={colorway.label}
+                          colorwayArchived={colorway.archived}
+                        />
+                        {/* J-18: the history filters to fabric renders by default; E-22: closed. */}
+                        <GenerationHistory
+                          band={band}
+                          techCardId={techCardId}
+                          disabled={readOnly}
+                          defaultRep='render'
+                          defaultOpen={false}
+                        />
+                      </>
+                    )}
+                    {/* ═══ STEP 5 · 3D — the same colourway number as the render, and NO remount:
+                        the 3D draft (presentation, model, body, size) is not a colour and must
+                        survive a change of colourway; everything colour-dependent (`threedSides`,
+                        the gate, the run body) is a selector over the band and follows the prop. */}
+                    {step === 'threed' && (
+                      <>
+                        <ThreedStudio
+                          band={band}
+                          techCardId={techCardId}
+                          disabled={readOnly}
+                          onGoToKind={goKind}
+                          colorwayId={colorway.colorwayId}
+                          colorwayLabel={colorway.label}
+                          colorwayArchived={colorway.archived}
+                        />
+                        {/* E-23: closed by default. */}
+                        <GenerationHistory
+                          band={band}
+                          techCardId={techCardId}
+                          disabled={readOnly}
+                          defaultRep='threed'
+                          defaultOpen={false}
+                        />
+                      </>
+                    )}
+                    {/* ═══ ASIDE · ON MODEL — a recolour of a photograph of a real person (K-17).
+                        No remount on a change of colourway, measured: `useTargetColourDraft` seeds
+                        from the card's last recipe (not narrowed by colourway), the input row shows
+                        library media, the outputs are card-wide — a remount would guard nothing and
+                        cost four gathered photographs. The name and the archive ride here for the
+                        reason the number does: the screen FREEZES `colorwayId` in the run. */}
+                    {step === 'aside' && (
+                      <>
+                        <OnModelStudio
+                          band={band}
+                          techCardId={techCardId}
+                          disabled={readOnly}
+                          colorwayId={colorway.colorwayId}
+                          colorwayLabel={colorway.label}
+                          colorwayArchived={colorway.archived}
+                        />
+                        {/* J-31 / E-23: sorted to on-model, closed by default. */}
+                        <GenerationHistory
+                          band={band}
+                          techCardId={techCardId}
+                          disabled={readOnly}
+                          defaultRep='onmodel'
+                          defaultOpen={false}
+                        />
+                      </>
+                    )}
+                    {/* ═══ THE FLAT SLOTS STAND ONLY ON FLAT — J-14, J-18, J-30, one organ, gated by
+                        the composer because the composer knows the step; the bench itself reads one
+                        band and knows no step. `RecallBenchIntake` (generation-history) writes slots
+                        THROUGH THE API, so recall on the render step is untouched. `PickTray` is
+                        mounted but has nothing left to arm it (J-15 removed every `pick.start`);
+                        it is kept under the flat gate so the dead organ is at least not mounted on
+                        four other steps. */}
+                    {step === 'flat' && (
+                      <>
+                        <PickTray band={band} />
+                        <Bench techCardId={techCardId} band={band} disabled={readOnly} />
+                      </>
+                    )}
+                  </>
+                ))}
+            </div>
+          </PickModeProvider>
+        </PictureGalleryProvider>
+      </DesignCapabilityProvider>
     );
   }
 
   return (
     <SectionStack>
-      {stepCard}
-      {body}
+      {rail}
+      {screen}
     </SectionStack>
   );
 }

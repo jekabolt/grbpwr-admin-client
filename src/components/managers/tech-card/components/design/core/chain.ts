@@ -50,10 +50,25 @@ export type Step = {
   n: string;
   label: string;
   optional?: boolean;
-  /** The studio view this step opens, when it is a switched screen. `card` and `mood` are always on
-   *  screen above the rail and have none: a click on them scrolls, it does not switch. */
+  /** The generative screen this step opens. `card` and `mood` have none: they are steps of the
+   *  rail all the same — one screen at a time, like every other — but nothing on them runs. */
   kind?: DesignKind;
 };
+
+/** Every step id, in rail order — the one list a URL value or a form path is checked against. */
+export const STEP_IDS: readonly StepId[] = [
+  'card',
+  'mood',
+  'flat',
+  'pattern',
+  'render',
+  'threed',
+  'aside',
+];
+
+export function isStepId(x: unknown): x is StepId {
+  return typeof x === 'string' && (STEP_IDS as readonly string[]).includes(x);
+}
 
 /**
  * The six links of the chain, in the order of the work. Numbers are the prototype's (`_core.js`
@@ -80,6 +95,56 @@ export function stepOfKind(kind: DesignKind): Step {
   return [...STEPS, ASIDE].find((s) => s.kind === kind) ?? ASIDE;
 }
 
+export function stepById(id: StepId): Step {
+  return [...STEPS, ASIDE].find((s) => s.id === id) ?? ASIDE;
+}
+
+/** The generative kind behind a step, or undefined on the two steps that run nothing. */
+export function kindOfStep(id: StepId): DesignKind | undefined {
+  return stepById(id).kind;
+}
+
+/**
+ * ═══ WHERE A FORM FIELD LIVES — root key → step ═══════════════════════════════════════════════════
+ * One step is on screen at a time, so a refusal aimed at a field of another step finds NO anchor in
+ * the document; `revealField` then asks the document who can bring the field on, and the composer
+ * answers from this map (see `studio-tab.tsx`). Keyed by the ROOT of the RHF path (`bomItems.3.name`
+ * → `bomItems`), the same key `ERROR_TAB` in `components/index.tsx` routes tabs by. The rows say
+ * where the field is DRAWN, not where it is filed: `categoryId` is a card fact, and it renders in
+ * GENERAL INFORMATION on the moodboard step (`construction-general-info.tsx`, B-27) — a row pointing
+ * at `card` would switch to a step that does not contain it, i.e. the same lie ERROR_TAB warns
+ * against. Walk this map with every move of a block, as that one.
+ */
+const FIELD_STEP: Record<string, StepId> = {
+  // the header slot (`cardDetails`, index.tsx): identification · classification · base model
+  name: 'card',
+  styleNumber: 'card',
+  brand: 'card',
+  purpose: 'card',
+  auxSubtype: 'card',
+  targetGender: 'card',
+  baseModelId: 'card',
+  baseSampleSizeId: 'card',
+  roles: 'card',
+  // the moodboard step: the board, its description, the callouts, general information
+  // (fit, category, silhouette/fabric aspects), construction aspects, material slots
+  moodboardMedia: 'mood',
+  concept: 'mood',
+  callouts: 'mood',
+  details: 'mood',
+  fit: 'mood',
+  categoryId: 'mood',
+  bomItems: 'mood',
+  // the flat step: the prompt's words, and the bench doors (`design.bench.*`, `doors.ts`)
+  garmentDescription: 'flat',
+};
+
+export function stepOfField(path: string): StepId | null {
+  const [root, second] = path.split('.');
+  if (root === 'design') return second === 'bench' ? 'flat' : null;
+  return FIELD_STEP[root ?? ''] ?? null;
+}
+
 /**
  * What the chain reads. Every member is something the composer (`studio-tab.tsx`) already holds —
  * the band it reads once, the colourway axis it owns, and a handful of form values. Nothing here is
@@ -89,8 +154,9 @@ export type ChainCtx = {
   band: GetDesignBandResponse;
   /** The server does not serve the band: every band-derived answer is «unknown», never «empty». */
   bandless: boolean;
-  /** Which switched screen is open. Determines the single `now`. */
-  kind: DesignKind;
+  /** The step on screen — the single `now`. `null` while the opening step is still being decided
+   *  (`defaultStep`), so that no step is skipped as «where you already are». */
+  now: StepId | null;
   card: {
     name: string;
     /** Judged by `cardMissingFields` ONLY when `pastIdea` — the schema's own rule, see below. */
@@ -242,9 +308,8 @@ export function stepDone(id: StepId, ctx: ChainCtx): boolean {
  * and either open or refusing only over its own input. ON MODEL is not in the queue — it is aside.
  */
 export function nextUp(ctx: ChainCtx): StepId | null {
-  const now = stepOfKind(ctx.kind).id;
   for (const s of STEPS) {
-    if (s.id === now) continue;
+    if (s.id === ctx.now) continue;
     if (stepDone(s.id, ctx)) continue;
     const g = chainGate(s.id, ctx);
     if (g.ok || g.own) return s.id;
@@ -254,9 +319,9 @@ export function nextUp(ctx: ChainCtx): StepId | null {
 
 /**
  * The word on the cell. Order of the checks matters and is the prototype's:
- *   · `now` is the switched screen on display. `card` and `mood` are never `now`: they are always
- *     on screen above the rail, so «you are here» would be true of them at all times and mean
- *     nothing;
+ *   · `now` is the step on display — any of the seven, CARD DETAILS and MOODBOARD included: the
+ *     studio shows one step at a time (`_core.js` `render`: rail + the one step), so «you are
+ *     here» is true of exactly one cell;
  *   · `optional` WINS over `blocked` on purpose — an optional step nobody can run right now holds
  *     nobody up, and calling it blocked would announce an obstacle where there is only a skip;
  *   · `next` goes to EXACTLY one step, otherwise it stands on three cells and stops meaning anything.
@@ -265,7 +330,7 @@ export function nextUp(ctx: ChainCtx): StepId | null {
  * (a new form field is not this phase's to add), so an optional step reads `optional` or `done`.
  */
 export function stepState(id: StepId, ctx: ChainCtx): StepState {
-  if (stepOfKind(ctx.kind).id === id) return 'now';
+  if (ctx.now === id) return 'now';
   if (stepDone(id, ctx)) return 'done';
   const step = [...STEPS, ASIDE].find((s) => s.id === id);
   if (step?.optional) return 'optional';
@@ -298,4 +363,25 @@ export function nearestBlock(ctx: ChainCtx): NearestBlock | null {
 
 export function doneCount(ctx: ChainCtx): number {
   return STEPS.filter((s) => stepDone(s.id, ctx)).length;
+}
+
+/** Whether the band holds a single picture — on the bench or in any run. */
+export function bandHasPictures(band: GetDesignBandResponse): boolean {
+  return (
+    (band.bench ?? []).some((s) => !!s.picture) ||
+    (band.runs ?? []).some((r) => (r.pictures ?? []).length > 0)
+  );
+}
+
+/**
+ * THE STEP A CARD OPENS ON — the prototype's `boot`: the step in the address if there is one,
+ * otherwise the first step. «First» is read as the first step WITH WORK LEFT: a card that has not
+ * drawn anything yet opens on CARD DETAILS (there is nothing further along to look at), a card
+ * with pictures opens on the first link not yet done (`nextUp`), and a card whose chain is complete
+ * opens where it started. Decided ONCE per card by the composer, not followed live — followed
+ * live, the step would jump under a person the moment a run finished.
+ */
+export function defaultStep(ctx: ChainCtx): StepId {
+  if (ctx.bandless || !bandHasPictures(ctx.band)) return 'card';
+  return nextUp({ ...ctx, now: null }) ?? 'card';
 }
