@@ -5,6 +5,7 @@ import Text from 'ui/components/text';
 
 import { InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
+import type { RunRefusal } from '../generation/refusal';
 import type { Gate } from './model';
 
 /**
@@ -235,11 +236,13 @@ export function GenerateRow({
  *   · слова сервера — ДОСЛОВНО, они единственное, что называет причину (переменную окружения,
  *     недостающую половину запроса); наша проза их не подменяет;
  *   · «Nothing was filed and nothing was charged.» — фраза контракта §E, и она печатается ТОЛЬКО
- *     если сервер сам не говорил о деньгах: отказ, упоминающий charge/reserv/budget/paid/quota,
- *     стоит один — иначе мы бы противоречили серверу его же полосой;
- *   · про «GENERATE carries the same request id» НЕ ГОВОРИТСЯ: `clientRequestId` из хука наружу
- *     не выходит, и утверждать факт, которого экран не видит, нельзя. Хук держит ключ в ledger по
- *     отпечатку запроса — это правда механизма, но не наблюдение этого органа.
+ *     когда сервер ОТВЕТИЛ (у отказа есть HTTP-статус) и сам не говорил о деньгах: отказ,
+ *     упоминающий charge/reserv/budget/paid/quota, стоит один — иначе мы бы противоречили серверу
+ *     его же полосой;
+ *   · сетевой сбой (статуса нет: `Failed to fetch`, таймаут) НЕ получает ни «filed», ни «charged» —
+ *     запрос мог дойти и быть оплачен. Вместо этого говорится то, что орган ВИДИТ: хук отдаёт
+ *     `clientRequestId` вместе с отказом, повтор с тем же составом несёт тот же ключ, а сервер
+ *     заводит один прогон на ключ (UNIQUE `client_request_id`) — второй раз не списывается.
  *
  * `dismiss` ничего не отменяет — человек прочёл. Снятие — глагол, а не таймер: исправление
  * отказа часто НЕ новое нажатие (дописать цвет, добавить фото), и отказ без двери стоял бы поверх
@@ -249,19 +252,40 @@ export function RunRefusal({
   refusal,
   onDismiss,
 }: {
-  refusal: string | null | undefined;
+  refusal: RunRefusal | null | undefined;
   onDismiss: () => void;
 }): JSX.Element | null {
-  const words = (refusal ?? '').trim();
-  if (!words) return null;
+  const words = (refusal?.words ?? '').trim();
+  if (!refusal || !words) return null;
   const serverSpokeOfMoney = /charg|reserv|budget|paid|quota|balance/i.test(words);
+  // ЧТО ИЗВЕСТНО — РЕШАЕТ СТАТУС, А НЕ СЛОВА (`generation/refusal.ts`). Есть статус → сервер
+  // ответил и отказал: ничего не подано. Статуса нет → ответа не было, и запрос МОГ быть подан и
+  // оплачен; единственный факт на руках — ключ идемпотентности, который повтор понесёт снова.
+  const answered = refusal.status != null;
   return (
     <CalloutBox tone='error'>
-      <div data-probe='refusal' className='flex items-start gap-2'>
+      <div
+        data-probe='refusal'
+        data-refusal-answered={answered ? '' : undefined}
+        data-request-id={refusal.clientRequestId}
+        className='flex items-start gap-2'
+      >
         <Text size='micro' component='p' className='min-w-0 flex-1 normal-case'>
-          <b>the run did not start.</b> The server answered: «
-          <span data-probe='refusal-verbatim'>{words}</span>». These are its words, printed as they
-          arrived.{serverSpokeOfMoney ? '' : ' Nothing was filed and nothing was charged.'}
+          <b>the run did not start.</b>{' '}
+          {answered ? (
+            <>
+              The server answered: «<span data-probe='refusal-verbatim'>{words}</span>». These are
+              its words, printed as they arrived.
+              {serverSpokeOfMoney ? '' : ' Nothing was filed and nothing was charged.'}
+            </>
+          ) : (
+            <>
+              No answer came back from the server («
+              <span data-probe='refusal-verbatim'>{words}</span>»), so whether the run was filed
+              and charged is not known here. Pressing GENERATE again with nothing changed carries
+              the same request id, and the server files one run per id — a repeat cannot pay twice.
+            </>
+          )}
         </Text>
         <button
           type='button'

@@ -122,11 +122,45 @@ export type CalloutLike = {
   number?: number;
   mediaId?: number;
   description?: string;
+  /** Echo of `parts[0]` — kept on the wire, never the whole list. */
   part?: string;
+  /** Every piece the callout points at; this is what the server prints. */
+  parts?: string[];
   dimensions?: string;
   posX?: string;
   posY?: string;
 };
+
+/**
+ * THE PIECES OF A CALLOUT AS THE SERVER PRINTS THEM — `TechCardCallout.PartList()`: all `parts`,
+ * trimmed, de-duplicated, in order; `part` alone only when the list is empty. Reading `part` here
+ * printed one piece where the model receives three.
+ */
+export function calloutPartList(c: Pick<CalloutLike, 'part' | 'parts'>): string[] {
+  const src = c.parts && c.parts.length > 0 ? c.parts : [c.part ?? ''];
+  const out: string[] = [];
+  for (const v of src) {
+    const name = (v ?? '').trim();
+    if (name && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+/**
+ * ONE CALLOUT IN THE WORDS THE SERVER SENDS — the same fold as `entity.TechCardCalloutPrintedLine`:
+ * the part list joined by «, », then «: description», then the measure in brackets at the end. A
+ * callout with no words at all is not sent (the server drops it, `designFrozenCallout` returns nil)
+ * and is not counted by any reader of this.
+ */
+export function calloutWords(c: CalloutLike): string {
+  const part = calloutPartList(c).join(', ');
+  const desc = (c.description ?? '').trim();
+  const dims = (c.dimensions ?? '').trim();
+  let head = desc;
+  if (part) head = desc ? `${part}: ${desc}` : part;
+  if (dims) return head ? `${head} (${dims})` : dims;
+  return head;
+}
 
 /** The dictionaries the two arms consult, resolved once by the caller's own hooks. */
 type Resolved = {

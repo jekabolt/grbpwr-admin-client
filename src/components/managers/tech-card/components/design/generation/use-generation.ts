@@ -11,6 +11,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { designKeys, newClientRequestId, useDesignWrites } from '../use-design-band';
+import { refusalFromError, type RunRefusal } from './refusal';
 import { hasLiveRun } from './run-state';
 
 /**
@@ -147,7 +148,7 @@ export type StartRunState = {
    * `useDesignRun` gives FABRIC RENDER and 3D, so all three studios print a refusal through one organ
    * (`RunRefusal`) with the server's words — not a flag the screen has to word for itself.
    */
-  refusal: string | null;
+  refusal: RunRefusal | null;
   dismissRefusal: () => void;
 };
 
@@ -169,7 +170,7 @@ export function useStartRun(techCardId?: number): StartRunState {
   const { showMessage } = useSnackBarStore();
   const { startRun } = useGenerationWrites(techCardId);
   const ledger = useRef<{ fingerprint: string; id: string } | null>(null);
-  const [refusal, setRefusal] = useState<string | null>(null);
+  const [refusal, setRefusal] = useState<RunRefusal | null>(null);
 
   const start = useCallback(
     (input: StartRunInput, onStarted?: () => void) => {
@@ -188,13 +189,15 @@ export function useStartRun(techCardId?: number): StartRunState {
         ledger.current = { fingerprint, id: newClientRequestId() };
       }
       setRefusal(null);
+      const clientRequestId = ledger.current.id;
       startRun.mutate(
-        { ...input, clientRequestId: ledger.current.id },
+        { ...input, clientRequestId },
         {
           // Beside the snackbar the hook-level `onError` already shows: the snackbar lives for
-          // seconds, the refusal stays on the screen until read (CONTRACT §E).
+          // seconds, the refusal stays on the screen until read (CONTRACT §E). A 409 is not kept:
+          // the band moved first, and the hook-level handler has already re-read it.
           onError: (error) => {
-            setRefusal((error as Error)?.message || 'the run did not start');
+            setRefusal(refusalFromError(error, clientRequestId));
           },
           onSuccess: () => {
             ledger.current = null;

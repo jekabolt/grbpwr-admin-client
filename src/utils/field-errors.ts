@@ -223,12 +223,51 @@ const FIELD_PULSE = ['animate-pulse', 'ring-2', 'ring-error', 'motion-reduce:ani
 // FormItem (ui/form), so this resolves ANY field in ANY form from its error path — including
 // controls that register no focusable ref (Radix selects, pickers), which setFocus alone cannot
 // reach. Returns false when the path has no rendered field, so the caller can retry or fall back.
-export function revealField(path: string): boolean {
-  const el = document.querySelector<HTMLElement>(`[data-field="${CSS.escape(path)}"]`);
-  if (!el) return false;
+//
+// A FIELD UNDER A FOLDED CONTAINER IS FOUND BUT NOT SHOWN. `hidden` is `display:none`: the anchor is
+// in the DOM, `scrollIntoView` is a no-op on it and the pulse paints nothing, so the honest answer
+// used to be a `true` that did nothing — one toast and no field (design step 0, folded once the
+// card is named and categorised, hiding `styleNumber` which the schema demands past IDEA). So a
+// hidden anchor first ASKS TO BE SHOWN: a bubbling `FIELD_REVEAL_EVENT` climbs to whichever
+// ancestor folds it (`data-step-fold` and its kin listen and open), and the scroll+pulse waits a
+// bounded number of frames for the fold to re-render open. The event is the seam on purpose: this
+// module knows nothing about how a fold is drawn, and a fold knows nothing about error paths — a
+// second fold on any screen inherits the door by adding one listener, not by teaching this reader
+// its markup.
+export const FIELD_REVEAL_EVENT = 'grbpwr:reveal-field';
+
+function isShown(el: HTMLElement): boolean {
+  if (typeof el.checkVisibility === 'function') return el.checkVisibility();
+  return el.getClientRects().length > 0;
+}
+
+function pulseField(el: HTMLElement): void {
   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   el.classList.add(...FIELD_PULSE);
   window.setTimeout(() => el.classList.remove(...FIELD_PULSE), 2600);
+}
+
+export function revealField(path: string): boolean {
+  const find = () => document.querySelector<HTMLElement>(`[data-field="${CSS.escape(path)}"]`);
+  const el = find();
+  if (!el) return false;
+  if (isShown(el)) {
+    pulseField(el);
+    return true;
+  }
+  el.dispatchEvent(new CustomEvent(FIELD_REVEAL_EVENT, { bubbles: true, detail: { path } }));
+  // Frames, not milliseconds: what has to happen is a React commit, and on a slow machine a timer
+  // runs out before the fold has re-rendered open.
+  let left = 30;
+  const tick = (): void => {
+    const now = find();
+    if (now && isShown(now)) {
+      pulseField(now);
+      return;
+    }
+    if (--left > 0) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
   return true;
 }
 

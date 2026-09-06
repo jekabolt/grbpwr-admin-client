@@ -239,6 +239,9 @@ export function ChainRail({
   const styleNumber = (useWatch({ control, name: 'styleNumber' }) as string | undefined) ?? '';
   const categoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
   const baseSampleSizeId = Number(useWatch({ control, name: 'baseSampleSizeId' }) ?? 0);
+  const pastIdea =
+    ((useWatch({ control, name: 'stage' }) as string | undefined) ?? '') !==
+    'TECH_CARD_STAGE_IDEA';
 
   /**
    * ═══ ALL FOUR NUMBERS FROM ONE CLASSIFIER (G-1) — moved here from `kinds-strip.tsx` verbatim ═══
@@ -259,7 +262,7 @@ export function ChainRail({
     band,
     bandless,
     kind,
-    card: { name, styleNumber, categoryId, baseSampleSizeId },
+    card: { name, styleNumber, categoryId, baseSampleSizeId, pastIdea },
     moodPictures,
     counts,
     colorway,

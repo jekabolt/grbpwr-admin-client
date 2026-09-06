@@ -1,10 +1,11 @@
 import type { common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
-import { useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { cn } from 'lib/utility';
 import { Arrow } from 'ui/icons/arrow';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { FIELD_REVEAL_EVENT } from 'utils/field-errors';
 import type { EditHistory } from 'ui/components/annotation/history';
 import Text from 'ui/components/text';
 import { Section, SectionStack } from 'ui/components/section';
@@ -17,7 +18,7 @@ import { ColourwayProposals } from './colourway-proposals';
 import { GenerationStudio } from './generation';
 import type { DesignKind } from './bench-kinds';
 import { ChainRail } from './chain-rail';
-import { stepDone } from './core/chain';
+import { cardMissingFields, stepDone } from './core/chain';
 import { RenderStudio, ThreedStudio } from './render';
 import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
@@ -239,9 +240,12 @@ export function StudioTab({
   const cardStyleNumber = (useWatch({ control, name: 'styleNumber' }) as string | undefined) ?? '';
   const cardCategoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
   const cardBaseSizeId = Number(useWatch({ control, name: 'baseSampleSizeId' }) ?? 0);
+  const cardPastIdea =
+    ((useWatch({ control, name: 'stage' }) as string | undefined) ?? '') !==
+    'TECH_CARD_STAGE_IDEA';
   // Only `.card` is read for step 0 (see `stepDone`); the rest is the honest shape of the context,
   // filled with what this composer already holds, and zeros where it holds nothing.
-  const cardDone = stepDone('card', {
+  const cardCtx = {
     band,
     bandless,
     kind,
@@ -250,17 +254,17 @@ export function StudioTab({
       styleNumber: cardStyleNumber,
       categoryId: cardCategoryId,
       baseSampleSizeId: cardBaseSizeId,
+      pastIdea: cardPastIdea,
     },
     moodPictures: 0,
     counts: { pattern: 0, render: 0, threed: 0, onmodel: 0 },
     colorway: { id: colorway.colorwayId, label: colorway.label, archived: colorway.archived },
-  });
-  const cardMissing = [
-    !cardName.trim() && 'name',
-    !cardStyleNumber.trim() && 'style number',
-    !(cardCategoryId > 0) && 'category',
-    !(cardBaseSizeId > 0) && 'base size',
-  ].filter((x): x is string => !!x);
+  };
+  // THE TICK AND THE LIST ARE ONE PREDICATE (`core/chain.ts`): the strip used to count four fields
+  // while `stepDone` counted two, so «— filled» stood over an empty style number and «to fill:
+  // …, base size» over a card the chain called done.
+  const cardDone = stepDone('card', cardCtx);
+  const cardMissing = cardMissingFields(cardCtx);
   const [cardFoldManual, setCardFoldManual] = useState<boolean | null>(null);
   const cardFoldAuto = useRef<boolean | null>(null);
   if (cardFoldAuto.current === null) {
@@ -269,6 +273,22 @@ export function StudioTab({
   }
   const cardOpen = cardFoldManual ?? cardFoldAuto.current ?? true;
   const cardBodyId = useId();
+  // A REFUSAL MUST REACH THE FIELD EVEN WHEN THE FOLD IS CLOSED. The fold closes itself once the
+  // card is named and categorised, and the schema still refuses a blank style number past IDEA —
+  // so a Save could fail on a field under `hidden`, where `setFocus` is inert and the pulse paints
+  // nothing. `revealField` (utils/field-errors) sends `FIELD_REVEAL_EVENT` up from a hidden anchor;
+  // this container is the ancestor that answers, by opening. The listener is imperative because
+  // React attaches no custom events from JSX — and it lives on the wrapper, not the strip, so an
+  // anchor anywhere under step 0 reaches it.
+  const stepCardRef = useRef<HTMLDivElement | null>(null);
+  const hasCardDetails = !!cardDetails;
+  useEffect(() => {
+    const node = stepCardRef.current;
+    if (!node) return;
+    const open = () => setCardFoldManual(true);
+    node.addEventListener(FIELD_REVEAL_EVENT, open);
+    return () => node.removeEventListener(FIELD_REVEAL_EVENT, open);
+  }, [hasCardDetails]);
 
   /* ═══ STEP 0 HAS ONE SET OF ANCESTORS IN EVERY BRANCH (Ф6 task 1, review BLOCKER) ═════════════
      The header used to be drawn inside each of three returns — under `SectionStack > div` in the
@@ -284,7 +304,7 @@ export function StudioTab({
      24px gutter — including the pick banner, which was the stack's sibling and is now its first
      row (sticky works the same inside a flex column). */
   const stepCard = cardDetails ? (
-    <div data-field='design.step.card' className='flex flex-col gap-gutter'>
+    <div ref={stepCardRef} data-field='design.step.card' className='flex flex-col gap-gutter'>
       {/* THE FOLD IS ONE NODE IN BOTH STATES — a strip that is a block by itself, never around the
           blocks (box-in-box). The whole strip is the door, as `Section` does when collapsed, and
           it is safe for the same reason: nothing else interactive stands inside it. One node, one

@@ -1,5 +1,7 @@
 import type { common_DesignRun, common_MediaFull } from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
+import { GENDER_ENUM_TO_SLUG } from 'constants/constants';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
@@ -17,6 +19,7 @@ import { formatMoney } from '../generation/money';
 import { runOutputText } from '../generation/run-state';
 import { GenerateRow } from '../render/generate-row';
 import type { Gate } from '../render/model';
+import { calloutWords, type CalloutLike } from '../render/what-model-gets';
 import { newClientRequestId } from '../use-design-band';
 import {
   diffProposal,
@@ -238,11 +241,7 @@ export function ConstructionDraft({
   const setProposals = useDraftMemory((st) => st.setProposals);
 
   const items = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as { mediaId?: number }[];
-  const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as {
-    mediaId?: number;
-    part?: string;
-    description?: string;
-  }[];
+  const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as CalloutLike[];
   const details = (useWatch({ control, name: 'details' }) ?? []) as {
     key?: string;
     text?: string;
@@ -250,9 +249,34 @@ export function ConstructionDraft({
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as {
     name?: string;
     lineKey?: string;
+    section?: string;
+    composition?: string;
   }[];
   const concept = (useWatch({ control, name: 'concept' }) ?? '') as string;
   const fit = (useWatch({ control, name: 'fit' }) ?? '') as string;
+  // ШАПКА ИЗДЕЛИЯ, КАК ЕЁ ЧИТАЕТ `designConstructionUserPrompt`: Category, Gender, Size run с
+  // отмеченным базовым. Имена — из словаря, потому что сервер печатает имена (`cache.GetCategoryById`,
+  // `cache.GetSizeById`), а форма держит id.
+  const categoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
+  const targetGender = (useWatch({ control, name: 'targetGender' }) ?? '') as string;
+  const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
+  const baseSampleSizeId = Number(useWatch({ control, name: 'baseSampleSizeId' }) ?? 0);
+  const { dictionary } = useDictionary();
+  const categoryName = useMemo(
+    () => (dictionary?.categories ?? []).find((c) => c.id === categoryId)?.name?.trim() ?? '',
+    [dictionary?.categories, categoryId],
+  );
+  const genderLabel = GENDER_ENUM_TO_SLUG[targetGender] ?? '';
+  const sizeRun = useMemo(() => {
+    const byId = new Map<number, string>();
+    for (const sz of dictionary?.sizes ?? []) if (sz.id != null) byId.set(sz.id, sz.name ?? '');
+    return sizeIds
+      .map((id) => {
+        const name = (byId.get(id) ?? '').trim();
+        return name ? (id === baseSampleSizeId ? `${name} (base)` : name) : '';
+      })
+      .filter(Boolean);
+  }, [dictionary?.sizes, sizeIds, baseSampleSizeId]);
 
   // ЧТО СЧИТАЕТСЯ НЕСОХРАНЁННОЙ ДОСКОЙ — ровно три поля, которые прогон читает из СТОРА. Подписка
   // сужена именами: `useFormState` без имён перерисовывал бы орган на каждом нажатии клавиши в
@@ -566,6 +590,11 @@ export function ConstructionDraft({
         callouts={callouts}
         concept={concept}
         fit={fit}
+        category={categoryName}
+        gender={genderLabel}
+        sizeRun={sizeRun}
+        aspects={details}
+        bomItems={bomItems}
         boardDirty={boardDirty}
       />
 
@@ -857,9 +886,12 @@ function DraftJournal({
  *
  * THE INPUT IS ASSEMBLED BY THE SERVER (`DraftDesignIdea`) FROM THE SAVED CARD, and this client
  * never sees the text it composes. So the panel does not pretend to: it lists what the server
- * READS — the board's pictures, the notes pinned to them, the description and the fit — and, for
- * the last draft asked from this screen, its ANSWER verbatim. Nothing here is inferred; every line
- * is a count or a stored column.
+ * READS — the card head (garment, fit, category, gender, size run), the board's pictures with the
+ * notes pinned to them, the description, and what the card ALREADY says (aspects, table callouts,
+ * BOM lines — sent under «refine, do not repeat», `designCardAlreadySays`) — and, for the last
+ * draft asked from this screen, its ANSWER verbatim. Nothing here is inferred; every line is a
+ * count or a stored column. The «already on the card» group is the one this panel used to deny:
+ * it listed the construction and the BOM under NOT SENT, and both are read.
  *
  * ⚠ THERE IS NO «WORDS AS SENT» BLOCK HERE, AND THAT IS A FACT ABOUT THE SERVER, NOT AN OMISSION.
  * `DraftDesignIdea` runs inline and never writes the composed prompt onto its run row — only the
@@ -884,6 +916,11 @@ function DraftInventoryModal({
   callouts,
   concept,
   fit,
+  category,
+  gender,
+  sizeRun,
+  aspects,
+  bomItems,
   boardDirty,
 }: {
   open: boolean;
@@ -891,12 +928,49 @@ function DraftInventoryModal({
   /** The row `DraftDesignIdea` answered with, for the last draft asked from this screen. */
   lastRun: common_DesignRun | null;
   items: readonly { mediaId?: number }[];
-  callouts: readonly { mediaId?: number; part?: string; description?: string }[];
+  callouts: readonly CalloutLike[];
   concept: string;
   fit: string;
+  /** Category NAME, as the server prints it; '' when the card has none (the line is then not sent). */
+  category: string;
+  /** men | women | unisex, or '' — the server sends nothing for an unknown gender. */
+  gender: string;
+  /** Size names in the card's order, the base one marked «(base)» — `designSizeRunLine`. */
+  sizeRun: readonly string[];
+  aspects: readonly { key?: string; text?: string }[];
+  bomItems: readonly { name?: string; section?: string; composition?: string }[];
   boardDirty: boolean;
 }): JSX.Element {
   const mediaById = useMediaMap();
+  // WHAT THE CARD ALREADY SAYS, IN THE SERVER'S OWN THREE LISTS (`designCardAlreadySays`): aspects
+  // with both a key and a text; TABLE callouts only — one pinned to a board picture already went as a
+  // note in the group above, and sending it twice would tell the model not to speak of what it must
+  // read; BOM lines as «section · name · composition». Each list is capped at 20 rows there, and the
+  // cut is named to the model as «(+N more …, not listed)» — so it is named here too.
+  const saidAspects = aspects
+    .map((d) => ({ key: (d.key ?? '').trim(), text: (d.text ?? '').trim() }))
+    .filter((d) => d.key && d.text);
+  const saidCallouts = callouts
+    .filter((c) => !(c.mediaId && c.mediaId > 0))
+    .map((c) => {
+      const line = calloutWords(c);
+      return line ? (c.number && c.number > 0 ? `#${c.number} ${line}` : line) : '';
+    })
+    .filter(Boolean);
+  const saidBom = bomItems
+    .filter((b) => (b.name ?? '').trim())
+    .map((b) =>
+      [(b.section ?? '').trim(), (b.name ?? '').trim(), (b.composition ?? '').trim()]
+        .filter(Boolean)
+        .join(' · '),
+    );
+  const ALREADY_ROWS = 20;
+  const capped = (rows: readonly string[], kind: string): string =>
+    rows.slice(0, ALREADY_ROWS).join(' · ') +
+    (rows.length > ALREADY_ROWS
+      ? ` — and «+${rows.length - ALREADY_ROWS} more ${kind} on the card, not listed», said to the model in those words`
+      : '');
+  const alreadyCount = saidAspects.length + saidCallouts.length + saidBom.length;
   const boardIds = useMemo(
     () => new Set(items.map((i) => i.mediaId).filter((id): id is number => !!id)),
     [items],
@@ -923,9 +997,11 @@ function DraftInventoryModal({
       kindWord='moodboard draft'
       intro={
         <>
-          <b>the server assembles this run itself,</b> from the SAVED card — the pictures on the
-          moodboard, the notes pinned to them, the description and the fit. This client never sees the
-          text it composes, so what is listed here is what the server READS, not how it words it.
+          <b>the server assembles this run itself,</b> from the SAVED card — the card head (garment,
+          fit, category, gender, size run), the pictures on the moodboard with the notes pinned to
+          them, the description, and what the card already says (aspects, table callouts, BOM), which
+          it is told to refine and not repeat. This client never sees the text it composes, so what is
+          listed here is what the server READS, not how it words it.
           {boardDirty ? (
             <>
               {' '}
@@ -997,16 +1073,82 @@ function DraftInventoryModal({
             )
           }
         />
+        {/* ШАПКА ИЗДЕЛИЯ — `designConstructionUserPrompt` пишет «Category:», «Gender:», «Size run:»
+            после «Garment:» и «Fit:». Пустое поле не едет строкой вовсе, и сказано так же. */}
+        <InventoryLine
+          name='category'
+          origin={category ? 'linked' : undefined}
+          text={
+            category || <span className='text-labelColor'>none on the card — the line is not sent</span>
+          }
+        />
+        <InventoryLine
+          name='gender'
+          origin={gender ? 'linked' : undefined}
+          text={
+            gender || <span className='text-labelColor'>not stated — the line is not sent</span>
+          }
+        />
+        <InventoryLine
+          name='size run'
+          origin={sizeRun.length ? 'linked' : undefined}
+          text={
+            sizeRun.length ? (
+              sizeRun.join(', ')
+            ) : (
+              <span className='text-labelColor'>no sizes on the card — the line is not sent</span>
+            )
+          }
+        />
+      </WmgGroup>
+
+      <WmgGroup
+        label='already on the card'
+        aside={alreadyCount ? `${alreadyCount} read` : 'nothing yet'}
+        note='read so the draft refines rather than repeats — the server sends these under «already on the card — refine, do not repeat»; a callout pinned to a board picture went with the picture above and is not sent twice'
+        data-wmg-already={alreadyCount}
+      >
+        {alreadyCount === 0 ? (
+          <InventoryLine
+            name='—'
+            text={
+              <span className='text-labelColor'>
+                the card says nothing yet — the section is not sent, and the draft proposes freely
+              </span>
+            }
+          />
+        ) : (
+          <>
+            {saidAspects.length > 0 && (
+              <InventoryLine
+                name={`aspects · ${saidAspects.length}`}
+                origin='linked'
+                text={capped(
+                  saidAspects.map((d) => `${d.key}: ${d.text}`),
+                  'aspects',
+                )}
+              />
+            )}
+            {saidCallouts.length > 0 && (
+              <InventoryLine
+                name={`table callouts · ${saidCallouts.length}`}
+                origin='linked'
+                text={capped(saidCallouts, 'callouts')}
+              />
+            )}
+            {saidBom.length > 0 && (
+              <InventoryLine
+                name={`BOM · ${saidBom.length}`}
+                origin='linked'
+                text={capped(saidBom, 'bom lines')}
+              />
+            )}
+          </>
+        )}
       </WmgGroup>
 
       <NotSent
         items={[
-          {
-            label: 'the construction',
-            reason:
-              'the draft PROPOSES the construction and is compared against it afterwards — what stands in it is not read',
-          },
-          { label: 'BOM', reason: 'the bill of materials is proposed by the draft, not read by it' },
           { label: 'colourways', reason: 'colourways are proposed by the draft and created on your click' },
           {
             label: 'reference roles',

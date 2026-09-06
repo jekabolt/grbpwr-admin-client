@@ -16,7 +16,7 @@ import {
 } from '../core';
 import { openDoor } from '../doors';
 import type { BoardItem } from '../mood-board';
-import { FIT_WHERE, type CalloutLike } from '../render/what-model-gets';
+import { FIT_WHERE, calloutWords, type CalloutLike } from '../render/what-model-gets';
 import { viewLabel } from '../views';
 
 /**
@@ -62,26 +62,12 @@ type Line = {
    * THE CALLOUTS DRAWN ON THIS PICTURE, AS WORDS. They travel: `designAssembleInputs` pins
    * `Callouts: callouts[r.MediaId]` to every reference in the prompt, and `designgen/snapshot.go`
    * (`refEntryCaption`) unfolds them into the picture's caption. Printed in the shape the server
-   * prints them (`TechCardCalloutPrintedLine`): «part: description (dimensions)».
+   * prints them (`TechCardCalloutPrintedLine`): «part, part: description (dimensions)» — every part
+   * of the callout (`PartList`), not the first alone.
    */
   callouts: string[];
   number?: number;
 };
-
-/**
- * ONE CALLOUT IN THE WORDS THE SERVER SENDS — the same fold as `entity.TechCardCalloutPrintedLine`:
- * part, then «: description», then the measure in brackets at the end. A callout with no words at
- * all is not sent (the server drops it, `designFrozenCallout` returns nil) and is not counted here.
- */
-function calloutWords(c: CalloutLike): string {
-  const part = (c.part ?? '').trim();
-  const desc = (c.description ?? '').trim();
-  const dims = (c.dimensions ?? '').trim();
-  let head = desc;
-  if (part) head = desc ? `${part}: ${desc}` : part;
-  if (dims) return head ? `${head} (${dims})` : dims;
-  return head;
-}
 
 function thumbOf(media?: common_MediaFull): string {
   const m = media?.media;

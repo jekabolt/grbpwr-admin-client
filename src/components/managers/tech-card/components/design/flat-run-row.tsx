@@ -260,8 +260,9 @@ export function FlatRunRow({
         </CalloutBox>
       )}
       {/* ОТКАЗ ЗАПУСКА — СТОЙКАЯ ПОЛОСА, НЕ СНЕКБАР (CONTRACT §E), И ТОТ ЖЕ ОРГАН, ЧТО У FABRIC
-          RENDER И 3D: слова сервера дословно, «nothing was charged» только когда сервер сам о деньгах
-          не говорит, и ни слова про «same request id» — этот орган ключа не видит (см. `RunRefusal`). */}
+          RENDER И 3D: слова сервера дословно; «nothing was charged» только когда сервер ОТВЕТИЛ и сам
+          о деньгах не говорит; при сетевом сбое — правда про тот же `client_request_id` на повторе
+          (хук отдаёт ключ вместе с отказом, см. `generation/refusal.ts` и `RunRefusal`). */}
       <RunRefusal refusal={startRun.refusal} onDismiss={startRun.dismissRefusal} />
       <WhatModelGetsModal open={wmgOpen} onOpenChange={setWmgOpen} band={band} />
     </div>

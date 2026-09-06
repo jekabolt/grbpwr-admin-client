@@ -163,7 +163,7 @@ export function PatternStudio({
      у поля, поэтому напечатано здесь ОДНО, а прочитано в двух местах. */
   const fallbackName = nextPatternName(band);
 
-  const advice = run.refusal ? refusalAdvice(run.refusal) : '';
+  const advice = run.refusal ? refusalAdvice(run.refusal.words) : '';
   const kept = useMemo(() => patternAssets(band), [band]);
 
   return (
@@ -350,7 +350,10 @@ export function PatternStudio({
           <div data-probe='refusal' className='flex items-start gap-2'>
             <div className='min-w-0 flex-1 space-y-1'>
               <Text size='micro' component='p' className='normal-case'>
-                <b>the run did not start.</b> The server said, in its own words:
+                <b>the run did not start.</b>{' '}
+                {run.refusal.status != null
+                  ? 'The server said, in its own words:'
+                  : 'No answer came back from the server — the transport said:'}
               </Text>
               <Text
                 size='micro'
@@ -358,7 +361,7 @@ export function PatternStudio({
                 data-probe='refusal-verbatim'
                 className='break-words border border-hairline bg-bgZebra px-2 py-1 normal-case'
               >
-                {run.refusal}
+                {run.refusal.words}
               </Text>
               {advice && (
                 <Text size='micro' variant='label' component='p' className='normal-case'>

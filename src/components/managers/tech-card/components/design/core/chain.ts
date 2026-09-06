@@ -93,11 +93,13 @@ export type ChainCtx = {
   kind: DesignKind;
   card: {
     name: string;
-    /** Carried by the rail's builder; NOT judged by `stepDone` — a release blocker, not a link. */
+    /** Judged by `cardMissingFields` ONLY when `pastIdea` — the schema's own rule, see below. */
     styleNumber: string;
     categoryId: number;
     /** Carried by the rail's builder; NOT judged by `stepDone` — feeds costing, not the band. */
     baseSampleSizeId: number;
+    /** `stage !== IDEA` — the one condition under which the schema refuses a blank style number. */
+    pastIdea: boolean;
   };
   /** How many pictures the moodboard holds (form field `moodboardMedia`). */
   moodPictures: number;
@@ -193,20 +195,31 @@ export function chainGate(id: StepId, ctx: ChainCtx): ChainGate {
  * optional there too). Bench-backed steps are done when the bench holds a picture — that is what
  * the following run reads.
  *
- * ⚠ STYLE NUMBER AND BASE SAMPLE SIZE ARE NOT COUNTED, and that is the schema speaking, not
- * leniency. `styleNumber` is required only past the IDEA stage (`schema.ts`, `pastIdea`) and no
- * run reads it — it is a RELEASE blocker (`RELEASE_BLOCKER_TAB.style_number`), and a release is not
- * a link of this chain. `baseSampleSizeId` is optional with default 0 and feeds costing and
- * patterns, not the design band; on aux cards it is routinely empty. Counting either kept the
- * «card details · next» cell up forever on every idea card and capped the counter at 5 of 6.
- * Roles are not counted either: a missing technologist stops neither the moodboard nor the flats.
+ * ⚠ STYLE NUMBER IS COUNTED EXACTLY WHEN THE SCHEMA REFUSES WITHOUT IT — past the IDEA stage
+ * (`schema.ts`, `pastIdea`) — and never at IDEA, where it may be blank. Counting it always kept the
+ * «card details · next» cell up forever on every idea card and capped the counter at 5 of 6;
+ * not counting it past IDEA let the strip say «filled» over a card the Save button refuses. BASE
+ * SAMPLE SIZE IS NOT COUNTED: optional with default 0, it feeds costing and patterns, not the design
+ * band, and on aux cards it is routinely empty. Roles are not counted either: a missing
+ * technologist stops neither the moodboard nor the flats.
+ *
+ * ONE PREDICATE, TWO READERS. `cardMissingFields` is the list the fold strip prints («to fill: …»)
+ * and `stepDone('card')` is its emptiness — the strip and the tick cannot disagree, because there
+ * is no second list to disagree with.
  */
+export function cardMissingFields(ctx: ChainCtx): string[] {
+  const c = ctx.card;
+  return [
+    !c.name.trim() && 'name',
+    c.pastIdea && !c.styleNumber.trim() && 'style number',
+    !(c.categoryId > 0) && 'category',
+  ].filter((x): x is string => typeof x === 'string');
+}
+
 export function stepDone(id: StepId, ctx: ChainCtx): boolean {
   switch (id) {
-    case 'card': {
-      const c = ctx.card;
-      return !!(c.name.trim() && c.categoryId > 0);
-    }
+    case 'card':
+      return cardMissingFields(ctx).length === 0;
     case 'mood':
       return ctx.moodPictures > 0;
     case 'flat':

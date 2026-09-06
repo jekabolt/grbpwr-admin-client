@@ -2,13 +2,12 @@ import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
 import Input from 'ui/components/input';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
 import { FieldRow, Hint } from '../render/field-row';
-import { GenerateRow } from '../render/generate-row';
+import { GenerateRow, RunRefusal } from '../render/generate-row';
 import { archivedColorwayGate, fabricStatement, type Gate } from '../render/model';
 import { useStartDesignRun } from '../render/use-design-run';
 import { WhatModelGetsRenderModal } from '../render/what-model-gets';
@@ -236,9 +235,6 @@ export function OnModelStudio({
     });
   };
 
-  /** Слова последнего отказа. Живут до следующего нажатия — тост живёт секунды. */
-  const refusal = (run.refusal ?? '').trim();
-
   return (
     <>
       <OnModelInputStrip sources={sources} disabled={disabled} />
@@ -255,16 +251,10 @@ export function OnModelStudio({
 
         {/* ОТКАЗ ПОСЛЕДНЕГО НАЖАТИЯ, ДОСЛОВНО. Стоит НАД органами, которые его снимают, и не
             уходит по таймеру: отказ по ключу называет переменную окружения, а имя переменной,
-            мелькнувшее во всплывающем сообщении, — имя, которое некому передать. */}
-        {refusal && (
-          <CalloutBox tone='error'>
-            <Text size='micro' component='p' className='normal-case'>
-              <b>the run did not start.</b> The server answered: «{refusal}». These are its words,
-              printed as they arrived — nothing was charged for a request that was refused at the
-              door.
-            </Text>
-          </CalloutBox>
-        )}
+            мелькнувшее во всплывающем сообщении, — имя, которое некому передать. Орган общий с
+            FLAT / FABRIC RENDER / 3D (`RunRefusal`): «nothing was charged» он говорит только когда
+            сервер ответил, а не когда ответа не было вовсе. */}
+        <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
 
         <div>
           {/* ═══ TEXTURE & COLOUR — РЯД D-8, КАК НА FABRIC RENDER (D-14) ═══════════════════════

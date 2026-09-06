@@ -4,6 +4,7 @@ import type { common_DesignRunParams } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useRef, useState } from 'react';
 
+import { isAborted, refusalFromError, type RunRefusal } from '../generation/refusal';
 import { designKeys, newClientRequestId } from '../use-design-band';
 
 /**
@@ -18,11 +19,6 @@ import { designKeys, newClientRequestId } from '../use-design-band';
  * When the seam next opens, this belongs inside `useDesignWrites` and this file disappears.
  */
 
-/** grpc-gateway maps `codes.Aborted` onto HTTP 409 — somebody else moved first. */
-function isAborted(error: unknown): boolean {
-  const status = (error as { status?: number } | null)?.status;
-  return status === 409;
-}
 
 export type StartRunInput = {
   /**
@@ -78,7 +74,7 @@ export type StartRunState = {
    * здесь как раз может НЕ быть новым нажатием (дописать цвет, добавить фотографию). Поэтому
    * снятие — глагол, и он рядом.
    */
-  refusal: string | null;
+  refusal: RunRefusal | null;
   /** Убрать отказ с экрана. Ничего не отменяет — просто человек его прочёл. */
   dismissRefusal: () => void;
 };
@@ -99,7 +95,7 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
   const ledger = useRef<{ fingerprint: string; id: string } | null>(null);
-  const [refusal, setRefusal] = useState<string | null>(null);
+  const [refusal, setRefusal] = useState<RunRefusal | null>(null);
 
   const mutation = useMutation({
     mutationFn: (input: StartRunInput & { clientRequestId: string }) =>
@@ -119,7 +115,7 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
       // answers. Saying so is the difference between «nothing happened» and «it was booked».
       showMessage('run started — the pictures land in the history when it finishes', 'success');
     },
-    onError: (error: unknown) => {
+    onError: (error: unknown, input) => {
       const message = (error as Error)?.message?.trim() || 'the run did not start';
       if (isAborted(error)) {
         showMessage(`someone changed this first — ${message}`, 'error');
@@ -128,7 +124,8 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
       }
       // ОБА КАНАЛА, И ЭТО НЕ ДУБЛИРОВАНИЕ. Всплывашка — для отказа, который человек просто увидел;
       // поле — для того, на который он обязан подействовать, и оно переживает секунды всплывашки.
-      setRefusal(message);
+      // Классификатор общий с FLAT (`generation/refusal.ts`): что известно об отказе, решает он.
+      setRefusal(refusalFromError(error, input.clientRequestId));
       showMessage(message, 'error');
     },
   });
