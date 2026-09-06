@@ -68,8 +68,8 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  *
  * ═══ THE LAYOUT IS THE MOCK-UP'S `histBlock()` (`_core.js`), THE MECHANISM IS THE PRODUCT'S ═════
  * Top to bottom (r2 п.22, п.23, п.27 — три правки владельца поверх макета):
- *   · header  `GENERATION HISTORY · nothing here is deleted`        [23 RUNS ▾]  ← И СВЁРТКА ТОЖЕ
- *   · row     `[1 OF 1 RUN] loaded [3 PICTURES]`                  [· 0 ARCHIVED ▸]
+ *   · header  `GENERATION HISTORY · nothing here is deleted`  [2 PATTERN RUNS ▾]  ← И СВЁРТКА ТОЖЕ
+ *   · row     `[3 PICTURES] loaded`                              [· 0 ARCHIVED ▸]
  *   · body    rows of runs: the tiles of what came back, then the meta line
  *             `alina · 14:12 · $0.38` и под ней ряд дверей `recall ▸  + results ▸  meta ▸ … archive ▸`,
  *             then the pager `‹ newer · page N of M · older › … show all`
@@ -78,6 +78,8 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  * закончен; номер и род не сказаны, потому что род задан шагом и не выбирается (п.27 — селект
  * KIND снят), а строку читают по часам и автору. Счётчик прогонов и дверь свёртки — ОДИН орган в
  * шапке (п.23): отдельной линейки `RUNS ─── HIDE ▾` больше нет.
+ * ⚠ ЧИСЛО В ШАПКЕ СЧИТАЕТ РОД ЭТОГО ШАГА, А НЕ КАРТОЧКУ (ревью Codex r2) — разбор у `liveShown`;
+ * поэтому в ряду «loaded» второго счётчика прогонов нет, там остались только картинки.
  * The five steps differ in TWO values only: the kind of the step (`defaultRep`, now a hard filter)
  * and whether the RUNS fold starts open (`defaultOpen`: open on FLAT, closed on the four steps that
  * have their own outputs section above). The block itself is never collapsed: its header and the
@@ -86,10 +88,11 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  * What the mock-up shows as gestures the product does with ITS OWN RPC and rules, unchanged here:
  * NOTHING IS EVER DELETED and the generation is the unit that collapses (archive is a flag on the
  * run, reversible, `ArchiveRun`); THREE ROWS AT A TIME with the server's continuations read on
- * demand (`useMoreHistory`, `HistoryWindowAutofill`, «show all»); the header's sums are the band's
- * aggregates over the WHOLE card, never the rows on screen; NO RUN IS MEASURED AGAINST THE CURRENT
- * INPUTS (T-18); the tiles are `PictureTile` and the corner law is the primitive's; the zoom walks
- * ONE `useGalleryGroup` over every loaded picture; RECALL is two doors and a question
+ * demand (`useMoreHistory`, `HistoryWindowAutofill`, «show all»); the band's whole-card aggregates
+ * (`total_runs`, `archived_runs`) stand in the doors' `title`, where they are named as such, and
+ * the numbers ON the doors count the population each door opens; NO RUN IS MEASURED AGAINST THE
+ * CURRENT INPUTS (T-18); the tiles are `PictureTile` and the corner law is the primitive's; the
+ * zoom walks ONE `useGalleryGroup` over every loaded picture; RECALL is two doors and a question
  * (`RecallDoors`, `history-recall.tsx`), and the bench intake stands OUTSIDE the fold, because a
  * host that unmounts drops the selection it was about to answer.
  *
@@ -878,6 +881,16 @@ const repLabel = (rep: RepFilter): string => REP_LABEL[rep] ?? String(rep);
 const repWord = (rep: RepFilter): string => (rep === 'all' ? 'run' : REP_NOUN[rep]);
 
 /**
+ * The noun of a COUNT that is narrowed to one kind: `flat run`, `pattern run`, `3D run`. Singular;
+ * the caller adds the `s`, because the plural of a FLOOR («2+ pattern runs») does not follow n.
+ */
+const repRunNoun = (rep: RepFilter): string => (rep === 'all' ? 'run' : `${REP_NOUN[rep]} run`);
+
+/** `1 flat run` / `2+ pattern runs` — a count that admits when it is only a floor. */
+const runCountWords = (rep: RepFilter, n: number, floor: boolean): string =>
+  `${n}${floor ? '+' : ''} ${repRunNoun(rep)}${n === 1 && !floor ? '' : 's'}`;
+
+/**
  * ═══ ОКНО КОРОЧЕ СВОЕЙ СТРАНИЦЫ — ОНО САМО ПРОСИТ НЕДОСТАЮЩЕЕ (B-1, D-3) ══════════════════════
  *
  * Лента страничится на СЕРВЕРЕ (12 прогонов страницей), а сужают её ДВА клиентских решения, о
@@ -1033,7 +1046,9 @@ export function GenerationHistory({
   const archivedRuns = band.archivedRuns ?? 0;
 
   /**
-   * Загруженные строки БЕЗ фильтра рода — знаменатель дроби «N of M» и ничего больше.
+   * Загруженные живые строки БЕЗ фильтра рода. На экран это число больше не выходит (дробь «N of
+   * M» снята вместе с ложью о карточке): оно СРАВНИВАЕТСЯ с серверным `total − archived` и говорит
+   * ровно одно — прочитана ли своя популяция целиком (`liveFloor`).
    * ⚠ ЗААРХИВИРОВАННЫЕ СТРОКИ ОТСЮДА ИСКЛЮЧЕНЫ ВСЕГДА (J-22): архив живёт на СВОЕЙ полке ниже, окно
    * его не пагинирует, и «страница 1 из N» после нажатия «archived ▸» остаётся верной.
    */
@@ -1163,17 +1178,32 @@ export function GenerationHistory({
   const autofillBudget = AUTOFILL_PAGES - autofillSpent;
 
   /**
-   * ═══ ДВА ФАКТА ПОД ДВУМЯ ПОДПИСЯМИ (D-3) ═════════════════════════════════════════════════════
-   * Шапка говорит только о КАРТОЧКЕ — `total_runs` и `archived_runs` приходят одним агрегатом с
-   * сервера и не зависят ни от страницы, ни от фильтра. Всё, что зависит от страницы и фильтра,
-   * стоит у САМОГО ФИЛЬТРА и подписано словом «loaded» (замерено на бете: «28 runs · 18 pictures
-   * shown» над тремя строками с шестью картинками). Агрегата по РОДУ на проводе нет, поэтому под
-   * суженным фильтром знаменатель ЧЕСТНО остаётся загруженным. `Math.max` — сторож против
-   * отрицательного остатка между двумя чтениями («11 of 10»).
+   * ═══ ЧИСЛО НА ДВЕРИ СЧИТАЕТ ТО, ЧТО ЭТА ДВЕРЬ ОТКРЫВАЕТ (D-3, ревью Codex r2) ═════════════════
+   * ДО п.27 род был ВЫБОРОМ, и шапка честно говорила о карточке: `total_runs`/`archived_runs` —
+   * серверный агрегат по всей ленте, а сужение стояло рядом и было видно. После п.27 род задан
+   * ШАГОМ жёстко: тело свёртки — прогоны ОДНОГО рода, полка — архив того же рода, и «23 runs ▾»
+   * над двумя строками паттерна перестало быть округлением. Это был другой факт под тем же словом.
+   *
+   * АГРЕГАТА ПО РОДУ НА ПРОВОДЕ НЕТ («AGGREGATES OVER THE WHOLE BAND» в `GetDesignBandResponse`),
+   * поэтому число рода — это число ПРОЧИТАННЫХ строк своего рода. Оно ТОЧНО ровно тогда, когда
+   * своя популяция прочитана целиком, и это проверяется, а не предполагается:
+   *   · живые — когда лента дочитана до конца ИЛИ загруженных живых не меньше, чем `total −
+   *     archived` (сервер сосчитал, и мы столько уже держим);
+   *   · архивные — когда лента дочитана ИЛИ загруженных архивных не меньше `archived_runs`.
+   * Иначе число — ПОЛ, и оно подписано `+`: тем же знаком, каким в этом же файле подписан пейджер
+   * («page 1 of 3+»), и по тому же доводу — назвать число, которое придётся исправлять, хуже, чем
+   * назвать нижнюю границу. Карточные итоги никуда не делись: они в `title` двери, где и названы
+   * карточными. ⚠ `totalRuns > 0` в проверке живых — сторож против сервера, который агрегата не
+   * считает вовсе: «0 − 0» тогда не должно читаться как «всё прочитано».
    */
   const picturesIn = (rows: common_DesignRun[]) =>
     rows.reduce((n, run) => n + (run.pictures ?? []).length, 0);
-  const liveOnCard = Math.max(totalRuns - archivedRuns, unfiltered.length);
+  const liveShown = visible.length;
+  const liveFloor =
+    more.hasMore && !(totalRuns > 0 && unfiltered.length >= totalRuns - archivedRuns);
+  const archShownCount = archivedRows.length;
+  const archFloor = more.hasMore && archivedLoaded.length < archivedRuns;
+  const cardWide = `the card has ${totalRuns} generation${totalRuns === 1 ? '' : 's'} in all, ${archivedRuns} of them archived`;
 
   /**
    * ПУСТОЕ ОКНО НАЗЫВАЕТ СВОЮ ПРИЧИНУ — И ПОД `all` ТОЖЕ (B-1). «Читаю» говорится, ТОЛЬКО пока
@@ -1216,7 +1246,6 @@ export function GenerationHistory({
     ));
 
   const paged = visible.length > PAGE || more.hasMore;
-  const shelfCount = Math.max(archivedRuns, archivedLoaded.length);
 
   return (
     <>
@@ -1236,19 +1265,23 @@ export function GenerationHistory({
            органа об одном и том же: пилюля-счётчик в шапке и отдельная линейка `RUNS ─── HIDE ▾`
            под рядом KIND. Счётчик и дверь слиты в одну кнопку: число говорит, сколько их, стрелка —
            открыты ли они. Отдельной линейки больше нет.
-           ЧИСЛО — ТОЛЬКО О КАРТОЧКЕ: живые прогоны всей ленты (`total − archived`), не строки на
-           экране; загруженное считает пилюля в ряду ниже. */
+           ЧИСЛО СЧИТАЕТ РОД ЭТОГО ШАГА — ровно те строки, которые дверь и открывает (разбор у
+           `liveShown`); карточные итоги — в `title`. */
         action={
           <Button
             variant='secondary'
             size='xs'
             aria-expanded={runsOpen}
             aria-controls='design-history-runs'
-            aria-label={`${runsOpen ? 'hide' : 'show'} the ${liveOnCard} run${liveOnCard === 1 ? '' : 's'} of this card`}
+            aria-label={`${runsOpen ? 'hide' : 'show'} the ${runCountWords(rep, liveShown, liveFloor)} of this card`}
             onClick={() => setRunsOpen((v) => !v)}
-            title={`${totalRuns} generation${totalRuns === 1 ? '' : 's'} have ever run on this card, ${archivedRuns} of them archived. What is loaded and shown right now is counted in the row below.`}
+            title={
+              liveFloor
+                ? `the ${repRunNoun(rep)}s this screen has read so far — the feed has earlier pages it has not read, so the number is a floor. Card-wide: ${cardWide}.`
+                : `every ${repRunNoun(rep)} on this card. Card-wide: ${cardWide}.`
+            }
           >
-            {liveOnCard} {liveOnCard === 1 ? 'run' : 'runs'} {runsOpen ? '▾' : '▸'}
+            {runCountWords(rep, liveShown, liveFloor)} {runsOpen ? '▾' : '▸'}
           </Button>
         }
       >
@@ -1259,33 +1292,38 @@ export function GenerationHistory({
         )}
 
         {/* ═══ THE LOADED ROW — что этот экран уже прочитал, и полка архива ═══════════════════════
-            `[1 OF 1 RUN] loaded [3 PICTURES] … [· 0 ARCHIVED ▸]`. СЕЛЕКТА KIND ЗДЕСЬ БОЛЬШЕ НЕТ
-            (r2 п.27): род задан шагом и не выбирается — см. `rep` выше. Счёт рядом — ЗАГРУЖЕННОЕ,
-            так и сказано; дверь архива несёт своё число сама и стоит в ряду, а не в шапке, где
-            теперь живёт единственный орган свёртки. `data-rep-filter` остаётся якорем: по нему
-            читают, каким родом эта история сужена. */}
+            `[3 PICTURES] loaded … [· 0 ARCHIVED ▸]`. СЕЛЕКТА KIND ЗДЕСЬ БОЛЬШЕ НЕТ (r2 п.27): род
+            задан шагом и не выбирается — см. `rep` выше. ПИЛЮЛИ ПРОГОНОВ ЗДЕСЬ ТОЖЕ НЕТ: после
+            того как число в шапке стало числом СВОЕГО РОДА, «1 of 1 run loaded» повторяло его теми
+            же цифрами — два органа об одном факте, ровно то, что п.23 отсюда и убирал. Осталось
+            то, чего шапка не говорит: сколько картинок под прочитанными строками. Дверь архива
+            несёт своё число сама. `data-rep-filter` остаётся якорем: по нему читают, каким родом
+            эта история сужена. */}
         <div data-rep-filter={rep} className='flex flex-wrap items-center gap-2'>
           <span data-loaded-note className='flex flex-wrap items-center gap-2'>
             <CountPill
-              n={visible.length}
-              noun='run'
-              total={unfiltered.length}
+              n={picturesIn(visible)}
+              noun='picture'
               title={
-                'counted over the runs this screen has actually read — the first page of the feed plus every continuation asked for' +
+                'the pictures under the rows this screen has actually read — the first page of the feed plus every continuation asked for' +
                 (more.hasMore ? '; the server has earlier pages this screen has not read yet' : '')
               }
             />
             <Text size='nano' variant='label' component='span'>
               loaded
             </Text>
-            <CountPill n={picturesIn(visible)} noun='picture' />
           </span>
           <span className='ml-auto'>
             <Button
               variant='secondary'
               size='xs'
               aria-expanded={archShown}
-              aria-label={`${archShown ? 'hide' : 'open'} the shelf of ${shelfCount} archived run${shelfCount === 1 ? '' : 's'}`}
+              aria-label={`${archShown ? 'hide' : 'open'} the shelf of ${archShownCount}${archFloor ? ' or more' : ''} archived ${repRunNoun(rep)}${archShownCount === 1 && !archFloor ? '' : 's'}`}
+              title={
+                archFloor
+                  ? `the archived ${repRunNoun(rep)}s read so far — the shelf reads the rest when it opens. Card-wide: ${cardWide}.`
+                  : `every archived ${repRunNoun(rep)} on this card. Card-wide: ${cardWide}.`
+              }
               onClick={() => {
                 setArchShown((v) => !v);
                 // Колода складывается: на полке может стоять её же строка, и «одна открытая на всю
@@ -1294,7 +1332,7 @@ export function GenerationHistory({
                 setOpenDeck(null);
               }}
             >
-              · {shelfCount} archived ▸
+              · {`${archShownCount}${archFloor ? '+' : ''}`} archived ▸
             </Button>
           </span>
         </div>
@@ -1451,20 +1489,21 @@ export function GenerationHistory({
         {/* ═══ ПОЛКА АРХИВА — ПОД ОКНОМ, после свёртки (J-22, макет `histShelfBody`) ══════════════
             Скрытое обязано лежать ниже того, что видно. Не блок — подгруппа: `GroupLabel` и под ней
             те же строки прогонов, развёрнутые (полку открывают, чтобы посмотреть), с приглушёнными
-            плитками. Число на линейке — `N RUNS` по всей карточке; пока продолжения едут, полка
-            говорит об этом. */}
+            плитками. Число на линейке — те же строки, что под ней (род этого шага); пока
+            продолжения едут, оно — пол, и говорит об этом знаком `+`. */}
         {archShown && (
-          <div data-archived-shelf={shelfCount}>
+          <div data-archived-shelf={`${archShownCount}${archFloor ? '+' : ''}`}>
             <GroupLabel
               action={
                 <span className='flex flex-wrap items-center gap-1.5'>
                   <CountPill
-                    n={shelfCount}
-                    noun='run'
+                    n={archShownCount}
+                    noun={repRunNoun(rep)}
+                    atLeast={archFloor}
                     title={
-                      archivedLoaded.length >= archivedRuns
-                        ? undefined
-                        : `${archivedLoaded.length} of ${archivedRuns} loaded so far`
+                      archFloor
+                        ? `${archivedLoaded.length} of the card's ${archivedRuns} archived runs have been read so far; the shelf is reading the rest`
+                        : undefined
                     }
                   />
                   <Button

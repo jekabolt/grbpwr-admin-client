@@ -137,8 +137,47 @@ export const PANTONE_SWATCHES: readonly PantoneSwatch[] = [
   { code: '19-3632 TCX', name: 'Petunia', hex: '#4F3466' },
 ];
 
-/** Looks like a Pantone reference the operator typed rather than a search word: «19-4005», «19-4005 TCX». */
-export const PANTONE_CODE_RE = /^\s*\d{2}-\d{4}(\s*(TCX|TPG|TPX|TN|TSX))?\s*$/i;
+/**
+ * ═══ ДВЕ СЕМЬИ ССЫЛОК PANTONE, А НЕ ОДНА ══════════════════════════════════════════════════════
+ * Список выше — ТЕКСТИЛЬНЫЙ (TCX: крашеный хлопок, тем и меряют ткань). Но владелец приносит
+ * референсы и из SOLID COATED — «407 C», «1635 C», «7419 C»: так печатают лейблы, пуговицы,
+ * фурнитуру и всё, что не крашеное полотно. Регулярка принимала только `NN-NNNN`, и набранное
+ * «407 C» не давало строки «use as typed» вовсе — то есть код, который человек держит в руках,
+ * в карточку было не ввести.
+ *
+ * ПРИНИМАЕТСЯ:
+ *   · текстиль  `18-1248`, `18-1248 TCX`, `18-1248TCX`, `18 1248 tcx` (суффикс TCX/TPG/TPX/TN/TSX)
+ *   · solid     `407 C`, `407C`, `1635 U`, `7419 CP` (три-четыре цифры + C/U/CP/UP)
+ *   · с приставкой `PANTONE ` спереди — так код и лежит в чужих спецификациях
+ * НЕ принимается голое число: `407` без буквы не говорит, coated это или uncoated, а нормализовать
+ * его значило бы ВЫДУМАТЬ половину ссылки. Пустая подсказка под полем называет обе формы.
+ */
+const PANTONE_TEXTILE_RE = /^(\d{2})[-\s]?(\d{4})\s*(TCX|TPG|TPX|TN|TSX)?$/i;
+const PANTONE_SOLID_RE = /^(\d{3,4})\s*(C|U|CP|UP)$/i;
+
+/**
+ * ОДНО НАПИСАНИЕ НА ХРАНЕНИЕ. Поле свободнотекстовое (`Material.pantone`,
+ * `ColorwayDevelopment.pantone`, `TechCardBomItem.pantone`), и «407c», «PANTONE 407 C» и «407 C» —
+ * один и тот же цвет тремя строками: они не сравнятся, не сгруппируются и не найдутся поиском.
+ * Поэтому написание приводится ЗДЕСЬ, у самой проверки, а не в каждом вызывающем: `18-1248 TCX`
+ * и `407 C` — верхний регистр, один пробел перед суффиксом, дефис в текстильном номере.
+ *
+ * ⚠ ЭТО И ЕСТЬ ПРОВЕРКА «читается ли набранное как ссылка»: непустой ответ — да, '' — нет. Двух
+ * органов (регулярка отдельно, нормализация отдельно) здесь быть не может — они разойдутся, и
+ * строка предложит «use “407 C” as typed», а положит в поле что-то другое.
+ */
+export function normalizePantone(input?: string): string {
+  const body = (input ?? '').trim().replace(/\s+/g, ' ').replace(/^PANTONE\s+/i, '');
+  if (!body) return '';
+  const textile = PANTONE_TEXTILE_RE.exec(body);
+  if (textile) {
+    const suffix = textile[3] ? ` ${textile[3].toUpperCase()}` : '';
+    return `${textile[1]}-${textile[2]}${suffix}`;
+  }
+  const solid = PANTONE_SOLID_RE.exec(body);
+  if (solid) return `${solid[1]} ${solid[2].toUpperCase()}`;
+  return '';
+}
 
 /** Case-insensitive, «19 4005» and «19-4005» both find the swatch; a name word finds by name. */
 export function searchPantone(query: string, limit = 24): PantoneSwatch[] {

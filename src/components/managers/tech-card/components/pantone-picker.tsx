@@ -3,7 +3,7 @@ import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
-import { PANTONE_CODE_RE, findPantone, searchPantone } from './pantone-swatches';
+import { findPantone, normalizePantone, searchPantone } from './pantone-swatches';
 
 /**
  * A Pantone reference picked by searching — «Search Pantone code or colour» (owner, C-8 snapshot).
@@ -26,6 +26,11 @@ import { PANTONE_CODE_RE, findPantone, searchPantone } from './pantone-swatches'
  * TYPED CODES ARE ACCEPTED AS TYPED. The swatch list is a suggestion list of ~120 common references;
  * the dyehouse's own number («19-4005 TCX») is not refused because it is not in it — the list
  * narrows, the query itself stays offered as the first row whenever it reads as a reference.
+ *
+ * AND «READS AS A REFERENCE» COVERS BOTH FAMILIES. The list is textile (TCX), but a solid coated
+ * number — «407 C», «1635 C» — is what the owner's own reference sheet holds, and a picker that
+ * refused it made the code in the operator's hand unenterable. What counts as a reference and what
+ * spelling is stored are ONE answer, `normalizePantone`; this file never re-decides either.
  */
 export function PantonePicker({
   value,
@@ -47,7 +52,13 @@ export function PantonePicker({
   const [query, setQuery] = useState('');
   const hits = useMemo(() => searchPantone(query), [query]);
   const typed = query.trim();
-  const typedIsCode = PANTONE_CODE_RE.test(typed);
+  /**
+   * НАБРАННОЕ, ПРИВЕДЁННОЕ К ХРАНИМОМУ НАПИСАНИЮ — и одновременно ответ на вопрос «ссылка ли это»
+   * (пусто = не ссылка). Строка предлагает РОВНО ТО, что и положит: человек набирает «407c», в
+   * кнопке стоит «407 C», в поле уезжает «407 C». Раньше здесь стоял `toUpperCase()`, и набранное
+   * «18-1248tcx» уезжало в карточку слипшимся — рядом с «18-1248 TCX» из списка это два значения.
+   */
+  const typedCode = normalizePantone(typed);
   const current = findPantone(value);
 
   const choose = (code: string) => {
@@ -110,29 +121,29 @@ export function PantonePicker({
             // with the key NAME, never a letter — letters die on a Cyrillic layout.
             if (e.key !== 'Enter') return;
             e.preventDefault();
-            if (typedIsCode) choose(typed.toUpperCase());
+            if (typedCode) choose(typedCode);
             else if (hits[0]) choose(hits[0].code);
           }}
         />
         <div className='max-h-[260px] overflow-y-auto' role='listbox' aria-label='pantone swatches'>
-          {typedIsCode && (
+          {typedCode && (
             <button
               type='button'
               role='option'
               aria-selected={false}
               data-pantone-typed={name}
-              onClick={() => choose(typed.toUpperCase())}
+              onClick={() => choose(typedCode)}
               className='flex w-full items-center gap-2 border-b border-hairline px-1.5 py-1 text-left hover:bg-bgZebra'
             >
               <span aria-hidden className='size-3 shrink-0 border border-dashed border-borderColor' />
               <Text component='span' size='micro' className='uppercase'>
-                use “{typed.toUpperCase()}” as typed
+                use “{typedCode}” as typed
               </Text>
             </button>
           )}
-          {hits.length === 0 && !typedIsCode && (
+          {hits.length === 0 && !typedCode && (
             <Text size='micro' variant='label' className='px-1.5 py-1' data-pantone-empty={name}>
-              nothing matches “{typed}” — type the reference itself, e.g. 19-4005 TCX
+              nothing matches “{typed}” — type the reference itself, e.g. 19-4005 TCX or 407 C
             </Text>
           )}
           {hits.map((s) => (

@@ -5,7 +5,7 @@ import type {
   common_MediaFull,
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { useMemo, useState, type JSX, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
@@ -415,6 +415,32 @@ export function SidesSection({
   const [editor, setEditor] = useState<
     { mode: 'draw'; view: string } | { mode: 'edit'; pictureId: number } | null
   >(null);
+
+  /**
+   * ═══ КАРТОЧКА СМЕНИЛАСЬ — РЕДАКТОР ЗАКРЫВАЕТСЯ, «SAVING…» ГАСНЕТ (инвариант 12) ══════════════
+   * `editor` держит не картинку, а АДРЕС: «рисую во флэт-сторону front». Адрес разрешается при
+   * рендере по СЕГОДНЯШНИМ `flats`/`renders` (см. `drawing`/`editing` ниже) и уезжает в
+   * `VectorModal` вместе с сегодняшним `techCardId` — то есть открытая модалка карточки A после
+   * перехода на B молча становится модалкой B, и сплющенный рисунок ложится в слот ЧУЖОЙ карточки.
+   * `busy` — то же самое словом: «saving…» стояло бы на стороне соседней карточки, где ничего не
+   * пишется. Оно только рисует подпись и ничего не сторожит, а идущая мутация всё равно снимет его
+   * своим `onSettled`, поэтому обнулить его здесь безопасно.
+   *
+   * ⚠ РЕМАУНТА ЗДЕСЬ НЕТ, И ПРОВЕРЯТЬ НАДО ИМЕННО ЭТО. `RenderStudio` стоит под
+   * `key={colorwayId}` — это ремаунт на смене КОЛОРВЕЯ, а не карточки: у двух карточек колорвей
+   * запросто один и тот же номер (нуль — неатрибутированный верстак), и тогда узел живёт дальше.
+   * `StudioTab` на переходе не размонтируется, а у уже посещённой карточки `isLoading` ложно и
+   * экран «loading…» не подменяет собой шаг (образец разбора — `pattern-studio.tsx`).
+   *
+   * В ТЕЛЕ РЕНДЕРА, А НЕ В ЭФФЕКТЕ: эффект оставил бы один закоммиченный кадр с новой карточкой и
+   * чужой открытой модалкой — а одного кадра хватает, чтобы в ней нажать «сохранить».
+   */
+  const shownCard = useRef(techCardId);
+  if (shownCard.current !== techCardId) {
+    shownCard.current = techCardId;
+    if (editor) setEditor(null);
+    if (busy) setBusy(null);
+  }
 
   /* ⚠ NO `slotId` — a `oneof` with `viewKey`; a zero is a SET field in proto-JSON and the server
      refuses the whole write. The kind is always spelled: empty reads as flat. Флэт-ось колорвея не

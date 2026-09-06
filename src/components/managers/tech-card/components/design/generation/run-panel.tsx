@@ -56,12 +56,13 @@ import { useGenerationWrites } from './use-generation';
    here once and imported by the row, the section and the recall doors. Просится в core: a `gap`
    tone on `Pill`, and `Counter` with a dashed zero instead of a red one. */
 
-/** `1 of 1 run` / `3 pictures` / `0 pictures` (dashed) — a count as a pill. */
+/** `1 of 1 run` / `3 pictures` / `2+ pattern runs` / `0 pictures` (dashed) — a count as a pill. */
 export function CountPill({
   n,
   noun,
   plural,
   total,
+  atLeast,
   title,
   className,
 }: {
@@ -69,14 +70,21 @@ export function CountPill({
   noun: string;
   plural?: string;
   total?: number;
+  /**
+   * THE NUMBER IS A FLOOR, NOT A SUM: what is counted has not all been read yet. Printed as `2+`,
+   * the same sign the history's pager already uses for a page total it would have to correct — and
+   * the plural then follows the `+`, never the one item that happens to be in hand.
+   */
+  atLeast?: boolean;
   title?: string;
   className?: string;
 }) {
   const many = plural ?? `${noun}s`;
-  const word = (total ?? n) === 1 ? noun : many;
+  const word = (total ?? n) === 1 && !atLeast ? noun : many;
+  const count = `${n}${atLeast ? '+' : ''}`;
   return (
     <Pill tone='mut' className={cn(n === 0 && 'border-dashed', className)} title={title}>
-      {total != null ? `${n} of ${total} ${word}` : `${n} ${word}`}
+      {total != null ? `${count} of ${total} ${word}` : `${count} ${word}`}
     </Pill>
   );
 }
