@@ -256,19 +256,23 @@ export function MaterialSlots({
       /* ПРАВЫЙ УГОЛ ШАПКИ — МАКЕТА: `FROM THE MOODBOARD · N OF M DRAFTED SLOTS · + CLOTH · + THREAD
          · + HARDWARE · MOODBOARD MOVED ON`. Счётчик не рисуется при нуле строк. */
       action={
-        <>
+        /* Свой перенос: слот `action` шапки не переносит, а пять органов в нём шире узкого экрана
+           (замерено: 388px документа при окне 375). */
+        <span className='flex flex-wrap items-center justify-end gap-1.5'>
           <FromMoodboardPill />
           {lines.length > 0 && (
-            <Counter n={drafted} noun='drafted slot' total={lines.length} data-b16-drafted='' />
+            <span className='contents' data-b16-drafted=''>
+              <Counter n={drafted} noun='drafted slot' total={lines.length} />
+            </span>
           )}
           {addChips}
           <BoardMovedPill techCardId={techCardId ?? 0} />
-        </>
+        </span>
       }
     >
       <div data-b16-slots=''>
         {lines.length === 0 ? (
-          <EmptyState action={addChips ?? undefined} data-b16-empty=''>
+          <EmptyState action={addChips ?? undefined}>
             <span className='uppercase text-textColor'>no material slots yet</span>
             {readOnly ? '' : ' · draft the construction above, or add one by hand'}
           </EmptyState>

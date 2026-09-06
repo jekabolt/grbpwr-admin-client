@@ -20,6 +20,7 @@ import {
   type Gate,
 } from './model';
 import { OutputsSection } from './outputs';
+import { RenderInputStrip } from './render-input-strip';
 import { Palette } from './palette';
 import { InputFlatsGroup, SidesGroup } from './side-row';
 import { useStartDesignRun } from './use-design-run';
@@ -281,6 +282,18 @@ export function RenderStudio({
           onGenerate={generate}
           onInspect={() => setInspecting(true)}
         />
+
+        {/* ═══ UNDER A RULE AT THE END — THE SHEETS NOT YET RAISED INTO THE STRIP ══════════════
+            The prototype's own words: «ниже полосы — разделитель и мультивью-листы, которые ещё не
+            подняты в полосу; под разделителем сырьё, над ним размеченный результат». The mockup
+            has no such rail, so it stands LAST, under a hairline, and not between the strip and
+            the recipe: the same organ as before (`RenderInputStrip`, bare) — the unmarked
+            drawings with `mark ▸`, the sheets and their decks, the `+ flat` door. */}
+        {!disabled && (
+          <div className='mt-3 border-t border-hairline pt-2' data-side-rows-pool=''>
+            <RenderInputStrip band={band} techCardId={techCardId} disabled={disabled} bare />
+          </div>
+        )}
       </Section>
 
       {/* The renders this card holds — where `mark ▸`, `split ▸` and `apply splitted` live: the

@@ -31,7 +31,6 @@ import {
   type BenchSide,
   type RenderPlacement,
 } from './model';
-import { RenderInputStrip } from './render-input-strip';
 
 /**
  * ═══ THE TWO STRIPS OF THE FABRIC RENDER STEP, AND THE ONE STRIP OF 3D ═══════════════════════
@@ -490,6 +489,8 @@ export function SidesGroup({
                     frameAspect={PLATE_ASPECT}
                     label={`${label}${required ? ' *' : ''}`}
                     hint={null}
+                    /* The mockup's empty cell is words in a dashed box — no photo glyph. */
+                    compact
                     purpose={`design · render for the ${label} slot`}
                     showVideos={false}
                     editMode
@@ -527,9 +528,13 @@ export function SidesGroup({
                   title={`no render stands in ${label}.`}
                 />
               )}
-              <span>
-                <ThreedWord side={side} />
-              </span>
+              {/* The 3D word stands under a FILLED plate only: an empty side is in no run, and
+                  saying so under every hole made six pills out of nothing. */}
+              {side.picture && (
+                <span>
+                  <ThreedWord side={side} />
+                </span>
+              )}
             </div>
           );
         })}
@@ -549,17 +554,6 @@ export function SidesGroup({
             left.
           </Text>
         </CalloutBox>
-      )}
-
-      {/* ═══ BELOW THE STRIP — THE DIVIDER AND THE SHEETS NOT YET RAISED INTO IT ══════════════════
-          The prototype's own words: «ниже полосы — разделитель и мультивью-листы, которые ещё не
-          подняты в полосу; под разделителем сырьё, над ним размеченный результат». The same organ
-          as before (`RenderInputStrip`, bare): the unmarked drawings with `mark ▸`, the sheets and
-          their decks, the `+ flat` door, the read to the end of the feed. */}
-      {canWrite && (
-        <div className='mt-2 border-t border-hairline pt-2' data-side-rows-pool=''>
-          <RenderInputStrip band={band} techCardId={techCardId} disabled={disabled} bare />
-        </div>
       )}
 
       {editing && (
@@ -647,9 +641,13 @@ export function RendersByViewGroup({
                   title={`fill ${label} on FABRIC RENDER — from the renders of this card or from a file`}
                 />
               )}
-              <span>
-                <ThreedWord side={side} />
-              </span>
+              {/* The 3D word stands under a FILLED plate only: an empty side is in no run, and
+                  saying so under every hole made six pills out of nothing. */}
+              {side.picture && (
+                <span>
+                  <ThreedWord side={side} />
+                </span>
+              )}
             </div>
           );
         })}

@@ -312,7 +312,7 @@ export function useBringOwnModel(techCardId: number): BringOwnModel {
       /* THE MOCKUP'S DOOR IS WIDE (`p4Bring`, «BRING YOUR OWN · .glb up to 50 MB …»): one dashed
          cell under its own rule, not a strip cell of 132px — it stands alone in its group, so the
          width is its own. Capped so the hint does not become a ruler on a wide monitor. */
-      className='flex w-full max-w-[420px] flex-col gap-1'
+      className='flex w-full max-w-[300px] flex-col gap-1'
     >
       {/* КАДР САМ И ЕСТЬ ДВЕРЬ, а не коробка с кнопкой под ней: тот же довод, что у пустого слота
           верстака — два органа на один слот заставляют выбирать между ними. Кадр остаётся дверью и

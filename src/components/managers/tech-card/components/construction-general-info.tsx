@@ -138,7 +138,10 @@ export function GeneralInformationAction({
   return (
     <div className='flex flex-wrap items-center justify-end gap-1.5' data-c19-general-action=''>
       <FromMoodboardPill />
-      <Counter n={drafted} noun='drafted field' total={total} data-c19-general-drafted='' />
+      {/* `Counter` не проносит `data-*`; якорь пробы — на обёртке. */}
+      <span className='contents' data-c19-general-drafted=''>
+        <Counter n={drafted} noun='drafted field' total={total} />
+      </span>
       <BoardMovedPill techCardId={techCardId} />
     </div>
   );

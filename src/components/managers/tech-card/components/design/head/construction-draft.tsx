@@ -350,7 +350,10 @@ export function ConstructionDraft({
   const readOnly = !!disabled;
   // ⚠ ПУСТОТА МЕРИТСЯ ТАК ЖЕ, КАК ЕЁ МЕРИТ СЕРВЕР: «нет картинок И нет слов». Доска из одних
   // картинок законна (сторож на словах снят в Ф0), доска из одного описания — тоже.
-  const nothingToRead = items.length === 0 && !concept.trim() && boardNotes.length === 0;
+  // РОВНО КАРТИНКИ, А НЕ СТРОКИ: одна картинка стоит и на доске, и во входе двумя строками
+  // `moodboardMedia` (U-5) — считать её дважды значило бы обещать прогону восьмую картинку.
+  const pictureCount = boardIds.size;
+  const nothingToRead = pictureCount === 0 && !concept.trim() && boardNotes.length === 0;
   const gate: Gate = nothingToRead
     ? {
         ok: false,
@@ -363,7 +366,7 @@ export function ConstructionDraft({
   function askForDraft() {
     if (!gate.ok || readOnly || draftIdea.isPending) return;
     if (!intent.current) intent.current = newClientRequestId();
-    const snapshot = { pictures: items.length, notes: boardNotes.length, fingerprint };
+    const snapshot = { pictures: pictureCount, notes: boardNotes.length, fingerprint };
     draftIdea.mutate(
       { clientRequestId: intent.current },
       {
@@ -536,6 +539,28 @@ export function ConstructionDraft({
       });
     }
     forget(techCardId, fill.id);
+    // Квитанция умирает вместе с записью: строка, чью запись вернули, снова РАБОТА и стоит в
+    // `to decide` (макет `mood:unwrite`: «снятие квитанции»). Без этого возврат прятал бы строку
+    // навсегда — ни написана, ни отклонена, ни в очереди.
+    const rowIds = rows
+      .filter((r) => {
+        const t = targetOfRow(r);
+        return !!t && fillIdOf(t) === fill.id;
+      })
+      .map((r) => r.id);
+    if (rowIds.length) {
+      setReceipts((prev) => {
+        const next = { ...prev };
+        for (const id of rowIds) delete next[id];
+        return next;
+      });
+    }
+    setReceiptByFill((prev) => {
+      if (!(fill.id in prev)) return prev;
+      const next = { ...prev };
+      delete next[fill.id];
+      return next;
+    });
   }
 
   // СРАВНЕНИЕ СЧИТАЕТСЯ НА РЕНДЕРЕ, ПРОТИВ ЖИВЫХ ЗНАЧЕНИЙ (D5). Не в `onSuccess` и не в состоянии:
@@ -759,7 +784,7 @@ export function ConstructionDraft({
           pending={draftIdea.isPending}
           disabled={readOnly}
           onGenerate={askForDraft}
-          shape={`${items.length} picture${items.length === 1 ? '' : 's'} · ${boardNotes.length} note${
+          shape={`${pictureCount} picture${pictureCount === 1 ? '' : 's'} · ${boardNotes.length} note${
             boardNotes.length === 1 ? '' : 's'
           }`}
           onInspect={() => setInspecting(true)}
@@ -849,7 +874,7 @@ export function ConstructionDraft({
                 </div>
               </div>
             ) : (
-              <EmptyState className='py-1' data-c19-draft-nothing-to-decide=''>
+              <EmptyState className='py-1'>
                 <span className='uppercase text-textColor'>nothing to decide</span> · the draft did
                 not argue with a single written field
               </EmptyState>
@@ -916,7 +941,7 @@ export function ConstructionDraft({
                 </div>
               </div>
             ) : (
-              <EmptyState className='py-1' data-c19-draft-nothing-written=''>
+              <EmptyState className='py-1'>
                 <span className='uppercase text-textColor'>nothing written</span> · the draft filled
                 no empty field on this card
               </EmptyState>
@@ -928,7 +953,7 @@ export function ConstructionDraft({
                 <KeptRow key={row.id} row={row} readOnly={readOnly} onReopen={() => putBack(row)} />
               ))
             ) : (
-              <EmptyState className='py-1' data-c19-draft-nothing-kept=''>
+              <EmptyState className='py-1'>
                 <span className='uppercase text-textColor'>nothing turned down</span> · every drafted
                 line is either written or still open
               </EmptyState>
@@ -950,7 +975,7 @@ export function ConstructionDraft({
                 ))}
               </div>
             ) : (
-              <EmptyState className='py-1' data-c19-draft-nothing-missing=''>
+              <EmptyState className='py-1'>
                 <span className='uppercase text-textColor'>nothing to pin</span> · the draft named
                 no picture that wants a note
               </EmptyState>

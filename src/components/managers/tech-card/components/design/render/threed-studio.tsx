@@ -15,6 +15,7 @@ import { Counter } from '../core';
 import { useCardFit, useThreedDraft } from './drafts';
 import { GenerateRow, LockBar, RunRefusal } from './generate-row';
 import {
+  benchSides,
   PRESENTATIONS,
   fitChoices,
   threedGate,
@@ -216,13 +217,18 @@ export function ThreedStudio({
           </Button>
         );
       case 'flat':
+        /* The mockup's one door — FILL THE EMPTY SIDES › — and the flat bench only when it is
+           empty too: a card with flats drawn has nothing to generate on FLAT, and a door that
+           says so would send the person a step back for nothing. */
         return (
           <>
-            <Button variant='secondary' size='xs' onClick={() => onGoToKind('flat')}>
-              generate a flat ›
-            </Button>
+            {benchSides(band, 'flat', 0).every((side) => !side.picture) && (
+              <Button variant='secondary' size='xs' onClick={() => onGoToKind('flat')}>
+                the flat bench ›
+              </Button>
+            )}
             <Button variant='secondary' size='xs' onClick={() => onGoToKind('render')}>
-              generate a render ›
+              fill the empty sides ›
             </Button>
           </>
         );

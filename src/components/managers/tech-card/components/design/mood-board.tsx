@@ -584,7 +584,9 @@ export function MoodBoard({
           action={
             <>
               {/* СЧЁТ — ПИЛЮЛЕЙ В ШАПКЕ (`7 of 12 pictures`), как в макете; ноль — тон «не хватает». */}
-              <Counter n={items.length} noun='picture' total={MOOD_MAX} data-mb-count='' />
+              <span className='contents' data-mb-count=''>
+                <Counter n={items.length} noun='picture' total={MOOD_MAX} />
+              </span>
               <button
                 type='button'
                 onClick={() => setOpen(!open)}

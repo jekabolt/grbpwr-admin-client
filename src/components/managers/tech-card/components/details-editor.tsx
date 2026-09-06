@@ -233,7 +233,7 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
       />
 
       {allKeys.length === 0 && (
-        <EmptyState action={addChip} data-c19-aspects-empty=''>
+        <EmptyState action={addChip}>
           <span className='uppercase text-textColor'>no aspects yet</span>
         </EmptyState>
       )}
@@ -436,7 +436,9 @@ export function ConstructionAction({
     <div className='flex flex-wrap items-center justify-end gap-1.5' data-c19-aspects-action=''>
       <FromMoodboardPill />
       {total > 0 && (
-        <Counter n={drafted} noun='drafted aspect' total={total} data-c19-aspects-drafted='' />
+        <span className='contents' data-c19-aspects-drafted=''>
+          <Counter n={drafted} noun='drafted aspect' total={total} />
+        </span>
       )}
       {add}
       <BoardMovedPill techCardId={techCardId} />
