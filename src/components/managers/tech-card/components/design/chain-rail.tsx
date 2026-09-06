@@ -62,7 +62,12 @@ import { countThreedResults } from './threed/media';
  * ruled by hairlines only — a second box inside the block is the shape DESIGN.md forbids.
  */
 
-const CELL = 'flex min-w-0 flex-1 flex-col gap-0.5 px-2.5 py-2 text-left';
+/* `min-w-[5.5rem]` is the floor under which «fabric render» and the `optional` pill stop fitting;
+   below it the ROW scrolls inside the block (`overflow-x-auto` on the wrapper), the page never
+   does. Focus is the system's 2px ink outline, drawn inside the cell so it is not clipped by the
+   scrolling wrapper. */
+const CELL =
+  'flex min-w-[5.5rem] flex-1 flex-col gap-0.5 px-2.5 py-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor';
 
 const PILL_TONE: Record<StepState, 'ok' | 'warn' | 'attention' | 'mut' | 'ink'> = {
   now: 'ink',
@@ -181,6 +186,7 @@ export function ChainRail({
   bandless,
   kind = 'flat',
   onKindChange,
+  onScrollStep,
   colorway,
   action,
 }: {
@@ -190,6 +196,11 @@ export function ChainRail({
   /** Which switched screen is on. The composer holds it (`state.kind` of the prototype). */
   kind?: DesignKind;
   onKindChange?: (kind: DesignKind) => void;
+  /**
+   * Called just before the rail scrolls to an always-on-screen step (card details, moodboard). The
+   * composer folds step 0 away on a filled card; without this the door would land on the fold.
+   */
+  onScrollStep?: (id: StepId) => void;
   /** The one colourway axis of the studio (`useColorwayChoice`), read for the 3D and render gates. */
   colorway: { id: number; label: string; archived: boolean };
   /**
@@ -280,7 +291,12 @@ export function ChainRail({
 
   const open = (step: Step): (() => void) | undefined => {
     const scroll = SCROLL_DOOR[step.id];
-    if (scroll) return () => openDoor(scroll.path, scroll.where, showMessage);
+    if (scroll) {
+      return () => {
+        onScrollStep?.(step.id);
+        openDoor(scroll.path, scroll.where, showMessage);
+      };
+    }
     if (step.kind && onKindChange) {
       const k = step.kind;
       return () => onKindChange(k);
@@ -320,14 +336,16 @@ export function ChainRail({
             pushes its cell over the neighbour, without grow a cell collapses to one letter per
             line). The aside is set off by a `borderColor` rule — the heavier weight — because it is
             not a link of the chain; the filter slot keeps its own width. */}
-        <div className='flex items-stretch'>
-          {STEPS.map((s, i) => cell(s, i > 0 ? 'border-l border-hairline' : undefined))}
-          {cell(ASIDE, 'border-l border-borderColor')}
-          {action && (
-            <div className='flex shrink-0 items-center border-l border-hairline px-2.5 py-2'>
-              {action}
-            </div>
-          )}
+        <div className='overflow-x-auto'>
+          <div className='flex items-stretch'>
+            {STEPS.map((s, i) => cell(s, i > 0 ? 'border-l border-hairline' : undefined))}
+            {cell(ASIDE, 'border-l border-borderColor')}
+            {action && (
+              <div className='flex shrink-0 items-center border-l border-hairline px-2.5 py-2'>
+                {action}
+              </div>
+            )}
+          </div>
         </div>
       </TooltipProvider>
       {/* ═══ THE NEAREST OBSTACLE, AS A VISIBLE BAR (SPEC §8: never `title` alone) ═══════════════════

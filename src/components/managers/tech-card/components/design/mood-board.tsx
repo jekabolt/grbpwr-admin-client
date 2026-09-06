@@ -14,6 +14,7 @@ import { Pill } from 'ui/components/pill';
 import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
+import { Arrow } from 'ui/icons/arrow';
 import { create } from 'zustand';
 
 import type { TechCardFormData } from '../schema';
@@ -566,11 +567,19 @@ export function MoodBoard({
           aria-expanded={open}
           aria-controls={bodyId}
           aria-label={open ? 'collapse the moodboard' : 'expand the moodboard'}
-          className='cursor-pointer px-1 text-labelColor hover:text-textColor'
+          className='group cursor-pointer px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
         >
-          <Text size='micro' component='span'>
-            {open ? '▲' : '▼'}
-          </Text>
+          {/* THE SAME SIGN EVERY FOLD IN THE ADMIN WEARS — `Section`'s arrow, turned 180° when
+              closed — not a pair of text triangles that read as a different control. The board
+              keeps its own toggle only because its two blocks fold together (this one and the
+              callouts beside it), which one `Section` cannot do. */}
+          <Arrow
+            aria-hidden
+            className={cn(
+              'shrink-0 text-labelColor group-hover:text-textColor',
+              !open && 'rotate-180',
+            )}
+          />
         </button>
       }
     >

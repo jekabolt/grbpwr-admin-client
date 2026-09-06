@@ -178,6 +178,8 @@ function EmptyPlate({
   );
 }
 
+/* Column heads are table headers — the 10px label size with its tracking (DESIGN.md §3), not the 9px
+   badge size the plates' footnotes use. */
 const HEAD = 'uppercase';
 
 export function SideRows({
@@ -495,30 +497,32 @@ export function SideRows({
     const cardinal = isCardinalView(side.view);
     const has = !!side.picture;
     let word: JSX.Element;
+    // The verdict is a sentence, not a footnote: 10px, the hint size, where the plates' footnotes
+    // under a 132px frame stay at 9px.
     if (!cardinal) {
       word = (
-        <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
-          {has ? 'on the bench · not read by 3D' : '· not read by 3D'} — the provider takes{' '}
+        <Text size='micro' variant='label' component='span' className='min-w-0 break-words'>
+          {has ? 'on the bench, not read by 3D' : 'not read by 3D'} — the provider takes{' '}
           {CARDINAL_VIEWS.length} named sides
         </Text>
       );
     } else if (has) {
       word = (
-        <Text size='nano' component='span' className='min-w-0 break-words'>
+        <Text size='micro' component='span' className='min-w-0 break-words'>
           <b>✓ goes into the 3D run</b>
           {side.view === 'front' ? ' · required' : ''}
         </Text>
       );
     } else if (side.view === 'front') {
       word = (
-        <Text size='nano' component='span' className='min-w-0 break-words text-error'>
+        <Text size='micro' component='span' className='min-w-0 break-words text-error'>
           <b>required</b> · blocks 3D
         </Text>
       );
     } else {
       word = (
-        <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
-          · optional
+        <Text size='micro' variant='label' component='span' className='min-w-0 break-words'>
+          optional
         </Text>
       );
     }
@@ -577,28 +581,39 @@ export function SideRows({
         <div
           data-side-rows={renders.length}
           className='grid items-start gap-x-4 gap-y-0'
+          /* Последняя дорожка забирает остаток (`1fr`), чтобы волосяная линия строки шла ВО ВСЮ
+             ширину блока: обрезанная на две трети, она читалась как незаконченная таблица. Текст
+             приговора при этом остаётся узким — предел стоит на самом тексте (`max-w-[24rem]`), а
+             не на дорожке, иначе он растянулся бы в строку на пол-экрана. Ниже ~540px вся сетка
+             скроллится ВНУТРИ блока (`overflow-x-auto` выше); страница вбок не едет. */
           style={{ gridTemplateColumns: 'minmax(64px, max-content) 132px 132px minmax(160px, 1fr)' }}
         >
           {/* ЗАГОЛОВОК — ярлыки колонок, метрикой ярлыка (DESIGN.md §3). */}
-          <Text size='nano' variant='label' component='span' className={HEAD}>
+          <Text size='micro' variant='label' tracking='label' component='span' className={HEAD}>
             side
           </Text>
-          <Text size='nano' variant='label' component='span' className={HEAD}>
+          <Text size='micro' variant='label' tracking='label' component='span' className={HEAD}>
             what went in (flat)
           </Text>
-          <Text size='nano' variant='label' component='span' className={HEAD}>
+          <Text size='micro' variant='label' tracking='label' component='span' className={HEAD}>
             what came back (render)
           </Text>
-          <Text size='nano' variant='label' component='span' className={HEAD}>
+          <Text size='micro' variant='label' tracking='label' component='span' className={HEAD}>
             3D
           </Text>
 
           {renders.map((side, i) => {
             const flat = flats[i];
-            const row = 'border-t border-hairline py-2';
+            /* ONE RULE PER ROW, NOT ONE PER CELL. The row is a subgrid over the four columns, so the
+               hairline runs unbroken across the gutters; a border on each cell left a gap at every
+               `gap-x-4` and read as a dashed line. */
             return (
-              <div key={side.view} data-side-row={side.view} className='contents'>
-                <div className={cn(row, 'min-w-0')}>
+              <div
+                key={side.view}
+                data-side-row={side.view}
+                className='col-span-4 grid grid-cols-subgrid items-start border-t border-hairline py-2'
+              >
+                <div className='min-w-0'>
                   <Text
                     size='micro'
                     variant='label'
@@ -609,9 +624,9 @@ export function SideRows({
                     {viewLabel(side.view)}
                   </Text>
                 </div>
-                <div className={row}>{flatCell(flat)}</div>
-                <div className={row}>{renderCell(side)}</div>
-                <div className={cn(row, 'min-w-0')}>{threedCell(side)}</div>
+                <div>{flatCell(flat)}</div>
+                <div>{renderCell(side)}</div>
+                <div className='min-w-0 max-w-[24rem]'>{threedCell(side)}</div>
               </div>
             );
           })}

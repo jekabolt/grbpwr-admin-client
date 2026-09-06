@@ -1,7 +1,9 @@
 import type { common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
-import { useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
+import { cn } from 'lib/utility';
+import { Arrow } from 'ui/icons/arrow';
 import { useFormContext, useWatch } from 'react-hook-form';
 import type { EditHistory } from 'ui/components/annotation/history';
 import Text from 'ui/components/text';
@@ -15,6 +17,7 @@ import { ColourwayProposals } from './colourway-proposals';
 import { GenerationStudio } from './generation';
 import type { DesignKind } from './bench-kinds';
 import { ChainRail } from './chain-rail';
+import { stepDone } from './core/chain';
 import { RenderStudio, ThreedStudio } from './render';
 import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
@@ -127,9 +130,11 @@ export function StudioTab({
    * arrives as a node from the owner of the header (`components/index.tsx`), by the same device as
    * `constructionAspects` below, and for two reasons that are correctness, not taste:
    *   · the fields inside it (`name`, `styleNumber`, …) must render on a card that DOES NOT EXIST
-   *     YET — otherwise a new card cannot be created at all. The studio returns early on
-   *     `!techCardId` and on `isLoading`; a header living inside those branches would vanish exactly
-   *     when it is the only thing a person can fill. Hence the slot is drawn in ALL THREE returns;
+   *     YET — otherwise a new card cannot be created at all. The studio has three states
+   *     (`!techCardId`, `isLoading`, loaded); a header living inside one of them would vanish exactly
+   *     when it is the only thing a person can fill. Hence the slot is drawn by the ONE return, above
+   *     whichever body the state picks (Ф6: three returns gave it three different parents, and React
+   *     remounted its fields on every transition);
    *   · `StyleFactsField` — the ONE writer of brand / collection / season / targetGender through its
    *     own `UpdateStyle` — stays in `index.tsx`, mounted unconditionally. Moved under
    *     `activeTab === 'studio'` it would silently roll those fields back on every other tab.
@@ -200,43 +205,6 @@ export function StudioTab({
      OLIVE. Ровно поэтому число раздаётся вниз ПРОПОМ, а экраны его не выбирают. */
   const colorway = useColorwayChoice(techCardId, band);
 
-  // A card that has not been created yet has no band and cannot have one: every write below is
-  // keyed by tech_card_id. Saying so is more useful than rendering seven empty organs.
-  // STEP 0 IS DRAWN IN EVERY BRANCH — including the two early returns — or the header of a card
-  // that is not saved yet would disappear together with the studio it hangs off (see `cardDetails`).
-  const stepCard = cardDetails ? (
-    <div data-field='design.step.card' className='flex flex-col gap-gutter'>
-      {cardDetails}
-    </div>
-  ) : null;
-
-  if (!techCardId) {
-    return (
-      <SectionStack>
-        {stepCard}
-        <Section title='studio' question='— what this style looks like, before it is frozen'>
-          <Text variant='inactive' size='control'>
-            Save this tech card first. The studio hangs off the card, so there is nothing to hang it
-            on yet.
-          </Text>
-        </Section>
-      </SectionStack>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <SectionStack>
-        {stepCard}
-        <Section title='studio'>
-          <Text variant='inactive' size='control'>
-            loading…
-          </Text>
-        </Section>
-      </SectionStack>
-    );
-  }
-
   const readOnly = !!disabled;
 
   // WHAT SURVIVES A SERVER THAT DOES NOT SPEAK THE BAND.
@@ -248,7 +216,145 @@ export function StudioTab({
   // loses a screen that works. The band's own organs degrade; these three do not.
   const bandless = !serverSpeaks;
 
-  return (
+  /* ═══ STEP 0 FOLDS — THE ONE ANSWER TO «1100px ABOVE THE FIRST PAID DOOR» (Ф6, mockup risk G-1) ═══
+     CARD DETAILS stands above the moodboard, which stands above the draft's GENERATE. On a 900px
+     screen the person who opens a FILLED card scrolls past five blocks they will not touch today
+     before reaching the first thing they came for. The mockup names the risk and forbids the two
+     easy cures: the moodboard is «one to one as today» (WAVE2 p.5), and the fold state must not
+     live in localStorage (no memory in this zone, by decision). So the fold is a STATE OF THIS
+     MOUNT, decided once: a card that is not saved yet opens (there is nothing else to fill), a
+     saved card opens when step 0 is not done and closes when it is — by the SAME predicate the
+     rail uses to paint step 0 `done` (`stepDone('card')`, core/chain.ts), imported, not re-derived.
+
+     ⚠ DECIDED ONCE, NOT FOLLOWED LIVE, and the difference is a hand on the keyboard: followed live,
+     the fold would close under a person the instant they typed the last missing field. The latch
+     waits for the form to be SEEDED (`name` is required to save, so an empty name on a saved card
+     means the reset has not landed yet), then fixes the default for the life of the mount. The
+     person's own toggle wins from then on.
+
+     THE BLOCKS STAY MOUNTED. Hidden with `hidden`, not unmounted — the same device `SectionStack`
+     uses for tab panels, and for the same reason: fields hold registration and local state
+     (validation messages, open pickers) that an unmount would throw away. */
+  const cardName = (useWatch({ control, name: 'name' }) as string | undefined) ?? '';
+  const cardStyleNumber = (useWatch({ control, name: 'styleNumber' }) as string | undefined) ?? '';
+  const cardCategoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
+  const cardBaseSizeId = Number(useWatch({ control, name: 'baseSampleSizeId' }) ?? 0);
+  // Only `.card` is read for step 0 (see `stepDone`); the rest is the honest shape of the context,
+  // filled with what this composer already holds, and zeros where it holds nothing.
+  const cardDone = stepDone('card', {
+    band,
+    bandless,
+    kind,
+    card: {
+      name: cardName,
+      styleNumber: cardStyleNumber,
+      categoryId: cardCategoryId,
+      baseSampleSizeId: cardBaseSizeId,
+    },
+    moodPictures: 0,
+    counts: { pattern: 0, render: 0, threed: 0, onmodel: 0 },
+    colorway: { id: colorway.colorwayId, label: colorway.label, archived: colorway.archived },
+  });
+  const cardMissing = [
+    !cardName.trim() && 'name',
+    !cardStyleNumber.trim() && 'style number',
+    !(cardCategoryId > 0) && 'category',
+    !(cardBaseSizeId > 0) && 'base size',
+  ].filter((x): x is string => !!x);
+  const [cardFoldManual, setCardFoldManual] = useState<boolean | null>(null);
+  const cardFoldAuto = useRef<boolean | null>(null);
+  if (cardFoldAuto.current === null) {
+    if (!techCardId) cardFoldAuto.current = true;
+    else if (cardName.trim()) cardFoldAuto.current = !cardDone;
+  }
+  const cardOpen = cardFoldManual ?? cardFoldAuto.current ?? true;
+  const cardBodyId = useId();
+
+  /* ═══ STEP 0 HAS ONE SET OF ANCESTORS IN EVERY BRANCH (Ф6 task 1, review BLOCKER) ═════════════
+     The header used to be drawn inside each of three returns — under `SectionStack > div` in the
+     two early ones and under `DesignCapabilityProvider > … > SectionStack > div` in the third. Same
+     element, different parents: React reconciles by position AND type from the root down, so every
+     `!techCardId → loaded` and `isLoading → loaded` transition UNMOUNTED the fields and mounted
+     fresh ones. RHF values survive that; local state does not — the season picker a person had
+     open closed by itself the moment the band finished loading.
+
+     Now there is ONE return: `SectionStack > [stepCard, body]`. `stepCard` is the first child of
+     the same stack in every state; only `body` changes type. The providers of the loaded branch
+     render no DOM, so the blocks they wrap are still direct children of the stack and keep the
+     24px gutter — including the pick banner, which was the stack's sibling and is now its first
+     row (sticky works the same inside a flex column). */
+  const stepCard = cardDetails ? (
+    <div data-field='design.step.card' className='flex flex-col gap-gutter'>
+      {/* THE FOLD IS ONE NODE IN BOTH STATES — a strip that is a block by itself, never around the
+          blocks (box-in-box). The whole strip is the door, as `Section` does when collapsed, and
+          it is safe for the same reason: nothing else interactive stands inside it. One node, one
+          focus: the arrow turns, the button under the finger stays. Not drawn before the card is
+          saved — there is nothing to fold away from and the person is here to fill it. */}
+      {techCardId ? (
+        <section className='border border-borderColor bg-bgColor'>
+          <button
+            type='button'
+            onClick={() => setCardFoldManual(!cardOpen)}
+            aria-expanded={cardOpen}
+            aria-controls={cardBodyId}
+            data-step-fold='card'
+            data-step-fold-open={cardOpen ? '' : undefined}
+            className='group flex w-full cursor-pointer items-center justify-between gap-2 px-block py-2.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+          >
+            <span className='flex min-w-0 flex-wrap items-baseline gap-x-2'>
+              <Text
+                component='h3'
+                variant='uppercase'
+                tracking='section'
+                className='min-w-0 break-words font-bold'
+              >
+                card details
+              </Text>
+              <Text size='micro' variant='label' component='span' className='min-w-0 break-words'>
+                {cardDone
+                  ? '— filled'
+                  : `— to fill: ${cardMissing.join(', ')}`}
+                {cardOpen ? '' : ' · show'}
+              </Text>
+            </span>
+            <Arrow
+              aria-hidden
+              className={cn(
+                'shrink-0 text-labelColor group-hover:text-textColor',
+                !cardOpen && 'rotate-180',
+              )}
+            />
+          </button>
+        </section>
+      ) : null}
+      <div id={cardBodyId} hidden={!cardOpen} className='flex flex-col gap-gutter'>
+        {cardDetails}
+      </div>
+    </div>
+  ) : null;
+
+  let body: ReactNode;
+  if (!techCardId) {
+    // A card that has not been created yet has no band and cannot have one: every write below is
+    // keyed by tech_card_id. Saying so is more useful than rendering seven empty organs.
+    body = (
+      <Section title='studio' question='— what this style looks like, before it is frozen'>
+        <Text variant='inactive' size='control'>
+          Save this tech card first. The studio hangs off the card, so there is nothing to hang it on
+          yet.
+        </Text>
+      </Section>
+    );
+  } else if (isLoading) {
+    body = (
+      <Section title='studio'>
+        <Text variant='inactive' size='control'>
+          loading…
+        </Text>
+      </Section>
+    );
+  } else {
+    body = (
     <DesignCapabilityProvider value={!bandless}>
       {/* ОДИН ПРОСМОТРЩИК НА ВСЮ СТУДИЮ, и он монтируется ЗДЕСЬ, потому что это единственное
           место, откуда видны сразу все органы полосы: референсы, история прогонов, верстак.
@@ -266,7 +372,6 @@ export function StudioTab({
             `useFixContext` и получает инертный дефолт («no fix armed»), что и задумано его же
             шапкой как отказоустойчивая поза вне провайдера. */}
         <PickBanner />
-        <SectionStack>
           {/* ПОРЯДОК — ПРОТОТИПА, И СВЕРЕН СО СБОРЩИКОМ (`proto.html:3875-3893`), А НЕ С ПАМЯТЬЮ:
                 topRow → moodboard → kinds → references → ГЕНЕРАЦИЯ → SLOTS → concept.
               Шапка карточки (`topRowHtml`) стоит выше, в `index.tsx`: она первый ряд СТУДИИ.
@@ -282,8 +387,8 @@ export function StudioTab({
               верстака; кадры сплита приезжают во вход уже с ролью вида (R-17), поэтому полки им
               не нужно. Единственная роль полки, которую больше некому играть, — отвечать режиму
               выбора за пачечные картинки — живёт в `PickTray` над верстаком. */}
-          {/* ═══ STEP 0 · CARD DETAILS — the header, first (WAVE2 p.1; argument on the prop) ═══ */}
-          {stepCard}
+          {/* ═══ STEP 0 · CARD DETAILS — the header, first — is `stepCard`, drawn by the ONE return
+              below, outside this branch (WAVE2 p.1; argument on the prop and above). ═══ */}
           {/* ═══ STEP 1 · MOODBOARD. The anchor is the rail's door to this step: the board stamps
               only its description textarea, and landing there would skip the pictures. */}
           <div data-field='design.step.mood'>
@@ -408,6 +513,11 @@ export function StudioTab({
             bandless={bandless}
             kind={kind}
             onKindChange={setKind}
+            // The rail's door to step 0 lands on the fold strip when the step is folded; opening it
+            // first is the difference between «here it is» and «here is a closed door».
+            onScrollStep={(id) => {
+              if (id === 'card') setCardFoldManual(true);
+            }}
             colorway={{ id: colorway.colorwayId, label: colorway.label, archived: colorway.archived }}
             action={
               !bandless && (kind === 'render' || kind === 'threed' || kind === 'onmodel') ? (
@@ -671,10 +781,17 @@ export function StudioTab({
               )}
             </>
           )}
-        </SectionStack>
       </PickModeProvider>
       </PictureGalleryProvider>
     </DesignCapabilityProvider>
+    );
+  }
+
+  return (
+    <SectionStack>
+      {stepCard}
+      {body}
+    </SectionStack>
   );
 }
 
