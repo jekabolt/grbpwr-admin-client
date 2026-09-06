@@ -7,13 +7,10 @@ import type { GetDesignBandResponse } from 'api/proto-http/admin';
  * подряд про тот же жест, что и `input — references` над ней. Владелец слил их: то, что модели
  * дают, и то, что у неё просят, — один запрос, и рвать его заголовком значило рисовать две
  * половины одного вопроса. Органы прогона переехали в подвал секции референсов —
- * `../flat-run-row.tsx`, — а этот файл держит ровно два предиката состава экрана, которые читает
- * `GenerationStudio`.
+ * `../flat-run-row.tsx`, — а этот файл держит ровно один предикат состава экрана, который читает
+ * `GenerationStudio`. (`hasFlatRun` жил здесь рядом и не имел ни одного читателя во всём `src/` —
+ * снят.)
  */
-
-export function hasFlatRun(band: GetDesignBandResponse): boolean {
-  return (band.runs ?? []).some((run) => (run.kind ?? '').trim().toLowerCase() === 'flat');
-}
 
 export function hasAnyPictures(band: GetDesignBandResponse): boolean {
   return (band.runs ?? []).length > 0 || (band.batches ?? []).length > 0;

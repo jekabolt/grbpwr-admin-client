@@ -16,7 +16,7 @@ import {
 } from '../core';
 import { openDoor } from '../doors';
 import type { BoardItem } from '../mood-board';
-import type { CalloutLike } from '../render/what-model-gets';
+import { FIT_WHERE, type CalloutLike } from '../render/what-model-gets';
 import { viewLabel } from '../views';
 
 /**
@@ -58,8 +58,30 @@ type Line = {
   mediaId: number;
   role: string;
   note: string;
+  /**
+   * THE CALLOUTS DRAWN ON THIS PICTURE, AS WORDS. They travel: `designAssembleInputs` pins
+   * `Callouts: callouts[r.MediaId]` to every reference in the prompt, and `designgen/snapshot.go`
+   * (`refEntryCaption`) unfolds them into the picture's caption. Printed in the shape the server
+   * prints them (`TechCardCalloutPrintedLine`): «part: description (dimensions)».
+   */
+  callouts: string[];
   number?: number;
 };
+
+/**
+ * ONE CALLOUT IN THE WORDS THE SERVER SENDS — the same fold as `entity.TechCardCalloutPrintedLine`:
+ * part, then «: description», then the measure in brackets at the end. A callout with no words at
+ * all is not sent (the server drops it, `designFrozenCallout` returns nil) and is not counted here.
+ */
+function calloutWords(c: CalloutLike): string {
+  const part = (c.part ?? '').trim();
+  const desc = (c.description ?? '').trim();
+  const dims = (c.dimensions ?? '').trim();
+  let head = desc;
+  if (part) head = desc ? `${part}: ${desc}` : part;
+  if (dims) return head ? `${head} (${dims})` : dims;
+  return head;
+}
 
 function thumbOf(media?: common_MediaFull): string {
   const m = media?.media;
@@ -111,6 +133,26 @@ export function WhatModelGetsModal({
   }, [band.references]);
 
   /**
+   * THE CALLOUTS BY PICTURE, IN WORDS. A callout travels ONLY with its picture: the server keys
+   * them by the media_id of a reference already in the prompt (`designAssembleInputs`), so a mark
+   * on a moodboard tile or on a roleless picture goes nowhere. Wordless callouts are dropped here
+   * exactly as the server drops them.
+   */
+  const calloutsOf = useMemo(() => {
+    const map = new Map<number, string[]>();
+    for (const c of callouts) {
+      const id = c.mediaId ?? 0;
+      if (!id) continue;
+      const words = calloutWords(c);
+      if (!words) continue;
+      const list = map.get(id) ?? [];
+      list.push(words);
+      map.set(id, list);
+    }
+    return map;
+  }, [callouts]);
+
+  /**
    * Membership is the UNION of the two halves, the same rule the references block applies: a
    * picture with a role belongs to the input even if its `kind` has drifted, because a role is the
    * stronger statement and hiding its carrier would leave a record visible on no screen at all.
@@ -124,7 +166,12 @@ export function WhatModelGetsModal({
       const role = roleOf.get(item.mediaId) ?? '';
       if (item.kind !== REFERENCE_KIND && !role) continue;
       seen.add(item.mediaId);
-      const line: Line = { mediaId: item.mediaId, role, note: noteOf.get(item.mediaId) ?? '' };
+      const line: Line = {
+        mediaId: item.mediaId,
+        role,
+        note: noteOf.get(item.mediaId) ?? '',
+        callouts: calloutsOf.get(item.mediaId) ?? [],
+      };
       if (role) inPrompt.push({ ...line, number: ++n });
       else onCardOnly.push(line);
     }
@@ -132,13 +179,28 @@ export function WhatModelGetsModal({
     // row is what the model would be fed — and it is listed last so it can be found and cleared.
     for (const [mediaId, role] of roleOf) {
       if (seen.has(mediaId)) continue;
-      inPrompt.push({ mediaId, role, note: noteOf.get(mediaId) ?? '', number: ++n });
+      inPrompt.push({
+        mediaId,
+        role,
+        note: noteOf.get(mediaId) ?? '',
+        callouts: calloutsOf.get(mediaId) ?? [],
+        number: ++n,
+      });
     }
     return { inPrompt, onCardOnly };
-  }, [items, roleOf, noteOf]);
+  }, [items, roleOf, noteOf, calloutsOf]);
 
   const moodCount = items.filter((i) => i.kind !== REFERENCE_KIND && !roleOf.has(i.mediaId)).length;
   const total = lines.inPrompt.length + lines.onCardOnly.length;
+  /** Callouts that travel — the ones drawn on pictures in the prompt. */
+  const sentCallouts = lines.inPrompt.reduce((acc, l) => acc + l.callouts.length, 0);
+  /** Callouts that stay — drawn on pictures the prompt never sees (mood tiles, roleless pictures). */
+  const strandedCallouts = useMemo(() => {
+    const inPromptIds = new Set(lines.inPrompt.map((l) => l.mediaId));
+    let n = 0;
+    for (const [id, list] of calloutsOf) if (!inPromptIds.has(id)) n += list.length;
+    return n;
+  }, [lines, calloutsOf]);
 
   /**
    * THE LATEST FLAT RUN — the newest row of THIS door's kind. A render's or a vector's text under
@@ -161,8 +223,9 @@ export function WhatModelGetsModal({
         `garment: ${garment.trim() || '—'}`,
         `fit: ${fit.trim() || '—'} (from the card)`,
         `references in the prompt: ${lines.inPrompt.length} of ${total}`,
+        `callouts in the prompt: ${sentCallouts} (drawn on those pictures)`,
       ].join('\n'),
-    [garment, fit, lines, total],
+    [garment, fit, lines, total, sentCallouts],
   );
 
   return (
@@ -172,13 +235,21 @@ export function WhatModelGetsModal({
       kindWord='flat'
       intro={
         <>
-          <b>this is what the model is given.</b> Pressing GENERATE sends exactly the pictures and
-          words listed below — nothing on the moodboard travels, and neither does anything absent
-          from this list. The same inventory is what a studio outside would need to be handed.
+          <b>this is what the model is given.</b> Pressing GENERATE sends the pictures listed
+          below — each with its role, its note and the callouts drawn on it — and the words under
+          them. Nothing on the moodboard travels, and neither does anything absent from this list.
+          The same inventory is what a studio outside would need to be handed.
         </>
       }
     >
-      <WmgGroup flush label='pictures' aside={`${lines.inPrompt.length} of ${total} on the card`}>
+      <WmgGroup
+        flush
+        label='pictures'
+        aside={`${lines.inPrompt.length} of ${total} on the card · ${sentCallouts} callout${
+          sentCallouts === 1 ? '' : 's'
+        }`}
+        note='a callout travels with its picture, in words, as part of that picture’s caption'
+      >
         {lines.inPrompt.length === 0 ? (
           <Empty>no picture on this card carries a role, so none of them would be shown.</Empty>
         ) : (
@@ -228,18 +299,24 @@ export function WhatModelGetsModal({
             label: `moodboard · ${moodCount}`,
             reason: 'mood is for the human — it is never instruction',
           },
-          {
-            label: `callouts · ${callouts.length}`,
-            reason: 'the callouts on the sheet are for the factory; the flat run never reads them',
-            door: callouts.length
-              ? () =>
-                  openDoor(
-                    'callouts.0.description',
-                    'the callouts are on ARTIFACTS, beside the sheet',
-                    showMessage,
-                  )
-              : undefined,
-          },
+          /* ⚠ ONLY THE CALLOUTS ON PICTURES OUTSIDE THE PROMPT. The ones on a picture with a role
+             DO travel (see `Line.callouts`) and are listed with their picture above; saying «the
+             flat run never reads them» here was the panel under-reporting what it charges for. */
+          ...(strandedCallouts > 0
+            ? [
+                {
+                  label: `callouts · ${strandedCallouts} on other pictures`,
+                  reason:
+                    'a callout travels only with its picture; these are drawn on pictures the prompt does not see — a moodboard tile or a picture without a role',
+                  door: () =>
+                    openDoor(
+                      'callouts.0.description',
+                      'the callouts are on ARTIFACTS, beside the sheet',
+                      showMessage,
+                    ),
+                },
+              ]
+            : []),
           /* The `notes` item is gone with its field: U-9 removed the notes editor from the band, so
              a door here led to a block that no longer exists. The field itself still round-trips;
              it is simply not authored here and never was sent to the model. */
@@ -270,7 +347,9 @@ export function WhatModelGetsModal({
           },
           {
             label: 'edit the fit ▸',
-            onClick: () => openDoor('fit', 'the fit is on HEADER', showMessage),
+            /* THE ADDRESS IS GENERAL INFORMATION ON STUDIO — the block `ERROR_TAB` in
+               `components/index.tsx` already routes `fit` there. «HEADER» was the field's old home. */
+            onClick: () => openDoor('fit', FIT_WHERE, showMessage),
           },
         ]}
       />
@@ -291,11 +370,12 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * One picture of the input.
+ * One picture of the input: its note, then the callouts drawn on it.
  *
- * A MISSING NOTE IS CALLED OUT IN RED, and it is the one red thing on this screen. A reference with
- * a role and no note is a picture handed over with no statement of what it is FOR — the receiving
- * studio sees a photograph and guesses. That is a defect of the card, so it is worded as one.
+ * A MISSING NOTE IS NOT AN ERROR HERE. The note's editor was taken off the band (SPEC п.10); a red
+ * «missing» beside a field the operator has no door to write would be a status nothing on the
+ * screen can clear. The wire still carries the note, so it is printed when it stands and stated as
+ * a plain «no note» when it does not.
  */
 function ReferenceLine({ line, media }: { line: Line; media?: common_MediaFull }) {
   return (
@@ -305,11 +385,14 @@ function ReferenceLine({ line, media }: { line: Line; media?: common_MediaFull }
       thumb={thumbOf(media)}
       origin={line.role ? 'linked' : undefined}
       text={
-        line.note ? (
-          line.note
-        ) : (
-          <span className='text-error'>note is missing; the picture goes unexplained</span>
-        )
+        <>
+          {line.note ? line.note : <span className='text-labelColor'>no note</span>}
+          {line.callouts.length > 0 && (
+            <span className='block text-labelColor' data-wmg-callouts={line.callouts.length}>
+              callouts · {line.callouts.join(' · ')}
+            </span>
+          )}
+        </>
       }
     />
   );

@@ -110,6 +110,14 @@ function kindLabel(kind: WhatModelGetsKind): string {
  * and its modal — are the only two readers left, so the type sits with them. A shared module for a
  * single type would be the same mistake with a better name.
  */
+/**
+ * WHERE THE FIT IS EDITED — one sentence for every «edit the fit ▸» door, on every arm. The field
+ * renders in GENERAL INFORMATION (`construction-general-info.tsx`), which `studio-tab.tsx` mounts on
+ * STUDIO; `ERROR_TAB` in `components/index.tsx` routes `fit` the same way. Two doors that named the
+ * address in two different words («HEADER», «the card header») were both pointing at its old home.
+ */
+export const FIT_WHERE = 'the fit is in GENERAL INFORMATION, on STUDIO';
+
 export type CalloutLike = {
   number?: number;
   mediaId?: number;
@@ -189,7 +197,14 @@ export function WhatModelGetsRenderModal({
     kind === 'render' ? (
       <RenderBody band={band} recipe={recipe} garment={garment} resolved={resolved} />
     ) : kind === 'recolor' ? (
-      <RecolorBody band={band} sources={sources} recipe={recipe} garment={garment} resolved={resolved} />
+      <RecolorBody
+        band={band}
+        sources={sources}
+        recipe={recipe}
+        garment={garment}
+        cardFit={cardFit}
+        resolved={resolved}
+      />
     ) : (
       <ThreedBody
         band={band}
@@ -285,7 +300,7 @@ export function WhatModelGetsRenderModal({
           },
           {
             label: 'edit the fit ▸',
-            onClick: () => openDoor('fit', 'the fit is on the card header', showMessage),
+            onClick: () => openDoor('fit', FIT_WHERE, showMessage),
           },
         ]}
       />
@@ -544,21 +559,26 @@ function RenderBody({
  * thing that keeps four pictures the same shade is the COLOUR NAMED — which is why that line sits
  * directly under the count of calls rather than in a section of its own.
  *
- * THE CARD CONTRIBUTES ALMOST NOTHING HERE, and that is worth reading before paying per shot: no
- * bench plate, no reference, no moodboard, no fit. A recolour is about a photograph that already
- * exists; the card's drawings would be a second, contradictory description of the same garment.
+ * THE CARD CONTRIBUTES ONLY ITS WORDS HERE, and that is worth reading before paying per shot: no
+ * bench plate, no reference, no moodboard. A recolour is about a photograph that already exists;
+ * the card's drawings would be a second, contradictory description of the same garment. The
+ * garment description AND the fit do travel: `designAssembleInputs` keeps them for every kind but
+ * pattern (`designKindReadsTheGarmentNote`), and `composePrompt` writes «fit:» before any fork by
+ * kind. This panel once listed the fit under «not sent» — that was the arm disagreeing with the wire.
  */
 function RecolorBody({
   band,
   sources,
   recipe,
   garment,
+  cardFit,
   resolved,
 }: {
   band: GetDesignBandResponse;
   sources?: readonly common_MediaFull[];
   recipe?: common_DesignColourRecipe;
   garment: string;
+  cardFit: string;
   resolved: Resolved;
 }): JSX.Element {
   const shots = sources ?? [];
@@ -672,6 +692,17 @@ function RecolorBody({
             garment || <span className='text-labelColor'>the card states no description</span>
           }
         />
+        <InventoryLine
+          name='fit'
+          origin={cardFit.trim() ? 'linked' : undefined}
+          text={
+            cardFit.trim() ? (
+              `${cardFit.trim()} (from the card)`
+            ) : (
+              <span className='text-labelColor'>the card states no fit</span>
+            )
+          }
+        />
       </div>
 
       <NotSent
@@ -693,10 +724,6 @@ function RecolorBody({
           },
           { label: 'references', reason: 'reference photographs belong to FLAT and never reach this run' },
           { label: 'moodboard', reason: 'mood is for the human — it is never instruction' },
-          {
-            label: 'the fit',
-            reason: 'fit describes a garment being drawn; this one has already been photographed on a body',
-          },
         ]}
       />
     </>
@@ -949,18 +976,17 @@ function plainText({
   if (kind === 'recolor') {
     const shots = sources ?? [];
     return [
-      // `fit` НЕ ПЕЧАТАЕТСЯ У РЕКОЛА, и строка выше его уже поставила: посадка описывает вещь,
-      // которую рисуют, а эта уже снята на человеке. Поэтому текст рекола собирается своим
-      // списком, а не дописывается к общему.
-      `what the model gets — ${kindLabel(kind)}`,
-      `garment: ${garment || '—'}`,
+      // Свой список, а не дописка к общему: у рекола нет верстака и листа, а «fit» у него ЕДЕТ —
+      // `designAssembleInputs` держит посадку для всех родов, кроме паттерна, и composePrompt пишет
+      // её до развилки по роду. Поэтому первые три строки совпадают с общими дословно.
+      ...lines,
       `inputs: ${shots.length} photograph${shots.length === 1 ? '' : 's'} — ${
         shots.map((m) => `media ${m.id ?? '—'}`).join(', ') || 'none'
       }`,
       `paid calls: ${shots.length} (one per photograph; each call sees only its own picture)`,
       `target colour: ${colourLabel(recipe, resolved.colors)}`,
       `colour in words: ${(recipe?.words ?? '').trim() || '—'}`,
-      'not sent: the flats, the bench, the other photographs, references, moodboard, the fit',
+      'not sent: the flats, the bench, the other photographs, references, moodboard',
     ].join('\n');
   }
 

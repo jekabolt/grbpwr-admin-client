@@ -142,7 +142,13 @@ export type StartRunState = {
   /** `onStarted` fires only when the row is actually filed — never on the click. */
   start: (input: StartRunInput, onStarted?: () => void) => void;
   isPending: boolean;
-  isError: boolean;
+  /**
+   * THE SERVER'S REFUSAL, VERBATIM, until a person dismisses it or a run starts. The same shape
+   * `useDesignRun` gives FABRIC RENDER and 3D, so all three studios print a refusal through one organ
+   * (`RunRefusal`) with the server's words — not a flag the screen has to word for itself.
+   */
+  refusal: string | null;
+  dismissRefusal: () => void;
 };
 
 /**
@@ -163,6 +169,7 @@ export function useStartRun(techCardId?: number): StartRunState {
   const { showMessage } = useSnackBarStore();
   const { startRun } = useGenerationWrites(techCardId);
   const ledger = useRef<{ fingerprint: string; id: string } | null>(null);
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   const start = useCallback(
     (input: StartRunInput, onStarted?: () => void) => {
@@ -180,9 +187,15 @@ export function useStartRun(techCardId?: number): StartRunState {
       if (ledger.current?.fingerprint !== fingerprint) {
         ledger.current = { fingerprint, id: newClientRequestId() };
       }
+      setRefusal(null);
       startRun.mutate(
         { ...input, clientRequestId: ledger.current.id },
         {
+          // Beside the snackbar the hook-level `onError` already shows: the snackbar lives for
+          // seconds, the refusal stays on the screen until read (CONTRACT §E).
+          onError: (error) => {
+            setRefusal((error as Error)?.message || 'the run did not start');
+          },
           onSuccess: () => {
             ledger.current = null;
             // The run comes back PENDING, not done: the pictures arrive when the provider answers.
@@ -202,7 +215,9 @@ export function useStartRun(techCardId?: number): StartRunState {
     [techCardId, startRun, showMessage],
   );
 
-  return { start, isPending: startRun.isPending, isError: startRun.isError };
+  const dismissRefusal = useCallback(() => setRefusal(null), []);
+
+  return { start, isPending: startRun.isPending, refusal, dismissRefusal };
 }
 
 /**

@@ -93,8 +93,10 @@ export type ChainCtx = {
   kind: DesignKind;
   card: {
     name: string;
+    /** Carried by the rail's builder; NOT judged by `stepDone` — a release blocker, not a link. */
     styleNumber: string;
     categoryId: number;
+    /** Carried by the rail's builder; NOT judged by `stepDone` — feeds costing, not the band. */
     baseSampleSizeId: number;
   };
   /** How many pictures the moodboard holds (form field `moodboardMedia`). */
@@ -186,21 +188,24 @@ export function chainGate(id: StepId, ctx: ChainCtx): ChainGate {
 
 /**
  * «Done» is judged by what the NEXT step needs from this one, not by a tick someone set. The card
- * is done when it is named and filed (name, style number, category, base sample size — roles are
- * not counted: a missing technologist stops neither the moodboard nor the flats, and counting them
- * would keep step 0 at NOW forever). Bench-backed steps are done when the bench holds a picture —
- * that is what the following run reads.
+ * is done when it is NAMED AND CATEGORISED — the two card fields the draft and the runs actually
+ * read (`designConstructionUserPrompt` writes «Garment:» and «Category:»; fit and gender are
+ * optional there too). Bench-backed steps are done when the bench holds a picture — that is what
+ * the following run reads.
+ *
+ * ⚠ STYLE NUMBER AND BASE SAMPLE SIZE ARE NOT COUNTED, and that is the schema speaking, not
+ * leniency. `styleNumber` is required only past the IDEA stage (`schema.ts`, `pastIdea`) and no
+ * run reads it — it is a RELEASE blocker (`RELEASE_BLOCKER_TAB.style_number`), and a release is not
+ * a link of this chain. `baseSampleSizeId` is optional with default 0 and feeds costing and
+ * patterns, not the design band; on aux cards it is routinely empty. Counting either kept the
+ * «card details · next» cell up forever on every idea card and capped the counter at 5 of 6.
+ * Roles are not counted either: a missing technologist stops neither the moodboard nor the flats.
  */
 export function stepDone(id: StepId, ctx: ChainCtx): boolean {
   switch (id) {
     case 'card': {
       const c = ctx.card;
-      return !!(
-        c.name.trim() &&
-        c.styleNumber.trim() &&
-        c.categoryId > 0 &&
-        c.baseSampleSizeId > 0
-      );
+      return !!(c.name.trim() && c.categoryId > 0);
     }
     case 'mood':
       return ctx.moodPictures > 0;

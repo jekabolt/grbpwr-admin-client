@@ -1,4 +1,4 @@
-import type { GetDesignBandResponse, common_DesignRun, common_MediaFull } from 'api/proto-http/admin';
+import type { common_DesignRun, common_MediaFull } from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useRef, useState, type JSX } from 'react';
@@ -12,12 +12,12 @@ import Text from 'ui/components/text';
 import { bornBomLine, upsertDetailText } from '../../form-writers';
 import type { TechCardFormData } from '../../schema';
 import { proposedColourways } from '../colourway-proposals-model';
-import { InventoryLine, NotSent, WmgGroup, WmgShell, WordsAsSent, latestRunOfKind } from '../core';
+import { InventoryLine, NotSent, WmgGroup, WmgShell, WordsAsSent } from '../core';
 import { formatMoney } from '../generation/money';
 import { runOutputText } from '../generation/run-state';
 import { GenerateRow } from '../render/generate-row';
 import type { Gate } from '../render/model';
-import { newClientRequestId, useDesignBand } from '../use-design-band';
+import { newClientRequestId } from '../use-design-band';
 import {
   diffProposal,
   parseConstructionDraft,
@@ -226,9 +226,6 @@ export function ConstructionDraft({
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
   const draftIdea = useDraftDesignIdea(techCardId);
-  // ПОЛОСА — РАДИ ОДНОЙ СТРОКИ: последнего прогона `draft_idea`, чей `output_text` печатает опись
-  // (`WHAT THE MODEL GETS ▸`). Тот же ключ react-query, что и у доски выше, — второго чтения нет.
-  const { band } = useDesignBand(techCardId);
   const [inspecting, setInspecting] = useState(false);
 
   // ЖУРНАЛ ЗАПОЛНЕНИЙ И ПРЕДЛОЖЕННЫЕ КОЛОРВЕИ ЖИВУТ В МОДУЛЬНОМ СТОРЕ, А НЕ ЗДЕСЬ: студия
@@ -291,6 +288,15 @@ export function ConstructionDraft({
   const [staged, setStaged] = useState<Staged | null>(null);
   /** Цена последнего прогона, уже словами. Живёт рядом с черновиком: это цена ЕГО, а не дня. */
   const [price, setPrice] = useState<string | null>(null);
+  /**
+   * СТРОКА ПОСЛЕДНЕГО ЧЕРНОВИКА — ИЗ ОТВЕТА, А НЕ ИЗ ПОЛОСЫ. Лента полосы НЕ НЕСЁТ род
+   * `draft_idea` (`internal/store/design/band.go`, `designFeedKinds`): искать его в `band.runs`
+   * значило бы найти null после каждого удачного черновика и напечатать «no draft has run yet»
+   * поверх только что оплаченного ответа. Ответ `DraftDesignIdea` отдаёт строку целиком (`res.run`,
+   * `output_text` заполнен — прогон исполняется инлайном), и это единственное место, где она есть.
+   * Живёт рядом с ценой и тем же сроком: это строка ЭТОГО нажатия, а не история карточки.
+   */
+  const [lastRun, setLastRun] = useState<common_DesignRun | null>(null);
   const [receipts, setReceipts] = useState<Record<string, Receipt>>({});
   const stale = !!staged && staged.fingerprint !== fingerprint;
 
@@ -322,6 +328,7 @@ export function ConstructionDraft({
         onSuccess: (res) => {
           intent.current = null;
           setPrice(runPrice(res.run));
+          setLastRun(res.run ?? null);
           const parsed = parseConstructionDraft(res.construction);
           if (!parsed) {
             // ПУСТОЙ ОТВЕТ — НЕ ЧЕРНОВИК. Строка в реестре есть, деньги списаны, а предлагать
@@ -554,10 +561,11 @@ export function ConstructionDraft({
       <DraftInventoryModal
         open={inspecting}
         onOpenChange={setInspecting}
-        band={band}
+        lastRun={lastRun}
         items={items}
         callouts={callouts}
         concept={concept}
+        fit={fit}
         boardDirty={boardDirty}
       />
 
@@ -849,9 +857,17 @@ function DraftJournal({
  *
  * THE INPUT IS ASSEMBLED BY THE SERVER (`DraftDesignIdea`) FROM THE SAVED CARD, and this client
  * never sees the text it composes. So the panel does not pretend to: it lists what the server
- * READS — the board's pictures, the notes pinned to them, whether a description stands — and, for
- * the last draft that ran, what the server KEPT: its stored text as sent (if the row carries one)
- * and its answer verbatim. Nothing here is inferred; every line is a count or a stored column.
+ * READS — the board's pictures, the notes pinned to them, the description and the fit — and, for
+ * the last draft asked from this screen, its ANSWER verbatim. Nothing here is inferred; every line
+ * is a count or a stored column.
+ *
+ * ⚠ THERE IS NO «WORDS AS SENT» BLOCK HERE, AND THAT IS A FACT ABOUT THE SERVER, NOT AN OMISSION.
+ * `DraftDesignIdea` runs inline and never writes the composed prompt onto its run row — only the
+ * worker's `RecordRunPrompt` does that, and the draft never passes through the worker. A block
+ * promising «the text the server kept» would be empty after every draft, forever.
+ *
+ * ⚠ THE LAST RUN COMES FROM THE RESPONSE, NOT FROM THE BAND. The feed excludes `draft_idea`
+ * (`designFeedKinds`), so `latestRunOfKind(band.runs, 'draft_idea')` is null on every card.
  *
  * SAME SHELL, SAME LINES AS THE FOUR STEPS (`core/wmg.tsx`): between steps only the composition
  * differs, never the markup. The reader who has opened this door on FLAT finds the same organ here.
@@ -863,22 +879,24 @@ function DraftJournal({
 function DraftInventoryModal({
   open,
   onOpenChange,
-  band,
+  lastRun,
   items,
   callouts,
   concept,
+  fit,
   boardDirty,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  band: GetDesignBandResponse;
+  /** The row `DraftDesignIdea` answered with, for the last draft asked from this screen. */
+  lastRun: common_DesignRun | null;
   items: readonly { mediaId?: number }[];
   callouts: readonly { mediaId?: number; part?: string; description?: string }[];
   concept: string;
+  fit: string;
   boardDirty: boolean;
 }): JSX.Element {
   const mediaById = useMediaMap();
-  const lastRun = useMemo(() => latestRunOfKind(band.runs, 'draft_idea'), [band.runs]);
   const boardIds = useMemo(
     () => new Set(items.map((i) => i.mediaId).filter((id): id is number => !!id)),
     [items],
@@ -906,7 +924,7 @@ function DraftInventoryModal({
       intro={
         <>
           <b>the server assembles this run itself,</b> from the SAVED card — the pictures on the
-          moodboard, the notes pinned to them and the description. This client never sees the
+          moodboard, the notes pinned to them, the description and the fit. This client never sees the
           text it composes, so what is listed here is what the server READS, not how it words it.
           {boardDirty ? (
             <>
@@ -965,6 +983,20 @@ function DraftInventoryModal({
             )
           }
         />
+        {/* ПОСАДКА ЧИТАЕТСЯ: `designConstructionUserPrompt` пишет «Fit: …» в шапку запроса, снимок
+            входов несёт `{Mood, Fit}`, строка прогона — `fit_at_launch`. Та же строка `origin='linked'`,
+            что и у флэт-руки: две руки не имеют права расходиться в том, едет ли одно и то же поле. */}
+        <InventoryLine
+          name='fit'
+          origin={fit.trim() ? 'linked' : undefined}
+          text={
+            fit.trim() ? (
+              `${fit.trim()} (from the card)`
+            ) : (
+              <span className='text-labelColor'>none stated — the draft proposes one</span>
+            )
+          }
+        />
       </WmgGroup>
 
       <NotSent
@@ -973,10 +1005,6 @@ function DraftInventoryModal({
             label: 'the construction',
             reason:
               'the draft PROPOSES the construction and is compared against it afterwards — what stands in it is not read',
-          },
-          {
-            label: 'the fit',
-            reason: 'not among what the server reads for a draft; it is compared against the proposal afterwards',
           },
           { label: 'BOM', reason: 'the bill of materials is proposed by the draft, not read by it' },
           { label: 'colourways', reason: 'colourways are proposed by the draft and created on your click' },
@@ -989,20 +1017,12 @@ function DraftInventoryModal({
 
       <WordsAsSent
         run={lastRun}
-        text={(lastRun?.prompt ?? '').trim()}
-        kindWord='draft'
-        caveat='stored by the server at dispatch — its own wording, kept on the run'
-        whenNone='no draft has run yet — once one has, this shows the text the server kept for it, if it kept one.'
-        data-c19-draft-sent=''
-      />
-      <WordsAsSent
-        run={lastRun}
         text={lastRun ? runOutputText(lastRun) : ''}
         kindWord='draft'
         label='what came back'
         noun='answer'
         caveat='the answer verbatim — the proposal above was parsed out of this text'
-        whenNone='no draft has run yet.'
+        whenNone='no draft has been asked from this screen since it opened — the server keeps draft rows out of the band feed, so only the answer to a draft asked here can be shown.'
         data-c19-draft-answer=''
       />
     </WmgShell>

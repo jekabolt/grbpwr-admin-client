@@ -129,7 +129,12 @@ const fullUrl = (full?: common_MediaFull): string =>
  * группы: блок один, внутри — рулёная сетка, строки разделены волосяной линией (внутренний вес),
  * колонки — зазором в 24px. Рамка ячейки была бы блоком в блоке.
  */
-const CELL = 'grid min-w-0 grid-cols-[160px_1fr] items-start gap-3 py-3';
+// На узком экране кадр и его правая половина встают ДРУГ ПОД ДРУГА: 160px кадра плюс минимальная
+// ширина селекта роли не влезают в 375px, и страница ехала вбок — а горизонтальный скролл страницы
+// в этом админе уже чинили дважды. Колонки обеих раскладок — `minmax(0,…)`: содержимое не имеет
+// права растянуть дорожку.
+const CELL =
+  'grid min-w-0 grid-cols-1 items-start gap-3 py-3 sm:grid-cols-[minmax(0,160px)_minmax(0,1fr)]';
 
 /**
  * Глиф нижней половины плейсхолдера (C-4) — перо, тем же штрихом и в той же коробке 24×24, что
@@ -774,8 +779,8 @@ export function ReferencesSection({
           className='resize-none'
         />
         <Text size='micro' variant='label' className='mt-px'>
-          one description for the whole garment — the only words the model reads, beside the roles
-          of the pictures below.
+          one description for the whole garment — read together with the fit, and with each
+          picture’s role, note and the callouts drawn on it.
         </Text>
         {/* КАРТИНКИ АСПЕКТОВ НЕ ЕДУТ, И ЭТО СКАЗАНО СОСТОЯНИЕМ (WAVE2 п.6) — только пока они есть:
             постоянная оговорка на каждой чистой карточке была бы шумом. */}
@@ -803,7 +808,7 @@ export function ReferencesSection({
         {/* ГРИД 2×N: `auto-fit` с минимумом 470px даёт при ширине админки ровно две колонки и
             честно схлопывается в одну на узком окне. Между колонками — зазор, между строками —
             волосяная линия на самих ячейках. */}
-        <div className='grid gap-x-gutter [grid-template-columns:repeat(auto-fit,minmax(470px,1fr))]'>
+        <div className='grid gap-x-gutter [grid-template-columns:repeat(auto-fit,minmax(min(470px,100%),1fr))]'>
           {members.map((mediaId) => (
             <ReferenceCell
               key={mediaId}

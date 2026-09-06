@@ -6,7 +6,7 @@
  */
 export { EmptyStudio } from './empty-studio';
 export { FixContext, FixContextProvider, useFixContext, type FixTarget } from './fix-context';
-export { hasAnyPictures, hasFlatRun } from './generation-form';
+export { hasAnyPictures } from './generation-form';
 export { GenerationHistory } from './generation-history';
 export { RunPanel } from './run-panel';
 export { SlotPicker } from './slot-picker';

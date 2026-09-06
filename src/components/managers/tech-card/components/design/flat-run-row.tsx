@@ -14,7 +14,7 @@ import { filledFlatSlots, sentFlatSlotIds, useFlatSlotsSend } from './flat-slots
 import { markedPlatesOf } from './fix-markup';
 import { useStartRun } from './generation/use-generation';
 import { WhatModelGetsModal } from './modals';
-import { GenerateRow } from './render/generate-row';
+import { GenerateRow, RunRefusal } from './render/generate-row';
 import { DETAIL_VIEW, SILHOUETTE_VIEWS, viewLabel } from './views';
 
 /**
@@ -259,14 +259,10 @@ export function FlatRunRow({
           </Text>
         </CalloutBox>
       )}
-      {/* ОТКАЗ ЗАПУСКА — СТОЙКАЯ ПОЛОСА, НЕ СНЕКБАР (CONTRACT §E). */}
-      {startRun.isError && (
-        <CalloutBox tone='error'>
-          <b>the run did not start.</b> Nothing was filed and nothing was charged. Pressing GENERATE
-          again carries the same request id, so a run that DID start on the server comes back
-          instead of a second paid one.
-        </CalloutBox>
-      )}
+      {/* ОТКАЗ ЗАПУСКА — СТОЙКАЯ ПОЛОСА, НЕ СНЕКБАР (CONTRACT §E), И ТОТ ЖЕ ОРГАН, ЧТО У FABRIC
+          RENDER И 3D: слова сервера дословно, «nothing was charged» только когда сервер сам о деньгах
+          не говорит, и ни слова про «same request id» — этот орган ключа не видит (см. `RunRefusal`). */}
+      <RunRefusal refusal={startRun.refusal} onDismiss={startRun.dismissRefusal} />
       <WhatModelGetsModal open={wmgOpen} onOpenChange={setWmgOpen} band={band} />
     </div>
   );
