@@ -1,6 +1,7 @@
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { MediaRecropDialog } from 'components/managers/media/components/media-recrop-dialog';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
+import { cn } from 'lib/utility';
 import { useState, type JSX, type RefObject } from 'react';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
@@ -9,33 +10,37 @@ import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 
 import { ASSET_NAME_MAX } from '../assets/model';
-import { STRIP_CELL_PX, STRIP_FRAME_ASPECT } from '../render/strip-cell';
+import { BENCH_CELL_STYLE, BENCH_FRAME_ASPECT, SlotCap } from '../bench-slot';
 
 /**
- * ═══ THE CELL IS THE STRIP'S CELL — 132 × 148, PORTRAIT, INLINE (owner, r2 §25) ════════════════
+ * ═══ THE CELL IS THE FLAT SLOTS CELL — 138 × 162, PORTRAIT (owner, r2 §25) ══════════════════════
  *
  * The owner, on the beta: «why is the placeholder in SOURCE PICTURE so crooked». It stood as a
  * 4:1 band «the height of the NAME column beside it» with three rows of text inside — and a
  * flattened striped band with text spilling over reads as a picture that failed to load, not as a
- * slot. The first answer was a 138 px SQUARE, argued from the tile's own geometry.
+ * slot. The first answer was a 138 px SQUARE, argued from the tile's own geometry; the second was
+ * the input strip's 132 × 148 frame, argued from «one shape for every cell of the studio».
  *
- * ⚠ ТОТ ДОВОД ВЛАДЕЛЕЦ ОТМЕНИЛ, И ЭТО НАПИСАНО ЗДЕСЬ, ЧТОБЫ КВАДРАТ НЕ ВЕРНУЛСЯ «ПО ЛОГИКЕ».
- * Дословно (r2 §25): «SOURCE PICTURE — плейсхолдер нормальной формы, как все остальные:
- * прямоугольный портретный». Правило теперь ОДНО НА ВСЕ ЯЧЕЙКИ СТУДИИ: ячейка ленты — 132 px
- * шириной, кадр 132/148 (`render/strip-cell.tsx`). Довод сильнее геометрии плитки: человек читает
- * экран ФОРМОЙ ячеек, и одна ячейка другой формы читается как другой род вещи. Что кадр не в
- * пропорциях снимка — здесь честно: `object-contain` внутри коробки, и ничего дробного (выносок,
- * маркеров) на этом кадре не рисуется. Правка кадра под содержимое живёт в `crop ▸` под ним.
+ * ⚠ ОБА ДОВОДА ОТМЕНЕНЫ ОДНИМ СЛОВОМ ВЛАДЕЛЬЦА, И ОНО ЗАПИСАНО ЗДЕСЬ ЦЕЛИКОМ, ЧТОБЫ НИ КВАДРАТ, НИ
+ * ЯЧЕЙКА ЛЕНТЫ НЕ ВЕРНУЛИСЬ «ПО ЛОГИКЕ». Дословно (r2 п.25): «SOURCE PICTURE — плейсхолдер
+ * нормальной формы, как все остальные: прямоугольный портретный», и решение списка задач называет
+ * мерку поимённо: «портретная ячейка ТОГО ЖЕ РАЗМЕРА, ЧТО ЯЧЕЙКИ FLAT SLOTS».
  *
- * ЧИСЛА ИМПОРТИРУЮТСЯ, А НЕ ПЕРЕПИСЫВАЮТСЯ. Второе написание «132» разошлось бы с первым молча —
- * это довод самого `strip-cell.tsx`, и он же действует через границу папки. Ширина при этом идёт
- * ИНЛАЙНОМ, а не классом: стенд читает CSS собранного бандла, где класса, которого не было в
- * дереве на момент сборки, не существует вовсе.
+ * Значит коробка здесь — не «похожая на ту», а ТА ЖЕ, собранная из тех же трёх слагаемых
+ * (`bench-slot.tsx`): рамка 1px, кадр `BENCH_FRAME_ASPECT` в ширине `BENCH_CELL_STYLE` и подвал
+ * `SlotCap`. Замер до правки: ячейка источника 132 × 148 против 138 × 162 у флэт-слота — две
+ * коробки на один род вещи, и глазами это читается как «две разные вещи». Портретной коробку
+ * делает ИМЕННО ПОДВАЛ: кадр сам по себе квадратный, а квадрат владелец отменил.
+ *
+ * ЧИСЛА ИМПОРТИРУЮТСЯ, А НЕ ПЕРЕПИСЫВАЮТСЯ — второе написание «138» разошлось бы с первым молча.
+ * Ширина при этом идёт ИНЛАЙНОМ, а не классом: стенд читает CSS собранного бандла, где класса,
+ * которого не было в дереве на момент сборки, не существует вовсе.
+ *
+ * Что кадр не в пропорциях снимка — здесь честно: картинка вписана в коробку, и ничего дробного
+ * (выносок, маркеров) на этом кадре не рисуется. Правка кадра под содержимое живёт в `crop ▸`.
  */
-const CELL_PX = STRIP_CELL_PX;
-const CELL_STYLE: React.CSSProperties = { width: CELL_PX, flex: `0 0 ${CELL_PX}px` };
-/** Пропорция кадра — та же, что у ячейки ленты и пустой ячейки FLAT SLOTS. */
-const FRAME_ASPECT = STRIP_FRAME_ASPECT;
+const CELL_STYLE = BENCH_CELL_STYLE;
+const FRAME_ASPECT = BENCH_FRAME_ASPECT;
 /**
  * The NAME column takes the rest of the row and drops under the cell when the row is narrow.
  *
@@ -51,11 +56,15 @@ const NAME_STYLE: React.CSSProperties = { flex: '1 1 200px', minWidth: 0, maxWid
  * ═══ THE GESTURE LINE IS DRAWN HERE, ONE LINE, UNDER THE CELL ══════════════════════════════════
  *
  * `MediaSlot` writes its own gesture line («⌘V · drag a file · click to browse») and hides it by
- * the SLOT'S OWN width below 11 rem — at a strip cell's 132 px it never shows, by the primitive's
- * design, and shown it would wrap into the three rows the owner called broken. So the slot is
- * told `hint={null}` (its documented «no room for a second line» case) and the gesture is said
- * once, in the bench's own words, as the cell's caption — the same row the filled cell puts its
- * caption in, so the two states of the cell have one shape.
+ * the SLOT'S OWN width below 11 rem — at the cell's 136 px of frame it never shows, by the
+ * primitive's design, and shown it would wrap into the three rows the owner called broken. So the
+ * slot is told `hint={null}` (its documented «no room for a second line» case) and the gesture is
+ * said once, in the bench's own words, as the cell's caption — the same row the filled cell puts
+ * its caption in, so the two states of the cell have one shape.
+ *
+ * ПО ТОМУ ЖЕ СЧЁТУ ЛИЦО КАДРА ГОВОРИТ `+ picture`, А ИМЯ ЯЧЕЙКИ УЕХАЛО В ПОДВАЛ: две строки
+ * текста внутри коробки в 136 px — ровно та форма, которую владелец назвал кривой. Флэт-слот
+ * называет свою сторону там же, в подвале, и это одна грамматика, а не совпадение.
  */
 const GESTURES = 'click to fill · ⌘V · drop';
 
@@ -125,42 +134,69 @@ export function PatternInput({
         style={CELL_STYLE}
         className='flex min-w-0 flex-col gap-1'
       >
-        {disabled && !sourceUrl ? (
-          <span
-            data-inert='this card is read-only for you — a run spends money, so attaching its input stops here too'
-            title='this card is read-only for you — a run spends money, so attaching its input stops here too'
-            className='block w-full'
-          >
-            <Placeholder
-              label='source picture'
-              dashed
-              style={{ aspectRatio: FRAME_ASPECT }}
-              className='w-full'
+        {/* ═══ КОРОБКА ЯЧЕЙКИ — рамка держит кадр И подвал, ровно как на верстаке ═══════════
+            Рамку несёт КОРОБКА, а кадр внутри идёт без своей (`border-0`): две рамки внахлёст
+            дают двойную линию на стыке, и это уже чинили в `bench-slot.tsx`. Пунктир, пока
+            ячейка пуста, сплошная — когда в ней что-то стоит: тот же словарь, что у флэт-слота,
+            и он же отвечает на «в этой ячейке что-то есть?» без единого слова. */}
+        <div
+          /* ЯКОРЬ КОРОБКИ, а не её css-класса: проверяемое утверждение п.25 — «того же размера,
+             что ячейка FLAT SLOTS», то есть ИЗМЕРЕНИЕ этого узла, и держать его за раскладку
+             значит проверять оформление вместо смысла. */
+          data-source-box=''
+          className={cn(
+            'flex min-w-0 flex-col overflow-hidden border',
+            sourceUrl ? 'border-textColor' : 'border-dashed border-borderColor',
+          )}
+        >
+          {disabled && !sourceUrl ? (
+            <span
+              data-inert='this card is read-only for you — a run spends money, so attaching its input stops here too'
+              title='this card is read-only for you — a run spends money, so attaching its input stops here too'
+              className='block w-full'
+            >
+              <Placeholder
+                label='empty'
+                style={{ aspectRatio: FRAME_ASPECT, minHeight: 0 }}
+                className='w-full border-0'
+              />
+            </span>
+          ) : (
+            <MediaSlot
+              aspectRatio={['Custom']}
+              /* ONE FRAME FOR BOTH STATES (owner, r2 п.25): the empty cell is the same box the
+                 filled one is — and it is the flat slot's box, not a second one like it. */
+              frameAspect={FRAME_ASPECT}
+              /* ЛИЦО КАДРА — ДВЕРЬ, А НЕ ИМЯ ЯЧЕЙКИ: имя переехало в подвал (см. ниже), и «+
+                 picture» здесь говорит то же, что дверь запертой полосы этого шага. */
+              label='+ picture'
+              hint={null}
+              purpose='design · the picture a pattern is made from'
+              showVideos={false}
+              editMode={!disabled}
+              mediaUrl={sourceUrl || undefined}
+              alt={sourceId ? `picture ${sourceId}` : 'source picture'}
+              onSelect={(media) => {
+                const first = media[0];
+                if (!first?.id) return;
+                onPick(first);
+                // «offer the crop RIGHT AFTER the upload» — the dialog opens from this door only.
+                setCropping(true);
+              }}
+              onClear={sourceUrl && !disabled ? onClear : undefined}
+              className='border-0'
             />
-          </span>
-        ) : (
-          <MediaSlot
-            aspectRatio={['Custom']}
-            /* ONE FRAME FOR BOTH STATES (owner, r2 §25): the empty cell is the same portrait box
-               the filled one is, and the same box every other cell of the studio draws. */
-            frameAspect={FRAME_ASPECT}
-            label='source picture *'
-            hint={null}
-            purpose='design · the picture a pattern is made from'
-            showVideos={false}
-            editMode={!disabled}
-            mediaUrl={sourceUrl || undefined}
-            alt={sourceId ? `picture ${sourceId}` : 'source picture'}
-            onSelect={(media) => {
-              const first = media[0];
-              if (!first?.id) return;
-              onPick(first);
-              // «offer the crop RIGHT AFTER the upload» — the dialog opens from this door only.
-              setCropping(true);
-            }}
-            onClear={sourceUrl && !disabled ? onClear : undefined}
+          )}
+          {/* ПОДВАЛ — ТОТ ЖЕ ОРГАН, ЧТО У ФЛЭТ-СЛОТА, и он же третье слагаемое высоты 162.
+              Имя ячейки и звёздочка обязательной стоят ЗДЕСЬ, а не внутри кадра: в кадре они
+              соревновались бы с дверью за одно и то же место, а на пустой ячейке читались как
+              подпись к пустоте. Одно и то же в обоих состояниях — коробка не прыгает. */}
+          <SlotCap
+            label='source picture'
+            required
+            requiredNote='a repeating tile is made out of exactly one picture'
           />
-        )}
+        </div>
 
         {/* THE CAPTION OF THE EMPTY CELL: the three gestures, one line, in the strip's words. */}
         {!sourceId && !disabled && (

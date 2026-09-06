@@ -104,7 +104,15 @@ function BrowserColumn({
 //
 // ЭКСПОРТИРУЕТСЯ С КРУГА 20 (B-27): базовая модель и базовый размер уехали отсюда в СВОЙ блок
 // шапки, и обёртки, которая держала бы категорию с ними вместе, больше нет. Браузер зовут по имени.
-export function CategoryBrowser({ hint = true }: { hint?: boolean } = {}) {
+//
+// ⚠ ПРОПА `hint` БОЛЬШЕ НЕТ, И ЭТО НЕ УПРОЩЕНИЕ, А СНЯТАЯ СТРОКА (r2 п.2). Владелец, дословно:
+// «only the top category is required — sub-category and type are optional — убери этот текст».
+// Строку сняли сначала ТОЛЬКО на CARD DETAILS (`hint={false}`), и она осталась жива на втором
+// вызывающем — MOODBOARD → GENERAL INFORMATION. Флаг с одним значением у всех вызывающих — это
+// мёртвая ветка, которая однажды вернёт текст «по умолчанию»; поэтому снят и он. Довод строки
+// был и остаётся верен: колонки браузера подписаны «sub · optional» / «type · optional», и она
+// повторяла их третий раз.
+export function CategoryBrowser() {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
   const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
@@ -247,14 +255,9 @@ export function CategoryBrowser({ hint = true }: { hint?: boolean } = {}) {
           />
         </div>
       </GenericPopover>
-      {/* Подсказка про необязательные уровни. На CARD DETAILS владелец её снял (`hint={false}`):
-          колонки браузера и так подписаны «sub · optional» / «type · optional», строка повторяла
-          их третий раз. Остальные вызывающие (CONSTRUCTION) её печатают как печатали. */}
-      {hint && (
-        <Text size='micro' variant='label'>
-          only the top category is required — sub-category and type are optional
-        </Text>
-      )}
+      {/* Строки «only the top category is required…» здесь БОЛЬШЕ НЕТ (r2 п.2) — разбор в шапке
+          компонента. Необязательность уровней говорят сами колонки браузера: «sub · optional»,
+          «type · optional». */}
 
       <ConfirmationModal
         open={pending != null}

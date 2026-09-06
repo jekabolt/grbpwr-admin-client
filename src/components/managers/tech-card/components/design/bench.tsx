@@ -13,6 +13,7 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Button } from 'ui/components/button';
 import {
+  BENCH_CELL_STYLE,
   BenchSlot,
   NewDetailCell,
   SHEET_MIN_VIEWS,
@@ -83,12 +84,12 @@ import { uploadItem } from './upload-item';
 const FLAT_BENCH: BenchKind = 'flat';
 
 /**
- * ЯЧЕЙКА ЛЕНТЫ — 138px (`.pstrip-i` макета), инлайном, а не классом: стенд читает CSS готовой
- * сборки, где произвольного класса, которого не было в дереве на момент сборки, нет вовсе;
- * ширина ячейки — геометрия ленты, не кожа, и зависеть от того, откуда сканер читает исходники,
- * не должна. `flex: 0 0` — ячейка не сжимается, лента прокручивается внутри блока.
+ * ЯЧЕЙКА ЛЕНТЫ — 138px (`.pstrip-i` макета). `flex: 0 0` — ячейка не сжимается, лента
+ * прокручивается внутри блока. Число и стиль ПЕРЕЕХАЛИ в `bench-slot.tsx` (`BENCH_CELL_STYLE`),
+ * где живут два других слагаемых коробки — кадр и подвал: с r2 п.25 той же коробкой стоит ячейка
+ * SOURCE PICTURE на шаге PATTERN, и «138» в двух файлах разъехалось бы молча. Разбор — там же.
  */
-const CELL_STYLE: React.CSSProperties = { width: 138, flex: '0 0 138px' };
+const CELL_STYLE = BENCH_CELL_STYLE;
 
 /**
  * ═══ И КОЛОРВЕЯ У ЭТОГО ВЕРСТАКА НЕТ — L-4, И ЭТО ГРАНИЦА, А НЕ ПРОБЕЛ ════════════════════════

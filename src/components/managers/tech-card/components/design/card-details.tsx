@@ -472,7 +472,7 @@ export function CardDetails({
           {/* The category cascade — three columns in one popover over a single stored leaf.
               Its trigger stretches to the whole cell like the selects beside it. */}
           <div className={W2}>
-            <CategoryBrowser hint={false} />
+            <CategoryBrowser />
           </div>
           <div className={W2}>
             <SelectField name='purpose' label='purpose' items={techCardPurposeFormOptions} />
