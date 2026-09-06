@@ -54,10 +54,24 @@ import type { Gate } from './model';
  * тот, кто держит два экрана рядом.
  *
  * Теперь ряд один на все пять. РАЗНОЕ У НИХ — ТОЛЬКО ХВОСТ, и он стал щелью (`trailing`), а не
- * поводом форкнуть ряд: у трёх экранов хвост стандартный (дверь описи + одна строка про деньги,
+ * поводом форкнуть ряд: у трёх экранов хвост стандартный (одна строка про деньги + дверь описи,
  * печатается, когда экран НАЗВАЛ `shape`), у плитки и у флэта он свой — они называют состав
  * запроса СВОИМИ словами и своими пробами (`data-probe='payload'`, `outputsLine`), и подменять их
  * общей фразой значило бы потерять то, ради чего эти строки писались.
+ *
+ * ═══ ПОРЯДОК РЯДА — МАКЕТА, И ДВЕРЬ ОПИСИ СТОИТ У ПРАВОГО КРАЯ ═══════════════════════════════
+ *
+ * Макет (`_core.js` `money`, все семь снимков шагов): `GENERATE · $ · priced by the server on
+ * start … WHAT THE MODEL GETS ▸`, и дверь прижата к правому краю ряда. Здесь дверь стояла ВТОРОЙ,
+ * сразу за кнопкой, а строка про деньги — за ней; на бете это назвали расхождением все семь
+ * реализаторов. Теперь: [кнопка] [строка про деньги] [`trailing` экрана] … [дверь, `ml-auto`].
+ * Деньги — в шести пикселях от кнопки, которая их тратит (правило макета), дверь — там, куда
+ * глаз идёт за «что именно уедет». Обёртка остаётся `flex-wrap`: на 375 дверь переносится на
+ * следующую строку и прижимается к её правому краю, но за экран не выходит. Флэт (`flat-run-row`)
+ * держит тот же порядок своим `trailing` — деньги, потом дверь с `ml-auto`.
+ *
+ * Цены ДО прогона на проводе нет, и строка её не выдумывает: `{shape} · priced by the server when
+ * the run starts` — ровно то, что известно.
  */
 export function GenerateRow({
   gate,
@@ -138,49 +152,56 @@ export function GenerateRow({
       )}
 
       {/* ═══ СТАНДАРТНЫЙ ХВОСТ — ТОЛЬКО ТОМУ, КТО НАЗВАЛ `shape` ══════════════════════════════
-          Условие стоит на ПАРЕ (дверь описи + строка про деньги), а не на каждом органе по
+          Условие стоит на ПАРЕ (строка про деньги + дверь описи), а не на каждом органе по
           отдельности, потому что это один хвост: экран либо говорит о запросе стандартными
           словами, либо своими (`trailing`). Полумера — своя строка состава ПЛЮС инертная дверь
           «what the model gets ▸» с поводом «этот экран смонтировали без панели описи» — была бы
           прямой ложью на плитке: у неё панели нет НАРОЧНО, весь её состав — две строки, и они
-          напечатаны рядом. */}
-      {shape === undefined ? null : (
-        <>
-          {/* THE PROMPT INVENTORY DOOR, AND IT IS LIVE ON BOTH GENERATIVE SCREENS.
-              It used to be inert, on the ground that the prompt is assembled server-side from a
-              PROFILE this client cannot read. That sentence is true and it is still printed — at
-              the head of the panel itself. What it never justified was hiding the payload: the
-              profile is the wrapper, and everything it wraps around (which plates go in, which
-              colour rides with them, which renders a turntable turns, and what is NOT sent at all)
-              is on this card and is knowable exactly. A person about to spend money on two screens
-              out of three was being asked to do it blind. */}
-          {onInspect ? (
-            <Button variant='secondary' size='xs' onClick={onInspect}>
-              what the model gets ▸
-            </Button>
-          ) : (
-            <InertDoor
-              label='what the model gets ▸'
-              reason='this screen was mounted without the inventory panel — it lists what the card contributes to the run, and the composer did not hand it in'
-            />
-          )}
+          напечатаны рядом.
 
-          {/* ОДНА СТРОКА ПРО ДЕНЬГИ. Справа от неё стояла фраза про исчерпанный день; дня-потолка
-              больше нет, и `data-probe` держится на самой строке, чтобы проба спрашивала орган,
-              который экран действительно рисует, а не тот, которого не стало. */}
-          <Text
-            size='micro'
-            variant='label'
-            component='span'
-            data-probe='run-price'
-            className='min-w-0'
-          >
-            {shape} · priced by the server when the run starts
-          </Text>
-        </>
+          ПОРЯДОК — МАКЕТА (разбор в шапке файла): деньги сразу за кнопкой, дверь описи — у
+          правого края ряда, ПОСЛЕ `trailing` экрана. */}
+      {shape === undefined ? null : (
+        /* ОДНА СТРОКА ПРО ДЕНЬГИ. Справа от неё стояла фраза про исчерпанный день; дня-потолка
+           больше нет, и `data-probe` держится на самой строке, чтобы проба спрашивала орган,
+           который экран действительно рисует, а не тот, которого не стало. */
+        <Text
+          size='micro'
+          variant='label'
+          component='span'
+          data-probe='run-price'
+          className='min-w-0'
+        >
+          {shape} · priced by the server when the run starts
+        </Text>
       )}
 
       {trailing}
+
+      {shape === undefined ? null : (
+        /* THE PROMPT INVENTORY DOOR, AND IT IS LIVE ON BOTH GENERATIVE SCREENS.
+           It used to be inert, on the ground that the prompt is assembled server-side from a
+           PROFILE this client cannot read. That sentence is true and it is still printed — at
+           the head of the panel itself. What it never justified was hiding the payload: the
+           profile is the wrapper, and everything it wraps around (which plates go in, which
+           colour rides with them, which renders a turntable turns, and what is NOT sent at all)
+           is on this card and is knowable exactly. A person about to spend money on two screens
+           out of three was being asked to do it blind.
+
+           `ml-auto` — у правого края ряда, как в макете; при переносе на узком экране дверь
+           уходит на свою строку и прижимается к её правому краю, а не вылезает за него. */
+        onInspect ? (
+          <Button variant='secondary' size='xs' className='ml-auto' onClick={onInspect}>
+            what the model gets ▸
+          </Button>
+        ) : (
+          <InertDoor
+            label='what the model gets ▸'
+            reason='this screen was mounted without the inventory panel — it lists what the card contributes to the run, and the composer did not hand it in'
+            className='ml-auto'
+          />
+        )
+      )}
     </div>
   );
 }

@@ -8,6 +8,9 @@ import { cva, VariantProps } from 'class-variance-authority';
  *   warn      red    — broken, missing, blocking, over budget
  *   attention blue   — mid-flight, needs a human: in review, unsaved, changed, stale
  *   mut       grey   — neutral / not started / not applicable
+ *   gap       grey, DASHED — «not here yet»: an empty count, an unfilled slot, a step not reached.
+ *             Not red: red in this admin means a loss (broken, over budget), and an empty list is
+ *             not a loss. The dashed edge is the same mark the empty cells and «+ add» chips wear.
  *
  * Border and text share the tone colour; the background is always transparent.
  */
@@ -21,6 +24,7 @@ const pillVariants = cva(
         attention: ['border-warning', 'text-warning'],
         mut: ['border-borderColor', 'text-labelColor'],
         ink: ['border-textColor', 'text-textColor'],
+        gap: ['border-dashed', 'border-borderColor', 'text-labelColor'],
       },
     },
     defaultVariants: { tone: 'mut' },

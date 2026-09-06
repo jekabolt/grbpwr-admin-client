@@ -1,4 +1,8 @@
-import type { GetDesignBandResponse, common_DesignColourRecipe } from 'api/proto-http/admin';
+import type {
+  GetDesignBandResponse,
+  common_AdminColorwayRef,
+  common_DesignColourRecipe,
+} from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, type JSX, type ReactNode } from 'react';
@@ -13,6 +17,8 @@ import { Tile, Tiles } from 'ui/components/tiles';
 import { ColourPicker } from '../assets/colour-picker';
 import { ASSETS_PER_CARD_MAX, ASSET_FABRIC, clothShelf, normaliseHex } from '../assets/model';
 import { useAssetWrites } from '../assets/use-assets';
+import { COLORWAY_NONE } from '../bench-kinds';
+import { archivedRef, colorwayLabel as nameOfColorway } from '../colorway-picker';
 import { EmptyState, Reason } from '../core';
 import { hexIsPaintable } from '../render/model';
 import type { PaintDraft } from './drafts';
@@ -42,10 +48,16 @@ import {
  * writes — so the chip opens the library, the picture lands on the shelf as `cloth N` and is
  * picked as the paint the moment the server answers. `pending` is the mid-flight pill.
  *
- * THE COLOURWAY IS READ, NOT PICKED, HERE. The studio has ONE colourway organ — the select on the
- * rail (`studio-tab.tsx`) — and a second row of chips writing the same number would be two writers
- * of one state. The group prints the binding and where it is changed. It is NOT SENT to the model:
- * it becomes the `colorway_id` of the run, i.e. the name the returned picture is filed under.
+ * THE COLOURWAY — CHIPS THAT BIND AND UNBIND, OVER THE COMPOSER'S ONE STATE. The mock-up draws
+ * the card's colourways as a row of chips under «COLOURWAY» (`colourwayChips(s.colorwayId,
+ * 'om:way')`: the bound one is filled, a click on it unbinds, a click on another binds, an
+ * archived name shows only while it is the bound one). The studio still has ONE colourway STATE —
+ * `useColorwayChoice` in `studio-tab.tsx`, the number the select on the rail also writes — and
+ * the chips are a second DOOR to that one setter (`onColorwayChange`), never a second copy of the
+ * number: the group holds nothing, and a click here and a pick on the rail land in the same place.
+ * Without the setter (a composer that did not hand it in) the group prints the binding and says
+ * where it is changed, as it did before the chips. It is NOT SENT to the model: it becomes the
+ * `colorway_id` of the run, i.e. the name the returned picture is filed under.
  */
 
 const SQUARE = '1/1';
@@ -113,8 +125,11 @@ export function PaintGroup({
   draft,
   choices,
   colour,
+  colorwayId = COLORWAY_NONE,
   colorwayLabel,
   colorwayArchived,
+  colorways,
+  onColorwayChange,
   disabled,
 }: {
   band: GetDesignBandResponse;
@@ -126,8 +141,13 @@ export function PaintGroup({
   choices: readonly ClothChoice[];
   /** THE WIRE BODY (`paintWire`) — the pills read what will actually leave, not the draft. */
   colour: common_DesignColourRecipe;
+  /** The bound colourway — the composer's number; `0` = not bound. Which chip is filled. */
+  colorwayId?: number;
   colorwayLabel: string;
   colorwayArchived: boolean;
+  /** The card's colourways and the composer's setter — together they make the chips live. */
+  colorways?: common_AdminColorwayRef[];
+  onColorwayChange?: (id: number) => void;
   disabled?: boolean;
 }): JSX.Element {
   const writes = useAssetWrites(techCardId);
@@ -138,6 +158,12 @@ export function PaintGroup({
   const full = totalAssets >= ASSETS_PER_CARD_MAX;
   const fullReason = `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets · take a cloth off the shelf on FABRIC RENDER first`;
   const blocked = choices.find((c) => !!c.blocked) ?? null;
+  /** The chips are live only when the composer handed in BOTH the list and the setter. */
+  const liveChips = !!onColorwayChange && !!colorways;
+  /** The mock-up's filter: an archived colourway is offered only while it is the bound one. */
+  const ways = (colorways ?? []).filter(
+    (c) => !archivedRef(c) || (c.colorwayId ?? 0) === colorwayId,
+  );
 
   if (!shot) {
     return (
@@ -357,16 +383,60 @@ export function PaintGroup({
       >
         colourway
       </GroupLabel>
-      <div className='flex flex-wrap items-center gap-1.5' data-om-colourway={colorwayLabel || 'none'}>
-        <Text size='micro' variant='label' component='span' className='normal-case'>
-          {colorwayLabel
-            ? `bound to ${colorwayLabel} · picked in the COLOURWAY select on the rail`
-            : 'not bound · pick one in the COLOURWAY select on the rail, or leave it'}
-          {colorwayArchived ? ' · archived, so no new picture is made under it' : ''}
-        </Text>
-      </div>
+      {liveChips ? (
+        /* THE CHIPS — the mock-up's `colourwayChips`: one chip per colourway of the card, the
+           bound one filled; a click on the bound one UNBINDS (`COLORWAY_NONE`), a click on another
+           binds. An archived name is listed only while it is the bound one (the mock-up's filter),
+           so a name nobody may work under is not offered, yet the one a person stands on is not
+           pulled from under them. Every chip is a real `<button type='button'>` (Chip with
+           `onClick`), so the form is never submitted by a bind. */
+        ways.length === 0 ? (
+          <EmptyState>no colourways yet · the shot keeps its own name</EmptyState>
+        ) : (
+          <div
+            className='flex flex-wrap items-center gap-1.5'
+            data-om-colourway={colorwayLabel || 'none'}
+          >
+            {ways.map((c) => {
+              const id = c.colorwayId ?? 0;
+              const on = id === colorwayId;
+              const name = nameOfColorway(c);
+              const archived = archivedRef(c);
+              return (
+                <Chip
+                  key={id}
+                  selected={on}
+                  pressed={on}
+                  disabled={disabled}
+                  onClick={() => onColorwayChange?.(on ? COLORWAY_NONE : id)}
+                  aria-label={`${on ? 'unbind from' : 'bind to'} ${name}`}
+                  title={archived ? `${name} · archived · no new picture is made under it` : undefined}
+                  data-om-way={id}
+                >
+                  {name}
+                  {archived ? ' · archived' : ''}
+                </Chip>
+              );
+            })}
+          </div>
+        )
+      ) : (
+        /* WITHOUT THE SETTER the group reads the binding and says where it is changed — the face
+           it had before the chips, kept for a composer that hands no `onColorwayChange` in. */
+        <div className='flex flex-wrap items-center gap-1.5' data-om-colourway={colorwayLabel || 'none'}>
+          <Text size='micro' variant='label' component='span' className='normal-case'>
+            {colorwayLabel
+              ? `bound to ${colorwayLabel} · picked in the COLOURWAY select on the rail`
+              : 'not bound · pick one in the COLOURWAY select on the rail, or leave it'}
+            {colorwayArchived ? ' · archived, so no new picture is made under it' : ''}
+          </Text>
+        </div>
+      )}
       <Text size='nano' variant='label' component='p' className='mt-1 normal-case'>
         a link written on the picture that comes back · not a word in the prompt
+        {liveChips && colorwayArchived
+          ? ` · ${colorwayLabel} is archived, so no new picture is made under it`
+          : ''}
       </Text>
     </div>
   );

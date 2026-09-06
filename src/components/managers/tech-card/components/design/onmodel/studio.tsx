@@ -1,4 +1,4 @@
-import type { GetDesignBandResponse } from 'api/proto-http/admin';
+import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
@@ -52,19 +52,35 @@ export function OnModelStudio({
   colorwayId = 0,
   colorwayLabel = '',
   colorwayArchived = false,
+  colorways,
+  onColorwayChange,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
   /**
-   * THE LINK WRITTEN ON THE PICTURE THAT COMES BACK — the studio's ONE colourway organ (the
-   * select on the rail) hands the number down; the run freezes it as its `colorway_id`, and the
-   * output declares itself a picture of that colourway. `0` = «not bound», a legal value.
+   * THE LINK WRITTEN ON THE PICTURE THAT COMES BACK — the studio's ONE colourway state (owned by
+   * the composer, `useColorwayChoice` in `studio-tab.tsx`) hands the number down; the run freezes
+   * it as its `colorway_id`, and the output declares itself a picture of that colourway. `0` =
+   * «not bound», a legal value.
    */
   colorwayId?: number;
   colorwayLabel?: string;
   /** Under an archived name no new picture is bought; the gate says so first, by name. */
   colorwayArchived?: boolean;
+  /**
+   * ═══ THE COLOURWAY CHIPS OF THE PAINT GROUP — A SECOND DOOR TO THE ONE SETTER, NOT A SECOND
+   * STATE (mock-up `_step-aside.js`, `colourwayChips(s.colorwayId, 'om:way')`) ══════════════════
+   *
+   * The card's colourways, and the composer's own setter. Both optional, and TOGETHER: with them
+   * the COLOURWAY group draws live chips (bind / unbind, as the mock-up does); without them it
+   * prints the binding and says where it is changed, exactly as before. Nothing here owns a
+   * number — the chips call `onColorwayChange`, which is `useColorwayChoice.setColorwayId`, the
+   * same function the select on the rail calls. One writer, two doors; nothing is written into
+   * the form.
+   */
+  colorways?: common_AdminColorwayRef[];
+  onColorwayChange?: (id: number) => void;
 }): JSX.Element {
   const shotDraft = useOnModelShot();
   const paintDraft = useOnModelPaint();
@@ -167,8 +183,11 @@ export function OnModelStudio({
           draft={paintDraft}
           choices={choices}
           colour={wireColour}
+          colorwayId={colorwayId}
           colorwayLabel={colorwayLabel}
           colorwayArchived={colorwayArchived}
+          colorways={colorways}
+          onColorwayChange={onColorwayChange}
           disabled={disabled}
         />
 

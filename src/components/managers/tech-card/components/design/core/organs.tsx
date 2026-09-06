@@ -16,9 +16,14 @@ import { formatMoney } from '../generation/money';
  * `noun` is the SINGULAR; the plural is `noun + 's'` unless `plural` says otherwise. With `total`
  * the plural follows the total (`1 of 6 sides`), without it — the count (`1 picture`).
  *
- * ZERO IS THE «MISSING» TONE. The band already draws an unfilled slot as `Pill tone='warn'`
- * (`colour-plan/parts-row.tsx`: `colour.stated ? 'mut' : 'warn'`), and an empty count says the
- * same thing as an unassigned colour — something the screen expects is not here yet.
+ * ZERO IS THE `gap` TONE — DASHED GREY, NEVER RED. The mock-up's own rule (`_core.js` `counter`:
+ * `pill(text, n ? '' : 'gap')`, and the note beside it: «gap значит „не хватает" и НЕ красный:
+ * красный в этом админе значит убыток»), and the owner's, seeing the beta paint every empty
+ * count red on all seven steps. An empty list is not a loss and not a fault; it is a place not
+ * reached yet, and the dashed edge is the mark every empty cell and «+ add» chip already wears.
+ * `warn` on this organ used to lean on `colour-plan/parts-row.tsx`, which paints an unassigned
+ * colour red — that one IS a fault of the recipe (a run cannot start without it), so it keeps
+ * its red; a count of zero is not.
  */
 export function Counter({
   n,
@@ -38,7 +43,7 @@ export function Counter({
   const many = plural ?? `${noun}s`;
   const word = (total ?? n) === 1 ? noun : many;
   return (
-    <Pill tone={n === 0 ? 'warn' : 'mut'} className={className} title={title}>
+    <Pill tone={n === 0 ? 'gap' : 'mut'} className={className} title={title}>
       {total != null ? `${n} of ${total} ${word}` : `${n} ${word}`}
     </Pill>
   );

@@ -11,13 +11,48 @@ import Text from 'ui/components/text';
 import { ASSET_NAME_MAX } from '../assets/model';
 
 /**
+ * ═══ THE CELL IS THE STRIP'S CELL — 138 px SQUARE, INLINE (owner) ══════════════════════════════
+ *
+ * The owner, on the beta: «why is the placeholder in SOURCE PICTURE so crooked». It stood as a
+ * 4:1 band «the height of the NAME column beside it» with three rows of text inside — and a
+ * flattened striped band with text spilling over reads as a picture that failed to load, not as a
+ * slot. The ruling: a NORMAL slot cell, the one FLAT SLOTS draws — a 1:1 square the width of a
+ * strip cell (`bench.tsx` `CELL_STYLE`, 138 px), the label on the face, the gesture line ONE line,
+ * the striped dashed surface of `MediaSlot`. Empty and filled are the SAME square: the frame does
+ * not jump when a picture lands in it, and the NAME column beside it aligns to the cell's top
+ * (`items-start`) instead of dictating its height.
+ *
+ * The width is inline, not a class, for the same reason the bench's is: the harness reads the CSS
+ * of the built bundle, where a class that was not in the tree at build time does not exist; the
+ * cell's width is the strip's geometry, not skin.
+ *
+ * Square, not portrait: the source is a swatch photographed any old way, and a portrait frame
+ * would crop it for nothing; the tile that comes out of it is square too.
+ */
+const CELL_PX = 138;
+const CELL_STYLE: React.CSSProperties = { width: CELL_PX, flex: `0 0 ${CELL_PX}px` };
+/** The NAME column takes the rest of the row and drops under the cell when the row is narrow. */
+const NAME_STYLE: React.CSSProperties = { flex: '1 1 200px', minWidth: 0 };
+
+/**
+ * ═══ THE GESTURE LINE IS DRAWN HERE, ONE LINE, UNDER THE CELL ══════════════════════════════════
+ *
+ * `MediaSlot` writes its own gesture line («⌘V · drag a file · click to browse») and hides it by
+ * the SLOT'S OWN width below 11 rem — at a strip cell's 138 px it never shows, by the primitive's
+ * design, and shown it would wrap into the three rows the owner called broken. So the slot is
+ * told `hint={null}` (its documented «no room for a second line» case) and the gesture is said
+ * once, in the bench's own words, as the cell's caption — the same row the filled cell puts its
+ * caption in, so the two states of the cell have one shape.
+ */
+const GESTURES = 'click to fill · ⌘V · drop';
+
+/**
  * ═══ THE INPUT OF A TILE — ONE PICTURE AND ONE NAME, side by side ═══════════════════════════════
  *
- * Two columns under the `SOURCE PICTURE` rule: the source cell on the left (≈220 px, square — a
- * swatch photographed any old way, and a portrait frame would crop it for nothing), the NAME
- * field on the right. Each of the two knows whether it TRAVELS TO THE MODEL, and says so on its
- * own face: the filled cell carries `in the prompt`, the name carries `not sent` — the name is how
- * YOU will find the tile, and it is not the model's.
+ * Two columns under the `SOURCE PICTURE` rule: the source cell on the left, the NAME field on the
+ * right. Each of the two knows whether it TRAVELS TO THE MODEL, and says so on its own face: the
+ * filled cell carries `in the prompt`, the name carries `not sent` — the name is how YOU will find
+ * the tile, and it is not the model's.
  *
  * ═══ ONE DOOR, NOT TWO (owner) ═════════════════════════════════════════════════════════════════
  *
@@ -69,9 +104,14 @@ export function PatternInput({
   const [cropping, setCropping] = useState(false);
 
   return (
-    <div data-pattern-input='' className='grid grid-cols-1 gap-5 md:grid-cols-2'>
+    <div data-pattern-input='' className='flex flex-wrap items-start gap-3'>
       {/* ─── the source cell ────────────────────────────────────────────────────────────── */}
-      <div ref={slotRef} data-pattern-source={sourceId || 'empty'} className='flex max-w-[220px] flex-col gap-1'>
+      <div
+        ref={slotRef}
+        data-pattern-source={sourceId || 'empty'}
+        style={CELL_STYLE}
+        className='flex min-w-0 flex-col gap-1'
+      >
         {disabled && !sourceUrl ? (
           <span
             data-inert='this card is read-only for you — a run spends money, so attaching its input stops here too'
@@ -83,12 +123,11 @@ export function PatternInput({
         ) : (
           <MediaSlot
             aspectRatio={['Custom']}
-            /* THE EMPTY CELL IS SHORT — the height of the NAME column beside it, as on the
-               prototype — and the FILLED cell is the square the tile will be. A 220 px square of
-               stripes before anything is in it reads as a picture that failed to load. */
-            frameAspect={sourceUrl ? '1/1' : '4/1'}
+            /* ONE SQUARE FOR BOTH STATES (owner): the empty cell is the square the tile will be,
+               not a band the height of the column beside it. */
+            frameAspect='1/1'
             label='source picture *'
-            hint='click to fill'
+            hint={null}
             purpose='design · the picture a pattern is made from'
             showVideos={false}
             editMode={!disabled}
@@ -103,6 +142,13 @@ export function PatternInput({
             }}
             onClear={sourceUrl && !disabled ? onClear : undefined}
           />
+        )}
+
+        {/* THE CAPTION OF THE EMPTY CELL: the three gestures, one line, in the strip's words. */}
+        {!sourceId && !disabled && (
+          <Text size='micro' variant='label' component='span' data-source-hint='' className='leading-tight'>
+            {GESTURES}
+          </Text>
         )}
 
         {/* THE CAPTION OF A FILLED CELL: the picture's name and where it goes. The API carries no
@@ -130,7 +176,7 @@ export function PatternInput({
       </div>
 
       {/* ─── the name ───────────────────────────────────────────────────────────────────── */}
-      <div className='flex min-w-0 flex-col gap-1'>
+      <div style={NAME_STYLE} className='flex flex-col gap-1'>
         <label className='flex flex-col gap-0.5' htmlFor='design-pattern-name'>
           <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
             name <b className='text-textColor'>*</b>

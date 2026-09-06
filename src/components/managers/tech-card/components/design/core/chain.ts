@@ -304,12 +304,22 @@ export function stepDone(id: StepId, ctx: ChainCtx): boolean {
 }
 
 /**
- * The first link of the chain a person can take up right now: not on screen, not done, not skipped,
- * and either open or refusing only over its own input. ON MODEL is not in the queue — it is aside.
+ * The first link of the chain a person can take up right now: not on screen, not done, NOT
+ * OPTIONAL, and either open or refusing only over its own input. ON MODEL is not in the queue — it
+ * is aside.
+ *
+ * ⚠ OPTIONAL STEPS ARE PASSED OVER, AND THIS IS WHAT PUTS THE WORD «NEXT» ON THE RAIL AT ALL. The
+ * queue used to hand «next» to PATTERN the moment the flat was done — but PATTERN's cell prints
+ * `optional` (the check in `stepState` comes first), so the word went to a cell that could not
+ * show it, FABRIC RENDER read `ready`, and no cell on the rail said NEXT (the mock-up, `_core.js`
+ * `nextUp`, says it on FABRIC RENDER after FLAT DONE). A garment without a print is still a
+ * garment: the chain's next link after the flat is the render, and the pattern is a place one may
+ * go, not the place one is sent. `nearestBlock` skips optional steps for the same reason.
  */
 export function nextUp(ctx: ChainCtx): StepId | null {
   for (const s of STEPS) {
     if (s.id === ctx.now) continue;
+    if (s.optional) continue;
     if (stepDone(s.id, ctx)) continue;
     const g = chainGate(s.id, ctx);
     if (g.ok || g.own) return s.id;
@@ -324,7 +334,9 @@ export function nextUp(ctx: ChainCtx): StepId | null {
  *     here» is true of exactly one cell;
  *   · `optional` WINS over `blocked` on purpose — an optional step nobody can run right now holds
  *     nobody up, and calling it blocked would announce an obstacle where there is only a skip;
- *   · `next` goes to EXACTLY one step, otherwise it stands on three cells and stops meaning anything.
+ *   · `next` goes to EXACTLY one step, otherwise it stands on three cells and stops meaning anything
+ *     — and never to an optional one: `nextUp` passes those over, so the word lands on a cell that
+ *     can print it (FABRIC RENDER after the flat, not PATTERN).
  *
  * `skipped` is in the vocabulary and has no writer yet: the product keeps no «skip PATTERN» mark
  * (a new form field is not this phase's to add), so an optional step reads `optional` or `done`.
@@ -380,6 +392,11 @@ export function bandHasPictures(band: GetDesignBandResponse): boolean {
  * with pictures opens on the first link not yet done (`nextUp`), and a card whose chain is complete
  * opens where it started. Decided ONCE per card by the composer, not followed live — followed
  * live, the step would jump under a person the moment a run finished.
+ *
+ * «NOT YET DONE» PASSES OVER THE OPTIONAL PATTERN, as `nextUp` does: a card with a finished flat
+ * opens on FABRIC RENDER, not on a print it may never want — the mock-up's own opening, and the
+ * same cell the rail marks NEXT. (Before `nextUp` skipped optional steps such a card opened on
+ * PATTERN, i.e. on a step the rail itself did not call next.)
  */
 export function defaultStep(ctx: ChainCtx): StepId {
   if (ctx.bandless || !bandHasPictures(ctx.band)) return 'card';

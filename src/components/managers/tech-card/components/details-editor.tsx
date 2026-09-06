@@ -9,6 +9,7 @@ import Input from 'ui/components/input';
 import Media from 'ui/components/media';
 import { MediaViewer, MediaViewerItem } from 'ui/components/media-viewer';
 import { Pill } from 'ui/components/pill';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { Toolbar } from 'ui/components/toolbar';
@@ -44,11 +45,16 @@ import { detailAspects, detailKeyLabel } from './tech-card-options';
  * одной страницы читалось бы как два разных поля. Строки при этом никуда не деваются: этот орган их
  * не видит, не удаляет и в пикер не предлагает.
  *
- * ═══ ШАПКА БЛОКА — У КОМПОЗИТОРА (`design/studio-tab.tsx`, заморожен) ═══════════════════════════
+ * ═══ ШАПКА БЛОКА — СВОЯ, И РЯД ПИЛЮЛЬ СТОИТ В НЕЙ (r1, по макету `step-1.png`) ═════════════════
  *
- * Слота `action` она не отдаёт, поэтому правый угол макета (`FROM THE MOODBOARD · N OF M DRAFTED
- * ASPECTS · + ASPECT · MOODBOARD MOVED ON`) стоит первым рядом блока, прижатый вправо.
- * `ConstructionAction` экспортирован — как только композитор отдаст `action`, ряд переезжает туда.
+ * Редактор рисует СВОЮ `Section` — `construction · described aspect by aspect` — и ставит
+ * `ConstructionAction` (`FROM THE MOODBOARD · N OF M DRAFTED ASPECTS · + ASPECT · MOODBOARD MOVED
+ * ON`) в её `action`, в правый угол линейки, как макет. Раньше обёртку держал композитор
+ * (`design/studio-tab.tsx`) и слота `action` не отдавал, и ряд стоял первой строкой ПОД линейкой.
+ * Счёты (`drafted`, `allKeys`) и дверь `+ aspect` знает только этот файл, поэтому обёртка здесь, а
+ * не у композитора — тем же приёмом, что у `MaterialSlots`. Экземпляр по-прежнему один
+ * (`components/index.tsx` отдаёт его в студию пропом `constructionAspects`), и композитор кладёт
+ * его в стек КАК ЕСТЬ, без своей `Section` вокруг, — иначе коробка в коробке.
  *
  * ═══ ДВЕРЬ «FROM CONSTRUCTION ▸ · pastes N lines» ════════════════════════════════════════════════
  *
@@ -224,14 +230,21 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
   );
 
   return (
-    <div className='space-y-2.5' data-c19-aspects=''>
-      <ConstructionAction
-        techCardId={techCardId}
-        drafted={drafted}
-        total={allKeys.length}
-        add={addChip}
-      />
-
+    /* СВОЯ `Section`, ряд пилюль и дверь `+ aspect` — в её `action` (разбор в шапке файла).
+       `data-c19-aspects` — якорь проб, остался на содержимом блока. */
+    <Section
+      title='construction'
+      question='· described aspect by aspect'
+      action={
+        <ConstructionAction
+          techCardId={techCardId}
+          drafted={drafted}
+          total={allKeys.length}
+          add={addChip}
+        />
+      }
+    >
+      <div className='space-y-2.5' data-c19-aspects=''>
       {allKeys.length === 0 && (
         <EmptyState action={addChip}>
           <span className='uppercase text-textColor'>no aspects yet</span>
@@ -412,14 +425,16 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
         onOpenChange={(open) => !open && setViewer(null)}
         onIndexChange={(index) => setViewer((v) => (v ? { ...v, index } : v))}
       />
-    </div>
+      </div>
+    </Section>
   );
 }
 
 /**
  * ПРАВЫЙ УГОЛ ШАПКИ БЛОКА (макет: `zFromBoard() + counter(drafted, 'drafted aspect', n) +
- * chip('+ aspect') + zMoved()`). Экспортирован для `action` композитора; пока тот заморожен — стоит
- * первым рядом блока. Счётчик не рисуется при нуле аспектов (макет: «не рисуется, если аспектов 0»).
+ * chip('+ aspect') + zMoved()`). Стоит в `action` собственной `Section` редактора (см. шапку
+ * файла); экспорт оставлен композитору, который захочет собрать блок из частей. Счётчик не
+ * рисуется при нуле аспектов (макет: «не рисуется, если аспектов 0»).
  */
 export function ConstructionAction({
   techCardId,

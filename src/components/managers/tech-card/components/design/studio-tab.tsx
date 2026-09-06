@@ -53,9 +53,10 @@ import { useDesignBand } from './use-design-band';
  * The CHAIN RAIL stands at the TOP — «where this card stands», six cells and the aside, the LOCKED
  * bar under them — and under the rail there is EXACTLY ONE STEP:
  *   · step 0 CARD DETAILS  → the header of the card (`cardDetails`, a slot from `index.tsx`);
- *   · step 1 MOODBOARD     → the board with callouts, description and the construction draft
- *                            inside, then GENERAL INFORMATION, CONSTRUCTION, MATERIAL SLOTS (and
- *                            the colourway proposals, a product block the prototype has no row for);
+ *   · step 1 MOODBOARD     → the board with its callouts, DESCRIPTION and CONSTRUCTION DRAFT (four
+ *                            blocks, all drawn by `MoodBoard`), then GENERAL INFORMATION,
+ *                            CONSTRUCTION, MATERIAL SLOTS (and the colourway proposals, a product
+ *                            block the prototype has no row for) — each organ draws its OWN block;
  *   · steps 2–5 and the aside → the generative screens (flat · pattern · fabric render · 3D · on
  *                            model), each with its own input, GENERATE and history.
  * Nothing is «always on screen above the rail» any more: the previous build stacked steps 0 and 1
@@ -124,10 +125,13 @@ export function StudioTab({
    * (`components/index.tsx`). Пустой слот не рисует ничего: полустрочка `{constructionAspects}`
    * ниже — это `undefined`, а не пустая секция.
    *
-   * `Section`-ОБЁРТКА ЖИВЁТ ЗДЕСЬ, А НЕ У ВЫЗЫВАЮЩЕГО: порядок и материал блоков полосы DESIGN —
-   * решение этого файла. Вызывающий отдаёт СОДЕРЖИМОЕ; имя печатной секции, её вопрос и белый
-   * грунт под ним назначаются тут (`DetailsEditor` рисует голый div — без обёртки его карточки
-   * стояли бы прямо на сером грунте страницы, DESIGN.md, Filled-Block Rule).
+   * `Section`-ОБЁРТКА — У САМОГО ОРГАНА (r1). `DetailsEditor` рисует СВОЙ блок `construction ·
+   * described aspect by aspect` и ставит ряд `FROM THE MOODBOARD · N OF M DRAFTED ASPECTS · +
+   * ASPECT · MOODBOARD MOVED ON` в его `action` — в правый угол линейки, как макет (`step-1.png`).
+   * Раньше обёртку держал этот файл и слота `action` не отдавал, и ряд стоял ПОД линейкой; счёты
+   * и дверь `+ aspect` знает только редактор, поэтому блок собран там, а не тянет их сюда пропами.
+   * Этот файл решает ПОРЯДОК блоков полосы; узел кладётся в стек как есть — обернуть его ещё раз
+   * значило бы коробку в коробке. То же у `ConstructionGeneralInfo`.
    */
   constructionAspects?: ReactNode;
   /**
@@ -330,7 +334,7 @@ export function StudioTab({
     // A card that has not been created yet has no band and cannot have one: every write below is
     // keyed by tech_card_id. Saying so is more useful than rendering seven empty organs.
     screen = (
-      <Section title='studio' question='— what this style looks like, before it is frozen'>
+      <Section title='studio' question='· what this style looks like, before it is frozen'>
         <Text variant='inactive' size='control'>
           Save this tech card first. The studio hangs off the card, so there is nothing to hang it
           on yet — card details is the one step it has.
@@ -350,11 +354,12 @@ export function StudioTab({
           <PickModeProvider>
             <div data-step-screen={step} className='contents'>
               <PickBanner />
-              {/* ═══ STEP 1 · MOODBOARD — the board (callouts, description and the construction
-                  draft live inside it), then what the draft writes into: GENERAL INFORMATION,
-                  CONSTRUCTION, MATERIAL SLOTS. The order is the prototype's step screen
-                  (`_step-mood.js`) top to bottom, and reads as a story: what the style looks like,
-                  what it is, how it is made, what it is made of.
+              {/* ═══ STEP 1 · MOODBOARD — the board with its callouts, the DESCRIPTION and the
+                  CONSTRUCTION DRAFT (four blocks, drawn by `MoodBoard` as its own stack), then what
+                  the draft writes into: GENERAL INFORMATION, CONSTRUCTION, MATERIAL SLOTS. The
+                  order is the prototype's step screen (`_step-mood.js`) top to bottom, and reads
+                  as a story: what the style looks like, what it is, how it is made, what it is
+                  made of.
 
                   ⚠ THE ONE `useFieldArray` OVER `callouts` LIVES IN THE BOARD (`mood-callouts.tsx`),
                   and this is the only step that mounts it — zero or one in the tree, never two
@@ -365,25 +370,18 @@ export function StudioTab({
               {step === 'mood' && (
                 <>
                   <MoodBoard techCardId={techCardId} disabled={readOnly} />
-                  {/* ДВА БЛОКА, А НЕ ОДИН С ДВУМЯ ЯРУСАМИ ВНУТРИ: `Section` запрещает коробку в
-                      коробке («A block NEVER contains another block»), поэтому порядок «общие
-                      сведения → аспекты → слоты» выражается соседством в стеке, а не вложением.
-                      Слот аспектов может быть пуст (владелец шапки отдаёт сюда свой единственный
-                      `DetailsEditor`); пустой он не рисует ни секции, ни отступа. */}
-                  <Section
-                    title='general information'
-                    question='— what this style is, before how it is made'
-                  >
-                    <ConstructionGeneralInfo isAux={isAux} readOnly={readOnly || !canWriteCard} />
-                  </Section>
-                  {constructionAspects && (
-                    <Section
-                      title='construction'
-                      question='— described aspect by aspect; prints after the concept'
-                    >
-                      {constructionAspects}
-                    </Section>
-                  )}
+                  {/* КАЖДЫЙ ОРГАН — СВОЙ БЛОК, И ШАПКА С `action` У НЕГО (r1, макет `step-1.png`):
+                      `ConstructionGeneralInfo` рисует `general information · what this style is`
+                      с рядом `FROM THE MOODBOARD · N OF M DRAFTED FIELDS · MOODBOARD MOVED ON` в
+                      правом углу линейки, `DetailsEditor` — `construction · described aspect by
+                      aspect` со своим рядом и дверью `+ aspect`; счёты знают только они. Обёртки
+                      здесь больше нет — обернуть их ещё раз значило бы коробку в коробке
+                      («A block NEVER contains another block»), а порядок «общие сведения → аспекты
+                      → слоты» выражается соседством в стеке. Слот аспектов может быть пуст
+                      (владелец шапки отдаёт сюда свой единственный `DetailsEditor`); пустой он не
+                      рисует ни секции, ни отступа. */}
+                  <ConstructionGeneralInfo isAux={isAux} readOnly={readOnly || !canWriteCard} />
+                  {constructionAspects}
                   {/* ТАБЛИЦА СЛОТОВ — НА МЕСТЕ СНЯТОЙ СПЕЦИФИКАЦИИ (B-16 / B-19 / B-20). Рисуется
                       ВСЕГДА, даже пустой: пустая спецификация — такое же утверждение о карточке, и
                       именно её пустота зовёт нажать «draft the construction» выше. `Section` у
@@ -406,7 +404,7 @@ export function StudioTab({
               )}
               {step !== 'mood' &&
                 (bandless ? (
-                  <Section title='bench' question='— the flats this style is drawn from'>
+                  <Section title='bench' question='· the flats this style is drawn from'>
                     <Text variant='inactive' size='control'>
                       {error
                         ? `The bench could not be read: ${error.message}`
@@ -524,6 +522,13 @@ export function StudioTab({
                           colorwayId={colorway.colorwayId}
                           colorwayLabel={colorway.label}
                           colorwayArchived={colorway.archived}
+                          /* THE COLOURWAY CHIPS OF THE PAINT GROUP (r1, mock-up `_step-aside.js`
+                             `om:way`): the card's colourways and THE SAME SETTER the select on the
+                             rail calls. The one writer of the choice stays this file's
+                             `useColorwayChoice`; the chips are a second door to it, not a second
+                             state, and nothing is written into the form. */
+                          colorways={colorway.colorways}
+                          onColorwayChange={colorway.setColorwayId}
                         />
                         {/* J-31 / E-23: sorted to on-model, closed by default. */}
                         <GenerationHistory

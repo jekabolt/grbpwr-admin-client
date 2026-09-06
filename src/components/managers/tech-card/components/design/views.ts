@@ -71,22 +71,26 @@ export const DESIGN_VIEW_KEYS = [...SILHOUETTE_VIEWS, DETAIL_VIEW] as const;
 export type DesignViewKey = (typeof DESIGN_VIEW_KEYS)[number];
 
 /**
- * The one casing. Lower case with a capitalised side letter: `side L` reads as a side named L,
- * `SIDE L` reads as a shout, and the admin's own type scale already uppercases labels where it
- * wants them uppercase (`Text variant='uppercase'`). Casing belongs to the presentation, not to the
- * string — an organ that wants shouting asks the type system for it and does not bake it in here.
+ * The one casing: lower case, all of it. The admin's own type scale uppercases labels where it
+ * wants them uppercase (`Text variant='uppercase'`), so casing belongs to the presentation, not to
+ * the string — an organ that wants shouting asks the type system for it and does not bake it in
+ * here.
  *
- * `three-quarter L` and not `¾ L`: the glyph reads as a fraction of a side in a 9px cell, and the
- * owner named the view in words. Fifteen characters fit the narrowest cell of the band (132px, about
- * twenty-four nano characters) with room for the badge beside it.
+ * THE SIDES ARE SPELLED IN WORDS AND THE THREE-QUARTERS AS A FRACTION — the owner's ruling on the
+ * beta (2026-09-06), verbatim: «вместо THREE-QUARTER R пиши 3/4 right и тд». So `side left`, not
+ * `side L`; `3/4 right`, not `three-quarter R`. The earlier argument for `three-quarter L` («the
+ * owner named the view in words», «fifteen characters fit the narrowest cell») is retired by that
+ * word: `3/4 right` is nine characters and reads as a side at a glance, which is the whole point of
+ * a label on a 9px cell. `¾` is still not used — the single glyph shrinks to a smudge at nano size
+ * and the owner wrote the fraction with a slash.
  */
 const VIEW_LABELS: Record<string, string> = {
   front: 'front',
   back: 'back',
-  side_l: 'side L',
-  side_r: 'side R',
-  three_quarter_l: 'three-quarter L',
-  three_quarter_r: 'three-quarter R',
+  side_l: 'side left',
+  side_r: 'side right',
+  three_quarter_l: '3/4 left',
+  three_quarter_r: '3/4 right',
   detail: 'detail',
 };
 

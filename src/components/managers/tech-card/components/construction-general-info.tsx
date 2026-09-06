@@ -1,13 +1,12 @@
 import { useId, type JSX, type ReactNode } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
+import { Section } from 'ui/components/section';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
-import { Counter } from './design/core';
 import {
   BoardMovedPill,
-  FromMoodboardPill,
   ProvenancePill,
   useProvenance,
   type Provenance,
@@ -32,11 +31,19 @@ import { TechCardFormData } from './schema';
 // `useProvenance`); поле без записи в журнале пилюли не носит вовсе (не `by hand`: журнал
 // сессионный, и после перезагрузки надиктованное неотличимо от набранного).
 //
-// ⚠ ШАПКА БЛОКА — У КОМПОЗИТОРА (`design/studio-tab.tsx`, заморожен), и слота `action` она этому
-// блоку не отдаёт. Макет ставит в правый угол шапки `FROM THE MOODBOARD · N OF 4 DRAFTED FIELDS ·
-// MOODBOARD MOVED ON`; здесь они стоят ПЕРВЫМ РЯДОМ блока, прижатые вправо, — тот же состав, на
-// одну строку ниже. Как только композитор отдаст `action`, ряд переезжает туда без правки органов:
-// `GeneralInformationAction` ниже экспортирован ровно для этого.
+// ═══ ШАПКА БЛОКА — СВОЯ, И РЯД ПИЛЮЛЬ СТОИТ В НЕЙ (r1, по макету `step-1.png`) ═════════════════
+//
+// Блок рисует СВОЮ `Section` — `general information · what this style is` — и ставит
+// `GeneralInformationAction` (после рулинга 11 — только `MOODBOARD MOVED ON`, когда он есть)
+// в её `action`, то есть в правый угол линейки, ровно как макет. Раньше обёртку держал композитор
+// (`design/studio-tab.tsx`) и слота `action` не отдавал, поэтому ряд стоял первой строкой ПОД
+// линейкой — на бете это прочли как расхождение с макетом. Обёртка переехала сюда по той же
+// причине, по какой её держат `MaterialSlots` и `ConstructionDraft`: счёты знает только орган
+// (`useProvenance`), а `Section` с `action` — это один узел, и делить его между двумя файлами
+// значило бы тянуть счёты наверх пропами ради одной строки.
+//
+// ⚠ ГРАНИЦА БЛОКА ПОЭТОМУ ЗДЕСЬ: композитор кладёт этот орган в стек как есть, без своей `Section`
+// вокруг, — иначе получится коробка в коробке (DESIGN.md, «A block NEVER contains another block»).
 //
 // ═══ ЧЕМ ПРОДУКТ ОТЛИЧАЕТСЯ ОТ МАКЕТА, И ПОЧЕМУ ЭТО НЕ РАСХОЖДЕНИЕ ═══════════════════════════
 //
@@ -44,8 +51,9 @@ import { TechCardFormData } from './schema';
 // поле с описанием доски (V-16, владелец: «CONCEPT & CONSTRUCTION DESCRIPTION это и есть SHARED
 // NOTE»), и оно стоит блоком DESCRIPTION выше; второго редактора того же поля здесь не заводится.
 // Его место в гриде занимает CATEGORY — поле карточки, которого в макете нет, но которое обязано
-// где-то стоять (aux-карта его прячет, см. ниже). Считаются черновичными поэтому ТРИ поля: fit,
-// silhouette, fabric — `N of 3 drafted fields`; счётчик обещает ровно то, что черновик умеет.
+// где-то стоять (aux-карта его прячет, см. ниже). Черновичных полей здесь три: fit, silhouette,
+// fabric — их происхождение читается пилюлей у поля; общий счётчик «N of 3 drafted fields» владелец
+// снял (рулинг 11).
 //
 // ═══ КРУГ 20 — ЧТО ВЛАДЕЛЕЦ ОТСЮДА ЗАБРАЛ, И ЧЕМ ЭТО ОПЛАЧЕНО ════════════════════════════════
 //
@@ -77,20 +85,26 @@ export function ConstructionGeneralInfo({
   const provFit = prov({ kind: 'fit' });
   const provSilhouette = prov({ kind: 'detail', key: 'silhouette' });
   const provFabric = prov({ kind: 'detail', key: 'fabric' });
-  const draftable = [...(isAux ? [] : [provFit]), provSilhouette, provFabric];
-  const drafted = draftable.filter((p) => p === 'drafted').length;
 
   return (
-    <div className='space-y-2.5' data-c19-general=''>
-      <GeneralInformationAction
-        techCardId={techCardId}
-        drafted={drafted}
-        total={draftable.length}
-      />
+    /* СВОЯ `Section`, ряд пилюль — в её `action` (разбор в шапке файла). Пояснялка в грамматике
+       макета: «· что это». */
+    <Section
+      title='general information'
+      question='· what this style is'
+      action={
+        <GeneralInformationAction techCardId={techCardId} />
+      }
+    >
       {/* Грид два на два: подписи одного ряда всегда на одной линии, колонки равной ширины, которые
           содержимое растянуть не может (`minmax(0,1fr)`), перенос в один столбец на узком экране.
-          16px между КОЛОНКАМИ, 10px между РЯДАМИ — тот же ритм, каким `Section` кладёт детей. */}
-      <div className='grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2' data-c19-general-grid=''>
+          16px между КОЛОНКАМИ, 10px между РЯДАМИ — тот же ритм, каким `Section` кладёт детей.
+          `data-c19-general` — якорь проб, остался на содержимом блока. */}
+      <div
+        className='grid grid-cols-1 gap-x-4 gap-y-2.5 sm:grid-cols-2'
+        data-c19-general=''
+        data-c19-general-grid=''
+      >
         {/* Auxiliary cards carry no fit and no category — the same gate the CLASSIFICATION block
             applied. У aux-карты классификацию задаёт AUXILIARY TYPE в шапке; скрывается ТОЛЬКО
             орган, значение `categoryId` остаётся в форме и раунд-трипится. */}
@@ -117,31 +131,21 @@ export function ConstructionGeneralInfo({
           />
         </div>
       </div>
-    </div>
+    </Section>
   );
 }
 
 /**
- * ПРАВЫЙ УГОЛ ШАПКИ БЛОКА (макет: `zFromBoard() + counter(written, 'drafted field', 4) +
- * zMoved()`). Экспортирован, чтобы композитор мог поставить его в `action` своей `Section`;
- * пока композитор заморожен — стоит первым рядом блока (см. шапку файла).
+ * ПРАВЫЙ УГОЛ ШАПКИ БЛОКА. Макет рисовал здесь `zFromBoard() + counter(written, 'drafted field') +
+ * zMoved()`; владелец (2026-09-06, рулинг 11): «в GENERAL INFORMATION FROM THE MOODBOARD 0 OF 3
+ * DRAFTED FIELDS не нужны» — пилюля источника и счётчик сняты. Остаётся ОДНО предупреждение —
+ * «moodboard moved on», когда доска ушла вперёд после черновика (оно про потерю, не про счёт).
+ * Происхождение каждого поля по-прежнему стоит пилюлей у самого поля (`ProvenancePill`).
+ * Экспорт оставлен — композитору, который захочет собрать блок из частей.
  */
-export function GeneralInformationAction({
-  techCardId,
-  drafted,
-  total,
-}: {
-  techCardId: number;
-  drafted: number;
-  total: number;
-}): JSX.Element {
+export function GeneralInformationAction({ techCardId }: { techCardId: number }): JSX.Element {
   return (
     <div className='flex flex-wrap items-center justify-end gap-1.5' data-c19-general-action=''>
-      <FromMoodboardPill />
-      {/* `Counter` не проносит `data-*`; якорь пробы — на обёртке. */}
-      <span className='contents' data-c19-general-drafted=''>
-        <Counter n={drafted} noun='drafted field' total={total} />
-      </span>
       <BoardMovedPill techCardId={techCardId} />
     </div>
   );
