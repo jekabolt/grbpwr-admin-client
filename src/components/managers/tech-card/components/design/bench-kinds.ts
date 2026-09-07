@@ -86,7 +86,26 @@ export function pictureBenchKind(
  * and `recolorRuns` in `onmodel/model.ts` — and the fourth missing copy of the FIRST axis is
  * already recorded as a shipped bug (L-1/L-5).
  */
-export const REPRESENTATIONS = ['flat', 'pattern', 'render', 'threed', 'onmodel'] as const;
+export const REPRESENTATIONS = [
+  'flat',
+  'pattern',
+  'render',
+  'threed',
+  'onmodel',
+  /**
+   * ⚠ `playground` IS ONE REPRESENTATION OVER TWO RUN KINDS — `freeform` and `cutout`. They are two
+   * doors (two providers, two keys) and one ROOM: a person switches between them with a chip on the
+   * same screen, the history sorts them into one shelf, and the rail counts them on one cell. A
+   * sixth and seventh member would have split that room in the one place the studio speaks about
+   * rooms.
+   *
+   * IT IS NOT AN ARTIFACT KIND. `ArtifactKind` stays a five-member union on purpose (§8 q.6: the
+   * playground's output is neither a plate of the bench nor a page of the sheet), so a playground
+   * output taken onto the card by hand degrades to the card's own kind, exactly like any other
+   * hand-uploaded picture.
+   */
+  'playground',
+] as const;
 export type Representation = (typeof REPRESENTATIONS)[number];
 
 /**
@@ -138,6 +157,10 @@ export function runRepresentation(
       return 'threed';
     case 'pattern':
       return 'pattern';
+    case 'freeform':
+    case 'cutout':
+      // TWO KINDS, ONE ROOM — see the argument on `REPRESENTATIONS`.
+      return 'playground';
     default:
       return null;
   }
@@ -206,6 +229,10 @@ export function pictureRepresentation(
   if (kind === 'render') return 'render';
   if (kind === 'threed') return 'threed';
   if (kind === 'pattern') return 'pattern';
+  /* THE FALLBACK IS REACHED ONLY OFF THE FEED PAGE, and there the picture's own kind is the last
+     witness of the room it came from: the server files a playground output as `freeform`/`cutout`
+     explicitly (`DesignPictureKindOfRun`), rather than letting it fall into `flat` by default. */
+  if (kind === 'freeform' || kind === 'cutout') return 'playground';
   return null;
 }
 

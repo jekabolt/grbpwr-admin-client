@@ -11,7 +11,7 @@ import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
 import type { TechCardFormData } from '../schema';
 import { pictureRepresentation } from './bench-kinds';
 import {
-  ASIDE,
+  ASIDES,
   STEPS,
   chainGate,
   doneCount,
@@ -225,6 +225,11 @@ export function useChainCtx({
     render: shown.filter((p) => repOf(p) === 'render').length,
     threed: countThreedResults(shown.filter((p) => repOf(p) === 'threed')),
     onmodel: shown.filter((p) => repOf(p) === 'onmodel').length,
+    /* THE PLAYGROUND'S OWN COUNT, THROUGH THE SAME ONE CLASSIFIER as its four neighbours (G-1):
+       `freeform` and `cutout` are two run kinds of ONE representation, and asking the classifier
+       rather than comparing `run.kind` here is what keeps the rail's tick and the screen's list
+       from disagreeing about the same card. */
+    playground: shown.filter((p) => repOf(p) === 'playground').length,
   };
 
   return {
@@ -257,7 +262,7 @@ function doorLabel(door: StepId): string {
     case 'mood':
       return '+ picture ›';
     default:
-      return `go to ${[...STEPS, ASIDE].find((s) => s.id === door)?.label ?? door} ›`;
+      return `go to ${[...STEPS, ...ASIDES].find((s) => s.id === door)?.label ?? door} ›`;
   }
 }
 
@@ -308,7 +313,7 @@ export function ChainRail({
 
   const block = nearestBlock(ctx);
   const blockStep = block ? STEPS.find((s) => s.id === block.stepId) : null;
-  const doorStep = block?.door ? [...STEPS, ASIDE].find((s) => s.id === block.door) : null;
+  const doorStep = block?.door ? [...STEPS, ...ASIDES].find((s) => s.id === block.door) : null;
 
   return (
     <Section
@@ -329,8 +334,19 @@ export function ChainRail({
             <div className='flex items-stretch border border-borderColor'>
               {STEPS.map((s, i) => cell(s, i > 0 ? 'border-l border-hairline' : undefined))}
             </div>
+            {/* ═══ THE ASIDES SHARE THE SECOND ROW, AND THE PLAYGROUND MAY NOT BE ON IT ═══════
+                Both are rooms rather than links, so they stand on one full-width row pressed to
+                the first (`border-t-0`) and count in neither «N of 6 steps» nor the queue.
+
+                ⚠ THE PLAYGROUND CELL IS DRAWN ONLY WHERE THE SERVER OFFERS THE ROUTE, and the
+                rule is the STEP's own (`ASIDES[].visible`, core/chain.ts) — the rail asks it, so
+                that «which servers have a playground» is not written in two places. On a binary
+                older than `freeform_presets` the row holds ON MODEL alone, exactly as it did
+                before this step existed. */}
             <div className='flex items-stretch border border-t-0 border-borderColor'>
-              {cell(ASIDE)}
+              {ASIDES.filter((s) => !s.visible || s.visible(ctx.band)).map((s, i) =>
+                cell(s, i > 0 ? 'border-l border-hairline' : undefined),
+              )}
             </div>
           </div>
         </div>

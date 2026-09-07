@@ -130,6 +130,11 @@ export function recallTargetKind(run: common_DesignRun, mode: RecallMode): Desig
   const kind = (run.kind ?? '').trim().toLowerCase();
   if (kind === 'render') return 'render';
   if (kind === 'threed') return 'threed';
+  /* ПЛЕЙГРАУНД ЗАБИРАЕТ СВОЙ ВХОД СЕБЕ. Его вход — не референсы промпта и не слоты верстака, а
+     СТОЛ (`params.freeform.items[]` с областями), и разложить его может только тот экран, который
+     стол и рисует. Без этой строки жест уводил бы стол прошлого прогона во ФЛЭТ — то есть
+     превращал бы размеченные картинки в безымянные референсы чужого промпта, молча. */
+  if (kind === 'freeform' || kind === 'cutout') return 'playground';
   return 'flat';
 }
 
@@ -302,7 +307,12 @@ function useRegisterRecallHost(techCardId: number, kind: DesignKind, active: boo
 }
 
 function kindLabel(kind: DesignKind): string {
-  return kind === 'render' ? 'fabric render' : kind === 'threed' ? '3D' : 'flat';
+  if (kind === 'render') return 'fabric render';
+  if (kind === 'threed') return '3D';
+  if (kind === 'playground') return 'playground';
+  if (kind === 'onmodel') return 'on model';
+  if (kind === 'pattern') return 'pattern';
+  return 'flat';
 }
 
 /* ────────────────────────────── what a run can hand back ────────────────────────────── */

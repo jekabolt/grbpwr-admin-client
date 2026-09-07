@@ -31,6 +31,7 @@ import { DesignCapabilityProvider } from './capability';
 import { MaterialSlots } from './material-slots';
 import { MoodBoard } from './mood-board';
 import { OnModelStudio } from './onmodel';
+import { PlaygroundStudio } from './playground';
 import { PatternStudio } from './pattern';
 import { useStudioKindSwitch } from './history-recall';
 import { PictureGalleryProvider } from './picture-tile';
@@ -571,6 +572,33 @@ export function StudioTab({
                           techCardId={techCardId}
                           disabled={readOnly}
                           defaultRep='onmodel'
+                          defaultOpen={false}
+                        />
+                      </>
+                    )}
+                    {/* ═══ ASIDE · PLAYGROUND — pictures, words, one run. NO colourway prop, and
+                        that is the contract rather than an omission: this kind binds none, and a
+                        run carrying `colorway_id > 0` is refused (`colorway_forbidden`). No
+                        remount on a change of colourway either — there is nothing here a colour
+                        could invalidate.
+
+                        ⚠ THE CELL THAT LEADS HERE IS DRAWN ONLY WHERE THE SERVER OFFERS THE ROUTE
+                        (`ASIDES[].visible`), but the STEP is mounted whenever the address names
+                        it: a link pasted from a contour that has the route must land on a screen
+                        that explains itself, not on a blank. The screen says «no playground route
+                        is wired on this server» and names the keys. */}
+                    {step === 'playground' && (
+                      <>
+                        <PlaygroundStudio
+                          band={band}
+                          techCardId={techCardId}
+                          disabled={readOnly}
+                        />
+                        <GenerationHistory
+                          band={band}
+                          techCardId={techCardId}
+                          disabled={readOnly}
+                          defaultRep='playground'
                           defaultOpen={false}
                         />
                       </>

@@ -35,7 +35,14 @@ export type StartRunInput = {
    * against its own fingerprint — a second answer to «is this press the same intent as the last
    * one», which is exactly the question a duplicated paid job turns on. One verb, one door.
    */
-  kind: 'flat' | 'render' | 'threed' | 'recolor' | 'pattern';
+  /**
+   * ⚠ `freeform` AND `cutout` JOINED FOR THE THIRD TIME FOR THE SAME REASON — the playground spends
+   * the image key's money (and, on the cut-out, the fal key's), so both must be counted against the
+   * day and both must show up in the ONE history. They are also the reason this union is a union
+   * and not a string: `cutout` is a run kind of its own, not a preset of `freeform`, and a screen
+   * that could send either spelling would be a screen whose refusals depend on a typo.
+   */
+  kind: 'flat' | 'render' | 'threed' | 'recolor' | 'pattern' | 'freeform' | 'cutout';
   /** The delta phrase the human typed; the caption of the history row. May be empty. */
   ask: string;
   params: common_DesignRunParams;

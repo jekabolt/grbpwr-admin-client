@@ -191,6 +191,7 @@ const REP_NOUN: Record<Representation, string> = {
   render: 'render',
   threed: '3D',
   onmodel: 'on model',
+  playground: 'playground',
 };
 
 function kindWord(run: Pick<common_DesignRun, 'kind'>, rep: Representation | null): string {
@@ -199,6 +200,10 @@ function kindWord(run: Pick<common_DesignRun, 'kind'>, rep: Representation | nul
   // not a drawing and a vector redraw is not a fresh sheet, and the history is a record.
   if (kind === 'draft_idea') return 'draft';
   if (kind === 'vector') return 'vector';
+  /* THE CUT-OUT SAYS ITS OWN WORD, for the same reason `vector` and `draft` do: the two playground
+     kinds are one shelf but not one act, and «playground» over a row that removed a background
+     tells a person less than the row already knows. */
+  if (kind === 'cutout') return 'cut-out';
   return rep ? REP_NOUN[rep] : kind || 'run';
 }
 
@@ -907,6 +912,7 @@ const REP_LABEL: Record<RepFilter, string> = {
   render: 'renders',
   threed: '3D',
   onmodel: 'on model',
+  playground: 'playground',
 };
 
 const repLabel = (rep: RepFilter): string => REP_LABEL[rep] ?? String(rep);

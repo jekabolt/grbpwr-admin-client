@@ -42,7 +42,15 @@ import { benchSides, renderGate, threedGate, type Gate } from '../render/model';
  * prefixes the step's `label`, and no string in this file carries a digit as an address.
  */
 
-export type StepId = 'card' | 'mood' | 'flat' | 'pattern' | 'render' | 'threed' | 'aside';
+export type StepId =
+  | 'card'
+  | 'mood'
+  | 'flat'
+  | 'pattern'
+  | 'render'
+  | 'threed'
+  | 'aside'
+  | 'playground';
 
 export type Step = {
   id: StepId;
@@ -53,6 +61,11 @@ export type Step = {
   /** The generative screen this step opens. `card` and `mood` have none: they are steps of the
    *  rail all the same — one screen at a time, like every other — but nothing on them runs. */
   kind?: DesignKind;
+  /**
+   * Whether this step exists on THIS SERVER. Absent = always (every link of the chain, and ON
+   * MODEL). Present on the playground alone — see `ASIDES` for the argument.
+   */
+  visible?: (band: GetDesignBandResponse) => boolean;
 };
 
 /** Every step id, in rail order — the one list a URL value or a form path is checked against. */
@@ -64,6 +77,7 @@ export const STEP_IDS: readonly StepId[] = [
   'render',
   'threed',
   'aside',
+  'playground',
 ];
 
 export function isStepId(x: unknown): x is StepId {
@@ -91,12 +105,42 @@ export const STEPS: readonly Step[] = [
  */
 export const ASIDE: Step = { id: 'aside', n: '', label: 'on model', kind: 'onmodel' };
 
+/**
+ * ═══ THE PLAYGROUND STANDS ASIDE TOO, AND FOR A STRONGER REASON THAN ON MODEL ═════════════════
+ *
+ * ON MODEL is aside because nothing downstream reads what it makes. The playground is aside because
+ * it has no place in the sequence AT ALL: its input is whatever a person laid on the table this
+ * minute, it binds no colourway, and its output is neither a plate of the bench nor an artifact of
+ * the sheet. It is a room, not a link.
+ *
+ * ⚠ THE CELL IS DRAWN ONLY WHERE THE SERVER OFFERS THE ROUTE. `visible` is asked of the BAND, and
+ * the doctrine is «absent ≠ empty»: a binary that predates `freeform_presets` sends nothing and the
+ * cell must not exist (a step a person cannot leave, on a server that refuses it, is worse than no
+ * step); a binary that knows the field sends at least `[]`, the cell exists, and the SCREEN says
+ * which key is missing. Every other step is unconditional, so this is a predicate on the step
+ * rather than a filter written into the rail — the rail would then be the second place that knows
+ * the rule.
+ */
+export const ASIDES: readonly Step[] = [
+  ASIDE,
+  {
+    id: 'playground',
+    n: '',
+    label: 'playground',
+    kind: 'playground',
+    visible: (band) => band.freeformPresets !== undefined,
+  },
+];
+
+/** Every step of the rail, chain and asides together — the list every lookup below walks. */
+const ALL_STEPS: readonly Step[] = [...STEPS, ...ASIDES];
+
 export function stepOfKind(kind: DesignKind): Step {
-  return [...STEPS, ASIDE].find((s) => s.kind === kind) ?? ASIDE;
+  return ALL_STEPS.find((s) => s.kind === kind) ?? ASIDE;
 }
 
 export function stepById(id: StepId): Step {
-  return [...STEPS, ASIDE].find((s) => s.id === id) ?? ASIDE;
+  return ALL_STEPS.find((s) => s.id === id) ?? ASIDE;
 }
 
 /** The generative kind behind a step, or undefined on the two steps that run nothing. */
@@ -170,7 +214,7 @@ export type ChainCtx = {
   /** How many pictures the moodboard holds (form field `moodboardMedia`). */
   moodPictures: number;
   /** Counters the strip already computed with `pictureRepresentation` — not recomputed here. */
-  counts: { pattern: number; render: number; threed: number; onmodel: number };
+  counts: { pattern: number; render: number; threed: number; onmodel: number; playground: number };
   colorway: { id: number; label: string; archived: boolean };
 };
 
@@ -249,6 +293,11 @@ export function chainGate(id: StepId, ctx: ChainCtx): ChainGate {
     case 'aside':
       // `recolorGate(sources)` reads the photos gathered on the screen — local, `own`.
       return { ok: true };
+    case 'playground':
+      // `playgroundGate(draft, preset)` reads the table laid on the screen — local by nature, and
+      // the refusal that is NOT local (no route wired on this server) is printed by the screen
+      // itself, beside the chips that would have offered it. The rail asks; it never decides.
+      return { ok: true };
   }
 }
 
@@ -300,6 +349,8 @@ export function stepDone(id: StepId, ctx: ChainCtx): boolean {
       return ctx.counts.threed > 0;
     case 'aside':
       return ctx.counts.onmodel > 0;
+    case 'playground':
+      return ctx.counts.playground > 0;
   }
 }
 
@@ -344,7 +395,7 @@ export function nextUp(ctx: ChainCtx): StepId | null {
 export function stepState(id: StepId, ctx: ChainCtx): StepState {
   if (ctx.now === id) return 'now';
   if (stepDone(id, ctx)) return 'done';
-  const step = [...STEPS, ASIDE].find((s) => s.id === id);
+  const step = ALL_STEPS.find((s) => s.id === id);
   if (step?.optional) return 'optional';
   const g = chainGate(id, ctx);
   if (!g.ok && !g.own) return 'blocked';
