@@ -1370,6 +1370,29 @@ export type RailProps = {
   nodeSmooth: boolean;
   onNodeConvert: () => void;
   onNodeDelete: () => void;
+  /* ═══ ПОЛОЖЕННЫЕ КАРТИНКИ — ТРЕТИЙ СЛОЙ, И ОН СТОИТ В ГРУППЕ СЛОЁВ ══════════════════════════
+   *
+   * Владелец: «в эдитор добавляй возможность плейсить медиа слоями типо как пуговицы». Дверь одна
+   * — тот же `MediaSlot`, что у шаблона, то есть библиотека, ⌘V и бросок ОДНИМ органом. Второй
+   * кнопки «загрузить» рядом нет и не будет: это была бы вторая дверь в ту же комнату.
+   *
+   * ОРГАНОВ У ВЫБРАННОЙ РОВНО ЧЕТЫРЕ, и ни один из них не повторяет жест. Двигать, тянуть,
+   * крутить и гнуть умеет РАМКА на самой плате — кнопок для этого нет, как их нет и у шаблона
+   * (ряд из семи снесли по слову владельца). Кнопкой выражается только то, что рамкой не
+   * выражается: место в стопке (пара «выше/ниже»), сквозистость и снятие.
+   */
+  picturesCount: number;
+  picsOn: boolean;
+  onPicsOn: () => void;
+  onPicturePick: (media: common_MediaFull[]) => void;
+  /** Номер взятой в руку картинки; `null` — ни одной, и тогда органов ниже нет вовсе. */
+  pictureAt: number | null;
+  /** 0..100. Живёт у выбранной, как непрозрачность шаблона живёт у шаблона. */
+  pictureOpacity: number;
+  onPictureOpacity: (pct: number) => void;
+  onPictureUp: () => void;
+  onPictureDown: () => void;
+  onPictureRemove: () => void;
   onBackdropPick: (media: common_MediaFull[]) => void;
   onBackdropOp: (next: Backdrop) => void;
   /**
@@ -1940,6 +1963,81 @@ export function VectorBrushRail(p: RailProps) {
                 : `${p.baseLabel ?? 'nothing yet'} · starts when a pixel tool is picked`
             }
           />
+        )}
+        {/* ═══ КАРТИНКИ — СЛОЙ МЕЖДУ ПИКСЕЛЯМИ И ЛИНИЯМИ, И СТРОКА СТОИТ ТАМ ЖЕ ═══════════════
+            Строка появляется только когда есть что показывать: пустая «0 placed» рядом с дверью,
+            которая эту нулевую строку и заполняет, повторяла бы дверь другими словами. */}
+        {p.picturesCount > 0 && (
+          <LayerRow
+            on={p.picsOn}
+            onToggle={p.onPicsOn}
+            name='pictures'
+            sub={`${p.picturesCount} placed · moves for ever`}
+          />
+        )}
+        {!p.colourMode && (
+          <div className='mt-1.5 flex flex-col gap-1' data-picture-rail={p.picturesCount}>
+            {p.pictureAt === null ? (
+              /* ДВЕРЬ ОДНА НА ТРИ ЖЕСТА: библиотека, ⌘V и бросок — это `MediaSlot` целиком, и
+                 подпись под ним их называет. Ростом вдвое ниже шаблона: шаблон один и он про
+                 весь лист, а картинок бывает несколько и полоса не должна съедать рейку. */
+              <MediaSlot
+                aspectRatio={['Custom']}
+                frameAspect='4/5'
+                heightPx={52}
+                label='+ picture'
+                purpose='a picture placed on this drawing'
+                showVideos={false}
+                onSelect={p.onPicturePick}
+                sizeClassName='w-full'
+              />
+            ) : (
+              <>
+                <Text size='nano' variant='label' component='p'>
+                  {`picture ${p.pictureAt + 1} is in hand — drag it on the sheet, handles size it, ⌘-drag a corner bends it`}
+                </Text>
+                <ChipRow>
+                  <Chip
+                    data-picture-up=''
+                    disabled={p.frozen || p.pictureAt >= p.picturesCount - 1}
+                    onClick={p.onPictureUp}
+                    title='one step up the stack — pictures cover the ones under them'
+                  >
+                    forward
+                  </Chip>
+                  <Chip
+                    data-picture-down=''
+                    disabled={p.frozen || p.pictureAt <= 0}
+                    onClick={p.onPictureDown}
+                    title='one step down the stack'
+                  >
+                    back
+                  </Chip>
+                  <Chip
+                    data-picture-remove=''
+                    disabled={p.frozen}
+                    onClick={p.onPictureRemove}
+                    title='take this picture off the drawing (⌫) — for good, this layer keeps no undo for pictures'
+                  >
+                    take it off
+                  </Chip>
+                </ChipRow>
+                <Regulator
+                  name='picture'
+                  value={p.pictureOpacity}
+                  min={5}
+                  max={100}
+                  curve='linear'
+                  unit='%'
+                  disabled={p.frozen}
+                  onChange={p.onPictureOpacity}
+                  hint='how solid it sits — lower and the drawing shows through it'
+                  sample={<OpacitySample pct={p.pictureOpacity} />}
+                  probe='picture-opacity'
+                />
+              </>
+            )}
+          </div>
         )}
         {/* ШАБЛОН ДЛЯ СРИСОВЫВАНИЯ. Стоит в слоях, а не отдельной группой, потому что он и есть
             слой — просто тот, который никуда не уходит. Строка сама говорит, чем он отличается от

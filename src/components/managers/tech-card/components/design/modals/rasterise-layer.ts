@@ -1,5 +1,6 @@
 import { urlToDataUrl } from 'lib/features/getCropped';
 
+import { drawImagesOnto, type ImageStroke } from './vector-image-stroke';
 import type { RasterLayer } from './vector-raster';
 import {
   DEFAULT_INK,
@@ -65,6 +66,18 @@ export type SceneInput = {
    * картинке, которую сохраняют. Поэтому здесь ветка, а не наложение.
    */
   raster?: RasterLayer | null;
+  /**
+   * ПОЛОЖЕННЫЕ КАРТИНКИ — ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ОНИ СТАНОВЯТСЯ ПИКСЕЛЯМИ.
+   *
+   * Они живут ОБЪЕКТАМИ в документе слоя (`vector-image-stroke.ts`) именно затем, чтобы их можно
+   * было двигать через неделю, — поэтому в растр слоя они не вклеиваются НИКОГДА. Но флэт это
+   * КАРТИНКА, а не документ: на ней пуговица обязана быть, иначе сплющенная вещь отличается от
+   * той, которую человек только что видел на экране.
+   *
+   * Стоят между краской и чертежом — там же, где стоят на плате и где стоит превью плавающей
+   * вставки: поверх пикселей, под линиями.
+   */
+  images?: readonly ImageStroke[];
 };
 
 /**
@@ -75,11 +88,19 @@ export type SceneInput = {
  * a picker that sampled its own private redraw could hand back a colour the screen never showed.
  * The picker reads pixels off this canvas; the flatten asks the very same canvas for its PNG.
  */
-export async function composeScene({ baseSrc, strokes, ratio, raster }: SceneInput): Promise<{
+export async function composeScene({
+  baseSrc,
+  strokes,
+  ratio,
+  raster,
+  images,
+}: SceneInput): Promise<{
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   w: number;
   h: number;
+  /** Индексы `images`, чьи байты не приехали. Пустой список — на холсте ровно то, что на экране. */
+  missingImages: number[];
 }> {
   let image: HTMLImageElement | null = null;
   if (baseSrc && !raster) {
@@ -133,6 +154,9 @@ export async function composeScene({ baseSrc, strokes, ratio, raster }: SceneInp
   if (raster) ctx.drawImage(raster.doc, 0, 0, w, h);
   else if (image) ctx.drawImage(image, 0, 0, w, h);
 
+  // ПОЛОЖЕННЫЕ КАРТИНКИ — ПОСЛЕ КРАСКИ, ДО ЧЕРТЕЖА. Довод — у поля `images`.
+  const missingImages = images?.length ? await drawImagesOnto(ctx, images, w, h) : [];
+
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   for (const stroke of strokes) {
@@ -153,7 +177,7 @@ export async function composeScene({ baseSrc, strokes, ratio, raster }: SceneInp
     }
   }
   ctx.setLineDash([]);
-  return { canvas, ctx, w, h };
+  return { canvas, ctx, w, h, missingImages };
 }
 
 /** Paint base + strokes into one canvas and hand back a PNG data URL. */

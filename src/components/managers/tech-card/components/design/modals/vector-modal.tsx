@@ -3,6 +3,7 @@ import type {
   DesignBenchSlotRef,
   GetDesignBandResponse,
   common_DesignPicture,
+  common_MediaFull,
 } from 'api/proto-http/admin';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -21,7 +22,18 @@ import { exactPalette, isMapInk, planHex } from '../colour-plan/model';
 import { pictureHandle } from '../handles';
 import { provenanceLabel, readProvenance } from '../provenance';
 import { findMediaUrlInBand, useDesignWrites } from '../use-design-band';
-import { RASTER_FALLBACK_W, pickSceneInk, rasteriseStrokesOverBase } from './rasterise-layer';
+import { RASTER_FALLBACK_W, composeScene, pickSceneInk } from './rasterise-layer';
+import {
+  fitImageQuad,
+  hitImage,
+  imageBox,
+  imageCss,
+  imageQuadFrac,
+  imageQuadPlate,
+  joinImageDoc,
+  splitImageDoc,
+  type ImageStroke,
+} from './vector-image-stroke';
 import {
   findLayerForMedia,
   layerRasterUrl,
@@ -729,6 +741,17 @@ const FRAME_HANDLE_PX = 9;
 const FRAME_ROTATE_PX = 26;
 
 /**
+ * УСЛОВНАЯ КОРОБКА ПОЛОЖЕННОЙ КАРТИНКИ, в CSS-пикселях мирового блока.
+ *
+ * `quadCss` строит матрицу «коробка `natW × natH` → квад», и число здесь может быть любым: сам
+ * элемент растягивается `objectFit: fill`, а пропорции живут в квадe. Квадрат взят затем, чтобы
+ * матрица не зависела от того, узнал ли бакет натуральные размеры файла, — иначе картинка
+ * прыгала бы в момент, когда полоса дочитает медиа. Сотня, а не единица: у матрицы с делителем
+ * порядка 1e-2 округление до шестого знака в `quadCss` съедало бы заметную долю перспективы.
+ */
+const PLACED_BOX = 100;
+
+/**
  * САМАЯ МЕЛКАЯ РАМКА ВСТАВКИ, в долях кадра. Копия одной ГОРИЗОНТАЛЬНОЙ линии имеет нулевую
  * высоту, и нормировать по ней значило бы делить на ноль: вставка приезжала бы с NaN в каждой
  * координате и не рисовалась вовсе. Коробка раздаётся симметрично, поэтому вставка без единого
@@ -756,8 +779,23 @@ type FloatPaste = {
   srcH: number;
 };
 
+/**
+ * ЧЕТВЁРТЫЙ ХОЗЯИН РАМКИ — ПОЛОЖЕННАЯ КАРТИНКА, И ОН НАЗВАН ЗДЕСЬ, А НЕ В НАКЛАДКЕ.
+ *
+ * `FrameOwner` живёт в `transform-frame-overlay.tsx`, и накладке род хозяина нужен ровно для
+ * одного — атрибута `data-transform-frame`. Органы у картинки те же, что у вставки, буква в
+ * букву: восемь ручек, поворот, ⌘-перспектива, Enter ставит. Расширять там союз значило бы
+ * заводить в накладке ветку, которой у неё нет; здесь же он несёт РАЗВИЛКУ ПОСТАНОВКИ — вставка
+ * пишет пиксели, картинка переписывает свой квад, — и без своего имени эта развилка была бы
+ * выражена вторым полем при `owner: 'paste'`, то есть состоянием, в котором «вставка без
+ * пикселей» невыразимо отличается от «картинки без индекса».
+ */
+type FrameKind = FrameOwner | 'image';
+
 type FrameState = {
-  owner: FrameOwner;
+  owner: FrameKind;
+  /** Номер картинки в `images` — только у `owner: 'image'`, и тогда обязателен. */
+  imageAt?: number;
   quad: Quad;
   /** Кроп: осе-выровненная рамка без поворота и перспективы — у листа нет ни угла, ни схода. */
   axis: boolean;
@@ -868,6 +906,50 @@ type FrameDrag = {
   startDeg: number;
 };
 
+/**
+ * АДРЕС КАРТИНКИ ДЛЯ ПОКАЗА — та же лестница, что у подложки редактора, и по той же причине:
+ * полный размер это документ, а сжатый — та же картинка, просто дешевле. Миниатюра сюда НЕ входит:
+ * положенная пуговица растягивается на треть платы, и стопиксельный превью на ней виден как каша.
+ */
+const placedSrc = (m: common_MediaFull | undefined): string =>
+  m?.media?.fullSize?.mediaUrl || m?.media?.compressed?.mediaUrl || '';
+
+/** Натуральные пропорции с провода; ноль — «бакет не сказал», и тогда форму даёт плата. */
+const wireSize = (m: common_MediaFull | undefined): [number, number] => [
+  m?.media?.fullSize?.width ?? 0,
+  m?.media?.fullSize?.height ?? 0,
+];
+
+/**
+ * КАРТИНКА, ПРИНЕСЁННАЯ ДВЕРЬЮ `initialImage`, ПОВЕРХ УЖЕ ХРАНИМЫХ.
+ *
+ * ⚠ ДУБЛЬ ОТСЕИВАЕТСЯ ПО `mediaId`. Дверь «put it down ▸» жмут дважды не реже, чем один раз, и
+ * второе открытие с тем же вырезом клало бы вторую копию ровно поверх первой — человек видел бы
+ * одну пуговицу, двигал бы верхнюю и не понимал, откуда взялась нижняя.
+ */
+function seedInitialImage(
+  stored: ImageStroke[],
+  initial: { media: common_MediaFull } | null | undefined,
+  plateRatio: number,
+): ImageStroke[] {
+  const media = initial?.media;
+  const src = placedSrc(media);
+  const mediaId = media?.id ?? 0;
+  if (!src || !mediaId) return stored;
+  if (stored.some((i) => i.mediaId === mediaId)) return stored;
+  const [natW, natH] = wireSize(media);
+  return [
+    ...stored,
+    {
+      k: 'image',
+      mediaId,
+      src,
+      quad: fitImageQuad(natW, natH, PLATE_W, PLATE_W / (plateRatio || DEFAULT_RATIO)),
+      opacity: 1,
+    },
+  ];
+}
+
 /* Механика пера целиком живёт в vector-pen.ts: прежняя модель «одна исходящая рукоятка на якорь,
  * входящая достраивается зеркалом» не могла выразить Alt-размыкание пары (две независимые
  * величины не восстановить из одной) и переехала туда, вырастя, — см. довод в шапке того файла. */
@@ -886,6 +968,7 @@ export function VectorModal({
   mapSrc = '',
   seedInks,
   onColourMap,
+  initialImage,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -946,6 +1029,19 @@ export function VectorModal({
     url: string;
     palette: { hex: string; px: number }[];
   }) => boolean | Promise<boolean>;
+  /**
+   * ═══ ОТКРЫТЬСЯ С УЖЕ ПОЛОЖЕННОЙ КАРТИНКОЙ ════════════════════════════════════════════════════
+   *
+   * Дверь «put it down ▸» с плитки выреза в плейграунде: человек вырезал пуговицу и сказал, на
+   * какую картинку её класть. Открывать редактор пустым, чтобы он тут же полез в библиотеку за
+   * тем, что уже держит в руке, — это второй выбор того же самого.
+   *
+   * ⚠ ЭТО ЗАСЕВ ВИЗИТА, А НЕ УПРАВЛЯЕМОЕ СВОЙСТВО. Картинка кладётся ОДИН РАЗ, вместе с чтением
+   * слоя, и дальше живёт в документе: перерисовка родителя с той же ссылкой ничего не добавляет,
+   * иначе каждое его состояние клало бы вторую копию поверх первой. Новая картинка — новое
+   * открытие модалки, ровно как у `base`.
+   */
+  initialImage?: { media: common_MediaFull } | null;
 }) {
   const { showMessage } = useSnackBarStore();
   const { setBenchSlot } = useDesignWrites(techCardId);
@@ -983,6 +1079,25 @@ export function VectorModal({
   const loaded = layerQuery.data?.layer;
 
   const [strokes, setStrokes] = useState<VectorStroke[]>([]);
+  /**
+   * ═══ ПОЛОЖЕННЫЕ КАРТИНКИ — ТРЕТИЙ МАТЕРИАЛ СЛОЯ ═════════════════════════════════════════════
+   *
+   * Не линии и не пиксели: объекты, живущие в том же документе (`vector-image-stroke.ts`) и
+   * потому переживающие сохранение ДВИГАЕМЫМИ. Порядок в массиве и есть порядок в стопке —
+   * последняя сверху.
+   */
+  const [images, setImages] = useState<ImageStroke[]>([]);
+  const imagesRef = useRef<ImageStroke[]>([]);
+  imagesRef.current = images;
+  /** Выбранная картинка — номер в `images`. Своё состояние, а не `selected`: это другой материал. */
+  const [pictureAt, setPictureAt] = useState<number | null>(null);
+  /** Слой картинок виден. Свойство ВЗГЛЯДА: во флэт уезжает то, что хранится, а не то, что видно. */
+  const [picsOn, setPicsOn] = useState(true);
+  /**
+   * АДРЕСА, ПО КОТОРЫМ БРАУЗЕР ОТВЕТИЛ ОТКАЗОМ. Множество адресов, а не индексов: индексы едут при
+   * каждой перестановке в стопке, и «пропала третья» после хода вверх означало бы уже другую.
+   */
+  const [goneSrc, setGoneSrc] = useState<readonly string[]>([]);
   const [tool, setTool] = useState<Tool>('line');
   /**
    * ИНСТРУМЕНТ В РУКЕ, ОТВЕЧАЮЩИЙ ПРО СЕЙЧАС. Состояние React отвечает про кадр, в котором
@@ -1532,6 +1647,12 @@ export function VectorModal({
 
   /** Снимок штрихов на момент сида — им меряется «есть что терять» у стража выхода. */
   const seededJson = useRef('[]');
+  /**
+   * ТО ЖЕ ПРО КАРТИНКИ, И ОТДЕЛЬНОЙ ССЫЛКОЙ. Слить их в один снимок значило бы, что страж выхода
+   * не умеет сказать, ЧТО именно не сохранено, — а он и есть единственное место, где это
+   * спрашивают.
+   */
+  const seededImages = useRef('[]');
 
   /* ═══ ПИКСЕЛЬНЫЙ КАНАЛ ═══════════════════════════════════════════════════════════════════
    *
@@ -1699,9 +1820,22 @@ export function VectorModal({
     if (knownId > 0 && !loaded) return;
     seeded.current = true;
 
-    const doc = readLayer(decodeStrokesWire(loaded?.strokes), wireRatio);
+    /* ДОКУМЕНТ РАЗБИРАЕТСЯ НАДВОЕ ДО `readLayer`: картинки — род объекта, которого читатель
+       полилиний не знает, и он объявил бы такой документ нечитаемым целиком. Довод — в шапке
+       `vector-image-stroke.ts`; `broken` там значит ровно то же, что у него: не «пусто», а
+       «написано не этим бандлом», и дальше это ведёт `unreadable`. */
+    const split = splitImageDoc(decodeStrokesWire(loaded?.strokes));
+    const doc = readLayer(split.doc, wireRatio);
     setLayer({ id: loaded?.id ?? knownId, rev: loaded?.rev ?? knownRev });
     setStrokes(doc.strokes);
+    /* КАРТИНКА, ПРИНЕСЁННАЯ ДВЕРЬЮ, КЛАДЁТСЯ ЗДЕСЬ, А НЕ ОТДЕЛЬНЫМ ЭФФЕКТОМ. Отдельный эффект
+       гонялся бы за сидом наперегонки и на проигрыш клал бы её в документ, который сид тут же
+       заменит прочитанным. */
+    const seeded0 = seedInitialImage(split.images, initialImage, wireRatio);
+    setImages(seeded0);
+    setPictureAt(null);
+    setGoneSrc([]);
+    setPicsOn(true);
     // Файл слоя — из прочитанного слоя или из списка полосы; URL — лучшая попытка по картинкам
     // первой страницы (см. findMediaUrlInBand).
     const storedFileId = loaded?.sourceMediaId ?? known?.sourceMediaId ?? 0;
@@ -1712,7 +1846,10 @@ export function VectorModal({
     // place the moment the two disagree.
     // Расширенную плату НЕ перебиваем формой базы: она и есть то, что человек только что сделал.
     if (!expandedRef.current) setRatio(baseMediaId > 0 ? wireRatio : doc.ratio);
-    setUnreadable(doc.unreadable);
+    /* НЕЧИТАЕМОСТЬ — ДИЗЪЮНКЦИЯ ДВУХ ЧИТАТЕЛЕЙ. Битый список картинок запирает писателей ровно
+       так же, как рассинхронизированная кривая: и то, и другое значит «слой написан не этим
+       бандлом», и сохранение поверх стёрло бы чужую работу без следа. */
+    setUnreadable(doc.unreadable || split.broken);
     setSelected(null);
     /* В РЕЖИМЕ КАРТЫ РУКА НАЧИНАЕТ С ВЕДРА — это первое слово владельца («заливкой и брашем») и
        единственный инструмент, которым красят деталь целиком одним нажатием. */
@@ -1782,11 +1919,14 @@ export function VectorModal({
     tracingRef.current = false;
     setConfirmExit(false);
     seededJson.current = JSON.stringify(doc.strokes);
+    /* СНИМОК КАРТИНОК — ТОТ, ЧТО ПРОЧИТАН, А НЕ ТОТ, ЧТО ПОКАЗАН. Картинка, принесённая дверью,
+       ещё НЕ СОХРАНЕНА, и записав её в снимок, страж выхода выпустил бы человека молча. */
+    seededImages.current = JSON.stringify(split.images);
     userMoved.current = false;
     resetHistory();
     // `baseSrc` и `disabled` ушли из зависимостей вместе с развилкой входа (H-1): читала их
     // только она. Оставленные, они пересеивали бы визит на каждое прибытие подложки.
-  }, [open, knownId, knownRev, known, band, baseMediaId, loaded, wireRatio, resetHistory, colourMode, seedInks]);
+  }, [open, knownId, knownRev, known, band, baseMediaId, loaded, wireRatio, resetHistory, colourMode, seedInks, initialImage]);
 
   /**
    * THE EDITOR IS FROZEN UNTIL IT KNOWS WHAT IS ALREADY THERE — a correctness gate, not a spinner:
@@ -2945,6 +3085,9 @@ export function VectorModal({
       }
       setTool(t);
       toolRef.current = t;
+      /* ВЫБОР КАРТИНКИ ЖИВЁТ РОВНО ПОКА В РУКЕ ВЫБОР. Пережив смену инструмента, он оставил бы
+         Delete нацеленным на пуговицу у человека, который уже держит ластик. */
+      if (t !== 'select') setPictureAt(null);
       /**
        * ⚠ СМЕНА ИНСТРУМЕНТА ЗАКАНЧИВАЕТ ЛИЧНОСТЬ НАЖАТИЯ — И ЭТО ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ЭТО
        * ПРАВДА ДЛЯ ВСЕХ ПУТЕЙ. Отметка значит «ЭТО нажатие сняло область». Гасил её только хвост
@@ -3614,6 +3757,11 @@ export function VectorModal({
       void commitFloat(fr);
       return;
     }
+    /* КАРТИНКА — ЧЕТВЁРТАЯ ВЕТКА, И ОНА НЕ ПИШЕТ НИ ОДНОГО ПИКСЕЛЯ: довод у `commitPictureFrame`. */
+    if (fr.owner === 'image') {
+      commitPictureFrame(fr);
+      return;
+    }
     void applyCropFrame(fr);
   };
 
@@ -3642,6 +3790,12 @@ export function VectorModal({
       showMessage('the pasted piece was dropped — the drawing was never touched', 'success');
       return;
     }
+    /* У КАРТИНКИ ОТМЕНА ВОЗВРАЩАЕТ ХОД, А НЕ САМУ КАРТИНКУ. Квад в записи меняет только
+       постановка, значит закрытая рамка УЖЕ вернула её туда, где она была до жеста. */
+    if (fr.owner === 'image') {
+      cancelPictureFrame();
+      return;
+    }
     setTool('select');
   };
   cancelFrameRef.current = cancelFrame;
@@ -3658,6 +3812,10 @@ export function VectorModal({
   const settleFloatFirst = async () => {
     const fr = frameRef.current;
     if (fr?.owner === 'paste') await commitFloat(fr);
+    /* И ЖИВАЯ РАМКА КАРТИНКИ ТОЖЕ. Сохранение при взятой в руку пуговице записало бы ПРЕЖНИЙ её
+       квад: человек своими глазами видел её на новом месте, а на сервер уехало старое. Тот же
+       довод, что у вставки, — просто у картинки цена ошибки тише и потому опаснее. */
+    if (fr?.owner === 'image') commitPictureFrame(fr);
   };
 
   /* ═══ ВСТАВКА: ПОСТАВИТЬ ФЛОАТ В ДОКУМЕНТ (G-13) ══════════════════════════════════════════
@@ -3764,6 +3922,135 @@ export function VectorModal({
       return;
     }
     showMessage('the pasted piece held nothing that could be put down here', 'error');
+  };
+
+  /* ═══ ПОЛОЖЕННЫЕ КАРТИНКИ: ПИСАТЕЛИ ══════════════════════════════════════════════════════════
+   *
+   * ⚠ ЛЕНТЫ ОТМЕНЫ У НИХ НЕТ, И ЭТО НАЗВАНО ВСЛУХ, А НЕ ЗАБЫТО. `EditTimeline` знает два
+   * материала — линии и пиксели, — и третий в неё не помещается без правки самой ленты. Пока её
+   * нет, отмена у картинки ровно одна и она честная: Esc над живой рамкой возвращает СНИМОК НА
+   * ОТКРЫТИИ, то есть весь ход целиком, — тем же правилом, каким отменяется постановка шаблона.
+   * Снятие картинки при этом безвозвратно, и подпись кнопки говорит это словом «for good».
+   */
+  const writeImages = (next: ImageStroke[]) => {
+    imagesRef.current = next;
+    setImages(next);
+  };
+
+  /** Взять картинку в руку: рамка с восемью ручками, как у вставки и у шаблона. */
+  const openPictureFrame = (at: number) => {
+    const img = imagesRef.current[at];
+    if (!img || frozen) return;
+    const quad = imageQuadPlate(img, PLATE_W, plateH);
+    setPictureAt(at);
+    putFrame({ owner: 'image', imageAt: at, quad, axis: false, snapshot: quad });
+  };
+
+  /**
+   * ПОСТАВИТЬ КАРТИНКУ — ПЕРЕПИСАТЬ ЕЁ КВАД, И БОЛЬШЕ НИЧЕГО.
+   *
+   * В этом вся разница с `commitFloat`, стоящим выше: тот кладёт ПИКСЕЛИ в холст и на этом объект
+   * перестаёт существовать. Здесь объект остаётся объектом, и следующий визит найдёт его на новом
+   * месте — ровно то, чего просил владелец словом «слоями».
+   */
+  const commitPictureFrame = (fr: FrameState) => {
+    const at = fr.imageAt ?? -1;
+    closeFrame();
+    /* «ВЗЯТА В РУКУ» И «РАМКА ОТКРЫТА» — ОДНО И ТО ЖЕ СОСТОЯНИЕ, А НЕ ДВА. Оставь мы выбор жить
+       после постановки, на экране не было бы НИЧЕГО, что его показывает, — а Delete продолжал бы
+       целиться в пуговицу, и подпись на рейке продолжала бы обещать рамку, которой нет. */
+    setPictureAt(null);
+    const cur = imagesRef.current;
+    if (at < 0 || at >= cur.length || frozenRef.current) return;
+    const next = cur.slice();
+    next[at] = { ...cur[at], quad: imageQuadFrac(fr.quad, PLATE_W, plateH) };
+    writeImages(next);
+  };
+
+  /** Отменить ход: снимок на открытии рамки, целиком. Квад в записи и не менялся — писать нечего. */
+  const cancelPictureFrame = () => {
+    setPictureAt(null);
+    showMessage('the picture went back where it was', 'success');
+  };
+
+  /**
+   * ПОЛОЖИТЬ КАРТИНКУ ИЗ БИБЛИОТЕКИ (⌘V и бросок приходят той же дверью — см. `MediaSlot`).
+   *
+   * Кладётся в ТРЕТЬ ПЛАТЫ ПО ЦЕНТРУ и сразу берётся в руку: человек нажал «+ picture», чтобы
+   * поставить её куда-то, и рамка — это и есть «куда-то». Пустой адрес — отказ словами: медиа без
+   * полного размера нарисовать нечем, и молча положенный пустой прямоугольник был бы хуже.
+   */
+  const addPicture = (picked: common_MediaFull[]) => {
+    if (frozen || colourMode) return;
+    /* РУКА, КЛАДУЩАЯ КАРТИНКУ, — ЭТО РУКА ВЫБОРА. Оставь мы в ней кисть, положенная пуговица
+       перестала бы ловить клик в ту же секунду, как её поставили (ветка выбора живёт только у
+       `select`), и «она не выделяется» читалось бы как сломанная функция. Заодно этот же вызов
+       ставит на место рамку, если в руке была другая. */
+    switchTool('select');
+    const media = picked[0];
+    const src = placedSrc(media);
+    const mediaId = media?.id ?? 0;
+    if (!src || !mediaId) {
+      showMessage('that media has no full-size file to place — pick another picture', 'error');
+      return;
+    }
+    const [natW, natH] = wireSize(media);
+    const born: ImageStroke = {
+      k: 'image',
+      mediaId,
+      src,
+      quad: fitImageQuad(natW, natH, PLATE_W, plateH),
+      opacity: 1,
+    };
+    const next = [...imagesRef.current, born];
+    writeImages(next);
+    // Взятие в руку идёт СЛЕДУЮЩИМ кадром: `openPictureFrame` читает `imagesRef`, а он уже
+    // переписан здесь — то есть рамка открывается по тому же квадy, что и запись.
+    setPictureAt(next.length - 1);
+    const quad = imageQuadPlate(born, PLATE_W, plateH);
+    putFrame({ owner: 'image', imageAt: next.length - 1, quad, axis: false, snapshot: quad });
+    showMessage(
+      'placed — drag it, pull a handle to size it, ⌘-drag a corner for perspective. It stays a picture: reopen this layer tomorrow and it still moves',
+      'success',
+    );
+  };
+
+  /** Снять картинку со слоя. Безвозвратно — ленты у этого материала нет (довод выше). */
+  const removePicture = () => {
+    const at = pictureAt;
+    if (at === null || frozen) return;
+    closeFrame();
+    setPictureAt(null);
+    writeImages(imagesRef.current.filter((_, i) => i !== at));
+  };
+
+  /**
+   * ВЫШЕ / НИЖЕ В СТОПКЕ — ОДНА ПАРА ДЕЙСТВИЙ, а не «на самый верх / на самый низ» рядом с ней.
+   * Порядок массива и есть стопка, поэтому обмен с соседом описывает всю задачу.
+   */
+  const movePicture = (up: boolean) => {
+    const at = pictureAt;
+    if (at === null || frozen) return;
+    const cur = imagesRef.current;
+    const to = up ? at + 1 : at - 1;
+    if (to < 0 || to >= cur.length) return;
+    const next = cur.slice();
+    [next[at], next[to]] = [next[to], next[at]];
+    writeImages(next);
+    setPictureAt(to);
+    // Рамка держит НОМЕР, и после обмена он показывал бы на соседа: квад тот же, адрес другой.
+    const fr = frameRef.current;
+    if (fr?.owner === 'image') putFrame({ ...fr, imageAt: to });
+  };
+
+  const setPictureOpacity = (pct: number) => {
+    const at = pictureAt;
+    if (at === null || frozen) return;
+    const cur = imagesRef.current;
+    if (at >= cur.length) return;
+    const next = cur.slice();
+    next[at] = { ...cur[at], opacity: Math.min(1, Math.max(0, pct / 100)) };
+    writeImages(next);
   };
 
   /* ═══ КРОП: РАМКА КАДРА ПРИМЕНЯЕТСЯ (G-4) ═════════════════════════════════════════════════
@@ -4148,6 +4435,24 @@ export function VectorModal({
           return;
         }
       }
+      /**
+       * ═══ КАРТИНКА СТАРШЕ ЛИНИИ ПОД НЕЙ ══════════════════════════════════════════════════════
+       *
+       * Она НЕПРОЗРАЧНОЕ ТЕЛО, а линия — след толщиной в пару юнитов: спроси мы линию первой,
+       * клик в середину пуговицы, под которой проходит шов, брал бы шов, которого не видно. Тот
+       * же порядок, каким рамка спрашивается раньше инструментов: сначала то, что закрывает.
+       *
+       * ⚠ ПОГАШЕННЫЙ СЛОЙ НЕ ЛОВИТ УКАЗАТЕЛЬ. Иначе выключенная видимость означала бы «не видно,
+       * но мешает» — состояние, которого человек не поймёт и не отменит.
+       */
+      if (picsOn) {
+        const pic = hitImage(imagesRef.current, at);
+        if (pic !== null) {
+          openPictureFrame(pic);
+          return;
+        }
+      }
+      setPictureAt(null);
       const hit = hitStroke(strokes, at, PLATE_W, plateH, HIT_PX / (viewRef.current.zoom || 1));
       setSelected(hit);
       // Взяли линию — сразу открыли её узлы: отдельного «войти в правку» нет, потому что и не
@@ -5482,6 +5787,9 @@ export function VectorModal({
         baseSrc: rasterOn && !rasterRef.current ? baseSrc : '',
         raster: rasterOn ? rasterRef.current : null,
         strokes: vecOn ? strokes : [],
+        // Погашенный слой картинок пипетка тоже не берёт: она обязана вернуть цвет, ВИДНЫЙ на
+        // экране, — то же правило, что у линий и у краски строкой выше.
+        images: picsOn ? images : [],
         ratio: ratio || DEFAULT_RATIO,
       },
       at,
@@ -5496,16 +5804,24 @@ export function VectorModal({
 
   // ── the wire ───────────────────────────────────────────────────────────────────────────────
 
-  const payload = useMemo(() => writeLayer(strokes, ratio), [strokes, ratio]);
+  /* ДОКУМЕНТ МЕРЯЕТСЯ О ПОТОЛОК ЦЕЛИКОМ, ВМЕСТЕ С КАРТИНКАМИ. Сервер меряет БАЙТЫ поля, а не
+     число штрихов; список картинок весит адресами, и слой из полусотни пуговиц уперся бы в 512 КБ
+     по-настоящему. Мерить одни линии значило бы обещать сохранение, которое сервер отвергнет. */
+  const payload = useMemo(
+    () => joinImageDoc(writeLayer(strokes, ratio), images),
+    [strokes, ratio, images],
+  );
   const payloadBytes = useMemo(() => new TextEncoder().encode(payload).length, [payload]);
   const tooLarge = payloadBytes > MAX_STROKES_BYTES;
   const strokesJson = useMemo(() => JSON.stringify(strokes), [strokes]);
+  const imagesJson = useMemo(() => JSON.stringify(images), [images]);
   /**
    * «ЕСТЬ ЧТО ТЕРЯТЬ» СЧИТАЕТ И ПИКСЕЛИ. Страж выхода, знающий только про штрихи, выпускал бы
    * человека, стёршего полфотографии, без единого вопроса — и это была бы потеря, которую нечем
    * вернуть: ленты правок у слоя нет по контракту.
    */
-  const dirty = strokesJson !== seededJson.current || rasterDirty;
+  const dirty =
+    strokesJson !== seededJson.current || imagesJson !== seededImages.current || rasterDirty;
 
   /**
    * Store the strokes and adopt the rev the server hands back. Returns the layer's id.
@@ -5540,7 +5856,7 @@ export function VectorModal({
      *
      * Реф — единственный писатель, знающий про СЕЙЧАС (тот же довод, что у `strokesRef` вообще).
      */
-    const doc = writeLayer(strokesRef.current, ratio);
+    const doc = joinImageDoc(writeLayer(strokesRef.current, ratio), imagesRef.current);
     const layer = rasterRef.current;
     let rasterMediaId: number | undefined;
     let clearRaster: boolean | undefined;
@@ -5576,6 +5892,7 @@ export function VectorModal({
     // Сохранённое перестаёт быть «несохранённым» у стража выхода — по ОБОИМ каналам: ревизия одна
     // на них двоих, и «пиксели ещё не сохранены» после успешной записи было бы ложью.
     seededJson.current = JSON.stringify(strokesRef.current);
+    seededImages.current = JSON.stringify(imagesRef.current);
     setStoredRasterId(stored?.rasterMediaId ?? (clearRaster ? 0 : rasterMediaId ?? storedRasterId));
     // Адрес идёт ЗА идентификатором, иначе пара разошлась бы: снятие обнуляет оба, загрузка
     // переставляет оба, а сохранение одних штрихов не трогает ни один.
@@ -5645,19 +5962,26 @@ export function VectorModal({
    * Paint base + strokes into one canvas and hand back a PNG data URL. THE CANVAS ITSELF LIVES IN
    * `rasterise-layer.ts`, SHARED — two canvases drawing the same strokes would drift silently.
    */
-  const rasterise = useCallback(
-    () =>
-      rasteriseStrokesOverBase({
-        // ФЛЭТ НЕСЁТ КРАСКУ. Здесь видимость слоёв НЕ учитывается нарочно — как не учитывалась и
-        // до растра: погашенный на время работы слой это свойство ВЗГЛЯДА, а сплющивается
-        // рисунок, а не взгляд.
-        baseSrc: rasterRef.current ? '' : baseSrc,
-        raster: rasterRef.current,
-        strokes,
-        ratio,
-      }),
-    [baseSrc, ratio, strokes],
-  );
+  /**
+   * ⚠ ВОЗВРАЩАЕТ ЕЩЁ И СПИСОК НЕПРИЕХАВШИХ КАРТИНОК, И ЭТО НЕ УДОБСТВО.
+   *
+   * Пропавшее медиа рисуется на плате плашкой «picture N is gone» — на КАРТИНКЕ такой плашки быть
+   * не может, там просто дырка. Сплющить молча значило бы отдать наружу вещь без пуговицы и
+   * назвать это готовым; поэтому число уезжает вызывающему, а он отказывается словами.
+   */
+  const rasterise = useCallback(async (): Promise<{ dataUrl: string; missing: number[] }> => {
+    const { canvas, missingImages } = await composeScene({
+      // ФЛЭТ НЕСЁТ КРАСКУ. Здесь видимость слоёв НЕ учитывается нарочно — как не учитывалась и
+      // до растра: погашенный на время работы слой это свойство ВЗГЛЯДА, а сплющивается
+      // рисунок, а не взгляд. По тому же правилу едут и картинки.
+      baseSrc: rasterRef.current ? '' : baseSrc,
+      raster: rasterRef.current,
+      strokes,
+      images,
+      ratio,
+    });
+    return { dataUrl: canvas.toDataURL('image/png'), missing: missingImages };
+  }, [baseSrc, ratio, strokes, images]);
 
   /**
    * ═══ «USE AS COLOUR MAP» — ЕДИНСТВЕННАЯ КНОПКА РЕЖИМА КАРТЫ ══════════════════════════════════
@@ -5731,10 +6055,19 @@ export function VectorModal({
       const id = await persist();
 
       setBusy('rasterising…');
-      const dataUrl = await rasterise();
+      const flat = await rasterise();
+      if (flat.missing.length) {
+        /* ОТКАЗ ЦЕЛИКОМ, А НЕ КАРТИНКА С ДЫРКОЙ. Слой уже сохранён выше — это правда, и она
+           названа: терять человеку нечего, а сплющенная вещь без пуговицы уехала бы в верстак
+           и оттуда в тех-пакет, где её никто уже не опознает как неполную. */
+        setRefusal(
+          `${flat.missing.length === 1 ? 'one of the placed pictures' : `${flat.missing.length} of the placed pictures`} could not be fetched, so the flat would come out with a hole where it stands. The drawing itself IS saved. Remove the picture the sheet marks as gone, or wait for the media server, then press this again.`,
+        );
+        return;
+      }
 
       setBusy('uploading the picture…');
-      const media = await uploadRaster(dataUrl);
+      const media = await uploadRaster(flat.dataUrl);
 
       setBusy('filing it into the band…');
       const res = await flattenLayer.mutateAsync({
@@ -5817,6 +6150,24 @@ export function VectorModal({
 
   const download = () => {
     if (downloadingRef.current) return;
+    /**
+     * ⚠ ПОЛОЖЕННЫЕ КАРТИНКИ В SVG НЕ УЕЗЖАЮТ, И ЭТО НЕ ЗАБЫВЧИВОСТЬ, А ГЕЙТ ЭТОГО ЭКСПОРТА.
+     *
+     * `svg-export.ts` написан под QC-отчёт владельца, чья первая строка — «FAIL n_image > 0»:
+     * файл, внутри которого лежит растр, вектором не является. Прежний `layerSvg` вшивал
+     * `<image>` подложки, и ровно за это его и заменили. Вписать пуговицу тем же тегом значило бы
+     * вернуть проваленный гейт своими руками.
+     *
+     * Молчать об этом тоже нельзя: человек, положивший три пуговицы, увидел бы файл без них и
+     * решил бы, что редактор их потерял. Поэтому подмена НАЗЫВАЕТСЯ — тем же приёмом, каким
+     * называет себя подмена оригинала производителя двумя ветками ниже. За пикселями — флэт.
+     */
+    if (imagesRef.current.length) {
+      showMessage(
+        `${imagesRef.current.length} placed picture${imagesRef.current.length === 1 ? '' : 's'} stay out of the SVG — it is a vector file and a picture inside it is a raster. Use «save as picture» when you need them in the pixels.`,
+        'error',
+      );
+    }
     const w = RASTER_FALLBACK_W;
     const h = Math.round(w / (ratio || DEFAULT_RATIO));
     const name = () => `${base ? pictureHandle(base) : 'drawing'}`;
@@ -6029,6 +6380,14 @@ export function VectorModal({
          кисти, собирает `maskRef`, разводит две фазы заплатки), и гасить её по клику значило бы
          молча отменить ограничение, которое человек поставил руками. Сосуществование законно —
          неверен был ПОРЯДОК. */
+      /* ВЗЯТАЯ В РУКУ КАРТИНКА СТАРШЕ ВСЕГО ОСТАЛЬНОГО В ЭТОЙ ЛЕСТНИЦЕ — и по тому же правилу,
+         которым штрих старше области: разрушающая клавиша бьёт по тому объекту, который человек
+         только что взял и который сейчас в рамке на экране. */
+      if (pictureAt !== null) {
+        e.preventDefault();
+        removePicture();
+        return;
+      }
       if (tool === 'select' && selected !== null) {
         e.preventDefault();
         removeSelected();
@@ -6111,7 +6470,7 @@ export function VectorModal({
    * ЕСТЬ ЧТО СОХРАНЯТЬ — теперь это ДВА материала. Кнопки, запертые на «ни одной линии» у человека,
    * который стёр фотографии половину фона, читались бы как «эта работа ничего не стоит».
    */
-  const anyContent = strokes.length > 0 || rasterDirty;
+  const anyContent = strokes.length > 0 || rasterDirty || images.length > 0;
   const ready = !frozen && anyContent && !tooLarge && !busy;
   /** Слой-файл без редактируемой проекции: файл цел, штрихов нет — экран обязан сказать это. */
   const fileOnly = fileMediaId > 0 && strokes.length === 0 && !readPending;
@@ -6775,6 +7134,18 @@ export function VectorModal({
                     if (ne && ne.sel >= 0) commitNodes(editDelete(ne, ne.sel));
                   }}
                   plate={plateRect}
+                  picturesCount={images.length}
+                  picsOn={picsOn}
+                  onPicsOn={() => setPicsOn((v) => !v)}
+                  onPicturePick={addPicture}
+                  pictureAt={pictureAt}
+                  pictureOpacity={
+                    pictureAt === null ? 100 : Math.round((images[pictureAt]?.opacity ?? 1) * 100)
+                  }
+                  onPictureOpacity={setPictureOpacity}
+                  onPictureUp={() => movePicture(true)}
+                  onPictureDown={() => movePicture(false)}
+                  onPictureRemove={removePicture}
                   onBackdropPick={(media) => {
                     const r = adoptBackdrop(media[0], plateRect);
                     if (!r.ok) {
@@ -6896,7 +7267,7 @@ export function VectorModal({
                       {frame
                         ? frame.owner === 'crop'
                           ? 'drag the frame — outward grows the sheet, inward crops it · enter or double-click applies, esc cancels · cannot be undone'
-                          : `drag to move · handles scale (shift keeps the proportion) · drag outside a corner to rotate (shift snaps 15°) · ⌘-drag a corner for perspective · enter ${frame.owner === 'paste' ? 'puts it down' : 'places the template'}`
+                          : `drag to move · handles scale (shift keeps the proportion) · drag outside a corner to rotate (shift snaps 15°) · ⌘-drag a corner for perspective · enter ${frame.owner === 'paste' ? 'puts it down' : frame.owner === 'image' ? 'leaves the picture there — it stays movable' : 'places the template'}`
                         : tool === 'curve'
                         ? // ОДНА строка на весь путь: смена текста посреди жеста — тот же сдвиг холста.
                           'click = corner · drag = curve · grab a handle to bend, alt splits the pair · click the first anchor closes · enter/esc finish'
@@ -6965,6 +7336,12 @@ export function VectorModal({
                     <div
                       ref={worldRef}
                       className='absolute left-0 top-0 bg-bgColor'
+                      /* КТО ВЗЯТ В РУКУ — В РАЗМЕТКЕ, А НЕ ТОЛЬКО НА КАРТИНКЕ. Накладка рамки
+                         печатает `paste` и у вставки, и у картинки (довод у её `owner`), поэтому
+                         различить их снаружи можно только здесь. Пусто — никого. */
+                      data-picture-frame={
+                        frame?.owner === 'image' ? String(frame.imageAt ?? '') : ''
+                      }
                       style={{
                         width: `${PLATE_W}px`,
                         height: `${plateH}px`,
@@ -7087,6 +7464,71 @@ export function VectorModal({
                           которое некому опровергнуть. */}
                       {/* ШАБЛОН ДЛЯ СРИСОВЫВАНИЯ — см. близнеца выше: он же под растром. */}
                       {backdrop && backdrop.depth === 'over' && renderBackdrop('over')}
+                      {/* ═══ ПОЛОЖЕННЫЕ КАРТИНКИ — ТРЕТИЙ МАТЕРИАЛ, НАД КРАСКОЙ И ПОД ЧЕРТЕЖОМ ═══
+                          Тот же ярус, на котором стоит превью плавающей вставки, и по тому же
+                          доводу: положенное ложится поверх краски, но чертёж поверх него читают.
+                          Каждая — обычный `<img>` с матрицей квада: перспектива двумерной
+                          матрицей не выражается, а `matrix3d` — та же дорога, которой ставится
+                          шаблон, то есть второго растеризатора здесь не заведено.
+                          РАЗМЕР ЭЛЕМЕНТА — УСЛОВНЫЙ КВАДРАТ: `quadCss` отображает коробку
+                          `nat × nat` на квад, а сама коробка растягивается `objectFit: fill`,
+                          ровно как подложка растягивается в плату. Настоящие пропорции живут в
+                          квадe, куда их положил `fitImageQuad`. */}
+                      {picsOn &&
+                        images.map((img, i) => {
+                          const live =
+                            frame?.owner === 'image' && frame.imageAt === i ? frame.quad : null;
+                          const quad = live ?? imageQuadPlate(img, PLATE_W, plateH);
+                          const gone = goneSrc.includes(img.src) || !img.src;
+                          if (gone) {
+                            /* ПРОПАВШЕЕ МЕДИА — ПЛАШКА, А НЕ ПУСТОТА И НЕ ПАДЕНИЕ. Коробка
+                               осе-выровненная нарочно: подпись внутри перспективной матрицы
+                               читалась бы скошенной ровно тогда, когда её и надо прочесть. */
+                            const b = imageBox({ ...img, quad: imageQuadFrac(quad, PLATE_W, plateH) }, PLATE_W, plateH);
+                            return (
+                              <div
+                                key={`gone-${i}`}
+                                data-placed-picture={i}
+                                data-picture-gone={img.mediaId}
+                                className='pointer-events-none absolute flex items-center justify-center border border-dashed border-textColor bg-bgColor/70 text-center'
+                                style={{
+                                  left: `${b.x0}px`,
+                                  top: `${b.y0}px`,
+                                  width: `${Math.max(1, b.x1 - b.x0)}px`,
+                                  height: `${Math.max(1, b.y1 - b.y0)}px`,
+                                }}
+                              >
+                                <Text size='micro' variant='label' component='span'>
+                                  {`picture ${i + 1} is gone`}
+                                </Text>
+                              </div>
+                            );
+                          }
+                          return (
+                            <img
+                              key={`pic-${i}-${img.mediaId}`}
+                              src={img.src}
+                              alt=''
+                              draggable={false}
+                              data-placed-picture={i}
+                              data-picture-media={img.mediaId}
+                              onError={() =>
+                                setGoneSrc((prev) =>
+                                  prev.includes(img.src) ? prev : [...prev, img.src],
+                                )
+                              }
+                              className='pointer-events-none absolute left-0 top-0 block max-w-none'
+                              style={{
+                                width: `${PLACED_BOX}px`,
+                                height: `${PLACED_BOX}px`,
+                                objectFit: 'fill',
+                                opacity: img.opacity,
+                                transformOrigin: '0 0',
+                                transform: imageCss(quad, PLACED_BOX, PLACED_BOX, img.flipX),
+                              }}
+                            />
+                          );
+                        })}
                       {/* СЛОЙ-ФАЙЛ БЕЗ ПРОЕКЦИИ: на плате рисуется сам SVG слоя — иначе принятый
                           вектор выглядел бы как пустой холст. Штрихи, когда они появятся, рисуются
                           ПОВЕРХ и живут отдельно от файла; предупреждение над холстом говорит это
@@ -7692,7 +8134,11 @@ export function VectorModal({
                       {frame && (
                         <TransformFrameOverlay
                           quad={frame.quad}
-                          owner={frame.owner}
+                          /* НАКЛАДКЕ РОД ХОЗЯИНА НУЖЕН ТОЛЬКО ДЛЯ АТРИБУТА, а органы у картинки
+                             ровно те же, что у вставки, — поэтому союз накладки не расширяется, а
+                             сюда едет её ближайший родственник. Кто взят в руку, экран говорит
+                             отдельно: `data-picture-frame` на плате. */
+                          owner={frame.owner === 'image' ? 'paste' : frame.owner}
                           axis={frame.axis}
                           zoom={zoomK}
                           hover={frameHover}
