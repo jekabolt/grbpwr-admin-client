@@ -7,7 +7,7 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { formatBytes } from 'utils/pattern';
 
-import { RENDER_SHEET_ORDER } from '../render/model';
+import { RENDER_SHEET_ORDER, benchName } from '../render/model';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
 import { viewLabel } from '../views';
 import { useModelCard } from './model-index';
@@ -79,12 +79,34 @@ import type { WireUploadItem } from './wire';
  * индекса моделей по СВОЕМУ адресу (`useModelCard`), куда её кладёт картинка полосы
  * (`DesignPicture.tech_card_id`). Не нашлась — двери снимка стоят инертными и говорят это словами,
  * а не файлят картинку на карточку 0.
+ *
+ * ═══ И ПОД КАКОЙ ЦВЕТ — ТОЖЕ ОТ ВЫЗЫВАЮЩЕГО (r3f) ═════════════════════════════════════════════
+ *
+ * ЗДЕСЬ СТОЯЛО `colorwayId: 0` С ДОВОДОМ «снимок не заявляет колорвея за человека», И ЭТОТ ДОВОД
+ * УНОСИЛ СНИМОК С ЭКРАНА. Полка 3D СУЖЕНА целью студии (`outputsOfKind(band, 'threed', scope)` в
+ * `render/outputs.tsx`), то есть показывает ровно тот цвет, на котором человек стоит. Снимок,
+ * заявленный нулём, попадал на верстак `sample` — и на полке ROSSO, откуда его только что сняли,
+ * не появлялся вовсе: нажатие выглядело съеденным, а кадр, за который заплачено, находился только
+ * переключением цвета.
+ *
+ * ⚠ «НЕ ЗАЯВЛЯТЬ» ЗДЕСЬ НЕВОЗМОЖНО В ПРИНЦИПЕ: `colorway_id` — число, и `0` это НЕ «молчание», а
+ * ИМЯ ВЕРСТАКА СЕМПЛА (`SAMPLE_WORD` в `render/model.ts`), такое же полноправное, как `ROSSO`.
+ * Значит выбор не между «сказать» и «промолчать», а между «сказать то, на что человек смотрит» и
+ * «сказать `sample` за него». Цель приезжает пропом от того, кто её знает, — и она же печатается
+ * словом под дверями, чтобы утверждение было видно ДО нажатия, а не выводилось из пропажи кадра.
+ *
+ * ⚠ СЕРВЕР ЭТО ПРИНИМАЕТ И ГРАНИЦУ ДЕРЖИТ САМ: `DesignPictureKindTakesColorway` включает `threed`
+ * (`internal/entity/design.go`), а чужой колорвей отказывается словами в той же транзакции, что и
+ * вставка (`RegisterUpload`, `internal/store/design/pictures.go`). Клиенту здесь нечего проверять
+ * второй раз — и незачем: он не знает списка колорвеев карточки, а вызывающий знает.
  */
 export function ThreedModelModal({
   url,
   title,
   onClose,
   techCardId,
+  colorwayId = 0,
+  colorwayLabel = '',
 }: {
   /** Адрес `.glb`. `null` — окно закрыто. */
   url: string | null;
@@ -92,6 +114,13 @@ export function ThreedModelModal({
   onClose: () => void;
   /** The card a snapshot is filed onto. Omitted — read off the model index by the model's own url. */
   techCardId?: number;
+  /**
+   * ЧЕЙ ЭТО СНИМОК — колорвей, под которым он ляжет на карточку. `0` = верстак семпла, и это
+   * умолчание для всякого вызывающего, у которого цели нет: он и раньше файлил нулём.
+   */
+  colorwayId?: number;
+  /** Как этот колорвей зовётся на экране. Пусто у оси 0 — окно называет её `sample` само. */
+  colorwayLabel?: string;
 }): JSX.Element {
   const [facts, setFacts] = useState<ModelFacts | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -101,6 +130,14 @@ export function ThreedModelModal({
 
   const indexed = useModelCard(url);
   const card = techCardId || indexed;
+  /**
+   * КАК ЗОВЁТСЯ ЦЕЛЬ — ОДНО СЛОВО НА ПОДПИСЬ И НА ОБЕ ПОДСКАЗКИ. `benchName()` — то же написание
+   * `sample`, что у ворот, селекта и полосы (`render/model.ts`); второе написание в органе
+   * разошлось бы с отказом молча. Номер вместо имени (`#5`) — тот же запасной, что у
+   * `colourwayName` полки: колорвей, которого карточка больше не перечисляет, обязан оставаться
+   * НАЗЫВАЕМЫМ, иначе подпись пустеет ровно там, где она и нужна.
+   */
+  const targetName = colorwayId > 0 ? colorwayLabel.trim() || `#${colorwayId}` : benchName();
   const { registerUpload } = useDesignWrites(card);
   const apiRef = useRef<ModelViewerApi | null>(null);
   const [busy, setBusy] = useState<'' | 'shooting' | 'sending' | 'filing'>('');
@@ -195,8 +232,9 @@ export function ThreedModelModal({
         mediaId,
         ghostView,
         kind: 'threed',
-        // «не сказано», как у принесённой модели: снимок не заявляет колорвея за человека.
-        colorwayId: 0,
+        // ЦЕЛЬ, НА КОТОРУЮ ЧЕЛОВЕК СМОТРИТ, — разбор в шапке файла. Ноль здесь не «молчание», а
+        // верстак семпла, и он остаётся умолчанием для вызывающего без цели.
+        colorwayId,
         // ОДИН ВИД — НЕ МУЛЬТИВЬЮ, и сервер это скажет сам (`ghost_view` + композит = отказ):
         // лист объявляется ТОЛЬКО четырьмя сторонами.
         compositeViews: mode === 'sides' ? sides : undefined,
@@ -205,10 +243,13 @@ export function ThreedModelModal({
         displayOnly: false,
       };
       await registerUpload.mutateAsync({ clientRequestId: requestId, items: [item] });
+      /* ИМЯ ЦЕЛИ СТОИТ И В ИТОГЕ, А НЕ ТОЛЬКО ПОД ДВЕРЬЮ. «It stands in 3D MODELS OF THIS CARD»
+         верно ТОЛЬКО на этом цвете: полка сужена целью студии, и фраза без имени обещала бы кадр
+         на любом открытом верстаке. */
       showMessage(
         mode === 'sides'
-          ? `four sides filed on the card as one multi-view (${sides.map(viewLabel).join(', ')}) — it stands in 3D MODELS OF THIS CARD and on the sheet’s 3D tab; split it to select a side`
-          : `snapshot filed on the card${ghostView ? ` as a guess of ${viewLabel(ghostView)}` : ''} — it stands in 3D MODELS OF THIS CARD and on the sheet’s 3D tab`,
+          ? `four sides filed on the card under ${targetName} as one multi-view (${sides.map(viewLabel).join(', ')}) — it stands in 3D MODELS OF THIS CARD and on the sheet’s 3D tab; split it to select a side`
+          : `snapshot filed on the card under ${targetName}${ghostView ? ` as a guess of ${viewLabel(ghostView)}` : ''} — it stands in 3D MODELS OF THIS CARD and on the sheet’s 3D tab`,
         'success',
       );
     } catch (e) {
@@ -306,6 +347,28 @@ export function ThreedModelModal({
               >
                 snapshot 4 sides
               </Button>
+              {/* ═══ КУДА ЭТО ЛЯЖЕТ — СЛОВОМ, ДО НАЖАТИЯ, А НЕ ПО ПРОПАЖЕ КАДРА ═════════════════
+                  ТИХАЯ ПОДПИСЬ, А НЕ КНОПКА И НЕ ВЫБОР: цель здесь не назначается, а СООБЩАЕТСЯ —
+                  её держит экран, который это окно открыл (полка 3D сужена ею же). Селект рядом с
+                  дверями завёл бы вторую цель, спорящую с той, на которую человек смотрит.
+
+                  ⚠ И ОНА СТОИТ ВСЕГДА, В ТОМ ЧИСЛЕ У ВЫЗЫВАЮЩЕГО БЕЗ ЦЕЛИ. `sample` — такое же
+                  имя верстака, как `ROSSO`, и «files under sample» это факт, а не заглушка;
+                  прятать строку там, где цель не названа, значило бы молчать ровно в том случае,
+                  ради которого она заведена. */}
+              {/* Размер — `micro`, как у строки фактов слева: это ВТОРАЯ тихая строка того же
+                  ряда, и два размера тихого текста в одном ряду читаются как две разные важности
+                  там, где важность одна. `nano` в системе занят бейджами и номерами. */}
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                data-probe='snapshot-target'
+                className='shrink-0'
+                title={`both snapshots are filed on this card under ${targetName} — the colourway the screen that opened this window is standing on`}
+              >
+                files under {targetName}
+              </Text>
             </>
           )}
           <Button asChild variant='secondary' size='xs'>

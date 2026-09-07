@@ -196,6 +196,23 @@ export type DocumentPlate = {
    * draw a callout on, so it is drawn as a door into the model window, not as a surface.
    */
   modelOnly?: boolean;
+  /**
+   * ═══ ЧЕЙ ЭТО КАДР — КОЛОРВЕЙ САМОЙ КАРТИНКИ, И ЧИТАЕТСЯ ОН ТОЛЬКО У 3D (r3f) ═════════════════
+   *
+   * ⚠ ЭТО НЕ ВТОРОЕ НАПИСАНИЕ `colorwayId` ДЕСЯТЬЮ СТРОКАМИ ВЫШЕ, А ДРУГОЙ ВОПРОС. Тот отвечает
+   * «в КАКОМ ВЕРСТАКЕ стоит эта плита» (`slot.colorway_id`) и есть только у плиты верстака; этот —
+   * «чем ОБЪЯВЛЕНА сама картинка» (`DesignPicture.colorway_id`), и у выхода прогона он есть, а
+   * верстака за ним нет вовсе. Сервер их законно расходит, и `renderGroups` читает первый по
+   * `benchKind === 'render'`: положить сюда второе значение значило бы отправить кадр 3D в
+   * колорвейную группу рендеров.
+   *
+   * ЗАЧЕМ ЛИСТУ ЭТО ЧИСЛО. Из окна модели снимают кадр, и он филуется на карточку под КАКИМ-ТО
+   * колорвеем. Ноль — это не «молчание», а верстак семпла (разбор в `threed/model-modal.tsx`):
+   * снимок ROSSO-модели, заявленный нулём, уезжает на семпл-полку и на полке ROSSO не появляется.
+   * У листа своего пикера цвета нет, и единственная честная цель здесь — цвет ТОЙ МОДЕЛИ, которую
+   * человек открыл.
+   */
+  modelColorwayId?: number;
 };
 
 /**
@@ -500,6 +517,9 @@ export function bandPlates(
       pictureId: picture.id ?? 0,
       displayOnly: displayOnly || undefined,
       model: modelBehind.get(mediaId),
+      /* Цвет — только у постера 3D, за которым стоит модель: у прочих сегментов окна модели нет,
+         и число не на что было бы потратить. Разбор — у самого поля. */
+      modelColorwayId: modelBehind.has(mediaId) ? colorwayOf(picture) : undefined,
       /* ⚠ `run 0` — ЭТО НЕ ПРОГОН НОМЕР НОЛЬ, а его отсутствие: `?? '—'` мимо нуля не срабатывает,
          а общекарточный список впервые привёл сюда плиты, за которыми прогона нет вовсе
          (загруженная руками, «плоская» правка без основы). Слово то же, что на полосе выходов
@@ -539,6 +559,7 @@ export function bandPlates(
       pictureId: picture.id ?? 0,
       model: result.modelUrl,
       modelOnly: true,
+      modelColorwayId: colorwayOf(picture),
       note: `${(result.run.id ?? 0) > 0 ? `run ${result.run.id}` : 'no run'} · no thumbnail came back`,
     });
   }
@@ -2387,6 +2408,15 @@ export function ArtifactsPanel({
           url={viewing3d.model}
           title={viewing3d.name}
           techCardId={techCardId}
+          /* ═══ ЦЕЛЬ СНИМКА — ЦВЕТ ОТКРЫТОЙ МОДЕЛИ (r3f) ═══════════════════════════════════════
+             У листа своего пикера колорвея нет, и «текущая цель» здесь — это цвет ТОЙ картинки,
+             которую человек открыл (`modelColorwayId`, разбор у поля). В студии эту роль играет
+             сужение полки; здесь его нет, а ноль за человека означал бы «семплится» про модель,
+             про которую так никто не говорил, — и уносил бы снимок с полки её собственного цвета.
+             Имя — тем же словарём, что у полного имени плиты; у оси 0 его нет вовсе, и окно
+             назовёт её `sample` само. */
+          colorwayId={viewing3d.modelColorwayId ?? 0}
+          colorwayLabel={colourwayName(viewing3d.modelColorwayId ?? 0)}
           onClose={() => setViewing3d(null)}
         />
       )}

@@ -161,6 +161,45 @@ export const TILE_CORNER =
   'text-labelColor hover:text-textColor disabled:cursor-not-allowed disabled:text-textInactiveColor ' +
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
 
+/* ── ЦЕЛЬ СНИМКА МОДЕЛИ ─────────────────────────────────────────────────────────────────────── */
+
+/**
+ * ═══ ПОД КАКОЙ КОЛОРВЕЙ ЛЯЖЕТ СНИМОК, СДЕЛАННЫЙ ИЗ ЭТОГО ОКНА (r3f) ═══════════════════════════
+ *
+ * ЗАЧЕМ ЭТО КОНТЕКСТ, А НЕ ПРОП. Окно модели поднимает САМА плитка (`surfaceToModel` ниже, J-29),
+ * и между разделом, который знает цель, и плиткой стоит чужой примитив — ячейка полосы
+ * (`render/strip-cell.tsx`), у которой своего мнения о колорвее нет и быть не должно. Проп пришлось
+ * бы протащить сквозь неё, то есть заставить транзитный узел пересказывать утверждение, которого он
+ * не делает; следующий такой узел вернулся бы забывшим его — молча, потому что забытый проп даёт
+ * `undefined`, а `undefined` здесь читается как «семпл» и выглядит правдоподобно.
+ *
+ * Тот же приём и та же причина, что у `ThreedModelIndexContext` соседней строкой: «какой файл
+ * стоит за этим растром» плитка тоже не спрашивает у вызывающего.
+ *
+ * ⚠ ОБЛАСТЬ ОБЪЯВЛЯЕТ ТОТ, КТО СУЖЕН ЦЕЛЬЮ. Полка 3D показывает ровно один колорвей
+ * (`outputsOfKind(band, 'threed', scope)`), и потому она же его и называет. Экран, который цели не
+ * держит, провайдера не ставит — и его окно честно говорит `sample`, потому что нулём оно и файлит.
+ */
+export type ModelSnapshotTarget = {
+  /** Колорвей, под которым снимок ляжет на карточку. `0` — верстак семпла. */
+  colorwayId: number;
+  /** Как этот колорвей зовётся на экране. Пусто у оси 0: окно называет её `sample` само. */
+  label: string;
+};
+
+const SnapshotTargetContext = createContext<ModelSnapshotTarget | null>(null);
+
+/** Объявить цель снимка для всех плиток внутри. Разбор — у `ModelSnapshotTarget` выше. */
+export function ModelSnapshotScope({
+  target,
+  children,
+}: {
+  target: ModelSnapshotTarget;
+  children: ReactNode;
+}) {
+  return <SnapshotTargetContext.Provider value={target}>{children}</SnapshotTargetContext.Provider>;
+}
+
 /* ── ГАЛЕРЕЯ ────────────────────────────────────────────────────────────────────────────────── */
 
 interface GalleryEntry {
@@ -677,6 +716,8 @@ export function PictureTile({
   const ctx = useContext(GalleryContext);
   const hostRef = useRef<HTMLDivElement>(null);
   const [modelOpen, setModelOpen] = useState(false);
+  /** Цель снимка, объявленная разделом вокруг. Нет — окно файлит нулём и говорит `sample`. */
+  const snapshotTarget = useContext(SnapshotTargetContext);
 
   /**
    * ═══ ЭТОТ АДРЕС — НЕ КАРТИНКА, А ФАЙЛ МОДЕЛИ ══════════════════════════════════════════════
@@ -943,6 +984,10 @@ export function PictureTile({
         <ThreedModelModal
           url={modelHref}
           title={alt || '3d model'}
+          /* ЦЕЛЬ СНИМКА — ОТ РАЗДЕЛА, А НЕ ОТ ПЛИТКИ: разбор у `ModelSnapshotTarget` выше.
+             Без объявленной области это ноль — ровно то, чем окно файлило всегда. */
+          colorwayId={snapshotTarget?.colorwayId ?? 0}
+          colorwayLabel={snapshotTarget?.label ?? ''}
           onClose={() => setModelOpen(false)}
         />
       )}

@@ -108,12 +108,31 @@ export function useSplitToInput({
    * кроп, вот из чьего медиа он вырезан») и не решает за экран, что с ним делать.
    */
   onCropped,
+  /**
+   * ═══ ЧТО СКАЗАТЬ ПОСЛЕ РЕЗА, КОГДА КАДРЫ НЕ ИДУТ ВО ВХОД (r3f) ═══════════════════════════════
+   *
+   * Умолчание — «mark them into slots from the band», и оно ВЕРНО ровно там, где под кадром стоит
+   * дверь `mark ▸`: на полосе рендеров и на верстаке флэтов. Полка 3D — третий вызывающий, и у неё
+   * этой двери нет и быть не может: слот верстака кадр рода `threed` не принимает вовсе, сервер
+   * отвечает `wrong_kind`. Одна и та же строка отправляла человека искать орган, которого на его
+   * экране не нарисовано ни одного, — то есть обещала жест, которого нет.
+   *
+   * ⚠ ПРОП, А НЕ РОД КАРТИНКИ, И ЭТО ТА ЖЕ ГРАНИЦА, ЧТО У `addToInput`. С картинки полосы нельзя
+   * прочесть, каким экраном её открыли: один и тот же лист рода `threed` мог бы резаться там, где
+   * слоты есть, а флэт — там, где их нет. Про свои двери знает ВЫЗЫВАЮЩИЙ, и утверждение делает он.
+   * Забытый проп даёт прежнюю строку, а не пустоту: умолчание — то, что стояло здесь всегда.
+   *
+   * `views` приезжает уже посчитанным («4 views» / «1 view»): множественное число — вопрос языка, а
+   * не экрана, и второе его написание в каждом вызывающем разошлось бы с первым на единице.
+   */
+  cutSays,
 }: {
   techCardId: number;
   band: GetDesignBandResponse;
   addToInput?: boolean;
   onAccepted?: (media: common_MediaFull[]) => void;
   onCropped?: (crop: common_DesignPicture, sourceMediaId: number) => void;
+  cutSays?: (views: string) => string;
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   const { registerUpload } = useDesignWrites(techCardId);
@@ -296,7 +315,9 @@ export function useSplitToInput({
    */
   function saySlotsOnly(cut: number) {
     const views = `${cut} view${cut === 1 ? '' : 's'}`;
-    showMessage(`${views} cut — mark them into slots from the band`, 'success');
+    /* Что стоит ПОСЛЕ счёта — утверждение вызывающего о СВОИХ дверях (разбор у пропа `cutSays`).
+       Умолчание — прежняя строка, слово в слово: забытый проп не меняет ни одного экрана. */
+    showMessage(cutSays ? cutSays(views) : `${views} cut — mark them into slots from the band`, 'success');
   }
 
 
