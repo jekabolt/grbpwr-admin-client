@@ -1994,7 +1994,10 @@ export function VectorBrushRail(p: RailProps) {
             ) : (
               <>
                 <Text size='nano' variant='label' component='p'>
-                  {`picture ${p.pictureAt + 1} is in hand — drag it on the sheet, handles size it, ⌘-drag a corner bends it`}
+                  {/* ВЫХОД ИЗ РУКИ НАЗВАН ЗДЕСЬ, а не только над холстом: пока картинка в руке,
+                      дверь «+ picture» на её месте не рисуется, и человек, не знающий, чем
+                      отпустить, не найдёт способа положить ВТОРУЮ. */}
+                  {`picture ${p.pictureAt + 1} is in hand — drag it on the sheet, handles size it, ⌘-drag a corner bends it · enter lets go`}
                 </Text>
                 <ChipRow>
                   <Chip
