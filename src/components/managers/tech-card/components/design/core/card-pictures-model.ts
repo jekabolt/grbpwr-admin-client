@@ -266,6 +266,26 @@ export function cardPictureGroups(
      the reason travels with it. */
   const reps = options.reps;
   const kept = new Map<number, common_DesignPicture>();
+  /**
+   * ═══ ⚠ ONE MEDIA, ONE TILE — BECAUSE THE MEDIA IS WHAT IS PICKED ══════════════════════════════
+   *
+   * Rule 2 above says «one picture, one tile» and it was enforced by PICTURE id, while everything
+   * downstream of this door is addressed by MEDIA id: `taken` is a set of media ids, the tile
+   * toggles by `tile.media.id`, and the playground's table IS `freeform.items[]`, an FK on
+   * `media(id)`. One media reached by two picture rows — the same file uploaded into two batches,
+   * a plate filed a second time — therefore drew TWO frames that lit up and went out together,
+   * over a counter that said one. A person cannot tell that from a broken toggle.
+   *
+   * WHICH ROW SURVIVES IS THE POOL'S OWN ORDER, so the priority of rule 2 is kept whole: the bench
+   * comes first, so a plate keeps its «FLAT · FRONT» badge and its bench group, and the duplicate
+   * loses its tile — exactly what the rule already promised for one row reached twice.
+   *
+   * DE-DUPLICATED HERE AND NOT IN THE POOL, and the order matters: a hidden row (or a `.glb`, or
+   * one narrowed out by `reps`) must not claim the media and take a VISIBLE row down with it. Only
+   * what survives the offer is allowed to stand for a media.
+   */
+  const standsFor = new Map<number, number>();
+  const firstOfMedia = new Map<number, number>();
   for (const id of order) {
     const picture = byId.get(id)!;
     if (isPictureHidden(picture)) continue;
@@ -281,6 +301,15 @@ export function cardPictureGroups(
       const rep = pictureRepresentation(band, picture);
       if (!rep || !reps.includes(rep)) continue;
     }
+    const mediaId = media.id ?? 0;
+    if (mediaId > 0) {
+      const first = firstOfMedia.get(mediaId);
+      if (first !== undefined) {
+        standsFor.set(id, first);
+        continue;
+      }
+      firstOfMedia.set(mediaId, id);
+    }
     kept.set(id, picture);
   }
 
@@ -290,9 +319,17 @@ export function cardPictureGroups(
      neither is a reason to hide a picture that exists; both are worth saying out loud, because a
      picture standing alone with no explanation reads as a picture that lost something. */
   const tiles = new Map<number, CardPictureTile>();
+  /* A PARENT THAT LOST ITS TILE TO A TWIN IS NOT A PARENT THAT IS GONE. The de-duplication above
+     drops a picture ROW while its media stays on screen under another row; reading `derived_from`
+     raw would then print «parent gone» over a crop whose parent is one tile to the left — the
+     exact statement rule 1 forbids, because it is one a person can see is false. */
+  const parentOf = (picture: common_DesignPicture): number => {
+    const named = picture.derivedFrom ?? 0;
+    return named > 0 ? standsFor.get(named) ?? named : 0;
+  };
   for (const [id, picture] of kept) {
     const verb = (picture.derivation ?? '').trim().toLowerCase();
-    const parentId = picture.derivedFrom ?? 0;
+    const parentId = parentOf(picture);
     /* TWO FACTS, NOT ONE, AND THEY FAIL SEPARATELY. «Is the parent on this screen» is what the
        WORDS are about; «do we know what was done to it» is what the NESTING is about. Read as one
        flag they collapse into the lie above: a legacy row with a visible parent came out «parent
@@ -317,7 +354,7 @@ export function cardPictureGroups(
   for (const id of order) {
     const tile = tiles.get(id);
     if (!tile) continue;
-    const parentId = tile.childVerb ? tile.picture.derivedFrom ?? 0 : 0;
+    const parentId = tile.childVerb ? parentOf(tile.picture) : 0;
     const parent = parentId > 0 ? tiles.get(parentId) : undefined;
     if (parent) parent.children.push(tile);
     else roots.push(id);
