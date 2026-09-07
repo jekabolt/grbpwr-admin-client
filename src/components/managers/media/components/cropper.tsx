@@ -1,5 +1,5 @@
 import { ASPECT_RATIOS } from 'constants/constants';
-import getCroppedImg from 'lib/features/getCropped';
+import getCroppedImg, { imageFormatOf, normaliseImageFormat } from 'lib/features/getCropped';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import {
@@ -97,10 +97,10 @@ interface CropperInterface {
   /** Disables actions (e.g. while uploading). */
   busy?: boolean;
   /**
-   * MIME type of the cropped output. Defaults to guessing from the source url's extension, which
-   * only works for library media — a pasted or dropped file arrives as a `blob:` url with no
-   * extension at all, and guessing JPEG there flattens a screenshot's transparency without asking.
-   * Callers that know the source type (the intake dialog does — it holds the File) pass it.
+   * MIME type of the cropped output. Left out, the format is read off the source itself: the
+   * `data:` envelope or the url's extension (`imageFormatOf`), and for a `blob:` url — which
+   * carries no name at all — the blob's own type, read inside `getCroppedImg`. Callers that
+   * already hold the file say it outright; the intake dialog does, it has `File.type`.
    */
   outputFormat?: string;
   /** Label of the confirm action. */
@@ -340,7 +340,12 @@ export const MediaCropper: FC<CropperInterface> = ({
     if (!selectedFile || !rect) return;
     setSaveError(null);
     try {
-      const format = outputFormat ?? (selectedFile.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
+      /* ФОРМАТ НЕ ВЫБИРАЕТСЯ ЗДЕСЬ, А СПРАШИВАЕТСЯ. Раньше эта строка сама решала «`.webp` —
+         значит webp, всё остальное — JPEG», и всякий PNG выходил из кропа JPEG'ом, то есть без
+         прозрачности. Правило переехало в `imageFormatOf`, а неразобранный адрес (`blob:` —
+         библиотека и повторный кроп тянут снимок блобом) кроп дорешает сам по типу блоба: имени
+         у объектного адреса нет, а тип есть. */
+      const format = normaliseImageFormat(outputFormat) ?? imageFormatOf(selectedFile);
       // Пропорция в getCroppedImg не передаётся намеренно: рамка уже посчитана в целых
       // пикселях, и подгонять её второй раз — значит разойтись с числом, которое подписано
       // на рамке.

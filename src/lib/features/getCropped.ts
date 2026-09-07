@@ -76,6 +76,69 @@ export async function urlToDataUrl(imageUrl: string): Promise<string> {
   }
 }
 
+/* ═══ ФОРМАТ ВЫВОДА — ПРАВИЛО ЖИВЁТ ЗДЕСЬ ════════════════════════════════════════════════════
+   Кроп до сих пор ВСЕГДА писал JPEG, кроме источника с именем на `.webp`, и вместе с форматом
+   терялась прозрачность: канвас заливался белым и вырезанная фигура приезжала на белом прямо-
+   угольнике. Правило вынесено сюда, потому что писали его дословной строкой в трёх местах
+   (`cropper.tsx`, `expander.tsx:250`, приёмное окно медиа) и сходились они не всегда.
+   ⚠ ОБРАТНЫЙ КРОП (`expander.tsx` / `getExpanded.ts`) СВОЮ КОПИЮ ПОКА ДЕРЖИТ: там заливка не
+   лишняя, а несущая (поля добирает пипетка), и «прозрачно» ему нужно отдельным выбором, а не
+   сменой формата. Долг записан, в эту фазу не входит. */
+
+const IMAGE_FORMATS: Record<string, string> = {
+  'image/png': 'image/png',
+  'image/webp': 'image/webp',
+  'image/jpeg': 'image/jpeg',
+  'image/jpg': 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+};
+
+/**
+ * MIME, приведённый к тому, что канвас УМЕЕТ ЗАПИСАТЬ. `undefined` — не умеет.
+ *
+ * Проверка не формальность: `toDataURL` на неизвестном типе не отказывает, а молча пишет PNG.
+ * Снимок с телефона (`image/heic`) или гиф из буфера так и уезжали PNG'ом — то есть без потерь,
+ * зато вчетверо тяжелее, и упирались в потолок загрузки уже на сервере. Неизвестный тип теперь
+ * значит «источник о себе не сказал», и решает правило ниже, а не случай.
+ */
+export function normaliseImageFormat(mime?: string): string | undefined {
+  return mime ? IMAGE_FORMATS[mime.trim().toLowerCase()] : undefined;
+}
+
+/**
+ * Формат вывода, выведенный из АДРЕСА источника: MIME в конверте `data:`, иначе расширение.
+ * `undefined` — адрес формата не несёт (`blob:` — самый частый случай: библиотека и повторный
+ * кроп сначала тянут снимок блобом, и у объектного адреса расширения нет).
+ */
+export function imageFormatOf(src: string): string | undefined {
+  const envelope = /^data:([a-z]+\/[a-z0-9.+-]+)[;,]/i.exec(src);
+  if (envelope) return normaliseImageFormat(envelope[1]);
+  // `?v=2` и `#кадр` к имени файла не относятся: без обрезки хвоста `.png?w=800` уезжал в JPEG.
+  const path = src.split(/[?#]/)[0];
+  const ext = /\.([a-z0-9]+)$/i.exec(path);
+  return ext ? normaliseImageFormat(ext[1]) : undefined;
+}
+
+/**
+ * Формат вывода по САМОМУ источнику. От `imageFormatOf` отличается ровно на `blob:`: у объектного
+ * адреса имени нет, а тип у блоба есть — и без этого шага повторный кроп PNG из библиотеки
+ * (`media-recrop-dialog`, `media-selector`) продолжал бы отдавать JPEG, то есть терять альфу
+ * ровно там, где её и просили сохранить.
+ */
+async function sourceImageFormat(src: string): Promise<string | undefined> {
+  const byName = imageFormatOf(src);
+  if (byName || !src.startsWith('blob:')) return byName;
+  try {
+    const blob = await (await fetch(src)).blob();
+    return normaliseImageFormat(blob.type);
+  } catch {
+    return undefined;
+  }
+}
+
 function findBestCrop(width: number, height: number, targetRatio: number | undefined) {
   if (targetRatio === undefined) {
     return { bestWidth: width, bestHeight: height };
@@ -138,13 +201,20 @@ async function getRotatedImage(imageSrc: string, rotation: number): Promise<HTML
   return canvas;
 }
 
+/**
+ * @param format Формат вывода. Задан и записываем канвасом — уважается (приёмное окно медиа знает
+ * MIME файла из `File.type` и говорит его прямо). Не задан или незаписываем — выводится из
+ * источника, и только когда молчит и он, остаётся прежний JPEG.
+ */
 export default async function getCroppedImg(
   imageSrc: string,
   crop: Area,
   aspect?: number,
-  format: string = 'image/jpeg',
+  format?: string,
   rotation = 0,
 ): Promise<string> {
+  const outFormat =
+    normaliseImageFormat(format) ?? (await sourceImageFormat(imageSrc)) ?? 'image/jpeg';
   const rotatedCanvas = await getRotatedImage(imageSrc, rotation);
   const rotatedImage = new Image();
   rotatedImage.src = rotatedCanvas.toDataURL();
@@ -162,8 +232,15 @@ export default async function getCroppedImg(
   canvas.height = bestHeight;
 
   if (ctx) {
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    /* ═══ БЕЛЫЙ ГРУНТ — ЧАСТЬ JPEG, А НЕ ЧАСТЬ КРОПА ═══════════════════════════════════════
+       У JPEG альфы нет вовсе, и без заливки прозрачные точки уехали бы ЧЁРНЫМИ — заливка тут
+       обязательна. У PNG и WebP альфа есть, и та же заливка её просто СТИРАЛА: вырезанная
+       фигура приезжала на белом прямоугольнике, и вернуть её было уже нечем. Поворот кладёт в
+       углы такую же прозрачность, и она тоже остаётся прозрачной, а не белеет. */
+    if (outFormat === 'image/jpeg') {
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.imageSmoothingQuality = 'high';
@@ -182,6 +259,6 @@ export default async function getCroppedImg(
     );
   }
 
-  const quality = format === 'image/webp' ? 1.0 : 0.95;
-  return canvas.toDataURL(format, quality);
+  const quality = outFormat === 'image/webp' ? 1.0 : 0.95;
+  return canvas.toDataURL(outFormat, quality);
 }
