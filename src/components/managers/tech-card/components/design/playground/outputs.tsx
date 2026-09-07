@@ -1,5 +1,5 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
-import { useMemo, useState, type JSX } from 'react';
+import { useMemo, useRef, useState, type JSX } from 'react';
 import { CalloutBox } from 'ui/components/callout-box';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
 import { Pill } from 'ui/components/pill';
@@ -14,7 +14,6 @@ import { clockStamp, runHandle } from '../handles';
 import { VectorModal } from '../modals';
 import { PictureTile } from '../picture-tile';
 import { pictureThumb } from '../render/model';
-import { useDesignWrites } from '../use-design-band';
 import { isCutoutPicture, playgroundOutputs, playgroundRuns, presetsOf } from './model';
 
 /**
@@ -26,9 +25,18 @@ import { isCutoutPicture, playgroundOutputs, playgroundRuns, presetsOf } from '.
  * that fell off the feed's first page is paid work gone from the screen that shows it.
  *
  * ⚠ THESE PICTURES ARE NOT PLATES AND NOT ARTIFACTS, by decision (§8 q.6): there is no `select`
- * corner and no bench slot to put one into. What a person does with a result is look at it, draw
- * over it (`edit ▸`), or take it off the screen (`hide`). A cut-out is on its way to the picture
- * editor as a floating paste — that door belongs to the next phase and is not drawn as a dead one.
+ * corner and no bench slot to put one into. What a person does with a result is look at it or draw
+ * over it (`edit ▸`). A cut-out is on its way to the picture editor as a floating paste — that door
+ * belongs to the next phase and is not drawn as a dead one.
+ *
+ * ⚠ AND THERE IS NO `hide` CORNER, WHICH IS THE ONE CORNER THIS SECTION USED TO HAVE. `hide` is a
+ * PERSISTENT write on the card (`HideDesignPicture`), not a tidy-up of this screen: it is the same
+ * verb the bench and the history spend, it has no «show it back» anywhere on this screen, and the
+ * server refuses it outright for a picture that is an input of a live run or the parent of a
+ * visible crop (`live_run_input`, `live_crop_parent`) — refusals this section had no words for and
+ * no guard against. A one-way door onto a paid picture, standing where «take this off my screen»
+ * reads as free, is worse than no door: the archive of the run is what holds these pictures, and it
+ * keeps them either way.
  *
  * ⚠ A CUT-OUT IS SHOWN ON A NEUTRAL GROUND, and that is data, not decoration. Its subject stands on
  * TRANSPARENCY; over the white of a block it reads as a picture with a white background, which is
@@ -46,12 +54,24 @@ export function PlaygroundOutputs({
 }): JSX.Element {
   // Hooks above every early return (React #310 has taken this tab down once already).
   const speaks = serverSpeaksDesign();
-  const { hidePicture } = useDesignWrites(techCardId);
   const outputs = useMemo(() => playgroundOutputs(band), [band]);
   const runs = useMemo(() => playgroundRuns(band), [band]);
   const presets = useMemo(() => presetsOf(band), [band]);
   const [editingId, setEditingId] = useState(0);
-  const [hiding, setHiding] = useState(0);
+
+  /**
+   * ⚠ THE CARD CHANGED — THE OPEN EDITOR IS ABOUT THE OTHER CARD (invariant 12). `StudioTab` is not
+   * remounted between card A and card B, and the drawing modal is addressed by a PICTURE ID: left
+   * standing it would draw A's picture over B's screen and file the result against B. The guard
+   * below (`outputs.some`) closes it one render later at best — one COMMITTED frame in which a
+   * person can press SAVE. In the body of the render, never in an effect, exactly as the draft and
+   * the strip next door.
+   */
+  const shownCard = useRef(techCardId);
+  if (shownCard.current !== techCardId) {
+    shownCard.current = techCardId;
+    if (editingId) setEditingId(0);
+  }
 
   const noteworthy = runs.filter(
     (run) => isRunLive(run) || (run.status ?? '').trim().toLowerCase() === 'failed',
@@ -134,23 +154,6 @@ export function PlaygroundOutputs({
                     picture.media && mediaFullViewerSrc(picture.media)
                       ? mediaFullToViewerItem(picture.media)
                       : undefined
-                  }
-                  onRemove={
-                    writesOff
-                      ? undefined
-                      : {
-                          onClick: () => {
-                            setHiding(id);
-                            hidePicture.mutate(
-                              { pictureId: id, hidden: true },
-                              { onSettled: () => setHiding(0) },
-                            );
-                          },
-                          pending: hiding === id,
-                          ariaLabel: `hide playground picture ${picture.ordinal ?? ''}`.trim(),
-                          title:
-                            'take this picture off the screen — it is not deleted, and the run keeps it',
-                        }
                   }
                   onEdit={
                     !writesOff && pictureThumb(picture)
