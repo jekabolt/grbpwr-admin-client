@@ -10,6 +10,7 @@ import Text from 'ui/components/text';
 import { displayDetailName, readBench } from './bench-slot';
 import { findLayerForMedia, uploadRaster } from './modals/use-edit-layer';
 import { rasteriseStrokesOverBase } from './modals/rasterise-layer';
+import { splitImageDoc } from './modals/vector-image-stroke';
 import { DEFAULT_RATIO, decodeStrokesWire, readLayer } from './modals/vector-strokes';
 import { viewLabel } from './views';
 
@@ -114,9 +115,22 @@ export type TakenRaster = {
   /** The layer revision the strokes were actually read at — the server's answer, not the band's. */
   rev: number;
   strokeCount: number;
-  /** '' when the layer holds no strokes: nothing extra travels for this plate. */
+  /**
+   * СКОЛЬКО ПОЛОЖЕННЫХ КАРТИНОК НЕСЁТ ЭТОТ СЛОЙ.
+   *
+   * Отдельное число, а не прибавка к `strokeCount`: превью печатает «N lines pressed into the
+   * plate», и пуговица, посчитанная линией, была бы подписью, которую человек не сопоставит с
+   * тем, что видит. А «есть ли что везти» — это ИЛИ по двум числам: слой из одних картинок несёт
+   * разметку ровно так же, как слой из одних линий.
+   */
+  imageCount: number;
+  /** '' when the layer holds nothing at all: nothing extra travels for this plate. */
   dataUrl: string;
 };
+
+/** Слой несёт хоть что-то, чего нет на чистой плате. Одно правило на запуск и на превью. */
+export const carriesMarks = (taken: TakenRaster): boolean =>
+  taken.strokeCount > 0 || taken.imageCount > 0;
 
 /** Full size first — this raster is what the model reads, not a 200px bench frame. */
 function plateSrc(picture: common_DesignPicture): string {
@@ -131,6 +145,14 @@ function plateSrc(picture: common_DesignPicture): string {
  * the layer was written by a bundle this one cannot read — sending the clean plate under a screen
  * that promised marks would be the exact lie this module exists to remove, so the launch refuses
  * instead.
+ *
+ * ⚠ ДОКУМЕНТ РАЗБИРАЕТСЯ НАДВОЕ РОВНО КАК В РЕДАКТОРЕ, И БЕЗ ЭТОГО БЫЛИ ДВА ДЕФЕКТА СРАЗУ.
+ * Картинки-слои уезжают версией `IMAGE_DOC_VERSION`, которой `readLayer` не знает; скормленный ей
+ * целиком, такой слой объявлялся `unreadable`, и запуск отказывал словами «написано более новой
+ * админкой» — про документ, написанный ЭТИМ ЖЕ клиентом пять минут назад. А слой, на котором
+ * человек не провёл ни линии и положил одни пуговицы, до сюда даже не доходил: «нет штрихов»
+ * означало «нечего везти», и модель получала чистую плату под экраном, обещавшим разметку. Оба —
+ * ровно та ложь, ради снятия которой этот модуль существует.
  */
 export async function takeMarkedRaster(
   techCardId: number,
@@ -141,29 +163,37 @@ export async function takeMarkedRaster(
   const media = plate.picture.media?.media;
   const w = media?.fullSize?.width ?? 0;
   const h = media?.fullSize?.height ?? 0;
-  const doc = readLayer(decodeStrokesWire(layer?.strokes), w > 0 && h > 0 ? w / h : DEFAULT_RATIO);
-  if (doc.unreadable) {
+  const split = splitImageDoc(decodeStrokesWire(layer?.strokes));
+  const doc = readLayer(split.doc, w > 0 && h > 0 ? w / h : DEFAULT_RATIO);
+  // НЕЧИТАЕМОСТЬ — ДИЗЪЮНКЦИЯ ДВУХ ЧИТАТЕЛЕЙ, теми же словами, что в сиде редактора: битый список
+  // картинок значит «слой написан не этим бандлом» ровно так же, как чужая версия полилиний.
+  if (doc.unreadable || split.broken) {
     throw new Error(
       `the marks over ${plate.label} were written by a newer admin than this one and cannot be drawn here — reload the admin, or flatten them from edit ▸ on that slot`,
     );
   }
   const rev = layer?.rev ?? plate.layerRev;
-  if (!doc.strokes.length) return { rev, strokeCount: 0, dataUrl: '' };
+  if (!doc.strokes.length && !split.images.length) {
+    return { rev, strokeCount: 0, imageCount: 0, dataUrl: '' };
+  }
   const dataUrl = await rasteriseStrokesOverBase({
     baseSrc: plateSrc(plate.picture),
     strokes: doc.strokes,
     ratio: doc.ratio,
+    // ШОВ `SceneInput.images` УЖЕ БЫЛ — просто никто отсюда его не заполнял. Один растеризатор на
+    // редактор и на прогон: второй, рисующий те же пуговицы своим холстом, разошёлся бы молча.
+    images: split.images,
   });
-  return { rev, strokeCount: doc.strokes.length, dataUrl };
+  return { rev, strokeCount: doc.strokes.length, imageCount: split.images.length, dataUrl };
 }
 
 /**
  * The launch-time preparer: rasterise and upload every marked plate of the selection, and hand
  * back the media ids for `params.extra_input_media_ids`, in bench order.
  *
- * A layer that holds no strokes adds NOTHING — its plate already goes in through the bench, and an
- * extra copy with zero marks would only pad the input. Uploads are cached per (layer, rev, base):
- * see the module comment for why the retry must replay the same ids.
+ * A layer that holds neither strokes nor placed pictures adds NOTHING — its plate already goes in
+ * through the bench, and an extra copy with zero marks would only pad the input. Uploads are
+ * cached per (layer, rev, base): see the module comment for why the retry must replay the same ids.
  */
 export function useMarkedPlateUploads(techCardId: number) {
   const uploaded = useRef(new Map<string, number>());
@@ -172,7 +202,7 @@ export function useMarkedPlateUploads(techCardId: number) {
       const ids: number[] = [];
       for (const plate of markedPlatesOf(band, sel)) {
         const taken = await takeMarkedRaster(techCardId, plate);
-        if (!taken.strokeCount) continue;
+        if (!carriesMarks(taken)) continue;
         const key = `${plate.layerId}:${taken.rev}:${plate.picture.media?.id ?? 0}`;
         let mediaId = uploaded.current.get(key) ?? 0;
         if (!mediaId) {
@@ -191,7 +221,14 @@ export function useMarkedPlateUploads(techCardId: number) {
 
 type PreviewEntry =
   | { plate: MarkedPlate; state: 'reading' }
-  | { plate: MarkedPlate; state: 'ready'; rev: number; strokeCount: number; dataUrl: string }
+  | {
+      plate: MarkedPlate;
+      state: 'ready';
+      rev: number;
+      strokeCount: number;
+      imageCount: number;
+      dataUrl: string;
+    }
   | { plate: MarkedPlate; state: 'empty'; rev: number }
   | { plate: MarkedPlate; state: 'failed'; error: string };
 
@@ -239,8 +276,15 @@ export function MarkedPlatesModal({
           setEntries((prev) =>
             prev.map((e) =>
               e.plate.key === plate.key
-                ? taken.strokeCount
-                  ? { plate, state: 'ready', rev: taken.rev, strokeCount: taken.strokeCount, dataUrl: taken.dataUrl }
+                ? carriesMarks(taken)
+                  ? {
+                      plate,
+                      state: 'ready',
+                      rev: taken.rev,
+                      strokeCount: taken.strokeCount,
+                      imageCount: taken.imageCount,
+                      dataUrl: taken.dataUrl,
+                    }
                   : { plate, state: 'empty', rev: taken.rev }
                 : e,
             ),
@@ -338,7 +382,7 @@ function PlateFrame({ entry, bandRev }: { entry: PreviewEntry; bandRev: number }
           {entry.plate.label}
         </Text>
         {entry.state === 'ready' && <Pill tone='attention'>plate + marks · layer r{entry.rev}</Pill>}
-        {entry.state === 'empty' && <Pill tone='mut'>layer r{entry.rev} · no strokes</Pill>}
+        {entry.state === 'empty' && <Pill tone='mut'>layer r{entry.rev} · nothing marked</Pill>}
       </div>
       {/* `items-start` on the row above is load-bearing — see compare-modal on why a stretched
           flex item collapses an aspect-ratio frame to 0×0. */}
@@ -363,7 +407,7 @@ function PlateFrame({ entry, bandRev }: { entry: PreviewEntry; bandRev: number }
               {entry.state === 'reading'
                 ? 'pressing the marks in…'
                 : entry.state === 'empty'
-                  ? 'this layer holds no strokes — nothing extra goes for this slot'
+                  ? 'this layer holds neither strokes nor pictures — nothing extra goes for it'
                   : entry.error}
             </Text>
           </span>
@@ -371,7 +415,20 @@ function PlateFrame({ entry, bandRev }: { entry: PreviewEntry; bandRev: number }
       </div>
       {entry.state === 'ready' && (
         <Text size='nano' variant='label' component='p'>
-          {entry.strokeCount} line{entry.strokeCount === 1 ? '' : 's'} pressed into the plate
+          {/* ДВА МАТЕРИАЛА НАЗЫВАЮТСЯ ПОРОЗНЬ. Слой из одних пуговиц читался бы как «0 lines
+              pressed» — то есть как ошибка, ровно на том экране, который существует, чтобы
+              показать, ЧТО уезжает. */}
+          {[
+            entry.strokeCount
+              ? `${entry.strokeCount} line${entry.strokeCount === 1 ? '' : 's'}`
+              : '',
+            entry.imageCount
+              ? `${entry.imageCount} placed picture${entry.imageCount === 1 ? '' : 's'}`
+              : '',
+          ]
+            .filter(Boolean)
+            .join(' and ')}{' '}
+          pressed into the plate
         </Text>
       )}
       {stale && (
