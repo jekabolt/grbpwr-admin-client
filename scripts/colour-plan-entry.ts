@@ -6,7 +6,11 @@
 // согласна сама с собой (приём взят у `step-roundtrip-entry` и `bom-pantone-entry`).
 import type {
   GetDesignBandResponse,
+  common_DesignAsset,
+  common_DesignBenchSlot,
+  common_DesignColourPlan,
   common_DesignColourRecipe,
+  common_DesignReference,
 } from 'api/proto-http/admin';
 import {
   colourPlanGate,
@@ -47,8 +51,20 @@ export type Asset = { id: number; name: string; mediaId: number; colourHex?: str
 
 /**
  * ПОЛОСА-ФИКСТУРА. Ровно те поля, которые читают `benchSides`, `renderSheetViews`, `assetById` и
- * `readColourPlan`; всё остальное отсутствует НАРОЧНО — чтение полосы обязано переживать
+ * `readColourPlan`; всё остальное НЕЗАПОЛНЕНО НАРОЧНО — чтение полосы обязано переживать
  * незаполненное поле, и стенд, доливший в неё ключей «на всякий случай», прятал бы это.
+ *
+ * ⚠ «НЕЗАПОЛНЕНО» ЗДЕСЬ ЗНАЧИТ `undefined`, НАПИСАННОЕ ВСЛУХ, А НЕ ОТСУТСТВУЮЩИЙ КЛЮЧ, и разница
+ * стоила пропущенного поля. Раньше объект уезжал через `as unknown as GetDesignBandResponse` —
+ * двойное приведение выключает проверку ЦЕЛИКОМ, поэтому `freeform_presets`, приехавший в контракт
+ * позже стенда, не был здесь ни назван, ни замечен: полоса пробы молча отличалась от полосы экрана
+ * ровно тем полем, по которому рельс решает, рисовать ли ячейку. Теперь верхний уровень
+ * ИСЧЕРПЫВАЮЩИЙ и без приведения — следующее новое поле контракта уронит `tsc` здесь, на стенде,
+ * а не в проходящей зелёной пробе.
+ *
+ * ПРИВЕДЕНИЯ ОСТАЛИСЬ ВНУТРИ, ПООБЪЕКТНО И НАМЕРЕННО: слот, снимок, ткань и референс заполнены
+ * ровно теми полями, которые читает проверяемый код, и точечное `as` говорит это вслух там, где
+ * это правда, вместо одного приведения, отменяющего проверку всего сообщения.
  */
 export function makeBand(input: {
   sides: Side[];
@@ -57,39 +73,72 @@ export function makeBand(input: {
   plan?: { rev: number; maps: unknown[]; cloths: unknown[] } | null | undefined;
 }): GetDesignBandResponse {
   return {
-    bench: input.sides.map((s) => ({
-      viewKey: s.view,
-      kind: 'flat',
-      colorwayId: 0,
-      slotRev: 1,
-      picture: {
-        id: s.pictureId,
-        kind: 'flat',
-        media: {
-          id: s.mediaId,
-          media: {
-            fullSize: {
-              mediaUrl: `https://example.test/${s.mediaId}.png`,
-              width: s.w ?? 1000,
-              height: s.h ?? 1250,
+    bench: input.sides.map(
+      (s) =>
+        ({
+          viewKey: s.view,
+          kind: 'flat',
+          colorwayId: 0,
+          slotRev: 1,
+          picture: {
+            id: s.pictureId,
+            kind: 'flat',
+            media: {
+              id: s.mediaId,
+              media: {
+                fullSize: {
+                  mediaUrl: `https://example.test/${s.mediaId}.png`,
+                  width: s.w ?? 1000,
+                  height: s.h ?? 1250,
+                },
+                thumbnail: { mediaUrl: `https://example.test/${s.mediaId}-t.png` },
+              },
             },
-            thumbnail: { mediaUrl: `https://example.test/${s.mediaId}-t.png` },
           },
-        },
-      },
-    })),
-    assets: (input.assets ?? []).map((a) => ({
-      id: a.id,
-      kind: 'fabric',
-      name: a.name,
-      mediaId: a.mediaId,
-      colourHex: a.colourHex ?? '',
-      note: a.note ?? '',
-      repeatMm: 0,
-    })),
-    references: (input.references ?? []).map((mediaId) => ({ mediaId, role: 'front' })),
-    colourPlan: input.plan,
-  } as unknown as GetDesignBandResponse;
+        }) as common_DesignBenchSlot,
+    ),
+    budget: undefined,
+    references: (input.references ?? []).map(
+      (mediaId) => ({ mediaId, role: 'front' }) as common_DesignReference,
+    ),
+    layers: undefined,
+    totalRuns: undefined,
+    archivedRuns: undefined,
+    maxRrev: undefined,
+    colourRecipes: undefined,
+    hiddenByRun: undefined,
+    hiddenByBatch: undefined,
+    runs: undefined,
+    batches: undefined,
+    nextPageToken: undefined,
+    hasFabricRender: undefined,
+    renderBenchColorwayIds: undefined,
+    assets: (input.assets ?? []).map(
+      (a) =>
+        ({
+          id: a.id,
+          kind: 'fabric',
+          name: a.name,
+          mediaId: a.mediaId,
+          colourHex: a.colourHex ?? '',
+          note: a.note ?? '',
+          repeatMm: 0,
+        }) as common_DesignAsset,
+    ),
+    assetPlacements: undefined,
+    outputs: undefined,
+    outputsTotal: undefined,
+    outputsTotalByColorway: undefined,
+    /* ТРИ СОСТОЯНИЯ, А НЕ ДВА: `readColourPlan` отличает отсутствие поля (старый бинарь) от `null`
+       («у карточки плана нет») и от документа. Сгенерированный тип этого не выражает — отсюда
+       приведение, сохраняющее `null` как есть. */
+    colourPlan: input.plan as common_DesignColourPlan | undefined,
+    benchAdoptsUnattributed: undefined,
+    /* ⚠ НЕ `[]`. Отсутствие поля — это «бинарь старше плейграунда», и полоса цветового плана
+       обязана читаться на таком же сервере; пустой список означал бы «плейграунд есть, ключей
+       нет» и рисовал бы на рельсе ячейку, которой этому стенду взяться неоткуда. */
+    freeformPresets: undefined,
+  };
 }
 
 /** Документ плана, прочитанный ТОЙ ЖЕ дверью, что читает экран. */
