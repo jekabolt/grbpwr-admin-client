@@ -16,6 +16,7 @@ import { runHandle } from '../handles';
 import { VectorModal } from '../modals';
 import { PictureTile } from '../picture-tile';
 import {
+  SAMPLE_WORD,
   SELECT_MARK_NOT_STATED,
   pictureIsSelected,
   pictureThumb,
@@ -35,7 +36,8 @@ import { recolorOutputs, recolorRuns } from './model';
  * A GRID OF TILES (148px cells, the prototype's `fgrid`), each the studio's own `PictureTile`:
  * zoom in the shared viewer, the `select` mark that ARTIFACTS reads, `edit` to draw over it.
  * Under the picture: the run it came out of, and the colourway it is filed under — the link the
- * screen above calls «written on the picture that comes back» — or «no colourway».
+ * screen above calls «written on the picture that comes back» — or `sample`, the name the whole
+ * studio gives the colourway-less axis (D1).
  *
  * THE RUN'S OWN WORDS STAY ABOVE THE GRID. A live run and a failed one are printed here, next to
  * the GENERATE that started them, in the server's words (`runOutcomeNote`): the history below is
@@ -187,7 +189,7 @@ export function OnModelOutputs({
                   {runHandle(run.id) || 'run —'} · {which}
                 </Text>
                 <Text size='micro' variant='label' className='truncate'>
-                  {way ? way.toLowerCase() : 'no colourway'} · on model
+                  {way ? way.toLowerCase() : SAMPLE_WORD} · on model
                 </Text>
                 {/* under the frame only the refusal stays visible: a hover-only corner cannot
                     carry a reason nobody sees */}

@@ -51,10 +51,12 @@ export type { PatternColour, PatternGate } from './model';
    отпечатку — то есть держал второй ответ на вопрос «то же ли это нажатие, что и прошлое», а
    именно на этом вопросе и разъезжается оплаченный дважды прогон. Плитка стартует тем же
    `useStartDesignRun`, что рендер, перекрас и 3D; параметры собирает вызывающий экран. */
-/* ⚠ `pickableColourways` И `colourwayHex` ОСТАЛИСЬ БЕЗ ЧИТАТЕЛЯ (r3 п.18 снял чипы носки, их
-   единственного). Они НЕ снесены нарочно и это записано, чтобы не читалось как забывчивость: обе
-   — чистые функции об оси колорвеев, и волна 2 (вкладка COLOURWAYS, пп.29/41) заявлена ровно на
-   неё. Если та волна их не заберёт — удалять вместе с этой строкой, а не оставлять молча. */
+/* `pickableColourways` И `colourwayHex` СНЕСЕНЫ (волна 2). Записка на их месте обещала, что
+   вкладка COLOURWAYS их заберёт; она их не забрала — свотч колорвея читается там `dev_hex` с
+   фолбэком на словарь (`colourwaySwatchHex` в `colorway-recipe.tsx`), а список «каких колорвеев
+   можно выбрать» на оси колорвеев считает `useColorwayChoice`. Читателей не осталось ни одного,
+   и держать чистую функцию «на будущее» — это ровно тот мёртвый код, о котором записка и
+   предупреждала. */
 export {
   PATTERN,
   REFUSAL_ADVICE,
@@ -62,7 +64,6 @@ export {
   SEAM_CODE,
   SEAM_WORDS,
   assetOfMedia,
-  colourwayHex,
   nextPatternName,
   normaliseRepeat,
   patternAssets,
@@ -72,7 +73,6 @@ export {
   patternOutputs,
   patternRuns,
   patternTwin,
-  pickableColourways,
   pictureFull,
   pictureThumb,
   recentPatternColours,

@@ -1,6 +1,11 @@
-import type { common_DesignPicture, common_DesignRun, GetDesignBandResponse } from 'api/proto-http/admin';
+import type {
+  common_AdminColorwayRef,
+  common_DesignPicture,
+  common_DesignRun,
+  GetDesignBandResponse,
+} from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { Fragment, useMemo, useState, type JSX } from 'react';
+import { Fragment, useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Pill } from 'ui/components/pill';
@@ -26,13 +31,13 @@ import { threedResults } from '../threed/media';
 import { useBringOwnModel } from '../threed/model-upload-cell';
 import { useDesignWrites } from '../use-design-band';
 import {
-  SILHOUETTE_VIEWS,
   isSilhouetteView,
   normaliseViewKey,
   viewLabel,
   type SilhouetteView,
 } from '../views';
 import { ApplySplitDoor, type SplitPiece } from './apply-split';
+import { SAMPLE_LABEL, colourwayColumns } from './side-row';
 import {
   SELECT_MARK_NOT_STATED,
   liveRunsOfKind,
@@ -50,6 +55,12 @@ import { CELL_WIDTH, STRIP_CELL_PX, STRIP_FRAME_ASPECT, Strip, StripCell } from 
 
 /** Radix запрещает пустое значение пункта, поэтому «ничего не выбрано» — сентинел, а не `''`. */
 const MARK_PROMPT = '__mark__';
+/**
+ * Пункт «завести колорвей» в том же списке. Сентинел, а не пара «0:view»: он отвечает на ДРУГОЙ
+ * вопрос («в какой столбец»), и спутать его со стороной нельзя по построению — в значениях сторон
+ * стоит двоеточие и номер верстака.
+ */
+const MARK_NEW_COLOURWAY = '__new_colourway__';
 
 /** Пустая карта родства — для рода, который колодой не группируется. Один экземпляр: новая пустая
  *  карта на каждый рендер пересобирала бы `useMemo` ниже по кругу. */
@@ -230,29 +241,55 @@ interface Row {
 export function OutputsSection({
   band,
   techCardId,
-  kind,
+  kind = 'render',
   disabled,
   colorwayId,
   colorwayLabel,
+  colorways = [],
+  adopts = false,
+  onCreateColorway,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
-  kind: 'render' | 'threed';
+  /** Умолчание — рендеры: так этот раздел зовёт его хозяин на FABRIC RENDER (`<Outputs .../>`). */
+  kind?: 'render' | 'threed';
   disabled?: boolean;
   /**
-   * ═══ ВЫХОДЫ ТОГО ЖЕ КОЛОРВЕЯ, ЧТО И МЕНЮ НАД НИМИ (L-2) ═══════════════════════════════════
+   * ═══ СУЖЕНИЕ ОСТАЛОСЬ ТОЛЬКО У 3D (r3 D5) ═══════════════════════════════════════════════════
    *
-   * `undefined` — экран без оси (сегодня таких нет; оставлено для композитора, у которого выбора
-   * колорвея нет вовсе), и тогда список не сужается ничем. Число — включая 0 — сужает до прогонов
-   * ЭТОГО колорвея; 0 это безколорвейные, то есть все, сделанные до оси.
+   * Владелец (п.29 → дизайн колорвея): RENDERS OF THIS CARD — это ВСЕ цветные плиты карточки, а
+   * какого они цвета, говорит пилюля на самой плитке. Сужение секции одним колорвеем прятало
+   * материал соседнего цвета ровно тогда, когда его и ищут («а где мой рендер»), и рождало отказ
+   * «this section is not narrowed to a colourway» у двери разреза — отказ, которого больше нет.
    *
-   * ПЛИТКА ЧУЖОГО КОЛОРВЕЯ ОТСЮДА ПРОПАДАЕТ, И ЭТО ОТВЕТ, А НЕ ПРОПАЖА. Она лежит на карточке,
-   * видна в ленте прогонов ниже и в ARTIFACTS; здесь её нет потому, что раздел стоит под меню
-   * ОДНОГО цвета и «renders of this card» без сужения читалось бы как «вход, который увидит 3D».
+   * У 3D сужение остаётся и означает другое: полка моделей стоит под меню, которое СОБИРАЕТ
+   * модель из верстака ОДНОГО колорвея, и чужая модель в этом списке была бы обещанием входа,
+   * которого прогон не увидит. Поэтому число читается только при `kind === 'threed'` — правило
+   * живёт здесь (`scope`), а не в том, что передал хозяин.
    */
   colorwayId?: number;
-  /** Имя выбранного колорвея для подписи; пусто = безколорвейный верстак. */
+  /** Имя выбранного колорвея для подписи (только 3D); пусто = безколорвейный верстак. */
   colorwayLabel?: string;
+  /**
+   * Колорвеи карточки в её порядке — из них строятся цели `mark ▸` и `apply splitted`. Пустой
+   * список = «у карточки их нет», и тогда единственная цель — `sample`.
+   */
+  colorways?: common_AdminColorwayRef[];
+  /**
+   * ═══ ФЛАГ СЕРВЕРА: УСЫНОВЛЯЕТ ЛИ ВЕРСТАК СЕМПЛ-ПЛИТУ (B7, доктрина `has_fabric_render`) ══════
+   *
+   * `band.benchAdoptsUnattributed === true` — сервер переписывает `colorway_id` 0 → N в той же
+   * транзакции, что и постановка, и семпл-плиту МОЖНО положить в столбец колорвея. Отсутствие
+   * поля — «не сказано», а не «нет»: бинарь старше флага молчит, и рисовать по его молчанию дверь
+   * в чужой столбец значило бы обещать жест, который отвечает `colorway_mismatch` («попробуй —
+   * увидишь»). Поэтому вызывающий передаёт СРАВНЕНИЕ (`=== true`), а не само поле.
+   */
+  adopts?: boolean;
+  /**
+   * Открыть поповер рождения колорвея. `then` зовётся с id созданного — жест продолжается в новый
+   * столбец, не начинаясь заново.
+   */
+  onCreateColorway?: (then?: (colorwayId: number) => void) => void;
 }): JSX.Element | null {
   // HOOKS ABOVE THE EARLY RETURN, unconditionally — a hook below it would change the hook count
   // between renders and take the whole tree down (React #310; this screen has paid for it once).
@@ -303,6 +340,35 @@ export function OutputsSection({
    * старый колапсится обратно». Состояние из одного значения делает второе открытое невыразимым.
    */
   const [openDeck, setOpenDeck] = useState<number | null>(null);
+  /**
+   * ═══ ЖЕСТ `mark ▸`, ПРОДОЛЖЕННЫЙ В ТОЛЬКО ЧТО РОЖДЁННЫЙ КОЛОРВЕЙ ═══════════════════════════
+   *
+   * Пункт `+ colourway…` отвечает на «в какой столбец», а не на «в какую сторону»: столбца ещё
+   * нет. Поэтому после успеха дверь той же плитки СУЖАЕТСЯ до нового колорвея — на её лице стоит
+   * его имя, в списке только его стороны, — и второе нажатие доканчивает жест. Один орган, два
+   * ответа по очереди; альтернатива («поставить в сторону, выведенную из `ghost_view`») писала бы
+   * в слот, которого человек не называл.
+   *
+   * ⚠ ЭТО СОСТОЯНИЕ ОДНОЙ ПЛИТКИ, А НЕ РАЗДЕЛА: пара «картинка + колорвей». Булев флаг сузил бы
+   * двери всех плиток разом.
+   */
+  const [markScope, setMarkScope] = useState<{ pictureId: number; colorwayId: number } | null>(null);
+
+  /**
+   * ═══ КАРТОЧКА СМЕНИЛАСЬ — ОТКРЫТОЕ ЗАКРЫВАЕТСЯ, В ТЕЛЕ РЕНДЕРА (инвариант 12) ════════════════
+   *
+   * `StudioTab` при смене карточки не размонтируется, а все три состояния ниже — АДРЕСА чужих
+   * картинок: раскрытая колода соседней карточки, редактор над её плитой, суженная дверь её
+   * колорвея. Эффект оставил бы один закоммиченный кадр с новой карточкой и старым адресом — а
+   * одного кадра хватает, чтобы в модалке нажать «сохранить».
+   */
+  const shownCard = useRef(techCardId);
+  if (shownCard.current !== techCardId) {
+    shownCard.current = techCardId;
+    if (openDeck !== null) setOpenDeck(null);
+    if (editingId) setEditingId(0);
+    if (markScope) setMarkScope(null);
+  }
 
   /**
    * ═══ ДВЕРЬ РАСКРЫТОЙ КОЛОДЫ БОЛЬШЕ НЕ ДЕРЖИТ СВОЕГО СОСТОЯНИЯ (F-7 → Ф4) ═════════════════════
@@ -336,8 +402,14 @@ export function OutputsSection({
    * и показывала битый кадр. Пару сводит `threedResults` — ЕДИНСТВЕННОЕ место, где живёт этот
    * счёт; здесь она только вызывается. Второй свод рядом с ним разошёлся бы молча.
    */
+  /**
+   * ЧЕМ СУЖЕН ЭТОТ СПИСОК — ОДНО МЕСТО НА ВЕСЬ РАЗДЕЛ (`rows`, `pending`, горизонт шапки).
+   * Разбор — у пропа `colorwayId`: у рендеров сужения больше нет вовсе, у 3D оно осталось.
+   */
+  const scope = kind === 'threed' ? colorwayId : undefined;
+
   const rows = useMemo<Row[]>(() => {
-    const outputs = outputsOfKind(band, kind, colorwayId);
+    const outputs = outputsOfKind(band, kind, scope);
     if (kind !== 'threed') {
       return outputs.map(({ picture, run }) => ({
         picture,
@@ -367,7 +439,7 @@ export function OutputsSection({
       src: result.posterUrl || result.modelUrl,
       modelUrl: result.modelUrl,
     }));
-  }, [band, kind, colorwayId]);
+  }, [band, kind, scope]);
 
   /**
    * ЖИВЫЕ ПРОГОНЫ ЭТОГО ЖЕ РОДА И ЭТОГО ЖЕ КОЛОРВЕЯ — ИСТОЧНИК ПУНКТИРНЫХ ЯЧЕЕК В ГОЛОВЕ ПОЛОСЫ.
@@ -382,8 +454,8 @@ export function OutputsSection({
    * вместо закрытой.
    */
   const pending = useMemo(
-    () => liveRunsOfKind(band, kind, colorwayId),
-    [band, kind, colorwayId],
+    () => liveRunsOfKind(band, kind, scope),
+    [band, kind, scope],
   );
 
   /**
@@ -418,6 +490,21 @@ export function OutputsSection({
     for (const row of rows) if (row.picture.id != null) m.set(row.picture.id, row);
     return m;
   }, [rows]);
+
+  /**
+   * ═══ ОСЬ КОЛОРВЕЕВ — ТА ЖЕ, ЧТО СТОЛБЦЫ SIDES, И ОДНИМ ОПРЕДЕЛЕНИЕМ ══════════════════════════
+   *
+   * Пункты `mark ▸` и цели `apply splitted` обязаны совпадать со столбцами таблицы над этим
+   * разделом: человек кладёт плиту «в ROSSO», глядя на столбец ROSSO. Порядок и состав считает
+   * `colourwayColumns` (`./side-row`) — второе написание правила «архивный только с плитами»
+   * разошлось бы с первым в первый же день.
+   *
+   * Целью здесь передаётся 0: ось 0 нужна ВСЕГДА (у семпл-плиты она собственная), а «цель
+   * прогона» этот раздел не знает и знать не должен — он больше не сужен ничем.
+   */
+  const axis = useMemo(() => colourwayColumns(band, colorways, 0), [band, colorways]);
+  const colourwayName = (id: number): string =>
+    id === 0 ? SAMPLE_LABEL : (axis.find((c) => c.colorwayId === id)?.label ?? `#${id}`);
 
   /**
    * ═══ КУСКИ РАЗРЕЗА, ПРИВЯЗАННЫЕ К СТОРОНАМ, — ВХОД `applyPlan` (F-7) ══════════════════════
@@ -534,21 +621,21 @@ export function OutputsSection({
    *
    * Владелец: слоты фабрик-рендера «можно заполнять в разделе RENDERS OF THIS CARD».
    *
-   * ⚠ АДРЕСУЕТСЯ ВЕРСТАК ПЛИТЫ, А НЕ ВЕРСТАК ЭКРАНА, И ЭТО НЕ ОСТОРОЖНОСТЬ. Колорвей входит в
+   * ⚠ АДРЕСУЕТСЯ ВЕРСТАК, НАЗВАННЫЙ В САМОМ ПУНКТЕ, И ЭТО НЕ ОСТОРОЖНОСТЬ. Колорвей входит в
    * ключ исключительности слота, а сервер сверяет колорвей ПЛИТЫ с колорвеем СЛОТА и отвергает
-   * несовпадение (`colorway_mismatch`). Кадр ROSSO, помеченный при выбранном OLIVE, обязан
-   * адресовать верстак ROSSO — иначе экран рисует дверь, за которой отказ. Сегодня секция и так
-   * сужена колорвеем студии, то есть две величины совпадают; читать их как одну значило бы
-   * поставить починку в зависимость от сужения, которое живёт в другом файле и может смениться.
+   * несовпадение (`colorway_mismatch`) — В ОБЕ СТОРОНЫ, кроме одного случая: семпл-плита (0) в
+   * слот колорвея N, где сервер с флагом `bench_adopts_unattributed` УСЫНОВЛЯЕТ её, переписав
+   * `colorway_id` 0 → N в той же транзакции (B7). Поэтому пункты чужих столбцов рисуются ровно
+   * при `adopts` и ровно у семпл-плиты; у плиты цвета цель одна — её собственный столбец.
    *
    * ⚠ CAS-ТОКЕН БЕРЁТСЯ С ТОГО ЖЕ ВЕРСТАКА, ЧТО И АДРЕС. Полоса читается целиком
    * (`bench_colorway_id: 0`, довод в `use-design-band.ts`), поэтому строка чужого колорвея у
    * клиента на руках есть и второго круга запроса не нужно.
    */
-  const markInto = (picture: common_DesignPicture, view: string) => {
+  const markInto = (picture: common_DesignPicture, target: number, view: string) => {
     const pictureId = picture.id ?? 0;
     if (pictureId <= 0) return;
-    const bench = refColorwayFor('render', colorwayOf(picture));
+    const bench = refColorwayFor('render', target);
     const side = threedSides(band, bench).find((s) => s.view === view);
     if (!side) return;
     setMarking(pictureId);
@@ -568,6 +655,60 @@ export function OutputsSection({
   };
 
   /**
+   * ═══ ПУНКТЫ ОДНОГО СЕЛЕКТА `mark ▸` — ВСЁ, КУДА ЭТА ПЛИТА МОЖЕТ ВСТАТЬ ═══════════════════════
+   *
+   * ТРИ ПРАВИЛА, И КАЖДОЕ — ЗЕРКАЛО СЕРВЕРА, А НЕ ВКУС:
+   *   · плита колорвея N предлагает ТОЛЬКО стороны N. N→M и N→0 сервер отвергает
+   *     (`colorway_mismatch`) даже с флагом B7 — предлагать их значило бы рисовать дверь, за
+   *     которой отказ;
+   *   · семпл-плита (0) предлагает свои стороны ВСЕГДА, а стороны чужих столбцов — ровно при
+   *     `adopts`. Молчание сервера о флаге читается как «не сказано» (доктрина `has_fabric_render`),
+   *     и на старом бинаре список остаётся ровно таким, каким был;
+   *   · архивный столбец в усыновление не предлагается: этим цветом больше не работают. Своя
+   *     собственная ось плиты при этом остаётся всегда — иначе у плиты архивного колорвея не
+   *     осталось бы НИ ОДНОГО пункта, и селект был бы пуст.
+   *
+   * ИМЯ СТОЛБЦА В ПОДПИСИ — ТОЛЬКО КОГДА СТОЛБЦОВ НЕСКОЛЬКО. `ROSSO › front` в списке, где ROSSO
+   * единственный, повторял бы имя шесть раз подряд ни к чему.
+   *
+   * ⚠ ЗАНЯТАЯ СТОРОНА НАЗЫВАЕТ СЕБЯ ЗАНЯТОЙ. Пункт без пометки писал бы «front» и молча ВЫТЕСНЯЛ
+   * плиту, которая там стоит: запись идёт CAS-токеном ИМЕННО той строки, поэтому она проходит.
+   * Замена законна и обратима — она просто перестаёт быть немой.
+   */
+  const markTargets = (
+    picture: common_DesignPicture,
+    scoped: number | null,
+  ): { value: string; label: string }[] => {
+    const own = colorwayOf(picture);
+    const ids =
+      scoped !== null
+        ? [scoped]
+        : own === 0 && adopts
+          ? axis.filter((c) => c.colorwayId === 0 || !c.archived).map((c) => c.colorwayId)
+          : [own];
+    const many = ids.length > 1;
+    const items: { value: string; label: string }[] = [];
+    for (const id of ids) {
+      const name = colourwayName(id);
+      for (const side of threedSides(band, refColorwayFor('render', id))) {
+        const heldId = side.picture?.id ?? 0;
+        const face = many ? `${name} › ${viewLabel(side.view)}` : viewLabel(side.view);
+        items.push({
+          value: `${id}:${side.view}`,
+          label: heldId > 0 ? `${face} · replaces #${heldId}` : face,
+        });
+      }
+    }
+    /* ЧЕТВЁРТАЯ ДВЕРЬ ОДНОЙ КОМНАТЫ — тем же поповером, что заголовок `+ colourway` в SIDES. Она
+       предлагается там же, где предлагается усыновление: без флага семпл-плита в новый столбец не
+       встанет, и пункт вёл бы к рождению колорвея, которым нечего было бы наполнить отсюда. */
+    if (scoped === null && own === 0 && adopts && onCreateColorway) {
+      items.push({ value: MARK_NEW_COLOURWAY, label: '+ colourway…' });
+    }
+    return items;
+  };
+
+  /**
    * ═══ «APPLY SPLITTED» — ВХОД РЕНДЕРА СТАНОВИТСЯ РОВНО ЭТИМ РАЗРЕЗОМ (F-7 → Ф4) ═════════════
    *
    * Владелец, дословно: «когда заэкспанжено кнопка set которая будет чистить текущие FABRIC
@@ -582,32 +723,26 @@ export function OutputsSection({
    * потом положить», `viewKey` без `slotId` (члены одного `oneof`), `kind` всегда спеллится, отказ
    * одной стороны не останавливает остальные.
    *
-   * ═══ АДРЕСУЕТСЯ ВЕРСТАК СЕКЦИИ, А НЕ ВЕРСТАК ЛИСТА (F-7, круг 19) ═════════════════════════
+   * ═══ АДРЕСУЕТСЯ ВЕРСТАК ЛИСТА, А ЕСЛИ ЦЕЛЕЙ НЕСКОЛЬКО — ТА, ЧТО ВЫБРАЛИ В САМОЙ ДВЕРИ (r3) ══
    *
-   * Здесь стояло `colorwayOf(sheet)` — колорвей ЛИСТА, — а блок, который человек в этот момент
-   * видит, смонтирован колорвеем СЕКЦИИ (`FabricRenderSlots colorwayId={colorwayId}` в
-   * `render-studio.tsx`). Пока два числа совпадают, разницы нет; расходятся они не гипотетически:
-   * на сервере БЕЗ поля `outputs` список сужается колорвеем ПРОГОНА, а `colorwayOf(sheet)` читает
-   * колорвей КАРТИНКИ, и загруженная плита с `run_colorway_id: 0` и собственным колорвеем ROSSO
-   * проходит фильтр безымянной секции (разбор — у `outputsOfKind`, `render/model.ts`). Тогда `set`
-   * писал В ВЕРСТАК, КОТОРОГО НА ЭКРАНЕ НЕТ: слоты ниже не менялись, кнопка отрабатывала молча и
-   * «успешно», а стороны заполнялись у другого цвета. Молчаливая запись не в тот верстак — худший
-   * из исходов, потому что она не оставляет следа даже в виде отказа.
+   * Здесь стоял верстак СЕКЦИИ, потому что секция была сужена одним колорвеем. Сужения больше нет
+   * (D5), и «верстак секции» перестал существовать как факт — вместе с ним ушёл отказ «this
+   * section is not narrowed to a colourway»: он назывался ОТСУТСТВИЕМ выбора там, где выбор
+   * теперь делается в самой двери.
    *
-   * ПОДПИСЬ ДВЕРИ И ЕСТЬ ДОВОД: «the render input becomes exactly this split» — «the render input»
-   * это блок ПОД ЭТОЙ СЕКЦИЕЙ, и обещание двери обязано указывать на него. `markInto` рядом
-   * адресует верстак ПЛИТЫ, и это не разнобой: там жест называет одну плиту («поставь ВОТ ЭТУ»),
-   * а сервер сверяет колорвей плиты с колорвеем слота (`colorway_mismatch`).
+   * ПРАВИЛО ЦЕЛИ, ОДНО НА ТРИ СЛУЧАЯ:
+   *   · лист колорвея N → в N, без вопроса. Он и не может встать никуда больше: сервер сверяет
+   *     колорвей плиты с колорвеем слота, и N→M отвергается даже с флагом B7;
+   *   · семпл-лист БЕЗ флага → в `sample`, молча. Единственная законная цель;
+   *   · семпл-лист ПРИ флаге → дверь становится СЕЛЕКТОМ целей (`sample | ROSSO | … |
+   *     + colourway…`), и план считается по слотам ВЫБРАННОЙ цели. Второго органа рядом с дверью
+   *     не появилось: селект — это и есть дверь, тот же глагол, тот же вопрос, тот же отчёт.
    *
-   * ДВА ОТКАЗА ВМЕСТО ЗАПИСИ, ОБА СЛОВАМИ (`refusal`), И НИ ОДИН НЕ МОЛЧИТ:
-   *   · секция не сужена колорвеем вовсе (`colorwayId === undefined`) — верстака, в который
-   *     «надо», не существует как факта, и выбрать его за человека нельзя;
-   *   · лист принадлежит ДРУГОМУ колорвею — сервер отверг бы каждую сторону по
-   *     `colorway_mismatch`, а до починки мы бы вместо этого тихо заполнили чужой верстак.
-   * Оба уезжают в `ApplySplitDoor` пропом `refusal`: при заданном отказе дверь погашена, причина
-   * напечатана строкой, и на провод не уходит ни одной записи. Порядок отказов — от общего к
-   * частному: карточка только читается / сервер молчит → верстак не назван → лист чужой → в разрезе
-   * нет ни одной стороны силуэта (куски — детали, а у детали нет слота).
+   * ОТКАЗ ОСТАЛСЯ ОДИН СОДЕРЖАТЕЛЬНЫЙ (плюс два общих): в разрезе нет ни одной стороны силуэта.
+   * Он уезжает в `ApplySplitDoor` пропом `refusal`: дверь погашена, причина напечатана строкой, и
+   * на провод не уходит ни одной записи. Порядок — от общего к частному: карточка только читается
+   * / сервер молчит → в разрезе нет ни одной стороны силуэта (куски — детали, а у детали нет
+   * слота).
    */
   const applyRefusalFor = (rootId: number): string | null => {
     if (disabled)
@@ -615,17 +750,6 @@ export function OutputsSection({
     if (!speaks) return 'this server does not answer the design routes';
     const sheet = rowById.get(rootId)?.picture;
     if (!sheet) return null;
-    if (colorwayId === undefined)
-      return (
-        'this section is not narrowed to a colourway, and a render bench is addressed by one — ' +
-        'putting the split anywhere would fill a bench you are not looking at'
-      );
-    if (colorwayOf(sheet) !== colorwayOf({ colorwayId }))
-      return (
-        'this sheet belongs to another colourway than the slots below, and a plate of one ' +
-        'colourway cannot stand in the bench of another — the server refuses it outright. ' +
-        'Open that colourway and apply the split there.'
-      );
     if (!piecesOf(rootId).length)
       return 'nothing in this split names a side of the silhouette — the pieces are details, and a detail has no slot to stand in. Cut the sheet again and name front, back or a side on the frames.';
     return null;
@@ -645,9 +769,12 @@ export function OutputsSection({
    * секцию числом всей карточки. `null` — ничего не осталось за горизонтом, и тогда о нём молчим.
    */
   const stated = serverStatesOutputs(band);
-  // Горизонт спрашивается только у СЕКЦИИ С КОЛОРВЕЕМ — теперь это требование типа, а не
-  // договорённость: секция без сужения не имеет числа, которым её можно честно подписать.
-  const horizon = colorwayId === undefined ? null : outputsHorizon(band, colorwayId);
+  // Горизонт в ШАПКЕ спрашивается только у суженной секции (сегодня — только 3D): у списка всей
+  // карточки одного числа нет вовсе, потолок сервера тратится ПОКОЛОРВЕЙНО. У рендеров он поэтому
+  // переехал на саму плитку — в подсказку её подписи, по колорвею ЭТОЙ плитки (`horizonOf`).
+  const horizon = scope === undefined ? null : outputsHorizon(band, scope);
+  /** Горизонт колорвея ОДНОЙ плитки — «у него N, доехало M»; `null` — за горизонтом ничего. */
+  const horizonOf = (picture: common_DesignPicture) => outputsHorizon(band, colorwayOf(picture));
 
   /**
    * ⚠ «FRAME» И «TURNTABLE» БЫЛИ НЕПРАВДОЙ, И ЭТО ПРОВЕРЕНО ПО ЗАДЕПЛОЕННОМУ БЭКЕНДУ, А НЕ ПО
@@ -706,6 +833,15 @@ export function OutputsSection({
      * только за прогон, и её честный ответ — что прогона нет.
      */
     const stamped = (run.id ?? 0) > 0;
+    /**
+     * ЧЕЙ ЭТОТ РЕНДЕР — читается у САМОЙ КАРТИНКИ (`picture.colorway_id`), а не у прогона: на
+     * сервере они законно расходятся (загруженная плита несёт свой колорвей при `run_colorway_id`
+     * 0), и `outputs_total_by_colorway` считает именно по картинке.
+     */
+    const ownColorway = colorwayOf(picture);
+    const ownName = colourwayName(ownColorway);
+    /** «У этого колорвея N картинок, доехало M» — на плитке, потому что горизонт поколорвейный. */
+    const seen = kind === 'render' ? horizonOf(picture) : null;
     const view = viewLabel((picture.ghostView ?? '').trim());
     const shape = modelUrl
       ? '3d model'
@@ -832,6 +968,12 @@ export function OutputsSection({
            кадре стоит `.glb`, и примитив уже пишет «3d model» посреди него — второй такой же
            ярлык поверх был бы одним фактом, сказанным дважды. Пометка при этом называется
            всегда: это состояние, а не тип файла. */
+        /* ═══ ПИЛЮЛЯ КАДРА — ИМЯ КОЛОРВЕЯ У РЕНДЕРА (D5) ══════════════════════════════════════
+           Список больше не сужен цветом, и «чей это рендер» обязано стоять НА САМОЙ ПЛИТКЕ:
+           иначе шесть плит трёх цветов читаются как один ряд. `sample` — такое же имя, как
+           `ROSSO`, и рисуется так же: ось 0 не «ничего не выбрано», а вечный верстак семпла.
+           У 3D пилюля занята другим (род файла и пометка) — там список сужен, и имя цвета стоит
+           в шапке раздела один раз. */
         badge={
           modelUrl
             ? chosen
@@ -841,7 +983,9 @@ export function OutputsSection({
                 : undefined
             : selectable && chosen
               ? 'selected'
-              : undefined
+              : kind === 'render'
+                ? ownName
+                : undefined
         }
         /* ═══ ВТОРАЯ СТРОКА ПОДПИСИ СНЯТА — F-13, ДОСЛОВНО «убери текст "AI · run 26 · from mixed
            input"» ═══════════════════════════════════════════════════════════════════════════════
@@ -852,7 +996,23 @@ export function OutputsSection({
            столько раз, сколько плиток на экране.
            Что при этом НЕ потеряно: номер прогона стоит первой строкой, и он же — единственный
            член провенанса, который на этом экране различает строки. */
-        lines={[stamped ? `run ${run.id} · ${shape}` : `no run · ${shape}`]}
+        /* ⚠ ГОРИЗОНТ ЕДЕТ ПОДСКАЗКОЙ ЭТОЙ ЖЕ СТРОКИ, А НЕ ВТОРОЙ СТРОКОЙ ПОД НЕЙ. Он поколорвейный
+           («у ROSSO 74 картинки, доехало 60»), а список теперь общий — в шапке одного такого числа
+           нет вовсе. Вторая видимая строка вернула бы под каждую плитку прозу, которую владелец
+           снял (J-19); подсказка отвечает тому, кто спросил «а где остальные». */
+        lines={[
+          <span
+            key='shape'
+            data-outputs-horizon={seen ? `${seen.carried}/${seen.total}` : undefined}
+            title={
+              seen
+                ? `${ownName} has ${seen.total} generative pictures in all and the card shipped the newest ${seen.carried} of them, so the oldest are not on this list`
+                : undefined
+            }
+          >
+            {stamped ? `run ${run.id} · ${shape}` : `no run · ${shape}`}
+          </span>,
+        ]}
         /* ⚠ РЯД ПОД КАДРОМ РИСУЕТСЯ, ТОЛЬКО ЕСЛИ В НЁМ ЧТО-ТО ЕСТЬ (E-25). У здоровой ячейки 3D
            под карточкой теперь не должно быть НИЧЕГО — а пустой `<div>` это всё-таки орган:
            `StripCell` даёт ему свою отбивку, и ряд ячеек разъезжается по высоте оттого, у какой
@@ -918,16 +1078,25 @@ export function OutputsSection({
                         кнопке, как у соседей. */}
                     {(() => {
                       const rootId = picture.id ?? 0;
-                      const bench = refColorwayFor('render', colorwayId ?? 0);
+                      const own = colorwayOf(picture);
+                      /* ЦЕЛИ — ТОЛЬКО У СЕМПЛ-ЛИСТА И ТОЛЬКО ПРИ ФЛАГЕ (разбор у `applyRefusalFor`).
+                         В остальных случаях цель одна и вопроса нет: дверь остаётся кнопкой. */
+                      const targets =
+                        own === 0 && adopts
+                          ? axis
+                              .filter((c) => c.colorwayId === 0 || !c.archived)
+                              .map((c) => ({ colorwayId: c.colorwayId, label: c.label }))
+                          : [{ colorwayId: own, label: colourwayName(own) }];
                       return (
                         <ApplySplitDoor
                           techCardId={techCardId}
-                          sides={threedSides(band, bench)}
+                          sidesOf={(target) => threedSides(band, refColorwayFor('render', target))}
+                          targets={targets}
                           pieces={piecesOf(rootId)}
                           benchKind='render'
-                          colorwayId={bench}
                           noun='render'
                           refusal={applyRefusalFor(rootId)}
+                          onCreateColorway={own === 0 && adopts ? onCreateColorway : undefined}
                           className='min-w-0 flex-1 [&>button]:h-5 [&>button]:bg-bgColor'
                           doorClassName='h-5 bg-bgColor'
                         />
@@ -1032,42 +1201,50 @@ export function OutputsSection({
                   }
                 />
               ) : (
+                /* ═══ ОДИН СЕЛЕКТ — ОДИН ВОПРОС: «В КАКУЮ СТОРОНУ ЧЬЕГО СТОЛБЦА» (D4/D5) ════════
+                   Пункты собирает `markTargets` (ниже, в теле раздела): стороны СОБСТВЕННОГО
+                   столбца плиты, а у семпл-плиты при флаге усыновления — ещё и стороны каждого
+                   колорвея, ОДНИМ списком с именем столбца в подписи (`ROSSO › front`). Второго
+                   уровня кнопок нет намеренно: «сначала выбери колорвей, потом сторону» — это два
+                   органа на один жест, ровно то, чего владелец просил не делать. */
                 <span data-mark-for={picture.id || undefined} className='flex w-full'>
-                  <SelectComponent
-                    name={`mark-render-${picture.id}`}
-                    value={MARK_PROMPT}
-                    placeholder='mark ▸'
-                    disabled={marking === (picture.id ?? 0)}
-                    /* ⚠ СЕЛЕКТОР ПРИВОДИТСЯ К МЕТРИКЕ КНОПКИ, А НЕ НАОБОРОТ (F-9). `min-h-0`
-                       обязателен: `min-height` и `height` — РАЗНЫЕ группы у twMerge, поэтому
-                       `min-h-[22px]` примитива тихо победил бы `h-5` и селектор остался бы выше
-                       соседней кнопки — ровно то, на что владелец и жалуется. Кегль тоже: поле
-                       ввода говорит 12px строчными, ряд дверей — 10px прописными. */
-                    className='h-5 min-h-0 py-0 text-micro uppercase tracking-label'
-                    /* ⚠ ЗАНЯТАЯ СТОРОНА НАЗЫВАЕТ СЕБЯ ЗАНЯТОЙ. Пункт без пометки писал бы «front»
-                       и молча ВЫТЕСНЯЛ плиту, которая там стоит: запись идёт CAS-токеном ИМЕННО
-                       той строки, поэтому она проходит. Довод блока слотов гласит, что замена
-                       осталась отдельным жестом «где видно, что именно вытесняется» — в момент
-                       действия видно не было ничего. Сторона не запрещается: замена законна и
-                       обратима, она просто перестаёт быть немой. */
-                    items={[
-                      { value: MARK_PROMPT, label: 'mark ▸' },
-                      ...SILHOUETTE_VIEWS.map((view) => {
-                        const held = threedSides(band, refColorwayFor('render', colorwayOf(picture)))
-                          .find((s) => s.view === view)?.picture;
-                        const heldId = held?.id ?? 0;
-                        return {
-                          value: view,
-                          label: heldId > 0 ? `${viewLabel(view)} · replaces #${heldId}` : viewLabel(view),
-                        };
-                      }),
-                    ]}
-                    onValueChange={(value: string) => {
-                      if (!value || value === MARK_PROMPT) return;
-                      markInto(picture, value);
-                    }}
-                    fullWidth
-                  />
+                  {(() => {
+                    const scoped =
+                      markScope && markScope.pictureId === (picture.id ?? 0)
+                        ? markScope.colorwayId
+                        : null;
+                    const targets = markTargets(picture, scoped);
+                    const face = scoped === null ? 'mark ▸' : `${colourwayName(scoped)} ▸`;
+                    return (
+                      <SelectComponent
+                        name={`mark-render-${picture.id}`}
+                        value={MARK_PROMPT}
+                        placeholder={face}
+                        disabled={marking === (picture.id ?? 0)}
+                        /* ⚠ СЕЛЕКТОР ПРИВОДИТСЯ К МЕТРИКЕ КНОПКИ, А НЕ НАОБОРОТ (F-9). `min-h-0`
+                           обязателен: `min-height` и `height` — РАЗНЫЕ группы у twMerge, поэтому
+                           `min-h-[22px]` примитива тихо победил бы `h-5` и селектор остался бы выше
+                           соседней кнопки — ровно то, на что владелец и жалуется. Кегль тоже: поле
+                           ввода говорит 12px строчными, ряд дверей — 10px прописными. */
+                        className='h-5 min-h-0 py-0 text-micro uppercase tracking-label'
+                        items={[{ value: MARK_PROMPT, label: face }, ...targets]}
+                        onValueChange={(value: string) => {
+                          if (!value || value === MARK_PROMPT) return;
+                          if (value === MARK_NEW_COLOURWAY) {
+                            const id = picture.id ?? 0;
+                            onCreateColorway?.((created) =>
+                              setMarkScope({ pictureId: id, colorwayId: created }),
+                            );
+                            return;
+                          }
+                          const [target, view] = value.split(':');
+                          markInto(picture, Number(target), view);
+                          setMarkScope(null);
+                        }}
+                        fullWidth
+                      />
+                    );
+                  })()}
                 </span>
               ))}
             {/* ═══ ЗДЕСЬ СТОЯЛИ `open` И `download` — ОБЕ СНЯТЫ (E-25) ═══════════════════════
@@ -1142,12 +1319,15 @@ export function OutputsSection({
             ? // ГОВОРИТ ПРО КАРТОЧКУ ЦЕЛИКОМ И ПРО ОБА ПРОИСХОЖДЕНИЯ. В списке теперь стоят и
               // загруженные руками плиты (у них нет прогона вовсе), а «came back» — слово о
               // прогоне, и под ним рука выглядела бы чужой строкой.
-              '— the coloured plates of this whole card, generated or brought, and which are chosen'
+              // ⚠ «and which are chosen» СНЯТО, И ЭТО ПОЧИНКА ЛЖИ, А НЕ ПРАВКА СЛОВА: пометки у
+              // рендеров нет с J-23 (у них выбор — слот верстака), а с r3 плитка называет СВОЙ
+              // КОЛОРВЕЙ пилюлей. Подпись обязана называть то, что на плитках и есть.
+              '— the coloured plates of this whole card, generated or brought, each under its colourway'
             : // ОТКАЧЕННЫЙ БИНАРЬ ПРИЗНАЁТСЯ ЗДЕСЬ, И ЭТО ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ОН ЕЩЁ МОЖЕТ.
               // Строка охвата и сноска, обе говорившие «on this page of the feed», сняты (J-24,
               // J-19). Список на таком сервере по-прежнему обходит СТРАНИЦУ ЛЕНТЫ, и молчать об
               // этом значило бы выдать её за все рендеры карточки.
-              '— the coloured plates on this page of the feed, and which of them are chosen'
+              '— the coloured plates on this page of the feed, each under its colourway'
       }
       /* ЧЕЙ ЭТО СПИСОК И ГДЕ ОН КОНЧАЕТСЯ — В СЧЁТЕ ШАПКИ, А НЕ ОТДЕЛЬНОЙ СТРОКОЙ (J-24, J-19).
          Владелец снял обе прозаические строки под плитками; из них уцелели ровно два ФАКТА, и оба
@@ -1165,7 +1345,10 @@ export function OutputsSection({
           {kind === 'threed' && <Counter n={rows.length} noun='model' />}
           <Text size='micro' variant='label' component='span' className='uppercase'>
             {kind === 'threed' ? '' : `${rows.length} ${noun}${rows.length === 1 ? '' : 's'}`}
-            {colorwayLabel?.trim() ? ` · ${colorwayLabel.trim()}` : ''}
+            {/* ИМЯ КОЛОРВЕЯ — ТОЛЬКО ТАМ, ГДЕ СПИСОК ИМ СУЖЕН (3D). У рендеров сужения больше нет,
+                и одно имя над списком трёх цветов было бы неправдой о двух из них; чей рендер,
+                говорит пилюля на самой плитке. */}
+            {kind === 'threed' && colorwayLabel?.trim() ? ` · ${colorwayLabel.trim()}` : ''}
             {/* СЧЁТ ПОМЕЧЕННЫХ — ТОЛЬКО ТАМ, ГДЕ ПОМЕТКУ СТАВЯТ (J-23). У рендеров двери больше
                 нет, и число «· 2 selected» над списком без единого органа читалось бы как
                 сломанная кнопка, а не как факт. */}

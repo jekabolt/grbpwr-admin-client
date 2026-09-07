@@ -387,10 +387,21 @@ export function ConstructionDraft({
     if (!gate.ok || readOnly || draftIdea.isPending) return;
     if (!intent.current) intent.current = newClientRequestId();
     const snapshot = { pictures: pictureCount, notes: boardNotes.length, fingerprint };
+    /**
+     * ⚠ КАРТОЧКА, КОТОРАЯ СПРОСИЛА, — И НИКАКАЯ ДРУГАЯ. Запрос летит секунды, а человек за это
+     * время уходит на соседнюю тех-карту, и `StudioTab` при этом не размонтируется (инвариант 12):
+     * колбэк, не спросивший «а тот же ли это экран», положил бы ответ A на карточку B — вместе с
+     * ценой, строкой прогона и чипами деталей. Сброс в теле рендера этого не ловит: он про
+     * состояние, УЖЕ стоящее на экране, а не про ответ, который ещё в полёте.
+     * `shownCard` объявлен ниже по файлу — это законно: колбэк исполняется после рендера, к тому
+     * времени ссылка инициализирована.
+     */
+    const asked = techCardId;
     draftIdea.mutate(
       { clientRequestId: intent.current },
       {
         onSuccess: (res) => {
+          if (shownCard.current !== asked) return;
           intent.current = null;
           setPrice(runPrice(res.run));
           setLastRun(res.run ?? null);
@@ -428,6 +439,7 @@ export function ConstructionDraft({
           // означало бы заплатить дважды за один вопрос. Но у прогона, который сервер уже закрыл,
           // стеречь нечего: тот же ключ будет вечно возвращать ту же самую фразу, и «press draft
           // again» — совет, которому мы физически не давали сбыться (см. CLOSED_RUN_REFUSALS).
+          if (shownCard.current !== asked) return;
           if (runIsClosed(error)) intent.current = null;
           showMessage(draftIdeaRefusal(error), 'error');
         },
@@ -608,6 +620,17 @@ export function ConstructionDraft({
     });
   }
 
+  /**
+   * ЧЕМ ЗАВЕЛИ СЛОТ — ПО ЕГО АДРЕСУ (Fable r3-w1, NIT 10). Журнал заполнений держит ровно эту
+   * пару: адрес `detailSlot:<slotId>` и `after` — имя, которым слот минтили. Больше её нигде нет:
+   * на полосе лежит ТЕКУЩЕЕ имя, а переименование законно и следа за собой не оставляет.
+   * Читается из `fills` (стор ключуется карточкой), поэтому знание сессионное — см. поле снимка.
+   */
+  const mintedBySlot = useMemo(() => {
+    const by = new Map<number, string>();
+    for (const f of fills) if (f.target.kind === 'detailSlot') by.set(f.target.slotId, f.after);
+    return by;
+  }, [fills]);
   // СРАВНЕНИЕ СЧИТАЕТСЯ НА РЕНДЕРЕ, ПРОТИВ ЖИВЫХ ЗНАЧЕНИЙ (D5). Не в `onSuccess` и не в состоянии:
   // принятая строка обязана сама стать `same`, а рукописная правка соседнего поля — сама поменять
   // «add» на «replace», без единого пере-запроса.
@@ -621,10 +644,14 @@ export function ConstructionDraft({
       // `isLive`: пустой массив — утверждение «слотов нет» и гасит записи журнала, отсутствие —
       // «не знаем» и оставляет их. На бинаре без полосы у человека иначе исчезал бы `✕`.
       detailSlots: serverSpeaks
-        ? benchDetails.map((s) => ({ id: s.id ?? 0, name: (s.detailName ?? '').trim() }))
+        ? benchDetails.map((s) => ({
+            id: s.id ?? 0,
+            name: (s.detailName ?? '').trim(),
+            mintedAs: mintedBySlot.get(s.id ?? 0),
+          }))
         : undefined,
     }),
-    [fit, concept, details, bomItems, serverSpeaks, benchDetails],
+    [fit, concept, details, bomItems, serverSpeaks, benchDetails, mintedBySlot],
   );
   const { rows, missing, details: detailIdeas } = useMemo(
     () => diffProposal(staged?.draft ?? null, formSnapshot),
@@ -696,6 +723,51 @@ export function ConstructionDraft({
   const [logOpen, setLogOpen] = useState(false);
   /** Квитанция записи по АДРЕСУ ЖУРНАЛА — пилюля `added` / `replaced` в строке WRITTEN. */
   const [receiptByFill, setReceiptByFill] = useState<Record<string, Receipt>>({});
+
+  /**
+   * ═══ КАРТОЧКА СМЕНИЛАСЬ — ЧЕРНОВИК НАЧИНАЕТСЯ ЗАНОВО (Codex r3-w1, MAJOR) ═══════════════════
+   *
+   * ⚠ СБРОСА ЗДЕСЬ НЕ БЫЛО ВОВСЕ, И ЦЕНА ЕМУ — ЗАПИСЬ НА СЕРВЕР ЧУЖИМИ СЛОВАМИ. Всё, что стоит
+   * выше, — это ОТВЕТ ПРО КАРТОЧКУ A: предложенные детали (`staged` → `openDetails`), их отметки
+   * (`wantedDetails`), отметки строк (`taken`), квитанции, цена и строка прогона. `ConstructionDraft`
+   * не ключуется `techCardId`, а `StudioTab` при переходе на соседнюю тех-карту НЕ размонтируется
+   * (инвариант 12): чипы деталей карточки A встают на экран карточки B, и `addDetailSlots` заводит
+   * их ИМЕНАМИ A на верстаке B — `writes` уже адресован B. Цена и «read 7 pictures · 3 notes»
+   * при этом утверждают, что за прогон B заплачено, а прогона у B не было.
+   *
+   * ⚠⚠ ПРОВЕРЯТЬ ЭТО НА ХОЛОДНОЙ КАРТОЧКЕ БЕСПОЛЕЗНО, И ИМЕННО ТАК ЭТОТ СБРОС СНЕСУТ. У карточки,
+   * которую в этой сессии ещё не открывали, `useDesignBand` отдаёт `isLoading: true`, `StudioTab`
+   * подменяет весь шаг на «loading…», и блок размонтируется САМ — состояние пропадает без всякого
+   * сброса. Опасен обычный ход «A → B → A»: у уже посещённой карточки данные в кэше, `isLoading`
+   * ложно, экран не подменяется, узел живёт (сцена G в `probe-mood.mjs` греет обе карточки).
+   *
+   * В ТЕЛЕ РЕНДЕРА, А НЕ В ЭФФЕКТЕ (инвариант 12): эффект оставил бы один закоммиченный кадр, где
+   * карточка уже новая, а чипы ещё чужие, — и этого кадра хватает, чтобы по ним нажать. Образец —
+   * `pattern/pattern-studio.tsx` и `colourway-proposals.tsx` (`shownCard`).
+   *
+   * ЧТО НЕ СБРАСЫВАЕТСЯ, И ЭТО НЕ ЗАБЫВЧИВОСТЬ:
+   *   · `minting` — счётчик записей В ПОЛЁТЕ, он снимается в `finally` уже идущей мутации; обнулить
+   *     его здесь значило бы отпустить кнопку под живым запросом;
+   *   · `logOpen` — раскрытие журнала, а журнал КЛЮЧУЕТСЯ карточкой в сторе (`useCardMemory`):
+   *     открытым он показывает записи B, а не A, то есть ничего чужого не утверждает;
+   *   · сам журнал и предложенные колорвеи — они и живут в сторе по ключу карточки именно затем.
+   */
+  const shownCard = useRef(techCardId);
+  if (shownCard.current !== techCardId) {
+    shownCard.current = techCardId;
+    // Ключ идемпотентности принадлежит ВОПРОСУ ПРО КАРТОЧКУ A: унесённый на B, он вернул бы с
+    // сервера тот же самый ответ A вместо нового прогона.
+    intent.current = null;
+    if (staged) setStaged(null);
+    if (price) setPrice(null);
+    if (lastRun) setLastRun(null);
+    if (inspecting) setInspecting(false);
+    if (Object.keys(receipts).length) setReceipts({});
+    if (Object.keys(taken).length) setTaken({});
+    if (Object.keys(shown).length) setShown({});
+    if (Object.keys(wantedDetails).length) setWantedDetails({});
+    if (Object.keys(receiptByFill).length) setReceiptByFill({});
+  }
 
   /* ДОСКА УШЛА ВПЕРЁД — ОДИН ФЛАГ НА ТРИ БЛОКА ВЫХОДА. Считается здесь (`stale`), показывается там
      (`BoardMovedPill` в GENERAL INFORMATION, CONSTRUCTION, MATERIAL SLOTS). Через стор, а не

@@ -3,6 +3,7 @@ import { cn } from 'lib/utility';
 import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
+import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 
 import { cardOutputRows, pictureRepresentation, type Representation } from '../bench-kinds';
@@ -65,6 +66,14 @@ import type { BenchSide } from './model';
  * нажатием и записью. Замерено пробой qa-k2 (21–23) и qa-w2 (W-2): вопрос задаётся, до ответа на
  * провод не уходит ничего, после — ровно четыре стороны.
  *
+ * ═══ У ДВЕРИ ДВА СОСТОЯНИЯ, А НЕ ДВЕ ДВЕРИ (r3, связка колорвея) ═══════════════════════════════
+ *
+ * Целей может быть несколько — семпл-лист при усыновлении (`bench_adopts_unattributed`) ложится в
+ * любой живой столбец. Тогда та же дверь становится СЕЛЕКТОМ целей: пункт отвечает на «куда», а
+ * вопрос о потере, запись и отчёт идут ровно тем же путём. Пара «селект цели + кнопка apply» была
+ * бы двумя органами на один глагол в ячейке шириной 132px. Лицо в этом состоянии короче («apply ▸»
+ * вместо «apply splitted») — замер, разбор у самого селекта.
+ *
  * ⚠ ПОДПИСЬ ДВЕРИ — «apply splitted» БЕЗ СТРЕЛКИ, И ЭТО ЗАМЕР, А НЕ ВКУС. Ячейка полосы — 132px;
  * кнопка `xs` рендерится 12-пиксельным FeatureMono с трекингом, и «apply splitted ▸» меряется в
  * 136px — то есть ПЕРЕНОСИЛАСЬ на вторую строку и стояла выше соседних дверей (F-14, «всё
@@ -79,6 +88,10 @@ import type { BenchSide } from './model';
 
 /** Один кусок разреза, уже привязанный к стороне силуэта. */
 export type SplitPiece = { view: SilhouetteView; picture: common_DesignPicture };
+
+/** «Ничего не выбрано» и «завести колорвей» — сентинелы: Radix запрещает пустое значение пункта. */
+const APPLY_PROMPT = '__apply__';
+const APPLY_NEW_COLOURWAY = '__new_colourway__';
 
 /** Склеенный лист вместе со своими кусками — ровно то, что рисует ячейка «мультивью». */
 export type SplitDeck = {
@@ -205,22 +218,37 @@ export function applyPlan(sides: BenchSide[], pieces: SplitPiece[]): Step[] {
  */
 export function ApplySplitDoor({
   techCardId,
-  sides,
+  sidesOf,
+  targets,
   pieces,
   benchKind,
-  colorwayId,
   disabled,
   /** Как этот экран зовёт то, что кладёт в сторону, — «render» или «flat». Для слов вопроса. */
   noun,
   refusal = null,
+  onCreateColorway,
   className,
   doorClassName,
 }: {
   techCardId: number;
-  sides: BenchSide[];
+  /**
+   * Стороны верстака ОДНОЙ цели — функцией, а не списком, потому что целей может быть несколько
+   * (семпл-лист при усыновлении). План считается по слотам ВЫБРАННОЙ цели: `expectedSlotRev` из
+   * строки соседнего столбца сервер отвергнет («slot is at rev N, M was echoed»).
+   */
+  sidesOf: (colorwayId: number) => BenchSide[];
+  /**
+   * ═══ КУДА ЭТОТ РАЗРЕЗ МОЖЕТ ЛЕЧЬ ══════════════════════════════════════════════════════════
+   *
+   * ОДИН ЧЛЕН — дверь остаётся КНОПКОЙ, и вопроса «куда» нет вовсе: у листа колорвея цель одна
+   * (его собственный столбец), у семпл-листа без флага усыновления — тоже одна (`sample`).
+   * НЕСКОЛЬКО — та же дверь становится СЕЛЕКТОМ целей, и это по-прежнему ОДИН орган: тот же
+   * глагол, тот же вопрос перед записью, тот же отчёт. Пара «селект цели + кнопка apply» была бы
+   * двумя кнопками на один жест в ячейке шириной 132px.
+   */
+  targets: { colorwayId: number; label: string }[];
   pieces: SplitPiece[];
   benchKind: 'flat' | 'render';
-  colorwayId: number;
   disabled?: boolean;
   noun: string;
   /**
@@ -240,26 +268,39 @@ export function ApplySplitDoor({
    * `pieces` при заданном отказе тоже рисуется: причина важнее состава.
    */
   refusal?: string | null;
+  /**
+   * Завести колорвей прямо отсюда — тем же поповером, что заголовок `+ colourway` в SIDES. Задан
+   * только там, где новый столбец законная цель (семпл-лист при усыновлении); `then` зовётся с
+   * id созданного, и жест продолжается вопросом уже под ним.
+   */
+  onCreateColorway?: (then?: (colorwayId: number) => void) => void;
   /** Класс обёртки — хозяин ряда дверей задаёт ячейке свою ширину (`flex-1 min-w-0`). */
   className?: string;
   /** Класс самой кнопки — ряд дверей выходов держит все свои двери одной метрикой (`h-5`, F-9). */
   doorClassName?: string;
 }): JSX.Element | null {
   const writes = useDesignWrites(techCardId);
-  const [asking, setAsking] = useState(false);
+  const [asking, setAsking] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<{
     done: SilhouetteView[];
     failed: { view: SilhouetteView; reason: string }[];
   } | null>(null);
 
-  const steps = useMemo(() => applyPlan(sides, pieces), [sides, pieces]);
-  const places = steps.filter((s) => s.act === 'place');
-  const clears = steps.filter((s) => s.act === 'clear');
-  /** Сколько сторон ТЕРЯЮТ то, что на них стоит. Ровно это и есть разрушительная половина жеста. */
-  const losing = steps.filter((s) => s.displaces);
+  /**
+   * ЦЕЛЬ ПО УМОЛЧАНИЮ — ПЕРВАЯ, И ПРИ ОДНОЙ ЦЕЛИ ОНА ЕДИНСТВЕННАЯ. Список пуст только у
+   * вызывающего, который сам себе противоречит; тогда писать некуда, и дверь молчит.
+   */
+  const only = targets.length === 1 ? targets[0].colorwayId : null;
+  const planFor = (target: number) => applyPlan(sidesOf(target), pieces);
+  const steps = useMemo(
+    () => (only === null ? [] : planFor(only)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [only, pieces, sidesOf],
+  );
 
   if (!pieces.length && !refusal) return null;
+  if (!targets.length && !refusal) return null;
 
   /* ОТКАЗ ХОЗЯИНА — дверь стоит, но мертва, и говорит почему. Ни одной записи: `run` ниже
      недостижим, потому что живой кнопки нет. */
@@ -274,13 +315,13 @@ export function ApplySplitDoor({
     );
   }
 
-  const run = async () => {
+  const run = async (target: number) => {
     if (busy) return;
     setBusy(true);
     setOutcome(null);
     const done: SilhouetteView[] = [];
     const failed: { view: SilhouetteView; reason: string }[] = [];
-    for (const step of steps) {
+    for (const step of planFor(target)) {
       try {
         await writes.setBenchSlot.mutateAsync({
           // Род СПЕЛЛИТСЯ всегда: пустое поле сервер читает как `flat`, и «что бы ни стало
@@ -289,7 +330,7 @@ export function ApplySplitDoor({
              ноль в proto-JSON это ЗАДАННОЕ поле: сервер отвечал «oneof … is already set» и не
              записывал НИ ОДНОЙ стороны. Верстак флэтов всегда слал только `viewKey` — поэтому
              работал он, а эти двери не работали ни разу. */
-          slot: { viewKey: step.view, kind: benchKind, colorwayId },
+          slot: { viewKey: step.view, kind: benchKind, colorwayId: target },
           pictureId: step.pictureId,
           expectedSlotRev: step.slotRev,
         });
@@ -309,9 +350,23 @@ export function ApplySplitDoor({
     setOutcome(failed.length ? { done, failed } : null);
   };
 
-  const placeWords = places.map((s) => viewLabel(s.view)).join(', ');
-  const clearWords = clears.map((s) => viewLabel(s.view)).join(', ');
-  const losingWords = losing.map((s) => viewLabel(s.view)).join(', ');
+  /** Начать жест целью: терять нечего — пишем; есть что — сперва вопрос, поимённо по сторонам. */
+  const start = (target: number) => {
+    if (planFor(target).some((s) => s.displaces)) setAsking(target);
+    else void run(target);
+  };
+
+  const places = steps.filter((s) => s.act === 'place');
+  /** Сколько сторон ТЕРЯЮТ то, что на них стоит. Ровно это и есть разрушительная половина жеста. */
+  const losing = steps.filter((s) => s.displaces);
+  /** Те же три списка, но для цели, о которой СПРАШИВАЮТ: вопрос и запись читают один план. */
+  const askSteps = asking === null ? [] : planFor(asking);
+  const askPlaces = askSteps.filter((s) => s.act === 'place');
+  const askClears = askSteps.filter((s) => s.act === 'clear');
+  const askLosing = askSteps.filter((s) => s.displaces);
+  const words = (list: Step[]) => list.map((s) => viewLabel(s.view)).join(', ');
+  const placeWords = words(places);
+  const losingWords = words(losing);
 
   return (
     <div className={cn('flex flex-col gap-1', className)} data-apply-split={pieces.length}>
@@ -326,23 +381,74 @@ export function ApplySplitDoor({
           (`w-full`), рост — метрика `size='xs'`; хозяин ряда сужает поля через `doorClassName`,
           когда соседи отнимают место.
           Потеря названа на самой двери, до нажатия, подсказкой; вопрос — между нажатием и записью. */}
-      <Button
-        variant='secondary'
-        size='xs'
-        className={cn('w-full whitespace-nowrap', doorClassName)}
-        loading={busy}
-        disabled={disabled}
-        data-apply-split-door=''
-        data-apply-split-losing={losing.length}
-        title={
-          losing.length
-            ? `${placeWords || 'no side'} take the pieces; ${losingWords} ${losing.length === 1 ? `loses its ${noun}` : `lose their ${noun}s`} — you are asked first`
-            : `${placeWords || 'no side'} take the pieces; no side loses anything`
-        }
-        onClick={() => (losing.length ? setAsking(true) : void run())}
-      >
-        apply splitted
-      </Button>
+      {only !== null ? (
+        <Button
+          variant='secondary'
+          size='xs'
+          className={cn('w-full whitespace-nowrap', doorClassName)}
+          loading={busy}
+          disabled={disabled}
+          data-apply-split-door=''
+          data-apply-split-losing={losing.length}
+          title={
+            losing.length
+              ? `${placeWords || 'no side'} take the pieces; ${losingWords} ${losing.length === 1 ? `loses its ${noun}` : `lose their ${noun}s`} — you are asked first`
+              : `${placeWords || 'no side'} take the pieces; no side loses anything`
+          }
+          onClick={() => start(only)}
+        >
+          apply splitted
+        </Button>
+      ) : (
+        /* ═══ ТА ЖЕ ДВЕРЬ, КОГДА ЦЕЛЕЙ НЕСКОЛЬКО (r3, семпл-лист при усыновлении) ═══════════════
+           Выбор цели И ЕСТЬ нажатие: пункт отвечает на «куда», а всё остальное — вопрос о потере,
+           запись, отчёт — идёт ровно тем же путём. Отдельной кнопки `apply` рядом нет: два органа
+           на один глагол — это ровно то, чего просили не делать («не делай разные кнопки для
+           одного и того же»).
+           ⚠ АТРИБУТ ВИСИТ НА ОБЁРТКЕ: корень Radix разбирает ЗАКРЫТЫЙ список пропов, `data-*` до
+           DOM не доезжает, и утверждение по нему зеленело бы над отсутствующим узлом.
+
+           ⚠ ЛИЦО КОРОЧЕ, И ЭТО ЗАМЕР (r2 п.31, тот же дефект в новом состоянии). В ячейке 132px
+           рядом стоит складывающая дверь `▾` (20px), то есть селектору достаётся 110px, а
+           «APPLY SPLITTED ▸» меряется в ~142px: подпись ложилась на вторую строку и вылезала за
+           коробку — ровно то, на что владелец жаловался. Глагол при этом не потерян: полное
+           предложение складывают лицо и пункт («apply ▸» + «into ROSSO»), а `title` называет его
+           целиком. `whitespace-nowrap` сторожит, чтобы перенос не вернулся молча. */
+        <span
+          data-apply-split-door=''
+          data-apply-split-targets={targets.length}
+          title='apply this split into the sides of one colourway'
+          className='flex w-full'
+        >
+          <SelectComponent
+            name={`apply-split-${techCardId}-${pieces.length}`}
+            value={APPLY_PROMPT}
+            placeholder='apply ▸'
+            disabled={disabled || busy}
+            className={cn(
+              'h-5 min-h-0 whitespace-nowrap py-0 text-micro uppercase tracking-label',
+              doorClassName,
+            )}
+            items={[
+              { value: APPLY_PROMPT, label: 'apply ▸' },
+              ...targets.map((t) => ({
+                value: String(t.colorwayId),
+                label: `into ${t.label}`,
+              })),
+              ...(onCreateColorway ? [{ value: APPLY_NEW_COLOURWAY, label: '+ colourway…' }] : []),
+            ]}
+            onValueChange={(value: string) => {
+              if (!value || value === APPLY_PROMPT) return;
+              if (value === APPLY_NEW_COLOURWAY) {
+                onCreateColorway?.((created) => start(created));
+                return;
+              }
+              start(Number(value));
+            }}
+            fullWidth
+          />
+        </span>
+      )}
 
       {/* ═══ ВОПРОС ПЕЧАТАЕТ ОБЩИЙ ОРГАН (Ф4) ═══════════════════════════════════════════════════
           `AskModal` из `../core` — ОДИН принтер разрушительного вопроса на всю студию. Он только
@@ -353,35 +459,43 @@ export function ApplySplitDoor({
           ⚠ `sentence` встаёт ВНУТРЬ `<Text component='p'>` органа, поэтому два абзаца — это два
           блочных `span`, а не два `p`: `p` внутри `p` браузер разрывает. */}
       <AskModal
-        open={asking}
-        onClose={() => setAsking(false)}
+        open={asking !== null}
+        onClose={() => setAsking(null)}
         title='replace the whole input with this split?'
         verb='replace the input'
         note={null}
         onDo={() => {
-          setAsking(false);
-          void run();
+          const target = asking;
+          setAsking(null);
+          if (target !== null) void run(target);
         }}
         sentence={
           <>
             <span className='block normal-case'>
-              {places.length > 0 && (
+              {targets.length > 1 && asking !== null && (
                 <>
-                  <b>{placeWords}</b> take the pieces of this split.{' '}
+                  the sides of{' '}
+                  <b>{targets.find((t) => t.colorwayId === asking)?.label ?? asking}</b> are the
+                  ones that change.{' '}
                 </>
               )}
-              {clears.length > 0 && (
+              {askPlaces.length > 0 && (
                 <>
-                  <b>{clearWords}</b> {clears.length === 1 ? 'is' : 'are'} emptied — the split does
-                  not name {clears.length === 1 ? 'that side' : 'those sides'}.
+                  <b>{words(askPlaces)}</b> take the pieces of this split.{' '}
+                </>
+              )}
+              {askClears.length > 0 && (
+                <>
+                  <b>{words(askClears)}</b> {askClears.length === 1 ? 'is' : 'are'} emptied — the
+                  split does not name {askClears.length === 1 ? 'that side' : 'those sides'}.
                 </>
               )}
             </span>
             <span className='mt-2 block normal-case'>
-              {losing.length} of the four sides {losing.length === 1 ? 'holds a' : 'hold a'} {noun}{' '}
-              right now, and {losing.length === 1 ? 'it goes' : 'they go'} out of the input:{' '}
-              {losing.map((s) => viewLabel(s.view)).join(', ')}. Nothing is deleted — every picture
-              stays on the card and can be put back one side at a time.
+              {askLosing.length} of the four sides {askLosing.length === 1 ? 'holds a' : 'hold a'}{' '}
+              {noun} right now, and {askLosing.length === 1 ? 'it goes' : 'they go'} out of the
+              input: {words(askLosing)}. Nothing is deleted — every picture stays on the card and
+              can be put back one side at a time.
             </span>
           </>
         }

@@ -5,6 +5,7 @@ import { Section } from 'ui/components/section';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
+import { GROUP_SEAM } from './design/core';
 import { BoardMovedPill } from './design/head/mood-organs';
 import { FIT_OPTIONS } from './design/render/model';
 import { upsertDetailText } from './form-writers';
@@ -84,6 +85,10 @@ export function ConstructionGeneralInfo({
       title='general information'
       question='· what this style is'
       action={<GeneralInformationAction techCardId={techCardId} />}
+      /* ШОВ ОДИН НА ВЕСЬ ШАГ MOOD (r3b, M-1) — `GROUP_SEAM`, 20px: тот же стык «линейка блока →
+         содержимое», что у CONSTRUCTION DRAFT и CONSTRUCTION по соседству. Штатные 10px `Section`
+         делали этот блок теснее соседей на ровном месте. */
+      className={GROUP_SEAM}
     >
       {/* Грид два на два: подписи одного ряда всегда на одной линии, колонки равной ширины, которые
           содержимое растянуть не может (`minmax(0,1fr)`), перенос в один столбец на узком экране.

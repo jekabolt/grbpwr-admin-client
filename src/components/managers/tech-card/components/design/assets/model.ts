@@ -312,12 +312,6 @@ export function fabricOfColorway(
 }
 
 /**
- * КОЛОРВЕЙ, НОСЯЩИЙ ЭТОТ АССЕТ, или 0. Читается ТЕМ ЖЕ разбором, что колорвей слота, кадра и
- * прогона (`colorwayOf` в `../bench-kinds`) — ось одна, и второго её написания в дереве нет.
- */
-export const assetWornBy = (a?: common_DesignAsset | null): number => colorwayOf(a);
-
-/**
  * АССЕТЫ, КОТОРЫМ КОЛОРВЕЙ НАЗНАЧИТЬ МОЖНО. Ткани и паттерны — да; фурнитура — нет, и это отказ
  * сервера (`colorway_forbidden`, «a zip is not what a colourway is made of»), а не наш вкус.
  * Тот же состав, что у ряда CLOTHS: полка, из которой рендер и так берёт ткань.

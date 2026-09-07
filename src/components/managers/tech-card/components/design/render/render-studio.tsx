@@ -1,15 +1,18 @@
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
-import { useMemo, useState, type JSX } from 'react';
+import { useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 
 import { colourPlanGate, planRecipe } from '../colour-plan/model';
+import { ColorwaySelect } from '../colorway-picker';
+import { ColourwayCreatePopover } from '../colourway-create';
 import { useColourPlan } from '../colour-plan/use-colour-plan';
 import { GROUP_SEAM } from '../core';
 import { useCardFit, useColourDraft } from './drafts';
 import { GenerateRow, LockBar, RunRefusal } from './generate-row';
 import {
+  clampColourName,
   hexIsPaintable,
   recipeIsStated,
   renderGate,
@@ -57,12 +60,18 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * render's snapshot and prints it into the paid prompt, so `useCardFit` stays and feeds the modal
  * «what the model gets»: the inventory must name EVERYTHING that travels.
  *
- * ═══ THE COLOURWAY IS ONE NUMBER FOR THE WHOLE STUDIO (round 19, C1) ═══════════════════════════
- * The choice is on the rail, not here; the number arrives as a prop. The render bench is WRITTEN
- * here (`SidesSection` unmarks, `OutputsSection` → `mark ▸` fills), READ on 3D and ASSEMBLED by the server
- * (`designSelectBench`); a second owner of the number would have 3D looking into one bench while
- * the render fills another. `key={colorwayId}` on the composer remounts this screen on a change of
- * colour, so `useColourDraft` seeds ONCE PER MOUNT and anew per colour.
+ * ═══ THE COLOURWAY IS ONE NUMBER FOR THE WHOLE STUDIO, AND IT IS CHOSEN HERE (D2, G2-3) ════════
+ * ОДНО СОСТОЯНИЕ (`useColorwayChoice` у композитора) — но ОРГАН его стоит на этом экране, в ряду
+ * GENERATE: `for: [sample ▾]`. Круг раньше он стоял на рельсе шагов, и довод был про место; он не
+ * учёл того, что этот выбор РЕШАЕТ: `colorway_id` прогона неизменяем, значит цель — часть покупки.
+ * Верстак рендеров ПИШЕТ этот экран (SIDES снимает, `mark ▸` кладёт), ЧИТАЕТ 3D, СОБИРАЕТ сервер
+ * (`designSelectBench`) — второй владелец числа заставил бы 3D смотреть в один верстак, пока
+ * рендер наполняет другой.
+ *
+ * ⚠ РЕМОУНТА ПО `key={colorwayId}` БОЛЬШЕ НЕТ, И ОН БЫЛ БЫ ТЕПЕРЬ ПРЯМЫМ ДЕФЕКТОМ: экран,
+ * ремоунтящий сам себя на смене цели, закрывал бы собственный список прямо под пальцем. Пересев
+ * цветной половины рецепта переехал внутрь `useColourDraft` — ткань и слова там остаются, потому
+ * что ткань есть свойство изделия, а цвет — колорвея (D6).
  */
 export function RenderStudio({
   band,
@@ -73,18 +82,30 @@ export function RenderStudio({
   colorwayRef = null,
   colorwayLabel = '',
   colorwayArchived = false,
+  colorways = [],
+  onColorwayChange,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
   /**
-   * WHOSE render this is. `0` — the colourway-less bench: not a gap but a real, permanently legal
-   * value, the one every render made before the axis existed stands on.
+   * ═══ ЦЕЛЬ ПРОГОНА ВЫБИРАЮТ ЗДЕСЬ, НО ВЛАДЕЕТ ЕЮ КОМПОЗИТОР (D2, G2-3) ════════════════════════
+   *
+   * Список колорвеев карточки и ТОТ ЖЕ САМЫЙ сеттер, которым пользуются чипы on-model. Второго
+   * состояния не заводится: верстак рендеров ПИШЕТ этот экран, ЧИТАЕТ 3D, а СЕРВЕР по нему
+   * собирает — заведи второго владельца, и полоса входа 3D показывала бы ROSSO, пока прогон
+   * уезжает за OLIVE. Не задан `onColorwayChange` — селекта нет вовсе (композитор без оси).
+   */
+  colorways?: common_AdminColorwayRef[];
+  onColorwayChange?: (id: number) => void;
+  /**
+   * WHOSE render this is. `0` — верстак `sample`: не пропуск, а настоящее и вечно законное
+   * значение, на котором стоит всякий рендер, сделанный до появления оси, и всякая проба цвета.
    */
   colorwayId?: number;
   /** Its row — the second half of the seed («its own colour», when it has no renders yet). */
   colorwayRef?: common_AdminColorwayRef | null;
-  /** Its name — for refusals and captions; `''` under `no colourway`, and that is a statement too. */
+  /** Its name — for refusals, captions and the recipe's `code`; `''` под `sample`, и это тоже ответ. */
   colorwayLabel?: string;
   /**
    * ⚠ ARCHIVED COLOURWAYS ARE NOT WORKED ON, and this is the only thing this screen refuses by the
@@ -111,6 +132,39 @@ export function RenderStudio({
   const [inspecting, setInspecting] = useState(false);
 
   /**
+   * ═══ РОЖДЕНИЕ КОЛОРВЕЯ — ОДНО ОКНО НА ЭКРАН, СКОЛЬКО БЫ ДВЕРЕЙ К НЕМУ НИ ВЕЛО (G2-4) ═════════
+   *
+   * Дверей три: пункт `+ colourway…` в селекте цели, заголовок-плейсхолдер столбца в SIDES и цель
+   * `mark ▸` / `apply splitted` в блоке рендеров. Окно одно — иначе три копии формы разошлись бы в
+   * проверке имени и в подборе словарного цвета, и разошлись бы молча.
+   *
+   * `after` — ЧТО ДОДЕЛАТЬ ПОСЛЕ УСПЕХА, и это ref, а не состояние: продолжение жеста ничего не
+   * рисует, а состоянием оно давало бы вторую перерисовку ровно синхронно с первой. Дверь SIDES
+   * просто переключает цель (продолжения нет), а `apply splitted` продолжает свой жест В НОВЫЙ
+   * столбец — ему нужен id, которого до ответа сервера не существует.
+   */
+  const [creating, setCreating] = useState(false);
+  const after = useRef<((id: number) => void) | null>(null);
+  const openCreate = (then?: (id: number) => void) => {
+    after.current = then ?? null;
+    setCreating(true);
+  };
+
+  /**
+   * ⚠ КАРТОЧКА СМЕНИЛАСЬ — ОКНО ЗАКРЫВАЕТСЯ, ПРОДОЛЖЕНИЕ ЖЕСТА ЗАБЫВАЕТСЯ (инвариант 12).
+   * `StudioTab` при смене карточки НЕ размонтируется, а продолжение держит план, собранный по
+   * ПЛИТАМ ПРЕДЫДУЩЕЙ карточки: исполнить его под новой значило бы разложить чужие рендеры по её
+   * слотам. В теле рендера, а не в эффекте: эффект оставил бы один закоммиченный кадр, в котором
+   * карточка уже новая, а окно ещё чужое, — и по нему успевают нажать.
+   */
+  const shownCard = useRef(techCardId);
+  if (shownCard.current !== techCardId) {
+    shownCard.current = techCardId;
+    after.current = null;
+    if (creating) setCreating(false);
+  }
+
+  /**
    * THE VIEWS THIS RUN ASKS FOR, IN SHEET ORDER — a walk around the garment, narrowed to the slots
    * that hold a drawing. ⚠ SENT, PROMPTED AND SPLIT AS ONE LIST (`params.views` → `compositeViewsOf`
    * → the splitter's labels); sorting it anywhere else mislabels the cut frames.
@@ -123,8 +177,9 @@ export function RenderStudio({
    * ⚠ THE GATE READS THIS, NOT `draft.recipe`: a run stated only by opacity and weight is a legal
    * statement about the cloth (H-13).
    */
-  const sent = useMemo(
-    () => ({
+  const sent = useMemo(() => {
+    const hex = hexIsPaintable(draft.recipe.hex) ? (draft.recipe.hex ?? '').trim() : '';
+    return {
       ...draft.recipe,
       words: statedWords(draft),
       /**
@@ -134,10 +189,23 @@ export function RenderStudio({
        * different prompt than the one shown. The door PASSES OR DROPS, it does not repair —
        * completing the `#` lives at the field's blur, where the person sees the result.
        */
-      hex: hexIsPaintable(draft.recipe.hex) ? (draft.recipe.hex ?? '').trim() : '',
-    }),
-    [draft.recipe, draft.cloth],
-  );
+      hex,
+      /**
+       * ═══ ИМЯ ЦВЕТА — ЭТО ИМЯ КОЛОРВЕЯ, И СОБИРАЕТСЯ ОНО ЗДЕСЬ (H-8, п.23) ══════════════════════
+       *
+       * Поле «colour name» с экрана снято (пантон и есть описание), а промпт цитирует пару:
+       * `colourPhrase` печатает «colourway <code> — the exact value is <hex>». Значит `code`
+       * обязан приехать из ЕДИНСТВЕННОГО места, где он что-то значит, — из цели прогона. Под
+       * `sample` цели нет, и поле уезжает ПУСТЫМ: ветка без кода печатает голый hex, и это правда
+       * («мы просто семплимся»), а не пропуск.
+       *
+       * ⚠ ТОЛЬКО ВМЕСТЕ С ЦВЕТОМ. Имя без hex — это заявление о цвете, которого никто не делал:
+       * ворота ниже (`recipeIsStated`) читают ту же склейку, и одно лишь имя цели открывало бы
+       * GENERATE на карточке, где про ткань не сказано вообще ничего.
+       */
+      code: hex ? clampColourName(colorwayId > 0 ? colorwayLabel.trim() : '') : '',
+    };
+  }, [draft.recipe, draft.cloth, colorwayId, colorwayLabel]);
 
   /** What will actually travel — the recipe SUBSTITUTED BY THE PLAN when colour maps ride along. */
   const wire = useMemo(
@@ -268,12 +336,37 @@ export function RenderStudio({
             the last refusal of the server verbatim, then GENERATE · WHAT THE MODEL GETS ▸ · money. */}
         {!gate.ok && <LockBar reason={`locked · ${gate.reason}`}>{lockDoors}</LockBar>}
         <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
+        {/* ═══ ДЛЯ КОГО ЭТОТ ПРОГОН — В ОДНОМ РЯДУ С ДЕНЬГАМИ (D2, G2-3) ═══════════════════════
+            `colorway_id` прогона НЕИЗМЕНЯЕМ: лист, купленный не под тем именем, останется в
+            истории чужим навсегда. Поэтому цель называется у самой кнопки, а не на рельсе шагов,
+            где она стояла кругом раньше (`chain-rail.tsx` слота `action` больше не имеет). Пункт
+            `+ colourway…` — та же дверь, что и заголовок столбца в SIDES: одно окно, три двери. */}
         <GenerateRow
           gate={gate}
           pending={run.isPending}
           disabled={disabled}
           onGenerate={generate}
           onInspect={() => setInspecting(true)}
+          trailing={
+            onColorwayChange ? (
+              <ColorwaySelect
+                band={band}
+                label='for'
+                probe='design-render-target'
+                disabled={disabled}
+                onCreate={() => openCreate()}
+                choice={{
+                  colorwayId,
+                  setColorwayId: onColorwayChange,
+                  colorways,
+                  current: colorwayRef,
+                  label: colorwayLabel,
+                  archived: colorwayArchived,
+                  loading: false,
+                }}
+              />
+            ) : null
+          }
         />
       </Section>
 
@@ -286,21 +379,35 @@ export function RenderStudio({
         band={band}
         techCardId={techCardId}
         disabled={disabled}
-        colorwayId={colorwayId}
-        colorwayLabel={colorwayLabel}
+        /* ═══ ТАБЛИЦА ЕДЕТ ПО ОСИ КОЛОРВЕЕВ, А НЕ ОДНОГО ВЫБРАННОГО (п.28/29) ═══════════════════
+           Столбец на каждый занятый верстак — `sample` первым, затем колорвеи карточки, — и
+           заголовок столбца есть ВТОРАЯ ДВЕРЬ к той же цели, что и `for:` выше (`onPickColorway`
+           — тот же единственный сеттер). `onCreateColorway` открывает то же окно рождения. */
+        colorways={colorways}
+        targetColorwayId={colorwayId}
+        onPickColorway={onColorwayChange ?? (() => {})}
+        onCreateColorway={() => openCreate()}
         onGoToKind={onGoToKind}
       />
 
       {/* The renders this card holds — where `mark ▸`, `split ▸` and `apply splitted` live: the
           doors that put a render into a side from the card's own pictures. `mark ▸` addresses the
           bench of the PICTURE's colourway (see `./outputs`). */}
+      {/* ═══ РЕНДЕРЫ КАРТОЧКИ — НЕ СУЖЕНЫ ЦЕЛЬЮ (D5) ══════════════════════════════════════════
+          Список показывает ВСЕ рендеры карточки, а чей каждый — говорит пилюля на самой плитке.
+          Сужение фильтром прятало плиты, которые человек видел минуту назад, и вопрос «куда её
+          положить» всё равно задаётся у двери `mark ▸`, а не фильтром над разделом.
+          `adopts` — сказал ли СЕРВЕР, что семпл-плита усыновляется при постановке в слот
+          колорвея (B7). Отсутствие поля читается как «не сказано» (доктрина `has_fabric_render`),
+          и тогда дверей в чужой столбец не рисуется вовсе. */}
       <OutputsSection
         band={band}
         techCardId={techCardId}
         kind='render'
         disabled={disabled}
-        colorwayId={colorwayId}
-        colorwayLabel={colorwayLabel}
+        colorways={colorways}
+        adopts={band.benchAdoptsUnattributed === true}
+        onCreateColorway={openCreate}
       />
 
       <WhatModelGetsRenderModal
@@ -311,6 +418,22 @@ export function RenderStudio({
         /* THE MODAL KNOWS NOTHING OF CHIPS: it is handed the SAME sentence that travels. */
         recipe={wire}
         cardFit={cardFit}
+      />
+
+      {/* ОДНО ОКНО РОЖДЕНИЯ НА ВЕСЬ ЭКРАН. Оно не носит `anchor`: двери держат `open` сами —
+          пункт селекта, заголовок столбца, цель разреза. После успеха цель прогона переключается
+          на новый колорвей, и продолжение жеста (если оно было) доигрывается уже в его столбце. */}
+      <ColourwayCreatePopover
+        techCardId={techCardId}
+        open={creating}
+        onOpenChange={setCreating}
+        readOnly={disabled}
+        onCreated={(id) => {
+          onColorwayChange?.(id);
+          const then = after.current;
+          after.current = null;
+          then?.(id);
+        }}
       />
     </>
   );

@@ -22,6 +22,7 @@ import { useAssetWrites } from '../assets/use-assets';
 import { COLORWAY_NONE } from '../bench-kinds';
 import { archivedRef, colorwayLabel as nameOfColorway } from '../colorway-picker';
 import { EmptyState, GROUP_GAP, Reason } from '../core';
+import { SAMPLE_WORD } from '../render/model';
 import type { PaintDraft } from './drafts';
 import { paintModeWord, type ClothChoice, type OnModelPaint } from './model';
 
@@ -54,9 +55,11 @@ import { paintModeWord, type ClothChoice, type OnModelPaint } from './model';
  * THE COLOURWAY — CHIPS THAT BIND AND UNBIND, OVER THE COMPOSER'S ONE STATE. One chip per
  * colourway of the card, the bound one filled; a click on the bound one unbinds, a click on
  * another binds, an archived name is offered only while it is the one bound. The studio still has
- * ONE colourway STATE — `useColorwayChoice` in `studio-tab.tsx`, the number the select on the rail
- * also writes — and the chips are a second DOOR to that one setter (`onColorwayChange`), never a
- * second copy of the number. It is NOT SENT to the model: it becomes the `colorway_id` of the run,
+ * ONE colourway STATE — `useColorwayChoice` in `studio-tab.tsx` — and the chips are the ONE organ
+ * of this screen over that setter (`onColorwayChange`), never a second copy of the number. Круг r3
+ * снял селект с рельса шагов (G2-2), так что у on-model этот ряд чипов теперь единственная дверь
+ * к выбору, а не вторая. Не привязано — значит подаётся под осью `sample`: это НАСТОЯЩЕЕ имя оси
+ * 0, а не отсутствие связи. It is NOT SENT to the model: it becomes the `colorway_id` of the run,
  * i.e. the name the returned pictures are filed under.
  */
 
@@ -296,14 +299,13 @@ export function PaintGroup({
         {!disabled && full && <Reason>{fullReason}</Reason>}
       </div>
 
+      {/* ⚠ ПИЛЮЛЯ «GOES TO THE MODEL» СНЯТА (п.14 по духу — на PATTERN она уже снята). Она стояла
+          над рядом, ВЕСЬ смысл которого в том, что цвет уезжает в модель; строка под пикером и без
+          неё называет, что именно уедет. Осталась одна пилюля — та, что говорит НОВОЕ: какая
+          ссылка выбрана. */}
       <GroupLabel
         className={GROUP_GAP}
-        action={
-          <span className='flex flex-wrap items-center gap-1.5'>
-            {code ? <Pill tone='ink'>{code}</Pill> : <Pill tone='mut'>no colour</Pill>}
-            <Pill tone='ink'>goes to the model</Pill>
-          </span>
-        }
+        action={code ? <Pill tone='ink'>{code}</Pill> : <Pill tone='mut'>no colour</Pill>}
       >
         and a colour
       </GroupLabel>
@@ -336,20 +338,16 @@ export function PaintGroup({
         )}
       </div>
 
+      {/* ⚠ ДВЕ ПИЛЮЛИ СНЯТЫ (G2-1), И ОБЕ ГОВОРИЛИ О ТОМ, ЧТО УЖЕ СКАЗАНО ЛУЧШЕ.
+          · `not bound` — «связи нет». Связь ЕСТЬ ВСЕГДА: непривязанная картинка подаётся под осью
+            `sample`, и это её настоящее имя, а не отсутствие имени. Пилюля называла законное
+            состояние поломкой — ровно то, за что снято слово «no colourway»;
+          · `not sent` — «в промпт не едет». Строка под чипами говорит это словами («a link written
+            on the picture that comes back · not a word in the prompt»), в двух сантиметрах ниже.
+          Осталась одна пилюля, и она называет ФАКТ: под каким именем уедут картинки. */}
       <GroupLabel
         className={GROUP_GAP}
-        action={
-          <span className='flex flex-wrap items-center gap-1.5'>
-            {colorwayLabel ? (
-              <Pill tone='ink'>{colorwayLabel}</Pill>
-            ) : (
-              <Pill tone='mut'>not bound</Pill>
-            )}
-            {/* «OPTIONAL» СНЯТ: «not bound» уже говорит, что связи может не быть, а две пилюли об
-                одном читаются как два разных факта (та же правка, что п.14 у паттерна). */}
-            <Pill tone='mut'>not sent</Pill>
-          </span>
-        }
+        action={<Pill tone={colorwayLabel ? 'ink' : 'mut'}>{colorwayLabel || SAMPLE_WORD}</Pill>}
       >
         colourway
       </GroupLabel>
@@ -361,7 +359,7 @@ export function PaintGroup({
            pulled from under them. Every chip is a real `<button type='button'>` (Chip with
            `onClick`), so the form is never submitted by a bind. */
         ways.length === 0 ? (
-          <EmptyState>no colourways yet · the pictures keep their own name</EmptyState>
+          <EmptyState>{SAMPLE_WORD} · the pictures keep their own name</EmptyState>
         ) : (
           <div
             className='flex flex-wrap items-center gap-1.5'
@@ -396,8 +394,8 @@ export function PaintGroup({
         <div className='flex flex-wrap items-center gap-1.5' data-om-colourway={colorwayLabel || 'none'}>
           <Text size='micro' variant='label' component='span' className='normal-case'>
             {colorwayLabel
-              ? `bound to ${colorwayLabel} · picked in the COLOURWAY select on the rail`
-              : 'not bound · pick one in the COLOURWAY select on the rail, or leave it'}
+              ? `bound to ${colorwayLabel}`
+              : `${SAMPLE_WORD} · the pictures keep their own name`}
             {colorwayArchived ? ' · archived, so no new picture is made under it' : ''}
           </Text>
         </div>

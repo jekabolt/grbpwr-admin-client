@@ -1298,45 +1298,41 @@ export function GenerationHistory({
            под рядом KIND. Счётчик и дверь слиты в одну кнопку: число говорит, сколько их, стрелка —
            открыты ли они. Отдельной линейки больше нет.
            ЧИСЛО СЧИТАЕТ РОД ЭТОГО ШАГА — ровно те строки, которые дверь и открывает (разбор у
-           `liveShown`); карточные итоги — в `title`. */
-        action={
-          <Button
-            variant='secondary'
-            size='xs'
-            aria-expanded={runsOpen}
-            aria-controls='design-history-runs'
-            aria-label={`${runsOpen ? 'hide' : 'show'} the ${runCountWords(rep, liveShown, liveFloor)} of this card`}
-            onClick={() => setRunsOpen((v) => !v)}
-            title={
-              liveFloor
-                ? `the ${repRunNoun(rep)}s this screen has read so far — the feed has earlier pages it has not read, so the number is a floor. Card-wide: ${cardWide}.`
-                : `every ${repRunNoun(rep)} on this card. Card-wide: ${cardWide}.`
-            }
-          >
-            {runCountWords(rep, liveShown, liveFloor)} {runsOpen ? '▾' : '▸'}
-          </Button>
-        }
-      >
-        {!speaks && (
-          <CalloutBox tone='note'>
-            this server does not speak the design band yet — the rows below are read-only.
-          </CalloutBox>
-        )}
+           `liveShown`); карточные итоги — в `title`.
 
-        {/* ═══ THE SHELF DOOR — единственный орган этого ряда ═════════════════════════════════════
-            Здесь стоял ещё счётчик «[3 PICTURES] loaded». Владелец (r3 п.8), дословно: «6 PICTURES
-            loaded — не показывать». И это не только вкус: число картинок под прочитанными строками
-            — свойство ПАГИНАЦИИ, а не работы. Оно менялось само собой от нажатия «show all» или от
-            дочитывателя окна, ничего не сообщая о карточке, и стояло третьим числом подряд под
-            двумя, которые говорят о деле (счётчик прогонов в шапке и число архива на двери). Факт
-            не потерян: сколько картинок принёс прогон, видно в самой его строке.
-            `data-rep-filter` остаётся якорем: по нему читают, каким родом эта история сужена. */}
-        <div data-rep-filter={rep} className='flex flex-wrap items-center gap-2'>
-          <span className='ml-auto'>
+           ═══ И ДВЕРЬ ПОЛКИ АРХИВА СТОИТ ЗДЕСЬ ЖЕ, СПРАВА ОТ НЕГО (r3b, M-3) ═══════════════════
+           Она занимала СВОЙ ряд под шапкой, одна, прижатая `ml-auto` к правому краю: ряд из одной
+           кнопки и пустоты, то есть 32 пикселя высоты, не сказавшие ни слова. Двери разные (одна
+           открывает живые прогоны, другая — полку архива), и две разные двери в одной линейке —
+           не «куча кнопок в одном месте», а две вещи, названные там, где на них смотрят. Ряда
+           больше нет; якорь `data-rep-filter` переехал на обёртку линейки — по нему по-прежнему
+           читают, каким родом сужена эта история.
+           ⚠ ОБЁРТКА ОБЯЗАТЕЛЬНА: `Button` — блок, и без ряда `flex` вторая дверь падала бы под
+           первую. И `collapsible` этой секции НЕ ставить — свёрнутая коробка не рисует `action`
+           вовсе, а кнопка внутри кнопки невалидна (разбор в `ui/components/section.tsx`). */
+        action={
+          <div data-rep-filter={rep} className='flex flex-wrap items-center gap-1.5'>
+            <Button
+              variant='secondary'
+              size='xs'
+              aria-expanded={runsOpen}
+              aria-controls='design-history-runs'
+              aria-label={`${runsOpen ? 'hide' : 'show'} the ${runCountWords(rep, liveShown, liveFloor)} of this card`}
+              onClick={() => setRunsOpen((v) => !v)}
+              className='whitespace-nowrap'
+              title={
+                liveFloor
+                  ? `the ${repRunNoun(rep)}s this screen has read so far — the feed has earlier pages it has not read, so the number is a floor. Card-wide: ${cardWide}.`
+                  : `every ${repRunNoun(rep)} on this card. Card-wide: ${cardWide}.`
+              }
+            >
+              {runCountWords(rep, liveShown, liveFloor)} {runsOpen ? '▾' : '▸'}
+            </Button>
             <Button
               variant='secondary'
               size='xs'
               aria-expanded={archShown}
+              className='whitespace-nowrap'
               aria-label={`${archShown ? 'hide' : 'open'} the shelf of ${archShownCount}${archFloor ? ' or more' : ''} archived ${repRunNoun(rep)}${archShownCount === 1 && !archFloor ? '' : 's'}`}
               title={
                 archFloor
@@ -1353,8 +1349,20 @@ export function GenerationHistory({
             >
               · {`${archShownCount}${archFloor ? '+' : ''}`} archived ▸
             </Button>
-          </span>
-        </div>
+          </div>
+        }
+      >
+        {!speaks && (
+          <CalloutBox tone='note'>
+            this server does not speak the design band yet — the rows below are read-only.
+          </CalloutBox>
+        )}
+
+        {/* ═══ РЯДА ПОД ШАПКОЙ БОЛЬШЕ НЕТ (r3b, M-3) ═════════════════════════════════════════════
+            Здесь стоял счётчик «[3 PICTURES] loaded» (снят владельцем, r3 п.8: «не показывать» —
+            число картинок это свойство ПАГИНАЦИИ, а не работы), а после него ряд остался с одной
+            дверью `· N archived ▸` и пустотой слева. Дверь переехала в линейку заголовка, рядом с
+            дверью прогонов; вместе с ней переехал якорь `data-rep-filter`. */}
 
         {/* ═══ СВЁРТКА RUNS — ЕЁ ДВЕРЬ СТОИТ В ШАПКЕ БЛОКА (r2 п.23) ══════════════════════════════
             Здесь была линейка `RUNS ──── HIDE ▾` — второй орган об одном и том же. Осталось только

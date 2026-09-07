@@ -1,6 +1,5 @@
 import type {
   GetDesignBandResponse,
-  common_AdminColorwayRef,
   common_DesignAsset,
   common_DesignColourRecipe,
   common_DesignPicture,
@@ -248,12 +247,6 @@ export function patternGate(
 
 /* ─────────────────────────── цвет, который уезжает к модели ─────────────────────────── */
 
-/** The paintable hex of a colourway, or '' when its development record names none. */
-export function colourwayHex(ref?: common_AdminColorwayRef | null): string {
-  const hex = (ref?.devHex ?? '').trim();
-  return /^#?[0-9a-f]{6}$/i.test(hex) ? (hex.startsWith('#') ? hex : `#${hex}`) : '';
-}
-
 /**
  * ═══ ЦВЕТ ПЛИТКИ НИ К ЧЕМУ НЕ ОБЯЗЫВАЕТ (владелец, r2 §26) ═════════════════════════════════════
  *
@@ -329,19 +322,6 @@ export function recentPatternColours(band: GetDesignBandResponse, max = 6): Patt
     if (out.length >= max) break;
   }
   return out;
-}
-
-/** Живые колорвеи карточки для выбора цвета и привязки; архивный — только пока он уже выбран. */
-export function pickableColourways(
-  refs: readonly common_AdminColorwayRef[] | undefined,
-  keepId: number,
-  archived: (ref: common_AdminColorwayRef) => boolean,
-): common_AdminColorwayRef[] {
-  return (refs ?? []).filter((c) => {
-    const cid = c.colorwayId ?? 0;
-    if (cid <= 0) return false;
-    return !archived(c) || cid === keepId;
-  });
 }
 
 /* ─────────────────────────── плитка как ассет карточки ─────────────────────────── */

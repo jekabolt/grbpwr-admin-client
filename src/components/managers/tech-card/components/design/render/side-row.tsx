@@ -1,9 +1,11 @@
 import type {
   DesignBenchSlotRef,
   GetDesignBandResponse,
+  common_AdminColorwayRef,
   common_DesignPicture,
   common_MediaFull,
 } from 'api/proto-http/admin';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { Button } from 'ui/components/button';
@@ -13,7 +15,9 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
+import { refColorwayFor } from '../bench-kinds';
 import { InertDoor, pictureUrl } from '../bench-slot';
+import { archivedRef, colorwayLabel } from '../colorway-picker';
 import { PlaceOrDrawCell, Counter, EMPTY_WORD } from '../core';
 import { VectorModal } from '../modals';
 import { PictureTile } from '../picture-tile';
@@ -21,9 +25,11 @@ import { readProvenance } from '../provenance';
 import { uploadItem } from '../upload-item';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
 import { SILHOUETTE_VIEWS, isCardinalView, viewLabel } from '../views';
+import { Swatch } from './field-row';
 import {
   RENDER_MIN_VIEWS,
   benchSides,
+  findDictionaryColour,
   slotOrigin,
   threedRevisions,
   threedSides,
@@ -47,7 +53,12 @@ import {
  * превратилось» приходилось угадывать по порядку ячеек. `SidesSection` — СВОЙ БЛОК, стоящий над
  * RENDERS OF THIS CARD (r2 п.29 перекрывает рулинг r1 §8.9 «под»), строкой на сторону:
  *
- *   SIDE · FLATS IN · RENDERS BACK
+ *   SIDE · FLATS IN · sample · ROSSO · OLIVE (archived) · + colourway
+ *
+ * ⚠ ТАБЛИЦА ПЕРЕЕХАЛА НА ОСЬ КОЛОРВЕЯ (r3 п.28/29/32). Столбец «RENDERS BACK» был ОДИН и показывал
+ * верстак ВЫБРАННОГО цвета — то есть две трети экрана пустовали, а соседний цвет был невидим, пока
+ * его не выберешь. Теперь столбец на колорвей, они заполняют ширину, а «какой цвет мы сейчас
+ * заказываем» говорит подчёркнутый заголовок (он же — вторая дверь к цели прогона).
  *
  * ШЕСТЬ СТРОК, НЕ ЧЕТЫРЕ. Верстак — шесть слотов (`SILHOUETTE_VIEWS`), и жест «apply splitted»
  * «неназванную занятую сторону очищает»: четыре строки над шестисторонним верстаком дали бы дверь,
@@ -318,86 +329,167 @@ function ThreedWord({ side }: { side: BenchSide }): JSX.Element {
    верха блока FABRIC RENDER сняты: они показывали ОДНУ И ТУ ЖЕ сторону дважды, в двух местах, и
    связь «что во что превратилось» приходилось угадывать. Строка таблицы читает её без догадки.
 
-   ⚠ ЧТО ЭТА ТАБЛИЦА ПИШЕТ, А ЧТО НЕТ (r2 п.30, дословно: «mark ▸ / UNMARK / fill N empty sides /
-   apply splitted живут ТОЛЬКО в RENDERS OF THIS CARD; таблица SIDES — только unmark + дверь на
-   FLAT»):
+   ⚠ ЧТО ЭТА ТАБЛИЦА ПИШЕТ, А ЧТО НЕТ:
      · FLATS IN — ПИШЕТСЯ, и только у ПУСТОЙ стороны: половина «из медиатеки» и половина «draw»
        одной плитки (`PlaceOrDrawCell`), обе через флэт-верстак — `kind: 'flat'`, `colorwayId: 0`,
        БЕЗ `slotId` (oneof с `viewKey`: записанный ноль = отказ всей записи), `expectedSlotRev` —
        CAS этой стороны. Занятая сторона читается: её писатели — шаг FLAT и рекол истории.
-     · RENDERS BACK — только СНЯТИЕ (✕ на плите) и правка. Положить рендер в сторону — жест
-       `mark ▸` у самой картинки, в блоке RENDERS OF THIS CARD ниже: там лежит материал, там и
-       дверь. Ни `fill N empty sides`, ни `apply splitted` здесь больше нет — они были вторым
-       написанием того же глагола на экране, где картинок не видно.
+     · СТОЛБЕЦ КОЛОРВЕЯ — снятие (✕ на плите), правка и ОДНА дверь у пустой ячейки: «+ media»,
+       файл из библиотеки прямо в этот слот одной транзакцией (r3 п.30, `RegisterDesignUpload` с
+       колорвеем и в кадре, и в цели). Положить в сторону картинку, УЖЕ ЛЕЖАЩУЮ НА КАРТОЧКЕ, —
+       по-прежнему жест `mark ▸` у самой картинки, в блоке RENDERS OF THIS CARD ниже: там лежит
+       материал, там и дверь. Два разных глагола на два разных предмета, ни одного дубля.
+       Ни `fill N empty sides`, ни `apply splitted` здесь нет — они были вторым написанием того же
+       глагола на экране, где картинок не видно.
 
    Оси сравниваются РОВНО в `benchRowMatches` (через `benchSides` / `threedSides`); ни колорвей, ни
    род здесь не парсятся. */
 
 /** Ширина колонки плиты — та же 138px, что у ячейки ленты: один шаг на весь шаг рендера. */
 const COL_PX = 138;
+/**
+ * Столбец «+ colourway» — УЗКИЙ, и это не экономия. Он не носит плит: в нём стоит одно
+ * приглашение в шапке и пунктирная кромка вдоль строк, показывающая, что ось на этом не кончается.
+ * Дай ему `minmax(COL_PX, 1fr)`, как живому столбцу, и пустое место заняло бы ровно ту треть
+ * экрана, на которую владелец жаловался (п.28).
+ */
+const PLUS_COL_PX = 104;
 
 /**
- * Приговор колонки 3D — одна короткая фраза, читаемая с плиты; ни пилюль, ни дверей.
+ * ═══ ОСЬ КОЛОРВЕЯ — ОДИН ПОРЯДОК СТОЛБЦОВ НА ТАБЛИЦУ И НА ЦЕЛИ `mark ▸` / `apply splitted` ═════
  *
- * ⚠ ФРАЗА НАЗЫВАЕТ ЧТЕНИЕ, А НЕ ПРОГОН, и разбор этому — у `ThreedWord` выше: «goes into the 3D
- * run» выводилось из одной занятости слота и было ложным всюду, где ворота 3D закрыты (архивный
- * колорвей, колорвей вне `renderBenchColorwayIds`). Две ленты говорят это ОДНИМ словарём — иначе
- * таблица и полоса входа разошлись бы на первой же правке.
+ * Читается ЦЕЛИКОМ из whole-card `band.bench` (`benchColorwayId: 0`, довод в `use-design-band.ts`),
+ * поэтому второго круга запроса на соседний цвет не нужно: строки всех колорвеев уже на руках, и
+ * `expectedSlotRev` берётся из строки ЦЕЛИ, а не из строки семпла того же вида.
+ *
+ * ПОРЯДОК И СОСТАВ — РЕШЕНИЕ D1/D8, и он один на три органа:
+ *   · `sample` (ось 0) первым — если у него есть плиты ИЛИ он текущая цель. Это не «ничего не
+ *     выбрано»: безколорвейный верстак законен вечно, и на нём стоит всё, сделанное до оси;
+ *   · живые колорвеи карточки — ВСЕ, в порядке карточки, с плитами и без (пустой столбец и есть
+ *     приглашение его наполнить);
+ *   · архивные — ТОЛЬКО с плитами: этим цветом больше не работают, и рисовать ему пустые ячейки
+ *     значило бы предлагать начать.
+ *
+ * ЭКСПОРТИРУЕТСЯ РАДИ ВТОРОГО ЧИТАТЕЛЯ, А НЕ «НА ВСЯКИЙ СЛУЧАЙ»: `render/outputs.tsx` строит из
+ * той же оси пункты `mark ▸` и цели `apply splitted`. Второе написание порядка разошлось бы с
+ * первым в первый же день, когда карточка заведёт архивный колорвей.
  */
-function threedWords(side: BenchSide): JSX.Element {
-  const has = !!side.picture;
-  if (!isCardinalView(side.view)) {
-    return (
-      <Text size='micro' variant='label' component='span' className='min-w-0 break-words'>
-        not read by 3D
-      </Text>
-    );
+export type ColourwayColumn = {
+  /** 0 = `sample`. Значение, а не отсутствие. */
+  colorwayId: number;
+  ref: common_AdminColorwayRef | null;
+  /** Имя на экране: `sample` у оси 0, `devName → colorCode` у остальных. */
+  label: string;
+  archived: boolean;
+  /** Хоть одна плита на рендер-верстаке этого колорвея. */
+  plated: boolean;
+  /** Шесть сторон ЭТОГО верстака, в порядке силуэта, со своими CAS-токенами. */
+  sides: BenchSide[];
+};
+
+/** Слово оси 0 на экране. В коде она остаётся `COLORWAY_NONE`; таблицу семплов 0108 не путать. */
+export const SAMPLE_LABEL = 'sample';
+
+/**
+ * ═══ ЗАПРОС «ФАЙЛ ИЗ БИБЛИОТЕКИ В ЯЧЕЙКУ СТОЛБЦА» — ЧИСТОЙ ФУНКЦИЕЙ (п.30) ═══════════════════
+ *
+ * Отдельно от жеста ровно потому, что три его поля — утверждения, которые обязаны СОВПАДАТЬ, и
+ * проверять их удобнее цитатой, чем через модалку медиатеки:
+ *   · `items[0].colorwayId` — ЧЬЯ ЭТО КАРТИНКА (её атрибуция на карточке);
+ *   · `target.colorwayId` — В КАКОЙ ВЕРСТАК она встаёт; сервер сверяет эти два и отвечает
+ *     `colorway_mismatch`, если они разошлись;
+ *   · `expectedSlotRev` — CAS строки ЦЕЛИ (view, render, colourway), а не строки семпла того же
+ *     вида: у каждой тройки своя ревизия.
+ * `slotId` не ставится вовсе — он в одном `oneof` с `viewKey`, и ноль там заданное поле.
+ */
+export function renderUploadWrite(v: {
+  mediaId: number;
+  view: string;
+  colorwayId: number;
+  slotRev: number;
+}) {
+  const bench = refColorwayFor('render', v.colorwayId);
+  return {
+    items: [uploadItem({ mediaId: v.mediaId, ghostView: v.view, kind: 'render', colorwayId: bench })],
+    target: { viewKey: v.view, kind: 'render', colorwayId: bench } as DesignBenchSlotRef,
+    expectedSlotRev: v.slotRev,
+  };
+}
+
+export function colourwayColumns(
+  band: GetDesignBandResponse,
+  colorways: common_AdminColorwayRef[],
+  targetColorwayId: number,
+): ColourwayColumn[] {
+  const column = (colorwayId: number, ref: common_AdminColorwayRef | null): ColourwayColumn => {
+    const sides = threedSides(band, colorwayId);
+    return {
+      colorwayId,
+      ref,
+      label: ref ? colorwayLabel(ref) : SAMPLE_LABEL,
+      archived: archivedRef(ref),
+      plated: sides.some((s) => !!s.picture),
+      sides,
+    };
+  };
+  const out: ColourwayColumn[] = [];
+  const sample = column(0, null);
+  if (sample.plated || targetColorwayId === 0) out.push(sample);
+  for (const ref of colorways) {
+    const id = ref.colorwayId ?? 0;
+    if (id <= 0) continue;
+    const col = column(id, ref);
+    if (col.archived && !col.plated) continue;
+    out.push(col);
   }
-  if (has) {
-    return (
-      <Text size='micro' component='span' className='min-w-0 break-words' data-threed-in=''>
-        <b>read by 3D</b>
-      </Text>
-    );
-  }
-  return (
-    <Text size='micro' variant='label' component='span' className='min-w-0 break-words'>
-      {side.view === 'front' ? 'required — 3D cannot start without it' : 'optional'}
-    </Text>
-  );
+  return out;
 }
 
 export function SidesSection({
   band,
   techCardId,
+  colorways,
+  targetColorwayId,
+  onPickColorway,
+  onCreateColorway,
   disabled,
-  colorwayId = 0,
-  colorwayLabel = '',
   onGoToKind,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
+  /** Колорвеи карточки в её собственном порядке (`useTechCard().colorways`). */
+  colorways: common_AdminColorwayRef[];
+  /**
+   * ЦЕЛЬ ПРОГОНА — то же одно число студии (`useColorwayChoice`), что стоит в `for:` у GENERATE.
+   * Таблица его не ВЛАДЕЕТ: клик по заголовку столбца — вторая дверь к тому же состоянию, как чипы
+   * on-model. Столбцы при этом рисуются ВСЕ, а не один: сужение таблицы целью и было той «третью
+   * экрана белого пятна», на которую жаловался владелец (п.28).
+   */
+  targetColorwayId: number;
+  onPickColorway: (colorwayId: number) => void;
+  /** Открыть поповер рождения колорвея (`ColourwayCreatePopover`) — заголовок столбца `+ colourway`. */
+  onCreateColorway: () => void;
   disabled?: boolean;
-  /** WHOSE render bench: one number for the whole studio (`useColorwayChoice`). */
-  colorwayId?: number;
-  colorwayLabel?: string;
   onGoToKind?: (kind: 'flat' | 'render' | 'threed') => void;
 }): JSX.Element {
   const writes = useDesignWrites(techCardId);
+  const { dictionary } = useDictionary();
   const flats = useMemo(() => benchSides(band, 'flat', 0), [band]);
-  const renders = useMemo(() => threedSides(band, colorwayId), [band, colorwayId]);
+  const columns = useMemo(
+    () => colourwayColumns(band, colorways, targetColorwayId),
+    [band, colorways, targetColorwayId],
+  );
 
   const canWrite = !disabled;
-  const filledFlats = flats.filter((s) => !!s.picture).length;
-  const filledRenders = renders.filter((s) => !!s.picture).length;
 
   /**
-   * За какую ЯЧЕЙКУ идёт запись — ключом «ось:сторона», а не одной стороной. Общий `isPending`
-   * сказал бы «saving» на всех шести; один ключ по стороне сказал бы это на ОБЕИХ ячейках строки,
-   * хотя оси пишутся врозь (чертёж кладут в одну, рендер снимают с другой).
+   * За какую ЯЧЕЙКУ идёт запись — ключом «ось:колорвей:сторона». Общий `isPending` сказал бы
+   * «saving» на всех сразу; ключ по одной стороне сказал бы это на всех столбцах строки, хотя
+   * верстаки пишутся врозь: рендер кладут в ROSSO, пока с семпла снимают.
    */
   const [busy, setBusy] = useState<string | null>(null);
-  const busyKey = (kind: 'flat' | 'render', view: string) => `${kind}:${view}`;
+  const busyKey = (kind: 'flat' | 'render', colorwayId: number, view: string) =>
+    `${kind}:${colorwayId}:${view}`;
   /**
    * ОДИН РЕДАКТОР НА БЛОК, НАЗВАННЫЙ ПО ЦЕЛИ. Два булевых флага открыли бы обе модалки разом;
    * `null` — закрыто. `draw` рисует С НУЛЯ в пустую флэт-сторону (`base: null` + `slot`), `edit`
@@ -426,11 +518,11 @@ export function SidesSection({
    * пишется. Оно только рисует подпись и ничего не сторожит, а идущая мутация всё равно снимет его
    * своим `onSettled`, поэтому обнулить его здесь безопасно.
    *
-   * ⚠ РЕМАУНТА ЗДЕСЬ НЕТ, И ПРОВЕРЯТЬ НАДО ИМЕННО ЭТО. `RenderStudio` стоит под
-   * `key={colorwayId}` — это ремаунт на смене КОЛОРВЕЯ, а не карточки: у двух карточек колорвей
-   * запросто один и тот же номер (нуль — неатрибутированный верстак), и тогда узел живёт дальше.
-   * `StudioTab` на переходе не размонтируется, а у уже посещённой карточки `isLoading` ложно и
-   * экран «loading…» не подменяет собой шаг (образец разбора — `pattern-studio.tsx`).
+   * ⚠ РЕМАУНТА ЗДЕСЬ НЕТ, И ПРОВЕРЯТЬ НАДО ИМЕННО ЭТО. Прежде `RenderStudio` стоял под
+   * `key={colorwayId}` — ремаунт на смене КОЛОРВЕЯ, а не карточки; со снятием этого ключа (D2:
+   * цель переехала внутрь экрана) не осталось и его. `StudioTab` на переходе не размонтируется, а
+   * у уже посещённой карточки `isLoading` ложно и экран «loading…» не подменяет собой шаг
+   * (образец разбора — `pattern-studio.tsx`).
    *
    * В ТЕЛЕ РЕНДЕРА, А НЕ В ЭФФЕКТЕ: эффект оставил бы один закоммиченный кадр с новой карточкой и
    * чужой открытой модалкой — а одного кадра хватает, чтобы в ней нажать «сохранить».
@@ -446,13 +538,22 @@ export function SidesSection({
      refuses the whole write. The kind is always spelled: empty reads as flat. Флэт-ось колорвея не
      имеет по существу — она читается и пишется под нулём всегда. */
   const flatRef = (view: string): DesignBenchSlotRef => ({ viewKey: view, kind: 'flat', colorwayId: 0 });
-  const renderRef = (view: string): DesignBenchSlotRef => ({ viewKey: view, kind: 'render', colorwayId });
+  /**
+   * Ссылка на РЕНДЕР-СЛОТ СТОЛБЦА, а не столбца-цели: колорвей входит в ключ исключительности
+   * слота, и `expectedSlotRev` обязан приехать из строки ТОГО ЖЕ столбца (ловушка 1 разбора).
+   * `refColorwayFor` — единственное место, где решается, что у флэта колорвея нет по существу.
+   */
+  const renderRef = (view: string, colorwayId: number): DesignBenchSlotRef => ({
+    viewKey: view,
+    kind: 'render',
+    colorwayId: refColorwayFor('render', colorwayId),
+  });
 
   /** Снять плиту со стороны рендера. `picture_id = 0` — освободить, ничего не удаляя. */
-  const unmark = (view: string, slotRev: number) => {
-    setBusy(busyKey('render', view));
+  const unmark = (view: string, colorwayId: number, slotRev: number) => {
+    setBusy(busyKey('render', colorwayId, view));
     writes.setBenchSlot.mutate(
-      { slot: renderRef(view), pictureId: 0, expectedSlotRev: slotRev },
+      { slot: renderRef(view, colorwayId), pictureId: 0, expectedSlotRev: slotRev },
       { onSettled: () => setBusy(null) },
     );
   };
@@ -461,7 +562,7 @@ export function SidesSection({
   const placeFlat = (media: common_MediaFull, view: string, expectedSlotRev: number) => {
     const mediaId = media.id ?? 0;
     if (!mediaId) return;
-    setBusy(busyKey('flat', view));
+    setBusy(busyKey('flat', 0, view));
     writes.registerUpload.mutate(
       {
         clientRequestId: newClientRequestId(),
@@ -473,9 +574,37 @@ export function SidesSection({
     );
   };
 
+  /**
+   * ═══ РЕНДЕР ИЗ МЕДИАТЕКИ ПРЯМО В ПУСТУЮ ЯЧЕЙКУ СТОЛБЦА (п.30) ══════════════════════════════
+   *
+   * ОДНА ТРАНЗАКЦИЯ, И КОЛОРВЕЙ В НЕЙ НАЗЫВАЕТСЯ ДВАЖДЫ — В КАДРЕ И В ЦЕЛИ, потому что это два
+   * разных утверждения об одном жесте: `item.colorwayId` говорит, ЧЬЯ ЭТО КАРТИНКА (её атрибуция
+   * на карточке), `target.colorwayId` — В КАКОЙ ВЕРСТАК она встаёт. Сервер сверяет их между собой
+   * (`colorway_mismatch`), поэтому разойтись они не могут молча; разойдясь, они дают отказ вместо
+   * тихой записи не туда.
+   *
+   * `expectedSlotRev` — CAS строки ЦЕЛИ: строка соседнего столбца того же вида живёт своей
+   * ревизией, и токен от неё сервер отвергнет («slot is at rev N, M was echoed»).
+   */
+  const placeRender = (media: common_MediaFull, view: string, colorwayId: number, expectedSlotRev: number) => {
+    const mediaId = media.id ?? 0;
+    if (!mediaId) return;
+    setBusy(busyKey('render', colorwayId, view));
+    writes.registerUpload.mutate(
+      {
+        clientRequestId: newClientRequestId(),
+        ...renderUploadWrite({ mediaId, view, colorwayId, slotRev: expectedSlotRev }),
+      },
+      { onSettled: () => setBusy(null) },
+    );
+  };
+
+  /** Правится плита ЛЮБОГО столбца — редактор один на блок, адрес у него по номеру картинки. */
   const editing =
     editor?.mode === 'edit'
-      ? renders.find((s) => (s.picture?.id ?? 0) === editor.pictureId)?.picture ?? null
+      ? columns
+          .flatMap((c) => c.sides)
+          .find((s) => (s.picture?.id ?? 0) === editor.pictureId)?.picture ?? null
       : null;
   /** Сторона, в которую сейчас рисуют, — ЖИВАЯ строка верстака, вместе со своим `slotRev`. */
   const drawing = editor?.mode === 'draw' ? flats.find((s) => s.view === editor.view) ?? null : null;
@@ -509,36 +638,65 @@ export function SidesSection({
           onDraw={() => setEditor({ mode: 'draw', view: side.view })}
           data-side-flat-door={side.view}
         />
-        {busy === busyKey('flat', side.view) ? <Caption>saving…</Caption> : null}
+        {busy === busyKey('flat', 0, side.view) ? <Caption>saving…</Caption> : null}
       </>
     );
   };
 
-  const renderCell = (side: BenchSide): JSX.Element => {
+  /**
+   * ЯЧЕЙКА СТОЛБЦА КОЛОРВЕЯ. Плита — с `✕` (снять) и правкой, как была; пустая — половина «из
+   * медиатеки» той же плитки (п.30), и ТОЛЬКО она: рендер не рисуют с нуля пером, его либо
+   * генерируют, либо приносят файлом.
+   *
+   * ⚠ В АРХИВНЫЙ СТОЛБЕЦ ДВЕРИ НЕТ. Сервер её примет (`assertColorwayOfCard` статуса не читает),
+   * но правило «этим цветом больше не работают» держит клиент — тот же `archivedColorwayGate`,
+   * что гасит GENERATE. Плиты при этом читаются и снимаются: архив не запрещает разбирать
+   * сделанное.
+   */
+  const renderCell = (col: ColourwayColumn, side: BenchSide): JSX.Element => {
     const label = viewLabel(side.view);
-    const saving = busy === busyKey('render', side.view);
-    if (!side.picture) {
+    const saving = busy === busyKey('render', col.colorwayId, side.view);
+    if (side.picture) {
+      return (
+        <Plate
+          picture={side.picture}
+          name={`${label} · ${col.label}`}
+          origin={saving ? 'saving…' : originWord(band, side)}
+          alt={`render · ${label} · ${col.label}`}
+          saving={saving}
+          onRemove={canWrite ? () => unmark(side.view, col.colorwayId, side.slotRev) : undefined}
+          onEdit={
+            canWrite && (side.picture.id ?? 0) > 0
+              ? () => setEditor({ mode: 'edit', pictureId: side.picture?.id ?? 0 })
+              : undefined
+          }
+        />
+      );
+    }
+    if (!canWrite || col.archived) {
       return (
         <EmptyBox
           hint={EMPTY_RENDER_SIDE}
-          title={`no render stands in ${label}. Put one in from RENDERS OF THIS CARD, below — the door «mark ▸» stands on the picture itself.`}
+          title={
+            col.archived
+              ? `${col.label} is archived — its renders can be read and unmarked, but nothing new goes into it.`
+              : `no render stands in ${label} of ${col.label}.`
+          }
         />
       );
     }
     return (
-      <Plate
-        picture={side.picture}
-        name={label}
-        origin={saving ? 'saving…' : originWord(band, side)}
-        alt={`render · ${label}`}
-        saving={saving}
-        onRemove={canWrite ? () => unmark(side.view, side.slotRev) : undefined}
-        onEdit={
-          canWrite && (side.picture.id ?? 0) > 0
-            ? () => setEditor({ mode: 'edit', pictureId: side.picture?.id ?? 0 })
-            : undefined
-        }
-      />
+      <>
+        <PlaceOrDrawCell
+          label={label}
+          mediaLabel='+ media'
+          heightPx={EMPTY_PX}
+          purpose={`design · render for the ${label} slot of ${col.label}`}
+          onSelect={(media) => placeRender(media, side.view, col.colorwayId, side.slotRev)}
+          data-side-render-door={`${col.colorwayId}:${side.view}`}
+        />
+        {saving ? <Caption>saving…</Caption> : null}
+      </>
     );
   };
 
@@ -553,13 +711,10 @@ export function SidesSection({
       question='· what went in, what came back'
       action={
         <span className='flex flex-wrap items-center gap-2'>
-          {/* Счётчика здесь нет намеренно: строка ПОД таблицей называет обе оси одним
-              предложением, а «2 of 6 sides» в шапке не говорило, о какой из них речь. */}
-          {colorwayLabel.trim() ? (
-            <Text size='micro' variant='label' component='span' className='uppercase'>
-              {colorwayLabel.trim()}
-            </Text>
-          ) : null}
+          {/* ⚠ НИ СЧЁТЧИКА, НИ ИМЕНИ КОЛОРВЕЯ. Счёта здесь нет намеренно: «2 of 6 sides» не
+              говорило, о какой из осей речь, и владелец снял эту строку целиком (п.31). Имя
+              колорвея тоже ушло: таблица больше не сужена одним цветом — каждый столбец назван
+              своим заголовком, и второе имя в шапке противоречило бы им всем, кроме одного. */}
           {/* ОДНА ДВЕРЬ НА ШАПКУ, а не по кнопке в каждой ячейке: чертежи заводят здесь, но
               размечают и перебирают на своём шаге. */}
           {onGoToKind ? (
@@ -576,32 +731,91 @@ export function SidesSection({
       }
     >
       {/* ⚠ ТАБЛИЦА СКРОЛЛИТСЯ ВНУТРИ СВОЕЙ КОРОБКИ, А НЕ УВОЗИТ СТРАНИЦУ ВБОК (DESIGN.md).
-          Дорожки заданы числами: обе колонки плит — ровно `COL_PX`, поэтому пустая и занятая
-          ячейка стоят в ОДНОЙ коробке; последняя дорожка забирает остаток, чтобы волосяная линия
-          строки шла во всю ширину блока. */}
+          Дорожки: имя стороны по содержимому, `FLATS IN` ровно `COL_PX` (у флэта оси колорвея
+          нет — столбец один и его ширина не спорит ни с кем), столбцы колорвеев
+          `minmax(COL_PX, 1fr)` — они и ЗАПОЛНЯЮТ ширину (п.28: «треть экрана белое пятно»), а
+          `+ colourway` узкий, потому что плит не носит.
+          ⚠ КОЛОНКИ 3D ЗДЕСЬ БОЛЬШЕ НЕТ (п.32). Она печатала ВЫВОД («read by 3D»), не жест, и
+          выводился он из одной занятости слота — то есть повторял глазами то, что видно по самой
+          плите. Слово о том, что 3D читает четыре названные стороны, стоит там, где 3D и
+          заказывают: у ворот `threedGate` на своём шаге. */}
       <div className='overflow-x-auto'>
         <div
-          data-side-rows={renders.length}
+          data-side-rows={flats.length}
+          data-side-columns={columns.length}
           className='grid items-start gap-x-6'
           style={{
-            gridTemplateColumns: `minmax(72px, max-content) ${COL_PX}px ${COL_PX}px minmax(0, 1fr)`,
+            gridTemplateColumns: `minmax(72px, max-content) ${COL_PX}px ${columns
+              .map(() => `minmax(${COL_PX}px, 1fr)`)
+              .join(' ')} ${PLUS_COL_PX}px`,
           }}
         >
           <Head>side</Head>
           <Head>flats in</Head>
-          <Head>renders back</Head>
-          <Head>3d</Head>
+          {columns.map((col) => {
+            const target = col.colorwayId === targetColorwayId;
+            const hex =
+              (col.ref?.devHex ?? '').trim() ||
+              (findDictionaryColour(dictionary?.colors, col.ref?.colorCode)?.hex ?? '').trim();
+            return (
+              /* ═══ ЗАГОЛОВОК СТОЛБЦА И ЕСТЬ ВЫБОР ЦЕЛИ (D2) ═══════════════════════════════════
+                 Вторая дверь к тому же состоянию, что `for:` у GENERATE, — как чипы колорвея на
+                 ON MODEL. Отдельного селектора над таблицей нет: он был бы ТРЕТЬИМ органом одного
+                 вопроса «для кого этот прогон». Активный столбец подчёркнут — не залит и не
+                 покрашен: цветом здесь говорит свотч, и второй цветовой признак спорил бы с ним. */
+              <button
+                key={col.colorwayId}
+                type='button'
+                data-side-column={col.colorwayId}
+                data-side-column-target={target ? '' : undefined}
+                onClick={() => onPickColorway(col.colorwayId)}
+                title={
+                  target
+                    ? `${col.label} is the target of the next render run`
+                    : `make ${col.label} the target of the next render run`
+                }
+                className={cn(
+                  'flex min-w-0 items-center gap-1.5 py-0.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+                  target ? 'underline underline-offset-4' : 'hover:underline hover:underline-offset-4',
+                )}
+              >
+                <Swatch hex={hex} size={11} title={col.label} />
+                <Text
+                  size='micro'
+                  variant={target ? undefined : 'label'}
+                  tracking='label'
+                  component='span'
+                  className='min-w-0 truncate uppercase'
+                >
+                  {col.label}
+                  {col.archived ? ' (archived)' : ''}
+                </Text>
+              </button>
+            );
+          })}
+          {/* ЧЕТВЁРТАЯ ДВЕРЬ ОДНОЙ КОМНАТЫ (G2-4): пунктирный заголовок открывает тот же поповер,
+              что пункт `+ colourway…` в цели GENERATE и в цели mark. Ячеек под ним нет — только
+              пунктирная кромка: ось на этом столбце не кончается, но плит он не носит. */}
+          <button
+            type='button'
+            data-side-add-colourway=''
+            onClick={onCreateColorway}
+            title='name a new colourway — it becomes a column here and the target of the next run'
+            className='flex items-center justify-center border border-dashed border-borderColor px-2 py-0.5 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+          >
+            + colourway
+          </button>
 
-          {renders.map((side, i) => {
-            const flat = flats[i];
-            const label = viewLabel(side.view);
-            /* ODNA ЛИНИЯ НА СТРОКУ, А НЕ ПО ЛИНИИ НА ЯЧЕЙКУ: строка — подсетка над четырьмя
+          {flats.map((flat, i) => {
+            const label = viewLabel(flat.view);
+            /* ОДНА ЛИНИЯ НА СТРОКУ, А НЕ ПО ЛИНИИ НА ЯЧЕЙКУ: строка — подсетка над всеми
                дорожками, поэтому волосяная линия идёт неразрывно через все зазоры. */
             return (
               <div
-                key={side.view}
-                data-side-row={side.view}
-                className='col-span-4 grid grid-cols-subgrid items-start border-t border-hairline py-3'
+                key={flat.view}
+                data-side-row={flat.view}
+                className='grid grid-cols-subgrid items-start border-t border-hairline py-3'
+                style={{ gridColumn: `span ${columns.length + 3} / span ${columns.length + 3}` }}
               >
                 <div className='min-w-0'>
                   <Text
@@ -612,7 +826,7 @@ export function SidesSection({
                     className='uppercase'
                   >
                     {label}
-                    {RENDER_MIN_VIEWS.includes(side.view) ? (
+                    {RENDER_MIN_VIEWS.includes(flat.view) ? (
                       <span className='font-bold' title='the render needs it'>
                         {' *'}
                       </span>
@@ -620,39 +834,38 @@ export function SidesSection({
                   </Text>
                 </div>
                 <div
-                  data-side-flat={side.view}
-                  data-slot-empty={flat?.picture ? undefined : ''}
+                  data-side-flat={flat.view}
+                  data-slot-empty={flat.picture ? undefined : ''}
                   className='flex flex-col gap-1'
                 >
-                  {flat ? flatCell(flat) : null}
+                  {flatCell(flat)}
                 </div>
-                <div
-                  data-side-render={side.view}
-                  data-slot-empty={side.picture ? undefined : ''}
-                  className='flex flex-col gap-1'
-                >
-                  {renderCell(side)}
-                </div>
-                {/* ═══ ТРЕТЬЯ КОЛОНКА — ВЫВОД, А НЕ ЖЕСТ ═══════════════════════════════════════
-                    Сторона идёт в 3D-прогон ровно тогда, когда её рендер-слот заполнен и вид — из
-                    четырёх, которые принимает провайдер (`isCardinalView`); фронт обязателен
-                    (`no_front_render`, отказ до денег). Ни одной двери здесь нет и быть не должно:
-                    разметка живёт у самих картинок, в блоке ниже. Словами, а не пилюлями —
-                    владелец снял пилюли со строк как «иконки». */}
-                <div className='min-w-0 max-w-[24rem]' data-side-threed={side.view}>
-                  {threedWords(side)}
-                </div>
+                {columns.map((col) => {
+                  const side = col.sides[i];
+                  return (
+                    /* ⚠ ДОРОЖКА ТЯНЕТСЯ, СОДЕРЖИМОЕ — НЕТ, И ЭТО ЗАМЕР, А НЕ ВКУС. Столбцы
+                       заполняют ширину блока (п.28), но плита обязана остаться той же 138-й
+                       мерой, что во всей студии: без потолка кадр 1:1 растягивался по дорожке
+                       (на 1440px — 230px), строка вырастала вдвое, а пустая ячейка рядом
+                       оставалась 162px — ровно та жалоба «плейсхолдер и плита разного размера»,
+                       только вывернутая наизнанку. Потолок держит обе коробки в одной. */
+                    <div
+                      key={col.colorwayId}
+                      data-side-cell={`${col.colorwayId}:${flat.view}`}
+                      data-slot-empty={side?.picture ? undefined : ''}
+                      style={{ maxWidth: COL_PX }}
+                      className='flex min-w-0 flex-col gap-1'
+                    >
+                      {side ? renderCell(col, side) : null}
+                    </div>
+                  );
+                })}
+                <div className='self-stretch border-l border-dashed border-borderColor' />
               </div>
             );
           })}
         </div>
       </div>
-
-      {/* ЧТО СЧИТАЕТ ЭТА ТАБЛИЦА — одной строкой под ней, а не пилюлями в каждой ячейке. */}
-      <Text size='micro' variant='label' component='p' className='normal-case'>
-        {filledFlats} of {flats.length} sides have a drawing · {filledRenders} of {renders.length}{' '}
-        have a render
-      </Text>
 
       {/* ОДИН РЕДАКТОР НА БЛОК, ПО ИМЕНИ ЦЕЛИ. `draw` пишет В СЛОТ (флэт-верстак, CAS этой
           стороны); `edit` кладёт результат на карточку обычной картинкой и в слот не пишет. */}

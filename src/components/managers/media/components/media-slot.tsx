@@ -54,6 +54,22 @@ export type MediaSlotProps = {
   showVideos?: boolean;
   /** Можно менять. Выключено — только показ. */
   editMode?: boolean;
+  /**
+   * ═══ ПОЛОСА `change · remove` НА ЗАПОЛНЕННОМ КАДРЕ — И ТОЛЬКО ОНА ═══════════════════════════
+   *
+   * `false` — полоса не рисуется, а слот ОСТАЁТСЯ ЖИВЫМ: ⌘V и брошенный файл по-прежнему
+   * заменяют то, что в нём лежит.
+   *
+   * ⚠ ЗАЧЕМ ОТДЕЛЬНЫЙ ПРОП, А НЕ `editMode={false}`. Экран, которому полоса не подходит по месту
+   * (кадр в 136 пикселей — она съедает нижнюю треть картинки), гасил её единственным способом,
+   * который был: `editMode={false}`. Но этот флаг гасит и приёмник жестов (`useMediaIntake({
+   * enabled: editMode })`), то есть вместе с двумя кнопками ТИХО уносит ⌘V и бросок — жест
+   * исчезает, а экран выглядит целым (`pattern-input.tsx`, замерено). Полоса и право менять — два
+   * разных утверждения, и теперь они спрашиваются двумя разными пропами.
+   *
+   * На ПУСТОМ слоте проп не значит ничего: там полосы нет вовсе, а есть плейсхолдер-триггер.
+   */
+  toolbar?: boolean;
   /** Малый размер: глиф и подсказка не помещаются, остаётся только подпись. */
   compact?: boolean;
   /**
@@ -120,6 +136,7 @@ export function MediaSlot({
   limit,
   showVideos = true,
   editMode = true,
+  toolbar = true,
   compact = false,
   sizeClassName,
   className,
@@ -328,7 +345,7 @@ export function MediaSlot({
         </div>
       )}
 
-      {editMode && (
+      {editMode && toolbar && (
         <div className='absolute inset-x-0 bottom-0 z-10 flex flex-wrap items-center justify-between gap-1 border-t border-textInactiveColor bg-bgColor/90 px-1.5 py-1'>
           <MediaSelector
             label='change'

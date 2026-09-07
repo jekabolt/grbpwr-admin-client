@@ -276,15 +276,21 @@ const PRODUCT_NOTE =
  * meaning — a corner label and a dimmed tile — because it explains why that colourway is no good
  * for ON MODEL. There is no action on a tile: adding, removing and archiving live on the
  * colourways tab, which the door in the group rule opens.
+ *
+ * ⚠ ЭТОТ ОРГАН НЕ РИСУЕТ НИ ОДНОЙ ДВЕРИ, И ЭТО ПРАВИЛО, А НЕ ПРОПУСК (r3b, M-2). Пустое состояние
+ * держало ВТОРУЮ кнопку `go to colourways ›` — ту же самую, что стоит в линейке группы сорока
+ * пикселями выше. Две одинаковые двери на одном экране читаются как две РАЗНЫЕ («может, эта ведёт
+ * куда-то ещё?»), и человек тратит взгляд на различение того, что не различается. Дверь одна, и
+ * она в линейке — там, где стоит и счётчик колорвеев, то есть рядом с предметом; строка под ней
+ * только называет пустоту. Поэтому `onGoColourways` сюда БОЛЬШЕ НЕ ПЕРЕДАЁТСЯ: проп, оставленный
+ * «на всякий случай», вернул бы кнопку первым же правщиком пустого состояния.
  */
 function LinkedProducts({
   techCardId,
   colorways,
-  onGoColourways,
 }: {
   techCardId?: number;
   colorways: common_AdminColorwayRef[];
-  onGoColourways: () => void;
 }) {
   const ids = colorwayIds(colorways);
   const productMap = useProductsByIds(ids);
@@ -298,17 +304,8 @@ function LinkedProducts({
     );
   }
   if (ids.length === 0) {
-    return (
-      <EmptyState
-        action={
-          <Button type='button' variant='secondary' size='xs' onClick={onGoColourways}>
-            go to colourways ›
-          </Button>
-        }
-      >
-        no colourways yet
-      </EmptyState>
-    );
+    /* Тихий текст без двери — дверь одна и она в линейке группы (см. шапку органа). */
+    return <EmptyState>no colourways yet</EmptyState>;
   }
   return (
     <div className='min-w-0'>
@@ -553,11 +550,7 @@ export function CardDetails({
             >
               linked products
             </GroupLabel>
-            <LinkedProducts
-              techCardId={techCardId}
-              colorways={ways}
-              onGoColourways={onGoColourways}
-            />
+            <LinkedProducts techCardId={techCardId} colorways={ways} />
           </div>
         )}
       </div>

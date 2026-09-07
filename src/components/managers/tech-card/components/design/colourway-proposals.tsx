@@ -21,6 +21,8 @@ import {
   useUpdateColorwayRecipe,
 } from '../useColorwayRecipe';
 import { InertDoor } from './bench-slot';
+import { colorwayLabel as nameOfColorway } from './colorway-picker';
+import { ColourwayCreatePopover } from './colourway-create';
 import {
   bindSlots,
   confirmRefusal,
@@ -80,9 +82,6 @@ function Swatch({ hex, title }: { hex?: string; title?: string }): JSX.Element {
 
 const cell =
   'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
-
-/** Ключ занятости для ручной строки — свой, чтобы «идёт создание» не гасило кнопки предложений. */
-const HAND = 'hand:new';
 
 /**
  * ТРЁХШАГОВАЯ ЗАПИСЬ, ТОЧНО ТА ЖЕ, КАКОЙ ЕЁ ДЕЛАЕТ ВКЛАДКА: сперва личность, потом рецепт.
@@ -169,11 +168,15 @@ export function ColourwayProposals({
   const { confirm, pending } = useConfirmColourway(techCardId);
   const [busy, setBusy] = useState<string | null>(null);
   const [, setParams] = useSearchParams();
-  /* Строка «завести руками» — своё имя, свой цвет и свои квитанции; в сторе черновика её нет и
-     быть не должно: она не предложение модели, а действие человека. */
-  const [handName, setHandName] = useState('');
-  const [handCode, setHandCode] = useState('');
-  const [handMade, setHandMade] = useState<Array<{ colorwayId: number; name: string }>>([]);
+  /* Дверь «завести руками» — своё окно и свои квитанции; в сторе черновика её нет и быть не
+     должно: она не предложение модели, а действие человека. Имя, пантон, подбор словарного цвета и
+     все отказы держит само окно (`ColourwayCreatePopover`) — здесь остаётся только «открыто ли». */
+  const [creatingByHand, setCreatingByHand] = useState(false);
+  /* ⚠ ХРАНИТСЯ ТОЛЬКО `id`, А ИМЯ ЧИТАЕТСЯ ИЗ КАРТОЧКИ. Окно рождения отдаёт наружу один
+     `colorwayId` (его контракт), и переписать имя себе значило бы завести ВТОРУЮ копию названия
+     колорвея — ту, что не поправится, если имя тут же изменят на вкладке COLOURWAYS. Запись
+     инвалидирует `useTechCard`, поэтому имя приезжает из того же источника, что и весь список. */
+  const [handMade, setHandMade] = useState<number[]>([]);
 
   /**
    * ═══ КАРТОЧКА СМЕНИЛАСЬ — РУЧНАЯ СТРОКА И ЕЁ КВИТАНЦИИ НАЧИНАЮТСЯ ЗАНОВО ══════════════════
@@ -204,8 +207,10 @@ export function ColourwayProposals({
   const shownCard = useRef(techCardId);
   if (shownCard.current !== techCardId) {
     shownCard.current = techCardId;
-    if (handName) setHandName('');
-    if (handCode) setHandCode('');
+    /* Само окно свои поля сбрасывает тем же приёмом и по тому же доводу; здесь закрывается ДВЕРЬ
+       и стираются квитанции — «NAME · created», заработанная на карточке A, на карточке B врала бы
+       про заведённый у неё колорвей и вела бы смотреть его на её вкладку COLOURWAYS. */
+    if (creatingByHand) setCreatingByHand(false);
     if (handMade.length) setHandMade([]);
   }
 
@@ -271,28 +276,9 @@ export function ColourwayProposals({
      ровно то, чего боялся старый ранний возврат. Читателю она не сообщает ничего. */
   if (readOnly && visible.length === 0 && handMade.length === 0) return null;
 
-  /**
-   * ВОРОТА РУЧНОЙ СТРОКИ — ТЕ ЖЕ САМЫЕ, ЧТО У ПРЕДЛОЖЕНИЯ, И ЭТО ОДНА ФУНКЦИЯ, А НЕ ВТОРОЙ
-   * СПИСОК ОТКАЗОВ: права, словарь, несохранённая карточка и занятый цвет говорят здесь ровно
-   * то же и теми же словами. Отличие ровно одно — привязка слотов: у колорвея, заведённого
-   * рукой, слотов НЕТ вовсе (рецепт не пишется, `usages` пуст), поэтому вопрос «сколько из них
-   * стоит на сохранённой карточке» ему не задаётся, и `boundCount` ниже означает «неприменимо».
-   *
-   * Имя спрашивается сверх этого: у предложения оно приезжает от модели, а здесь его вводит
-   * человек — и колорвей без имени читается на вкладке COLORWAYS одним кодом цвета.
-   */
-  const handRefusal =
-    confirmRefusal({
-      readOnly,
-      dirty,
-      colorCode: handCode,
-      usedCodes,
-      dictionaryHasAny: colours.length > 0,
-      dictionaryHasColours: choosable.size > 0,
-      codeChoosable: !handCode || choosable.has(handCode),
-      codeKnown: true,
-      boundCount: 1,
-    }) ?? (handName.trim() ? null : 'give it a name — it is what the colourway is called');
+  /* ⚠ ВОРОТА РУЧНОЙ ДВЕРИ ЗДЕСЬ БОЛЬШЕ НЕ СЧИТАЮТСЯ, И ЭТО НЕ ОСЛАБЛЕНИЕ: их считает то же
+     `createRefusal` внутри окна, поверх тех же прав, того же словаря и того же `isDirty` формы
+     карточки. Два списка отказов на один жест — это два разных ответа на «почему нельзя». */
 
   const goToColorways = () =>
     setParams(
@@ -521,14 +507,18 @@ export function ColourwayProposals({
         {/* КВИТАНЦИЯ РУЧНОГО КОЛОРВЕЯ — ТА ЖЕ ФОРМА, ЧТО У ПОДТВЕРЖДЁННОГО ПРЕДЛОЖЕНИЯ. Создание
             необратимо формой (это продукт на сервере), поэтому строка обязана остаться на экране
             и увести туда, где колорвей теперь живёт. */}
-        {handMade.map((m, i) => (
+        {handMade.map((id, i) => (
           <div
-            key={`${m.colorwayId}:${i}`}
+            key={`${id}:${i}`}
             className='mt-1.5 flex flex-wrap items-baseline gap-2 border-b border-hairline py-1'
-            data-b25-receipt={`hand:${m.colorwayId}`}
+            data-b25-receipt={`hand:${id}`}
           >
             <Text size='micro' component='span' className='uppercase'>
-              {m.name}
+              {/* ИМЯ — ИЗ КАРТОЧКИ. Пока перечитывание не доехало, печатается `#42` — та же
+                  лестница отступления, что у всех подписей колорвея (`colorwayLabel`): число
+                  существует наверняка, а имя — ещё нет, и выдумывать его нечем. */}
+              {nameOfColorway((techCard?.colorways ?? []).find((c) => (c.colorwayId ?? 0) === id)) ||
+                `#${id}`}
             </Text>
             <Pill tone='ok'>created</Pill>
             <Button
@@ -544,118 +534,47 @@ export function ColourwayProposals({
         ))}
 
         {/**
-         * ═══ ПЛЕЙСХОЛДЕР «+ COLOURWAY» — ВНИЗУ БЛОКА, ОДНОЙ ДВЕРЬЮ (п. 15 владельца) ═══════════
+         * ═══ «+ COLOURWAY» — ОДНА ДВЕРЬ, И ОКНО ЗА НЕЙ ОБЩЕЕ СО СТУДИЕЙ (r2 п.15, G2-4) ════════
          *
-         * Дословно: «в COLOURWAYS снизу плейсхолдер для добавления нового колорвея». Пунктирная
-         * строка — та же грамматика «здесь появится запись», что у плейсхолдера слотов выше и у
-         * пустых ячеек верстака.
+         * Владелец просил снизу плейсхолдер добавления (r2 п.15) и — этим кругом — «кастомное имя,
+         * не из словаря». Здесь стояла СВОЯ форма: поле имени плюс `<select>` словарных цветов
+         * плюс кнопка. Она противоречила обоим приказам сразу: имя было, но цвет ВЫБИРАЛСЯ ИЗ
+         * СЛОВАРЯ руками, а пантона — того, чем колорвей на самом деле называют в производстве, —
+         * у неё не было вовсе. И она была ВТОРОЙ формой рождения колорвея в дереве: рядом,
+         * в студии, живёт `ColourwayCreatePopover` с именем, пантоном и видимым подбором словарного
+         * цвета под SKU.
          *
-         * ⚠ ПИСАТЕЛЬ ОДИН, И ОН УЖЕ БЫЛ: `useConfirmColourway` — тот самый путь, которым уходит
-         * `confirm ▸` у предложения черновика (`CreateColorway`, а затем рецепт). У ручного
-         * колорвея слотов нет вовсе, поэтому второй шаг не делается сам собой: `usages` пуст, и
-         * функция возвращается сразу после создания. Второго писателя колорвеев не заводится —
-         * иначе обработка ошибок, инвалидация кэша и порядок двух вызовов разошлись бы по двум
-         * местам, и разошлись бы молча.
+         * ДВЕ ФОРМЫ НА ОДИН ПРОДУКТ РАСХОДЯТСЯ МОЛЧА — проверкой имени на уникальность, отказом на
+         * грязной форме карточки, порядком двух вызовов, — и разъезд увидел бы только тот, кто
+         * держит оба экрана рядом. Поэтому форма СНЕСЕНА, а дверь осталась ровно там, где стояла:
+         * пунктирной строкой внизу блока. Писатель по-прежнему один (`useCreateColorway`), и он
+         * теперь один НА ВСЁ ДЕРЕВО, а не один на файл.
+         *
+         * ⚠ РЯДЫ ПРЕДЛОЖЕНИЙ ЧЕРНОВИКА НЕ ТРОНУТЫ: у них своя половина работы — привязка слотов и
+         * рецепт, — которой у ручного колорвея нет вовсе (`usages` пуст). Их `confirm ▸` уходит
+         * тем же `useConfirmColourway`, что и раньше.
          */}
         {!readOnly && (
           <div
             data-b25-add-row=''
-            className='mt-2 flex flex-wrap items-end gap-2 border border-dashed border-borderColor px-2.5 py-2'
+            className='mt-2 flex flex-wrap items-center gap-2 border border-dashed border-borderColor px-2.5 py-2'
           >
-            {/* Обе половины несут СВОЙ минимум ширины: без него на узком экране поле имени
-                сжималось в 60 пикселей (замерено при окне 375), вместо того чтобы честно
-                перенестись на свою строку. */}
-            <label className='flex min-w-[180px] flex-1 flex-col gap-0.5'>
-              <Text size='micro' variant='label' component='span' className='uppercase'>
-                name
-              </Text>
-              <Input
-                value={handName}
-                maxLength={64}
-                placeholder='name this colourway'
-                data-b25-new-name=''
-                onChange={(e: { target: { value: string } }) => setHandName(e.target.value)}
-              />
-            </label>
-            <label className='flex min-w-[200px] flex-1 flex-col gap-0.5'>
-              <Text size='micro' variant='label' component='span' className='uppercase'>
-                colour
-              </Text>
-              <span className='flex items-center gap-2'>
-                {/* Квадратик рисуется только когда цвет ВЫБРАН: пустая рамка рядом с селектом
-                    читается как невыбранный чекбокс, то есть как ещё один орган. */}
-                {!!handCode && (
-                  <Swatch
-                    hex={colours.find((c) => c.code === handCode)?.hex ?? undefined}
-                    title={handCode}
-                  />
-                )}
-                <select
-                  className={cn(cell, 'max-w-[240px]')}
-                  value={handCode}
-                  data-b25-new-code=''
-                  onChange={(e) => setHandCode(e.target.value)}
-                >
-                  <option value=''>— select colour —</option>
-                  {colours.map((c) => (
-                    <option
-                      key={c.code}
-                      value={c.code}
-                      disabled={usedCodes.has(c.code ?? '') || !!c.archived}
-                    >
-                      {c.code} · {c.name}
-                      {c.archived ? ' (archived)' : ''}
-                      {usedCodes.has(c.code ?? '') ? ' (already on this style)' : ''}
-                    </option>
-                  ))}
-                </select>
-              </span>
-            </label>
+            <Text size='micro' variant='label' component='span' className='min-w-0 normal-case'>
+              a colourway of this style — its own name and its pantone
+            </Text>
             <span className='ml-auto'>
-              {handRefusal ? (
-                <InertDoor label='+ colourway' reason={handRefusal} size='sm' />
-              ) : (
-                <Button
-                  type='button'
-                  variant='main'
-                  size='sm'
-                  data-b25-add=''
-                  disabled={pending || busy === HAND}
-                  loading={busy === HAND}
-                  onClick={async () => {
-                    setBusy(HAND);
-                    try {
-                      const v = await confirm(
-                        {
-                          id: HAND,
-                          name: handName.trim(),
-                          colorCode: handCode,
-                          pantone: '',
-                          hex: '',
-                          slots: [],
-                        },
-                        [],
-                      );
-                      setHandMade((prev) => [
-                        ...prev,
-                        {
-                          colorwayId: v.status === 'confirmed' ? v.colorwayId : 0,
-                          name: handName.trim() || handCode,
-                        },
-                      ]);
-                      setHandName('');
-                      setHandCode('');
-                      showMessage('colourway created', 'success');
-                    } catch (e) {
-                      showMessage(createColorwayErrorMessage(e), 'error');
-                    } finally {
-                      setBusy(null);
-                    }
-                  }}
-                >
-                  + colourway
-                </Button>
-              )}
+              <ColourwayCreatePopover
+                techCardId={techCardId}
+                open={creatingByHand}
+                onOpenChange={setCreatingByHand}
+                readOnly={readOnly}
+                onCreated={(colorwayId: number) => setHandMade((prev) => [...prev, colorwayId])}
+                anchor={
+                  <Button type='button' variant='main' size='sm' data-b25-add=''>
+                    + colourway
+                  </Button>
+                }
+              />
             </span>
           </div>
         )}

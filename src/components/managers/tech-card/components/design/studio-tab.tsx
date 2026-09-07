@@ -12,7 +12,7 @@ import { ConstructionGeneralInfo } from '../construction-general-info';
 import type { TechCardFormData } from '../schema';
 import { ArtifactsPanel, type SheetCallout } from './artifacts-panel';
 import { Bench } from './bench';
-import { ColorwaySelect, useColorwayChoice } from './colorway-picker';
+import { useColorwayChoice } from './colorway-picker';
 import { ColourwayProposals } from './colourway-proposals';
 import { GenerationStudio } from './generation';
 import type { DesignKind } from './bench-kinds';
@@ -289,22 +289,15 @@ export function StudioTab({
 
   /* ═══ THE RAIL — FIRST CHILD OF THE STACK IN EVERY STATE ═══════════════════════════════════════
      Drawn before the band is read and before the card exists: while the band loads every
-     band-derived state is «unknown» (`bandless`), never «locked», and the cells still navigate. The
-     `action` slot — `ColorwaySelect`, «whose render is this» — stands on the three steps keyed by
-     that number (render writes the bench, 3D reads it, on-model freezes it in the run) and on none
-     other: the flat has no colour axis by nature, the pattern by the owner's word (E-1). Bandless,
-     the select has no bench to read and is not drawn. */
-  const rail = (
-    <ChainRail
-      ctx={ctx}
-      onStepChange={goStep}
-      action={
-        !bandless && (decided === 'render' || decided === 'threed' || decided === 'aside') ? (
-          <ColorwaySelect band={band} choice={colorway} disabled={readOnly} />
-        ) : null
-      }
-    />
-  );
+     band-derived state is «unknown» (`bandless`), never «locked», and the cells still navigate.
+
+     ⚠ СЕЛЕКТА КОЛОРВЕЯ ЗДЕСЬ БОЛЬШЕ НЕТ (G2-2). Он стоял в слоте `action` — «чей это рендер», —
+     и уехал ТУДА, ГДЕ ЭТОТ ВЫБОР ТРАТИТ ДЕНЬГИ: `for:` в ряду GENERATE фабрик-рендера, `build:`
+     над сборкой 3D, чипы PAINT на on-model. Довод целиком — в шапке `ChainRail` и у самого
+     `ColorwaySelect`; коротко: `colorway_id` прогона неизменяем, и цель обязана называться у
+     кнопки, которая её замораживает, а не в ряду «где я нахожусь». Состояние по-прежнему ОДНО
+     (`useColorwayChoice` выше) и раздаётся вниз пропами. */
+  const rail = <ChainRail ctx={ctx} onStepChange={goStep} />;
 
   /* ═══ ONE RETURN, ONE STACK: `SectionStack > [rail, screen]` ═══════════════════════════════════
      The header used to be drawn inside each of three returns — same element, different parents —
@@ -450,19 +443,21 @@ export function StudioTab({
                         />
                       </>
                     )}
-                    {/* ═══ STEP 4 · FABRIC RENDER. `key={colorwayId}` — a REMOUNT on a change of
-                        colourway, and it guards one thing exactly: `useColourDraft` seeds the recipe
-                        ONCE PER MOUNT (`seeded`/`touched` refs — a refetch of the band must not wipe
-                        a half-made choice), and «once per mount» and «anew on a change of colour»
-                        are two different rules. Without the remount the screen named OLIVE would
-                        show ROSSO's recipe. The unsent recipe of ROSSO is lost by a glance at OLIVE —
-                        a price paid once and visibly, not a defect. `colorwayArchived` is the ONE
-                        archive predicate of the studio (`useColorwayChoice`), so the hint and the
-                        refusal cannot part. */}
+                    {/* ═══ STEP 4 · FABRIC RENDER.
+
+                        ⚠ `key={colorway.colorwayId}` СНЯТ (G2-3), И ЭТО ОБЯЗАТЕЛЬНО, А НЕ УБОРКА.
+                        Ремоунт стоял ради одного: `useColourDraft` засевает рецепт ОДИН РАЗ ЗА
+                        МОНТИРОВАНИЕ, и «однажды» ≠ «заново на смене цвета». Теперь селект цели
+                        живёт ВНУТРИ этого экрана — компонент не может ремоунтить сам себя, не
+                        уничтожив состояние собственного органа выбора (список закрылся бы прямо
+                        под пальцем). Второе правило переехало туда, где ему место: `useColourDraft`
+                        на смене цели переселяет ТОЛЬКО цветную половину (hex/code), а ткань и слова
+                        остаются — ткань есть свойство изделия, цвет есть свойство колорвея.
+                        `colorwayArchived` — ЕДИНСТВЕННЫЙ предикат архива студии
+                        (`useColorwayChoice`), поэтому подсказка и отказ не могут разойтись. */}
                     {step === 'render' && (
                       <>
                         <RenderStudio
-                          key={colorway.colorwayId}
                           band={band}
                           techCardId={techCardId}
                           disabled={readOnly}
@@ -471,6 +466,11 @@ export function StudioTab({
                           colorwayRef={colorway.current}
                           colorwayLabel={colorway.label}
                           colorwayArchived={colorway.archived}
+                          /* ЦЕЛЬ ВЫБИРАЮТ ЗДЕСЬ, НО ВЛАДЕЕТ ЕЮ КОМПОЗИТОР: вниз едет список
+                             колорвеев карточки и ТОТ ЖЕ САМЫЙ сеттер, которым пользуются чипы
+                             on-model. Второго состояния не заводится ни на одном экране. */
+                          colorways={colorway.colorways}
+                          onColorwayChange={colorway.setColorwayId}
                         />
                         {/* J-18: the history filters to fabric renders by default; E-22: closed. */}
                         <GenerationHistory
@@ -496,6 +496,10 @@ export function StudioTab({
                           colorwayId={colorway.colorwayId}
                           colorwayLabel={colorway.label}
                           colorwayArchived={colorway.archived}
+                          /* `build:` над сборкой — тот же единственный сеттер. Список экран сузит
+                             сам: собирать можно только из колорвеев, у которых стоит FRONT. */
+                          colorways={colorway.colorways}
+                          onColorwayChange={colorway.setColorwayId}
                         />
                         {/* E-23: closed by default. */}
                         <GenerationHistory

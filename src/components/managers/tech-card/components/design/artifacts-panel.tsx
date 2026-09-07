@@ -1936,6 +1936,9 @@ export function ArtifactsPanel({
                       : SELECT_MARK_NOT_STATED
                 }
                 chosenPending={setPictureSelected.isPending}
+                /* ПИЛЮЛЯ `chosen` — ТЕМ ЖЕ ПРИЗНАКОМ, ЧТО И ДВЕРЬ (находка 3): список, у которого
+                   выбор выносит слот верстака, не рисует метку выбора вовсе. */
+                marksChosen={marksChosen}
                 sayPrints={kind !== 'flat'}
                 halo={kind !== 'flat'}
               />
@@ -2389,6 +2392,7 @@ function PlateGrid({
   onToggleChosen,
   chosenInert,
   chosenPending,
+  marksChosen,
   sayPrints,
   halo,
 }: {
@@ -2449,6 +2453,19 @@ function PlateGrid({
   /** A write of the mark is in flight — the doors wait for the band to answer. */
   chosenPending?: boolean;
   /**
+   * ═══ ЧИТАЕТ ЛИ ЭТОТ СПИСОК ПОМЕТКУ `chosen` ВООБЩЕ (Fable r3-w1, находка 3) ══════════════════
+   *
+   * Пилюля `chosen` на плите рисовалась по одному `plate.chosen`, без оглядки на то, значит ли эта
+   * пометка что-нибудь ЗДЕСЬ. На флэтах и рендерах она не значит ничего: выбор там — это стояние
+   * в слоте верстака, дверь `select`/`un-select` снята по этому же доводу (`marksChosen` у
+   * панели), и сегмент по пометке не сужается. Зелёная пилюля называла выбор, которого этот
+   * список не читает, а снять её человеку было нечем — «ложь на экране» в чистом виде.
+   *
+   * Это ТОТ ЖЕ признак, которым гейтится дверь, а не второй расчёт рядом: пилюля и дверь обязаны
+   * говорить об одном, иначе однажды разойдутся молча.
+   */
+  marksChosen: boolean;
+  /**
    * Сказать на лице плиты, что она ПЕЧАТАЕТСЯ. Ставится в сегментах, где это удивляет (рендеры и
    * 3D): лист — это медиа карточки, и тех-пак печатает их все. Прежний проп `offSheet` утверждал
    * обратное и был неправдой — см. довод у пилюли.
@@ -2498,7 +2515,14 @@ function PlateGrid({
         }
         const { plate, index } = cell;
         if (plate.modelOnly) {
-          return <ModelPlateTile key={plate.key} plate={plate} onView3d={onView3d} />;
+          return (
+            <ModelPlateTile
+              key={plate.key}
+              plate={plate}
+              marksChosen={marksChosen}
+              onView3d={onView3d}
+            />
+          );
         }
         const drawable = canPlaceOn(plate);
         const mine = calloutsOf(plate.mediaId);
@@ -2562,7 +2586,7 @@ function PlateGrid({
                 </Text>
               {plate.origin === 'bench' && <Pill tone='mut'>bench</Pill>}
               {plate.origin === 'run' && <Pill tone='mut'>not on the card</Pill>}
-              {plate.chosen && <Pill tone='ok'>chosen</Pill>}
+              {marksChosen && plate.chosen && <Pill tone='ok'>chosen</Pill>}
               {/* КАДР ТОЛЬКО ДЛЯ ПОКАЗА ГОВОРИТ ЭТО САМ (D-24): голубая пилюля — «нужен человек»,
                   и здесь это верно буквально: в промпт этот кадр не уедет ни при каком жесте. */}
               {plate.displayOnly && (
@@ -2972,9 +2996,12 @@ function ModelGlyph({ className }: { className?: string }): JSX.Element {
  */
 function ModelPlateTile({
   plate,
+  marksChosen,
   onView3d,
 }: {
   plate: DocumentPlate;
+  /** Читает ли эта плита пометку `chosen` — довод у одноимённого пропа `PlateGrid`. */
+  marksChosen: boolean;
   onView3d: (plate: DocumentPlate) => void;
 }) {
   return (
@@ -2997,7 +3024,7 @@ function ModelPlateTile({
             {plate.name}
           </Text>
           <Pill tone='mut'>3d file</Pill>
-          {plate.chosen && <Pill tone='ok'>chosen</Pill>}
+          {marksChosen && plate.chosen && <Pill tone='ok'>chosen</Pill>}
         </div>
         {plate.note ? (
           <span className={cn(PLATE_BADGE_CHIP, TILE_QUIET)}>

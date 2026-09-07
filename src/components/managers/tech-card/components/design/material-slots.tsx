@@ -14,7 +14,7 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
-import { EmptyState } from './core';
+import { EmptyState, GROUP_SEAM } from './core';
 import {
   BoardMovedPill,
   ProvenancePill,
@@ -279,6 +279,8 @@ export function MaterialSlots({
          он относится к чему-то конкретному. `moodboard moved on` остаётся: это не украшение
          счёта, а предупреждение, что доска ушла вперёд написанного. */
       action={<BoardMovedPill techCardId={techCardId ?? 0} />}
+      /* ШОВ ОДИН НА ВЕСЬ ШАГ MOOD (r3b, M-1) — `GROUP_SEAM`, 20px, как у соседних блоков шага. */
+      className={GROUP_SEAM}
     >
       <div data-b16-slots=''>
         {lines.length === 0 ? (

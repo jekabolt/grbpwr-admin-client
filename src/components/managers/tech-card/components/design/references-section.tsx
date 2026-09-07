@@ -14,7 +14,6 @@ import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { Tiles } from 'ui/components/tiles';
-import { revealField } from 'utils/field-errors';
 
 import type { TechCardFormData } from '../schema';
 import { detailKeyLabel } from '../tech-card-options';
@@ -38,7 +37,6 @@ import { RecalledRunPrompt } from './history-recall';
 import { AskModal, EmptyState, GROUP_GAP, PlaceOrDrawCell } from './core';
 import { VectorModal } from './modals';
 import { PictureTile } from './picture-tile';
-import { LockBar } from './render/generate-row';
 import { pictureOffersSplit } from './render/model';
 import { useSplitToInput } from './split-to-input';
 import { DETAIL_VIEW, SILHOUETTE_VIEWS, normaliseViewKey, viewLabel } from './views';
@@ -668,16 +666,6 @@ export function ReferencesSection({
   const plates = useMemo(() => filledFlatSlots(band), [band]);
   const sentIds = new Set(sentFlatSlotIds(flatSend, plates.map((p) => p.slotId)));
 
-  /**
-   * ДВЕРЬ «GENERAL INFORMATION ›» лок-полосы — тем же механизмом, которым отказ сейва ведёт к полю:
-   * `revealField('fit')` не находит якоря на этом шаге, спрашивает документ, и композитор
-   * (`studio-tab.tsx`, `stepOfField`) переключает студию на MOODBOARD и мигает полем FIT. Второго
-   * писателя `?step=` здесь не заводится.
-   */
-  const gotoGeneral = () => {
-    if (!revealField('fit')) showMessage('general information is not on this screen', 'error');
-  };
-
   return (
     <Section
       title='input — references'
@@ -897,7 +885,10 @@ export function ReferencesSection({
                 <InertDoor
                   label={<ControlLabel>from construction ▸</ControlLabel>}
                   size='sm'
-                  reason='no construction text yet — fill GENERAL INFORMATION or CONSTRUCTION above'
+                  /* ПОВОД НАЗЫВАЕТ ШАГ, А НЕ СТОРОНУ СВЕТА. «above» было неправдой: GENERAL
+                     INFORMATION и CONSTRUCTION живут на шаге MOODBOARD (`FIELD_STEP`), а не выше
+                     на этом экране, и человек искал бы их здесь. */
+                  reason='no construction text yet — fill GENERAL INFORMATION or CONSTRUCTION on the MOODBOARD step'
                 />
               )}
               {/* ТУМБЛЕР ПЛИТ — ЧИП РОСТОМ С КНОПКУ (`ROW_CONTROL_STYLE`): состояние `on` несёт
@@ -924,15 +915,21 @@ export function ReferencesSection({
                 also send the flat slots
               </Chip>
             </div>
-            {!readOnly && !aspectText && (
-              <LockBar reason='no construction text yet · fill GENERAL INFORMATION or CONSTRUCTION above'>
-                {/* РАЗМЕР ДВЕРИ — РАЗМЕР ВСЕХ ОРГАНОВ ЭТИХ РЯДОВ (r3 п.5): `xs` рядом с `sm`
-                    читался как ещё одна, третья кнопка другого рода. */}
-                <Button variant='secondary' size='sm' onClick={gotoGeneral}>
-                  <ControlLabel>general information ›</ControlLabel>
-                </Button>
-              </LockBar>
-            )}
+            {/* ═══ ЧЕТВЁРТОЙ ПОЛОСЫ ЗДЕСЬ БОЛЬШЕ НЕТ (Fable r3-w1, находка 2) ═══════════════════
+                Под этим рядом стояла LOCKED-полоса «no construction text yet · general
+                information ›» — и стояла она на КАЖДОЙ карточке без текста конструкции, то есть
+                почти на каждой свежей. Ряды после WORDS обещаны владельцем ТРЕМЯ (r3 п.5), а это
+                была четвёртая, другого роста, ради повода, который уже сказан в двух шагах левее:
+                погашенная дверь `from construction ▸` несёт его своим `data-inert`/`title`. Тем же
+                доводом отсюда ушла полоса «no flat slots are filled» — причина переехала в `title`
+                чипа плит. Один повод говорится один раз.
+
+                ⚠ ЦЕНА НАЗВАНА: вместе с полосой ушёл ЖЕСТ — прыжок на GENERAL INFORMATION одним
+                нажатием (`gotoGeneral` → `revealField('fit')` → студия сама переключается на
+                MOODBOARD). Замены ему на этом экране нет; остаётся рельс студии сверху, и повод
+                теперь называет шаг по имени, а не «above» — блоки GENERAL INFORMATION и
+                CONSTRUCTION стоят не выше на этом экране, а на ДРУГОМ шаге (`core/chain.ts`,
+                `FIELD_STEP`: `fit`/`details` → `mood`). */}
             {/* ═══ ПЛИТЫ — ЛЕНТА МИНИАТЮР, И ТОЛЬКО ПРИ ВКЛЮЧЁННОМ ТУМБЛЕРЕ (r3 п.5) ══════════
                 Владелец, r2 (J-10): «сами картинки должны быть в тамбнейлах … с серой пеленой
                 поверх типо инэктив и должны убираться по кнопке». Здесь стоял ряд ТЕКСТОВЫХ

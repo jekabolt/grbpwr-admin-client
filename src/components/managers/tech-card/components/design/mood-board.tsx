@@ -19,7 +19,7 @@ import { create } from 'zustand';
 import type { TechCardFormData } from '../schema';
 import { CalloutRail, CalloutRowBody, type CalloutRailRow } from './callout-rail';
 import { serverSpeaksDesign } from './capability';
-import { Counter } from './core';
+import { Counter, GROUP_SEAM } from './core';
 import { ConstructionDraft } from './head/construction-draft';
 import { VectorModal } from './modals';
 import { useMoodCallouts } from './mood-callouts';
@@ -580,7 +580,11 @@ export function MoodBoard({
           id='mb-board'
           title='moodboard'
           question='— the mood, not the prompt'
-          className='min-w-0 flex-1'
+          /* ШОВ ОДИН НА ВЕСЬ ШАГ (r3b, M-1) — `GROUP_SEAM` из `./core`, 20px. До него блоки доски,
+             указаний, описания, общих сведений и слотов держали штатные `space-y-stack` (10px), а
+             соседние CONSTRUCTION DRAFT и CONSTRUCTION — 20px: один и тот же стык читался двумя
+             разными весами через блок. Свой размер тут не заводится. */
+          className={cn('min-w-0 flex-1', GROUP_SEAM)}
           action={
             <>
               {/* СЧЁТ — ПИЛЮЛЕЙ В ШАПКЕ (`7 of 12 pictures`), как в макете; ноль — тон «не хватает». */}
@@ -865,7 +869,8 @@ export function MoodBoard({
                 {railRows.length} on the board
               </Pill>
             }
-            className='lg:sticky lg:top-gutter lg:w-[340px] lg:shrink-0'
+            /* Тот же шов, что у доски слева: панель стоит с ней в одном ряду, и разойтись им нельзя. */
+            className={cn('lg:sticky lg:top-gutter lg:w-[340px] lg:shrink-0', GROUP_SEAM)}
           >
             <CalloutRail
               rows={railRows}
@@ -909,7 +914,7 @@ export function MoodBoard({
             печатается в тех-паке и входит в подпись DESIGN. Это по-прежнему НЕ описание изделия для
             генерации: то — `garment description` блока референсов, уходит в каждый прогон; этот
             текст генерация не видит (W-15), его читают человек, бумага и черновик ниже. */}
-        <Section title='description' question='— what this thing is'>
+        <Section title='description' question='— what this thing is' className={GROUP_SEAM}>
           {/* `data-field` — ЯКОРЬ ДВЕРИ, А НЕ УКРАШЕНИЕ. `revealField` (`utils/field-errors.ts:226`)
               ищет поле по `[data-field="<путь>"]`, и этот штамп ставит `FormItem` из `ui/form`. Здесь
               стоит ГОЛАЯ `Textarea`, потому что поле переехало из формы на доску (V-16) — вместе с

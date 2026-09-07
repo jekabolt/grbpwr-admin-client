@@ -28,6 +28,29 @@ import type { SilhouetteView } from '../views';
  * without `??`.
  */
 
+/**
+ * ═══ ОСЬ 0 НА ЭКРАНЕ ЗОВЁТСЯ `sample` (D1, G2-1) ═══════════════════════════════════════════════
+ *
+ * Владелец: «колорвей появляется только на этапе FABRIC RENDER, но не каждый фабрик-рендер значит,
+ * что у нас будет такой колорвей — возможно, мы просто семплимся». Верстак `colorway_id = 0` — это
+ * и есть «просто семплимся»: своё, законное и вечное место, а не отсутствие ответа. Слово
+ * «no colourway» называло его дырой, и пустой верстак читался как поломка.
+ *
+ * ⚠ ОДНО НАПИСАНИЕ НА ВСЮ ПОЛОСУ, И ЖИВЁТ ОНО ЗДЕСЬ — в чистом модуле, который читают и ворота, и
+ * оба генеративных экрана, и селект. Второе написание в органе разошлось бы с отказом молча: экран
+ * говорил бы «sample», а отказ — «no colourway», и человек искал бы два разных верстака.
+ *
+ * ⚠ ТОЛЬКО НА ЭКРАНЕ. В коде ось остаётся `COLORWAY_NONE`: рядом живёт СВОЯ сущность `sample`
+ * (таблица 0108, физические образцы со своим `colorway_id`), и второе имя в коде свело бы две
+ * разные вещи в одно слово.
+ */
+export const SAMPLE_WORD = 'sample';
+
+/** Как зовётся адресуемый верстак: имя колорвея либо `sample` у оси 0. */
+export function benchName(colorwayLabel?: string): string {
+  return (colorwayLabel ?? '').trim() || SAMPLE_WORD;
+}
+
 /* ─────────────────────────── what kind of picture is this ─────────────────────────── */
 
 /**
@@ -243,6 +266,42 @@ export function threedSides(
   colorwayId: number = COLORWAY_NONE,
 ): BenchSide[] {
   return benchSides(band, 'render', colorwayId);
+}
+
+/**
+ * ═══ ИЗ ЧЕГО МОЖНО СОБРАТЬ 3D — КОЛОРВЕИ, У КОТОРЫХ СТОИТ FRONT (G2-7) ════════════════════════
+ *
+ * Владелец: «в 3D выбираем колорвей из размеченных в SIDES». Сервер собирает поворот из render-
+ * слотов РОВНО ЭТОГО колорвея (`designSelectBench`) и без фронта отказывает бесплатно
+ * (`no_front_render`), поэтому список, предлагающий колорвей без фронта, продавал бы отказ.
+ *
+ * ⚠ СЧИТАЕТСЯ ПО `band.bench`, А НЕ ПО `render_bench_colorway_ids`, И РАЗНИЦА НЕСУЩАЯ. Серверное
+ * множество отвечает «занят ХОТЯ БЫ ОДИН слот» — карточка, у которой под OLIVE лежит только
+ * спинка, в нём есть, а собрать её нельзя. Полоса читается ЦЕЛИКОМ (`benchColorwayId: 0`), то есть
+ * все строки всех осей уже здесь и второго запроса не нужно.
+ *
+ * ПОРЯДОК — ТОТ ЖЕ, ЧТО В СЕЛЕКТЕ: `sample` первым (ось 0 — законный вход 3D на тех же правах),
+ * затем колорвеи В ПОРЯДКЕ КАРТОЧКИ. Порядок, выведенный из порядка слотов, менялся бы от того,
+ * какую сторону положили раньше.
+ */
+export function threedColorwayOptions(
+  band: GetDesignBandResponse,
+  colorways: readonly { colorwayId?: number }[] = [],
+): number[] {
+  const withFront = new Set<number>();
+  for (const row of band.bench ?? []) {
+    if (benchKindOf(row) !== 'render') continue;
+    if (normaliseViewKey(row.viewKey) !== 'front') continue;
+    if (!row.picture && !(row.pictureId ?? 0)) continue;
+    withFront.add(colorwayOf(row));
+  }
+  const out: number[] = [];
+  if (withFront.has(COLORWAY_NONE)) out.push(COLORWAY_NONE);
+  for (const c of colorways) {
+    const id = colorwayOf(c);
+    if (id > 0 && withFront.has(id)) out.push(id);
+  }
+  return out;
 }
 
 /**
@@ -810,8 +869,8 @@ export function threedGate(
    * GENERATE — и безымянный отказ «the render slots are empty» на ней читается как поломка, потому
    * что человек своими глазами видел эти рендеры минуту назад. Имя превращает поломку в адрес.
    *
-   * Пусто — это `no colourway`, законный безымянный верстак `0`; тогда работают прежние
-   * формулировки слово в слово, и выдумывать ему имя («unattributed») здесь незачем.
+   * Пусто — это ось `0`, и она НЕ безымянна с круга r3: на экране её зовут `sample` (`benchName`),
+   * тем же словом, что стоит пунктом селекта. Выдумывать «unattributed» по-прежнему незачем.
    */
   const named = colorwayLabel.trim();
   /**
@@ -852,9 +911,12 @@ export function threedGate(
        строкой. `next: 'render'` при этом жив: по нему полоса и узнаёт, что молчать. */
     return {
       ok: false,
-      reason: named
-        ? `the render slots of ${named} are empty — 3D is built from this colourway’s own bench and needs at least FRONT. Fill it on FABRIC RENDER, with ${named} picked`
-        : 'the render slots are empty — 3D needs at least FRONT. Fill it on FABRIC RENDER',
+      /* ⚠ БЕЗЫМЯННЫЙ ВЕРСТАК ТЕПЕРЬ ТОЖЕ НАЗЫВАЕТСЯ (G2-1): «the render slots are empty» без имени
+         на карточке с несколькими осями не говорило, О КАКОМ верстаке речь, а `sample` — это его
+         настоящее имя на экране, то же самое, что стоит пунктом в селекте `build:`. */
+      reason:
+        `the render slots of ${benchName(named)} are empty — 3D is built from this bench alone and ` +
+        `needs at least FRONT. Fill it on FABRIC RENDER, with ${benchName(named)} picked`,
       // НЕЧЕГО СТАВИТЬ — СНАЧАЛА СДЕЛАТЬ. Это `no_fabric_render` сервера, слово в слово по
       // предмету: на верстаке пусто.
       next: 'render',
@@ -892,8 +954,7 @@ export function threedGate(
            (E-16), всякий вызов приходит с нулём» пережила свою причину: орган вернулся в ряд
            представлений, `colorwayId` у этого вызова теперь бывает любым, и «the render bench»
            без имени на карточке с несколькими цветами не называет, О КАКОМ из верстаков речь. */
-        (named ? `the render bench of ${named} holds renders, ` : 'the render bench holds renders, ') +
-        'but not on FRONT — ' +
+        `the render bench of ${benchName(named)} holds renders, but not on FRONT — ` +
         'and FRONT is the one side 3D cannot do without: the provider is handed it as the primary ' +
         'view and rejects a build that has none. Put a render into the FRONT slot on FABRIC RENDER. ' +
         'Nothing is reserved and nothing is charged until it is there',

@@ -261,37 +261,30 @@ function doorLabel(door: StepId): string {
   }
 }
 
+/**
+ * ═══ У РЕЛЬСА БОЛЬШЕ НЕТ СЛОТА `action`, И ЭТО ПЕРЕЕЗД ОРГАНА, А НЕ ЕГО СНЯТИЕ (G2-2) ══════════
+ *
+ * Здесь стоял `ColorwaySelect` — «чей это рендер», — и довод был про МЕСТО: единственный ряд,
+ * который переживает смену экрана. Довод не учёл того, что этот выбор решает: `colorway_id`
+ * прогона НЕИЗМЕНЯЕМ, значит цель — часть покупки. Спрятанная на рельсе, она оставляла человека
+ * с историей, где ROSSO навсегда записан семплом; сам рельс при этом отвечает на вопрос «где я»,
+ * а не «за кого я плачу».
+ *
+ * Куда уехало: `for:` в ряду GENERATE фабрик-рендера, `build:` над сборкой 3D, чипы в PAINT на
+ * on-model. У каждого экрана орган ровно один (владелец: «не делай разные кнопки для одного и
+ * того же»), и состояние по-прежнему ОДНО — `useColorwayChoice` у композитора.
+ *
+ * Проп удалён, а не оставлен пустым: щель без вызывающих — это дверь, о которой следующий читатель
+ * решит, что она нужна, и повесит на неё второй орган выбора.
+ */
 export function ChainRail({
   ctx,
   onStepChange,
-  action,
 }: {
   /** What the chain reads, `now` filled in — see `useChainCtx`. */
   ctx: ChainCtx;
   /** A cell was pressed. The composer holds the step (`S.step` of the prototype) and switches. */
   onStepChange: (id: StepId) => void;
-  /**
-   * ═══ THE RIGHT END OF THE ROW — ONE FILTER, HANDED IN BY THE COMPOSER (round 19, C1) ═══════════
-   *
-   * `ColorwaySelect` — «whose render is this» — stands HERE, and for three reasons none of which is
-   * about screen space:
-   *   · this is the ONLY row that survives a change of view. The eye comes back here to change the
-   *     representation, and «in which colour» is a question of the same class as «in which view»;
-   *   · the render bench and the 3D gate are keyed by one number, so it must be named in one place,
-   *     not once per screen;
-   *   · on the bench itself (`FabricRenderSlots`) it cannot stand: that is the LAST block of the
-   *     render screen (J-25), and the colourway must be known before the recipe seeds above it.
-   *
-   * WHY A SLOT AND NOT AN IMPORT OF THE PICKER. The rail decides nothing about the studio: it draws
-   * the row and reports a click. Were it to import `useColorwayChoice`, the axis would have TWO
-   * owners — the defect round 16 removed by demolition. The slot takes a ready node and does not
-   * know what is in it; that it is empty on FLAT and PATTERN is the composer's decision.
-   *
-   * `shrink-0` is load-bearing: the cells are `flex-1`, and without it the row would hand the filter
-   * a share of the width taken from the last cell. The mock-up has no such organ on its rail; it is
-   * the product's, and it keeps the place it had.
-   */
-  action?: JSX.Element | null;
 }): JSX.Element {
   // Every cell opens its step; the one on display is drawn as a place, not a control (`StepCell`).
   function open(step: Step): () => void {
@@ -328,19 +321,13 @@ export function ChainRail({
             grow, shrink AND a zero basis; `min-w` is the floor under the longest name). Then the
             ASIDE on a full-width row of its own, pressed to the first (`border-t-0`): ON MODEL is
             not a link of the chain — a row of equal cells would claim it is a step — so it stands
-            apart, without a number, and does not count in «N of 6 steps». The filter slot keeps
-            its own width at the right end of the first row. */}
+            apart, without a number, and does not count in «N of 6 steps». */}
         <div className='overflow-x-auto'>
           {/* `min-w-max`: below the floor both rows are as wide as the six cells, so the aside's
               outline stays under the first row's while the block scrolls. */}
           <div className='min-w-max'>
             <div className='flex items-stretch border border-borderColor'>
               {STEPS.map((s, i) => cell(s, i > 0 ? 'border-l border-hairline' : undefined))}
-              {action && (
-                <div className='flex shrink-0 items-center border-l border-hairline px-2.5 py-1.5'>
-                  {action}
-                </div>
-              )}
             </div>
             <div className='flex items-stretch border border-t-0 border-borderColor'>
               {cell(ASIDE)}

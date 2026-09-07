@@ -27,17 +27,18 @@ import {
   fabricUses,
   unmanagedAssets,
 } from '../assets/model';
-import { ColourPicker } from '../assets/colour-picker';
 import { useAssetWrites } from '../assets/use-assets';
 import { PartsRow } from '../colour-plan/parts-row';
 import type { ColourPlanWrites } from '../colour-plan/use-colour-plan';
 import { InertDoor } from '../bench-slot';
 import { GROUP_GAP, GROUP_SEAM } from '../core';
-import { PictureTile } from '../picture-tile';
+import { PictureTile, TILE_CORNER, TILE_QUIET } from '../picture-tile';
+import { PantonePicker } from '../../pantone-picker';
+import { PANTONE_SWATCHES, findPantone } from '../../pantone-swatches';
 import { benchSides } from './model';
 import { ClothIsRow } from './cloth-is';
 import type { ColourDraft } from './drafts';
-import { COLOUR_NAME_MAX, fabricStatement, hexIsPaintable } from './model';
+import { fabricStatement, hexIsPaintable } from './model';
 
 /**
  * TEXTURE & COLOUR — what a render is clothed and coloured with, and the ONLY place on the band
@@ -663,117 +664,152 @@ function TextureGrid({
 }
 
 /**
- * ═══ ЦВЕТ — ТА ЖЕ ПИКТОГРАММА, ТОЛЬКО ЗАМЕШАННАЯ РУКАМИ ═══════════════════════════════════════
+ * ═══ ЦВЕТ ВЫБИРАЮТ ПАНТОНОМ, И ПАНТОН — ЭТО И ЕСТЬ ОПИСАНИЕ (r3 п.23/24) ══════════════════════
  *
- * ПОСЛЕДНЯЯ КЛЕТКА СЕТКИ ТЕКСТУР (B-22), а не сосед рядом с ней: на этом ряду текстура и цвет —
- * ОДНОРОДНЫЕ предметы («квадрат, на который можно посмотреть»), и это ровно то, чем они являются
- * для промпта. Однородные предметы стоят в одной сетке — тогда их квадраты одного роста ПО
- * ПОСТРОЕНИЮ, а не по совпадению двух чисел, которое и разъехалось. Незакрашиваемое значение —
- * ПОЛОСАТОЕ, никогда не чёрное и не белое: квадрат, закрасивший неизвестный цвет, врёт так, что
- * глаз верит целиком.
+ * Владелец, дословно: «CLOTH AND COLOUR: цвет выбирается из пантона; описания-текста цвета не
+ * должно быть — пантон и есть описание» и «пустое состояние: два квадрата — паттерн и цвет
+ * (клик → пантон)».
  *
- * ПИКЕР ТОТ ЖЕ САМЫЙ (`assets/colour-picker`) — квадрат насыщенности, полоса тона, поле hex,
- * пипетка там, где браузер её даёт, и плашки рецептов, которыми ЭТА карточка уже печаталась.
- * «Нормальный пикер цвета» из E-8 — это он, и второго здесь не заводится: два органа на один
- * предмет расходятся первой же правкой.
+ * ЧТО ЗДЕСЬ СТОЯЛО, И ПОЧЕМУ ЭТО БЫЛА КОЛОНКА ИЗ ЧЕТЫРЁХ ОРГАНОВ НА ОДИН ВОПРОС: квадрат с
+ * пипеточным пикером (тон + насыщенность + поле hex + плашки прошлых рецептов), под ним ПОЛЕ
+ * ИМЕНИ ЦВЕТА («dusty rose»), под ним строка с напечатанным hex («#b3202a»), а рядом с ней кнопка
+ * CLEAR. Четыре предмета, из которых человек трогает один, — и ни один из четырёх не назывался
+ * так, как цвет зовут в производстве.
  *
- * ИМЯ ЦВЕТА — ВТОРАЯ ПОЛОВИНА ОДНОГО ЗАЯВЛЕНИЯ, а не отдельная настройка: промпт цитирует их
- * ПАРОЙ («colourway dusty rose — the exact value is #a41f22»), поэтому поле стоит в той же
- * колонке, под своей плиткой. Поля hex здесь НЕТ намеренно: оно живёт внутри пикера, и второй
- * вход одной величины на одном экране — тот самый дефект, который уже стоил купленного прогона.
+ * ЧТО СТАЛО — ОДИН КВАДРАТ И ОДНА СТРОКА ПОД НИМ:
+ *   · КВАДРАТ ЕСТЬ ДВЕРЬ. Вся его поверхность открывает `PantonePicker` — тот же орган, которым
+ *     пантон выбирают на PATTERN и на ON MODEL. Второго пикера цвета на экране больше нет:
+ *     произвольный тон, набранный пипеткой, дайхаус не сварит, а два органа на один предмет
+ *     расходятся первой же правкой.
+ *   · КОД — ПОД КВАДРАТОМ, мелко. Это и есть «описание цвета»: «18-1664 TCX» говорит и цвет, и
+ *     как его повторить, чего не говорил ни «dusty rose», ни «#b3202a».
+ *   · ПОЛЕ ИМЕНИ СНЯТО ЦЕЛИКОМ, и знание не потеряно: имя цвета в рецепте — это ИМЯ КОЛОРВЕЯ
+ *     (H-8), и оно теперь подставляется у двери прогона (`RenderStudio`), где известна цель. Под
+ *     `sample` имени нет вовсе — и это правда, а не пропуск: у оси 0 нет колорвея, чтобы её так
+ *     звать.
+ *   · CLEAR СНЯТ КАК КНОПКА и вернулся `✕` в углу квадрата, по наведению и по фокусу — той же
+ *     грамматикой, что у всех плиток полосы (`TILE_QUIET` / `TILE_CORNER`). Ряд перестал носить
+ *     кнопку, которая нужна раз в сессию.
+ *
+ * ⚠ ЧТО ИМЕННО УЕЗЖАЕТ НА ПРОВОД — `hex`, А НЕ КОД (D7). Номер красильни модель прочтёт как
+ * бессмысленный жетон: TCX-таблиц она не знает. `renderprompt.go` печатает «colourway <имя> — the
+ * exact value is <hex>», и обе половины этой фразы собираются в `RenderStudio`. Ссылка остаётся на
+ * экране, где по ней сверяются с банкой краски; поле рецепта под неё — бэкенд-задача B8.
  */
-function ColourTile({
-  band,
-  state,
-  disabled,
-}: {
-  band: GetDesignBandResponse;
-  state: ColourDraft;
-  disabled?: boolean;
-}): JSX.Element {
-  const recipe = state.recipe;
-  const stated = fabricStatement(recipe);
-  const paintable = hexIsPaintable(recipe.hex);
 
-  const recent = useMemo(
-    () =>
-      (band.colourRecipes ?? [])
-        .map((r) => ({ hex: (r.hex ?? '').trim(), code: (r.code ?? '').trim() }))
-        .filter((r) => hexIsPaintable(r.hex)),
-    [band.colourRecipes],
-  );
+/**
+ * ОБРАТНОЕ ЧТЕНИЕ ССЫЛКИ ПО ЦВЕТУ — И ОНО НАЗВАНО ПРИБЛИЖЕНИЕМ ВСЛУХ.
+ *
+ * Черновик помнит ссылку, которой цвет ВЫБРАЛИ (`draft.pantone`), но рецепт прошлого прогона её не
+ * несёт (поля нет на проводе — B8). Тогда экран читает её обратно по hex: если ровно такой свотч
+ * в наборе есть, его код и печатается. Совпадение hex у двух кодов теоретически возможно, поэтому
+ * это ЧТЕНИЕ, а не источник истины: на провод в обоих случаях уезжает hex, и он один.
+ */
+function pantoneOfHex(hex: string): string {
+  const want = hex.trim().toLowerCase();
+  if (!want) return '';
+  return PANTONE_SWATCHES.find((s) => s.hex.toLowerCase() === want)?.code ?? '';
+}
+
+/**
+ * ⚠ ТРИГГЕР ПИКЕРА РАСТЯНУТ НА ВЕСЬ КВАДРАТ, И ЭТО СДЕЛАНО КЛАССАМИ, А НЕ ВТОРЫМ ПИКЕРОМ.
+ *
+ * `PantonePicker` рисует своё лицо сам — маленький чип «код ▾», и трогать его нельзя: он
+ * принадлежит зоне пантона и стоит ещё на трёх экранах. Нужен же ОДИН орган: квадрат, по которому
+ * кликают. Поэтому кнопка триггера растягивается на всю клетку, а её собственное лицо уходит в
+ * `sr-only` — читалка по-прежнему называет орган («18-1664 TCX» или «+ colour»), глаз видит сам
+ * цвет, а фокус остаётся видимым обводкой на кнопке (DESIGN.md: у каждого органа видимый
+ * `focus-visible`).
+ *
+ * Специфичность здесь несущая: `.wrapper button > span` — это класс плюс два типа, то есть строго
+ * выше одиночного `bg-bgColor` самого чипа. Порядок правил на это не влияет (память
+ * `cn-twmerge-eats-bare-outline`: одинаковая специфичность решается порядком — здесь она разная).
+ */
+const PICKER_OVER_TILE =
+  'absolute inset-0 z-0 [&_button]:size-full ' +
+  '[&_button:focus-visible]:outline [&_button:focus-visible]:outline-2 ' +
+  '[&_button:focus-visible]:-outline-offset-2 [&_button:focus-visible]:outline-textColor ' +
+  '[&_button>span]:sr-only';
+
+function ColourTile({ state, disabled }: { state: ColourDraft; disabled?: boolean }): JSX.Element {
+  const recipe = state.recipe;
+  const hex = (recipe.hex ?? '').trim();
+  const paintable = hexIsPaintable(recipe.hex);
+  /** Ссылка, которую печатает строка под квадратом: сначала память жеста, потом чтение по цвету. */
+  const reference = state.pantone.trim() || pantoneOfHex(hex);
+  const stated = paintable || !!reference;
 
   return (
     <div
       data-fabric-tile='colour'
-      data-tile-state={stated.colour ? 'filled' : 'empty'}
-      /* ⚠ B-22 · НИ `w-[104px]`, НИ `shrink-0` — И ЭТО НЕ УБОРКА КЛАССОВ. Плитка теперь клетка
-         сетки текстур, а не сосед сетки: ширину ей задаёт ДОРОЖКА (`minmax(104px, 1fr)`), и
-         своё число здесь снова развело бы её с квадратами ткани ровно на разницу между полом
-         дорожки и её настоящим размером — тот самый дефект, на который жаловался владелец.
-         `min-w-0` обязателен: у грид-элемента `min-width:auto`, а внутри есть обрезаемая строка,
-         min-content которой — всё значение целиком; без него плитка вылезла бы на соседнюю. */
-      className='flex min-w-0 flex-col gap-1'
+      data-tile-state={stated ? 'filled' : 'empty'}
+      /* ⚠ B-22 · НИ `w-[104px]`, НИ `shrink-0` — И ЭТО НЕ УБОРКА КЛАССОВ. Плитка — клетка сетки
+         текстур, а не сосед сетки: ширину ей задаёт ДОРОЖКА (`minmax(104px, 1fr)`), и своё число
+         здесь снова развело бы её с квадратами ткани ровно на разницу между полом дорожки и её
+         настоящим размером. `min-w-0` обязателен: у грид-элемента `min-width:auto`, а внутри есть
+         обрезаемая строка. `group` — хозяин тихого угла (`TILE_QUIET` слушает именно его). */
+      className='group flex min-w-0 flex-col gap-1'
     >
-      <ColourPicker
-        hex={recipe.hex ?? ''}
-        disabled={disabled}
-        recent={recent}
-        label='pick the colour of this run'
-        /* ⚠ ПИКЕР — ТИПОВАННЫЙ ВХОД, А НЕ ЭХО. Человек, открывший его и выбравший значение, сделал
-           ОСОЗНАННОЕ заявление; это ранг 2 порядка старшинства, и он обязан пережить последующий
-           выбор ткани. «Производное» — то, что приезжает САМО, а не то, во что ткнули пальцем. */
-        onPick={(hex) => state.typed({ hex })}
-        /* Прошлый рецепт возвращается ЦЕЛИКОМ — значение и имя: плашка обещает пару, которая на
-           карточке была, и вернуть половину значило бы собрать пару, которой не было никогда. */
-        onPickRecent={(hex, code) => state.typed({ hex, code })}
-        face={
-          <span className='relative block w-full'>
-            {paintable ? (
-              <span
-                data-colour-swatch
-                aria-hidden='true'
-                className='block w-full border border-textColor'
-                style={{ aspectRatio: TEXTURE_ASPECT, background: (recipe.hex ?? '').trim() }}
-              />
-            ) : (
-              <span
-                data-colour-swatch
-                style={{ ...PLACEHOLDER_SURFACE, aspectRatio: TEXTURE_ASPECT }}
-                className={`${placeholderClass({ dashed: true })} w-full`}
-              >
-                + colour
-              </span>
-            )}
-            <RoleLabel>colour</RoleLabel>
-            {stated.colour && <InMark />}
+      <span className='relative block w-full'>
+        {paintable ? (
+          <span
+            data-colour-swatch
+            aria-hidden='true'
+            className='block w-full border border-textColor'
+            style={{ aspectRatio: TEXTURE_ASPECT, background: hex }}
+          />
+        ) : (
+          /* НЕЗАКРАШИВАЕМОЕ ЗНАЧЕНИЕ — ПОЛОСАТОЕ, никогда не чёрное и не белое: квадрат,
+             закрасивший неизвестный цвет, врёт так, что глаз верит целиком. */
+          <span
+            data-colour-swatch
+            aria-hidden='true'
+            style={{ ...PLACEHOLDER_SURFACE, aspectRatio: TEXTURE_ASPECT }}
+            className={`${placeholderClass({ dashed: true })} w-full`}
+          >
+            + colour
           </span>
-        }
-      />
-
-      <Input
-        name='design-colour-name'
-        data-colour-name
-        /* ПОДПИСЬ ДЛЯ СКРИНРИДЕРА: `<label for>` в этой колонке нет, а соседнее поле «in words»
-           звучало бы так же — «edit text». */
-        aria-label='colour name'
-        maxLength={COLOUR_NAME_MAX}
-        value={recipe.code ?? ''}
-        disabled={disabled}
-        placeholder='dusty rose'
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => state.typed({ code: e.target.value })}
-      />
-
-      <div className='flex min-w-0 flex-wrap items-center gap-1'>
-        <Text size='nano' variant='label' component='span' className='min-w-0 break-words'>
-          {paintable ? (recipe.hex ?? '').trim() : stated.colour ? 'named, no value' : 'optional'}
-        </Text>
-        {!disabled && stated.colour && (
-          <Button variant='secondary' size='xs' onClick={() => state.clear('colour')}>
-            clear
-          </Button>
         )}
-      </div>
+
+        <span className={PICKER_OVER_TILE}>
+          <PantonePicker
+            name='design-render-colour'
+            value={reference}
+            label='+ colour'
+            disabled={disabled}
+            /* ОДИН ЖЕСТ — ОБЕ ПОЛОВИНЫ: ссылка на экран, её экранный hex на провод. Ссылка, у
+               которой в наборе нет hex (набранный номер дайхауса), красить нечем — квадрат честно
+               остаётся полосатым и печатает код под собой. */
+            onPick={(code) => state.setColour(code, findPantone(code)?.hex ?? '')}
+          />
+        </span>
+
+        <RoleLabel>colour</RoleLabel>
+        {paintable && <InMark />}
+
+        {/* ⚠ СНЯТИЕ ЦВЕТА — УГЛОВОЙ ОРГАН ПЛИТКИ, А НЕ КНОПКА В РЯДУ. Та же формула появления, что
+            у всех тихих углов полосы: наведение ИЛИ фокус внутри плитки, и всегда на устройстве
+            без наведения. Стоит ПОСЛЕ растянутого триггера и выше него по слою — иначе кликом по
+            нему открывался бы пикер. */}
+        {!disabled && stated && (
+          <button
+            type='button'
+            data-colour-clear=''
+            aria-label='take the colour off this run'
+            title='take the colour off this run'
+            onClick={() => state.clear('colour')}
+            className={`absolute right-1 top-1 z-10 ${TILE_QUIET} ${TILE_CORNER}`}
+          >
+            ✕
+          </button>
+        )}
+      </span>
+
+      {/* ПОД КВАДРАТОМ — ССЫЛКА, И БОЛЬШЕ НИЧЕГО. `optional` на пустой клетке говорит то
+          единственное, чего по полосатому квадрату не видно: прогон без цвета законен. */}
+      <Text size='nano' variant='label' component='span' data-colour-ref className='min-w-0 break-words'>
+        {reference || (paintable ? 'no pantone reference' : 'optional')}
+      </Text>
     </div>
   );
 }
@@ -927,7 +963,7 @@ export function Palette({
             state={state}
             disabled={disabled}
             onMakePattern={onMakePattern}
-            trailing={<ColourTile band={band} state={state} disabled={disabled} />}
+            trailing={<ColourTile state={state} disabled={disabled} />}
             /* ⚠ СЕТКА ПЕРЕХОДИТ НА ЯЗЫК ПОКРАСКИ ТОЛЬКО КОГДА КАРТЫ ЕСТЬ, и это не осторожность.
                `assignedTo` заданный, но пустой, переопределяет ВЫБРАННОСТЬ плиток на «носит ли
                она покрашенный цвет» — то есть на карточке с пустым планом обесцветил бы каждый

@@ -50,10 +50,13 @@ import { Section, SectionStack } from 'ui/components/section';
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
-import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ColorwayDeleteControl } from './colorway-delete';
 import { normSourceLabel } from './costing-vocab';
+import { pictureUrl } from './design/bench-slot';
+import { benchSides, type BenchSide } from './design/render/model';
+import { useDesignBand } from './design/use-design-band';
+import { viewLabel } from './design/views';
 import { DxfApplyHint } from './dxf-apply';
 import { KitMarkerHint } from './kit-marker';
 import { MarkerApplyHint } from './marker-apply';
@@ -87,12 +90,7 @@ import { PieceSilhouette } from './piece-silhouette';
 import { TechCardFormData, wireInt } from './schema';
 import type { RecipePieceLink } from './use-fabric-dxf-pieces';
 import { usePieceShapes } from './use-piece-shapes';
-import {
-  createColorwayErrorMessage,
-  recipeSaveErrorMessage,
-  useCreateColorway,
-  useUpdateColorwayRecipe,
-} from './useColorwayRecipe';
+import { recipeSaveErrorMessage, useUpdateColorwayRecipe } from './useColorwayRecipe';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 
 // Пересчёт dxf-нормы по текущим данным (Ф2) — lazy() ровно потому же, почему dxf-apply.tsx лениво
@@ -286,6 +284,46 @@ type RecipeSnapshot = { usages: UsageDraft[] };
 // «колорвей 4127» names nothing anybody can find in the swatch grid.
 function colorwayTitle(cw: common_AdminColorwayRef): string {
   return cw.colorCode?.trim() || cw.baseSku?.trim() || `#${cw.colorwayId}`;
+}
+
+// ═══ ИМЯ КОЛОРВЕЯ — ТО, КАК ЕГО НАЗВАЛ ЧЕЛОВЕК, А НЕ КОД СЛОВАРЯ (D10) ═════════════════════════
+//
+// Колорвей рождается в студии (STUDIO › FABRIC RENDER) кастомным именем — `development.name`,
+// «ROSSO», — а словарный цвет подбирается под SKU и человеку почти ничего не говорит: два разных
+// колорвея законно сидят на одном словарном «BLK». Поэтому имя ведёт, а код идёт мелкой строкой
+// под ним. Фолбэк — ровно `colorwayTitle`: колорвеи, заведённые до кастомных имён, называются
+// кодом, и это честно, а не «без имени».
+function colourwayName(cw: common_AdminColorwayRef): string {
+  return cw.devName?.trim() || colorwayTitle(cw);
+}
+
+// ЦВЕТ КОЛОРВЕЯ: ПАНТОН ПЕРВЫЙ, СЛОВАРЬ — ФОЛБЭК. `dev_hex` — экранное приближение пантона,
+// который дизайнер выбрал при рождении; словарный hex — цвет SKU, подобранный под него. Когда
+// пантона нет (легаси-колорвей), остаётся словарный. Пустая строка нормализуется в undefined,
+// чтобы вызывающий рисовал плейсхолдер, а не чёрный квадрат.
+//
+// Формат `dev_hex` не гарантирован (`#RRGGBB` или голые шесть цифр) — тот же разбор, что у
+// `colourwayHex` в pattern-модели, и он ОДИН на два места нарочно: свотч на плитке и свотч в
+// студии обязаны красить одинаково.
+function colourwaySwatchHex(cw: common_AdminColorwayRef, dictHex?: string): string | undefined {
+  const dev = (cw.devHex ?? '').trim();
+  if (/^#?[0-9a-f]{6}$/i.test(dev)) return dev.startsWith('#') ? dev : `#${dev}`;
+  return dictHex || undefined;
+}
+
+/** Стабильная пустая ссылка: колорвей без строк верстака не должен ремоунтить проп на каждый рендер. */
+const EMPTY_SIDES: readonly BenchSide[] = [];
+
+// ⚠ СБРОС ПРИ СМЕНЕ КАРТОЧКИ ИДЁТ ЭТИМИ КОНСТАНТАМИ, а не свежими литералами: сброс живёт в теле
+// рендера, а `setState` с НОВЫМ пустым объектом каждый раз считается изменением и запускает рендер
+// заново — на карточке без колорвеев это бесконечный цикл, а не «лишний кадр».
+const EMPTY_DELETED: ReadonlySet<number> = new Set();
+const EMPTY_STATUSES: Record<number, RecipeStatus> = {};
+
+/** Лицо плитки — размеченный ПЕРЕДНИЙ рендер колорвея, если он есть на его render-верстаке. */
+function frontRenderUrl(sides?: readonly BenchSide[]): string | undefined {
+  const front = (sides ?? []).find((s) => s.view === 'front')?.picture;
+  return front ? pictureUrl(front) || undefined : undefined;
 }
 
 // THE OPTIMISTIC LOCK, READ AT COMMIT TIME — never at render time. Both colourway writes echo the
@@ -3672,6 +3710,9 @@ function ColorwayRecipeEditor({
   canEdit,
   frozen,
   colorwayPins,
+  renderSides,
+  bandSpeaks,
+  onOpenStudio,
   onStatus,
 }: {
   colorway: common_AdminColorwayRef;
@@ -3718,6 +3759,16 @@ function ColorwayRecipeEditor({
   frozen: boolean;
   /** Пины колорвеев карточки с их ширинами (markerColorways) — вход раскладки комплекта. */
   colorwayPins: readonly MarkerColorway[];
+  /**
+   * Стороны render-верстака ЭТОГО колорвея, посчитанные РОДИТЕЛЕМ из одной полосы (`useDesignBand`
+   * читается на вкладке ровно один раз). Пропом, а не своим чтением: второй наблюдатель того же
+   * ключа на каждом из шести редакторов — шесть подписок ради одного видимого.
+   */
+  renderSides: readonly BenchSide[];
+  /** Сервер вообще отвечает на маршруты полосы. Пусто ≠ «рендеров нет» на старом бинаре. */
+  bandSpeaks: boolean;
+  /** Дверь в студию на шаг FABRIC RENDER. */
+  onOpenStudio: () => void;
   onStatus: (colorwayId: number, status: RecipeStatus) => void;
 }) {
   const save = useUpdateColorwayRecipe(techCardId);
@@ -3739,7 +3790,12 @@ function ColorwayRecipeEditor({
   // карточке, где они лежат в соседнем колорвее и видны на вкладке выкроек.
   const allCardMarkers = useMemo(() => cardMarkers(markers), [markers]);
   const stagingKey = `recipe:${colorwayId}`;
-  const title = colorwayTitle(colorway);
+  // ЗАГОЛОВКИ БЛОКОВ НАЗЫВАЮТ КОЛОРВЕЙ ТАК ЖЕ, КАК ПЛИТКА НАД НИМИ (`colourwayName`). Пока здесь
+  // стоял словарный код, человек нажимал плитку «ROSSO» и читал под ней «BLK · fabrics and
+  // consumption» — два имени одного продукта на одном экране. Код при этом никуда не делся: он
+  // стоит мелкой строкой на плитке, а подтверждение удаления по-прежнему просит напечатать
+  // ИМЕННО ЕГО (там речь о SKU, а не о том, как цвет зовут между собой).
+  const title = colourwayName(colorway);
   const [dirty, setDirty] = useState(false);
   const [labDipStaged, setLabDipStaged] = useState(false);
   // CRITICAL (full-replace): the draft starts from the LIVE read (colorway.usages), never from empty.
@@ -4259,42 +4315,90 @@ function ColorwayRecipeEditor({
           onStagedChange={setLabDipStaged}
         />
       </Section>
+
+      {/* РЕНДЕРЫ — ТОЛЬКО У ОТКРЫТОГО КОЛОРВЕЯ и только если сервер говорит про полосу. Редакторы
+          всех колорвеев смонтированы одновременно и лишь спрятаны атрибутом `hidden`, а спрятанный
+          <img> браузер всё равно грузит: шесть колорвеев по четыре стороны — двадцать четыре
+          снимка ради нуля видимых. `bandSpeaks` отделяет «рендеров нет» от «этот сервер про
+          рендеры не знает» (доктрина `has_fabric_render`): на откатанном бинаре блока нет вовсе,
+          вместо обещания, что размечать нечего. */}
+      {bandSpeaks && active && (
+        <Section
+          title={`${title} · renders`}
+          question='marked on the render bench — read-only here'
+          action={
+            <Button type='button' variant='secondary' size='sm' onClick={onOpenStudio}>
+              open in studio ›
+            </Button>
+          }
+        >
+          <ColorwayRenders sides={renderSides} name={title} />
+        </Section>
+      )}
     </SectionStack>
   );
 }
 
-// One colourway in the swatch grid. The swatch IS the content: full-bleed colour, no outline — an
-// outline around a colour reads as a box rather than as the colour itself.
+// ═══ ОДНА ПЛИТКА КОЛОРВЕЯ (G2-8) ═══════════════════════════════════════════════════════════════
+//
+// Лицо плитки — ПЕРЕДНИЙ РЕНДЕР этого колорвея с верстака студии, если он там размечен: цвет в
+// одежде видно, а не «чем красили», и вкладка перестаёт быть сеткой абстрактных квадратов. Пока
+// рендера нет, лицо — сам цвет во всю плитку (как было), без рамки: рамка вокруг цвета читается
+// как коробка, а не как цвет.
+//
+// ⚠ СВОТЧ ОСТАЁТСЯ ВСЕГДА, отдельной строкой под именем. Он не дубль лица: когда лицо — снимок,
+// свотч единственное место, где виден сам цвет; когда лицо — цвет, свотч стоит РЯДОМ С КОДОМ и
+// говорит, что этот код значит. Одно правило на оба состояния лучше, чем свотч, который то есть,
+// то нет.
 function ColorwayTile({
   colorway,
   hex,
+  frontUrl,
   status,
   selected,
   onSelect,
 }: {
   colorway: common_AdminColorwayRef;
+  /** Пантон колорвея, словарный цвет фолбэком (`colourwaySwatchHex`). */
   hex?: string;
+  /** Передний рендер с render-верстака ЭТОГО колорвея, если сторона `front` размечена. */
+  frontUrl?: string;
   status?: RecipeStatus;
   selected: boolean;
   onSelect: () => void;
 }) {
-  const code = colorwayTitle(colorway);
+  const name = colourwayName(colorway);
+  const code = colorway.colorCode?.trim() || '';
   const count = status?.count ?? colorway.usages?.length ?? 0;
+  const pantone = [colorway.pantone?.trim(), colorway.pantoneSystem?.trim()]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <Tile
       selected={selected}
       onClick={onSelect}
-      name={code}
+      title={name}
       media={
-        hex ? (
+        frontUrl ? (
+          <Media src={frontUrl} alt={`${name} — front render`} aspectRatio='1/1' fit='cover' />
+        ) : hex ? (
           <div className='aspect-square w-full' style={{ backgroundColor: hex }} aria-hidden />
         ) : (
-          <Placeholder aspect='square' label='no hex' />
+          <Placeholder aspect='square' label='no colour' />
         )
       }
     >
-      <div className='mt-1 flex flex-wrap items-center gap-1'>
+      {/* ИМЯ КРУПНО (12px — потолок системы), КОД МЕЛКО. `Tile.name` зашивает 10px, поэтому обе
+          строки пишутся здесь: у имени и кода разный вес, а не разный шрифт. */}
+      <Text className='mt-1.5 truncate font-bold uppercase'>{name}</Text>
+      <span className='mt-1 flex min-w-0 items-center gap-1.5'>
+        <Swatch hex={hex} title={pantone || hex || undefined} />
+        <Text size='micro' variant='label' component='span' className='truncate'>
+          {code || 'no SKU colour'}
+        </Text>
+      </span>
+      <div className='mt-2 flex flex-wrap items-center gap-1'>
         <LabDipPill status={colorway.labDipStatus} />
         {/* A colourway with no recipe is red right here in the grid — you should never have to open
             one to find out it is empty. */}
@@ -4311,102 +4415,42 @@ function ColorwayTile({
   );
 }
 
-// #35 — inline "create colourway": until this existed the recipe editor could only edit EXISTING
-// colourways (techCard.colorways), so making a new one meant leaving for the product manager and
-// coming back (ping-pong). This spins up a minimal DRAFT (colour only, via CreateColorway) without
-// leaving the tech card. It occupies the SAME slot below the grid as a recipe, opened from the
-// dashed `+ colourway` tile.
+// ═══ РЕНДЕРЫ КОЛОРВЕЯ — ЧТЕНИЕ ВЕРСТАКА СТУДИИ, И ТОЛЬКО ЧТЕНИЕ (G2-8) ═════════════════════════
 //
-// KEEPS ITS OWN BUTTON, deliberately — like roles-field (19.5). Creating a colourway is not a draft
-// edit of this card: it mints the row every other panel here then refers to, so it has to exist
-// before the card's Save runs, not with it.
-function CreateColorwayForm({
-  techCardId,
-  usedCodes,
-  onCancel,
-  onCreated,
-}: {
-  techCardId: number;
-  usedCodes: Set<string>;
-  onCancel: () => void;
-  onCreated: (colorwayId?: number) => void;
-}) {
-  const { dictionary } = useDictionary();
-  const { showMessage } = useSnackBarStore();
-  const create = useCreateColorway(techCardId);
-  const [colorCode, setColorCode] = useState('');
-
-  const availableColors = (dictionary?.colors ?? []).filter((c) => !c.archived && c.code);
-  const picked = availableColors.find((c) => c.code === colorCode);
-
-  const submit = () => {
-    if (!colorCode) {
-      showMessage('Pick a colour', 'error');
-      return;
-    }
-    create.mutate(
-      { colorCode },
-      {
-        onSuccess: (res) => {
-          showMessage('Draft colourway created', 'success');
-          setColorCode('');
-          onCreated(res?.colorwayId);
-        },
-        onError: (e) => showMessage(createColorwayErrorMessage(e), 'error'),
-      },
+// Те же плиты, что стоят в SIDES студии, в том же порядке видов (`benchSides` над `band.bench`,
+// род `render`, ось — этот колорвей). Разметка живёт ТАМ: одна дверь на жест, а не вторая копия
+// органа во вкладке. Здесь ответ на вопрос «как этот цвет выглядит» — и дверь туда, где его
+// меняют.
+//
+// НЕРАЗМЕЧЕННЫЕ СТОРОНЫ НЕ РИСУЮТСЯ ВОВСЕ. Пустая ячейка в read-only блоке читается как дверь,
+// которой тут нет; счётчика «N из 6» тоже нет — владелец снял ровно эту фразу с экрана рендера
+// (r3 п.31), и заводить её здесь заново значило бы вернуть её в новом месте.
+function ColorwayRenders({ sides, name }: { sides: readonly BenchSide[]; name: string }) {
+  const marked = sides.filter((s) => !!s.picture);
+  if (marked.length === 0) {
+    return (
+      <Text size='micro' variant='label'>
+        no render is marked for this colourway yet — sides are marked in STUDIO › FABRIC RENDER
+      </Text>
     );
-  };
-
+  }
   return (
-    <div className='flex flex-col gap-2 border border-borderColor bg-bgColor p-4'>
-      <SectionHeader
-        title='new colourway'
-        question='a DRAFT colourway — colour only, so its recipe can be edited here; media, price and the rest come from the product manager afterwards'
-      />
-      {availableColors.length === 0 ? (
-        <CalloutBox tone='note'>
-          <Text size='micro' component='span'>
-            no colours in the dictionary yet — add them under <b>settings › colors</b>
-          </Text>
-        </CalloutBox>
-      ) : (
-        <Toolbar>
-          <label className='flex flex-col gap-1'>
-            <FieldLabel>colour</FieldLabel>
-            <span className='flex items-center gap-2'>
-              <Swatch hex={picked?.hex} title={picked?.name ?? undefined} />
-              <select
-                className={cn(cell, 'w-56')}
-                value={colorCode}
-                onChange={(e) => setColorCode(e.target.value)}
-              >
-                <option value=''>— select colour —</option>
-                {availableColors.map((c) => (
-                  <option key={c.code} value={c.code} disabled={usedCodes.has(c.code ?? '')}>
-                    {c.code} · {c.name}
-                    {usedCodes.has(c.code ?? '') ? ' (already on this style)' : ''}
-                  </option>
-                ))}
-              </select>
-            </span>
-          </label>
-          <ToolbarSpacer />
-          <Button type='button' variant='secondary' size='sm' onClick={onCancel}>
-            cancel
-          </Button>
-          <Button
-            type='button'
-            variant='main'
-            size='sm'
-            disabled={create.isPending || !colorCode}
-            loading={create.isPending}
-            onClick={submit}
-          >
-            create
-          </Button>
-        </Toolbar>
-      )}
-    </div>
+    <Tiles min={140}>
+      {marked.map((side) => (
+        <Tile
+          key={side.view}
+          name={viewLabel(side.view)}
+          media={
+            <Media
+              src={pictureUrl(side.picture)}
+              alt={`${name} — ${viewLabel(side.view)}`}
+              aspectRatio='1/1'
+              fit='cover'
+            />
+          }
+        />
+      ))}
+    </Tiles>
   );
 }
 
@@ -4572,21 +4616,64 @@ export function ColorwayRecipes({
     return m;
   }, [dictionary?.colors]);
   const lockVersion = techCard?.lockVersion ?? 0;
-  const usedCodes = useMemo(
-    () => new Set(colorways.map((c) => c.colorCode ?? '').filter(Boolean)),
-    [colorways],
-  );
 
-  // Which tile owns the slot below the grid: a colourway id, the create form, or nothing (which
-  // falls back to the first colourway so the tab is never a grid over dead space).
-  const [selected, setSelected] = useState<number | 'new' | null>(null);
-  const activeId = selected === 'new' ? null : selected ?? colorways[0]?.colorwayId ?? null;
+  /* ═══ ПОЛОСА ДИЗАЙНА ЧИТАЕТСЯ ЗДЕСЬ, ОДИН РАЗ НА ВСЮ ВКЛАДКУ (G2-8) ═══════════════════════════
+     Плитке нужен передний рендер колорвея, редактору — все его размеченные стороны, и это ОДИН
+     факт: слоты `kind: render` на оси этого колорвея. Ключ запроса общий со студией
+     (`designKeys.band(card)`), так что это не второй кэш, а второй наблюдатель того же — открытая
+     до этого студия отдаёт готовый ответ, а прочитанный здесь греет её.
+
+     ⚠ ПУСТО ≠ «РЕНДЕРОВ НЕТ». `serverSpeaks` отделяет «на этой карточке ничего не размечено» от
+     «этот бинарь маршрутов полосы не знает вовсе» — на втором блок рендеров не рисуется, потому
+     что сказать «размечать нечего» там было бы неправдой (доктрина `has_fabric_render`). */
+  const { band, serverSpeaks: bandSpeaks } = useDesignBand(techCardId);
+  const renderSidesByColorway = useMemo(() => {
+    const m = new Map<number, BenchSide[]>();
+    for (const cw of colorways) {
+      const id = cw.colorwayId ?? 0;
+      // Ось 0 — это СЕМПЛ, и на вкладке его нет: семплы ничьи, их место в студии (D1/§2.6).
+      // Колорвей карточки всегда имеет id > 0, так что это сторож, а не фильтр.
+      if (id > 0) m.set(id, benchSides(band, 'render', id));
+    }
+    return m;
+  }, [band, colorways]);
+
+  // Which tile owns the slot below the grid: a colourway id, or nothing (which falls back to the
+  // first colourway so the tab is never a grid over dead space).
+  const [selected, setSelected] = useState<number | null>(null);
+  const activeId = selected ?? colorways[0]?.colorwayId ?? null;
 
   // ?colorway=<id> opens one colourway's recipe directly. Sent by the BOM tab when a delete is
   // blocked by this colourway's recipe, so «which usage do I remove» lands on screen rather than
   // on a grid the operator has to search. The param is consumed, not kept: leaving it set would
   // re-select this colourway every time the tab is reopened.
   const [params, setParams] = useSearchParams();
+
+  /* ═══ ДВЕРЬ В СТУДИЮ — ОДНА, И ОНА ЖЕ ОБЪЯСНЯЕТ ПУСТУЮ ВКЛАДКУ (D10) ══════════════════════════
+     Колорвей рождается на FABRIC RENDER жестом, а не заранее списком, поэтому создания здесь
+     больше нет вовсе (`CreateColorwayForm` снесён). Всё, что вкладка может сказать про рождение,
+     — куда идти; всё, что она может сказать про рендеры, — где их размечают. Дверь одна на оба
+     ответа: `?tab=studio&step=render` в ТОМ ЖЕ адресе (вкладку читает `index.tsx`, шаг —
+     `studio-tab.tsx`).
+
+     `replace`, как навигация вкладок самой карточки (`navTo`): Back уводит со страницы, а не
+     ходит по вкладкам по одной.
+
+     ⚠ ЦЕЛЬ ПРОГОНА ЭТА ДВЕРЬ НЕ ВЫСТАВЛЯЕТ. Выбор колорвея в студии — состояние
+     `useColorwayChoice`, у него нет адреса в URL, и завести его отсюда нельзя, не трогая чужой
+     файл. Студия открывается на своём умолчании (первый колорвей с рендерами); записано в gaps. */
+  const goToRenderStep = useCallback(() => {
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.set('tab', 'studio');
+        p.set('step', 'render');
+        p.delete('colorway');
+        return p;
+      },
+      { replace: true },
+    );
+  }, [setParams]);
   const deepLinked = params.get('colorway');
   useEffect(() => {
     if (!deepLinked) return;
@@ -4609,6 +4696,26 @@ export function ColorwayRecipes({
       return { ...prev, [colorwayId]: next };
     });
   }, []);
+
+  /* ═══ СМЕНА КАРТОЧКИ СБРАСЫВАЕТ ВЫБОР — В ТЕЛЕ РЕНДЕРА, НЕ В ЭФФЕКТЕ (G2-10, инвариант 12) ═════
+     Вкладка НЕ размонтируется между карточками: страница тех-карты одна, меняется параметр
+     маршрута. Поэтому `selected` переживал переход и указывал на колорвей ЧУЖОЙ карточки — а
+     `activeId` берёт `selected` вперёд `colorways[0]`, так что редактор не открывался ни один:
+     сетка цветов над пустотой, без единого слова о причине. Тем же переходом протухают
+     `deletedIds` (id чужой карточки прятал бы живой колорвей этой) и `statuses` (пилюли `staged`
+     от чужих редакторов).
+
+     В ТЕЛЕ, А НЕ В `useEffect`: эффект отрабатывает ПОСЛЕ первого кадра новой карточки, то есть
+     ровно этот кадр рисуется старым выбором. Обновление состояния во время рендера того же
+     компонента — законный приём React (он немедленно перезапускает рендер, до коммита), и в этом
+     дереве он уже несёт все прочие сбросы при смене карточки. */
+  const openedCard = useRef(techCardId);
+  if (openedCard.current !== techCardId) {
+    openedCard.current = techCardId;
+    setSelected(null);
+    setDeletedIds(EMPTY_DELETED);
+    setStatuses(EMPTY_STATUSES);
+  }
 
   // ПОСЛЕ УДАЛЕНИЯ ВЫБОР ОБЯЗАН ПЕРЕЕХАТЬ. `selected` может быть и null — тогда активен
   // colorways[0], и если стёрли именно его, вкладка осталась бы смотреть на несуществующий продукт
@@ -4634,7 +4741,7 @@ export function ColorwayRecipes({
         Each colourway is its own write, and every one you edit goes out with the card’s Save.
       </Text>
 
-      <Tiles min={120}>
+      <Tiles min={150}>
         {colorways.map((cw) => (
           // Плитка и удаление — СОСЕДИ, а не вложение: Tile с onClick рендерится как <button>, и
           // контрол внутри него был бы кнопкой в кнопке (невалидная разметка, и клик по удалению
@@ -4642,7 +4749,8 @@ export function ColorwayRecipes({
           <div key={cw.colorwayId} className='flex min-w-0 flex-col gap-1'>
             <ColorwayTile
               colorway={cw}
-              hex={hexByCode.get(cw.colorCode ?? '')}
+              hex={colourwaySwatchHex(cw, hexByCode.get(cw.colorCode ?? ''))}
+              frontUrl={frontRenderUrl(renderSidesByColorway.get(cw.colorwayId ?? 0))}
               status={statuses[cw.colorwayId ?? 0]}
               selected={activeId === cw.colorwayId}
               onSelect={() => setSelected(cw.colorwayId ?? null)}
@@ -4654,7 +4762,13 @@ export function ColorwayRecipes({
             {canDeleteProduct && activeId === cw.colorwayId && (
               <ColorwayDeleteControl
                 colorwayId={cw.colorwayId ?? 0}
-                code={colorwayTitle(cw)}
+                /* ПОДТВЕРЖДЕНИЕ ПРОСИТ НАПЕЧАТАТЬ ТО СЛОВО, КОТОРОЕ СТОИТ НА ПЛИТКЕ. Пока плитка
+                   называлась словарным кодом, здесь стоял он; теперь плитка ведёт именем колорвея
+                   (`ROSSO`), а код — мелкая строка под ним. Просить напечатать «BLK» у продукта,
+                   подписанного «ROSSO», значит просить сверить не тот факт — а вся ценность этого
+                   поля в сверке. Фолбэк тот же (`colorwayTitle`), так что легаси-колорвей без
+                   имени по-прежнему подтверждается кодом. */
+                code={colourwayName(cw)}
                 techCardId={techCardId}
                 lockVersion={cw.lockVersion ?? lockVersion}
                 isLastColorway={colorways.length === 1}
@@ -4663,35 +4777,35 @@ export function ColorwayRecipes({
             )}
           </div>
         ))}
-        {canEdit && (
-          <Tile
-            dashed
-            selected={selected === 'new'}
-            name='colourway'
-            onClick={() => setSelected('new')}
-            media={
-              <div className='flex aspect-square w-full items-center justify-center border border-dashed border-borderColor'>
-                <Text size='stat' variant='label' component='span'>
-                  +
-                </Text>
-              </div>
-            }
-          />
-        )}
       </Tiles>
 
+      {/* ═══ ПУСТОЕ СОСТОЯНИЕ — ОДНА СТРОКА И ОДНА ДВЕРЬ (D10) ══════════════════════════════════
+          Здесь стояла плитка `+ colourway` с формой под ней: колорвей заводился словарным цветом,
+          то есть раньше, чем становилось известно, будет ли он вообще. Владелец: колорвей
+          появляется на FABRIC RENDER, «но не каждый фабрик-рендер значит, что у нас будет такой
+          колорвей — возможно, мы просто семплимся». Поэтому создание живёт ровно там, где принято
+          решение, а вкладка говорит, где это. Двух кнопок «завести колорвей» в системе больше нет. */}
       {colorways.length === 0 && (
-        <Text size='micro' variant='label'>
-          no colourways yet — a colourway is a product. Create a draft from the tile above, or from
-          the product manager, then its material recipe is edited here.
-        </Text>
+        <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
+          <Text size='micro' variant='label' component='span'>
+            colourways are born in the studio, on a fabric render — a colour becomes a product once
+            you decide to keep it
+          </Text>
+          <Button type='button' variant='secondary' size='sm' onClick={goToRenderStep}>
+            studio › fabric render ›
+          </Button>
+        </div>
       )}
 
       {/* The slot. Every editor stays MOUNTED and merely hidden, so an unsaved recipe survives a hop
           to another colourway and back — losing a draft to a tile click would be worse than the
           accordion this replaced. */}
       {colorways.map((cw) => (
-        <div key={cw.colorwayId} hidden={activeId !== cw.colorwayId}>
+        // `mt-3.5` поверх зазора колонки (10px) даёт 24px — тот же ГУТТЕР, которым разделены блоки
+        // ниже (`SectionStack`). Сетка цветов — самостоятельная вещь, а не шапка первого блока, и
+        // на стековом расстоянии она читалась бы как его часть. Спрятанный редактор — `display:
+        // none`, поэтому ни отступа, ни щели во флексе от него не остаётся.
+        <div key={cw.colorwayId} hidden={activeId !== cw.colorwayId} className='mt-3.5'>
           <ColorwayRecipeEditor
             colorway={cw}
             bomItems={bomItems}
@@ -4704,26 +4818,19 @@ export function ColorwayRecipes({
             active={activeId === cw.colorwayId}
             sizeIds={sizeIds}
             sizeNameById={sizeNameById}
-            swatchHex={hexByCode.get(cw.colorCode ?? '')}
+            swatchHex={colourwaySwatchHex(cw, hexByCode.get(cw.colorCode ?? ''))}
             lockVersion={lockVersion}
             techCardId={techCardId}
             canEdit={canEdit}
             frozen={frozen}
             colorwayPins={colorwayPins}
+            renderSides={renderSidesByColorway.get(cw.colorwayId ?? 0) ?? EMPTY_SIDES}
+            bandSpeaks={bandSpeaks}
+            onOpenStudio={goToRenderStep}
             onStatus={reportStatus}
           />
         </div>
       ))}
-
-      {canEdit && selected === 'new' && (
-        <CreateColorwayForm
-          techCardId={techCardId}
-          usedCodes={usedCodes}
-          onCancel={() => setSelected(null)}
-          // Land on the colourway that was just created — its recipe is why you made it.
-          onCreated={(id) => setSelected(id ?? null)}
-        />
-      )}
     </div>
   );
 }

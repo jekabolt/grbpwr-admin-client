@@ -1,7 +1,7 @@
-import type { GetDesignBandResponse } from 'api/proto-http/admin';
+import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useMemo, useState, type JSX } from 'react';
+import { useEffect, useMemo, useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
@@ -12,7 +12,8 @@ import { ViewSwitch } from 'ui/components/view-switch';
 
 import type { TechCardFormData } from '../../schema';
 import { InertDoor } from '../bench-slot';
-import { GROUP_GAP, GROUP_SEAM } from '../core';
+import { ColorwaySelect } from '../colorway-picker';
+import { EmptyState, GROUP_GAP, GROUP_SEAM } from '../core';
 import { useCardFit, useThreedDraft } from './drafts';
 import { FieldRow, Hint } from './field-row';
 import { GenerateRow, LockBar, RunRefusal } from './generate-row';
@@ -20,6 +21,7 @@ import {
   benchSides,
   PRESENTATIONS,
   fitChoices,
+  threedColorwayOptions,
   threedGate,
   threedRunViews,
   threedSides,
@@ -77,6 +79,8 @@ export function ThreedStudio({
   colorwayId = 0,
   colorwayLabel = '',
   colorwayArchived = false,
+  colorways = [],
+  onColorwayChange,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -84,11 +88,18 @@ export function ThreedStudio({
   /** Switch the studio to another step — the doors of the lock bar and of the empty sides. */
   onGoToKind?: (kind: 'flat' | 'render') => void;
   /**
+   * ═══ ЧТО СОБИРАЕМ — ТОТ ЖЕ ЕДИНСТВЕННЫЙ СЕТТЕР СТУДИИ (G2-7) ═════════════════════════════════
+   * Список сужает САМ ЭКРАН: собирать можно только из колорвеев, у которых на render-верстаке
+   * стоит FRONT. Не задан `onColorwayChange` — органа нет вовсе (композитор без оси).
+   */
+  colorways?: common_AdminColorwayRef[];
+  onColorwayChange?: (id: number) => void;
+  /**
    * THE BENCH BEING BUILT — one number for the whole studio (`useColorwayChoice`). It addresses the
    * bench the SERVER reads (`designSelectBench`) and the set the door opens on (`no_fabric_render`).
    */
   colorwayId?: number;
-  /** Its human name; `''` under `no colourway` — the refusals say so in words. */
+  /** Its human name; `''` под `sample` — отказы называют его тем же словом (`benchName`). */
   colorwayLabel?: string;
   /** ⚠ Read by the GATE only: reading and the input strip work under an archived colourway. */
   colorwayArchived?: boolean;
@@ -102,6 +113,39 @@ export function ThreedStudio({
   const [inspecting, setInspecting] = useState(false);
 
   const sides = useMemo(() => threedSides(band, colorwayId), [band, colorwayId]);
+
+  /**
+   * ═══ ИЗ ЧЕГО МОЖНО СОБРАТЬ — И ТОЛЬКО ИЗ ЭТОГО (G2-7) ═══════════════════════════════════════
+   *
+   * Владелец: «в 3D выбираем колорвей из размеченных в SIDES». Сервер собирает поворот из
+   * render-слотов ровно этого колорвея и без фронта отказывает бесплатно, поэтому список,
+   * предлагающий колорвей без фронта, продавал бы отказ. Считается по `band.bench` целиком, а не
+   * по `render_bench_colorway_ids`: серверное множество отвечает «занят ХОТЯ БЫ ОДИН слот», и
+   * колорвей с одной спинкой в нём есть, а собрать его нельзя (разбор — у `threedColorwayOptions`).
+   */
+  const buildable = useMemo(
+    () => threedColorwayOptions(band, colorways),
+    [band, colorways],
+  );
+
+  /**
+   * ⚠ ПРИШЛИ НА 3D С ЦЕЛИ, КОТОРУЮ СОБРАТЬ НЕЛЬЗЯ — ВЫБОР ПЕРЕЕЗЖАЕТ НА ПЕРВУЮ ПОДХОДЯЩУЮ.
+   *
+   * Это не умолчание (`settled` у `useColorwayChoice` про другое) и не тихая правка: экран,
+   * открывшийся на OLIVE без фронта, показал бы пустой вход и погашенную кнопку, притом что рядом
+   * лежит собранный ROSSO. Сужение списка — половина ответа; вторая половина — переезд.
+   *
+   * ЭФФЕКТОМ, А НЕ В ТЕЛЕ РЕНДЕРА, НАРОЧНО: состояние принадлежит КОМПОЗИТОРУ, и `setState` чужого
+   * компонента во время своего рендера React запрещает (предупреждение и потерянное обновление).
+   * Кадр между рендером и эффектом при этом честен, а не сломан: инвариант «значение среди
+   * пунктов» держит сам `ColorwaySelect` — выбранный id дописывается в список со словами
+   * «no front render», а не исчезает под человеком.
+   */
+  useEffect(() => {
+    if (!onColorwayChange || buildable.length === 0) return;
+    if (buildable.includes(colorwayId)) return;
+    onColorwayChange(buildable[0]);
+  }, [buildable, colorwayId, onColorwayChange]);
 
   const sizes = dictionary?.sizes ?? [];
   const sizeName = (id: number) =>
@@ -292,6 +336,48 @@ export function ThreedStudio({
            обёрнуты своим `<div>`, иначе шов встал бы и внутри них. */
         className={GROUP_SEAM}
       >
+        {/* ═══ ЧТО СОБИРАЕМ — ПЕРВАЯ СТРОКА ЭКРАНА (G2-7) ══════════════════════════════════════
+            Владелец: «в 3D выбираем колорвей из размеченных в SIDES». Один орган, и он стоит НАД
+            входом, потому что именно он решает, чем этот вход будет: `build:` меняет и полосу
+            сторон под собой, и ворота, и `params.colorway_id` прогона. С рельса шагов орган снят
+            (G2-2) — там он отвечал на вопрос «где я», а этот вопрос про то, что покупается.
+
+            ⚠ ПУСТОЙ СПИСОК — ЭТО НЕ ПУСТОЙ СЕЛЕКТ, А ПРЕДЛОЖЕНИЕ ЖЕСТА. Живой список с нулём
+            пунктов читается как поломка («не загрузилось»); строка называет, ЧЕГО не хватает, и
+            ведёт ровно туда, где это делают. Ворота ниже при этом продолжают отказывать своими
+            словами — они про КАРТОЧКУ, а эта строка про ВЫБОР. */}
+        {onColorwayChange &&
+          (buildable.length === 0 ? (
+            /* ⚠ ДВЕРИ У ЭТОЙ СТРОКИ НЕТ НАРОЧНО, И ЭТО ЗАМЕРЕНО ГЛАЗАМИ НА СНИМКЕ. `EmptyState`
+               принимает `action`, и первая редакция ставила туда `fabric render ›` — а ровно такая
+               же кнопка с той же подписью и тем же назначением стоит на линейке INPUT в сорока
+               пикселях ниже, СТОИТ ВСЕГДА. Две одинаковые кнопки за одно (владелец: «не делай
+               разные кнопки для одного и того же»). Осталась одна — та, что ниже; предложение
+               называет и место, и жест словами. */
+            <EmptyState>
+              no colourway has a front render yet — mark one in FABRIC RENDER › SIDES
+            </EmptyState>
+          ) : (
+            <div data-threed-build=''>
+              <ColorwaySelect
+                band={band}
+                label='build'
+                probe='design-threed-build'
+                disabled={disabled}
+                only={buildable}
+                choice={{
+                  colorwayId,
+                  setColorwayId: onColorwayChange,
+                  colorways,
+                  current: colorways.find((c) => (c.colorwayId ?? 0) === colorwayId) ?? null,
+                  label: colorwayLabel,
+                  archived: colorwayArchived,
+                  loading: false,
+                }}
+              />
+            </div>
+          ))}
+
         {/* ═══ INPUT · RENDERS BY VIEW — a READING of the render bench; every empty cell is a
             door back to FABRIC RENDER, where a side is filled. */}
         <RendersByViewGroup band={band} colorwayId={colorwayId} onGoToKind={onGoToKind} />

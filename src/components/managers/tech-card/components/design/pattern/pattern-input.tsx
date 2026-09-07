@@ -181,16 +181,28 @@ export function PatternInput({
             />
           ) : (
             <>
-              {/* ЗАПОЛНЕННЫЙ КАДР БЕЗ ПОЛОСЫ: `editMode={false}` гасит собственные `change` и
-                  `remove` слота, оставляя ровно картинку в рамке этой коробки. */}
+              {/* ═══ ЗАПОЛНЕННЫЙ КАДР БЕЗ ПОЛОСЫ, НО С ЖИВЫМИ ЖЕСТАМИ ═══════════════════════════
+                  Здесь стоял `editMode={false}`, и он гасил не только полосу `change · remove`:
+                  тем же флагом слот выключает приёмник ⌘V и броска (`useMediaIntake({ enabled:
+                  editMode })`). Заполненная ячейка молча теряла «вставить другой снимок поверх» —
+                  человеку приходилось сначала жать ✕, а экран при этом выглядел целым.
+
+                  Теперь полоса снимается СВОИМ пропом (`toolbar={false}`), а право менять
+                  остаётся: ⌘V и брошенный файл ЗАМЕНЯЮТ картинку тем же `onPick`, что и дверь
+                  `change` в углу. Один предмет — один обработчик. */}
               <MediaSlot
                 aspectRatio={['Custom']}
                 frameAspect={FRAME_ASPECT}
                 showVideos={false}
-                editMode={false}
+                editMode={!disabled}
+                toolbar={false}
                 mediaUrl={sourceUrl}
                 alt={`source picture ${sourceId}`}
-                onSelect={() => undefined}
+                purpose='design · the picture a pattern is made from'
+                onSelect={(media) => {
+                  const first = media[0];
+                  if (first?.id) onPick(first);
+                }}
                 className='border-0'
               />
               {!disabled && (
