@@ -272,6 +272,9 @@ export function RenderStudio({
         // records that the guess was wanted.
         autoSplit: true,
         pattern: undefined,
+        // НЕ ПЛЕЙГРАУНД: поле осмысленно только на kind=freeform и на любом другом роде
+        // отвергается сервером (`freeform_forbidden`), поэтому здесь оно названо пустым вслух.
+        freeform: undefined,
         useFlatSlots: false,
         // Meaningful on kind=flat only; named because the contract wants the field named.
         flatSlotIds: [],

@@ -269,6 +269,9 @@ export function ThreedStudio({
         fixSlotIds: [],
         autoSplit: false,
         pattern: undefined,
+        // НЕ ПЛЕЙГРАУНД: поле осмысленно только на kind=freeform и на любом другом роде
+        // отвергается сервером (`freeform_forbidden`), поэтому здесь оно названо пустым вслух.
+        freeform: undefined,
         useFlatSlots: false,
         flatSlotIds: [],
       },

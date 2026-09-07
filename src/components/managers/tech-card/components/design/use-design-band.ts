@@ -109,6 +109,11 @@ const EMPTY_BAND: GetDesignBandResponse = {
   // `false` for it would be honest by accident and dishonest the moment the field means something
   // else. Every reader treats absence as «not stated» and draws the door the conservative way.
   benchAdoptsUnattributed: undefined,
+  // `undefined`, И ИМЕННО ОНО — контракт поля говорит ОТСУТСТВИЕ ≠ ПУСТО. Пустой список это
+  // утверждение «сервер знает плейграунд, но ни один маршрут не подключён», и экран печатает
+  // его словами; отсутствие — «бинарь про плейграунд не знает вовсе», и тогда ячейки на рельсе
+  // нет совсем. Пустая полоса — второй случай, а не первый.
+  freeformPresets: undefined,
 };
 
 export type DesignBandState = {
