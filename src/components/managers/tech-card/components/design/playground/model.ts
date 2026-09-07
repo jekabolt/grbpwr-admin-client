@@ -62,6 +62,19 @@ export const REFS_MAX = 16;
 
 export type PlaygroundRole = '' | 'subject' | 'hardware' | 'cloth';
 
+/**
+ * THE WHOLE VOCABULARY OF ROLES, AS THE SERVER SPELLS IT (`entity.IsFreeformRole`), and it is a
+ * VALUE rather than only a type because the wire hands back plain strings: a run recalled from the
+ * history carries `item.role` as a `string`, and casting one to `PlaygroundRole` at the door is a
+ * promise the compiler cannot keep. A word this build has never heard of is refused
+ * (`unknown_role`) after the money moves through no fault of the person who pressed.
+ */
+export const PLAYGROUND_ROLES: readonly PlaygroundRole[] = ['', 'subject', 'hardware', 'cloth'];
+
+export function isPlaygroundRole(word: string): word is PlaygroundRole {
+  return (PLAYGROUND_ROLES as readonly string[]).includes(word);
+}
+
 /** One marked area of one picture: the polygon, and the words about it. */
 export type PlaygroundRegion = {
   /** Fractions of the picture, 0..1 — the surface's own coordinates and the wire's. */
@@ -188,12 +201,57 @@ export function subjectItem(state: PlaygroundState): PlaygroundItem | null {
   );
 }
 
-/** items + one crop per area + one marked copy per picture that has areas. */
-export function refsCount(state: PlaygroundState): number {
-  const items = state.items.length;
-  const areas = state.items.reduce((n, i) => n + i.regions.length, 0);
-  const marked = state.items.filter((i) => i.regions.length > 0).length;
+/* ─────────────────────────── what the press ACTUALLY buys ─────────────────────────── */
+
+/**
+ * ═══ THE ROLE THIS PICTURE TRAVELS UNDER, WHICH IS NOT ALWAYS THE ROLE ON THE ITEM ════════════
+ *
+ * A ROLE IS A CLAIM A PRESET ASKS FOR, AND A PRESET THAT DOES NOT ASK GETS NO ANSWER. The chips
+ * are drawn from `preset.roles`, so switching from ADD HARDWARE to FREE takes the chips off the
+ * screen — and the words «hardware» stayed on the item underneath and went out on the wire, where
+ * `free` has no hardware to speak of. Measured shape: `{preset:"free", items:[{role:"hardware"}]}`
+ * — a claim nobody on either side can act on, riding a paid call. Clearing the item on every
+ * preset switch would be worse: pressing the wrong chip and pressing back would silently forget
+ * which picture was the hardware.
+ *
+ * SO THE ITEM REMEMBERS AND THE WIRE FORGETS. One function, read by `wireParams`, by the gate and
+ * by the inventory — the three readers that must agree about one paid run.
+ */
+export function effectiveRole(item: PlaygroundItem, preset: Preset | null): PlaygroundRole {
+  const role = item.role;
+  if (!role || !isPlaygroundRole(role)) return '';
+  return preset?.roles.includes(role) ? role : '';
+}
+
+/**
+ * ═══ THE ITEMS AS THEY LEAVE — ONE ANSWER FOR THE WIRE, THE GATE, THE COUNTS AND THE INVENTORY ═
+ *
+ * ⚠ A CUT-OUT CARRIES ONE PICTURE AND NOTHING ELSE. Its whole request is
+ * `extra_input_media_ids: [id]` — no `freeform`, no areas, no words, no role — because the
+ * segmentation route has no prompt at all. The table underneath may still hold areas a person
+ * marked under another preset, and the inventory used to promise «a crop and a marked copy travel»
+ * over a run that sends neither. This is the one place that decides it.
+ */
+export function effectiveItems(state: PlaygroundState, preset: Preset | null): PlaygroundItem[] {
+  if (preset?.kind === 'cutout') {
+    const one = state.items[0];
+    return one ? [{ media: one.media, role: '', regions: [] }] : [];
+  }
+  return state.items.map((item) => ({ ...item, role: effectiveRole(item, preset) }));
+}
+
+/** items + one crop per area + one marked copy per picture that has areas — of what TRAVELS. */
+export function refsCount(state: PlaygroundState, preset: Preset | null): number {
+  const list = effectiveItems(state, preset);
+  const items = list.length;
+  const areas = list.reduce((n, i) => n + i.regions.length, 0);
+  const marked = list.filter((i) => i.regions.length > 0).length;
   return items + areas + marked;
+}
+
+/** Whether a preset lets an area be marked at all — `cutout` sends none, so it draws none. */
+export function presetTakesAreas(preset: Preset | null): boolean {
+  return preset?.kind !== 'cutout';
 }
 
 /**
@@ -232,7 +290,38 @@ export function playgroundGate(state: PlaygroundState, preset: Preset | null): P
       door: 'pictures',
     };
   }
-  if (preset.roles.includes('hardware') && !state.items.some((i) => i.role === 'hardware')) {
+  /* ⚠ THE SAME PICTURE TWICE IS A REFUSAL, NOT A TIDINESS RULE (`duplicate_picture`). The ceiling
+     of four areas is declared PER PICTURE, and one media named in two entries walks around it; the
+     snapshot then de-duplicates the references while the job builder does not, so the model would
+     be handed two outlined copies both captioned «image 1». The strip cannot make this state — the
+     table refuses a media it already holds — but a recalled run and a future gesture can, and this
+     is the last gate before the money. */
+  const list = effectiveItems(state, preset);
+  const seen = new Set<number>();
+  for (const item of list) {
+    const id = item.media.id ?? 0;
+    if (id <= 0) continue;
+    if (seen.has(id)) {
+      return {
+        ok: false,
+        reason: 'the same picture twice · one picture is one entry, with its areas on it',
+        door: 'pictures',
+      };
+    }
+    seen.add(id);
+  }
+  /* THE ROLE VOCABULARY IS CLOSED, AND THE WIRE HANDS BACK PLAIN STRINGS. A run recalled out of
+     the history carries whatever word the server wrote that day; a word this build cannot spell is
+     `unknown_role` AFTER the reservation, which is a refusal a person did nothing to earn. */
+  const stranger = state.items.find((i) => !isPlaygroundRole(i.role));
+  if (stranger) {
+    return {
+      ok: false,
+      reason: `«${stranger.role}» is not a role this run can state · subject | hardware | cloth`,
+      door: 'pictures',
+    };
+  }
+  if (preset.roles.includes('hardware') && !list.some((i) => i.role === 'hardware')) {
     return {
       ok: false,
       reason: 'the preset needs a picture of the hardware · say which picture that is',
@@ -240,8 +329,15 @@ export function playgroundGate(state: PlaygroundState, preset: Preset | null): P
     };
   }
   if (preset.key === 'add_hardware') {
-    const subject = subjectItem(state);
-    if (!subject || subject.regions.length === 0) {
+    /* ⚠ THE SERVER LOOKS FOR AN AREA ON ANY NON-HARDWARE PICTURE, NOT ON «THE SUBJECT». Its own
+       words: «роль пустая законна („просто картинка“), и требовать её проставленной значило бы
+       отказывать за неназванное имя там, где человек уже показал пальцем». This screen refused
+       exactly there — two pictures, `hardware` on one, an area drawn on the other and no `subject`
+       chip pressed: the server would have run it, the lock bar said «mark the area first» over an
+       area a person could see they had marked. A gate that refuses what the door allows is worse
+       than no gate: it is unfixable from the screen. */
+    const marked = list.some((i) => i.role !== 'hardware' && i.regions.length > 0);
+    if (!marked) {
       return {
         ok: false,
         reason: 'mark the area first · where does the hardware go',
@@ -249,7 +345,7 @@ export function playgroundGate(state: PlaygroundState, preset: Preset | null): P
       };
     }
   }
-  const refs = refsCount(state);
+  const refs = refsCount(state, preset);
   if (refs > REFS_MAX) {
     return {
       ok: false,
@@ -329,7 +425,7 @@ export function wireParams(state: PlaygroundState, preset: Preset): common_Desig
     flatSlotIds: [] as number[],
   };
   if (preset.kind === 'cutout') {
-    const id = state.items[0]?.media.id ?? 0;
+    const id = effectiveItems(state, preset)[0]?.media.id ?? 0;
     return {
       ...common,
       extraInputMediaIds: id > 0 ? [id] : [],
@@ -341,7 +437,9 @@ export function wireParams(state: PlaygroundState, preset: Preset): common_Desig
     extraInputMediaIds: [],
     freeform: {
       preset: preset.key,
-      items: state.items.map((item) => ({
+      // `effectiveItems` — THE ONE ANSWER, not a second reading of the draft. A role the chosen
+      // preset never asked for does not travel (see there), and the inventory counts THIS list.
+      items: effectiveItems(state, preset).map((item) => ({
         mediaId: item.media.id ?? 0,
         regions: item.regions.map(regionToWire),
         // texts PAIR WITH regions BY INDEX, and this screen writes exactly as many as there are

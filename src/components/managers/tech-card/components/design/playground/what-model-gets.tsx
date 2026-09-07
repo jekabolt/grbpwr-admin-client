@@ -3,7 +3,14 @@ import Text from 'ui/components/text';
 
 import { InventoryLine, NotSent, WmgGroup, WmgShell, type NotSentItem } from '../core';
 import { mediaThumb } from '../render/model';
-import { AREA_LETTERS, areaLetter, refsCount, type PlaygroundState, type Preset } from './model';
+import {
+  AREA_LETTERS,
+  areaLetter,
+  effectiveItems,
+  refsCount,
+  type PlaygroundState,
+  type Preset,
+} from './model';
 
 /**
  * ═══ WHAT THE MODEL GETS — PLAYGROUND ════════════════════════════════════════════════════════
@@ -22,6 +29,13 @@ import { AREA_LETTERS, areaLetter, refsCount, type PlaygroundState, type Preset 
  * NOT SENT is the half that is easiest to be wrong about. The playground reads NOTHING of the card:
  * `designKindReadsTheCard` is false for both kinds, so the colourway, the colour recipe, the bench
  * and the garment description stay where they are — and this list says so by name.
+ *
+ * ⚠ IT COUNTS `effectiveItems`, NOT THE TABLE, AND THE TWO LEGITIMATELY DIFFER. Under the cut-out
+ * chip the request is one media id and nothing else — no areas, no roles, no words — while the
+ * table underneath may still hold everything a person marked under another preset. Reading the
+ * table here made this modal promise «a crop and a marked copy of image 1 travel» over a run that
+ * carries neither: the second statement about one paid run, which is the defect this file exists
+ * against. The wire reads the same function.
  */
 export function WhatModelGetsPlaygroundModal({
   open,
@@ -34,7 +48,8 @@ export function WhatModelGetsPlaygroundModal({
   state: PlaygroundState;
   preset: Preset | null;
 }): JSX.Element {
-  const items = state.items;
+  const cut = preset?.kind === 'cutout';
+  const items = effectiveItems(state, preset);
   const areas = items.flatMap((item, i) =>
     item.regions.map((region, r) => ({
       key: `${i}-${r}`,
@@ -43,7 +58,6 @@ export function WhatModelGetsPlaygroundModal({
       text: region.text.trim(),
     })),
   );
-  const cut = preset?.kind === 'cutout';
   const words = state.ask.trim();
 
   const notSent: NotSentItem[] = [
@@ -73,9 +87,9 @@ export function WhatModelGetsPlaygroundModal({
       kindWord={cut ? 'cut out the background' : 'playground'}
       intro={
         <>
-          <b>{refsCount(state)} pictures travel, in this order.</b> Everything below is the request
-          as it leaves — the pictures a person laid on the table, the areas marked on them and the
-          words typed above. Nothing of the card is added to it.
+          <b>{refsCount(state, preset)} pictures travel, in this order.</b> Everything below is the
+          request as it leaves — the pictures a person laid on the table, the areas marked on them
+          and the words typed above. Nothing of the card is added to it.
         </>
       }
     >
@@ -119,11 +133,16 @@ export function WhatModelGetsPlaygroundModal({
 
       <WmgGroup
         label='areas'
-        aside={`${areas.length} marked`}
+        aside={cut ? 'this preset sends none' : `${areas.length} marked`}
         data-wmg-areas={areas.length}
         note='an area is a polygon in fractions of its picture; its letter is drawn on this screen only.'
       >
-        {areas.length === 0 ? (
+        {cut ? (
+          <Text size='micro' variant='label' component='p' className='normal-case'>
+            a cut-out sends the picture and nothing else — no area travels with it, and any drawn
+            under another preset stays on the table.
+          </Text>
+        ) : areas.length === 0 ? (
           <Text size='micro' variant='label' component='p' className='normal-case'>
             no area is marked — the words are about the whole picture
           </Text>
@@ -144,14 +163,18 @@ export function WhatModelGetsPlaygroundModal({
         )}
       </WmgGroup>
 
-      <WmgGroup label='how areas travel' data-wmg-how-areas=''>
-        <Text size='micro' component='p' className='normal-case'>
-          each area is sent as a <b>crop</b> of its picture and as an <b>outline</b> drawn on a copy
-          of that picture, and it is described in <b>words</b>. <b>It is not a mask</b>: the image
-          route takes none, so an area is a hint about WHERE, not a boundary the model is held to.
-          The outlines are markers — the server tells the model not to draw them.
-        </Text>
-      </WmgGroup>
+      {/* Под вырезом этой группы нет вовсе: она описывает кроп и обведённую копию, которых на
+          этом маршруте не существует, — абзац про несуществующее читается как обещание. */}
+      {!cut && (
+        <WmgGroup label='how areas travel' data-wmg-how-areas=''>
+          <Text size='micro' component='p' className='normal-case'>
+            each area is sent as a <b>crop</b> of its picture and as an <b>outline</b> drawn on a
+            copy of that picture, and it is described in <b>words</b>. <b>It is not a mask</b>: the
+            image route takes none, so an area is a hint about WHERE, not a boundary the model is
+            held to. The outlines are markers — the server tells the model not to draw them.
+          </Text>
+        </WmgGroup>
+      )}
 
       <WmgGroup
         label='preset'

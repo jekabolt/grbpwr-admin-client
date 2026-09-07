@@ -22,6 +22,7 @@ import {
   REFS_MAX,
   areaLetter,
   itemMediaIds,
+  presetTakesAreas,
   refsCount,
   type PlaygroundRole,
   type Preset,
@@ -148,12 +149,26 @@ export function PicturesGroup({
   const markingIndex = items.findIndex((i) => (i.media.id ?? 0) === marking);
   if (marking && markingIndex < 0) setMarking(0);
 
+  /**
+   * ⚠ A CUT-OUT SENDS NO AREA, SO THIS SCREEN OFFERS NONE. Its whole request is one media id
+   * (`extra_input_media_ids`), and the segmentation route has no prompt to describe an area to —
+   * a `mark ▸` door under that chip is a door onto a fact that does not travel, and the areas
+   * drawn through it read on the inventory as work that was bought. The panel closes on the
+   * switch, in the body of the render: an effect would leave one committed frame with a drawing
+   * surface open over a run that cannot carry what is drawn.
+   *
+   * WHAT IS DRAWN IS NOT ERASED. The areas stay on the items — switching the chip back brings the
+   * letters and the words with it, and until then they simply do not travel (`effectiveItems`).
+   */
+  const takesAreas = presetTakesAreas(preset);
+  if (marking && !takesAreas) setMarking(0);
+
   const take = (media: common_MediaFull[], role: PlaygroundRole = '') => {
     const landed = draft.add(media, role);
     setDropped(media.length - landed);
   };
 
-  const refs = refsCount(draft.state);
+  const refs = refsCount(draft.state, preset);
   const taken = new Set(itemMediaIds(items));
 
   return (
@@ -221,7 +236,7 @@ export function PicturesGroup({
                     screen's alone, so it is drawn by this screen — in the one cluster the tile
                     leaves free (bottom left, where split/crop stand when a screen has them), with
                     the primitive's own corner skin so it is not a second visual language. */}
-                {!disabled && (
+                {!disabled && takesAreas && (
                   <div className='absolute bottom-1 left-1 z-20 flex items-end gap-1'>
                     <button
                       type='button'
@@ -349,7 +364,7 @@ export function PicturesGroup({
       )}
 
       {/* ─── marking, over the strip and never beside it ────────────────────────────────────── */}
-      {markingIndex >= 0 && (
+      {markingIndex >= 0 && takesAreas && (
         <MarkMode
           item={items[markingIndex]}
           index={markingIndex}

@@ -9,9 +9,9 @@ import type { PlaygroundDraft } from './drafts';
 import {
   PLAYGROUND_ITEMS_MAX,
   REGIONS_PER_ITEM_MAX,
+  isPlaygroundRole,
   type PlaygroundItem,
   type PlaygroundRegion,
-  type PlaygroundRole,
 } from './model';
 
 /**
@@ -104,7 +104,14 @@ export function PlaygroundRecallIntake({
           .map((region, i) => ({ points: pointsOf(region), text: (texts[i] ?? '').trim() }))
           .filter((r) => r.points.length >= 3)
           .slice(0, REGIONS_PER_ITEM_MAX);
-        items.push({ media: found, role: (item.role ?? '') as PlaygroundRole, regions });
+        /* ⚠ THE ROLE IS READ, NOT CAST. `item.role` is a plain string off the wire — a run frozen
+           by a server that knows a role this bundle does not carries that word, and a cast would
+           put it on the table typed as one of four. From there it would ride the next paid call
+           into `unknown_role`, refused after the reservation for a word the person never typed.
+           A role this build cannot spell becomes «just a picture», which is what the empty role
+           means to the server and what the missing chip says on screen. */
+        const role = (item.role ?? '').trim();
+        items.push({ media: found, role: isPlaygroundRole(role) ? role : '', regions });
       }
     }
 
