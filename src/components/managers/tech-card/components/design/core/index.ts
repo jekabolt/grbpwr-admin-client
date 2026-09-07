@@ -18,6 +18,8 @@ export { Reason } from './reason';
    Внутри файла они живут по-прежнему; экспортированное имя без потребителя — это обещание
    стабильности, за которое никто не платит и о котором забывают при первой же правке. */
 export { HALF_FACE, PlaceOrDrawCell } from './two-half-slot';
+export { TwoStepPicker } from './two-step-picker';
+export type { PickerBranch, PickerLeaf } from './two-step-picker';
 export {
   CopyWords,
   InventoryLine,

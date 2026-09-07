@@ -913,7 +913,7 @@ export function threedGate(
       ok: false,
       /* ⚠ БЕЗЫМЯННЫЙ ВЕРСТАК ТЕПЕРЬ ТОЖЕ НАЗЫВАЕТСЯ (G2-1): «the render slots are empty» без имени
          на карточке с несколькими осями не говорило, О КАКОМ верстаке речь, а `sample` — это его
-         настоящее имя на экране, то же самое, что стоит пунктом в селекте `build:`. */
+         настоящее имя на экране, то же самое, что стоит пунктом в селекте `for:` ряда GENERATE. */
       reason:
         `the render slots of ${benchName(named)} are empty — 3D is built from this bench alone and ` +
         `needs at least FRONT. Fill it on FABRIC RENDER, with ${benchName(named)} picked`,

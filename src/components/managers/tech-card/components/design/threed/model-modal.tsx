@@ -2,9 +2,10 @@ import { adminService } from 'api/api';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
-import { formatBytes, stripDataUrlPrefix } from 'utils/pattern';
+import { formatBytes } from 'utils/pattern';
 
 import { RENDER_SHEET_ORDER } from '../render/model';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
@@ -63,6 +64,15 @@ import type { WireUploadItem } from './wire';
  * `client_request_id` минтится на намерение и переживает повтор второго шага: полка уже держит
  * байты, и свежий id завёл бы на карточке вторую строку.
  *
+ * ⚠ ПЕРВЫЙ ВЫЗОВ БЕРЁТ КОНВЕРТ ЦЕЛИКОМ — `data:image/png;base64,…`. Соседний по папке
+ * `UploadContentModel` берёт ГОЛЫЙ base64 (у него поля объявлены `bytes`), и одна общая функция
+ * `stripDataUrlPrefix`, уместная там, стояла здесь и роняла КАЖДЫЙ снимок серверным отказом.
+ * Разбор — у самого поля, ниже.
+ *
+ * ⚠ РАКУРСОВ СТОЛЬКО, СКОЛЬКО НАЖАТИЙ: «snapshot this angle» снимает камеру КАК ОНА СТОИТ, и
+ * каждое нажатие — свой `client_request_id`, своя картинка на полке и своя строка на карточке.
+ * Отдельного органа «сними ещё один ракурс» поэтому нет и не нужно: жест уже повторяемый.
+ *
  * ═══ ОТКУДА ОКНО ЗНАЕТ КАРТОЧКУ ═══════════════════════════════════════════════════════════════
  *
  * Лист передаёт её пропом. Плитка студии — чужой примитив, у неё карточки нет; окно берёт её из
@@ -94,14 +104,21 @@ export function ThreedModelModal({
   const { registerUpload } = useDesignWrites(card);
   const apiRef = useRef<ModelViewerApi | null>(null);
   const [busy, setBusy] = useState<'' | 'shooting' | 'sending' | 'filing'>('');
+  /**
+   * ПОЧЕМУ СНИМОК НЕ ДОЕХАЛ — словами сервера, на экране, до следующей попытки. Отдельно от
+   * `error`: тот означает «модель не открылась здесь» и ЗАМЕЩАЕТ сцену, а отказ снимка приходит на
+   * живой сцене, которую человек как раз крутит, и гасить её нечем и незачем.
+   */
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   const loading = !!url && !facts && !error;
 
   // Новый адрес — новая загрузка: прошлые числа и прошлый отказ обязаны уйти, иначе окно покажет
-  // вес чужой модели.
+  // вес чужой модели, а полоса — отказ, полученный на другой.
   useEffect(() => {
     setFacts(null);
     setError(null);
+    setRefusal(null);
     setElapsed(0);
     startedAt.current = Date.now();
   }, [url]);
@@ -141,13 +158,34 @@ export function ThreedModelModal({
     const requestId = newClientRequestId();
     let mediaId = 0;
     try {
+      setRefusal(null);
       setBusy('shooting');
       const sides = [...RENDER_SHEET_ORDER];
       const shot = mode === 'sides' ? api.snapshotSides(sides) : api.snapshot();
       const ghostView = mode === 'sides' ? '' : api.nearestSide();
       setBusy('sending');
       const response = await adminService.UploadContentImage({
-        rawB64Image: stripDataUrlPrefix(shot.dataUrl),
+        /**
+         * ═══ КОНВЕРТ ЕДЕТ ЦЕЛИКОМ: `data:image/png;base64,…`, А НЕ ГОЛЫЕ БАЙТЫ ══════════════════
+         *
+         * ЗДЕСЬ СТОЯЛ `stripDataUrlPrefix(shot.dataUrl)`, И СНИМОК НЕ РАБОТАЛ НИ РАЗУ. Сервер
+         * читает это поле РОВНО как конверт и отказывает дословно: «invalid base64 image format:
+         * expected 'data:[mediatype];base64,[data]'» (`rawImageFromDataURL` в
+         * `apisrv/admin/content.go`, и та же фраза во второй раз — `getB64ImageFromString` в
+         * `bucket/image.go`). Он режет строку по `;base64,` и берёт медиатип из головы; без головы
+         * резать нечего, и до байтов дело не доходит вовсе.
+         *
+         * ⚠ СНЯТЬ ПРЕФИКС БЫЛО НЕ ОПЕЧАТКОЙ, А ПЕРЕНОСОМ ЧУЖОГО ПРАВИЛА. Рядом, в этой же папке,
+         * `model-upload-cell` снимает его ПРАВИЛЬНО — но у `UploadContentModel` поля `raw` и
+         * `preview` объявлены `bytes`, а grpc-gateway ждёт в JSON голый base64 без конверта. Два
+         * соседних вызова, две РАЗНЫЕ формы одного и того же — и функция с общим именем
+         * (`stripDataUrlPrefix`) выглядела уместной у обоих.
+         *
+         * ЧЕМ ЭТО ЗАКРЕПЛЕНО: остальные вызывающие `UploadContentImage` шлют конверт целиком —
+         * `uploadRaster` (`modals/use-edit-layer.ts`) и общая загрузка медиатеки
+         * (`media/utils/useUploadMedia.ts`). Теперь так шлют ВСЕ ТРИ.
+         */
+        rawB64Image: shot.dataUrl,
         preserveOriginal: true,
       });
       mediaId = response.media?.id ?? 0;
@@ -174,14 +212,32 @@ export function ThreedModelModal({
         'success',
       );
     } catch (e) {
-      // `registerUpload` УЖЕ сказал своё слово снекбаром на втором шаге (общий `onError` полосы);
-      // первый шаг и сама сцена говорят здесь.
-      if (!mediaId) {
-        showMessage(
-          e instanceof Error && e.message ? e.message : 'the snapshot did not go up',
-          'error',
-        );
-      }
+      /**
+       * ═══ ОТКАЗ ОСТАЁТСЯ НА ЭКРАНЕ СЛОВАМИ, А НЕ УЛЕТАЕТ СЕКУНДАМИ СНЕКБАРА ═══════════════════
+       *
+       * Здесь стоял ОДИН `showMessage(..., 'error')`, и его хватало ровно до того дня, когда отказ
+       * оказался постоянным: строка «invalid base64 image format: expected …» — это то, что сервер
+       * отвечал НА КАЖДОЕ нажатие, а всплывашка уносила её через несколько секунд, оставляя
+       * человека в окне, где кнопка снова живая и снова ничего не делает. Полоса держит слова
+       * сервера до следующей попытки — ровно как `RunRefusal` держит отказ прогона.
+       *
+       * СЛОВА СЕРВЕРА — ДОСЛОВНО, В КАВЫЧКАХ И БЕЗ ПЕРЕСКАЗА: только они называют причину
+       * (`requestHandler` достаёт `message` из тела ответа). Наша проза говорит ровно одно — НА
+       * КАКОМ шаге это случилось; `mediaId` отвечает на это точно: до него отказала полка, после
+       * него карточка. Кавычки нужны затем же, зачем они у `RunRefusal`: видно, где кончается наша
+       * фраза и начинается чужая, — иначе строка сервера читается как наш текст и «починить» её
+       * идут в этот файл.
+       *
+       * ⚠ ПУСТЫЕ КАВЫЧКИ НЕ ПЕЧАТАЮТСЯ. Сетевой сбой доезжает и вовсе без слов, и «the server
+       * answered: «»» было бы утверждением, что сервер что-то сказал.
+       */
+      const words = e instanceof Error ? e.message.trim() : '';
+      const step = mediaId
+        ? 'the picture is on the shelf, but filing it on the card did not go through'
+        : 'the snapshot did not go up';
+      setRefusal(
+        words ? `${step} — the server answered: «${words}»` : `${step}, and no words came back`,
+      );
     } finally {
       setBusy('');
     }
@@ -258,6 +314,25 @@ export function ThreedModelModal({
             </a>
           </Button>
         </div>
+
+        {/* ═══ ОТКАЗ СНИМКА — ПОД ЕГО ЖЕ ДВЕРЬМИ, СЛОВАМИ СЕРВЕРА, ДО СЛЕДУЮЩЕЙ ПОПЫТКИ ══════════
+            Форма та же, что у `RunRefusal` полосы генерации: `CalloutBox tone='error'`, слова
+            сервера в кавычках, наша проза — только про шаг. Сцена под ней остаётся живой: снимок
+            не удался, а модель открыта, и крутить её никто не мешает — и обе двери снова живые,
+            потому что исправление отказа часто НЕ второе нажатие (перевыбрать ракурс, дождаться
+            карточки). */}
+        {refusal && (
+          <CalloutBox tone='error'>
+            <Text
+              size='micro'
+              component='p'
+              data-probe='snapshot-refusal'
+              className='min-w-0 normal-case'
+            >
+              {refusal}
+            </Text>
+          </CalloutBox>
+        )}
 
         {error ? (
           /* СЛОВАМИ, А НЕ ПУСТОТОЙ. Пустая рамка на месте сцены читается как «сломался сервер», а

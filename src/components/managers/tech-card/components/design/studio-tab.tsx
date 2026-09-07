@@ -322,8 +322,8 @@ export function StudioTab({
      band-derived state is «unknown» (`bandless`), never «locked», and the cells still navigate.
 
      ⚠ СЕЛЕКТА КОЛОРВЕЯ ЗДЕСЬ БОЛЬШЕ НЕТ (G2-2). Он стоял в слоте `action` — «чей это рендер», —
-     и уехал ТУДА, ГДЕ ЭТОТ ВЫБОР ТРАТИТ ДЕНЬГИ: `for:` в ряду GENERATE фабрик-рендера, `build:`
-     над сборкой 3D, чипы PAINT на on-model. Довод целиком — в шапке `ChainRail` и у самого
+     и уехал ТУДА, ГДЕ ЭТОТ ВЫБОР ТРАТИТ ДЕНЬГИ: `for:` в ряду GENERATE — и фабрик-рендера, и 3D,
+     — чипы PAINT на on-model. Довод целиком — в шапке `ChainRail` и у самого
      `ColorwaySelect`; коротко: `colorway_id` прогона неизменяем, и цель обязана называться у
      кнопки, которая её замораживает, а не в ряду «где я нахожусь». Состояние по-прежнему ОДНО
      (`useColorwayChoice` выше) и раздаётся вниз пропами. */
@@ -526,8 +526,9 @@ export function StudioTab({
                           colorwayId={colorway.colorwayId}
                           colorwayLabel={colorway.label}
                           colorwayArchived={colorway.archived}
-                          /* `build:` над сборкой — тот же единственный сеттер. Список экран сузит
-                             сам: собирать можно только из колорвеев, у которых стоит FRONT. */
+                          /* `for:` в ряду GENERATE — тот же единственный сеттер, что у фабрик-
+                             рендера. Список экран сузит сам: собирать можно только из колорвеев,
+                             у которых стоит FRONT. */
                           colorways={colorway.colorways}
                           onColorwayChange={colorway.setColorwayId}
                         />

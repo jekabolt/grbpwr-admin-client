@@ -46,7 +46,7 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  *      GARMENT SIZE * the card's own size run                                 (on a model only)
  *      FIT            the card's fit, or a stated deviation for this run
  *      LOCKED …  · FILL THE EMPTY SIDES ›
- *      GENERATE · WHAT THE MODEL GETS ▸
+ *      GENERATE · for: [sample ▾] ……………………………………………………………… WHAT THE MODEL GETS ▸
  *   3D MODELS OF THIS CARD · built here or brought — the shelf, and BRING YOUR OWN (`./outputs`)
  *
  * 3D IS BUILT FROM THE RENDERS, NOT FROM THE DRAWINGS: the input lists the RENDER bench by view,
@@ -91,6 +91,8 @@ export function ThreedStudio({
    * ═══ ЧТО СОБИРАЕМ — ТОТ ЖЕ ЕДИНСТВЕННЫЙ СЕТТЕР СТУДИИ (G2-7) ═════════════════════════════════
    * Список сужает САМ ЭКРАН: собирать можно только из колорвеев, у которых на render-верстаке
    * стоит FRONT. Не задан `onColorwayChange` — органа нет вовсе (композитор без оси).
+   * Стоит он в ряду GENERATE, подписанный `for`, — ровно там же и тем же словом, что на FABRIC
+   * RENDER (разбор у самого ряда, ниже по файлу).
    */
   colorways?: common_AdminColorwayRef[];
   onColorwayChange?: (id: number) => void;
@@ -141,7 +143,7 @@ export function ThreedStudio({
    * своего клика, — и следующий рендер уезжал под ним. `run.colorway_id` неизменяем: такой прогон
    * не переименовать, его можно только выбросить и купить заново.
    *
-   * ЧТО ВМЕСТО НЕГО: экран говорит, чего не хватает, и ЖДЁТ ЖЕСТА. Список `build:` предлагает
+   * ЧТО ВМЕСТО НЕГО: экран говорит, чего не хватает, и ЖДЁТ ЖЕСТА. Список `for:` предлагает
    * только собираемые цели; текущая, если она не из них, в список не дописывается, а на её месте
    * стоит пункт-приглашение «pick a colourway» (инвариант «значение всегда среди пунктов» держит
    * сам `ColorwaySelect`, см. проп `unmatched`). Причину и ИМЯ цели называет полоса LOCKED ниже
@@ -345,59 +347,6 @@ export function ThreedStudio({
            обёрнуты своим `<div>`, иначе шов встал бы и внутри них. */
         className={GROUP_SEAM}
       >
-        {/* ═══ ЧТО СОБИРАЕМ — ПЕРВАЯ СТРОКА ЭКРАНА (G2-7) ══════════════════════════════════════
-            Владелец: «в 3D выбираем колорвей из размеченных в SIDES». Один орган, и он стоит НАД
-            входом, потому что именно он решает, чем этот вход будет: `build:` меняет и полосу
-            сторон под собой, и ворота, и `params.colorway_id` прогона. С рельса шагов орган снят
-            (G2-2) — там он отвечал на вопрос «где я», а этот вопрос про то, что покупается.
-
-            ⚠ ПУСТОЙ СПИСОК — ЭТО НЕ ПУСТОЙ СЕЛЕКТ, А ПРЕДЛОЖЕНИЕ ЖЕСТА. Живой список с нулём
-            пунктов читается как поломка («не загрузилось»); строка называет, ЧЕГО не хватает, и
-            ведёт ровно туда, где это делают. Ворота ниже при этом продолжают отказывать своими
-            словами — они про КАРТОЧКУ, а эта строка про ВЫБОР. */}
-        {onColorwayChange &&
-          (buildable.length === 0 ? (
-            /* ⚠ ДВЕРИ У ЭТОЙ СТРОКИ НЕТ НАРОЧНО, И ЭТО ЗАМЕРЕНО ГЛАЗАМИ НА СНИМКЕ. `EmptyState`
-               принимает `action`, и первая редакция ставила туда `fabric render ›` — а ровно такая
-               же кнопка с той же подписью и тем же назначением стоит на линейке INPUT в сорока
-               пикселях ниже, СТОИТ ВСЕГДА. Две одинаковые кнопки за одно (владелец: «не делай
-               разные кнопки для одного и того же»). Осталась одна — та, что ниже; предложение
-               называет и место, и жест словами. */
-            <EmptyState>
-              no colourway has a front render yet — mark one in FABRIC RENDER › SIDES
-            </EmptyState>
-          ) : (
-            <div data-threed-build=''>
-              <ColorwaySelect
-                band={band}
-                label='build'
-                probe='design-threed-build'
-                disabled={disabled}
-                only={buildable}
-                /* ⚠ ЦЕЛЬ, КОТОРУЮ СОБРАТЬ НЕЛЬЗЯ, НЕ ДОПИСЫВАЕТСЯ В СПИСОК И НЕ ПОДМЕНЯЕТСЯ САМА:
-                   на её месте стоит приглашение к жесту, а общий выбор студии ждёт клика человека
-                   (разбор — выше по файлу, на месте снятого эффекта-переезда).
-                   ⚠ ФРАЗА КОРОТКАЯ НАРОЧНО, И ЭТО ЗАМЕР, А НЕ ВКУС: «pick a colourway with a front
-                   render» не влезает в орган (190px) и ложится ДВУМЯ строками, поднимая ряд вдвое
-                   над 26px, которыми набраны все прочие ряды экрана. Условие при этом не потеряно
-                   — его называет полоса LOCKED четырьмя рядами ниже, и НЕ вообще, а по имени
-                   текущей цели («the render bench of sample holds renders, but not on FRONT»).
-                   Орган спрашивает ЖЕСТ, полоса называет ПРИЧИНУ; одно утверждение в двух местах
-                   было бы хуже. */
-                unmatched='pick a colourway'
-                choice={{
-                  colorwayId,
-                  setColorwayId: onColorwayChange,
-                  colorways,
-                  current: colorways.find((c) => (c.colorwayId ?? 0) === colorwayId) ?? null,
-                  label: colorwayLabel,
-                  archived: colorwayArchived,
-                  loading: false,
-                }}
-              />
-            </div>
-          ))}
-
         {/* ═══ INPUT · RENDERS BY VIEW — a READING of the render bench; every empty cell is a
             door back to FABRIC RENDER, where a side is filled. */}
         <RendersByViewGroup band={band} colorwayId={colorwayId} onGoToKind={onGoToKind} />
@@ -529,12 +478,80 @@ export function ThreedStudio({
             владелец жалуется пунктом 35 («слишком много»); а цена «по факту в истории» (п.27)
             касается обоих платных экранов, не одного. Дверь описи осталась: она висит на
             `onInspect`, а не на `shape` (разбор в `./generate-row`). */}
+        {/* ═══ ДЛЯ КОГО ЭТОТ ПРОГОН — В ОДНОМ РЯДУ С ДЕНЬГАМИ, КАК НА FABRIC RENDER ════════════
+            Владелец, дословно: «в 3D сделай выбор колорвея как в фабрик рендере около кнопки
+            генерейт». Орган стоял ШАПКОЙ блока (`build:`), над входом, и довод был про порядок
+            чтения — «сначала решаем, чем будет этот вход». Он не учёл того, что на соседнем
+            платном экране этот же самый выбор человек делает у самой кнопки: два места для одного
+            состояния (`useColorwayChoice`) заставляли искать орган заново на каждом шаге.
+
+            ТЕПЕРЬ РЯД ОДИН НА ОБА ЭКРАНА, И ПОДПИСЬ ТОЖЕ ОДНА — `for`. `colorway_id` прогона
+            неизменяем: и лист FABRIC RENDER, и поворот 3D навсегда остаются в истории того цвета,
+            под которым были куплены, — то есть это один и тот же вопрос, «для кого эта покупка»,
+            и задавать его двумя разными словами в двух шагах одной цепочки значило бы делать вид,
+            что вопросов два.
+
+            ⚠ СУЖЕНИЕ СПИСКА ОСТАЛОСЬ РОВНО ТЕМ ЖЕ (G2-7): предлагаются ТОЛЬКО колорвеи, у которых
+            на render-верстаке стоит FRONT (`buildable`), а цель, этого не прошедшая, НЕ
+            подменяется сама — на её месте стоит пункт-приглашение, и общий выбор студии двигает
+            только клик человека. Разбор целиком — у `threedColorwayOptions` и в шапке
+            `ColorwaySelect` (проп `unmatched`). */}
         <GenerateRow
           gate={gate}
           pending={run.isPending}
           disabled={disabled}
           onGenerate={generate}
           onInspect={() => setInspecting(true)}
+          trailing={
+            !onColorwayChange ? null : buildable.length === 0 ? (
+              /* ⚠ ПУСТОЙ СПИСОК — ЭТО НЕ ПУСТОЙ СЕЛЕКТ, А ПРЕДЛОЖЕНИЕ ЖЕСТА. Живой список с нулём
+                 пунктов читается как поломка («не загрузилось»); строка называет, ЧЕГО не хватает,
+                 и ведёт ровно туда, где это делают. Она НЕ пересказывает полосу LOCKED над собой:
+                 та говорит про ТЕКУЩИЙ верстак («the render slots of sample are empty»), а эта —
+                 что и переключаться некуда, ни один колорвей карточки фронта не держит.
+
+                 ⚠ ДВЕРИ У НЕЁ НЕТ НАРОЧНО, И ЭТО ЗАМЕРЕНО ГЛАЗАМИ НА СНИМКЕ. `EmptyState`
+                 принимает `action`, и первая редакция ставила туда `fabric render ›` — а ровно
+                 такая же кнопка с той же подписью и тем же назначением стоит на линейке INPUT
+                 выше, СТОИТ ВСЕГДА. Две одинаковые кнопки за одно (владелец: «не делай разные
+                 кнопки для одного и того же»). Осталась одна — та, что выше; предложение называет
+                 и место, и жест словами. */
+              <div data-threed-build-empty='' className='min-w-0 flex-1'>
+                <EmptyState>
+                  no colourway has a front render yet — mark one in FABRIC RENDER › SIDES
+                </EmptyState>
+              </div>
+            ) : (
+              <ColorwaySelect
+                band={band}
+                label='for'
+                /* ИМЯ ОРГАНА — ПАРА К `design-render-target`: тот же вопрос, тот же ряд, соседний
+                   шаг. Прежнее `design-threed-build` называло место, которого больше нет. */
+                probe='design-threed-target'
+                disabled={disabled}
+                only={buildable}
+                /* ⚠ ЦЕЛЬ, КОТОРУЮ СОБРАТЬ НЕЛЬЗЯ, НЕ ДОПИСЫВАЕТСЯ В СПИСОК И НЕ ПОДМЕНЯЕТСЯ САМА:
+                   на её месте стоит приглашение к жесту, а общий выбор студии ждёт клика человека
+                   (разбор — выше по файлу, на месте снятого эффекта-переезда).
+                   ⚠ ФРАЗА КОРОТКАЯ НАРОЧНО, И ЭТО ЗАМЕР, А НЕ ВКУС: «pick a colourway with a front
+                   render» не влезает в орган (190px) и ложится ДВУМЯ строками, поднимая ряд вдвое
+                   над той метрикой, которой набран ряд GENERATE. Условие при этом не потеряно —
+                   его называет полоса LOCKED над рядом, и НЕ вообще, а по имени текущей цели («the
+                   render bench of sample holds renders, but not on FRONT»). Орган спрашивает ЖЕСТ,
+                   полоса называет ПРИЧИНУ; одно утверждение в двух местах было бы хуже. */
+                unmatched='pick a colourway'
+                choice={{
+                  colorwayId,
+                  setColorwayId: onColorwayChange,
+                  colorways,
+                  current: colorways.find((c) => (c.colorwayId ?? 0) === colorwayId) ?? null,
+                  label: colorwayLabel,
+                  archived: colorwayArchived,
+                  loading: false,
+                }}
+              />
+            )
+          }
         />
       </Section>
 
