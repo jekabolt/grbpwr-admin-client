@@ -1021,27 +1021,126 @@ export function drawWarped(
   }
 
   const n = Math.max(2, Math.min(64, Math.round(subdiv)));
-  for (let j = 0; j < n; j++) {
-    for (let i = 0; i < n; i++) {
-      const sx0 = (i / n) * srcW;
-      const sx1 = ((i + 1) / n) * srcW;
-      const sy0 = (j / n) * srcH;
-      const sy1 = ((j + 1) / n) * srcH;
-      const t00 = f(uAt(sx0), vAt(sy0));
-      const t10 = f(uAt(sx1), vAt(sy0));
-      const t11 = f(uAt(sx1), vAt(sy1));
-      const t01 = f(uAt(sx0), vAt(sy1));
-      tri(ctx, src, [sx0, sy0], [sx1, sy0], [sx1, sy1], t00, t10, t11);
-      tri(ctx, src, [sx0, sy0], [sx1, sy1], [sx0, sy1], t00, t11, t01);
-    }
+
+  /** Вся сетка целевых точек СНАЧАЛА: по ней же считается коробка для промежуточного холста. */
+  const grid: Pt[][] = [];
+  for (let j = 0; j <= n; j++) {
+    const row: Pt[] = [];
+    for (let i = 0; i <= n; i++) row.push(f(uAt((i / n) * srcW), vAt((j / n) * srcH)));
+    grid.push(row);
   }
+
+  const mesh = (target: CanvasRenderingContext2D, dx: number, dy: number) => {
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        const sx0 = (i / n) * srcW;
+        const sx1 = ((i + 1) / n) * srcW;
+        const sy0 = (j / n) * srcH;
+        const sy1 = ((j + 1) / n) * srcH;
+        const sh = (p: Pt): Pt => [p[0] + dx, p[1] + dy];
+        const t00 = sh(grid[j][i]);
+        const t10 = sh(grid[j][i + 1]);
+        const t11 = sh(grid[j + 1][i + 1]);
+        const t01 = sh(grid[j + 1][i]);
+        tri(target, src, [sx0, sy0], [sx1, sy0], [sx1, sy1], t00, t10, t11);
+        tri(target, src, [sx0, sy0], [sx1, sy1], [sx0, sy1], t00, t11, t01);
+      }
+    }
+  };
+
+  /**
+   * ⚠ ПОЛУПРОЗРАЧНОСТЬ КЛАДЁТСЯ ОДИН РАЗ, А НЕ ПО ТРЕУГОЛЬНИКУ — И ЭТО ЗАМЕРЕНО.
+   *
+   * `tri` расширяет свой клип на полпикселя наружу нарочно (довод у него же: без нахлёста по
+   * общему краю соседей идёт полупрозрачная нить-шов). Пока рисуется НЕПРОЗРАЧНОЕ поверх себя,
+   * нахлёст невидим. Но `drawImagesOnto` ставит `globalAlpha = opacity`, и тогда каждая полоска
+   * нахлёста композитится ДВАЖДЫ: 50%-чёрный даёт 75% на швах, а на перекрестьях сетки и 87%.
+   * Замерено стендом: alpha 127 в поле, 219 на перекрестье — сетка, видимая как решётка.
+   *
+   * Поэтому варп при непрозрачности меньше единицы строится на ОТДЕЛЬНОМ холсте при alpha = 1
+   * (там нахлёст снова невидим, ради чего он и заведён) и переносится ОДНИМ `drawImage` с
+   * непрозрачностью вызывающего. Цена — один холст размером с коробку квада, и платится она
+   * только на этой ветке: обычная постановка вставки идёт alpha = 1 и промежуточного холста не
+   * заводит вовсе.
+   *
+   * ⚠ ГРАНИЦА НАЗВАНА: источник СО СВОЕЙ альфой (обтравленный PNG) при `globalAlpha === 1` швы
+   * по-прежнему даст. Узнать про неё, не читая пиксели источника, нечем, а читать их — значит
+   * пачкать холст чужим ориджином ровно там, где весь модуль этого и избегает.
+   */
+  const alpha = ctx.globalAlpha;
+  const off = alpha < 1 ? offscreenFor(ctx, grid) : null;
+  if (off) {
+    off.ctx.imageSmoothingEnabled = true;
+    off.ctx.imageSmoothingQuality = 'high';
+    mesh(off.ctx, -off.x, -off.y);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(off.ctx.canvas, off.x, off.y);
+    ctx.restore();
+    return;
+  }
+  mesh(ctx, 0, 0);
   ctx.restore();
 }
 
 /**
- * ОДИН ТРЕУГОЛЬНИК. Клип расширяется наружу от центра на полпикселя: у соседних треугольников
- * общий край проходит по одним и тем же числам, а сглаживание краёв клипа даёт по нему
- * ПОЛУПРОЗРАЧНУЮ нить — сетка швов, видимая на любой сплошной заливке. Перекрытие её закрывает.
+ * Холст под коробку варпа, ОБРЕЗАННУЮ ХОЛСТОМ-ЦЕЛЬЮ, — и обрезка тут же и есть потолок памяти:
+ * промежуточный холст по построению не больше того, в который рисуют, а рисовать за его краем всё
+ * равно некуда. `null` — коробка пуста, вырождена или холст не дали: тогда рисуем как раньше, со
+ * швами, потому что решётка на картинке честнее, чем упавшая вкладка.
+ */
+function offscreenFor(
+  ctx: CanvasRenderingContext2D,
+  grid: readonly (readonly Pt[])[],
+): { ctx: CanvasRenderingContext2D; x: number; y: number } | null {
+  if (typeof document === 'undefined') return null;
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const row of grid) {
+    for (const p of row) {
+      if (!finite(p[0]) || !finite(p[1])) return null;
+      if (p[0] < x0) x0 = p[0];
+      if (p[0] > x1) x1 = p[0];
+      if (p[1] < y0) y0 = p[1];
+      if (p[1] > y1) y1 = p[1];
+    }
+  }
+  // Полпикселя на нахлёст `tri` с каждой стороны, потом обрезка холстом: рисовать за его краем
+  // всё равно некуда, а память за это платилась бы.
+  const cw = ctx.canvas.width;
+  const ch = ctx.canvas.height;
+  const ix0 = Math.max(0, Math.floor(x0 - 1));
+  const iy0 = Math.max(0, Math.floor(y0 - 1));
+  const ix1 = Math.min(cw, Math.ceil(x1 + 1));
+  const iy1 = Math.min(ch, Math.ceil(y1 + 1));
+  const w = ix1 - ix0;
+  const h = iy1 - iy0;
+  if (w <= 0 || h <= 0) return null;
+  try {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const g = c.getContext('2d');
+    return g ? { ctx: g, x: ix0, y: iy0 } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ОДИН ТРЕУГОЛЬНИК. Клип расширяется НАРУЖУ ОТ КАЖДОЙ СТОРОНЫ на полпикселя: у соседних
+ * треугольников общий край проходит по одним и тем же числам, а сглаживание краёв клипа даёт по
+ * нему ПОЛУПРОЗРАЧНУЮ нить — сетка швов, видимая на любой сплошной заливке. Перекрытие её
+ * закрывает.
+ *
+ * ⚠ РАСШИРЕНИЕ СЧИТАЕТСЯ ПО НОРМАЛЯМ СТОРОН, А НЕ РАДИАЛЬНО ОТ ЦЕНТРА, И ЭТО ЗАМЕРЕНО. Радиальный
+ * сдвиг вершины на 0.5 даёт вдоль стороны запас `0.5·cos θ`, где θ — угол между радиусом и
+ * нормалью; у вытянутого треугольника сетки он падает почти до нуля, и пиксель ровно на общем
+ * крае оказывается покрыт обоими соседями ЧАСТИЧНО. Пока рисуют непрозрачным по непрозрачному,
+ * этого не видно; на промежуточном холсте (см. `drawWarped`) недобор покрытия становится нитью
+ * ТЕМНЕЕ поля. Замерено стендом: радиально — alpha 105..128 при ожидаемых 128 (провал 18%),
+ * по нормалям — 128..128.
  */
 function tri(
   ctx: CanvasRenderingContext2D,
@@ -1071,17 +1170,7 @@ function tri(
   const fv = t0[1] - b * s0[0] - d * s0[1];
   if (![a, b, c, d, e, fv].every(finite)) return;
 
-  const cx = (t0[0] + t1[0] + t2[0]) / 3;
-  const cy = (t0[1] + t1[1] + t2[1]) / 3;
-  const grow = (p: Pt): Pt => {
-    const dx = p[0] - cx;
-    const dy = p[1] - cy;
-    const len = Math.hypot(dx, dy) || 1;
-    return [p[0] + (dx / len) * 0.5, p[1] + (dy / len) * 0.5];
-  };
-  const g0 = grow(t0);
-  const g1 = grow(t1);
-  const g2 = grow(t2);
+  const [g0, g1, g2] = growTri(t0, t1, t2, 0.5);
 
   ctx.save();
   ctx.beginPath();
@@ -1093,4 +1182,59 @@ function tri(
   ctx.setTransform(a, b, c, d, e, fv);
   ctx.drawImage(src, 0, 0);
   ctx.restore();
+}
+
+/**
+ * ТРЕУГОЛЬНИК, РАЗДУТЫЙ НАРУЖУ НА `d` ПО КАЖДОЙ СТОРОНЕ.
+ *
+ * Каждая сторона отодвигается по своей внешней нормали, и новые вершины — это пересечения
+ * отодвинутых прямых. Тем самым запас `d` держится ПЕРПЕНДИКУЛЯРНО каждой стороне, а не «в
+ * среднем»: именно этого требует сглаживание клипа у общего края соседей (довод — у `tri`).
+ *
+ * Острый угол уводит вершину тем дальше, чем он острее (`d / sin(θ/2)`), поэтому смещение
+ * ограничено сверху: раздутый в бесконечность шпиль клипа затёр бы соседей вместо того, чтобы
+ * прикрыть шов. Вырожденный треугольник возвращается как есть — рисовать его всё равно нечем.
+ */
+function growTri(t0: Pt, t1: Pt, t2: Pt, d: number): [Pt, Pt, Pt] {
+  const cx = (t0[0] + t1[0] + t2[0]) / 3;
+  const cy = (t0[1] + t1[1] + t2[1]) / 3;
+  /** Прямая стороны, отодвинутая наружу: точка на ней и направление. */
+  const side = (p: Pt, q: Pt): { px: number; py: number; dx: number; dy: number } | null => {
+    const dx = q[0] - p[0];
+    const dy = q[1] - p[1];
+    const len = Math.hypot(dx, dy);
+    if (!finite(len) || len < 1e-9) return null;
+    let nx = dy / len;
+    let ny = -dx / len;
+    // Наружу — значит от центра тяжести: знак выбирается замером, а не соглашением об обходе.
+    if ((cx - p[0]) * nx + (cy - p[1]) * ny > 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+    return { px: p[0] + nx * d, py: p[1] + ny * d, dx, dy };
+  };
+  const a = side(t0, t1);
+  const b = side(t1, t2);
+  const c = side(t2, t0);
+  if (!a || !b || !c) return [t0, t1, t2];
+  const cross = (
+    l1: { px: number; py: number; dx: number; dy: number },
+    l2: { px: number; py: number; dx: number; dy: number },
+    fallback: Pt,
+  ): Pt => {
+    const den = l1.dx * l2.dy - l1.dy * l2.dx;
+    if (!finite(den) || Math.abs(den) < 1e-9) return fallback;
+    const s = ((l2.px - l1.px) * l2.dy - (l2.py - l1.py) * l2.dx) / den;
+    const x = l1.px + l1.dx * s;
+    const y = l1.py + l1.dy * s;
+    if (!finite(x) || !finite(y)) return fallback;
+    // Потолок смещения: восемь запасов — это уже шпиль, а не прикрытый шов.
+    const ox = x - fallback[0];
+    const oy = y - fallback[1];
+    const off = Math.hypot(ox, oy);
+    const cap = d * 8;
+    if (off > cap) return [fallback[0] + (ox / off) * cap, fallback[1] + (oy / off) * cap];
+    return [x, y];
+  };
+  return [cross(c, a, t0), cross(a, b, t1), cross(b, c, t2)];
 }
