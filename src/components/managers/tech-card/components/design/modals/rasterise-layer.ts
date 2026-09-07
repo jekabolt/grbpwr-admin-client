@@ -78,6 +78,19 @@ export type SceneInput = {
    * вставки: поверх пикселей, под линиями.
    */
   images?: readonly ImageStroke[];
+  /**
+   * ФАЙЛ СЛОЯ — ВЕКТОР, ПРИНЯТЫЙ ОТ ВЕКТОРИЗАТОРА, У КОТОРОГО ЕЩЁ НЕТ ПРАВИМОЙ ПРОЕКЦИИ.
+   *
+   * ⚠ БЕЗ НЕГО ФЛЭТ ВРАЛ МОЛЧА. На плате такой слой рисуется целым `<img>` во весь кадр (ветка
+   * `strokes.length === 0 && fileMediaId > 0` в модалке) — то есть человек видит ЧЕРТЁЖ и кладёт
+   * пуговицы прямо на него. Композит про этот ярус не знал вовсе, и «сохранить как картинку»
+   * отдавало наружу подложку с пуговицами и БЕЗ чертежа: вещь, которой на экране не было ни
+   * секунды. Ярус тот же, что на плате, — поверх картинок, под штрихами.
+   *
+   * Приезжает ТЕМ ЖЕ прокси, что подложка: холст, на который лёг файл с медиа-сервера, испачкан,
+   * и `toDataURL` на нём бросает — то есть без прокси флэттен не отказал бы, а УПАЛ.
+   */
+  overlaySrc?: string;
 };
 
 /**
@@ -94,6 +107,7 @@ export async function composeScene({
   ratio,
   raster,
   images,
+  overlaySrc,
 }: SceneInput): Promise<{
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
@@ -101,6 +115,12 @@ export async function composeScene({
   h: number;
   /** Индексы `images`, чьи байты не приехали. Пустой список — на холсте ровно то, что на экране. */
   missingImages: number[];
+  /**
+   * Файл слоя просили, а он не приехал. Отдельный флаг, а не исключение: пипетка зовёт тот же
+   * композит и падать посреди жеста ей нечем, а флэттен обязан отказать СЛОВАМИ — по тому же
+   * доводу, по которому у него есть `missingImages`.
+   */
+  missingOverlay: boolean;
 }> {
   let image: HTMLImageElement | null = null;
   if (baseSrc && !raster) {
@@ -157,6 +177,22 @@ export async function composeScene({
   // ПОЛОЖЕННЫЕ КАРТИНКИ — ПОСЛЕ КРАСКИ, ДО ЧЕРТЕЖА. Довод — у поля `images`.
   const missingImages = images?.length ? await drawImagesOnto(ctx, images, w, h) : [];
 
+  // ФАЙЛ СЛОЯ — ПОВЕРХ КАРТИНОК, ПОД ШТРИХАМИ: тот же ярус, что на плате. Растягивается в кадр
+  // так же, как подложка (`objectFit: fill` там, `drawImage(…, w, h)` здесь) — второй способ
+  // вписать его разошёлся бы с экраном ровно на несовпадении пропорций.
+  let missingOverlay = false;
+  if (overlaySrc) {
+    try {
+      const dataUrl = await urlToDataUrl(overlaySrc);
+      const file = new Image();
+      file.src = dataUrl;
+      await file.decode();
+      ctx.drawImage(file, 0, 0, w, h);
+    } catch {
+      missingOverlay = true;
+    }
+  }
+
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   for (const stroke of strokes) {
@@ -177,7 +213,7 @@ export async function composeScene({
     }
   }
   ctx.setLineDash([]);
-  return { canvas, ctx, w, h, missingImages };
+  return { canvas, ctx, w, h, missingImages, missingOverlay };
 }
 
 /** Paint base + strokes into one canvas and hand back a PNG data URL. */

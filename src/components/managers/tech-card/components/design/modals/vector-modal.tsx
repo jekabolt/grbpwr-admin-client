@@ -24,7 +24,10 @@ import { provenanceLabel, readProvenance } from '../provenance';
 import { findMediaUrlInBand, useDesignWrites } from '../use-design-band';
 import { RASTER_FALLBACK_W, composeScene, pickSceneInk } from './rasterise-layer';
 import {
+  clearImageBytes,
+  expandImageQuads,
   fitImageQuad,
+  forgetImageBytes,
   hitImage,
   imageBox,
   imageCss,
@@ -1091,6 +1094,12 @@ export function VectorModal({
   imagesRef.current = images;
   /** Выбранная картинка — номер в `images`. Своё состояние, а не `selected`: это другой материал. */
   const [pictureAt, setPictureAt] = useState<number | null>(null);
+  /**
+   * ЧТО ВЗЯЛ ПРОШЛЫЙ КЛИК И ГДЕ. Ссылка, а не состояние: она не рисуется ничем и меняется внутри
+   * обработчика, которому нужен ответ ПРО СЕЙЧАС. Ею идёт круг по стопке перекрывающихся картинок
+   * — довод у самого хит-теста.
+   */
+  const pictureCycle = useRef<{ at: [number, number]; index: number } | null>(null);
   /** Слой картинок виден. Свойство ВЗГЛЯДА: во флэт уезжает то, что хранится, а не то, что видно. */
   const [picsOn, setPicsOn] = useState(true);
   /**
@@ -1581,6 +1590,8 @@ export function VectorModal({
   const commitFrameRef = useRef<() => void>(() => {});
   /** Открытие рамки шаблона, читаемое из эффекта восстановления — тот же приём, что у отмены. */
   const openBackdropFrameRef = useRef<(b: Backdrop) => void>(() => {});
+  /** Гашение рамки картинки, читаемое из отмены — она объявлена выше по телу, тот же приём. */
+  const dropPictureFrameRef = useRef<() => void>(() => {});
   /** Холст превью вставки. Байты в него кладёт эффект — рендер JSX холсты не красит. */
   const floatCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -1807,6 +1818,11 @@ export function VectorModal({
   useEffect(() => {
     if (!open) {
       seeded.current = false;
+      /* ⚠ ПОЛКА РАСПАКОВАННЫХ КАРТИНОК ОСВОБОЖДАЕТСЯ ЗДЕСЬ. Она МОДУЛЬНАЯ, то есть переживает и
+         эту модалку, и переход на другую карточку, а держит полноразмерные снимки: десяток
+         пуговиц 4000×4000 — это сотни мегабайт, которые без этого вызова не отпустит никто до
+         перезагрузки вкладки. Следующий визит заплатит сетью — это дешевле и это заметно. */
+      clearImageBytes();
       /* ⚠ ПРИЗНАК «ПРО ПОЛ УЖЕ СКАЗАНО» ГАСИТСЯ НА ЗАКРЫТИИ, А НЕ НИЖЕ ПО ТЕЛУ СИДА. Ниже —
          значит после РАННЕГО ВЫХОДА (`knownId > 0 && !loaded`), которого на повторном входе не
          миновать: «один раз за визит» превращалось в «один раз на два визита». Закрытие
@@ -1838,6 +1854,9 @@ export function VectorModal({
     const seeded0 = seedInitialImage(split.images, initialImage, seedRatio);
     setImages(seeded0);
     setPictureAt(null);
+    /* Круг по стопке — свойство ВИЗИТА: дожив до другой платы, второй клик целился бы в номер
+       записи, которой на этом слое нет. */
+    pictureCycle.current = null;
     setGoneSrc([]);
     setPicsOn(true);
     // Файл слоя — из прочитанного слоя или из списка полосы; URL — лучшая попытка по картинкам
@@ -2223,13 +2242,27 @@ export function VectorModal({
   const applyUndoResult = useCallback(
     (res: NonNullable<UndoResult>) => {
       /**
+       * КАРТИНКИ ЛЕНТА ВОЗВРАЩАЕТ СПИСКОМ — они живут в состоянии React ровно как штрихи, и
+       * подменить их может только их владелец. Рамка при этом гасится: она держит НОМЕР записи,
+       * а список под ней только что стал другим.
+       */
+      if (res.kind === 'images') {
+        dropPictureFrameRef.current();
+        imagesRef.current = res.images;
+        setImages(res.images);
+        /* ⚠ `goneSrc` НЕ ГАСИТСЯ. Это ответ ЭКРАНА про АДРЕС («по нему пришла битая картинка»), а
+           не про номер записи; вернувшаяся отменой пуговица с тем же мёртвым адресом обязана
+           по-прежнему рисоваться плашкой, а не мигать битым `<img>` на каждое ⌘Z. */
+        return;
+      }
+      /**
        * СМЕНА ЛИСТА ОТМЕНЯЕТСЯ ЦЕЛИКОМ, ОДНИМ КАДРОМ (круг 15, J-34).
        *
-       * Холст, штрихи и форма платы меняются ВМЕСТЕ: подставь их по одному, и между двумя
-       * присваиваниями существовал бы кадр, в котором штрихи считаны в долях нового листа, а
+       * Холст, штрихи, КАРТИНКИ и форма платы меняются ВМЕСТЕ: подставь их по одному, и между
+       * двумя присваиваниями существовал бы кадр, в котором штрихи считаны в долях нового листа, а
        * холст ещё старый, — то есть ровно та рассинхронизация, из-за которой круг G-4 ленту и
        * сносил. Всё, что держало координаты старого листа (маска, область, точка отрыва, живой
-       * жест), здесь же и гасится.
+       * жест, взятая в руку пуговица), здесь же и гасится.
        *
        * ⚠ `expanded` СТАНОВИТСЯ ПРОИЗВОДНЫМ ОТ ФОРМЫ, А НЕ ОТ ФАКТА КРОПА. Флаг запирает «save the
        * drawing only», и если бы он оставался взведённым после отмены, человек, вернувший лист к
@@ -2240,6 +2273,11 @@ export function VectorModal({
         rasterRef.current = res.layer;
         strokesRef.current = res.strokes;
         setStrokes(res.strokes);
+        /* И КАРТИНКИ ТОЖЕ — КРОП ИХ ДВИГАЛ. Квад хранится долями кадра, отмена возвращает кадр;
+           оставленный «после»-список лежал бы по координатам листа, которого больше нет. */
+        dropPictureFrameRef.current();
+        imagesRef.current = res.images;
+        setImages(res.images);
         setRatio(res.ratio);
         setRasterReady(!!res.layer);
         maskRef.current = null;
@@ -3930,13 +3968,25 @@ export function VectorModal({
 
   /* ═══ ПОЛОЖЕННЫЕ КАРТИНКИ: ПИСАТЕЛИ ══════════════════════════════════════════════════════════
    *
-   * ⚠ ЛЕНТЫ ОТМЕНЫ У НИХ НЕТ, И ЭТО НАЗВАНО ВСЛУХ, А НЕ ЗАБЫТО. `EditTimeline` знает два
-   * материала — линии и пиксели, — и третий в неё не помещается без правки самой ленты. Пока её
-   * нет, отмена у картинки ровно одна и она честная: Esc над живой рамкой возвращает СНИМОК НА
-   * ОТКРЫТИИ, то есть весь ход целиком, — тем же правилом, каким отменяется постановка шаблона.
-   * Снятие картинки при этом безвозвратно, и подпись кнопки говорит это словом «for good».
+   * ⚠ ЛЕНТА ОТМЕНЫ У НИХ ТЕПЕРЬ ОБЩАЯ СО ВСЕМИ. Здесь стояло обратное — «ленты у них нет, и это
+   * названо вслух», — и названная граница всё равно была дефектом, притом худшим, чем выглядела:
+   * не «у картинки нет отмены», а ⌘Z СНИМАЕТ ЧУЖУЮ ПРАВКУ. Линия, пуговица, «take it off», ⌘Z —
+   * и человек получает обратно ЛИНИЮ, а пуговица снята навсегда. Довод целиком — у `ImagesStep`
+   * в `vector-raster-history.ts`; здесь остаётся правило: ЭТА ФУНКЦИЯ — ЕДИНСТВЕННЫЙ ПИСАТЕЛЬ
+   * списка, и она ходит через ленту, потому что вторая дорога мимо неё дала бы ⌘Z, который иногда
+   * работает.
+   *
+   * ⚠ ПУСТОЙ ХОД В ЛЕНТУ НЕ КЛАДЁТСЯ. `commitPictureFrame` зовётся и тогда, когда рамку просто
+   * открыли и закрыли Enter'ом, ничего не потянув; шаг на это был бы ⌘Z, который «ничего не
+   * сделал», — а такой отмене человек перестаёт верить уже никогда (то же правило, что у
+   * `recordCombined`, только сравнивать здесь дёшево: список — это адреса и по восемь чисел).
    */
-  const writeImages = (next: ImageStroke[]) => {
+  const writeImages = (next: ImageStroke[], coalesce?: string) => {
+    const before = imagesRef.current;
+    if (JSON.stringify(before) !== JSON.stringify(next)) {
+      timeline.current.recordImages(before, next, coalesce);
+      bumpTl();
+    }
     imagesRef.current = next;
     setImages(next);
   };
@@ -3976,6 +4026,17 @@ export function VectorModal({
     setPictureAt(null);
     showMessage('the picture went back where it was', 'success');
   };
+
+  /**
+   * ⚠ ЖИВАЯ РАМКА КАРТИНКИ ГАСИТСЯ ПЕРЕД ЛЮБЫМ ХОДОМ ЛЕНТЫ. Она держит НОМЕР записи и её квад; за
+   * ⌘Z список меняется под ней, и оставленная рамка либо тянула бы соседнюю пуговицу, либо
+   * записала бы обратно то, что только что отменили.
+   */
+  const dropPictureFrame = () => {
+    if (frameRef.current?.owner === 'image') closeFrame();
+    setPictureAt(null);
+  };
+  dropPictureFrameRef.current = dropPictureFrame;
 
   /**
    * ПОЛОЖИТЬ КАРТИНКУ ИЗ БИБЛИОТЕКИ (⌘V и бросок приходят той же дверью — см. `MediaSlot`).
@@ -4019,12 +4080,15 @@ export function VectorModal({
     );
   };
 
-  /** Снять картинку со слоя. Безвозвратно — ленты у этого материала нет (довод выше). */
+  /** Снять картинку со слоя. ⌘Z её возвращает — лента у этого материала теперь общая со всеми. */
   const removePicture = () => {
     const at = pictureAt;
     if (at === null || frozen) return;
     closeFrame();
     setPictureAt(null);
+    /* Номера в стопке сдвинулись — круг обязан начаться заново, иначе следующий клик в то же
+       место целился бы «ниже» той, которой там уже нет. То же и после обмена местами. */
+    pictureCycle.current = null;
     writeImages(imagesRef.current.filter((_, i) => i !== at));
   };
 
@@ -4042,6 +4106,7 @@ export function VectorModal({
     [next[at], next[to]] = [next[to], next[at]];
     writeImages(next);
     setPictureAt(to);
+    pictureCycle.current = null;
     // Рамка держит НОМЕР, и после обмена он показывал бы на соседа: квад тот же, адрес другой.
     const fr = frameRef.current;
     if (fr?.owner === 'image') putFrame({ ...fr, imageAt: to });
@@ -4054,7 +4119,10 @@ export function VectorModal({
     if (at >= cur.length) return;
     const next = cur.slice();
     next[at] = { ...cur[at], opacity: Math.min(1, Math.max(0, pct / 100)) };
-    writeImages(next);
+    // ⚠ ВЕСЬ ПРОТЯГ РЕГУЛЯТОРА — ОДИН ШАГ ЛЕНТЫ. Ползунок шлёт значение на каждый пиксель
+    // движения; шаг на каждое съел бы потолок в двадцать шагов одним движением пальца, и ⌘Z
+    // перестал бы доставать до предыдущего РИСУНКА. Ключ склейки — довод у `ImagesStep`.
+    writeImages(next, `opacity:${at}`);
   };
 
   /* ═══ КРОП: РАМКА КАДРА ПРИМЕНЯЕТСЯ (G-4) ═════════════════════════════════════════════════
@@ -4130,6 +4198,9 @@ export function VectorModal({
        Тот же довод, по которому здесь же гасится источник штампа. */
     lastMark.current = null;
     setNibHover(null);
+    /* И ВЗЯТАЯ В РУКУ КАРТИНКА ОТПУСКАЕТСЯ. Рамка держит квад В ЮНИТАХ СТАРОЙ ПЛАТЫ; пережив
+       кроп, она поставила бы пуговицу по координатам листа, которого больше нет. */
+    dropPictureFrame();
     closeFrame();
 
     try {
@@ -4149,6 +4220,14 @@ export function VectorModal({
       const beforeStrokes = strokesRef.current;
       const beforeRatio = ratio;
       const beforeExpanded = expandedRef.current;
+      /**
+       * ⚠ И КАРТИНКИ ТОЖЕ. Здесь был дефект молчаливого рода: пересчитывались штрихи и растр, а
+       * квады пуговиц оставались долями СТАРОГО кадра. Обрезка листа вдвое отправляла каждую
+       * пуговицу ровно вдвое не туда, где её оставили, — и на экране это читалось бы как «редактор
+       * сам их подвинул». Довод и правило про выпавшие за новый лист — у `expandImageQuads`.
+       */
+      const beforeImages = imagesRef.current;
+      const nextImages = expandImageQuads(beforeImages, plan);
       if (layer) {
         /* НОВЫЙ ХОЛСТ — НОВЫЙ ОБЪЕКТ; старый уходит в ленту ЖИВЫМ, а не копией: шаги ниже по
            стопке адресуют его пиксели, и отмена обязана вернуть им ИМЕННО их холст. */
@@ -4156,6 +4235,12 @@ export function VectorModal({
       }
       strokesRef.current = nextStrokes;
       setStrokes(nextStrokes);
+      /* ⚠ КАРТИНКИ КЛАДУТСЯ МИМО `writeImages` НАРОЧНО, И ЭТО НЕ ОБХОД ЛЕНТЫ. Их шаг едет ВНУТРИ
+         шага `sheet` строчками ниже: записанный порознь, он требовал бы двух ⌘Z, и первое
+         вернуло бы пуговицы на старый лист, которого ещё нет, — тот же довод, по которому
+         составной шаг существует для линий и пикселей. */
+      imagesRef.current = nextImages;
+      setImages(nextImages);
       /* ОБЛАСТИ СНИМАЮТСЯ ЦЕЛИКОМ, И ЭТО СКАЗАНО. Пересчитанная область, половина которой лежала
          за новым краем, стала бы дорожкой вокруг того, чего больше нет; одно правило на оба
          направления жеста честнее двух похожих. */
@@ -4179,6 +4264,8 @@ export function VectorModal({
         afterRatio: plan.ratio,
         beforeExpanded,
         afterExpanded: true,
+        beforeImages,
+        afterImages: nextImages,
       });
       bumpTl();
       rasterDirtyRef.current = true;
@@ -4187,8 +4274,11 @@ export function VectorModal({
       paintView();
       fitPlate();
       setTool('select');
+      /* СНЯТЫЕ ПУГОВИЦЫ НАЗЫВАЮТСЯ ЧИСЛОМ. Молча уехавшая за край картинка — это ровно та потеря,
+         которую человек заметит через неделю и не свяжет с кропом. */
+      const lostPics = beforeImages.length - nextImages.length;
       showMessage(
-        `the sheet is now ${plan.to.w}×${plan.to.h}${cuts ? ' — what fell outside the frame was cut, areas were dropped' : ''}. ⌘Z brings the old sheet back; as it stands it survives only as a NEW picture — use “save as a new picture”`,
+        `the sheet is now ${plan.to.w}×${plan.to.h}${cuts ? ' — what fell outside the frame was cut, areas were dropped' : ''}${lostPics > 0 ? `, ${lostPics} placed picture${lostPics === 1 ? '' : 's'} fell off the sheet` : ''}. ⌘Z brings the old sheet back; as it stands it survives only as a NEW picture — use “save as a new picture”`,
         'success',
       );
     } catch (err) {
@@ -4449,13 +4539,30 @@ export function VectorModal({
        * ⚠ ПОГАШЕННЫЙ СЛОЙ НЕ ЛОВИТ УКАЗАТЕЛЬ. Иначе выключенная видимость означала бы «не видно,
        * но мешает» — состояние, которого человек не поймёт и не отменит.
        */
+      /**
+       * ⚠ ВТОРОЙ КЛИК В ТУ ЖЕ ТОЧКУ БЕРЁТ СЛЕДУЮЩУЮ ВНИЗ. Без этого стопка перекрывающихся
+       * пуговиц запирала нижние навсегда: верхняя отвечает всегда, а органа «выбрать под ней» нет
+       * ни одного. Круг, а не тупик — с самой нижней выбор возвращается наверх.
+       *
+       * ⚠ ЯКОРЬ — ТОЧКА, А НЕ `pictureAt`, И ЭТО ПРОВЕРЕНО ПО КОДУ, А НЕ УГАДАНО. Пока картинка в
+       * руке, клик ВНУТРИ её квада сюда не доходит вовсе: рамка спрашивается первой (выше по этой
+       * же функции) и забирает его себе как начало перетаскивания. То есть `pictureAt` в этой
+       * точке всегда `null`, и якорь на нём был бы ступенью, заведённой мёртвой. Живой якорь —
+       * «прошлый клик был примерно здесь и взял вот эту»: человек отпускает рамку (Enter/Esc) и
+       * бьёт в то же место снова.
+       */
       if (picsOn) {
-        const pic = hitImage(imagesRef.current, at);
+        const cyc = pictureCycle.current;
+        const samePlace =
+          !!cyc && Math.abs(cyc.at[0] - at[0]) < 0.01 && Math.abs(cyc.at[1] - at[1]) < 0.01;
+        const pic = hitImage(imagesRef.current, at, samePlace ? cyc!.index : null);
         if (pic !== null) {
+          pictureCycle.current = { at, index: pic };
           openPictureFrame(pic);
           return;
         }
       }
+      pictureCycle.current = null;
       setPictureAt(null);
       const hit = hitStroke(strokes, at, PLATE_W, plateH, HIT_PX / (viewRef.current.zoom || 1));
       setSelected(hit);
@@ -5794,6 +5901,11 @@ export function VectorModal({
         // Погашенный слой картинок пипетка тоже не берёт: она обязана вернуть цвет, ВИДНЫЙ на
         // экране, — то же правило, что у линий и у краски строкой выше.
         images: picsOn ? images : [],
+        // И ФАЙЛ СЛОЯ — ПО ТОМУ ЖЕ ПРАВИЛУ. На слое «только файл» именно он и есть чертёж на
+        // экране; без него пипетка на линии принятого вектора возвращала бы цвет ПОДЛОЖКИ под
+        // ней. Условие ровно то же, что у экранного яруса, включая видимость: пипетка берёт
+        // видное, а не хранимое.
+        overlaySrc: vecOn && strokes.length === 0 && fileMediaId > 0 ? fileUrl : '',
         ratio: ratio || DEFAULT_RATIO,
       },
       at,
@@ -5972,20 +6084,42 @@ export function VectorModal({
    * Пропавшее медиа рисуется на плате плашкой «picture N is gone» — на КАРТИНКЕ такой плашки быть
    * не может, там просто дырка. Сплющить молча значило бы отдать наружу вещь без пуговицы и
    * назвать это готовым; поэтому число уезжает вызывающему, а он отказывается словами.
+   *
+   * ⚠ ИСТОЧНИКИ БЕРУТСЯ ИЗ РЕФОВ, А НЕ ИЗ СОСТОЯНИЯ, И ЭТО ЗАКРЫВАЕТ РАСХОЖДЕНИЕ ДОКУМЕНТА С
+   * КАРТИНКОЙ. `saveAsPicture` начинается с `settleFloatFirst()`, который ставит живую рамку —
+   * `commitPictureFrame` переписывает `imagesRef.current` ТУТ ЖЕ, в том же обработчике нажатия, а
+   * `setImages` перерисует состояние только СЛЕДУЮЩИМ кадром. Дальше `persist()` читает реф (и
+   * пишет на сервер НОВЫЙ квад), а этот композит читал состояние — то есть СТАРЫЙ. Итог: в слое
+   * пуговица на новом месте, на сплющенной картинке — на прежнем, и никто об этом не сказал ни
+   * слова. Тот же довод дословно приведён у `persist`; здесь он был не применён.
+   *
+   * ⚠ И ФАЙЛ СЛОЯ ТОЖЕ (ветка «только файл»). Принятый от векторизатора SVG рисуется на плате
+   * целым `<img>` поверх картинок, пока у слоя нет ни одного штриха; композит про него не знал, и
+   * флэт уезжал БЕЗ чертежа — вещь, которой на экране не было ни секунды. Условие ровно то же, что
+   * у экранного яруса, минус видимость слоя: сплющивается рисунок, а не взгляд.
    */
-  const rasterise = useCallback(async (): Promise<{ dataUrl: string; missing: number[] }> => {
-    const { canvas, missingImages } = await composeScene({
+  const rasterise = useCallback(async (): Promise<{
+    dataUrl: string;
+    missing: number[];
+    missingFile: boolean;
+  }> => {
+    const { canvas, missingImages, missingOverlay } = await composeScene({
       // ФЛЭТ НЕСЁТ КРАСКУ. Здесь видимость слоёв НЕ учитывается нарочно — как не учитывалась и
       // до растра: погашенный на время работы слой это свойство ВЗГЛЯДА, а сплющивается
       // рисунок, а не взгляд. По тому же правилу едут и картинки.
       baseSrc: rasterRef.current ? '' : baseSrc,
       raster: rasterRef.current,
-      strokes,
-      images,
+      strokes: strokesRef.current,
+      images: imagesRef.current,
+      overlaySrc: strokesRef.current.length === 0 && fileMediaId > 0 ? fileUrl : '',
       ratio,
     });
-    return { dataUrl: canvas.toDataURL('image/png'), missing: missingImages };
-  }, [baseSrc, ratio, strokes, images]);
+    return {
+      dataUrl: canvas.toDataURL('image/png'),
+      missing: missingImages,
+      missingFile: missingOverlay,
+    };
+  }, [baseSrc, ratio, fileMediaId, fileUrl]);
 
   /**
    * ═══ «USE AS COLOUR MAP» — ЕДИНСТВЕННАЯ КНОПКА РЕЖИМА КАРТЫ ══════════════════════════════════
@@ -6064,8 +6198,21 @@ export function VectorModal({
         /* ОТКАЗ ЦЕЛИКОМ, А НЕ КАРТИНКА С ДЫРКОЙ. Слой уже сохранён выше — это правда, и она
            названа: терять человеку нечего, а сплющенная вещь без пуговицы уехала бы в верстак
            и оттуда в тех-пакет, где её никто уже не опознает как неполную. */
+        /* ⚠ И ПОЛКА БАЙТОВ ПРО ЭТИ АДРЕСА ЗАБЫВАЕТСЯ. Отказ обещает «press this again», и обещание
+           обязано быть выполнимым: без этого повтор спрашивал бы у полки тот же ответ. Полка и
+           сама не помнит провалов (см. `loadImageBytes`), но обещание не вправе опираться на то,
+           что у соседнего модуля такая политика — оно опирается на этот вызов. */
+        for (const i of flat.missing) forgetImageBytes(imagesRef.current[i]?.src ?? '');
         setRefusal(
           `${flat.missing.length === 1 ? 'one of the placed pictures' : `${flat.missing.length} of the placed pictures`} could not be fetched, so the flat would come out with a hole where it stands. The drawing itself IS saved. Remove the picture the sheet marks as gone, or wait for the media server, then press this again.`,
+        );
+        return;
+      }
+      if (flat.missingFile) {
+        /* ТОТ ЖЕ ОТКАЗ ПРО ФАЙЛ СЛОЯ. На плате он и есть чертёж; сплющить без него значило бы
+           отдать наружу подложку с пуговицами и назвать её вещью. */
+        setRefusal(
+          'the vector file of this layer could not be fetched, and it IS the drawing on the sheet — flattening without it would hand out the plate with the marks and no drawing. The layer itself IS saved. Wait for the media server and press this again.',
         );
         return;
       }
@@ -6888,7 +7035,7 @@ export function VectorModal({
                       data-undo-chip={timeline.current.nextUndoKind() ?? ''}
                       title={
                         tl.depth
-                          ? `undo the last ${{ pixels: 'pixel gesture', lines: 'line gesture', both: 'gesture — it took both lines and pixels', sheet: 'change of the sheet itself — the crop comes off and the old sheet comes back' }[timeline.current.nextUndoKind() ?? 'lines']} (⌘z) · ${tl.depth} step${tl.depth === 1 ? '' : 's'} kept, ceiling ${RASTER_UNDO_DEPTH} or ${RASTER_UNDO_BYTES / 1024 / 1024} MB of pixels`
+                          ? `undo the last ${{ pixels: 'pixel gesture', lines: 'line gesture', both: 'gesture — it took both lines and pixels', sheet: 'change of the sheet itself — the crop comes off and the old sheet comes back', images: 'thing done to a placed picture — it comes back where it was' }[timeline.current.nextUndoKind() ?? 'lines']} (⌘z) · ${tl.depth} step${tl.depth === 1 ? '' : 's'} kept, ceiling ${RASTER_UNDO_DEPTH} or ${RASTER_UNDO_BYTES / 1024 / 1024} MB of pixels`
                           : 'nothing to undo yet (⌘z)'
                       }
                     >

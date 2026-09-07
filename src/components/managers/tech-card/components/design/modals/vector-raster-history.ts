@@ -1,3 +1,4 @@
+import type { ImageStroke } from './vector-image-stroke';
 import {
   RASTER_UNDO_BYTES,
   RASTER_UNDO_DEPTH,
@@ -8,7 +9,7 @@ import {
 import type { VectorStroke } from './vector-strokes';
 
 /**
- * ОДНА ЛЕНТА ОТМЕНЫ НА ДВА МАТЕРИАЛА — ЛИНИИ И ПИКСЕЛИ.
+ * ОДНА ЛЕНТА ОТМЕНЫ НА ТРИ МАТЕРИАЛА — ЛИНИИ, ПИКСЕЛИ И ПОЛОЖЕННЫЕ КАРТИНКИ.
  *
  * ДВЕ СТОПКИ ПОД ОДНОЙ КЛАВИШЕЙ — ЭТО НЕ ДВЕ ОТМЕНЫ, А НЕПРЕДСКАЗУЕМАЯ. Пока у слоя были только
  * штрихи, ⌘Z означал ровно одно. С появлением пикселей соблазн завести вторую стопку велик и
@@ -34,6 +35,35 @@ import type { VectorStroke } from './vector-strokes';
 
 /** Шаг по линиям: полный список штрихов ДО жеста. Он дёшев и копируется целиком. */
 type LinesStep = { kind: 'lines'; before: VectorStroke[]; after: VectorStroke[] };
+
+/**
+ * ТРЕТИЙ МАТЕРИАЛ — ПОЛОЖЕННЫЕ КАРТИНКИ.
+ *
+ * ⚠ ЕГО ЗДЕСЬ НЕ БЫЛО, И ОТСУТСТВИЕ БЫЛО НАЗВАНО ВСЛУХ («ленты отмены у них нет») — то есть
+ * дефект был задокументирован, а не спрятан. Но названная граница всё равно оставалась дефектом,
+ * и хуже, чем выглядела: не «у картинки нет отмены», а ⌘Z ОТМЕНЯЕТ ЧУЖУЮ ПРАВКУ. Человек ставит
+ * линию, кладёт пуговицу, снимает её, жмёт ⌘Z — и получает обратно ЛИНИЮ, а пуговица остаётся
+ * снятой навсегда. Отмена, снимающая не последнее сделанное, ломает не картинки, а саму ленту:
+ * ей перестают верить целиком.
+ *
+ * Список картинок — это адреса и по восемь чисел на штуку: он дёшев ровно как список штрихов и
+ * копируется целиком, без арифметики прямоугольников, которой платят пиксели.
+ */
+type ImagesStep = {
+  kind: 'images';
+  before: ImageStroke[];
+  after: ImageStroke[];
+  /**
+   * КЛЮЧ СКЛЕЙКИ — ОДИН ПРОТЯГ РЕГУЛЯТОРА ЭТО ОДИН ШАГ, А НЕ ШЕСТЬДЕСЯТ.
+   *
+   * Непрозрачность живёт ползунком, а ползунок шлёт значение на каждый пиксель протяга. Шаг на
+   * каждое такое значение забил бы ленту так, что ⌘Z перестал бы доставать до предыдущего
+   * РИСУНКА — то есть потолок в двадцать шагов съедался бы одним движением пальца. Склейка идёт
+   * только с ВЕРШИНОЙ стопки и только по совпадающему ключу: стоит между двумя протягами лечь
+   * любому другому шагу, и следующий протяг начинает свой собственный.
+   */
+  coalesce?: string;
+};
 
 /** Шаг по растру: затронутый прямоугольник в двух состояниях. */
 type PixelsStep = {
@@ -108,16 +138,25 @@ type SheetStep = {
    */
   beforeExpanded: boolean;
   afterExpanded: boolean;
+  /**
+   * И КАРТИНКИ ТОЖЕ — ПОТОМУ ЧТО КРОП ИХ ДВИГАЕТ. Квад хранится долями КАДРА, кроп меняет кадр,
+   * значит `expandImageQuads` переписывает каждую пуговицу. Оставь их вне шага, и ⌘Z вернул бы
+   * старый лист со сдвинутыми по НОВОМУ листу пуговицами — состояние, которого не создавал никто.
+   */
+  beforeImages: ImageStroke[];
+  afterImages: ImageStroke[];
   bytes: number;
 };
 
-export type TimelineStep = LinesStep | PixelsStep | BothStep | SheetStep;
+export type TimelineStep = LinesStep | PixelsStep | BothStep | SheetStep | ImagesStep;
 
 /** Что вернула отмена: список штрихов, «пиксели уже на месте», оба разом, или пустая лента. */
 export type UndoResult =
   | { kind: 'lines'; strokes: VectorStroke[] }
   | { kind: 'pixels' }
   | { kind: 'both'; strokes: VectorStroke[] }
+  /** Картинки живут в состоянии React ровно как штрихи — лента их возвращает, а не кладёт сама. */
+  | { kind: 'images'; images: ImageStroke[] }
   /**
    * ЛИСТ ЛЕНТА ВЕРНУТЬ САМА НЕ МОЖЕТ. Пиксели она кладёт в холст своими руками, потому что холст
    * ей передали; холст же живёт в `rasterRef` модалки вместе с формой платы и списком штрихов, и
@@ -131,6 +170,7 @@ export type UndoResult =
       strokes: VectorStroke[];
       ratio: number;
       expanded: boolean;
+      images: ImageStroke[];
     }
   | null;
 
@@ -232,6 +272,28 @@ export class EditTimeline {
   }
 
   /**
+   * Запомнить правку СПИСКА КАРТИНОК. Зовётся ЕДИНСТВЕННЫМ писателем этого списка — иначе вторая
+   * дорога мимо ленты дала бы ⌘Z, который иногда работает, а это хуже, чем не работает никогда.
+   *
+   * `coalesce` склеивает подряд идущие правки одного органа в один шаг — довод у поля.
+   */
+  recordImages(
+    before: readonly ImageStroke[],
+    after: readonly ImageStroke[],
+    coalesce?: string,
+  ): void {
+    const top = this.past[this.past.length - 1];
+    if (coalesce && top && top.kind === 'images' && top.coalesce === coalesce) {
+      // ⚠ ПЕРЕПИСЫВАЕТСЯ ТОЛЬКО «ПОСЛЕ». «До» осталось тем, чем оно было в начале протяга, — иначе
+      // склейка означала бы отмену в середину движения, то есть в состояние, которого не было.
+      top.after = after.slice();
+      this.future = [];
+      return;
+    }
+    this.push({ kind: 'images', before: before.slice(), after: after.slice(), coalesce });
+  }
+
+  /**
    * Запомнить СМЕНУ ЛИСТА. Зовётся ПОСЛЕ того, как новый холст построен, и получает ОБА объекта.
    *
    * ⚠ `beforeLayer` НЕ КОПИРУЕТСЯ, И ЭТО НЕСУЩЕЕ. Копия стоила бы ещё один полноразмерный холст и,
@@ -248,6 +310,8 @@ export class EditTimeline {
     afterRatio: number;
     beforeExpanded: boolean;
     afterExpanded: boolean;
+    beforeImages: readonly ImageStroke[];
+    afterImages: readonly ImageStroke[];
   }): void {
     const px = (l: RasterLayer | null) => (l ? l.w * l.h * 4 : 0);
     this.push({
@@ -260,6 +324,8 @@ export class EditTimeline {
       afterRatio: args.afterRatio,
       beforeExpanded: args.beforeExpanded,
       afterExpanded: args.afterExpanded,
+      beforeImages: args.beforeImages.slice(),
+      afterImages: args.afterImages.slice(),
       bytes: px(args.beforeLayer) + px(args.afterLayer),
     });
   }
@@ -360,6 +426,7 @@ export class EditTimeline {
     if (!step) return null;
     this.future.push(step);
     if (step.kind === 'lines') return { kind: 'lines', strokes: step.before };
+    if (step.kind === 'images') return { kind: 'images', images: step.before };
     if (step.kind === 'sheet') {
       return {
         kind: 'sheet',
@@ -367,6 +434,7 @@ export class EditTimeline {
         strokes: step.beforeStrokes,
         ratio: step.beforeRatio,
         expanded: step.beforeExpanded,
+        images: step.beforeImages,
       };
     }
     if (step.kind === 'both') {
@@ -382,6 +450,7 @@ export class EditTimeline {
     if (!step) return null;
     this.past.push(step);
     if (step.kind === 'lines') return { kind: 'lines', strokes: step.after };
+    if (step.kind === 'images') return { kind: 'images', images: step.after };
     if (step.kind === 'sheet') {
       return {
         kind: 'sheet',
@@ -389,6 +458,7 @@ export class EditTimeline {
         strokes: step.afterStrokes,
         ratio: step.afterRatio,
         expanded: step.afterExpanded,
+        images: step.afterImages,
       };
     }
     if (step.kind === 'both') {
@@ -400,10 +470,10 @@ export class EditTimeline {
   }
 
   /** Что именно вернёт следующая отмена — рейка называет материал словом, а не глаголом «undo». */
-  nextUndoKind(): 'lines' | 'pixels' | 'both' | 'sheet' | null {
+  nextUndoKind(): TimelineStep['kind'] | null {
     return this.past[this.past.length - 1]?.kind ?? null;
   }
-  nextRedoKind(): 'lines' | 'pixels' | 'both' | 'sheet' | null {
+  nextRedoKind(): TimelineStep['kind'] | null {
     return this.future[this.future.length - 1]?.kind ?? null;
   }
 }
