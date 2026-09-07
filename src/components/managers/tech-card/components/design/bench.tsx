@@ -517,12 +517,6 @@ export function Bench({
         })}
       </div>
 
-      {/* Жест снятия — словами под лентой. `✕`, а не «клик по плите»: поверхность плиты — закон
-          углов `PictureTile` (зум), снятие — угол ✕; см. шапку `bench-slot.tsx`. */}
-      <Text size='nano' variant='label' component='p'>
-        click ✕ on a standing plate to take it off
-      </Text>
-
       {/* Пустые стороны есть, а свободных флэтов нет: всё, что вернулось, уже стоит. Дверь ведёт
           к ряду GENERATE этого же шага. */}
       {!disabled && emptySides > 0 && pool.length === 0 && (
