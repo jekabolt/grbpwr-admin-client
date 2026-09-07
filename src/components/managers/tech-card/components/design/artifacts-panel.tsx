@@ -1,5 +1,7 @@
 import type {
   GetDesignBandResponse,
+  common_AdminColorwayRef,
+  common_Color,
   common_DesignBenchSlot,
   common_DesignPicture,
   common_DesignRun,
@@ -9,6 +11,7 @@ import type {
 } from 'api/proto-http/admin';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
@@ -51,6 +54,10 @@ import {
 } from './bench-kinds';
 import { readBench, type BenchRead } from './bench-slot';
 import { CalloutRail } from './callout-rail';
+// ОДИН СЛОВАРЬ ИМЁН НА СТУДИЮ И НА ЛИСТ. `colorwayLabel` — та же лестница `devName → colorCode →
+// baseSku`, которой колорвей зовут в пикере и в столбцах SIDES; `archivedRef` — тот же предикат
+// архива. Второе написание разошлось бы с первым в день, когда у цвета появится четвёртое имя.
+import { archivedRef, colorwayLabel } from './colorway-picker';
 import { EMPTY_WORD, GROUP_GAP } from './core';
 import { benchDoor } from './doors';
 import { pictureHandle } from './handles';
@@ -72,6 +79,12 @@ import {
   serverStatesSelected,
   type BenchSide,
 } from './render';
+// ⚠ ИЗ `./render/model`, А НЕ ИЗ ЭКРАНА: `benchName` — ЕДИНСТВЕННОЕ написание слова `sample` на
+// всю полосу (оно живёт в чистом модуле ровно затем, чтобы экран и отказ не звали ось 0 двумя
+// разными словами), а `findDictionaryColour` — точное, регистрозависимое сравнение кода цвета,
+// которым словарный hex подставляется и в студии.
+import { benchName, findDictionaryColour } from './render/model';
+import { Swatch } from './render/field-row';
 import { pictureIsModel, threedResults } from './threed/media';
 import { ThreedModelModal } from './threed/model-modal';
 import { pictureIsDisplayOnly, type WireUploadItem } from './threed/wire';
@@ -79,7 +92,6 @@ import { newClientRequestId, useDesignWrites } from './use-design-band';
 import {
   SHEET_MIN_VIEWS,
   SILHOUETTE_VIEWS,
-  isSilhouetteView,
   normaliseViewKey,
   viewLabel,
   type SilhouetteView,
@@ -117,6 +129,15 @@ import { isPictureHidden } from './visibility';
 export type DocumentPlate = {
   key: string;
   name: string;
+  /**
+   * ЧТО ПИШЕТ САМА ПЛИТА, когда ряд вокруг неё уже назвал остальное. Пусто — пишется `name`.
+   *
+   * Ровно один случай на сегодня: рендеры сгруппированы по колорвею, шапка группы говорит `ROSSO`,
+   * и плита под ней пишет `FRONT`, а не `FRONT · ROSSO`. `name` при этом остаётся ПОЛНЫМ — он
+   * едет в увеличенный вид, в строку «где» списка CALLOUTS и в вопрос о снятии с листа, то есть
+   * туда, где шапки группы рядом нет и два «FRONT» были бы разметкой не той картинки.
+   */
+  caption?: string;
   mediaId: number;
   media?: common_MediaFull;
   /**
@@ -154,6 +175,13 @@ export type DocumentPlate = {
    * front».
    */
   benchKind?: 'flat' | 'render';
+  /**
+   * ЧЕЙ ЭТО ВЕРСТАК — колорвей слота, `0` = `sample`. Читается ИЗ СТРОКИ ВЕРСТАКА (`slot.
+   * colorway_id`), а не из порядка колорвеев карточки: карточка перечисляет цвета, которые у неё
+   * ЕСТЬ, а плита стоит там, куда её поставили, — и вывести одно из другого нельзя.
+   * `undefined` — «вопрос не задавали»: у флэта колорвейной оси нет по существу (L-4).
+   */
+  colorwayId?: number;
   /**
    * КАДР ТОЛЬКО ДЛЯ ПОКАЗА (D-24, `DesignPicture.display_only`). Виден здесь и на листе, никогда
    * не уезжает в промпт: сервер отказывает ему в слоте, в референсах и у денежной двери. Плита
@@ -575,15 +603,30 @@ export function flatOutputRows(
  * видимой части ленты.
  *
  * ЧИТАЕТСЯ ВЕСЬ ВЕРСТАК, ЛЮБЫМ КОЛОРВЕЕМ. Порядок — по стороне (`SILHOUETTE_VIEWS`), внутри
- * стороны — по колорвею: ряд остаётся читаемым как ряд сторон, а второй колорвей встаёт рядом со
- * своим соседом, а не в конце списка.
+ * стороны — по колорвею: список остаётся читаемым как список сторон, а второй колорвей встаёт
+ * рядом со своим соседом, а не в конце. Группировку по колорвею делает уже `renderGroups`, и
+ * пересортировать этот список она может — порядок сторон внутри группы от того не меняется.
  *
- * ⚠ ИМЯ ОБЯЗАНО РАЗЛИЧАТЬ ДВА КОЛОРВЕЯ ОДНОЙ СТОРОНЫ. Два «FRONT» в одном ряду — это разметка не
- * той картинки (тот же довод, что у `TILE 0` в `bandPlates`), поэтому колорвейная плита несёт имя
- * колорвея: `FRONT · ROSSO`, а без читаемого имени — `FRONT · CW 3`.
+ * ⚠ ОТБОРА `isSilhouetteView` ЗДЕСЬ БОЛЬШЕ НЕТ, И ЭТО СЛОВО ВЛАДЕЛЬЦА: «должны показываться ВСЕ
+ * размеченные рендеры». Отбор молча выбрасывал занятые слоты ДЕТАЛЕЙ — рендер, размеченный на
+ * `detail`, стоял в верстаке, печатался бы в тех-паке и не показывался на листе вовсе. Детали
+ * идут ЗА сторонами (ранг `SIDE_RANK_DETAIL`), как и в `documentPlates` у флэтов: лист читают
+ * сторонами, а деталь висит под своим именем.
+ *
+ * ⚠ ИМЯ ОБЯЗАНО РАЗЛИЧАТЬ ДВА КОЛОРВЕЯ ОДНОЙ СТОРОНЫ. Два «FRONT» в одном списке — это разметка
+ * не той картинки (тот же довод, что у `TILE 0` в `bandPlates`), поэтому колорвейная плита несёт
+ * имя колорвея: `FRONT · ROSSO`, а без читаемого имени — `FRONT · CW 3`. Это имя едет в увеличенный
+ * вид, в список CALLOUTS («где стоит указание») и в вопрос о снятии с листа — туда, где заголовка
+ * группы рядом НЕТ. На самой плите пишется `caption` — одна сторона: колорвей уже назван шапкой
+ * группы, и повторять его под ней значило бы печатать одно слово дважды в каждой ячейке.
  *
  * Плита, которая УЖЕ в медиа карточки, приходит отсюда карточной: документ старше верстака, и
  * сузить её до «bench» значило бы спрятать `✕` и пилюлю «on paper» у картинки, которая печатается.
+ * ⚠ ЧТОБЫ ЭТА ВЕТКА ЖИЛА, `already` НЕ ДОЛЖЕН БЫТЬ ЗАСЕЯН `onCard`. Он засевался — и тогда плита,
+ * взятая на карточку первым же указанием, ВЫПАДАЛА из верстачного чтения и приходила карточной
+ * строкой `documentPlates` с именем рода («render»), без стороны и без колорвея: на глазах у
+ * человека она вылетала из своей колорвейной группы в самый конец. Дедупликация внутри самого
+ * верстака (два слота на одну картинку) держится тем же множеством и не страдает.
  */
 export function renderBenchPlates(
   band: GetDesignBandResponse,
@@ -594,13 +637,8 @@ export function renderBenchPlates(
 ): DocumentPlate[] {
   const rows = (band.bench ?? [])
     .filter((row) => benchKindOf(row) === 'render')
-    .map((row) => ({ row, view: normaliseViewKey(row.viewKey), cw: colorwayOf(row) }))
-    .filter(({ view }) => isSilhouetteView(view))
-    .sort(
-      (a, b) =>
-        SILHOUETTE_VIEWS.indexOf(a.view as SilhouetteView) -
-          SILHOUETTE_VIEWS.indexOf(b.view as SilhouetteView) || a.cw - b.cw,
-    );
+    .map((row, at) => ({ row, at, view: normaliseViewKey(row.viewKey), cw: colorwayOf(row) }))
+    .sort((a, b) => sideRank(a.view) - sideRank(b.view) || a.cw - b.cw || a.at - b.at);
   const plates: DocumentPlate[] = [];
   for (const { row, view, cw } of rows) {
     const picture = row.picture;
@@ -608,13 +646,21 @@ export function renderBenchPlates(
     if (!picture || mediaId <= 0 || already.has(mediaId)) continue;
     already.add(mediaId);
     const named = cw > 0 ? colourwayName(cw).trim() || `CW ${cw}` : '';
+    /* ПОДПИСЬ ДЕТАЛИ — ЕЁ СОБСТВЕННОЕ ИМЯ, как у флэтовой детали в `documentPlates`. Слово
+       «detail» на трёх деталях подряд не различает их вовсе. */
+    const caption =
+      (sideRank(view) === SIDE_RANK_DETAIL ? (row.detailName ?? '').trim() : '') ||
+      viewLabel(view) ||
+      'detail';
     plates.push({
       key: `m-${mediaId}`,
-      name: [viewLabel(view).toUpperCase(), named.toUpperCase()].filter(Boolean).join(' · '),
+      name: [caption.toUpperCase(), named.toUpperCase()].filter(Boolean).join(' · '),
+      caption: caption.toUpperCase(),
       mediaId,
       media: picture.media,
       origin: onCard.has(mediaId) ? 'card' : 'bench',
       benchKind: 'render',
+      colorwayId: cw,
       viewKey: view,
       door: benchDoor({ viewKey: view, id: row.id }),
       pictureId: picture.id ?? 0,
@@ -624,6 +670,144 @@ export function renderBenchPlates(
     });
   }
   return plates;
+}
+
+/** Ранг вида в ряду: силуэты в порядке `views.ts`, всё прочее (деталь, ключ нового сервера) — за ними. */
+const SIDE_RANK_DETAIL = SILHOUETTE_VIEWS.length;
+function sideRank(view: string): number {
+  const at = SILHOUETTE_VIEWS.indexOf(view as SilhouetteView);
+  return at < 0 ? SIDE_RANK_DETAIL : at;
+}
+
+/**
+ * ═══ РЕНДЕРЫ ЛИСТА — ГРУППАМИ ПО КОЛОРВЕЮ (жалоба владельца по бете, 2026-09-07) ═══════════════
+ *
+ * Дословно: «в ARTIFACTS → THE SHEET → renders должны показываться ВСЕ размеченные рендеры, с
+ * привязкой к колорвею — и чтобы в UI было видно, группировались по колорвею; если слот не
+ * размечен — блок картинки показывать не надо, а то сейчас там криво выглядит».
+ *
+ * ТРИ РЕШЕНИЯ, И КАЖДОЕ ОТВЕЧАЕТ НА СВОЮ ПОЛОВИНУ ЖАЛОБЫ.
+ *
+ * 1. ПРИВЯЗКА ЧИТАЕТСЯ ИЗ ПЛИТЫ ВЕРСТАКА, А НЕ ИЗ ПОРЯДКА КОЛОРВЕЕВ КАРТОЧКИ. Карточка
+ *    перечисляет цвета, которые у неё ЕСТЬ; плита стоит там, куда её поставили (`slot.
+ *    colorway_id`). Вывести первое из второго нельзя ни в какую сторону: у карточки бывает цвет
+ *    без единого рендера (и группы у него не будет) и рендер под колорвеем, снятым с карточки
+ *    позже (и группа у него всё равно есть — работа достижима).
+ * 2. ПОРЯДОК ГРУПП — ТОТ ЖЕ, ЧТО У СТОЛБЦОВ SIDES В СТУДИИ (D1/D8, `colourwayColumns`): `sample`
+ *    первым, дальше колорвеи В ПОРЯДКЕ КАРТОЧКИ. Иначе один и тот же набор цветов читался бы на
+ *    двух экранах в двух разных порядках, и «второй столбец» перестал бы означать одно и то же.
+ *    Здесь порядок повторён, а не импортирован: `side-row.tsx` — это ЭКРАН со своими хуками,
+ *    словарём и `SidesSection`; тянуть его сюда ради семи строк сортировки значило бы затащить
+ *    в лист половину студии (тот же довод, что у `./pattern/model` в шапке файла).
+ * 3. ПУСТЫХ ЯЧЕЕК НЕТ ВОВСЕ, И ГРУППЫ БЕЗ ПЛИТ ТОЖЕ НЕТ. Это и есть «криво выглядит»: шесть
+ *    пустых рамок во весь рост кадра ради четырёх сторон, которых никто не размечал. Разметка
+ *    рендера живёт на STUDIO → FABRIC RENDER, где колорвей НАЗВАН; у пустой ячейки листа ответа
+ *    на вопрос «в какой колорвей положить» нет вовсе — поэтому её здесь и не рисуют (тот же
+ *    довод, что снял стороны у рендеров кругом H-39).
+ *
+ * ⚠ АРХИВНЫЙ КОЛОРВЕЙ ГРУППУ ПОЛУЧАЕТ — если у него есть плиты. Правило то же, что у столбца
+ * SIDES (D8): этим цветом больше не работают, но сделанное им остаётся достижимым. Пустых групп
+ * не бывает по построению, поэтому отдельного условия «архивный без плит» здесь нет.
+ */
+export type RenderGroup = {
+  key: string;
+  /** Колорвей группы; `0` = `sample`. `RENDER_GROUP_LOOSE` — плиты карточки вне всякого слота. */
+  colorwayId: number;
+  label: string;
+  archived: boolean;
+  /** Заливка свотча. Пусто — свотча нет ВОВСЕ (не пустой квадрат): довод у самой отрисовки. */
+  hex: string;
+  swatchTitle: string;
+  /**
+   * Пояснение к шапке, когда сама шапка вопроса не закрывает. Пусто у колорвейных групп: их имя и
+   * свотч говорят всё. Живой случай один — `not in a slot`: заголовок называет ОТСУТСТВИЕ, и без
+   * слова о том, откуда эти плиты и как их привязать, он читается как поломка, а не как факт.
+   */
+  hint: string;
+  plates: DocumentPlate[];
+};
+
+/**
+ * ПЛИТЫ, КОТОРЫЕ НЕ СТОЯТ НИ В ОДНОМ РЕНДЕР-СЛОТЕ. Живая карточка приходит на этот экран с
+ * `technicalMedia` рода RENDER и нетронутым верстаком (довод у `ArtifactsPanel`), и своя дверь
+ * листа `+ add a render` кладёт файл ровно туда же. Ни то, ни другое не называет колорвея — и
+ * положить их в `sample` значило бы сказать про них «семплились», чего никто не говорил.
+ */
+export const RENDER_GROUP_LOOSE = -1;
+
+export function renderGroups(
+  plates: DocumentPlate[],
+  colourways: common_AdminColorwayRef[],
+  dictColours: readonly common_Color[] | undefined,
+): RenderGroup[] {
+  const byColorway = new Map<number, DocumentPlate[]>();
+  for (const plate of plates) {
+    const id = plate.benchKind === 'render' ? (plate.colorwayId ?? 0) : RENDER_GROUP_LOOSE;
+    const list = byColorway.get(id);
+    if (list) list.push(plate);
+    else byColorway.set(id, [plate]);
+  }
+
+  const refs = new Map<number, common_AdminColorwayRef>();
+  const order: number[] = [0];
+  for (const ref of colourways) {
+    const id = ref.colorwayId ?? 0;
+    if (id <= 0 || refs.has(id)) continue;
+    refs.set(id, ref);
+    order.push(id);
+  }
+  /* Колорвей, под которым что-то размечено, но карточка его больше не перечисляет: группа у него
+     всё равно есть, иначе работа стала бы недостижимой. Порядок — по номеру, за известными. */
+  for (const id of [...byColorway.keys()].sort((a, b) => a - b)) {
+    if (id > 0 && !refs.has(id)) order.push(id);
+  }
+  order.push(RENDER_GROUP_LOOSE);
+
+  const groups: RenderGroup[] = [];
+  for (const id of order) {
+    const mine = byColorway.get(id);
+    if (!mine?.length) continue;
+    const ref = refs.get(id) ?? null;
+    /* СВОТЧ: цвет, названный САМИМ колорвеем, старше словарной подстановки по коду SKU — та же
+       лестница и тот же `title`, что у заголовка столбца SIDES. У `sample` и у плит вне слотов
+       цвета нет ПО СУЩЕСТВУ, и квадрат не рисуется вовсе (не рисуется пустым: пустой квадратик
+       слева от слова читается как невыбранный чекбокс — замерено кругом r3b). */
+    const devHex = (ref?.devHex ?? '').trim();
+    const dictHex = (findDictionaryColour(dictColours, ref?.colorCode)?.hex ?? '').trim();
+    const pantone = (ref?.pantone ?? '').trim();
+    const code = (ref?.colorCode ?? '').trim();
+    /* ИМЯ ГРУППЫ — ТА ЖЕ ЛЕСТНИЦА, ЧТО У ПОЛНОГО ИМЕНИ ПЛИТЫ, вплоть до запасного `CW 5`: колорвей,
+       которого карточка больше не перечисляет, обязан зваться одинаково в шапке и на плите под ней,
+       иначе одна картинка называется двумя словами на одном экране. */
+    const label =
+      id === RENDER_GROUP_LOOSE
+        ? 'not in a slot'
+        : id === 0
+          ? benchName()
+          : ref
+            ? colorwayLabel(ref)
+            : `CW ${id}`;
+    groups.push({
+      key: `cw-${id}`,
+      colorwayId: id,
+      label,
+      archived: archivedRef(ref),
+      hex: ref ? devHex || dictHex : '',
+      swatchTitle: devHex
+        ? pantone
+          ? `pantone ${pantone}`
+          : `development colour ${devHex} — no pantone named`
+        : dictHex
+          ? `dictionary colour${code ? ` ${code}` : ''} — not a pantone reference`
+          : `${label} names no colour yet`,
+      hint:
+        id === RENDER_GROUP_LOOSE
+          ? 'these are in the card’s media and stand in no render slot, so no colourway is stated for them — put one into a slot on STUDIO › FABRIC RENDER › SIDES to bind it'
+          : '',
+      plates: mine,
+    });
+  }
+  return groups;
 }
 
 /**
@@ -874,6 +1058,10 @@ export function ArtifactsPanel({
   const { showMessage } = useSnackBarStore();
   // The SAME cache entry the page reads and re-primes after every save. Not a second fetch.
   const { data: card } = useTechCard(techCardId);
+  /* СЛОВАРЬ ЦВЕТОВ — ЗАПАСНОЙ ИСТОЧНИК СВОТЧА В ШАПКЕ ГРУППЫ, и он уже загружен приложением один
+     раз на старте (`DictionaryProvider`). Колорвеи, заведённые до пантон-пикера, своего `dev_hex`
+     не несут, и их цвет находится по коду SKU — той же подстановкой, что в столбцах SIDES. */
+  const { dictionary } = useDictionary();
   // The band's ONE write seam — the same `setPictureSelected` the studio's outputs strips call.
   // A second way to write the mark is exactly what must not exist; a second DOOR to the one way is
   // what W-14 asks for: the choice is consumed here, so it can be amended here.
@@ -1044,20 +1232,35 @@ export function ArtifactsPanel({
   const flatSides = useMemo(() => benchSides(band, 'flat', COLORWAY_NONE), [band]);
 
   /**
-   * Имя колорвея для подписи плиты. `colorCode` — то же слово, которым колорвей зовут на вкладке
-   * COLOURWAYS; `baseSku` — запасное, когда кода нет. Ни одного нового запроса: карточка уже здесь.
+   * ═══ КОЛОРВЕИ КАРТОЧКИ — ОДИН СПИСОК НА ПОДПИСЬ ПЛИТЫ И НА ПОРЯДОК ГРУПП ═════════════════════
+   *
+   * ОБА ИСТОЧНИКА КАРТОЧКИ, ТЕМ ЖЕ ПОРЯДКОМ, ЧТО У `resolved`: переданная страницей карточка и
+   * загруженная этим экраном. Один из двух бывает пуст в зависимости от того, кто смонтировал
+   * вкладку, и ни подпись плиты, ни порядок групп не должны зависеть от этого. Ни одного нового
+   * запроса: карточка уже здесь, и в ней уже лежит `dev_hex`/`pantone` каждого цвета.
+   *
+   * ПОРЯДОК СОХРАНЯЕТСЯ КАРТОЧНЫЙ — он и есть порядок столбцов SIDES в студии (D1/D8).
    */
-  const colourwayName = useMemo(() => {
-    const byId = new Map<number, string>();
-    /* ОБА ИСТОЧНИКА КАРТОЧКИ, ТЕМ ЖЕ ПОРЯДКОМ, ЧТО У `resolved`: переданная страницей карточка и
-       загруженная этим экраном. Один из двух бывает пуст в зависимости от того, кто смонтировал
-       вкладку, и подпись плиты не должна зависеть от этого. */
+  const colourways = useMemo(() => {
+    const byId = new Map<number, common_AdminColorwayRef>();
     for (const ref of [...(techCard?.colorways ?? []), ...(card?.colorways ?? [])]) {
       const id = ref.colorwayId ?? 0;
-      if (id > 0 && !byId.has(id)) byId.set(id, (ref.colorCode || ref.baseSku || '').trim());
+      if (id > 0 && !byId.has(id)) byId.set(id, ref);
     }
-    return (id: number) => byId.get(id) ?? '';
+    return [...byId.values()];
   }, [techCard?.colorways, card?.colorways]);
+
+  /**
+   * Имя колорвея для ПОЛНОГО имени плиты (`FRONT · ROSSO` в увеличенном виде и в списке
+   * указаний). Та же лестница `devName → colorCode → baseSku`, что в шапке группы и в студии:
+   * плита и шапка над ней обязаны звать цвет одним словом.
+   */
+  const colourwayName = useMemo(() => {
+    const byId = new Map(
+      colourways.map((ref) => [ref.colorwayId ?? 0, colorwayLabel(ref)] as const),
+    );
+    return (id: number) => byId.get(id) ?? '';
+  }, [colourways]);
 
   const segments = useMemo(() => {
     const of = (p: DocumentPlate) => artifactKindOf(p.mediaId, runKinds, cardKindOf.get(p.mediaId));
@@ -1093,13 +1296,33 @@ export function ArtifactsPanel({
        не должно быть по слову владельца.
 
        Ряд стоит на плитах и только на плитах — пустых сторон у рендеров больше нет (довод у
-       `flatSides`), поэтому и `sideCells` здесь не зовётся. */
-    const seenRender = new Set(onCard);
-    const benchRender = renderBenchPlates(band, onCard, seenRender, colourwayName);
+       `flatSides`), поэтому и `sideCells` здесь не зовётся.
+
+       ⚠ ВЕРСТАК ЧИТАЕТСЯ ПЕРВЫМ, И ТОЛЬКО ПОТОМ ДОБИРАЮТСЯ ПЛИТЫ КАРТОЧКИ. Раньше было наоборот, и
+       множество `already` засевалось `onCard`: плита, взятую на карточку первым же указанием
+       (D-18), верстак больше не отдавал вовсе — она приходила карточной строкой `documentPlates` с
+       именем РОДА («render»), без стороны, без слота и без колорвея. С группами по колорвею это
+       перестало быть косметикой: картинка на глазах вылетала из своей колорвейной группы. Теперь
+       порядок обратный, а из карточных плит берутся только те, которых в верстаке нет. */
+    const benchRender = renderBenchPlates(band, onCard, new Set<number>(), colourwayName);
+    const onRenderBench = new Set(benchRender.map((p) => p.mediaId));
     const renderAll = mark([
-      ...plates.filter((p) => of(p) === 'render'),
-      ...benchRender.filter((p) => p.origin === 'bench'),
+      ...benchRender,
+      ...plates.filter((p) => of(p) === 'render' && !onRenderBench.has(p.mediaId)),
     ]);
+    /* ═══ ГРУППЫ ПО КОЛОРВЕЮ, И ПОРЯДОК ЯЧЕЕК СКВОЗНОЙ (жалоба владельца 2026-09-07) ════════════
+       `index` ячейки — место плиты в РЯДУ НА ЭКРАНЕ: по нему листает увеличенный вид. Значит
+       считать его надо сквозь все группы подряд, в том же порядке, в каком они рисуются, а
+       `renderPlates` обязан быть их конкатенацией — иначе «следующая» в зуме окажется не той,
+       что справа. Разбор самого порядка групп — у `renderGroups`. */
+    let renderAt = 0;
+    const renderGrouped = renderGroups(renderAll, colourways, dictionary?.colors).map((group) => ({
+      ...group,
+      cells: group.plates.map(
+        (plate): SheetCell => ({ type: 'plate', plate, index: renderAt++ }),
+      ),
+    }));
+    const renderPlates = renderGrouped.flatMap((group) => group.plates);
 
     const patternBand = bandPlates(band, 'pattern', new Set(onCard));
     const threedBand = bandPlates(band, 'threed', new Set(onCard));
@@ -1128,9 +1351,14 @@ export function ArtifactsPanel({
       /* РЕНДЕРЫ НЕ НЕСУТ `serverStates`, И ЭТО НЕ ПРОПУСК. Флаг живёт ровно ради двери `select`, а
          у рендера выбор — СЛОТ ВЕРСТАКА, ровно как у флэта. Вторая метка над тем же решением была
          бы вторым реестром одних выборов: «не делай разные кнопки для одного и того же». */
+      /* ⚠ У РЕНДЕРОВ РЯД НЕ ОДИН, А ПО ОДНОМУ НА КОЛОРВЕЙ, поэтому `cells` здесь — та же
+         последовательность, только без разрывов: её читают органы, которым группы не нужны
+         (`canPlaceOn`, счётчик указаний), и она обязана совпадать с `plates` по порядку. Рисует
+         же экран `groups`. */
       render: {
-        plates: renderAll,
-        cells: asCells(renderAll),
+        plates: renderPlates,
+        cells: renderGrouped.flatMap((group) => group.cells),
+        groups: renderGrouped,
         serverStates: false,
       },
       threed: {
@@ -1144,7 +1372,17 @@ export function ArtifactsPanel({
         serverStates: onmodelBand.serverStates,
       },
     };
-  }, [plates, band, runKinds, cardKindOf, chosenMedia, flatSides, colourwayName]);
+  }, [
+    plates,
+    band,
+    runKinds,
+    cardKindOf,
+    chosenMedia,
+    flatSides,
+    colourwayName,
+    colourways,
+    dictionary?.colors,
+  ]);
 
   const [selected, setSelected] = useState<number | null>(null);
   /** Which representation is on screen. `flat` is the default because the SHEET is made of flats. */
@@ -1752,6 +1990,113 @@ export function ArtifactsPanel({
   /** Read once, so the question and the act cannot disagree about how many are at stake. */
   const detachCount = detaching ? calloutsOn(detaching.mediaId) : 0;
 
+  /**
+   * ═══ ГРУППЫ КОЛОРВЕЕВ — ТОЛЬКО У РЕНДЕРОВ, И ЭТО НЕ ЭКОНОМИЯ ══════════════════════════════════
+   *
+   * У флэта колорвейной оси нет ПО СУЩЕСТВУ (L-4): один чертёж служит всем цветам, и делить его
+   * ряд на группы значило бы обещать ось, которой у него не будет никогда. У плитки, кадра
+   * турнтейбла и снимка на модели верстака нет вовсе, и группировать их не по чему. Читается
+   * `segments.render` напрямую, а не `segment`: у остальных четырёх поля `groups` нет, и союз из
+   * пяти форм пришлось бы уравнивать четырьмя `groups: null`.
+   */
+  const renderGroupRows = kind === 'render' ? segments.render.groups : null;
+
+  /**
+   * ═══ РЯД ПЛИТ — ОДНИМ НАБОРОМ ПРОПОВ, СКОЛЬКО БЫ РЯДОВ НИ БЫЛО НА ЭКРАНЕ ══════════════════════
+   *
+   * Рендеры рисуются по ряду на колорвей, остальные четыре сегмента — одним рядом. Второй, «почти
+   * такой же» вызов `PlateGrid` со своими двадцатью пропами разошёлся бы с первым первой же
+   * правкой (и разошёлся бы молча: типы у обоих одинаковы). Отличается ровно одно — какие ячейки и
+   * есть ли под ними дверь загрузки.
+   *
+   * ДВЕРЬ ОДНА НА СЕГМЕНТ, А НЕ ОДНА НА ГРУППУ. Принесённый файл кладётся в МЕДИА КАРТОЧКИ и ни в
+   * какой слот (`addPlateFromLibrary`), то есть колорвея он не называет; дверь внутри группы
+   * `ROSSO` обещала бы «положить в ROSSO» и обманывала бы.
+   */
+  const plateRow = (cells: SheetCell[], withAddDoor: boolean) => (
+    <PlateGrid
+      cells={cells}
+      layout={layout}
+      hoverIndex={hoverIndex}
+      onSlotMedia={!disabled ? placeInSlot : undefined}
+      onView3d={setViewing3d}
+      calloutsOf={calloutsOfPlate}
+      selected={selected}
+      canPlaceOn={canPlaceOn}
+      tool={tool}
+      /* ОДНОРАЗОВЫЙ ЖЕСТ ВОЗВРАЩАЕТ РУКУ К ЗАПИСКЕ, А НЕ К ПУСТОТЕ (D-18): лист живёт с
+         взведённым видом, и «поставил линию — рука пуста» вернуло бы снятый порядок
+         «сначала взведи». */
+      onToolDone={() => setTool(DEFAULT_TOOL)}
+      onPlacedCountChange={setPlaced}
+      onAddCallout={addCalloutOn}
+      bindings={surfaceBindings}
+      onZoom={setZoomAt}
+      /* ДВЕРЬ ЗАГРУЗКИ СТОИТ ВО ВСЕХ ТРЁХ ВИДАХ (V-20 г) — см. довод у
+         `addPlateFromLibrary`: род принесённого файла берётся у вида на экране. */
+      onAddPlate={withAddDoor && !disabled ? addPlateFromLibrary : undefined}
+      addPlateLabel={
+        kind === 'flat'
+          ? '+ add a flat'
+          : kind === 'render'
+            ? '+ add a render'
+            : kind === 'pattern'
+              ? '+ add a tile'
+              : kind === 'onmodel'
+                ? '+ add an on-model photo'
+                : '+ add a 3D model'
+      }
+      /* ЦЕНА НАЗВАНА ДО НАЖАТИЯ, А НЕ ПОСЛЕ. Словарь медиа карточки не знает кадра
+         турнтейбла, поэтому принесённый сюда файл числится рендером и покажется среди
+         рендеров. Сказать это тостом ПОСЛЕ выбора — значит дать человеку удивиться;
+         строка стоит на самом слоте, в уже зарезервированном под подпись месте. */
+      addPlateNote={
+        kind === 'threed'
+          ? 'filed as a render: the card has no 3D kind'
+          : kind === 'pattern'
+            ? 'filed as a render: the card has no tile kind'
+            : kind === 'onmodel'
+              ? 'filed as a render: the card has no on-model kind'
+              : undefined
+      }
+      onDetach={!disabled ? askDetach : undefined}
+      detachInert={detachInert}
+      /* ═══ ДВЕ ДВЕРИ, КОТОРЫЕ РАНЬШЕ БЫЛИ ОДНОЙ (K-7) ══════════════════════════════
+         `edit` открывает РАСТРОВЫЙ РЕДАКТОР — слова владельца: «в артифактс фабрик
+         рендерс кнопка эдит должна открывать растр эдитор». Прежний акт этой двери
+         (внести картинку в медиа карточки) никуда не делся и не мог: `media_id` выноски
+         адресует медиа КАРТОЧКИ, и без этого шага на рендере полосы указание не
+         поставить вовсе. Он исполняется первым же указанием (D-18); отдельной кнопки
+         у него больше нет (H-41). */
+      onEdit={!disabled ? setRasterOn : undefined}
+      editInert={editInert}
+      /* THE MARK'S DOOR RIDES ONLY THE LISTS WITH NO BENCH OF THEIR OWN — довод у
+         `marksChosen`. */
+      onToggleChosen={
+        marksChosen && !disabled && segment.serverStates
+          ? (plate) =>
+              setPictureSelected.mutate({
+                pictureId: plate.pictureId ?? 0,
+                selected: !plate.chosen,
+              })
+          : undefined
+      }
+      chosenInert={
+        !marksChosen
+          ? undefined
+          : disabled
+            ? 'the card is read-only for you — the mark is an edit of the card'
+            : SELECT_MARK_NOT_STATED
+      }
+      chosenPending={setPictureSelected.isPending}
+      /* ПИЛЮЛЯ `chosen` — ТЕМ ЖЕ ПРИЗНАКОМ, ЧТО И ДВЕРЬ (находка 3): список, у которого
+         выбор выносит слот верстака, не рисует метку выбора вовсе. */
+      marksChosen={marksChosen}
+      sayPrints={kind !== 'flat'}
+      halo={kind !== 'flat'}
+    />
+  );
+
   return (
     <SectionStack>
       <SectionStack row>
@@ -1859,10 +2204,12 @@ export function ArtifactsPanel({
                 {kind === 'flat'
                   ? 'nothing is drawn on this card yet. Put a flat into a side below, or draw one on STUDIO — callouts are placed on the plate itself, here, once one exists.'
                   : kind === 'render'
-                    ? /* H-39: РЕНДЕРЫ — ЭТО ВЕРСТАК, и пустое состояние обязано звать туда, где их
-                         размечают, а не к стороне на этом экране: сторон у рендеров здесь больше
-                         нет (довод у `flatSides`). */
-                      'nothing is marked as a render of this card yet. Mark one on STUDIO → FABRIC RENDER and it appears here — or put your own file on the sheet with the door below.'
+                    ? /* H-39 + жалоба 2026-09-07: РЕНДЕРЫ — ЭТО ВЕРСТАК, и пустое состояние
+                         обязано звать ТУДА, ГДЕ ИХ РАЗМЕЧАЮТ, называя весь путь до органа.
+                         Про дверь загрузки эта строка молчит: дверь стоит прямо под ней, со
+                         своим словом на лице (`+ add a render`), и вторая ссылка на неё
+                         прозой была бы второй дверью в ту же комнату. */
+                      'no renders marked yet — mark them in STUDIO › FABRIC RENDER › SIDES'
                     : kind === 'pattern'
                       ? 'no tile of this card yet. A repeating tile is made on STUDIO → PATTERN, out of one picture; the ones you mark as chosen there are listed here — or put your own file into the slot below.'
                       : kind === 'onmodel'
@@ -1870,87 +2217,43 @@ export function ArtifactsPanel({
                         : 'no 3D of this card yet. A model is built on STUDIO from the renders standing in the sides — or put your own file into the slot below.'}
               </Text>
             )}
-              <PlateGrid
-                cells={segment.cells}
-                layout={layout}
-                hoverIndex={hoverIndex}
-                onSlotMedia={!disabled ? placeInSlot : undefined}
-                onView3d={setViewing3d}
-                calloutsOf={calloutsOfPlate}
-                selected={selected}
-                canPlaceOn={canPlaceOn}
-                tool={tool}
-                /* ОДНОРАЗОВЫЙ ЖЕСТ ВОЗВРАЩАЕТ РУКУ К ЗАПИСКЕ, А НЕ К ПУСТОТЕ (D-18): лист живёт с
-                   взведённым видом, и «поставил линию — рука пуста» вернуло бы снятый порядок
-                   «сначала взведи». */
-                onToolDone={() => setTool(DEFAULT_TOOL)}
-                onPlacedCountChange={setPlaced}
-                onAddCallout={addCalloutOn}
-                bindings={surfaceBindings}
-                onZoom={setZoomAt}
-                /* ДВЕРЬ ЗАГРУЗКИ СТОИТ ВО ВСЕХ ТРЁХ ВИДАХ (V-20 г) — см. довод у
-                   `addPlateFromLibrary`: род принесённого файла берётся у вида на экране. */
-                onAddPlate={!disabled ? addPlateFromLibrary : undefined}
-                addPlateLabel={
-                  kind === 'flat'
-                    ? '+ add a flat'
-                    : kind === 'render'
-                      ? '+ add a render'
-                      : kind === 'pattern'
-                        ? '+ add a tile'
-                        : kind === 'onmodel'
-                          ? '+ add an on-model photo'
-                          : '+ add a 3D model'
-                }
-                /* ЦЕНА НАЗВАНА ДО НАЖАТИЯ, А НЕ ПОСЛЕ. Словарь медиа карточки не знает кадра
-                   турнтейбла, поэтому принесённый сюда файл числится рендером и покажется среди
-                   рендеров. Сказать это тостом ПОСЛЕ выбора — значит дать человеку удивиться;
-                   строка стоит на самом слоте, в уже зарезервированном под подпись месте. */
-                addPlateNote={
-                  kind === 'threed'
-                    ? 'filed as a render: the card has no 3D kind'
-                    : kind === 'pattern'
-                      ? 'filed as a render: the card has no tile kind'
-                      : kind === 'onmodel'
-                        ? 'filed as a render: the card has no on-model kind'
-                        : undefined
-                }
-                onDetach={!disabled ? askDetach : undefined}
-                detachInert={detachInert}
-                /* ═══ ДВЕ ДВЕРИ, КОТОРЫЕ РАНЬШЕ БЫЛИ ОДНОЙ (K-7) ══════════════════════════════
-                   `edit` открывает РАСТРОВЫЙ РЕДАКТОР — слова владельца: «в артифактс фабрик
-                   рендерс кнопка эдит должна открывать растр эдитор». Прежний акт этой двери
-                   (внести картинку в медиа карточки) никуда не делся и не мог: `media_id` выноски
-                   адресует медиа КАРТОЧКИ, и без этого шага на рендере полосы указание не
-                   поставить вовсе. Он исполняется первым же указанием (D-18); отдельной кнопки
-                   у него больше нет (H-41). */
-                onEdit={!disabled ? setRasterOn : undefined}
-                editInert={editInert}
-                /* THE MARK'S DOOR RIDES ONLY THE LISTS WITH NO BENCH OF THEIR OWN — довод у
-                   `marksChosen`. */
-                onToggleChosen={
-                  marksChosen && !disabled && segment.serverStates
-                    ? (plate) =>
-                        setPictureSelected.mutate({
-                          pictureId: plate.pictureId ?? 0,
-                          selected: !plate.chosen,
-                        })
-                    : undefined
-                }
-                chosenInert={
-                  !marksChosen
-                    ? undefined
-                    : disabled
-                      ? 'the card is read-only for you — the mark is an edit of the card'
-                      : SELECT_MARK_NOT_STATED
-                }
-                chosenPending={setPictureSelected.isPending}
-                /* ПИЛЮЛЯ `chosen` — ТЕМ ЖЕ ПРИЗНАКОМ, ЧТО И ДВЕРЬ (находка 3): список, у которого
-                   выбор выносит слот верстака, не рисует метку выбора вовсе. */
-                marksChosen={marksChosen}
-                sayPrints={kind !== 'flat'}
-                halo={kind !== 'flat'}
-              />
+            {/* ═══ РЕНДЕРЫ — ПО РЯДУ НА КОЛОРВЕЙ, ОСТАЛЬНОЕ — ОДНИМ РЯДОМ ═══════════════════════
+                Жалоба владельца (бета, 2026-09-07): «должны показываться ВСЕ размеченные рендеры,
+                с привязкой к колорвею — и чтобы в UI было видно, группировались по колорвею».
+                Разбор состава и порядка групп — у `renderGroups`; здесь только их отрисовка. */}
+            {renderGroupRows
+              ? renderGroupRows.map((group) => (
+                  <div key={group.key} data-render-group={group.colorwayId}>
+                    <GroupLabel
+                      className={GROUP_GAP}
+                      /* ⚠ У `sample` И У ПЛИТ ВНЕ СЛОТОВ СВОТЧА НЕТ ВОВСЕ, А НЕ ПУСТОЙ КВАДРАТ.
+                         Пустой квадратик 11px слева от слова читается как НЕВЫБРАННЫЙ ЧЕКБОКС —
+                         шапка выглядит выключенной, хотя ничего не выключает (замерено кругом
+                         r3b на столбцах SIDES, решение то же). У колорвея пустой квадрат честен:
+                         цвет у него есть, просто не назван; у оси 0 цвета нет ПО СУЩЕСТВУ. */
+                      lead={
+                        group.colorwayId > 0 ? (
+                          <Swatch hex={group.hex} size={11} title={group.swatchTitle} />
+                        ) : undefined
+                      }
+                    >
+                      <span data-render-group-name title={group.hint || undefined}>
+                        {group.label}
+                        {group.archived ? ' (archived)' : ''}
+                      </span>
+                    </GroupLabel>
+                    {plateRow(group.cells, false)}
+                  </div>
+                ))
+              : plateRow(segment.cells, true)}
+            {/* ДВЕРЬ ЛИСТА — ПОСЛЕДНЕЙ И ОДНА (довод у `plateRow`). Своей шапки у неё нет:
+                на лице слота уже написано, что появится на его месте, а заголовок над одной
+                рамкой был бы подписью к подписи. */}
+            {renderGroupRows && !disabled ? (
+              <div className='mt-3' data-render-add-row=''>
+                {plateRow([], true)}
+              </div>
+            ) : null}
           </>
         </Section>
 
@@ -2591,7 +2894,13 @@ function PlateGrid({
                   data-plate-name
                   className='min-w-0 truncate'
                 >
-                  {plate.name}
+                  {/* ЯРЛЫК ПИШЕТ КОРОТКОЕ ИМЯ, КОГДА РЯД ВОКРУГ УЖЕ НАЗВАЛ ОСТАЛЬНОЕ (довод у
+                      `DocumentPlate.caption`): под шапкой `ROSSO` плита говорит `FRONT`. Полное
+                      имя от этого не пропадает — оно стоит в углах кадра (`zoom · FRONT · ROSSO`,
+                      `detach …`), в увеличенном виде и в строке «где» списка указаний. `title`
+                      здесь бесполезен: ярлык прозрачен для указателя и всплывающей подсказки не
+                      даёт вовсе (довод у второй строки ярлыка ниже). */}
+                  {plate.caption || plate.name}
                 </Text>
               {plate.origin === 'bench' && <Pill tone='mut'>bench</Pill>}
               {plate.origin === 'run' && <Pill tone='mut'>not on the card</Pill>}
