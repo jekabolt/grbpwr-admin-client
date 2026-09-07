@@ -65,9 +65,19 @@ export type ImageStroke = {
   quad: readonly [Frac, Frac, Frac, Frac];
   /** 0..1. Единица — обычная картинка; меньше — сквозь неё видно чертёж. */
   opacity: number;
-  /** Отражение по горизонтали. Необязательное: его отсутствие — «не отражена». */
-  flipX?: boolean;
 };
+
+/**
+ * ⚠ ПОЛЯ `flipX` ЗДЕСЬ НЕТ НАРОЧНО, И ЭТО ПРОВЕРЕНО, А НЕ ЗАБЫТО.
+ *
+ * Отражение уже ВЫРАЗИМО КВАДОМ: рамка вставки зовёт `scaleQuad` с `allowFlip: !fr.axis`, то есть
+ * протяжка ручки за противоположный край переворачивает квад, а гомография с отрицательным
+ * определителем зеркалит и `<img>` на экране (`quadCss`), и пиксели во флэте (`drawWarped`) —
+ * ОДНИМ И ТЕМ ЖЕ числом. Отдельный флаг был бы вторым способом сказать то же самое: он не имел бы
+ * ни одного писателя (кнопки «mirror» в рейке нет и не нужно — жест уже есть), а его читатель
+ * применялся бы ПОВЕРХ уже перевёрнутого квада. Ступень, заведённая мёртвой, — довод у
+ * `probe-exit-code-is-not-verdict`.
+ */
 
 /**
  * Версия документа, несущего картинки. На единицу выше той, которую читает `readLayer`, и это
@@ -117,7 +127,6 @@ function readImage(raw: unknown, report: { broken: boolean }): ImageStroke | nul
     quad: pts as unknown as ImageStroke['quad'],
     opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1,
   };
-  if (r.flipX === true) out.flipX = true;
   return out;
 }
 
@@ -187,8 +196,6 @@ export function joinImageDoc(doc: string, images: readonly ImageStroke[]): strin
       quad: i.quad.map((p) => [round4(p[0]), round4(p[1])]),
       opacity: Math.round(Math.min(1, Math.max(0, i.opacity)) * 1000) / 1000,
     };
-    // Ключ дописывается только когда ему есть что сказать — как `ink`, `gauge` и `step` у штриха.
-    if (i.flipX) row.flipX = true;
     return row;
   });
   return JSON.stringify(obj);
@@ -268,12 +275,8 @@ function inTri(p: readonly [number, number], a: Frac, b: Frac, c: Frac): boolean
 }
 
 /** CSS-трансформ для элемента `natW × natH` с `transform-origin: 0 0`, в юнитах платы. */
-export const imageCss = (
-  quad: Quad,
-  natW: number,
-  natH: number,
-  flipX?: boolean,
-): string => (flipX ? `${quadCss(quad, natW, natH)} translateX(${natW}px) scaleX(-1)` : quadCss(quad, natW, natH));
+export const imageCss = (quad: Quad, natW: number, natH: number): string =>
+  quadCss(quad, natW, natH);
 
 /** Осе-выровненная коробка картинки в юнитах платы — ею рисуется плашка пропавшей. */
 export const imageBox = (img: ImageStroke, plateW: number, plateH: number) =>
@@ -344,14 +347,11 @@ export async function drawImagesOnto(
     const quad = imageQuadPlate(img, w, h);
     ctx.save();
     ctx.globalAlpha = Math.min(1, Math.max(0, img.opacity));
-    // Отражение выражается КВАДОМ, а не трансформом холста: `drawWarped` ставит свой
-    // `setTransform` и любой внешний перевернул бы ещё и его собственную арифметику.
-    const drawn = img.flipX
-      ? ([quad[1], quad[0], quad[3], quad[2]] as unknown as Quad)
-      : quad;
     // `drawWarped` держит СВОЮ пару `save`/`restore` и матрицу за собой убирает сам — внешний
     // `setTransform` здесь затёр бы мир вызывающего, о котором этот модуль ничего не знает.
-    drawWarped(ctx, bytes, bytes.naturalWidth, bytes.naturalHeight, { quad: drawn }, FULL_REGION);
+    // Перевёрнутый квад зеркалит картинку тем же кодом: у гомографии просто отрицательный
+    // определитель, и отдельной ветки отражения здесь нет по построению.
+    drawWarped(ctx, bytes, bytes.naturalWidth, bytes.naturalHeight, { quad }, FULL_REGION);
     ctx.restore();
   }
   return missing;

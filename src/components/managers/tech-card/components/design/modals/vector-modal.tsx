@@ -745,9 +745,9 @@ const FRAME_ROTATE_PX = 26;
  *
  * `quadCss` строит матрицу «коробка `natW × natH` → квад», и число здесь может быть любым: сам
  * элемент растягивается `objectFit: fill`, а пропорции живут в квадe. Квадрат взят затем, чтобы
- * матрица не зависела от того, узнал ли бакет натуральные размеры файла, — иначе картинка
- * прыгала бы в момент, когда полоса дочитает медиа. Сотня, а не единица: у матрицы с делителем
- * порядка 1e-2 округление до шестого знака в `quadCss` съедало бы заметную долю перспективы.
+ * матрица не зависела от того, узнал ли бакет натуральные размеры файла: иначе картинка ПРЫГАЛА
+ * БЫ в момент, когда полоса дочитает медиа, — и прыгала бы только у части файлов, то есть
+ * невоспроизводимо.
  */
 const PLACED_BOX = 100;
 
@@ -1831,7 +1831,11 @@ export function VectorModal({
     /* КАРТИНКА, ПРИНЕСЁННАЯ ДВЕРЬЮ, КЛАДЁТСЯ ЗДЕСЬ, А НЕ ОТДЕЛЬНЫМ ЭФФЕКТОМ. Отдельный эффект
        гонялся бы за сидом наперегонки и на проигрыш клал бы её в документ, который сид тут же
        заменит прочитанным. */
-    const seeded0 = seedInitialImage(split.images, initialImage, wireRatio);
+    /* ФОРМА ПЛАТЫ БЕРЁТСЯ ТА, КОТОРУЮ СИД И ПРИМЕНИТ, а не форма с провода. Без базы плата
+       принимает форму ДОКУМЕНТА (строкой ниже), и вписанная по чужой форме картинка приезжала бы
+       растянутой ровно на их отношение. */
+    const seedRatio = baseMediaId > 0 ? wireRatio : doc.ratio;
+    const seeded0 = seedInitialImage(split.images, initialImage, seedRatio);
     setImages(seeded0);
     setPictureAt(null);
     setGoneSrc([]);
@@ -7524,7 +7528,7 @@ export function VectorModal({
                                 objectFit: 'fill',
                                 opacity: img.opacity,
                                 transformOrigin: '0 0',
-                                transform: imageCss(quad, PLACED_BOX, PLACED_BOX, img.flipX),
+                                transform: imageCss(quad, PLACED_BOX, PLACED_BOX),
                               }}
                             />
                           );
