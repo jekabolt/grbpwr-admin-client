@@ -19,7 +19,7 @@ import { InertDoor } from '../bench-slot';
 import { colorwayOf, refColorwayFor, slotHolding } from '../bench-kinds';
 import { Counter, TwoStepPicker, type PickerBranch } from '../core';
 import { serverSpeaksDesign } from '../capability';
-import { cropFamilies, type CropFamilies } from '../generation/composite';
+import { cropFamilies } from '../generation/composite';
 import { CropDeck, DECK_PEEK_MAX } from '../generation/crop-deck';
 import { runStatus } from '../generation/run-state';
 import { useElapsed } from '../generation/use-generation';
@@ -61,9 +61,9 @@ import { CELL_WIDTH, STRIP_CELL_PX, STRIP_FRAME_ASPECT, Strip, StripCell } from 
  * колорвея — отдельный глагол шага 1, а не пункт того же списка.
  */
 
-/** Пустая карта родства — для рода, который колодой не группируется. Один экземпляр: новая пустая
- *  карта на каждый рендер пересобирала бы `useMemo` ниже по кругу. */
-const EMPTY_FAMILIES: CropFamilies = { membersOf: new Map(), rootOf: new Map() };
+/* ЗДЕСЬ ЖИЛ `EMPTY_FAMILIES` — пустая карта родства «для рода, который колодой не группируется».
+   Такого рода на этом экране больше нет: колоду группируют ОБА (разбор у самого `families`), и
+   живая константа осталась бы приглашением снова выключить семьи одному из них. */
 
 /**
  * ═══ ОДНА СЕТКА НА ВЕСЬ РЯД ДВЕРЕЙ — F-9, И ЭТО ЗАМЕР, А НЕ ВКУС ══════════════════════════════
@@ -145,11 +145,26 @@ const INERT_DOOR = 'w-full [&>button]:h-5 [&>button]:w-full [&>button]:bg-bgColo
  * Рамки у отсека нет намеренно: блок уже обведён, а вторая рамка внутри — это box-in-box, прямой
  * запрет системы. `bgZebra` (#fafafa) на белом не читается вовсе: 5 единиц яркости против 18.
  */
-function Bay({ groupOf, children }: { groupOf?: number; children: React.ReactNode }): JSX.Element {
+function Bay({
+  groupOf,
+  /**
+   * ⚠ ТОЛЬКО НА СЕТКЕ ПОЛКИ 3D И ТОЛЬКО У СВЁРНУТОЙ КОЛОДЫ. Веер `CropDeck` — это лист ПЛЮС края
+   * кусков, торчащие справа: в одной дорожке лист сжался бы до трети её ширины, и выглядывать
+   * было бы не из-за чего. Раскрытая колода снова занимает одну дорожку и меряется как соседи.
+   * В полосе рендеров (`Strip`) свойства не существует: там ширину задаёт сама колода, дорожек нет.
+   */
+  spanTwo,
+  children,
+}: {
+  groupOf?: number;
+  spanTwo?: boolean;
+  children: React.ReactNode;
+}): JSX.Element {
   return (
     <div
       data-deck-group={groupOf || undefined}
       className={cn('flex shrink-0 items-stretch gap-2 py-1', groupOf ? 'bg-bgSecondary' : '')}
+      style={spanTwo ? { gridColumn: 'span 2' } : undefined}
     >
       {children}
     </div>
@@ -484,14 +499,23 @@ export function OutputsSection({
    * спрашивает «помечена ли картинка выше по цепочке»; `threed/media.ts` — поглощение постера
    * парой 3D; `provenance.ts` печатает сырой id родителя. Три вопроса, ни одного о колоде.
    *
-   * ⚠ ТОЛЬКО У РЕНДЕРОВ. Ряд 3D — это `threedResults`, свод пары «модель + её растр», и
-   * `derived_from` там уже занят другим утверждением (кроп постера не поглощается парой). Пакет
-   * 3D придёт своим кругом.
+   * ═══ И У 3D ТОЖЕ — ЭТО И ЕСТЬ ТОТ САМЫЙ «СВОЙ КРУГ» ════════════════════════════════════════
+   *
+   * Владелец, дословно (2026-09-07): «в 3D MODELS OF THIS CARD … у SNAPSHOT 4 SIDES — и это будет
+   * мультивью». Лист четырёх сторон УЖЕ приезжает объявленным мультивью (`threed/model-modal.tsx`
+   * шлёт `composite_views` из `RENDER_SHEET_ORDER`), и без семей полка показывала его обычной
+   * плиткой, а его куски — четырьмя чужими плитками рядом.
+   *
+   * ⚠ ЗДЕСЬ СТОЯЛО «ТОЛЬКО У РЕНДЕРОВ», И ЕГО ДОВОД БЫЛ ВЕРЕН РОВНО ДО ЭТОЙ ПРАВКИ, А НЕ ПОСЛЕ.
+   * Он говорил, что у 3D `derived_from` занят другим утверждением — поглощением постера парой
+   * (`threed/media.ts`). Утверждения РАЗНЫЕ и не спорят:
+   *   · пара 3D спрашивает `derivedFrom === 0` и потому производную НЕ поглощает вовсе — кроп
+   *     листа и правка снимка остаются собственными строками ряда, каждая своим результатом;
+   *   · семья спрашивает `derivation === 'crop'` (`isCutOut`), то есть ГЛАГОЛ, а не наличие
+   *     родителя, — правка (`flatten`) семьи не заводит и стоит соседней карточкой.
+   * Один и тот же столбец, два непересекающихся вопроса; общего у них — только имя.
    */
-  const families = useMemo(
-    () => (kind === 'render' ? cropFamilies(rows.map((r) => r.picture)) : EMPTY_FAMILIES),
-    [rows, kind],
-  );
+  const families = useMemo(() => cropFamilies(rows.map((r) => r.picture)), [rows]);
   /** Кусок → его строка ряда: открытая колода рисует членов теми же ячейками, что и ряд. */
   const rowById = useMemo(() => {
     const m = new Map<number, Row>();
@@ -835,8 +859,24 @@ export function OutputsSection({
      */
     /** В кадре стоит РАСТР, а не сам `.glb`: у прогона без миниатюры это не так (E-25). */
     const posterShown = !!src && !!modelUrl && src !== modelUrl;
-    const composite = kind === 'render' && pictureIsComposite(picture);
+    /**
+     * ⚠ РОД БОЛЬШЕ НЕ УЧАСТВУЕТ В ЭТОМ ВОПРОСЕ, И ЭТО НЕ ОСЛАБЛЕНИЕ СТОРОЖА. «Склеены ли в этом
+     * файле несколько видов» — факт О ФАЙЛЕ, который объявил тот, кто его завёл; у листа четырёх
+     * сторон (`snapshot 4 sides`) он объявлен ровно так же, как у листа рендер-прогона. Род решает
+     * лишь то, ЧТО ИЗ ЭТОГО СЛЕДУЕТ, и решает ниже, у каждой двери отдельно: слот верстака у 3D
+     * не спрашивается вовсе, а резать и раскрывать колоду можно у обоих.
+     */
+    const composite = pictureIsComposite(picture);
     const held = kind === 'render' ? slotHolding(band, picture.id ?? 0) : null;
+    /** Сколько видов объявлено в листе — число для бейджа полки 3D, оно же счёт кадров разреза. */
+    const declaredViews = (picture.compositeViews ?? []).length;
+    /**
+     * ⚠ КАК ЭТОТ КАДР НАЗЫВАЕТСЯ ВСЛУХ — НЕ `noun`. `noun` считает ПРЕДМЕТЫ полки («0 models»), и
+     * у 3D это «модель»; но двери правки и разреза стоят ровно там, где модели НЕТ (`!modelUrl` —
+     * разбор у самих дверей), то есть на растре. «edit model 3» назвало бы файл тем, чем он не
+     * является, и повело бы человека искать `.glb`.
+     */
+    const spokenNoun = kind === 'threed' ? '3d picture' : 'render';
     /**
      * ⚠ `run 0` — ЭТО НЕ ПРОГОН НОМЕР НОЛЬ. Со времён H-9 в списке стоят и плиты, за которыми
      * прогона нет вовсе: загруженная руками и «плоская» правка без основы обе приходят с
@@ -960,22 +1000,47 @@ export function OutputsSection({
            ховер «сплит и эдит», и оба угла живут по одному правилу: редактор работает ОТ
            РАСТРА, а `.glb` растром не является — на постере же он сработал бы и завёл в
            строке прогона обычную картинку, выдающую себя за выход 3D. `slot` не передаётся:
-           плитка полосы не слот верстака, и результат правки никуда вставать не обязан. */
+           плитка полосы не слот верстака, и результат правки никуда вставать не обязан.
+
+           ═══ И У 3D — НО НЕ У ЛИСТА ЧЕТЫРЁХ СТОРОН ═══════════════════════════════════════════
+           Владелец, дословно (2026-09-07): «у картинок SNAPSHOT THIS ANGLE должна быть кнопка
+           edit, а у SNAPSHOT 4 SIDES — и это будет мультивью». Две половины одной фразы, и вторая
+           не «тоже edit»: у листа жест другой — раскрыть и разрезать.
+
+           ⚠ ЛИСТУ ДВЕРЬ НЕ РИСУЕТСЯ ПОТОМУ, ЧТО СЕРВЕР ТЕРЯЕТ ЕГО МУЛЬТИВЬЮ, А НЕ ИЗ ОСТОРОЖНОСТИ.
+           `FlattenEditLayer` (`internal/store/design/layer.go`) переносит на ребёнка род, колорвей,
+           `ghost_view`, `display_only` и провенанс — и НЕ переносит `composite_views`: колонки нет
+           в его INSERT'е вовсе. То есть правка листа отдаёт широкий кадр четырёх сторон, который
+           уже никем не объявлен мультивью и потому НЕ РЕЖЕТСЯ. Дверь обещала бы «поправлю и
+           разрежу», а человек получил бы копию, которую нечем разложить.
+           (Та же потеря есть и у рендер-листов; там дверь стоит с прошлых кругов, и снимать её
+           этой волной значило бы менять экран, о котором владелец не просил. Названо в отчёте.)
+
+           РЕЗУЛЬТАТ ПРАВКИ ОСТАЁТСЯ КАДРОМ 3D САМ СОБОЙ: и род, и колорвей ребёнок наследует у
+           подложки на сервере (`kind = parent.Kind`, `cw = parent.ColorwayId`), поэтому снимок
+           колорвея N остаётся кадром колорвея N и встаёт на ЭТУ ЖЕ полку. Клиент здесь не
+           заявляет ни рода, ни цвета — второе мнение о них и было бы догадкой. */
         onEdit={
-          kind === 'render' && !writesOff && !modelUrl
+          !writesOff && !modelUrl && !(kind === 'threed' && composite)
             ? {
                 onClick: () => setEditingId(picture.id ?? 0),
-                ariaLabel: `edit render ${picture.ordinal ?? ''} — draw over this picture`.trim(),
+                ariaLabel: `edit ${spokenNoun} ${picture.ordinal ?? ''} — draw over this picture`.trim(),
                 title:
                   'draw over this picture — saving makes a NEW picture; the original is never overwritten',
               }
             : undefined
         }
+        /* ⚠ РЕЗАТЬ МОЖНО И ЛИСТ 3D, И ЭТО ПРОВЕРЕНО ПО БЭКЕНДУ, А НЕ ПРЕДПОЛОЖЕНО.
+           `SplitDesignPicture` рода не спрашивает вовсе (гейт композитности снят там же, с
+           разбором), а `SplitPicture` пишет кускам `kind = parent.Kind` и `cw = parent.ColorwayId`
+           — то есть куски снимка рождаются кадрами 3D того же цвета и встают на эту же полку.
+           `for_input` при этом `false` (умолчание `useSplitToInput`), и ролей промпта кускам не
+           пишется: снимок модели — не референс чертежа. */
         onSplit={
-          kind === 'render' && !writesOff && !modelUrl && pictureOffersSplit(picture, !!deck)
+          !writesOff && !modelUrl && pictureOffersSplit(picture, !!deck)
             ? {
-                onClick: () => split.openForPicture(picture, `render ${picture.ordinal ?? ''}`.trim()),
-                ariaLabel: `split render ${picture.ordinal ?? ''} into views`,
+                onClick: () => split.openForPicture(picture, `${spokenNoun} ${picture.ordinal ?? ''}`.trim()),
+                ariaLabel: `split ${spokenNoun} ${picture.ordinal ?? ''} into views`,
               }
             : undefined
         }
@@ -988,8 +1053,22 @@ export function OutputsSection({
            Список больше не сужен цветом, и «чей это рендер» обязано стоять НА САМОЙ ПЛИТКЕ:
            иначе шесть плит трёх цветов читаются как один ряд. `sample` — такое же имя, как
            `ROSSO`, и рисуется так же: ось 0 не «ничего не выбрано», а вечный верстак семпла.
-           У 3D пилюля занята другим (род файла и пометка) — там список сужен, и имя цвета стоит
-           в шапке раздела один раз. */
+           У 3D пилюля занята другим (род файла, лист и пометка) — там список сужен, и имя цвета
+           стоит в шапке раздела один раз.
+
+           ═══ «4 VIEWS» — ТА ЖЕ ПИЛЮЛЯ, ЧТО У ЛИСТОВ В ЛЕНТЕ ══════════════════════════════════
+           Владелец: лист четырёх сторон «будет мультивью». Мультивью на плитке этой системы
+           называется одним способом — числом видов в верхнем ярлыке (`generation-history.tsx`:
+           `badge = composite ? `${views.length} views` : …`), и второе начертание того же факта
+           разошлось бы с первым словом.
+
+           ⚠ ТОЛЬКО У 3D, И ЭТО НЕ ЗАБЫВЧИВОСТЬ. У рендера ярлык ЗАНЯТ именем колорвея (D5), и
+           отдать его числу видов значило бы вернуть на полку тот самый вопрос «а где мой рендер»,
+           ради которого имя туда и поставлено. Лист рендера говорит о себе дверью `expand ▸` /
+           `split ▸` в ряду под кадром — она у него была и осталась.
+
+           ⚠ И ПОМЕТКА НЕ ТЕРЯЕТСЯ: два факта об одном кадре складываются в один ярлык тем же
+           приёмом, каким уже собран «3d · selected» строкой выше. */
         badge={
           modelUrl
             ? chosen
@@ -997,11 +1076,13 @@ export function OutputsSection({
               : posterShown
                 ? '3d model'
                 : undefined
-            : selectable && chosen
-              ? 'selected'
-              : kind === 'render'
-                ? ownName
-                : undefined
+            : kind === 'threed' && composite
+              ? `${declaredViews} views${selectable && chosen ? ' · selected' : ''}`
+              : selectable && chosen
+                ? 'selected'
+                : kind === 'render'
+                  ? ownName
+                  : undefined
         }
         /* ═══ ВТОРАЯ СТРОКА ПОДПИСИ СНЯТА — F-13, ДОСЛОВНО «убери текст "AI · run 26 · from mixed
            input"» ═══════════════════════════════════════════════════════════════════════════════
@@ -1032,10 +1113,14 @@ export function OutputsSection({
         /* ⚠ РЯД ПОД КАДРОМ РИСУЕТСЯ, ТОЛЬКО ЕСЛИ В НЁМ ЧТО-ТО ЕСТЬ (E-25). У здоровой ячейки 3D
            под карточкой теперь не должно быть НИЧЕГО — а пустой `<div>` это всё-таки орган:
            `StripCell` даёт ему свою отбивку, и ряд ячеек разъезжается по высоте оттого, у какой
-           из них дверь жива. Единственные жильцы ряда — двери рендера (плашка/`split`/`mark ▸`) и
-           ОТКАЗ пометки; живая пометка уехала на кадр. */
+           из них дверь жива. Единственные жильцы ряда — двери рендера (плашка/`split`/`mark ▸`),
+           дверь колоды 3D и ОТКАЗ пометки; живая пометка уехала на кадр.
+
+           ⚠ У 3D РЯД ПОЯВЛЯЕТСЯ РОВНО У ЛИСТА, ИЗ КОТОРОГО УЖЕ ВЫРЕЗАНЫ КУСКИ (`deck`), и ни у
+           одной другой ячейки полки. Нерезаный лист свою дверь носит УГЛОМ (`split`), как и всякий
+           лист этой системы; у одиночного снимка под кадром по-прежнему нет ничего. */
         action={
-          kind === 'render' || (selectable && (!carries || writesOff)) ? (
+          kind === 'render' || !!deck || (selectable && (!carries || writesOff)) ? (
           /* ⚠ `flex-wrap` СНЯТ ВМЕСТЕ С ПРИЧИНОЙ ПЕРЕНОСА. Переносить было что, пока ряд мог
              держать ДВА органа шириной 104px и 50px в колонке 132px; теперь живая дверь ровно
              одна на ячейку (`held` ИЛИ колода ИЛИ лист ИЛИ пометка), и единственный ряд из двух
@@ -1289,6 +1374,54 @@ export function OutputsSection({
                   })()}
                 </span>
               ))}
+
+            {/* ═══ КОЛОДА ЛИСТА 3D — ДВЕ ДВЕРИ И НИ ОДНОЙ ТРЕТЬЕЙ ══════════════════════════════
+                Владелец, дословно (2026-09-07): у листа `snapshot 4 sides` «будет мультивью».
+                Жест мультивью в этой системе один и тот же на всех экранах — раскрыть колоду и
+                свернуть её обратно, — и здесь он написан теми же словами и тем же классом
+                (`expand ▸` / `DOOR`), что у соседа-рендера двумя сотнями строк выше.
+
+                ⚠ `apply splitted` ЗДЕСЬ НЕТ, И ЭТО РЕШЕНИЕ, А НЕ ПРОПУСК. Та дверь ставит куски В
+                СТОРОНЫ ВЕРСТАКА, а верстак читает только род `render`: постановка кадра 3D в
+                рендер-слот — серверный отказ `wrong_kind`. Дверь предлагала бы жест, на который
+                сервер отвечает «нет», причём молча — по наведению. Куски листа 3D избираются
+                пометкой на кадре (`select`), как и всякий другой выход этого рода.
+
+                ⚠ И ПОЭТОМУ ЖЕ СКЛАДЫВАЮЩАЯ ДВЕРЬ ЗДЕСЬ ПОЛНОЙ ШИРИНЫ, А НЕ КВАДРАТ 20×20. У
+                рендера квадрат — следствие соседства: рядом стоит `apply splitted`, и две двери
+                делят одну строку. Соседа нет — и квадратный глиф без слова остался бы единственным
+                органом строки, объявленным одной стрелкой. `fold ▾` говорит, что он делает.
+
+                ⚠ ОБЯЗАТЕЛЬНА ИМЕННО ОБЪЯВЛЕННАЯ КНОПКА: веер `CropDeck` объявленно нем при
+                `hostDoor` (`aria-hidden`, `tabIndex={-1}`), поэтому без этих двух дверей колода
+                была бы мышиной — ни таб-стопа, ни `aria-expanded`, ни слова читалке. */}
+            {kind === 'threed' &&
+              deck &&
+              (deck.open ? (
+                <Button
+                  variant='secondary'
+                  size='xs'
+                  className={DOOR}
+                  aria-expanded
+                  data-deck-fold={picture.id || undefined}
+                  title='fold these views back behind the sheet'
+                  onClick={() => setOpenDeck(null)}
+                >
+                  fold ▾
+                </Button>
+              ) : (
+                <Button
+                  variant='secondary'
+                  size='xs'
+                  className={DOOR}
+                  aria-expanded={false}
+                  data-deck-expand={picture.id || undefined}
+                  onClick={() => setOpenDeck(picture.id ?? 0)}
+                  title={`${(families.membersOf.get(picture.id ?? 0) ?? []).length}${(families.membersOf.get(picture.id ?? 0) ?? []).length === 1 ? ' view was' : ' views were'} cut from this sheet — open them as cards on the shelf`}
+                >
+                  expand ▸
+                </Button>
+              ))}
             {/* ═══ ЗДЕСЬ СТОЯЛИ `open` И `download` — ОБЕ СНЯТЫ (E-25) ═══════════════════════
                 Владелец, дословно: «кнопки OPEN DOWNLOAD SELECT должны появляться на ховер на
                 карточку а не кнопками снизу а кнопки DOWNLOAD быть не должно она только во вьере».
@@ -1464,9 +1597,68 @@ export function OutputsSection({
               <PendingCell run={run} />
             </Bay>
           ))}
-          {rows.map((row) => (
-            <Bay key={row.picture.id ?? 0}>{cell(row)}</Bay>
-          ))}
+          {/* ═══ ЛИСТ И ЕГО ВИДЫ — ОДНОЙ КОЛОДОЙ, ТЕМ ЖЕ ОРГАНОМ, ЧТО В ЛЕНТЕ И В ПОЛОСЕ ═══════
+              Владелец (2026-09-07): лист `snapshot 4 sides` «будет мультивью». Форма мультивью на
+              СЕТКЕ уже написана один раз — в ленте генераций: свёрнутая колода занимает ДВЕ
+              дорожки (`span 2`) и веером показывает края кусков, раскрытая садится в одну дорожку,
+              а куски встают следом обычными карточками. Здесь она позвана теми же тремя
+              значениями, только пропорция кадра своя (`STRIP_FRAME_ASPECT` — кадр полки).
+
+              ⚠ РАЗМЕР ЛИСТА СЧИТАЕТСЯ ОТ СОБСТВЕННОЙ КОРОБКИ КОЛОДЫ, А НЕ В ПИКСЕЛЯХ. Дорожка
+              здесь `minmax(148px, 1fr)`, то есть шире 148px на широком экране; фиксированное число
+              рассинхронизировало бы веер с дорожкой ровно там, где сетка растянулась. `calc((100%
+              - 8px) / 2)` — две дорожки и `gap-2` между ними, дословно формула ленты.
+
+              ⚠ `span 2` ЕДЕТ НА ОТСЕК, А НЕ НА КОЛОДУ: грид-элемент здесь — `Bay` (он же держит
+              затемнённый грунт раскрытой группы), и `gridColumn` на его потомке не значит ничего. */}
+          {rows.map((row) => {
+            const rootId = row.picture.id ?? 0;
+            /* Кусок рисуется ТОЛЬКО внутри своей раскрытой колоды — иначе свёрнутая показала бы
+               его вопреки собственной двери, а раскрытая дважды. */
+            if (families.rootOf.has(rootId)) return null;
+            const members = families.membersOf.get(rootId) ?? [];
+            const open = openDeck === rootId;
+            if (!members.length) return <Bay key={rootId}>{cell(row)}</Bay>;
+            return (
+              <Fragment key={rootId}>
+                <Bay groupOf={open ? rootId : 0} spanTwo={!open}>
+                  <CropDeck
+                    rootId={rootId}
+                    count={members.length}
+                    peeks={members.map((member) => ({
+                      id: member.id ?? 0,
+                      url: pictureThumb(member),
+                      alt: `3d picture ${member.ordinal ?? ''}`,
+                    }))}
+                    sheetWidth='calc((100% - 8px) / 2)'
+                    frameAspect={STRIP_FRAME_ASPECT}
+                    className='w-full'
+                    open={open}
+                    onToggle={() => setOpenDeck((current) => (current === rootId ? null : rootId))}
+                    /* Дверь колоды — в ряду дверей ячейки (`expand ▸` / `fold ▾`), как у полосы
+                       рендеров: разбор у ветки `deck` в `cell`. */
+                    hostDoor
+                  >
+                    {cell(row, { open })}
+                  </CropDeck>
+                </Bay>
+                {open &&
+                  members.map((member) => {
+                    const memberRow = rowById.get(member.id ?? 0);
+                    /* ⚠ ГРУНТ У КАЖДОГО КУСКА СВОЙ, А НЕ ОДНОЙ КОРОБКОЙ НА ГРУППУ, И ЭТО СЕТКА, А
+                       НЕ ПОЛОСА. В полосе группа стоит подряд и её можно обвести одним отсеком;
+                       на сетке она законно ПЕРЕНОСИТСЯ на следующую строку, и коробка, натянутая
+                       поверх переноса, обвела бы полстроки чужих плиток. Тонированная дорожка
+                       читается как принадлежность и переживает перенос. */
+                    return memberRow ? (
+                      <Bay key={member.id} groupOf={rootId}>
+                        {cell(memberRow)}
+                      </Bay>
+                    ) : null;
+                  })}
+              </Fragment>
+            );
+          })}
         </Tiles>
       ) : (
         <Strip>
