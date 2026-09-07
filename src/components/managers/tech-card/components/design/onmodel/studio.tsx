@@ -1,11 +1,9 @@
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
-import { MediaSelector } from 'components/managers/media/components/media-selector';
-import { useMemo, useState, type JSX } from 'react';
+import { useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 
-import { Counter } from '../core';
 import { GenerateRow, LockBar, RunRefusal } from '../render/generate-row';
 import { useStartDesignRun } from '../render/use-design-run';
 import { WhatModelGetsRenderModal } from '../render/what-model-gets';
@@ -13,7 +11,7 @@ import { useOnModelPaint, useOnModelShot } from './drafts';
 import { asRowGate, clothChoices, onModelGate, paintWire, shotMediaIds } from './model';
 import { OnModelOutputs } from './outputs';
 import { PaintGroup } from './paint-group';
-import { ShotGroup, libraryShot } from './shot-group';
+import { ShotGroup } from './shot-group';
 
 /**
  * ═══ ON MODEL — THE ASIDE: a real photograph, repainted (studio v3, `_step-aside.js`) ═════════
@@ -40,10 +38,16 @@ import { ShotGroup, libraryShot } from './shot-group';
  * REFUSALS ARE PRINTED, NEVER HIDDEN IN A TITLE. The gate (`onModelGate`) asks two things — is
  * there something to repaint, and something to repaint it with (a cloth, a colour, or BOTH — the
  * exclusive «one of three» is gone, r3 п.43) — after the archived-name check; each refusal is a
- * lock bar with the door that lifts it: `+ photo ›` opens the fittings chooser
- * (or the library when the card has no fittings with pictures), `the paint ›` carries the eye and
- * the caret to the paint group on this same screen — no step switch, no re-render that would blow
- * the focus away.
+ * lock bar with THE DOOR THAT CARRIES THE EYE TO WHERE IT IS LIFTED, and never a second copy of
+ * that door: `the shots ›` scrolls to the strip and focuses its first control, `the paint ›` does
+ * the same for the paint group — no step switch, no re-render that would blow the focus away.
+ *
+ * ⚠ THE LOCK BAR NO LONGER OPENS THE LIBRARY ITSELF (r3, Fable №5). It carried its own
+ * `MediaSelector` — a SECOND door into the same library, two centimetres above the strip's own
+ * dashed tail, and a worse one: it had no `limit`, so a person could pick past the 24 the run
+ * takes and watch the extras vanish without the strip's «N did not go in» line, which is counted
+ * by the tail alone. Owner: «не делай разные кнопки для одного и того же». One door remains — the
+ * tail of the strip — and the bar points at it.
  *
  * THE SERVER'S OWN REFUSAL OF A PRESSED GENERATE stands as the shared `RunRefusal`, verbatim: a
  * refusal by key names an environment variable, and a name that flashed in a snackbar is a name
@@ -86,14 +90,22 @@ export function OnModelStudio({
   colorways?: common_AdminColorwayRef[];
   onColorwayChange?: (id: number) => void;
 }): JSX.Element {
-  const shotDraft = useOnModelShot();
-  const paintDraft = useOnModelPaint();
+  const shotDraft = useOnModelShot(techCardId);
+  const paintDraft = useOnModelPaint(techCardId);
   const run = useStartDesignRun(techCardId);
   const [inspecting, setInspecting] = useState(false);
-  /** The fittings chooser — opened by the chip in the shot group AND by the lock bar's door. */
-  const [chooserOpen, setChooserOpen] = useState(false);
-  /** Whether the card has a fitting with a picture — the `+ photo ›` door picks its target by it. */
-  const [fittingsHavePictures, setFittingsHavePictures] = useState(false);
+
+  /**
+   * ⚠ THE CARD CHANGED — THE OPEN INVENTORY IS ABOUT THE OTHER CARD (invariant 12). The two drafts
+   * empty themselves inside their own hooks (`./drafts`); what is left here is the modal, and a
+   * modal listing A's photographs over B's screen is the same lie one layer up. In the body of the
+   * render, never in an effect — the committed frame in between is a frame a person can act on.
+   */
+  const shownCard = useRef(techCardId);
+  if (shownCard.current !== techCardId) {
+    shownCard.current = techCardId;
+    if (inspecting) setInspecting(false);
+  }
 
   const shots = shotDraft.shots;
   /** THE LIST, IN THE ORDER IT LEAVES — the gate, the shelf and the wire all read this one array. */
@@ -144,9 +156,13 @@ export function OnModelStudio({
     });
   };
 
-  /** The door `the paint ›`: the eye and the caret to the group, no re-render. */
-  const goToPaint = () => {
-    const group = document.getElementById('design-onmodel-paint');
+  /**
+   * THE DOORS OF THE LOCK BAR — the eye and the caret to the organ that lifts the refusal, and no
+   * organ of their own. Both refusals are fixed ON THIS SCREEN, so a door that DID something would
+   * be a second copy of a control standing a few centimetres away.
+   */
+  const goTo = (id: string) => () => {
+    const group = document.getElementById(id);
     if (!group) return;
     group.scrollIntoView({ block: 'center', behavior: 'smooth' });
     const first = group.querySelector<HTMLElement>('button:not([disabled])');
@@ -161,21 +177,12 @@ export function OnModelStudio({
         id='design-onmodel'
         title='on model'
         question='· a real photograph, repainted'
-        action={
-          <>
-            <Pill tone='ink'>outside the chain</Pill>
-            <Counter n={shots.length} noun='shot' />
-          </>
-        }
+        /* ⚠ СЧЁТЧИК СНИМКОВ ИЗ ШАПКИ СНЯТ (r3, Fable №6). Он печатал «3 SHOTS» в двух сантиметрах
+           над «3 OF 24 SHOTS» на линейке группы — один факт двумя органами, и худшим из двух:
+           потолок 24 знает только линейка. Владелец п.2: «и так видно». */
+        action={<Pill tone='ink'>outside the chain</Pill>}
       >
-        <ShotGroup
-          techCardId={techCardId}
-          draft={shotDraft}
-          disabled={disabled}
-          chooserOpen={chooserOpen}
-          onChooserOpenChange={setChooserOpen}
-          onFittingsKnown={setFittingsHavePictures}
-        />
+        <ShotGroup techCardId={techCardId} draft={shotDraft} disabled={disabled} />
 
         <PaintGroup
           band={band}
@@ -198,29 +205,11 @@ export function OnModelStudio({
         {!gate.ok && (
           <LockBar reason={`locked · ${gate.reason}`}>
             {door === 'photo' && !disabled ? (
-              fittingsHavePictures ? (
-                <Button variant='secondary' size='xs' onClick={() => setChooserOpen(true)}>
-                  + photo ›
-                </Button>
-              ) : (
-                <MediaSelector
-                  label='+ photo'
-                  purpose='design · the photographs this run repaints'
-                  aspectRatio={['Custom']}
-                  showVideos={false}
-                  allowMultiple
-                  saveSelectedMedia={(media) => {
-                    shotDraft.add(media.filter((m) => m.id).map(libraryShot));
-                  }}
-                  trigger={
-                    <Button variant='secondary' size='xs'>
-                      + photo ›
-                    </Button>
-                  }
-                />
-              )
+              <Button variant='secondary' size='xs' onClick={goTo('design-onmodel-shots')}>
+                the shots ›
+              </Button>
             ) : door === 'paint' ? (
-              <Button variant='secondary' size='xs' onClick={goToPaint}>
+              <Button variant='secondary' size='xs' onClick={goTo('design-onmodel-paint')}>
                 the paint ›
               </Button>
             ) : null}

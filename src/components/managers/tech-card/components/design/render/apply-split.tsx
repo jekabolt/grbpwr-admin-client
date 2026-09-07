@@ -1,4 +1,4 @@
-import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http/admin';
+import type { common_DesignPicture } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
@@ -6,23 +6,14 @@ import { CalloutBox } from 'ui/components/callout-box';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 
-import { cardOutputRows, pictureRepresentation, type Representation } from '../bench-kinds';
 import { InertDoor } from '../bench-slot';
 import { AskModal } from '../core';
-import { cropFamilies } from '../generation/composite';
 import { useDesignWrites } from '../use-design-band';
-import { isPictureHidden } from '../visibility';
-import {
-  SILHOUETTE_VIEWS,
-  isSilhouetteView,
-  normaliseViewKey,
-  viewLabel,
-  type SilhouetteView,
-} from '../views';
+import { viewLabel, type SilhouetteView } from '../views';
 import type { BenchSide } from './model';
 
 /**
- * ═══ APPLY SPLITTED — E-6, И ЭТО ОДИН МЕХАНИЗМ НА ДВА ЭКРАНА ══════════════════════════════════
+ * ═══ APPLY SPLITTED — E-6, И ЖИВЁТ ОН НА ОДНОМ ЭКРАНЕ, В РЕНДЕР-ВЕРСТАКЕ ══════════════════════
  *
  * Владелец, дословно: «в 3д INPUT — RENDERS BY VIEW мультивью карточек тоже должно отображаться и
  * если его расколапсить под мультивью кнока аплай сплитед и они уходят в инпут после нажатия и
@@ -30,10 +21,20 @@ import type { BenchSide } from './model';
  * INPUT — FLATS OF THIS CARD что бы там после дивайдера показывало фильтром только флеты и
  * мультивью тоже спильнутые».
  *
- * ДВА ЭКРАНА, ОДИН ГЛАГОЛ, ОДНО НАПИСАНИЕ. Вход фабрик-рендера пишет ФЛЭТОВЫЙ верстак, вход 3D —
- * РЕНДЕРНЫЙ; всё остальное у них совпадает построчно. Второе написание этого жеста разошлось бы с
- * первым на первой же правке — ровно тем дефектом, за который эта полоса уже платила («сделай
- * везде одинаково»).
+ * ⚠ ЗДЕСЬ СТОЯЛО «ОДИН МЕХАНИЗМ НА ДВА ЭКРАНА» — ЭТО БЫЛО ВЕРНО И ПРОТУХЛО (r3-w2 №7). Просьба
+ * действительно называла два места, и первая редакция дала двери проп `benchKind: 'flat'|'render'`
+ * — «вход фабрик-рендера пишет ФЛЭТОВЫЙ верстак, вход 3D — рендерный». Круг r2 (п.29/30) снял с
+ * полос входа ВСЕ двери постановки: у пустой стороны нет ни половины «из медиатеки», ни
+ * `apply splitted` — единственный жест это `mark ▸` на самой картинке в RENDERS OF THIS CARD.
+ * С тех пор у двери ровно один хозяин — раскрытая колода мультивью в `outputs.tsx`, — и он
+ * передавал `'render'`. Флэтовая ветка не исполнялась ни разу.
+ *
+ * ⚠ И ЭТО НЕ ПРОСТО МЁРТВАЯ ВЕТКА, А ЗАРЯЖЕННАЯ. Род и колорвей у верстака связаны инвариантом 4
+ * (`00-STATE.md`): у флэта `colorway_id` строго `0`, и `slot: { kind: 'flat', colorwayId: target }`
+ * при любой цели, кроме нуля, получил бы от сервера `colorway_forbidden`. То есть проп разрешал
+ * собрать пару, которую сервер обязан отвергнуть, — а целей у этой двери с круга r3 стало
+ * несколько (усыновление семпл-листа). Род поэтому СПЕЛЛИТСЯ ЛИТЕРАЛОМ у самой записи: одно место,
+ * где его видно рядом с `colorwayId`, и никакого способа передать другое снаружи.
  *
  * ═══ ЧТО ЗНАЧИТ «ОЧИЩАЯ ПРЕДЫДУЩИЙ ИНПУТ» — И ПОЧЕМУ ЭТО НЕ ДВА ЖЕСТА НА СТОРОНУ ══════════════
  *
@@ -93,83 +94,15 @@ export type SplitPiece = { view: SilhouetteView; picture: common_DesignPicture }
 const APPLY_PROMPT = '__apply__';
 const APPLY_NEW_COLOURWAY = '__new_colourway__';
 
-/** Склеенный лист вместе со своими кусками — ровно то, что рисует ячейка «мультивью». */
-export type SplitDeck = {
-  sheet: common_DesignPicture;
-  /** Куски, чей `ghost_view` — сторона силуэта. Первый на сторону: разрез — один на лист. */
-  pieces: SplitPiece[];
-  /**
-   * Виды, которые лист ОБЪЯВЛЯЕТ (`composite_views`), даже если разреза ещё нет. Это то, что
-   * человек читает на самой карточке; `pieces` — то, что уже можно применить.
-   */
-  declared: string[];
-};
-
-/**
- * СКЛЕЕННЫЕ ЛИСТЫ ЭТОГО РОДА, С ИХ РАЗРЕЗАМИ.
- *
- * ⚠ ПОЧЕМУ ЭТОТ СПИСОК СТРОИТСЯ ЗДЕСЬ, А НЕ БЕРЁТСЯ ИЗ `unmarkedFlats`. `isFlatCandidate`
- * ВЫБРАСЫВАЕТ композиты намеренно и правильно: «a render reads ONE drawing per view, so it must be
- * split first» — в СЛОТ такой лист не встаёт, сервер отказывает (`ErrDesignCompositePlate`).
- * Ровно поэтому владелец их и не видел: экран честно прятал то, что нельзя пометить. E-6 просит не
- * ослабить фильтр, а показать эти листы ВТОРЫМ родом ячейки — с другим глаголом («разрезать» и
- * «применить разрез»), а не с `mark ▸`, который отказал бы.
- *
- * ⚠ РОДСТВО ЧИТАЕТСЯ `cropFamilies` — ТЕМ ЖЕ ЧИТАТЕЛЕМ, ЧТО У ЛЕНТЫ И У ВЫХОДОВ. Он лезет к КОРНЮ
- * родословной, а не к родителю: у куска, вырезанного из ОТРЕДАКТИРОВАННОГО листа, родитель —
- * правка, а корень — сам лист.
- */
-export function splitDecks(band: GetDesignBandResponse, rep: Representation): SplitDeck[] {
-  const rows = cardOutputRows(band, rep);
-  const pictures: common_DesignPicture[] = [];
-  if (rows) {
-    for (const row of rows) pictures.push(row.picture);
-  } else {
-    /**
-     * Сервер не назвал `outputs` (откаченный бинарь) — читаем страницу ленты, ровно как это делает
-     * `outputsOfKind` в той же ветке.
-     *
-     * ⚠ РОД ФИЛЬТРУЕТСЯ И ЗДЕСЬ, И ЭТО НЕ ПЕДАНТИЧНОСТЬ. Ветка `outputs` сужает по роду сама
-     * (`cardOutputRows(band, rep)`); ветка ленты, не сужающая, показала бы склеенные ЛИСТЫ ФЛЭТОВ
-     * во входе 3D и ЛИСТЫ РЕНДЕРОВ во входе фабрик-рендера — то есть предложила бы поставить
-     * чертёж в рендер-слот и получить `wrong_kind` от сервера. Кусок наследует род родителя на
-     * СЕРВЕРЕ, в момент разреза, поэтому родословная внутри одного рода не рвётся.
-     */
-    for (const run of band.runs ?? []) {
-      if (!run.pictures) continue;
-      for (const picture of run.pictures) {
-        if ((picture.id ?? 0) <= 0 || isPictureHidden(picture)) continue;
-        if (pictureRepresentation(band, picture) !== rep) continue;
-        pictures.push(picture);
-      }
-    }
-  }
-
-  const families = cropFamilies(pictures);
-  const out: SplitDeck[] = [];
-  for (const sheet of pictures) {
-    const id = sheet.id ?? 0;
-    const declared = (sheet.compositeViews ?? []).filter(Boolean);
-    if (id <= 0 || declared.length === 0) continue;
-
-    const seen = new Set<string>();
-    const pieces: SplitPiece[] = [];
-    for (const piece of families.membersOf.get(id) ?? []) {
-      const view = normaliseViewKey(piece.ghostView);
-      // Кусок без стороны — законный (человек мог вырезать деталь), но применить его некуда:
-      // он не называет слот. Молча выдумывать сторону было бы враньём в оплаченном входе.
-      if (!isSilhouetteView(view) || seen.has(view)) continue;
-      seen.add(view);
-      pieces.push({ view: view as SilhouetteView, picture: piece });
-    }
-    // Порядок сторон — обхода силуэта, а не разреза: человек читает вход слева направо.
-    pieces.sort(
-      (a, b) => SILHOUETTE_VIEWS.indexOf(a.view) - SILHOUETTE_VIEWS.indexOf(b.view),
-    );
-    out.push({ sheet, pieces, declared });
-  }
-  return out;
-}
+/* `splitDecks` И ТИП `SplitDeck` СНЕСЕНЫ (r3c). Они строили список «склеенный лист + его куски»
+   ДЛЯ ЯЧЕЙКИ МУЛЬТИВЬЮ, и ячейка эта своего второго источника не завела: раскрытый лист рисует
+   `outputs.tsx` по родословной куска (`cropFamilies` + `piecesOf` там же), потому что
+   вопрос там другой — «что показать под ЭТОЙ плиткой», а не «какие листы есть у карточки».
+   Читателей не осталось ни одного; экспортированный список, который никто не читает, — это второй
+   ответ на вопрос, ждущий, когда он разойдётся с первым. Механизм применения (`applyPlan` ниже и
+   `ApplySplitDoor`) на месте: он принимает КУСКИ, а не листы. Живых ссылок на имя не осталось:
+   в `bench.tsx` разрез теперь назван своей дверью (`split ▸` в полосе выходов), а само слово
+   встречается только в двух записках о сносе — этой и в `outputs.tsx`. */
 
 /** Одна запись плана: что делаем со стороной и что при этом теряем. */
 type Step = {
@@ -221,9 +154,12 @@ export function ApplySplitDoor({
   sidesOf,
   targets,
   pieces,
-  benchKind,
   disabled,
-  /** Как этот экран зовёт то, что кладёт в сторону, — «render» или «flat». Для слов вопроса. */
+  /**
+   * Как этот экран зовёт то, что кладёт в сторону. ТОЛЬКО СЛОВА вопроса и подсказки: верстак у
+   * двери один и спеллится литералом у самой записи (разбор в шапке файла), поэтому этим пропом
+   * нельзя переадресовать запись — только назвать её человеку.
+   */
   noun,
   refusal = null,
   onCreateColorway,
@@ -248,7 +184,6 @@ export function ApplySplitDoor({
    */
   targets: { colorwayId: number; label: string }[];
   pieces: SplitPiece[];
-  benchKind: 'flat' | 'render';
   disabled?: boolean;
   noun: string;
   /**
@@ -324,13 +259,15 @@ export function ApplySplitDoor({
     for (const step of planFor(target)) {
       try {
         await writes.setBenchSlot.mutateAsync({
-          // Род СПЕЛЛИТСЯ всегда: пустое поле сервер читает как `flat`, и «что бы ни стало
-          // умолчанием» завтра. Колорвей — тот же, под которым этот экран читает верстак.
+          /* Род СПЕЛЛИТСЯ всегда: пустое поле сервер читает как `flat`, и «что бы ни стало
+             умолчанием» завтра. И спеллится он ЗДЕСЬ ЛИТЕРАЛОМ, а не пропом: рядом стоит
+             `colorwayId` цели, а флэт-верстак колорвея не носит вовсе (инвариант 4) — пара
+             `'flat'` + цель≠0 это `colorway_forbidden` от сервера. Разбор в шапке файла. */
           /* ⚠ `slotId` НЕ СТАВИТСЯ ВОВСЕ. `view_key` и `slot_id` — ЧЛЕНЫ ОДНОГО `oneof`, и
              ноль в proto-JSON это ЗАДАННОЕ поле: сервер отвечал «oneof … is already set» и не
              записывал НИ ОДНОЙ стороны. Верстак флэтов всегда слал только `viewKey` — поэтому
              работал он, а эти двери не работали ни разу. */
-          slot: { viewKey: step.view, kind: benchKind, colorwayId: target },
+          slot: { viewKey: step.view, kind: 'render', colorwayId: target },
           pictureId: step.pictureId,
           expectedSlotRev: step.slotRev,
         });

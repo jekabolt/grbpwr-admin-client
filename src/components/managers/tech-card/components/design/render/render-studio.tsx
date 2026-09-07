@@ -119,7 +119,11 @@ export function RenderStudio({
    */
   onGoToKind?: (kind: 'flat' | 'pattern' | 'render' | 'threed' | 'onmodel') => void;
 }): JSX.Element {
-  const draft = useColourDraft(band, colorwayId, colorwayRef);
+  /* ⚠ `techCardId` ЗДЕСЬ НЕСУЩИЙ, А НЕ СПРАВОЧНЫЙ: черновик подачи умирает вместе с карточкой, и
+     умирает он ПО ЭТОМУ ЧИСЛУ (`StudioTab` между карточками не размонтируется — инвариант 12).
+     Без него на карточке B стояли бы ткани карточки A — `design_asset.id` ЧУЖОЙ полки, — и
+     GENERATE покупал бы лист по чужому рецепту. Довод целиком — в шапке `useColourDraft`. */
+  const draft = useColourDraft(band, colorwayId, colorwayRef, techCardId);
   /**
    * ⚠ THE PLAN LIVES HERE, NOT IN THE PALETTE, for the reason the draft does: the gate and the run
    * body read it together with the parts row; two hooks would be two documents of different
@@ -281,8 +285,12 @@ export function RenderStudio({
      её член, — это и есть тихая потеря:
        · «1 picture · N views in a row» и «split into the slots afterwards» — форма листа. Живёт в
          модалке «what the model gets», дверь которой стоит в ЭТОМ ЖЕ ряду, у правого края;
-       · «made of …» (`madeOfLine`) — из чего сделан рецепт. Это дословный пересказ сетки CLOTH AND
-         COLOUR, стоящей на три сантиметра выше: ткани там помечены «in» с номером, цвет — квадратом;
+       · «made of …» — из чего сделан рецепт. Это дословный пересказ сетки CLOTH AND COLOUR,
+         стоящей на три сантиметра выше: ткани там помечены «in» с номером, цвет — квадратом.
+         ⚠ ФУНКЦИЯ, СОБИРАВШАЯ ЭТУ ПОЛОВИНУ, СНЕСЕНА ВМЕСТЕ СО СТРОКОЙ, и звалась она `madeOfLine`.
+         Прежняя редакция абзаца называла её как живую («`madeOfLine`» в обратных кавычках, будто
+         по имени можно перейти), и следующий читатель искал бы её по всему дереву, чтобы понять,
+         что именно печаталось. Имя оставлено ТОЛЬКО как след в истории — вызывать нечего;
        · «priced by the server when the run starts» — цена. Владелец: «цена — по факту в истории»,
          и она там печатается строкой прогона (`priceActual`).
      ПОЭТОМУ `shape` БОЛЬШЕ НЕ ПЕРЕДАЁТСЯ, а не подменяется пустой строкой: у `GenerateRow` это
@@ -290,8 +298,9 @@ export function RenderStudio({
      при этом осталась — она висит на `onInspect`, а не на `shape` (разбор там же). */
 
   /* THE DOOR OF A REFUSAL: where it is fixed, when that is another step. Missing flats → the flat
-     bench; the archived colourway → the select on the rail (no door here); everything else is this
-     screen's own input, a few rows up. */
+     bench; the archived colourway → `for:` IN THIS VERY ROW (the rail has no select any more —
+     G2-2/G2-3, so no door is drawn for it: the organ is already on screen); everything else is
+     this screen's own input, a few rows up. */
   const lockDoors =
     !gate.ok && gate.next === 'flat' && onGoToKind ? (
       <Button variant='secondary' size='xs' onClick={() => onGoToKind('flat')}>

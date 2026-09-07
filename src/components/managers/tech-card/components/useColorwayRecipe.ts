@@ -10,6 +10,10 @@ import { stockChangeHistoryKeys } from 'components/managers/product/components/s
 import { tasksKeys } from 'components/managers/tasks/hooks/useTasks';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { waitlistKeys } from 'components/managers/waitlist/components/useWaitlist';
+// КЛЮЧ ПОЛОСЫ, А НЕ ХУК: этому файлу нужен адрес кэша, а не подписка на него. `useDesignBand`
+// здесь был бы вторым наблюдателем полосы ради инвалидации — то есть лишним запросом на каждой
+// мутации рецепта.
+import { designKeys } from './design/use-design-band';
 import { sampleKeys } from './useSamples';
 import { styleReadViewKeys } from './useStyleReadViews';
 
@@ -169,6 +173,29 @@ export function useDeleteColorway(techCardId: number) {
         // (recipe_usage/size_consumption/piece_material), и раскладки в techCard.markers теряют
         // ссылку на него (orphan_marker: замер остаётся, артикул из него исчезает).
         qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) }),
+        /* ПОЛОСА ДИЗАЙНА — ОТДЕЛЬНЫЙ КЭШ С ПЯТИМИНУТНЫМ staleTime, И БЕЗ ЭТОЙ СТРОКИ ОН ПЕРЕЖИВАЛ
+           УДАЛЁННЫЙ ПРОДУКТ (Codex r3-w2 MINOR 5). Сервер на удалении колорвея сносит его слоты
+           верстака КАСКАДОМ, а размеченные плиты роняет в семпл — он сам это и печатает в сухом
+           прогоне двумя строками вердикта («N bench slots will be deleted», «N design pictures
+           will become unattributed»), которые стоят в диалоге выше по стеку. То есть ответ
+           `GetDesignBand`, лежащий в кэше, становится неправдой в ту же секунду, и пока он не
+           протух сам — а это пять минут, — вкладка COLOURWAYS показывает
+           миниатюру FRONT удалённого колорвея, а студия — целый столбец SIDES под его именем; и
+           это не косметика: `+ media` в такой столбец уезжает с `colorwayId` несуществующего
+           продукта и отказывается на сервере, а side-row и список сборки 3D, наоборот, молча
+           выбрасывают строки полосы, которым больше не соответствует ни один колорвей карточки,
+           — плиты просто исчезают с экрана без единого слова.
+
+           КЛЮЧ РОВНО ОДИН, потому что полоса читается ОДНИМ запросом на карточку
+           (`designKeys.band(card)`, use-design-band.ts): и вкладка, и студия — наблюдатели того же
+           ключа, так что одна инвалидация обновляет обе.
+
+           ⚠ ЭТО ТОЛЬКО УДАЛЕНИЕ. Создание колорвея полосу не трогает (у нового продукта нет ни
+           слота, ни плиты — инвалидировать нечего), поэтому в `useCreateColorway` этой строки
+           нет намеренно. Архив полосу тоже не меняет: архивный колорвей остаётся в карточке, его
+           столбец в студии виден и подписан `(archived)` — а сам жест архивирования живёт вне
+           этого файла (index.tsx «archive & switch», lifecycle-controls.tsx). */
+        qc.invalidateQueries({ queryKey: designKeys.band(techCardId) }),
         // Списки и пайплайн карточек несут на строке сведения о колорвеях стиля.
         qc.invalidateQueries({ queryKey: techCardKeys.lists() }),
         qc.invalidateQueries({ queryKey: techCardKeys.pipeline() }),

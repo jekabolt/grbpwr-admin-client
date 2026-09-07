@@ -168,14 +168,13 @@ export function refusalAdvice(message: string): string {
 
 /* ─────────────────────────── ворота ─────────────────────────── */
 
-/**
- * THE GATE'S REFUSAL PLUS THE DOOR THAT FIXES IT. `Gate` is the band's shared shape (the generate
- * row reads `ok`/`reason`); `door` is this screen's own addition, read by the lock bar above the
- * row to draw the ONE door that repairs the refusal — the source slot for `picture`, the name
- * field for `name`. A refusal is only ever spoken as a visible bar with a door, never as a
- * button's `title` alone (SPEC §8).
- */
-export type PatternGate = Gate & { door?: 'picture' | 'name' };
+/* ТИП `PatternGate` СНЕСЁН ВМЕСТЕ С ПОЛЕМ `door` (r3c). Он был `Gate & { door?: 'picture' | 'name' }`
+   — «какая дверь чинит этот отказ», — и читала его ПОЛОСА ЗАМКА над рядом GENERATE. Полосы нет с
+   круга F (`LockLine`/`focusName`/`openSlot` сняты), а единственный сегодняшний читатель ворот,
+   `GenerateRow`, объявлен на общем `Gate` и берёт из него `ok`/`reason`. Поле, которое никто не
+   читает, — это не «задел»: оно заставляет каждую новую ветку отказа выбирать значение, за
+   которое некому спросить, и первая же выбравшая неверно об этом не узнает. Ворота этого экрана
+   возвращают теперь ровно `Gate`, как у соседей. */
 
 /**
  * A TILE ON THIS CARD THAT ALREADY CARRIES THIS NAME — case-insensitively, because the person who
@@ -220,26 +219,18 @@ export function patternGate(
   band: GetDesignBandResponse,
   sourceMediaId: number,
   name?: string,
-): PatternGate {
+): Gate {
   if (!sourceMediaId || sourceMediaId <= 0) {
-    return {
-      ok: false,
-      reason: 'a repeating tile is made out of exactly one picture',
-      door: 'picture',
-    };
+    return { ok: false, reason: 'a repeating tile is made out of exactly one picture' };
   }
   if (name !== undefined) {
     const nm = name.trim();
     if (!nm) {
-      return { ok: false, reason: 'a pattern is found by its name · give it one', door: 'name' };
+      return { ok: false, reason: 'a pattern is found by its name · give it one' };
     }
     const twin = patternTwin(band, nm);
     if (twin) {
-      return {
-        ok: false,
-        reason: `a pattern called "${assetLabel(twin)}" already stands here`,
-        door: 'name',
-      };
+      return { ok: false, reason: `a pattern called "${assetLabel(twin)}" already stands here` };
     }
   }
   return { ok: true };

@@ -63,7 +63,6 @@ export function ColourwayCreatePopover({
   onCreated,
   anchor,
   readOnly = false,
-  isCardDirty,
 }: {
   techCardId: number;
   open: boolean;
@@ -77,19 +76,18 @@ export function ColourwayCreatePopover({
    */
   anchor?: React.ReactNode;
   readOnly?: boolean;
-  /**
-   * Грязная форма карточки. По умолчанию читается из контекста формы — окно живёт внутри `<Form>`
-   * тех-карты (`components/index.tsx`), как и его сосед `ColourwayProposals`. Проп существует для
-   * вызывающего ВНЕ этого контекста; заданный, он старше контекста.
-   */
-  isCardDirty?: boolean;
 }): JSX.Element {
   /* ⚠ ЧИТАЕТСЯ ТОЛЬКО `isDirty`, И ЭТО ПОДПИСКА, А НЕ ПРОСМОТР — тот же довод, что у соседа
      (`colourway-proposals.tsx`): прокси `useFormState` подписывает на прочитанные свойства, и один
-     булев переключается редко. */
+     булев переключается редко.
+
+     ⚠ ЗДЕСЬ СТОЯЛ ПРОП `isCardDirty` «для вызывающего ВНЕ формы», и вызывающих у него не было ни
+     одного: оба монтирования окна (`render-studio.tsx`, `colourway-proposals.tsx`) живут внутри
+     `<Form>` тех-карты. Снят, а не оставлен на будущее: необязательный проп, старший контекста,
+     это готовая дверь мимо единственного источника истины — первый же, кто передал бы в неё своё
+     значение, получил бы окно, отказывающее по одной «грязности», пока сохраняет другую. */
   const { control } = useFormContext<TechCardFormData>();
-  const { isDirty } = useFormState({ control });
-  const dirty = isCardDirty ?? isDirty;
+  const { isDirty: dirty } = useFormState({ control });
 
   const { data: techCard } = useTechCard(techCardId);
   const { dictionary } = useDictionary();
@@ -220,6 +218,13 @@ export function ColourwayCreatePopover({
       showMessage('colourway created', 'success');
       clear();
       onOpenChange(false);
+      /* ⚠ ЦЕЛЬ ВСТАЁТ НА НОВЫЙ КОЛОРВЕЙ ТОЛЬКО ПОТОМУ, ЧТО `useCreateColorway.onSuccess` ВОЗВРАЩАЕТ
+         промис `qc.invalidateQueries` (`useColorwayRecipe.ts`): v5 ждёт его до резолва
+         `mutateAsync`, поэтому к этой строке карточка УЖЕ перечитана и новый id есть в
+         `techCard.colorways`. Убери там `return` (или перепиши на `mutate`) — и дрейф-эффект
+         `useColorwayChoice` не найдёт пункта под только что выбранным числом и молча отправит
+         цель обратно в `sample`, а следующий прогон уедет семплом. Связь неявная — поэтому
+         названа здесь, у потребителя. */
       onCreated(colorwayId);
     } catch (e) {
       /* ⚠ ОКНО НЕ ЗАКРЫВАЕТСЯ НА ОШИБКЕ (`closeOnConfirm={false}`): закрыть его значило бы стереть

@@ -22,6 +22,7 @@ import {
 } from '../useColorwayRecipe';
 import { InertDoor } from './bench-slot';
 import { colorwayLabel as nameOfColorway } from './colorway-picker';
+import { GROUP_SEAM } from './core';
 import { ColourwayCreatePopover } from './colourway-create';
 import {
   bindSlots,
@@ -296,6 +297,12 @@ export function ColourwayProposals({
     <Section
       title='colourways'
       question='— proposed by the draft or added by hand; a confirmed one lives on the COLORWAYS tab'
+      /* ШОВ БЛОКА — ТОТ ЖЕ ТОКЕН, ЧТО У СОСЕДЕЙ ШАГА MOODBOARD (r3 п.3-токен, зона M замерила
+         здесь 10px против 20 у всех остальных). `Section` разводит своих прямых детей штатными
+         10px `space-y-stack`; шаг MOODBOARD набран швом в 20px — CARD DETAILS, CONSTRUCTION DRAFT,
+         CONSTRUCTION, MATERIAL SLOTS, — и блок, стоящий между ними со своим числом, читается как
+         «сюда не дописали». Число берётся у `GROUP_SEAM`, а не пишется здесь второй раз. */
+      className={GROUP_SEAM}
     >
       <div data-b25-colourways=''>
         {visible.map((p) => {

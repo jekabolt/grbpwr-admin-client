@@ -3767,8 +3767,12 @@ function ColorwayRecipeEditor({
   renderSides: readonly BenchSide[];
   /** Сервер вообще отвечает на маршруты полосы. Пусто ≠ «рендеров нет» на старом бинаре. */
   bandSpeaks: boolean;
-  /** Дверь в студию на шаг FABRIC RENDER. */
-  onOpenStudio: () => void;
+  /**
+   * Дверь в студию на шаг FABRIC RENDER — С ИМЕНЕМ ЭТОГО КОЛОРВЕЯ. Аргумент обязателен именно
+   * здесь: кнопка стоит в блоке рендеров одного продукта, и дверь без id открывала бы студию на
+   * её умолчании, то есть на СОСЕДНЕМ колорвее (Codex r3-w2 MAJOR 2).
+   */
+  onOpenStudio: (colorwayId: number) => void;
   onStatus: (colorwayId: number, status: RecipeStatus) => void;
 }) {
   const save = useUpdateColorwayRecipe(techCardId);
@@ -4327,7 +4331,12 @@ function ColorwayRecipeEditor({
           title={`${title} · renders`}
           question='marked on the render bench — read-only here'
           action={
-            <Button type='button' variant='secondary' size='sm' onClick={onOpenStudio}>
+            <Button
+              type='button'
+              variant='secondary'
+              size='sm'
+              onClick={() => onOpenStudio(colorwayId)}
+            >
               open in studio ›
             </Button>
           }
@@ -4626,7 +4635,12 @@ export function ColorwayRecipes({
      ⚠ ПУСТО ≠ «РЕНДЕРОВ НЕТ». `serverSpeaks` отделяет «на этой карточке ничего не размечено» от
      «этот бинарь маршрутов полосы не знает вовсе» — на втором блок рендеров не рисуется, потому
      что сказать «размечать нечего» там было бы неправдой (доктрина `has_fabric_render`). */
-  const { band, serverSpeaks: bandSpeaks } = useDesignBand(techCardId);
+  const {
+    band,
+    serverSpeaks: bandSpeaks,
+    isLoading: bandLoading,
+    error: bandError,
+  } = useDesignBand(techCardId);
   const renderSidesByColorway = useMemo(() => {
     const m = new Map<number, BenchSide[]>();
     for (const cw of colorways) {
@@ -4643,10 +4657,11 @@ export function ColorwayRecipes({
   const [selected, setSelected] = useState<number | null>(null);
   const activeId = selected ?? colorways[0]?.colorwayId ?? null;
 
-  // ?colorway=<id> opens one colourway's recipe directly. Sent by the BOM tab when a delete is
-  // blocked by this colourway's recipe, so «which usage do I remove» lands on screen rather than
-  // on a grid the operator has to search. The param is consumed, not kept: leaving it set would
-  // re-select this colourway every time the tab is reopened.
+  // ?colorway=<id> НАЗЫВАЕТ КОЛОРВЕЙ, А ЧИТАЕТ ЕГО ТА ВКЛАДКА, КОТОРУЮ НАЗЫВАЕТ `?tab=`.
+  // Пишут его двое — вкладка BOM (когда удаление артикула упёрлось в рецепт: `?tab=colorways`
+  // + id, чтобы «какое использование убрать» было на экране, а не в двух кликах) и дверь в
+  // студию ниже (`?tab=studio` + id). Читателей тоже двое, и они НЕ конкурируют: ровно поэтому
+  // здесь стоит гейт по `?tab=` (см. эффект под дверью).
   const [params, setParams] = useSearchParams();
 
   /* ═══ ДВЕРЬ В СТУДИЮ — ОДНА, И ОНА ЖЕ ОБЪЯСНЯЕТ ПУСТУЮ ВКЛАДКУ (D10) ══════════════════════════
@@ -4659,31 +4674,56 @@ export function ColorwayRecipes({
      `replace`, как навигация вкладок самой карточки (`navTo`): Back уводит со страницы, а не
      ходит по вкладкам по одной.
 
-     ⚠ ЦЕЛЬ ПРОГОНА ЭТА ДВЕРЬ НЕ ВЫСТАВЛЯЕТ. Выбор колорвея в студии — состояние
-     `useColorwayChoice`, у него нет адреса в URL, и завести его отсюда нельзя, не трогая чужой
-     файл. Студия открывается на своём умолчании (первый колорвей с рендерами); записано в gaps. */
-  const goToRenderStep = useCallback(() => {
-    setParams(
-      (prev) => {
-        const p = new URLSearchParams(prev);
-        p.set('tab', 'studio');
-        p.set('step', 'render');
-        p.delete('colorway');
-        return p;
-      },
-      { replace: true },
-    );
-  }, [setParams]);
+     ⚠ ДВЕРЬ НАЗЫВАЕТ КОЛОРВЕЙ, ИНАЧЕ ОНА ВРЁТ ИМЕНЕМ. «open in studio ›» стоит в блоке рендеров
+     КОНКРЕТНОГО колорвея, и человек, нажавший её у OLIVE, дальше грузит, размечает и заказывает
+     прогон в уверенности, что активен OLIVE. Без имени в адресе студия открывалась на СВОЁМ
+     умолчании (первый колорвей с рендерами, то есть ROSSO), и деньги прогона уходили на чужую
+     ось молча — цена ошибки тут не «не туда посмотрел», а оплаченная генерация не тому продукту.
+     Поэтому дверь ПИШЕТ `?colorway=<id>` (десятичный id продукта, тот же, что у BOM-двери), а
+     не удаляет его, как раньше.
+
+     ЧЕСТНОСТЬ ПОЛОВИНЫ. Производит адрес эта дверь; ПОТРЕБЛЯЕТ его выбор цели в студии
+     (`useColorwayChoice`, colorway-picker.tsx) — читает один раз при монтировании шага и снимает
+     параметр. Пока потребителя нет, дверь не врёт: она открывает студию на шаге render, ровно как
+     раньше, а имя в адресе просто никто не читает — и снимается оно первым же возвратом на эту
+     вкладку (гейт ниже), то есть не копится и не переживает переход.
+
+     БЕЗ ID (пустая вкладка) параметр СНИМАЕТСЯ, а не оставляется: там не выбран ни один колорвей,
+     и унесённый в студию чужой `?colorway=` от BOM-двери засеял бы цель тем, о чём эта дверь не
+     говорила. */
+  const goToRenderStep = useCallback(
+    (colorwayId?: number) => {
+      setParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          p.set('tab', 'studio');
+          p.set('step', 'render');
+          if (colorwayId && colorwayId > 0) p.set('colorway', String(colorwayId));
+          else p.delete('colorway');
+          return p;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
+
+  /* ГЕЙТ ПО `?tab=` — НЕ УКРАШЕНИЕ, А УСЛОВИЕ СУЩЕСТВОВАНИЯ ДВЕРИ ВЫШЕ.
+     Вкладки тех-карты СМОНТИРОВАНЫ ВСЕ СРАЗУ (`SectionStack hidden=…`, index.tsx): эта вкладка
+     живёт и тогда, когда на экране студия. Без гейта её же эффект съедал бы `?colorway=`,
+     который дверь только что написала СТУДИИ, — за один кадр, до того как студия смонтируется.
+     Правило простое и одно на систему: параметр читает тот, кого называет `?tab=`. */
   const deepLinked = params.get('colorway');
+  const addressedTab = params.get('tab');
   useEffect(() => {
-    if (!deepLinked) return;
+    if (!deepLinked || addressedTab !== 'colorways') return;
     const id = Number(deepLinked);
     if (Number.isFinite(id) && id > 0) setSelected(id);
     const next = new URLSearchParams(params);
     next.delete('colorway');
     setParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinked]);
+  }, [deepLinked, addressedTab]);
 
   // Live per-colourway recipe state, reported up by each editor so the grid can badge it — including
   // the colourways whose editor is currently hidden, which is the point: a staged edit two swatches
@@ -4785,15 +4825,37 @@ export function ColorwayRecipes({
           появляется на FABRIC RENDER, «но не каждый фабрик-рендер значит, что у нас будет такой
           колорвей — возможно, мы просто семплимся». Поэтому создание живёт ровно там, где принято
           решение, а вкладка говорит, где это. Двух кнопок «завести колорвей» в системе больше нет. */}
+      {/* ⚠ ДВЕРЬ РИСУЕТСЯ, ТОЛЬКО ЕСЛИ ЗА НЕЙ ЧТО-ТО ЕСТЬ (Codex r3-w2 MINOR 6). На бинаре, который
+          маршрутов полосы не знает, `StudioTab` отказывается монтировать render-верстак и печатает
+          вместо него уведомление, — то есть эта кнопка вела бы в тупик: человек нажимает
+          «где рождается колорвей», попадает на экран «этого здесь нет» и остаётся без единого
+          способа завести колорвей вообще. Три состояния, и ни одно из них не притворяется другим:
+          пока полоса ЧИТАЕТСЯ — ни двери, ни приговора (утверждать «студии нет» на неприехавшем
+          ответе значит соврать на полсекунды в самом важном месте вкладки); полоса ОТВЕТИЛА —
+          дверь; полоса не отвечает — строка, объясняющая отсутствие двери, теми же словами, что
+          и сама студия на таком сервере (`studio-tab.tsx`, ветка `bandless`). Ошибка чтения
+          отделена от «маршрута нет»: 500 на GetDesignBand не делает сервер безстудийным. */}
       {colorways.length === 0 && (
         <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
           <Text size='micro' variant='label' component='span'>
             colourways are born in the studio, on a fabric render — a colour becomes a product once
             you decide to keep it
           </Text>
-          <Button type='button' variant='secondary' size='sm' onClick={goToRenderStep}>
-            studio › fabric render ›
-          </Button>
+          {bandSpeaks ? (
+            <Button type='button' variant='secondary' size='sm' onClick={() => goToRenderStep()}>
+              studio › fabric render ›
+            </Button>
+          ) : bandLoading ? null : (
+            /* ЧЕРНЫМ, А НЕ СЕРЫМ. `variant='inactive'` — это #ccc (≈1.6:1 к фону, в токенах он
+               так и подписан: декоративный), а эта строка — ЕДИНСТВЕННОЕ, что отвечает человеку
+               на пустой вкладке, где не осталось ни одной кнопки. Соседняя фраза выше серая
+               (`label`, #666): общее правило системы тише, чем факт про этот сервер. */
+            <Text size='micro' component='span'>
+              {bandError
+                ? `the render bench could not be read (${bandError.message}), so there is no door to it from here`
+                : 'this server does not serve the render bench yet, so fabric render is not available here'}
+            </Text>
+          )}
         </div>
       )}
 

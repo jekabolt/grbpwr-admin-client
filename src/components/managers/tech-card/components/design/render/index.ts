@@ -7,6 +7,13 @@
  * not because they are meant to be reassembled by hand into a screen the studios already assemble
  * correctly.
  *
+ * ⚠ `ColourStatementRow` СНЯТ ВМЕСТЕ СО СВОИМ ФАЙЛОМ (r3, волна 2), и с ним реэкспорт
+ * `COLOUR_NAME_MAX` (сам предел жив там, где он применяется, — `./model`). Ряд заявления о цвете
+ * перестал монтироваться кругом раньше: поле имени и его чипы сняты с фабрик-рендера, а цвет
+ * набирается пантон-пикером. Ноль потребителей проверен грепом по всему `src/` и по стендам проб
+ * до сноса — вместе с `madeOfLine` (строка состава снята с ряда GENERATE, r3 п.27) и
+ * `modelCaption` (плитки моделей заменены одним селектом, r3 п.37).
+ *
  * ⚠ `RenderInputStrip` СНЯТ ВМЕСТЕ СО СВОИМ ФАЙЛОМ (r3, пул), и с ним `renderPlacements` /
  * `RenderPlacement` из `./model`. Полоса перестала монтироваться откуда бы то ни было кругом r2 —
  * две ленты с верха FABRIC RENDER сняты по слову владельца, разметка уехала к самим картинкам в
@@ -27,13 +34,12 @@
  * fit models (`ListModels`, through the models manager's own `useAllModels`).
  */
 export { ClothIsRow } from './cloth-is';
-export { ColourStatementRow, COLOUR_NAME_MAX } from './colour-statement';
 export { OutputsSection } from './outputs';
 export { Palette } from './palette';
 export { RenderStudio } from './render-studio';
 export { RendersByViewGroup, SidesSection } from './side-row';
 export { ThreedStudio } from './threed-studio';
-export { BodyPicker, modelCaption, modelFacts, modelName } from './model-picker';
+export { BodyPicker, modelFacts, modelName } from './model-picker';
 export { WhatModelGetsRenderModal } from './what-model-gets';
 export type { WhatModelGetsKind } from './what-model-gets';
 
@@ -67,7 +73,6 @@ export {
   fabricRenderGate,
   fabricStatement,
   hexIsPaintable,
-  madeOfLine,
   normaliseGsm,
   normaliseTypedHex,
   readGsm,

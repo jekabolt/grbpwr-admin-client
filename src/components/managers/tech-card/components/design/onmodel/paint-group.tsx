@@ -4,14 +4,13 @@ import type {
   common_DesignColourRecipe,
 } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
-import { Button } from 'ui/components/button';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, type JSX, type ReactNode } from 'react';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
-import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
+import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 
@@ -331,11 +330,12 @@ export function PaintGroup({
               : 'searched by code or by colour name'}
           </Text>
         </div>
-        {code && !disabled && (
-          <Button variant='secondary' size='xs' onClick={() => draft.setColour('', '')}>
-            take the colour off
-          </Button>
-        )}
+        {/* ⚠ ВТОРОЙ КНОПКИ «СНЯТЬ ЦВЕТ» ЗДЕСЬ НЕТ (r3, Fable №7). Рядом стояла `take the colour
+            off`, а ВНУТРИ поповера пикера живёт его собственная `clear` — два органа с одним
+            глаголом в двух сантиметрах друг от друга, ровно то, на что владелец жалуется («не
+            делай разные кнопки для одного и того же»). Осталась та, что ПРИНАДЛЕЖИТ органу: цвет
+            снимают там же, где его выбирают, и `onPick('')` этого экрана кладёт пустые hex и код
+            той же дверью, что и выбранный пантон. */}
       </div>
 
       {/* ⚠ ДВЕ ПИЛЮЛИ СНЯТЫ (G2-1), И ОБЕ ГОВОРИЛИ О ТОМ, ЧТО УЖЕ СКАЗАНО ЛУЧШЕ.

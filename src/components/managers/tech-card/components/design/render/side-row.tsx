@@ -18,7 +18,7 @@ import Text from 'ui/components/text';
 import { refColorwayFor } from '../bench-kinds';
 import { InertDoor, pictureUrl } from '../bench-slot';
 import { archivedRef, colorwayLabel } from '../colorway-picker';
-import { PlaceOrDrawCell, Counter, EMPTY_WORD } from '../core';
+import { PlaceOrDrawCell, EMPTY_WORD } from '../core';
 import { VectorModal } from '../modals';
 import { PictureTile } from '../picture-tile';
 import { readProvenance } from '../provenance';
@@ -348,10 +348,21 @@ function ThreedWord({ side }: { side: BenchSide }): JSX.Element {
 /** Ширина колонки плиты — та же 138px, что у ячейки ленты: один шаг на весь шаг рендера. */
 const COL_PX = 138;
 /**
- * Столбец «+ colourway» — УЗКИЙ, и это не экономия. Он не носит плит: в нём стоит одно
- * приглашение в шапке и пунктирная кромка вдоль строк, показывающая, что ось на этом не кончается.
- * Дай ему `minmax(COL_PX, 1fr)`, как живому столбцу, и пустое место заняло бы ровно ту треть
- * экрана, на которую владелец жаловался (п.28).
+ * ═══ ОСТАТОК ШИРИНЫ ЗАБИРАЕТ «+ COLOURWAY», А НЕ ПОСЛЕДНИЙ ВЕРСТАК (п.28, круг r3c) ═══════════
+ *
+ * Столбцы верстаков стояли `minmax(COL_PX, 1fr)` — «пусть делят ширину». На карточке с ОДНИМ
+ * верстаком (а это всякая карточка до первого колорвея) это давало ровно ту жалобу, ради которой
+ * писалось: единственная дорожка `sample` разъезжалась на 800px, плита в ней держала свои 138
+ * (потолок `maxWidth`, иначе кадр 1:1 растёт вдвое), и справа от неё вставала белая треть экрана
+ * — БЕЗ ИМЕНИ, потому что принадлежала она столбцу `sample`, а показывать ей было нечего.
+ *
+ * Растягиваться должно то, у чего содержимое РАСТЯЖИМО, и такой столбец здесь ровно один:
+ * приглашение «+ colourway». Плиту оно не носит, кончаться на своём минимуме ему незачем, и
+ * пустое место под ним читается тем, чем оно и является, — местом для следующего цвета. Поэтому
+ * верстаки стоят своей мерой (`COL_PX`, той же, что во всей студии), а `1fr` отдан приглашению.
+ * При многих колорвеях правило то же и ветки не заводит: столбцы встают шеренгой слева, остаток
+ * достаётся приглашению, а когда их станет больше, чем влезает, — минимум держит меру и таблица
+ * скроллится внутри своей коробки (обёртка `overflow-x-auto` выше).
  */
 const PLUS_COL_PX = 104;
 
@@ -653,7 +664,7 @@ export function SidesSection({
    * что гасит GENERATE. Плиты при этом читаются и снимаются: архив не запрещает разбирать
    * сделанное.
    */
-  const renderCell = (col: ColourwayColumn, side: BenchSide): JSX.Element => {
+  const renderCell = (col: ColourwayColumn, side: BenchSide): JSX.Element | null => {
     const label = viewLabel(side.view);
     const saving = busy === busyKey('render', col.colorwayId, side.view);
     if (side.picture) {
@@ -673,17 +684,21 @@ export function SidesSection({
         />
       );
     }
-    if (!canWrite || col.archived) {
-      return (
-        <EmptyBox
-          hint={EMPTY_RENDER_SIDE}
-          title={
-            col.archived
-              ? `${col.label} is archived — its renders can be read and unmarked, but nothing new goes into it.`
-              : `no render stands in ${label} of ${col.label}.`
-          }
-        />
-      );
+    /**
+     * ⚠ ПУСТАЯ ЯЧЕЙКА АРХИВНОГО СТОЛБЦА НЕ РИСУЕТСЯ ВОВСЕ — ТИХАЯ ПУСТОТА (D8, r3c).
+     *
+     * Архивный столбец стоит здесь ради СВОИХ ПЛИТ («этим цветом когда-то работали»), и с одной
+     * плитой на шесть сторон он печатал пять коробок «empty · mark one» — пять приглашений
+     * сделать то, чего в этом столбце сделать нельзя: двери в архив нет по правилу
+     * `archivedColorwayGate`, и слово «mark one» здесь просто неправда. Молчание точнее: у
+     * архивного цвета есть ровно то, что есть.
+     *
+     * Ячейка-обёртка при этом остаётся (она несёт `data-side-cell` и держит дорожку сетки) —
+     * пропадает только её содержимое, поэтому строка не съезжает и столбец не схлопывается.
+     */
+    if (col.archived) return null;
+    if (!canWrite) {
+      return <EmptyBox hint={EMPTY_RENDER_SIDE} title={`no render stands in ${label} of ${col.label}.`} />;
     }
     return (
       <>
@@ -732,9 +747,10 @@ export function SidesSection({
     >
       {/* ⚠ ТАБЛИЦА СКРОЛЛИТСЯ ВНУТРИ СВОЕЙ КОРОБКИ, А НЕ УВОЗИТ СТРАНИЦУ ВБОК (DESIGN.md).
           Дорожки: имя стороны по содержимому, `FLATS IN` ровно `COL_PX` (у флэта оси колорвея
-          нет — столбец один и его ширина не спорит ни с кем), столбцы колорвеев
-          `minmax(COL_PX, 1fr)` — они и ЗАПОЛНЯЮТ ширину (п.28: «треть экрана белое пятно»), а
-          `+ colourway` узкий, потому что плит не носит.
+          нет — столбец один и его ширина не спорит ни с кем), столбцы колорвеев той же мерой
+          `COL_PX` (плита в них всё равно держит потолок), а ОСТАТОК ШИРИНЫ забирает
+          `+ colourway` — `minmax(PLUS_COL_PX, 1fr)`. Так таблица занимает ширину блока всегда, и
+          при одном верстаке тоже (п.28: «треть экрана белое пятно»); разбор — у `PLUS_COL_PX`.
           ⚠ КОЛОНКИ 3D ЗДЕСЬ БОЛЬШЕ НЕТ (п.32). Она печатала ВЫВОД («read by 3D»), не жест, и
           выводился он из одной занятости слота — то есть повторял глазами то, что видно по самой
           плите. Слово о том, что 3D читает четыре названные стороны, стоит там, где 3D и
@@ -746,23 +762,58 @@ export function SidesSection({
           className='grid items-start gap-x-6'
           style={{
             gridTemplateColumns: `minmax(72px, max-content) ${COL_PX}px ${columns
-              .map(() => `minmax(${COL_PX}px, 1fr)`)
-              .join(' ')} ${PLUS_COL_PX}px`,
+              .map(() => `${COL_PX}px`)
+              .join(' ')} minmax(${PLUS_COL_PX}px, 1fr)`,
           }}
         >
           <Head>side</Head>
           <Head>flats in</Head>
           {columns.map((col) => {
             const target = col.colorwayId === targetColorwayId;
-            const hex =
-              (col.ref?.devHex ?? '').trim() ||
-              (findDictionaryColour(dictionary?.colors, col.ref?.colorCode)?.hex ?? '').trim();
+            const devHex = (col.ref?.devHex ?? '').trim();
+            const dictHex = (
+              findDictionaryColour(dictionary?.colors, col.ref?.colorCode)?.hex ?? ''
+            ).trim();
+            const hex = devHex || dictHex;
+            /**
+             * ⚠ У КВАДРАТА ДВА ИСТОЧНИКА И ОДИН ВИД — ЗНАЧИТ РАЗНИЦУ ГОВОРИТ `title`.
+             *
+             * `devHex` — цвет, названный САМИМ колорвеем: его выбирают пантон-пикером в окне
+             * рождения, и рядом с ним ложится `pantone` (`colourway-create.tsx:206`). Словарный
+             * hex — подстановка по коду SKU для колорвеев, заведённых ДО этой волны: у них
+             * `devHex` пуст, и квадрат красится тем, что нашлось в словаре. Пантоном такой цвет
+             * не является, номера красильни за ним нет, и общая подпись `col.label` над обоими
+             * молчала ровно о той разнице, из-за которой красильня получит не тот цвет.
+             *
+             * Пантон печатается только когда он НАЗВАН: `devHex` без `pantone` законен (цвет
+             * подобрали, номер не присвоили), и выдумывать ему систему по одному hex значило бы
+             * делать то же, что делает `pantoneOfHex` под квадратом рецепта, — читать номер
+             * обратно из краски.
+             */
+            const pantone = (col.ref?.pantone ?? '').trim();
+            const code = (col.ref?.colorCode ?? '').trim();
+            const swatchTitle = devHex
+              ? pantone
+                ? `pantone ${pantone}`
+                : `development colour ${devHex} — no pantone named`
+              : dictHex
+                ? `dictionary colour${code ? ` ${code}` : ''} — not a pantone reference`
+                : `${col.label} names no colour yet`;
             return (
               /* ═══ ЗАГОЛОВОК СТОЛБЦА И ЕСТЬ ВЫБОР ЦЕЛИ (D2) ═══════════════════════════════════
                  Вторая дверь к тому же состоянию, что `for:` у GENERATE, — как чипы колорвея на
                  ON MODEL. Отдельного селектора над таблицей нет: он был бы ТРЕТЬИМ органом одного
                  вопроса «для кого этот прогон». Активный столбец подчёркнут — не залит и не
-                 покрашен: цветом здесь говорит свотч, и второй цветовой признак спорил бы с ним. */
+                 покрашен: цветом здесь говорит свотч, и второй цветовой признак спорил бы с ним.
+
+                 ⚠ ЭТОТ КЛИК ЖИВ И БЕЗ ПРАВА ЗАПИСИ, В ОТЛИЧИЕ ОТ СОСЕДНЕЙ ДВЕРИ `+ colourway`, и
+                 разница между ними не в строгости, а в том, что они делают. Цель — состояние
+                 КЛИЕНТА (`useColorwayChoice`, обычный `useState`): на провод она уезжает только
+                 внутри прогона, а прогон на read-only карточке не запускается вовсе. Значит
+                 переключение столбца здесь — это ЧТЕНИЕ: им выбирают, чей верстак и чей рецепт
+                 смотреть. Погасить его значило бы запереть читателя на одном цвете и оставить ему
+                 подчёркивание, которое ничего не выбирает. Поповер рождения колорвея — запись, и
+                 поэтому он гаснет. */
               <button
                 key={col.colorwayId}
                 type='button'
@@ -779,7 +830,16 @@ export function SidesSection({
                   target ? 'underline underline-offset-4' : 'hover:underline hover:underline-offset-4',
                 )}
               >
-                <Swatch hex={hex} size={11} title={col.label} />
+                {/* ⚠ У `sample` СВОТЧА НЕТ ВОВСЕ, И ЭТО НЕ ЭКОНОМИЯ ПИКСЕЛЯ. Свотч рисуется
+                    пустым (`PLACEHOLDER_SURFACE`), когда цвет не назван, — и пустой квадратик
+                    11px слева от слова читается как НЕВЫБРАННЫЙ ЧЕКБОКС: заголовок столбца
+                    выглядит выключенным, хотя ничего не выключает (замечено на снимке r3b).
+                    У колорвея пустой квадрат честен: цвет у него есть, просто не назван. У оси 0
+                    цвета нет ПО СУЩЕСТВУ — `sample` это «семплимся», а не «цвет неизвестен», — и
+                    молчание тут точнее любого глифа. Ряд заголовков от этого НЕ разъезжается —
+                    это замерено пробой, а не обещано: рост держит подпись, а свотч (11px) ниже
+                    неё, и все заголовки стоят 19px по одной верхней линии. */}
+                {col.ref ? <Swatch hex={hex} size={11} title={swatchTitle} /> : null}
                 <Text
                   size='micro'
                   variant={target ? undefined : 'label'}
@@ -795,16 +855,38 @@ export function SidesSection({
           })}
           {/* ЧЕТВЁРТАЯ ДВЕРЬ ОДНОЙ КОМНАТЫ (G2-4): пунктирный заголовок открывает тот же поповер,
               что пункт `+ colourway…` в цели GENERATE и в цели mark. Ячеек под ним нет — только
-              пунктирная кромка: ось на этом столбце не кончается, но плит он не носит. */}
-          <button
-            type='button'
-            data-side-add-colourway=''
-            onClick={onCreateColorway}
-            title='name a new colourway — it becomes a column here and the target of the next run'
-            className='flex items-center justify-center border border-dashed border-borderColor px-2 py-0.5 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-          >
-            + colourway
-          </button>
+              пунктирная кромка: ось на этом столбце не кончается, но плит он не носит.
+              ⚠ НАДПИСЬ ПРИЖАТА ВЛЕВО, А НЕ ПО ЦЕНТРУ, И ЭТО НЕ ВКУС. Этот столбец забирает
+              остаток ширины (`PLUS_COL_PX, 1fr`), то есть на карточке с одним верстаком он
+              шириной в две трети блока; центрованное слово уезжало на середину пустого места и
+              читалось баннером посреди страницы. Прижатое — оно стоит НАД своей пунктирной
+              кромкой, в один ряд с `SIDE`, `FLATS IN` и именами столбцов, и называет зону, а не
+              висит в ней.
+
+              ⚠ БЕЗ ПРАВА ЗАПИСИ ДВЕРИ НЕТ ВОВСЕ, А НЕ «ЕСТЬ, НО ОТКАЖЕТ» (r3-w2 №4). Поповер
+              рождения колорвея — запись (`CreateColorway`), и на read-only карточке он открылся
+              бы, чтобы отказать словами «read-only»: приглашение, нарисованное без права. Тут
+              остаётся ровно то, что и было правдой, — пунктирная кромка, та же самая, что идёт
+              вдоль строк ниже: ось на столбцах не кончается, просто продолжить её этому человеку
+              нечем. Пустой элемент рисуется, а не пропускается: строки ниже занимают все
+              `columns.length + 3` дорожки, и дыра в шапке сдвинула бы их авто-размещением. */}
+          {canWrite ? (
+            <button
+              type='button'
+              data-side-add-colourway=''
+              onClick={onCreateColorway}
+              title='name a new colourway — it becomes a column here and the target of the next run'
+              className='flex items-center justify-start border border-dashed border-borderColor px-2 py-0.5 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            >
+              + colourway
+            </button>
+          ) : (
+            <div
+              data-side-add-colourway-inert=''
+              title='read-only — a new colourway is named by someone with write access'
+              className='self-stretch border-l border-dashed border-borderColor'
+            />
+          )}
 
           {flats.map((flat, i) => {
             const label = viewLabel(flat.view);
@@ -843,12 +925,13 @@ export function SidesSection({
                 {columns.map((col) => {
                   const side = col.sides[i];
                   return (
-                    /* ⚠ ДОРОЖКА ТЯНЕТСЯ, СОДЕРЖИМОЕ — НЕТ, И ЭТО ЗАМЕР, А НЕ ВКУС. Столбцы
-                       заполняют ширину блока (п.28), но плита обязана остаться той же 138-й
-                       мерой, что во всей студии: без потолка кадр 1:1 растягивался по дорожке
-                       (на 1440px — 230px), строка вырастала вдвое, а пустая ячейка рядом
-                       оставалась 162px — ровно та жалоба «плейсхолдер и плита разного размера»,
-                       только вывернутая наизнанку. Потолок держит обе коробки в одной. */
+                    /* ⚠ ПОТОЛОК СТОИТ, ХОТЯ ДОРОЖКА БОЛЬШЕ НЕ ТЯНЕТСЯ, И ЭТО ЗАМЕР, А НЕ ВКУС.
+                       Он писался, когда столбцы делили ширину (`1fr`): без потолка кадр 1:1
+                       растягивался по дорожке (на 1440px — 230px), строка вырастала вдвое, а
+                       пустая ячейка рядом оставалась 162px — ровно та жалоба «плейсхолдер и
+                       плита разного размера», только вывернутая наизнанку. Сегодня дорожка ровно
+                       `COL_PX`, и потолок совпал с нею; убрать его значило бы отдать ту же
+                       ловушку обратно первому же, кто вернёт столбцам `1fr`. */
                     <div
                       key={col.colorwayId}
                       data-side-cell={`${col.colorwayId}:${flat.view}`}
@@ -914,7 +997,6 @@ export function RendersByViewGroup({
   onGoToKind?: (kind: 'flat' | 'render') => void;
 }): JSX.Element {
   const sides = useMemo(() => threedSides(band, colorwayId), [band, colorwayId]);
-  const filled = sides.filter((s) => !!s.picture).length;
   const revisions = useMemo(() => threedRevisions(band, sides), [band, sides]);
   const toRender = onGoToKind ? () => onGoToKind('render') : undefined;
   return (
@@ -922,8 +1004,13 @@ export function RendersByViewGroup({
       <GroupLabel
         flush
         action={
+          /* ⚠ СЧЁТЧИКА СТОРОН ЗДЕСЬ НЕТ — ОН СНЯТ, А НЕ ЗАБЫТ (п.31, r3-w2 №6). «N of 6 sides»
+             пересказывал словами ровно то, что стоит строкой ниже: шесть плит, каждая либо с
+             картинкой, либо пустая. Владелец снял такую строку на SIDES, и второй экземпляр того
+             же счёта на входе 3D жил только потому, что это другой файл. Пилюля о РАЗНЫХ РЕВИЗИЯХ
+             остаётся: её по плитам не прочитать — она про то, из каких прогонов эти шесть
+             картинок, а не про то, сколько их. */
           <span className='flex flex-wrap items-center gap-1.5'>
-            <Counter n={filled} noun='side' total={sides.length} />
             {revisions.length > 1 && (
               <Pill
                 tone='attention'

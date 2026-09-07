@@ -1,9 +1,8 @@
 import type { common_MediaFull } from 'api/proto-http/admin';
-import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useTechCardFittings } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useEffect, useMemo, useState, type JSX } from 'react';
+import { useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip } from 'ui/components/chip';
@@ -24,7 +23,6 @@ import {
   fittingShots,
   fittingsWithShots,
   shotName,
-  shotOrigin,
   type FittingShot,
   type OnModelShot,
 } from './model';
@@ -49,6 +47,12 @@ import {
  * «+ from the media library» chip beside it (which this group carried while the slot was one)
  * would be two buttons for one thing, which is exactly what the owner asked us to stop doing. The
  * fittings are a source the strip cannot open by itself, so THEY keep a chip.
+ *
+ * ⚠ AND THE CHOOSER IS OPENED FROM HERE ALONE, WHICH IS WHY ITS STATE CAME BACK HOME. The composer
+ * held it while the lock bar had a door of its own into the library (r3, Fable №5); that door is
+ * now a jump to this group, so a second opener no longer exists and neither does the prop that
+ * carried it. `onFittingsKnown` went with it — it existed only to tell the bar WHICH library door
+ * to draw.
  *
  * FROM THE FITTINGS — THE CARD'S OWN TRY-ONS. `ListFittings` filtered by this card
  * (`useTechCardFittings`, the same read the sample panels make) hands back each fitting with its
@@ -100,18 +104,10 @@ export function ShotGroup({
   techCardId,
   draft,
   disabled,
-  chooserOpen,
-  onChooserOpenChange,
-  onFittingsKnown,
 }: {
   techCardId: number;
   draft: ShotDraft;
   disabled?: boolean;
-  /** The fittings chooser is opened from here AND from the lock bar's door — the composer holds it. */
-  chooserOpen: boolean;
-  onChooserOpenChange: (open: boolean) => void;
-  /** Told once the read lands: whether any fitting carries a picture (the `+ photo ›` door reads it). */
-  onFittingsKnown?: (havePictures: boolean) => void;
 }): JSX.Element {
   const shots = draft.shots;
   const count = shots.length;
@@ -129,9 +125,9 @@ export function ShotGroup({
     [fittings.data, sizes],
   );
   const fittingCount = fittingsWithShots(rows);
-  useEffect(() => {
-    onFittingsKnown?.(fittingCount > 0);
-  }, [fittingCount, onFittingsKnown]);
+
+  /** The chooser of the fittings — this group is its only door, so this group holds it open. */
+  const [chooserOpen, setChooserOpen] = useState(false);
 
   /**
    * WHAT THE LAST GESTURE ACTUALLY DID, when it did less than it was asked for. A ⌘V of ten files
@@ -139,6 +135,19 @@ export function ShotGroup({
    * the screen that already shows it, and silence would let a person believe ten went in.
    */
   const [dropped, setDropped] = useState(0);
+
+  /**
+   * ⚠ AND BOTH DIE WITH THE CARD (invariant 12, the drafts' own rule in `./drafts`). The strip
+   * empties itself when `techCardId` changes; a «4 of them did not go in» left standing over the
+   * empty strip of the next card would be a complaint about a gesture made on another garment, and
+   * an open chooser would list the fittings of that one. In the body of the render, as everywhere.
+   */
+  const shownCard = useRef(techCardId);
+  if (shownCard.current !== techCardId) {
+    shownCard.current = techCardId;
+    if (dropped) setDropped(0);
+    if (chooserOpen) setChooserOpen(false);
+  }
 
   const take = (next: OnModelShot[]) => {
     const landed = draft.add(next);
@@ -176,7 +185,7 @@ export function ShotGroup({
   }, [rows]);
 
   return (
-    <div data-om-shots={count}>
+    <div id='design-onmodel-shots' data-om-shots={count}>
       <GroupLabel
         flush
         className={GROUP_GAP}
@@ -275,7 +284,7 @@ export function ShotGroup({
           title={fittingsWhy || 'take photographs from the fittings of this item'}
           aria-label='take photographs from the fittings of this item'
           data-om-door='fittings'
-          onClick={() => onChooserOpenChange(true)}
+          onClick={() => setChooserOpen(true)}
         >
           + from the fittings{' '}
           <span className='tabular-nums opacity-65'>{fittings.isLoading ? '…' : fittingCount}</span>
@@ -320,8 +329,8 @@ export function ShotGroup({
       {/* THE CHOOSER — the photographs of this card's fittings, one group per fitting. */}
       <ConfirmationModal
         open={chooserOpen}
-        onOpenChange={onChooserOpenChange}
-        onConfirm={() => onChooserOpenChange(false)}
+        onOpenChange={setChooserOpen}
+        onConfirm={() => setChooserOpen(false)}
         hideActions
         width='lg'
         title='the photographs · from the fittings'

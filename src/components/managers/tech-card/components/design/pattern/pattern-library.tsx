@@ -61,7 +61,7 @@ import { CornerLabel, GoToStep, LockLine, TiledFace } from './organs';
  * ═══ WORN BY IS A FACT, NOT AN EFFECT (E-15, B-26) ═════════════════════════════════════════════
  *
  * The chips write `SetDesignAssetColorway` and read it back; they do NOT seed the render's cloth
- * (`fabricOfColorway` has no callers) — that seeding is what the old chips were removed for, and
+ * (`fabricOfColorway` is gone) — that seeding is what the old chips were removed for, and
  * the owner asked the FACT back («привязать паттерн к колорвею»), not the effect.
  */
 

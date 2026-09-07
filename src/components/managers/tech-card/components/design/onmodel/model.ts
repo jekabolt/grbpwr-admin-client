@@ -547,38 +547,6 @@ export function shotName(shot: OnModelShot | null): string {
   return `picture ${shot.media.id ?? 0}`;
 }
 
-/** `from fitting 12 Aug` / `from media library` — the origin pill under the slot. */
-export function shotOrigin(shot: OnModelShot): string {
-  if (shot.source === 'fitting') return shot.stamp ? `from fitting ${shot.stamp}` : 'from a fitting';
-  return 'from media library';
-}
-
-/**
- * THE FLAT COLOURS THIS CARD ALREADY KNOWS — the tiles of «or a flat colour». Two sources, one
- * list, deduplicated by normalised hex: the colour recipes its render runs used (`colour_recipes`,
- * newest first) and the shelf cloths stated in colour alone (an asset with `colour_hex` and no
- * picture is exactly «a flat colour · bruciato» of the prototype). Nothing is invented: a colourway
- * ref carries no hex on this read, so the colourways are NOT painted here (see `paint-group.tsx`).
- */
-export type FlatColour = { hex: string; name: string };
-
-export function flatColours(band: GetDesignBandResponse): FlatColour[] {
-  const out: FlatColour[] = [];
-  const seen = new Set<string>();
-  const push = (hex: string | undefined, name: string | undefined) => {
-    const norm = normaliseHex(hex);
-    if (!norm || seen.has(norm)) return;
-    seen.add(norm);
-    out.push({ hex: norm, name: (name ?? '').trim() || norm });
-  };
-  for (const r of band.colourRecipes ?? []) push(r.hex, r.code);
-  for (const a of band.assets ?? []) {
-    if ((a.mediaId ?? 0) > 0) continue;
-    push(a.colourHex, a.colourCode || a.name);
-  }
-  return out;
-}
-
 /**
  * ═══ THE ONE OBJECT THE GATE JUDGES, THE ROW PRINTS AND THE WIRE CARRIES (J-31) ═══════════════
  *
@@ -597,8 +565,9 @@ export function paintWire(
     hex: paint.hex,
     /**
      * ⚠ THE PANTONE REFERENCE RIDES, AND THAT IS A CHANGE OF PREMISE, NOT A RELAXATION (r3 п.43).
-     * E-11 stripped `code` here because the colour organ of the day (the recipe chips of
-     * `ColourStatementRow`) could hand back a NAME together with a value, and this screen showed
+     * E-11 stripped `code` here because the colour organ of the day (the recipe chips of the
+     * render's colour-statement row, itself gone since) could hand back a NAME with a value, and
+     * this screen showed
      * no name — «the screen would buy a prompt with a name the person never saw». The colour is
      * now picked by its reference alone, and that reference is printed on the picker's trigger and
      * under the swatch. The prompt quotes the pair («18-1248 TCX — the exact value is #9a8b7f»),

@@ -83,12 +83,6 @@ export function modelFacts(model: common_Model, sizeName: (id: number) => string
   return parts.join(' · ');
 }
 
-/** `Vera K. · 178 cm · base M` — одна строка для мест, где карточке не хватает места (инвентарь). */
-export function modelCaption(model: common_Model, sizeName: (id: number) => string): string {
-  const facts = modelFacts(model, sizeName);
-  return [modelName(model), facts].filter(Boolean).join(' · ');
-}
-
 /** Обложка модели: назначенная миниатюра, иначе первый кадр её галереи. */
 function modelThumb(model: common_Model): string {
   return mediaThumb(model.thumbnail) || mediaThumb((model.media ?? [])[0]);

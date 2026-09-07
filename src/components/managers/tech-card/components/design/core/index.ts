@@ -12,14 +12,12 @@ export {
   PRICED_LATER,
 } from './organs';
 export { Reason } from './reason';
-export {
-  DrawHalf,
-  HALF_FACE,
-  PenGlyph,
-  PlaceOrDrawCell,
-  SLOT_HALVES,
-  drawTitle,
-} from './two-half-slot';
+/* ЭТА ПОВЕРХНОСТЬ ОТДАЁТ ТО, ЧТО ЧИТАЮТ СНАРУЖИ, И НИЧЕГО СВЕРХ (r3c). `DrawHalf`, `SLOT_HALVES`,
+   `PenGlyph` и `drawTitle` отсюда сняты: за пределами `two-half-slot.tsx` их не читает никто —
+   плитку собрали в один орган (`PlaceOrDrawCell`), и половины перестали быть чужой сборкой.
+   Внутри файла они живут по-прежнему; экспортированное имя без потребителя — это обещание
+   стабильности, за которое никто не платит и о котором забывают при первой же правке. */
+export { HALF_FACE, PlaceOrDrawCell } from './two-half-slot';
 export {
   CopyWords,
   InventoryLine,

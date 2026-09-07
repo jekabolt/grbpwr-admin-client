@@ -698,12 +698,18 @@ function TextureGrid({
  */
 
 /**
- * ОБРАТНОЕ ЧТЕНИЕ ССЫЛКИ ПО ЦВЕТУ — И ОНО НАЗВАНО ПРИБЛИЖЕНИЕМ ВСЛУХ.
+ * ОБРАТНОЕ ЧТЕНИЕ ССЫЛКИ ПО ЦВЕТУ — И ТЕПЕРЬ ОНО НАЗВАНО ПРИБЛИЖЕНИЕМ НЕ ТОЛЬКО ЗДЕСЬ, НО И НА
+ * ЭКРАНЕ.
  *
  * Черновик помнит ссылку, которой цвет ВЫБРАЛИ (`draft.pantone`), но рецепт прошлого прогона её не
  * несёт (поля нет на проводе — B8). Тогда экран читает её обратно по hex: если ровно такой свотч
- * в наборе есть, его код и печатается. Совпадение hex у двух кодов теоретически возможно, поэтому
- * это ЧТЕНИЕ, а не источник истины: на провод в обоих случаях уезжает hex, и он один.
+ * в наборе есть, его код и печатается — ПЕРВЫЙ СОВПАВШИЙ. Совпадение hex у двух кодов возможно, и
+ * тогда под квадратом стоит чужой номер красильни: «ROSSO выбирали свотчем A» → печатается B.
+ *
+ * ⚠ ПРИЗНАНИЕ БЫЛО ТОЛЬКО В ЭТОМ КОММЕНТАРИИ, А ЧИТАЕТ ЕГО НЕ ТОТ, КТО ПОЙДЁТ В ДАЙХАУС. Строка
+ * печаталась ОДИНАКОВО в обоих случаях — и когда ссылка своя (жест этой сессии, точная), и когда
+ * она вычитана обратно из hex (догадка). Поэтому вторая теперь печатается как `≈ <код>` и несёт
+ * `title`, говорящий, откуда она взялась. На провод в обоих случаях уезжает hex, и он один.
  */
 function pantoneOfHex(hex: string): string {
   const want = hex.trim().toLowerCase();
@@ -735,8 +741,14 @@ function ColourTile({ state, disabled }: { state: ColourDraft; disabled?: boolea
   const recipe = state.recipe;
   const hex = (recipe.hex ?? '').trim();
   const paintable = hexIsPaintable(recipe.hex);
-  /** Ссылка, которую печатает строка под квадратом: сначала память жеста, потом чтение по цвету. */
-  const reference = state.pantone.trim() || pantoneOfHex(hex);
+  /**
+   * ДВЕ ССЫЛКИ РАЗНОГО ПРОИСХОЖДЕНИЯ, И РАЗЛИЧИЕ ДОЕЗЖАЕТ ДО ГЛАЗА, А НЕ ТОЛЬКО ДО КОДА.
+   * `own` — жест этой сессии: человек выбрал этот свотч, и код точен. `readBack` — догадка по hex
+   * прошлого прогона (довод у `pantoneOfHex`), поэтому она печатается со знаком приближения.
+   */
+  const own = state.pantone.trim();
+  const readBack = own ? '' : pantoneOfHex(hex);
+  const reference = own || readBack;
   const stated = paintable || !!reference;
 
   return (
@@ -806,9 +818,19 @@ function ColourTile({ state, disabled }: { state: ColourDraft; disabled?: boolea
       </span>
 
       {/* ПОД КВАДРАТОМ — ССЫЛКА, И БОЛЬШЕ НИЧЕГО. `optional` на пустой клетке говорит то
-          единственное, чего по полосатому квадрату не видно: прогон без цвета законен. */}
-      <Text size='nano' variant='label' component='span' data-colour-ref className='min-w-0 break-words'>
-        {reference || (paintable ? 'no pantone reference' : 'optional')}
+          единственное, чего по полосатому квадрату не видно: прогон без цвета законен.
+          ⚠ `≈` СТОИТ ТОЛЬКО У ВЫЧИТАННОЙ ОБРАТНО ССЫЛКИ. У выбранной рукой его нет — там знак
+          приближения был бы ложью в другую сторону: код ровно тот, по которому кликнули. */}
+      <Text
+        size='nano'
+        variant='label'
+        component='span'
+        data-colour-ref
+        data-colour-ref-source={readBack ? 'read-back' : own ? 'picked' : undefined}
+        title={readBack ? 'read back from the hex of the last run' : undefined}
+        className='min-w-0 break-words'
+      >
+        {readBack ? `≈ ${readBack}` : reference || (paintable ? 'no pantone reference' : 'optional')}
       </Text>
     </div>
   );

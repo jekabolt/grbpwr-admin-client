@@ -1,7 +1,7 @@
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useEffect, useMemo, useState, type JSX } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
@@ -104,7 +104,8 @@ export function ThreedStudio({
   /** ⚠ Read by the GATE only: reading and the input strip work under an archived colourway. */
   colorwayArchived?: boolean;
 }): JSX.Element {
-  const { draft, patch } = useThreedDraft();
+  /* Черновик ключуется КАРТОЧКОЙ, а не монтированием: разбор — в шапке хука (`./drafts`). */
+  const { draft, patch } = useThreedDraft(techCardId);
   const cardFit = useCardFit();
   const { dictionary } = useDictionary();
   const { data: models, isLoading: modelsLoading } = useAllModels();
@@ -129,23 +130,24 @@ export function ThreedStudio({
   );
 
   /**
-   * ⚠ ПРИШЛИ НА 3D С ЦЕЛИ, КОТОРУЮ СОБРАТЬ НЕЛЬЗЯ — ВЫБОР ПЕРЕЕЗЖАЕТ НА ПЕРВУЮ ПОДХОДЯЩУЮ.
+   * ═══ ⚠ ЗАХОД НА 3D НЕ ПЕРЕДВИГАЕТ ОБЩИЙ ВЫБОР СТУДИИ. НИКОГДА (G2-7, побочка G2a) ════════════
    *
-   * Это не умолчание (`settled` у `useColorwayChoice` про другое) и не тихая правка: экран,
-   * открывшийся на OLIVE без фронта, показал бы пустой вход и погашенную кнопку, притом что рядом
-   * лежит собранный ROSSO. Сужение списка — половина ответа; вторая половина — переезд.
+   * ЗДЕСЬ СТОЯЛ ЭФФЕКТ, ПЕРЕВОДИВШИЙ ЦЕЛЬ НА «ПЕРВУЮ ПОДХОДЯЩУЮ», и довод у него был вежливый:
+   * экран, открытый на цели без фронта, показывает пустой вход и погашенную кнопку, притом что
+   * рядом лежит собранный ROSSO. Цена этой вежливости замерена и она не про 3D:
+   * `colorwayId` — ОДНО состояние всей студии (`useColorwayChoice`), и то же самое число называет
+   * ЦЕЛЬ СЛЕДУЮЩЕГО ПЛАТНОГО ПРОГОНА на FABRIC RENDER (`for:`) и ось чипов on-model. Человек,
+   * заглянувший на 3D и вернувшийся назад, обнаруживал в `for:` ЧУЖОЕ имя — молча, без единого
+   * своего клика, — и следующий рендер уезжал под ним. `run.colorway_id` неизменяем: такой прогон
+   * не переименовать, его можно только выбросить и купить заново.
    *
-   * ЭФФЕКТОМ, А НЕ В ТЕЛЕ РЕНДЕРА, НАРОЧНО: состояние принадлежит КОМПОЗИТОРУ, и `setState` чужого
-   * компонента во время своего рендера React запрещает (предупреждение и потерянное обновление).
-   * Кадр между рендером и эффектом при этом честен, а не сломан: инвариант «значение среди
-   * пунктов» держит сам `ColorwaySelect` — выбранный id дописывается в список со словами
-   * «no front render», а не исчезает под человеком.
+   * ЧТО ВМЕСТО НЕГО: экран говорит, чего не хватает, и ЖДЁТ ЖЕСТА. Список `build:` предлагает
+   * только собираемые цели; текущая, если она не из них, в список не дописывается, а на её месте
+   * стоит пункт-приглашение «pick a colourway» (инвариант «значение всегда среди пунктов» держит
+   * сам `ColorwaySelect`, см. проп `unmatched`). Причину и ИМЯ цели называет полоса LOCKED ниже
+   * («the render bench of sample holds renders, but not on FRONT»), поэтому приглашение не
+   * пересказывает её второй раз. Общее состояние меняет ТОЛЬКО клик человека по этому селекту.
    */
-  useEffect(() => {
-    if (!onColorwayChange || buildable.length === 0) return;
-    if (buildable.includes(colorwayId)) return;
-    onColorwayChange(buildable[0]);
-  }, [buildable, colorwayId, onColorwayChange]);
 
   const sizes = dictionary?.sizes ?? [];
   const sizeName = (id: number) =>
@@ -162,16 +164,23 @@ export function ThreedStudio({
    * заново из категории значило бы завести ВТОРОЙ ответ на тот же вопрос — и он разошёлся бы с
    * первым в тот день, когда технолог снимет размер с карточки.
    *
-   * ⚠ ФОРМА МОЖЕТ БЫТЬ НЕ СМОНТИРОВАНА (студию собирает и стенд, и просмотр без формы), поэтому
-   * контекст читается мягко. ⚠ И ПУСТОЙ РЯД — ЭТО НЕ ПУСТОЙ СПИСОК: карточка без объявленного ряда
-   * законна, а поле помечено `*` и держит ворота прогона; пустой список сделал бы 3D недостижимым
-   * молча. Тогда предлагается словарь целиком — ровно как до этой правки.
+   * ⚠ ФОРМА ЗДЕСЬ ОБЯЗАТЕЛЬНА, И ЭТО СКАЗАНО ПРЯМО. На этом месте стоял каст к `| null` с
+   * оговоркой «студию собирает и стенд без формы, поэтому контекст читается мягко» — и мягким это
+   * чтение НЕ БЫЛО: `useWatch({ control: undefined })` внутри сам берёт `useFormContext()`, а у
+   * `null` читает `.control` (RHF 7.62), то есть обещанный мягкий путь падал бы `TypeError`ом и
+   * уносил бы вкладку в белое — над ней нет ни одной границы ошибок. Обещание снято, а не
+   * подкреплено: `ThreedStudio` монтирует только `StudioTab`, который сам зовёт `useFormContext`
+   * безусловно (`studio-tab.tsx`), значит форма есть у ВСЕГО поддерева, включая стенд проб (он
+   * оборачивает студию в `FormProvider`). Понадобится монтаж без формы — читать `sizeIds` пропом
+   * от композитора, как читается `band`; выдумывать вторую мягкость на месте не нужно.
+   *
+   * ⚠ И ПУСТОЙ РЯД — ЭТО НЕ ПУСТОЙ СПИСОК: карточка без объявленного ряда законна, а поле помечено
+   * `*` и держит ворота прогона; пустой список сделал бы 3D недостижимым молча. Тогда предлагается
+   * словарь целиком — ровно как до этой правки.
    */
-  const form = useFormContext<TechCardFormData>() as ReturnType<
-    typeof useFormContext<TechCardFormData>
-  > | null;
-  const cardSizeIds = (useWatch({ control: form?.control, name: 'sizeIds' }) ?? []) as number[];
-  const baseSizeId = Number(useWatch({ control: form?.control, name: 'baseSampleSizeId' }) ?? 0);
+  const { control } = useFormContext<TechCardFormData>();
+  const cardSizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
+  const baseSizeId = Number(useWatch({ control, name: 'baseSampleSizeId' }) ?? 0);
   const sizeItems = useMemo(() => {
     const run = new Set(cardSizeIds.filter((id) => (id ?? 0) > 0));
     const offered = run.size ? sizes.filter((s) => run.has(s.id ?? 0)) : sizes;
@@ -365,6 +374,17 @@ export function ThreedStudio({
                 probe='design-threed-build'
                 disabled={disabled}
                 only={buildable}
+                /* ⚠ ЦЕЛЬ, КОТОРУЮ СОБРАТЬ НЕЛЬЗЯ, НЕ ДОПИСЫВАЕТСЯ В СПИСОК И НЕ ПОДМЕНЯЕТСЯ САМА:
+                   на её месте стоит приглашение к жесту, а общий выбор студии ждёт клика человека
+                   (разбор — выше по файлу, на месте снятого эффекта-переезда).
+                   ⚠ ФРАЗА КОРОТКАЯ НАРОЧНО, И ЭТО ЗАМЕР, А НЕ ВКУС: «pick a colourway with a front
+                   render» не влезает в орган (190px) и ложится ДВУМЯ строками, поднимая ряд вдвое
+                   над 26px, которыми набраны все прочие ряды экрана. Условие при этом не потеряно
+                   — его называет полоса LOCKED четырьмя рядами ниже, и НЕ вообще, а по имени
+                   текущей цели («the render bench of sample holds renders, but not on FRONT»).
+                   Орган спрашивает ЖЕСТ, полоса называет ПРИЧИНУ; одно утверждение в двух местах
+                   было бы хуже. */
+                unmatched='pick a colourway'
                 choice={{
                   colorwayId,
                   setColorwayId: onColorwayChange,

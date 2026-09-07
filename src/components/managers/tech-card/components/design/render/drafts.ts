@@ -208,11 +208,12 @@ export function echoOf(source: EchoSource): EchoValues {
          * переплетение и падение вещи из номера, которого человек не набирал.
          *
          * Цвет уже сказан ТОЧНО — `colourPhrase` печатает «colourway <имя> — the exact value is
-         * <hex>», — поэтому в словах о ткани пантону делать нечего вовсе. С ЭКРАНА он никуда не
-         * делся: чип пикера колорвеев печатает его через `colorwaySubtitle` (ряд FABRIC, второй
-         * его читатель, снят вместе с тремя рядами настроек — J-20).
-         * Нужно ли доносить его до модели РЯДОМ с именем и hex — вопрос к владельцу, и он открыт;
-         * тихо подмешивать его в описание материала — не ответ на него.
+         * <hex>», — поэтому в словах о ткани пантону делать нечего вовсе.
+         * ⚠ ЗДЕСЬ СТОЯЛО «с экрана он никуда не делся: чип пикера колорвеев печатает его через
+         * `colorwaySubtitle`». Не стоит: ряд чипов снесён вместе с этой функцией (r3, волна 2 —
+         * последний его вызывающий исчез ещё двумя кругами раньше), и на экране рендера номер
+         * красильни теперь не показывается вовсе. Что с этим делать — вопрос к владельцу, и он
+         * открыт; тихо подмешивать номер в описание материала по-прежнему не ответ на него.
          */
         words: '',
       };
@@ -358,6 +359,27 @@ function useClothStatement(touched: { current: boolean }): {
   };
 }
 
+/**
+ * ⚠⚠ ЭТОТ ЧЕРНОВИК УМИРАЕТ ВМЕСТЕ С КАРТОЧКОЙ, И ДОЛГ, СТОЯВШИЙ ЗДЕСЬ ОДИН КРУГ, ЗАКРЫТ.
+ *
+ * ЧТО БЫЛО ЗАМЕРЕНО. Соседние черновики студии (`onmodel/drafts.ts`, `useThreedDraft` ниже) держат
+ * карточку, для которой они набраны, и опустошаются в теле рендера при её смене — `StudioTab`
+ * между карточками НЕ размонтируется (инвариант 12). У этого хука такого ключа не было вовсе:
+ * `seeded` не давал пересеять рецепт под новой карточкой, `touched` не давал этого и подавно, а
+ * `RenderStudio` живёт тем же узлом (`probe-render.mjs`, сцена N, `sameNode: true`). Значит на
+ * карточке B стояли слова, цвет и — что весомее — ТКАНИ карточки A, а ткань в рецепте это
+ * `design_asset.id` ЕЁ полки: GENERATE на B покупал лист по рецепту A, молча.
+ *
+ * ПОЧЕМУ КЛЮЧ, А НЕ РЕМОУНТ ПО `key={techCardId}`. Ключ у композитора снял бы заодно ВСЕ
+ * сбросы-в-теле-рендера соседних органов этого экрана (`side-row`, окно рождения колорвея),
+ * превратив их в мёртвый код, а их пробы — в сторожей у него. Черновик обязан знать свою карточку
+ * сам, как знают её оба соседа.
+ *
+ * ⚠ СБРОС ПОЛНЫЙ, А НЕ «ТОЛЬКО ЦВЕТ», И ЭТО НЕ ПРОТИВОРЕЧИТ ПРАВИЛУ D6 ДВУМЯ ЭКРАНАМИ НИЖЕ.
+ * Смена ЦЕЛИ переселяет один цвет, потому что ткань есть свойство ИЗДЕЛИЯ и изделие то же самое.
+ * Смена КАРТОЧКИ меняет само изделие: полка другая, `design_asset.id` другие, ряд размеров другой —
+ * от прежнего рецепта не остаётся законным ни одно поле.
+ */
 export function useColourDraft(
   band: GetDesignBandResponse,
   /**
@@ -368,6 +390,12 @@ export function useColourDraft(
   colorwayId: number = COLORWAY_NONE,
   /** Its row, for the colour half of the seed. Absent = the fabric half only. */
   colorway?: common_AdminColorwayRef | null,
+  /**
+   * ЧЬЯ ЭТО ПОДАЧА. Не «для удобства»: без этого числа черновик переживал смену карточки — см.
+   * шапку. Необязателен ради композиторов, монтирующих экран без карточки (стенд, печатный
+   * корень): `undefined !== undefined` ложно, и такой черновик просто не сбрасывается никогда.
+   */
+  techCardId?: number,
 ): ColourDraft {
   const [recipe, setRecipe] = useState<common_DesignColourRecipe>(EMPTY_RECIPE);
   /** Ссылка красильни, которой выбран цвет. На провод не едет — довод у `ColourDraft.pantone`. */
@@ -460,7 +488,9 @@ export function useColourDraft(
    * ЧТО СТОЯЛО ЗДЕСЬ ДО КРУГА 19: `fabricOfColorway` — ССЫЛКА `design_asset.colorway_id`, то есть
    * «какую ткань НАЗНАЧИЛИ этому колорвею». Механизм был честный и работал, но круг 16 снял его
    * писателя (`SetDesignAssetColorway` и чипы «worn by»), и с тех пор ветка читала колонку,
-   * которую ни один экран не заполняет: мёртвый засев, всегда промахивающийся мимо.
+   * которую ни один экран не заполняет: мёртвый засев, всегда промахивающийся мимо. Самой функции
+   * больше нет — она снесена в `assets/model.ts` вместе с последним вызывающим (r3, волна 2), и на
+   * её месте там стоит записка тем же доводом; искать её по имени бесполезно.
    *
    * И ВЕРНУТЬ ЕГО БЫЛО НЕЛЬЗЯ, ДАЖЕ ЕСЛИ БЫ ХОТЕЛОСЬ. Ссылка выражает ОДНУ ткань на колорвей —
    * это её серверный инвариант (`SetDesignAssetColorway` в одной транзакции снимает колорвей со
@@ -556,7 +586,26 @@ export function useColourDraft(
    * показав промежуточного состояния.
    */
   const shownColorway = useRef(colorwayId);
-  if (shownColorway.current !== colorwayId) {
+  /**
+   * ═══ СМЕНА КАРТОЧКИ ОПУСТОШАЕТ ЧЕРНОВИК ЦЕЛИКОМ (инвариант 12, довод — в шапке хука) ══════════
+   *
+   * `else if` НЕ КОСМЕТИКА, А ПОРЯДОК СТАРШИНСТВА ДВУХ СБРОСОВ. Композитор при смене карточки
+   * возвращает цель в `sample` (`useColorwayChoice`, тот же приём в теле рендера), поэтому оба
+   * условия истинны В ОДНОМ РЕНДЕРЕ. Пересев цветной половины после полного опустошения был бы
+   * работой над пустым рецептом в лучшем случае и восстановлением цвета ЧУЖОГО колорвея — в
+   * худшем; поэтому карточка старше, а `shownColorway` усыновляет новую цель молча.
+   */
+  const shownCard = useRef(techCardId);
+  if (shownCard.current !== techCardId) {
+    shownCard.current = techCardId;
+    shownColorway.current = colorwayId;
+    seeded.current = false;
+    touched.current = false;
+    owned.current = { ...NOTHING_OWNED };
+    setRecipe(EMPTY_RECIPE);
+    seedCloth(EMPTY_CLOTH);
+    setPantone('');
+  } else if (shownColorway.current !== colorwayId) {
     shownColorway.current = colorwayId;
     owned.current.code = false;
     owned.current.hex = false;
@@ -708,8 +757,32 @@ const INITIAL_THREED: ThreedDraft = {
   fitOverride: '',
 };
 
-export function useThreedDraft(): ThreedDraftState {
+/**
+ * ⚠ THE DRAFT BELONGS TO THE CARD, AND THE TAB IS NOT REMOUNTED BETWEEN CARDS (invariant 12).
+ *
+ * Every field here is card-scoped in the strictest sense: `garmentSizeId` is an id out of THIS
+ * card's declared size run (`sizeIds`, r3 п.36), and `fitOverride` is a stated deviation from THIS
+ * card's fit. Walking from card A to card B left all three standing — measured — so a run bought on
+ * B could name a size B does not have and a body picked for A, and the size select would not even
+ * show it: the list is narrowed to B's run, and a value outside the list is simply not drawn.
+ *
+ * SO THE DRAFT CARRIES THE CARD IT WAS FILLED FOR and empties itself in THE BODY OF THE RENDER
+ * (the pattern of `head/construction-draft.tsx`; an effect would leave one committed frame with
+ * B's name over A's answers, and one frame is enough to press GENERATE in).
+ *
+ * ⚠ A COLD CARD PROVES NOTHING HERE: unvisited, its band is `isLoading`, `StudioTab` swaps the step
+ * for «loading…» and this screen unmounts on its own. The walk that shows it is A → B → A with the
+ * band cached (`probe-g2a.mjs`, scene «cards»).
+ */
+export function useThreedDraft(techCardId?: number): ThreedDraftState {
   const [draft, setDraft] = useState<ThreedDraft>(INITIAL_THREED);
+
+  const shownCard = useRef(techCardId);
+  if (shownCard.current !== techCardId) {
+    shownCard.current = techCardId;
+    if (draft !== INITIAL_THREED) setDraft(INITIAL_THREED);
+  }
+
   return {
     draft,
     patch: (next) => setDraft((prev) => ({ ...prev, ...next })),

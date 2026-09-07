@@ -1,13 +1,10 @@
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { Chip, ChipRow } from 'ui/components/chip';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 
-import { assetThumb, fabricOfColorway } from './assets/model';
 import { COLORWAY_NONE, renderBenchOccupied, colorwayOf } from './bench-kinds';
-import { FieldRow, Hint, Swatch } from './render/field-row';
 /* СЛОВО ОСИ 0 БЕРЁТСЯ У ВОРОТ, А НЕ ПИШЕТСЯ ЗДЕСЬ ВТОРОЙ РАЗ: подпись пункта и отказ, который
    человек прочтёт следом, обязаны быть одной строкой кода (`render/model.ts`, `SAMPLE_WORD`). */
 import { SAMPLE_WORD } from './render/model';
@@ -39,10 +36,14 @@ import { SAMPLE_WORD } from './render/model';
  * Второй сущности «рендерный колорвей» тоже не заведено: ось — это ПРОДУКТОВЫЙ колорвей карточки
  * (`AdminColorwayRef`), тот самый, которым уже ключуются верстак, ворота 3D и история.
  *
- * `ColorwayPicker` (ряд чипов) при этом ПО-ПРЕЖНЕМУ БЕЗ ВЫЗЫВАЮЩИХ — см. вторую записку ниже; ряд
- * чипов рядом с рядом представлений читался бы как «ещё пять представлений», а вопрос у него не
- * тот. Возвращён `ColorwaySelect`, потому что селект читается как фильтр, а фильтр — это и есть
- * «чей».
+ * ⚠ РЯД ЧИПОВ (`ColorwayPicker`) СНЕСЁН ВМЕСТЕ СО СВОЕЙ ЗАПИСКОЙ, а не оставлен «под волну»
+ * (r3, ревью объединённого диффа). Он простоял без единого продуктового вызывающего два круга:
+ * J-20 заменил его на экране фабрик-рендера компактным `ColorwaySelect`, J-27 снял поле колорвея с
+ * 3D, и последними читателями остались два стенда проб, которых сегодня нет и в стендах. Записка
+ * «назван вслух, сносить — решение ревью объединённого диффа» своё дело сделала: ревью прошло,
+ * снос — здесь. Вместе с ним ушли `colorwaySubtitle` (его читал только чип) и единственный в
+ * студии вызов `fabricOfColorway`; сама функция была снесена следом, в `assets/model.ts`, где на
+ * её месте стоит записка, почему её нельзя и незачем восстанавливать.
  *
  * ⚠ ОСЬ НЕ УМИРАЛА НИ НА ДЕНЬ, И ФАЙЛ — НЕ ЕЁ ЕДИНСТВЕННЫЙ СЛЕД. `params.colorway_id`, колонка
  * `design_bench_slot.colorway_id`, `render_bench_colorway_ids` в полосе и
@@ -54,15 +55,17 @@ import { SAMPLE_WORD } from './render/model';
  *
  * Владелец: «у фабрик-рендера 1 колорвей — там мультивью, из него сплитом стороны, и так на каждый
  * колорвей», и «в 3д рендере выбираем колорвей, который будем рендерить». So the render bench is
- * per colourway and 3D builds from exactly one of them. This row is where that one is named.
+ * per colourway and 3D builds from exactly one of them. `ColorwaySelect` is where that one is
+ * named — `for:` beside the money on FABRIC RENDER, `build:` above the input on 3D.
  *
  * ═══ ЧТО ЗДЕСЬ НЕ ЯВЛЯЕТСЯ ПУСТЫМ СОСТОЯНИЕМ, И ЭТО ГЛАВНОЕ РЕШЕНИЕ ЭКРАНА ════════════════════
  *
- * `NO COLOURWAY` — ПЕРВЫЙ ЧИП РЯДА, ВСЕГДА, И РИСУЕТСЯ ОН ТЕМ ЖЕ ЧИПОМ, ЧТО ИМЕНОВАННЫЕ. Это не
- * «ничего не выбрано» и не ошибка: безколорвейный верстак — настоящий, выбираемый и вечно законный
- * (контракт: «every render made before the colourway axis stands on it», и 3D-прогон, не назвавший
- * колорвея, читает ровно его). Нарисовать его серым, курсивом или предупреждением значило бы
- * сказать человеку, что половина его карточек сломана, — а сломано в них ничего нет.
+ * ОСЬ 0 — ПЕРВЫЙ ПУНКТ СПИСКА, ВСЕГДА, И НАБРАН ОН ТАК ЖЕ, КАК ИМЕНОВАННЫЕ (на экране её зовут
+ * `sample`, r3 G2-1). Это не «ничего не выбрано» и не ошибка: безколорвейный верстак — настоящий,
+ * выбираемый и вечно законный (контракт: «every render made before the colourway axis stands on
+ * it», и 3D-прогон, не назвавший колорвея, читает ровно его). Нарисовать его серым, курсивом или
+ * предупреждением значило бы сказать человеку, что половина его карточек сломана, — а сломано в
+ * них ничего нет.
  *
  * ═══ ПОДПИСИ БЕРУТСЯ ИЗ РАЗРАБОТОЧНЫХ ПОЛЕЙ, А НЕ ИЗ ПЕРЕВОДОВ, И ЭТО ЗАМЕР, А НЕ ВКУС ════════
  *
@@ -98,16 +101,6 @@ export function colorwayLabel(ref?: common_AdminColorwayRef | null): string {
   if (sku) return sku;
   const id = ref?.colorwayId ?? 0;
   return id > 0 ? `#${id}` : 'colourway';
-}
-
-/** Вторая строка чипа-носителя в палитре: чем именно этот колорвей ЕСТЬ, кроме имени. */
-export function colorwaySubtitle(ref?: common_AdminColorwayRef | null): string {
-  const parts = [
-    (ref?.pantone ?? '').trim(),
-    (ref?.colorCode ?? '').trim(),
-    (ref?.devHex ?? '').trim(),
-  ].filter(Boolean);
-  return [...new Set(parts)].join(' · ');
 }
 
 export type ColorwayChoice = {
@@ -154,15 +147,54 @@ export type ColorwayChoice = {
  * ПОЧЕМУ НЕ «ВСЕГДА ПЕРВЫЙ КОЛОРВЕЙ». Легаси-карточка — их на бете большинство — открылась бы на
  * ИМЕНОВАННОМ и, значит, ПУСТОМ верстаке, притом что все её рендеры лежат рядом, на безколорвейном.
  * Снаружи это читается как пропажа данных, и первое, что делает человек, — идёт их искать.
+ *
+ * ═══ И ЭТО СОСТОЯНИЕ УМИРАЕТ ВМЕСТЕ С КАРТОЧКОЙ, КАК ЧЕРНОВИКИ РЯДОМ (инвариант 12) ═══════════
+ *
+ * `settled` и `colorwayId` пережили смену карточки ровно один круг, и цена была не косметическая:
+ * выбор карточки A снимался только дрейф-эффектом (пункта нет → `sample`), то есть правило
+ * умолчания для карточки B НЕ ИСПОЛНЯЛОСЬ НИ РАЗУ — она открывалась семплом даже там, где вся её
+ * работа лежит под ROSSO. Тот самый исход, против которого написан абзац про умолчание выше, и
+ * приезжал он ЧЕРЕЗ СОСЕДНЮЮ КАРТОЧКУ. Сброс — в теле рендера: эффект оставил бы кадр, в котором
+ * карточка уже новая, а цель ещё чужая, и по этому кадру успевают нажать GENERATE.
  */
 export function useColorwayChoice(
   techCardId: number | undefined,
   band: GetDesignBandResponse,
+  /**
+   * ═══ АДРЕС НАЗВАЛ ЦЕЛЬ — ПОТРЕБЛЯЮЩАЯ ПОЛОВИНА ДВЕРИ «open in studio ›» (Codex MAJOR 2) ══════
+   *
+   * `0` = адрес про цель не говорит, и это обычный случай. Гейт по `?tab=` СЮДА НЕ ВХОДИТ
+   * нарочно: правило системы — «параметр читает та вкладка, которую назвал `?tab=`», а какая
+   * вкладка на экране, знает композитор, а не хук. Он же и парсит: сюда приезжает УЖЕ ЧИСЛО.
+   *
+   * ⚠ ПРОВЕРКА «ТАКОЙ КОЛОРВЕЙ У КАРТОЧКИ ЕСТЬ» ЖИВЁТ ЗДЕСЬ, А НЕ У КОМПОЗИТОРА, И ЭТО НЕ ВКУС:
+   * сверяться надо с СЫРЫМ списком карточки (`techCard.colorways`, архивные тоже), а наружу хук
+   * отдаёт список УЖЕ СУЖЕННЫЙ — архивный без плит из него выброшен. Проверив по нему, дверь к
+   * архивному цвету с пустым верстаком отказывала бы молча, хотя стоять на нём законно (см. два
+   * предиката ниже).
+   */
+  deepLinkColorwayId: number = 0,
+  /**
+   * СНЯТЬ ПАРАМЕТР ИЗ АДРЕСА. Зовётся РОВНО ОДИН РАЗ на карточку и при любом исходе — и когда цель
+   * принята, и когда названного колорвея у карточки нет: иначе `?colorway=` пережил бы жест,
+   * который его написал, и следующая смена карточки читала бы чужое имя как приказ.
+   */
+  onDeepLinkTaken?: () => void,
 ): ColorwayChoice {
   const { data: techCard, isLoading } = useTechCard(techCardId);
 
   const [colorwayId, setColorwayId] = useState<number>(COLORWAY_NONE);
   const settled = useRef(false);
+  /** Адрес прочитан для ЭТОЙ карточки. Ref, а не состояние: ничего не рисует. */
+  const linkTaken = useRef(false);
+
+  const shownCard = useRef(techCardId);
+  if (shownCard.current !== techCardId) {
+    shownCard.current = techCardId;
+    settled.current = false;
+    linkTaken.current = false;
+    if (colorwayId !== COLORWAY_NONE) setColorwayId(COLORWAY_NONE);
+  }
 
   /**
    * ⚠ АРХИВ ЗАКРЫВАЕТ ДВЕРЬ К НОВОЙ РАБОТЕ, А НЕ К УЖЕ СДЕЛАННОЙ — И ЭТО ДВА РАЗНЫХ ПРЕДИКАТА,
@@ -215,6 +247,58 @@ export function useColorwayChoice(
       }),
     [techCard, band.renderBenchColorwayIds, colorwayId],
   );
+
+  /**
+   * ═══ ЦЕЛЬ, НАЗВАННАЯ АДРЕСОМ, СТАРШЕ УМОЛЧАНИЯ — И ЭТО ВЕСЬ СМЫСЛ ДВЕРИ (Codex MAJOR 2) ═══════
+   *
+   * ЧТО ЛОМАЛОСЬ. «open in studio ›» стоит в блоке рендеров КОНКРЕТНОГО колорвея на вкладке
+   * COLOURWAYS, и человек, нажавший её у OLIVE, дальше грузит, размечает и ЗАКАЗЫВАЕТ прогон в
+   * уверенности, что активен OLIVE. Студия же открывалась на СВОЁМ умолчании (первый колорвей с
+   * рендерами — ROSSO), и `colorway_id` прогона НЕИЗМЕНЯЕМ: оплаченная генерация оставалась в
+   * истории чужого цвета навсегда.
+   *
+   * ⚠ ЭТОТ ЭФФЕКТ ОБЪЯВЛЕН ВЫШЕ ЭФФЕКТА УМОЛЧАНИЯ, И ПОРЯДОК ЗДЕСЬ НЕСУЩИЙ. React исполняет
+   * эффекты в порядке объявления: приняв цель, этот поднимает `settled`, и умолчание, идущее
+   * следом В ТОМ ЖЕ ПРОХОДЕ, выходит на первой строке. Переставь их местами — и умолчание успело
+   * бы поставить ROSSO, а адрес починил бы его вторым кадром, по которому уже можно нажать.
+   *
+   * ⚠ ЖДЁМ КАРТОЧКУ, А НЕ ПОЛОСУ. Проверять «есть ли такой колорвей» можно только по прочитанной
+   * карточке; `isLoading` — единственное, чего этот эффект ждёт, и `linkTaken` до тех пор НЕ
+   * поднимается: подняв его раньше, мы сняли бы параметр, не прочитав его, — ровно тот дефект,
+   * который эффект умолчания уже однажды оплатил своим `settled` не на той строке.
+   *
+   * ⚠ ИСХОДА ДВА, А ЗОВ `taken` ОДИН. Колорвея у карточки нет (снесён, чужой, опечатка в адресе) —
+   * параметр снимается МОЛЧА и отрабатывает обычное умолчание: угадывать «похожий» тут нечего, а
+   * оставить параметр висеть значило бы дать ему выстрелить на следующей карточке.
+   */
+  const takenRef = useRef(onDeepLinkTaken);
+  takenRef.current = onDeepLinkTaken;
+  useEffect(() => {
+    /**
+     * ⚠ ФЛАГ СНИМАЕТСЯ, КАК ТОЛЬКО АДРЕС ПЕРЕСТАЁТ НАЗЫВАТЬ ЦЕЛЬ, И ЭТО НЕ АККУРАТНОСТЬ, А ВТОРОЙ
+     * ЖЕСТ. Дверь «open in studio ›» жмут не по разу: вкладки тех-карты смонтированы все сразу,
+     * поэтому человек уходит на COLOURWAYS и возвращается в студию за ДРУГИМ цветом, НЕ МЕНЯЯ
+     * карточки. Флаг «однажды прочитано» (первая редакция этой строки) съедал бы второй адрес
+     * молча — и второй прогон уезжал бы за первым цветом, ровно тот дефект, ради которого дверь
+     * и назвала колорвей. `linkTaken` поэтому значит «ТЕКУЩИЙ адрес обработан», а пустой адрес
+     * его снимает. Сравнивать с ПРОЧИТАННЫМ id нельзя по той же причине: дважды подряд названный
+     * один и тот же цвет — законный жест, и он бы не прошёл.
+     */
+    if (deepLinkColorwayId <= 0) {
+      linkTaken.current = false;
+      return;
+    }
+    if (linkTaken.current || isLoading) return;
+    linkTaken.current = true;
+    const named = (techCard?.colorways ?? []).some(
+      (c) => (c.colorwayId ?? 0) === deepLinkColorwayId,
+    );
+    if (named) {
+      settled.current = true;
+      setColorwayId(deepLinkColorwayId);
+    }
+    takenRef.current?.();
+  }, [deepLinkColorwayId, isLoading, techCard]);
 
   const withRenders = band.renderBenchColorwayIds;
   useEffect(() => {
@@ -295,167 +379,6 @@ export function useColorwayChoice(
 }
 
 /**
- * РЯД ЧИПОВ. Та же грамматика, что у CLOTHS: `FieldRow` + `ChipRow`, ни одного нового примитива —
- * «одна форма для одного жеста» на всей полосе.
- *
- * ПРИСУТСТВИЕ РЕНДЕРА — ГЛИФ, А НЕ СЧЁТЧИК, и это предел честности данных: `render_bench_colorway_ids`
- * говорит «у этого колорвея занят хотя бы один слот» и ничего больше. Считать плиты по колорвею со
- * страницы ленты нельзя — она одна страница, — и число на чипе было бы правдоподобной неправдой.
- */
-/**
- * ⚠ У ЭТОГО РЯДА ЧИПОВ НЕ ОСТАЛОСЬ НИ ОДНОГО ПРОДУКТОВОГО ВЫЗЫВАЮЩЕГО — И ЭТО СОВМЕСТНЫЙ ЭФФЕКТ
- * ДВУХ ВОЛН ОДНОГО КРУГА, КОТОРЫЙ НИ ОДНА ИЗ НИХ ПО ОТДЕЛЬНОСТИ НЕ ВИДИТ.
- *
- * Замерено на ОБЪЕДИНЁННОМ дереве, а не на своей половине:
- *   · J-20 (эта волна) снял ряд с экрана фабрик-рендера — там теперь `ColorwaySelect`, компактный
- *     адрес блока в его заголовочной линейке;
- *   · J-27 (соседняя волна, вкладка 3D) снял поле колорвея оттуда целиком — `threed-studio.tsx`
- *     больше не упоминает этот компонент вовсе.
- * Читателей осталось двое, и оба — стенды проб (`cw-stand.tsx`).
- *
- * ЧТО С ЭТИМ ДЕЛАТЬ — РЕШЕНИЕ РЕВЬЮ ОБЪЕДИНЁННОГО ДИФФА, А НЕ ОДНОЙ ИЗ ВОЛН. Снести его отсюда
- * значило бы править файл под чужой незакрытой волной; оставить молча — завести ровно тот мёртвый
- * орган, против которого написан весь этот круг. Поэтому он назван вслух здесь.
- *
- * `colorwayLabel` / `colorwaySubtitle` / `useColorwayChoice` из этого же файла ЖИВЫ и нужны обеим
- * волнам — снос обязан коснуться ровно этой функции, а не файла.
- */
-export function ColorwayPicker({
-  band,
-  choice,
-  disabled,
-  /** Что стоит под рядом на карточке БЕЗ колорвеев — экраны говорят разное, оба правдиво. */
-  emptyNote,
-}: {
-  band: GetDesignBandResponse;
-  choice: ColorwayChoice;
-  disabled?: boolean;
-  emptyNote?: string;
-}): JSX.Element {
-  const { colorwayId, setColorwayId, colorways, loading } = choice;
-  const has = (id: number) => renderBenchOccupied(band.renderBenchColorwayIds, id);
-  // Точка означает что-то ТОЛЬКО когда сервер список прислал: у старого бинаря `renderBenchOccupied`
-  // отвечает «занят» на любой вопрос, и ряд точек над пустой карточкой был бы украшением.
-  const stated = !!band.renderBenchColorwayIds;
-
-  return (
-    <FieldRow label='colourway' data-cw-picker={colorwayId}>
-      {loading ? (
-        <Text size='micro' variant='label' component='span' className='normal-case'>
-          reading this card’s colourways…
-        </Text>
-      ) : (
-        <ChipRow>
-          <Chip
-            nonForm
-            selected={colorwayId === COLORWAY_NONE}
-            pressed={colorwayId === COLORWAY_NONE}
-            disabled={disabled}
-            data-cw='none'
-            title={
-              'sampling — renders filed under no colourway of their own. A real bench, selectable ' +
-              'like any other, and everything made before colourways existed stands on it.'
-            }
-            onClick={() => setColorwayId(COLORWAY_NONE)}
-          >
-            <span className='flex items-center gap-1'>
-              {/* ПУСТОЙ КВАДРАТ СО ШТРИХОВКОЙ — ГЛИФ, А НЕ ЦВЕТ. Закрасить его чем угодно значило
-                  бы назвать цвет верстаку, у которого цвета нет по существу. */}
-              <Swatch hex='' size={11} />
-              {SAMPLE_WORD}
-              {stated && has(COLORWAY_NONE) ? ' ·' : ''}
-            </span>
-          </Chip>
-
-          {colorways.map((c) => {
-            const id = c.colorwayId ?? 0;
-            const on = id === colorwayId;
-            const renders = stated && has(id);
-            /**
-             * ЛИЦО ЧИПА — ТО ЖЕ, ЧТО ЛИЦО КОЛОРВЕЯ В РЯДУ FABRIC (H-12). Колорвей носит ЛИБО свой
-             * цвет, ЛИБО плитку; чип, всегда рисующий `devHex`, показывал бы у набивного колорвея
-             * цвет, которого в его рендерах не будет ни разу. Ткань есть — показываем ткань.
-             * Одиннадцать пикселей плитки не «превью раппорта», а опознавательный знак: он отвечает
-             * на «этот из тканевых?», и ровно на это его хватает.
-             */
-            const wornFace = assetThumb(fabricOfColorway(band, id));
-            /* Архивный стоит в ряду только потому, что под ним лежит работа (или потому, что на
-               нём стоят) — и говорит об этом сам, словом, а не оттенком: серый чип читался бы как
-               «сломан», а сломанного в нём ничего нет. */
-            const archived = archivedRef(c);
-            return (
-              <Chip
-                key={id}
-                nonForm
-                selected={on}
-                pressed={on}
-                disabled={disabled}
-                data-cw={id}
-                title={[
-                  colorwayLabel(c),
-                  colorwaySubtitle(c),
-                  wornFace ? 'wears a cloth of this card, so its chip shows the cloth' : '',
-                  renders
-                    ? 'its render bench holds at least one plate'
-                    : 'no plate stands on its render bench yet',
-                  archived
-                    ? 'archived — kept here so its work stays reachable; file new work under a live colourway'
-                    : '',
-                ]
-                  .filter(Boolean)
-                  .join(' — ')}
-                onClick={() => setColorwayId(id)}
-              >
-                <span className='flex items-center gap-1'>
-                  {wornFace ? (
-                    <img
-                      src={wornFace}
-                      alt=''
-                      aria-hidden='true'
-                      data-cw-face={id}
-                      className='size-[11px] shrink-0 border border-textColor object-cover'
-                    />
-                  ) : (
-                    <Swatch hex={(c.devHex ?? '').trim()} size={11} />
-                  )}
-                  {colorwayLabel(c)}
-                  {archived ? ' (archived)' : ''}
-                  {renders ? ' ·' : ''}
-                </span>
-              </Chip>
-            );
-          })}
-        </ChipRow>
-      )}
-
-      {!loading && colorways.length === 0 ? (
-        /* НЕ ПУСТОЕ СОСТОЯНИЕ И НЕ ОШИБКА: работать можно, всё уезжает в безколорвейный верстак,
-           ровно как жило до оси. Строка называет, ГДЕ колорвеи заводят, и что будет без них. */
-        <Hint>
-          {emptyNote ??
-            'this card has no colourways yet — everything made here is filed as a sample, which is a permanent, legal place for it. A colourway is born on FABRIC RENDER.'}
-        </Hint>
-      ) : (
-        !loading && (
-          <>
-            {stated && <Hint>· marks a colourway whose render bench already holds a plate</Hint>}
-            {/* СТРОКА ПОЯВЛЯЕТСЯ ТОЛЬКО КОГДА В РЯДУ ЕСТЬ АРХИВНЫЙ: постоянная проза про случай,
-                которого на экране нет, — это шум, а не документация. */}
-            {colorways.some(archivedRef) && (
-              <Hint>
-                (archived) marks a colourway that is no longer worked on — it stands here so its
-                renders stay reachable, and a new run is refused under it. Make new work under a
-                live colourway.
-              </Hint>
-            )}
-          </>
-        )
-      )}
-    </FieldRow>
-  );
-}
-
-/**
  * ═══ ОДИН СЕЛЕКТ — «ДЛЯ КОГО ЭТОТ ПРОГОН», И СТОИТ ОН У ДЕНЕГ (D2, G2-2/G2-3) ═════════════════
  *
  * ГДЕ ОН БЫЛ И ПОЧЕМУ УЕХАЛ. Круг 19 поставил его в слот `action` рельса шагов — «один фильтр на
@@ -474,14 +397,20 @@ export function ColorwayPicker({
  * скрытый нативный `<select>`; текущее значение, которого нет среди `<option>`, он принять не
  * может и присылает обратно ПУСТУЮ строку как «выбор человека». `sample` — полноценный пункт со
  * значением `'0'`, а не отсутствие пункта. Сужение списка (`only`, экран 3D) держит тот же
- * инвариант КОНСТРУКЦИЕЙ: выбранный id дописывается в список, даже если он сужение не прошёл, и
- * называет причину («no front render») вместо того, чтобы исчезнуть под человеком.
+ * инвариант КОНСТРУКЦИЕЙ, и у него ДВА исхода, между которыми выбирает вызывающий:
+ *   · без `unmatched` — выбранный id дописывается в список и называет причину («no front render»);
+ *     так орган остаётся ФИЛЬТРОМ ПРЕДСТАВЛЕНИЯ и ничего не утверждает про выбор;
+ *   · с `unmatched` — не прошедший сужение выбор НЕ дописывается, а на его месте стоит пункт-
+ *     плейсхолдер с этой фразой. Список тогда честно говорит «здесь выбирать не из чего, кроме
+ *     вот этого», и выбор остаётся ЧЕЛОВЕКУ (3D, G2-7: экран не двигает общую цель студии сам).
  *
  * ⚠ ПУНКТ `+ colourway…` — ДВЕРЬ, А НЕ ЗНАЧЕНИЕ. Он ничего не выбирает: обработчик ловит его
  * раньше `setColorwayId`, открывает окно рождения и оставляет значение прежним. Поэтому и `value`
  * остаётся тем, чем был, — контролируемый Radix откатывает список сам.
  */
 const CREATE_ITEM = '__create__';
+/** «Ничего подходящего не выбрано» — тоже пункт, а не пустое значение (см. шапку про Radix). */
+const PICK_ITEM = '__pick__';
 
 export function ColorwaySelect({
   band,
@@ -503,6 +432,12 @@ export function ColorwaySelect({
    * предлагающий остальные, продавал бы отказ.
    */
   only,
+  /**
+   * ЧТО СТОИТ В ОРГАНЕ, КОГДА ТЕКУЩИЙ ВЫБОР СУЖЕНИЕ НЕ ПРОШЁЛ. Задано — пункт-плейсхолдер с этой
+   * фразой (выбор не дописывается и не двигается сам); не задано — прежнее поведение, выбранный
+   * пункт остаётся в списке с хвостом «no front render». Работает только вместе с `only`.
+   */
+  unmatched,
   /** Якорь для проб и для отладки: чем этот селект отличается от соседнего. */
   probe = 'design-render-colourway',
 }: {
@@ -512,6 +447,7 @@ export function ColorwaySelect({
   label?: string;
   onCreate?: () => void;
   only?: readonly number[];
+  unmatched?: string;
   probe?: string;
 }): JSX.Element {
   const { colorwayId, setColorwayId, colorways, current, loading } = choice;
@@ -526,8 +462,14 @@ export function ColorwaySelect({
     );
   }
 
-  /** Прошёл ли колорвей сужение экрана. Выбранный проходит ВСЕГДА — иначе он выпадет из списка. */
-  const allowed = (id: number) => !only || only.includes(id) || id === colorwayId;
+  /**
+   * СТОИТ ЛИ ВЫБРАННЫЙ ПУНКТ НА ПЛЕЙСХОЛДЕРЕ. Только когда вызывающий дал фразу И сужение текущий
+   * выбор не прошёл: тогда список = ровно подходящие, а значение — пункт-плейсхолдер.
+   */
+  const unpicked = !!unmatched && !!only && !only.includes(colorwayId);
+  /** Прошёл ли колорвей сужение экрана. Без плейсхолдера выбранный проходит ВСЕГДА — иначе он
+   *  выпадет из списка, а Radix пришлёт пустую строку как «выбор человека» (см. шапку). */
+  const allowed = (id: number) => !only || only.includes(id) || (!unpicked && id === colorwayId);
   const offered = colorways.filter((c) => allowed(c.colorwayId ?? 0));
   const sampleOffered = allowed(COLORWAY_NONE);
   /** Почему пункт стоит, хотя сужение он не прошёл: экран обязан сказать это словом. */
@@ -559,9 +501,10 @@ export function ColorwaySelect({
       <span className='w-[190px]' title={nothing ? emptyNote : archivedNote}>
         <SelectComponent
           name={probe}
-          value={String(colorwayId)}
+          value={unpicked ? PICK_ITEM : String(colorwayId)}
           disabled={disabled || nothing}
           items={[
+            ...(unpicked ? [{ value: PICK_ITEM, label: unmatched! }] : []),
             ...(sampleOffered
               ? [
                   {
@@ -590,8 +533,10 @@ export function ColorwaySelect({
           ]}
           onValueChange={(value: string) => {
             /* Пустая строка сюда доехать не может (см. шапку), но если доедет — это НЕ выбор
-               человека, и молчание честнее записи. */
-            if (!value) return;
+               человека, и молчание честнее записи. Плейсхолдер — тоже не выбор: он называет
+               ОТСУТСТВИЕ подходящей цели, и «выбрать» его значило бы записать в общее состояние
+               строку вместо числа. */
+            if (!value || value === PICK_ITEM) return;
             if (value === CREATE_ITEM) {
               /* ДВЕРЬ, А НЕ ЗНАЧЕНИЕ: выбор не двигается, окно открывается, и цель переключит уже
                  `onCreated` — на тот id, который вернул сервер. */

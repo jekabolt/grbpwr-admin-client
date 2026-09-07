@@ -29,6 +29,7 @@ import type { ThreedDraft } from './drafts';
 import { Swatch } from './field-row';
 import {
   fabricAuthority,
+  benchName,
   benchSides,
   colourLabel,
   colourSubtitle,
@@ -799,11 +800,14 @@ function ThreedBody({
 
   return (
     <>
+      {/* ⚠ ВЕРСТАК ЗДЕСЬ ЗОВЁТСЯ ТЕМ ЖЕ СЛОВОМ, ЧТО НА СЕЛЕКТЕ И В ОТКАЗАХ (D1/G2-1). Опись
+          печатала «· no colourway» у оси 0 — то же самое написание, что `benchName` сняло со всей
+          полосы: селект над сборкой говорил `sample`, опись ТОГО ЖЕ прогона — «no colourway», и
+          два имени одного верстака на последней поверхности перед деньгами читались как два
+          разных набора. Написание одно и живёт в `render/model.ts`. */}
       <WmgGroup
         flush
-        label={`inputs — renders by view${
-          colorwayLabel.trim() ? ` · ${colorwayLabel.trim()}` : ' · no colourway'
-        }`}
+        label={`inputs — renders by view · ${benchName(colorwayLabel)}`}
         aside={`${present} of 4 marked · front required`}
       >
         {sides.map((side) => {

@@ -30,7 +30,6 @@ export {
   fittingDayStamp,
   fittingShots,
   fittingsWithShots,
-  flatColours,
   lastRecolorCharge,
   onModelGate,
   paintModeWord,
@@ -43,13 +42,11 @@ export {
   recolourWireColour,
   shotMediaIds,
   shotName,
-  shotOrigin,
   targetIsStated,
 } from './model';
 export type {
   ClothChoice,
   FittingShot,
-  FlatColour,
   OnModelDoor,
   OnModelGate,
   OnModelPaint,

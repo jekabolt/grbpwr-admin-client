@@ -1,7 +1,7 @@
 import type { common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
@@ -167,12 +167,42 @@ export function StudioTab({
   const { canWrite } = usePermissions();
   const canWriteCard = canWrite(SECTION.techCards);
 
+  /* АДРЕС — ОДИН НА ОБА ПАРАМЕТРА СТУДИИ (`?step=` ниже, `?colorway=` тут же). Читается ВЫШЕ
+     `useColorwayChoice`, потому что цель, названную адресом, хук получает пропом. */
+  const [params, setParams] = useSearchParams();
+
   /* ═══ ЧЕЙ ЭТО РЕНДЕР — ОДНО ЧИСЛО НА ВСЮ СТУДИЮ (круг 19, C1) ═════════════════════════════════
      Ось — продуктовый колорвей карточки, тот самый, которым ключуются верстак рендеров, ворота 3D и
      история. Владелец хука — композитор, не экран: верстак рендеров ПИШЕТ FABRIC RENDER, ЧИТАЕТ 3D,
      а СЕРВЕР по нему собирает (`designSelectBench`); заведи второго владельца — и полоса входа 3D
-     показывала бы ROSSO, пока прогон уезжает за OLIVE. Число раздаётся вниз ПРОПОМ. */
-  const colorway = useColorwayChoice(techCardId, band);
+     показывала бы ROSSO, пока прогон уезжает за OLIVE. Число раздаётся вниз ПРОПОМ.
+
+     ═══ ⚠ `?colorway=<id>` — ЭТО ВТОРАЯ ПОЛОВИНА ДВЕРИ «open in studio ›» (Codex MAJOR 2) ═══════
+     Пишет её вкладка COLOURWAYS (`colorway-recipe.tsx`), у КОНКРЕТНОГО колорвея, вместе с
+     `?tab=studio&step=render`. Правило системы одно и оно же держит обе половины: ПАРАМЕТР ЧИТАЕТ
+     ТА ВКЛАДКА, КОТОРУЮ НАЗЫВАЕТ `?tab=`. Вкладки тех-карты смонтированы ВСЕ СРАЗУ (`SectionStack
+     hidden=…`, index.tsx), поэтому без этого гейта две вкладки читали бы одно число и та, что
+     быстрее, съедала бы его у адресата.
+
+     ЧИСЛО РАЗБИРАЕТСЯ ЗДЕСЬ, А ПРОВЕРЯЕТСЯ В ХУКЕ: `Number(null) === 0` и `Number('olive')`
+     — `NaN`, оба не проходят `> 0`; а вот «есть ли такой колорвей у карточки» знает только тот,
+     кто читал карточку. Снятие параметра — тоже здесь: адрес принадлежит композитору, и второй
+     его писатель развёл бы правило «replace, не трогая `tab`/`step`» на две редакции. */
+  const addressedTab = params.get('tab');
+  const askedColorway = addressedTab === 'studio' ? Number(params.get('colorway')) : NaN;
+  const deepLinkColorway =
+    Number.isFinite(askedColorway) && askedColorway > 0 ? askedColorway : 0;
+  const dropColorwayParam = useCallback(() => {
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.delete('colorway');
+        return p;
+      },
+      { replace: true },
+    );
+  }, [setParams]);
+  const colorway = useColorwayChoice(techCardId, band, deepLinkColorway, dropColorwayParam);
 
   const readOnly = !!disabled;
 
@@ -210,7 +240,7 @@ export function StudioTab({
      being shown and then swapped for the decided step a moment later. A step that is on screen
      must be a step the person can stay on; the cells are live throughout, so CARD DETAILS is one
      click away at any moment (and that click writes the address, which then wins). */
-  const [params, setParams] = useSearchParams();
+  /* `params` / `setParams` взяты выше — у чтения `?colorway=`: адрес один, и читатель его один. */
   const urlStep = params.get('step');
   const chain = useChainCtx({
     band,

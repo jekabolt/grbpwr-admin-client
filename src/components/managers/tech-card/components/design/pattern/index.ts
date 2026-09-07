@@ -46,7 +46,9 @@ export { PatternLibrary } from './pattern-library';
    колорвеев, а не на экране, где плитку делают. */
 export { PatternColourRow, colourSwatchHex } from './colourways';
 export { CornerLabel, GoToStep, TiledFace } from './organs';
-export type { PatternColour, PatternGate } from './model';
+/* `PatternGate` СНЕСЁН (r3c): его единственной прибавкой к общему `Gate` было поле `door`, а
+   читателя у поля не осталось. Разбор — на его месте в `model.ts`. */
+export type { PatternColour } from './model';
 /* `useStartPatternRun` ЖИЛ ЗДЕСЬ НЕДЕЛЮ И СНЕСЁН. Он минтил СВОЙ ключ идемпотентности по СВОЕМУ
    отпечатку — то есть держал второй ответ на вопрос «то же ли это нажатие, что и прошлое», а
    именно на этом вопросе и разъезжается оплаченный дважды прогон. Плитка стартует тем же

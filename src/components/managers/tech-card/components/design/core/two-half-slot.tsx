@@ -31,7 +31,7 @@ import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
  * Перо нижней половины — тем же штрихом и в той же коробке 24×24, что фотоглиф верхней у
  * `MediaSlot`: две половины одной плитки обязаны читаться одной парой «знак + глагол».
  */
-export function PenGlyph({ className }: { className?: string }): JSX.Element {
+function PenGlyph({ className }: { className?: string }): JSX.Element {
   return (
     <svg
       aria-hidden
@@ -62,7 +62,7 @@ export const HALF_FACE =
  * (4/5) распирают строку, и «половина» перестаёт быть половиной (замерено: 366 против 162 у
  * заполненной ячейки). Поэтому размер живёт на КОРОБКЕ, а строки просто делят её пополам.
  */
-export const SLOT_HALVES: React.CSSProperties = { display: 'grid', gridTemplateRows: '1fr 1fr' };
+const SLOT_HALVES: React.CSSProperties = { display: 'grid', gridTemplateRows: '1fr 1fr' };
 
 /**
  * ═══ ОДИН ФАКТ — ОДНА ФРАЗА, А ВЫЗЫВАЮЩИЙ ДАЁТ ТОЛЬКО СУЩЕСТВИТЕЛЬНОЕ ════════════════════════
@@ -76,7 +76,7 @@ export const SLOT_HALVES: React.CSSProperties = { display: 'grid', gridTemplateR
  * ПОЭТОМУ ПРЕДЛОЖЕНИЕ ЖИВЁТ ЗДЕСЬ, А ЛЕНТА НАЗЫВАЕТ ТОЛЬКО АДРЕС: `this slot`, `the input`.
  * Существительное — единственное, что у лент действительно различается.
  */
-export const drawTitle = (into: string): string =>
+const drawTitle = (into: string): string =>
   `opens the picture editor on a blank plate; what you draw goes into ${into}`;
 
 /**
@@ -84,7 +84,7 @@ export const drawTitle = (into: string): string =>
  * разных лентах держат разные коробки (квадрат референса, кадр верстака, плита стороны), а нижняя
  * везде одна и та же: второе её начертание разъехалось бы с первым в первый же день.
  */
-export function DrawHalf({
+function DrawHalf({
   label,
   into = 'this slot',
   onClick,
