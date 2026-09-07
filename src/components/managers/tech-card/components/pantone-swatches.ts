@@ -1,6 +1,8 @@
-// A SUGGESTION LIST, NOT A DICTIONARY. The picker searches these by code and by name, but any code
-// the operator types is accepted as typed («use “19-4005 TCX” as typed»): the Pantone fashion
-// library runs to ~2,600 TCX references and a closed list would refuse the dyehouse's own number.
+// ЛИЦО НАБОРА, А НЕ ВЕСЬ НАБОР. Здесь лежат ОТОБРАННЫЕ ~274 ссылки — то, что человек видит,
+// открыв пикер и ничего не набрав, разложенное спектром рукой. Остальные ~4 400 приезжают
+// отдельным чанком при первом открытии пикера (`ensurePantoneLibrary`, ниже) — полная библиотека
+// Pantone FHI TCX и Solid Coated. И любой набранный код по-прежнему принимается как набран
+// («use “19-4005 TCX” as typed»): у красильни бывает свой номер, которого нет ни в одной книге.
 //
 // `hex` is an APPROXIMATE screen rendering — a swatch to tell entries apart in a list, never a
 // colour standard. Nothing downstream reads it; the stored value is the code string alone, exactly
@@ -15,11 +17,12 @@
 // одного соседа, чтобы сравнить. Регулярка такой код принимала (r2), но принимать набранное и
 // ПОКАЗЫВАТЬ семью — разные вещи, и вторая половина сделана здесь.
 //
-// ⚠ И СПИСОК ПО-ПРЕЖНЕМУ НЕ БИБЛИОТЕКА, И ЭТО СКАЗАНО ЧЕЛОВЕКУ ЛИЦОМ ПИКЕРА. Полная библиотека —
-// ~2 600 TCX и ~2 300 solid; выписать её сюда по памяти значило бы выдумать имена и hex'ы, то есть
-// подделать справочник, по которому потом красят. Здесь стоит ОТОБРАННЫЙ набор, каждая запись
-// которого проверяема, а всё, чего в нём нет, вводится строкой «use “…” as typed» — ровно как и
-// раньше. Пикер говорит обе вещи там, где на них смотрят: «suggestions, not the full library».
+// ⚠ И СПИСОК ВСЁ РАВНО ОСТАЛСЯ КОРОТКИМ — 274 ПРОТИВ ~4 700 (круг 4). Владелец повторил жалобу
+// теми же словами. Прежний довод («выписать библиотеку по памяти = выдумать справочник») был
+// верен и остаётся верным: выдумывать её нельзя. Но выписывать её и не надо — набор собран
+// СКРИПТОМ из открытых источников (`scratchpad/pantone/build-pantone-data.mjs` называет их и их
+// лицензии), лежит в `pantone-swatches-data.ts` и подтягивается лениво. Ни одного кода отсюда
+// не выдумано; всё, чего нет и там, по-прежнему вводится строкой «use “…” as typed».
 export type PantoneFamily = 'textile' | 'solid';
 export type PantoneSwatch = { code: string; name: string; hex: string; family: PantoneFamily };
 
@@ -348,10 +351,122 @@ const row = (family: PantoneFamily) => ([code, name, hex]: Row): PantoneSwatch =
  * зелёные → синие → фиолетовые), потом коричневые, и только потом нейтральные: белые и чёрные
  * ищут КОДОМ, а глазами выбирают цвет.
  */
-export const PANTONE_SWATCHES: readonly PantoneSwatch[] = [
-  ...TEXTILE.map(row('textile')),
-  ...SOLID.map(row('solid')),
-];
+const SWATCHES: PantoneSwatch[] = [...TEXTILE.map(row('textile')), ...SOLID.map(row('solid'))];
+
+/**
+ * ⚠ МАССИВ ЖИВОЙ, А НЕ ЗАМОРОЖЕННЫЙ, И ЭТО НЕСУЩЕЕ. Полная библиотека (см. ниже) ДОПИСЫВАЕТСЯ В
+ * НЕГО ЖЕ, а не подменяет его новым: `palette.tsx` держит на этот массив ссылку и ищет по нему
+ * (`pantoneOfHex`), и переприсваивание экспорта прошло бы мимо такой ссылки молча.
+ */
+export const PANTONE_SWATCHES: readonly PantoneSwatch[] = SWATCHES;
+
+/* ═══ ПОЛНАЯ БИБЛИОТЕКА, ДОГРУЖАЕМАЯ ЛЕНИВО ══════════════════════════════════════════════════════
+ *
+ * Владелец, круг 4: «почему в пантоне так мало цветов». Отобранных выше 274 — это ~6% ссылок,
+ * которыми реально красят, и человек, державший в руках свой номер, его не находил.
+ *
+ * ПОЛНЫЙ НАБОР ЖИВЁТ ОТДЕЛЬНЫМ МОДУЛЕМ (`pantone-swatches-data.ts`, ~4 700 записей, 112 КБ
+ * исходника) И ТЯНЕТСЯ ДИНАМИЧЕСКИМ ИМПОРТОМ ПРИ ПЕРВОМ ОТКРЫТИИ ПИКЕРА. Причина не в весе
+ * страницы вообще, а в том, ЧЕЙ это вес: вкладка тех-карты грузится целиком у каждого, кто её
+ * открыл, а пантон нужен тому, кто заводит колорвей. Отдельный чанк платит только он и только раз.
+ *
+ * ⚠ СИНХРОННЫЕ ВЫЗЫВАЮЩИЕ НЕ ТРОНУТЫ, И ЭТО УСЛОВИЕ, А НЕ УДОБСТВО. `findPantone` читают ПРЯМО В
+ * РЕНДЕРЕ четыре зоны (`colourway-create`, `palette`, `onmodel/paint-group`, `pattern/colourways`),
+ * и async-ветка там означала бы четыре новых состояния загрузки ради подписи под квадратом.
+ * Поэтому отобранные 274 остаются ЖЁСТКОЙ ЧАСТЬЮ модуля: до загрузки всё отвечает ровно как
+ * раньше, после — шире. Ни один вызывающий не обязан знать, что библиотека вообще есть.
+ *
+ * ⚠ ОТОБРАННАЯ ЗАПИСЬ СТАРШЕ БИБЛИОТЕЧНОЙ ПРИ СОВПАДЕНИИ КОДА, И НЕ ИЗ ВЕЖЛИВОСТИ. У 19 из 274
+ * hex расходится с библиотечным на единицы (глазом на квадрате 60px не читается), НО именно этот
+ * hex уезжает на провод как `development.dev_hex`. Пусти библиотеку вперёд — и два колорвея с
+ * одним пантоном, заведённые до и после загрузки чанка, разошлись бы в `dev_hex` без всякой
+ * причины. Имена номерных solid-кодов («179 C» → «Signal Red») библиотека не знает вовсе: у
+ * Pantone их нет, это подписи цеха, и терять их поиску нельзя.
+ */
+type LibraryState = 'idle' | 'loading' | 'ready' | 'failed';
+let libraryState: LibraryState = 'idle';
+let libraryPromise: Promise<void> | null = null;
+let version = 0;
+const listeners = new Set<() => void>();
+
+/**
+ * Код → свотч. Кладётся ДВА ключа на запись: полный код и он же без хвоста семьи, поэтому
+ * «18-1662» и «18-1662 TCX» — одна и та же дверь, а «100» больше не может достаться «1002 C».
+ */
+const byCode = new Map<string, PantoneSwatch>();
+const indexKeys = (code: string) => {
+  const full = code.toLowerCase();
+  const bare = full.replace(/\s+(tcx|tpg|tpx|tn|tsx|c|u|cp|up)$/, '');
+  return bare === full ? [full] : [full, bare];
+};
+const indexSwatch = (s: PantoneSwatch) => {
+  for (const k of indexKeys(s.code)) if (!byCode.has(k)) byCode.set(k, s);
+};
+SWATCHES.forEach(indexSwatch);
+
+/** Сколько ссылок сейчас в наборе — пикер печатает это число, отвечая на «почему так мало». */
+export function pantoneCount(): number {
+  return SWATCHES.length;
+}
+
+/** Меняется, когда набор вырос. Снимок для `useSyncExternalStore`. */
+export function pantoneVersion(): number {
+  return version;
+}
+
+export function subscribePantone(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
+}
+
+/**
+ * Догрузить полную библиотеку. Идемпотентно: второй зов отдаёт тот же промис, а после успеха —
+ * уже выполненный. Отказ (чанк не приехал) НЕ бросается наружу: пикер остаётся с отобранными 274
+ * и говорит об этом словами, а не пустой сеткой.
+ */
+export function ensurePantoneLibrary(): Promise<void> {
+  if (libraryPromise) return libraryPromise;
+  libraryState = 'loading';
+  libraryPromise = import('./pantone-swatches-data')
+    .then(({ TEXTILE_PACKED, SOLID_PACKED }) => {
+      absorb(TEXTILE_PACKED, 'textile');
+      absorb(SOLID_PACKED, 'solid');
+      libraryState = 'ready';
+    })
+    .catch(() => {
+      libraryState = 'failed';
+    })
+    .then(() => {
+      version += 1;
+      listeners.forEach((fn) => fn());
+    });
+  return libraryPromise;
+}
+
+export function pantoneLibraryState(): LibraryState {
+  return libraryState;
+}
+
+/** `code|name|hex;…`, hex без решётки — распаковка ровно здесь, формат больше нигде не знают. */
+function absorb(packed: string, family: PantoneFamily): void {
+  for (const record of packed.split(';')) {
+    const a = record.indexOf('|');
+    const b = record.indexOf('|', a + 1);
+    if (a < 0 || b < 0) continue;
+    const code = record.slice(0, a);
+    if (byCode.has(code.toLowerCase())) continue;
+    const swatch: PantoneSwatch = {
+      code,
+      name: record.slice(a + 1, b),
+      hex: `#${record.slice(b + 1)}`,
+      family,
+    };
+    SWATCHES.push(swatch);
+    indexSwatch(swatch);
+  }
+}
 
 /**
  * ═══ ДВЕ СЕМЬИ ССЫЛОК PANTONE, А НЕ ОДНА ══════════════════════════════════════════════════════
@@ -401,40 +516,46 @@ export function normalizePantone(input?: string): string {
 /**
  * Case-insensitive, «19 4005» and «19-4005» both find the swatch; a name word finds by name.
  *
- * ⚠ ПОТОЛОК ПОДНЯТ ВМЕСТЕ СО СПИСКОМ (r3 п.13). Он стоял на 24 — при 120 записях это молча
- * показывало ПЯТУЮ ЧАСТЬ набора тому, кто открыл пикер, ничего не набрав, и ровно это владелец
- * назвал «очень мало цветов». Сетка теперь листается, а не обрывается; потолок остаётся только
- * как защита от списка, выросшего до тысяч.
+ * ⚠ ПОТОЛКА БОЛЬШЕ НЕТ, И ЭТО ПЕРЕЕЗД ОТВЕТСТВЕННОСТИ, А НЕ ЕЁ ОТМЕНА. Он стоял сначала на 24,
+ * потом на 600 — и оба раза молча решал за пикер, сколько тот покажет. При 4 700 записях число,
+ * зашитое здесь, снова врало бы: «19-40» отдаёт полсотни попаданий, пустой запрос — весь набор,
+ * и резать их одинаково нечем. Сколько нарисовать за раз — вопрос СЕТКИ (у неё есть высота и
+ * кнопка «show more»), и решается он там. Здесь считается только КТО подошёл.
+ *
+ * ⚠ КОД СТАРШЕ ИМЕНИ В ВЫДАЧЕ. Набравший «19-4052» ищет ссылку, а не слово: попадания по коду
+ * идут первыми, и внутри каждой половины сохраняется порядок набора — отобранные 274 (спектром)
+ * впереди библиотечных.
  */
 export function searchPantone(
   query: string,
-  { limit = 600, family }: { limit?: number; family?: PantoneFamily } = {},
+  { limit, family }: { limit?: number; family?: PantoneFamily } = {},
 ): PantoneSwatch[] {
-  const pool = family ? PANTONE_SWATCHES.filter((s) => s.family === family) : PANTONE_SWATCHES;
+  const pool = family ? SWATCHES.filter((s) => s.family === family) : SWATCHES;
   const q = query.trim().toLowerCase().replace(/\s+/g, ' ');
-  if (!q) return pool.slice(0, limit);
+  if (!q) return limit === undefined ? pool.slice() : pool.slice(0, limit);
   const qCode = q.replace(/\s/g, '-');
-  const hits = pool.filter(
-    (s) =>
-      s.code.toLowerCase().includes(q) ||
-      s.code.toLowerCase().includes(qCode) ||
-      s.name.toLowerCase().includes(q),
-  );
-  return hits.slice(0, limit);
+  const byCodeHit: PantoneSwatch[] = [];
+  const byNameHit: PantoneSwatch[] = [];
+  for (const s of pool) {
+    const code = s.code.toLowerCase();
+    if (code.includes(q) || code.includes(qCode)) byCodeHit.push(s);
+    else if (s.name.toLowerCase().includes(q)) byNameHit.push(s);
+  }
+  const hits = byCodeHit.concat(byNameHit);
+  return limit === undefined ? hits : hits.slice(0, limit);
 }
 
 /**
  * The swatch behind a stored code, for the colour square next to a value. Unknown codes get none.
  *
  * ⚠ ТОЧНОЕ СОВПАДЕНИЕ СТАРШЕ ПРЕФИКСНОГО, И С ВЫРОСШИМ СПИСКОМ ЭТО ПЕРЕСТАЛО БЫТЬ ФОРМАЛЬНОСТЬЮ:
- * «100 C» — префикс «1002 C», а `find` вернул бы того из двух, кто ближе к началу массива. Поэтому
- * сначала ищется равенство по всему списку и только потом — начало строки.
+ * «100 C» — префикс «1002 C», а `find` вернул бы того из двух, кто ближе к началу массива. Теперь
+ * отвечает индекс: в нём лежит и полный код, и он же без хвоста семьи, поэтому «100» попадает
+ * ровно в «100 C». Перебор остаётся ХВОСТОМ — на случай набранного огрызка вроде «18-16», и на
+ * 4 700 записях он стоит доли миллисекунды, потому что доходит до него только промах.
  */
 export function findPantone(code?: string): PantoneSwatch | undefined {
   const c = (code ?? '').trim().toLowerCase();
   if (!c) return undefined;
-  return (
-    PANTONE_SWATCHES.find((s) => s.code.toLowerCase() === c) ??
-    PANTONE_SWATCHES.find((s) => s.code.toLowerCase().startsWith(c))
-  );
+  return byCode.get(c) ?? SWATCHES.find((s) => s.code.toLowerCase().startsWith(c));
 }
