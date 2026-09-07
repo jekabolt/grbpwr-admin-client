@@ -485,6 +485,15 @@ const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
 /**
+ * ENTER — ДВЕ ФИЗИЧЕСКИЕ КЛАВИШИ, И СПРАШИВАЮТСЯ ОБЕ. Разбор клавиатуры на этой поверхности
+ * ведётся по `e.code` — по ФИЗИЧЕСКОЙ клавише, одинаковой во всех раскладках (довод целиком стоит
+ * у ⌘Z ниже: `e.key` — это НАПЕЧАТАННАЯ буква, и на кириллице сравнение с латинской буквой мертво).
+ * Плата за это ровно одна: у `key` оба Enter'а зовутся «Enter», а у `code` цифровой блок — это
+ * `NumpadEnter`. Не спросить его значило бы отнять клавишу у тех, кто ей пользуется.
+ */
+const isEnter = (e: KeyboardEvent): boolean => e.code === 'Enter' || e.code === 'NumpadEnter';
+
+/**
  * ПАМЯТЬ ПЕРА — модульная, одна на приложение. У человека одна рука: выбрав красный пунктир, он
  * рисует им дальше, а не переназначает цвет каждой новой фигуре. Держать память на поверхности
  * значило бы, что в полосе из десяти кадров цвет сбрасывается при переходе к соседнему снимку.
@@ -1609,7 +1618,7 @@ export function AnnotationSurface({
       const visible = !!boxRef.current?.isConnected && boxRef.current.offsetParent !== null;
       if (!visible) return;
 
-      if (e.key === 'Escape') {
+      if (e.code === 'Escape') {
         // ЛЕСТНИЦА: вооружённая ручка → выбор → незавершённый жест → инструмент. Один Esc — один
         // шаг: иначе выход из режима правки точки гасил бы заодно и инструмент, который выбирали
         // отдельно.
@@ -1659,12 +1668,12 @@ export function AnnotationSurface({
       }
       // ENTER ЗАКАНЧИВАЕТ ФИГУРУ-СЛЕД. Стоит ПЕРЕД остальными ветками Enter: живой жест старше
       // выбора, а незавершённой постановки у следа не бывает — штрих кончается вместе с кнопкой.
-      if (e.key === 'Enter' && !typing && inkSession.length > 0) {
+      if (isEnter(e) && !typing && inkSession.length > 0) {
         e.preventDefault();
         endInkSession();
         return;
       }
-      if (e.key === 'Enter' && !typing && placing && points.length >= def.points[0]) {
+      if (isEnter(e) && !typing && placing && points.length >= def.points[0]) {
         e.preventDefault();
         finishPlacing(def.key, points);
         return;
@@ -1679,12 +1688,12 @@ export function AnnotationSurface({
       // УСТУПАЕТ НАЧАТОМУ ЖЕСТУ, А НЕ ВЗВЕДЁННОМУ ВИДУ (B-8a): ветка выше уже забрала Enter у
       // набранной фигуры, а под одним лишь взводом эта была бы мертва навсегда там, где вид взведён
       // с открытия (D-18) — то есть клавиатурного пути к подписи на листе не осталось бы вовсе.
-      if (e.key === 'Enter' && !typing && !drawing && selected !== null && byKey.has(selected)) {
+      if (isEnter(e) && !typing && !drawing && selected !== null && byKey.has(selected)) {
         e.preventDefault();
         select(selected, { focus: true });
         return;
       }
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (e.code !== 'Delete' && e.code !== 'Backspace') return;
       if (typing) return;
       // Delete/Backspace ОБЕ намеренно: на маковской клавиатуре «Delete» — это Backspace, и
       // обещать жест, которого у половины команды физически нет, хуже, чем не обещать вовсе.
