@@ -4,7 +4,9 @@ import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 
-import { ASSETS_PER_CARD_MAX } from '../assets/model';
+import { ASSETS_PER_CARD_MAX, ASSET_PATTERN } from '../assets/model';
+import { useAssetWrites } from '../assets/use-assets';
+import { serverSpeaksDesign } from '../capability';
 import { Counter, GROUP_GAP, Money, Reason } from '../core';
 import { stepById } from '../core/chain';
 import { isRunLive } from '../generation';
@@ -12,11 +14,13 @@ import { GenerateRow, RunRefusal } from '../render/generate-row';
 import { useStartDesignRun } from '../render/use-design-run';
 import { PatternColourRow } from './colourways';
 import {
+  nextPatternName,
   patternColourRecipe,
   patternGate,
   patternRuns,
   recentPatternColours,
   refusalAdvice,
+  shelfIsFull,
   type PatternColour,
 } from './model';
 import { PatternInput } from './pattern-input';
@@ -76,12 +80,31 @@ export function PatternStudio({
   disabled?: boolean;
 }): JSX.Element {
   const run = useStartDesignRun(techCardId);
+  const { upsertAsset } = useAssetWrites(techCardId);
+  const speaks = serverSpeaksDesign();
   const [source, setSource] = useState<common_MediaFull | null>(null);
   const sourceId = source?.id ?? 0;
   const [name, setName] = useState('');
   /* ЦВЕТ НИЧЕЙ (владелец, r2 §26): пара «код + hex», а не ссылка на колорвей карточки. `null` —
      законное и обычное состояние: плитка генерится и без цвета. */
   const [colour, setColour] = useState<PatternColour | null>(null);
+  /**
+   * ═══ ЧЬЮ ПЛИТКУ ОТКРЫТЬ НА ПЕРЕИМЕНОВАНИЕ, КОГДА ОНА ПРИЕДЕТ С ПОЛОСОЙ ═══════════════════════
+   *
+   * Состояние жило ВНУТРИ `PatternLibrary` и обслуживало одну дверь — `keep it`. Теперь тем же
+   * жестом («картинка уже есть, заведи её плиткой») пользуется нижняя половина ячейки, стоящая в
+   * ДРУГОМ поддереве, и второй такой счётчик рядом с первым — это два ответа на вопрос «какую
+   * плитку сейчас переименовывают»: один из них молча проиграл бы. Поэтому ответ один и лежит
+   * там, где обе двери его видят.
+   */
+  const [renameMedia, setRenameMedia] = useState(0);
+  /**
+   * ОТКАЗ ПОСАДКИ — СВОИМ СОСТОЯНИЕМ, А НЕ `upsertAsset.isError`, И РАЗНИЦА В ЖИЗНИ, А НЕ В ФОРМЕ.
+   * Ошибка react-query живёт до СЛЕДУЮЩЕЙ мутации, а `PatternStudio` при смене карточки не
+   * размонтируется (инвариант 12): отказ по чужому снимку карточки A стоял бы под ячейкой
+   * карточки B, где ему нечего объяснять. Здесь он гаснет вместе со всей заготовкой.
+   */
+  const [fileRefusal, setFileRefusal] = useState('');
 
   /**
    * ═══ КАРТОЧКА СМЕНИЛАСЬ — ЗАГОТОВКА ПРОГОНА НАЧИНАЕТСЯ ЗАНОВО ═════════════════════════════
@@ -115,6 +138,11 @@ export function PatternStudio({
     if (source) setSource(null);
     if (name) setName('');
     if (colour) setColour(null);
+    /* И АДРЕС ОТКРЫТОГО ПЕРЕИМЕНОВАНИЯ ТОЖЕ: он назван МЕДИА, а полка новой карточки ищется по
+       тому же числу. Оставленный, он открыл бы поле имени на чужой плитке — той, что случайно
+       собрана из того же файла (один лоскут законно лежит на десяти карточках). */
+    if (renameMedia) setRenameMedia(0);
+    if (fileRefusal) setFileRefusal('');
   }
 
   /* История цвета уже лежит на проводе — она заморожена в `params.colour` прошлых прогонов. */
@@ -145,6 +173,68 @@ export function PatternStudio({
   }, [run.isPending, run.refusal]);
 
   const advice = run.refusal ? refusalAdvice(run.refusal.words) : '';
+
+  /**
+   * ═══ ГОТОВАЯ ПЛИТКА ВСТАЁТ НА ПОЛКУ БЕЗ ПРОГОНА — И ЭТО НЕ НОВЫЙ ГЛАГОЛ ═══════════════════════
+   *
+   * Владелец (2026-09-07): «если выбираешь из галереи, то можно добавить без генерации через AI».
+   * Сервер это УМЕЕТ И УМЕЛ: `UpsertDesignAsset` с `asset_id = 0` заводит строку полки из медиа —
+   * `internal/store/design/assets.go:285` (`UpsertAsset`), граница медиа отрицательная («не чужой
+   * карточки», `layer.go:710`), так что ничейный файл библиотеки проходит. Ровно этим вызовом на
+   * этом же экране живёт дверь `keep it` в полосе «made earlier, not kept». Второго глагола
+   * заводить не надо — и не надо изобретать: `keepPatternTx` (посадка прогона) от этого пути
+   * отличается только тем, что там за картинку заплачено.
+   *
+   * ИМЯ МИНТИТСЯ, А НЕ БЕРЁТСЯ ИЗ ПОЛЯ `NAME`, И ЭТО РЕШЕНИЕ. Поле рядом — имя БУДУЩЕГО ПРОГОНА:
+   * его читают ворота GENERATE, его же прогон тратит (`setName('')` после старта). Прочитать его
+   * второй дверью значило бы дать одному полю два смысла — тот самый шов, на котором в этом
+   * репозитории уже разъезжались `words` и `scope_key`. Поэтому здесь тот же ход, что у `keep it`:
+   * `nextPatternName` даёт свободное `pattern N`, а поле имени открывается НА САМОЙ ПЛИТКЕ, когда
+   * полоса привезёт её обратно — имя спрашивается там, где его будут печатать, а не отказом над
+   * дверью. Новых полей формы при этом не заводится ни одного.
+   *
+   * `repeatMm: 0` — «раппорт не назван», единственное честное чтение: этот снимок никто не мерил,
+   * а выдуманное число уехало бы в промпт ткани как факт о ней.
+   */
+  const fileFromGallery = (media: common_MediaFull) => {
+    const mediaId = media.id ?? 0;
+    if (mediaId <= 0) return;
+    setFileRefusal('');
+    upsertAsset.mutate(
+      {
+        assetId: 0,
+        kind: ASSET_PATTERN,
+        name: nextPatternName(band),
+        mediaId,
+        repeatMm: 0,
+      },
+      {
+        /* АДРЕС ПЕРЕИМЕНОВАНИЯ СТАВИТСЯ ПО ФАКТУ ПОСАДКИ, А НЕ ДО НЕЁ. Дверь `keep it` метит его
+           заранее и может себе это позволить — она стоит НАД оплаченной картинкой, и отказ там
+           почти невозможен. Здесь снимок берут из общей библиотеки, и `foreign_media` — обычный
+           исход: помеченный заранее адрес пережил бы отказ и открыл бы поле имени на первой же
+           плитке, собранной из того же файла. Полоса перечитывается хуком (`onSuccess:
+           invalidate`) и приезжает ПОЗЖЕ этой строки, так что окна «плитка есть, метки нет» нет. */
+        onSuccess: () => setRenameMedia(mediaId),
+        /* ДОСЛОВНО И РЯДОМ С ДВЕРЬЮ. Всплывашку рисует сам хук; она живёт секунды, а этот отказ
+           человек обязан прочитать и на него подействовать (выбрать другой снимок). */
+        onError: (error: unknown) =>
+          setFileRefusal(
+            (error as Error)?.message?.trim() || 'the tile did not go onto the shelf',
+          ),
+      },
+    );
+  };
+
+  /* ЧЕСТНАЯ ДВЕРЬ ИЛИ НИКАКОЙ: половина гаснет ровно там, где сервер откажет. Потолок полки —
+     серверный (`refuseFullShelf` в той же транзакции), и нарисовать за ним живую дверь значило бы
+     обещать посадку, которой не будет. Выпущенная карточка (`disabled`) сюда не попадает: у неё
+     ячейка целиком инертна ещё до половин. */
+  const galleryInert = !speaks
+    ? 'this server does not answer the design routes'
+    : shelfIsFull(band)
+      ? `this card already holds its ${ASSETS_PER_CARD_MAX} assets · delete a tile below first`
+      : '';
 
   return (
     <Section
@@ -182,10 +272,18 @@ export function PatternStudio({
         source={source}
         onPick={setSource}
         onClear={() => setSource(null)}
+        onPickFromGallery={fileFromGallery}
+        galleryInert={galleryInert}
+        galleryPending={upsertAsset.isPending}
         name={name}
         onName={setName}
         disabled={disabled}
       />
+      {fileRefusal && (
+        <span data-gallery-refusal=''>
+          <Reason>{fileRefusal}</Reason>
+        </span>
+      )}
 
       {/* ─── COLOUR ─────────────────────────────────────────────────────────────────────── */}
       {/* ⚠ ПИЛЮЛЬ НА ЭТОЙ ЛИНЕЙКЕ БОЛЬШЕ НЕТ (владелец, r3 п.14: «убрать “GOES TO THE MODEL” и
@@ -260,6 +358,8 @@ export function PatternStudio({
         disabled={disabled}
         live={live}
         hasSource={sourceId > 0}
+        renameMedia={renameMedia}
+        onRenameMedia={setRenameMedia}
       />
     </Section>
   );

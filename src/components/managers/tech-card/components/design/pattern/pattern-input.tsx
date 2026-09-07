@@ -5,12 +5,12 @@ import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { cn } from 'lib/utility';
 import { useState, type JSX } from 'react';
 import Input from 'ui/components/input';
-import { Placeholder } from 'ui/components/placeholder';
+import { PLACEHOLDER_SURFACE, Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 
 import { ASSET_NAME_MAX } from '../assets/model';
 import { BENCH_CELL_PX, BENCH_CELL_STYLE } from '../bench-slot';
-import { EMPTY_WORD } from '../core';
+import { EMPTY_WORD, HALF_FACE } from '../core';
 import { TILE_CORNER, TILE_QUIET } from '../picture-tile';
 
 /**
@@ -51,6 +51,85 @@ const FRAME_ASPECT = `${BENCH_CELL_PX - 2}/${BENCH_CELL_PX + CAP_PX - 2}`;
 const NAME_STYLE: React.CSSProperties = { flex: '1 1 200px', minWidth: 0, maxWidth: 420 };
 
 /**
+ * ═══ ПУСТАЯ ЯЧЕЙКА — ДВЕ ПОЛОВИНЫ, И ЭТО ДВА РАЗНЫХ ИСХОДА, А НЕ ДВА ВХОДА ═══════════════════════
+ *
+ * Владелец, вживую (2026-09-07): «в PATTERN → SOURCE PICTURE плейсхолдер разделить на 2: один —
+ * generate, второй — выбрать из галереи; если выбираешь из галереи, то можно добавить без
+ * генерации через AI».
+ *
+ * ⚠ РАЗНИЦА ПОЛОВИН — НЕ ОТКУДА БЕРЁТСЯ КАРТИНКА, А ЧТО С НЕЙ БУДЕТ. Обе двери открывают ОДНУ И
+ * ТУ ЖЕ библиотеку (⌘V и брошенный файл — тоже обе), поэтому подписи вида «из медиатеки» /
+ * «из галереи» назвали бы одно и то же дважды и не различили бы ничего. Различает исход:
+ *   · ВЕРХ (`+ to generate`) — снимок ЛОЖИТСЯ В ЯЧЕЙКУ и уезжает в платный прогон: плитку из него
+ *     делает модель по нажатию GENERATE ниже. Ячейка после этого заполнена, половин больше нет.
+ *   · НИЗ (`+ tile from gallery`) — снимок УЖЕ ЯВЛЯЕТСЯ повторяющейся плиткой и встаёт на полку
+ *     `TILES ON THIS CARD` КАК ЕСТЬ: ни прогона, ни денег, ни модели. Ячейка при этом не
+ *     заполняется вовсе — предмет этой двери лежит не в ней.
+ *
+ * ⚠ ПОЛОВИНЫ ЖИВУТ ТОЛЬКО НА ПУСТОЙ ЯЧЕЙКЕ, И У ЭТОГО ЕСТЬ ЦЕНА, НАЗВАННАЯ ВСЛУХ. Заполненный
+ * кадр — это ОДНА картинка во всю коробку (решение r2 п.25: пустая и заполненная ячейки — одна и
+ * та же коробка 138 × 162), поделить его надвое значило бы показывать источник вдвое меньше и
+ * ровно там, где на него смотрят. Поэтому, пока в ячейке лежит источник прогона, нижней двери на
+ * экране нет: чтобы завести готовую плитку, источник снимают углом `✕`. Плата за это одно нажатие,
+ * и она куплена тем, что картинка не ужимается вдвое ради двери, которой в этот момент не
+ * пользуются.
+ *
+ * ПОЭТОМУ ЭТО НЕ `PlaceOrDrawCell`. Общий орган делит коробку на «медиа + ПЕРО» (`DrawHalf`,
+ * `PenGlyph`, `drawTitle`) — нижняя половина там жёстко про редактор рисования, и второй родовой
+ * вариант «две медийные половины» ему пришлось бы добавить пропом-развилкой на все четыре ленты,
+ * которые его уже читают. Взято оттуда РОВНО ТО, ЧТО ОБЯЗАНО СОВПАСТЬ: лицо половины (`HALF_FACE`
+ * — та же типографика, тот же фокус, тот же зазор «знак + глагол») и деление коробки геометрией
+ * (`SLOT_HALVES`). Кадр и коробка остаются свои — 138 × 162, решение r2 п.25.
+ */
+const GENERATE_HALF = '+ to generate';
+const GALLERY_HALF = '+ tile from gallery';
+/**
+ * ЗАГОЛОВОК ПИКЕРА — ОДНА СТРОКА НА ОДИН ПРЕДМЕТ, И ИХ ЗДЕСЬ РОВНО ДВА. Верхняя половина,
+ * заполненный кадр и угловой `change` говорят об ОДНОМ И ТОМ ЖЕ снимке (источнике прогона), и до
+ * этой правки писали о нём двумя разными фразами — то есть человек, открывший пикер из угла и из
+ * пустой ячейки, читал над одной и той же библиотекой разные обещания. Нижняя половина — предмет
+ * ДРУГОЙ, и потому у неё своя строка, а не третья редакция первой.
+ */
+const SOURCE_PURPOSE = 'design · the picture a pattern is generated from';
+const GALLERY_PURPOSE = 'design · a picture that is already a repeating tile';
+const GALLERY_TITLE =
+  'pick a picture that is ALREADY a repeating tile — it is filed on this card’s shelf as it is, ' +
+  'with no run, no model and nothing paid for. The tile is named for you; rename it on its face.';
+
+/**
+ * Деление коробки НАДВОЕ — ГЕОМЕТРИЕЙ, А НЕ ВЕРОЙ, теми же двумя строками, что у общей плитки
+ * (`core/two-half-slot.tsx` → `SLOT_HALVES`, разбор целиком там): у элемента грида `min-height:
+ * auto`, и собственные пропорции кнопки слота распирают строку, пока минимум не обнулён.
+ */
+const SLOT_HALVES: React.CSSProperties = { display: 'grid', gridTemplateRows: '1fr 1fr' };
+
+/**
+ * Знак нижней половины — ЧЕТЫРЕ КВАДРАТА, то есть сам раппорт: то, что берут этой дверью, уже
+ * повторяющаяся плитка. Верхняя половина носит фотоглиф `MediaSlot` (обычный снимок), и пара
+ * «снимок → повтор» читается на глифах раньше, чем на словах. Штрих, коробка 24 и размер 20 —
+ * те же, что у `PhotoGlyph` и `PenGlyph`: три знака одной студии обязаны быть одной руки.
+ */
+function RepeatGlyph({ className }: { className?: string }): JSX.Element {
+  return (
+    <svg
+      aria-hidden
+      width={20}
+      height={20}
+      viewBox='0 0 24 24'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth='1.25'
+      className={cn('shrink-0', className)}
+    >
+      <rect x='3.5' y='3.5' width='7' height='7' />
+      <rect x='13.5' y='3.5' width='7' height='7' />
+      <rect x='3.5' y='13.5' width='7' height='7' />
+      <rect x='13.5' y='13.5' width='7' height='7' />
+    </svg>
+  );
+}
+
+/**
  * ═══ THE INPUT OF A TILE — ONE PICTURE AND ONE NAME, side by side ═══════════════════════════════
  *
  * Two columns: the source cell on the left, the NAME field on the right.
@@ -66,12 +145,18 @@ const NAME_STYLE: React.CSSProperties = { flex: '1 1 200px', minWidth: 0, maxWid
  *     под ним говорят «a repeating tile is made out of exactly one picture», когда его нет;
  *   · строка жестов — `MediaSlot` рисует свою на самом плейсхолдере, когда для неё есть место.
  *
- * ═══ ONE DOOR, NOT TWO (owner) ═════════════════════════════════════════════════════════════════
+ * ═══ ОДИН ИСТОЧНИК ПРОГОНА — И ВТОРАЯ ДВЕРЬ, КОТОРАЯ ВЕДЁТ НЕ В НЕГО ══════════════════════════
  *
  * The second door of the input — «or one of this card's cloths» — was taken off at the owner's
  * word, and WITH IT WENT THE ABILITY, not only the row: a cloth of the card cannot be picked as a
  * tile's source any more, a repeat is made only out of a picture of the library, the clipboard or
  * a dropped file. `sourceAssetId` therefore always travels as 0.
+ *
+ * ⚠ ЭТО ПРАВИЛО ЖИВО И ПОЛОВИНАМИ НЕ ОТМЕНЕНО, потому что нижняя половина В ЯЧЕЙКУ НЕ КЛАДЁТ
+ * НИЧЕГО. Ячейка — вход ПРОГОНА, и вход у него по-прежнему один. Нижняя дверь заводит СТРОКУ
+ * ПОЛКИ и к прогону не относится вовсе: `source` от неё не меняется, ворота GENERATE не
+ * открываются, `extraInputMediaIds` её снимка не видят. Две двери в одной коробке — это две
+ * ветки, а не два входа одной ветки.
  *
  * ═══ EXACTLY ONE PICTURE, AND THAT IS NOT A SETTING ═════════════════════════════════════════════
  *
@@ -91,6 +176,9 @@ export function PatternInput({
   source,
   onPick,
   onClear,
+  onPickFromGallery,
+  galleryInert,
+  galleryPending,
   name,
   onName,
   disabled,
@@ -99,6 +187,19 @@ export function PatternInput({
   source: common_MediaFull | null;
   onPick: (media: common_MediaFull) => void;
   onClear: () => void;
+  /**
+   * НИЖНЯЯ ПОЛОВИНА: снимок, который УЖЕ плитка. Он не ложится в ячейку и никуда не едет —
+   * вызывающий заводит им строку полки (`UpsertDesignAsset`, kind `pattern`) и на этом всё.
+   */
+  onPickFromGallery: (media: common_MediaFull) => void;
+  /**
+   * ПОВОД, ПО КОТОРОМУ НИЖНЯЯ ДВЕРЬ ЗАКРЫТА, дословно — пусто значит «открыта». Дверь, за которой
+   * отказ, не рисуется живой: половина остаётся на месте (коробка не прыгает), но гаснет и носит
+   * повод в `title` и в `data-inert`, ровно как `InertDoor` носит свой.
+   */
+  galleryInert?: string;
+  /** Строка полки ещё пишется — вторая посадка тем же жестом завела бы двойника. */
+  galleryPending?: boolean;
   name: string;
   onName: (next: string) => void;
   disabled?: boolean;
@@ -163,22 +264,84 @@ export function PatternInput({
               />
             </span>
           ) : !sourceUrl ? (
-            <MediaSlot
-              aspectRatio={['Custom']}
-              /* ONE FRAME FOR BOTH STATES: the empty cell is the same box the filled one is —
-                 and it is the flat slot's box, not a second one like it. */
-              frameAspect={FRAME_ASPECT}
-              label='+ picture'
-              hint={null}
-              purpose='design · the picture a pattern is made from'
-              showVideos={false}
-              editMode
-              onSelect={(media) => {
-                const first = media[0];
-                if (first?.id) onPick(first);
-              }}
-              className='border-0'
-            />
+            /* ═══ ОДИН КАДР НА ОБА СОСТОЯНИЯ, И ОН ЖЕ — ТО, ЧТО ДЕЛИТСЯ ПОПОЛАМ ══════════════
+               Пропорция живёт ЗДЕСЬ, а не на кнопке слота: пустая ячейка обязана остаться той же
+               коробкой, что заполненная (138 × 162, решение r2 п.25), а половины — просто двумя
+               строками этого кадра. Полосатая поверхность тоже здесь: нижняя половина — не
+               `MediaSlot`, своей поверхности у неё нет, и без этой строки она была бы белой
+               заплатой в полосатой рамке. */
+            <div style={{ ...PLACEHOLDER_SURFACE, aspectRatio: FRAME_ASPECT, minHeight: 0, ...SLOT_HALVES }}>
+              {/* ─── верх: снимок, из которого модель СДЕЛАЕТ плитку ────────────────────────
+                  Обёртка с нулевым минимумом и обрезкой несущая: у элемента грида `min-height:
+                  auto`, и собственные пропорции кнопки слота распёрли бы строку (разбор —
+                  `core/two-half-slot.tsx`). Якорь стоит на ней, а не на кнопке: кнопку рисует
+                  примитив, и данных-атрибутов он не принимает. */}
+              <div
+                data-source-half='generate'
+                style={{ minHeight: 0, overflow: 'hidden' }}
+                className='min-w-0'
+              >
+                <MediaSlot
+                  aspectRatio={['Custom']}
+                  label={GENERATE_HALF}
+                  hint={null}
+                  purpose={SOURCE_PURPOSE}
+                  showVideos={false}
+                  editMode
+                  onSelect={(media) => {
+                    const first = media[0];
+                    if (first?.id) onPick(first);
+                  }}
+                  sizeClassName='h-full w-full'
+                  className='border-0'
+                />
+              </div>
+              {/* ─── низ: снимок, который УЖЕ плитка ─────────────────────────────────────── */}
+              {galleryInert ? (
+                <span
+                  data-source-half='gallery'
+                  data-inert={galleryInert}
+                  title={galleryInert}
+                  style={{ minHeight: 0 }}
+                  className={cn(
+                    HALF_FACE,
+                    'cursor-not-allowed border-t border-dashed border-borderColor',
+                    'text-textInactiveColor hover:text-textInactiveColor',
+                  )}
+                >
+                  <RepeatGlyph />
+                  <span className='leading-tight'>{GALLERY_HALF}</span>
+                </span>
+              ) : (
+                <MediaSelector
+                  label={GALLERY_HALF}
+                  purpose={GALLERY_PURPOSE}
+                  aspectRatio={['Custom']}
+                  allowMultiple={false}
+                  showVideos={false}
+                  saveSelectedMedia={(media) => {
+                    const first = media[0];
+                    if (first?.id) onPickFromGallery(first);
+                  }}
+                  trigger={
+                    <button
+                      type='button'
+                      data-source-half='gallery'
+                      aria-label='add a picture that is already a tile, with no run'
+                      title={GALLERY_TITLE}
+                      disabled={galleryPending}
+                      style={{ minHeight: 0 }}
+                      className={cn(HALF_FACE, 'border-t border-dashed border-borderColor')}
+                    >
+                      <RepeatGlyph />
+                      <span className='leading-tight'>
+                        {galleryPending ? 'filing…' : GALLERY_HALF}
+                      </span>
+                    </button>
+                  }
+                />
+              )}
+            </div>
           ) : (
             <>
               {/* ═══ ЗАПОЛНЕННЫЙ КАДР БЕЗ ПОЛОСЫ, НО С ЖИВЫМИ ЖЕСТАМИ ═══════════════════════════
@@ -198,7 +361,7 @@ export function PatternInput({
                 toolbar={false}
                 mediaUrl={sourceUrl}
                 alt={`source picture ${sourceId}`}
-                purpose='design · the picture a pattern is made from'
+                purpose={SOURCE_PURPOSE}
                 onSelect={(media) => {
                   const first = media[0];
                   if (first?.id) onPick(first);
@@ -235,7 +398,7 @@ export function PatternInput({
                     </button>
                     <MediaSelector
                       label='change'
-                      purpose='design · the picture a pattern is made from'
+                      purpose={SOURCE_PURPOSE}
                       aspectRatio={['Custom']}
                       allowMultiple={false}
                       showVideos={false}

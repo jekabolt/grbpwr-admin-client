@@ -358,6 +358,8 @@ export function PatternLibrary({
   disabled,
   live,
   hasSource,
+  renameMedia,
+  onRenameMedia,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -366,6 +368,16 @@ export function PatternLibrary({
   live?: common_DesignRun[];
   /** Is a source attached above? The empty shelf's one line says what to do next. */
   hasSource: boolean;
+  /**
+   * ═══ ЧЬЁ ИМЯ ОТКРЫТЬ, КОГДА ПОЛОСА ПРИВЕЗЁТ ПЛИТКУ — ОТВЕТ ОДИН НА ВЕСЬ ШАГ ══════════════════
+   *
+   * Держался здесь `useState`'ом, пока дверь «картинка уже есть, заведи её плиткой» была одна
+   * (`keep it`). Теперь такая же дверь стоит нижней половиной ячейки SOURCE PICTURE — в другом
+   * поддереве, — и второе состояние рядом с первым было бы вторым ответом на один вопрос.
+   * Поднято в `PatternStudio`: там же оно и сбрасывается при смене карточки (инвариант 12).
+   */
+  renameMedia: number;
+  onRenameMedia: (mediaId: number) => void;
 }): JSX.Element {
   const { upsertAsset } = useAssetWrites(techCardId);
   const { setPictureSelected } = useDesignWrites(techCardId);
@@ -396,8 +408,8 @@ export function PatternLibrary({
   const shelfFull = shelfIsFull(band);
   const pending = live ?? [];
   /* `keep it` files the tile under a minted name and opens the rename on it as soon as the band
-     brings it back — the name is asked where it will be typed, not as a refusal over a paid frame. */
-  const [renameMedia, setRenameMedia] = useState(0);
+     brings it back — the name is asked where it will be typed, not as a refusal over a paid frame.
+     Тем же ходом живёт нижняя половина ячейки SOURCE PICTURE, поэтому адрес приезжает пропом. */
 
   return (
     <>
@@ -444,7 +456,7 @@ export function PatternLibrary({
               disabled={disabled}
               verdict={verdictOf.get(a.mediaId ?? 0)}
               autoRename={renameMedia > 0 && (a.mediaId ?? 0) === renameMedia}
-              onRenameTaken={() => setRenameMedia(0)}
+              onRenameTaken={() => onRenameMedia(0)}
             />
           ))}
         </Tiles>
@@ -539,7 +551,7 @@ export function PatternLibrary({
                           /* ORDER IS LOAD-BEARING (E-15): two verbs, no transaction. The asset
                              FIRST — without it the tile is no cloth of the card, and a lone
                              «selected» mark would be an artifact that is not on the shelf. */
-                          setRenameMedia(mediaId);
+                          onRenameMedia(mediaId);
                           upsertAsset.mutate({
                             assetId: 0,
                             kind: ASSET_PATTERN,
