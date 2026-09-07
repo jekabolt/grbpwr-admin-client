@@ -10,10 +10,9 @@ import { cn } from 'lib/utility';
 import { useEffect, useRef, useState } from 'react';
 
 import { VectorModal } from './modals';
-import { HALF_FACE, PlaceOrDrawCell, Reason } from './core';
+import { PlaceOrDrawCell, Reason } from './core';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
-import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { batchCaption, pictureHandle } from './handles';
 import { mixedInputNote, provenanceLabel, readProvenance, slotProvenance } from './provenance';
@@ -502,21 +501,14 @@ export const BENCH_CELL_STYLE: React.CSSProperties = {
 };
 export const BENCH_FRAME_ASPECT = '1/1';
 
-/**
- * ⚠ `minHeight: 0` НА САМОМ КАДРЕ — ВТОРАЯ ПОЛОВИНА ТОЙ ЖЕ ПОЧИНКИ. Кадр стоит элементом
- * колоночного флекса (коробка ячейки), а у элемента флекса `min-height: auto`, то есть
- * содержательный минимум ПЕРЕБИВАЕТ `aspect-ratio`. Замерено: без нуля коробка вырастала до 366
- * при 162 у заполненной — «квадрат» проигрывал содержимому половин.
- */
-const SLOT_FRAME: React.CSSProperties = {
-  ...PLACEHOLDER_SURFACE,
-  aspectRatio: BENCH_FRAME_ASPECT,
-  minHeight: 0,
-};
 /*
- * ДВЕ ПОЛОВИНЫ ПЛЕЙСХОЛДЕРА (перо, лицо половины, деление коробки надвое) ЖИВУТ В `./core`
- * (`core/two-half-slot.tsx`): тот же орган стоит в INPUT — REFERENCES и во флэт-сторонах рендера,
- * и второе его начертание разъехалось бы с первым молча — так уже разъехалась кожа в волне r2.
+ * ПУСТОГО КАДРА СВОЕЙ РУКОЙ ЭТОТ ФАЙЛ БОЛЬШЕ НЕ РИСУЕТ ВОВСЕ. Полосатая поверхность, квадрат с
+ * нулевым минимумом (без него содержательная высота кнопки перебивала `aspect-ratio` — замерено,
+ * 366 против 162), деление надвое и перо живут в `./core` (`core/two-half-slot.tsx`): тот же орган
+ * стоит в INPUT — REFERENCES и во флэт-сторонах рендера, и второе его начертание разъехалось бы с
+ * первым молча — так уже разъехалась кожа в волне r2. Последним своим кадром здесь была ячейка
+ * минта детали: она рисовала предложение во всю ширину квадрата вместо двери и потому расходилась
+ * с соседями по ленте на четыре замера сразу (разбор — в шапке `NewDetailCell`).
  */
 
 /**
@@ -582,6 +574,7 @@ function EmptyCell({
   purpose,
   disabled,
   picking,
+  mediaLabel = 'from media',
   onPlaceMedia,
   onDraw,
 }: {
@@ -591,6 +584,13 @@ function EmptyCell({
   purpose: string;
   disabled?: boolean;
   picking?: boolean;
+  /**
+   * Лицо ВЕРХНЕЙ половины. Умолчание `from media` — правило подвала: у стороны имя уже напечатано
+   * под кадром, и `+ front` повторял бы его в двух сантиметрах. У ЯЧЕЙКИ МИНТА имени в подвале
+   * ещё нет вовсе, поэтому она и просит здесь другое слово (`+ detail`) — это единственное, чем
+   * её дверь отличается от двери стороны, и потому это проп, а не вторая ячейка.
+   */
+  mediaLabel?: string;
   onPlaceMedia: (media: common_MediaFull) => void;
   /** Есть — у ячейки вторая половина «draw». Нет — кадр целиком под слот медиа. */
   onDraw?: () => void;
@@ -603,7 +603,7 @@ function EmptyCell({
       role='group'
       ariaLabel={`${label} — empty slot`}
       label={label}
-      mediaLabel='from media'
+      mediaLabel={mediaLabel}
       showGestures
       aspect={BENCH_FRAME_ASPECT}
       purpose={purpose}
@@ -881,85 +881,205 @@ function DetailNameField({
   );
 }
 
+/** Адрес картинки библиотеки — теми же двумя ступенями, что `pictureUrl` берёт у плиты. */
+function mediaUrl(media: common_MediaFull): string {
+  const m = media.media;
+  return m?.thumbnail?.mediaUrl || m?.fullSize?.mediaUrl || '';
+}
+
+/** ЧТО УЖЕ ВЫБРАНО, НО ЕЩЁ НЕ НАЗВАНО — ровно два происхождения, и оба ведут в один минт. */
+type HeldPicture =
+  /** Файл библиотеки: минтит `RegisterDesignUpload` — он заводит пачку И ставит плиту одной транзакцией. */
+  | { from: 'media'; media: common_MediaFull; url: string }
+  /** Рисунок: `flattenLayer` УЖЕ положил его в полосу картинкой, минту остаётся адрес. */
+  | { from: 'picture'; pictureId: number; url: string };
+
 /**
- * The cell that MINTS a detail — and the name comes before the picture, which is the whole rule of
- * this cell. A detail slot is addressed by id and cited by name on a printed sheet; a nameless one
- * would be born with nothing to call it and the server refuses it
- * (`FailedPrecondition:detail_name_required`). So the door does not open until the field has a word
- * in it: it says so and puts the caret where the answer goes.
+ * ═══ ЯЧЕЙКА, КОТОРАЯ ЗАВОДИТ ДЕТАЛЬ — ТА ЖЕ ПЛИТКА, ЧТО У СТОРОНЫ ══════════════════════════════
  *
- * ONE DOOR, NOT TWO, SINCE J-15 — «or mark from the band» was the second, and it went with its
- * twins on the slots themselves.
+ * Владелец, вживую по бете: «в FLAT SLOTS → DETAILS криво отображается текст в плейсхолдере, и в
+ * этом плейсхолдере должна быть возможность нарисовать тоже». Обе жалобы — об одном: эта ячейка
+ * была НЕ ТЕМ ОРГАНОМ, что её соседи, и расходилась с ними по четырём замерам сразу.
  *
- * ФОРМА — ТА ЖЕ ЯЧЕЙКА ПОЛОСЫ, что у пустой стороны (`EmptyCell`): с именем — живой слот на три
- * жеста, без имени — та же пунктирная коробка, которая зовёт к полю имени под собой.
+ * ЧТО БЫЛО КРИВЫМ, ЧИСЛАМИ (1280, ячейка 138):
+ *   · ПРЕДЛОЖЕНИЕ ВМЕСТО ГЛАГОЛА. В кадре стояла строка «name it, then fill it» — 112.1px внутри
+ *     120px доступной ширины, то есть 93% и упор в обе стены. У соседей в том же кадре стоят
+ *     `from media` (66.6px) и `draw` (31px). Одна лишняя буква — и «IT» уезжает на вторую строку.
+ *   · НЕ БЫЛО ЗНАКА. У каждой половины соседа пара «пиктограмма + глагол»; здесь был голый текст,
+ *     поэтому его строка садилась в ОПТИЧЕСКИЙ ЦЕНТР квадрата 136 (+62), а у соседей текст стоит
+ *     на +40 своей половины — две ленты рядом не совпадали ни одной базовой линией.
+ *   · ПОДВАЛ ГОВОРИЛ ГЛАГОЛОМ. У всех ячеек в подвале ИМЯ (`FRONT *`, `SIDE LEFT`); здесь —
+ *     `+ DETAIL`, то есть действие в органе подписи, а «+» — не на двери.
+ *   · РЯД СТОЯЛ НА 30px НИЖЕ. Коробка 192 против 162 у каждой ячейки ленты сторон: под кадром
+ *     всегда висело поле имени — орган СНАРУЖИ рамки, который к тому же делал DETAILS самым
+ *     высоким рядом блока без единой причины, видимой глазом.
+ *   · РИСОВАТЬ БЫЛО НЕЧЕМ ни в одном из двух состояний (замерено: `pen:false` и до имени, и после).
+ *
+ * ТЕПЕРЬ ЭТО `PlaceOrDrawCell` — тот же орган, что у пустой стороны и у входа референсов: та же
+ * коробка, тот же квадрат 1:1, те же две половины встык, та же типография и та же пара «знак +
+ * глагол». Отличается ОДНО слово — верхняя половина говорит `+ detail` вместо `from media`,
+ * потому что имени в подвале ещё нет и повторять там нечего.
+ *
+ * ═══ ЯЧЕЙКА → ИМЯ → МИНТ, И ПОЛЕ СПРАШИВАЕТСЯ В МОМЕНТ ПОЛОЖЕНИЯ ══════════════════════════════
+ *
+ * Имя обязательно: лист цитирует деталь ПО ИМЕНИ, и безымянный минт сервер отвергает
+ * (`FailedPrecondition:detail_name_required`). Прежняя ячейка выводила из этого «сначала имя» и
+ * платила за это мёртвым кадром: пока поле пустое, в плитке стояла не дверь, а надпись, отсылающая
+ * к полю под ней. Теперь порядок обратный и честный — ОБЕ ДВЕРИ ЖИВЫ ВСЕГДА, а поле появляется
+ * ровно тогда, когда картинка уже выбрана и минту не хватает единственного слова.
+ *
+ * ⚠ И ПОЭТОМУ ЖЕ ПОЛЕ НЕ СТОИТ ПОСТОЯННО. Одно поле, один путь: не назвав, его нельзя проскочить,
+ * а не выбрав картинку — незачем показывать. Выбранное держится здесь и НЕ уходит на сервер до
+ * имени; `✕` на кадре роняет держание обратно в две двери.
  */
 export function NewDetailCell({
-  disabled,
+  techCardId,
+  band,
   onPlaceMedia,
+  onPlacePicture,
 }: {
-  disabled?: boolean;
+  techCardId: number;
+  band: GetDesignBandResponse;
+  /** Файл библиотеки + имя: одна транзакция заводит пачку, слот и плиту. */
   onPlaceMedia: (media: common_MediaFull, name: string) => void;
+  /** Уже существующая картинка полосы + имя: минт адресует её `picture_id`. */
+  onPlacePicture: (pictureId: number, name: string) => void;
 }) {
+  const [held, setHeld] = useState<HeldPicture | null>(null);
+  const [drawOpen, setDrawOpen] = useState(false);
   const [name, setName] = useState('');
   const [bad, setBad] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const named = name.trim();
 
-  const demandName = () => {
-    setBad(true);
-    inputRef.current?.focus();
+  /* Каретка едет туда, где ответ, в тот же кадр, в котором человек только что выбрал картинку. */
+  useEffect(() => {
+    if (held) inputRef.current?.focus();
+  }, [held]);
+
+  const drop = () => {
+    setHeld(null);
+    setName('');
+    setBad(false);
+  };
+
+  const commit = () => {
+    const named = name.trim();
+    if (!named) {
+      setBad(true);
+      inputRef.current?.focus();
+      return;
+    }
+    if (!held) return;
+    if (held.from === 'media') onPlaceMedia(held.media, named);
+    else onPlacePicture(held.pictureId, named);
+    drop();
   };
 
   return (
+    /* ⚠ `group` ЗДЕСЬ НЕ НУЖЕН, И ЭТО ЗАМЕРЕНО, А НЕ ПРИНЯТО НА ВЕРУ. Углы `PictureTile` тихие
+       (`TILE_QUIET`: `opacity-0` + `group-hover`), и напрашивается вывод, что хозяин обязан быть
+       `.group`, как у `BenchSlot`. Но `.group` у плитки СВОЙ СОБСТВЕННЫЙ (`picture-tile.tsx:802`),
+       и `✕` проявляется наведением на сам кадр — проверено под эмулированным `hover: hover`, со
+       снятием класса у обёртки: непрозрачность не менялась. У `BenchSlot` класс несёт не углы, а
+       СОСЕДА углов — дверь «remove slot» под кадром; такого соседа здесь нет. */
     <div className='flex h-full min-w-0 flex-col gap-1' data-bench-slot='new detail'>
-      {named && !disabled ? (
-        <EmptyCell
-          label={named}
-          purpose={`design bench · ${named}`}
-          onPlaceMedia={(media) => {
-            onPlaceMedia(media, named);
-            setName('');
-            setBad(false);
-          }}
-        />
-      ) : (
-        /* ТА ЖЕ КОРОБКА, ЧТО У ВСЯКОЙ ЯЧЕЙКИ ЛЕНТЫ (R2 п.24): рамка, кадр 1:1, подвал. Двери
-           внутри кадра нет — сначала имя: безымянный слот сервер отвергает
-           (`detail_name_required`), и кнопка, которая нажимается и молча ничего не делает,
-           читается как сломанная. */
+      {held ? (
+        /* ═══ ВЫБРАНО, НЕ НАЗВАНО — ТА ЖЕ КОРОБКА, что у заполненной ячейки, но пунктиром: плита
+           ещё не подана. Подвал говорит, ЧЕГО не хватает, и звёздочка у него та же красная, что
+           у обязательной стороны. */
         <div
+          data-detail-naming=''
           className={cn(
             'flex min-w-0 flex-col overflow-hidden border border-dashed',
-            bad ? 'border-error' : 'border-borderColor',
+            bad ? 'border-error' : 'border-textColor',
           )}
         >
-          <button
-            type='button'
-            disabled={disabled}
-            onClick={demandName}
-            aria-label='name the detail first'
-            style={SLOT_FRAME}
-            className={cn(HALF_FACE, bad && 'text-error', disabled && 'cursor-default')}
-          >
-            <span className='leading-tight'>name it, then fill it</span>
-          </button>
-          <SlotCap label='+ detail' />
+          <PictureTile
+            url={held.url}
+            alt='the picture waiting for a detail name'
+            aspect={BENCH_FRAME_ASPECT}
+            fit='contain'
+            className='border-0'
+            onRemove={{
+              onClick: drop,
+              ariaLabel: 'drop this picture',
+              title: 'drop it — nothing has been filed yet',
+            }}
+          />
+          <SlotCap label='name it' required requiredNote='the sheet cites a detail by its name' />
         </div>
+      ) : (
+        <EmptyCell
+          label='new detail'
+          /* «+» НА ДВЕРИ, А НЕ В ПОДВАЛЕ: подпись под кадром — орган имени, и глагол в ней читался
+             как имя слота. Имени у этой ячейки пока нет, поэтому дверь и называет свой предмет. */
+          mediaLabel='+ detail'
+          purpose='design bench · a new detail'
+          onPlaceMedia={(media) => setHeld({ from: 'media', media, url: mediaUrl(media) })}
+          onDraw={() => setDrawOpen(true)}
+        />
       )}
 
-      <Input
-        ref={inputRef}
-        value={name}
-        disabled={disabled}
-        placeholder='name this detail'
-        aria-invalid={bad || undefined}
-        aria-label='new detail name'
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-          setName(e.target.value);
-          if (e.target.value.trim()) setBad(false);
-        }}
-      />
+      {/* ПОЛЕ — ОДНО, И ТОЛЬКО ПОКА ЕГО СПРАШИВАЮТ. Enter кладёт, Esc роняет: обе клавиши стоят
+          здесь, потому что каретка уже в поле и рука с него не уходит. */}
+      {held && (
+        <>
+          <Input
+            ref={inputRef}
+            value={name}
+            placeholder='name this detail'
+            aria-invalid={bad || undefined}
+            aria-label='new detail name'
+            /* Отказ и обе клавиши — В ОПИСАНИИ ПОЛЯ, а не только рядом с ним: строка под полем
+               единственная, кто называет Esc, и незрячий человек иначе не узнает о ней вовсе. */
+            aria-describedby='design-new-detail-hint'
+            autoComplete='off'
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+              setName(e.target.value);
+              if (e.target.value.trim()) setBad(false);
+            }}
+            onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commit();
+                return;
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                drop();
+              }
+            }}
+          />
+          <Text
+            id='design-new-detail-hint'
+            size='nano'
+            component='span'
+            className={bad ? 'text-error' : 'text-labelColor'}
+          >
+            {bad
+              ? 'name it — the server refuses a nameless detail'
+              : 'enter files it · esc drops it'}
+          </Text>
+        </>
+      )}
+
+      {/* НИЖНЯЯ ПОЛОВИНА ОТКРЫВАЕТ ТОТ ЖЕ РЕДАКТОР, ЧТО У СТОРОНЫ, но БЕЗ слота: слота ещё нет, и
+          его адрес — не «пусто», а следующий вопрос. `base={null}` — заявленный чистый холст;
+          сплющенная картинка приезжает в `onFlattened` и ждёт здесь своего имени. */}
+      {drawOpen && (
+        <VectorModal
+          open={drawOpen}
+          onOpenChange={setDrawOpen}
+          techCardId={techCardId}
+          band={band}
+          base={null}
+          slot={null}
+          onFlattened={(picture) => {
+            const id = picture.id ?? 0;
+            if (id > 0) setHeld({ from: 'picture', pictureId: id, url: pictureUrl(picture) });
+          }}
+        />
+      )}
     </div>
   );
 }

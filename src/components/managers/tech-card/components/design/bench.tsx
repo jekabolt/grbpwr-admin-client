@@ -347,6 +347,30 @@ export function Bench({
     [writes.registerUpload, dropOptimistic],
   );
 
+  /**
+   * МИНТ ДЕТАЛИ ИЗ УЖЕ СУЩЕСТВУЮЩЕЙ КАРТИНКИ — вторая дверь ячейки минта («draw»), и она отличается
+   * от первой ровно происхождением плиты. Файл библиотеки идёт через `placeMedia`, потому что его
+   * ещё надо ЗАВЕСТИ в полосу; нарисованное уже картинка полосы (`FlattenDesignEditLayer` положил
+   * её туда до того, как редактор закрылся), и заводить его второй раз означало бы вторую пачку с
+   * тем же изображением.
+   *
+   * ФОРМА ЗАПИСИ — ТА ЖЕ, ЧТО У ОТВЕТА РЕЖИМА ВЫБОРА ВЫШЕ, и не случайно: минт детали пишется
+   * ОДНИМ способом на весь экран. `view_key = 'detail'` — это ГЛАГОЛ, а не адрес: он не называет
+   * ни одной строки, требует имя рядом с собой и `expected_slot_rev = 0`, потому что строки,
+   * против которой можно было бы сверить ревизию, ещё не существует.
+   */
+  const mintDetailFromPicture = useCallback(
+    (pictureId: number, newDetailName: string) => {
+      if (!Number.isFinite(pictureId) || pictureId <= 0) return;
+      setMintingDetail(true);
+      writes.setBenchSlot.mutate(
+        { slot: mintDetailRef(), pictureId, expectedSlotRev: 0, newDetailName },
+        { onSettled: () => setMintingDetail(false) },
+      );
+    },
+    [writes.setBenchSlot],
+  );
+
   const unmark = useCallback(
     (ref: DesignBenchSlotRef, expectedSlotRev: number) => {
       const key = slotRefKey(ref);
@@ -609,13 +633,24 @@ export function Bench({
           );
         })}
 
-        {/* J-15: у ячейки минта остался ОДИН вход — файл. */}
-        <div className='min-w-0' style={CELL_STYLE}>
-          <NewDetailCell
-            disabled={disabled}
-            onPlaceMedia={(media, name) => placeMedia(media, mintDetailRef(), 0, name)}
-          />
-        </div>
+        {/* ═══ ЯЧЕЙКА МИНТА — ДВЕ ДВЕРИ, ТЕ ЖЕ, ЧТО У ПУСТОЙ СТОРОНЫ: положить файл или нарисовать
+            (жалоба владельца 2026-09-07; разбор — в шапке `NewDetailCell`).
+
+            ⚠ У ВЫПУЩЕННОЙ КАРТОЧКИ ЕЁ НЕТ ВОВСЕ, и это не сокращение экрана. Всё, что она умеет, —
+            завести новую деталь; на замороженной карточке завести нельзя, поэтому раньше здесь
+            стояла ячейка, у которой ОБА жеста молча ничего не делали. Дверь, которая не открывается,
+            читается как поломка — ровно тот довод, по которому у нижней половины нет и рендер-слота.
+            Уже заведённые детали при этом остаются на ленте: их плиты — содержимое карточки. */}
+        {!disabled && (
+          <div className='min-w-0' style={CELL_STYLE}>
+            <NewDetailCell
+              techCardId={techCardId}
+              band={band}
+              onPlaceMedia={(media, name) => placeMedia(media, mintDetailRef(), 0, name)}
+              onPlacePicture={mintDetailFromPicture}
+            />
+          </div>
+        )}
       </div>
     </Section>
   );
