@@ -58,12 +58,23 @@ export function PlaygroundOutputs({
   );
   const writesOff = !!disabled || !speaks;
 
-  /** The preset a finished run was bought under, in the words the chips use. */
-  const presetWord = (kind: string, key: string): string => {
+  /**
+   * The preset a finished run was bought under, in the words the chips use.
+   *
+   * ⚠ AN OFF-PAGE ROW HAS NO `params` AT ALL, AND «free» WOULD BE AN INVENTION. `cardOutputRows`
+   * hands back a four-field STAMP for a run that fell off the loaded feed page — id, kind,
+   * revision, colourway — and every other field of it reads `undefined`. A neighbouring section
+   * once read `params.pattern.repeat_mm` off such a stamp and wrote the resulting **0** onto the
+   * card's fabric. So the preset is printed only where it is actually stated; `cutout` needs no
+   * params (the KIND is the answer), and `freeform` without them says nothing rather than
+   * something plausible.
+   */
+  const presetWord = (kind: string, key: string, stated: boolean): string => {
     if ((kind ?? '').trim().toLowerCase() === 'cutout') {
       return presets.find((p) => p.key === 'cutout')?.label ?? 'cut out the background';
     }
-    return presets.find((p) => p.key === key)?.label ?? (key.replace(/_/g, ' ') || 'free');
+    if (!stated || !key) return '';
+    return presets.find((p) => p.key === key)?.label ?? key.replace(/_/g, ' ');
   };
 
   return (
@@ -105,7 +116,11 @@ export function PlaygroundOutputs({
             const id = picture.id ?? 0;
             const cut = isCutoutPicture(run);
             const stamp = clockStamp(run.completedAt ?? run.createdAt);
-            const word = presetWord(run.kind ?? '', run.params?.freeform?.preset ?? '');
+            const word = presetWord(
+              run.kind ?? '',
+              run.params?.freeform?.preset ?? '',
+              run.params !== undefined,
+            );
             return (
               <div key={id} className='flex min-w-0 flex-col gap-1' data-pg-output={id}>
                 <PictureTile
@@ -141,7 +156,8 @@ export function PlaygroundOutputs({
                     !writesOff && pictureThumb(picture)
                       ? {
                           onClick: () => setEditingId(id),
-                          ariaLabel: `edit playground picture ${picture.ordinal ?? ''} — draw over it`.trim(),
+                          ariaLabel:
+                            `edit playground picture ${picture.ordinal ?? ''} — draw over it`.trim(),
                           title:
                             'draw over this picture — saving makes a NEW picture; the original is never overwritten',
                         }
@@ -152,8 +168,7 @@ export function PlaygroundOutputs({
                   {runHandle(run.id) || 'run —'} · picture {picture.ordinal ?? '—'}
                 </Text>
                 <Text size='micro' variant='label' className='truncate'>
-                  {word}
-                  {stamp ? ` · ${stamp}` : ''}
+                  {[word, stamp].filter(Boolean).join(' · ') || 'playground'}
                 </Text>
                 {/* ОДНО СЛОВО, А НЕ ТРИ СТРОКИ: факт («у этой картинки нет фона») читается пилюлей
                     так же полно, как абзацем, а сетка плиток не разъезжается по высоте от подписи,
@@ -161,7 +176,10 @@ export function PlaygroundOutputs({
                     его говорит сам грунт. */}
                 {cut && (
                   <span>
-                    <Pill tone='mut' title='the subject stands on transparency — the tone behind it is this screen’s, not the picture’s'>
+                    <Pill
+                      tone='mut'
+                      title='the subject stands on transparency — the tone behind it is this screen’s, not the picture’s'
+                    >
                       no background
                     </Pill>
                   </span>

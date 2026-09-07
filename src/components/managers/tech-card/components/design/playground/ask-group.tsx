@@ -75,7 +75,9 @@ export function AskGroup({
 
   const subject = subjectItem(state);
   const repaintWhole =
-    preset?.key === 'repaint_parts' && state.items.length > 0 && (subject?.regions.length ?? 0) === 0;
+    preset?.key === 'repaint_parts' &&
+    state.items.length > 0 &&
+    (subject?.regions.length ?? 0) === 0;
 
   return (
     <div id='design-playground-ask' data-pg-preset={preset?.key ?? ''}>
@@ -106,7 +108,9 @@ export function AskGroup({
                 selected={preset?.key === p.key}
                 pressed={preset?.key === p.key}
                 disabled={disabled}
-                title={p.craft || `the server offers «${p.key}»; this build has no description of it`}
+                title={
+                  p.craft || `the server offers «${p.key}»; this build has no description of it`
+                }
                 onClick={() => draft.setPreset(p.key)}
               >
                 {p.label}
@@ -121,7 +125,9 @@ export function AskGroup({
             data-pg-needs=''
             className='mt-2 normal-case'
           >
-            {preset ? `needs: ${preset.needs}` : 'pick one — each preset asks for different pictures'}
+            {preset
+              ? `needs: ${preset.needs}`
+              : 'pick one — each preset asks for different pictures'}
           </Text>
 
           {takesWords ? (
@@ -136,7 +142,9 @@ export function AskGroup({
                 maxLength={ASK_MAX}
                 placeholder='say what should change; the pictures and the marked areas are numbered above'
                 aria-label='words for the model'
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => draft.setAsk(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                  draft.setAsk(e.target.value)
+                }
                 /* Полка под счётчик — ИНЛАЙНОМ: произвольного класса, которого не было в дереве на
                    момент сборки, в собранном CSS не существует (тот же приём, что у
                    `references-section.tsx`). */
@@ -156,8 +164,8 @@ export function AskGroup({
           ) : (
             <div data-pg-no-words='' className='mt-3'>
               <Reason>
-                this preset takes no words · the background is removed and the subject comes back
-                on transparency
+                this preset takes no words · the background is removed and the subject comes back on
+                transparency
               </Reason>
             </div>
           )}

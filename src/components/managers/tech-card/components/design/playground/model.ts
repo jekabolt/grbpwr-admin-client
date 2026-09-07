@@ -6,7 +6,11 @@ import type {
   common_MediaFull,
   common_TechCardAnnotation,
 } from 'api/proto-http/admin';
-import { annotationCapsOut, annotationColorToWire, annotationKindToWire } from 'ui/components/annotation/wire';
+import {
+  annotationCapsOut,
+  annotationColorToWire,
+  annotationKindToWire,
+} from 'ui/components/annotation/wire';
 import { inputToDecimal } from 'utils/decimal';
 
 import { cardOutputRows } from '../bench-kinds';
@@ -134,7 +138,8 @@ const KNOWN: Record<string, Omit<Preset, 'key'>> = {
   cutout: {
     label: 'cut out the background',
     needs: 'one picture · no words',
-    craft: 'the background is removed and the subject comes back on transparency. this route takes no words.',
+    craft:
+      'the background is removed and the subject comes back on transparency. this route takes no words.',
     kind: 'cutout',
     roles: [],
   },
@@ -172,9 +177,7 @@ export function presetByKey(presets: readonly Preset[], key: string): Preset | n
 
 export type PlaygroundDoor = 'pictures' | 'preset' | 'areas';
 
-export type PlaygroundGate =
-  | { ok: true }
-  | { ok: false; reason: string; door?: PlaygroundDoor };
+export type PlaygroundGate = { ok: true } | { ok: false; reason: string; door?: PlaygroundDoor };
 
 /** The item a preset treats as the thing being changed. */
 export function subjectItem(state: PlaygroundState): PlaygroundItem | null {
@@ -200,7 +203,11 @@ export function refsCount(state: PlaygroundState): number {
  */
 export function playgroundGate(state: PlaygroundState, preset: Preset | null): PlaygroundGate {
   if (!preset) {
-    return { ok: false, reason: 'no preset is chosen · pick what this run should do', door: 'preset' };
+    return {
+      ok: false,
+      reason: 'no preset is chosen · pick what this run should do',
+      door: 'preset',
+    };
   }
   if (preset.kind === 'cutout') {
     if (state.items.length !== 1) {
@@ -235,7 +242,11 @@ export function playgroundGate(state: PlaygroundState, preset: Preset | null): P
   if (preset.key === 'add_hardware') {
     const subject = subjectItem(state);
     if (!subject || subject.regions.length === 0) {
-      return { ok: false, reason: 'mark the area first · where does the hardware go', door: 'areas' };
+      return {
+        ok: false,
+        reason: 'mark the area first · where does the hardware go',
+        door: 'areas',
+      };
     }
   }
   const refs = refsCount(state);

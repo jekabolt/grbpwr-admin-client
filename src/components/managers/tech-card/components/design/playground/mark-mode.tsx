@@ -1,5 +1,9 @@
 import { useMemo, type JSX } from 'react';
-import { AnnotationSurface, type ShapePoint, type SurfaceCallout } from 'ui/components/annotation/surface';
+import {
+  AnnotationSurface,
+  type ShapePoint,
+  type SurfaceCallout,
+} from 'ui/components/annotation/surface';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';

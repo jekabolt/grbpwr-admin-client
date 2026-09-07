@@ -3,13 +3,7 @@ import Text from 'ui/components/text';
 
 import { InventoryLine, NotSent, WmgGroup, WmgShell, type NotSentItem } from '../core';
 import { mediaThumb } from '../render/model';
-import {
-  AREA_LETTERS,
-  areaLetter,
-  refsCount,
-  type PlaygroundState,
-  type Preset,
-} from './model';
+import { AREA_LETTERS, areaLetter, refsCount, type PlaygroundState, type Preset } from './model';
 
 /**
  * ═══ WHAT THE MODEL GETS — PLAYGROUND ════════════════════════════════════════════════════════
@@ -54,8 +48,14 @@ export function WhatModelGetsPlaygroundModal({
 
   const notSent: NotSentItem[] = [
     { label: 'colourway', reason: 'a playground run binds no colourway — it files under none' },
-    { label: 'colour recipe', reason: 'the recipe belongs to FABRIC RENDER; nothing reads it here' },
-    { label: 'the bench', reason: 'no plate of the bench travels — only the pictures on the table' },
+    {
+      label: 'colour recipe',
+      reason: 'the recipe belongs to FABRIC RENDER; nothing reads it here',
+    },
+    {
+      label: 'the bench',
+      reason: 'no plate of the bench travels — only the pictures on the table',
+    },
     {
       label: 'garment description',
       reason: 'this route is not told what the garment is; the pictures are the whole subject',

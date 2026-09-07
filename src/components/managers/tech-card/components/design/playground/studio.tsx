@@ -8,14 +8,7 @@ import { GenerateRow, LockBar, RunRefusal } from '../render/generate-row';
 import { useStartDesignRun } from '../render/use-design-run';
 import { AskGroup } from './ask-group';
 import { usePlaygroundDraft } from './drafts';
-import {
-  asRowGate,
-  playgroundGate,
-  presetByKey,
-  presetsOf,
-  runShape,
-  wireParams,
-} from './model';
+import { asRowGate, playgroundGate, presetByKey, presetsOf, runShape, wireParams } from './model';
 import { PlaygroundOutputs } from './outputs';
 import { PicturesGroup } from './pictures-group';
 import { PlaygroundRecallIntake } from './recall';
@@ -133,19 +126,11 @@ export function PlaygroundStudio({
                 the ask ›
               </Button>
             ) : door === 'areas' && !disabled ? (
-              <Button
-                variant='secondary'
-                size='xs'
-                onClick={goTo('design-playground-pictures-in')}
-              >
+              <Button variant='secondary' size='xs' onClick={goTo('design-playground-pictures-in')}>
                 mark an area ›
               </Button>
             ) : door === 'pictures' && !disabled ? (
-              <Button
-                variant='secondary'
-                size='xs'
-                onClick={goTo('design-playground-pictures-in')}
-              >
+              <Button variant='secondary' size='xs' onClick={goTo('design-playground-pictures-in')}>
                 add a picture ›
               </Button>
             ) : null}

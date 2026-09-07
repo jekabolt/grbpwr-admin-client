@@ -249,9 +249,7 @@ export function PicturesGroup({
                         open && 'text-textColor',
                       )}
                     >
-                      {areas
-                        ? item.regions.map((_, i) => areaLetter(i)).join(' · ')
-                        : 'mark ▸'}
+                      {areas ? item.regions.map((_, i) => areaLetter(i)).join(' · ') : 'mark ▸'}
                     </button>
                   </div>
                 )}
@@ -337,8 +335,8 @@ export function PicturesGroup({
       )}
       {dropped > 0 && (
         <Reason className='mt-2'>
-          {dropped} of them did not go in · already on the table, or over the{' '}
-          {PLAYGROUND_ITEMS_MAX} the run takes
+          {dropped} of them did not go in · already on the table, or over the {PLAYGROUND_ITEMS_MAX}{' '}
+          the run takes
         </Reason>
       )}
       {refs > REFS_MAX && (
