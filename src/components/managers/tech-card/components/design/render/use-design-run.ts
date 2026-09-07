@@ -104,20 +104,56 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
   const ledger = useRef<{ fingerprint: string; id: string } | null>(null);
   const [refusal, setRefusal] = useState<RunRefusal | null>(null);
 
+  /**
+   * ═══ ⚠ THE LEDGER AND THE REFUSAL BELONG TO ONE CARD, AND THE STUDIO IS NOT REMOUNTED ═════════
+   *
+   * The two generative screens live inside a tab that SURVIVES the walk from card A to card B
+   * (invariant 12, and the draft next door empties itself for exactly this reason). This hook was
+   * the last thing on them still holding A's answer: B's screen opened with A's refusal standing
+   * over it — words naming a fault of another card, next to a GENERATE that is not refused — and
+   * the ledger held A's `client_request_id`, minted against a fingerprint that did not name the
+   * card at all. A press on B with the same kind, the same words and the same pictures replayed
+   * that id, and the server reads an idempotency key against the CARD it was minted for
+   * (`designSameStartRequest`): it hands back «that is not this request», i.e. a refusal for a run
+   * a person is entitled to buy.
+   *
+   * SO BOTH DIE WITH THE CARD, IN THE BODY OF THE RENDER. Not in an effect: an effect leaves one
+   * COMMITTED frame in which the card is already B and the refusal is still A's, and one frame is
+   * enough to read a sentence and act on it.
+   */
+  const shownCard = useRef(techCardId);
+  if (shownCard.current !== techCardId) {
+    shownCard.current = techCardId;
+    ledger.current = null;
+    // By VALUE: clearing an already-empty refusal would cost a render that changes nothing.
+    if (refusal) setRefusal(null);
+  }
+
   const mutation = useMutation({
-    mutationFn: (input: StartRunInput & { clientRequestId: string }) =>
+    /**
+     * ⚠ THE CARD TRAVELS WITH THE REQUEST, IT IS NOT READ FROM THE CLOSURE WHEN THE ANSWER COMES.
+     * react-query calls the callbacks with the LATEST options object, so a card switch while the
+     * call is in flight would have `onSuccess` invalidating B's band for a run started on A —
+     * B repainting for work it does not hold, A never repainting for work it does.
+     */
+    mutationFn: (input: StartRunInput & { clientRequestId: string; techCardId: number }) =>
       adminService.StartDesignRun({
-        techCardId: techCardId ?? 0,
+        techCardId: input.techCardId,
         clientRequestId: input.clientRequestId,
         kind: input.kind,
         ask: input.ask,
         params: input.params,
         rerunOfRunId: input.rerunOfRunId ?? 0,
       }),
-    onSuccess: () => {
-      ledger.current = null;
-      setRefusal(null);
-      qc.invalidateQueries({ queryKey: designKeys.band(techCardId ?? 0) });
+    onSuccess: (_answer: unknown, input) => {
+      qc.invalidateQueries({ queryKey: designKeys.band(input.techCardId) });
+      // The screen's own state is cleared only where the answer is ABOUT the card on screen; the
+      // switch above has already cleared it otherwise, and writing it again would be a statement
+      // about B made by A.
+      if (shownCard.current === input.techCardId) {
+        ledger.current = null;
+        setRefusal(null);
+      }
       // The run comes back PENDING, not done: the picture arrives in the feed when the provider
       // answers. Saying so is the difference between «nothing happened» and «it was booked».
       showMessage('run started — the pictures land in the history when it finishes', 'success');
@@ -126,13 +162,16 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
       const message = (error as Error)?.message?.trim() || 'the run did not start';
       if (isAborted(error)) {
         showMessage(`someone changed this first — ${message}`, 'error');
-        qc.invalidateQueries({ queryKey: designKeys.band(techCardId ?? 0) });
+        qc.invalidateQueries({ queryKey: designKeys.band(input.techCardId) });
         return;
       }
       // ОБА КАНАЛА, И ЭТО НЕ ДУБЛИРОВАНИЕ. Всплывашка — для отказа, который человек просто увидел;
       // поле — для того, на который он обязан подействовать, и оно переживает секунды всплывашки.
       // Классификатор общий с FLAT (`generation/refusal.ts`): что известно об отказе, решает он.
-      setRefusal(refusalFromError(error, input.clientRequestId));
+      // ПОЛЕ — ТОЛЬКО СВОЕЙ КАРТОЧКЕ (см. выше); всплывашка принадлежит человеку, а не экрану.
+      if (shownCard.current === input.techCardId) {
+        setRefusal(refusalFromError(error, input.clientRequestId));
+      }
       showMessage(message, 'error');
     },
   });
@@ -140,10 +179,14 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
   const start = useCallback(
     (input: StartRunInput) => {
       if (!techCardId || techCardId <= 0) return;
-      // THE FINGERPRINT COVERS EVERY FIELD THAT REACHES THE WIRE. `rerun_of_run_id` is part of the
-      // intent — «run 7 again» is not the same request as «run this» — so leaving it out would
-      // replay one idempotency key across two different jobs and hand back the wrong run.
+      // THE FINGERPRINT COVERS EVERY FIELD THAT REACHES THE WIRE — THE CARD INCLUDED. `techCardId`
+      // is the first field of the request and the server's own idempotency key is scoped by it, so
+      // a fingerprint that left it out could replay one id across two cards. `rerun_of_run_id` is
+      // part of the intent too — «run 7 again» is not the same request as «run this» — so leaving
+      // it out would replay one idempotency key across two different jobs and hand back the wrong
+      // run.
       const fingerprint = JSON.stringify([
+        techCardId,
         input.kind,
         input.ask,
         input.params,
@@ -152,7 +195,7 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
       if (ledger.current?.fingerprint !== fingerprint) {
         ledger.current = { fingerprint, id: newClientRequestId() };
       }
-      mutation.mutate({ ...input, clientRequestId: ledger.current.id });
+      mutation.mutate({ ...input, techCardId, clientRequestId: ledger.current.id });
     },
     [techCardId, mutation],
   );
