@@ -825,10 +825,7 @@ export function SidesSection({
                     ? `${col.label} is the target of the next render run`
                     : `make ${col.label} the target of the next render run`
                 }
-                className={cn(
-                  'flex min-w-0 items-center gap-1.5 py-0.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-                  target ? 'underline underline-offset-4' : 'hover:underline hover:underline-offset-4',
-                )}
+                className='group flex min-w-0 items-center gap-1.5 py-0.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
               >
                 {/* ⚠ У `sample` СВОТЧА НЕТ ВОВСЕ, И ЭТО НЕ ЭКОНОМИЯ ПИКСЕЛЯ. Свотч рисуется
                     пустым (`PLACEHOLDER_SURFACE`), когда цвет не назван, — и пустой квадратик
@@ -840,12 +837,20 @@ export function SidesSection({
                     это замерено пробой, а не обещано: рост держит подпись, а свотч (11px) ниже
                     неё, и все заголовки стоят 19px по одной верхней линии. */}
                 {col.ref ? <Swatch hex={hex} size={11} title={swatchTitle} /> : null}
+                {/* ПОДЧЁРКИВАНИЕ — НА ПОДПИСИ, НЕ НА КНОПКЕ, И СО СМЕЩЕНИЕМ 2. С кнопки оно не
+                    доезжало вовсе: `truncate` (overflow:hidden) на подписи режет линию, идущую от
+                    предка, а при offset-4 её срезает и собственный клип span'а — замерено по
+                    смещениям: auto/1/2/3 рисуются, 4 нет. Поэтому цель столбца годами
+                    подчёркивалась только в разметке. */}
                 <Text
                   size='micro'
                   variant={target ? undefined : 'label'}
                   tracking='label'
                   component='span'
-                  className='min-w-0 truncate uppercase'
+                  className={cn(
+                    'min-w-0 truncate uppercase underline-offset-2',
+                    target ? 'underline' : 'group-hover:underline',
+                  )}
                 >
                   {col.label}
                   {col.archived ? ' (archived)' : ''}
@@ -856,37 +861,57 @@ export function SidesSection({
           {/* ЧЕТВЁРТАЯ ДВЕРЬ ОДНОЙ КОМНАТЫ (G2-4): пунктирный заголовок открывает тот же поповер,
               что пункт `+ colourway…` в цели GENERATE и в цели mark. Ячеек под ним нет — только
               пунктирная кромка: ось на этом столбце не кончается, но плит он не носит.
-              ⚠ НАДПИСЬ ПРИЖАТА ВЛЕВО, А НЕ ПО ЦЕНТРУ, И ЭТО НЕ ВКУС. Этот столбец забирает
-              остаток ширины (`PLUS_COL_PX, 1fr`), то есть на карточке с одним верстаком он
-              шириной в две трети блока; центрованное слово уезжало на середину пустого места и
-              читалось баннером посреди страницы. Прижатое — оно стоит НАД своей пунктирной
-              кромкой, в один ряд с `SIDE`, `FLATS IN` и именами столбцов, и называет зону, а не
-              висит в ней.
+
+              ═══ ДОРОЖКУ ДЕРЖИТ ЯЧЕЙКА, А КНОПКА МЕРЯЕТСЯ СВОИМ СЛОВОМ — ЭТО ДВА ПРЕДМЕТА ═══════
+              Владелец на бете, дословно: «в STEP 4 FABRIC RENDER → SIDES криво отображается текст
+              в плейсхолдере». Кривизна была одна на вид и две числом, и обе — от того, что
+              элементом сетки стояла САМА КНОПКА:
+                · ШИРИНА. Столбец забирает остаток (`PLUS_COL_PX, 1fr`), а элемент сетки по
+                  умолчанию растянут на всю дорожку — значит при одном верстаке пунктирная коробка
+                  шла через две трети блока (замер: 986px на рамку вокруг слова в 76px), слово
+                  жалось к её левому краю тонкой полосой, и рамка вокруг пустоты читалась не
+                  приглашением, а сломанным полем ввода.
+                · СТРОКА. Собственная кромка прибавляла по пикселю сверху и снизу: 21px против
+                  19px у соседей (`SIDE`, `FLATS IN`, имена столбцов), и надпись садилась на
+                  пиксель ниже ряда. Ряд заголовков вставал ступенькой.
+              Поэтому дорожку занимает ЯЧЕЙКА (растянутая, как всякий элемент сетки), а кнопка
+              внутри неё меряется по содержимому и стоит у левого края столбца — тем же кеглем, на
+              той же строке и в тот же рост, что имена соседних столбцов. Рост сходится вычетом:
+              рамка съедает те самые два пикселя, поэтому поле у кнопки `py-px`, а не `py-0.5`
+              (1 + 1 + 15 строки + 1 + 1 = 19, ровно как `py-0.5` без рамки). Числа сторожит
+              `probe-sides.mjs` (`checkHeadRow`: ширина против собственного слова, `top`/`height`
+              и строка текста против заголовка `sample`) — «на глаз одинаково» здесь уже один раз
+              разошлось с числом.
+              Пустоты под кнопкой это НЕ трогает: 1fr остаётся у дорожки, таблица занимает ширину
+              блока (п.28), и пустое место под приглашением читается тем, чем является, — местом
+              для следующего цвета.
 
               ⚠ БЕЗ ПРАВА ЗАПИСИ ДВЕРИ НЕТ ВОВСЕ, А НЕ «ЕСТЬ, НО ОТКАЖЕТ» (r3-w2 №4). Поповер
               рождения колорвея — запись (`CreateColorway`), и на read-only карточке он открылся
               бы, чтобы отказать словами «read-only»: приглашение, нарисованное без права. Тут
               остаётся ровно то, что и было правдой, — пунктирная кромка, та же самая, что идёт
               вдоль строк ниже: ось на столбцах не кончается, просто продолжить её этому человеку
-              нечем. Пустой элемент рисуется, а не пропускается: строки ниже занимают все
+              нечем. Сама ЯЧЕЙКА рисуется всегда, а не пропускается: строки ниже занимают все
               `columns.length + 3` дорожки, и дыра в шапке сдвинула бы их авто-размещением. */}
-          {canWrite ? (
-            <button
-              type='button'
-              data-side-add-colourway=''
-              onClick={onCreateColorway}
-              title='name a new colourway — it becomes a column here and the target of the next run'
-              className='flex items-center justify-start border border-dashed border-borderColor px-2 py-0.5 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-            >
-              + colourway
-            </button>
-          ) : (
-            <div
-              data-side-add-colourway-inert=''
-              title='read-only — a new colourway is named by someone with write access'
-              className='self-stretch border-l border-dashed border-borderColor'
-            />
-          )}
+          <div data-side-plus-head='' className='flex min-w-0 self-stretch'>
+            {canWrite ? (
+              <button
+                type='button'
+                data-side-add-colourway=''
+                onClick={onCreateColorway}
+                title='name a new colourway — it becomes a column here and the target of the next run'
+                className='flex shrink-0 items-center self-start whitespace-nowrap border border-dashed border-borderColor px-2 py-px text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+              >
+                + colourway
+              </button>
+            ) : (
+              <div
+                data-side-add-colourway-inert=''
+                title='read-only — a new colourway is named by someone with write access'
+                className='border-l border-dashed border-borderColor'
+              />
+            )}
+          </div>
 
           {flats.map((flat, i) => {
             const label = viewLabel(flat.view);
