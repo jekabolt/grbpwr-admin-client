@@ -2316,7 +2316,10 @@ export function ArtifactsPanel({
           open
           onOpenChange={(open) => !open && setZoomAt(null)}
           title={onScreen[zoomAt].name}
-          src={plateUrl(onScreen[zoomAt])}
+          /* УВЕЛИЧЕННЫЙ ВИД — ПОЛНЫЙ РАЗМЕР ПЕРВЫМ, и это единственное место, где он того стоит:
+             кадр открывают, чтобы РАССМОТРЕТЬ. Запасные адреса те же, что на плите. */
+          src={plateSources(onScreen[zoomAt], true)[0] ?? ''}
+          srcFallbacks={plateSources(onScreen[zoomAt], true).slice(1)}
           callouts={calloutsOfPlate(onScreen[zoomAt].mediaId)}
           frozen={!canPlaceOn(onScreen[zoomAt])}
           onAdd={
@@ -2468,14 +2471,52 @@ function plateAsPicture(plate: DocumentPlate): common_DesignPicture {
   };
 }
 
-/** Адрес плиты: полный размер, потом сжатый, потом миниатюра. Пусто — поверхность скажет сама. */
-function plateUrl(plate: DocumentPlate): string {
-  return (
-    plate.media?.media?.fullSize?.mediaUrl ||
-    plate.media?.media?.compressed?.mediaUrl ||
-    plate.media?.media?.thumbnail?.mediaUrl ||
-    ''
-  );
+/* ═══ АДРЕСА ПЛИТЫ — ЛЕСТНИЦА, А НЕ ОДИН ВЫБОР (жалоба владельца по бете, 2026-09-07) ══════════
+ *
+ * Дословно: «в THE SHEET у меня пустые картинки всё равно» — со снимком, где в группе SAMPLE три
+ * плиты FRONT / BACK / SIDE RIGHT с пилюлей BENCH стоят со ЗНАЧКОМ БИТОЙ КАРТИНКИ, а те же
+ * снимки в STUDIO › FABRIC RENDER › SIDES показываются нормально.
+ *
+ * ПРИЧИНА — ПОРЯДОК, В КОТОРОМ СПРАШИВАЮТ ТРИ ОБЪЕКТА ОДНОЙ МЕДИА-СТРОКИ, И БОЛЬШЕ НИЧЕГО.
+ * Здесь стояло `fullSize → compressed → thumbnail`, то есть лист — ЕДИНСТВЕННЫЙ экран полосы,
+ * который просит объект `-og`. Верстак и SIDES просят `thumbnail` первым (`pictureUrl`,
+ * `bench-slot.tsx`; `pictureThumb`, `render/model.ts`), и потому видят картинку там, где лист её
+ * не видит. Не CORS и не `crossOrigin`: поверхность их не ставит вовсе и `canvas` не трогает.
+ *
+ * ЗАМЕРЕНО НА БЕТЕ, НЕ ВЫВЕДЕНО (`internal/apisrv/admin/design_band.go`, довод у имени объекта
+ * кадра): из 28 кадров разреза у трёх `-og.png` и `-compressed.webp` отдают 403 AccessDenied, а
+ * `-thumb.webp` — 200. Имя объекта кропа было детерминированным, уборка провалившейся попытки
+ * сносила объекты успешного повтора. Сервер починен — но уже загруженные строки на бете остались
+ * битыми: сервер чинит будущее, не прошлое. Три плиты на снимке владельца — ровно эти три кадра.
+ *
+ * ЧТО ИСПРАВЛЕНО, И ПОЧЕМУ ДВУМЯ ПОЛОВИНАМИ.
+ * 1. `compressed` ПЕРВЫМ НА ЛИСТЕ. Это тот же кадр в тех же пикселях (`uploadVerbatimImageObj`
+ *    жмёт КАДР ЦЕЛИКОМ, уменьшает только миниатюра), поэтому лист ничего не теряет в разрешении,
+ *    а `-og` перестаёт быть единственной дверью. В увеличенном виде порядок обратный: там кадр
+ *    рассматривают, и полный размер стоит своих байт.
+ * 2. ЛЕСТНИЦА ЦЕЛИКОМ ЕДЕТ В ПОВЕРХНОСТЬ (`srcFallbacks`), и спуск делается по СОБЫТИЮ `error`.
+ *    Выбрать «правильный» адрес заранее нельзя: какой из трёх объектов жив — знает только бакет.
+ *    Кончилась лестница — поверхность говорит словами, чей хост молчит, а не рисует «?».
+ *
+ * ⚠ ЭТО ВТОРАЯ ПОЛОВИНА ПОЧИНКИ D-7, ОБЪЯВЛЕННОЙ И НЕ СДЕЛАННОЙ. `picture-tile.tsx` называет плиту
+ * ARTIFACTS вторым читателем своей памяти павших адресов — но `useLoadableSrc` не был позван
+ * отсюда НИ РАЗУ (ноль импортов вне самого `picture-tile.tsx`). Здесь взята не та память, а
+ * событие: у листа кандидатов ТРИ, а не два, и пробовать их отдельным `Image()` до отрисовки
+ * значило бы удваивать запросы там, где `<img>` и так сообщает исход.
+ */
+function plateSources(plate: DocumentPlate, biggestFirst = false): string[] {
+  const m = plate.media?.media;
+  const ladder = biggestFirst
+    ? [m?.fullSize, m?.compressed, m?.thumbnail]
+    : [m?.compressed, m?.fullSize, m?.thumbnail];
+  const out: string[] = [];
+  for (const v of ladder) {
+    const url = (v?.mediaUrl ?? '').trim();
+    // ⚠ ДУБЛИКАТЫ СХЛОПЫВАЮТСЯ: у анимированного GIF `compressed` — тот же объект, что `fullSize`,
+    // у файла модели равны все три. Второй запрос по тому же адресу не проверяет ничего нового.
+    if (url && !out.includes(url)) out.push(url);
+  }
+  return out;
 }
 
 /** Пропорции кадра плиты: собственные, если сервер их назвал, иначе честный фолбэк. */
@@ -2838,6 +2879,8 @@ function PlateGrid({
         }
         const drawable = canPlaceOn(plate);
         const mine = calloutsOf(plate.mediaId);
+        /** Адреса кадра по убыванию предпочтения; довод целиком — у `plateSources`. */
+        const sources = plateSources(plate);
         /* ВЫНОСКА ПОД КУРСОРОМ СПИСКА — ЕСЛИ ОНА НА ЭТОЙ ПЛИТЕ (C-2). Ключ поверхности — индекс
            строки формы строкой; сравнение ровно то же, что у выбора. */
         const hovered =
@@ -2975,7 +3018,8 @@ function PlateGrid({
             <div>
               <AnnotationSurface
                 {...bindings}
-                src={plateUrl(plate)}
+                src={sources[0] ?? ''}
+                srcFallbacks={sources.slice(1)}
                 alt={plate.name}
                 aspectRatio={plateAspect(plate)}
                 preferNaturalAspect

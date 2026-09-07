@@ -188,6 +188,28 @@ export type AnnotationSurfaceProps = {
    */
   hoveredKey?: string | null;
   src: string;
+  /**
+   * ЗАПАСНЫЕ АДРЕСА ТОЙ ЖЕ КАРТИНКИ, по убыванию предпочтения. Кадр спускается по ним ТОЛЬКО по
+   * событию `error` — то есть подмена происходит после доказанного отказа, а не по догадке.
+   *
+   * ЗАЧЕМ ЭТО ЗДЕСЬ ВООБЩЕ. Медиа-строка несёт ТРИ объекта одной картинки (`fullSize`,
+   * `compressed`, `thumbnail`), и они переживают друг друга по отдельности: замерено на бете
+   * (`internal/apisrv/admin/design_band.go`, довод у имени объекта кадра) — из 28 кадров разреза у
+   * трёх `-og.png` и `-compressed.webp` отдают 403 AccessDenied, а `-thumb.webp` 200. Сервер
+   * починен, но УЖЕ ЗАГРУЖЕННЫЕ строки на бете остались такими: сервер чинит будущее, не прошлое.
+   * Поэтому «какой из трёх адресов взять» — не вопрос вкуса вызывающего, а вопрос, на который
+   * честно отвечает только сама загрузка.
+   *
+   * ⚠ ЧТО ЗДЕСЬ БЫЛО ДО ЭТОГО ПРОПА. `<img>` оставался на мёртвом адресе, и кадр показывал ЗНАЧОК
+   * БИТОЙ КАРТИНКИ — то есть говорил «сломался сервер» там, где рядом лежит живой файл той же
+   * картинки. Пустой адрес поверхность объясняла словами (ветка `image address not resolved`), а
+   * непустой и не грузящийся — не объясняла ничем.
+   *
+   * ⚠ ЛЕСТНИЦА, А НЕ ОДИН ЗАПАСНОЙ: у медиа три объекта, и падают они не парами. Дубликаты
+   * схлопываются (у анимированного GIF `compressed` — тот же объект, что `fullSize`, а у модели
+   * все три равны), поэтому один и тот же адрес никогда не пробуется дважды.
+   */
+  srcFallbacks?: readonly string[];
   alt?: string;
   media?: 'image' | 'video';
   /** Пропорции кадра для сеточной плитки (`4/5`). */
@@ -504,6 +526,24 @@ function claimEditing(me: SurfaceClaim) {
  */
 let undoOwner: object | null = null;
 
+/**
+ * Хост адреса — ровно столько, сколько человек может проверить сам.
+ *
+ * НЕ ВЕСЬ АДРЕС: у подписанного объекта это сотни символов подписи, и в двухстрочной ленте они
+ * вытеснили бы саму фразу. Не путь: имя объекта человеку ничего не говорит. Хост отвечает на
+ * единственный вопрос, который тут решается, — чей бакет молчит.
+ */
+function urlHost(url: string): string {
+  const u = (url ?? '').trim();
+  if (!u) return '';
+  try {
+    return new URL(u, typeof window === 'undefined' ? 'http://x/' : window.location.href).host || u;
+  } catch {
+    // Относительный адрес стенда или `data:` — базы нет, разбирать нечего: печатается начало.
+    return u.slice(0, 40);
+  }
+}
+
 type Drag =
   | { what: 'label'; key: string; offX: number; offY: number; at: ShapePoint; moved: boolean }
   | { what: 'handle'; key: string; index: number; at: ShapePoint; moved: boolean }
@@ -511,6 +551,7 @@ type Drag =
 
 export function AnnotationSurface({
   src,
+  srcFallbacks,
   alt,
   media = 'image',
   aspectRatio,
@@ -556,11 +597,51 @@ export function AnnotationSurface({
 }: AnnotationSurfaceProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+
+  /* ═══ ЛЕСТНИЦА АДРЕСОВ ОДНОЙ КАРТИНКИ ══════════════════════════════════════════════════════
+     Довод целиком — у пропа `srcFallbacks`. Здесь только механика, и в ней две ловушки.
+
+     ⚠ КЛЮЧ ЛЕСТНИЦЫ — СТРОКА, А НЕ МАССИВ. Вызывающие собирают запасные адреса выражением
+     (`sources.slice(1)`), то есть новым массивом на каждую отрисовку; сравнивай мы ссылки —
+     ступень сбрасывалась бы каждый раз, кадр возвращался бы на мёртвый адрес и просил бы его
+     заново, вечно. Строка сравнивается по значению, поэтому «та же лестница» — это правда о
+     СОДЕРЖИМОМ.
+
+     ⚠ СБРОС СТУПЕНИ — В ТЕЛЕ ОТРИСОВКИ, А НЕ В `useEffect`. Эффект стреляет ПОСЛЕ первой
+     отрисовки новой лестницы: один кадр `<img>` держал бы ступень от предыдущей картинки, то
+     есть просил бы чужой адрес или показывал бы отказ там, где ещё ничего не пробовали. */
+  const ladderKey = [src, ...(srcFallbacks ?? [])].join('\n');
+  const ladder = useMemo(
+    () =>
+      ladderKey
+        .split('\n')
+        .map((u) => u.trim())
+        .filter((u, at, all) => !!u && all.indexOf(u) === at),
+    [ladderKey],
+  );
+  const [rung, setRung] = useState(0);
+  const ladderSeen = useRef(ladderKey);
+  if (ladderSeen.current !== ladderKey) {
+    ladderSeen.current = ladderKey;
+    if (rung !== 0) setRung(0);
+  }
+  /** Адрес, который кадр показывает СЕЙЧАС. Пусто — либо адресов не давали, либо все отказали. */
+  const shownSrc = ladder[rung] ?? '';
+  /** Адреса были, и ни один не загрузился. Отличается от «адреса не дали» — это разные фразы. */
+  const exhausted = ladder.length > 0 && rung >= ladder.length;
+  /** Спуск на ступень ниже. По АДРЕСУ, а не по номеру: повторный `error` того же кадра не считается. */
+  const fellOn = useCallback(
+    (failed: string) => setRung((at) => (ladder[at] === failed ? at + 1 : at)),
+    [ladder],
+  );
+
   /** Собственные пропорции картинки — известны только после загрузки. */
   const [naturalRatio, setNaturalRatio] = useState<number | null>(null);
   // Смена картинки обнуляет пропорции: иначе новый снимок кадрируется по старым, и указания на нём
   // ложатся мимо — ровно на время до его загрузки, то есть незаметно и каждый раз по-разному.
-  useEffect(() => setNaturalRatio(null), [src]);
+  // ⚠ ЗАВИСИМОСТЬ — ПОКАЗЫВАЕМЫЙ АДРЕС, А НЕ ПРОП `src`: спуск на запасной вариант меняет файл, и
+  // его собственные пропорции обязаны приехать заново.
+  useEffect(() => setNaturalRatio(null), [shownSrc]);
   const fitting = fit && naturalRatio != null;
   /**
    * ПРОПОРЦИЯ ЧИСЛОМ. Собственные пропорции картинки старше объявленных: проп честен только до
@@ -1953,7 +2034,7 @@ export function AnnotationSurface({
             className={fit || aspectRatio ? 'absolute inset-0' : 'relative'}
             style={zoom ? { transform: `translate3d(${pos.x}px, ${pos.y}px, 0) scale(${scale})` } : undefined}
           >
-            {!src ? (
+            {!shownSrc ? (
               /* АДРЕС НЕ РАЗРЕШЁН — ЭТО СОСТОЯНИЕ, А НЕ ПОВОД ИСЧЕЗНУТЬ.
                  Пустой `src` означает, что медиа по id найти не удалось: сервер его не вернул, а в
                  библиотеке оно дальше загруженной страницы. Раньше такой кадр вызывающие просто
@@ -1963,15 +2044,27 @@ export function AnnotationSurface({
                  Кадр остаётся на месте в своих пропорциях, поэтому доли по-прежнему меряются по
                  нему и ПИНЫ РИСУЮТСЯ ТАМ ЖЕ, где стояли: указание можно прочесть, подвинуть и
                  убрать. `<img>` при этом не рисуется вовсе — пустой `src` в Chromium разрешается
-                 в адрес самой страницы и даёт значок битой картинки, то есть врёт про причину. */
+                 в адрес самой страницы и даёт значок битой картинки, то есть врёт про причину.
+
+                 ⚠ ДВЕ РАЗНЫЕ ФРАЗЫ, И РАЗНИЦА НЕСУЩАЯ. «Адреса нет» и «адрес есть, но файла по
+                 нему нет» чинятся в разных местах: первое — на сервере, который не отдал медиа,
+                 второе — в бакете, где объект пропал. Одна фраза на оба случая отправляла бы
+                 человека не туда, а значок битой картинки не называет НИ ОДНОГО из них. Хост
+                 назван потому, что это единственное, что человек может проверить сам. */
               <div className='absolute inset-0 flex items-end justify-center p-2'>
-                <span className='max-w-full bg-bgColor/90 px-1.5 py-0.5 text-center text-nano uppercase leading-tight tracking-label text-labelColor'>
-                  image address not resolved
+                <span
+                  data-surface-broken={exhausted ? '' : undefined}
+                  className='max-w-full bg-bgColor/90 px-1.5 py-0.5 text-center text-nano uppercase leading-tight tracking-label text-labelColor'
+                >
+                  {exhausted
+                    ? `the picture did not load · ${urlHost(ladder[ladder.length - 1])}`
+                    : 'image address not resolved'}
                 </span>
               </div>
             ) : media === 'video' ? (
               <video
-                src={src}
+                src={shownSrc}
+                onError={(e) => fellOn(e.currentTarget.getAttribute('src') ?? '')}
                 className={cn(
                   fit || aspectRatio ? 'absolute inset-0 h-full w-full object-cover' : 'block w-full',
                 )}
@@ -1995,8 +2088,13 @@ export function AnnotationSurface({
                  снимок. Ограничив изображение, коробка ужимается по нему, а выноски остаются на
                  местах: они в долях кадра, а не в пикселях. */
               <img
-                src={src}
+                src={shownSrc}
                 alt={alt ?? ''}
+                /* ОТКАЗ АДРЕСА — СОБЫТИЕ, А НЕ ДОГАДКА. Кадр спускается на следующий объект той же
+                   картинки; когда лестница кончилась, `shownSrc` пустеет и ветка выше говорит словами.
+                   `<img>` стреляет `error` один раз на адрес, а `fellOn` сверяет адрес со ступенью,
+                   поэтому цикла «тот же src → та же ошибка» здесь быть не может. */
+                onError={(e) => fellOn(e.currentTarget.getAttribute('src') ?? '')}
                 // Вкладки карточки смонтированы ВСЕ разом (переключение — это `hidden`), поэтому без
                 // `lazy` открытие карточки ради опечатки в шапке тянет снимки шагов, весь мудборд и
                 // все эскизы в полный размер.
