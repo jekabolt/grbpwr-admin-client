@@ -14820,6 +14820,14 @@ export type GetDesignBandResponse = {
   // for a sample plate is the sample bench itself. A client that cannot tell the two apart draws
   // doors into `colorway_mismatch` on every rollback.
   benchAdoptsUnattributed: boolean | undefined;
+  // THE PLAYGROUND THIS BINARY OFFERS — the presets whose route is wired right now, in chip order:
+  // "free" "add_hardware" "repaint_parts" (kind=freeform, the image key) and "cutout" (kind=cutout,
+  // FAL_KEY). Computed from the same pre-flight the door uses (designKindGate), so a chip is drawn
+  // only where GENERATE would not refuse for a missing key.
+  // ⚠ ABSENT ≠ EMPTY (the has_fabric_render / colour_plan doctrine). A binary older than this field
+  // sends nothing → the client draws NO PLAYGROUND cell on the rail. A binary that knows it sends at
+  // least [] → the cell exists; an empty list means «nothing wired», and the screen says so.
+  freeformPresets: string[] | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The six
@@ -14916,7 +14924,13 @@ export type common_DesignPicture = {
   runId: number | undefined;
   batchId: number | undefined;
   ordinal: number | undefined;
-  // flat | render | threed | pattern.
+  // flat | render | threed | pattern | freeform | cutout.
+  // `freeform` and `cutout` are the outputs of the PLAYGROUND (kind=freeform / kind=cutout). They
+  // are named apart for the same reason `pattern` is: neither is a plate. A playground picture that
+  // called itself a flat would become selectable into a bench slot, and one that called itself a
+  // render would satisfy the «3D needs a fabric render first» gate with a picture nobody drew the
+  // garment in. `cutout` additionally says the pixels carry ALPHA — the background was removed —
+  // which is what makes a neutral ground under the tile the honest way to show it.
   // `pattern` is a REPEATING TILE, the output of a kind=pattern run. It has a name of its own
   // rather than borrowing `flat` because a tile that calls itself a flat becomes selectable into a
   // bench slot — «the front of the garment» would be a square of cloth — and one that calls itself
@@ -15567,6 +15581,10 @@ export type common_DesignRunParams = {
   // naming a slot that has since been deleted or emptied simply matches nothing — the run loses
   // that plate, which is what its absence already means.
   flatSlotIds: number[] | undefined;
+  // THE FREEFORM ASK OF A PLAYGROUND RUN (kind=freeform). Only meaningful there; refused on every
+  // other kind with `freeform_forbidden`. The pictures a person laid on the playground travel HERE,
+  // never in extra_input_media_ids (one list per fact — a run naming a picture in both is refused).
+  freeform: common_DesignFreeformParams | undefined;
 };
 
 // DesignThreedParams are the parameters of a turntable run.
@@ -15627,6 +15645,38 @@ export type common_DesignPatternParams = {
   // standing with its parentage cleared (the FK's ON DELETE SET NULL), because a tile with a
   // picture is still a usable instruction after its swatch is gone.
   sourceAssetId: number | undefined;
+};
+
+// DesignFreeformParams is the frozen ask of a PLAYGROUND run (kind=freeform): the pictures a person
+// laid out, what they said about them, and which preset shapes the craft paragraph.
+// IT IS THE ONE LIST OF THIS RUN'S PICTURES. They do NOT also appear in
+// DesignRunParams.extra_input_media_ids — one list per fact — and a run naming a picture in both is
+// refused (`one_list_per_fact`) rather than quietly sending it twice.
+export type common_DesignFreeformParams = {
+  // free | add_hardware | repaint_parts — the server's own dictionary (designgen.FreeformPresets);
+  // `cutout` is NOT a preset of this kind: cutting the background is kind=cutout, another route.
+  preset: string | undefined;
+  // 1..8 pictures, in the order they are numbered on screen and in the prompt («image 1» is items[0]).
+  items: common_DesignFreeformItem[] | undefined;
+};
+
+// DesignFreeformItem is ONE picture of a playground run, with the places on it a person marked and
+// the words they said about each.
+export type common_DesignFreeformItem = {
+  mediaId: number | undefined;
+  // Where on this picture the words apply. Absent = the whole picture. A bbox is a 4-point POLYGON,
+  // a free shape is a POLYGON of 3..12 points; coordinates 0..1 of the picture, the same normalised
+  // decimals SplitDesignPicture takes. `text`/`color`/`piece_*` of the annotation are IGNORED —
+  // the words live in `texts` below.
+  // ⚠ NOT A MASK. The image route has no mask field. The server turns a region into (a) a marked
+  // COPY of the picture with the region outlined in a named colour and (b) a close CROP of the
+  // region, both attached as further numbered images, and tells the model so in words.
+  regions: common_TechCardAnnotation[] | undefined;
+  // What about this picture / these regions, ≤ 1000 runes. Regions and texts pair by index:
+  // regions[i] is described by texts[i]; a text with no region describes the whole picture.
+  texts: string[] | undefined;
+  // '' | subject | hardware | cloth — what the preset expects this picture to be. Empty on `free`.
+  role: string | undefined;
 };
 
 // DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
@@ -15932,8 +15982,8 @@ export type common_DesignCardOutput = {
   // FK design_run(id). 0 = no run: an uploaded picture, or a parentless flatten. It does NOT imply
   // «a run produced this picture» when non-zero — see the ancestry note above.
   runId: number | undefined;
-  // render | threed | pattern | recolor — the kind of the RUN, never of the picture. "" when there
-  // is no run at all.
+  // render | threed | pattern | recolor | freeform | cutout — the kind of the RUN, never of the
+  // picture. "" when there is no run at all.
   runKind: string | undefined;
   runRrev: number | undefined;
   // The run's colourway — product(id), 0 = unattributed or no run.
@@ -16035,7 +16085,8 @@ export type StartDesignRunRequest = {
   // Client-minted UUID. A repeat returns the existing run with OK — a double click on GENERATE is
   // one payment.
   clientRequestId: string | undefined;
-  // flat | render | threed | vector | recolor | pattern. `draft_idea` is REFUSED here with
+  // flat | render | threed | vector | recolor | pattern | freeform | cutout. `draft_idea` is
+  // REFUSED here with
   // InvalidArgument: a text run executes inline and returns its answer, so it has its own verb
   // (DraftDesignIdea) rather than a shared one that would return a pending row nobody ever polls.
   // `vector` IS ACCEPTED HERE and has no verb of its own on purpose: machine vectorisation spends
@@ -16056,6 +16107,23 @@ export type StartDesignRunRequest = {
   // Each of those is FailedPrecondition-shaped news in an InvalidArgument wrapper, except
   // `library_full`, which IS FailedPrecondition: the request is incomplete, and the sentence says
   // which half is missing.
+  // `freeform` AND `cutout` ARE THE PLAYGROUND, and they take this same door for the same reason:
+  // both spend a key's money (the image key and FAL_KEY respectively), both are counted against the
+  // day, both show up in the one history. Each returns EXACTLY ONE picture. What they refuse for
+  // free, before anything is reserved:
+  // · freeform — no picture in params.freeform.items («no_source_picture»); preset
+  // `add_hardware` with no item whose role is `hardware` («hardware_picture_required») or with
+  // no region marked on the subject («mark_the_area»); a picture named both in
+  // params.freeform.items and in params.extra_input_media_ids («one_list_per_fact»); more
+  // pictures than the snapshot's reference ceiling once the marked copies and the crops of the
+  // regions are counted («too_many_pictures», with the numbers);
+  // · cutout — anything other than exactly one picture in params.extra_input_media_ids
+  // («one_source_picture»); an `ask` or a params.freeform on a route that reads neither
+  // («cutout_takes_no_words») — a refusal rather than silence, so nobody pays for words that
+  // were never sent.
+  // A non-empty params.freeform on ANY other kind is «freeform_forbidden». Neither kind reads the
+  // card: no references, no bench plates, no garment description, no colourway (a positive
+  // params.colorway_id is still `colorway_forbidden`).
   kind: string | undefined;
   ask: string | undefined;
   // What is being asked for; at most 8 KB encoded. The INPUTS are not here and cannot be: the

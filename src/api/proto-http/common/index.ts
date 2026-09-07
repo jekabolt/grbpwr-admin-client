@@ -4668,6 +4668,10 @@ export type DesignRunParams = {
   // naming a slot that has since been deleted or emptied simply matches nothing — the run loses
   // that plate, which is what its absence already means.
   flatSlotIds: number[] | undefined;
+  // THE FREEFORM ASK OF A PLAYGROUND RUN (kind=freeform). Only meaningful there; refused on every
+  // other kind with `freeform_forbidden`. The pictures a person laid on the playground travel HERE,
+  // never in extra_input_media_ids (one list per fact — a run naming a picture in both is refused).
+  freeform: DesignFreeformParams | undefined;
 };
 
 // DesignColourRecipe is the colour submission of a render run, in a form that a history chip can
@@ -4871,6 +4875,38 @@ export type DesignPatternParams = {
   sourceAssetId: number | undefined;
 };
 
+// DesignFreeformParams is the frozen ask of a PLAYGROUND run (kind=freeform): the pictures a person
+// laid out, what they said about them, and which preset shapes the craft paragraph.
+// IT IS THE ONE LIST OF THIS RUN'S PICTURES. They do NOT also appear in
+// DesignRunParams.extra_input_media_ids — one list per fact — and a run naming a picture in both is
+// refused (`one_list_per_fact`) rather than quietly sending it twice.
+export type DesignFreeformParams = {
+  // free | add_hardware | repaint_parts — the server's own dictionary (designgen.FreeformPresets);
+  // `cutout` is NOT a preset of this kind: cutting the background is kind=cutout, another route.
+  preset: string | undefined;
+  // 1..8 pictures, in the order they are numbered on screen and in the prompt («image 1» is items[0]).
+  items: DesignFreeformItem[] | undefined;
+};
+
+// DesignFreeformItem is ONE picture of a playground run, with the places on it a person marked and
+// the words they said about each.
+export type DesignFreeformItem = {
+  mediaId: number | undefined;
+  // Where on this picture the words apply. Absent = the whole picture. A bbox is a 4-point POLYGON,
+  // a free shape is a POLYGON of 3..12 points; coordinates 0..1 of the picture, the same normalised
+  // decimals SplitDesignPicture takes. `text`/`color`/`piece_*` of the annotation are IGNORED —
+  // the words live in `texts` below.
+  // ⚠ NOT A MASK. The image route has no mask field. The server turns a region into (a) a marked
+  // COPY of the picture with the region outlined in a named colour and (b) a close CROP of the
+  // region, both attached as further numbered images, and tells the model so in words.
+  regions: TechCardAnnotation[] | undefined;
+  // What about this picture / these regions, ≤ 1000 runes. Regions and texts pair by index:
+  // regions[i] is described by texts[i]; a text with no region describes the whole picture.
+  texts: string[] | undefined;
+  // '' | subject | hardware | cloth — what the preset expects this picture to be. Empty on `free`.
+  role: string | undefined;
+};
+
 // DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
 // IDS ARE STORED, MediaFull IS SERVED. The stored snapshot freezes media_id — freezing a URL is
 // wrong because objects move — and the read joins media and hands back a ready picture. Nothing
@@ -5030,7 +5066,13 @@ export type DesignPicture = {
   runId: number | undefined;
   batchId: number | undefined;
   ordinal: number | undefined;
-  // flat | render | threed | pattern.
+  // flat | render | threed | pattern | freeform | cutout.
+  // `freeform` and `cutout` are the outputs of the PLAYGROUND (kind=freeform / kind=cutout). They
+  // are named apart for the same reason `pattern` is: neither is a plate. A playground picture that
+  // called itself a flat would become selectable into a bench slot, and one that called itself a
+  // render would satisfy the «3D needs a fabric render first» gate with a picture nobody drew the
+  // garment in. `cutout` additionally says the pixels carry ALPHA — the background was removed —
+  // which is what makes a neutral ground under the tile the honest way to show it.
   // `pattern` is a REPEATING TILE, the output of a kind=pattern run. It has a name of its own
   // rather than borrowing `flat` because a tile that calls itself a flat becomes selectable into a
   // bench slot — «the front of the garment» would be a square of cloth — and one that calls itself
@@ -5314,8 +5356,8 @@ export type DesignCardOutput = {
   // FK design_run(id). 0 = no run: an uploaded picture, or a parentless flatten. It does NOT imply
   // «a run produced this picture» when non-zero — see the ancestry note above.
   runId: number | undefined;
-  // render | threed | pattern | recolor — the kind of the RUN, never of the picture. "" when there
-  // is no run at all.
+  // render | threed | pattern | recolor | freeform | cutout — the kind of the RUN, never of the
+  // picture. "" when there is no run at all.
   runKind: string | undefined;
   runRrev: number | undefined;
   // The run's colourway — product(id), 0 = unattributed or no run.
