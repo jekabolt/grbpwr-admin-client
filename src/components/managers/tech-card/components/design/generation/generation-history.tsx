@@ -99,7 +99,7 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  * WHERE THE MOCK-UP'S FORM MEETS THE PRODUCT'S DATA, THE DATA WINS AND THE FORM STAYS: the tile's
  * top-left badge names the SIDE THE PLATE STANDS IN — a fact, never `ghost_view`, a guess (F-17);
  * `+ results ▸` replaces INPUT — REFERENCES with the run's outputs (J-4), it does not seat them
- * on the bench; a sheet says `N views` on its badge and `sheet of N` in its caption.
+ * on the bench; a sheet says `N views` on its badge and carries no caption line.
  */
 
 /** How many run rows one page of the history holds. The owner's number (T-17). */
@@ -293,11 +293,7 @@ function RunTile({
    * picker below.
    */
   const badge = composite ? `${facts.views.length} views` : inSlot ? inSlot.badge : undefined;
-  const place = composite
-    ? `sheet of ${facts.views.length}`
-    : inSlot
-      ? inSlot.place
-      : 'not standing';
+  const place = inSlot ? inSlot.place : 'not standing';
 
   // `flat · front` — the mock-up's `picName`. The address (`run 7 · b`), the provenance and the
   // composite tail ride in the title: the row already says which run, and the caption is one line.
@@ -306,16 +302,20 @@ function RunTile({
   // standing» — то же самое утверждение, что и снятая фраза «стоит не в слоте», сказанное мельче:
   // паттерн НЕ СТОИТ НИГДЕ ПО УСТРОЙСТВУ, и «не стоит» под каждым кадром ленты — это не факт о
   // работе, а повторение определения. Остаётся род, который на смешанной ленте ещё различает кадры.
+  // ⚠ У ЛИСТА ПОДПИСИ НЕТ (владелец, 2026-09-07 утро: «flat · sheet of 6 — этот текст убрать»):
+  // бейдж `N views` уже несёт единственный факт, который эта строка повторяла словами.
   const caption = (
     <>
-      <Text
-        size='micro'
-        component='p'
-        className='mt-1 truncate'
-        title={`${handle} · ${provenanceLabel(provenance)}${compositeTail(facts)}${mixed ? ` · ${mixed}` : ''}`}
-      >
-        {patternTile && !inSlot ? word : `${word} · ${place}`}
-      </Text>
+      {!composite && (
+        <Text
+          size='micro'
+          component='p'
+          className='mt-1 truncate'
+          title={`${handle} · ${provenanceLabel(provenance)}${compositeTail(facts)}${mixed ? ` · ${mixed}` : ''}`}
+        >
+          {patternTile && !inSlot ? word : `${word} · ${place}`}
+        </Text>
+      )}
       {fitMismatch && (
         // Слово, а не только цвет: система обязана читаться в монохроме, и «≠» здесь несёт смысл
         // сама по себе. Обе величины названы — расхождение без второй половины ничего не значит.
