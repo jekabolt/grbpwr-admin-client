@@ -2,6 +2,7 @@ import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useMemo, useState, type JSX } from 'react';
 import { CalloutBox } from 'ui/components/callout-box';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
+import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
@@ -154,10 +155,16 @@ export function PlaygroundOutputs({
                   {word}
                   {stamp ? ` · ${stamp}` : ''}
                 </Text>
+                {/* ОДНО СЛОВО, А НЕ ТРИ СТРОКИ: факт («у этой картинки нет фона») читается пилюлей
+                    так же полно, как абзацем, а сетка плиток не разъезжается по высоте от подписи,
+                    которая длиннее самой плитки. Объяснение грунта живёт в шапке файла — на экране
+                    его говорит сам грунт. */}
                 {cut && (
-                  <Text size='nano' variant='label' component='span' className='normal-case'>
-                    no background · the ground behind it is this screen’s, not the picture’s
-                  </Text>
+                  <span>
+                    <Pill tone='mut' title='the subject stands on transparency — the tone behind it is this screen’s, not the picture’s'>
+                      no background
+                    </Pill>
+                  </span>
                 )}
               </div>
             );

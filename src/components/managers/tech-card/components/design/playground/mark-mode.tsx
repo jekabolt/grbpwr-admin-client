@@ -85,9 +85,12 @@ export function MarkMode({
         points: region.points,
         label: centroid(region.points),
         number: i + 1,
-        // The letter is what the screen, the ask chips and the inventory all call this area; the
-        // wire carries no text on the annotation at all (see `regionToWire`).
-        text: `${areaLetter(i)}${region.text.trim() ? ` · ${region.text.trim()}` : ''}`,
+        /* THE PLATE ON THE FRAME CARRIES THE LETTER AND NOTHING ELSE. The words about the area
+           are one line away, in the row that OWNS them and can be edited; printing them twice
+           would put a second, unfixable copy over the picture — and over a small area the plate
+           then covers what it points at. (The wire carries no text on the annotation at all —
+           see `regionToWire`.) */
+        text: areaLetter(i),
       })),
     [regions],
   );
@@ -115,7 +118,7 @@ export function MarkMode({
       className='mt-4 flex flex-wrap items-start gap-6'
     >
       {/* ─── the picture, marked ────────────────────────────────────────────────────────────── */}
-      <div className='min-w-0 flex-[2] basis-[320px]'>
+      <div className='min-w-0 flex-[3] basis-[340px]'>
         <AnnotationSurface
           src={mediaThumb(item.media)}
           alt={`image ${index + 1}`}
@@ -139,7 +142,7 @@ export function MarkMode({
       </div>
 
       {/* ─── the areas of this picture, one line each ───────────────────────────────────────── */}
-      <div className='min-w-0 flex-[3] basis-[280px]'>
+      <div className='min-w-0 flex-[2] basis-[280px]'>
         <GroupLabel
           flush
           className={GROUP_GAP}
