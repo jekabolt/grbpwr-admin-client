@@ -339,7 +339,14 @@ export function CardPicturePicker({
               : 'no pictures on this card yet · generate one, or bring a picture from the library'}
           </EmptyState>
         ) : (
-          <div className={GROUP_SEAM}>
+          /* `isolate` IS THE HALF OF THE FOOTER FIX THAT IS NOT A NUMBER, and it belongs here
+             rather than there. A tile's badge and corners are `absolute … z-20` INSIDE the tile,
+             and the tile is `relative` with no z of its own — which is not a stacking context, so
+             those 20s are not local at all: they climb to the modal's own layer and print over
+             anything below 20 that comes after them, the footer included. Raising the footer to 21
+             would answer this badge; `isolation: isolate` answers every future one, by making the
+             list a layer whose insides cannot leave it. */
+          <div className={`isolate ${GROUP_SEAM}`}>
             {groups.map((group) => (
               <div key={group.key} data-card-picker-group={group.key}>
                 <GroupLabel
@@ -394,10 +401,22 @@ export function CardPicturePicker({
             grammar as `ConfirmationModal`'s own: ruled top, full bleed, actions to the right. It
             is `sticky` to the bottom of the SCROLLING body, so a card with forty pictures keeps
             `done` on screen; `-bottom-2.5` cancels the body's own padding so nothing scrolls in a
-            sliver underneath it. */}
+            sliver underneath it.
+
+            ⚠ THE BAR HAD NO LAYER, AND THE COST WAS THE COUNT. `sticky` with `z-index: auto`
+            sits at 0, so every `z-20` tile badge scrolling past beneath it printed THROUGH: 286
+            pixels of the footer strip changed depending on what stood behind, the first of them
+            black on white right across «0 of 2 pictures». A count a person cannot read is worse
+            than no count, because they read the wrong one.
+
+            ⚠ WHAT ACTUALLY FIXES IT IS `isolate` ON THE LIST ABOVE, measured — dropping this
+            token alone leaves the strip pixel-identical. `z-[var(--z-sticky)]` is here because it
+            is the app's own layer for a bar pinned over scrolling content (the media selection
+            bar, the files selection bar, the catalog batch bar all stand on it), and a pinned bar
+            that names no layer is the state this defect came out of. */}
         <div
           data-card-picker-foot=''
-          className='sticky -bottom-2.5 -mx-2.5 -mb-2.5 mt-5 flex items-center gap-2 border-t border-borderColor bg-bgColor px-2.5 py-1.5'
+          className='sticky -bottom-2.5 z-[var(--z-sticky)] -mx-2.5 -mb-2.5 mt-5 flex items-center gap-2 border-t border-borderColor bg-bgColor px-2.5 py-1.5'
         >
           <Counter n={picked.length} noun='picture' total={Math.max(room, 0)} />
           <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>

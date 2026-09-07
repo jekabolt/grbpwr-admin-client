@@ -34,7 +34,8 @@ import { stepOfKind } from './chain';
  *    in some other group. The verb is read as a PAIR with `derived_from`, exactly as the wire's own
  *    comment demands and `generation/composite.tsx` already does for the history's decks: `''` with
  *    a parent id is a legacy row the server declined to classify, and it stands as a root of its
- *    own with the words «parent gone» rather than being folded on a guess.
+ *    own rather than being folded on a guess — SILENTLY, because not knowing the verb says nothing
+ *    about the parent. «parent gone» is spent on ONE state only: the parent is not on this screen.
  *
  * 2. ONE PICTURE, ONE TILE. A bench plate IS a run's output — the same row, reached twice. The
  *    bench wins the tie, because «FLAT · FRONT» is what a person calls that picture; the run group
@@ -71,7 +72,14 @@ export type CardPictureTile = {
    * intrinsic refusal is `display_only`; the room left in the caller's list is the caller's own.
    */
   refusal: string;
-  /** It names a parent this band cannot show — a legacy `''` verb, or a parent that is hidden. */
+  /**
+   * It names a parent that is NOT on this screen — hidden, or on a page this band did not bring.
+   *
+   * ⚠ NOT «it is drawn as a root». A row the server declined to classify (`derivation: ''`) is a
+   * root too, and its parent may be standing right beside it; saying «parent gone» over a picture
+   * whose parent is one tile to the left is a statement a person can see is false, and a screen
+   * that is caught lying once is read as guessing everywhere after.
+   */
   orphan: boolean;
 };
 
@@ -277,15 +285,20 @@ export function cardPictureGroups(
   }
 
   /* ── 3. the families ────────────────────────────────────────────────────────────────────────
-     A verb without a parent that is ON SCREEN is not a family link: the child stands as a root and
-     says so. That covers all three ways a parent goes missing — a legacy `''` verb, a parent this
-     band did not page in, and a parent somebody hid — and none of them is a reason to hide a
-     picture that exists. */
+     A verb without a parent that is ON SCREEN is not a family link: the child stands as a root.
+     Two ways a parent goes missing — a page this band did not bring, and somebody hiding it — and
+     neither is a reason to hide a picture that exists; both are worth saying out loud, because a
+     picture standing alone with no explanation reads as a picture that lost something. */
   const tiles = new Map<number, CardPictureTile>();
   for (const [id, picture] of kept) {
     const verb = (picture.derivation ?? '').trim().toLowerCase();
     const parentId = picture.derivedFrom ?? 0;
-    const attached = (verb === 'crop' || verb === 'flatten') && parentId > 0 && kept.has(parentId);
+    /* TWO FACTS, NOT ONE, AND THEY FAIL SEPARATELY. «Is the parent on this screen» is what the
+       WORDS are about; «do we know what was done to it» is what the NESTING is about. Read as one
+       flag they collapse into the lie above: a legacy row with a visible parent came out «parent
+       gone» because the verb was blank, which is a fact about the server, not about the parent. */
+    const parentShown = parentId > 0 && kept.has(parentId);
+    const attached = (verb === 'crop' || verb === 'flatten') && parentShown;
     const placement = place.get(id);
     const letter = ordinalLetter(picture.ordinal ?? 0);
     tiles.set(id, {
@@ -296,7 +309,7 @@ export function cardPictureGroups(
       children: [],
       childVerb: attached ? (verb as CardPictureVerb) : '',
       refusal: picture.displayOnly ? DISPLAY_ONLY_REFUSAL : '',
-      orphan: !attached && parentId > 0,
+      orphan: parentId > 0 && !parentShown,
     });
   }
 
