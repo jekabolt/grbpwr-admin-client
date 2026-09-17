@@ -58,17 +58,33 @@ export function DescriptionEditor({
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const [preview, setPreview] = useState(false);
 
+  /** Фокус ставится ОДИН раз за открытие — но именно поставится, а не «попытается». */
+  const focusedRef = useRef(false);
   useEffect(() => {
-    if (!autoFocus) return;
+    if (!autoFocus || focusedRef.current || disabled) return;
     const el = areaRef.current;
     if (!el) return;
-    // `preventScroll`: фокус не имеет права уносить страницу к верху поля (см. потолок высоты
-    // ниже). Каретка — В НАЧАЛО: высота поля ограничена, и каретка в конце длинного описания
-    // прокрутила бы поле к хвосту, спрятав то, что человек только что читал сверху.
+    // ПОЛЕ МОГЛО ОТКРЫТЬСЯ ЗАМОРОЖЕННЫМ: запись у всех инлайн-полей страницы общая, и двойной
+    // щелчок во время сохранения заголовка монтирует поле с `disabled`, на котором `focus()` не
+    // делает ничего. Поэтому эффект ждёт разморозки — но фокус не отбирает, если человек за это
+    // время уже ушёл в другой контрол.
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== el) {
+      focusedRef.current = true;
+      return;
+    }
+    focusedRef.current = true;
+    // Каретка — В НАЧАЛО: высота поля ограничена, и каретка в конце длинного описания
+    // прокрутила бы поле к хвосту, спрятав начало текста.
     el.focus({ preventScroll: true });
     el.setSelectionRange(0, 0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // ПОЛЕ ПРИВОДИТСЯ В ВИД ЯВНО. Отрисованное описание бывает в несколько экранов, а поле на
+    // его месте — не выше потолка; прокрутка страницы остаётся прежней, и двойной щелчок в
+    // нижней половине длинного описания оставлял бы фокус в поле, чей верх далеко над экраном,
+    // — человек печатал бы вслепую. `nearest` не двигает страницу, если поле уже видно.
+    // Сам `focus` — с `preventScroll`: его прокрутка ставит к краю по своему усмотрению.
+    el.scrollIntoView({ block: 'nearest' });
+  }, [autoFocus, disabled]);
 
   return (
     <div className='flex flex-col gap-1.5'>

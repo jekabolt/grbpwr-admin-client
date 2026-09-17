@@ -22,6 +22,10 @@
 //   node scripts/task-desc-links-probe.mjs --mutate-no-autofocus      поле открывается без фокуса
 //   node scripts/task-desc-links-probe.mjs --mutate-trim-star         «*» на конце адреса отрезается
 //   node scripts/task-desc-links-probe.mjs --mutate-quadratic-trim    баланс скобок пересчитывается на каждом шаге
+//   node scripts/task-desc-links-probe.mjs --mutate-no-quote-trim     «» и … на конце остаются в адресе
+//   node scripts/task-desc-links-probe.mjs --mutate-no-portal-guard   двойной щелчок из просмотрщика доходит до описания
+//   node scripts/task-desc-links-probe.mjs --mutate-no-scroll-into-view  поле длинного описания открывается за экраном
+//   node scripts/task-desc-links-probe.mjs --mutate-focus-at-mount-only  замороженное поле так и остаётся без фокуса
 //
 //   Ц1.9–Ц1.11 и Ц4 мутацией не закрываются: они написаны по дефектам ревью первой версии
 //   (адрес искался наравне с токенами разметки), и их краснота проверена прогоном против неё.
@@ -92,7 +96,12 @@ const state = (globalThis.__server = globalThis.__server || { task: null, update
 const wrap = () => ({ id: 1, task: { ...state.task }, board: 'TASK_BOARD_DESIGN', status: 'TASK_STATUS_TODO', position: 0, media: [], checklist: [], createdBy: 'me', createdAt: '2026-08-01T00:00:00Z', updatedAt: '', startedAt: '', archivedAt: '' });
 const table = {
   GetTask: () => ({ task: wrap(), files: [] }),
-  UpdateTask: ({ task }) => { state.updates.push(JSON.parse(JSON.stringify(task))); state.task = { ...task }; return {}; },
+  // Задержка — чтобы двойной щелчок успел прийти, ПОКА летит чужая инлайн-запись (Ц3.14).
+  UpdateTask: ({ task }) => {
+    const apply = () => { state.updates.push(JSON.parse(JSON.stringify(task))); state.task = { ...task }; return {}; };
+    if (!state.delayUpdate) return apply();
+    return new Promise((res) => setTimeout(() => res(apply()), state.delayUpdate));
+  },
   ListTaskComments: () => ({ comments: state.comments || [] }),
   ListTasks: () => ({ tasks: [], total: 0 }),
   ListAdmins: () => ({ admins: [{ id: 1, username: 'nina' }] }),
@@ -178,14 +187,34 @@ if (flag('--mutate-no-autolink'))
 if (flag('--mutate-keep-punct'))
   mutate(
     'конечная пунктуация остаётся в адресе',
-    `var TRAILING = /[.,:;!?'"]/;`,
+    `var TRAILING = /[.,:;!?'"»”’…]/;`,
     'var TRAILING = /$^/;',
   );
 if (flag('--mutate-trim-star'))
   mutate(
     'звёздочка на конце адреса снова отрезается (набор GFM)',
+    `var TRAILING = /[.,:;!?'"»”’…]/;`,
+    `var TRAILING = /[.,:;!?'"»”’…*_~]/;`,
+  );
+if (flag('--mutate-no-quote-trim'))
+  mutate(
+    'закрывающие ёлочки/лапки/многоточие остаются в адресе',
+    `var TRAILING = /[.,:;!?'"»”’…]/;`,
     `var TRAILING = /[.,:;!?'"]/;`,
-    `var TRAILING = /[.,:;!?'"*_~]/;`,
+  );
+if (flag('--mutate-no-portal-guard'))
+  mutate(
+    'двойной щелчок из портала (просмотрщик) доходит до описания',
+    'if (!(e2.target instanceof Element) || !e2.currentTarget.contains(e2.target)) return;',
+    'if (!(e2.target instanceof Element)) return;',
+  );
+if (flag('--mutate-no-scroll-into-view'))
+  mutate('открытое поле не приводится в вид', 'el.scrollIntoView({ block: "nearest" });', '');
+if (flag('--mutate-focus-at-mount-only'))
+  mutate(
+    'фокус пробуется один раз при монтировании, даже замороженного поля',
+    'if (!autoFocus || focusedRef.current || disabled) return;',
+    'if (!autoFocus || focusedRef.current) return;',
   );
 if (flag('--mutate-internal-same-tab'))
   mutate(
@@ -227,6 +256,7 @@ const DESCRIPTION = [
   'на снимке [[media:12]] (см. https://ref-line.example/a)',
   'жирным **https://bold.example/b** и вплотную https://glued.example/**жирный**',
   'регистр HTTP://UPPER.example/x',
+  'ёлочки «https://quoted.example/a» и дальше',
 ].join('\n');
 
 const CARD = {
@@ -271,13 +301,22 @@ await page.route('http://probe.local/**', (r) =>
 );
 // Никаких внешних запросов со стенда (миниатюры, переходы).
 await page.route(/^https?:\/\/(?!probe\.local)/, (r) => r.abort());
+// Снимки для просмотрщика (Ц3.12) — настоящие картинки, иначе `NoteImage` откатится в ссылку и
+// просмотрщику нечего открывать. Маршрут позже — значит проверяется раньше общего запрета.
+const PIXEL = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+await page.route('https://img.example/**', (r) =>
+  r.fulfill({ status: 200, contentType: 'image/png', body: PIXEL }),
+);
 
-async function mount({ description = DESCRIPTION, readonly = false } = {}) {
+async function mount({ description = DESCRIPTION, readonly = false, delayUpdate = 0 } = {}) {
   await page.goto('http://probe.local/');
   await page.addStyleTag({ content: CSS });
   await page.evaluate(
-    ({ t, c, ro }) => {
-      globalThis.__server = { task: t, updates: [], comments: c, readonly: ro };
+    ({ t, c, ro, delay }) => {
+      globalThis.__server = { task: t, updates: [], comments: c, readonly: ro, delayUpdate: delay };
       // Переход по ссылке стенду не нужен: щелчок по <a> гасится ДО браузера, но всплытие и
       // dblclick остаются настоящими — React слушает их на корне.
       document.addEventListener(
@@ -288,7 +327,7 @@ async function mount({ description = DESCRIPTION, readonly = false } = {}) {
         true,
       );
     },
-    { t: { ...CARD, description }, c: COMMENTS, ro: readonly },
+    { t: { ...CARD, description }, c: COMMENTS, ro: readonly, delay: delayUpdate },
   );
   await page.addScriptTag({ content: bundle });
   await page.waitForSelector('text=comments', { timeout: 8000 });
@@ -379,6 +418,8 @@ await mount();
     'Ц1.10 адрес вплотную к разметке не глотает её: ссылка + жирный, а не одна длинная ссылка',
     `${JSON.stringify(glued)}, <b>жирный</b>: ${gluedBold}`,
   );
+  const quoted = await linkFacts('https://quoted.example/a');
+  ck(quoted.n === 1, 'Ц1.12 закрывающая «ёлочка» в адрес не попала', JSON.stringify(quoted));
   const upper = await linkFacts('HTTP://UPPER.example/x');
   ck(
     upper.n === 1 && upper.target === '_blank',
@@ -456,9 +497,71 @@ await mount();
 }
 await mount();
 {
-  await page.getByRole('button', { name: /▣ 1/ }).dblclick();
+  // СОБЫТИЕМ, А НЕ ДВУМЯ ЩЕЛЧКАМИ: первый настоящий щелчок по чипу открывает просмотрщик, и
+  // второй попадал бы уже в него, а не в чип, — проверка зеленела, не дойдя до правила о кнопках.
+  await page.getByRole('button', { name: /▣ 1/ }).dispatchEvent('dblclick');
   await page.waitForTimeout(300);
   ck((await editor().count()) === 0, 'Ц3.8 двойной щелчок по чипу вложения правку не открывает');
+}
+console.log('\nЦ3В · портал, длинное описание, фокус во время чужой записи');
+await mount({
+  description:
+    '![a](https://img.example/1.png) ![b](https://img.example/2.png)\nтекст под снимками',
+});
+{
+  const pic = page.locator('button', { has: page.locator('img[src="https://img.example/1.png"]') });
+  if (await act('Ц3.12', pic, (l) => l.click())) {
+    const viewer = page.locator('[data-media-viewer]');
+    await viewer.waitFor({ timeout: 5000 }).catch(() => {});
+    ck((await viewer.count()) === 1, 'Ц3.12.0 (контроль) снимок из описания открыл просмотрщик');
+    if (await viewer.count()) {
+      await viewer.dispatchEvent('dblclick');
+      await page.waitForTimeout(300);
+      ck(
+        (await editor().count()) === 0 && (await viewer.count()) === 1,
+        'Ц3.12 двойной щелчок ВНУТРИ просмотрщика (портал) не открывает правку и не закрывает его',
+        `редактор ${await editor().count()}, просмотрщик ${await viewer.count()}`,
+      );
+    }
+  }
+}
+await mount({
+  description: Array.from({ length: 120 }, (_, i) => `строка ${i + 1}`).join('\n\n'),
+});
+{
+  const far = page.getByText('строка 110', { exact: true });
+  if (await act('Ц3.13', far, (l) => l.dblclick())) {
+    await page.waitForTimeout(300);
+    const box = (await editor().count()) ? await editor().boundingBox() : null;
+    const vh = page.viewportSize().height;
+    ck(!!box, 'Ц3.13.0 (контроль) двойной щелчок в хвосте длинного описания открыл редактор');
+    ck(
+      !!box && box.y < vh && box.y + box.height > 0,
+      'Ц3.13 открытое поле видно на экране, а не над ним',
+      box ? `top=${Math.round(box.y)} bottom=${Math.round(box.y + box.height)} vh=${vh}` : '',
+    );
+  }
+}
+await mount({ delayUpdate: 1500 });
+{
+  await page.click('[aria-label="edit title"]');
+  await page.locator('input[aria-label="task title"]').fill('другой заголовок');
+  await page.locator('input[aria-label="task title"]').press('Enter');
+  await page.waitForTimeout(100);
+  await page.getByText('в коде', { exact: false }).first().dblclick();
+  await page.waitForTimeout(100);
+  const frozen = (await editor().count()) === 1 && (await editor().isDisabled());
+  ck(frozen, 'Ц3.14.0 (контроль) поле открылось ЗАМОРОЖЕННЫМ — чужая запись ещё летит');
+  await page
+    .waitForFunction(() => globalThis.__server.updates.length > 0, { timeout: 5000 })
+    .catch(() => {});
+  await page.waitForTimeout(500);
+  const focused = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
+  ck(
+    focused === 'task description',
+    'Ц3.14 после разморозки фокус всё-таки в поле описания',
+    `activeElement=${focused}`,
+  );
 }
 await mount({ description: '' });
 {
