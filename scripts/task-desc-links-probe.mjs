@@ -237,11 +237,15 @@ if (flag('--mutate-dblclick-readonly'))
 if (flag('--mutate-no-dblclick-guard'))
   mutate(
     'двойной щелчок по ссылке/чипу открывает правку',
-    `if (e2.target instanceof Element && e2.target.closest('a, button, [role="button"], img, video, input, textarea, select'))`,
+    `if (e2.target.closest('a, button, [role="button"], img, video, input, textarea, select'))`,
     'if (false)',
   );
 if (flag('--mutate-no-autofocus'))
-  mutate('поле открывается без фокуса', 'if (!autoFocus) return;', 'return;');
+  mutate(
+    'поле открывается без фокуса',
+    'if (!autoFocus || focusedRef.current || disabled) return;',
+    'return;',
+  );
 
 let bad = 0;
 const ck = (ok, what, d = '') => {
@@ -311,7 +315,12 @@ await page.route('https://img.example/**', (r) =>
   r.fulfill({ status: 200, contentType: 'image/png', body: PIXEL }),
 );
 
-async function mount({ description = DESCRIPTION, readonly = false, delayUpdate = 0 } = {}) {
+async function mount({
+  description = DESCRIPTION,
+  readonly = false,
+  delayUpdate = 0,
+  comments = COMMENTS,
+} = {}) {
   await page.goto('http://probe.local/');
   await page.addStyleTag({ content: CSS });
   await page.evaluate(
@@ -327,7 +336,7 @@ async function mount({ description = DESCRIPTION, readonly = false, delayUpdate 
         true,
       );
     },
-    { t: { ...CARD, description }, c: COMMENTS, ro: readonly, delay: delayUpdate },
+    { t: { ...CARD, description }, c: comments, ro: readonly, delay: delayUpdate },
   );
   await page.addScriptTag({ content: bundle });
   await page.waitForSelector('text=comments', { timeout: 8000 });
@@ -525,8 +534,19 @@ await mount({
     }
   }
 }
+// ПРАВАЯ КОЛОНКА ДЛИННЕЕ ОПИСАНИЯ — не украшение. Без неё страница, у которой описание в
+// несколько экранов сменилось полем в полэкрана, сама становится короткой, браузер поджимает
+// прокрутку, и поле оказывается на экране БЕЗ всякой починки: проверка зеленела под мутацией.
+// Так и выглядит живая карточка с длинным обсуждением.
 await mount({
   description: Array.from({ length: 120 }, (_, i) => `строка ${i + 1}`).join('\n\n'),
+  comments: Array.from({ length: 150 }, (_, i) => ({
+    id: 100 + i,
+    body: `реплика ${i + 1}`,
+    author: 'nina',
+    authorId: 1,
+    createdAt: '2026-09-01T00:00:00Z',
+  })),
 });
 {
   const far = page.getByText('строка 110', { exact: true });
@@ -535,6 +555,12 @@ await mount({
     const box = (await editor().count()) ? await editor().boundingBox() : null;
     const vh = page.viewportSize().height;
     ck(!!box, 'Ц3.13.0 (контроль) двойной щелчок в хвосте длинного описания открыл редактор');
+    const docH = await page.evaluate(() => document.documentElement.scrollHeight);
+    ck(
+      docH > 4000,
+      'Ц3.13.1 (контроль) страница осталась длинной — прокрутке нечего поджимать',
+      `scrollHeight=${docH}`,
+    );
     ck(
       !!box && box.y < vh && box.y + box.height > 0,
       'Ц3.13 открытое поле видно на экране, а не над ним',
