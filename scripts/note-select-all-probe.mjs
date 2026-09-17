@@ -189,6 +189,18 @@ await page.waitForSelector('text=КОНЕЦ-ДОКУМЕНТА', { timeout: 8000
 await page.waitForTimeout(200);
 
 const selText = () => page.evaluate(() => String(window.getSelection() ?? ''));
+/**
+ * ДИАПАЗОН ВНУТРИ ДОКУМЕНТА — а не «в выделении есть слова документа». Родное «выделить всё»
+ * тоже содержит слова документа (вместе со всей страницей), и проверка по тексту зеленела под
+ * мутацией, снимающей перехват.
+ */
+const selInDoc = () =>
+  page.evaluate(() => {
+    const sel = window.getSelection();
+    const doc = document.querySelector('[data-note-document]');
+    if (!sel || !sel.rangeCount || !doc) return false;
+    return doc.contains(sel.getRangeAt(0).commonAncestorContainer);
+  });
 // Сочетание — по системе стенда, как и в продукте: на маке ⌘, на прочих Ctrl.
 const SELECT_ALL = 'ControlOrMeta+a';
 
@@ -200,8 +212,8 @@ console.log('\nС1 · в чтении ⌘A выделяет только док�
   await page.keyboard.press(SELECT_ALL);
   const t = await selText();
   ck(
-    t.includes('ТЕКСТ-ДОКУМЕНТА') && t.includes('КОНЕЦ-ДОКУМЕНТА'),
-    'С1.1 документ выделен от начала до конца',
+    t.includes('ТЕКСТ-ДОКУМЕНТА') && t.includes('КОНЕЦ-ДОКУМЕНТА') && (await selInDoc()),
+    'С1.1 выделен ровно документ — от начала до конца и диапазоном внутри него',
     JSON.stringify(t.slice(0, 80)),
   );
   ck(!t.includes('SITE MENU'), 'С1.2 меню сайта в выделение НЕ попало');
@@ -253,8 +265,8 @@ console.log('\nС3 · в правке вне поля — выделяется �
   const t = await selText();
   const r = await area.evaluate((el) => ({ focused: document.activeElement === el }));
   ck(
-    t.includes('ТЕКСТ-ДОКУМЕНТА') && t.includes('КОНЕЦ-ДОКУМЕНТА'),
-    'С3.1 выделен показ документа',
+    t.includes('ТЕКСТ-ДОКУМЕНТА') && t.includes('КОНЕЦ-ДОКУМЕНТА') && (await selInDoc()),
+    'С3.1 выделен показ документа — диапазоном внутри него',
     JSON.stringify(t.slice(0, 80)),
   );
   ck(
@@ -264,6 +276,67 @@ console.log('\nС3 · в правке вне поля — выделяется �
   ck(
     !r.focused && (await area.inputValue()) === before,
     'С3.3 поле не получило фокус и не изменилось',
+  );
+}
+
+// ═══ С3Б · РУССКАЯ РАСКЛАДКА И ОТКРЫТЫЙ СЛОЙ ═══════════════════════════════════════════════
+console.log('\nС3Б · русская раскладка и открытый слой поверх страницы');
+{
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  await page.click('#site-chrome');
+  // На русской раскладке физическая A приходит как «ф»: ловится по `code`. Playwright шлёт
+  // клавиши латиницей, поэтому такое нажатие собирается событием.
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'ф',
+        code: 'KeyA',
+        metaKey: true,
+        ctrlKey: true,
+        bubbles: true,
+      }),
+    );
+  });
+  ck(await selInDoc(), 'С3Б.1 ⌘A на русской раскладке (key «ф», code KeyA) выделяет документ');
+
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  const grabbed = await page.evaluate(() => {
+    const layer = document.createElement('div');
+    layer.setAttribute('role', 'listbox');
+    layer.textContent = 'вариант один';
+    document.body.appendChild(layer);
+    layer.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'a',
+        code: 'KeyA',
+        metaKey: true,
+        ctrlKey: true,
+        bubbles: true,
+      }),
+    );
+    const sel = window.getSelection();
+    const has = !!sel && sel.rangeCount > 0;
+    layer.remove();
+    return has;
+  });
+  ck(!grabbed, 'С3Б.2 при открытом слое (listbox) ⌘A документ НЕ выделяет');
+}
+
+// ═══ С5 · ПУСТАЯ ЗАМЕТКА ═══════════════════════════════════════════════════════════════════
+console.log('\nС5 · в пустой заметке ⌘A не выделяет страницу');
+{
+  const area = page.locator('textarea[name="noteContent"]');
+  await area.click();
+  await area.fill('');
+  await page.waitForTimeout(200);
+  await page.click('#site-chrome');
+  await page.keyboard.press(SELECT_ALL);
+  const t = await selText();
+  ck(!t.includes('SITE MENU'), 'С5.1 меню сайта не выделено', JSON.stringify(t.slice(0, 60)));
+  ck(
+    t.trim() === '',
+    'С5.2 выделять нечего — и ничего не выделено',
+    JSON.stringify(t.slice(0, 60)),
   );
 }
 
