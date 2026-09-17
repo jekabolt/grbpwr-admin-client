@@ -96,6 +96,17 @@ export function FilesSelectionBar({
   const { assignTopics, setRoles, invalidate } = useFilesMutations();
   const { showMessage } = useSnackBarStore();
   const [sorting, setSorting] = useState(false);
+  /**
+   * ЧТО ИМЕННО ОТКРЫЛИ — РАЗБОР ЦЕЛИКОМ ИЛИ ТОЛЬКО «ПОЛОЖИТЬ В ПРОЕКТ».
+   *
+   * Просьба владельца: выделив файлы чекбоксами, положить все выбранные в проект. Это умел и
+   * прежний диалог, но внутри себя, третьим блоком под темами, — то есть человек, которому
+   * нужно ровно это, обязан был сперва догадаться, что «sort these out» про проекты тоже.
+   *
+   * ВТОРОГО ПИКЕРА ПРИ ЭТОМ НЕ ЗАВОДИТСЯ. Диалог тот же самый: та же запись, тот же разбор
+   * выделения и та же машина полуотказа. Сужается только то, что показано, и слова.
+   */
+  const [sortScope, setSortScope] = useState<'all' | 'project'>('all');
   const [applying, setApplying] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -184,7 +195,8 @@ export function FilesSelectionBar({
   const projectName = project?.name ?? (sortProject ? `#${sortProject}` : '');
   const roleName = roles.find((r) => Number(r.id) === roleChoice)?.name ?? '';
 
-  const openSort = () => {
+  const openSort = (scope: 'all' | 'project' = 'all') => {
+    setSortScope(scope);
     setSortProject(activeProjectId || 0);
     setRoleChoice(LEAVE_ROLES);
     setProjectQuery('');
@@ -623,7 +635,22 @@ export function FilesSelectionBar({
                 без проекта не существует, и кнопка, предлагавшая её отдельно, предлагала
                 невозможное — а проекты при этом лежали группой внутри диалога тем, то есть одна
                 пара заводилась из двух мест разными словами. */}
-                <Button size='sm' variant='simpleReverse' disabled={!writable} onClick={openSort}>
+                {/* ОТДЕЛЬНАЯ КНОПКА НА САМОЕ ЧАСТОЕ ДЕЙСТВИЕ. «sort these out» осталась целиком:
+                    темы, проект и роль за одно нажатие — это другой, более крупный жест. */}
+                <Button
+                  size='sm'
+                  variant='simpleReverse'
+                  disabled={!writable}
+                  onClick={() => openSort('project')}
+                >
+                  add to a project
+                </Button>
+                <Button
+                  size='sm'
+                  variant='simpleReverse'
+                  disabled={!writable}
+                  onClick={() => openSort('all')}
+                >
                   sort these out
                 </Button>
                 <Button
@@ -655,21 +682,29 @@ export function FilesSelectionBar({
         open={sorting}
         onOpenChange={setSorting}
         onConfirm={apply}
-        title={`sort out · ${files(selected.length)}`}
-        confirmLabel={applying ? 'applying…' : 'apply'}
-        confirmDisabled={applying || (!wantTopics && !wantProject)}
+        title={
+          sortScope === 'project'
+            ? `add to a project · ${files(selected.length)}`
+            : `sort out · ${files(selected.length)}`
+        }
+        confirmLabel={applying ? 'applying…' : sortScope === 'project' ? 'add' : 'apply'}
+        confirmDisabled={
+          applying || (sortScope === 'project' ? !wantProject : !wantTopics && !wantProject)
+        }
         closeOnConfirm={false}
         width='md'
       >
         <div className='flex flex-col gap-2.5'>
           {/* ДВЕ ЗАПИСИ ЗА ОДНИМ НАЖАТИЕМ — СКАЗАНО ДО НАЖАТИЯ, а не в плашке после него. */}
           <Text>
-            two writes behind one press: the topics are ADDED to whatever the files already carry,
-            and the project link is made separately. neither replaces anything, and if one of them
-            fails the other still stands.
+            {sortScope === 'project'
+              ? 'the selected files get a link to the project. nothing is replaced: the topics they already carry stay, and a file that is already inside gets no second link.'
+              : 'two writes behind one press: the topics are ADDED to whatever the files already carry, and the project link is made separately. neither replaces anything, and if one of them fails the other still stands.'}
           </Text>
 
-          <div className='flex flex-col gap-1'>
+          {/* ТЕМЫ — ТОЛЬКО В ПОЛНОМ РАЗБОРЕ. В «положить в проект» их блок был бы предложением
+              заодно навесить ярлык, которого не просили, и первой же ошибкой руки. */}
+          <div className={sortScope === 'project' ? 'hidden' : 'flex flex-col gap-1'}>
             <Text
               size='micro'
               variant='uppercase'

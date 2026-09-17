@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { FileTopic } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
+import { NewProjectModal } from '../projects/new-project-modal';
 
 export type TopicSelection = { topicIds: number[]; untopiced: boolean };
 
@@ -212,7 +214,7 @@ export function TopicChips({
               title={
                 atLimit && !on
                   ? `no more than ${MAX_TOPIC_FILTERS} topics in one intersection`
-                  : (t.name ?? undefined)
+                  : t.name ?? undefined
               }
               onClick={() => toggle(id)}
             >
@@ -261,6 +263,7 @@ export function ProjectChips({
   projects,
   selected,
   matched,
+  writable,
   onChange,
 }: {
   projects: FileTopic[];
@@ -268,8 +271,19 @@ export function ProjectChips({
   selected: number;
   /** Сколько файлов отвечает текущему фильтру целиком. `undefined` — ответ ещё не приехал. */
   matched?: number;
+  /** Можно ли заводить проект. В режиме чтения кнопка стоит на месте, но не нажимается. */
+  writable?: boolean;
   onChange: (projectId: number) => void;
 }) {
+  /**
+   * ЗАВЕСТИ ПРОЕКТ МОЖНО ТАМ, ГДЕ ПРОЕКТ ВЫБИРАЮТ.
+   *
+   * Ряд отвечает на вопрос «какой проект», и «ещё никакой, заведи новый» — это тот же вопрос.
+   * Раньше за этим уходили на отдельный экран по ссылке в хвосте ряда: человек, стоящий над
+   * пачкой файлов, терял и холст, и фильтры, и выделение. Диалог тот же самый, что на экране
+   * списка, — второй формы заведения проекта в админке нет.
+   */
+  const [creating, setCreating] = useState(false);
   const picked = projects.find((p) => Number(p.id) === selected);
   // ВЫБРАННЫЙ, НО НЕ НАЙДЕННЫЙ В СЛОВАРЕ — это заархивированный проект (холст архив не просит,
   // а прямая ссылка на него живёт) либо id из испорченной ссылки. Молчать нельзя: сетка
@@ -284,7 +298,7 @@ export function ProjectChips({
       return `project #${selected} is not in the list: it is archived, or the link is old. the filter works all the same — it asks by number rather than by name`;
     }
     if (!projects.length) {
-      return 'no projects yet. a project is a topic that has dates, an archive and roles on the files inside it — start one with “all projects →”, in one press';
+      return 'no projects yet. a project is a topic that has dates, an archive and roles on the files inside it — start one with “+ new project”, in one press';
     }
     if (picked) {
       // ПОДПИСЬ ЦИТИРОВАЛА ОРГАН, КОТОРОГО БОЛЬШЕ НЕТ: «the role row below» умер вместе с
@@ -311,7 +325,7 @@ export function ProjectChips({
               key={id}
               selected={on}
               pressed={on}
-              title={d ? `${p.name} · ${d}` : (p.name ?? undefined)}
+              title={d ? `${p.name} · ${d}` : p.name ?? undefined}
               // Повторное нажатие СНИМАЕТ выбор. Ряд одиночного выбора без этого превращается
               // в ловушку: поставить проект можно, а вернуться ко всей библиотеке — только
               // через соседний чип, о котором ещё надо догадаться.
@@ -336,6 +350,18 @@ export function ProjectChips({
             список, который сортируется и ищется, и там же заводят новый. Ссылка стоит В РЯДУ, а
             не отдельной кнопкой сверху: она отвечает на тот же вопрос, что и сам ряд («какой
             проект»), просто на большем числе проектов. */}
+        {/* ЗАВЕДЕНИЕ — ПЕРЕД ВЫХОДОМ В СПИСОК: сначала то, что делают чаще (выбрать или завести),
+            потом уход на другой экран. Кнопка видна и в режиме чтения, но не нажимается — иначе
+            её отсутствие читалось бы как «проекты заводят где-то ещё». */}
+        <Button
+          size='xs'
+          variant='underline'
+          disabled={!writable}
+          title={writable ? undefined : 'right now it is read-only — projects are not started'}
+          onClick={() => setCreating(true)}
+        >
+          + new project
+        </Button>
         <Button asChild size='xs' variant='underline'>
           <Link to={ROUTES.filesProjects}>all projects →</Link>
         </Button>
@@ -343,6 +369,13 @@ export function ProjectChips({
       <Text size='micro' variant='label'>
         {caption()}
       </Text>
+
+      {/* ЗАВЕДЁННЫЙ ПРОЕКТ СРАЗУ СТАНОВИТСЯ ВЫБРАННЫМ — тем же путём, что и нажатие по чипу:
+          заводят его, чтобы в него класть, и оставлять человека на прежнем фильтре значило бы
+          требовать второго нажатия по чипу, которого в ряду ещё нет (словарь приезжает позже). */}
+      {creating && (
+        <NewProjectModal onClose={() => setCreating(false)} onDone={(id) => onChange(id)} />
+      )}
     </div>
   );
 }
