@@ -12,6 +12,18 @@
 //   Ц5 — набранное в ОТКРЫТОЙ модалке правки переживает фоновое перечитывание карточки;
 //   Ц6 — то же, что Ц2, но на ОПИСАНИИ: захват «увиденного» там структурно такой же, и без
 //        своего случая он держался на сходстве с заголовком, а не на замере;
+//   Ц7 — ТОТ ЖЕ КЛАСС, ЧТО Ц4, НО НА КНОПКЕ «SAVE» У ОПИСАНИЯ: пока летит запись приоритета,
+//        кнопка описания ЗАПЕРТА. До этой правки `loading` рисовал крутилку, но кнопку не
+//        запирал — и второе нажатие уносило приоритет обратно;
+//   Ц8 — ДВА ЖЕСТА В ОДНОМ ТАКТЕ (Enter по заголовку + клик «save» у описания). Перерисовки
+//        между ними нет, значит ни одна блокировка по `isPending` ещё НЕ ВЗВЕДЕНА, и держит
+//        только синхронный засов в самой двери;
+//   Ц9 — засов отпускает: когда первая запись долетела, второй жест проходит;
+//   Ц10 — «сохранил, ничего не изменив» НЕ ПИШЕТ ВОВСЕ: полная замена содержимого не бывает
+//        бесплатной;
+//   Ц11 — ОТКАЗ ОТПУСКАЕТ засов так же, как успех: конфликт не запирает карточку до перезагрузки;
+//   Ц12 — УХОД СО СТРАНИЦЫ И ВОЗВРАТ не снимают засова, пока запись ещё летит. Ровно этот случай
+//        отличает засов в кэше записей от засова в экземпляре хука;
 //   ЦЖ — жесты настоящие: клик открывает редактор, Enter сохраняет.
 //
 //   node scripts/task-detail-inline-probe.mjs
@@ -20,6 +32,10 @@
 //   node scripts/task-detail-inline-probe.mjs --mutate-no-assignee-lock    исполнитель не глохнет на время записи
 //   node scripts/task-detail-inline-probe.mjs --mutate-modal-reseed        модалка пересеивается на каждое перечитывание
 //   node scripts/task-detail-inline-probe.mjs --mutate-desc-base-from-live  ОПИСАНИЕ: base — живое значение на момент save
+//   node scripts/task-detail-inline-probe.mjs --mutate-loading-not-disabled кнопка с крутилкой снова нажимаема (Ц7)
+//   node scripts/task-detail-inline-probe.mjs --mutate-no-inline-write-lock засова в двери нет — две записи в полёте (Ц8, Ц12)
+//   node scripts/task-detail-inline-probe.mjs --mutate-busy-from-observer   «занято» от наблюдателя, не из кэша (Ц12.0)
+//   node scripts/task-detail-inline-probe.mjs --mutate-desc-writes-noop     пустое сохранение описания снова пишет (Ц10)
 
 import { build as esbuild } from 'esbuild';
 import { execFileSync } from 'node:child_process';
@@ -180,8 +196,42 @@ if (process.argv.includes('--mutate-no-assignee-lock'))
 if (process.argv.includes('--mutate-desc-base-from-live'))
   mutate(
     'ОПИСАНИЕ: base берётся живым на момент сохранения',
-    'onClick: () => onSave(draft, baseRef.current),',
-    'onClick: () => onSave(draft, value),',
+    'onSave(draft, baseRef.current);',
+    'onSave(draft, value);',
+  );
+// ТРИ СЛОЯ — ТРИ МУТАЦИИ, И КАЖДАЯ СНИМАЕТ РОВНО ОДИН. Одна общая мутация была бы удобнее и
+// лживее: защита здесь эшелонированная, и общий флаг не показал бы, который из слоёв ещё жив.
+if (process.argv.includes('--mutate-loading-not-disabled'))
+  // ПРИМИТИВ: `loading` снова только рисует крутилку. Дверь при этом цела, поэтому данные не
+  // портятся — краснеет ровно то, что этот слой и обещает: кнопка не принимает жеста.
+  mutate(
+    'кнопка с крутилкой снова нажимаема',
+    'const busyProps = loading ? { disabled: true } : {};',
+    'const busyProps = {};',
+  );
+if (process.argv.includes('--mutate-no-inline-write-lock'))
+  // ДВЕРЬ: засова нет вовсе. Виден только на жестах, обогнавших перерисовку, — на медленных его
+  // подменяет запертая кнопка, и Ц7 остаётся зелёным.
+  mutate(
+    'засова в двери нет',
+    'if (qc2.isMutating({ mutationKey: inlinePatchKey(taskId) }) > 0) {',
+    'if (false) {',
+  );
+if (process.argv.includes('--mutate-busy-from-observer'))
+  // «ЗАНЯТО» ДЛЯ КОНТРОЛОВ — СНОВА ОТ НАБЛЮДАТЕЛЯ. Дверь при этом цела, поэтому данные не
+  // портятся: краснеет ровно то, что этот слой обещает, — после возврата на страницу контролы
+  // заперты, пока заперта дверь. Мутация снимает ИМЕННО кэш-версию флага, не трогая засов, —
+  // поэтому она отличима от `--mutate-no-inline-write-lock`, а не повторяет его.
+  mutate(
+    '«занято» для контролов взято у наблюдателя, а не из кэша записей',
+    'const isPending = useIsMutating({ mutationKey: inlinePatchKey(taskId) }) > 0;',
+    'const isPending = mutation.isPending;',
+  );
+if (process.argv.includes('--mutate-desc-writes-noop'))
+  mutate(
+    'пустое сохранение описания снова пишет',
+    'if (draft === baseRef.current) {',
+    'if (false) {',
   );
 
 let bad = 0;
@@ -235,6 +285,24 @@ const foreignEdit = (patch) =>
   page.evaluate((p) => {
     globalThis.__server.task = { ...globalThis.__server.task, ...p };
   }, patch);
+/**
+ * ПРИОРИТЕТ — НАСТОЯЩИЙ RADIX-СПИСОК: триггер, пункт, закрытие. Триггер ищется по ОТДЕЛЬНОМУ
+ * span с подписью, а не по тексту `<label>`: сам label читается как «prioritylow» (подпись плюс
+ * текущее значение), и поиск по нему привязался бы к выбранному значению.
+ */
+const pickPriority = async (label) => {
+  await page
+    .locator('label')
+    .filter({ has: page.locator('span', { hasText: /^priority$/ }) })
+    .locator('button[role="combobox"]')
+    .first()
+    .click();
+  await page.waitForSelector('[role="option"]', { timeout: 5000 });
+  await page.locator('[role="option"]').filter({ hasText: label }).first().click();
+  await page
+    .waitForSelector('[role="option"]', { state: 'detached', timeout: 5000 })
+    .catch(() => {});
+};
 // Возврат в окно: ровно то, что делает refetchOnWindowFocus, который добавила эта же ветка.
 const refetchLikeFocus = async () => {
   await page.evaluate(() => window.__qc.invalidateQueries({ queryKey: ['tasks', 'detail', 1] }));
@@ -375,6 +443,332 @@ ck(
   (await page.locator('textarea[aria-label="task description"]').count()) === 1 &&
     (await descArea.inputValue()) === 'МОЁ новое описание',
   'Ц6.2 после отказа редактор открыт и набранное на месте — чужая гонка не стоила мне моего текста',
+);
+
+// ═══ Ц7 · ЗАЯВЛЕННЫЙ ПОВТОР: ПРИОРИТЕТ В ПОЛЁТЕ, А Я ЖМУ «SAVE» У ОПИСАНИЯ ═══════════════════
+// Тот же класс, что Ц4, но через дверь, которую Ц4 не трогал. Контролы рейки глохли на время
+// полёта (`disabled={inlinePatch.isPending}`), а кнопка «save» у описания — НЕТ: ей передавали
+// `loading`, а примитив кнопки на `loading` не запирался вовсе. Нажатие проходило, вторая запись
+// делала СВОЁ свежее чтение — карточку ДО правки приоритета, — и садилась последней, вернув
+// приоритет на прежний. Оба действия при этом рапортовали успехом.
+console.log('\nЦ7 · пока летит запись приоритета, кнопка «save» у описания заперта');
+await mount();
+await page.evaluate(() => {
+  globalThis.__server.delayUpdate = 2500;
+});
+await page.click('[aria-label="edit description"]');
+await page.waitForSelector('textarea[aria-label="task description"]', { timeout: 8000 });
+await page.locator('textarea[aria-label="task description"]').fill('МОЁ новое описание');
+
+await pickPriority(/^high$/i);
+await page.waitForTimeout(300); // перерисовка прошла, запись висит
+
+const descSave = page.locator('[data-inline-save="description"]');
+const descLocked = await descSave.getAttribute('disabled');
+let descInteracted = false;
+try {
+  await descSave.click({ timeout: 1000 });
+  descInteracted = true;
+} catch {
+  /* кнопка не приняла жеста — это и есть починка */
+}
+await page.waitForTimeout(3500); // обе записи, если их две, успевают долететь
+const afterDesc = await server();
+ck(descLocked !== null, 'Ц7.0 на время полёта кнопка «save» у описания заперта', `disabled=${JSON.stringify(descLocked)}`);
+ck(!descInteracted, 'Ц7.1 жест по кнопке не прошёл', descInteracted ? 'прошёл — вторая запись стартовала' : '');
+ck(
+  afterDesc.updates.length === 1,
+  'Ц7.2 запись была ровно одна',
+  `updates=${afterDesc.updates.length}`,
+);
+ck(
+  afterDesc.task.priority === 'TASK_PRIORITY_HIGH',
+  'Ц7 ПРИОРИТЕТ НЕ ОТКАТИЛСЯ — второй записи с устаревшим полем не было',
+  `priority=${JSON.stringify(afterDesc.task.priority)}`,
+);
+ck(
+  afterDesc.task.description === MY_DESC,
+  'Ц7.3 описание на сервере прежнее — его никто не сохранял',
+  JSON.stringify(afterDesc.task.description),
+);
+
+// ═══ Ц8 · ДВА ЖЕСТА В ОДНОМ ТАКТЕ ════════════════════════════════════════════════════════════
+// САМЫЙ ВАЖНЫЙ СЛУЧАЙ ЭТОЙ ПРАВКИ. Всё, что запирается по `isPending`, — состояние: оно
+// становится истинным только ПОСЛЕ перерисовки. Два жеста, прошедшие в одном такте (двойной
+// ⌘Enter, клик сразу за выбором в рейке), перерисовку обгоняют, и ни одна кнопка ещё не заперта.
+// Держать в этот момент может только синхронный засов в самой двери.
+//
+// Оба редактора открыты СПЕЦИАЛЬНО: правятся РАЗНЫЕ поля, и потеря видна прямо в данных —
+// вторая запись уносит заголовок таким, каким его вернуло её собственное чтение, то есть до
+// первой правки.
+console.log('\nЦ8 · Enter по заголовку и клик «save» у описания в ОДНОМ такте');
+await mount();
+await page.evaluate(() => {
+  globalThis.__server.delayUpdate = 2000;
+});
+await page.click('[aria-label="edit description"]');
+await page.waitForSelector('textarea[aria-label="task description"]', { timeout: 8000 });
+await page.locator('textarea[aria-label="task description"]').fill('НОВОЕ описание');
+await page.click('[aria-label="edit title"]');
+await page.waitForSelector('input[aria-label="task title"]', { timeout: 8000 });
+await page.locator('input[aria-label="task title"]').fill('НОВЫЙ заголовок');
+
+// ОДИН ТАКТ: между двумя жестами нет ни микрозадачи, значит React заведомо не перерисовался.
+// `sawEnabled` — это НЕ проверка свойства, а проверка того, что случай вообще состоялся: если
+// кнопка к моменту клика уже успела запереться, то замерять было нечего, и зелёный прогон ничего
+// не значил бы.
+const sameTick = await page.evaluate(() => {
+  const input = document.querySelector('input[aria-label="task title"]');
+  const save = document.querySelector('[data-inline-save="description"]');
+  if (!input || !save) return { mounted: false };
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  const sawEnabled = !save.disabled;
+  save.click();
+  return { mounted: true, sawEnabled };
+});
+if (!sameTick.mounted) dieNotRun('Ц8: не нашлись оба контрола — случай не состоялся');
+if (!sameTick.sawEnabled)
+  dieNotRun(
+    'Ц8: кнопка описания успела запереться ДО второго жеста — такт разъехался, и засов не проверялся',
+  );
+await page.waitForTimeout(3500);
+const afterSameTick = await server();
+ck(
+  afterSameTick.updates.length === 1,
+  'Ц8 в полёте была РОВНО ОДНА запись — вторую дверь не пустила',
+  `updates=${afterSameTick.updates.length}`,
+);
+ck(
+  afterSameTick.task.title === 'НОВЫЙ заголовок',
+  'Ц8.1 ЗАГОЛОВОК НЕ ОТКАТИЛСЯ',
+  `title=${JSON.stringify(afterSameTick.task.title)}`,
+);
+ck(
+  afterSameTick.task.description === MY_DESC,
+  'Ц8.2 описание не записалось — отказ, а не тихая запись поверх',
+  JSON.stringify(afterSameTick.task.description),
+);
+ck(
+  (await page.locator('textarea[aria-label="task description"]').count()) === 1 &&
+    (await page.locator('textarea[aria-label="task description"]').inputValue()) ===
+      'НОВОЕ описание',
+  'Ц8.3 после отказа редактор открыт и набранное на месте — отказ не стоил мне текста',
+);
+
+// ═══ Ц9 · ЗАСОВ ОТПУСКАЕТ ════════════════════════════════════════════════════════════════════
+// Отказ ради отказа — это заклиненный редактор, а не починка. Случай СВОЙ, а не продолжение Ц8:
+// продолжение проверяло бы засов только там, где предыдущий случай уже зелёный, и под мутацией,
+// ломающей Ц8, молча меняло бы смысл.
+//
+// Проверяются сразу две половины освобождения: жест снова проходит И проходит по СВЕЖЕМУ чтению —
+// то есть не откатывает приоритет, записанный первой записью.
+console.log('\nЦ9 · первая запись долетела — тот же жест проходит и ничего не откатывает');
+await mount();
+await page.evaluate(() => {
+  globalThis.__server.delayUpdate = 600;
+});
+await page.click('[aria-label="edit description"]');
+await page.waitForSelector('textarea[aria-label="task description"]', { timeout: 8000 });
+await page.locator('textarea[aria-label="task description"]').fill('ОПИСАНИЕ ПОСЛЕ ЗАСОВА');
+await pickPriority(/^high$/i);
+await page.waitForFunction(() => globalThis.__server.updates.length >= 1, { timeout: 8000 });
+// Ждём именно СНЯТИЯ замка, а не таймаута: «подождал и получилось» не отличает освобождение от
+// везения.
+await page
+  .waitForSelector('[data-inline-save="description"]:not([disabled])', { timeout: 8000 })
+  .catch(() => {});
+await page.locator('[data-inline-save="description"]').click({ timeout: 3000 });
+await page
+  .waitForFunction(() => globalThis.__server.updates.length >= 2, { timeout: 8000 })
+  .catch(() => {});
+const afterRelease = await server();
+ck(
+  afterRelease.updates.length === 2,
+  'Ц9 после того как первая запись долетела, вторая ПРОШЛА',
+  `updates=${afterRelease.updates.length}`,
+);
+ck(
+  afterRelease.task.description === 'ОПИСАНИЕ ПОСЛЕ ЗАСОВА',
+  'Ц9.1 описание сохранено',
+  JSON.stringify(afterRelease.task.description),
+);
+ck(
+  afterRelease.task.priority === 'TASK_PRIORITY_HIGH',
+  'Ц9.2 и приоритет первой записи уцелел — вторая писала по свежему чтению',
+  `priority=${JSON.stringify(afterRelease.task.priority)}`,
+);
+ck(
+  (await page.locator('textarea[aria-label="task description"]').count()) === 0,
+  'Ц9.3 редактор закрылся — запись прошла, а не была проглочена',
+);
+
+// ═══ Ц10 · ПУСТОЕ СОХРАНЕНИЕ ОПИСАНИЯ НЕ ПИШЕТ ВОВСЕ ═════════════════════════════════════════
+// «Открыл, посмотрел, нажал save» не должно стоить полной замены содержимого: такая запись
+// способна и чужую правку соседнего поля откатить, и снекбар конфликта вызвать на ровном месте —
+// за жест, которым человек ничего не менял.
+console.log('\nЦ10 · открыл редактор описания, ничего не изменил, нажал save');
+await mount();
+await page.click('[aria-label="edit description"]');
+await page.waitForSelector('textarea[aria-label="task description"]', { timeout: 8000 });
+await page.locator('[data-inline-save="description"]').click();
+await page.waitForTimeout(500);
+const afterNoop = await server();
+ck(
+  afterNoop.updates.length === 0,
+  'Ц10 записи НЕ БЫЛО — писать было нечего',
+  `updates=${afterNoop.updates.length}`,
+);
+ck(
+  (await page.locator('textarea[aria-label="task description"]').count()) === 0,
+  'Ц10.1 редактор при этом закрылся — жест завершён, а не проглочен',
+);
+
+// ═══ Ц11 · ОТКАЗ ОТПУСКАЕТ ЗАСОВ ════════════════════════════════════════════════════════════
+// Засов не снимается руками: запись перестаёт быть `pending`, когда долетела ИЛИ отказала. Разница
+// между «и» и «или» здесь ценой в заклиненную карточку, поэтому она замеряется, а не выводится.
+console.log('\nЦ11 · после КОНФЛИКТА следующая правка проходит');
+await mount();
+// ПОВТОР ЗАПИСИ — КАК В ПРОДЕ, И ТОЛЬКО В ЭТОМ СЛУЧАЕ. `src/index.tsx` ставит `mutations.retry: 1`,
+// а значит отказ остаётся `pending` весь промежуток до повторной попытки и всю её саму: карточка
+// заперта дольше, чем длится один запрос. Без этой строки случай мерил бы освобождение на
+// интервале, которого в проде не бывает. Общему энтри повтор не отдан — см. довод там.
+await page.evaluate(() => {
+  const d = window.__qc.getDefaultOptions();
+  window.__qc.setDefaultOptions({ ...d, mutations: { ...d.mutations, retry: 1 } });
+});
+await page.click('[aria-label="edit title"]');
+await page.locator('input[aria-label="task title"]').fill('МОЙ новый заголовок');
+await foreignEdit({ title: 'ЧУЖОЙ новый заголовок' });
+await refetchLikeFocus();
+const getsBeforeRefusal = (await server()).gets;
+await page.locator('input[aria-label="task title"]').press('Enter');
+// ЖДЁМ САМУ ДВЕРЬ, А НЕ СЕКУНДОМЕР. Отказ остаётся `pending` весь промежуток до повторной попытки
+// и всю её саму (`mutations.retry: 1`, как в проде), поэтому фиксированная пауза мерила бы не
+// освобождение, а удачно подобранное число.
+const doorFreed = await page
+  .waitForFunction(
+    () => window.__qc.isMutating({ mutationKey: ['task-inline-patch', 1] }) === 0,
+    { timeout: 15000 },
+  )
+  .then(() => true)
+  .catch(() => false);
+const afterRefusal = await server();
+ck(
+  afterRefusal.updates.length === 0,
+  'Ц11.0 (контроль) отказ действительно случился — иначе освобождение проверять не на чем',
+  `updates=${afterRefusal.updates.length}`,
+);
+ck(doorFreed, 'Ц11.1 дверь отпустила карточку после отказа, а не осталась запертой');
+// БЕЗ ЭТОГО ПРЕДЫДУЩАЯ СТРОКА БЫЛА БЫ ПРО ДРУГОЙ ИНТЕРВАЛ: если бы `setDefaultOptions` выше не
+// доехал, засов держал бы ОДИН заход, а случай зеленел бы, утверждая в комментарии повтор.
+//
+// ЗАМЕРЕНО НА ЭТОМ ЖЕ СЛУЧАЕ, оба числа — прогоном: один заход стоит ТРЁХ чтений карточки
+// (своё свежее чтение записи, перечитывание по конфликту, перечитывание из `onSettled`), два
+// захода — ПЯТИ. Граница взята по нижнему краю замера, а не по равенству: она отделяет один
+// заход от двух и не ломается от лишнего фонового перечитывания.
+ck(
+  afterRefusal.gets - getsBeforeRefusal >= 4,
+  'Ц11.1.1 (контроль) отказ и правда ходил ДВАЖДЫ — повтор как в проде, а не один заход',
+  `GetTask за время отказа: ${afterRefusal.gets - getsBeforeRefusal} (один заход даёт 3, два — 5)`,
+);
+await pickPriority(/^high$/i);
+await page.waitForFunction(() => globalThis.__server.updates.length >= 1, { timeout: 8000 }).catch(() => {});
+const afterRefusalRelease = await server();
+ck(
+  afterRefusalRelease.updates.length === 1,
+  'Ц11 следующая запись ПРОШЛА — отказ не запер карточку',
+  `updates=${afterRefusalRelease.updates.length}`,
+);
+ck(
+  afterRefusalRelease.task.priority === 'TASK_PRIORITY_HIGH',
+  'Ц11.2 и записала именно то, что просили',
+  `priority=${JSON.stringify(afterRefusalRelease.task.priority)}`,
+);
+
+// ═══ Ц12 · УХОД СО СТРАНИЦЫ И ВОЗВРАТ ═══════════════════════════════════════════════════════
+// СЛУЧАЙ, РАДИ КОТОРОГО ЗАСОВ ЖИВЁТ В КЭШЕ ЗАПИСЕЙ, А НЕ В ЭКЗЕМПЛЯРЕ ХУКА. Ушёл на доску и
+// вернулся, пока запись ещё летит: страница смонтирована ЗАНОВО, и всё, что она знает о полёте из
+// собственного состояния, — ничего. `isPending` у нового экземпляра ложен ПО ПОСТРОЕНИЮ (у его
+// наблюдателя нет текущей записи), поэтому кнопка «save» у описания не заперта и жест проходит.
+// Удержать может только засов, который пережил размонтирование.
+//
+// Уход делается маршрутизатором, а не перезагрузкой стенда: перезагрузка унесла бы и `QueryClient`.
+console.log('\nЦ12 · ушёл на доску и вернулся, пока летит запись приоритета');
+await mount();
+await page.evaluate(() => {
+  // ПОЛЁТ ОБЯЗАН ПЕРЕЖИТЬ ВЕСЬ КРУГ «ушёл — вернулся — открыл редактор». Круг стоит около
+  // полусекунды, запас взят десятикратный: задержка впритык означала бы не «засов не удержал», а
+  // «держать было уже нечего», и случай зеленел бы по самой скучной из возможных причин. Что
+  // запас не съеден, проверяется ниже отдельно — иначе эта строка была бы обещанием, а не мерой.
+  globalThis.__server.delayUpdate = 5000;
+});
+const flightStartedAt = Date.now();
+await pickPriority(/^high$/i);
+await page.waitForTimeout(200); // запись пошла и висит
+await page.evaluate(() => window.__nav('/tasks'));
+await page.waitForSelector('[data-board-stub]', { timeout: 5000 });
+await page.evaluate(() => window.__nav('/tasks/1'));
+await page.waitForSelector('[aria-label="edit description"]', { timeout: 8000 });
+await page.click('[aria-label="edit description"]');
+await page.waitForSelector('textarea[aria-label="task description"]', { timeout: 8000 });
+const stillFlying = await page.evaluate(
+  () => window.__qc.isMutating({ mutationKey: ['task-inline-patch', 1] }) > 0,
+);
+if (!stillFlying)
+  dieNotRun(
+    `Ц12: запись успела долететь за ${Date.now() - flightStartedAt} мс — держать было нечего, и засов не проверялся`,
+  );
+
+// ДВА РАЗНЫХ УТВЕРЖДЕНИЯ, И ИХ НЕЛЬЗЯ ПУТАТЬ.
+//  Ц12.0 — ЭКРАН: контролы заперты и после возврата. Держится на том, что «занято» взято из КЭША
+//          записей; у наблюдателя нового экземпляра текущей записи нет, и он сказал бы «свободно»,
+//          отперев и поле, и кнопку, и «edit», открывающую модалку.
+//  Ц12   — ИТОГ: второй записи нет и приоритет не откачен — сколько бы слоёв ни сняли.
+const remountLocked =
+  (await page.locator('textarea[aria-label="task description"]').getAttribute('disabled')) !== null &&
+  (await page.locator('[data-inline-save="description"]').getAttribute('disabled')) !== null;
+
+// ЖЕСТ ПРОТАЛКИВАЕТСЯ МИМО `disabled` — ОДИНАКОВО В ОБОИХ МИРАХ. Если бы проба просто «печатала и
+// жала», то на ПОЧИНЕННОМ коде она уперлась бы в запертое поле и молча ничего не проверила, а на
+// сломанном прошла бы насквозь: один и тот же случай мерил бы разное. Снимая замок руками, проба
+// спрашивает у обоих миров один вопрос — «что будет, если жест всё-таки случится».
+await page.evaluate(() => {
+  const area = document.querySelector('textarea[aria-label="task description"]');
+  if (!area) return;
+  area.disabled = false;
+  // Контролируемое поле React не замечает присваивания `.value` — нужен родной сеттер и событие.
+  const setValue = Object.getOwnPropertyDescriptor(
+    HTMLTextAreaElement.prototype,
+    'value',
+  )?.set;
+  setValue?.call(area, 'ОПИСАНИЕ ПОСЛЕ ВОЗВРАТА');
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+});
+await page.evaluate(() => {
+  const b = document.querySelector('[data-inline-save="description"]');
+  if (!b) return;
+  b.disabled = false;
+  b.click();
+});
+await page
+  .waitForFunction(() => window.__qc.isMutating() === 0, { timeout: 20000 })
+  .catch(() => {});
+await page.waitForTimeout(300); // вторая запись, если она стартовала, успевает долететь
+const afterRemount = await server();
+ck(
+  remountLocked,
+  'Ц12.0 после возврата и поле, и кнопка ЗАПЕРТЫ — «занято» пережило размонтирование',
+  remountLocked ? '' : 'не заперты — экран и дверь разошлись',
+);
+ck(
+  afterRemount.updates.length === 1,
+  'Ц12 запись была ровно одна — засов пережил размонтирование',
+  `updates=${afterRemount.updates.length}`,
+);
+ck(
+  afterRemount.task.priority === 'TASK_PRIORITY_HIGH',
+  'Ц12.1 ПРИОРИТЕТ НЕ ОТКАТИЛСЯ',
+  `priority=${JSON.stringify(afterRemount.task.priority)}`,
 );
 
 // ═══ ЦЖ · ЧТО ЖЕСТЫ ВООБЩЕ РАБОТАЮТ ══════════════════════════════════════════════════════════

@@ -143,6 +143,7 @@ export function InlineTitle({
         type='button'
         variant='secondary'
         size='sm'
+        data-inline-save='title'
         loading={saving}
         disabled={!draft.trim()}
         onClick={commit}
@@ -191,6 +192,29 @@ export function InlineDescription({
   /** То же, что у заголовка: «увиденное» фиксируется в начале правки, а не в момент записи. */
   const baseRef = useRef(value);
 
+  /**
+   * ОДИН ПУТЬ СОХРАНЕНИЯ НА ОБА ЖЕСТА — кнопку и ⌘Enter. Раньше их было два, и оба правила ниже
+   * стояли бы только на одном из них: кнопка гаснет на время записи сама (`loading` у примитива),
+   * а сочетание клавиш не гаснет ничем.
+   */
+  const commit = () => {
+    // ПОКА ЛЕТИТ ЗАПИСЬ — НИЧЕГО. Второе сохранение поверх первого унесло бы соседнее поле
+    // устаревшим: `UpdateTask` заменяет содержимое целиком. Дверь (`useInlineTaskPatch`) такую
+    // запись всё равно отвергнет, но отвергнет СНЕКБАРОМ — а нажатие по кнопке, которая и так
+    // показывает крутилку, ошибкой называть не за что.
+    if (saving) return;
+    // ПУСТОЕ СОХРАНЕНИЕ — НЕ ЗАПИСЬ. Открыл редактор, ничего не набрал, нажал «save»: писать
+    // нечего, а полная замена содержимого не бывает бесплатной — она и чужую правку соседнего
+    // поля способна откатить, и снекбар конфликта способна вызвать на ровном месте. Сверяется с
+    // `baseRef`, а не с живым `value`: чужой текст, доехавший в кэш, пока редактор открыт, — это
+    // как раз НЕ то, что человек видел, и молчаливо принимать его за свой черновик нельзя.
+    if (draft === baseRef.current) {
+      onCancel();
+      return;
+    }
+    onSave(draft, baseRef.current);
+  };
+
   return (
     <div className='flex flex-col gap-2'>
       <DescriptionEditor
@@ -205,7 +229,7 @@ export function InlineDescription({
           // по назначению. Сохраняет то же сочетание, что и в модалке.
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
-            onSave(draft, baseRef.current);
+            commit();
           }
           if (e.key === 'Escape') {
             e.preventDefault();
@@ -214,12 +238,17 @@ export function InlineDescription({
         }}
       />
       <div className='flex items-center gap-2'>
+        {/* `data-inline-save` — ЯКОРЬ ДЛЯ СТЕНДА, и он нужен именно здесь: когда открыты и
+            заголовок, и описание, кнопок с надписью «save» на странице две, и поиск по имени
+            брал бы первую попавшуюся — то есть проверял бы не тот контрол, о котором говорит
+            случай. */}
         <Button
           type='button'
           variant='secondary'
           size='sm'
+          data-inline-save='description'
           loading={saving}
-          onClick={() => onSave(draft, baseRef.current)}
+          onClick={commit}
         >
           save
         </Button>
