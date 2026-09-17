@@ -7,11 +7,13 @@
 //   С2 — в правке с фокусом в поле ⌘A — родное выделение ВСЕГО текста поля, показ не трогается;
 //   С3 — в правке вне поля ⌘A выделяет показ, а поле не получает фокус и не выделяется;
 //   С4 — в поле имени ⌘A выделяет имя (родное поведение не отнято);
-//   С6 — двойной щелчок по документу в чтении открывает правку (просьба владельца).
+//   С6 — двойной щелчок по документу в чтении открывает правку (просьба владельца);
+//   С7 — ⌘A при ОТКРЫТОМ подтверждении выделяет подтверждение, а не всю страницу.
 //
 //   node scripts/note-select-all-probe.mjs
 //   node scripts/note-select-all-probe.mjs --mutate-no-handler     ⌘A не перехватывается
 //   node scripts/note-select-all-probe.mjs --mutate-no-field-guard ⌘A перехватывается и в поле
+//   node scripts/note-select-all-probe.mjs --mutate-confirm-early-return ⌘A глушится при открытом подтверждении
 //   node scripts/note-select-all-probe.mjs --mutate-no-dblclick    двойной щелчок не открывает правку
 
 import { build as esbuild } from 'esbuild';
@@ -163,6 +165,12 @@ if (flag('--mutate-no-field-guard'))
     'if (false) return;\n          const layer',
   );
 
+if (flag('--mutate-confirm-early-return'))
+  mutate(
+    '⌘A снова глушится вместе с ⌘S и ⌘E, пока открыто подтверждение',
+    'if (isTextField(e.target)) return;\n          const layer',
+    'if (confirmOverwrite || confirmRestore) return;\n          if (isTextField(e.target)) return;\n          const layer',
+  );
 if (flag('--mutate-no-dblclick'))
   mutate(
     'двойной щелчок по документу не открывает правку',
@@ -191,6 +199,13 @@ await page.goto('http://probe.local/');
 await page.addStyleTag({ content: CSS });
 await page.evaluate((n) => {
   globalThis.__NOTE = n;
+  // Черновик в браузере: он даёт баннер «an unsaved draft is left», а тот — подтверждение
+  // восстановления. Только в этом состоянии проверяется, что ⌘A не проваливается мимо разбора
+  // (обработчик глушит ⌘S и ⌘E, пока подтверждение открыто, и ⌘A когда-то глушился вместе с ними).
+  localStorage.setItem(
+    'files:note-draft:7',
+    JSON.stringify({ content: '# ЧЕРНОВИК', base: '', at: Date.now() }),
+  );
 }, NOTE);
 await page.addScriptTag({ content: bundle });
 await page.waitForSelector('text=КОНЕЦ-ДОКУМЕНТА', { timeout: 8000 });
@@ -244,14 +259,90 @@ console.log('\nС6 · двойной щелчок по документу отк
   ck(value === NOTE, 'С6.2 в поле тот же текст разметки');
   const sel = await selText();
   ck(sel === '', 'С6.3 выделения от двойного щелчка не осталось', JSON.stringify(sel));
-  // Возврат в чтение — чтобы следующие случаи начинались с того же состояния, что и раньше.
+  // ВОЗВРАТ В ЧТЕНИЕ — не проверка, а уборка: следующие случаи начинаются с того же состояния.
+  // Под мутацией правка не открылась вовсе, и слать ⌘E было бы входом в неё, а не выходом.
+  if ((await area().count()) > 0) {
+    await page.evaluate(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'e', code: 'KeyE', metaKey: true, bubbles: true }),
+      );
+    });
+    await page.waitForTimeout(300);
+    ck((await area().count()) === 0, 'С6.4 (контроль) ⌘E вернул чтение — состояние стенда прежнее');
+  }
+}
+
+// ═══ С7 · ⌘A ПРИ ОТКРЫТОМ ПОДТВЕРЖДЕНИИ ════════════════════════════════════════════════════
+console.log('\nС7 · ⌘A при открытом подтверждении не выделяет всю страницу');
+{
+  const banner = page.getByRole('button', { name: 'restore' });
+  ck((await banner.count()) === 1, 'С7.0 (контроль) баннер черновика на месте');
+  // Подтверждение спрашивают только поверх НАБРАННОГО: делаем поле грязным.
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'e', code: 'KeyE', metaKey: true, bubbles: true }),
+    );
+  });
+  const area = page.locator('textarea[name="noteContent"]');
+  await area.waitFor({ timeout: 5000 });
+  await area.click();
+  await area.type(' и ещё строка');
   await page.evaluate(() => {
     window.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'e', code: 'KeyE', metaKey: true, bubbles: true }),
     );
   });
   await page.waitForTimeout(300);
-  ck((await area().count()) === 0, 'С6.4 (контроль) ⌘E вернул чтение — состояние стенда прежнее');
+  await page.getByRole('button', { name: 'restore' }).click();
+  const dialog = page.locator('[role="dialog"]');
+  const dialogOpen = await dialog
+    .first()
+    .waitFor({ timeout: 4000 })
+    .then(() => true)
+    .catch(() => false);
+  ck(dialogOpen, 'С7.1 (контроль) подтверждение восстановления открылось');
+  if (dialogOpen) {
+    await page.evaluate(() => window.getSelection()?.removeAllRanges());
+    const res = await page.evaluate(() => {
+      const d = document.querySelector('[role="dialog"]');
+      const target = d?.querySelector('button') ?? d;
+      target?.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'a',
+          code: 'KeyA',
+          metaKey: true,
+          ctrlKey: true,
+          bubbles: true,
+        }),
+      );
+      const sel = window.getSelection();
+      const range = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+      return {
+        inDialog: !!range && !!d && d.contains(range.commonAncestorContainer),
+        text: String(sel ?? ''),
+      };
+    });
+    ck(res.inDialog, 'С7.2 выделено само подтверждение', JSON.stringify(res.text.slice(0, 50)));
+    ck(!res.text.includes('SITE MENU'), 'С7.3 меню сайта не выделено');
+    // Возврат стенда в прежнее состояние: закрыть подтверждение и вернуть исходный текст.
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    await page.evaluate(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'e', code: 'KeyE', metaKey: true, bubbles: true }),
+      );
+    });
+    const a2 = page.locator('textarea[name="noteContent"]');
+    if (await a2.count()) {
+      await a2.fill(NOTE);
+      await page.evaluate(() => {
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'e', code: 'KeyE', metaKey: true, bubbles: true }),
+        );
+      });
+      await page.waitForTimeout(200);
+    }
+  }
 }
 
 // ═══ С2 · ПРАВКА, ФОКУС В ПОЛЕ ═══════════════════════════════════════════════════════════════

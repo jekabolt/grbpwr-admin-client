@@ -137,7 +137,7 @@ export function AddFilesToProjectModal({
       <div className='flex flex-col gap-2.5'>
         <Text size='micro' variant='label'>
           {roleId > 0 && roleName
-            ? `the picked files get a link to the project with the role “${roleName}”. nothing is uploaded and nothing is copied: a file lies in the library once and can belong to several projects.`
+            ? `the picked files get a link to the project with the role “${roleName}”. a file that already carries ANOTHER role here is MOVED to this one — its previous role in this project is replaced, and in other projects nothing changes. nothing is uploaded and nothing is copied: a file lies in the library once and can belong to several projects.`
             : 'the picked files get a link to the project, with no role — they show up in the “without a role” pile. nothing is uploaded and nothing is copied: a file lies in the library once and can belong to several projects.'}
         </Text>
 
@@ -195,6 +195,16 @@ export function AddFilesToProjectModal({
               {files.map((f) => {
                 const id = Number(f.id);
                 const here = alreadyHere(f);
+                /**
+                 * ЧТО НА ФАЙЛЕ СТОИТ СЕЙЧАС — на самой плитке, а не только в шапке диалога.
+                 * Выбор роли ПЕРЕСТАВЛЯЕТ прежнюю, и «эту переставят» надо видеть на том
+                 * файле, который переставляют, — иначе замена происходит молча.
+                 */
+                const carried =
+                  roleId > 0
+                    ? (f.roles ?? []).find((r) => Number(r.projectTopicId) === projectId)
+                        ?.roleName ?? ''
+                    : '';
                 const on = picked.includes(id);
                 return (
                   <Tile
@@ -216,7 +226,9 @@ export function AddFilesToProjectModal({
                         ? roleId > 0 && roleName
                           ? `already “${roleName}”`
                           : 'already here'
-                        : formatBytes(Number(f.sizeBytes ?? 0))
+                        : carried
+                          ? `now “${carried}” → moves`
+                          : formatBytes(Number(f.sizeBytes ?? 0))
                     }
                     selected={on}
                     pressed={here ? undefined : on}
