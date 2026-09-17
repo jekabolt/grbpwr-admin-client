@@ -223,14 +223,14 @@ if (flag('--mutate-create-ignores-canvas'))
 if (flag('--mutate-tile-everywhere'))
   mutate(
     'плитка рисуется и вне проекта',
-    'projectId > 0 && writable && !narrowedRoleArchived &&',
-    'writable && !narrowedRoleArchived &&',
+    '\n      projectId > 0 && writable && !narrowedRoleUnusable &&',
+    '\n      writable && !narrowedRoleUnusable &&',
   );
 if (flag('--mutate-tile-in-read-mode'))
   mutate(
     'плитка рисуется и в режиме чтения',
-    'projectId > 0 && writable && !narrowedRoleArchived &&',
-    'projectId > 0 && !narrowedRoleArchived &&',
+    '\n      projectId > 0 && writable && !narrowedRoleUnusable &&',
+    '\n      projectId > 0 && !narrowedRoleUnusable &&',
   );
 if (flag('--mutate-pick-inside'))
   mutate(
@@ -279,11 +279,22 @@ const TOPICS = [
   // Пустой проект: «плитка стоит ВСЕГДА» проверяется там, где сетки нет вовсе.
   { id: 8, name: 'empty shoot', kind: 'project', filesCount: 0, startsAt: '', endsAt: '' },
 ];
-const ROLES = [{ id: 7, name: 'sources', projectTopicId: 5 }];
+const ROLES = [
+  { id: 7, name: 'sources', projectTopicId: 5 },
+  { id: 9, name: 'lookbook', projectTopicId: 5 },
+];
 const FILES = [
   // Лежит в проекте БЕЗ роли: в разделе роли его законно туда перенести, и «уже здесь» на него
   // распространяться не должно.
   { id: 104, fileName: 'no-role.png', topicIds: [5], roles: [] },
+  // Лежит в проекте с ДРУГОЙ ролью: перенос законен, но он ЗАМЕНЯЕТ прежнюю роль — и об этом
+  // обязано быть сказано на самой плитке.
+  {
+    id: 105,
+    fileName: 'other-role.png',
+    topicIds: [5],
+    roles: [{ projectTopicId: 5, roleId: 9, roleName: 'lookbook' }],
+  },
   {
     id: 101,
     fileName: 'in-project.png',
@@ -393,6 +404,10 @@ await mount({ start: '/files?project=5' });
   });
   ck(order === 'плитка раньше', 'П3.2 плитка стоит ПЕРВЫМ блоком — до файлов проекта', order);
 }
+// Роль из адреса, которой в словаре нет (старая ссылка, роль удалили): назначить её нельзя,
+// и приглашение обещало бы жест с гарантированным отказом.
+await mount({ start: '/files?project=5&frole=999' });
+ck((await addTile().count()) === 0, 'П3.2.2 в разделе НЕИЗВЕСТНОЙ роли плитки нет');
 await mount({ start: '/files?project=8' });
 ck((await addTile().count()) === 1, 'П3.2.1 в ПУСТОМ проекте плитка тоже стоит');
 await mount();
@@ -461,6 +476,21 @@ await mount({ start: '/files?project=5&frole=7' });
     return node.closest('button') ? 'выбирается' : 'не выбирается';
   });
   ck(other === 'выбирается', 'П5.0.1 файл проекта без этой роли можно выбрать', other);
+  // ЗАМЕНА РОЛИ НАЗВАНА НА САМОЙ ПЛИТКЕ. Перенос из «lookbook» в «sources» стирает прежнюю
+  // роль, и молчаливая замена здесь была бы тем же дефектом, что и в полосе выделения.
+  const moving = await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]');
+    const node = Array.from(d?.querySelectorAll('*') || []).find(
+      (el) => (el.textContent || '').includes('other-role') && el.children.length === 0,
+    );
+    const tile = node?.closest('button');
+    return tile ? tile.textContent || '' : 'плитки нет';
+  });
+  ck(
+    /lookbook/.test(moving) && /moves/.test(moving),
+    'П5.0.2 у файла с другой ролью сказано, что он ПЕРЕЕДЕТ и какая роль на нём сейчас',
+    JSON.stringify(moving.slice(0, 60)),
+  );
   await f.click();
   await page.getByRole('button', { name: /^add 1$/ }).click();
   await page.waitForTimeout(500);

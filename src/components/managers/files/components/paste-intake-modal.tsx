@@ -108,16 +108,27 @@ export function PasteIntakeModal({
    * Темы холста не трогаются: их человек мог править руками прямо здесь.
    */
   const pinnedRef = useRef(presetProjectId);
+  /**
+   * СНИМАЕТСЯ ТОЛЬКО ТО, ЧТО ПОСТАВИЛИ МЫ. Прежний приколотый проект человек мог выбрать и сам —
+   * до того, как холст в него вошёл; сняв такой выбор, окно отменило бы его решение. Поэтому
+   * помним, добавляли ли мы этот id сами (и только такой убираем).
+   */
+  const injectedRef = useRef(presetProjectId > 0 && !presetTopicIds.includes(presetProjectId));
   useEffect(() => {
     const was = pinnedRef.current;
     if (was === presetProjectId) return;
     pinnedRef.current = presetProjectId;
+    const drop = injectedRef.current ? was : 0;
     setSelected((prev) => {
-      const without = was > 0 ? prev.filter((x) => x !== was) : prev;
-      if (presetProjectId <= 0) return without;
+      const without = drop > 0 ? prev.filter((x) => x !== drop) : prev;
+      if (presetProjectId <= 0) {
+        injectedRef.current = false;
+        return without;
+      }
+      injectedRef.current = !without.includes(presetProjectId);
       return without.includes(presetProjectId) ? without : [...without, presetProjectId];
     });
-  }, [presetProjectId]);
+  }, [presetProjectId, presetTopicIds]);
 
   // Имена ДОПИСЫВАЮТСЯ, а не пересобираются: вторая вставка не имеет права стереть имя,
   // которое человек уже набрал для первой.
