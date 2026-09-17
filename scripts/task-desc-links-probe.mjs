@@ -20,6 +20,7 @@
 //   node scripts/task-desc-links-probe.mjs --mutate-no-dblclick-guard двойной щелчок по ссылке открывает правку
 //   node scripts/task-desc-links-probe.mjs --mutate-dblclick-readonly двойной щелчок открывает правку без права
 //   node scripts/task-desc-links-probe.mjs --mutate-no-autofocus      поле открывается без фокуса
+//   node scripts/task-desc-links-probe.mjs --mutate-trim-star         «*» на конце адреса отрезается
 //   node scripts/task-desc-links-probe.mjs --mutate-quadratic-trim    баланс скобок пересчитывается на каждом шаге
 //
 //   Ц1.9–Ц1.11 и Ц4 мутацией не закрываются: они написаны по дефектам ревью первой версии
@@ -177,8 +178,14 @@ if (flag('--mutate-no-autolink'))
 if (flag('--mutate-keep-punct'))
   mutate(
     'конечная пунктуация остаётся в адресе',
-    `var TRAILING = /[.,:;!?'"*_~]/;`,
+    `var TRAILING = /[.,:;!?'"]/;`,
     'var TRAILING = /$^/;',
+  );
+if (flag('--mutate-trim-star'))
+  mutate(
+    'звёздочка на конце адреса снова отрезается (набор GFM)',
+    `var TRAILING = /[.,:;!?'"]/;`,
+    `var TRAILING = /[.,:;!?'"*_~]/;`,
   );
 if (flag('--mutate-internal-same-tab'))
   mutate(
@@ -246,7 +253,7 @@ const CARD = {
 const COMMENTS = [
   {
     id: 5,
-    body: 'посмотри https://comment.example/x, там всё',
+    body: 'посмотри https://comment.example/x, там всё; поиск https://search.example/q?sku=GRB*',
     author: 'nina',
     authorId: 1,
     createdAt: '2026-09-01T00:00:00Z',
@@ -397,6 +404,12 @@ console.log('\nЦ2 · в комментариях нет выбора медиа
     c.n === 1 && c.target === '_blank' && c.text === 'https://comment.example/x',
     'Ц2.2 адрес в комментарии — ссылка в новую вкладку, запятая отрезана',
     JSON.stringify(c),
+  );
+  const star = await linkFacts('https://search.example/q?sku=GRB*');
+  ck(
+    star.n === 1,
+    'Ц2.4 звёздочка на конце поискового адреса остаётся в адресе',
+    JSON.stringify(star),
   );
   await page.click('[aria-label="edit description"]');
   await editor()
