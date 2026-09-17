@@ -6,11 +6,13 @@
 //        заметки (имя, кнопки);
 //   С2 — в правке с фокусом в поле ⌘A — родное выделение ВСЕГО текста поля, показ не трогается;
 //   С3 — в правке вне поля ⌘A выделяет показ, а поле не получает фокус и не выделяется;
-//   С4 — в поле имени ⌘A выделяет имя (родное поведение не отнято).
+//   С4 — в поле имени ⌘A выделяет имя (родное поведение не отнято);
+//   С6 — двойной щелчок по документу в чтении открывает правку (просьба владельца).
 //
 //   node scripts/note-select-all-probe.mjs
 //   node scripts/note-select-all-probe.mjs --mutate-no-handler     ⌘A не перехватывается
 //   node scripts/note-select-all-probe.mjs --mutate-no-field-guard ⌘A перехватывается и в поле
+//   node scripts/note-select-all-probe.mjs --mutate-no-dblclick    двойной щелчок не открывает правку
 
 import { build as esbuild } from 'esbuild';
 import { execFileSync } from 'node:child_process';
@@ -150,16 +152,22 @@ function mutate(name, needle, replacement) {
 const flag = (f) => process.argv.includes(f);
 if (flag('--mutate-no-handler'))
   mutate(
-    '⌘A не перехватывается',
-    `const doc = document.querySelector("[data-note-document]");`,
-    'const doc = null;',
+    '⌘A не перехватывается вовсе',
+    'if (isTextField(e.target)) return;\n          const layer',
+    'if (true) return;\n          const layer',
   );
 if (flag('--mutate-no-field-guard'))
   mutate(
     '⌘A перехватывается и в поле ввода',
-    `if (isTextField(e.target)) return;
-          if (e.target?.closest?.('[role="dialog"]')) return;`,
-    `if (e.target?.closest?.('[role="dialog"]')) return;`,
+    'if (isTextField(e.target)) return;\n          const layer',
+    'if (false) return;\n          const layer',
+  );
+
+if (flag('--mutate-no-dblclick'))
+  mutate(
+    'двойной щелчок по документу не открывает правку',
+    'onDoubleClick: writable ? (e) => {',
+    'onDoubleClick: false ? (e) => {',
   );
 
 let bad = 0;
@@ -222,6 +230,28 @@ console.log('\nС1 · в чтении ⌘A выделяет только док�
     'С1.3 шапка заметки (имя, кнопки) в выделение НЕ попала',
     JSON.stringify(t.slice(0, 120)),
   );
+}
+
+// ═══ С6 · ДВОЙНОЙ ЩЕЛЧОК ОТКРЫВАЕТ ПРАВКУ ══════════════════════════════════════════════════
+console.log('\nС6 · двойной щелчок по документу открывает правку');
+{
+  const area = () => page.locator('textarea[name="noteContent"]');
+  ck((await area().count()) === 0, 'С6.0 до жеста мы в чтении');
+  await page.getByText('ТЕКСТ-ДОКУМЕНТА', { exact: false }).first().dblclick();
+  await page.waitForTimeout(300);
+  ck((await area().count()) === 1, 'С6.1 двойной щелчок по тексту открыл правку');
+  const value = (await area().count()) ? await area().inputValue() : '';
+  ck(value === NOTE, 'С6.2 в поле тот же текст разметки');
+  const sel = await selText();
+  ck(sel === '', 'С6.3 выделения от двойного щелчка не осталось', JSON.stringify(sel));
+  // Возврат в чтение — чтобы следующие случаи начинались с того же состояния, что и раньше.
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'e', code: 'KeyE', metaKey: true, bubbles: true }),
+    );
+  });
+  await page.waitForTimeout(300);
+  ck((await area().count()) === 0, 'С6.4 (контроль) ⌘E вернул чтение — состояние стенда прежнее');
 }
 
 // ═══ С2 · ПРАВКА, ФОКУС В ПОЛЕ ═══════════════════════════════════════════════════════════════
@@ -300,12 +330,14 @@ console.log('\nС3Б · русская раскладка и открытый с
   ck(await selInDoc(), 'С3Б.1 ⌘A на русской раскладке (key «ф», code KeyA) выделяет документ');
 
   await page.evaluate(() => window.getSelection()?.removeAllRanges());
-  const grabbed = await page.evaluate(() => {
-    const layer = document.createElement('div');
-    layer.setAttribute('role', 'listbox');
-    layer.textContent = 'вариант один';
-    document.body.appendChild(layer);
-    layer.dispatchEvent(
+  // СЛОЙ ПОВЕРХ СТРАНИЦЫ ВЫДЕЛЯЕТ СЕБЯ. Отдать жест браузеру здесь нельзя: он взял бы документ
+  // целиком вместе с меню сайта — та самая жалоба владельца, только из другого места.
+  const layer = await page.evaluate(() => {
+    const el = document.createElement('div');
+    el.setAttribute('role', 'listbox');
+    el.textContent = 'ВАРИАНТ-ИЗ-СЛОЯ';
+    document.body.appendChild(el);
+    el.dispatchEvent(
       new KeyboardEvent('keydown', {
         key: 'a',
         code: 'KeyA',
@@ -315,11 +347,22 @@ console.log('\nС3Б · русская раскладка и открытый с
       }),
     );
     const sel = window.getSelection();
-    const has = !!sel && sel.rangeCount > 0;
-    layer.remove();
-    return has;
+    const range = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+    const doc = document.querySelector('[data-note-document]');
+    const out = {
+      inLayer: !!range && el.contains(range.commonAncestorContainer),
+      inDoc: !!range && !!doc && doc.contains(range.commonAncestorContainer),
+      text: String(sel ?? ''),
+    };
+    el.remove();
+    return out;
   });
-  ck(!grabbed, 'С3Б.2 при открытом слое (listbox) ⌘A документ НЕ выделяет');
+  ck(layer.inLayer, 'С3Б.2 при открытом слое ⌘A выделяет САМ слой', JSON.stringify(layer));
+  ck(
+    !layer.inDoc && !layer.text.includes('SITE MENU'),
+    'С3Б.3 …и не трогает ни заметку под ним, ни меню сайта',
+    JSON.stringify(layer.text.slice(0, 60)),
+  );
 }
 
 // ═══ С5 · ПУСТАЯ ЗАМЕТКА ═══════════════════════════════════════════════════════════════════

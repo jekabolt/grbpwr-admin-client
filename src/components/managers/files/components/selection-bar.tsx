@@ -862,7 +862,13 @@ export function FilesSelectionBar({
             )}
           </div>
 
-          <div className='flex flex-col gap-1'>
+          {/* РОЛЬ — ТОЛЬКО В ПОЛНОМ РАЗБОРЕ.
+              «Add to a project» обещает первой же строкой, что ничего не заменяется, — и это
+              правда ровно до тех пор, пока роль не трогают: выбор роли ПЕРЕСТАВЛЯЕТ ту, что
+              стояла, а «take the role off» её снимает. Разрушительный орган под обещанием
+              «ничего не заменяется» — это ложь в заголовке, а не лишняя возможность. Кому нужна
+              роль, у того рядом стоит «sort these out», где про замену сказано прямо. */}
+          <div className={sortScope === 'project' ? 'hidden' : 'flex flex-col gap-1'}>
             <div className='flex flex-wrap items-baseline gap-2'>
               <Text
                 size='micro'
@@ -961,9 +967,11 @@ export function FilesSelectionBar({
             </CalloutBox>
           )}
 
-          {!wantTopics && !wantProject && (
+          {(sortScope === 'project' ? !wantProject : !wantTopics && !wantProject) && (
             <Text size='micro' variant='label' component='p'>
-              pick a topic or a project — both halves may be empty, but not at once.
+              {sortScope === 'project'
+                ? 'pick the project to put them in.'
+                : 'pick a topic or a project — both halves may be empty, but not at once.'}
             </Text>
           )}
         </div>
