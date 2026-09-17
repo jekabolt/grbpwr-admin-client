@@ -254,16 +254,35 @@ export function PasteIntakeModal({
                 const id = Number(p.id);
                 const on = selected.includes(id);
                 const d = projectHint(p);
+                /**
+                 * ПРОЕКТ, ВНУТРИ КОТОРОГО ВСТАВЛЯЮТ, НЕ СНИМАЕТСЯ.
+                 *
+                 * Просьба владельца дословно: «если внутри проекта вставляешь файл, он сразу
+                 * должен добавляться в этот проект». Чип и раньше стоял выбранным, но его можно
+                 * было снять — то есть «сразу» держалось на том, что человек не тронет галочку.
+                 * Теперь он выбран и не переключается: вставка идёт в тот проект, который открыт.
+                 *
+                 * Это не отнимает ничего: файл — не копия, и положить его вдобавок в другой
+                 * проект можно тут же соседним чипом, а убрать из этого — в карточке файла.
+                 */
+                const pinned = presetProjectId === id;
                 return (
                   <Chip
                     key={id}
                     selected={on}
-                    pressed={on}
-                    title={presetProjectId === id ? 'chosen on the canvas' : d || undefined}
-                    onClick={() =>
-                      setSelected((prev) =>
-                        prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-                      )
+                    pressed={pinned ? undefined : on}
+                    title={
+                      pinned
+                        ? 'this project is open right now — the paste lands in it'
+                        : d || undefined
+                    }
+                    onClick={
+                      pinned
+                        ? undefined
+                        : () =>
+                            setSelected((prev) =>
+                              prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+                            )
                     }
                   >
                     {p.name}
@@ -275,6 +294,9 @@ export function PasteIntakeModal({
             <Text size='micro' variant='label' component='p'>
               the paste lands in the project without a role — the role is set later, by picking the
               files out in the grid
+              {presetProjectId > 0
+                ? '. the project you are standing in is set and does not come off here: the paste belongs to it'
+                : ''}
             </Text>
           </div>
         )}

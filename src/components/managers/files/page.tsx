@@ -41,6 +41,8 @@ import {
   NoAccessState,
   RebuildPreview,
 } from './components/gallery-states';
+import { AddFilesToProjectModal } from './components/add-files-modal';
+import { AddFilesTile } from './components/add-files-tile';
 import { FilesSelectionBar } from './components/selection-bar';
 import {
   MAX_TOPIC_FILTERS,
@@ -306,6 +308,13 @@ export default function FilesPage() {
   // не внутри шапки: шапка исчезает вместе с режимом проекта, а модалка, смонтированная в ней,
   // исчезла бы вместе с несохранённой правкой.
   const [editingProject, setEditingProject] = useState(false);
+  /**
+   * ОТКРЫТА ЛИ МОДАЛКА «ПОЛОЖИТЬ В ПРОЕКТ ТО, ЧТО УЖЕ ЕСТЬ».
+   *
+   * Держится СТРАНИЦЕЙ, а не плиткой: плитка пропадает вместе с режимом чтения и со сменой
+   * фильтра, а диалог, начатый человеком, пропадать вместе с ней не должен.
+   */
+  const [addingFiles, setAddingFiles] = useState(false);
   const [rolesDialog, setRolesDialog] = useState(false);
 
   const topicsQuery = useFileTopics();
@@ -1010,6 +1019,7 @@ export default function FilesPage() {
             projects={projects}
             selected={projectId}
             matched={matched}
+            writable={writable}
             // Смена проекта СНИМАЕТ роль: роль осмысленна только на связи с проектом, и
             // перенесённая в соседнюю съёмку она означала бы уже другой вопрос — тот, который
             // человек не задавал. «Без роли» уходит вместе с проектом тем же правилом в `patch`.
@@ -1082,6 +1092,21 @@ export default function FilesPage() {
             !!roles.find((r) => Number(r.id) === fileRole.roleId)?.archived
           }
           onBack={() => patch({ fileRole: { roleId: 0, withoutRole: false } })}
+        />
+      )}
+
+      {/* ПЕРВЫЙ БЛОК ПРОЕКТА — ПРИГЛАШЕНИЕ ПОЛОЖИТЬ ФАЙЛ (просьба владельца). Стоит ДО секций и
+          до пустого состояния, поэтому оно на месте и у проекта, в котором пока ничего нет.
+          Роль берётся из текущего сужения: в разделе «исходники» добавленный файл обязан
+          появиться там же, где его добавляли, а не уехать в кучу без роли. */}
+      {projectId > 0 && writable && (
+        <AddFilesTile
+          label={
+            fileRole.roleId > 0 && roleLabel
+              ? `to “${activeProject?.name ?? `#${projectId}`}” as “${roleLabel}”`
+              : `to “${activeProject?.name ?? `#${projectId}`}”`
+          }
+          onClick={() => setAddingFiles(true)}
         />
       )}
 
@@ -1316,6 +1341,16 @@ export default function FilesPage() {
       {/* ПРАВКА ПРОЕКТА И ЕГО СЛОВАРЬ — РЯДОМ С КАРТОЧКОЙ, а не внутри шапки: шапка исчезает
           вместе с режимом проекта, и модалка, смонтированная в ней, унесла бы с собой
           несохранённый текст на первом же изменении фильтра. */}
+      {addingFiles && projectId > 0 && (
+        <AddFilesToProjectModal
+          projectId={projectId}
+          projectName={activeProject?.name ?? `#${projectId}`}
+          roleId={fileRole.roleId > 0 ? fileRole.roleId : 0}
+          roleName={roleLabel || undefined}
+          onClose={() => setAddingFiles(false)}
+        />
+      )}
+
       {editingProject && activeProject && (
         <ProjectEditModal project={activeProject} onClose={() => setEditingProject(false)} />
       )}
