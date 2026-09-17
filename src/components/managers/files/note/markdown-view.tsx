@@ -24,19 +24,22 @@ import { NoteImage, NotePicturesProvider, useNotePictures } from './note-picture
  * дважды значило бы платить вторым проходом на каждую перерисовку — потолок заметки 512 КиБ.
  */
 
-/** Ссылка внутрь админки — навигацией spa, без перезагрузки. */
+/** Ссылка внутрь админки — навигацией spa, без перезагрузки (или в новой вкладке, см. `linksInNewTab`). */
 function AdminLink({
   href,
   label,
   inPlate,
+  newTab,
 }: {
   href: string;
   label: string;
   inPlate?: boolean;
+  newTab?: boolean;
 }) {
   return (
     <Link
       to={href}
+      {...(newTab ? { target: '_blank', rel: 'noopener' } : {})}
       className={`text-highlightColor underline${inPlate ? ' normal-case' : ''}`}
     >
       {label || href}
@@ -64,7 +67,27 @@ const ADMIN_REFS: MarkdownRefs = {
   ),
 };
 
-export function MarkdownView({ source, className }: { source: string; className?: string }) {
+const ADMIN_REFS_NEW_TAB: MarkdownRefs = {
+  ...ADMIN_REFS,
+  internalLink: (href, label, opts) => (
+    <AdminLink href={href} label={label} inPlate={opts?.inPlate} newTab />
+  ),
+};
+
+export function MarkdownView({
+  source,
+  className,
+  linksInNewTab,
+}: {
+  source: string;
+  className?: string;
+  /**
+   * Внутренние ссылки (`/files/12`) открываются новой вкладкой, как и внешние. Нужно там, где
+   * текст — часть другой карточки (описание задачи): уход spa-навигацией уводит с неё, а в
+   * режиме предпросмотра ещё и теряет несохранённый черновик.
+   */
+  linksInNewTab?: boolean;
+}) {
   // Разбор — единственная дорогая операция на экране чтения (потолок заметки 512 КиБ), и она
   // не имеет права повторяться из-за перерисовки соседнего баннера.
   const blocks = useMemo(() => parse(source), [source]);
@@ -79,7 +102,7 @@ export function MarkdownView({ source, className }: { source: string; className?
   return (
     <FileRefsProvider ids={refIds}>
       <NotePicturesProvider pictures={pictures}>
-        <MarkdownRefsProvider value={ADMIN_REFS}>
+        <MarkdownRefsProvider value={linksInNewTab ? ADMIN_REFS_NEW_TAB : ADMIN_REFS}>
           <MarkdownDoc blocks={blocks} className={className} />
         </MarkdownRefsProvider>
       </NotePicturesProvider>

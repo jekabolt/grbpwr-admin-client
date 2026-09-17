@@ -1,6 +1,6 @@
 import { FormatBar } from 'components/managers/files/note/format-bar';
 import { cn } from 'lib/utility';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import type { TaskMedia } from '../api/types';
@@ -37,6 +37,7 @@ export function DescriptionEditor({
   placeholder = 'add details or acceptance criteria…',
   className,
   onKeyDown,
+  autoFocus,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -48,9 +49,26 @@ export function DescriptionEditor({
   placeholder?: string;
   className?: string;
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  /**
+   * Поле получает фокус при открытии. Инлайн-правку открывают жестом по самому описанию
+   * (двойной щелчок, кнопка «edit») — после него печатают, а не ищут поле второй раз.
+   */
+  autoFocus?: boolean;
 }) {
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const [preview, setPreview] = useState(false);
+
+  useEffect(() => {
+    if (!autoFocus) return;
+    const el = areaRef.current;
+    if (!el) return;
+    // `preventScroll`: фокус не имеет права уносить страницу к верху поля (см. потолок высоты
+    // ниже). Каретка — В НАЧАЛО: высота поля ограничена, и каретка в конце длинного описания
+    // прокрутила бы поле к хвосту, спрятав то, что человек только что читал сверху.
+    el.focus({ preventScroll: true });
+    el.setSelectionRange(0, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className='flex flex-col gap-1.5'>

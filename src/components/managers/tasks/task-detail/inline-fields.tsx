@@ -195,6 +195,7 @@ export function InlineDescription({
     <div className='flex flex-col gap-2'>
       <DescriptionEditor
         ariaLabel='task description'
+        autoFocus
         media={media}
         value={draft}
         disabled={saving}
