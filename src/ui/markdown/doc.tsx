@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from 'react';
 import { cn } from 'lib/utility';
-import { AUTOLINK_SOURCE, readAutolink } from './autolink';
+import { autolinkNodes } from './autolink';
 import { isTableRow, isTableRule, parseTable, type TableAlign } from './table';
 import {
   fileRefId,
@@ -177,14 +177,11 @@ export function parse(src: string): Block[] {
 }
 
 /**
- * `code` | **жирный** | *курсив* | [текст](адрес) | ![текст](адрес) | голый адрес. Всё прочее — текст.
- *
- * Голый адрес не отбирает адрес у оформленной конструкции (`[текст](https://…)`, код, жирный):
- * регулярка берёт самое левое совпадение, а `[`, `` ` `` и `*` стоят в тексте раньше адреса
- * внутри них.
+ * `code` | **жирный** | *курсив* | [текст](адрес) | ![текст](адрес). Всё прочее — текст, и голые
+ * адреса в нём становятся ссылками (`autolinkNodes`) — уже ПОСЛЕ того, как токены разметки нашли
+ * свои места.
  */
-const MARKUP = /(`[^`]+`)|(\*\*[^*]+?\*\*)|(\*[^*\s][^*]*?\*)|(!?\[[^\]]*\]\([^)\s]*\))/;
-const INLINE = new RegExp(`${MARKUP.source}|(${AUTOLINK_SOURCE})`, 'g');
+const INLINE = /(`[^`]+`)|(\*\*[^*]+?\*\*)|(\*[^*\s][^*]*?\*)|(!?\[[^\]]*\]\([^)\s]*\))/g;
 
 /** Адрес из токена `[..](адрес)`; для `![..](адрес)` — он же. */
 function tokenHref(token: string): string {
@@ -365,9 +362,9 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
   let n = 0;
 
   while ((m = INLINE.exec(text)) !== null) {
-    if (m.index > last) out.push(text.slice(last, m.index));
-    const token = m[0];
     const key = `${keyPrefix}-${(n += 1)}`;
+    if (m.index > last) out.push(...autolinkNodes(text.slice(last, m.index), `${key}t`));
+    const token = m[0];
 
     if (token.startsWith('`')) {
       out.push(
@@ -378,51 +375,19 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
         </code>,
       );
     } else if (token.startsWith('**')) {
-      out.push(<b key={key}>{token.slice(2, -2)}</b>);
+      out.push(<b key={key}>{autolinkNodes(token.slice(2, -2), key)}</b>);
     } else if (token.startsWith('*')) {
-      out.push(<i key={key}>{token.slice(1, -1)}</i>);
-    } else if (token.startsWith('[') || token.startsWith('![')) {
+      out.push(<i key={key}>{autolinkNodes(token.slice(1, -1), key)}</i>);
+    } else {
       const image = token.startsWith('!');
       const label = token.slice(image ? 2 : 1, token.indexOf(']('));
       out.push(<InlineLink key={key} image={image} label={label} href={tokenHref(token)} />);
-    } else {
-      const link = readAutolink(token);
-      if (!link) {
-        out.push(token);
-      } else {
-        out.push(<Autolink key={key} href={link.href} />);
-        // Отрезанная пунктуация («…/a.») возвращается в текст: разбор продолжается с неё.
-        last = m.index + link.length;
-        INLINE.lastIndex = last;
-        continue;
-      }
     }
 
     last = m.index + token.length;
   }
-  if (last < text.length) out.push(text.slice(last));
+  if (last < text.length) out.push(...autolinkNodes(text.slice(last), `${keyPrefix}-tail`));
   return out;
-}
-
-/**
- * ГОЛЫЙ АДРЕС — ВСЕГДА ССЫЛКА, А НЕ СНИМОК, даже если оканчивается на `.jpg`. Правило «адрес
- * картинки становится картинкой» (`isPictureHref`) касается оформленной ссылки `[текст](адрес)`:
- * у неё есть подпись, которая остаётся на месте снимка. Голый адрес вставляют, чтобы по нему
- * ПЕРЕЙТИ, и превращать его в кадр значило бы спрятать сам адрес.
- *
- * Длинный адрес без пробелов не имеет точки переноса и распирал бы колонку — отсюда `anywhere`.
- */
-function Autolink({ href }: { href: string }) {
-  return (
-    <a
-      href={href}
-      target='_blank'
-      rel='noreferrer noopener'
-      className='text-highlightColor underline [overflow-wrap:anywhere]'
-    >
-      {href}
-    </a>
-  );
 }
 
 function InlineLink({ image, label, href }: { image: boolean; label: string; href: string }) {

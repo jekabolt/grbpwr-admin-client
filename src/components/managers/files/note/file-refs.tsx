@@ -159,13 +159,17 @@ export function FileRefImage({
   id,
   label,
   onZoom,
+  newTab,
 }: {
   id: number;
   label: string;
   /** Открыть увеличенный вид. Нет — снимок по-прежнему ведёт на карточку файла. */
   onZoom?: () => void;
+  /** Ссылки на карточку файла — новой вкладкой (текст живёт внутри другой карточки). */
+  newTab?: boolean;
 }) {
   const state = useFileRef(id);
+  const tab = newTab ? { target: '_blank', rel: 'noopener' } : {};
   const file = state.kind === 'ok' ? state.file : undefined;
   const name = label || file?.fileName || `file ${id}`;
   const candidates = imageCandidates(file);
@@ -192,7 +196,7 @@ export function FileRefImage({
     return (
       <InlinePlate>
         the picture didn't read
-        <Link to={fileCardPath(id)} className='text-highlightColor underline normal-case'>
+        <Link {...tab} to={fileCardPath(id)} className='text-highlightColor underline normal-case'>
           {name}
         </Link>
       </InlinePlate>
@@ -206,7 +210,7 @@ export function FileRefImage({
         {/* Причина названа: «не показывается» без причины читается как поломка, а это решение
             сервера — такой файл отдают только скачиванием. */}
         {candidates.length ? "the picture didn't open" : 'this file is not shown inside the text'}
-        <Link to={fileCardPath(id)} className='text-highlightColor underline normal-case'>
+        <Link {...tab} to={fileCardPath(id)} className='text-highlightColor underline normal-case'>
           {name}
         </Link>
       </InlinePlate>
@@ -244,6 +248,7 @@ export function FileRefImage({
 
   return (
     <Link
+      {...tab}
       to={fileCardPath(id)}
       title={`${name} — open the file card`}
       className={NOTE_PICTURE_FRAME}
