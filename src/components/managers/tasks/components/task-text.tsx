@@ -1,8 +1,8 @@
 import { cn } from 'lib/utility';
-import { Fragment, useMemo, type ReactNode } from 'react';
+import { Fragment, useMemo } from 'react';
 import { Chip } from 'ui/components/chip';
 import Text from 'ui/components/text';
-import { AUTOLINK_SOURCE, readAutolink } from 'ui/markdown/autolink';
+import { autolinkNodes } from 'ui/markdown/autolink';
 import type { TaskMedia } from '../api/types';
 
 /**
@@ -102,39 +102,6 @@ function MediaRefChip({
 }
 
 /**
- * АДРЕСА В ТЕКСТЕ — ССЫЛКИ В НОВУЮ ВКЛАДКУ, по тому же правилу, что у разметчика описания
- * (`ui/markdown/autolink.ts`): иначе адрес был бы ссылкой в описании и текстом в комментарии.
- * Элемент собирается react-узлом, схема — только http(s).
- */
-function linkify(text: string): ReactNode[] {
-  const re = new RegExp(AUTOLINK_SOURCE, 'g');
-  const out: ReactNode[] = [];
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const link = readAutolink(m[0]);
-    if (!link) continue;
-    if (m.index > last) out.push(text.slice(last, m.index));
-    out.push(
-      <a
-        key={m.index}
-        href={link.href}
-        target='_blank'
-        rel='noreferrer noopener'
-        className='text-highlightColor underline [overflow-wrap:anywhere]'
-      >
-        {link.href}
-      </a>,
-    );
-    last = m.index + link.length;
-    // Отрезанная пунктуация («…/a.») остаётся текстом и в следующий адрес не попадает.
-    re.lastIndex = last;
-  }
-  if (last < text.length) out.push(text.slice(last));
-  return out;
-}
-
-/**
  * Описание задачи и тело комментария рисуются ОДНИМ компонентом: это один и тот же текст с одними
  * и теми же ссылками, и разойтись они могут только в сторону «в комментарии скобки, а в описании
  * чип».
@@ -142,7 +109,8 @@ function linkify(text: string): ReactNode[] {
  * Переносы строк остаются переносами (`whitespace-pre-wrap`), разметки нет и не заводится —
  * `dangerouslySetInnerHTML` здесь означал бы, что любой, кто может написать комментарий, может
  * выполнить свой скрипт в чужой админке. Единственное, что текст получает сверх букв, — ссылки
- * на голые адреса (`linkify`).
+ * в новую вкладку на голые адреса, тем же `autolinkNodes`, что у разметчика описания: иначе адрес
+ * был бы ссылкой в описании и текстом в комментарии.
  */
 export function TaskText({
   text,
@@ -169,7 +137,7 @@ export function TaskText({
         p.ref ? (
           <MediaRefChip key={i} refr={p.ref} media={media} onOpen={onOpen} />
         ) : (
-          <Fragment key={i}>{linkify(p.text)}</Fragment>
+          <Fragment key={i}>{autolinkNodes(p.text, String(i))}</Fragment>
         ),
       )}
     </Text>

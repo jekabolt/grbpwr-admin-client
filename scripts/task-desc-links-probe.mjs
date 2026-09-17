@@ -20,6 +20,10 @@
 //   node scripts/task-desc-links-probe.mjs --mutate-no-dblclick-guard двойной щелчок по ссылке открывает правку
 //   node scripts/task-desc-links-probe.mjs --mutate-dblclick-readonly двойной щелчок открывает правку без права
 //   node scripts/task-desc-links-probe.mjs --mutate-no-autofocus      поле открывается без фокуса
+//   node scripts/task-desc-links-probe.mjs --mutate-quadratic-trim    баланс скобок пересчитывается на каждом шаге
+//
+//   Ц1.9–Ц1.11 и Ц4 мутацией не закрываются: они написаны по дефектам ревью первой версии
+//   (адрес искался наравне с токенами разметки), и их краснота проверена прогоном против неё.
 
 import { build as esbuild } from 'esbuild';
 import { execFileSync } from 'node:child_process';
@@ -151,6 +155,12 @@ if (!bundle.includes(STUB_MARKER))
 if (bundle.includes(REAL_API_MARKER))
   dieNotRun(`в сборке есть «${REAL_API_MARKER}» — настоящий api-слой внутри`);
 
+if (process.argv.includes('--dump')) {
+  const { writeFileSync } = await import('node:fs');
+  writeFileSync(process.argv[process.argv.indexOf('--dump') + 1], bundle);
+  process.exit(0);
+}
+
 function mutate(name, needle, replacement) {
   const n = bundle.split(needle).length - 1;
   if (n !== 1) dieNotRun(`МУТАЦИЯ «${name}» НЕ ПРИМЕНИЛАСЬ: якорь найден ${n} раз вместо одного`);
@@ -208,6 +218,8 @@ const DESCRIPTION = [
   'оформленная [дока](https://example.org/doc) и файл [лекала](/files/77)',
   'в коде `https://in-code.example` не ссылка',
   'на снимке [[media:12]] (см. https://ref-line.example/a)',
+  'жирным **https://bold.example/b** и вплотную https://glued.example/**жирный**',
+  'регистр HTTP://UPPER.example/x',
 ].join('\n');
 
 const CARD = {
@@ -347,6 +359,25 @@ await mount();
   );
   const chip = await page.getByRole('button', { name: /▣ 1/ }).count();
   ck(chip === 1, 'Ц1.8 (контроль) чип вложения на той же строке жив', `чипов ${chip}`);
+  const inBold = await page.locator('b > a[href="https://bold.example/b"]').count();
+  ck(
+    inBold === 1,
+    'Ц1.9 адрес внутри **жирного** — ссылка внутри жирного',
+    `ссылок в <b>: ${inBold}`,
+  );
+  const glued = await linkFacts('https://glued.example/');
+  const gluedBold = await page.locator('b', { hasText: /^жирный$/ }).count();
+  ck(
+    glued.n === 1 && gluedBold === 1,
+    'Ц1.10 адрес вплотную к разметке не глотает её: ссылка + жирный, а не одна длинная ссылка',
+    `${JSON.stringify(glued)}, <b>жирный</b>: ${gluedBold}`,
+  );
+  const upper = await linkFacts('HTTP://UPPER.example/x');
+  ck(
+    upper.n === 1 && upper.target === '_blank',
+    'Ц1.11 схема в верхнем регистре — тоже ссылка',
+    JSON.stringify(upper),
+  );
 }
 
 // ═══ Ц2 · КОММЕНТАРИИ ══════════════════════════════════════════════════════════════════════
@@ -440,6 +471,51 @@ await mount({ readonly: true });
     (await editor().count()) === 0,
     'Ц3.11 без права на запись двойной щелчок ничего не открывает',
   );
+}
+
+// ═══ Ц4 · РАЗБОР АДРЕСА ЛИНЕЕН ═════════════════════════════════════════════════════════════
+// Строка из десятков тысяч `)` за адресом: пересчёт баланса на каждом отрезанном символе делал
+// разбор квадратичным и вешал вкладку (публичная страница заметки читает тот же разметчик).
+console.log('\nЦ4 · обрезка хвостовых скобок не квадратична');
+{
+  const pureOut = resolve(tmpdir(), `autolink-pure-${process.pid}.mjs`);
+  await esbuild({
+    entryPoints: [resolve(REPO, 'src/ui/markdown/autolink.tsx')],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    jsx: 'automatic',
+    absWorkingDir: REPO,
+    nodePaths: [resolve(REPO, 'node_modules')],
+    outfile: pureOut,
+    logLevel: 'warning',
+    define: { 'process.env.NODE_ENV': '"production"' },
+  }).catch((e) => dieNotRun(`модуль адресов не собрался: ${e.message}`));
+  let pure = readFileSync(pureOut, 'utf8');
+  if (flag('--mutate-quadratic-trim')) {
+    const needle = 'else if (ch === ")" && parens > 0) {';
+    const n = pure.split(needle).length - 1;
+    if (n !== 1) dieNotRun(`МУТАЦИЯ «квадратичная обрезка» НЕ ПРИМЕНИЛАСЬ: якорь найден ${n} раз`);
+    pure = pure.replace(
+      needle,
+      'else if (ch === ")" && href.slice(0, end).split(")").length > href.slice(0, end).split("(").length) {',
+    );
+    console.log('  МУТАЦИЯ: баланс скобок пересчитывается на каждом отрезанном символе');
+  }
+  const { writeFileSync } = await import('node:fs');
+  writeFileSync(pureOut, pure);
+  const { readAutolink } = await import(pureOut);
+  rmSync(pureOut, { force: true });
+  const hostile = 'https://example.com/' + ')'.repeat(50000);
+  const t0 = performance.now();
+  const got = readAutolink(hostile);
+  const ms = performance.now() - t0;
+  ck(
+    got?.href === 'https://example.com/',
+    'Ц4.0 (контроль) все непарные «)» отрезаны',
+    JSON.stringify(got?.href),
+  );
+  ck(ms < 200, 'Ц4.1 50 000 скобок разбираются быстрее 200 мс', `${ms.toFixed(1)} мс`);
 }
 
 await browser.close();

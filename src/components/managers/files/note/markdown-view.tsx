@@ -48,9 +48,19 @@ function AdminLink({
 }
 
 /** Картинка файла библиотеки: нажатие открывает увеличенный вид — тот же, что в медиатеке. */
-function AdminFileImage({ id, label, pictureKey }: { id: number; label: string; pictureKey: string }) {
+function AdminFileImage({
+  id,
+  label,
+  pictureKey,
+  newTab,
+}: {
+  id: number;
+  label: string;
+  pictureKey: string;
+  newTab?: boolean;
+}) {
   const { openAt } = useNotePictures();
-  return <FileRefImage id={id} label={label} onZoom={() => openAt(pictureKey)} />;
+  return <FileRefImage id={id} label={label} onZoom={() => openAt(pictureKey)} newTab={newTab} />;
 }
 
 // Реализация постоянна между перерисовками: контекст со свежим объектом на каждый рендер
@@ -71,6 +81,11 @@ const ADMIN_REFS_NEW_TAB: MarkdownRefs = {
   ...ADMIN_REFS,
   internalLink: (href, label, opts) => (
     <AdminLink href={href} label={label} inPlate={opts?.inPlate} newTab />
+  ),
+  // Картинка файла, которую показать нечем, рисуется плашкой со ссылкой на карточку файла, —
+  // и эта ссылка тоже новой вкладкой.
+  fileImage: (id, label, pictureKey) => (
+    <AdminFileImage id={id} label={label} pictureKey={pictureKey} newTab />
   ),
 };
 
