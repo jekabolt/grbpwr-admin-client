@@ -1,6 +1,6 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { formatDistanceToNow } from 'date-fns';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { Avatar } from 'ui/components/avatar';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -9,7 +9,6 @@ import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import type { TaskComment, TaskMedia } from '../api/types';
 import { useAddComment, useDeleteComment, useTaskComments } from '../hooks/useTasks';
-import { MediaRefRow } from './media-ref-row';
 import { TaskText, type MediaRef } from './task-text';
 
 // tskComments v1 (kept) — a flat activity list + composer, now living in the detail's
@@ -17,6 +16,10 @@ import { TaskText, type MediaRef } from './task-text';
 //
 // Тело комментария идёт через тот же `TaskText`, что и описание: «посмотри вот сюда» одинаково
 // нужно и в описании, и в обсуждении, а сырые `[[media:…]]` в ленте выглядели бы поломкой.
+//
+// РЯДА «ВСТАВИТЬ ССЫЛКУ НА ВЛОЖЕНИЕ» ПОД ПОЛЕМ КОММЕНТАРИЯ НЕТ — по слову владельца: к
+// комментарию медиа не выбирают. Ряд остаётся у описания (`description-editor.tsx`), а уже
+// написанные ссылки в старых комментариях по-прежнему рисуются чипами.
 
 /**
  * СВОЯ ЛИ ЭТО РЕПЛИКА — ПАРА, А НЕ ОДНО ИМЯ.
@@ -74,7 +77,7 @@ export function TaskComments({
   onOpenMedia,
 }: {
   taskId: number;
-  /** Вложения карточки — из них берутся номера ссылок и ряд для вставки. */
+  /** Вложения карточки — из них берутся номера чипов у ссылок, уже стоящих в тексте. */
   media?: TaskMedia[];
   onOpenMedia?: (ref: MediaRef) => void;
 }) {
@@ -83,7 +86,6 @@ export function TaskComments({
   const add = useAddComment(taskId);
   const del = useDeleteComment(taskId);
   const [body, setBody] = useState('');
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
   /** Какую реплику собираются стереть; `null` — никакую. Слова стирают с подтверждением. */
   const [pendingDelete, setPendingDelete] = useState<TaskComment | null>(null);
   /**
@@ -156,7 +158,6 @@ export function TaskComments({
 
       <div className='flex flex-col gap-2'>
         <Textarea
-          ref={bodyRef}
           name='newComment'
           variant='secondary'
           placeholder='add a comment…'
@@ -164,7 +165,6 @@ export function TaskComments({
           value={body}
           onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setBody(e.target.value)}
         />
-        <MediaRefRow media={media} targetRef={bodyRef} value={body} onChange={setBody} />
         <Button
           type='button'
           variant='secondary'

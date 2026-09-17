@@ -108,6 +108,17 @@ export function TaskDetail() {
   const [editingDescription, setEditingDescription] = useState(false);
   const navigate = useNavigate();
 
+  function editDescriptionOnDoubleClick(e: React.MouseEvent<HTMLDivElement>) {
+    if (
+      e.target instanceof Element &&
+      e.target.closest('a, button, [role="button"], img, video, input, textarea, select')
+    )
+      return;
+    // Двойной щелчок выделяет слово; выделение на тексте, который сейчас уйдёт, — мусор.
+    window.getSelection()?.removeAllRanges();
+    setEditingDescription(true);
+  }
+
   /**
    * ОДНА ФУНКЦИЯ НА ВСЕ ИНЛАЙН-ПОЛЯ. `seen` — значения ПРАВЛЕНЫХ полей, какими человек их
    * видел, НАЧИНАЯ править; дальше решает хук: сверить, слить со свежим чтением и записать
@@ -383,19 +394,28 @@ export function TaskDetail() {
                 }}
                 onCancel={() => setEditingDescription(false)}
               />
-            ) : t.description ? (
-              /* МАРКДАУН, А НЕ СЫРОЙ ТЕКСТ (п.6 волны) — тем же разметчиком, что у заметок
-                 библиотеки. Ссылки на вложения карточки при этом остаются чипами: шов между
-                 двумя языками одной строки описан в `task-description.tsx`. */
-              <TaskDescriptionView
-                text={t.description}
-                media={media}
-                onOpen={attachments.openMedia}
-              />
             ) : (
-              <Text size='micro' variant='label' component='span'>
-                No description.
-              </Text>
+              /* ДВОЙНОЙ ЩЕЛЧОК ОТКРЫВАЕТ ПРАВКУ — по слову владельца. Одинарный остаётся за
+                 чтением: по нему переходят по ссылкам, открывают вложения и выделяют текст.
+                 Двойной щелчок ПО живому элементу (ссылка, чип вложения, снимок) правку не
+                 открывает: первый щелчок уже сделал своё дело, и поверх открытой вкладки
+                 или просмотрщика редактор был бы вторым, непрошеным действием. */
+              <div onDoubleClick={canWrite ? editDescriptionOnDoubleClick : undefined}>
+                {t.description ? (
+                  /* МАРКДАУН, А НЕ СЫРОЙ ТЕКСТ (п.6 волны) — тем же разметчиком, что у заметок
+                     библиотеки. Ссылки на вложения карточки при этом остаются чипами: шов между
+                     двумя языками одной строки описан в `task-description.tsx`. */
+                  <TaskDescriptionView
+                    text={t.description}
+                    media={media}
+                    onOpen={attachments.openMedia}
+                  />
+                ) : (
+                  <Text size='micro' variant='label' component='span'>
+                    No description.
+                  </Text>
+                )}
+              </div>
             )}
           </Section>
 
