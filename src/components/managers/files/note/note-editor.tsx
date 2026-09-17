@@ -407,7 +407,10 @@ export function NoteEditor({
               className='max-h-[50vh] overflow-y-auto px-3 py-2.5 lg:absolute lg:inset-0 lg:max-h-none'
             >
               {previewSource.trim() ? (
-                <MarkdownView source={previewSource} />
+                // Граница ⌘A в правке вне поля (`note-page.tsx`): выделяется показ, а не страница.
+                <div data-note-document=''>
+                  <MarkdownView source={previewSource} />
+                </div>
               ) : (
                 <Text size='micro' variant='label'>
                   what you write will show up here

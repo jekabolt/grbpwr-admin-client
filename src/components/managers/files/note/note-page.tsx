@@ -462,6 +462,39 @@ export function NotePage() {
       // нажатие пришло НЕ из диалога: у Radix-диалога свой Esc, он закрывает сам себя, и
       // подслушивать его чужому экрану нечего. Выход из правки остаётся у ⌘E и у кнопки «finish
       // editing» — оба видимы, и ни один не срабатывает мимо намерения.
+      // ── ⌘A ВЫДЕЛЯЕТ ДОКУМЕНТ, А НЕ СТРАНИЦУ ─────────────────────────────────────────────
+      //
+      // Просьба владельца: «когда нажимаешь cmd + a в md файле, чтобы выделялся только текст
+      // маркдауна, а не весь сайт». Браузерное «выделить всё» вне поля берёт документ целиком —
+      // меню, шапку, кнопки, — и скопированное приходится чистить руками.
+      //
+      // В ПОЛЕ ВВОДА — РОДНОЕ ПОВЕДЕНИЕ: в поле правки ⌘A и так выделяет ровно текст разметки, а
+      // в поле имени — имя. В ДИАЛОГЕ — тоже родное: его содержимое не документ заметки.
+      // Вне поля выделяется ТО, ЧТО ЧИТАЮТ: в чтении — отрисованный документ, в правке —
+      // панель показа рядом с полем. Поле правки при этом НЕ получает фокус и не выделяется:
+      // выделенный целиком текст в поле стирается первой же случайной клавишей, а человек,
+      // щёлкнувший мимо поля, не ждёт, что следующая буква заменит всю заметку.
+      //
+      // Модификатор — по системе: на маке ⌘ (Ctrl+A там ничего не выделяет), на прочих Ctrl.
+      // `code` рядом с `key` — та же русская раскладка, что у ⌘S: физическая A приходит «ф».
+      if (
+        (IS_MAC ? e.metaKey : e.ctrlKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        (e.code === 'KeyA' || e.key.toLowerCase() === 'a')
+      ) {
+        if (isTextField(e.target)) return;
+        if ((e.target as HTMLElement | null)?.closest?.('[role="dialog"]')) return;
+        const doc = document.querySelector('[data-note-document]');
+        if (!doc) return;
+        e.preventDefault();
+        const range = document.createRange();
+        range.selectNodeContents(doc);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        return;
+      }
       if (e.key === 'Escape' && editing) {
         const from = e.target as HTMLElement | null;
         if (from?.closest?.('[role="dialog"]')) return;
@@ -783,8 +816,11 @@ export function NotePage() {
           {banners}
 
           <div className='min-h-[50vh] border border-borderColor bg-bgColor p-block'>
+            {/* Граница ⌘A — только документ, без пустой подсказки и рамки (см. обработчик). */}
             {value.trim() ? (
-              <MarkdownView source={value} />
+              <div data-note-document=''>
+                <MarkdownView source={value} />
+              </div>
             ) : (
               <Text size='micro' variant='label'>
                 the note is still empty{writable ? ' — ⌘e, and you can write' : ''}
