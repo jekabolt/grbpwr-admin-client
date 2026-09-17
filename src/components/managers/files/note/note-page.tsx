@@ -66,12 +66,33 @@ const IS_MAC =
   typeof navigator !== 'undefined' &&
   /Mac|iP(hone|ad|od)/.test(navigator.platform || navigator.userAgent);
 
-/** Живое текстовое поле — то, у которого своя работа с клавишами. */
+/**
+ * Живое текстовое поле — то, у которого своя работа с клавишами.
+ *
+ * `input` НЕ РАВЕН «полю ввода текста»: флажок, радиокнопка, ползунок и выбор файла — это тоже
+ * `input`, и своего «выделить всё» у них нет. Считая их полями, экран отдавал бы им ⌘A, то есть
+ * возвращал бы выделение всей страницы при фокусе на флажке.
+ */
+const NON_TEXT_INPUT = new Set([
+  'checkbox',
+  'radio',
+  'file',
+  'range',
+  'color',
+  'button',
+  'submit',
+  'reset',
+  'image',
+]);
+
 function isTextField(node: EventTarget | null): boolean {
   const el = node as HTMLElement | null;
   if (!el || typeof el.tagName !== 'string') return false;
   const tag = el.tagName.toLowerCase();
-  return tag === 'textarea' || tag === 'input' || el.isContentEditable === true;
+  if (tag === 'textarea') return true;
+  if (tag === 'input')
+    return !NON_TEXT_INPUT.has(((el as HTMLInputElement).type || 'text').toLowerCase());
+  return el.isContentEditable === true;
 }
 
 export function NotePage() {
@@ -484,10 +505,22 @@ export function NotePage() {
         (e.code === 'KeyA' || e.key.toLowerCase() === 'a')
       ) {
         if (isTextField(e.target)) return;
-        if ((e.target as HTMLElement | null)?.closest?.('[role="dialog"]')) return;
-        const doc = document.querySelector('[data-note-document]');
-        if (!doc) return;
+        // НЕ ТОЛЬКО ДИАЛОГ: выпадающий список, меню и диалог-предупреждение — такие же
+        // отдельные слои поверх страницы, и «выделить всё» в них не про заметку под ними.
+        if (
+          (e.target as HTMLElement | null)?.closest?.(
+            '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="combobox"]',
+          )
+        )
+          return;
         e.preventDefault();
+        const doc = document.querySelector('[data-note-document]');
+        // ПУСТАЯ ЗАМЕТКА — ВЫДЕЛЯТЬ НЕЧЕГО, и это не повод отдавать жест браузеру: он выделил бы
+        // ровно то, на что жаловался владелец, — меню, шапку и кнопки.
+        if (!doc) {
+          window.getSelection()?.removeAllRanges();
+          return;
+        }
         const range = document.createRange();
         range.selectNodeContents(doc);
         const selection = window.getSelection();
