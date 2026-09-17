@@ -505,16 +505,18 @@ export function NotePage() {
         (e.code === 'KeyA' || e.key.toLowerCase() === 'a')
       ) {
         if (isTextField(e.target)) return;
-        // НЕ ТОЛЬКО ДИАЛОГ: выпадающий список, меню и диалог-предупреждение — такие же
-        // отдельные слои поверх страницы, и «выделить всё» в них не про заметку под ними.
-        if (
-          (e.target as HTMLElement | null)?.closest?.(
-            '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="combobox"]',
-          )
-        )
-          return;
+        /**
+         * СЛОЙ ПОВЕРХ СТРАНИЦЫ ВЫДЕЛЯЕТ СЕБЯ, А НЕ ЗАМЕТКУ ПОД НИМ И НЕ ВЕСЬ САЙТ.
+         *
+         * Диалог, меню и выпадающий список — такие же отдельные слои, и «выделить всё» при
+         * фокусе на их кнопке относится к ним. Отдать жест браузеру здесь нельзя: он выделит
+         * документ целиком, вместе с меню сайта, — ровно то, на что жаловался владелец.
+         */
+        const layer = (e.target as HTMLElement | null)?.closest?.(
+          '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="combobox"]',
+        );
         e.preventDefault();
-        const doc = document.querySelector('[data-note-document]');
+        const doc = layer ?? document.querySelector('[data-note-document]');
         // ПУСТАЯ ЗАМЕТКА — ВЫДЕЛЯТЬ НЕЧЕГО, и это не повод отдавать жест браузеру: он выделил бы
         // ровно то, на что жаловался владелец, — меню, шапку и кнопки.
         if (!doc) {
@@ -848,7 +850,32 @@ export function NotePage() {
 
           {banners}
 
-          <div className='min-h-[50vh] border border-borderColor bg-bgColor p-block'>
+          {/* ДВОЙНОЙ ЩЕЛЧОК ПО ДОКУМЕНТУ ОТКРЫВАЕТ ПРАВКУ — просьба владельца, тот же жест, что
+              у описания задачи. Одинарный остаётся за чтением: по нему ходят по ссылкам,
+              открывают снимки и выделяют текст.
+
+              ТОЛЬКО ИЗ СВОЕГО DOM И НЕ ПО ЖИВОМУ ЭЛЕМЕНТУ: просмотрщик снимка рисуется порталом,
+              а React ведёт всплытие по дереву компонентов — без этой проверки двойной щелчок в
+              открытом просмотрщике выбрасывал бы в редактор. Ссылка, кнопка и сам снимок своё
+              дело уже сделали первым щелчком.
+
+              БЕЗ ПРАВА НА ЗАПИСЬ ЖЕСТА НЕТ: `writable` здесь тот же, что у кнопки «edit ⌘e». */}
+          <div
+            onDoubleClick={
+              writable
+                ? (e) => {
+                    if (!(e.target instanceof Element) || !e.currentTarget.contains(e.target))
+                      return;
+                    if (e.target.closest('a, button, [role="button"], img, video, input, textarea'))
+                      return;
+                    // Выделение от двойного щелчка остаётся на тексте, который сейчас уйдёт.
+                    window.getSelection()?.removeAllRanges();
+                    setEditing(true);
+                  }
+                : undefined
+            }
+            className='min-h-[50vh] border border-borderColor bg-bgColor p-block'
+          >
             {/* Граница ⌘A — только документ, без пустой подсказки и рамки (см. обработчик). */}
             {value.trim() ? (
               <div data-note-document=''>

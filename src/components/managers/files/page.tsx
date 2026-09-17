@@ -384,6 +384,18 @@ export default function FilesPage() {
    */
   const rolesQuery = useFileRoles(projectId, true, projectId > 0);
   const roles = rolesQuery.data?.roles ?? [];
+  /**
+   * СУЖЕНИЕ ПО АРХИВНОЙ РОЛИ. Архивную роль НЕЛЬЗЯ назначить (сервер отказывает), поэтому
+   * приглашение «положить сюда файл» в таком разделе обещало бы жест, который отвечает отказом.
+   * Смотреть раздел при этом можно — исчезает только плитка.
+   */
+  const narrowedRoleArchived =
+    !fileRole.withoutRole &&
+    fileRole.roleId > 0 &&
+    // `isSuccess`, А НЕ «НЕ В ПУТИ» — то же правило, что у ряда ролей ниже: пока словарь не
+    // приехал (или не приехал вовсе), «роль не архивная» это утверждение, которого мы не знаем.
+    // Пока не знаем — плитки нет: предлагать жест, который сервер отвергнет, дороже молчания.
+    (!rolesQuery.isSuccess || !!roles.find((r) => Number(r.id) === fileRole.roleId)?.archived);
 
   /**
    * РАЗРЕШЕНИЕ РОЛИ-СИРОТЫ — ОДИН ЭФФЕКТ, ДВА ИСХОДА, И ТРЕТЬЕГО НЕТ.
@@ -1099,7 +1111,7 @@ export default function FilesPage() {
           до пустого состояния, поэтому оно на месте и у проекта, в котором пока ничего нет.
           Роль берётся из текущего сужения: в разделе «исходники» добавленный файл обязан
           появиться там же, где его добавляли, а не уехать в кучу без роли. */}
-      {projectId > 0 && writable && (
+      {projectId > 0 && writable && !narrowedRoleArchived && (
         <AddFilesTile
           label={
             fileRole.roleId > 0 && roleLabel
@@ -1341,8 +1353,14 @@ export default function FilesPage() {
       {/* ПРАВКА ПРОЕКТА И ЕГО СЛОВАРЬ — РЯДОМ С КАРТОЧКОЙ, а не внутри шапки: шапка исчезает
           вместе с режимом проекта, и модалка, смонтированная в ней, унесла бы с собой
           несохранённый текст на первом же изменении фильтра. */}
-      {addingFiles && projectId > 0 && (
+      {addingFiles && projectId > 0 && writable && (
         <AddFilesToProjectModal
+          /**
+           * КЛЮЧ ПО ЦЕЛИ. Проект и роль приезжают из адреса, а адрес меняется под открытой
+           * модалкой — кнопкой «назад», например. Без ключа набранный выбор уехал бы в ДРУГОЙ
+           * проект: ровно та подмена цели, от которой не спасает ни одна проверка внутри.
+           */
+          key={`${projectId}:${fileRole.roleId}`}
           projectId={projectId}
           projectName={activeProject?.name ?? `#${projectId}`}
           roleId={fileRole.roleId > 0 ? fileRole.roleId : 0}

@@ -21,7 +21,9 @@
 //   node scripts/files-projects-probe.mjs --mutate-tile-in-read-mode  плитка рисуется в режиме чтения
 //   node scripts/files-projects-probe.mjs --mutate-pick-inside        уже лежащий в проекте файл выбирается
 //   node scripts/files-projects-probe.mjs --mutate-role-ignored       модалка пишет без роли даже в роли
+//   node scripts/files-projects-probe.mjs --mutate-paste-no-project   вставка не наследует проект
 //   node scripts/files-projects-probe.mjs --mutate-unpin-project      чип проекта при вставке снова снимается
+//   node scripts/files-projects-probe.mjs --mutate-scope-ignored-role  в суженном диалоге снова виден выбор роли
 //   node scripts/files-projects-probe.mjs --mutate-scope-ignored      «add to a project» открывает полный разбор
 
 import { build as esbuild } from 'esbuild';
@@ -219,9 +221,17 @@ if (flag('--mutate-create-ignores-canvas'))
     'onDone: () => {}',
   );
 if (flag('--mutate-tile-everywhere'))
-  mutate('плитка рисуется и вне проекта', 'projectId > 0 && writable &&', 'writable &&');
+  mutate(
+    'плитка рисуется и вне проекта',
+    'projectId > 0 && writable && !narrowedRoleArchived &&',
+    'writable && !narrowedRoleArchived &&',
+  );
 if (flag('--mutate-tile-in-read-mode'))
-  mutate('плитка рисуется и в режиме чтения', 'projectId > 0 && writable &&', 'projectId > 0 &&');
+  mutate(
+    'плитка рисуется и в режиме чтения',
+    'projectId > 0 && writable && !narrowedRoleArchived &&',
+    'projectId > 0 && !narrowedRoleArchived &&',
+  );
 if (flag('--mutate-pick-inside'))
   mutate(
     'уже лежащий в проекте файл снова выбирается',
@@ -230,6 +240,18 @@ if (flag('--mutate-pick-inside'))
   );
 if (flag('--mutate-role-ignored'))
   mutate('модалка пишет без роли даже в разделе роли', 'if (roleId > 0) {', 'if (false) {');
+if (flag('--mutate-scope-ignored-role'))
+  mutate(
+    '«add to a project» показывает выбор роли',
+    'className: sortScope === "project" ? "hidden" : "flex flex-col gap-1", children: [\n              /* @__PURE__ */ (0, import_jsx_runtime115.jsxs)("div", { className: "flex flex-wrap items-baseline gap-2"',
+    'className: "flex flex-col gap-1", children: [\n              /* @__PURE__ */ (0, import_jsx_runtime115.jsxs)("div", { className: "flex flex-wrap items-baseline gap-2"',
+  );
+if (flag('--mutate-paste-no-project'))
+  mutate(
+    'вставка не наследует открытый проект',
+    'const preset = presetProjectId > 0 ? [...presetTopicIds, presetProjectId] : presetTopicIds;',
+    'const preset = presetTopicIds;',
+  );
 if (flag('--mutate-unpin-project'))
   mutate(
     'чип открытого проекта снова снимается при вставке',
@@ -237,10 +259,12 @@ if (flag('--mutate-unpin-project'))
     'const pinned = false;',
   );
 if (flag('--mutate-scope-ignored'))
+  // Блоков, которые прячет сужение, ДВА (темы и роль) — мутация снимает оба: одна снятая
+  // половина оставила бы проверку зелёной по второй.
   mutate(
-    '«add to a project» открывает полный разбор',
-    'className: sortScope === "project" ? "hidden" : "flex flex-col gap-1"',
-    'className: "flex flex-col gap-1"',
+    '«add to a project» открывает полный разбор (темы)',
+    'className: sortScope === "project" ? "hidden" : "flex flex-col gap-1", children: [\n              /* @__PURE__ */ (0, import_jsx_runtime115.jsx)(\n                Text,',
+    'className: "flex flex-col gap-1", children: [\n              /* @__PURE__ */ (0, import_jsx_runtime115.jsx)(\n                Text,',
   );
 
 let bad = 0;
@@ -252,9 +276,14 @@ const ck = (ok, what, d = '') => {
 const TOPICS = [
   { id: 5, name: 'autumn shoot', kind: 'project', filesCount: 2, startsAt: '', endsAt: '' },
   { id: 6, name: 'packaging', kind: '', filesCount: 1 },
+  // Пустой проект: «плитка стоит ВСЕГДА» проверяется там, где сетки нет вовсе.
+  { id: 8, name: 'empty shoot', kind: 'project', filesCount: 0, startsAt: '', endsAt: '' },
 ];
 const ROLES = [{ id: 7, name: 'sources', projectTopicId: 5 }];
 const FILES = [
+  // Лежит в проекте БЕЗ роли: в разделе роли его законно туда перенести, и «уже здесь» на него
+  // распространяться не должно.
+  { id: 104, fileName: 'no-role.png', topicIds: [5], roles: [] },
   {
     id: 101,
     fileName: 'in-project.png',
@@ -364,6 +393,8 @@ await mount({ start: '/files?project=5' });
   });
   ck(order === 'плитка раньше', 'П3.2 плитка стоит ПЕРВЫМ блоком — до файлов проекта', order);
 }
+await mount({ start: '/files?project=8' });
+ck((await addTile().count()) === 1, 'П3.2.1 в ПУСТОМ проекте плитка тоже стоит');
 await mount();
 ck((await addTile().count()) === 0, 'П3.3 вне проекта плитки нет');
 await mount({ start: '/files?project=5', readonly: true });
@@ -419,6 +450,17 @@ await mount({ start: '/files?project=5&frole=7' });
   await addTile().click();
   const f = page.locator('[role="dialog"] button').filter({ hasText: 'loose-one.png' }).first();
   await f.waitFor({ timeout: 5000 });
+  // ФАЙЛ, УЖЕ ЛЕЖАЩИЙ В ПРОЕКТЕ, НО БЕЗ ЭТОЙ РОЛИ, — законная цель: перенести его в раздел и
+  // есть то, ради чего диалог открыли из самого раздела.
+  const other = await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]');
+    const node = Array.from(d?.querySelectorAll('*') || []).find(
+      (el) => (el.textContent || '').includes('no-role') && el.children.length === 0,
+    );
+    if (!node) return 'файла нет в списке';
+    return node.closest('button') ? 'выбирается' : 'не выбирается';
+  });
+  ck(other === 'выбирается', 'П5.0.1 файл проекта без этой роли можно выбрать', other);
   await f.click();
   await page.getByRole('button', { name: /^add 1$/ }).click();
   await page.waitForTimeout(500);
@@ -457,6 +499,20 @@ await mount();
     return label.getBoundingClientRect().height > 0 ? 'виден' : 'скрыт';
   });
   ck(topicsBlockVisible === 'скрыт', 'П6.2 диалог сужен: блок тем не показан', topicsBlockVisible);
+  const roleBlockVisible = await page.evaluate(() => {
+    const dialog = document.querySelector('[role="dialog"]');
+    if (!dialog) return 'нет диалога';
+    const label = Array.from(dialog.querySelectorAll('p')).find(
+      (el) => (el.textContent || '').trim() === 'role',
+    );
+    if (!label) return 'блока роли нет вовсе';
+    return label.getBoundingClientRect().height > 0 ? 'виден' : 'скрыт';
+  });
+  ck(
+    roleBlockVisible === 'скрыт',
+    'П6.2.1 блок роли тоже скрыт: «add» ничего не заменяет, а роль — заменяет',
+    roleBlockVisible,
+  );
   await page.locator('[role="dialog"] button').filter({ hasText: 'autumn shoot' }).first().click();
   await page.getByRole('button', { name: /^add$/ }).click();
   await page.waitForTimeout(600);
@@ -514,6 +570,26 @@ await mount({ start: '/files?project=5' });
       'П7.2 и сказано словами, почему он не снимается',
       typeof chip === 'object' ? chip.title : '',
     );
+    // И ГЛАВНОЕ — ЧТО УХОДИТ НА ПРОВОД. Чип на месте, но отправку решает не он: заливка идёт
+    // мимо gRPC, своим multipart, и темы едут внутри поля `meta`.
+    const upload = page
+      .waitForRequest((r) => r.url().includes('/api/files/upload'), { timeout: 8000 })
+      .then((r) => r.postData() || '')
+      .catch(() => '');
+    await page.getByRole('button', { name: 'upload' }).first().click();
+    const meta = await upload;
+    ck(!!meta, 'П7.3.0 (контроль) заливка вообще ушла — есть что читать');
+    if (meta) {
+      const ids = /"topic_ids":\s*\[([^\]]*)\]/.exec(meta)?.[1] ?? '';
+      ck(
+        ids
+          .split(',')
+          .map((x) => x.trim())
+          .includes('5'),
+        'П7.3 в заливку ушёл id открытого проекта',
+        `topic_ids=[${ids}]`,
+      );
+    }
   }
 }
 

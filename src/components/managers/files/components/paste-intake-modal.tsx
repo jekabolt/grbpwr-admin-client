@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FileTopic } from 'api/proto-http/admin';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -98,6 +98,26 @@ export function PasteIntakeModal({
   const [selected, setSelected] = useState<number[]>(preset);
   const [newTopics, setNewTopics] = useState<string[]>([]);
   const [newTopic, setNewTopic] = useState('');
+
+  /**
+   * ХОЛСТ МОГ УЕХАТЬ В ДРУГОЙ ПРОЕКТ, ПОКА МОДАЛКА ОТКРЫТА (кнопка «назад», ссылка в соседней
+   * вкладке ряда). Начальный набор сеется один раз — и без этого чип нового проекта стоял бы
+   * приколотым, но НЕ выбранным, то есть вставка ушла бы в проект, который человек уже покинул.
+   *
+   * Прежний проект при этом СНИМАЕТСЯ: «вставка идёт туда, где стоишь» — одно место, а не два.
+   * Темы холста не трогаются: их человек мог править руками прямо здесь.
+   */
+  const pinnedRef = useRef(presetProjectId);
+  useEffect(() => {
+    const was = pinnedRef.current;
+    if (was === presetProjectId) return;
+    pinnedRef.current = presetProjectId;
+    setSelected((prev) => {
+      const without = was > 0 ? prev.filter((x) => x !== was) : prev;
+      if (presetProjectId <= 0) return without;
+      return without.includes(presetProjectId) ? without : [...without, presetProjectId];
+    });
+  }, [presetProjectId]);
 
   // Имена ДОПИСЫВАЮТСЯ, а не пересобираются: вторая вставка не имеет права стереть имя,
   // которое человек уже набрал для первой.

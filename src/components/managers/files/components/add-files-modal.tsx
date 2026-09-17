@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { LibraryFile } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -46,10 +46,21 @@ export function AddFilesToProjectModal({
 }) {
   const { assignTopics, setRoles } = useFilesMutations();
   const { showMessage } = useSnackBarStore();
+  /**
+   * НАБОР И ЗАПРОС РАЗВЕДЕНЫ. Ключ запроса — вторая переменная: каждый её поворот это
+   * `ListLibraryFiles` на шестьдесят строк с подписанными адресами, и «autumn» без задержки
+   * посылает шесть таких. Тот же приём, что у поиска на холсте (там задержку держит адрес).
+   */
+  const [input, setInput] = useState('');
   const [search, setSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(input.trim()), 250);
+    return () => clearTimeout(t);
+  }, [input]);
   const [topicId, setTopicId] = useState(0);
   const [picked, setPicked] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
+  /** Сколько выбранного сейчас не показано (сужение поиском или темой). */
 
   const topicsQuery = useFileTopics();
   const filesQuery = useLibraryFiles({
@@ -67,7 +78,24 @@ export function AddFilesToProjectModal({
   // «покажи файлы другого проекта» — вопрос, которого у этого диалога нет.
   const topics = (topicsQuery.data?.topics ?? []).filter((t) => (t.kind ?? '') !== 'project');
 
-  const inProject = (f: LibraryFile) => (f.topics ?? []).some((t) => Number(t.id) === projectId);
+  /** Сколько выбранного сейчас не показано (сужение поиском или темой). */
+  const hiddenPicked = picked.filter((id) => !files.some((f) => Number(f.id) === id)).length;
+
+  /**
+   * «УЖЕ ЗДЕСЬ» СЧИТАЕТСЯ ПО ТОМУ, КУДА КЛАДУТ, а не по проекту вообще.
+   *
+   * В разделе роли законная работа — перенести в него файл, который уже лежит в проекте с
+   * другой ролью или без роли: `SetFileRoles` ровно для этого и есть. Считая «в проекте» за
+   * «уже здесь», диалог запрещал бы то, ради чего его открыли, и раздел было бы нечем наполнить.
+   */
+  const alreadyHere = (f: LibraryFile) => {
+    const linked = (f.topics ?? []).some((t) => Number(t.id) === projectId);
+    if (!linked) return false;
+    if (roleId <= 0) return true;
+    return (f.roles ?? []).some(
+      (r) => Number(r.projectTopicId) === projectId && Number(r.roleId) === roleId,
+    );
+  };
 
   const submit = async () => {
     if (!picked.length) return;
@@ -115,9 +143,9 @@ export function AddFilesToProjectModal({
 
         <Input
           name='addToProjectSearch'
-          value={search}
+          value={input}
           placeholder='file name or topic'
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInput(e.target.value)}
         />
 
         {topics.length > 0 && (
@@ -142,6 +170,21 @@ export function AddFilesToProjectModal({
           <Text size='micro' variant='label'>
             loading…
           </Text>
+        ) : filesQuery.isError ? (
+          /* ОТКАЗ НАЗЫВАЕТСЯ ОТКАЗОМ. «Ничего не нашлось» на упавшем запросе — это утверждение о
+             библиотеке, которого мы не знаем: человек ушёл бы искать файл в другом месте. */
+          <div className='flex flex-wrap items-center gap-2'>
+            <Text size='micro' variant='error' component='span'>
+              {failureText(filesQuery.error, "the library didn't load")}
+            </Text>
+            <button
+              type='button'
+              onClick={() => filesQuery.refetch()}
+              className='text-micro uppercase tracking-label text-labelColor underline hover:text-textColor'
+            >
+              try again
+            </button>
+          </div>
         ) : files.length === 0 ? (
           <Text size='micro' variant='label'>
             {search ? 'nothing found' : 'the library has no files yet'}
@@ -151,18 +194,30 @@ export function AddFilesToProjectModal({
             <Tiles min={120}>
               {files.map((f) => {
                 const id = Number(f.id);
-                const here = inProject(f);
+                const here = alreadyHere(f);
                 const on = picked.includes(id);
                 return (
                   <Tile
                     key={id}
                     title={
-                      here ? `${f.fileName ?? ''} — already in this project` : f.fileName ?? ''
+                      here
+                        ? `${f.fileName ?? ''} — ${
+                            roleId > 0 && roleName
+                              ? `already carries “${roleName}” here`
+                              : 'already in this project'
+                          }`
+                        : f.fileName ?? ''
                     }
                     name={f.fileName ?? ''}
                     // «УЖЕ ЗДЕСЬ» — СЛОВОМ, а не только серостью: цвет на плитке уже занят
                     // выбором, и два смысла одним признаком не различить.
-                    sub={here ? 'already here' : formatBytes(Number(f.sizeBytes ?? 0))}
+                    sub={
+                      here
+                        ? roleId > 0 && roleName
+                          ? `already “${roleName}”`
+                          : 'already here'
+                        : formatBytes(Number(f.sizeBytes ?? 0))
+                    }
                     selected={on}
                     pressed={here ? undefined : on}
                     onClick={
@@ -194,6 +249,19 @@ export function AddFilesToProjectModal({
               })}
             </Tiles>
           </div>
+        )}
+
+        {/* ВЫБРАННОЕ, НО НЕ ВИДНОЕ, НАЗЫВАЕТСЯ ЧИСЛОМ. Поиск и чип темы прячут плитки, а выбор
+            переживает их: без этой строки кнопка обещает «add 5», а на экране отмечено две — и
+            это читается как сбой счётчика. Сам выбор НЕ сбрасывается: сужение — способ добраться
+            до следующего файла, а не отказ от предыдущих. */}
+        {hiddenPicked > 0 && (
+          <Text size='micro' variant='label'>
+            {hiddenPicked} of the picked {plural(hiddenPicked, 'file')}{' '}
+            {hiddenPicked === 1 ? 'is' : 'are'} not on this list — the search or the topic hides{' '}
+            {hiddenPicked === 1 ? 'it' : 'them'}, and {hiddenPicked === 1 ? 'it goes' : 'they go'}{' '}
+            into the project all the same.
+          </Text>
         )}
 
         {filesQuery.hasNextPage && (
