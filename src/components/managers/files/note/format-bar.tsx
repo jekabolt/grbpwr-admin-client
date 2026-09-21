@@ -16,6 +16,8 @@ import {
   lineMarkEdit,
   linkEdit,
   mediaEdit,
+  pastedHref,
+  pastedLinkEdit,
   tableAt,
   tableInsertEdit,
   tableOpEdit,
@@ -24,6 +26,11 @@ import {
   type TableOp,
 } from './format-edits';
 import type { TableAlign } from 'ui/markdown/table';
+
+/** Мак: отмена — ⌘Z; Ctrl+Z там в поле не значит ничего, и отнимать его незачем. */
+const IS_MAC =
+  typeof navigator !== 'undefined' &&
+  /Mac|iP(hone|ad|od)/.test(navigator.platform || navigator.userAgent);
 
 /**
  * ПОЛОСА ФОРМАТИРОВАНИЯ НАД ТЕКСТОМ.
@@ -239,6 +246,86 @@ export function FormatBar({
     apply((t, s, e) => mediaEdit(t, s, e, items));
   };
 
+  /* ── ⌘V АДРЕСОМ — ГОТОВАЯ ССЫЛКА ────────────────────────────────────────────────────────────
+   *
+   * Просьба владельца дословно: «когда в эдитмоде маркдауна вставляешь ссылку, она автоматом
+   * форматится как ссылка по названию домена, например https://www.etsy.com/listing/… = etsy.
+   * так же сделай поддержку cmd z».
+   *
+   * Что считается адресом и чем подписывается — `pastedHref` / `pastedLinkEdit` в
+   * `format-edits.ts`; там же сказано, где адрес остаётся текстом (внутри ссылки, в коде).
+   *
+   * ДВА ШАГА В СТОПКЕ ОТМЕНЫ, А НЕ ОДИН. Сначала адрес ложится КАК ЕСТЬ — так, как его положила
+   * бы сама вставка, — и лишь вторым шагом заменяется ссылкой. Оба шага идут через `apply`, то
+   * есть через `execCommand`, а между ними меняется выделение — для браузера это два разных
+   * набора, и ⌘Z снимает их по одному: первое нажатие возвращает голый адрес (это и есть «не
+   * хочу ссылку»), второе убирает вставку вовсе. Одним шагом ⌘Z умел бы только «вставки не
+   * было», и за адресом текстом пришлось бы вставлять второй раз и править разметку руками.
+   * Замерено на стенде (`format-bar-probe`, раздел 6).
+   *
+   * ПОСЛЕ ⌘Z КАРЕТКА СХЛОПЫВАЕТСЯ. Родная отмена возвращает и выделение, каким оно было перед
+   * шагом, — то есть весь адрес выделенным, и следующая клавиша (пробел после адреса — самое
+   * частое) стирала бы его целиком. Поэтому ⌘Z над НЕТРОНУТОЙ ссылкой перехватывается: та же
+   * родная отмена (`execCommand('undo')`), затем каретка в конец адреса. Стопка не трогается —
+   * второе ⌘Z и ⇧⌘Z работают как родные. «Нетронутой» значит: текст поля совпадает с тем, каким
+   * его оставила вставка; после любой правки перехвата нет, и ⌘Z целиком родной. Помнится
+   * только ПОСЛЕДНЯЯ вставка: откат сквозь две подряд оставит первый адрес выделенным — редко
+   * и не страшно, а стопка на каждую вставку стоила бы ровно того, чего здесь избегают.
+   */
+  const autolink = useRef<{ linked: string; bare: string; start: number; href: string } | null>(
+    null,
+  );
+
+  const pasteHref = useCallback(
+    (area: HTMLTextAreaElement, href: string): boolean => {
+      const edit = pastedLinkEdit(
+        area.value,
+        area.selectionStart ?? 0,
+        area.selectionEnd ?? 0,
+        href,
+      );
+      if (!edit) return false;
+      const bareEnd = edit.start + href.length;
+      apply(() => ({ start: edit.start, end: edit.end, text: href, sel: [edit.start, bareEnd] }));
+      const bare = area.value;
+      // Первый шаг лёг не так, как ждали, — второй строился бы на чужих координатах. Адрес уже в
+      // тексте, и на этом честно всё: родная вставка своё сделала бы точно так же.
+      if (bare.slice(edit.start, bareEnd) !== href) return true;
+      apply(() => ({ start: edit.start, end: bareEnd, text: edit.text, sel: edit.sel }));
+      autolink.current = { linked: area.value, bare, start: edit.start, href };
+      return true;
+    },
+    [apply],
+  );
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const area = areaRef.current;
+      const last = autolink.current;
+      if (!area || !last || e.target !== area) return;
+      if (!(IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey)) return;
+      if (e.shiftKey || e.altKey) return;
+      // `code` рядом с `key`: на русской раскладке физическая Z приходит как «я».
+      if (e.code !== 'KeyZ' && e.key.toLowerCase() !== 'z') return;
+      if (area.value !== last.linked) return;
+      try {
+        document.execCommand('undo');
+      } catch {
+        /* ниже — по состоянию поля, а не по возвращённому значению */
+      }
+      // Текст не изменился — родной отмены у этой сборки нет, и жест отдаётся браузеру как есть.
+      // Класть голый адрес своей правкой нельзя: она легла бы В стопку новым шагом, и следующее
+      // ⌘Z возвращало бы ссылку — отмена ходила бы по кругу и до «вставки не было» не доходила.
+      if (area.value === last.linked) return;
+      e.preventDefault();
+      const bareEnd = last.start + last.href.length;
+      if (area.value === last.bare) area.setSelectionRange(bareEnd, bareEnd);
+      onChange(area.value);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [areaRef, onChange]);
+
   /* ── ⌘V КАРТИНКОЙ ПРЯМО В ТЕКСТ ─────────────────────────────────────────────────────────────
    *
    * Просьба владельца: «если ты прямо в маркдауне во время редактирования жмёшь ⌘V картинкой, она
@@ -276,8 +363,14 @@ export function FormatBar({
       if (!area || e.target !== area) return;
       const data = e.clipboardData;
       if (!data) return;
-      // Текст в буфере — вставка остаётся вставкой текста, и мы даже не смотрим, что там ещё.
-      if (data.getData('text/plain') !== '') return;
+      const plain = data.getData('text/plain');
+      if (plain !== '') {
+        // Текст в буфере — вставка остаётся вставкой текста, и мы даже не смотрим, что там ещё.
+        // Одно исключение — ровно один адрес; что с ним делается, описано у `pasteHref`.
+        const href = pastedHref(plain);
+        if (href && pasteHref(area, href)) e.preventDefault();
+        return;
+      }
       const files = mediaFromClipboard(data, 'image');
       if (!files.length) return;
       // Гасим родную вставку: без этого браузер положил бы в текст имя файла или пустоту.
@@ -288,7 +381,7 @@ export function FormatBar({
     // (правка задачи), и подписка на узел пережила бы не каждое такое переключение.
     document.addEventListener('paste', onPaste);
     return () => document.removeEventListener('paste', onPaste);
-  }, [areaRef, openIntake]);
+  }, [areaRef, openIntake, pasteHref]);
 
   /**
    * Операция режима таблицы. ОТКАЗ ПРОИЗНОСИТСЯ СЛОВАМИ: `tableOpEdit` возвращает `null` там, где

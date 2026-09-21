@@ -213,5 +213,61 @@ const INLINE = /(`[^`]+`)|(\*\*[^*]+?\*\*)|(\*[^*\s][^*]*?\*)|(!?\[[^\]]*\]\([^)
   console.log(`${ok ? '  ok  ' : '  FAIL'} M5-neg сырой адрес со скобками токеном НЕ становится`);
 }
 
+
+console.log('\n── ⌘V адресом: подпись по имени сайта ─────────────────────────────────────');
+
+// Просьба владельца дословно: «…форматится как ссылка по названию домена, например
+// https://www.etsy.com/listing/… = etsy».
+function eq(id, note, got, want) {
+  const ok = got === want;
+  if (ok) pass += 1; else { fail += 1; failed.push(id); }
+  console.log(`${ok ? '  ok  ' : '  FAIL'} ${id} ${note}`);
+  if (!ok) console.log(`        ждали ${show(want)}, имеем ${show(got)}`);
+}
+const ETSY = 'https://www.etsy.com/listing/612420616/metal-buttons?ls=s&ga_order=most_relevant&ref=sr_gallery-7-24';
+const host = (h) => (typeof m.hostLabel === 'function' ? m.hostLabel(h) : undefined);
+const href = (c) => (typeof m.pastedHref === 'function' ? m.pastedHref(c) : undefined);
+const pl = (t, s, e, h) => m.pastedLinkEdit(t, s, e, h);
+
+eq('H1 ', 'www.etsy.com → etsy (пример владельца)', host(ETSY), 'etsy');
+eq('H2 ', 'поддомен: admin.beta.grbpwr.com → grbpwr', host('https://admin.beta.grbpwr.com/files/12'), 'grbpwr');
+eq('H3 ', 'страна за co: amazon.co.uk → amazon', host('https://www.amazon.co.uk/dp/1'), 'amazon');
+eq('H4 ', 'localhost с портом остаётся localhost', host('http://localhost:4040/files'), 'localhost');
+eq('H5 ', 'IP-адрес остаётся адресом', host('https://192.168.0.1:8080/a'), '192.168.0.1');
+eq('H6 ', 'кириллический домен НЕ становится punycode', host('https://почта.рф/'), 'почта');
+eq('H7 ', 'регистр схемы и хоста не важен', host('HTTPS://GitHub.com/jekabolt'), 'github');
+eq('H8 ', 'учётка перед хостом отбрасывается', host('https://user:pw@example.org/x'), 'example');
+
+eq('P1 ', 'один адрес — адрес', href('https://x.com/a?b=c'), 'https://x.com/a?b=c');
+eq('P2 ', 'пробелы и перевод строки по краям (адресная строка) срезаются', href('  https://x.com/a\n'), 'https://x.com/a');
+eq('P3 ', 'фраза с адресом внутри — НЕ адрес', href('see https://x.com'), null);
+eq('P4 ', 'чужая схема — не адрес', href('ftp://x.com/a'), null);
+eq('P5 ', 'схема без хоста — не адрес', href('https://'), null);
+eq('P6 ', 'javascript: — не адрес', href('javascript:alert(1)'), null);
+
+const LINK = `[etsy](${ETSY})`;
+row('L1 ', 'пустая каретка — `[имя сайта](адрес)`, каретка за ссылкой', () => pl('', 0, 0, ETSY), E(0, 0, LINK, [LINK.length, LINK.length]), '');
+row('L2 ', 'выделенное слово — подпись', () => pl('buy buttons here', 4, 11, ETSY), E(4, 11, `[buttons](${ETSY})`, [4 + 10 + ETSY.length + 1, 4 + 10 + ETSY.length + 1]), 'buy buttons here');
+row('L3 ', 'пробелы по краям выделения остаются снаружи', () => pl('a  word  b', 1, 8, ETSY), E(3, 7, `[word](${ETSY})`, [3 + 7 + ETSY.length + 1, 3 + 7 + ETSY.length + 1]), 'a  word  b');
+row('L4 ', 'плейсхолдер `url` кнопки link — вставить КАК ЕСТЬ', () => pl('[text](url)', 7, 10, ETSY), null, '[text](url)');
+row('L5 ', 'каретка в подписи ссылки — как есть', () => pl('[text](u)', 3, 3, ETSY), null, '[text](u)');
+row('L6 ', 'в инлайн-коде — как есть', () => pl('run `curl ` now', 9, 9, ETSY), null, 'run `curl ` now');
+row('L7 ', 'в ограде — как есть', () => pl('```\ncode\n```', 6, 6, ETSY), null, '```\ncode\n```');
+row('L8 ', 'ПОСЛЕ закрытой ссылки на той же строке — ссылка', () => pl('[a](b) ', 7, 7, ETSY), E(7, 7, LINK, [7 + LINK.length, 7 + LINK.length]), '[a](b) ');
+row('L9 ', 'ПОСЛЕ закрытой ограды — ссылка', () => pl('```\nc\n```\nx', 10, 10, ETSY), E(10, 10, LINK, [10 + LINK.length, 10 + LINK.length]), '```\nc\n```\nx');
+row('L10', 'многострочное выделение заменяется целиком, подпись у сайта', () => pl('a\nb', 0, 3, ETSY), E(0, 3, LINK, [LINK.length, LINK.length]), 'a\nb');
+row('L11', 'имени у сайта не вышло — как есть', () => pl('', 0, 0, 'https://./x'), null, '');
+// L12 — СКОБКА В АДРЕСЕ. Разметчик не пускает `)` в адрес токена; голым такой адрес обрывал бы
+// ссылку на `Foo_(bar` — то есть хуже, чем читатель размечал его до этой кнопки. Кодируется тем
+// же `tokenHref`, что у снимков (M5).
+const WIKI = 'https://en.wikipedia.org/wiki/Foo_(bar)';
+const WIKI_LINK = '[wikipedia](https://en.wikipedia.org/wiki/Foo_%28bar%29)';
+row('L12', 'скобки в адресе кодируются — ссылка не рвётся', () => pl('', 0, 0, WIKI), E(0, 0, WIKI_LINK, [WIKI_LINK.length, WIKI_LINK.length]), '');
+const V6 = 'http://[::1]:8080/x';
+const V6_LINK = `[::1](${V6})`;
+row('L13', 'IPv6: квадратные скобки не попадают в подпись', () => pl('', 0, 0, V6), E(0, 0, V6_LINK, [V6_LINK.length, V6_LINK.length]), '');
+eq('H9 ', 'японская зона: shop.example.ne.jp → example', host('https://shop.example.ne.jp/'), 'example');
+eq('H10', 'обратная косая кончает хост, как и у URL', host('https://example.com\\evil.com/'), 'example');
+
 console.log(`\nИСХОДОВ ${pass + fail}: зелёных ${pass}, ПРОВАЛОВ ${fail}${fail ? ` (${failed.join(', ')})` : ''}`);
 process.exit(fail === 0 ? 0 : 1);

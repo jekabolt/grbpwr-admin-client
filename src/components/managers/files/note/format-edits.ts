@@ -393,7 +393,8 @@ export function tableAt(text: string, pos: number): TableSpot | null {
     li += 1;
   }
   if (li >= lines.length) return null;
-  const isRun = (k: number) => k >= 0 && k < lines.length && !!lines[k].trim() && isTableRow(lines[k]);
+  const isRun = (k: number) =>
+    k >= 0 && k < lines.length && !!lines[k].trim() && isTableRow(lines[k]);
   if (!isRun(li)) return null;
   let from = li;
   while (isRun(from - 1)) from -= 1;
@@ -487,7 +488,11 @@ export function tableOpEdit(text: string, pos: number, op: TableOp): Edit | null
     case 'row+': {
       // Из шапки строка добавляется ПЕРВОЙ строкой тела, из тела — под текущей.
       const at = spot.row === 0 ? 0 : spot.row;
-      next.rows.splice(at, 0, Array.from({ length: width }, () => ''));
+      next.rows.splice(
+        at,
+        0,
+        Array.from({ length: width }, () => ''),
+      );
       return tableEditAt(spot, next, at + 1, spot.col);
     }
     case 'row-': {
@@ -554,6 +559,151 @@ export function linkEdit(text: string, start: number, end: number): Edit {
   };
 }
 
+/* ── ⌘V АДРЕСОМ ─────────────────────────────────────────────────────────────────────────────
+ *
+ * Просьба владельца дословно: «когда в эдитмоде маркдауна вставляешь ссылку, она автоматом
+ * форматится как ссылка по названию домена, например https://www.etsy.com/listing/… = etsy».
+ */
+
+/**
+ * В буфере — ОДИН АДРЕС и ничего кроме: `https://…` без пробелов, с хостом. Иначе `null`, и
+ * вставка остаётся обычной вставкой текста. Абзац с адресом внутри — это текст: превращать в
+ * ссылку чужой абзац никто не просил.
+ *
+ * Только `http://` и `https://` — по той же причине, что у автоссылок читателя
+ * (`ui/markdown/autolink`): любая другая схема исполняемая или подменяет страницу.
+ */
+export function pastedHref(clip: string): string | null {
+  const raw = clip.trim();
+  if (!raw || /\s/.test(raw) || !/^https?:\/\//i.test(raw)) return null;
+  try {
+    if (!new URL(raw).hostname) return null;
+  } catch {
+    return null;
+  }
+  return raw;
+}
+
+/** Зоны, у которых своё «второе имя»: `amazon.co.uk` — это amazon, а не co. */
+const SECOND_LEVEL = new Set([
+  'co',
+  'com',
+  'net',
+  'org',
+  'gov',
+  'edu',
+  'ac',
+  'ne',
+  'or',
+  'go',
+  'ltd',
+  'plc',
+]);
+
+/**
+ * ИМЯ САЙТА ПО АДРЕСУ: `https://www.etsy.com/listing/…` → `etsy`.
+ *
+ * Хост читается из СТРОКИ, а не из `URL.hostname`: тот отдаёт punycode, и `почта.рф`
+ * подписалась бы `xn--80a1acny`. `www.` отбрасывается; у двухбуквенной страны за `co`/`com`/…
+ * берётся метка перед ними; IP-адрес и `localhost` остаются как есть — имени у них нет.
+ * Пустая строка — имени не вышло, и подписывать ссылку нечем.
+ */
+export function hostLabel(href: string): string {
+  // Обратная косая — тоже конец хоста: `URL` читает её как `/`, и подпись обязана согласиться.
+  const authority = href.replace(/^https?:\/\//i, '').split(/[/?#\\]/, 1)[0] ?? '';
+  let host = authority.slice(authority.lastIndexOf('@') + 1).toLowerCase();
+  if (host.startsWith('[')) return host.slice(0, host.indexOf(']') + 1);
+  host = host
+    .split(':', 1)[0]
+    .replace(/^www\./, '')
+    .replace(/\.$/, '');
+  if (!host) return '';
+  if (/^[\d.]+$/.test(host)) return host;
+  const parts = host.split('.');
+  if (parts.length < 2) return host;
+  const tld = parts[parts.length - 1];
+  const second = parts[parts.length - 2];
+  if (parts.length >= 3 && tld.length === 2 && SECOND_LEVEL.has(second)) {
+    return parts[parts.length - 3];
+  }
+  return second;
+}
+
+/**
+ * Каретка стоит ВНУТРИ уже написанной ссылки — в подписи `[…]` или в скобках адреса `](…)`.
+ *
+ * Скобки адреса — главный случай: кнопка «link» оставляет выделенным плейсхолдер `url` именно
+ * затем, чтобы ⌘V положил туда адрес. Ссылка внутри ссылки была бы разметкой, которую не покажет
+ * ни один разметчик.
+ */
+function insideLink(text: string, pos: number): boolean {
+  const ls = pos === 0 ? 0 : text.lastIndexOf('\n', pos - 1) + 1;
+  const le = text.indexOf('\n', pos);
+  const before = text.slice(ls, pos);
+  const after = text.slice(pos, le < 0 ? text.length : le);
+  const paren = before.lastIndexOf('](');
+  if (paren >= 0 && !before.slice(paren + 2).includes(')')) return true;
+  const bracket = before.lastIndexOf('[');
+  if (bracket >= 0 && !before.slice(bracket + 1).includes(']')) {
+    const close = after.indexOf('](');
+    if (close >= 0 && !after.slice(0, close).includes('[')) return true;
+  }
+  return false;
+}
+
+/**
+ * Каретка стоит в коде — в инлайновом (нечётное число бэктиков слева на строке) или в ограде
+ * (нечётное число строк-оград выше; та же чётность, что у `fenceAround`). Там адрес — текст,
+ * и разметка ссылки вокруг него была бы мусором в коде.
+ */
+function insideCode(text: string, pos: number): boolean {
+  const ls = pos === 0 ? 0 : text.lastIndexOf('\n', pos - 1) + 1;
+  const ticks = text.slice(ls, pos).split('`').length - 1;
+  if (ticks % 2 === 1) return true;
+  if (ls === 0) return false;
+  return (
+    text
+      .slice(0, ls - 1)
+      .split('\n')
+      .filter((l) => FENCE_LINE.test(l)).length %
+      2 ===
+    1
+  );
+}
+
+/**
+ * Вставленный адрес — готовая ссылка `[имя сайта](адрес)`; выделенное слово становится подписью.
+ * Каретка после правки стоит за ссылкой, как после любой вставки.
+ *
+ * `null` — ВСТАВИТЬ КАК ЕСТЬ: внутри ссылки, в коде или когда имени у сайта не вышло.
+ *
+ * АДРЕС КОДИРУЕТСЯ ТЕМ ЖЕ `tokenHref`, ЧТО У СНИМКОВ: разметчик не пускает `)` в адрес токена
+ * (`[^)\s]*` в `doc.tsx`), и `…/wiki/Foo_(bar)` голым обрывал бы ссылку на `Foo_(bar` — хуже,
+ * чем было: голый адрес читатель размечал целиком, со скобкой. Подпись — через `linkLabel`:
+ * квадратные скобки IPv6 порвали бы `[…]`.
+ *
+ * Выделение в одну строку — подпись (пробелы по краям остаются снаружи, как у кнопки «link»);
+ * пустое или многострочное — заменяется целиком, как его заменила бы обычная вставка, а
+ * подпись берётся у сайта.
+ */
+export function pastedLinkEdit(
+  text: string,
+  start: number,
+  end: number,
+  href: string,
+): Edit | null {
+  if (insideLink(text, start) || insideCode(text, start)) return null;
+  const site = linkLabel(hostLabel(href));
+  if (!site) return null;
+  const [s, e] = trimEdges(text, start, end);
+  const picked = text.slice(s, e);
+  const oneLine = picked !== '' && !picked.includes('\n');
+  const label = (oneLine && linkLabel(picked)) || site;
+  const [rs, re] = oneLine ? [s, e] : [start, end];
+  const next = `[${label}](${tokenHref(href)})`;
+  return { start: rs, end: re, text: next, sel: [rs + next.length, rs + next.length] };
+}
+
 /**
  * Показывать ли выбранный файл прямо в тексте.
  *
@@ -586,7 +736,7 @@ export type MediaInsert = { id: number; url: string };
  * куском текста со скобками наружу. Открывающая скобка кодируется заодно: пара `%28`/`%29`
  * читается человеком как пара, а `(1%29` — как опечатка.
  */
-function mediaHref(url: string): string {
+function tokenHref(url: string): string {
   return url.replace(/\(/g, '%28').replace(/\)/g, '%29').replace(/ /g, '%20');
 }
 
@@ -664,7 +814,7 @@ export function mediaEdit(text: string, start: number, end: number, items: Media
   // в ответ на жест, которого не было.
   if (!items.length) return { start: s, end: s, text: '', sel: [s, s] };
 
-  const token = (m: MediaInsert, label: string) => `![${label}](${mediaHref(m.url)})`;
+  const token = (m: MediaInsert, label: string) => `![${label}](${tokenHref(m.url)})`;
 
   if (items.length === 1) {
     // ОДИН КАДР: выделение уходит в подпись (см. шапку). У пачки ниже оно просто замещается.
