@@ -5,6 +5,9 @@
 //   node scripts/format-bar-probe.mjs --mutate  снять В БАНДЛЕ срез хвостовых переводов у кнопки
 //                                               code (репозиторий не трогается) — проба обязана
 //                                               покраснеть
+//   --mutate=nolink    адрес при ⌘V не перехватывается (остаётся обычной вставкой)
+//   --mutate=collapse  после ⌘Z адрес остаётся ВЫДЕЛЕННЫМ (следующая клавиша стёрла бы его)
+//   --mutate=onestep   ссылка ложится ОДНИМ шагом стопки — первое ⌘Z сразу убирает вставку
 //
 // Зачем проба, когда есть таблица: таблица знает только про чистые функции. Что кнопка зовёт
 // ИМЕННО ИХ и что правка доезжает до поля через execCommand — вопрос браузера.
@@ -50,6 +53,28 @@ const outfile = resolve(tmpdir(), `format-bar-${process.pid}.js`);
 //          галереей и ложатся столбцом внутри текста.
 //   focus — вернуть ГОЛЫЙ `area.focus()` в `apply`: прокрутка страницы обязана снова прыгнуть.
 const MUTATIONS = {
+  nolink: {
+    file: /format-bar\.tsx$/,
+    loader: 'tsx',
+    from: '        if (href && pasteHref(area, href)) e.preventDefault();',
+    to: '        void href;',
+  },
+  collapse: {
+    file: /format-bar\.tsx$/,
+    loader: 'tsx',
+    from: '      if (area.value === last.bare) area.setSelectionRange(bareEnd, bareEnd);',
+    to: '      void bareEnd;',
+  },
+  // Один шаг вместо двух: первый (голый адрес) откатывается родной отменой ДО второго, и в
+  // стопке остаётся только ссылка.
+  onestep: {
+    file: /format-bar\.tsx$/,
+    loader: 'tsx',
+    from: '      apply(() => ({ start: edit.start, end: bareEnd, text: edit.text, sel: edit.sel }));',
+    to:
+      "      document.execCommand('undo');\n" +
+      '      apply(() => ({ start: edit.start, end: edit.end, text: edit.text, sel: edit.sel }));',
+  },
   focus: {
     file: /format-bar\.tsx$/,
     loader: 'tsx',
@@ -590,6 +615,86 @@ const movable = await page.evaluate(() => {
 ck(movable.zero === 0 && movable.nine === 900,
   'КОНТРОЛЬ ПРИБОРА: страница в этой конфигурации прокручивается на 900',
   JSON.stringify(movable));
+
+/* ── 6. ⌘V АДРЕСОМ — ГОТОВАЯ ССЫЛКА, ⌘Z — ПО ШАГАМ ─────────────────────────────────────────
+ *
+ * Просьба владельца дословно: «когда в эдитмоде маркдауна вставляешь ссылку, она автоматом
+ * форматится как ссылка по названию домена, например https://www.etsy.com/listing/… = etsy.
+ * так же сделай поддержку cmd z».
+ *
+ * Вставка — СИНТЕТИЧЕСКИМ `paste` с настоящим `DataTransfer`: перехват смотрит ровно в него.
+ * Непогашенное событие текста НЕ кладёт (оно недоверенное) — так «не перехвачено» отличимо от
+ * «перехвачено и положено как есть». ⌘Z и ⇧⌘Z — настоящими клавишами: это и есть проверяемое.
+ */
+head('6. ⌘V адресом — ссылка с подписью по имени сайта; ⌘Z снимает по шагам');
+await page.evaluate(() => window.__formatBar.mount({ heightPx: 300, spacerPx: 0 }));
+await page.waitForSelector('[data-area]', { timeout: 15000 });
+const ETSY =
+  'https://www.etsy.com/listing/612420616/metal-buttons-10pcs?ls=s&ga_order=most_relevant&ref=sr_gallery-7-24';
+const paste = (t) =>
+  page.evaluate((t) => {
+    const a = document.querySelector('[data-area]');
+    const dt = new DataTransfer();
+    dt.setData('text/plain', t);
+    const ev = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+    return { prevented: !a.dispatchEvent(ev) };
+  }, t);
+const caret = () => page.evaluate(() => window.__formatBar.caret());
+const at = (n) => JSON.stringify([n, n]);
+const undo = async () => { await page.keyboard.press('Meta+z'); await page.waitForTimeout(150); };
+const redo = async () => { await page.keyboard.press('Meta+Shift+z'); await page.waitForTimeout(150); };
+
+const LINKED = `see [etsy](${ETSY})`;
+const BARE = `see ${ETSY}`;
+await setText('see ', 4, 4);
+const p1 = await paste(ETSY);
+await page.waitForTimeout(150);
+ck(p1.prevented, 'вставка адреса перехвачена — родная вставка погашена');
+ck((await text()) === LINKED, 'адрес лёг ссылкой с подписью «etsy»', show(await text()));
+ck((await value()) === LINKED, 'страница узнала о правке — проп совпал с полем', show(await value()));
+ck(JSON.stringify(await caret()) === at(LINKED.length), 'каретка за ссылкой', show(await caret()));
+
+await undo();
+ck((await text()) === BARE, 'первое ⌘Z возвращает ГОЛЫЙ адрес, а не убирает вставку', show(await text()));
+ck((await value()) === BARE, 'и страница об этом знает', show(await value()));
+ck(JSON.stringify(await caret()) === at(BARE.length), 'каретка СХЛОПНУТА в конец адреса — адрес не выделен', show(await caret()));
+await undo();
+ck((await text()) === 'see ', 'второе ⌘Z убирает вставку вовсе', show(await text()));
+await redo();
+ck((await text()) === BARE, '⇧⌘Z возвращает голый адрес', show(await text()));
+await redo();
+ck((await text()) === LINKED, 'второе ⇧⌘Z возвращает ссылку — стопка цела', show(await text()));
+
+// Набор ПОСЛЕ ссылки: ⌘Z сначала снимает набранное (родная отмена, столько шагов, сколько
+// браузер нарезал), и только потом — голый адрес со схлопнутой кареткой: перехват пережил набор.
+await setText('see ', 4, 4);
+await paste(ETSY);
+await page.waitForTimeout(120);
+await page.keyboard.type(' ok');
+await page.waitForTimeout(120);
+ck((await text()) === `${LINKED} ok`, 'КОНТРОЛЬ: набор после ссылки лёг', show(await text()));
+let steps = 0;
+while (steps < 4 && (await text()) !== LINKED) { await undo(); steps += 1; }
+ck((await text()) === LINKED, `⌘Z снял набранное (${steps} шаг.), ссылка цела`, show(await text()));
+await undo();
+ck(
+  (await text()) === BARE && JSON.stringify(await caret()) === at(BARE.length),
+  'следующее ⌘Z — голый адрес со схлопнутой кареткой: перехват пережил набор',
+  `${show(await text())} ${show(await caret())}`,
+);
+
+await setText('buy buttons here', 4, 11);
+await paste(ETSY);
+await page.waitForTimeout(120);
+ck((await text()) === `buy [buttons](${ETSY}) here`, 'выделенное слово становится подписью', show(await text()));
+
+await setText('[text](url)', 7, 10);
+const p7 = await paste(ETSY);
+ck(!p7.prevented && (await text()) === '[text](url)', 'плейсхолдер url кнопки link — НЕ перехвачено, адрес ляжет как есть');
+
+await setText('', 0, 0);
+const p8 = await paste('see https://x.com/a');
+ck(!p8.prevented && (await text()) === '', 'фраза с адресом внутри — обычная вставка, не перехвачена');
 
 ck(errors.length === 0, 'ни одного исключения на странице', errors[0] ?? '');
 await browser.close();
