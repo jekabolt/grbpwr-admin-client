@@ -5,6 +5,11 @@
 //   node scripts/note-preview-sync-probe.mjs --mutate=listen  снять подписку на движение каретки
 //   node scripts/note-preview-sync-probe.mjs --mutate=guard   снять запрет двигать показ без фокуса
 //   node scripts/note-preview-sync-probe.mjs --mutate=steady  снять проверку «блок и так виден»
+//   node scripts/note-preview-sync-probe.mjs --mutate=follow  показ больше не ведёт поле колесом
+//   node scripts/note-preview-sync-probe.mjs --mutate=gate    поле едет и за `scroll` ПЕРЕРИСОВКИ показа
+//   node scripts/note-preview-sync-probe.mjs --mutate=click   щелчок по показу не ставит каретку
+//   node scripts/note-preview-sync-probe.mjs --mutate=word    каретка в начало блока, а не под слово
+//   node scripts/note-preview-sync-probe.mjs --mutate=jump    щелчок по показу дёргает показ подводкой
 //
 // Мутации живут В БАНДЛЕ, репозиторий не трогается. Каждая обязана покраснить СВОЙ раздел — иначе
 // раздел сторожит мёртвый код.
@@ -59,6 +64,27 @@ const MUTATIONS = {
   steady: {
     from: '    if (r.top >= box.top + EDGE && r.bottom <= box.bottom - EDGE) return;',
     to: '    void EDGE;',
+  },
+  // ── обратная подводка ──
+  follow: {
+    from: '    if (relayout && performance.now() - wheelAt.current > GESTURE_MS) return;',
+    to: '    return;',
+  },
+  gate: {
+    from: '    if (relayout && performance.now() - wheelAt.current > GESTURE_MS) return;',
+    to: '    void relayout;',
+  },
+  jump: {
+    from: '    if (performance.now() - fromPane.current < FROM_PANE_MS) return;',
+    to: '    void fromPane;',
+  },
+  click: {
+    from: '      area.setSelectionRange(pos, pos);',
+    to: '      void pos;',
+  },
+  word: {
+    from: '        if (word) {',
+    to: '        if (!word) {',
   },
 };
 if (MUTATE && !MUTATIONS[MUTATE]) {
@@ -263,7 +289,141 @@ ck(
 );
 ck(tailBox && tailBox.visible, 'последний, только что набранный блок виден целиком', JSON.stringify(tailBox));
 
-head('6. исключения');
+/* ── ОБРАТНАЯ ПОДВОДКА: ПОКАЗ ВЕДЁТ ПОЛЕ ─────────────────────────────────────────────────────
+ *
+ * Просьба владельца дословно: «если скроллишь превьюшку, надо, чтобы и маркдаун скроллился; и
+ * если где-то нажимаешь на превью, надо, чтобы курсор тоже туда — только в эдиторе».
+ *
+ * НЕЗАВИСИМЫЙ ОТВЕТ «ГДЕ СТРОКА N В ПОЛЕ». Заметка нарочно без переносов (строки короче поля),
+ * поэтому верх строки N — ровно N × высота строки, без всякого зеркала. Что стоит наверху показа,
+ * читается с его вёрстки (`topBlock`), и ожидание для поля считается из этого.
+ */
+const areaM = () => page.evaluate(() => window.__notePreview.area());
+const lh = await page.evaluate(() => window.__notePreview.lineHeight());
+const wheelOnPane = async (dy) => {
+  const b = await page.evaluate(() => window.__notePreview.paneBox());
+  await page.mouse.move(b.x + b.w / 2, b.y + b.h / 2);
+  await page.mouse.wheel(0, dy);
+  await page.waitForTimeout(450);
+};
+const settle = async () => {
+  await setText(NOTE);
+  await caretTo(0);
+  await page.evaluate(() => {
+    window.__notePreview.areaScrollTo(0);
+    window.__notePreview.paneScrollTo(0);
+  });
+  // Окно жеста (GESTURE_MS) должно ЗАКРЫТЬСЯ от прошлого раздела, иначе программная прокрутка
+  // ниже сошла бы за хвост колеса.
+  await page.waitForTimeout(1000);
+};
+
+head('6. колесо по показу крутит поле к той же строке');
+await settle();
+ck(Number.isFinite(lh) && lh > 10, 'КОНТРОЛЬ ПРИБОРА: высота строки поля прочитана', `lh=${lh}`);
+ck((await areaM()).room > 0, 'КОНТРОЛЬ ПРИБОРА: поле само прокручивается', JSON.stringify(await areaM()));
+await wheelOnPane(1800);
+const w1 = await pane();
+ck(w1.scrollTop > 0, 'КОНТРОЛЬ: колесо прокрутило показ', `scrollTop ${w1.scrollTop}`);
+const tb = await page.evaluate(() => window.__notePreview.topBlock());
+const a1 = await areaM();
+const want1 = (tb.line + tb.share * (tb.next - tb.line)) * lh;
+ck(
+  Math.abs(a1.scrollTop - want1) <= lh,
+  `поле прокручено к строке верхнего блока показа (${tb.line}${tb.share ? ` +${tb.share.toFixed(2)} блока` : ''})`,
+  `поле ${a1.scrollTop}, ждали ≈${Math.round(want1)} (±${Math.round(lh)})`,
+);
+await wheelOnPane(1800);
+const tb2 = await page.evaluate(() => window.__notePreview.topBlock());
+const a2 = await areaM();
+const want2 = (tb2.line + tb2.share * (tb2.next - tb2.line)) * lh;
+ck(a2.scrollTop > a1.scrollTop, 'второе колесо — поле уехало дальше', `${a1.scrollTop} → ${a2.scrollTop}`);
+ck(Math.abs(a2.scrollTop - want2) <= lh, 'и снова к строке верхнего блока', `поле ${a2.scrollTop}, ждали ≈${Math.round(want2)}`);
+await wheelOnPane(40000);
+const endP = await pane();
+const endA = await areaM();
+ck(endP.scrollTop >= endP.room - 1, 'КОНТРОЛЬ: показ докручен до конца', JSON.stringify(endP));
+ck(endA.scrollTop >= endA.room - 1, 'показ в конце — и поле в конце, без хвоста за окном', JSON.stringify(endA));
+
+head('7. `scroll` показа от ПЕРЕРИСОВКИ — не жест: поле стоит');
+// Середина заметки ВЫХОЛАЩИВАЕТСЯ: 184 строки разделов 10–55 становятся пустыми строками. Число
+// строк то же — поле не меняет ни высоты, ни прокрутки; показ же схлопывает пустые строки в
+// зазоры, становится ниже, и браузер ПОДРЕЗАЕТ его прокрутку — это `scroll` без человека. Поле
+// за ним ехать не должно: под мутацией `gate` оно уезжает в конец (показ-то теперь в конце).
+await settle();
+await wheelOnPane(1800);
+await wheelOnPane(1800);
+const held = await areaM();
+const p7before = await pane();
+ck(held.scrollTop > 0 && p7before.scrollTop < p7before.room, 'КОНТРОЛЬ: колесо увело поле вслед за показом, показ НЕ в конце', `поле ${held.scrollTop}, показ ${p7before.scrollTop}/${p7before.room}`);
+await page.evaluate(() => window.__notePreview.focusName());
+await page.waitForTimeout(1000); // окно колеса (GESTURE_MS) закрылось
+const HOLLOW = NOTE.split('\n').map((l, i) => (i >= 40 && i < 40 + 184 ? '' : l)).join('\n');
+await setText(HOLLOW);
+const p7 = await pane();
+ck(p7.scrollHeight < p7before.scrollHeight, 'КОНТРОЛЬ: показ стал ниже', `${p7before.scrollHeight} → ${p7.scrollHeight}`);
+ck(p7.scrollTop < p7before.scrollTop, 'КОНТРОЛЬ: показ подрезал прокрутку — `scroll` без человека', `${p7before.scrollTop} → ${p7.scrollTop}`);
+const a7 = await areaM();
+ck(a7.scrollHeight === held.scrollHeight, 'КОНТРОЛЬ: высота поля прежняя (строк столько же)', `${held.scrollHeight} → ${a7.scrollHeight}`);
+ck(a7.scrollTop === held.scrollTop, 'поле стоит где стояло — за подрезкой показа оно не поехало', `${held.scrollTop} → ${a7.scrollTop}`);
+
+head('8. щелчок по показу ставит каретку в поле — под слово');
+await settle();
+await page.evaluate(() => window.__notePreview.focusName());
+ck((await page.evaluate(() => window.__notePreview.focused())) === false, 'КОНТРОЛЬ: фокус вне поля');
+// Показ в начале, раздел 40 не виден — подвести его в окно показа, чтобы было по чему щёлкать,
+// и щёлкнуть настоящей мышью.
+await page.evaluate(() =>
+  document.querySelector('[data-md-line="161"]')?.scrollIntoView({ block: 'center' }),
+);
+await page.waitForTimeout(300);
+let wb = await page.evaluate(() => window.__notePreview.wordBox(161, 'second'));
+const pbox = await page.evaluate(() => window.__notePreview.paneBox());
+ck(wb && wb.y >= pbox.y && wb.y + wb.h <= pbox.y + pbox.h, 'КОНТРОЛЬ: слово в окне показа, по нему можно щёлкнуть', JSON.stringify({ wb, pbox }));
+ck(wb !== null, 'КОНТРОЛЬ: слово «second» абзаца раздела найдено в показе', JSON.stringify(wb));
+if (wb) {
+  await page.mouse.click(wb.x + wb.w / 2, wb.y + wb.h / 2);
+  await page.waitForTimeout(200);
+  const line = await page.evaluate(() => window.__notePreview.caretLine());
+  const caret = await page.evaluate(() => window.__notePreview.caret());
+  const ls = await page.evaluate(() => window.__notePreview.lineStart(162));
+  const row = (await page.evaluate(() => window.__notePreview.value())).split('\n')[162] ?? '';
+  const col = caret - ls;
+  const at = row.indexOf('second');
+  ck((await page.evaluate(() => window.__notePreview.focused())) === true, 'фокус перешёл в поле');
+  ck(line === 162, 'каретка на ВТОРОЙ строке абзаца — там, где слово, а не в начале блока', `строка ${line}`);
+  ck(at >= 0 && col >= at && col <= at + 'second'.length, 'и внутри самого слова', `col ${col}, слово с ${at}: ${JSON.stringify(row)}`);
+  const am = await areaM();
+  ck(162 * lh >= am.scrollTop && 163 * lh <= am.scrollTop + am.clientHeight, 'строка каретки видна в поле', JSON.stringify(am));
+}
+wb = await page.evaluate(() => window.__notePreview.wordBox(160, 'section'));
+if (wb) {
+  await page.mouse.click(wb.x + wb.w / 2, wb.y + wb.h / 2);
+  await page.waitForTimeout(200);
+  const line = await page.evaluate(() => window.__notePreview.caretLine());
+  ck(line === 160, 'щелчок по заголовку — каретка на строке заголовка', `строка ${line}`);
+}
+// Блок ЧАСТИЧНО за нижней кромкой показа: щелчок по его видимой части ставит каретку, а показ
+// НЕ прыгает — подводка под каретку знает, что каретку поставил сам показ.
+await page.evaluate(() =>
+  document.querySelector('[data-md-line="161"]')?.scrollIntoView({ block: 'end' }),
+);
+await page.evaluate(() => window.__notePreview.paneScrollTo(window.__notePreview.pane().scrollTop - 6));
+await page.waitForTimeout(300);
+const cut = await anchor(161);
+const p8 = await pane();
+ck(cut && !cut.visible && cut.top < p8.clientHeight, 'КОНТРОЛЬ: блок частично за нижней кромкой показа', JSON.stringify(cut));
+const wb3 = await page.evaluate(() => window.__notePreview.wordBox(161, 'body'));
+if (wb3) {
+  await page.mouse.click(wb3.x + wb3.w / 2, wb3.y + 3);
+  await page.waitForTimeout(300);
+  const line = await page.evaluate(() => window.__notePreview.caretLine());
+  const p8after = await pane();
+  ck(line === 161, 'каретка встала на блок за кромкой', `строка ${line}`);
+  ck(p8after.scrollTop === p8.scrollTop, 'показ НЕ прыгнул после щелчка', `${p8.scrollTop} → ${p8after.scrollTop}`);
+}
+
+head('9. исключения');
 ck(errors.length === 0, 'ни одного исключения на странице', errors.slice(0, 2).join(' | '));
 
 await browser.close();

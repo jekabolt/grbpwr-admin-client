@@ -17,6 +17,7 @@ import { NoteEditor } from 'components/managers/files/note/note-editor';
 
 type Metrics = { scrollTop: number; clientHeight: number; scrollHeight: number; room: number };
 type Box = { line: number; top: number; bottom: number; visible: boolean } | null;
+type Rect = { x: number; y: number; w: number; h: number } | null;
 
 type SyncProbe = {
   mount: () => void;
@@ -38,6 +39,21 @@ type SyncProbe = {
   anchor: (line: number) => Box;
   /** Якоря, видные целиком, — независимый ответ на вопрос «что сейчас на экране показа». */
   visible: () => number[];
+  /* ── обратная подводка: показ ведёт поле ── */
+  /** Прокрутка САМОГО ПОЛЯ — то, что мерится в обратную сторону. */
+  area: () => Metrics;
+  areaScrollTo: (y: number) => void;
+  /** Высота строки поля в px: у заметки без переносов верх строки N — ровно N × lh. */
+  lineHeight: () => number;
+  /** Коробка окна показа в координатах вьюпорта — чтобы крутить колесо и щёлкать по-настоящему. */
+  paneBox: () => Rect;
+  /** Коробка ПЕРВОГО вхождения слова в блоке строки `line` (координаты вьюпорта). */
+  wordBox: (line: number, word: string) => Rect;
+  /** Верхний блок показа и доля, на которую он ушёл за кромку, — прочитано с вёрстки показа. */
+  topBlock: () => { line: number; next: number; share: number } | null;
+  caret: () => number;
+  lineStart: (line: number) => number;
+  lineCount: () => number;
 };
 
 declare global {
@@ -112,6 +128,66 @@ probe.visible = () => {
     .map((el) => Number(el.dataset.mdLine));
 };
 probe.focused = () => document.activeElement === area();
+probe.area = () => {
+  const a = area();
+  if (!a) return { scrollTop: -1, clientHeight: -1, scrollHeight: -1, room: -1 };
+  return {
+    scrollTop: Math.round(a.scrollTop),
+    clientHeight: Math.round(a.clientHeight),
+    scrollHeight: Math.round(a.scrollHeight),
+    room: Math.round(a.scrollHeight - a.clientHeight),
+  };
+};
+probe.areaScrollTo = (y) => {
+  const a = area();
+  if (a) a.scrollTop = y;
+};
+probe.lineHeight = () => {
+  const a = area();
+  return a ? parseFloat(getComputedStyle(a).lineHeight) : NaN;
+};
+const rect = (r: DOMRect): Rect => ({ x: r.left, y: r.top, w: r.width, h: r.height });
+probe.paneBox = () => {
+  const p = pane();
+  return p ? rect(p.getBoundingClientRect()) : null;
+};
+probe.wordBox = (line, word) => {
+  const el = document.querySelector<HTMLElement>(`[data-md-line="${line}"]`);
+  if (!el) return null;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const at = (n as Text).data.indexOf(word);
+    if (at < 0) continue;
+    const r = document.createRange();
+    r.setStart(n, at);
+    r.setEnd(n, at + word.length);
+    return rect(r.getBoundingClientRect());
+  }
+  return null;
+};
+probe.lineCount = () => (area()?.value ?? '').split('\n').length;
+probe.topBlock = () => {
+  const p = pane();
+  if (!p) return null;
+  const blocks = Array.from(document.querySelectorAll<HTMLElement>('[data-md-line]'));
+  if (!blocks.length) return null;
+  const box = p.getBoundingClientRect();
+  let i = blocks.findIndex((el) => el.getBoundingClientRect().bottom > box.top);
+  if (i < 0) i = blocks.length - 1;
+  const r = blocks[i].getBoundingClientRect();
+  return {
+    line: Number(blocks[i].dataset.mdLine),
+    next: i + 1 < blocks.length ? Number(blocks[i + 1].dataset.mdLine) : probe.lineCount(),
+    share: r.height > 0 ? Math.max(0, Math.min(1, (box.top - r.top) / r.height)) : 0,
+  };
+};
+probe.caret = () => area()?.selectionStart ?? -1;
+probe.lineStart = (line) => {
+  const lines = (area()?.value ?? '').split('\n');
+  let at = 0;
+  for (let i = 0; i < line && i < lines.length; i += 1) at += lines[i].length + 1;
+  return at;
+};
 // Поле имени в шапке редактора: примитив `Input` кладёт имя в `id`, а не в `name` — отсюда
 // селектор по `id`. Запасной путь — любое поле ввода на экране: важно, что фокус УШЁЛ ИЗ ТЕКСТА
 // в соседний живой элемент, а не просто был снят.
