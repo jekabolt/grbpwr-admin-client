@@ -11,6 +11,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
+import { ROUTES } from 'constants/routes';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Accordion } from 'ui/components/accordion';
 import { Button } from 'ui/components/button';
@@ -7582,6 +7583,25 @@ export function OperationsField({
                 >
                   fullscreen ⤢
                 </Chip>
+                {/* ПЕЧАТЬ — СОХРАНЁННОЙ карточки, в новой вкладке: лист берёт GetTechCard, а не
+                    черновик формы, поэтому у несохранённой карточки кнопки нет — печатать было бы
+                    нечего, и кнопка, печатающая «не то, что на экране», хуже отсутствующей. */}
+                {techCardId ? (
+                  <Chip
+                    nonForm
+                    dashed
+                    onClick={() =>
+                      window.open(
+                        ROUTES.techCardAssemblyPrint.replace(':id', String(techCardId)),
+                        '_blank',
+                        'noopener',
+                      )
+                    }
+                    title='print the SAVED assembly order on one sheet (opens in a new tab)'
+                  >
+                    print ⎙
+                  </Chip>
+                ) : null}
               </div>
             }
           >
