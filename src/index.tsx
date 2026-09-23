@@ -159,6 +159,11 @@ const TechCardImport = lazyRoute(() =>
 const TechCardPrint = lazyRoute(() =>
   import('components/managers/tech-card/print-page').then((m) => ({ default: m.TechCardPrint })),
 );
+const TechCardAssemblyPrint = lazyRoute(() =>
+  import('components/managers/tech-card/assembly-print/page').then((m) => ({
+    default: m.TechCardAssemblyPrint,
+  })),
+);
 const OrderInvoicePrint = lazyRoute(() =>
   import('components/managers/order/invoice-page').then((m) => ({ default: m.OrderInvoicePrint })),
 );
@@ -474,6 +479,9 @@ root.render(
                     no app chrome to isolate via fragile print CSS. */}
                 <Route path='/' element={<ProtectedBare />}>
                   <Route path={ROUTES.techCardPrint} element={<TechCardPrint />} />
+                  {/* Схема сборки на одном листе (420 / 841 мм): лист сам объявляет @page,
+                      поэтому тоже голый маршрут — под Layout ему нечего делать. */}
+                  <Route path={ROUTES.techCardAssemblyPrint} element={<TechCardAssemblyPrint />} />
                   {/* Наряд на партию — бумага ПРОГОНА, не стиля: тех-пак печатает устройство
                       изделия, наряд — тираж этой партии. Отсюда отдельный печатный роут. */}
                   <Route path={ROUTES.productionRunPrint} element={<RunPackPrint />} />

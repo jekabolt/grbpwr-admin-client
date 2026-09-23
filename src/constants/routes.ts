@@ -99,6 +99,9 @@ export enum ROUTES {
   // не съедается карточкой с id «import» (такого id и не бывает — id числовой).
   techCardImport = '/tech-cards/import',
   techCardPrint = '/tech-cards/:id/print',
+  // ПЕЧАТЬ СХЕМЫ СБОРКИ — свой голый маршрут рядом с тех-паком: другой лист (420 / 841 мм, свой
+  // @page), другая бумага. Выбор формы и силуэтов — в query (?form=route|map&shapes=on|off).
+  techCardAssemblyPrint = '/tech-cards/:id/assembly-print',
   // PUBLIC pattern viewer — the page a printed tech-pack QR opens (no JWT, no dictionary).
   // Registered in src/index.tsx OUTSIDE ProtectedRoute/DictionaryProvider on purpose.
   patternViewer = '/p/:token',
