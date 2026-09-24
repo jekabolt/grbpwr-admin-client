@@ -41,6 +41,7 @@ export type SheetReport = {
   sheetW: number;
   sheetH: number;
   crossings: number;
+  /** Лист шире A0 (841 мм): печатать с рулона. Не запрет — сведение. */
   overWidth: boolean;
   /** ROUTE: сколько полос и с каким шагом, мм. */
   lanes?: number;
@@ -216,13 +217,18 @@ function WithLine({ r, ownKey }: { r: PrintRow; ownKey: string }) {
 
 // ======================= ROUTE: ledger + lanes =======================
 
-// 420 мм — A2 по короткой стороне (на A3 — три листа альбомно), длина по содержимому. Колонки в
-// мм; при силуэтах TAKES шире (три плитки в ряд) за счёт OPERATION.
+// ШИРИНА ЛИСТА РАСТЁТ ЗА СОДЕРЖИМЫМ, А НЕ РЕЖЕТ ЕГО. Текстовые колонки фиксированы (мм; при силуэтах
+// TAKES шире за счёт OPERATION), а колонка дорожек берёт столько, сколько нужно полосам: лист
+// выбирается наименьшим из стандартных (420 — A2 по короткой стороне, 594 — A1, 841 — A0), на
+// котором полосы стоят не теснее PITCH_MIN; шире A0 — только если не влезло и туда (рулон).
+// Резать дорожки по краю листа или запрещать печать нельзя: это не A4, бумага бывает любой.
 const R = {
-  W: 420,
+  WIDTHS: [420, 594, 841],
   MARGIN: 12,
   COLS_TEXT: { step: 16, op: 116, takes: 96, unit: 92 },
   COLS_TILES: { step: 16, op: 104, takes: 110, unit: 92 },
+  /** Поля колонки дорожек слева и справа от полос, мм. */
+  ROUTE_PAD: 8,
   PITCH_MAX: 5,
   PITCH_MIN: 3.2,
 };
@@ -242,9 +248,11 @@ export function RouteSheet({ M, meta, shapeOf, fontsReady, onReport }: SheetProp
   const reportRef = useRef(onReport);
   reportRef.current = onReport;
   const [geo, setGeo] = useState<{ g: RouteGeometry; H: number } | null>(null);
-  const W = R.W;
   const COLS = shapeOf ? R.COLS_TILES : R.COLS_TEXT;
-  const routeW = W - 2 * R.MARGIN - COLS.step - COLS.op - COLS.takes - COLS.unit;
+  const fixedW = COLS.step + COLS.op + COLS.takes + COLS.unit;
+  const needW = (pitch: number) => 2 * R.MARGIN + fixedW + R.ROUTE_PAD + M.lanes.length * pitch;
+  const W = R.WIDTHS.find((w) => w >= needW(R.PITCH_MIN)) ?? Math.ceil(needW(R.PITCH_MIN));
+  const routeW = W - 2 * R.MARGIN - fixedW;
 
   useLayoutEffect(() => {
     const sheet = sheetRef.current;
@@ -253,10 +261,11 @@ export function RouteSheet({ M, meta, shapeOf, fontsReady, onReport }: SheetProp
     if (!sheet || !table || !routeTh) return;
     // offsetTop у <tr> считается от ТАБЛИЦЫ, а не от листа — добавляем смещение самой таблицы.
     const x0 = mm(table.offsetLeft + routeTh.offsetLeft) + 4;
-    const usable = routeW - 8;
+    const usable = routeW - R.ROUTE_PAD;
     const n = Math.max(1, M.lanes.length);
-    const pitch = Math.max(R.PITCH_MIN, Math.min(R.PITCH_MAX, usable / n));
-    const overWidth = M.lanes.length * pitch > usable + 0.01;
+    // Лист уже выбран так, что полосы влезают не теснее PITCH_MIN; шире 5 мм не разъезжаемся.
+    const pitch = Math.min(R.PITCH_MAX, usable / n);
+    const overWidth = W > 841;
     const laneX = (key: string) => x0 + ((M.laneOf.get(key) ?? 0) + 0.5) * pitch;
     const rowY = (i: number) => {
       const tr = table.querySelector<HTMLElement>(`tr[data-step="${i}"]`);
@@ -462,7 +471,17 @@ export function RouteSheet({ M, meta, shapeOf, fontsReady, onReport }: SheetProp
 // ======================= MAP: tree of cards =======================
 
 // 841 мм — A0 по короткой стороне. Колонка 110 мм, при большем числе колонок сжимается до 80.
-const T = { W: 841, MARGIN: 14, GUTTER: 20, COL_W: 110, COL_MIN: 80, GAP_Y: 7, FOOT_H: 14 };
+// Те же стандартные ширины, что у ROUTE: лист — наименьший, куда входят колонки по 110 мм; на A0
+// колонки ужимаются до 80 мм, и только если не влезло и так — лист шире A0 при полных 110.
+const T = {
+  WIDTHS: [420, 594, 841],
+  MARGIN: 14,
+  GUTTER: 20,
+  COL_W: 110,
+  COL_MIN: 80,
+  GAP_Y: 7,
+  FOOT_H: 14,
+};
 
 export function MapSheet({ M, meta, shapeOf, fontsReady, onReport }: SheetProps) {
   const headRef = useRef<HTMLDivElement>(null);
@@ -474,14 +493,16 @@ export function MapSheet({ M, meta, shapeOf, fontsReady, onReport }: SheetProps)
     wires: Wire[];
     sheetH: number;
   } | null>(null);
-  const W = T.W;
   const cols = Math.max(1, M.maxHeight + 1);
   const need = (c: number, cw: number) => T.MARGIN * 2 + c * cw + (c - 1) * T.GUTTER;
-  const colW =
-    need(cols, T.COL_W) > W
-      ? Math.max(T.COL_MIN, (W - T.MARGIN * 2 - (cols - 1) * T.GUTTER) / cols)
-      : T.COL_W;
-  const overWidth = need(cols, colW) > W + 0.01;
+  const a0 = T.WIDTHS[T.WIDTHS.length - 1];
+  const squeezed = Math.max(T.COL_MIN, (a0 - T.MARGIN * 2 - (cols - 1) * T.GUTTER) / cols);
+  const fitsA0Squeezed = need(cols, squeezed) <= a0 + 0.01;
+  const W =
+    T.WIDTHS.find((w) => w >= need(cols, T.COL_W)) ??
+    (fitsA0Squeezed ? a0 : Math.ceil(need(cols, T.COL_W)));
+  const colW = need(cols, T.COL_W) <= W + 0.01 ? T.COL_W : squeezed;
+  const overWidth = W > a0;
 
   useLayoutEffect(() => {
     const head = headRef.current;
@@ -609,10 +630,12 @@ export function MapSheet({ M, meta, shapeOf, fontsReady, onReport }: SheetProps)
           viewBox={`0 0 ${W} ${lay.sheetH}`}
           aria-hidden='true'
         >
-          {lay.wires.map((w) => (
-            <g key={w.from}>
+          {lay.wires.map((w, i) => (
+            <g key={i}>
               <path d={w.d} />
-              <path className='ap-arrow' d={`M${w.x2},${w.y2} l-2.2,-0.9 v1.8 z`} />
+              {w.arrow && (
+                <path className='ap-arrow' d={`M${w.arrow.x},${w.arrow.y} l-2.4,-1 v2 z`} />
+              )}
             </g>
           ))}
         </svg>
@@ -698,7 +721,7 @@ export const ASSEMBLY_PRINT_CSS = `
 .ap-row .ap-zone { text-transform: uppercase; font-size: 10pt; }
 .ap-with { font-size: 10pt; text-transform: uppercase; margin-top: 0.4mm; }
 .ap-wires { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-.ap-wires path { fill: none; stroke: #000; stroke-width: 0.3; stroke-linecap: round; }
+.ap-wires path { fill: none; stroke: #000; stroke-width: 0.3; stroke-linecap: round; stroke-linejoin: round; }
 .ap-wires .ap-arrow { fill: #000; stroke: none; }
 
 @media print {

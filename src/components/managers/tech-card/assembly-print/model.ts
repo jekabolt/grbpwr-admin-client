@@ -15,9 +15,11 @@
 // раньше или неизвестный, не входит в TAKES. Рисовать объявление значило бы печатать сборку,
 // которой по правилам нет, — и цех шил бы по ней. Все отказы движка перечислены в исключениях.
 //
-// На бумаге НЕТ КЛЮЧЕЙ: узел зовётся именем (outputUnitName) либо «UNIT FROM STEP N»; деталь —
-// именем (lineKey непрозрачен, человек его не читает). Дубли имён различаются явно — иначе две
-// полосы или два кроя стояли бы под одной подписью. Модуль чистый: ни DOM, ни миллиметров.
+// ИМЯ НА БУМАГЕ. Узел зовётся именем (outputUnitName); безымянный — своим ключом, прочитанным как
+// слова (`PLACKET_L` → «PLACKET L»): ключ узла технолог набирает сам, и экран показывает его же
+// первой строкой карточки. Прятать его за «UNIT FROM STEP 190» значило бы отнять у узла имя вовсе.
+// Деталь — именем (lineKey непрозрачен, ULID, человек его не читает). Дубли имён различаются
+// явно — иначе две полосы или два кроя стояли бы под одной подписью. Модуль чистый: ни DOM, ни мм.
 import { assemblyBlocks } from '../components/assembly-blocks';
 import {
   assemblyReleaseCheck,
@@ -112,6 +114,8 @@ export type PrintModel = {
 };
 
 const upper = (s: string) => s.trim().toUpperCase();
+/** Ключ узла словами: разделители → пробелы, капс. */
+const keyWords = (key: string) => upper(key.replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' '));
 const dedupe = (keys: string[]) => [...new Set(keys)];
 
 export function assemblyPrintModel(input: PrintCardInput): PrintModel {
@@ -141,19 +145,37 @@ export function assemblyPrintModel(input: PrintCardInput): PrintModel {
   const numberOf = (i: number): number | null => card.steps[i]?.number ?? null;
 
   // Имя узла на бумаге. Дубли имён различаются шагом рождения — иначе две полосы неотличимы.
+  // Первое ОБЪЯВЛЕНИЕ ключа на карточке — для узла, которого движок не произвёл (отвергнутый
+  // шаг): у него нет блока, но есть имя и шаг, которые технолог набрал, и отказ обязан звать
+  // его так же, как редактор, а не «“PLACKET_L” у шага ?».
+  const declaredAt = new Map<string, number>();
+  steps.forEach((s, i) => {
+    if (s.outputUnitKey && !declaredAt.has(s.outputUnitKey)) declaredAt.set(s.outputUnitKey, i);
+  });
+  const unitBase = (key: string): string => {
+    const b = byKey.get(key);
+    const decl = declaredAt.get(key);
+    const born = b ? b.producedAt : decl;
+    return (
+      upper(b?.name ?? '') ||
+      upper(decl === undefined ? '' : steps[decl].outputUnitName) ||
+      keyWords(key) ||
+      // Ключ из одних разделителей («---») словами пуст — тогда хотя бы шаг рождения.
+      (born === undefined ? 'UNNAMED UNIT' : `UNIT FROM STEP ${numberOf(born) ?? born + 1}`)
+    );
+  };
   const nameCount = new Map<string, number>();
   for (const b of blocks) {
-    const n = upper(b.name);
-    if (n) nameCount.set(n, (nameCount.get(n) ?? 0) + 1);
+    const n = unitBase(b.key);
+    nameCount.set(n, (nameCount.get(n) ?? 0) + 1);
   }
   const displayName = (key: string): string => {
     const b = byKey.get(key);
-    // Ключ узла, которого движок не произвёл, на бумагу не попадает — такой шаг печатается как
-    // NOT APPLIED, а сюда не доходит; ветка оставлена ради полноты, без ключа.
-    if (!b) return 'UNIT NOT MADE';
-    const n = upper(b.name);
+    const n = unitBase(key);
+    // Узел, которого движок не произвёл, сюда не доходит (такой шаг печатается NOT APPLIED);
+    // ветка оставлена ради полноты — словами ключа, без номера шага.
+    if (!b) return n;
     const born = numberOf(b.producedAt) ?? b.producedAt + 1;
-    if (!n) return `UNIT FROM STEP ${born}`;
     return (nameCount.get(n) ?? 0) > 1 ? `${n} · FROM STEP ${born}` : n;
   };
   // Имя детали на бумаге. `lineKey` непрозрачен (ULID) и не печатается — безымянная деталь
