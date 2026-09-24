@@ -1,6 +1,8 @@
-// ПЕЧАТЬ СХЕМЫ СБОРКИ — голый маршрут (механика A, см. print/sheet.tsx): страница вне Layout,
-// лист лежит в обычном потоке, инлайн CSS прячет тулбар. `@page { size }` объявляет САМ лист после
-// раскладки (420 × H или 841 × H мм) — поэтому здесь НЕТ PageFurniture: у него A4 на весь документ.
+// ПЕЧАТЬ СХЕМЫ СБОРКИ — голый маршрут (механика A, см. print/sheet.tsx): страница вне Layout, лист
+// лежит в обычном потоке. Лист набирается арифметикой в миллиметрах (paper.ts) и рисуется SVG; кнопка
+// «download pdf» отдаёт ФАЙЛ размером с лист (paper-pdf.ts), а не диалог печати — владелец: «файл
+// должен скачиваться, размером с канвас, на который помещается вся диаграмма». ⌘P всё равно работает:
+// `@page { size }` объявлен под лист, а PageFurniture (A4) здесь не подключён.
 //
 // Печатается СОХРАНЁННАЯ карточка (GetTechCard), не черновик редактора: бумага в цеху обязана
 // совпадать с тем, что лежит в базе, а не с тем, что было на экране у того, кто нажал кнопку.
@@ -13,6 +15,7 @@ import { depStatus, usePrintReady, type PrintDep } from 'components/managers/pri
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
 import type { common_TechCard, common_TechCardInsert } from 'api/proto-http/admin';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
@@ -28,18 +31,31 @@ import { usePieceShapes } from '../components/use-piece-shapes';
 import { useOperationWorkCatalog } from '../components/useOperationWorkCatalog';
 import { useTechCardReleases } from '../components/useSamples';
 import { assemblyPrintModel, type PrintCardInput } from './model';
-import {
-  ASSEMBLY_PRINT_CSS,
-  MapSheet,
-  RouteSheet,
-  type SheetMeta,
-  type SheetReport,
-  type ShapeLookup,
-} from './sheets';
+import { typesetMap, typesetRoute, type PaperDoc, type SheetMeta, type ShapeLookup } from './paper';
+import { exportPaperPdf, PDF_MAX_MM } from './paper-pdf';
+import { PaperSvg } from './paper-svg';
 
 type Form = 'route' | 'map';
 
 const PX_PER_MM = 96 / 25.4;
+// Подпись входов листа: карточка ИЗ АДРЕСА (id в ответе бэка — необязательное поле), форма,
+// силуэты. Роутер переиспользует страницу при смене `:id`, и без подписи кнопка могла бы скачать
+// ПРЕДЫДУЩУЮ карточку, пока грузится новая.
+const docKey = (routeId: string | undefined, form: Form, shapes: boolean) =>
+  `${routeId ?? ''}|${form}|${shapes ? 'on' : 'off'}`;
+
+// Экранная обвязка: на печати (⌘P) прячется тулбар и снимается масштаб; лист печатается как есть.
+const SCREEN_CSS = `
+.ap-sheet { box-shadow: 0 0 0 1px #ccc; }
+@media print {
+  html, body { background: #fff !important; margin: 0; }
+  .ap-toolbar { display: none !important; }
+  .ap-stage-wrap { padding: 0 !important; height: auto !important; }
+  .ap-stage { transform: none !important; }
+  .ap-sheet { box-shadow: none; }
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+}
+`;
 
 /**
  * Что печатается из карточки. Шаг называется ТЕМ ЖЕ композитором и с теми же аргументами, что
@@ -107,7 +123,8 @@ function Document({
   meta,
   onDeps,
   onShapesAvailable,
-  onReport,
+  onDoc,
+  docKey: key,
 }: {
   techCard: common_TechCard;
   form: Form;
@@ -116,13 +133,15 @@ function Document({
   meta: SheetMeta;
   onDeps: (deps: PrintDep[]) => void;
   onShapesAvailable: (available: boolean) => void;
-  onReport: (r: SheetReport) => void;
+  /** Лист и подпись входов, по которым он набран: страница верит листу только под текущую. */
+  onDoc: (doc: PaperDoc, key: string) => void;
+  docKey: string;
 }) {
   const { shapeByKey, hasDxf, isLoading, error } = usePieceShapes(shapes);
   useEffect(() => onShapesAvailable(hasDxf), [hasDxf, onShapesAvailable]);
   useEffect(() => {
-    // Контуры входят в гейт печати только когда их просили И есть чем рисовать: без DXF ждать
-    // нечего, а отказ разбора — degraded, не блокировка (правило 1 гейта).
+    // Контуры входят в гейт только когда их просили И есть чем рисовать: без DXF ждать нечего, а
+    // отказ разбора — degraded, не блокировка (правило 1 гейта).
     onDeps(
       shapes && hasDxf ? [{ label: 'piece contours', status: depStatus(isLoading, !!error) }] : [],
     );
@@ -136,22 +155,17 @@ function Document({
     if (!shapes || !hasDxf) return null;
     return (key) => shapeByKey?.get(pieceRefKey(key))?.piece ?? null;
   }, [shapes, hasDxf, shapeByKey]);
-
-  // Шрифт: до загрузки FeatureMono таблица стоит в фолбэке с другими метриками, и дорожки,
-  // промеренные по ней, уехали бы после подмены. Перемер — по document.fonts.ready.
-  const [fontsReady, setFontsReady] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    (document.fonts?.ready ?? Promise.resolve()).then(() => {
-      if (!cancelled) setFontsReady(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const props = { M, meta, shapeOf, fontsReady, onReport };
-  return form === 'map' ? <MapSheet {...props} /> : <RouteSheet {...props} />;
+  const doc = useMemo(
+    () => (form === 'map' ? typesetMap(M, meta, shapeOf) : typesetRoute(M, meta, shapeOf)),
+    [M, meta, shapeOf, form],
+  );
+  useEffect(() => onDoc(doc, key), [doc, key, onDoc]);
+  return (
+    <>
+      <style>{`@page { size: ${doc.w}mm ${doc.h}mm; margin: 0; }`}</style>
+      <PaperSvg doc={doc} />
+    </>
+  );
 }
 
 export function TechCardAssemblyPrint() {
@@ -165,6 +179,7 @@ export function TechCardAssemblyPrint() {
     const s = next.shapes ?? shapes;
     setSearchParams({ form: f, shapes: s ? 'on' : 'off' }, { replace: true });
   };
+  const showMessage = useSnackBarStore((s) => s.showMessage);
 
   const { data: techCard, isLoading, isError } = useTechCard(numId);
   const {
@@ -188,8 +203,13 @@ export function TechCardAssemblyPrint() {
 
   const [docDeps, setDocDeps] = useState<PrintDep[]>([]);
   const [shapesAvailable, setShapesAvailable] = useState<boolean | null>(null);
-  const [report, setReport] = useState<SheetReport | null>(null);
-  const onReport = useCallback((r: SheetReport) => setReport(r), []);
+  const [docState, setDocState] = useState<{ doc: PaperDoc; key: string } | null>(null);
+  const onDoc = useCallback((doc: PaperDoc, key: string) => setDocState({ doc, key }), []);
+  const currentKey = docKey(id, form, shapes);
+  const doc = docState && docState.key === currentKey ? docState.doc : null;
+  const [exporting, setExporting] = useState(false);
+  // Предел страницы PDF (5080 мм): лист крупнее jsPDF молча обрежет — честнее не отдавать файл.
+  const tooBigForPdf = !!doc && (doc.w > PDF_MAX_MM || doc.h > PDF_MAX_MM);
 
   const { ready, degraded } = usePrintReady([
     { label: 'tech card', status: depStatus(isLoading, isError) },
@@ -225,8 +245,8 @@ export function TechCardAssemblyPrint() {
     };
   }, [techCard, latestRelease, releasesLoading, releasesError, degraded, printedOn]);
 
-  // Экран: лист шире любого монитора (420 / 841 мм), по умолчанию вписываем по ширине; «100 %» —
-  // для проверки глазом того, что уйдёт на бумагу. На печать масштаб не влияет (PRINT CSS).
+  // Экран: лист шире любого монитора, по умолчанию вписываем по ширине; «100 %» — для проверки
+  // глазом того, что уйдёт в файл.
   const [view, setView] = useState<'fit' | 'one'>('fit');
   const [winW, setWinW] = useState(() => window.innerWidth);
   useEffect(() => {
@@ -234,12 +254,11 @@ export function TechCardAssemblyPrint() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
-  const sheetWpx = (report?.sheetW ?? 420) * PX_PER_MM;
-  const sheetHpx = (report?.sheetH ?? 0) * PX_PER_MM;
+  const sheetWpx = (doc?.w ?? 420) * PX_PER_MM;
+  const sheetHpx = (doc?.h ?? 0) * PX_PER_MM;
   const k = view === 'fit' ? Math.min(1, (winW - 48) / sheetWpx) : 1;
 
-  // Лист сам растёт за содержимым (420 → 594 → 841 → шире), так что печать не запрещается
-  // никогда; шире A0 и пересечения (по построению их нет) — сведения в ридауте, не засов.
+  const report = doc?.report;
   const readout = report
     ? [
         `sheet ${report.sheetW} × ${report.sheetH} mm`,
@@ -247,14 +266,29 @@ export function TechCardAssemblyPrint() {
         report.cols != null ? `${report.cols} columns × ${report.colW} mm` : '',
         `${report.crossings} crossings`,
         report.overWidth ? 'wider than A0 — print from a roll' : '',
+        tooBigForPdf
+          ? `exceeds the PDF page limit of ${PDF_MAX_MM} mm — use the other diagram`
+          : '',
       ]
         .filter(Boolean)
         .join(' · ')
     : '';
 
+  const download = async () => {
+    if (!doc) return;
+    setExporting(true);
+    try {
+      await exportPaperPdf(doc);
+    } catch (e) {
+      showMessage(`pdf failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className='flex min-h-screen flex-col'>
-      <style>{ASSEMBLY_PRINT_CSS}</style>
+      <style>{SCREEN_CSS}</style>
 
       <div className='ap-toolbar sticky top-0 z-10 flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
         <div className='flex items-center gap-3'>
@@ -356,10 +390,15 @@ export function TechCardAssemblyPrint() {
             variant='main'
             size='lg'
             className='uppercase'
-            disabled={!techCard || !ready}
-            onClick={() => window.print()}
+            // Не «пришла ли карта», а «готов ли весь лист»: данные и контуры. По таймауту гейт
+            // отпускает кнопку сам и называет недостающее строкой на листе.
+            disabled={!doc || !ready || exporting || tooBigForPdf}
+            onClick={download}
+            title={
+              doc ? `${doc.fileStem}.pdf · ${doc.w} × ${doc.h} mm · vector, black only` : undefined
+            }
           >
-            save as pdf
+            {exporting ? 'preparing pdf…' : 'download pdf'}
           </Button>
         </div>
       </div>
@@ -384,14 +423,14 @@ export function TechCardAssemblyPrint() {
           className='ap-stage-wrap relative p-6'
           style={{ height: sheetHpx ? sheetHpx * k + 48 : undefined }}
         >
-          {/* Плашка деградации дублируется на бумаге строкой в шапке листа (meta.warnings) — экран
-              видел не тот, кто держит лист. */}
+          {/* Плашка деградации дублируется на листе строкой в шапке (meta.warnings) — экран видел
+              не тот, кто держит лист. */}
           <div className='ap-toolbar'>
             <PrintDegradedNotice items={degraded} />
           </div>
           <div
             className='ap-stage origin-top-left'
-            style={{ transform: `scale(${k})`, width: `${report?.sheetW ?? 420}mm` }}
+            style={{ transform: `scale(${k})`, width: `${doc?.w ?? 420}mm` }}
           >
             <FormProvider {...methods}>
               <Document
@@ -402,7 +441,8 @@ export function TechCardAssemblyPrint() {
                 meta={meta}
                 onDeps={setDocDeps}
                 onShapesAvailable={setShapesAvailable}
-                onReport={onReport}
+                onDoc={onDoc}
+                docKey={currentKey}
               />
             </FormProvider>
           </div>
