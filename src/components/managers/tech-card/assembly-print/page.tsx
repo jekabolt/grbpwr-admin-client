@@ -238,16 +238,15 @@ export function TechCardAssemblyPrint() {
   const sheetHpx = (report?.sheetH ?? 0) * PX_PER_MM;
   const k = view === 'fit' ? Math.min(1, (winW - 48) / sheetWpx) : 1;
 
-  // Лист, который не влезает (слишком много полос / колонок) или с пересечением, на бумагу не
-  // уходит: тулбар на печати скрыт, и предупреждать было бы некому.
-  const doesNotFit = !!report && (report.overWidth || report.crossings > 0);
+  // Лист сам растёт за содержимым (420 → 594 → 841 → шире), так что печать не запрещается
+  // никогда; шире A0 и пересечения (по построению их нет) — сведения в ридауте, не засов.
   const readout = report
     ? [
         `sheet ${report.sheetW} × ${report.sheetH} mm`,
         report.lanes != null ? `${report.lanes} lanes × ${report.pitch} mm` : '',
         report.cols != null ? `${report.cols} columns × ${report.colW} mm` : '',
         `${report.crossings} crossings`,
-        report.overWidth ? 'too wide for the sheet' : '',
+        report.overWidth ? 'wider than A0 — print from a roll' : '',
       ]
         .filter(Boolean)
         .join(' · ')
@@ -277,7 +276,7 @@ export function TechCardAssemblyPrint() {
                 pressed={form === 'route'}
                 selected={form === 'route'}
                 onClick={() => setChoice({ form: 'route' })}
-                title='operations in order with unit lanes on the right — 420 mm wide'
+                title='operations in order with unit lanes on the right — 420 mm wide, grows to 594 / 841 when the lanes need it'
               >
                 route ledger
               </Chip>
@@ -286,7 +285,7 @@ export function TechCardAssemblyPrint() {
                 pressed={form === 'map'}
                 selected={form === 'map'}
                 onClick={() => setChoice({ form: 'map' })}
-                title='tree of unit cards, leaves on the left — 841 mm wide'
+                title='tree of unit cards, leaves on the left — 420 / 594 / 841 mm wide by the number of columns'
               >
                 map tree
               </Chip>
@@ -357,16 +356,11 @@ export function TechCardAssemblyPrint() {
             variant='main'
             size='lg'
             className='uppercase'
-            disabled={!techCard || !ready || doesNotFit}
+            disabled={!techCard || !ready}
             onClick={() => window.print()}
           >
             save as pdf
           </Button>
-          {doesNotFit && (
-            <Text variant='error' size='small'>
-              this card does not fit the sheet — try the other diagram
-            </Text>
-          )}
         </div>
       </div>
 

@@ -86,15 +86,26 @@ export type CardMeasure = {
   rowOf: (stepIndex: number) => { top: number; h: number } | null;
 };
 
+/**
+ * Провод MAP — отрезок «шины» родителя. У КАЖДОГО родителя одна вертикальная шина посреди щели
+ * перед его колонкой; ребёнок входит в шину горизонталью от своего правого края на высоте своей
+ * шапки, а из шины в КАЖДУЮ строку родителя, которая берёт узлы, идёт горизонталь со стрелкой.
+ *
+ * Почему не кривые: при перепаде в сотни мм и щели в 20 мм S-кривая превращалась в вертикаль с
+ * крючком у стрелки — читалось как «криво». Прямые печатаются чисто, стрелка всегда горизонтальна.
+ * Почему шина, а не отдельный провод на ребёнка: два ортогональных провода со вложенными
+ * пролётами пересекаются при ЛЮБОМ выборе дорожек, а одна общая шина не пересекает ничего:
+ * полосы поддеревьев не пересекаются, и шина вместе с ветками лежит внутри полосы родителя.
+ * Какой ребёнок в какую строку — говорит текст строки (`WITH …`), провод ведёт к узлу.
+ */
 export type Wire = {
-  from: string;
-  to: string;
+  /** Родитель, чьей шине принадлежит отрезок: внутри одной шины отрезки касаются по замыслу. */
+  group: string;
   d: string;
-  /** Конец провода (стрелка). */
-  x2: number;
-  y2: number;
-  /** Ломаная для счётчика пересечений. */
+  /** Ломаная для счётчика пересечений (скругления углов в неё не входят — они 2 мм). */
   pts: [number, number][];
+  /** Стрелка на правом конце (вход в строку родителя). */
+  arrow?: { x: number; y: number };
 };
 
 export type MapLayout = {
@@ -103,25 +114,6 @@ export type MapLayout = {
   /** Низ последней полосы, мм. */
   bottom: number;
 };
-
-function cubic(
-  p0: [number, number],
-  c1: [number, number],
-  c2: [number, number],
-  p1: [number, number],
-  n: number,
-): [number, number][] {
-  const out: [number, number][] = [];
-  for (let i = 1; i <= n; i++) {
-    const t = i / n;
-    const mt = 1 - t;
-    out.push([
-      mt * mt * mt * p0[0] + 3 * mt * mt * t * c1[0] + 3 * mt * t * t * c2[0] + t * t * t * p1[0],
-      mt * mt * mt * p0[1] + 3 * mt * mt * t * c1[1] + 3 * mt * t * t * c2[1] + t * t * t * p1[1],
-    ]);
-  }
-  return out;
-}
 
 /**
  * Раскладка MAP: колонка = высота поддерева, полоса поддерева непрерывна, дети — по наименьшему
@@ -171,46 +163,76 @@ export function mapLayout(
   // Без единого узла низ содержимого — низ шапки, а не «на две щели выше неё».
   const bottom = M.roots.length ? top - m.gapY * 2 : m.top;
 
-  const fan = new Map<string, string[]>();
-  for (const u of M.units)
-    for (const c of kidsOf(u.key)) {
-      const k = `${u.key}:${M.unitByKey.get(c)!.parent!.step}`;
-      fan.set(k, [...(fan.get(k) ?? []), c]);
-    }
   const wires: Wire[] = [];
-  for (const u of M.units) {
-    if (!u.parent) continue;
-    const from = pos.get(u.key)!;
-    const to = pos.get(u.parent.key)!;
-    const row = measureOf(u.parent.key).rowOf(u.parent.step);
-    if (!row) continue;
-    const y1 = from.y + measureOf(u.key).headY;
-    const sib = fan.get(`${u.parent.key}:${u.parent.step}`) ?? [u.key];
-    const rowTop = to.y + row.top;
-    const y2 =
-      sib.length === 1
-        ? rowTop + row.h / 2
-        : rowTop + (row.h * (sib.indexOf(u.key) + 1)) / (sib.length + 1);
-    const xa = from.x + m.colW;
-    const xb = to.x;
-    const xTurn = xb - m.gutter;
-    const half = m.gutter * 0.5;
-    const pts: [number, number][] = [[xa, y1]];
-    let d: string;
-    if (xTurn > xa + 0.5) {
-      pts.push([xTurn, y1]);
-      pts.push(...cubic([xTurn, y1], [xTurn + half, y1], [xb - half, y2], [xb, y2], 24));
-      d = `M${xa},${y1} H${xTurn} C${xTurn + half},${y1} ${xb - half},${y2} ${xb},${y2}`;
-    } else {
-      pts.push(...cubic([xa, y1], [xa + half, y1], [xb - half, y2], [xb, y2], 24));
-      d = `M${xa},${y1} C${xa + half},${y1} ${xb - half},${y2} ${xb},${y2}`;
+  const R_CORNER = 2;
+  for (const p of M.units) {
+    const kids = kidsOf(p.key);
+    if (!kids.length) continue;
+    const to = pos.get(p.key)!;
+    const busX = to.x - m.gutter / 2;
+    const joins = kids.map((c) => {
+      const from = pos.get(c)!;
+      return { x: from.x + m.colW, y: from.y + measureOf(c).headY };
+    });
+    // Строки родителя, которые берут узлы, — по одной стрелке на строку, без дублей.
+    const rowsIn = [...new Set(kids.map((c) => M.unitByKey.get(c)!.parent!.step))]
+      .map((step) => measureOf(p.key).rowOf(step))
+      .filter((r): r is { top: number; h: number } => r !== null)
+      .map((r) => to.y + r.top + r.h / 2);
+    const ys = [...joins.map((j) => j.y), ...rowsIn];
+    const yTop = Math.min(...ys);
+    const yBot = Math.max(...ys);
+    const r = Math.min(R_CORNER, (yBot - yTop) / 2);
+    // Шина между крайними точками; крайние примыкания получают скругление в её сторону.
+    if (yBot - yTop > 0.01)
+      wires.push({
+        group: p.key,
+        d: `M${busX},${yTop + r} V${yBot - r}`,
+        pts: [
+          [busX, yTop],
+          [busX, yBot],
+        ],
+      });
+    const cornerIn = (y: number) => (y - yTop < 0.01 ? 1 : yBot - y < 0.01 ? -1 : 0); // куда загибаться: вниз, вверх, никуда
+    for (const j of joins) {
+      const s = cornerIn(j.y);
+      const d =
+        s === 0 || r < 0.01
+          ? `M${j.x},${j.y} H${busX}`
+          : `M${j.x},${j.y} H${busX - r} Q${busX},${j.y} ${busX},${j.y + s * r}`;
+      wires.push({
+        group: p.key,
+        d,
+        pts: [
+          [j.x, j.y],
+          [busX, j.y],
+        ],
+      });
     }
-    wires.push({ from: u.key, to: u.parent.key, d, x2: xb, y2, pts });
+    for (const y of rowsIn) {
+      const s = cornerIn(y);
+      const d =
+        s === 0 || r < 0.01
+          ? `M${busX},${y} H${to.x}`
+          : `M${busX},${y + s * r} Q${busX},${y} ${busX + r},${y} H${to.x}`;
+      wires.push({
+        group: p.key,
+        d,
+        pts: [
+          [busX, y],
+          [to.x, y],
+        ],
+        arrow: { x: to.x, y },
+      });
+    }
   }
   return { pos, wires, bottom };
 }
 
-/** Пары проводов MAP, у которых ломаные пересекаются хотя бы раз. По построению — ноль. */
+/**
+ * Пары отрезков РАЗНЫХ шин MAP, у которых ломаные пересекаются хотя бы раз. По построению — ноль.
+ * Отрезки одной шины касаются друг друга по замыслу и не считаются.
+ */
 export function mapCrossings(wires: Wire[]): number {
   const orient = (p: [number, number], q: [number, number], r: [number, number]) =>
     Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
@@ -223,6 +245,7 @@ export function mapCrossings(wires: Wire[]): number {
   let n = 0;
   for (let i = 0; i < wires.length; i++)
     for (let j = i + 1; j < wires.length; j++) {
+      if (wires[i].group === wires[j].group) continue;
       const A = wires[i].pts;
       const B = wires[j].pts;
       let hit = false;
