@@ -101,8 +101,7 @@ export type CardMeasure = {
 export type Wire = {
   /** Родитель, чьей шине принадлежит отрезок: внутри одной шины отрезки касаются по замыслу. */
   group: string;
-  d: string;
-  /** Ломаная для счётчика пересечений (скругления углов в неё не входят — они 2 мм). */
+  /** Отрезок провода, мм: прямые линии, углы 90°. */
   pts: [number, number][];
   /** Стрелка на правом конце (вход в строку родителя). */
   arrow?: { x: number; y: number };
@@ -164,7 +163,6 @@ export function mapLayout(
   const bottom = M.roots.length ? top - m.gapY * 2 : m.top;
 
   const wires: Wire[] = [];
-  const R_CORNER = 2;
   for (const p of M.units) {
     const kids = kidsOf(p.key);
     if (!kids.length) continue;
@@ -182,49 +180,32 @@ export function mapLayout(
     const ys = [...joins.map((j) => j.y), ...rowsIn];
     const yTop = Math.min(...ys);
     const yBot = Math.max(...ys);
-    const r = Math.min(R_CORNER, (yBot - yTop) / 2);
-    // Шина между крайними точками; крайние примыкания получают скругление в её сторону.
+    // Шина между крайними примыканиями; углы ПРЯМЫЕ — владелец: «90 градусов, без скруглений».
     if (yBot - yTop > 0.01)
       wires.push({
         group: p.key,
-        d: `M${busX},${yTop + r} V${yBot - r}`,
         pts: [
           [busX, yTop],
           [busX, yBot],
         ],
       });
-    const cornerIn = (y: number) => (y - yTop < 0.01 ? 1 : yBot - y < 0.01 ? -1 : 0); // куда загибаться: вниз, вверх, никуда
-    for (const j of joins) {
-      const s = cornerIn(j.y);
-      const d =
-        s === 0 || r < 0.01
-          ? `M${j.x},${j.y} H${busX}`
-          : `M${j.x},${j.y} H${busX - r} Q${busX},${j.y} ${busX},${j.y + s * r}`;
+    for (const j of joins)
       wires.push({
         group: p.key,
-        d,
         pts: [
           [j.x, j.y],
           [busX, j.y],
         ],
       });
-    }
-    for (const y of rowsIn) {
-      const s = cornerIn(y);
-      const d =
-        s === 0 || r < 0.01
-          ? `M${busX},${y} H${to.x}`
-          : `M${busX},${y + s * r} Q${busX},${y} ${busX + r},${y} H${to.x}`;
+    for (const y of rowsIn)
       wires.push({
         group: p.key,
-        d,
         pts: [
           [busX, y],
           [to.x, y],
         ],
         arrow: { x: to.x, y },
       });
-    }
   }
   return { pos, wires, bottom };
 }
