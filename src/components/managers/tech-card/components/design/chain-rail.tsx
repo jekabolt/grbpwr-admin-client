@@ -15,6 +15,7 @@ import {
   STEPS,
   chainGate,
   doneCount,
+  moodMinimumGate,
   nearestBlock,
   stepState,
   type ChainCtx,
@@ -22,6 +23,7 @@ import {
   type StepId,
   type StepState,
 } from './core/chain';
+import { isBoardRow, type BoardItem } from './mood-board';
 import { LockBar } from './render/generate-row';
 import { countThreedResults } from './threed/media';
 
@@ -208,9 +210,13 @@ export function useChainCtx({
   colorway: { id: number; label: string; archived: boolean };
 }): ChainCtx {
   const { control } = useFormContext<TechCardFormData>();
+  // BOARD ROWS ONLY (Codex B-10). `moodboardMedia` holds the flat input too — REFERENCE rows —
+  // and counting them told the rail «the moodboard has pictures» over a card whose only picture was
+  // a flat reference. The predicate is the board's own (`isBoardRow`), not a second reading of it.
   const moodPictures = (
-    (useWatch({ control, name: 'moodboardMedia' }) as unknown[] | undefined) ?? []
-  ).length;
+    (useWatch({ control, name: 'moodboardMedia' }) as BoardItem[] | undefined) ?? []
+  ).filter(isBoardRow).length;
+  const moodConcept = (useWatch({ control, name: 'concept' }) as string | null | undefined) ?? '';
   const name = (useWatch({ control, name: 'name' }) as string | undefined) ?? '';
   const styleNumber = (useWatch({ control, name: 'styleNumber' }) as string | undefined) ?? '';
   const categoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
@@ -238,9 +244,29 @@ export function useChainCtx({
     now: null,
     card: { name, styleNumber, categoryId, baseSampleSizeId, pastIdea },
     moodPictures,
+    moodConcept,
     counts,
     colorway,
   };
+}
+
+/**
+ * ═══ THE MOODBOARD MINIMUM, READ FROM THE FORM — for a button that is about to spend money ═══════
+ *
+ * The flat's GENERATE (zone CL-D) refuses with EXACTLY the sentence the rail locks FLAT with,
+ * because both read `moodMinimumGate` over the same three facts: pictures ON THE BOARD
+ * (`isBoardRow`), the description, the category. `door` is where the refusal is fixed — `mood` for
+ * the board's content, `card` when only the category is missing; open it with
+ * `openStepOf('concept')` / `openStepOf('categoryId', '#card-details')` (core/chain.ts).
+ */
+export function useMoodMinimumGate(): ReturnType<typeof moodMinimumGate> {
+  const { control } = useFormContext<TechCardFormData>();
+  const boardPictures = (
+    (useWatch({ control, name: 'moodboardMedia' }) as BoardItem[] | undefined) ?? []
+  ).filter(isBoardRow).length;
+  const concept = (useWatch({ control, name: 'concept' }) as string | null | undefined) ?? '';
+  const categoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
+  return moodMinimumGate({ boardPictures, concept, categoryId });
 }
 
 /**
@@ -260,7 +286,11 @@ function doorLabel(door: StepId): string {
       // render yet, and its flats may well be standing already.
       return 'the flat bench ›';
     case 'mood':
-      return '+ picture ›';
+      // The moodboard minimum (D-10) is «a picture OR forty characters of description» — the door
+      // names the place, not one of the two ways to satisfy it.
+      return 'moodboard ›';
+    case 'card':
+      return 'card details ›';
     default:
       return `go to ${[...STEPS, ...ASIDES].find((s) => s.id === door)?.label ?? door} ›`;
   }

@@ -1,7 +1,14 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
+import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 
 import type { DesignKind } from '../bench-kinds';
 import { benchSides, renderGate, threedGate, type Gate } from '../render/model';
+import {
+  moodboardGate,
+  moodGateSentence,
+  type MoodGateInput,
+  type MoodGateResult,
+} from './mood-gate';
 
 /**
  * THE CHAIN — six named steps of the DESIGN band, and where this card stands on them.
@@ -35,6 +42,13 @@ import { benchSides, renderGate, threedGate, type Gate } from '../render/model';
  * bench (missing front/back) or an archived colourway — both fixed elsewhere → obstacle. `threedGate`
  * refuses over the RENDER bench or the same archived colourway → obstacle. The two screens'
  * `own` refusals (fabric recipe, body, size) live in local drafts and never reach here.
+ *
+ * ═══ ONE GATE THIS MODULE DOES OWN: THE MOODBOARD MINIMUM (wave 25.09, D-10 / Codex B-10) ═══════
+ * «пока мы не заполним минимально поля в мудборде, мы не можем пойти дальше по флоу». The rule is
+ * written once, in `./mood-gate.ts`, and read here by three readers — `stepDone('mood')`,
+ * `chainGate('mood')` and `chainGate('flat')` — and by the two GENERATE buttons through
+ * `moodMinimumGate` below. Before the wave the rail said «mood done» on one picture while the draft
+ * refused on another rule and the flat never refused at all: three answers to one question.
  *
  * ═══ TEXTS NAME THE STEP, NEVER ITS NUMBER ═══════════════════════════════════════════════════════
  * CARD DETAILS became step 0 and shifted every number by one (REVIEW: «каждая прежняя ссылка „шаг N“
@@ -154,10 +168,13 @@ export function kindOfStep(id: StepId): DesignKind | undefined {
  * the document; `revealField` then asks the document who can bring the field on, and the composer
  * answers from this map (see `studio-tab.tsx`). Keyed by the ROOT of the RHF path (`bomItems.3.name`
  * → `bomItems`), the same key `ERROR_TAB` in `components/index.tsx` routes tabs by. The rows say
- * where the field is DRAWN, not where it is filed: `categoryId` is a card fact, and it renders in
- * GENERAL INFORMATION on the moodboard step (`construction-general-info.tsx`, B-27) — a row pointing
- * at `card` would switch to a step that does not contain it, i.e. the same lie ERROR_TAB warns
- * against. Walk this map with every move of a block, as that one.
+ * where the field is DRAWN, not where it is filed. Walk this map with every move of a block.
+ *
+ * WAVE 25.09 (T05) MOVED TWO ROWS: `fit` and `categoryId` are no longer EDITED on the moodboard step
+ * — GENERAL INFORMATION prints them as values with one door `edit in card details ›`, and the
+ * editors live in CARD DETAILS (the category browser always stood there too; the fit select moved
+ * there in zone CL-C). A row still pointing at `mood` would switch a Save refusal over `fit` to a
+ * step that shows the fit but cannot change it.
  */
 const FIELD_STEP: Record<string, StepId> = {
   // the header slot (`cardDetails`, index.tsx): identification · classification · base model
@@ -170,14 +187,15 @@ const FIELD_STEP: Record<string, StepId> = {
   baseModelId: 'card',
   baseSampleSizeId: 'card',
   roles: 'card',
+  // the two style facts GENERAL INFORMATION prints read-only since wave 25.09 (T05)
+  fit: 'card',
+  categoryId: 'card',
   // the moodboard step: the board, its description, the callouts, general information
-  // (fit, category, silhouette/fabric aspects), construction aspects, material slots
+  // (silhouette/fabric aspects), construction aspects, material slots
   moodboardMedia: 'mood',
   concept: 'mood',
   callouts: 'mood',
   details: 'mood',
-  fit: 'mood',
-  categoryId: 'mood',
   bomItems: 'mood',
   // the flat step: the prompt's words, and the bench doors (`design.bench.*`, `doors.ts`)
   garmentDescription: 'flat',
@@ -187,6 +205,46 @@ export function stepOfField(path: string): StepId | null {
   const [root, second] = path.split('.');
   if (root === 'design') return second === 'bench' ? 'flat' : null;
   return FIELD_STEP[root ?? ''] ?? null;
+}
+
+/**
+ * ═══ A DOOR TO THE STEP THAT DRAWS A FIELD — the same seam as `revealField`, without its pulse ═══
+ *
+ * Organs of one step cannot switch the step: the composer owns `?step=` (`studio-tab.tsx`, `goStep`)
+ * and hands the setter to nobody but the rail. It DOES listen for `FIELD_REVEAL_EVENT` — «bring the
+ * field at this path on» — and answers from `stepOfField` above. A door such as GENERAL
+ * INFORMATION's `edit in card details ›` or the flat's `moodboard ›` asks the same question, but it
+ * is not a refusal: `revealField` would pulse the field in the ERROR ring, and a red pulse after a
+ * plain «take me there» reads as «something is wrong there». So this dispatches the event itself,
+ * then waits (frames, as `revealField` does — a whole step has to mount) for the field's anchor
+ * and scrolls it to the centre, falling back to `fallback` when the step draws no anchor for it.
+ *
+ * Returns false when nobody claimed the request — the field's step is already on screen or the
+ * path is unknown — and then only scrolls. Pass a path, not a step: the map stays the one place
+ * that knows where a field lives.
+ */
+export function openStepOf(path: string, fallback?: string): boolean {
+  if (typeof document === 'undefined') return false;
+  const ask = new CustomEvent<FieldRevealDetail>(FIELD_REVEAL_EVENT, {
+    bubbles: true,
+    cancelable: true,
+    detail: { path },
+  });
+  const claimed = !document.dispatchEvent(ask);
+  const find = () =>
+    document.querySelector<HTMLElement>(`[data-field="${CSS.escape(path)}"]`) ??
+    (fallback ? document.querySelector<HTMLElement>(fallback) : null);
+  let left = 90;
+  const tick = (): void => {
+    const el = find();
+    if (el && el.getClientRects().length > 0) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    if (--left > 0) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  return claimed;
 }
 
 /**
@@ -211,8 +269,14 @@ export type ChainCtx = {
     /** `stage !== IDEA` — the one condition under which the schema refuses a blank style number. */
     pastIdea: boolean;
   };
-  /** How many pictures the moodboard holds (form field `moodboardMedia`). */
+  /**
+   * How many pictures stand ON THE BOARD — rows of `moodboardMedia` that pass `isBoardRow`. The
+   * REFERENCE rows of the flat input share that field and are NOT counted (Codex B-10): a card whose
+   * only picture is a flat reference has an empty moodboard.
+   */
   moodPictures: number;
+  /** The board's description (`concept`) — the other half of the moodboard minimum. */
+  moodConcept: string;
   /** Counters the strip already computed with `pictureRepresentation` — not recomputed here. */
   counts: { pattern: number; render: number; threed: number; onmodel: number; playground: number };
   colorway: { id: number; label: string; archived: boolean };
@@ -239,6 +303,44 @@ export type ChainGate =
 
 export type StepState = 'now' | 'done' | 'skipped' | 'optional' | 'blocked' | 'next' | 'ready';
 
+/* ─────────────────────────── the moodboard minimum ─────────────────────────── */
+
+/** The minimum of THIS card, as the chain reads it. */
+export function moodGateOf(ctx: ChainCtx): MoodGateResult {
+  return moodboardGate({
+    boardPictures: ctx.moodPictures,
+    concept: ctx.moodConcept,
+    categoryId: ctx.card.categoryId,
+  });
+}
+
+/**
+ * Where a failed minimum is FIXED. The board's content is fixed on the moodboard; a missing category
+ * is fixed in CARD DETAILS, where the category browser stands (GENERAL INFORMATION only prints it
+ * since T05). Sending a person who lacks only the category to the moodboard would cost a second hop
+ * through a door that says «edit in card details». The content reason comes first in
+ * `moodboardGate`, so a card missing both is sent to the board first.
+ */
+export function moodGateDoor(r: MoodGateResult): StepId {
+  const contentMissing = r.reasons.some((why) => !/category/i.test(why));
+  return contentMissing || r.reasons.length === 0 ? 'mood' : 'card';
+}
+
+/**
+ * ═══ THE MOODBOARD MINIMUM AS A GATE — for the flat's GENERATE (zone CL-D) and the draft's ═══════
+ *
+ * One call for a button that is about to spend money: the product's `Gate` shape plus the step the
+ * refusal is fixed on. The rail locks FLAT with the SAME sentence (`chainGate('flat')` below), so the
+ * cell, the bar under the rail and the button can never disagree about why.
+ */
+export function moodMinimumGate(
+  v: MoodGateInput,
+): { ok: true } | { ok: false; reason: string; door: StepId } {
+  const r = moodboardGate(v);
+  if (r.ok) return { ok: true };
+  return { ok: false, reason: moodGateSentence(r), door: moodGateDoor(r) };
+}
+
 /* ─────────────────────────── the gates, asked not written ─────────────────────────── */
 
 /** Where a product `Gate.next` points, as a step of this chain. */
@@ -263,16 +365,22 @@ export function chainGate(id: StepId, ctx: ChainCtx): ChainGate {
     case 'card':
       // No run, no gate — stated, not defaulted (see `ChainGate`).
       return { ok: true, noRun: true };
-    case 'mood':
-      // The construction draft reads pictures; an empty board is the step's OWN input, fixed here.
-      if (ctx.moodPictures === 0) {
-        return { ok: false, own: true, reason: 'the moodboard is empty', door: 'mood' };
-      }
-      return { ok: true };
-    case 'flat':
-      // The flat's only refusal — an empty prompt — lives in the generation form's local state and
-      // is `own` by SPEC §2 p.1. Nothing else refuses a flat run, so the rail never locks it.
-      return { ok: true };
+    case 'mood': {
+      // The moodboard minimum is the step's OWN input — fixed on this step (and, for the category,
+      // one door away) — so the step stays open; it is the NEXT link that locks (below).
+      const r = moodGateOf(ctx);
+      if (r.ok) return { ok: true };
+      return { ok: false, own: true, reason: moodGateSentence(r), door: moodGateDoor(r) };
+    }
+    case 'flat': {
+      // THE FLAT IS LOCKED UNTIL THE MOODBOARD MINIMUM HOLDS (D-10): a flat drawn from an empty board
+      // and no category has nothing to be a flat OF. This refusal is NOT `own` — nothing on the flat
+      // step fixes it — so the rail paints the cell blocked and names the door. The flat's other
+      // refusal (an empty prompt) stays local to its form and `own`, per SPEC §2 p.1.
+      const r = moodGateOf(ctx);
+      if (r.ok) return { ok: true };
+      return { ok: false, reason: moodGateSentence(r), door: moodGateDoor(r) };
+    }
     case 'pattern':
       // `patternGate(band, sourceId)` needs the picked source: local to the screen, `own` by nature.
       return { ok: true };
@@ -336,7 +444,8 @@ export function stepDone(id: StepId, ctx: ChainCtx): boolean {
     case 'card':
       return cardMissingFields(ctx).length === 0;
     case 'mood':
-      return ctx.moodPictures > 0;
+      // The same minimum that unlocks the flat: a text-only board that passes it IS done (B-10).
+      return moodGateOf(ctx).ok;
     case 'flat':
       return !ctx.bandless && benchSides(ctx.band).some((s) => !!s.picture);
     case 'pattern':
