@@ -30,6 +30,7 @@ import {
   RENDER_MIN_VIEWS,
   benchSides,
   findDictionaryColour,
+  legacyRenderSides,
   slotOrigin,
   threedRevisions,
   threedSides,
@@ -497,6 +498,13 @@ export function SidesSection({
     () => colourwayColumns(band, colorways, targetColorwayId),
     [band, colorways, targetColorwayId],
   );
+  /** Занятые снятые 3/4 рендер-верстака, всех колорвеев (D-18', ревью Codex M1) — хвост блока. */
+  const legacy = useMemo(() => legacyRenderSides(band), [band]);
+  const colourwayName = (colorwayId: number): string => {
+    if (colorwayId === 0) return SAMPLE_LABEL;
+    const ref = colorways.find((r) => (r.colorwayId ?? 0) === colorwayId) ?? null;
+    return ref ? `${colorwayLabel(ref)}${archivedRef(ref) ? ' (archived)' : ''}` : `colourway ${colorwayId}`;
+  };
 
   const canWrite = !disabled;
 
@@ -981,6 +989,54 @@ export function SidesSection({
           })}
         </div>
       </div>
+
+      {/* ═══ СНЯТЫЕ 3/4 — ТОЛЬКО ЗАНЯТЫЕ, ТОЛЬКО С ✕ (D-18', ревью Codex M1) ═══════════════════
+          Таблица читает четыре стороны, и рендер, оставшийся в слоте 3/4 какого-то колорвея, в ней
+          не виден, а ARTIFACTS снимать плиту верстака отказывается и шлёт сюда. Поэтому хвост
+          блока — ряд «legacy views (N)», как на FLAT SLOTS: плита, её колорвей пилюлей и одна
+          дверь — снять. Правки пером нет: перерисовывать вид, которого больше нет, незачем. Архив
+          снимать не мешает — «архив не запрещает разбирать сделанное», как у плит таблицы. */}
+      {legacy.length > 0 && (
+        <>
+          <GroupLabel
+            action={
+              <Text size='micro' variant='label' component='span'>
+                3/4 is retired · ✕ takes a render off
+              </Text>
+            }
+          >
+            legacy views ({legacy.length})
+          </GroupLabel>
+          <Strip data-side-legacy=''>
+            {legacy.map((side) => {
+              const label = viewLabel(side.view);
+              const colourway = colourwayName(side.colorwayId);
+              return (
+                <div
+                  key={`${side.colorwayId}:${side.view}`}
+                  className={CELL}
+                  data-side-legacy-cell={`${side.colorwayId}:${side.view}`}
+                >
+                  <Plate
+                    picture={side.picture}
+                    name={`${label} · ${colourway}`}
+                    /* В ПОДВАЛЕ — ВИД БЕЗ «(legacy)»: ряд уже озаглавлен «legacy views», а в 138px
+                       рядом с пилюлей колорвея полное имя обрезалось до «3/4 LEFT (…» (замер,
+                       снимок пробы). Речь (`name`) держит полное имя. */
+                    label={label.replace(/\s*\(legacy\)$/, '')}
+                    origin={colourway}
+                    alt={`render · ${label} · ${colourway}`}
+                    saving={busy === busyKey('render', side.colorwayId, side.view)}
+                    onRemove={
+                      canWrite ? () => unmark(side.view, side.colorwayId, side.slotRev) : undefined
+                    }
+                  />
+                </div>
+              );
+            })}
+          </Strip>
+        </>
+      )}
 
       {/* ОДИН РЕДАКТОР НА БЛОК, ПО ИМЕНИ ЦЕЛИ. `draw` пишет В СЛОТ (флэт-верстак, CAS этой
           стороны); `edit` кладёт результат на карточку обычной картинкой и в слот не пишет. */}

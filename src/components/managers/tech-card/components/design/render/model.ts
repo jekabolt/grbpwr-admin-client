@@ -11,7 +11,15 @@ import type {
 import { isRunLive } from '../generation/run-state';
 import { mixedInputNote, provenanceLabel, readProvenance } from '../provenance';
 import { isPictureHidden } from '../visibility';
-import { ACTIVE_VIEWS, CARDINAL_VIEWS, isActiveView, normaliseViewKey, viewLabel } from '../views';
+import {
+  ACTIVE_VIEWS,
+  CARDINAL_VIEWS,
+  LEGACY_VIEWS,
+  isActiveView,
+  isLegacyView,
+  normaliseViewKey,
+  viewLabel,
+} from '../views';
 import type { ActiveView } from '../views';
 
 /**
@@ -192,6 +200,64 @@ export function benchSides(
       slotRev: slot?.slotRev ?? 0,
     };
   });
+}
+
+/**
+ * ═══ СНЯТЫЕ 3/4 ОДНОГО ВЕРСТАКА, ЗАНЯТЫЕ ПЛИТОЙ (D-18', ревью Codex M1) ═══════════════════════
+ *
+ * `benchSides` их пропускает — таблица сторон, 3D и лист читают четыре стороны, — но плита в таком
+ * слоте стоит на верстаке, и без этого чтения у неё не было бы двери, чтобы её снять: ARTIFACTS
+ * отказывается снимать плиту верстака и шлёт на студию, а в таблице студии ряда 3/4 нет.
+ *
+ * ТОЛЬКО ЗАПОЛНЕННЫЕ И РАЗРЕШЁННЫЕ. Пустой снятый слот предлагать нечем (вид не заполняют), а плита
+ * без картинки на загруженной странице нарисовалась бы дырой — тот же фильтр, что у ряда «legacy
+ * views» на FLAT SLOTS. Порядок — `LEGACY_VIEWS`, последняя строка вида выигрывает, как в
+ * `benchSides`.
+ */
+export type LegacyBenchSide = {
+  view: string;
+  slot: common_DesignBenchSlot;
+  picture: common_DesignPicture;
+  slotRev: number;
+};
+
+export function legacyBenchSides(
+  band: GetDesignBandResponse,
+  kind: BenchKind = 'flat',
+  colorwayId: number = COLORWAY_NONE,
+): LegacyBenchSide[] {
+  const byView = new Map<string, common_DesignBenchSlot>();
+  for (const row of band.bench ?? []) {
+    if (!benchRowMatches(row, kind, colorwayId)) continue;
+    const key = normaliseViewKey(row.viewKey);
+    if (isLegacyView(key)) byView.set(key, row);
+  }
+  const out: LegacyBenchSide[] = [];
+  for (const view of LEGACY_VIEWS) {
+    const slot = byView.get(view);
+    if (!slot || (slot.pictureId ?? 0) <= 0 || !slot.picture) continue;
+    out.push({ view, slot, picture: slot.picture, slotRev: slot.slotRev ?? 0 });
+  }
+  return out;
+}
+
+/**
+ * Все занятые снятые 3/4 РЕНДЕР-верстака, по всем колорвеям (M1): хвост таблицы сторон FABRIC
+ * RENDER. По всем, а не по столбцам таблицы: столбец архивного колорвея рисуется, только когда у
+ * него есть плита на одной из ЧЕТЫРЁХ сторон, и плита 3/4 такого цвета иначе осталась бы без двери.
+ * Порядок — колорвей по номеру (семпл первым), внутри — `LEGACY_VIEWS`.
+ */
+export function legacyRenderSides(
+  band: GetDesignBandResponse,
+): (LegacyBenchSide & { colorwayId: number })[] {
+  const ids = new Set<number>();
+  for (const row of band.bench ?? []) {
+    if (benchKindOf(row) !== 'render') continue;
+    if (isLegacyView(normaliseViewKey(row.viewKey))) ids.add(colorwayOf(row));
+  }
+  return [...ids]
+    .sort((a, b) => a - b)
+    .flatMap((id) => legacyBenchSides(band, 'render', id).map((side) => ({ ...side, colorwayId: id })));
 }
 
 /** Every picture standing in a silhouette slot of one bench right now, keyed by its own id. */

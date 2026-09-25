@@ -623,6 +623,14 @@ function platePlan(
     if (seen.has(key)) continue;
     seen.add(key);
 
+    /* СНЯТЫЙ ВИД — «retired» ДО перевода файла в картинку (ревью Codex m2). Плита 3/4 может не
+       лежать на загруженной странице истории, и тогда она читалась бы «не найдена», хотя ответ
+       другой и окончательный: вернуть её некуда вовсе, слота такого вида больше не предлагают. */
+    if (isLegacyView(view)) {
+      retired++;
+      continue;
+    }
+
     const pictureId = byMedia.get(mediaId) ?? 0;
     if (pictureId <= 0) {
       unresolved++;
@@ -647,10 +655,6 @@ function platePlan(
       continue;
     }
 
-    if (isLegacyView(view)) {
-      retired++;
-      continue;
-    }
     if (!isActiveView(view)) continue;
     const row = benchRow(band, benchKind, view);
     moves.push({

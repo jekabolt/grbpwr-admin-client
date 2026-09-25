@@ -1014,15 +1014,31 @@ export function documentPlates(
   const plates: DocumentPlate[] = [];
   const seen = new Set<number>();
 
+  /* ═══ СНЯТЫЙ 3/4, УЖЕ ВЗЯТЫЙ НА КАРТОЧКУ, НАЗЫВАЕТСЯ СВОИМ ВИДОМ (D-18', ревью Codex M2) ══════
+     В словаре карточки вида 3/4 нет, и `takeIntoCard` файлит такую плиту DETAIL — единственное
+     честное «не сторона». Но карточная строка идёт ПЕРВОЙ и съедает строку верстака дедупом, и лист
+     подписывал плиту «detail», хотя верстак знает, что это 3/4 left. Имя вида берётся из ряда
+     legacy ДО дедупа — и только для карточного рода, который стороной не является: FRONT на
+     карточке остаётся FRONT, что бы ни стояло в слоте. */
+  const legacyName = new Map<number, string>();
+  for (const slot of bench.legacy) {
+    if (!slotIsFilled(slot)) continue;
+    const id = slot.picture?.media?.id ?? 0;
+    if (id > 0) legacyName.set(id, viewLabel((slot.viewKey ?? '').trim()).toUpperCase());
+  }
+
   formMedia.forEach((item, i) => {
     const mediaId = item.mediaId ?? 0;
     if (mediaId <= 0 || seen.has(mediaId)) return;
     seen.add(mediaId);
+    const kind = (item.kind ?? '') as common_TechCardMediaKind;
     plates.push({
       // КЛЮЧ — ПО МЕДИА, у всех плит листа одинаково (довод у `bandPlates`): плита не меняет
       // ключа оттого, что её взяли на карточку или сняли с неё.
       key: `m-${mediaId}`,
-      name: CARD_PLATE_KINDS[(item.kind ?? '') as common_TechCardMediaKind] ?? `image ${i + 1}`,
+      name:
+        (!CARD_KIND_VIEW[kind] && legacyName.get(mediaId)) ||
+        (CARD_PLATE_KINDS[kind] ?? `image ${i + 1}`),
       mediaId,
       media: resolved.get(mediaId),
       origin: 'card',

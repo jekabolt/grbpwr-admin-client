@@ -13,7 +13,7 @@ import { VectorModal } from '../modals';
 import { PictureTile } from '../picture-tile';
 import { benchSides } from '../render/model';
 import { FieldRow, Hint, Swatch } from '../render/field-row';
-import { viewLabel } from '../views';
+import { isLegacyView, normaliseViewKey, viewLabel } from '../views';
 import {
   COLOUR_WORDS_MAX,
   type ColourPlanDoc,
@@ -91,6 +91,17 @@ export function PartsRow({
     for (const one of plan.maps) m.set(one.view, one);
     return m;
   }, [plan.maps]);
+  /**
+   * КАРТЫ СНЯТЫХ 3/4 (D-18', ревью Codex M3). План их хранит, а плитки у них нет — плитки идут по
+   * четырём сторонам верстака, — значит и двери снять такую карту не было, а подсказка ниже
+   * («repaint the stale views or drop them») звала сделать то, чего на экране сделать нечем. Они
+   * не уезжают с прогоном (`mapState` — `orphan`: слота такого вида нет), поэтому им положена ровно
+   * одна дверь — снять.
+   */
+  const legacyMaps = useMemo(
+    () => plan.maps.filter((m) => isLegacyView(normaliseViewKey(m.view))),
+    [plan.maps],
+  );
   const colours = useMemo(() => planColours(band, plan), [band, plan]);
   const assets = useMemo(() => assetById(band), [band]);
 
@@ -245,6 +256,45 @@ export function PartsRow({
               );
             })}
           </Tiles>
+
+          {/* ── СНЯТЫЕ ВИДЫ: карта 3/4 — имя вида, её образцы и одна дверь `drop ✕` (M3). */}
+          {legacyMaps.length > 0 && (
+            <div className='flex flex-col gap-1' data-colour-legacy={legacyMaps.length}>
+              <Text size='nano' variant='label' component='span' className='uppercase'>
+                legacy views ({legacyMaps.length}) · 3/4 is retired · these maps do not travel
+              </Text>
+              {legacyMaps.map((m) => (
+                <div
+                  key={m.view}
+                  data-colour-legacy-map={m.view}
+                  className='flex min-w-0 flex-wrap items-center gap-2 border-b border-hairline py-1'
+                >
+                  <Text size='micro' component='span' className='uppercase'>
+                    {viewLabel(m.view)}
+                  </Text>
+                  {m.palette.length > 0 && (
+                    <span className='flex min-w-0 flex-wrap gap-0.5'>
+                      {m.palette.map((sw) => (
+                        <Swatch key={sw.hex} hex={sw.hex} size={10} title={sw.hex} />
+                      ))}
+                    </span>
+                  )}
+                  {!disabled && (
+                    /* НАСТОЯЩАЯ КНОПКА, НЕ `nonForm`: дверь ПИШЕТ план, и выключенный fieldset
+                       карточки только для чтения обязан её гасить (правило у `Chip`). */
+                    <Chip
+                      dashed
+                      onClick={() => void dropMap(m.view)}
+                      aria-label={`drop the ${viewLabel(m.view)} colour map`}
+                      title='drop this colour map — 3/4 views are retired; the colours only it carried leave the menu with it'
+                    >
+                      drop ✕
+                    </Chip>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* ── ЯРУС ВТОРОЙ: ЦВЕТА. Ряд на цвет — и ни одной строки, когда красить ещё не начали:
               пустая ведомость под пустыми плитками была бы двумя способами сказать «ничего нет». */}

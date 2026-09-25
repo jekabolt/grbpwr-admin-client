@@ -11,7 +11,7 @@ import { mediaFullToViewerItem } from 'ui/components/media-viewer';
 
 import { GROUP_GAP } from '../core';
 import { PictureTile } from '../picture-tile';
-import { viewLabel } from '../views';
+import { normaliseViewKey, viewLabel } from '../views';
 import { formatMoney } from './money';
 import { isCancelling, isRunLive, runFailureText, runStatus, viewsLine } from './run-state';
 import { Thumb, thumbUrl } from './thumb';
@@ -150,7 +150,13 @@ export function RunPanel({
   };
   const plateRows = [...(inputs?.slots ?? [])]
     .filter((sl) => (sl.mediaId ?? 0) > 0)
-    .sort((a, b) => (VIEW_RANK[a.viewKey ?? ''] ?? 7) - (VIEW_RANK[b.viewKey ?? ''] ?? 7))
+    /* РАНГ ПО НОРМАЛИЗОВАННОМУ КЛЮЧУ (ревью Codex m1): снимок старых прогонов несёт и
+       верблюжье написание (`threeQuarterL`), и сырой ключ ставил такую плиту за деталь — номер на
+       экране расходился с «image k» серверного промпта. */
+    .sort(
+      (a, b) =>
+        (VIEW_RANK[normaliseViewKey(a.viewKey)] ?? 7) - (VIEW_RANK[normaliseViewKey(b.viewKey)] ?? 7),
+    )
     .map((sl) => ({
       mediaId: sl.mediaId ?? 0,
       media: sl.media,
