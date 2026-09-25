@@ -1,15 +1,22 @@
+import { cn } from 'lib/utility';
 import { useId, type JSX, type ReactNode } from 'react';
-import { useController, useFormContext, useWatch } from 'react-hook-form';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
+import { AiEnhance, type EnhanceField } from 'ui/components/ai-enhance';
 import { Section } from 'ui/components/section';
-import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { GROUP_SEAM } from './design/core';
-import { BoardMovedPill } from './design/head/mood-organs';
-import { FIT_OPTIONS } from './design/render/model';
+import { cardFactsContext } from './design/core/card-facts';
+import { openStepOf } from './design/core/chain';
+import { DraftedField } from './design/core/drafted-field';
+import { draftedKey, useDrafted } from './design/drafted-contract';
+import { fitLabel } from './design/fit-vocabulary';
+import { useCardFacts, useFitKeys } from './design/head/card-facts-form';
+import { useAcceptOnEdit } from './design/head/drafted-provider';
+import { BoardMovedPill, DraftedPill, GoTo } from './design/head/mood-organs';
+import { isBoardRow } from './design/mood-board';
 import { upsertDetailText } from './form-writers';
-import { CategoryBrowser } from './header-meta-fields';
 import { TechCardFormData } from './schema';
 
 // C-5 · GENERAL INFORMATION — the block the owner asked for in CONSTRUCTION.
@@ -28,6 +35,10 @@ import { TechCardFormData } from './schema';
 // местом выше, блоком CONSTRUCTION DRAFT, где у каждой строки есть `show ▸` с обеими редакциями.
 // Строка подписи снова несёт ровно одно слово, и два поля рядом читаются одинаково.
 //
+// ⚠ ВОЛНА 25.09 (D-07) ВЕРНУЛА ПОМЕТКУ, НО НЕ В СТРОКУ ПОДПИСИ. Владелец попросил подсвечивать то,
+// что заполнил черновик, — это синяя рамка поля и пилюля `drafted` на ВЕРХНЕМ КРАЕ рамки, как
+// легенда: подпись поля по-прежнему несёт одно слово.
+//
 // ═══ ШАПКА БЛОКА — СВОЯ, И РЯД ПИЛЮЛЬ СТОИТ В НЕЙ (r1, по макету `step-1.png`) ═════════════════
 //
 // Блок рисует СВОЮ `Section` — `general information · what this style is` — и ставит
@@ -35,8 +46,8 @@ import { TechCardFormData } from './schema';
 // в её `action`, то есть в правый угол линейки, ровно как макет. Раньше обёртку держал композитор
 // (`design/studio-tab.tsx`) и слота `action` не отдавал, поэтому ряд стоял первой строкой ПОД
 // линейкой — на бете это прочли как расхождение с макетом. Обёртка переехала сюда по той же
-// причине, по какой её держат `MaterialSlots` и `ConstructionDraft`: счёты знает только орган
-// (`useProvenance`), а `Section` с `action` — это один узел, и делить его между двумя файлами
+// причине, по какой её держат `MaterialSlots` и `ConstructionDraft`: предупреждение знает только
+// орган (`BoardMovedPill`), а `Section` с `action` — это один узел, и делить его между двумя файлами
 // значило бы тянуть счёты наверх пропами ради одной строки.
 //
 // ⚠ ГРАНИЦА БЛОКА ПОЭТОМУ ЗДЕСЬ: композитор кладёт этот орган в стек как есть, без своей `Section`
@@ -47,8 +58,8 @@ import { TechCardFormData } from './schema';
 // Макет держит четыре поля: FIT · CONCEPT · SILHOUETTE · FABRIC. У продукта CONCEPT — это ОДНО
 // поле с описанием доски (V-16, владелец: «CONCEPT & CONSTRUCTION DESCRIPTION это и есть SHARED
 // NOTE»), и оно стоит блоком DESCRIPTION выше; второго редактора того же поля здесь не заводится.
-// Его место в гриде занимает CATEGORY — поле карточки, которого в макете нет, но которое обязано
-// где-то стоять (aux-карта его прячет, см. ниже). Общий счётчик «N of 3 drafted fields» и пилюлю
+// Его место в гриде занимала CATEGORY (с волны 25.09 — строка фактов FIT · CATEGORY над полями;
+// aux-карта её прячет, см. ниже). Общий счётчик «N of 3 drafted fields» и пилюлю
 // `FROM THE MOODBOARD` владелец снял (рулинг 11), пер-полевые пилюли происхождения — п.4 r2.
 //
 // ═══ КРУГ 20 — ЧТО ВЛАДЕЛЕЦ ОТСЮДА ЗАБРАЛ, И ЧЕМ ЭТО ОПЛАЧЕНО ════════════════════════════════
@@ -58,11 +69,24 @@ import { TechCardFormData } from './schema';
 // (`components/index.tsx`, блок «base»); категория осталась здесь и зовётся по имени —
 // `CategoryBrowser`.
 //
+// ═══ ВОЛНА 25.09 (T05) — FIT И CATEGORY ЗДЕСЬ ЗНАЧЕНИЯ, А НЕ СЕЛЕКТЫ ═══════════════════════════
+//
+// Два редактора одного факта на двух шагах — это два места, где его «последнее слово» расходится:
+// селект fit здесь писал форму, а на проводе fit несёт `StyleFactsField` (UpdateStyle), и человек
+// видел выбор, который уезжал другой дверью. Факты стиля правятся в CARD DETAILS (браузер категорий
+// стоял там всегда, селект fit туда переехал в зоне CL-C); здесь они ПЕЧАТАЮТСЯ — посадка словом,
+// категория путём по словарю («bottoms › pants › cargo») — с ОДНОЙ дверью `edit in card details ›`.
+// Дверь не пишет адрес сама: она просит композитора показать шаг, где поле нарисовано
+// (`openStepOf`, тот же шов, что у `revealField`), — `?step=` по-прежнему пишет один `goStep`.
+//
+// SILHOUETTE и FABRIC остаются полями и получают две вещи волны: синюю рамку `drafted`, пока в поле
+// стоит текст черновика и его не приняли (`drafted-contract.ts`), и кнопку `ai ✦` в правом нижнем
+// углу (`AiEnhance`, контекст — факты карточки одним композитором `cardFactsContext`).
+//
 // NOTHING HERE IS A SECOND PLACE FOR A FACT THAT ALREADY HAS ONE — that is the whole discipline of
 // this file, aspect by aspect:
-//   · fit / category — THE SAME FORM FIELDS the CLASSIFICATION block used to render (`fit`,
-//     `categoryId`), moved, not copied; `fit` is still carried to the server by the staged
-//     `UpdateStyle` in the hidden `StyleFactsField` — this select writes the form field only.
+//   · fit / category — printed from THE SAME FORM FIELDS (`fit`, `categoryId`); edited in CARD
+//     DETAILS only (see above).
 //   · silhouette — the `details[]` aspect that ALREADY exists under key `silhouette`. The same
 //     row, edited from a second surface.
 //   · fabric — a `details[]` row under key `fabric`. Free text; `details` takes custom keys, so it
@@ -77,6 +101,11 @@ export function ConstructionGeneralInfo({
   readOnly: boolean;
 }) {
   const techCardId = useTechCardIdFromRoute();
+  // ФАКТЫ КАРТОЧКИ ДЛЯ `ai ✦` — ОДНО чтение формы (`useCardFacts`), один композитор строк
+  // (`cardFactsContext`). Путь категории берётся оттуда же, чтобы строка на экране и строка,
+  // уходящая модели, были одной строкой.
+  const facts = useCardFacts(isBoardRow);
+  const context = cardFactsContext(facts);
 
   return (
     /* СВОЯ `Section`, предупреждение доски — в её `action` (разбор в шапке файла). Пояснялка в
@@ -102,18 +131,15 @@ export function ConstructionGeneralInfo({
       >
         {/* Auxiliary cards carry no fit and no category — the same gate the CLASSIFICATION block
             applied. У aux-карты классификацию задаёт AUXILIARY TYPE в шапке; скрывается ТОЛЬКО
-            орган, значение `categoryId` остаётся в форме и раунд-трипится. */}
-        {!isAux && <FitField readOnly={readOnly} />}
-        {!isAux && (
-          <div className='min-w-0' data-c19-field='meta'>
-            <CategoryBrowser />
-          </div>
-        )}
+            строка фактов, значение `categoryId` остаётся в форме и раунд-трипится. */}
+        {!isAux && <StyleFacts categoryPath={facts.categoryPath ?? ''} />}
         <div className='min-w-0' data-c19-field-cell='silhouette'>
           <DetailTextField
             detailKey='silhouette'
             label='silhouette'
             placeholder='what this garment is, before how it is made'
+            readOnly={readOnly}
+            context={context}
           />
         </div>
         <div className='min-w-0' data-c19-field-cell='fabric'>
@@ -121,6 +147,8 @@ export function ConstructionGeneralInfo({
             detailKey='fabric'
             label='fabric'
             placeholder='the cloth this style is cut from'
+            readOnly={readOnly}
+            context={context}
           />
         </div>
       </div>
@@ -177,33 +205,74 @@ function FieldLabel({ htmlFor, children }: { htmlFor?: string; children: ReactNo
   );
 }
 
-// U-2: the fit dictionary is the exported copy in `design/render/model.ts` — the same one the
-// CLASSIFICATION select imported. Not a third copy.
-const fitFormOptions = FIT_OPTIONS.map((f) => ({ label: f, value: f }));
-
 /**
- * FIT — тот же примитив `Select`, что стоит под `SelectField`, но со своей подписью: `SelectField`
- * рисует `FormLabel` собственной метрикой, а четыре поля этого грида обязаны нести одну. Писатель
- * тот же — поле формы `fit` через `useController`; `data-field` — якорь `revealField`, который у
- * `FormItem` ставится сам, а здесь — рукой.
+ * ═══ ФАКТЫ СТИЛЯ — ЗНАЧЕНИЯ И ОДНА ДВЕРЬ (T05) ══════════════════════════════════════════════
+ *
+ * Строка во всю ширину грида: FIT · CATEGORY, справа — `edit in card details ›`. Пустой факт — `—`
+ * (DESIGN.md: пустота не рисуется нулём и не прячется). Посадка печатается словом словаря
+ * (`fitLabel`: `wide_leg` → «wide leg», `a_line` → «a-line»), тем же, каким её печатает CARD DETAILS.
+ * Посадка, записанная черновиком и ещё не просмотренная, стоит в синей рамке с пилюлей `drafted` —
+ * тем же органом, что поля ниже; снимает её `accept all` в блоке черновика или правка fit в CARD
+ * DETAILS.
+ *
+ * FIT НЕТ У ВЕЩИ, КОТОРАЯ ПОСАДКИ НЕ НЕСЁТ (accessories · shoes · bags · objects) — ровно как в CARD
+ * DETAILS (`useFitKeys`): печатать здесь факт, поля которого за дверью нет, значило бы звать
+ * человека править то, чего там не найти. Хранимое значение не трогается.
+ *
+ * Дверь просит шаг ПОЛЯ, а не шаг по имени: `categoryId`, пока категории нет (это главный недостающий
+ * факт, и именно его ждёт минимум мудборда) или пока посадки у вещи нет, иначе `fit`. Где нарисовано
+ * поле — знает карта шагов.
  */
-function FitField({ readOnly }: { readOnly: boolean }): JSX.Element {
+function StyleFacts({ categoryPath }: { categoryPath: string }): JSX.Element {
   const { control } = useFormContext<TechCardFormData>();
-  const { field } = useController({ control, name: 'fit' });
-  const id = useId();
+  const fit = ((useWatch({ control, name: 'fit' }) as string | null | undefined) ?? '').trim();
+  const categoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
+  const fitShown = useFitKeys() !== null;
+  const fitDrafted = useDrafted().isLive(draftedKey.fit, fit);
+
   return (
-    <div className='min-w-0 space-y-1' data-field='fit' data-c19-field='fit'>
-      <FieldLabel htmlFor={id}>fit</FieldLabel>
-      <Select
-        id={id}
-        name='fit'
-        aria-label='fit'
-        items={fitFormOptions}
-        value={(field.value as string | undefined) ?? ''}
-        onValueChange={(v: string) => field.onChange(v)}
-        onBlur={field.onBlur}
-        readOnly={readOnly}
-      />
+    <div
+      className='flex min-w-0 flex-wrap items-end gap-x-8 gap-y-3 sm:col-span-2'
+      data-c19-facts=''
+    >
+      {fitShown && (
+        <div className='min-w-0 space-y-1.5' data-c19-field='fit'>
+          <FieldLabel>fit</FieldLabel>
+          <div className='flex items-center gap-2'>
+            <DraftedField live={fitDrafted} pill={false} className={cn(fitDrafted && 'px-1.5')}>
+              <Text
+                component='span'
+                className={cn('block', fitDrafted && 'text-warning')}
+                data-c19-fact='fit'
+              >
+                {fit ? fitLabel(fit) : '—'}
+              </Text>
+            </DraftedField>
+            <DraftedPill live={fitDrafted} data-c19-drafted='fit' />
+          </div>
+        </div>
+      )}
+      <div className='min-w-0 space-y-1.5' data-c19-field='meta'>
+        <FieldLabel>category</FieldLabel>
+        <Text component='span' className='block break-words' data-c19-fact='category'>
+          {categoryPath || '—'}
+        </Text>
+      </div>
+      <div className='ml-auto'>
+        <GoTo
+          onClick={() =>
+            openStepOf(categoryId > 0 && fitShown ? 'fit' : 'categoryId', '#card-details')
+          }
+          data-c19-edit-in-card=''
+          title={
+            fitShown
+              ? 'fit and category are style facts — they are edited in card details'
+              : 'the category is a style fact — it is edited in card details'
+          }
+        >
+          edit in card details
+        </GoTo>
+      </div>
     </div>
   );
 }
@@ -216,14 +285,25 @@ function FitField({ readOnly }: { readOnly: boolean }): JSX.Element {
 // A textarea, not an input, even though the answer is often one line: an <input> silently strips
 // line breaks from a value it is handed, and a silhouette note typed across two lines on STUDIO
 // would lose its break the moment this field rendered it. Three rows, as the mock draws them.
+//
+// WAVE 25.09: the field sits in `DraftedField` (blue frame while the draft's words stand unreviewed;
+// its own edge is dropped then, so the text never moves by a pixel when the frame goes) and carries
+// `ai ✦` in its bottom-right corner — the textarea keeps `pb-7` so the last line never runs under it.
+// The pill `drafted` sits ON the frame's top edge, like a legend: in the label row it would put the
+// word back next to the label, which the owner removed as crooked (r2 p.4).
 function DetailTextField({
   detailKey,
   label,
   placeholder,
+  readOnly,
+  context,
 }: {
-  detailKey: string;
+  detailKey: Extract<EnhanceField, 'silhouette' | 'fabric'>;
   label: string;
   placeholder: string;
+  readOnly: boolean;
+  /** Факты карточки для `ai ✦` (`cardFactsContext`). */
+  context: string;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const details = (useWatch({ control, name: 'details' }) ?? []) as Array<{
@@ -233,6 +313,9 @@ function DetailTextField({
   }>;
   const value = details.find((d) => d.key === detailKey)?.text ?? '';
   const id = useId();
+  const key = draftedKey.detail(detailKey);
+  const drafted = useDrafted().isLive(key, value);
+  const settle = useAcceptOnEdit(key, value);
 
   // ПИСАТЕЛЬ ОДИН НА ТРИ ПОВЕРХНОСТИ — `form-writers.ts`. Здесь стояла его первая копия (вторая
   // жила в `details-editor.tsx`, третья родилась бы в черновике construction); правило строки
@@ -243,17 +326,37 @@ function DetailTextField({
   return (
     <div className='space-y-1' data-c19-field={detailKey}>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Textarea
-        id={id}
-        name={`construction-${detailKey}`}
-        value={value}
-        rows={3}
-        autoGrow={false}
-        maxLength={2000}
-        placeholder={placeholder}
-        data-c19-detail={detailKey}
-        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => write(e.target.value)}
-      />
+      <DraftedField live={drafted} pill={false} className='focus-within:border-textColor'>
+        <Textarea
+          id={id}
+          name={`construction-${detailKey}`}
+          value={value}
+          rows={3}
+          autoGrow={false}
+          maxLength={2000}
+          placeholder={placeholder}
+          // Без права записи поле читается, но не правится (внешний fieldset гасит только релиз).
+          readOnly={readOnly}
+          data-c19-detail={detailKey}
+          className={cn('pb-7', drafted && 'border-0 bg-transparent')}
+          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => write(e.target.value)}
+          onFocus={settle.onFocus}
+          onBlur={settle.onBlur}
+        />
+        <DraftedPill
+          live={drafted}
+          data-c19-drafted={detailKey}
+          className='pointer-events-none absolute -top-2 right-2 bg-bgColor'
+        />
+        <AiEnhance
+          field={detailKey}
+          value={value}
+          onApply={write}
+          context={context}
+          maxRunes={2000}
+          disabled={readOnly}
+        />
+      </DraftedField>
     </div>
   );
 }
