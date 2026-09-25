@@ -51,9 +51,14 @@ export function foldToken(s?: string | null): string {
  * выбираема человеком в селекте рядом, и предложить её значило бы предложить состояние, из
  * которого нет пути назад руками.
  */
-export function foldFit(s?: string | null): string {
+export function foldFit(s?: string | null, allowed?: readonly string[] | null): string {
+  // Волна 25.09 (T02 × D-07): словарь — ещё и СЕМЕЙСТВО вещи. `null` — вещь посадки не несёт
+  // (aux-карта, accessories · shoes · bags · objects), и черновик, который теперь сам пишет пустую
+  // посадку, не вписывает её в поле, скрытое в CARD DETAILS. `undefined` — сужения не знаем: весь
+  // словарь, как было.
+  if (allowed === null) return '';
   const f = foldToken(s);
-  return (FIT_OPTIONS as readonly string[]).find((o) => foldToken(o) === f) ?? '';
+  return (allowed ?? (FIT_OPTIONS as readonly string[])).find((o) => foldToken(o) === f) ?? '';
 }
 
 /**
@@ -293,6 +298,11 @@ export type DetailSuggestion = {
 /** Живые значения формы — ровно те поля, против которых считается сравнение. */
 export type FormSnapshot = {
   fit?: string;
+  /**
+   * Посадки, которые эта вещь может нести (`fitKeysFor` в `card-facts-form.ts` — правило CARD
+   * DETAILS): `null` — посадки нет вовсе, массив — ключи семейства, `undefined` — не сужаем.
+   */
+  fitChoices?: readonly string[] | null;
   concept?: string;
   details?: Array<{ key?: string; text?: string }>;
   /**
@@ -318,10 +328,10 @@ export type FormSnapshot = {
    * человеком в `манжета`, перестаёт узнаваться, чип «завести деталь» воскресает, и TAKE заводит
    * ВТОРОЙ слот про тот же узел. Имя же человек переименовывает законно — значит узнавать слот
    * по одному только текущему имени нельзя. Заполняется из журнала заполнений (`Fill` рода
-   * `detailSlot`: адрес — `slotId`, `after` — имя минта), поэтому знание СЕССИОННОЕ: после F5
-   * журнала нет, и переименованный слот снова читается как чужой. Настоящее лекарство —
-   * провенанс слота на сервере (бэкенд-задача рядом с «suggested details»), а не второй реестр
-   * имён на клиенте.
+   * `detailSlot`: адрес — `slotId`, `after` — имя минта). С волны 25.09 журнал переживает F5 В
+   * ЭТОМ БРАУЗЕРЕ (localStorage, `use-draft-fills.ts`), но не другой браузер и не другого человека:
+   * там переименованный слот снова читается как чужой. Настоящее лекарство — провенанс слота на
+   * сервере (бэкенд-задача рядом с «suggested details»), а не второй реестр имён на клиенте.
    */
   detailSlots?: Array<{ id?: number; name?: string; mintedAs?: string }>;
 };
@@ -412,7 +422,7 @@ export function diffProposal(
     });
   }
 
-  const fit = foldFit(draft.fit);
+  const fit = foldFit(draft.fit, form.fitChoices);
   if (fit) {
     const current = normText(form.fit);
     rows.push({
@@ -441,6 +451,11 @@ export function diffProposal(
 
   /* ── аспекты ── */
   const seenAspect = new Set<string>();
+  // Имена предложенных деталей, СВЁРНУТЫЕ: два самодельных ключа, различные лишь регистром или
+  // знаками («Cuff» и «cuff»), — две строки аспектов, но ОДНА деталь верстака. Без этого минт
+  // заводил бы первую, а сервер (он узнаёт имя свёрткой) отказывал бы второй — ложное
+  // «could not add cuff» (ревью Codex, волна 25.09).
+  const seenDetail = new Set<string>();
   for (const a of draft.aspects ?? []) {
     const key = foldAspectKey(a.key);
     const text = normText(a.text);
@@ -461,12 +476,16 @@ export function diffProposal(
        «sleeveCuff» на бумаге — это машинный ключ, попавший человеку на глаза. `detailKeyLabel`
        возвращает подпись словаря («sleeve / cuff»), а самодельному ключу — его самого, уже
        обрезанного `foldAspectKey` до 64 рун, то есть всегда короче серверных 120. */
-    details.push({
-      id: `detail:${key}`,
-      name: detailKeyLabel(key),
-      why: text,
-      onBench: benchNames.has(foldToken(detailKeyLabel(key))),
-    });
+    const detailFold = foldToken(detailKeyLabel(key));
+    if (detailFold && !seenDetail.has(detailFold)) {
+      seenDetail.add(detailFold);
+      details.push({
+        id: `detail:${key}`,
+        name: detailKeyLabel(key),
+        why: text,
+        onBench: benchNames.has(detailFold),
+      });
+    }
     const current = detailText(form, key);
     rows.push({
       id: `aspect:${key}`,

@@ -68,8 +68,21 @@ export type Fill = {
   before: string;
   /** ЧТО НАПИСАЛ ЧЕРНОВИК. Он же — мера живости записи (см. `isLive`). */
   after: string;
-  /** Когда, `HH:MM`. Только для глаз: журнал живёт сессию, а не карточку. */
+  /** Когда, `HH:MM`. Только для глаз. */
   at: string;
+  /**
+   * ═══ ПРОСМОТРЕНО ЧЕЛОВЕКОМ (волна 25.09, D-07' / ревью Codex B-09) ═══════════════════════════
+   *
+   * Пометка «drafted» на поле — это НЕ второй стор рядом с журналом, а ЭТОТ ЖЕ журнал с одним
+   * флагом: запись живая (`isLive`) и не `accepted` — поле подсвечено синим. `accept all N ▸` и
+   * правка поля ставят флаг, но НЕ стирают запись: значения уже сохранены автосейвом, «принять» =
+   * «я это видел», и `undo all` по-прежнему обязан уметь вернуть `before` (иначе кнопка принятия
+   * отбирала бы откат — ровно то, от чего предостерегал B-09).
+   *
+   * Отсутствие поля = `false`: записи, сделанные до волны, и записи НОВОГО прогона по тому же
+   * адресу (`mergeFill` берёт `next` целиком, кроме `before`) снова ждут взгляда человека.
+   */
+  accepted?: boolean;
 };
 
 export function fillIdOf(target: FillTarget): string {
@@ -158,6 +171,61 @@ export function isLive(fill: Fill, form: FormSnapshot): boolean {
 /** Живые записи журнала, новейшая первой — порядок отката «undo all». */
 export function liveFills(fills: Fill[], form: FormSnapshot): Fill[] {
   return fills.filter((f) => isLive(f, form));
+}
+
+/**
+ * ПОДСВЕЧЕННЫЕ — живые и ещё не просмотренные. Ровно этот список считает `accept all N ▸`, и
+ * ровно его рисуют синие рамки полей: число на кнопке и число рамок на экране не могут разойтись,
+ * потому что второго вычисления нет.
+ */
+export function draftedFills(fills: Fill[], form: FormSnapshot): Fill[] {
+  return fills.filter((f) => !f.accepted && isLive(f, form));
+}
+
+/**
+ * КЛЮЧ ПРЕЗЕНТАЦИИ → АДРЕС ЖУРНАЛА. Органы спрашивают контракт `drafted-contract.ts` ключами
+ * `concept` · `fit` · `details.<key>` · `bom.<lineKey>`; журнал адресует записи `fillIdOf`. Перевод
+ * написан ЗДЕСЬ, рядом с `fillIdOf`, потому что расходиться им нельзя: ключ, который не
+ * переводится, молча не подсвечивает ничего. Файл остаётся чистым — префиксы повторены строками,
+ * а не импортом контракта (тот тянет `react`).
+ */
+export function fillIdOfDraftedKey(key: string): string {
+  if (key.startsWith('details.'))
+    return fillIdOf({ kind: 'detail', key: key.slice('details.'.length) });
+  if (key.startsWith('bom.')) return fillIdOf({ kind: 'slot', lineKey: key.slice('bom.'.length) });
+  if (key === 'fit') return fillIdOf({ kind: 'fit' });
+  if (key === 'concept') return fillIdOf({ kind: 'concept' });
+  return key;
+}
+
+/** Адрес журнала для заведённого слота верстака — им спрашивает `slotProposed(slotId)`. */
+export function fillIdOfSlot(slotId: number): string {
+  return fillIdOf({ kind: 'detailSlot', slotId });
+}
+
+/**
+ * ПРИНЯТИЕ ОДНОЙ ЗАПИСИ ПО ЖИВОЙ ФОРМЕ. Живая запись получает флаг `accepted` (откат остаётся);
+ * НЕ живая — это уже слова человека (он поправил поле или удалил строку), и держать её незачем:
+ * `undo` её всё равно не коснётся, а localStorage копил бы мусор. Слот верстака — исключение:
+ * его запись несёт имя минта (`mintedAs`), по которому переименованный слот узнаётся, поэтому
+ * он только помечается и никогда не выбрасывается отсюда.
+ */
+export function acceptPlan(
+  fills: Fill[],
+  ids: ReadonlySet<string>,
+  form: FormSnapshot,
+): { accept: string[]; drop: string[] } {
+  const accept: string[] = [];
+  const drop: string[] = [];
+  for (const f of fills) {
+    if (!ids.has(f.id)) continue;
+    if (f.target.kind === 'detailSlot' || isLive(f, form)) {
+      if (!f.accepted) accept.push(f.id);
+    } else {
+      drop.push(f.id);
+    }
+  }
+  return { accept, drop };
 }
 
 /* ─── САМ ЗАКОН ────────────────────────────────────────────────────────────────────────────── */

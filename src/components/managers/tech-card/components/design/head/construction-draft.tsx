@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import type { common_DesignRun, common_MediaFull } from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { GENDER_ENUM_TO_SLUG } from 'constants/constants';
@@ -14,8 +15,11 @@ import Text from 'ui/components/text';
 
 import { bornBomLine, upsertDetailText } from '../../form-writers';
 import type { TechCardFormData } from '../../schema';
+import { flushAllowsRun, flushRefusalSentence, useTechCardAutosave } from '../autosave-contract';
 import { readBench } from '../bench-slot';
 import { proposedColourways } from '../colourway-proposals-model';
+import { moodMinimumGate, openStepOf } from '../core/chain';
+import { useDrafted } from '../drafted-contract';
 import {
   Counter,
   EmptyState,
@@ -32,7 +36,8 @@ import { runOutputText } from '../generation/run-state';
 import { GenerateRow } from '../render/generate-row';
 import type { Gate } from '../render/model';
 import { calloutWords, type CalloutLike } from '../render/what-model-gets';
-import { newClientRequestId, useDesignBand, useDesignWrites } from '../use-design-band';
+import { designKeys, newClientRequestId, useDesignBand, useDesignWrites } from '../use-design-band';
+import { useFitKeys } from './card-facts-form';
 import {
   diffProposal,
   draftSays,
@@ -79,8 +84,10 @@ import { draftIdeaRefusal, useDraftDesignIdea } from './use-draft-idea';
  *   2. строки РОЖДАЮТСЯ конструктором, которым рождаются рукописные (`bornBomLine`), а скаляры
  *      патчатся ПО ПУТИ (`upsertDetailText`, `setValue('fit')`) — ни одного `setValue` на корень
  *      массива, кроме добавления в конец и УДАЛЕНИЯ ПО КЛЮЧУ при откате, и ни одного `reset`;
- *   3. кнопки «принять всё» НЕТ. Цикл заполнения идёт по СТРОКАМ ПРЕДЛОЖЕНИЯ, а строка рождается
+ *   3. кнопки «записать всё» НЕТ. Цикл заполнения идёт по СТРОКАМ ПРЕДЛОЖЕНИЯ, а строка рождается
  *      только у значения, которое модель НАЗВАЛА, — молчание физически не выразимо как запись.
+ *      (`accept all N ▸` волны 25.09 — другое: она не пишет НИЧЕГО, только снимает синюю подсветку
+ *      с уже записанного, см. `drafted-contract.ts`.)
  * Плюс четвёртое, новое: САМО СОБОЙ ПИШЕТСЯ ТОЛЬКО ПУСТОЙ АДРЕСАТ (`draft-fills.ts: fillPlan`).
  * Поле, в котором стоят слова человека, приходит строкой «TO DECIDE» и ждёт его клика. И пятое:
  * каждая запись легла в ЖУРНАЛ вместе с тем, что стояло до неё, поэтому «удалим» — это ВОЗВРАТ,
@@ -235,9 +242,20 @@ export function ConstructionDraft({
   techCardId,
   disabled,
   conceptMax,
+  boardPictures,
 }: {
   techCardId: number;
   disabled?: boolean;
+  /**
+   * Картинок НА ДОСКЕ (`isBoardRow`), для минимума мудборда (`moodMinimumGate`, D-10). Пропом, а не
+   * импортом `isBoardRow`, по тому же доводу, что `conceptMax` ниже: доска монтирует этот орган, и
+   * импорт отсюда завёл бы цикл. Строки входа REFERENCE не в счёт (ревью Codex B-10).
+   *
+   * Необязателен ТОЛЬКО ради отдельного монтажа органа без доски (`scripts/construction-draft-
+   * probe-entry.tsx`): там счёт падает на число разных картинок `moodboardMedia` — прежнее чтение.
+   * Продукт монтирует орган одним местом, `mood-board.tsx`, и передаёт число всегда.
+   */
+  boardPictures?: number;
   /**
    * Потолок поля `concept`, ПЕРЕДАННЫЙ ВЛАДЕЛЬЦЕМ ПОЛЯ, а не написанный здесь второй раз.
    * Редактор описания стоит в `mood-board.tsx`, там же его `maxLength`, и там же — единственное
@@ -252,6 +270,16 @@ export function ConstructionDraft({
   const { showMessage } = useSnackBarStore();
   const draftIdea = useDraftDesignIdea(techCardId);
   const [inspecting, setInspecting] = useState(false);
+  /* ═══ АВТОСЕЙВ (волна 25.09, D-07 / ревью Codex B-05) ═══════════════════════════════════════
+     Прогон читает СОХРАНЁННУЮ карточку, поэтому перед платной дверью — `flush` (сохрани СЕЙЧАС и
+     скажи, вышло ли), а после записи черновика в поля — `request` (сохрани скоро, не дожидаясь
+     дебаунса). Провайдера нет (стенд, создание карточки) — контракт отвечает `off`, и дверь
+     ведёт себя как до волны: гейт «save the card first» по грязной доске остаётся в силе. */
+  const autosave = useTechCardAutosave();
+  /** `flush` в полёте — GENERATE уже нажат, прогон ещё не заказан. */
+  const [flushing, setFlushing] = useState(false);
+  /** Одно состояние «drafted» на всю студию (`drafted-contract.ts`): кнопка `accept all N ▸`. */
+  const drafted = useDrafted();
 
   /* ═══ ФЛЭТ-ВЕРСТАК — ВТОРОЙ АДРЕСАТ ЧЕРНОВИКА (r3 п.6) ═══════════════════════════════════════
      Предложенная деталь заводится СТРОКОЙ НА СЕРВЕРЕ, а не значением формы, поэтому органу нужны
@@ -267,6 +295,7 @@ export function ConstructionDraft({
      детали значило бы рисовать дверь, за которой отказ. */
   const { band, serverSpeaks } = useDesignBand(techCardId);
   const writes = useDesignWrites(techCardId);
+  const queryClient = useQueryClient();
   const benchDetails = useMemo(() => readBench(band, 'flat').details, [band]);
 
   // ЖУРНАЛ ЗАПОЛНЕНИЙ И ПРЕДЛОЖЕННЫЕ КОЛОРВЕИ ЖИВУТ В МОДУЛЬНОМ СТОРЕ, А НЕ ЗДЕСЬ: студия
@@ -292,6 +321,11 @@ export function ConstructionDraft({
   }[];
   const concept = (useWatch({ control, name: 'concept' }) ?? '') as string;
   const fit = (useWatch({ control, name: 'fit' }) ?? '') as string;
+  // Посадки, которые вещь может нести, — правило CARD DETAILS (`useFitKeys`). Черновик предлагает
+  // и САМ пишет посадку только из них: сумке — никакой, брюкам — не `a_line`.
+  const fitKeys = useFitKeys();
+  const fitKeysRef = useRef(fitKeys);
+  fitKeysRef.current = fitKeys;
   // ШАПКА ИЗДЕЛИЯ, КАК ЕЁ ЧИТАЕТ `designConstructionUserPrompt`: Category, Gender, Size run с
   // отмеченным базовым. Имена — из словаря, потому что сервер печатает имена (`cache.GetCategoryById`,
   // `cache.GetSizeById`), а форма держит id.
@@ -368,23 +402,54 @@ export function ConstructionDraft({
   const intent = useRef<string | null>(null);
 
   const readOnly = !!disabled;
-  // ⚠ ПУСТОТА МЕРИТСЯ ТАК ЖЕ, КАК ЕЁ МЕРИТ СЕРВЕР: «нет картинок И нет слов». Доска из одних
-  // картинок законна (сторож на словах снят в Ф0), доска из одного описания — тоже.
   // РОВНО КАРТИНКИ, А НЕ СТРОКИ: одна картинка стоит и на доске, и во входе двумя строками
   // `moodboardMedia` (U-5) — считать её дважды значило бы обещать прогону восьмую картинку.
   const pictureCount = boardIds.size;
-  const nothingToRead = pictureCount === 0 && !concept.trim() && boardNotes.length === 0;
-  const gate: Gate = nothingToRead
-    ? {
-        ok: false,
-        reason: 'there is nothing to read: put a picture on the moodboard or write the description',
-      }
-    : boardDirty
+  /**
+   * ═══ МИНИМУМ МУДБОРДА — ТОТ ЖЕ, ЧТО ЗАПИРАЕТ FLAT НА РЕЛЬСЕ (волна 25.09, D-10 / Codex B-10) ═══
+   *
+   * Здесь стояла своя мера пустоты («нет картинок И нет слов», зеркало серверного `no_moodboard`).
+   * Теперь правило одно на рельс, флэт и эту дверь — `moodMinimumGate`: картинка на ДОСКЕ или 40
+   * символов описания, и выбранная категория. Оно строже серверного, и это намеренно: черновик,
+   * прочитавший три слова без категории, предлагает посадки не того семейства.
+   *
+   * «SAVE THE CARD FIRST» ОСТАЁТСЯ ТОЛЬКО БЕЗ АВТОСЕЙВА. С автосейвом грязная доска не повод
+   * запирать дверь: нажатие само сохранит карточку (`flush` в `askForDraft`) и откажет словами,
+   * если сохранить нельзя. Без автосейва (`off`) сохранить некому, и гейт прежний.
+   */
+  const minimum = moodMinimumGate({
+    boardPictures: boardPictures ?? pictureCount,
+    concept,
+    categoryId,
+  });
+  const gate: Gate = !minimum.ok
+    ? { ok: false, reason: minimum.reason }
+    : boardDirty && autosave.status === 'off'
       ? { ok: false, reason: 'save the card first — the draft reads what is saved' }
       : { ok: true };
 
-  function askForDraft() {
-    if (!gate.ok || readOnly || draftIdea.isPending) return;
+  async function askForDraft() {
+    if (!gate.ok || readOnly || busy) return;
+    const asked = techCardId;
+    /* СНАЧАЛА СОХРАНИТЬ, ПОТОМ ПЛАТИТЬ (Codex B-05). Сервер соберёт вход из СОХРАНЁННОЙ карточки;
+       правка доски, не доехавшая до сервера, до промпта не доедет, и черновик прочитал бы
+       вчерашнюю доску молча. Отказ — словами контракта, прогон не заказывается. */
+    setFlushing(true);
+    let flushed: Awaited<ReturnType<typeof autosave.flush>>;
+    try {
+      flushed = await autosave.flush('draft');
+    } catch {
+      // Контракт отвечает исходом, а не исключением; брошенное всё равно читается отказом, а не
+      // разрешением платить.
+      flushed = 'error';
+    } finally {
+      setFlushing(false);
+    }
+    if (shownCard.current !== asked) return;
+    if (!flushAllowsRun(flushed)) {
+      showMessage(flushRefusalSentence(flushed, autosave.errorsCount), 'error');
+      return;
+    }
     if (!intent.current) intent.current = newClientRequestId();
     const snapshot = { pictures: pictureCount, notes: boardNotes.length, fingerprint };
     /**
@@ -396,7 +461,6 @@ export function ConstructionDraft({
      * `shownCard` объявлен ниже по файлу — это законно: колбэк исполняется после рендера, к тому
      * времени ссылка инициализирована.
      */
-    const asked = techCardId;
     draftIdea.mutate(
       { clientRequestId: intent.current },
       {
@@ -430,8 +494,14 @@ export function ConstructionDraft({
           setWantedDetails({});
           // Колорвеи — ПРЕДЛОЖЕНИЕ, и они ждут клика: подтверждение создаёт продукт (B-25).
           setProposals(techCardId, proposedColourways(parsed));
-          // …а поля карточки заполняются САМИ, и только пустые (B-14).
+          // …а поля карточки заполняются САМИ, и только пустые (B-14)…
           autoFill(parsed);
+          // …и уезжают на сервер, не дожидаясь дебаунса (D-07): записанное черновиком — такая же
+          // правка карточки, как набранная рукой.
+          autosave.request('draft');
+          // …а предложенные детали заводятся слотами FLAT SLOTS сразу (D-09, T14) — тем же
+          // писателем, что `add N detail slots ▸`, одной отслеживаемой операцией с прогоном.
+          void mintSuggested(parsed);
         },
         onError: (error) => {
           // ⚠ КЛЮЧ ОТПУСКАЕТСЯ РОВНО НА ЗАКРЫТОМ ПРОГОНЕ — И НИ НА ЧЁМ БОЛЬШЕ. Пока прогон может
@@ -491,6 +561,7 @@ export function ConstructionDraft({
   function liveSnapshot(): FormSnapshot {
     return {
       fit: (getValues('fit') ?? '') as string,
+      fitChoices: fitKeysRef.current,
       concept: (getValues('concept') ?? '') as string,
       details: (getValues('details') ?? []) as { key?: string; text?: string }[],
       bomItems: (getValues('bomItems') ?? []) as { name?: string; lineKey?: string }[],
@@ -637,6 +708,7 @@ export function ConstructionDraft({
   const formSnapshot: FormSnapshot = useMemo(
     () => ({
       fit,
+      fitChoices: fitKeys,
       concept,
       details,
       bomItems,
@@ -651,8 +723,11 @@ export function ConstructionDraft({
           }))
         : undefined,
     }),
-    [fit, concept, details, bomItems, serverSpeaks, benchDetails, mintedBySlot],
+    [fit, fitKeys, concept, details, bomItems, serverSpeaks, benchDetails, mintedBySlot],
   );
+  /** Верстак ЭТОГО рендера — для дедупа в `mintSuggested`, чей колбэк живёт дольше рендера. */
+  const detailSlotsRef = useRef(formSnapshot.detailSlots);
+  detailSlotsRef.current = formSnapshot.detailSlots;
   const { rows, missing, details: detailIdeas } = useMemo(
     () => diffProposal(staged?.draft ?? null, formSnapshot),
     [staged, formSnapshot],
@@ -720,6 +795,12 @@ export function ConstructionDraft({
    */
   const [wantedDetails, setWantedDetails] = useState<Record<string, boolean>>({});
   const [minting, setMinting] = useState(0);
+  /**
+   * ОДНА ОПЕРАЦИЯ «ПРОГОН → ЗАПИСЬ В ПОЛЯ → ЗАВЕДЕНИЕ СЛОТОВ» (ревью Codex M-08): пока идёт любая
+   * её часть — сохранение перед прогоном, сам прогон, цикл заведения, — GENERATE, `undo all`,
+   * `accept all` и `✕` журнала погашены.
+   */
+  const busy = flushing || draftIdea.isPending || minting > 0;
   const [logOpen, setLogOpen] = useState(false);
   /** Квитанция записи по АДРЕСУ ЖУРНАЛА — пилюля `added` / `replaced` в строке WRITTEN. */
   const [receiptByFill, setReceiptByFill] = useState<Record<string, Receipt>>({});
@@ -831,6 +912,8 @@ export function ConstructionDraft({
     // Записанное уезжает под раскрытие — раскрытие ОТКРЫВАЕТСЯ, иначе жест выглядит исчезновением
     // строк, а квитанции не видно нигде.
     setLogOpen(true);
+    // Взятое из очереди — правка карточки, и она уезжает на сервер, не дожидаясь дебаунса (D-07).
+    autosave.request('draft');
   }
 
   /**
@@ -860,52 +943,128 @@ export function ConstructionDraft({
    * ответ приходит тому вызову, который его и заказывал. Последовательно (`await` в цикле), а не
    * пачкой: очередь из двух-трёх записей мгновенна, зато отказ на второй не гонится с третьей.
    */
-  async function addDetailSlots() {
-    if (readOnly || !serverSpeaks) return;
-    const picked = openDetails.filter((d) => wantedDetails[d.id]);
-    if (!picked.length) return;
+  /**
+   * ОДИН ЦИКЛ ЗАВЕДЕНИЯ НА ДВЕ ДВЕРИ — авто после прогона (`mintSuggested`, D-09) и ручную
+   * (`add N detail slots ▸` для тех, что не завелись). Возвращает имена, которые сервер НЕ принял.
+   *
+   * ⚠ ОДНА ОТСЛЕЖИВАЕМАЯ ОПЕРАЦИЯ (ревью Codex M-08). Счётчик `minting` поднимается ОДИН раз на
+   * весь цикл и опускается в `finally` после последней записи: пока он поднят, погашены GENERATE,
+   * `undo all`, `accept all` и `✕` журнала. Иначе `undo all`, нажатый посреди цикла, снёс бы уже
+   * заведённые слоты, а следующая запись завела бы новый — поверх отката. Каждый заведённый слот
+   * ложится в журнал СРАЗУ, со своим серверным id, — то есть ДО того, как откат снова доступен.
+   *
+   * ⚠ КАРТОЧКА, КОТОРАЯ ЗАКАЗАЛА, — И НИКАКАЯ ДРУГАЯ. Писатель `writes` адресован карточке этого
+   * рендера; ушёл человек на соседнюю карточку посреди цикла — оставшиеся имена не заводятся вовсе
+   * (их заказал ответ про ЭТУ карточку), а заведённые уже лежат в журнале своей.
+   *
+   * Идемпотентного ключа у `SetDesignBenchSlot` нет (в контракте только CAS `expected_slot_rev`,
+   * а у минта он 0), поэтому от двойного заведения стережёт сам счётчик: пока цикл идёт, ни
+   * GENERATE, ни ручная кнопка не нажимаются, а дедуп по имени (`onBench`) видит свежий верстак.
+   */
+  async function mintDetailSlots(ideas: DetailSuggestion[]): Promise<string[]> {
+    if (readOnly || !serverSpeaks || !ideas.length) return [];
+    const asked = techCardId;
     const at = hhmm();
-    setMinting((n) => n + picked.length);
+    const failed: string[] = [];
+    let minted = 0;
+    setMinting((n) => n + 1);
+    try {
+      for (const idea of ideas) {
+        if (shownCard.current !== asked) break;
+        try {
+          const res = await writes.setBenchSlot.mutateAsync({
+            slot: { viewKey: 'detail', kind: 'flat', colorwayId: 0 },
+            pictureId: 0,
+            expectedSlotRev: 0,
+            newDetailName: idea.name,
+          });
+          const slotId = res.slot?.id ?? 0;
+          // ⚠ БЕЗ id ЗАПИСИ В ЖУРНАЛ НЕТ. Строка журнала — это обещание вернуть как было, а вернуть
+          // слот, адреса которого мы не знаем, нечем: `✕` печатался бы кнопкой, которая не может
+          // сработать. Слот при этом заведён, и он виден там, где живёт.
+          //
+          // Запись идёт в журнал ЗАПРОСИВШЕЙ карточки (`asked`), даже если на экране уже другая:
+          // слот заведён там, и откат его принадлежит ей.
+          if (slotId > 0) {
+            record(asked, {
+              id: fillIdOf({ kind: 'detailSlot', slotId }),
+              target: { kind: 'detailSlot', slotId },
+              label: 'detail slot',
+              before: '',
+              after: idea.name,
+              at,
+            });
+            minted += 1;
+          }
+          // Ответ пришёл, пока на экране сменилась карточка: состояние органа — уже чужое.
+          if (shownCard.current !== asked) break;
+          // Отметка снимается ТОЛЬКО у той, что прошла: неудачная остаётся отмеченной, и следующее
+          // нажатие пробует ровно её.
+          setWantedDetails((prev) => {
+            if (!(idea.id in prev)) return prev;
+            const next = { ...prev };
+            delete next[idea.id];
+            return next;
+          });
+        } catch {
+          if (shownCard.current !== asked) break;
+          // Причина уже сказана снекбаром общего писателя (`useDesignWrites.onError`); имя
+          // запоминается, и после цикла звучит одной фразой, ЧТО именно не завелось.
+          failed.push(idea.name);
+        }
+      }
+      // ОПЕРАЦИЯ ДЕРЖИТСЯ ДО ПЕРЕЧИТАННОЙ ПОЛОСЫ (ревью Codex, P1). Писатель верстака только
+      // помечает полосу устаревшей и не ждёт её; журнал же считает слот живым по ПРОЧИТАННОЙ полосе.
+      // Отпусти мы `minting` раньше — в окне до перечитывания `undo all` не видел бы только что
+      // заведённых слотов, а `accept all` не считал бы их.
+      if (minted > 0 && shownCard.current === asked) {
+        await queryClient.invalidateQueries({ queryKey: designKeys.band(asked) }).catch(() => {});
+      }
+    } finally {
+      setMinting((n) => Math.max(0, n - 1));
+    }
+    // Снекбар «could not add …» говорит о ПОКАЗАННОЙ карточке — про чужую он соврал бы.
+    return shownCard.current === asked ? failed : [];
+  }
+
+  /**
+   * ═══ ДЕТАЛИ ЗАВОДЯТСЯ САМИ — СРАЗУ ПОСЛЕ ПРОГОНА (волна 25.09, D-09 / T14) ═══════════════════
+   *
+   * Владелец: черновик предлагает детали для FLAT SLOTS — и пусть они там сразу стоят. Список тот
+   * же, что под «details for flat» (`diffProposal(...).details`), минус уже стоящие на верстаке:
+   * дедуп по имени и по имени МИНТА (переименованный слот не воскрешает своё имя). Считается от
+   * СВЕЖЕГО верстака (`detailSlotsRef`), а не от снимка рендера, в котором пришёл ответ.
+   *
+   * Не завелось — снекбар «could not add …», а чип остаётся в группе ОТМЕЧЕННЫМ, с живой ручной
+   * кнопкой: повтор — один клик, без поиска, что именно отпало.
+   */
+  async function mintSuggested(draft: ConstructionDraft) {
+    if (readOnly || !serverSpeaks) return;
+    const ideas = diffProposal(draft, {
+      ...liveSnapshot(),
+      detailSlots: detailSlotsRef.current,
+    }).details.filter((d) => !d.onBench);
+    if (!ideas.length) return;
+    const failed = await mintDetailSlots(ideas);
+    if (!failed.length) return;
+    const lost = new Set(failed);
+    setWantedDetails((prev) => {
+      const next = { ...prev };
+      for (const idea of ideas) if (lost.has(idea.name)) next[idea.id] = true;
+      return next;
+    });
+    showMessage(`could not add ${failed.join(', ')}`, 'error');
+  }
+
+  /** Ручная дверь — только для того, что не завелось само (или завелось и было снесено). */
+  async function addDetailSlots() {
+    const picked = openDetails.filter((d) => wantedDetails[d.id]);
+    if (!picked.length || busy) return;
     // Раскрытие журнала открывается СРАЗУ: первая же запись уедет туда, и открывать его после
     // ответа значило бы дёрнуть страницу под рукой человека.
     setLogOpen(true);
-    for (const idea of picked) {
-      try {
-        const res = await writes.setBenchSlot.mutateAsync({
-          slot: { viewKey: 'detail', kind: 'flat', colorwayId: 0 },
-          pictureId: 0,
-          expectedSlotRev: 0,
-          newDetailName: idea.name,
-        });
-        const slotId = res.slot?.id ?? 0;
-        // Отметка снимается ТОЛЬКО у той, что прошла: неудачная остаётся отмеченной, и следующее
-        // нажатие пробует ровно её.
-        setWantedDetails((prev) => {
-          const next = { ...prev };
-          delete next[idea.id];
-          return next;
-        });
-        // ⚠ БЕЗ id ЗАПИСИ В ЖУРНАЛ НЕТ. Строка журнала — это обещание вернуть как было, а вернуть
-        // слот, адреса которого мы не знаем, нечем: `✕` печатался бы кнопкой, которая не может
-        // сработать. Слот при этом заведён, и он виден там, где живёт.
-        if (slotId > 0) {
-          record(techCardId, {
-            id: fillIdOf({ kind: 'detailSlot', slotId }),
-            target: { kind: 'detailSlot', slotId },
-            label: 'detail slot',
-            before: '',
-            after: idea.name,
-            at,
-          });
-        }
-      } catch {
-        // Отказ уже сказан снекбаром общего писателя (`useDesignWrites.onError`). Здесь ловится
-        // только сам промис: неперехваченный `mutateAsync` роняет unhandledrejection в консоль и
-        // ничего не добавляет к тому, что человек уже прочитал.
-      } finally {
-        setMinting((n) => Math.max(0, n - 1));
-      }
-    }
+    const failed = await mintDetailSlots(picked);
+    if (failed.length) showMessage(`could not add ${failed.join(', ')}`, 'error');
   }
 
   /** «keep mine» — отклонить навсегда: строка уходит из TO DECIDE в DISMISSED, с дверью обратно. */
@@ -938,15 +1097,41 @@ export function ConstructionDraft({
 
   /* СТАТУС В ШАПКЕ БЛОКА — только там, где заменить его нечем: прогона не было или он в полёте.
      Прогон есть → шапка пуста, а «прогон был» стоит словами в ряду (`read N pictures · …`). */
-  const status = draftIdea.isPending ? (
-    <Pill tone='attention' data-c19-draft-status='flight'>
-      starting…
-    </Pill>
-  ) : staged ? null : (
-    <Pill tone='mut' data-c19-draft-status='fresh'>
-      not run yet
-    </Pill>
-  );
+  const status =
+    draftIdea.isPending || flushing ? (
+      <Pill tone='attention' data-c19-draft-status='flight'>
+        starting…
+      </Pill>
+    ) : minting > 0 ? (
+      <Pill tone='attention' data-c19-draft-status='minting'>
+        adding detail slots…
+      </Pill>
+    ) : staged ? null : (
+      <Pill tone='mut' data-c19-draft-status='fresh'>
+        not run yet
+      </Pill>
+    );
+
+  /* ═══ `accept all N ▸` — ЕДИНСТВЕННАЯ НОВАЯ КНОПКА ВОЛНЫ В ЭТОМ БЛОКЕ (D-07, Q-03) ═════════════
+     Принять = «я это видел»: значения уже на карточке (автосейв), кнопка лишь снимает синие рамки
+     и пилюли `drafted` — с полей, строк спецификации и слотов верстака разом. Откат не отнимается:
+     `undo all` по-прежнему вернёт то, что стояло до черновика. Кнопки нет, пока нечего принимать;
+     пока идёт операция прогона — погашена (M-08). Стоит в шапке блока: это ответ на весь прогон,
+     а не на одну группу под линейкой. */
+  const acceptAll =
+    drafted.count > 0 ? (
+      <Button
+        type='button'
+        variant='main'
+        size='sm'
+        disabled={busy || readOnly}
+        onClick={() => drafted.acceptAll()}
+        data-c19-accept-all={drafted.count}
+        title='marks the drafted fields as reviewed — the values are already saved'
+      >
+        accept all {drafted.count} ▸
+      </Button>
+    ) : null;
 
   /* ЧТО ПРОЧИТАЛ ПРОГОН — В ТОТ ЖЕ РЯД, ЧТО И КНОПКА (`trailing` общего `GenerateRow`). Два ряда
      читались как два органа, хотя это одно: что я запускаю и на чём. */
@@ -982,7 +1167,14 @@ export function ConstructionDraft({
       id='mb-draft'
       title='construction draft'
       question='— what the model proposes'
-      action={status}
+      action={
+        status || acceptAll ? (
+          <span className='flex items-center gap-2'>
+            {status}
+            {acceptAll}
+          </span>
+        ) : null
+      }
       /* ЗАЗОР «ШАПКА БЛОКА → СОДЕРЖИМОЕ» — ТЕМ ЖЕ ТОКЕНОМ, ЧТО У CARD DETAILS (r3 п.3/15/34/38).
          Владелец: «больший отступ от хединга вниз к содержимому, как в CARD DETAILS». ЗАМЕРЕНО, а
          не выведено: без него шов здесь был 10px против 20px эталона — `mb-2.5` шапки и `mt` от
@@ -1001,22 +1193,34 @@ export function ConstructionDraft({
             className='mb-2'
             data-c19-draft-gate=''
             door={
-              nothingToRead ? (
+              minimum.ok ? undefined : minimum.door === 'card' ? (
+                // Не хватает только категории — она правится в CARD DETAILS (T05).
+                <GoTo
+                  onClick={() => openStepOf('categoryId', '#card-details')}
+                  data-c19-draft-to-card=''
+                >
+                  card details
+                </GoTo>
+              ) : (
                 <GoTo onClick={() => scrollToOrgan('#mb-board')} data-c19-draft-to-board=''>
                   + picture
                 </GoTo>
-              ) : undefined
+              )
             }
           />
         )}
         {/* ОДНА ДВЕРЬ НА ВСЕ ЭКРАНЫ — общий `GenerateRow`: `GENERATE`, дверь описи, строка про
             деньги. Состояние прогона вшито в её ряд по шву `trailing`. */}
         <GenerateRow
-          gate={gate}
+          gate={
+            minting > 0
+              ? { ok: false, reason: 'the detail slots the draft named are being added — a moment' }
+              : gate
+          }
           label='GENERATE'
-          pending={draftIdea.isPending}
+          pending={draftIdea.isPending || flushing}
           disabled={readOnly}
-          onGenerate={askForDraft}
+          onGenerate={() => void askForDraft()}
           shape={`${pictureCount} picture${pictureCount === 1 ? '' : 's'} · ${boardNotes.length} note${
             boardNotes.length === 1 ? '' : 's'
           }`}
@@ -1143,9 +1347,12 @@ export function ConstructionDraft({
                 </GroupLabel>
                 {openDetails.length > 0 ? (
                   <>
+                    {/* С ВОЛНЫ 25.09 (D-09) ДЕТАЛИ ЗАВОДЯТСЯ САМИ, сразу после прогона; чип здесь
+                        стоит только у того, чего на верстаке НЕТ — не завелось (отмечено, кнопка
+                        живая) или было снесено. Подпись говорит ровно это. */}
                     <Text size='micro' variant='label' component='p' className='mb-2.5'>
-                      the aspects the draft named · each can become an empty named slot under
-                      DETAILS on FLAT SLOTS, ready for its close-up
+                      the aspects the draft named that are not on FLAT SLOTS · each becomes an empty
+                      named slot under DETAILS, ready for its close-up
                     </Text>
                     <ChipRow>
                       {openDetails.map((idea) => (
@@ -1224,6 +1431,7 @@ export function ConstructionDraft({
                     fill={fill}
                     receipt={receiptByFill[fill.id]}
                     readOnly={readOnly}
+                    busy={busy}
                     onUndo={() => undo(fill)}
                   />
                 ))}
@@ -1245,6 +1453,7 @@ export function ConstructionDraft({
                       variant='secondary'
                       size='xs'
                       data-c19-undo-all=''
+                      disabled={busy}
                       onClick={() => {
                         for (const f of live) undo(f);
                         // ⚠ ЗАВЕДЁННЫЕ ДЕТАЛИ ЗДЕСЬ НЕ ЗАБЫВАЮТСЯ: их возврат уходит на сервер и
@@ -1518,11 +1727,14 @@ function WrittenRow({
   fill,
   receipt,
   readOnly,
+  busy,
   onUndo,
 }: {
   fill: Fill;
   receipt?: Receipt;
   readOnly: boolean;
+  /** Идёт операция прогона (M-08) — откат погашен, пока она не кончилась. */
+  busy: boolean;
   onUndo: () => void;
 }): JSX.Element {
   return (
@@ -1563,6 +1775,7 @@ function WrittenRow({
           variant='secondary'
           size='xs'
           data-c19-undo={fill.id}
+          disabled={busy}
           onClick={onUndo}
           aria-label={
             fill.before

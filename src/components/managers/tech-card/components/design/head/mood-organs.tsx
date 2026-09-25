@@ -1,22 +1,19 @@
-import { useMemo, type JSX, type ReactNode } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
+import { type JSX, type ReactNode } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
-import type { TechCardFormData } from '../../schema';
-import type { FormSnapshot } from './construction-draft-model';
-import { currentOf, fillIdOf, isLive, type FillTarget } from './draft-fills';
 import { useCardMemory } from './use-draft-fills';
 
 /**
  * ═══ ОРГАНЫ ШАГА MOODBOARD, ОБЩИЕ ДЛЯ ЕГО ШЕСТИ БЛОКОВ ═══════════════════════════════════════════
  *
  * Макет (`_step-mood.js`) рисует три блока выхода — GENERAL INFORMATION, CONSTRUCTION, MATERIAL
- * SLOTS — одними и теми же органами: пилюля `moodboard moved on`, пилюля происхождения поля
- * (`drafted` / `drafted, edited`), полоса `LOCKED …` с дверью, раскрытие `show ▸ / hide ▾`.
+ * SLOTS — одними и теми же органами: пилюля `moodboard moved on`, пилюля `drafted` (волна 25.09:
+ * одна, синяя, из контракта `drafted-contract.ts`), полоса `LOCKED …` с дверью, раскрытие
+ * `show ▸ / hide ▾`.
  * У продукта их не было, а три копии по трём файлам разошлись бы на первой же правке — поэтому
  * они лежат здесь, ОДИН раз, поверх примитивов `ui/components`.
  *
@@ -30,16 +27,15 @@ import { useCardMemory } from './use-draft-fills';
  * `head/` только потому, что `core/*` заморожен для этой волны; ни состояния провода, ни формы
  * (кроме чтения журнала заполнений) здесь нет.
  *
- * ═══ ПРОИСХОЖДЕНИЕ ПОЛЯ ЧИТАЕТСЯ ИЗ ЖУРНАЛА, И ТОЛЬКО ИЗ НЕГО ════════════════════════════════
+ * ═══ «DRAFTED» ЧИТАЕТСЯ ИЗ ОДНОГО СОСТОЯНИЯ — КОНТРАКТА `drafted-contract.ts` (волна 25.09) ═══
  *
- * Макет держит `origin` на каждом поле (`draft` / `edit` / `hand`). У продукта поля этого нет, зато
- * есть ЖУРНАЛ ЗАПОЛНЕНИЙ черновика (`use-draft-fills.ts`, `Fill`): что стояло, что написано, по
- * какому адресу. Пилюля рисуется РОВНО из него:
- *   · запись жива (`isLive`: в поле стоит то, что написал черновик) → `drafted`;
- *   · запись есть, но текст с тех пор поправлен рукой и не пуст → `drafted, edited`;
- *   · записи нет → пилюли НЕТ. Не `by hand`: журнал сессионный, после F5 надиктованное
- *     неотличимо от набранного, и пилюля `by hand` на нём была бы ложью о человеке. Неизвестное
- *     происхождение не рисуется вовсе — по слову постановки: «не выдумывай».
+ * Здесь стояли `useProvenance` и `ProvenancePill` — второй читатель журнала, у каждого органа свой
+ * (`drafted` чернилами, `drafted, edited` серым). Волна 25.09 (D-07', ревью Codex B-09) свела
+ * пометку к ОДНОМУ состоянию: провайдер `./drafted-provider.tsx` у композитора считает её из
+ * журнала против живой формы, органы спрашивают `useDrafted().isLive(key, current)`. Пилюля
+ * `DraftedPill` ниже — тот же синий тон, что рамка `DraftedField` (синий = «в полёте, нужен
+ * человек»), и она рисуется ровно пока поле не просмотрено. `drafted, edited` снят: правка поля
+ * и есть просмотр, и серой пилюле нечего больше утверждать.
  */
 
 /**
@@ -57,55 +53,24 @@ export function BoardMovedPill({ techCardId }: { techCardId: number }): JSX.Elem
   );
 }
 
-export type Provenance = 'drafted' | 'edited' | null;
-
 /**
- * Читатель происхождения по адресу заполнения. Подписан на те же четыре поля формы, против
- * которых журнал меряет живость (`FormSnapshot`), — ровно как сам черновик.
+ * `drafted` — поле написано черновиком и человек его ещё не смотрел. Тон `attention`, тот же, что у
+ * рамки `DraftedField`: одна и та же пометка не может быть чернильной в одной таблице и синей в
+ * соседней. Рисует её тот, кто знает живость (`useDrafted().isLive`); сама пилюля ничего не читает.
  */
-export function useProvenance(techCardId: number): (target: FillTarget) => Provenance {
-  const { fills } = useCardMemory(techCardId);
-  const { control } = useFormContext<TechCardFormData>();
-  const fit = (useWatch({ control, name: 'fit' }) ?? '') as string;
-  const concept = (useWatch({ control, name: 'concept' }) ?? '') as string;
-  const details = (useWatch({ control, name: 'details' }) ?? []) as FormSnapshot['details'];
-  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as FormSnapshot['bomItems'];
-  const snapshot: FormSnapshot = useMemo(
-    () => ({ fit, concept, details, bomItems }),
-    [fit, concept, details, bomItems],
-  );
-  return (target) => {
-    const fill = fills.find((f) => f.id === fillIdOf(target));
-    if (!fill) return null;
-    if (isLive(fill, snapshot)) return 'drafted';
-    // Строка слота — вещь, а не текст: не живая значит удалённая, и говорить о ней нечего.
-    if (target.kind === 'slot') return null;
-    return currentOf(target, snapshot) ? 'edited' : null;
-  };
-}
-
-export function ProvenancePill({
-  state,
+export function DraftedPill({
+  live,
   ...rest
 }: {
-  state: Provenance;
+  live: boolean;
   [k: string]: unknown;
 }): JSX.Element | null {
-  if (state === 'drafted') {
-    return (
-      <Pill tone='ink' data-provenance='drafted' {...rest}>
-        drafted
-      </Pill>
-    );
-  }
-  if (state === 'edited') {
-    return (
-      <Pill tone='mut' data-provenance='edited' {...rest}>
-        drafted, edited
-      </Pill>
-    );
-  }
-  return null;
+  if (!live) return null;
+  return (
+    <Pill tone='attention' data-drafted-pill='' {...rest}>
+      drafted
+    </Pill>
+  );
 }
 
 /**

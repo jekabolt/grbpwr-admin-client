@@ -16,14 +16,15 @@ import Textarea from 'ui/components/text-area';
 import { Toolbar } from 'ui/components/toolbar';
 import { InertDoor } from './design/bench-slot';
 import { GROUP_SEAM } from './design/core';
+import { DraftedField } from './design/core/drafted-field';
+import { draftedKey, useDrafted } from './design/drafted-contract';
+import { useAcceptOnEdit } from './design/head/drafted-provider';
 import {
   BoardMovedPill,
+  DraftedPill,
   GoTo,
   LockedBar,
-  ProvenancePill,
   scrollToOrgan,
-  useProvenance,
-  type Provenance,
 } from './design/head/mood-organs';
 import { REFERENCE_KIND } from './design/mood-board';
 import { upsertDetail, type FormDetail } from './form-writers';
@@ -111,7 +112,6 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
     [boardRows],
   );
   const techCardId = techCard?.id ?? 0;
-  const prov = useProvenance(techCardId);
 
   const [shownStandard, setShownStandard] = useState<string[]>(() =>
     STANDARD_KEYS.filter((k) => details.some((d) => d.key === k)),
@@ -274,7 +274,6 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
               aspectKey={key}
               text={d?.text ?? ''}
               ids={d?.mediaIds ?? []}
-              prov={prov({ kind: 'detail', key })}
               inputIds={inputIds}
               urlOf={urlOf}
               onText={(text) => upsert(key, { text })}
@@ -410,7 +409,6 @@ function AspectRow({
   aspectKey,
   text,
   ids,
-  prov,
   inputIds,
   urlOf,
   onText,
@@ -422,7 +420,6 @@ function AspectRow({
   aspectKey: string;
   text: string;
   ids: number[];
-  prov: Provenance;
   /** Кадры, которые ТА ЖЕ карточка держит референсом входа шага FLAT. */
   inputIds: Set<number>;
   urlOf: (id: number) => string;
@@ -433,6 +430,12 @@ function AspectRow({
   onOpenViewer: (index: number, ids: number[]) => void;
 }): JSX.Element {
   const label = detailKeyLabel(aspectKey);
+  // «DRAFTED» — ИЗ ОДНОГО СОСТОЯНИЯ СТУДИИ (волна 25.09, `drafted-contract.ts`): синяя пилюля у
+  // ярлыка и синяя рамка поля, пока текст — ровно тот, что написал черновик, и его не приняли.
+  // Правка гасит обе сама; уход из поля после правки ставит запись принятой.
+  const draftKey = draftedKey.detail(aspectKey);
+  const drafted = useDrafted().isLive(draftKey, text);
+  const settle = useAcceptOnEdit(draftKey, text);
   // ПРИЁМНИК РАЗМЕРОМ С РЯД. Раньше ⌘V и бросок ловил полосатый квадрат `+ image`; квадрата больше
   // нет, а жесты остались — теперь их принимает весь ряд аспекта, включая его текстовое поле.
   // Текстовая вставка сюда не доходит: приёмник берёт из буфера только файлы.
@@ -460,7 +463,7 @@ function AspectRow({
         >
           {label}
         </Text>
-        <ProvenancePill state={prov} data-c19-prov={aspectKey} />
+        <DraftedPill live={drafted} data-c19-prov={aspectKey} data-provenance='drafted' />
         <Button
           type='button'
           variant='secondary'
@@ -473,15 +476,22 @@ function AspectRow({
         </Button>
       </div>
 
-      <Textarea
-        name={`detail-${aspectKey}`}
-        rows={2}
-        maxLength={2000}
-        value={text}
-        placeholder='how this aspect is made'
-        className='mt-1.5'
-        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onText(e.target.value)}
-      />
+      {/* РАМКА ОДНА: пока поле подсвечено, его собственный край снят (`border-0`), и синий край
+          обёртки стоит РОВНО там, где стоял серый, — текст не сдвигается ни на пиксель, когда
+          подсветка гаснет. Фокус возвращает чернильный край той же обёртке (`focus-within`). */}
+      <DraftedField live={drafted} pill={false} className='mt-1.5 focus-within:border-textColor'>
+        <Textarea
+          name={`detail-${aspectKey}`}
+          rows={2}
+          maxLength={2000}
+          value={text}
+          placeholder='how this aspect is made'
+          className={drafted ? 'border-0 bg-transparent' : undefined}
+          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onText(e.target.value)}
+          onFocus={settle.onFocus}
+          onBlur={settle.onBlur}
+        />
+      </DraftedField>
 
       {/* ЛЕНТА КАДРОВ И ЕЁ ДВЕРЬ — ОДНА СТРОКА, ВСЕГДА ОДНА И ТА ЖЕ (п.7). Ветки «есть кадры /
           нет кадров» здесь НЕТ: строка рисуется одна, дверь стоит последней в ней. Нет кадров —

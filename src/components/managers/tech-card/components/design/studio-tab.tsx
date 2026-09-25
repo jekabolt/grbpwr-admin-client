@@ -33,6 +33,7 @@ import { MoodBoard } from './mood-board';
 import { OnModelStudio } from './onmodel';
 import { PlaygroundStudio } from './playground';
 import { PatternStudio } from './pattern';
+import { DraftedProvider } from './head/drafted-provider';
 import { useStudioKindSwitch } from './history-recall';
 import { PictureGalleryProvider } from './picture-tile';
 import { PickModeProvider, usePickMode } from './pick-mode';
@@ -625,11 +626,17 @@ export function StudioTab({
     );
   }
 
+  /* ═══ «DRAFTED» — ОДНО СОСТОЯНИЕ НА ВСЕ ШАГИ (волна 25.09, D-07', `drafted-contract.ts`) ═════
+     Провайдер стоит ЗДЕСЬ, над рельсом и экраном, потому что пометки черновика читают органы
+     разных шагов: поля — на MOODBOARD, предложенные слоты — на FLAT. Состояние своё он не держит:
+     ответ считается из журнала черновика против живой формы (`head/drafted-provider.tsx`). */
   return (
-    <SectionStack>
-      {rail}
-      {screen}
-    </SectionStack>
+    <DraftedProvider techCardId={techCardId}>
+      <SectionStack>
+        {rail}
+        {screen}
+      </SectionStack>
+    </DraftedProvider>
   );
 }
 

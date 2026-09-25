@@ -15,12 +15,8 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
 import { EmptyState, GROUP_SEAM } from './core';
-import {
-  BoardMovedPill,
-  ProvenancePill,
-  useProvenance,
-  type Provenance,
-} from './head/mood-organs';
+import { draftedKey, useDrafted } from './drafted-contract';
+import { BoardMovedPill, DraftedPill } from './head/mood-organs';
 import ComboField from 'ui/form/fields/combo-field';
 import DecimalField from 'ui/form/fields/decimal-field';
 import InputField from 'ui/form/fields/input-field';
@@ -233,11 +229,12 @@ export function MaterialSlots({
   const goToLine = (line: Line) =>
     onGoTab?.('bom', line.lineKey?.trim() ? { bom: line.lineKey.trim() } : {});
 
-  // ПРОИСХОЖДЕНИЕ СТРОКИ — ИЗ ЖУРНАЛА ЧЕРНОВИКА (`head/mood-organs.tsx`): рождённая черновиком
-  // строка носит `drafted`, пока стоит на карточке; набранная рукой пилюли не носит вовсе.
-  const prov = useProvenance(techCardId ?? 0);
-  const provOf = (line: Line): Provenance =>
-    line.lineKey?.trim() ? prov({ kind: 'slot', lineKey: line.lineKey.trim() }) : null;
+  // «DRAFTED» — ИЗ ОДНОГО СОСТОЯНИЯ СТУДИИ (волна 25.09, `drafted-contract.ts`): рождённая
+  // черновиком строка носит синюю `drafted`, пока стоит на карточке и её не приняли (`accept all`
+  // в блоке черновика или правка ячейки строки); набранная рукой пилюли не носит вовсе.
+  const drafted = useDrafted();
+  const draftedOf = (line: Line): boolean =>
+    !!line.lineKey?.trim() && drafted.isLive(draftedKey.bom(line.lineKey.trim()));
 
   /**
    * ОДНА ДВЕРЬ РОЖДЕНИЯ, И ОНА ВНИЗУ СПИСКА (п. 13 владельца, дословно: «вместо + CLOTH + THREAD
@@ -355,7 +352,10 @@ export function MaterialSlots({
                     key={lines[index].lineKey || `row-${index}`}
                     index={index}
                     family={family.key}
-                    prov={provOf(lines[index])}
+                    drafted={draftedOf(lines[index])}
+                    onEdited={(line) =>
+                      line.lineKey?.trim() && drafted.acceptKey(draftedKey.bom(line.lineKey.trim()))
+                    }
                     lines={lines}
                     readOnly={!!readOnly}
                     onGo={onGoTab ? goToLine : undefined}
@@ -383,7 +383,8 @@ export function MaterialSlots({
 function SlotRow({
   index,
   family,
-  prov,
+  drafted,
+  onEdited,
   lines,
   readOnly,
   onGo,
@@ -392,7 +393,10 @@ function SlotRow({
 }: {
   index: number;
   family: Family;
-  prov: Provenance;
+  /** Строка рождена черновиком и ещё не просмотрена — синяя пилюля и лёгкий синий фон строки. */
+  drafted: boolean;
+  /** Правка ячейки этой строки и уход из неё — строка просмотрена. */
+  onEdited: (line: Line) => void;
   lines: Line[];
   readOnly: boolean;
   onGo?: (line: Line) => void;
@@ -474,8 +478,30 @@ function SlotRow({
   const blockers = blockersOf(line);
   const blocked = blockers.length > 0;
 
+  /* ПРАВКА ЯЧЕЙКИ = ПРОСМОТР (D-07). Строка спецификации — вещь, а не текст: её живость меряется
+     существованием, и правка имени рамку сама не гасит. Поэтому строка сравнивает свои поля на
+     входе фокуса в неё и на выходе из неё; разошлись — строка принята. Переход фокуса между
+     ячейками ОДНОЙ строки — не выход (`relatedTarget` внутри). */
+  const rowSig = [line.name, line.composition, line.estUsage, line.unit, line.purpose, line.kind]
+    .map((v) => String(v ?? ''))
+    .join('\u0001');
+  const sigAtFocus = useRef<string | null>(null);
+
   return (
-    <tr data-b16-row={index}>
+    <tr
+      data-b16-row={index}
+      data-drafted={drafted || undefined}
+      className={drafted ? 'bg-warning/5' : undefined}
+      onFocusCapture={() => {
+        if (sigAtFocus.current === null) sigAtFocus.current = rowSig;
+      }}
+      onBlurCapture={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        const was = sigAtFocus.current;
+        sigAtFocus.current = null;
+        if (was !== null && was !== rowSig) onEdited(line);
+      }}
+    >
       {/**
        * ═══ ОДНА СТРОКА — ОДНО ПОЛЕ И ОДНА ПИЛЮЛЯ (п. 9 владельца) ════════════════════════════
        *
@@ -670,8 +696,8 @@ function SlotRow({
         )}
       </td>
       <td data-align='left' className='w-[90px] align-top' data-b16-from={index}>
-        {/* ОТКУДА СТРОКА — пилюля из журнала черновика; пусто, когда журнал о ней не знает. */}
-        <ProvenancePill state={prov} />
+        {/* ОТКУДА СТРОКА — синяя `drafted`, пока строка черновика не просмотрена; пусто иначе. */}
+        <DraftedPill live={drafted} data-provenance='drafted' />
       </td>
       <td className='w-[110px] align-top'>
         <div className='flex items-start justify-end gap-1'>
