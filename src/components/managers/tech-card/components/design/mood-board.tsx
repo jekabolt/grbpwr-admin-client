@@ -2,8 +2,9 @@ import { common_DesignPicture, common_MediaFull } from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
+import { AiEnhance } from 'ui/components/ai-enhance';
 import { noteArrowsOf } from 'ui/components/annotation/surface';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -20,10 +21,24 @@ import type { TechCardFormData } from '../schema';
 import { CalloutRail, CalloutRowBody, type CalloutRailRow } from './callout-rail';
 import { serverSpeaksDesign } from './capability';
 import { Counter, GROUP_SEAM } from './core';
+import { cardFactsContext } from './core/card-facts';
+import { DraftedField } from './core/drafted-field';
+import { draftedKey, useDrafted } from './drafted-contract';
+import { useCardFacts } from './head/card-facts-form';
 import { ConstructionDraft } from './head/construction-draft';
+import { useAcceptOnEdit } from './head/drafted-provider';
+import { DraftedPill } from './head/mood-organs';
 import { VectorModal } from './modals';
 import { useMoodCallouts } from './mood-callouts';
 import { TILE_CORNER } from './picture-tile';
+import {
+  CALLOUTS_KEY_STEP,
+  CALLOUTS_MIN_W,
+  calloutsCollapsed,
+  calloutsMaxWidth,
+  clampCalloutsWidth,
+  useCalloutsPrefs,
+} from './use-callouts-prefs';
 import { useDesignBand } from './use-design-band';
 
 /**
@@ -554,6 +569,69 @@ export function MoodBoard({
 
   const canEdit = !readOnly && speaks;
 
+  /* ═══ ПАНЕЛЬ CALLOUTS — ШИРИНА, СВЁРНУТОСТЬ, РАЗДЕЛИТЕЛЬ (волна 25.09, D-11/D-12, T12/T13) ═══════
+     Владелец: панель указаний занимала 340px всегда — и на пустой доске тоже. Теперь:
+       · ширину тянут разделителем между доской и панелью (влево — шире), ←/→ на фокусе — по 16px;
+         пол 240, потолок — меньшее из 720 и 60% ряда: доске всегда остаётся место;
+       · шеврон в шапке сворачивает панель в полоску 28px с повёрнутой подписью `callouts · N`;
+         вся полоска — одна дверь обратно;
+       · без предпочтения пустая доска держит панель свёрнутой, а первое указание раскрывает её
+         само (`calloutsCollapsed`); явный клик пишет предпочтение, и число больше не решает.
+     Ширина и свёрнутость — ПРЕЗЕНТАЦИЯ (`use-callouts-prefs.ts`, localStorage на пользователя):
+     форма об этом не узнаёт, автосейв не просыпается. */
+  const panelId = useId();
+  const { prefs: calloutPrefs, set: setCalloutPrefs } = useCalloutsPrefs();
+  const calloutCount = railRows.length;
+  /* РАСКРЫТИЕ ПО ПРОСЬБЕ ПОВЕРХНОСТИ — НА СЕАНС, А НЕ В ПРЕДПОЧТЕНИЕ. Enter на кадре и «напиши, что
+     это» после новой точки раскрывают свёрнутую панель: текст указания пишется только в ней. Это не
+     выбор человека про панель, и его явное «свернуть» обязано пережить перезагрузку (ревью Codex,
+     P2). Держится до следующего щелчка по шеврону или полоске. Ключ — карточка, которую раскрыли:
+     на соседней карточке раскрытие не действует с первого же кадра, без эффекта-сброса. */
+  const [heldFor, setHeldFor] = useState<number | null>(null);
+  const heldOpen = heldFor === techCardId;
+  const collapsed = !heldOpen && calloutsCollapsed(calloutPrefs.collapsed, calloutCount);
+  const separator = useRef<HTMLDivElement | null>(null);
+  /** Ширина ряда «доска + панель» — меряется у родителя разделителя (сам ряд — `SectionStack`). */
+  const [rowW, setRowW] = useState(0);
+  useLayoutEffect(() => {
+    const row = separator.current?.parentElement;
+    if (!row) return;
+    const measure = () => setRowW(Math.round(row.getBoundingClientRect().width));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(row);
+    return () => ro.disconnect();
+  }, []);
+  const panelW = clampCalloutsWidth(calloutPrefs.w, rowW);
+  const drag = useRef<{ x: number; w: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const resizeTo = (w: number) => setCalloutPrefs({ w: clampCalloutsWidth(w, rowW) });
+
+  /* ФОКУС ЕДЕТ ЗА ДВЕРЬЮ — та же беда, что у свёрнутой `Section`: шеврон и полоска — два разных
+     узла, и нажатие прячет тот, на котором стоял фокус. Переносится ТОЛЬКО после жеста человека:
+     панель, раскрывшаяся сама (появилось первое указание), фокус не ворует. */
+  const collapseDoor = useRef<HTMLButtonElement | null>(null);
+  const expandDoor = useRef<HTMLButtonElement | null>(null);
+  const movedFocus = useRef(false);
+  const setCollapsed = (next: boolean) => {
+    movedFocus.current = true;
+    setHeldFor(null);
+    setCalloutPrefs({ collapsed: next });
+  };
+  useEffect(() => {
+    if (!movedFocus.current) return;
+    movedFocus.current = false;
+    (collapsed ? expandDoor : collapseDoor).current?.focus();
+  }, [collapsed]);
+
+  // ОПИСАНИЕ — ТЕ ЖЕ ДВА ОРГАНА ВОЛНЫ, ЧТО У ПОЛЕЙ GENERAL INFORMATION: синяя рамка `drafted`,
+  // пока в поле стоит текст черновика и его не приняли, и `ai ✦` в правом нижнем углу.
+  const conceptValue = (concept.field.value as string | null | undefined) ?? '';
+  const conceptDrafted = useDrafted().isLive(draftedKey.concept, conceptValue);
+  const conceptSettle = useAcceptOnEdit(draftedKey.concept, conceptValue);
+  const facts = useCardFacts(isBoardRow);
+
   /* ═══ ПОРЯДОК ЭКРАНА — МАКЕТА, БЛОК ЗА БЛОКОМ (`_step-mood.js`, RENDER['step-mood']) ═══════════
      Здесь был ОДИН блок доски, внутри которого лежали лента, описание и черновик, а справа —
      указания. Владелец, увидев бету: «не как в референсе». Макет держит ПЯТЬ отдельных блоков:
@@ -657,7 +735,13 @@ export function MoodBoard({
                 setAddingKey(null);
                 // ТРЕТИЙ ТАКТ ЖЕСТА «клик — клик — напиши, что это», и он же исполнение Enter: обе
                 // просьбы приходят от поверхности одним флагом и обе кончаются курсором в поле меню.
-                if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
+                if (key != null && opts?.focus) {
+                  // Текст указания пишется ТОЛЬКО в панели — свёрнутая, она раскрывается на эту
+                  // просьбу (волна 25.09), иначе Enter уводил бы курсор в спрятанное поле. На сеанс:
+                  // предпочтение человека не переписывается (`heldOpen`).
+                  if (collapsed) setHeldFor(techCardId);
+                  setFocusEditor((n) => n + 1);
+                }
               }}
               hoveredKey={hoverIndex == null ? null : callouts.keyOf(hoverIndex)}
               addingKey={addingKey}
@@ -848,65 +932,192 @@ export function MoodBoard({
           )}
         </Section>
 
+        {/* ═══ РАЗДЕЛИТЕЛЬ ДОСКИ И ПАНЕЛИ (волна 25.09, D-11) ═══════════════════════════════════
+            Стоит В ШВЕ между блоками, а не рисует его: шов остаётся грунтом в 24px (разделитель
+            8px и отрицательные поля `-mx-4` съедают ровно свою ширину у двух зазоров ряда), линия
+            не рисуется в покое — только короткая метка-хватка, чернеющая под рукой. Полная линия
+            встаёт лишь на время перетаскивания: это «шов в движении», а не второй контур блока.
+            Только от `lg` — ниже панель стоит под доской во всю ширину, и тянуть нечего. Всегда
+            смонтирован (прячется атрибутом), потому что по нему меряется ширина ряда. */}
+        <div
+          ref={separator}
+          role='separator'
+          aria-orientation='vertical'
+          aria-label='resize the callouts panel'
+          aria-controls={panelId}
+          aria-valuenow={panelW}
+          aria-valuemin={CALLOUTS_MIN_W}
+          aria-valuemax={calloutsMaxWidth(rowW)}
+          tabIndex={0}
+          hidden={!open || collapsed}
+          data-mb-callouts-resize=''
+          data-dragging={dragging || undefined}
+          className='group relative hidden w-2 shrink-0 cursor-col-resize touch-none select-none self-stretch focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-textColor lg:-mx-4 lg:block'
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.currentTarget.setPointerCapture(e.pointerId);
+            drag.current = { x: e.clientX, w: panelW };
+            setDragging(true);
+          }}
+          onPointerMove={(e) => {
+            const d = drag.current;
+            if (!d) return;
+            // Влево — шире: панель стоит СПРАВА, и её левый край идёт за рукой.
+            resizeTo(d.w + (d.x - e.clientX));
+          }}
+          onPointerUp={() => {
+            drag.current = null;
+            setDragging(false);
+          }}
+          onPointerCancel={() => {
+            drag.current = null;
+            setDragging(false);
+          }}
+          onLostPointerCapture={() => {
+            drag.current = null;
+            setDragging(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowLeft') resizeTo(panelW + CALLOUTS_KEY_STEP);
+            else if (e.key === 'ArrowRight') resizeTo(panelW - CALLOUTS_KEY_STEP);
+            else return;
+            e.preventDefault();
+          }}
+        >
+          {/* Линия перетаскивания — на всю высоту ряда, только пока тянут. */}
+          <span
+            aria-hidden
+            className='pointer-events-none absolute inset-y-0 left-1/2 hidden w-px -translate-x-1/2 bg-textColor group-data-[dragging]:block'
+          />
+          {/* Хватка: липкая, чтобы её было видно и у длинной ленты кадров. */}
+          <span
+            aria-hidden
+            className='pointer-events-none sticky top-gutter mx-auto block h-8 w-0.5 bg-borderColor transition-colors duration-150 group-hover:bg-textColor group-focus-visible:bg-textColor group-data-[dragging]:bg-textColor motion-reduce:transition-none'
+          />
+        </div>
+
         {/* БОКОВОЕ МЕНЮ УКАЗАНИЙ (B-9) — ТОТ ЖЕ ОРГАН, что стоит справа от листа в ARTIFACTS, и
             теперь буквально тот же: заголовок `callouts`, счётчик пилюлей, строка на указание,
-            правка выбранной строки внутри неё. Сворачивается вместе с доской: меню про то, что на
-            доске, и без доски ему не о чем. 340px и липкое от `lg` (макет: `flex:0 0 340px;
-            position:sticky`) — панель стоит рядом ровно с тем, что комментирует, и не уезжает,
-            пока человек листает ленту.
+            правка выбранной строки внутри неё. Липкое от `lg` — панель стоит рядом ровно с тем,
+            что комментирует, и не уезжает, пока человек листает ленту.
             `caps` ПЕРЕДАЁТСЯ — у мудбордного указания редактор наконечника был всегда (он стоял в
             `AnnotationEditor` под кадрами), и переезд правки в панель не имел права его терять.
-            ⚠ ЗДЕСЬ СТОЯЛО «в отличие от листа: у листа его нет, и чинит это та волна» — волна
-            прошла В ЭТОМ ЖЕ КРУГЕ: лист артефактов передаёт `caps` тем же пропом (B-8,
-            `artifacts-panel.tsx`). Оговорка звала чинить починенное, и это единственное, что
-            изменилось в этой строке. */}
-        {open && (
-          <Section
-            title='callouts'
-            question='— pinned on the board, not numbered'
-            action={
-              <Pill tone={railRows.length ? 'mut' : 'warn'} data-mb-callout-count=''>
-                {railRows.length} on the board
-              </Pill>
-            }
-            /* Тот же шов, что у доски слева: панель стоит с ней в одном ряду, и разойтись им нельзя. */
-            className={cn('lg:sticky lg:top-gutter lg:w-[340px] lg:shrink-0', GROUP_SEAM)}
-          >
-            <CalloutRail
-              rows={railRows}
-              selected={selectedIndex}
-              onSelect={(index) => {
-                setSelectedKey(index == null ? null : callouts.keyOf(index));
-                // Взвод принадлежит ОДНОЙ записке: перевыбор — уже другая строка.
-                setAddingKey(null);
-              }}
-              hoverIndex={hoverIndex}
-              onHover={setHoverIndex}
-              disabled={readOnly}
-              onRemove={
-                readOnly
-                  ? undefined
-                  : (index) => {
-                      const key = callouts.keyOf(index);
-                      if (!key) return;
-                      callouts.removeByKey(key);
-                      // Выбор снимается ВМЕСТЕ со строкой: индекс под ним после удаления адресует
-                      // уже соседнее указание, и оставленный выбор открыл бы правку чужого текста.
-                      setSelectedKey(null);
-                      setAddingKey(null);
-                    }
+
+            ⚠ ВОЛНА 25.09: ПАНЕЛЬ БОЛЬШЕ НЕ РАЗМОНТИРУЕТСЯ СВЁРТКОЙ ДОСКИ — прячется атрибутом, как
+            DESCRIPTION и черновик ниже (`hidden` побеждает любой `display`, preflight). Состояние
+            меню (выбранная строка, взвод «+ point», просьба фокуса) переживает сворачивание. Ширина
+            — CSS-переменной `--cw` на обёртке, от `lg`; свёрнутая панель — полоска 28px. */}
+        <div
+          id={panelId}
+          hidden={!open}
+          data-mb-callouts=''
+          data-collapsed={collapsed || undefined}
+          style={{ '--cw': `${panelW}px` } as React.CSSProperties}
+          className={cn(
+            'min-w-0 lg:sticky lg:top-gutter lg:shrink-0 lg:self-start',
+            collapsed ? 'lg:w-[28px]' : 'lg:w-[var(--cw)]',
+          )}
+        >
+          {collapsed && (
+            /* СВЁРНУТАЯ ПАНЕЛЬ — ОДНА ДВЕРЬ ЦЕЛИКОМ, как свёрнутый блок `Section`: имя, число и
+               знак, внутри ни одного другого органа. От `lg` — вертикальная полоска с повёрнутой
+               подписью, ниже — обычная строка во всю ширину. */
+            <button
+              ref={expandDoor}
+              type='button'
+              onClick={() => setCollapsed(false)}
+              aria-expanded={false}
+              aria-controls={panelId}
+              aria-label={`expand the callouts panel · ${calloutCount} on the board`}
+              data-mb-callouts-strip=''
+              className='group flex w-full cursor-pointer items-center justify-between gap-2 border border-borderColor bg-bgColor px-block py-2.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor lg:flex-col lg:justify-start lg:gap-3 lg:px-0 lg:py-2.5'
+            >
+              <Text
+                size='micro'
+                variant='uppercase'
+                tracking='label'
+                component='span'
+                className='whitespace-nowrap text-labelColor group-hover:text-textColor lg:[writing-mode:vertical-rl]'
+              >
+                callouts · {calloutCount}
+              </Text>
+              <Arrow
+                aria-hidden
+                className='shrink-0 rotate-180 text-labelColor group-hover:text-textColor lg:order-first lg:-rotate-90'
+              />
+            </button>
+          )}
+          <div hidden={collapsed} className='contents'>
+            <Section
+              title='callouts'
+              question='— pinned on the board, not numbered'
+              action={
+                <span className='flex items-center gap-2'>
+                  {/* Ноль — пунктир «ещё нет», не красный: пустая доска не убыток (D-12). */}
+                  <Pill tone={calloutCount ? 'mut' : 'gap'} data-mb-callout-count=''>
+                    {calloutCount} on the board
+                  </Pill>
+                  <button
+                    ref={collapseDoor}
+                    type='button'
+                    onClick={() => setCollapsed(true)}
+                    aria-expanded
+                    aria-controls={panelId}
+                    aria-label='collapse the callouts panel'
+                    data-mb-callouts-collapse=''
+                    className='group cursor-pointer px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
+                  >
+                    {/* Тот же знак, что у каждой свёртки админки, повёрнутый к краю, куда панель
+                        уходит: вправо от `lg`, вверх ниже. */}
+                    <Arrow
+                      aria-hidden
+                      className='shrink-0 text-labelColor group-hover:text-textColor lg:rotate-90'
+                    />
+                  </button>
+                </span>
               }
-              arrows={arrows}
-              focusToken={focusEditor}
-              /* НОМЕРА У МУДБОРДНОГО УКАЗАНИЯ НЕТ, И ДЕТАЛИ КРОЯ ТОЖЕ (см. шапку `mood-callouts.tsx`):
-                 оно про настроение, его не адресует ни деталь, ни операция, ни дефект. */
-              numbered={false}
-              detailFields={false}
-              caps
-              emptyLabel='none yet. A note is put on the picture itself — arm a kind above the board and click a picture; the row appears here the moment it exists, and this is where its text is written.'
-            />
-          </Section>
-        )}
+              /* Тот же шов, что у доски слева: панель стоит с ней в одном ряду, и разойтись им нельзя. */
+              className={GROUP_SEAM}
+            >
+              <CalloutRail
+                rows={railRows}
+                selected={selectedIndex}
+                onSelect={(index) => {
+                  setSelectedKey(index == null ? null : callouts.keyOf(index));
+                  // Взвод принадлежит ОДНОЙ записке: перевыбор — уже другая строка.
+                  setAddingKey(null);
+                }}
+                hoverIndex={hoverIndex}
+                onHover={setHoverIndex}
+                disabled={readOnly}
+                onRemove={
+                  readOnly
+                    ? undefined
+                    : (index) => {
+                        const key = callouts.keyOf(index);
+                        if (!key) return;
+                        callouts.removeByKey(key);
+                        // Выбор снимается ВМЕСТЕ со строкой: индекс под ним после удаления адресует
+                        // уже соседнее указание, и оставленный выбор открыл бы правку чужого текста.
+                        setSelectedKey(null);
+                        setAddingKey(null);
+                      }
+                }
+                arrows={arrows}
+                focusToken={focusEditor}
+                /* НОМЕРА У МУДБОРДНОГО УКАЗАНИЯ НЕТ, И ДЕТАЛИ КРОЯ ТОЖЕ (см. шапку `mood-callouts.tsx`):
+                   оно про настроение, его не адресует ни деталь, ни операция, ни дефект. */
+                numbered={false}
+                detailFields={false}
+                caps
+                /* ПУСТОГО ТЕКСТА НЕТ (D-12): здесь стоял абзац «none yet. A note is put on the
+                   picture itself…». Пустая раскрытая панель — одна шапка со счётчиком; как ставится
+                   указание, объясняет сама доска (ряд видов над кадрами). */
+              />
+            </Section>
+          </div>
+        </div>
       </SectionStack>
 
       <div hidden={!open} className='contents' data-mb-fold-body=''>
@@ -936,16 +1147,46 @@ export function MoodBoard({
                 concept & construction description
               </Text>
             </label>
-            <Textarea
-              {...concept.field}
-              id={noteId}
-              disabled={readOnly}
-              value={concept.field.value ?? ''}
-              rows={4}
-              maxLength={CONCEPT_MAX}
-              placeholder='what this thing is — the idea, the reference, the purpose'
-              className='mt-1 resize-none'
-            />
+            {/* ВОЛНА 25.09: рамка `drafted` (описание пишет и черновик — только в пустое поле) и
+                `ai ✦` в правом нижнем углу (T08/T16). Своя кромка поля снята, пока горит рамка, —
+                текст не сдвигается, когда её снимают; `pb-7` держит последнюю строку над кнопкой.
+                Пилюля `drafted` стоит на верхнем крае рамки, как легенда. */}
+            <DraftedField
+              live={conceptDrafted}
+              pill={false}
+              className='mt-1 focus-within:border-textColor'
+            >
+              <Textarea
+                {...concept.field}
+                id={noteId}
+                disabled={readOnly}
+                value={conceptValue}
+                rows={4}
+                maxLength={CONCEPT_MAX}
+                placeholder='what this thing is — the idea, the reference, the purpose'
+                className={cn('resize-none pb-7', conceptDrafted && 'border-0 bg-transparent')}
+                onFocus={conceptSettle.onFocus}
+                onBlur={() => {
+                  concept.field.onBlur();
+                  conceptSettle.onBlur();
+                }}
+              />
+              <DraftedPill
+                live={conceptDrafted}
+                data-mb-concept-drafted=''
+                className='pointer-events-none absolute -top-2 right-2 bg-bgColor'
+              />
+              <AiEnhance
+                field='description'
+                value={conceptValue}
+                onApply={(text) =>
+                  setValue('concept', text, { shouldDirty: true, shouldValidate: true })
+                }
+                context={cardFactsContext(facts)}
+                maxRunes={CONCEPT_MAX}
+                disabled={readOnly}
+              />
+            </DraftedField>
             {/* ⚠ ПОДПИСИ ПОД ПОЛЕМ БОЛЬШЕ НЕТ — СНЯТА ВЛАДЕЛЬЦЕМ (круг 20, B-3), дословно:
                 «"printed for the factory ·
                 part of the DESIGN signature · read by «draft the idea»
@@ -1000,7 +1241,12 @@ export function MoodBoard({
             раскладывается предложением на группы, которые рисуют блоки ниже. Ни одна строка не
             попадает в форму сама — см. подпись органа. Секцию орган держит САМ: её шапка несёт
             статус прогона, который знает только он. */}
-        <ConstructionDraft techCardId={techCardId} disabled={readOnly} conceptMax={CONCEPT_MAX} />
+        <ConstructionDraft
+          techCardId={techCardId}
+          disabled={readOnly}
+          conceptMax={CONCEPT_MAX}
+          boardPictures={items.length}
+        />
       </div>
     </>
   );
