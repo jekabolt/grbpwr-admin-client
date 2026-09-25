@@ -125,6 +125,12 @@ type StagingActions = {
   hydrate: (persisted: PersistedStaging | null) => void;
   clear: () => void;
   /**
+   * The queue AS IT IS RIGHT NOW, read from the ref every action writes — not the rendered `changes`
+   * array, which trails an effect's `stage()` by one render. The autosave asks «is anything staged»
+   * from inside timers and awaited saves, where a render-time copy would be stale by construction.
+   */
+  peek: () => StagedChange[];
+  /**
    * Bumped by hydrate(), and part of the identity a panel receives from useTechCardStaging().
    *
    * WHY IT EXISTS: every panel claims its restored snapshot from a MOUNT-ONLY effect
@@ -141,13 +147,45 @@ type StagingActions = {
 
 const ActionsContext = createContext<StagingActions | null>(null);
 const ChangesContext = createContext<StagedChange[]>([]);
+// ═══ РЕВИЗИЯ ОЧЕРЕДИ — ЧТОБЫ АВТОСЕЙВ ВИДЕЛ ПРАВКУ УЖЕ ЗАСТЕЙДЖЕННОЙ ПАНЕЛИ (волна 25.09, Codex B-03) ══
+// Длина очереди не двигается, когда оператор правит панель, которая УЖЕ стоит в очереди: размерная
+// таблица с шестью ячейками и с семью — это одна строка `sizeChart`. Дебаунс по `changes.length`
+// такую правку не видел, и автосейв молча ждал следующей правки формы. Счётчик растёт на КАЖДОМ
+// движении очереди, которое читатель может увидеть (новая строка, другая подпись, другой снимок,
+// снятие строки) и на любом `stage()` панели без снимка — ровно по тому же правилу `moved`, по
+// которому commitAll решает «панель уехала, пока я писал».
+//
+// ⚠ НЕ «на каждом вызове stage()». Панели со снимком перестейдживают ТО ЖЕ содержимое после каждого
+// коммита рецепта (свежий lock_version перерисовывает панель — см. записку в `stage` ниже). Счётчик,
+// считающий вызовы, взводил бы автосейв на каждое такое эхо, и тот гонял бы на сервер одну и ту же
+// запись снова и снова. Отдельный контекст, а не поле действий: действия обязаны оставаться
+// идентичностно стабильными (записка про две контекста в шапке файла).
+const RevisionContext = createContext(0);
 
 export function TechCardStagingProvider({ children }: { children: ReactNode }) {
   const [changes, setChanges] = useState<StagedChange[]>([]);
   // The actions read through this ref, so none of them has to depend on `changes` — which is what
   // keeps every callback below stable across a stage.
+  //
+  // THE REF IS THE TRUTH, THE STATE IS ITS ECHO (волна 25.09). Every action writes the ref FIRST and
+  // then mirrors it into state for rendering; the render no longer copies state back into the ref.
+  // Two reasons, both about a reader that runs before the next render:
+  //   · create-mode style facts (Codex B-07): the new card id reaches StyleFactsField through a
+  //     synchronous render, its effect stages in the same flush, and `commitAll()` runs on the very
+  //     next line — a render-time copy would still hold the queue from BEFORE the stage;
+  //   · a render that skips a lower-priority `setChanges` (concurrent rendering does that) would have
+  //     copied the older array back over a newer ref and resurrected a change already committed.
   const changesRef = useRef<StagedChange[]>([]);
-  changesRef.current = changes;
+  const publish = (next: StagedChange[]) => {
+    changesRef.current = next;
+    setChanges(next);
+  };
+  const revisionRef = useRef(0);
+  const [revision, setRevision] = useState(0);
+  const bumpRevision = () => {
+    revisionRef.current += 1;
+    setRevision(revisionRef.current);
+  };
   // Snapshots restored from localStorage, waiting for their panel to mount and claim them. A ref,
   // not state: claiming one must not re-render every other panel. The claim is made observable by
   // `hydratedAt` below instead (see the doc on StagingActions.hydratedAt).
@@ -189,37 +227,42 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
           prevChange.label !== change.label ||
           prevChange.order !== change.order ||
           !sameSnapshot(prevChange.snapshot, change.snapshot);
-        // Bumped OUTSIDE the updater below (a state updater must stay pure — React can call it twice).
         if (moved) {
           stageGen.current.set(change.key, (stageGen.current.get(change.key) ?? 0) + 1);
         }
-        setChanges((prev) => {
-          const existing = prev.find((c) => c.key === change.key);
-          // Bail out when nothing a reader can see has moved. `commit` is a fresh closure on every
-          // render, so comparing it would always report a change and defeat the point; the label and
-          // order are what the header renders, and the closure is swapped in regardless below.
-          if (
-            existing &&
-            existing.label === change.label &&
-            existing.order === change.order &&
-            sameSnapshot(existing.snapshot, change.snapshot)
-          ) {
-            // Same visible state, newer closure: replace in place WITHOUT a new array identity, so
-            // the header does not re-render and no dependent effect re-fires.
-            const idx = prev.indexOf(existing);
-            prev[idx] = change;
-            return prev;
-          }
+        const prev = changesRef.current;
+        const existing = prev.find((c) => c.key === change.key);
+        // Bail out when nothing a reader can see has moved. `commit` is a fresh closure on every
+        // render, so comparing it would always report a change and defeat the point; the label and
+        // order are what the header renders, and the closure is swapped in regardless below.
+        if (
+          existing &&
+          existing.label === change.label &&
+          existing.order === change.order &&
+          sameSnapshot(existing.snapshot, change.snapshot)
+        ) {
+          // Same visible state, newer closure: replace in place WITHOUT a new array identity, so
+          // the header does not re-render and no dependent effect re-fires. The ref and the state
+          // are the same array object (see `publish`), so this swap lands in both.
+          const idx = prev.indexOf(existing);
+          prev[idx] = change;
+        } else {
           // Re-staging REPLACES: `commit` closes over the panel's state at the render that staged
           // it, so a stale closure would commit the edit before last.
-          return sortQueue([...prev.filter((c) => c.key !== change.key), change]);
-        });
+          publish(sortQueue([...prev.filter((c) => c.key !== change.key), change]));
+        }
+        // The autosave's trigger (see RevisionContext): moved by exactly what moved the generation.
+        if (moved) bumpRevision();
       },
 
-      unstage: (key) =>
-        setChanges((prev) =>
-          prev.some((c) => c.key === key) ? prev.filter((c) => c.key !== key) : prev,
-        ),
+      unstage: (key) => {
+        const prev = changesRef.current;
+        if (!prev.some((c) => c.key === key)) return;
+        publish(prev.filter((c) => c.key !== key));
+        // A panel returned to pristine is a change of what the next save carries too — the status
+        // chip should stop saying «unsaved» without waiting for an unrelated edit.
+        bumpRevision();
+      },
 
       commitAll: async () => {
         // Snapshot WHICH keys this run commits: a panel re-staging mid-commit (its own mutation
@@ -253,7 +296,9 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
             continue;
           }
           change.settle?.();
-          setChanges((prev) => prev.filter((c) => c.key !== change.key));
+          // No revision bump here: this is the save's own bookkeeping, and waking the autosave for it
+          // would only schedule a cycle that finds nothing to write.
+          publish(changesRef.current.filter((c) => c.key !== change.key));
         }
         return { committed, restaged };
       },
@@ -278,11 +323,16 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
       },
 
       clear: () => {
-        setChanges([]);
+        publish([]);
         restorable.current.clear();
         stageGen.current.clear();
       },
+
+      peek: () => changesRef.current,
     };
+    // `publish` and `bumpRevision` only touch refs and state setters, both stable for the provider's
+    // lifetime — which is what lets this memo keep its empty dependency list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // The value panels depend on: stable, except that a hydrate() gives it a new identity exactly
@@ -292,7 +342,9 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
 
   return (
     <ActionsContext.Provider value={value}>
-      <ChangesContext.Provider value={changes}>{children}</ChangesContext.Provider>
+      <ChangesContext.Provider value={changes}>
+        <RevisionContext.Provider value={revision}>{children}</RevisionContext.Provider>
+      </ChangesContext.Provider>
     </ActionsContext.Provider>
   );
 }
@@ -331,10 +383,15 @@ export function useStagedSnapshot(): (key: string) => unknown {
  * The header's view: the actions PLUS the live list. Throws outside a provider, because the header
  * is only ever inside one and a silent null there would mean a save button that saves nothing.
  */
-export function useTechCardStagingRequired(): StagingActions & { changes: StagedChange[] } {
+export function useTechCardStagingRequired(): StagingActions & {
+  changes: StagedChange[];
+  /** Monotonic: moves whenever what the next save would commit moves (see RevisionContext). */
+  revision: number;
+} {
   const actions = useContext(ActionsContext);
   const changes = useContext(ChangesContext);
+  const revision = useContext(RevisionContext);
   if (!actions)
     throw new Error('useTechCardStagingRequired must be used inside TechCardStagingProvider');
-  return { ...actions, changes };
+  return { ...actions, changes, revision };
 }
