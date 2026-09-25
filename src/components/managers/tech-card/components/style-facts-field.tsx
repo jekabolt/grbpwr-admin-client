@@ -6,7 +6,7 @@ import { CarePicker } from 'components/managers/product/components/care/care-pic
 import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
@@ -14,6 +14,7 @@ import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { FormLabel } from 'ui/form';
 import SelectField from 'ui/form/fields/select-field';
+import { FIT_KEYS, fitLabel } from './design/fit-vocabulary';
 import { emptyLabel } from './labels-field';
 import { TechCardFormData } from './schema';
 import { parseSeasonToSku } from './season-util';
@@ -22,9 +23,13 @@ import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 // One set of style facts per card, so one staging key.
 const STAGING_KEY = 'styleFacts';
 
-const FIT_OPTIONS = ['regular', 'slim', 'loose', 'relaxed', 'skinny', 'cropped', 'tailored'].map(
-  (f) => ({ label: f, value: f }),
-);
+// The app's ONE fit vocabulary (`design/fit-vocabulary.ts`, wave 2026-09-25). The private copy
+// that stood here is gone: the list is keyed like the storefront, and CARD DETAILS narrows it per
+// family.
+const FIT_ITEMS = FIT_KEYS.map((k) => ({ label: fitLabel(k), value: k }));
+
+// How long a commit waits for a card being CREATED to hand its new id in (see `currentStyleId`).
+const STYLE_ID_WAIT_MS = 5000;
 
 const ORIGIN_LABEL = 'TECH_CARD_LABEL_TYPE_ORIGIN';
 const CARE_LABEL = 'TECH_CARD_LABEL_TYPE_CARE';
@@ -74,7 +79,7 @@ function StorefrontPreview() {
   ]
     .filter(Boolean)
     .join(', ');
-  const fitLine = [fit ? `${fit} fit` : '', modelLine].filter(Boolean).join(' · ');
+  const fitLine = [fit ? `${fitLabel(fit)} fit` : '', modelLine].filter(Boolean).join(' · ');
 
   return (
     <div className='border border-borderColor p-2.5'>
@@ -286,6 +291,44 @@ export function StyleFactsField({
   const [saving, setSaving] = useState(false);
   const staging = useTechCardStaging();
 
+  // THE STYLE ID IS READ AT COMMIT TIME, NEVER CAPTURED AT STAGING TIME (Codex B-07, D-24).
+  //
+  // On a card being created the change is staged BEFORE the card exists: the operator picks a fit,
+  // presses «add», and only CreateTechCard's answer names the row UpdateStyle has to write.
+  // index.tsx hands that id in as `styleId` and then commits the staged queue — but a prop set from
+  // an async save lands on the NEXT render, while `commitAll` starts running in the same tick. So
+  // the commit does not read a value closed over when the change was staged (that was `undefined`,
+  // and the old `if (!styleId) return` dropped fit/season silently on every new card): it reads
+  // this ref, and when the ref is still empty it waits for the render that fills it — bounded, and
+  // loud when it never comes (a rejected commit is a named line in the save banner, a silent return
+  // is a lost fact).
+  const styleIdRef = useRef<number | undefined>(styleId || undefined);
+  const idWaiters = useRef<Array<(id: number) => void>>([]);
+  useLayoutEffect(() => {
+    styleIdRef.current = styleId || undefined;
+    if (!styleId) return;
+    const waiting = idWaiters.current;
+    idWaiters.current = [];
+    waiting.forEach((resolve) => resolve(styleId));
+  }, [styleId]);
+  const currentStyleId = (): Promise<number> => {
+    const now = styleIdRef.current;
+    if (now) return Promise.resolve(now);
+    return new Promise<number>((resolve, reject) => {
+      const done = (id: number) => {
+        window.clearTimeout(timer);
+        resolve(id);
+      };
+      const timer = window.setTimeout(() => {
+        idWaiters.current = idWaiters.current.filter((w) => w !== done);
+        reject(
+          new Error('the card has no id yet, so its style facts (fit, season…) were not written'),
+        );
+      }, STYLE_ID_WAIT_MS);
+      idWaiters.current.push(done);
+    });
+  };
+
   // Care is authored once, on the care label — reachable from this panel and from the LABELS tab,
   // both writing that one field. The style-level careInstructions (what the storefront + the preview
   // below read) mirrors that single source, so neither entry point can leave the storefront care
@@ -352,14 +395,15 @@ export function StyleFactsField({
     season: boolean;
     targetGender: boolean;
   }) {
-    if (!styleId) return;
     if (!Object.values(dirty).some(Boolean)) return;
+    // The id as of NOW — on a new card it arrives with the render after CreateTechCard (see above).
+    const id = await currentStyleId();
     setSaving(true);
     try {
       // The chart read is the cheapest way to read the fresh shared lock (it echoes
       // tech_card.lock_version). It has to happen HERE, right before the write: the card body
       // commits first and bumps that version, so anything read at mount is already stale.
-      const cur = await adminService.GetStyleSizeChart({ styleId });
+      const cur = await adminService.GetStyleSizeChart({ styleId: id });
       const expectedLockVersion = cur.chart?.lockVersion ?? 0;
       type StylePatch = NonNullable<Parameters<typeof adminService.UpdateStyle>[0]['patch']>;
       const patch: Partial<StylePatch> = {};
@@ -403,7 +447,7 @@ export function StyleFactsField({
         mask.push('targetGender');
       }
       await adminService.UpdateStyle({
-        styleId,
+        styleId: id,
         // The mask is what decides which of these the server reads; the rest of StylePatch is
         // deliberately absent rather than echoed back.
         patch: patch as StylePatch,
@@ -418,8 +462,14 @@ export function StyleFactsField({
   // Hand the mutation to the card's one save. Re-staged whenever the changed set moves, so the
   // header's label keeps naming the right fields; `commit` reads through getValues, so unlike the
   // grid panels its payload cannot go stale between staging and committing.
+  //
+  // Staged on a card that is NOT SAVED YET too (no `styleId`): the commit resolves the id itself
+  // (`currentStyleId`), so the change has to be in the queue when index.tsx commits it right after
+  // CreateTechCard. `styleId` is deliberately NOT a dependency: the id arriving is not an edit, and
+  // re-staging on it would bump the key's generation mid-commit and file a written change as
+  // «changed while the save was running».
   useEffect(() => {
-    if (!staging || !styleId || !canEdit) return;
+    if (!staging || !canEdit) return;
     if (changed.length === 0) {
       staging.unstage(STAGING_KEY);
       return;
@@ -458,7 +508,6 @@ export function StyleFactsField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     staging,
-    styleId,
     canEdit,
     dirtyFields.fit,
     dirtyFields.careInstructions,
@@ -488,7 +537,7 @@ export function StyleFactsField({
           and can be picked here or on the LABELS tab, it is the same field either way; composition
           is derived from the BOM’s shell-fabric materials (see the composition on the BOM tab).
         </Text>
-        <SelectField name='fit' label='fit' items={FIT_OPTIONS} readOnly={!canEdit} />
+        <SelectField name='fit' label='fit' items={FIT_ITEMS} readOnly={!canEdit} />
         <HeaderCarePicker
           canEdit={canEdit}
           careIdx={careIdx}
