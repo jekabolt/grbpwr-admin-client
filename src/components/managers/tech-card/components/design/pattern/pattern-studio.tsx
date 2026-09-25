@@ -7,7 +7,7 @@ import { Section } from 'ui/components/section';
 import { ASSETS_PER_CARD_MAX, ASSET_PATTERN } from '../assets/model';
 import { useAssetWrites } from '../assets/use-assets';
 import { serverSpeaksDesign } from '../capability';
-import { Counter, GROUP_GAP, Money, Reason } from '../core';
+import { GROUP_GAP, Money, Reason } from '../core';
 import { stepById } from '../core/chain';
 import { isRunLive } from '../generation';
 import { GenerateRow, RunRefusal } from '../render/generate-row';
@@ -149,7 +149,6 @@ export function PatternStudio({
   const recentColours = useMemo(() => recentPatternColours(band), [band]);
 
   const live = useMemo(() => patternRuns(band).filter(isRunLive), [band]);
-  const shelf = (band.assets ?? []).length;
   const step = stepById('pattern');
 
   /* THE GATE, in the order of the prototype: the source, the name, a twin of the name. The full
@@ -249,23 +248,17 @@ export function PatternStudio({
           {/* ПИЛЮЛЯ `OPTIONAL` СНЯТА ОБЕИМИ СВОИМИ КОПИЯМИ (владелец, r3 п.14). На этом экране она
               стояла ДВАЖДЫ — здесь про шаг и ниже про цвет, — и второе прочтение первой («что
               именно тут необязательно?») стоило человеку взгляда. Что шаг можно пропустить,
-              говорит рельс цепочки, а не шапка блока. */}
-          <span data-assets-count=''>
-            <Counter n={shelf} noun='asset' total={ASSETS_PER_CARD_MAX} />
-          </span>
+              говорит рельс цепочки, а не шапка блока.
+              ⚠ СЧЁТЧИК «N OF 40 ASSETS» СНЯТ ТОЖЕ (владелец, T27 / D-23): потолок полки говорит
+              тот, кто в него упирается, — погашенный `keep it` под своей полосой, когда полка
+              полна, — а не шапка блока на каждой карточке. */}
         </>
       }
     >
       {/* ─── SOURCE PICTURE · NAME ────────────────────────────────────────────────────────── */}
-      <GroupLabel
-        flush
-        className={GROUP_GAP}
-        action={
-          <span data-source-count=''>
-            <Counter n={sourceId > 0 ? 1 : 0} noun='picture' total={1} />
-          </span>
-        }
-      >
+      {/* «0 OF 1 PICTURE» СНЯТ (T27 / D-23): картинка одна по определению, и ячейка под подписью
+          сама показывает, стоит она или нет. */}
+      <GroupLabel flush className={GROUP_GAP}>
         source picture
       </GroupLabel>
       <PatternInput

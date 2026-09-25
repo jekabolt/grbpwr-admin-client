@@ -413,16 +413,10 @@ export function PatternLibrary({
 
   return (
     <>
-      <GroupLabel
-        className={GROUP_GAP}
-        action={
-          <span data-tiles-count=''>
-            <Counter n={assets.length} noun='tile' />
-          </span>
-        }
-      >
-        tiles on this card
-      </GroupLabel>
+      {/* «N TILES» СНЯТ (T27 / D-23): плитки видны сами, и число над ними — второе их прочтение.
+          Счётчик «made earlier, not kept» ниже остаётся: та группа рисуется только когда в ней
+          что-то есть, и число там говорит, сколько ждёт решения. */}
+      <GroupLabel className={GROUP_GAP}>tiles on this card</GroupLabel>
 
       {assets.length === 0 && pending.length === 0 ? (
         /* ═══ ПУСТАЯ ПОЛКА — ОДНА СТРОКА, БЕЗ ДВЕРИ (владелец, r3 п.17) ═════════════════════
