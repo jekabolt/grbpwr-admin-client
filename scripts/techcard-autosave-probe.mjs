@@ -2,6 +2,11 @@
 // АВТОСЕЙВ КАРТОЧКИ, АВТО-СТЕЙДЖ И ОТКАТ ТЕКСТА — ТРИ ОБЕЩАНИЯ ВОЛНЫ 25.09 (зона CL-A).
 //
 //   (1) автосейв пишет через 2 с после ПОСЛЕДНЕЙ правки — не раньше — и НЕ пишет невалидную форму;
+//   (4) flush отвечает только над ТИХОЙ карточкой (ревью B-03 / M-03): записи здесь ОТЛОЖЕННЫЕ, правки
+//       приходят и во время первого прохода, и во время поставленного в очередь, — flush обязан ждать,
+//       пока не ляжет проход, за который не пришло ничего, а «saved» и история — только после него;
+//   (5) 409 держит ВСЕ записи, явные тоже (M-01); откат всей работы гасит любой статус о ней (N-02);
+//       после dispose машина не рендерит и не взводит таймеров (N-01);
 //   (2) авто-стейдж не поднимает стейдж, если хоть одна строка готовности `unknown` (Codex B-01);
 //   (3) откат из истории меняет ТОЛЬКО текстовые секции, картинки аспектов остаются текущими (B-04).
 //
@@ -31,6 +36,31 @@ const MUTANTS = {
   ],
   // (1b) проверка валидности выключена: невалидная форма уходит на сервер
   noValidate: [[`${C}/useTechCardAutosave.ts`, 'if (!v.ok) {', 'if (false) {']],
+  // (4a) ОТКАТ B-03 В ОДНУ СТРОКУ: flush отвечает после первого же прохода, тихо там или нет
+  flushAnswersEarly: [
+    [`${C}/useTechCardAutosave.ts`, 'const quiet = gen === changeGen && !deps.hasWork();', 'const quiet = true;'],
+  ],
+  // (4b) «complete» с работой на руках снова считается концом: saved + история над правкой в полёте
+  completeOverWork: [
+    [`${C}/useTechCardAutosave.ts`, 'if (deps.hasWork()) return progress(at);', 'if (false) return progress(at);'],
+  ],
+  // (5a) старая пауза конфликта: держала только тихие записи, ⌘S проходил с протухшей версией
+  conflictLetsExplicit: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "if (state.status === 'conflict') return 'conflict';",
+      "if (mode === 'silent' && state.status === 'conflict') return 'conflict';",
+    ],
+  ],
+  // (5b) старое «нечего писать»: гасило только `dirty`, `invalid` оставался висеть
+  restOnlyDirty: [
+    [`${C}/useTechCardAutosave.ts`, 'restIfNoWork();', "if (state.status === 'dirty') set({ status: restingStatus() });"],
+  ],
+  // (5c) без стража dispose: исход записи, пришедший после размонтирования, рендерится и взводит повтор
+  noDisposeGuard: [
+    [`${C}/useTechCardAutosave.ts`, 'if (!disposed) deps.onState(state);', 'deps.onState(state);'],
+    [`${C}/useTechCardAutosave.ts`, '    // N-01: no retry or debounce outlives the page.\n    if (disposed) return;\n', ''],
+  ],
   // (2) строка `unknown` больше не держит стейдж
   noUnknownGuard: [
     [`${C}/stage-progress.tsx`, 'if (all.some((x) => x.unknown === true)) return null;', ''],
@@ -104,6 +134,7 @@ function fakeClock() {
       return id;
     },
     clearTimer: (id) => q.delete(id),
+    pending: () => q.size,
     async advance(ms) {
       const end = t + ms;
       for (;;) {
@@ -300,6 +331,173 @@ function promise3(mod) {
   return out;
 }
 
+// ─── (4) flush над отложенными записями ────────────────────────────────────────────────────────
+// Запись здесь висит, пока проба её не отпустит, и уносит только ту правку, что была на экране, когда
+// она стартовала: правка, набранная на лету, после приземления остаётся несохранённой.
+function deferredRig(mod) {
+  const clock = fakeClock();
+  const rig = { clock, version: 0, savedVersion: 0, inFlight: [], saves: [], completes: [] };
+  rig.m = mod.createAutosaveMachine({
+    debounceMs: 2000,
+    retryDelaysMs: [5000, 15000, 45000],
+    setTimer: clock.setTimer,
+    clearTimer: clock.clearTimer,
+    now: clock.now,
+    isEnabled: () => true,
+    isPaused: () => false,
+    hasWork: () => rig.version !== rig.savedVersion,
+    validate: async () => ({ ok: true, errors: 0 }),
+    save: (mode, reason) =>
+      new Promise((resolve) => {
+        const carried = rig.version;
+        rig.saves.push({ at: clock.now(), mode, reason, carried });
+        rig.inFlight.push(() => {
+          rig.savedVersion = carried;
+          resolve({ outcome: 'complete' });
+        });
+      }),
+    countErrors: () => 0,
+    onState: () => {},
+    onComplete: (reason) => rig.completes.push(reason),
+  });
+  rig.edit = () => {
+    rig.version += 1;
+    rig.m.notifyChange();
+  };
+  // Lands the oldest write on the wire; with none on the wire (a mutant that stopped early) it lands
+  // nothing, and the checks read what did — or did not — happen.
+  rig.land = async () => {
+    const next = rig.inFlight.shift();
+    if (next) next();
+    await clock.advance(0);
+  };
+  return rig;
+}
+
+async function promise4(mod) {
+  const out = {};
+  // A · a paid door flushes; the operator types during the first pass AND during the second
+  let r = deferredRig(mod);
+  r.edit();
+  let answer = null;
+  let flushed = r.m.flush('paid door').then((x) => (answer = x));
+  await r.clock.advance(0);
+  const firstStarted = r.saves.length === 1;
+  r.edit(); // typed while pass 1 is on the wire
+  await r.land(); // pass 1 lands without it
+  out.pendingAfterFirstPass = firstStarted && answer === null && r.saves.length === 2;
+  out.noHistoryOverWork = r.completes.length === 0;
+  r.edit(); // typed while pass 2 is on the wire
+  await r.land();
+  out.pendingAfterSecondPass = answer === null && r.saves.length === 3;
+  await r.land(); // pass 3 lands, nothing typed meanwhile
+  await flushed;
+  out.answersOverQuietCard = answer === 'ok' && r.version === r.savedVersion;
+  out.historyOnceQuiet = r.completes.length === 1;
+
+  // B · the flush lands in the QUEUE behind a timer cycle already on the wire; edits during that
+  // cycle and during the queued one
+  r = deferredRig(mod);
+  r.edit();
+  await r.clock.advance(2000); // the debounce fires: cycle A on the wire
+  const timerCycle = r.saves.length === 1;
+  answer = null;
+  flushed = r.m.flush('paid door').then((x) => (answer = x)); // queued behind A
+  r.edit(); // typed during A
+  await r.land(); // A lands; the queued cycle B starts, carrying the edit
+  out.queuedPassCarriesEdit = timerCycle && r.saves.length === 2 && r.saves[1].carried === 2 && answer === null;
+  r.edit(); // typed during the queued cycle
+  await r.land();
+  out.pendingAfterQueuedPass = answer === null && r.saves.length === 3;
+  await r.land();
+  await flushed;
+  out.queuedAnswersOverQuietCard = answer === 'ok' && r.version === r.savedVersion;
+  // …and the debounce the edits armed does not write the same card again afterwards
+  await r.clock.advance(10_000);
+  out.noEchoWrite = r.saves.length === 3;
+  return out;
+}
+
+// ─── (5) конфликт, откат всей работы, dispose ─────────────────────────────────────────────────
+async function promise5(mod) {
+  const out = {};
+  // a 409, then ⌘S under the modal: no write until «keep mine» lifts the pause
+  let r = machineRig(mod);
+  let next = 'conflict';
+  r.m = mod.createAutosaveMachine({
+    debounceMs: 2000,
+    retryDelaysMs: [5000, 15000, 45000],
+    setTimer: r.clock.setTimer,
+    clearTimer: r.clock.clearTimer,
+    now: r.clock.now,
+    isEnabled: () => true,
+    isPaused: () => false,
+    hasWork: () => r.dirty,
+    validate: async () => ({ ok: true, errors: 0 }),
+    save: async (mode, reason) => {
+      r.saves.push({ at: r.clock.now(), mode, reason });
+      if (next === 'conflict') return { outcome: 'conflict', message: 'moved on' };
+      r.dirty = false;
+      return { outcome: 'complete' };
+    },
+    countErrors: () => 0,
+    onState: (s) => r.states.push(s),
+  });
+  r.dirty = true;
+  r.m.notifyChange();
+  await r.clock.advance(2000);
+  const conflicted = r.m.state().status === 'conflict' && r.saves.length === 1;
+  next = 'complete';
+  const cmdS = await r.m.flush('keyboard', 'explicit');
+  out.conflictHoldsExplicit = conflicted && cmdS === 'conflict' && r.saves.length === 1;
+  r.m.resolveConflict();
+  const keepMine = await r.m.flush('keep mine', 'explicit');
+  out.keepMineWrites = keepMine === 'ok' && r.saves.length === 2 && r.m.state().status === 'saved';
+
+  // invalid, then the operator reverts the only edit: nothing to write, nothing to say about it
+  r = machineRig(mod, { valid: false });
+  r.edit();
+  await r.clock.advance(2000);
+  const wasInvalid = r.m.state().status === 'invalid';
+  r.dirty = false;
+  r.m.notifyChange();
+  out.revertClearsInvalid = wasInvalid && r.m.state().status === 'idle' && r.m.state().errorsCount === undefined;
+
+  // dispose while a write is on the wire; the write then fails: no render, no retry timer
+  r = machineRig(mod);
+  let fail = null;
+  r.m = mod.createAutosaveMachine({
+    debounceMs: 2000,
+    retryDelaysMs: [5000, 15000, 45000],
+    setTimer: r.clock.setTimer,
+    clearTimer: r.clock.clearTimer,
+    now: r.clock.now,
+    isEnabled: () => true,
+    isPaused: () => false,
+    hasWork: () => r.dirty,
+    validate: async () => ({ ok: true, errors: 0 }),
+    save: (mode, reason) =>
+      new Promise((resolve) => {
+        r.saves.push({ at: r.clock.now(), mode, reason });
+        fail = () => resolve({ outcome: 'error', message: 'network' });
+      }),
+    countErrors: () => 0,
+    onState: (s) => r.states.push(s),
+  });
+  r.dirty = true;
+  r.m.notifyChange();
+  await r.clock.advance(2000);
+  r.m.dispose();
+  const statesAtDispose = r.states.length;
+  fail();
+  await r.clock.advance(0);
+  out.noRenderAfterDispose = r.states.length === statesAtDispose;
+  out.noTimerAfterDispose = r.clock.pending() === 0;
+  await r.clock.advance(120_000);
+  out.noRetryAfterDispose = r.saves.length === 1;
+  return out;
+}
+
 // ─── прогон ─────────────────────────────────────────────────────────────────────────────────
 let fail = 0;
 const report = (title, results, mustFail = []) => {
@@ -317,6 +515,8 @@ const real = await load('none');
 report('(1) autosave', await promise1(real));
 report('(2) auto-stage', promise2(real));
 report('(3) restore', promise3(real));
+report('(4) flush over deferred writes', await promise4(real));
+report('(5) conflict / revert / dispose', await promise5(real));
 // sanity for the shortcut: ⌘S on a Russian layout gives e.key 'ы' — the physical key decides
 const kb = real.isSaveShortcut;
 report('keyboard', {
@@ -332,6 +532,23 @@ report('(1) mutant noValidate', await promise1(await load('noValidate')), ['noWr
 report('(2) mutant noUnknownGuard', promise2(await load('noUnknownGuard')), ['unknownFlagItselfHolds']);
 report('(3) mutant restoreDropsPictures', promise3(await load('restoreDropsPictures')), ['picturesStayCurrent', 'rowWithPicturesKeepsThem']);
 report('(3) mutant restoreKeepsEmptyRows', promise3(await load('restoreKeepsEmptyRows')), ['addedTextOnlyRowDropped']);
+report('(4) mutant flushAnswersEarly', await promise4(await load('flushAnswersEarly')), [
+  'pendingAfterFirstPass',
+  'pendingAfterSecondPass',
+  'answersOverQuietCard',
+  // the flush gave up the drain, so the quiet pass (and its one history row) never came in A
+  'historyOnceQuiet',
+  'pendingAfterQueuedPass',
+  'queuedAnswersOverQuietCard',
+]);
+report('(4) mutant completeOverWork', await promise4(await load('completeOverWork')), ['noHistoryOverWork', 'historyOnceQuiet']);
+report('(5) mutant conflictLetsExplicit', await promise5(await load('conflictLetsExplicit')), [
+  'conflictHoldsExplicit',
+  // ⌘S already wrote under the modal, so «keep mine» is the third write, not the second
+  'keepMineWrites',
+]);
+report('(5) mutant restOnlyDirty', await promise5(await load('restOnlyDirty')), ['revertClearsInvalid']);
+report('(5) mutant noDisposeGuard', await promise5(await load('noDisposeGuard')), ['noRenderAfterDispose', 'noTimerAfterDispose']);
 
 console.log(fail === 0 ? '\nALL GREEN (real code) · ALL MUTANTS CAUGHT' : `\n${fail} UNEXPECTED RESULT(S)`);
 process.exit(fail === 0 ? 0 : 1);

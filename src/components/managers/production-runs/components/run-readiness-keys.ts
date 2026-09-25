@@ -20,7 +20,7 @@ export const SEV_UNKNOWN: ProductionRunReadinessSeverity =
 export const SEV_OK: ProductionRunReadinessSeverity = 'PRODUCTION_RUN_READINESS_SEVERITY_OK';
 
 // Куда чинится каждая причина гейта, по стабильному `key` сервера. ТРЕТЬЯ карта того же вида, что
-// REQ_TAB (lifecycle-strip.tsx) и RELEASE_BLOCKER_TAB (tech-card/components/index.tsx), и по той же
+// REQ_TAB (stage-progress.tsx) и RELEASE_BLOCKER_TAB (tech-card/components/index.tsx), и по той же
 // причине: бэкенд НАЗЫВАЕТ и СУДИТ условие, а вкладка, на которой оно чинится, — навигация этой
 // админки и не может приехать по проводу.
 //

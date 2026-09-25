@@ -63,7 +63,7 @@ function modelBucket(f: TechCardAnalysisFinding): string {
 
 // A ref is an anchor string the server mints: "op:460" | "unit:base" | "piece:SL_INS_L" |
 // "bom:подкладка" | "card". WHERE each one is fixed is this admin's navigation and can never come
-// from the API, so the mapping stays here — the same split lifecycle-strip makes for its checklist.
+// from the API, so the mapping stays here — the same split stage-progress.tsx makes for its checklist.
 //
 // `piece:` lands on PATTERNS and `bom:` on BOM by their real TabId, not by the name in the anchor:
 // cut pieces moved off their own tab (?tab=pieces is a folded alias now), so «the pieces tab» is
