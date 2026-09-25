@@ -1,20 +1,27 @@
 import type { GetDesignBandResponse, common_DesignRunParams } from 'api/proto-http/admin';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 import { ViewSwitch } from 'ui/components/view-switch';
 
+import {
+  flushAllowsRun,
+  flushRefusalSentence,
+  useTechCardAutosave,
+  type FlushResult,
+} from './autosave-contract';
 import { displayDetailName, readBench } from './bench-slot';
 import { serverSpeaksDesign } from './capability';
+import { useMoodMinimumGate } from './chain-rail';
 import { GROUP_GAP, PRICED_LATER, latestRunOfKind } from './core';
-import { filledFlatSlots, sentFlatSlotIds, useFlatSlotsSend } from './flat-slots-send';
+import { openStepOf } from './core/chain';
 import { markedPlatesOf } from './fix-markup';
 import { formatMoney } from './generation/money';
 import { useStartRun } from './generation/use-generation';
 import { WhatModelGetsModal } from './modals';
-import { GenerateRow, RunRefusal } from './render/generate-row';
+import { GenerateRow, LockBar, RunRefusal } from './render/generate-row';
 import { ACTIVE_VIEWS, DETAIL_VIEW, viewLabel } from './views';
 
 /**
@@ -101,26 +108,18 @@ export function FlatRunRow({
   band,
   techCardId,
   disabled,
-  sources,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
-  /**
-   * ВТОРОЙ РЯД — ИСТОЧНИКИ (r3 п.5): «from construction ▸ · also send the flat slots» и лента
-   * миниатюр плит при включённом тумблере. Приезжает щелью, потому что ОБЕ его двери пишут в
-   * блок референсов (поле формы и хранилище исключений карточки), а этот компонент держит РИТМ
-   * трёх полос, а не их содержимое. Разбор — у места вызова.
-   */
-  sources?: ReactNode;
 }): JSX.Element {
   const [wmgOpen, setWmgOpen] = useState(false);
   const speaks = serverSpeaksDesign();
   const startRun = useStartRun(techCardId);
   const [views, setViews] = useState<Record<string, boolean>>({ front: true, back: true });
   const [detailTicks, setDetailTicks] = useState<Record<number, boolean>>({});
-  const flatSend = useFlatSlotsSend(techCardId);
-  const [layout, setLayout] = useState<Layout>('per_view');
+  /** «one picture» по умолчанию (T23, D-19): виды приходят одним листом и режутся сами (`autoSplit`). */
+  const [layout, setLayout] = useState<Layout>('one');
   const bench = useMemo(() => readBench(band, 'flat'), [band]);
 
   const tickedSides = ACTIVE_VIEWS.filter((v) => views[v]);
@@ -136,15 +135,41 @@ export function FlatRunRow({
     [bench],
   );
   const marked = useMemo(() => markedPlatesOf(band, wholeBench), [band, wholeBench]);
-  const filled = useMemo(() => filledFlatSlots(band), [band]);
-  const sentSlotIds = useMemo(
-    () =>
-      sentFlatSlotIds(
-        flatSend,
-        filled.map((p) => p.slotId),
-      ),
-    [flatSend, filled],
-  );
+
+  /**
+   * ═══ МИНИМУМ МУДБОРДА — ТА ЖЕ ФРАЗА, ЧТО ЗАПИРАЕТ FLAT НА РЕЛЬСЕ (D-10, контракт `mood-gate`) ══
+   *
+   * Флэт, нарисованный с пустой доски и без категории, — флэт НИЧЕГО. Правило одно: картинка НА
+   * ДОСКЕ (строки входа REFERENCE не в счёт) или описание от 40 знаков, и категория. Читает его
+   * ОДИН хук рельса (`useMoodMinimumGate`, заведён под эту кнопку), поэтому фраза отказа дословно
+   * та, что запирает FLAT на рельсе, и кнопка с рельсом не могут разойтись в «почему». Дверь —
+   * туда, где отказ чинится (`door`): к доске, если не хватает её содержимого, к категории в CARD
+   * DETAILS — если только её. Открывается `openStepOf`, а не `revealField`: это не ошибка поля, и
+   * красная пульсация после «отведи меня туда» читалась бы как «там что-то сломано».
+   */
+  const mood = useMoodMinimumGate();
+  const moodReason = mood.ok ? null : mood.reason;
+  const moodDoor =
+    !mood.ok && mood.door === 'card'
+      ? { label: 'card details ›', open: () => openStepOf('categoryId', '#card-details') }
+      : { label: 'moodboard ›', open: () => openStepOf('concept') };
+
+  /**
+   * ═══ СНАЧАЛА СОХРАНИТЬ, ПОТОМ ПЛАТИТЬ (D-16, контракт `autosave`, Codex B-05) ══════════════
+   *
+   * Прогон читает СОХРАНЁННУЮ карточку: WORDS, засеянные секунду назад, и роль, выбранная только
+   * что, на сервер ещё не уехали, и модель получила бы вчерашний запрос за сегодняшние деньги.
+   * Поэтому GENERATE сначала ждёт `flush` и стартует только при `ok`/`nothing`/`off`; иначе —
+   * фраза контракта (`flushRefusalSentence`) стойкой строкой под рядом, не всплывашкой.
+   */
+  const autosave = useTechCardAutosave();
+  const [flushing, setFlushing] = useState(false);
+  const [flushRefusal, setFlushRefusal] = useState<string | null>(null);
+  /* Отказ снимается сам, как только карточка сохранилась: поправленное поле — это и есть ответ на
+     него, и строка «save the card first» над сохранённой карточкой была бы неправдой. */
+  useEffect(() => {
+    if (autosave.status === 'saved' || autosave.status === 'idle') setFlushRefusal(null);
+  }, [autosave.status]);
 
   /* Цена последнего флэт-прогона — см. шапку. `priceActual` первым: это то, что списали. */
   const lastRun = useMemo(() => latestRunOfKind(band.runs, 'flat'), [band.runs]);
@@ -160,12 +185,29 @@ export function FlatRunRow({
     ? 'this server does not speak the design band yet — nothing can be generated here'
     : disabled
       ? 'this card is read-only'
-      : noViews
-        ? 'no views ticked — tick at least one'
-        : null;
+      : moodReason
+        ? moodReason
+        : noViews
+          ? 'no views ticked — tick at least one'
+          : null;
 
-  const submit = () => {
-    if (gateReason || startRun.isPending) return;
+  const submit = async () => {
+    if (gateReason || startRun.isPending || flushing) return;
+    setFlushing(true);
+    let saved: FlushResult;
+    try {
+      saved = await autosave.flush('flat-generate');
+    } catch {
+      // Контракт обещает исход, а не исключение; бросок читается как неудача сохранения.
+      saved = 'error';
+    } finally {
+      setFlushing(false);
+    }
+    if (!flushAllowsRun(saved)) {
+      setFlushRefusal(flushRefusalSentence(saved, autosave.errorsCount) || 'save the card first');
+      return;
+    }
+    setFlushRefusal(null);
     const params: common_DesignRunParams = {
       views: [...ticked],
       detailSlotIds: [...tickedDetailIds],
@@ -181,23 +223,24 @@ export function FlatRunRow({
       // НЕ ПЛЕЙГРАУНД: поле осмысленно только на kind=freeform и на любом другом роде
       // отвергается сервером (`freeform_forbidden`), поэтому здесь оно названо пустым вслух.
       freeform: undefined,
-      /* ⚠ ПУСТОЙ СПИСОК ПРИ ВКЛЮЧЁННОМ ЧИПЕ ЗНАЧИТ «ВСЕ» (`design.proto`, `flat_slot_ids`) — поэтому
-         «вычеркнул все плиты» обязано схлопнуться в ВЫКЛЮЧЕННЫЙ чип, а не уехать пустым списком.
-         Потолка трат на сервере нет; эта строка — единственное между отказом человека и оплаченным
-         прогоном, который этот отказ не услышал. Пара согласована в одном месте — здесь. */
-      useFlatSlots: flatSend.on && sentSlotIds.length > 0,
-      flatSlotIds: sentSlotIds,
+      /* ПЛИТЫ ВЕРСТАКА В ПРОГОН ФЛЭТА НЕ ЕДУТ (T24, D-20): дверь `also send the flat slots` снята
+         владельцем вместе с лентой плит. `false` — СКАЗАНО, а не опущено: пустой `flat_slot_ids`
+         при включённом флаге значил бы «все» (`design.proto`), и старый флаг из хранилища вкладки
+         не должен дожить до платного запроса. */
+      useFlatSlots: false,
+      flatSlotIds: [],
       extraInputMediaIds: [],
     };
     startRun.start({ kind: 'flat', ask: '', params });
   };
 
   return (
-    /* ═══ ТРИ РЯДА, ОДИН ЗАЗОР, ОДИН РОСТ ОРГАНОВ (r3 п.5) ══════════════════════════════════════
+    /* ═══ ДВА РЯДА, ОДИН ЗАЗОР, ОДИН РОСТ ОРГАНОВ (r3 п.5; ряд источников снят D-20) ══════════
        Владелец: «сделать по уму … три спокойных ряда … дай больше спейсинга». Ряды идут в его
-       порядке: виды → источники → запуск. Зазор — 12px, ТОТ ЖЕ ШАГ, что `GROUP_GAP` («линейка
-       группы → содержимое», `core/organs.tsx`): между полосами одного решения он обязан быть тем
-       же, что между подписью и её содержимым, и меньше шва между блоками (16px у секции).
+       порядке: виды → запуск (средний ряд источников снят владельцем в волне 25.09). Зазор —
+       12px, ТОТ ЖЕ ШАГ, что `GROUP_GAP` («линейка группы → содержимое», `core/organs.tsx`):
+       между полосами одного решения он обязан быть тем же, что между подписью и её содержимым,
+       и меньше шва между блоками (16px у секции).
        Классом `GROUP_GAP` его не выразить — тот margin-bottom на подписи, а здесь нужен ритм
        между рядами; поэтому шаг один, а написаний два, и оба названы здесь. */
     <div data-flat-run='' className='space-y-3'>
@@ -285,19 +328,15 @@ export function FlatRunRow({
         </span>
       </div>
 
-      {/* ═══ РЯД 2 · ИСТОЧНИКИ — что ещё уедет вместе с референсами. Содержимое даёт блок
-          референсов (разбор — у места вызова); здесь его место в ритме. */}
-      {sources}
-
-      {/* ═══ РЯД 3 · ЗАПУСК — ОБЩИЙ ОРГАН (F-1). `disabled` ряду НЕ передаётся: право на запись уже
+      {/* ═══ РЯД 2 · ЗАПУСК — ОБЩИЙ ОРГАН (F-1). `disabled` ряду НЕ передаётся: право на запись уже
           названо в `gateReason` и той же переменной заперт `submit`. `shape` не называется:
           хвост здесь свой — деньги слева от двери описи, дверь у правого края, как в макете.
           `data-flat-generate` — якорь двери «the flat run ›» из FLAT SLOTS. */}
       <div data-flat-generate=''>
         <GenerateRow
           gate={gateReason ? { ok: false, reason: gateReason } : { ok: true }}
-          pending={startRun.isPending}
-          onGenerate={submit}
+          pending={startRun.isPending || flushing}
+          onGenerate={() => void submit()}
           trailing={
             <>
               {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — единственное место, где человек видит ПОЛНЫЙ состав запроса
@@ -329,14 +368,32 @@ export function FlatRunRow({
         />
       </div>
 
+      {/* ОТКАЗ МИНИМУМА МУДБОРДА — СЛОВАМИ И С ДВЕРЬЮ, А НЕ ТОЛЬКО ПОГАШЕННОЙ КНОПКОЙ. Погашенный
+          GENERATE держит повод в `title`, то есть по наведению; здесь он же стоит строкой, и рядом —
+          дверь туда, где он чинится. Только на карточке, которую можно писать. */}
+      {moodReason && speaks && !disabled && (
+        <div data-flat-mood-gate=''>
+          <LockBar reason={moodReason}>
+            <Button variant='secondary' size='sm' onClick={moodDoor.open}>
+              <ControlLabel>{moodDoor.label}</ControlLabel>
+            </Button>
+          </LockBar>
+        </div>
+      )}
+      {/* СОХРАНЕНИЕ НЕ ПРОШЛО — ПРОГОН НЕ ЗАПУЩЕН (контракт autosave). Стойкая строка до следующей
+          попытки: исправление («поправь поле») — не новое нажатие, и всплывашка ушла бы раньше. */}
+      {flushRefusal && (
+        <div data-flat-flush-refusal=''>
+          <LockBar reason={`${flushRefusal} — nothing was started, nothing was charged`} />
+        </div>
+      )}
       {/* МЕТКИ НЕ ЕДУТ, И СКАЗАНО ЭТО ТАМ, ГДЕ ТРАТЯТСЯ ДЕНЬГИ. Рисуется только пока метки есть. */}
       {marked.length > 0 && (
         <CalloutBox tone='note'>
           <Text size='micro' component='p'>
             <b>the edit ▸ marks on {marked.map((p) => p.label).join(', ')} stay on this screen.</b>{' '}
-            {flatSend.on
-              ? 'the plates themselves travel with GENERATE — you asked for them above. The marks drawn on them do not: they stay here for people.'
-              : 'a flat run reads the card’s references, never the bench plates, so nothing drawn there travels with GENERATE — the marks remain on their plates for people.'}
+            a flat run reads the card’s references, never the bench plates, so nothing drawn there
+            travels with GENERATE — the marks remain on their plates for people.
           </Text>
         </CalloutBox>
       )}

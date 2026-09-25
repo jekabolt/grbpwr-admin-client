@@ -1,11 +1,12 @@
 import { GetDesignBandResponse, common_DesignPicture, common_MediaFull } from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { cn } from 'lib/utility';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
+import { AiEnhance } from 'ui/components/ai-enhance';
 import { Button } from 'ui/components/button';
-import { Chip } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
@@ -16,25 +17,21 @@ import Textarea from 'ui/components/text-area';
 import { Tiles } from 'ui/components/tiles';
 
 import type { TechCardFormData } from '../schema';
-import { detailKeyLabel } from '../tech-card-options';
 import {
   INPUT_MAX,
   REFERENCE_KIND,
   appendBoardPictures,
+  isBoardRow,
   isInputRow,
   type BoardItem,
 } from './mood-board';
-import { InertDoor, displayDetailName, readBench } from './bench-slot';
-import {
-  filledFlatSlots,
-  sentFlatSlotIds,
-  useFlatSlotsSend,
-  useFlatSlotsSendWrites,
-} from './flat-slots-send';
+import { displayDetailName, readBench } from './bench-slot';
 import { cropFamilies } from './generation/composite';
-import { ControlLabel, FlatRunRow, PLATE_PX, ROW_CONTROL_STYLE } from './flat-run-row';
+import { FlatRunRow } from './flat-run-row';
 import { RecalledRunPrompt } from './history-recall';
-import { AskModal, EmptyState, GROUP_GAP, PlaceOrDrawCell } from './core';
+import { EmptyState, GROUP_GAP, PlaceOrDrawCell } from './core';
+import { cardFactsContext, composeWords } from './core/card-facts';
+import { useCardFacts } from './head/card-facts-form';
 import { VectorModal } from './modals';
 import { PictureTile } from './picture-tile';
 import { pictureOffersSplit } from './render/model';
@@ -88,15 +85,18 @@ import { useDesignWrites } from './use-design-band';
  * запрос. Записки у картинок больше нет (SPEC п.10): один общий текст — garment description.
  *
  * ═══ ПОРЯДОК БЛОКА — ЭКРАН МАКЕТА (`_step-flat.js`, `fInputBlock`), РЯДАМИ, БЕЗ ЛИНЕЕК ГРУПП ═══
- *   заголовок  INPUT — REFERENCES · what this run is given ·                            [CLEAR]
+ *   заголовок  INPUT — REFERENCES · what this run is given (дверей в шапке нет — D-21)
  *   1.1  сетка плиток референсов (кадр 1:1, `#N` в углу, селект вида СРАЗУ под кадром) +
  *        последняя ячейка — плитка на две половины: слот медиа сверху, «draw a reference» снизу;
  *        пусто → та же плитка одна в сетке (второй пары кнопок больше нет);
- *   1.2  WORDS [N CHARACTERS] — textarea во всю ширину (`garmentDescription`);
- *   1.3  FROM CONSTRUCTION ▸ · ALSO SEND THE FLAT SLOTS, под рядом — полосы
- *        LOCKED с причиной и дверью, и чипы плит при включённом тумблере;
- *   1.4  ряд запуска (`./flat-run-row.tsx`): VIEWS (продуктовая строка — проводу нужны
+ *        под сеткой справа — тихая дверь `clear the input ✕` (D-21, волна 25.09);
+ *   1.2  WORDS — textarea во всю ширину (`garmentDescription`), засеянная фактами карточки при
+ *        ОТСУТСТВИИ значения (D-20/D-20'); в правом нижнем углу счётчик `N / 2000` и `ai ✦`;
+ *   1.3  ряд запуска (`./flat-run-row.tsx`): VIEWS (продуктовая строка — проводу нужны
  *        `views[]`), GENERATE · цена · WHAT THE MODEL GETS ▸.
+ * Двери `from construction ▸` и `also send the flat slots` (с лентой плит) сняты владельцем
+ * (T24, D-20): всё, что они приносили, теперь стоит в WORDS с самого начала, а плиты верстака в
+ * прогон флэта больше не едут вовсе (`useFlatSlots` всегда false).
  * Здесь стояла сетка 2×N с кадром 160px и правой колонкой на роль, линейка «garment description»
  * и линейка «also shown — flat slots» с миниатюрами плит; владелец увидел и сказал «не как в
  * референсе». Кожа — продукта (`ui/components`), логика — продукта (RPC, поля формы).
@@ -116,9 +116,9 @@ import { useDesignWrites } from './use-design-band';
  */
 /**
  * Потолок `garmentDescription` — ЕДИНСТВЕННОЕ НАПИСАНИЕ ЭТОГО ЧИСЛА. Его читают `maxLength`
- * самого поля и дверь «from construction ▸» (B-15), которая обязана отказать словами, а не
- * молча обрезать хвост описания. Два разных потолка на одно поле — это способ потерять текст на
- * том из них, который меньше (ровно тот же довод, что у `CONCEPT_MAX` в `./mood-board`).
+ * самого поля, засев фактами (`composeWords` — опускает секции ЦЕЛИКОМ, а не режет хвост) и
+ * `ai ✦` (`maxRunes`). Два разных потолка на одно поле — это способ потерять текст на том из них,
+ * который меньше (ровно тот же довод, что у `CONCEPT_MAX` в `./mood-board`).
  */
 const GARMENT_MAX = 2000;
 
@@ -476,12 +476,9 @@ export function ReferencesSection({
   // ── clear: ТОЛЬКО ПРОМПТ, картинки остаются (SPEC п.8, CONTRACT §B) ─────────────────────────
   const [clearAsk, setClearAsk] = useState(false);
   const [clearing, setClearing] = useState(false);
-  const flatSend = useFlatSlotsSend(techCardId);
-  const { setOn: setFlatSendOn, exclude, restore } = useFlatSlotsSendWrites();
 
   /**
-   * ЧТО ЧИСТИТСЯ: слова (`garmentDescription`), роли референсов (и с ними — порядок промпта),
-   * переключатель «also send the flat slots» вместе с поимённым списком снятых плит.
+   * ЧТО ЧИСТИТСЯ: слова (`garmentDescription`) и роли референсов (и с ними — порядок промпта).
    * ЧТО НЕ ТРОГАЕТСЯ: строки входа. Здесь стоял фильтр, вырезавший их из `moodboardMedia`, то есть
    * `clear` УНОСИЛ КАРТИНКИ; макет говорит обратное — «The pictures stay». Строка входа без роли
    * сегодня и есть «картинка есть, в промпте нет» (модель читает только `design_reference`), так
@@ -494,8 +491,8 @@ export function ReferencesSection({
    *    уходит с ней по контракту провода, других записей этот жест не делает.
    * 2. ОПИСАНИЕ чистится ТОЛЬКО В ФОРМЕ — у поля нет своего RPC, оно едет с документом. `''` —
    *    команда «сотри» трёхсостоянийного протокола; до сейва сервер держит старый текст. Вопрос
-   *    ниже называет это словами, чтобы «clear» не обещал больше, чем делает.
-   * 3. `flatSlotsSend` — местное состояние вкладки, выключается вместе со списком исключений.
+   *    ниже называет это словами, чтобы «clear» не обещал больше, чем делает. И `''` же держит
+   *    засев WORDS (ниже) от повтора: засевается только ОТСУТСТВИЕ значения, а стёртое — нет.
    */
   async function runClear() {
     setClearAsk(false);
@@ -512,7 +509,6 @@ export function ReferencesSection({
       }
     }
     setValue('garmentDescription', '', { shouldDirty: true });
-    setFlatSendOn(techCardId, false);
     setClearing(false);
     if (failed.size) {
       showMessage(
@@ -534,60 +530,40 @@ export function ReferencesSection({
   const garment = useController({ control, name: 'garmentDescription' });
   const garmentId = useId();
 
-  // ── описание из CONSTRUCTION (B-15) ─────────────────────────────────────────────────────────
-  //
-  // ЧИТАЕТСЯ ТО ЖЕ, ЧТО РИСУЕТ `DetailsEditor`: массив `details[]`, где ключ — аспект, а текст —
-  // его описание, в порядке формы. Имя аспекта берётся ОДНОЙ функцией со всеми прочими экранами
-  // (`detailKeyLabel`). ПЛЮС `fit` — поле GENERAL INFORMATION, отдельной строкой перед аспектами:
-  // посадка — тоже конструкция, а `silhouette` и `fabric` уже есть среди аспектов `details[]`.
-  // `concept` НЕ берётся намеренно: это проза для цеха, другой документ (входит в подпись DESIGN).
-  const aspects = (useWatch({ control, name: 'details' }) ?? []) as {
-    key?: string;
-    text?: string;
-    mediaIds?: number[];
-  }[];
-  const fit = ((useWatch({ control, name: 'fit' }) ?? '') as string).trim();
-  const aspectText = useMemo(() => {
-    const lines = aspects
-      .map((d) => ({ label: detailKeyLabel(d.key), text: (d.text ?? '').trim() }))
-      .filter((d) => !!d.text)
-      .map((d) => `${d.label}: ${d.text}`);
-    return [...(fit ? [`fit: ${fit}`] : []), ...lines].join('\n');
-  }, [aspects, fit]);
+  // ── WORDS: ФАКТЫ КАРТОЧКИ, ОДИН РАЗ И ТОЛЬКО ПРИ ОТСУТСТВИИ ЗНАЧЕНИЯ (T24, D-20/D-20') ─────────
   /**
-   * КАРТИНКИ АСПЕКТОВ НЕ ЕДУТ (WAVE2 п.6). `from construction ▸` материализует ТОЛЬКО ТЕКСТ; у
-   * аспекта могут быть приколотые картинки (`details[].mediaIds`), и молчание о них читалось бы
-   * как «поехали вместе со словами». Число считается здесь дёшево, из той же формы, и говорится
-   * состоянием у самой двери — только пока такие картинки есть.
+   * Владелец: «WORDS по умолчанию = вся информация из полей мудборда, редактируемо, с AI ENHANCE».
+   * Здесь стояла дверь `from construction ▸`, приносившая посадку и аспекты по кнопке; теперь то,
+   * что она приносила (и больше), стоит в поле с самого начала, а дверь снята.
+   *
+   * ОДИН ЧИТАТЕЛЬ, ОДИН КОМПОЗИТОР. Факты формы читает `useCardFacts` (тот же, что у кнопок `ai ✦`
+   * DESCRIPTION, SILHOUETTE и FABRIC), строку собирает `composeWords` (`core/card-facts.ts`):
+   * путь категории · посадка · описание · силуэт · ткань · аспекты · указания доски · материалы —
+   * в этом порядке, в потолок поля ЦЕЛЫМИ секциями; сколько не влезло, говорится под полем.
+   *
+   * ⚠ ТОЛЬКО ПРИ `undefined`, НИКОГДА ПРИ `''`. Поле трёхсостоянийное (schema.ts): `undefined` —
+   * значения нет вовсе; `''` — его СТЁРЛИ (CLEAR пишет ровно это), и засеять стёртое значило бы
+   * отменить жест человека на следующей же отрисовке. Засев ставит поле грязным — автосейв доводит
+   * текст до сервера, а прогон читает СОХРАНЁННУЮ карточку.
+   *
+   * ⚠ СЛОВАРЬ ЖДЁТСЯ. Путь категории читается по словарю, а он приезжает асинхронно; засей мы до
+   * него, строка `category:` не появилась бы никогда — второго засева не бывает.
    */
-  const aspectPictures = useMemo(
-    () => aspects.reduce((n, d) => n + (d.mediaIds?.length ?? 0), 0),
-    [aspects],
-  );
-  /** Перезапись НЕПУСТОГО описания спрашивается: чужой текст исчезает без единого следа (PRODUCT.md). */
-  const [askTakeAspects, setAskTakeAspects] = useState(false);
-
-  function writeAspects() {
-    if (aspectText.length > GARMENT_MAX) {
-      // Молча обрезанное описание — это предложение, потерявшее хвост без единого слова об этом.
-      showMessage(
-        `the aspects do not fit — the description holds ${GARMENT_MAX} characters and they are ${aspectText.length}; shorten them in CONSTRUCTION first`,
-        'error',
-      );
-      return;
-    }
-    setValue('garmentDescription', aspectText, { shouldDirty: true });
-    showMessage('the description is taken from the construction aspects', 'success');
-  }
-
-  function takeAspects() {
-    if (!aspectText) return;
-    if (((getValues('garmentDescription') ?? '') as string).trim()) {
-      setAskTakeAspects(true);
-      return;
-    }
-    writeAspects();
-  }
+  const facts = useCardFacts(isBoardRow);
+  const composed = useMemo(() => composeWords(facts, GARMENT_MAX), [facts]);
+  const factsContext = useMemo(() => cardFactsContext(facts), [facts]);
+  const { loading: dictionaryLoading } = useDictionary();
+  const seedCategoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
+  const factsReady = seedCategoryId <= 0 || !dictionaryLoading;
+  /** Засеянный текст и сколько секций в него не влезло — строка под полем, пока текст тот же. */
+  const [seeded, setSeeded] = useState<{ text: string; omitted: number } | null>(null);
+  useEffect(() => {
+    if (readOnly || !factsReady || !composed.text) return;
+    const current = getValues('garmentDescription');
+    if (current !== undefined) return;
+    setValue('garmentDescription', composed.text, { shouldDirty: true });
+    setSeeded(composed);
+  }, [readOnly, factsReady, composed, getValues, setValue]);
 
   // ── сплит референса → строки входа с ролями (R-17) ──────────────────────────────────────────
   // `addToInput` СКАЗАН ЯВНО и только здесь: кадры разреза становятся референсами лишь тогда,
@@ -686,49 +662,20 @@ export function ReferencesSection({
   const garmentChars = ((garment.field.value ?? '') as string).trim().length;
   /* Счётчик внутри поля считает СЫРУЮ длину — ту же, по которой режет `maxLength`; разбор у поля. */
   const garmentLen = ((garment.field.value ?? '') as string).length;
-  const nothingToClear = refOf.size === 0 && garmentChars === 0 && !flatSend.on;
-
-  /**
-   * ═══ ПЛИТЫ, КОТОРЫЕ ЕДУТ С ПРОМПТОМ — ЧИПЫ ПОД РЯДОМ ДВЕРЕЙ (J-10, форма макета) ═════════════
-   *
-   * Здесь стояла линейка «also shown — flat slots» с миниатюрами плит под пеленой и нумерацией.
-   * Макет (`fPromptDoors`) рисует ПО ЧИПУ на заполненную плиту, только пока тумблер включён:
-   * чип залит — плита едет, снят — вычеркнута поимённо. Снятое поимённо переживает выключение
-   * тумблера (`flat-slots-send.ts`). Что именно уедет и под какими номерами — опись в модалке
-   * WHAT THE MODEL GETS ▸, одна на все шаги; здесь только выключатели.
-   *
-   * ⚠ ДУБЛИКАТ ЧЕСТЕН В `title`: плита, чей файл уже стоит референсом, в `flat_slot_ids` уезжает
-   * как всякая не снятая (человек её не снимал), но новой картинки в промпт не добавляет — сервер
-   * дедуплицирует и оставляет первое вхождение, референс. Замерено на стенде.
-   */
-  const plates = useMemo(() => filledFlatSlots(band), [band]);
-  const sentIds = new Set(sentFlatSlotIds(flatSend, plates.map((p) => p.slotId)));
+  const nothingToClear = refOf.size === 0 && garmentChars === 0;
+  const omittedShown =
+    seeded && seeded.omitted > 0 && ((garment.field.value ?? '') as string) === seeded.text
+      ? seeded.omitted
+      : 0;
 
   return (
     <Section
       title='input — references'
       question='— what this run is given'
-      /* ═══ ШАПКА ДЕРЖИТ ОДНУ ДВЕРЬ, А НЕ ДВЕ ПЛАШКИ (R2 п.19) ══════════════════════════════════
-         Владелец, дословно: «кнопку CLEAR помести туда, где STEP 2 · 3 OF 3 REFERENCES; сами эти
-         пилюли удалить». Обе плашки были подписями, а не органами: номер шага уже назван рельсой
-         студии слева, а счёт референсов виден по самой сетке плиток под шапкой. На их месте
-         теперь ОДНА дверь — та, что чистит промпт; из ряда дверей ниже она ушла, чтобы «clear»
-         не стоял в двух местах сразу. */
-      action={
-        !readOnly ? (
-          <Button
-            variant='secondary'
-            size='xs'
-            data-clear-prompt=''
-            loading={clearing}
-            disabled={clearing || nothingToClear}
-            onClick={() => setClearAsk(true)}
-            title='clears the words and the reference roles — the pictures stay'
-          >
-            clear
-          </Button>
-        ) : undefined
-      }
+      /* ═══ В ШАПКЕ БОЛЬШЕ НЕТ НИ ОДНОЙ ДВЕРИ (D-21, волна 25.09) ══════════════════════════════
+         R2 п.19 поставил сюда CLEAR на место двух плашок; владелец в этой волне: «кнопка CLEAR не
+         в хедере блока, а уместнее». Уместнее — там, где лежит то, что она чистит: под сеткой
+         референсов, тихой текстовой дверью `clear the input ✕` (ниже). */
       /* Больше воздуха между рядами блока (16px вместо 10px): владелец — «дай больше спейсинга,
          чтобы проще было воспринимать». Ряды здесь разнородные — сетка, текст, двери, прогон. */
       className='space-y-block'
@@ -810,6 +757,26 @@ export function ReferencesSection({
         </Text>
       )}
 
+      {/* ═══ CLEAR — ПОД СЕТКОЙ, СПРАВА, ТИХОЙ ТЕКСТОВОЙ ДВЕРЬЮ (D-21) ══════════════════════════
+          Поведение прежнее: вопрос с объёмом числами, роли уходят с сервера, слова — пустой
+          строкой в форме, картинки остаются. Нечего чистить — дверь погашена, а не спрятана:
+          пустое место не объясняет, куда она делась. */}
+      {!readOnly && (
+        <div className='flex justify-end'>
+          <Button
+            variant='underline'
+            size='sm'
+            data-clear-prompt=''
+            loading={clearing}
+            disabled={clearing || nothingToClear}
+            onClick={() => setClearAsk(true)}
+            title='clears the words and the reference roles — the pictures stay'
+          >
+            clear the input ✕
+          </Button>
+        </div>
+      )}
+
       {/* ═══ 1.2 WORDS — один текст на весь промпт (SPEC п.10): записок у картинок нет. Поле
           `garmentDescription`; `data-field` — якорь двери «edit the description ▸» из панели
           WHAT THE MODEL GETS (`revealField` ищет по `[data-field]`). */}
@@ -828,21 +795,17 @@ export function ReferencesSection({
         <label htmlFor={garmentId} className='sr-only'>
           words for the model
         </label>
-        {/* ═══ СЧЁТЧИК ЖИВЁТ ВНУТРИ ПОЛЯ, В ЕГО ПРАВОМ НИЖНЕМ УГЛУ (r3 п.7) ═══════════════════
-            Владелец: «счётчик characters у WORDS — внутри поля снизу справа, и ограничитель по
-            размеру». Снаружи он был ОТДЕЛЬНОЙ СТРОКОЙ над полем и появлялся только когда текст
-            уже набран — то есть ровно тогда, когда он ничего не подсказывает, и никогда тогда,
-            когда человек ещё решает, сколько писать. Внутри он стоит всегда и печатает ОБА числа,
-            `N / 2000`: потолок — это и есть то, что он обещает, а `maxLength` его молча режет.
+        {/* ═══ ПРАВЫЙ НИЖНИЙ УГОЛ ПОЛЯ — СЧЁТЧИК И `ai ✦`, ОДНОЙ СТРОКОЙ (r3 п.7 + D-20) ═════════
+            Владелец: «счётчик characters у WORDS — внутри поля снизу справа» (r3) и «WORDS … с AI
+            ENHANCE» (T24). Угол один, органов два — поэтому они стоят в нём ОДНОЙ СТРОКОЙ: число
+            `N / 2000` и сразу за ним тихая кнопка `ai ✦` (контракт `AiEnhance`: правый нижний угол
+            обёртки поля). Своё абсолютное место кнопки снято (`static`), чтобы она не легла на
+            счётчик, — строку держит обёртка.
 
-            ⚠ ЧИСЛО — СЫРАЯ ДЛИНА, А НЕ ОБРЕЗАННАЯ. Режет `maxLength` по сырой длине; счётчик,
-            считавший `trim()`, показывал бы 1998 на поле, которое уже не принимает символ.
-            (`garmentChars` рядом — обрезанная длина, и она остаётся у вопроса CLEAR: там речь о
-            том, есть ли ЧТО терять, а пробел терять нечего.)
-
-            ⚠ `pointer-events-none` НЕСУЩИЙ: счётчик лежит НАД полем, и без него клик в правый
-            нижний угол поля не ставил бы каретку. Место под него выгорожено нижним отступом
-            самого поля (20px), поэтому последняя строка текста под него не заезжает. */}
+            ⚠ ЧИСЛО — СЫРАЯ ДЛИНА, А НЕ ОБРЕЗАННАЯ: режет `maxLength` по сырой длине.
+            ⚠ `pointer-events: none` НЕСУЩИЙ, и кнопка его ОТМЕНЯЕТ для себя: угол лежит НАД полем, и
+            клик в него мимо кнопки обязан ставить каретку. Полка под угол — нижний отступ поля
+            (30px, инлайном: класса такого роста в собранном CSS может не быть). */}
         <div className='relative'>
           <Textarea
             {...garment.field}
@@ -854,207 +817,62 @@ export function ReferencesSection({
             maxLength={GARMENT_MAX}
             placeholder='what this flat has to show'
             aria-label='words for the model'
-            /* Полка под счётчик — ИНЛАЙНОМ, как и его посадка: `pb-5` и `bottom-1.5` в собранном
-               CSS не существуют, если этих классов не было в дереве на момент сборки, и стенд
-               намерил бы счётчик ПОД полем, показав зелёное там, где у человека он внутри. */
-            style={{ paddingBottom: 20 }}
+            style={{ paddingBottom: 30 }}
             className='resize-y'
           />
-          <Text
-            size='nano'
-            variant='label'
-            component='span'
-            data-words-count={garmentLen}
-            style={{ position: 'absolute', bottom: 6, right: 8 }}
-            className='pointer-events-none tabular-nums'
+          <div
+            data-words-corner=''
+            /* `right: 16`, а не 6: в самом углу стоит ручка `resize-y` поля, и кнопка на ней
+               закрывала бы её (замерено снимком стенда). */
+            style={{
+              position: 'absolute',
+              bottom: 6,
+              right: 16,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              pointerEvents: 'none',
+            }}
           >
-            {garmentLen} / {GARMENT_MAX}
-          </Text>
+            <Text
+              size='nano'
+              variant='label'
+              component='span'
+              data-words-count={garmentLen}
+              className='tabular-nums'
+            >
+              {garmentLen} / {GARMENT_MAX}
+            </Text>
+            <AiEnhance
+              field='words'
+              value={garment.field.value}
+              context={factsContext}
+              maxRunes={GARMENT_MAX}
+              disabled={readOnly}
+              className='static pointer-events-auto'
+              onApply={(text) => setValue('garmentDescription', text, { shouldDirty: true })}
+            />
+          </div>
         </div>
-        {/* КАРТИНКИ АСПЕКТОВ НЕ ЕДУТ, И ЭТО СКАЗАНО СОСТОЯНИЕМ (WAVE2 п.6) — только пока они есть. */}
-        {aspectPictures > 0 && (
-          <Text size='micro' variant='label' component='p' data-aspect-pictures={aspectPictures}>
-            from construction ▸ takes the words only — the {aspectPictures} picture
-            {aspectPictures === 1 ? '' : 's'} pinned to the aspects {aspectPictures === 1 ? 'does' : 'do'}{' '}
-            not travel. Add {aspectPictures === 1 ? 'it' : 'them'} as references here if the model
-            should see {aspectPictures === 1 ? 'it' : 'them'}.
+        {/* ЗАСЕВ НЕ ВЛЕЗ ЦЕЛИКОМ — сказано числом секций, а не молчанием (D-20'): пока текст тот,
+            что засеян; первая же правка делает строку неправдой, и она уходит. */}
+        {omittedShown > 0 && (
+          <Text size='micro' variant='label' component='p' data-words-omitted={omittedShown}>
+            (+{omittedShown} section{omittedShown === 1 ? '' : 's'} omitted — the words hold{' '}
+            {GARMENT_MAX} characters)
           </Text>
         )}
       </div>
 
-      {/* ═══ 1.3–1.5 ТРИ РЯДА ПРОГОНА (r3 п.5) — ОДИН КОМПОНЕНТ, ОДИН РИТМ ════════════════════
-          Владелец: «после WORDS очень много кнопок разного размера с минимальными отступами».
-          Их и было много: ряд дверей, две полосы LOCKED, лента чипов плит, ряд видов и ряд
-          запуска — пять полос вперемешку, три разные высоты органов. Теперь их три, и порядок
-          назван владельцем: (1) виды и раскладка ответа, (2) ИСТОЧНИКИ — что ещё уедет вместе с
-          референсами, (3) запуск.
-
-          ⚠ ИСТОЧНИКИ ПРИЕЗЖАЮТ СЮДА ЩЕЛЬЮ, А НЕ ПЕРЕЕЗЖАЮТ В `FlatRunRow`. Обе двери ряда пишут
-          в ЭТОТ блок — одна в поле `garmentDescription` формы, вторая в хранилище исключений
-          карточки, — и утащить их в компонент прогона значило бы протащить туда же половину
-          состояния секции. Ряд прогона держит РИТМ трёх полос, а не их содержимое.
+      {/* ═══ РЯДЫ ПРОГОНА — ОДИН КОМПОНЕНТ, ОДИН РИТМ (r3 п.5; ряд источников снят D-20) ═══════════
+          Были три полосы: виды → источники (`from construction ▸`, `also send the flat slots` и
+          лента плит) → запуск. Средняя снята владельцем целиком (T24): её слова стоят в WORDS с
+          самого начала, а плиты в прогон флэта не едут. Остались виды и запуск.
 
           ⚠ НЕ ЗАВОРАЧИВАТЬ В СВОРАЧИВАНИЕ (`collapsible`/`Fold`): ниже смонтирован приёмник рекола
           `RecalledRunPrompt`, при размонтировании реестр стирает выбор (`recalled.delete`), и жест
           теряется молча. */}
-      <FlatRunRow
-        band={band}
-        techCardId={techCardId}
-        disabled={disabled}
-        sources={
-          <>
-            <div className='flex flex-wrap items-center gap-2' data-prompt-doors=''>
-              {/* ВЗЯТЬ ОПИСАНИЕ ИЗ CONSTRUCTION (B-15): `details[]` — аспекты в порядке
-                  `DetailsEditor`, плюс `fit` первой строкой; пустые аспекты не берутся. Поле
-                  трёхсостоянийное (schema.ts): дверь ставит ЗНАЧЕНИЕ и только его — команду
-                  «сотри» она не отдаёт никогда. Непустое описание перезаписывается с вопросом
-                  (`AskModal` ниже). */}
-              {readOnly ? null : aspectText ? (
-                <Button
-                  variant='secondary'
-                  size='sm'
-                  data-take-aspects=''
-                  onClick={takeAspects}
-                  title='fill the words from CONSTRUCTION — fit first, then one line per filled aspect, in the order they are described there'
-                >
-                  <ControlLabel>from construction ▸</ControlLabel>
-                </Button>
-              ) : (
-                <InertDoor
-                  label={<ControlLabel>from construction ▸</ControlLabel>}
-                  size='sm'
-                  /* ПОВОД НАЗЫВАЕТ ШАГ, А НЕ СТОРОНУ СВЕТА. «above» было неправдой: GENERAL
-                     INFORMATION и CONSTRUCTION живут на шаге MOODBOARD (`FIELD_STEP`), а не выше
-                     на этом экране, и человек искал бы их здесь. */
-                  reason='no construction text yet — fill GENERAL INFORMATION or CONSTRUCTION on the MOODBOARD step'
-                />
-              )}
-              {/* ТУМБЛЕР ПЛИТ — ЧИП РОСТОМ С КНОПКУ (`ROW_CONTROL_STYLE`): состояние `on` несёт
-                  заливка + `aria-pressed`.
-
-                  ⚠ ПРИЧИНА ПОГАШЕНИЯ ПЕРЕЕХАЛА В `title` ИЗ ОТДЕЛЬНОЙ ПОЛОСЫ. Под рядом стояла
-                  вечная полоса LOCKED «no flat slots are filled · nothing extra to send» — целая
-                  полоса ради отсутствия, и стояла она на КАЖДОЙ карточке, у которой верстак ещё
-                  пуст, то есть почти всегда. Само состояние при этом видно глазами двумя блоками
-                  ниже (FLAT SLOTS, «0 OF 6 SIDES»), а погашенный чип говорит его словами. */}
-              <Chip
-                selected={flatSend.on}
-                pressed={flatSend.on}
-                disabled={readOnly || plates.length === 0}
-                data-use-flat-slots=''
-                style={ROW_CONTROL_STYLE}
-                onClick={() => setFlatSendOn(techCardId, !flatSend.on)}
-                title={
-                  plates.length === 0
-                    ? 'no flat slots are filled — nothing extra to send. Put a plate into FLAT SLOTS below first'
-                    : 'the plates standing in FLAT SLOTS go to the model after the references — they are usually flats it drew before, so it tends to redraw them'
-                }
-              >
-                also send the flat slots
-              </Chip>
-            </div>
-            {/* ═══ ЧЕТВЁРТОЙ ПОЛОСЫ ЗДЕСЬ БОЛЬШЕ НЕТ (Fable r3-w1, находка 2) ═══════════════════
-                Под этим рядом стояла LOCKED-полоса «no construction text yet · general
-                information ›» — и стояла она на КАЖДОЙ карточке без текста конструкции, то есть
-                почти на каждой свежей. Ряды после WORDS обещаны владельцем ТРЕМЯ (r3 п.5), а это
-                была четвёртая, другого роста, ради повода, который уже сказан в двух шагах левее:
-                погашенная дверь `from construction ▸` несёт его своим `data-inert`/`title`. Тем же
-                доводом отсюда ушла полоса «no flat slots are filled» — причина переехала в `title`
-                чипа плит. Один повод говорится один раз.
-
-                ⚠ ЦЕНА НАЗВАНА: вместе с полосой ушёл ЖЕСТ — прыжок на GENERAL INFORMATION одним
-                нажатием (`gotoGeneral` → `revealField('fit')` → студия сама переключается на
-                MOODBOARD). Замены ему на этом экране нет; остаётся рельс студии сверху, и повод
-                теперь называет шаг по имени, а не «above» — блоки GENERAL INFORMATION и
-                CONSTRUCTION стоят не выше на этом экране, а на ДРУГОМ шаге (`core/chain.ts`,
-                `FIELD_STEP`: `fit`/`details` → `mood`). */}
-            {/* ═══ ПЛИТЫ — ЛЕНТА МИНИАТЮР, И ТОЛЬКО ПРИ ВКЛЮЧЁННОМ ТУМБЛЕРЕ (r3 п.5) ══════════
-                Владелец, r2 (J-10): «сами картинки должны быть в тамбнейлах … с серой пеленой
-                поверх типо инэктив и должны убираться по кнопке». Здесь стоял ряд ТЕКСТОВЫХ
-                чипов — то есть ещё одна лента кнопок под рядом кнопок, и по именам сторон нельзя
-                было понять, ЧТО именно уедет. Теперь это снимки: залитый — едет, под пеленой —
-                снят поимённо. Что уедет и под какими номерами, целиком перечисляет модалка
-                WHAT THE MODEL GETS ▸; здесь только выключатели.
-
-                ⚠ ДУБЛИКАТ ЧЕСТЕН В `title`: плита, чей файл уже стоит референсом, в
-                `flat_slot_ids` уезжает как всякая не снятая (человек её не снимал), но новой
-                картинки в промпт не добавляет — сервер дедуплицирует и оставляет первое
-                вхождение, референс. Замерено на стенде. */}
-            {flatSend.on && plates.length > 0 && (
-              <div
-                data-flat-plates={plates.length}
-                className='flex flex-wrap items-start gap-2'
-              >
-                {plates.map((plate) => {
-                  const travels = sentIds.has(plate.slotId);
-                  const already = promptNumber.get(plate.mediaId);
-                  const url = thumbUrl(plate.media) || thumbUrl(mediaById.get(plate.mediaId));
-                  return (
-                    <button
-                      key={plate.slotId}
-                      type='button'
-                      data-flat-plate={plate.slotId}
-                      aria-pressed={travels}
-                      aria-label={`${plate.label} plate`}
-                      disabled={readOnly}
-                      style={{ width: PLATE_PX + 12 }}
-                      title={
-                        already != null
-                          ? `its file already travels as reference #${already} — the server keeps the first copy`
-                          : travels
-                            ? 'travels after the references — click to take it off by name'
-                            : 'taken off by name — click to send it again'
-                      }
-                      onClick={() =>
-                        travels
-                          ? exclude(techCardId, plate.slotId)
-                          : restore(techCardId, plate.slotId)
-                      }
-                      className='flex min-w-0 flex-col items-center gap-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed'
-                    >
-                      {/* СОСТОЯНИЕ НЕСУТ ТРИ ЗНАКА, А НЕ ОДИН: рамка (чернила — едет, серая —
-                          снята), пелена на снимке и цвет имени. Одной пеленой на бледном флэте
-                          «едет / снята» не различить — замерено глазами на стенде. */}
-                      <span
-                        style={{ width: PLATE_PX, height: PLATE_PX }}
-                        className={cn(
-                          'block shrink-0 overflow-hidden border bg-bgColor',
-                          travels ? 'border-textColor' : 'border-borderColor',
-                        )}
-                      >
-                        {url ? (
-                          /* ПЕЛЕНА — НА САМОМ СНИМКЕ, А НЕ НА КОРОБКЕ: рамка и имя обязаны
-                             остаться читаемыми, снятая плита — не отключённый орган. */
-                          <img
-                            src={url}
-                            alt=''
-                            className='h-full w-full object-cover'
-                            /* Пелена — ИНЛАЙНОМ по тому же доводу, что и всё новое в этих рядах:
-                               класса `opacity-20` в собранном CSS нет, и стенд намерил бы снятую
-                               плиту такой же яркой, как едущую. */
-                            style={!travels ? { opacity: 0.2 } : undefined}
-                          />
-                        ) : null}
-                      </span>
-                      <Text
-                        size='nano'
-                        variant='label'
-                        component='span'
-                        className={cn(
-                          'w-full truncate text-center uppercase tracking-label',
-                          travels && 'text-textColor',
-                        )}
-                      >
-                        {plate.label}
-                      </Text>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </>
-        }
-      />
+      <FlatRunRow band={band} techCardId={techCardId} disabled={disabled} />
 
       {/* ПРИЁМНИК РЕКОЛА (T-10). Видимого органа у него нет — он рисует только вопрос про описание
           изделия, и только когда описание уже непустое. Внутри блока, не сворачивать. */}
@@ -1095,8 +913,8 @@ export function ReferencesSection({
         onOpenChange={(open) => !open && setClearAsk(false)}
         onConfirm={runClear}
         onCancel={() => setClearAsk(false)}
-        title='clear the prompt'
-        confirmLabel='clear the prompt'
+        title='clear the input'
+        confirmLabel='clear the input'
         width='sm'
       >
         <div className='space-y-2'>
@@ -1105,11 +923,11 @@ export function ReferencesSection({
             {inPrompt > 0
               ? ` and ${inPrompt} reference role${inPrompt === 1 ? '' : 's'}`
               : ' — no reference carries a role'}
-            {flatSend.on ? ', and turns “also send the flat slots” off' : ''}. The pictures stay.
+            . The pictures stay.
           </Text>
           <Text size='control'>
-            Roles are removed from the server now, one by one; the words leave the card when you
-            next save it. The {members.length} picture{members.length === 1 ? ' stays' : 's stay'} in
+            Roles are removed from the server now, one by one; the words leave the card with its
+            next save. The {members.length} picture{members.length === 1 ? ' stays' : 's stay'} in
             the input, out of the prompt until given a role again. The moodboard is not touched.
           </Text>
         </div>
@@ -1174,20 +992,6 @@ export function ReferencesSection({
           </Text>
         </div>
       </ConfirmationModal>
-
-      {/* ЦЕНА ДВЕРИ «FROM CONSTRUCTION» НАЗЫВАЕТСЯ ДО ЖЕСТА, И ТОЛЬКО КОГДА ЕСТЬ ЧТО ТЕРЯТЬ (B-15). */}
-      <AskModal
-        open={askTakeAspects}
-        onDo={() => {
-          setAskTakeAspects(false);
-          writeAspects();
-        }}
-        onClose={() => setAskTakeAspects(false)}
-        title='replace the words?'
-        verb='replace them'
-        note={null}
-        sentence='The words below are replaced by the construction aspects, one line each. What is written there now is not kept anywhere else — copy it first if you need it.'
-      />
     </Section>
   );
 }

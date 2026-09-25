@@ -4,6 +4,7 @@ import { useMemo, type CSSProperties } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 import type { TechCardFormData } from '../schema';
+import { categoryChain } from './fit-vocabulary';
 
 /**
  * ═══ ПИКТОГРАММЫ ИЗДЕЛИЯ ПОД ПОЛОСАМИ ПУСТОГО СЛОТА (T25, D-22) ═══════════════════════════════
@@ -81,24 +82,16 @@ export function familyFor(c: FamilyInput): GarmentFamily | null {
 /**
  * Лист категории → имена её уровней. Уровни сопоставляются ЯВНО по `level`, не по глубине:
  * у `dresses` типы висят прямо на верхней категории, без подкатегории (тот же довод, что у
- * `CategoryBrowser` в `header-meta-fields.tsx`).
+ * `CategoryBrowser` в `header-meta-fields.tsx`). Прогулка по `parentId` — ОДНА на админку,
+ * `categoryChain` словаря посадок (её же читают CARD DETAILS и факты карточки); здесь только
+ * раскладка имён по уровням.
  */
 export function resolveCategory(
   categories: readonly common_Category[] | undefined,
   leafId: number | null | undefined,
 ): { top: string; sub: string; type: string; names: string[] } {
   const out = { top: '', sub: '', type: '', names: [] as string[] };
-  if (!leafId || !categories?.length) return out;
-  const byId = new Map<number, common_Category>();
-  for (const c of categories) if (c.id != null) byId.set(c.id, c);
-  const chain: common_Category[] = [];
-  let cur = byId.get(leafId);
-  let guard = 0;
-  while (cur && guard++ < 8) {
-    chain.unshift(cur);
-    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
-  }
-  for (const c of chain) {
+  for (const c of categoryChain(categories, leafId)) {
     const name = (c.name ?? '').trim();
     if (c.level === 'top_category') out.top = name;
     else if (c.level === 'sub_category') out.sub = name;
@@ -125,7 +118,10 @@ export function useCardGarmentFamily(): GarmentFamily | null {
  * различаются (горловина, планка, карманы, капюшон). Координаты — рука, а не данные: восемь
  * силуэтов проверены глазами на листе-контактке при 136px и при 0.12 поверх полос.
  */
-export const GARMENT_SHAPES: Record<GarmentFamily, { body: string; front: string[]; back: string[] }> = {
+export const GARMENT_SHAPES: Record<
+  GarmentFamily,
+  { body: string; front: string[]; back: string[] }
+> = {
   tee: {
     body: 'M26 14 L15 18 L5 33 L13 38 L18 32 L18 86 L46 86 L46 32 L51 38 L59 33 L49 18 L38 14',
     front: ['M26 14 Q32 23 38 14', 'M28 14 Q32 20.5 36 14'],
@@ -163,7 +159,12 @@ export const GARMENT_SHAPES: Record<GarmentFamily, { body: string; front: string
       'M6.5 71 L12.5 73',
       'M57.5 71 L51.5 73',
     ],
-    back: ['M26 13 Q32 16 38 13', 'M24 13.5 Q32 19 40 13.5', 'M6.5 71 L12.5 73', 'M57.5 71 L51.5 73'],
+    back: [
+      'M26 13 Q32 16 38 13',
+      'M24 13.5 Q32 19 40 13.5',
+      'M6.5 71 L12.5 73',
+      'M57.5 71 L51.5 73',
+    ],
   },
   trousers: {
     body: 'M18 8 L46 8 L46 14 L52 90 L35.5 90 L32 38 L28.5 90 L12 90 L18 14 Z',
@@ -276,7 +277,11 @@ export function PictogramBackdrop({
         pointerEvents: 'none',
       }}
     >
-      <GarmentPictogram family={family} view={face} style={{ height: '100%', aspectRatio: '64 / 96' }} />
+      <GarmentPictogram
+        family={family}
+        view={face}
+        style={{ height: '100%', aspectRatio: '64 / 96' }}
+      />
     </span>
   );
 }
