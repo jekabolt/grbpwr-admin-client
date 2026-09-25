@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { adminService } from 'api/api';
+import type { EnhanceTextField, EnhanceTextMode } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
@@ -18,9 +20,8 @@ import GenericPopover from 'ui/components/popover';
  * десять секунд рядом появляется `undo ↶` — вернуть, что было. Никаких второй кнопки, переключателей
  * режимов и превью: поле само и есть превью, а откат — одна дверь.
  *
- * СЕТЬ: `enhanceText` — единственный адрес RPC `EnhanceText` (POST /api/admin/ai/enhance-text).
- * Пока типы не сгенерированы, функция честно бросает `AI_NOT_WIRED`; зона CL-E заменяет тело на
- * `adminService.EnhanceText`. Компонент этого не знает и меняться не должен.
+ * СЕТЬ: `enhanceText` — единственный адрес RPC `EnhanceText` (POST /api/admin/ai/enhance-text),
+ * подключён в волне 25.09 (зона CL-E). Компонент о проводе не знает и меняться не должен.
  *
  * ОБЁРТКА ПОЛЯ: родитель делает `relative` и даёт textarea `pb-7`, чтобы последняя строка текста
  * не уезжала под кнопку. `maxRunes` — лимит поля назначения (2000 у DESCRIPTION/WORDS/NOTE): сервер
@@ -56,13 +57,64 @@ export class EnhanceRefusal extends Error {
   }
 }
 
+const MODE_WIRE: Record<EnhanceMode, EnhanceTextMode> = {
+  improve: 'ENHANCE_TEXT_MODE_IMPROVE',
+  expand: 'ENHANCE_TEXT_MODE_EXPAND',
+  shorten: 'ENHANCE_TEXT_MODE_SHORTEN',
+};
+
+const FIELD_WIRE: Record<EnhanceField, EnhanceTextField> = {
+  description: 'ENHANCE_TEXT_FIELD_DESCRIPTION',
+  note: 'ENHANCE_TEXT_FIELD_NOTE',
+  words: 'ENHANCE_TEXT_FIELD_WORDS',
+  silhouette: 'ENHANCE_TEXT_FIELD_SILHOUETTE',
+  fabric: 'ENHANCE_TEXT_FIELD_FABRIC',
+  other: 'ENHANCE_TEXT_FIELD_OTHER',
+};
+
 /**
- * Единственная дверь к серверу. ЗОНА CL-E: заменить тело на вызов `adminService.EnhanceText`
- * (маппинг mode/field → enum'ы контракта, `ErrorInfo.reason` → `EnhanceRefusal.reason`),
- * не меняя сигнатуру.
+ * `ErrorInfo.reason` из деталей google.rpc.Status (их хранит `api/api.ts` в `error.details`).
+ * Сверка по суффиксу `@type`, как в `utils/field-errors.ts`; голый объект с `reason` тоже годится.
  */
-export async function enhanceText(_req: EnhanceRequest, _signal?: AbortSignal): Promise<string> {
-  throw new EnhanceRefusal('AI_NOT_WIRED', 'AI enhance is not wired to the server yet');
+function errorInfoReason(error: unknown): string | undefined {
+  const details = (error as { details?: unknown } | null)?.details;
+  if (!Array.isArray(details)) return undefined;
+  for (const d of details) {
+    if (!d || typeof d !== 'object') continue;
+    const type = (d as { '@type'?: unknown })['@type'];
+    if (typeof type === 'string' && !type.endsWith('ErrorInfo')) continue;
+    const reason = (d as { reason?: unknown }).reason;
+    if (typeof reason === 'string' && reason) return reason;
+  }
+  return undefined;
+}
+
+/**
+ * Единственная дверь к серверу: `adminService.EnhanceText`. Режим и поле уходят закрытыми enum'ами
+ * (сервер сам превращает их в свою фразу промпта), `maxRunes` — лимит поля назначения (0 = 4000 на
+ * сервере). Отказ с `ErrorInfo` становится `EnhanceRefusal` с той же причиной (`AI_NOT_CONFIGURED`,
+ * `AI_MODEL_UNAVAILABLE`; незнакомая — `OTHER`), остальные ошибки (занят, лимит в час, сеть) идут
+ * как есть — компонент показывает их текст.
+ *
+ * `signal` не доходит до сети: сгенерированный клиент не принимает AbortSignal. Поздний ответ
+ * отбрасывает сам компонент (он сверяет свой контроллер после `await`).
+ */
+export async function enhanceText(req: EnhanceRequest, _signal?: AbortSignal): Promise<string> {
+  try {
+    const res = await adminService.EnhanceText({
+      text: req.text,
+      mode: MODE_WIRE[req.mode],
+      field: FIELD_WIRE[req.field],
+      context: req.context ?? '',
+      maxRunes: req.maxRunes ?? 0,
+    });
+    return res.text ?? '';
+  } catch (e) {
+    const reason = errorInfoReason(e);
+    if (!reason) throw e;
+    const known = reason === 'AI_NOT_CONFIGURED' || reason === 'AI_MODEL_UNAVAILABLE';
+    throw new EnhanceRefusal(known ? reason : 'OTHER', e instanceof Error ? e.message : reason);
+  }
 }
 
 const UNDO_WINDOW_MS = 10_000;
