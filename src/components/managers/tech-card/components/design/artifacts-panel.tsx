@@ -90,11 +90,11 @@ import { ThreedModelModal } from './threed/model-modal';
 import { pictureIsDisplayOnly, type WireUploadItem } from './threed/wire';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
 import {
+  ACTIVE_VIEWS,
+  LEGACY_VIEWS,
   SHEET_MIN_VIEWS,
-  SILHOUETTE_VIEWS,
   normaliseViewKey,
   viewLabel,
-  type SilhouetteView,
 } from './views';
 import { isPictureHidden } from './visibility';
 
@@ -623,12 +623,12 @@ export function flatOutputRows(
  * `probe-artifacts.mjs` (сцена R, `--base`): первая ячейка ряда — пустой слот, ни одной картинки в
  * видимой части ленты.
  *
- * ЧИТАЕТСЯ ВЕСЬ ВЕРСТАК, ЛЮБЫМ КОЛОРВЕЕМ. Порядок — по стороне (`SILHOUETTE_VIEWS`), внутри
+ * ЧИТАЕТСЯ ВЕСЬ ВЕРСТАК, ЛЮБЫМ КОЛОРВЕЕМ. Порядок — по стороне (`ACTIVE_VIEWS`), внутри
  * стороны — по колорвею: список остаётся читаемым как список сторон, а второй колорвей встаёт
  * рядом со своим соседом, а не в конце. Группировку по колорвею делает уже `renderGroups`, и
  * пересортировать этот список она может — порядок сторон внутри группы от того не меняется.
  *
- * ⚠ ОТБОРА `isSilhouetteView` ЗДЕСЬ БОЛЬШЕ НЕТ, И ЭТО СЛОВО ВЛАДЕЛЬЦА: «должны показываться ВСЕ
+ * ⚠ ОТБОРА `isActiveView` ЗДЕСЬ НЕТ, И ЭТО СЛОВО ВЛАДЕЛЬЦА: «должны показываться ВСЕ
  * размеченные рендеры». Отбор молча выбрасывал занятые слоты ДЕТАЛЕЙ — рендер, размеченный на
  * `detail`, стоял в верстаке, печатался бы в тех-паке и не показывался на листе вовсе. Детали
  * идут ЗА сторонами (ранг `SIDE_RANK_DETAIL`), как и в `documentPlates` у флэтов: лист читают
@@ -693,10 +693,16 @@ export function renderBenchPlates(
   return plates;
 }
 
-/** Ранг вида в ряду: силуэты в порядке `views.ts`, всё прочее (деталь, ключ нового сервера) — за ними. */
-const SIDE_RANK_DETAIL = SILHOUETTE_VIEWS.length;
+/**
+ * Ранг вида в ряду: четыре стороны в порядке `views.ts`, за ними снятые 3/4 (D-18 — плита, стоящая
+ * в таком слоте, всё ещё печатается и показывается с подписью «3/4 left (legacy)»), всё прочее
+ * (деталь, ключ нового сервера) — в конце. ⚠ Снятый вид НЕ получает ранг детали: иначе подпись
+ * плиты читалась бы из `detailName`, которого у стороны нет (Codex M-11).
+ */
+const SIDE_ORDER: readonly string[] = [...ACTIVE_VIEWS, ...LEGACY_VIEWS];
+const SIDE_RANK_DETAIL = SIDE_ORDER.length;
 function sideRank(view: string): number {
-  const at = SILHOUETTE_VIEWS.indexOf(view as SilhouetteView);
+  const at = SIDE_ORDER.indexOf(view);
   return at < 0 ? SIDE_RANK_DETAIL : at;
 }
 
@@ -1025,7 +1031,10 @@ export function documentPlates(
 
   // Стороны идут в порядке `views.ts` (перед, спинка, бока), детали — за ними, как их отдала
   // полоса. `readBench` уже разложил их именно так, поэтому порядок здесь не назначается заново.
-  const benchSlots = [...bench.sides.map((s) => s.slot), ...bench.details];
+  // ЗАПОЛНЕННЫЕ СНЯТЫЕ 3/4 — ПОСЛЕДНИМИ (D-18'): плита в таком слоте по-прежнему на верстаке, и
+  // лист, который её не показал бы, спрятал бы то, что уходит на бумагу. Подпись — `viewLabel`,
+  // то есть «3/4 LEFT (LEGACY)»; снять её — ✕ в ряду «legacy views» на FLAT SLOTS.
+  const benchSlots = [...bench.sides.map((s) => s.slot), ...bench.details, ...bench.legacy];
   for (const slot of benchSlots) {
     if (!slotIsFilled(slot)) continue;
     const media = slot!.picture?.media;

@@ -11,8 +11,8 @@ import type {
 import { isRunLive } from '../generation/run-state';
 import { mixedInputNote, provenanceLabel, readProvenance } from '../provenance';
 import { isPictureHidden } from '../visibility';
-import { SILHOUETTE_VIEWS, isSilhouetteView, normaliseViewKey, viewLabel } from '../views';
-import type { SilhouetteView } from '../views';
+import { ACTIVE_VIEWS, CARDINAL_VIEWS, isActiveView, normaliseViewKey, viewLabel } from '../views';
+import type { ActiveView } from '../views';
 
 /**
  * READING THE BAND FOR THE TWO GENERATIVE SCREENS — everything FABRIC RENDER and 3D need to know
@@ -115,7 +115,7 @@ export function isFlatCandidate(
 /* ─────────────────────────── the bench, as the render reads it ─────────────────────────── */
 
 export type BenchSide = {
-  view: SilhouetteView;
+  view: ActiveView;
   slot: common_DesignBenchSlot | null;
   picture: common_DesignPicture | null;
   /** The CAS token the next write to this slot must echo. 0 = the slot has never been written. */
@@ -179,9 +179,11 @@ export function benchSides(
   for (const row of band.bench ?? []) {
     if (!benchRowMatches(row, kind, colorwayId)) continue;
     const key = normaliseViewKey(row.viewKey);
-    if (isSilhouetteView(key)) byView.set(key, row);
+    // A retired three-quarter row (D-18) is not a side of any strip this reader feeds — the render
+    // table, the 3D input, the sheet's walk. It is skipped here, never re-filed under another name.
+    if (isActiveView(key)) byView.set(key, row);
   }
-  return SILHOUETTE_VIEWS.map((view) => {
+  return ACTIVE_VIEWS.map((view) => {
     const slot = byView.get(view) ?? null;
     return {
       view,
@@ -610,7 +612,9 @@ export function turntableSourceIds(sides: BenchSide[]): number[] {
   const byView = new Map(sides.map((side) => [side.view as string, side]));
   if ((byView.get('front')?.picture?.id ?? 0) <= 0) return [];
   const ids: number[] = [];
-  for (const view of SILHOUETTE_VIEWS) {
+  // THE PROVIDER'S FOUR, BY NAME (`CARDINAL_VIEWS`): today they are the four active sides too, but
+  // the question here is what Meshy/fal can take, not what the bench offers.
+  for (const view of CARDINAL_VIEWS) {
     const id = byView.get(view)?.picture?.id ?? 0;
     if (id > 0) ids.push(id);
   }
@@ -1592,7 +1596,7 @@ export function wireColourSource(recipe?: common_DesignColourRecipe | null): str
  *
  * The owner's own sample is front, side, back in that order, and this list is that sample
  * generalised to a card that also holds a right side: you walk around the body rather than
- * enumerating a database. It is deliberately NOT `SILHOUETTE_VIEWS` (front, back, side L, side R),
+ * enumerating a database. It is deliberately NOT `ACTIVE_VIEWS` (front, back, side L, side R),
  * which is the order the bench is DRAWN in — a bench is a set of slots to fill and reads best with
  * the two main sides adjacent, a sheet is a photograph and reads as a rotation.
  *

@@ -43,7 +43,7 @@ import { SplitModal } from '../split-modal';
 import { isModelUrl } from '../threed/media';
 import { useDesignWrites } from '../use-design-band';
 import { isPictureHidden, isRunArchived } from '../visibility';
-import { isSilhouetteView, normaliseViewKey, viewLabel } from '../views';
+import { isActiveView, isLegacyView, normaliseViewKey, viewLabel } from '../views';
 import { compositeTail, cropFamilies, readComposite, splitVerb } from './composite';
 import { CropDeck } from './crop-deck';
 import { formatMoney } from './money';
@@ -153,7 +153,10 @@ function slotOfPicture(band: GetDesignBandResponse, pictureId: number): SlotOfPi
   for (const row of band.bench ?? []) {
     if ((row.pictureId ?? 0) !== pictureId) continue;
     const view = normaliseViewKey(row.viewKey);
-    if (isSilhouetteView(view)) {
+    // A RETIRED THREE-QUARTER IS STILL A SIDE ROW, NOT A DETAIL (D-18, Codex M-11): it is addressed
+    // by its view key like any side, and prints «3/4 left (legacy)» — «not active» never means
+    // «address it as a detail by id».
+    if (isActiveView(view) || isLegacyView(view)) {
       const kind = benchKindOf(row);
       return {
         /* И КОЛОРВЕЙ БЕРЁТСЯ У САМОЙ СТРОКИ, А НЕ У ЭКРАНА (L-2): снятие адресует ТУ строку, в

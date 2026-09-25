@@ -15,7 +15,7 @@ import { formatMoney } from './generation/money';
 import { useStartRun } from './generation/use-generation';
 import { WhatModelGetsModal } from './modals';
 import { GenerateRow, RunRefusal } from './render/generate-row';
-import { DETAIL_VIEW, SILHOUETTE_VIEWS, viewLabel } from './views';
+import { ACTIVE_VIEWS, DETAIL_VIEW, viewLabel } from './views';
 
 /**
  * ═══ РЯД ЗАПУСКА БЛОКА INPUT — REFERENCES (`runDoors('flat')` макета) ═══════════════════════════
@@ -123,7 +123,7 @@ export function FlatRunRow({
   const [layout, setLayout] = useState<Layout>('per_view');
   const bench = useMemo(() => readBench(band, 'flat'), [band]);
 
-  const tickedSides = SILHOUETTE_VIEWS.filter((v) => views[v]);
+  const tickedSides = ACTIVE_VIEWS.filter((v) => views[v]);
   const tickedDetails = bench.details.filter((d) => (d.id ?? 0) > 0 && detailTicks[d.id ?? 0]);
   const ticked: string[] = [...tickedSides, ...tickedDetails.map(() => DETAIL_VIEW)];
   const tickedDetailIds: number[] = tickedDetails.map((d) => d.id ?? 0);
@@ -220,7 +220,7 @@ export function FlatRunRow({
           views
         </Text>
         <ChipRow>
-          {SILHOUETTE_VIEWS.map((view) => {
+          {ACTIVE_VIEWS.map((view) => {
             const on = !!views[view];
             const slot = bench.sides.find((s) => s.view === view)?.slot ?? null;
             const slotFilled = (slot?.pictureId ?? 0) > 0;

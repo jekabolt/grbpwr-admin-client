@@ -9,7 +9,7 @@ import Text from 'ui/components/text';
 import { InertDoor } from '../bench-slot';
 import { AskModal } from '../core';
 import { useDesignWrites } from '../use-design-band';
-import { viewLabel, type SilhouetteView } from '../views';
+import { viewLabel, type ActiveView } from '../views';
 import type { BenchSide } from './model';
 
 /**
@@ -88,7 +88,7 @@ import type { BenchSide } from './model';
  */
 
 /** Один кусок разреза, уже привязанный к стороне силуэта. */
-export type SplitPiece = { view: SilhouetteView; picture: common_DesignPicture };
+export type SplitPiece = { view: ActiveView; picture: common_DesignPicture };
 
 /** «Ничего не выбрано» и «завести колорвей» — сентинелы: Radix запрещает пустое значение пункта. */
 const APPLY_PROMPT = '__apply__';
@@ -106,7 +106,7 @@ const APPLY_NEW_COLOURWAY = '__new_colourway__';
 
 /** Одна запись плана: что делаем со стороной и что при этом теряем. */
 type Step = {
-  view: SilhouetteView;
+  view: ActiveView;
   act: 'place' | 'clear';
   pictureId: number;
   slotRev: number;
@@ -218,8 +218,8 @@ export function ApplySplitDoor({
   const [asking, setAsking] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<{
-    done: SilhouetteView[];
-    failed: { view: SilhouetteView; reason: string }[];
+    done: ActiveView[];
+    failed: { view: ActiveView; reason: string }[];
   } | null>(null);
 
   /**
@@ -254,8 +254,8 @@ export function ApplySplitDoor({
     if (busy) return;
     setBusy(true);
     setOutcome(null);
-    const done: SilhouetteView[] = [];
-    const failed: { view: SilhouetteView; reason: string }[] = [];
+    const done: ActiveView[] = [];
+    const failed: { view: ActiveView; reason: string }[] = [];
     for (const step of planFor(target)) {
       try {
         await writes.setBenchSlot.mutateAsync({

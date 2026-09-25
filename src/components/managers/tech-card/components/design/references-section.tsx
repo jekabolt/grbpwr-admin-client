@@ -39,7 +39,7 @@ import { VectorModal } from './modals';
 import { PictureTile } from './picture-tile';
 import { pictureOffersSplit } from './render/model';
 import { useSplitToInput } from './split-to-input';
-import { DETAIL_VIEW, SILHOUETTE_VIEWS, normaliseViewKey, viewLabel } from './views';
+import { ACTIVE_VIEWS, DETAIL_VIEW, normaliseViewKey, viewLabel } from './views';
 import { useDesignWrites } from './use-design-band';
 
 /**
@@ -108,10 +108,11 @@ import { useDesignWrites } from './use-design-band';
  */
 
 /**
- * Роли промпта. Значения — проводные (`front | back | side_l | side_r | three_quarter_l |
- * three_quarter_r | detail`, см. `common.DesignReference`); пустая строка это ПУНКТ СПИСКА, а не
- * отсутствие пункта, и потому законный выбор: примитив селекта пропускает пустоту только когда её
- * кто-то предложил, иначе гасит фантомную пустоту скрытого нативного `<select>`.
+ * Роли промпта. Значения — проводные (`front | back | side_l | side_r | detail`, см.
+ * `common.DesignReference`; снятые `three_quarter_l | three_quarter_r` провод по-прежнему несёт —
+ * см. `roleItemsFor`); пустая строка это ПУНКТ СПИСКА, а не отсутствие пункта, и потому законный
+ * выбор: примитив селекта пропускает пустоту только когда её кто-то предложил, иначе гасит
+ * фантомную пустоту скрытого нативного `<select>`.
  */
 /**
  * Потолок `garmentDescription` — ЕДИНСТВЕННОЕ НАПИСАНИЕ ЭТОГО ЧИСЛА. Его читают `maxLength`
@@ -121,13 +122,50 @@ import { useDesignWrites } from './use-design-band';
  */
 const GARMENT_MAX = 2000;
 
-const ROLE_ITEMS = [
+type RoleItem = { value: string; label: string; disabled?: boolean };
+
+const ROLE_ITEMS: RoleItem[] = [
   { value: '', label: '— not sent —' },
-  // РОВНО СЛОВАРЬ ПРОВОДА, В ЕГО ПОРЯДКЕ (`views.ts`): шесть силуэтов и деталь. Слов макета
-  // «silhouette / stitching / hardware» на проводе НЕТ — селект остаётся продуктовым.
-  ...SILHOUETTE_VIEWS.map((view) => ({ value: view, label: viewLabel(view) })),
+  // ЧЕТЫРЕ СТОРОНЫ И ДЕТАЛЬ (`views.ts`, `ACTIVE_VIEWS`): 3/4 сняты владельцем (D-18) и больше не
+  // предлагаются. Слов макета «silhouette / stitching / hardware» на проводе НЕТ — селект остаётся
+  // продуктовым.
+  ...ACTIVE_VIEWS.map((view) => ({ value: view, label: viewLabel(view) })),
   { value: DETAIL_VIEW, label: viewLabel(DETAIL_VIEW) },
 ];
+
+/**
+ * ═══ РОЛЬ, КОТОРОЙ НЕТ СРЕДИ ПУНКТОВ, ОСТАЁТСЯ ВИДНА — НЕАКТИВНЫМ ПУНКТОМ (D-18', Codex B-08) ═══
+ *
+ * У референсов беты и прода есть роли `three_quarter_l|r`, а пунктов таких больше нет. Без пункта
+ * Radix не может поставить значение в свой скрытый нативный `<select>`, тот остаётся при пустой
+ * строке и отдаёт её наружу как выбор — а этот селект ПРЕДЛАГАЕТ пустоту («— not sent —»), поэтому
+ * примитив её пропускает, и `setRole(…, '')` СТИРАЕТ роль на сервере без единого жеста человека.
+ * Поэтому текущая роль, которой нет в списке, добавляется последним пунктом — видимым, отмеченным
+ * и НЕАКТИВНЫМ: её не выбрать заново, но и не потерять молча. Снять её — явный выбор
+ * «— not sent —» или другой стороны.
+ *
+ * Правило общее, а не про 3/4 поимённо: роль из словаря более нового сервера упала бы в ту же яму.
+ * Подпись — `viewLabel`, то есть «3/4 left (legacy)» для снятых и ключ как есть для незнакомого.
+ *
+ * ⚠ ОДНОГО ПУНКТА МАЛО, НУЖЕН ЕЩЁ КЛЮЧ СЕЛЕКТА (`selectKeyFor`), И ЭТО ЗАМЕРЕНО, А НЕ ПРЕДПОЛОЖЕНО
+ * (`probe-flat.mjs`, сцена «снятая роль», студия внутри <form>, как на странице карточки). Когда
+ * роль ПЕРЕХОДИТ в снятую на смонтированной ячейке (перечтение полосы после записи из старой
+ * вкладки), пункт и значение приезжают одним рендером, а нативная `<option>` регистрируется
+ * лейаут-эффектом пункта — ПОЗЖЕ, чем пассивный эффект скрытого `<select>` ставит новое значение.
+ * В это окно опции ещё нет, и фантомное '' улетало всё равно. Смена ключа при переходе между
+ * «роль из списка» и «роль сверх списка» перемонтирует селект: на первом рендере Radix значение
+ * не «меняется», события нет, а опция успевает встать до следующего.
+ */
+function roleItemsFor(role: string): RoleItem[] {
+  const current = role.trim();
+  if (!current || ROLE_ITEMS.some((item) => item.value === current)) return ROLE_ITEMS;
+  return [...ROLE_ITEMS, { value: current, label: viewLabel(current) || current, disabled: true }];
+}
+
+/** Ключ селекта роли: один на все предлагаемые роли, свой — на каждую роль сверх списка. */
+function selectKeyFor(role: string): string {
+  return roleItemsFor(role) === ROLE_ITEMS ? 'offered' : `kept:${role.trim()}`;
+}
 
 const thumbUrl = (full?: common_MediaFull): string =>
   full?.media?.thumbnail?.mediaUrl || full?.media?.fullSize?.mediaUrl || '';
@@ -1361,8 +1399,9 @@ function ReferenceCell({
           `onValueChange` на повторный выбор того же значения). `data-ref-role` — якорь пробы. */}
       <div className='flex min-w-0 items-center gap-1' data-ref-role={mediaId}>
         <Select
+          key={selectKeyFor(role)}
           name={`ref-role-${mediaId}`}
-          items={ROLE_ITEMS}
+          items={roleItemsFor(role)}
           value={role}
           placeholder='— not sent —'
           readOnly={readOnly}

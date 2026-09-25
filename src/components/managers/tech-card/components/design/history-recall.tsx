@@ -38,7 +38,7 @@ import {
 import { pictureIsModel } from './threed/media';
 import { useDesignWrites } from './use-design-band';
 import { isPictureHidden } from './visibility';
-import { isSilhouetteView, normaliseViewKey, viewLabel } from './views';
+import { isActiveView, isLegacyView, normaliseViewKey, viewLabel } from './views';
 
 /**
  * RECALL — ЖЕСТ «СОБЕРИ ЭТОТ ПРОГОН ЗАНОВО», И ОН РАЗРУШИТЕЛЕН, ПОЭТОМУ СПРАШИВАЕТ.
@@ -604,10 +604,13 @@ function platePlan(
   band: GetDesignBandResponse,
   run: common_DesignRun,
   benchKind: string,
-): { moves: PlateMove[]; unresolved: number } {
+): { moves: PlateMove[]; unresolved: number; retired: number } {
   const byMedia = pictureIdByMedia(band);
   const moves: PlateMove[] = [];
   let unresolved = 0;
+  /** Плиты снятых 3/4 (D-18): прогон их получал, но вернуть их некуда — слота такого вида больше
+   *  не предлагают. Считаются и называются вслух, как и ненайденные, а не пропадают молча. */
+  let retired = 0;
   const seen = new Set<string>();
 
   for (const slot of (run.inputs?.slots ?? []) as common_DesignInputSlot[]) {
@@ -644,7 +647,11 @@ function platePlan(
       continue;
     }
 
-    if (!isSilhouetteView(view)) continue;
+    if (isLegacyView(view)) {
+      retired++;
+      continue;
+    }
+    if (!isActiveView(view)) continue;
     const row = benchRow(band, benchKind, view);
     moves.push({
       // `kind` НАЗЫВАЕТСЯ ЯВНО: у верстака ТРИ оси, и render-front и flat-front — разные слоты,
@@ -658,7 +665,7 @@ function platePlan(
       same: (row?.pictureId ?? 0) === pictureId,
     });
   }
-  return { moves, unresolved };
+  return { moves, unresolved, retired };
 }
 
 /* ────────────────────────────── the doors ────────────────────────────── */
@@ -971,7 +978,7 @@ function PlateQuestion({
   handle,
   switches,
 }: {
-  plates: { moves: PlateMove[]; unresolved: number };
+  plates: { moves: PlateMove[]; unresolved: number; retired: number };
   handle: string;
   /** Обещание перехода даётся, только если этой сборке есть чем его сдержать. */
   switches: boolean;
@@ -999,12 +1006,14 @@ function PlateQuestion({
           switches.
         </Text>
       )}
-      {(already > 0 || plates.unresolved > 0) && (
+      {(already > 0 || plates.unresolved > 0 || plates.retired > 0) && (
         <Text size='control' variant='label' component='p'>
           {[
             already > 0 && `${already} already in place`,
             plates.unresolved > 0 &&
               `${plates.unresolved} not on this page of the card and skipped`,
+            plates.retired > 0 &&
+              `${plates.retired} of a 3/4 view skipped — 3/4 views are retired`,
           ]
             .filter(Boolean)
             .join(' · ')}
@@ -1299,13 +1308,24 @@ export function RecallBenchIntake({
       return;
     }
 
-    const { moves, unresolved } = platePlan(band, run, 'flat');
+    const { moves, unresolved, retired } = platePlan(band, run, 'flat');
     const moving = moves.filter((m) => !m.same);
+    /* Плиты снятых 3/4 (D-18) — отдельной фразой: их не «не нашли», им просто больше некуда встать. */
+    const retiredSaid = retired
+      ? `${count(retired, 'plate')} of a 3/4 view skipped — 3/4 views are retired`
+      : '';
     if (!moving.length) {
       showMessage(
-        unresolved > 0
-          ? `nothing was placed — ${count(unresolved, 'plate')} of ${handle} ${unresolved === 1 ? 'is' : 'are'} not on this page of the card`
-          : `every plate ${handle} was given already stands in its slot — nothing to move`,
+        [
+          unresolved > 0
+            ? `nothing was placed — ${count(unresolved, 'plate')} of ${handle} ${unresolved === 1 ? 'is' : 'are'} not on this page of the card`
+            : moves.length === 0
+              ? 'nothing was placed'
+              : `${retired > 0 ? 'every other plate' : `every plate ${handle} was given`} already stands in its slot — nothing to move`,
+          retiredSaid,
+        ]
+          .filter(Boolean)
+          .join(' · '),
         unresolved > 0 ? 'error' : 'success',
       );
       return;
@@ -1339,6 +1359,7 @@ export function RecallBenchIntake({
         );
       if (unresolved)
         said.push(`${count(unresolved, 'plate')} not on this page of the card, skipped`);
+      if (retiredSaid) said.push(retiredSaid);
       showMessage(said.join(' · '), failed.length || unresolved ? 'error' : 'success');
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

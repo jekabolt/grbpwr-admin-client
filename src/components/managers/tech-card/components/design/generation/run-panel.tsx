@@ -130,20 +130,27 @@ export function RunPanel({
    * остальные: они уезжали, но на экране их не было НИГДЕ.
    *
    * Порядок и нумерация — ровно те, что у сервера (`referenceList`): сначала плиты, отсортированные
-   * front → back → side_l → side_r → detail, потом референсы. Номер здесь читается ВМЕСТЕ со
-   * строками «- image k: …» под base text; два ряда без номеров были бы третьим мнением о том, что
-   * ушло.
+   * front → back → side_l → side_r → 3/4 left → 3/4 right → detail, потом референсы. Номер здесь
+   * читается ВМЕСТЕ со строками «- image k: …» под base text; два ряда без номеров были бы третьим
+   * мнением о том, что ушло.
+   *
+   * ⚠ РАНГИ 3/4 ОСТАЮТСЯ, ХОТЯ ВИДЫ СНЯТЫ (D-18). Это зеркало серверного `viewRank`
+   * (`designgen/snapshot.go`), а сервер 3/4 по-прежнему знает: замороженный прогон, которому их
+   * отдали, обязан пронумероваться так же, как его промпт. Без этих строк плиты 3/4 уезжали за
+   * деталь, и номер на экране расходился с «image k» в тексте — так было с круга 18.
    */
   const VIEW_RANK: Record<string, number> = {
     front: 0,
     back: 1,
     side_l: 2,
     side_r: 3,
-    detail: 4,
+    three_quarter_l: 4,
+    three_quarter_r: 5,
+    detail: 6,
   };
   const plateRows = [...(inputs?.slots ?? [])]
     .filter((sl) => (sl.mediaId ?? 0) > 0)
-    .sort((a, b) => (VIEW_RANK[a.viewKey ?? ''] ?? 5) - (VIEW_RANK[b.viewKey ?? ''] ?? 5))
+    .sort((a, b) => (VIEW_RANK[a.viewKey ?? ''] ?? 7) - (VIEW_RANK[b.viewKey ?? ''] ?? 7))
     .map((sl) => ({
       mediaId: sl.mediaId ?? 0,
       media: sl.media,

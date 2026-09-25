@@ -51,17 +51,19 @@ import { selectPickablePictures } from './visibility';
  */
 export {
   SHEET_MIN_VIEWS,
-  SILHOUETTE_VIEWS,
-  isSilhouetteView,
+  ACTIVE_VIEWS,
+  isActiveView,
   viewLabel,
-  type SilhouetteView,
+  type ActiveView,
 } from './views';
 import {
-  SILHOUETTE_VIEWS,
-  isSilhouetteView,
+  ACTIVE_VIEWS,
+  LEGACY_VIEWS,
+  isActiveView,
+  isLegacyView,
   normaliseViewKey,
   viewLabel,
-  type SilhouetteView,
+  type ActiveView,
 } from './views';
 import {
   COLORWAY_NONE,
@@ -75,18 +77,32 @@ import {
 
 /** Total over the vocabulary: an unknown key prints itself rather than becoming a wrong side. */
 export type BenchRead = {
-  /** All four sides, in a fixed order, present-or-not. */
-  sides: { view: SilhouetteView; slot: common_DesignBenchSlot | null }[];
+  /** All four active sides, in a fixed order, present-or-not. */
+  sides: { view: ActiveView; slot: common_DesignBenchSlot | null }[];
   /** Every detail slot, oldest first — the order they were minted in, which is stable. */
   details: common_DesignBenchSlot[];
+  /**
+   * FILLED rows of a retired three-quarter view (D-18', Codex B-08), in `LEGACY_VIEWS` order. They
+   * are drawn only to be taken off (✕ in the bench's «legacy views» row); an EMPTY legacy row is not
+   * here at all — there is nothing on it to take off, and a drawn empty slot would invite filling a
+   * view the admin no longer offers.
+   */
+  legacy: common_DesignBenchSlot[];
 };
 
 /**
- * ONE BENCH's rows split into the two shapes the screen draws.
+ * ONE BENCH's rows split into the three shapes the screen draws.
  *
- * A row whose `view_key` is not one of the four sides IS a detail — that is the only classification
- * the wire supports, and it deliberately does not test for the literal `detail`: `view_key=detail`
- * is the MINT verb, and a stored detail row is addressed by id from then on.
+ * A row whose `view_key` is neither an active side NOR a retired three-quarter IS a detail — that is
+ * the only classification the wire supports, and it deliberately does not test for the literal
+ * `detail`: `view_key=detail` is the MINT verb, and a stored detail row is addressed by id from then
+ * on.
+ *
+ * ⚠ «NOT ACTIVE» IS NOT «DETAIL» (Codex M-11, wave 2026-09-25). When the three-quarters left
+ * `ACTIVE_VIEWS`, the old `else details.push(row)` would have filed every stored three-quarter
+ * plate as a DETAIL: a nameless «detail» chip in VIEWS, a `remove slot` door that deletes a side row,
+ * a plate the sheet cites by a name it never had. So the retired views are asked about BY NAME
+ * (`isLegacyView`) before anything is allowed to fall through, and they land in `legacy`.
  *
  * ⚠ `kind` IS A FILTER, NOT DECORATION, AND ITS ABSENCE WAS A MEASURED DEFECT (L-5). This function
  * used to key the map by view alone; the moment a card held BOTH a flat front and a render front
@@ -118,16 +134,23 @@ export function readBench(
   const rows = band.bench ?? [];
   const byView = new Map<string, common_DesignBenchSlot>();
   const details: common_DesignBenchSlot[] = [];
+  const legacy: common_DesignBenchSlot[] = [];
   for (const row of rows) {
     if (!benchRowMatches(row, kind, colorwayId)) continue;
     const key = normaliseViewKey(row.viewKey);
-    if (isSilhouetteView(key)) byView.set(key, row);
-    else details.push(row);
+    if (isActiveView(key)) byView.set(key, row);
+    else if (isLegacyView(key)) {
+      if ((row.pictureId ?? 0) > 0) legacy.push(row);
+    } else details.push(row);
   }
   details.sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+  const legacyRank = (row: common_DesignBenchSlot) =>
+    (LEGACY_VIEWS as readonly string[]).indexOf(normaliseViewKey(row.viewKey));
+  legacy.sort((a, b) => legacyRank(a) - legacyRank(b) || (a.id ?? 0) - (b.id ?? 0));
   return {
-    sides: SILHOUETTE_VIEWS.map((view) => ({ view, slot: byView.get(view) ?? null })),
+    sides: ACTIVE_VIEWS.map((view) => ({ view, slot: byView.get(view) ?? null })),
     details,
+    legacy,
   };
 }
 
@@ -434,8 +457,8 @@ export type BenchSlotProps = {
 /**
  * ═══ ОДНА ЯЧЕЙКА ПОЛОСЫ FLAT SLOTS — форма макета (`slotCell`, `_core.js`), данные продукта ═══
  *
- * Плита стоит в ГОРИЗОНТАЛЬНОЙ ПОЛОСЕ из шести ячеек по 138px (`.pstrip` макета), и у ячейки два
- * лица:
+ * Плита стоит в ГОРИЗОНТАЛЬНОЙ ПОЛОСЕ из четырёх ячеек по 138px (`.pstrip` макета; до 2026-09-25
+ * их было шесть — 3/4 сняты, D-18), и у ячейки два лица:
  *   · ЗАПОЛНЕННАЯ — сплошная чернильная рамка, кадр 1:1 без своей рамки, ПОДВАЛ (`.cap`) с именем
  *     стороны и звёздочкой обязательной; никакой полосы происхождения — она уехала в `title`
  *     подвала (`slotFootnote`), потому что макет её не рисует, а стереть факт нельзя;
@@ -598,7 +621,7 @@ function EmptyCell({
   return (
     <PlaceOrDrawCell
       data-bench-empty={label}
-      /* Обе половины подписаны одинаково на всех шести ячейках («from media» / «draw»), и на слух
+      /* Обе половины подписаны одинаково на всех четырёх ячейках («from media» / «draw»), и на слух
          они неразличимы. Имя стороны даёт группа — оно же напечатано в подвале. */
       role='group'
       ariaLabel={`${label} — empty slot`}
@@ -835,6 +858,78 @@ export function BenchSlot(props: BenchSlotProps) {
           {unflattened}
         </Text>
       )}
+    </div>
+  );
+}
+
+/**
+ * ═══ ЯЧЕЙКА СНЯТОГО ВИДА — ПЛИТА 3/4, У КОТОРОЙ ОСТАЛАСЬ ОДНА ДВЕРЬ (D-18', Codex B-08) ═══════
+ *
+ * Владелец снял 3/4 «вообще везде», а на карточках беты и прода такие плиты уже стоят. Спрятать их
+ * значило бы оставить на верстаке то, что уходит в прогоны и на лист, без единого способа это
+ * увидеть и снять; вернуть им полную ячейку — снова предложить вид, которого больше нет. Поэтому
+ * здесь ровно одна дверь — `✕` (unmark), — и просмотр по клику: смотреть можно, чинить нельзя.
+ *
+ * ЧЕГО ЗДЕСЬ НЕТ НАМЕРЕННО: пера (`edit`), двух половин пустой ячейки, чипа в VIEWS, GENERATE.
+ * Снятая плита уходит из ряда целиком — пустой слот 3/4 не рисуется (`readBench` его и не отдаёт),
+ * поэтому пустой ветки у ячейки нет: вызывающий не монтирует её без картинки.
+ *
+ * Та же коробка, что у стороны (рамка, кадр 1:1, подвал `SlotCap`), только кадр приглушён (`dim`):
+ * снятый вид читается как «уже не в работе» и глазами, и словом «(legacy)» в подписи — цвет
+ * состояние в одиночку не несёт.
+ */
+export function LegacySlotCell({
+  label,
+  picture,
+  footnote,
+  saving,
+  disabled,
+  onUnmark,
+  galleryItem,
+}: {
+  label: string;
+  picture: common_DesignPicture;
+  /** Происхождение плиты — в `title` подвала, как у стороны. */
+  footnote?: string;
+  saving?: boolean;
+  disabled?: boolean;
+  onUnmark: () => void;
+  galleryItem?: MediaViewerItem;
+}) {
+  return (
+    <div className='group flex h-full min-w-0 flex-col gap-1' data-bench-slot={label} data-bench-legacy={label}>
+      <div className='flex min-w-0 flex-col overflow-hidden border border-borderColor'>
+        <PictureTile
+          url={pictureUrl(picture)}
+          alt={label}
+          aspect={BENCH_FRAME_ASPECT}
+          fit='contain'
+          className='border-0'
+          dim
+          gallery={galleryItem}
+          onRemove={
+            !disabled
+              ? {
+                  onClick: onUnmark,
+                  ariaLabel: `unmark ${label}`,
+                  title: 'unmark — take this plate off the retired 3/4 slot; it stays in the history',
+                  disabled: saving,
+                }
+              : undefined
+          }
+        />
+        <SlotCap
+          label={label}
+          title={footnote}
+          trailing={
+            saving ? (
+              <Text size='nano' variant='label' component='span' className='ml-auto uppercase'>
+                saving…
+              </Text>
+            ) : null
+          }
+        />
+      </div>
     </div>
   );
 }

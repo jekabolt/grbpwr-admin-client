@@ -132,7 +132,8 @@ export function SlotPicker({
     }));
     // DETAILS ARE THE FLAT BENCH'S ALONE. A detail is a named close-up the sheet cites — cuff,
     // collar — and no organ of the render bench draws detail slots at all: a detail minted there
-    // would be a row no screen shows. So the render picker offers the six sides and nothing else.
+    // would be a row no screen shows. So the render picker offers the four sides and nothing else
+    // (the retired three-quarters are offered by no picker since D-18).
     const details: { value: string; label: string }[] = [];
     if (kind === 'flat') {
       bench.details.forEach((slot) => {

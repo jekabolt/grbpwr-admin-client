@@ -15,12 +15,14 @@ import { Button } from 'ui/components/button';
 import {
   BENCH_CELL_STYLE,
   BenchSlot,
+  LegacySlotCell,
   NewDetailCell,
   SHEET_MIN_VIEWS,
   displayDetailName,
   findSlot,
   pickableFlats,
   readBench,
+  slotFootnote,
   slotRefKey,
   viewLabel,
 } from './bench-slot';
@@ -32,10 +34,12 @@ import { MixWarn } from './mixwarn';
 import { type PickTarget, usePickMode } from './pick-mode';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
 import { uploadItem } from './upload-item';
+import { normaliseViewKey } from './views';
 
 /**
- * THE BENCH — the four silhouette sides and the named details, and the one place on the card where
- * a human says «THIS picture is the front».
+ * THE BENCH — the four sides and the named details, and the one place on the card where a human says
+ * «THIS picture is the front». Plates of the two retired three-quarter views (D-18) are shown in a
+ * row of their own, only to be taken off.
  *
  * IT IS THE ASKING SIDE OF PICK MODE, AND ONLY THAT. The bench arms a pick (`start`) and registers
  * what to do with the answer (`setHandler`); the band of pictures is what becomes clickable and
@@ -449,6 +453,18 @@ export function Bench({
   const emptySides = bench.sides.length - filledSides;
 
   /**
+   * Плиты снятых 3/4, КОТОРЫЕ ЕЩЁ СТОЯТ — с оптимистичным снятием: `shownPicture` отдаёт `null`
+   * сразу после ✕, и ячейка уходит из ряда, не дожидаясь перечтения полосы. Адрес — ВИДОМ, как у
+   * всякой стороны (`sideRef`): строка стороны адресуется ключом вида всю жизнь, и снятый вид —
+   * не деталь, чтобы звать его по id (Codex M-11).
+   */
+  const legacyShown = bench.legacy.flatMap((slot) => {
+    const ref = sideRef(normaliseViewKey(slot.viewKey));
+    const picture = shownPicture(ref, slot.picture);
+    return picture ? [{ slot, ref, rev: slot.slotRev ?? 0, picture }] : [];
+  });
+
+  /**
    * СВОБОДНЫЕ ФЛЭТЫ — картинки полосы рода `flat`, не композиты, не стоящие ни в одном слоте
    * (`fPool` макета). Пул пуст при пустых сторонах → полоса LOCKED под лентой с дверью к прогону:
    * человек видит не «здесь пусто», а «всё, что вернулось, уже стоит — сгенерируй ещё».
@@ -500,7 +516,7 @@ export function Bench({
           поручиться за смесь происхождений. Рисуется только когда смесь есть. */}
       <MixWarn band={band} />
 
-      {/* ═══ ЛЕНТА ШЕСТИ СТОРОН — `.pstrip` макета: горизонтальный ряд ячеек по 138px, прокрутка
+      {/* ═══ ЛЕНТА ЧЕТЫРЁХ СТОРОН — `.pstrip` макета: горизонтальный ряд ячеек по 138px, прокрутка
           внутри ленты, страница вбок не едет. `items-stretch` — пустые ячейки не короче
           заполненных (у заполненной под кадром подвал). */}
       <div
@@ -652,6 +668,45 @@ export function Bench({
           </div>
         )}
       </div>
+
+      {/* ═══ СНЯТЫЕ ВИДЫ — ТОЛЬКО ЗАПОЛНЕННЫЕ 3/4, ТОЛЬКО С ✕ (D-18', Codex B-08) ═══════════════════
+          Владелец снял 3/4 «вообще везде», но плиты, которые уже стоят, по-прежнему на верстаке:
+          их читают прогоны и лист. Поэтому они видны здесь, отдельным рядом В КОНЦЕ блока (это не
+          работа, а хвост), и снимаются одной дверью. Пустой снятый слот не рисуется вовсе — на нём
+          нечего снимать, а пустая ячейка звала бы заполнить вид, которого больше нет. Ряд исчезает
+          вместе с последней плитой: снятие оптимистично, как у всякой плиты верстака. */}
+      {legacyShown.length > 0 && (
+        <>
+          <GroupLabel
+            action={
+              <Text size='micro' variant='label' component='span'>
+                3/4 is retired · ✕ takes a plate off
+              </Text>
+            }
+          >
+            legacy views ({legacyShown.length})
+          </GroupLabel>
+          <div data-flat-legacy='' className='flex items-stretch gap-2 overflow-x-auto pb-1'>
+            {legacyShown.map(({ slot, ref, rev, picture }) => (
+              <div key={slot.id ?? slot.viewKey} className='min-w-0' style={CELL_STYLE}>
+                <LegacySlotCell
+                  label={viewLabel(slot.viewKey)}
+                  picture={picture}
+                  footnote={slotFootnote(band, picture, shelfOrdinals)}
+                  saving={isSaving(ref)}
+                  disabled={disabled}
+                  onUnmark={() => unmark(ref, rev)}
+                  galleryItem={
+                    picture.media
+                      ? mediaFullToViewerItem(picture.media as common_MediaFull)
+                      : undefined
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </Section>
   );
 }

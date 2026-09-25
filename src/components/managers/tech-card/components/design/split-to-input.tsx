@@ -14,7 +14,7 @@ import {
 } from './mood-board';
 import { SplitModal } from './split-modal';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
-import { DESIGN_VIEW_KEYS, normaliseViewKey } from './views';
+import { isKnownViewKey } from './views';
 import { uploadItem } from './upload-item';
 
 /**
@@ -242,9 +242,9 @@ export function useSplitToInput({
     // Кадры, которым сервер поставил роль промпта, — РОВНО те, что несут вид: условие серверной
     // транзакции (`IsDesignGhostView`) и это членство в словаре — одно и то же утверждение, и
     // считать их по-другому значило бы обещать снятие ролей, которых не ставили.
-    const framed = withMedia.filter((crop) =>
-      (DESIGN_VIEW_KEYS as readonly string[]).includes(normaliseViewKey(crop.ghostView)),
-    );
+    // ⚠ СЛОВАРЬ ПРОВОДА, А НЕ СЛОВАРЬ ПИКЕРА (D-18): сервер по-прежнему принимает снятые 3/4, и
+    // зеркало его условия обязано их помнить, хотя окно разреза их больше не предлагает.
+    const framed = withMedia.filter((crop) => isKnownViewKey(crop.ghostView));
 
     if (!addToInput) {
       saySlotsOnly(withMedia.length);

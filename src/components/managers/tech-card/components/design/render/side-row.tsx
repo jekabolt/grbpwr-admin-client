@@ -24,7 +24,7 @@ import { PictureTile } from '../picture-tile';
 import { readProvenance } from '../provenance';
 import { uploadItem } from '../upload-item';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
-import { SILHOUETTE_VIEWS, isCardinalView, viewLabel } from '../views';
+import { ACTIVE_VIEWS, isCardinalView, viewLabel } from '../views';
 import { Swatch } from './field-row';
 import {
   RENDER_MIN_VIEWS,
@@ -60,9 +60,11 @@ import {
  * его не выберешь. Теперь столбец на колорвей, они заполняют ширину, а «какой цвет мы сейчас
  * заказываем» говорит подчёркнутый заголовок (он же — вторая дверь к цели прогона).
  *
- * ШЕСТЬ СТРОК, НЕ ЧЕТЫРЕ. Верстак — шесть слотов (`SILHOUETTE_VIEWS`), и жест «apply splitted»
- * «неназванную занятую сторону очищает»: четыре строки над шестисторонним верстаком дали бы дверь,
- * вычищающую слоты, которых человек не видит.
+ * ЧЕТЫРЕ СТРОКИ — ПО СТОРОНЕ ВЕРСТАКА (`ACTIVE_VIEWS`). С круга 18 их было шесть, с 2026-09-25 3/4
+ * сняты (D-18). Довод «строк столько же, сколько слотов» остаётся в силе: жест «apply splitted»
+ * «неназванную занятую сторону очищает», и он же читает те же четыре стороны (`benchSides`), поэтому
+ * дверь не трогает слоты, которых человек не видит, — плита, оставшаяся в рендерном слоте 3/4, не
+ * читается ни 3D (`CARDINAL_VIEWS`), ни этой таблицей и чистке не подлежит.
  *
  * На 3D тот же рендер-верстак читается лентой (`RendersByViewGroup`) с дверью назад на FABRIC
  * RENDER у каждой пустой ячейки. Ничего там не размечается: заполненный слот И ЕСТЬ членство
@@ -294,6 +296,11 @@ function Caption({ children }: { children: ReactNode }): JSX.Element {
  * ЧИТАТЬ ВОРОТА ЗДЕСЬ БЫЛО БЫ ВТОРЫМ ИХ НАПИСАНИЕМ: отказ уже назван словами у самой кнопки
  * GENERATE, ровно один раз и полной причиной. Поэтому колонка говорит то, что знает сама и что
  * верно всегда: провайдер читает четыре названные стороны, и вот эта — одна из них.
+ *
+ * ⚠ ВЕТКА «not read by 3D» ОСТАЁТСЯ, ХОТЯ СЕГОДНЯ НЕДОСТИЖИМА. С 2026-09-25 лента рисует ровно
+ * четыре стороны (`ACTIVE_VIEWS`), и все они — `CARDINAL_VIEWS`. Но это два разных списка (что
+ * предлагает админка и что берёт провайдер), и если вид однажды вернут на верстак, слово обязано
+ * остаться честным без правки здесь.
  *
  * Пилюля рисуется ТОЛЬКО под занятой плитой (вызывающий гейтит `side.picture`), поэтому ветки
  * «пусто» здесь нет: пустоту говорит сама коробка, и второе её написание было бы шестой пилюлей
@@ -1103,4 +1110,4 @@ export function RendersByViewGroup({
 }
 
 /** The silhouette order the strips walk — exported for callers that count what the strips draw. */
-export const STRIP_VIEWS = SILHOUETTE_VIEWS;
+export const STRIP_VIEWS = ACTIVE_VIEWS;

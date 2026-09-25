@@ -17,48 +17,60 @@
  */
 
 /**
- * ═══ THE SIX SILHOUETTES (round 18, D-28) ═══════════════════════════════════════════════════════
+ * ═══ THE FOUR ACTIVE SIDES (wave 2026-09-25, D-18 / D-18') ════════════════════════════════════
  *
- * Owner, verbatim: «добавить три четверти лево и право в слоты и как опцию генерации».
+ * Owner, verbatim: «в разделе flats давай все же уберем 3/4 LEFT и 3/4 RIGHT и вообще везде».
  *
- * The server already speaks six — its own enumeration reads «front | back | side_l | side_r |
- * three_quarter_l | three_quarter_r» on every field that names a side (`ghost_view`,
- * `composite_views`, the bench's `view_key`, `StartDesignRunParams.views`), and the render bench
- * mints a three-quarter slot lazily like any other. So this list is not a client invention: it is
- * the wire's own order, in the order the wire states it — front, back, the sides, then the
- * three-quarters. Every bench, every «which sides» chip row and every slot picker reads THIS list
- * and therefore grew to six by construction; nothing had to be told.
+ * This is the list every screen OFFERS: every bench strip, every «which sides» chip row, every
+ * slot picker, every role select and every sheet order reads it, so the three-quarters left all of
+ * them by construction. It replaces `SILHOUETTE_VIEWS` (round 18, D-28, six sides) under a new
+ * name ON PURPOSE: the old name answered «is this a side?», and the moment the list shrank that
+ * question got a wrong answer for every stored three-quarter row — «not a side, therefore a
+ * detail» (Codex M-11). Renaming made every reader of the old name stop at the type checker and
+ * choose, out loud, what it does with a retired view.
  *
- * ⚠ EXCEPT 3D, AND THAT EXCEPTION HAS A NAME — `CARDINAL_VIEWS` below. Read it before enumerating
- * sides for anything a 3D run touches.
+ * ⚠ THE SERVER STILL SPEAKS SIX, AND NOTHING HERE ASKS IT TO FORGET. `view_key`, `ghost_view`,
+ * `composite_views`, `DesignReference.role` and `params.views` are open strings on the wire, and
+ * cards on beta/production carry three-quarter plates and roles. So the two retired keys are not
+ * deleted from the vocabulary — they move to `LEGACY_VIEWS` below, where they are UNDERSTOOD
+ * (normalised, labelled `3/4 left (legacy)`) but never OFFERED.
+ *
+ * ⚠ 3D HAS ITS OWN FOUR — `CARDINAL_VIEWS` below. Today they are the same four; they are not the
+ * same fact, and a 3D reader names the provider's list, not this one.
  */
-export const SILHOUETTE_VIEWS = [
-  'front',
-  'back',
-  'side_l',
-  'side_r',
-  'three_quarter_l',
-  'three_quarter_r',
-] as const;
-export type SilhouetteView = (typeof SILHOUETTE_VIEWS)[number];
+export const ACTIVE_VIEWS = ['front', 'back', 'side_l', 'side_r'] as const;
+export type ActiveView = (typeof ACTIVE_VIEWS)[number];
+
+/**
+ * ═══ THE TWO RETIRED VIEWS — KNOWN, SHOWN, NEVER OFFERED (D-18', Codex B-08) ═══════════════════
+ *
+ * What stays true for a three-quarter row already written:
+ *   · a FILLED flat slot is drawn in the bench's own row «legacy views (N)» with exactly one
+ *     door — ✕ (unmark) — because it may still travel into a run or print on the sheet, and a
+ *     plate nobody can see or take off is the worst of the three options (keep · show · drop);
+ *   · an EMPTY one is not drawn at all — there is nothing on it to take off;
+ *   · a reference ROLE of that view stays visible in its select as a disabled item, so the select
+ *     does not emit Radix's phantom '' and silently DELETE the role on the server; the person can
+ *     move it to «— not sent —» explicitly;
+ *   · history prints it as it was, with the word «legacy».
+ * What is never true: a three-quarter row filed as a DETAIL. «Not active» is not «detail» — every
+ * classifier asks `isLegacyView` before it lets a row fall through (`readBench`, `slotOfPicture`).
+ */
+export const LEGACY_VIEWS = ['three_quarter_l', 'three_quarter_r'] as const;
+export type LegacyView = (typeof LEGACY_VIEWS)[number];
 
 /**
  * ═══ THE FOUR A 3D RUN READS — `DesignCardinalViews` on the server ═════════════════════════════
  *
  * Meshy and fal take exactly four NAMED image slots — front, back, left, right — and nothing else.
  * So the server assembles a 3D run from the cardinal render slots only, and a three-quarter render
- * standing on the render bench feeds no 3D run whatever the screen shows. A 3D reader that
- * enumerates `SILHOUETTE_VIEWS` would draw two sides the provider cannot take and, worse, send
- * their picture ids in `source_picture_ids` — a request the server refuses for free, but a screen
- * that promised the person a six-sided turntable.
+ * standing on the render bench feeds no 3D run whatever the screen shows.
  *
- * ⚠ WHO MUST READ THIS LIST INSTEAD OF THE SIX (the client's 3D readers, by address):
- *   · `render/model.ts` — `threedSides` (the mirror of the render bench the 3D input draws) and
- *     `turntableSourceIds` (the ids a 3D run is built from, «in view order»);
- *   · `render/threed-input-strip.tsx` — the `mark ▸` list of a loose render on the 3D input.
- * Two other readers stay on the six on purpose: `benchSides` (a bench IS six slots now) and
- * `RENDER_SHEET_ORDER` (a render sheet walks around the garment; it must NAME the three-quarters or
- * a filled three-quarter slot is silently not asked for).
+ * SINCE 2026-09-25 THIS IS THE SAME SET AS `ACTIVE_VIEWS`, AND IT STAYS A SEPARATE NAME. The two
+ * lists answer different questions — «what does the provider read» and «what does this admin
+ * offer» — and if the owner ever brings a view back to the benches, 3D must not grow with it.
+ * The 3D readers name this list: `turntableSourceIds` (`render/model.ts`, the ids a 3D run is built
+ * from, «in view order») and the `read by 3D` word of `render/side-row.tsx`.
  */
 export const CARDINAL_VIEWS = ['front', 'back', 'side_l', 'side_r'] as const;
 export type CardinalView = (typeof CARDINAL_VIEWS)[number];
@@ -67,7 +79,10 @@ export type CardinalView = (typeof CARDINAL_VIEWS)[number];
  *  hangs under its own NAME, and the name is what the sheet cites it by. */
 export const DETAIL_VIEW = 'detail';
 
-export const DESIGN_VIEW_KEYS = [...SILHOUETTE_VIEWS, DETAIL_VIEW] as const;
+/** What a picker of «which view is this» OFFERS: the four active sides and `detail`. A retired
+ *  three-quarter is never offered — `isKnownViewKey` below is the wider question «does the wire
+ *  know this key», for readers that mirror a server condition rather than draw a list. */
+export const DESIGN_VIEW_KEYS = [...ACTIVE_VIEWS, DETAIL_VIEW] as const;
 export type DesignViewKey = (typeof DESIGN_VIEW_KEYS)[number];
 
 /**
@@ -83,14 +98,19 @@ export type DesignViewKey = (typeof DESIGN_VIEW_KEYS)[number];
  * word: `3/4 right` is nine characters and reads as a side at a glance, which is the whole point of
  * a label on a 9px cell. `¾` is still not used — the single glyph shrinks to a smudge at nano size
  * and the owner wrote the fraction with a slash.
+ *
+ * THE RETIRED TWO CARRY THE WORD «legacy» (D-18, 2026-09-25). Wherever an old row still names one —
+ * a plate in the bench's legacy row, a reference role, a frozen run's inputs, a composite's views —
+ * the label says that this view is no longer offered, instead of looking like a live option that
+ * vanished from every picker.
  */
 const VIEW_LABELS: Record<string, string> = {
   front: 'front',
   back: 'back',
   side_l: 'side left',
   side_r: 'side right',
-  three_quarter_l: '3/4 left',
-  three_quarter_r: '3/4 right',
+  three_quarter_l: '3/4 left (legacy)',
+  three_quarter_r: '3/4 right (legacy)',
   detail: 'detail',
 };
 
@@ -99,7 +119,9 @@ const VIEW_LABELS: Record<string, string> = {
  * prototype's state uses `sideL`, the wire and the database CHECK use `side_l`. Normalising on read
  * means a row written by either one lands in the same slot instead of creating a second, invisible
  * side. The three-quarters get the same courtesy for the same camel-cased spelling and nothing
- * more — a third spelling the wire has never carried would be an invention here.
+ * more — a third spelling the wire has never carried would be an invention here. They are retired
+ * (`LEGACY_VIEWS`), not forgotten: a stored `threeQuarterL` must still land in the legacy row, not
+ * in the details.
  */
 export function normaliseViewKey(key?: string | null): string {
   const k = (key ?? '').trim().toLowerCase();
@@ -122,8 +144,24 @@ export function viewLabel(key?: string | null): string {
   return VIEW_LABELS[k] ?? k.replace(/_/g, ' ');
 }
 
-export function isSilhouetteView(key?: string | null): boolean {
-  return (SILHOUETTE_VIEWS as readonly string[]).includes(normaliseViewKey(key));
+/** One of the four sides this admin offers. ⚠ `false` does NOT mean «detail» — ask
+ *  `isLegacyView` first (Codex M-11). */
+export function isActiveView(key?: string | null): boolean {
+  return (ACTIVE_VIEWS as readonly string[]).includes(normaliseViewKey(key));
+}
+
+/** A retired three-quarter: understood on read, never offered (D-18'). */
+export function isLegacyView(key?: string | null): boolean {
+  return (LEGACY_VIEWS as readonly string[]).includes(normaliseViewKey(key));
+}
+
+/**
+ * Does the WIRE know this key — an active side, a retired one or `detail`. For readers that mirror
+ * a server condition (the server still accepts all seven, e.g. `IsDesignGhostView`), never for a
+ * list a person picks from.
+ */
+export function isKnownViewKey(key?: string | null): boolean {
+  return isActiveView(key) || isLegacyView(key) || isDetailView(key);
 }
 
 export function isCardinalView(key?: string | null): boolean {
@@ -155,13 +193,14 @@ export function isDetailView(key?: string | null): boolean {
  * the slot picker of the feed, the `mark ▸` of the flats input, the `mark ▸` of the 3D input — and
  * the fourth (`mark ▸` in RENDERS OF THIS CARD, `render/outputs.tsx`) did not, which is the defect
  * D-6 names: the same cut piece led with its own side on one screen and with «front» on the next.
- * A view that is not a silhouette (`detail`, empty, a key from a newer server) leaves the drawing
- * order untouched.
+ * A view that is not an active side (`detail`, empty, a retired three-quarter, a key from a newer
+ * server) leaves the drawing order untouched — a crop cut as «3/4 left» before the retirement is
+ * offered the four live sides, never its own retired one back.
  */
-export function sidesLeadingWith(view?: string | null): SilhouetteView[] {
+export function sidesLeadingWith(view?: string | null): ActiveView[] {
   const lead = normaliseViewKey(view);
-  const rest = SILHOUETTE_VIEWS.filter((side) => side !== lead);
-  return isSilhouetteView(lead) ? [lead as SilhouetteView, ...rest] : [...rest];
+  const rest = ACTIVE_VIEWS.filter((side) => side !== lead);
+  return isActiveView(lead) ? [lead as ActiveView, ...rest] : [...rest];
 }
 
 /**
@@ -178,7 +217,7 @@ export function sidesLeadingWith(view?: string | null): SilhouetteView[] {
  * them because it was never about minting — front and back are what a person needs in order to cut
  * a garment, whatever ceremony sits downstream of that.)
  *
- * Six sides did not move it (D-28): a three-quarter is a view the sheet MAY carry, not one a cutter
- * cannot work without.
+ * Six sides did not move it (D-28), and four do not either (D-18): a three-quarter was a view the
+ * sheet MAY carry, never one a cutter cannot work without.
  */
 export const SHEET_MIN_VIEWS: readonly string[] = ['front', 'back'];

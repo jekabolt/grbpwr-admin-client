@@ -30,10 +30,10 @@ import { threedResults } from '../threed/media';
 import { useBringOwnModel } from '../threed/model-upload-cell';
 import { useDesignWrites } from '../use-design-band';
 import {
-  isSilhouetteView,
+  isActiveView,
   normaliseViewKey,
   viewLabel,
-  type SilhouetteView,
+  type ActiveView,
 } from '../views';
 import { ApplySplitDoor, type SplitPiece } from './apply-split';
 import { SAMPLE_LABEL, colourwayColumns } from './side-row';
@@ -573,9 +573,10 @@ export function OutputsSection({
     const out: SplitPiece[] = [];
     for (const member of families.membersOf.get(rootId) ?? []) {
       const view = normaliseViewKey(member.ghostView);
-      if (!isSilhouetteView(view) || seen.has(view)) continue;
+      // A piece cut as a retired three-quarter (D-18) goes into no slot: the bench no longer has one.
+      if (!isActiveView(view) || seen.has(view)) continue;
       seen.add(view);
-      out.push({ view: view as SilhouetteView, picture: member });
+      out.push({ view: view as ActiveView, picture: member });
     }
     return out;
   };
