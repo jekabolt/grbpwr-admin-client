@@ -39,25 +39,25 @@ import { RolesField } from '../roles-field';
 import type { TechCardFormData } from '../schema';
 import { SeasonField } from '../season-field';
 import { parseSeasonToSku } from '../season-util';
+import {
+  AGE_GROUP_UNSET,
+  ageGroupLabel,
+  ageGroupOptions,
+  isAgeGroupSet,
+} from '../tech-card-options';
 import { useRoleAssignments } from '../useRoles';
 import { Counter, EmptyState, GROUP_GAP, GROUP_SEAM } from './core';
 import { cardFactsContext } from './core/card-facts';
 import { DraftedField } from './core/drafted-field';
 import { draftedKey, useDrafted } from './drafted-contract';
-import {
-  categoryChain,
-  fitLabel,
-  fitsForTopCategory,
-  topCategoryName,
-  type FitChoice,
-} from './fit-vocabulary';
+import { categoryChain, fitChoicesFor, fitLabel, type FitChoice } from './fit-vocabulary';
 import { LockBar } from './render/generate-row';
 
 /**
  * ═══ STEP 0 · CARD DETAILS — ONE BLOCK, SIX GROUPS (`design-band-flow/_step-card.js` + NOTE) ═════
  *
  * The header of the card as the prototype draws it: ONE `Section` titled «card details · who and
- * what this card is», a `N of 11 fields` counter in its rule, and inside it the groups as
+ * what this card is», a `N of 12 fields` counter in its rule, and inside it the groups as
  * `GroupLabel` rules — IDENTIFICATION, CLASSIFICATION, BASE MODEL & SAMPLE SIZE, NOTE, and the
  * two-column row RESPONSIBLE ROLES | LINKED PRODUCTS. Not four separate blocks: the owner saw
  * those and said «не как в референсе». A block never contains a block (DESIGN.md), so the groups
@@ -68,16 +68,17 @@ import { LockBar } from './render/generate-row';
  * beside a hole. Below `sm` the grid is one column and reads top to bottom in the same order.
  *
  * THE LOGIC IS THE PRODUCT'S. Every field is the same RHF field it was (`name`, `styleNumber`,
- * `collection`, `season`, `brand`, `categoryId`, `fit`, `purpose`, `targetGender`, `baseModelId`,
- * `baseSampleSizeId`, `notes`); the organs that already existed are reused by import (season
- * picker, collection select, category cascade, base model pair). Roles keep writing through their
- * own RPCs the instant they change, outside the card's draft. `StyleFactsField` — the one writer of
- * brand / collection / season / targetGender / fit — is NOT here: it stays mounted unconditionally
- * in `index.tsx`, because this screen is mounted only while step 0 is open.
+ * `collection`, `season`, `brand`, `categoryId`, `fit`, `ageGroup`, `purpose`, `targetGender`,
+ * `baseModelId`, `baseSampleSizeId`, `notes`); the organs that already existed are reused by import
+ * (season picker, collection select, category cascade, base model pair). Roles keep writing through
+ * their own RPCs the instant they change, outside the card's draft. `StyleFactsField` — the one
+ * writer of brand / collection / season / targetGender / fit / age group — is NOT here: it stays
+ * mounted unconditionally in `index.tsx`, because this screen is mounted only while step 0 is open.
  *
- * WAVE 2026-09-25 (tmp/plans/techcard-ux-0925, zone CL-C) added three things and nothing else:
+ * WAVE 2026-09-25 (tmp/plans/techcard-ux-0925, zone CL-C) added four things and nothing else:
  *   · FIT moved here from GENERAL INFORMATION (T02, D-03) — CLASSIFICATION, right after the
  *     category it depends on; the list narrows to the garment family (`fit-vocabulary.ts`);
+ *   · AGE GROUP (T01, D-01') beside fit — a style fact, written by the same staged UpdateStyle;
  *   · the collection picker's `+ new collection…` (T06, D-06) — the one door, inside the list;
  *   · NOTE (T07, D-05) — the card's existing `notes` field, which had lost its editor.
  *
@@ -88,10 +89,10 @@ import { LockBar } from './render/generate-row';
  */
 
 /**
- * The META fields the header counter reads — the prototype's `metaFill()`, plus FIT since it
- * moved here (wave 2026-09-25): eleven. FIT counts only where the field is DRAWN — an auxiliary
- * card and an accessory / shoe / bag / object have no fit, and «10 of 11» on a card that cannot
- * reach 11 would be a gap nobody can close. So the total is the fields on screen, not a constant.
+ * The META fields the header counter reads — the prototype's `metaFill()`, plus FIT (moved here)
+ * and AGE GROUP (wave 2026-09-25): twelve. FIT counts only where the field is DRAWN — an auxiliary
+ * card and an accessory / shoe / bag / object have no fit, and «11 of 12» on a card that cannot
+ * reach 12 would be a gap nobody can close. So the total is the fields on screen, not a constant.
  */
 const META_FIELDS = [
   'name',
@@ -101,6 +102,7 @@ const META_FIELDS = [
   'brand',
   'categoryId',
   'fit',
+  'ageGroup',
   'purpose',
   'targetGender',
   'baseModelId',
@@ -116,6 +118,7 @@ function isFilled(key: MetaField, v: unknown): boolean {
     return typeof v === 'number' && v > 0;
   }
   if (key === 'targetGender') return !!v && v !== UNSET_GENDER;
+  if (key === 'ageGroup') return isAgeGroupSet(v as string | undefined);
   if (key === 'purpose') return typeof v === 'string' && !/UNKNOWN|UNSET/.test(v);
   return typeof v === 'string' && !!v.trim();
 }
@@ -273,8 +276,24 @@ function StyleNumberCell({ isIdea }: { isIdea: boolean }) {
   );
 }
 
-/** Radix Select forbids an empty item value; «no fit» rides a sentinel that maps back to ''. */
-const FIT_UNSET = '__unset__';
+/**
+ * THE SELECT'S VALUES ARE A NAMESPACE OF THEIR OWN (Codex m2). Every fit — listed or legacy — is
+ * `fit:<stored string>`, and «— unset —» is the bare word `none`, which no `fit:` value can equal.
+ * The old sentinel `__unset__` was a string a legacy record could hold: its item and «unset» would
+ * have been one value, and picking it would have cleared the fit.
+ *
+ * NOT the shared Select's own empty option (a '' item), on purpose: offering '' switches off the
+ * primitive's guard against the PHANTOM '' Radix emits when the value and its item arrive in the
+ * same render (`select.tsx`, `references-section.tsx`). MEASURED on this cell (`probe-card.mjs`
+ * scene L, the card inside a <form> as on the page — only there does Radix mount its native
+ * <select>): with a '' item, a re-read moving category + fit together, a re-read to a fit outside
+ * the list and a draft writing one ALL came out as '' — a fit cleared that nobody touched. With no
+ * '' item the guard stays on and each keeps its value.
+ */
+const FIT_NONE = 'none';
+const FIT_ITEM = 'fit:';
+const fitItem = (fit: string) => `${FIT_ITEM}${fit}`;
+const fitOfItem = (item: string) => (item.startsWith(FIT_ITEM) ? item.slice(FIT_ITEM.length) : '');
 
 /**
  * FIT — ONE SELECT, BOUND TO THE FORM FIELD `fit` (T02, D-03). It moved here from GENERAL
@@ -291,7 +310,9 @@ const FIT_UNSET = '__unset__';
  * · `— unset —` is how a fit is removed; there is no second control for it.
  * · DRAFTED: the construction draft may have written this value; the frame and the word stand until
  *   the value is edited or accepted (`drafted-contract.ts`). The word sits in the label row — a
- *   22px select has no room for a corner pill.
+ *   22px select has no room for a corner pill. A genuine pick IS the review: it accepts the fit's
+ *   journal entry (`acceptKey`), so going back to the drafted value later does not bring the mark
+ *   back — the select's own form of `useAcceptOnEdit`, which a text field runs on blur.
  * · LOCKED without `products:write`: `UpdateStyle` is authorised by the catalog section, not by
  *   `tech_cards` (Codex M-05), so an edit here would be refused at save. Said in words under the
  *   control, not only in a `title` on a dead select.
@@ -308,9 +329,15 @@ function FitCell({ choices, locked }: { choices: FitChoice[]; locked: boolean })
         const live = drafted.isLive(draftedKey.fit, value);
         const listed = choices.some((c) => c.key === value);
         const items = [
-          { value: FIT_UNSET, label: '— unset —' },
-          ...(value && !listed ? [{ value, label: `${fitLabel(value)} (legacy)` }] : []),
-          ...choices.map((c) => ({ value: c.key, label: fitLabel(c.key), group: c.group })),
+          { value: FIT_NONE, label: '— unset —' },
+          ...(value && !listed
+            ? [{ value: fitItem(value), label: `${fitLabel(value)} (legacy)` }]
+            : []),
+          ...choices.map((c) => ({
+            value: fitItem(c.key),
+            label: fitLabel(c.key),
+            group: c.group,
+          })),
         ];
         return (
           <FormItem
@@ -326,14 +353,72 @@ function FitCell({ choices, locked }: { choices: FitChoice[]; locked: boolean })
                 name='fit'
                 placeholder='fit'
                 items={items}
-                value={value || FIT_UNSET}
+                value={value ? fitItem(value) : FIT_NONE}
                 disabled={locked}
                 // Reads as a dead control, like a disabled `Input` (zebra ground, label ink).
                 className={locked ? 'bg-bgZebra text-labelColor' : undefined}
-                onValueChange={(v: string) => field.onChange(v === FIT_UNSET ? '' : v)}
+                onValueChange={(v: string) => {
+                  const next = fitOfItem(v);
+                  field.onChange(next);
+                  if (next !== value) drafted.acceptKey(draftedKey.fit);
+                }}
                 onBlur={field.onBlur}
               />
             </DraftedField>
+            {locked && (
+              <Text size='micro' variant='label'>
+                needs products:write
+              </Text>
+            )}
+          </FormItem>
+        );
+      }}
+    />
+  );
+}
+
+/**
+ * AGE GROUP (T01, D-01') — the style's target age group, a style fact beside target gender. Bound
+ * to the form field `ageGroup`; written, like FIT, only by the staged `UpdateStyle` in
+ * `StyleFactsField` (mask path `age_group`), never by the card's own save.
+ *
+ * · «— unset —» is offered only where it is TRUE: on a card being created and on a card whose
+ *   stored age group is not set. Once a style has one, the server refuses UNKNOWN under the mask,
+ *   so an «unset» picked there would fall out of the save without a word — the item is left out
+ *   rather than drawn as a lie. A value that is unset right now is always drawn.
+ * · A new card proposes adult (`techCardDefaultData`); an existing card shows what it holds.
+ * · Locked exactly like FIT, for the same reason: UpdateStyle is `products:write`.
+ */
+function AgeGroupCell({ creating, locked }: { creating: boolean; locked: boolean }) {
+  const { control } = useFormContext<TechCardFormData>();
+  return (
+    <FormField
+      control={control}
+      name='ageGroup'
+      render={({ field }) => {
+        const value = (field.value as string | undefined) || AGE_GROUP_UNSET;
+        const loaded = (control._defaultValues as Partial<TechCardFormData>).ageGroup;
+        const offerUnset = creating || !isAgeGroupSet(loaded) || !isAgeGroupSet(value);
+        const items = [
+          ...(offerUnset ? [{ value: AGE_GROUP_UNSET as string, label: '— unset —' }] : []),
+          ...ageGroupOptions,
+        ];
+        return (
+          <FormItem
+            data-card-age={locked ? 'locked' : 'open'}
+            title={locked ? 'needs products:write' : undefined}
+          >
+            <FormLabel>age group</FormLabel>
+            <Select
+              name='ageGroup'
+              placeholder='age group'
+              items={items}
+              value={value}
+              disabled={locked}
+              className={locked ? 'bg-bgZebra text-labelColor' : undefined}
+              onValueChange={(v: string) => field.onChange(v)}
+              onBlur={field.onBlur}
+            />
             {locked && (
               <Text size='micro' variant='label'>
                 needs products:write
@@ -543,13 +628,17 @@ export function CardDetails({
   const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
   const concept = (useWatch({ control, name: 'concept' }) as string | undefined) ?? '';
   const fit = (useWatch({ control, name: 'fit' }) as string | undefined) ?? '';
+  const ageGroup = useWatch({ control, name: 'ageGroup' }) as string | undefined;
 
   // FIT follows the garment: the family of the card's TOP category decides the list, and «no fit
   // here» (accessories, shoes, bags, objects — and every auxiliary card, which makes packaging)
-  // hides the field without touching the stored value.
+  // hides the field without touching the stored value. `fitChoicesFor` is the SAME answer
+  // StyleFactsField reads to keep a hidden fit out of its mask.
   const categories = dictionary?.categories;
-  const topName = topCategoryName(categories, categoryId);
-  const fitChoices = useMemo(() => (isAux ? null : fitsForTopCategory(topName)), [isAux, topName]);
+  const fitChoices = useMemo(
+    () => fitChoicesFor(categories, categoryId, isAux),
+    [categories, categoryId, isAux],
+  );
   const fitShown = fitChoices !== null;
   const counted = META_FIELDS.filter((key) => key !== 'fit' || fitShown);
   const filled = META_FIELDS.reduce(
@@ -557,12 +646,21 @@ export function CardDetails({
     0,
   );
 
-  // CLASSIFICATION stays on the six-track grid without a hole: four cells are 3+3 / 3+3, three are
-  // 2+2+2 (the rule at the top of this file — no lone half-width field beside a gap).
-  const classCells = 3 + (fitShown ? 1 : 0) + (isAux ? 1 : 0);
-  const WC = classCells === 4 ? W3 : W2;
-  // UpdateStyle — the one writer of fit — is `products:write` on the server (Codex M-05).
-  const fitLocked = !canWrite(SECTION.products);
+  // CLASSIFICATION stays on the six-track grid without a hole (the rule at the top of this file —
+  // no lone half-width field beside a gap): four cells are 3+3 / 3+3, five are 2+2+2 / 3+3. Which
+  // cells exist is decided here once; each cell reads its width off its place in this list.
+  const classCells = [
+    'category',
+    ...(fitShown ? ['fit'] : []),
+    'age',
+    'purpose',
+    'gender',
+    ...(isAux ? ['aux'] : []),
+  ];
+  const wc = (cell: string) => (classCells.length === 4 || classCells.indexOf(cell) >= 3 ? W3 : W2);
+  // UpdateStyle — the one writer of fit and age group — is `products:write` on the server (Codex
+  // M-05): both cells lock on it.
+  const styleLocked = !canWrite(SECTION.products);
 
   const categoryPath = categoryChain(categories, categoryId)
     .map((c) => c.name || `#${c.id}`)
@@ -570,6 +668,7 @@ export function CardDetails({
   const noteContext = cardFactsContext({
     categoryPath,
     fit: fitShown ? fitLabel(fit) : '',
+    ageGroup: ageGroupLabel(ageGroup),
     concept,
   });
 
@@ -614,7 +713,7 @@ export function CardDetails({
         </div>
       </div>
 
-      {/* ── CLASSIFICATION — 3+3 / 3+3 with FIT (or the aux type), else 2+2+2 ───────────────── */}
+      {/* ── CLASSIFICATION — 2+2+2 / 3+3 with FIT (or the aux type), else 3+3 / 3+3 ─────────── */}
       <div className='min-w-0' data-card-group='classification'>
         <GroupLabel flush className={GROUP_GAP}>
           classification
@@ -622,16 +721,20 @@ export function CardDetails({
         <div className={GRID}>
           {/* The category cascade — three columns in one popover over a single stored leaf.
               Its trigger stretches to the whole cell like the selects beside it. */}
-          <div className={WC}>
+          <div className={wc('category')}>
             <CategoryBrowser />
           </div>
           {/* FIT right after the category it depends on (T02). */}
           {fitChoices && (
-            <div className={WC} data-card-cell='fit'>
-              <FitCell choices={fitChoices} locked={fitLocked} />
+            <div className={wc('fit')} data-card-cell='fit'>
+              <FitCell choices={fitChoices} locked={styleLocked} />
             </div>
           )}
-          <div className={WC}>
+          {/* AGE GROUP beside fit — the style's other «who is it for» fact (T01). */}
+          <div className={wc('age')} data-card-cell='age'>
+            <AgeGroupCell creating={!techCardId} locked={styleLocked} />
+          </div>
+          <div className={wc('purpose')}>
             <SelectField name='purpose' label='purpose' items={techCardPurposeFormOptions} />
             {/* Purpose is mutually exclusive with the output material and the save is a full
                 replace — flag the destruction BEFORE it happens. The server's other refusals (live
@@ -643,7 +746,7 @@ export function CardDetails({
               </Text>
             )}
           </div>
-          <div className={WC}>
+          <div className={wc('gender')}>
             <SelectField
               name='targetGender'
               label='target gender'
@@ -653,9 +756,9 @@ export function CardDetails({
           {/* WS7: what KIND of auxiliary item this card makes — auxiliary-only, the dto rejects it
               on a sellable card and the save mapper clears it on a purpose flip. A product field
               the prototype has no cell for; it takes the cell after the gender (an aux card has no
-              FIT, so the group is 3+3 / 3+3 again). */}
+              FIT, so the group is 2+2+2 / 3+3 again). */}
           {isAux && (
-            <div className={WC}>
+            <div className={wc('aux')}>
               <SelectField
                 name='auxSubtype'
                 label='auxiliary type'

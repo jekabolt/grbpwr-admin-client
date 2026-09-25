@@ -1,4 +1,5 @@
 import { adminService } from 'api/api';
+import { ACCESS, accessSatisfies } from 'components/managers/accounts/utils/hooks';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -12,17 +13,23 @@ import { FormLabel } from 'ui/form';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { TechCardFormData } from './schema';
 
-// Radix Select forbids an empty-string item value, so "no collection" needs a sentinel that maps
-// back to '' in form state — the same trick the category cascade uses with '0'.
-const NONE = '__none__';
-
+// THE LIST'S VALUES ARE A NAMESPACE OF THEIR OWN (Codex m3). Every collection is `name:<name>`;
+// «no collection» and the create door are bare words that no `name:` value can equal — a collection
+// really called «__none__» or «new» is just a name here, never «clear» or «open the dialog».
+// (Radix forbids an empty-string item value, which is why «no collection» is a word at all.)
+const NONE = 'none';
 // The last item of the list is a DOOR, not a value: picking it opens the create dialog and writes
 // nothing into the form. Never stored — the value handler turns it away before `setValue`.
-const NEW = '__new__';
+const NEW = 'new';
+const NAME = 'name:';
+const nameItem = (name: string) => `${NAME}${name}`;
+const nameOfItem = (item: string) => (item.startsWith(NAME) ? item.slice(NAME.length) : '');
 
-// CreateCollection is `dictionaries:write` on the server (rbac.go, «создание Collection —
-// отдельное право словарей»): a catalog editor may PICK a collection but not add one. The client's
-// SECTION map has no key for it, and `canWrite` takes the backend's section string as is.
+// CreateCollection is `dictionaries:write` on the server (rbac.go: `"CreateCollection":
+// wr(SectionDictionaries)`, «создание Collection — отдельное право словарей»), and `dictionaries`
+// is a section the backend publishes in its catalog — so it is THE key, not `settings` (the key the
+// dictionaries PAGE happens to be filed under in the nav: `settings` is storefront configuration,
+// and an account holding only that would be offered a create the server refuses).
 const DICTIONARIES = 'dictionaries';
 
 // The style's collection, picked from the COLLECTIONS dictionary rather than typed free-hand: a
@@ -35,13 +42,19 @@ const DICTIONARIES = 'dictionaries';
 // the created name is selected on this card. No second button beside the select — the list is the
 // one control for «which collection», including «one that does not exist yet». The item is absent
 // for an account without `dictionaries:write`, whose create would only be refused.
+//
+// THE DOOR FAILS CLOSED (Codex M1). `canWrite` opens every section while the account is loading or
+// has failed to load, and for a key the catalog does not list — right for the sidebar, wrong for a
+// door whose only outcome for the wrong account is a refusal. So the item is offered on a
+// DEFINITIVE answer only: a super account, or an explicit write grant on `dictionaries`.
 export function CollectionField({ readOnly }: { readOnly?: boolean }) {
   const { setValue } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
-  const { canWrite } = usePermissions();
+  const { resolved, isSuper, account } = usePermissions();
   const collection = (useWatch({ name: 'collection' }) as string | undefined) ?? '';
   const [creating, setCreating] = useState(false);
-  const canCreate = !readOnly && canWrite(DICTIONARIES);
+  const grant = account?.permissions?.find((p) => p.section === DICTIONARIES)?.access;
+  const canCreate = !readOnly && resolved && (isSuper || accessSatisfies(grant, ACCESS.WRITE));
 
   const items = useMemo(() => {
     const names = (dictionary?.collections ?? [])
@@ -54,7 +67,7 @@ export function CollectionField({ readOnly }: { readOnly?: boolean }) {
     if (collection && !names.includes(collection)) names.unshift(collection);
     const out: { value: string; label: string }[] = [
       { value: NONE, label: '— none —' },
-      ...names.map((n) => ({ value: n, label: n })),
+      ...names.map((n) => ({ value: nameItem(n), label: n })),
     ];
     if (canCreate) out.push({ value: NEW, label: '+ new collection…' });
     return out;
@@ -68,7 +81,7 @@ export function CollectionField({ readOnly }: { readOnly?: boolean }) {
       <Select
         name='collection'
         items={items}
-        value={collection || NONE}
+        value={collection ? nameItem(collection) : NONE}
         readOnly={readOnly}
         onValueChange={(v?: string) => {
           if (v === NEW) {
@@ -77,7 +90,7 @@ export function CollectionField({ readOnly }: { readOnly?: boolean }) {
             window.setTimeout(() => setCreating(true), 0);
             return;
           }
-          setValue('collection', !v || v === NONE ? '' : v, { shouldDirty: true });
+          setValue('collection', nameOfItem(v ?? ''), { shouldDirty: true });
         }}
       />
       {canCreate && (
