@@ -13,7 +13,9 @@ import { VectorModal } from './modals';
 import { PlaceOrDrawCell, Reason } from './core';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
+import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
+import { useDrafted } from './drafted-contract';
 import { batchCaption, pictureHandle } from './handles';
 import { mixedInputNote, provenanceLabel, readProvenance, slotProvenance } from './provenance';
 import type { MediaViewerItem } from 'ui/components/media-viewer';
@@ -452,6 +454,11 @@ export type BenchSlotProps = {
   /** Details only. */
   onRename?: (name: string) => void;
   onDelete?: () => void;
+  /**
+   * Бледная пиктограмма изделия в ПУСТОМ кадре (techcard-ux-0925, D-22) — только у сторон: деталь
+   * не сторона изделия, и силуэт ей ничего не подсказывает. Готовый узел (`PictogramBackdrop`).
+   */
+  backdrop?: React.ReactNode;
 };
 
 /**
@@ -597,6 +604,8 @@ function EmptyCell({
   purpose,
   disabled,
   picking,
+  proposed,
+  backdrop,
   mediaLabel = 'from media',
   onPlaceMedia,
   onDraw,
@@ -607,6 +616,22 @@ function EmptyCell({
   purpose: string;
   disabled?: boolean;
   picking?: boolean;
+  /**
+   * ═══ ДЕТАЛЬ, КОТОРУЮ ПРЕДЛОЖИЛ ЧЕРНОВИК, И ЧЕЛОВЕК ЕЁ ЕЩЁ НЕ ТРОГАЛ (T14, D-09/D-07') ═══════
+   *
+   * Владелец: «генерация в MOODBOARD … создавала пустые DETAILS с подписями … они также должны быть
+   * синими с обводкой до принятия пользователем». Синий в этой админке — «в полёте, нужен человек»
+   * (тот же тон, что у пометки «drafted» и баннера «draft was found»), поэтому рамка ячейки —
+   * `warning`, а в подвале — пилюля `proposed` словом: цвет состояние в одиночку не несёт.
+   *
+   * ⚠ РАМКА — СОБСТВЕННАЯ ГРАНИЦА КОРОБКИ, А НЕ `ring-1`. Кольцо рисуется СНАРУЖИ коробки, а лента
+   * деталей — `overflow-x-auto` без полей сверху и слева: верхняя и левая черта кольца срезались бы
+   * краем ленты, и первая ячейка стояла бы в синей скобке без двух сторон. Своя граница коробки
+   * (сплошная, `border-warning`) — та же синяя обводка, и её нечем срезать.
+   */
+  proposed?: boolean;
+  /** Бледная пиктограмма изделия на полосах кадра (D-22) — у сторон. */
+  backdrop?: React.ReactNode;
   /**
    * Лицо ВЕРХНЕЙ половины. Умолчание `from media` — правило подвала: у стороны имя уже напечатано
    * под кадром, и `+ front` повторял бы его в двух сантиметрах. У ЯЧЕЙКИ МИНТА имени в подвале
@@ -642,8 +667,27 @@ function EmptyCell({
           </Text>
         ) : undefined
       }
-      className={picking ? 'border-textColor' : undefined}
-      cap={<SlotCap label={label} required={required} requiredNote={requiredNote} />}
+      backdrop={backdrop}
+      className={cn(picking && 'border-textColor', proposed && 'border-solid border-warning')}
+      cap={
+        <SlotCap
+          label={label}
+          required={required}
+          requiredNote={requiredNote}
+          trailing={
+            proposed ? (
+              <Pill
+                tone='attention'
+                data-proposed-pill=''
+                className='ml-auto leading-none'
+                title='the construction draft proposed this detail — put a picture, draw, rename or remove it to accept'
+              >
+                proposed
+              </Pill>
+            ) : undefined
+          }
+        />
+      }
     />
   );
 }
@@ -672,10 +716,24 @@ export function BenchSlot(props: BenchSlotProps) {
     galleryItem,
     onRename,
     onDelete,
+    backdrop,
   } = props;
 
   const provenance = picture ? slotProvenance({ picture }) : null;
   const url = pictureUrl(picture);
+
+  /**
+   * «PROPOSED» — ПУСТОЙ слот детали, заведённый черновиком и ещё не принятый (T14). Принятие —
+   * ЛЮБОЕ касание самого слота: положить картинку, открыть перо, переименовать, снести (D-09:
+   * «отклонить = существующая дверь удаления»). Заполненный слот пометку не рисует: картинка в нём
+   * уже ответ человека или прогона.
+   */
+  const drafted = useDrafted();
+  const slotId = slot?.id ?? 0;
+  const proposed = !!detail && slotId > 0 && !(url && picture) && drafted.slotProposed(slotId);
+  const accept = () => {
+    if (slotId > 0 && drafted.slotProposed(slotId)) drafted.acceptSlot(slotId);
+  };
 
   /**
    * A DRAWING SITS OVER THIS PLATE — and the sentence it deserves depends on where the plate came
@@ -772,12 +830,24 @@ export function BenchSlot(props: BenchSlotProps) {
           purpose={`design bench · ${label}`}
           disabled={disabled}
           picking={picking}
-          onPlaceMedia={onPlaceMedia}
+          proposed={proposed}
+          backdrop={backdrop}
+          onPlaceMedia={(media) => {
+            accept();
+            onPlaceMedia(media);
+          }}
           /* НИЖНЯЯ ПОЛОВИНА ПИШЕТ В ЭТОТ ЖЕ СЛОТ: редактор получает `slotRef` и `slotRev` ячейки,
              то есть `kind:'flat'`, `colorwayId: 0`, адрес одним членом oneof и живой CAS-токен.
              Там, где редактора нет по существу (`editable={false}` — рендер-слоты), нет и
              половины: дверь, которая молча делает не то, хуже отсутствующей. */
-          onDraw={!disabled && editable ? () => setVectorOpen(true) : undefined}
+          onDraw={
+            !disabled && editable
+              ? () => {
+                  accept();
+                  setVectorOpen(true);
+                }
+              : undefined
+          }
         />
       )}
 
@@ -799,7 +869,14 @@ export function BenchSlot(props: BenchSlotProps) {
       )}
 
       {detail && onRename && (
-        <DetailNameField name={(slot?.detailName ?? '').trim()} disabled={disabled} onRename={onRename} />
+        <DetailNameField
+          name={(slot?.detailName ?? '').trim()}
+          disabled={disabled}
+          onRename={(next) => {
+            accept();
+            onRename(next);
+          }}
+        />
       )}
 
       {/* ДВЕРЬ СНОСА СЛОТА ДЕТАЛИ — другой глагол, чем ✕ (крестик очищает слот, эта кнопка сносит
@@ -817,7 +894,10 @@ export function BenchSlot(props: BenchSlotProps) {
             variant='secondary'
             size='xs'
             title='remove this detail slot — not just its picture'
-            onClick={onDelete}
+            onClick={() => {
+              accept();
+              onDelete();
+            }}
           >
             remove slot
           </Button>

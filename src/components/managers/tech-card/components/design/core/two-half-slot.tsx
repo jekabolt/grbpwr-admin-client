@@ -192,6 +192,7 @@ export function PlaceOrDrawCell({
   into,
   cap,
   instead,
+  backdrop,
   topAligned,
   role,
   ariaLabel,
@@ -228,6 +229,12 @@ export function PlaceOrDrawCell({
   cap?: React.ReactNode;
   /** Слово состояния ВМЕСТО половин: «the input is full», «empty». Коробка остаётся своя. */
   instead?: React.ReactNode;
+  /**
+   * Бледный слой НА ПОЛОСАХ кадра (techcard-ux-0925, D-22: пиктограмма изделия на пустом слоте
+   * верстака). Вызывающий отдаёт уже позиционированный узел (`position: absolute`, мимо указателя);
+   * кадр при этом становится `position: relative`, и больше ничего в плитке не меняется.
+   */
+  backdrop?: React.ReactNode;
   /** Не растягивать коробку по строке грида: её рост задаёт пропорция, а не сосед. */
   topAligned?: boolean;
   role?: string;
@@ -259,6 +266,7 @@ export function PlaceOrDrawCell({
         style={{
           ...PLACEHOLDER_SURFACE,
           minHeight: 0,
+          ...(backdrop ? { position: 'relative' as const } : null),
           ...(aspect ? { aspectRatio: aspect } : { flex: '1 1 auto' }),
           /* Слово состояния — единственное, что центрируется флексом: у него нет своей ширины и
              отнимать её не у чего. Дверям кадр отдаётся дорожками грида — разбор у `slotFrame`. */
@@ -268,6 +276,7 @@ export function PlaceOrDrawCell({
            `px-2` там вжал бы кнопку на 8px с каждой стороны, то есть сузил бы саму дверь. */
         className={cn(instead && 'flex items-center justify-center px-2 text-center')}
       >
+        {backdrop}
         {instead ?? (
           <>
             {/* ⚠ ОБЁРТКА С НУЛЕВЫМ МИНИМУМОМ НЕСУЩАЯ, А НЕ УБОРКА — см. разбор у `slotFrame`. */}

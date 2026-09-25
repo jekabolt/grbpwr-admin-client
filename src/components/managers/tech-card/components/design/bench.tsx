@@ -27,6 +27,7 @@ import {
   viewLabel,
 } from './bench-slot';
 import { COLORWAY_NONE, type BenchKind } from './bench-kinds';
+import { PictogramBackdrop, useCardGarmentFamily } from './garment-pictograms';
 import { Counter } from './core';
 import { LockBar } from './render/generate-row';
 import { shelfBatchOrdinals } from './handles';
@@ -218,6 +219,8 @@ export function Bench({
 
   const bench = useMemo(() => readBench(band, FLAT_BENCH), [band]);
   const candidates = useMemo(() => pickableFlats(band), [band]);
+  /** Семейство силуэта по категории карточки (D-22): пиктограмма на полосах пустой стороны. */
+  const family = useCardGarmentFamily();
   const shelfOrdinals = useMemo(() => shelfBatchOrdinals(band.batches ?? []), [band.batches]);
 
   /**
@@ -543,6 +546,9 @@ export function Bench({
                 picking={pickingKey === key}
                 disabled={disabled}
                 shelfOrdinals={shelfOrdinals}
+                /* ПИКТОГРАММА ИЗДЕЛИЯ (D-22): «штаны фронт, штаны бэк», еле видно, во всю высоту
+                   кадра. Нет семейства (аксессуар, обувь, сумка, нет категории) — нет и рисунка. */
+                backdrop={family ? <PictogramBackdrop family={family} view={view} /> : undefined}
                 onPlaceMedia={(media) => placeMedia(media, ref, rev)}
                 onCancelPick={pick.cancel}
                 onUnmark={() => unmark(ref, rev)}
