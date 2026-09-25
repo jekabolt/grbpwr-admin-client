@@ -15,12 +15,14 @@ import type { StagedChange } from './useTechCardStaging';
  * этой дверью:
  *   saved 18:42           — серый, всё на сервере;
  *   unsaved / saving…     — синий: в полёте (дебаунс, запись);
- *   unsaved · 2 errors    — красный, щелчок ведёт к первому полю (та же логика, что у Save);
+ *   unsaved · 2 errors    — красный, щелчок = явное сохранение: ошибки выходят на поля, фокус уходит
+ *                           к первому (автосейв проверяет ТИХО и полям ничего не публикует, M-02);
  *   unsaved · save now    — синий, смена purpose ждёт явного сохранения с диалогом перевода;
  *   conflict              — красный, щелчок снова открывает модалку конфликта;
  *   not saved · retry     — красный, повторы исчерпаны, щелчок пробует снова.
  * `▾` рядом открывает то, что раньше открывал старый чип (что именно ждёт записи), и под ним —
- * ИСТОРИЮ: откат текста к любому из последних сохранений.
+ * ИСТОРИЮ: откат текста к любому из последних сохранений. Раскрытие поповера при `invalid` — тоже
+ * «покажи»: ошибки выходят на поля без прыжка.
  *
  * Цвет никогда не несёт состояние один: у каждого тона своё слово (DESIGN.md, Monochrome Rule).
  */
@@ -104,6 +106,7 @@ export function SaveStatusChip({
   currentText,
   canRestore,
   onJumpToError,
+  onOpenDetails,
   onSaveNow,
   onOpenConflict,
   onRestore,
@@ -119,6 +122,8 @@ export function SaveStatusChip({
   currentText: TextSnapshot;
   canRestore: boolean;
   onJumpToError: () => void;
+  /** The popover opened: the operator is looking — publish what the quiet check found (M-02). */
+  onOpenDetails?: () => void;
   onSaveNow: () => void;
   onOpenConflict: () => void;
   onRestore: (entry: HistoryEntry) => void;
@@ -158,6 +163,9 @@ export function SaveStatusChip({
       <GenericPopover
         title='saving'
         className='w-[300px]'
+        onOpenChange={(open) => {
+          if (open) onOpenDetails?.();
+        }}
         triggerProps={{
           className: `flex items-stretch ${action ? '-ml-px' : ''} ${FOCUS}`,
           'aria-label': action ? 'saving details and history' : `${label}, details and history`,

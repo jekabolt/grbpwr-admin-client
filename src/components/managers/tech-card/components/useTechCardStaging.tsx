@@ -77,8 +77,9 @@ export type CommitOutcome = {
   /** The one that refused, if any. Everything from here on stays staged. */
   failed?: { change: StagedChange; error: unknown };
   /**
-   * Committed, but the panel was edited again WHILE its commit was in flight, so the newer values
-   * are still staged and still unsaved. The caller has to say so: "saved everything" over an edit
+   * Still-unsaved work the run leaves in the queue: a panel edited again WHILE its commit was in
+   * flight (committed, newer values still staged), or one staged — anew or again — while the run went
+   * on (not committed by this run at all). The caller has to say so: "saved everything" over an edit
    * the operator made seconds ago is the lie this exists to prevent.
    */
   restaged?: StagedChange[];
@@ -220,6 +221,14 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
         // Панель БЕЗ снимка остаётся на прежнем правиле «любой stage = движение»: доказать обратное
         // о ней нечем, а пропущенная правка на лету — это молча потерянные нажатия, ради которых
         // счётчик и заводился.
+        //
+        // КОНТРАКТ СНИМКА (ревью Codex N-03). Повторный stage с ТЕМ ЖЕ снимком меняет только замыкание
+        // — и не двигает счётчик нарочно: это эхо перерисовки (свежий lock_version после чужого
+        // коммита), и счёт таких вызовов вернул бы бесконечное «changed while the save was running».
+        // Поэтому снимок обязан покрывать ВСЁ, что оператор может изменить из того, что читает
+        // `commit`; вне снимка остаются только серверные входы (номера версий), для которых новое
+        // замыкание — та же правка. Четыре панели со снимком (размерная таблица, лабдип, рецепт,
+        // семпл) этому контракту отвечают.
         const prevChange = changesRef.current.find((c) => c.key === change.key);
         const moved =
           !prevChange ||
@@ -258,6 +267,10 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
       unstage: (key) => {
         const prev = changesRef.current;
         if (!prev.some((c) => c.key === key)) return;
+        // Снятие — тоже движение ключа (ревью Codex B-05). commitAll сверяет счётчик через коммит, и
+        // unstage посреди него значит «панель больше не хочет того, что сейчас на проводе», а не
+        // «ничего не случилось» — такой коммит не гасится `settle()` поверх вернувшейся панели.
+        stageGen.current.set(key, (stageGen.current.get(key) ?? 0) + 1);
         publish(prev.filter((c) => c.key !== key));
         // A panel returned to pristine is a change of what the next save carries too — the status
         // chip should stop saying «unsaved» without waiting for an unrelated edit.
@@ -275,7 +288,12 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
           // Inputs are not disabled while a save runs, and a commit is often two sequential RPCs —
           // so a keystroke landing after Save was pressed re-stages the key, and writing the
           // snapshotted closure would put the state from one keystroke ago on the server.
-          const change = changesRef.current.find((c) => c.key === queued.key) ?? queued;
+          //
+          // And NO closure when the key has left the queue since the run began (Codex B-05): the
+          // panel was put back to pristine while an earlier panel was committing, and the snapshotted
+          // closure would write exactly the values the operator had just taken back.
+          const change = changesRef.current.find((c) => c.key === queued.key);
+          if (!change) continue;
           // Read AFTER picking the change, so an edit that landed while an EARLIER commit was in
           // flight (already folded into `change` above) does not read as a mid-flight edit here.
           const genBefore = stageGen.current.get(change.key);
@@ -288,11 +306,13 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
           }
           committed.push(change);
           if (stageGen.current.get(change.key) !== genBefore) {
-            // Re-staged WHILE this was committing: what just went over the wire is already out of
-            // date. Leave the newer change queued and DON'T settle — settling would return the
-            // panel to pristine (dropping the newer edit from the queue on its next render) and the
-            // header would report work as saved that never left the browser.
-            restaged.push(change);
+            // Moved WHILE this was committing, and never settled: settling would return the panel to
+            // pristine over whatever it holds now. Re-staged → the newer change stays queued and the
+            // header must not call the work saved. Unstaged → the panel took its edit back while it
+            // was on the wire; a request already sent cannot be recalled, so the panel's own state
+            // stands from here (it reloads, or re-stages against the server's new copy, as after any
+            // commit) and nothing is left queued to count as unsaved.
+            if (changesRef.current.some((c) => c.key === change.key)) restaged.push(change);
             continue;
           }
           change.settle?.();
@@ -300,7 +320,11 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
           // would only schedule a cycle that finds nothing to write.
           publish(changesRef.current.filter((c) => c.key !== change.key));
         }
-        return { committed, restaged };
+        // Whatever is queued NOW is unsaved work (Codex B-05): a key re-staged after its own commit
+        // settled, or a panel staged for the first time while the run went on. The caller must not
+        // hear «complete» over it.
+        const leftover = changesRef.current.filter((c) => !restaged.some((r) => r.key === c.key));
+        return { committed, restaged: [...restaged, ...leftover] };
       },
 
       takeSnapshot: (key) => {

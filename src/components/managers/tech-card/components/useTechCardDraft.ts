@@ -142,11 +142,20 @@ export function useTechCardDraft(
     serialize: () => PersistedStaging;
     hydrate: (persisted: PersistedStaging | null) => void;
   },
+  // Moves whenever what the staged queue would commit moves (useTechCardStaging's revision). The
+  // boolean above flips once — on the first staged edit — so a SECOND edit of an already-staged panel
+  // used to leave the draft holding the first one (волна 25.09, Codex B-04).
+  stagedRevision = 0,
 ) {
   sweepLegacyDrafts();
   const storageKey = PREFIX + key;
   const [pending, setPending] = useState<StoredDraft | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // «A write is due» — its values are read when it runs, not when it was scheduled. The writer lives
+  // in the effect below (it closes over this render's key and staging); `scheduleRef` is how the
+  // second trigger (the staged queue) reaches it, `due` is how clear() cancels it.
+  const due = useRef(false);
+  const scheduleRef = useRef<() => void>(() => {});
 
   // On open (or when the key changes): surface an existing draft for restore.
   useEffect(() => {
@@ -202,8 +211,19 @@ export function useTechCardDraft(
   //
   // Хелпер общий для ОБОИХ писателей (правки формы и правки сабпанелей) намеренно: вычеркнуть
   // флаг в одном из них — значит не вычеркнуть его вовсе.
+  //
+  // И ТАК ЖЕ ВЫЧЁРКИВАЮТСЯ ДВЕ ВЕХИ — `approvalState` и `stage` (волна 25.09). Каждую двигает своя
+  // дверь (релиз / re-open, авто-стейдж), и черновик не должен уметь сдвинуть их обратно: правки,
+  // набранные, пока карточку релизили, лежат в черновике рядом с RELEASED — восстановленные после
+  // re-open, они отправили бы карточку в релиз мимо гейта. Ключа нет — restore берёт его с карточки.
   const draftPayload = (values: TechCardFormData, st: typeof staging) => {
-    const { assemblyCleared: _spent, mediaCleared: _spentMedia, ...data } = values;
+    const {
+      assemblyCleared: _spent,
+      mediaCleared: _spentMedia,
+      approvalState: _approvalDoor,
+      stage: _stageDoor,
+      ...data
+    } = values;
     return JSON.stringify({
       savedAt: Date.now(),
       data,
@@ -214,52 +234,74 @@ export function useTechCardDraft(
 
   // Persist on change (debounced), but only once the user has actually edited (isDirty) — merely
   // opening a card and clicking around must not write a redundant draft.
+  //
+  // THE UNLOAD GUARANTEE (волна 25.09, Codex B-04). The autosave's flush on the way out is best
+  // effort — the page may not live to hear the server — so this copy is the one that has to exist:
+  //   · dirtiness is read LIVE (`control._formState`), not from the render snapshot: inside
+  //     form.watch the snapshot still says «clean» on the very first edit of a card, and that edit
+  //     used to schedule nothing at all;
+  //   · a write that is due is written SYNCHRONOUSLY on pagehide, on the tab going hidden and on
+  //     cleanup (leaving the route, the card freezing) — the 800 ms timer used to be cancelled there,
+  //     taking the last edits with it;
+  //   · clear() cancels a due write, so a save that made the card quiet cannot be followed by a stale
+  //     copy of what it just saved.
   useEffect(() => {
     if (!enabled) return;
-    const sub = form.watch(() => {
-      if (!form.formState.isDirty) return;
+    const writeNow = () => {
       if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => {
-        try {
-          // assemblyCleared В ЧЕРНОВИК НЕ ПОПАДАЕТ НИКОГДА (см. draftPayload). Это намерение ОДНОГО сохранения, а
-          // черновик — «незаписанные правки на потом»: восстановить намерение, которое, возможно,
-          // уже исполнено, значит открыть дыру мимо серверного бекстопа. Худший сценарий именно
-          // такой: снял разметку, сохранил, другая вкладка разметила заново — восстановленный
-          // черновик со взведённым флагом попадает в РАЗРЕШЁННУЮ серверную клетку и молча стирает
-          // чужую свежую разметку.
-          //
-          // Цена отказа мала и громкая: черновик, где кнопку нажали, но не сохранили, вернётся с
-          // распакованными входами и без флага — сервер откажет бекстопом с внятной подсказкой
-          // «нажмите снять разметку», и пользователь нажмёт её снова.
-          localStorage.setItem(storageKey, draftPayload(form.getValues(), staging));
-        } catch {
-          /* quota / serialization — best-effort, ignore */
-        }
-      }, DEBOUNCE_MS);
+      timer.current = undefined;
+      if (!due.current) return;
+      due.current = false;
+      try {
+        // assemblyCleared В ЧЕРНОВИК НЕ ПОПАДАЕТ НИКОГДА (см. draftPayload). Это намерение ОДНОГО
+        // сохранения, а черновик — «незаписанные правки на потом»: восстановить намерение, которое,
+        // возможно, уже исполнено, значит открыть дыру мимо серверного бекстопа. Худший сценарий
+        // именно такой: снял разметку, сохранил, другая вкладка разметила заново — восстановленный
+        // черновик со взведённым флагом попадает в РАЗРЕШЁННУЮ серверную клетку и молча стирает
+        // чужую свежую разметку.
+        //
+        // Цена отказа мала и громкая: черновик, где кнопку нажали, но не сохранили, вернётся с
+        // распакованными входами и без флага — сервер откажет бекстопом с внятной подсказкой
+        // «нажмите снять разметку», и пользователь нажмёт её снова.
+        localStorage.setItem(storageKey, draftPayload(form.getValues(), staging));
+      } catch {
+        /* quota / serialization — best-effort, ignore */
+      }
+    };
+    const schedule = () => {
+      due.current = true;
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(writeNow, DEBOUNCE_MS);
+    };
+    scheduleRef.current = schedule;
+    const sub = form.watch(() => {
+      if (!form.control._formState.isDirty) return;
+      schedule();
     });
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') writeNow();
+    };
+    window.addEventListener('pagehide', writeNow);
+    document.addEventListener('visibilitychange', onHidden);
     return () => {
       sub.unsubscribe();
-      if (timer.current) clearTimeout(timer.current);
+      window.removeEventListener('pagehide', writeNow);
+      document.removeEventListener('visibilitychange', onHidden);
+      // Written, not dropped: this cleanup is the route change, the card freezing, the key moving on.
+      writeNow();
+      scheduleRef.current = () => {};
     };
   }, [storageKey, enabled, form, staging]);
 
   // The form's watch never fires for a sub-panel edit (they live outside RHF), so a card whose ONLY
   // unsaved work is staged would autosave nothing and the restore banner would lie about its count.
+  // Keyed on the queue's revision as well, so every staged edit is written — not only the first.
+  // ТОТ ЖЕ писатель, что у правок формы: вычеркнуть потраченный флаг в одном из двух писателей
+  // значит не вычеркнуть его вовсе (см. draftPayload).
   useEffect(() => {
     if (!enabled || !hasStagedChanges) return;
-    const t = setTimeout(() => {
-      try {
-        // ТОТ ЖЕ хелпер, что у соседнего писателя. Писателей черновика ДВА (правки формы и
-        // правки сабпанелей), и вычеркнуть потраченный флаг в одном из них значит не вычеркнуть
-        // его вовсе: достаточно снять разметку, тронуть сабпанель — и в localStorage ляжет
-        // снимок со взведённым намерением.
-        localStorage.setItem(storageKey, draftPayload(form.getValues(), staging));
-      } catch {
-        /* quota / serialization — best-effort, ignore */
-      }
-    }, DEBOUNCE_MS);
-    return () => clearTimeout(t);
-  }, [storageKey, enabled, hasStagedChanges, form, staging]);
+    scheduleRef.current();
+  }, [enabled, hasStagedChanges, stagedRevision]);
 
   // Warn before a hard unload (refresh / tab close) with unsaved edits. In-app route changes are
   // covered by the restore banner instead (the draft survives the navigation).
@@ -275,6 +317,10 @@ export function useTechCardDraft(
   }, [enabled, isDirty]);
 
   const clear = () => {
+    // A due write would put back a copy of what the quiet save just wrote (see the effect above).
+    due.current = false;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = undefined;
     try {
       localStorage.removeItem(storageKey);
     } catch {
@@ -502,6 +548,10 @@ export function useTechCardDraft(
     // ещё актуально, его объявляют кнопкой заново.
     (data as Record<string, unknown>).assemblyCleared = false;
     (data as Record<string, unknown>).mediaCleared = false;
+    // ВЕХИ — ТОЖЕ ВСЕГДА С КАРТОЧКИ (см. draftPayload). Черновик прежней сборки ещё несёт оба ключа,
+    // и правило «нет ключа — возьми с карточки» до него не достаёт: ключ там ЕСТЬ.
+    (data as Record<string, unknown>).approvalState = loaded.approvalState;
+    (data as Record<string, unknown>).stage = loaded.stage;
 
     form.reset(data, { keepDefaultValues: true });
     // Seed the sub-panel snapshots BEFORE clearing `pending`. hydrate() also bumps the staging

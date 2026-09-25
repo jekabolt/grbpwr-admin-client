@@ -14,17 +14,26 @@ import type { TechCardFormData } from './schema';
  * Правила, ради которых файл написан:
  *   · дебаунс 2 с от ПОСЛЕДНЕЙ правки (формы — `form.watch`; панели — ревизия очереди стейджинга,
  *     B-03: длина очереди не видит правку уже застейдженной панели);
- *   · перед записью `form.trigger()`; невалидная форма НЕ пишется — статус `invalid` с числом ошибок;
+ *   · перед тихой записью — ТИХАЯ проверка (ревью M-02): значения разбираются схемой, полям не
+ *     публикуется ни одна ошибка; невалидная форма НЕ пишется — статус `invalid` с числом ошибок.
+ *     Красным поля становятся только по явному жесту: ⌘S, щелчок по чипу, раскрытие его поповера;
  *   · один вызов в полёте; правки во время записи — ещё один цикл после неё, без второго параллельного;
- *   · `flush()` — немедленно и с ответом; платные двери стартуют только при `ok`/`nothing` (B-05);
+ *   · «saved» — только над ТИХОЙ карточкой (ревью B-03): запись легла, а правка, набранная пока она
+ *     летела, всё ещё только в браузере, — это ход вперёд (`progress`), а не конец. История и уборка
+ *     черновика висят на том проходе, после которого работы не осталось;
+ *   · `flush()` — немедленно и с ответом, и отвечает он только над тихой карточкой: проходит цикл за
+ *     циклом, пока за проход не пришло ни одной правки и писать больше нечего. Платные двери
+ *     стартуют только при `ok`/`nothing` (B-05);
  *   · ошибка → повторы через 5 / 15 / 45 с, потом `not saved · retry`;
- *   · 409 → статус `conflict`, автосейв стоит, пока человек не решит в модалке (B-02: сам автосейв
- *     НИКОГДА не выбирает «keep mine»);
- *   · `saved` и запись истории — ТОЛЬКО при исходе `complete` (B-03: `restaged`/`partial` — не сохранено).
+ *   · 409 → статус `conflict`, и автосейв стоит ЦЕЛИКОМ, явные записи тоже (ревью M-01: ⌘S под
+ *     модалкой отправил бы ту же протухшую версию). Выходов два, и оба в модалке: «reload theirs»
+ *     уходит со страницы, «keep mine» читает текущую версию и снимает паузу `resolveConflict()`.
+ *     Сам автосейв НИКОГДА не выбирает «keep mine» (B-02).
  *
  * Машина ниже не импортирует React и не трогает window: таймеры, часы и все чтения приходят
  * зависимостями. Это не ради красоты — проба (`scripts/techcard-autosave-probe.mjs`) гоняет её в node
- * с поддельными часами и доказывает «сработал ровно через 2 с» и «не пишет невалидное» без браузера.
+ * с поддельными часами и отложенными записями и доказывает «сработал ровно через 2 с», «не пишет
+ * невалидное» и «flush не отвечает, пока карточка не затихла» без браузера.
  */
 
 export const AUTOSAVE_DEBOUNCE_MS = 2000;
@@ -36,6 +45,12 @@ export const AUTOSAVE_RETRY_MS: readonly number[] = [5000, 15000, 45000];
  * одну и ту же запись на сервер каждые две секунды.
  */
 const RESTAGED_CAP = 4;
+/**
+ * Сколько проходов `flush` делает, прежде чем ответить «не вышло». Обычный flush — один проход и
+ * один пустой контрольный; оператор, который печатает не переставая, пока платная дверь ждёт,
+ * получает отказ двери, а не бесконечное «saving…».
+ */
+const FLUSH_MAX_PASSES = 5;
 
 export type SaveMode = 'silent' | 'explicit';
 
@@ -64,6 +79,8 @@ export type SaveResult = {
   message?: string;
   /** `complete`, но смена purpose по-прежнему ждёт подтверждения (остальное записано). */
   pendingConfirm?: boolean;
+  /** `invalid`: сколько полей держат запись, когда конвейер сосчитал их сам (тихий разбор). */
+  errorsCount?: number;
 };
 
 export type MachineState = {
@@ -86,25 +103,32 @@ export type MachineDeps = {
   isPaused: () => boolean;
   /** Грязно ли тело формы или есть ли что-то в очереди панелей — читается «сейчас», не из рендера. */
   hasWork: () => boolean;
-  /** Тихая проверка: выставляет ошибки полям, НЕ уводит фокус и не переключает вкладку. */
+  /** ТИХАЯ проверка (M-02): разбирает значения и считает ошибки, полям НЕ публикует ничего. */
   validate: () => Promise<{ ok: boolean; errors: number }>;
   save: (mode: SaveMode, reason: string) => Promise<SaveResult>;
   countErrors: () => number;
   onState: (state: MachineState) => void;
-  /** Только на `complete`: сюда вешается запись истории. */
+  /** Только на ТИХОМ `complete` (B-03): сюда вешаются запись истории и уборка черновика. */
   onComplete?: (reason: string) => void;
 };
 
-/** Внутренний исход цикла: `restaged` наружу не выходит, flush его разворачивает. */
-type CycleResult = FlushResult | 'restaged';
+/**
+ * Внутренний исход цикла. Наружу, из `flush`, выходят только `FlushResult`: `restaged` (панель
+ * сдвинулась на лету) и `progress` (запись легла, но за время полёта набралась новая работа) flush
+ * разворачивает сам — ещё одним проходом.
+ */
+type CycleResult = FlushResult | 'restaged' | 'progress';
 
 export type AutosaveMachine = {
   state: () => MachineState;
   /** Что-то изменилось (правка формы, движение очереди, просьба органа): взвести дебаунс. */
   notifyChange: () => void;
-  /** Сохранить сейчас и сказать, вышло ли. `explicit` — ⌘S / «save now»: там валидирует сам конвейер
-   *  (с прыжком к полю), и только там работает диалог перевода purpose. */
+  /** Сохранить сейчас и сказать, вышло ли, — над тихой карточкой. `explicit` — ⌘S / «save now»:
+   *  первый проход валидирует сам конвейер (с прыжком к полю), и только там работает диалог перевода
+   *  purpose; добирающие проходы тихие. */
   flush: (reason: string, mode?: SaveMode) => Promise<FlushResult>;
+  /** «keep mine» модалки конфликта: снять паузу, чтобы следующая явная запись могла пойти. */
+  resolveConflict: () => void;
   /** Включение/выключение (режим создания, frozen, права). */
   setEnabled: (enabled: boolean) => void;
   dispose: () => void;
@@ -131,12 +155,16 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
   let running: Promise<CycleResult> | null = null;
   let queued: { promise: Promise<CycleResult>; mode: SaveMode; reason: string } | null = null;
   let disposed = false;
+  // B-03: every change the machine has heard of, counted. A flush compares it across a pass: a
+  // change heard while the pass ran means the pass wrote an older card than the one on screen.
+  let changeGen = 0;
 
   const set = (patch: Partial<MachineState>) => {
     const next = { ...state, ...patch };
     if (sameState(next, state)) return;
     state = next;
-    deps.onState(state);
+    // N-01: after dispose (the page unmounted) the last flush may still finish; it gets no render.
+    if (!disposed) deps.onState(state);
   };
   const restingStatus = (): AutosaveStatus => (state.lastSavedAt ? 'saved' : 'idle');
 
@@ -146,10 +174,27 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
   };
   const arm = (ms: number, reason: string) => {
     clearTimer();
+    // N-01: no retry or debounce outlives the page.
+    if (disposed) return;
     timer = deps.setTimer(() => {
       timer = null;
       void enqueue('silent', reason);
     }, ms);
+  };
+  // N-02: nothing left to write — whatever the status said about the work (dirty, invalid, a purpose
+  // waiting for its dialog, a failed save with retries pending) is moot now. A conflict stays: it is
+  // a fact about the SERVER, and only the modal ends it.
+  const restIfNoWork = () => {
+    if (state.status === 'conflict') return;
+    clearTimer();
+    retryIndex = 0;
+    restagedStreak = 0;
+    set({
+      status: restingStatus(),
+      errorsCount: undefined,
+      message: undefined,
+      retrying: undefined,
+    });
   };
 
   async function runCycle(mode: SaveMode, reason: string): Promise<CycleResult> {
@@ -160,16 +205,10 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
     }
     // Диалог перевода в auxiliary открыт: запись, которую он перехватил, он же и повторит.
     if (deps.isPaused()) return 'needs-confirm';
-    // 409 держит автосейв, пока человек не выбрал в модалке. Явное сохранение (⌘S, «keep mine»)
-    // проходит: это и есть выбор.
-    if (mode === 'silent' && state.status === 'conflict') return 'conflict';
+    // M-01: 409 держит ВСЕ записи, явные тоже. Выходы — только двери модалки (см. шапку файла).
+    if (state.status === 'conflict') return 'conflict';
     if (!deps.hasWork()) {
-      set({
-        status: state.status === 'conflict' ? 'conflict' : restingStatus(),
-        errorsCount: undefined,
-        message: undefined,
-        retrying: undefined,
-      });
+      restIfNoWork();
       return 'nothing';
     }
     if (mode === 'silent') {
@@ -189,26 +228,45 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
     return settle(r, reason);
   }
 
+  /** A pass that moved the card forward but left work behind: say so, and make sure a cycle follows. */
+  function progress(at: number | undefined): CycleResult {
+    set({
+      status: 'dirty',
+      ...(at !== undefined ? { lastSavedAt: at } : {}),
+      errorsCount: undefined,
+      message: undefined,
+      retrying: undefined,
+    });
+    if (timer == null) arm(deps.debounceMs, 'debounce');
+    return 'progress';
+  }
+
   function settle(r: SaveResult, reason: string): CycleResult {
     switch (r.outcome) {
       case 'complete': {
         retryIndex = 0;
         restagedStreak = 0;
         const at = deps.now();
-        deps.onComplete?.(reason);
         if (r.pendingConfirm) {
           set({
             status: 'needs-confirm',
             lastSavedAt: at,
             errorsCount: undefined,
             message: r.message,
+            retrying: undefined,
           });
           return 'needs-confirm';
         }
-        // Правка, набранная, пока запись летела, остаётся несохранённой — «saved» над ней было бы
-        // ложью. Дебаунс для неё уже взведён тем же `notifyChange`, что её заметил.
+        // B-03: правка, набранная, пока запись летела, или панель, застейдженная за это время, — ещё
+        // только в браузере. «saved» над ней было бы ложью, история записала бы не то, что на
+        // сервере, а черновик — единственная копия этой правки — был бы стёрт.
+        if (deps.hasWork()) return progress(at);
+        // Тихо: всё, что есть на экране, лежит на сервере. Эхо самой записи (её сброс базы будит
+        // form.watch) успело взвести дебаунс — он пустой, и его снимаем.
+        clearTimer();
+        deps.onComplete?.(reason);
         set({
-          status: deps.hasWork() ? 'dirty' : 'saved',
+          status: 'saved',
           lastSavedAt: at,
           errorsCount: undefined,
           message: undefined,
@@ -217,12 +275,10 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
         return 'ok';
       }
       case 'nothing':
-        set({
-          status: restingStatus(),
-          errorsCount: undefined,
-          message: undefined,
-          retrying: undefined,
-        });
+        // A pass that wrote nothing can still end over work: the quiet re-read after the auto-stage's
+        // 409 keeps what the operator typed during the read (B-07).
+        if (deps.hasWork()) return progress(undefined);
+        restIfNoWork();
         return 'nothing';
       case 'needs-confirm':
         set({ status: 'needs-confirm', message: r.message, errorsCount: undefined });
@@ -247,7 +303,7 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
         restagedStreak = 0;
         set({
           status: 'invalid',
-          errorsCount: deps.countErrors() || undefined,
+          errorsCount: r.errorsCount || deps.countErrors() || undefined,
           message: r.message,
           retrying: undefined,
         });
@@ -306,6 +362,7 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
 
     notifyChange: () => {
       if (disposed || !deps.isEnabled()) return;
+      changeGen += 1;
       if (state.status === 'conflict') return;
       if (running) {
         // Решим после цикла: правка во время записи — ещё один цикл, а не второй параллельный.
@@ -313,9 +370,9 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
         return;
       }
       if (!deps.hasWork()) {
-        // Правку откатили руками — сохранять нечего, и «unsaved» над чистой карточкой было бы ложью.
-        if (state.status === 'dirty') set({ status: restingStatus() });
-        if (state.status !== 'error') clearTimer();
+        // Правку откатили руками — сохранять нечего, и любое «unsaved» над чистой карточкой было бы
+        // ложью (N-02: не только `dirty` — `invalid` и `needs-confirm` тоже).
+        restIfNoWork();
         return;
       }
       retryIndex = 0;
@@ -327,12 +384,32 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
 
     flush: async (reason, mode = 'silent') => {
       if (disposed && reason !== 'unmount') return 'off';
-      clearTimer();
-      let r = await enqueue(mode, reason);
-      // `restaged` — сервер ещё не видел последних значений панели. Для платной двери это «нет»,
-      // поэтому flush доводит дело сам: ещё два цикла, и только потом отвечает ошибкой.
-      for (let i = 0; r === 'restaged' && i < 2; i++) r = await enqueue(mode, reason);
-      return r === 'restaged' ? 'error' : r;
+      let wrote = false;
+      let passMode = mode;
+      for (let pass = 0; pass < FLUSH_MAX_PASSES; pass++) {
+        clearTimer();
+        const gen = changeGen;
+        const r = await enqueue(passMode, reason);
+        if (r === 'ok' || r === 'progress' || r === 'restaged') wrote = true;
+        if (r !== 'ok' && r !== 'nothing' && r !== 'progress' && r !== 'restaged') return r;
+        // B-03: отвечать можно только над ТИХОЙ карточкой — за проход не пришло ни одной правки, и
+        // писать больше нечего. Иначе платная дверь стартует по карточке, которой нет на сервере.
+        const quiet = gen === changeGen && !deps.hasWork();
+        if (quiet) return wrote ? 'ok' : 'nothing';
+        // Добирающие проходы несут то, что набрали, пока шёл предыдущий: тихо, с тихой проверкой.
+        passMode = 'silent';
+      }
+      // Карточка не затихла за FLUSH_MAX_PASSES проходов — оператор печатает, пока дверь ждёт.
+      return 'error';
+    },
+
+    resolveConflict: () => {
+      if (state.status !== 'conflict') return;
+      set({
+        status: deps.hasWork() ? 'dirty' : restingStatus(),
+        message: undefined,
+        retrying: undefined,
+      });
     },
 
     setEnabled: (enabled) => {
@@ -414,6 +491,8 @@ export function isSaveShortcut(
 export type AutosaveController = AutosaveApi & {
   /** Явное сохранение: ⌘S, «save now», «retry», «keep mine». */
   saveNow: (reason: string) => Promise<FlushResult>;
+  /** «keep mine» модалки конфликта — единственный, кроме ухода со страницы, выход из паузы (M-01). */
+  resolveConflict: () => void;
   /** При `error`: идут ли ещё автоматические повторы. */
   retrying?: boolean;
 };
@@ -428,6 +507,12 @@ export type AutosaveController = AutosaveApi & {
  */
 export function useTechCardAutosaveController(opts: {
   enabled: boolean;
+  /**
+   * Выключить СЕЙЧАС, не дожидаясь рендера, в котором `enabled` станет false: одобренный релиз
+   * замораживает карточку в ту же миллисекунду, когда лёг PUT, а добирающий проход flush стартует
+   * раньше, чем React успеет перерисовать страницу (B-08).
+   */
+  halted?: () => boolean;
   /** Диалог перевода в auxiliary открыт или переводит: запись ведёт он. */
   paused: boolean;
   form: UseFormReturn<TechCardFormData>;
@@ -436,7 +521,10 @@ export function useTechCardAutosaveController(opts: {
   /** «Есть ли что-то в очереди прямо сейчас» — из ref, а не из рендера. */
   hasStaged: () => boolean;
   save: (mode: SaveMode, reason: string) => Promise<SaveResult>;
+  /** Тихая проверка (M-02): разбор схемой, ни одной ошибки на поля. */
+  validate: () => Promise<{ ok: boolean; errors: number }>;
   countErrors: () => number;
+  /** Только на тихом `complete` (B-03). */
   onComplete?: (reason: string) => void;
   debounceMs?: number;
   retryDelaysMs?: readonly number[];
@@ -455,13 +543,12 @@ export function useTechCardAutosaveController(opts: {
       setTimer: (fn, ms) => window.setTimeout(fn, ms),
       clearTimer: (h) => window.clearTimeout(h as number),
       now: () => Date.now(),
-      isEnabled: () => optsRef.current.enabled,
+      isEnabled: () => optsRef.current.enabled && !(optsRef.current.halted?.() ?? false),
       isPaused: () => optsRef.current.paused,
       hasWork: () => liveIsDirty(optsRef.current.form) || optsRef.current.hasStaged(),
-      validate: async () => {
-        const ok = await optsRef.current.form.trigger();
-        return { ok, errors: optsRef.current.countErrors() };
-      },
+      // NOT `form.trigger()`: that publishes an error onto every field, so a two-second pause turned
+      // an empty row the operator had just added — and every hidden tab — red (Codex M-02).
+      validate: () => optsRef.current.validate(),
       save: (mode, reason) => optsRef.current.save(mode, reason),
       countErrors: () => optsRef.current.countErrors(),
       onState: setState,
@@ -536,6 +623,7 @@ export function useTechCardAutosaveController(opts: {
       flush: (reason) => machineRef.current?.flush(reason) ?? Promise.resolve('off' as const),
       saveNow: (reason) =>
         machineRef.current?.flush(reason, 'explicit') ?? Promise.resolve('off' as const),
+      resolveConflict: () => machineRef.current?.resolveConflict(),
     }),
     [state],
   );
