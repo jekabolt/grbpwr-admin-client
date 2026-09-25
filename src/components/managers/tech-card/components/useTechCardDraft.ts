@@ -99,7 +99,9 @@ function shapeFingerprint(): string {
   return (h >>> 0).toString(36);
 }
 
-const FORM_SHAPE = shapeFingerprint();
+// Экспортирован для истории сохранений (save-history.ts, волна 25.09): снимок, записанный формой
+// другого состава, так же не наш, как и черновик, — правило одно, отпечаток один.
+export const FORM_SHAPE = shapeFingerprint();
 
 /** Только для пробы: отпечаток и список путей, из которых он посчитан. */
 export const __draftShapeForTest = () => ({ shape: FORM_SHAPE, paths: schemaFieldPaths() });
