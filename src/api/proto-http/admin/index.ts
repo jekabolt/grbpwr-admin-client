@@ -105,6 +105,30 @@ export type LibraryFilePersonRole =
   | "LIBRARY_FILE_PERSON_ROLE_UNKNOWN"
   | "LIBRARY_FILE_PERSON_ROLE_UPLOADED"
   | "LIBRARY_FILE_PERSON_ROLE_OWNER";
+// EnhanceTextMode is what the rewrite should do. UNKNOWN is refused
+// (InvalidArgument) — there is no default mode.
+export type EnhanceTextMode =
+  | "ENHANCE_TEXT_MODE_UNKNOWN"
+  // Fix spelling and grammar, make it clearer and better organised; roughly the
+  // same length, every fact kept.
+  | "ENHANCE_TEXT_MODE_IMPROVE"
+  // Add concrete, plausible detail a garment technologist would want; every fact
+  // kept; at most twice the length.
+  | "ENHANCE_TEXT_MODE_EXPAND"
+  // Keep only what matters; at most half the length.
+  | "ENHANCE_TEXT_MODE_SHORTEN";
+// EnhanceTextField names WHICH field is being rewritten. It is an enum and not a
+// string on purpose (review M-07): the server maps it to its own fixed phrase in
+// the system prompt, so nothing the request carries can become an instruction.
+// UNKNOWN is refused (InvalidArgument).
+export type EnhanceTextField =
+  | "ENHANCE_TEXT_FIELD_UNKNOWN"
+  | "ENHANCE_TEXT_FIELD_DESCRIPTION"
+  | "ENHANCE_TEXT_FIELD_NOTE"
+  | "ENHANCE_TEXT_FIELD_WORDS"
+  | "ENHANCE_TEXT_FIELD_SILHOUETTE"
+  | "ENHANCE_TEXT_FIELD_FABRIC"
+  | "ENHANCE_TEXT_FIELD_OTHER";
 // StyleCostPriceSource is the Q4 price-ladder level a material line resolved to.
 export type StyleCostPriceSource =
   | "STYLE_COST_PRICE_SOURCE_UNKNOWN"
@@ -888,6 +912,12 @@ export type StylePatch = {
   // is a SKU fact like the code: it re-mints every unfrozen sibling colourway and is refused
   // outright when any sibling is SKU-frozen.
   seasonYear: number | undefined;
+  // Target age group — a style fact like target_gender (0366), masked under the "age_group" path
+  // (camelCase "ageGroup" matches too). UNKNOWN is refused when the mask names age_group. When the
+  // mask does not name it — an unmasked full replace included — UNKNOWN means "keep the stored
+  // value": that is the shape every caller predating this field sends, so an old client's full
+  // replace can neither reset a set age group nor invent one for an unset style.
+  ageGroup: common_AgeGroupEnum | undefined;
 };
 
 export type common_SeasonEnum =
@@ -901,6 +931,18 @@ export type common_GenderEnum =
   | "GENDER_ENUM_MALE"
   | "GENDER_ENUM_FEMALE"
   | "GENDER_ENUM_UNISEX";
+// AgeGroupEnum is the style's target age group — a style fact like target_gender (0366).
+// Stored on the tech_card row as a lowercase token (adult/teen/kids/toddler/baby) and written only
+// through UpdateStyle (StylePatch.age_group). UNKNOWN is the absence of a value on the wire: a read
+// emits it for a style whose age group is not set (NULL — every style predating 0366 until someone
+// picks one) or holds a token this build cannot map; a write naming age_group refuses it.
+export type common_AgeGroupEnum =
+  | "AGE_GROUP_ENUM_UNKNOWN"
+  | "AGE_GROUP_ENUM_ADULT"
+  | "AGE_GROUP_ENUM_TEEN"
+  | "AGE_GROUP_ENUM_KIDS"
+  | "AGE_GROUP_ENUM_TODDLER"
+  | "AGE_GROUP_ENUM_BABY";
 export type UpdateStyleRequest = {
   styleId: number | undefined;
   patch: StylePatch | undefined;
@@ -1008,6 +1050,9 @@ export type common_ColorwayMerchandising = {
   // still hold pre-ISO free text. OUTPUT-ONLY — care is written as the code string.
   careEntries: common_CareEntry[] | undefined;
   targetGender: common_GenderEnum | undefined;
+  // age_group is resolved from the style like target_gender above (0366; output-only — written
+  // through UpdateStyle's StylePatch.age_group, never through a colourway write).
+  ageGroup: common_AgeGroupEnum | undefined;
   season: common_SeasonEnum | undefined;
   collection: string | undefined;
   fit: string | undefined;
@@ -6183,6 +6228,27 @@ export type FormatLibraryNoteMarkdownResponse = {
   content: string | undefined;
 };
 
+export type EnhanceTextRequest = {
+  // The text to rewrite: 1..4000 runes, not blank.
+  text: string | undefined;
+  mode: EnhanceTextMode | undefined;
+  field: EnhanceTextField | undefined;
+  // Facts of the card the model may use (category path, fit, age group,
+  // silhouette, fabric…), assembled by the client; ≤ 2000 runes, may be empty.
+  // Sent to the model as DATA, never as instructions.
+  context: string | undefined;
+  // The destination field's own limit, so the answer always fits it. 0 = 4000;
+  // anything else is clamped to [200, 4000]. A longer answer is cut at the last
+  // sentence end (. ! ?) inside the limit, or at the limit when there is none.
+  maxRunes: number | undefined;
+};
+
+export type EnhanceTextResponse = {
+  // The rewritten text, trimmed, never empty, at most max_runes runes. Nothing is
+  // stored: applying it is the client's ordinary write of that field.
+  text: string | undefined;
+};
+
 export type UpdateTaskRequest = {
   id: number | undefined;
   task: common_TaskInsert | undefined;
@@ -9872,6 +9938,11 @@ export type common_TechCard = {
   fit: string | undefined;
   composition: string | undefined;
   careInstructions: string | undefined;
+  // age_group is a style catalogue fact like fit above (0366): stored on the tech_card row but
+  // WRITTEN via UpdateStyle (StylePatch.age_group), so it is a read-only projection here, surfaced
+  // for the constructor to display and edit-in-place. UNKNOWN = not set (NULL, the state of every
+  // style predating 0366 until someone picks one) or a stored token this build cannot map.
+  ageGroup: common_AgeGroupEnum | undefined;
   // care_entries is the STRUCTURED projection of care_instructions above, resolved against the
   // care_symbol dictionary and always in canonical print order. care_instructions keeps holding the
   // raw comma-joined codes; render entries when present and fall back to the string for rows that
@@ -10916,6 +10987,11 @@ export type common_TechCardListItem = {
   // нет (такие существуют намеренно). Колонки-ссылки collection_id у тех-карты не существует —
   // её дропнула 0240 как мёртвую схему, поэтому фильтровать можно ТОЛЬКО по этой строке.
   collection: string | undefined;
+  // Age group of the style (0366), mirroring TechCard.age_group. Together with target_gender (7) it
+  // is the row's audience, so a list/board can label and group by it without an N+1 GetTechCard.
+  // Read-only here — written only via UpdateStyle. UNKNOWN = not set (NULL column) or a stored token
+  // this build cannot map; never a stand-in for ADULT.
+  ageGroup: common_AgeGroupEnum | undefined;
 };
 
 // TechCardReadinessRequirement is ONE condition on a style's progress, evaluated server-side against
@@ -17396,6 +17472,22 @@ export interface AdminService {
   // Classified as a WRITE (files:write) although it stores nothing — precedent
   // GenerateTechCardOperations: AI-assisted authoring is authoring.
   FormatLibraryNoteMarkdown(request: FormatLibraryNoteMarkdownRequest): Promise<FormatLibraryNoteMarkdownResponse>;
+  // EnhanceText rewrites ONE free-text field of a tech card — improve (fix errors,
+  // clearer), expand (more detail) or shorten — for the small `ai ✦` button in the
+  // corner of the field (T15). Like FormatLibraryNoteMarkdown it is a SUGGESTION
+  // and persists NOTHING: the answer goes back as a string, the client puts it in
+  // the field with a short-lived undo, and the save is the field's ordinary write.
+  // What reaches the model is req.text plus req.context (card facts the client
+  // assembled), both as DATA in the user message. The field is a closed enum the
+  // server turns into its own phrase — no request string is ever placed in the
+  // system prompt. Capped (text ≤ 4000 runes, context ≤ 2000, answer ≤ max_runes,
+  // completion ≤ 1200 tokens) and fenced (4 in flight, 30 calls per admin per
+  // hour → ResourceExhausted).
+  // Classified as a WRITE on tech_cards although it stores nothing — precedent
+  // GenerateTechCardOperations / AnalyzeTechCardConstruction: a press spends the
+  // AI key, and a grant to spend is an authoring grant. The route sits under
+  // /api/admin/ai/, not /tech-card/, so it cannot be shadowed by /tech-card/{id}.
+  EnhanceText(request: EnhanceTextRequest): Promise<EnhanceTextResponse>;
   // GetFulfillmentBoard returns the three columns of cards (compact order +
   // annotation summary), oldest order first within each column.
   GetFulfillmentBoard(request: GetFulfillmentBoardRequest): Promise<GetFulfillmentBoardResponse>;
@@ -22189,6 +22281,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "FormatLibraryNoteMarkdown",
       }) as Promise<FormatLibraryNoteMarkdownResponse>;
+    },
+    EnhanceText(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/ai/enhance-text`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "EnhanceText",
+      }) as Promise<EnhanceTextResponse>;
     },
     GetFulfillmentBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/board`; // eslint-disable-line quotes

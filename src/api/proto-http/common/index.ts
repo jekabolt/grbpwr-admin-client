@@ -141,6 +141,18 @@ export type GenderEnum =
   | "GENDER_ENUM_MALE"
   | "GENDER_ENUM_FEMALE"
   | "GENDER_ENUM_UNISEX";
+// AgeGroupEnum is the style's target age group — a style fact like target_gender (0366).
+// Stored on the tech_card row as a lowercase token (adult/teen/kids/toddler/baby) and written only
+// through UpdateStyle (StylePatch.age_group). UNKNOWN is the absence of a value on the wire: a read
+// emits it for a style whose age group is not set (NULL — every style predating 0366 until someone
+// picks one) or holds a token this build cannot map; a write naming age_group refuses it.
+export type AgeGroupEnum =
+  | "AGE_GROUP_ENUM_UNKNOWN"
+  | "AGE_GROUP_ENUM_ADULT"
+  | "AGE_GROUP_ENUM_TEEN"
+  | "AGE_GROUP_ENUM_KIDS"
+  | "AGE_GROUP_ENUM_TODDLER"
+  | "AGE_GROUP_ENUM_BABY";
 export type SeasonEnum =
   | "SEASON_ENUM_UNKNOWN"
   | "SEASON_ENUM_SS"
@@ -308,6 +320,9 @@ export type ColorwayMerchandising = {
   // still hold pre-ISO free text. OUTPUT-ONLY — care is written as the code string.
   careEntries: CareEntry[] | undefined;
   targetGender: GenderEnum | undefined;
+  // age_group is resolved from the style like target_gender above (0366; output-only — written
+  // through UpdateStyle's StylePatch.age_group, never through a colourway write).
+  ageGroup: AgeGroupEnum | undefined;
   season: SeasonEnum | undefined;
   collection: string | undefined;
   fit: string | undefined;
@@ -3796,6 +3811,11 @@ export type TechCard = {
   fit: string | undefined;
   composition: string | undefined;
   careInstructions: string | undefined;
+  // age_group is a style catalogue fact like fit above (0366): stored on the tech_card row but
+  // WRITTEN via UpdateStyle (StylePatch.age_group), so it is a read-only projection here, surfaced
+  // for the constructor to display and edit-in-place. UNKNOWN = not set (NULL, the state of every
+  // style predating 0366 until someone picks one) or a stored token this build cannot map.
+  ageGroup: AgeGroupEnum | undefined;
   // care_entries is the STRUCTURED projection of care_instructions above, resolved against the
   // care_symbol dictionary and always in canonical print order. care_instructions keeps holding the
   // raw comma-joined codes; render entries when present and fall back to the string for rows that
@@ -4399,6 +4419,11 @@ export type TechCardListItem = {
   // нет (такие существуют намеренно). Колонки-ссылки collection_id у тех-карты не существует —
   // её дропнула 0240 как мёртвую схему, поэтому фильтровать можно ТОЛЬКО по этой строке.
   collection: string | undefined;
+  // Age group of the style (0366), mirroring TechCard.age_group. Together with target_gender (7) it
+  // is the row's audience, so a list/board can label and group by it without an N+1 GetTechCard.
+  // Read-only here — written only via UpdateStyle. UNKNOWN = not set (NULL column) or a stored token
+  // this build cannot map; never a stand-in for ADULT.
+  ageGroup: AgeGroupEnum | undefined;
 };
 
 // DesignRun is one row of the band's history: a generation job, its money, its inputs and its

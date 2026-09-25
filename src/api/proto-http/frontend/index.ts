@@ -230,6 +230,9 @@ export type common_ColorwayMerchandising = {
   // still hold pre-ISO free text. OUTPUT-ONLY — care is written as the code string.
   careEntries: common_CareEntry[] | undefined;
   targetGender: common_GenderEnum | undefined;
+  // age_group is resolved from the style like target_gender above (0366; output-only — written
+  // through UpdateStyle's StylePatch.age_group, never through a colourway write).
+  ageGroup: common_AgeGroupEnum | undefined;
   season: common_SeasonEnum | undefined;
   collection: string | undefined;
   fit: string | undefined;
@@ -316,6 +319,18 @@ export type common_GenderEnum =
   | "GENDER_ENUM_MALE"
   | "GENDER_ENUM_FEMALE"
   | "GENDER_ENUM_UNISEX";
+// AgeGroupEnum is the style's target age group — a style fact like target_gender (0366).
+// Stored on the tech_card row as a lowercase token (adult/teen/kids/toddler/baby) and written only
+// through UpdateStyle (StylePatch.age_group). UNKNOWN is the absence of a value on the wire: a read
+// emits it for a style whose age group is not set (NULL — every style predating 0366 until someone
+// picks one) or holds a token this build cannot map; a write naming age_group refuses it.
+export type common_AgeGroupEnum =
+  | "AGE_GROUP_ENUM_UNKNOWN"
+  | "AGE_GROUP_ENUM_ADULT"
+  | "AGE_GROUP_ENUM_TEEN"
+  | "AGE_GROUP_ENUM_KIDS"
+  | "AGE_GROUP_ENUM_TODDLER"
+  | "AGE_GROUP_ENUM_BABY";
 export type common_SeasonEnum =
   | "SEASON_ENUM_UNKNOWN"
   | "SEASON_ENUM_SS"
