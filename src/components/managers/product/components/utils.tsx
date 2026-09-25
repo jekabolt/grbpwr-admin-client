@@ -99,6 +99,10 @@ export function buildStylePatch(data: ProductFormData): StylePatch {
     seasonYear: 0,
     collection: b.collection,
     targetGender: b.targetGender as common_GenderEnum,
+    // Age group is authored on the tech card (CARD DETAILS), never here. `undefined` goes out as
+    // AGE_GROUP_ENUM_UNKNOWN, which UpdateStyle reads as "keep the stored value" whenever the
+    // field is not masked — the 0366 contract for callers predating the field (this one included).
+    ageGroup: undefined,
     fit: b.fit,
     composition: b.composition,
     careInstructions: b.careInstructions,
