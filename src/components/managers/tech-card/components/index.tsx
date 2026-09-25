@@ -27,10 +27,7 @@ import {
 } from 'components/managers/tech-cards/components/utils';
 import { MaterialModal } from 'components/managers/materials/components/material-modal';
 import { MaterialPicker } from 'components/managers/materials/components/material-picker';
-import {
-  techCardApprovalStateOptions,
-  techCardStageOptions,
-} from 'constants/filter';
+import { techCardStageOptions } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
 import {
   applyServerFieldErrors,
@@ -41,10 +38,10 @@ import {
 } from 'utils/field-errors';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useForm, useWatch, type FieldErrors } from 'react-hook-form';
+import { flushSync } from 'react-dom';
+import { useForm, useWatch, type FieldErrors, type UseFormReturn } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
-import { Chip, ChipRow } from 'ui/components/chip';
 import { Pill } from 'ui/components/pill';
 import { Section, SectionStack } from 'ui/components/section';
 import { SectionHeader } from 'ui/components/section-header';
@@ -57,7 +54,6 @@ import { TechCardImportBanner } from '../import/import-banner';
 import { ReleaseBlocker, ReleaseBlockersModal } from './release-blockers-modal';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
-import SelectField from 'ui/form/fields/select-field';
 import { BomField } from './bom-field';
 import { ColorwayRecipes } from './colorway-recipe';
 import { CompositionEntries } from './composition-entries';
@@ -70,8 +66,7 @@ import { AssemblyField } from './assembly-field';
 import { LabelsField } from './labels-field';
 import { MoneyPanel } from './money-panel';
 import { PackagingRecipeField } from './packaging-recipe-field';
-import { LifecycleStrip } from './lifecycle-strip';
-import { StyleProjects, StyleProjectsAction } from './style-projects';
+import { StyleProjects } from './style-projects';
 import { TechCardTasksPanel } from './tech-card-tasks-panel';
 import {
   activeVariantCount,
@@ -101,7 +96,6 @@ import {
   toPurposeEnum,
   wireInt,
 } from './schema';
-import { PrintOptionsModal } from 'components/managers/print/options-modal';
 import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import { ProductionTab } from './production-tab';
 import { SamplesTab } from './samples-tab';
@@ -121,8 +115,25 @@ import {
   VersionSkewBanner,
   type VersionSkew,
 } from './save-audit-banners';
-import { StagedChangesChip } from './staged-changes-chip';
 import { useTechCardStagingRequired } from './useTechCardStaging';
+import { AutosaveContext, type AutosaveApi } from './design/autosave-contract';
+import {
+  deepEqual,
+  liveIsDirty,
+  useTechCardAutosaveController,
+  type SaveMode,
+  type SaveOutcome,
+  type SaveResult,
+} from './useTechCardAutosave';
+import {
+  restoreTextSections,
+  textSnapshotOf,
+  TEXT_SECTION_LABEL,
+  useSaveHistory,
+  type HistoryEntry,
+} from './save-history';
+import { formatSavedAt, SaveStatusChip } from './save-status-chip';
+import { decideAutoStage, StageProgress, stageLabel, type FormErrorRow } from './stage-progress';
 
 // U-2 / C-5: the fit select and its `FIT_OPTIONS` import left this file with the classification FKs
 // — they render in GENERAL INFORMATION on CONSTRUCTION now (construction-general-info.tsx, which
@@ -292,12 +303,18 @@ const ERROR_TAB: Record<string, TabId> = {
 // Walked key by key when STUDIO/ARTIFACTS replaced moodboard/sketch: not one row here pointed at
 // either of them, so the map is unchanged. Recorded rather than left implicit — the next tab move
 // has to walk this map too, and «nothing to do» is only worth knowing if someone checked.
+//
+// Волна 25.09 (G2): `costing_computes` и `construction_graph` сюда не доходили и падали в фолбэк
+// `studio` — блокер «себестоимость не считается» вёл на доску настроения. Теперь каждый ведёт туда,
+// где его чинят.
 const RELEASE_BLOCKER_TAB: Record<string, TabId> = {
   style_number: 'studio',
   size_range: 'patterns',
   bom_fabric: 'bom',
   bom_linked: 'bom',
   costing: 'costing',
+  costing_computes: 'costing',
+  construction_graph: 'construction',
   colorway_linked: 'colorways',
   lab_dip: 'colorways',
   signoffs: 'signoff',
@@ -306,6 +323,82 @@ const RELEASE_BLOCKER_TAB: Record<string, TabId> = {
 const RELEASED = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 const DRAFT = 'TECH_CARD_APPROVAL_STATE_DRAFT';
 const SIGNOFF_APPROVED = 'TECH_CARD_SIGNOFF_STATE_APPROVED';
+
+/**
+ * АВТО-СТЕЙДЖ (D-14, волна 25.09). Одна константа, которой он выключается целиком: селекта стейджа
+ * больше нет, и `false` здесь оставляет стейдж там, где он сохранён, — до следующей волны.
+ */
+const AUTO_STAGE = true;
+/** D-14': каскад не длиннее пяти шагов за жизнь страницы (IDEA → PROD — ровно пять). */
+const AUTO_STAGE_MAX_STEPS = 5;
+
+/** What one write of the card did (see writeTechCard). */
+type WriteResult = { bodySaved: boolean; ok: boolean; outcome: SaveOutcome; message?: string };
+
+/**
+ * A deep copy of the form values, or null when the values cannot be cloned (then the caller skips
+ * whatever needed the copy — never a reason to fail a save). RHF writes nested values IN PLACE, so
+ * «what the form held at time T» needs a real copy, not `getValues()`'s shallow one.
+ */
+function cloneFormValues(v: TechCardFormData): TechCardFormData | null {
+  try {
+    return structuredClone(v);
+  } catch {
+    return null;
+  }
+}
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  !!v &&
+  typeof v === 'object' &&
+  !Array.isArray(v) &&
+  Object.getPrototypeOf(v) === Object.prototype;
+
+/**
+ * Write `next` into the form at `path` through the SMALLEST paths that differ from `cur`. A leaf
+ * write never re-keys a field array; only a change of an array's LENGTH is written at that array's
+ * root — the rows really changed, and the useFieldArray that owns them has to hear it.
+ */
+function writeFormDiff(
+  write: (path: string, value: unknown) => void,
+  path: string,
+  cur: unknown,
+  next: unknown,
+): void {
+  if (deepEqual(cur, next)) return;
+  if (Array.isArray(cur) && Array.isArray(next) && cur.length === next.length) {
+    next.forEach((n, i) => writeFormDiff(write, `${path}.${i}`, cur[i], n));
+    return;
+  }
+  if (isPlainObject(cur) && isPlainObject(next)) {
+    for (const k of new Set([...Object.keys(cur), ...Object.keys(next)])) {
+      writeFormDiff(write, `${path}.${k}`, cur[k], next[k]);
+    }
+    return;
+  }
+  write(path, next);
+}
+
+/**
+ * The page's two providers as ONE element: the form, and the one autosave the header chip and the
+ * studio's organs share (design/autosave-contract.ts). One element on purpose: nesting a second
+ * provider inline would re-indent the ~900 lines of the page body for no change in behaviour.
+ */
+function FormWithAutosave({
+  form,
+  autosave,
+  children,
+}: {
+  form: UseFormReturn<TechCardFormData>;
+  autosave: AutosaveApi;
+  children: React.ReactNode;
+}) {
+  return (
+    <Form {...form}>
+      <AutosaveContext.Provider value={autosave}>{children}</AutosaveContext.Provider>
+    </Form>
+  );
+}
 
 function PreSaveTile({ label }: { label: string }) {
   return (
@@ -532,7 +625,6 @@ export function TechCardForm({
   // the handler re-runs the save immediately after setting it.
   const lockOverride = useRef<number | null>(null);
   const [blockersOpen, setBlockersOpen] = useState(false);
-  const [printOptionsOpen, setPrintOptionsOpen] = useState(false);
   // Экспорт архива: держим только «идёт запрос», чтобы не выпустить второй по двойному клику.
   // Ссылку НЕ храним — она presigned и живёт 10 минут, а хранимая ссылка молча протухает в руках.
   const [exportingArchive, setExportingArchive] = useState(false);
@@ -581,7 +673,11 @@ export function TechCardForm({
   const isIdea = stage === 'TECH_CARD_STAGE_IDEA';
   // The server's readiness checklist. The lifecycle strip reads the SAME cached query for its stage
   // rows; this call is here for `releaseRequirements`, which is a second, independent list.
-  const { data: readiness } = useTechCardReadiness(isEditMode ? numId : undefined);
+  const {
+    data: readiness,
+    isPending: readinessPending,
+    isError: readinessError,
+  } = useTechCardReadiness(isEditMode ? numId : undefined);
   // The style's batches. Read here as well as inside the production tab so the rail's completion
   // glyph knows whether the tab has content — React Query serves both from ONE cached list, keyed by
   // the same arguments, so this is not a second request.
@@ -602,15 +698,16 @@ export function TechCardForm({
     id?: number;
     lineKey?: string;
   }>;
-  // ONE release-blocker list, rendered three ways (header chips, the blockers modal, the
-  // ReleasesField gate). Its spine is now the SERVER's release checklist — `releaseRequirements`
-  // from GetTechCardReadiness — which knows things this screen never could (costing currency, an
-  // unapproved lab dip, an empty size range) and phrases each failure as a fact.
+  // ONE release-blocker list, rendered three ways (the header's release organ, the blockers
+  // modal, the ReleasesField gate). Its spine is now the SERVER's release checklist —
+  // `releaseRequirements` from GetTechCardReadiness — which knows things this screen never could
+  // (costing currency, an unapproved lab dip, an empty size range) and phrases each failure as a
+  // fact.
   // Server rows are scored against SAVED data, so a fix made in the form counts once it is saved.
   // That is the right reading here: release freezes the saved spec as the factory-facing document.
   // Each blocker still carries the tab that fixes it, so every rendering navigates identically.
   const serverReleaseRows = (readiness?.releaseRequirements ?? []).filter(
-    // The one fact the readiness RPC cannot know (same filter, same reason as lifecycle-strip.tsx:
+    // The one fact the readiness RPC cannot know (same filter, same reason as stage-progress.tsx:
     // the facts query has no notion of `purpose`): an NF-07 auxiliary card produces a packaging
     // material and links no products BY DESIGN, so `colorway_linked` — and the `lab_dip` row that
     // only exists to score those colourways — would sit permanently unmet. Worse than merely wrong
@@ -865,6 +962,67 @@ export function TechCardForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusTarget]);
 
+  // ═══ АВТОСЕЙВ — ОБВЯЗКА СТРАНИЦЫ (волна 25.09 · T21 · D-16/D-16') ═════════════════════════════
+  // Only a SAVED card that this account may write and that is not frozen saves itself. A new card
+  // keeps its `add` button (the create IS the save), a released one its «re-open to draft».
+  const autosaveEnabled = isEditMode && !!numId && canWrite(SECTION.techCards) && !frozen;
+  // The version the next body write claims: the freshest read in the cache, which is what the
+  // `techCard` prop becomes one render later. An autosave cycle can start in the same tick the
+  // previous save's read landed — before that render — and the prop would still name the version
+  // this very page has just moved past (a 409 against ourselves).
+  const currentLockVersion = () =>
+    (numId
+      ? queryClient.getQueryData<common_TechCard>(techCardKeys.detail(numId))?.lockVersion
+      : undefined) ??
+    techCard?.lockVersion ??
+    0;
+  // Did the last body PUT land. Reset at the start of every write.
+  const lastBodySaved = useRef(false);
+  // G1: the approval door's own question — did a body write that CARRIED the requested approval
+  // land? Marked inside writeTechCard, so a concurrent autosave that did not carry it cannot answer.
+  const approvalAttempt = useRef<{ next: string; landed: boolean } | null>(null);
+  // A7 (Codex B-07): the id CreateTechCard answered with. State for the render that hands it to
+  // StyleFactsField; a ref for the retry path, which must finish THIS card rather than mint another.
+  const [createdId, setCreatedId] = useState<number | undefined>(undefined);
+  const createdIdRef = useRef<number | undefined>(undefined);
+  // Auto-stage bookkeeping (see the effect under the autosave controller).
+  const autoStageInFlight = useRef(false);
+  const autoStageSteps = useRef(0);
+  // M-01: the form exactly as the auto-stage left it after raising the stage. If nothing has moved
+  // since, a 409 on that write is the other tab's business and a quiet re-read is the whole answer.
+  const autoStageBaseline = useRef<TechCardFormData | null>(null);
+  const autoStageUntouched = () =>
+    !!autoStageBaseline.current &&
+    staging.peek().length === 0 &&
+    deepEqual(form.getValues(), autoStageBaseline.current);
+  async function quietReload() {
+    if (!numId) return;
+    lockOverride.current = null;
+    try {
+      const res = await adminService.GetTechCard({ id: numId, vatCountryCode: undefined });
+      if (res.techCard) {
+        queryClient.setQueryData(techCardKeys.detail(numId), res.techCard);
+        form.reset(mapTechCardToForm(res.techCard));
+      }
+    } catch {
+      // Best effort: the invalidation below still brings the card and its readiness back.
+    }
+    queryClient.invalidateQueries({ queryKey: techCardKeys.detail(numId) });
+  }
+
+  // HISTORY of saved TEXT (save-history.ts, D-17'). «as opened» is the text this page opened with —
+  // without it the first autosave of a session could not be undone at all.
+  const [openedText] = useState(() =>
+    techCard
+      ? {
+          values: textSnapshotOf(form.getValues()),
+          lockVersion: techCard.lockVersion ?? 0,
+          at: Date.parse(techCard.updatedAt ?? '') || Date.now(),
+        }
+      : null,
+  );
+  const history = useSaveHistory(isEditMode ? numId : undefined, openedText);
+
   // After a body save the server owns values this form cannot compute, and `data` — the payload
   // that just went over the wire — still carries the pre-save placeholder for each of them.
   // Resetting the form to it leaves the card lying about itself, and for ONE of those fields the lie
@@ -885,47 +1043,11 @@ export function TechCardForm({
   // прочитанным в координатах формы, ПРИСУТСТВИЕ против присутствия. `audit === null` означает
   // «чтения не было» (новая карточка, сбой рефетча) — сравнивать не с чем, и молчание здесь
   // честнее ложной тревоги.
-  async function withServerAssignedValues(
-    sent: TechCardFormData,
-  ): Promise<{ values: TechCardFormData; audit: PresenceAudit | null }> {
-    // Намерение «снял разметку» гасится НА ВСЕХ ветках возврата, включая ранние. PUT к этому
-    // моменту уже прошёл — намерение исполнено, и оставить флаг взведённым из-за транзиентного
-    // сбоя рефетча значило бы отправить следующее сохранение в отказ «cleared против карточки без
-    // разметки», из которого пользователю не выбраться иначе как перезагрузкой с потерей правок.
-    // ОБА намерения гасятся здесь. Забыть второе — значит отправить следующее сохранение в
-    // тупик: маппер увидит взведённый mediaCleared против карточки, у которой снимки уже есть,
-    // и пришлёт «снял» вместе с фотографиями — серверный гейт отвергнет это как противоречие, а
-    // жеста, снимающего флаг, в интерфейсе нет.
-    // Аудит по умолчанию — null: ранние ветки возврата не читали карточку, и сравнивать им не с
-    // чем. Ветка catch рефетча (:«Not fatal») тоже молчит НАМЕРЕННО: чтения не было, а «поле не
-    // вернулось» про непрочитанную карточку — ложная тревога, которая учит не читать баннер.
-    const done = (
-      v: TechCardFormData,
-      audit: PresenceAudit | null = null,
-    ): { values: TechCardFormData; audit: PresenceAudit | null } => ({
-      values: {
-        ...v,
-        assemblyCleared: false,
-        mediaCleared: false,
-      },
-      audit,
-    });
-    if (!numId) return done(sent);
-    let fresh: common_TechCard | undefined;
-    try {
-      const res = await adminService.GetTechCard({ id: numId, vatCountryCode: undefined });
-      fresh = res.techCard;
-    } catch {
-      // Not fatal — the save itself landed. Fall back to what was sent; useUpdateTechCard's own
-      // invalidation still refetches the card, and a reload re-seeds the form from the server.
-      return done(sent);
-    }
-    if (!fresh) return done(sent);
-    // Prime the cache with the read we already paid for, so the detail this reset is built from is
-    // the same one the NEXT save reads its expectedLockVersion from.
-    queryClient.setQueryData(techCardKeys.detail(numId), fresh);
-    const server = mapTechCardToForm(fresh);
-
+  // The three server-assigned lists, merged onto whatever form values are handed in. Split out of
+  // withServerAssignedValues (волна 25.09) because it now has TWO callers: the values that were sent,
+  // and the edits typed while that save was on the wire (see reapplyEditsMadeDuringSave) — a BOM row
+  // added by this very save must not go out again with id 0 just because the operator kept typing.
+  function assignServerLists(sent: TechCardFormData, server: TechCardFormData) {
     // Sign-off digests, by section. A section normally holds one row; a duplicate ("other entries")
     // takes the NEXT server row for that section rather than a copy of the first.
     const serverDigests = new Map<string, string[]>();
@@ -960,6 +1082,55 @@ export function TechCardForm({
       const id = serverBomIds.get(b.lineKey ?? '');
       return id === undefined ? b : { ...b, id };
     });
+    return { signoffs, patterns, bomItems };
+  }
+
+  async function withServerAssignedValues(sent: TechCardFormData): Promise<{
+    values: TechCardFormData;
+    audit: PresenceAudit | null;
+    /** The server's card in form coordinates — null when there was no read to take it from. */
+    server: TechCardFormData | null;
+  }> {
+    // Намерение «снял разметку» гасится НА ВСЕХ ветках возврата, включая ранние. PUT к этому
+    // моменту уже прошёл — намерение исполнено, и оставить флаг взведённым из-за транзиентного
+    // сбоя рефетча значило бы отправить следующее сохранение в отказ «cleared против карточки без
+    // разметки», из которого пользователю не выбраться иначе как перезагрузкой с потерей правок.
+    // ОБА намерения гасятся здесь. Забыть второе — значит отправить следующее сохранение в
+    // тупик: маппер увидит взведённый mediaCleared против карточки, у которой снимки уже есть,
+    // и пришлёт «снял» вместе с фотографиями — серверный гейт отвергнет это как противоречие, а
+    // жеста, снимающего флаг, в интерфейсе нет.
+    // Аудит по умолчанию — null: ранние ветки возврата не читали карточку, и сравнивать им не с
+    // чем. Ветка catch рефетча (:«Not fatal») тоже молчит НАМЕРЕННО: чтения не было, а «поле не
+    // вернулось» про непрочитанную карточку — ложная тревога, которая учит не читать баннер.
+    const done = (
+      v: TechCardFormData,
+      audit: PresenceAudit | null = null,
+      server: TechCardFormData | null = null,
+    ) => ({
+      values: {
+        ...v,
+        assemblyCleared: false,
+        mediaCleared: false,
+      },
+      audit,
+      server,
+    });
+    if (!numId) return done(sent);
+    let fresh: common_TechCard | undefined;
+    try {
+      const res = await adminService.GetTechCard({ id: numId, vatCountryCode: undefined });
+      fresh = res.techCard;
+    } catch {
+      // Not fatal — the save itself landed. Fall back to what was sent; useUpdateTechCard's own
+      // invalidation still refetches the card, and a reload re-seeds the form from the server.
+      return done(sent);
+    }
+    if (!fresh) return done(sent);
+    // Prime the cache with the read we already paid for, so the detail this reset is built from is
+    // the same one the NEXT save reads its expectedLockVersion from.
+    queryClient.setQueryData(techCardKeys.detail(numId), fresh);
+    const server = mapTechCardToForm(fresh);
+    const { signoffs, patterns, bomItems } = assignServerLists(sent, server);
 
     // CONSTRUCTION IS TAKEN WHOLE FROM THE SERVER, not merged field by field, and it is the one
     // section where that is the honest answer. Its equipment park (0306) is a keyed list the write
@@ -986,9 +1157,11 @@ export function TechCardForm({
     return done(
       { ...sent, signoffs, patterns, bomItems, construction: server.construction },
       audit,
+      server,
     );
   }
 
+  // ═══ ОДНА ЗАПИСЬ КАРТОЧКИ — ТЕЛО, ПОТОМ ОЧЕРЕДЬ ПАНЕЛЕЙ ════════════════════════════════════════
   // The actual write: card body first (it carries the lock version), then the staged sub-panels.
   //
   // Two answers, not one, because "did it all land" and "is the card's PURPOSE now auxiliary" are
@@ -996,9 +1169,21 @@ export function TechCardForm({
   // already committed the flip — at which point the convert flow must NOT tell the operator the card
   // is still sellable and their colourways are restorable, because an auxiliary style refuses every
   // un-archive edge (checkOwningStyleSellable). `bodySaved` is the honest half of that answer.
+  //
+  // ВОЛНА 25.09 (автосейв): и ТРЕТИЙ ответ — `outcome`. Автосейв решает по нему, что сказать и что
+  // делать дальше, и «saved» он вправе сказать ТОЛЬКО на `complete` (Codex B-03): `restaged` значит,
+  // что новые значения панели всё ещё в очереди, `partial` — что панель отказала. `ok` остался
+  // прежним («ничего не сломалось») ради управляемого перевода в auxiliary, который по нему сеет цвета.
+  //
+  // `mode: 'silent'` — запись автосейва: ни тоста об успехе, ни переключения вкладки на поле с
+  // ошибкой, ни выхода из фулскрина из-за сетевой ошибки, от которой человеку нечего делать, — обо
+  // всём этом говорит чип статуса. Баннеры (частичное сохранение, расхождение версий, аудит
+  // присутствия) и модалка конфликта остаются в обоих режимах: это решения, а не уведомления.
   async function writeTechCard(
     data: TechCardFormData,
-  ): Promise<{ bodySaved: boolean; ok: boolean }> {
+    opts: { mode: SaveMode; autoStage?: boolean; keepPurpose?: string } = { mode: 'explicit' },
+  ): Promise<WriteResult> {
+    const silent = opts.mode === 'silent';
     setConflict(false);
     setStagingError(null);
     // Оба баннера — факты о ПРЕДЫДУЩЕЙ попытке. Новая попытка начинается с чистого экрана,
@@ -1019,27 +1204,37 @@ export function TechCardForm({
       { serverSpeaksDesign: designBandSpeaks },
     );
     let bodySaved = false;
+    lastBodySaved.current = false;
     try {
       if (isEditMode) {
         // Count what this run intends to write BEFORE anything moves, so a partial-failure banner
-        // can say "2 of 4" and mean it.
-        const bodyDirty = form.formState.isDirty;
-        const planned = (bodyDirty ? 1 : 0) + staging.changes.length;
+        // can say "2 of 4" and mean it. The LIVE dirty flag, not the render snapshot: the auto-stage
+        // and the approval doors set a value and save in the same tick (see liveIsDirty).
+        const bodyDirty = liveIsDirty(form);
+        const planned = (bodyDirty ? 1 : 0) + staging.peek().length;
 
         // The card body goes FIRST: it carries expectedLockVersion, so a 409 here must abort before
         // any child panel writes. Committing a recipe against a card body someone else has already
         // moved is how orphan references are made (19.4). The catch below handles that.
         if (bodyDirty) {
+          // What the form held when this write started — DEEP-copied, because RHF writes nested
+          // values in place (`set(_formValues, 'bomItems.3.name', …)` mutates the row object), and a
+          // shallow copy would already «contain» the edits typed while the request is in flight.
+          const before = cloneFormValues(form.getValues());
           await updateTechCard.mutateAsync({
             id: parseInt(id || '0', 10),
             techCard: techCardInsert,
             // Normally the loaded card's version; after «keep mine & overwrite» the version read
             // back from the server, so that choice actually overwrites (see keepMineAndOverwrite).
-            expectedLockVersion: lockOverride.current ?? techCard?.lockVersion ?? 0,
+            expectedLockVersion: lockOverride.current ?? currentLockVersion(),
           });
           // The body is committed server-side from here on — anything that fails below leaves the
           // card carrying the values this PUT just wrote (see the return type's comment).
           bodySaved = true;
+          lastBodySaved.current = true;
+          if (approvalAttempt.current && data.approvalState === approvalAttempt.current.next) {
+            approvalAttempt.current.landed = true;
+          }
           // Spent: the write moved the server's version on, and useUpdateTechCard's invalidation
           // brings the new one back. Holding it would 409 the save after next.
           lockOverride.current = null;
@@ -1047,7 +1242,12 @@ export function TechCardForm({
           // was just approved carries its stamped digest instead of the blank that MEANS "approve
           // now" (see withServerAssignedValues).
           const settled = await withServerAssignedValues(data);
-          form.reset(settled.values);
+          settleAfterBodySave(before, settled);
+          // M-03: the silent write carried the STORED purpose; the operator's pending switch to
+          // auxiliary goes back into the form, still dirty, still waiting for its confirmation.
+          if (opts.keepPurpose !== undefined) {
+            form.setValue('purpose', opts.keepPurpose, { shouldDirty: true });
+          }
           // Ф7: сохранение прошло, но часть отправленных фактов не вернулась — молчать об этом
           // значит отдать человеку карточку, которая узнает о потере через неделю пустым полем.
           if (settled.audit && hasPresenceLoss(settled.audit)) setPresenceLoss(settled.audit);
@@ -1062,13 +1262,14 @@ export function TechCardForm({
         if (outcome.failed) {
           const { change, error } = outcome.failed;
           const done = (bodyDirty ? 1 : 0) + outcome.committed.length;
+          const why = techCardErrorMessage(error, 'unknown error');
           setStagingError(
-            `saved ${done} of ${planned} — «${change.label}» failed: ${techCardErrorMessage(error, 'unknown error')}. Everything not yet saved is still staged.`,
+            `saved ${done} of ${planned} — «${change.label}» failed: ${why}. Everything not yet saved is still staged.`,
           );
-          showMessage(`«${change.label}» failed — the rest is still staged`, 'error');
+          if (!silent) showMessage(`«${change.label}» failed — the rest is still staged`, 'error');
           // Баннер «сохранено 2 из 4» стоит на странице, то есть под оверлеем фулскрина.
           leaveFullscreen();
-          return { bodySaved, ok: false };
+          return { bodySaved, ok: false, outcome: 'partial', message: `«${change.label}»: ${why}` };
         }
         // A committed panel bumps the SHARED tech_card.lock_version server-side (UpdateStyleSizeChart
         // and UpdateStyle both do), but only useUpdateTechCard invalidates this card. Without this
@@ -1078,39 +1279,93 @@ export function TechCardForm({
         if (numId && outcome.committed.length > 0) {
           queryClient.invalidateQueries({ queryKey: techCardKeys.detail(numId) });
         }
-        showMessage(planned > 1 ? `saved ${planned} changes` : 'tech card updated', 'success');
-        // A panel edited WHILE its own commit was in flight wrote the older values and kept the newer
-        // ones staged (see commitAll). Saying so is the whole point — the previous behaviour reported
-        // everything saved and dropped those keystrokes. The draft stays too: it is the only copy of
-        // those newer values until the next autosave tick rewrites it.
-        if (outcome.restaged?.length) {
-          setStagingError(
-            `«${outcome.restaged.map((c) => c.label).join('», «')}» changed while the save was running — the newer values are still staged. Press Save again.`,
-          );
-        } else {
-          draft.clear();
+        // No success toast for an autosave: the chip says «saved 18:42», and a toast every two
+        // seconds of typing would be noise the operator learns to ignore — errors included.
+        if (!silent) {
+          showMessage(planned > 1 ? `saved ${planned} changes` : 'tech card updated', 'success');
         }
-      } else {
+        // A panel edited WHILE its own commit was in flight wrote the older values and kept the newer
+        // ones staged (see commitAll). With the autosave on, the next cycle carries them without a
+        // word from anyone; the banner that said «Press Save again» stays only where no autosave runs.
+        // The draft stays too: it is the only copy of those newer values until they are written.
+        if (outcome.restaged?.length) {
+          if (!autosaveEnabled) {
+            setStagingError(
+              `«${outcome.restaged.map((c) => c.label).join('», «')}» changed while the save was running — the newer values are still staged. Press Save again.`,
+            );
+          }
+          return { bodySaved, ok: true, outcome: 'restaged' };
+        }
+        draft.clear();
+        // History records the TEXT that is now on the server (B-04). A save that did not move any
+        // text section adds no row — the hook compares against the newest entry.
+        if (numId) history.push(textSnapshotOf(data), currentLockVersion());
+        return { bodySaved, ok: true, outcome: 'complete' };
+      }
+
+      // ── CREATE ────────────────────────────────────────────────────────────────────────────────
+      // A7 (Codex B-07): the card's style facts (fit, brand, collection, season, gender) are written
+      // by StyleFactsField through its own UpdateStyle, which needs the card's id — and a new card had
+      // none, so those fields were silently dropped by «add». Now: create, hand the new id to the
+      // panel, commit its staged write, and only THEN leave. A failure keeps the operator here with
+      // the «saved X of Y» banner; `createdIdRef` makes the retry finish THIS card instead of minting
+      // a second one.
+      let newId = createdIdRef.current;
+      if (!newId) {
         const created = await createTechCard.mutateAsync(techCardInsert);
         bodySaved = true;
-        showMessage('tech card created', 'success');
-        draft.clear();
-        // If they were working on labels & pkg, land on the saved card's labels tab so the
-        // per-style assembly / packaging-recipe / dust-bag editors (which need the new id) are
-        // right there — instead of bouncing to the list and losing the thread (see PreSavePrompt).
-        if (created?.id && activeTab === 'labels') {
-          navigate(`${ROUTES.techCards}/${created.id}?tab=labels`);
-        } else {
-          navigate(ROUTES.techCards);
+        lastBodySaved.current = true;
+        newId = created?.id ?? undefined;
+        if (newId) {
+          createdIdRef.current = newId;
+          // A SYNC render: React flushes a sync render's passive effects before flushSync returns,
+          // so StyleFactsField's staging effect has already run against the new id by the next line
+          // (and useTechCardStaging writes its queue ref eagerly for exactly this reader).
+          const minted = newId;
+          flushSync(() => setCreatedId(minted));
         }
       }
-      return { bodySaved, ok: true };
+      if (newId) {
+        const planned = 1 + staging.peek().length;
+        const outcome = await staging.commitAll();
+        if (outcome.failed) {
+          const { change, error } = outcome.failed;
+          setStagingError(
+            `the card is created, saved ${1 + outcome.committed.length} of ${planned}. «${change.label}» failed: ${techCardErrorMessage(error, 'unknown error')}. Press add again to retry the rest.`,
+          );
+          showMessage(
+            `«${change.label}» failed. The card is created, the rest is still staged`,
+            'error',
+          );
+          leaveFullscreen();
+          return { bodySaved: true, ok: false, outcome: 'partial' };
+        }
+      }
+      showMessage('tech card created', 'success');
+      draft.clear();
+      // If they were working on labels & pkg, land on the saved card's labels tab so the
+      // per-style assembly / packaging-recipe / dust-bag editors (which need the new id) are
+      // right there — instead of bouncing to the list and losing the thread (see PreSavePrompt).
+      if (newId && activeTab === 'labels') {
+        navigate(`${ROUTES.techCards}/${newId}?tab=labels`);
+      } else {
+        navigate(ROUTES.techCards);
+      }
+      return { bodySaved: true, ok: true, outcome: 'complete' };
     } catch (error) {
+      const status = (error as { status?: number })?.status;
+      // M-01: a 409 on the AUTO-STAGE's own write, with nothing else of the operator's in flight,
+      // is not a conflict anyone has to decide — the other tab already moved the card. Re-read it
+      // quietly and let the next readiness answer decide again.
+      if (status === 409 && opts.autoStage && autoStageUntouched()) {
+        await quietReload();
+        return { bodySaved, ok: false, outcome: 'nothing' };
+      }
       // Серверный отказ: и модалка конфликта, и пришпиленные к полям нарушения, и — главное —
       // `ClearAssemblyButton`, единственный выход из щита «карточка несёт узлы», живут под
       // оверлеем. Фулскрин уходит раньше, чем что-либо из этого показывается.
-      leaveFullscreen();
-      if ((error as { status?: number })?.status === 409) setConflict(true);
+      if (!silent || status === 409) leaveFullscreen();
+      if (status === 409) setConflict(true);
       // ОТКАЗ ТРАНСПОРТА РАСПОЗНАЁТСЯ ПЕРВЫМ. Строгий маршалер (Ф2) отвечает на незнакомое поле
       // или незнакомое имя члена словаря 400 без единого поимённого нарушения: RPC не звали,
       // карточка не тронута. Показывать это «голым сообщением» значит показать человеку
@@ -1127,11 +1382,14 @@ export function TechCardForm({
         // отвечает на тот же вопрос, что аудит присутствия.
         contradicts: contradictsScreen((path) => form.getValues(path as never)),
       });
-      if (applied.length > 0) {
+      // An autosave never yanks the operator to another tab: the chip says «N errors» and its click
+      // is the walk to the field.
+      if (applied.length > 0 && !silent) {
         const root = applied[0].split('.')[0];
         setActiveTab(errorTabFor(root));
       }
       if (transport || contradictions.length > 0) {
+        if (silent) leaveFullscreen();
         setVersionSkew({
           quote: transport ?? undefined,
           fields: contradictions.map((c) => ({
@@ -1142,17 +1400,77 @@ export function TechCardForm({
       }
       // Непришпиленное нарушение дописывается к тосту В ЛЮБОЙ ветке, включая баннерную:
       // отказ, который никуда не встал — ни на контрол, ни в баннер, ни в тост, — и есть та
-      // самая невидимая потеря, ради которой затевалась фаза.
+      // самая невидимая потеря, ради которой затевалась фаза. (У автосейва тоста нет — то же
+      // предложение уезжает в поповер чипа через `message`.)
       const base =
         transport || contradictions.length > 0
           ? 'the backend did not recognise part of this card — see the banner on the card'
           : techCardErrorMessage(error, 'Failed to submit tech card');
-      showMessage(
-        unmapped.length ? `${base} — ${unmapped.map((u) => u.description).join('; ')}` : base,
-        'error',
-      );
+      const message = unmapped.length
+        ? `${base} — ${unmapped.map((u) => u.description).join('; ')}`
+        : base;
+      if (!silent) showMessage(message, 'error');
       console.error('Failed to submit tech card', error);
-      return { bodySaved, ok: false };
+      const outcome: SaveOutcome =
+        status === 409 ? 'conflict' : applied.length > 0 ? 'invalid' : 'error';
+      return { bodySaved, ok: false, outcome, message };
+    }
+  }
+
+  // ═══ ПОСЛЕ ЗАПИСИ ТЕЛА: БАЗА ПЕРЕЕЗЖАЕТ, ЗНАЧЕНИЯ ОСТАЮТСЯ НА МЕСТЕ (волна 25.09) ═══════════════
+  // До автосейва здесь стоял `form.reset(settled.values)`. Он честен о значениях, но с автосейвом
+  // два его побочных действия стали бедой:
+  //   · полный reset шлёт событие в array-подписку RHF, и КАЖДЫЙ useFieldArray чеканит новые ключи
+  //     строк: строки BOM, операций, выносок размонтируются, фокус и каретка уходят из поля, раскрытые
+  //     плитки сворачиваются. Раньше — раз на нажатие Save; с автосейвом — после каждой паузы в наборе;
+  //   · он ставит форму в то, что УШЛО, и стирает нажатия, сделанные, пока летели PUT и повторное
+  //     чтение.
+  // Теперь это два разных шага. ЗНАЧЕНИЯ правятся точечно — лист за листом, где они разошлись с тем,
+  // что теперь хранит сервер (лист никогда не пересоздаёт ключей массива; в корень массива пишется
+  // только смена его ДЛИНЫ — строки и правда поменялись, и useFieldArray обязан это услышать). Поле,
+  // которое человек успел изменить, пока запись летела, остаётся ЕГО значением (трём спискам с
+  // серверными значениями — подписи, выкройки, BOM — серверное доливается и в него: строка BOM,
+  // добавленная этим сохранением, не должна уйти следующим снова с id 0). БАЗА переезжает отдельно:
+  // `reset(…, { keepValues: true })` меняет только то, с чем сравнивается «грязно».
+  function settleAfterBodySave(
+    before: TechCardFormData | null,
+    settled: { values: TechCardFormData; server: TechCardFormData | null },
+  ) {
+    const write = (path: string, value: unknown) => form.setValue(path as never, value as never);
+    const typed = form.getValues();
+    const lists = settled.server ? assignServerLists(typed, settled.server) : null;
+    const edited: string[] = [];
+    for (const key of new Set([...Object.keys(typed), ...Object.keys(settled.values)])) {
+      const k = key as keyof TechCardFormData;
+      // No copy from the start of the write (it could not be cloned): the old behaviour — the form
+      // becomes what was sent.
+      const touched = !!before && !deepEqual(typed[k], before[k]);
+      if (touched) edited.push(key);
+      const target = !touched
+        ? settled.values[k]
+        : lists && (k === 'signoffs' || k === 'patterns' || k === 'bomItems')
+          ? lists[k]
+          : typed[k];
+      writeFormDiff(write, key, typed[k], target);
+    }
+    // Read BEFORE the baseline moves: right after a reset RHF may consider itself unmounted until the
+    // next render, and then getValues() answers with the defaults (see below).
+    const keep = edited.map((key) => [key, form.getValues(key as never)] as const);
+    form.reset(settled.values, { keepValues: true });
+    // RHF marks the form «unmounted» after a reset when something subscribes to `isValid` (nothing on
+    // this form does today) and then getValues()/isDirty read the DEFAULTS until the next render — which
+    // would turn «re-dirty the edits typed during the save» below into a no-op. Its own effect sets the
+    // flag back after every render; setting it here only closes that one-render window.
+    if (!form.control._state.mount) form.control._state.mount = true;
+    // Edits typed during the save are the form's own again — DIRTY, so the next cycle writes them and
+    // StyleFactsField (which stages by dirtyFields) still sees its fields as changed. An array is not
+    // re-written at its root (that would re-key its rows); the form-wide flag below still counts it.
+    for (const [key, v] of keep) {
+      if (!Array.isArray(v)) form.setValue(key as never, v as never, { shouldDirty: true });
+    }
+    if (keep.length > 0 && !liveIsDirty(form)) {
+      // Any write with shouldDirty makes RHF recompute the form-wide flag against the new baseline.
+      form.setValue('name', form.getValues('name'), { shouldDirty: true });
     }
   }
 
@@ -1197,13 +1515,14 @@ export function TechCardForm({
     [convert],
   );
 
-  async function doSubmit(data: TechCardFormData) {
+  async function doSubmit(data: TechCardFormData): Promise<SaveResult> {
     if (flipsToAuxiliary(data) && liveColorways.length > 0) {
       setConvertReport(null);
       setConvert({ data, colorways: liveColorways });
-      return;
+      return { outcome: 'needs-confirm' };
     }
-    await writeTechCard(data);
+    const r = await writeTechCard(data, { mode: 'explicit' });
+    return { outcome: r.outcome, message: r.message };
   }
 
   // «archive & switch»: retire every live colourway, then run the same save again. Client-guided and
@@ -1352,7 +1671,66 @@ export function TechCardForm({
     const more = flat.length > 1 ? ` (+${flat.length - 1})` : '';
     showMessage(`${tabLabel} → ${first.path} — ${first.message || 'invalid'}${more}`, 'error');
   };
-  const save = () => form.handleSubmit(doSubmit, onInvalid)();
+  // THE EXPLICIT SAVE as one promise with a verdict: validation with the walk to the first error,
+  // the convert dialog for a sellable→auxiliary flip, the success toast. On a saved card it runs
+  // through the autosave's queue (⌘S, «save now», «retry», «keep mine»), so there is never a second
+  // write in flight beside an autosave cycle.
+  const explicitSave = () =>
+    new Promise<SaveResult>((resolve) => {
+      form
+        .handleSubmit(
+          async (data) => resolve(await doSubmit(data)),
+          (errors) => {
+            onInvalid(errors);
+            resolve({ outcome: 'invalid' });
+          },
+        )()
+        .catch((error) =>
+          resolve({ outcome: 'error', message: techCardErrorMessage(error, 'save failed') }),
+        );
+    });
+  // Every «save» door of the page. A new card has no autosave: `add` IS the save.
+  const save = () => (autosaveEnabled ? autosave.saveNow('button') : explicitSave());
+
+  // THE AUTOSAVE'S WRITE (mode 'silent'). The controller has already validated QUIETLY
+  // (`form.trigger()` — errors on the fields, no focus stolen, no tab switched); here the values are
+  // parsed exactly as handleSubmit would hand them to doSubmit (zod OUTPUT, defaults and all).
+  //
+  // M-03: a sellable→auxiliary flip never opens its dialog on its own. The write carries the STORED
+  // purpose so every other edit still lands, the flip goes back into the form afterwards, and the
+  // status says `needs-confirm` until an explicit save (⌘S / «save now») runs the dialog.
+  async function silentSave(): Promise<SaveResult> {
+    const parsed = await techCardSchema.safeParseAsync(form.getValues());
+    if (!parsed.success) return { outcome: 'invalid' };
+    let data = parsed.data as TechCardFormData;
+    let keepPurpose: string | undefined;
+    if (flipsToAuxiliary(data)) {
+      const stored = form.control._defaultValues as Partial<TechCardFormData>;
+      const withoutFlip = (v: Partial<TechCardFormData>) => ({
+        ...v,
+        purpose: undefined,
+        auxSubtype: undefined,
+      });
+      if (
+        staging.peek().length === 0 &&
+        deepEqual(withoutFlip(form.getValues()), withoutFlip(stored))
+      ) {
+        return { outcome: 'needs-confirm' };
+      }
+      keepPurpose = data.purpose;
+      data = { ...data, purpose: stored.purpose ?? 'TECH_CARD_PURPOSE_SELLABLE' };
+    }
+    const r = await writeTechCard(data, {
+      mode: 'silent',
+      autoStage: autoStageInFlight.current,
+      keepPurpose,
+    });
+    return {
+      outcome: r.outcome,
+      message: r.message,
+      pendingConfirm: keepPurpose !== undefined && r.outcome === 'complete',
+    };
+  }
 
   // «keep mine & overwrite» — the conflict modal's other exit. Read the card's CURRENT version off
   // the server, then re-run the same save carrying it: the form's values are untouched, so the
@@ -1371,7 +1749,12 @@ export function TechCardForm({
       // получали ровно тот отказ, от которого эта кнопка спасает: соседняя вкладка добавила узлы,
       // наша карточка о них не знает, `assemblyCleared` зажат в false «потому что узлов нет» —
       // и сервер отвергает запись, а кнопка «не потеряй работу» упирается в «перезагрузи и потеряй».
-      queryClient.setQueryData(techCardKeys.detail(numId), res);
+      // `res.techCard`, NOT `res` (волна 25.09): the detail key holds the CARD, as useTechCard and
+      // withServerAssignedValues write it. The whole response here turned the `techCard` prop into
+      // `{ techCard: <card> }` — harmless only while the retry below ran through a closure from the
+      // render BEFORE this write; the autosave runs the LATEST closure, which would have mapped the
+      // wrapper as the card.
+      queryClient.setQueryData(techCardKeys.detail(numId), res.techCard);
     } catch (error) {
       showMessage(
         techCardErrorMessage(error, 'could not read the server’s version — try saving again'),
@@ -1379,16 +1762,101 @@ export function TechCardForm({
       );
       return;
     }
-    // The header's Save button shows the spinner for this second run (form.formState.isSubmitting).
-    save();
+    // Through the autosave's queue as an EXPLICIT save: the operator's own choice is what lifts the
+    // autosave's pause on a conflict (B-02 — the autosave never picks «keep mine» by itself).
+    void save();
   };
-  // Pass the approval override INTO the validated submit (don't mutate form state before
-  // validation — on failure that would leave the card stuck in an ungated state that a later
-  // plain save would persist).
-  const submitWithApproval = (next: string) =>
-    form.handleSubmit((data) => doSubmit({ ...data, approvalState: next }), onInvalid)();
+  // G1 (волна 25.09): the approval travels as a FORM VALUE, set dirty before the save. It used to be
+  // passed only into the validated payload — and on a pristine form writeTechCard skips the body
+  // (`bodyDirty` false), so «release ▸» and «re-open to draft» wrote nothing. The old worry — a failed
+  // validation leaving the card in an ungated state that a later plain save would persist — is
+  // answered by putting the SAVED value back whenever a write carrying this approval did not land:
+  // otherwise the autosave would ship RELEASED with the next unrelated edit, past the gate the
+  // operator was shown.
+  const submitWithApproval = async (next: string) => {
+    const savedApproval = (techCard?.techCard?.approvalState as string | undefined) || DRAFT;
+    approvalAttempt.current = { next, landed: false };
+    form.setValue('approvalState', next, { shouldDirty: true });
+    try {
+      if (autosaveEnabled) await autosave.saveNow(`approval:${next}`);
+      else await explicitSave();
+    } finally {
+      const landed = approvalAttempt.current?.landed ?? false;
+      approvalAttempt.current = null;
+      if (!landed) form.setValue('approvalState', savedApproval, { shouldDirty: true });
+    }
+  };
 
-  const saving = form.formState.isSubmitting;
+  const autosave = useTechCardAutosaveController({
+    enabled: autosaveEnabled,
+    // The convert dialog owns the write it intercepted (confirmConvert re-runs it).
+    paused: !!convert || converting,
+    form,
+    stagingRevision: staging.revision,
+    hasStaged: () => staging.peek().length > 0,
+    save: (mode) => (mode === 'explicit' ? explicitSave() : silentSave()),
+    // LIVE errors: the controller counts right after `trigger()`, before any re-render.
+    countErrors: () => flattenFieldErrors(form.control._formState.errors as FieldErrors).length,
+  });
+
+  const saving = form.formState.isSubmitting || autosave.status === 'saving';
+
+  // ═══ АВТО-СТЕЙДЖ (D-14 / D-14' · Codex B-01, M-01) ════════════════════════════════════════════
+  // STAGE IS A MILESTONE — monotonic. It marks how far the card has GOT; it is raised one step at a
+  // time when the server's readiness says the next stage is reached, and it is never lowered here
+  // (the server guards regressions besides). `decideAutoStage` holds the rules: fresh readiness, one
+  // step, no `unknown` row. This effect adds the page's side: only on a settled card (nothing typed,
+  // nothing staged — so a 409 on this write can be answered with a quiet re-read, M-01), at most five
+  // steps per page life, each step its own save and its own «stage → …».
+  const savedStage = techCard?.techCard?.stage;
+  useEffect(() => {
+    if (!AUTO_STAGE || !autosaveEnabled || autoStageInFlight.current) return;
+    if (autosave.status !== 'idle' && autosave.status !== 'saved') return;
+    if (liveIsDirty(form) || staging.peek().length > 0) return;
+    if (autoStageSteps.current >= AUTO_STAGE_MAX_STEPS) return;
+    const next = decideAutoStage({
+      readiness,
+      savedStage,
+      formStage: form.getValues('stage'),
+      isAux,
+    });
+    if (!next) return;
+    autoStageSteps.current += 1;
+    autoStageInFlight.current = true;
+    form.setValue('stage', next, { shouldDirty: true });
+    autoStageBaseline.current = cloneFormValues(form.getValues());
+    void autosave.flush('stage').then((r) => {
+      autoStageInFlight.current = false;
+      autoStageBaseline.current = null;
+      if (r === 'ok') showMessage(`stage → ${stageLabel(next)}`, 'success');
+    });
+    // `form` and `staging` are read live inside; the triggers are the readiness answer, the saved
+    // stage, the form's stage and the autosave settling.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readiness, savedStage, stage, autosave.status, autosaveEnabled, isAux]);
+
+  // ROLLBACK (D-17'): text sections only, everything else stays as it is now; then save.
+  const restoreHistory = (entry: HistoryEntry) => {
+    const { next, changed } = restoreTextSections(form.getValues(), entry.values);
+    if (changed.length === 0) return;
+    for (const key of changed) form.setValue(key, next[key] as never, { shouldDirty: true });
+    showMessage(
+      `restored ${changed.map((k) => TEXT_SECTION_LABEL[k]).join(', ')} from ${formatSavedAt(entry.at)}`,
+      'success',
+    );
+    void autosave.flush('history');
+  };
+
+  // A form error named in the warnings organ walks to its field — the same walk onInvalid takes.
+  const revealError = (path: string) => {
+    leaveFullscreen();
+    setActiveTab(errorTabFor(errorRootKey(path)));
+    setFocusTarget((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
+  };
+  const formErrorRows: FormErrorRow[] = flatErrors.map((e) => {
+    const tab = errorTabFor(errorRootKey(e.path));
+    return { path: e.path, message: e.message, tab: TABS.find((t) => t.id === tab)?.label ?? tab };
+  });
 
   /**
    * ЭКСПОРТ АРХИВА КАРТОЧКИ. Сервер кладёт zip в бакет и отдаёт presigned-ссылку; скачивает её
@@ -1540,16 +2008,25 @@ export function TechCardForm({
   );
 
   return (
-    <Form {...form}>
-      {/* TWO-TIER CHROME (-mx-2.5 cancels the Layout content px-2.5 so the bar spans full width).
-          Row 1 is identity + the page actions. Row 2 is the card's STATE: stage, approval,
-          and one chip per release blocker — each chip navigates to the tab that fixes it.
-          NOT sticky — it scrolls away with the content on every screen (the left tab rail stays
-          pinned so the sections remain reachable while scrolling). */}
+    <FormWithAutosave form={form} autosave={autosave}>
+      {/* ONE AUTOSAVE FOR THE WHOLE PAGE. The studio's organs read it through `useTechCardAutosave()`
+          (design/autosave-contract.ts): the construction draft asks for a save after its autoFill,
+          GENERATE awaits `flush()` before a paid run. The provider wraps the header too, so the chip
+          and the organs can never disagree about what «saved» means. */}
+      {/* THE HEADER — two rows, not sticky (волна 25.09 · T16/T19: minimum space, one control per
+          action). Row 1 is identity and the page's own actions. Row 2 is where the card IS (the
+          stage bar) and what it still needs (next stage · release · warnings) — the old stage and
+          approval selects, the lifecycle strip and its «to reach …» checklist all folded into it.
+          Gone from the header, reachable elsewhere (D-13): `tasks` (the drawer still opens on
+          ?tasks=1 and from the tasks section), `pdf…` (print scopes live on the print page's URL and
+          on the runs screen), `+ project` (the file library links projects; the StyleProjects block
+          under the header stays whenever a link exists). */}
       <div className='-mx-2.5 border-b border-borderColor bg-bgColor'>
-        <div className='flex flex-wrap items-center gap-2 px-2.5 py-2'>
+        <div className='flex flex-wrap items-center gap-x-3 gap-y-2 px-2.5 py-2'>
           <Button asChild variant='secondary' size='sm'>
-            <Link to={ROUTES.techCards}>←</Link>
+            <Link to={ROUTES.techCards} aria-label='back to tech cards'>
+              ←
+            </Link>
           </Button>
           <div className='min-w-0'>
             <Text variant='uppercase' className='truncate font-bold'>
@@ -1563,47 +2040,38 @@ export function TechCardForm({
             </Text>
           </div>
 
-          <div className='ml-auto flex flex-wrap items-center gap-1.5'>
+          <div className='ml-auto flex flex-wrap items-center gap-3'>
+            {/* The save state, in the place the save button used to stand. A released card has no
+                autosave — its state is the freeze, said in words. */}
+            {isEditMode && frozen ? (
+              <Pill tone='ok'>released · frozen</Pill>
+            ) : autosaveEnabled ? (
+              <SaveStatusChip
+                status={autosave.status}
+                lastSavedAt={autosave.lastSavedAt}
+                errorsCount={autosave.errorsCount}
+                message={autosave.message}
+                retrying={autosave.retrying}
+                bodyDirty={form.formState.isDirty}
+                staged={staging.changes}
+                history={history.entries}
+                currentText={textSnapshotOf(form.getValues())}
+                canRestore={!saving && !converting}
+                onJumpToError={() =>
+                  onInvalid(form.control._formState.errors as FieldErrors<TechCardFormData>)
+                }
+                onSaveNow={() => void autosave.saveNow('chip')}
+                onOpenConflict={() => setConflict(true)}
+                onRestore={restoreHistory}
+              />
+            ) : null}
             {isEditMode && numId && (
               <>
-                {/* Tasks moved off the page into a drawer — the tile row used to push the
-                    actual spec below the fold on every single tab. */}
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='sm'
-                  onClick={() =>
-                    setParams(
-                      (prev) => {
-                        const p = new URLSearchParams(prev);
-                        p.set('tasks', '1');
-                        return p;
-                      },
-                      { replace: true },
-                    )
-                  }
-                >
-                  tasks
-                </Button>
-                <Button asChild variant='secondary' size='sm'>
+                <Button asChild variant='underline' size='sm'>
                   <Link to={`/tech-cards/${numId}/print`} target='_blank' rel='noopener'>
                     pdf
                   </Link>
                 </Button>
-                {/* Печать со скоупом (прогон/колорвей/размеры/профиль/тетради); прямая ссылка
-                    выше остаётся печатью в один клик. */}
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='sm'
-                  onClick={() => setPrintOptionsOpen(true)}
-                >
-                  pdf…
-                </Button>
-                {/* Ф3: точка входа в привязку проекта, пока проектов НЕТ. Как только первый
-                    появился, блок под шапкой берёт это действие на себя, и кнопка исчезает —
-                    см. шапку style-projects.tsx. */}
-                <StyleProjectsAction techCardId={numId} />
                 {/* Гейт — ПРАВО ЗАПИСИ, тот же `canWrite(SECTION.techCards)`, что у соседних
                     пишущих действий шапки, а не право чтения карточки: архив уносит приватные
                     выкройки и паспорта материалов за пределы панели одним файлом, и сервер
@@ -1621,99 +2089,70 @@ export function TechCardForm({
                 )}
               </>
             )}
-            {canWrite(SECTION.techCards) && !frozen && isEditMode && (
-              <StagedChangesChip changes={staging.changes} cardBodyDirty={form.formState.isDirty} />
-            )}
-            {canWrite(SECTION.techCards) &&
-              (frozen ? (
-                <Button
-                  type='button'
-                  variant='main'
-                  size='lg'
-                  className='uppercase'
-                  loading={saving}
-                  onClick={() => submitWithApproval(DRAFT)}
-                >
-                  re-open to draft
-                </Button>
-              ) : (
-                <Button
-                  type='button'
-                  variant='main'
-                  size='lg'
-                  className='uppercase'
-                  // `converting` as well as `saving`: the guided convert drives its re-save WITHOUT
-                  // form.handleSubmit, so isSubmitting stays false for the whole archive→flip
-                  // sequence and this button would otherwise stay live through it.
-                  disabled={
-                    (isEditMode && !form.formState.isDirty && staging.changes.length === 0) ||
-                    saving ||
-                    converting
-                  }
-                  loading={saving || converting}
-                  onClick={save}
-                >
-                  {isEditMode ? 'save' : 'add'}
-                </Button>
-              ))}
-          </div>
-        </div>
-
-        {!frozen && (
-          <div className='flex flex-wrap items-center gap-1.5 border-t border-hairline px-2.5 py-1.5'>
-            <div className='w-28'>
-              <SelectField
-                name='stage'
-                label='stage'
-                items={techCardStageOptions}
-                disabled={frozen}
-              />
-            </div>
-            <div className='w-32'>
-              <SelectField
-                name='approvalState'
-                label='approval'
-                items={techCardApprovalStateOptions}
-                disabled={frozen}
-              />
-            </div>
-            {canRelease ? (
-              <Pill tone='ok'>ready to release</Pill>
-            ) : (
-              <>
-                <Text size='micro' variant='label' component='span'>
-                  can’t release —
-                </Text>
-                <ChipRow>
-                  {releaseBlockers.map((b) => (
-                    <Chip
-                      key={b.label}
-                      tone='error'
-                      onClick={() => setActiveTab(b.tab)}
-                      title={`fix this on the ${b.tab} tab`}
-                    >
-                      {b.label}
-                    </Chip>
-                  ))}
-                </ChipRow>
-              </>
-            )}
-            {canWrite(SECTION.techCards) && (
+            {canWrite(SECTION.techCards) && isEditMode && frozen && (
               <Button
                 type='button'
-                variant='secondary'
-                size='sm'
-                className='ml-auto'
-                disabled={saving}
-                // Enabled even when blocked: pressing it explains WHY, which is the one
-                // moment the reasons are actually wanted.
-                onClick={() => (canRelease ? submitWithApproval(RELEASED) : setBlockersOpen(true))}
+                variant='main'
+                size='lg'
+                className='uppercase'
+                loading={saving}
+                onClick={() => void submitWithApproval(DRAFT)}
               >
-                release ▸
+                re-open to draft
+              </Button>
+            )}
+            {canWrite(SECTION.techCards) && !isEditMode && (
+              <Button
+                type='button'
+                variant='main'
+                size='lg'
+                className='uppercase'
+                // `converting` as well as `saving`: the guided convert drives its re-save WITHOUT
+                // form.handleSubmit, so isSubmitting stays false for the whole archive→flip
+                // sequence and this button would otherwise stay live through it.
+                disabled={saving || converting}
+                loading={saving || converting}
+                onClick={() => void save()}
+              >
+                add
               </Button>
             )}
           </div>
-        )}
+        </div>
+
+        {isEditMode && numId && !frozen ? (
+          <StageProgress
+            techCardId={numId}
+            stage={stage}
+            readiness={readiness}
+            readinessPending={readinessPending}
+            readinessError={readinessError}
+            isAux={isAux}
+            canEdit={canWrite(SECTION.techCards)}
+            // An auxiliary run needs somewhere to BOOK its output, and there are two ways to have
+            // one: the single output material, or at least one live colour variant (each colour
+            // owns its own bucket). Only a card with neither cannot be planned.
+            planRunDisabled={isAux && !outputMaterialId && liveVariants === 0}
+            planRunDisabledReason='set an output material or register a colour variant before planning an auxiliary run'
+            blockers={releaseBlockers}
+            canRelease={canRelease}
+            releasing={saving || converting}
+            // Enabled even when blocked: pressing it explains WHY, which is the one moment the
+            // reasons are actually wanted.
+            onRelease={() =>
+              canRelease ? void submitWithApproval(RELEASED) : setBlockersOpen(true)
+            }
+            approvalState={techCard?.techCard?.approvalState}
+            onBackToDraft={() => void submitWithApproval(DRAFT)}
+            formErrors={formErrorRows}
+            onRevealError={revealError}
+            onGoTab={(t) => navTo(t as TabId)}
+            onAddSample={() => navTo('samples', { sample: 'new' })}
+            onGoFittings={(unresolvedOnly) =>
+              navTo('history', unresolvedOnly ? { fits: 'unresolved' } : undefined)
+            }
+          />
+        ) : null}
       </div>
 
       {/* ОТКУДА ЭТА КАРТОЧКА ВЗЯЛАСЬ. Стоит В ШАПКЕ и ВНЕ `fieldset disabled={frozen}`: отчёт
@@ -1721,35 +2160,13 @@ export function TechCardForm({
           не право узнать, что при импорте потерялось. Карточка без импорта не рисует ничего. */}
       {isEditMode && numId ? <TechCardImportBanner techCardId={numId} /> : null}
 
-      {isEditMode && numId ? (
-        <LifecycleStrip
-          techCardId={numId}
-          stage={stage}
-          approvalState={approvalState}
-          canEdit={canWrite(SECTION.techCards)}
-          unsaved={form.formState.isDirty}
-          // An auxiliary run needs somewhere to BOOK its output, and there are now two ways to have
-          // one: the single output material, or at least one live colour variant (each colour owns
-          // its own bucket). Only a card with neither cannot be planned. Per-variant runs are no
-          // longer blocked — that refusal shipped and has since been lifted server-side.
-          planRunDisabled={isAux && !outputMaterialId && liveVariants === 0}
-          planRunDisabledReason='set an output material or register a colour variant before planning an auxiliary run'
-          isAuxiliary={isAux}
-          onGoTab={(t) => navTo(t as TabId)}
-          onAddSample={() => navTo('samples', { sample: 'new' })}
-          onGoFittings={(unresolvedOnly) =>
-            navTo('history', unresolvedOnly ? { fits: 'unresolved' } : undefined)
-          }
-        />
-      ) : null}
-
       {/* Ф3: «в каких проектах библиотеки упомянута эта вещь». Стоит В ШАПКЕ, а не во вкладке и
           не внутри `fieldset disabled={frozen}`: вопрос «каким .zprj это сшито» задают на любой
           вкладке, и чаще всего — как раз про ЗАМОРОЖЕННУЮ, выпущенную карточку, у которой
           fieldset погасил бы и переход в файлы. Пусто — блока нет вовсе. */}
       {isEditMode && numId ? <StyleProjects techCardId={numId} /> : null}
 
-      {/* Tasks as a drawer, opened from the header and deep-linkable via ?tasks=1. */}
+      {/* Tasks as a drawer, deep-linkable via ?tasks=1 (the header button is gone — D-13). */}
       {isEditMode && numId ? (
         <Drawer
           open={tasksOpen}
@@ -1768,16 +2185,6 @@ export function TechCardForm({
         >
           <TechCardTasksPanel techCardId={numId} />
         </Drawer>
-      ) : null}
-
-      {isEditMode && numId ? (
-        <PrintOptionsModal
-          open={printOptionsOpen}
-          onClose={() => setPrintOptionsOpen(false)}
-          techCardId={numId}
-          techCard={techCard}
-          runs={productionRunsData?.runs ?? []}
-        />
       ) : null}
 
       {/* Why release is greyed out, on demand. Reuses the SAME blocker list the header
@@ -2016,7 +2423,16 @@ export function TechCardForm({
           </div>
         </aside>
 
-        <form className='min-w-0 pb-24' onSubmit={form.handleSubmit(doSubmit, onInvalid)}>
+        {/* An implicit submit (Enter in a field, a stray untyped button) goes through the same door as
+            every other save — on a saved card that is the autosave's queue, never a second write
+            beside a running autosave cycle. */}
+        <form
+          className='min-w-0 pb-24'
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+        >
           <fieldset disabled={frozen} className='m-0 min-w-0 border-0 p-0'>
             {/* ШАПКА СТУДИИ — `topRowHtml` прототипа (`proto.html:3172`).
                 Прототип не даёт карточной шапке вкладки вовсе: identification, classification,
@@ -2036,7 +2452,9 @@ export function TechCardForm({
               после перезагрузки. `hideFitCare` возвращает null ПОСЛЕ всех хуков
               (style-facts-field.tsx:473) — невидимая панель пишет ровно то же, что видимая. */}
             <StyleFactsField
-              styleId={numId}
+              // A7: on a NEW card the id arrives after CreateTechCard answers, and the facts it
+              // staged are committed against it before the page navigates away.
+              styleId={numId ?? createdId}
               canEdit={canWrite(SECTION.techCards) && !frozen}
               careEntries={techCard?.careEntries}
               hideFitCare
@@ -2245,11 +2663,11 @@ export function TechCardForm({
                 active={activeTab === 'construction'}
                 // Прокладка до хрома фулскрина: его кнопка save обязана быть той же самой, что в
                 // шапке карточки, — второй путь сохранения разошёлся бы с первым.
-                onSave={save}
+                onSave={() => void save()}
                 // `converting` наравне с `isSubmitting`: управляемый перевод в aux гоняет свою
                 // пере-запись МИМО handleSubmit, и без него кнопка фулскрина оставалась бы живой
-                // всё время, пока летит переворот.
-                saving={form.formState.isSubmitting || converting}
+                // всё время, пока летит переворот. `saving` несёт и цикл автосейва.
+                saving={saving || converting}
                 draftPending={Boolean(draft.pending)}
                 // Якоря находок аудита («op:460», «piece:SL_INS_L») ведут по карточке. Прокладка
                 // та же, что у ленты жизненного цикла: имя вкладки приходит строкой, а `TabId`,
@@ -2292,7 +2710,7 @@ export function TechCardForm({
                   <PreSavePrompt
                     canWrite={canWrite(SECTION.techCards)}
                     saving={saving}
-                    onSave={save}
+                    onSave={() => void save()}
                   />
                 </Section>
               )}
@@ -2523,6 +2941,6 @@ export function TechCardForm({
           form.setValue('outputMaterialId', newId, { shouldDirty: true });
         }}
       />
-    </Form>
+    </FormWithAutosave>
   );
 }
