@@ -1,3 +1,5 @@
+import type { common_AgeGroupEnum } from 'api/proto-http/admin';
+
 // Guided-but-open vocabularies for the tech-card form (ComboField suggestion lists +
 // closed-select item lists). Hints, not closed sets, unless used via SelectField.
 
@@ -101,3 +103,43 @@ export const labelAttachmentOptions = [
   'heat transfer',
   'hangtag',
 ];
+
+// AGE GROUP (wave 2026-09-25, T01 / D-01'): a style fact like target gender, stored on the tech
+// card and written ONLY through UpdateStyle (StylePatch.age_group — StyleFactsField). The wire
+// enum, in the ladder order of the size runs. UNKNOWN is «not set»: it is shown, and it is never
+// written — the server refuses it under the `age_group` mask, and an unset select stays out of it.
+export const AGE_GROUP_UNSET = 'AGE_GROUP_ENUM_UNKNOWN' as const satisfies common_AgeGroupEnum;
+
+/**
+ * What a NEW card starts with (D-01': the new-card UI proposes adult). Only a card being created
+ * gets it — an existing card is read with its own value, UNKNOWN included, and is never defaulted.
+ */
+export const AGE_GROUP_NEW_CARD = 'AGE_GROUP_ENUM_ADULT' as const satisfies common_AgeGroupEnum;
+
+/** The six wire values (UNKNOWN first) — the schema's enum. */
+export const AGE_GROUP_VALUES = [
+  'AGE_GROUP_ENUM_UNKNOWN',
+  'AGE_GROUP_ENUM_ADULT',
+  'AGE_GROUP_ENUM_TEEN',
+  'AGE_GROUP_ENUM_KIDS',
+  'AGE_GROUP_ENUM_TODDLER',
+  'AGE_GROUP_ENUM_BABY',
+] as const satisfies readonly common_AgeGroupEnum[];
+
+/** The five that can be chosen and written, with their words. */
+export const ageGroupOptions: ReadonlyArray<{ value: common_AgeGroupEnum; label: string }> = [
+  { value: 'AGE_GROUP_ENUM_ADULT', label: 'adult' },
+  { value: 'AGE_GROUP_ENUM_TEEN', label: 'teen' },
+  { value: 'AGE_GROUP_ENUM_KIDS', label: 'kids' },
+  { value: 'AGE_GROUP_ENUM_TODDLER', label: 'toddler' },
+  { value: 'AGE_GROUP_ENUM_BABY', label: 'baby' },
+];
+
+/** A real, writable age group (not UNKNOWN, not a token this build does not know). */
+export function isAgeGroupSet(value?: string | null): value is common_AgeGroupEnum {
+  return !!value && ageGroupOptions.some((o) => o.value === value);
+}
+
+export function ageGroupLabel(value?: string | null): string {
+  return ageGroupOptions.find((o) => o.value === value)?.label ?? '';
+}

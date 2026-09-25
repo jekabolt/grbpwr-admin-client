@@ -215,3 +215,16 @@ export function topCategoryName(
   const top = chain.find((c) => c.level === 'top_category') ?? chain[0];
   return top?.name || undefined;
 }
+
+/**
+ * Посадки ЭТОЙ карточки, или `null` — поля FIT у неё нет: auxiliary-карта (она делает упаковку) и
+ * семейства без посадки. Один ответ на два вопроса — что рисует CARD DETAILS и что имеет право
+ * уехать в маску UpdateStyle (`StyleFactsField`): поле, которого не видно, не пишется.
+ */
+export function fitChoicesFor(
+  categories: readonly common_Category[] | undefined,
+  categoryId: number | null | undefined,
+  isAux: boolean,
+): FitChoice[] | null {
+  return isAux ? null : fitsForTopCategory(topCategoryName(categories, categoryId));
+}

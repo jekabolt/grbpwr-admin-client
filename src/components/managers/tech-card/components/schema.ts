@@ -74,6 +74,7 @@ import { ulid } from 'utils/ulid';
 import { KIND_HOME_SECTION, UNSET_KIND, isKindEligibleSection } from './bom-kind';
 import { UNSET_PURPOSE, fabricScopeKey, isOtherPurpose, isRollGoodsSection } from './bom-purpose';
 import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
+import { AGE_GROUP_NEW_CARD, AGE_GROUP_UNSET, AGE_GROUP_VALUES } from './tech-card-options';
 import {
   UNSET_CUT_SYMMETRY,
   UNSET_FUSING_MODE,
@@ -2001,6 +2002,10 @@ const techCardObject = z.object({
   baseSampleSizeId: z.number().optional().default(0),
   // classification
   targetGender: z.string().optional().default(UNSET_GENDER),
+  // Target age group (0366, T01) — a style fact like targetGender and fit: read off the TechCard,
+  // written ONLY through UpdateStyle (StyleFactsField, mask path `age_group`), never on the
+  // TechCardInsert. UNKNOWN = not set; it is never sent under the mask.
+  ageGroup: z.enum(AGE_GROUP_VALUES).optional().default(AGE_GROUP_UNSET),
   // Style catalogue facts written via UpdateStyle (not the tech-card write): edited on the tech card,
   // read-only on the colourway card. composition is the legacy free-text string (M1), never JSON.
   fit: z.string().optional().default(''),
@@ -2241,6 +2246,9 @@ export const techCardDefaultData: TechCardFormData = {
   baseModelId: 0,
   baseSampleSizeId: 0,
   targetGender: UNSET_GENDER,
+  // A NEW card proposes adult (D-01'). This object is the form's defaults only until a saved card
+  // is read — `mapTechCardToForm` then brings the card's own value, UNKNOWN included.
+  ageGroup: AGE_GROUP_NEW_CARD,
   fit: '',
   composition: '',
   careInstructions: '',
@@ -2444,6 +2452,10 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     targetGender: insert?.targetGender || UNSET_GENDER,
     // Read-only projections on the TechCard read (written via UpdateStyle) — top-level, not on insert.
     fit: techCard.fit || '',
+    // A token this build does not know reads as UNKNOWN (the server already maps its own that way).
+    ageGroup: (AGE_GROUP_VALUES as readonly string[]).includes(techCard.ageGroup ?? '')
+      ? (techCard.ageGroup as (typeof AGE_GROUP_VALUES)[number])
+      : AGE_GROUP_UNSET,
     composition: techCard.composition || '',
     careInstructions: techCard.careInstructions || '',
     stage: stageOrDefault(insert?.stage),
