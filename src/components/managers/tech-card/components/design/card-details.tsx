@@ -4,21 +4,28 @@ import {
   common_Colorway,
   common_TechCardRoleAssignment,
 } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useProductsByIds } from 'components/managers/fittings/components/useResolvers';
 import {
   techCardAuxSubtypeFormOptions,
   techCardGenderOptions,
   techCardPurposeFormOptions,
 } from 'constants/filter';
+import { SECTION } from 'constants/routes';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
-import { useState } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
+import { useId, useMemo, useState } from 'react';
+import { useController, useFormContext, useWatch } from 'react-hook-form';
+import { AiEnhance } from 'ui/components/ai-enhance';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import Media from 'ui/components/media';
+import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
+import Select from 'ui/components/select';
+import Textarea from 'ui/components/text-area';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from 'ui/form';
@@ -34,38 +41,58 @@ import { SeasonField } from '../season-field';
 import { parseSeasonToSku } from '../season-util';
 import { useRoleAssignments } from '../useRoles';
 import { Counter, EmptyState, GROUP_GAP, GROUP_SEAM } from './core';
+import { cardFactsContext } from './core/card-facts';
+import { DraftedField } from './core/drafted-field';
+import { draftedKey, useDrafted } from './drafted-contract';
+import {
+  categoryChain,
+  fitLabel,
+  fitsForTopCategory,
+  topCategoryName,
+  type FitChoice,
+} from './fit-vocabulary';
 import { LockBar } from './render/generate-row';
 
 /**
- * ═══ STEP 0 · CARD DETAILS — ONE BLOCK, FIVE GROUPS (`design-band-flow/_step-card.js`) ═══════════
+ * ═══ STEP 0 · CARD DETAILS — ONE BLOCK, SIX GROUPS (`design-band-flow/_step-card.js` + NOTE) ═════
  *
  * The header of the card as the prototype draws it: ONE `Section` titled «card details · who and
- * what this card is», a `N of 10 fields` counter in its rule, and inside it the groups as
- * `GroupLabel` rules — IDENTIFICATION, CLASSIFICATION, BASE MODEL & SAMPLE SIZE, and the two-column
- * row RESPONSIBLE ROLES | LINKED PRODUCTS. Not four separate blocks: the owner saw those and said
- * «не как в референсе». A block never contains a block (DESIGN.md), so the groups are rules, not
- * borders.
+ * what this card is», a `N of 11 fields` counter in its rule, and inside it the groups as
+ * `GroupLabel` rules — IDENTIFICATION, CLASSIFICATION, BASE MODEL & SAMPLE SIZE, NOTE, and the
+ * two-column row RESPONSIBLE ROLES | LINKED PRODUCTS. Not four separate blocks: the owner saw
+ * those and said «не как в референсе». A block never contains a block (DESIGN.md), so the groups
+ * are rules, not borders.
  *
  * ONE SIX-TRACK GRID FOR EVERY FIELD ROW. 3+3 and 2+2+2 both fill six tracks without a remainder,
  * so every group shares one left edge, one right edge and one row height — no lone half-width field
  * beside a hole. Below `sm` the grid is one column and reads top to bottom in the same order.
  *
  * THE LOGIC IS THE PRODUCT'S. Every field is the same RHF field it was (`name`, `styleNumber`,
- * `collection`, `season`, `brand`, `categoryId`, `purpose`, `targetGender`, `baseModelId`,
- * `baseSampleSizeId`); the organs that already existed are reused by import (season picker,
- * collection select, category cascade, base model pair). Roles keep writing through their own RPCs
- * the instant they change, outside the card's draft. `StyleFactsField` — the one writer of brand /
- * collection / season / targetGender — is NOT here: it stays mounted unconditionally in
- * `index.tsx`, because this screen is mounted only while step 0 is open.
+ * `collection`, `season`, `brand`, `categoryId`, `fit`, `purpose`, `targetGender`, `baseModelId`,
+ * `baseSampleSizeId`, `notes`); the organs that already existed are reused by import (season
+ * picker, collection select, category cascade, base model pair). Roles keep writing through their
+ * own RPCs the instant they change, outside the card's draft. `StyleFactsField` — the one writer of
+ * brand / collection / season / targetGender / fit — is NOT here: it stays mounted unconditionally
+ * in `index.tsx`, because this screen is mounted only while step 0 is open.
+ *
+ * WAVE 2026-09-25 (tmp/plans/techcard-ux-0925, zone CL-C) added three things and nothing else:
+ *   · FIT moved here from GENERAL INFORMATION (T02, D-03) — CLASSIFICATION, right after the
+ *     category it depends on; the list narrows to the garment family (`fit-vocabulary.ts`);
+ *   · the collection picker's `+ new collection…` (T06, D-06) — the one door, inside the list;
+ *   · NOTE (T07, D-05) — the card's existing `notes` field, which had lost its editor.
  *
  * WHAT THE PROTOTYPE HAS AND THE WIRE DOES NOT — named, not faked:
- *   · the collection picker's «+ create» (the product picks from the COLLECTIONS dictionary);
  *   · a `#PRD-…` product id under a colourway (the product prints the colourway id);
  *   · the `season ›` door under a disabled SUGGEST leads to the season FIELD (`revealField`), not
  *     straight into the picker — the picker's open state is the season organ's own.
  */
 
-/** The ten META fields the header counter reads — the prototype's `metaFill()`. */
+/**
+ * The META fields the header counter reads — the prototype's `metaFill()`, plus FIT since it
+ * moved here (wave 2026-09-25): eleven. FIT counts only where the field is DRAWN — an auxiliary
+ * card and an accessory / shoe / bag / object have no fit, and «10 of 11» on a card that cannot
+ * reach 11 would be a gap nobody can close. So the total is the fields on screen, not a constant.
+ */
 const META_FIELDS = [
   'name',
   'styleNumber',
@@ -73,25 +100,24 @@ const META_FIELDS = [
   'season',
   'brand',
   'categoryId',
+  'fit',
   'purpose',
   'targetGender',
   'baseModelId',
   'baseSampleSizeId',
 ] as const;
+type MetaField = (typeof META_FIELDS)[number];
 
 const UNSET_GENDER = 'GENDER_ENUM_UNKNOWN';
 
 /** Filled = non-blank string / positive id / an enum that is not its «unset» sentinel. */
-function filledMeta(values: unknown[]): number {
-  return META_FIELDS.reduce((n, key, i) => {
-    const v = values[i];
-    if (key === 'categoryId' || key === 'baseModelId' || key === 'baseSampleSizeId') {
-      return n + (typeof v === 'number' && v > 0 ? 1 : 0);
-    }
-    if (key === 'targetGender') return n + (v && v !== UNSET_GENDER ? 1 : 0);
-    if (key === 'purpose') return n + (typeof v === 'string' && !/UNKNOWN|UNSET/.test(v) ? 1 : 0);
-    return n + (typeof v === 'string' && v.trim() ? 1 : 0);
-  }, 0);
+function isFilled(key: MetaField, v: unknown): boolean {
+  if (key === 'categoryId' || key === 'baseModelId' || key === 'baseSampleSizeId') {
+    return typeof v === 'number' && v > 0;
+  }
+  if (key === 'targetGender') return !!v && v !== UNSET_GENDER;
+  if (key === 'purpose') return typeof v === 'string' && !/UNKNOWN|UNSET/.test(v);
+  return typeof v === 'string' && !!v.trim();
 }
 
 /**
@@ -247,6 +273,120 @@ function StyleNumberCell({ isIdea }: { isIdea: boolean }) {
   );
 }
 
+/** Radix Select forbids an empty item value; «no fit» rides a sentinel that maps back to ''. */
+const FIT_UNSET = '__unset__';
+
+/**
+ * FIT — ONE SELECT, BOUND TO THE FORM FIELD `fit` (T02, D-03). It moved here from GENERAL
+ * INFORMATION, which now only reads it. The WRITER did not move: fit is a style fact, and the one
+ * thing that sends it is the staged `UpdateStyle` in `StyleFactsField` (mounted hidden by
+ * index.tsx), exactly as before — this cell edits the form field and nothing else.
+ *
+ * · ITEMS FOLLOW THE GARMENT. `choices` is the family's list for the card's top category
+ *   (`fitsForTopCategory`); with no category yet it is the whole vocabulary, grouped.
+ * · A STORED VALUE IS NEVER HIDDEN. A fit outside the family's list (the category changed after, an
+ *   older record, a value typed before the list settled) stays as its own `(legacy)` item and stays
+ *   selected — a select that cannot show its value lets Radix report a phantom '' and the next save
+ *   would wipe a fact nobody touched.
+ * · `— unset —` is how a fit is removed; there is no second control for it.
+ * · DRAFTED: the construction draft may have written this value; the frame and the word stand until
+ *   the value is edited or accepted (`drafted-contract.ts`). The word sits in the label row — a
+ *   22px select has no room for a corner pill.
+ * · LOCKED without `products:write`: `UpdateStyle` is authorised by the catalog section, not by
+ *   `tech_cards` (Codex M-05), so an edit here would be refused at save. Said in words under the
+ *   control, not only in a `title` on a dead select.
+ */
+function FitCell({ choices, locked }: { choices: FitChoice[]; locked: boolean }) {
+  const { control } = useFormContext<TechCardFormData>();
+  const drafted = useDrafted();
+  return (
+    <FormField
+      control={control}
+      name='fit'
+      render={({ field }) => {
+        const value = ((field.value as string | undefined) ?? '').trim();
+        const live = drafted.isLive(draftedKey.fit, value);
+        const listed = choices.some((c) => c.key === value);
+        const items = [
+          { value: FIT_UNSET, label: '— unset —' },
+          ...(value && !listed ? [{ value, label: `${fitLabel(value)} (legacy)` }] : []),
+          ...choices.map((c) => ({ value: c.key, label: fitLabel(c.key), group: c.group })),
+        ];
+        return (
+          <FormItem
+            data-card-fit={locked ? 'locked' : 'open'}
+            title={locked ? 'needs products:write' : undefined}
+          >
+            <div className='flex items-center justify-between gap-1.5'>
+              <FormLabel>fit</FormLabel>
+              {live && <Pill tone='attention'>drafted</Pill>}
+            </div>
+            <DraftedField live={live} pill={false}>
+              <Select
+                name='fit'
+                placeholder='fit'
+                items={items}
+                value={value || FIT_UNSET}
+                disabled={locked}
+                // Reads as a dead control, like a disabled `Input` (zebra ground, label ink).
+                className={locked ? 'bg-bgZebra text-labelColor' : undefined}
+                onValueChange={(v: string) => field.onChange(v === FIT_UNSET ? '' : v)}
+                onBlur={field.onBlur}
+              />
+            </DraftedField>
+            {locked && (
+              <Text size='micro' variant='label'>
+                needs products:write
+              </Text>
+            )}
+          </FormItem>
+        );
+      }}
+    />
+  );
+}
+
+const NOTE_MAX = 2000;
+
+/**
+ * NOTE (T07, D-05) — the card's own `notes` field, persisted by the regular card save
+ * (`TechCardInsert.notes`, mapped in `schema.ts`). The field and its round trip always existed; its
+ * editor did not since U-9. One textarea and the one quiet `ai ✦` in its corner (`AiEnhance`), fed
+ * the facts the model needs to keep a note on-topic: category path, fit, the first lines of the
+ * moodboard description.
+ */
+function NoteField({ context, canEdit }: { context: string; canEdit: boolean }) {
+  const { control, setValue } = useFormContext<TechCardFormData>();
+  const { field } = useController({ control, name: 'notes' });
+  const value = (field.value as string | undefined) ?? '';
+  const id = useId();
+  return (
+    <div className='relative min-w-0' data-field='notes'>
+      <Textarea
+        ref={field.ref}
+        id={id}
+        name='notes'
+        aria-label='note'
+        value={value}
+        rows={3}
+        maxLength={NOTE_MAX}
+        placeholder='anything the team should know about this style'
+        className='pb-7'
+        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => field.onChange(e.target.value)}
+        onBlur={field.onBlur}
+      />
+      <AiEnhance
+        field='note'
+        value={value}
+        maxRunes={NOTE_MAX}
+        context={context}
+        disabled={!canEdit}
+        onApply={(text) => setValue('notes', text.slice(0, NOTE_MAX), { shouldDirty: true })}
+      />
+    </div>
+  );
+}
+
 /** `techCard.colorways` → the ids the tiles are drawn for (unset ids are not a colourway). */
 function colorwayIds(colorways: common_AdminColorwayRef[]): number[] {
   return colorways
@@ -396,9 +536,42 @@ export function CardDetails({
   onGoColourways: () => void;
 }) {
   const { control } = useFormContext<TechCardFormData>();
+  const { dictionary } = useDictionary();
+  const { canWrite } = usePermissions();
   const meta = useWatch({ control, name: [...META_FIELDS] }) as unknown[];
-  const filled = filledMeta(meta);
   const auxSubtype = (useWatch({ control, name: 'auxSubtype' }) as string | undefined) ?? '';
+  const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
+  const concept = (useWatch({ control, name: 'concept' }) as string | undefined) ?? '';
+  const fit = (useWatch({ control, name: 'fit' }) as string | undefined) ?? '';
+
+  // FIT follows the garment: the family of the card's TOP category decides the list, and «no fit
+  // here» (accessories, shoes, bags, objects — and every auxiliary card, which makes packaging)
+  // hides the field without touching the stored value.
+  const categories = dictionary?.categories;
+  const topName = topCategoryName(categories, categoryId);
+  const fitChoices = useMemo(() => (isAux ? null : fitsForTopCategory(topName)), [isAux, topName]);
+  const fitShown = fitChoices !== null;
+  const counted = META_FIELDS.filter((key) => key !== 'fit' || fitShown);
+  const filled = META_FIELDS.reduce(
+    (n, key, i) => n + (counted.includes(key) && isFilled(key, meta[i]) ? 1 : 0),
+    0,
+  );
+
+  // CLASSIFICATION stays on the six-track grid without a hole: four cells are 3+3 / 3+3, three are
+  // 2+2+2 (the rule at the top of this file — no lone half-width field beside a gap).
+  const classCells = 3 + (fitShown ? 1 : 0) + (isAux ? 1 : 0);
+  const WC = classCells === 4 ? W3 : W2;
+  // UpdateStyle — the one writer of fit — is `products:write` on the server (Codex M-05).
+  const fitLocked = !canWrite(SECTION.products);
+
+  const categoryPath = categoryChain(categories, categoryId)
+    .map((c) => c.name || `#${c.id}`)
+    .join(' › ');
+  const noteContext = cardFactsContext({
+    categoryPath,
+    fit: fitShown ? fitLabel(fit) : '',
+    concept,
+  });
 
   // ONE read feeds the counter in the group rule AND the rows: react-query serves both from the
   // cache the card read seeded, so the count cannot disagree with the chips beneath it.
@@ -410,7 +583,7 @@ export function CardDetails({
     <Section
       title='card details'
       question='— who and what this card is'
-      action={<Counter n={filled} noun='field' total={META_FIELDS.length} />}
+      action={<Counter n={filled} noun='field' total={counted.length} />}
       id='card-details'
       className={cn('min-w-0', GROUP_SEAM)}
     >
@@ -441,7 +614,7 @@ export function CardDetails({
         </div>
       </div>
 
-      {/* ── CLASSIFICATION — 2+2+2 ───────────────────────────────────────────────────────── */}
+      {/* ── CLASSIFICATION — 3+3 / 3+3 with FIT (or the aux type), else 2+2+2 ───────────────── */}
       <div className='min-w-0' data-card-group='classification'>
         <GroupLabel flush className={GROUP_GAP}>
           classification
@@ -449,10 +622,16 @@ export function CardDetails({
         <div className={GRID}>
           {/* The category cascade — three columns in one popover over a single stored leaf.
               Its trigger stretches to the whole cell like the selects beside it. */}
-          <div className={W2}>
+          <div className={WC}>
             <CategoryBrowser />
           </div>
-          <div className={W2}>
+          {/* FIT right after the category it depends on (T02). */}
+          {fitChoices && (
+            <div className={WC} data-card-cell='fit'>
+              <FitCell choices={fitChoices} locked={fitLocked} />
+            </div>
+          )}
+          <div className={WC}>
             <SelectField name='purpose' label='purpose' items={techCardPurposeFormOptions} />
             {/* Purpose is mutually exclusive with the output material and the save is a full
                 replace — flag the destruction BEFORE it happens. The server's other refusals (live
@@ -464,7 +643,7 @@ export function CardDetails({
               </Text>
             )}
           </div>
-          <div className={W2}>
+          <div className={WC}>
             <SelectField
               name='targetGender'
               label='target gender'
@@ -473,9 +652,10 @@ export function CardDetails({
           </div>
           {/* WS7: what KIND of auxiliary item this card makes — auxiliary-only, the dto rejects it
               on a sellable card and the save mapper clears it on a purpose flip. A product field
-              the prototype has no cell for; it takes the next two tracks. */}
+              the prototype has no cell for; it takes the cell after the gender (an aux card has no
+              FIT, so the group is 3+3 / 3+3 again). */}
           {isAux && (
-            <div className={W2}>
+            <div className={WC}>
               <SelectField
                 name='auxSubtype'
                 label='auxiliary type'
@@ -500,6 +680,14 @@ export function CardDetails({
         <div className='[&_label]:flex [&_label]:min-h-[19px] [&_label]:items-center'>
           <BaseModelFields />
         </div>
+      </div>
+
+      {/* ── NOTE — the card's free text, full width, before the people and the products ────── */}
+      <div className='min-w-0' data-card-group='note'>
+        <GroupLabel flush className={GROUP_GAP}>
+          note
+        </GroupLabel>
+        <NoteField context={noteContext} canEdit={canEdit} />
       </div>
 
       {/* ── RESPONSIBLE ROLES | LINKED PRODUCTS — the prototype's `.brow.even` ───────────────

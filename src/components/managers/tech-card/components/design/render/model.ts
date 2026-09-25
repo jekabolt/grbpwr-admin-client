@@ -1675,29 +1675,15 @@ export const BODY_TYPES = ['slim', 'athletic', 'average', 'curvy', 'plus'] as co
 export type BodyType = (typeof BODY_TYPES)[number];
 
 /**
- * THE FIT VOCABULARY, AND IT IS RESTATED HERE UNDER PROTEST.
+ * THE FIT VOCABULARY — ONE LIST, AND IT LIVES IN `../fit-vocabulary.ts` (wave 2026-09-25, D-03).
  *
- * The card's own list lives in `style-facts-field.tsx` as a private `const FIT_OPTIONS` that is not
- * exported, and this wave may not edit that file. So the same vocabulary now exists twice, which is
- * exactly the drift `./views.ts` was written to end — a list duplicated per screen rots silently,
- * and the symptom would be a 3D override offering a fit the classification block refuses.
- *
- * IT IS THE APP'S LIST, NOT THE PROTOTYPE'S. The prototype offers `oversized` and no
- * `skinny/cropped/tailored`, and its own source marks that list «НЕ ответ владельцу». The card is
- * the single place of truth about fit, so the override may only offer fits the card can hold.
- *
- * TO FIX: export `FIT_OPTIONS` from `style-facts-field.tsx` (or lift it beside `views.ts`) and
- * delete this constant.
+ * The private copy in `style-facts-field.tsx` is gone and this name stays only as a re-export for
+ * its readers (`fitChoices` below, the construction draft's `foldFit`, GENERAL INFORMATION), so the
+ * 3D override can never offer a fit the card cannot hold. The keys are the storefront's
+ * (`messages/*.json → fit`); the per-family narrowing lives with the list, not here.
  */
-export const FIT_OPTIONS = [
-  'regular',
-  'slim',
-  'loose',
-  'relaxed',
-  'skinny',
-  'cropped',
-  'tailored',
-] as const;
+import { FIT_KEYS } from '../fit-vocabulary';
+export const FIT_OPTIONS = FIT_KEYS;
 
 /**
  * The fits the 3D override may offer: the app's vocabulary MINUS the card's own.
