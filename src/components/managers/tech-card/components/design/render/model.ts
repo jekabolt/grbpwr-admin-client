@@ -257,7 +257,9 @@ export function legacyRenderSides(
   }
   return [...ids]
     .sort((a, b) => a - b)
-    .flatMap((id) => legacyBenchSides(band, 'render', id).map((side) => ({ ...side, colorwayId: id })));
+    .flatMap((id) =>
+      legacyBenchSides(band, 'render', id).map((side) => ({ ...side, colorwayId: id })),
+    );
 }
 
 /** Every picture standing in a silhouette slot of one bench right now, keyed by its own id. */

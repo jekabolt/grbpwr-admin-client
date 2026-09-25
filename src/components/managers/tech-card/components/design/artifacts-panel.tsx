@@ -89,13 +89,7 @@ import { pictureIsModel, threedResults } from './threed/media';
 import { ThreedModelModal } from './threed/model-modal';
 import { pictureIsDisplayOnly, type WireUploadItem } from './threed/wire';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
-import {
-  ACTIVE_VIEWS,
-  LEGACY_VIEWS,
-  SHEET_MIN_VIEWS,
-  normaliseViewKey,
-  viewLabel,
-} from './views';
+import { ACTIVE_VIEWS, LEGACY_VIEWS, SHEET_MIN_VIEWS, normaliseViewKey, viewLabel } from './views';
 import { isPictureHidden } from './visibility';
 
 /**

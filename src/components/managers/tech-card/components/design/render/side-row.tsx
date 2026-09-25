@@ -503,7 +503,9 @@ export function SidesSection({
   const colourwayName = (colorwayId: number): string => {
     if (colorwayId === 0) return SAMPLE_LABEL;
     const ref = colorways.find((r) => (r.colorwayId ?? 0) === colorwayId) ?? null;
-    return ref ? `${colorwayLabel(ref)}${archivedRef(ref) ? ' (archived)' : ''}` : `colourway ${colorwayId}`;
+    return ref
+      ? `${colorwayLabel(ref)}${archivedRef(ref) ? ' (archived)' : ''}`
+      : `colourway ${colorwayId}`;
   };
 
   const canWrite = !disabled;

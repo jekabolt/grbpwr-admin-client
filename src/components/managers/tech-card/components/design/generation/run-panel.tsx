@@ -155,7 +155,8 @@ export function RunPanel({
        экране расходился с «image k» серверного промпта. */
     .sort(
       (a, b) =>
-        (VIEW_RANK[normaliseViewKey(a.viewKey)] ?? 7) - (VIEW_RANK[normaliseViewKey(b.viewKey)] ?? 7),
+        (VIEW_RANK[normaliseViewKey(a.viewKey)] ?? 7) -
+        (VIEW_RANK[normaliseViewKey(b.viewKey)] ?? 7),
     )
     .map((sl) => ({
       mediaId: sl.mediaId ?? 0,

@@ -1016,8 +1016,7 @@ function PlateQuestion({
             already > 0 && `${already} already in place`,
             plates.unresolved > 0 &&
               `${plates.unresolved} not on this page of the card and skipped`,
-            plates.retired > 0 &&
-              `${plates.retired} of a 3/4 view skipped — 3/4 views are retired`,
+            plates.retired > 0 && `${plates.retired} of a 3/4 view skipped — 3/4 views are retired`,
           ]
             .filter(Boolean)
             .join(' · ')}

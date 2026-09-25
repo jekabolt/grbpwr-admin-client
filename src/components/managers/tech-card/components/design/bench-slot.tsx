@@ -51,13 +51,7 @@ import { selectPickablePictures } from './visibility';
  * spelling, and these re-exports exist so that the call sites inside this module keep reading the
  * way they did.
  */
-export {
-  SHEET_MIN_VIEWS,
-  ACTIVE_VIEWS,
-  isActiveView,
-  viewLabel,
-  type ActiveView,
-} from './views';
+export { SHEET_MIN_VIEWS, ACTIVE_VIEWS, isActiveView, viewLabel, type ActiveView } from './views';
 import {
   ACTIVE_VIEWS,
   LEGACY_VIEWS,
@@ -977,7 +971,11 @@ export function LegacySlotCell({
   galleryItem?: MediaViewerItem;
 }) {
   return (
-    <div className='group flex h-full min-w-0 flex-col gap-1' data-bench-slot={label} data-bench-legacy={label}>
+    <div
+      className='group flex h-full min-w-0 flex-col gap-1'
+      data-bench-slot={label}
+      data-bench-legacy={label}
+    >
       <div className='flex min-w-0 flex-col overflow-hidden border border-borderColor'>
         <PictureTile
           url={pictureUrl(picture)}
@@ -992,7 +990,8 @@ export function LegacySlotCell({
               ? {
                   onClick: onUnmark,
                   ariaLabel: `unmark ${label}`,
-                  title: 'unmark — take this plate off the retired 3/4 slot; it stays in the history',
+                  title:
+                    'unmark — take this plate off the retired 3/4 slot; it stays in the history',
                   disabled: saving,
                 }
               : undefined
