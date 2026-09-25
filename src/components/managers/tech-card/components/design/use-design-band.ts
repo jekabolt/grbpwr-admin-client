@@ -7,7 +7,7 @@ import {
   GetDesignBandResponse,
 } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 
 /**
  * THE BAND'S DATA SEAM. Every organ of the DESIGN band reads through here and writes through here;
@@ -211,6 +211,20 @@ export type DesignWriteOptions = {
   onSettledOk?: () => void;
 };
 
+/**
+ * ═══ МОЛЧАНИЕ ОБЩЕГО ХВОСТА ОШИБОК — ПО ПРОСЬБЕ ВЫЗЫВАЮЩЕГО (волна 25.09) ═══════════════════════
+ *
+ * `silent: true` в переменных записи верстака (`setBenchSlot`, `registerUpload`) снимает ОБЩИЙ
+ * снекбар отказа: вызывающий говорит об отказе сам (своим `onError` у `mutate`/`mutateAsync`) или
+ * знает, что сказанное общим хвостом было бы неправдой. 409 при этом по-прежнему перечитывает
+ * полосу — чужая запись выигрывает всегда, молчит только слово. Поле в запрос НЕ уезжает: каждое
+ * `mutationFn` собирает тело запроса поимённо.
+ */
+export type SilentWrite = { silent?: boolean };
+
+/** Контекст записи: КАКОЙ карточке был отправлен запрос (см. `onError` в `useDesignWrites`). */
+type WriteContext = { card: number };
+
 export function useDesignWrites(techCardId?: number) {
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
@@ -253,31 +267,54 @@ export function useDesignWrites(techCardId?: number) {
      обычного чтения хватило бы. */
 
   /**
+   * ═══ ОТКАЗ ГОВОРИТСЯ НА ТОЙ КАРТОЧКЕ, КОТОРОЙ ОН ОТВЕЧАЕТ (волна 25.09, находка CL-B) ══════════
+   *
+   * Хвост ниже общий для всех записей хука, а хук живёт на экране дольше одной карточки: студия на
+   * переходе A → B не размонтируется. Запрос, отправленный с A, мог упасть, когда на экране уже B, —
+   * и снекбар говорил об отказе НА B, где человек ничего не делал (замечено на заведении детали
+   * после смены карточки). Поэтому каждая запись запоминает свою карточку (`onMutate` → контекст),
+   * а хвост молчит, если на экране уже другая. 409 всё равно перечитывает полосу ТОЙ карточки.
+   */
+  const shownCard = useRef(techCardId ?? 0);
+  shownCard.current = techCardId ?? 0;
+  const onMutate = useCallback((): WriteContext => ({ card: techCardId ?? 0 }), [techCardId]);
+  // Та же причина со стороны успеха: запись, дошедшая после смены карточки, перечитывает полосу
+  // СВОЕЙ карточки (иначе A, куда легла запись, осталась бы в кэше старой, а B перечиталась зря).
+  const invalidateWritten = useCallback(
+    (_data: unknown, _variables: unknown, context?: WriteContext) => {
+      qc.invalidateQueries({ queryKey: designKeys.band(context?.card ?? techCardId ?? 0) });
+    },
+    [qc, techCardId],
+  );
+
+  /**
    * The shared tail of every band write. Kept as a plain function rather than a hook so the
    * mutations below can all be declared unconditionally at the top level.
    */
   const onError = useCallback(
-    (error: unknown) => {
+    (error: unknown, variables?: unknown, context?: WriteContext) => {
+      const card = context?.card ?? techCardId ?? 0;
+      const aborted = isAborted(error);
+      // Somebody else moved first. Their state wins; ours is thrown away on purpose.
+      if (aborted) qc.invalidateQueries({ queryKey: designKeys.band(card) });
+      const silent = !!(variables as SilentWrite | undefined)?.silent;
+      if (silent || card !== shownCard.current) return;
       const message = (error as Error)?.message || 'the change did not go through';
-      if (isAborted(error)) {
-        // Somebody else moved first. Their state wins; ours is thrown away on purpose.
-        showMessage(`someone changed this first — ${message}`, 'error');
-        invalidate();
-        return;
-      }
-      showMessage(message, 'error');
+      showMessage(aborted ? `someone changed this first — ${message}` : message, 'error');
     },
-    [showMessage, invalidate],
+    [showMessage, qc, techCardId],
   );
 
   const registerUpload = useMutation({
-    mutationFn: (input: {
-      clientRequestId: string;
-      items: DesignUploadItem[];
-      target?: DesignBenchSlotRef;
-      expectedSlotRev?: number;
-      newDetailName?: string;
-    }) =>
+    mutationFn: (
+      input: {
+        clientRequestId: string;
+        items: DesignUploadItem[];
+        target?: DesignBenchSlotRef;
+        expectedSlotRev?: number;
+        newDetailName?: string;
+      } & SilentWrite,
+    ) =>
       adminService.RegisterDesignUpload({
         techCardId: techCardId ?? 0,
         clientRequestId: input.clientRequestId,
@@ -286,17 +323,20 @@ export function useDesignWrites(techCardId?: number) {
         expectedSlotRev: input.expectedSlotRev ?? 0,
         newDetailName: input.newDetailName ?? '',
       }),
-    onSuccess: invalidate,
+    onMutate,
+    onSuccess: invalidateWritten,
     onError,
   });
 
   const setBenchSlot = useMutation({
-    mutationFn: (input: {
-      slot: DesignBenchSlotRef;
-      pictureId: number;
-      expectedSlotRev: number;
-      newDetailName?: string;
-    }) =>
+    mutationFn: (
+      input: {
+        slot: DesignBenchSlotRef;
+        pictureId: number;
+        expectedSlotRev: number;
+        newDetailName?: string;
+      } & SilentWrite,
+    ) =>
       adminService.SetDesignBenchSlot({
         techCardId: techCardId ?? 0,
         slot: input.slot,
@@ -304,20 +344,23 @@ export function useDesignWrites(techCardId?: number) {
         expectedSlotRev: input.expectedSlotRev,
         newDetailName: input.newDetailName ?? '',
       }),
-    onSuccess: invalidate,
+    onMutate,
+    onSuccess: invalidateWritten,
     onError,
   });
 
   const deleteDetailSlot = useMutation({
     mutationFn: (slotId: number) => adminService.DeleteDesignDetailSlot({ slotId }),
-    onSuccess: invalidate,
+    onMutate,
+    onSuccess: invalidateWritten,
     onError,
   });
 
   const hidePicture = useMutation({
     mutationFn: (input: { pictureId: number; hidden: boolean }) =>
       adminService.HideDesignPicture(input),
-    onSuccess: invalidate,
+    onMutate,
+    onSuccess: invalidateWritten,
     onError,
   });
 
@@ -331,7 +374,8 @@ export function useDesignWrites(techCardId?: number) {
   const setPictureSelected = useMutation({
     mutationFn: (input: { pictureId: number; selected: boolean }) =>
       adminService.SetDesignPictureSelected(input),
-    onSuccess: invalidate,
+    onMutate,
+    onSuccess: invalidateWritten,
     onError,
   });
 
@@ -348,7 +392,8 @@ export function useDesignWrites(techCardId?: number) {
        */
       forInput: boolean;
     }) => adminService.SplitDesignPicture(input),
-    onSuccess: invalidate,
+    onMutate,
+    onSuccess: invalidateWritten,
     onError,
   });
 
@@ -411,7 +456,8 @@ export function useDesignWrites(techCardId?: number) {
         note: input.note,
         detailSlotId: Math.max(0, Math.trunc(input.detailSlotId ?? 0)),
       }),
-    onSuccess: invalidate,
+    onMutate,
+    onSuccess: invalidateWritten,
     onError,
   });
 

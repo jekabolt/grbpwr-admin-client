@@ -1,5 +1,5 @@
 import type { GetDesignBandResponse, common_DesignRunParams } from 'api/proto-http/admin';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -139,20 +139,30 @@ export function FlatRunRow({
   /**
    * ═══ МИНИМУМ МУДБОРДА — ТА ЖЕ ФРАЗА, ЧТО ЗАПИРАЕТ FLAT НА РЕЛЬСЕ (D-10, контракт `mood-gate`) ══
    *
-   * Флэт, нарисованный с пустой доски и без категории, — флэт НИЧЕГО. Правило одно: картинка НА
-   * ДОСКЕ (строки входа REFERENCE не в счёт) или описание от 40 знаков, и категория. Читает его
-   * ОДИН хук рельса (`useMoodMinimumGate`, заведён под эту кнопку), поэтому фраза отказа дословно
-   * та, что запирает FLAT на рельсе, и кнопка с рельсом не могут разойтись в «почему». Дверь —
-   * туда, где отказ чинится (`door`): к доске, если не хватает её содержимого, к категории в CARD
-   * DETAILS — если только её. Открывается `openStepOf`, а не `revealField`: это не ошибка поля, и
-   * красная пульсация после «отведи меня туда» читалась бы как «там что-то сломано».
+   * Флэт, нарисованный с пустой доски и без категории, — флэт НИЧЕГО. Правило ОДНО и живёт в
+   * `core/mood-gate.ts` (что считается минимумом — картинка на доске, описание, категория — решает
+   * только оно; строки входа REFERENCE доской не считаются). Читает его ОДИН хук рельса
+   * (`useMoodMinimumGate`, заведён под эту кнопку), поэтому фраза отказа дословно та, что запирает
+   * FLAT на рельсе, и кнопка с рельсом не могут разойтись в «почему». Дверь — туда, где отказ
+   * чинится (`door`): к доске, если не хватает её содержимого, к категории в CARD DETAILS — если
+   * только её. Открывается `openStepOf`, а не `revealField`: это не ошибка поля, и красная
+   * пульсация после «отведи меня туда» читалась бы как «там что-то сломано».
+   *
+   * ГЕЙТ ЧИТАЮТ ДВАЖДЫ — в `gateReason` (кнопка и строка под ней) и в `submit` ПОСЛЕ ожидания
+   * сохранения (`moodNow`): пока шёл `flush`, доска могла опустеть (правка отменена, другая вкладка
+   * сохранила раньше), и старт сверяется с гейтом, каким он стал, а не каким был на клике.
    */
   const mood = useMoodMinimumGate();
+  const moodNow = useRef(mood);
+  moodNow.current = mood;
   const moodReason = mood.ok ? null : mood.reason;
+  /* Дверь по `door` гейта. «moodboard ›» ведёт на САМУ доску (`#mb-board`), описание стоит под ней
+     на том же шаге: какой части не хватает, говорит фраза, а слово и адрес двери — те же, что у
+     доски на рельсе, чтобы одна надпись не вела в два места. */
   const moodDoor =
     !mood.ok && mood.door === 'card'
       ? { label: 'card details ›', open: () => openStepOf('categoryId', '#card-details') }
-      : { label: 'moodboard ›', open: () => openStepOf('concept') };
+      : { label: 'moodboard ›', open: () => openStepOf('moodboardMedia', '#mb-board') };
 
   /**
    * ═══ СНАЧАЛА СОХРАНИТЬ, ПОТОМ ПЛАТИТЬ (D-16, контракт `autosave`, Codex B-05) ══════════════
@@ -192,11 +202,11 @@ export function FlatRunRow({
           : null;
 
   const submit = async () => {
-    if (gateReason || startRun.isPending || flushing) return;
+    if (gateReason || !mood.ok || startRun.isPending || flushing) return;
     setFlushing(true);
     let saved: FlushResult;
     try {
-      saved = await autosave.flush('flat-generate');
+      saved = await autosave.flush('flat');
     } catch {
       // Контракт обещает исход, а не исключение; бросок читается как неудача сохранения.
       saved = 'error';
@@ -208,6 +218,8 @@ export function FlatRunRow({
       return;
     }
     setFlushRefusal(null);
+    // Гейт после сохранения: отказ уже стоит строкой под рядом (`moodReason`), второй не нужен.
+    if (!moodNow.current.ok) return;
     const params: common_DesignRunParams = {
       views: [...ticked],
       detailSlotIds: [...tickedDetailIds],
