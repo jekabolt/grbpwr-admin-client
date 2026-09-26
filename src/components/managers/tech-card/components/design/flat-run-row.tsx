@@ -21,8 +21,9 @@ import {
 import { displayDetailName, readBench } from './bench-slot';
 import { serverSpeaksDesign } from './capability';
 import { useMoodMinimumGate } from './chain-rail';
-import { GROUP_GAP, PRICED_LATER, latestRunOfKind } from './core';
+import { GROUP_GAP } from './core';
 import { moodMinimumGate, openGateDoor } from './core/chain';
+import { useDrafted } from './drafted-contract';
 import { markedPlatesOf } from './fix-markup';
 import {
   flatInputBusy,
@@ -32,7 +33,6 @@ import {
   type FlatAsk,
   type FlatLayout,
 } from './flat-input';
-import { formatMoney } from './generation/money';
 import type { RunRefusal as ServerRefusal } from './generation/refusal';
 import { useStartRun } from './generation/use-generation';
 import { WhatModelGetsModal } from './modals';
@@ -46,7 +46,7 @@ import { materializeWords } from './words-seed';
 /**
  * ═══ РЯД ЗАПУСКА БЛОКА INPUT — REFERENCES (`runDoors('flat')` макета) ═══════════════════════════
  *
- *   GENERATE · $0.38 · priced by the server on start ·                    WHAT THE MODEL GETS ▸
+ *   GENERATE · WHAT THE MODEL GETS ▸
  *
  * Здесь стояла ОТДЕЛЬНАЯ секция `generation — flat`, потом — подвал `the flat run` с линейкой
  * группы, чипами видов, переключателем раскладки и рядом. Макет (`_step-flat.js`, SPEC п.7) знает
@@ -63,11 +63,9 @@ import { materializeWords } from './words-seed';
  * решать за человека, за что он платит. Поэтому ряд остаётся, одной строкой над рядом запуска:
  * ярлык `VIEWS`, чипы сторон и деталей, справа — раскладка ответа. Это названо в gaps.
  *
- * ⚠ ЦЕНА — ПОСЛЕДНЕГО ФЛЭТ-ПРОГОНА, И ЭТО СКАЗАНО СЛОВАМИ. Макет печатает `$0.38` из своего
- * прейскуранта; на проводе цены прогона, которого ещё нет, не бывает (`price_estimate` и
- * `price_actual` — поля прогона, выходные). Что есть — цена ПОСЛЕДНЕГО флэт-прогона карточки, факт,
- * а не оценка; она печатается с приставкой «last flat run», а дальше — та же фраза, что на всех
- * пяти рядах GENERATE (`PRICED_LATER`). Нет ни одного прогона — только фраза.
+ * ⚠ ЦЕНЫ В РЯДУ НЕТ (26.09, O-37 / D-35). Здесь стояла строка «US$… · last flat run · priced by the
+ * server when the run starts» — цена ПОСЛЕДНЕГО прогона под видом цены следующего. Владелец:
+ * «убрать полностью». Цена прогона живёт в истории, по факту; ряд запуска о деньгах молчит.
  */
 
 /**
@@ -388,11 +386,9 @@ export function FlatRunRow({
     chip.querySelector<HTMLElement>('[aria-haspopup]')?.click();
   };
 
-  /* Цена последнего флэт-прогона — см. шапку. `priceActual` первым: это то, что списали. */
-  const lastRun = useMemo(() => latestRunOfKind(band.runs, 'flat'), [band.runs]);
-  const lastPrice = lastRun
-    ? formatMoney(lastRun.priceActual ?? lastRun.priceEstimate, lastRun.currency)
-    : '';
+  /* ЧИПЫ ДЕТАЛЕЙ, КОТОРЫЕ ПРЕДЛОЖИЛ ЧЕРНОВИК (26.09, O-34): синие, пока слот не принят, — по тому же
+     журналу, что и слот на бенче (`slotProposed`); своего состояния у ряда нет. */
+  const drafted = useDrafted();
 
   const writesOff = !!disabled || !speaks;
   /* Выбор ряда заперт, пока ждём сохранения и пока запрос в полёте: `submit` берёт виды и раскладку
@@ -587,14 +583,21 @@ export function FlatRunRow({
             const id = d.id ?? 0;
             if (id <= 0) return null;
             const on = !!detailTicks[id];
+            const proposed = drafted.slotProposed(id);
             return (
               <Chip
                 key={`d:${id}`}
                 selected={on}
                 pressed={on}
                 disabled={choiceOff}
+                tone={proposed ? 'attention' : undefined}
+                data-proposed={proposed || undefined}
                 style={ROW_CONTROL_STYLE}
-                title={`detail described in the flat slots: ${displayDetailName(bench.details, d)}`}
+                title={
+                  proposed
+                    ? `detail proposed by the construction draft, not accepted yet: ${displayDetailName(bench.details, d)} — accept it in the flat slots`
+                    : `detail described in the flat slots: ${displayDetailName(bench.details, d)}`
+                }
                 onClick={() => setDetailTicks((prev) => ({ ...prev, [id]: !prev[id] }))}
               >
                 detail · {displayDetailName(bench.details, d)}
@@ -627,7 +630,7 @@ export function FlatRunRow({
 
       {/* ═══ РЯД 2 · ЗАПУСК — ОБЩИЙ ОРГАН (F-1). `disabled` ряду НЕ передаётся: право на запись уже
           названо в `gateReason` и той же переменной заперт `submit`. `shape` не называется:
-          хвост здесь свой — деньги слева от двери описи, дверь у правого края, как в макете.
+          хвост здесь свой — только дверь описи рядом с GENERATE (O-37: строки денег нет).
           `data-flat-generate` — якорь двери «the flat run ›» из FLAT SLOTS. */}
       <div data-flat-generate=''>
         <GenerateRow
@@ -646,20 +649,6 @@ export function FlatRunRow({
               <Button variant='secondary' size='sm' onClick={() => setWmgOpen(true)}>
                 <ControlLabel>what the model gets ▸</ControlLabel>
               </Button>
-              <Text
-                size='micro'
-                variant='label'
-                component='span'
-                className='min-w-0'
-                data-probe='run-price'
-              >
-                {lastPrice ? (
-                  <>
-                    <b className='text-textColor'>{lastPrice}</b> · last flat run ·{' '}
-                  </>
-                ) : null}
-                {PRICED_LATER}
-              </Text>
             </>
           }
         />

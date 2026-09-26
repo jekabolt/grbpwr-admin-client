@@ -10,6 +10,7 @@ import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
+import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
@@ -28,6 +29,7 @@ import {
 import { useTechCardAutosave } from './autosave-contract';
 import { displayDetailName, readBench } from './bench-slot';
 import { useMoodMinimumGate } from './chain-rail';
+import { useDrafted } from './drafted-contract';
 import { cropFamilies } from './generation/composite';
 import {
   flatInputBusy,
@@ -1341,6 +1343,20 @@ function ReferenceCell({
   const label = `reference ${number ?? mediaId}`;
   const name = `picture ${mediaId}`;
 
+  /**
+   * «PROPOSED» — ДЕТАЛЬ, КОТОРУЮ ЗАВЁЛ ЧЕРНОВИК И ЧЕЛОВЕК ЕЩЁ НЕ ПРИНЯЛ (26.09, O-34). Владелец: «в
+   * самом окне INPUT — REFERENCES они не помечены как PROPOSED, они так помечены только в FLAT
+   * SLOTS». Источник один — журнал черновика (`slotProposed`, тот же, что читает бенч и чипы VIEWS);
+   * здесь он спрашивается по указателю строки на слот. Синяя рамка на селекте роли и слово
+   * `proposed` рядом — тот же тон, что у слота на бенче. Снимается там же, где у бенча: касание
+   * слота (картинка, перо, имя, снос) или `accept all`; своей двери принятия у строки нет.
+   */
+  const drafted = useDrafted();
+  const proposed =
+    detailSlotId > 0 &&
+    normaliseViewKey(role) === DETAIL_VIEW &&
+    drafted.slotProposed(detailSlotId);
+
   return (
     <div className='flex min-w-0 flex-col gap-1' data-ref-cell={mediaId}>
       {/* КАДР 1:1, КАРТИНКА ВПИСЫВАЕТСЯ ЦЕЛИКОМ (`contain`). Навязанное соотношение законно
@@ -1433,7 +1449,11 @@ function ReferenceCell({
       {/* РОЛЬ, А У ДЕТАЛИ — ЕЁ ИМЯ (J-9): имя печатается на триггере, не в списке; дверь починки
           «name it» — соседняя и появляется РОВНО в сломанном состоянии (Radix не шлёт
           `onValueChange` на повторный выбор того же значения). `data-ref-role` — якорь пробы. */}
-      <div className='flex min-w-0 items-center gap-1' data-ref-role={mediaId}>
+      <div
+        className='flex min-w-0 items-center gap-1'
+        data-ref-role={mediaId}
+        data-ref-proposed={proposed || undefined}
+      >
         <Select
           key={selectKeyFor(role)}
           name={`ref-role-${mediaId}`}
@@ -1442,7 +1462,7 @@ function ReferenceCell({
           placeholder='— not sent —'
           readOnly={readOnly || locked}
           onValueChange={onRole}
-          className='w-full min-w-0'
+          className={cn('w-full min-w-0', proposed && 'border-warning text-warning')}
           renderValue={(value, item) =>
             normaliseViewKey(String(value)) === DETAIL_VIEW ? (
               <span className='min-w-0 truncate' data-ref-detail={mediaId}>
@@ -1457,6 +1477,16 @@ function ReferenceCell({
             )
           }
         />
+        {proposed && (
+          <Pill
+            tone='attention'
+            data-proposed-pill=''
+            className='shrink-0 leading-none'
+            title='the construction draft proposed this detail — put a picture in its flat slot, draw, rename or remove it there to accept'
+          >
+            proposed
+          </Pill>
+        )}
         {normaliseViewKey(role) === DETAIL_VIEW && !detailName && !readOnly && (
           <Button
             variant='secondary'

@@ -19,11 +19,15 @@ const chipVariants = cva(
         default: [],
         // A chip pointing at broken data (a dangling piece code, a missing material).
         error: ['border-error', 'text-error'],
+        // Blue — mid-flight, needs a human (the same tone as `Pill` `attention` and the «drafted»
+        // mark): a chip standing for something a draft proposed and nobody has accepted yet.
+        attention: ['border-warning', 'text-warning'],
       },
       dashed: { true: ['border-dashed'], false: [] },
     },
     compoundVariants: [
       { selected: true, tone: 'error', className: 'bg-error text-bgColor border-error' },
+      { selected: true, tone: 'attention', className: 'bg-warning text-bgColor border-warning' },
     ],
     defaultVariants: { selected: false, tone: 'default', dashed: false },
   },
@@ -99,7 +103,9 @@ export function Chip({
       {...spanRole}
       {...(interactive && !nonForm ? { type: 'button' as const, disabled, onClick } : {})}
       aria-pressed={pressed}
-      className={chipVariants({ selected, tone, dashed, className: cn(spanRole.className, className) })}
+      /* twMerge over the WHOLE string: a tone's colour must beat the `selected` branch's
+         (`text-labelColor` → `text-warning`), and the compiled CSS order is not a contract. */
+      className={cn(chipVariants({ selected, tone, dashed }), spanRole.className, className)}
     >
       {children}
       {/* Задизейбленный чип не удаляется. Настоящей `<button disabled>` это давал браузер; в
