@@ -142,9 +142,9 @@ export function WmgGroup({
  * Remaining `data-*` attributes land on the row: the arms' probe anchors (`data-sent-cloths`,
  * `data-input-side`) live on the line, not on a wrapper around it.
  *
- * The hairline sits BETWEEN lines (O-48): a line draws it only while another line follows among
- * its siblings (`data-wmg-line` is that mark) — so a group ends in air before its note, and before
- * the next group's label.
+ * The hairline sits BETWEEN lines (O-48): a line draws it only when the element right after it is
+ * another line (`data-wmg-line` is that mark) — so a run of lines ends in air before its note, the
+ * next group's label, or anything else that is not a line.
  */
 export function InventoryLine({
   name,
@@ -169,7 +169,7 @@ export function InventoryLine({
     <div
       data-wmg-line=''
       {...rest}
-      className={`flex items-center gap-2 border-b border-hairline py-1 [&:not(:has(~[data-wmg-line]))]:border-b-0${className ? ` ${className}` : ''}`}
+      className={`flex items-center gap-2 border-b border-hairline py-1 [&:not(:has(+[data-wmg-line]))]:border-b-0${className ? ` ${className}` : ''}`}
     >
       {lead !== undefined ? (
         <span className='shrink-0'>{lead}</span>

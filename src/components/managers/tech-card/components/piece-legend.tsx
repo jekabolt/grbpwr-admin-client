@@ -23,10 +23,17 @@ export function PieceLegend() {
         </Text>
       }
     >
+      {/* TWO COLUMNS FROM `sm` UP, AND THE LAST VISUAL ROW ENDS IN AIR (O-48 review). `Row` rules
+          itself by its next sibling, which in a two-up grid is its NEIGHBOUR ACROSS, not the row
+          below: the last code went bare while the one beside it kept a half-width rule. The
+          penultimate code sits in the last visual row exactly when it opens that row (an odd
+          position), and then it drops its rule too; below `sm` the grid is one column and the
+          plain rule holds. */}
       <div className='grid gap-x-2.5 sm:grid-cols-2'>
         {pieceBaseCodes.map((p) => (
           <Row
             key={p.code}
+            className='sm:[&:nth-last-child(2):nth-child(odd)]:border-b-0'
             label={<span className='font-bold'>{p.code}</span>}
             value={
               <Text size='micro' variant='label' component='span'>

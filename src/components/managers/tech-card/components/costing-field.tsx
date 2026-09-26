@@ -1916,10 +1916,11 @@ function StepRow({
   const valueTone = kind === 'neg' ? 'text-error' : kind === 'final' ? 'text-success' : '';
   return (
     // The rule sits BETWEEN steps (O-48). `last:` never fired here — the notes and the parameters
-    // follow the waterfall in the same column — so a step draws it only while another step follows.
+    // follow the waterfall in the same column — so a step draws it only when the element right
+    // after it is another step.
     <div
       data-step-row=''
-      className='grid grid-cols-[minmax(110px,170px)_1fr_auto] items-center gap-2 border-b border-hairline py-1 [&:not(:has(~[data-step-row]))]:border-b-0'
+      className='grid grid-cols-[minmax(110px,170px)_1fr_auto] items-center gap-2 border-b border-hairline py-1 [&:not(:has(+[data-step-row]))]:border-b-0'
     >
       <span className='min-w-0'>
         <span className={`flex items-center gap-1 ${emphasis ? 'font-bold' : ''}`}>

@@ -261,9 +261,9 @@ Structure inside a block is drawn with exactly four ruled weights. This is what 
 | Block title | 2px solid ink, below the title | `SectionHeader` |
 | Sub-group | 1px solid edge `#cccccc` | `GroupLabel` |
 | List row | 1px solid rule `#e6e6e6` | `Row` |
-| Closing total | 1px solid ink | `RowTotal` |
+| Closing total | 1px solid ink, above the total | `RowTotal` |
 
-**The Between-Rows Rule.** A list's hairline sits *between* rows, never under the last one: the list ends in air. An add door below a list (the dashed `+ …` placeholder row) stands one step away from the last row (`mt-4`, 16px), and only when rows exist; in an empty list it is the first row, with no extra gap. `Row`, `DataTable`, `FieldRow` and `InventoryLine` do this themselves; a hand-rolled list uses `divide-y divide-hairline`, `last:border-b-0`, or the row's index when something that is not a row follows it.
+**The Between-Rows Rule.** A list's hairline sits *between* rows, never under the last one: a run of rows ends in air at the first thing that is not a row — a note, a label, a door, the end. A closing total draws its ink rule *above* itself and none below, and the row before it drops its hairline. An add door below a list (the dashed `+ …` placeholder row) stands one step away from the last row (`mt-4`, 16px), and only when rows exist; in an empty list it is the first row, with no extra gap. `Row`/`RowTotal`, `DataTable`/`TotalRow`, `FieldRow` and `InventoryLine` do this themselves; a hand-rolled list uses `divide-y divide-hairline`, `last:border-b-0`, or the row's index when something that is not a row follows it.
 
 `SectionHeader` also carries an optional grey trailing clause (`question`) that says what the block is FOR — that clause is most of why the product reads as explained rather than merely labelled. Use it.
 

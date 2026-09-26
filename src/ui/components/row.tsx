@@ -5,14 +5,19 @@ import { cn } from 'lib/utility';
  * screens must never set `tabular-nums` themselves.
  *
  * THE HAIRLINE SITS BETWEEN ROWS, NEVER UNDER THE LAST ONE (owner, 2026-09-26, O-48: «после
- * последнего чилда в списке не делать подчеркивание»). A row draws its rule only while another
- * `Row` follows it among its siblings (`data-row` is that mark), so the list ends in air whatever
- * comes after it — nothing, a note, a door that adds a row. A row followed by a `RowTotal` keeps
- * its rule: the total is a row too. A row wrapped ALONE in a per-item element (a link, a click
- * target) has no sibling to look at — the wrapper carries the rule there (`last:border-b-0` on
- * the wrapper, `border-b-0` on the row).
+ * последнего чилда в списке не делать подчеркивание»). A row draws its rule only when the element
+ * RIGHT AFTER it is another `Row` (`data-row` is that mark), so a run of rows ends in air at the
+ * first thing that is not a row: a note, a group label, a door that adds a row, a total, the end
+ * of the container. Adjacent, not «any later sibling»: a note between two runs ends the first run
+ * even though rows follow it (O-48 review). A fragment is transparent — its rows are siblings of
+ * the rows around it — and `null` leaves no sibling at all. A row wrapped ALONE in a per-item
+ * element (a link, a click target) has no sibling to look at: the wrapper carries the rule there
+ * (`border-b border-hairline last:border-b-0` on the wrapper, `border-b-0` on the row).
  *
- * `emphasis` is the closing/total row: bold, with a full-weight rule above the value.
+ * `emphasis` is the closing/total row (DESIGN.md, the rule ladder): bold, with the full-weight ink
+ * rule ABOVE it and nothing below — the total closes the list, so the row before it drops its
+ * hairline (a total is `data-row-total`, not `data-row`). Directly under a `GroupLabel` there is no
+ * list to close: the label's own rule stands there, and the total draws none.
  */
 export function Row({
   label,
@@ -31,12 +36,13 @@ export function Row({
     tone === 'error' ? 'text-error' : tone === 'label' ? 'text-labelColor' : undefined;
   return (
     <div
-      data-row=''
+      data-row={emphasis ? undefined : ''}
+      data-row-total={emphasis ? '' : undefined}
       className={cn(
         'flex justify-between gap-2.5 py-1',
         emphasis
-          ? 'border-b border-textColor font-bold'
-          : 'border-b border-hairline [&:not(:has(~[data-row]))]:border-b-0',
+          ? 'border-t border-textColor font-bold [[data-group-label]+&]:border-t-0'
+          : 'border-b border-hairline [&:not(:has(+[data-row]))]:border-b-0',
         toneClass,
         className,
       )}

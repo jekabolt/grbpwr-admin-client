@@ -941,7 +941,10 @@ function RailTotal() {
     return acc + (Number.isFinite(n) ? n : 0);
   }, 0);
   return (
+    // The total's ink rule stands ABOVE it now (O-48 review), right under «+ operation»: a step of
+    // air keeps it off the door's dashed edge.
     <RowTotal
+      className='mt-2'
       label={
         <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
           total · {operations.length}

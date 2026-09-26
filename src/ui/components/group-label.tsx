@@ -27,6 +27,9 @@ export function GroupLabel({
 }) {
   return (
     <div
+      // A total right under a label draws no rule of its own — the label's rule stands there
+      // (`Row`, O-48 review); this mark is how it knows.
+      data-group-label=''
       className={cn(
         'mb-1 flex items-baseline gap-2 border-b border-borderColor pb-0.5',
         flush ? 'mt-0' : 'mt-3',

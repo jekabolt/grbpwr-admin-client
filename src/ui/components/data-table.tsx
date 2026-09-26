@@ -8,7 +8,8 @@ import { cn } from 'lib/utility';
  *   - `td` over a `--hairline` rule — BETWEEN rows only: the last row of the last `tbody` ends in
  *     air (O-48), and a door that adds a row stands under the table, not as its last row
  *   - tabular numerals throughout
- *   - the total row is bold with a full-weight rule ABOVE it
+ *   - the total row is bold with a full-weight rule ABOVE it — and the row above it gives up its
+ *     bottom rule, or the collapsed border model paints that hairline over the ink (O-48 review)
  *
  * `variant="grid"` is the matrix form (fabric map, size chart): every cell bordered
  * and centred, first column left-aligned on the zebra tint.
@@ -64,6 +65,15 @@ export function DataTable({
           // keeps the rule between those groups. A `TotalRow` closing the list already draws no
           // rule below itself; the grid keeps its outline, so this is the list form alone.
           variant === 'list' && '[&>tbody:last-of-type>tr:last-child>td]:border-b-0',
+          // A TOTAL CLOSES THE LIST WITH ITS OWN INK RULE ABOVE IT — and in `border-collapse` two
+          // 1px solid borders on one seam are settled by position, not colour: the UPPER cell wins.
+          // Measured (Chromium, 26.09): the hairline of the row above painted over the `TotalRow`'s
+          // ink, so the closing rule never showed. The row right above a total therefore drops its
+          // bottom border — in the same `tbody`, or as the last row of the group a total's own
+          // `tbody`/`tfoot` follows. Both forms, list and grid: the ladder is the same.
+          '[&>tbody>tr:has(+tr[data-row-total])>td]:border-b-0',
+          '[&>tbody:has(+tbody>tr[data-row-total]:first-child)>tr:last-child>td]:border-b-0',
+          '[&>tbody:has(+tfoot>tr[data-row-total]:first-child)>tr:last-child>td]:border-b-0',
           '[&_th:first-child]:text-left [&_td:first-child]:text-left',
           // A TEXT COLUMN SAYS SO WITH `data-align="left"` ON BOTH ITS `th` AND ITS `td`, and it
           // has to live here rather than at the call site: `[&_th]:text-right` is a descendant
@@ -83,10 +93,13 @@ export function DataTable({
   );
 }
 
-/** Closing row: bold, ruled above, no rule below. */
+/** Closing row: bold, ruled above, no rule below. `data-row-total` lets the row above step aside. */
 export function TotalRow({ children }: { children: React.ReactNode }) {
   return (
-    <tr className='[&>td]:border-t [&>td]:border-b-0 [&>td]:border-textColor [&>td]:font-bold'>
+    <tr
+      data-row-total=''
+      className='[&>td]:border-t [&>td]:border-b-0 [&>td]:border-textColor [&>td]:font-bold'
+    >
       {children}
     </tr>
   );
