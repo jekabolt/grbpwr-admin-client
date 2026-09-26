@@ -116,7 +116,13 @@ export type EnhanceTextMode =
   // kept; at most twice the length.
   | "ENHANCE_TEXT_MODE_EXPAND"
   // Keep only what matters; at most half the length.
-  | "ENHANCE_TEXT_MODE_SHORTEN";
+  | "ENHANCE_TEXT_MODE_SHORTEN"
+  // Rewrite as a concise image-generation prompt (O-50): the garment type
+  // first, then silhouette, construction, material, colour and finish facts as
+  // comma-separated descriptors; every fact kept, none added; no marketing
+  // words, no negations (what the garment does NOT have is left out — an image
+  // model draws what a prompt names). Same language as the input.
+  | "ENHANCE_TEXT_MODE_PROMPT";
 // EnhanceTextField names WHICH field is being rewritten. It is an enum and not a
 // string on purpose (review M-07): the server maps it to its own fixed phrase in
 // the system prompt, so nothing the request carries can become an instruction.
@@ -6239,7 +6245,8 @@ export type EnhanceTextRequest = {
   context: string | undefined;
   // The destination field's own limit, so the answer always fits it. 0 = 4000;
   // anything else is clamped to [200, 4000]. A longer answer is cut at the last
-  // sentence end (. ! ?) inside the limit, or at the limit when there is none.
+  // sentence end (. ! ?) inside the limit — for PROMPT, a list of descriptors,
+  // also at the last comma or semicolon — or at the limit when there is none.
   maxRunes: number | undefined;
 };
 
@@ -16721,6 +16728,16 @@ export type common_DesignConstructionDraft = {
   // colour. A PROPOSAL LIKE EVERY OTHER FIELD HERE: nothing is created until a person confirms
   // one, because confirming writes a PRODUCT (a colourway of this style) and not a form value.
   colourways: common_DesignColourwayProposal[] | undefined;
+  // Details that need a drawing of their OWN (O-33, D-32): what cannot be understood from the
+  // front/back flats — an unusual pocket construction, a special collar, cuff, placket or vent, a
+  // hidden fastening, a hardware detail. EMPTY IS A REAL ANSWER: most garments need none, and the
+  // prompt says so in as many words («if nothing needs a separate drawing, return an empty list»).
+  // ⚠ THIS, AND NOT `aspects`, IS WHAT THE CLIENT MAKES DETAIL SLOTS FROM. An aspect is a
+  // construction fact in words (its home is the CONSTRUCTION tab); whether a detail deserves its
+  // own flat drawing is a separate question the model answers separately — turning every aspect
+  // into a slot produced «DETAIL · FASTENING» for a pull-on tee. Server-capped at 6; name ≤ 40
+  // runes, note ≤ 200; deduped by folded name; a «none» row is dropped, not carried.
+  flatDetails: common_DesignFlatDetail[] | undefined;
 };
 
 // DesignConstructionAspect is one row of the aspects editor: its key and its text.
@@ -16804,6 +16821,14 @@ export type common_DesignColourwaySlotColour = {
   pantone: string | undefined;
   hex: string | undefined;
   colour: string | undefined;
+};
+
+// DesignFlatDetail is ONE detail that needs its own flat drawing: what it is and what the drawing
+// must show. A proposal like every other field of the draft — the client stages it as a DETAIL
+// slot, and nothing is drawn until a person accepts it and runs the flat.
+export type common_DesignFlatDetail = {
+  name: string | undefined;
+  note: string | undefined;
 };
 
 export interface AdminService {
@@ -17473,8 +17498,9 @@ export interface AdminService {
   // GenerateTechCardOperations: AI-assisted authoring is authoring.
   FormatLibraryNoteMarkdown(request: FormatLibraryNoteMarkdownRequest): Promise<FormatLibraryNoteMarkdownResponse>;
   // EnhanceText rewrites ONE free-text field of a tech card — improve (fix errors,
-  // clearer), expand (more detail) or shorten — for the small `ai ✦` button in the
-  // corner of the field (T15). Like FormatLibraryNoteMarkdown it is a SUGGESTION
+  // clearer), expand (more detail), shorten, or prompt (the text as an
+  // image-generation prompt, O-50) — for the small `ai ✦` button in the corner
+  // of the field (T15). Like FormatLibraryNoteMarkdown it is a SUGGESTION
   // and persists NOTHING: the answer goes back as a string, the client puts it in
   // the field with a short-lived undo, and the save is the field's ordinary write.
   // What reaches the model is req.text plus req.context (card facts the client

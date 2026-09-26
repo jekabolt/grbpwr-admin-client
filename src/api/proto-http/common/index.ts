@@ -5670,6 +5670,16 @@ export type DesignConstructionDraft = {
   // colour. A PROPOSAL LIKE EVERY OTHER FIELD HERE: nothing is created until a person confirms
   // one, because confirming writes a PRODUCT (a colourway of this style) and not a form value.
   colourways: DesignColourwayProposal[] | undefined;
+  // Details that need a drawing of their OWN (O-33, D-32): what cannot be understood from the
+  // front/back flats — an unusual pocket construction, a special collar, cuff, placket or vent, a
+  // hidden fastening, a hardware detail. EMPTY IS A REAL ANSWER: most garments need none, and the
+  // prompt says so in as many words («if nothing needs a separate drawing, return an empty list»).
+  // ⚠ THIS, AND NOT `aspects`, IS WHAT THE CLIENT MAKES DETAIL SLOTS FROM. An aspect is a
+  // construction fact in words (its home is the CONSTRUCTION tab); whether a detail deserves its
+  // own flat drawing is a separate question the model answers separately — turning every aspect
+  // into a slot produced «DETAIL · FASTENING» for a pull-on tee. Server-capped at 6; name ≤ 40
+  // runes, note ≤ 200; deduped by folded name; a «none» row is dropped, not carried.
+  flatDetails: DesignFlatDetail[] | undefined;
 };
 
 // DesignConstructionAspect is one row of the aspects editor: its key and its text.
@@ -5753,6 +5763,14 @@ export type DesignColourwaySlotColour = {
   pantone: string | undefined;
   hex: string | undefined;
   colour: string | undefined;
+};
+
+// DesignFlatDetail is ONE detail that needs its own flat drawing: what it is and what the drawing
+// must show. A proposal like every other field of the draft — the client stages it as a DETAIL
+// slot, and nothing is drawn until a person accepts it and runs the flat.
+export type DesignFlatDetail = {
+  name: string | undefined;
+  note: string | undefined;
 };
 
 export type OrderFactor =
