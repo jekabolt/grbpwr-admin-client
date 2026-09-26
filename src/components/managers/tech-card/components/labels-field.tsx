@@ -22,6 +22,7 @@ import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import { generateCareLabel, hasAnyComposition } from 'utils/care-label';
 import { useBomItemIdOptions } from './bom-line-picker';
+import { useCareDrift } from './care-drift';
 import { LabelsChecklist } from './labels-checklist';
 import { TechCardFormData, wireInt } from './schema';
 import { labelAttachmentOptions, labelPlacementOptions } from './tech-card-options';
@@ -72,6 +73,10 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
   // storefront keeps what it had — said here, where the label is edited (25.09 CL-C, Codex M2).
   const { canWrite } = usePermissions();
   const storefrontCareLocked = isCare && !canWrite(SECTION.products);
+  // …and when the storefront's care is NOT this label (a legacy card, or a label edited without
+  // that grant), StyleFactsField knows it and says so here, with the one door that stages the label
+  // as the style's care (`care-drift.ts`; nothing is written on open).
+  const careDrift = useCareDrift((s) => (isCare && s.drift?.row === index ? s.drift : null));
   // Which BOM article this label is printed on (§2.8). The wire carries the BOM line's server id,
   // so the picker offers ids — never a number the operator has to know, and never one belonging to
   // another card, which the backend now rejects outright.
@@ -108,6 +113,24 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
         {isCare ? (
           <div className='col-span-2 sm:col-span-3'>
             <CarePicker name={`labels.${index}.content`} label='care symbols' />
+            {careDrift && (
+              <div className='flex items-center gap-2' data-storefront-care-drift=''>
+                <Text size='micro' variant='label' component='span' className='min-w-0 flex-1'>
+                  storefront care differs from this label
+                </Text>
+                {careDrift.sync && (
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='xs'
+                    className='shrink-0 whitespace-nowrap'
+                    onClick={careDrift.sync}
+                  >
+                    sync ›
+                  </Button>
+                )}
+              </div>
+            )}
             {storefrontCareLocked && (
               <Text size='micro' variant='label' data-storefront-care-locked=''>
                 storefront care needs products:write

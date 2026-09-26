@@ -3,6 +3,7 @@ import { common_CareEntry } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useModel } from 'components/managers/models/components/useModelQuery';
 import { CareSymbol } from 'components/managers/product/components/care/care-card';
+import { careCodes } from 'components/managers/product/components/care/care-codes';
 import { CarePicker } from 'components/managers/product/components/care/care-picker';
 import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
@@ -23,6 +24,7 @@ import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { FormLabel } from 'ui/form';
 import SelectField from 'ui/form/fields/select-field';
+import { useCareDrift } from './care-drift';
 import { FIT_KEYS, fitChoicesFor, fitLabel } from './design/fit-vocabulary';
 import { emptyLabel } from './labels-field';
 import { TechCardFormData, toPurposeEnum } from './schema';
@@ -70,6 +72,16 @@ const FACT_WORD: Record<Fact, string> = {
 
 /** A fact's value as comparable text: the form holds strings and enum strings; unset is ''. */
 const factText = (v: unknown): string => (v == null ? '' : String(v));
+
+/**
+ * Two care values that name the same symbols. The server stores care in its own print order, so
+ * a label picked in another order is the same care, not a difference to report.
+ */
+const sameCare = (a: string, b: string): boolean => {
+  const x = new Set(careCodes(a));
+  const y = new Set(careCodes(b));
+  return x.size === y.size && [...x].every((c) => y.has(c));
+};
 
 const ORIGIN_LABEL = 'TECH_CARD_LABEL_TYPE_ORIGIN';
 const CARE_LABEL = 'TECH_CARD_LABEL_TYPE_CARE';
@@ -436,6 +448,9 @@ export function StyleFactsField({
   const { canWrite, isLoading: grantLoading } = usePermissions();
   const canStyle = canWrite(SECTION.products);
   const firstCareSync = useRef(true);
+  // What the first sync found the style holding when it adopted the care label over it (see CARE
+  // DRIFT below). Null when it adopted nothing, and again once a care write has landed.
+  const [careAdopted, setCareAdopted] = useState<{ stored: string; label: string } | null>(null);
   useEffect(() => {
     // THE STYLE'S CARE IS LEFT ALONE FOR AN ACCOUNT THAT CANNOT WRITE IT (Codex M2). The care
     // label is the card's (LABELS, tech_cards:write) and saves as it always did; mirroring it into
@@ -444,8 +459,14 @@ export function StyleFactsField({
     // in words. An account still loading reads as allowed (the grants fail open), so the mirror —
     // its first sync included — waits for the answer: nothing is adopted for an account that turns
     // out not to hold the grant.
+    //
+    // ACCEPTED RACE (25.09 decision): a products:write account that edits the care label before
+    // its own account has loaded gets that edit adopted by the first sync — clean, not staged. The
+    // layout loads the account at app start, so the window is the first moments of a cold page,
+    // and CARE DRIFT below says so on the label row, with its `sync ›`.
     if (!canStyle || grantLoading) return;
-    const cur = factText(live('careInstructions')).trim();
+    const held = live('careInstructions');
+    const cur = factText(held).trim();
     if (firstCareSync.current) {
       firstCareSync.current = false;
       // On mount only adopt a care label that actually carries symbols — never clear a stored value
@@ -460,6 +481,9 @@ export function StyleFactsField({
       // the care label in this session (below).
       if (careFromLabel && careFromLabel !== cur) {
         moveBaseline('careInstructions', careFromLabel, careFromLabel);
+        // Nothing is written on open. What the adoption went over is kept, because the style
+        // still holds it (CARE DRIFT).
+        setCareAdopted({ stored: factText(held), label: careFromLabel });
       }
       return;
     }
@@ -535,6 +559,57 @@ export function StyleFactsField({
   };
   const changed = STYLE_FACT_KEYS.filter((f) => writes[f]).map((f) => FACT_WORD[f]);
   const writesKey = STYLE_FACT_KEYS.map((f) => (writes[f] ? 1 : 0)).join('');
+
+  // CARE DRIFT — THE STOREFRONT'S CARE IS NOT THE CARE LABEL (25.09 decision: no write on open).
+  // Two ways to get here. A legacy card's care was authored somewhere else, and the first sync
+  // adopted the label over it. Or the label was edited by an account that cannot write the style
+  // (M2), and the style kept its care. The care label row says so (`useCareDrift`, LABELS) and
+  // offers one door, `sync ›`: it puts the stored care back under the label as the baseline, so
+  // the label reads as the edit it is, and it is staged and written like any other care edit
+  // (mask [careInstructions]). An account without products:write gets the words and no door, and
+  // for it the care in the form IS the stored care, since nothing here ever writes it.
+  //  - Not while care is staged: that write is what ends the difference, and the save says how it
+  //    went.
+  //  - Only for a label that is care symbols the server takes: under the mask UpdateStyle refuses
+  //    any unknown code, and a refused write would stay staged and retry on every autosave.
+  //  - The same symbols in another order are no difference: the server stores its own print order.
+  const careHeld = useWatch({ control, name: 'careInstructions' }) as string | undefined;
+  const careVocabulary = useCareVocabulary();
+  const careDrift =
+    !grantLoading &&
+    careIdx >= 0 &&
+    !!careFromLabel &&
+    (canStyle
+      ? !!careAdopted &&
+        careAdopted.label === careFromLabel &&
+        !dirtyFields.careInstructions &&
+        !sameCare(careAdopted.stored, careFromLabel)
+      : !sameCare(factText(careHeld), careFromLabel));
+  const labelCodes = careCodes(careFromLabel);
+  const careSyncable =
+    careDrift &&
+    canStyle &&
+    canEdit &&
+    !!staging &&
+    labelCodes.length > 0 &&
+    labelCodes.every((c) => !!careVocabulary.byCode[c] && !careVocabulary.byCode[c].archived);
+  useEffect(() => {
+    const adopted = careAdopted;
+    useCareDrift.setState({
+      drift: careDrift
+        ? {
+            row: careIdx,
+            sync:
+              careSyncable && adopted
+                ? () => moveBaseline('careInstructions', adopted.stored)
+                : null,
+          }
+        : null,
+    });
+    return () => useCareDrift.setState({ drift: null });
+    // `moveBaseline` reads the page's one form control.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [careDrift, careSyncable, careIdx, careAdopted]);
 
   // The panel's mutation, unwrapped: it THROWS on failure instead of toasting, because the header's
   // one save is what reports the outcome now — it needs the rejection to name this panel in a
@@ -696,6 +771,8 @@ export function StyleFactsField({
         // staged again, not as clean and «saved». Each baseline becomes what was sent, never what
         // the field holds by now — a value typed in flight is still an edit (see moveBaseline).
         for (const f of STYLE_FACT_KEYS) if (f in sent) moveBaseline(f, sent[f]);
+        // The style holds the care that was sent now: whatever the first sync adopted over is gone.
+        if ('careInstructions' in sent) setCareAdopted(null);
         // The style is written: from here on only an edit writes its age group.
         if (Object.keys(sent).length > 0) setCreateMode(false);
       },
