@@ -1,7 +1,11 @@
-import type { GetDesignBandResponse, common_DesignPicture, common_MediaFull } from 'api/proto-http/admin';
+import type {
+  GetDesignBandResponse,
+  common_DesignPicture,
+  common_MediaFull,
+} from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useFormContext } from 'react-hook-form';
 
 import type { TechCardFormData } from '../schema';
@@ -12,6 +16,7 @@ import {
   isInputRow,
   type BoardItem,
 } from './mood-board';
+import { flatInputBusy, holdFlatInput, readFlatInput, rowsWritable } from './flat-input';
 import { SplitModal } from './split-modal';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
 import { isKnownViewKey } from './views';
@@ -152,12 +157,36 @@ export function useSplitToInput({
   const [registering, setRegistering] = useState<number | null>(null);
 
   /**
+   * ═══ РАЗРЕЗ ВО ВХОД ДЕРЖИТ ВХОД (ревью раунда 4, MIN-2) ════════════════════════════════════════
+   * Разрез для входа пишет роли на СЕРВЕРЕ (`for_input`) и строки в форме; прогон, начатый посреди,
+   * снял бы вход без них или с половиной. Поэтому от щелчка (регистрация) до закрытия окна вход
+   * удержан — GENERATE ждёт, CLEAR и рекол отказываются; окно не открывается над занятым входом, и
+   * строки не дописываются, если к ответу вход оказался занят. Только для двери входа (`addToInput`):
+   * разрез с верстака во вход не пишет ничего. Удержание снимается и при размонтировании — ответ
+   * регистрации, пришедший без экрана, своих колбэков уже не позовёт.
+   */
+  const inputHold = useRef<(() => void) | null>(null);
+  const holdInput = () => {
+    if (addToInput && !inputHold.current) inputHold.current = holdFlatInput(techCardId);
+  };
+  const releaseInput = () => {
+    inputHold.current?.();
+    inputHold.current = null;
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => releaseInput, []);
+  const INPUT_BUSY =
+    'the input is busy — a run is being saved or started, or the prompt is being changed';
+
+  /**
    * Регистрации этой сессии: media_id → {ключ намерения, картинка}. Ключ минтится ОДИН раз на
    * медиа и переживает и ретрай, и повторный клик: `client_request_id` — серверный ключ
    * идемпотентности, повторный id возвращает ТУ ЖЕ пачку вместо фантомной второй. Свежий ключ на
    * каждый клик плодил бы в полосе по картинке на нажатие.
    */
-  const registered = useRef(new Map<number, { requestId: string; picture?: common_DesignPicture }>());
+  const registered = useRef(
+    new Map<number, { requestId: string; picture?: common_DesignPicture }>(),
+  );
 
   /** Картинка полосы под этим media_id, если она уже есть, — тогда регистрация не нужна вовсе. */
   function findBandPicture(mediaId: number): common_DesignPicture | undefined {
@@ -191,6 +220,11 @@ export function useSplitToInput({
     if (mediaId == null) return;
     const mode = opts?.mode ?? 'split';
     const note = opts?.note;
+    if (addToInput && flatInputBusy(readFlatInput(techCardId))) {
+      showMessage(`${INPUT_BUSY} — try the ${mode} once it is free`, 'error');
+      return;
+    }
+    holdInput();
     const existing = findBandPicture(mediaId) ?? registered.current.get(mediaId)?.picture;
     if (existing) {
       setTarget({ picture: existing, handle, mode, sourceMediaId: mediaId, note });
@@ -218,15 +252,25 @@ export function useSplitToInput({
           if (!picture) {
             // Сервер сказал «да» и не вернул картинку — это его нарушение контракта, но открыть
             // модалку не на чем, и молчать нельзя: клик выглядел бы съеденным.
+            releaseInput();
             showMessage('the upload was filed but no picture came back', 'error');
             return;
           }
           keep.picture = picture;
+          // Окно не открывается над входом, который за время регистрации заняли (GENERATE, CLEAR).
+          if (addToInput && !rowsWritable(readFlatInput(techCardId))) {
+            releaseInput();
+            showMessage(`${INPUT_BUSY} — the ${mode} was not opened`, 'error');
+            return;
+          }
           setTarget({ picture, handle, mode, sourceMediaId: mediaId, note });
         },
         // Слова отказа уже показал шов записи (`useDesignWrites.onError`); здесь — только снять
-        // «split…» с кнопки, чтобы она не осталась вечно занятой.
-        onError: () => setRegistering(null),
+        // «split…» с кнопки, чтобы она не осталась вечно занятой, и отпустить вход.
+        onError: () => {
+          setRegistering(null);
+          releaseInput();
+        },
       },
     );
   }
@@ -248,6 +292,15 @@ export function useSplitToInput({
 
     if (!addToInput) {
       saySlotsOnly(withMedia.length);
+      return;
+    }
+    // Вход заняли, пока шёл разрез (ревью раунда 4, MIN-2): строки не дописываются посреди прогона
+    // или CLEAR. Роли кадров сервер уже поставил — блок референсов покажет их носителей.
+    if (!rowsWritable(readFlatInput(techCardId))) {
+      showMessage(
+        `${INPUT_BUSY} — the cut pictures are filed and carry their views, but were not added to the input`,
+        'error',
+      );
       return;
     }
 
@@ -317,9 +370,11 @@ export function useSplitToInput({
     const views = `${cut} view${cut === 1 ? '' : 's'}`;
     /* Что стоит ПОСЛЕ счёта — утверждение вызывающего о СВОИХ дверях (разбор у пропа `cutSays`).
        Умолчание — прежняя строка, слово в слово: забытый проп не меняет ни одного экрана. */
-    showMessage(cutSays ? cutSays(views) : `${views} cut — mark them into slots from the band`, 'success');
+    showMessage(
+      cutSays ? cutSays(views) : `${views} cut — mark them into slots from the band`,
+      'success',
+    );
   }
-
 
   /**
    * КРОП — РОВНО ОДНА КАРТИНКА НА ВЫХОДЕ. Окно кропа отпускает только один кадр (`ready` там —
@@ -349,7 +404,11 @@ export function useSplitToInput({
       mode={target.mode}
       note={target.note}
       open
-      onOpenChange={(open) => !open && setTarget(null)}
+      onOpenChange={(open) => {
+        if (open) return;
+        setTarget(null);
+        releaseInput();
+      }}
       forInput={addToInput}
       onSplit={
         target.mode === 'crop'

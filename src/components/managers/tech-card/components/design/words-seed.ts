@@ -17,7 +17,7 @@ import type { TechCardFormData } from '../schema';
  *     из-за засева.
  *
  * РЕШЕНИЕ D-20'''': засев в значения формы НЕ ПОПАДАЕТ, пока человек не подействовал.
- *   · Предложенный текст живёт здесь, по карточке: `{ text, omitted, materialized }`.
+ *   · Предложенный текст живёт здесь, по карточке: `{ text, omitted }`.
  *   · Поле WORDS показывает значение формы, а пока оно пусто и засев не отдан — засев.
  *   · В форму («грязным») засев отдаёт первое действие человека: правка поля, ответ `ai ✦`, GENERATE
  *     (`materializeWords` перед `flush`). CLEAR пишет `''` и засев снимает (`dropWords`).
@@ -27,14 +27,22 @@ import type { TechCardFormData } from '../schema';
  * МОДУЛЬНЫЙ, по карточке, как прежний замок: секция размонтируется на каждой смене шага. Ключа нет —
  * о карточке ещё не решено; `null` — решено без засева (текст стоял, человек стёр, CLEAR), и до
  * перезагрузки страницы карточка больше не засевается.
+ *
+ * «ОТДАН В ФОРМУ» (materialized) — НЕ ФЛАГ, А ФАКТ ФОРМЫ (ревью раунда 4, MIN-4): засев показывается
+ * тогда и только тогда, когда значение формы пусто, а предложение не снято. Поэтому:
+ *   (a) неотданное предложение ИДЁТ ЗА ФАКТАМИ — эффект секции перезаписывает его текст на каждый
+ *       новый `composed`; отданное стоит в форме и фактами не трогается;
+ *   (b) форма, ПЕРЕБАЗИРОВАННАЯ в пустое (сброс черновика, «reload theirs», тихое перечтение), снова
+ *       показывает предложение — отдача «сбрасывается» сама, без слежки за базой формы;
+ *   (c) на карточке, которую нельзя писать или которая не сохраняется, предложения НЕ ВИДНО —
+ *       читатели передают `live`, и слова на экране — значение формы.
+ * Стёртое руками и CLEAR снимают предложение (`null`) — пустое поле остаётся пустым.
  */
 export type WordsSeed = {
   /** Предложенный текст — то, что показано в пустом поле. */
   text: string;
   /** Сколько секций фактов не влезло в потолок поля (строка «+N omitted» под полем). */
   omitted: number;
-  /** Засев отдан в форму или перебит действием человека: больше не показывается вместо значения. */
-  materialized: boolean;
 };
 
 const session = new Map<number, WordsSeed | null>();
@@ -79,20 +87,26 @@ export function lockWords(card: number): void {
 /** Предложить засев — только если о карточке ещё ничего не решено. */
 export function offerWords(card: number, text: string, omitted: number): void {
   if (wordsDecided(card)) return;
-  session.set(card, { text, omitted, materialized: false });
+  session.set(card, { text, omitted });
+  notify();
+}
+
+/** (a) Предложение идёт за фактами: новый `composed` — новый текст; снятое не возвращается. */
+export function followWords(card: number, text: string, omitted: number): void {
+  const seed = card > 0 ? session.get(card) : null;
+  if (!seed || (seed.text === text && seed.omitted === omitted)) return;
+  session.set(card, { text, omitted });
   notify();
 }
 
 /**
- * Человек подействовал сам — правкой, ответом `ai ✦`, реколом: засев больше не подставляется вместо
- * значения формы. Стерев поле руками, он получает пустое поле, а не засев обратно.
+ * Человек подействовал сам — правкой, ответом `ai ✦`, реколом. Непустое значение стоит в форме и
+ * засев не показывается само собой; ПУСТОЕ — стёрто руками: предложение снимается, и пустое поле
+ * остаётся пустым до перезагрузки страницы.
  */
-export function settleWords(card: number): void {
-  if (card <= 0) return;
-  const seed = session.get(card);
-  if (seed === undefined) session.set(card, null);
-  else if (seed && !seed.materialized) session.set(card, { ...seed, materialized: true });
-  else return;
+export function settleWords(card: number, value: unknown): void {
+  if (card <= 0 || !isBlank(value) || session.get(card) === null) return;
+  session.set(card, null);
   notify();
 }
 
@@ -103,41 +117,50 @@ export function dropWords(card: number): void {
   notify();
 }
 
-/** Слова на экране по засеву и значению формы. */
-export function pickShownWords(seed: WordsSeed | null | undefined, stored: unknown): string {
+/**
+ * Слова на экране по засеву и значению формы. `live` — карточку можно писать и она сохраняется:
+ * иначе предложения не видно (c).
+ */
+export function pickShownWords(
+  seed: WordsSeed | null | undefined,
+  stored: unknown,
+  live: boolean,
+): string {
   const value = (stored ?? '') as string;
-  return seed && !seed.materialized && isBlank(value) ? seed.text : value;
+  return live && seed && isBlank(value) ? seed.text : value;
 }
 
 /** СЛОВА НА ЭКРАНЕ СЕЙЧАС — для щелчков и планов: значение формы, а пока оно пусто — засев. */
 export function shownWords(
   card: number,
   form: Pick<UseFormReturn<TechCardFormData>, 'getValues'>,
+  live: boolean,
 ): string {
-  return pickShownWords(readWordsSeed(card), form.getValues('garmentDescription'));
+  return pickShownWords(readWordsSeed(card), form.getValues('garmentDescription'), live);
 }
 
 /** Слова на экране — живые, для отрисовки: подписаны и на поле формы, и на засев. */
-export function useShownWords(card: number, control: Control<TechCardFormData>): string {
+export function useShownWords(
+  card: number,
+  control: Control<TechCardFormData>,
+  live: boolean,
+): string {
   const stored = useWatch({ control, name: 'garmentDescription' });
   const seed = useWordsSeed(card);
-  return pickShownWords(seed, stored);
+  return pickShownWords(seed, stored, live);
 }
 
 /**
- * GENERATE: засев, показанный, но не отданный, уходит в форму «грязным» ДО `flush` — эта запись его
+ * GENERATE: засев, показанный в пустом поле, уходит в форму «грязным» ДО `flush` — эта запись его
  * и понесёт, и прогон прочтёт его из сохранённой карточки. Текст, который стоит в форме, не
- * трогается: показан ровно он.
+ * трогается: показан ровно он. Не `live` — засева не видно (c), и в форму ничего не уходит.
  */
 export function materializeWords(
   card: number,
   form: Pick<UseFormReturn<TechCardFormData>, 'getValues' | 'setValue'>,
+  live: boolean,
 ): void {
   const seed = readWordsSeed(card);
-  if (!seed || seed.materialized) return;
-  if (isBlank(form.getValues('garmentDescription'))) {
-    form.setValue('garmentDescription', seed.text, { shouldDirty: true });
-  }
-  session.set(card, { ...seed, materialized: true });
-  notify();
+  if (!live || !seed || !isBlank(form.getValues('garmentDescription'))) return;
+  form.setValue('garmentDescription', seed.text, { shouldDirty: true });
 }

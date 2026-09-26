@@ -15,9 +15,15 @@ import type { RunRefusal } from './generation/refusal';
  *   · `run`           — `saving`: ждём сохранения карточки; `starting`: запрос прогона в полёте;
  *   · `refused`       — почему последний GENERATE остановился ДО прогона: исход flush, «карточку
  *                       утвердили, пока она сохранялась» или «сохранение остановилось» (m3);
- *   · `clearing`      — вход ПЕРЕПИСЫВАЕТСЯ: CLEAR снимает роли, рекол кладёт вход прогона, кроп
- *                       замещает строку, деталь получает роль (тот же довод: цикл переживает смену
- *                       шага; ревью раунда 3, m1). GENERATE ждёт; другой переписчик отказывается;
+ *   · `clearing`      — CLEAR снимает роли по одной и стирает слова: заперто всё, и спиннер CLEAR
+ *                       читает ТОЛЬКО этот флаг;
+ *   · `rewriting`     — СЧЁТЧИК удержаний строк и ролей (ревью раунда 4, MIN-1/MIN-2): рекол, кроп,
+ *                       деталь, сплит во вход (от регистрации до закрытия окна), селект роли, ✕,
+ *                       переименование детали. GENERATE ждёт, CLEAR и рекол отказываются; слова НЕ
+ *                       запираются — набор посреди кропа не теряется (раунд 3 брал для этого флаг
+ *                       CLEAR, и поле становилось readOnly на время двух записей роли);
+ *   · `wordsHeld`     — СЧЁТЧИК удержаний слов: рекол, который пишет слова прогона (иначе набранное
+ *                       посреди него было бы затёрто);
  *   · `serverRefusal` — отказ СЕРВЕРА последнему запуску, дословно, пока его не прочли или не нажали
  *                       GENERATE снова (ревью раунда 3, m2: в состоянии ряда он жил до смены шага и
  *                       дальше показывался только всплывашкой);
@@ -40,6 +46,8 @@ export type FlatInputState = {
   run: 'saving' | 'starting' | null;
   refused: FlushResult | 'released' | 'stopped' | null;
   clearing: boolean;
+  rewriting: number;
+  wordsHeld: number;
   serverRefusal: RunRefusal | null;
   ask: FlatAsk | null;
 };
@@ -48,6 +56,8 @@ const FLAT_INPUT_IDLE: FlatInputState = {
   run: null,
   refused: null,
   clearing: false,
+  rewriting: 0,
+  wordsHeld: 0,
   serverRefusal: null,
   ask: null,
 };
@@ -59,9 +69,22 @@ export function readFlatInput(card: number): FlatInputState {
   return flatInput.get(card) ?? FLAT_INPUT_IDLE;
 }
 
-/** Вход занят: идёт GENERATE или вход переписывается. */
+/** Вход занят: идёт GENERATE, CLEAR или вход переписывается. GENERATE ждёт, CLEAR и рекол отказываются. */
 export function flatInputBusy(state: FlatInputState): boolean {
-  return state.run !== null || state.clearing;
+  return state.run !== null || state.clearing || state.rewriting > 0;
+}
+
+/**
+ * Строки и роли МОЖНО писать: не идёт ни GENERATE (сервер снимет вход в момент запуска), ни CLEAR.
+ * Другое удержание строк — не помеха: две правки ролей подряд не спорят, спорят правка и прогон.
+ */
+export function rowsWritable(state: FlatInputState): boolean {
+  return state.run === null && !state.clearing;
+}
+
+/** Слова заперты: прогон, CLEAR или рекол, который пишет слова (ревью раунда 4, MIN-1). */
+export function wordsLocked(state: FlatInputState): boolean {
+  return state.run !== null || state.clearing || state.wordsHeld > 0;
 }
 
 export function patchFlatInput(card: number, patch: Partial<FlatInputState>): void {
@@ -71,6 +94,8 @@ export function patchFlatInput(card: number, patch: Partial<FlatInputState>): vo
     next.run === prev.run &&
     next.refused === prev.refused &&
     next.clearing === prev.clearing &&
+    next.rewriting === prev.rewriting &&
+    next.wordsHeld === prev.wordsHeld &&
     next.serverRefusal === prev.serverRefusal &&
     next.ask === prev.ask
   ) {
@@ -80,6 +105,8 @@ export function patchFlatInput(card: number, patch: Partial<FlatInputState>): vo
     next.run === null &&
     next.refused === null &&
     !next.clearing &&
+    next.rewriting === 0 &&
+    next.wordsHeld === 0 &&
     next.serverRefusal === null &&
     next.ask === null
   ) {
@@ -103,7 +130,31 @@ export function useFlatInput(card: number): FlatInputState {
   return useSyncExternalStore(subscribeFlatInput, read, read);
 }
 
-/** Вход переписывается (CLEAR, рекол, кроп, деталь): GENERATE ждёт, пока это не закончится. */
+/** CLEAR снимает роли и стирает слова: заперто всё, GENERATE ждёт. */
 export function setFlatInputClearing(card: number, clearing: boolean): void {
   patchFlatInput(card, { clearing });
+}
+
+/**
+ * УДЕРЖАТЬ СТРОКИ И РОЛИ на время записей (а с `words` — ещё и слова). Возвращает отпускание —
+ * одно на удержание, повторный вызов ничего не делает. Счётчик, а не флаг: удержания пересекаются
+ * (две правки ролей подряд), и первое отпускание не должно снимать чужое.
+ */
+export function holdFlatInput(card: number, opts?: { words?: boolean }): () => void {
+  const words = !!opts?.words;
+  const at = readFlatInput(card);
+  patchFlatInput(card, {
+    rewriting: at.rewriting + 1,
+    ...(words ? { wordsHeld: at.wordsHeld + 1 } : {}),
+  });
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const now = readFlatInput(card);
+    patchFlatInput(card, {
+      rewriting: Math.max(0, now.rewriting - 1),
+      ...(words ? { wordsHeld: Math.max(0, now.wordsHeld - 1) } : {}),
+    });
+  };
 }

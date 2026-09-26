@@ -39,17 +39,6 @@ export type GarmentFamily =
   | 'dress'
   | 'briefs';
 
-export const GARMENT_FAMILIES: readonly GarmentFamily[] = [
-  'jacket',
-  'hoodie',
-  'tee',
-  'trousers',
-  'shorts',
-  'skirt',
-  'dress',
-  'briefs',
-];
-
 /** Имена уровней категории, как их называет словарь (`common_Category.name`). */
 export type FamilyInput = { top?: string | null; sub?: string | null };
 

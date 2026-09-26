@@ -4,6 +4,7 @@ import type {
   common_DesignPicture,
   common_MediaFull,
 } from 'api/proto-http/admin';
+import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GroupLabel } from 'ui/components/group-label';
@@ -29,6 +30,7 @@ import {
 import { COLORWAY_NONE, type BenchKind } from './bench-kinds';
 import { PictogramBackdrop, useCardGarmentFamily } from './garment-pictograms';
 import { Counter } from './core';
+import { holdFlatInput, readFlatInput, rowsWritable } from './flat-input';
 import { LockBar } from './render/generate-row';
 import { shelfBatchOrdinals } from './handles';
 import { MixWarn } from './mixwarn';
@@ -141,7 +143,7 @@ class BenchRefError extends Error {
     super(
       byView && byId
         ? `a bench slot ref names BOTH ${byView} and ${byId}; they are one oneof, ` +
-          'and the server refuses the whole write'
+            'and the server refuses the whole write'
         : 'a bench slot ref names NEITHER view_key nor slot_id — it addresses no row at all',
     );
     this.name = 'BenchRefError';
@@ -212,6 +214,7 @@ export function Bench({
 }): JSX.Element {
   const writes = useDesignWrites(techCardId);
   const pick = usePickMode();
+  const { showMessage } = useSnackBarStore();
 
   const [optimistic, setOptimistic] = useState<Record<string, Optimistic>>({});
   /** A detail being minted has no slot to key on yet — it is born by this very write. */
@@ -256,7 +259,10 @@ export function Bench({
         const live = findSlot(band, entry.ref);
         const liveRev = live?.slotRev ?? 0;
         const livePicture = live?.pictureId ?? 0;
-        if (liveRev !== entry.sentRev || (entry.pictureId !== null && livePicture === entry.pictureId)) {
+        if (
+          liveRev !== entry.sentRev ||
+          (entry.pictureId !== null && livePicture === entry.pictureId)
+        ) {
           delete next[key];
           changed = true;
         }
@@ -522,10 +528,7 @@ export function Bench({
       {/* ═══ ЛЕНТА ЧЕТЫРЁХ СТОРОН — `.pstrip` макета: горизонтальный ряд ячеек по 138px, прокрутка
           внутри ленты, страница вбок не едет. `items-stretch` — пустые ячейки не короче
           заполненных (у заполненной под кадром подвал). */}
-      <div
-        data-flat-strip=''
-        className='flex items-stretch gap-2 overflow-x-auto pb-1'
-      >
+      <div data-flat-strip='' className='flex items-stretch gap-2 overflow-x-auto pb-1'>
         {bench.sides.map(({ view, slot }) => {
           const ref: DesignBenchSlotRef = sideRef(view);
           const rev = slot?.slotRev ?? 0;
@@ -587,10 +590,7 @@ export function Bench({
         details
       </GroupLabel>
 
-      <div
-        data-flat-details=''
-        className='flex items-stretch gap-2 overflow-x-auto pb-1'
-      >
+      <div data-flat-details='' className='flex items-stretch gap-2 overflow-x-auto pb-1'>
         {bench.details.map((slot, index) => {
           /* СТРОКА БЕЗ ИДЕНТИФИКАТОРА ГОВОРИТ ЭТО ВСЛУХ, А НЕ ПРОПАДАЕТ (F-11b): `readBench` не
              фильтрует по `id`, и деталь без него — законно возможная форма ответа. Не `null`:
@@ -600,7 +600,10 @@ export function Bench({
             return (
               <div
                 key={`detail-without-id-${index}`}
-                className={cn(placeholderClass({ dashed: true, tone: 'error' }), 'px-2 text-center')}
+                className={cn(
+                  placeholderClass({ dashed: true, tone: 'error' }),
+                  'px-2 text-center',
+                )}
                 style={{ ...PLACEHOLDER_SURFACE, ...CELL_STYLE, minHeight: 138 }}
                 title='the server sent this detail row without a slot id, so nothing on it can be addressed — reload the card, and report it if it comes back'
               >
@@ -632,16 +635,31 @@ export function Bench({
                 onPlaceMedia={(media) => placeMedia(media, ref, rev)}
                 onCancelPick={pick.cancel}
                 onUnmark={() => unmark(ref, rev)}
-                onRename={(next) =>
-                  writes.setBenchSlot.mutate({
-                    slot: ref,
-                    // A rename must ECHO the plate. `picture_id` is not optional and 0 means UNMARK,
-                    // so a rename that sent 0 would quietly empty the slot it was renaming.
-                    pictureId: slot.pictureId ?? 0,
-                    expectedSlotRev: rev,
-                    newDetailName: next,
-                  })
-                }
+                onRename={(next) => {
+                  /* ИМЯ ДЕТАЛИ ЕДЕТ В ПРОМПТ ФЛЭТА (ревью раунда 4, MIN-2): посреди GENERATE или
+                     CLEAR оно не меняется, а пока переименование пишется, вход удержан — GENERATE
+                     ждёт, и прогон не снимет наполовину переименованный вход. */
+                  if (!rowsWritable(readFlatInput(techCardId))) {
+                    showMessage(
+                      'the flat input is busy — a run is being saved or started, or the prompt is being cleared; the detail was not renamed',
+                      'error',
+                    );
+                    return;
+                  }
+                  const release = holdFlatInput(techCardId);
+                  writes.setBenchSlot
+                    .mutateAsync({
+                      slot: ref,
+                      // A rename must ECHO the plate. `picture_id` is not optional and 0 means
+                      // UNMARK, so a rename that sent 0 would quietly empty the slot it was renaming.
+                      pictureId: slot.pictureId ?? 0,
+                      expectedSlotRev: rev,
+                      newDetailName: next,
+                    })
+                    // Отказ сказан швом записи (`onError` мутации).
+                    .catch(() => {})
+                    .finally(release);
+                }}
                 // СНЯТИЕ ДЕТАЛИ НИЧЕМ НЕ ЗАПЕРТО ОТСЮДА: единственный довод запрета («выпущенный
                 // лист ссылается на слот») умер вместе с версиями листа.
                 onDelete={() => writes.deleteDetailSlot.mutate(slot.id ?? 0)}

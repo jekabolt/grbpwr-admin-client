@@ -57,7 +57,6 @@ export type ActiveView = (typeof ACTIVE_VIEWS)[number];
  * classifier asks `isLegacyView` before it lets a row fall through (`readBench`, `slotOfPicture`).
  */
 export const LEGACY_VIEWS = ['three_quarter_l', 'three_quarter_r'] as const;
-export type LegacyView = (typeof LEGACY_VIEWS)[number];
 
 /**
  * ═══ THE FOUR A 3D RUN READS — `DesignCardinalViews` on the server ═════════════════════════════

@@ -29,7 +29,15 @@ import { useTechCardAutosave } from './autosave-contract';
 import { displayDetailName, readBench } from './bench-slot';
 import { useMoodMinimumGate } from './chain-rail';
 import { cropFamilies } from './generation/composite';
-import { flatInputBusy, readFlatInput, setFlatInputClearing, useFlatInput } from './flat-input';
+import {
+  flatInputBusy,
+  holdFlatInput,
+  readFlatInput,
+  rowsWritable,
+  setFlatInputClearing,
+  useFlatInput,
+  wordsLocked,
+} from './flat-input';
 import { FlatRunRow } from './flat-run-row';
 import { RecalledRunPrompt } from './history-recall';
 import { EmptyState, GROUP_GAP, PlaceOrDrawCell } from './core';
@@ -43,6 +51,7 @@ import { ACTIVE_VIEWS, DETAIL_VIEW, normaliseViewKey, viewLabel } from './views'
 import { cardOnScreen, useDesignWrites } from './use-design-band';
 import {
   dropWords,
+  followWords,
   lockWords,
   offerWords,
   pickShownWords,
@@ -431,14 +440,30 @@ export function ReferencesSection({
    * (`replaceReference`), и он несёт значение, ПРИШЕДШЕЕ С СЕРВЕРА, а не своё.
    */
   function writeRef(mediaId: number, role: string, detailSlotId?: number) {
+    const card = techCardId;
+    /* ПОД УДЕРЖАНИЕМ СТРОК (ревью раунда 4, MIN-2): пока роль пишется, GENERATE ждёт — иначе прогон,
+       нажатый в это окно, снял бы вход без неё. Посреди GENERATE или CLEAR роль не пишется вовсе
+       (селект в этот момент и так заперт; проверка — на щелчок, пришедший раньше замка). */
+    if (!rowsWritable(readFlatInput(card))) {
+      showMessage(
+        'the input is busy — a run is being saved or started, or the prompt is being cleared; the role was not changed',
+        'error',
+      );
+      return;
+    }
+    const release = holdFlatInput(card);
     // ORDINAL — ЭТО ПОЗИЦИЯ ВО ВХОДЕ, а не номер промпта. Номер промпта выводится сканом (см.
     // выше), и класть его в хранимое поле значило бы завести второй источник одной величины.
-    setReferenceRole.mutate({
-      mediaId,
-      role,
-      ordinal: role ? ordinalOf(mediaId) : 0,
-      detailSlotId,
-    });
+    setReferenceRole
+      .mutateAsync({
+        mediaId,
+        role,
+        ordinal: role ? ordinalOf(mediaId) : 0,
+        detailSlotId,
+      })
+      // Отказ сказан швом записи (`onError` мутации, над карточкой на экране).
+      .catch(() => {})
+      .finally(release);
   }
 
   function setRole(mediaId: number, role: string) {
@@ -482,9 +507,24 @@ export function ReferencesSection({
     const mediaId = pendingRemove;
     setPendingRemove(null);
     if (mediaId == null) return;
+    const card = techCardId;
+    if (!rowsWritable(readFlatInput(card))) {
+      showMessage(
+        'the input is busy — a run is being saved or started, or the prompt is being cleared; nothing was taken off',
+        'error',
+      );
+      return;
+    }
     // Порядок важен: сначала снимается роль (сервер отвергнет роль на медиа, которого карточка
-    // больше не держит), потом уходит строка входа вместе с запиской.
-    if (refOf.has(mediaId)) setReferenceRole.mutate({ mediaId, role: '', ordinal: 0, note: '' });
+    // больше не держит), потом уходит строка входа вместе с запиской. Пока роль снимается, строки
+    // удержаны — GENERATE ждёт (ревью раунда 4, MIN-2).
+    if (refOf.has(mediaId)) {
+      const release = holdFlatInput(card);
+      setReferenceRole
+        .mutateAsync({ mediaId, role: '', ordinal: 0, note: '' })
+        .catch(() => {})
+        .finally(release);
+    }
     writeItems(
       ((getValues('moodboardMedia') ?? []) as BoardItem[]).filter(
         (i) => !(i.mediaId === mediaId && isInputRow(i)),
@@ -500,8 +540,13 @@ export function ReferencesSection({
        прочтёт то, что сохраняется сейчас, и правка поверх уехала бы мимо него (ревью MAJOR и [2]);
      · `clearing` — CLEAR снимает роли по одной: заперты те же органы, а GENERATE ждёт (ревью [2]). */
   const flatInput = useFlatInput(techCardId);
+  /* РАЗНЫЕ ЗАМКИ РАЗНЫМ ОРГАНАМ (ревью раунда 4, MIN-1): спиннер CLEAR — только его флаг; плитки,
+     роли, ✕ и сам CLEAR — любая занятость входа; WORDS и `ai ✦` — только прогон, CLEAR и рекол,
+     который пишет слова. Кроп, деталь и правка роли держат строки, а не слова: набор в поле посреди
+     них не теряется. */
   const clearing = flatInput.clearing;
-  const inputBusy = flatInput.run !== null || flatInput.clearing;
+  const inputBusy = flatInputBusy(flatInput);
+  const wordsBusy = wordsLocked(flatInput);
 
   /**
    * ЧТО ЧИСТИТСЯ: слова (`garmentDescription`) и роли референсов (и с ними — порядок промпта).
@@ -524,8 +569,7 @@ export function ReferencesSection({
     setClearAsk(false);
     const card = techCardId;
     // Щелчок по двери, вернувшейся к идущему GENERATE или CLEAR, ничего не начинает.
-    const at = readFlatInput(card);
-    if (at.run !== null || at.clearing) return;
+    if (flatInputBusy(readFlatInput(card))) return;
     setFlatInputClearing(card, true);
     const roleIds = [...refOf.keys()];
     const failed = new Set<number>();
@@ -620,9 +664,15 @@ export function ReferencesSection({
   const draftPending = autosave.draftPending;
   const moodMinimum = useMoodMinimumGate();
   // D-13'': сделанный шаг не запирается — у карточки с флэтами WORDS засевается и при неполном
-  // минимуме мудборда (то же правило, что `stepDone('flat')` в core/chain). GENERATE минимум требует.
+  // минимуме мудборда. GENERATE минимум требует.
+  // ⚠ КОПИЯ `stepDone('flat')` (core/chain.ts, ветка 'flat'), и копия НАМЕРЕННАЯ: общего `flatDone(band)`
+  // там нет, а файл — зоны CL-B. Правило одно — сторона флэтового верстака с картинкой; меняется
+  // там — меняется и здесь (в бэклог: экспортировать `flatDone` из chain.ts и звать его отсюда).
   const flatDone = useMemo(() => benchSides(band).some((s) => !!s.picture), [band]);
   const wordsNow = (garment.field.value ?? '') as string;
+  /* (c) Предложение видно только там, где его можно отдать: карточку можно писать, и она сохраняется
+     (ревью раунда 4, MIN-4). */
+  const wordsLive = !readOnly && autosave.status !== 'off';
   useEffect(() => {
     if (techCardId <= 0) return;
     const blank = ((getValues('garmentDescription') ?? '') as string).trim() === '';
@@ -631,23 +681,26 @@ export function ReferencesSection({
       lockWords(techCardId);
       return;
     }
-    if (wordsDecided(techCardId)) return;
-    if (readOnly || !factsReady || !composed.text) return;
-    if (autosave.status === 'off' || draftPending) return;
-    // Вход занят (GENERATE сохраняет, вход переписывается) — слова сейчас не меняются; решим после.
-    if (inputBusy) return;
+    if (!wordsLive || !factsReady || !composed.text || draftPending) return;
+    // Прогон, CLEAR или рекол со словами — слова сейчас не меняются; решим после.
+    if (wordsBusy) return;
+    if (wordsDecided(techCardId)) {
+      // (a) Предложение, уже стоящее на экране, ИДЁТ ЗА ФАКТАМИ (ревью раунда 4, MIN-4): новая
+      // категория или описание — новый текст. Снятое (`null`) не возвращается.
+      followWords(techCardId, composed.text, composed.omitted);
+      return;
+    }
     if (!moodMinimum.ok && !flatDone) return;
     // D-20'''': засев — ПРЕДЛОЖЕНИЕ НА ЭКРАНЕ, в значения формы он не пишется (см. `words-seed.ts`).
     offerWords(techCardId, composed.text, composed.omitted);
   }, [
     techCardId,
     wordsNow,
-    readOnly,
+    wordsLive,
     factsReady,
     composed,
-    autosave.status,
     draftPending,
-    inputBusy,
+    wordsBusy,
     moodMinimum.ok,
     flatDone,
     getValues,
@@ -702,10 +755,10 @@ export function ReferencesSection({
        просит прогон, а сервер снимает роли В МОМЕНТ запуска. Замена строки и перенос роли посреди
        этого окна дали бы прогону не тот промпт, за который нажали. Кроп уже подшит к полосе
        картинкой; вход не трогается, и это сказано. */
-    if (flatInputBusy(readFlatInput(card))) {
+    if (!rowsWritable(readFlatInput(card))) {
       if (cardOnScreen(card)) {
         showMessage(
-          'the input is busy — a run is being saved or started, or the prompt is being changed; the crop is filed as a band picture and the reference was left as it was',
+          'the input is busy — a run is being saved or started, or the prompt is being cleared; the crop is filed as a band picture and the reference was left as it was',
           'error',
         );
       }
@@ -731,10 +784,11 @@ export function ReferencesSection({
     // ORDINAL — позиция СТАРОЙ строки: новая встала ровно на её место, а `ordinalOf` читает ещё не
     // перечитанный `rows` и ответил бы про несуществующую строку.
     const ordinal = Math.max(1, rows.findIndex((i) => i.mediaId === oldMediaId) + 1);
-    /* ДВЕ ЗАПИСИ РОЛИ — ПОД ЗАМКОМ ВХОДА (m1): пока роль переезжает со старой картинки на кроп, GENERATE
-       ждёт («the prompt is being changed»), иначе прогон мог бы снять вход с двумя строками одной роли
-       или с кропом без неё. Замок держится до ответа второй записи — и после смены шага тоже. */
-    setFlatInputClearing(card, true);
+    /* ДВЕ ЗАПИСИ РОЛИ — ПОД УДЕРЖАНИЕМ СТРОК (m1): пока роль переезжает со старой картинки на кроп,
+       GENERATE ждёт («the prompt is being changed»), иначе прогон мог бы снять вход с двумя строками
+       одной роли или с кропом без неё. Удержание — до ответа второй записи, и после смены шага тоже.
+       Слова НЕ запираются (ревью раунда 4, MIN-1): набор сразу после «crop it» не теряется. */
+    const release = holdFlatInput(card);
     void (async () => {
       try {
         await setReferenceRole.mutateAsync({
@@ -748,7 +802,7 @@ export function ReferencesSection({
         // Отказ уже сказан швом записи (`onError` мутации, над карточкой на экране); вторая запись
         // после отказа первой не делается — как и прежде: картинка без роли хуже двух строк.
       } finally {
-        setFlatInputClearing(card, false);
+        release();
       }
     })();
   }
@@ -781,7 +835,7 @@ export function ReferencesSection({
   /* СЛОВА НА ЭКРАНЕ (D-20''''): значение формы, а пока оно пусто и засев не отдан — засев. Их читают
      поле, счётчик, «чистить нечего» и строка «+N omitted» — один помощник на всех (`words-seed.ts`). */
   const seed = useWordsSeed(techCardId);
-  const shown = pickShownWords(seed, garment.field.value);
+  const shown = pickShownWords(seed, garment.field.value, wordsLive);
   /** Кнопке нечего чистить — она выключена, а не спрятана: пустое место не объясняет, куда она делась. */
   const garmentChars = shown.trim().length;
   /* Счётчик внутри поля считает СЫРУЮ длину — ту же, по которой режет `maxLength`; разбор у поля. */
@@ -936,14 +990,14 @@ export function ReferencesSection({
             data-field='garmentDescription'
             id={garmentId}
             disabled={readOnly}
-            readOnly={inputBusy}
+            readOnly={wordsBusy}
             /* D-20'''': поле показывает засев, пока значение формы пусто; первая правка отдаёт в форму
                то, что человек видит и поправил, — «грязным», как любая правка, — и засев больше не
                подставляется (стёртое руками остаётся пустым). */
             value={shown}
             onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
               garment.field.onChange(event);
-              settleWords(techCardId);
+              settleWords(techCardId, event.target.value);
             }}
             rows={3}
             maxLength={GARMENT_MAX}
@@ -980,11 +1034,11 @@ export function ReferencesSection({
               value={shown}
               context={factsContext}
               maxRunes={GARMENT_MAX}
-              disabled={readOnly || inputBusy}
+              disabled={readOnly || wordsBusy}
               className='static pointer-events-auto'
               onApply={(text) => {
                 setValue('garmentDescription', text, { shouldDirty: true });
-                settleWords(techCardId);
+                settleWords(techCardId, text);
               }}
             />
           </div>
@@ -1086,14 +1140,14 @@ export function ReferencesSection({
              называния закрыто — GENERATE снова доступен, а слот и роль ещё впереди: роль, легшая
              посреди сохранения и запуска, дала бы прогону не тот промпт. Поэтому GENERATE ждёт, пока
              деталь не получит роль, а начатый раньше GENERATE не даёт её записать. */
-          if (flatInputBusy(readFlatInput(card))) {
+          if (!rowsWritable(readFlatInput(card))) {
             showMessage(
-              `the input is busy — a run is being saved or started, or the prompt is being changed; detail “${name}” was not added`,
+              `the input is busy — a run is being saved or started, or the prompt is being cleared; detail “${name}” was not added`,
               'error',
             );
             return;
           }
-          setFlatInputClearing(card, true);
+          const release = holdFlatInput(card);
           try {
             /* ПОРЯДОК ДВУХ ЗАПИСЕЙ (J-9): слот заводится ПЕРВЫМ, его id берётся из ответа и едет со
                ролью тем же запросом. Отказ заведения отменяет и роль — намеренно: неудача не делает
@@ -1128,7 +1182,7 @@ export function ReferencesSection({
               showMessage(`detail “${name}” added — tick it in VIEWS below`, 'success');
             }
           } finally {
-            setFlatInputClearing(card, false);
+            release();
           }
         }}
       />

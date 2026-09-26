@@ -24,6 +24,7 @@ import { GROUP_GAP, PRICED_LATER, latestRunOfKind } from './core';
 import { moodMinimumGate, openGateDoor } from './core/chain';
 import { markedPlatesOf } from './fix-markup';
 import {
+  flatInputBusy,
   patchFlatInput,
   readFlatInput,
   useFlatInput,
@@ -36,7 +37,8 @@ import { useStartRun } from './generation/use-generation';
 import { WhatModelGetsModal } from './modals';
 import { isBoardRow, type BoardItem } from './mood-board';
 import { GenerateRow, LockBar, RunRefusal } from './render/generate-row';
-import { designKeys, serverSpeaksNow } from './use-design-band';
+import { designKeys, serverSpeaksNow, type WriteContext } from './use-design-band';
+import type { CalloutLike } from './render/what-model-gets';
 import { ACTIVE_VIEWS, DETAIL_VIEW, viewLabel } from './views';
 import { materializeWords } from './words-seed';
 
@@ -127,15 +129,24 @@ const RELEASED = 'TECH_CARD_APPROVAL_STATE_RELEASED';
  */
 
 /**
- * ЧТО СЕРВЕР ЗАМОРОЗИТ В ПРОГОН ФЛЭТА — КАК СОХРАНЕНО (ревью раунда 3, m6): слова, посадка, строки
- * доски, указания и роли референсов. В запрос это не едет (см. `startRun`); это часть НАМЕРЕНИЯ и
- * уходит в отпечаток леджера (`useStartRun`): правка слов или роли после двусмысленного провала с теми
- * же VIEWS — новое намерение, и старый id повторяться не должен. Роли — из кэша полосы, как их
- * прочёл экран; форма — после `flush`, то есть сохранённая.
+ * ЧТО СЕРВЕР ЗАМОРОЗИТ В ПРОГОН ФЛЭТА — КАК СОХРАНЕНО (ревью раунда 3, m6; раунда 4, MIN-3). В запрос
+ * это не едет (см. `startRun`); это часть НАМЕРЕНИЯ и уходит в отпечаток леджера (`useStartRun`):
+ * правка слов или роли после двусмысленного провала с теми же VIEWS — новое намерение, и старый id
+ * повторяться не должен. Поэтому в отпечатке РОВНО то, что прогон флэта читает, — не шире и не уже:
+ *   · слова и посадка — из формы после `flush`, то есть сохранённые;
+ *   · референсы С РОЛЬЮ (роль, порядок, записка, слот детали) и указания на НИХ — плитка доски и
+ *     строка без роли в промпт не едут, и их правка между провалом и повтором — тот же запрос;
+ *   · ИМЕНА отмеченных деталей: они печатаются в промпте, и переименование при тех же id —
+ *     другой запрос.
+ * Полоса — СВЕЖЕЕ чтение (`freshBand` в `submit`, ревью раунда 4, MAJ-1), а не кэш экрана.
  */
-function flatSnapshot(qc: QueryClient, card: number, now: TechCardFormData): unknown {
-  const band = qc.getQueryData<GetDesignBandResponse>(designKeys.band(card));
+function flatSnapshot(
+  band: GetDesignBandResponse | undefined,
+  now: TechCardFormData,
+  detailSlotIds: readonly number[],
+): unknown {
   const refs = (band?.references ?? [])
+    .filter((r) => (r.mediaId ?? 0) > 0 && !!(r.role ?? '').trim())
     .map((r) => [
       r.mediaId ?? 0,
       (r.role ?? '').trim(),
@@ -144,13 +155,44 @@ function flatSnapshot(qc: QueryClient, card: number, now: TechCardFormData): unk
       r.detailSlotId ?? 0,
     ])
     .sort((a, b) => (a[0] as number) - (b[0] as number));
+  const roled = new Set(refs.map((r) => r[0] as number));
+  const callouts = ((now.callouts ?? []) as CalloutLike[]).filter((c) =>
+    roled.has(c?.mediaId ?? 0),
+  );
+  const details = band
+    ? readBench(band, 'flat')
+        .details.filter((d) => detailSlotIds.includes(d.id ?? 0))
+        .map((d) => [d.id ?? 0, (d.detailName ?? '').trim()])
+        .sort((a, b) => (a[0] as number) - (b[0] as number))
+    : [];
   return {
     words: ((now.garmentDescription ?? '') as string).trim(),
     fit: now.fit ?? '',
-    board: now.moodboardMedia ?? [],
-    callouts: now.callouts ?? [],
     refs,
+    callouts,
+    details,
   };
+}
+
+/**
+ * ЗАПИСИ ПОЛОСЫ ЭТОЙ КАРТОЧКИ ОТВЕТИЛИ (ревью раунда 4, MAJ-1). Каждая запись полосы несёт свою
+ * карточку в контексте мутации (`onMutate` → `{ card }`, `use-design-band.ts`); ждём, пока ни одной
+ * такой не останется в полёте — ни роли, ни слота, ни переименования.
+ */
+async function bandWritesSettled(qc: QueryClient, card: number): Promise<void> {
+  const cache = qc.getMutationCache();
+  const pendingHere = () =>
+    cache
+      .findAll({ status: 'pending' })
+      .some((m) => (m.state.context as WriteContext | undefined)?.card === card);
+  if (!pendingHere()) return;
+  await new Promise<void>((resolve) => {
+    const unsubscribe = cache.subscribe(() => {
+      if (pendingHere()) return;
+      unsubscribe();
+      resolve();
+    });
+  });
 }
 
 export function FlatRunRow({
@@ -309,7 +351,7 @@ export function FlatRunRow({
     ? 'this server does not speak the design band yet — nothing can be generated here'
     : disabled
       ? 'this card is read-only'
-      : input.clearing
+      : input.clearing || input.rewriting > 0
         ? 'the prompt is being changed — generate once it is done'
         : moodReason
           ? moodReason
@@ -322,8 +364,7 @@ export function FlatRunRow({
     if (gateReason || !mood.ok || card <= 0) return;
     // Занятость — из хранилища В МОМЕНТ щелчка, а не из снимка отрисовки: два щелчка в одном кадре
     // и щелчок по ряду, вернувшемуся к идущему запросу, отказываются одинаково.
-    const at = readFlatInput(card);
-    if (at.run !== null || at.clearing) return;
+    if (flatInputBusy(readFlatInput(card))) return;
     /* АВТОСЕЙВ БЫЛ ЖИВ НА ЩЕЛЧКЕ? (ревью раунда 3, m3). Выключенный или уничтоженный автосейв (уход со
        страницы посреди flush, утверждение) отвечает `off`, а `off` пропускает прогон — и для записи, у
        которой автосейва нет вовсе, так и надо. Но если на щелчке он был ЖИВ, `off` после ожидания
@@ -360,7 +401,7 @@ export function FlatRunRow({
     try {
       // D-20'''': засев, показанный в пустом поле, уходит в форму «грязным» ДО flush — эта запись его
       // и понесёт, прогон прочтёт его из сохранённой карточки.
-      materializeWords(card, form);
+      materializeWords(card, form, wasOn && !disabled);
       let saved: FlushResult;
       try {
         saved = await autosave.flush('flat');
@@ -398,6 +439,15 @@ export function FlatRunRow({
       });
       // Отказ уже стоит строкой под рядом (`moodReason`), второй не нужен.
       if (!gateNow.ok) return;
+      /* РОЛИ ДЛЯ ОТПЕЧАТКА — СВЕЖИМ ЧТЕНИЕМ (ревью раунда 4, MAJ-1). Кэш полосы отстаёт от каждой
+         записи роли на одно перечитывание: `mutateAsync` отвечает раньше, чем перечитывание приходит.
+         GENERATE, нажатый в это окно, взял бы в отпечаток СТАРЫЕ роли, а сервер заморозил бы НОВЫЕ; и
+         после потерянного ответа повтор (кэш уже свежий) получил бы другой id — второй платный
+         прогон за то же. Поэтому: дождаться записей полосы этой карточки, перечитать полосу и брать
+         роли из этого чтения. */
+      await bandWritesSettled(qc, card);
+      await qc.refetchQueries({ queryKey: designKeys.band(card), exact: true });
+      const freshBand = qc.getQueryData<GetDesignBandResponse>(designKeys.band(card));
       patchFlatInput(card, { run: 'starting' });
       // Ответ ждётся здесь, а не в наблюдателе ряда: «run started», сброс леджера, отказ сервера и
       // снятие занятости случаются и тогда, когда ряда уже нет (`useStartRun`).
@@ -405,7 +455,7 @@ export function FlatRunRow({
         kind: 'flat',
         ask: '',
         params,
-        snapshot: flatSnapshot(qc, card, now),
+        snapshot: flatSnapshot(freshBand, now, params.detailSlotIds ?? []),
       });
     } finally {
       // Отказ сервера — в хранилище карточки, до прочтения или следующего GENERATE; с ним остаются
@@ -615,6 +665,7 @@ export function FlatRunRow({
         onOpenChange={setWmgOpen}
         band={band}
         techCardId={techCardId}
+        readOnly={!!disabled}
       />
     </div>
   );

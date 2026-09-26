@@ -24,7 +24,8 @@ import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../schema';
 import { findSlot } from './bench-slot';
-import { flatInputBusy, readFlatInput, setFlatInputClearing } from './flat-input';
+import { useTechCardAutosave } from './autosave-contract';
+import { flatInputBusy, holdFlatInput, readFlatInput } from './flat-input';
 import { GapPill } from './generation/run-panel';
 import { isRunLive } from './generation/run-state';
 import { runHandle } from './handles';
@@ -37,7 +38,7 @@ import {
   type BoardItem,
 } from './mood-board';
 import { pictureIsModel } from './threed/media';
-import { useDesignWrites } from './use-design-band';
+import { cardOnScreen, useDesignWrites } from './use-design-band';
 import { isPictureHidden } from './visibility';
 import { isActiveView, isLegacyView, normaliseViewKey, viewLabel } from './views';
 import { settleWords, shownWords } from './words-seed';
@@ -713,6 +714,9 @@ export function RecallDoors({
   disabled?: boolean;
 }) {
   const form = useFormContext<TechCardFormData>();
+  // Слова на экране — с предложением WORDS только там, где его видно (MIN-4 c).
+  const autosaveStatus = useTechCardAutosave().status;
+  const wordsLive = !disabled && autosaveStatus !== 'off';
   const answerable = useRecallAnswerable(techCardId);
   const canSwitch = useStudioSwitchAvailable(techCardId);
   const [asking, setAsking] = useState<RecallMode | null>(null);
@@ -791,7 +795,7 @@ export function RecallDoors({
       roled,
       // D-20'''': СЛОВА НА ЭКРАНЕ — засев WORDS в форму не пишется, пока человек не подействовал, и
       // вопрос «описание будет заменено» обязан видеть то, что человек видит в поле.
-      description: shownWords(techCardId, form),
+      description: shownWords(techCardId, form, wordsLive),
       pinned: platedMedia(band),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1066,6 +1070,8 @@ export function RecalledRunPrompt({
   const form = useFormContext<TechCardFormData>();
   const { setReferenceRole } = useDesignWrites(techCardId);
   const { showMessage } = useSnackBarStore();
+  const autosaveStatus = useTechCardAutosave().status;
+  const wordsLive = !disabled && autosaveStatus !== 'off';
 
   /**
    * Какой жест этот приёмник уже взял — прогон И дверь: один прогон законно вспоминают дважды,
@@ -1124,7 +1130,7 @@ export function RecalledRunPrompt({
       callouts,
       roled,
       // D-20'''': слова на экране (см. вопрос у двери).
-      description: shownWords(techCardId, form),
+      description: shownWords(techCardId, form, wordsLive),
       // Полосы у этой копии может и не быть; без неё плиты неизвестны, и разметка не трогается.
       pinned: band ? platedMedia(band) : null,
     });
@@ -1141,11 +1147,12 @@ export function RecalledRunPrompt({
       return;
     }
 
-    /* ПОД ЗАМКОМ ВХОДА ДО ПОСЛЕДНЕЙ ЗАПИСИ (m1): роли снимаются и ставятся по одной, и GENERATE,
+    /* ПОД УДЕРЖАНИЕМ ВХОДА ДО ПОСЛЕДНЕЙ ЗАПИСИ (m1): роли снимаются и ставятся по одной, и GENERATE,
        нажатый посреди, снял бы наполовину старый промпт — он ждёт («the prompt is being changed»).
-       Замок по карточке, в модульном хранилище: переживает смену шага, как и сам цикл. */
+       Слова запираются, только если рекол их пишет (ревью раунда 4, MIN-1): иначе набранное посреди
+       не тронуто. Удержание по карточке, в модульном хранилище: переживает смену шага, как и цикл. */
     const card = techCardId;
-    setFlatInputClearing(card, true);
+    const release = holdFlatInput(card, { words: !!plan.words });
     void (async () => {
       try {
         const said: string[] = [];
@@ -1213,8 +1220,8 @@ export function RecalledRunPrompt({
            «подробнее», а сомнение в собственном вопросе. */
         if (plan.words) {
           form.setValue('garmentDescription', plan.words, { shouldDirty: true });
-          // Слова пришли из прогона — засев больше не подставляется (D-20'''').
-          settleWords(techCardId);
+          // Слова пришли из прогона и стоят в форме (D-20'''').
+          settleWords(techCardId, plan.words);
         }
 
         /* ── роли принятых картинок ──
@@ -1262,12 +1269,16 @@ export function RecalledRunPrompt({
             `${roleFailed} could not be given ${roleFailed === 1 ? 'its role' : 'their roles'} — set ${roleFailed === 1 ? 'it' : 'them'} by hand`,
           );
         if (plan.words) said.push('the description was taken from the run');
-        showMessage(
-          said.join(' · '),
-          stayed.size || roleFailed || result.refusal ? 'error' : 'success',
-        );
+        // Итог — только над карточкой, которая на экране: страница перемонтируется по карточке, и
+        // итог рекола карточки A не печатается над карточкой B (ревью раунда 4, MIN-5).
+        if (cardOnScreen(card)) {
+          showMessage(
+            said.join(' · '),
+            stayed.size || roleFailed || result.refusal ? 'error' : 'success',
+          );
+        }
       } finally {
-        setFlatInputClearing(card, false);
+        release();
       }
     })();
     // `form`, `showMessage` и `setReferenceRole` намеренно не в списке: приём взводится ВЫБОРОМ, и

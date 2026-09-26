@@ -14,6 +14,7 @@ import {
   WordsAsSent,
   latestRunOfKind,
 } from '../core';
+import { useTechCardAutosave } from '../autosave-contract';
 import { openDoor } from '../doors';
 import type { BoardItem } from '../mood-board';
 import { FIT_WHERE, calloutWords, type CalloutLike } from '../render/what-model-gets';
@@ -80,12 +81,15 @@ export function WhatModelGetsModal({
   onOpenChange,
   band,
   techCardId = 0,
+  readOnly = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   band: GetDesignBandResponse;
   /** Чьи слова на экране (засев WORDS живёт по карточке, `words-seed.ts`). */
   techCardId?: number;
+  /** Карточку нельзя писать — предложения WORDS не видно, слова = значение формы (MIN-4 c). */
+  readOnly?: boolean;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
@@ -104,7 +108,8 @@ export function WhatModelGetsModal({
   // не подействовал, и GENERATE флэта отдаёт его перед сохранением (`materializeWords`) — то есть
   // модель получит ровно то, что стоит в поле. Опись, читавшая одну форму, показала бы пустые слова
   // рядом с ценой прогона, который их получит.
-  const garment = useShownWords(techCardId, control);
+  const autosave = useTechCardAutosave();
+  const garment = useShownWords(techCardId, control, !readOnly && autosave.status !== 'off');
   const fit = (useWatch({ control, name: 'fit' }) ?? '') as string;
 
   const roleOf = useMemo(() => {
