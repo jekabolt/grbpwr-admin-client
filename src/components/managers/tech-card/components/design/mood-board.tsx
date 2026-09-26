@@ -317,6 +317,26 @@ const PEEK_CLOSE_MS = 250;
  * ней, каждый раз, когда курсор просто едет мимо; там дверь — только щелчок.
  */
 const SIDE_BY_SIDE = '(min-width: 64rem)';
+/**
+ * ДВЕРИ ПАНЕЛИ CALLOUTS — `<span role="button">`, А НЕ `<button>` (ревью O-52, второй круг). На
+ * RELEASED-карте вся вкладка стоит в `<fieldset disabled>` (index.tsx), а он гасит у каждой кнопки
+ * внутри щелчок и фокус: полоска, `keep open` и шеврон были мертвы ровно на тех карточках, которые
+ * читают чаще всего, — жило одно наведение, а щелчку и клавиатуре раскрыть панель было нечем.
+ * Свёрнута панель или нет — вид, а не данные карточки, и её двери обязаны пережить заморозку. Приём
+ * тот же, что у `RowDisclosure` (cost-estimate-field) и `Chip nonForm`.
+ *
+ * Клавиатура — то, что кнопка делала сама: Enter и пробел нажимают дверь. Нажатие, которое взял
+ * кто-то раньше (поверхность доски на Enter фокусирует подпись выбранного указания и гасит
+ * событие), дверь не нажимает — кнопку такой `preventDefault` тоже не нажимал: он гасил её `click`.
+ * Автоповтор удерживаемой клавиши дверь не качает: полоска снимается с первого нажатия, и повтор
+ * пришёлся бы в шеврон, который свернул бы панель обратно.
+ */
+const onDoorKey = (press: () => void) => (e: React.KeyboardEvent) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  if (e.defaultPrevented || e.repeat) return;
+  e.preventDefault();
+  press();
+};
 
 export function MoodBoard({
   techCardId,
@@ -686,8 +706,8 @@ export function MoodBoard({
   /* ФОКУС ЕДЕТ ЗА ДВЕРЬЮ — та же беда, что у свёрнутой `Section`: шеврон и полоска — два разных
      узла, и нажатие прячет тот, на котором стоял фокус. Переносится ТОЛЬКО после жеста человека:
      панель, раскрывшаяся сама (появилось первое указание), фокус не ворует. */
-  const collapseDoor = useRef<HTMLButtonElement | null>(null);
-  const expandDoor = useRef<HTMLButtonElement | null>(null);
+  const collapseDoor = useRef<HTMLSpanElement | null>(null);
+  const expandDoor = useRef<HTMLSpanElement | null>(null);
   /**
    * Дверь, на которую ставит фокус СЛЕДУЮЩИЙ коммит. Заводится только жестом человека (щелчок,
    * Enter, Esc) или подглядом, который снял полоску вместе с фокусом. `park` — фокус ставит сам
@@ -1333,11 +1353,15 @@ export function MoodBoard({
                вне потока, чтобы не сдвигать подпись со середины; симметричные 32px сверху и снизу
                оставляют знаку место и на короткой доске. Подпись ЛИПКАЯ сверху и снизу (ревью): у
                высокой доски (сетка) середина полоски уходит за край экрана, и подпись держится в
-               видимой части полоски, не выходя из неё. Ниже `lg` — обычная строка во всю ширину. */
-            <button
+               видимой части полоски, не выходя из неё. Ниже `lg` — обычная строка во всю ширину.
+               Дверь — `span`, а не кнопка: её не гасит `<fieldset disabled>` выпущенной карты (см.
+               `onDoorKey`). */
+            <span
               ref={expandDoor}
-              type='button'
+              role='button'
+              tabIndex={0}
               onClick={() => setCollapsed(false)}
+              onKeyDown={onDoorKey(() => setCollapsed(false))}
               aria-expanded={false}
               aria-controls={panelId}
               aria-label={`expand the callouts panel · ${calloutCount} on the board`}
@@ -1358,7 +1382,7 @@ export function MoodBoard({
                 aria-hidden
                 className='shrink-0 rotate-180 text-labelColor group-hover:text-textColor lg:absolute lg:left-1/2 lg:top-2.5 lg:-translate-x-1/2 lg:-rotate-90'
               />
-            </button>
+            </span>
           )}
           <div hidden={folded} className='contents'>
             <Section
@@ -1376,9 +1400,11 @@ export function MoodBoard({
                   )}
                   {/* УДЕРЖАТЬ ПОДГЛЯД (O-52, ревью) — отдельная кнопка, а не второй смысл шеврона:
                       шеврон и в подгляде остаётся дверью раскрытия (`aria-expanded` — то, что
-                      нарисовано). Живёт только в подгляде; щелчок пишет `collapsed: false`. */}
+                      нарисовано). Живёт только в подгляде; щелчок пишет `collapsed: false`.
+                      `nonForm` — та же причина, что у полоски и шеврона (см. `onDoorKey`). */}
                   {peeking && (
                     <Chip
+                      nonForm
                       onClick={keepOpen}
                       pressed={false}
                       title='keep the panel open — otherwise it folds when the pointer leaves'
@@ -1387,10 +1413,12 @@ export function MoodBoard({
                       keep open
                     </Chip>
                   )}
-                  <button
+                  <span
                     ref={collapseDoor}
-                    type='button'
+                    role='button'
+                    tabIndex={0}
                     onClick={() => setCollapsed(true)}
+                    onKeyDown={onDoorKey(() => setCollapsed(true))}
                     aria-expanded
                     aria-controls={panelId}
                     aria-label='collapse the callouts panel'
@@ -1403,7 +1431,7 @@ export function MoodBoard({
                       aria-hidden
                       className='shrink-0 text-labelColor group-hover:text-textColor lg:rotate-90'
                     />
-                  </button>
+                  </span>
                 </span>
               }
               /* Тот же шов, что у доски слева: панель стоит с ней в одном ряду, и разойтись им нельзя.
