@@ -73,8 +73,36 @@ export function cardSlots(lines: readonly BomLineLike[] | null | undefined): Car
 
 /* ─── РЯДЫ ПРЕДЛОЖЕНИЯ ─────────────────────────────────────────────────────────────────────────── */
 
+/**
+ * ═══ ЛИЧНОСТЬ РЯДА — С РОДОМ, А НЕ ГОЛОЙ СТРОКОЙ (ревью Codex O-44, второй круг, MAJOR 3) ═════════
+ *
+ * Ряд бывает двух родов: строка СОХРАНЁННОЙ карточки (адрес — её `line_key`) и хвост — слот модели,
+ * которого на карточке нет (адрес — номер слота в ответе, `entry`). Раньше оба жили в одном
+ * пространстве строк: ряд карточки звался своим `line_key`, хвост — `extra:<n>:<имя>`. Но `line_key`
+ * — строка сервера, и схема хранит любые легаси-ключи сидера (`schema.ts`): строка с ключом
+ * `extra:1:zip` и хвост «zip» получали ОДИН ключ, и правка хвоста находила строку карточки первой.
+ *
+ * Теперь личность — пара «род + адрес» (`RowId`): поиск ряда сравнивает род (`sameRow` — разные роды
+ * не совпадают никогда), а ключ для React и адресов DOM (`rowKey`) несёт род в себе: `card:<ключ>` и
+ * `extra:<номер>`. Никакой ключ строки карточки не совпадёт с ключом хвоста — у них разные приставки.
+ */
+export type RowId = { kind: 'card'; lineKey: string } | { kind: 'extra'; entry: number };
+
+/** Ключ ряда для React и адресов DOM: род стоит в самом ключе. */
+export function rowKey(id: RowId): string {
+  return id.kind === 'card' ? `card:${id.lineKey}` : `extra:${id.entry}`;
+}
+
+/** Тот же ряд — тот же род и тот же адрес; ряды разных родов не совпадают никогда. */
+export function sameRow(a: RowId, b: RowId): boolean {
+  if (a.kind === 'card') return b.kind === 'card' && a.lineKey === b.lineKey;
+  return b.kind === 'extra' && a.entry === b.entry;
+}
+
 export type ColourwayRow = {
-  /** Личность ряда: `line_key` слота карточки, а у слота, которого на карточке нет, — `extra:…`. */
+  /** Личность ряда: род и адрес (`RowId`). */
+  id: RowId;
+  /** `rowKey(id)` — ключ для React и адресов DOM. */
   key: string;
   /** Имя слота как есть; пустое — безымянная строка карточки (экран печатает `unnamed`). */
   slot: string;
@@ -132,8 +160,10 @@ export function proposalRows(
   const rows: ColourwayRow[] = card.map((c) => {
     const i = entryOf.get(c.lineKey) ?? -1;
     const s = i >= 0 ? slots[i] : undefined;
+    const id: RowId = { kind: 'card', lineKey: c.lineKey };
     return {
-      key: c.lineKey,
+      id,
+      key: rowKey(id),
       slot: c.name,
       lineKey: c.lineKey,
       family: c.family,
@@ -143,18 +173,15 @@ export function proposalRows(
       colour: s?.colour ?? '',
     };
   });
-  // ХВОСТ — КАЖДОЕ ВХОЖДЕНИЕ СВОИМ РЯДОМ: две лишние «zip» — два ряда (`extra:1:zip`, `extra:2:zip`),
-  // а не один, съевший второй цвет. Номер вхождения стоит ПЕРЕД именем, поэтому ключи двух разных
-  // рядов не совпадут, какие бы знаки ни несло имя.
-  const occurrences = new Map<string, number>();
+  // ХВОСТ — КАЖДОЕ ВХОЖДЕНИЕ СВОИМ РЯДОМ: две лишние «zip» — два ряда, а не один, съевший второй
+  // цвет. Адрес хвоста — номер его слота в ответе: он у каждого вхождения свой, и имя (любых знаков)
+  // в личность не входит вовсе.
   slots.forEach((s, i) => {
     if (claimed.has(i)) return;
-    const name = nameKey(s.slot) || '#';
-    const n = (occurrences.get(name) ?? 0) + 1;
-    occurrences.set(name, n);
-    const key = `extra:${n}:${name}`;
+    const id: RowId = { kind: 'extra', entry: i };
     rows.push({
-      key,
+      id,
+      key: rowKey(id),
       slot: s.slot,
       lineKey: '',
       family: null,
@@ -168,28 +195,29 @@ export function proposalRows(
 }
 
 /**
- * СЛОТЫ ПРЕДЛОЖЕНИЯ ПОСЛЕ ПРАВКИ ОДНОГО РЯДА — ПО КЛЮЧУ РЯДА, НИКОГДА ПО ПОЗИЦИИ.
+ * СЛОТЫ ПРЕДЛОЖЕНИЯ ПОСЛЕ ПРАВКИ ОДНОГО РЯДА — ПО ЛИЧНОСТИ РЯДА, НИКОГДА ПО ПОЗИЦИИ.
  *
  * Позиция ряда на экране — это позиция в СЛОТАХ КАРТОЧКИ, а не в `slots` предложения, и индексная
- * запись (`patchSlot`) писала бы в соседа. Здесь ряд находится заново по ключу над ТЕМИ `slots`,
- * которые переданы (вызывающий берёт их из стора в момент записи, а не из рендера), и правится
- * его слот; у ряда, о котором модель молчала, слот дописывается. Правленый слот получает `lineKey`
- * своего ряда — с этого момента он держится за строку, а не за имя.
+ * запись (`patchSlot`) писала бы в соседа. Здесь ряд находится заново по личности (`sameRow`: род и
+ * адрес — строка карточки и хвост не совпадут, даже если строка сидера зовётся «extra:…») над ТЕМИ
+ * `slots`, которые переданы (вызывающий берёт их из стора в момент записи, а не из рендера), и
+ * правится его слот; у ряда, о котором модель молчала, слот дописывается. Правленый слот получает
+ * `lineKey` своего ряда — с этого момента он держится за строку, а не за имя.
  */
 export function patchRow(
   slots: readonly ProposedSlotColour[],
   card: readonly CardSlot[],
-  rowKey: string,
+  row: RowId,
   patch: Partial<Pick<ProposedSlotColour, 'pantone' | 'hex' | 'colour'>>,
 ): ProposedSlotColour[] {
-  const row = proposalRows(slots, card).find((r) => r.key === rowKey);
+  const target = proposalRows(slots, card).find((r) => sameRow(r.id, row));
   // Ряд исчез (карточку перечитали между рендером и записью) — писать некуда, и выдумывать не надо.
-  if (!row) return slots.slice();
-  const bind = row.lineKey ? { lineKey: row.lineKey } : {};
-  if (row.entry >= 0) {
-    return slots.map((s, i) => (i === row.entry ? { ...s, ...patch, ...bind } : s));
+  if (!target) return slots.slice();
+  const bind = target.lineKey ? { lineKey: target.lineKey } : {};
+  if (target.entry >= 0) {
+    return slots.map((s, i) => (i === target.entry ? { ...s, ...patch, ...bind } : s));
   }
-  return [...slots, { slot: row.slot, pantone: '', hex: '', colour: '', ...patch, ...bind }];
+  return [...slots, { slot: target.slot, pantone: '', hex: '', colour: '', ...patch, ...bind }];
 }
 
 /**
@@ -294,5 +322,34 @@ export function savedSlotRows(
       article: wireInt(u?.materialId) > 0,
       recorded: !!u,
     };
+  });
+}
+
+/**
+ * ═══ СОХРАНЁННЫЙ РЕЦЕПТ УЖЕ НЕСЁТ ЦВЕТА, КОТОРЫЕ НЕ ЗАПИСАЛИСЬ (ревью Codex O-44, второй круг) ═════
+ *
+ * Запись цветов слотов после `confirm ▸` упала — под сохранённым рядом стоит «its slot colours did
+ * not save». Потом человек донёс их сам (вкладка COLORWAYS), и предупреждение, которое этого не
+ * замечает, врёт до конца вкладки. Предупреждение снимается, когда ПРОЧИТАННЫЙ рецепт несёт каждый
+ * из цветов, которые не записались: на строке изделия того же слота — тот же пантон, а у слота без
+ * пантона — те же слова (без регистра и лишних пробелов). Слот, которого на карточке больше нет,
+ * не донесён никогда — такое предупреждение снимает только человек («dismiss»).
+ */
+export function recipeCarries(
+  expected: readonly Pick<BoundSlot, 'bomLineKey' | 'pantone' | 'colour'>[],
+  usages: readonly UsageLike[] | null | undefined,
+  card: readonly CardSlot[],
+): boolean {
+  if (expected.length === 0) return false;
+  const saved = new Map(
+    savedSlotRows(usages, card)
+      .filter((r) => r.recorded)
+      .map((r) => [r.key, r]),
+  );
+  const same = (a: string, b: string) => normText(a).toLowerCase() === normText(b).toLowerCase();
+  return expected.every((e) => {
+    const r = saved.get(e.bomLineKey);
+    if (!r) return false;
+    return normText(e.pantone) ? same(r.pantone, e.pantone) : same(r.colour, e.colour);
   });
 }

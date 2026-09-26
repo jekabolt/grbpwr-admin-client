@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } 
 import { useFormContext, useFormState } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
@@ -49,9 +50,11 @@ import {
   pantonePatch,
   patchRow,
   proposalRows,
+  recipeCarries,
   recipeSlots,
   savedSlotRows,
   type CardSlot,
+  type RowId,
 } from './colourway-rows';
 import { useCardMemory, useDraftMemory, type ColourwayVerdict } from './head/use-draft-fills';
 
@@ -132,6 +135,27 @@ const LINE = 'flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5';
 const RULED = '[&>*+*]:border-t [&>*+*]:border-hairline';
 
 /**
+ * ═══ ПАМЯТЬ ВКЛАДКИ О КОЛОРВЕЯХ, КОТОРЫЕ СОЗДАЛ ЭТОТ БЛОК (ревью Codex O-44, второй круг) ═════════
+ *
+ * Два факта, которых нет ни в вердикте, ни в карточке, и живут они столько же, сколько вердикты
+ * (память вкладки, не хранилище):
+ *   · `seenSaved` — колорвеи, чей СОХРАНЁННЫЙ ряд блок уже видел в прочитанной карточке (по карточке).
+ *     Отличает «создан, а ряд ещё не пришёл» (re-read) от «ряд был и ушёл» (продукт удалили);
+ *   · `unsavedColours` — цвета слотов, чья запись упала после создания (по id колорвея). По ним
+ *     предупреждение «did not save» узнаёт, что человек донёс цвета сам.
+ */
+const seenSaved = new Map<number, Set<number>>();
+function seenSavedOn(card: number): Set<number> {
+  let seen = seenSaved.get(card);
+  if (!seen) {
+    seen = new Set<number>();
+    seenSaved.set(card, seen);
+  }
+  return seen;
+}
+const unsavedColours = new Map<number, BoundSlot[]>();
+
+/**
  * ТРЁХШАГОВАЯ ЗАПИСЬ, ТОЧНО ТА ЖЕ, КАКОЙ ЕЁ ДЕЛАЕТ ВКЛАДКА: сперва личность, потом рецепт.
  *
  * ⚠ ПЕРЕДАЧА СОХРАНЁННОМУ РЯДУ — СРАЗУ ПОСЛЕ ЛИЧНОСТИ. `create.mutateAsync` возвращается ПОСЛЕ
@@ -203,6 +227,7 @@ function useConfirmColourway(techCardId: number) {
       const expectedColorwayVersion = ref.lockVersion ?? fresh.techCard?.lockVersion ?? 0;
       await recipe.mutateAsync({ colorwayId, expectedColorwayVersion, usages });
     } catch (e) {
+      unsavedColours.set(colorwayId, bound);
       return { status: 'confirmed', colorwayId, recipeFailed: recipeSaveErrorMessage(e) };
     } finally {
       await qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
@@ -232,12 +257,14 @@ function SavedColourway({
   card,
   dictionaryColour,
   recipeFailed,
+  onDismissFailure,
   onOpen,
 }: {
   cw: common_AdminColorwayRef;
   card: readonly CardSlot[];
   dictionaryColour?: common_Color;
   recipeFailed?: string;
+  onDismissFailure: () => void;
   onOpen: (colorwayId: number) => void;
 }): JSX.Element {
   const id = wireInt(cw.colorwayId);
@@ -288,10 +315,25 @@ function SavedColourway({
           open ›
         </Button>
       </div>
+      {/* ПОЛУ-ЗАПИСЬ — НЕ ТОСТ (DESIGN.md, Callout Box): колорвей есть, цвета слотов нет, и это стоит
+          под рядом, пока не станет неправдой (рецепт донесли) или человек не снимет его сам. */}
       {recipeFailed && (
-        <Text size='micro' variant='label' className='mt-1 normal-case' data-cw-recipe-failed={id}>
-          created, but its slot colours did not save — {recipeFailed}
-        </Text>
+        <div className='mt-1' data-cw-recipe-failed={id}>
+          <CalloutBox tone='error' className='flex flex-wrap items-center gap-2'>
+            <Text size='micro'>created, but its slot colours did not save — {recipeFailed}</Text>
+            <div className='ml-auto'>
+              <Button
+                type='button'
+                variant='secondary'
+                size='sm'
+                data-cw-recipe-dismiss={id}
+                onClick={onDismissFailure}
+              >
+                dismiss
+              </Button>
+            </div>
+          </CalloutBox>
+        </div>
       )}
       <div className={cn('mt-1', RULED)}>
         {rows.map((r) => (
@@ -401,19 +443,20 @@ export function ColourwayProposals({
   const saved = useMemo(() => techCard?.colorways ?? [], [techCard?.colorways]);
 
   /**
-   * ПРАВКА РЯДА — ПО КЛЮЧУ РЯДА И НАД СЛОТАМИ ИЗ СТОРА В МОМЕНТ ЗАПИСИ. Ряды — слоты карточки, а не
-   * слоты ответа, поэтому индекс ряда в `slots` предложения не адрес (индексный `patchSlot` писал
-   * бы в соседа). Слоты берутся из стора, а не из рендера: две записи подряд без перерисовки между
-   * ними не должны затирать друг друга.
+   * ПРАВКА РЯДА — ПО ЛИЧНОСТИ РЯДА И НАД СЛОТАМИ ИЗ СТОРА В МОМЕНТ ЗАПИСИ. Ряды — слоты карточки, а
+   * не слоты ответа, поэтому индекс ряда в `slots` предложения не адрес (индексный `patchSlot` писал
+   * бы в соседа); личность — род и адрес (`RowId`), и строка карточки с хвостом не спутаются.
+   * Слоты берутся из стора, а не из рендера: две записи подряд без перерисовки между ними не должны
+   * затирать друг друга.
    */
   const writeRow = (
     id: string,
-    rowKey: string,
+    row: RowId,
     patch: Partial<Pick<ProposedSlotColour, 'pantone' | 'hex' | 'colour'>>,
   ) => {
     const cur = useDraftMemory.getState().byCard[techCardId]?.proposals.find((x) => x.id === id);
     if (!cur) return;
-    patchProposal(techCardId, id, { slots: patchRow(cur.slots, card, rowKey, patch) });
+    patchProposal(techCardId, id, { slots: patchRow(cur.slots, card, row, patch) });
   };
   const usedCodes = useMemo(
     () => new Set(saved.map((c) => c.colorCode ?? '').filter(Boolean)),
@@ -456,27 +499,75 @@ export function ColourwayProposals({
    * ПОДТВЕРЖДЁННОЕ ПРЕДЛОЖЕНИЕ ПРЯЧЕТСЯ, КОГДА ЕГО СОХРАНЁННЫЙ РЯД УЖЕ СТОИТ. До того — перечитывание
    * карточки упало или ещё не пришло — оно стоит рядом «created · re-read the card» (ветка «СОЗДАН, А
    * РЯД НЕ ПРИШЁЛ» ниже): продукт уже есть на сервере, и второй `confirm ▸` у него не появляется ни
-   * при каком состоянии кэша (ревью Codex O-44, MAJOR 2). Снимать вердикт `confirmed` нечему: он
-   * принадлежит ЭТОМУ поколению ответа, а следующий ответ приходит с новыми личностями
-   * (`proposedColourways`) и чужого вердикта не видит.
+   * при каком состоянии кэша (ревью Codex O-44, MAJOR 2).
+   *
+   * ⚠ РЯД БЫЛ И УШЁЛ — ПРОДУКТ УДАЛИЛИ, И ПРЕДЛОЖЕНИЕ НЕ ВОСКРЕСАЕТ (второй круг, MAJOR 2). Ряд, который
+   * блок уже видел (`seenSaved`), а свежее чтение карточки не несёт, удалён человеком на вкладке
+   * COLORWAYS — нарочно. «created · re-read the card» здесь соврал бы навсегда: перечитывание его не
+   * вернёт. Такой вердикт уходит на покой (`dismissed`), предложение не рисуется вовсе; re-read
+   * остаётся только у продукта, которого блок ещё не видел ни разу.
    */
   const savedIds = useMemo(
     () => new Set(saved.map((c) => wireInt(c.colorwayId)).filter((n) => n > 0)),
     [saved],
   );
+  const seen = seenSavedOn(techCardId);
+  const isRetired = (v: ColourwayVerdict) =>
+    v.status === 'confirmed' &&
+    !savedIds.has(wireInt(v.colorwayId)) &&
+    seen.has(wireInt(v.colorwayId));
   const visible = proposals.filter((p) => {
     const v = verdicts[p.id];
-    if (v?.status === 'dismissed') return false;
-    return !(v?.status === 'confirmed' && savedIds.has(wireInt(v.colorwayId)));
+    if (!v) return true;
+    if (v.status === 'dismissed' || isRetired(v)) return false;
+    return !savedIds.has(wireInt(v.colorwayId));
   });
-  /** «Колорвей заведён, а рецепт не записался» — правда, которая стоит под его сохранённым рядом. */
-  const recipeFailedById = useMemo(() => {
-    const out = new Map<number, string>();
-    for (const v of Object.values(verdicts))
+  /* Факты чтения — в память, отставку — в стор. Только над прочитанной карточкой: пока её нет,
+     «ряда нет» значит «ещё не знаем». */
+  useEffect(() => {
+    if (!techCard) return;
+    for (const [pid, v] of Object.entries(verdicts)) {
+      if (v.status !== 'confirmed') continue;
+      const cw = wireInt(v.colorwayId);
+      if (savedIds.has(cw)) seen.add(cw);
+      else if (isRetired(v)) {
+        seen.delete(cw);
+        unsavedColours.delete(cw);
+        setVerdict(techCardId, pid, { status: 'dismissed' });
+      }
+    }
+    // `isRetired` читает ровно `savedIds` и `seen` — они и стоят в зависимостях.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [techCard, verdicts, savedIds, seen, techCardId, setVerdict]);
+
+  /**
+   * «КОЛОРВЕЙ ЗАВЕДЁН, А РЕЦЕПТ НЕ ЗАПИСАЛСЯ» — ПРАВДА ПОД ЕГО СОХРАНЁННЫМ РЯДОМ, ПОКА ОНА ПРАВДА
+   * (второй круг, minor). Уходит сама, когда прочитанный рецепт уже несёт цвета, которые тогда не
+   * записались (`recipeCarries`: человек донёс их на вкладке COLORWAYS), — и по «dismiss» человека.
+   * В обоих случаях вердикт остаётся `confirmed` (продукт есть), теряя только `recipeFailed`.
+   */
+  const failures = useMemo(() => {
+    const out = new Map<number, { words: string; verdict: string }>();
+    for (const [pid, v] of Object.entries(verdicts))
       if (v.status === 'confirmed' && v.recipeFailed)
-        out.set(wireInt(v.colorwayId), v.recipeFailed);
+        out.set(wireInt(v.colorwayId), { words: v.recipeFailed, verdict: pid });
     return out;
   }, [verdicts]);
+  const repaired = (cw: common_AdminColorwayRef) =>
+    recipeCarries(unsavedColours.get(wireInt(cw.colorwayId)) ?? [], cw.usages, card);
+  const settleFailure = (colorwayId: number) => {
+    const failure = failures.get(colorwayId);
+    unsavedColours.delete(colorwayId);
+    if (failure) setVerdict(techCardId, failure.verdict, { status: 'confirmed', colorwayId });
+  };
+  useEffect(() => {
+    for (const cw of saved) {
+      const id = wireInt(cw.colorwayId);
+      if (failures.has(id) && repaired(cw)) settleFailure(id);
+    }
+    // `repaired` и `settleFailure` читают ровно `card`, `failures` и карточку — они в зависимостях.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saved, failures, card, techCardId]);
 
   /**
    * ПОЛНАЯ БИБЛИОТЕКА ПАНТОНОВ — КОГДА НА ЭКРАНЕ ЕСТЬ КОД, КОТОРОГО НЕТ В ОТОБРАННЫХ 274, И НЕ В ТАКТЕ
@@ -567,7 +658,10 @@ export function ColourwayProposals({
                 cw={cw}
                 card={card}
                 dictionaryColour={dictionaryByCode.get((cw.colorCode ?? '').trim())}
-                recipeFailed={recipeFailedById.get(wireInt(cw.colorwayId))}
+                recipeFailed={
+                  repaired(cw) ? undefined : failures.get(wireInt(cw.colorwayId))?.words
+                }
+                onDismissFailure={() => settleFailure(wireInt(cw.colorwayId))}
                 onOpen={openOnColorways}
               />
             ))}
@@ -812,7 +906,7 @@ export function ColourwayProposals({
                             label='pantone'
                             disabled={readOnly}
                             onPick={(code) =>
-                              writeRow(p.id, s.key, pantonePatch(s, code, findPantone))
+                              writeRow(p.id, s.id, pantonePatch(s, code, findPantone))
                             }
                           />
                         </span>
@@ -825,7 +919,7 @@ export function ColourwayProposals({
                           aria-label={`colour name · ${s.slot || 'unnamed'}`}
                           data-b25-colour={`${p.id}:${s.key}`}
                           onChange={(e: { target: { value: string } }) =>
-                            writeRow(p.id, s.key, { colour: e.target.value })
+                            writeRow(p.id, s.id, { colour: e.target.value })
                           }
                         />
                         {/* НЕ ПРИВЯЗАННЫЙ СЛОТ НАЗЫВАЕТСЯ, А НЕ ПРЯЧЕТСЯ: он не поедет в рецепт, и
