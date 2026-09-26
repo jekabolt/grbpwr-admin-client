@@ -102,6 +102,7 @@ import { SamplesTab } from './samples-tab';
 import { SizeIdsField } from './size-ids-field';
 import { SizeChartField } from './size-chart-field';
 import { StyleFactsField } from './style-facts-field';
+import { STYLE_FACT_KEYS } from './tech-card-options';
 import { TechCardFittings } from './tech-card-fittings';
 import { useTechCardDraft } from './useTechCardDraft';
 import {
@@ -352,23 +353,6 @@ function cloneFormValues(v: TechCardFormData): TechCardFormData | null {
     return null;
   }
 }
-
-/**
- * The facts StyleFactsField writes through its OWN UpdateStyle (style-facts-field.tsx, staging key
- * `styleFacts`), committed after the card body. See settleAfterBodySave's `keepBaseline`.
- *
- * TODO(25.09 R-14): import `STYLE_FACT_KEYS` from './tech-card-options' once CL-C's round 2 exports
- * it there, and delete this copy. Until then it must list exactly style-facts-field.tsx's `FACTS`.
- */
-const STYLE_FACT_KEYS = [
-  'fit',
-  'careInstructions',
-  'brand',
-  'collection',
-  'season',
-  'targetGender',
-  'ageGroup',
-] as const satisfies readonly (keyof TechCardFormData)[];
 
 /** M-02: what the quiet check found, one row per field (a field can fail several rules at once). */
 function quietIssues(error: {
