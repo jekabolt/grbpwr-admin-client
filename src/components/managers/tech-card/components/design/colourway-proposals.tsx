@@ -23,6 +23,7 @@ import {
 import { InertDoor } from './bench-slot';
 import { colorwayLabel as nameOfColorway } from './colorway-picker';
 import { GROUP_SEAM } from './core';
+import { DRAFTED_CLASS, DraftedPill } from './core/drafted-field';
 import { ColourwayCreatePopover } from './colourway-create';
 import {
   bindSlots,
@@ -357,13 +358,28 @@ export function ColourwayProposals({
             boundCount,
           });
 
+          /* ═══ ПРЕДЛОЖЕНИЕ — ЧЕРНОВИК, И ВЫГЛЯДИТ ОНО ЧЕРНОВИКОМ (владелец, O-44 п.1) ═══════════
+             Дословно: «после генерации колорвеи не отображались синими драфтами». Всё прочее, что
+             пишет черновик, стоит в синей рамке, а колорвеи — нет: пометку считает журнал записей
+             (`use-draft-fills`), а колорвей в журнал не пишется и писаться не должен — он не
+             значение поля, а продукт, и принимает его `confirm ▸`, а не пилюля. Поэтому рамка здесь
+             ПРЕДСТАВЛЕНИЕ, без журнала и без «accept all»: неподтверждённое предложение синее по
+             определению, а пилюля глухая — второй двери «принять» рядом с `confirm ▸` быть не должно. */
           return (
-            <div key={p.id} className='mt-2' data-b25-cw={p.id}>
+            <div
+              key={p.id}
+              className={cn('mt-2 p-2', DRAFTED_CLASS)}
+              data-b25-cw={p.id}
+              data-drafted=''
+            >
               <div className='flex flex-wrap items-end gap-2'>
                 <label className='flex min-w-0 flex-1 flex-col gap-0.5'>
-                  <Text size='micro' variant='label' component='span' className='uppercase'>
-                    name
-                  </Text>
+                  <span className='flex items-center gap-2'>
+                    <Text size='micro' variant='label' component='span' className='uppercase'>
+                      name
+                    </Text>
+                    <DraftedPill live data-b25-drafted={p.id} />
+                  </span>
                   <Input
                     value={p.name}
                     maxLength={64}
