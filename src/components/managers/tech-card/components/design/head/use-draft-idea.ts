@@ -93,7 +93,8 @@ export function refusalReason(error: unknown): string {
  *
  * ФРАЗА `no_moodboard` — ФРАЗА ГЕЙТА МИНИМУМА (фиксап N1). Своей формулировки здесь больше нет:
  * вызывающий передаёт фразу своей двери, собранную `moodGateSentence` (`core/mood-gate.ts`) из тех
- * же частей, что запирают FLAT на рельсе, — картинка на доске, 40 символов описания, категория.
+ * же частей, что запирают FLAT на рельсе (D-31): категория И (картинка на доске ИЛИ непустое, после
+ * `trim`, описание) — «put a picture on the moodboard or write the description, and pick a category».
  *
  * ⚠ СЕГОДНЯШНИЙ СЕРВЕР ТОКЕНА НЕ ШЛЁТ (фиксап раунда 2, MIN-1). `DraftDesignIdea` отказывает
  * голым FailedPrecondition «there is nothing to read: put a picture on the moodboard or write the

@@ -44,10 +44,54 @@ export type CardFacts = {
 const clean = (s?: string | null) => (s ?? '').replace(/\s+/g, ' ').trim();
 
 /**
- * Существительные, у которых нет единственного числа как имени вещи: «cargo pants», а не «cargo pant».
- * Список — по ключам сида категорий и очевидным соседям; слово вне списка теряет хвостовое `s`.
+ * ═══ ИМЯ ИЗДЕЛИЯ: СНАЧАЛА ТАБЛИЦЫ, ПОТОМ ЭВРИСТИКА (26.09, ревью Codex T35) ═════════════════════
+ *
+ * Ключи сида — не грамматика: «sweaters_knits», «swimwear_w», «scarves», «slippers_loafers» ломают
+ * любое правило («sweaters knit», «swimwear w loungewear», «scarve», «slippers loafer»). Поэтому
+ * СНАЧАЛА спрашиваются две таблицы — точный путь (`GARMENT_BY_PATH`) и существительное по ключу
+ * (`NOUN_BY_KEY`), — и только потом работает эвристика; хвостовое `s` снимается лишь у слова, которого
+ * таблицы не знают и которого нет среди неизменяемых (`INVARIANT`). Весь сид (`0001_initial_setup.sql`,
+ * 152 пути) прогнан через функцию — таблица «путь → имя» в ревью T35.
  */
-const PLURAL_ONLY = new Set([
+
+/** Точный путь по ключам → готовое имя. Первая проверка; правит там, где эвристике нечего ловить. */
+const GARMENT_BY_PATH: Record<string, string> = {
+  loungewear_sleepwear: 'loungewear',
+  'accessories › jewelry': 'jewelry',
+  'accessories › eyewear': 'eyewear',
+  'loungewear_sleepwear › swimwear_w': "women's swimwear",
+  'loungewear_sleepwear › swimwear_m': "men's swimwear",
+  'outerwear › jackets › blazer': 'blazer',
+  'tops › tanks': 'tank top',
+  'tops › sweaters_knits': 'sweater',
+  'tops › hoodies_sweatshirts': 'hoodie',
+  'tops › hoodies_sweatshirts › crewneck': 'crewneck sweatshirt',
+  'shoes › slippers_loafers': 'loafer',
+  'shoes › flats › slippers_loafers': 'loafer',
+  'shoes › mules_clogs': 'mule',
+  'objects › other': 'object',
+};
+
+/**
+ * Существительное по КЛЮЧУ — единственное число или готовое имя. Читается и для листа («scarves» →
+ * «scarf»), и для родителя («tops › tshirts › crew_neck» → «crew neck t-shirt»).
+ */
+const NOUN_BY_KEY: Record<string, string> = {
+  tshirts: 't-shirt',
+  scarves: 'scarf',
+  dress_shoes: 'shoe',
+  sweaters_knits: 'sweater',
+  hoodies_sweatshirts: 'hoodie',
+  slippers_loafers: 'loafer',
+  mules_clogs: 'mule',
+  lace_ups: 'lace-ups',
+};
+
+/**
+ * Неизменяемые слова: у вещи нет единственного числа как имени («cargo pants», «heels», «flats»,
+ * «earrings») или слово не про число вовсе. Хвостовое `s` у них не снимается никогда.
+ */
+const INVARIANT = new Set([
   'pants',
   'shorts',
   'jeans',
@@ -65,10 +109,13 @@ const PLURAL_ONLY = new Set([
   'boots',
   'sneakers',
   'sandals',
+  'heels',
+  'flats',
   'socks',
   'earrings',
   'glasses',
   'sunglasses',
+  'knits',
 ]);
 
 /** Ключи листов на `s`, которые ОПРЕДЕЛЕНИЯ, а не существительные во множественном числе. */
@@ -77,18 +124,34 @@ const MODIFIERS_IN_S = new Set(['sports']);
 const humanize = (key: string): string =>
   key.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 
-function singular(noun: string): string {
-  if (PLURAL_ONLY.has(noun)) return noun;
-  if (/ries$/.test(noun)) return `${noun.slice(0, -3)}y`; // accessories → accessory
-  if (/ies$/.test(noun)) return noun.slice(0, -1); // hoodies → hoodie, beanies → beanie
-  if (/sses$/.test(noun)) return noun.slice(0, -2); // dresses → dress
-  if (/(ch|sh|x)es$/.test(noun)) return noun.slice(0, -2); // watches → watch
-  if (/[^s]s$/.test(noun)) return noun.slice(0, -1); // shirts → shirt
-  return noun;
+/** Единственное число СЛОВА (уже без подчёркиваний): таблицы и неизменяемые — раньше правил. */
+function singular(word: string): string {
+  if (INVARIANT.has(word)) return word;
+  if (/ries$/.test(word)) return `${word.slice(0, -3)}y`; // accessories → accessory
+  if (/ies$/.test(word)) return word.slice(0, -1); // hoodies → hoodie, beanies → beanie
+  if (/sses$/.test(word)) return word.slice(0, -2); // dresses → dress
+  if (/(ch|sh|x)es$/.test(word)) return word.slice(0, -2); // watches → watch
+  if (/[^s]s$/.test(word)) return word.slice(0, -1); // shirts → shirt
+  return word;
 }
 
-/** Лист во множественном числе — вещь сама («overshirts» → «overshirt»); иначе — определение. */
-const isPluralNoun = (word: string): boolean => /[^s]s$/.test(word) && !MODIFIERS_IN_S.has(word);
+/** Существительное по ключу звена: таблица, иначе первое слово ключа в единственном числе. */
+function nounOf(key: string): string {
+  return NOUN_BY_KEY[key] ?? singular(humanize(key).split(' ')[0]);
+}
+
+/**
+ * Лист — вещь сама (стоит один): известное существительное, неизменяемое слово, слово на «-wear»
+ * или множественное число («overshirts» → «overshirt»). Иначе лист — определение, и ему нужно
+ * существительное родителя («short sleeve» + «shirt»).
+ */
+function standsAlone(key: string): string | null {
+  if (NOUN_BY_KEY[key]) return NOUN_BY_KEY[key];
+  const word = humanize(key);
+  if (INVARIANT.has(word) || /wear$/.test(word)) return word;
+  if (/[^s]s$/.test(word) && !MODIFIERS_IN_S.has(word)) return singular(word);
+  return null;
+}
 
 /**
  * Имя изделия по пути категории: «tops › shirts › short_sleeve» → «short sleeve shirt»,
@@ -96,18 +159,25 @@ const isPluralNoun = (word: string): boolean => /[^s]s$/.test(word) && !MODIFIER
  * «dresses › maxi» → «maxi dress», «bags › tote» → «tote bag», «tops» → «tops». Пустой путь — «».
  */
 export function garmentNameOf(categoryPath?: string | null): string {
-  const names = (categoryPath ?? '').split('›').map(humanize).filter(Boolean);
-  if (!names.length) return '';
-  const leaf = names[names.length - 1];
+  const keys = (categoryPath ?? '')
+    .split('›')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (!keys.length) return '';
+  const exact = GARMENT_BY_PATH[keys.join(' › ')];
+  if (exact) return exact;
+  const leafKey = keys[keys.length - 1];
+  const leaf = humanize(leafKey);
   // Звено без имени печатается `#id` (см. `categoryPathOf`) — из него слова не собрать.
-  if (names.length === 1 || leaf.startsWith('#')) return leaf;
-  if (isPluralNoun(leaf)) return singular(leaf);
-  // Существительное — первое слово родителя: `sweaters_knits` → «sweater», `hoodies_sweatshirts` → «hoodie».
-  const parent = names[names.length - 2].split(' ')[0];
-  if (parent.startsWith('#')) return leaf;
+  if (keys.length === 1 || leaf.startsWith('#')) return leaf;
+  const alone = standsAlone(leafKey);
+  if (alone) return alone;
+  const parentKey = keys[keys.length - 2];
+  if (parentKey.startsWith('#')) return leaf;
+  const noun = nounOf(parentKey);
   // «boxer» под «boxers» — уже имя вещи, второй раз не печатается.
-  if (parent.startsWith(leaf)) return singular(parent);
-  return `${leaf} ${singular(parent)}`;
+  if (noun.startsWith(leaf)) return noun;
+  return `${leaf} ${noun}`;
 }
 
 /** Строки в фиксированном порядке; пустые факты пропускаются. */
