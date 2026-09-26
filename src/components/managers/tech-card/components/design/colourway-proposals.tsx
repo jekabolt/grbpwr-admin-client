@@ -276,6 +276,7 @@ function SavedColourway({
           className='ml-auto text-labelColor hover:text-textColor'
           data-cw-open={id}
           title='open this colourway on the COLORWAYS tab'
+          aria-label={`open ${name} on the colorways tab`}
           onClick={() => onOpen(id)}
         >
           open ›
