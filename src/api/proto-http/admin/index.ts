@@ -116,7 +116,13 @@ export type EnhanceTextMode =
   // kept; at most twice the length.
   | "ENHANCE_TEXT_MODE_EXPAND"
   // Keep only what matters; at most half the length.
-  | "ENHANCE_TEXT_MODE_SHORTEN";
+  | "ENHANCE_TEXT_MODE_SHORTEN"
+  // Rewrite as a concise image-generation prompt (O-50): the garment type
+  // first, then silhouette, construction, material, colour and finish facts as
+  // comma-separated descriptors; every fact kept, none added; no marketing
+  // words, no negations (what the garment does NOT have is left out — an image
+  // model draws what a prompt names). Same language as the input.
+  | "ENHANCE_TEXT_MODE_PROMPT";
 // EnhanceTextField names WHICH field is being rewritten. It is an enum and not a
 // string on purpose (review M-07): the server maps it to its own fixed phrase in
 // the system prompt, so nothing the request carries can become an instruction.
@@ -287,17 +293,16 @@ export type common_ShipmentCarrierPrice = {
 };
 
 // A representation of a decimal value, such as 2.5. Clients may convert values
-// into language-native decimal formats, such as Java's [BigDecimal][] or
-// Python's [decimal.Decimal][].
-// [BigDecimal]:
-// https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/math/BigDecimal.html
-// [decimal.Decimal]: https://docs.python.org/3/library/decimal.html
+// into language-native decimal formats, such as Java's
+// [BigDecimal](https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/math/BigDecimal.html)
+// or Python's
+// [decimal.Decimal](https://docs.python.org/3/library/decimal.html).
 export type googletype_Decimal = {
   // The decimal value, as a string.
   // The string representation consists of an optional sign, `+` (`U+002B`)
   // or `-` (`U+002D`), followed by a sequence of zero or more decimal digits
   // ("the integer"), optionally followed by a fraction, optionally followed
-  // by an exponent.
+  // by an exponent. An empty string **should** be interpreted as `0`.
   // The fraction consists of a decimal point followed by zero or more decimal
   // digits. The string must contain at least one digit in either the integer
   // or the fraction. The number formed by the sign, the integer and the
@@ -307,11 +312,12 @@ export type googletype_Decimal = {
   // Services **should** normalize decimal values before storing them by:
   // - Removing an explicitly-provided `+` sign (`+2.5` -> `2.5`).
   // - Replacing a zero-length integer value with `0` (`.5` -> `0.5`).
-  // - Coercing the exponent character to lower-case (`2.5E8` -> `2.5e8`).
-  // - Removing an explicitly-provided zero exponent (`2.5e0` -> `2.5`).
+  // - Coercing the exponent character to upper-case, with explicit sign
+  // (`2.5e8` -> `2.5E+8`).
+  // - Removing an explicitly-provided zero exponent (`2.5E0` -> `2.5`).
   // Services **may** perform additional normalization based on its own needs
   // and the internal decimal implementation selected, such as shifting the
-  // decimal point and exponent value together (example: `2.5e-1` <-> `0.25`).
+  // decimal point and exponent value together (example: `2.5E-1` <-> `0.25`).
   // Additionally, services **may** preserve trailing zeroes in the fraction
   // to indicate increased precision, but are not required to do so.
   // Note that only the `.` character is supported to divide the integer
@@ -320,7 +326,7 @@ export type googletype_Decimal = {
   // service does support them, values **must** be normalized.
   // The ENBF grammar is:
   // DecimalString =
-  // [Sign] Significand [Exponent];
+  // '' | [Sign] Significand [Exponent];
   // Sign = '+' | '-';
   // Significand =
   // Digits ['.'] [Digits] | [Digits] '.' Digits;
@@ -6239,7 +6245,8 @@ export type EnhanceTextRequest = {
   context: string | undefined;
   // The destination field's own limit, so the answer always fits it. 0 = 4000;
   // anything else is clamped to [200, 4000]. A longer answer is cut at the last
-  // sentence end (. ! ?) inside the limit, or at the limit when there is none.
+  // sentence end (. ! ?) inside the limit — for PROMPT, a list of descriptors,
+  // also at the last comma or semicolon — or at the limit when there is none.
   maxRunes: number | undefined;
 };
 
@@ -14904,6 +14911,16 @@ export type GetDesignBandResponse = {
   // sends nothing → the client draws NO PLAYGROUND cell on the rail. A binary that knows it sends at
   // least [] → the cell exists; an empty list means «nothing wired», and the screen says so.
   freeformPresets: string[] | undefined;
+  // THE FABRIC OF EVERY (COLOURWAY, SLOT) OF THIS CARD — one row per bound pair (see
+  // common.DesignAssetBinding); a pair with no row has no fabric chosen.
+  // WHOLE CARD, NEVER NARROWED BY bench_colorway_id. The pattern step draws every colourway's slots
+  // on one screen, and the render step reads the bound fabrics of whichever colourway it is about
+  // to paint; a list cut down to the bench's colourway would blank all the others.
+  // ⚠ ABSENT ≠ EMPTY (the has_fabric_render / colour_plan doctrine). A server that knows this field
+  // always sends at least [] — «nothing bound yet»; NOTHING AT ALL means a binary older than the
+  // bindings, where SetDesignAssetBinding does not exist either, and a client must not draw the
+  // per-slot doors against it.
+  assetBindings: common_DesignAssetBinding[] | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The six
@@ -15571,7 +15588,9 @@ export type common_DesignRunParams = {
   // each, one of which somebody eventually forgets.
   // COUNTS ARE PER KIND AND ARE ENFORCED AT THE DOOR, before anything is reserved: `recolor` needs
   // at least one, `pattern` needs exactly one (a tile glued out of two swatches cannot join to
-  // itself), and every kind is capped at the snapshot's own reference ceiling.
+  // itself) — zero or one in swatch mode, where the picture is a texture reference and not the
+  // source (DesignPatternParams.mode) — and every kind is capped at the snapshot's own reference
+  // ceiling.
   extraInputMediaIds: number[] | undefined;
   // WHICH SIDES OF THE BENCH this run was asked to fix — «select everything in FLAT SLOTS» (W-10),
   // which a single string could not express at all: the studio marks up three plates and asks for
@@ -15721,6 +15740,36 @@ export type common_DesignPatternParams = {
   // standing with its parentage cleared (the FK's ON DELETE SET NULL), because a tile with a
   // picture is still a usable instruction after its swatch is gone.
   sourceAssetId: number | undefined;
+  // WHAT THE TILE IS BUILT FROM: "" or "image" | "swatch".
+  // · "" / "image" — TODAY'S ROUTE, and what every run frozen before this field means: the tile
+  // is extracted from exactly ONE source photograph in DesignRunParams.extra_input_media_ids
+  // (`one_source_picture` otherwise).
+  // · "swatch" — a fabric swatch built from the STATED COLOUR. DesignRunParams.colour is
+  // REQUIRED (`no_colour`), and any one of hex, code or words satisfies it. The client sends
+  // the Pantone's screen hex AND its name in `words`: a Pantone code alone is a text token an
+  // image model holds no colour for, so this is the one place the screen approximation travels
+  // on purpose. extra_input_media_ids then holds ZERO or ONE picture (`one_texture_picture`
+  // past one), and that picture is a TEXTURE reference — the model takes the material, the
+  // weave and the surface from it and NOTHING of its colour.
+  // WHY A FIELD AND NOT A KIND. A swatch is still a seamless `pattern` picture: the same seam check
+  // guards it, it lands on the same shelf as the same asset kind, and the render lays it out with
+  // the same repeat-tile paragraph. A new run kind would have had to be taught to every closed kind
+  // switch of the band — the door, the price, the queue, the landing, the history, the counters,
+  // ten of them — only to end up doing exactly what `pattern` already does. What differs is where
+  // the cloth comes from, and that is a parameter of the ask, not a different ask.
+  mode: string | undefined;
+  // THE SLOT THIS TILE IS MADE FOR — tech_card_bom_item(id), a roll-goods line (fabric, lining,
+  // interlining, insulation) of THIS card, read TOGETHER WITH DesignRunParams.colorway_id: the pair
+  // (colourway, slot) is the address of one fabric («white → outer, inner» is two addresses).
+  // 0 = not made for a slot, which is every image-mode run and every run frozen before this field.
+  // WHEN BOTH ARE SET, THE KEPT TILE BECOMES THE FABRIC OF THAT PAIR: the transaction that files
+  // the asset on the shelf also upserts the pair's DesignAssetBinding, replacing whatever the pair
+  // wore before. The newest swatch is what the person just asked for; the earlier ones stay on the
+  // shelf and can be bound back by hand (SetDesignAssetBinding).
+  // A LINE OF ANOTHER CARD is refused at the door, free (`foreign_bom_line`). A line deleted
+  // between the door and the landing does NOT fail the landing — the run is paid for and the tile
+  // is still a tile — it simply lands unbound.
+  bomItemId: number | undefined;
 };
 
 // DesignFreeformParams is the frozen ask of a PLAYGROUND run (kind=freeform): the pictures a person
@@ -16112,6 +16161,30 @@ export type common_DesignColourCloth = {
   parts: string | undefined;
 };
 
+// DesignAssetBinding — THE FABRIC OF ONE (COLOURWAY, SLOT): which asset colourway N wears on BOM
+// roll-goods line M. One row per pair (UNIQUE), one asset may serve many pairs; legacy
+// DesignAsset.colorway_id stays the whole-colourway fabric and is not touched by bindings.
+// WHY A ROW OF ITS OWN AND NOT A COLUMN ON THE ASSET. The choice belongs to the PAIR — «what does
+// white wear outside» — not to the tile, and the same cloth is routinely the outer of two
+// colourways, or the outer and the lining of one: a slot column on design_asset could name one slot
+// per tile and would have to steal across all of them. With the pair as the key, choosing again is
+// one upsert and never a hunt for the previous holder.
+// IT DIES WITH ANY OF ITS FOUR ENDS — card, colourway, BOM line, asset (every FK is ON DELETE
+// CASCADE). A pair missing either half is not a statement about anything, so nothing is left
+// pointing at nobody.
+// WRITTEN BY TWO PLACES: SetDesignAssetBinding (the person's choice; asset_id 0 unbinds), and the
+// LANDING OF A PATTERN RUN made for a pair (DesignPatternParams.bom_item_id together with the run's
+// colorway_id), which replaces the pair's previous fabric with the tile it just filed.
+export type common_DesignAssetBinding = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  colorwayId: number | undefined;
+  bomItemId: number | undefined;
+  assetId: number | undefined;
+  setBy: string | undefined;
+  setAt: wellKnownTimestamp | undefined;
+};
+
 export type ListDesignRunsRequest = {
   techCardId: number | undefined;
   // Max 24, default 12 when 0. The history shows about 4 rows per screen; three screens of slack is
@@ -16176,13 +16249,19 @@ export type StartDesignRunRequest = {
   // target stated at all in params.colour, meaning neither a code, a hex, words, NOR a cloth
   // carrying a picture («no_target_colour»); or a cloth named in words alone, with no picture
   // to lay on the photograph and no colour either («cloth_without_picture»);
-  // · pattern — anything other than exactly one picture in params.extra_input_media_ids
-  // («one_source_picture»); no name in params.pattern.name («pattern_name_required»); or a card
-  // whose asset shelves are already full, so the tile this run buys would have nowhere to land
-  // («library_full», FailedPrecondition).
+  // · pattern — no name in params.pattern.name («pattern_name_required»); a card whose asset
+  // shelves are already full, so the tile this run buys would have nowhere to land
+  // («library_full», FailedPrecondition); a params.pattern.bom_item_id that is not a line of
+  // THIS card's BOM («foreign_bom_line», FailedPrecondition — the sibling of foreign_colorway);
+  // and, by params.pattern.mode:
+  // - "" / "image" — anything other than exactly one picture in
+  // params.extra_input_media_ids («one_source_picture»);
+  // - "swatch" — no colour stated in params.colour, meaning neither a hex, a code nor words
+  // («no_colour»); or more than one picture in params.extra_input_media_ids, which in this
+  // mode is a texture reference and not the source («one_texture_picture»).
   // Each of those is FailedPrecondition-shaped news in an InvalidArgument wrapper, except
-  // `library_full`, which IS FailedPrecondition: the request is incomplete, and the sentence says
-  // which half is missing.
+  // `library_full` and `foreign_bom_line`, which ARE FailedPrecondition: the request is
+  // incomplete, and the sentence says which half is missing.
   // `freeform` AND `cutout` ARE THE PLAYGROUND, and they take this same door for the same reason:
   // both spend a key's money (the image key and FAL_KEY respectively), both are counted against the
   // day, both show up in the one history. Each returns EXACTLY ONE picture. What they refuse for
@@ -16642,6 +16721,20 @@ export type SetDesignAssetColorwayResponse = {
   asset: common_DesignAsset | undefined;
 };
 
+// SetDesignAssetBindingRequest — «the fabric of colourway N on slot M is this asset». The card is
+// named in the path and every one of the three ids is checked against it: an asset, a colourway or
+// a BOM line of a DIFFERENT card is refused, never silently bound.
+export type SetDesignAssetBindingRequest = {
+  techCardId: number | undefined;
+  colorwayId: number | undefined;
+  bomItemId: number | undefined;
+  assetId: number | undefined;
+};
+
+export type SetDesignAssetBindingResponse = {
+  binding: common_DesignAssetBinding | undefined;
+};
+
 // DeleteDesignAssetPlacementRequest names BOTH the mark and the card it is being taken off.
 // See DeleteDesignAssetRequest for why the card is stated; the scoping runs THROUGH the asset,
 // since a placement row deliberately carries no tech_card_id.
@@ -16721,6 +16814,16 @@ export type common_DesignConstructionDraft = {
   // colour. A PROPOSAL LIKE EVERY OTHER FIELD HERE: nothing is created until a person confirms
   // one, because confirming writes a PRODUCT (a colourway of this style) and not a form value.
   colourways: common_DesignColourwayProposal[] | undefined;
+  // Details that need a drawing of their OWN (O-33, D-32): what cannot be understood from the
+  // front/back flats — an unusual pocket construction, a special collar, cuff, placket or vent, a
+  // hidden fastening, a hardware detail. EMPTY IS A REAL ANSWER: most garments need none, and the
+  // prompt says so in as many words («if nothing needs a separate drawing, return an empty list»).
+  // ⚠ THIS, AND NOT `aspects`, IS WHAT THE CLIENT MAKES DETAIL SLOTS FROM. An aspect is a
+  // construction fact in words (its home is the CONSTRUCTION tab); whether a detail deserves its
+  // own flat drawing is a separate question the model answers separately — turning every aspect
+  // into a slot produced «DETAIL · FASTENING» for a pull-on tee. Server-capped at 6; name ≤ 40
+  // runes, note ≤ 200; deduped by folded name; a «none» row is dropped, not carried.
+  flatDetails: common_DesignFlatDetail[] | undefined;
 };
 
 // DesignConstructionAspect is one row of the aspects editor: its key and its text.
@@ -16804,6 +16907,14 @@ export type common_DesignColourwaySlotColour = {
   pantone: string | undefined;
   hex: string | undefined;
   colour: string | undefined;
+};
+
+// DesignFlatDetail is ONE detail that needs its own flat drawing: what it is and what the drawing
+// must show. A proposal like every other field of the draft — the client stages it as a DETAIL
+// slot, and nothing is drawn until a person accepts it and runs the flat.
+export type common_DesignFlatDetail = {
+  name: string | undefined;
+  note: string | undefined;
 };
 
 export interface AdminService {
@@ -17473,8 +17584,9 @@ export interface AdminService {
   // GenerateTechCardOperations: AI-assisted authoring is authoring.
   FormatLibraryNoteMarkdown(request: FormatLibraryNoteMarkdownRequest): Promise<FormatLibraryNoteMarkdownResponse>;
   // EnhanceText rewrites ONE free-text field of a tech card — improve (fix errors,
-  // clearer), expand (more detail) or shorten — for the small `ai ✦` button in the
-  // corner of the field (T15). Like FormatLibraryNoteMarkdown it is a SUGGESTION
+  // clearer), expand (more detail), shorten, or prompt (the text as an
+  // image-generation prompt, O-50) — for the small `ai ✦` button in the corner
+  // of the field (T15). Like FormatLibraryNoteMarkdown it is a SUGGESTION
   // and persists NOTHING: the answer goes back as a string, the client puts it in
   // the field with a short-lived undo, and the save is the field's ordinary write.
   // What reaches the model is req.text plus req.context (card facts the client
@@ -18059,7 +18171,8 @@ export interface AdminService {
   // derived_from_asset_id belonging to another card, or a repeat outside 1..2000 mm.
   UpsertDesignAsset(request: UpsertDesignAssetRequest): Promise<UpsertDesignAssetResponse>;
   // DeleteDesignAsset removes ONE shelf row and, with it, every mark it left on a flat — the marks
-  // are the asset's own statements about itself and have no meaning once it is gone. A pattern
+  // are the asset's own statements about itself and have no meaning once it is gone — and every
+  // (colourway, slot) it was the fabric of, which is left with no fabric chosen. A pattern
   // built from this asset SURVIVES with its parentage cleared; it still carries a picture and a
   // repeat, which is a usable instruction on its own.
   // THE CARD IS NAMED IN THE PATH, and it is not decoration: the server refuses an asset_id that
@@ -18085,6 +18198,26 @@ export interface AdminService {
   // NotFound on an asset of another card, exactly like DeleteDesignAsset. InvalidArgument on a
   // negative colorway_id.
   SetDesignAssetColorway(request: SetDesignAssetColorwayRequest): Promise<SetDesignAssetColorwayResponse>;
+  // SetDesignAssetBinding says WHICH ASSET IS THE FABRIC OF ONE (COLOURWAY, SLOT): colourway N wears
+  // asset X on BOM roll-goods line M (see common.DesignAssetBinding). asset_id 0 takes the fabric
+  // off the pair, which is a real answer («nothing chosen for this slot yet»), not an omission;
+  // unbinding a pair that wears nothing is OK and changes nothing.
+  // SINGLE-SELECT PER PAIR, AND THE WRITE IS THE WHOLE STEAL: the pair is the row's unique key, so
+  // binding X to (N, M) replaces whatever (N, M) wore before, in one statement. One asset may serve
+  // any number of pairs — the same cloth as the outer of two colourways is one tile, not two.
+  // IT DOES NOT TOUCH DesignAsset.colorway_id. That column is the legacy whole-colourway fabric
+  // (SetDesignAssetColorway and the pattern landing write it); a binding is a narrower fact of its
+  // own and the two live side by side.
+  // WHY A VERB OF ITS OWN: the reason SetDesignAssetColorway has one — UpsertDesignAsset is a full
+  // replace and would clear the choice on every unrelated save — and one more: the binding belongs
+  // to the PAIR, not to the asset, so it could not be a field of the asset at all.
+  // InvalidArgument `colorway_forbidden`: the asset is hardware (a zip is not what a slot is cut
+  // from). FailedPrecondition `foreign_colorway`: the colourway is not this card's.
+  // FailedPrecondition `foreign_bom_line`: the line is not one of this card's BOM lines — the
+  // server checks whose line it is, not which section it sits in. NotFound on an asset of another
+  // card, exactly like DeleteDesignAsset. InvalidArgument on a colorway_id or bom_item_id that is
+  // not positive, or a negative asset_id.
+  SetDesignAssetBinding(request: SetDesignAssetBindingRequest): Promise<SetDesignAssetBindingResponse>;
   // SetDesignAssetPlacement puts ONE mark on ONE flat: this asset, this drawing, here. Creates when
   // placement_id is 0, moves it otherwise.
   // InvalidArgument: an asset or a picture of another card, a shape whose point count does not
@@ -24454,6 +24587,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SetDesignAssetColorway",
       }) as Promise<SetDesignAssetColorwayResponse>;
+    },
+    SetDesignAssetBinding(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/asset/binding`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignAssetBinding",
+      }) as Promise<SetDesignAssetBindingResponse>;
     },
     SetDesignAssetPlacement(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {

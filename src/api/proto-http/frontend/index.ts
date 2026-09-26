@@ -243,17 +243,16 @@ export type common_ColorwayMerchandising = {
 };
 
 // A representation of a decimal value, such as 2.5. Clients may convert values
-// into language-native decimal formats, such as Java's [BigDecimal][] or
-// Python's [decimal.Decimal][].
-// [BigDecimal]:
-// https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/math/BigDecimal.html
-// [decimal.Decimal]: https://docs.python.org/3/library/decimal.html
+// into language-native decimal formats, such as Java's
+// [BigDecimal](https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/math/BigDecimal.html)
+// or Python's
+// [decimal.Decimal](https://docs.python.org/3/library/decimal.html).
 export type googletype_Decimal = {
   // The decimal value, as a string.
   // The string representation consists of an optional sign, `+` (`U+002B`)
   // or `-` (`U+002D`), followed by a sequence of zero or more decimal digits
   // ("the integer"), optionally followed by a fraction, optionally followed
-  // by an exponent.
+  // by an exponent. An empty string **should** be interpreted as `0`.
   // The fraction consists of a decimal point followed by zero or more decimal
   // digits. The string must contain at least one digit in either the integer
   // or the fraction. The number formed by the sign, the integer and the
@@ -263,11 +262,12 @@ export type googletype_Decimal = {
   // Services **should** normalize decimal values before storing them by:
   // - Removing an explicitly-provided `+` sign (`+2.5` -> `2.5`).
   // - Replacing a zero-length integer value with `0` (`.5` -> `0.5`).
-  // - Coercing the exponent character to lower-case (`2.5E8` -> `2.5e8`).
-  // - Removing an explicitly-provided zero exponent (`2.5e0` -> `2.5`).
+  // - Coercing the exponent character to upper-case, with explicit sign
+  // (`2.5e8` -> `2.5E+8`).
+  // - Removing an explicitly-provided zero exponent (`2.5E0` -> `2.5`).
   // Services **may** perform additional normalization based on its own needs
   // and the internal decimal implementation selected, such as shifting the
-  // decimal point and exponent value together (example: `2.5e-1` <-> `0.25`).
+  // decimal point and exponent value together (example: `2.5E-1` <-> `0.25`).
   // Additionally, services **may** preserve trailing zeroes in the fraction
   // to indicate increased precision, but are not required to do so.
   // Note that only the `.` character is supported to divide the integer
@@ -276,7 +276,7 @@ export type googletype_Decimal = {
   // service does support them, values **must** be normalized.
   // The ENBF grammar is:
   // DecimalString =
-  // [Sign] Significand [Exponent];
+  // '' | [Sign] Significand [Exponent];
   // Sign = '+' | '-';
   // Significand =
   // Digits ['.'] [Digits] | [Digits] '.' Digits;
@@ -1516,13 +1516,15 @@ export type StorefrontAccount = {
 // day and time zone are either specified elsewhere or are insignificant. The
 // date is relative to the Gregorian Calendar. This can represent one of the
 // following:
-// * A full date, with non-zero year, month, and day values
-// * A month and day value, with a zero year, such as an anniversary
-// * A year on its own, with zero month and day values
-// * A year and month value, with a zero day, such as a credit card expiration
-// date
-// Related types are [google.type.TimeOfDay][google.type.TimeOfDay] and
-// `google.protobuf.Timestamp`.
+// * A full date, with non-zero year, month, and day values.
+// * A month and day, with a zero year (for example, an anniversary).
+// * A year on its own, with a zero month and a zero day.
+// * A year and month, with a zero day (for example, a credit card expiration
+// date).
+// Related types:
+// * [google.type.TimeOfDay][google.type.TimeOfDay]
+// * [google.type.DateTime][google.type.DateTime]
+// * [google.protobuf.Timestamp][google.protobuf.Timestamp]
 export type googletype_Date = {
   // Year of the date. Must be from 1 to 9999, or 0 to specify a date without
   // a year.

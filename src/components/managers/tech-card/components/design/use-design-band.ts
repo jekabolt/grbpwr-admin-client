@@ -56,6 +56,11 @@ const EMPTY_BAND: GetDesignBandResponse = {
   // ни разу», и ровно так же выглядит ответ старого сервера, который поля не знает вовсе, —
   // экрану красок обе картины одинаково честны, а CAS-лестница не получает фальшивой ступени.
   colourPlan: undefined,
+  // ПРИВЯЗКИ ТКАНЕЙ К (КОЛОРВЕЙ, СЛОТ) — тот же ответ, что у `colourPlan`: `undefined` значит «сервер
+  // этого поля не сказал» — и старый бинарь, и ещё не пришедший ответ выглядят одинаково. Шаг
+  // PATTERN читает именно это различие как свою способность (capability gate), поэтому пустой
+  // список здесь был бы ложным «умею».
+  assetBindings: undefined,
   bench: [],
   budget: undefined,
   references: [],
@@ -187,7 +192,7 @@ export function useDesignBand(techCardId?: number): DesignBandState {
     band: query.data ?? EMPTY_BAND,
     isLoading: enabled && query.isLoading,
     serverSpeaks: enabled && !!query.data && !unimplemented,
-    error: unimplemented ? null : ((query.error as Error | null) ?? null),
+    error: unimplemented ? null : (query.error as Error | null) ?? null,
     refetch: query.refetch,
   };
 }

@@ -333,17 +333,16 @@ export type ColorwayMerchandising = {
 };
 
 // A representation of a decimal value, such as 2.5. Clients may convert values
-// into language-native decimal formats, such as Java's [BigDecimal][] or
-// Python's [decimal.Decimal][].
-// [BigDecimal]:
-// https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/math/BigDecimal.html
-// [decimal.Decimal]: https://docs.python.org/3/library/decimal.html
+// into language-native decimal formats, such as Java's
+// [BigDecimal](https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/math/BigDecimal.html)
+// or Python's
+// [decimal.Decimal](https://docs.python.org/3/library/decimal.html).
 export type googletype_Decimal = {
   // The decimal value, as a string.
   // The string representation consists of an optional sign, `+` (`U+002B`)
   // or `-` (`U+002D`), followed by a sequence of zero or more decimal digits
   // ("the integer"), optionally followed by a fraction, optionally followed
-  // by an exponent.
+  // by an exponent. An empty string **should** be interpreted as `0`.
   // The fraction consists of a decimal point followed by zero or more decimal
   // digits. The string must contain at least one digit in either the integer
   // or the fraction. The number formed by the sign, the integer and the
@@ -353,11 +352,12 @@ export type googletype_Decimal = {
   // Services **should** normalize decimal values before storing them by:
   // - Removing an explicitly-provided `+` sign (`+2.5` -> `2.5`).
   // - Replacing a zero-length integer value with `0` (`.5` -> `0.5`).
-  // - Coercing the exponent character to lower-case (`2.5E8` -> `2.5e8`).
-  // - Removing an explicitly-provided zero exponent (`2.5e0` -> `2.5`).
+  // - Coercing the exponent character to upper-case, with explicit sign
+  // (`2.5e8` -> `2.5E+8`).
+  // - Removing an explicitly-provided zero exponent (`2.5E0` -> `2.5`).
   // Services **may** perform additional normalization based on its own needs
   // and the internal decimal implementation selected, such as shifting the
-  // decimal point and exponent value together (example: `2.5e-1` <-> `0.25`).
+  // decimal point and exponent value together (example: `2.5E-1` <-> `0.25`).
   // Additionally, services **may** preserve trailing zeroes in the fraction
   // to indicate increased precision, but are not required to do so.
   // Note that only the `.` character is supported to divide the integer
@@ -366,7 +366,7 @@ export type googletype_Decimal = {
   // service does support them, values **must** be normalized.
   // The ENBF grammar is:
   // DecimalString =
-  // [Sign] Significand [Exponent];
+  // '' | [Sign] Significand [Exponent];
   // Sign = '+' | '-';
   // Significand =
   // Digits ['.'] [Digits] | [Digits] '.' Digits;
@@ -4607,7 +4607,9 @@ export type DesignRunParams = {
   // each, one of which somebody eventually forgets.
   // COUNTS ARE PER KIND AND ARE ENFORCED AT THE DOOR, before anything is reserved: `recolor` needs
   // at least one, `pattern` needs exactly one (a tile glued out of two swatches cannot join to
-  // itself), and every kind is capped at the snapshot's own reference ceiling.
+  // itself) — zero or one in swatch mode, where the picture is a texture reference and not the
+  // source (DesignPatternParams.mode) — and every kind is capped at the snapshot's own reference
+  // ceiling.
   extraInputMediaIds: number[] | undefined;
   // WHICH SIDES OF THE BENCH this run was asked to fix — «select everything in FLAT SLOTS» (W-10),
   // which a single string could not express at all: the studio marks up three plates and asks for
@@ -4898,6 +4900,36 @@ export type DesignPatternParams = {
   // standing with its parentage cleared (the FK's ON DELETE SET NULL), because a tile with a
   // picture is still a usable instruction after its swatch is gone.
   sourceAssetId: number | undefined;
+  // WHAT THE TILE IS BUILT FROM: "" or "image" | "swatch".
+  // · "" / "image" — TODAY'S ROUTE, and what every run frozen before this field means: the tile
+  // is extracted from exactly ONE source photograph in DesignRunParams.extra_input_media_ids
+  // (`one_source_picture` otherwise).
+  // · "swatch" — a fabric swatch built from the STATED COLOUR. DesignRunParams.colour is
+  // REQUIRED (`no_colour`), and any one of hex, code or words satisfies it. The client sends
+  // the Pantone's screen hex AND its name in `words`: a Pantone code alone is a text token an
+  // image model holds no colour for, so this is the one place the screen approximation travels
+  // on purpose. extra_input_media_ids then holds ZERO or ONE picture (`one_texture_picture`
+  // past one), and that picture is a TEXTURE reference — the model takes the material, the
+  // weave and the surface from it and NOTHING of its colour.
+  // WHY A FIELD AND NOT A KIND. A swatch is still a seamless `pattern` picture: the same seam check
+  // guards it, it lands on the same shelf as the same asset kind, and the render lays it out with
+  // the same repeat-tile paragraph. A new run kind would have had to be taught to every closed kind
+  // switch of the band — the door, the price, the queue, the landing, the history, the counters,
+  // ten of them — only to end up doing exactly what `pattern` already does. What differs is where
+  // the cloth comes from, and that is a parameter of the ask, not a different ask.
+  mode: string | undefined;
+  // THE SLOT THIS TILE IS MADE FOR — tech_card_bom_item(id), a roll-goods line (fabric, lining,
+  // interlining, insulation) of THIS card, read TOGETHER WITH DesignRunParams.colorway_id: the pair
+  // (colourway, slot) is the address of one fabric («white → outer, inner» is two addresses).
+  // 0 = not made for a slot, which is every image-mode run and every run frozen before this field.
+  // WHEN BOTH ARE SET, THE KEPT TILE BECOMES THE FABRIC OF THAT PAIR: the transaction that files
+  // the asset on the shelf also upserts the pair's DesignAssetBinding, replacing whatever the pair
+  // wore before. The newest swatch is what the person just asked for; the earlier ones stay on the
+  // shelf and can be bound back by hand (SetDesignAssetBinding).
+  // A LINE OF ANOTHER CARD is refused at the door, free (`foreign_bom_line`). A line deleted
+  // between the door and the landing does NOT fail the landing — the run is paid for and the tile
+  // is still a tile — it simply lands unbound.
+  bomItemId: number | undefined;
 };
 
 // DesignFreeformParams is the frozen ask of a PLAYGROUND run (kind=freeform): the pictures a person
@@ -5325,6 +5357,30 @@ export type DesignAssetPlacement = {
   setAt: wellKnownTimestamp | undefined;
 };
 
+// DesignAssetBinding — THE FABRIC OF ONE (COLOURWAY, SLOT): which asset colourway N wears on BOM
+// roll-goods line M. One row per pair (UNIQUE), one asset may serve many pairs; legacy
+// DesignAsset.colorway_id stays the whole-colourway fabric and is not touched by bindings.
+// WHY A ROW OF ITS OWN AND NOT A COLUMN ON THE ASSET. The choice belongs to the PAIR — «what does
+// white wear outside» — not to the tile, and the same cloth is routinely the outer of two
+// colourways, or the outer and the lining of one: a slot column on design_asset could name one slot
+// per tile and would have to steal across all of them. With the pair as the key, choosing again is
+// one upsert and never a hunt for the previous holder.
+// IT DIES WITH ANY OF ITS FOUR ENDS — card, colourway, BOM line, asset (every FK is ON DELETE
+// CASCADE). A pair missing either half is not a statement about anything, so nothing is left
+// pointing at nobody.
+// WRITTEN BY TWO PLACES: SetDesignAssetBinding (the person's choice; asset_id 0 unbinds), and the
+// LANDING OF A PATTERN RUN made for a pair (DesignPatternParams.bom_item_id together with the run's
+// colorway_id), which replaces the pair's previous fabric with the tile it just filed.
+export type DesignAssetBinding = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  colorwayId: number | undefined;
+  bomItemId: number | undefined;
+  assetId: number | undefined;
+  setBy: string | undefined;
+  setAt: wellKnownTimestamp | undefined;
+};
+
 // DesignBatch is one upload gesture: the shelf stamp «uploaded · Т. · 14:41 · 12.4 MB» and the
 // carrier of the batch's coherence — plates that arrived together are one hand's work, and the
 // mixed-provenance warning reads that.
@@ -5670,6 +5726,16 @@ export type DesignConstructionDraft = {
   // colour. A PROPOSAL LIKE EVERY OTHER FIELD HERE: nothing is created until a person confirms
   // one, because confirming writes a PRODUCT (a colourway of this style) and not a form value.
   colourways: DesignColourwayProposal[] | undefined;
+  // Details that need a drawing of their OWN (O-33, D-32): what cannot be understood from the
+  // front/back flats — an unusual pocket construction, a special collar, cuff, placket or vent, a
+  // hidden fastening, a hardware detail. EMPTY IS A REAL ANSWER: most garments need none, and the
+  // prompt says so in as many words («if nothing needs a separate drawing, return an empty list»).
+  // ⚠ THIS, AND NOT `aspects`, IS WHAT THE CLIENT MAKES DETAIL SLOTS FROM. An aspect is a
+  // construction fact in words (its home is the CONSTRUCTION tab); whether a detail deserves its
+  // own flat drawing is a separate question the model answers separately — turning every aspect
+  // into a slot produced «DETAIL · FASTENING» for a pull-on tee. Server-capped at 6; name ≤ 40
+  // runes, note ≤ 200; deduped by folded name; a «none» row is dropped, not carried.
+  flatDetails: DesignFlatDetail[] | undefined;
 };
 
 // DesignConstructionAspect is one row of the aspects editor: its key and its text.
@@ -5753,6 +5819,14 @@ export type DesignColourwaySlotColour = {
   pantone: string | undefined;
   hex: string | undefined;
   colour: string | undefined;
+};
+
+// DesignFlatDetail is ONE detail that needs its own flat drawing: what it is and what the drawing
+// must show. A proposal like every other field of the draft — the client stages it as a DETAIL
+// slot, and nothing is drawn until a person accepts it and runs the flat.
+export type DesignFlatDetail = {
+  name: string | undefined;
+  note: string | undefined;
 };
 
 export type OrderFactor =
