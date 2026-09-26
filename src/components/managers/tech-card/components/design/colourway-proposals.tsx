@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
+import type { common_AdminColorwayRef, common_Color } from 'api/proto-http/admin';
 import {
   useTechCard,
   techCardKeys,
@@ -7,7 +8,7 @@ import {
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useMemo, useRef, useState, type JSX } from 'react';
+import { useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { useFormContext, useFormState } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -16,6 +17,7 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
+import { findPantone, pantoneVersion, subscribePantone } from '../pantone-swatches';
 import type { TechCardFormData } from '../schema';
 import {
   createColorwayErrorMessage,
@@ -23,8 +25,9 @@ import {
   useCreateColorway,
   useUpdateColorwayRecipe,
 } from '../useColorwayRecipe';
+import { wireInt } from '../wire-int';
 import { InertDoor } from './bench-slot';
-import { colorwayLabel as nameOfColorway } from './colorway-picker';
+import { archivedRef, colorwayLabel } from './colorway-picker';
 import { GROUP_SEAM } from './core';
 import { DRAFTED_CLASS, DraftedPill } from './core/drafted-field';
 import { ColourwayCreatePopover } from './colourway-create';
@@ -35,52 +38,68 @@ import {
   type ProposedColourway,
   type ProposedSlotColour,
 } from './colourway-proposals-model';
-import { cardSlots, patchRow, proposalRows, recipeSlots } from './colourway-rows';
+import {
+  cardSlots,
+  patchRow,
+  proposalRows,
+  recipeSlots,
+  savedSlotRows,
+  type CardSlot,
+} from './colourway-rows';
 import { useCardMemory, useDraftMemory, type ColourwayVerdict } from './head/use-draft-fills';
 
 /**
- * КОЛОРВЕИ, ПРЕДЛОЖЕННЫЕ ЧЕРНОВИКОМ (B-25 круга 20).
+ * КОЛОРВЕИ СТИЛЯ: СОХРАНЁННЫЕ И ПРЕДЛОЖЕННЫЕ ЧЕРНОВИКОМ (B-25 круга 20; O-44, 26.09).
  *
- * Владелец: «я хочу что бы DRAFT OF THE CONSTRUCTION могло предложить мне создать несколько
+ * Владелец (B-25): «я хочу что бы DRAFT OF THE CONSTRUCTION могло предложить мне создать несколько
  * колорвеев и это было отдельным блоком где мы могли бы выбрать какие цвета по пантонам может
  * что-то еще и что бы если мы вконфирмили этот колорвей появлялся далее уже во вкладке колорвей».
+ * И поверх (O-44 п.3): «после конфирма колорвея он не должен пропадать он должен оставатся в этой
+ * же карточке».
+ *
+ * ═══ ОДИН СПИСОК: СОХРАНЁННЫЕ → ПРЕДЛОЖЕНИЯ → «+ COLOURWAY» ══════════════════════════════════
+ *
+ * Сохранённые колорвеи карточки (`useTechCard(...).colorways`, порядок карточки) стоят рядами того
+ * же вида, что и предложения: имя, цвет, и под ними — все слоты карточки с цветом каждого. Ниже —
+ * синие предложения черновика, ещё ниже — дверь «+ colourway». Подтверждённое предложение не
+ * превращается в квитанцию и не уходит смотреть себя на вкладку COLORWAYS: оно становится
+ * сохранённым рядом ЗДЕСЬ ЖЕ, а синее предложение прячется, как только этот ряд пришёл с сервера.
+ * Дверь на вкладку осталась — тихой `open ›` у каждого сохранённого ряда.
  *
  * ═══ ЭТО СВОЙ БЛОК, И ОБЁРТКУ ОН ДЕРЖИТ САМ ════════════════════════════════════════════════
  *
- * Владелец сказал «отдельным блоком» (D5 плана). Одну ночь орган простоял ПОДСТРУКТУРОЙ внутри
- * черновика — не по замыслу, а потому что `design/studio-tab.tsx` держала другая рука, — и это
- * было нарушением системы: черновик сам стоит внутри блока мудборда, то есть колорвеи оказывались
- * блоком в блоке (прямой запрет DESIGN.md). Теперь орган смонтирован своей секцией в стопке
- * STUDIO, сразу под таблицей слотов: цвета назначаются ПО СЛОТАМ, и соседство читается как фраза.
+ * Владелец сказал «отдельным блоком» (D5 плана): орган смонтирован своей секцией в стопке STUDIO,
+ * сразу под таблицей слотов — цвета назначаются ПО СЛОТАМ, и соседство читается как фраза.
+ * `Section`-обёртка живёт здесь, потому что условие «рисоваться или нет» знает только орган
+ * (состояние модульного стора, карточка и права): обёртка у вызывающего потребовала бы второго
+ * читателя того же стора в композиторе.
  *
- * `Section`-ОБЁРТКА ЖИВЁТ ЗДЕСЬ, А НЕ У ВЫЗЫВАЮЩЕГО, И ЭТО НЕ СТИЛЬ — тем же приёмом, каким её
- * держит соседняя таблица слотов. Причина: условие «рисоваться или нет» знает только орган
- * (состояние модульного стора плюс права), а обёртка у вызывающего потребовала бы ВТОРОГО
- * читателя того же стора в композиторе — то есть второго ответа на один вопрос.
- *
- * ⚠ С КРУГА r2 БЛОК СТОИТ НА КАРТОЧКЕ ВСЕГДА, а не только после прогона черновика: владелец
- * попросил снизу плейсхолдер «+ colourway» (п. 15), а дверь, которая появляется только после
- * платного прогона, дверью не является. Единственное исключение — карточка только для чтения:
- * там нет ни плейсхолдера, ни предложений, и рамка с одним заголовком не сказала бы ничего
- * (ранний возврат ниже).
+ * ⚠ БЛОК СТОИТ НА КАРТОЧКЕ ВСЕГДА (r2 п.15: снизу плейсхолдер «+ colourway»). Единственное
+ * исключение — карточка только для чтения, у которой нечего показать: ни сохранённых, ни
+ * предложений; рамка с одним заголовком не сказала бы ничего (ранний возврат ниже).
  *
  * ═══ ЗДЕСЬ КЛИК ОБЯЗАТЕЛЕН, И ЭТО НЕ ПРОТИВОРЕЧИТ B-14 ═════════════════════════════════════
  *
- * Всё остальное черновик теперь пишет сам, потому что запись в форму отменяется формой же: `✕`
- * возвращает то, что стояло. Подтверждение колорвея — НЕ запись в форму. `CreateColorway` создаёт
- * ПРОДУКТ, немедленно и на сервере; ни `✕`, ни отказ от сохранения карточки его не уберут — его
- * придётся удалять руками на вкладке продуктов. Само-заполнение здесь означало бы, что платный
- * прогон молча наплодил до четырёх продуктов, о которых человека не спросили.
+ * Всё остальное черновик пишет сам, потому что запись в форму отменяется формой же: `✕` возвращает
+ * то, что стояло. Подтверждение колорвея — НЕ запись в форму. `CreateColorway` создаёт ПРОДУКТ,
+ * немедленно и на сервере; ни `✕`, ни отказ от сохранения карточки его не уберут. Само-заполнение
+ * здесь означало бы, что платный прогон молча наплодил до четырёх продуктов.
  */
 
-/** Квадратик цвета. Своя копия на четыре строки — импортировать из `colorway-recipe.tsx`
- *  (4 700 строк редактора рецепта) значило бы затащить сюда его половину ради рамки 12×12. */
+/**
+ * Квадратик цвета. Своя копия на несколько строк — импортировать из `colorway-recipe.tsx`
+ * (4 700 строк редактора рецепта) значило бы затащить сюда его половину ради рамки 12×12.
+ * Без цвета квадрат ПУНКТИРНЫЙ: сплошная пустая рамка читалась бы белым цветом, которого нет.
+ */
 function Swatch({ hex, title }: { hex?: string; title?: string }): JSX.Element {
   return (
     <span
       aria-hidden
       title={title ?? hex ?? undefined}
-      className='inline-block size-3 shrink-0 border border-textColor'
+      className={cn(
+        'inline-block size-3 shrink-0 border',
+        hex ? 'border-textColor' : 'border-dashed border-borderColor',
+      )}
       style={hex ? { backgroundColor: hex } : undefined}
     />
   );
@@ -90,23 +109,53 @@ const cell =
   'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
 
 /**
+ * ═══ СЕТКА КОЛОРВЕЯ — ДВЕ КОЛОНКИ, ОДНИ НА ВСЕ РЯДЫ ═════════════════════════════════════════
+ *
+ * Первая колонка — имя: колорвея в его строке и слота в строках под ним; вторая — цвет: колорвея
+ * и каждого слота. Ширина первой колонки одна на сохранённые ряды и на предложения, поэтому цвета
+ * стоят одной вертикалью по всему блоку, и два колорвея сравниваются глазом сверху вниз.
+ */
+const NAME_COL = 'w-36 shrink-0 sm:w-44';
+const LINE = 'flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5';
+/**
+ * ЛИНЕЙКИ ТОЛЬКО МЕЖДУ РЯДАМИ (владелец, O-43 и O-48): «после последнего чилда в списке не делать
+ * подчеркивание» — последний ряд кончается воздухом, а не линейкой; воздух под ним даёт шов списка
+ * колорвеев (20px) или отступ двери «+ colourway» (16px).
+ */
+const RULED = '[&>*+*]:border-t [&>*+*]:border-hairline';
+
+/**
  * ТРЁХШАГОВАЯ ЗАПИСЬ, ТОЧНО ТА ЖЕ, КАКОЙ ЕЁ ДЕЛАЕТ ВКЛАДКА: сперва личность, потом рецепт.
+ *
+ * ⚠ ПЕРЕДАЧА СОХРАНЁННОМУ РЯДУ — СРАЗУ ПОСЛЕ ЛИЧНОСТИ. `create.mutateAsync` возвращается ПОСЛЕ
+ * своего `onSuccess`, а тот ждёт `invalidateQueries` — то есть перечитывания живой карточки
+ * (react-query 5: `Mutation.execute` ждёт `options.onSuccess`, `refetchQueries` ждёт `fetch`).
+ * К этой строке новый колорвей уже лежит в кэше карточки, и `onCreated` отдаёт вердикт стору:
+ * синее предложение уходит в тот же кадр, в каком пришёл его сохранённый ряд, а не через шаг
+ * рецепта. Если перечитывание упало молча, ряда нет — и предложение остаётся живым: второй
+ * `confirm ▸` сервер отвергнет уникальностью `(style, color_code)`, продукт не задвоится.
  *
  * ⚠ ВЕРСИЯ ЗАМКА ЧИТАЕТСЯ ПЕРЕД САМОЙ ЗАПИСЬЮ, А НЕ НА РЕНДЕРЕ. `expected_colorway_version` —
  * это общий `tech_card.lock_version`, и его двигает ЛЮБАЯ запись по карточке, включая только что
- * сделанный нами `CreateColorway`. Версия, взятая раньше, гарантированно устарела бы о нашу же
- * первую половину — то есть каждый confirm отвечал бы 409 на собственный второй шаг.
+ * сделанный нами `CreateColorway`.
  *
  * ⚠ ОТКАТА У ПОЛОВИНЫ НЕТ, И ОН ЗДЕСЬ БЫЛ БЫ ХУЖЕ САМОЙ ПОЛОВИНЫ. Упавший второй шаг оставляет
  * СОЗДАННЫЙ колорвей без рецепта; удалять его в ответ значило бы стирать продукт из-за сетевой
- * ошибки. Поэтому квитанция говорит правду обеими половинами и уводит доделать рецепт руками.
+ * ошибки. Поэтому под сохранённым рядом стоит правда словами, а `open ›` ведёт доделать рецепт.
+ *
+ * `colorwayId` — int64 с провода, то есть СТРОКА в JSON при объявленном `number`; сравнивается
+ * только через `wireInt`, иначе `"42" === 42` молча не находит только что созданный колорвей.
  */
 function useConfirmColourway(techCardId: number) {
   const create = useCreateColorway(techCardId);
   const recipe = useUpdateColorwayRecipe(techCardId);
   const qc = useQueryClient();
 
-  async function confirm(p: ProposedColourway, bound: BoundSlot[]): Promise<ColourwayVerdict> {
+  async function confirm(
+    p: ProposedColourway,
+    bound: BoundSlot[],
+    onCreated: (colorwayId: number) => void,
+  ): Promise<ColourwayVerdict> {
     const usages = usagesForColourway(bound);
     const res = await create.mutateAsync({
       colorCode: p.colorCode,
@@ -131,12 +180,13 @@ function useConfirmColourway(techCardId: number) {
         displayOrder: undefined,
       },
     });
-    const colorwayId = res?.colorwayId ?? 0;
+    const colorwayId = wireInt(res?.colorwayId);
     if (!colorwayId) throw new Error('the server created no colourway id');
+    onCreated(colorwayId);
     if (usages.length === 0) return { status: 'confirmed', colorwayId };
     try {
       const fresh = await adminService.GetTechCard({ id: techCardId, vatCountryCode: undefined });
-      const ref = fresh.techCard?.colorways?.find((c) => c.colorwayId === colorwayId);
+      const ref = fresh.techCard?.colorways?.find((c) => wireInt(c.colorwayId) === colorwayId);
       const expectedColorwayVersion = ref?.lockVersion ?? fresh.techCard?.lockVersion ?? 0;
       await recipe.mutateAsync({ colorwayId, expectedColorwayVersion, usages });
     } catch (e) {
@@ -150,6 +200,130 @@ function useConfirmColourway(techCardId: number) {
   return { confirm, pending: create.isPending || recipe.isPending };
 }
 
+/**
+ * ═══ СОХРАНЁННЫЙ КОЛОРВЕЙ — ЧТЕНИЕ, А НЕ РЕДАКТОР (O-44 п.3, фаза 1) ═════════════════════════
+ *
+ * Имя — `colorwayLabel` (одно определение на всю студию). Цвет — экранный `dev_hex`, при его
+ * отсутствии — приближение пантона, при отсутствии и его — hex словарного цвета SKU; подпись —
+ * пантон, а без него — имя словарного цвета. Слоты — строки рецепта УРОВНЯ ИЗДЕЛИЯ
+ * (`savedSlotRows`): ровно то, что пишет `confirm ▸`, и ровно то, что вкладка COLORWAYS больше
+ * не рисует ни одним полем (она возит `color`/`pantone` строки только ради старых записей).
+ *
+ * Правка здесь не живёт: писатель рецепта — вкладка COLORWAYS (полная замена строк, с артикулами и
+ * нормами), и второй писатель той же записи разошёлся бы с ним молча. `open ›` ведёт туда, сразу
+ * на этот колорвей (`?colorway=`). Архивный — тем же рядом, серым и со словом «(archived)»: цвет
+ * без слова не несёт состояния (DESIGN.md).
+ */
+function SavedColourway({
+  cw,
+  card,
+  dictionaryColour,
+  recipeFailed,
+  onOpen,
+}: {
+  cw: common_AdminColorwayRef;
+  card: readonly CardSlot[];
+  dictionaryColour?: common_Color;
+  recipeFailed?: string;
+  onOpen: (colorwayId: number) => void;
+}): JSX.Element {
+  const id = wireInt(cw.colorwayId);
+  const archived = archivedRef(cw);
+  const pantone = (cw.pantone ?? '').trim();
+  const hex =
+    (cw.devHex ?? '').trim() || findPantone(pantone)?.hex || (dictionaryColour?.hex ?? '').trim();
+  const colourWords =
+    pantone || (dictionaryColour?.name ?? '').trim() || (cw.colorCode ?? '').trim();
+  const rows = savedSlotRows(cw.usages, card);
+  const name = colorwayLabel(cw);
+  return (
+    <div data-cw-saved={id} data-archived={archived ? '' : undefined}>
+      <div className='flex flex-wrap items-center gap-x-3 gap-y-1'>
+        <span className={cn(NAME_COL, 'flex min-w-0 items-baseline gap-1.5')} title={name}>
+          <Text
+            component='span'
+            className={cn('min-w-0 truncate font-bold uppercase', archived && 'text-labelColor')}
+          >
+            {name}
+          </Text>
+          {archived && (
+            <Text size='micro' variant='label' component='span' className='shrink-0'>
+              (archived)
+            </Text>
+          )}
+        </span>
+        <span className='flex min-w-0 items-center gap-2' data-cw-colour={id}>
+          <Swatch hex={hex || undefined} title={colourWords || undefined} />
+          <Text
+            size='micro'
+            component='span'
+            className={cn('uppercase', archived && 'text-labelColor')}
+          >
+            {colourWords || '—'}
+          </Text>
+        </span>
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          className='ml-auto text-labelColor hover:text-textColor'
+          data-cw-open={id}
+          title='open this colourway on the COLORWAYS tab'
+          onClick={() => onOpen(id)}
+        >
+          open ›
+        </Button>
+      </div>
+      {recipeFailed && (
+        <Text size='micro' variant='label' className='mt-1 normal-case' data-cw-recipe-failed={id}>
+          created, but its slot colours did not save — {recipeFailed}
+        </Text>
+      )}
+      <div className={cn('mt-1', RULED)}>
+        {rows.map((r) => (
+          <div key={r.key} className={LINE} data-cw-slot={`${id}:${r.key}`}>
+            <Text
+              size='micro'
+              variant='label'
+              component='span'
+              className={cn(NAME_COL, 'truncate')}
+              title={r.slot || undefined}
+            >
+              {r.slot || 'unnamed'}
+            </Text>
+            {r.pantone || r.colour ? (
+              <span className='flex min-w-0 items-center gap-2' data-slot-pantone={r.pantone}>
+                <Swatch hex={findPantone(r.pantone)?.hex} title={r.pantone || undefined} />
+                {r.pantone && (
+                  <Text
+                    size='micro'
+                    component='span'
+                    className={cn('uppercase', archived && 'text-labelColor')}
+                  >
+                    {r.pantone}
+                  </Text>
+                )}
+                {r.colour && (
+                  <Text size='micro' variant='label' component='span'>
+                    {r.colour}
+                  </Text>
+                )}
+              </span>
+            ) : (
+              /* «—», А НЕ ПУСТОТА (DESIGN.md): слот есть, цвета у него в рецепте нет. Строка,
+                 чей цвет живёт на пришпиленном артикуле, так и говорит — прочерк там был бы
+                 неправдой. */
+              <Text size='micro' variant='label' component='span' data-slot-pantone=''>
+                {r.article ? 'set by its article' : '—'}
+              </Text>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ColourwayProposals({
   techCardId,
   readOnly,
@@ -158,10 +332,9 @@ export function ColourwayProposals({
   readOnly: boolean;
 }): JSX.Element | null {
   /* ⚠ ЧИТАЕТСЯ ТОЛЬКО `isDirty`, И ЭТО ПОДПИСКА, А НЕ ПРОСМОТР: прокси `useFormState` подписывает
-     на прочитанные свойства, и один булев переключается редко. Читает его ОРГАН, а не композитор,
-     и это довод про место: подписка обязана жить там же, где её единственный потребитель, — иначе
-     первая клавиша на карточке перерисовывала бы всю стопку STUDIO ради ворот одной кнопки.
-     Сами ворота — `confirmRefusal` в `colourway-proposals-model.ts`. */
+     на прочитанные свойства, и один булев переключается редко. Читает его ОРГАН, а не композитор:
+     подписка обязана жить там же, где её единственный потребитель, — иначе первая клавиша на
+     карточке перерисовывала бы всю стопку STUDIO ради ворот одной кнопки. */
   const { control } = useFormContext<TechCardFormData>();
   const { isDirty: dirty } = useFormState({ control });
   const { proposals, verdicts } = useCardMemory(techCardId);
@@ -173,59 +346,42 @@ export function ColourwayProposals({
   const { confirm, pending } = useConfirmColourway(techCardId);
   const [busy, setBusy] = useState<string | null>(null);
   const [, setParams] = useSearchParams();
-  /* Дверь «завести руками» — своё окно и свои квитанции; в сторе черновика её нет и быть не
-     должно: она не предложение модели, а действие человека. Имя, пантон, подбор словарного цвета и
-     все отказы держит само окно (`ColourwayCreatePopover`) — здесь остаётся только «открыто ли». */
+  /* Полная библиотека пантонов догружается в чужом такте (первое открытие любого пикера); свотчи
+     сохранённых рядов узнают об этом этой подпиской, а не следующим случайным рендером. */
+  useSyncExternalStore(subscribePantone, pantoneVersion, pantoneVersion);
+  /* Дверь «завести руками» — своё окно; в сторе черновика её нет и быть не должно: она не
+     предложение модели, а действие человека. Имя, пантон, подбор словарного цвета и все отказы
+     держит само окно (`ColourwayCreatePopover`) — здесь остаётся только «открыто ли». Заведённый
+     им колорвей приходит в список сам: окно пишет через `useCreateColorway`, а тот перечитывает
+     карточку — своих квитанций у двери больше нет. */
   const [creatingByHand, setCreatingByHand] = useState(false);
-  /* ⚠ ХРАНИТСЯ ТОЛЬКО `id`, А ИМЯ ЧИТАЕТСЯ ИЗ КАРТОЧКИ. Окно рождения отдаёт наружу один
-     `colorwayId` (его контракт), и переписать имя себе значило бы завести ВТОРУЮ копию названия
-     колорвея — ту, что не поправится, если имя тут же изменят на вкладке COLOURWAYS. Запись
-     инвалидирует `useTechCard`, поэтому имя приезжает из того же источника, что и весь список. */
-  const [handMade, setHandMade] = useState<number[]>([]);
 
   /**
-   * ═══ КАРТОЧКА СМЕНИЛАСЬ — РУЧНАЯ СТРОКА И ЕЁ КВИТАНЦИИ НАЧИНАЮТСЯ ЗАНОВО ══════════════════
+   * ═══ КАРТОЧКА СМЕНИЛАСЬ — ДВЕРЬ «+ COLOURWAY» ЗАКРЫВАЕТСЯ ════════════════════════════════
    *
-   * ⚠ ЭТО НЕ ОСТОРОЖНОСТЬ, А ЗАКРЫТИЕ ЛОЖНОГО УТВЕРЖДЕНИЯ О ЧУЖОЙ КАРТОЧКЕ. Три состояния выше
-   * — местные, и ничто их не сбрасывало: `ColourwayProposals` не ключуется `techCardId`, а
-   * `StudioTab` при смене карточки НЕ размонтируется (инвариант 12). Квитанция «NAME · created ·
-   * see it on COLORWAYS ▸», заработанная на карточке A, остаётся стоять на карточке B — то есть
-   * экран сообщает, что у B ЗАВЕДЁН колорвей, которого у неё нет, и дверь ведёт смотреть его на
-   * её вкладку COLORWAYS. Полу-набранное имя и выбранный код уезжают туда же и уходят в
-   * `CreateColorway` уже под чужой карточкой.
+   * `ColourwayProposals` не ключуется `techCardId`, а `StudioTab` при смене карточки НЕ
+   * размонтируется (инвариант 12). Открытое окно рождения карточки A на карточке B завело бы
+   * колорвей уже под чужой карточкой. Всё остальное, что здесь рисуется, читается ПО КАРТОЧКЕ
+   * (`useCardMemory`, `useTechCard`) и переезжать не может по построению.
    *
-   * ⚠⚠ ПРОВЕРЯТЬ ЭТО НА ХОЛОДНОЙ КАРТОЧКЕ БЕСПОЛЕЗНО, И ИМЕННО ТАК ЭТОТ СБРОС СНЕСУТ. У карточки,
-   * которую в этой сессии ещё не открывали, `useDesignBand` отдаёт `isLoading: true`, `StudioTab`
-   * подменяет весь шаг на «loading…», и блок размонтируется САМ — состояние пропадает без всякого
-   * сброса. Опасен обычный ход человека «A → B → A»: у уже посещённой карточки данные в кэше,
-   * `isLoading` ложно, экран не подменяется, узел живёт. ЗАМЕРЕНО на стенде: сцена E в
-   * `probe-mood.mjs` прогревает обе карточки и без этих трёх строк показывает квитанцию карточки
-   * 7 на карточке 8 при `sameNode: true`.
-   *
-   * В ТЕЛЕ РЕНДЕРА, А НЕ В ЭФФЕКТЕ (инвариант 12): эффект оставил бы один закоммиченный кадр, в
-   * котором карточка уже новая, а квитанция ещё чужая — и этого кадра хватает, чтобы по ней
-   * нажать. Образец — `generation/generation-history.tsx` (`shownCard`).
-   *
-   * `busy` НЕ СБРАСЫВАЕТСЯ НАРОЧНО: он снимается в `finally` уже идущего запроса, и обнулить его
-   * здесь значило бы отпустить кнопку под живой мутацией.
+   * В ТЕЛЕ РЕНДЕРА, А НЕ В ЭФФЕКТЕ: эффект оставил бы один закоммиченный кадр, в котором карточка
+   * уже новая, а окно ещё старое. Образец — `generation/generation-history.tsx` (`shownCard`).
+   * `busy` НЕ СБРАСЫВАЕТСЯ НАРОЧНО: он снимается в `finally` уже идущего запроса.
    */
   const shownCard = useRef(techCardId);
   if (shownCard.current !== techCardId) {
     shownCard.current = techCardId;
-    /* Само окно свои поля сбрасывает тем же приёмом и по тому же доводу; здесь закрывается ДВЕРЬ
-       и стираются квитанции — «NAME · created», заработанная на карточке A, на карточке B врала бы
-       про заведённый у неё колорвей и вела бы смотреть его на её вкладку COLOURWAYS. */
     if (creatingByHand) setCreatingByHand(false);
-    if (handMade.length) setHandMade([]);
   }
 
-  /* Слоты СОХРАНЁННОЙ карточки в порядке MATERIAL SLOTS — из них и строятся ряды каждого колорвея
+  /* Слоты СОХРАНЁННОЙ карточки в порядке MATERIAL SLOTS — из них строятся ряды каждого колорвея
      (`colourway-rows.ts`). `cardRead` отличает «слотов нет» от «карточку ещё не прочитали». */
   const card = useMemo(
     () => cardSlots(techCard?.techCard?.bomItems),
     [techCard?.techCard?.bomItems],
   );
   const cardRead = techCard !== undefined;
+  const saved = useMemo(() => techCard?.colorways ?? [], [techCard?.colorways]);
 
   /**
    * ПРАВКА РЯДА — ПО КЛЮЧУ РЯДА И НАД СЛОТАМИ ИЗ СТОРА В МОМЕНТ ЗАПИСИ. Ряды — слоты карточки, а не
@@ -243,32 +399,22 @@ export function ColourwayProposals({
     patchProposal(techCardId, id, { slots: patchRow(cur.slots, card, rowKey, patch) });
   };
   const usedCodes = useMemo(
-    () => new Set((techCard?.colorways ?? []).map((c) => c.colorCode ?? '').filter(Boolean)),
-    [techCard?.colorways],
+    () => new Set(saved.map((c) => c.colorCode ?? '').filter(Boolean)),
+    [saved],
   );
   /**
    * ═══ ВЫБРАННОЕ ЗНАЧЕНИЕ ОБЯЗАНО БЫТЬ СРЕДИ ПУНКТОВ — ВСЕГДА, БЕЗ ИСКЛЮЧЕНИЙ ═══════════════
    *
    * Список — ЖИВОЙ КАТАЛОГ, а `colorCode` предложения — то, что сервер сверил со словарём В МОМЕНТ
    * ПРОГОНА. Между прогоном и этим экраном цвет успевают снять в архив, и тогда пункта у него нет:
-   * триггер рисуется ПУСТЫМ («— select colour —»), а в сторе лежит код, и ворота, спрашивающие
-   * только `!colorCode`, пропускают `CreateColorway` с цветом, которого экран не показывает.
-   * Продукт заводится с невидимым цветом, и узнаётся это уже на вкладке COLORWAYS.
+   * триггер рисуется ПУСТЫМ, а в сторе лежит код, и ворота, спрашивающие только `!colorCode`,
+   * пропускают `CreateColorway` с цветом, которого экран не показывает.
    *
-   * ЛЕЧИТСЯ ТЕМ ЖЕ, ЧЕМ У СОСЕДА (`pattern/pattern-library.tsx`, «носимый архивный остаётся в
-   * списке, а сирота дописывается своим пунктом»), И ДОВОД ТОТ ЖЕ И ДВОЙНОЙ:
-   *   (а) ДОСТИЖИМОСТЬ: спрятав имя, мы спрятали бы ровно то, что человек пришёл поправить;
-   *   (б) КОНСТРУКЦИЯ ВМЕСТО ОБЕЩАНИЯ: значение среди пунктов держится построением списка, а не
-   *       тем, что «архивных не бывает».
+   * ЛЕЧИТСЯ ТЕМ ЖЕ, ЧЕМ У СОСЕДА (`pattern/pattern-library.tsx`): носимый архивный остаётся в
+   * списке, а сирота дописывается своим пунктом. Здесь список — выбор цвета БУДУЩЕГО ПРОДУКТА,
+   * поэтому такой пункт стоит `disabled` и НАЗЫВАЕТ факт, а ворота отказывают словами.
    *
-   * ЧТО ЗДЕСЬ У́ЖЕ, ЧЕМ У СОСЕДА, И ПОЧЕМУ. Там список — выбор привязки, и архивный носимый пункт
-   * ВЫБИРАЕМ. Здесь список — выбор цвета БУДУЩЕГО ПРОДУКТА, а новая работа под снятым именем —
-   * ровно то, что архив закрывает; поэтому такой пункт стоит `disabled` и НАЗЫВАЕТ факт, а ворота
-   * ниже отказывают словами. Показать и не дать — это не полумера, а две разные обязанности:
-   * первая перед глазами, вторая перед сервером.
-   *
-   * КЛЮЧ БЕРЁТСЯ У ВСЕХ ПРЕДЛОЖЕНИЙ СРАЗУ (`held`), а не у одного: список тут один на блок, а
-   * предложений до четырёх, и мемо на каждое строило бы четыре каталога ради одной строки.
+   * КЛЮЧ БЕРЁТСЯ У ВСЕХ ПРЕДЛОЖЕНИЙ СРАЗУ (`held`): список тут один на блок.
    */
   const held = useMemo(
     () => new Set(proposals.map((p) => (p.colorCode ?? '').trim()).filter(Boolean)),
@@ -283,32 +429,50 @@ export function ColourwayProposals({
     () => new Set(colours.filter((c) => !c.archived).map((c) => c.code ?? '')),
     [colours],
   );
+  /** Словарь целиком, включая архив: подпись сохранённого колорвея ищет свой код и там. */
+  const dictionaryByCode = useMemo(
+    () => new Map((dictionary?.colors ?? []).map((c) => [c.code ?? '', c])),
+    [dictionary?.colors],
+  );
 
   /**
-   * ⚠ РАНЬШЕ ЗДЕСЬ СТОЯЛ РАННИЙ ВОЗВРАТ: «блока нет вовсе, пока нечего сказать». Владелец (п. 15
-   * круга r2, дословно) попросил обратное: «в COLOURWAYS снизу плейсхолдер для добавления нового
-   * колорвея». Плейсхолдер, который виден только после платного прогона черновика, — это не
-   * дверь, а лотерея, поэтому блок теперь стоит ВСЕГДА, и пустой он говорит ровно одно: колорвей
-   * можно завести отсюда. Довод старого возврата («рамка с подписью учит, что кнопка сломана»)
-   * снят не отменой, а тем, что подпись больше не про кнопку прогона: в пустом блоке стоит
-   * работающая дверь.
+   * ПОДТВЕРЖДЁННОЕ ПРЕДЛОЖЕНИЕ ПРЯЧЕТСЯ, КОГДА ЕГО СОХРАНЁННЫЙ РЯД УЖЕ СТОИТ, — и только тогда.
+   * Вердикт `confirmed` без ряда (колорвей удалили на вкладке COLORWAYS, перечитывание не
+   * доехало) не прячет ничего: предложение снова живо, а задвоение закрывает сервер.
    */
-  const visible = proposals.filter((p) => verdicts[p.id]?.status !== 'dismissed');
+  const savedIds = useMemo(
+    () => new Set(saved.map((c) => wireInt(c.colorwayId)).filter((n) => n > 0)),
+    [saved],
+  );
+  const visible = proposals.filter((p) => {
+    const v = verdicts[p.id];
+    if (v?.status === 'dismissed') return false;
+    return !(v?.status === 'confirmed' && savedIds.has(wireInt(v.colorwayId)));
+  });
+  /** «Колорвей заведён, а рецепт не записался» — правда, которая стоит под его сохранённым рядом. */
+  const recipeFailedById = useMemo(() => {
+    const out = new Map<number, string>();
+    for (const v of Object.values(verdicts))
+      if (v.status === 'confirmed' && v.recipeFailed)
+        out.set(wireInt(v.colorwayId), v.recipeFailed);
+    return out;
+  }, [verdicts]);
 
-  /* ⚠ ОДНО ИСКЛЮЧЕНИЕ ИЗ «БЛОК СТОИТ ВСЕГДА»: карточка только для чтения. Плейсхолдера там нет
-     по построению, предложений тоже, и остаётся пустая белая рамка с одним заголовком — то есть
-     ровно то, чего боялся старый ранний возврат. Читателю она не сообщает ничего. */
-  if (readOnly && visible.length === 0 && handMade.length === 0) return null;
+  /* ⚠ ОДНО ИСКЛЮЧЕНИЕ ИЗ «БЛОК СТОИТ ВСЕГДА»: карточка только для чтения, у которой нет ни
+     сохранённых колорвеев, ни предложений. Читателю пустая рамка не сообщает ничего. */
+  if (readOnly && visible.length === 0 && saved.length === 0) return null;
 
-  /* ⚠ ВОРОТА РУЧНОЙ ДВЕРИ ЗДЕСЬ БОЛЬШЕ НЕ СЧИТАЮТСЯ, И ЭТО НЕ ОСЛАБЛЕНИЕ: их считает то же
-     `createRefusal` внутри окна, поверх тех же прав, того же словаря и того же `isDirty` формы
-     карточки. Два списка отказов на один жест — это два разных ответа на «почему нельзя». */
+  /* ⚠ ВОРОТА РУЧНОЙ ДВЕРИ ЗДЕСЬ НЕ СЧИТАЮТСЯ, И ЭТО НЕ ОСЛАБЛЕНИЕ: их считает `createRefusal`
+     внутри окна, поверх тех же прав, того же словаря и того же `isDirty` формы карточки. */
 
-  const goToColorways = () =>
+  /* `?colorway=` выбирает свотч на вкладке (`colorway-recipe.tsx` читает его, только когда `?tab=`
+     называет её), поэтому дверь ведёт прямо к этому колорвею, а не на вкладку вообще. */
+  const openOnColorways = (colorwayId: number) =>
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev);
         next.set('tab', 'colorways');
+        next.set('colorway', String(colorwayId));
         next.delete('sample');
         next.delete('fits');
         return next;
@@ -316,303 +480,248 @@ export function ColourwayProposals({
       { replace: true },
     );
 
+  const listed = saved.length + visible.length > 0;
+
   return (
     <Section
       title='colourways'
-      question='— proposed by the draft or added by hand; a confirmed one lives on the COLORWAYS tab'
-      /* ШОВ БЛОКА — ТОТ ЖЕ ТОКЕН, ЧТО У СОСЕДЕЙ ШАГА MOODBOARD (r3 п.3-токен, зона M замерила
-         здесь 10px против 20 у всех остальных). `Section` разводит своих прямых детей штатными
-         10px `space-y-stack`; шаг MOODBOARD набран швом в 20px — CARD DETAILS, CONSTRUCTION DRAFT,
-         CONSTRUCTION, MATERIAL SLOTS, — и блок, стоящий между ними со своим числом, читается как
-         «сюда не дописали». Число берётся у `GROUP_SEAM`, а не пишется здесь второй раз. */
+      question='— what colours it comes in'
+      /* ШОВ БЛОКА — ТОТ ЖЕ ТОКЕН, ЧТО У СОСЕДЕЙ ШАГА MOODBOARD (r3 п.3-токен): `Section` разводит
+         своих прямых детей штатными 10px, шаг набран швом в 20px, и число берётся у `GROUP_SEAM`,
+         а не пишется здесь второй раз. */
       className={GROUP_SEAM}
     >
       <div data-b25-colourways=''>
-        {visible.map((p) => {
-          const verdict = verdicts[p.id];
-          // Ряды — все слоты сохранённой карточки, потом слоты модели, которых на ней нет (O-44 п.2).
-          const rows = proposalRows(p.slots, card);
-          const bound = recipeSlots(rows);
+        {listed && (
+          /* Шов между колорвеями — 20px, число `GROUP_SEAM`: колорвей в этом блоке и есть группа. */
+          <div className='flex flex-col gap-5' data-cw-list=''>
+            {saved.map((cw, i) => (
+              <SavedColourway
+                key={`saved:${wireInt(cw.colorwayId) || `#${i}`}`}
+                cw={cw}
+                card={card}
+                dictionaryColour={dictionaryByCode.get((cw.colorCode ?? '').trim())}
+                recipeFailed={recipeFailedById.get(wireInt(cw.colorwayId))}
+                onOpen={openOnColorways}
+              />
+            ))}
 
-          if (verdict?.status === 'confirmed') {
-            return (
-              <div
-                key={p.id}
-                className='mt-1.5 flex flex-wrap items-baseline gap-2 border-b border-hairline py-1'
-                data-b25-receipt={p.id}
-              >
-                <Text size='micro' component='span' className='uppercase'>
-                  {p.name || p.colorCode}
-                </Text>
-                <Pill tone='ok'>confirmed</Pill>
-                {verdict.recipeFailed && (
-                  <Text size='nano' variant='label' component='span'>
-                    colourway created · recipe not saved — {verdict.recipeFailed}
-                  </Text>
-                )}
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  className='ml-auto'
-                  data-b25-go={p.id}
-                  onClick={goToColorways}
-                >
-                  see it on COLORWAYS ▸
-                </Button>
-              </div>
-            );
-          }
+            {visible.map((p) => {
+              // Ряды — все слоты сохранённой карточки, потом слоты модели, которых на ней нет (O-44 п.2).
+              const rows = proposalRows(p.slots, card);
+              const bound = recipeSlots(rows);
+              /* Сирота — код, которого в словаре нет ВОВСЕ (цвет удалили, а не сняли в архив). Он
+                 тоже обязан получить свой пункт: иначе триггер снова пуст, а стор снова не пуст. */
+              const orphanCode = !!p.colorCode && !colours.some((c) => c.code === p.colorCode);
+              const refusal = confirmRefusal({
+                readOnly,
+                dirty,
+                colorCode: p.colorCode,
+                usedCodes,
+                // Словарь «есть» ровно тогда, когда из него есть ЧТО ВЫБРАТЬ: архивный пункт,
+                // оставленный ради видимости своего же значения, выбором не является.
+                dictionaryHasAny: colours.length > 0,
+                dictionaryHasColours: choosable.size > 0,
+                codeChoosable: !p.colorCode || choosable.has(p.colorCode),
+                codeKnown: !p.colorCode || !orphanCode,
+                cardRead,
+                cardSlotCount: card.length,
+                boundCount: bound.length,
+              });
 
-          /* Сирота — код, которого в словаре нет ВОВСЕ (цвет удалили, а не сняли в архив). Он
-             тоже обязан получить свой пункт: иначе триггер снова пуст, а стор снова не пуст. */
-          const orphanCode = !!p.colorCode && !colours.some((c) => c.code === p.colorCode);
-          const refusal = confirmRefusal({
-            readOnly,
-            dirty,
-            colorCode: p.colorCode,
-            usedCodes,
-            // Словарь «есть» ровно тогда, когда из него есть ЧТО ВЫБРАТЬ: архивный пункт,
-            // оставленный ради видимости своего же значения, выбором не является.
-            dictionaryHasAny: colours.length > 0,
-            dictionaryHasColours: choosable.size > 0,
-            codeChoosable: !p.colorCode || choosable.has(p.colorCode),
-            codeKnown: !p.colorCode || !orphanCode,
-            cardRead,
-            cardSlotCount: card.length,
-            boundCount: bound.length,
-          });
-
-          /* ═══ ПРЕДЛОЖЕНИЕ — ЧЕРНОВИК, И ВЫГЛЯДИТ ОНО ЧЕРНОВИКОМ (владелец, O-44 п.1) ═══════════
-             Дословно: «после генерации колорвеи не отображались синими драфтами». Всё прочее, что
-             пишет черновик, стоит в синей рамке, а колорвеи — нет: пометку считает журнал записей
-             (`use-draft-fills`), а колорвей в журнал не пишется и писаться не должен — он не
-             значение поля, а продукт, и принимает его `confirm ▸`, а не пилюля. Поэтому рамка здесь
-             ПРЕДСТАВЛЕНИЕ, без журнала и без «accept all»: неподтверждённое предложение синее по
-             определению, а пилюля глухая — второй двери «принять» рядом с `confirm ▸` быть не должно. */
-          return (
-            <div
-              key={p.id}
-              className={cn('mt-2 p-2', DRAFTED_CLASS)}
-              data-b25-cw={p.id}
-              data-drafted=''
-            >
-              <div className='flex flex-wrap items-end gap-2'>
-                <label className='flex min-w-0 flex-1 flex-col gap-0.5'>
-                  <span className='flex items-center gap-2'>
-                    <Text size='micro' variant='label' component='span' className='uppercase'>
-                      name
-                    </Text>
-                    <DraftedPill live data-b25-drafted={p.id} />
-                  </span>
-                  <Input
-                    value={p.name}
-                    maxLength={64}
-                    disabled={readOnly}
-                    data-b25-name={p.id}
-                    onChange={(e: { target: { value: string } }) =>
-                      patchProposal(techCardId, p.id, { name: e.target.value })
-                    }
-                  />
-                </label>
-                <label className='flex flex-col gap-0.5'>
-                  <Text size='micro' variant='label' component='span' className='uppercase'>
-                    colour
-                  </Text>
-                  <span className='flex items-center gap-2'>
-                    <Swatch
-                      hex={colours.find((c) => c.code === p.colorCode)?.hex ?? undefined}
-                      title={p.colorCode || undefined}
-                    />
-                    <select
-                      className={cn(cell, 'w-56')}
-                      value={p.colorCode}
-                      disabled={readOnly}
-                      data-b25-code={p.id}
-                      onChange={(e) =>
-                        patchProposal(techCardId, p.id, { colorCode: e.target.value })
-                      }
-                    >
-                      <option value=''>— select colour —</option>
-                      {colours.map((c) => (
-                        <option
-                          key={c.code}
-                          value={c.code}
-                          disabled={usedCodes.has(c.code ?? '') || !!c.archived}
-                        >
-                          {c.code} · {c.name}
-                          {c.archived ? ' (archived)' : ''}
-                          {usedCodes.has(c.code ?? '') ? ' (already on this style)' : ''}
-                        </option>
-                      ))}
-                      {/* СИРОТА — СВОИМ ПУНКТОМ, И ЭТО НЕ КОСМЕТИКА: без него у селекта нет пункта
-                          под своё же значение, триггер пуст, а код лежит в сторе и уезжает на
-                          сервер. Пункт показывает ровно то, что лежит, — и называет, что этого
-                          кода в словаре больше нет. */}
-                      {orphanCode && (
-                        <option value={p.colorCode} disabled>
-                          {p.colorCode} (not in the dictionary)
-                        </option>
-                      )}
-                    </select>
-                  </span>
-                </label>
-                <span className='ml-auto flex items-center gap-2'>
-                  {refusal ? (
-                    <InertDoor label='confirm ▸' reason={refusal} size='sm' />
-                  ) : (
-                    <Button
-                      type='button'
-                      variant='main'
-                      size='sm'
-                      data-b25-confirm={p.id}
-                      disabled={pending || busy === p.id}
-                      loading={busy === p.id}
-                      onClick={async () => {
-                        setBusy(p.id);
-                        try {
-                          const v = await confirm(p, bound);
-                          setVerdict(techCardId, p.id, v);
-                          showMessage(
-                            v.status === 'confirmed' && v.recipeFailed
-                              ? 'colourway created — its recipe did not save'
-                              : 'colourway created',
-                            v.status === 'confirmed' && v.recipeFailed ? 'error' : 'success',
-                          );
-                        } catch (e) {
-                          showMessage(createColorwayErrorMessage(e), 'error');
-                        } finally {
-                          setBusy(null);
-                        }
-                      }}
-                    >
-                      confirm ▸
-                    </Button>
-                  )}
-                  <Button
-                    type='button'
-                    variant='secondary'
-                    size='sm'
-                    data-b25-dismiss={p.id}
-                    disabled={busy === p.id}
-                    onClick={() => setVerdict(techCardId, p.id, { status: 'dismissed' })}
-                  >
-                    dismiss
-                  </Button>
-                </span>
-              </div>
-
-              {/* ПОСЛЕДНИЙ СЛОТ БЕЗ ЛИНЕЙКИ, С ВОЗДУХОМ (владелец, 2026-09-26, O-43): «под последним
-                  слотом не делать нижнее подчеркивание а просто увеличить гэп»; строка «N of M slots
-                  bound to the saved card» снята там же — непривязанный слот и так назван пилюлей. */}
-              {rows.map((s, i) => (
+              /* ═══ ПРЕДЛОЖЕНИЕ — ЧЕРНОВИК, И ВЫГЛЯДИТ ОНО ЧЕРНОВИКОМ (владелец, O-44 п.1) ═══════
+                 Дословно: «после генерации колорвеи не отображались синими драфтами». Пометку
+                 остального черновика считает журнал записей (`use-draft-fills`), а колорвей в
+                 журнал не пишется и писаться не должен — он не значение поля, а продукт, и
+                 принимает его `confirm ▸`, а не пилюля. Рамка здесь ПРЕДСТАВЛЕНИЕ, без журнала и
+                 без «accept all»; пилюля глухая — второй двери «принять» рядом быть не должно.
+                 Рамка выступает за колонку на свои поля (`-mx-2 px-2`): содержимое предложения
+                 стоит в той же сетке, что и сохранённые ряды над ним. */
+              return (
                 <div
-                  key={`${p.id}:${s.key}`}
-                  className={cn(
-                    'flex flex-wrap items-center gap-2 py-1',
-                    i === rows.length - 1 ? 'pb-4' : 'border-b border-hairline',
-                  )}
-                  data-b25-slot={`${p.id}:${s.key}`}
-                  data-bound={s.lineKey ? 'yes' : 'no'}
-                  data-family={s.family ?? undefined}
+                  key={p.id}
+                  className={cn('-mx-2 px-2 py-2', DRAFTED_CLASS)}
+                  data-b25-cw={p.id}
+                  data-drafted=''
                 >
-                  <Text
-                    size='nano'
-                    variant='label'
-                    component='span'
-                    className='w-28 shrink-0 truncate'
-                  >
-                    {s.slot || 'unnamed'}
-                  </Text>
-                  <Swatch hex={s.hex || undefined} title={s.pantone || undefined} />
-                  <Input
-                    className='w-32'
-                    value={s.pantone}
-                    maxLength={64}
-                    disabled={readOnly}
-                    placeholder='pantone'
-                    data-b25-pantone={`${p.id}:${s.key}`}
-                    onChange={(e: { target: { value: string } }) =>
-                      writeRow(p.id, s.key, { pantone: e.target.value })
-                    }
-                  />
-                  <Input
-                    className='w-32'
-                    value={s.colour}
-                    maxLength={64}
-                    disabled={readOnly}
-                    placeholder='colour'
-                    data-b25-colour={`${p.id}:${s.key}`}
-                    onChange={(e: { target: { value: string } }) =>
-                      writeRow(p.id, s.key, { colour: e.target.value })
-                    }
-                  />
-                  {/* НЕ ПРИВЯЗАННЫЙ СЛОТ НАЗЫВАЕТСЯ, А НЕ ПРЯЧЕТСЯ. Он не поедет в рецепт, и человек
-                      обязан знать, ПОЧЕМУ: имени такого слота на СОХРАНЁННОЙ карточке нет. Тихо
-                      выброшенная строка выглядела бы как потерянный цвет. Пока карточку не
-                      прочитали, «нет на карточке» значит «ещё не знаем» — пилюли нет. */}
-                  {!s.lineKey && cardRead && <Pill tone='mut'>not on the card</Pill>}
-                </div>
-              ))}
-            </div>
-          );
-        })}
+                  <div className='flex flex-wrap items-end gap-x-3 gap-y-2'>
+                    <label className={cn(NAME_COL, 'flex flex-col gap-0.5')}>
+                      <span className='flex items-center gap-2'>
+                        <Text size='micro' variant='label' component='span' className='uppercase'>
+                          name
+                        </Text>
+                        <DraftedPill live data-b25-drafted={p.id} />
+                      </span>
+                      <Input
+                        value={p.name}
+                        maxLength={64}
+                        disabled={readOnly}
+                        data-b25-name={p.id}
+                        onChange={(e: { target: { value: string } }) =>
+                          patchProposal(techCardId, p.id, { name: e.target.value })
+                        }
+                      />
+                    </label>
+                    <label className='flex flex-col gap-0.5'>
+                      <Text size='micro' variant='label' component='span' className='uppercase'>
+                        colour
+                      </Text>
+                      <span className='flex items-center gap-2'>
+                        <Swatch
+                          hex={colours.find((c) => c.code === p.colorCode)?.hex ?? undefined}
+                          title={p.colorCode || undefined}
+                        />
+                        <select
+                          className={cn(cell, 'w-56')}
+                          value={p.colorCode}
+                          disabled={readOnly}
+                          data-b25-code={p.id}
+                          onChange={(e) =>
+                            patchProposal(techCardId, p.id, { colorCode: e.target.value })
+                          }
+                        >
+                          <option value=''>— select colour —</option>
+                          {colours.map((c) => (
+                            <option
+                              key={c.code}
+                              value={c.code}
+                              disabled={usedCodes.has(c.code ?? '') || !!c.archived}
+                            >
+                              {c.code} · {c.name}
+                              {c.archived ? ' (archived)' : ''}
+                              {usedCodes.has(c.code ?? '') ? ' (already on this style)' : ''}
+                            </option>
+                          ))}
+                          {/* СИРОТА — СВОИМ ПУНКТОМ: без него у селекта нет пункта под своё же
+                              значение, триггер пуст, а код лежит в сторе и уезжает на сервер. */}
+                          {orphanCode && (
+                            <option value={p.colorCode} disabled>
+                              {p.colorCode} (not in the dictionary)
+                            </option>
+                          )}
+                        </select>
+                      </span>
+                    </label>
+                    <span className='ml-auto flex items-center gap-2'>
+                      {refusal ? (
+                        <InertDoor label='confirm ▸' reason={refusal} size='sm' />
+                      ) : (
+                        <Button
+                          type='button'
+                          variant='main'
+                          size='sm'
+                          data-b25-confirm={p.id}
+                          disabled={pending || busy === p.id}
+                          loading={busy === p.id}
+                          onClick={async () => {
+                            setBusy(p.id);
+                            try {
+                              const v = await confirm(p, bound, (colorwayId) =>
+                                setVerdict(techCardId, p.id, { status: 'confirmed', colorwayId }),
+                              );
+                              setVerdict(techCardId, p.id, v);
+                              const half = v.status === 'confirmed' && !!v.recipeFailed;
+                              showMessage(
+                                half
+                                  ? 'colourway created — its slot colours did not save'
+                                  : 'colourway created',
+                                half ? 'error' : 'success',
+                              );
+                            } catch (e) {
+                              showMessage(createColorwayErrorMessage(e), 'error');
+                            } finally {
+                              setBusy(null);
+                            }
+                          }}
+                        >
+                          confirm ▸
+                        </Button>
+                      )}
+                      <Button
+                        type='button'
+                        variant='secondary'
+                        size='sm'
+                        data-b25-dismiss={p.id}
+                        disabled={busy === p.id}
+                        onClick={() => setVerdict(techCardId, p.id, { status: 'dismissed' })}
+                      >
+                        dismiss
+                      </Button>
+                    </span>
+                  </div>
 
-        {/* КВИТАНЦИЯ РУЧНОГО КОЛОРВЕЯ — ТА ЖЕ ФОРМА, ЧТО У ПОДТВЕРЖДЁННОГО ПРЕДЛОЖЕНИЯ. Создание
-            необратимо формой (это продукт на сервере), поэтому строка обязана остаться на экране
-            и увести туда, где колорвей теперь живёт. */}
-        {handMade.map((id, i) => (
-          <div
-            key={`${id}:${i}`}
-            className='mt-1.5 flex flex-wrap items-baseline gap-2 border-b border-hairline py-1'
-            data-b25-receipt={`hand:${id}`}
-          >
-            <Text size='micro' component='span' className='uppercase'>
-              {/* ИМЯ — ИЗ КАРТОЧКИ. Пока перечитывание не доехало, печатается `#42` — та же
-                  лестница отступления, что у всех подписей колорвея (`colorwayLabel`): число
-                  существует наверняка, а имя — ещё нет, и выдумывать его нечем. */}
-              {nameOfColorway(
-                (techCard?.colorways ?? []).find((c) => (c.colorwayId ?? 0) === id),
-              ) || `#${id}`}
-            </Text>
-            <Pill tone='ok'>created</Pill>
-            <Button
-              type='button'
-              variant='underline'
-              size='xs'
-              className='ml-auto'
-              onClick={goToColorways}
-            >
-              see it on COLORWAYS ▸
-            </Button>
+                  <div className={cn('mt-1', RULED)}>
+                    {rows.map((s) => (
+                      <div
+                        key={`${p.id}:${s.key}`}
+                        className={LINE}
+                        data-b25-slot={`${p.id}:${s.key}`}
+                        data-bound={s.lineKey ? 'yes' : 'no'}
+                        data-family={s.family ?? undefined}
+                      >
+                        <Text
+                          size='micro'
+                          variant='label'
+                          component='span'
+                          className={cn(NAME_COL, 'truncate')}
+                          title={s.slot || undefined}
+                        >
+                          {s.slot || 'unnamed'}
+                        </Text>
+                        <Swatch hex={s.hex || undefined} title={s.pantone || undefined} />
+                        <Input
+                          className='w-32'
+                          value={s.pantone}
+                          maxLength={64}
+                          disabled={readOnly}
+                          placeholder='pantone'
+                          data-b25-pantone={`${p.id}:${s.key}`}
+                          onChange={(e: { target: { value: string } }) =>
+                            writeRow(p.id, s.key, { pantone: e.target.value })
+                          }
+                        />
+                        <Input
+                          className='w-32'
+                          value={s.colour}
+                          maxLength={64}
+                          disabled={readOnly}
+                          placeholder='colour'
+                          data-b25-colour={`${p.id}:${s.key}`}
+                          onChange={(e: { target: { value: string } }) =>
+                            writeRow(p.id, s.key, { colour: e.target.value })
+                          }
+                        />
+                        {/* НЕ ПРИВЯЗАННЫЙ СЛОТ НАЗЫВАЕТСЯ, А НЕ ПРЯЧЕТСЯ: он не поедет в рецепт, и
+                            человек обязан знать почему. Пока карточку не прочитали, «нет на
+                            карточке» значит «ещё не знаем» — пилюли нет. */}
+                        {!s.lineKey && cardRead && <Pill tone='mut'>not on the card</Pill>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        ))}
+        )}
 
         {/**
          * ═══ «+ COLOURWAY» — ОДНА ДВЕРЬ, И ОКНО ЗА НЕЙ ОБЩЕЕ СО СТУДИЕЙ (r2 п.15, G2-4) ════════
          *
-         * Владелец просил снизу плейсхолдер добавления (r2 п.15) и — этим кругом — «кастомное имя,
-         * не из словаря». Здесь стояла СВОЯ форма: поле имени плюс `<select>` словарных цветов
-         * плюс кнопка. Она противоречила обоим приказам сразу: имя было, но цвет ВЫБИРАЛСЯ ИЗ
-         * СЛОВАРЯ руками, а пантона — того, чем колорвей на самом деле называют в производстве, —
-         * у неё не было вовсе. И она была ВТОРОЙ формой рождения колорвея в дереве: рядом,
-         * в студии, живёт `ColourwayCreatePopover` с именем, пантоном и видимым подбором словарного
-         * цвета под SKU.
+         * Своей формы здесь нет: за дверью стоит `ColourwayCreatePopover` — имя, пантон и видимый
+         * подбор словарного цвета под SKU, то же окно, что у остальных дверей студии. Писатель один
+         * (`useCreateColorway`) на всё дерево. Заведённый колорвей встаёт сохранённым рядом выше
+         * сам — перечитыванием карточки, без квитанций у двери.
          *
-         * ДВЕ ФОРМЫ НА ОДИН ПРОДУКТ РАСХОДЯТСЯ МОЛЧА — проверкой имени на уникальность, отказом на
-         * грязной форме карточки, порядком двух вызовов, — и разъезд увидел бы только тот, кто
-         * держит оба экрана рядом. Поэтому форма СНЕСЕНА, а дверь осталась ровно там, где стояла:
-         * пунктирной строкой внизу блока. Писатель по-прежнему один (`useCreateColorway`), и он
-         * теперь один НА ВСЁ ДЕРЕВО, а не один на файл.
-         *
-         * ⚠ РЯДЫ ПРЕДЛОЖЕНИЙ ЧЕРНОВИКА НЕ ТРОНУТЫ: у них своя половина работы — привязка слотов и
-         * рецепт, — которой у ручного колорвея нет вовсе (`usages` пуст). Их `confirm ▸` уходит
-         * тем же `useConfirmColourway`, что и раньше.
+         * `mt-4` — только под списком (O-48): дверь отступает от последнего ряда на шаг, а в пустом
+         * блоке стоит сразу под шапкой.
          */}
         {!readOnly && (
           <div
             data-b25-add-row=''
-            className='mt-2 flex flex-wrap items-center gap-2 border border-dashed border-borderColor px-2.5 py-2'
+            className={cn(
+              'flex flex-wrap items-center gap-2 border border-dashed border-borderColor px-2.5 py-2',
+              listed && 'mt-4',
+            )}
           >
             <Text size='micro' variant='label' component='span' className='min-w-0 normal-case'>
               a colourway of this style — its own name and its pantone
@@ -623,7 +732,7 @@ export function ColourwayProposals({
                 open={creatingByHand}
                 onOpenChange={setCreatingByHand}
                 readOnly={readOnly}
-                onCreated={(colorwayId: number) => setHandMade((prev) => [...prev, colorwayId])}
+                onCreated={() => {}}
                 anchor={
                   <Button type='button' variant='main' size='sm' data-b25-add=''>
                     + colourway

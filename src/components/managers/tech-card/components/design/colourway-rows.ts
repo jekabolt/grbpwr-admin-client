@@ -208,3 +208,61 @@ export function recipeSlots(rows: readonly ColourwayRow[]): BoundSlot[] {
       bomLineKey: r.lineKey,
     }));
 }
+
+/* ─── РЯДЫ СОХРАНЁННОГО КОЛОРВЕЯ ───────────────────────────────────────────────────────────────── */
+
+/** Слот сохранённого колорвея: цвет, который несёт его строка рецепта уровня изделия. */
+export type SavedSlotRow = {
+  /** `line_key` слота карточки — ряды сохранённых стоят в той же сетке, что и ряды предложений. */
+  key: string;
+  slot: string;
+  pantone: string;
+  colour: string;
+  /** Цвет живёт на пришпиленном артикуле, а не в строке рецепта (`material_id`). */
+  article: boolean;
+  /** Строка рецепта на этот слот есть — пусть и без цвета. */
+  recorded: boolean;
+};
+
+type UsageLike = {
+  bomLineKey?: string;
+  bomItemId?: unknown;
+  pieceLineKey?: string;
+  pieceId?: unknown;
+  pantone?: string;
+  color?: string;
+  materialId?: unknown;
+};
+
+/**
+ * ВСЕ СЛОТЫ КАРТОЧКИ, И У КАЖДОГО — ЕГО СТРОКА РЕЦЕПТА УРОВНЯ ИЗДЕЛИЯ.
+ *
+ * Строка детали кроя (`piece_line_key` / `piece_id`) — назначение ткани на деталь, а не цвет слота,
+ * и здесь не читается. Адрес строки — `bom_line_key`, а у старой записи без него — `bom_item_id`,
+ * разрешённый по строкам сохранённой карточки (тот же путь, что `fromRead` у `colorway-recipe.tsx`).
+ * Первая строка на слот побеждает.
+ */
+export function savedSlotRows(
+  usages: readonly UsageLike[] | null | undefined,
+  card: readonly CardSlot[],
+): SavedSlotRow[] {
+  const keyById = new Map(card.filter((c) => c.bomItemId > 0).map((c) => [c.bomItemId, c.lineKey]));
+  const garment = new Map<string, UsageLike>();
+  for (const u of usages ?? []) {
+    if ((u.pieceLineKey ?? '').trim() || wireInt(u.pieceId) > 0) continue;
+    const key = (u.bomLineKey ?? '').trim() || keyById.get(wireInt(u.bomItemId)) || '';
+    if (!key || garment.has(key)) continue;
+    garment.set(key, u);
+  }
+  return card.map((c) => {
+    const u = garment.get(c.lineKey);
+    return {
+      key: c.lineKey,
+      slot: c.name,
+      pantone: normText(u?.pantone),
+      colour: normText(u?.color),
+      article: wireInt(u?.materialId) > 0,
+      recorded: !!u,
+    };
+  });
+}
