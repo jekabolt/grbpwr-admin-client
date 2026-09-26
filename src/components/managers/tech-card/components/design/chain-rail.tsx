@@ -257,7 +257,8 @@ export function useChainCtx({
  *
  * The flat's GENERATE (zone CL-D) refuses with EXACTLY the sentence the rail locks FLAT with,
  * because both read `moodMinimumGate` over the same three facts: pictures ON THE BOARD
- * (`isBoardRow`), the description, the category — ALL THREE are required (fix-up B1).
+ * (`isBoardRow`), the description, the category — a picture OR the description, AND the category
+ * (D-31, 26.09: the 40-character threshold of fix-up B1 is gone).
  *
  * THE NAME AND THE OLD FIELDS ARE STABLE: `ok`, `reason`, `door` (the step of the FIRST missing
  * part — `mood` or `card`). Added: `doors` — one per missing part, each with its step, form path,

@@ -4,7 +4,6 @@ import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 import type { DesignKind } from '../bench-kinds';
 import { benchSides, renderGate, threedGate, type Gate } from '../render/model';
 import {
-  draftInputGate,
   moodboardGate,
   moodGateSentence,
   type MoodGateField,
@@ -366,6 +365,9 @@ export function moodGateOf(ctx: ChainCtx): MoodGateResult {
  * category browser stands (GENERAL INFORMATION only prints it since T05). One door for all three
  * sent a person lacking only the category to the moodboard, and one lacking only words to the top
  * of the board. The order is the sentence's.
+ *
+ * Since D-31 (26.09) the first part is «a picture OR the description»: one sentence, TWO doors —
+ * either of them closes it — so a missing part carries `fields`, one door per place it is fixed.
  */
 const MOOD_DOORS: Record<MoodGateField, Omit<GateDoor, 'field'>> = {
   board: { step: 'mood', path: 'moodboardMedia', fallback: '#mb-board', label: 'moodboard ›' },
@@ -379,7 +381,7 @@ const MOOD_DOORS: Record<MoodGateField, Omit<GateDoor, 'field'>> = {
 };
 
 export function moodGateDoors(r: MoodGateResult): GateDoor[] {
-  return r.missing.map((m) => ({ field: m.field, ...MOOD_DOORS[m.field] }));
+  return r.missing.flatMap((m) => m.fields.map((field) => ({ field, ...MOOD_DOORS[field] })));
 }
 
 /**
@@ -388,7 +390,8 @@ export function moodGateDoors(r: MoodGateResult): GateDoor[] {
  * category to CARD DETAILS.
  */
 export function moodGateDoor(r: MoodGateResult): StepId {
-  return r.missing[0] ? MOOD_DOORS[r.missing[0].field].step : 'mood';
+  const first = r.missing[0]?.fields[0];
+  return first ? MOOD_DOORS[first].step : 'mood';
 }
 
 /** Opens a door: the composer brings the field's step on, the field is scrolled to, no pulse. */
@@ -413,13 +416,12 @@ export function moodMinimumGate(v: MoodGateInput): MoodMinimum {
 }
 
 /**
- * The CONSTRUCTION DRAFT's own door (`draftInputGate`): something to READ — a board picture or the
- * description — and the category. The draft is what writes the description; gating it on the full
- * minimum would ask for its answer before the question. Same parts, same words, same doors.
+ * The CONSTRUCTION DRAFT's door IS the minimum (D-31, 26.09): something to READ — a board picture
+ * or the description — and the category. Before D-31 the flat asked for more (a description of
+ * 40 characters) and the draft, which writes that description, could not be held to it; the
+ * threshold is gone, and the two doors are one function under two names, kept for the callers.
  */
-export function draftReadGate(v: MoodGateInput): MoodMinimum {
-  return asMoodMinimum(draftInputGate(v));
-}
+export const draftReadGate = moodMinimumGate;
 
 function asMoodMinimum(r: MoodGateResult): MoodMinimum {
   if (r.ok) return { ok: true };
@@ -428,7 +430,7 @@ function asMoodMinimum(r: MoodGateResult): MoodMinimum {
     reason: moodGateSentence(r),
     door: moodGateDoor(r),
     doors: moodGateDoors(r),
-    missing: r.missing.map((m) => m.field),
+    missing: r.missing.flatMap((m) => m.fields),
   };
 }
 
@@ -579,8 +581,8 @@ export function stepDone(id: StepId, ctx: ChainCtx): boolean {
  * go, not the place one is sent. `nearestBlock` skips optional steps for the same reason.
  *
  * ⚠ A DONE FLAT PASSES THE MOODBOARD FOR THE QUEUE (round-2 fix-up, MIN-4 — D-13''). The minimum
- * is the flat's entrance, and it grew stricter (picture AND 40 characters AND category): an older
- * card that already HAS its flats may not meet it. Sending that card back to MOODBOARD as «next» —
+ * is the flat's entrance (a picture or the description, and the category — D-31): an older card
+ * that already HAS its flats may not meet it. Sending that card back to MOODBOARD as «next» —
  * and opening it there (`defaultStep`) — would pull it behind work it has done. The moodboard is
  * still not `done` (its cell and the flat's GENERATE keep the minimum); it is only not «next».
  *
