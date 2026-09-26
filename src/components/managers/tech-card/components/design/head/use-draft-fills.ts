@@ -70,19 +70,24 @@ export type Dismissal = {
   /** Когда, `HH:MM`. Только для глаз. */
   at: string;
   /**
-   * Момент отказа, epoch ms — ставит стор при записи. Им отказ сверяется со штампом `clearedAt`
-   * последнего ответа: отказ старше штампа — отказ ПРОШЛОМУ предложению, и вкладка, проспавшая
-   * чужой GENERATE, его не воскресит (ревью O-39).
+   * ПОКОЛЕНИЕ ОТВЕТА, которому отказ принадлежит (`answerGen` карточки), — ставит стор при записи.
+   * Отказ чужого поколения — отказ прошлому предложению: он не читается, не сливается и не пишется.
+   * Не время: часы двух вкладок и две записи в одну миллисекунду не порядок (ревью O-39 №2).
    */
-  ts?: number;
+  gen?: number;
 };
 
 type CardMemory = {
   fills: Fill[];
   /** Отклонённые строки ПОСЛЕДНЕГО ответа, новейшая первой (O-39); не больше `MAX_DISMISSED`. */
   dismissed: Dismissal[];
-  /** Штамп последнего ответа, обнулившего отказы (epoch ms); 0 — ни один ещё не обнулял. */
-  clearedAt: number;
+  /**
+   * ПОКОЛЕНИЕ ТЕКУЩЕГО ОТВЕТА — счётчик карточки: +1 на каждый применённый ответ (`clearDismissed`),
+   * хранится в ключе отказов. Это ограда для отказов (ревью O-39 №2): устойчивый id ответа сюда не
+   * доходит, а счётчик, в отличие от uuid, ещё и УПОРЯДОЧЕН — вкладка с более новым ответом
+   * побеждает вкладку с прошлым, даже если её собственная запись поколения не легла (квота).
+   */
+  answerGen: number;
   proposals: ProposedColourway[];
   /** Вердикт по предложению колорвея: подтверждён (с id продукта) или отклонён. */
   verdicts: Record<string, ColourwayVerdict>;
@@ -111,7 +116,7 @@ export type ColourwayVerdict =
 const EMPTY: CardMemory = {
   fills: [],
   dismissed: [],
-  clearedAt: 0,
+  answerGen: 0,
   proposals: [],
   verdicts: {},
   boardMoved: false,
@@ -285,7 +290,7 @@ function isStoredFill(x: unknown): x is Fill {
   return f.accepted === undefined || typeof f.accepted === 'boolean';
 }
 
-/** Отклонённая строка (O-39) — четыре строки и штамп; ничего больше не читается; пустой ключ — мусор. */
+/** Отклонённая строка (O-39) — четыре строки и поколение; ничего больше не читается; пустой ключ — мусор. */
 function isStoredDismissal(x: unknown): x is Dismissal {
   if (!x || typeof x !== 'object') return false;
   const d = x as Record<string, unknown>;
@@ -295,29 +300,28 @@ function isStoredDismissal(x: unknown): x is Dismissal {
     typeof d.label === 'string' &&
     typeof d.says === 'string' &&
     typeof d.at === 'string' &&
-    (d.ts === undefined || typeof d.ts === 'number')
+    (d.gen === undefined || typeof d.gen === 'number')
   );
 }
 
-/** Отказ, каким он идёт в память и в хранилище: строки в потолках, штамп на месте. */
-function boundDismissal(d: Dismissal, now: number): Dismissal {
+/** Отказ, каким он идёт в память и в хранилище: строки в потолках, поколение проставлено. */
+function boundDismissal(d: Dismissal, gen: number): Dismissal {
   return {
     row: d.row,
     label: runes(d.label, MAX_DISMISSAL_LABEL),
     says: runes(d.says, MAX_DISMISSAL_SAYS),
     at: d.at,
-    ts: typeof d.ts === 'number' && d.ts > 0 ? d.ts : now,
+    gen,
   };
 }
 
-/** Что лежит под ключом отказов: список (новейшие первыми) и штамп последнего обнуления. */
-type StoredDismissed = { list: Dismissal[]; clearedAt: number };
-const NO_DISMISSED: StoredDismissed = { list: [], clearedAt: 0 };
+/** Что лежит под ключом отказов: поколение текущего ответа и его список (новейшие первыми). */
+type StoredDismissed = { gen: number; list: Dismissal[] };
 
 /**
  * Журнал карточки из хранилища. Чужой владелец, мусор, запрет хранилища — пусто. `legacy` — отказы,
- * которые сборка 1931c256 (до этого ревью) вшивала в тот же блоб: читаются один раз и переезжают под
- * свой ключ (`memoryOf`); следующая запись журнала пишет блоб уже без них.
+ * которые сборка 1931c256 (до этого ревью) вшивала в тот же блоб: их забирает и снимает с блоба
+ * ПЕРВАЯ ЗАПИСЬ отказов (`editDismissed`), а не чтение — чтение хранилища ничего не пишет.
  */
 function readFillsBlob(card: number): { fills: Fill[]; legacy: Dismissal[] | null } {
   const none = { fills: [] as Fill[], legacy: null };
@@ -333,12 +337,9 @@ function readFillsBlob(card: number): { fills: Fill[]; legacy: Dismissal[] | nul
     } | null;
     if (!parsed || parsed.v !== 1 || parsed.owner !== card || !Array.isArray(parsed.fills))
       return none;
-    const now = Date.now();
     return {
       fills: storedSlice(parsed.fills.filter(isStoredFill)),
-      legacy: Array.isArray(parsed.dismissed)
-        ? parsed.dismissed.filter(isStoredDismissal).map((d) => boundDismissal(d, now))
-        : null,
+      legacy: Array.isArray(parsed.dismissed) ? parsed.dismissed.filter(isStoredDismissal) : null,
     };
   } catch {
     return none;
@@ -354,19 +355,18 @@ function readDismissedBlob(card: number): StoredDismissed | null {
     const parsed = JSON.parse(raw) as {
       v?: unknown;
       owner?: unknown;
+      gen?: unknown;
       list?: unknown;
-      clearedAt?: unknown;
     } | null;
     if (!parsed || parsed.v !== 1 || parsed.owner !== card || !Array.isArray(parsed.list))
       return null;
-    const now = Date.now();
+    const gen = typeof parsed.gen === 'number' && parsed.gen > 0 ? Math.floor(parsed.gen) : 0;
     return {
+      gen,
       list: parsed.list
         .filter(isStoredDismissal)
-        .map((d) => boundDismissal(d, now))
+        .map((d) => boundDismissal(d, typeof d.gen === 'number' ? d.gen : gen))
         .slice(0, MAX_DISMISSED),
-      clearedAt:
-        typeof parsed.clearedAt === 'number' && parsed.clearedAt > 0 ? parsed.clearedAt : 0,
     };
   } catch {
     return null;
@@ -411,44 +411,53 @@ function storeWorked(card: number): void {
  * отказ его перепишет) → без цепочек возвратов (`slimFill`: `✕` возврата тогда просто забудет
  * запись, но ни одно слово и ни одна пометка не потеряются). Не влезло — стоит прежняя копия.
  */
-function writeFills(card: number, fills: Fill[]): boolean {
-  if (!(card > 0)) return false;
+type FillsOutcome = {
+  /** Журнал лёг (целиком, без ключа отказов или облегчённым). */
+  stored: boolean;
+  /** Ключ отказов снят ради места — вкладка обязана забыть свои отказы тем же шагом (ревью №2, D). */
+  dropped: boolean;
+};
+function writeFills(card: number, fills: Fill[]): FillsOutcome {
+  if (!(card > 0)) return { stored: false, dropped: false };
   const key = fillsKey(card);
   const write = (list: Fill[]) =>
     localStorage.setItem(key, JSON.stringify({ v: 1, owner: card, fills: list }));
   try {
     if (!fills.length) localStorage.removeItem(key);
     else write(storedSlice(fills));
-    return true;
+    return { stored: true, dropped: false };
   } catch {
+    let dropped = false;
     try {
       localStorage.removeItem(dismissedKey(card));
+      dropped = true;
       write(storedSlice(fills));
-      return true;
+      return { stored: true, dropped };
     } catch {
       // Всё ещё не влезает — облегчённая копия.
     }
     try {
       write(storedSlice(fills).map(slimFill));
-      return true;
+      return { stored: true, dropped };
     } catch {
-      return false; // прежняя копия остаётся: снять ключ значило бы стереть «что стояло до»
+      return { stored: false, dropped }; // прежняя копия остаётся: снять ключ значило бы стереть «что стояло до»
     }
   }
 }
 
 /**
- * ОТКАЗЫ — В ХРАНИЛИЩЕ; `false` — не влезли, журнал не тронут. Пустой список без штампа снимает
- * ключ; со штампом — остаётся: штамп и есть то, что не даёт отставшей вкладке воскресить отказы,
- * обнулённые чужим ответом. Не влезли все — влезут новейшие: отказ старше десяти других уже история.
+ * ОТКАЗЫ — В ХРАНИЛИЩЕ; `false` — не влезли, журнал не тронут. Пустой список нулевого поколения
+ * снимает ключ; с поколением — остаётся: поколение и есть ограда, не дающая отставшей вкладке
+ * воскресить отказы, обнулённые чужим ответом. Не влезли все — влезут новейшие: отказ старше
+ * десяти других уже история.
  */
 function writeDismissed(card: number, d: StoredDismissed): boolean {
   if (!(card > 0)) return false;
   const key = dismissedKey(card);
   const write = (list: Dismissal[]) =>
-    localStorage.setItem(key, JSON.stringify({ v: 1, owner: card, list, clearedAt: d.clearedAt }));
+    localStorage.setItem(key, JSON.stringify({ v: 1, owner: card, gen: d.gen, list }));
   try {
-    if (!d.list.length && !d.clearedAt) localStorage.removeItem(key);
+    if (!d.list.length && !d.gen) localStorage.removeItem(key);
     else write(d.list.slice(0, MAX_DISMISSED));
     return true;
   } catch {
@@ -462,57 +471,63 @@ function writeDismissed(card: number, d: StoredDismissed): boolean {
 }
 
 /**
- * ═══ ДВЕ ВКЛАДКИ ОДНОЙ КАРТОЧКИ (ревью O-39, Codex MAJOR-1) ═══════════════════════════════════════
+ * ═══ ДВЕ ВКЛАДКИ ОДНОЙ КАРТОЧКИ — ЗАПИСЬ НЕСЁТ ТОЛЬКО ТО, ЧТО ТРОНУЛА (ревью O-39 №2) ══════════════
  *
- * Память поднимается из хранилища ОДИН раз, а вкладок у карточки может быть две, и каждая писала
- * блоб целиком из своей памяти: отказ вкладки A стирался журнальной правкой вкладки B, и наоборот.
- * Замков и IndexedDB здесь нет — владелец просит проще. Вместо них три вещи:
- *   · каждая запись СНАЧАЛА ПЕРЕЧИТЫВАЕТ свой ключ и сливает построчно (`mergeIn`): чужое
- *     добавленное входит, чужое стёртое уходит, по совпавшей строке побеждает своя — правка этой
- *     вкладки новее. (Не «новейший `at`»: `at` — это `HH:MM` для глаз, а не порядок.)
- *   · «чужое стёртое» отличимо от «своего несохранённого» только памятью о том, что вкладка УЖЕ
- *     ВИДЕЛА в хранилище (`seen`): строка была там и пропала — её стёрла другая вкладка; не была
- *     — это своя запись, которую хранилище ещё не приняло (квота), и её не бросают;
- *   · чужая запись (событие `storage`, приходит только из ДРУГОЙ вкладки) освежает память карточки
- *     (`refresh`): хранимое побеждает, свои несохранённые строки остаются.
- * Окно гонки — между чужой записью и своим событием о ней — закрывает первое: перечитывание перед
- * записью. Своя операция (`fn`) применяется ПОСЛЕ слияния, поэтому `put it back` и `✕` стирают
- * строку и из чужой копии, а не воскрешают её из собственной.
+ * Журнал — память ОДНОГО оператора по карточке; две вкладки одной карточки редки. Обещание ровно
+ * такое: ПОСЛЕДОВАТЕЛЬНЫЕ действия двух вкладок не теряются (A записала — B прочтёт или запишет
+ * после), отказы обнулённого ответа не воскресают, квота не стирает журнал. Одновременная запись в
+ * одну миллисекунду — «последний пишет» на уровне ключа: у localStorage нет сравнения-и-обмена, и
+ * замок ради редкого случая владелец не просит.
+ *
+ * Как: каждая запись ПЕРЕЧИТЫВАЕТ свой ключ и пишет ХРАНИМОЕ ∪ ТРОНУТОЕ. Тронутое — строки, которые
+ * ЭТА операция ставит (они побеждают) или снимает (уходят). Строки, которые вкладка лишь держит в
+ * памяти, а операция не трогала, берутся ИЗ ХРАНИЛИЩА, не из памяти: устаревшая память не
+ * перепишет более новую строку соседа. Память после записи = записанное. Ни множества «виденного»,
+ * ни надгробий: каждое действие стора называет тронутое явно (`Touch`).
+ *
+ * Тронутое, которое хранилище не приняло (квота), едет со следующей записью (`unsaved`) — иначе
+ * «this tab keeps it until reload» было бы неправдой уже на второй записи. Легло — забыто; F5 —
+ * забыто тоже, как и обещано. Что потолок `storedSlice` не положил в хранилище, уходит из памяти со
+ * следующей записью — цена простоты, и это только принятые строки сверх ста двадцати.
  */
-const seen = new Map<number, Set<string>>();
-function seenOf(card: number): Set<string> {
-  let s = seen.get(card);
-  if (!s) {
-    s = new Set();
-    seen.set(card, s);
-  }
-  return s;
-}
-const fillKey = (f: Fill) => `f:${f.id}`;
-const rowKey = (d: Dismissal) => `d:${d.row}`;
-function note<T>(known: Set<string>, list: T[], keyOf: (x: T) => string): void {
-  for (const x of list) known.add(keyOf(x));
+type Touch<T> = { put: T[]; drop: string[] };
+const NOTHING: Touch<never> = { put: [], drop: [] };
+const idOf = (f: Fill) => f.id;
+const rowOf = (d: Dismissal) => d.row;
+
+/** Хранимое ∪ тронутое: снятое уходит, поставленное встаёт на своё место, новое — в голову. */
+function overlay<T>(stored: T[], t: Touch<T>, keyOf: (x: T) => string): T[] {
+  const drop = new Set(t.drop);
+  const put = new Map(t.put.map((x) => [keyOf(x), x] as const));
+  const present = new Set(stored.map(keyOf));
+  const fresh = t.put.filter((x) => !present.has(keyOf(x)));
+  const kept = stored.filter((x) => !drop.has(keyOf(x))).map((x) => put.get(keyOf(x)) ?? x);
+  return fresh.length ? [...fresh, ...kept] : kept;
 }
 
-/**
- * Список перед СВОЕЙ записью: свой минус стёртое другой вкладкой, плюс добавленное ею. Чужое — то,
- * чего вкладка НЕ ВИДЕЛА; знакомая строка, которой в памяти уже нет, — это своё стирание, которое
- * хранилище не приняло (квота), и оно остаётся стиранием, а не воскресает из собственной копии.
- */
-function mergeIn<T>(mine: T[], stored: T[], keyOf: (x: T) => string, known: Set<string>): T[] {
-  const inStore = new Set(stored.map(keyOf));
-  const kept = mine.filter((x) => inStore.has(keyOf(x)) || !known.has(keyOf(x)));
-  const have = new Set(mine.map(keyOf));
-  const foreign = stored.filter((x) => !have.has(keyOf(x)) && !known.has(keyOf(x)));
-  if (kept.length === mine.length && !foreign.length) return mine;
-  return [...kept, ...foreign];
+/** Тронутое двух операций: новое побеждает старое по ключу. */
+function joinTouch<T>(
+  older: Touch<T> | undefined,
+  newer: Touch<T>,
+  keyOf: (x: T) => string,
+): Touch<T> {
+  if (!older) return newer;
+  const taken = new Set([...newer.put.map(keyOf), ...newer.drop]);
+  return {
+    put: [...older.put.filter((x) => !taken.has(keyOf(x))), ...newer.put],
+    drop: [...older.drop.filter((k) => !taken.has(k)), ...newer.drop],
+  };
 }
 
-/** Список после ЧУЖОЙ записи: хранимое, плюс свои строки, которых хранилище ещё не видело. */
-function takeStored<T>(mine: T[], stored: T[], keyOf: (x: T) => string, known: Set<string>): T[] {
-  const inStore = new Set(stored.map(keyOf));
-  const unsaved = mine.filter((x) => !inStore.has(keyOf(x)) && !known.has(keyOf(x)));
-  return unsaved.length ? [...stored, ...unsaved] : stored;
+/** Тронутое, которое хранилище не приняло, — по карточке; снимается первой удавшейся записью. */
+const unsaved = {
+  fills: new Map<number, Touch<Fill>>(),
+  dismissed: new Map<number, Touch<Dismissal>>(),
+};
+
+/** Отказы поколения `gen` — и только они: чужое поколение не читается, не сливается, не пишется. */
+function ofGen(list: Dismissal[], gen: number): Dismissal[] {
+  return list.filter((d) => d.gen === gen);
 }
 
 const sameList = (a: unknown[], b: unknown[]) =>
@@ -534,7 +549,7 @@ type Store = {
   dismiss: (card: number, d: Dismissal) => void;
   /** «put it back»: отказ снят, строка снова работа. */
   undismiss: (card: number, row: string) => void;
-  /** Новый ответ прогона — отказы прошлого ответа обнуляются, как квитанции (D5), со штампом. */
+  /** Новый ответ прогона — поколение +1, отказы прошлого ответа обнуляются, как квитанции (D5). */
   clearDismissed: (card: number) => void;
   /** Чужая вкладка записала ключ карточки (событие `storage`) — память освежается из хранилища. */
   refresh: (card: number, which: 'fills' | 'dismissed') => void;
@@ -559,28 +574,23 @@ type Store = {
 function memoryOf(state: Store, card: number): CardMemory {
   const cur = state.byCard[card] ?? EMPTY;
   if (state.hydrated[card] || !(card > 0)) return cur;
-  const known = seenOf(card);
   const blob = readFillsBlob(card);
-  let stored = readDismissedBlob(card);
-  if (!stored && blob.legacy) {
-    // Отказы, вшитые в блоб журнала сборкой до ревью, переезжают под свой ключ — один раз, здесь.
-    stored = { list: blob.legacy.slice(0, MAX_DISMISSED), clearedAt: 0 };
-    writeDismissed(card, stored);
-  }
-  note(known, blob.fills, fillKey);
-  if (stored) note(known, stored.list, rowKey);
-  const have = new Set(cur.fills.map((f) => f.id));
+  const stored = readDismissedBlob(card);
+  const have = new Set(cur.fills.map(idOf));
   const fills = blob.fills.filter((f) => !have.has(f.id));
-  // Отказы сеанса побеждают хранимые по ключу строки — тем же законом, что записи (O-39).
-  const rows = new Set(cur.dismissed.map((d) => d.row));
-  const dismissed = stored ? stored.list.filter((d) => !rows.has(d.row)) : [];
-  const clearedAt = Math.max(cur.clearedAt, stored?.clearedAt ?? 0);
-  if (!fills.length && !dismissed.length && clearedAt === cur.clearedAt) return cur;
+  const answerGen = Math.max(cur.answerGen, stored?.gen ?? 0);
+  // Отказы сеанса своего поколения побеждают хранимые по ключу строки — как записи (O-39).
+  const mine = ofGen(cur.dismissed, answerGen);
+  const rows = new Set(mine.map(rowOf));
+  const foreign = stored ? ofGen(stored.list, answerGen).filter((d) => !rows.has(d.row)) : [];
+  const dismissed = foreign.length ? [...mine, ...foreign] : mine;
+  if (!fills.length && answerGen === cur.answerGen && dismissed.length === cur.dismissed.length)
+    return cur;
   return {
     ...cur,
     fills: fills.length ? [...cur.fills, ...fills] : cur.fills,
-    dismissed: dismissed.length ? [...cur.dismissed, ...dismissed] : cur.dismissed,
-    clearedAt,
+    dismissed,
+    answerGen,
   };
 }
 
@@ -594,55 +604,81 @@ function edit(state: Store, card: number, fn: (m: CardMemory) => CardMemory): Pa
 }
 
 /**
- * Правка ЖУРНАЛА — та же `edit`, плюс перечитывание, слияние с чужим и запись в хранилище (см.
- * «ДВЕ ВКЛАДКИ»). Побочный эффект внутри апдейтера законен: zustand зовёт его ровно один раз (это
- * не апдейтер React под StrictMode). Не влезло — память всё равно правится, а человеку сказано.
+ * Правка ЖУРНАЛА — та же `edit`, плюс перечитывание ключа и запись «хранимое ∪ тронутое» (см.
+ * «ДВЕ ВКЛАДКИ»). `touch` называет тронутое по памяти вкладки И по хранимому — строка, которую
+ * операция меняет, берётся из хранимого, если оно её знает (там она новее), иначе из памяти.
+ * Побочный эффект внутри апдейтера законен: zustand зовёт его ровно один раз (это не апдейтер
+ * React под StrictMode). Не влезло — память всё равно правится, тронутое ждёт, человеку сказано.
  */
-function editFills(state: Store, card: number, fn: (fills: Fill[]) => Fill[]): Partial<Store> {
+function editFills(
+  state: Store,
+  card: number,
+  touch: (mine: Fill[], stored: Fill[]) => Touch<Fill>,
+): Partial<Store> {
   return edit(state, card, (m) => {
-    const known = seenOf(card);
     const stored = readFillsBlob(card).fills;
-    const next = fn(mergeIn(m.fills, stored, fillKey, known));
-    if (next === m.fills) return m;
-    note(known, stored, fillKey);
-    if (writeFills(card, next)) {
-      note(known, next, fillKey);
+    const t = joinTouch(unsaved.fills.get(card), touch(m.fills, stored), idOf);
+    if (!t.put.length && !t.drop.length) return m;
+    const next = overlay(stored, t, idOf);
+    const w = writeFills(card, next);
+    if (w.stored) {
+      unsaved.fills.delete(card);
       storeWorked(card);
-    } else storeRefused(card);
-    return { ...m, fills: next };
+    } else {
+      unsaved.fills.set(card, t);
+      storeRefused(card);
+    }
+    if (!w.dropped) return { ...m, fills: next };
+    // Ключ отказов снят ради места (ревью №2, D): память вкладки об отказах — тем же шагом, иначе
+    // экран показывал бы отказы, которых в хранилище больше нет. Поколение остаётся.
+    unsaved.dismissed.delete(card);
+    return { ...m, fills: next, dismissed: [] };
   });
 }
 
 /**
- * Правка ОТКАЗОВ (O-39) — та же `edit` под своим ключом. `clear` — новый ответ: штамп «сейчас», и
- * всё, что старше штампа (свой список, чужой, отставшая вкладка), уходит; своя новая запись
- * (`dismiss`) ставится после фильтра и штамп переживает.
+ * Правка ОТКАЗОВ (O-39) — та же `edit` под своим ключом, за оградой поколения. `newGen` — новый
+ * ответ: поколение +1 к старшему из известных (памяти и хранилища), список пуст по построению.
+ * Своё тронутое несёт поколение ПАМЯТИ вкладки: у отставшей вкладки оно старше хранимого, и её
+ * отказ — отказ прошлому предложению — не пишется. Отказы, вшитые в блоб журнала сборкой 1931c256,
+ * переезжают ОДНОЙ записью: складываются сюда как тронутые однажды (не в новое поколение — оно пусто
+ * по смыслу) и снимаются с блоба журнала; не легло — не легло, наружу не говорится.
  */
 function editDismissed(
   state: Store,
   card: number,
-  fn: (list: Dismissal[]) => Dismissal[],
-  clear = false,
+  touch: (mine: Dismissal[], base: Dismissal[]) => Touch<Dismissal>,
+  newGen = false,
 ): Partial<Store> {
   return edit(state, card, (m) => {
-    const known = seenOf(card);
-    const stored = readDismissedBlob(card) ?? NO_DISMISSED;
-    const now = Date.now();
-    const clearedAt = clear ? now : Math.max(m.clearedAt, stored.clearedAt);
-    const base = mergeIn(m.dismissed, stored.list, rowKey, known).filter(
-      (d) => (d.ts ?? now) >= clearedAt,
+    const blob = readFillsBlob(card);
+    const stored = readDismissedBlob(card);
+    const gen = Math.max(m.answerGen, stored?.gen ?? 0) + (newGen ? 1 : 0);
+    let base = stored ? ofGen(stored.list, gen) : [];
+    if (blob.legacy) {
+      if (!newGen) {
+        const moved = blob.legacy.map((d) => boundDismissal(d, gen));
+        base = overlay(base, { put: moved, drop: [] }, rowOf);
+      }
+      writeFills(card, blob.fills);
+    }
+    const own = touch(m.dismissed, base);
+    const t = joinTouch(
+      unsaved.dismissed.get(card),
+      { put: own.put.map((d) => boundDismissal(d, m.answerGen)), drop: own.drop },
+      rowOf,
     );
-    const grown = fn(base);
+    if (!newGen && !blob.legacy && !t.put.length && !t.drop.length) return m;
+    const grown = ofGen(overlay(base, t, rowOf), gen);
     const next = grown.length > MAX_DISMISSED ? grown.slice(0, MAX_DISMISSED) : grown;
-    const unchanged =
-      next.length === m.dismissed.length && next.every((d, i) => d === m.dismissed[i]);
-    if (unchanged && clearedAt === m.clearedAt) return m;
-    note(known, stored.list, rowKey);
-    if (writeDismissed(card, { list: next, clearedAt })) {
-      note(known, next, rowKey);
+    if (writeDismissed(card, { gen, list: next })) {
+      unsaved.dismissed.delete(card);
       storeWorked(card);
-    } else storeRefused(card);
-    return { ...m, dismissed: next, clearedAt };
+    } else {
+      unsaved.dismissed.set(card, t);
+      storeRefused(card);
+    }
+    return { ...m, dismissed: next, answerGen: gen };
   });
 }
 
@@ -681,10 +717,9 @@ export const useDraftMemory = create<Store>((set, get) => ({
    */
   record: (card, fill) =>
     set((s) =>
-      editFills(s, card, (fills) => {
-        const prev = fills.find((f) => f.id === fill.id);
-        const merged = mergeFill(prev, fill);
-        return [merged, ...fills.filter((f) => f.id !== fill.id)];
+      editFills(s, card, (mine, stored) => {
+        const prev = stored.find((f) => f.id === fill.id) ?? mine.find((f) => f.id === fill.id);
+        return { put: [mergeFill(prev, fill)], drop: [] };
       }),
     ),
 
@@ -694,74 +729,71 @@ export const useDraftMemory = create<Store>((set, get) => ({
    * целиком. Через `record` слияние (`mergeFill`) приняло бы прежнюю запись за новую запись
    * черновика — и понесло бы снятую поверх неё ступенью.
    */
-  put: (card, fill) =>
-    set((s) => editFills(s, card, (fills) => [fill, ...fills.filter((f) => f.id !== fill.id)])),
+  put: (card, fill) => set((s) => editFills(s, card, () => ({ put: [fill], drop: [] }))),
 
   forget: (card, id) =>
     set((s) =>
-      editFills(s, card, (fills) =>
-        fills.some((f) => f.id === id) ? fills.filter((f) => f.id !== id) : fills,
+      editFills(s, card, (mine, stored) =>
+        mine.some((f) => f.id === id) || stored.some((f) => f.id === id)
+          ? { put: [], drop: [id] }
+          : NOTHING,
       ),
     ),
 
   forgetMany: (card, ids) =>
     set((s) =>
-      editFills(s, card, (fills) => {
-        const drop = new Set(ids);
-        return fills.some((f) => drop.has(f.id)) ? fills.filter((f) => !drop.has(f.id)) : fills;
+      editFills(s, card, (mine, stored) => {
+        const drop = ids.filter(
+          (id) => mine.some((f) => f.id === id) || stored.some((f) => f.id === id),
+        );
+        return drop.length ? { put: [], drop } : NOTHING;
       }),
     ),
 
   accept: (card, ids) =>
     set((s) =>
-      editFills(s, card, (fills) => {
-        const take = new Set(ids);
-        if (!fills.some((f) => take.has(f.id) && !f.accepted)) return fills;
-        return fills.map((f) => (take.has(f.id) && !f.accepted ? { ...f, accepted: true } : f));
+      editFills(s, card, (mine, stored) => {
+        const put: Fill[] = [];
+        for (const id of ids) {
+          const row = stored.find((f) => f.id === id) ?? mine.find((f) => f.id === id);
+          if (row && !row.accepted) put.push({ ...row, accepted: true });
+        }
+        return put.length ? { put, drop: [] } : NOTHING;
       }),
     ),
 
   /* ОТКАЗЫ (O-39): по ключу строки, новейший первым; повтор по тому же ключу заменяет запись;
-     строки — в потолках, штамп — «сейчас» (`boundDismissal`). */
-  dismiss: (card, d) =>
-    set((s) =>
-      editDismissed(s, card, (list) => {
-        const b = boundDismissal(d, Date.now());
-        return [b, ...list.filter((x) => x.row !== b.row)];
-      }),
-    ),
+     строки — в потолках, поколение — памяти вкладки (`editDismissed`). */
+  dismiss: (card, d) => set((s) => editDismissed(s, card, () => ({ put: [d], drop: [] }))),
 
   undismiss: (card, row) =>
     set((s) =>
-      editDismissed(s, card, (list) =>
-        list.some((x) => x.row === row) ? list.filter((x) => x.row !== row) : list,
+      editDismissed(s, card, (mine, base) =>
+        mine.some((x) => x.row === row) || base.some((x) => x.row === row)
+          ? { put: [], drop: [row] }
+          : NOTHING,
       ),
     ),
 
-  clearDismissed: (card) => set((s) => editDismissed(s, card, () => [], true)),
+  clearDismissed: (card) => set((s) => editDismissed(s, card, () => NOTHING, true)),
 
-  /* ЧУЖАЯ ЗАПИСЬ (событие `storage` из другой вкладки): хранимое побеждает, своё несохранённое
-     остаётся (`takeStored`). Неподнятая карточка не освежается — её поднимет первое обращение. */
+  /* ЧУЖАЯ ЗАПИСЬ (событие `storage` из другой вкладки): память = хранимое; своё непринятое
+     хранилищем поедет со следующей записью (`unsaved`). Неподнятая карточка не освежается — её
+     поднимет первое обращение. */
   refresh: (card, which) =>
     set((s) => {
       const cur = s.byCard[card];
       if (!cur || !s.hydrated[card]) return {};
-      const known = seenOf(card);
       if (which === 'fills') {
-        const stored = readFillsBlob(card).fills;
-        const fills = takeStored(cur.fills, stored, fillKey, known);
-        note(known, stored, fillKey);
+        const fills = readFillsBlob(card).fills;
         if (sameList(fills, cur.fills)) return {};
         return { byCard: { ...s.byCard, [card]: { ...cur, fills } } };
       }
-      const stored = readDismissedBlob(card) ?? NO_DISMISSED;
-      const clearedAt = Math.max(cur.clearedAt, stored.clearedAt);
-      const dismissed = takeStored(cur.dismissed, stored.list, rowKey, known).filter(
-        (d) => (d.ts ?? clearedAt) >= clearedAt,
-      );
-      note(known, stored.list, rowKey);
-      if (clearedAt === cur.clearedAt && sameList(dismissed, cur.dismissed)) return {};
-      return { byCard: { ...s.byCard, [card]: { ...cur, dismissed, clearedAt } } };
+      const stored = readDismissedBlob(card);
+      const answerGen = Math.max(cur.answerGen, stored?.gen ?? 0);
+      const dismissed = stored ? ofGen(stored.list, answerGen) : [];
+      if (answerGen === cur.answerGen && sameList(dismissed, cur.dismissed)) return {};
+      return { byCard: { ...s.byCard, [card]: { ...cur, dismissed, answerGen } } };
     }),
 
   /**
