@@ -304,6 +304,20 @@ function pictureOfMedia(full: common_MediaFull): common_DesignPicture {
   };
 }
 
+/**
+ * ПОДГЛЯД ПАНЕЛИ CALLOUTS ПО НАВЕДЕНИЮ (26.09, O-52) — две задержки намерения. Раскрытие ждёт
+ * 120 мс: курсор, который пролетает шов по дороге к краю экрана, панель не дёргает. Свёртка ждёт
+ * 250 мс: рука, на миг промахнувшаяся мимо края панели, не теряет её из-под себя.
+ */
+const PEEK_OPEN_MS = 120;
+const PEEK_CLOSE_MS = 250;
+/**
+ * Бок о бок доска и панель стоят только от `lg` (тот же брейкпойнт, что у классов ряда). Ниже
+ * полоска — строка во всю ширину под доской, и раскрытие наведением двигало бы вниз всё, что под
+ * ней, каждый раз, когда курсор просто едет мимо; там дверь — только щелчок.
+ */
+const SIDE_BY_SIDE = '(min-width: 64rem)';
+
 export function MoodBoard({
   techCardId,
   disabled,
@@ -607,8 +621,17 @@ export function MoodBoard({
   const [heldFor, setHeldFor] = useState<number | null>(null);
   const heldOpen = heldFor === techCardId;
   const collapsed = !heldOpen && calloutsCollapsed(calloutPrefs.collapsed, calloutCount);
+  /* ПОДГЛЯД (O-52, см. обработчики наведения ниже) — ТРЕТЬЕ СОСТОЯНИЕ, И ОНО НЕ ПРЕДПОЧТЕНИЕ.
+     `collapsed` по-прежнему отвечает «что выбрал человек» (предпочтение, число, удержание на
+     сеанс); подгляд лишь показывает свёрнутую панель раскрытой, пока курсор над ней или над швом.
+     Всё, что рисуется, читает `folded`; всё, что решает про удержание (Enter на кадре, «покажи
+     поле»), — по-прежнему `collapsed`: просьба поверхности во время подгляда превращает его в
+     удержание, а не теряется вместе с ним. */
+  const [peek, setPeek] = useState(false);
+  const peeking = collapsed && peek;
+  const folded = collapsed && !peek;
   /* ПАНЕЛЬ, СВЁРНУТАЯ ПРЕДПОЧТЕНИЕМ, ТОЖЕ РАСКРЫВАЕТСЯ НА ПРОСЬБУ «ПОКАЖИ ПОЛЕ» (раунд 3, m5). Якорь
-     `callouts.N.description` стоит под `hidden={collapsed}`: раскрытая доска (`setOpen` выше) его не
+     `callouts.N.description` стоит под `hidden={folded}`: раскрытая доска (`setOpen` выше) его не
      покажет, пока свёрнута сама панель, — и дверь с отказом по полю снова молчала бы. Раскрытие — на
      сеанс (`heldFor`), как у Enter на кадре: явное «свернуть» человека не переписывается. */
   useEffect(() => {
@@ -666,16 +689,142 @@ export function MoodBoard({
   const collapseDoor = useRef<HTMLButtonElement | null>(null);
   const expandDoor = useRef<HTMLButtonElement | null>(null);
   const movedFocus = useRef(false);
+
+  /* ═══ ПОДГЛЯД ПО НАВЕДЕНИЮ (26.09, O-52) ═══════════════════════════════════════════════════════
+     Владелец, дословно: «CALLOUTS · 0 в заколапшеном виде должен быть в высоту такой же как и
+     картинки на мудборде и текст должен быть посередине и если мы ховерим пространство между
+     колаут блоком и картинками мы можем его расколапсить и заколапсить даже без того что бы нажать
+     на его».
+
+     ЗОНА НАВЕДЕНИЯ — ОБЁРТКА ПАНЕЛИ ПЛЮС ШОВ СЛЕВА ОТ НЕЁ, И НИЧЕГО НОВОГО НЕ РИСУЕТСЯ. Шов (24px
+     грунта между доской и полоской) становится частью обёртки прозрачным `::before` — см. классы
+     обёртки: событие указателя над ним приходит самой обёртке, поэтому одна пара
+     `pointerenter`/`pointerleave` отвечает и за «полоску + шов», и за «подгляд + шов». Разделитель
+     ширины, который стоит в том же шве, пока панель свёрнута или подглядывает, спрятан (его
+     `hidden` читает `collapsed`); у удержанной панели нет `::before`, и разделителю ничто не мешает.
+
+     ПОДГЛЯДЫВАЮЩАЯ ОБЁРТКА РОСТОМ С РЯД, А НЕ С СОДЕРЖИМОЕ — это защита от мигания. Курсор стоит
+     посреди высокой полоски, а раскрытая панель с нулём указаний — одна шапка наверху. Будь обёртка
+     ростом с содержимое, курсор оказался бы под ней, панель свернулась бы, полоска вернулась бы под
+     курсор и раскрылась снова — по кругу. Растянутая обёртка держит зону монотонной: раскрытая
+     зона всегда накрывает свёрнутую. Сама панель внутри неё липкая, как у удержанной.
+
+     ЩЕЛЧОК ПО-ПРЕЖНЕМУ ПЕРЕКЛЮЧАЕТ И УДЕРЖИВАЕТ. Полоска — прежняя дверь. Но через 120 мс под
+     курсором уже не полоска, а подгляд, поэтому шеврон подгляда — та же дверь в «раскрыто»:
+     стрелка смотрит туда же, куда у полоски, а щелчок пишет `collapsed: false`. Свернуть подгляд —
+     просто увести курсор. Без этого удержать панель мышью было бы нечем: щелчок по полоске
+     опаздывает за подглядом.
+
+     ФОКУС ВНУТРИ ДЕРЖИТ ПОДГЛЯД. Щелчок по строке указания подгляд не удерживает: панель
+     сворачивается, когда курсор уходит. Но пока фокус стоит внутри (человек правит указание),
+     панель под руками не сворачивается — свёртка ждёт, пока фокус уйдёт. Фокус считается по дереву
+     React (`onFocus`/`onBlur` всплывают и из порталов, а пикеры строки рисуются порталом), а не по
+     `contains`.
+
+     Касание (`pointerType === 'touch'`) наведения не имеет: там дверь — щелчок, как и была. С
+     клавиатуры подгляд не открывается вовсе: Tab, Enter и перенос фокуса за дверью — прежние. */
+  const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Подгляд, каким его видят таймеры и события между рендерами (состояние — для отрисовки). */
+  const peekOn = useRef(false);
+  const collapsedNow = useRef(collapsed);
+  collapsedNow.current = collapsed;
+  /** Указатель в зоне: полоска или панель — плюс шов. */
+  const pointerIn = useRef(false);
+  /** Фокус внутри панели — по дереву React, порталы включены. */
+  const focusIn = useRef(false);
+  /** Полоска держала фокус, когда подгляд её снял: свернувшись, подгляд вернёт его на место. */
+  const refocusStrip = useRef(false);
+  const clearPeekTimer = () => {
+    if (peekTimer.current) clearTimeout(peekTimer.current);
+    peekTimer.current = null;
+  };
+  const putPeek = (on: boolean) => {
+    peekOn.current = on;
+    setPeek(on);
+  };
+  /** Фокус держит подгляд, только если он где-то стоит: снятый узел молча роняет его в body. */
+  const focusHolds = () => {
+    const at = document.activeElement;
+    return focusIn.current && !!at && at !== document.body;
+  };
+  const foldPeekLater = () => {
+    clearPeekTimer();
+    peekTimer.current = setTimeout(() => {
+      peekTimer.current = null;
+      if (pointerIn.current || focusHolds()) return;
+      putPeek(false);
+    }, PEEK_CLOSE_MS);
+  };
+  const onZoneEnter = (e: React.PointerEvent) => {
+    if (e.pointerType === 'touch') return;
+    pointerIn.current = true;
+    clearPeekTimer();
+    // Удержанная панель наведения не слышит; открытый подгляд только отменяет свою свёртку.
+    if (!collapsedNow.current || peekOn.current) return;
+    if (window.matchMedia?.(SIDE_BY_SIDE).matches === false) return;
+    // С зажатой кнопкой это не наведение, а перетаскивание: подпись или ручка указания, которую
+    // тянут за край кадра (поверхность ведёт её слушателями окна, без захвата указателя), въехала в
+    // шов. Раскрытие сузило бы доску прямо под рукой.
+    if (e.buttons !== 0) return;
+    peekTimer.current = setTimeout(() => {
+      peekTimer.current = null;
+      if (!pointerIn.current || !collapsedNow.current) return;
+      refocusStrip.current = !!expandDoor.current && document.activeElement === expandDoor.current;
+      putPeek(true);
+    }, PEEK_OPEN_MS);
+  };
+  const onZoneLeave = (e: React.PointerEvent) => {
+    if (e.pointerType === 'touch') return;
+    pointerIn.current = false;
+    clearPeekTimer();
+    if (peekOn.current) foldPeekLater();
+  };
+  const onZoneBlur = () => {
+    focusIn.current = false;
+    // Фокус ушёл из подгляда, а курсор уже снаружи — свёртка тем же путём, что по уходу курсора.
+    // Переход фокуса ВНУТРИ панели ставит флаг обратно раньше, чем истекут 250 мс.
+    if (peekOn.current && !pointerIn.current) foldPeekLater();
+  };
+  // Удержание (щелчок, Enter на кадре, «покажи поле») заменяет подгляд, и когда удержание кончится,
+  // подгляд не имеет права вернуться сам.
+  useEffect(() => {
+    if (collapsed) return;
+    if (peekTimer.current) clearTimeout(peekTimer.current);
+    peekTimer.current = null;
+    peekOn.current = false;
+    refocusStrip.current = false;
+    setPeek(false);
+  }, [collapsed]);
+  useEffect(
+    () => () => {
+      if (peekTimer.current) clearTimeout(peekTimer.current);
+    },
+    [],
+  );
+
   const setCollapsed = (next: boolean) => {
-    movedFocus.current = true;
+    // Фокус едет, только если дверь на экране сменится. Шеврон подгляда удерживает панель
+    // раскрытой — та же кнопка остаётся на месте, теперь со словом «collapse», и фокус на ней.
+    movedFocus.current = next !== folded;
+    refocusStrip.current = false;
+    clearPeekTimer();
+    putPeek(false);
     setHeldFor(null);
     setCalloutPrefs({ collapsed: next });
   };
   useEffect(() => {
-    if (!movedFocus.current) return;
-    movedFocus.current = false;
-    (collapsed ? expandDoor : collapseDoor).current?.focus();
-  }, [collapsed]);
+    if (movedFocus.current) {
+      movedFocus.current = false;
+      (folded ? expandDoor : collapseDoor).current?.focus();
+      return;
+    }
+    // Подгляд снял полоску вместе с фокусом; свернувшись, он возвращает фокус на полоску — если за
+    // это время человек не поставил его куда-то сам.
+    if (!folded || !refocusStrip.current) return;
+    refocusStrip.current = false;
+    const at = document.activeElement;
+    if (!at || at === document.body) expandDoor.current?.focus({ preventScroll: true });
+  }, [folded]);
 
   // ОПИСАНИЕ — ТЕ ЖЕ ДВА ОРГАНА ВОЛНЫ, ЧТО У ПОЛЕЙ GENERAL INFORMATION: синяя рамка `drafted`,
   // пока в поле стоит текст черновика и его не приняли, и `ai ✦` в правом нижнем углу.
@@ -1066,23 +1215,41 @@ export function MoodBoard({
             ⚠ ВОЛНА 25.09: ПАНЕЛЬ БОЛЬШЕ НЕ РАЗМОНТИРУЕТСЯ СВЁРТКОЙ ДОСКИ — прячется атрибутом, как
             DESCRIPTION и черновик ниже (`hidden` побеждает любой `display`, preflight). Состояние
             меню (выбранная строка, взвод «+ point», просьба фокуса) переживает сворачивание. Ширина
-            — CSS-переменной `--cw` на обёртке, от `lg`; свёрнутая панель — полоска 28px. */}
+            — CSS-переменной `--cw` на обёртке, от `lg`; свёрнутая панель — полоска 28px.
+
+            O-52 (26.09): СВЁРНУТАЯ ИЛИ ПОДГЛЯДЫВАЮЩАЯ ОБЁРТКА РОСТОМ С РЯД (`self-stretch`), то есть
+            с доску рядом: полоска стоит вровень с блоком доски сверху и снизу. Её `::before` —
+            прозрачный шов слева шириной в `gutter`: он ничего не рисует, но наведение на грунт между
+            доской и полоской приходит обёртке (зона подгляда, см. шапку обработчиков). Удержанная
+            панель — прежняя: липкая, ростом с содержимое. */}
         <div
           ref={calloutsPanel}
           id={panelId}
           hidden={!open}
           data-mb-callouts=''
-          data-collapsed={collapsed || undefined}
+          data-collapsed={folded || undefined}
+          data-peek={peeking || undefined}
           style={{ '--cw': `${panelW}px` } as React.CSSProperties}
+          onPointerEnter={onZoneEnter}
+          onPointerLeave={onZoneLeave}
+          onFocus={() => {
+            focusIn.current = true;
+          }}
+          onBlur={onZoneBlur}
           className={cn(
-            'min-w-0 lg:sticky lg:top-gutter lg:shrink-0 lg:self-start',
-            collapsed ? 'lg:w-[28px]' : 'lg:w-[var(--cw)]',
+            'min-w-0 lg:shrink-0',
+            collapsed
+              ? "lg:relative lg:self-stretch lg:before:absolute lg:before:inset-y-0 lg:before:right-full lg:before:w-gutter lg:before:content-['']"
+              : 'lg:sticky lg:top-gutter lg:self-start',
+            folded ? 'lg:w-[28px]' : 'lg:w-[var(--cw)]',
           )}
         >
-          {collapsed && (
+          {folded && (
             /* СВЁРНУТАЯ ПАНЕЛЬ — ОДНА ДВЕРЬ ЦЕЛИКОМ, как свёрнутый блок `Section`: имя, число и
-               знак, внутри ни одного другого органа. От `lg` — вертикальная полоска с повёрнутой
-               подписью, ниже — обычная строка во всю ширину. */
+               знак, внутри ни одного другого органа. От `lg` — вертикальная полоска во всю высоту
+               ряда: подпись стоит ровно посередине по обеим осям (O-52), знак — у верхнего края,
+               вне потока, чтобы не сдвигать подпись со середины; симметричные 32px сверху и снизу
+               оставляют знаку место и на короткой доске. Ниже `lg` — обычная строка во всю ширину. */
             <button
               ref={expandDoor}
               type='button'
@@ -1091,24 +1258,25 @@ export function MoodBoard({
               aria-controls={panelId}
               aria-label={`expand the callouts panel · ${calloutCount} on the board`}
               data-mb-callouts-strip=''
-              className='group flex w-full cursor-pointer items-center justify-between gap-2 border border-borderColor bg-bgColor px-block py-2.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor lg:flex-col lg:justify-start lg:gap-3 lg:px-0 lg:py-2.5'
+              className='group flex w-full cursor-pointer items-center justify-between gap-2 border border-borderColor bg-bgColor px-block py-2.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor lg:relative lg:h-full lg:flex-col lg:justify-center lg:px-0 lg:py-8'
             >
               <Text
                 size='micro'
                 variant='uppercase'
                 tracking='label'
                 component='span'
+                data-mb-callouts-label=''
                 className='whitespace-nowrap text-labelColor group-hover:text-textColor lg:[writing-mode:vertical-rl]'
               >
                 callouts · {calloutCount}
               </Text>
               <Arrow
                 aria-hidden
-                className='shrink-0 rotate-180 text-labelColor group-hover:text-textColor lg:order-first lg:-rotate-90'
+                className='shrink-0 rotate-180 text-labelColor group-hover:text-textColor lg:absolute lg:left-1/2 lg:top-2.5 lg:-translate-x-1/2 lg:-rotate-90'
               />
             </button>
           )}
-          <div hidden={collapsed} className='contents'>
+          <div hidden={folded} className='contents'>
             <Section
               title='callouts'
               question='— pinned on the board, not numbered'
@@ -1122,27 +1290,41 @@ export function MoodBoard({
                       {calloutCount} on the board
                     </Pill>
                   )}
+                  {/* В ПОДГЛЯДЕ (O-52) ЭТА ДВЕРЬ ВЕДЁТ В «РАСКРЫТО»: панель показана, но свёрнута,
+                      и щелчок переключает именно это — удерживает её раскрытой и пишет
+                      предпочтение. Свернуть подгляд — увести курсор. */}
                   <button
                     ref={collapseDoor}
                     type='button'
-                    onClick={() => setCollapsed(true)}
-                    aria-expanded
+                    onClick={() => setCollapsed(!peeking)}
+                    aria-expanded={peeking ? undefined : true}
                     aria-controls={panelId}
-                    aria-label='collapse the callouts panel'
+                    aria-label={
+                      peeking ? 'keep the callouts panel open' : 'collapse the callouts panel'
+                    }
+                    title={
+                      peeking
+                        ? 'keep it open — otherwise it folds when the pointer leaves'
+                        : undefined
+                    }
                     data-mb-callouts-collapse=''
                     className='group cursor-pointer px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
                   >
                     {/* Тот же знак, что у каждой свёртки админки, повёрнутый к краю, куда панель
-                        уходит: вправо от `lg`, вверх ниже. */}
+                        уходит: вправо от `lg`, вверх ниже. В подгляде — влево, как у полоски. */}
                     <Arrow
                       aria-hidden
-                      className='shrink-0 text-labelColor group-hover:text-textColor lg:rotate-90'
+                      className={cn(
+                        'shrink-0 text-labelColor group-hover:text-textColor',
+                        peeking ? 'lg:-rotate-90' : 'lg:rotate-90',
+                      )}
                     />
                   </button>
                 </span>
               }
-              /* Тот же шов, что у доски слева: панель стоит с ней в одном ряду, и разойтись им нельзя. */
-              className={GROUP_SEAM}
+              /* Тот же шов, что у доски слева: панель стоит с ней в одном ряду, и разойтись им нельзя.
+                 В подгляде обёртка растянута на весь ряд, и липкой становится сама панель. */
+              className={cn(GROUP_SEAM, peeking && 'lg:sticky lg:top-gutter')}
             >
               <CalloutRail
                 rows={railRows}
