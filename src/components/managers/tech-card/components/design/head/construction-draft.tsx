@@ -32,12 +32,7 @@ import {
 import { readBench } from '../bench-slot';
 import { proposedColourways } from '../colourway-proposals-model';
 import { draftReadGate, openGateDoor } from '../core/chain';
-import {
-  draftInputGate,
-  isBoardRow,
-  moodGateSentence,
-  type MoodGateInput,
-} from '../core/mood-gate';
+import { draftInputGate, isBoardRow, moodGateSentence, type MoodGateInput } from '../core/mood-gate';
 import { useDrafted } from '../drafted-contract';
 import {
   Counter,
@@ -88,13 +83,14 @@ import {
   type FillTarget,
   type WordsOffer,
 } from './draft-fills';
-import { Fold, LockedBar, scrollToOrgan } from './mood-organs';
+import { LockedBar } from './mood-organs';
 import {
   draftRunBusy,
   readDraftRun,
   useCardMemory,
   useDraftMemory,
   useDraftRun,
+  type Dismissal,
   type ParkedDraft,
 } from './use-draft-fills';
 import { draftIdeaRefusal, refusalReason, useDraftDesignIdea } from './use-draft-idea';
@@ -217,8 +213,20 @@ function boardReadOf(v: { moodboardMedia?: unknown; callouts?: unknown; concept?
 /**
  * Квитанция строки. Заменяет чипы после клика — сегодняшняя грамматика, слово в слово. `restored`
  * — у записи возврата (`restore previous ↶`, BLK-1); она выводится из самой записи, не из клика.
+ * Отказа («keep mine») здесь больше нет (O-39): он живёт в памяти карточки (`Dismissal`), потому
+ * что квитанция органа умирает с органом, а «dismissed 0» после F5 рядом с «written 7» — ложь.
  */
-type Receipt = 'added' | 'replaced' | 'dismissed' | 'restored';
+type Receipt = 'added' | 'replaced' | 'restored';
+
+/**
+ * НАВЕДЕНИЕ НА СТРОКУ ЖУРНАЛА (O-39, 26.09). Владелец: «при ховере на строчки во WRITTEN, DISMISSED,
+ * HINTS затемняй её немного, чтобы было понятно, куда мы смотрим». Тон — грунт страницы (`pageBg`,
+ * #f2f2f2): на белом материале блока это «немного», и цвет на экране уже есть (`style-projects`
+ * ведёт строки списка тем же). `bgZebra` (#fafafa) на этом мониторе не отличим от белого — он
+ * подсветка ячейки, а не ответ на вопрос «где курсор». Строки TO DECIDE не трогаются: там строка —
+ * работа с отметкой и раскрытием, а не запись для чтения.
+ */
+const ROW_HOVER = 'hover:bg-pageBg';
 
 /**
  * ЦЕНА ЭТОГО ПРОГОНА — И БОЛЬШЕ НИЧЕГО (T-12). Владелец: «нам надо показывать только цену
@@ -391,10 +399,13 @@ export function ConstructionDraft({
   // ЖУРНАЛ ЗАПОЛНЕНИЙ И ПРЕДЛОЖЕННЫЕ КОЛОРВЕИ ЖИВУТ В МОДУЛЬНОМ СТОРЕ, А НЕ ЗДЕСЬ: студия
   // монтируется условно, и `useState` органа умер бы от одного захода на COLORWAYS и обратно —
   // вместе с единственной записью о том, что стояло на карточке ДО черновика (см. `use-draft-fills`).
-  const { fills } = useCardMemory(techCardId);
+  const { fills, dismissed } = useCardMemory(techCardId);
   const record = useDraftMemory((st) => st.record);
   const put = useDraftMemory((st) => st.put);
   const forget = useDraftMemory((st) => st.forget);
+  const dismiss = useDraftMemory((st) => st.dismiss);
+  const undismiss = useDraftMemory((st) => st.undismiss);
+  const clearDismissed = useDraftMemory((st) => st.clearDismissed);
   const setProposals = useDraftMemory((st) => st.setProposals);
 
   const items = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as { mediaId?: number }[];
@@ -1048,10 +1059,11 @@ export function ConstructionDraft({
   /** Верстак ЭТОГО рендера — для дедупа в `mintSuggested`, чей колбэк живёт дольше рендера. */
   const detailSlotsRef = useRef(formSnapshot.detailSlots);
   detailSlotsRef.current = formSnapshot.detailSlots;
-  const { rows, missing, details: detailIdeas } = useMemo(
-    () => diffProposal(staged?.draft ?? null, formSnapshot),
-    [staged, formSnapshot],
-  );
+  const {
+    rows,
+    missing,
+    details: detailIdeas,
+  } = useMemo(() => diffProposal(staged?.draft ?? null, formSnapshot), [staged, formSnapshot]);
 
   /**
    * ЖИВЫЕ ЗАПИСИ ЖУРНАЛА — ПЕРЕСЧИТЫВАЮТСЯ НА КАЖДОМ РЕНДЕРЕ, ПРОТИВ ЖИВОЙ ФОРМЫ.
@@ -1117,8 +1129,12 @@ export function ConstructionDraft({
   // будто модель предложила меньше, чем предложила. Поэтому строка с квитанцией считается
   // предложенной по-прежнему: она ею и была.
   const proposed = rows.filter((r) => r.state !== 'same' || receipts[r.id]).length;
-  const dismissed = Object.values(receipts).filter((r) => r === 'dismissed').length;
-  const open = decide.filter((r) => !receipts[r.id]);
+  /**
+   * ОТКЛОНЁННЫЕ СТРОКИ — ИЗ ПАМЯТИ КАРТОЧКИ, А НЕ ИЗ КВИТАНЦИЙ ОРГАНА (O-39). Квитанция умирает с
+   * органом (смена шага, F5), и «dismissed 0» вставало рядом с «written 7» из хранимого журнала.
+   */
+  const dismissedRows = useMemo(() => new Set(dismissed.map((d) => d.row)), [dismissed]);
+  const open = decide.filter((r) => !receipts[r.id] && !dismissedRows.has(r.id));
   // ⚠ СОВЕТ — ЭТО «НОВОЕ». Без `missing.length === 0` строка «ничего нового — карточка это уже
   // говорит» вставала ПРЯМО НАД восстановленным блоком «что заслуживает булавки»: на хорошо
   // заполненной карточке все предложения возвращаются `same`, а совет модель всё равно даёт — и
@@ -1270,6 +1286,8 @@ export function ConstructionDraft({
     // может не быть вовсе. Принятое при этом никуда не делось — оно на карточке, и новое сравнение
     // покажет его как `same`.
     setReceipts({});
+    // Отказы прошлого ответа — тем же законом (O-39): они в памяти карточки, а не в квитанциях.
+    clearDismissed(techCardId);
     setRowByFill({});
     // Отметки, раскрытия и выбранные секции строк — тоже про строки прошлого ответа.
     setTaken({});
@@ -1579,25 +1597,34 @@ export function ConstructionDraft({
     if (failed.length) showMessage(couldNotAdd(failed), 'error');
   }
 
-  /** «keep mine» — отклонить навсегда: строка уходит из TO DECIDE в DISMISSED, с дверью обратно. */
+  /**
+   * «keep mine» — отклонить: строка уходит из TO DECIDE в DISMISSED, с дверью обратно. Запись — в
+   * памяти карточки (O-39): она переживает смену шага и F5, как журнал, и несёт то, что строка
+   * DISMISSED рисует без живого ответа — подпись поля и фразу предложения.
+   */
   function keepMine(row: ProposalRow) {
     setTaken((prev) => {
       const next = { ...prev };
       delete next[row.id];
       return next;
     });
-    setReceipts((prev) => ({ ...prev, [row.id]: 'dismissed' as Receipt }));
+    dismiss(techCardId, {
+      row: row.id,
+      label: row.label,
+      says: draftSays(row.current, row.value).plain,
+      at: hhmm(),
+    });
     setLogOpen(true);
   }
-  function putBack(row: ProposalRow) {
-    setReceipts((prev) => {
-      const next = { ...prev };
-      delete next[row.id];
-      return next;
-    });
+  function putBack(d: Dismissal) {
+    undismiss(techCardId, d.row);
   }
-
-  const kept = decide.filter((r) => receipts[r.id] === 'dismissed');
+  /**
+   * У какой отклонённой строки есть дверь обратно: у той, чья строка стоит в живом ответе. После F5
+   * ответа нет, и «put it back» вернул бы её в очередь, которой нет, — тогда запись стоит историей,
+   * как `was:` у WRITTEN, до следующего прогона (он обнуляет отказы вместе с квитанциями, D5).
+   */
+  const decideIds = useMemo(() => new Set(decide.map((r) => r.id)), [decide]);
   const takenRows = open.filter((r) => taken[r.id]);
   // Считается ПО ЖИВОМУ СПИСКУ, а не по числу ключей в карте отметок: имя, которое уже уехало на
   // верстак (или пришло `onBench` со следующим прогоном), обязано перестать считаться выбранным,
@@ -1606,7 +1633,9 @@ export function ConstructionDraft({
   const hasAnswer = !!staged && run.phase !== 'asking';
   // Журнал живёт в сторе дольше ответа: раскрытие рисуется и без прогона, пока есть что вернуть, —
   // и пока стоит `undo ↶` отказа от слов (m6): отказ от последних слов не уносит с экрана свою отмену.
-  const showLog = hasAnswer || live.length > 0 || restore.length > 0 || undismissable;
+  // …и пока есть отклонённые строки (O-39): они в памяти карточки и стоят после F5, как журнал.
+  const showLog =
+    hasAnswer || live.length > 0 || restore.length > 0 || undismissable || dismissed.length > 0;
   /** Строки группы WRITTEN: записи с `✕` и прежние слова с `restore previous ↶` (BLK-1, M-A). */
   const writtenCount = live.length + restore.length;
 
@@ -1647,29 +1676,30 @@ export function ConstructionDraft({
 
   /* ЧТО ПРОЧИТАЛ ПРОГОН — В ТОТ ЖЕ РЯД, ЧТО И КНОПКА (`trailing` общего `GenerateRow`). Два ряда
      читались как два органа, хотя это одно: что я запускаю и на чём. */
-  const runState = hasAnswer && staged ? (
-    <>
-      <Text size='micro' variant='label' component='span' data-c19-draft-head=''>
-        read {staged.readPictures} picture{staged.readPictures === 1 ? '' : 's'} ·{' '}
-        {staged.readNotes} note{staged.readNotes === 1 ? '' : 's'} · {staged.time}
-      </Text>
-      {stale && (
-        <Pill tone='attention' data-c19-draft-stale=''>
-          the moodboard has changed since
-        </Pill>
-      )}
-      {nothingNew && (
-        <Pill tone='mut' data-c19-draft-nothing-new=''>
-          nothing new · the card already says all of this
-        </Pill>
-      )}
-      {price && (
-        <Text size='micro' variant='label' component='span' data-c19-draft-price=''>
-          {price}
+  const runState =
+    hasAnswer && staged ? (
+      <>
+        <Text size='micro' variant='label' component='span' data-c19-draft-head=''>
+          read {staged.readPictures} picture{staged.readPictures === 1 ? '' : 's'} ·{' '}
+          {staged.readNotes} note{staged.readNotes === 1 ? '' : 's'} · {staged.time}
         </Text>
-      )}
-    </>
-  ) : null;
+        {stale && (
+          <Pill tone='attention' data-c19-draft-stale=''>
+            the moodboard has changed since
+          </Pill>
+        )}
+        {nothingNew && (
+          <Pill tone='mut' data-c19-draft-nothing-new=''>
+            nothing new · the card already says all of this
+          </Pill>
+        )}
+        {price && (
+          <Text size='micro' variant='label' component='span' data-c19-draft-price=''>
+            {price}
+          </Text>
+        )}
+      </>
+    ) : null;
 
   return (
     /* СВОЙ БЛОК, А НЕ ПОДСТРУКТУРА ДОСКИ. Слова человека (DESCRIPTION) и ответ машины — разные
@@ -1801,7 +1831,11 @@ export function ConstructionDraft({
             НЕ написал: спор со словами человека. */}
         {hasAnswer && (
           <div className='mt-3 border-t-2 border-textColor pt-3' data-c19-draft-cut=''>
-            <GroupLabel flush className={GROUP_GAP} action={<Counter n={open.length} noun='line' />}>
+            <GroupLabel
+              flush
+              className={GROUP_GAP}
+              action={<Counter n={open.length} noun='line' />}
+            >
               to decide
             </GroupLabel>
             {open.length > 0 ? (
@@ -1947,8 +1981,8 @@ export function ConstructionDraft({
                   </>
                 ) : (
                   <EmptyState className='py-1'>
-                    <span className='uppercase text-textColor'>every detail is already there</span> ·
-                    each aspect the draft named has a slot on FLAT SLOTS
+                    <span className='uppercase text-textColor'>every detail is already there</span>{' '}
+                    · each aspect the draft named has a slot on FLAT SLOTS
                   </EmptyState>
                 )}
               </div>
@@ -1962,142 +1996,167 @@ export function ConstructionDraft({
             ЖУРНАЛ СТОИТ И БЕЗ ОТВЕТА ПРОГОНА, и это смысл, а не вёрстка: ответ живёт в состоянии
             органа и умирает вместе с ним (студия монтируется условно), написанное на карточку
             живёт в модульном сторе и умирать не должно. Спрятать журнал вместе с ответом значило бы
-            отобрать `✕` у человека, вернувшегося с COLORWAYS. */}
+            отобрать `✕` у человека, вернувшегося с COLORWAYS.
+
+            ПОДПИСЬ — САМА КНОПКА, А НЕ ЛИНЕЙКА С КНОПКОЙ (O-39, 26.09). Владелец: «дай чуть больше
+            гэпа от WRITTEN 7 · DISMISSED… от кнопки генерейт и убери подчеркивание». Общий `Fold`
+            рисовал подпись `GroupLabel` — с линейкой под текстом, которая читалась подчёркиванием,
+            и с отдельной кнопкой `show ▸`. Здесь подпись — тихий текст той же гарнитуры, что у
+            линеек ниже, весь щелкаемый, со стрелкой в хвосте; линейки нет. Зазор сверху — шов
+            между группами блока (`mt-5`, 20px), ступенью выше прежних 12px: под ним другой
+            документ. Счётчиков в подписи три, и они единственные (O-41): чипы «7 writes» ·
+            «0 lines» · «0 hints» с линеек групп сняты — повторять число, которое стоит строкой
+            выше, значило бы говорить его дважды. У TO DECIDE счётчик остаётся: там числа в
+            подписи нет. */}
         {showLog && (
-          <Fold
-            className={hasAnswer ? undefined : 'mt-3'}
-            label={`written ${writtenCount} · dismissed ${kept.length} · hints ${missing.length}`}
-            open={logOpen}
-            onToggle={() => setLogOpen((v) => !v)}
-            data-c19-draft-log=''
-          >
-            <GroupLabel className={GROUP_GAP} action={<Counter n={writtenCount} noun='write' />}>
-              written
-            </GroupLabel>
-            {writtenCount > 0 ? (
-              <div data-c19-journal=''>
-                {live.map((fill) => (
-                  <WrittenRow
-                    key={fill.id}
-                    fill={fill}
-                    receipt={fill.restore ? 'restored' : receiptByFill[fill.id]}
-                    readOnly={readOnly || fitBarred(fill)}
-                    busy={busy}
-                    onUndo={() => undo(fill)}
-                  />
-                ))}
-                {/* ПРЕЖНИЕ СЛОВА, ПЕРЕПИСАННЫЕ ЧЕРНОВИКОМ И ПОПРАВЛЕННЫЕ ПОТОМ ЧЕЛОВЕКОМ (BLK-1), И
+          <div className='mt-5' data-c19-draft-log=''>
+            <button
+              type='button'
+              aria-expanded={logOpen}
+              aria-controls='mb-draft-log'
+              onClick={() => setLogOpen((v) => !v)}
+              data-fold-toggle=''
+              className='flex items-center gap-1.5 text-left hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            >
+              <Text
+                size='micro'
+                variant='label'
+                tracking='group'
+                component='span'
+                className='font-bold uppercase'
+              >
+                written {writtenCount} · dismissed {dismissed.length} · hints {missing.length}
+              </Text>
+              <Text size='micro' variant='label' component='span' aria-hidden='true'>
+                {logOpen ? '▾' : '▸'}
+              </Text>
+            </button>
+            {logOpen && (
+              <div id='mb-draft-log'>
+                <GroupLabel className={GROUP_GAP}>written</GroupLabel>
+                {writtenCount > 0 ? (
+                  <div data-c19-journal=''>
+                    {live.map((fill) => (
+                      <WrittenRow
+                        key={fill.id}
+                        fill={fill}
+                        receipt={fill.restore ? 'restored' : receiptByFill[fill.id]}
+                        readOnly={readOnly || fitBarred(fill)}
+                        busy={busy}
+                        onUndo={() => undo(fill)}
+                      />
+                    ))}
+                    {/* ПРЕЖНИЕ СЛОВА, ПЕРЕПИСАННЫЕ ЧЕРНОВИКОМ И ПОПРАВЛЕННЫЕ ПОТОМ ЧЕЛОВЕКОМ (BLK-1), И
                     СЛОВА, КОТОРЫЕ ЗАПИСЬ НЕСЁТ (M-A): `✕` отката у них нет, есть явный возврат и
                     тихий отказ (m6). Стоят здесь же — это тоже «что стояло до». */}
-                {restore.map((offer) => (
-                  <RestoreRow
-                    key={`restore:${offer.fill.id}:${offer.from}`}
-                    offer={offer}
-                    readOnly={readOnly || fitBarred(offer.fill)}
-                    busy={busy}
-                    onRestore={() => restorePrevious(offer)}
-                    onDismiss={() => dismissWords(offer)}
-                  />
-                ))}
-                <div className='mt-1.5 flex flex-wrap justify-end gap-1.5'>
-                  {/* ДВЕРЬ ВЕДЁТ ТУДА, КУДА ПРАВДА УЕХАЛИ ЗНАЧЕНИЯ — блоки ниже на этой же
-                      странице. Якорь ставит `ConstructionGeneralInfo` (`data-c19-general`). */}
-                  <Button
-                    type='button'
-                    variant='secondary'
-                    size='xs'
-                    data-c19-draft-go=''
-                    onClick={() => scrollToOrgan('[data-c19-general]')}
-                  >
-                    see it on CONSTRUCTION ▸
-                  </Button>
-                  {!readOnly && undoable.length > 0 && (
-                    <Button
-                      type='button'
-                      variant='secondary'
-                      size='xs'
-                      data-c19-undo-all=''
-                      disabled={busy}
-                      onClick={() => {
-                        // Возвраты человека (BLK-1) не откатываются: это не работа черновика.
-                        // Журнал правит сам `undo`, запись за записью: забывает, ставит на место
-                        // заменённую (M-A) или — у заведённой детали — забывает после успеха
-                        // сервера. Прежний `forgetMany` поверх цикла стирал бы поставленные на
-                        // место записи вместе со словами, которые они несут.
-                        for (const f of undoable) undo(f);
-                      }}
-                    >
-                      undo all {undoable.length} ▸
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <EmptyState className='py-1'>
-                <span className='uppercase text-textColor'>nothing written</span> · the draft filled
-                no empty field on this card
-              </EmptyState>
-            )}
-            {/* ОТМЕНА ОТКАЗА ОТ СЛОВ (m6) — десять секунд, как `undo ↶` у `ai ✦`, и только пока
+                    {restore.map((offer) => (
+                      <RestoreRow
+                        key={`restore:${offer.fill.id}:${offer.from}`}
+                        offer={offer}
+                        readOnly={readOnly || fitBarred(offer.fill)}
+                        busy={busy}
+                        onRestore={() => restorePrevious(offer)}
+                        onDismiss={() => dismissWords(offer)}
+                      />
+                    ))}
+                    {/* Двери «see it on CONSTRUCTION ▸» здесь больше нет (O-39): владелец снял её —
+                    записанное видно там, где живёт, полем с пилюлей `drafted` ниже на этой же
+                    странице. Ряд рисуется только с `undo all`: пустой ряд — это зазор ни к чему. */}
+                    {!readOnly && undoable.length > 0 && (
+                      <div className='mt-1.5 flex flex-wrap justify-end gap-1.5'>
+                        <Button
+                          type='button'
+                          variant='secondary'
+                          size='xs'
+                          data-c19-undo-all=''
+                          disabled={busy}
+                          onClick={() => {
+                            // Возвраты человека (BLK-1) не откатываются: это не работа черновика.
+                            // Журнал правит сам `undo`, запись за записью: забывает, ставит на место
+                            // заменённую (M-A) или — у заведённой детали — забывает после успеха
+                            // сервера. Прежний `forgetMany` поверх цикла стирал бы поставленные на
+                            // место записи вместе со словами, которые они несут.
+                            for (const f of undoable) undo(f);
+                          }}
+                        >
+                          undo all {undoable.length} ▸
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <EmptyState className='py-1'>
+                    <span className='uppercase text-textColor'>nothing written</span> · the draft
+                    filled no empty field on this card
+                  </EmptyState>
+                )}
+                {/* ОТМЕНА ОТКАЗА ОТ СЛОВ (m6) — десять секунд, как `undo ↶` у `ai ✦`, и только пока
                 запись журнала та, что отказ оставил. Вне условия группы: отказ от последних слов
                 оставляет группу пустой, а отмена обязана остаться на экране. */}
-            {undismissable && dismissedWords && !readOnly && (
-              <div
-                className='flex flex-wrap items-center justify-end gap-2 py-1'
-                data-c19-restore-dismissed={dismissedWords.was.id}
-              >
-                <Text size='nano' variant='label' component='span'>
-                  previous {dismissedWords.label} dropped
-                </Text>
-                <Chip
-                  onClick={undismissWords}
-                  disabled={busy}
-                  data-c19-restore-undismiss={dismissedWords.was.id}
-                  title='put the dropped words back among the ones you can restore'
-                >
-                  undo ↶
-                </Chip>
-              </div>
-            )}
+                {undismissable && dismissedWords && !readOnly && (
+                  <div
+                    className='flex flex-wrap items-center justify-end gap-2 py-1'
+                    data-c19-restore-dismissed={dismissedWords.was.id}
+                  >
+                    <Text size='nano' variant='label' component='span'>
+                      previous {dismissedWords.label} dropped
+                    </Text>
+                    <Chip
+                      onClick={undismissWords}
+                      disabled={busy}
+                      data-c19-restore-undismiss={dismissedWords.was.id}
+                      title='put the dropped words back among the ones you can restore'
+                    >
+                      undo ↶
+                    </Chip>
+                  </div>
+                )}
 
-            <GroupLabel className={GROUP_GAP} action={<Counter n={kept.length} noun='line' />}>
-              dismissed
-            </GroupLabel>
-            {kept.length > 0 ? (
-              kept.map((row) => (
-                <KeptRow key={row.id} row={row} readOnly={readOnly} onReopen={() => putBack(row)} />
-              ))
-            ) : (
-              <EmptyState className='py-1'>
-                <span className='uppercase text-textColor'>nothing turned down</span> · every drafted
-                line is either written or still open
-              </EmptyState>
-            )}
+                <GroupLabel className={GROUP_GAP}>dismissed</GroupLabel>
+                {dismissed.length > 0 ? (
+                  dismissed.map((d) => (
+                    <KeptRow
+                      key={d.row}
+                      entry={d}
+                      live={decideIds.has(d.row)}
+                      readOnly={readOnly}
+                      onReopen={() => putBack(d)}
+                    />
+                  ))
+                ) : (
+                  <EmptyState className='py-1'>
+                    <span className='uppercase text-textColor'>nothing turned down</span> · every
+                    drafted line is either written or still open
+                  </EmptyState>
+                )}
 
-            {/* СОВЕТЫ МОДЕЛИ — «что заслуживает булавки» (`missing`). Это совет, а не
+                {/* СОВЕТЫ МОДЕЛИ — «что заслуживает булавки» (`missing`). Это совет, а не
                 предложение: у строк нет ни `take`, ни `✕` — на карточке нет поля, в которое
                 булавка легла бы сама. Ставить сюда дверь значило бы обещать действие, которого
                 организм не умеет. Ключ несёт позицию: `missing` нигде не дедуплицируется. */}
-            <GroupLabel className={GROUP_GAP} action={<Counter n={missing.length} noun='hint' />}>
-              hints
-            </GroupLabel>
-            {missing.length > 0 ? (
-              <div data-c19-draft-missing=''>
-                {missing.map((line, i) => (
-                  <div key={`${i}:${line}`} className='border-b border-hairline py-1'>
-                    <Text size='micro' component='p' className='break-words'>
-                      {line}
-                    </Text>
+                <GroupLabel className={GROUP_GAP}>hints</GroupLabel>
+                {missing.length > 0 ? (
+                  <div data-c19-draft-missing=''>
+                    {missing.map((line, i) => (
+                      <div
+                        key={`${i}:${line}`}
+                        className={`border-b border-hairline py-1 ${ROW_HOVER}`}
+                      >
+                        <Text size='micro' component='p' className='break-words'>
+                          {line}
+                        </Text>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                ) : (
+                  <EmptyState className='py-1'>
+                    <span className='uppercase text-textColor'>nothing to pin</span> · the draft
+                    named no picture that wants a note
+                  </EmptyState>
+                )}
               </div>
-            ) : (
-              <EmptyState className='py-1'>
-                <span className='uppercase text-textColor'>nothing to pin</span> · the draft named
-                no picture that wants a note
-              </EmptyState>
             )}
-          </Fold>
+          </div>
         )}
       </div>
     </Section>
@@ -2386,7 +2445,7 @@ function WrittenRow({
 }): JSX.Element {
   return (
     <div
-      className='flex flex-wrap items-center gap-2 border-b border-hairline py-1'
+      className={`flex flex-wrap items-center gap-2 border-b border-hairline py-1 ${ROW_HOVER}`}
       data-c19-fill={fill.id}
     >
       <Text
@@ -2410,7 +2469,7 @@ function WrittenRow({
           was: {fill.before || '—'}
         </Text>
       </Text>
-      {receipt && receipt !== 'dismissed' && (
+      {receipt && (
         <Pill tone='ink' data-c19-draft-receipt={receipt}>
           {receipt}
         </Pill>
@@ -2470,7 +2529,7 @@ function RestoreRow({
   const fill = offer.fill;
   return (
     <div
-      className='flex flex-wrap items-center gap-2 border-b border-hairline py-1'
+      className={`flex flex-wrap items-center gap-2 border-b border-hairline py-1 ${ROW_HOVER}`}
       data-c19-restore-row={fill.id}
       data-c19-restore-from={String(offer.from)}
     >
@@ -2522,20 +2581,28 @@ function RestoreRow({
   );
 }
 
-/** Отклонённая строка: ушла из работы, но держит дверь обратно — отметка без обратной двери это ловушка. */
+/**
+ * Отклонённая строка: ушла из работы, но держит дверь обратно — отметка без обратной двери это
+ * ловушка. Рисуется из ЗАПИСИ ПАМЯТИ КАРТОЧКИ (O-39), а не из строки ответа: после F5 ответа нет,
+ * а отказ есть, и «dismissed 2» обязан показывать свои две строки. Дверь `put it back` — только
+ * пока строка стоит в живом ответе (`live`): без него она вернула бы строку в очередь, которой нет;
+ * тогда запись стоит историей до следующего прогона, который обнуляет отказы (D5).
+ */
 function KeptRow({
-  row,
+  entry,
+  live,
   readOnly,
   onReopen,
 }: {
-  row: ProposalRow;
+  entry: Dismissal;
+  live: boolean;
   readOnly: boolean;
   onReopen: () => void;
 }): JSX.Element {
   return (
     <div
-      className='flex flex-wrap items-center gap-2 border-b border-hairline py-1'
-      data-c19-draft-kept={row.id}
+      className={`flex flex-wrap items-center gap-2 border-b border-hairline py-1 ${ROW_HOVER}`}
+      data-c19-draft-kept={entry.row}
     >
       <Text
         size='nano'
@@ -2544,20 +2611,25 @@ function KeptRow({
         component='span'
         className='w-[88px] shrink-0 truncate uppercase'
       >
-        {row.label}
+        {entry.label}
       </Text>
-      <Text size='micro' variant='label' component='span' className='min-w-0 flex-[1_1_220px] truncate'>
-        {draftSays(row.current, row.value).plain}
+      <Text
+        size='micro'
+        variant='label'
+        component='span'
+        className='min-w-0 flex-[1_1_220px] truncate'
+      >
+        {entry.says}
       </Text>
       <Pill tone='ink'>kept</Pill>
-      {!readOnly && (
+      {!readOnly && live && (
         <Button
           type='button'
           variant='secondary'
           size='xs'
           onClick={onReopen}
-          data-c19-draft-reopen={row.id}
-          title={`put the drafted ${row.label} back among the lines to decide`}
+          data-c19-draft-reopen={entry.row}
+          title={`put the drafted ${entry.label} back among the lines to decide`}
         >
           put it back
         </Button>
@@ -2684,9 +2756,9 @@ function DraftInventoryModal({
         <>
           <b>the server assembles this run itself,</b> from the SAVED card — the card head (garment,
           fit, category, gender, size run), the pictures on the moodboard with the notes pinned to
-          them, the description, and what the card already says (aspects, table callouts, BOM), which
-          it is told to refine and not repeat. This client never sees the text it composes, so what is
-          listed here is what the server READS, not how it words it.
+          them, the description, and what the card already says (aspects, table callouts, BOM),
+          which it is told to refine and not repeat. This client never sees the text it composes, so
+          what is listed here is what the server READS, not how it words it.
           {boardDirty ? (
             <>
               {' '}
@@ -2764,7 +2836,9 @@ function DraftInventoryModal({
           name='category'
           origin={category ? 'linked' : undefined}
           text={
-            category || <span className='text-labelColor'>none on the card — the line is not sent</span>
+            category || (
+              <span className='text-labelColor'>none on the card — the line is not sent</span>
+            )
           }
         />
         <InventoryLine
@@ -2834,10 +2908,14 @@ function DraftInventoryModal({
 
       <NotSent
         items={[
-          { label: 'colourways', reason: 'colourways are proposed by the draft and created on your click' },
+          {
+            label: 'colourways',
+            reason: 'colourways are proposed by the draft and created on your click',
+          },
           {
             label: 'reference roles',
-            reason: 'roles and reference notes belong to the flat run; the draft reads the board, not the input',
+            reason:
+              'roles and reference notes belong to the flat run; the draft reads the board, not the input',
           },
         ]}
       />

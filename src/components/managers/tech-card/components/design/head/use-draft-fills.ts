@@ -30,9 +30,10 @@ import { fillIdOf, holdsWords, mergeFill, type Fill, type FillTarget } from './d
  * Здесь стояло «сохранения между перезагрузками нет, журнал сессионный». Волна 25.09 сделала
  * журнал ИСТОЧНИКОМ пометок «drafted» (синие рамки полей, `accept all N ▸`), а пометка, гаснущая от
  * F5, врала бы: поле, которое человек ещё не смотрел, выглядело бы просмотренным. Поэтому записи
- * `fills` (и только они — предложения колорвеев и флаг «доска ушла» остаются сессионными) пишутся
- * в localStorage `plm.techcard.drafted.v1.<cardId>` на КАЖДОЙ правке журнала и читаются при первом
- * обращении к карточке.
+ * `fills` — и с O-39 отклонённые строки `dismissed` (предложения колорвеев и флаг «доска ушла»
+ * остаются сессионными) — пишутся в localStorage `plm.techcard.drafted.v1.<cardId>` на КАЖДОЙ правке
+ * журнала и читаются при первом обращении к карточке. Ключ один: у карточки одна память, и F5 не
+ * вправе вернуть «written 7» без «dismissed 2» той же строки.
  *
  * ⚠ ВЛАДЕЛЕЦ — КАРТОЧКА, И ЭТО ПРОВЕРЯЕТСЯ ПРИ ЧТЕНИИ. Ключ уже несёт id, но хранилище правит кто
  * угодно (соседняя вкладка, ручная чистка, старая сборка), поэтому в значении лежит `owner`, и
@@ -44,8 +45,34 @@ import { fillIdOf, holdsWords, mergeFill, type Fill, type FillTarget } from './d
  * глотается — журнал просто остаётся сессионным, как было до волны.
  */
 
+/**
+ * ═══ ОТКЛОНЁННАЯ СТРОКА ПРЕДЛОЖЕНИЯ — «keep mine» В TO DECIDE (O-39, 26.09) ═══════════════════════
+ *
+ * Владелец: «DISMISSED не ноль — я там некоторые отклонил, но они почему-то не учлись». Отказ жил в
+ * `useState` органа (`receipts[row] = 'dismissed'`), а список DISMISSED фильтровал ответ прогона —
+ * тоже состояние органа. Орган умирает от смены шага, вкладки и F5, и «dismissed 0» вставало рядом с
+ * «written 7», который читается из хранимого журнала: два счётчика одной строки жили по разным
+ * законам. Теперь отказ — ЗАПИСЬ ПАМЯТИ КАРТОЧКИ рядом с журналом, в том же хранилище.
+ *
+ * Запись несёт то, что рисует строка DISMISSED без живого ответа: подпись поля и фразу предложения
+ * словами. Ключ — строка предложения (`ProposalRow.id`): по нему строка уходит из TO DECIDE, и по нему
+ * `put it back` возвращает её, пока ответ жив. Срок — ОТВЕТ ПРОГОНА, как у квитанций (D5): новый
+ * ответ предлагает заново, и отказ прошлому предложению не отказ новому.
+ */
+export type Dismissal = {
+  row: string;
+  /** Подпись поля-адресата, как у строки TO DECIDE: `silhouette`, `fabric · main`. */
+  label: string;
+  /** Что предлагал черновик, уже фразой (`draftSays(...).plain`): «draft says it differently». */
+  says: string;
+  /** Когда, `HH:MM`. Только для глаз. */
+  at: string;
+};
+
 type CardMemory = {
   fills: Fill[];
+  /** Отклонённые строки ПОСЛЕДНЕГО ответа, новейшая первой (O-39). */
+  dismissed: Dismissal[];
   proposals: ProposedColourway[];
   /** Вердикт по предложению колорвея: подтверждён (с id продукта) или отклонён. */
   verdicts: Record<string, ColourwayVerdict>;
@@ -71,7 +98,13 @@ export type ColourwayVerdict =
       recipeFailed?: string;
     };
 
-const EMPTY: CardMemory = { fills: [], proposals: [], verdicts: {}, boardMoved: false };
+const EMPTY: CardMemory = {
+  fills: [],
+  dismissed: [],
+  proposals: [],
+  verdicts: {},
+  boardMoved: false,
+};
 
 /* ═══ ПРОГОН ЧЕРНОВИКА — ПО КЛЮЧУ КАРТОЧКИ, А НЕ В ОРГАНЕ (раунд 4, S-M1) ═══════════════════════════
 
@@ -222,18 +255,46 @@ function isStoredFill(x: unknown): x is Fill {
   return f.accepted === undefined || typeof f.accepted === 'boolean';
 }
 
-/** Журнал карточки из хранилища. Чужой владелец, мусор, запрет хранилища — пусто. */
-export function readStoredFills(card: number): Fill[] {
-  if (!(card > 0)) return [];
+/** Отклонённая строка (O-39) — четыре строки, и ничего больше не читается; пустой ключ — мусор. */
+function isStoredDismissal(x: unknown): x is Dismissal {
+  if (!x || typeof x !== 'object') return false;
+  const d = x as Record<string, unknown>;
+  return (
+    typeof d.row === 'string' &&
+    d.row.length > 0 &&
+    typeof d.label === 'string' &&
+    typeof d.says === 'string' &&
+    typeof d.at === 'string'
+  );
+}
+
+/** Что карточка держит в хранилище: журнал и отклонённые строки последнего ответа (O-39). */
+type Stored = { fills: Fill[]; dismissed: Dismissal[] };
+const NOTHING_STORED: Stored = { fills: [], dismissed: [] };
+
+/**
+ * Память карточки из хранилища. Чужой владелец, мусор, запрет хранилища — пусто. Запись без
+ * `dismissed` (сборка до O-39, стенд) читается как журнал без отказов, а не как мусор.
+ */
+function readStored(card: number): Stored {
+  if (!(card > 0)) return NOTHING_STORED;
   try {
     const raw = localStorage.getItem(storageKey(card));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as { v?: unknown; owner?: unknown; fills?: unknown } | null;
+    if (!raw) return NOTHING_STORED;
+    const parsed = JSON.parse(raw) as {
+      v?: unknown;
+      owner?: unknown;
+      fills?: unknown;
+      dismissed?: unknown;
+    } | null;
     if (!parsed || parsed.v !== 1 || parsed.owner !== card || !Array.isArray(parsed.fills))
-      return [];
-    return storedSlice(parsed.fills.filter(isStoredFill));
+      return NOTHING_STORED;
+    return {
+      fills: storedSlice(parsed.fills.filter(isStoredFill)),
+      dismissed: Array.isArray(parsed.dismissed) ? parsed.dismissed.filter(isStoredDismissal) : [],
+    };
   } catch {
-    return [];
+    return NOTHING_STORED;
   }
 }
 
@@ -245,13 +306,15 @@ function slimFill(f: Fill): Fill {
   return out;
 }
 
-function writeStoredFills(card: number, fills: Fill[]): void {
+function writeStored(card: number, stored: Stored): void {
   if (!(card > 0)) return;
   const key = storageKey(card);
+  const { fills, dismissed } = stored;
   const write = (list: Fill[]) =>
-    localStorage.setItem(key, JSON.stringify({ v: 1, owner: card, fills: list }));
+    localStorage.setItem(key, JSON.stringify({ v: 1, owner: card, fills: list, dismissed }));
   try {
-    if (!fills.length) {
+    // Ключ снимается, когда карточке нечего помнить: ни записи, ни отказа (O-39).
+    if (!fills.length && !dismissed.length) {
       localStorage.removeItem(key);
       return;
     }
@@ -287,6 +350,12 @@ type Store = {
   forgetMany: (card: number, ids: string[]) => void;
   /** «Просмотрено»: флаг `accepted` на записях; значения и `before` остаются (откат жив). */
   accept: (card: number, ids: string[]) => void;
+  /** «keep mine» по строке TO DECIDE (O-39): запись по ключу строки, повтор заменяет прежнюю. */
+  dismiss: (card: number, d: Dismissal) => void;
+  /** «put it back»: отказ снят, строка снова работа. */
+  undismiss: (card: number, row: string) => void;
+  /** Новый ответ прогона — отказы прошлого ответа обнуляются, как квитанции (D5). */
+  clearDismissed: (card: number) => void;
   setProposals: (card: number, list: ProposedColourway[]) => void;
   patchProposal: (card: number, id: string, patch: Partial<ProposedColourway>) => void;
   patchSlot: (card: number, id: string, slot: number, patch: Partial<ProposedSlotColour>) => void;
@@ -308,9 +377,18 @@ type Store = {
 function memoryOf(state: Store, card: number): CardMemory {
   const cur = state.byCard[card] ?? EMPTY;
   if (state.hydrated[card] || !(card > 0)) return cur;
+  const stored = readStored(card);
   const have = new Set(cur.fills.map((f) => f.id));
-  const stored = readStoredFills(card).filter((f) => !have.has(f.id));
-  return stored.length ? { ...cur, fills: [...cur.fills, ...stored] } : cur;
+  const fills = stored.fills.filter((f) => !have.has(f.id));
+  // Отказы сеанса побеждают хранимые по ключу строки — тем же законом, что записи (O-39).
+  const rows = new Set(cur.dismissed.map((d) => d.row));
+  const dismissed = stored.dismissed.filter((d) => !rows.has(d.row));
+  if (!fills.length && !dismissed.length) return cur;
+  return {
+    ...cur,
+    fills: fills.length ? [...cur.fills, ...fills] : cur.fills,
+    dismissed: dismissed.length ? [...cur.dismissed, ...dismissed] : cur.dismissed,
+  };
 }
 
 function edit(state: Store, card: number, fn: (m: CardMemory) => CardMemory): Partial<Store> {
@@ -329,8 +407,22 @@ function edit(state: Store, card: number, fn: (m: CardMemory) => CardMemory): Pa
 function editFills(state: Store, card: number, fn: (fills: Fill[]) => Fill[]): Partial<Store> {
   return edit(state, card, (m) => {
     const fills = fn(m.fills);
-    if (fills !== m.fills) writeStoredFills(card, fills);
+    if (fills !== m.fills) writeStored(card, { fills, dismissed: m.dismissed });
     return fills === m.fills ? m : { ...m, fills };
+  });
+}
+
+/** Правка ОТКАЗОВ (O-39) — та же `edit`, плюс запись в хранилище рядом с журналом. */
+function editDismissed(
+  state: Store,
+  card: number,
+  fn: (list: Dismissal[]) => Dismissal[],
+): Partial<Store> {
+  return edit(state, card, (m) => {
+    const dismissed = fn(m.dismissed);
+    if (dismissed === m.dismissed) return m;
+    writeStored(card, { fills: m.fills, dismissed });
+    return { ...m, dismissed };
   });
 }
 
@@ -409,6 +501,19 @@ export const useDraftMemory = create<Store>((set, get) => ({
       }),
     ),
 
+  /* ОТКАЗЫ (O-39): по ключу строки, новейший первым; повтор по тому же ключу заменяет запись. */
+  dismiss: (card, d) =>
+    set((s) => editDismissed(s, card, (list) => [d, ...list.filter((x) => x.row !== d.row)])),
+
+  undismiss: (card, row) =>
+    set((s) =>
+      editDismissed(s, card, (list) =>
+        list.some((x) => x.row === row) ? list.filter((x) => x.row !== row) : list,
+      ),
+    ),
+
+  clearDismissed: (card) => set((s) => editDismissed(s, card, (list) => (list.length ? [] : list))),
+
   /**
    * НОВЫЙ ОТВЕТ ЗАМЕНЯЕТ ПРЕДЛОЖЕНИЯ, НО НЕ КВИТАНЦИИ ПОДТВЕРЖДЁННЫХ.
    *
@@ -421,7 +526,8 @@ export const useDraftMemory = create<Store>((set, get) => ({
     set((s) =>
       edit(s, card, (m) => {
         const kept: Record<string, ColourwayVerdict> = {};
-        for (const [id, v] of Object.entries(m.verdicts)) if (v.status === 'confirmed') kept[id] = v;
+        for (const [id, v] of Object.entries(m.verdicts))
+          if (v.status === 'confirmed') kept[id] = v;
         return { ...m, proposals: list, verdicts: kept };
       }),
     ),
