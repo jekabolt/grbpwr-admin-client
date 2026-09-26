@@ -36,7 +36,7 @@ import { cardFactsContext, composeWords } from './core/card-facts';
 import { useCardFacts } from './head/card-facts-form';
 import { VectorModal } from './modals';
 import { PictureTile } from './picture-tile';
-import { pictureOffersSplit } from './render/model';
+import { benchSides, pictureOffersSplit } from './render/model';
 import { useSplitToInput } from './split-to-input';
 import { ACTIVE_VIEWS, DETAIL_VIEW, normaliseViewKey, viewLabel } from './views';
 import { useDesignWrites } from './use-design-band';
@@ -612,6 +612,9 @@ export function ReferencesSection({
   // контракт его ещё не объявил.
   const draftPending = 'draftPending' in autosave ? !!autosave.draftPending : false;
   const moodMinimum = useMoodMinimumGate();
+  // D-13'': сделанный шаг не запирается — у карточки с флэтами WORDS засевается и при неполном
+  // минимуме мудборда (то же правило, что `stepDone('flat')` в core/chain). GENERATE минимум требует.
+  const flatDone = useMemo(() => benchSides(band).some((s) => !!s.picture), [band]);
   const wordsNow = (garment.field.value ?? '') as string;
   useEffect(() => {
     if (techCardId <= 0) return;
@@ -626,7 +629,7 @@ export function ReferencesSection({
     if (autosave.status === 'off' || draftPending) return;
     // Вход занят (GENERATE сохраняет, CLEAR снимает роли) — слова сейчас не меняются; решим после.
     if (inputBusy) return;
-    if (!moodMinimum.ok) return;
+    if (!moodMinimum.ok && !flatDone) return;
     wordsSession.set(techCardId, composed);
     setValue('garmentDescription', composed.text, { shouldDirty: false });
   }, [
@@ -639,6 +642,7 @@ export function ReferencesSection({
     draftPending,
     inputBusy,
     moodMinimum.ok,
+    flatDone,
     getValues,
     setValue,
   ]);
