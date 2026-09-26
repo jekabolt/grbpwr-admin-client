@@ -22,7 +22,7 @@ import { mediaThumb } from '../../render/model';
  *
  * The empty slot above this door IS the library door (`MediaSlot`: click to browse or upload, ⌘V,
  * drop a file), so this door does not offer the library a second time: two buttons for one thing
- * is what the owner asked us to stop doing (`onmodel/shot-group.tsx` made the same call). What it
+ * is what the owner asked us to stop doing (the ON MODEL shot strip made the same call before C-06 removed it). What it
  * offers is everything the slot cannot reach by itself:
  *
  *   · this card     the card's pictures, renders and cut pieces — the app's own `CardPicturePicker`

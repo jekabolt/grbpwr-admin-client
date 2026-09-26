@@ -35,7 +35,7 @@ import { EMPTY_DRAFT, type WorkflowDef, type WorkflowRun } from '../types';
 const PROMPT = 'prompt';
 const REFS = 'refs';
 const REFS_MAX = 3;
-/** The door's own ceiling on `ask` (`ASK_MAX`, `../../model.ts`). */
+/** The door's own ceiling on `ask` (the old playground's `ASK_MAX`, removed in C-06). */
 const ASK_MAX = 4000;
 
 const NOT_SENT: readonly NotSentItem[] = [

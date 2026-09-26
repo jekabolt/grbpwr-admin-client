@@ -27,7 +27,7 @@ import type {
  * `../workflow-panel.tsx`) draws any of them the same way and knows no wire shape.
  *
  * ⚠ `wire()` IS THE ONE WRITER OF THE REQUEST. The gate, the price text, the inventory and the press
- * all read ITS result — the doctrine of `../model.ts` (`wireParams`): two reconstructions of one paid
+ * all read ITS result — the doctrine the old playground's `wireParams` held (removed in C-06): two reconstructions of one paid
  * run disagree silently, and that cost a week on a neighbouring screen.
  */
 

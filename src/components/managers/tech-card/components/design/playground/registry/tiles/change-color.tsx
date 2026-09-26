@@ -10,7 +10,7 @@ import {
   recolorShape,
   recolourWireColour,
   targetIsStated,
-} from '../../../onmodel/model';
+} from '../../../recolor/model';
 import { EMPTY_RECIPE, hexIsPaintable } from '../../../render/model';
 import { NO_PANTONE, PantoneValue, pantoneColour, slotCounter } from '../../fields';
 import { colourOf, emptyParams, imagesOf, mediaIdsOf, pictureLines, textOf } from '../common';

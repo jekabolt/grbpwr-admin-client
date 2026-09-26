@@ -83,7 +83,7 @@ export function pictureBenchKind(
  * states: a vocabulary spelled per organ drifts silently and by construction. Before this block
  * the rule existed in FOUR spellings — `runKindOf || declaredKind` inside `render/model.ts`, the
  * hand-made recolor subtraction in `kinds-strip.tsx`, `runKindByMediaId` in `artifacts-panel.tsx`
- * and `recolorRuns` in `onmodel/model.ts` — and the fourth missing copy of the FIRST axis is
+ * and `recolorRuns` in `recolor/model.ts` — and the fourth missing copy of the FIRST axis is
  * already recorded as a shipped bug (L-1/L-5).
  */
 export const REPRESENTATIONS = [

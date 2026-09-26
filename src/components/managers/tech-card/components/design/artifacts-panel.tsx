@@ -62,7 +62,7 @@ import { EMPTY_WORD, GROUP_GAP } from './core';
 import { benchDoor } from './doors';
 import { pictureHandle } from './handles';
 import { VectorModal } from './modals';
-import { recolorOutputs } from './onmodel/model';
+import { recolorOutputs } from './recolor/model';
 // K-15 — ПЛИТКИ. Читатель ленты и раппорт прогона берутся у экрана паттернов: одно определение
 // «что такое выход прогона-плитки» на панель и на сам экран, иначе сегмент `patterns` и вкладка
 // PATTERN однажды разойдутся в составе и никто этого не заметит.
