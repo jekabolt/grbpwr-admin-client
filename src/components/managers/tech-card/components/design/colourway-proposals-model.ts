@@ -1,6 +1,8 @@
 import type { common_TechCardColorwayUsage } from 'api/proto-http/admin';
+import { decimalToInput, inputToDecimal } from 'utils/decimal';
 
-import { foldToken, normText, type ConstructionDraft } from './head/construction-draft-model';
+import { wireInt } from '../wire-int';
+import { detailIdentity, normText, type ConstructionDraft } from './head/construction-draft-model';
 
 /**
  * ПРЕДЛОЖЕННЫЕ КОЛОРВЕИ — РАЗБОР, ПРИВЯЗКА И ВОРОТА, БЕЗ ЕДИНОЙ СТРОКИ ЭКРАНА (B-25 круга 20).
@@ -32,7 +34,8 @@ import { foldToken, normText, type ConstructionDraft } from './head/construction
  *
  * `lineKey` — ключ строки карточки, на ряду которой слот ПРАВИЛИ на экране (`patchRow`,
  * `colourway-rows.ts`). С ним слот держится за строку, а не за имя: переименование строки в MATERIAL
- * SLOTS не уводит уже выбранный цвет в «not on the card». У слотов, пришедших от модели, его нет.
+ * SLOTS не уводит уже выбранный цвет в «not on the card», а удаление строки не уводит его на
+ * одноимённую соседку — такой слот стоит «not on the card». У слотов, пришедших от модели, его нет.
  */
 export type ProposedSlotColour = {
   slot: string;
@@ -45,9 +48,11 @@ export type ProposedSlotColour = {
 /**
  * Один предложенный колорвей — ровно то, что нужно вкладке COLORWAYS, и ничего сверх.
  *
- * `id` выведен из СОДЕРЖИМОГО, а не из позиции: список пере-разбирается на каждом ответе, и
- * позиционный ключ переехал бы на соседа, как только одно предложение подтвердили и оно ушло в
- * квитанцию. Тот же закон, что у личности строки предложения.
+ * `id` = ПОКОЛЕНИЕ ОТВЕТА + свёрнутое имя (`cw:<поколение>:<имя>`). Имя — а не позиция: внутри
+ * одного ответа позиционный ключ переехал бы на соседа, как только одно предложение подтвердили и
+ * оно ушло. Поколение — потому что вердикт живёт дольше своего ответа: `setProposals` бережёт
+ * `confirmed` (он называет настоящий продукт), и `rosso` СЛЕДУЮЩЕГО прогона с ключом `cw:rosso`
+ * унаследовал бы чужой «подтверждён» и спрятался, ни разу не показанный (ревью Codex O-44, MAJOR 4).
  */
 export type ProposedColourway = {
   id: string;
@@ -59,22 +64,63 @@ export type ProposedColourway = {
 };
 
 /**
+ * КЛЮЧ УЗНАВАНИЯ ИМЕНИ — буквы и цифры ЛЮБОГО алфавита (`detailIdentity`, O-33). Одна свёртка на
+ * весь блок: личность предложения, привязка слота модели к строке карточки (`proposalRows`).
+ *
+ * ⚠ НЕ `foldToken`. Та держит только латиницу: «подкладка» и «шерсть» сворачивались в одну пустоту,
+ * а «молния 5мм» и «люверс 5мм» — в одно «5». Для латиницы это та же свёртка («Nylon Twill 180 GSM» =
+ * «nylon twill 180gsm»); имя из одних знаков держится своим нормализованным текстом.
+ */
+export function nameKey(name?: string | null): string {
+  return detailIdentity(name);
+}
+
+/**
+ * ПОКОЛЕНИЕ ОТВЕТА, КОГДА ПИСАТЕЛЬ ЕГО НЕ НАЗВАЛ — метка САМОГО ОБЪЕКТА разобранного ответа.
+ *
+ * Ответ разбирается один раз и применяется один раз (`takeParked` отдаёт его ровно одному органу),
+ * поэтому объект черновика и есть поколение: тот же объект — та же метка (повторный разбор того же
+ * ответа не плодит новых личностей), новый ответ — новая. Счётчик поверх часов: две метки в одну
+ * миллисекунду не совпадут. Предложения и вердикты живут в памяти вкладки, не в хранилище, —
+ * уникальности в пределах вкладки достаточно.
+ */
+const answerTags = new WeakMap<object, string>();
+let answerSeq = 0;
+function answerTag(draft: object): string {
+  let tag = answerTags.get(draft);
+  if (!tag) {
+    tag = `${Date.now().toString(36)}${(++answerSeq).toString(36)}`;
+    answerTags.set(draft, tag);
+  }
+  return tag;
+}
+
+/**
  * Разбор списка. Пустое имя И пустые слоты — не предложение вовсе (сервер такие уже выбросил;
  * повтор здесь стоит нуля и закрывает случай «старый сохранённый прогон, разобранный на повторе»).
+ *
+ * `generation` — личность ответа, если писатель её знает (ключ идемпотентности прогона, id строки
+ * реестра); без неё — метка объекта ответа (`answerTag`).
+ *
+ * ⚠ СЛОТЫ НЕ СХЛОПЫВАЮТСЯ ПО ИМЕНИ (ревью Codex O-44, MAJOR 6). Две «zip» у модели — это две молнии
+ * для двух одноимённых строк карточки, и `proposalRows` сажает каждую на следующую свободную строку
+ * с тем же именем. Схлопнутая здесь вторая пропадала до того, как привязка могла её увидеть, — а
+ * латинская свёртка вдобавок схлопывала любые два кириллических имени в одно.
  */
-export function proposedColourways(draft: ConstructionDraft | null): ProposedColourway[] {
+export function proposedColourways(
+  draft: ConstructionDraft | null,
+  generation?: string,
+): ProposedColourway[] {
+  if (!draft) return [];
+  const gen = normText(generation) || answerTag(draft);
   const out: ProposedColourway[] = [];
   const seen = new Set<string>();
-  for (const c of draft?.colourways ?? []) {
+  for (const c of draft.colourways ?? []) {
     const name = normText(c.name);
     const slots: ProposedSlotColour[] = [];
-    const seenSlot = new Set<string>();
     for (const s of c.slots ?? []) {
       const slot = normText(s.slot);
       if (!slot) continue;
-      const fold = foldToken(slot);
-      if (seenSlot.has(fold)) continue;
-      seenSlot.add(fold);
       slots.push({
         slot,
         pantone: normText(s.pantone),
@@ -83,12 +129,12 @@ export function proposedColourways(draft: ConstructionDraft | null): ProposedCol
       });
     }
     if (!name && slots.length === 0) continue;
-    // Личность: свёрнутое имя, а при столкновении — с хвостом порядкового номера. Два
-    // одноимённых предложения — это состояние ненормальное (сервер схлопывает), но выразимое
-    // сохранённым прогоном, и одинаковый ключ у двух карточек React потерял бы одну из них.
-    let id = `cw:${foldToken(name) || 'unnamed'}`;
+    // Два одноимённых предложения в одном ответе — состояние ненормальное (сервер схлопывает), но
+    // выразимое сохранённым прогоном, и одинаковый ключ у двух карточек React потерял бы одну из них.
+    const base = `cw:${gen}:${nameKey(name) || 'unnamed'}`;
+    let id = base;
     let n = 2;
-    while (seen.has(id)) id = `cw:${foldToken(name) || 'unnamed'}:${n++}`;
+    while (seen.has(id)) id = `${base}:${n++}`;
     seen.add(id);
     out.push({
       id,
@@ -116,48 +162,142 @@ export type BoundSlot = ProposedSlotColour & {
 
 /* ─── СТРОКИ РЕЦЕПТА ───────────────────────────────────────────────────────────────────────── */
 
+/** Строка BOM или деталь кроя так, как их отдаёт перечитанная карточка: серверный id и ключ строки. */
+type Keyed = { id?: unknown; lineKey?: string };
+
+/** Серверный id → `line_key`; строки без ключа и без id адреса не дают. */
+function keysById(rows: readonly Keyed[] | null | undefined): Map<number, string> {
+  const m = new Map<number, string>();
+  for (const r of rows ?? []) {
+    const id = wireInt(r.id);
+    if (id > 0 && r.lineKey?.trim()) m.set(id, r.lineKey);
+  }
+  return m;
+}
+
 /**
- * СТРОКИ РЕЦЕПТА ДЛЯ СВЕЖЕГО КОЛОРВЕЯ — И СЛОВО «СВЕЖЕГО» ЗДЕСЬ НЕСУЩЕЕ.
+ * ОДНА СТРОКА СОХРАНЁННОГО РЕЦЕПТА — ТАК, КАК ЕЁ ВЕРНУЛ БЫ НЕТРОНУТОЙ РЕДАКТОР ВКЛАДКИ.
  *
- * `UpdateColorwayRecipe` — ПОЛНАЯ ЗАМЕНА, и у полной замены есть дорогая тонкость: поля,
- * объявленные `optional` (`materialId`, `consumptionSource`, `normMarkerId`), при ОТСУТСТВИИ
- * читаются сервером как «сохрани что было», а при явном значении — как «запиши это». Редактор
- * рецепта возит их дословно ровно поэтому: он правит строки, у которых есть прошлое.
- *
- * У колорвея, созданного секунду назад, прошлого НЕТ — рецепт пуст, сохранять нечего. Поэтому
- * здесь они не посылаются вовсе: это не упрощение чужого правила, а тот же самый ответ на другой
- * вопрос. Из этого же следует, чего здесь нет и не должно быть: НОРМЫ. Расход — свойство
- * изделия, его ставит технолог на вкладке; предложение цвета, привёзшее с собой выдуманный
- * метраж, стало бы себестоимостью, которой никто не считал.
- *
- * `placement` пуст намеренно: он сверяется (trim+lower) с `TechCardOperation.placement`, и
- * выдуманное здесь слово встало бы ложной связью с операцией.
+ * Это `toWire(fromRead(u))` из `colorway-recipe.tsx`, поле в поле: `UpdateColorwayRecipe` — ПОЛНАЯ
+ * ЗАМЕНА, и строка, которую этот блок не знает (пин артикула, норма и её размеры, штамп раскладки,
+ * назначение ткани на деталь), обязана вернуться на сервер ровно такой, какой пришла. Правило каждого
+ * поля — там, у редактора; здесь его копия, и расходиться им нельзя:
+ *   · адрес строки — `bom_line_key`, у старой записи — `bom_item_id`, разрешённый по строкам
+ *     перечитанной карточки (сервер на записи читает только ключ); деталь — тем же путём;
+ *   · `material_id` — ЯВНО, 0 = «наследовать артикул слота»: пропуск сохранил бы старый пин, явный
+ *     повтор пишет тот, что прочитан;
+ *   · `consumption_source` — `'manual'` пишется как `''` (одно написание), `norm_marker_id` — дословно,
+ *     включая отсутствие: отсутствие = «сохрани штамп», и подставленный 0 стёр бы чужой аудит;
+ *   · размерная норма без размера или без числа не посылается (у редактора — пустая ячейка);
+ *   · `line_total`, `size_run_total`, `norm_applied_at` — только чтение, не посылаются никогда.
  */
-export function usagesForColourway(bound: BoundSlot[]): common_TechCardColorwayUsage[] {
-  return bound
-    .filter((s) => !!s.bomLineKey)
-    .map((s) => ({
-      bomLineKey: s.bomLineKey,
-      bomItemIndex: undefined,
-      bomItemId: undefined,
-      placement: '',
-      color: s.colour,
-      pantone: s.pantone,
-      consumption: undefined,
-      quantity: undefined,
-      sizeConsumptions: [],
-      // Строка уровня ИЗДЕЛИЯ: пустой ключ детали — это и есть «носитель нормы слота», а не
-      // назначение материала на деталь кроя.
-      pieceLineKey: '',
-      pieceId: undefined,
-      pieceIndex: undefined,
-      wasteSelvedgePct: undefined,
-      wasteCutPct: undefined,
-      // output-only — сервер считает их сам
-      lineTotal: undefined,
-      sizeRunTotal: undefined,
-      normAppliedAt: undefined,
-    }));
+export function recipeRowAsRead(
+  u: common_TechCardColorwayUsage,
+  bomKeys: ReadonlyMap<number, string>,
+  pieceKeys: ReadonlyMap<number, string>,
+): common_TechCardColorwayUsage {
+  return {
+    bomLineKey: u.bomLineKey || bomKeys.get(wireInt(u.bomItemId)) || '',
+    bomItemIndex: undefined,
+    bomItemId: undefined,
+    materialId: wireInt(u.materialId) || 0,
+    placement: (u.placement || '').trim(),
+    color: (u.color || '').trim(),
+    pantone: (u.pantone || '').trim(),
+    consumption: inputToDecimal(decimalToInput(u.consumption)),
+    quantity: inputToDecimal(decimalToInput(u.quantity)),
+    sizeConsumptions: (u.sizeConsumptions ?? [])
+      .filter((sc) => sc.sizeId && decimalToInput(sc.consumption).trim() !== '')
+      .map((sc) => ({
+        sizeId: sc.sizeId,
+        consumption: inputToDecimal(decimalToInput(sc.consumption)),
+      })),
+    pieceLineKey: u.pieceLineKey || pieceKeys.get(wireInt(u.pieceId)) || '',
+    pieceId: undefined,
+    pieceIndex: undefined,
+    consumptionSource: u.consumptionSource === 'manual' ? '' : u.consumptionSource || '',
+    wasteSelvedgePct: inputToDecimal(decimalToInput(u.wasteSelvedgePct)),
+    wasteCutPct: inputToDecimal(decimalToInput(u.wasteCutPct)),
+    normMarkerId: u.normMarkerId,
+    lineTotal: undefined,
+    sizeRunTotal: undefined,
+    normAppliedAt: undefined,
+  };
+}
+
+/**
+ * НОВАЯ СТРОКА ЦВЕТА СЛОТА — для слота, у которого в рецепте нет строки уровня изделия.
+ *
+ * Прошлого у такой строки нет, поэтому необязательные поля (`materialId`, `consumptionSource`,
+ * `normMarkerId`) не посылаются вовсе: у отсутствующего «сохрани что было» сохранять нечего. НОРМ
+ * здесь нет и быть не должно: расход — свойство изделия, его ставит технолог на вкладке; предложение
+ * цвета с выдуманным метражом стало бы себестоимостью, которой никто не считал. `placement` пуст
+ * намеренно: он сверяется (trim+lower) с `TechCardOperation.placement`, и выдуманное здесь слово
+ * встало бы ложной связью с операцией.
+ */
+function slotColourRow(s: BoundSlot): common_TechCardColorwayUsage {
+  return {
+    bomLineKey: s.bomLineKey,
+    bomItemIndex: undefined,
+    bomItemId: undefined,
+    placement: '',
+    color: s.colour.trim(),
+    pantone: s.pantone.trim(),
+    consumption: undefined,
+    quantity: undefined,
+    sizeConsumptions: [],
+    // Строка уровня ИЗДЕЛИЯ: пустой ключ детали — это и есть «носитель нормы слота», а не
+    // назначение материала на деталь кроя.
+    pieceLineKey: '',
+    pieceId: undefined,
+    pieceIndex: undefined,
+    wasteSelvedgePct: undefined,
+    wasteCutPct: undefined,
+    // output-only — сервер считает их сам
+    lineTotal: undefined,
+    sizeRunTotal: undefined,
+    normAppliedAt: undefined,
+  };
+}
+
+/**
+ * ═══ РЕЦЕПТ КОЛОРВЕЯ = ПЕРЕЧИТАННЫЙ РЕЦЕПТ + ЦВЕТА СЛОТОВ, И НИЧЕГО СВЕРХ (ревью Codex O-44, BLOCKER) ═
+ *
+ * `UpdateColorwayRecipe` — ПОЛНАЯ ЗАМЕНА строк. Раньше сюда уезжали одни строки предложения: колорвей
+ * создан секунду назад, «рецепт пуст». Но между `CreateColorway` и этой записью сохранённый ряд уже
+ * стоит на экране с живой `open ›`, и вкладка COLORWAYS (или соседний человек) успевает записать в
+ * тот же колорвей пин артикула, норму, размеры, назначение ткани на деталь. Перечитанная карточка их
+ * видит, её замок — уже сдвинутый — CAS пропускает, и замена молча стирала чужую работу.
+ *
+ * Теперь основа записи — ПЕРЕЧИТАННЫЙ рецепт этого колорвея, каждая строка которого возвращается
+ * такой, какой пришла (`recipeRowAsRead`). Меняется ровно одно: `color`/`pantone` у строк УРОВНЯ
+ * ИЗДЕЛИЯ (без детали) тех слотов, которые покрашены здесь; у слота, строк которого нет, строка
+ * дописывается (`slotColourRow`). Строки деталей, чужие слоты, нормы и пины не трогаются. Основа и
+ * замок взяты ОДНИМ чтением, поэтому CAS сервера — сторож именно этой основы: запись, успевшая
+ * между чтением и заменой, даст 409, а не молчаливую потерю.
+ *
+ * Строк уровня изделия у слота бывает несколько (одна пуговица на планке, другая на манжете —
+ * сервер держит их по `placement`); цвет слота садится на каждую: предложение говорит про СЛОТ.
+ */
+export function recipeForColourway(
+  existing: readonly common_TechCardColorwayUsage[] | null | undefined,
+  bound: readonly BoundSlot[],
+  card: { bomItems?: readonly Keyed[] | null; pieces?: readonly Keyed[] | null } | null | undefined,
+): common_TechCardColorwayUsage[] {
+  const bomKeys = keysById(card?.bomItems);
+  const pieceKeys = keysById(card?.pieces);
+  const out = (existing ?? []).map((u) => recipeRowAsRead(u, bomKeys, pieceKeys));
+  for (const s of bound) {
+    if (!s.bomLineKey) continue;
+    let carried = false;
+    out.forEach((u, i) => {
+      if (u.bomLineKey !== s.bomLineKey || u.pieceLineKey) return;
+      out[i] = { ...u, color: s.colour.trim(), pantone: s.pantone.trim() };
+      carried = true;
+    });
+    if (!carried) out.push(slotColourRow(s));
+  }
+  return out;
 }
 
 /* ─── ВОРОТА ПОДТВЕРЖДЕНИЯ ─────────────────────────────────────────────────────────────────── */

@@ -39,7 +39,7 @@ import { DRAFTED_CLASS, DraftedPill } from './core/drafted-field';
 import { ColourwayCreatePopover } from './colourway-create';
 import {
   confirmRefusal,
-  usagesForColourway,
+  recipeForColourway,
   type BoundSlot,
   type ProposedColourway,
   type ProposedSlotColour,
@@ -139,12 +139,17 @@ const RULED = '[&>*+*]:border-t [&>*+*]:border-hairline';
  * (react-query 5: `Mutation.execute` ждёт `options.onSuccess`, `refetchQueries` ждёт `fetch`).
  * К этой строке новый колорвей уже лежит в кэше карточки, и `onCreated` отдаёт вердикт стору:
  * синее предложение уходит в тот же кадр, в каком пришёл его сохранённый ряд, а не через шаг
- * рецепта. Если перечитывание упало молча, ряда нет — и предложение остаётся живым: второй
- * `confirm ▸` сервер отвергнет уникальностью `(style, color_code)`, продукт не задвоится.
+ * рецепта. Вердикт несёт ID СОЗДАННОГО продукта, и с этой секунды `confirm ▸` у предложения нет
+ * НИКОГДА: упавшее молча перечитывание (react-query глотает его ошибку, `mutateAsync` всё равно
+ * разрешается) оставляет ряд «created · re-read the card», а не живую вторую дверь создания
+ * (ревью Codex O-44, MAJOR 2).
  *
- * ⚠ ВЕРСИЯ ЗАМКА ЧИТАЕТСЯ ПЕРЕД САМОЙ ЗАПИСЬЮ, А НЕ НА РЕНДЕРЕ. `expected_colorway_version` —
- * это общий `tech_card.lock_version`, и его двигает ЛЮБАЯ запись по карточке, включая только что
- * сделанный нами `CreateColorway`.
+ * ⚠ РЕЦЕПТ И ЕГО ЗАМОК — ИЗ ОДНОГО ЧТЕНИЯ, СДЕЛАННОГО ПЕРЕД САМОЙ ЗАПИСЬЮ. `expected_colorway_version`
+ * — это общий `tech_card.lock_version`, и его двигает ЛЮБАЯ запись по карточке, включая только что
+ * сделанный нами `CreateColorway`. Основа записи — строки ЭТОГО ЖЕ чтения (`recipeForColourway`): в
+ * окно между созданием и записью вкладка COLORWAYS успевает положить в колорвей пин или норму, и
+ * запись из одних строк предложения стёрла бы их полной заменой при честно совпавшем замке (ревью
+ * Codex O-44, BLOCKER). Колорвея в перечитанной карточке нет — основы нет, и запись не делается.
  *
  * ⚠ ОТКАТА У ПОЛОВИНЫ НЕТ, И ОН ЗДЕСЬ БЫЛ БЫ ХУЖЕ САМОЙ ПОЛОВИНЫ. Упавший второй шаг оставляет
  * СОЗДАННЫЙ колорвей без рецепта; удалять его в ответ значило бы стирать продукт из-за сетевой
@@ -163,7 +168,6 @@ function useConfirmColourway(techCardId: number) {
     bound: BoundSlot[],
     onCreated: (colorwayId: number) => void,
   ): Promise<ColourwayVerdict> {
-    const usages = usagesForColourway(bound);
     const res = await create.mutateAsync({
       colorCode: p.colorCode,
       development: {
@@ -190,11 +194,13 @@ function useConfirmColourway(techCardId: number) {
     const colorwayId = wireInt(res?.colorwayId);
     if (!colorwayId) throw new Error('the server created no colourway id');
     onCreated(colorwayId);
-    if (usages.length === 0) return { status: 'confirmed', colorwayId };
+    if (bound.length === 0) return { status: 'confirmed', colorwayId };
     try {
       const fresh = await adminService.GetTechCard({ id: techCardId, vatCountryCode: undefined });
       const ref = fresh.techCard?.colorways?.find((c) => wireInt(c.colorwayId) === colorwayId);
-      const expectedColorwayVersion = ref?.lockVersion ?? fresh.techCard?.lockVersion ?? 0;
+      if (!ref) throw new Error('the re-read card came back without the new colourway');
+      const usages = recipeForColourway(ref.usages, bound, fresh.techCard?.techCard);
+      const expectedColorwayVersion = ref.lockVersion ?? fresh.techCard?.lockVersion ?? 0;
       await recipe.mutateAsync({ colorwayId, expectedColorwayVersion, usages });
     } catch (e) {
       return { status: 'confirmed', colorwayId, recipeFailed: recipeSaveErrorMessage(e) };
@@ -352,7 +358,10 @@ export function ColourwayProposals({
   const { showMessage } = useSnackBarStore();
   const { data: techCard } = useTechCard(techCardId);
   const { confirm, pending } = useConfirmColourway(techCardId);
+  const qc = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
+  /** Идёт ручное перечитывание карточки из ряда «created · re-read the card». */
+  const [rereading, setRereading] = useState(false);
   const [, setParams] = useSearchParams();
   /* Полная библиотека пантонов догружается в чужом такте (первое открытие любого пикера); свотчи
      сохранённых рядов узнают об этом этой подпиской, а не следующим случайным рендером. */
@@ -444,9 +453,12 @@ export function ColourwayProposals({
   );
 
   /**
-   * ПОДТВЕРЖДЁННОЕ ПРЕДЛОЖЕНИЕ ПРЯЧЕТСЯ, КОГДА ЕГО СОХРАНЁННЫЙ РЯД УЖЕ СТОИТ, — и только тогда.
-   * Вердикт `confirmed` без ряда (колорвей удалили на вкладке COLORWAYS, перечитывание не
-   * доехало) не прячет ничего: предложение снова живо, а задвоение закрывает сервер.
+   * ПОДТВЕРЖДЁННОЕ ПРЕДЛОЖЕНИЕ ПРЯЧЕТСЯ, КОГДА ЕГО СОХРАНЁННЫЙ РЯД УЖЕ СТОИТ. До того — перечитывание
+   * карточки упало или ещё не пришло — оно стоит рядом «created · re-read the card» (ветка «СОЗДАН, А
+   * РЯД НЕ ПРИШЁЛ» ниже): продукт уже есть на сервере, и второй `confirm ▸` у него не появляется ни
+   * при каком состоянии кэша (ревью Codex O-44, MAJOR 2). Снимать вердикт `confirmed` нечему: он
+   * принадлежит ЭТОМУ поколению ответа, а следующий ответ приходит с новыми личностями
+   * (`proposedColourways`) и чужого вердикта не видит.
    */
   const savedIds = useMemo(
     () => new Set(saved.map((c) => wireInt(c.colorwayId)).filter((n) => n > 0)),
@@ -467,11 +479,13 @@ export function ColourwayProposals({
   }, [verdicts]);
 
   /**
-   * ПОЛНАЯ БИБЛИОТЕКА ПАНТОНОВ — КОГДА НА ЭКРАНЕ ЕСТЬ КОД, КОТОРОГО НЕТ В ОТОБРАННЫХ 274. Штатно она
-   * догружается при первом открытии пикера (платит тот, кто выбирает цвет); здесь её платит тот,
-   * кто СМОТРИТ на коды: модель называет TCX-номера из всей книги, и без библиотеки их свотчи
-   * рисовались бы пустыми квадратами до первого открытия любого пикера. Ни одного незнакомого кода —
-   * ни одного запроса.
+   * ПОЛНАЯ БИБЛИОТЕКА ПАНТОНОВ — КОГДА НА ЭКРАНЕ ЕСТЬ КОД, КОТОРОГО НЕТ В ОТОБРАННЫХ 274, И НЕ В ТАКТЕ
+   * РЕНДЕРА. Штатно она догружается при первом открытии пикера (платит тот, кто выбирает цвет); здесь
+   * её платит тот, кто СМОТРИТ на коды: модель называет TCX-номера из всей книги, и без библиотеки их
+   * свотчи в сохранённых рядах стояли бы пунктиром (hex у строки рецепта нет; у предложения его даёт
+   * модель). Чанк просится в ПРОСТОЕ браузера (`requestIdleCallback`, а где его нет — таймер):
+   * показ блока его не ждёт, и закрытые пикеры его не просят (ревью Codex O-44, minor). Ни одного
+   * незнакомого кода — ни одного запроса.
    */
   const unknownCode =
     visible.some((p) => p.slots.some((s) => !!s.pantone.trim() && !findPantone(s.pantone))) ||
@@ -481,8 +495,34 @@ export function ColourwayProposals({
         (c.usages ?? []).some((u) => !!(u.pantone ?? '').trim() && !findPantone(u.pantone)),
     );
   useEffect(() => {
-    if (unknownCode) void ensurePantoneLibrary();
+    if (!unknownCode) return;
+    const load = () => void ensurePantoneLibrary();
+    if (typeof window.requestIdleCallback === 'function') {
+      const idle = window.requestIdleCallback(load, { timeout: 4000 });
+      return () => window.cancelIdleCallback(idle);
+    }
+    const timer = window.setTimeout(load, 1500);
+    return () => window.clearTimeout(timer);
   }, [unknownCode]);
+
+  /**
+   * ПЕРЕЧИТАТЬ КАРТОЧКУ — ЕДИНСТВЕННАЯ ДВЕРЬ У СОЗДАННОГО, ЧЕЙ РЯД НЕ ПРИШЁЛ. Ошибка перечитывания
+   * здесь НЕ глотается (`throwOnError`), в отличие от инвалидации после записи: человек нажал и
+   * обязан узнать, что карточка снова не пришла.
+   */
+  const reread = async () => {
+    setRereading(true);
+    try {
+      await qc.refetchQueries(
+        { queryKey: techCardKeys.detail(techCardId) },
+        { throwOnError: true },
+      );
+    } catch {
+      showMessage('the card could not be re-read — try again', 'error');
+    } finally {
+      setRereading(false);
+    }
+  };
 
   /* ⚠ ОДНО ИСКЛЮЧЕНИЕ ИЗ «БЛОК СТОИТ ВСЕГДА»: карточка только для чтения, у которой нет ни
      сохранённых колорвеев, ни предложений. Читателю пустая рамка не сообщает ничего. */
@@ -533,6 +573,58 @@ export function ColourwayProposals({
             ))}
 
             {visible.map((p) => {
+              const verdict = verdicts[p.id];
+              /* ═══ СОЗДАН, А РЯД НЕ ПРИШЁЛ — «created · re-read the card» (ревью Codex O-44, MAJOR 2) ══
+                 Продукт уже на сервере (вердикт несёт его id), а перечитанной карточки с ним нет.
+                 Ни `confirm ▸`, ни полей: создавать второй раз нечего, а править черновик продукта,
+                 который уже есть, — значит править не то. Не синий: это уже не черновик. Когда ряд
+                 придёт, предложение уйдёт само (`visible`). */
+              if (verdict?.status === 'confirmed') {
+                const hex =
+                  p.hex ||
+                  findPantone(p.pantone)?.hex ||
+                  colours.find((c) => c.code === p.colorCode)?.hex ||
+                  undefined;
+                return (
+                  <div
+                    key={p.id}
+                    className='flex flex-wrap items-center gap-x-3 gap-y-1'
+                    data-cw-created={verdict.colorwayId}
+                  >
+                    <Text
+                      component='span'
+                      className={cn(NAME_COL, 'truncate font-bold uppercase')}
+                      title={p.name || undefined}
+                    >
+                      {p.name || 'unnamed'}
+                    </Text>
+                    <span className='flex min-w-0 items-center gap-2'>
+                      <Swatch hex={hex} title={p.pantone || p.colorCode || undefined} />
+                      <Text size='micro' component='span' className='uppercase'>
+                        {p.pantone || p.colorCode || '—'}
+                      </Text>
+                    </span>
+                    <span className='ml-auto flex items-center gap-1.5'>
+                      <Text size='micro' variant='label' component='span' className='normal-case'>
+                        created ·
+                      </Text>
+                      <Button
+                        type='button'
+                        variant='underline'
+                        size='xs'
+                        className='text-labelColor hover:text-textColor'
+                        data-cw-reread={verdict.colorwayId}
+                        disabled={rereading}
+                        loading={rereading}
+                        title='the colourway exists — read the card again to show it here'
+                        onClick={() => void reread()}
+                      >
+                        re-read the card
+                      </Button>
+                    </span>
+                  </div>
+                );
+              }
               // Ряды — все слоты сохранённой карточки, потом слоты модели, которых на ней нет (O-44 п.2).
               const rows = proposalRows(p.slots, card);
               const bound = recipeSlots(rows);

@@ -1,6 +1,6 @@
 import { wireInt } from '../wire-int';
-import type { BoundSlot, ProposedSlotColour } from './colourway-proposals-model';
-import { foldToken, normText } from './head/construction-draft-model';
+import { nameKey, type BoundSlot, type ProposedSlotColour } from './colourway-proposals-model';
+import { normText } from './head/construction-draft-model';
 
 /**
  * ═══ РЯДЫ КОЛОРВЕЯ — ИЗ СЛОТОВ КАРТОЧКИ, А НЕ ИЗ ОТВЕТА МОДЕЛИ (владелец, O-44 п.2) ══════════════
@@ -71,15 +71,6 @@ export function cardSlots(lines: readonly BomLineLike[] | null | undefined): Car
   return FAMILY_ORDER.flatMap((family) => buckets[family]);
 }
 
-/**
- * Ключ узнавания имени — свёртка сервера (`foldToken`), а для имени, которое она сворачивает в пустоту
- * (кириллица, одни знаки), — само имя без регистра. Иначе «нитка» на карточке и «нитка» у модели не
- * узнали бы друг друга, и один слот встал бы двумя рядами: пустым и «not on the card».
- */
-function nameKey(name?: string | null): string {
-  return foldToken(name) || normText(name).toLowerCase();
-}
-
 /* ─── РЯДЫ ПРЕДЛОЖЕНИЯ ─────────────────────────────────────────────────────────────────────────── */
 
 export type ColourwayRow = {
@@ -103,8 +94,14 @@ export type ColourwayRow = {
  * Привязка в два прохода, и порядок проходов — решение:
  *   1. слот, который уже правили на этом экране, несёт `lineKey` своего ряда и садится на него — даже
  *      если строку карточки с тех пор переименовали;
- *   2. остальные садятся по имени на ПЕРВЫЙ ещё не занятый ряд с тем же именем — в порядке таблицы,
- *      то есть так, как их видит человек (правило старого `bindSlots`).
+ *   2. слоты БЕЗ `lineKey` садятся по имени (`nameKey`) на ПЕРВЫЙ ещё не занятый ряд с тем же именем —
+ *      в порядке таблицы, то есть так, как их видит человек (правило старого `bindSlots`). Две «zip» у
+ *      модели и две строки «zip» на карточке — две пары, по очереди (ревью Codex O-44, MAJOR 6).
+ *
+ * ⚠ СЛОТ С `lineKey` ИМЕНИ БОЛЬШЕ НЕ СЛУШАЕТ (ревью Codex O-44, MAJOR 5). Цвет, выбранный на ряду
+ * строки A, принадлежит строке A. Строку A удалили, а рядом стоит одноимённая B — второй проход
+ * посадил бы цвет A на B, и `confirm ▸` записал бы его чужой строке. Такой слот стоит хвостом «not on
+ * the card», пока человек сам не решит, куда его цвет.
  */
 export function proposalRows(
   slots: readonly ProposedSlotColour[],
@@ -124,7 +121,9 @@ export function proposalRows(
     if (entryOf.has(c.lineKey)) continue;
     const want = nameKey(c.name);
     if (!want) continue;
-    const i = slots.findIndex((s, j) => !claimed.has(j) && nameKey(s.slot) === want);
+    const i = slots.findIndex(
+      (s, j) => !claimed.has(j) && !(s.lineKey ?? '').trim() && nameKey(s.slot) === want,
+    );
     if (i < 0) continue;
     entryOf.set(c.lineKey, i);
     claimed.add(i);
@@ -144,13 +143,16 @@ export function proposalRows(
       colour: s?.colour ?? '',
     };
   });
-  const extras = new Set<string>();
+  // ХВОСТ — КАЖДОЕ ВХОЖДЕНИЕ СВОИМ РЯДОМ: две лишние «zip» — два ряда (`extra:1:zip`, `extra:2:zip`),
+  // а не один, съевший второй цвет. Номер вхождения стоит ПЕРЕД именем, поэтому ключи двух разных
+  // рядов не совпадут, какие бы знаки ни несло имя.
+  const occurrences = new Map<string, number>();
   slots.forEach((s, i) => {
     if (claimed.has(i)) return;
-    // Разбор ответа уже схлопнул одноимённые; ключ по индексу — только у имени, которое не сворачивается.
-    const key = `extra:${nameKey(s.slot) || `#${i}`}`;
-    if (extras.has(key)) return;
-    extras.add(key);
+    const name = nameKey(s.slot) || '#';
+    const n = (occurrences.get(name) ?? 0) + 1;
+    occurrences.set(name, n);
+    const key = `extra:${n}:${name}`;
     rows.push({
       key,
       slot: s.slot,
@@ -196,11 +198,12 @@ export function patchRow(
  * «Должна быть возможность выбрать из пантон свотчей и это должно быть сделано удобно». Пикер отдаёт
  * КОД (библиотечный или набранный — уже в хранимом написании, `normalizePantone`), а ряд из него
  * пишет три поля разом: код, hex свотча (у набранного номера дайхауса его нет — пусто, не выдумка)
- * и слова — имя свотча. Слова остаются правимыми; новый выбор их переименовывает, потому что выбор
- * свотча — это и есть называние цвета.
+ * и слова — имя свотча. Слова остаются правимыми; выбор свотча из книги их переименовывает, потому
+ * что выбор свотча — это и есть называние цвета.
  *
- * Очистка забирает слова, только если их написал свотч: слова человека («dyehouse navy») без кода
- * остаются — это его цвет, а не след пикера.
+ * Код, которого в книге нет (очистка или номер дайхауса), имени не несёт — и забирает слова, только
+ * если их написал ПРЕЖНИЙ свотч: «Flame Scarlet» под кодом дайхауса была бы ложью о цвете, а слова
+ * человека («dyehouse navy») остаются — это его цвет, а не след пикера (ревью Codex O-44, minor).
  *
  * `find` — поиск свотча (`findPantone`), переданный снаружи: файл не тянет таблицу пантонов.
  */
@@ -210,13 +213,11 @@ export function pantonePatch(
   find: (code: string) => { name: string; hex: string } | undefined,
 ): Pick<ProposedSlotColour, 'pantone' | 'hex' | 'colour'> {
   const next = code.trim();
-  if (!next) {
-    const wrote = normText(find(prev.pantone)?.name).toLowerCase();
-    const theirs = !!wrote && normText(prev.colour).toLowerCase() === wrote;
-    return { pantone: '', hex: '', colour: theirs ? '' : prev.colour };
-  }
-  const swatch = find(next);
-  return { pantone: next, hex: swatch?.hex ?? '', colour: swatch?.name || prev.colour };
+  const swatch = next ? find(next) : undefined;
+  if (swatch) return { pantone: next, hex: swatch.hex ?? '', colour: swatch.name || prev.colour };
+  const wrote = normText(find(prev.pantone)?.name).toLowerCase();
+  const theirs = !!wrote && normText(prev.colour).toLowerCase() === wrote;
+  return { pantone: next, hex: '', colour: theirs ? '' : prev.colour };
 }
 
 /**
