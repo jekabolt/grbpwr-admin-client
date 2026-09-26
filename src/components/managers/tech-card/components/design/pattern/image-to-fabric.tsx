@@ -188,13 +188,16 @@ export function ImageToFabric({
           disabled={disabled}
         />
         <div className='flex min-w-0 flex-1 flex-col items-start gap-3'>
+          {/* THE SAME MEASURE AS THE ROW `generate` (`xs`, final review m-F): the two paid doors of
+              one block are siblings, and the inert door keeps the size of the live one it stands
+              in for (F-1), so nothing jumps when the gate opens. */}
           <span data-image-extract={sourceId || 'empty'}>
             {disabled ? (
-              <InertDoor label='extract fabric' reason={READ_ONLY_RUN_REASON} size='sm' />
+              <InertDoor label='extract fabric' reason={READ_ONLY_RUN_REASON} />
             ) : gate.ok ? (
               <Button
                 variant='secondary'
-                size='sm'
+                size='xs'
                 disabled={run.isPending}
                 onClick={extract}
                 title='extract a seamless fabric from this photograph — it lands in LAST FABRICS below, bound to no slot'
@@ -202,7 +205,7 @@ export function ImageToFabric({
                 {run.isPending ? 'starting…' : 'extract fabric'}
               </Button>
             ) : (
-              <InertDoor label='extract fabric' reason={gate.reason} size='sm' />
+              <InertDoor label='extract fabric' reason={gate.reason} />
             )}
           </span>
           {fileRefusal && (

@@ -19,6 +19,7 @@ import type {
   common_AdminColorwayRef,
   common_DesignAsset,
   common_DesignAssetBinding,
+  common_DesignPicture,
   common_DesignRun,
   common_DesignRunParams,
   common_MediaFull,
@@ -63,6 +64,8 @@ declare global {
 const TECH_CARD_ID = 42;
 const ROSSO = 11;
 const OLIVE = 12;
+/** Третий колорвей — только в сцене следов (8): на нём стоят три случая финального ревью. */
+const NERO = 13;
 
 /* ─────────────────────────── ткани: PNG из канвы, без сети ─────────────────────────── */
 
@@ -181,11 +184,27 @@ function liveRun(id: number, colorwayId: number, bomItemId: number, name: string
   });
 }
 
+/** Плитка, которую прогон паттерна вернул, — одна строка `pictures` его ряда. */
+function tilePicture(id: number, runId: number, hiddenAt = ''): common_DesignPicture {
+  return wire<common_DesignPicture>({
+    id,
+    techCardId: TECH_CARD_ID,
+    media: media(600 + id, ''),
+    runId,
+    batchId: 0,
+    ordinal: 0,
+    kind: 'pattern',
+    hiddenAt: hiddenAt || undefined,
+    createdAt: '2026-09-23T12:05:00Z',
+  });
+}
+
 /**
- * ПРОГОН, КОНЧИВШИЙСЯ БЕЗ ТКАНИ (ревью M-1): `failed` / `cancelled`, или `done` с кодом посадки
- * (`library_full` — картинка куплена, полке места нет). Метка времени — ЯВНАЯ, а не «сейчас минус
- * N»: след пары сравнивается с `setAt` её привязки (2026-09-21 в стенде), и часы машины пробы не
- * должны решать, виден ли он.
+ * ЗАКОНЧЕННЫЙ ПРОГОН (ревью M-1, финальное ревью M-A / m-B): `failed` / `cancelled`, или `done` —
+ * с кодом посадки (`library_full` — картинка куплена, полке места нет), с кодом РАННЕЙ попытки при
+ * живой картинке (след НЕ ставится) или вовсе без картинки. `extra` — картинки и `archivedAt`.
+ * Метка времени — ЯВНАЯ, а не «сейчас минус N»: след пары сравнивается с `setAt` её привязки
+ * (2026-09-21 в стенде), и часы машины пробы не должны решать, виден ли он.
  */
 function endedRun(
   id: number,
@@ -196,6 +215,7 @@ function endedRun(
   at: string,
   errorCode = '',
   lastError = '',
+  extra: Partial<common_DesignRun> = {},
 ) {
   return wire<common_DesignRun>({
     id,
@@ -221,6 +241,7 @@ function endedRun(
     lastError,
     createdAt: at,
     startedAt: at,
+    ...extra,
   });
 }
 
@@ -404,14 +425,52 @@ function scenario(id: ScenarioId): Scenario {
     //       · ROSSO × outer — упал 09-20, РАНЬШЕ привязки → следа нет (пара одета позже);
     //       · ROSSO × inner — упал, но новее него живой прогон 900 → следа нет, ячейка «making…»;
     //       · «картинка → ткань» — новейший упал (`provider_timeout`) → плитка в голове карусели.
+    //     И ТРЕТИЙ КОЛОРВЕЙ NERO — три случая финального ревью (ещё ОДНА строка следа, всего 4):
+    //       · NERO × outer — `done` с кодом ПЕРВОЙ попытки (`provider_timeout`) и живой картинкой:
+    //         прогон сел, код не сброшен сервером → следа НЕТ (M-A);
+    //       · NERO × inner — новейший прогон упал и АРХИВИРОВАН, под ним старое падение → следа НЕТ:
+    //         старое не всплывает из-под архивного (m-B);
+    //       · NERO × contrast — `done` без единой картинки → след «done, no picture came back» (M-A).
     case 'failed':
       return {
-        colourways: COLOURWAYS,
+        colourways: [...COLOURWAYS, colourway(NERO, 'NERO', '#1c1c1c', '', [])],
         bomItems: [...CLOTH_LINES, ...NON_CLOTH_LINES],
         band: band({
           assets: threeFabrics(),
           assetBindings: [binding(1, ROSSO, 1, 101), binding(2, OLIVE, 1, 102)],
           runs: [
+            endedRun(
+              921,
+              NERO,
+              2,
+              'NERO · inner 2',
+              'failed',
+              '2026-09-24T11:00:00Z',
+              'provider_error',
+              '',
+              { archivedAt: '2026-09-24T12:00:00Z' },
+            ),
+            endedRun(920, NERO, 3, 'NERO · contrast / facing', 'done', '2026-09-24T10:00:00Z'),
+            endedRun(
+              919,
+              NERO,
+              2,
+              'NERO · inner',
+              'failed',
+              '2026-09-23T11:00:00Z',
+              'provider_error',
+            ),
+            endedRun(
+              918,
+              NERO,
+              1,
+              'NERO · outer',
+              'done',
+              '2026-09-23T12:00:00Z',
+              'provider_timeout',
+              'the first attempt timed out after 180 s',
+              { pictures: [tilePicture(9180, 918)] },
+            ),
             endedRun(
               915,
               0,

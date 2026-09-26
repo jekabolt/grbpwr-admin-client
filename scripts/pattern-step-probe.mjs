@@ -20,6 +20,9 @@
 //   8 failed     — (ревью M-1) следы прогонов, не давших ткани: строка под рядом пары (упал,
 //                  отменён, `done` + `library_full`) и пунктирная плитка «картинка → ткань» в голове
 //                  карусели; следа нет у пары, одетой позже падения, и у пары с живым прогоном.
+//                  Финальное ревью (третий колорвей NERO): нет следа у `done` с кодом ранней попытки
+//                  и живой картинкой (M-A) и у пары, чей новейший упавший прогон архивирован, —
+//                  старое падение из-под него не всплывает (m-B); есть след у `done` без картинки.
 //
 // React собирается в РАЗРАБОТОЧНОМ режиме: предупреждения о ключах, об обновлении чужого
 // компонента во время рендера и т.п. существуют только там, а ради них проба и ставится.
@@ -350,7 +353,9 @@ for (const vp of VIEWPORTS) {
       ['блок IMAGE TO FABRIC', '[data-image-to-fabric]', 1],
       ['плиток карусели', '[data-fabric-tile]', 3],
       ['живых generate', '[data-slot-generate="live"]', 5],
-      ['нано-строк «где в рендере» под плитками (U-5)', '[data-fabric-worn-by]', 2],
+      // Обе надетые ткани названы ровно своей парой («ROSSO · outer» на ROSSO × outer), и строка,
+      // повторяющая имя, молчит (m-D). Сама строка проверяется в (6), на «fabric 1».
+      ['нано-строк «где в рендере», повторяющих имя (U-5, m-D)', '[data-fabric-worn-by]', 0],
       ['унаследованных цветов на двери (m-3/U-4)', '[data-slot-colour-inherited]', 2],
     ]);
     await shoot(page, '3-full', vp);
@@ -434,6 +439,16 @@ for (const vp of VIEWPORTS) {
       window.__pattern.calls.filter((c) => c.method === 'SetDesignAssetBinding').map((c) => c.req),
     );
     entry.notes.push(`SetDesignAssetBinding: ${JSON.stringify(writes)}`);
+    // «fabric 1» надета на ROSSO × contrast — имя пары НЕ повторяет имя плитки, строка есть (U-5).
+    await facts(page, entry, [
+      ['нано-строка под «fabric 1» после use for', '[data-fabric-worn-by="103"]', 1],
+      ['нано-строк всего (101/102 повторяют имя — m-D)', '[data-fabric-worn-by]', 1],
+    ]);
+    const wornBy = await page
+      .locator('[data-fabric-worn-by="103"]')
+      .textContent()
+      .catch(() => '(нет)');
+    entry.notes.push(`нано-строка «fabric 1»: ${(wornBy ?? '').trim()}`);
     await shoot(page, '6-use-for-after', vp);
   });
 
@@ -472,7 +487,7 @@ for (const vp of VIEWPORTS) {
   await withPage(vp, '8-failed', async (page, entry) => {
     await mount(page, 'failed');
     await facts(page, entry, [
-      ['следов под рядами', '[data-slot-last-run]', 3],
+      ['следов под рядами', '[data-slot-last-run]', 4],
       ['след ROSSO × contrast', `${cellOf(11, 3)} [data-slot-last-run="911"]`, 1],
       ['след OLIVE × inner (library_full)', `${cellOf(12, 2)} [data-slot-last-run="912"]`, 1],
       [
@@ -482,6 +497,21 @@ for (const vp of VIEWPORTS) {
       ],
       ['нет следа у ROSSO × outer (одет позже)', `${cellOf(11, 1)} [data-slot-last-run]`, 0],
       ['нет следа у ROSSO × inner (живой прогон)', `${cellOf(11, 2)} [data-slot-last-run]`, 0],
+      [
+        'нет следа у NERO × outer (done + код ранней попытки, картинка есть — M-A)',
+        `${cellOf(13, 1)} [data-slot-last-run]`,
+        0,
+      ],
+      [
+        'нет следа у NERO × inner (новейший архивирован, старое не всплывает — m-B)',
+        `${cellOf(13, 2)} [data-slot-last-run]`,
+        0,
+      ],
+      [
+        'след NERO × contrast (done без картинки — M-A)',
+        `${cellOf(13, 3)} [data-slot-last-run="920"]`,
+        1,
+      ],
       ['пунктирная плитка «картинка → ткань»', '[data-fabric-failed="915"]', 1],
     ]);
     const lines = await page

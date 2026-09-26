@@ -655,14 +655,16 @@ function SlotRow({
           </span>
         )}
         {/* THE LAST RUN OF THE PAIR ENDED WITHOUT A FABRIC (review M-1): said once, under the row,
-            in the history's own words, until a newer run or a newer binding answers the pair. */}
+            in the history's own words, until a newer run or a newer binding answers the pair.
+            «last attempt», not «last swatch»: the whole point of the line is that no swatch came
+            of it (final review, m-E). */}
         {trace && traceNote && (
           <span
             data-slot-last-run={trace.id ?? ''}
             className='flex flex-col gap-0.5'
             title={traceNote.full}
           >
-            <Reason>{`last swatch: ${traceNote.line}`}</Reason>
+            <Reason>{`last attempt: ${traceNote.line}`}</Reason>
             {traceAdvice && <Reason>{traceAdvice}</Reason>}
           </span>
         )}

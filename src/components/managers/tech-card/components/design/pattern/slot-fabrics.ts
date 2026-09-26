@@ -29,8 +29,8 @@ import {
 } from '../assets/model';
 import { isRunLive, runOutcomeNote, runStatus } from '../generation/run-state';
 import type { Gate } from '../render/model';
-import { isRunArchived, stampIsSet } from '../visibility';
-import { SEAM_CODE, patternRuns } from './model';
+import { isRunArchived, selectVisiblePictures, stampIsSet } from '../visibility';
+import { patternRuns } from './model';
 
 /**
  * ═══ STEP 3 · PATTERN — THE FABRIC OF EVERY (COLOURWAY, SLOT), AS A PURE MODEL ════════════════
@@ -522,12 +522,27 @@ export function pairsOfAsset(
  *   · новый прогон той же пары (живой или удачный) — новейшим становится он;
  *   · привязка пары НОВЕЕ упавшего прогона (`use for ▸` вернул ткань на слот) — след снимается:
  *     вопрос «чем одета пара» уже отвечен позже, чем прогон упал;
- *   · архивированный прогон следа не оставляет — его человек уже прочёл и убрал.
+ *   · архивированный прогон следа не оставляет — его человек уже прочёл и убрал. ⚠ И более старый
+ *     прогон из-под него НЕ ВСПЛЫВАЕТ (финальное ревью, m-B): новейший прогон адреса выбирается ДО
+ *     фильтра архива, а не после. Иначе архивация свежего падения поднимала бы на экран позавчерашнее
+ *     — то есть жест «прочёл, убери» показывал бы след, который человек уже пережил.
  * Кнопки «закрыть» нет нарочно: след — не отказ двери, а состояние пары, и держится ровно пока
  * правда.
  *
- * `done` С КОДОМ `pattern_not_seamless` — НЕ СЛЕД: ткань села, а шов меряется и говорится на её
- * плитке в карусели (`seamWarningOf`). Всякий другой код на `done` — посадка без ткани.
+ * ═══ `done` — СЛЕД, ТОЛЬКО ЕСЛИ ТКАНИ ПРАВДА НЕТ (финальное ревью, M-A) ═══════════════════════════
+ *
+ * Здесь стояло «всякий код на `done`, кроме шва, — посадка без ткани», и это читало код, которому
+ * на `done` верить нельзя. `error_code` строки прогона пишется после КАЖДОЙ неудачной попытки, а
+ * UPDATE, закрывающий строку `done` (`store/design/queue.go`, CompleteRun), его НЕ сбрасывает:
+ * прогон, у которого первая попытка упала по таймауту, а вторая села, приходит `done` с кодом
+ * ПЕРВОЙ. Под одетой парой вставал след «done, not filed · provider_timeout» — неправда о прогоне,
+ * который ткань как раз дал. Поэтому у `done` след ровно в двух случаях:
+ *   · `error_code = library_full` — ЕДИНСТВЕННЫЙ код, который на `done` пишет сама посадка
+ *     (`keepPatternTx`): картинка куплена, а полке места нет, ассета не заведено;
+ *   · у прогона нет ни одной НЕСКРЫТОЙ картинки — закрыт, а показать нечего.
+ * Шов (`pattern_not_seamless`) сюда больше не доходит вовсе: ткань села, картинка есть, а шов
+ * говорится на её плитке в карусели (`seamWarningOf`). `failed` и `cancelled` — след всегда, как
+ * и было. Статус, которого этот клиент не знает, — не след: «не наш» не значит «пустой».
  *
  * «Новейший» — по `id` (строка ленты заводится вставкой; тот же довод, что у `recentFabrics`), а
  * читается ПЕРВАЯ СТРАНИЦА ленты: прогон, свалившийся с неё, следа не оставит — честный предел.
@@ -536,8 +551,16 @@ export function runLeftNoFabric(run: common_DesignRun): boolean {
   if (isRunLive(run)) return false;
   const status = runStatus(run);
   if (status === 'failed' || status === 'cancelled') return true;
-  const code = (run.errorCode ?? '').trim().toLowerCase();
-  return !!code && code !== SEAM_CODE;
+  if (status !== 'done') return false;
+  return runWasNotFiled(run) || selectVisiblePictures(run.pictures ?? []).length === 0;
+}
+
+/** Код, который посадка (`keepPatternTx`) пишет на `done`, когда полке некуда взять ткань. */
+const LIBRARY_FULL_CODE = 'library_full';
+
+/** `done` с кодом посадки: картинка куплена, на полку не легла (см. `runLeftNoFabric`). */
+function runWasNotFiled(run: common_DesignRun): boolean {
+  return (run.errorCode ?? '').trim().toLowerCase() === LIBRARY_FULL_CODE;
 }
 
 /** Миллисекунды метки провода; `null` — метки нет (четыре написания «нет» — `stampIsSet`). */
@@ -563,20 +586,21 @@ export function runTraces(band: GetDesignBandResponse, drawn: ReadonlySet<string
   let image: common_DesignRun | null = null;
   const seen = new Set<string>();
   let imageSeen = false;
-  const runs = patternRuns(band)
-    .filter((r) => !isRunArchived(r))
-    .sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
+  /* ⚠ НОВЕЙШИЙ ВЫБИРАЕТСЯ ДО ФИЛЬТРА АРХИВА (m-B): адрес «занимает» его новейший прогон, какой бы
+     он ни был, и только потом архивный молчит. Фильтр перед выбором поднимал бы из-под
+     архивированного падения более старое. */
+  const runs = [...patternRuns(band)].sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
   for (const run of runs) {
     const key = pairOfRun(run);
     if (!key) {
       if (imageSeen) continue;
       imageSeen = true;
-      if (runLeftNoFabric(run)) image = run;
+      if (!isRunArchived(run) && runLeftNoFabric(run)) image = run;
       continue;
     }
     if (seen.has(key)) continue;
     seen.add(key);
-    if (!drawn.has(key) || !runLeftNoFabric(run)) continue;
+    if (isRunArchived(run) || !drawn.has(key) || !runLeftNoFabric(run)) continue;
     const [cw, bom] = key.split(':').map(Number);
     const bound = stampMs(bindingOf(band, cw, bom)?.setAt);
     if (bound != null) {
@@ -593,15 +617,23 @@ export function runTraces(band: GetDesignBandResponse, drawn: ReadonlySet<string
 const TRACE_LINE_MAX = 72;
 
 /**
- * ЧЕМ КОНЧИЛСЯ ПРОГОН — СЛОВАМИ ИСТОРИИ (`runOutcomeNote`), и одно добавление: `done` с кодом
+ * ЧЕМ КОНЧИЛСЯ ПРОГОН — СЛОВАМИ ИСТОРИИ (`runOutcomeNote`), и одно добавление: `done`
  * `runOutcomeNote` печатает голым «done» (для истории это верно — картинка есть), а здесь это
- * ровно тот случай, ради которого след заведён: «сделано, но на полку не легло». `full` — целиком,
- * для `title`; `line` — одна строка не длиннее `TRACE_LINE_MAX` (у провайдера бывает 4 000 знаков).
+ * ровно тот случай, ради которого след заведён. Слова у `done` — по тем же двум случаям, что у
+ * `runLeftNoFabric` (M-A): «сделано, но на полку не легло · library_full» или «сделано, а картинки
+ * нет». Прочий код на `done` не печатается: это код ранней попытки, а не исход прогона. `full` —
+ * целиком, для `title`; `line` — одна строка не длиннее `TRACE_LINE_MAX` (у провайдера бывает
+ * 4 000 знаков).
  */
 export function runTraceNote(run: common_DesignRun): { line: string; full: string } {
-  const code = (run.errorCode ?? '').trim();
   const full =
-    runStatus(run) === 'done' && code ? `done, not filed · ${code}` : runOutcomeNote(run);
+    runStatus(run) !== 'done'
+      ? runOutcomeNote(run)
+      : runWasNotFiled(run)
+        ? `done, not filed · ${LIBRARY_FULL_CODE}`
+        : (run.pictures ?? []).length > 0
+          ? 'done, its picture is hidden'
+          : 'done, no picture came back';
   return { line: clip(full.replace(/\s+/g, ' ').trim(), TRACE_LINE_MAX), full };
 }
 

@@ -6,7 +6,7 @@ import type {
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useMemo, useRef, useState, type JSX } from 'react';
+import { useId, useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -493,17 +493,37 @@ function TextureGrid({
   /** Потолок активов — ОДНА функция на всех, кто его называет (разбор у `clothCeiling`). */
   const { full, reason: fullReason } = clothCeiling(band, shelf);
 
+  /**
+   * ═══ ПЛИТКА С ФОКУСОМ НЕ РАЗМОНТИРУЕТСЯ ИЗ-ПОД КЛАВИАТУРЫ (финальное ревью, m-C) ═══════════════
+   *
+   * В свёрнутой сетке плитка за `FOLD_AT` видна, пока она едет с прогоном. Снял её чипом — она
+   * перестаёт ехать, фильтр ниже её выбрасывает, и узел с фокусом уходит из документа: фокус падает
+   * на `body`, а человек с клавиатуры оказывается в начале страницы, не зная, что случилось. Поэтому
+   * плитка, внутри которой фокус (чип, зум, `✕`, сама поверхность), остаётся в сетке, пока он там, —
+   * и сворачивается следом, когда человек ушёл табом дальше: фокус к тому времени уже у соседа.
+   * `focusin`/`focusout` React всплывают, поэтому слушает обёртка плитки, а не каждый её орган.
+   */
+  const [focusedId, setFocusedId] = useState(0);
+
   /* ЧТО ВИДНО В СВЁРНУТОЙ СЕТКЕ: первые `FOLD_AT` плиток порядка — и, вне очереди, всё, что едет
-     с этим прогоном или надето на цель (довод — в шапке сетки). */
+     с этим прогоном или надето на цель (довод — в шапке сетки), и плитка с фокусом (m-C выше). */
   const foldable = shelf.length > FOLD_AT;
   const folded = foldable && !unfolded;
   const visible = folded
     ? ranked.filter((a, i) => {
         const id = a.id ?? 0;
-        return i < FOLD_AT || boundBy.has(id) || ordinalOf(id) > 0 || !!assignedTo?.has(id);
+        return (
+          i < FOLD_AT ||
+          boundBy.has(id) ||
+          ordinalOf(id) > 0 ||
+          !!assignedTo?.has(id) ||
+          (id > 0 && id === focusedId)
+        );
       })
     : ranked;
   const hidden = ranked.length - visible.length;
+  /** Сетка, которую открывает и сворачивает дверь свёртки, — её `aria-controls` (m-C). */
+  const gridId = useId();
 
   /**
    * ПЕРЕКЛЮЧАТЕЛЬ, А НЕ ЗАМЕНА (круг 19, C2). Раньше здесь стояло `fabrics: [эта одна]`, и потолок
@@ -544,170 +564,180 @@ function TextureGrid({
 
   return (
     <>
-      <Tiles min={118}>
-        {visible.map((a) => {
-          const id = a.id ?? 0;
-          const name = assetLabel(a);
-          const url = assetThumb(a);
-          const n = ordinalOf(id);
-          /* STEP 3: на какие слоты текущей цели эта плитка надета — `undefined`, если ни на какие. */
-          const worn = boundBy.get(id);
-          const wornAs = worn ? worn.slotNames.join(' · ') : '';
-          /* ⚠ ПОД ПОКРАСКОЙ «ВЫБРАНА» ЗНАЧИТ «НЕСЁТ ХОТЯ БЫ ОДИН ПОКРАШЕННЫЙ ЦВЕТ». Порядковый
-             номер прогона там ничего не описывает: список тканей собирается из палитры, а не из
-             очерёдности тычков, и нарисованная «1» на плитке была бы номером, которого никто не
-             назначал. */
-          const serves = assignedTo?.get(id) ?? [];
-          const on = armed !== undefined && assignedTo ? serves.length > 0 : n > 0;
-          const pattern = assetIsPattern(a);
-          return (
-            <div
-              key={id}
-              className='flex min-w-0 flex-col gap-1'
-              data-texture={id}
-              data-texture-bound={wornAs || undefined}
-            >
-              <PictureTile
-                url={url}
-                alt={name}
-                aspect={TEXTURE_ASPECT}
-                /* `cover`, не `contain`: у лоскута и у плитки набивки края нет, и поля вокруг
-                   показывали бы фактуру мельче, чем она есть. */
-                fit='cover'
-                selected={on}
-                className='w-full bg-bgColor'
-                /* ⚠ ЯРЛЫК — ТРЕТИЙ НОСИТЕЛЬ СОСТОЯНИЯ, а не украшение: заливка чипа и толщина
-                   рамки — оба зрительные, и на миниатюре набивки рамка читается плохо.
-                   ⚠ И ТЕПЕРЬ ОН НЕСЁТ ЕЩЁ ОДИН ФАКТ — ПОРЯДКОВЫЙ НОМЕР. Здесь стояло слово
-                   «in this run», и при одной ткани оно говорило ВСЁ, что было правдой. При
-                   нескольких (круг 19, C2) правды стало больше: промпт зовёт первую CLOTH 1 и
-                   скаляры цвета относит К НЕЙ (`renderprompt.go`), то есть порядок — это ДЕНЬГИ,
-                   а не оформление. Порядок, который нельзя увидеть, нельзя и исправить: человек
-                   снял бы не ту ткань, чтобы поменять их местами. Номер — тот же носитель («есть
-                   ярлык / нет ярлыка»), только говорящий вторую половину. */
-                badge={
-                  serves.length > 0 ? (
-                    /* ПЛИТКА ГОВОРИТ, КАКИЕ ПОКРАШЕННЫЕ ЦВЕТА ОНА НОСИТ, — ОБРАЗЦАМИ, а не
-                       числом: числу «2» на этой сетке уже назначен другой смысл (порядок в
-                       прогоне), и одно место с двумя значениями — это ведро под двумя смыслами. */
-                    <span className='flex items-center gap-0.5'>
-                      {serves.map((hex) => (
-                        <span
-                          key={hex}
-                          data-texture-serves={hex}
-                          className='block h-2 w-2 border border-textColor'
-                          style={{ background: hex }}
-                        />
-                      ))}
-                    </span>
-                  ) : on ? (
-                    /* «in» — the mark of the mockup; with several cloths the ORDER is money (the
-                       prompt calls the first CLOTH 1), so the number rides with it. */
-                    chosen.length > 1 ? (
-                      `in · ${n}`
-                    ) : (
-                      'in'
-                    )
-                  ) : undefined
-                }
-                /* ПОВЕРХНОСТЬ ВЫБИРАЕТ — ЖЕСТОМ МЫШИ. Объявленный орган — чип ниже; довод целиком
-                   в шапке файла. */
-                onOpen={disabled ? undefined : () => pick(id)}
-                /* The role corner of the mockup's tile — «cloth» / «pattern», bottom left; a tile
-                   bound to a slot of this target wears the slot one storey above it (STEP 3) —
-                   the same corner organ the PATTERN step prints «in render» with. */
-                children={
-                  <>
-                    {worn && (
-                      <CornerLabel at='bl' stack>
-                        {wornAs}
-                      </CornerLabel>
-                    )}
-                    <RoleLabel>{pattern ? 'pattern' : 'cloth'}</RoleLabel>
-                  </>
-                }
-                gallery={
-                  url
-                    ? { src: assetFull(a) || url, thumbnail: url, type: 'image', alt: name }
-                    : undefined
-                }
-                /* ⚠ `✕` ЗДЕСЬ — «УБРАТЬ ТКАНЬ С КАРТОЧКИ», а не «снять с этого прогона». Второе
-                   делается повторным нажатием на чип. Приехало из ленты входа (E-7) вместе со
-                   своим вопросом: убрать эту дверь было бы дешевле — и оставило бы единственного
-                   писателя тканей БЕЗ отката, потому что снять ткань больше негде во всей админке. */
-                onRemove={
-                  disabled
-                    ? undefined
-                    : {
-                        onClick: () => setPendingRemove(a),
-                        ariaLabel: `remove ${name} from this card`,
-                        title: pattern
-                          ? 'remove this pattern from the card'
-                          : 'remove this cloth from the card',
-                      }
-                }
-              />
-              {/* ОБЪЯВЛЕННЫЙ ОРГАН ВЫБОРА: имя ткани, в табе, с заливкой в состоянии. */}
-              <Chip
-                nonForm
-                selected={on}
-                pressed={on}
-                disabled={disabled}
-                data-texture-pick={id}
-                title={[
-                  armed
-                    ? `make ${name} the cloth of the parts painted ${armed}`
-                    : serves.length > 0
-                      ? `${name} is the cloth of ${serves.join(', ')} on the colour map — change it on that row below`
-                      : on
-                        ? `cloth ${n} of this run — press again to drop it. ${name} stays on the card`
-                        : `add ${name} to this run as cloth ${chosen.length + 1}`,
-                  /* Кто надел её и где это меняют — одна фраза, а не новая кнопка. */
-                  worn ? `bound to ${wornAs} of this colourway on the PATTERN step` : '',
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-                onClick={() => pick(id)}
+      {/* Обёртка — ради `id`, на который указывает `aria-controls` двери свёртки: `Tiles` закрытым
+          списком пропов `id` не принимает, а блочный `div` вокруг грида раскладку не трогает. */}
+      <div id={gridId} data-texture-grid=''>
+        <Tiles min={118}>
+          {visible.map((a) => {
+            const id = a.id ?? 0;
+            const name = assetLabel(a);
+            const url = assetThumb(a);
+            const n = ordinalOf(id);
+            /* STEP 3: на какие слоты текущей цели эта плитка надета — `undefined`, если ни на какие. */
+            const worn = boundBy.get(id);
+            const wornAs = worn ? worn.slotNames.join(' · ') : '';
+            /* ⚠ ПОД ПОКРАСКОЙ «ВЫБРАНА» ЗНАЧИТ «НЕСЁТ ХОТЯ БЫ ОДИН ПОКРАШЕННЫЙ ЦВЕТ». Порядковый
+               номер прогона там ничего не описывает: список тканей собирается из палитры, а не из
+               очерёдности тычков, и нарисованная «1» на плитке была бы номером, которого никто не
+               назначал. */
+            const serves = assignedTo?.get(id) ?? [];
+            const on = armed !== undefined && assignedTo ? serves.length > 0 : n > 0;
+            const pattern = assetIsPattern(a);
+            return (
+              <div
+                key={id}
+                className='flex min-w-0 flex-col gap-1'
+                data-texture={id}
+                data-texture-bound={wornAs || undefined}
+                onFocus={() => setFocusedId(id)}
+                onBlur={(e) => {
+                  // Фокус ушёл к другому органу ЭТОЙ ЖЕ плитки — она всё ещё «в руках».
+                  if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+                  setFocusedId((current) => (current === id ? 0 : current));
+                }}
               >
-                <span className='block max-w-full truncate'>{name}</span>
-              </Chip>
-              {/* ВТОРАЯ СТРОКА ТОЛЬКО ТОГДА, КОГДА ЕЙ ЕСТЬ ЧТО СКАЗАТЬ. Род называется словом лишь
-                  у паттерна: ткань — умолчание этой сетки, а на глаз лоскут от набивки не отличить.
-                  Раппорт — настоящий факт, и он тоже не читается с картинки. */}
-              {pattern && (
-                <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
-                  {['pattern', a.repeatMm ? `${a.repeatMm} mm` : ''].filter(Boolean).join(' · ')}
-                </Text>
-              )}
+                <PictureTile
+                  url={url}
+                  alt={name}
+                  aspect={TEXTURE_ASPECT}
+                  /* `cover`, не `contain`: у лоскута и у плитки набивки края нет, и поля вокруг
+                     показывали бы фактуру мельче, чем она есть. */
+                  fit='cover'
+                  selected={on}
+                  className='w-full bg-bgColor'
+                  /* ⚠ ЯРЛЫК — ТРЕТИЙ НОСИТЕЛЬ СОСТОЯНИЯ, а не украшение: заливка чипа и толщина
+                     рамки — оба зрительные, и на миниатюре набивки рамка читается плохо.
+                     ⚠ И ТЕПЕРЬ ОН НЕСЁТ ЕЩЁ ОДИН ФАКТ — ПОРЯДКОВЫЙ НОМЕР. Здесь стояло слово
+                     «in this run», и при одной ткани оно говорило ВСЁ, что было правдой. При
+                     нескольких (круг 19, C2) правды стало больше: промпт зовёт первую CLOTH 1 и
+                     скаляры цвета относит К НЕЙ (`renderprompt.go`), то есть порядок — это ДЕНЬГИ,
+                     а не оформление. Порядок, который нельзя увидеть, нельзя и исправить: человек
+                     снял бы не ту ткань, чтобы поменять их местами. Номер — тот же носитель («есть
+                     ярлык / нет ярлыка»), только говорящий вторую половину. */
+                  badge={
+                    serves.length > 0 ? (
+                      /* ПЛИТКА ГОВОРИТ, КАКИЕ ПОКРАШЕННЫЕ ЦВЕТА ОНА НОСИТ, — ОБРАЗЦАМИ, а не
+                         числом: числу «2» на этой сетке уже назначен другой смысл (порядок в
+                         прогоне), и одно место с двумя значениями — это ведро под двумя смыслами. */
+                      <span className='flex items-center gap-0.5'>
+                        {serves.map((hex) => (
+                          <span
+                            key={hex}
+                            data-texture-serves={hex}
+                            className='block h-2 w-2 border border-textColor'
+                            style={{ background: hex }}
+                          />
+                        ))}
+                      </span>
+                    ) : on ? (
+                      /* «in» — the mark of the mockup; with several cloths the ORDER is money (the
+                         prompt calls the first CLOTH 1), so the number rides with it. */
+                      chosen.length > 1 ? (
+                        `in · ${n}`
+                      ) : (
+                        'in'
+                      )
+                    ) : undefined
+                  }
+                  /* ПОВЕРХНОСТЬ ВЫБИРАЕТ — ЖЕСТОМ МЫШИ. Объявленный орган — чип ниже; довод целиком
+                     в шапке файла. */
+                  onOpen={disabled ? undefined : () => pick(id)}
+                  /* The role corner of the mockup's tile — «cloth» / «pattern», bottom left; a tile
+                     bound to a slot of this target wears the slot one storey above it (STEP 3) —
+                     the same corner organ the PATTERN step prints «in render» with. */
+                  children={
+                    <>
+                      {worn && (
+                        <CornerLabel at='bl' stack>
+                          {wornAs}
+                        </CornerLabel>
+                      )}
+                      <RoleLabel>{pattern ? 'pattern' : 'cloth'}</RoleLabel>
+                    </>
+                  }
+                  gallery={
+                    url
+                      ? { src: assetFull(a) || url, thumbnail: url, type: 'image', alt: name }
+                      : undefined
+                  }
+                  /* ⚠ `✕` ЗДЕСЬ — «УБРАТЬ ТКАНЬ С КАРТОЧКИ», а не «снять с этого прогона». Второе
+                     делается повторным нажатием на чип. Приехало из ленты входа (E-7) вместе со
+                     своим вопросом: убрать эту дверь было бы дешевле — и оставило бы единственного
+                     писателя тканей БЕЗ отката, потому что снять ткань больше негде во всей админке. */
+                  onRemove={
+                    disabled
+                      ? undefined
+                      : {
+                          onClick: () => setPendingRemove(a),
+                          ariaLabel: `remove ${name} from this card`,
+                          title: pattern
+                            ? 'remove this pattern from the card'
+                            : 'remove this cloth from the card',
+                        }
+                  }
+                />
+                {/* ОБЪЯВЛЕННЫЙ ОРГАН ВЫБОРА: имя ткани, в табе, с заливкой в состоянии. */}
+                <Chip
+                  nonForm
+                  selected={on}
+                  pressed={on}
+                  disabled={disabled}
+                  data-texture-pick={id}
+                  title={[
+                    armed
+                      ? `make ${name} the cloth of the parts painted ${armed}`
+                      : serves.length > 0
+                        ? `${name} is the cloth of ${serves.join(', ')} on the colour map — change it on that row below`
+                        : on
+                          ? `cloth ${n} of this run — press again to drop it. ${name} stays on the card`
+                          : `add ${name} to this run as cloth ${chosen.length + 1}`,
+                    /* Кто надел её и где это меняют — одна фраза, а не новая кнопка. */
+                    worn ? `bound to ${wornAs} of this colourway on the PATTERN step` : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                  onClick={() => pick(id)}
+                >
+                  <span className='block max-w-full truncate'>{name}</span>
+                </Chip>
+                {/* ВТОРАЯ СТРОКА ТОЛЬКО ТОГДА, КОГДА ЕЙ ЕСТЬ ЧТО СКАЗАТЬ. Род называется словом лишь
+                    у паттерна: ткань — умолчание этой сетки, а на глаз лоскут от набивки не отличить.
+                    Раппорт — настоящий факт, и он тоже не читается с картинки. */}
+                {pattern && (
+                  <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
+                    {['pattern', a.repeatMm ? `${a.repeatMm} mm` : ''].filter(Boolean).join(' · ')}
+                  </Text>
+                )}
+              </div>
+            );
+          })}
+
+          {/* ═══ КВАДРАТ ДВЕРИ — ТОЛЬКО НА ПУСТОЙ ПОЛКЕ (r3 п.22) ═══════════════════════════════
+              Владелец: «при выбранном паттерне плейсхолдер «+ CLOTH» остаётся — зачем». Незачем:
+              на карточке, где ткань уже принесена, пустой кадр вклинивался МЕЖДУ выбранной тканью и
+              квадратом цвета и читался как третий предмет ряда. Когда полка непуста, та же дверь
+              стоит тихой кнопкой в заголовке группы (`ClothIntake variant='door'`) — одна дверь, два
+              лица, и ни одного места, где её нет вовсе. */}
+          {!disabled && shelf.length === 0 && (
+            <div className='flex min-w-0 flex-col gap-1' data-texture-add={full ? 'inert' : 'live'}>
+              <ClothIntake
+                band={band}
+                techCardId={techCardId}
+                shelf={shelf}
+                variant='slot'
+                onMakePattern={onMakePattern}
+              />
             </div>
-          );
-        })}
+          )}
 
-        {/* ═══ КВАДРАТ ДВЕРИ — ТОЛЬКО НА ПУСТОЙ ПОЛКЕ (r3 п.22) ═══════════════════════════════
-            Владелец: «при выбранном паттерне плейсхолдер «+ CLOTH» остаётся — зачем». Незачем:
-            на карточке, где ткань уже принесена, пустой кадр вклинивался МЕЖДУ выбранной тканью и
-            квадратом цвета и читался как третий предмет ряда. Когда полка непуста, та же дверь
-            стоит тихой кнопкой в заголовке группы (`ClothIntake variant='door'`) — одна дверь, два
-            лица, и ни одного места, где её нет вовсе. */}
-        {!disabled && shelf.length === 0 && (
-          <div className='flex min-w-0 flex-col gap-1' data-texture-add={full ? 'inert' : 'live'}>
-            <ClothIntake
-              band={band}
-              techCardId={techCardId}
-              shelf={shelf}
-              variant='slot'
-              onMakePattern={onMakePattern}
-            />
-          </div>
-        )}
-
-        {/* B-22 · ПЛИТКА ЦВЕТА — ПОСЛЕДНЯЯ КЛЕТКА ЭТОЙ ЖЕ СЕТКИ. Довод целиком у пропа `trailing`
-            выше; короткая версия: одна дорожка на всех — единственный способ, которым квадрат
-            цвета и квадрат ткани гарантированно одного роста. Стоит ПОСЛЕ двери `+ texture`,
-            поэтому на пустой карточке два пустых кадра — `+ texture` и `+ colour` — оказываются
-            соседями и читаются как пара, чем они и являются («a texture, a colour, or both»). */}
-        {trailing}
-      </Tiles>
+          {/* B-22 · ПЛИТКА ЦВЕТА — ПОСЛЕДНЯЯ КЛЕТКА ЭТОЙ ЖЕ СЕТКИ. Довод целиком у пропа `trailing`
+              выше; короткая версия: одна дорожка на всех — единственный способ, которым квадрат
+              цвета и квадрат ткани гарантированно одного роста. Стоит ПОСЛЕ двери `+ texture`,
+              поэтому на пустой карточке два пустых кадра — `+ texture` и `+ colour` — оказываются
+              соседями и читаются как пара, чем они и являются («a texture, a colour, or both»). */}
+          {trailing}
+        </Tiles>
+      </div>
 
       {/* ═══ ОДНА ДВЕРЬ СВЁРТКИ (STEP 3) — в двух положениях, как `show all` ↔ `paged again`
           истории. Рисуется, только когда ей есть что открыть или что свернуть: полка, где всё
@@ -719,6 +749,7 @@ function TextureGrid({
             size='xs'
             data-texture-fold={folded ? 'folded' : 'open'}
             aria-expanded={!folded}
+            aria-controls={gridId}
             onClick={() => setUnfolded(folded)}
             title={
               folded
