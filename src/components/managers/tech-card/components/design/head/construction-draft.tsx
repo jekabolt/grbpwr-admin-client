@@ -229,6 +229,17 @@ type Receipt = 'added' | 'replaced' | 'restored';
 const ROW_HOVER = 'hover:bg-pageBg';
 
 /**
+ * ЛИНЕЙКА ТОЛЬКО МЕЖДУ РЯДАМИ (O-48, второй проход; DESIGN.md, «The Between-Rows Rule»). Владелец:
+ * «после последнего чилда в списке не делать подчеркивание». Ряд любого списка органа — TO DECIDE,
+ * WRITTEN (записи и возвраты — один список), DISMISSED, HINTS — рисует волосяную черту, только
+ * когда СРАЗУ за ним стоит другой ряд (`data-c19-list-row` — эта метка). Прогон рядов кончается
+ * воздухом у первого не-ряда: полосы LOCKED и кнопки записи под TO DECIDE, `undo all` под WRITTEN,
+ * линейки следующей группы под DISMISSED, конца списка под HINTS. `last:` здесь не годится: ряды
+ * DISMISSED стоят в одном родителе с линейками групп, а за рядами TO DECIDE и WRITTEN идут не-ряды.
+ */
+const LIST_ROW = 'border-b border-hairline [&:not(:has(+[data-c19-list-row]))]:border-b-0';
+
+/**
  * ЦЕНА ЭТОГО ПРОГОНА — И БОЛЬШЕ НИЧЕГО (T-12). Владелец: «нам надо показывать только цену
  * генерации и все».
  *
@@ -2156,7 +2167,8 @@ export function ConstructionDraft({
                     {missing.map((line, i) => (
                       <div
                         key={`${i}:${line}`}
-                        className={`border-b border-hairline py-1 ${ROW_HOVER}`}
+                        data-c19-list-row=''
+                        className={`${LIST_ROW} py-1 ${ROW_HOVER}`}
                       >
                         <Text size='micro' component='p' className='break-words'>
                           {line}
@@ -2236,7 +2248,8 @@ function DecideRow({
   const lineName = row.write.kind === 'bom' ? row.write.line.name : row.label;
   return (
     <div
-      className='border-b border-hairline py-1.5'
+      className={`${LIST_ROW} py-1.5`}
+      data-c19-list-row=''
       data-c19-draft-row={row.id}
       data-state={row.state}
     >
@@ -2461,7 +2474,8 @@ function WrittenRow({
 }): JSX.Element {
   return (
     <div
-      className={`flex flex-wrap items-center gap-2 border-b border-hairline py-1 ${ROW_HOVER}`}
+      className={`flex flex-wrap items-center gap-2 ${LIST_ROW} py-1 ${ROW_HOVER}`}
+      data-c19-list-row=''
       data-c19-fill={fill.id}
     >
       <Text
@@ -2545,7 +2559,8 @@ function RestoreRow({
   const fill = offer.fill;
   return (
     <div
-      className={`flex flex-wrap items-center gap-2 border-b border-hairline py-1 ${ROW_HOVER}`}
+      className={`flex flex-wrap items-center gap-2 ${LIST_ROW} py-1 ${ROW_HOVER}`}
+      data-c19-list-row=''
       data-c19-restore-row={fill.id}
       data-c19-restore-from={String(offer.from)}
     >
@@ -2617,7 +2632,8 @@ function KeptRow({
 }): JSX.Element {
   return (
     <div
-      className={`flex flex-wrap items-center gap-2 border-b border-hairline py-1 ${ROW_HOVER}`}
+      className={`flex flex-wrap items-center gap-2 ${LIST_ROW} py-1 ${ROW_HOVER}`}
+      data-c19-list-row=''
       data-c19-draft-kept={entry.row}
     >
       <Text

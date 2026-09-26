@@ -991,6 +991,20 @@ function Ramp({
 }
 
 /**
+ * ЛИНЕЙКА РЕЙКИ — ТОЛЬКО МЕЖДУ РЯДАМИ (O-48, второй проход; DESIGN.md, «The Between-Rows Rule»).
+ * Владелец: «после последнего чилда в списке не делать подчеркивание». Ряд рейки — регулятор, слот
+ * шва, строка слоя, строка области — рисует волосяную черту, только когда СРАЗУ за ним стоит
+ * другой ряд (`data-rail-row` — эта метка). Прогон рядов кончается воздухом у первого не-ряда:
+ * чипа `construction`, чипа `remove template`, кнопок области, двери `+ picture`, конца группы.
+ *
+ * ⚠ ДВЕ ЧЕРТЫ ОСТАЮТСЯ БЕЗУСЛОВНЫМИ, И ЭТО НЕ ПРОПУСК: они не делят список, а ГРУППИРУЮТ органы.
+ * Черта под рядом цвета отделяет половину «ink» от половины «seam» (слот шва стоит за ней
+ * всегда), а общая черта сросшейся пары «thread + stitch» закрывает пару (Q-7) — довод у самого
+ * слота шва.
+ */
+const RAIL_ROW = 'border-b border-hairline [&:not(:has(+[data-rail-row]))]:border-b-0';
+
+/**
  * ОДИН РЕГУЛЯТОР НА ВСЕ ЧИСЛА РЕЙКИ: имя, точное поле, ползунок, образец, строка объяснения.
  *
  * Пять почти одинаковых рядов, написанных руками, — это пять мест, где грамматика разъедется: у
@@ -1054,7 +1068,7 @@ function Regulator({
   const shown = Math.round(value * 100) / 100;
   const spoken = unit === '%' ? 'per cent' : 'plate pixels';
   return (
-    <div className={cn('py-1', !fused && 'border-b border-hairline')} data-regulator={probe}>
+    <div className={cn('py-1', !fused && RAIL_ROW)} data-rail-row='' data-regulator={probe}>
       <div className='flex items-center gap-1.5'>
         <Text size='nano' variant='label' component='span' className='shrink-0 uppercase'>
           {name}
@@ -1157,7 +1171,11 @@ function LayerRow({
   sub: string;
 }) {
   return (
-    <div className='flex items-center gap-2 border-b border-hairline py-1'>
+    <div
+      className={cn('flex items-center gap-2 py-1', RAIL_ROW)}
+      data-rail-row=''
+      data-layer-row={name}
+    >
       <button
         type='button'
         onClick={onToggle}
@@ -1644,7 +1662,10 @@ export function VectorBrushRail(p: RailProps) {
               // третья ступень линейки DESIGN.md. Без неё название одной строки читалось как
               // подпись к образцу СЛЕДУЮЩЕЙ: у строки две высоты, и глазу нужно, где она кончается.
               // Заголовок семьи стоит на ступень выше (#ccc) — деление групп крупнее деления строк.
-              itemClassName='border-b border-hairline data-[state=checked]:bg-textColor data-[state=checked]:text-bgColor data-[state=checked]:data-[highlighted]:bg-textColor data-[state=checked]:data-[highlighted]:text-bgColor'
+              // ПОСЛЕДНИЙ ВИД СЕМЬИ КОНЧАЕТСЯ ВОЗДУХОМ (O-48): черта стоит только МЕЖДУ строками, а
+              // строки семьи — единственные соседи в её `Select.Group` под заголовком, поэтому
+              // хватает `last:` — и последний вид всего списка тоже без черты.
+              itemClassName='border-b border-hairline last:border-b-0 data-[state=checked]:bg-textColor data-[state=checked]:text-bgColor data-[state=checked]:data-[highlighted]:bg-textColor data-[state=checked]:data-[highlighted]:text-bgColor'
               value={curStitch.key}
               items={STITCHES.map((st) => ({
                 value: st.key,
@@ -1816,8 +1837,19 @@ export function VectorBrushRail(p: RailProps) {
             запрещает прямо. По той же причине у пары ОДНА строка объяснения на двоих, под нижним
             рядом: два почти одинаковых определения подряд читаются как повтор, а не как пара.
 
-            У КРУГЛОГО НИБА СТЕЖКОВ НЕ БЫВАЕТ — там ряд остаётся один и черту закрывает сам. */}
-        <div data-seam={sizingNib ? undefined : ''}>
+            У КРУГЛОГО НИБА СТЕЖКОВ НЕ БЫВАЕТ — там ряд остаётся один, обычным рядом рейки.
+
+            ЧЕРТУ СЛОТА РИСУЕТ САМ СЛОТ, А НЕ ЕГО НИЖНИЙ РЕГУЛЯТОР (O-48, второй проход). Регулятор
+            рисует черту, только когда за ним стоит ряд, а за нижним рядом слота внутри слота нет
+            ничего, — поэтому черта живёт на обёртке, в тех же пикселях. Одинокий ниб — обычный ряд:
+            черта стоит, пока ниже идёт жёсткость, и уходит в конце группы. Общая черта ПАРЫ стоит
+            всегда: она группирует пару, а не делит список, и чип `construction` под ней отделён
+            именно ею. */}
+        <div
+          data-seam={sizingNib ? undefined : ''}
+          data-rail-row=''
+          className={sizingNib ? RAIL_ROW : 'border-b border-hairline'}
+        >
           <Regulator
             name={sizingNib ? 'nib' : 'thread'}
             hint={sizingNib ? 'the diameter of the round tip, in plate pixels' : undefined}
@@ -1975,8 +2007,12 @@ export function VectorBrushRail(p: RailProps) {
             sub={`${p.picturesCount} placed · moves for ever`}
           />
         )}
+        {/* ДВЕРЬ «+ picture» — ШАГ ОТ ПОСЛЕДНЕЙ СТРОКИ СЛОЯ (O-48): список слоёв кончается
+            воздухом, и дверь, добавляющая в него строку, стоит от него на `mt-4` (16px), как все
+            двери под списками. Строка `lines` есть всегда, так что зазор безусловный; органы
+            картинки в руке, встающие на место двери, стоят там же. */}
         {!p.colourMode && (
-          <div className='mt-1.5 flex flex-col gap-1' data-picture-rail={p.picturesCount}>
+          <div className='mt-4 flex flex-col gap-1' data-picture-rail={p.picturesCount}>
             {p.pictureAt === null ? (
               /* ДВЕРЬ ОДНА НА ТРИ ЖЕСТА: библиотека, ⌘V и бросок — это `MediaSlot` целиком, и
                  подпись под ним их называет. Ростом вдвое ниже шаблона: шаблон один и он про
@@ -2378,7 +2414,8 @@ export function VectorBrushRail(p: RailProps) {
         <div>
           <GroupLabel flush>selection</GroupLabel>
           <div
-            className='flex items-center gap-1.5 border-b border-hairline py-1'
+            className={cn('flex items-center gap-1.5 py-1', RAIL_ROW)}
+            data-rail-row=''
             data-sel-row='0'
           >
             <Text size='nano' variant='label' component='span' className='shrink-0'>
