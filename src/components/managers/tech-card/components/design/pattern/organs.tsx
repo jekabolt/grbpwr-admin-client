@@ -84,10 +84,19 @@ export function CornerLabel({
  * through the middle of the face — the most visible place on the card. A tile that does not join
  * gives itself away with a cross in the centre, without being opened.
  *
- * `background-size: 50% 50%` is EXACTLY four copies, not «about four»: the fraction is taken from
- * the box, and the box is square, so each copy keeps the tile's own square and the join is not
- * stretched. `contain` or pixels would let the vertical period drift from the horizontal one on
- * a card of any other width, and the cross in the centre would stop being the join.
+ * ⚠ `background-size: 50% auto`, NOT `50% 50%` (review M-3). The fraction was taken from the box
+ * on BOTH axes, which is exact only on a square box — and the slot cell is not square (138 × 162,
+ * `FABRIC_CELL_ASPECT`): there the square swatch was drawn 69 × 81, stretched 17 % tall, i.e. the
+ * cell showed a cloth that is not the one in the render. Now the width is exactly half the box
+ * (two copies across, the vertical join in the middle) and the height follows the picture's own
+ * proportion, so a copy is never stretched on any box.
+ *
+ * THE HORIZONTAL JOIN STAYS IN THE MIDDLE BY POSITION, NOT BY STRETCHING. With a square copy of
+ * height W/2 in a box of height H, a copy edge lands on H/2 when the grid is shifted by
+ * (H − W)/2; `calc(50% − 25cqw)` is exactly that (a percentage position resolves against
+ * H − W/2, and `cqw` is a hundredth of the face's own width — the wrapper is the size container).
+ * On a square box the shift is zero and the face is the old 2×2 to the pixel. Four copies, one
+ * cross through the centre, on the carousel's square tile and on the portrait cell alike.
  */
 export function TiledFace({ url, alt }: { url: string; alt: string }): JSX.Element {
   return (
@@ -95,13 +104,19 @@ export function TiledFace({ url, alt }: { url: string; alt: string }): JSX.Eleme
       role='img'
       aria-label={`${alt} — the tile repeated four times, so the join runs through the middle`}
       data-tiled-face
-      className='h-full w-full bg-bgColor'
-      style={{
-        backgroundImage: `url(${JSON.stringify(url)})`,
-        backgroundSize: '50% 50%',
-        backgroundRepeat: 'repeat',
-      }}
-    />
+      className='h-full w-full'
+      style={{ containerType: 'inline-size' }}
+    >
+      <div
+        className='h-full w-full bg-bgColor'
+        style={{
+          backgroundImage: `url(${JSON.stringify(url)})`,
+          backgroundSize: '50% auto',
+          backgroundPosition: '0 calc(50% - 25cqw)',
+          backgroundRepeat: 'repeat',
+        }}
+      />
+    </div>
   );
 }
 

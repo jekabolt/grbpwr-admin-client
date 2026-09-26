@@ -7,7 +7,21 @@ import type {
 } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { PantonePicker } from 'components/managers/tech-card/components/pantone-picker';
-import { useCallback, useMemo, useRef, useState, type JSX } from 'react';
+import {
+  ensurePantoneLibrary,
+  pantoneLibraryState,
+  pantoneVersion,
+  subscribePantone,
+} from 'components/managers/tech-card/components/pantone-swatches';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type JSX,
+} from 'react';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
@@ -29,7 +43,7 @@ import { RunRefusal } from '../render/generate-row';
 import { archivedColorwayGate, type Gate } from '../render/model';
 import { useStartDesignRun } from '../render/use-design-run';
 import { ImageToFabric } from './image-to-fabric';
-import { patternRuns, refusalAdvice, shelfIsFull } from './model';
+import { patternRuns, refusalAdvice } from './model';
 import { CornerLabel, FABRIC_CELL_ASPECT, PendingTile, TiledFace } from './organs';
 import {
   READ_ONLY_RUN_REASON,
@@ -38,10 +52,14 @@ import {
   pairKey,
   pairOfRun,
   rowColour,
+  runTraceNote,
+  runTraces,
+  shelfCeiling,
   slotSuggestions,
   slotUsage,
   swatchGate,
   type ClothSlot,
+  type ShelfCeiling,
 } from './slot-fabrics';
 
 /**
@@ -154,9 +172,26 @@ export function PatternStudio({
   const capable = band.assetBindings !== undefined;
   const byPair = useMemo(() => boundAssetsByPair(band), [band]);
 
-  /* ЖИВЫЕ КОЛОРВЕИ — И АРХИВНЫЕ, ТОЛЬКО ПОКА ЧТО-ТО НОСЯТ: сделанное под архивным именем читается
-     как под живым, а новой работы под ним не делают (ворота ряда ниже). Архивный без привязок —
-     пустая строка «ничего и нельзя», и её не рисуют. */
+  /* ═══ ПОЛНАЯ БИБЛИОТЕКА ПАНТОНОВ — С ПЕРВОГО КАДРА ШАГА, А НЕ С ПЕРВОГО ОТКРЫТИЯ ПИКЕРА (ревью M-2)
+     `swatchColour` берёт hex у `findPantone`, а тот до `ensurePantoneLibrary()` знает только
+     отобранные 274 кода. Пикер тянул библиотеку лишь при открытии — значит пантон рецепта вне 274
+     уезжал в прогон без hex, пока человек случайно не откроет поповер. Теперь её тянет сам шаг, а
+     подписка на версию набора перерисовывает ряды, когда он вырос (чанк приезжает в чужом такте).
+     Пока едет — ворота ряда держат `generate` для кода без hex (`swatchGate`, `pantonePending`). */
+  useEffect(() => {
+    if (capable) void ensurePantoneLibrary();
+  }, [capable]);
+  useSyncExternalStore(subscribePantone, pantoneVersion, pantoneVersion);
+  const libraryState = pantoneLibraryState();
+  const pantonePending = libraryState === 'idle' || libraryState === 'loading';
+
+  /* ЖИВЫЕ КОЛОРВЕИ; АРХИВНЫЙ — ТОЛЬКО ЕСЛИ ОН ДОШЁЛ ДО ЭКРАНА И ЧТО-ТО НОСИТ. Архивный без
+     привязок — пустая строка «ничего и нельзя», и её не рисуют.
+     ⚠ ЭТО ФИЛЬТР, А НЕ ОБЕЩАНИЕ ПОКАЗАТЬ АРХИВ С ПРИВЯЗКАМИ (ревью m-5). Ось композитора
+     (`useColorwayChoice`) отдаёт архивный колорвей, только пока он цель студии или у него есть
+     рендеры на верстаке; архивный, у которого есть одни привязки, до этого шага НЕ ДОХОДИТ вовсе,
+     и его ткани видны лишь в карусели (ярлык плитки называет такую пару числом). Расширять ось
+     ради этого шага не стали: она одна на всю студию. */
   const shown = useMemo(() => {
     const dressed = new Set((band.assetBindings ?? []).map((b) => wireInt(b.colorwayId)));
     return colorways.filter((c) => {
@@ -166,8 +201,10 @@ export function PatternStudio({
   }, [colorways, band.assetBindings]);
 
   /* ЖИВЫЕ ПРОГОНЫ: свотч нарисованной пары ждут в её ячейке, всё прочее — первым в карусели.
-     Пара прогона читается с его ПАРАМЕТРОВ (`colorwayId` + `pattern.bomItemId`), а не угадывается. */
-  const { liveByPair, unpaired } = useMemo(() => {
+     Пара прогона читается с его ПАРАМЕТРОВ (`colorwayId` + `pattern.bomItemId`), а не угадывается.
+     И СЛЕДЫ ПРОГОНОВ, НЕ ДАВШИХ ТКАНИ (ревью M-1, `runTraces`): пары — строкой под рядом,
+     «картинка → ткань» — пунктирной плиткой в голове карусели. */
+  const { liveByPair, unpaired, traces } = useMemo(() => {
     const drawn = new Set<string>();
     for (const c of shown)
       for (const s of slots) drawn.add(pairKey(c.colorwayId ?? 0, s.bomItemId));
@@ -179,7 +216,7 @@ export function PatternStudio({
         if (!byPairRun.has(key)) byPairRun.set(key, r);
       } else rest.push(r);
     }
-    return { liveByPair: byPairRun, unpaired: rest };
+    return { liveByPair: byPairRun, unpaired: rest, traces: runTraces(band, drawn) };
   }, [band, shown, slots]);
 
   const total = shown.length * slots.length;
@@ -187,7 +224,7 @@ export function PatternStudio({
     (n, c) => n + slots.filter((s) => byPair.has(pairKey(c.colorwayId ?? 0, s.bomItemId))).length,
     0,
   );
-  const shelfFull = shelfIsFull(band);
+  const ceiling = useMemo(() => shelfCeiling(band), [band]);
 
   const stepPill = (
     <Pill tone='ink' data-step-pill=''>
@@ -301,7 +338,9 @@ export function PatternStudio({
                       slot={s}
                       asset={byPair.get(key)}
                       liveRun={liveByPair.get(key)}
-                      shelfFull={shelfFull}
+                      trace={traces.byPair.get(key)}
+                      ceiling={ceiling}
+                      pantonePending={pantonePending}
                       pick={picks[key] ?? NO_PICK}
                       onPick={(patch) => setPick(key, patch)}
                     />
@@ -320,6 +359,8 @@ export function PatternStudio({
         colorways={shown}
         slots={slots}
         live={unpaired}
+        failed={traces.image}
+        ceiling={ceiling}
       />
     </Section>
   );
@@ -356,7 +397,9 @@ function SlotRow({
   slot,
   asset,
   liveRun,
-  shelfFull,
+  trace,
+  ceiling,
+  pantonePending,
   pick,
   onPick,
 }: {
@@ -370,7 +413,11 @@ function SlotRow({
   slot: ClothSlot;
   asset?: common_DesignAsset;
   liveRun?: common_DesignRun;
-  shelfFull: boolean;
+  /** Новейший прогон пары, если он кончился без ткани (`runTraces`). */
+  trace?: common_DesignRun;
+  ceiling: ShelfCeiling;
+  /** Полная библиотека пантонов ещё едет — код без hex пока не пускается (`swatchGate`). */
+  pantonePending: boolean;
   pick: SlotPick;
   onPick: (patch: SlotPick) => void;
 }): JSX.Element {
@@ -384,9 +431,16 @@ function SlotRow({
   const colour = rowColour(pick.code, usage);
   const texture = pick.texture ?? null;
   const pickedCode = pick.code ?? usage.pantone;
-  /* ЦВЕТ БЕЗ ПАНТОНА — ЭКРАННЫЙ ЦВЕТ КОЛОРВЕЯ ИЛИ СЛОВО РЕЦЕПТА. Он уедет (см. `rowColour`), значит
-     он обязан стоять на месте пикера: свотчем, если это hex, и словом в самой двери. */
+  /* ЦВЕТ БЕЗ ПАНТОНА — ЭКРАННЫЙ ЦВЕТ КОЛОРВЕЯ ИЛИ ЦВЕТ РЕЦЕПТА. Он уедет (см. `rowColour`), значит
+     он обязан стоять на месте пикера — но ПО ПРАВИЛУ ПИКЕРА ДЛЯ УНАСЛЕДОВАННОГО (его `label`):
+     свотч, если это hex, и серое слово ИСТОЧНИКА на двери — «colourway colour» / «recipe colour»,
+     а само значение (hex, слово) — в `title` (ревью m-3). Сырой «#5B6236 ▾» на двери читался как
+     выбранный пантон, то есть как чужой выбор, сделанный за человека. */
   const fallback = !pickedCode.trim() && colour ? colour.hex || colour.words : '';
+  const fallbackLabel = usage.colorSource === 'recipe' ? 'recipe colour' : 'colourway colour';
+  const fallbackTitle = fallback
+    ? `${fallback} — no Pantone is named for this slot, so the ${fallbackLabel} travels until one is picked`
+    : undefined;
 
   const archivedGate = archivedColorwayGate(archived, colorwayName, 'swatch');
   const gate: Gate = disabled
@@ -398,7 +452,7 @@ function SlotRow({
             ok: false,
             reason: 'a swatch for this slot is being made — it lands in the cell by itself',
           }
-        : swatchGate(colour, shelfFull, speaks);
+        : swatchGate(colour, ceiling, speaks, pantonePending);
 
   const start = () => {
     if (!gate.ok || !colour) return;
@@ -448,6 +502,10 @@ function SlotRow({
   };
 
   const advice = run.refusal ? refusalAdvice(run.refusal.words) : '';
+  const traceNote = trace ? runTraceNote(trace) : null;
+  const traceAdvice = trace
+    ? refusalAdvice(`${trace.errorCode ?? ''} ${trace.lastError ?? ''}`)
+    : '';
 
   /* РИТМ: ряд `py-4`, первый прижат к своей линейке (`pt-0` — подпись держит свои ряды), последний
      низ сохраняет: 16px + шов группы 20px разводят колорвеи шире, чем ряды внутри одного (33px). */
@@ -493,19 +551,15 @@ function SlotRow({
           <div
             className='flex items-center gap-2'
             data-slot-colour={colour?.code || colour?.hex || 'none'}
+            data-slot-colour-inherited={fallback ? usage.colorSource : undefined}
+            title={fallbackTitle}
           >
             <FieldWord>colour</FieldWord>
-            {fallback && colour?.hex && (
-              <Swatch
-                hex={colour.hex}
-                size={14}
-                title='no Pantone is named for this slot — the colourway’s screen colour travels until one is picked'
-              />
-            )}
+            {fallback && colour?.hex && <Swatch hex={colour.hex} size={14} />}
             <PantonePicker
               name={`slot-${cwId}-${slot.bomItemId}`}
               value={pickedCode}
-              label={fallback || '+ pantone'}
+              label={fallback ? fallbackLabel : '+ pantone'}
               suggested={suggested}
               disabled={disabled}
               onPick={(code) => onPick({ code: code.trim() })}
@@ -579,6 +633,18 @@ function SlotRow({
         {run.refusal && advice && (
           <span data-refusal-advice=''>
             <Reason>{advice}</Reason>
+          </span>
+        )}
+        {/* THE LAST RUN OF THE PAIR ENDED WITHOUT A FABRIC (review M-1): said once, under the row,
+            in the history's own words, until a newer run or a newer binding answers the pair. */}
+        {trace && traceNote && (
+          <span
+            data-slot-last-run={trace.id ?? ''}
+            className='flex flex-col gap-0.5'
+            title={traceNote.full}
+          >
+            <Reason>{`last swatch: ${traceNote.line}`}</Reason>
+            {traceAdvice && <Reason>{traceAdvice}</Reason>}
           </span>
         )}
       </div>

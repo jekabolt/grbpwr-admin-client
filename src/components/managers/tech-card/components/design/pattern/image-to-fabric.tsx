@@ -17,15 +17,15 @@ import { GROUP_GAP, Reason } from '../core';
 import { RunRefusal } from '../render/generate-row';
 import { useStartDesignRun } from '../render/use-design-run';
 import { FabricCarousel } from './fabric-carousel';
-import { refusalAdvice, shelfIsFull } from './model';
+import { refusalAdvice } from './model';
 import { PatternInput } from './pattern-input';
 import {
   READ_ONLY_RUN_REASON,
-  SHELF_FULL_REASON,
   SILENT_SERVER_REASON,
   imageGate,
   mintFabricName,
   type ClothSlot,
+  type ShelfCeiling,
 } from './slot-fabrics';
 
 /**
@@ -52,6 +52,8 @@ export function ImageToFabric({
   colorways,
   slots,
   live,
+  failed,
+  ceiling,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -60,6 +62,10 @@ export function ImageToFabric({
   slots: ClothSlot[];
   /** Живые прогоны без своей ячейки на экране — карусель ставит их первыми. */
   live: common_DesignRun[];
+  /** Новейший прогон «картинка → ткань», если он кончился без ткани (`runTraces`, ревью M-1). */
+  failed: common_DesignRun | null;
+  /** Потолок полки — один ответ на обе двери шага (`shelfCeiling`, ревью m-2). */
+  ceiling: ShelfCeiling;
 }): JSX.Element {
   const run = useStartDesignRun(techCardId);
   const { upsertAsset } = useAssetWrites(techCardId);
@@ -86,8 +92,7 @@ export function ImageToFabric({
   }
 
   const sourceId = source?.id ?? 0;
-  const shelfFull = shelfIsFull(band);
-  const gate = imageGate(sourceId, shelfFull, speaks);
+  const gate = imageGate(sourceId, ceiling, speaks);
   const advice = run.refusal ? refusalAdvice(run.refusal.words) : '';
 
   /**
@@ -115,7 +120,7 @@ export function ImageToFabric({
 
   /* ЧЕСТНАЯ ДВЕРЬ ИЛИ НИКАКОЙ: половина гаснет ровно там, где сервер откажет (потолок полки —
      серверный, `refuseFullShelf`). */
-  const galleryInert = !speaks ? SILENT_SERVER_REASON : shelfFull ? SHELF_FULL_REASON : '';
+  const galleryInert = !speaks ? SILENT_SERVER_REASON : ceiling.full ? ceiling.reason : '';
 
   const extract = () =>
     run.start({
@@ -220,6 +225,7 @@ export function ImageToFabric({
         colorways={colorways}
         slots={slots}
         live={live}
+        failed={failed}
       />
     </div>
   );

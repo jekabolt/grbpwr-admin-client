@@ -17,15 +17,17 @@ import { serverSpeaksDesign } from '../capability';
 import { archivedRef, colorwayLabel } from '../colorway-picker';
 import { AskModal, EmptyState, TwoStepPicker, type PickerBranch } from '../core';
 import { PictureTile } from '../picture-tile';
-import { SEAM_WORDS, patternOutputs, patternTwin, seamWarningOf } from './model';
+import { SEAM_WORDS, patternOutputs, refusalAdvice, seamWarningOf } from './model';
 import { CornerLabel, PendingTile, TiledFace } from './organs';
 import {
   READ_ONLY_SHELF_REASON,
   SILENT_SERVER_REASON,
   boundAssetsByPair,
+  clothTwin,
   pairKey,
   pairsOfAsset,
   recentFabrics,
+  runTraceNote,
   type ClothSlot,
 } from './slot-fabrics';
 
@@ -55,11 +57,15 @@ export function FabricCarousel({
   colorways,
   slots,
   live,
+  failed,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
-  /** Колорвеи, которые экран рисует рядами (ось композитора, архивные — только с привязками). */
+  /**
+   * Колорвеи, которые экран рисует рядами: ось композитора, из архивных — только дошедшие до шага
+   * и носящие привязки (архив с одними привязками сюда не доходит — ревью m-5).
+   */
   colorways: common_AdminColorwayRef[];
   slots: ClothSlot[];
   /**
@@ -68,6 +74,11 @@ export function FabricCarousel({
    * читался бы как два прогона.
    */
   live: common_DesignRun[];
+  /**
+   * Новейший прогон «картинка → ткань», кончившийся без ткани (`runTraces`, ревью M-1): пунктирная
+   * плитка в голове полосы, пока его не сменит новый прогон. Следы пар сюда не едут — у них ряд.
+   */
+  failed: common_DesignRun | null;
 }): JSX.Element {
   const fabrics = useMemo(() => recentFabrics(band), [band]);
   const byPair = useMemo(() => boundAssetsByPair(band), [band]);
@@ -95,7 +106,11 @@ export function FabricCarousel({
      колеса. Нарисованные на полосе из трёх плиток, они обещали бы продолжение, которого нет. */
   const strip = useRef<HTMLDivElement | null>(null);
   const [overflow, setOverflow] = useState(false);
-  const count = fabrics.length + live.length;
+  const count = fabrics.length + live.length + (failed ? 1 : 0);
+  /* ⚠ ПЕРЕМЕР — НА СМЕНЕ САМИХ ПЛИТОК, А НЕ ИХ ЧИСЛА (ревью m-6). Удалили одну, на её место из
+     глубины полки въехала тринадцатая — число то же, эффект по `count` молчал. Поэтому зависимости —
+     списки, а наблюдатель смотрит и на полосу, и на каждую плитку: плитка, выросшая после декода
+     картинки или после переименования, двигает `scrollWidth` без единого рендера здесь. */
   useEffect(() => {
     const el = strip.current;
     if (!el) {
@@ -107,8 +122,9 @@ export function FabricCarousel({
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    for (const child of Array.from(el.children)) ro.observe(child);
     return () => ro.disconnect();
-  }, [count]);
+  }, [fabrics, live, failed]);
   const scroll = (dir: -1 | 1) => {
     const el = strip.current;
     if (!el) return;
@@ -172,6 +188,7 @@ export function FabricCarousel({
               <PendingTile startedAt={r.startedAt ?? r.createdAt} aspect='1/1' />
             </div>
           ))}
+          {failed && <FailedTile run={failed} />}
           {fabrics.map((a) => (
             <FabricTile
               key={a.id}
@@ -188,6 +205,49 @@ export function FabricCarousel({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * СЛЕД ПРОГОНА «КАРТИНКА → ТКАНЬ», НЕ ДАВШЕГО ТКАНИ (ревью M-1) — пунктирная плитка той же меры,
+ * что живая, на её же месте: «здесь должна была лечь ткань, и вот почему не легла». Пунктир и
+ * серое слово, не красный: исход назван словом («failed · CODE»), а красный в этой админке — убыток
+ * там, где он точно есть. Двери у плитки нет ни одной: повтор — та же `extract fabric` выше, а
+ * исчезает плитка сама, когда новейшим прогоном этого вида станет другой. Полный исход и совет —
+ * в `title` (у провайдера бывают абзацы; плитка 138px их не держит).
+ */
+function FailedTile({ run }: { run: common_DesignRun }): JSX.Element {
+  const note = runTraceNote(run);
+  const advice = refusalAdvice(`${run.errorCode ?? ''} ${run.lastError ?? ''}`);
+  const name = (run.params?.pattern?.name ?? '').trim() || 'extracted fabric';
+  return (
+    <div
+      data-fabric-failed={run.id ?? ''}
+      style={BENCH_CELL_STYLE}
+      className='flex snap-start flex-col gap-1'
+      title={[note.full, advice].filter(Boolean).join(' — ')}
+    >
+      <Placeholder dashed aspect='square' className='w-full px-2'>
+        <span className='flex min-w-0 flex-col items-center gap-0.5 text-center'>
+          <Text size='micro' variant='label' component='span' className='normal-case'>
+            no fabric from the last extract
+          </Text>
+          {/* The code IS the news here, so it wraps rather than being cut to «PROVIDER_TIM…». */}
+          <Text size='nano' variant='label' component='span' className='max-w-full break-words'>
+            {note.line}
+          </Text>
+        </span>
+      </Placeholder>
+      <Text
+        size='micro'
+        variant='uppercase'
+        tracking='label'
+        component='span'
+        className='min-w-0 truncate font-bold'
+      >
+        {name}
+      </Text>
     </div>
   );
 }
@@ -224,11 +284,11 @@ function FabricTile({
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(label);
   const [asking, setAsking] = useState(false);
-  const twin = renaming ? patternTwin(band, name, id) : undefined;
+  const twin = renaming ? clothTwin(band, name, id) : undefined;
 
   /* ГДЕ ЭТА ТКАНЬ В РЕНДЕРЕ — пары, которые её носят, словами. Пара, чей колорвей или слот экран не
-     рисует (архив без привязок, строка ушла из рулонного товара), называется числом: привязка есть
-     на сервере, и промолчать о ней значило бы удалить её вслепую. */
+     рисует (архивный колорвей, не дошедший до шага; строка ушла из рулонного товара), называется
+     числом: привязка есть на сервере, и промолчать о ней значило бы удалить её вслепую. */
   const worn = useMemo(
     () =>
       pairsOfAsset(band, id).map(

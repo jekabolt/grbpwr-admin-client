@@ -5,7 +5,7 @@ import type {
   common_DesignRun,
 } from 'api/proto-http/admin';
 
-import { ASSETS_PER_CARD_MAX, ASSET_PATTERN, assetLabel, shelfOf } from '../assets/model';
+import { ASSETS_PER_CARD_MAX, ASSET_PATTERN, shelfOf } from '../assets/model';
 import { cardOutputRows } from '../bench-kinds';
 
 /**
@@ -164,6 +164,10 @@ export const REFUSAL_ADVICE: Record<string, string> = {
     'the slot this swatch was asked for is not a BOM line of this card any more — it was deleted ' +
     'or the card changed under the screen. Reload the card, then make the swatch on the slot as ' +
     'it stands now.',
+  /* ─── полка полна: отказ двери ДО денег и посадка `done` с этим кодом ПОСЛЕ (след ряда) ─── */
+  library_full:
+    'the card holds as many assets as it may, so there is no place on it for a new fabric. Delete ' +
+    'a fabric in LAST FABRICS below or in the CLOTHS grid of FABRIC RENDER, then generate again.',
   provider_model_retired:
     'the image model this route was pointed at no longer exists at the provider. Nothing on this ' +
     'card can fix that: the model is server configuration, and somebody has to point it at a live one.',
@@ -188,22 +192,11 @@ export function refusalAdvice(message: string): string {
    которое некому спросить, и первая же выбравшая неверно об этом не узнает. Ворота этого экрана
    возвращают теперь ровно `Gate`, как у соседей. */
 
-/**
- * A TILE ON THIS CARD THAT ALREADY CARRIES THIS NAME — case-insensitively, because the person who
- * will look for the tile by eye reads «Chevron» and «chevron» as one word. `skipAssetId` lets a
- * rename skip the tile being renamed.
- */
-export function patternTwin(
-  band: GetDesignBandResponse,
-  name: string,
-  skipAssetId = 0,
-): common_DesignAsset | undefined {
-  const key = (name ?? '').trim().toLowerCase();
-  if (!key) return undefined;
-  return patternAssets(band).find(
-    (a) => (a.id ?? 0) !== skipAssetId && assetLabel(a).trim().toLowerCase() === key,
-  );
-}
+/* ═══ `patternTwin` СНЕСЁН: ДВОЙНИК ИМЕНИ ИЩЕТСЯ ПО ВСЕЙ ПОЛКЕ ТКАНЕЙ (ревью m-1) ═══════════════
+   Он искал совпадение только среди паттернов, а карусель LAST FABRICS и сетка CLOTHS рисуют
+   `fabric` и `pattern` одним рядом, и промпт рендера цитирует ткань по имени. Замена —
+   `clothTwin` в `slot-fabrics.ts` (минт имени свотча и совет при переименовании на плитке);
+   второго правила «какое имя занято» рядом с ним держать незачем. */
 
 /* ═══ `patternGate` И ЦВЕТ «НИЧЕЙ ПАРЫ» СНЕСЕНЫ ВМЕСТЕ С ЭКРАНОМ, КОТОРЫЙ ИХ ЧИТАЛ (STEP 3) ════════
    Здесь стояли ворота прежнего экрана (источник · ИМЯ · двойник имени) и четыре органа цвета

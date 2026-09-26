@@ -561,8 +561,8 @@ export function useColourDraft(
    * слова, прозрачность, граммаж, — то есть наказывал за взгляд на соседний цвет потерей работы,
    * которая к цвету не относится вовсе. Ткань есть свойство ИЗДЕЛИЯ (одна и та же вещь шьётся из
    * одного полотна во всех цветах), цвет есть свойство КОЛОРВЕЯ. Поэтому на смене цели меняются
-   * `hex` и `code`, и больше ничего — кроме тканей, ПРИВЯЗАННЫХ к слотам новой цели (STEP 3,
-   * отмена ниже).
+   * `hex` и `code`, и больше ничего — кроме тканей, ПРИВЯЗАННЫХ к слотам новой цели, и тканей,
+   * приехавших из привязок прошлой (STEP 3, отмена ниже: правила 2 и 2а).
    *
    * ⚠ ПЕРЕСЕВ ЦВЕТА СТАРШЕ «СВОЕГО» ЗНАЧЕНИЯ, и это не нарушение старшинства, а его применение:
    * набранный человеком цвет принадлежал ПРОШЛОЙ цели, а вопрос сменился («каким цветом ROSSO?»
@@ -585,7 +585,16 @@ export function useColourDraft(
    *      (`fabrics` и эхо `fabricMediaId`).
    *   2. СМЕНА ЦЕЛИ: ткани пересеваются ТОЛЬКО если у НОВОГО колорвея есть привязки — вопрос
    *      сменился («из чего ROSSO?»), и выбор, сделанный для прошлой цели, ему не ответ. У колорвея
-   *      без привязок, и у `sample`, правило абзаца выше держится БАЙТ В БАЙТ: ткани стоят.
+   *      без привязок, и у `sample`, правило абзаца выше держится — С ОДНОЙ ОГОВОРКОЙ (2а).
+   *   2а. ⚠ ТКАНИ, ПРИЕХАВШИЕ ИЗ ПРИВЯЗОК, НЕ ПЕРЕЕЗЖАЮТ К ЧУЖОЙ ЦЕЛИ (B6-1). Черновик помнит,
+   *      откуда его `fabrics`: засев привязками (правила 1, 2, 3) или рука человека (тычок в плитку
+   *      CLOTHS, любое `echo`) — реф `fabricsFromBindings`. Переход ROSSO (с привязками) → OLIVE
+   *      (без них) раньше оставлял стоять красный свотч «ROSSO · outer», и платный рендер OLIVE
+   *      получал его своей тканью: правило «ткань стоит» писалось про ткань ИЗДЕЛИЯ, а свотч пары —
+   *      ткань КОЛОРВЕЯ (см. выше). Поэтому на такой смене ткани из привязок СНИМАЮТСЯ, и ответ даёт
+   *      сегодняшнее правило новой цели: её последний рецепт (у `sample` — последний рецепт
+   *      карточки), пока черновик не тронут, иначе — пусто. Ткани, выбранные РУКОЙ, стоят, как
+   *      стояли (D6 байт в байт): человек выбрал их сам, и смена цели этот выбор не отменяет.
    *   3. ПРИВЯЗКИ СМЕНИЛИСЬ ПОД ЧЕРНОВИКОМ (свотч сел, пока экран открыт; рефетч): пересев один раз
    *      на отпечаток привязок (`BoundSeed.sig`) и ТОЛЬКО пока человек ничего не трогал
    *      (`touched`) — иначе рефетч затирал бы выбор, сделанный руками, прямо под пальцами.
@@ -707,6 +716,12 @@ export function useColourDraft(
   const boundSig = bound?.sig ?? '';
   /** Отпечаток привязок, которым черновик засеян последний раз. Рисовать нечего — реф. */
   const shownBound = useRef('');
+  /**
+   * ОТКУДА ТЕКУЩИЕ `fabrics` ЧЕРНОВИКА: `true` — их положил засев привязками (правила 1–3 шапки),
+   * `false` — рука человека, прошлый рецепт или пусто. Нужен ровно одному решению — правилу 2а
+   * (B6-1): снимать ли ткани на смене цели на колорвей без привязок. Рисовать нечего — реф.
+   */
+  const fabricsFromBindings = useRef(false);
 
   /**
    * ⚠ В ТЕЛЕ РЕНДЕРА, А НЕ В ЭФФЕКТЕ (инвариант 12, и по той же причине). Эффект оставил бы один
@@ -730,6 +745,7 @@ export function useColourDraft(
     shownCard.current = techCardId;
     shownColorway.current = colorwayId;
     shownBound.current = '';
+    fabricsFromBindings.current = false;
     seeded.current = false;
     touched.current = false;
     owned.current = { ...NOTHING_OWNED };
@@ -742,14 +758,29 @@ export function useColourDraft(
     owned.current.hex = false;
     const next = colourHalf;
     /* STEP 3, правило 2 (шапка): у новой цели есть привязки — её ткани приезжают ВМЕСТЕ с её
-       цветом, одной записью; нет — ткани стоят, как стояли (D6 байт в байт). */
+       цветом, одной записью; нет — ткани стоят, как стояли (D6 байт в байт), КРОМЕ тканей,
+       приехавших из привязок прошлой цели (правило 2а, B6-1): те снимаются, и ответ даёт
+       сегодняшнее правило новой цели — её последний рецепт, пока черновик не тронут, иначе пусто. */
     const cloths = bound;
     shownBound.current = boundSig;
+    let fabricHalf: Pick<EchoValues, 'fabrics' | 'fabricMediaId'> = {};
+    if (cloths) {
+      fabricHalf = cloths.values;
+      fabricsFromBindings.current = true;
+    } else if (fabricsFromBindings.current) {
+      const last = colorwayId > 0 ? ofColorway : latest;
+      const fallback = !touched.current && last ? echoOf({ from: 'recipe', recipe: last }) : null;
+      fabricHalf = {
+        fabrics: fallback?.fabrics ?? [],
+        fabricMediaId: fallback?.fabricMediaId ?? 0,
+      };
+      fabricsFromBindings.current = false;
+    }
     setRecipe((prev) => ({
       ...prev,
       code: next ? next.code : '',
       hex: next ? next.hex : prev.hex ?? '',
-      ...(cloths ? cloths.values : {}),
+      ...fabricHalf,
     }));
     /* ССЫЛКА ЕДЕТ ВМЕСТЕ СО СВОИМ ЦВЕТОМ, А НЕ ОТДЕЛЬНО. У цели N ссылка — та, что записана у
        колорвея; у прогона своей ссылки нет (поля в рецепте нет — B8), поэтому ставится пусто, и
@@ -763,7 +794,10 @@ export function useColourDraft(
        тогда засевает эффект ниже, и привязки он берёт сам. */
     shownBound.current = boundSig;
     const cloths = bound;
-    if (cloths && !touched.current) setRecipe((prev) => ({ ...prev, ...cloths.values }));
+    if (cloths && !touched.current) {
+      fabricsFromBindings.current = true;
+      setRecipe((prev) => ({ ...prev, ...cloths.values }));
+    }
   }
 
   useEffect(() => {
@@ -794,6 +828,7 @@ export function useColourDraft(
        ПОВЕРХ засева, то есть заменяет `fabrics` и `fabricMediaId` рецепта и не трогает ни цвета,
        ни слов. Засева нет вовсе (колорвей без цвета и без рендеров), а привязки есть — ткани
        всё равно приезжают: «ткань надета» — полный ответ на вопрос «из чего». */
+    fabricsFromBindings.current = !!bound;
     setRecipe({
       ...EMPTY_RECIPE,
       ...(seed ?? {}),
@@ -846,7 +881,10 @@ export function useColourDraft(
     },
     echo: (source) => {
       touched.current = true;
-      setRecipe((prev) => mergeEcho(prev, echoOf(source), owned.current));
+      const values = echoOf(source);
+      // Ткани, положенные жестом, — выбор человека (правило 2а): смена цели их больше не снимает.
+      if (values.fabrics !== undefined) fabricsFromBindings.current = false;
+      setRecipe((prev) => mergeEcho(prev, values, owned.current));
     },
     patchCloth,
     /**

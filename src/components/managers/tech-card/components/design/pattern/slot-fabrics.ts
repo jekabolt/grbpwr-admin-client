@@ -22,11 +22,15 @@ import {
   ASSETS_PER_CARD_MAX,
   ASSET_NAME_MAX,
   assetById,
+  assetLabel,
   clothShelf,
   normaliseHex,
+  unmanagedAssets,
 } from '../assets/model';
+import { isRunLive, runOutcomeNote, runStatus } from '../generation/run-state';
 import type { Gate } from '../render/model';
-import { patternTwin } from './model';
+import { isRunArchived, stampIsSet } from '../visibility';
+import { SEAM_CODE, patternRuns } from './model';
 
 /**
  * ═══ STEP 3 · PATTERN — THE FABRIC OF EVERY (COLOURWAY, SLOT), AS A PURE MODEL ════════════════
@@ -205,6 +209,12 @@ export type SlotUsage = {
   pantone: string;
   /** Цвет строки рецепта (слово или hex), иначе экранный hex колорвея (`devHex`). */
   color: string;
+  /**
+   * ОТКУДА `color`: строка рецепта или сам колорвей. Дверь цвета подписывает унаследованное
+   * значение ИСТОЧНИКОМ («recipe colour» / «colourway colour»), а не сырым hex или словом (ревью
+   * m-3): сырое значение на двери читалось бы как выбранный пантон. Пусто — цвета нет нигде.
+   */
+  colorSource: 'recipe' | 'colourway' | '';
   /** Пантон ИМЕННО строки рецепта — чтобы пикер подписал, откуда он. */
   recipePantone: string;
 };
@@ -219,9 +229,12 @@ export function slotUsage(
 ): SlotUsage {
   const row = slotUsageRow(colorway, slot);
   const recipePantone = (row?.pantone ?? '').trim();
+  const recipeColor = (row?.color ?? '').trim();
+  const ownHex = (colorway?.devHex ?? '').trim();
   return {
     pantone: recipePantone || (colorway?.pantone ?? '').trim(),
-    color: (row?.color ?? '').trim() || (colorway?.devHex ?? '').trim(),
+    color: recipeColor || ownHex,
+    colorSource: recipeColor ? 'recipe' : ownHex ? 'colourway' : '',
     recipePantone,
   };
 }
@@ -270,9 +283,17 @@ function codeStem(code: string): string {
  * ⚠ HEX БЕРЁТСЯ ТОЛЬКО У ТОГО ЖЕ КОДА. `findPantone` добирает префиксом (`18-16` найдёт первый
  * `18-16…`), и приблизительный цвет ЧУЖОГО пантона уехал бы в промпт как «точный». Совпадение
  * проверяется по коду без хвоста системы; не совпало — едут код и слова, без hex.
+ *
+ * ⚠ ВЕДУЩЕЕ «PANTONE » СНИМАЕТСЯ ДО ПОИСКА (ревью m-4). Поле рецепта свободнотекстовое, и
+ * «PANTONE 18-1664 TCX» там законно — `normalizePantone` снимает ту же приставку при записи, но
+ * старые строки записаны до него. С приставкой поиск промахивался (hex не ехал вовсе), а слова
+ * выходили «Pantone PANTONE 18-1664 TCX»; код без неё — тот же цвет, и едет он без неё.
  */
 export function swatchColour(code: string | null | undefined): SwatchColour | null {
-  const c = (code ?? '').trim();
+  const c = (code ?? '')
+    .trim()
+    .replace(/^pantone\s+/i, '')
+    .trim();
   if (!c) return null;
   const found = findPantone(c);
   const hit = found && codeStem(found.code) === codeStem(c) ? found : undefined;
@@ -309,8 +330,35 @@ export function colourIsStated(colour: SwatchColour | null | undefined): colour 
 
 /* ─────────────────────────── ворота ─────────────────────────── */
 
-/** Повод полной полки — один на оба прогона шага и на нижнюю половину ячейки IMAGE TO FABRIC. */
-export const SHELF_FULL_REASON = `this card already holds its ${ASSETS_PER_CARD_MAX} assets · delete a fabric in LAST FABRICS below first`;
+/** Полка карточки против серверного потолка — полна ли и чем, одним ответом. */
+export type ShelfCeiling = { full: boolean; reason: string };
+
+/**
+ * ═══ ПОВОД ПОЛНОЙ ПОЛКИ — ЧЕСТНЫЙ, ТРЁХСТОРОННИЙ (ревью m-2) ═══════════════════════════════════
+ *
+ * Здесь стояла одна строка «delete a fabric in LAST FABRICS below first» — и на карточке, чей
+ * потолок добран фурнитурой легаси-полок, она звала туда, где освободить место нечем. Сетка CLOTHS
+ * рендера знает об этом давно (`render/palette.tsx`, `clothCeiling`: Д-2) и различает три случая;
+ * здесь те же три случая и те же слова о фурнитуре, а двери названы свои — карусель LAST FABRICS
+ * на этом шаге и сетка CLOTHS на FABRIC RENDER (карусель держит двенадцать новейших, CLOTHS —
+ * всю полку). Один ответ на оба прогона шага и на нижнюю половину ячейки IMAGE TO FABRIC.
+ *
+ * Потолок серверный и считается по ВСЕЙ карточке (`refuseFullShelf`): `fabric` + `pattern`
+ * (`clothShelf`) снимаются здесь и в CLOTHS, `hardware` (`unmanagedAssets`) — нигде.
+ */
+export function shelfCeiling(band: GetDesignBandResponse): ShelfCeiling {
+  const total = (band.assets ?? []).length;
+  if (total < ASSETS_PER_CARD_MAX) return { full: false, reason: '' };
+  const cloths = clothShelf(band).length;
+  const hardware = unmanagedAssets(band).length;
+  const reason =
+    hardware === 0
+      ? `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets, all of them fabrics — delete one in LAST FABRICS below or in the CLOTHS grid of FABRIC RENDER to make room`
+      : cloths === 0
+        ? `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets, and every one of them is hardware from the removed ASSETS shelves — nothing here or in the CLOTHS grid can free a place, so this card cannot take a new fabric`
+        : `the card is at its limit of ${ASSETS_PER_CARD_MAX} assets: ${cloths} fabrics and ${hardware} hardware from the removed ASSETS shelves, which no screen can remove any more — free a place by deleting a fabric in LAST FABRICS below or in the CLOTHS grid of FABRIC RENDER`;
+  return { full: true, reason };
+}
 
 /** Сервер не отвечает на маршруты полосы — одно предложение на все двери шага. */
 export const SILENT_SERVER_REASON = 'this server does not answer the design routes';
@@ -323,24 +371,39 @@ export const READ_ONLY_RUN_REASON =
 export const READ_ONLY_SHELF_REASON = 'this card is read-only for you — the fabrics are card data';
 
 /**
- * ВОРОТА СВОТЧА — порядок проверки: сервер, цвет, полка. Все три сервер откажет и сам, бесплатно
- * (`no_colour`, `library_full`), — ворота только не дают нажать заведомо мёртвое.
+ * Библиотека пантонов ещё едет, а у названного кода hex пока нет (ревью M-2) — см. `swatchGate`.
+ */
+export const PANTONE_LOADING_REASON = 'loading the Pantone list…';
+
+/**
+ * ВОРОТА СВОТЧА — порядок проверки: сервер, цвет, библиотека пантонов, полка. Сервер откажет и
+ * сам, бесплатно (`no_colour`, `library_full`), — ворота только не дают нажать заведомо мёртвое.
  *
  * ⚠ ПОЛНАЯ ПОЛКА ТЕПЕРЬ ВОРОТА, А НЕ ПРИМЕЧАНИЕ, и это отмена прежнего правила шага. Раньше
  * упёршийся прогон шёл, оплачивался и падал в «made earlier, not kept», где его подбирала дверь
  * `keep it`. Той полосы больше нет (одна история — карусель), и оплаченная картинка, которой
  * некуда сесть, осталась бы только в ленте прогонов — без привязки и без двери к ней.
+ *
+ * ⚠ КОД БЕЗ HEX, ПОКА БИБЛИОТЕКА ЕДЕТ, — ТОЖЕ ВОРОТА (ревью M-2). `swatchColour` находит hex только
+ * у кода, который знает набор, а до приезда полной библиотеки набор — отобранные 274. Пантон
+ * рецепта вне их уехал бы кодом и словами без hex, хотя через секунду hex был бы — то есть прогон
+ * купил бы цвет, который модель прочесть не может, из-за такта загрузки. Библиотека не приехала
+ * (`failed`) — код едет как есть: ждать больше нечего.
  */
 export function swatchGate(
   colour: SwatchColour | null | undefined,
-  shelfFull: boolean,
+  ceiling: ShelfCeiling,
   serverSpeaks: boolean,
+  pantonePending = false,
 ): Gate {
   if (!serverSpeaks) return { ok: false, reason: SILENT_SERVER_REASON };
   if (!colourIsStated(colour)) {
     return { ok: false, reason: 'a swatch is dyed from a colour · pick a Pantone for this slot' };
   }
-  if (shelfFull) return { ok: false, reason: SHELF_FULL_REASON };
+  if (pantonePending && colour.code.trim() && !colour.hex.trim()) {
+    return { ok: false, reason: PANTONE_LOADING_REASON };
+  }
+  if (ceiling.full) return { ok: false, reason: ceiling.reason };
   return { ok: true };
 }
 
@@ -348,7 +411,11 @@ export function swatchGate(
  * ВОРОТА «КАРТИНКА → ТКАНЬ» — сервер, ровно одна фотография (`one_source_picture` у сервера),
  * полка.
  */
-export function imageGate(sourceMediaId: number, shelfFull: boolean, serverSpeaks: boolean): Gate {
+export function imageGate(
+  sourceMediaId: number,
+  ceiling: ShelfCeiling,
+  serverSpeaks: boolean,
+): Gate {
   if (!serverSpeaks) return { ok: false, reason: SILENT_SERVER_REASON };
   if (!sourceMediaId || sourceMediaId <= 0) {
     return {
@@ -356,7 +423,7 @@ export function imageGate(sourceMediaId: number, shelfFull: boolean, serverSpeak
       reason: 'a fabric is extracted from exactly one photograph · add it to the cell',
     };
   }
-  if (shelfFull) return { ok: false, reason: SHELF_FULL_REASON };
+  if (ceiling.full) return { ok: false, reason: ceiling.reason };
   return { ok: true };
 }
 
@@ -439,6 +506,105 @@ export function pairsOfAsset(
     .map((b) => ({ colorwayId: wireInt(b.colorwayId), bomItemId: wireInt(b.bomItemId) }));
 }
 
+/* ─────────────────────────── след прогона, не давшего ткани ─────────────────────────── */
+
+/**
+ * ═══ ПРОГОН, КОТОРЫЙ НЕ ДАЛ ТКАНИ, ОСТАВЛЯЕТ СЛЕД (ревью M-1) ══════════════════════════════════
+ *
+ * Экран читал только ЖИВЫЕ прогоны: ячейка пары показывала «making the fabric…», а когда прогон
+ * падал, отменялся или садился в `library_full` (картинка куплена, ассета нет — `keepPatternTx`
+ * закрывает строку `done` с этим кодом), ячейка молча возвращалась к «no fabric yet». Следующее, что
+ * делает человек, — жмёт `generate` ещё раз, то есть покупает второй прогон, не узнав, чем кончился
+ * первый. Истории под шагом больше нет (одна история — карусель), так что сказать это больше негде.
+ *
+ * ПРАВИЛО ОДНО НА ПАРУ И НА «КАРТИНКУ → ТКАНЬ»: берётся НОВЕЙШИЙ прогон этого адреса (живой
+ * тоже), и след есть, только если он кончился без ткани. Отсюда «исчезает сам»:
+ *   · новый прогон той же пары (живой или удачный) — новейшим становится он;
+ *   · привязка пары НОВЕЕ упавшего прогона (`use for ▸` вернул ткань на слот) — след снимается:
+ *     вопрос «чем одета пара» уже отвечен позже, чем прогон упал;
+ *   · архивированный прогон следа не оставляет — его человек уже прочёл и убрал.
+ * Кнопки «закрыть» нет нарочно: след — не отказ двери, а состояние пары, и держится ровно пока
+ * правда.
+ *
+ * `done` С КОДОМ `pattern_not_seamless` — НЕ СЛЕД: ткань села, а шов меряется и говорится на её
+ * плитке в карусели (`seamWarningOf`). Всякий другой код на `done` — посадка без ткани.
+ *
+ * «Новейший» — по `id` (строка ленты заводится вставкой; тот же довод, что у `recentFabrics`), а
+ * читается ПЕРВАЯ СТРАНИЦА ленты: прогон, свалившийся с неё, следа не оставит — честный предел.
+ */
+export function runLeftNoFabric(run: common_DesignRun): boolean {
+  if (isRunLive(run)) return false;
+  const status = runStatus(run);
+  if (status === 'failed' || status === 'cancelled') return true;
+  const code = (run.errorCode ?? '').trim().toLowerCase();
+  return !!code && code !== SEAM_CODE;
+}
+
+/** Миллисекунды метки провода; `null` — метки нет (четыре написания «нет» — `stampIsSet`). */
+function stampMs(stamp?: string | null): number | null {
+  if (!stampIsSet(stamp)) return null;
+  const ms = Date.parse(stamp ?? '');
+  return Number.isFinite(ms) ? ms : null;
+}
+
+export type RunTraces = {
+  /** По `pairKey` — только нарисованные пары, только новейший прогон пары, только без ткани. */
+  byPair: Map<string, common_DesignRun>;
+  /** Новейший прогон «картинка → ткань», если он кончился без ткани. */
+  image: common_DesignRun | null;
+};
+
+/**
+ * Следы прогонов шага. `drawn` — пары, у которых есть ряд на экране: след пары без ряда сказать
+ * негде, и он не «переезжает» в карусель — там говорят только прогоны без пары.
+ */
+export function runTraces(band: GetDesignBandResponse, drawn: ReadonlySet<string>): RunTraces {
+  const byPair = new Map<string, common_DesignRun>();
+  let image: common_DesignRun | null = null;
+  const seen = new Set<string>();
+  let imageSeen = false;
+  const runs = patternRuns(band)
+    .filter((r) => !isRunArchived(r))
+    .sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
+  for (const run of runs) {
+    const key = pairOfRun(run);
+    if (!key) {
+      if (imageSeen) continue;
+      imageSeen = true;
+      if (runLeftNoFabric(run)) image = run;
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (!drawn.has(key) || !runLeftNoFabric(run)) continue;
+    const [cw, bom] = key.split(':').map(Number);
+    const bound = stampMs(bindingOf(band, cw, bom)?.setAt);
+    if (bound != null) {
+      const asked = stampMs(run.createdAt) ?? stampMs(run.startedAt);
+      // Не доказано, что прогон новее привязки, — следа нет: пара одета, и это правда экрана.
+      if (asked == null || asked <= bound) continue;
+    }
+    byPair.set(key, run);
+  }
+  return { byPair, image };
+}
+
+/** Потолок видимой строки следа — тот же, что у пилюли исхода в истории (`runOutcomeChip`). */
+const TRACE_LINE_MAX = 72;
+
+/**
+ * ЧЕМ КОНЧИЛСЯ ПРОГОН — СЛОВАМИ ИСТОРИИ (`runOutcomeNote`), и одно добавление: `done` с кодом
+ * `runOutcomeNote` печатает голым «done» (для истории это верно — картинка есть), а здесь это
+ * ровно тот случай, ради которого след заведён: «сделано, но на полку не легло». `full` — целиком,
+ * для `title`; `line` — одна строка не длиннее `TRACE_LINE_MAX` (у провайдера бывает 4 000 знаков).
+ */
+export function runTraceNote(run: common_DesignRun): { line: string; full: string } {
+  const code = (run.errorCode ?? '').trim();
+  const full =
+    runStatus(run) === 'done' && code ? `done, not filed · ${code}` : runOutcomeNote(run);
+  return { line: clip(full.replace(/\s+/g, ' ').trim(), TRACE_LINE_MAX), full };
+}
+
 /* ─────────────────────────── карусель ─────────────────────────── */
 
 /**
@@ -452,6 +618,25 @@ export function recentFabrics(band: GetDesignBandResponse, max = 12): common_Des
 }
 
 /* ─────────────────────────── имена ─────────────────────────── */
+
+/**
+ * ТКАНЬ НА ЭТОЙ КАРТОЧКЕ, УЖЕ НОСЯЩАЯ ЭТО ИМЯ — без регистра («Chevron» и «chevron» глазом одно
+ * слово). Ищется по ВСЕЙ полке тканей (`clothShelf`: `fabric` + `pattern`), а не по одним паттернам
+ * (ревью m-1): карусель и сетка CLOTHS рисуют обе полки одним рядом, а промпт рендера цитирует
+ * ткань ПО ИМЕНИ, так что свотч «ROSSO · outer» рядом с загруженной тканью «ROSSO · outer» — две
+ * одинаковые подписи на двух разных тканях. `skipAssetId` пропускает переименовываемую плитку.
+ */
+export function clothTwin(
+  band: GetDesignBandResponse,
+  name: string,
+  skipAssetId = 0,
+): common_DesignAsset | undefined {
+  const key = (name ?? '').trim().toLowerCase();
+  if (!key) return undefined;
+  return clothShelf(band).find(
+    (a) => (a.id ?? 0) !== skipAssetId && assetLabel(a).trim().toLowerCase() === key,
+  );
+}
 
 /**
  * ═══ ИМЕНА МИНТЯТСЯ, А НЕ НАБИРАЮТСЯ (D5) ════════════════════════════════════════════════════
@@ -478,7 +663,7 @@ export function mintSlotName(
       .slice(0, ASSET_NAME_MAX - suffix.length)
       .join('')
       .trimEnd()}${suffix}`;
-    if (!patternTwin(band, name)) return name;
+    if (!clothTwin(band, name)) return name;
   }
   return Array.from(base).slice(0, ASSET_NAME_MAX).join('');
 }

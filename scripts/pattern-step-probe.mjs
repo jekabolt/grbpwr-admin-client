@@ -16,7 +16,10 @@
 //   6 use-for    — `use for ▸` карусели: шаг 1 (колорвеи), шаг 2 (слоты), и после выбора — ткань
 //                  встала в ячейку пары через `SetDesignAssetBinding` и перечитывание полосы;
 //   7 generate   — (сверх постановки) `generate` у ряда OLIVE × inner: `StartDesignRun` и ячейка
-//                  переходит в «making the fabric…» после перечитывания полосы.
+//                  переходит в «making the fabric…» после перечитывания полосы;
+//   8 failed     — (ревью M-1) следы прогонов, не давших ткани: строка под рядом пары (упал,
+//                  отменён, `done` + `library_full`) и пунктирная плитка «картинка → ткань» в голове
+//                  карусели; следа нет у пары, одетой позже падения, и у пары с живым прогоном.
 //
 // React собирается в РАЗРАБОТОЧНОМ режиме: предупреждения о ключах, об обновлении чужого
 // компонента во время рендера и т.п. существуют только там, а ради них проба и ставится.
@@ -454,6 +457,29 @@ for (const vp of VIEWPORTS) {
     entry.notes.push(`StartDesignRun: ${JSON.stringify(runs)}`);
     await row.evaluate((n) => n.scrollIntoView({ block: 'center' }));
     await shoot(page, '7-generate-after', vp, { fullPage: false });
+  });
+
+  // (8) следы прогонов, не давших ткани (ревью M-1)
+  await withPage(vp, '8-failed', async (page, entry) => {
+    await mount(page, 'failed');
+    await facts(page, entry, [
+      ['следов под рядами', '[data-slot-last-run]', 3],
+      ['след ROSSO × contrast', `${cellOf(11, 3)} [data-slot-last-run="911"]`, 1],
+      ['след OLIVE × inner (library_full)', `${cellOf(12, 2)} [data-slot-last-run="912"]`, 1],
+      [
+        'след OLIVE × outer (отменён после привязки)',
+        `${cellOf(12, 1)} [data-slot-last-run="913"]`,
+        1,
+      ],
+      ['нет следа у ROSSO × outer (одет позже)', `${cellOf(11, 1)} [data-slot-last-run]`, 0],
+      ['нет следа у ROSSO × inner (живой прогон)', `${cellOf(11, 2)} [data-slot-last-run]`, 0],
+      ['пунктирная плитка «картинка → ткань»', '[data-fabric-failed="915"]', 1],
+    ]);
+    const lines = await page
+      .locator('[data-slot-last-run]')
+      .evaluateAll((ns) => ns.map((n) => (n.textContent ?? '').trim()));
+    entry.notes.push(`строки следов: ${lines.join(' | ')}`);
+    await shoot(page, '8-failed', vp);
   });
 }
 

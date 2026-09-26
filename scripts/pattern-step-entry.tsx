@@ -40,7 +40,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { SectionStack } from 'ui/components/section';
 import { SnackBar } from 'ui/components/snackbar';
 
-export type ScenarioId = 'empty' | 'no-slots' | 'full' | 'gate';
+export type ScenarioId = 'empty' | 'no-slots' | 'full' | 'gate' | 'failed';
 
 type ApiHandler = (req: Record<string, unknown>) => unknown;
 
@@ -176,6 +176,49 @@ function liveRun(id: number, colorwayId: number, bomItemId: number, name: string
     params: runParams(colorwayId, bomItemId, name),
     attempts: [],
     pictures: [],
+    createdAt: at,
+    startedAt: at,
+  });
+}
+
+/**
+ * ПРОГОН, КОНЧИВШИЙСЯ БЕЗ ТКАНИ (ревью M-1): `failed` / `cancelled`, или `done` с кодом посадки
+ * (`library_full` — картинка куплена, полке места нет). Метка времени — ЯВНАЯ, а не «сейчас минус
+ * N»: след пары сравнивается с `setAt` её привязки (2026-09-21 в стенде), и часы машины пробы не
+ * должны решать, виден ли он.
+ */
+function endedRun(
+  id: number,
+  colorwayId: number,
+  bomItemId: number,
+  name: string,
+  status: 'failed' | 'cancelled' | 'done',
+  at: string,
+  errorCode = '',
+  lastError = '',
+) {
+  return wire<common_DesignRun>({
+    id,
+    techCardId: TECH_CARD_ID,
+    kind: 'pattern',
+    status,
+    clientRequestId: `probe-${id}`,
+    ask: '',
+    params:
+      colorwayId > 0
+        ? runParams(colorwayId, bomItemId, name)
+        : wire<common_DesignRunParams>({
+            views: [],
+            layout: '',
+            colour: undefined,
+            extraInputMediaIds: [777],
+            colorwayId: 0,
+            pattern: { repeatMm: 0, name, sourceAssetId: 0, mode: '', bomItemId: 0 },
+          }),
+    attempts: [],
+    pictures: [],
+    errorCode,
+    lastError,
     createdAt: at,
     startedAt: at,
   });
@@ -351,6 +394,75 @@ function scenario(id: ScenarioId): Scenario {
           assets: threeFabrics(),
           assetBindings: [binding(1, ROSSO, 1, 101), binding(2, OLIVE, 1, 102)],
           runs: [liveRun(900, ROSSO, 2, 'ROSSO · inner', 14)],
+        }),
+      };
+    // (8) СЛЕДЫ ПРОГОНОВ, НЕ ДАВШИХ ТКАНИ (ревью M-1). Видны РОВНО ТРИ строки под рядами и ОДНА
+    //     пунктирная плитка в карусели:
+    //       · ROSSO × contrast — упал (`provider_error`), привязки нет → след;
+    //       · OLIVE × inner — `done` + `library_full` (куплено, не легло) → след с советом;
+    //       · OLIVE × outer — отменён ПОЗЖЕ привязки 09-21 → след;
+    //       · ROSSO × outer — упал 09-20, РАНЬШЕ привязки → следа нет (пара одета позже);
+    //       · ROSSO × inner — упал, но новее него живой прогон 900 → следа нет, ячейка «making…»;
+    //       · «картинка → ткань» — новейший упал (`provider_timeout`) → плитка в голове карусели.
+    case 'failed':
+      return {
+        colourways: COLOURWAYS,
+        bomItems: [...CLOTH_LINES, ...NON_CLOTH_LINES],
+        band: band({
+          assets: threeFabrics(),
+          assetBindings: [binding(1, ROSSO, 1, 101), binding(2, OLIVE, 1, 102)],
+          runs: [
+            endedRun(
+              915,
+              0,
+              0,
+              'fabric 2',
+              'failed',
+              '2026-09-24T09:00:00Z',
+              'provider_timeout',
+              'the image provider did not answer in 180 s',
+            ),
+            endedRun(913, OLIVE, 1, 'OLIVE · outer 2', 'cancelled', '2026-09-23T10:00:00Z'),
+            endedRun(
+              912,
+              OLIVE,
+              2,
+              'OLIVE · inner',
+              'done',
+              '2026-09-22T12:00:00Z',
+              'library_full',
+              'the shelf of tech card 42 was full when the tile landed',
+            ),
+            endedRun(
+              911,
+              ROSSO,
+              3,
+              'ROSSO · contrast / facing',
+              'failed',
+              '2026-09-22T10:00:00Z',
+              'provider_error',
+              'the provider answered 500 Internal Server Error',
+            ),
+            liveRun(900, ROSSO, 2, 'ROSSO · inner', 14),
+            endedRun(
+              890,
+              ROSSO,
+              2,
+              'ROSSO · inner',
+              'failed',
+              '2026-09-22T09:00:00Z',
+              'provider_error',
+            ),
+            endedRun(
+              880,
+              ROSSO,
+              1,
+              'ROSSO · outer',
+              'failed',
+              '2026-09-20T09:00:00Z',
+              'provider_error',
+            ),
+          ],
         }),
       };
     // (4) ВОРОТА ВОЗМОЖНОСТИ: бинарь старше привязок — `assetBindings` НЕ ПРИСЛАН (≠ пусто).
