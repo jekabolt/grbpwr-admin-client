@@ -1,8 +1,11 @@
 // Точка входа пробы автосейва / авто-стейджа / отката текста (волна 25.09, CL-A).
 export {
   anyDirty,
+  bodyFingerprint,
   bodyMoved,
+  bodyOnTheWire,
   bodyWorkOf,
+  formOnTheWire,
   createAutosaveMachine,
   deepEqual,
   isSaveShortcut,
@@ -23,6 +26,7 @@ export {
   TEXT_SECTIONS,
 } from '../src/components/managers/tech-card/components/save-history';
 export {
+  mapFormToTechCardInsert,
   mapTechCardToForm,
   techCardDefaultData,
 } from '../src/components/managers/tech-card/components/schema';

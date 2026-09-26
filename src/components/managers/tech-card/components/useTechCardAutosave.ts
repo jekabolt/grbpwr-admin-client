@@ -260,6 +260,10 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
     }
     if (mode === 'silent') {
       const v = await deps.validate();
+      // ревью mn-5: a read judged while the check ran may have opened the conflict decision — it
+      // stands; neither «invalid» nor «saving» is painted over it, and nothing is written.
+      // (read afresh: the check above narrowed `state` for TypeScript, not for the code that ran since)
+      if ((state as MachineState).status === 'conflict') return 'conflict';
       if (!v.ok) {
         set({ status: 'invalid', errorsCount: v.errors, message: undefined, retrying: undefined });
         return 'invalid';
@@ -735,21 +739,62 @@ function pinRowKeys(card: common_TechCard): common_TechCard {
   };
 }
 
-/** The body a write built on `card` would put on the wire, `echo` standing in for the stored fields it echoes. */
-function bodyOnTheWire(
-  card: common_TechCard,
+/**
+ * The body a body write of these form values puts on the wire, `echo` standing in for the stored fields
+ * it echoes (ревью mn-1: what this page SENT, to compare a later reading with when it has no card).
+ */
+export function formOnTheWire(
+  values: TechCardFormData,
   echo: common_TechCardInsert | undefined,
   canWriteCosting: boolean,
 ): Record<string, unknown> {
   const wire = {
-    ...(mapFormToTechCardInsert(
-      mapTechCardToForm(pinRowKeys(card)),
-      echo,
-      canWriteCosting,
-    ) as unknown as Record<string, unknown>),
+    ...(mapFormToTechCardInsert(values, echo, canWriteCosting) as unknown as Record<
+      string,
+      unknown
+    >),
   };
   for (const k of STYLE_OWNED_INSERT_KEYS) delete wire[k];
   return wire;
+}
+
+/** The body a write built on `card` would put on the wire, `echo` standing in for the stored fields it echoes. */
+export function bodyOnTheWire(
+  card: common_TechCard,
+  echo: common_TechCardInsert | undefined,
+  canWriteCosting: boolean,
+): Record<string, unknown> {
+  return formOnTheWire(mapTechCardToForm(pinRowKeys(card)), echo, canWriteCosting);
+}
+
+/** JSON with sorted keys and no null/undefined members — two equal bodies (deepEqual) print the same. */
+function stableJson(v: unknown): string {
+  if (v == null) return 'null';
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(',')}]`;
+  if (v instanceof Date) return JSON.stringify(v.toISOString());
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    const keys = Object.keys(o)
+      .filter((k) => o[k] != null)
+      .sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableJson(o[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v);
+}
+
+/**
+ * A FINGERPRINT OF THE CARD'S BODY (ревью MJ-3) — what a draft remembers of the card it was typed on, so a
+ * restore over a card whose body moved since can ask first, and one whose version moved without the body
+ * (a panel, a roll-up) does not. FNV-1a over the stable JSON of the wire body; not a secret, not a lock.
+ */
+export function bodyFingerprint(card: common_TechCard, canWriteCosting: boolean): string {
+  const text = stableJson(bodyOnTheWire(card, card.techCard, canWriteCosting));
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return `${text.length.toString(36)}.${(h >>> 0).toString(36)}`;
 }
 
 /**
@@ -1005,6 +1050,14 @@ export function useTechCardAutosaveController(opts: {
   // best-effort flushes on leaving (unmount, hidden, pagehide) do not write it either — opening a card
   // and leaving it writes nothing.
   const personBehind = () => gestures.current > 0 || requestedEarly.current || heard.current;
+  // ревью mn-4: the form's dirt as it stood when last looked at with nobody behind the page — a values
+  // event that leaves it where it was (a mirror writing back the value it holds) is not a change.
+  const dirtSignature = () => {
+    const o = optsRef.current;
+    const sparse = sparseDirtyFields(o.form.control._formState.dirtyFields) ?? null;
+    return `${JSON.stringify(sparse)}|${o.bodyWork?.() ?? liveIsDirty(o.form)}`;
+  };
+  const quietDirt = useRef('');
 
   // Машина живёт от монтирования до размонтирования и создаётся В ЭФФЕКТЕ, а не в рендере: StrictMode
   // размонтирует и монтирует эффекты заново, и машина, убитая первой уборкой, осталась бы мёртвой.
@@ -1031,6 +1084,7 @@ export function useTechCardAutosaveController(opts: {
       armAtCreation: personBehind,
     });
     machineRef.current = m;
+    quietDirt.current = dirtSignature();
     // Already `dirty` when a child's effect dirtied the form before this one ran (R-12) — and armed only
     // when a person is behind that work (m7).
     setState(m.state());
@@ -1064,6 +1118,13 @@ export function useTechCardAutosaveController(opts: {
     const sub = form.watch(() =>
       queueMicrotask(() => {
         if (!alive) return;
+        // mn-4: with nobody behind the page yet, only an event that moves the dirt (or the body's work)
+        // is heard — a value-preserving mirror must not arm work found at mount.
+        if (!personBehind()) {
+          const sig = dirtSignature();
+          if (sig === quietDirt.current) return;
+          quietDirt.current = sig;
+        }
         heard.current = true;
         machineRef.current?.notifyChange();
       }),

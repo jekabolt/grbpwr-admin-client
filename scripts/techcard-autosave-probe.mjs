@@ -13,7 +13,8 @@
 //       RHF (createFormControl) и настоящий маппер схемы;
 //   (8) хелперы записи: «грязно ли что-то под узлом» по полной карте RHF (m4); отказ панели — только
 //       её собственный, в той же задаче (m2); сдвинулось ли ТЕЛО между двумя чтениями карточки (M-3);
-//       работа тела формы без фактов стиля (M2);
+//       работа тела формы без фактов стиля (M2); тело, которое страница ОТПРАВИЛА, против прочитанного
+//       потом (mn-1); отпечаток тела, по которому черновик узнаёт, сдвинулась ли карточка (MJ-3);
 //   (7) панель, которую правят во время каждого её коммита, не упирается в потолок `restaged` —
 //       потолок держит только панель, перестейдживающую саму себя (R-9); flush, не дождавшийся
 //       тишины, отвечает `busy` (R-10); работа, возникшая раньше машины, взводится при создании
@@ -166,8 +167,24 @@ const MUTANTS = {
   keysNotPinned: [
     [
       `${C}/useTechCardAutosave.ts`,
-      '      mapTechCardToForm(pinRowKeys(card)),',
-      '      mapTechCardToForm(card),',
+      'formOnTheWire(mapTechCardToForm(pinRowKeys(card)), echo, canWriteCosting)',
+      'formOnTheWire(mapTechCardToForm(card), echo, canWriteCosting)',
+    ],
+  ],
+  // (7h) ОТКАТ mn-5: конфликт, открытый, пока шла тихая проверка, перекрашивается и пишется поверх
+  conflictDuringCheckOverwritten: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "      if ((state as MachineState).status === 'conflict') return 'conflict';\n",
+      '',
+    ],
+  ],
+  // (8g) отпечаток не видит тела: восстановление поверх сдвинутой карточки не спросит
+  fingerprintBlind: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      '  const text = stableJson(bodyOnTheWire(card, card.techCard, canWriteCosting));',
+      "  const text = '';",
     ],
   ],
   // (8e) факты стиля считаются движением тела
@@ -876,6 +893,22 @@ async function promise7(mod) {
   r.m.settleExternal({ outcome: 'complete' }, 'convert');
   out.externalWriteSettlesStatus =
     heldForDialog && r.m.state().status === 'saved' && r.completes.join() === 'convert';
+
+  // mn-5 · a read judged while the quiet check runs opens the conflict decision: it stands — the cycle
+  // neither paints «saving»/«invalid» over it nor writes
+  r = bareRig(mod, (rig) => ({
+    validate: async () => {
+      rig.m.settleExternal({ outcome: 'conflict', message: 'their body moved' }, 'read');
+      return { ok: true, errors: 0 };
+    },
+    save: async () => {
+      rig.saves += 1;
+      return { outcome: 'complete' };
+    },
+  }));
+  r.m.notifyChange();
+  await r.clock.advance(2000);
+  out.conflictDuringCheckStands = r.saves === 0 && r.m.state().status === 'conflict';
   return out;
 }
 
@@ -960,6 +993,37 @@ async function promise8(mod) {
     !mod.bodyMoved(from, bump({ costing: { currency: 'EUR', notes: 'theirs' } }), false) &&
     mod.bodyMoved(from, bump({ costing: { currency: 'EUR', notes: 'theirs' } }), true);
   out.keylessRowsCompare = !mod.bodyMoved(from, bump({}), true);
+
+  // mn-1 · no card read back after this page's own write: the body it SENT stands in for it — a later
+  // reading with that body (a panel's bump on top) is no move; another editor's concept is
+  const echo = from.techCard;
+  const sentValues = mod.mapTechCardToForm(from);
+  sentValues.name = 'parka 2';
+  const sentBody = mod.formOnTheWire(sentValues, echo, true);
+  // what the server keeps is what was sent (its row keys included), under a panel's bump
+  const readBack = {
+    ...from,
+    lockVersion: 5,
+    colorways: [{ colorwayId: 1 }],
+    techCard: mod.mapFormToTechCardInsert(sentValues, echo, true),
+  };
+  const theirsOnTop = {
+    ...readBack,
+    lockVersion: 6,
+    techCard: { ...readBack.techCard, concept: 'theirs' },
+  };
+  out.sentBodyIsNoMove =
+    mod.deepEqual(mod.bodyOnTheWire(readBack, echo, true), sentBody) &&
+    !mod.deepEqual(mod.bodyOnTheWire(theirsOnTop, echo, true), sentBody);
+
+  // MJ-3 · the fingerprint a draft keeps of its card: the same through a version bump, a colourway and
+  // a reordered object; another with a moved body
+  const shuffled = JSON.parse(JSON.stringify(from));
+  shuffled.techCard = Object.fromEntries(Object.entries(shuffled.techCard).reverse());
+  out.fingerprintFollowsTheBody =
+    mod.bodyFingerprint(from, true) ===
+      mod.bodyFingerprint({ ...shuffled, lockVersion: 9, colorways: [{ colorwayId: 3 }] }, true) &&
+    mod.bodyFingerprint(from, true) !== mod.bodyFingerprint(bump({ concept: 'theirs' }), true);
 
   // M2 · a style fact is not the body's work; any other field is
   const form = formFor(mod, mod.mapTechCardToForm(BODY_CARD()));
@@ -1074,12 +1138,19 @@ report('(7) mutant noArmAtCreation', await promise7(await load('noArmAtCreation'
 ]);
 report('(7) mutant externalIgnored', await promise7(await load('externalIgnored')), [
   'externalWriteSettlesStatus',
+  // the mn-5 check puts the machine into conflict through the same door
+  'conflictDuringCheckStands',
 ]);
 report('(7) mutant mountDirtArmed', await promise7(await load('mountDirtArmed')), [
   'mountDirtWaitsForAPerson',
   'pausedCycleResumes',
 ]);
 report('(7) mutant noResume', await promise7(await load('noResume')), ['pausedCycleResumes']);
+report(
+  '(7) mutant conflictDuringCheckOverwritten',
+  await promise7(await load('conflictDuringCheckOverwritten')),
+  ['conflictDuringCheckStands'],
+);
 report('(8) mutant anyDirtyArrays', await promise8(await load('anyDirtyArrays')), [
   'fullMapEmptyArrayIsClean',
 ]);
@@ -1095,12 +1166,16 @@ report('(8) mutant keysNotPinned', await promise8(await load('keysNotPinned')), 
   'styleFactIsNoMove',
   'costingByWhoWritesIt',
   'keylessRowsCompare',
+  'fingerprintFollowsTheBody',
 ]);
 report('(8) mutant styleOwnedCounted', await promise8(await load('styleOwnedCounted')), [
   'styleFactIsNoMove',
 ]);
 report('(8) mutant styleFactsAreBodyWork', await promise8(await load('styleFactsAreBodyWork')), [
   'styleFactIsNotBodyWork',
+]);
+report('(8) mutant fingerprintBlind', await promise8(await load('fingerprintBlind')), [
+  'fingerprintFollowsTheBody',
 ]);
 
 console.log(

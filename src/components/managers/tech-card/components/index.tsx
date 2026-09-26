@@ -104,7 +104,7 @@ import { SizeChartField } from './size-chart-field';
 import { StyleFactsField } from './style-facts-field';
 import { STYLE_FACT_KEYS } from './tech-card-options';
 import { TechCardFittings } from './tech-card-fittings';
-import { useTechCardDraft } from './useTechCardDraft';
+import { useTechCardDraft, type DraftStamp } from './useTechCardDraft';
 import {
   auditOperationPresence,
   contradictsScreen,
@@ -123,12 +123,14 @@ import {
   type AutosaveApi,
 } from './design/autosave-contract';
 import {
+  bodyFingerprint,
   bodyMoved,
+  bodyOnTheWire,
   bodyWorkOf,
   deepEqual,
+  formOnTheWire,
   hasHttpStatus,
   isConflictError,
-  liveIsDirty,
   settleFormAfterSave,
   useTechCardAutosaveController,
   watchOwnFailure,
@@ -614,6 +616,20 @@ export function TechCardForm({
     );
   };
   const [conflict, setConflict] = useState(false);
+  // ревью MJ-3: a restore over a card that moved since the draft waits for this answer.
+  const [restoreAsk, setRestoreAsk] = useState<{
+    id: string | undefined;
+    from: number | null;
+    to: number;
+  } | null>(null);
+  // ревью mn-5: the conflict decision is PENDING from the moment it opens until «keep mine» answers it
+  // (the modal's own close only hides it; the chip shows it again). While it is pending nothing is
+  // written — a write that was already on its way to the wire (the check before it awaited) included.
+  const conflictOpen = useRef(false);
+  const openConflict = () => {
+    conflictOpen.current = true;
+    setConflict(true);
+  };
   // A sellable→auxiliary save held back until the operator answers for the live colourways it has to
   // retire first (NF-07 purpose lock). Carries the validated payload so «archive & switch» re-runs
   // exactly the save that was intercepted, not whatever the form holds a few seconds later.
@@ -842,6 +858,13 @@ export function TechCardForm({
     stagingIO,
     // Every movement of the staged queue re-writes the draft, not only the first (B-04).
     staging.revision,
+    {
+      // mn-3: on a saved card the work worth a draft is the body's (and the queue's); a new card's
+      // create writes the style facts too, so all of its dirt counts.
+      formWork: isEditMode ? () => bodyWorkOf(form) : undefined,
+      // MJ-3: the card under the work — its version and body fingerprint (computed once per card).
+      stamp: isEditMode && numId ? () => draftStamp() : undefined,
+    },
   );
 
   // Section-completion progress (Q9): a visible "how filled is this card" signal, per tab + overall.
@@ -1005,11 +1028,31 @@ export function TechCardForm({
   // stops at the conflict decision. The cache used to be the claim — every refetch that picked up
   // someone else's write handed THEIR version to this page's next PUT, which then wrote this page's
   // stale fields straight over theirs with nothing to refuse it.
-  const base = useRef<{ version: number; card: common_TechCard | null }>({
+  const base = useRef<{
+    version: number;
+    card: common_TechCard | null;
+    // ревью mn-1: with no card at this version (the read after this page's own write failed, or brought a
+    // newer one), the body this page SENT under it — a later reading whose body is that is not a move.
+    sent?: { body: Record<string, unknown>; echo: common_TechCardInsert | undefined };
+  }>({
     version: techCard?.lockVersion ?? 0,
     card: techCard ?? null,
   });
   const claimVersion = () => lockOverride.current ?? base.current.version;
+  // ревью MJ-3: the card a draft is typed on — its version, and its body's fingerprint when this page
+  // holds the card (once per card: every draft write asks).
+  const stampCache = useRef<{ card: common_TechCard | null; body?: string }>({ card: null });
+  function draftStamp(): DraftStamp {
+    const cur = base.current;
+    if (cur.card && stampCache.current.card !== cur.card) {
+      stampCache.current = { card: cur.card, body: bodyFingerprint(cur.card, canWriteCosting) };
+    }
+    return {
+      version: cur.version,
+      body: cur.card ? stampCache.current.body : undefined,
+      updatedAt: (cur.card ?? techCard)?.updatedAt,
+    };
+  }
   const adopt = (card: common_TechCard) => {
     base.current = { version: card.lockVersion ?? 0, card };
   };
@@ -1095,18 +1138,41 @@ export function TechCardForm({
       if (!cur.card) adopt(fresh);
       return 'same';
     }
-    if (cur.card && !bodyMoved(cur.card, fresh, canWriteCosting)) {
+    // The body did not move since the card this page stands on — or, when that card was never read back,
+    // since the body this page SENT under its version (mn-1): a panel's bump, a roll-up. Taken.
+    const unmoved = cur.card
+      ? !bodyMoved(cur.card, fresh, canWriteCosting)
+      : !!cur.sent &&
+        deepEqual(bodyOnTheWire(fresh, cur.sent.echo, canWriteCosting), cur.sent.body);
+    if (unmoved) {
       adopt(fresh);
       return 'adopted';
     }
-    if (liveIsDirty(form) || staging.peek().length > 0) return 'conflict';
-    const before = cloneFormValues(form.getValues());
-    const server = mapTechCardToForm(fresh);
+    // MJ-1: only unsaved work of the BODY stops at the decision. Work outside it — a staged panel, a style
+    // fact, dirt nobody can write (mn-3) — is not what their write moved: the body is rebased onto
+    // theirs and the queue is kept.
+    if (bodyWorkOf(form)) return 'conflict';
+    rebaseOnto(fresh);
     adopt(fresh);
     lastBody.current = null;
-    settleAfterBodySave(before, { values: server, server });
     calloutHistory.reset();
     return 'rebased';
+  }
+  // THEIR CARD UNDER THIS FORM (ревью MJ-1). Every key the operator has not changed against the baseline
+  // takes theirs, value and baseline; a changed key stays the operator's — dirty against their card, so
+  // the next write carries it; the style facts are the style panel's and are not moved at all (M2).
+  // Without it, a form that stood on the old body kept showing it after the page took their version,
+  // and the next unrelated edit's full-replace write put the old body back over theirs, unrefused.
+  function rebaseOnto(fresh: common_TechCard) {
+    // The baseline object is not written by the merge (setValue writes the values), so it serves as
+    // the comparison when it cannot be cloned.
+    const baseline =
+      cloneFormValues(form.control._defaultValues as TechCardFormData) ??
+      (form.control._defaultValues as TechCardFormData);
+    const values = form.getValues();
+    const server = mapTechCardToForm(fresh);
+    for (const k of STYLE_FACT_KEYS) (server as Record<string, unknown>)[k] = values[k];
+    settleAfterBodySave(baseline, { values: server, server }, undefined, STYLE_FACT_KEYS);
   }
   // A read that arrived by itself (a refetch after someone's invalidation, a reconnect): judged when no
   // write chain of this page is on the wire — a chain settles `base` with its own reads, and this runs
@@ -1117,7 +1183,7 @@ export function TechCardForm({
     if (!fresh) return;
     if (reconcileRead(fresh) !== 'conflict') return;
     leaveFullscreen();
-    setConflict(true);
+    openConflict();
     autosave.settleExternal(
       { outcome: 'conflict', message: 'another editor saved this card meanwhile' },
       'read',
@@ -1126,16 +1192,25 @@ export function TechCardForm({
   // The quiet answer to a 409 on the auto-stage's own write: take the card the other save left, and
   // let the next readiness answer decide the stage again. `before` is the form as the auto-stage
   // wrote it. Returns whether the card was re-read.
-  async function quietReload(before: TechCardFormData | null): Promise<boolean> {
-    if (!numId) return false;
+  async function quietReload(
+    before: TechCardFormData | null,
+  ): Promise<'reread' | 'failed' | 'typed'> {
+    if (!numId) return 'failed';
     lockOverride.current = null;
     let fresh: common_TechCard | undefined;
     try {
       fresh = (await adminService.GetTechCard({ id: numId, vatCountryCode: undefined })).techCard;
     } catch {
-      return false;
+      return 'failed';
     }
-    if (!fresh) return false;
+    if (!fresh) return 'failed';
+    // ревью mn-2: typed while the read was on the wire — the merge below would keep each typed key
+    // WHOLE, with their card as its baseline, and the next write would put that key back over theirs
+    // (another row of the same list). Nothing about that is quiet: the decision.
+    if (!autoStageUntouched()) {
+      queryClient.setQueryData(techCardKeys.detail(numId), fresh);
+      return 'typed';
+    }
     // The card this form stands on from here (M-3): the merge below takes it everywhere untouched.
     adopt(fresh);
     lastBody.current = null;
@@ -1148,7 +1223,7 @@ export function TechCardForm({
     settleAfterBodySave(before, { values: server, server });
     calloutHistory.reset();
     void queryClient.invalidateQueries({ queryKey: techCardKeys.readiness(numId) });
-    return true;
+    return 'reread';
   }
 
   // HISTORY of saved TEXT (save-history.ts, D-17'). «as opened» is the text this page opened with —
@@ -1237,6 +1312,8 @@ export function TechCardForm({
     sent: TechCardFormData,
     // The version this page's body write claimed and got: the server holds `expected + 1` now (M-3).
     expected?: number,
+    // The stored fields that write echoed (the mapper's `original`) — for the body it put on the wire (mn-1).
+    echo?: common_TechCardInsert,
   ): Promise<{
     values: TechCardFormData;
     audit: PresenceAudit | null;
@@ -1269,7 +1346,14 @@ export function TechCardForm({
     });
     if (!numId) return done(sent);
     // M-3: the write landed under `expected + 1` — that version is this page's, whatever the read says.
-    if (expected !== undefined) base.current = { version: expected + 1, card: null };
+    // mn-1: and until its card is read, the body it sent is what this page knows of it.
+    if (expected !== undefined) {
+      base.current = {
+        version: expected + 1,
+        card: null,
+        sent: { body: formOnTheWire(sent, echo, canWriteCosting), echo },
+      };
+    }
     let fresh: common_TechCard | undefined;
     try {
       const res = await adminService.GetTechCard({ id: numId, vatCountryCode: undefined });
@@ -1343,6 +1427,15 @@ export function TechCardForm({
   ): Promise<WriteResult> {
     writing.current += 1;
     try {
+      // mn-5: the decision is pending — nothing goes out but its answer («keep mine» closes it first).
+      if (conflictOpen.current) {
+        return {
+          bodySaved: false,
+          ok: false,
+          outcome: 'conflict',
+          message: 'this card moved on without you — decide first',
+        };
+      }
       // m1: the read this page needed after its last write never came back — the card it stands on is
       // unknown, so nothing is built on it until it is read.
       if (isEditMode && numId && needsRead.current) {
@@ -1358,7 +1451,7 @@ export function TechCardForm({
         if (r === 'conflict') {
           const message = 'another editor saved this card meanwhile';
           leaveFullscreen();
-          setConflict(true);
+          openConflict();
           if (opts.mode !== 'silent') showMessage(message, 'error');
           return { bodySaved: false, ok: false, outcome: 'conflict', message };
         }
@@ -1402,7 +1495,6 @@ export function TechCardForm({
     opts: { mode: SaveMode; autoStage?: boolean; keepPurpose?: string },
   ): Promise<WriteResult> {
     const silent = opts.mode === 'silent';
-    setConflict(false);
     setStagingError(null);
     // Оба баннера — факты о ПРЕДЫДУЩЕЙ попытке. Новая попытка начинается с чистого экрана,
     // иначе «карточка не сохранена» продолжало бы стоять над уже сохранённой карточкой.
@@ -1423,8 +1515,9 @@ export function TechCardForm({
     // prop (R-2b): a pass chained right after a re-read runs before the render that brings the prop
     // up to date, and would put the other editor's fields back the way they were — under a fresh
     // version, so nothing would refuse it.
+    const original = (base.current.card ?? storedCard())?.techCard;
     const { payload: techCardInsert } = gateTechCardPayload(
-      mapFormToTechCardInsert(data, (base.current.card ?? storedCard())?.techCard, canWriteCosting),
+      mapFormToTechCardInsert(data, original, canWriteCosting),
       { serverSpeaksDesign: designBandSpeaks },
     );
     let bodySaved = false;
@@ -1508,7 +1601,7 @@ export function TechCardForm({
           // Reset to what the SERVER now holds, not to what we sent — above all so a sign-off that
           // was just approved carries its stamped digest instead of the blank that MEANS "approve
           // now" (see withServerAssignedValues).
-          const settled = await withServerAssignedValues(data, expected);
+          const settled = await withServerAssignedValues(data, expected, original);
           // What the server holds as the body now, and the version it holds it under — the backstop
           // above compares the next body against it.
           lastBody.current = { payload: bodyKey, lock: base.current.version };
@@ -1570,7 +1663,7 @@ export function TechCardForm({
         if (reread === 'conflict') {
           const message = 'another editor saved this card while it was being saved';
           leaveFullscreen();
-          setConflict(true);
+          openConflict();
           if (!silent) showMessage(message, 'error');
           return { bodySaved, ok: false, outcome: 'conflict', message };
         }
@@ -1580,7 +1673,7 @@ export function TechCardForm({
           if (isConflictError(error) || !!own?.conflict) {
             const message = `«${change.label}» was changed by someone else meanwhile`;
             leaveFullscreen();
-            setConflict(true);
+            openConflict();
             if (!silent) showMessage(message, 'error');
             return { bodySaved, ok: false, outcome: 'conflict', message };
           }
@@ -1725,7 +1818,8 @@ export function TechCardForm({
       // is not a conflict anyone has to decide — the other tab already moved the card. Re-read it
       // quietly and let the next readiness answer decide again.
       if (status === 409 && opts.autoStage && autoStageUntouched()) {
-        if (await quietReload(autoStageBaseline.current)) {
+        const reread = await quietReload(autoStageBaseline.current);
+        if (reread === 'reread') {
           return { bodySaved, ok: false, outcome: 'nothing' };
         }
         // B-07: nothing re-read, nothing to reconcile against. The raised stage goes back to what is
@@ -1734,6 +1828,13 @@ export function TechCardForm({
         // this page's stale values is how a write would silently overwrite the other editor.
         const saved = (form.control._defaultValues as Partial<TechCardFormData>).stage ?? '';
         form.setValue('stage', saved, { shouldDirty: true });
+        // mn-2: typed during the read — their card moved under the typing; the decision, not a merge.
+        if (reread === 'typed') {
+          const message = 'another editor saved this card while you were typing';
+          leaveFullscreen();
+          openConflict();
+          return { bodySaved, ok: false, outcome: 'conflict', message };
+        }
         return {
           bodySaved,
           ok: false,
@@ -1745,7 +1846,7 @@ export function TechCardForm({
       // `ClearAssemblyButton`, единственный выход из щита «карточка несёт узлы», живут под
       // оверлеем. Фулскрин уходит раньше, чем что-либо из этого показывается.
       if (!silent || status === 409) leaveFullscreen();
-      if (status === 409) setConflict(true);
+      if (status === 409) openConflict();
       // ОТКАЗ ТРАНСПОРТА РАСПОЗНАЁТСЯ ПЕРВЫМ. Строгий маршалер (Ф2) отвечает на незнакомое поле
       // или незнакомое имя члена словаря 400 без единого поимённого нарушения: RPC не звали,
       // карточка не тронута. Показывать это «голым сообщением» значит показать человеку
@@ -2110,8 +2211,14 @@ export function TechCardForm({
       const res = await adminService.GetTechCard({ id: numId, vatCountryCode: undefined });
       lockOverride.current = res.techCard?.lockVersion ?? 0;
       // The operator's own choice (M-3): this page stands on their card from here, and the write below
-      // claims its version — the one adoption a moved body gets without a rebase.
-      if (res.techCard) adopt(res.techCard);
+      // claims its version. MJ-1: what the operator did NOT change takes their card first — «keep mine»
+      // keeps the operator's changes, not the body the conflict found under them; left as it was, that
+      // body went out with this write (or, with no body work, with the next unrelated edit's write,
+      // under their version, unrefused).
+      if (res.techCard) {
+        rebaseOnto(res.techCard);
+        adopt(res.techCard);
+      }
       // И САМУ КАРТОЧКУ, А НЕ ТОЛЬКО НОМЕР ВЕРСИИ. Прочитанное здесь — это то, ЧТО лежит на
       // сервере сейчас, и от него зависит не только замок: маппер записи спреадит `original`
       // (поля, которых форма не ведёт), а щиты совместимости решают по нему, объявлять ли
@@ -2135,6 +2242,9 @@ export function TechCardForm({
     // Through the autosave's queue as an EXPLICIT save. The operator's own choice is what lifts the
     // pause on a conflict — the ONLY thing that does, ⌘S included (M-01; B-02: the autosave never
     // picks «keep mine» by itself) — and it is lifted only now, with the current version in hand.
+    // Answered (mn-5): writes may go out again — this one first.
+    conflictOpen.current = false;
+    setConflict(false);
     autosave.resolveConflict();
     void save();
   };
@@ -2230,6 +2340,23 @@ export function TechCardForm({
     // M2: a style fact is work only through the style panel's queue — the body never writes it.
     bodyWork: () => bodyWorkOf(form),
   });
+
+  // THE DRAFT BANNER'S DOORS. A restore over a card whose body moved since the draft asks first (ревью
+  // MJ-3); restored work is unsaved work — the autosave hears it at once (B-1).
+  function doRestore(id: string | undefined) {
+    setRestoreAsk(null);
+    draft.restore(id);
+    autosave.request('restore');
+  }
+  function askRestore(id: string | undefined) {
+    const moved = draft.movedSince(id);
+    if (moved) setRestoreAsk({ id, ...moved });
+    else doRestore(id);
+  }
+  function discardDrafts() {
+    setRestoreAsk(null);
+    draft.clear();
+  }
 
   const saving = form.formState.isSubmitting || autosave.status === 'saving';
   // A card at rest has nothing to answer for: the quiet check's list goes with the work it was about
@@ -2504,7 +2631,8 @@ export function TechCardForm({
                 errorsCount={autosave.errorsCount}
                 message={autosave.message}
                 retrying={autosave.retrying}
-                bodyDirty={form.formState.isDirty}
+                // mn-3: dirt nobody can write is not «waiting» (read after the subscription).
+                bodyDirty={form.formState.isDirty && bodyWorkOf(form)}
                 staged={staging.changes}
                 history={history.entries}
                 currentText={textSnapshotOf(form.getValues())}
@@ -2776,52 +2904,99 @@ export function TechCardForm({
 
       {/* Draft and frozen stay inline — they are context, not decisions. */}
       {draft.pending && (
-        <CalloutBox tone='warning' className='mt-2.5 flex flex-wrap items-center gap-2'>
-          {/* M-1: two drafts when the last visit typed under this banner and left without answering
-              it — the newer one first, the older one kept beside it until one of them is chosen. */}
-          <Text size='micro'>
-            {draft.earlier ? 'unsaved work was found' : 'an unsaved draft was found'}
-            {draft.pending.savedAt
-              ? ` from ${new Date(draft.pending.savedAt).toLocaleString('en-US')}`
-              : ''}
-            {draft.earlier
-              ? `, and an earlier draft${
-                  draft.earlier.savedAt
-                    ? ` from ${new Date(draft.earlier.savedAt).toLocaleString('en-US')}`
-                    : ''
-                } — restore one (the other is discarded) or discard both?`
-              : ' — restore it or discard it?'}
-          </Text>
-          <div className='ml-auto flex gap-1.5'>
-            {/* B-1: the restored work is unsaved work — the autosave hears it at once. */}
-            <Button
-              type='button'
-              variant='main'
-              size='sm'
-              onClick={() => {
-                draft.restore('draft');
-                autosave.request('restore');
-              }}
-            >
-              {draft.earlier ? 'restore the newer' : 'restore'}
-            </Button>
-            {draft.earlier && (
-              <Button
-                type='button'
-                variant='secondary'
-                size='sm'
-                onClick={() => {
-                  draft.restore('earlier');
-                  autosave.request('restore');
-                }}
-              >
-                restore the earlier
-              </Button>
-            )}
-            <Button type='button' variant='secondary' size='sm' onClick={draft.clear}>
-              {draft.earlier ? 'discard both' : 'discard'}
-            </Button>
-          </div>
+        <CalloutBox tone='warning' className='mt-2.5 flex flex-col gap-2'>
+          {draft.drafts.length <= 1 ? (
+            <div className='flex flex-wrap items-center gap-2'>
+              <Text size='micro'>
+                an unsaved draft was found
+                {draft.pending.savedAt
+                  ? ` from ${new Date(draft.pending.savedAt).toLocaleString('en-US')}`
+                  : ''}{' '}
+                — restore it or discard it?
+              </Text>
+              <div className='ml-auto flex gap-1.5'>
+                <Button
+                  type='button'
+                  variant='main'
+                  size='sm'
+                  onClick={() => askRestore(draft.drafts[0]?.id)}
+                >
+                  restore
+                </Button>
+                <Button type='button' variant='secondary' size='sm' onClick={discardDrafts}>
+                  discard
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* MJ-2: every visit that left work beside an unanswered draft left a draft of its own —
+                  all of them are here, the newest first, until one is restored or all are discarded. */}
+              <div className='flex flex-wrap items-center gap-2'>
+                <Text size='micro'>
+                  unsaved work was found — {draft.drafts.length} drafts, the newest first: restore
+                  one (the others are discarded) or discard all?
+                </Text>
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='sm'
+                  className='ml-auto'
+                  onClick={discardDrafts}
+                >
+                  discard all
+                </Button>
+              </div>
+              {draft.drafts.map((d, i) => (
+                <div key={d.id} className='flex flex-wrap items-center gap-2'>
+                  <Text size='micro'>
+                    {i === 0 ? 'the newest' : `draft ${i + 1}`}
+                    {d.savedAt ? ` · ${new Date(d.savedAt).toLocaleString('en-US')}` : ''}
+                  </Text>
+                  <Button
+                    type='button'
+                    variant={i === 0 ? 'main' : 'secondary'}
+                    size='sm'
+                    className='ml-auto'
+                    onClick={() => askRestore(d.id)}
+                  >
+                    {i === 0 ? 'restore the newest' : `restore draft ${i + 1}`}
+                  </Button>
+                </div>
+              ))}
+            </>
+          )}
+          {/* MJ-3: the draft is the WHOLE card as it was typed; over a card whose body moved since, a
+              restore puts back what the other editor changed — said before it happens. */}
+          {restoreAsk && (
+            <div className='flex flex-wrap items-center gap-2' data-draft-moved=''>
+              <Text size='micro'>
+                the card changed (
+                {restoreAsk.from !== null
+                  ? `v${restoreAsk.from} → v${restoreAsk.to}`
+                  : `now v${restoreAsk.to}`}
+                ) since this draft; restoring overwrites those changes
+              </Text>
+              <div className='ml-auto flex gap-1.5'>
+                <Button
+                  type='button'
+                  variant='main'
+                  size='sm'
+                  onClick={() => doRestore(restoreAsk.id)}
+                >
+                  restore anyway
+                </Button>
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='sm'
+                  onClick={() => setRestoreAsk(null)}
+                >
+                  cancel
+                </Button>
+              </div>
+            </div>
+          )}
         </CalloutBox>
       )}
 
