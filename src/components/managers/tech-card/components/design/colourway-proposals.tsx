@@ -8,7 +8,7 @@ import {
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { useFormContext, useFormState } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -17,7 +17,13 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
-import { findPantone, pantoneVersion, subscribePantone } from '../pantone-swatches';
+import { PantonePicker } from '../pantone-picker';
+import {
+  ensurePantoneLibrary,
+  findPantone,
+  pantoneVersion,
+  subscribePantone,
+} from '../pantone-swatches';
 import type { TechCardFormData } from '../schema';
 import {
   createColorwayErrorMessage,
@@ -40,6 +46,7 @@ import {
 } from './colourway-proposals-model';
 import {
   cardSlots,
+  pantonePatch,
   patchRow,
   proposalRows,
   recipeSlots,
@@ -458,6 +465,24 @@ export function ColourwayProposals({
     return out;
   }, [verdicts]);
 
+  /**
+   * ПОЛНАЯ БИБЛИОТЕКА ПАНТОНОВ — КОГДА НА ЭКРАНЕ ЕСТЬ КОД, КОТОРОГО НЕТ В ОТОБРАННЫХ 274. Штатно она
+   * догружается при первом открытии пикера (платит тот, кто выбирает цвет); здесь её платит тот,
+   * кто СМОТРИТ на коды: модель называет TCX-номера из всей книги, и без библиотеки их свотчи
+   * рисовались бы пустыми квадратами до первого открытия любого пикера. Ни одного незнакомого кода —
+   * ни одного запроса.
+   */
+  const unknownCode =
+    visible.some((p) => p.slots.some((s) => !!s.pantone.trim() && !findPantone(s.pantone))) ||
+    saved.some(
+      (c) =>
+        (!!(c.pantone ?? '').trim() && !findPantone(c.pantone)) ||
+        (c.usages ?? []).some((u) => !!(u.pantone ?? '').trim() && !findPantone(u.pantone)),
+    );
+  useEffect(() => {
+    if (unknownCode) void ensurePantoneLibrary();
+  }, [unknownCode]);
+
   /* ⚠ ОДНО ИСКЛЮЧЕНИЕ ИЗ «БЛОК СТОИТ ВСЕГДА»: карточка только для чтения, у которой нет ни
      сохранённых колорвеев, ни предложений. Читателю пустая рамка не сообщает ничего. */
   if (readOnly && visible.length === 0 && saved.length === 0) return null;
@@ -668,24 +693,43 @@ export function ColourwayProposals({
                         >
                           {s.slot || 'unnamed'}
                         </Text>
-                        <Swatch hex={s.hex || undefined} title={s.pantone || undefined} />
+                        {/**
+                         * ═══ ПАНТОН СЛОТА — ИЗ СВОТЧЕЙ, ОДНИМ ОРГАНОМ (владелец, O-44 п.4) ═══════
+                         *
+                         * Свободное поле кода стало домашним `PantonePicker` — тем же, что у окна
+                         * «+ colourway» и у палитры: поиск по коду и имени, сетка свотчей двух
+                         * семей, любой код можно набрать. Пикер пишет в слот код, hex и имя свотча
+                         * (`pantonePatch`); слова рядом остаются полем — их можно поправить.
+                         *
+                         * Свотч рисует сам триггер пикера, когда знает код. Свой квадрат стоит
+                         * только там, где пикер не может: кода нет в библиотеке, а hex прислала
+                         * модель, — иначе квадратов было бы два. Колонка пикера фиксирована, чтобы
+                         * слова стояли одной вертикалью, какой бы длины ни был код.
+                         */}
+                        <span
+                          className='flex w-40 shrink-0 items-center gap-2'
+                          data-slot-pantone={s.pantone}
+                        >
+                          {!findPantone(s.pantone) && !!s.hex && (
+                            <Swatch hex={s.hex} title={s.pantone || undefined} />
+                          )}
+                          <PantonePicker
+                            name={`${p.id}:${s.key}`}
+                            value={s.pantone}
+                            label='pantone'
+                            disabled={readOnly}
+                            onPick={(code) =>
+                              writeRow(p.id, s.key, pantonePatch(s, code, findPantone))
+                            }
+                          />
+                        </span>
                         <Input
-                          className='w-32'
-                          value={s.pantone}
-                          maxLength={64}
-                          disabled={readOnly}
-                          placeholder='pantone'
-                          data-b25-pantone={`${p.id}:${s.key}`}
-                          onChange={(e: { target: { value: string } }) =>
-                            writeRow(p.id, s.key, { pantone: e.target.value })
-                          }
-                        />
-                        <Input
-                          className='w-32'
+                          className='w-40'
                           value={s.colour}
                           maxLength={64}
                           disabled={readOnly}
-                          placeholder='colour'
+                          placeholder='colour name'
+                          aria-label={`colour name · ${s.slot || 'unnamed'}`}
                           data-b25-colour={`${p.id}:${s.key}`}
                           onChange={(e: { target: { value: string } }) =>
                             writeRow(p.id, s.key, { colour: e.target.value })

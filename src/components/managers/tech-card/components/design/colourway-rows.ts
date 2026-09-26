@@ -191,6 +191,35 @@ export function patchRow(
 }
 
 /**
+ * ═══ ВЫБОР ПАНТОНА В РЯДУ — КОД, ЕГО ЭКРАННЫЙ HEX И ИМЯ СВОТЧА СЛОВАМИ (владелец, O-44 п.4) ══════
+ *
+ * «Должна быть возможность выбрать из пантон свотчей и это должно быть сделано удобно». Пикер отдаёт
+ * КОД (библиотечный или набранный — уже в хранимом написании, `normalizePantone`), а ряд из него
+ * пишет три поля разом: код, hex свотча (у набранного номера дайхауса его нет — пусто, не выдумка)
+ * и слова — имя свотча. Слова остаются правимыми; новый выбор их переименовывает, потому что выбор
+ * свотча — это и есть называние цвета.
+ *
+ * Очистка забирает слова, только если их написал свотч: слова человека («dyehouse navy») без кода
+ * остаются — это его цвет, а не след пикера.
+ *
+ * `find` — поиск свотча (`findPantone`), переданный снаружи: файл не тянет таблицу пантонов.
+ */
+export function pantonePatch(
+  prev: { pantone: string; colour: string },
+  code: string,
+  find: (code: string) => { name: string; hex: string } | undefined,
+): Pick<ProposedSlotColour, 'pantone' | 'hex' | 'colour'> {
+  const next = code.trim();
+  if (!next) {
+    const wrote = normText(find(prev.pantone)?.name).toLowerCase();
+    const theirs = !!wrote && normText(prev.colour).toLowerCase() === wrote;
+    return { pantone: '', hex: '', colour: theirs ? '' : prev.colour };
+  }
+  const swatch = find(next);
+  return { pantone: next, hex: swatch?.hex ?? '', colour: swatch?.name || prev.colour };
+}
+
+/**
  * ЧТО УЕЗЖАЕТ В РЕЦЕПТ: ряды СОХРАНЁННОЙ карточки, у которых есть цвет — пантон или слова.
  *
  * Пустой ряд строки рецепта не рождает. Строка рецепта — утверждение «колорвей носит этот слот», и
