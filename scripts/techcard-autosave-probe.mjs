@@ -7,6 +7,14 @@
 //       пока не ляжет проход, за который не пришло ничего, а «saved» и история — только после него;
 //   (5) 409 держит ВСЕ записи, явные тоже (M-01); откат всей работы гасит любой статус о ней (N-02);
 //       после dispose машина не рендерит и не взводит таймеров (N-01);
+//   (6) после записи форма чиста, если никто не правил (R-1), — и когда карточка пришла маппером, и когда
+//       она восстановлена из черновика-JSON (у профиля пресса без пара ключа `pressSteam` там нет, а
+//       маппер отдаёт его присутствующим `undefined`); карта грязного — разреженная (R-8). Настоящий
+//       RHF (createFormControl) и настоящий маппер схемы;
+//   (7) панель, которую правят во время каждого её коммита, не упирается в потолок `restaged` —
+//       потолок держит только панель, перестейдживающую саму себя (R-9); flush, не дождавшийся
+//       тишины, отвечает `busy` (R-10); работа, возникшая раньше машины, взводится при создании
+//       (R-12); запись, которую вела не машина, заканчивает её статус там же, где кончилась (R-7);
 //   (2) авто-стейдж не поднимает стейдж, если хоть одна строка готовности `unknown` (Codex B-01);
 //   (3) откат из истории меняет ТОЛЬКО текстовые секции, картинки аспектов остаются текущими (B-04).
 //
@@ -38,11 +46,19 @@ const MUTANTS = {
   noValidate: [[`${C}/useTechCardAutosave.ts`, 'if (!v.ok) {', 'if (false) {']],
   // (4a) ОТКАТ B-03 В ОДНУ СТРОКУ: flush отвечает после первого же прохода, тихо там или нет
   flushAnswersEarly: [
-    [`${C}/useTechCardAutosave.ts`, 'const quiet = gen === changeGen && !deps.hasWork();', 'const quiet = true;'],
+    [
+      `${C}/useTechCardAutosave.ts`,
+      'const quiet = gen === changeGen && !deps.hasWork();',
+      'const quiet = true;',
+    ],
   ],
   // (4b) «complete» с работой на руках снова считается концом: saved + история над правкой в полёте
   completeOverWork: [
-    [`${C}/useTechCardAutosave.ts`, 'if (deps.hasWork()) return progress(at);', 'if (false) return progress(at);'],
+    [
+      `${C}/useTechCardAutosave.ts`,
+      'if (deps.hasWork()) return progress(at);',
+      'if (false) return progress(at);',
+    ],
   ],
   // (5a) старая пауза конфликта: держала только тихие записи, ⌘S проходил с протухшей версией
   conflictLetsExplicit: [
@@ -54,12 +70,62 @@ const MUTANTS = {
   ],
   // (5b) старое «нечего писать»: гасило только `dirty`, `invalid` оставался висеть
   restOnlyDirty: [
-    [`${C}/useTechCardAutosave.ts`, 'restIfNoWork();', "if (state.status === 'dirty') set({ status: restingStatus() });"],
+    [
+      `${C}/useTechCardAutosave.ts`,
+      'restIfNoWork();',
+      "if (state.status === 'dirty') set({ status: restingStatus() });",
+    ],
   ],
   // (5c) без стража dispose: исход записи, пришедший после размонтирования, рендерится и взводит повтор
   noDisposeGuard: [
     [`${C}/useTechCardAutosave.ts`, 'if (!disposed) deps.onState(state);', 'deps.onState(state);'],
-    [`${C}/useTechCardAutosave.ts`, '    // N-01: no retry or debounce outlives the page.\n    if (disposed) return;\n', ''],
+    [
+      `${C}/useTechCardAutosave.ts`,
+      '    // N-01: no retry or debounce outlives the page.\n    if (disposed) return;\n',
+      '',
+    ],
+  ],
+  // (6a) ОТКАТ R-1: база нетронутого ключа снова с сервера — форма из JSON-черновика «грязна» навсегда
+  baselineFromServer: [[`${C}/useTechCardAutosave.ts`, '        : now;', '        : landed;']],
+  // (6b) ОТКАТ R-8: полная карта RHF остаётся — `!![]` читается «грязно» у каждого массива
+  fullDirtyMap: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      '  control._formState.dirtyFields = sparse;\n  control._subjects.state.next({ dirtyFields: sparse });\n',
+      '',
+    ],
+  ],
+  // (7a) ОТКАТ R-9: жест оператора больше не обнуляет счёт `restaged`
+  streakIgnoresGestures: [
+    [`${C}/useTechCardAutosave.ts`, 'if (gestures !== heardOperatorGen) {', 'if (false) {'],
+  ],
+  // (7b) ОТКАТ R-10: не затихший flush снова «the last save failed»
+  flushSaysError: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "было бы неправдой (R-10).\n      return 'busy';",
+      "было бы неправдой (R-10).\n      return 'error';",
+    ],
+  ],
+  // (7e) ОТКАТ R-10 у потолка restaged: flush, упёршийся в него, снова «the last save failed»
+  capSaysError: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "not «the last save failed» (R-10).\n          return 'busy';",
+      "not «the last save failed» (R-10).\n          return 'error';",
+    ],
+  ],
+  // (7c) ОТКАТ R-12: работа, возникшая до машины, ждёт следующей правки под «idle»
+  noArmAtCreation: [
+    [`${C}/useTechCardAutosave.ts`, 'if (deps.isEnabled() && deps.hasWork()) {', 'if (false) {'],
+  ],
+  // (7d) ОТКАТ R-7: исход чужой записи машине не сообщается
+  externalIgnored: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      '      if (disposed || !deps.isEnabled()) return;\n      settle(r, reason);\n',
+      '      if (disposed || !deps.isEnabled() || reason) return;\n      settle(r, reason);\n',
+    ],
   ],
   // (2) строка `unknown` больше не держит стейдж
   noUnknownGuard: [
@@ -67,7 +133,11 @@ const MUTANTS = {
   ],
   // (3a) откат переписывает строку аспекта из снимка — картинки строки теряются
   restoreDropsPictures: [
-    [`${C}/save-history.ts`, 'details.push({ ...d, text });', 'details.push({ key, text, mediaIds: [] });'],
+    [
+      `${C}/save-history.ts`,
+      'details.push({ ...d, text });',
+      'details.push({ key, text, mediaIds: [] });',
+    ],
   ],
   // (3b) аспект без текста и без картинок больше не снимается
   restoreKeepsEmptyRows: [
@@ -102,7 +172,8 @@ async function load(mutant) {
             if (mine.length === 0) return null;
             let text = readFileSync(args.path, 'utf8');
             for (const [rel, from, to] of mine) {
-              if (!text.includes(from)) throw new Error(`mutant ${mutant}: «${from}» not found in ${rel}`);
+              if (!text.includes(from))
+                throw new Error(`mutant ${mutant}: «${from}» not found in ${rel}`);
               text = text.split(from).join(to);
               hits.add(rel + from);
             }
@@ -112,7 +183,8 @@ async function load(mutant) {
       },
     ],
   });
-  if (hits.size !== edits.length) throw new Error(`mutant ${mutant}: ${edits.length - hits.size} edit(s) did not apply`);
+  if (hits.size !== edits.length)
+    throw new Error(`mutant ${mutant}: ${edits.length - hits.size} edit(s) did not apply`);
   const mod = await import(pathToFileURL(outfile).href);
   rmSync(outfile, { force: true });
   return mod;
@@ -249,9 +321,11 @@ function promise2(mod) {
     // even a row the server marks met AND unknown holds the milestone — the guard itself, not `met`
     unknownFlagItselfHolds: decide([met, { key: 'patterns', met: true, unknown: true }]) === null,
     // control: the same card with every row verified DOES advance, one step
-    advancesWhenVerified: decide([met, { key: 'patterns', met: true, unknown: false }]) === 'TECH_CARD_STAGE_PROTO',
+    advancesWhenVerified:
+      decide([met, { key: 'patterns', met: true, unknown: false }]) === 'TECH_CARD_STAGE_PROTO',
     // stale readiness (scored for a stage the card has left) never advances
-    staleReadinessHolds: decide([met], { saved: 'TECH_CARD_STAGE_PROTO', form: 'TECH_CARD_STAGE_PROTO' }) === null,
+    staleReadinessHolds:
+      decide([met], { saved: 'TECH_CARD_STAGE_PROTO', form: 'TECH_CARD_STAGE_PROTO' }) === null,
     // already raised in the form, waiting for its save
     raisedInFormHolds: decide([met], { form: 'TECH_CARD_STAGE_PROTO' }) === null,
     // never two steps, never down
@@ -266,8 +340,10 @@ function promise2(mod) {
     unmetHolds: decide([met, { key: 'bom_fabric', met: false }]) === null,
     // aux card: its colourway row can never be met — it is dropped, not failed
     auxDropsColourwayRow:
-      decide([met, { key: 'colorway_linked', met: false }], { isAux: true, readiness: { nextStageReady: false } }) ===
-      'TECH_CARD_STAGE_PROTO',
+      decide([met, { key: 'colorway_linked', met: false }], {
+        isAux: true,
+        readiness: { nextStageReady: false },
+      }) === 'TECH_CARD_STAGE_PROTO',
   };
 }
 
@@ -320,7 +396,8 @@ function promise3(mod) {
     rowWithPicturesKeepsThem:
       byKey('pockets')?.text === '' && JSON.stringify(byKey('pockets')?.mediaIds) === '[9]',
     // a text-only aspect deleted since the snapshot comes back, without pictures
-    deletedAspectReturns: byKey('hem')?.text === 'raw hem THEN' && JSON.stringify(byKey('hem')?.mediaIds) === '[]',
+    deletedAspectReturns:
+      byKey('hem')?.text === 'raw hem THEN' && JSON.stringify(byKey('hem')?.mediaIds) === '[]',
   };
   // An absent WORDS (null in the snapshot) is never turned into a command to clear it.
   const absent = mod.restoreTextSections(cur, { ...snap, garmentDescription: null });
@@ -405,7 +482,8 @@ async function promise4(mod) {
   flushed = r.m.flush('paid door').then((x) => (answer = x)); // queued behind A
   r.edit(); // typed during A
   await r.land(); // A lands; the queued cycle B starts, carrying the edit
-  out.queuedPassCarriesEdit = timerCycle && r.saves.length === 2 && r.saves[1].carried === 2 && answer === null;
+  out.queuedPassCarriesEdit =
+    timerCycle && r.saves.length === 2 && r.saves[1].carried === 2 && answer === null;
   r.edit(); // typed during the queued cycle
   await r.land();
   out.pendingAfterQueuedPass = answer === null && r.saves.length === 3;
@@ -461,7 +539,8 @@ async function promise5(mod) {
   const wasInvalid = r.m.state().status === 'invalid';
   r.dirty = false;
   r.m.notifyChange();
-  out.revertClearsInvalid = wasInvalid && r.m.state().status === 'idle' && r.m.state().errorsCount === undefined;
+  out.revertClearsInvalid =
+    wasInvalid && r.m.state().status === 'idle' && r.m.state().errorsCount === undefined;
 
   // dispose while a write is on the wire; the write then fails: no render, no retry timer
   r = machineRig(mod);
@@ -498,6 +577,191 @@ async function promise5(mod) {
   return out;
 }
 
+// ─── (6) после записи: база по ключу, разреженная карта грязного (R-1 / R-8) ─────────────────
+// Настоящий RHF и настоящий маппер. Профиль пресса без пара: маппер отдаёт `pressSteam: undefined`
+// ПРИСУТСТВУЮЩИМ ключом (schema.ts), а черновик — JSON, и у восстановленной формы ключа нет вовсе.
+const PRESS_CARD = {
+  id: 7,
+  lockVersion: 3,
+  techCard: {
+    name: 'parka',
+    styleNumber: 'ST-042',
+    stage: 'TECH_CARD_STAGE_IDEA',
+    approvalState: 'TECH_CARD_APPROVAL_STATE_DRAFT',
+    construction: {
+      // with its equipment, as a stored profile has it (the write mapper drops one without)
+      equipmentDefaults: {
+        machines: [],
+        presses: [
+          {
+            profileKey: 'p1',
+            label: 'steam press',
+            pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_PRESS',
+            pressTemperatureC: 150,
+          },
+        ],
+      },
+    },
+  },
+};
+// What useForm does for the page: something reads isDirty / dirtyFields (RHF computes them only then),
+// and a subscriber keeps `_formState` current (RHF writes it only through its subscribers).
+function formFor(mod, defaults) {
+  const form = mod.createFormControl({ defaultValues: defaults, mode: 'onSubmit' });
+  form.control._proxyFormState.isDirty = true;
+  form.control._proxyFormState.dirtyFields = true;
+  form.control._subscribe({
+    formState: { isDirty: true, dirtyFields: true },
+    callback: () => {},
+    reRenderRoot: true,
+  });
+  form.control._state.mount = true;
+  return form;
+}
+// A save with nothing typed: the body re-read, construction taken whole from the server (as
+// withServerAssignedValues does), everything else as sent.
+function landedSave(mod, form) {
+  const before = structuredClone(form.getValues());
+  const server = mod.mapTechCardToForm(PRESS_CARD);
+  return {
+    before,
+    settled: {
+      values: { ...structuredClone(form.getValues()), construction: server.construction },
+      server,
+    },
+  };
+}
+
+function promise6(mod) {
+  const out = {};
+  const mapped = mod.mapTechCardToForm(PRESS_CARD);
+  const press = mapped.construction?.equipmentDefaults?.presses?.[0] ?? {};
+  // the fixture carries the key as the mapper really emits it — otherwise the checks below prove nothing
+  out.mapperEmitsPresentUndefined = 'pressSteam' in press && press.pressSteam === undefined;
+  // a) the card as the mapper gave it, saved with no edit
+  let form = formFor(mod, mapped);
+  let s = landedSave(mod, form);
+  mod.settleFormAfterSave(form, s.before, s.settled);
+  out.mapperShapedQuietAfterSave = !mod.liveIsDirty(form);
+  // b) the same card restored from a JSON draft: dirty by key presence alone, quiet after one save
+  form = formFor(mod, mapped);
+  form.reset(JSON.parse(JSON.stringify(mapped)), { keepDefaultValues: true });
+  const dirtyByPresenceOnly = mod.liveIsDirty(form);
+  s = landedSave(mod, form);
+  mod.settleFormAfterSave(form, s.before, s.settled);
+  out.jsonRestoredQuietAfterSave = dirtyByPresenceOnly && !mod.liveIsDirty(form);
+  // c) a keystroke landing while that save is on the wire stays the operator's — and is ALL the map holds
+  form = formFor(mod, mapped);
+  form.reset(JSON.parse(JSON.stringify(mapped)), { keepDefaultValues: true });
+  s = landedSave(mod, form);
+  form.setValue('name', 'parka typed', { shouldDirty: true });
+  mod.settleFormAfterSave(form, s.before, s.settled);
+  const map = form.control._formState.dirtyFields;
+  out.typedDuringSaveStaysDirty =
+    mod.liveIsDirty(form) && form.getValues('name') === 'parka typed' && map.name === true;
+  out.dirtyMapIsSparse = JSON.stringify(map) === '{"name":true}';
+  return out;
+}
+
+// ─── (7) потолок restaged, busy, работа до машины, чужая запись (R-9 / R-10 / R-12 / R-7) ─────
+function bareRig(mod, over) {
+  const clock = fakeClock();
+  const rig = { clock, saves: 0, completes: [] };
+  rig.m = mod.createAutosaveMachine({
+    debounceMs: 2000,
+    retryDelaysMs: [5000, 15000, 45000],
+    setTimer: clock.setTimer,
+    clearTimer: clock.clearTimer,
+    now: clock.now,
+    isEnabled: () => true,
+    isPaused: () => false,
+    hasWork: () => true,
+    validate: async () => ({ ok: true, errors: 0 }),
+    save: async () => ({ outcome: 'complete' }),
+    countErrors: () => 0,
+    onState: () => {},
+    onComplete: (reason) => rig.completes.push(reason),
+    ...over(rig),
+  });
+  return rig;
+}
+
+async function promise7(mod) {
+  const out = {};
+  // R-9 · every cycle ends `restaged` because the operator types into the panel while its commit
+  // runs: never the cap. The same with NO gesture behind it is a panel re-staging itself: the cap holds.
+  const restaged = (withGestures) =>
+    bareRig(mod, (rig) => {
+      rig.gen = 0;
+      return {
+        operatorGen: () => rig.gen,
+        save: async () => {
+          rig.saves += 1;
+          if (withGestures) {
+            rig.gen += 1;
+            rig.m.notifyChange();
+          }
+          return { outcome: 'restaged' };
+        },
+      };
+    });
+  let r = restaged(true);
+  r.m.notifyChange();
+  await r.clock.advance(20_000);
+  out.steadyPanelEditsNeverCapped = r.saves >= 8 && r.m.state().status !== 'error';
+  r = restaged(false);
+  r.m.notifyChange();
+  await r.clock.advance(20_000);
+  out.selfRestagingStillCapped =
+    r.saves === 4 && r.m.state().status === 'error' && r.m.state().retrying === false;
+  // …and a paid door's flush that runs into that cap hears `busy`: nothing failed, the panel kept moving
+  r = restaged(false);
+  const capped = await r.m.flush('paid door');
+  out.flushOnTheCapIsBusy = capped === 'busy' && r.saves === 4 && r.m.state().status === 'error';
+
+  // R-10 · a flush over a card that is never quiet (every pass leaves work) answers `busy`
+  r = bareRig(mod, (rig) => ({
+    save: async () => {
+      rig.saves += 1;
+      return { outcome: 'complete' };
+    },
+  }));
+  const answer = await r.m.flush('paid door');
+  out.neverQuietFlushIsBusy = answer === 'busy' && r.saves === 5;
+
+  // R-12 · work that was there before the machine (a child's effect on the first render): armed at
+  // creation, written at 2 s — not left under «idle» until the next edit
+  let dirty = true;
+  r = bareRig(mod, (rig) => ({
+    hasWork: () => dirty,
+    save: async () => {
+      rig.saves += 1;
+      dirty = false;
+      return { outcome: 'complete' };
+    },
+  }));
+  const armedAtCreation = r.m.state().status === 'dirty';
+  await r.clock.advance(2000);
+  out.workBeforeMachineIsWritten =
+    armedAtCreation && r.saves === 1 && r.m.state().status === 'saved';
+
+  // R-7 · the convert: an explicit save handed its write to the dialog (needs-confirm); the dialog's
+  // own write lands and leaves the card quiet → «saved» and the quiet-card bookkeeping, at once
+  dirty = true;
+  r = bareRig(mod, () => ({
+    hasWork: () => dirty,
+    save: async () => ({ outcome: 'needs-confirm', message: 'the purpose change waits' }),
+  }));
+  r.m.notifyChange(); // the flip itself — this check must not lean on (R-12) arming at creation
+  await r.clock.advance(2000);
+  const heldForDialog = r.m.state().status === 'needs-confirm';
+  dirty = false;
+  r.m.settleExternal({ outcome: 'complete' }, 'convert');
+  out.externalWriteSettlesStatus =
+    heldForDialog && r.m.state().status === 'saved' && r.completes.join() === 'convert';
+  return out;
+}
+
 // ─── прогон ─────────────────────────────────────────────────────────────────────────────────
 let fail = 0;
 const report = (title, results, mustFail = []) => {
@@ -505,7 +769,13 @@ const report = (title, results, mustFail = []) => {
     const expected = !mustFail.includes(name);
     const good = ok === expected;
     if (!good) fail++;
-    const tag = mustFail.includes(name) ? (ok ? '✗ STILL GREEN on mutant' : '✓ red on mutant') : ok ? '✓' : '✗';
+    const tag = mustFail.includes(name)
+      ? ok
+        ? '✗ STILL GREEN on mutant'
+        : '✓ red on mutant'
+      : ok
+        ? '✓'
+        : '✗';
     if (!good || mustFail.includes(name)) console.log(`${tag}  ${title} · ${name}`);
     else console.log(`${tag}  ${title} · ${name}`);
   }
@@ -517,6 +787,8 @@ report('(2) auto-stage', promise2(real));
 report('(3) restore', promise3(real));
 report('(4) flush over deferred writes', await promise4(real));
 report('(5) conflict / revert / dispose', await promise5(real));
+report('(6) settle after a save (real RHF, real mapper)', promise6(real));
+report('(7) restaged cap / busy / work before the machine / external write', await promise7(real));
 // sanity for the shortcut: ⌘S on a Russian layout gives e.key 'ы' — the physical key decides
 const kb = real.isSaveShortcut;
 report('keyboard', {
@@ -527,11 +799,28 @@ report('keyboard', {
 });
 
 console.log('\n── negative controls (mutants): the named check MUST turn red ──');
-report('(1) mutant debounce0', await promise1(await load('debounce0')), ['notBefore2s', 'firesAt2s', 'savedStatus', 'restartsOnEachEdit', 'oneWriteAfterQuiet']);
-report('(1) mutant noValidate', await promise1(await load('noValidate')), ['noWriteWhileInvalid', 'invalidStatus', 'writesOnceFixed']);
-report('(2) mutant noUnknownGuard', promise2(await load('noUnknownGuard')), ['unknownFlagItselfHolds']);
-report('(3) mutant restoreDropsPictures', promise3(await load('restoreDropsPictures')), ['picturesStayCurrent', 'rowWithPicturesKeepsThem']);
-report('(3) mutant restoreKeepsEmptyRows', promise3(await load('restoreKeepsEmptyRows')), ['addedTextOnlyRowDropped']);
+report('(1) mutant debounce0', await promise1(await load('debounce0')), [
+  'notBefore2s',
+  'firesAt2s',
+  'savedStatus',
+  'restartsOnEachEdit',
+  'oneWriteAfterQuiet',
+]);
+report('(1) mutant noValidate', await promise1(await load('noValidate')), [
+  'noWriteWhileInvalid',
+  'invalidStatus',
+  'writesOnceFixed',
+]);
+report('(2) mutant noUnknownGuard', promise2(await load('noUnknownGuard')), [
+  'unknownFlagItselfHolds',
+]);
+report('(3) mutant restoreDropsPictures', promise3(await load('restoreDropsPictures')), [
+  'picturesStayCurrent',
+  'rowWithPicturesKeepsThem',
+]);
+report('(3) mutant restoreKeepsEmptyRows', promise3(await load('restoreKeepsEmptyRows')), [
+  'addedTextOnlyRowDropped',
+]);
 report('(4) mutant flushAnswersEarly', await promise4(await load('flushAnswersEarly')), [
   'pendingAfterFirstPass',
   'pendingAfterSecondPass',
@@ -541,14 +830,43 @@ report('(4) mutant flushAnswersEarly', await promise4(await load('flushAnswersEa
   'pendingAfterQueuedPass',
   'queuedAnswersOverQuietCard',
 ]);
-report('(4) mutant completeOverWork', await promise4(await load('completeOverWork')), ['noHistoryOverWork', 'historyOnceQuiet']);
+report('(4) mutant completeOverWork', await promise4(await load('completeOverWork')), [
+  'noHistoryOverWork',
+  'historyOnceQuiet',
+]);
 report('(5) mutant conflictLetsExplicit', await promise5(await load('conflictLetsExplicit')), [
   'conflictHoldsExplicit',
   // ⌘S already wrote under the modal, so «keep mine» is the third write, not the second
   'keepMineWrites',
 ]);
-report('(5) mutant restOnlyDirty', await promise5(await load('restOnlyDirty')), ['revertClearsInvalid']);
-report('(5) mutant noDisposeGuard', await promise5(await load('noDisposeGuard')), ['noRenderAfterDispose', 'noTimerAfterDispose']);
+report('(5) mutant restOnlyDirty', await promise5(await load('restOnlyDirty')), [
+  'revertClearsInvalid',
+]);
+report('(5) mutant noDisposeGuard', await promise5(await load('noDisposeGuard')), [
+  'noRenderAfterDispose',
+  'noTimerAfterDispose',
+]);
+report('(6) mutant baselineFromServer', promise6(await load('baselineFromServer')), [
+  'jsonRestoredQuietAfterSave',
+]);
+report('(6) mutant fullDirtyMap', promise6(await load('fullDirtyMap')), ['dirtyMapIsSparse']);
+report('(7) mutant streakIgnoresGestures', await promise7(await load('streakIgnoresGestures')), [
+  'steadyPanelEditsNeverCapped',
+]);
+report('(7) mutant flushSaysError', await promise7(await load('flushSaysError')), [
+  'neverQuietFlushIsBusy',
+]);
+report('(7) mutant capSaysError', await promise7(await load('capSaysError')), [
+  'flushOnTheCapIsBusy',
+]);
+report('(7) mutant noArmAtCreation', await promise7(await load('noArmAtCreation')), [
+  'workBeforeMachineIsWritten',
+]);
+report('(7) mutant externalIgnored', await promise7(await load('externalIgnored')), [
+  'externalWriteSettlesStatus',
+]);
 
-console.log(fail === 0 ? '\nALL GREEN (real code) · ALL MUTANTS CAUGHT' : `\n${fail} UNEXPECTED RESULT(S)`);
+console.log(
+  fail === 0 ? '\nALL GREEN (real code) · ALL MUTANTS CAUGHT' : `\n${fail} UNEXPECTED RESULT(S)`,
+);
 process.exit(fail === 0 ? 0 : 1);

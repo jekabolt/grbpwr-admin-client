@@ -23,7 +23,15 @@ import type { TechCardFormData } from './schema';
  *     черновика висят на том проходе, после которого работы не осталось;
  *   · `flush()` — немедленно и с ответом, и отвечает он только над тихой карточкой: проходит цикл за
  *     циклом, пока за проход не пришло ни одной правки и писать больше нечего. Платные двери
- *     стартуют только при `ok`/`nothing` (B-05);
+ *     стартуют только при `ok`/`nothing` (B-05). Не затихла за все проходы — `busy`, а не `error`:
+ *     запись не падала, её просто правили, пока дверь ждала (ревью R-10);
+ *   · `restaged` подряд — панель, перестейдживающая САМА себя, и только это упирается в потолок
+ *     повторов. Жест оператора (ввод, клавиша, нажатие) счёт обнуляет: человек, который правит, пока
+ *     идёт запись, — не петля (R-9). Flush, упёршийся в потолок, тоже слышит `busy` (R-10);
+ *   · работа, появившаяся раньше самой машины (эффект ребёнка испачкал форму на первом рендере, до
+ *     подписки), взводит дебаунс при создании, а не ждёт следующей правки (R-12);
+ *   · запись, которую ведёт не машина (перевод в auxiliary после диалога), сообщает ей исход
+ *     `settleExternal` — статус и уборка тихой карточки кончаются там же, где запись (R-7);
  *   · ошибка → повторы через 5 / 15 / 45 с, потом `not saved · retry`;
  *   · 409 → статус `conflict`, и автосейв стоит ЦЕЛИКОМ, явные записи тоже (ревью M-01: ⌘S под
  *     модалкой отправил бы ту же протухшую версию). Выходов два, и оба в модалке: «reload theirs»
@@ -110,6 +118,11 @@ export type MachineDeps = {
   onState: (state: MachineState) => void;
   /** Только на ТИХОМ `complete` (B-03): сюда вешаются запись истории и уборка черновика. */
   onComplete?: (reason: string) => void;
+  /**
+   * Счётчик жестов оператора на странице (ввод, клавиша, нажатие, вставка). Перестейдж панели без
+   * жеста за спиной — эхо её собственного коммита; с жестом — правка человека (R-9).
+   */
+  operatorGen?: () => number;
 };
 
 /**
@@ -129,6 +142,12 @@ export type AutosaveMachine = {
   flush: (reason: string, mode?: SaveMode) => Promise<FlushResult>;
   /** «keep mine» модалки конфликта: снять паузу, чтобы следующая явная запись могла пойти. */
   resolveConflict: () => void;
+  /**
+   * Исход записи, которую вела НЕ машина (перевод в auxiliary: диалог перехватил запись и повторил её
+   * сам). Разбирается тем же `settle`, что и свой цикл: тихий `complete` — «saved» и уборка, работа на
+   * руках — ход вперёд, отказ — свой статус (R-7).
+   */
+  settleExternal: (r: SaveResult, reason: string) => void;
   /** Включение/выключение (режим создания, frozen, права). */
   setEnabled: (enabled: boolean) => void;
   dispose: () => void;
@@ -158,6 +177,8 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
   // B-03: every change the machine has heard of, counted. A flush compares it across a pass: a
   // change heard while the pass ran means the pass wrote an older card than the one on screen.
   let changeGen = 0;
+  // R-9: the operator's gestures as of the last change heard (see notifyChange).
+  let heardOperatorGen = deps.operatorGen?.();
 
   const set = (patch: Partial<MachineState>) => {
     const next = { ...state, ...patch };
@@ -292,7 +313,9 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
             message: r.message ?? 'a panel kept changing while it was being saved',
             retrying: false,
           });
-          return 'error';
+          // No write failed here either: a flush that ends on the cap hears `busy`, and its door says
+          // that the card kept changing — not «the last save failed» (R-10).
+          return 'busy';
         }
         // Новые значения панели ещё в очереди — следующий цикл их и понесёт.
         set({ status: 'dirty', message: undefined });
@@ -357,12 +380,28 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
     return p;
   }
 
+  // R-12: work that exists before the machine does — a child's effect dirtied the form on the first
+  // render, before `form.watch` subscribed — is armed now instead of waiting under «idle» for the next
+  // edit.
+  if (deps.isEnabled() && deps.hasWork()) {
+    state = { ...state, status: 'dirty' };
+    arm(deps.debounceMs, 'debounce');
+  }
+
   return {
     state: () => state,
 
     notifyChange: () => {
       if (disposed || !deps.isEnabled()) return;
       changeGen += 1;
+      // R-9: a change with an operator's gesture behind it ends a run of «restaged» cycles. The streak
+      // is there to stop a panel that re-stages ITSELF after every commit; a person editing a panel
+      // while its commit runs re-stages it too, and must never be taken for that loop.
+      const gestures = deps.operatorGen?.();
+      if (gestures !== heardOperatorGen) {
+        heardOperatorGen = gestures;
+        restagedStreak = 0;
+      }
       if (state.status === 'conflict') return;
       if (running) {
         // Решим после цикла: правка во время записи — ещё один цикл, а не второй параллельный.
@@ -399,8 +438,14 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
         // Добирающие проходы несут то, что набрали, пока шёл предыдущий: тихо, с тихой проверкой.
         passMode = 'silent';
       }
-      // Карточка не затихла за FLUSH_MAX_PASSES проходов — оператор печатает, пока дверь ждёт.
-      return 'error';
+      // Карточка не затихла за FLUSH_MAX_PASSES проходов — оператор печатает, пока дверь ждёт. Запись не
+      // падала, и сказать «the last save failed» было бы неправдой (R-10).
+      return 'busy';
+    },
+
+    settleExternal: (r, reason) => {
+      if (disposed || !deps.isEnabled()) return;
+      settle(r, reason);
     },
 
     resolveConflict: () => {
@@ -480,6 +525,183 @@ export function liveIsDirty(form: UseFormReturn<TechCardFormData>): boolean {
   return !!form.control._formState.isDirty;
 }
 
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  !!v &&
+  typeof v === 'object' &&
+  !Array.isArray(v) &&
+  Object.getPrototypeOf(v) === Object.prototype;
+
+/**
+ * Write `next` into the form at `path` through the SMALLEST paths that differ from `cur`. A leaf
+ * write never re-keys a field array; only a change of an array's LENGTH is written at that array's
+ * root — the rows really changed, and the useFieldArray that owns them has to hear it.
+ */
+export function writeFormDiff(
+  write: (path: string, value: unknown) => void,
+  path: string,
+  cur: unknown,
+  next: unknown,
+): void {
+  if (deepEqual(cur, next)) return;
+  if (Array.isArray(cur) && Array.isArray(next) && cur.length === next.length) {
+    next.forEach((n, i) => writeFormDiff(write, `${path}.${i}`, cur[i], n));
+    return;
+  }
+  if (isPlainObject(cur) && isPlainObject(next)) {
+    for (const k of new Set([...Object.keys(cur), ...Object.keys(next)])) {
+      writeFormDiff(write, `${path}.${k}`, cur[k], next[k]);
+    }
+    return;
+  }
+  write(path, next);
+}
+
+/**
+ * RHF's FULL dirty map → the SPARSE one its per-field updates keep (ревью R-8).
+ *
+ * `reset(values, { keepDefaultValues })` answers with `getDirtyFields(baseline, values)`: every leaf
+ * of the form, `false` included, and every object and array present even when nothing under it moved.
+ * The page's readers ask the sparse question — `!!dirtyFields.moodboardMedia`, «is anything under this
+ * dirty» — and over the full map `!![]` is always true: the construction draft's «the board has unsaved
+ * changes» stood over every card after its first save. Only what is dirty stays; a clean row of an
+ * array becomes a hole, exactly like the map `setValue` / `unset` build one field at a time.
+ */
+export function sparseDirtyFields(node: unknown): unknown {
+  if (node === true) return true;
+  if (Array.isArray(node)) {
+    const out: unknown[] = [];
+    let any = false;
+    for (let i = 0; i < node.length; i++) {
+      const s = sparseDirtyFields(node[i]);
+      if (s === undefined) continue;
+      out[i] = s;
+      any = true;
+    }
+    return any ? out : undefined;
+  }
+  if (node && typeof node === 'object') {
+    const out: Record<string, unknown> = {};
+    let any = false;
+    for (const [k, v] of Object.entries(node)) {
+      const s = sparseDirtyFields(v);
+      if (s === undefined) continue;
+      out[k] = s;
+      any = true;
+    }
+    return any ? out : undefined;
+  }
+  return undefined;
+}
+
+type ServerLists = Pick<TechCardFormData, 'signoffs' | 'patterns' | 'bomItems'>;
+
+/**
+ * ПОСЛЕ ЗАПИСИ ТЕЛА: ФОРМА БЕРЁТ СЕРВЕР ТАМ, ГДЕ ОПЕРАТОР НЕ ПРАВИЛ, И НОВУЮ БАЗУ «ЧИСТО».
+ *
+ * `before` — форма, какой её увидела запись (глубокая копия), `settled.values` — что легло на сервер
+ * в координатах формы, `settled.server` — прочитанная карточка (или null, когда чтения не было).
+ *
+ * ЗНАЧЕНИЯ. Ключ, который не трогали, пока запись летела, получает то, что легло (минимальными
+ * путями — ни строка массива не перемонтируется, ни каретка не прыгает). Тронутый остаётся
+ * операторским: его понесёт следующий цикл. У тронутых списков с серверными ключами (sign-off,
+ * выкройки, BOM) операторские строки получают серверные id/дайджесты — строка, добавленная этой же
+ * записью, не должна уехать ещё раз с id 0 только потому, что оператор продолжал печатать.
+ * Отложенный purpose (sellable→auxiliary ждёт диалога, M-03) возвращается только поверх НЕтронутого
+ * поля: переключение обратно, сделанное, пока запись летела, — последнее слово оператора (B-02).
+ *
+ * БАЗА — ПО КЛЮЧУ (ревью R-1). Нетронутый ключ получает базой СОБСТВЕННОЕ значение формы после записи
+ * выше, а не `settled.values`: они равны для нашего сравнения (`undefined` = нет ключа, null = undefined),
+ * но не для RHF, который считает ключи строго. Маппер отдаёт `pressSteam: undefined` ПРИСУТСТВУЮЩИМ
+ * ключом у каждого профиля без пара, а черновик — это JSON, и у восстановленной формы ключа нет вовсе;
+ * база с сервера делала такую форму «грязной» после каждой записи — и автосейв переписывал карточку
+ * каждые две секунды, навсегда. Тронутый ключ и отложенный purpose получают базой то, что легло, —
+ * они и должны остаться грязными. `keepBaseline` сохраняет прежнюю базу полям, которые пишет панель
+ * ПОСЛЕ тела (факты стиля, StyleFactsField → UpdateStyle): иначе панель сочла бы их чистыми и сняла
+ * себя с очереди посреди коммита, и упавший UpdateStyle не оставил бы ничего для повтора.
+ *
+ * ГРЯЗНОЕ — ЗАНОВО, ПО ВСЕЙ ФОРМЕ (B-02). Первый reset меняет только то, что значит «чисто». Второй
+ * отдаёт форме её же значения с keepDefaultValues — это `getDirtyFields(база, значения)` RHF по всей
+ * форме, строки массивов тоже, — а keepValues не даёт ему записать ни одного значения. Полную карту
+ * RHF затем сводим к разреженной, которую ждут читатели (`sparseDirtyFields`, R-8).
+ *
+ * ЧТО ОТПУСКАЕТСЯ НАМЕРЕННО (R-8): опубликованные ошибки, isSubmitted, submitCount. Запись легла —
+ * форма прошла проверку, сервер принял, и каждая показанная ошибка отвечена; RHF возвращается в режим
+ * «до отправки» (`mode: 'onSubmit'`: поля не перепроверяются на каждое нажатие), как делал полный
+ * сброс до автосейва. Касания (touched) остаются.
+ */
+export function settleFormAfterSave(
+  form: UseFormReturn<TechCardFormData>,
+  before: TechCardFormData | null,
+  settled: { values: TechCardFormData; server: TechCardFormData | null },
+  opts: {
+    /** M-03: the purpose the write deliberately did NOT carry; it returns, still dirty. */
+    keepPurpose?: string;
+    /** Fields whose baseline this write must NOT move (a panel commits them after the body). */
+    keepBaseline?: readonly (keyof TechCardFormData)[];
+    /** The server-assigned ids/digests merged onto the operator's rows (index.tsx assignServerLists). */
+    serverLists?: (typed: TechCardFormData, server: TechCardFormData) => ServerLists;
+  } = {},
+): void {
+  const { keepPurpose, keepBaseline = [], serverLists } = opts;
+  const write = (path: string, value: unknown) => form.setValue(path as never, value as never);
+  const typed = form.getValues();
+  const lists = settled.server && serverLists ? serverLists(typed, settled.server) : null;
+  const keys = new Set([...Object.keys(typed), ...Object.keys(settled.values)]);
+  const touched = new Set<string>();
+  for (const key of keys) {
+    const k = key as keyof TechCardFormData;
+    // No copy from the start of the write (it could not be cloned): the old behaviour — the form
+    // becomes what was sent.
+    const isTouched = !!before && !deepEqual(typed[k], before[k]);
+    if (isTouched) touched.add(key);
+    const target = isTouched
+      ? lists && (k === 'signoffs' || k === 'patterns' || k === 'bomItems')
+        ? lists[k]
+        : typed[k]
+      : k === 'purpose' && keepPurpose !== undefined
+        ? keepPurpose
+        : settled.values[k];
+    writeFormDiff(write, key, typed[k], target);
+  }
+
+  const now = form.getValues() as Record<string, unknown>;
+  const landed = settled.values as Record<string, unknown>;
+  const previous = form.control._defaultValues as Record<string, unknown>;
+  const kept = new Set<string>(keepBaseline);
+  const baseline: Record<string, unknown> = {};
+  for (const key of keys) {
+    // A key absent on the side it is taken from stays absent: presence is what RHF counts.
+    const from = kept.has(key)
+      ? previous
+      : touched.has(key) || (key === 'purpose' && keepPurpose !== undefined)
+        ? landed
+        : now;
+    if (Object.prototype.hasOwnProperty.call(from, key)) baseline[key] = from[key];
+  }
+
+  const control = form.control;
+  form.reset(baseline as TechCardFormData, {
+    keepValues: true,
+    keepTouched: true,
+    // After a reset RHF may consider the form «unmounted» until the next render when something
+    // subscribes to isValid, and getValues() then answers with the DEFAULTS — the second reset would
+    // read the new baseline back as the current values and find nothing dirty.
+    keepIsValid: true,
+  });
+  if (!control._state.mount) control._state.mount = true;
+  form.reset(form.getValues(), {
+    keepValues: true,
+    keepDefaultValues: true,
+    keepTouched: true,
+    keepIsValid: true,
+  });
+  if (!control._state.mount) control._state.mount = true;
+  const sparse = (sparseDirtyFields(control._formState.dirtyFields) ??
+    {}) as typeof control._formState.dirtyFields;
+  control._formState.dirtyFields = sparse;
+  control._subjects.state.next({ dirtyFields: sparse });
+}
+
 /** ⌘S / Ctrl+S — по ФИЗИЧЕСКОЙ клавише: на русской раскладке `e.key` у этой клавиши — «ы». */
 export function isSaveShortcut(
   e: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' | 'altKey' | 'code' | 'key'>,
@@ -493,6 +715,8 @@ export type AutosaveController = AutosaveApi & {
   saveNow: (reason: string) => Promise<FlushResult>;
   /** «keep mine» модалки конфликта — единственный, кроме ухода со страницы, выход из паузы (M-01). */
   resolveConflict: () => void;
+  /** Исход записи, которую вела не машина (перевод в auxiliary, R-7). */
+  settleExternal: (r: SaveResult, reason: string) => void;
   /** При `error`: идут ли ещё автоматические повторы. */
   retrying?: boolean;
 };
@@ -526,6 +750,8 @@ export function useTechCardAutosaveController(opts: {
   countErrors: () => number;
   /** Только на тихом `complete` (B-03). */
   onComplete?: (reason: string) => void;
+  /** Найденный на открытии черновик ждёт ответа оператора (R-11) — отдаётся органам как есть. */
+  draftPending?: boolean;
   debounceMs?: number;
   retryDelaysMs?: readonly number[];
 }): AutosaveController {
@@ -533,6 +759,19 @@ export function useTechCardAutosaveController(opts: {
   optsRef.current = opts;
   const [state, setState] = useState<MachineState>({ status: opts.enabled ? 'idle' : 'off' });
   const machineRef = useRef<AutosaveMachine | null>(null);
+  // R-9: every gesture of the operator on the page, counted (capture phase, so a panel that stops
+  // propagation is still heard). A panel re-staged with no gesture behind it is echoing its own commit.
+  const gestures = useRef(0);
+  useEffect(() => {
+    const bump = () => {
+      gestures.current += 1;
+    };
+    const kinds = ['input', 'change', 'keydown', 'pointerdown', 'paste', 'cut', 'drop'] as const;
+    for (const k of kinds) window.addEventListener(k, bump, true);
+    return () => {
+      for (const k of kinds) window.removeEventListener(k, bump, true);
+    };
+  }, []);
 
   // Машина живёт от монтирования до размонтирования и создаётся В ЭФФЕКТЕ, а не в рендере: StrictMode
   // размонтирует и монтирует эффекты заново, и машина, убитая первой уборкой, осталась бы мёртвой.
@@ -553,8 +792,10 @@ export function useTechCardAutosaveController(opts: {
       countErrors: () => optsRef.current.countErrors(),
       onState: setState,
       onComplete: (reason) => optsRef.current.onComplete?.(reason),
+      operatorGen: () => gestures.current,
     });
     machineRef.current = m;
+    // Already `dirty` and armed when a child's effect dirtied the form before this one ran (R-12).
     setState(m.state());
     return () => {
       // Лучшее, что можно сделать при уходе со страницы: отправить то, что есть. Гарантия на выгрузку —
@@ -612,6 +853,7 @@ export function useTechCardAutosaveController(opts: {
     };
   }, [opts.enabled]);
 
+  const draftPending = !!opts.draftPending;
   return useMemo<AutosaveController>(
     () => ({
       status: state.status,
@@ -619,12 +861,14 @@ export function useTechCardAutosaveController(opts: {
       errorsCount: state.errorsCount,
       message: state.message,
       retrying: state.retrying,
+      draftPending,
       request: () => machineRef.current?.notifyChange(),
       flush: (reason) => machineRef.current?.flush(reason) ?? Promise.resolve('off' as const),
       saveNow: (reason) =>
         machineRef.current?.flush(reason, 'explicit') ?? Promise.resolve('off' as const),
       resolveConflict: () => machineRef.current?.resolveConflict(),
+      settleExternal: (r, reason) => machineRef.current?.settleExternal(r, reason),
     }),
-    [state],
+    [state, draftPending],
   );
 }

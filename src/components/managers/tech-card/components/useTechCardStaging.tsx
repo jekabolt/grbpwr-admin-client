@@ -74,15 +74,25 @@ export const COMMIT_ORDER = {
 export type CommitOutcome = {
   /** Changes that committed, in the order they went. */
   committed: StagedChange[];
-  /** The one that refused, if any. Everything from here on stays staged. */
-  failed?: { change: StagedChange; error: unknown };
   /**
-   * Still-unsaved work the run leaves in the queue: a panel edited again WHILE its commit was in
-   * flight (committed, newer values still staged), or one staged — anew or again — while the run went
-   * on (not committed by this run at all). The caller has to say so: "saved everything" over an edit
-   * the operator made seconds ago is the lie this exists to prevent.
+   * The one that refused, if any. Everything from here on stays staged. `startedAt` (Date.now()) is
+   * when ITS commit began: a mutation submitted before it is not this panel's (R-5 — the caller reads
+   * a rewrapped 409 off the mutations this commit submitted, and only those).
+   */
+  failed?: { change: StagedChange; error: unknown; startedAt: number };
+  /**
+   * A TRUE re-stage: a panel this run committed that is queued again at its end — edited while its
+   * own commit was in flight (the newer values are still staged), or re-staged after it settled. The
+   * caller has to say so: "saved everything" over an edit made seconds ago is the lie this prevents.
    */
   restaged?: StagedChange[];
+  /**
+   * Work this run never committed that is queued at its end: a panel staged for the first time — or
+   * staged again after it had left the queue — while the run went on. Unsaved like the above, but
+   * ordinary new work, not a panel moving under its own commit (R-9: only `restaged` counts toward
+   * the autosave's cap).
+   */
+  pending?: StagedChange[];
 };
 
 export type PersistedStaging = Array<{ key: string; label: string; snapshot: unknown }>;
@@ -297,12 +307,13 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
           // Read AFTER picking the change, so an edit that landed while an EARLIER commit was in
           // flight (already folded into `change` above) does not read as a mid-flight edit here.
           const genBefore = stageGen.current.get(change.key);
+          const startedAt = Date.now();
           try {
             await change.commit();
           } catch (error) {
             // Stop. Everything not yet committed stays staged, including this one — the caller
             // names it in the partial-failure banner.
-            return { committed, failed: { change, error }, restaged };
+            return { committed, failed: { change, error, startedAt }, restaged };
           }
           committed.push(change);
           if (stageGen.current.get(change.key) !== genBefore) {
@@ -320,11 +331,16 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
           // would only schedule a cycle that finds nothing to write.
           publish(changesRef.current.filter((c) => c.key !== change.key));
         }
-        // Whatever is queued NOW is unsaved work (Codex B-05): a key re-staged after its own commit
-        // settled, or a panel staged for the first time while the run went on. The caller must not
-        // hear «complete» over it.
-        const leftover = changesRef.current.filter((c) => !restaged.some((r) => r.key === c.key));
-        return { committed, restaged: [...restaged, ...leftover] };
+        // Whatever is queued NOW is unsaved work (Codex B-05), and it is told apart (R-9): a key this
+        // run committed and that came back — re-staged after its own commit settled — is a re-stage;
+        // anything the run never committed is new work. Neither may be heard as «complete and quiet».
+        const committedKeys = new Set(committed.map((c) => c.key));
+        const queuedNow = changesRef.current.filter((c) => !restaged.some((r) => r.key === c.key));
+        return {
+          committed,
+          restaged: [...restaged, ...queuedNow.filter((c) => committedKeys.has(c.key))],
+          pending: queuedNow.filter((c) => !committedKeys.has(c.key)),
+        };
       },
 
       takeSnapshot: (key) => {

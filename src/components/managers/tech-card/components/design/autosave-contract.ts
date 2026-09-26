@@ -37,7 +37,16 @@ export type AutosaveStatus =
   | 'error';
 
 /** Исход `flush`: только `ok` и `nothing` разрешают платную дверь. */
-export type FlushResult = 'ok' | 'nothing' | 'invalid' | 'needs-confirm' | 'conflict' | 'error' | 'off';
+export type FlushResult =
+  | 'ok'
+  | 'nothing'
+  | 'invalid'
+  | 'needs-confirm'
+  | 'conflict'
+  | 'error'
+  | 'off'
+  /** Карточка не затихла за все проходы flush: её правили, пока дверь ждала. Запись не падала (R-10). */
+  | 'busy';
 
 export type AutosaveApi = {
   status: AutosaveStatus;
@@ -47,6 +56,12 @@ export type AutosaveApi = {
   errorsCount?: number;
   /** Человекочитаемая причина при `error`/`conflict`/`needs-confirm`. */
   message?: string;
+  /**
+   * На открытии найден несохранённый черновик, и оператор ещё не ответил баннеру (restore / discard).
+   * Пока это так, тихая запись его не трогает, авто-стейдж стоит, и орган не сеет в форму значений
+   * сам: сеянное грязнит форму и уезжает тихой записью мимо ответа (волна 25.09, R-11).
+   */
+  draftPending: boolean;
   /** «Сохрани скоро»: перезапускает дебаунс. `reason` — для логов/телеметрии, не для UI. */
   request: (reason: string) => void;
   /** «Сохрани сейчас и скажи, вышло ли». Ждёт завершения текущего сохранения, если оно идёт. */
@@ -58,6 +73,7 @@ const noop = () => {};
 /** Умолчание: автосейва нет — стенды, печать, режим создания. */
 export const AUTOSAVE_OFF: AutosaveApi = {
   status: 'off',
+  draftPending: false,
   request: noop,
   flush: async () => 'off',
 };
@@ -87,6 +103,8 @@ export function flushRefusalSentence(r: FlushResult, errorsCount?: number): stri
       return 'save the card first — someone else saved it meanwhile';
     case 'error':
       return 'save the card first — the last save failed';
+    case 'busy':
+      return 'save the card first — it kept changing while it was being saved; try again in a moment';
     default:
       return '';
   }
