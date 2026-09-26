@@ -459,10 +459,16 @@ export function ColourwayProposals({
                 </span>
               </div>
 
+              {/* ПОСЛЕДНИЙ СЛОТ БЕЗ ЛИНЕЙКИ, С ВОЗДУХОМ (владелец, 2026-09-26, O-43): «под последним
+                  слотом не делать нижнее подчеркивание а просто увеличить гэп»; строка «N of M slots
+                  bound to the saved card» снята там же — непривязанный слот и так назван пилюлей. */}
               {bound.map((s, i) => (
                 <div
                   key={`${p.id}:${s.slot}`}
-                  className='flex flex-wrap items-center gap-2 border-b border-hairline py-1'
+                  className={cn(
+                    'flex flex-wrap items-center gap-2 py-1',
+                    i === bound.length - 1 ? 'pb-4' : 'border-b border-hairline',
+                  )}
                   data-b25-slot={`${p.id}:${s.slot}`}
                   data-bound={s.bomLineKey ? 'yes' : 'no'}
                 >
@@ -503,10 +509,6 @@ export function ColourwayProposals({
                   {!s.bomLineKey && <Pill tone='mut'>not on the card</Pill>}
                 </div>
               ))}
-              <Text size='nano' variant='label' component='p' data-b25-bound={p.id}>
-                {boundCount} of {bound.length} slot{bound.length === 1 ? '' : 's'} bound to the saved
-                card
-              </Text>
             </div>
           );
         })}
