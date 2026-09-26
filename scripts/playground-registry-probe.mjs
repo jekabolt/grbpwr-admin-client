@@ -35,6 +35,8 @@
 //                                                                   как «всё можно» → краснеет D
 //   node scripts/playground-registry-probe.mjs --mutate-recall      cutout теряет свою плитку
 //                                                                   → краснеет E
+//   node scripts/playground-registry-probe.mjs --mutate-preset-match create_edit снова сверяет
+//                                                                   пресет (G-01 m-3) → краснеет D
 //
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
@@ -56,6 +58,7 @@ const MUT = {
   legacy: process.argv.includes('--mutate-legacy'),
   capability: process.argv.includes('--mutate-capability'),
   recall: process.argv.includes('--mutate-recall'),
+  presetMatch: process.argv.includes('--mutate-preset-match'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -135,6 +138,16 @@ if (MUT.recall)
       /registry\/index\.ts$/,
       "if (kind === 'cutout') return 'remove_background';",
       '',
+    ),
+  );
+
+if (MUT.presetMatch)
+  plugins.push(
+    swap(
+      'match-on-preset',
+      /tiles\/create-edit\.tsx$/,
+      "match: (run) => (run.kind ?? '').trim().toLowerCase() === 'freeform',",
+      "match: (run) => (run.kind ?? '').trim().toLowerCase() === 'freeform' && (run.params === undefined || (run.params.freeform?.preset ?? '').trim() === 'free'),",
     ),
   );
 
@@ -437,9 +450,18 @@ for (const [name, b, open] of shapes) {
     show(pick('remove_background')),
   );
   ck(
-    same(pick('create_edit'), ['freeform/free']),
-    'история create_edit — только freeform/free',
+    same(pick('create_edit'), ['freeform/free', 'freeform/add_hardware']),
+    'история create_edit — каждый freeform, и свободный, и отставленного пресета (Q17)',
     show(pick('create_edit')),
+  );
+  // G-01 m-3: один и тот же прогон заглушкой (страница ещё не пришла) и целиком (пришла) —
+  // одинаково свой, иначе оплаченная картинка уходит с плитки, пока лента листается.
+  const stub = { id: 9, kind: 'freeform' };
+  const loaded = { id: 9, kind: 'freeform', params: { freeform: { preset: 'add_hardware' } } };
+  const m = M.playgroundHistoryMatch('create_edit', b);
+  ck(
+    m(stub) === true && m(loaded) === true,
+    'create_edit: заглушка и загруженный прогон — оба свои',
   );
 }
 
