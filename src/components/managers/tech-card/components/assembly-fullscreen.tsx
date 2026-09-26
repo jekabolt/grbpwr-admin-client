@@ -1923,6 +1923,12 @@ export function AssemblyFullscreen({
                       // Каталог работ — имя строки рельса спрашивает работу и в фулскрине (R8).
                       workCatalog={workCatalog}
                     />
+                    {/* Σ SMV — ровно там же, где в инлайне: СРАЗУ под рельсом, и её чернильная
+                        черта закрывает прогон шагов (O-48, ревью Codex T48-2). Без неё
+                        фулскрин-список читал бы ту же последовательность, что инлайн, но молчал о
+                        её длительности — а это единственное число, которым технолог меряет сборку
+                        целиком. У пустого рельса итога нет (`RailTotal` молчит на нуле). */}
+                    {railTotal}
                     {/* «＋ NEW OPERATION» ОБЯЗАТЕЛЬНА ИМЕННО ЗДЕСЬ. В схеме она стоит в шапке
                         дока, а в списке док закрыт — и без этой кнопки карточка с нулём шагов (а
                         список и есть её дефолт) не давала бы завести первый шаг вовсе. Настоящая
@@ -1931,24 +1937,25 @@ export function AssemblyFullscreen({
                         СЛОВО «NEW» — НЕ УКРАШЕНИЕ: «+ operation» носит ещё и ховер-чип на боксе
                         узла (`assembly-node-views.tsx`), и делает он другое — операцию НА ЭТОМ
                         узле, с ним же в составе. Два органа под одной надписью читаются как
-                        один. */}
+                        один.
+                        ДВЕРЬ — ПОСЛЕ ИТОГА, НА ШАГ (`mt-4`), пока шаги есть; у пустого рельса она
+                        первая строка колонки, без зазора. Порядок и зазоры — те же, что у
+                        инлайна. */}
                     {!frozen && (
                       <button
                         type='button'
                         onClick={openCreateDialog}
                         title='a new step from scratch — pick what it joins in the dialog'
-                        className='mt-0.5 w-full shrink-0 border border-dashed border-borderColor py-1 text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+                        className={cn(
+                          'w-full shrink-0 border border-dashed border-borderColor py-1 text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
+                          railFields.length > 0 && 'mt-4',
+                        )}
                       >
                         <Text size='control' variant='uppercase' tracking='label' component='span'>
                           + new operation
                         </Text>
                       </button>
                     )}
-                    {/* Σ SMV — ровно там же, где в инлайне: под рельсом, последней строкой
-                        колонки. Без неё фулскрин-список читал бы ту же последовательность, что
-                        инлайн, но молчал о её длительности — а это единственное число, которым
-                        технолог меряет сборку целиком. */}
-                    {railTotal}
                   </div>
                   {/* СВОЙ `<fieldset disabled>` — РОВНО ПО ТОЙ ЖЕ ПРИЧИНЕ, ЧТО У ДОКА: внешний,
                       что стоит на карточке, до портала не достаёт вовсе, и редактор выпущенной

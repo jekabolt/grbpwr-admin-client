@@ -940,9 +940,15 @@ function RailTotal() {
     const n = parseDecimalNumber(o?.smv);
     return acc + (Number.isFinite(n) ? n : 0);
   }, 0);
+  // A RAIL WITH NO STEP HAS NOTHING TO CLOSE (O-48, Codex T48-2): no total at all, and the door
+  // below becomes the rail's first row. «total · 0 · 0.0 min» over an empty rail would be an ink
+  // rule closing nothing — the same silence-at-zero as `RailUnnamedWord` below.
+  if (operations.length === 0) return null;
   return (
-    // The total's ink rule stands ABOVE it now (O-48 review), right under «+ operation»: a step of
-    // air keeps it off the door's dashed edge.
+    // THE TOTAL CLOSES THE RUN (O-48): it stands right under the last step — not under the door —
+    // with its ink rule above it, and «+ operation» comes after it, a step away. The rail's steps
+    // are boxes, not hairline rows, so a step of air (8px) keeps the ink off the last box's edge;
+    // the two lines touching would read as one heavy edge of that box.
     <RowTotal
       className='mt-2'
       label={
@@ -7698,16 +7704,24 @@ export function OperationsField({
                 />
               </div>
               )}
+              {/* ИТОГ ЗАКРЫВАЕТ РЕЛЬС, ДВЕРЬ СТОИТ ЗА НИМ (O-48, ревью Codex T48-2). Итог — сразу
+                  под последним шагом: его чернильная черта закрывает прогон шагов, а не дверь.
+                  Дверь «+ operation» — после итога, на шаг (`mt-4`, 16px), пока шаги есть; у
+                  пустого рельса итога нет вовсе, и дверь — его первая строка, без зазора. Тот же
+                  порядок и те же зазоры — у рельса фулскрина. */}
+              <RailTotal />
               <button
                 type='button'
                 onClick={addOperation}
-                className='mt-0.5 w-full border border-dashed border-borderColor py-1 text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+                className={cn(
+                  'w-full border border-dashed border-borderColor py-1 text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
+                  fields.length > 0 && 'mt-4',
+                )}
               >
                 <Text size='control' variant='uppercase' tracking='label' component='span'>
                   + operation
                 </Text>
               </button>
-              <RailTotal />
             </div>
 
             {selectedIndex >= 0 && (
