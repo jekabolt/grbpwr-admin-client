@@ -8,6 +8,7 @@ export { EmptyStudio } from './empty-studio';
 export { FixContext, FixContextProvider, useFixContext, type FixTarget } from './fix-context';
 export { hasAnyPictures } from './generation-form';
 export { GenerationHistory } from './generation-history';
+export { LatestGeneration } from './latest-generation';
 export { RunPanel } from './run-panel';
 export { SlotPicker } from './slot-picker';
 export { GenerationStudio } from './studio';
