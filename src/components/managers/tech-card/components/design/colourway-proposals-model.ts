@@ -1,10 +1,6 @@
 import type { common_TechCardColorwayUsage } from 'api/proto-http/admin';
 
-import {
-  foldToken,
-  normText,
-  type ConstructionDraft,
-} from './head/construction-draft-model';
+import { foldToken, normText, type ConstructionDraft } from './head/construction-draft-model';
 
 /**
  * ПРЕДЛОЖЕННЫЕ КОЛОРВЕИ — РАЗБОР, ПРИВЯЗКА И ВОРОТА, БЕЗ ЕДИНОЙ СТРОКИ ЭКРАНА (B-25 круга 20).
@@ -31,12 +27,19 @@ import {
 
 /* ─── ФОРМА ПРЕДЛОЖЕНИЯ ────────────────────────────────────────────────────────────────────── */
 
-/** Один слот, носящий один цвет. `slot` — ИМЯ, свёртка которого и есть вся привязка. */
+/**
+ * Один слот, носящий один цвет. `slot` — ИМЯ, свёртка которого — привязка слота, пока его не правили.
+ *
+ * `lineKey` — ключ строки карточки, на ряду которой слот ПРАВИЛИ на экране (`patchRow`,
+ * `colourway-rows.ts`). С ним слот держится за строку, а не за имя: переименование строки в MATERIAL
+ * SLOTS не уводит уже выбранный цвет в «not on the card». У слотов, пришедших от модели, его нет.
+ */
 export type ProposedSlotColour = {
   slot: string;
   pantone: string;
   hex: string;
   colour: string;
+  lineKey?: string;
 };
 
 /**
@@ -101,38 +104,15 @@ export function proposedColourways(draft: ConstructionDraft | null): ProposedCol
 
 /* ─── ПРИВЯЗКА СЛОТА К СОХРАНЁННОЙ СТРОКЕ ──────────────────────────────────────────────────── */
 
-/** Строка спецификации так, как её знает СОХРАНЁННАЯ карточка: имя и durable-ключ. */
-export type SavedSlot = { name?: string; lineKey?: string };
-
+/**
+ * Слот, привязанный к строке СОХРАНЁННОЙ карточки. Привязку считает `proposalRows`
+ * (`colourway-rows.ts`): ряды там — слоты карточки, а не слоты ответа, и привязка идёт по строке,
+ * которую сервер уже знает, а не по форме (довод — в шапке того файла).
+ */
 export type BoundSlot = ProposedSlotColour & {
   /** Пусто — слота с таким именем на СОХРАНЁННОЙ карточке нет; строка рецепта не родится. */
   bomLineKey: string;
 };
-
-/**
- * ПРИВЯЗКА ИДЁТ ПО СВЁРНУТОМУ ИМЕНИ И ПО СОХРАНЁННОЙ КАРТОЧКЕ, А НЕ ПО ФОРМЕ.
- *
- * Два раза «а не»:
- *   · не по позиции и не по id — сервер называет слот ИМЕНЕМ, тем же, на которое таблица слотов
- *     дедуплицируется, поэтому колорвей, предложенный в одном ответе со своими слотами,
- *     привязывается и к ним, и к одноимённым, набранным руками;
- *   · не по ФОРМЕ — рецепт ссылается на `bom_line_key` строки, КОТОРУЮ СЕРВЕР УЖЕ ЗНАЕТ.
- *     Строка, рождённая черновиком минуту назад и ещё не сохранённая, ключ имеет, но на сервере
- *     её нет: рецепт с таким ключом сервер отверг бы целиком. Ворота ниже требуют чистой формы
- *     ровно ради этого, а привязка читает сохранённую карточку, чтобы это было ВИДНО ГЛАЗАМИ,
- *     а не выяснялось отказом.
- */
-export function bindSlots(slots: ProposedSlotColour[], saved: SavedSlot[]): BoundSlot[] {
-  const byFold = new Map<string, string>();
-  for (const line of saved) {
-    const fold = foldToken(line.name);
-    const key = (line.lineKey ?? '').trim();
-    if (!fold || !key) continue;
-    // Первая строка с этим именем побеждает — тот же порядок, каким её видит человек в таблице.
-    if (!byFold.has(fold)) byFold.set(fold, key);
-  }
-  return slots.map((s) => ({ ...s, bomLineKey: byFold.get(foldToken(s.slot)) ?? '' }));
-}
 
 /* ─── СТРОКИ РЕЦЕПТА ───────────────────────────────────────────────────────────────────────── */
 
@@ -196,6 +176,14 @@ export type ConfirmGateInput = {
   codeChoosable: boolean;
   /** Код вообще известен словарю (архивный — известен; удалённый — нет). */
   codeKnown: boolean;
+  /**
+   * Карточка прочитана — до этого «слотов нет» значит «ещё не знаем», а не «нет». Необязателен:
+   * окно рождения (`createRefusal`) берёт отсюда только общие ворота и рецепта не пишет вовсе.
+   */
+  cardRead?: boolean;
+  /** Слотов на СОХРАНЁННОЙ карточке — отличает «слотов нет» от «ни один не покрашен». */
+  cardSlotCount?: number;
+  /** Рядов, которые уедут в рецепт: слот сохранённой карточки, у которого есть цвет (`recipeSlots`). */
   boundCount: number;
 };
 
@@ -222,13 +210,19 @@ export function confirmRefusal(i: ConfirmGateInput): string | null {
   // Два РАЗНЫХ тупика, и лекарства у них противоположные. Пустой словарь лечится заведением
   // цветов; словарь, где все цвета сняты в архив, лечится их возвратом — и старый общий текст
   // отправлял человека заводить то, что у него уже есть, в полном списке.
-  if (!i.dictionaryHasAny) return 'no colours in the dictionary yet — add them under settings › colors';
-  if (!i.dictionaryHasColours) return 'every colour in the dictionary is archived — un-archive one under settings › colors';
+  if (!i.dictionaryHasAny)
+    return 'no colours in the dictionary yet — add them under settings › colors';
+  if (!i.dictionaryHasColours)
+    return 'every colour in the dictionary is archived — un-archive one under settings › colors';
   if (i.dirty) return 'save the card first — the colourway binds to saved slots';
   if (!i.colorCode) return 'pick the dictionary colour — a colourway is a product and needs one';
   if (!i.codeKnown) return 'that colour is gone from the dictionary — pick another';
   if (!i.codeChoosable) return 'that colour has been archived — pick one still in the dictionary';
   if (i.usedCodes.has(i.colorCode)) return 'this colour is already on the style';
-  if (i.boundCount === 0) return 'none of these slots is on the saved card yet';
+  if (i.cardRead === false) return 'reading the card…';
+  // Два тупика, и лечатся они по-разному: слотов на сохранённой карточке нет вовсе (сохранить
+  // карточку со слотами) — или слоты есть, но ни один не покрашен (выбрать цвет здесь же, в ряду).
+  if (i.boundCount === 0 && !i.cardSlotCount) return 'none of these slots is on the saved card yet';
+  if (i.boundCount === 0) return 'give at least one slot on the card a colour';
   return null;
 }

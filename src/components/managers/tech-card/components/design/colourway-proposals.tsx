@@ -1,6 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { useTechCard, techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
+import {
+  useTechCard,
+  techCardKeys,
+} from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
@@ -26,12 +29,13 @@ import { GROUP_SEAM } from './core';
 import { DRAFTED_CLASS, DraftedPill } from './core/drafted-field';
 import { ColourwayCreatePopover } from './colourway-create';
 import {
-  bindSlots,
   confirmRefusal,
   usagesForColourway,
   type BoundSlot,
   type ProposedColourway,
+  type ProposedSlotColour,
 } from './colourway-proposals-model';
+import { cardSlots, patchRow, proposalRows, recipeSlots } from './colourway-rows';
 import { useCardMemory, useDraftMemory, type ColourwayVerdict } from './head/use-draft-fills';
 
 /**
@@ -163,7 +167,6 @@ export function ColourwayProposals({
   const { proposals, verdicts } = useCardMemory(techCardId);
   const setVerdict = useDraftMemory((s) => s.setVerdict);
   const patchProposal = useDraftMemory((s) => s.patchProposal);
-  const patchSlot = useDraftMemory((s) => s.patchSlot);
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
   const { data: techCard } = useTechCard(techCardId);
@@ -216,10 +219,29 @@ export function ColourwayProposals({
     if (handMade.length) setHandMade([]);
   }
 
-  const savedSlots = useMemo(
-    () => (techCard?.techCard?.bomItems ?? []).map((b) => ({ name: b.name, lineKey: b.lineKey })),
+  /* Слоты СОХРАНЁННОЙ карточки в порядке MATERIAL SLOTS — из них и строятся ряды каждого колорвея
+     (`colourway-rows.ts`). `cardRead` отличает «слотов нет» от «карточку ещё не прочитали». */
+  const card = useMemo(
+    () => cardSlots(techCard?.techCard?.bomItems),
     [techCard?.techCard?.bomItems],
   );
+  const cardRead = techCard !== undefined;
+
+  /**
+   * ПРАВКА РЯДА — ПО КЛЮЧУ РЯДА И НАД СЛОТАМИ ИЗ СТОРА В МОМЕНТ ЗАПИСИ. Ряды — слоты карточки, а не
+   * слоты ответа, поэтому индекс ряда в `slots` предложения не адрес (индексный `patchSlot` писал
+   * бы в соседа). Слоты берутся из стора, а не из рендера: две записи подряд без перерисовки между
+   * ними не должны затирать друг друга.
+   */
+  const writeRow = (
+    id: string,
+    rowKey: string,
+    patch: Partial<Pick<ProposedSlotColour, 'pantone' | 'hex' | 'colour'>>,
+  ) => {
+    const cur = useDraftMemory.getState().byCard[techCardId]?.proposals.find((x) => x.id === id);
+    if (!cur) return;
+    patchProposal(techCardId, id, { slots: patchRow(cur.slots, card, rowKey, patch) });
+  };
   const usedCodes = useMemo(
     () => new Set((techCard?.colorways ?? []).map((c) => c.colorCode ?? '').filter(Boolean)),
     [techCard?.colorways],
@@ -308,8 +330,9 @@ export function ColourwayProposals({
       <div data-b25-colourways=''>
         {visible.map((p) => {
           const verdict = verdicts[p.id];
-          const bound = bindSlots(p.slots, savedSlots);
-          const boundCount = bound.filter((s) => !!s.bomLineKey).length;
+          // Ряды — все слоты сохранённой карточки, потом слоты модели, которых на ней нет (O-44 п.2).
+          const rows = proposalRows(p.slots, card);
+          const bound = recipeSlots(rows);
 
           if (verdict?.status === 'confirmed') {
             return (
@@ -355,7 +378,9 @@ export function ColourwayProposals({
             dictionaryHasColours: choosable.size > 0,
             codeChoosable: !p.colorCode || choosable.has(p.colorCode),
             codeKnown: !p.colorCode || !orphanCode,
-            boundCount,
+            cardRead,
+            cardSlotCount: card.length,
+            boundCount: bound.length,
           });
 
           /* ═══ ПРЕДЛОЖЕНИЕ — ЧЕРНОВИК, И ВЫГЛЯДИТ ОНО ЧЕРНОВИКОМ (владелец, O-44 п.1) ═══════════
@@ -404,7 +429,9 @@ export function ColourwayProposals({
                       value={p.colorCode}
                       disabled={readOnly}
                       data-b25-code={p.id}
-                      onChange={(e) => patchProposal(techCardId, p.id, { colorCode: e.target.value })}
+                      onChange={(e) =>
+                        patchProposal(techCardId, p.id, { colorCode: e.target.value })
+                      }
                     >
                       <option value=''>— select colour —</option>
                       {colours.map((c) => (
@@ -478,15 +505,16 @@ export function ColourwayProposals({
               {/* ПОСЛЕДНИЙ СЛОТ БЕЗ ЛИНЕЙКИ, С ВОЗДУХОМ (владелец, 2026-09-26, O-43): «под последним
                   слотом не делать нижнее подчеркивание а просто увеличить гэп»; строка «N of M slots
                   bound to the saved card» снята там же — непривязанный слот и так назван пилюлей. */}
-              {bound.map((s, i) => (
+              {rows.map((s, i) => (
                 <div
-                  key={`${p.id}:${s.slot}`}
+                  key={`${p.id}:${s.key}`}
                   className={cn(
                     'flex flex-wrap items-center gap-2 py-1',
-                    i === bound.length - 1 ? 'pb-4' : 'border-b border-hairline',
+                    i === rows.length - 1 ? 'pb-4' : 'border-b border-hairline',
                   )}
-                  data-b25-slot={`${p.id}:${s.slot}`}
-                  data-bound={s.bomLineKey ? 'yes' : 'no'}
+                  data-b25-slot={`${p.id}:${s.key}`}
+                  data-bound={s.lineKey ? 'yes' : 'no'}
+                  data-family={s.family ?? undefined}
                 >
                   <Text
                     size='nano'
@@ -494,7 +522,7 @@ export function ColourwayProposals({
                     component='span'
                     className='w-28 shrink-0 truncate'
                   >
-                    {s.slot}
+                    {s.slot || 'unnamed'}
                   </Text>
                   <Swatch hex={s.hex || undefined} title={s.pantone || undefined} />
                   <Input
@@ -503,9 +531,9 @@ export function ColourwayProposals({
                     maxLength={64}
                     disabled={readOnly}
                     placeholder='pantone'
-                    data-b25-pantone={`${p.id}:${s.slot}`}
+                    data-b25-pantone={`${p.id}:${s.key}`}
                     onChange={(e: { target: { value: string } }) =>
-                      patchSlot(techCardId, p.id, i, { pantone: e.target.value })
+                      writeRow(p.id, s.key, { pantone: e.target.value })
                     }
                   />
                   <Input
@@ -514,15 +542,16 @@ export function ColourwayProposals({
                     maxLength={64}
                     disabled={readOnly}
                     placeholder='colour'
-                    data-b25-colour={`${p.id}:${s.slot}`}
+                    data-b25-colour={`${p.id}:${s.key}`}
                     onChange={(e: { target: { value: string } }) =>
-                      patchSlot(techCardId, p.id, i, { colour: e.target.value })
+                      writeRow(p.id, s.key, { colour: e.target.value })
                     }
                   />
                   {/* НЕ ПРИВЯЗАННЫЙ СЛОТ НАЗЫВАЕТСЯ, А НЕ ПРЯЧЕТСЯ. Он не поедет в рецепт, и человек
                       обязан знать, ПОЧЕМУ: имени такого слота на СОХРАНЁННОЙ карточке нет. Тихо
-                      выброшенная строка выглядела бы как потерянный цвет. */}
-                  {!s.bomLineKey && <Pill tone='mut'>not on the card</Pill>}
+                      выброшенная строка выглядела бы как потерянный цвет. Пока карточку не
+                      прочитали, «нет на карточке» значит «ещё не знаем» — пилюли нет. */}
+                  {!s.lineKey && cardRead && <Pill tone='mut'>not on the card</Pill>}
                 </div>
               ))}
             </div>
@@ -542,8 +571,9 @@ export function ColourwayProposals({
               {/* ИМЯ — ИЗ КАРТОЧКИ. Пока перечитывание не доехало, печатается `#42` — та же
                   лестница отступления, что у всех подписей колорвея (`colorwayLabel`): число
                   существует наверняка, а имя — ещё нет, и выдумывать его нечем. */}
-              {nameOfColorway((techCard?.colorways ?? []).find((c) => (c.colorwayId ?? 0) === id)) ||
-                `#${id}`}
+              {nameOfColorway(
+                (techCard?.colorways ?? []).find((c) => (c.colorwayId ?? 0) === id),
+              ) || `#${id}`}
             </Text>
             <Pill tone='ok'>created</Pill>
             <Button
