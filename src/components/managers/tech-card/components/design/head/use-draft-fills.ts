@@ -94,8 +94,11 @@ const EMPTY: CardMemory = { fills: [], proposals: [], verdicts: {}, boardMoved: 
 
 export type DraftRunPhase = 'saving' | 'asking';
 
-/** Почему GENERATE не заказал прогон после сохранения: исход `flush` или остановленное сохранение. */
-export type DraftRefusal = FlushResult | 'released' | 'stopped';
+/**
+ * Почему GENERATE не заказал прогон после сохранения: исход `flush` или остановленное сохранение.
+ * `running` — повтор ключа застал прогон живым (26.09): ответа ещё нет, ключ на месте, нажать снова.
+ */
+export type DraftRefusal = FlushResult | 'released' | 'stopped' | 'running';
 
 /** Что прочитал прогон: картинки, заметки и слепок доски, по которому черновик поймёт, что протух. */
 export type DraftRead = { pictures: number; notes: number; fingerprint: string };

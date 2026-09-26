@@ -307,6 +307,9 @@ const FIT_NEEDS_GRANT = 'fit needs products:write';
  * TO DECIDE, и её `take` оживает, когда право подтвердится.
  */
 const FIT_WAITS_ACCOUNT = 'fit waits for your account';
+/** Повтор ключа застал прогон живым (26.09): стойкая строка над дверью, пока не нажмут снова. */
+const STILL_RUNNING =
+  'the draft is still being written — press GENERATE again in a moment; it will not be charged twice';
 /** Сколько стоит `undo ↶` после отказа от прежних слов (m6) — столько же, сколько у `ai ✦`. */
 const UNDO_WINDOW_MS = 10_000;
 
@@ -625,6 +628,17 @@ export function ConstructionDraft({
     patchRun(card, { phase: 'asking', intent: clientRequestId });
     try {
       const res = await draftIdea.mutateAsync({ clientRequestId });
+      // ⚠ ПОВТОР, ЗАСТАВШИЙ ПРОГОН ЖИВЫМ, — НЕ ОТВЕТ (26.09). На тот же ключ при живой лизе сервер
+      // отвечает OK строкой `pending|running` и БЕЗ предложения: вызов идёт прямо сейчас в соседнем
+      // запросе. Прочитать это как «нечего предложить» значило бы отпустить ключ — и следующее
+      // нажатие заплатило бы второй раз за тот же вопрос, а первый ответ так и остался бы в реестре
+      // непоказанным. Ключ на месте, дверь живая, стойкая строка велит нажать снова: второе нажатие
+      // несёт ТОТ ЖЕ ключ и получает готовую строку — или закрытый отказ, как всегда.
+      const status = res.run?.status;
+      if ((status === 'pending' || status === 'running') && !res.construction) {
+        patchRun(card, { phase: null, refused: 'running' });
+        return;
+      }
       patchRun(card, {
         phase: null,
         intent: null,
@@ -1291,7 +1305,9 @@ export function ConstructionDraft({
   const refused = run.refused;
   useEffect(() => {
     if (autosave.status !== 'saved' && autosave.status !== 'idle') return;
-    if (readDraftRun(techCardId).refused !== null) patchRun(techCardId, { refused: null });
+    // `running` — не про сохранение: его снимает только следующее нажатие, не состояние автосейва.
+    const cur = readDraftRun(techCardId).refused;
+    if (cur !== null && cur !== 'running') patchRun(techCardId, { refused: null });
   }, [autosave.status, techCardId, patchRun]);
   const saveless = readOnly || autosave.status === 'off';
   useEffect(() => {
@@ -1300,11 +1316,13 @@ export function ConstructionDraft({
   const refusedSentence =
     saveless || !refused
       ? null
-      : refused === 'released'
-        ? 'the card was released while it was being saved'
-        : refused === 'stopped'
-          ? 'the card stopped saving while GENERATE waited for it'
-          : flushRefusalSentence(refused, autosave.errorsCount) || 'save the card first';
+      : refused === 'running'
+        ? STILL_RUNNING
+        : refused === 'released'
+          ? 'the card was released while it was being saved'
+          : refused === 'stopped'
+            ? 'the card stopped saving while GENERATE waited for it'
+            : flushRefusalSentence(refused, autosave.errorsCount) || 'save the card first';
   /**
    * ДВЕРЬ У ОТКАЗА СОХРАНЕНИЯ: `invalid` — к первому полю с ошибкой (`revealField` сам приносит
    * шаг студии), прочие исходы и поле, которого студия не рисует, — к чипу сохранения в шапке: он и
@@ -1716,14 +1734,19 @@ export function ConstructionDraft({
         )}
         {/* СОХРАНЕНИЕ НЕ ПРОШЛО — ПРОГОН НЕ ЗАКАЗАН (S-M1). Стойкая строка до следующего сохранения:
             исправление («поправь поле») — не новое нажатие, и всплывашка ушла бы раньше. Утверждённой
-            карточке чинить нечего — двери нет. */}
+            карточке чинить нечего — двери нет.
+            `running` (26.09) — та же полоса: повтор ключа застал прогон живым; дверь — сам GENERATE. */}
         {refusedSentence && (
           <LockedBar
-            reason={`${refusedSentence} — nothing was started, nothing was charged`}
+            reason={
+              refused === 'running'
+                ? refusedSentence
+                : `${refusedSentence} — nothing was started, nothing was charged`
+            }
             className='mb-2'
             data-c19-draft-refused={refused ?? ''}
             door={
-              refused === 'released' ? undefined : (
+              refused === 'released' || refused === 'running' ? undefined : (
                 <Button
                   type='button'
                   variant='secondary'
