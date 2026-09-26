@@ -215,10 +215,23 @@ interface GalleryEntry {
 
 interface GalleryApi {
   register: (key: string, entry: GalleryEntry | null) => void;
-  openAt: (key: string, offset?: number) => void;
+  /** `mediaId` — the clicked frame's identity; the offset is only the fallback (see `openAt`). */
+  openAt: (key: string, offset?: number, mediaId?: number) => void;
 }
 
 const GalleryContext = createContext<GalleryApi | null>(null);
+
+/**
+ * ОТКРЫТ ЛИ ПРОСМОТРЩИК — ОТДЕЛЬНЫЙ КОНТЕКСТ, ТОЛЬКО ДЛЯ ЧТЕНИЯ (26.09, O-53 review). Его читает
+ * верстак последней генерации: пока человек листает, прогон на верстаке не меняется — иначе ряд
+ * пересобрался бы без кадра на сцене и показал бы соседний. Отдельно от `GalleryContext`, чтобы
+ * открытие просмотрщика не перерисовывало каждую плитку полосы.
+ */
+const GalleryOpenContext = createContext(false);
+
+export function useGalleryViewerOpen(): boolean {
+  return useContext(GalleryOpenContext);
+}
 
 /**
  * ОДИН ПРОСМОТРЩИК НА ВСЮ ПОЛОСУ. Владелец: «что бы можно было в зум вью по всем картинкам из
@@ -252,7 +265,7 @@ export function PictureGalleryProvider({
   /** Адрес кадра, стоящего на сцене. Держит место человека при пересборке ряда. */
   const onStage = useRef<string | null>(null);
 
-  /** Весь ряд в порядке документа, плюс смещение начала записи `key`, если она нужна. */
+  /** Весь ряд в порядке документа, плюс начало и длина записи `key`, если она нужна. */
   const collect = useCallback((key?: string) => {
     const entries = [...registry.current.entries()].filter(([, e]) => e.node.isConnected);
     entries.sort(([, a], [, b]) => {
@@ -263,14 +276,18 @@ export function PictureGalleryProvider({
       return 0;
     });
     let before = -1;
+    let count = 0;
     const items: MediaViewerItem[] = [];
     for (const [k, e] of entries) {
-      if (k === key) before = items.length;
+      if (k === key) {
+        before = items.length;
+        count = e.items.length;
+      }
       // Павший крупный адрес подменяется миниатюрой ЗДЕСЬ, при сборке ряда, — и только здесь:
       // плитки регистрируют кадр как есть, а «что показывать вместо битого» решает ряд (D-7).
       items.push(...e.items.map(withFallback));
     }
-    return { items, before };
+    return { items, before, count };
   }, []);
 
   /**
@@ -330,11 +347,35 @@ export function PictureGalleryProvider({
     [rebuild],
   );
 
+  /**
+   * ═══ ОТКРЫВАЕТСЯ КАДР, НА КОТОРЫЙ НАЖАЛИ, — ПО ЕГО МЕДИА, А НЕ ПО СМЕЩЕНИЮ (26.09, O-53 review) ═══
+   * Смещение `before + offset` верно, только пока запись группы и номер у плитки посчитаны по одному
+   * и тому же списку, и пока якорь группы в документе. Codex на ревью верстака: две группы с одной и
+   * той же картинкой — и ряд держал её дважды. Корень убран там (прогон на верстаке в истории без
+   * плиток), а здесь страховка: плитка группы называет свой медиа (`galleryGroup.mediaId`), и ряд
+   * открывается на нём — сперва внутри своей записи (листание идёт дальше оттуда, где нажали), потом
+   * где угодно в ряду (якорь группы выпал из документа — кадр всё равно открывается). Смещение
+   * остаётся запасным ходом для кадра без медиа.
+   */
   const openAt = useCallback(
-    (key: string, offset = 0) => {
-      const { items, before } = collect(key);
-      if (before < 0 || !items.length) return;
-      const index = Math.min(Math.max(before + offset, 0), items.length - 1);
+    (key: string, offset = 0, mediaId?: number) => {
+      const { items, before, count } = collect(key);
+      if (!items.length) return;
+      let index = -1;
+      if (mediaId) {
+        const find = (from: number, to: number) => {
+          for (let i = Math.max(from, 0); i < Math.min(to, items.length); i++) {
+            if ((items[i]?.meta?.id ?? 0) === mediaId) return i;
+          }
+          return -1;
+        };
+        if (before >= 0) index = find(before, before + count);
+        if (index < 0) index = find(0, items.length);
+      }
+      if (index < 0) {
+        if (before < 0) return;
+        index = Math.min(Math.max(before + offset, 0), items.length - 1);
+      }
       onStage.current = items[index]?.src ?? null;
       setRow({ items, index });
     },
@@ -439,7 +480,11 @@ export function PictureGalleryProvider({
 
   return (
     <GalleryContext.Provider value={api}>
-      <ThreedModelIndexContext.Provider value={modelIndex}>{children}</ThreedModelIndexContext.Provider>
+      <GalleryOpenContext.Provider value={!!row}>
+        <ThreedModelIndexContext.Provider value={modelIndex}>
+          {children}
+        </ThreedModelIndexContext.Provider>
+      </GalleryOpenContext.Provider>
       <MediaViewer
         items={row?.items ?? []}
         index={row?.index ?? 0}
@@ -553,10 +598,11 @@ export interface PictureTileProps {
   gallery?: MediaViewerItem;
   /**
    * Плитка принадлежит ГРУППЕ (`useGalleryGroup`) и своего кадра в ряд не кладёт: ряд группы
-   * полон и без неё. Зум открывает группу на этом смещении. Задан вместе с `gallery` — `gallery`
-   * проигрывает: две записи об одной картинке дали бы её в ряду дважды.
+   * полон и без неё. Зум открывает группу на кадре с этим `mediaId` (id медиа картинки — тот же,
+   * что `meta.id` кадра в ряду), а без него — на этом смещении (разбор у `openAt`). Задан вместе с
+   * `gallery` — `gallery` проигрывает: две записи об одной картинке дали бы её в ряду дважды.
    */
-  galleryGroup?: { key: string; index: number };
+  galleryGroup?: { key: string; index: number; mediaId?: number };
   /**
    * ПОВЕРХНОСТЬ ОТКРЫВАЕТ НЕ ЗУМ, А ЭТО (J-2).
    *
@@ -868,10 +914,10 @@ export function PictureTile({
   const onZoomRef = useRef(onZoom);
   onZoomRef.current = onZoom;
   const openZoom = useCallback(() => {
-    if (galleryGroup) ctx?.openAt(galleryGroup.key, galleryGroup.index);
+    if (galleryGroup) ctx?.openAt(galleryGroup.key, galleryGroup.index, galleryGroup.mediaId);
     else ctx?.openAt(key);
     onZoomRef.current?.();
-  }, [ctx, key, galleryGroup?.key, galleryGroup?.index]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ctx, key, galleryGroup?.key, galleryGroup?.index, galleryGroup?.mediaId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
