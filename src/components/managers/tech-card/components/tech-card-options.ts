@@ -1,5 +1,7 @@
 import type { common_AgeGroupEnum } from 'api/proto-http/admin';
 
+import type { TechCardFormData } from './schema';
+
 // Guided-but-open vocabularies for the tech-card form (ComboField suggestion lists +
 // closed-select item lists). Hints, not closed sets, unless used via SelectField.
 
@@ -143,3 +145,23 @@ export function isAgeGroupSet(value?: string | null): value is common_AgeGroupEn
 export function ageGroupLabel(value?: string | null): string {
   return ageGroupOptions.find((o) => o.value === value)?.label ?? '';
 }
+
+/**
+ * THE STYLE FACTS — the form fields `StyleFactsField` writes through its own staged `UpdateStyle`,
+ * which the card's own save never writes (UpdateTechCard excludes them, R4/§14.7; only
+ * CreateTechCard seeds brand, collection and gender at creation). ONE list (Codex R8): the panel
+ * reads it for its dirty map, its mask and its label (in this order), and the card's body save for
+ * the baselines it leaves to that panel (`keepBaseline`). A fact added in one place and not the
+ * other would be written by nobody or re-baselined by the wrong writer.
+ */
+export const STYLE_FACT_KEYS = [
+  'fit',
+  'careInstructions',
+  'brand',
+  'collection',
+  'season',
+  'targetGender',
+  'ageGroup',
+] as const satisfies readonly (keyof TechCardFormData)[];
+
+export type StyleFact = (typeof STYLE_FACT_KEYS)[number];
