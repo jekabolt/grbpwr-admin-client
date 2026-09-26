@@ -33,27 +33,39 @@ import GenericPopover from 'ui/components/popover';
  *
  * ВИДИМОСТЬ (26.09, O-30; владелец: «кнопка ai должна появляться только если мы в активном поле
  * текстбокса, а не всегда, и для пустых текстбоксов вообще не должна показываться»). `ai ✦` стоит в
- * углу, только пока фокус В ПОЛЕ (сам текст, кнопка, чип отката или открытое меню) И в поле есть
- * текст; ещё — пока летит запрос (`busy`). Пустое или запертое поле не показывает кнопки вовсе —
- * прежнего выключенного «write something first» нет. `undo ↶` живёт свои десять секунд независимо
- * от фокуса: после замены в оставленном поле он — единственное, что видно.
+ * углу, только пока фокус У СВОИХ (сам текст поля, кнопка, чип отката или открытое меню) И в поле
+ * есть текст. Летящий запрос кнопку НЕ держит (ревью O-30, MAJOR 1): уйди фокус из поля, пока ответ
+ * в пути, — кнопки нет, ответ всё равно ложится, и `undo ↶` встаёт один. Пустое или запертое поле не
+ * показывает кнопки вовсе — прежнего выключенного «write something first» нет. `undo ↶` живёт свои
+ * десять секунд независимо от фокуса: после замены в оставленном поле он — единственное, что видно.
  *
- * ГДЕ «ПОЛЕ» — ближайший предок с текстовым контролом (`fieldOf`), а не голый `parentElement`: у
- * WORDS кнопка стоит на уровень глубже, в угловой строке рядом со счётчиком. Фокус слушается на
- * `document` (focusin/focusout), а не на обёртке: меню портируется в body, и уход фокуса ИЗ него
- * обёртка не увидела бы. Строка меню, снятая с DOM, focusout не шлёт — после закрытия меню фокус
- * перечитывается из `document.activeElement` (микрозадачей, когда Radix уже вернул его). Нажатие на
- * кнопку не уводит каретку из текста (`onMouseDown` → preventDefault); после выбора режима фокус
- * идёт обратно в текст — занятая запросом кнопка взять его не может, а Radix отдал бы его в body.
+ * ЧТО «СВОЁ» — текстовый контрол поля, сам ряд (кнопка и чип) и портированное меню; НЕ вся обёртка
+ * (ревью O-30, MAJOR 2): в DESCRIPTION и GENERAL INFORMATION рядом стоит пилюля «принять черновик»,
+ * и Tab с текста на неё — уход из поля, кнопка гаснет. Поле ищется как ближайший предок с текстовым
+ * контролом (`fieldOf`), а не голый `parentElement`: у WORDS кнопка стоит на уровень глубже, в угловой
+ * строке рядом со счётчиком. Фокус слушается на `document` (focusin/focusout), а не на обёртке: меню
+ * портируется в body, и уход фокуса ИЗ него обёртка не увидела бы. Нажатие на кнопку не уводит
+ * каретку из текста (`onMouseDown` → preventDefault); после выбора режима фокус идёт обратно в текст
+ * (`pickedMode`) — Escape и повторное нажатие возвращают его на кнопку, как у любой кнопки с меню.
  *
  * ⚠ УХОД ФОКУСА СО СНЯТОГО УЗЛА — НЕ УХОД ИЗ ПОЛЯ. Chromium шлёт focusout (relatedTarget = null) по
- * элементу, который УБРАЛИ из DOM с фокусом: строка меню при закрытии, чип `undo ↶` при нажатии. Радикс
- * возвращает фокус на кнопку лишь задачей позже (setTimeout в FocusScope), и, прими мы этот blur за
- * чистую монету, кнопка размонтировалась бы под ним и возвращать фокус было бы некуда. Поэтому blur
- * судится микрозадачей позже и отброшенного узла не касается; тот, кто узел снял, фокус возвращает
- * (закрытие меню — на кнопку или в текст; откат — в текст) или перечитывает. И чип отката фокуса по
- * нажатию не берёт (тоже `onMouseDown` → preventDefault): фокус, пришедший на чип, привёл бы рядом
- * `ai ✦`, ряд прижат вправо — чип уехал бы из-под указателя, и клик пропал бы (замерено стендом).
+ * элементу, который УБРАЛИ из DOM с фокусом: строка меню при закрытии, чип `undo ↶` при нажатии,
+ * сама кнопка, когда родитель опустошил или запер поле. Радикс возвращает фокус лишь задачей позже
+ * (setTimeout в FocusScope), и, прими мы этот blur за чистую монету, кнопка размонтировалась бы под
+ * ним и возвращать фокус было бы некуда. Поэтому blur судится микрозадачей позже: снятая строка меню
+ * — дело Радикса (закрытие меню возвращает фокус на кнопку или в текст и перечитывает
+ * `activeElement`); снятый СВОЙ узел — кнопка или чип с фокусом на нём (`ownFocus`) — отдаёт фокус
+ * тексту поля сам (`handOff`; ревью O-30, MAJOR 5): без этого фокус падал бы в body, `focused`
+ * оставался бы ложно истинным, и после разблокировки кнопка вставала бы в поле, где никого нет.
+ * Чип отката фокуса по нажатию не берёт (тоже `onMouseDown` → preventDefault): фокус, пришедший на
+ * чип, привёл бы рядом `ai ✦`, ряд прижат вправо — чип уехал бы из-под указателя, и клик пропал бы
+ * (замерено стендом). Таймер отката (десять секунд) фокуса не трогает: он лишь снимает чип, а фокус
+ * с него, если он там был, отдаёт тот же `handOff`; ручная правка снимает и чип, и таймер (MAJOR 4).
+ *
+ * ОТВЕТ НЕ ЛОЖИТСЯ В ПОЛЕ, КОТОРОЕ ПОД НИМ ШЕВЕЛИЛОСЬ (ревью O-30, MAJOR 3). Замок или правка,
+ * случившиеся ПОКА ответ летел, защёлкиваются на запросе при первом же рендере (`flight.invalid`) и
+ * не снимаются: правка A → B → A и замок, снятый до прихода медленного ответа, — всё равно «not
+ * applied». Конечный снимок (`latest`) сверяется тоже, на случай ответа в том же тике.
  *
  * РАСШИРИТЕЛЬ ПОЛЯ НЕ НАКРЫВАЕТСЯ (26.09, O-42; владелец: «если у нас есть расширитель блока текста,
  * кнопка ai не должна наезжать на него»). У textarea без автовысоты (`resize-y`: GENERAL INFORMATION,
@@ -171,10 +183,24 @@ function fieldOf(root: HTMLElement): HTMLElement {
   return root.parentElement ?? root;
 }
 
-/** Whether `node` is in the field or in the open menu (portalled to body by Radix). */
-function inField(root: HTMLElement | null, menu: HTMLElement | null, node: EventTarget | null) {
+/** The field's text control — what «the caret is in the field» means. */
+function textControlOf(root: HTMLElement | null): HTMLElement | null {
+  return root ? fieldOf(root).querySelector<HTMLElement>(TEXT_CONTROL) : null;
+}
+
+/**
+ * Whether `node` is this control's own: the field's text control or the row itself (trigger, undo
+ * chip). A sibling control in the same wrapper — the «accept drafted value» pill — is not: focus on
+ * it is focus out of the text.
+ */
+function isOwn(root: HTMLElement, node: Node): boolean {
+  return !!textControlOf(root)?.contains(node) || root.contains(node);
+}
+
+/** …or in the open menu (portalled to body by Radix). */
+function inHome(root: HTMLElement | null, menu: HTMLElement | null, node: EventTarget | null) {
   if (!root || !(node instanceof Node)) return false;
-  if (fieldOf(root).contains(node)) return true;
+  if (isOwn(root, node)) return true;
   const panel = menu?.closest('[data-radix-popper-content-wrapper]') ?? menu;
   return !!panel && panel.contains(node);
 }
@@ -200,30 +226,45 @@ export function AiEnhance({
   const { showMessage } = useSnackBarStore();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  /** Focus is in the field (text, button, undo chip) or in the open menu — see `inField`. */
+  /** Focus is on our own (the text, the trigger, the undo chip) or in the open menu — `inHome`. */
   const [focused, setFocused] = useState(false);
   /** Что стояло в поле до замены — пока жив, рисуется `undo ↶`. */
   const [prev, setPrev] = useState<{ before: string; after: string } | null>(null);
   const abort = useRef<AbortController | null>(null);
   const undoTimer = useRef<number | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLUListElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   /** The open menu was dismissed from outside the field (a click elsewhere, Tab away). */
   const leftOutside = useRef(false);
   /** The menu closed because a mode was chosen — focus goes back to the text, not the button. */
   const pickedMode = useRef(false);
+  /** The row's own node that holds the focus (trigger or chip) — see `handOff`. */
+  const ownFocus = useRef<Node | null>(null);
+  /**
+   * The request in flight: the text it was sent for, and whether the field moved under it since —
+   * latched on the first lock or edit and never cleared for that request (MAJOR 3).
+   */
+  const flight = useRef<{ before: string; invalid: 'locked' | 'changed' | null } | null>(null);
   /** The field's textarea keeps its resize grip in the corner — the row stands left of it (O-42). */
   const [resizable, setResizable] = useState(false);
   // What the field holds and whether the control is open as of the LAST render — the answer lands
   // renders after the click, and is checked against these, not against the click's own closure.
+  // The same pass latches a lock or an edit onto the request in flight: a value that came and went
+  // (A → B → A) or a lock lifted before the answer still leaves its mark.
   const latest = useRef({ value: value ?? '', disabled: !!disabled });
   useLayoutEffect(() => {
     latest.current = { value: value ?? '', disabled: !!disabled };
+    const f = flight.current;
+    if (f && !f.invalid) {
+      if (disabled) f.invalid = 'locked';
+      else if ((value ?? '') !== f.before) f.invalid = 'changed';
+    }
   });
 
   const empty = !(value ?? '').trim();
-  // THE VISIBILITY RULE (O-30): in a focused, non-empty, open field — or while a request is out.
-  const shown = !disabled && !empty && (focused || open || busy);
+  // THE VISIBILITY RULE (O-30): in a focused, non-empty, open field. A request in flight does not
+  // hold the button: blurred, the field shows nothing until the answer's `undo ↶`.
+  const shown = !disabled && !empty && (focused || open);
 
   // A menu left open when the parent locks the control, or when the text is emptied under it,
   // closes with it — a menu with no button to hang from would float.
@@ -246,17 +287,34 @@ export function AiEnhance({
   // Focus is read at the document: the menu lives outside the wrapper, and a field that is
   // already focused when this mounts (a card switch re-keys the control) sends no event.
   useEffect(() => {
-    const here = (n: EventTarget | null) => inField(rootRef.current, menuRef.current, n);
-    const onIn = (e: FocusEvent) => setFocused(here(e.target));
+    const here = (n: EventTarget | null) => inHome(rootRef.current, menuRef.current, n);
+    // A node of the row that held the focus is gone (the trigger, when the parent emptied or
+    // locked the field under it; the chip, when its window closed or it was pressed by keyboard):
+    // the text takes the focus. A text control that cannot take it (disabled) leaves focus on
+    // body, and `focused` is re-read either way — never left true over a field nobody is in.
+    const handOff = () => {
+      ownFocus.current = null;
+      textControlOf(rootRef.current)?.focus();
+      setFocused(here(document.activeElement));
+    };
+    const onIn = (e: FocusEvent) => {
+      const t = e.target;
+      ownFocus.current = t instanceof Node && rootRef.current?.contains(t) ? t : null;
+      setFocused(here(t));
+    };
     // A focused element that LEAVES THE DOM (a menu row when the menu closes, the undo chip when
-    // pressed) fires a focusout with no relatedTarget in Chromium. That is not the operator leaving
-    // the field, and Radix hands focus back a task later — dropping `focused` here would unmount
-    // the trigger under it. The blur is judged a microtask later, when a removed node has no
-    // document any more; whoever removed the node puts focus back or re-reads it.
+    // pressed, the trigger when the field is emptied or locked) fires a focusout with no
+    // relatedTarget in Chromium. That is not the operator leaving the field, and Radix hands focus
+    // back a task later — dropping `focused` here would unmount the trigger under it. The blur is
+    // judged a microtask later, when a removed node has no document any more: a menu row is
+    // Radix's to hand back (`onCloseAutoFocus` re-reads); a node of our own hands off to the text.
     const onOut = (e: FocusEvent) => {
       const { target, relatedTarget } = e;
       queueMicrotask(() => {
-        if (target instanceof Node && !target.isConnected) return;
+        if (target instanceof Node && !target.isConnected) {
+          if (target === ownFocus.current) handOff();
+          return;
+        }
         setFocused(here(relatedTarget));
       });
     };
@@ -286,25 +344,28 @@ export function AiEnhance({
       const next =
         trigger && !trigger.disabled
           ? trigger
-          : latest.current.disabled || !root
+          : latest.current.disabled
             ? null
-            : fieldOf(root).querySelector<HTMLElement>(TEXT_CONTROL);
+            : textControlOf(root);
       next?.focus();
     }
     // The focused menu row left the DOM and its blur was set aside — re-read where focus really is.
-    queueMicrotask(() => setFocused(inField(rootRef.current, null, document.activeElement)));
+    queueMicrotask(() => setFocused(inHome(rootRef.current, null, document.activeElement)));
   };
 
-  /** Focus held by a part of this control that is about to go (the undo chip) moves to the text. */
-  const homeFocus = () => {
-    const root = rootRef.current;
-    if (!root || !root.contains(document.activeElement) || latest.current.disabled) return;
-    fieldOf(root).querySelector<HTMLElement>(TEXT_CONTROL)?.focus();
+  const clearUndoTimer = () => {
+    if (undoTimer.current) window.clearTimeout(undoTimer.current);
+    undoTimer.current = null;
   };
 
-  // Ручная правка после замены снимает откат: возвращать «что было» поверх чужой правки нельзя.
+  // Ручная правка после замены снимает откат — и его таймер: возвращать «что было» поверх чужой
+  // правки нельзя, а таймеру после этого нечего снимать.
   useEffect(() => {
-    if (prev && (value ?? '') !== prev.after) setPrev(null);
+    if (prev && (value ?? '') !== prev.after) {
+      setPrev(null);
+      if (undoTimer.current) window.clearTimeout(undoTimer.current);
+      undoTimer.current = null;
+    }
   }, [value, prev]);
 
   useEffect(
@@ -323,6 +384,8 @@ export function AiEnhance({
     abort.current?.abort();
     const ctrl = new AbortController();
     abort.current = ctrl;
+    const f: NonNullable<typeof flight.current> = { before, invalid: null };
+    flight.current = f;
     setBusy(true);
     try {
       const after = await enhanceText(
@@ -330,13 +393,18 @@ export function AiEnhance({
         ctrl.signal,
       );
       if (ctrl.signal.aborted) return;
-      // THE ANSWER IS FOR THE TEXT THAT WAS SENT, INTO A FIELD THAT IS STILL OPEN. A field locked
-      // meanwhile (the card saving what it holds) or edited meanwhile gets nothing: applying would
-      // put words on the screen that the save never got, or write over the operator's typing.
+      if (flight.current === f) flight.current = null;
+      // THE ANSWER IS FOR THE TEXT THAT WAS SENT, INTO A FIELD THAT STAYED OPEN THE WHOLE WAY. A field
+      // locked meanwhile (the card saving what it holds) or edited meanwhile gets nothing — even if
+      // the words are back to what was sent, even if the lock is off again: applying would put words
+      // on the screen that the save never got, or write over the operator's typing. `f.invalid` is
+      // the latch; the final snapshot is read too, for an edit in the answer's own tick.
       const now = latest.current;
-      if (now.disabled || now.value !== before) {
+      const lateWhy = now.disabled ? 'locked' : now.value !== before ? 'changed' : null;
+      const why = f.invalid ?? lateWhy;
+      if (why) {
         showMessage(
-          now.disabled ? 'not applied: field locked' : 'not applied: field changed',
+          why === 'locked' ? 'not applied: field locked' : 'not applied: field changed',
           'success',
         );
         return;
@@ -348,11 +416,10 @@ export function AiEnhance({
       }
       onApply(next);
       setPrev({ before, after: next });
-      if (undoTimer.current) window.clearTimeout(undoTimer.current);
-      undoTimer.current = window.setTimeout(() => {
-        homeFocus();
-        setPrev(null);
-      }, UNDO_WINDOW_MS);
+      clearUndoTimer();
+      // The window closing takes the chip and nothing else: focus, if it was on the chip, goes to
+      // the text through `handOff`; on the trigger or anywhere else it is not touched.
+      undoTimer.current = window.setTimeout(() => setPrev(null), UNDO_WINDOW_MS);
     } catch (e) {
       if (ctrl.signal.aborted) return;
       const r = e instanceof EnhanceRefusal ? e.reason : 'OTHER';
@@ -365,16 +432,18 @@ export function AiEnhance({
         'error',
       );
     } finally {
-      if (!ctrl.signal.aborted) setBusy(false);
+      if (!ctrl.signal.aborted) {
+        setBusy(false);
+        if (flight.current === f) flight.current = null;
+      }
     }
   };
 
   const undo = () => {
     if (!prev || disabled) return;
-    homeFocus();
     onApply(prev.before);
     setPrev(null);
-    if (undoTimer.current) window.clearTimeout(undoTimer.current);
+    clearUndoTimer();
   };
 
   return (
@@ -393,6 +462,7 @@ export function AiEnhance({
           onClick={undo}
           disabled={disabled}
           title='put the previous text back'
+          data-ai-enhance-undo=''
           // Takes no focus on a press: focus arriving here would bring `ai ✦` in beside it and
           // slide the chip out from under the pointer before the click lands.
           onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
@@ -409,7 +479,7 @@ export function AiEnhance({
             align: 'end',
             side: 'top',
             onInteractOutside: (e) => {
-              leftOutside.current = !inField(rootRef.current, menuRef.current, e.target);
+              leftOutside.current = !inHome(rootRef.current, menuRef.current, e.target);
             },
             onCloseAutoFocus,
           }}
@@ -428,29 +498,36 @@ export function AiEnhance({
               disabled={busy}
               title={busy ? 'working…' : 'ai enhance: improve, expand or shorten'}
               // Appears with a short fade (the button is absolute: nothing moves); leaves at once.
-              className='bg-bgColor transition-opacity duration-100 starting:opacity-0'
+              className='bg-bgColor transition-opacity duration-100 starting:opacity-0 motion-reduce:transition-none'
             >
               <span>{busy ? 'ai …' : 'ai ✦'}</span>
             </Button>
           }
         >
-          <ul ref={menuRef} className='flex flex-col' role='menu' aria-label='ai enhance'>
+          {/* Plain buttons in the labelled popover — Tab walks them, Enter chooses, Escape closes
+              (Radix). No `role=menu`: that promises arrow-key roving this small list does not
+              implement, and would be the one more moving part the owner asked not to have. */}
+          <div
+            ref={menuRef}
+            role='group'
+            aria-label='ai enhance'
+            data-ai-enhance-menu=''
+            className='flex flex-col'
+          >
             {ENHANCE_MODES.map((m) => (
-              <li key={m.mode} role='none'>
-                <button
-                  type='button'
-                  role='menuitem'
-                  onClick={() => run(m.mode)}
-                  className='flex w-full items-baseline gap-2 px-2 py-1.5 text-left hover:bg-bgSecondary'
-                >
-                  <span className='text-micro uppercase tracking-label text-textColor'>
-                    {m.label}
-                  </span>
-                  <span className='text-micro text-labelColor'>· {m.hint}</span>
-                </button>
-              </li>
+              <button
+                key={m.mode}
+                type='button'
+                onClick={() => run(m.mode)}
+                className='flex w-full items-baseline gap-2 px-2 py-1.5 text-left hover:bg-bgSecondary'
+              >
+                <span className='text-micro uppercase tracking-label text-textColor'>
+                  {m.label}
+                </span>
+                <span className='text-micro text-labelColor'>· {m.hint}</span>
+              </button>
             ))}
-          </ul>
+          </div>
         </GenericPopover>
       )}
     </div>
