@@ -4,7 +4,7 @@ import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 
 import { WORKFLOWS } from './registry';
-import { NOT_ON_THIS_SERVER } from './registry/common';
+import { whyNot } from './registry/common';
 import type { WorkflowDef, WorkflowKey } from './registry/types';
 import { WorkflowGlyph } from './workflow-glyph';
 
@@ -18,7 +18,7 @@ import { WorkflowGlyph } from './workflow-glyph';
  * refuse.
  */
 export function workflowOpenable(def: WorkflowDef, band: GetDesignBandResponse): boolean {
-  return !!def.run && def.gate(band).available;
+  return !whyNot(def, band);
 }
 
 export function WorkflowGrid({
@@ -31,8 +31,7 @@ export function WorkflowGrid({
   return (
     <Tiles min={148} className='gap-3'>
       {WORKFLOWS.map((def) => {
-        const gate = def.gate(band);
-        const reason = !def.run ? NOT_ON_THIS_SERVER : gate.available ? '' : gate.reason;
+        const reason = whyNot(def, band);
         const live = !reason;
         return (
           <Tile

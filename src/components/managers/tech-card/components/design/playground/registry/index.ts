@@ -1,5 +1,6 @@
 import type { common_DesignRun } from 'api/proto-http/admin';
 
+import { runRepresentation, type Representation } from '../../bench-kinds';
 import { RETIRED_PRESET_WORD, notYet } from './common';
 import { CHANGE_COLOR } from './tiles/change-color';
 import { CREATE_EDIT } from './tiles/create-edit';
@@ -122,16 +123,34 @@ export function freeformPresetOf(run: common_DesignRun): string {
   return (run.params.freeform?.preset ?? '').trim();
 }
 
+/** The representations of the playground room: its own kinds and the recolours ON MODEL held (C-01). */
+export const PLAYGROUND_ROOM: readonly Representation[] = ['playground', 'onmodel'];
+
+/**
+ * A run of the playground room — THE one predicate: the grid's results and the studio tab's
+ * history on the grid both read it.
+ */
+export function inPlaygroundRoom(run: common_DesignRun): boolean {
+  const rep = runRepresentation(run);
+  return !!rep && PLAYGROUND_ROOM.includes(rep);
+}
+
 /** The word under a result in the room's view: which workflow made it. */
 export function runWorkflowWord(run: common_DesignRun): string {
   const key = workflowOfRun(run);
-  if (key === 'create_edit') {
-    const preset = freeformPresetOf(run);
-    if (preset && preset !== 'free') {
-      return RETIRED_PRESET_WORD[preset] ?? preset.replace(/_/g, ' ');
-    }
-  }
-  return key ? ROOM_WORD[key] : '';
+  return retiredPresetWord(run) || (key ? ROOM_WORD[key] : '');
+}
+
+/**
+ * The retired preset a freeform run was bought under, in words (Q17) — `''` for `free`, for a stub
+ * that states no preset, and for every other kind. Create or edit shows these runs as its own, and
+ * this word says which preset made one.
+ */
+export function retiredPresetWord(run: common_DesignRun): string {
+  if (workflowOfRun(run) !== 'create_edit') return '';
+  const preset = freeformPresetOf(run);
+  if (!preset || preset === 'free') return '';
+  return RETIRED_PRESET_WORD[preset] ?? preset.replace(/_/g, ' ');
 }
 
 /**

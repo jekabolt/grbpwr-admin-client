@@ -71,12 +71,15 @@ const run: WorkflowRun = {
         },
       ],
     },
+    /* «optional», as the owner's reference (13.png) heads it — that is the workflow. Today's server
+       still needs one, and that is said ONCE, in one short line under the slots; the lock reason
+       names it again only while the list is empty (G-01, m-8). No REQUIRED pill: it would
+       contradict the header the owner drew. */
     {
       key: REFS,
       title: 'Reference images',
       glyph: 'image',
-      required: true,
-      value: (draft) => slotCounter(imagesOf(draft, REFS).length, REFS_MAX),
+      value: (draft) => slotCounter(imagesOf(draft, REFS).length, REFS_MAX, true),
       fields: [
         {
           type: 'images',
@@ -88,7 +91,7 @@ const run: WorkflowRun = {
         {
           type: 'note',
           key: 'refs-note',
-          text: 'Add at least one reference image; text-only comes later.',
+          text: 'For now this server needs at least one.',
         },
       ],
     },
@@ -162,14 +165,12 @@ const run: WorkflowRun = {
 
   results: {
     reps: ['playground'],
-    /* Free runs, and freeform rows whose run fell off the feed page (a four-field stub that states
-       no preset): hiding those would drop paid pictures off the screen that made them. The retired
-       presets' pictures stay in the room's grid view. */
-    match: (run) => {
-      if ((run.kind ?? '').trim().toLowerCase() !== 'freeform') return false;
-      if (run.params === undefined) return true;
-      return (run.params.freeform?.preset ?? '').trim() === 'free';
-    },
+    /* EVERY freeform run, on the kind alone (G-01, m-3). Matching on the preset flipped a paid
+       picture in and out of this tile as the feed paged: off the first page a run is a four-field
+       stub that states no preset (in), and once its page loaded it said `add_hardware` (out). The
+       retired presets are absorbed by this workflow anyway (Q17) — recall lays them out here — and
+       their rows say which preset made them (`retiredPresetWord`). */
+    match: (run) => (run.kind ?? '').trim().toLowerCase() === 'freeform',
   },
 
   recall: (past, media) => {

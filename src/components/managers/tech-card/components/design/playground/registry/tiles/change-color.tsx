@@ -74,6 +74,9 @@ const run: WorkflowRun = {
           mode: 'grow',
           max: RECOLOR_SOURCES_MAX,
           purpose: 'change a color · photographs',
+          /* Photographs of a garment only: a cloth picture would be recoloured as if it were a
+             garment photo and charged as one call. Cloth is Swap Fabrics' (tile 5) — G-01, m-4. */
+          sources: ['card', 'models', 'fittings'],
         },
       ],
     },

@@ -7,6 +7,7 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { useMemo, useRef, useState, type JSX } from 'react';
 import { CalloutBox } from 'ui/components/callout-box';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
+import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
@@ -27,8 +28,15 @@ import { PictureTile } from '../picture-tile';
 import { pictureIsSelected, pictureThumb, serverStatesSelected } from '../render/model';
 import { isPictureHidden } from '../visibility';
 import { useDesignWrites } from '../use-design-band';
-import { runWorkflowWord } from './registry';
-import type { WorkflowDef } from './registry/types';
+import {
+  PLAYGROUND_ROOM,
+  inPlaygroundRoom,
+  retiredPresetWord,
+  runWorkflowWord,
+  workflowByKey,
+  workflowOfRun,
+} from './registry';
+import type { ResultsDef, WorkflowDef } from './registry/types';
 
 /**
  * ═══ WHAT CAME BACK — the room's results, or one workflow's (C-03) ═════════════════════════════════
@@ -48,23 +56,20 @@ import type { WorkflowDef } from './registry/types';
  * (`outputsHorizon`) rather than letting an older result vanish silently.
  *
  * Corners: zoom (the gallery) and `edit ▸` (draw over it, saving a NEW picture) on every picture;
- * the `select` mark on recolours only, as ON MODEL had it — ARTIFACTS offers the chosen ones for
- * markup. A cut-out stands on a neutral ground: its subject is on transparency, and over white it
- * would read as a picture with a white background.
+ * the `select` mark where the workflow says so (`ResultsDef.selectable` — recolours, as ON MODEL
+ * had it; ARTIFACTS offers the chosen ones for markup). A cut-out (`ResultsDef.cutout`) stands on a
+ * neutral ground with the word «no background» under it: its subject is on transparency, over white
+ * it would read as a picture with a white background, and the ground alone does not say «alpha».
+ *
+ * ⚠ THE ROW ASKS THE WORKFLOW THAT MADE IT, not the one open: on the grid the rows of three
+ * workflows stand together, and each keeps its own corners.
  */
 
 type Row = { picture: common_DesignPicture; run: common_DesignRun };
 
-/** The playground room: its own kinds and ON MODEL's recolours (C-01). */
-const ROOM: readonly Representation[] = ['playground', 'onmodel'];
-
-const inRoom = (run: common_DesignRun): boolean => {
-  const rep = runRepresentation(run);
-  return rep === 'playground' || rep === 'onmodel';
-};
-
-const isRecolor = (run: common_DesignRun) => (run.kind ?? '').trim().toLowerCase() === 'recolor';
-const isCutout = (run: common_DesignRun) => (run.kind ?? '').trim().toLowerCase() === 'cutout';
+/** The results contract of the workflow a run belongs to (`null` = a kind outside the room). */
+const resultsOfRun = (run: common_DesignRun): ResultsDef | null =>
+  workflowByKey(workflowOfRun(run))?.run?.results ?? null;
 
 /**
  * Every output of the given representations, newest run first — the order `cardOutputRows` keeps
@@ -85,7 +90,7 @@ function cardRows(band: GetDesignBandResponse, reps: readonly Representation[]):
       last = runId;
     }
   }
-  const top = (g: Row[]) => Math.max(...g.map((r) => r.picture.id ?? 0));
+  const top = (g: Row[]) => (g.length ? Math.max(...g.map((r) => r.picture.id ?? 0)) : 0);
   return groups.sort((a, b) => top(b) - top(a)).flat();
 }
 
@@ -131,8 +136,8 @@ export function PlaygroundResults({
   }
 
   const results = def?.run?.results;
-  const reps = results?.reps ?? ROOM;
-  const match = results?.match ?? inRoom;
+  const reps = results?.reps ?? PLAYGROUND_ROOM;
+  const match = results?.match ?? inPlaygroundRoom;
 
   const rows = useMemo(() => {
     const all = cardRows(band, reps) ?? pageRows(band, reps);
@@ -142,7 +147,7 @@ export function PlaygroundResults({
   /* The runs of this workflow still out, and the newest one if it failed: the answer to a press
      stands above what came back. Older failures live in the history, not here. */
   const pinned = useMemo(() => {
-    const mine = (band.runs ?? []).filter((run) => inRoom(run) && match(run));
+    const mine = (band.runs ?? []).filter((run) => inPlaygroundRoom(run) && match(run));
     const live = mine.filter((run) => isRunLive(run));
     const newest = mine[0];
     const failed =
@@ -152,7 +157,12 @@ export function PlaygroundResults({
     return [...live, ...failed];
   }, [band, match]);
 
-  const horizon = useMemo(() => outputsHorizon(band, 0), [band]);
+  /* The colourway-0 window is the room's, not Change a Color's: its recolours may be filed under a
+     colourway and its rows are not that window — the sentence would count another list (m-5). */
+  const horizon = useMemo(
+    () => (def?.key === 'change_color' ? null : outputsHorizon(band, 0)),
+    [band, def?.key],
+  );
   const carries = rows.length ? serverStatesSelected(rows[0].picture) : true;
   const writesOff = !!disabled || !speaks;
 
@@ -194,11 +204,13 @@ export function PlaygroundResults({
           <Tiles min={148} className='gap-3'>
             {rows.map(({ picture, run }) => {
               const id = picture.id ?? 0;
-              const cut = isCutout(run);
-              const recolour = isRecolor(run);
-              const chosen = recolour && pictureIsSelected(picture);
+              const own = resultsOfRun(run);
+              const cut = !!own?.cutout;
+              const selectable = !!own?.selectable;
+              const chosen = selectable && pictureIsSelected(picture);
               const words = [
-                def ? '' : runWorkflowWord(run),
+                // An open workflow names only what differs from it: a retired preset's run.
+                def ? retiredPresetWord(run) : runWorkflowWord(run),
                 wayName(run.colorwayId),
                 clockStamp(run.completedAt ?? run.createdAt),
               ].filter(Boolean);
@@ -219,7 +231,7 @@ export function PlaygroundResults({
                         : undefined
                     }
                     onSelect={
-                      recolour && carries && !writesOff
+                      selectable && carries && !writesOff
                         ? {
                             onClick: () => {
                               setSelecting(id);
@@ -257,6 +269,18 @@ export function PlaygroundResults({
                   <Text size='micro' variant='label' className='truncate'>
                     {words.join(' · ') || '—'}
                   </Text>
+                  {/* ONE WORD, NOT A PARAGRAPH (the old playground's pill, restored — G-01 M-2): the
+                      tile's height stays the grid's, and the fact reads as fully. */}
+                  {cut && (
+                    <span>
+                      <Pill
+                        tone='mut'
+                        title='the subject stands on transparency — the tone behind it is this screen’s, not the picture’s'
+                      >
+                        no background
+                      </Pill>
+                    </span>
+                  )}
                 </div>
               );
             })}

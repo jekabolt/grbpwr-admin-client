@@ -26,6 +26,19 @@ export const NOT_ON_THIS_SERVER = 'not on this server yet';
 export const notYet = (): Availability => ({ available: false, reason: NOT_ON_THIS_SERVER });
 
 /**
+ * Why this server cannot open a workflow, in words — `''` when it can. The grid's dimmed tile and
+ * the studio's «not available» line read this one answer.
+ */
+export function whyNot(
+  def: { run?: WorkflowRun; gate: (band: GetDesignBandResponse) => Availability },
+  band: GetDesignBandResponse,
+): string {
+  if (!def.run) return NOT_ON_THIS_SERVER;
+  const gate = def.gate(band);
+  return gate.available ? '' : gate.reason;
+}
+
+/**
  * ⚠ «ABSENT ≠ EMPTY», THE DOCTRINE OF `freeform_presets`. `undefined` = a binary older than the
  * playground route: nothing of it can run. A list = the server's own dictionary; a key missing from
  * it is a route this server has not wired, and the door would refuse it for the missing key.
