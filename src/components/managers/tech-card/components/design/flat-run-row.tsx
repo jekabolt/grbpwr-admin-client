@@ -1,10 +1,14 @@
 import type { GetDesignBandResponse, common_DesignRunParams } from 'api/proto-http/admin';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 import { ViewSwitch } from 'ui/components/view-switch';
+import { flattenFieldErrors, revealField } from 'utils/field-errors';
+
+import type { TechCardFormData } from '../schema';
 
 import {
   flushAllowsRun,
@@ -52,12 +56,13 @@ import { ACTIVE_VIEWS, DETAIL_VIEW, viewLabel } from './views';
  */
 
 /**
- * ═══ ОДИН РОСТ НА ВСЕ ОРГАНЫ ТРЁХ РЯДОВ (r3 п.5) ══════════════════════════════════════════════
+ * ═══ ОДИН РОСТ НА ВСЕ ОРГАНЫ ОБОИХ РЯДОВ — VIEWS И ЗАПУСКА (r3 п.5) ═══════════════════════════
  *
  * Владелец, дословно: «после WORDS очень много кнопок разного размера с минимальными отступами …
  * сделать по уму». «Разного размера» — это измеримо и это была правда: `Button size='sm'` (рамка +
  * `py-1` + `leading-4`) ростом 26px стояла вплотную к `Chip` и к сегменту `ViewSwitch` ростом 19px,
- * и три ряда органов читались как три разных класса вещей.
+ * и тогдашние три ряда органов читались как три разных класса вещей. Средний ряд (источники) снят
+ * волной 25.09 (T24, D-20), рядов два: VIEWS и запуск.
  *
  * ЭТАЛОН ВЫБРАН НЕ ГОЛОСОВАНИЕМ: 26px — рост `GENERATE`, а её разметку держит общий ряд
  * (`render/generate-row.tsx`, зона G1), то есть подогнать надо было ВСЁ ОСТАЛЬНОЕ к ней, а не
@@ -70,9 +75,6 @@ import { ACTIVE_VIEWS, DETAIL_VIEW, viewLabel } from './views';
  */
 export const ROW_CONTROL_PX = 26;
 export const ROW_CONTROL_STYLE: React.CSSProperties = { height: ROW_CONTROL_PX };
-
-/** Сторона миниатюры плиты в ряду источников — снимок, а не иконка, и не выше двух рядов текста. */
-export const PLATE_PX = 44;
 
 /**
  * ═══ ПОДПИСЬ ВТОРОСТЕПЕННОЙ КНОПКИ — РАЗМЕРОМ КОНТРОЛА, А НЕ ТЕЛА ТЕКСТА (r3 п.5) ══════════════
@@ -108,10 +110,13 @@ export function FlatRunRow({
   band,
   techCardId,
   disabled,
+  onSavingChange,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /** GENERATE ждёт сохранения карточки. Секция запирает на это время WORDS (ревью MAJOR). */
+  onSavingChange?: (saving: boolean) => void;
 }): JSX.Element {
   const [wmgOpen, setWmgOpen] = useState(false);
   const speaks = serverSpeaksDesign();
@@ -156,9 +161,11 @@ export function FlatRunRow({
   const moodNow = useRef(mood);
   moodNow.current = mood;
   const moodReason = mood.ok ? null : mood.reason;
-  /* Дверь по `door` гейта. «moodboard ›» ведёт на САМУ доску (`#mb-board`), описание стоит под ней
-     на том же шаге: какой части не хватает, говорит фраза, а слово и адрес двери — те же, что у
-     доски на рельсе, чтобы одна надпись не вела в два места. */
+  /* Дверь по `door` гейта. СЛОВА — КОПИЯ приватного `doorLabel` из `chain-rail.tsx` (`mood` →
+     «moodboard ›», `card` → «card details ›»): экспорт оттуда не сделан, потому что файл — зоны
+     CL-B и в момент правки в нём шла чужая работа. Копия обязана совпадать с рельсом; разойдутся —
+     прав рельс. «moodboard ›» ведёт на САМУ доску (`#mb-board`), описание стоит под ней на том же
+     шаге: какой части не хватает, говорит фраза, а адрес двери — тот же, что у доски на рельсе. */
   const moodDoor =
     !mood.ok && mood.door === 'card'
       ? { label: 'card details ›', open: () => openStepOf('categoryId', '#card-details') }
@@ -173,13 +180,51 @@ export function FlatRunRow({
    * фраза контракта (`flushRefusalSentence`) стойкой строкой под рядом, не всплывашкой.
    */
   const autosave = useTechCardAutosave();
+  /**
+   * `flushing` держит GENERATE занятым от щелчка до того, как запрос прогона ушёл, и снимается в том
+   * же тике, что `start` (см. хвост `submit`): живого кадра между «сохраняю» и «запускаю» нет.
+   */
   const [flushing, setFlushing] = useState(false);
-  const [flushRefusal, setFlushRefusal] = useState<string | null>(null);
+  useEffect(() => {
+    onSavingChange?.(flushing);
+  }, [flushing, onSavingChange]);
+  /**
+   * ИСХОД отказавшего сохранения, а не готовая фраза: фраза собирается при отрисовке, и число полей
+   * в ней — ТЕКУЩЕЕ (`errorsCount` после flush), а не снятое на щелчке, когда провал ещё не был
+   * известен (ревью m2).
+   */
+  const [refused, setRefused] = useState<FlushResult | null>(null);
   /* Отказ снимается сам, как только карточка сохранилась: поправленное поле — это и есть ответ на
      него, и строка «save the card first» над сохранённой карточкой была бы неправдой. */
   useEffect(() => {
-    if (autosave.status === 'saved' || autosave.status === 'idle') setFlushRefusal(null);
+    if (autosave.status === 'saved' || autosave.status === 'idle') setRefused(null);
   }, [autosave.status]);
+  const refusalSentence = refused
+    ? flushRefusalSentence(refused, autosave.errorsCount) || 'save the card first'
+    : null;
+
+  /**
+   * ДВЕРЬ У ОТКАЗА СОХРАНЕНИЯ (ревью m3). `invalid` — к первому полю с ошибкой: проверка громкая
+   * (человек сам попросил показать), путь — первый из `flattenFieldErrors`, показ — `revealField`
+   * (шаг студии он приносит сам). Поле, которого эта вкладка не рисует, и прочие исходы — к чипу
+   * сохранения в шапке (`save-status-chip.tsx`, зона CL-A): он и есть дверь этих состояний
+   * (повторить, подтвердить, решить конфликт), и его поповер говорит причину целиком.
+   */
+  const form = useFormContext<TechCardFormData>();
+  const openSaveDoor = async () => {
+    if (refused === 'invalid') {
+      await form.trigger();
+      const first = flattenFieldErrors(form.control._formState.errors)[0];
+      if (first && revealField(first.path)) return;
+    }
+    const chip = document.querySelector<HTMLElement>('[data-save-status]');
+    if (!chip) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    chip.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    chip.querySelector<HTMLElement>('[aria-haspopup]')?.click();
+  };
 
   /* Цена последнего флэт-прогона — см. шапку. `priceActual` первым: это то, что списали. */
   const lastRun = useMemo(() => latestRunOfKind(band.runs, 'flat'), [band.runs]);
@@ -188,6 +233,9 @@ export function FlatRunRow({
     : '';
 
   const writesOff = !!disabled || !speaks;
+  /* Выбор ряда заперт, пока ждём сохранения и пока запрос в полёте: `submit` берёт виды и раскладку
+     на щелчке, и открытые чипы дали бы прогону не то, что на экране (ревью MAJOR). */
+  const choiceOff = writesOff || flushing || startRun.isPending;
   const noViews = ticked.length === 0;
   /* Ряд (`GenerateRow`) сам спрашивает `serverSpeaksDesign()` ПЕРВЫМ и печатает свою формулировку;
      ветка ниже остаётся ЗАМКОМ ПРОВОДА: `submit` заперт этой же переменной. */
@@ -202,7 +250,7 @@ export function FlatRunRow({
           : null;
 
   const submit = async () => {
-    if (gateReason || !mood.ok || startRun.isPending || flushing) return;
+    if (gateReason || !mood.ok || startRun.isPending || flushing || techCardId <= 0) return;
     setFlushing(true);
     let saved: FlushResult;
     try {
@@ -210,16 +258,18 @@ export function FlatRunRow({
     } catch {
       // Контракт обещает исход, а не исключение; бросок читается как неудача сохранения.
       saved = 'error';
-    } finally {
-      setFlushing(false);
     }
     if (!flushAllowsRun(saved)) {
-      setFlushRefusal(flushRefusalSentence(saved, autosave.errorsCount) || 'save the card first');
+      setFlushing(false);
+      setRefused(saved);
       return;
     }
-    setFlushRefusal(null);
+    setRefused(null);
     // Гейт после сохранения: отказ уже стоит строкой под рядом (`moodReason`), второй не нужен.
-    if (!moodNow.current.ok) return;
+    if (!moodNow.current.ok) {
+      setFlushing(false);
+      return;
+    }
     const params: common_DesignRunParams = {
       views: [...ticked],
       detailSlotIds: [...tickedDetailIds],
@@ -244,6 +294,12 @@ export function FlatRunRow({
       extraInputMediaIds: [],
     };
     startRun.start({ kind: 'flat', ask: '', params });
+    /* ПОСЛЕ `start`, В ТОМ ЖЕ ТИКЕ. `mutate()` уже перевёл результат наблюдателя в pending
+       (Mutation.execute шлёт 'pending' до первого await), а useSyncExternalStore читает снимок при
+       отрисовке — поэтому отрисовка, вызванная этим сбросом, видит `isPending`, и кадра живой кнопки
+       нет (ревью m1: замерено пробой по каждому коммиту кнопки). Ждать эстафеты эффектом на
+       `isPending` НЕЛЬЗЯ: ответ, пришедший раньше отрисовки, оставил бы кнопку на «starting…». */
+    setFlushing(false);
   };
 
   return (
@@ -284,7 +340,7 @@ export function FlatRunRow({
                 key={view}
                 selected={on}
                 pressed={on}
-                disabled={writesOff}
+                disabled={choiceOff}
                 style={ROW_CONTROL_STYLE}
                 title={
                   slotFilled
@@ -307,7 +363,7 @@ export function FlatRunRow({
                 key={`d:${id}`}
                 selected={on}
                 pressed={on}
-                disabled={writesOff}
+                disabled={choiceOff}
                 style={ROW_CONTROL_STYLE}
                 title={`detail described in the flat slots: ${displayDetailName(bench.details, d)}`}
                 onClick={() => setDetailTicks((prev) => ({ ...prev, [id]: !prev[id] }))}
@@ -333,7 +389,7 @@ export function FlatRunRow({
             label='layout'
             value={layout}
             options={LAYOUT_OPTIONS}
-            disabled={writesOff}
+            disabled={choiceOff}
             onChange={setLayout}
             className='h-full'
           />
@@ -394,9 +450,18 @@ export function FlatRunRow({
       )}
       {/* СОХРАНЕНИЕ НЕ ПРОШЛО — ПРОГОН НЕ ЗАПУЩЕН (контракт autosave). Стойкая строка до следующей
           попытки: исправление («поправь поле») — не новое нажатие, и всплывашка ушла бы раньше. */}
-      {flushRefusal && (
+      {refusalSentence && (
         <div data-flat-flush-refusal=''>
-          <LockBar reason={`${flushRefusal} — nothing was started, nothing was charged`} />
+          <LockBar reason={`${refusalSentence} — nothing was started, nothing was charged`}>
+            <Button
+              variant='secondary'
+              size='sm'
+              data-flush-door={refused ?? ''}
+              onClick={() => void openSaveDoor()}
+            >
+              <ControlLabel>{refused === 'invalid' ? 'first error ›' : 'saving ›'}</ControlLabel>
+            </Button>
+          </LockBar>
         </div>
       )}
       {/* МЕТКИ НЕ ЕДУТ, И СКАЗАНО ЭТО ТАМ, ГДЕ ТРАТЯТСЯ ДЕНЬГИ. Рисуется только пока метки есть. */}
