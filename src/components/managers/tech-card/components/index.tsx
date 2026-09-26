@@ -1114,12 +1114,16 @@ export function TechCardForm({
     // conflict decision, never by writing its release-time form over their work.
     reconcileLatest();
     if (approvalAttempt.current || autoStageInFlight.current) return;
+    // A read OLDER than the card this page stands on (a refetch that lost the race to a newer read)
+    // says nothing of the milestones now: taken from it, a release someone lifted since would go back
+    // out with the next write (ревью CL-A r4, backlog 1).
+    if ((techCard.lockVersion ?? 0) < base.current.version) return;
     const stored = mapTechCardToForm(techCard);
-    const base = form.control._defaultValues as Partial<TechCardFormData>;
+    const baseline = form.control._defaultValues as Partial<TechCardFormData>;
     for (const key of ['approvalState', 'stage'] as const) {
       const server = stored[key];
-      if (base[key] === server || form.getValues(key) !== base[key]) continue;
-      (base as Record<string, unknown>)[key] = server;
+      if (baseline[key] === server || form.getValues(key) !== baseline[key]) continue;
+      (baseline as Record<string, unknown>)[key] = server;
       form.setValue(key, server, { shouldDirty: true });
     }
     // `form` is stable for the page's life; the trigger is a new read of the card.
