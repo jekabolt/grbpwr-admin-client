@@ -427,8 +427,24 @@ export function StyleFactsField({
   const careIdx = labels.findIndex((l) => l.labelType === CARE_LABEL);
   const careFromLabel = careIdx < 0 ? '' : labels[careIdx].content?.trim() ?? '';
   const careCount = labels.filter((l) => l.labelType === CARE_LABEL).length;
+  // WHO MAY WRITE A STYLE FACT AT ALL (Codex R3): UpdateStyle is `products:write` on the server
+  // (rbac.go:163) — `tech_cards:write` is not enough. Staged for an account without it, every one
+  // of these edits came back refused and, a failed commit staying staged (m5), was sent again on
+  // every autosave with the banner up. Nothing is staged for such an account; CARD DETAILS locks
+  // the cells on the same grant (brand, collection, season and gender stay open on a card being
+  // created: CreateTechCard seeds those four from its own insert).
+  const { canWrite, isLoading: grantLoading } = usePermissions();
+  const canStyle = canWrite(SECTION.products);
   const firstCareSync = useRef(true);
   useEffect(() => {
+    // THE STYLE'S CARE IS LEFT ALONE FOR AN ACCOUNT THAT CANNOT WRITE IT (Codex M2). The care
+    // label is the card's (LABELS, tech_cards:write) and saves as it always did; mirroring it into
+    // `careInstructions` here only made an edit nobody could stage — and once the card body's
+    // save took it as saved, the storefront care silently never followed. The LABELS row says so
+    // in words. An account still loading reads as allowed (the grants fail open), so the mirror —
+    // its first sync included — waits for the answer: nothing is adopted for an account that turns
+    // out not to hold the grant.
+    if (!canStyle || grantLoading) return;
     const cur = factText(live('careInstructions')).trim();
     if (firstCareSync.current) {
       firstCareSync.current = false;
@@ -452,7 +468,7 @@ export function StyleFactsField({
     }
     // `live` and `moveBaseline` read the page's one form control.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [careFromLabel, setValue]);
+  }, [careFromLabel, canStyle, grantLoading, setValue]);
   // brand / collection / season / targetGender / fit / age group are edited in CARD DETAILS and
   // care on the labels — but they are style catalogue facts, so UpdateStyle is their only writer.
   // UpdateTechCard deliberately excludes them (R4/§14.7, "no fact is written by two paths"), while
@@ -504,14 +520,7 @@ export function StyleFactsField({
   // arrives. index.tsx hands the id in with a flushSync right before commitAll; read off `styleId`,
   // the pending default would unstage in that very render and the card would be created without it.
   const [createMode, setCreateMode] = useState(!styleId);
-  // WHO MAY WRITE A STYLE FACT AT ALL (Codex R3): UpdateStyle is `products:write` on the server
-  // (rbac.go:163) — `tech_cards:write` is not enough. Staged for an account without it, every one
-  // of these edits came back refused and, a failed commit staying staged (m5), was sent again on
-  // every autosave with the banner up. Nothing is staged for such an account; CARD DETAILS locks
-  // the cells on the same grant (brand, collection and gender stay open on a card being created:
-  // CreateTechCard seeds those three from its own insert).
-  const { canWrite } = usePermissions();
-  const canStyle = canWrite(SECTION.products);
+  // `canStyle` — see the care mirror above: without products:write nothing here is staged.
   const proposeAge = createMode && formDirty && canStyle;
   const ageGroup = useWatch({ control, name: 'ageGroup' });
 

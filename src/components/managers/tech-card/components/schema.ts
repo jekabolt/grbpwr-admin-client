@@ -3073,8 +3073,10 @@ export function mapFormToTechCardInsert(
       : 'STYLE_NUMBER_SOURCE_GENERATED') as common_StyleNumberSource,
     name: data.name.trim(),
     brand: data.brand?.trim() || '',
-    // No season here on purpose: sku_season is a style catalogue fact and UpdateStyle is its only
-    // writer (StyleFactsField stages it) — the stored value rides back untouched in `...original`.
+    // The season rides at the END of this object (`skuSeason`, parsed from the label). On CREATE
+    // it seeds the new style's sku_season — AddTechCard owns the season columns, as it does brand,
+    // collection and gender; on UPDATE the server persists no season column, and UpdateStyle
+    // (StyleFactsField) is its only writer from then on.
     collection: data.collection?.trim() || '',
     status: data.status?.trim() || '',
     categoryId: data.categoryId || 0,

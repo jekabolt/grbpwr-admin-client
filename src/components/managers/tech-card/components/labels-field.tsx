@@ -1,4 +1,5 @@
 import { common_Material } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { CARE_ARTWORK } from 'components/managers/product/components/care/care-artwork';
 import { careCodes } from 'components/managers/product/components/care/care-codes';
 import { CarePicker } from 'components/managers/product/components/care/care-picker';
@@ -6,6 +7,7 @@ import { useCareVocabulary } from 'components/managers/product/components/care/u
 import { materialCompositionCode } from 'components/managers/materials/components/material-code';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { techCardLabelTypeOptions } from 'constants/filter';
+import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
@@ -65,6 +67,11 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
   const { control } = useFormContext<TechCardFormData>();
   const labelType = useWatch({ control, name: `labels.${index}.labelType` }) as string;
   const isCare = labelType === CARE;
+  // The care label is the card's, but the STOREFRONT care is the style's, written only through
+  // UpdateStyle (products:write). For an account without that grant the label saves and the
+  // storefront keeps what it had — said here, where the label is edited (25.09 CL-C, Codex M2).
+  const { canWrite } = usePermissions();
+  const storefrontCareLocked = isCare && !canWrite(SECTION.products);
   // Which BOM article this label is printed on (§2.8). The wire carries the BOM line's server id,
   // so the picker offers ids — never a number the operator has to know, and never one belonging to
   // another card, which the backend now rejects outright.
@@ -101,6 +108,11 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
         {isCare ? (
           <div className='col-span-2 sm:col-span-3'>
             <CarePicker name={`labels.${index}.content`} label='care symbols' />
+            {storefrontCareLocked && (
+              <Text size='micro' variant='label' data-storefront-care-locked=''>
+                storefront care needs products:write
+              </Text>
+            )}
           </div>
         ) : (
           <div className='col-span-1 sm:col-span-2'>

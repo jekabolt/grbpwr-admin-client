@@ -149,10 +149,10 @@ export function ageGroupLabel(value?: string | null): string {
 /**
  * THE STYLE FACTS — the form fields `StyleFactsField` writes through its own staged `UpdateStyle`,
  * which the card's own save never writes (UpdateTechCard excludes them, R4/§14.7; only
- * CreateTechCard seeds brand, collection and gender at creation). ONE list (Codex R8): the panel
- * reads it for its dirty map, its mask and its label (in this order), and the card's body save for
- * the baselines it leaves to that panel (`keepBaseline`). A fact added in one place and not the
- * other would be written by nobody or re-baselined by the wrong writer.
+ * CreateTechCard seeds brand, collection, season and gender at creation). ONE list (Codex R8):
+ * the panel reads it for its dirty map, its mask and its label (in this order), and the card's
+ * body save for the baselines it leaves to that panel (`keepBaseline`). A fact added in one place
+ * and not the other would be written by nobody or re-baselined by the wrong writer.
  */
 export const STYLE_FACT_KEYS = [
   'fit',
