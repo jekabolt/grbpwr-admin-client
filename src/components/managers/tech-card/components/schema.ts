@@ -2003,7 +2003,7 @@ const techCardObject = z.object({
   // classification
   targetGender: z.string().optional().default(UNSET_GENDER),
   // Target age group (0366, T01) — a style fact like targetGender and fit: read off the TechCard,
-  // written ONLY through UpdateStyle (StyleFactsField, mask path `age_group`), never on the
+  // written ONLY through UpdateStyle (StyleFactsField, mask path `ageGroup`), never on the
   // TechCardInsert. UNKNOWN = not set; it is never sent under the mask.
   ageGroup: z.enum(AGE_GROUP_VALUES).optional().default(AGE_GROUP_UNSET),
   // Style catalogue facts written via UpdateStyle (not the tech-card write): edited on the tech card,

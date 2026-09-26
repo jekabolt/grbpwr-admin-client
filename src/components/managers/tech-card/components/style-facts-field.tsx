@@ -38,16 +38,34 @@ const NO_STYLE_ID = 'the card has no id yet, so its style facts (fit, season…)
 /** One commit waiting for the new card's id — settled by the id, by the timeout, or by unmount. */
 type IdWaiter = { resolve: (id: number) => void; reject: (e: Error) => void; timer: number };
 
+/** The facts this panel writes, in the order of the mask and of the header's label. */
+const FACTS = [
+  'fit',
+  'careInstructions',
+  'brand',
+  'collection',
+  'season',
+  'targetGender',
+  'ageGroup',
+] as const;
+type Fact = (typeof FACTS)[number];
+
 /** Which facts one staged commit writes — frozen when it is staged (see the staging effect). */
-type FactsDirty = {
-  fit: boolean;
-  care: boolean;
-  brand: boolean;
-  collection: boolean;
-  season: boolean;
-  targetGender: boolean;
-  ageGroup: boolean;
+type FactsDirty = Record<Fact, boolean>;
+
+/** How the header's label names each fact. */
+const FACT_WORD: Record<Fact, string> = {
+  fit: 'fit',
+  careInstructions: 'care',
+  brand: 'brand',
+  collection: 'collection',
+  season: 'season',
+  targetGender: 'gender',
+  ageGroup: 'age group',
 };
+
+/** A fact's value as comparable text: the form holds strings and enum strings; unset is ''. */
+const factText = (v: unknown): string => (v == null ? '' : String(v));
 
 const ORIGIN_LABEL = 'TECH_CARD_LABEL_TYPE_ORIGIN';
 const CARE_LABEL = 'TECH_CARD_LABEL_TYPE_CARE';
@@ -305,7 +323,7 @@ export function StyleFactsField({
    */
   hideFitCare?: boolean;
 }) {
-  const { getValues, control, resetField, setValue } = useFormContext<TechCardFormData>();
+  const { getValues, control, setValue } = useFormContext<TechCardFormData>();
   const [saving, setSaving] = useState(false);
   const staging = useTechCardStaging();
 
@@ -334,20 +352,26 @@ export function StyleFactsField({
   }, [styleId]);
   // Leaving the screen ends the wait (Codex m1): every timer is cleared and a commit still waiting
   // is rejected NOW, by name — not by a timer firing five seconds later into a page that is gone.
-  useEffect(
-    () => () => {
+  // A commit that only STARTS after the page is gone («add», then away while CreateTechCard is in
+  // flight — index.tsx commits the queue when the create answers) never begins a wait at all:
+  // nothing will hand this panel an id any more.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
       const waiting = idWaiters.current;
       idWaiters.current = [];
       waiting.forEach((w) => {
         window.clearTimeout(w.timer);
         w.reject(new Error(NO_STYLE_ID));
       });
-    },
-    [],
-  );
+    };
+  }, []);
   const currentStyleId = (): Promise<number> => {
     const now = styleIdRef.current;
     if (now) return Promise.resolve(now);
+    if (!mounted.current) return Promise.reject(new Error(NO_STYLE_ID));
     return new Promise<number>((resolve, reject) => {
       const waiter: IdWaiter = {
         resolve,
@@ -387,26 +411,27 @@ export function StyleFactsField({
       setValue('careInstructions', careFromLabel, { shouldDirty: true });
     }
   }, [careFromLabel, getValues, setValue]);
-  // Both fields live in the card's RHF form, so "dirty" here is exactly RHF's own answer: they moved
-  // off the loaded card's defaults. That is also what makes the header's label a FACT — it names the
-  // fields that actually changed rather than guessing "style facts".
-  // brand / collection / targetGender are edited in the card HEADER, not in this panel — but they
-  // are style catalogue facts, so UpdateStyle is their only writer. UpdateTechCard deliberately
-  // excludes them (R4/§14.7, "no fact is written by two paths"), while the card kept sending them
-  // in its insert and reporting success: the operator changed the brand, saw "saved", reloaded, and
-  // got the old value back. They ride this panel's staged UpdateStyle now, because that is the RPC
-  // that owns them. Season rides along too, but only half of it can land — see commitFacts.
-  const { dirtyFields } = useFormState({
-    control,
-    name: ['fit', 'careInstructions', 'brand', 'collection', 'season', 'targetGender', 'ageGroup'],
-  });
+  // brand / collection / season / targetGender / fit / age group are edited in CARD DETAILS and
+  // care on the labels — but they are style catalogue facts, so UpdateStyle is their only writer.
+  // UpdateTechCard deliberately excludes them (R4/§14.7, "no fact is written by two paths"), while
+  // the card kept sending them in its insert and reporting success: the operator changed the brand,
+  // saw "saved", reloaded, and got the old value back. They ride this panel's staged UpdateStyle,
+  // because that is the RPC that owns them. Season rides along too — see commitFacts.
+  //
+  // WHICH FACTS MOVED IS RHF'S OWN ANSWER — each field against its baseline, the value the server
+  // holds. That holds through the card body's save too: while this panel is staged, index.tsx keeps
+  // these seven baselines where they are (settleAfterBodySave's `keepBaseline`, CL-A 61c6af0b), so
+  // a style write that FAILS leaves its facts dirty and the change staged under the same truthful
+  // label until it lands or the operator puts the old value back (Codex m5). Only this panel's own
+  // settle moves them — to what it wrote.
+  const { dirtyFields } = useFormState({ control, name: [...FACTS] });
   const { isDirty: formDirty } = useFormState({ control });
 
   // FIT IS WRITTEN ONLY WHERE IT IS DRAWN (Codex M2). CARD DETAILS hides the field on an auxiliary
   // card and on a family with no fit (accessories, shoes, bags, objects), and the same predicate —
   // `fitChoicesFor` — answers here. A fit edited and THEN hidden by a category change goes back to
-  // the loaded value (the effect below) and never reaches the mask: a value nobody can see any more
-  // is not a value anybody chose.
+  // the value the server holds (the effect below) and never reaches the mask: a value nobody can
+  // see any more is not a value anybody chose.
   const { dictionary } = useDictionary();
   const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
   const purpose = useWatch({ control, name: 'purpose' }) as string | undefined;
@@ -416,14 +441,14 @@ export function StyleFactsField({
       categoryId,
       toPurposeEnum(purpose) === 'TECH_CARD_PURPOSE_AUXILIARY',
     ) !== null;
-  const fitDirty = fitApplies && !!dirtyFields.fit;
+  const fitEdited = !!dirtyFields.fit;
   useEffect(() => {
-    if (fitApplies || !dirtyFields.fit) return;
-    const loaded = (control._defaultValues as Partial<TechCardFormData>).fit ?? '';
-    // `shouldDirty` with the LOADED value is what clears the flag (RHF compares against the
+    if (fitApplies || !fitEdited) return;
+    const loaded = factText((control._defaultValues as Partial<TechCardFormData>).fit);
+    // `shouldDirty` with the loaded value is what clears the flag (RHF compares against the
     // default) — and it does so for a field no control has registered; `resetField` would not.
     setValue('fit', loaded, { shouldDirty: true });
-  }, [fitApplies, dirtyFields.fit, control, setValue]);
+  }, [fitApplies, fitEdited, control, setValue]);
 
   // AGE GROUP (T01, D-01'). Written like every fact here — dirty, then masked — plus ONE case of
   // its own: a card being CREATED proposes adult (techCardDefaultData), and the new style row has
@@ -438,20 +463,20 @@ export function StyleFactsField({
   // the pending default would unstage in that very render and the card would be created without it.
   const [createMode, setCreateMode] = useState(!styleId);
   const { canWrite } = usePermissions();
+  const proposeAge = createMode && formDirty && canWrite(SECTION.products);
   const ageGroup = useWatch({ control, name: 'ageGroup' });
-  const ageWrites =
-    isAgeGroupSet(ageGroup) &&
-    (!!dirtyFields.ageGroup || (createMode && formDirty && canWrite(SECTION.products)));
 
-  const changed = [
-    fitDirty ? 'fit' : '',
-    dirtyFields.careInstructions ? 'care' : '',
-    dirtyFields.brand ? 'brand' : '',
-    dirtyFields.collection ? 'collection' : '',
-    dirtyFields.season ? 'season' : '',
-    dirtyFields.targetGender ? 'gender' : '',
-    ageWrites ? 'age group' : '',
-  ].filter(Boolean);
+  const writes: FactsDirty = {
+    fit: fitApplies && fitEdited,
+    careInstructions: !!dirtyFields.careInstructions,
+    brand: !!dirtyFields.brand,
+    collection: !!dirtyFields.collection,
+    season: !!dirtyFields.season,
+    targetGender: !!dirtyFields.targetGender,
+    ageGroup: isAgeGroupSet(ageGroup) && (!!dirtyFields.ageGroup || proposeAge),
+  };
+  const changed = FACTS.filter((f) => writes[f]).map((f) => FACT_WORD[f]);
+  const writesKey = FACTS.map((f) => (writes[f] ? 1 : 0)).join('');
 
   // The panel's mutation, unwrapped: it THROWS on failure instead of toasting, because the header's
   // one save is what reports the outcome now — it needs the rejection to name this panel in a
@@ -461,63 +486,82 @@ export function StyleFactsField({
   // tidiness: UpdateStyle validates careInstructions STRICTLY whenever the mask names it (every token
   // must be a care-dictionary code), and a card whose style still holds pre-ISO free text — which the
   // backend explicitly keeps — would then reject a fit-only edit with unknown_care_code on a field the
-  // operator never touched. Which fields moved is decided at STAGING time, not here: the card body
-  // commits first and its form.reset() clears the dirty flags before this runs.
-  async function commitFacts(dirty: FactsDirty) {
+  // operator never touched. Which fields go is decided at STAGING time and frozen into the commit
+  // (the staging effect below), never re-derived here.
+  //
+  // MASK PATHS ARE lowerCamelCase. The gateway decodes the body with protojson, which refuses any
+  // JSON FieldMask path containing `_` (400 «paths contains invalid path», before UpdateStyle runs)
+  // and maps `ageGroup` onto the proto field age_group itself.
+  //
+  // It answers with the form values it read, so `settle` re-baselines to THOSE and not to whatever
+  // the fields hold by then: a value typed while the request was in flight was not written, and it
+  // must stay an edit.
+  async function commitFacts(dirty: FactsDirty): Promise<Partial<Record<Fact, unknown>>> {
     type StylePatch = NonNullable<Parameters<typeof adminService.UpdateStyle>[0]['patch']>;
     const patch: Partial<StylePatch> = {};
     const mask: string[] = [];
+    const read: Partial<Record<Fact, unknown>> = {};
+    for (const f of FACTS) if (dirty[f]) read[f] = getValues(f);
     if (dirty.fit) {
-      patch.fit = getValues('fit') || '';
+      patch.fit = factText(read.fit);
       mask.push('fit');
     }
-    if (dirty.care) {
-      patch.careInstructions = getValues('careInstructions') || '';
+    if (dirty.careInstructions) {
+      patch.careInstructions = factText(read.careInstructions);
       mask.push('careInstructions');
     }
     if (dirty.brand) {
-      patch.brand = getValues('brand') || '';
+      patch.brand = factText(read.brand);
       mask.push('brand');
     }
     if (dirty.collection) {
-      patch.collection = getValues('collection') || '';
+      patch.collection = factText(read.collection);
       mask.push('collection');
     }
     if (dirty.season) {
       // Code AND year: sku_season is one fact, and both travel under the single "season" mask
       // path. The form holds a label ("SS26"); parseSeasonToSku is the same parser the style
-      // number is minted from, so what is saved is what the label says. An unrecognised label
-      // parses to nothing and is skipped rather than written as UNKNOWN — the operator's typo
-      // must not re-mint every colourway's SKU under a blank season.
-      const sku = parseSeasonToSku(getValues('season') || '');
-      if (sku?.code && sku.code !== 'SEASON_ENUM_UNKNOWN') {
-        patch.season = sku.code;
-        // 0 is "keep the stored year" server-side, so a label carrying no year changes only the
-        // code — which is exactly what a label like "Resort" means.
-        patch.seasonYear = sku.year ?? 0;
-        mask.push('season');
+      // number is minted from, so what is saved is what the label says.
+      const label = factText(read.season).trim();
+      const sku = parseSeasonToSku(label);
+      if (!sku?.code || sku.code === 'SEASON_ENUM_UNKNOWN') {
+        // A season that does not parse is NOT «nothing to write» (Codex m4): it was changed and it
+        // cannot be sent — UNKNOWN would re-mint every colourway's SKU under a blank season. So
+        // this panel refuses by name, BEFORE any request: the change stays staged and the save
+        // banner says why. Returning quietly let `settle` adopt the unparsed label as the new
+        // baseline while the header said «saved». (The card's schema refuses such a label before
+        // a save starts; this is the panel's own guard, not the only one.)
+        const why = label
+          ? `the season «${label}» is not one a style can take (SS26, FW25, Resort 26…)`
+          : 'a style cannot be left without a season';
+        throw new Error(`${why} — nothing from «style facts» was written`);
       }
+      patch.season = sku.code;
+      // 0 is "keep the stored year" server-side, so a label carrying no year changes only the
+      // code — which is exactly what a label like "Resort" means.
+      patch.seasonYear = sku.year ?? 0;
+      mask.push('season');
     }
     if (dirty.targetGender) {
       // The form holds the GenderEnum string the header's select writes, which is what the patch
       // wants — no mapping. An unmasked enum is replaced by a placeholder server-side, so naming
       // it in the mask is what makes it real.
-      patch.targetGender = getValues('targetGender') as StylePatch['targetGender'];
+      patch.targetGender = read.targetGender as StylePatch['targetGender'];
       mask.push('targetGender');
     }
     if (dirty.ageGroup) {
-      // Read again at commit time: the select may be back at «— unset —», and UNKNOWN is never
-      // sent under the mask (the server refuses it — «unset» means «leave it», not «clear it»).
-      const age = getValues('ageGroup');
+      // Read at commit time: the select may be back at «— unset —», and UNKNOWN is never sent
+      // under the mask (the server refuses it — «unset» means «leave it», not «clear it»).
+      const age = factText(read.ageGroup);
       if (isAgeGroupSet(age)) {
         patch.ageGroup = age;
-        mask.push('age_group');
+        mask.push('ageGroup');
       }
     }
     // AN EMPTY MASK IS NOT «WRITE NOTHING». UpdateStyle reads a request without one as a FULL
-    // replace of the style's facts, so a commit whose every field fell out above (a season label
-    // that does not parse, an age group back at «— unset —») sends no request at all.
-    if (mask.length === 0) return;
+    // replace of the style's facts, so a commit whose every field fell out above (an age group
+    // back at «— unset —») sends no request at all.
+    if (mask.length === 0) return read;
     // The id as of NOW — on a new card it arrives with the render after CreateTechCard (see above).
     const id = await currentStyleId();
     setSaving(true);
@@ -538,70 +582,82 @@ export function StyleFactsField({
     } finally {
       setSaving(false);
     }
+    return read;
   }
 
-  // Hand the mutation to the card's one save. Re-staged whenever the changed set moves, so the
-  // header's label keeps naming the right fields; `commit` reads through getValues, so unlike the
-  // grid panels its payload cannot go stale between staging and committing.
+  // Hand the mutation to the card's one save. Re-staged whenever the set of facts to write moves,
+  // so the header's label keeps naming the right fields; `commit` reads through getValues when it
+  // runs, so an unchanged set needs no new closure.
   //
   // Staged on a card that is NOT SAVED YET too (no `styleId`): the commit resolves the id itself
   // (`currentStyleId`), so the change has to be in the queue when index.tsx commits it right after
   // CreateTechCard. `styleId` is deliberately NOT a dependency: the id arriving is not an edit, and
   // re-staging on it would bump the key's generation mid-commit and file a written change as
   // «changed while the save was running».
+  const lastStaged = useRef<string | null>(null);
+  const [settledTimes, setSettledTimes] = useState(0);
   useEffect(() => {
     if (!staging || !canEdit) return;
+    const queued = staging.peek().some((c) => c.key === STAGING_KEY);
     if (changed.length === 0) {
-      staging.unstage(STAGING_KEY);
+      lastStaged.current = null;
+      if (queued) staging.unstage(STAGING_KEY);
       return;
     }
-    // The dirty set is FROZEN into the commit here, from the same render that computed the label —
-    // so the two can never disagree, and the card body's form.reset() (which runs between staging and
-    // committing whenever the body was dirty too) cannot widen the mask back onto untouched care.
-    const dirty: FactsDirty = {
-      fit: fitDirty,
-      care: !!dirtyFields.careInstructions,
-      brand: !!dirtyFields.brand,
-      collection: !!dirtyFields.collection,
-      season: !!dirtyFields.season,
-      targetGender: !!dirtyFields.targetGender,
-      ageGroup: ageWrites,
-    };
+    // Still queued with the same facts: nothing to tell the queue. The effect re-runs with an
+    // unchanged set when `staging` takes a new identity (a draft's hydrate) or `canEdit` returns,
+    // and a panel without a snapshot counts every stage() as an edit — so re-staging then would
+    // bump the key's generation, and mid-commit that files a written change as «changed while the
+    // save was running» and leaves it unsettled. A commit that FAILED stays queued the same way,
+    // under the same truthful label — its facts stay dirty, the body's save keeps their baselines
+    // (keepBaseline) — until it lands or the operator puts the old value back.
+    if (queued && lastStaged.current === writesKey) return;
+    lastStaged.current = writesKey;
+    // The set is FROZEN into the commit here, from the same render that computed the label — so the
+    // two can never disagree, and nothing that runs between staging and committing can widen the
+    // mask back onto untouched care.
+    const dirty: FactsDirty = { ...writes };
+    let wrote: Partial<Record<Fact, unknown>> = {};
     staging.stage({
       key: STAGING_KEY,
       label: `${changed.join('/')} — ${changed.length} ${changed.length === 1 ? 'field' : 'fields'}`,
       order: COMMIT_ORDER.styleFacts,
-      commit: () => commitFacts(dirty),
-      // These two values ARE form fields, so the card body's own reset normally clears them first —
-      // but only when the body was dirty. Re-baselining them here keeps the header count honest on
-      // the panel's own terms instead of borrowing another panel's cleanup.
+      commit: async () => {
+        wrote = await commitFacts(dirty);
+      },
+      // Runs only when the write landed and nothing re-staged meanwhile. The written facts'
+      // baseline becomes what was WRITTEN, not what the fields hold by now: a value typed while the
+      // request was in flight is still an edit, and the render this bump causes stages it again
+      // (commitAll has just dropped the key from the queue).
+      //
+      // ONLY THE BASELINE MOVES, and not through `resetField`: that call writes the VALUE with the
+      // default — handed the written value it puts a brand typed in flight back under the caret,
+      // handed the current one (the old settle) it takes that brand as saved though it was never
+      // sent — and it does nothing at all for a field no control has registered. Care never is (it
+      // mirrors the care label), nor are the CARD DETAILS cells before the studio is opened: such
+      // a fact stayed dirty after its write, «unsaved» for good once the body's save kept its
+      // baseline (keepBaseline), and staged and written again on every save by the bump below.
+      // The baseline goes where resetField itself puts it; `setValue` of the field's own value
+      // with `shouldDirty` then re-derives the field's flag and the form's isDirty against it,
+      // registered or not (the fit effect above makes the same move).
       settle: () => {
-        const v = getValues();
-        resetField('fit', { defaultValue: v.fit });
-        resetField('careInstructions', { defaultValue: v.careInstructions });
-        resetField('brand', { defaultValue: v.brand });
-        resetField('collection', { defaultValue: v.collection });
-        resetField('season', { defaultValue: v.season });
-        resetField('targetGender', { defaultValue: v.targetGender });
-        resetField('ageGroup', { defaultValue: v.ageGroup });
+        const baseline = control._defaultValues as Record<string, unknown>;
+        for (const f of FACTS) {
+          if (!dirty[f]) continue;
+          baseline[f] = f in wrote ? wrote[f] : getValues(f);
+          setValue(f, getValues(f) as never, { shouldDirty: true });
+        }
+        lastStaged.current = null;
         // The style is written: from here on only an edit writes its age group.
         setCreateMode(false);
+        setSettledTimes((n) => n + 1);
       },
     });
-    // commitFacts/settle are redefined every render by design (they read current form state);
-    // depending on them here would restage on every keystroke for no gain.
+    // The closures read current form state when they run; `writesKey` is what a reader (the
+    // label) and the commit (the frozen set) can see; `settledTimes` re-stages what a settle left
+    // dirty.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    staging,
-    canEdit,
-    fitDirty,
-    dirtyFields.careInstructions,
-    dirtyFields.brand,
-    dirtyFields.collection,
-    dirtyFields.season,
-    dirtyFields.targetGender,
-    ageWrites,
-  ]);
+  }, [staging, canEdit, writesKey, settledTimes]);
 
   // Ниже — только разметка. Все хуки (зеркало care, staging brand/collection/season/gender) уже
   // отработали выше, поэтому невидимая панель продолжает ПИСАТЬ ровно то же, что и видимая.

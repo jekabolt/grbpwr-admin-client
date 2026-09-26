@@ -105,9 +105,9 @@ export const labelAttachmentOptions = [
 ];
 
 // AGE GROUP (wave 2026-09-25, T01 / D-01'): a style fact like target gender, stored on the tech
-// card and written ONLY through UpdateStyle (StylePatch.age_group — StyleFactsField). The wire
-// enum, in the ladder order of the size runs. UNKNOWN is «not set»: it is shown, and it is never
-// written — the server refuses it under the `age_group` mask, and an unset select stays out of it.
+// card and written ONLY through UpdateStyle (StylePatch.age_group, mask path `ageGroup` —
+// StyleFactsField). The wire enum, in the ladder order of the size runs. UNKNOWN is «not set»: it
+// is shown and never written — the server refuses it under the mask; an unset select stays out.
 export const AGE_GROUP_UNSET = 'AGE_GROUP_ENUM_UNKNOWN' as const satisfies common_AgeGroupEnum;
 
 /**
