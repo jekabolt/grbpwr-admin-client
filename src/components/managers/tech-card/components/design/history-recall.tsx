@@ -316,7 +316,9 @@ function kindLabel(kind: DesignKind): string {
   if (kind === 'render') return 'fabric render';
   if (kind === 'threed') return '3D';
   if (kind === 'playground') return 'playground';
-  if (kind === 'onmodel') return 'on model';
+  // `onmodel` is no screen any more (C-06): a recolour is recalled into PLAYGROUND · Change a
+  // Color, and `recallTargetKind` never answers `onmodel`. Named for the type's sake, truthfully.
+  if (kind === 'onmodel') return 'playground';
   if (kind === 'pattern') return 'pattern';
   return 'flat';
 }
