@@ -1,9 +1,9 @@
-import type { common_DesignRun, common_TechCard } from 'api/proto-http/admin';
+import type { common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 import type { EditHistory } from 'ui/components/annotation/history';
 import Text from 'ui/components/text';
@@ -15,7 +15,7 @@ import { Bench } from './bench';
 import { useColorwayChoice } from './colorway-picker';
 import { ColourwayProposals } from './colourway-proposals';
 import { GenerationStudio } from './generation';
-import { runRepresentation, type DesignKind } from './bench-kinds';
+import type { DesignKind } from './bench-kinds';
 import { ChainRail, useChainCtx } from './chain-rail';
 import {
   PLAYGROUND_WF_PARAM,
@@ -32,7 +32,14 @@ import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
 import { MaterialSlots } from './material-slots';
 import { MoodBoard } from './mood-board';
-import { PlaygroundStudio, playgroundHistoryMatch } from './playground';
+import {
+  PlaygroundStudio,
+  inPlaygroundRoom,
+  playgroundHistoryMatch,
+  playgroundHistoryScope,
+  useLegacyStepRewrite,
+  useStepAddress,
+} from './playground';
 import { PatternStudio } from './pattern';
 import { DraftedProvider } from './head/drafted-provider';
 import { useStudioKindSwitch } from './history-recall';
@@ -70,12 +77,6 @@ import { useDesignBand } from './use-design-band';
  * down. Organs that called it separately would each get their own cache entry and the bench could
  * disagree with the feed about which instant of the card is on screen.
  */
-
-/** The runs of the PLAYGROUND room: its own kinds and the recolours ON MODEL used to hold. */
-const inPlaygroundRoom = (run: common_DesignRun): boolean => {
-  const rep = runRepresentation(run);
-  return rep === 'playground' || rep === 'onmodel';
-};
 
 /**
  * The pick banner. It belongs to neither the bench (which asks) nor the feed (which answers), so it
@@ -199,8 +200,10 @@ export function StudioTab({
      его писатель развёл бы правило «replace, не трогая `tab`/`step`» на две редакции. */
   const addressedTab = params.get('tab');
   const askedColorway = addressedTab === 'studio' ? Number(params.get('colorway')) : NaN;
-  const deepLinkColorway =
-    Number.isFinite(askedColorway) && askedColorway > 0 ? askedColorway : 0;
+  const deepLinkColorway = Number.isFinite(askedColorway) && askedColorway > 0 ? askedColorway : 0;
+  /* The entry's own state rides along: dropping a spent `?colorway=` is not a navigation, and it
+     must not wipe the playground's «opened from the grid» mark (G-01). */
+  const entryState = useLocation().state as unknown;
   const dropColorwayParam = useCallback(() => {
     setParams(
       (prev) => {
@@ -208,9 +211,9 @@ export function StudioTab({
         p.delete('colorway');
         return p;
       },
-      { replace: true },
+      { replace: true, state: entryState },
     );
-  }, [setParams]);
+  }, [setParams, entryState]);
   const colorway = useColorwayChoice(techCardId, band, deepLinkColorway, dropColorwayParam);
 
   const readOnly = !!disabled;
@@ -283,31 +286,11 @@ export function StudioTab({
       ? legacy.step
       : opened.current.step;
   const ctx = { ...chain, now: decided };
-  const goStep = (next: StepId) =>
-    setParams(
-      (prev) => {
-        const p = new URLSearchParams(prev);
-        p.set('step', next);
-        // `?wf=` belongs to the playground screen; it does not outlive the step.
-        if (next !== 'playground') p.delete(PLAYGROUND_WF_PARAM);
-        return p;
-      },
-      // `replace`, as the prototype's `replaceState`: Back leaves the card, it does not walk the
-      // rail backwards one cell at a time.
-      { replace: true },
-    );
-  useEffect(() => {
-    if (!legacy) return;
-    setParams(
-      (prev) => {
-        const p = new URLSearchParams(prev);
-        p.set('step', legacy.step);
-        if (!p.get(PLAYGROUND_WF_PARAM)) p.set(PLAYGROUND_WF_PARAM, legacy.wf);
-        return p;
-      },
-      { replace: true },
-    );
-  }, [legacy, setParams]);
+  /* The rail's write and the legacy rewrite live with the playground's address rules
+     (`playground/address.ts`): leaving a workflow opened from the grid has to pop that entry
+     before it replaces, or the grid stays behind as an orphan entry (G-01). */
+  const goStep = useStepAddress();
+  useLegacyStepRewrite(legacy);
 
   /* ═══ THE GENERATIVE KIND IS DERIVED FROM THE STEP, NEVER HELD BESIDE IT ═════════════════════════
      `kind` was the studio's state (`state.kind` of the old prototype); now the step is, and the
@@ -643,6 +626,9 @@ export function StudioTab({
                             playgroundHistoryMatch(params.get(PLAYGROUND_WF_PARAM), band) ??
                             inPlaygroundRoom
                           }
+                          /* Which list this is: the page and the autofill budget belong to it,
+                             not to the shared `defaultRep` (G-01, Codex 4). */
+                          scopeKey={playgroundHistoryScope(params.get(PLAYGROUND_WF_PARAM), band)}
                           defaultOpen={false}
                         />
                       </>
@@ -716,7 +702,7 @@ export function ArtifactsTab({
    */
   calloutHistory?: EditHistory<SheetCallout>;
 }) {
-  const { band, isLoading, serverSpeaks, error } = useDesignBand(techCardId);
+  const { band, isLoading, serverSpeaks } = useDesignBand(techCardId);
 
   if (!techCardId) {
     return (
@@ -725,7 +711,10 @@ export function ArtifactsTab({
             пустого экрана значило бы звать человека к органу, которого нет. Ждёт эта заглушка
             ровно одного — сохранённой карточки: пластины живут в её медиа, а у несохранённой
             карточки медиа некуда положить. */}
-        <Section title='artifacts' question='— the pictures of this card, and the sheet the factory prints'>
+        <Section
+          title='artifacts'
+          question='— the pictures of this card, and the sheet the factory prints'
+        >
           <Text variant='inactive' size='control'>
             Save this tech card first — pictures are kept on a card that exists.
           </Text>

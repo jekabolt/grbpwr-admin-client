@@ -151,7 +151,11 @@ function RunRow({
    */
   const notes = [
     ...(fixNames.length > 0
-      ? [isVector ? `redraw of ${fixNames.join(', ')}` : `fix: ${fixNames.join(', ')} · from the slots`]
+      ? [
+          isVector
+            ? `redraw of ${fixNames.join(', ')}`
+            : `fix: ${fixNames.join(', ')} · from the slots`,
+        ]
       : []),
     ...(rerunOf > 0 ? [`repeat of ${runHandle(rerunOf)}`] : []),
   ];
@@ -382,6 +386,7 @@ export function GenerationHistory({
   defaultRep = 'all',
   defaultOpen = true,
   match,
+  scopeKey = '',
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -407,6 +412,15 @@ export function GenerationHistory({
    * words. Pass a stable function (module constant or `useCallback`) — it is a memo dependency.
    */
   match?: (run: common_DesignRun) => boolean;
+  /**
+   * WHICH LIST `match` DRAWS, AS A STABLE NAME (PLAYGROUND: the registry key of the open workflow,
+   * or `playground-room`). Every playground workflow shares one `defaultRep`, so a changed matcher
+   * was invisible to the window's resets: the page stayed where another list left it and the
+   * autofill budget spent on that list stayed spent — rows the server holds were never fetched
+   * (G-01, Codex 4). A change of scope resets the page, the open deck and the budget; the fold stays
+   * as the person left it. A name, not the function: identity says nothing about which list it is.
+   */
+  scopeKey?: string;
 }) {
   const speaks = serverSpeaksDesign();
   const more = useMoreHistory(techCardId, band);
@@ -443,9 +457,14 @@ export function GenerationHistory({
    * ещё чужой.
    */
   const shownDefaults = useRef(`${defaultRep}|${defaultOpen}`);
-  if (shownDefaults.current !== `${defaultRep}|${defaultOpen}`) {
+  const shownScope = useRef(scopeKey);
+  if (shownDefaults.current !== `${defaultRep}|${defaultOpen}` || shownScope.current !== scopeKey) {
+    // Only a new step folds the list back; a new scope inside one step keeps the fold.
+    if (shownDefaults.current !== `${defaultRep}|${defaultOpen}` && runsOpen !== defaultOpen) {
+      setRunsOpen(defaultOpen);
+    }
     shownDefaults.current = `${defaultRep}|${defaultOpen}`;
-    if (runsOpen !== defaultOpen) setRunsOpen(defaultOpen);
+    shownScope.current = scopeKey;
     if (page !== 0) setPage(0);
     if (openDeck !== null) setOpenDeck(null);
   }
@@ -601,7 +620,7 @@ export function GenerationHistory({
    * бюджет перетекал бы к соседу (`StudioTab` не размонтируется на переходе).
    */
   const [autofillSpent, setAutofillSpent] = useState(0);
-  const autofillSlot = `${techCardId}:${rep}:${current}`;
+  const autofillSlot = `${techCardId}:${rep}:${scopeKey}:${current}`;
   const autofillSlotRef = useRef(autofillSlot);
   if (autofillSlotRef.current !== autofillSlot) {
     autofillSlotRef.current = autofillSlot;
@@ -813,21 +832,19 @@ export function GenerationHistory({
                    (r2 п.27): история шага сужена его родом жёстко, и предлагать «покажи все роды»
                    значило бы обещать экран, которого не существует. Пустота теперь говорит одно и
                    то же в обоих случаях: этого рода среди прочитанных прогонов нет. */
-                (
-                  <EmptyState
-                    action={
-                      <Button variant='secondary' size='xs' onClick={goToRun}>
-                        go to the run
-                      </Button>
-                    }
-                  >
-                    <span data-probe='rep-empty'>
-                      {rep !== 'all'
-                        ? `no ${repWord(rep)} generations among the loaded runs`
-                        : 'no runs to show'}
-                    </span>
-                  </EmptyState>
-                )
+                <EmptyState
+                  action={
+                    <Button variant='secondary' size='xs' onClick={goToRun}>
+                      go to the run
+                    </Button>
+                  }
+                >
+                  <span data-probe='rep-empty'>
+                    {rep !== 'all'
+                      ? `no ${repWord(rep)} generations among the loaded runs`
+                      : 'no runs to show'}
+                  </span>
+                </EmptyState>
               ))}
 
             {/* THE PAGER, AND THE DOOR THAT SWITCHES IT OFF (T-17): pages are for reading a long
