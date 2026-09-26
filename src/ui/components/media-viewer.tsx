@@ -3,7 +3,7 @@ import { ChevronLeftIcon, ChevronRightIcon, Cross2Icon } from '@radix-ui/react-i
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
   useImageAdjust,
   useImageAnnotate,
@@ -108,6 +108,23 @@ export function mediaFullListToViewerItems(
     })
     .filter((i) => i.src);
 }
+
+/**
+ * ═══ АДРЕС ЕСТЬ, ФАЙЛА НЕТ — СЛОВО И ЕГО ПОДСКАЗКА (O-55) ═══════════════════════════════════════
+ *
+ * Бета: у части кропов дизайна бакет отдаёт 403 `AccessDenied` на КАЖДЫЙ вариант — объекты удалены,
+ * строки остались, и ни миниатюры, ни крупного файла у такого кадра нет. Плитка рисовала иконку
+ * битой картинки, просмотрщик — пустоту. Пустоту называет СЛОВО, как «deleted» и «no image» у
+ * плиток полосы, и слово одно на всех, кто его говорит: этот просмотрщик, `PictureTile` и `Thumb`.
+ *
+ * Здесь, в примитиве `ui`, а не у полосы: просмотрщик общий (библиотека, задачи, заметки), и
+ * слово, которое он печатает, не может жить в файле, о котором он не знает.
+ */
+export const FILE_MISSING_WORDS = 'file missing';
+export const FILE_MISSING_TITLE = 'the file is gone from storage — this picture cannot be shown';
+
+/** Пустой набор павших адресов. Один на модуль, чтобы сброс на закрытии не будил лишнюю отрисовку. */
+const NO_MISSING: ReadonlySet<string> = new Set();
 
 export function resolveViewerType(item: MediaViewerItem): 'image' | 'video' {
   return item.type ?? (isVideo(item.src) ? 'video' : 'image');
@@ -236,6 +253,33 @@ export function MediaViewer({
   const activeType = current ? resolveViewerType(current) : undefined;
   const isImage = activeType === 'image';
 
+  /**
+   * ═══ КАДР, ЧЕЙ ФАЙЛ НЕ ЗАГРУЗИЛСЯ, ПОКАЗЫВАЕТ СЛОВО, А НЕ ДЫРУ (O-55) ═══════════════════════
+   *
+   * Сцена узнаёт о провале от СОБСТВЕННОГО `<img>` (`onError`) — своей сети у просмотрщика нет и
+   * не будет (довод у `meta.usage`). Павший адрес ложится в набор, и пока просмотрщик открыт, он
+   * больше не запрашивается: сцена рисует рамку со словом, кадр ленты — то же слово мельче, а
+   * сосед с этим адресом не подгружается заранее. Листание при этом живо целиком — стрелки,
+   * клавиши, лента кадров и смахивание; гаснут только зум, чернила и коррекция: им не над чем
+   * работать.
+   *
+   * Набор живёт СЕАНС, а не страницу: закрытие его сбрасывает, и следующее открытие пробует адрес
+   * заново — сбой сети не должен становиться «файла нет» до перезагрузки. Хозяин ряда, который
+   * знает больше (полоса дизайна подменяет павший крупный файл миниатюрой, D-7), делает это сам,
+   * СВОИМ `src`; новый адрес здесь пробуется честно, один раз.
+   */
+  const [missing, setMissing] = useState<ReadonlySet<string>>(NO_MISSING);
+  useEffect(() => {
+    if (!open) setMissing(NO_MISSING);
+  }, [open]);
+  const markMissing = useCallback((src: string | null) => {
+    if (!src) return;
+    setMissing((prev) => (prev.has(src) ? prev : new Set(prev).add(src)));
+  }, []);
+  const stageMissing = isImage && !!current && missing.has(current.src);
+  /** Сцене есть что двигать и над чем рисовать: картинка, и её файл на месте. */
+  const stageLive = isImage && !stageMissing;
+
   const go = useCallback(
     (dir: 1 | -1) => {
       if (!count) return;
@@ -279,7 +323,7 @@ export function MediaViewer({
   // Reset zoom/pan/drawing whenever the viewer moves to a different item, or
   // closes — each image gets a fresh, session-only stage.
   const resetKey = `${open ? 1 : 0}:${safeIndex}:${current?.src ?? ''}`;
-  const gestures = useMediaStageGestures({ active: isImage, resetKey, hasMany, onSwipe: go });
+  const gestures = useMediaStageGestures({ active: stageLive, resetKey, hasMany, onSwipe: go });
   const annotate = useImageAnnotate({ resetKey, baseSize: gestures.baseSize });
   // Коррекция подчиняется ТОМУ ЖЕ `resetKey`, что зум и чернила: смена кадра или закрытие снимают
   // её начисто. Пережившая закрытие коррекция была бы уже хранимой дельтой, а это другой договор
@@ -288,7 +332,7 @@ export function MediaViewer({
     resetKey,
     baseSize: gestures.baseSize,
     src: current?.src ?? '',
-    enabled: isImage,
+    enabled: stageLive,
   });
   // Callouts start visible — you open the viewer on an annotated sketch to read them. The toggle
   // is there to get them off the picture, which is what you want before drawing on it.
@@ -330,7 +374,7 @@ export function MediaViewer({
   // Neighbours to preload so arrow / swipe nav feels instant.
   const neighbours = hasMany
     ? [items[(safeIndex + 1) % count], items[(safeIndex - 1 + count) % count]].filter(
-        (n) => n && resolveViewerType(n) === 'image',
+        (n) => n && resolveViewerType(n) === 'image' && !missing.has(n.src),
       )
     : [];
 
@@ -391,6 +435,8 @@ export function MediaViewer({
             ref={gestures.viewportRef}
             className={cn(
               'relative flex min-h-0 flex-1 items-center justify-center px-4 sm:px-16',
+              // `isImage`, не `stageLive`: смахивание по рамке «file missing» — тоже листание, и
+              // отдать жест браузеру значило бы отнять его у ряда.
               isImage && 'touch-none',
             )}
             onClick={handleStageClick}
@@ -399,7 +445,7 @@ export function MediaViewer({
             <div
               key={safeIndex}
               className='media-viewer-stage relative flex max-h-full max-w-full items-center justify-center'
-              style={isImage ? gestures.stageStyle : undefined}
+              style={stageLive ? gestures.stageStyle : undefined}
             >
               {type === 'video' ? (
                 <video
@@ -409,6 +455,17 @@ export function MediaViewer({
                   playsInline
                   className='max-h-[calc(100vh-11rem)] max-w-full object-contain'
                 />
+              ) : stageMissing ? (
+                /* РАМКА КАДРА СО СЛОВОМ (O-55): тот же белый грунт, что под снимком, и подпись
+                   тоном ярлыка — ровно как пустота названа на плитках. Размер — обычный кадр 4:5,
+                   потому что настоящего размера у файла, которого нет, никто не измерит. */
+                <div
+                  data-probe='viewer-missing'
+                  title={FILE_MISSING_TITLE}
+                  className='flex h-80 max-h-[calc(100vh-11rem)] w-64 max-w-full items-center justify-center bg-bgColor px-4 text-center text-micro uppercase tracking-label text-labelColor'
+                >
+                  {FILE_MISSING_WORDS}
+                </div>
               ) : (
                 <>
                   <img
@@ -418,6 +475,9 @@ export function MediaViewer({
                     draggable={false}
                     data-probe='viewer-image'
                     onDoubleClick={gestures.onImageDoubleClick}
+                    // Адрес — с самого узла, а не из замыкания: запоздалая ошибка прежнего кадра не
+                    // объявит павшим тот, на который уже перелистнули.
+                    onError={(e) => markMissing(e.currentTarget.getAttribute('src'))}
                     className={cn(
                       // White ground behind the picture: transparent PNGs (background-removed
                       // product shots, sketches) are unreadable on the near-black overlay.
@@ -471,7 +531,7 @@ export function MediaViewer({
               </>
             )}
 
-            {isImage && (
+            {stageLive && (
               <ZoomDrawToolbar
                 scale={gestures.scale}
                 canZoomIn={gestures.canZoomIn}
@@ -545,11 +605,22 @@ export function MediaViewer({
                         muted
                         className='size-full object-cover'
                       />
+                    ) : missing.has(item.thumbnail || item.src) ? (
+                      /* Тот же набор павших адресов, что у сцены (O-55): кадр ленты под рамкой
+                         «file missing» не рисует браузерную иконку битой картинки. */
+                      <span
+                        data-probe='viewer-strip-missing'
+                        title={FILE_MISSING_TITLE}
+                        className='flex size-full items-center justify-center bg-bgColor px-0.5 text-center text-nano uppercase leading-tight text-labelColor'
+                      >
+                        {FILE_MISSING_WORDS}
+                      </span>
                     ) : (
                       <img
                         src={item.thumbnail || item.src}
                         alt=''
                         className='size-full bg-bgColor object-cover'
+                        onError={(e) => markMissing(e.currentTarget.getAttribute('src'))}
                       />
                     )}
                     {itemIsVideo && (

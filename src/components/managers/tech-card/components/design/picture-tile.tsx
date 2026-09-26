@@ -14,7 +14,12 @@ import {
   type ReactNode,
 } from 'react';
 import MediaComponent from 'ui/components/media';
-import { MediaViewer, type MediaViewerItem } from 'ui/components/media-viewer';
+import {
+  FILE_MISSING_TITLE,
+  FILE_MISSING_WORDS,
+  MediaViewer,
+  type MediaViewerItem,
+} from 'ui/components/media-viewer';
 import Text from 'ui/components/text';
 
 import { uploadRaster } from './modals/use-edit-layer';
@@ -795,6 +800,29 @@ export function PictureTile({
    * про то, КАК нарисовать, а не про то, что за этим адресом стоит.
    */
   const faceSrc = useLoadableSrc(url, gallery?.thumbnail);
+  /**
+   * ═══ АДРЕС ЕСТЬ, ФАЙЛА НЕТ — ЛИЦО ГОВОРИТ ЭТО СЛОВОМ (O-55) ═══════════════════════════════
+   *
+   * Бета: у части кропов бакет отдаёт 403 на КАЖДЫЙ вариант, миниатюру тоже, — откату D-7 выше
+   * подставлять нечего, и плитка стояла с браузерной иконкой битой картинки без единого слова.
+   * Теперь лицо, чей `<img>` не загрузился, становится кадром со словом «file missing» — тем же
+   * кадром, каким здесь уже нарисованы «no image» и «3d model».
+   *
+   * ⚠ ОШИБКУ СЛЫШИТ ОБЁРТКА ЛИЦА, А НЕ САМ `<img>`, И ЭТО НЕ ОБХОД. `<img>` рисует примитив
+   * `MediaComponent` (`ui/components/media`), и наружу он его событий не отдаёт. Синтетические
+   * события React всплывают по дереву компонентов — все, кроме `onScroll`, `onError` картинки в
+   * том числе, — поэтому `onError` на обёртке ловит ошибку её `<img>`, и общий примитив остаётся
+   * нетронутым. Слушает обёртка ТОЛЬКО в ветке `MediaComponent`: лицо вызывающего (`face`) и лицо
+   * модели не её, и их ошибки не её дело.
+   *
+   * Помнится АДРЕС, который не загрузился, а не флаг: откат D-7 на миниатюру и новый `url` дают
+   * другой адрес, и он пробуется честно, один раз; павший же не запрашивается снова — `<img>`
+   * снят, повторять нечего. Двери плитки (углы, подвал вызывающего) от этого не меняются: слово
+   * заменяет ТОЛЬКО картинку.
+   */
+  const [faceFailed, setFaceFailed] = useState<string | null>(null);
+  const hearsFace = !model && !face && !!url;
+  const faceBroken = hearsFace && !!faceSrc && faceFailed === faceSrc;
   const opensModel = !!modelHref;
   /**
    * ⚠ ПОВЕРХНОСТЬ ЕСТЬ У ОБЕИХ ПЛИТОК 3D, И ЭТО ПРАВКА, А НЕ УПРОЩЕНИЕ (E-25).
@@ -863,6 +891,10 @@ export function PictureTile({
          лишний узел не дал бы ни пикселя разницы, зато сдвинул бы приглушённую обёртку на ярус
          вглубь. Геометрия и глубина дерева не трогаются вовсе. */
       data-ground={ground === 'neutral' && fit === 'contain' ? 'neutral' : undefined}
+      /* O-55: объявленное состояние «файла нет» и подсказка к нему. Подсказка на ХОЗЯИНЕ, а не на
+         слове: поверхность-зум накрывает лицо целиком, и `title` слова наведением не достать. */
+      data-thumb-broken={faceBroken ? '' : undefined}
+      title={faceBroken ? FILE_MISSING_TITLE : undefined}
       className={cn(
         'group relative border',
         selected ? 'border-2 border-textColor' : 'border-textInactiveColor',
@@ -879,7 +911,17 @@ export function PictureTile({
           (см. выше), и гасить ей теперь нечего, кроме самой картинки. `h-full w-full` в потоке —
           ровно те же коробка и место, что были у самого `MediaComponent` (его контейнер при
           `aspectRatio='auto'` таков же), поэтому кадр не сдвигается ни на пиксель. */}
-      <div className={cn('h-full w-full', dim && 'opacity-40')}>
+      <div
+        className={cn('h-full w-full', dim && 'opacity-40')}
+        onError={
+          hearsFace
+            ? (e) => {
+                const img = e.target;
+                if (img instanceof HTMLImageElement) setFaceFailed(img.getAttribute('src'));
+              }
+            : undefined
+        }
+      >
         {model && url ? (
           /* ЛИЦО МОДЕЛИ — КАДР СО СЛОВОМ, И БОЛЬШЕ НИЧЕГО (E-25). Здесь стояли `open` и
              `download` — два органа посреди картинки, то есть ровно «кнопками», против которых
@@ -895,6 +937,12 @@ export function PictureTile({
           </div>
         ) : face ? (
           face
+        ) : faceBroken ? (
+          <div className='flex h-full w-full items-center justify-center bg-bgSecondary px-1 text-center'>
+            <Text size='nano' variant='label' component='span' className='uppercase'>
+              {FILE_MISSING_WORDS}
+            </Text>
+          </div>
         ) : url ? (
           <MediaComponent src={faceSrc} alt={alt} aspectRatio='auto' fit={fit} />
         ) : (

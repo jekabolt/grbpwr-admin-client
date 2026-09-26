@@ -1,5 +1,7 @@
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
+import { useState } from 'react';
+import { FILE_MISSING_TITLE, FILE_MISSING_WORDS } from 'ui/components/media-viewer';
 import Text from 'ui/components/text';
 
 /**
@@ -33,8 +35,24 @@ export function Thumb({
   gone?: boolean;
 }) {
   const src = thumbUrl(media);
+  /**
+   * ═══ АДРЕС ЕСТЬ, ФАЙЛА НЕТ (O-55) ═══════════════════════════════════════════════════════════
+   *
+   * Бета: у части кропов бакет отдаёт 403 `AccessDenied` на КАЖДЫЙ вариант — объекты удалены, а
+   * строки остались. Такой кадр рисовал браузерную иконку битой картинки и ни слова. Теперь
+   * `onError` переводит ячейку в третье словесное состояние рядом с «deleted» и «no image».
+   *
+   * Состояние помнит АДРЕС, который не загрузился, а не флаг «сломано»: новый `src` сбрасывает
+   * его сам, без эффекта, а упавший адрес второй раз не запрашивается — `<img>` снят, и повторять
+   * нечего. Адрес берётся с самого узла (`getAttribute`), а не из замыкания: запоздалая ошибка
+   * прежнего адреса не объявит битым новый.
+   */
+  const [failed, setFailed] = useState<string | null>(null);
+  const broken = !!src && failed === src;
   return (
     <span
+      data-thumb-broken={broken ? '' : undefined}
+      title={broken ? FILE_MISSING_TITLE : undefined}
       className={cn(
         // МАТ ПОД СНИМКОМ БЕЛЫЙ, И ЭТО ПРАВИЛО, А НЕ ВКУС (R-12).
         //
@@ -57,17 +75,18 @@ export function Thumb({
         className,
       )}
     >
-      {src ? (
+      {src && !broken ? (
         <img
           src={src}
           alt={alt ?? ''}
           loading='lazy'
           className='block h-full w-full'
           style={{ objectFit: 'contain' }}
+          onError={(e) => setFailed(e.currentTarget.getAttribute('src'))}
         />
       ) : (
         <Text size='nano' variant='label' component='span' className='px-0.5 text-center'>
-          {gone ? 'deleted' : 'no image'}
+          {broken ? FILE_MISSING_WORDS : gone ? 'deleted' : 'no image'}
         </Text>
       )}
     </span>
