@@ -30,6 +30,30 @@ import GenericPopover from 'ui/components/popover';
  * `disabled` — ПОЛНЫЙ ЗАМОК (ревью CL-D): ни запуска, ни `undo ↶`, и ответ, пришедший в запертое
  * поле или в поле, текст которого уже не тот, что ушёл на сервер, НЕ ПРИМЕНЯЕТСЯ — иначе FLAT
  * GENERATE, сохраняющий слова, показал бы после себя слова, которых его прогон не получал.
+ *
+ * ВИДИМОСТЬ (26.09, O-30; владелец: «кнопка ai должна появляться только если мы в активном поле
+ * текстбокса, а не всегда, и для пустых текстбоксов вообще не должна показываться»). `ai ✦` стоит в
+ * углу, только пока фокус В ПОЛЕ (сам текст, кнопка, чип отката или открытое меню) И в поле есть
+ * текст; ещё — пока летит запрос (`busy`). Пустое или запертое поле не показывает кнопки вовсе —
+ * прежнего выключенного «write something first» нет. `undo ↶` живёт свои десять секунд независимо
+ * от фокуса: после замены в оставленном поле он — единственное, что видно.
+ *
+ * ГДЕ «ПОЛЕ» — ближайший предок с текстовым контролом (`fieldOf`), а не голый `parentElement`: у
+ * WORDS кнопка стоит на уровень глубже, в угловой строке рядом со счётчиком. Фокус слушается на
+ * `document` (focusin/focusout), а не на обёртке: меню портируется в body, и уход фокуса ИЗ него
+ * обёртка не увидела бы. Строка меню, снятая с DOM, focusout не шлёт — после закрытия меню фокус
+ * перечитывается из `document.activeElement` (микрозадачей, когда Radix уже вернул его). Нажатие на
+ * кнопку не уводит каретку из текста (`onMouseDown` → preventDefault); после выбора режима фокус
+ * идёт обратно в текст — занятая запросом кнопка взять его не может, а Radix отдал бы его в body.
+ *
+ * ⚠ УХОД ФОКУСА СО СНЯТОГО УЗЛА — НЕ УХОД ИЗ ПОЛЯ. Chromium шлёт focusout (relatedTarget = null) по
+ * элементу, который УБРАЛИ из DOM с фокусом: строка меню при закрытии, чип `undo ↶` при нажатии. Радикс
+ * возвращает фокус на кнопку лишь задачей позже (setTimeout в FocusScope), и, прими мы этот blur за
+ * чистую монету, кнопка размонтировалась бы под ним и возвращать фокус было бы некуда. Поэтому blur
+ * судится микрозадачей позже и отброшенного узла не касается; тот, кто узел снял, фокус возвращает
+ * (закрытие меню — на кнопку или в текст; откат — в текст) или перечитывает. И чип отката фокуса по
+ * нажатию не берёт (тоже `onMouseDown` → preventDefault): фокус, пришедший на чип, привёл бы рядом
+ * `ai ✦`, ряд прижат вправо — чип уехал бы из-под указателя, и клик пропал бы (замерено стендом).
  */
 export type EnhanceMode = 'improve' | 'expand' | 'shorten';
 
@@ -123,6 +147,30 @@ export async function enhanceText(req: EnhanceRequest, _signal?: AbortSignal): P
 
 const UNDO_WINDOW_MS = 10_000;
 
+const TEXT_CONTROL = 'textarea, input, [contenteditable]';
+const TRIGGER = 'button[aria-label="ai enhance"]';
+
+/**
+ * The field this control belongs to: the nearest ancestor that holds a text control. Every call
+ * site renders `AiEnhance` inside the field's `relative` wrapper; WORDS keeps it one level deeper,
+ * in the corner row beside the counter, so the parent alone is not the field. Stops short of
+ * `body` — a control with no text control above it owns only its parent.
+ */
+function fieldOf(root: HTMLElement): HTMLElement {
+  for (let el = root.parentElement; el && el !== document.body; el = el.parentElement) {
+    if (el.querySelector(TEXT_CONTROL)) return el;
+  }
+  return root.parentElement ?? root;
+}
+
+/** Whether `node` is in the field or in the open menu (portalled to body by Radix). */
+function inField(root: HTMLElement | null, menu: HTMLElement | null, node: EventTarget | null) {
+  if (!root || !(node instanceof Node)) return false;
+  if (fieldOf(root).contains(node)) return true;
+  const panel = menu?.closest('[data-radix-popper-content-wrapper]') ?? menu;
+  return !!panel && panel.contains(node);
+}
+
 export function AiEnhance({
   value,
   onApply,
@@ -144,20 +192,93 @@ export function AiEnhance({
   const { showMessage } = useSnackBarStore();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** Focus is in the field (text, button, undo chip) or in the open menu — see `inField`. */
+  const [focused, setFocused] = useState(false);
   /** Что стояло в поле до замены — пока жив, рисуется `undo ↶`. */
   const [prev, setPrev] = useState<{ before: string; after: string } | null>(null);
   const abort = useRef<AbortController | null>(null);
   const undoTimer = useRef<number | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLUListElement>(null);
+  /** The open menu was dismissed from outside the field (a click elsewhere, Tab away). */
+  const leftOutside = useRef(false);
+  /** The menu closed because a mode was chosen — focus goes back to the text, not the button. */
+  const pickedMode = useRef(false);
   // What the field holds and whether the control is open as of the LAST render — the answer lands
   // renders after the click, and is checked against these, not against the click's own closure.
   const latest = useRef({ value: value ?? '', disabled: !!disabled });
   useLayoutEffect(() => {
     latest.current = { value: value ?? '', disabled: !!disabled };
   });
-  // A menu left open when the parent locks the control closes with the lock.
+
+  const empty = !(value ?? '').trim();
+  // THE VISIBILITY RULE (O-30): in a focused, non-empty, open field — or while a request is out.
+  const shown = !disabled && !empty && (focused || open || busy);
+
+  // A menu left open when the parent locks the control, or when the text is emptied under it,
+  // closes with it — a menu with no button to hang from would float.
   useEffect(() => {
-    if (disabled) setOpen(false);
-  }, [disabled]);
+    if (disabled || empty) setOpen(false);
+  }, [disabled, empty]);
+
+  // Focus is read at the document: the menu lives outside the wrapper, and a field that is
+  // already focused when this mounts (a card switch re-keys the control) sends no event.
+  useEffect(() => {
+    const here = (n: EventTarget | null) => inField(rootRef.current, menuRef.current, n);
+    const onIn = (e: FocusEvent) => setFocused(here(e.target));
+    // A focused element that LEAVES THE DOM (a menu row when the menu closes, the undo chip when
+    // pressed) fires a focusout with no relatedTarget in Chromium. That is not the operator leaving
+    // the field, and Radix hands focus back a task later — dropping `focused` here would unmount
+    // the trigger under it. The blur is judged a microtask later, when a removed node has no
+    // document any more; whoever removed the node puts focus back or re-reads it.
+    const onOut = (e: FocusEvent) => {
+      const { target, relatedTarget } = e;
+      queueMicrotask(() => {
+        if (target instanceof Node && !target.isConnected) return;
+        setFocused(here(relatedTarget));
+      });
+    };
+    document.addEventListener('focusin', onIn);
+    document.addEventListener('focusout', onOut);
+    setFocused(here(document.activeElement));
+    return () => {
+      document.removeEventListener('focusin', onIn);
+      document.removeEventListener('focusout', onOut);
+    };
+  }, []);
+
+  /** The menu closed: put focus where the operator expects it, then re-read where it really is. */
+  const onCloseAutoFocus = (e: Event) => {
+    const outside = leftOutside.current;
+    const chosen = pickedMode.current;
+    leftOutside.current = false;
+    pickedMode.current = false;
+    if (chosen || !outside) {
+      // Radix would hand focus back to the trigger. A mode chosen means the operator is done with
+      // the button: the text takes the focus (the trigger is busy anyway, and focus would fall to
+      // body). Escape and a second press keep the button convention — back on the trigger. A
+      // locked field is left alone.
+      e.preventDefault();
+      const root = rootRef.current;
+      const trigger = chosen ? null : root?.querySelector<HTMLButtonElement>(TRIGGER);
+      const next =
+        trigger && !trigger.disabled
+          ? trigger
+          : latest.current.disabled || !root
+            ? null
+            : fieldOf(root).querySelector<HTMLElement>(TEXT_CONTROL);
+      next?.focus();
+    }
+    // The focused menu row left the DOM and its blur was set aside — re-read where focus really is.
+    queueMicrotask(() => setFocused(inField(rootRef.current, null, document.activeElement)));
+  };
+
+  /** Focus held by a part of this control that is about to go (the undo chip) moves to the text. */
+  const homeFocus = () => {
+    const root = rootRef.current;
+    if (!root || !root.contains(document.activeElement) || latest.current.disabled) return;
+    fieldOf(root).querySelector<HTMLElement>(TEXT_CONTROL)?.focus();
+  };
 
   // Ручная правка после замены снимает откат: возвращать «что было» поверх чужой правки нельзя.
   useEffect(() => {
@@ -172,9 +293,8 @@ export function AiEnhance({
     [],
   );
 
-  const empty = !(value ?? '').trim();
-
   const run = async (mode: EnhanceMode) => {
+    pickedMode.current = true;
     setOpen(false);
     const before = value ?? '';
     if (!before.trim() || busy || disabled) return;
@@ -183,7 +303,10 @@ export function AiEnhance({
     abort.current = ctrl;
     setBusy(true);
     try {
-      const after = await enhanceText({ text: before, mode, field, context, maxRunes }, ctrl.signal);
+      const after = await enhanceText(
+        { text: before, mode, field, context, maxRunes },
+        ctrl.signal,
+      );
       if (ctrl.signal.aborted) return;
       // THE ANSWER IS FOR THE TEXT THAT WAS SENT, INTO A FIELD THAT IS STILL OPEN. A field locked
       // meanwhile (the card saving what it holds) or edited meanwhile gets nothing: applying would
@@ -204,7 +327,10 @@ export function AiEnhance({
       onApply(next);
       setPrev({ before, after: next });
       if (undoTimer.current) window.clearTimeout(undoTimer.current);
-      undoTimer.current = window.setTimeout(() => setPrev(null), UNDO_WINDOW_MS);
+      undoTimer.current = window.setTimeout(() => {
+        homeFocus();
+        setPrev(null);
+      }, UNDO_WINDOW_MS);
     } catch (e) {
       if (ctrl.signal.aborted) return;
       const r = e instanceof EnhanceRefusal ? e.reason : 'OTHER';
@@ -223,53 +349,83 @@ export function AiEnhance({
 
   const undo = () => {
     if (!prev || disabled) return;
+    homeFocus();
     onApply(prev.before);
     setPrev(null);
     if (undoTimer.current) window.clearTimeout(undoTimer.current);
   };
 
   return (
-    <div className={cn('absolute bottom-1.5 right-1.5 flex items-center gap-1.5', className)} data-ai-enhance>
+    <div
+      ref={rootRef}
+      className={cn('absolute bottom-1.5 right-1.5 flex items-center gap-1.5', className)}
+      data-ai-enhance
+    >
       {prev && (
-        <Chip onClick={undo} disabled={disabled} title='put the previous text back'>
+        <Chip
+          onClick={undo}
+          disabled={disabled}
+          title='put the previous text back'
+          // Takes no focus on a press: focus arriving here would bring `ai ✦` in beside it and
+          // slide the chip out from under the pointer before the click lands.
+          onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+        >
           undo ↶
         </Chip>
       )}
-      <GenericPopover
-        open={open}
-        onOpenChange={setOpen}
-        noTail
-        contentProps={{ align: 'end', side: 'top' }}
-        triggerProps={{ 'aria-label': 'ai enhance', disabled: disabled || busy || empty }}
-        openElement={
-          <Button
-            asChild
-            variant='secondary'
-            size='xs'
-            disabled={disabled || busy || empty}
-            title={empty ? 'write something first' : busy ? 'working…' : 'ai enhance: improve, expand or shorten'}
-            className='bg-bgColor'
-          >
-            <span>{busy ? 'ai …' : 'ai ✦'}</span>
-          </Button>
-        }
-      >
-        <ul className='flex flex-col' role='menu' aria-label='ai enhance'>
-          {ENHANCE_MODES.map((m) => (
-            <li key={m.mode} role='none'>
-              <button
-                type='button'
-                role='menuitem'
-                onClick={() => run(m.mode)}
-                className='flex w-full items-baseline gap-2 px-2 py-1.5 text-left hover:bg-bgSecondary'
-              >
-                <span className='text-micro uppercase tracking-label text-textColor'>{m.label}</span>
-                <span className='text-micro text-labelColor'>· {m.hint}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </GenericPopover>
+      {shown && (
+        <GenericPopover
+          open={open}
+          onOpenChange={setOpen}
+          noTail
+          contentProps={{
+            align: 'end',
+            side: 'top',
+            onInteractOutside: (e) => {
+              leftOutside.current = !inField(rootRef.current, menuRef.current, e.target);
+            },
+            onCloseAutoFocus,
+          }}
+          triggerProps={{
+            'aria-label': 'ai enhance',
+            // Never rendered locked or empty; only a request in flight holds it.
+            disabled: busy,
+            // A press must not take the caret out of the text: the button is a detour, not a place.
+            onMouseDown: (e) => e.preventDefault(),
+          }}
+          openElement={
+            <Button
+              asChild
+              variant='secondary'
+              size='xs'
+              disabled={busy}
+              title={busy ? 'working…' : 'ai enhance: improve, expand or shorten'}
+              // Appears with a short fade (the button is absolute: nothing moves); leaves at once.
+              className='bg-bgColor transition-opacity duration-100 starting:opacity-0'
+            >
+              <span>{busy ? 'ai …' : 'ai ✦'}</span>
+            </Button>
+          }
+        >
+          <ul ref={menuRef} className='flex flex-col' role='menu' aria-label='ai enhance'>
+            {ENHANCE_MODES.map((m) => (
+              <li key={m.mode} role='none'>
+                <button
+                  type='button'
+                  role='menuitem'
+                  onClick={() => run(m.mode)}
+                  className='flex w-full items-baseline gap-2 px-2 py-1.5 text-left hover:bg-bgSecondary'
+                >
+                  <span className='text-micro uppercase tracking-label text-textColor'>
+                    {m.label}
+                  </span>
+                  <span className='text-micro text-labelColor'>· {m.hint}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </GenericPopover>
+      )}
     </div>
   );
 }
