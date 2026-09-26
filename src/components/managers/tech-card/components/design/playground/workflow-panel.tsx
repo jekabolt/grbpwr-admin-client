@@ -4,6 +4,7 @@ import Text from 'ui/components/text';
 
 import { GenerateRow, LockBar, RunRefusal } from '../render/generate-row';
 import { useStartDesignRun } from '../render/use-design-run';
+import { useFocusReturn } from './focus';
 import {
   FoldSection,
   FormatGrid,
@@ -14,6 +15,7 @@ import {
   Slider,
   ToggleRow,
 } from './fields';
+import { playgroundRunScope } from './address';
 import { rememberRecentText, recentTextKey } from './recent';
 import { colourOf, imagesOf, promptKeys, textOf } from './registry/common';
 import type { Draft, FieldDef, SectionDef, WorkflowDef, WorkflowRun } from './registry/types';
@@ -33,6 +35,11 @@ import { WhatModelGetsPlaygroundModal } from './what-model-gets';
  *
  * ⚠ «RECENTLY USED» IS WRITTEN ONLY AFTER THE DOOR ACCEPTED THE RUN. A text the server refused is
  * not a text anything was generated with (C-02 handoff).
+ *
+ * ⚠ THIS FORM IS UNMOUNTED WHILE ITS RUN CAN STILL BE STARTING (|→, Back, the rail, another
+ * workflow), so nothing about the press may live only here: the idempotency key and «starting…»
+ * are the scoped hook's (`playgroundRunScope`, G-01), and the «Recently used» write rides with the
+ * press into the mutation.
  */
 export function WorkflowPanel({
   def,
@@ -51,8 +58,11 @@ export function WorkflowPanel({
   onDraft: (fn: (draft: Draft) => Draft) => void;
   disabled?: boolean;
 }): JSX.Element {
-  const run = useStartDesignRun(techCardId);
+  const run = useStartDesignRun(techCardId, { scope: playgroundRunScope(def.key) });
   const [inspecting, setInspecting] = useState(false);
+  /* Radix restores focus to a `Dialog.Trigger`; this dialog is opened by state and has none, so the
+     opener is remembered and handed focus back on close (G-01, Codex 5). */
+  const inspectFocus = useFocusReturn();
 
   /* THE CARD CHANGED — the open inventory is about the other card (invariant 12), closed in the
      body of the render like every other screen of the band. */
@@ -109,13 +119,17 @@ export function WorkflowPanel({
           pending={run.isPending}
           disabled={disabled}
           onGenerate={generate}
-          onInspect={() => setInspecting(true)}
+          onInspect={() => {
+            inspectFocus.remember();
+            setInspecting(true);
+          }}
         />
       </div>
 
       <WhatModelGetsPlaygroundModal
         open={inspecting}
         onOpenChange={setInspecting}
+        onCloseAutoFocus={inspectFocus.onCloseAutoFocus}
         inventory={inspecting ? flow.inventory(draft, request, ctx) : null}
       />
     </>

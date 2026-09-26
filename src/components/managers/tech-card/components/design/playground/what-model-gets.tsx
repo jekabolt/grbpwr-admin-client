@@ -18,10 +18,13 @@ import type { Inventory } from './registry/types';
 export function WhatModelGetsPlaygroundModal({
   open,
   onOpenChange,
+  onCloseAutoFocus,
   inventory,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Where focus goes on close — the door that opened it (`useFocusReturn`). */
+  onCloseAutoFocus?: (event: Event) => void;
   /** `null` while closed — the inventory is computed only when someone looks. */
   inventory: Inventory | null;
 }): JSX.Element {
@@ -29,6 +32,7 @@ export function WhatModelGetsPlaygroundModal({
     <WmgShell
       open={open && !!inventory}
       onOpenChange={onOpenChange}
+      onCloseAutoFocus={onCloseAutoFocus}
       kindWord={inventory?.kindWord ?? 'playground'}
       intro={inventory?.intro ?? ''}
     >

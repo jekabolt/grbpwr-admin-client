@@ -18,10 +18,16 @@ import { WorkflowGlyph } from './workflow-glyph';
 export function WorkflowCard({
   def,
   onBack,
+  backDisabled,
 }: {
   def: WorkflowDef;
   onBack: () => void;
+  /** A run of this workflow is starting: the way back waits for the answer (see `studio.tsx`). */
+  backDisabled?: boolean;
 }): JSX.Element {
+  const backWords = backDisabled
+    ? 'back to all workflows once the run is booked'
+    : 'back to all workflows';
   return (
     <div className='flex flex-col gap-2' data-workflow-card={def.key}>
       <Text size='micro' variant='label' component='span' tracking='label' className='uppercase'>
@@ -32,7 +38,14 @@ export function WorkflowCard({
           <WorkflowGlyph workflow={def.key} size={40} />
         </span>
         <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
-          <Text size='micro' component='span' className='font-bold uppercase'>
+          {/* Focus lands here when the workflow opens (`studio.tsx`): the title names the screen. */}
+          <Text
+            size='micro'
+            component='span'
+            tabIndex={-1}
+            data-workflow-heading=''
+            className='font-bold uppercase outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+          >
             {def.title}
           </Text>
           <Text size='micro' variant='label' component='span' className='normal-case'>
@@ -42,9 +55,10 @@ export function WorkflowCard({
         <button
           type='button'
           onClick={onBack}
-          aria-label='back to all workflows'
-          title='back to all workflows'
-          className='flex h-8 w-8 shrink-0 items-center justify-center border border-textInactiveColor bg-bgColor text-textColor hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+          disabled={backDisabled}
+          aria-label={backWords}
+          title={backWords}
+          className='flex h-8 w-8 shrink-0 items-center justify-center border border-textInactiveColor bg-bgColor text-textColor hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed disabled:text-textInactiveColor disabled:hover:bg-bgColor disabled:hover:text-textInactiveColor'
           data-workflow-back=''
         >
           <svg

@@ -16,6 +16,7 @@ import { cardPictureGroups, countTiles } from '../../core/card-pictures-model';
 import { Counter, EmptyState, GROUP_GAP, GROUP_SEAM } from '../../core/organs';
 import { PictureTile } from '../../picture-tile';
 import { mediaThumb } from '../../render/model';
+import { useFocusReturn } from '../focus';
 
 /**
  * ═══ REUSE — ONE DOOR TO EVERY PICTURE THE ADMIN ALREADY HOLDS (C-02) ═══════════════════════════
@@ -170,6 +171,7 @@ function GalleryPicker({
   room,
   taken,
   onPick,
+  onCloseAutoFocus,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -182,6 +184,7 @@ function GalleryPicker({
   room: number;
   taken: ReadonlySet<number>;
   onPick: (media: common_MediaFull[]) => void;
+  onCloseAutoFocus?: (event: Event) => void;
 }): JSX.Element {
   const [picked, setPicked] = useState<number[]>([]);
   // A pick abandoned by closing the modal is not waiting the next time the door opens.
@@ -212,6 +215,7 @@ function GalleryPicker({
     <ConfirmationModal
       open={open}
       onOpenChange={onOpenChange}
+      onCloseAutoFocus={onCloseAutoFocus}
       onConfirm={commit}
       hideActions
       width='lg'
@@ -396,6 +400,7 @@ function GallerySource({
   taken,
   onPick,
   onClose,
+  onCloseAutoFocus,
 }: {
   source: Exclude<ReuseSource, 'card'>;
   band?: GetDesignBandResponse;
@@ -404,6 +409,7 @@ function GallerySource({
   taken: ReadonlySet<number>;
   onPick: (media: common_MediaFull[]) => void;
   onClose: () => void;
+  onCloseAutoFocus?: (event: Event) => void;
 }): JSX.Element {
   const models = useModelGroups(source === 'models');
   const fittings = useFittingGroups(source === 'fittings' ? techCardId : undefined);
@@ -441,6 +447,7 @@ function GallerySource({
       room={room}
       taken={taken}
       onPick={onPick}
+      onCloseAutoFocus={onCloseAutoFocus}
     />
   );
 }
@@ -457,6 +464,10 @@ export function ReuseDoor({
 }: ReuseDoorProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const [openSource, setOpenSource] = useState<ReuseSource | null>(null);
+  /* The pickers are opened by state (no `Dialog.Trigger`), and from the menu the pressed row is gone
+     by the time the picker opens: focus is handed back to the door itself on close (G-01). */
+  const door = useRef<HTMLSpanElement | null>(null);
+  const focus = useFocusReturn();
   const takenSet = useMemo(() => new Set(taken.filter((id) => id > 0)), [taken]);
 
   // A source that cannot work here is not offered at all (no band → no card, no fabrics; no card id
@@ -469,6 +480,7 @@ export function ReuseDoor({
   const locked = disabled || room <= 0 || offered.length === 0;
 
   const choose = (s: ReuseSource) => {
+    focus.remember(door.current?.querySelector<HTMLElement>('button'));
     setMenuOpen(false);
     setOpenSource(s);
   };
@@ -482,7 +494,7 @@ export function ReuseDoor({
       : 'pick a picture the admin already holds';
 
   return (
-    <>
+    <span ref={door} className='contents'>
       {offered.length === 1 ? (
         <Button
           variant='secondary'
@@ -536,6 +548,7 @@ export function ReuseDoor({
           room={room}
           onPick={onPick}
           title='reuse a picture of this card'
+          onCloseAutoFocus={focus.onCloseAutoFocus}
         />
       )}
       {openSource && openSource !== 'card' && (
@@ -547,8 +560,9 @@ export function ReuseDoor({
           taken={takenSet}
           onPick={onPick}
           onClose={close}
+          onCloseAutoFocus={focus.onCloseAutoFocus}
         />
       )}
-    </>
+    </span>
   );
 }

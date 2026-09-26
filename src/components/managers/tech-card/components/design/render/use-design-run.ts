@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useIsMutating, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import type { common_DesignRunParams } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -6,6 +6,7 @@ import { useCallback, useRef, useState } from 'react';
 
 import { isAborted, refusalFromError, type RunRefusal } from '../generation/refusal';
 import { designKeys, newClientRequestId } from '../use-design-band';
+import { ledgerRefused, ledgerSend, ledgerSettle } from './run-ledger';
 
 /**
  * STARTING A RUN — the one write the two generative screens make.
@@ -62,8 +63,17 @@ export type StartRunState = {
    * `onAccepted` — called once the door ACCEPTED this press (the run is booked), never on a refusal.
    * PLAYGROUND remembers the prompt's words in «Recently used» there and only there (C-03): a text
    * the server refused is not a text a run was bought with.
+   *
+   * ⚠ IT TRAVELS WITH THE PRESS AND IS CALLED BY THE MUTATION ITSELF, not handed to `mutate` as a
+   * per-call option: react-query drops per-call callbacks once the component that called `mutate`
+   * has unmounted, and a playground form is unmounted by |→, Back or the rail while «starting…»
+   * (G-01, Fable m-7). The run was booked all the same, so the words are remembered all the same.
    */
   start: (input: StartRunInput, opts?: { onAccepted?: () => void }) => void;
+  /**
+   * A press is out. With a `scope` this reads the mutation cache, not this component: a form that
+   * was left and reopened while its run was starting is still «starting…».
+   */
   isPending: boolean;
   /**
    * THE REFUSAL OF THE LAST PRESS, VERBATIM, AND IT SURVIVES THE TOAST.
@@ -102,7 +112,20 @@ export type StartRunState = {
  * intent. A success clears the ledger, so the next press is a new run rather than an idempotent
  * echo of the last one.
  */
-export function useStartDesignRun(techCardId?: number): StartRunState {
+export function useStartDesignRun(
+  techCardId?: number,
+  opts?: {
+    /**
+     * THE FORM THIS PRESS BELONGS TO (`playground:change_color`). Given, the idempotency key lives in
+     * the shared ledger (`./run-ledger.ts`) keyed by `{card, scope, fingerprint}` instead of in this
+     * component, and «pending» is read from the mutation cache — both outlive an unmounted form
+     * (G-01, Codex 1). Absent, the hook behaves exactly as it always has: the other generative
+     * screens (fabric render, 3D, pattern) stay mounted for as long as their step is open.
+     */
+    scope?: string;
+  },
+): StartRunState {
+  const scope = opts?.scope ?? '';
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
   const ledger = useRef<{ fingerprint: string; id: string } | null>(null);
@@ -133,14 +156,20 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
     if (refusal) setRefusal(null);
   }
 
+  const scopedPending = useIsMutating({
+    mutationKey: startRunKey(techCardId ?? 0, scope),
+    predicate: () => !!scope,
+  });
+
   const mutation = useMutation({
+    mutationKey: scope ? startRunKey(techCardId ?? 0, scope) : undefined,
     /**
      * ⚠ THE CARD TRAVELS WITH THE REQUEST, IT IS NOT READ FROM THE CLOSURE WHEN THE ANSWER COMES.
      * react-query calls the callbacks with the LATEST options object, so a card switch while the
      * call is in flight would have `onSuccess` invalidating B's band for a run started on A —
      * B repainting for work it does not hold, A never repainting for work it does.
      */
-    mutationFn: (input: StartRunInput & { clientRequestId: string; techCardId: number }) =>
+    mutationFn: (input: SentRun) =>
       adminService.StartDesignRun({
         techCardId: input.techCardId,
         clientRequestId: input.clientRequestId,
@@ -151,6 +180,8 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
       }),
     onSuccess: (_answer: unknown, input) => {
       qc.invalidateQueries({ queryKey: designKeys.band(input.techCardId) });
+      if (input.scope) ledgerSettle(input.techCardId, input.scope, input.fingerprint);
+      input.onAccepted?.();
       // The screen's own state is cleared only where the answer is ABOUT the card on screen; the
       // switch above has already cleared it otherwise, and writing it again would be a statement
       // about B made by A.
@@ -163,6 +194,7 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
       showMessage('run started — the pictures land in the history when it finishes', 'success');
     },
     onError: (error: unknown, input) => {
+      if (input.scope) ledgerRefused(input.techCardId, input.scope, input.fingerprint);
       const message = (error as Error)?.message?.trim() || 'the run did not start';
       if (isAborted(error)) {
         showMessage(`someone changed this first — ${message}`, 'error');
@@ -196,18 +228,60 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
         input.params,
         input.rerunOfRunId ?? 0,
       ]);
-      if (ledger.current?.fingerprint !== fingerprint) {
-        ledger.current = { fingerprint, id: newClientRequestId() };
+      let clientRequestId: string;
+      if (scope) {
+        clientRequestId = ledgerSend(techCardId, scope, fingerprint);
+      } else {
+        if (ledger.current?.fingerprint !== fingerprint) {
+          ledger.current = { fingerprint, id: newClientRequestId() };
+        }
+        clientRequestId = ledger.current.id;
       }
-      mutation.mutate(
-        { ...input, techCardId, clientRequestId: ledger.current.id },
-        opts?.onAccepted ? { onSuccess: () => opts.onAccepted?.() } : undefined,
-      );
+      mutation.mutate({
+        ...input,
+        techCardId,
+        clientRequestId,
+        scope,
+        fingerprint,
+        onAccepted: opts?.onAccepted,
+      });
     },
-    [techCardId, mutation],
+    [techCardId, mutation, scope],
   );
 
   const dismissRefusal = useCallback(() => setRefusal(null), []);
 
-  return { start, isPending: mutation.isPending, refusal, dismissRefusal };
+  return {
+    start,
+    isPending: mutation.isPending || (!!scope && scopedPending > 0),
+    refusal,
+    dismissRefusal,
+  };
+}
+
+/** What one press carries into the mutation — everything its answer needs, nothing from a closure. */
+type SentRun = StartRunInput & {
+  clientRequestId: string;
+  techCardId: number;
+  /** `''` = the unscoped hook (its ledger is a ref of the component). */
+  scope: string;
+  fingerprint: string;
+  onAccepted?: () => void;
+};
+
+/** The mutation key of a scoped form's presses — the cache is asked «is one of them out?». */
+export function startRunKey(techCardId: number, scope: string) {
+  return ['design', 'start-run', techCardId, scope] as const;
+}
+
+/**
+ * «IS A RUN OF THIS FORM STARTING?» — for a door that stands OUTSIDE the form (the playground's |→).
+ * Reads the same mutation cache the scoped hook writes.
+ */
+export function useStartRunPending(techCardId: number, scope: string): boolean {
+  const n = useIsMutating({
+    mutationKey: startRunKey(techCardId, scope),
+    predicate: () => !!scope && techCardId > 0,
+  });
+  return n > 0;
 }
