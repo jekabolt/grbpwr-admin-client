@@ -479,6 +479,13 @@ function SlotRow({
   const readableFiber = formatCompositionCell(rawFiber);
 
   /**
+   * У НИТКИ НЕТ СОСТАВА ИЗДЕЛИЯ (D-44; владелец, O-47: «THREAD не должен добалятся в композишен в
+   * MATERIAL SLOTS»). Нитка сшивает вещь, а не составляет её, и на ярлык не идёт: у её строки здесь
+   * прочерк — ни двери, ни текста. Значение в форме не трогается, снимок артикула лежит там инертно.
+   */
+  const noFibre = family === 'thread';
+
+  /**
    * ОЦЕНКА ЧИТАЕТСЯ БЕЗ ЕДИНОГО ДЕФОЛТА. `estUsage` у строки без оценки — `undefined`, и оно
    * ОБЯЗАНО таким остаться до самого провода: `?? ''` здесь — местная переменная для рендера, а не
    * запись в форму. Стоит подставить пустоту в форму — и сохранение начнёт говорить «очисти» за
@@ -624,7 +631,9 @@ function SlotRow({
         {!rollGoods && !kindEligible && <EmptyCell />}
       </td>
       <td data-align='left' className='min-w-[180px] align-top' data-b16-fiber-cell={index}>
-        {readOnly || linked ? (
+        {noFibre ? (
+          <EmptyCell />
+        ) : readOnly || linked ? (
           <Text
             component='span'
             data-b16-fiber={index}
@@ -635,7 +644,7 @@ function SlotRow({
         ) : (
           <FibreField index={index} raw={rawFiber} readable={readableFiber} />
         )}
-        {linked && !readOnly && (
+        {linked && !readOnly && !noFibre && (
           /* ПРИЧИНА ОТКАЗА СТОИТ РЯДОМ С ОТКАЗОМ, А НЕ В ДОКУМЕНТАЦИИ. Ячейка, которая просто не
              принимает набор, читается как поломка; она обязана назвать, ЧЕЙ это состав и где его
              меняют. Дверь туда уже стоит в этой же строке — `›`. */

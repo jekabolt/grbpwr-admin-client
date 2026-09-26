@@ -1,3 +1,4 @@
+import type { common_TechCardBomSection } from 'api/proto-http/admin';
 import { composition as dict } from 'constants/garment-composition';
 
 // reverse map material CODE → display name across every garment-composition category
@@ -54,7 +55,8 @@ function formatItems(items: Item[]): string {
     .join(', ');
 }
 
-// section → care-label group name; the order is the preferred print order too
+// section → care-label group name; the order is the preferred print order too. An unknown section
+// prints as Material. Thread has no entry: its lines never reach the label (`carriesComposition`).
 const SECTION_LABELS: Record<string, string> = {
   TECH_CARD_BOM_SECTION_FABRIC: 'Shell',
   TECH_CARD_BOM_SECTION_LINING: 'Lining',
@@ -63,12 +65,18 @@ const SECTION_LABELS: Record<string, string> = {
   TECH_CARD_BOM_SECTION_TRIM: 'Trim',
   TECH_CARD_BOM_SECTION_DECORATION: 'Decoration',
   TECH_CARD_BOM_SECTION_HARDWARE: 'Hardware',
-  TECH_CARD_BOM_SECTION_THREAD: 'Thread',
   TECH_CARD_BOM_SECTION_LABEL: 'Label',
   TECH_CARD_BOM_SECTION_PACKAGING: 'Packaging',
   TECH_CARD_BOM_SECTION_OTHER: 'Other',
 };
 const SECTION_ORDER = Object.keys(SECTION_LABELS);
+
+// Thread carries no fibre composition of the garment (D-44, O-47): it sews the garment together,
+// it is not what the garment is made of. A thread line never prints on the care label and never
+// counts as "composition is set", whatever string it holds — a linked thread article keeps its
+// catalog snapshot on the line, and that snapshot stays inert here.
+const THREAD_SECTION: common_TechCardBomSection = 'TECH_CARD_BOM_SECTION_THREAD';
+const carriesComposition = (b: { section?: string }): boolean => b.section !== THREAD_SECTION;
 
 // The care line is NOT built here. `careInstructions` is a comma-joined ISO-3758 code string
 // ("MW30,DNB,DNTD"), and the wording for each code — plus its print order — is dictionary data
@@ -76,15 +84,18 @@ const SECTION_ORDER = Object.keys(SECTION_LABELS);
 // `useCareVocabulary().prose(value)`; that is the same wording the storefront renders, so the
 // preview on the header tab and the printed tag can never word the same symbols differently.
 
-// True if at least one article carries a non-blank composition string (used to tell apart
-// "nothing filled" from "filled but not parseable").
-export function hasAnyComposition(bomItems: Array<{ composition?: string }>): boolean {
-  return (bomItems ?? []).some((b) => !!b.composition?.trim());
+// True if at least one article other than thread carries a non-blank composition string (used to
+// tell apart "nothing filled" from "filled but not parseable").
+export function hasAnyComposition(
+  bomItems: Array<{ section?: string; composition?: string }>,
+): boolean {
+  return (bomItems ?? []).some((b) => carriesComposition(b) && !!b.composition?.trim());
 }
 
 // Build a care-label composition block from the BOM catalog: one line per section that has a
 // parseable composition (Shell / Lining / Filling / …), using that section's primary article,
-// plus an optional "Made in …". Returns '' when nothing parseable is found.
+// plus an optional "Made in …". Thread lines are skipped (`carriesComposition`). Returns '' when
+// nothing parseable is found.
 export function generateCareLabel(
   bomItems: Array<{ section?: string; composition?: string }>,
   originCountry?: string,
@@ -92,6 +103,7 @@ export function generateCareLabel(
   // first parseable composition per section
   const bySection = new Map<string, string>();
   for (const b of bomItems ?? []) {
+    if (!carriesComposition(b)) continue;
     const section = b.section || 'TECH_CARD_BOM_SECTION_OTHER';
     if (bySection.has(section)) continue;
     const formatted = formatItems(parseComposition(b.composition));

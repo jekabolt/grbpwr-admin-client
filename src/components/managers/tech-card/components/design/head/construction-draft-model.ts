@@ -1,3 +1,4 @@
+import type { common_TechCardBomSection } from 'api/proto-http/admin';
 import { techCardBomSectionOptions } from 'constants/filter';
 import { z } from 'zod';
 
@@ -319,6 +320,13 @@ const DRAFT_SECTIONS: ReadonlySet<string> = new Set(techCardBomSectionOptions.ma
 export function isDraftSection(section?: string | null): boolean {
   return DRAFT_SECTIONS.has(normText(section));
 }
+
+/**
+ * У НИТКИ НЕТ СОСТАВА ИЗДЕЛИЯ (D-44; владелец, O-47: «THREAD не должен добалятся в композишен в
+ * MATERIAL SLOTS»). Нитка сшивает вещь, а не составляет её: состав, названный моделью нитке, не
+ * едет ни в подпись строки, ни в запись. Токен сверен с генерённым енумом — второго написания нет.
+ */
+const THREAD_SECTION: common_TechCardBomSection = 'TECH_CARD_BOM_SECTION_THREAD';
 
 /**
  * ПРЕДЛОЖЕННАЯ ДЕТАЛЬ ФЛЭТ-ВЕРСТАКА (r3 п.6) — ИМЯ БУДУЩЕГО СЛОТА, А НЕ ЗНАЧЕНИЕ ПОЛЯ.
@@ -645,7 +653,7 @@ export function diffProposal(
     const section = isDraftSection(b.section) ? normText(b.section) : '';
     const purpose = normText(b.purpose);
     const kind = normText(b.kind);
-    const composition = normText(b.composition);
+    const composition = section === THREAD_SECTION ? '' : normText(b.composition);
     const colour = normText(b.colour);
     const pantone = normText(b.pantone);
     const materialId = Number(b.materialId ?? 0) || 0;
