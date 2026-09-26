@@ -47,6 +47,19 @@ export function foldToken(s?: string | null): string {
 }
 
 /**
+ * ЛИЧНОСТЬ ИМЕНИ ДЕТАЛИ — `id` предложения, его дедуп и узнавание слота на верстаке (O-33, ревью
+ * Codex). `foldToken` держит только латиницу: «манжета» и «袖口» сворачивались в пустоту, и законная
+ * деталь пропадала молча — ни чипа, ни записи, ни отказа. Здесь буквы и цифры ЛЮБОГО алфавита (как
+ * у серверного `designFoldToken`), после NFKC и нижнего регистра, — для латиницы это та же свёртка,
+ * что у `foldToken`. Не «латиница, если она есть»: «манжета 2» и «рукав 2» свернулись бы обе в «2».
+ * Имя из одних знаков держится своим нормализованным текстом; пропускается только пустое.
+ */
+export function detailIdentity(s?: string | null): string {
+  const t = normText(s).normalize('NFKC').toLowerCase();
+  return t.replace(/[^\p{L}\p{N}]+/gu, '') || t;
+}
+
+/**
  * Посадка складывается на СЛОВАРЬ КАРТОЧКИ, и не сложившаяся не предлагается вовсе. `fit` — это
  * факт стиля (`UpdateStyle`), общий для всех его карточек; строка, которой нет в словаре, не
  * выбираема человеком в селекте рядом, и предложить её значило бы предложить состояние, из
@@ -192,8 +205,12 @@ export const constructionDraftSchema = z.object({
    * и модель отвечает на него отдельным списком (правило 12 промпта), чаще всего — «ни одной».
    * Разбор — в `diffProposal` (поле `details`), довод — у `DetailSuggestion`.
    *
-   * `.nullish()` по тому же доводу, что у соседей, и ещё по одному: прогон, отвеченный ДО O-33,
-   * пересобирается на повторе без этого ключа — и это тоже «ни одной», а не ошибка разбора.
+   * ⚠ ПРИСУТСТВИЕ КЛЮЧА НЕСУЩЕЕ, И ЕГО ХРАНИТ САМ МАССИВ (ревью O-33). `[]` — ответ «ни одной
+   * рисовки не нужно», и он СОДЕРЖАТЕЛЕН (`parseConstructionDraft`); `undefined`/`null` — ключа не
+   * было: бинарь до O-33 его не знает. Схема не подставляет `[]` вместо отсутствия — ни одного
+   * `.default()`, как и везде в этом файле. Новый сервер маршалит с `EmitUnpopulated`, поэтому на
+   * его проводе ключ есть всегда — и у прогона, отвеченного до O-33, тоже пустым списком; для минта
+   * это одно и то же: ни одного слота.
    */
   flatDetails: z.array(z.object({ name: wireString, note: wireString })).nullish(),
 });
@@ -208,6 +225,12 @@ export type ConstructionDraft = z.infer<typeof constructionDraftSchema>;
  * ⚠ ОБЪЕКТ БЕЗ ЕДИНОГО СОДЕРЖАТЕЛЬНОГО КЛЮЧА — ТОЖЕ `null`. Сервер отказывает такому ответу сам
  * (`invalid_output`), но на пути повтора клиент получает пересобранный объект, и «прошло валидацию»
  * там не значит «есть что предложить».
+ *
+ * ⚠ ПРИСУТСТВУЮЩИЙ `flatDetails` СОДЕРЖАТЕЛЕН И ПУСТЫМ (O-33, ревью Codex). «Ни одной детали не
+ * нужна своя рисовка» — оплаченный ответ на заданный вопрос, а не молчание: `{flatDetails: []}`
+ * без всего остального — черновик, и орган рисует его пустое состояние, а не «nothing to
+ * propose». Отсутствие ключа (бинарь до O-33) ответом не считается. Следствие `EmitUnpopulated`:
+ * объект нового сервера несёт этот ключ всегда, и `null` здесь остаётся ответу без объекта.
  */
 export function parseConstructionDraft(input: unknown): ConstructionDraft | null {
   if (!input || typeof input !== 'object') return null;
@@ -224,9 +247,9 @@ export function parseConstructionDraft(input: unknown): ConstructionDraft | null
     (d.bom?.length ?? 0) > 0 ||
     (d.missing?.length ?? 0) > 0 ||
     (d.colourways?.length ?? 0) > 0 ||
-    // O-33: ответ из одних деталей для рисунка — законный ответ (серверный список value-ключей,
-    // `designConstructionValueKeys`, держит `flat_details` девятым): ему есть куда лечь.
-    (d.flatDetails?.length ?? 0) > 0;
+    // O-33: список деталей для рисунка — ответ, и ПУСТОЙ тоже (довод выше); серверный список
+    // value-ключей (`designConstructionValueKeys`) держит `flat_details` девятым.
+    Array.isArray(d.flatDetails);
   return any ? d : null;
 }
 
@@ -310,9 +333,11 @@ export function isDraftSection(section?: string | null): boolean {
  * словами, его дом — CONSTRUCTION; нужна ли детали СВОЯ рисовка — другой вопрос, и модель отвечает
  * на него отдельным списком, чаще всего — «ни одной». Поэтому:
  *   · слот — на каждую запись `flat_details`: имя — `name`, довод — `note`;
- *   · ПУСТОЙ СПИСОК — ЭТО ОТВЕТ: ни одного слота;
- *   · НЕТ КЛЮЧА (прогон до O-33, пересобранный на повторе из сохранённого JSON) — тоже ни одного.
- *     Вернуться к аспектам значило бы снова печатать детали, которых модель в этой роли не называла.
+ *   · ПУСТОЙ СПИСОК — ЭТО ОТВЕТ: ни одного слота (и черновик содержателен — `parseConstructionDraft`);
+ *   · НЕТ КЛЮЧА (ответ бинаря до O-33) — тоже ни одного, а прогон до O-33 новый сервер отдаёт
+ *     пустым списком. Вернуться к аспектам значило бы снова печатать детали, которых модель в этой
+ *     роли не называла;
+ *   · имя ЛЮБОГО алфавита — имя (`detailIdentity`): «манжета» и «袖口» заводятся, как «cuff».
  *
  * ⚠ ДОВОД ЖИВЁТ ТОЛЬКО ЗДЕСЬ. У слота верстака (`DesignBenchSlot`, `SetDesignBenchSlotRequest`)
  * поля под него НЕТ — только `detail_name`, — поэтому `note` видна подсказкой чипа в DETAILS FOR
@@ -320,7 +345,7 @@ export function isDraftSection(section?: string | null): boolean {
  * `detail_name` VARCHAR(120)); второго их написания здесь нет, по доводу у колорвеев в схеме выше.
  */
 export type DetailSuggestion = {
-  /** Личность строки внутри предложения — свёрнутое имя детали, не позиция. */
+  /** Личность строки внутри предложения — `detail:` + личность имени (`detailIdentity`), не позиция. */
   id: string;
   /** Имя, которым слот будет НАЗВАН на верстаке (`detail_name`, VARCHAR(120) на сервере). */
   name: string;
@@ -484,15 +509,15 @@ export function diffProposal(
   if (!draft) return { rows: [], missing: [], details: [] };
   const rows: ProposalRow[] = [];
   const details: DetailSuggestion[] = [];
-  // Дедуп предложенных деталей стоит на СВЁРНУТОМ имени (`foldToken`) — той же свёртке, которой
-  // сервер узнаёт «Sleeve / Cuff», «sleeve_cuff» и «sleeveCuff» как один ключ.
+  // Дедуп предложенных деталей стоит на ЛИЧНОСТИ имени (`detailIdentity`) — одной и той же у
+  // предложения и у слота: «Welt Pocket» и «welt pocket» — один узел, «МАНЖЕТА» и «манжета» тоже.
   //
   // ⚠ У СЛОТА ДВА ИМЕНИ, И СЧИТАЮТСЯ ОБА: то, как он называется СЕЙЧАС, и то, каким его ЗАВЕЛИ
   // (`mintedAs`, довод у поля снимка). Переименование — законный жест человека, а дедуп по одному
   // текущему имени превращал бы его в воскресший чип и второй слот про тот же узел.
   const benchNames = new Set(
     (form.detailSlots ?? [])
-      .flatMap((s) => [foldToken(s.name), foldToken(s.mintedAs)])
+      .flatMap((s) => [detailIdentity(s.name), detailIdentity(s.mintedAs)])
       .filter(Boolean),
   );
 
@@ -589,20 +614,21 @@ export function diffProposal(
   // Пустой список и отсутствие ключа (прогон до O-33) — одно и то же «ни одной», и к аспектам
   // этот цикл не возвращается ни при каком ответе (довод — у `DetailSuggestion`).
   //
-  // Дедуп по СВЁРТКЕ имени — не второе написание серверного дедупа, а личность строки: `id`
-  // ключует чип и отметку, а два имени одной свёртки («Cuff» и «cuff») сервер узнаёт одним
-  // именем — минт второго был бы ложным «could not add cuff» (ревью Codex, волна 25.09).
+  // Дедуп по ЛИЧНОСТИ имени (`detailIdentity`) — не второе написание серверного дедупа, а личность
+  // строки: `id` ключует чип и отметку, а два имени одной личности («Cuff» и «cuff») сервер узнаёт
+  // одним именем — минт второго был бы ложным «could not add cuff» (ревью Codex, волна 25.09).
+  // Имя любого алфавита — законное имя (ревью O-33): пропускается только пустое.
   const seenDetail = new Set<string>();
   for (const f of draft.flatDetails ?? []) {
     const name = normText(f.name);
-    const fold = foldToken(name);
-    if (!fold || seenDetail.has(fold)) continue;
-    seenDetail.add(fold);
+    const identity = detailIdentity(name);
+    if (!identity || seenDetail.has(identity)) continue;
+    seenDetail.add(identity);
     details.push({
-      id: `detail:${fold}`,
+      id: `detail:${identity}`,
       name,
       why: normText(f.note),
-      onBench: benchNames.has(fold),
+      onBench: benchNames.has(identity),
     });
   }
 
