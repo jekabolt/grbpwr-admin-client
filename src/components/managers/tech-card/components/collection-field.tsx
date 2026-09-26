@@ -47,14 +47,25 @@ const DICTIONARIES = 'dictionaries';
 // has failed to load, and for a key the catalog does not list — right for the sidebar, wrong for a
 // door whose only outcome for the wrong account is a refusal. So the item is offered on a
 // DEFINITIVE answer only: a super account, or an explicit write grant on `dictionaries`.
-export function CollectionField({ readOnly }: { readOnly?: boolean }) {
+export function CollectionField({
+  readOnly,
+  locked,
+}: {
+  readOnly?: boolean;
+  /**
+   * The account cannot write the style's collection (UpdateStyle is `products:write`, Codex R3):
+   * a dead control like FIT's — disabled, zebra ground — and no «+ new collection…» door.
+   */
+  locked?: boolean;
+}) {
   const { setValue } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
   const { resolved, isSuper, account } = usePermissions();
   const collection = (useWatch({ name: 'collection' }) as string | undefined) ?? '';
   const [creating, setCreating] = useState(false);
   const grant = account?.permissions?.find((p) => p.section === DICTIONARIES)?.access;
-  const canCreate = !readOnly && resolved && (isSuper || accessSatisfies(grant, ACCESS.WRITE));
+  const canCreate =
+    !readOnly && !locked && resolved && (isSuper || accessSatisfies(grant, ACCESS.WRITE));
 
   const items = useMemo(() => {
     const names = (dictionary?.collections ?? [])
@@ -83,6 +94,8 @@ export function CollectionField({ readOnly }: { readOnly?: boolean }) {
         items={items}
         value={collection ? nameItem(collection) : NONE}
         readOnly={readOnly}
+        disabled={locked}
+        className={locked ? 'bg-bgZebra text-labelColor' : undefined}
         onValueChange={(v?: string) => {
           if (v === NEW) {
             // Opened on the next frame: the list is still closing and hands focus back to its

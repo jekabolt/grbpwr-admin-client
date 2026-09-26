@@ -318,7 +318,15 @@ const fitOfItem = (item: string) => (item.startsWith(FIT_ITEM) ? item.slice(FIT_
  *   `tech_cards` (Codex M-05), so an edit here would be refused at save. Said in words under the
  *   control, not only in a `title` on a dead select.
  */
-function FitCell({ choices, locked }: { choices: FitChoice[]; locked: boolean }) {
+function FitCell({
+  choices,
+  creating,
+  locked,
+}: {
+  choices: FitChoice[];
+  creating: boolean;
+  locked: boolean;
+}) {
   const { control } = useFormContext<TechCardFormData>();
   const drafted = useDrafted();
   return (
@@ -326,7 +334,9 @@ function FitCell({ choices, locked }: { choices: FitChoice[]; locked: boolean })
       control={control}
       name='fit'
       render={({ field }) => {
-        const value = ((field.value as string | undefined) ?? '').trim();
+        // A NEW card by an account that cannot write the style gets no fit at all (UpdateStyle is
+        // its only writer — see AgeGroupCell): drawn as the cell will read once the card exists.
+        const value = creating && locked ? '' : ((field.value as string | undefined) ?? '').trim();
         const live = drafted.isLive(draftedKey.fit, value);
         const listed = choices.some((c) => c.key === value);
         const items = [
@@ -435,6 +445,22 @@ function AgeGroupCell({ creating, locked }: { creating: boolean; locked: boolean
         );
       }}
     />
+  );
+}
+
+/**
+ * THE WORDS UNDER A STYLE FACT THIS ACCOUNT CANNOT WRITE (Codex M-05, R3): UpdateStyle — the one
+ * writer of a saved card's style facts — is `products:write`. FIT and AGE GROUP say so under their
+ * controls; collection, season, brand and target gender say the same, on the same grant. Each
+ * control is disabled by its OWN prop: a disabled `<fieldset>` does not stop a Radix select, which
+ * opens on pointerdown (the one exception is SEASON, see its cell).
+ */
+function StyleLockNote({ locked }: { locked: boolean }) {
+  if (!locked) return null;
+  return (
+    <Text size='micro' variant='label'>
+      needs products:write
+    </Text>
   );
 }
 
@@ -647,16 +673,25 @@ export function CardDetails({
     [categories, categoryId, isAux],
   );
   const fitShown = fitChoices !== null;
-  // UpdateStyle — the one writer of fit and age group — is `products:write` on the server (Codex
-  // M-05): both cells lock on it.
+  // UpdateStyle — the one writer of a saved card's style facts — is `products:write` on the server
+  // (Codex M-05, R3; rbac.go:163): every style-fact cell locks on it.
   const styleLocked = !canWrite(SECTION.products);
-  // A new card by an account that cannot write the style gets no age group (see AgeGroupCell): the
-  // counter and the ai context read it as the cell shows it — unset.
-  const ageShown = !techCardId && styleLocked ? AGE_GROUP_UNSET : ageGroup;
+  // …except brand, collection and gender on a card being CREATED: CreateTechCard seeds those three
+  // from the card's own insert (AddTechCard), so there they are the create's to write.
+  const seededLocked = styleLocked && !!techCardId;
+  // Fit, season and age group reach the style through UpdateStyle ALONE, so a new card made by such
+  // an account gets none of them: the cells, the counter and the ai context read them as unset
+  // (m2) — never as a locked value that will not be written.
+  const unwritten = !techCardId && styleLocked;
+  const ageShown = unwritten ? AGE_GROUP_UNSET : ageGroup;
+  const shownMeta = (key: MetaField, v: unknown) => {
+    if (!unwritten) return v;
+    if (key === 'ageGroup') return AGE_GROUP_UNSET;
+    return key === 'fit' || key === 'season' ? '' : v;
+  };
   const counted = META_FIELDS.filter((key) => key !== 'fit' || fitShown);
   const filled = META_FIELDS.reduce(
-    (n, key, i) =>
-      n + (counted.includes(key) && isFilled(key, key === 'ageGroup' ? ageShown : meta[i]) ? 1 : 0),
+    (n, key, i) => n + (counted.includes(key) && isFilled(key, shownMeta(key, meta[i])) ? 1 : 0),
     0,
   );
 
@@ -678,7 +713,7 @@ export function CardDetails({
     .join(' › ');
   const noteContext = cardFactsContext({
     categoryPath,
-    fit: fitShown ? fitLabel(fit) : '',
+    fit: fitShown && !unwritten ? fitLabel(fit) : '',
     ageGroup: ageGroupLabel(ageShown),
     concept,
   });
@@ -709,17 +744,41 @@ export function CardDetails({
           <div className={W3}>
             <StyleNumberCell isIdea={isIdea} />
           </div>
-          <div className={W2}>
-            <CollectionField />
+          <div
+            className={W2}
+            data-card-cell='collection'
+            data-style-lock={seededLocked ? 'locked' : 'open'}
+            title={seededLocked ? 'needs products:write' : undefined}
+          >
+            <CollectionField locked={seededLocked} />
+            <StyleLockNote locked={seededLocked} />
           </div>
-          <div className={W2}>
-            <SeasonField pickHint={seasonPickHint} />
+          <div
+            className={W2}
+            data-card-cell='season'
+            data-style-lock={styleLocked ? 'locked' : 'open'}
+            title={styleLocked ? 'needs products:write' : undefined}
+          >
+            {/* SeasonField has no lock of its own, and needs none here: its ONE writer is the
+                `pick` button's click (the input is read-only and the picker opens only from that
+                click), and a disabled fieldset kills click and focus on the buttons inside it —
+                measured; pointerdown still fires, but nothing in this cell listens to it. */}
+            <fieldset disabled={styleLocked} className='m-0 min-w-0 border-0 p-0'>
+              <SeasonField pickHint={seasonPickHint} />
+            </fieldset>
+            <StyleLockNote locked={styleLocked} />
           </div>
           {/* brand sits inline with the rest of the card's identity: pre-filled with GRBPWR
               (techCardDefaultData) and almost never changed, but hidden it looked absent rather
               than defaulted. */}
-          <div className={W2}>
-            <InputField name='brand' label='brand' placeholder='GRBPWR' />
+          <div
+            className={W2}
+            data-card-cell='brand'
+            data-style-lock={seededLocked ? 'locked' : 'open'}
+            title={seededLocked ? 'needs products:write' : undefined}
+          >
+            <InputField name='brand' label='brand' placeholder='GRBPWR' disabled={seededLocked} />
+            <StyleLockNote locked={seededLocked} />
           </div>
         </div>
       </div>
@@ -738,7 +797,7 @@ export function CardDetails({
           {/* FIT right after the category it depends on (T02). */}
           {fitChoices && (
             <div className={wc('fit')} data-card-cell='fit'>
-              <FitCell choices={fitChoices} locked={styleLocked} />
+              <FitCell choices={fitChoices} creating={!techCardId} locked={styleLocked} />
             </div>
           )}
           {/* AGE GROUP beside fit — the style's other «who is it for» fact (T01). */}
@@ -757,12 +816,20 @@ export function CardDetails({
               </Text>
             )}
           </div>
-          <div className={wc('gender')}>
+          <div
+            className={wc('gender')}
+            data-card-cell='gender'
+            data-style-lock={seededLocked ? 'locked' : 'open'}
+            title={seededLocked ? 'needs products:write' : undefined}
+          >
             <SelectField
               name='targetGender'
               label='target gender'
               items={techCardGenderOptions}
+              disabled={seededLocked}
+              className={seededLocked ? 'bg-bgZebra text-labelColor' : undefined}
             />
+            <StyleLockNote locked={seededLocked} />
           </div>
           {/* WS7: what KIND of auxiliary item this card makes — auxiliary-only, the dto rejects it
               on a sellable card and the save mapper clears it on a purpose flip. A product field
