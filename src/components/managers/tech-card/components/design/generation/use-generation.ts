@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import type {
   GetDesignBandResponse,
@@ -10,7 +10,13 @@ import type {
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { designKeys, newClientRequestId, useDesignWrites } from '../use-design-band';
+import {
+  cardOnScreen,
+  designKeys,
+  newClientRequestId,
+  useDesignWrites,
+  type WriteContext,
+} from '../use-design-band';
 import { refusalFromError, type RunRefusal } from './refusal';
 import { hasLiveRun } from './run-state';
 
@@ -30,17 +36,35 @@ import { hasLiveRun } from './run-state';
 
 /** The generative RPCs. Nothing else in the band calls them. */
 export function useGenerationWrites(techCardId?: number) {
+  const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
+  // `useDesignWrites` also marks this card as held on screen (`cardOnScreen`).
   const { invalidate } = useDesignWrites(techCardId);
 
+  /**
+   * THE CARD A WRITE WAS FOR, carried by the mutation itself (`onMutate` → context), for the same
+   * reason as the band's own writes (`use-design-band.ts`): the request outlives the screen it left.
+   * The re-read goes to THAT card's band, and a refusal is said only while that card is on screen —
+   * the page remounts per card, so a late refusal from card A must not print over card B (review
+   * round 2, [1]).
+   */
+  const onMutate = useCallback((): WriteContext => ({ card: techCardId ?? 0 }), [techCardId]);
+  const invalidateWritten = useCallback(
+    (_data: unknown, _variables: unknown, context?: WriteContext) => {
+      qc.invalidateQueries({ queryKey: designKeys.band(context?.card ?? techCardId ?? 0) });
+    },
+    [qc, techCardId],
+  );
   const onError = useCallback(
-    (error: unknown) => {
-      showMessage((error as Error)?.message || 'the run did not start', 'error');
+    (error: unknown, _variables?: unknown, context?: WriteContext) => {
+      const card = context?.card ?? techCardId ?? 0;
       // Even a refusal moves money on the server (a reservation released, an attempt billed), so
       // the band is re-read rather than left showing prices from before the attempt.
-      invalidate();
+      qc.invalidateQueries({ queryKey: designKeys.band(card) });
+      if (!cardOnScreen(card)) return;
+      showMessage((error as Error)?.message || 'the run did not start', 'error');
     },
-    [showMessage, invalidate],
+    [showMessage, qc, techCardId],
   );
 
   /**
@@ -78,7 +102,8 @@ export function useGenerationWrites(techCardId?: number) {
         // rather than left unset — one spelling for one meaning.
         rerunOfRunId: input.rerunOfRunId ?? 0,
       }),
-    onSuccess: invalidate,
+    onMutate,
+    onSuccess: invalidateWritten,
     onError,
   });
 
@@ -89,7 +114,8 @@ export function useGenerationWrites(techCardId?: number) {
    */
   const cancelRun = useMutation({
     mutationFn: (runId: number) => adminService.CancelDesignRun({ runId }),
-    onSuccess: invalidate,
+    onMutate,
+    onSuccess: invalidateWritten,
     onError,
   });
 
@@ -97,7 +123,8 @@ export function useGenerationWrites(techCardId?: number) {
   const archiveRun = useMutation({
     mutationFn: (input: { runId: number; archived: boolean }) =>
       adminService.ArchiveDesignRun({ runId: input.runId, archived: input.archived }),
-    onSuccess: invalidate,
+    onMutate,
+    onSuccess: invalidateWritten,
     onError,
   });
 
@@ -116,7 +143,8 @@ export function useGenerationWrites(techCardId?: number) {
         // структуру, читатель нашёл бы ноль заголовков и нарисовал пустой черновик без ошибки.
         construction: false,
       }),
-    onSuccess: invalidate,
+    onMutate,
+    onSuccess: invalidateWritten,
     onError,
   });
 
@@ -140,8 +168,11 @@ export type StartRunInput = {
 };
 
 export type StartRunState = {
-  /** `onStarted` fires only when the row is actually filed — never on the click. */
-  start: (input: StartRunInput, onStarted?: () => void) => void;
+  /**
+   * `onStarted` fires only when the row is actually filed — never on the click. The promise settles
+   * when the server has answered (either way), also after the calling screen has unmounted.
+   */
+  start: (input: StartRunInput, onStarted?: () => void) => Promise<void>;
   isPending: boolean;
   /**
    * THE SERVER'S REFUSAL, VERBATIM, until a person dismisses it or a run starts. The same shape
@@ -162,19 +193,28 @@ export type StartRunState = {
  * screen would report success for a request nobody made. A success clears the ledger, so the next
  * press is a new run rather than an idempotent echo of the last.
  *
+ * THE LEDGER IS MODULE-LEVEL, KEYED BY CARD AND FINGERPRINT (review round 2, MAJOR B). It lived in a
+ * ref of the hook, and a step switch unmounts the flat row while its request is still on the wire:
+ * the row that came back had an EMPTY ledger, so a retry of the very same intent minted a new id and
+ * bought a second run. The answer is awaited on the mutation's promise, not through the observer's
+ * callbacks — those fire only while the screen is mounted — so the ledger is cleared, the success is
+ * said and the caller's promise settles even when nobody is watching any more.
+ *
  * THIS IS WHERE THE THREE STUDIOS MEET. FLAT, FABRIC RENDER and 3D differ only in `kind` and in what
  * they put in `params`; the money, the idempotency and the invalidation are one mechanism, and a
  * second copy of it is precisely where two screens start disagreeing about what a retry means.
  */
+const runLedger = new Map<string, string>();
+
 export function useStartRun(techCardId?: number): StartRunState {
   const { showMessage } = useSnackBarStore();
   const { startRun } = useGenerationWrites(techCardId);
-  const ledger = useRef<{ fingerprint: string; id: string } | null>(null);
   const [refusal, setRefusal] = useState<RunRefusal | null>(null);
 
   const start = useCallback(
-    (input: StartRunInput, onStarted?: () => void) => {
-      if (!techCardId || techCardId <= 0) return;
+    async (input: StartRunInput, onStarted?: () => void): Promise<void> => {
+      const card = techCardId ?? 0;
+      if (card <= 0) return;
       // THE RERUN TARGET IS PART OF THE INTENT, so it is part of the fingerprint. Left out, «rerun
       // run 3» and «rerun run 7» typed with the same delta phrase would replay ONE request id, and
       // the second press would come back OK holding the first run — a success reported for a
@@ -185,35 +225,34 @@ export function useStartRun(techCardId?: number): StartRunState {
         input.params,
         input.rerunOfRunId ?? 0,
       ]);
-      if (ledger.current?.fingerprint !== fingerprint) {
-        ledger.current = { fingerprint, id: newClientRequestId() };
+      const key = `${card}:${fingerprint}`;
+      let clientRequestId = runLedger.get(key);
+      if (!clientRequestId) {
+        clientRequestId = newClientRequestId();
+        runLedger.set(key, clientRequestId);
       }
       setRefusal(null);
-      const clientRequestId = ledger.current.id;
-      startRun.mutate(
-        { ...input, clientRequestId },
-        {
-          // Beside the snackbar the hook-level `onError` already shows: the snackbar lives for
-          // seconds, the refusal stays on the screen until read (CONTRACT §E). A 409 is not kept:
-          // the band moved first, and the hook-level handler has already re-read it.
-          onError: (error) => {
-            setRefusal(refusalFromError(error, clientRequestId));
-          },
-          onSuccess: () => {
-            ledger.current = null;
-            // The run comes back PENDING, not done: the pictures arrive when the provider answers.
-            // Saying so is the difference between «nothing happened» and «it was booked».
-            showMessage(
-              'run started — the pictures land in the history when it finishes',
-              'success',
-            );
-            // The caller clears its fields HERE and not on the click: clearing the ask before the
-            // row is filed would change the fingerprint under a failed attempt, and the retry would
-            // mint a fresh id and buy a second picture.
-            onStarted?.();
-          },
-        },
-      );
+      try {
+        await startRun.mutateAsync({ ...input, clientRequestId });
+      } catch (error) {
+        // Beside the snackbar the hook-level `onError` already shows: the snackbar lives for
+        // seconds, the refusal stays on the screen until read (CONTRACT §E). A 409 is not kept:
+        // the band moved first, and the hook-level handler has already re-read it. The ledger
+        // entry stays — the retry of the same intent replays the same id.
+        setRefusal(refusalFromError(error, clientRequestId));
+        return;
+      }
+      if (runLedger.get(key) === clientRequestId) runLedger.delete(key);
+      // The run comes back PENDING, not done: the pictures arrive when the provider answers.
+      // Saying so is the difference between «nothing happened» and «it was booked» — and it is said
+      // while the card is on screen, whether or not the row that pressed is still mounted.
+      if (cardOnScreen(card)) {
+        showMessage('run started — the pictures land in the history when it finishes', 'success');
+      }
+      // The caller clears its fields HERE and not on the click: clearing the ask before the row is
+      // filed would change the fingerprint under a failed attempt, and the retry would mint a fresh
+      // id and buy a second picture.
+      onStarted?.();
     },
     [techCardId, startRun, showMessage],
   );

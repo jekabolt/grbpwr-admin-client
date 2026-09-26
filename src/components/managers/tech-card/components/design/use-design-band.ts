@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import {
   DesignBenchSlotRef,
@@ -7,7 +7,7 @@ import {
   GetDesignBandResponse,
 } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 
 /**
  * THE BAND'S DATA SEAM. Every organ of the DESIGN band reads through here and writes through here;
@@ -172,6 +172,7 @@ function bandQuery(techCardId: number) {
 
 export function useDesignBand(techCardId?: number): DesignBandState {
   const enabled = !!techCardId && techCardId > 0;
+  useCardOnScreen(techCardId ?? 0);
   const query = useQuery({
     ...bandQuery(techCardId ?? 0),
     enabled,
@@ -189,6 +190,18 @@ export function useDesignBand(techCardId?: number): DesignBandState {
     error: unimplemented ? null : ((query.error as Error | null) ?? null),
     refetch: query.refetch,
   };
+}
+
+/**
+ * THE SAME ANSWER AS `useDesignBand(...).serverSpeaks`, READ FROM THE CACHE NOW — not a hook. For a
+ * continuation that outlives the component that started it (the flat's GENERATE after its save,
+ * review round 2, MAJOR B): the capability context (`serverSpeaksDesign`) is a hook and cannot be
+ * asked after an `await`, and a value captured at render would be the one from the click.
+ */
+export function serverSpeaksNow(qc: QueryClient, techCardId: number): boolean {
+  if (techCardId <= 0) return false;
+  const state = qc.getQueryState(designKeys.band(techCardId));
+  return !!state?.data && !isUnimplemented(state.error);
 }
 
 /**
@@ -223,7 +236,39 @@ export type DesignWriteOptions = {
 export type SilentWrite = { silent?: boolean };
 
 /** Контекст записи: КАКОЙ карточке был отправлен запрос (см. `onError` в `useDesignWrites`). */
-type WriteContext = { card: number };
+export type WriteContext = { card: number };
+
+/**
+ * ═══ ОТКАЗ ГОВОРИТСЯ ТОЛЬКО НАД КАРТОЧКОЙ, КОТОРАЯ НА ЭКРАНЕ (волна 25.09, ревью раунда 2, [1]) ══
+ *
+ * Хвост ошибок записи общий и глобальный (снекбар), а запрос живёт дольше экрана, с которого ушёл.
+ * Страница монтирует карточку заново на каждый переход (`page.tsx`, `key={id}`): хук карточки A
+ * РАЗМОНТИРОВАН, когда её поздний отказ приходит на экран B, — и сравнение «карточка записи ==
+ * карточка хука» (ссылкой в хуке) видело там A == A и печатало отказ A над B. Поэтому источник
+ * правды — не хук, а СЧЁТЧИК ПО КАРТОЧКЕ: кто её показывает или пишет, тот её и отмечает на время
+ * жизни. Отмечают и ЧТЕНИЕ полосы (`useDesignBand` — студия держит его на любом шаге), и каждый
+ * пишущий хук (`useDesignWrites`, через него `useGenerationWrites`): одних пишущих мало — на шаге
+ * MOODBOARD их может не быть вовсе, и тогда смолк бы отказ карточки, которая как раз на экране.
+ * Отказ карточки, которую больше никто не держит, молчит. Смена карточки у живого хука (без
+ * перемонтирования) — тот же эффект: старая снимается, новая встаёт.
+ */
+const cardsOnScreen = new Map<number, number>();
+
+function useCardOnScreen(card: number): void {
+  useEffect(() => {
+    cardsOnScreen.set(card, (cardsOnScreen.get(card) ?? 0) + 1);
+    return () => {
+      const left = (cardsOnScreen.get(card) ?? 1) - 1;
+      if (left > 0) cardsOnScreen.set(card, left);
+      else cardsOnScreen.delete(card);
+    };
+  }, [card]);
+}
+
+/** Держит ли эту карточку на экране хоть один орган (чтение полосы или запись в неё). */
+export function cardOnScreen(card: number): boolean {
+  return (cardsOnScreen.get(card) ?? 0) > 0;
+}
 
 export function useDesignWrites(techCardId?: number) {
   const qc = useQueryClient();
@@ -267,16 +312,10 @@ export function useDesignWrites(techCardId?: number) {
      обычного чтения хватило бы. */
 
   /**
-   * ═══ ОТКАЗ ГОВОРИТСЯ НА ТОЙ КАРТОЧКЕ, КОТОРОЙ ОН ОТВЕЧАЕТ (волна 25.09, находка CL-B) ══════════
-   *
-   * Хвост ниже общий для всех записей хука, а хук живёт на экране дольше одной карточки: студия на
-   * переходе A → B не размонтируется. Запрос, отправленный с A, мог упасть, когда на экране уже B, —
-   * и снекбар говорил об отказе НА B, где человек ничего не делал (замечено на заведении детали
-   * после смены карточки). Поэтому каждая запись запоминает свою карточку (`onMutate` → контекст),
-   * а хвост молчит, если на экране уже другая. 409 всё равно перечитывает полосу ТОЙ карточки.
+   * КАЖДАЯ ЗАПИСЬ ЗАПОМИНАЕТ СВОЮ КАРТОЧКУ (`onMutate` → контекст): отказ говорится, только пока
+   * эта карточка на экране (`cardOnScreen`, см. выше), и 409 перечитывает полосу ТОЙ карточки.
    */
-  const shownCard = useRef(techCardId ?? 0);
-  shownCard.current = techCardId ?? 0;
+  useCardOnScreen(techCardId ?? 0);
   const onMutate = useCallback((): WriteContext => ({ card: techCardId ?? 0 }), [techCardId]);
   // Та же причина со стороны успеха: запись, дошедшая после смены карточки, перечитывает полосу
   // СВОЕЙ карточки (иначе A, куда легла запись, осталась бы в кэше старой, а B перечиталась зря).
@@ -298,7 +337,7 @@ export function useDesignWrites(techCardId?: number) {
       // Somebody else moved first. Their state wins; ours is thrown away on purpose.
       if (aborted) qc.invalidateQueries({ queryKey: designKeys.band(card) });
       const silent = !!(variables as SilentWrite | undefined)?.silent;
-      if (silent || card !== shownCard.current) return;
+      if (silent || !cardOnScreen(card)) return;
       const message = (error as Error)?.message || 'the change did not go through';
       showMessage(aborted ? `someone changed this first — ${message}` : message, 'error');
     },
