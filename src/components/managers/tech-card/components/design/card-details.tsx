@@ -311,9 +311,10 @@ const fitOfItem = (item: string) => (item.startsWith(FIT_ITEM) ? item.slice(FIT_
  *   the value is edited or accepted (`drafted-contract.ts`). The word sits in the label row — a
  *   22px select has no room for a corner pill — and it IS the accept control (`DraftedPill`, as
  *   on every drafted field since CL-B's M3): pressing it accepts the fit's journal entry and
- *   leaves the value alone. A genuine pick is a review too: it accepts the same entry, so going
- *   back to the drafted value later does not bring the mark back — the select's own form of
- *   `useAcceptOnEdit`, which a text field runs on blur.
+ *   leaves the value alone. Locked with the select (`disabled`, CL-B r2 MIN-5): a fit this account
+ *   cannot change is not one it reviews either. A genuine pick is a review too: it accepts the
+ *   same entry, so going back to the drafted value later does not bring the mark back — the
+ *   select's own form of `useAcceptOnEdit`, which a text field runs on blur.
  * · LOCKED without `products:write`: `UpdateStyle` is authorised by the catalog section, not by
  *   `tech_cards` (Codex M-05), so an edit here would be refused at save. Said in words under the
  *   control, not only in a `title` on a dead select.
@@ -357,7 +358,11 @@ function FitCell({
           >
             <div className='flex items-center justify-between gap-1.5'>
               <FormLabel>fit</FormLabel>
-              <DraftedPill live={live} onAccept={() => drafted.acceptKey(draftedKey.fit)} />
+              <DraftedPill
+                live={live}
+                onAccept={() => drafted.acceptKey(draftedKey.fit)}
+                disabled={locked}
+              />
             </div>
             <DraftedField live={live} pill={false}>
               <Select
