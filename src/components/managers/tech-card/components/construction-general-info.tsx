@@ -1,24 +1,27 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
-import { useId, useRef, type JSX, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
 import { AiEnhance, type EnhanceField } from 'ui/components/ai-enhance';
+import { Button } from 'ui/components/button';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { GROUP_SEAM } from './design/core';
 import { cardFactsContext } from './design/core/card-facts';
-import { openStepOf } from './design/core/chain';
 import { DraftedField } from './design/core/drafted-field';
 import { isBoardRow } from './design/core/mood-gate';
 import { draftedKey, useDrafted } from './design/drafted-contract';
-import { fitLabel } from './design/fit-vocabulary';
-import { useCardFacts, useFitKeys } from './design/head/card-facts-form';
+import { fitChoicesFor, fitLabel } from './design/fit-vocabulary';
+import { useCardFacts } from './design/head/card-facts-form';
 import { useAcceptOnEdit } from './design/head/drafted-provider';
-import { BoardMovedPill, DraftedPill, GoTo } from './design/head/mood-organs';
+import { BoardMovedPill, DraftedPill } from './design/head/mood-organs';
+import { FitCell } from './design/style-cells';
 import { upsertDetailText } from './form-writers';
+import { CategoryBrowser } from './header-meta-fields';
 import { TechCardFormData } from './schema';
 
 // C-5 · GENERAL INFORMATION — the block the owner asked for in CONSTRUCTION.
@@ -77,9 +80,17 @@ import { TechCardFormData } from './schema';
 // селект fit здесь писал форму, а на проводе fit несёт `StyleFactsField` (UpdateStyle), и человек
 // видел выбор, который уезжал другой дверью. Факты стиля правятся в CARD DETAILS (браузер категорий
 // стоял там всегда, селект fit туда переехал в зоне CL-C); здесь они ПЕЧАТАЮТСЯ — посадка словом,
-// категория путём по словарю («bottoms › pants › cargo») — с ОДНОЙ дверью `edit in card details ›`.
-// Дверь не пишет адрес сама: она просит композитора показать шаг, где поле нарисовано
-// (`openStepOf`, тот же шов, что у `revealField`), — `?step=` по-прежнему пишет один `goStep`.
+// категория путём по словарю («bottoms › pants › cargo»). Дверь `edit in card details ›`, которая
+// стояла справа, снята 26.09 (O-29) — см. `StyleFacts` ниже.
+//
+// ═══ 26.09 (O-29) — ОДНА ИКОНКА `✎`, И ЗНАЧЕНИЯ ПРАВЯТСЯ НА МЕСТЕ ═════════════════════════════════
+//
+// Владелец, дословно: «в GENERAL INFORMATION EDIT IN CARD DETAILS › замени просто на иконку эдит и
+// чтобы мы могли инлайн это менять». Довод T05 при этом не отменён, а соблюдён строже: второго
+// редактора здесь по-прежнему нет — `✎` ставит на место двух напечатанных значений ТЕ ЖЕ ЯЧЕЙКИ,
+// которые рисует CARD DETAILS (`FitCell` из `design/style-cells.tsx`, куда она переехала из
+// `card-details.tsx`, и `CategoryBrowser`), с теми же замками и той же пометкой `drafted`. Один
+// редактор, смонтированный на двух шагах, — не копия.
 //
 // SILHOUETTE и FABRIC остаются полями и получают две вещи волны: синюю рамку `drafted`, пока в поле
 // стоит текст черновика и его не приняли (`drafted-contract.ts`), и кнопку `ai ✦` в правом нижнем
@@ -87,8 +98,9 @@ import { TechCardFormData } from './schema';
 //
 // NOTHING HERE IS A SECOND PLACE FOR A FACT THAT ALREADY HAS ONE — that is the whole discipline of
 // this file, aspect by aspect:
-//   · fit / category — printed from THE SAME FORM FIELDS (`fit`, `categoryId`); edited in CARD
-//     DETAILS only (see above).
+//   · fit / category — printed from THE SAME FORM FIELDS (`fit`, `categoryId`) and, behind `✎`,
+//     edited through THE SAME CELLS CARD DETAILS draws (`style-cells.tsx`, `CategoryBrowser`) —
+//     one editor on two steps, never a copy (O-29, see above).
 //   · silhouette — the `details[]` aspect that ALREADY exists under key `silhouette`. The same
 //     row, edited from a second surface.
 //   · fabric — a `details[]` row under key `fabric`. Free text; `details` takes custom keys, so it
@@ -100,7 +112,10 @@ export function ConstructionGeneralInfo({
   frozen = false,
 }: {
   isAux: boolean;
-  /** No write permission, or a released card — the Radix select ignores the outer fieldset. */
+  /**
+   * No write permission, or a released card — the Radix select ignores the outer fieldset. The
+   * facts row draws no `✎` under it: nothing here could be edited (O-29).
+   */
   readOnly: boolean;
   /**
    * A released card, on its own. The fit is a style fact: its `drafted` pill locks on the grant of
@@ -141,7 +156,14 @@ export function ConstructionGeneralInfo({
         {/* Auxiliary cards carry no fit and no category — the same gate the CLASSIFICATION block
             applied. У aux-карты классификацию задаёт AUXILIARY TYPE в шапке; скрывается ТОЛЬКО
             строка фактов, значение `categoryId` остаётся в форме и раунд-трипится. */}
-        {!isAux && <StyleFacts categoryPath={facts.categoryPath ?? ''} frozen={frozen} />}
+        {!isAux && (
+          <StyleFacts
+            categoryPath={facts.categoryPath ?? ''}
+            readOnly={readOnly}
+            frozen={frozen}
+            techCardId={techCardId}
+          />
+        )}
         <div className='min-w-0' data-c19-field-cell='silhouette'>
           <DetailTextField
             detailKey='silhouette'
@@ -217,32 +239,58 @@ function FieldLabel({ htmlFor, children }: { htmlFor?: string; children: ReactNo
 }
 
 /**
- * ═══ ФАКТЫ СТИЛЯ — ЗНАЧЕНИЯ И ОДНА ДВЕРЬ (T05) ══════════════════════════════════════════════
+ * ═══ ФАКТЫ СТИЛЯ — ЗНАЧЕНИЯ И ОДНА ИКОНКА, КОТОРАЯ ДЕЛАЕТ ИХ ЯЧЕЙКАМИ (T05 → O-29) ═══════════════
  *
- * Строка во всю ширину грида: FIT · CATEGORY, справа — `edit in card details ›`. Пустой факт — `—`
- * (DESIGN.md: пустота не рисуется нулём и не прячется). Посадка печатается словом словаря
- * (`fitLabel`: `wide_leg` → «wide leg», `a_line` → «a-line»), тем же, каким её печатает CARD DETAILS.
- * Посадка, записанная черновиком и ещё не просмотренная, стоит в синей рамке с пилюлей `drafted` —
- * тем же органом, что поля ниже; снимает её `accept all` в блоке черновика или правка fit в CARD
- * DETAILS.
+ * Строка во всю ширину грида: FIT · CATEGORY, справа — одна кнопка `✎`. Печать — та же, что в T05:
+ * пустой факт — `—` (DESIGN.md: пустота не рисуется нулём и не прячется); посадка печатается словом
+ * словаря (`fitLabel`: `wide_leg` → «wide leg», `a_line` → «a-line»), тем же, каким её печатает CARD
+ * DETAILS; посадка, записанная черновиком и ещё не просмотренная, стоит в синей рамке с пилюлей
+ * `drafted` — тем же органом, что поля ниже.
+ *
+ * ═══ 26.09 (O-29): ДВЕРИ НЕТ, ЗНАЧЕНИЯ ПРАВЯТСЯ НА МЕСТЕ ═══════════════════════════════════════════
+ *
+ * `edit in card details ›` (одна дверь T05, `openStepOf`) заменена ОДНИМ органом: `✎` ставит на
+ * место двух напечатанных значений НАСТОЯЩИЕ ячейки — `FitCell` из `design/style-cells.tsx` и
+ * `CategoryBrowser`, ровно те компоненты, что рисует CARD DETAILS, а не их копии; та же кнопка,
+ * ставшая `✓`, и Escape возвращают печать. Из рук в руки ничего не переходит:
+ *   · ТЕ ЖЕ ПОЛЯ. Ячейки пишут `fit` и `categoryId` в форму; категорию сохраняет автосейв как любое
+ *     поле тела, посадку — staged UpdateStyle в `StyleFactsField`, как только поле RHF грязное, —
+ *     ровно как из CARD DETAILS. Кнопки «сохранить» здесь нет.
+ *   · ТЕ ЖЕ ЗАМКИ. `✎` есть только у аккаунта, который может писать карточку, и на карточке, которая
+ *     не утверждена (`readOnly` складывает оба — дверь к двум глухим контролам не дверь, Codex m3).
+ *     Внутри селект посадки заперт по `products:write` (право UpdateStyle) с теми же словами «needs
+ *     products:write» и на утверждённой карточке; браузеру категорий свой замок не нужен — его
+ *     триггер гасит `fieldset disabled={frozen}` страницы, а карточка, утверждённая или потерявшая
+ *     писателя, пока ячейки открыты, сама возвращается к печати (`open` выводится, не хранится).
+ *   · ТА ЖЕ ПОМЕТКА. `FitCell` несёт рамку `drafted` и пилюлю в строке подписи и принимает запись
+ *     черновика на настоящем выборе, как в CARD DETAILS; у печати своя пилюля.
  *
  * FIT НЕТ У ВЕЩИ, КОТОРАЯ ПОСАДКИ НЕ НЕСЁТ (accessories · shoes · bags · objects) — ровно как в CARD
- * DETAILS (`useFitKeys`): печатать здесь факт, поля которого за дверью нет, значило бы звать
- * человека править то, чего там не найти. Хранимое значение не трогается.
+ * DETAILS (`fitChoicesFor` → null): строка печатает одну категорию, и `✎` открывает одну категорию.
+ * Хранимое значение не трогается.
  *
- * Дверь просит шаг ПОЛЯ, а не шаг по имени: `categoryId`, пока категории нет (это главный недостающий
- * факт, и именно его ждёт минимум мудборда) или пока посадки у вещи нет, иначе `fit`. Где нарисовано
- * поле — знает карта шагов.
+ * КЛАВИАТУРА. `✎` — кнопка; нажатая с клавиатуры (`detail === 0`, так `DraftedPill` отличает клавишу
+ * от указателя) она ведёт фокус в первую ячейку, а Escape откуда угодно внутри строки закрывает
+ * ячейки и возвращает фокус кнопке — если Escape не потрачен слоем Radix (раскрытый список, поповер
+ * категорий, подтверждение): тот гасит его `preventDefault`. Enter на пилюле печати
+ * (`data-drafted-scope`) после принятия ведёт на `✎` — первую кнопку строки, как ищет `focusFieldIn`.
  */
 function StyleFacts({
   categoryPath,
+  readOnly,
   frozen,
+  techCardId,
 }: {
   categoryPath: string;
-  /** Утверждённая карточка — пилюля `drafted` глухая (фиксап раунда 2, MIN-5). */
+  /** Нет `tech_cards:write`, или карточка утверждена — только печать, без `✎`. */
+  readOnly: boolean;
+  /** Утверждённая карточка — пилюля `drafted` и селект посадки глухие (фиксап раунда 2, MIN-5). */
   frozen: boolean;
+  /** 0 у ещё не сохранённой карточки (`/add-tech-card`) — ячейка посадки знает это как `creating`. */
+  techCardId: number;
 }): JSX.Element {
   const { control } = useFormContext<TechCardFormData>();
+  const { dictionary } = useDictionary();
   /* ПОСАДКУ ПРИНИМАЕТ ТОТ, КТО ЕЁ ПИШЕТ (ревью швов, S-m2). `fit` — факт стиля, его единственный
      писатель — UpdateStyle, то есть `products:write`; CARD DETAILS запирает на этом праве ячейку и
      её пилюлю. Здесь пилюля запиралась по `tech_cards:write`, и один и тот же аккаунт видел её живой
@@ -251,63 +299,127 @@ function StyleFacts({
   const fitLocked = frozen || !canWrite(SECTION.products);
   const fit = ((useWatch({ control, name: 'fit' }) as string | null | undefined) ?? '').trim();
   const categoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
-  const fitShown = useFitKeys() !== null;
+  // Посадки семейства, или null — у вещи посадки нет: ТОТ ЖЕ ответ, что читает CARD DETAILS
+  // (`fitChoicesFor`). На aux-карте эта строка не рисуется, поэтому `isAux` здесь ложь.
+  const categories = dictionary?.categories;
+  const fitChoices = useMemo(
+    () => fitChoicesFor(categories, categoryId, false),
+    [categories, categoryId],
+  );
+  const fitShown = fitChoices !== null;
   const draftedApi = useDrafted();
   const fitDrafted = draftedApi.isLive(draftedKey.fit, fit);
 
+  const canEdit = !readOnly;
+  const [editing, setEditing] = useState(false);
+  // Карточка, утверждённая или потерявшая писателя, пока ячейки открыты, и другая карточка под той
+  // же смонтированной студией — обратно к печати.
+  useEffect(() => {
+    setEditing(false);
+  }, [canEdit, techCardId]);
+  const open = editing && canEdit;
+  const row = useRef<HTMLDivElement>(null);
+  const focusIn = (selector: string) =>
+    requestAnimationFrame(() => row.current?.querySelector<HTMLElement>(selector)?.focus());
+  const editLabel = fitShown ? 'edit fit and category' : 'edit category';
+
   return (
     <div
-      className='flex min-w-0 flex-wrap items-end gap-x-8 gap-y-3 sm:col-span-2'
-      data-c19-facts=''
-      // Посадка здесь — факт, не поле: принятие с клавиатуры ведёт фокус к двери в CARD DETAILS.
+      ref={row}
+      /* Печать равняет строку по низу (значения — текст); ячейки — по верху, как грид CARD DETAILS:
+         подписи в одну линию (`[&_label]:min-h-[19px]`), контролы в одну, слова замка под селектом. */
+      className={cn(
+        'flex min-w-0 flex-wrap gap-x-8 gap-y-3 sm:col-span-2',
+        open ? 'items-start' : 'items-end',
+      )}
+      data-c19-facts={open ? 'edit' : 'read'}
+      // Принятие пилюли с клавиатуры ведёт фокус к первому полю строки, а без поля — к `✎`.
       data-drafted-scope=''
+      onKeyDown={(e) => {
+        // Escape, уже потраченный слоем Radix (список, поповер, подтверждение), сюда не доходит
+        // «живым»: слой гасит его `preventDefault`, и ячейки остаются на месте.
+        if (!open || e.key !== 'Escape' || e.defaultPrevented) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setEditing(false);
+        focusIn('[data-c19-facts-edit]');
+      }}
     >
-      {fitShown && (
-        <div className='min-w-0 space-y-1.5' data-c19-field='fit'>
-          <FieldLabel>fit</FieldLabel>
-          <div className='flex items-center gap-2'>
-            <DraftedField live={fitDrafted} pill={false} className={cn(fitDrafted && 'px-1.5')}>
-              <Text
-                component='span'
-                className={cn('block', fitDrafted && 'text-warning')}
-                data-c19-fact='fit'
-              >
-                {fit ? fitLabel(fit) : '—'}
-              </Text>
-            </DraftedField>
-            <DraftedPill
-              live={fitDrafted}
-              disabled={fitLocked}
-              onAccept={() => draftedApi.acceptKey(draftedKey.fit)}
-              data-c19-drafted='fit'
-            />
+      {open ? (
+        <>
+          {fitChoices && (
+            <div className={CELL} data-c19-field='fit'>
+              <FitCell choices={fitChoices} creating={techCardId === 0} locked={fitLocked} />
+            </div>
+          )}
+          <div className={CELL} data-c19-field='meta'>
+            <CategoryBrowser />
           </div>
+        </>
+      ) : (
+        <>
+          {fitShown && (
+            <div className='min-w-0 space-y-1.5' data-c19-field='fit'>
+              <FieldLabel>fit</FieldLabel>
+              <div className='flex items-center gap-2'>
+                <DraftedField live={fitDrafted} pill={false} className={cn(fitDrafted && 'px-1.5')}>
+                  <Text
+                    component='span'
+                    className={cn('block', fitDrafted && 'text-warning')}
+                    data-c19-fact='fit'
+                  >
+                    {fit ? fitLabel(fit) : '—'}
+                  </Text>
+                </DraftedField>
+                <DraftedPill
+                  live={fitDrafted}
+                  disabled={fitLocked}
+                  onAccept={() => draftedApi.acceptKey(draftedKey.fit)}
+                  data-c19-drafted='fit'
+                />
+              </div>
+            </div>
+          )}
+          <div className='min-w-0 space-y-1.5' data-c19-field='meta'>
+            <FieldLabel>category</FieldLabel>
+            <Text component='span' className='block break-words' data-c19-fact='category'>
+              {categoryPath || '—'}
+            </Text>
+          </div>
+        </>
+      )}
+      {canEdit && (
+        /* ОДНА кнопка на оба режима — тот же узел DOM, поэтому щелчок по ней не роняет фокус. При
+           открытых ячейках она стоит на линии контролов: строка подписи 19px + шов 1px. */
+        <div className={cn('ml-auto', open && 'mt-[20px]')}>
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            aria-label={open ? 'done editing' : editLabel}
+            title={open ? 'done — saved as you go' : editLabel}
+            data-c19-facts-edit={open ? 'done' : 'edit'}
+            onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+              const next = !open;
+              setEditing(next);
+              // Enter/Space — щелчок без указателя (`detail === 0`): фокус идёт в первую ячейку.
+              if (next && e.detail === 0) {
+                focusIn(
+                  '[data-c19-field] [role="combobox"], [data-c19-field] button:not([data-drafted-pill])',
+                );
+              }
+            }}
+          >
+            {open ? '✓' : '✎'}
+          </Button>
         </div>
       )}
-      <div className='min-w-0 space-y-1.5' data-c19-field='meta'>
-        <FieldLabel>category</FieldLabel>
-        <Text component='span' className='block break-words' data-c19-fact='category'>
-          {categoryPath || '—'}
-        </Text>
-      </div>
-      <div className='ml-auto'>
-        <GoTo
-          onClick={() =>
-            openStepOf(categoryId > 0 && fitShown ? 'fit' : 'categoryId', '#card-details')
-          }
-          data-c19-edit-in-card=''
-          title={
-            fitShown
-              ? 'fit and category are style facts — they are edited in card details'
-              : 'the category is a style fact — it is edited in card details'
-          }
-        >
-          edit in card details
-        </GoTo>
-      </div>
     </div>
   );
 }
+
+/** Ячейка открытого режима: делит строку поровну с соседкой, на узком экране переносится. */
+const CELL = 'min-w-[200px] flex-1 [&_label]:flex [&_label]:min-h-[19px] [&_label]:items-center';
 
 // One construction aspect as a plain text field. Writes the SAME `details[]` row the aspects editor
 // on STUDIO writes, with the same rule: a row with neither text nor images is dropped, not kept
