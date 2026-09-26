@@ -274,9 +274,12 @@ export function useStartRun(techCardId?: number): StartRunState {
       if (runLedger.get(key) === clientRequestId) runLedger.delete(key);
       // The run comes back PENDING, not done: the pictures arrive when the provider answers.
       // Saying so is the difference between «nothing happened» and «it was booked» — and it is said
-      // while the card is on screen, whether or not the row that pressed is still mounted.
+      // while the card is on screen, whether or not the row that pressed is still mounted. WHERE
+      // they land is said too, and since 26.09 it is under GENERATE — the latest-generation row of
+      // the same block (O-53); the history below starts folded (O-54). Only the flat's GENERATE
+      // presses this door; FABRIC RENDER and 3D speak through `render/use-design-run.ts`.
       if (cardOnScreen(card)) {
-        showMessage('run started — the pictures land in the history when it finishes', 'success');
+        showMessage('run started — the pictures land under GENERATE when it finishes', 'success');
       }
       // The caller clears its fields HERE and not on the click: clearing the ask before the row is
       // filed would change the fingerprint under a failed attempt, and the retry would mint a fresh

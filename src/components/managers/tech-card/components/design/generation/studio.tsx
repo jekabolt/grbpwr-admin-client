@@ -23,9 +23,16 @@ import { GenerationHistory } from './generation-history';
  * where it was closed.
  *
  * `defaultRep='flat'` — owner, verbatim: «в FLAT — SHEET GENERATION HISTORY REPRESENTATION по
- * дефолту фильтр на флеты только». `defaultOpen` — the flat has no outputs strip of its own («the
- * bench slot IS the choice for a flat»), so the history is the only place a run's result is seen,
- * and folding it would hide the result behind a click.
+ * дефолту фильтр на флеты только».
+ *
+ * `defaultOpen={false}` (26.09, O-54) — owner, verbatim: «по дефолту GENERATION HISTORY должен быть
+ * заколапшен и справа должно показывать цифру колличество генераций и стрелочку для анколапса».
+ * It stood open because the flat had no outputs strip of its own and the history was the only place
+ * a run's result was seen. That reason is gone: the latest generation lands under GENERATE, at the
+ * bottom of INPUT — REFERENCES (`latest-generation.tsx`, O-53), with the same doors. The count and
+ * the chevron are the history's own fold door on the right of its header (`N FLAT RUNS ▸`); the fold
+ * is not remembered, as on the other four steps, and a live run does not unfold it. Folded, the
+ * organ stays MOUNTED — the poll and the recall intake above live in it.
  */
 export function GenerationStudio({
   band,
@@ -42,7 +49,7 @@ export function GenerationStudio({
       techCardId={techCardId}
       disabled={disabled}
       defaultRep='flat'
-      defaultOpen
+      defaultOpen={false}
     />
   );
 }

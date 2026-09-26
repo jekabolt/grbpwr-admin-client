@@ -47,10 +47,11 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  * шапке (п.23): отдельной линейки `RUNS ─── HIDE ▾` больше нет.
  * ⚠ ЧИСЛО В ШАПКЕ СЧИТАЕТ РОД ЭТОГО ШАГА, А НЕ КАРТОЧКУ (ревью Codex r2) — разбор у `liveShown`.
  * В ряду под шапкой счётчиков больше нет вовсе (r3 п.8): осталась одна дверь архива.
- * The five steps differ in TWO values only: the kind of the step (`defaultRep`, now a hard filter)
- * and whether the RUNS fold starts open (`defaultOpen`: open on FLAT, closed on the four steps that
- * have their own outputs section above). The block itself is never collapsed: its header and the
- * shelf door are always on screen.
+ * The five steps differ in the kind of the step (`defaultRep`, now a hard filter); the RUNS fold
+ * starts CLOSED on all five (`defaultOpen={false}`), because every step now has its own outputs
+ * above it — FLAT the latest generation under GENERATE since 26.09 (O-53/O-54), the other four their
+ * outputs section. The block itself is never collapsed: its header and the shelf door are always on
+ * screen.
  *
  * What the mock-up shows as gestures the product does with ITS OWN RPC and rules, unchanged here:
  * NOTHING IS EVER DELETED and the generation is the unit that collapses (archive is a flag on the
@@ -391,8 +392,9 @@ export function GenerationHistory({
   defaultRep?: RepFilter;
   /**
    * ═══ РАСКРЫТА ЛИ СВЁРТКА RUNS, КОГДА ЭКРАН ТОЛЬКО ОТКРЫЛИ (E-21…E-23, макет `fold`) ═══════
-   * На FLAT — да (лента там и есть выход); на pattern, fabric render, 3D и on model — нет: у них над
-   * лентой стоит СВОЙ раздел выходов. ⚠ Это положение СВЁРТКИ, а не блока: шапка и ряд KIND
+   * Нет — на всех пяти шагах: у каждого над лентой стоит СВОЙ выход (на FLAT с 26.09 — последняя
+   * генерация под GENERATE, O-53; владелец, O-54: «по дефолту GENERATION HISTORY должен быть
+   * заколапшен»). ⚠ Это положение СВЁРТКИ, а не блока: шапка и ряд KIND
    * стоят всегда, орган остаётся смонтированным, опрос живого прогона (`useRunPolling`) идёт —
    * без него «making a tile…» стояло бы вечно и человек нажал бы GENERATE второй раз, то есть
    * заплатил бы дважды. И поэтому же `RecallBenchIntake` стоит СНАРУЖИ свёртки.
