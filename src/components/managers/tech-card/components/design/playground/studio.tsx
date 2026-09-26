@@ -1,16 +1,15 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useCallback, type JSX } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
-import { PLAYGROUND_WF_PARAM } from '../core/chain';
+import { useWorkflowAddress } from './address';
 import { WorkflowGrid, workflowOpenable } from './grid';
 import { PlaygroundRecallIntake } from './recall';
 import { workflowByKey } from './registry';
 import { NOT_ON_THIS_SERVER } from './registry/common';
-import type { Draft, WorkflowKey } from './registry/types';
+import type { Draft, ResultsDef, WorkflowDef, WorkflowKey } from './registry/types';
 import { PlaygroundResults } from './results';
 import { WorkflowCard } from './workflow-card';
 import { useWorkflowDrafts } from './workflow-drafts';
@@ -26,8 +25,10 @@ import { WorkflowPanel } from './workflow-panel';
  *   · `?wf=<key>`  → «Select a workflow» with the open one (`WorkflowCard`, whose |→ is the one way
  *                    back), its form (`WorkflowPanel`) and its own results.
  *
- * `?wf=` IS THIS SCREEN'S, written with `replace` like the rail's `?step=` (C-01): the address names
- * the open workflow so a link lands on it, but opening one is not a history entry of its own.
+ * `?wf=` IS THIS SCREEN'S (`useWorkflowAddress`, `./address.ts`). Opening a workflow from the grid
+ * is a history entry, so the browser's Back returns to the grid (C-05); the recall intake and the
+ * legacy `?step=aside` rewrite stay `replace`; |→ walks back to the grid it was opened from, or
+ * writes the grid over a workflow a link landed on.
  *
  * ⚠ A WORKFLOW THIS SERVER CANNOT RUN IS NEVER OPENED INTO A FORM. An address naming one (an old
  * link, a server rolled back) draws the grid with one line saying which and why — a form whose
@@ -44,27 +45,12 @@ export function PlaygroundStudio({
   techCardId: number;
   disabled?: boolean;
 }): JSX.Element {
-  const [params, setParams] = useSearchParams();
   const drafts = useWorkflowDrafts(techCardId);
+  const { asked, setWf, openFromGrid, backToGrid } = useWorkflowAddress();
 
-  const asked = (params.get(PLAYGROUND_WF_PARAM) ?? '').trim();
   const def = workflowByKey(asked);
-  const open = def && workflowOpenable(def, band) ? def : null;
+  const open = openWorkflow(asked, band);
   const flow = open?.run ?? null;
-
-  const setWf = useCallback(
-    (key: WorkflowKey | null) =>
-      setParams(
-        (prev) => {
-          const p = new URLSearchParams(prev);
-          if (key) p.set(PLAYGROUND_WF_PARAM, key);
-          else p.delete(PLAYGROUND_WF_PARAM);
-          return p;
-        },
-        { replace: true },
-      ),
-    [setParams],
-  );
 
   const onRecall = useCallback(
     (key: WorkflowKey, draft: Draft) => {
@@ -89,7 +75,7 @@ export function PlaygroundStudio({
       >
         {open && flow ? (
           <div className='flex flex-col gap-8' data-playground-open={open.key}>
-            <WorkflowCard def={open} onBack={() => setWf(null)} />
+            <WorkflowCard def={open} onBack={backToGrid} />
             <WorkflowPanel
               /* One panel per workflow: its run state (refusal, pending) is about THAT form. */
               key={open.key}
@@ -111,7 +97,7 @@ export function PlaygroundStudio({
                 </Text>
               </CalloutBox>
             )}
-            <WorkflowGrid band={band} onOpen={setWf} />
+            <WorkflowGrid band={band} onOpen={openFromGrid} />
           </div>
         )}
       </Section>
@@ -119,6 +105,32 @@ export function PlaygroundStudio({
       <PlaygroundResults band={band} techCardId={techCardId} disabled={disabled} def={open} />
     </>
   );
+}
+
+/**
+ * The workflow the address opens, or `null` for the grid: a key this playground knows AND this server
+ * can run. The screen and the history under it (`playgroundHistoryMatch`) read the same answer.
+ */
+export function openWorkflow(
+  asked: string | null | undefined,
+  band: GetDesignBandResponse,
+): WorkflowDef | null {
+  const def = workflowByKey((asked ?? '').trim());
+  return def && workflowOpenable(def, band) ? def : null;
+}
+
+/**
+ * ═══ THE HISTORY UNDER AN OPEN WORKFLOW NARROWS TO IT (C-05) ════════════════════════════════════
+ *
+ * The open workflow's own results matcher (`def.run.results.match`), or `null` on the grid — the
+ * studio tab then passes the whole room. The matcher is a constant of its tile module, so the
+ * reference is stable per workflow (`GenerationHistory` memoises on it).
+ */
+export function playgroundHistoryMatch(
+  asked: string | null | undefined,
+  band: GetDesignBandResponse,
+): ResultsDef['match'] | null {
+  return openWorkflow(asked, band)?.run?.results.match ?? null;
 }
 
 function whyNotOpen(

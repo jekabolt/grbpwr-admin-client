@@ -32,7 +32,7 @@ import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
 import { MaterialSlots } from './material-slots';
 import { MoodBoard } from './mood-board';
-import { PlaygroundStudio } from './playground';
+import { PlaygroundStudio, playgroundHistoryMatch } from './playground';
 import { PatternStudio } from './pattern';
 import { DraftedProvider } from './head/drafted-provider';
 import { useStudioKindSwitch } from './history-recall';
@@ -628,8 +628,9 @@ export function StudioTab({
                         itself.
 
                         ⚠ ONE MOUNT POINT FOR THE PLAYGROUND SCREEN. The screen owns `?wf=`; the
-                        history below shows the room's runs (playground + recolour), and a
-                        workflow narrows it with `match`. */}
+                        history below shows the room's runs (playground + recolour); an open
+                        workflow narrows it to its own (`playgroundHistoryMatch`, C-05 — a stable
+                        matcher per workflow, the room's on the grid). */}
                     {step === 'playground' && (
                       <>
                         <PlaygroundStudio band={band} techCardId={techCardId} disabled={readOnly} />
@@ -638,7 +639,10 @@ export function StudioTab({
                           techCardId={techCardId}
                           disabled={readOnly}
                           defaultRep='playground'
-                          match={inPlaygroundRoom}
+                          match={
+                            playgroundHistoryMatch(params.get(PLAYGROUND_WF_PARAM), band) ??
+                            inPlaygroundRoom
+                          }
                           defaultOpen={false}
                         />
                       </>
