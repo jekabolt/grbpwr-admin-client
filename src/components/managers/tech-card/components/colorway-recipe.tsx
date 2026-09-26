@@ -4764,7 +4764,7 @@ export function ColorwayRecipes({
   // же удалённый элемент, пока не приедет рефетч.
   const handleDeleted = (deletedId: number) => {
     setDeletedIds((prev) => new Set(prev).add(deletedId));
-    if (activeId !== deletedId) return;
+    if (wireInt(activeId) !== wireInt(deletedId)) return;
     const survivor = colorways.find((c) => c.colorwayId !== deletedId);
     setSelected(survivor?.colorwayId ?? null);
   };
@@ -4792,14 +4792,14 @@ export function ColorwayRecipes({
               hex={colourwaySwatchHex(cw, hexByCode.get(cw.colorCode ?? ''))}
               frontUrl={frontRenderUrl(renderSidesByColorway.get(cw.colorwayId ?? 0))}
               status={statuses[cw.colorwayId ?? 0]}
-              selected={activeId === cw.colorwayId}
+              selected={wireInt(activeId) === wireInt(cw.colorwayId)}
               onSelect={() => setSelected(cw.colorwayId ?? null)}
             />
             {/* ТОЛЬКО ПОД ВЫБРАННОЙ ПЛИТКОЙ. Удаление — жест по одному продукту, тому самому, чей
                 рецепт открыт ниже; сетка из N необратимых контролов и приглашает промахнуться, и
                 перестаёт читаться как сетка цветов. Так же это делает жест двухшаговым: сначала
                 выбрать продукт, потом стереть его. */}
-            {canDeleteProduct && activeId === cw.colorwayId && (
+            {canDeleteProduct && wireInt(activeId) === wireInt(cw.colorwayId) && (
               <ColorwayDeleteControl
                 colorwayId={cw.colorwayId ?? 0}
                 /* ПОДТВЕРЖДЕНИЕ ПРОСИТ НАПЕЧАТАТЬ ТО СЛОВО, КОТОРОЕ СТОИТ НА ПЛИТКЕ. Пока плитка
@@ -4867,7 +4867,11 @@ export function ColorwayRecipes({
         // ниже (`SectionStack`). Сетка цветов — самостоятельная вещь, а не шапка первого блока, и
         // на стековом расстоянии она читалась бы как его часть. Спрятанный редактор — `display:
         // none`, поэтому ни отступа, ни щели во флексе от него не остаётся.
-        <div key={cw.colorwayId} hidden={activeId !== cw.colorwayId} className='mt-3.5'>
+        <div
+          key={cw.colorwayId}
+          hidden={wireInt(activeId) !== wireInt(cw.colorwayId)}
+          className='mt-3.5'
+        >
           <ColorwayRecipeEditor
             colorway={cw}
             bomItems={bomItems}
@@ -4876,8 +4880,8 @@ export function ColorwayRecipes({
             pieces={pieces}
             // null всем скрытым: редакторы смонтированы все сразу, и без этого 7 колорвеев ×
             // 40 деталей положили бы в спрятанный DOM ~300 полигонов по сотням точек.
-            shapes={activeId === cw.colorwayId ? shapeByKey : null}
-            active={activeId === cw.colorwayId}
+            shapes={wireInt(activeId) === wireInt(cw.colorwayId) ? shapeByKey : null}
+            active={wireInt(activeId) === wireInt(cw.colorwayId)}
             sizeIds={sizeIds}
             sizeNameById={sizeNameById}
             swatchHex={colourwaySwatchHex(cw, hexByCode.get(cw.colorCode ?? ''))}
