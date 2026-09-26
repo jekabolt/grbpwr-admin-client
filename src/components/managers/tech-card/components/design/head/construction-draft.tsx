@@ -1916,11 +1916,12 @@ export function ConstructionDraft({
                 ⚠ ГРУППА СТОИТ ВНУТРИ РАЗДЕЛА `to decide`, А НЕ СВОИМ БЛОКОМ. Это тоже работа, ждущая
                 решения, и второй блок под тем же заголовком объявил бы черновик двумя органами.
 
-                ⚠ ЧТО ГОВОРИТ ПОДПИСЬ — ЭТО ПРОВЕРЯЕМАЯ ПРАВДА, А НЕ ОБОРОТ РЕЧИ. Сервер отдельного
-                списка деталей НЕ ДАЁТ (см. `DetailSuggestion` в модели), и имена здесь — это
-                НАЗВАННЫЕ МОДЕЛЬЮ АСПЕКТЫ, то есть узлы, которые она увидела на картинках. Строка
-                «the aspects the draft named» именно это и произносит: обещать «модель выбрала, что
-                снять крупным планом» было бы обещанием чужого решения. */}
+                ⚠ ЧТО ГОВОРИТ ПОДПИСЬ — ЭТО ПРОВЕРЯЕМАЯ ПРАВДА, А НЕ ОБОРОТ РЕЧИ. С O-33 (26.09) имена
+                здесь — список `flat_details`: детали, которым черновик велит СВОЮ рисовку (см.
+                `DetailSuggestion` в модели), а не аспекты, как было. Подпись называет ровно этот
+                источник — «the draft says need a drawing of their own» — и пересказывает слова
+                черновика, а не выносит за человека решение: чип можно не брать, слот — снести `✕`.
+                Пустой список — ответ «ни одной», и группы тогда нет вовсе. */}
             {serverSpeaks && detailIdeas.length > 0 && (
               <div className='mt-5' data-c19-draft-details={detailIdeas.length}>
                 <GroupLabel
@@ -1936,8 +1937,8 @@ export function ConstructionDraft({
                         стоит только у того, чего на верстаке НЕТ — не завелось (отмечено, кнопка
                         живая) или было снесено. Подпись говорит ровно это. */}
                     <Text size='micro' variant='label' component='p' className='mb-2.5'>
-                      the aspects the draft named that are not on FLAT SLOTS · each becomes an empty
-                      named slot under DETAILS, ready for its close-up
+                      details the draft says need a drawing of their own, not yet on FLAT SLOTS ·
+                      each becomes an empty named slot under DETAILS
                     </Text>
                     <ChipRow>
                       {openDetails.map((idea) => (
@@ -1955,7 +1956,9 @@ export function ConstructionDraft({
                             })
                           }
                           data-c19-draft-detail={idea.id}
-                          title={idea.why}
+                          /* `note` детали (O-33) — у слота верстака поля под него нет; пустая
+                             записка не рисует пустой подсказки. */
+                          title={idea.why || undefined}
                         >
                           {idea.name}
                         </Chip>
@@ -1982,7 +1985,7 @@ export function ConstructionDraft({
                 ) : (
                   <EmptyState className='py-1'>
                     <span className='uppercase text-textColor'>every detail is already there</span>{' '}
-                    · each aspect the draft named has a slot on FLAT SLOTS
+                    · each detail the draft named has a slot on FLAT SLOTS
                   </EmptyState>
                 )}
               </div>
