@@ -169,7 +169,7 @@ export function MediaSlot({
 
   // Подсказка о жестах пишется один раз здесь: каждый вызывающий, сочиняя её сам, писал бы про ⌘V
   // по-своему — или забывал, и жест оставался бы невидимым.
-  const gestures = editMode ? '⌘V · drag a file · click to browse' : null;
+  const gestures = editMode ? 'drag or click to browse' : null;
   // Подпись слота и жесты стоят ОДНОЙ строкой: «4:5 · ⌘V · drop…». Двумя они превращают рамку
   // высотой в шесть строк текста, а слоты бывают ростом в 96 пикселей.
   const secondLine = hint === null ? null : [hint, gestures].filter(Boolean).join(' · ') || null;

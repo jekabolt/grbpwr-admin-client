@@ -144,7 +144,7 @@ export function DragDropArea({
         >
           <span className='leading-tight'>+ add media</span>
           <span className='text-nano normal-case leading-tight tracking-normal'>
-            ⌘V · drag a file · click to browse
+            drag or click to browse
           </span>
         </button>
       )}
@@ -169,7 +169,7 @@ export function DragDropArea({
           {/* Две строки пустого состояния должны отличаться: приглашение — 12px жирным,
               подсказка — 10px. Раньше их разводили случайные 16px наследования. */}
           <span className='font-bold uppercase'>drag &amp; drop media here</span>
-          <span className='text-micro uppercase'>⌘V · or click to browse</span>
+          <span className='text-micro uppercase'>drag or click to browse</span>
         </button>
       )}
       {showAddButton && (

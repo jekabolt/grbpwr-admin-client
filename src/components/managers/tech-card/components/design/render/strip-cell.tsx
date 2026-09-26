@@ -311,7 +311,7 @@ export function EmptyStripCell({
 
       {onPlaceMedia && (
         <Text size='nano' variant='label' component='span'>
-          ⌘V · drop · browse
+          drag or click to browse
         </Text>
       )}
     </div>
