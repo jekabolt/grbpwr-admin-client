@@ -1,6 +1,9 @@
 import type { common_DesignRun } from 'api/proto-http/admin';
 
 import { RETIRED_PRESET_WORD, notYet } from './common';
+import { CHANGE_COLOR } from './tiles/change-color';
+import { CREATE_EDIT } from './tiles/create-edit';
+import { REMOVE_BACKGROUND } from './tiles/remove-background';
 import type { WorkflowDef, WorkflowKey } from './types';
 
 /**
@@ -36,7 +39,7 @@ export const WORKFLOWS: readonly WorkflowDef[] = [
     key: 'change_color',
     title: 'Change a Color',
     blurb: 'Change a color on your fashion design.',
-    gate: notYet,
+    ...CHANGE_COLOR,
   },
   {
     key: 'swap_fabrics',
@@ -61,7 +64,7 @@ export const WORKFLOWS: readonly WorkflowDef[] = [
     key: 'remove_background',
     title: 'Remove Background',
     blurb: 'Cut the subject out and keep it on a transparent background.',
-    gate: notYet,
+    ...REMOVE_BACKGROUND,
   },
   {
     key: 'extend_image',
@@ -80,7 +83,7 @@ export const WORKFLOWS: readonly WorkflowDef[] = [
     key: 'create_edit',
     title: 'Create or edit images',
     blurb: 'Create or edit any image from a text prompt or reference images.',
-    gate: notYet,
+    ...CREATE_EDIT,
   },
   {
     key: 'image_to_3d',
