@@ -16,7 +16,8 @@ import GenericPopover from 'ui/components/popover';
  * ошибки, написать более детально или наоборот короче».
  *
  * ФОРМА: ровно одна кнопка `ai ✦` в правом нижнем углу обёртки поля; клик открывает поповер с
- * тремя строками (improve · expand · shorten). Ответ ЗАМЕНЯЕТ текст поля через `onApply`, и на
+ * четырьмя строками (improve · expand · shorten · as a prompt — переписать как промпт для генерации;
+ * 26.09, O-50). Ответ ЗАМЕНЯЕТ текст поля через `onApply`, и на
  * десять секунд рядом появляется `undo ↶` — вернуть, что было. Никаких второй кнопки, переключателей
  * режимов и превью: поле само и есть превью, а откат — одна дверь.
  *
@@ -75,7 +76,7 @@ import GenericPopover from 'ui/components/popover';
  * рукой — остаётся слева от ручки, в полосе `pb-7`, которую поле держит под ним. Появление и уход
  * кнопки ряд не двигают: место ряда задано отступами, а не содержимым.
  */
-export type EnhanceMode = 'improve' | 'expand' | 'shorten';
+export type EnhanceMode = 'improve' | 'expand' | 'shorten' | 'prompt';
 
 /** Что за поле — закрытый список (сервер держит такой же enum; свободный текст в промпт не идёт). */
 export type EnhanceField = 'description' | 'note' | 'words' | 'silhouette' | 'fabric' | 'other';
@@ -84,6 +85,7 @@ export const ENHANCE_MODES: ReadonlyArray<{ mode: EnhanceMode; label: string; hi
   { mode: 'improve', label: 'improve', hint: 'fix errors, make it clearer' },
   { mode: 'expand', label: 'expand', hint: 'more detail' },
   { mode: 'shorten', label: 'shorten', hint: 'to the point' },
+  { mode: 'prompt', label: 'as a prompt', hint: 'rewrite as a generation prompt' },
 ];
 
 export type EnhanceRequest = {
@@ -109,6 +111,7 @@ const MODE_WIRE: Record<EnhanceMode, EnhanceTextMode> = {
   improve: 'ENHANCE_TEXT_MODE_IMPROVE',
   expand: 'ENHANCE_TEXT_MODE_EXPAND',
   shorten: 'ENHANCE_TEXT_MODE_SHORTEN',
+  prompt: 'ENHANCE_TEXT_MODE_PROMPT',
 };
 
 const FIELD_WIRE: Record<EnhanceField, EnhanceTextField> = {
@@ -496,7 +499,9 @@ export function AiEnhance({
               variant='secondary'
               size='xs'
               disabled={busy}
-              title={busy ? 'working…' : 'ai enhance: improve, expand or shorten'}
+              title={
+                busy ? 'working…' : 'ai enhance: improve, expand, shorten or rewrite as a prompt'
+              }
               // Appears with a short fade (the button is absolute: nothing moves); leaves at once.
               className='bg-bgColor transition-opacity duration-100 starting:opacity-0 motion-reduce:transition-none'
             >
