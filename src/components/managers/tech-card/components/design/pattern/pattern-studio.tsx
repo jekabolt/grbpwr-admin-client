@@ -75,7 +75,7 @@ import {
  *   PATTERN — a fabric swatch for every colourway and slot     step 3 · k of n fabrics · money
  *   ■ ROSSO ───────────────────────────────────────────────────────────── 1 of 2 fabrics
  *     [ячейка 138×162]  OUTER  main material  100% cotton twill · 300 gsm
- *                       COLOUR [18-1664 TCX ▾]   TEXTURE [+ texture]            [generate]
+ *                       COLOUR [18-1664 TCX ▾]   [+ texture]   [generate]
  *     ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
  *     [ячейка]          LINING  lining  …
  *   IMAGE TO FABRIC — a seamless fabric out of a photograph ─────────────────────────────────
@@ -204,7 +204,7 @@ export function PatternStudio({
      Пара прогона читается с его ПАРАМЕТРОВ (`colorwayId` + `pattern.bomItemId`), а не угадывается.
      И СЛЕДЫ ПРОГОНОВ, НЕ ДАВШИХ ТКАНИ (ревью M-1, `runTraces`): пары — строкой под рядом,
      «картинка → ткань» — пунктирной плиткой в голове карусели. */
-  const { liveByPair, unpaired, traces } = useMemo(() => {
+  const { liveByPair, unpaired, traces, making } = useMemo(() => {
     const drawn = new Set<string>();
     for (const c of shown)
       for (const s of slots) drawn.add(pairKey(c.colorwayId ?? 0, s.bomItemId));
@@ -216,7 +216,13 @@ export function PatternStudio({
         if (!byPairRun.has(key)) byPairRun.set(key, r);
       } else rest.push(r);
     }
-    return { liveByPair: byPairRun, unpaired: rest, traces: runTraces(band, drawn) };
+    return {
+      liveByPair: byPairRun,
+      unpaired: rest,
+      traces: runTraces(band, drawn),
+      // Пары, чей свотч сейчас делается, — для «making…» у листа `use for ▸` (U-6).
+      making: new Set(byPairRun.keys()) as ReadonlySet<string>,
+    };
   }, [band, shown, slots]);
 
   const total = shown.length * slots.length;
@@ -359,6 +365,7 @@ export function PatternStudio({
         colorways={shown}
         slots={slots}
         live={unpaired}
+        making={making}
         failed={traces.image}
         ceiling={ceiling}
       />
@@ -366,7 +373,11 @@ export function PatternStudio({
   );
 }
 
-/** Подпись поля в строке управления — одна мера на `colour` и `texture`. */
+/**
+ * Подпись поля в строке управления. Стоит у ЦВЕТА и только у него (UX-проход, U-2): чип цвета
+ * показывает КОД («18-1664 TCX»), а не глагол, и без подписи не сказано, что это за поле; дверь
+ * текстуры называет себя сама («+ texture»), и подпись «TEXTURE» рядом читалась словом дважды.
+ */
 function FieldWord({ children }: { children: string }): JSX.Element {
   return (
     <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
@@ -378,13 +389,17 @@ function FieldWord({ children }: { children: string }): JSX.Element {
 /**
  * ═══ ОДИН РЯД — ОДНА ПАРА (КОЛОРВЕЙ, СЛОТ), ДВЕ СТРОКИ ═════════════════════════════════════════
  *
- *   [ячейка]   ИМЯ СЛОТА  назначение  состав · спецификация              ← строка 1: что это
- *              COLOUR [пантон ▾]   TEXTURE [+ texture]       [generate]  ← строка 2: из чего
+ *   [ячейка]   ИМЯ СЛОТА  назначение  состав · спецификация    ← строка 1: что это
+ *              COLOUR [пантон ▾]   [+ texture]   [generate]   ← строка 2: из чего — и дверь
  *
- * Ряд — единица работы (ревью, UX-решение): `generate` стоит у КАЖДОГО ряда, но одна, тихая
- * (secondary) и в конце строки; модель «сначала выбери ряд, потом одна кнопка» завела бы скрытое
- * состояние выбора. Закрытые ворота — погашенная дверь с поводом в `title` (`InertDoor`), никогда
- * не серая плашка и никогда не отсутствие.
+ * Ряд — единица работы (ревью, UX-решение): `generate` стоит у КАЖДОГО ряда, но одна и тихая
+ * (secondary, той же меры `xs`, что двери рядом); модель «сначала выбери ряд, потом одна кнопка»
+ * завела бы скрытое состояние выбора. Закрытые ворота — погашенная дверь с поводом в `title`
+ * (`InertDoor`), никогда не серая плашка и никогда не отсутствие.
+ *
+ * ⚠ `generate` — В КОНЦЕ СТРОКИ УПРАВЛЕНИЯ, А НЕ У КРАЯ РЯДА (UX-проход, U-1). На 1280 `ml-auto`
+ * уносил её на ~650px от цвета и текстуры, из которых она делает свотч, — глаз искал дверь не там,
+ * где выбирал. Теперь она стоит следом за дверью текстуры на обычном шаге строки (`gap-x-6`, 24px).
  */
 function SlotRow({
   band,
@@ -533,7 +548,12 @@ function SlotRow({
             >
               {slot.name}
             </Text>
-            {slot.purposeLabel && <Pill tone='mut'>{slot.purposeLabel}</Pill>}
+            {/* ИМЯ = НАЗНАЧЕНИЕ — ОДНО СЛОВО ОДИН РАЗ (U-3): у строки без своего имени имя берётся
+                из назначения, и «CONTRAST / FACING [CONTRAST / FACING]» говорило одно дважды. */}
+            {slot.purposeLabel &&
+              slot.purposeLabel.trim().toLowerCase() !== slot.name.trim().toLowerCase() && (
+                <Pill tone='mut'>{slot.purposeLabel}</Pill>
+              )}
           </div>
           <Text
             size='micro'
@@ -567,7 +587,6 @@ function SlotRow({
           </div>
 
           <div className='flex items-center gap-2' data-slot-texture={texture?.id || 'none'}>
-            <FieldWord>texture</FieldWord>
             {texture ? (
               <>
                 <Thumb media={texture} alt='texture' className='h-10 w-10' />
@@ -610,11 +629,11 @@ function SlotRow({
             )}
           </div>
 
-          <span data-slot-generate={gate.ok ? 'live' : 'inert'} className='ml-auto'>
+          <span data-slot-generate={gate.ok ? 'live' : 'inert'}>
             {gate.ok ? (
               <Button
                 variant='secondary'
-                size='sm'
+                size='xs'
                 disabled={run.isPending}
                 onClick={start}
                 title={`make a seamless swatch of ${slot.name} in this colour — when it lands it becomes the fabric of ${colorwayName} · ${slot.name} in FABRIC RENDER`}
@@ -622,7 +641,7 @@ function SlotRow({
                 {run.isPending ? 'starting…' : 'generate'}
               </Button>
             ) : (
-              <InertDoor label='generate' reason={gate.reason} size='sm' />
+              <InertDoor label='generate' reason={gate.reason} />
             )}
           </span>
         </div>

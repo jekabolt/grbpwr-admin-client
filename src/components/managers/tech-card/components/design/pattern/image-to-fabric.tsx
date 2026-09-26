@@ -52,6 +52,7 @@ export function ImageToFabric({
   colorways,
   slots,
   live,
+  making,
   failed,
   ceiling,
 }: {
@@ -62,6 +63,8 @@ export function ImageToFabric({
   slots: ClothSlot[];
   /** Живые прогоны без своей ячейки на экране — карусель ставит их первыми. */
   live: common_DesignRun[];
+  /** Пары (`pairKey`), чей свотч сейчас делается, — пометка «making…» в `use for ▸` (U-6). */
+  making: ReadonlySet<string>;
   /** Новейший прогон «картинка → ткань», если он кончился без ткани (`runTraces`, ревью M-1). */
   failed: common_DesignRun | null;
   /** Потолок полки — один ответ на обе двери шага (`shelfCeiling`, ревью m-2). */
@@ -225,6 +228,7 @@ export function ImageToFabric({
         colorways={colorways}
         slots={slots}
         live={live}
+        making={making}
         failed={failed}
       />
     </div>

@@ -350,6 +350,8 @@ for (const vp of VIEWPORTS) {
       ['блок IMAGE TO FABRIC', '[data-image-to-fabric]', 1],
       ['плиток карусели', '[data-fabric-tile]', 3],
       ['живых generate', '[data-slot-generate="live"]', 5],
+      ['нано-строк «где в рендере» под плитками (U-5)', '[data-fabric-worn-by]', 2],
+      ['унаследованных цветов на двери (m-3/U-4)', '[data-slot-colour-inherited]', 2],
     ]);
     await shoot(page, '3-full', vp);
     await shoot(page, '3-full-viewport', vp, { fullPage: false });
@@ -455,6 +457,13 @@ for (const vp of VIEWPORTS) {
         })),
     );
     entry.notes.push(`StartDesignRun: ${JSON.stringify(runs)}`);
+    // Тост успеха — по роду прогона (U-7): у свотча «in its slot — or in LAST FABRICS».
+    const toast = await page
+      .getByText('run started', { exact: false })
+      .first()
+      .textContent({ timeout: 3000 })
+      .catch(() => '(нет тоста)');
+    entry.notes.push(`тост: ${(toast ?? '').trim()}`);
     await row.evaluate((n) => n.scrollIntoView({ block: 'center' }));
     await shoot(page, '7-generate-after', vp, { fullPage: false });
   });

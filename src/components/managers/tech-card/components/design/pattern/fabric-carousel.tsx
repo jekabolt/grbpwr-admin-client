@@ -49,6 +49,11 @@ import {
  * `✕` СПРАШИВАЕТ ТОЛЬКО ТОГДА, КОГДА ЕСТЬ ЧТО ТЕРЯТЬ: ткань, надетая на слоты, уносит привязки с
  * собой (FK ON DELETE CASCADE), и эти слоты остаются без ткани в рендере — об этом говорят словами
  * перед удалением. Ненадетая ткань удаляется сразу: её потеря — одна плитка, видимая здесь же.
+ *
+ * ГДЕ ТКАНЬ В РЕНДЕРЕ — ДВУМЯ МЕРАМИ (UX-проход, U-5). Угол лица говорит только факт — `in render`;
+ * КАКИЕ пары её носят, говорит серая нано-строка под именем («ROSSO · outer, OLIVE · outer»,
+ * без повторов, полный список — в `title`). Угловой ярлык в 80px ширины обрезал адрес до
+ * «IN RENDER · R…», то есть не говорил ни того, ни другого.
  */
 export function FabricCarousel({
   band,
@@ -57,6 +62,7 @@ export function FabricCarousel({
   colorways,
   slots,
   live,
+  making,
   failed,
 }: {
   band: GetDesignBandResponse;
@@ -74,6 +80,11 @@ export function FabricCarousel({
    * читался бы как два прогона.
    */
   live: common_DesignRun[];
+  /**
+   * Пары (`pairKey`), чей свотч делается прямо сейчас: лист `use for ▸` помечает их «making…» (U-6)
+   * — так же, как «replaces» помечает одетую пару, — потому что надетое сейчас сменит посадка.
+   */
+  making: ReadonlySet<string>;
   /**
    * Новейший прогон «картинка → ткань», кончившийся без ткани (`runTraces`, ревью M-1): пунктирная
    * плитка в голове полосы, пока его не сменит новый прогон. Следы пар сюда не едут — у них ряд.
@@ -200,6 +211,7 @@ export function FabricCarousel({
               wearable={wearable}
               slots={slots}
               byPair={byPair}
+              making={making}
               names={names}
             />
           ))}
@@ -261,6 +273,7 @@ function FabricTile({
   wearable,
   slots,
   byPair,
+  making,
   names,
 }: {
   asset: common_DesignAsset;
@@ -271,6 +284,7 @@ function FabricTile({
   wearable: common_AdminColorwayRef[];
   slots: ClothSlot[];
   byPair: Map<string, common_DesignAsset>;
+  making: ReadonlySet<string>;
   names: { cw: Map<number, string>; slot: Map<number, string> };
 }): JSX.Element {
   const { upsertAsset, deleteAsset } = useAssetWrites(techCardId);
@@ -299,15 +313,12 @@ function FabricTile({
       ),
     [band, id, names],
   );
-  const wornLabel =
-    worn.length === 0
-      ? ''
-      : worn.length === 1
-        ? `in render · ${worn[0]}`
-        : `in render · ${worn.length} slots`;
+  /** Пары словами, без повторов (два слота с одним именем у одного колорвея — одна строка). */
+  const wornLine = useMemo(() => [...new Set(worn)].join(', '), [worn]);
 
-  /* ДВЕРЬ `use for ▸`: колорвей, потом слот. У листа — что станет с парой: «worn» — уже эта ткань,
-     «replaces» — у пары есть другая, и она сменится (сама она остаётся здесь, в карусели). */
+  /* ДВЕРЬ `use for ▸`: колорвей, потом слот. У листа — что станет с парой: «making…» — для пары
+     прямо сейчас делается свотч, и его посадка сменит всё, что надето сейчас (U-6); «worn» — уже эта
+     ткань; «replaces» — у пары есть другая, и она сменится (сама она остаётся здесь, в карусели). */
   const branches: PickerBranch[] = useMemo(
     () =>
       slots.length === 0
@@ -324,20 +335,23 @@ function FabricTile({
               leaves: slots.map((s) => {
                 const current = byPair.get(pairKey(cw, s.bomItemId));
                 const mine = (current?.id ?? 0) === id;
+                const inFlight = making.has(pairKey(cw, s.bomItemId));
                 return {
                   value: String(s.bomItemId),
                   label: s.name,
-                  note: mine ? 'worn' : current ? 'replaces' : '',
-                  title: mine
-                    ? `${label} is already the fabric of ${cwName} · ${s.name}`
-                    : current
-                      ? `${label} becomes the fabric of ${cwName} · ${s.name} instead of ${assetLabel(current)} — that one stays here`
-                      : `${label} becomes the fabric of ${cwName} · ${s.name}`,
+                  note: inFlight ? 'making…' : mine ? 'worn' : current ? 'replaces' : '',
+                  title: inFlight
+                    ? `a swatch for ${cwName} · ${s.name} is being made — when it lands it becomes the fabric of this slot, in place of whatever is chosen now`
+                    : mine
+                      ? `${label} is already the fabric of ${cwName} · ${s.name}`
+                      : current
+                        ? `${label} becomes the fabric of ${cwName} · ${s.name} instead of ${assetLabel(current)} — that one stays here`
+                        : `${label} becomes the fabric of ${cwName} · ${s.name}`,
                 };
               }),
             };
           }),
-    [slots, wearable, byPair, id, label],
+    [slots, wearable, byPair, making, id, label],
   );
 
   /**
@@ -426,10 +440,10 @@ function FabricTile({
               seam
             </CornerLabel>
           )}
-          {wornLabel && (
+          {worn.length > 0 && (
             /* Узкий ярлык: нижний правый угол занят тихим `rename`, и на наведении они бы наехали. */
             <CornerLabel at='bl' className='max-w-[calc(100%-56px)]' data-fabric-worn={worn.length}>
-              {wornLabel}
+              in render
             </CornerLabel>
           )}
         </PictureTile>
@@ -500,9 +514,24 @@ function FabricTile({
           tracking='label'
           component='span'
           className='min-w-0 truncate font-bold'
-          title={worn.length ? `${label} — worn by ${worn.join(', ')}` : label}
+          title={worn.length ? `${label} — worn by ${wornLine}` : label}
         >
           {label}
+        </Text>
+      )}
+      {wornLine && (
+        /* ГДЕ ОНА В РЕНДЕРЕ — ПАРЫ СЛОВАМИ, ОДНОЙ СЕРОЙ НАНО-СТРОКОЙ (U-5). Длинный список режется
+           многоточием, целиком он — в `title`. */
+        <Text
+          size='nano'
+          variant='label'
+          tracking='label'
+          component='span'
+          className='-mt-0.5 min-w-0 truncate uppercase'
+          title={`in FABRIC RENDER for ${wornLine}`}
+          data-fabric-worn-by={id}
+        >
+          {wornLine}
         </Text>
       )}
 
