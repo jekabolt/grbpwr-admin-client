@@ -1,7 +1,7 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type { GetDesignBandResponse, common_DesignRunParams } from 'api/proto-http/admin';
-import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { useFormContext, type UseFormReturn } from 'react-hook-form';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -23,13 +23,22 @@ import { useMoodMinimumGate } from './chain-rail';
 import { GROUP_GAP, PRICED_LATER, latestRunOfKind } from './core';
 import { moodMinimumGate, openGateDoor } from './core/chain';
 import { markedPlatesOf } from './fix-markup';
+import {
+  patchFlatInput,
+  readFlatInput,
+  useFlatInput,
+  type FlatAsk,
+  type FlatLayout,
+} from './flat-input';
 import { formatMoney } from './generation/money';
+import type { RunRefusal as ServerRefusal } from './generation/refusal';
 import { useStartRun } from './generation/use-generation';
 import { WhatModelGetsModal } from './modals';
 import { isBoardRow, type BoardItem } from './mood-board';
 import { GenerateRow, LockBar, RunRefusal } from './render/generate-row';
-import { serverSpeaksNow } from './use-design-band';
+import { designKeys, serverSpeaksNow } from './use-design-band';
 import { ACTIVE_VIEWS, DETAIL_VIEW, viewLabel } from './views';
+import { materializeWords } from './words-seed';
 
 /**
  * ═══ РЯД ЗАПУСКА БЛОКА INPUT — REFERENCES (`runDoors('flat')` макета) ═══════════════════════════
@@ -107,78 +116,41 @@ const LAYOUT_OPTIONS = [
     hint: 'each ticked view comes back on its own',
   },
 ];
-type Layout = 'one' | 'per_view';
+type Layout = FlatLayout;
 
 /** Утверждение карточки замораживает её (`index.tsx`, `frozen`); строка — проводная. */
 const RELEASED = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 
 /**
- * ═══ ВХОД ФЛЭТА ЗАНЯТ — ЭТО СОСТОЯНИЕ КАРТОЧКИ, А НЕ РЯДА (ревью раунда 2, MAJOR B) ═══════════════
- *
- * Смена шага размонтирует ряд и секцию (`studio-tab.tsx` рисует их только на FLAT), а продолжение
- * GENERATE после `await flush` живёт дальше — прогон уходит, за него платят. Пока «занято» было
- * состоянием ряда, вернувшийся ряд рисовал живой GENERATE над ещё идущим запросом, и второй щелчок
- * был вторым платным прогоном. Поэтому занятость — модульная, по карточке, и её читают все, кто
- * рисует вход: ряд (`starting…`, отказ щелчку, запертые виды), секция (WORDS, роли, ✕, CLEAR).
- *   · `run`      — `saving`: ждём сохранения карточки; `starting`: запрос прогона в полёте;
- *   · `refused`  — почему последний GENERATE остановился ДО прогона (исход flush или «карточку
- *                  утвердили, пока она сохранялась»); строка стоит до следующего сохранения;
- *   · `clearing` — CLEAR снимает роли по одной (тот же довод: цикл переживает смену шага).
+ * ВХОД ФЛЭТА ЗАНЯТ — состояние КАРТОЧКИ, а не ряда: хранилище `flat-input.ts` (ревью раунда 2,
+ * MAJOR B; раунда 3, m1/m2). Засев WORDS — `words-seed.ts` (D-20'''').
  */
-export type FlatInputState = {
-  run: 'saving' | 'starting' | null;
-  refused: FlushResult | 'released' | null;
-  clearing: boolean;
-};
-const FLAT_INPUT_IDLE: FlatInputState = { run: null, refused: null, clearing: false };
-const flatInput = new Map<number, FlatInputState>();
-const flatInputListeners = new Set<() => void>();
-
-/** Занятость входа СЕЙЧАС — для щелчков: снимок отрисовки мог отстать на кадр. */
-export function readFlatInput(card: number): FlatInputState {
-  return flatInput.get(card) ?? FLAT_INPUT_IDLE;
-}
-
-function patchFlatInput(card: number, patch: Partial<FlatInputState>): void {
-  const prev = readFlatInput(card);
-  const next = { ...prev, ...patch };
-  if (next.run === prev.run && next.refused === prev.refused && next.clearing === prev.clearing) {
-    return;
-  }
-  if (next.run === null && next.refused === null && !next.clearing) flatInput.delete(card);
-  else flatInput.set(card, next);
-  flatInputListeners.forEach((listener) => listener());
-}
-
-function subscribeFlatInput(listener: () => void): () => void {
-  flatInputListeners.add(listener);
-  return () => {
-    flatInputListeners.delete(listener);
-  };
-}
-
-/** Занятость входа флэта этой карточки — живая, переживает смену шага. */
-export function useFlatInput(card: number): FlatInputState {
-  const read = () => readFlatInput(card);
-  return useSyncExternalStore(subscribeFlatInput, read, read);
-}
-
-/** CLEAR снимает роли: GENERATE ждёт, пока он не закончит (ревью раунда 2, [2]). */
-export function setFlatInputClearing(card: number, clearing: boolean): void {
-  patchFlatInput(card, { clearing });
-}
 
 /**
- * D-20''': засев WORDS показан, но не сохранён (`shouldDirty: false`). Прогон читает СОХРАНЁННУЮ
- * карточку, поэтому перед `flush` слова на экране, которых нет на сервере, помечаются грязными —
- * эта запись их и понесёт. «Сохранённое» — база формы: после каждой записи тела `index.tsx`
- * переносит её на то, что вернул сервер (`settleAfterBodySave`).
+ * ЧТО СЕРВЕР ЗАМОРОЗИТ В ПРОГОН ФЛЭТА — КАК СОХРАНЕНО (ревью раунда 3, m6): слова, посадка, строки
+ * доски, указания и роли референсов. В запрос это не едет (см. `startRun`); это часть НАМЕРЕНИЯ и
+ * уходит в отпечаток леджера (`useStartRun`): правка слов или роли после двусмысленного провала с теми
+ * же VIEWS — новое намерение, и старый id повторяться не должен. Роли — из кэша полосы, как их
+ * прочёл экран; форма — после `flush`, то есть сохранённая.
  */
-function markShownWords(form: UseFormReturn<TechCardFormData>): void {
-  const shown = (form.getValues('garmentDescription') ?? '') as string;
-  const stored = ((form.control._defaultValues as Partial<TechCardFormData> | undefined)
-    ?.garmentDescription ?? '') as string;
-  if (shown !== stored) form.setValue('garmentDescription', shown, { shouldDirty: true });
+function flatSnapshot(qc: QueryClient, card: number, now: TechCardFormData): unknown {
+  const band = qc.getQueryData<GetDesignBandResponse>(designKeys.band(card));
+  const refs = (band?.references ?? [])
+    .map((r) => [
+      r.mediaId ?? 0,
+      (r.role ?? '').trim(),
+      r.ordinal ?? 0,
+      (r.note ?? '').trim(),
+      r.detailSlotId ?? 0,
+    ])
+    .sort((a, b) => (a[0] as number) - (b[0] as number));
+  return {
+    words: ((now.garmentDescription ?? '') as string).trim(),
+    fit: now.fit ?? '',
+    board: now.moodboardMedia ?? [],
+    callouts: now.callouts ?? [],
+    refs,
+  };
 }
 
 export function FlatRunRow({
@@ -194,10 +166,19 @@ export function FlatRunRow({
   const speaks = serverSpeaksDesign();
   const qc = useQueryClient();
   const startRun = useStartRun(techCardId);
-  const [views, setViews] = useState<Record<string, boolean>>({ front: true, back: true });
-  const [detailTicks, setDetailTicks] = useState<Record<number, boolean>>({});
+  /* ЧИПЫ — С ЗАПРОСА В ПОЛЁТЕ, если он есть (ревью раунда 3, m2): ряд, вернувшийся после смены шага,
+     рисует то, за что уже платят, а не выбор по умолчанию рядом со `starting…`. Пока запрос идёт,
+     выбор заперт (`choiceOff`), поэтому локальное состояние с ним не расходится. */
+  const [views, setViews] = useState<Record<string, boolean>>(
+    () => readFlatInput(techCardId).ask?.views ?? { front: true, back: true },
+  );
+  const [detailTicks, setDetailTicks] = useState<Record<number, boolean>>(
+    () => readFlatInput(techCardId).ask?.detailTicks ?? {},
+  );
   /** «one picture» по умолчанию (T23, D-19): виды приходят одним листом и режутся сами (`autoSplit`). */
-  const [layout, setLayout] = useState<Layout>('one');
+  const [layout, setLayout] = useState<Layout>(
+    () => readFlatInput(techCardId).ask?.layout ?? 'one',
+  );
   const bench = useMemo(() => readBench(band, 'flat'), [band]);
 
   const tickedSides = ACTIVE_VIEWS.filter((v) => views[v]);
@@ -269,12 +250,23 @@ export function FlatRunRow({
       patchFlatInput(techCardId, { refused: null });
     }
   }, [autosave.status, techCardId]);
-  const refusalSentence =
-    refused === 'released'
+  /* КАРТОЧКА, КОТОРАЯ БОЛЬШЕ НЕ СОХРАНЯЕТСЯ (утверждена, только для чтения, автосейв выключен), не
+     сохранится и дальше — строка «до следующего сохранения» стояла бы вечно. Почему GENERATE молчит,
+     говорит замок ряда (`gateReason`: «this card is read-only»), второй строки не нужно (ревью раунда 3,
+     m7). Не рисуется с того же кадра, а снимается эффектом — без вспышки. */
+  const saveless = !!disabled || autosave.status === 'off';
+  useEffect(() => {
+    if (saveless && refused !== null) patchFlatInput(techCardId, { refused: null });
+  }, [saveless, refused, techCardId]);
+  const refusalSentence = saveless
+    ? null
+    : refused === 'released'
       ? 'the card was released while it was being saved'
-      : refused
-        ? flushRefusalSentence(refused, autosave.errorsCount) || 'save the card first'
-        : null;
+      : refused === 'stopped'
+        ? 'the card stopped saving while GENERATE waited for it'
+        : refused
+          ? flushRefusalSentence(refused, autosave.errorsCount) || 'save the card first'
+          : null;
 
   /**
    * ДВЕРЬ У ОТКАЗА СОХРАНЕНИЯ (ревью m3). `invalid` — к первому полю с ошибкой: проверка громкая
@@ -318,7 +310,7 @@ export function FlatRunRow({
     : disabled
       ? 'this card is read-only'
       : input.clearing
-        ? 'the prompt is being cleared — generate once it is done'
+        ? 'the prompt is being changed — generate once it is done'
         : moodReason
           ? moodReason
           : noViews
@@ -332,7 +324,14 @@ export function FlatRunRow({
     // и щелчок по ряду, вернувшемуся к идущему запросу, отказываются одинаково.
     const at = readFlatInput(card);
     if (at.run !== null || at.clearing) return;
-    // Запрос — то, что на экране В МОМЕНТ щелчка; на время ожидания выбор заперт (`choiceOff`).
+    /* АВТОСЕЙВ БЫЛ ЖИВ НА ЩЕЛЧКЕ? (ревью раунда 3, m3). Выключенный или уничтоженный автосейв (уход со
+       страницы посреди flush, утверждение) отвечает `off`, а `off` пропускает прогон — и для записи, у
+       которой автосейва нет вовсе, так и надо. Но если на щелчке он был ЖИВ, `off` после ожидания
+       значит «сохранение остановилось»: прогон по несохранённой карточке не стартует. */
+    const wasOn = autosave.status !== 'off';
+    // Запрос — то, что на экране В МОМЕНТ щелчка; на время ожидания выбор заперт (`choiceOff`), а
+    // сам выбор лежит в хранилище карточки: ряд, вернувшийся после смены шага, рисует его (m2).
+    const ask: FlatAsk = { views: { ...views }, detailTicks: { ...detailTicks }, layout };
     const params: common_DesignRunParams = {
       views: [...ticked],
       detailSlotIds: [...tickedDetailIds],
@@ -356,15 +355,24 @@ export function FlatRunRow({
       flatSlotIds: [],
       extraInputMediaIds: [],
     };
-    patchFlatInput(card, { run: 'saving', refused: null });
+    patchFlatInput(card, { run: 'saving', refused: null, serverRefusal: null, ask });
+    let refusal: ServerRefusal | null = null;
     try {
-      markShownWords(form);
+      // D-20'''': засев, показанный в пустом поле, уходит в форму «грязным» ДО flush — эта запись его
+      // и понесёт, прогон прочтёт его из сохранённой карточки.
+      materializeWords(card, form);
       let saved: FlushResult;
       try {
         saved = await autosave.flush('flat');
       } catch {
         // Контракт обещает исход, а не исключение; бросок читается как неудача сохранения.
         saved = 'error';
+      }
+      if (saved === 'off' && wasOn) {
+        patchFlatInput(card, {
+          refused: form.getValues('approvalState') === RELEASED ? 'released' : 'stopped',
+        });
+        return;
       }
       if (!flushAllowsRun(saved)) {
         patchFlatInput(card, { refused: saved });
@@ -391,11 +399,18 @@ export function FlatRunRow({
       // Отказ уже стоит строкой под рядом (`moodReason`), второй не нужен.
       if (!gateNow.ok) return;
       patchFlatInput(card, { run: 'starting' });
-      // Ответ ждётся здесь, а не в наблюдателе ряда: «run started», сброс леджера и снятие занятости
-      // случаются и тогда, когда ряда уже нет (`useStartRun`).
-      await startRun.start({ kind: 'flat', ask: '', params });
+      // Ответ ждётся здесь, а не в наблюдателе ряда: «run started», сброс леджера, отказ сервера и
+      // снятие занятости случаются и тогда, когда ряда уже нет (`useStartRun`).
+      refusal = await startRun.start({
+        kind: 'flat',
+        ask: '',
+        params,
+        snapshot: flatSnapshot(qc, card, now),
+      });
     } finally {
-      patchFlatInput(card, { run: null });
+      // Отказ сервера — в хранилище карточки, до прочтения или следующего GENERATE; с ним остаются
+      // чипы отказанного запроса. Без отказа запрос отпущен.
+      patchFlatInput(card, { run: null, serverRefusal: refusal, ask: refusal ? ask : null });
     }
   };
 
@@ -584,8 +599,23 @@ export function FlatRunRow({
       )}
       {/* ОТКАЗ ЗАПУСКА — СТОЙКАЯ ПОЛОСА, НЕ СНЕКБАР (CONTRACT §E), тот же орган, что у FABRIC RENDER
           и 3D: слова сервера дословно, «nothing was charged» только когда сервер ОТВЕТИЛ. */}
-      <RunRefusal refusal={startRun.refusal} onDismiss={startRun.dismissRefusal} />
-      <WhatModelGetsModal open={wmgOpen} onOpenChange={setWmgOpen} band={band} />
+      <RunRefusal
+        refusal={input.serverRefusal}
+        onDismiss={() =>
+          patchFlatInput(
+            techCardId,
+            readFlatInput(techCardId).run === null
+              ? { serverRefusal: null, ask: null }
+              : { serverRefusal: null },
+          )
+        }
+      />
+      <WhatModelGetsModal
+        open={wmgOpen}
+        onOpenChange={setWmgOpen}
+        band={band}
+        techCardId={techCardId}
+      />
     </div>
   );
 }

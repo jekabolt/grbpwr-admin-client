@@ -18,6 +18,7 @@ import { openDoor } from '../doors';
 import type { BoardItem } from '../mood-board';
 import { FIT_WHERE, calloutWords, type CalloutLike } from '../render/what-model-gets';
 import { viewLabel } from '../views';
+import { useShownWords } from '../words-seed';
 
 /**
  * WHAT THE MODEL GETS — THE FLAT ARM: a reader of the FORM.
@@ -78,10 +79,13 @@ export function WhatModelGetsModal({
   open,
   onOpenChange,
   band,
+  techCardId = 0,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   band: GetDesignBandResponse;
+  /** Чьи слова на экране (засев WORDS живёт по карточке, `words-seed.ts`). */
+  techCardId?: number;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
@@ -96,7 +100,11 @@ export function WhatModelGetsModal({
   // prose printed for the factory, `garment_description` is the sentence the operator writes FOR
   // THE MODEL and which goes into every run. Showing one under the other's name made this panel
   // state, next to a price, that the model receives words it does not receive.
-  const garment = (useWatch({ control, name: 'garmentDescription' }) ?? '') as string;
+  // D-20'''': СЛОВА НА ЭКРАНЕ, а не одно значение формы. Засев WORDS в форму не пишется, пока человек
+  // не подействовал, и GENERATE флэта отдаёт его перед сохранением (`materializeWords`) — то есть
+  // модель получит ровно то, что стоит в поле. Опись, читавшая одну форму, показала бы пустые слова
+  // рядом с ценой прогона, который их получит.
+  const garment = useShownWords(techCardId, control);
   const fit = (useWatch({ control, name: 'fit' }) ?? '') as string;
 
   const roleOf = useMemo(() => {

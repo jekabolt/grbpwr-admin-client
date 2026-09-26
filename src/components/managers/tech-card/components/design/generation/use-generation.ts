@@ -38,8 +38,10 @@ import { hasLiveRun } from './run-state';
 export function useGenerationWrites(techCardId?: number) {
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
-  // `useDesignWrites` also marks this card as held on screen (`cardOnScreen`).
-  const { invalidate } = useDesignWrites(techCardId);
+  // Called for the one thing it does besides writing: it marks this card as held on screen
+  // (`cardOnScreen`). Its `invalidate` is not re-exported — the refreshes here go to the WRITTEN
+  // card (`invalidateWritten`), and nobody read the returned one (review round 3, nit).
+  useDesignWrites(techCardId);
 
   /**
    * THE CARD A WRITE WAS FOR, carried by the mutation itself (`onMutate` → context), for the same
@@ -149,8 +151,8 @@ export function useGenerationWrites(techCardId?: number) {
   });
 
   return useMemo(
-    () => ({ startRun, cancelRun, archiveRun, draftIdea, invalidate }),
-    [startRun, cancelRun, archiveRun, draftIdea, invalidate],
+    () => ({ startRun, cancelRun, archiveRun, draftIdea }),
+    [startRun, cancelRun, archiveRun, draftIdea],
   );
 }
 
@@ -165,22 +167,30 @@ export type StartRunInput = {
    * server re-reads run N's frozen snapshot; nothing about those inputs is composed here.
    */
   rerunOfRunId?: number;
+  /**
+   * WHAT THE SERVER WILL FREEZE INTO THE RUN, AS SAVED — the words, the fit, the moodboard rows, the
+   * callouts and the reference roles (review round 3, m6). It is NOT sent (see `startRun`); it is
+   * digested into the fingerprint, because it is part of the intent: after an ambiguous failure an
+   * edit of the words or a role, retried with the same VIEWS, would otherwise replay the old id, and
+   * the server would hand back the OLD run — with the old prompt — as «started».
+   */
+  snapshot?: unknown;
 };
 
 export type StartRunState = {
   /**
    * `onStarted` fires only when the row is actually filed — never on the click. The promise settles
-   * when the server has answered (either way), also after the calling screen has unmounted.
-   */
-  start: (input: StartRunInput, onStarted?: () => void) => Promise<void>;
-  isPending: boolean;
-  /**
-   * THE SERVER'S REFUSAL, VERBATIM, until a person dismisses it or a run starts. The same shape
+   * when the server has answered (either way), also after the calling screen has unmounted, and it
+   * RESOLVES TO THE SERVER'S REFUSAL, VERBATIM (`null` once the run is filed). The same shape
    * `useDesignRun` gives FABRIC RENDER and 3D, so all three studios print a refusal through one organ
-   * (`RunRefusal`) with the server's words — not a flag the screen has to word for itself.
+   * (`RunRefusal`) with the server's words.
+   *
+   * THE REFUSAL IS THE CALLER'S TO KEEP, NOT THIS HOOK'S (review round 3, m2). It lived in the hook's
+   * state, and a step switch unmounted the flat row with it: the refusal «that stays until read»
+   * survived only as a snackbar. The caller files it where its screen state lives — the flat row in
+   * its per-card store (`flat-input.ts`) — and a remounted row shows it again.
    */
-  refusal: RunRefusal | null;
-  dismissRefusal: () => void;
+  start: (input: StartRunInput, onStarted?: () => void) => Promise<RunRefusal | null>;
 };
 
 /**
@@ -206,24 +216,44 @@ export type StartRunState = {
  */
 const runLedger = new Map<string, string>();
 
+/**
+ * A SHORT, STABLE DIGEST of a JSON-able value (cyrb53: two 32-bit lanes, 53 bits out). It keeps the
+ * ledger key readable; a collision would need two different prompts of one card, pressed with one
+ * VIEWS selection, to land on the same 53 bits.
+ */
+export function digestOf(value: unknown): string {
+  const text = JSON.stringify(value ?? null) ?? 'null';
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
 export function useStartRun(techCardId?: number): StartRunState {
   const { showMessage } = useSnackBarStore();
   const { startRun } = useGenerationWrites(techCardId);
-  const [refusal, setRefusal] = useState<RunRefusal | null>(null);
 
   const start = useCallback(
-    async (input: StartRunInput, onStarted?: () => void): Promise<void> => {
+    async (input: StartRunInput, onStarted?: () => void): Promise<RunRefusal | null> => {
       const card = techCardId ?? 0;
-      if (card <= 0) return;
+      if (card <= 0) return null;
       // THE RERUN TARGET IS PART OF THE INTENT, so it is part of the fingerprint. Left out, «rerun
       // run 3» and «rerun run 7» typed with the same delta phrase would replay ONE request id, and
       // the second press would come back OK holding the first run — a success reported for a
       // request nobody made.
+      // THE SAVED PROMPT IS PART OF THE INTENT TOO (review round 3, m6) — see `snapshot`.
       const fingerprint = JSON.stringify([
         input.kind,
         input.ask,
         input.params,
         input.rerunOfRunId ?? 0,
+        input.snapshot === undefined ? '' : digestOf(input.snapshot),
       ]);
       const key = `${card}:${fingerprint}`;
       let clientRequestId = runLedger.get(key);
@@ -231,16 +261,15 @@ export function useStartRun(techCardId?: number): StartRunState {
         clientRequestId = newClientRequestId();
         runLedger.set(key, clientRequestId);
       }
-      setRefusal(null);
       try {
         await startRun.mutateAsync({ ...input, clientRequestId });
       } catch (error) {
         // Beside the snackbar the hook-level `onError` already shows: the snackbar lives for
-        // seconds, the refusal stays on the screen until read (CONTRACT §E). A 409 is not kept:
-        // the band moved first, and the hook-level handler has already re-read it. The ledger
-        // entry stays — the retry of the same intent replays the same id.
-        setRefusal(refusalFromError(error, clientRequestId));
-        return;
+        // seconds, the refusal stays on the screen until read (CONTRACT §E) — in the CALLER's
+        // store (see `start`). A 409 is not kept: the band moved first, and the hook-level handler
+        // has already re-read it. The ledger entry stays — the retry of the same intent replays the
+        // same id.
+        return refusalFromError(error, clientRequestId);
       }
       if (runLedger.get(key) === clientRequestId) runLedger.delete(key);
       // The run comes back PENDING, not done: the pictures arrive when the provider answers.
@@ -253,13 +282,14 @@ export function useStartRun(techCardId?: number): StartRunState {
       // filed would change the fingerprint under a failed attempt, and the retry would mint a fresh
       // id and buy a second picture.
       onStarted?.();
+      return null;
     },
     [techCardId, startRun, showMessage],
   );
 
-  const dismissRefusal = useCallback(() => setRefusal(null), []);
-
-  return { start, isPending: startRun.isPending, refusal, dismissRefusal };
+  // `isPending` is gone (review round 3, nit): nobody read it — the flat row's «starting…» comes
+  // from its per-card store, which outlives this hook's observer.
+  return useMemo(() => ({ start }), [start]);
 }
 
 /**

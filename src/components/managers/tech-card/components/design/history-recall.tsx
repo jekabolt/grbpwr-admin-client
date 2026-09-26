@@ -24,6 +24,7 @@ import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../schema';
 import { findSlot } from './bench-slot';
+import { flatInputBusy, readFlatInput, setFlatInputClearing } from './flat-input';
 import { GapPill } from './generation/run-panel';
 import { isRunLive } from './generation/run-state';
 import { runHandle } from './handles';
@@ -39,6 +40,7 @@ import { pictureIsModel } from './threed/media';
 import { useDesignWrites } from './use-design-band';
 import { isPictureHidden } from './visibility';
 import { isActiveView, isLegacyView, normaliseViewKey, viewLabel } from './views';
+import { settleWords, shownWords } from './words-seed';
 
 /**
  * RECALL — ЖЕСТ «СОБЕРИ ЭТОТ ПРОГОН ЗАНОВО», И ОН РАЗРУШИТЕЛЕН, ПОЭТОМУ СПРАШИВАЕТ.
@@ -787,7 +789,9 @@ export function RecallDoors({
       otherListIds: ((form.getValues('technicalMedia') ?? []) as BoardItem[]).map((i) => i.mediaId),
       callouts: (form.getValues('callouts') ?? []) as MoodCalloutRow[],
       roled,
-      description: (form.getValues('garmentDescription') ?? '') as string,
+      // D-20'''': СЛОВА НА ЭКРАНЕ — засев WORDS в форму не пишется, пока человек не подействовал, и
+      // вопрос «описание будет заменено» обязан видеть то, что человек видит в поле.
+      description: shownWords(techCardId, form),
       pinned: platedMedia(band),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1091,6 +1095,17 @@ export function RecalledRunPrompt({
       showMessage(`this card is read-only — nothing was taken from ${handle}`, 'error');
       return;
     }
+    /* ВХОД ЗАНЯТ — РЕКОЛ ОТКАЗЫВАЕТСЯ (ревью раунда 3, m1). Идёт GENERATE (карточка сохраняется, запрос
+       прогона в полёте — сервер снимает роли В МОМЕНТ запуска) или вход уже переписывается (CLEAR,
+       кроп, деталь): роли и строки, переписанные посреди этого, дали бы прогону не тот промпт, за
+       который нажали. Жест не делает ничего и говорит об этом; повторить его можно, когда вход свободен. */
+    if (flatInputBusy(readFlatInput(techCardId))) {
+      showMessage(
+        `the flat input is busy — a run is being saved or started, or the prompt is being changed; nothing was taken from ${handle}`,
+        'error',
+      );
+      return;
+    }
 
     const rows = (form.getValues('moodboardMedia') ?? []) as BoardItem[];
     const otherListIds = ((form.getValues('technicalMedia') ?? []) as BoardItem[]).map(
@@ -1108,7 +1123,8 @@ export function RecalledRunPrompt({
       otherListIds,
       callouts,
       roled,
-      description: (form.getValues('garmentDescription') ?? '') as string,
+      // D-20'''': слова на экране (см. вопрос у двери).
+      description: shownWords(techCardId, form),
       // Полосы у этой копии может и не быть; без неё плиты неизвестны, и разметка не трогается.
       pinned: band ? platedMedia(band) : null,
     });
@@ -1125,123 +1141,134 @@ export function RecalledRunPrompt({
       return;
     }
 
+    /* ПОД ЗАМКОМ ВХОДА ДО ПОСЛЕДНЕЙ ЗАПИСИ (m1): роли снимаются и ставятся по одной, и GENERATE,
+       нажатый посреди, снял бы наполовину старый промпт — он ждёт («the prompt is being changed»).
+       Замок по карточке, в модульном хранилище: переживает смену шага, как и сам цикл. */
+    const card = techCardId;
+    setFlatInputClearing(card, true);
     void (async () => {
-      const said: string[] = [];
+      try {
+        const said: string[] = [];
 
-      /* ── чистка: сначала роли, потом строки ──
-         Тот же порядок, что у одиночного ✕ и у «clear the input»: снятая строка при живой роли
-         рождала бы носителя роли без строки на карточке. Роли снимаются ПО ОДНОЙ — bulk-глагола на
-         проводе нет, — и частичный отказ не съедается: не снявшаяся роль остаётся на экране вместе
-         со своей строкой, а итог говорит, сколько именно осталось. */
-      const stayed = new Set<number>();
-      for (const mediaId of plan.clearRoles) {
-        try {
-          await setReferenceRole.mutateAsync({ mediaId, role: '', ordinal: 0, note: '' });
-        } catch {
-          stayed.add(mediaId);
+        /* ── чистка: сначала роли, потом строки ──
+           Тот же порядок, что у одиночного ✕ и у «clear the input»: снятая строка при живой роли
+           рождала бы носителя роли без строки на карточке. Роли снимаются ПО ОДНОЙ — bulk-глагола на
+           проводе нет, — и частичный отказ не съедается: не снявшаяся роль остаётся на экране вместе
+           со своей строкой, а итог говорит, сколько именно осталось. */
+        const stayed = new Set<number>();
+        for (const mediaId of plan.clearRoles) {
+          try {
+            await setReferenceRole.mutateAsync({ mediaId, role: '', ordinal: 0, note: '' });
+          } catch {
+            stayed.add(mediaId);
+          }
         }
-      }
 
-      const live = (form.getValues('moodboardMedia') ?? []) as BoardItem[];
-      const dropping = new Set(plan.clearRows.filter((id) => !stayed.has(id)));
-      const cleared = live.filter((i) => !(isInputRow(i) && dropping.has(i.mediaId)));
+        const live = (form.getValues('moodboardMedia') ?? []) as BoardItem[];
+        const dropping = new Set(plan.clearRows.filter((id) => !stayed.has(id)));
+        const cleared = live.filter((i) => !(isInputRow(i) && dropping.has(i.mediaId)));
 
-      const result = appendBoardPictures({
-        live: cleared,
-        inScope: isInputRow,
-        otherListIds,
-        added: plan.add.map((k) => k.media),
-        kind: REFERENCE_KIND,
-        max: INPUT_MAX,
-        scopeLabel: 'input',
-      });
-      // Запись по КОРНЮ массива, как и везде в этой паре блоков: два экземпляра поля-массива на одно
-      // имя не синхронизируются, а мудборд правит вторую половину того же списка.
-      form.setValue('moodboardMedia', result.next as TechCardFormData['moodboardMedia'], {
-        shouldDirty: true,
-      });
-      if (result.accepted.length) onAccepted?.(result.accepted);
+        const result = appendBoardPictures({
+          live: cleared,
+          inScope: isInputRow,
+          otherListIds,
+          added: plan.add.map((k) => k.media),
+          kind: REFERENCE_KIND,
+          max: INPUT_MAX,
+          scopeLabel: 'input',
+        });
+        // Запись по КОРНЮ массива, как и везде в этой паре блоков: два экземпляра поля-массива на одно
+        // имя не синхронизируются, а мудборд правит вторую половину того же списка.
+        form.setValue('moodboardMedia', result.next as TechCardFormData['moodboardMedia'], {
+          shouldDirty: true,
+        });
+        if (result.accepted.length) onAccepted?.(result.accepted);
 
-      /* ── разметка ──
-         Указание живёт на медиа, а не на строке входа, поэтому снимается только у картинок, которые
-         уходят с карточки СОВСЕМ: у той, что осталась на доске, разметка чужая этому жесту. */
-      if (dropping.size) {
-        // СПИСОК НА СНОС, А НЕ НА СОХРАНЕНИЕ (см. `pinned` у планировщика): в `callouts` лежат ещё и
-        // указания на плитах листа, и «сохранить то, что осталось во входе и на доске» унесло бы их
-        // целиком. Уходят ровно те медиа, которые план назвал в вопросе, и ни одним больше — плюс
-        // сторож на тот случай, если роль не снялась и строка осталась стоять.
-        const gonePictures = new Set(
-          [...plan.losing].filter(
-            (id) => dropping.has(id) && !result.next.some((i) => i.mediaId === id),
-          ),
-        );
-        const kept = callouts.filter((c) => !gonePictures.has(c?.mediaId ?? 0));
-        const lost = callouts.length - kept.length;
-        if (lost > 0) {
-          form.setValue('callouts', kept as TechCardFormData['callouts'], { shouldDirty: true });
-          said.push(
-            `${count(lost, 'callout')} removed with ${lost === 1 ? 'its' : 'their'} picture`,
+        /* ── разметка ──
+           Указание живёт на медиа, а не на строке входа, поэтому снимается только у картинок, которые
+           уходят с карточки СОВСЕМ: у той, что осталась на доске, разметка чужая этому жесту. */
+        if (dropping.size) {
+          // СПИСОК НА СНОС, А НЕ НА СОХРАНЕНИЕ (см. `pinned` у планировщика): в `callouts` лежат ещё и
+          // указания на плитах листа, и «сохранить то, что осталось во входе и на доске» унесло бы их
+          // целиком. Уходят ровно те медиа, которые план назвал в вопросе, и ни одним больше — плюс
+          // сторож на тот случай, если роль не снялась и строка осталась стоять.
+          const gonePictures = new Set(
+            [...plan.losing].filter(
+              (id) => dropping.has(id) && !result.next.some((i) => i.mediaId === id),
+            ),
           );
+          const kept = callouts.filter((c) => !gonePictures.has(c?.mediaId ?? 0));
+          const lost = callouts.length - kept.length;
+          if (lost > 0) {
+            form.setValue('callouts', kept as TechCardFormData['callouts'], { shouldDirty: true });
+            said.push(
+              `${count(lost, 'callout')} removed with ${lost === 1 ? 'its' : 'their'} picture`,
+            );
+          }
         }
-      }
 
-      /* ── слова ──
-         Вопрос про описание задан у двери вместе со всем остальным, поэтому здесь он не повторяется:
-         человек уже прочитал, что текст будет заменён, и нажал. Второе окно на один жест — это не
-         «подробнее», а сомнение в собственном вопросе. */
-      if (plan.words) {
-        form.setValue('garmentDescription', plan.words, { shouldDirty: true });
-      }
-
-      /* ── роли принятых картинок ──
-         Роль ставится ТОЛЬКО на своей новой строке: рекол воспроизводит вход прогона, а не
-         переписывает роли, которые человек поставил соседним картинкам. Порядковый номер промпта —
-         позиция во входе, как и у ручной правки: он нигде не хранится и выводится сканом. */
-      const order = result.next.filter(isInputRow).map((i) => i.mediaId);
-      const roleOf = new Map(plan.add.filter((k) => k.role).map((k) => [k.mediaId, k]));
-      let roledOk = 0;
-      let roleFailed = 0;
-      for (const media of result.accepted) {
-        const it = roleOf.get(media.id ?? 0);
-        if (!it) continue;
-        try {
-          await setReferenceRole.mutateAsync({
-            mediaId: it.mediaId,
-            role: it.role,
-            ordinal: Math.max(1, order.indexOf(it.mediaId) + 1),
-            note: it.note,
-          });
-          roledOk++;
-        } catch {
-          roleFailed++;
+        /* ── слова ──
+           Вопрос про описание задан у двери вместе со всем остальным, поэтому здесь он не повторяется:
+           человек уже прочитал, что текст будет заменён, и нажал. Второе окно на один жест — это не
+           «подробнее», а сомнение в собственном вопросе. */
+        if (plan.words) {
+          form.setValue('garmentDescription', plan.words, { shouldDirty: true });
+          // Слова пришли из прогона — засев больше не подставляется (D-20'''').
+          settleWords(techCardId);
         }
-      }
 
-      /* ── ИТОГ, НАЗЫВАЮЩИЙ ОБЕ ПОЛОВИНЫ ЧАСТИЧНОГО ИСХОДА ── */
-      const added = result.accepted.length;
-      said.unshift(
-        added
-          ? `${count(added, 'picture')} from ${handle} ${added === 1 ? 'is' : 'are'} in the input`
-          : `nothing was added from ${handle}`,
-      );
-      if (plan.clearRows.length)
-        said.push(`${count(plan.clearRows.length - stayed.size, 'picture')} cleared before it`);
-      if (stayed.size)
-        said.push(
-          `${count(stayed.size, 'role')} could not be removed — ${stayed.size === 1 ? 'that reference stays' : 'those references stay'} in the input`,
+        /* ── роли принятых картинок ──
+           Роль ставится ТОЛЬКО на своей новой строке: рекол воспроизводит вход прогона, а не
+           переписывает роли, которые человек поставил соседним картинкам. Порядковый номер промпта —
+           позиция во входе, как и у ручной правки: он нигде не хранится и выводится сканом. */
+        const order = result.next.filter(isInputRow).map((i) => i.mediaId);
+        const roleOf = new Map(plan.add.filter((k) => k.role).map((k) => [k.mediaId, k]));
+        let roledOk = 0;
+        let roleFailed = 0;
+        for (const media of result.accepted) {
+          const it = roleOf.get(media.id ?? 0);
+          if (!it) continue;
+          try {
+            await setReferenceRole.mutateAsync({
+              mediaId: it.mediaId,
+              role: it.role,
+              ordinal: Math.max(1, order.indexOf(it.mediaId) + 1),
+              note: it.note,
+            });
+            roledOk++;
+          } catch {
+            roleFailed++;
+          }
+        }
+
+        /* ── ИТОГ, НАЗЫВАЮЩИЙ ОБЕ ПОЛОВИНЫ ЧАСТИЧНОГО ИСХОДА ── */
+        const added = result.accepted.length;
+        said.unshift(
+          added
+            ? `${count(added, 'picture')} from ${handle} ${added === 1 ? 'is' : 'are'} in the input`
+            : `nothing was added from ${handle}`,
         );
-      if (result.refusal) said.push(result.refusal);
-      if (plan.gone) said.push(`${plan.gone} gone from the card, skipped`);
-      if (roledOk) said.push(`${roledOk} kept ${roledOk === 1 ? 'its role' : 'their roles'}`);
-      if (roleFailed)
-        said.push(
-          `${roleFailed} could not be given ${roleFailed === 1 ? 'its role' : 'their roles'} — set ${roleFailed === 1 ? 'it' : 'them'} by hand`,
+        if (plan.clearRows.length)
+          said.push(`${count(plan.clearRows.length - stayed.size, 'picture')} cleared before it`);
+        if (stayed.size)
+          said.push(
+            `${count(stayed.size, 'role')} could not be removed — ${stayed.size === 1 ? 'that reference stays' : 'those references stay'} in the input`,
+          );
+        if (result.refusal) said.push(result.refusal);
+        if (plan.gone) said.push(`${plan.gone} gone from the card, skipped`);
+        if (roledOk) said.push(`${roledOk} kept ${roledOk === 1 ? 'its role' : 'their roles'}`);
+        if (roleFailed)
+          said.push(
+            `${roleFailed} could not be given ${roleFailed === 1 ? 'its role' : 'their roles'} — set ${roleFailed === 1 ? 'it' : 'them'} by hand`,
+          );
+        if (plan.words) said.push('the description was taken from the run');
+        showMessage(
+          said.join(' · '),
+          stayed.size || roleFailed || result.refusal ? 'error' : 'success',
         );
-      if (plan.words) said.push('the description was taken from the run');
-      showMessage(
-        said.join(' · '),
-        stayed.size || roleFailed || result.refusal ? 'error' : 'success',
-      );
+      } finally {
+        setFlatInputClearing(card, false);
+      }
     })();
     // `form`, `showMessage` и `setReferenceRole` намеренно не в списке: приём взводится ВЫБОРОМ, и
     // перезапуск его от смены ссылки на мутацию был бы вторым приёмом того же жеста.

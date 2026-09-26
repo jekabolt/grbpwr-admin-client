@@ -3,7 +3,7 @@ import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState, type ChangeEvent } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 import { AiEnhance } from 'ui/components/ai-enhance';
 import { Button } from 'ui/components/button';
@@ -29,7 +29,8 @@ import { useTechCardAutosave } from './autosave-contract';
 import { displayDetailName, readBench } from './bench-slot';
 import { useMoodMinimumGate } from './chain-rail';
 import { cropFamilies } from './generation/composite';
-import { FlatRunRow, readFlatInput, setFlatInputClearing, useFlatInput } from './flat-run-row';
+import { flatInputBusy, readFlatInput, setFlatInputClearing, useFlatInput } from './flat-input';
+import { FlatRunRow } from './flat-run-row';
 import { RecalledRunPrompt } from './history-recall';
 import { EmptyState, GROUP_GAP, PlaceOrDrawCell } from './core';
 import { cardFactsContext, composeWords } from './core/card-facts';
@@ -39,7 +40,16 @@ import { PictureTile } from './picture-tile';
 import { benchSides, pictureOffersSplit } from './render/model';
 import { useSplitToInput } from './split-to-input';
 import { ACTIVE_VIEWS, DETAIL_VIEW, normaliseViewKey, viewLabel } from './views';
-import { useDesignWrites } from './use-design-band';
+import { cardOnScreen, useDesignWrites } from './use-design-band';
+import {
+  dropWords,
+  lockWords,
+  offerWords,
+  pickShownWords,
+  settleWords,
+  useWordsSeed,
+  wordsDecided,
+} from './words-seed';
 
 /**
  * РЕФЕРЕНСЫ — ВХОД, а не доска. Мудборд собирает настроение для человека; здесь лежит то, что
@@ -126,17 +136,10 @@ import { useDesignWrites } from './use-design-band';
 const GARMENT_MAX = 2000;
 
 /**
- * ═══ ЗАМОК ЗАСЕВА WORDS НА СЕССИЮ (D-20'', волна 25.09) ═══════════════════════════════════════
- *
- * Карточка, чьи WORDS в этой сессии (до перезагрузки страницы) уже засеяны, очищены CLEAR или хоть
- * раз стояли непустыми, больше не засевается. МОДУЛЬНЫЙ, а не `useRef`: секция размонтируется на
- * каждой смене шага (`studio-tab.tsx` рисует её только на FLAT), и замок в ref забывался бы по пути
- * CLEAR → MOODBOARD → FLAT — стёртое засевалось бы снова. Значение — засеянный текст и сколько
- * секций в него не влезло (строка «+N omitted» переживает перемонтирование); `null` — замок без
- * засева (CLEAR, текст человека).
+ * ЗАМОК ЗАСЕВА WORDS НА СЕССИЮ (D-20'') и сам засев (D-20'''') живут в `words-seed.ts`: засев в
+ * значения формы не пишется, пока человек не подействовал, и все, кто читает слова на экране, читают
+ * их оттуда.
  */
-type WordsSeed = { text: string; omitted: number };
-const wordsSession = new Map<number, WordsSeed | null>();
 
 type RoleItem = { value: string; label: string; disabled?: boolean };
 
@@ -514,8 +517,8 @@ export function ReferencesSection({
    *    уходит с ней по контракту провода, других записей этот жест не делает.
    * 2. ОПИСАНИЕ чистится ТОЛЬКО В ФОРМЕ — у поля нет своего RPC, оно едет с документом. `''` —
    *    команда «сотри» трёхсостоянийного протокола; до сейва сервер держит старый текст. Вопрос
-   *    ниже называет это словами, чтобы «clear» не обещал больше, чем делает. CLEAR ставит карточку
-   *    в сессионный замок засева (`wordsSession`): стёртое не засевается до перезагрузки страницы.
+   *    ниже называет это словами, чтобы «clear» не обещал больше, чем делает. CLEAR снимает засев
+   *    (`dropWords`, `words-seed.ts`): стёртое не засевается до перезагрузки страницы.
    */
   async function runClear() {
     setClearAsk(false);
@@ -536,11 +539,16 @@ export function ReferencesSection({
           failed.add(mediaId);
         }
       }
-      wordsSession.set(card, null);
+      // D-20'''': `''` в форму (стёрты сохранённые — эта правка и уедет; стоял один засев — форма и так
+      // пуста, писать нечего), и засев снят до перезагрузки страницы.
       setValue('garmentDescription', '', { shouldDirty: true });
+      dropWords(card);
     } finally {
       setFlatInputClearing(card, false);
     }
+    // Итог — только над карточкой, которая на экране: страница перемонтируется по карточке, и итог
+    // CLEAR карточки A не должен печататься над карточкой B (ревью раунда 3, m5).
+    if (!cardOnScreen(card)) return;
     if (failed.size) {
       showMessage(
         `cleared ${roleIds.length - failed.size} of ${roleIds.length} prompt roles — ${failed.size} reference${failed.size === 1 ? '' : 's'} kept ${failed.size === 1 ? 'its' : 'their'} role`,
@@ -577,23 +585,24 @@ export function ReferencesSection({
    * `pbStringFromNull`), схема держит `''` как `''`, и провод не отличает «никогда не писали» от
    * «стёрли». Поэтому засев применяется, когда ВСЁ сразу:
    *   · поле пусто после trim;
-   *   · карточки нет в сессионном замке (`wordsSession`: засеяно, очищено CLEAR или стояло
-   *     непустым — тогда и стёртое руками не засевается);
+   *   · о карточке в этой сессии ещё не решено (`words-seed.ts`: засеяно, очищено CLEAR, стояло
+   *     непустым или стёрто руками — тогда не засевается);
    *   · факты готовы (словарь приехал — иначе строки `category:` не будет никогда) и строка непуста;
    *   · карточку можно писать, и автосейв не `off` (засев, который не сохранится, — неправда на
    *     экране: прогон читает СОХРАНЁННУЮ карточку);
    *   · минимум доски пройден (`useMoodMinimumGate`): ранний визит не замораживает однострочник
-   *     «category: …» — засев дождётся доски и выйдет полным.
+   *     «category: …» — засев дождётся доски и выйдет полным; ИЛИ флэт уже сделан (D-13'').
    * Принятое ограничение: очищенные и СОХРАНЁННЫЕ WORDS после перезагрузки засеются снова — сервер
    * хранит `''` как NULL (сказано владельцу; бэк этой волной не трогается).
    *
-   * ⚠ ЗАСЕВ ТОЛЬКО НА ЭКРАНЕ (D-20''', уточняет D-20''). Он пишется БЕЗ пометки «грязно»
-   * (`shouldDirty: false`): карточка, которую только открыли и посмотрели, не сохраняется, не пишет
-   * черновика восстановления, не спрашивает при уходе со страницы и не двигает `lock_version`. На
-   * сервер засев уезжает, когда человек ДЕЙСТВУЕТ: правит поле (обычная грязь) или жмёт GENERATE —
-   * тот помечает показанные, но не сохранённые слова перед `flush` (`markShownWords`,
-   * `flat-run-row.tsx`), и прогон читает их из сохранённой карточки. (Правка любого другого поля
-   * сохраняет тело карточки целиком — засев на экране уезжает и с ней: это тоже действие человека.)
+   * ⚠ ЗАСЕВ — ТОЛЬКО НА ЭКРАНЕ, И В ФОРМУ ОН НЕ ПИШЕТСЯ (D-20'''', заменяет D-20'''). D-20''' клал его в
+   * форму без пометки «грязно» — но `isDirty` формы общий, а запись карточки шлёт все значения:
+   * подъём стадии, тихая запись с сохранённым назначением и синхронизация R-4 уносили засев на сервер
+   * записями, которых никто не делал (ревью раунда 3, M1). Теперь засев живёт в `words-seed.ts`, поле
+   * показывает его, пока значение формы пусто, и в форму («грязным») его отдаёт ДЕЙСТВИЕ человека:
+   * правка поля, ответ `ai ✦`, GENERATE (`materializeWords` перед `flush`, `flat-run-row.tsx`).
+   * Карточка, которую открыли и посмотрели, не сохраняется, не пишет черновика, не спрашивает при
+   * уходе и не двигает `lock_version` — и правка ЛЮБОГО другого поля засева тоже не несёт.
    *
    * ⚠ НЕ ПОВЕРХ НЕОТВЕЧЕННОГО ЧЕРНОВИКА (ревью раунда 2, MAJOR A). Пока баннер восстановления ждёт
    * ответа (`autosave.draftPending`), форма — ещё не то, что человек выберет; засев поверх неё мог бы
@@ -608,9 +617,7 @@ export function ReferencesSection({
   const { loading: dictionaryLoading, dictionary } = useDictionary();
   const factsReady = !dictionaryLoading && !!dictionary;
   const autosave = useTechCardAutosave();
-  // `draftPending` — поле контракта автосейва (зона CL-A); проверка `in` держит сборку и там, где
-  // контракт его ещё не объявил.
-  const draftPending = 'draftPending' in autosave ? !!autosave.draftPending : false;
+  const draftPending = autosave.draftPending;
   const moodMinimum = useMoodMinimumGate();
   // D-13'': сделанный шаг не запирается — у карточки с флэтами WORDS засевается и при неполном
   // минимуме мудборда (то же правило, что `stepDone('flat')` в core/chain). GENERATE минимум требует.
@@ -620,18 +627,18 @@ export function ReferencesSection({
     if (techCardId <= 0) return;
     const blank = ((getValues('garmentDescription') ?? '') as string).trim() === '';
     if (!blank) {
-      // Текст стоит (загружен, напечатан, засеян): в этой сессии поле больше не засевается.
-      if (!wordsSession.has(techCardId)) wordsSession.set(techCardId, null);
+      // Текст стоит (загружен, восстановлен, напечатан): в этой сессии поле больше не засевается.
+      lockWords(techCardId);
       return;
     }
-    if (wordsSession.has(techCardId)) return;
+    if (wordsDecided(techCardId)) return;
     if (readOnly || !factsReady || !composed.text) return;
     if (autosave.status === 'off' || draftPending) return;
-    // Вход занят (GENERATE сохраняет, CLEAR снимает роли) — слова сейчас не меняются; решим после.
+    // Вход занят (GENERATE сохраняет, вход переписывается) — слова сейчас не меняются; решим после.
     if (inputBusy) return;
     if (!moodMinimum.ok && !flatDone) return;
-    wordsSession.set(techCardId, composed);
-    setValue('garmentDescription', composed.text, { shouldDirty: false });
+    // D-20'''': засев — ПРЕДЛОЖЕНИЕ НА ЭКРАНЕ, в значения формы он не пишется (см. `words-seed.ts`).
+    offerWords(techCardId, composed.text, composed.omitted);
   }, [
     techCardId,
     wordsNow,
@@ -644,7 +651,6 @@ export function ReferencesSection({
     moodMinimum.ok,
     flatDone,
     getValues,
-    setValue,
   ]);
 
   // ── сплит референса → строки входа с ролями (R-17) ──────────────────────────────────────────
@@ -682,6 +688,7 @@ export function ReferencesSection({
    * является; на полке загрузок она и останется. Из ВХОДА она уходит.
    */
   function replaceReference(oldMediaId: number, crop: common_DesignPicture) {
+    const card = techCardId;
     const media = crop.media;
     const newMediaId = media?.id;
     if (newMediaId == null || newMediaId === oldMediaId) return;
@@ -689,6 +696,21 @@ export function ReferencesSection({
     // Кроп рисуется ДО того, как библиотечная карта о нём узнает: без этого ячейка, которую мы
     // сами и завели, нарисовала бы «media #N not resolved».
     setPicked((prev) => [...prev, media as common_MediaFull]);
+
+    /* ⚠ ВХОД ЗАНЯТ НА ЗАВЕРШЕНИИ — ОТКАЗ (ревью раунда 3, m1). Дверь кропа заперта, пока вход занят,
+       но кроп отвечает позже, чем его начали: GENERATE, начатый за это время, сохраняет карточку и
+       просит прогон, а сервер снимает роли В МОМЕНТ запуска. Замена строки и перенос роли посреди
+       этого окна дали бы прогону не тот промпт, за который нажали. Кроп уже подшит к полосе
+       картинкой; вход не трогается, и это сказано. */
+    if (flatInputBusy(readFlatInput(card))) {
+      if (cardOnScreen(card)) {
+        showMessage(
+          'the input is busy — a run is being saved or started, or the prompt is being changed; the crop is filed as a band picture and the reference was left as it was',
+          'error',
+        );
+      }
+      return;
+    }
 
     const live = (getValues('moodboardMedia') ?? []) as BoardItem[];
     const at = live.findIndex((item) => isInputRow(item) && item.mediaId === oldMediaId);
@@ -709,10 +731,26 @@ export function ReferencesSection({
     // ORDINAL — позиция СТАРОЙ строки: новая встала ровно на её место, а `ordinalOf` читает ещё не
     // перечитанный `rows` и ответил бы про несуществующую строку.
     const ordinal = Math.max(1, rows.findIndex((i) => i.mediaId === oldMediaId) + 1);
-    setReferenceRole.mutate(
-      { mediaId: newMediaId, role: carried.role, ordinal, note: carried.note },
-      { onSuccess: () => setReferenceRole.mutate({ mediaId: oldMediaId, role: '', ordinal: 0, note: '' }) },
-    );
+    /* ДВЕ ЗАПИСИ РОЛИ — ПОД ЗАМКОМ ВХОДА (m1): пока роль переезжает со старой картинки на кроп, GENERATE
+       ждёт («the prompt is being changed»), иначе прогон мог бы снять вход с двумя строками одной роли
+       или с кропом без неё. Замок держится до ответа второй записи — и после смены шага тоже. */
+    setFlatInputClearing(card, true);
+    void (async () => {
+      try {
+        await setReferenceRole.mutateAsync({
+          mediaId: newMediaId,
+          role: carried.role,
+          ordinal,
+          note: carried.note,
+        });
+        await setReferenceRole.mutateAsync({ mediaId: oldMediaId, role: '', ordinal: 0, note: '' });
+      } catch {
+        // Отказ уже сказан швом записи (`onError` мутации, над карточкой на экране); вторая запись
+        // после отказа первой не делается — как и прежде: картинка без роли хуже двух строк.
+      } finally {
+        setFlatInputClearing(card, false);
+      }
+    })();
   }
 
   /**
@@ -740,16 +778,18 @@ export function ReferencesSection({
    */
   const [drawOpen, setDrawOpen] = useState(false);
 
+  /* СЛОВА НА ЭКРАНЕ (D-20''''): значение формы, а пока оно пусто и засев не отдан — засев. Их читают
+     поле, счётчик, «чистить нечего» и строка «+N omitted» — один помощник на всех (`words-seed.ts`). */
+  const seed = useWordsSeed(techCardId);
+  const shown = pickShownWords(seed, garment.field.value);
   /** Кнопке нечего чистить — она выключена, а не спрятана: пустое место не объясняет, куда она делась. */
-  const garmentChars = ((garment.field.value ?? '') as string).trim().length;
+  const garmentChars = shown.trim().length;
   /* Счётчик внутри поля считает СЫРУЮ длину — ту же, по которой режет `maxLength`; разбор у поля. */
-  const garmentLen = ((garment.field.value ?? '') as string).length;
+  const garmentLen = shown.length;
   const nothingToClear = refOf.size === 0 && garmentChars === 0;
-  /* Засеянный текст и сколько в него не влезло — из сессионного замка: строка переживает смену шага,
-     пока текст тот же, что засеян. */
-  const seededHint = techCardId > 0 ? wordsSession.get(techCardId) ?? null : null;
-  const omittedShown =
-    seededHint && seededHint.omitted > 0 && wordsNow === seededHint.text ? seededHint.omitted : 0;
+  /* Сколько секций не влезло — из засева: строка переживает смену шага, пока на экране тот же текст,
+     что засеян. */
+  const omittedShown = seed && seed.omitted > 0 && shown === seed.text ? seed.omitted : 0;
 
   return (
     <Section
@@ -897,7 +937,14 @@ export function ReferencesSection({
             id={garmentId}
             disabled={readOnly}
             readOnly={inputBusy}
-            value={garment.field.value ?? ''}
+            /* D-20'''': поле показывает засев, пока значение формы пусто; первая правка отдаёт в форму
+               то, что человек видит и поправил, — «грязным», как любая правка, — и засев больше не
+               подставляется (стёртое руками остаётся пустым). */
+            value={shown}
+            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+              garment.field.onChange(event);
+              settleWords(techCardId);
+            }}
             rows={3}
             maxLength={GARMENT_MAX}
             placeholder='what this flat has to show'
@@ -930,12 +977,15 @@ export function ReferencesSection({
             </Text>
             <AiEnhance
               field='words'
-              value={garment.field.value}
+              value={shown}
               context={factsContext}
               maxRunes={GARMENT_MAX}
               disabled={readOnly || inputBusy}
               className='static pointer-events-auto'
-              onApply={(text) => setValue('garmentDescription', text, { shouldDirty: true })}
+              onApply={(text) => {
+                setValue('garmentDescription', text, { shouldDirty: true });
+                settleWords(techCardId);
+              }}
             />
           </div>
         </div>
@@ -1031,26 +1081,55 @@ export function ReferencesSection({
           const target = namingDetail;
           setNamingDetail(null);
           if (!target) return;
-          /* ПОРЯДОК ДВУХ ЗАПИСЕЙ (J-9): слот заводится ПЕРВЫМ, его id берётся из ответа и едет со
-             ролью тем же запросом. Отказ заведения отменяет и роль — намеренно: неудача не делает
-             НИЧЕГО и говорит об этом словами (`onError` мутации), жест повторяется целиком. */
-          let slotId = 0;
-          try {
-            const created = await setBenchSlot.mutateAsync({
-              // Деталь — строка ФЛЭТОВОГО верстака, а у него колорвея нет (L-4): положительное
-              // значение здесь сервер отвергает. Слот заводится ПУСТЫМ: он держит ЧЕРТЁЖ детали.
-              slot: { viewKey: DETAIL_VIEW, kind: 'flat', colorwayId: 0 },
-              pictureId: 0,
-              expectedSlotRev: 0,
-              newDetailName: name,
-            });
-            slotId = created?.slot?.id ?? 0;
-          } catch {
-            // Сообщение уже показано `onError` мутации; второго текста об одной беде не нужно.
+          const card = techCardId;
+          /* ВХОД ЗАНЯТ — ОТКАЗ, И ПОД ЗАМКОМ ВХОДА ДО ПОСЛЕДНЕЙ ЗАПИСИ (ревью раунда 3, m1). Окно
+             называния закрыто — GENERATE снова доступен, а слот и роль ещё впереди: роль, легшая
+             посреди сохранения и запуска, дала бы прогону не тот промпт. Поэтому GENERATE ждёт, пока
+             деталь не получит роль, а начатый раньше GENERATE не даёт её записать. */
+          if (flatInputBusy(readFlatInput(card))) {
+            showMessage(
+              `the input is busy — a run is being saved or started, or the prompt is being changed; detail “${name}” was not added`,
+              'error',
+            );
             return;
           }
-          writeRef(target.mediaId, DETAIL_VIEW, slotId);
-          showMessage(`detail “${name}” added — tick it in VIEWS below`, 'success');
+          setFlatInputClearing(card, true);
+          try {
+            /* ПОРЯДОК ДВУХ ЗАПИСЕЙ (J-9): слот заводится ПЕРВЫМ, его id берётся из ответа и едет со
+               ролью тем же запросом. Отказ заведения отменяет и роль — намеренно: неудача не делает
+               НИЧЕГО и говорит об этом словами (`onError` мутации), жест повторяется целиком. */
+            let slotId = 0;
+            try {
+              const created = await setBenchSlot.mutateAsync({
+                // Деталь — строка ФЛЭТОВОГО верстака, а у него колорвея нет (L-4): положительное
+                // значение здесь сервер отвергает. Слот заводится ПУСТЫМ: он держит ЧЕРТЁЖ детали.
+                slot: { viewKey: DETAIL_VIEW, kind: 'flat', colorwayId: 0 },
+                pictureId: 0,
+                expectedSlotRev: 0,
+                newDetailName: name,
+              });
+              slotId = created?.slot?.id ?? 0;
+            } catch {
+              // Сообщение уже показано `onError` мутации; второго текста об одной беде не нужно.
+              return;
+            }
+            try {
+              await setReferenceRole.mutateAsync({
+                mediaId: target.mediaId,
+                role: DETAIL_VIEW,
+                ordinal: ordinalOf(target.mediaId),
+                detailSlotId: slotId,
+              });
+            } catch {
+              // Отказ роли сказан швом записи; слот остался на верстаке пустым — его видно там.
+              return;
+            }
+            if (cardOnScreen(card)) {
+              showMessage(`detail “${name}” added — tick it in VIEWS below`, 'success');
+            }
+          } finally {
+            setFlatInputClearing(card, false);
+          }
         }}
       />
 
