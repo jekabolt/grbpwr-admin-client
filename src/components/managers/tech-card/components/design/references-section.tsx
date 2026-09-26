@@ -25,7 +25,9 @@ import {
   isInputRow,
   type BoardItem,
 } from './mood-board';
+import { useTechCardAutosave } from './autosave-contract';
 import { displayDetailName, readBench } from './bench-slot';
+import { useMoodMinimumGate } from './chain-rail';
 import { cropFamilies } from './generation/composite';
 import { FlatRunRow } from './flat-run-row';
 import { RecalledRunPrompt } from './history-recall';
@@ -90,8 +92,8 @@ import { useDesignWrites } from './use-design-band';
  *        последняя ячейка — плитка на две половины: слот медиа сверху, «draw a reference» снизу;
  *        пусто → та же плитка одна в сетке (второй пары кнопок больше нет);
  *        под сеткой справа — тихая дверь `clear the input ✕` (D-21, волна 25.09);
- *   1.2  WORDS — textarea во всю ширину (`garmentDescription`), засеянная фактами карточки при
- *        ОТСУТСТВИИ значения (D-20/D-20'); в правом нижнем углу счётчик `N / 2000` и `ai ✦`;
+ *   1.2  WORDS — textarea во всю ширину (`garmentDescription`), засеянная фактами карточки, когда
+ *        она пуста (D-20''), раз за сессию; в правом нижнем углу счётчик `N / 2000` и `ai ✦`;
  *   1.3  ряд запуска (`./flat-run-row.tsx`): VIEWS (продуктовая строка — проводу нужны
  *        `views[]`), GENERATE · цена · WHAT THE MODEL GETS ▸.
  * Двери `from construction ▸` и `also send the flat slots` (с лентой плит) сняты владельцем
@@ -121,6 +123,19 @@ import { useDesignWrites } from './use-design-band';
  * который меньше (ровно тот же довод, что у `CONCEPT_MAX` в `./mood-board`).
  */
 const GARMENT_MAX = 2000;
+
+/**
+ * ═══ ЗАМОК ЗАСЕВА WORDS НА СЕССИЮ (D-20'', волна 25.09) ═══════════════════════════════════════
+ *
+ * Карточка, чьи WORDS в этой сессии (до перезагрузки страницы) уже засеяны, очищены CLEAR или хоть
+ * раз стояли непустыми, больше не засевается. МОДУЛЬНЫЙ, а не `useRef`: секция размонтируется на
+ * каждой смене шага (`studio-tab.tsx` рисует её только на FLAT), и замок в ref забывался бы по пути
+ * CLEAR → MOODBOARD → FLAT — стёртое засевалось бы снова. Значение — засеянный текст и сколько
+ * секций в него не влезло (строка «+N omitted» переживает перемонтирование); `null` — замок без
+ * засева (CLEAR, текст человека).
+ */
+type WordsSeed = { text: string; omitted: number };
+const wordsSession = new Map<number, WordsSeed | null>();
 
 type RoleItem = { value: string; label: string; disabled?: boolean };
 
@@ -476,6 +491,9 @@ export function ReferencesSection({
   // ── clear: ТОЛЬКО ПРОМПТ, картинки остаются (SPEC п.8, CONTRACT §B) ─────────────────────────
   const [clearAsk, setClearAsk] = useState(false);
   const [clearing, setClearing] = useState(false);
+  /* GENERATE ждёт сохранения (`FlatRunRow` → `onSavingChange`): слова и CLEAR на это время заперты —
+     прогон прочтёт то, что сохраняется сейчас, и правка поверх уехала бы мимо него (ревью MAJOR). */
+  const [runSaving, setRunSaving] = useState(false);
 
   /**
    * ЧТО ЧИСТИТСЯ: слова (`garmentDescription`) и роли референсов (и с ними — порядок промпта).
@@ -491,8 +509,8 @@ export function ReferencesSection({
    *    уходит с ней по контракту провода, других записей этот жест не делает.
    * 2. ОПИСАНИЕ чистится ТОЛЬКО В ФОРМЕ — у поля нет своего RPC, оно едет с документом. `''` —
    *    команда «сотри» трёхсостоянийного протокола; до сейва сервер держит старый текст. Вопрос
-   *    ниже называет это словами, чтобы «clear» не обещал больше, чем делает. И `''` же держит
-   *    засев WORDS (ниже) от повтора: засевается только ОТСУТСТВИЕ значения, а стёртое — нет.
+   *    ниже называет это словами, чтобы «clear» не обещал больше, чем делает. CLEAR ставит карточку
+   *    в сессионный замок засева (`wordsSession`): стёртое не засевается до перезагрузки страницы.
    */
   async function runClear() {
     setClearAsk(false);
@@ -508,6 +526,7 @@ export function ReferencesSection({
         failed.add(mediaId);
       }
     }
+    wordsSession.set(techCardId, null);
     setValue('garmentDescription', '', { shouldDirty: true });
     setClearing(false);
     if (failed.size) {
@@ -530,7 +549,7 @@ export function ReferencesSection({
   const garment = useController({ control, name: 'garmentDescription' });
   const garmentId = useId();
 
-  // ── WORDS: ФАКТЫ КАРТОЧКИ, ОДИН РАЗ И ТОЛЬКО ПРИ ОТСУТСТВИИ ЗНАЧЕНИЯ (T24, D-20/D-20') ─────────
+  // ── WORDS: ФАКТЫ КАРТОЧКИ, ОДИН РАЗ ЗА СЕССИЮ И ТОЛЬКО В ПУСТОЕ ПОЛЕ (T24, D-20'') ─────────────
   /**
    * Владелец: «WORDS по умолчанию = вся информация из полей мудборда, редактируемо, с AI ENHANCE».
    * Здесь стояла дверь `from construction ▸`, приносившая посадку и аспекты по кнопке; теперь то,
@@ -541,13 +560,20 @@ export function ReferencesSection({
    * путь категории · посадка · описание · силуэт · ткань · аспекты · указания доски · материалы —
    * в этом порядке, в потолок поля ЦЕЛЫМИ секциями; сколько не влезло, говорится под полем.
    *
-   * ⚠ ТОЛЬКО ПРИ `undefined`, НИКОГДА ПРИ `''`. Поле трёхсостоянийное (schema.ts): `undefined` —
-   * значения нет вовсе; `''` — его СТЁРЛИ (CLEAR пишет ровно это), и засеять стёртое значило бы
-   * отменить жест человека на следующей же отрисовке. Засев ставит поле грязным — автосейв доводит
-   * текст до сервера, а прогон читает СОХРАНЁННУЮ карточку.
-   *
-   * ⚠ СЛОВАРЬ ЖДЁТСЯ. Путь категории читается по словарю, а он приезжает асинхронно; засей мы до
-   * него, строка `category:` не появилась бы никогда — второго засева не бывает.
+   * ⚠ «ПУСТО ПРИ ЗАГРУЗКЕ = ОТСУТСТВУЕТ» (D-20'', заменяет D-20'). Прежнее «сеять только при
+   * `undefined`» было мёртвым на любой настоящей карточке: сервер отдаёт NULL как `""` (dto
+   * `pbStringFromNull`), схема держит `''` как `''`, и провод не отличает «никогда не писали» от
+   * «стёрли». Поэтому засев применяется, когда ВСЁ сразу:
+   *   · поле пусто после trim;
+   *   · карточки нет в сессионном замке (`wordsSession`: засеяно, очищено CLEAR или стояло
+   *     непустым — тогда и стёртое руками не засевается);
+   *   · факты готовы (словарь приехал — иначе строки `category:` не будет никогда) и строка непуста;
+   *   · карточку можно писать, и автосейв не `off` (засев, который не сохранится, — неправда на
+   *     экране: прогон читает СОХРАНЁННУЮ карточку);
+   *   · минимум доски пройден (`useMoodMinimumGate`): ранний визит не замораживает однострочник
+   *     «category: …» — засев дождётся доски и выйдет полным.
+   * Принятое ограничение: очищенные и СОХРАНЁННЫЕ WORDS после перезагрузки засеются снова — сервер
+   * хранит `''` как NULL (сказано владельцу; бэк этой волной не трогается).
    */
   const facts = useCardFacts(isBoardRow);
   const composed = useMemo(() => composeWords(facts, GARMENT_MAX), [facts]);
@@ -555,15 +581,34 @@ export function ReferencesSection({
   const { loading: dictionaryLoading } = useDictionary();
   const seedCategoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
   const factsReady = seedCategoryId <= 0 || !dictionaryLoading;
-  /** Засеянный текст и сколько секций в него не влезло — строка под полем, пока текст тот же. */
-  const [seeded, setSeeded] = useState<{ text: string; omitted: number } | null>(null);
+  const autosave = useTechCardAutosave();
+  const moodMinimum = useMoodMinimumGate();
+  const wordsNow = (garment.field.value ?? '') as string;
   useEffect(() => {
+    if (techCardId <= 0) return;
+    const blank = ((getValues('garmentDescription') ?? '') as string).trim() === '';
+    if (!blank) {
+      // Текст стоит (загружен, напечатан, засеян): в этой сессии поле больше не засевается.
+      if (!wordsSession.has(techCardId)) wordsSession.set(techCardId, null);
+      return;
+    }
+    if (wordsSession.has(techCardId)) return;
     if (readOnly || !factsReady || !composed.text) return;
-    const current = getValues('garmentDescription');
-    if (current !== undefined) return;
+    if (autosave.status === 'off') return;
+    if (!moodMinimum.ok) return;
+    wordsSession.set(techCardId, composed);
     setValue('garmentDescription', composed.text, { shouldDirty: true });
-    setSeeded(composed);
-  }, [readOnly, factsReady, composed, getValues, setValue]);
+  }, [
+    techCardId,
+    wordsNow,
+    readOnly,
+    factsReady,
+    composed,
+    autosave.status,
+    moodMinimum.ok,
+    getValues,
+    setValue,
+  ]);
 
   // ── сплит референса → строки входа с ролями (R-17) ──────────────────────────────────────────
   // `addToInput` СКАЗАН ЯВНО и только здесь: кадры разреза становятся референсами лишь тогда,
@@ -663,10 +708,11 @@ export function ReferencesSection({
   /* Счётчик внутри поля считает СЫРУЮ длину — ту же, по которой режет `maxLength`; разбор у поля. */
   const garmentLen = ((garment.field.value ?? '') as string).length;
   const nothingToClear = refOf.size === 0 && garmentChars === 0;
+  /* Засеянный текст и сколько в него не влезло — из сессионного замка: строка переживает смену шага,
+     пока текст тот же, что засеян. */
+  const seededHint = techCardId > 0 ? wordsSession.get(techCardId) ?? null : null;
   const omittedShown =
-    seeded && seeded.omitted > 0 && ((garment.field.value ?? '') as string) === seeded.text
-      ? seeded.omitted
-      : 0;
+    seededHint && seededHint.omitted > 0 && wordsNow === seededHint.text ? seededHint.omitted : 0;
 
   return (
     <Section
@@ -768,7 +814,7 @@ export function ReferencesSection({
             size='sm'
             data-clear-prompt=''
             loading={clearing}
-            disabled={clearing || nothingToClear}
+            disabled={clearing || nothingToClear || runSaving}
             onClick={() => setClearAsk(true)}
             title='clears the words and the reference roles — the pictures stay'
           >
@@ -812,6 +858,7 @@ export function ReferencesSection({
             data-field='garmentDescription'
             id={garmentId}
             disabled={readOnly}
+            readOnly={runSaving}
             value={garment.field.value ?? ''}
             rows={3}
             maxLength={GARMENT_MAX}
@@ -848,14 +895,15 @@ export function ReferencesSection({
               value={garment.field.value}
               context={factsContext}
               maxRunes={GARMENT_MAX}
-              disabled={readOnly}
+              disabled={readOnly || runSaving}
               className='static pointer-events-auto'
               onApply={(text) => setValue('garmentDescription', text, { shouldDirty: true })}
             />
           </div>
         </div>
-        {/* ЗАСЕВ НЕ ВЛЕЗ ЦЕЛИКОМ — сказано числом секций, а не молчанием (D-20'): пока текст тот,
-            что засеян; первая же правка делает строку неправдой, и она уходит. */}
+        {/* ЗАСЕВ НЕ ВЛЕЗ ЦЕЛИКОМ — сказано числом секций, а не молчанием (D-20''): пока текст тот,
+            что засеян (число живёт в сессионном замке и переживает смену шага); первая же правка
+            делает строку неправдой, и она уходит. */}
         {omittedShown > 0 && (
           <Text size='micro' variant='label' component='p' data-words-omitted={omittedShown}>
             (+{omittedShown} section{omittedShown === 1 ? '' : 's'} omitted — the words hold{' '}
@@ -872,7 +920,12 @@ export function ReferencesSection({
           ⚠ НЕ ЗАВОРАЧИВАТЬ В СВОРАЧИВАНИЕ (`collapsible`/`Fold`): ниже смонтирован приёмник рекола
           `RecalledRunPrompt`, при размонтировании реестр стирает выбор (`recalled.delete`), и жест
           теряется молча. */}
-      <FlatRunRow band={band} techCardId={techCardId} disabled={disabled} />
+      <FlatRunRow
+        band={band}
+        techCardId={techCardId}
+        disabled={disabled}
+        onSavingChange={setRunSaving}
+      />
 
       {/* ПРИЁМНИК РЕКОЛА (T-10). Видимого органа у него нет — он рисует только вопрос про описание
           изделия, и только когда описание уже непустое. Внутри блока, не сворачивать. */}
@@ -907,14 +960,17 @@ export function ReferencesSection({
       )}
 
       {/* ВОПРОС ПЕРЕД ЧИСТКОЙ ПРОМПТА (SPEC п.8) — объём числами, и граница честности: роли
-          уходят с сервера СЕЙЧАС, слова — с карточки при её сохранении. Картинки остаются. */}
+          уходят с сервера СЕЙЧАС, слова — с карточки при её сохранении. Картинки остаются.
+          Дверь зовётся `clear the input ✕` (D-21), а вопрос — «clear the prompt»: чистится ПРОМПТ
+          (слова и роли), картинки остаются во входе, и заголовок «clear the input» спорил бы с
+          телом диалога (ревью m4). */}
       <ConfirmationModal
         open={clearAsk}
         onOpenChange={(open) => !open && setClearAsk(false)}
         onConfirm={runClear}
         onCancel={() => setClearAsk(false)}
-        title='clear the input'
-        confirmLabel='clear the input'
+        title='clear the prompt'
+        confirmLabel='clear the prompt'
         width='sm'
       >
         <div className='space-y-2'>
