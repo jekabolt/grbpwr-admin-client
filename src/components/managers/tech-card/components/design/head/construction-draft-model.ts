@@ -710,6 +710,29 @@ export function wordDiff(
 const cutTo = (t: string, n: number): string =>
   t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t;
 
+/**
+ * ═══ «APPEND» — СЛОВА КАРТОЧКИ ОСТАЮТСЯ, ЧЕРНОВИК ДОПИСЫВАЕТ ТОЛЬКО СВОЁ (ревью раунда 3) ═══════
+ *
+ * Режим `append` стоит там, где черновик ПРОДОЛЖАЕТ текст карточки (`draftSays` → `add`): его текст
+ * начинается словами карточки. Приписать его ЦЕЛИКОМ значило повторить их дважды — «clean
+ * shoulder\nclean shoulder, dropped sleeve». Поэтому к словам карточки, дословно, как их набрал
+ * человек, приписывается ХВОСТ — то, что черновик добавил после них, со стыком черновика (его
+ * запятая вместо точки карточки). Начало сверяется тем же правилом, что у `draftSays`, по
+ * отображаемому виду (`normText`); черновик, который карточку не продолжает, встаёт после неё с
+ * новой строки, как стоял.
+ */
+export function appendedText(card: string, draft: string): string {
+  const mine = card.trimEnd();
+  if (!mine.trim()) return draft;
+  const tip = /[.,;:!?\s]+$/;
+  const stem = normText(mine).replace(tip, '');
+  const said = normText(draft);
+  if (stem && said.length > stem.length && said.slice(0, stem.length) === stem) {
+    return `${mine.replace(tip, '')}${said.slice(stem.length)}`;
+  }
+  return `${mine}\n${draft}`;
+}
+
 export function draftSays(was?: string | null, now?: string | null): DraftSay {
   const a = String(was ?? '').trim();
   const b = String(now ?? '').trim();

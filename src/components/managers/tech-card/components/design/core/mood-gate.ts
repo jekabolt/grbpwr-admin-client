@@ -22,6 +22,23 @@
  */
 export const MOOD_MIN_CONCEPT = 40;
 
+/** Вид строки `moodboardMedia`, которая рисуется во ВХОДЕ референсов, а не на доске. */
+export const REFERENCE_KIND = 'TECH_CARD_MEDIA_KIND_REFERENCE';
+
+/** Строка ВХОДА — та, что рисуется в блоке референсов. */
+export const isInputRow = (item: { kind?: string | null }) => item.kind === REFERENCE_KIND;
+/**
+ * Строка ДОСКИ — то, что считает часть (a). Определена ОТРИЦАНИЕМ входа, а не перечислением видов:
+ * карточка из клона, из импорта или из легаси-разбиения несёт виды, которых сегодняшний словарь не
+ * знает, и список «доска = mood | swatch» тихо ронял бы такую строку в НИ ОДИН из двух блоков — то
+ * есть терял бы картинку с экрана, сохраняя её в payload.
+ *
+ * ЖИВЁТ ЗДЕСЬ, А НЕ В `mood-board.tsx` (раунд 4, S-M1): правило — часть минимума, и его читает
+ * черновик, которого мудборд монтирует, — импорт из доски завёл бы цикл. Доска реэкспортирует его
+ * для своих прежних читателей.
+ */
+export const isBoardRow = (item: { kind?: string | null }) => !isInputRow(item);
+
 export type MoodGateInput = {
   /** Картинок на самой доске (после `isBoardRow`), не во входе референсов. */
   boardPictures: number;
@@ -45,8 +62,6 @@ export type MoodGateResult = {
   /** Те же слова без адресов — для читателей, которым нужна только фраза. */
   reasons: string[];
 };
-
-export const MOOD_GATE_DOOR = 'mood' as const;
 
 /** Длина в символах, которые видит человек: кодовые точки, а не единицы UTF-16. */
 export function runeLength(s: string | null | undefined): number {

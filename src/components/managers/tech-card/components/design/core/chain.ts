@@ -590,12 +590,17 @@ export function stepDone(id: StepId, ctx: ChainCtx): boolean {
  * opened on CARD DETAILS with no NEXT on the rail, and the bar's door led to FLAT, whose GENERATE
  * the same minimum keeps locked. So the moodboard is passed over only when the render is done or
  * open; otherwise it IS the next thing to fix — the flat that is still missing waits behind it.
+ *
+ * ⚠ …AND A DONE FLAT THAT STILL OWES THE RENDER A SIDE IS ITSELF NEXT (round-3 review, MIN-2). With
+ * the minimum met the moodboard is done, the flat is «done» on its one side, the render is locked
+ * over the other — and nothing was left for «next»: the card opened on CARD DETAILS with no NEXT on
+ * the rail. The work is on the flat bench, so the flat is not passed over while it owes the side.
  */
 export function nextUp(ctx: ChainCtx): StepId | null {
   for (const s of STEPS) {
     if (s.id === ctx.now) continue;
     if (s.optional) continue;
-    if (stepDone(s.id, ctx)) continue;
+    if (stepDone(s.id, ctx) && !(s.id === 'flat' && flatOwesRender(ctx))) continue;
     if (
       s.id === 'mood' &&
       stepDone('flat', ctx) &&
@@ -659,10 +664,34 @@ export function nearestBlock(ctx: ChainCtx): NearestBlock | null {
     if (stepDone(s.id, ctx)) continue;
     const g = chainGate(s.id, ctx);
     if (!g.ok && !g.own) {
+      /* ⚠ THE DOOR MUST NOT LEAD TO A SHUT DOOR (round-3 review, MIN-2). The render sends to FLAT for
+         its missing side — but a done flat is never locked on the rail, while its GENERATE still asks
+         the moodboard minimum: on a weak minimum «the flat bench ›» opened a screen whose one button
+         was locked by the same minimum. Then the bar leads where the minimum is fixed — one door per
+         missing part — and says why the flat waits. */
+      const via = g.door === 'flat' ? chainGate('flat', ctx) : null;
+      if (via && !via.ok && !via.own) {
+        return {
+          stepId: s.id,
+          why: `${g.reason} · the flat waits for the moodboard: ${via.reason}`,
+          door: via.door ?? null,
+          doors: via.doors ?? [],
+        };
+      }
       return { stepId: s.id, why: g.reason, door: g.door ?? null, doors: g.doors ?? [] };
     }
   }
   return null;
+}
+
+/**
+ * The flat is done — one side holds a drawing — and the render still refuses over a missing FLAT
+ * side (its gate's door is the flat bench): the work that is left is on the flat (MIN-2).
+ */
+function flatOwesRender(ctx: ChainCtx): boolean {
+  if (!stepDone('flat', ctx) || stepDone('render', ctx)) return false;
+  const g = chainGate('render', ctx);
+  return !g.ok && g.door === 'flat';
 }
 
 export function doneCount(ctx: ChainCtx): number {
@@ -692,5 +721,9 @@ export function bandHasPictures(band: GetDesignBandResponse): boolean {
  */
 export function defaultStep(ctx: ChainCtx): StepId {
   if (ctx.bandless || !bandHasPictures(ctx.band)) return 'card';
-  return nextUp({ ...ctx, now: null }) ?? 'card';
+  const here = { ...ctx, now: null };
+  // NOTHING TO TAKE UP, BUT THE CHAIN IS HELD UP — open where the bar under the rail leads, the one
+  // place work can move (round-3 review, MIN-2), not on CARD DETAILS. A complete chain has no bar
+  // and still opens where it started.
+  return nextUp(here) ?? nearestBlock(here)?.door ?? 'card';
 }

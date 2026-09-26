@@ -1,7 +1,10 @@
+import type { common_DesignRun } from 'api/proto-http/admin';
 import { useLayoutEffect } from 'react';
 import { create } from 'zustand';
 
+import type { FlushResult } from '../autosave-contract';
 import type { ProposedColourway, ProposedSlotColour } from '../colourway-proposals-model';
+import type { ConstructionDraft } from './construction-draft-model';
 import { fillIdOf, holdsWords, mergeFill, type Fill, type FillTarget } from './draft-fills';
 
 /**
@@ -70,6 +73,66 @@ export type ColourwayVerdict =
 
 const EMPTY: CardMemory = { fills: [], proposals: [], verdicts: {}, boardMoved: false };
 
+/* ═══ ПРОГОН ЧЕРНОВИКА — ПО КЛЮЧУ КАРТОЧКИ, А НЕ В ОРГАНЕ (раунд 4, S-M1) ═══════════════════════════
+
+   Орган черновика рисуется только на шаге MOODBOARD (`studio-tab.tsx`), студия — только на своей
+   вкладке, а вся карточка монтируется заново на каждый адрес (`page.tsx` ключует её id). Между
+   щелчком GENERATE и ответом платного вызова орган может умереть трижды: смена шага, смена вкладки,
+   уход на другую карточку. Всё, что обязано это пережить, лежит здесь:
+     · `intent` — ключ идемпотентности НАМЕРЕНИЯ. В `useRef` органа он умирал вместе с органом, и
+       нажатие после возврата минтило новый — вторая оплата за один вопрос;
+     · `phase` — «сохраняю» / «спрашиваю»: вернувшийся орган видит `starting…` над идущим вызовом и
+       не пускает второй щелчок;
+     · `refused` — ИСХОД отказавшего сохранения, а не фраза: фраза собирается при отрисовке, и число
+       полей в ней — то, что автосейв говорит СЕЙЧАС, после ожидания, а не на щелчке;
+     · `parked` — ответ (или отказ сервера), который ждёт органа своей карточки. Колбэки `mutate`
+       TanStack роняет вместе с наблюдателем: оплаченный ответ не доезжал до полей вовсе. Теперь
+       ответ ложится сюда, а применяет его орган — сразу, если он на экране, или когда вернётся;
+     · `minting` — цикл заведения слотов в полёте. Он живёт дольше органа, и GENERATE, `undo all`,
+       `accept all` вернувшегося органа обязаны видеть его поднятым (ревью Codex M-08).
+   Сессионное, в хранилище не пишется: прогон, перешагнувший F5, — уже прошлая история. */
+
+export type DraftRunPhase = 'saving' | 'asking';
+
+/** Почему GENERATE не заказал прогон после сохранения: исход `flush` или остановленное сохранение. */
+export type DraftRefusal = FlushResult | 'released' | 'stopped';
+
+/** Что прочитал прогон: картинки, заметки и слепок доски, по которому черновик поймёт, что протух. */
+export type DraftRead = { pictures: number; notes: number; fingerprint: string };
+
+export type ParkedDraft =
+  | {
+      kind: 'answer';
+      run: common_DesignRun | null;
+      /** `null` — прогон вернулся без предложения: цена есть, предлагать нечего. */
+      draft: ConstructionDraft | null;
+      read: DraftRead;
+      /** Скаляры в момент заказа, по адресу журнала: поправленное после черновик не перепишет (M1). */
+      pressed: ReadonlyMap<string, string>;
+      time: string;
+    }
+  | {
+      kind: 'refusal';
+      words: string;
+      /** Отказ пришёл без органа на экране: сказанный по возвращении, он называет, чей он. */
+      away: boolean;
+    };
+
+export type DraftRun = {
+  intent: string | null;
+  phase: DraftRunPhase | null;
+  refused: DraftRefusal | null;
+  parked: ParkedDraft | null;
+  minting: number;
+};
+
+const IDLE_RUN: DraftRun = { intent: null, phase: null, refused: null, parked: null, minting: 0 };
+
+/** Прогон карточки занят: щелчок, пришедший сейчас, второго не заказывает. */
+export function draftRunBusy(r: DraftRun): boolean {
+  return r.phase !== null || r.parked !== null || r.minting > 0;
+}
+
 /* ─── ХРАНИЛИЩЕ ЖУРНАЛА ────────────────────────────────────────────────────────────────────── */
 
 export const DRAFTED_STORAGE_PREFIX = 'plm.techcard.drafted.v1.';
@@ -131,6 +194,7 @@ function isStoredPrior(x: unknown, depth = 1): boolean {
   if (p.before !== undefined && typeof p.before !== 'string') return false;
   if (p.carried !== undefined && !isStoredLevels(p.carried)) return false;
   if (p.restore !== undefined && p.restore !== true) return false;
+  if (p.accepted !== undefined && typeof p.accepted !== 'boolean') return false;
   return p.prior === undefined || isStoredPrior(p.prior, depth + 1);
 }
 
@@ -170,19 +234,41 @@ export function readStoredFills(card: number): Fill[] {
   }
 }
 
+/** Запись без цепочки возвратов (`prior`) — самой тяжёлой и самой необязательной её части. */
+function slimFill(f: Fill): Fill {
+  if (!f.prior) return f;
+  const out = { ...f };
+  delete out.prior;
+  return out;
+}
+
 function writeStoredFills(card: number, fills: Fill[]): void {
   if (!(card > 0)) return;
+  const key = storageKey(card);
+  const write = (list: Fill[]) =>
+    localStorage.setItem(key, JSON.stringify({ v: 1, owner: card, fills: list }));
   try {
     if (!fills.length) {
-      localStorage.removeItem(storageKey(card));
+      localStorage.removeItem(key);
       return;
     }
-    localStorage.setItem(
-      storageKey(card),
-      JSON.stringify({ v: 1, owner: card, fills: storedSlice(fills) }),
-    );
+    write(storedSlice(fills));
   } catch {
-    // Квота или запрещённое хранилище: пометки не переживут перезагрузку, но работать не мешают.
+    /* ⚠ ПРОГЛОЧЕННЫЙ ОТКАЗ ОСТАВЛЯЛ В ХРАНИЛИЩЕ ПРОШЛУЮ ЗАПИСЬ (ревью раунда 3, MIN-4). `setItem`,
+       упёршийся в квоту, не пишет ничего — и после F5 журнал поднимался из ВЧЕРАШНЕЙ копии: слова,
+       которые человек уже отбросил, вставали обратно предложением «restore previous ↶». Поэтому
+       второй заход — копия без цепочек возвратов (без них `✕` возврата просто забудет запись, но
+       ни одно слово и ни одна пометка не потеряются), а не влезла и она — ключ снимается: пустой
+       журнал после F5 честнее воскресшего. */
+    try {
+      write(storedSlice(fills).map(slimFill));
+    } catch {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // Запрещённое хранилище: читать из него после F5 тоже будет нечего.
+      }
+    }
   }
 }
 
@@ -203,6 +289,12 @@ type Store = {
   patchSlot: (card: number, id: string, slot: number, patch: Partial<ProposedSlotColour>) => void;
   setVerdict: (card: number, id: string, verdict: ColourwayVerdict) => void;
   setBoardMoved: (card: number, moved: boolean) => void;
+  /** Прогоны черновика по карточкам (S-M1) — отдельно от памяти, чтобы фаза не будила её читателей. */
+  runs: Record<number, DraftRun>;
+  patchRun: (card: number, patch: Partial<Omit<DraftRun, 'minting'>>) => void;
+  /** Забрать припаркованное — ОДИН раз: второй вызов (второй эффект, второй орган) получает null. */
+  takeParked: (card: number) => ParkedDraft | null;
+  bumpMinting: (card: number, delta: 1 | -1) => void;
 };
 
 /**
@@ -239,9 +331,27 @@ function editFills(state: Store, card: number, fn: (fills: Fill[]) => Fill[]): P
   });
 }
 
-export const useDraftMemory = create<Store>((set) => ({
+const runOf = (s: Store, card: number): DraftRun => s.runs[card] ?? IDLE_RUN;
+
+export const useDraftMemory = create<Store>((set, get) => ({
   byCard: {},
   hydrated: {},
+  runs: {},
+
+  patchRun: (card, patch) =>
+    set((s) => ({ runs: { ...s.runs, [card]: { ...runOf(s, card), ...patch } } })),
+
+  takeParked: (card) => {
+    const parked = runOf(get(), card).parked;
+    if (parked) set((s) => ({ runs: { ...s.runs, [card]: { ...runOf(s, card), parked: null } } }));
+    return parked;
+  },
+
+  bumpMinting: (card, delta) =>
+    set((s) => {
+      const cur = runOf(s, card);
+      return { runs: { ...s.runs, [card]: { ...cur, minting: Math.max(0, cur.minting + delta) } } };
+    }),
 
   hydrate: (card) =>
     set((s) => {
@@ -357,4 +467,14 @@ export function useCardMemory(techCardId: number): CardMemory {
     if (techCardId > 0) useDraftMemory.getState().hydrate(techCardId);
   }, [techCardId]);
   return useDraftMemory((s) => s.byCard[techCardId] ?? EMPTY);
+}
+
+/** Прогон черновика ЭТОЙ карточки; у незнакомой — одна и та же пустая ссылка. */
+export function useDraftRun(techCardId: number): DraftRun {
+  return useDraftMemory((s) => runOf(s, techCardId));
+}
+
+/** Прогон карточки В МОМЕНТ вызова, мимо рендера: щелчок и ответ читают стор, а не снимок. */
+export function readDraftRun(card: number): DraftRun {
+  return runOf(useDraftMemory.getState(), card);
 }

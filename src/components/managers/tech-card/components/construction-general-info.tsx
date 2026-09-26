@@ -1,3 +1,5 @@
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { SECTION } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useId, useRef, type JSX, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -10,12 +12,12 @@ import { GROUP_SEAM } from './design/core';
 import { cardFactsContext } from './design/core/card-facts';
 import { openStepOf } from './design/core/chain';
 import { DraftedField } from './design/core/drafted-field';
+import { isBoardRow } from './design/core/mood-gate';
 import { draftedKey, useDrafted } from './design/drafted-contract';
 import { fitLabel } from './design/fit-vocabulary';
 import { useCardFacts, useFitKeys } from './design/head/card-facts-form';
 import { useAcceptOnEdit } from './design/head/drafted-provider';
 import { BoardMovedPill, DraftedPill, GoTo } from './design/head/mood-organs';
-import { isBoardRow } from './design/mood-board';
 import { upsertDetailText } from './form-writers';
 import { TechCardFormData } from './schema';
 
@@ -95,10 +97,17 @@ import { TechCardFormData } from './schema';
 export function ConstructionGeneralInfo({
   isAux,
   readOnly,
+  frozen = false,
 }: {
   isAux: boolean;
   /** No write permission, or a released card — the Radix select ignores the outer fieldset. */
   readOnly: boolean;
+  /**
+   * A released card, on its own. The fit is a style fact: its `drafted` pill locks on the grant of
+   * its writer (`products:write`, UpdateStyle), as CARD DETAILS does, and not on `tech_cards:write`
+   * folded into `readOnly` (seam review, S-m2).
+   */
+  frozen?: boolean;
 }) {
   const techCardId = useTechCardIdFromRoute();
   // ФАКТЫ КАРТОЧКИ ДЛЯ `ai ✦` — ОДНО чтение формы (`useCardFacts`), один композитор строк
@@ -132,7 +141,7 @@ export function ConstructionGeneralInfo({
         {/* Auxiliary cards carry no fit and no category — the same gate the CLASSIFICATION block
             applied. У aux-карты классификацию задаёт AUXILIARY TYPE в шапке; скрывается ТОЛЬКО
             строка фактов, значение `categoryId` остаётся в форме и раунд-трипится. */}
-        {!isAux && <StyleFacts categoryPath={facts.categoryPath ?? ''} readOnly={readOnly} />}
+        {!isAux && <StyleFacts categoryPath={facts.categoryPath ?? ''} frozen={frozen} />}
         <div className='min-w-0' data-c19-field-cell='silhouette'>
           <DetailTextField
             detailKey='silhouette'
@@ -227,13 +236,19 @@ function FieldLabel({ htmlFor, children }: { htmlFor?: string; children: ReactNo
  */
 function StyleFacts({
   categoryPath,
-  readOnly,
+  frozen,
 }: {
   categoryPath: string;
-  /** Без права записи пилюля `drafted` глухая (фиксап раунда 2, MIN-5). */
-  readOnly: boolean;
+  /** Утверждённая карточка — пилюля `drafted` глухая (фиксап раунда 2, MIN-5). */
+  frozen: boolean;
 }): JSX.Element {
   const { control } = useFormContext<TechCardFormData>();
+  /* ПОСАДКУ ПРИНИМАЕТ ТОТ, КТО ЕЁ ПИШЕТ (ревью швов, S-m2). `fit` — факт стиля, его единственный
+     писатель — UpdateStyle, то есть `products:write`; CARD DETAILS запирает на этом праве ячейку и
+     её пилюлю. Здесь пилюля запиралась по `tech_cards:write`, и один и тот же аккаунт видел её живой
+     в одном блоке и глухой в другом. Предикат — ровно тот, что у CARD DETAILS. */
+  const { canWrite } = usePermissions();
+  const fitLocked = frozen || !canWrite(SECTION.products);
   const fit = ((useWatch({ control, name: 'fit' }) as string | null | undefined) ?? '').trim();
   const categoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
   const fitShown = useFitKeys() !== null;
@@ -262,7 +277,7 @@ function StyleFacts({
             </DraftedField>
             <DraftedPill
               live={fitDrafted}
-              disabled={readOnly}
+              disabled={fitLocked}
               onAccept={() => draftedApi.acceptKey(draftedKey.fit)}
               data-c19-drafted='fit'
             />

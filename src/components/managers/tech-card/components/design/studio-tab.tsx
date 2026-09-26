@@ -231,11 +231,17 @@ export function StudioTab({
      followed live, the step would jump under a person the moment a run finished or a picture was
      pinned. The latch waits for what the rule reads to have ARRIVED — the band (`!isLoading`) and
      the seeded form (`name` is required to save, so an empty name on a saved card means the reset
-     has not landed yet) — then fixes the answer for the life of this card on this mount. It is
-     RESET IN THE BODY OF THE RENDER when the card changes (invariant 12: the composer is not
-     remounted between cards), never in an effect. A card that does not exist yet has one step —
-     and KEEPS it when its id arrives: the person who just pressed Save on a new card is on the
-     header, and the header must not blink out while the (empty) band is read for the first time.
+     has not landed yet) — then fixes the answer for the life of this card on this mount.
+
+     ONE CARD, ONE MOUNT — in the app. `page.tsx` keys the whole card by its route id
+     (`TechCardStagingProvider key={id}`), so walking to another card, and a new card getting its
+     id (index.tsx navigates to the new address), each mount a fresh composer with a fresh latch;
+     «the composer is not remounted between cards» (the old invariant 12) is not true of the page.
+     The reset below, in the body of the render and never in an effect, is a belt for a parent that
+     swaps the id under a mounted composer (the probes do): it costs nothing and leaves no committed
+     frame with the other card's step. There a card that does not exist yet keeps its one step when
+     its id arrives — the person who just pressed Save is on the header, and the header must not
+     blink out while the (empty) band is read for the first time.
 
      UNDECIDED IS NOT «CARD DETAILS FOR NOW». While the address says nothing and the latch has not
      fired, no step is drawn — the screen says «loading…» under the rail — rather than the header
@@ -302,7 +308,16 @@ export function StudioTab({
      then waits frames for the step to mount and pulses the field. Not claimed: a path this map does
      not know, or a field of the step already open (a hidden anchor there is its own container's
      business) — `revealField` keeps its honest `false`. Imperative because React attaches no
-     custom events from JSX; on `document` because a missing anchor has nothing to bubble from. */
+     custom events from JSX; on `document` because a missing anchor has nothing to bubble from.
+
+     ⚠ ONCE THE STEP IS ON, THE REQUEST IS ASKED AGAIN WHILE ITS ANCHOR IS STILL MISSING (round-3
+     review, MIN-5). Some anchors are drawn only when their owner opens them: a moodboard callout's
+     text (`callouts.N.description`) exists for the SELECTED row alone, and the board, which selects
+     it on request, was not mounted when the first request went out. So for a few frames after the
+     switch the same request goes out again — to `document` while there is no anchor, until an
+     owner claims it; on the anchor while it is drawn but hidden (a folded board), so the fold
+     around it opens — and stops once the anchor is shown. This listener no longer claims it (the
+     step is on), so nothing loops. */
   const stepRef = useRef(decided);
   stepRef.current = decided;
   const goRef = useRef(goStep);
@@ -314,6 +329,26 @@ export function StudioTab({
       if (!home || home === stepRef.current) return;
       e.preventDefault();
       goRef.current(home);
+      let left = 90;
+      const again = () => {
+        const el = document.querySelector<HTMLElement>(`[data-field="${CSS.escape(path)}"]`);
+        const shown =
+          !!el &&
+          (typeof el.checkVisibility === 'function'
+            ? el.checkVisibility()
+            : el.getClientRects().length > 0);
+        if (shown) return;
+        if (stepRef.current === home) {
+          const ask = new CustomEvent<FieldRevealDetail>(FIELD_REVEAL_EVENT, {
+            bubbles: true,
+            cancelable: true,
+            detail: { path },
+          });
+          if (!(el ?? document).dispatchEvent(ask) && !el) return;
+        }
+        if (--left > 0) requestAnimationFrame(again);
+      };
+      requestAnimationFrame(again);
     };
     document.addEventListener(FIELD_REVEAL_EVENT, onAsk);
     return () => document.removeEventListener(FIELD_REVEAL_EVENT, onAsk);
@@ -394,7 +429,11 @@ export function StudioTab({
                   untouched by which step is open here. */}
               {step === 'mood' && (
                 <>
-                  <MoodBoard techCardId={techCardId} disabled={readOnly} />
+                  {/* `ai ✦` of the DESCRIPTION and the draft's GENERATE are writes of this card
+                      (EnhanceText and DraftDesignIdea need tech_cards:write), so the board locks on
+                      the grant as GENERAL INFORMATION does — one rule per door on every surface
+                      (seam review, S-m2). */}
+                  <MoodBoard techCardId={techCardId} disabled={readOnly || !canWriteCard} />
                   {/* КАЖДЫЙ ОРГАН — СВОЙ БЛОК, И ШАПКА С `action` У НЕГО (r1, макет `step-1.png`):
                       `ConstructionGeneralInfo` рисует `general information · what this style is`
                       с рядом `FROM THE MOODBOARD · N OF M DRAFTED FIELDS · MOODBOARD MOVED ON` в
@@ -405,7 +444,11 @@ export function StudioTab({
                       → слоты» выражается соседством в стеке. Слот аспектов может быть пуст
                       (владелец шапки отдаёт сюда свой единственный `DetailsEditor`); пустой он не
                       рисует ни секции, ни отступа. */}
-                  <ConstructionGeneralInfo isAux={isAux} readOnly={readOnly || !canWriteCard} />
+                  <ConstructionGeneralInfo
+                    isAux={isAux}
+                    readOnly={readOnly || !canWriteCard}
+                    frozen={readOnly}
+                  />
                   {constructionAspects}
                   {/* ТАБЛИЦА СЛОТОВ — НА МЕСТЕ СНЯТОЙ СПЕЦИФИКАЦИИ (B-16 / B-19 / B-20). Рисуется
                       ВСЕГДА, даже пустой: пустая спецификация — такое же утверждение о карточке, и
@@ -448,13 +491,19 @@ export function StudioTab({
                     {step === 'flat' && (
                       <>
                         <div id='design-input'>
+                          {/* WORDS' `ai ✦` and the flat's GENERATE lock on the grant too (S-m2):
+                              a viewer is stopped at the door, not by a 403 after it. */}
                           <ReferencesSection
                             techCardId={techCardId}
                             band={band}
-                            disabled={readOnly}
+                            disabled={readOnly || !canWriteCard}
                           />
                         </div>
-                        <GenerationStudio band={band} techCardId={techCardId} disabled={readOnly} />
+                        <GenerationStudio
+                          band={band}
+                          techCardId={techCardId}
+                          disabled={readOnly || !canWriteCard}
+                        />
                       </>
                     )}
                     {/* ═══ STEP 3 · PATTERN — the screen plus the SHARED run history, as on every

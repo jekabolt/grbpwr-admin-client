@@ -59,8 +59,6 @@ export const CALLOUTS_MAX_SHARE = 0.6;
 export const CALLOUTS_DEFAULT_W = 340;
 /** Шаг ←/→ на разделителе в фокусе. */
 export const CALLOUTS_KEY_STEP = 16;
-/** Свёрнутая панель — вертикальная полоска этой ширины. */
-export const CALLOUTS_STRIP_W = 28;
 
 /**
  * Потолок ширины для ряда шириной `rowW`. Ряд ещё не измерен (0) — потолок абсолютный: иначе на

@@ -15,7 +15,7 @@ import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { Arrow } from 'ui/icons/arrow';
-import { FIELD_REVEAL_EVENT } from 'utils/field-errors';
+import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 import { create } from 'zustand';
 
 import type { TechCardFormData } from '../schema';
@@ -24,6 +24,7 @@ import { serverSpeaksDesign } from './capability';
 import { Counter, GROUP_SEAM } from './core';
 import { cardFactsContext } from './core/card-facts';
 import { DraftedField } from './core/drafted-field';
+import { isBoardRow, isInputRow, REFERENCE_KIND } from './core/mood-gate';
 import { draftedKey, useDrafted } from './drafted-contract';
 import { useCardFacts } from './head/card-facts-form';
 import { ConstructionDraft } from './head/construction-draft';
@@ -81,15 +82,13 @@ import { useDesignBand } from './use-design-band';
  */
 export const CONCEPT_MAX = 2000;
 
-export const REFERENCE_KIND = 'TECH_CARD_MEDIA_KIND_REFERENCE';
-
 /**
  * ПИКЕРА mood/swatch НА ПЛИТКЕ БОЛЬШЕ НЕТ (слова владельца: «пикер mood & swatch не нужны в
  * мудборде») — вместе с ним умерли `BOARD_KINDS`/`KIND_ITEMS`/`kindOf`/`setKind`. Новые плитки
  * рождаются `MOODBOARD`; ярлык ничего не делил и ничего не гейтил, он только просил выбора.
- * СТАРЫЕ swatch-строки ПРИ ЭТОМ ЖИВЫ: `isBoardRow` ниже определён отрицанием входа, а не списком
- * видов, поэтому строка с любым не-REFERENCE видом рисуется на доске как рисовалась — снятие
- * пикера не имеет права терять чужие данные с экрана.
+ * СТАРЫЕ swatch-строки ПРИ ЭТОМ ЖИВЫ: `isBoardRow` (`core/mood-gate.ts`) определён отрицанием
+ * входа, а не списком видов, поэтому строка с любым не-REFERENCE видом рисуется на доске как
+ * рисовалась — снятие пикера не имеет права терять чужие данные с экрана.
  */
 
 /**
@@ -109,15 +108,12 @@ export const INPUT_MAX = 12;
 /** Одна строка `moodboardMedia` как её видит форма. Мудборд и референсы правят ОДИН этот список. */
 export type BoardItem = NonNullable<TechCardFormData['moodboardMedia']>[number];
 
-/** Строка ВХОДА — та, что рисуется в блоке референсов. */
-export const isInputRow = (item: BoardItem) => item.kind === REFERENCE_KIND;
 /**
- * Строка ДОСКИ. Определена ОТРИЦАНИЕМ входа, а не перечислением видов: карточка из клона, из
- * импорта или из легаси-разбиения несёт виды, которых сегодняшний словарь не знает, и список
- * «доска = mood | swatch» тихо ронял бы такую строку в НИ ОДИН из двух блоков — то есть терял бы
- * картинку с экрана, сохраняя её в payload.
+ * Строка ВХОДА и строка ДОСКИ — правило части (a) минимума, и живёт оно там же, где минимум
+ * (`core/mood-gate.ts`, раунд 4): черновик, которого доска монтирует, читает его после `await`, и
+ * импорт отсюда завёл бы цикл. Здесь — реэкспорт для прежних читателей, второго написания нет.
  */
-export const isBoardRow = (item: BoardItem) => !isInputRow(item);
+export { isBoardRow, isInputRow, REFERENCE_KIND };
 
 /**
  * ВЗВЕДЁННЫЙ ВЫБОР ПЛИТКИ — единственное состояние, которое делят два соседних блока: ссылку
@@ -622,6 +618,30 @@ export function MoodBoard({
     panel.addEventListener(FIELD_REVEAL_EVENT, onAsk);
     return () => panel.removeEventListener(FIELD_REVEAL_EVENT, onAsk);
   }, [collapsed, techCardId]);
+  /* ОТКАЗ ПО УКАЗАНИЮ, ЧЬЯ СТРОКА ЗАКРЫТА, ТОЖЕ ДОХОДИТ ДО ПАНЕЛИ (ревью раунда 3, MIN-5). Якорь
+     `callouts.N.description` стоит только у ВЫБРАННОЙ строки — правка раскрыта одна, — и отказ по
+     любому другому указанию не находил ни якоря, ни свёртки, которая бы его услышала: `revealField`
+     уходил в `document` и честно отвечал «нет поля». Теперь его слышит доска: строка этого указания
+     выбирается, доска и панель раскрываются (на сеанс, как по Enter на кадре), и просьба
+     ЗАКРЫВАЕТСЯ (`preventDefault`) — `revealField` дождётся якоря и подсветит его. Указание не с
+     доски (картинка входа, лист) — не её, и просьба идёт дальше. */
+  const railIndexes = useRef<ReadonlySet<number>>(new Set());
+  railIndexes.current = new Set(railRows.map((r) => r.index));
+  const keyOfRef = useRef(callouts.keyOf);
+  keyOfRef.current = callouts.keyOf;
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const path = (e as CustomEvent<FieldRevealDetail>).detail?.path ?? '';
+      const m = /^callouts\.(\d+)(?:\.|$)/.exec(path);
+      if (!m || !railIndexes.current.has(Number(m[1]))) return;
+      e.preventDefault();
+      setOpen(true);
+      setHeldFor(techCardId);
+      setSelectedKey(keyOfRef.current(Number(m[1])));
+    };
+    document.addEventListener(FIELD_REVEAL_EVENT, onAsk);
+    return () => document.removeEventListener(FIELD_REVEAL_EVENT, onAsk);
+  }, [techCardId]);
   const separator = useRef<HTMLDivElement | null>(null);
   /** Ширина ряда «доска + панель» — меряется у родителя разделителя (сам ряд — `SectionStack`). */
   const [rowW, setRowW] = useState(0);
@@ -664,9 +684,10 @@ export function MoodBoard({
   const conceptDrafted = draftedApi.isLive(draftedKey.concept, conceptValue);
   const conceptSettle = useAcceptOnEdit(draftedKey.concept, conceptValue);
   const facts = useCardFacts(isBoardRow);
-  // ОТВЕТ `ai ✦` — ТОЛЬКО В ТУ КАРТОЧКУ, КОТОРАЯ ЕГО ПРОСИЛА (фиксап M5): доска на переходе A → B не
-  // размонтируется, запрос живёт секунды. Кнопка пересоздаётся на смене карточки (`key`), а запись
-  // сверяет карточку на экране с той, чей рендер отдал колбэк.
+  // ОТВЕТ `ai ✦` — ТОЛЬКО В ТУ КАРТОЧКУ, КОТОРАЯ ЕГО ПРОСИЛА (фиксап M5). В продукте другая карточка —
+  // другой монтаж (`page.tsx` ключует её адресом, раунд 4), но ничто не мешает родителю подменить id у
+  // живой доски — стенд так и делает, а запрос живёт секунды. Кнопка пересоздаётся на смене карточки
+  // (`key`), а запись сверяет карточку на экране с той, чей рендер отдал колбэк.
   const shownCard = useRef(techCardId);
   shownCard.current = techCardId;
 

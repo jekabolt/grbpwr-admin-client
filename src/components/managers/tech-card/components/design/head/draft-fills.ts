@@ -141,6 +141,12 @@ export type Prior = {
   carried?: Words[];
   restore?: true;
   prior?: Prior;
+  /**
+   * Была ли заменённая запись просмотрена. `✕` возврата ставит её такой, какой она была: живая
+   * непросмотренная запись встаёт с рамкой «drafted» (ревью раунда 3, нит). У звеньев до раунда 4
+   * поля нет — они встают принятыми, как их и ставили.
+   */
+  accepted?: boolean;
 };
 
 /**
@@ -159,6 +165,7 @@ function priorOf(f: Fill): Prior {
       ...(f.carried?.length ? { carried: f.carried } : {}),
       ...(f.restore ? { restore: true as const } : {}),
       ...(f.prior ? { prior: f.prior } : {}),
+      accepted: !!f.accepted,
     },
     1,
   );
@@ -358,7 +365,7 @@ function withCarried(f: Fill, levels: readonly Words[]): Fill {
  * ОДНО ПРЕДЛОЖЕНИЕ «restore previous ↶» — слова человека по одному адресу, дословно. `from` —
  * откуда они в записи: `own` — её `before`, число — индекс в `carried`.
  */
-export type WordsOffer = { fill: Fill; words: string; at: string; from: 'own' | number };
+export type WordsOffer = { fill: Fill; words: string; from: 'own' | number };
 
 /**
  * ЧТО МОЖНО ВЕРНУТЬ ПО ОДНОЙ ЗАПИСИ — слова человека, которых в поле нет (фиксап раунда 2, BLK-1;
@@ -370,12 +377,16 @@ export function offersOf(f: Fill, form: FormSnapshot): WordsOffer[] {
   const t = f.target.kind;
   if (t !== 'detail' && t !== 'fit' && t !== 'concept') return [];
   const seen = new Set<string>([currentOf(f.target, form)]);
+  // ЖИВОЙ ВОЗВРАТ САМ ОТДАЁТ ТО, ЧТО СМЕСТИЛ, — своим `✕` (`unrestoredFill`), вместе с прежней
+  // записью журнала. Та же ступень второй дверью рядом («restore previous ↶» тех же слов) была бы
+  // двумя кнопками про одно; предлагается она, когда `✕` уже нет — возврат поправили (раунд 3, MIN-1).
+  if (f.restore && isLive(f, form)) seen.add(normText(f.before));
   const out: WordsOffer[] = [];
   const offer = (w: Words, from: WordsOffer['from']) => {
     const k = normText(w.before);
     if (!k || seen.has(k)) return;
     seen.add(k);
-    out.push({ fill: f, words: w.before, at: w.at, from });
+    out.push({ fill: f, words: w.before, from });
   };
   if (ownWords(f) && !isLive(f, form)) offer(f, 'own');
   (f.carried ?? []).forEach((w, i) => offer(w, i));
@@ -428,10 +439,23 @@ export function restorable(fills: Fill[], form: FormSnapshot): WordsOffer[] {
  * уходит в `before` — `✕` вернёт его. Принята сразу: это слова человека, рамки «drafted» у них нет.
  * Запись, которую возврат заменяет по адресу, едет с ним целиком (`prior`), а её ОСТАЛЬНЫЕ слова —
  * ступенями (`carried`): возврат выбирает одни слова, но не выбрасывает другие.
+ *
+ * ⚠ СМЕЩЁННОЕ ВОЗВРАТОМ — ТОЖЕ СЛОВА ЧЕЛОВЕКА, И ОНИ ЕДУТ СТУПЕНЬЮ (ревью раунда 3, MIN-1). Свои
+ * слова возврат не держит (`ownWords` — ложь: его `before` не предлагается и не несётся), а в
+ * `before` лежит правленый человеком черновик или слова, которые вернул прошлый возврат. Второй
+ * GENERATE поверх возврата (`mergeFill`) или правка с уходом из поля (`acceptPlan`) стирали их
+ * навсегда — вместе с «H», стоявшим до черновика, после возврата поверх возврата. Поэтому, когда
+ * смещается не собственный текст черновика (`current` не равен его `after`) или заменяемая запись
+ * сама возврат, смещённое ложится верхней ступенью. Пока возврат живой, её отдаёт его `✕`, и
+ * второй дверью она не предлагается (`offersOf`).
  */
 export function restoreFill(o: WordsOffer, current: string, at: string): Fill {
   const f = o.fill;
   const k = normText(o.words);
+  const displaced: Words[] =
+    f.restore || normText(current) !== normText(f.after)
+      ? [{ before: current, after: o.words, at }]
+      : [];
   return withCarried(
     {
       id: f.id,
@@ -444,7 +468,7 @@ export function restoreFill(o: WordsOffer, current: string, at: string): Fill {
       restore: true,
       prior: priorOf(f),
     },
-    levelsOf(f).filter((w) => normText(w.before) !== k),
+    [...displaced, ...levelsOf(f).filter((w) => normText(w.before) !== k)],
   );
 }
 
@@ -460,7 +484,7 @@ export function unrestoredFill(f: Fill): Fill | null {
     before: p.before ?? f.after,
     after: p.after,
     at: p.at,
-    accepted: true,
+    accepted: p.accepted ?? true,
     ...(p.carried?.length ? { carried: p.carried } : {}),
     // Заменённая запись сама была возвратом — она встаёт возвратом, со своим `prior`.
     ...(p.restore ? { restore: true as const } : {}),
