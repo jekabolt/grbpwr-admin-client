@@ -688,9 +688,18 @@ export function MoodBoard({
      панель, раскрывшаяся сама (появилось первое указание), фокус не ворует. */
   const collapseDoor = useRef<HTMLButtonElement | null>(null);
   const expandDoor = useRef<HTMLButtonElement | null>(null);
-  const movedFocus = useRef(false);
+  /**
+   * Дверь, на которую ставит фокус СЛЕДУЮЩИЙ коммит. Заводится только жестом человека (щелчок,
+   * Enter, Esc) или подглядом, который снял полоску вместе с фокусом. `park` — фокус ставит сам
+   * подгляд, а не человек (см. `parked`); `ifLost` — ставить, только если фокус упал в body.
+   */
+  const focusNext = useRef<{ door: 'strip' | 'chevron'; park?: boolean; ifLost?: boolean } | null>(
+    null,
+  );
+  /** Шеврон, на который подгляд переставил фокус с полоски: фокус там — наш, а не человека. */
+  const parked = useRef<HTMLElement | null>(null);
 
-  /* ═══ ПОДГЛЯД ПО НАВЕДЕНИЮ (26.09, O-52) ═══════════════════════════════════════════════════════
+  /* ═══ ПОДГЛЯД ПО НАВЕДЕНИЮ (26.09, O-52; ревью Codex того же дня) ═══════════════════════════════
      Владелец, дословно: «CALLOUTS · 0 в заколапшеном виде должен быть в высоту такой же как и
      картинки на мудборде и текст должен быть посередине и если мы ховерим пространство между
      колаут блоком и картинками мы можем его расколапсить и заколапсить даже без того что бы нажать
@@ -709,20 +718,40 @@ export function MoodBoard({
      курсор и раскрылась снова — по кругу. Растянутая обёртка держит зону монотонной: раскрытая
      зона всегда накрывает свёрнутую. Сама панель внутри неё липкая, как у удержанной.
 
-     ЩЕЛЧОК ПО-ПРЕЖНЕМУ ПЕРЕКЛЮЧАЕТ И УДЕРЖИВАЕТ. Полоска — прежняя дверь. Но через 120 мс под
-     курсором уже не полоска, а подгляд, поэтому шеврон подгляда — та же дверь в «раскрыто»:
-     стрелка смотрит туда же, куда у полоски, а щелчок пишет `collapsed: false`. Свернуть подгляд —
-     просто увести курсор. Без этого удержать панель мышью было бы нечем: щелчок по полоске
-     опаздывает за подглядом.
+     НАЖАТИЕ — ЩЕЛЧОК, А НЕ НАВЕДЕНИЕ (ревью, MAJOR 1). Таймер, сработавший между `pointerdown` и
+     `pointerup`, снимал нажатую полоску из-под руки: `click` не доходил, панель оставалась
+     подглядом. Нажатие в зоне отменяет ждущий подгляд, отпускание в зоне взводит его заново: на
+     полоске следующий за отпусканием `click` тут же снимает таймер и удерживает панель, в шве
+     подгляд откроется, как от наведения.
 
-     ФОКУС ВНУТРИ ДЕРЖИТ ПОДГЛЯД. Щелчок по строке указания подгляд не удерживает: панель
-     сворачивается, когда курсор уходит. Но пока фокус стоит внутри (человек правит указание),
-     панель под руками не сворачивается — свёртка ждёт, пока фокус уйдёт. Фокус считается по дереву
-     React (`onFocus`/`onBlur` всплывают и из порталов, а пикеры строки рисуются порталом), а не по
-     `contains`.
+     ДВЕРИ ПОДГЛЯДА (ревью, minor). Шеврон остаётся дверью раскрытия со своим смыслом:
+     `aria-expanded` — то, что нарисовано (в подгляде true), щелчок — «свернуть», как везде.
+     Удержать подгляд — отдельная кнопка `keep open` с `aria-pressed`, только в подгляде: щелчок по
+     полоске опаздывает за подглядом, и без неё удержать панель мышью было бы нечем. Свернуть
+     подгляд — увести курсор или Esc.
+
+     ESC ЗАКРЫВАЕТ ПОДГЛЯД (ревью, MAJOR 3; WCAG 1.4.13) и не трогает предпочтение. Слушатель стоит
+     на window в фазе всплытия, то есть последним: Esc, который взял кто-то раньше (слой Radix гасит
+     его `preventDefault`, поверхность указаний — `stopPropagation`, снимая выбор или взвод),
+     подгляд не закрывает. Одно нажатие — одна ступень.
+
+     ФОКУС ЧИТАЕТСЯ ВЖИВУЮ (ревью, MAJOR 2). Флаг «фокус внутри», который ставили события, протухал:
+     узел, снятый вместе с фокусом, `blur` не присылает, и любой потом сфокусированный элемент
+     читался «внутри». Теперь решение смотрит `document.activeElement` в момент решения. Держит
+     элемент внутри обёртки или тот, который React в последний раз донёс до неё через `onFocus` —
+     так приходит и фокус из портала панели (сегодня порталов в ней нет: органы строки — чипы в
+     строке, но первый пикер в портале не должен сворачивать панель под рукой). Шеврон, на который
+     фокус переставил сам подгляд, не держит.
+
+     ПОЛОСКА С ФОКУСОМ НЕ РОНЯЕТ ЕГО В BODY. Подгляд снимает полоску; если фокус стоял на ней, он
+     переезжает на шеврон подгляда — ту же дверь в другом положении, — и Tab идёт дальше по панели.
+     Свернувшись, подгляд возвращает фокус на полоску, как и фокус, оставшийся в спрятанной панели.
+
+     НИЖЕ `lg` ПОДГЛЯДА НЕТ, И ОН ГАСНЕТ, КОГДА ОКНО ТУДА ПЕРЕЕЗЖАЕТ (ревью, minor): таймер
+     перепроверяет брейкпойнт, а подписка на `change` гасит и ждущий, и открытый подгляд.
 
      Касание (`pointerType === 'touch'`) наведения не имеет: там дверь — щелчок, как и была. С
-     клавиатуры подгляд не открывается вовсе: Tab, Enter и перенос фокуса за дверью — прежние. */
+     клавиатуры подгляд не открывается: Tab и Enter — прежние. */
   const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Подгляд, каким его видят таймеры и события между рендерами (состояние — для отрисовки). */
   const peekOn = useRef(false);
@@ -730,10 +759,9 @@ export function MoodBoard({
   collapsedNow.current = collapsed;
   /** Указатель в зоне: полоска или панель — плюс шов. */
   const pointerIn = useRef(false);
-  /** Фокус внутри панели — по дереву React, порталы включены. */
-  const focusIn = useRef(false);
-  /** Полоска держала фокус, когда подгляд её снял: свернувшись, подгляд вернёт его на место. */
-  const refocusStrip = useRef(false);
+  /** Последний элемент, который React донёс до обёртки через `onFocus`, — в том числе из портала. */
+  const focusSeen = useRef<EventTarget | null>(null);
+  const sideBySide = () => window.matchMedia?.(SIDE_BY_SIDE).matches !== false;
   const clearPeekTimer = () => {
     if (peekTimer.current) clearTimeout(peekTimer.current);
     peekTimer.current = null;
@@ -742,36 +770,56 @@ export function MoodBoard({
     peekOn.current = on;
     setPeek(on);
   };
-  /** Фокус держит подгляд, только если он где-то стоит: снятый узел молча роняет его в body. */
-  const focusHolds = () => {
+  /** Фокус человека внутри панели — читается сейчас, а не по флагу событий. */
+  const focusOwned = () => {
     const at = document.activeElement;
-    return focusIn.current && !!at && at !== document.body;
+    if (!at || at === document.body || at === parked.current) return false;
+    return !!calloutsPanel.current?.contains(at) || at === focusSeen.current;
+  };
+  /** Свернуть подгляд. Фокус, оставшийся в спрятанной панели или на шевроне подгляда, — на полоску. */
+  const foldPeek = () => {
+    clearPeekTimer();
+    if (!peekOn.current) return;
+    const at = document.activeElement;
+    const lost = !at || at === document.body;
+    const ours = !!parked.current && (at === parked.current || lost);
+    const inside = !lost && (!!calloutsPanel.current?.contains(at) || at === focusSeen.current);
+    parked.current = null;
+    if (ours || inside) focusNext.current = { door: 'strip' };
+    putPeek(false);
+  };
+  const openPeekLater = () => {
+    clearPeekTimer();
+    // Удержанная панель наведения не слышит; открытый подгляд открывать нечего.
+    if (!collapsedNow.current || peekOn.current || !sideBySide()) return;
+    peekTimer.current = setTimeout(() => {
+      peekTimer.current = null;
+      if (!pointerIn.current || !collapsedNow.current || peekOn.current || !sideBySide()) return;
+      // Полоска уходит вместе с фокусом — он переезжает на шеврон подгляда (см. шапку).
+      if (expandDoor.current && document.activeElement === expandDoor.current) {
+        focusNext.current = { door: 'chevron', park: true, ifLost: true };
+      }
+      putPeek(true);
+    }, PEEK_OPEN_MS);
   };
   const foldPeekLater = () => {
     clearPeekTimer();
     peekTimer.current = setTimeout(() => {
       peekTimer.current = null;
-      if (pointerIn.current || focusHolds()) return;
-      putPeek(false);
+      if (pointerIn.current || focusOwned()) return;
+      foldPeek();
     }, PEEK_CLOSE_MS);
   };
   const onZoneEnter = (e: React.PointerEvent) => {
     if (e.pointerType === 'touch') return;
     pointerIn.current = true;
+    // Открытый подгляд — только отмена его свёртки.
     clearPeekTimer();
-    // Удержанная панель наведения не слышит; открытый подгляд только отменяет свою свёртку.
-    if (!collapsedNow.current || peekOn.current) return;
-    if (window.matchMedia?.(SIDE_BY_SIDE).matches === false) return;
     // С зажатой кнопкой это не наведение, а перетаскивание: подпись или ручка указания, которую
     // тянут за край кадра (поверхность ведёт её слушателями окна, без захвата указателя), въехала в
     // шов. Раскрытие сузило бы доску прямо под рукой.
     if (e.buttons !== 0) return;
-    peekTimer.current = setTimeout(() => {
-      peekTimer.current = null;
-      if (!pointerIn.current || !collapsedNow.current) return;
-      refocusStrip.current = !!expandDoor.current && document.activeElement === expandDoor.current;
-      putPeek(true);
-    }, PEEK_OPEN_MS);
+    openPeekLater();
   };
   const onZoneLeave = (e: React.PointerEvent) => {
     if (e.pointerType === 'touch') return;
@@ -779,12 +827,45 @@ export function MoodBoard({
     clearPeekTimer();
     if (peekOn.current) foldPeekLater();
   };
-  const onZoneBlur = () => {
-    focusIn.current = false;
-    // Фокус ушёл из подгляда, а курсор уже снаружи — свёртка тем же путём, что по уходу курсора.
-    // Переход фокуса ВНУТРИ панели ставит флаг обратно раньше, чем истекут 250 мс.
+  // Нажатие — щелчок в процессе: ждущий подгляд не имеет права снять полоску из-под кнопки.
+  const onZoneDown = (e: React.PointerEvent) => {
+    if (e.pointerType !== 'touch') clearPeekTimer();
+  };
+  // Отпускание в зоне взводит подгляд заново; на полоске его тут же снимает её `click`.
+  const onZoneUp = (e: React.PointerEvent) => {
+    if (e.pointerType !== 'touch' && pointerIn.current) openPeekLater();
+  };
+  const onZoneFocus = (e: React.FocusEvent) => {
+    focusSeen.current = e.target;
+  };
+  const onZoneBlur = (e: React.FocusEvent) => {
+    // Человек увёл фокус с шеврона, куда его переставил подгляд, — дальше фокус его.
+    if (e.target === parked.current) parked.current = null;
+    // Фокус ушёл, а курсор уже снаружи — свёртка тем же путём, что по уходу курсора. Решение
+    // читает фокус в момент свёртки, так что переход фокуса ВНУТРИ панели её не вызывает.
     if (peekOn.current && !pointerIn.current) foldPeekLater();
   };
+  // Esc — последним, после всех, кто этот Esc мог взять раньше (см. шапку).
+  useEffect(() => {
+    if (!peeking) return;
+    const onPeekKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return;
+      e.preventDefault();
+      foldPeek();
+    };
+    window.addEventListener('keydown', onPeekKey);
+    return () => window.removeEventListener('keydown', onPeekKey);
+  }, [peeking]);
+  // Окно ушло ниже `lg` — ни ждущего, ни открытого подгляда там не бывает.
+  useEffect(() => {
+    const mq = window.matchMedia?.(SIDE_BY_SIDE);
+    if (!mq) return;
+    const onMediaChange = () => {
+      if (!mq.matches) foldPeek();
+    };
+    mq.addEventListener('change', onMediaChange);
+    return () => mq.removeEventListener('change', onMediaChange);
+  }, []);
   // Удержание (щелчок, Enter на кадре, «покажи поле») заменяет подгляд, и когда удержание кончится,
   // подгляд не имеет права вернуться сам.
   useEffect(() => {
@@ -792,7 +873,7 @@ export function MoodBoard({
     if (peekTimer.current) clearTimeout(peekTimer.current);
     peekTimer.current = null;
     peekOn.current = false;
-    refocusStrip.current = false;
+    parked.current = null;
     setPeek(false);
   }, [collapsed]);
   useEffect(
@@ -803,28 +884,29 @@ export function MoodBoard({
   );
 
   const setCollapsed = (next: boolean) => {
-    // Фокус едет, только если дверь на экране сменится. Шеврон подгляда удерживает панель
-    // раскрытой — та же кнопка остаётся на месте, теперь со словом «collapse», и фокус на ней.
-    movedFocus.current = next !== folded;
-    refocusStrip.current = false;
+    // Фокус едет за дверью, только если дверь на экране сменится.
+    if (next !== folded) focusNext.current = { door: next ? 'strip' : 'chevron' };
+    parked.current = null;
     clearPeekTimer();
     putPeek(false);
     setHeldFor(null);
     setCalloutPrefs({ collapsed: next });
   };
-  useEffect(() => {
-    if (movedFocus.current) {
-      movedFocus.current = false;
-      (folded ? expandDoor : collapseDoor).current?.focus();
-      return;
-    }
-    // Подгляд снял полоску вместе с фокусом; свернувшись, он возвращает фокус на полоску — если за
-    // это время человек не поставил его куда-то сам.
-    if (!folded || !refocusStrip.current) return;
-    refocusStrip.current = false;
+  /** `keep open` подгляда: удержать раскрытой. Кнопка уходит вместе с подглядом — фокус на шеврон. */
+  const keepOpen = () => {
+    setCollapsed(false);
+    focusNext.current = { door: 'chevron', ifLost: true };
+  };
+  useLayoutEffect(() => {
+    const want = focusNext.current;
+    if (!want) return;
+    focusNext.current = null;
+    const door = (want.door === 'strip' ? expandDoor : collapseDoor).current;
     const at = document.activeElement;
-    if (!at || at === document.body) expandDoor.current?.focus({ preventScroll: true });
-  }, [folded]);
+    if (!door || (want.ifLost && at && at !== document.body)) return;
+    door.focus({ preventScroll: true });
+    parked.current = want.park ? door : null;
+  });
 
   // ОПИСАНИЕ — ТЕ ЖЕ ДВА ОРГАНА ВОЛНЫ, ЧТО У ПОЛЕЙ GENERAL INFORMATION: синяя рамка `drafted`,
   // пока в поле стоит текст черновика и его не приняли, и `ai ✦` в правом нижнем углу.
@@ -1232,9 +1314,9 @@ export function MoodBoard({
           style={{ '--cw': `${panelW}px` } as React.CSSProperties}
           onPointerEnter={onZoneEnter}
           onPointerLeave={onZoneLeave}
-          onFocus={() => {
-            focusIn.current = true;
-          }}
+          onPointerDown={onZoneDown}
+          onPointerUp={onZoneUp}
+          onFocus={onZoneFocus}
           onBlur={onZoneBlur}
           className={cn(
             'min-w-0 lg:shrink-0',
@@ -1249,7 +1331,9 @@ export function MoodBoard({
                знак, внутри ни одного другого органа. От `lg` — вертикальная полоска во всю высоту
                ряда: подпись стоит ровно посередине по обеим осям (O-52), знак — у верхнего края,
                вне потока, чтобы не сдвигать подпись со середины; симметричные 32px сверху и снизу
-               оставляют знаку место и на короткой доске. Ниже `lg` — обычная строка во всю ширину. */
+               оставляют знаку место и на короткой доске. Подпись ЛИПКАЯ сверху и снизу (ревью): у
+               высокой доски (сетка) середина полоски уходит за край экрана, и подпись держится в
+               видимой части полоски, не выходя из неё. Ниже `lg` — обычная строка во всю ширину. */
             <button
               ref={expandDoor}
               type='button'
@@ -1266,7 +1350,7 @@ export function MoodBoard({
                 tracking='label'
                 component='span'
                 data-mb-callouts-label=''
-                className='whitespace-nowrap text-labelColor group-hover:text-textColor lg:[writing-mode:vertical-rl]'
+                className='whitespace-nowrap text-labelColor group-hover:text-textColor lg:sticky lg:top-gutter lg:bottom-gutter lg:[writing-mode:vertical-rl]'
               >
                 callouts · {calloutCount}
               </Text>
@@ -1290,34 +1374,34 @@ export function MoodBoard({
                       {calloutCount} on the board
                     </Pill>
                   )}
-                  {/* В ПОДГЛЯДЕ (O-52) ЭТА ДВЕРЬ ВЕДЁТ В «РАСКРЫТО»: панель показана, но свёрнута,
-                      и щелчок переключает именно это — удерживает её раскрытой и пишет
-                      предпочтение. Свернуть подгляд — увести курсор. */}
+                  {/* УДЕРЖАТЬ ПОДГЛЯД (O-52, ревью) — отдельная кнопка, а не второй смысл шеврона:
+                      шеврон и в подгляде остаётся дверью раскрытия (`aria-expanded` — то, что
+                      нарисовано). Живёт только в подгляде; щелчок пишет `collapsed: false`. */}
+                  {peeking && (
+                    <Chip
+                      onClick={keepOpen}
+                      pressed={false}
+                      title='keep the panel open — otherwise it folds when the pointer leaves'
+                      data-mb-callouts-keep=''
+                    >
+                      keep open
+                    </Chip>
+                  )}
                   <button
                     ref={collapseDoor}
                     type='button'
-                    onClick={() => setCollapsed(!peeking)}
-                    aria-expanded={peeking ? undefined : true}
+                    onClick={() => setCollapsed(true)}
+                    aria-expanded
                     aria-controls={panelId}
-                    aria-label={
-                      peeking ? 'keep the callouts panel open' : 'collapse the callouts panel'
-                    }
-                    title={
-                      peeking
-                        ? 'keep it open — otherwise it folds when the pointer leaves'
-                        : undefined
-                    }
+                    aria-label='collapse the callouts panel'
                     data-mb-callouts-collapse=''
                     className='group cursor-pointer px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
                   >
                     {/* Тот же знак, что у каждой свёртки админки, повёрнутый к краю, куда панель
-                        уходит: вправо от `lg`, вверх ниже. В подгляде — влево, как у полоски. */}
+                        уходит: вправо от `lg`, вверх ниже. */}
                     <Arrow
                       aria-hidden
-                      className={cn(
-                        'shrink-0 text-labelColor group-hover:text-textColor',
-                        peeking ? 'lg:-rotate-90' : 'lg:rotate-90',
-                      )}
+                      className='shrink-0 text-labelColor group-hover:text-textColor lg:rotate-90'
                     />
                   </button>
                 </span>
