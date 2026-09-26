@@ -130,6 +130,30 @@ export function KindGlyph({ kind }: { kind: string }) {
   );
 }
 
+/**
+ * ═══ ДВЕРИ БЕЗ ФОРМЫ — `<span role="button">`, А НЕ `<button>` (ревью O-52, 26.09) ═══════════════
+ *
+ * На RELEASED-карте вся вкладка стоит в `<fieldset disabled>` (index.tsx), а он гасит у каждой
+ * кнопки внутри щелчок и фокус. Двери, которые только ПОКАЗЫВАЮТ, — полоска, `keep open` и шеврон
+ * панели указаний (mood-board.tsx), разворот строки указания здесь — были мертвы ровно на тех
+ * карточках, которые читают чаще всего. Раскрыто или свёрнуто — вид, а не данные карточки, поэтому
+ * такие двери — `span` с ролью кнопки. Всё, что ПИШЕТ (поля строки, её оформление, `delete`,
+ * `+ point`), остаётся настоящими полями и кнопками, и fieldset обязан их гасить. Приём тот же, что у
+ * `RowDisclosure` (cost-estimate-field) и `Chip nonForm`.
+ *
+ * Клавиатура — то, что кнопка делала сама: Enter и пробел нажимают дверь. Нажатие, которое взял кто-то
+ * раньше (поверхность доски на Enter фокусирует подпись выбранного указания и гасит событие), дверь
+ * не нажимает — кнопку такой `preventDefault` тоже не нажимал: он гасил её `click`. Автоповтор
+ * удерживаемой клавиши дверь не качает: полоска панели снимается с первого нажатия, и повтор
+ * пришёлся бы в шеврон, который свернул бы панель обратно.
+ */
+export const onDoorKey = (press: () => void) => (e: React.KeyboardEvent) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  if (e.defaultPrevented || e.repeat) return;
+  e.preventDefault();
+  press();
+};
+
 export function CalloutRail({
   rows,
   selected,
@@ -237,16 +261,21 @@ export function CalloutRail({
                 </Text>
               )}
               <KindGlyph kind={c.kind ?? 'pin'} />
-              <button
-                type='button'
+              {/* РАЗВОРОТ СТРОКИ — дверь без формы (см. `onDoorKey`): на выпущенной карте указание
+                  раскрывают, чтобы прочесть его целиком, а поля внутри гасит fieldset. */}
+              <span
+                role='button'
+                tabIndex={0}
                 onClick={() => onSelect(open ? null : index)}
+                onKeyDown={onDoorKey(() => onSelect(open ? null : index))}
                 aria-expanded={open}
+                data-callout-toggle=''
                 className='min-w-0 flex-1 cursor-pointer text-left'
               >
                 <Text size='micro' component='span' className='block truncate'>
                   {(c.description ?? '').trim() || (c.part ?? '').trim() || 'no text'}
                 </Text>
-              </button>
+              </span>
               {place ? <Pill tone='mut'>{place}</Pill> : null}
             </div>
 

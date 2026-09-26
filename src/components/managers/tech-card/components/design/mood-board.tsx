@@ -19,7 +19,7 @@ import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 import { create } from 'zustand';
 
 import type { TechCardFormData } from '../schema';
-import { CalloutRail, CalloutRowBody, type CalloutRailRow } from './callout-rail';
+import { CalloutRail, CalloutRowBody, onDoorKey, type CalloutRailRow } from './callout-rail';
 import { serverSpeaksDesign } from './capability';
 import { Counter, GROUP_SEAM } from './core';
 import { cardFactsContext } from './core/card-facts';
@@ -317,26 +317,6 @@ const PEEK_CLOSE_MS = 250;
  * ней, каждый раз, когда курсор просто едет мимо; там дверь — только щелчок.
  */
 const SIDE_BY_SIDE = '(min-width: 64rem)';
-/**
- * ДВЕРИ ПАНЕЛИ CALLOUTS — `<span role="button">`, А НЕ `<button>` (ревью O-52, второй круг). На
- * RELEASED-карте вся вкладка стоит в `<fieldset disabled>` (index.tsx), а он гасит у каждой кнопки
- * внутри щелчок и фокус: полоска, `keep open` и шеврон были мертвы ровно на тех карточках, которые
- * читают чаще всего, — жило одно наведение, а щелчку и клавиатуре раскрыть панель было нечем.
- * Свёрнута панель или нет — вид, а не данные карточки, и её двери обязаны пережить заморозку. Приём
- * тот же, что у `RowDisclosure` (cost-estimate-field) и `Chip nonForm`.
- *
- * Клавиатура — то, что кнопка делала сама: Enter и пробел нажимают дверь. Нажатие, которое взял
- * кто-то раньше (поверхность доски на Enter фокусирует подпись выбранного указания и гасит
- * событие), дверь не нажимает — кнопку такой `preventDefault` тоже не нажимал: он гасил её `click`.
- * Автоповтор удерживаемой клавиши дверь не качает: полоска снимается с первого нажатия, и повтор
- * пришёлся бы в шеврон, который свернул бы панель обратно.
- */
-const onDoorKey = (press: () => void) => (e: React.KeyboardEvent) => {
-  if (e.key !== 'Enter' && e.key !== ' ') return;
-  if (e.defaultPrevented || e.repeat) return;
-  e.preventDefault();
-  press();
-};
 
 export function MoodBoard({
   techCardId,
@@ -1355,7 +1335,7 @@ export function MoodBoard({
                высокой доски (сетка) середина полоски уходит за край экрана, и подпись держится в
                видимой части полоски, не выходя из неё. Ниже `lg` — обычная строка во всю ширину.
                Дверь — `span`, а не кнопка: её не гасит `<fieldset disabled>` выпущенной карты (см.
-               `onDoorKey`). */
+               `onDoorKey` в callout-rail.tsx). */
             <span
               ref={expandDoor}
               role='button'
