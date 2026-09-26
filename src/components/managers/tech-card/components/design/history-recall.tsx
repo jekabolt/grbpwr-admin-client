@@ -138,6 +138,9 @@ export function recallTargetKind(run: common_DesignRun, mode: RecallMode): Desig
      стол и рисует. Без этой строки жест уводил бы стол прошлого прогона во ФЛЭТ — то есть
      превращал бы размеченные картинки в безымянные референсы чужого промпта, молча. */
   if (kind === 'freeform' || kind === 'cutout') return 'playground';
+  // ON MODEL's recolour is the PLAYGROUND workflow `change_color` now (C-01). Recall switches the
+  // step only; `?wf=` is the playground screen's to set from the run.
+  if (kind === 'recolor') return 'playground';
   return 'flat';
 }
 

@@ -360,7 +360,7 @@ export function ChainRail({
       <TooltipProvider>
         {/* SIX LINKS IN ONE OUTLINED ROW, RULED BY HAIRLINES. The cells share the width (`flex-1` —
             grow, shrink AND a zero basis; `min-w` is the floor under the longest name). Then the
-            ASIDE on a full-width row of its own, pressed to the first (`border-t-0`): ON MODEL is
+            ASIDE on a full-width row of its own, pressed to the first (`border-t-0`): PLAYGROUND is
             not a link of the chain — a row of equal cells would claim it is a step — so it stands
             apart, without a number, and does not count in «N of 6 steps». */}
         <div className='overflow-x-auto'>
@@ -370,19 +370,12 @@ export function ChainRail({
             <div className='flex items-stretch border border-borderColor'>
               {STEPS.map((s, i) => cell(s, i > 0 ? 'border-l border-hairline' : undefined))}
             </div>
-            {/* ═══ THE ASIDES SHARE THE SECOND ROW, AND THE PLAYGROUND MAY NOT BE ON IT ═══════
-                Both are rooms rather than links, so they stand on one full-width row pressed to
-                the first (`border-t-0`) and count in neither «N of 6 steps» nor the queue.
-
-                ⚠ THE PLAYGROUND CELL IS DRAWN ONLY WHERE THE SERVER OFFERS THE ROUTE, and the
-                rule is the STEP's own (`ASIDES[].visible`, core/chain.ts) — the rail asks it, so
-                that «which servers have a playground» is not written in two places. On a binary
-                older than `freeform_presets` the row holds ON MODEL alone, exactly as it did
-                before this step existed. */}
+            {/* ═══ THE ASIDE ROW — PLAYGROUND alone (C-01) ═══════════════════════════════════
+                A room rather than a link: a full-width row pressed to the first (`border-t-0`),
+                counted in neither «N of 6 steps» nor the queue. Unconditional — the screen, not
+                the rail, says which workflow this server cannot run. */}
             <div className='flex items-stretch border border-t-0 border-borderColor'>
-              {ASIDES.filter((s) => !s.visible || s.visible(ctx.band)).map((s, i) =>
-                cell(s, i > 0 ? 'border-l border-hairline' : undefined),
-              )}
+              {ASIDES.map((s, i) => cell(s, i > 0 ? 'border-l border-hairline' : undefined))}
             </div>
           </div>
         </div>

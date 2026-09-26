@@ -304,7 +304,7 @@ const REP_LABEL: Record<RepFilter, string> = {
   pattern: 'patterns',
   render: 'renders',
   threed: '3D',
-  onmodel: 'on model',
+  onmodel: 'change a colour',
   playground: 'playground',
 };
 
@@ -381,6 +381,7 @@ export function GenerationHistory({
   disabled,
   defaultRep = 'all',
   defaultOpen = true,
+  match,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -400,6 +401,12 @@ export function GenerationHistory({
    * заплатил бы дважды. И поэтому же `RecallBenchIntake` стоит СНАРУЖИ свёртки.
    */
   defaultOpen?: boolean;
+  /**
+   * WHICH ROWS, when the step's kind is not the whole answer (PLAYGROUND, C-01): given, it REPLACES
+   * the kind filter for the window and the archive shelf; `defaultRep` still names the rows in
+   * words. Pass a stable function (module constant or `useCallback`) — it is a memo dependency.
+   */
+  match?: (run: common_DesignRun) => boolean;
 }) {
   const speaks = serverSpeaksDesign();
   const more = useMoreHistory(techCardId, band);
@@ -492,18 +499,25 @@ export function GenerationHistory({
   const archivedLoaded = useMemo(() => runs.filter(isRunArchived), [runs]);
   const archivedRows = useMemo(
     () =>
-      rep === 'all'
-        ? archivedLoaded
-        : archivedLoaded.filter((run) => runRepresentation(run) === rep),
-    [archivedLoaded, rep],
+      match
+        ? archivedLoaded.filter(match)
+        : rep === 'all'
+          ? archivedLoaded
+          : archivedLoaded.filter((run) => runRepresentation(run) === rep),
+    [archivedLoaded, rep, match],
   );
   /**
    * ВСЁ, ЧТО НИЖЕ, ВЫВОДИТСЯ ИЗ `visible`: страницы, зажим окна, ряд просмотрщика, «show all» и
    * подпись пейджера. Поэтому фильтр стоит ЗДЕСЬ и ровно одной строкой.
    */
   const visible = useMemo(
-    () => (rep === 'all' ? unfiltered : unfiltered.filter((run) => runRepresentation(run) === rep)),
-    [unfiltered, rep],
+    () =>
+      match
+        ? unfiltered.filter(match)
+        : rep === 'all'
+          ? unfiltered
+          : unfiltered.filter((run) => runRepresentation(run) === rep),
+    [unfiltered, rep, match],
   );
   const pageCount = Math.max(1, Math.ceil(visible.length / PAGE));
   /**

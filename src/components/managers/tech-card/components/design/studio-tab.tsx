@@ -1,4 +1,4 @@
-import type { common_TechCard } from 'api/proto-http/admin';
+import type { common_DesignRun, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useCallback, useEffect, useRef, type ReactNode } from 'react';
@@ -15,12 +15,14 @@ import { Bench } from './bench';
 import { useColorwayChoice } from './colorway-picker';
 import { ColourwayProposals } from './colourway-proposals';
 import { GenerationStudio } from './generation';
-import type { DesignKind } from './bench-kinds';
+import { runRepresentation, type DesignKind } from './bench-kinds';
 import { ChainRail, useChainCtx } from './chain-rail';
 import {
+  PLAYGROUND_WF_PARAM,
   defaultStep,
   isStepId,
   kindOfStep,
+  legacyStep,
   stepOfField,
   stepOfKind,
   type StepId,
@@ -30,7 +32,6 @@ import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
 import { MaterialSlots } from './material-slots';
 import { MoodBoard } from './mood-board';
-import { OnModelStudio } from './onmodel';
 import { PlaygroundStudio } from './playground';
 import { PatternStudio } from './pattern';
 import { DraftedProvider } from './head/drafted-provider';
@@ -59,8 +60,8 @@ import { useDesignBand } from './use-design-band';
  *                            blocks, all drawn by `MoodBoard`), then GENERAL INFORMATION,
  *                            CONSTRUCTION, MATERIAL SLOTS (and the colourway proposals, a product
  *                            block the prototype has no row for) — each organ draws its OWN block;
- *   · steps 2–5 and the aside → the generative screens (flat · pattern · fabric render · 3D · on
- *                            model), each with its own input, GENERATE and history.
+ *   · steps 2–5 and the aside → the generative screens (flat · pattern · fabric render · 3D ·
+ *                            playground), each with its own input, GENERATE and history.
  * Nothing is «always on screen above the rail» any more: the previous build stacked steps 0 and 1
  * over the rail and switched only the screens below it, and the owner, seeing it, said «не как в
  * референсе». Clicking a cell — any cell — switches the step, as `ACTIONS['go']` sets `S.step`.
@@ -69,6 +70,12 @@ import { useDesignBand } from './use-design-band';
  * down. Organs that called it separately would each get their own cache entry and the bench could
  * disagree with the feed about which instant of the card is on screen.
  */
+
+/** The runs of the PLAYGROUND room: its own kinds and the recolours ON MODEL used to hold. */
+const inPlaygroundRoom = (run: common_DesignRun): boolean => {
+  const rep = runRepresentation(run);
+  return rep === 'playground' || rep === 'onmodel';
+};
 
 /**
  * The pick banner. It belongs to neither the bench (which asks) nor the feed (which answers), so it
@@ -266,19 +273,41 @@ export function StudioTab({
     if (!techCardId) opened.current.step = 'card';
     else if (!isLoading && chain.card.name.trim()) opened.current.step = defaultStep(chain);
   }
-  const decided: StepId | null = isStepId(urlStep) ? urlStep : opened.current.step;
+  /* A step that no longer exists (`?step=aside`) is read as its new home in this very render and
+     rewritten once below, so neither the default-step latch nor a blank frame ever sees it. An
+     unknown value falls through to the latch, as before. */
+  const legacy = legacyStep(urlStep);
+  const decided: StepId | null = isStepId(urlStep)
+    ? urlStep
+    : legacy
+      ? legacy.step
+      : opened.current.step;
   const ctx = { ...chain, now: decided };
   const goStep = (next: StepId) =>
     setParams(
       (prev) => {
         const p = new URLSearchParams(prev);
         p.set('step', next);
+        // `?wf=` belongs to the playground screen; it does not outlive the step.
+        if (next !== 'playground') p.delete(PLAYGROUND_WF_PARAM);
         return p;
       },
       // `replace`, as the prototype's `replaceState`: Back leaves the card, it does not walk the
       // rail backwards one cell at a time.
       { replace: true },
     );
+  useEffect(() => {
+    if (!legacy) return;
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.set('step', legacy.step);
+        if (!p.get(PLAYGROUND_WF_PARAM)) p.set(PLAYGROUND_WF_PARAM, legacy.wf);
+        return p;
+      },
+      { replace: true },
+    );
+  }, [legacy, setParams]);
 
   /* ═══ THE GENERATIVE KIND IS DERIVED FROM THE STEP, NEVER HELD BESIDE IT ═════════════════════════
      `kind` was the studio's state (`state.kind` of the old prototype); now the step is, and the
@@ -593,62 +622,23 @@ export function StudioTab({
                         />
                       </>
                     )}
-                    {/* ═══ ASIDE · ON MODEL — a recolour of a photograph of a real person (K-17).
-                        No remount on a change of colourway, measured: `useTargetColourDraft` seeds
-                        from the card's last recipe (not narrowed by colourway), the input row shows
-                        library media, the outputs are card-wide — a remount would guard nothing and
-                        cost four gathered photographs. The name and the archive ride here for the
-                        reason the number does: the screen FREEZES `colorwayId` in the run. */}
-                    {step === 'aside' && (
-                      <>
-                        <OnModelStudio
-                          band={band}
-                          techCardId={techCardId}
-                          disabled={readOnly}
-                          colorwayId={colorway.colorwayId}
-                          colorwayLabel={colorway.label}
-                          colorwayArchived={colorway.archived}
-                          /* THE COLOURWAY CHIPS OF THE PAINT GROUP (r1, mock-up `_step-aside.js`
-                             `om:way`): the card's colourways and THE SAME SETTER the select on the
-                             rail calls. The one writer of the choice stays this file's
-                             `useColorwayChoice`; the chips are a second door to it, not a second
-                             state, and nothing is written into the form. */
-                          colorways={colorway.colorways}
-                          onColorwayChange={colorway.setColorwayId}
-                        />
-                        {/* J-31 / E-23: sorted to on-model, closed by default. */}
-                        <GenerationHistory
-                          band={band}
-                          techCardId={techCardId}
-                          disabled={readOnly}
-                          defaultRep='onmodel'
-                          defaultOpen={false}
-                        />
-                      </>
-                    )}
-                    {/* ═══ ASIDE · PLAYGROUND — pictures, words, one run. NO colourway prop, and
-                        that is the contract rather than an omission: this kind binds none, and a
-                        run carrying `colorway_id > 0` is refused (`colorway_forbidden`). No
-                        remount on a change of colourway either — there is nothing here a colour
-                        could invalidate.
+                    {/* ═══ ASIDE · PLAYGROUND — the one room beside the chain (C-01). ON MODEL
+                        lives here now as the workflow `change_color`; a legacy `?step=aside` is
+                        rewritten above. NO colourway prop: a workflow that binds one carries it
+                        itself.
 
-                        ⚠ THE CELL THAT LEADS HERE IS DRAWN ONLY WHERE THE SERVER OFFERS THE ROUTE
-                        (`ASIDES[].visible`), but the STEP is mounted whenever the address names
-                        it: a link pasted from a contour that has the route must land on a screen
-                        that explains itself, not on a blank. The screen says «no playground route
-                        is wired on this server» and names the keys. */}
+                        ⚠ ONE MOUNT POINT FOR THE PLAYGROUND SCREEN. The screen owns `?wf=`; the
+                        history below shows the room's runs (playground + recolour), and a
+                        workflow narrows it with `match`. */}
                     {step === 'playground' && (
                       <>
-                        <PlaygroundStudio
-                          band={band}
-                          techCardId={techCardId}
-                          disabled={readOnly}
-                        />
+                        <PlaygroundStudio band={band} techCardId={techCardId} disabled={readOnly} />
                         <GenerationHistory
                           band={band}
                           techCardId={techCardId}
                           disabled={readOnly}
                           defaultRep='playground'
+                          match={inPlaygroundRoom}
                           defaultOpen={false}
                         />
                       </>
