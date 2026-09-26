@@ -31,6 +31,7 @@ import { displayDetailName, readBench } from './bench-slot';
 import { useMoodMinimumGate } from './chain-rail';
 import { useDrafted } from './drafted-contract';
 import { cropFamilies } from './generation/composite';
+import { LatestGeneration } from './generation/latest-generation';
 import {
   flatInputBusy,
   holdFlatInput,
@@ -118,6 +119,9 @@ import {
  *        первой правкой или с GENERATE; в правом нижнем углу счётчик `N / 2000` и `ai ✦`;
  *   1.3  ряд запуска (`./flat-run-row.tsx`): VIEWS (продуктовая строка — проводу нужны
  *        `views[]`), GENERATE · цена · WHAT THE MODEL GETS ▸.
+ *   1.4  latest generation (`./generation/latest-generation.tsx`, 26.09, O-53) — нижний край блока:
+ *        последний флэт-прогон под GENERATE, `GroupLabel` со штампом и его плитки с дверьми истории
+ *        (split / edit / zoom / слот); идущий прогон — пунктирными плитками. История ниже свёрнута.
  * Двери `from construction ▸` и `also send the flat slots` (с лентой плит) сняты владельцем
  * (T24, D-20): всё, что они приносили, теперь стоит в WORDS с самого начала, а плиты верстака в
  * прогон флэта больше не едут вовсе (`useFlatSlots` всегда false).
@@ -1074,6 +1078,9 @@ export function ReferencesSection({
         disabled={disabled}
         onAccepted={(media) => setPicked((prev) => [...prev, ...media])}
       />
+
+      {/* 1.4 ПОСЛЕДНЯЯ ГЕНЕРАЦИЯ (O-53) — низ блока: то, что вернул GENERATE, с дверьми истории. */}
+      <LatestGeneration band={band} techCardId={techCardId} disabled={disabled} />
 
       {/* Модалка сплита (R-17) — монтируется хуком, когда для картинки получена картинка полосы. */}
       {split.modal}
