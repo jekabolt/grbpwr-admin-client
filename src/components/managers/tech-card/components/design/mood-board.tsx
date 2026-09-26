@@ -611,6 +611,17 @@ export function MoodBoard({
   const [heldFor, setHeldFor] = useState<number | null>(null);
   const heldOpen = heldFor === techCardId;
   const collapsed = !heldOpen && calloutsCollapsed(calloutPrefs.collapsed, calloutCount);
+  /* ПАНЕЛЬ, СВЁРНУТАЯ ПРЕДПОЧТЕНИЕМ, ТОЖЕ РАСКРЫВАЕТСЯ НА ПРОСЬБУ «ПОКАЖИ ПОЛЕ» (раунд 3, m5). Якорь
+     `callouts.N.description` стоит под `hidden={collapsed}`: раскрытая доска (`setOpen` выше) его не
+     покажет, пока свёрнута сама панель, — и дверь с отказом по полю снова молчала бы. Раскрытие — на
+     сеанс (`heldFor`), как у Enter на кадре: явное «свернуть» человека не переписывается. */
+  useEffect(() => {
+    const panel = calloutsPanel.current;
+    if (!panel || !collapsed) return;
+    const onAsk = () => setHeldFor(techCardId);
+    panel.addEventListener(FIELD_REVEAL_EVENT, onAsk);
+    return () => panel.removeEventListener(FIELD_REVEAL_EVENT, onAsk);
+  }, [collapsed, techCardId]);
   const separator = useRef<HTMLDivElement | null>(null);
   /** Ширина ряда «доска + панель» — меряется у родителя разделителя (сам ряд — `SectionStack`). */
   const [rowW, setRowW] = useState(0);

@@ -209,6 +209,9 @@ export function stepOfField(path: string): StepId | null {
   return FIELD_STEP[root ?? ''] ?? null;
 }
 
+/** The frame of the reveal loop in flight (`openStepOf`), 0 when none. */
+let revealFrame = 0;
+
 /**
  * ═══ A DOOR TO THE STEP THAT DRAWS A FIELD — the same seam as `revealField`, without its pulse ═══
  *
@@ -244,9 +247,13 @@ export function openStepOf(path: string, fallback?: string): boolean {
     detail: { path },
   });
   const claimed = !(anchor() ?? document).dispatchEvent(ask);
+  // ONE LOOP AT A TIME (round 3, nit): a second press of a door while the first is still waiting
+  // for its anchor cancels the first — two loops would fight over the scroll, each for its own path.
+  if (revealFrame) cancelAnimationFrame(revealFrame);
   let left = 90;
   let hiddenFrames = 0;
   const tick = (): void => {
+    revealFrame = 0;
     const el = anchor();
     if (shown(el)) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -258,9 +265,9 @@ export function openStepOf(path: string, fallback?: string): boolean {
       alt.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
-    if (--left > 0) requestAnimationFrame(tick);
+    if (--left > 0) revealFrame = requestAnimationFrame(tick);
   };
-  requestAnimationFrame(tick);
+  revealFrame = requestAnimationFrame(tick);
   return claimed;
 }
 
@@ -576,13 +583,26 @@ export function stepDone(id: StepId, ctx: ChainCtx): boolean {
  * card that already HAS its flats may not meet it. Sending that card back to MOODBOARD as «next» —
  * and opening it there (`defaultStep`) — would pull it behind work it has done. The moodboard is
  * still not `done` (its cell and the flat's GENERATE keep the minimum); it is only not «next».
+ *
+ * ⚠ …BUT ONLY WHEN THE WORK AHEAD CAN ACTUALLY BE TAKEN UP (round 3, m4). «Done» for the flat is ONE
+ * side with a picture; the render wants front AND back. A front-only bench on a weak minimum passed
+ * the moodboard, then found the render locked («missing: back») and nothing else open: the card
+ * opened on CARD DETAILS with no NEXT on the rail, and the bar's door led to FLAT, whose GENERATE
+ * the same minimum keeps locked. So the moodboard is passed over only when the render is done or
+ * open; otherwise it IS the next thing to fix — the flat that is still missing waits behind it.
  */
 export function nextUp(ctx: ChainCtx): StepId | null {
   for (const s of STEPS) {
     if (s.id === ctx.now) continue;
     if (s.optional) continue;
     if (stepDone(s.id, ctx)) continue;
-    if (s.id === 'mood' && stepDone('flat', ctx)) continue;
+    if (
+      s.id === 'mood' &&
+      stepDone('flat', ctx) &&
+      (stepDone('render', ctx) || chainGate('render', ctx).ok)
+    ) {
+      continue;
+    }
     const g = chainGate(s.id, ctx);
     if (g.ok || g.own) return s.id;
   }

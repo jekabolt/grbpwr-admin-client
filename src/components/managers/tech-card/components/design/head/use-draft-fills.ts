@@ -84,9 +84,10 @@ const MAX_STORED = 120;
 /**
  * ЧТО УХОДИТ В ХРАНИЛИЩЕ, КОГДА ЖУРНАЛ ДЛИННЕЕ ПОТОЛКА. НЕ принятые записи — ВСЕ, даже сверх
  * потолка: это пометки на экране, и отрезать хоть одну значило бы молча снять рамку и её откат после
- * F5 (ревью Codex, P1). Записи со словами человека (`holdsWords`, фиксап раунда 2, BLK-1) — тоже
- * все: принятая такая запись — единственная копия того, что стояло до черновика, и потолок не
- * вправе её стереть; их не больше, чем скалярных полей у карточки. Потолок режет только прочие
+ * F5 (ревью Codex, P1). Записи со словами человека (`holdsWords`: свои — фиксап раунда 2, BLK-1;
+ * несённые — раунд 3, M-A) — тоже все: принятая такая запись — единственная копия того, что стояло
+ * до черновика, и потолок не вправе её стереть; их не больше, чем скалярных полей у карточки
+ * (адрес — поле, ступени едут внутри записи). Потолок режет только прочие
  * принятые — остаток места отдаётся новейшим из них. Порядок журнала сохраняется. Память сеанса не
  * режется вовсе.
  */
@@ -110,6 +111,29 @@ const TARGET_KINDS = new Set<FillTarget['kind']>([
   'detailSlot',
 ]);
 
+/** Ступень несённых слов (раунд 3, M-A) — три строки, и ничего больше не читается. */
+function isStoredWords(x: unknown): boolean {
+  if (!x || typeof x !== 'object') return false;
+  const w = x as Record<string, unknown>;
+  return typeof w.before === 'string' && typeof w.after === 'string' && typeof w.at === 'string';
+}
+
+const isStoredLevels = (x: unknown): boolean => Array.isArray(x) && x.every(isStoredWords);
+
+/**
+ * Заменённая возвратом запись (`Prior`): `after` и `at` обязательны (так её писал раунд 2), прочее —
+ * по форме; цепочка возвратов проверяется целиком, но не глубже, чем её пишет журнал.
+ */
+function isStoredPrior(x: unknown, depth = 1): boolean {
+  if (!x || typeof x !== 'object' || depth > 8) return false;
+  const p = x as Record<string, unknown>;
+  if (typeof p.after !== 'string' || typeof p.at !== 'string') return false;
+  if (p.before !== undefined && typeof p.before !== 'string') return false;
+  if (p.carried !== undefined && !isStoredLevels(p.carried)) return false;
+  if (p.restore !== undefined && p.restore !== true) return false;
+  return p.prior === undefined || isStoredPrior(p.prior, depth + 1);
+}
+
 /** Недоверчивый разбор: запись журнала — это ровно эта форма, и адрес сходится с целью. */
 function isStoredFill(x: unknown): x is Fill {
   if (!x || typeof x !== 'object') return false;
@@ -126,12 +150,8 @@ function isStoredFill(x: unknown): x is Fill {
   if (typeof f.at !== 'string') return false;
   if (f.snapshot !== undefined && typeof f.snapshot !== 'string') return false;
   if (f.restore !== undefined && f.restore !== true) return false;
-  if (f.prior !== undefined) {
-    const p = f.prior as Record<string, unknown> | null;
-    if (!p || typeof p !== 'object' || typeof p.after !== 'string' || typeof p.at !== 'string') {
-      return false;
-    }
-  }
+  if (f.carried !== undefined && !isStoredLevels(f.carried)) return false;
+  if (f.prior !== undefined && !isStoredPrior(f.prior)) return false;
   return f.accepted === undefined || typeof f.accepted === 'boolean';
 }
 
@@ -172,6 +192,8 @@ type Store = {
   hydrated: Record<number, true>;
   hydrate: (card: number) => void;
   record: (card: number, fill: Fill) => void;
+  /** Запись целиком, без слияния: `✕` и отказ от слов ставят журнал в прежнее состояние (M-A, m6). */
+  put: (card: number, fill: Fill) => void;
   forget: (card: number, id: string) => void;
   forgetMany: (card: number, ids: string[]) => void;
   /** «Просмотрено»: флаг `accepted` на записях; значения и `before` остаются (откат жив). */
@@ -240,6 +262,15 @@ export const useDraftMemory = create<Store>((set) => ({
         return [merged, ...fills.filter((f) => f.id !== fill.id)];
       }),
     ),
+
+  /**
+   * ЗАПИСЬ, КАКОЙ ОНА ДОЛЖНА СТОЯТЬ, — БЕЗ СЛИЯНИЯ (раунд 3, M-A / m6). `✕` возвращает журнал к
+   * прежнему состоянию (`unrestoredFill`, `poppedFill`), отказ от слов и его отмена ставят запись
+   * целиком. Через `record` слияние (`mergeFill`) приняло бы прежнюю запись за новую запись
+   * черновика — и понесло бы снятую поверх неё ступенью.
+   */
+  put: (card, fill) =>
+    set((s) => editFills(s, card, (fills) => [fill, ...fills.filter((f) => f.id !== fill.id)])),
 
   forget: (card, id) =>
     set((s) =>

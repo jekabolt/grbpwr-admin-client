@@ -677,9 +677,13 @@ export function diffProposal(
  *     «append» — приписать продолжение к тому, что стоит;
  *   · есть общее начало, дальше расходятся → `draft rewrites the tail`;
  *   · общего начала нет вовсе → `draft says it differently`.
+ * И четвёртый, самый частый у строки `add` (раунд 3, m2): на карточке НЕ СТОИТ НИЧЕГО — поле пусто
+ * или это новая строка спецификации → `draft adds "…"` с предложенным целиком (у строки
+ * спецификации — её имя первым). Прежде такая строка читалась «draft says it differently», хотя
+ * спорить было не с чем. Режим свой (`new`), а не `add`: «приписать» к пустому нечего.
  * Кавычки прямые. Файл чистый, как и всё выше: стенд считает ЭТИ функции, а не их пересказ.
  */
-export type DraftSay = { mode: 'add' | 'tail' | 'other'; plain: string };
+export type DraftSay = { mode: 'add' | 'new' | 'tail' | 'other'; plain: string };
 
 const sayTokens = (t?: string | null): string[] => String(t ?? '').match(/\S+\s*/g) ?? [];
 
@@ -709,6 +713,7 @@ const cutTo = (t: string, n: number): string =>
 export function draftSays(was?: string | null, now?: string | null): DraftSay {
   const a = String(was ?? '').trim();
   const b = String(now ?? '').trim();
+  if (!a && b) return { mode: 'new', plain: `draft adds "${cutTo(b, 46)}"` };
   // «Продолжает» меряется БЕЗ хвостовой пунктуации: «…and cuff.» против «…and cuff, brushed
   // inside.» отличается точкой, ставшей запятой, и побуквенное сравнение назвало бы это
   // переписыванием хвоста.

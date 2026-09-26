@@ -1,8 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query';
 import type { common_DesignRun, common_MediaFull } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { GENDER_ENUM_TO_SLUG } from 'constants/constants';
 import { techCardBomSectionOptions } from 'constants/filter';
+import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
@@ -19,6 +21,7 @@ import { kindsForSection } from '../../bom-kind';
 import { isRollGoodsSection } from '../../bom-purpose';
 import { bornBomLine, upsertDetailText } from '../../form-writers';
 import type { TechCardFormData } from '../../schema';
+import { anyDirty } from '../../useTechCardAutosave';
 import { flushAllowsRun, flushRefusalSentence, useTechCardAutosave } from '../autosave-contract';
 import { readBench } from '../bench-slot';
 import { proposedColourways } from '../colourway-proposals-model';
@@ -62,12 +65,16 @@ import {
   fillIdOf,
   liveFills,
   openToDecide,
+  poppedFill,
   restorable,
   restoreFill,
+  sameFill,
   targetOfRow,
   unrestoredFill,
+  withoutWords,
   type Fill,
   type FillTarget,
+  type WordsOffer,
 } from './draft-fills';
 import { Fold, LockedBar, scrollToOrgan } from './mood-organs';
 import { useCardMemory, useDraftMemory } from './use-draft-fills';
@@ -236,6 +243,11 @@ function runIsClosed(error: unknown): boolean {
   return CLOSED_RUN_REFUSALS.has(refusalReason(error));
 }
 
+/** Почему посадку не пишет этот аккаунт — подпись строки TO DECIDE (M2 ре-ревью CL-C). */
+const FIT_NEEDS_GRANT = 'fit needs products:write';
+/** Сколько стоит `undo ↶` после отказа от прежних слов (m6) — столько же, сколько у `ai ✦`. */
+const UNDO_WINDOW_MS = 10_000;
+
 export function ConstructionDraft({
   techCardId,
   disabled,
@@ -301,8 +313,8 @@ export function ConstructionDraft({
   // вместе с единственной записью о том, что стояло на карточке ДО черновика (см. `use-draft-fills`).
   const { fills } = useCardMemory(techCardId);
   const record = useDraftMemory((st) => st.record);
+  const put = useDraftMemory((st) => st.put);
   const forget = useDraftMemory((st) => st.forget);
-  const forgetMany = useDraftMemory((st) => st.forgetMany);
   const setProposals = useDraftMemory((st) => st.setProposals);
 
   const items = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as { mediaId?: number }[];
@@ -355,10 +367,15 @@ export function ConstructionDraft({
     control,
     name: ['concept', 'moodboardMedia', 'callouts'] as never,
   });
+  // ПРАВКА ЛИ ЭТО — ПО ЗНАЧЕНИЮ, А НЕ ПО КЛЮЧУ (m4 ре-ревью CL-A). У полей-массивов RHF заводит
+  // запись в `dirtyFields` сразу и держит в ней пустой массив, объекты из `false` или дыры:
+  // `!!dirtyFields.moodboardMedia` читал «несохранённую доску» после любого движения строк,
+  // вернувшего доску к сохранённой, и запирал GENERATE словами «save the card first». Разбор —
+  // один на всю карточку, у автосейва (`anyDirty`).
   const boardDirty =
-    !!dirtyFields.concept ||
-    !!(dirtyFields as { moodboardMedia?: unknown }).moodboardMedia ||
-    !!(dirtyFields as { callouts?: unknown }).callouts;
+    anyDirty(dirtyFields.concept) ||
+    anyDirty((dirtyFields as { moodboardMedia?: unknown }).moodboardMedia) ||
+    anyDirty((dirtyFields as { callouts?: unknown }).callouts);
 
   const boardIds = useMemo(
     () => new Set(items.map((i) => i.mediaId).filter((id): id is number => !!id)),
@@ -402,6 +419,29 @@ export function ConstructionDraft({
   const pressed = useRef<{ card: number; values: Map<string, string> } | null>(null);
 
   const readOnly = !!disabled;
+  /**
+   * ═══ ПОСАДКА — ФАКТ СТИЛЯ, И ПИШЕТ ЕЁ ТОЛЬКО products:write (M2 ре-ревью CL-C) ═══════════════
+   *
+   * `fit` уходит на сервер одним писателем — `UpdateStyle`, а это `products:write` (rbac.go:163);
+   * `tech_cards:write` мало. Аккаунту без права панель фактов посадку НЕ СТЕЙДЖИТ
+   * (`style-facts-field.tsx`, `canStyle`), CARD DETAILS её запирает. Запиши её черновик в форму — и
+   * значение ни разу не уехало бы на сервер, следующий автосейв тела сдвинул бы базу, а запертая
+   * ячейка показывала бы черновую посадку как сохранённую: тихое расхождение экрана и карточки.
+   * Поэтому без права черновик посадку не пишет — ни сам, ни `take`, ни `✕`/возвратом журнала, —
+   * а строка стоит в TO DECIDE с подписью `fit needs products:write` и погашенным `take`.
+   *
+   * Предикат — тот же `canWrite(SECTION.products)`, что у CL-C, но ОТВЕЧЕННЫЙ: пока учётная запись
+   * не прочитана, `canWrite` открыт «на всякий случай», а платный прогон, записавший посадку в это
+   * окно, дал бы то же расхождение. Супер-аккаунт пишет всегда. В колбэки ответа — через ref: ответ
+   * приходит позже рендера, в котором его заказали.
+   */
+  const permissions = usePermissions();
+  const fitWritable =
+    permissions.isSuper || (permissions.resolved && permissions.canWrite(SECTION.products));
+  const fitWritableRef = useRef(fitWritable);
+  fitWritableRef.current = fitWritable;
+  /** Запись журнала по посадке, которую этот аккаунт вернуть в поле не вправе (см. выше). */
+  const fitBarred = (f: Fill) => f.target.kind === 'fit' && !fitWritable;
   // РОВНО КАРТИНКИ, А НЕ СТРОКИ: одна картинка стоит и на доске, и во входе двумя строками
   // `moodboardMedia` (U-5) — считать её дважды значило бы обещать прогону восьмую картинку.
   const pictureCount = boardIds.size;
@@ -498,6 +538,7 @@ export function ConstructionDraft({
           // предложении может не быть вовсе. Принятое при этом никуда не делось — оно на карточке,
           // и новое сравнение покажет его как `same`.
           setReceipts({});
+          setRowByFill({});
           // Отметки, раскрытия и выбранные секции строк — тоже про строки прошлого ответа.
           setTaken({});
           setShown({});
@@ -550,6 +591,9 @@ export function ConstructionDraft({
       return { ok: true, value: w.text };
     }
     if (w.kind === 'fit') {
+      // Без products:write посадка не пишется вовсе (M2): строка остаётся в TO DECIDE со своей
+      // подписью, отказ молчит — снекбар на каждом прогоне повторял бы то, что строка уже говорит.
+      if (!fitWritableRef.current) return { ok: false, value: '' };
       setValue('fit', w.value as never, { shouldDirty: true });
       return { ok: true, value: w.value };
     }
@@ -574,10 +618,13 @@ export function ConstructionDraft({
        Сохранение карточки со строкой в `TECH_CARD_BOM_SECTION_UNKNOWN` сервер отвергает ЦЕЛИКОМ
        (dto `parseTechCardBomItems`), вместе со всем остальным, что черновик записал. Поэтому строки
        без секции из списка вкладки BOM нет вовсе — её ждёт выбор человека (`hold`), а не умолчание:
-       «ткань» по умолчанию молча записала бы пуговицу рулонным товаром. Назначение и вид, которых
-       выбранная секция не держит, снимаются тем же правилом, что у сервера (`materials.go`
-       `validateBomKindSection`, назначение — только у рулонных): иначе отказ вернулся бы тем же
-       путём, одним полем дальше. */
+       «ткань» по умолчанию молча записала бы пуговицу рулонным товаром.
+
+       Назначение и вид, которых секция не держит, снимаются тем же правилом, что у сервера
+       (`materials.go` `validateBomKindSection`, назначение — только у рулонных), и ТОЛЬКО у секции,
+       выбранной человеком (раунд 3, m1): пару «вид — секция», названную моделью, сервер уже свёл
+       сам, а клиентский список видов короче серверного (нет `TOTE_BAG`, `SPARE_KIT_BAG` —
+       `bom-kind.ts`), и снятие на каждой строке молча теряло их вид. */
     const section = pickedSection || w.line.section || '';
     if (!isDraftSection(section)) {
       showMessage(
@@ -587,8 +634,11 @@ export function ConstructionDraft({
       return { ok: false, value: '' };
     }
     const line = { ...w.line, section };
-    if (line.purpose && !isRollGoodsSection(section)) delete line.purpose;
-    if (line.kind && !(kindsForSection(section) as string[]).includes(line.kind)) delete line.kind;
+    if (pickedSection) {
+      if (line.purpose && !isRollGoodsSection(section)) delete line.purpose;
+      if (line.kind && !(kindsForSection(section) as string[]).includes(line.kind))
+        delete line.kind;
+    }
     const cur = (getValues('bomItems') ?? []) as unknown[];
     const born = bornBomLine(line);
     setValue('bomItems', [...cur, born] as never, { shouldDirty: true });
@@ -733,15 +783,36 @@ export function ConstructionDraft({
    * ═══ «restore previous ↶» — ПРЕЖНИЕ СЛОВА ЧЕЛОВЕКА ОБРАТНО В ПОЛЕ (фиксап раунда 2, BLK-1) ════
    *
    * Черновик переписал «H» на «D», человек поправил «D» — запись больше не живая, `✕` у неё нет
-   * (откат поверх правки стёр бы и правку), а «H» живёт только в её `before`. Возврат пишет «H»
-   * тем же писателем, что откат, и САМ ложится в журнал (`restoreFill`): `✕` у этой строки вернёт
-   * правленый черновик, а запись черновика встанет на место (`unrestoredFill`).
+   * (откат поверх правки стёр бы и правку), а «H» живёт только в её `before` — или в её ступенях,
+   * если поверх правки уже легла новая запись (раунд 3, M-A). Возврат пишет «H» тем же писателем,
+   * что откат, и САМ ложится в журнал (`restoreFill`): `✕` у этой строки вернёт то, что стояло, а
+   * заменённая запись встанет на место (`unrestoredFill`).
    */
-  function restorePrevious(fill: Fill) {
-    if (readOnly || busy) return;
+  function restorePrevious(offer: WordsOffer) {
+    const fill = offer.fill;
+    if (readOnly || busy || fitBarred(fill)) return;
     const current = rawOf(fill.target);
-    writeScalar(fill.target, fill.before);
-    record(techCardId, restoreFill(fill, current, hhmm()));
+    writeScalar(fill.target, offer.words);
+    record(techCardId, restoreFill(offer, current, hhmm()));
+  }
+
+  /**
+   * ═══ ОТКАЗ ОТ ПРЕЖНИХ СЛОВ — ТИХИЙ `✕` У «restore previous ↶» (раунд 3, m6) ═════════════════
+   *
+   * Предложение вернуть слова стояло вечно и считалось в «written N»: снять его было нечем. Отказ
+   * — один щелчок без вопроса, как у `ai ✦`: десять секунд рядом стоит `undo ↶`, который ставит
+   * запись журнала ровно такой, какой она была. Отмена возможна, только пока запись та, что отказ
+   * оставил (`sameFill`): прогон или `✕` за эти секунды — уже другая запись, и затирать её нельзя.
+   */
+  function dismissWords(offer: WordsOffer) {
+    const fill = offer.fill;
+    if (readOnly || busy || fitBarred(fill)) return;
+    const left = withoutWords(fill, offer.words, liveSnapshot());
+    if (left) put(techCardId, left);
+    else forget(techCardId, fill.id);
+    if (dismissTimer.current) window.clearTimeout(dismissTimer.current);
+    setDismissedWords({ was: fill, left, label: fill.label });
+    dismissTimer.current = window.setTimeout(() => setDismissedWords(null), UNDO_WINDOW_MS);
   }
 
   /**
@@ -754,7 +825,7 @@ export function ConstructionDraft({
    * операция, какой строку удаляет вкладка BOM, и ни один объект модели через неё не проходит.
    */
   function undo(fill: Fill) {
-    if (readOnly) return;
+    if (readOnly || fitBarred(fill)) return;
     const t = fill.target;
     if (t.kind === 'detail' || t.kind === 'fit' || t.kind === 'concept') {
       writeScalar(t, fill.before);
@@ -790,19 +861,27 @@ export function ConstructionDraft({
     }
     // `✕` ВОЗВРАТА (BLK-1) возвращает журнал к тому, что было до него: запись черновика с прежними
     // словами встаёт на место, и `restore previous ↶` снова на экране. Забыть её здесь значило бы
-    // стереть прежние слова второй раз.
+    // стереть прежние слова второй раз. `✕` записи, несущей слова (M-A), ставит её верхнюю ступень —
+    // запись, какой она была до замены. Ставится целиком (`put`): слияние приняло бы прежнюю запись
+    // за новую запись черновика.
     const back = unrestoredFill(fill);
-    if (back) record(techCardId, back);
+    const popped = poppedFill(fill);
+    if (back) put(techCardId, back);
+    else if (popped) put(techCardId, popped);
     else forget(techCardId, fill.id);
     // Квитанция умирает вместе с записью: строка, чью запись вернули, снова РАБОТА и стоит в
     // `to decide` (макет `mood:unwrite`: «снятие квитанции»). Без этого возврат прятал бы строку
-    // навсегда — ни написана, ни отклонена, ни в очереди.
+    // навсегда — ни написана, ни отклонена, ни в очереди. Строка скаляра находится по адресу; у
+    // строки спецификации адреса до записи нет (`targetOfRow` — null), и её называет память
+    // `writeTaken` (раунд 3, M-B): взятая и снятая строка иначе пропадала из всех списков.
     const rowIds = rows
       .filter((r) => {
         const t = targetOfRow(r);
         return !!t && fillIdOf(t) === fill.id;
       })
       .map((r) => r.id);
+    const takenRow = rowByFill[fill.id];
+    if (takenRow) rowIds.push(takenRow);
     if (rowIds.length) {
       setReceipts((prev) => {
         const next = { ...prev };
@@ -811,6 +890,12 @@ export function ConstructionDraft({
       });
     }
     setReceiptByFill((prev) => {
+      if (!(fill.id in prev)) return prev;
+      const next = { ...prev };
+      delete next[fill.id];
+      return next;
+    });
+    setRowByFill((prev) => {
       if (!(fill.id in prev)) return prev;
       const next = { ...prev };
       delete next[fill.id];
@@ -868,10 +953,44 @@ export function ConstructionDraft({
    * погасить подсветку и убрать `✕`, без единого события и без флага, который кто-то забыл снять.
    */
   const live = useMemo(() => liveFills(fills, formSnapshot), [fills, formSnapshot]);
-  /** Что откатывает `undo all`: живые записи ЧЕРНОВИКА — возврат человека (BLK-1) не его работа. */
-  const undoable = useMemo(() => live.filter((f) => !f.restore), [live]);
-  /** Прежние слова, которые черновик переписал, а человек поправил поверх (BLK-1). */
+  /**
+   * Что откатывает `undo all`: живые записи ЧЕРНОВИКА — возврат человека (BLK-1) не его работа, а
+   * посадку без products:write (M2) этот аккаунт в поле не вернёт.
+   */
+  const undoable = useMemo(
+    () => live.filter((f) => !f.restore && !(f.target.kind === 'fit' && !fitWritable)),
+    [live, fitWritable],
+  );
+  /**
+   * Прежние слова, которые черновик переписал, а человек поправил поверх (BLK-1), — и слова, которые
+   * запись несёт после новой записи поверх правки (M-A). По строке `restore previous ↶` на каждые.
+   */
   const restore = useMemo(() => restorable(fills, formSnapshot), [fills, formSnapshot]);
+  const [dismissedWords, setDismissedWords] = useState<{
+    was: Fill;
+    left: Fill | null;
+    label: string;
+  } | null>(null);
+  const dismissTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (dismissTimer.current) window.clearTimeout(dismissTimer.current);
+    },
+    [],
+  );
+  /**
+   * ОТКАЗ ОТ СЛОВ, КОТОРЫЙ ЕЩЁ МОЖНО ОТМЕНИТЬ (m6): запись до отказа и то, что он оставил. `undo ↶`
+   * стоит, пока запись журнала по адресу — ровно оставленная отказом.
+   */
+  const undismissable =
+    !!dismissedWords &&
+    sameFill(fills.find((f) => f.id === dismissedWords.was.id) ?? null, dismissedWords.left);
+  function undismissWords() {
+    if (!dismissedWords || !undismissable || readOnly) return;
+    put(techCardId, dismissedWords.was);
+    setDismissedWords(null);
+    if (dismissTimer.current) window.clearTimeout(dismissTimer.current);
+  }
 
   /**
    * ЧТО ОСТАВЛЕНО ЧЕЛОВЕКУ — список «TO DECIDE» (фиксап раунда 2, MIN-3).
@@ -944,6 +1063,12 @@ export function ConstructionDraft({
   const [logOpen, setLogOpen] = useState(false);
   /** Квитанция записи по АДРЕСУ ЖУРНАЛА — пилюля `added` / `replaced` в строке WRITTEN. */
   const [receiptByFill, setReceiptByFill] = useState<Record<string, Receipt>>({});
+  /**
+   * СТРОКА ПРЕДЛОЖЕНИЯ, ВЗЯТАЯ В ЗАПИСЬ, — ПО АДРЕСУ ЖУРНАЛА (раунд 3, M-B). У строки спецификации
+   * адреса до записи нет, и `✕` иначе не нашёл бы, чью квитанцию снять: строка оставалась
+   * «взятой» и пропадала из TO DECIDE, DISMISSED и WRITTEN разом. Срок — ответ прогона, как у квитанций.
+   */
+  const [rowByFill, setRowByFill] = useState<Record<string, string>>({});
 
   /**
    * ═══ КАРТОЧКА СМЕНИЛАСЬ — ЧЕРНОВИК НАЧИНАЕТСЯ ЗАНОВО (Codex r3-w1, MAJOR) ═══════════════════
@@ -989,6 +1114,9 @@ export function ConstructionDraft({
     if (Object.keys(sectionPick).length) setSectionPick({});
     if (Object.keys(wantedDetails).length) setWantedDetails({});
     if (Object.keys(receiptByFill).length) setReceiptByFill({});
+    if (Object.keys(rowByFill).length) setRowByFill({});
+    // Отказ от слов карточки A не отменяется на карточке B (запись журнала — чужая).
+    if (dismissedWords) setDismissedWords(null);
   }
 
   /* ДОСКА УШЛА ВПЕРЁД — ОДИН ФЛАГ НА ТРИ БЛОКА ВЫХОДА. Считается здесь (`stale`), показывается там
@@ -1052,7 +1180,11 @@ export function ConstructionDraft({
       const fillId = remember(row, done, at, before);
       const receipt: Receipt = mode === 'append' || row.state !== 'replace' ? 'added' : 'replaced';
       setReceipts((prev) => ({ ...prev, [row.id]: receipt }));
-      if (fillId) setReceiptByFill((prev) => ({ ...prev, [fillId]: receipt }));
+      if (fillId) {
+        setReceiptByFill((prev) => ({ ...prev, [fillId]: receipt }));
+        // Чья это запись — для `✕` (M-B): у строки спецификации адрес рождается только здесь.
+        setRowByFill((prev) => ({ ...prev, [fillId]: row.id }));
+      }
     }
     setTaken({});
     // Записанное уезжает под раскрытие — раскрытие ОТКРЫВАЕТСЯ, иначе жест выглядит исчезновением
@@ -1247,9 +1379,10 @@ export function ConstructionDraft({
   // иначе кнопка обещала бы завести слот, которого в списке больше нет.
   const wantedDetailCount = openDetails.filter((d) => wantedDetails[d.id]).length;
   const hasAnswer = !!staged && !draftIdea.isPending;
-  // Журнал живёт в сторе дольше ответа: раскрытие рисуется и без прогона, пока есть что вернуть.
-  const showLog = hasAnswer || live.length > 0 || restore.length > 0;
-  /** Строки группы WRITTEN: записи с `✕` и прежние слова с `restore previous ↶` (BLK-1). */
+  // Журнал живёт в сторе дольше ответа: раскрытие рисуется и без прогона, пока есть что вернуть, —
+  // и пока стоит `undo ↶` отказа от слов (m6): отказ от последних слов не уносит с экрана свою отмену.
+  const showLog = hasAnswer || live.length > 0 || restore.length > 0 || undismissable;
+  /** Строки группы WRITTEN: записи с `✕` и прежние слова с `restore previous ↶` (BLK-1, M-A). */
   const writtenCount = live.length + restore.length;
 
   /* СТАТУС В ШАПКЕ БЛОКА — только там, где заменить его нечем: прогона не было или он в полёте.
@@ -1427,6 +1560,7 @@ export function ConstructionDraft({
                     mark={taken[row.id] ?? ''}
                     shown={!!shown[row.id]}
                     readOnly={readOnly}
+                    barred={row.write.kind === 'fit' && !fitWritable ? FIT_NEEDS_GRANT : undefined}
                     section={sectionPick[row.id]}
                     onSection={(value) => setSectionPick((prev) => ({ ...prev, [row.id]: value }))}
                     onTake={() =>
@@ -1594,20 +1728,22 @@ export function ConstructionDraft({
                     key={fill.id}
                     fill={fill}
                     receipt={fill.restore ? 'restored' : receiptByFill[fill.id]}
-                    readOnly={readOnly}
+                    readOnly={readOnly || fitBarred(fill)}
                     busy={busy}
                     onUndo={() => undo(fill)}
                   />
                 ))}
-                {/* ПРЕЖНИЕ СЛОВА, ПЕРЕПИСАННЫЕ ЧЕРНОВИКОМ И ПОПРАВЛЕННЫЕ ПОТОМ ЧЕЛОВЕКОМ (BLK-1): `✕`
-                    у них нет, есть явный возврат. Стоят здесь же — это тоже «что стояло до». */}
-                {restore.map((fill) => (
+                {/* ПРЕЖНИЕ СЛОВА, ПЕРЕПИСАННЫЕ ЧЕРНОВИКОМ И ПОПРАВЛЕННЫЕ ПОТОМ ЧЕЛОВЕКОМ (BLK-1), И
+                    СЛОВА, КОТОРЫЕ ЗАПИСЬ НЕСЁТ (M-A): `✕` отката у них нет, есть явный возврат и
+                    тихий отказ (m6). Стоят здесь же — это тоже «что стояло до». */}
+                {restore.map((offer) => (
                   <RestoreRow
-                    key={`restore:${fill.id}`}
-                    fill={fill}
-                    readOnly={readOnly}
+                    key={`restore:${offer.fill.id}:${offer.from}`}
+                    offer={offer}
+                    readOnly={readOnly || fitBarred(offer.fill)}
                     busy={busy}
-                    onRestore={() => restorePrevious(fill)}
+                    onRestore={() => restorePrevious(offer)}
+                    onDismiss={() => dismissWords(offer)}
                   />
                 ))}
                 <div className='mt-1.5 flex flex-wrap justify-end gap-1.5'>
@@ -1631,15 +1767,11 @@ export function ConstructionDraft({
                       disabled={busy}
                       onClick={() => {
                         // Возвраты человека (BLK-1) не откатываются: это не работа черновика.
+                        // Журнал правит сам `undo`, запись за записью: забывает, ставит на место
+                        // заменённую (M-A) или — у заведённой детали — забывает после успеха
+                        // сервера. Прежний `forgetMany` поверх цикла стирал бы поставленные на
+                        // место записи вместе со словами, которые они несут.
                         for (const f of undoable) undo(f);
-                        // ⚠ ЗАВЕДЁННЫЕ ДЕТАЛИ ЗДЕСЬ НЕ ЗАБЫВАЮТСЯ: их возврат уходит на сервер и
-                        // забывает себя сам, ПОСЛЕ успеха. Стереть их отсюда значило бы убрать из
-                        // журнала слот, который сервер отказался снести, — и `✕` пропал бы вместе
-                        // со слотом, оставшимся на верстаке.
-                        forgetMany(
-                          techCardId,
-                          undoable.filter((f) => f.target.kind !== 'detailSlot').map((f) => f.id),
-                        );
                       }}
                     >
                       undo all {undoable.length} ▸
@@ -1652,6 +1784,26 @@ export function ConstructionDraft({
                 <span className='uppercase text-textColor'>nothing written</span> · the draft filled
                 no empty field on this card
               </EmptyState>
+            )}
+            {/* ОТМЕНА ОТКАЗА ОТ СЛОВ (m6) — десять секунд, как `undo ↶` у `ai ✦`, и только пока
+                запись журнала та, что отказ оставил. Вне условия группы: отказ от последних слов
+                оставляет группу пустой, а отмена обязана остаться на экране. */}
+            {undismissable && dismissedWords && !readOnly && (
+              <div
+                className='flex flex-wrap items-center justify-end gap-2 py-1'
+                data-c19-restore-dismissed={dismissedWords.was.id}
+              >
+                <Text size='nano' variant='label' component='span'>
+                  previous {dismissedWords.label} dropped
+                </Text>
+                <Chip
+                  onClick={undismissWords}
+                  data-c19-restore-undismiss={dismissedWords.was.id}
+                  title='put the dropped words back among the ones you can restore'
+                >
+                  undo ↶
+                </Chip>
+              </div>
             )}
 
             <GroupLabel className={GROUP_GAP} action={<Counter n={kept.length} noun='line' />}>
@@ -1715,12 +1867,16 @@ export function ConstructionDraft({
  * СТРОКА СПЕЦИФИКАЦИИ БЕЗ СЕКЦИИ (`hold`, фиксап раунда 2, MIN-11) несёт выбор секции прямо в ряду:
  * `take` погашен, пока секция не выбрана, и подпись под рядом говорит почему — без секции сервер не
  * сохранит карточку вовсе. Список — тот же, что у вкладки BOM (`techCardBomSectionOptions`).
+ *
+ * `barred` (M2 ре-ревью CL-C) — строку этот аккаунт не запишет вовсе (посадка без products:write):
+ * `take` погашен, подпись под рядом называет право. Предложение при этом видно — это ответ прогона.
  */
 function DecideRow({
   row,
   mark,
   shown,
   readOnly,
+  barred,
   section,
   onSection,
   onTake,
@@ -1732,6 +1888,8 @@ function DecideRow({
   mark: '' | 'replace' | 'append';
   shown: boolean;
   readOnly: boolean;
+  /** Почему строку не записать этим аккаунтом (M2); `undefined` — записать можно. */
+  barred?: string;
   /** Секция, выбранная строке без своей; `undefined` — ещё не выбрана. */
   section?: string;
   onSection: (value: string) => void;
@@ -1745,6 +1903,8 @@ function DecideRow({
   const d = wordDiff(row.current, row.value);
   const needsSection = row.hold === 'section';
   const sectionMissing = needsSection && !section;
+  /** Чья это секция — имя строки спецификации; подпись выбора называет его (раунд 3, m3). */
+  const lineName = row.write.kind === 'bom' ? row.write.line.name : row.label;
   return (
     <div
       className='border-b border-hairline py-1.5'
@@ -1770,12 +1930,16 @@ function DecideRow({
           {say.plain}
         </Text>
         {needsSection && (
-          <div className='w-[128px] shrink-0' data-c19-draft-section={row.id}>
+          /* ИМЯ ВЫБОРА — «section for <строка>» (раунд 3, m3). Примитив кладёт подсказку в
+             `aria-label` триггера, и прежнее «pick a section» оставалось именем выбора навсегда —
+             и после выбора, и одинаковым у каждой такой строки. Длинное имя режется многоточием. */
+          <div className='w-[160px] shrink-0' data-c19-draft-section={row.id}>
             <SelectComponent
               name={`draft-section-${row.id}`}
               items={techCardBomSectionOptions}
               value={section ?? ''}
-              placeholder='pick a section'
+              placeholder={`section for ${lineName}`}
+              className='min-w-0 [&>span:first-child]:truncate'
               disabled={readOnly}
               onValueChange={onSection}
             />
@@ -1783,15 +1947,17 @@ function DecideRow({
         )}
         <ChipRow className='shrink-0'>
           <Chip
-            disabled={readOnly || sectionMissing}
+            disabled={readOnly || sectionMissing || !!barred}
             selected={!!mark}
             pressed={!!mark}
             onClick={onTake}
             data-c19-draft-take={row.id}
             title={
-              sectionMissing
-                ? 'pick a section first — the card does not keep a line without one'
-                : `take the drafted ${row.label} · ${say.plain}`
+              barred
+                ? barred
+                : sectionMissing
+                  ? 'pick a section first — the card does not keep a line without one'
+                  : `take the drafted ${row.label} · ${say.plain}`
             }
           >
             take
@@ -1820,6 +1986,17 @@ function DecideRow({
           {shown ? 'hide ▾' : 'show ▸'}
         </Button>
       </div>
+      {barred && (
+        <Text
+          size='nano'
+          variant='label'
+          component='p'
+          className='mt-0.5'
+          data-c19-draft-barred={row.id}
+        >
+          {barred} · the proposal stays here, nothing is written
+        </Text>
+      )}
       {sectionMissing && (
         <Text
           size='nano'
@@ -2014,29 +2191,34 @@ function WrittenRow({
 }
 
 /**
- * ПРЕЖНИЕ СЛОВА ЧЕЛОВЕКА, КОТОРЫЕ ЧЕРНОВИК ПЕРЕПИСАЛ (фиксап раунда 2, BLK-1).
+ * ПРЕЖНИЕ СЛОВА ЧЕЛОВЕКА, КОТОРЫЕ ЧЕРНОВИК ПЕРЕПИСАЛ (фиксап раунда 2, BLK-1; раунд 3, M-A).
  *
- *     CONCEPT   before the draft: "clean shoulder, …"   description   [ restore previous ↶ ]
+ *     CONCEPT   before the draft: "clean shoulder, …"   description   [ restore previous ↶ ] [ ✕ ]
  *
- * Черновик переписал слова, человек потом поправил черновик — `✕` здесь нет (он стёр бы правку).
- * Возврат — явный жест, и он сам встаёт в журнал строкой с `✕`, то есть тоже обратим.
+ * Черновик переписал слова, человек потом поправил черновик — `✕` отката здесь нет (он стёр бы
+ * правку). Возврат — явный жест, и он сам встаёт в журнал строкой с `✕`, то есть тоже обратим.
+ * Тихий `✕` справа — ОТКАЗ от этих слов (m6): без вопроса, с десятью секундами `undo ↶` под группой.
  */
 function RestoreRow({
-  fill,
+  offer,
   readOnly,
   busy,
   onRestore,
+  onDismiss,
 }: {
-  fill: Fill;
+  offer: WordsOffer;
   readOnly: boolean;
-  /** Идёт операция прогона (M-08) — возврат погашен, как и откат. */
+  /** Идёт операция прогона (M-08) — возврат и отказ погашены, как и откат. */
   busy: boolean;
   onRestore: () => void;
+  onDismiss: () => void;
 }): JSX.Element {
+  const fill = offer.fill;
   return (
     <div
       className='flex flex-wrap items-center gap-2 border-b border-hairline py-1'
       data-c19-restore-row={fill.id}
+      data-c19-restore-from={String(offer.from)}
     >
       <Text
         size='nano'
@@ -2051,22 +2233,36 @@ function RestoreRow({
         <Text size='nano' variant='label' component='span' className='mr-2'>
           before the draft:
         </Text>
-        {cutTo(fill.before, 92)}
+        {cutTo(offer.words, 92)}
       </Text>
       <Pill tone='mut'>{areaOf(fill.target)}</Pill>
       {!readOnly && (
-        <Button
-          type='button'
-          variant='secondary'
-          size='xs'
-          data-c19-restore={fill.id}
-          disabled={busy}
-          onClick={onRestore}
-          aria-label={`restore the ${fill.label} that stood before the draft`}
-          title='the draft wrote over these words and the field was edited since — restore them'
-        >
-          restore previous ↶
-        </Button>
+        <>
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            data-c19-restore={fill.id}
+            disabled={busy}
+            onClick={onRestore}
+            aria-label={`restore the ${fill.label} that stood before the draft: ${cutTo(offer.words, 40)}`}
+            title='the draft wrote over these words and the field was edited since — restore them'
+          >
+            restore previous ↶
+          </Button>
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            data-c19-restore-dismiss={fill.id}
+            disabled={busy}
+            onClick={onDismiss}
+            aria-label={`drop the ${fill.label} that stood before the draft: ${cutTo(offer.words, 40)}`}
+            title='drop these words — undo stays for 10 seconds'
+          >
+            ✕
+          </Button>
+        </>
       )}
     </div>
   );

@@ -102,37 +102,29 @@ export function DraftedPill({
   );
 }
 
+/**
+ * РАМКА ПОЛЯ «DRAFTED». Принимает поле пилюля У ПОДПИСИ (`DraftedPill` с `onAccept`) — её ставит
+ * сам вызывающий, и каждый вызывающий передаёт `pill={false}`. Угловая пилюля обёртки поэтому
+ * только помечает и никогда не принимает (раунд 3, nit): её `onAccept` и `disabled` были мёртвыми —
+ * замок режима чтения (MIN-5) живёт у пилюли подписи, где пилюля и нажимается.
+ */
 export function DraftedField({
   live,
   children,
   className,
   pill = true,
-  onAccept,
-  disabled,
 }: {
   live: boolean;
   children: React.ReactNode;
   className?: string;
-  /** Показывать ли угловую пилюлю (в тесных строках её ставит лейбл, а не обёртка). */
+  /** Показывать ли угловую пилюлю-пометку (в тесных строках её ставит лейбл, а не обёртка). */
   pill?: boolean;
-  /** Принять одно это поле — угловая пилюля становится кнопкой (см. шапку файла). */
-  onAccept?: () => void;
-  /** Поле только для чтения — угловая пилюля глухая (MIN-5). */
-  disabled?: boolean;
 }) {
   return (
     <div className={cn('relative', live && DRAFTED_CLASS, className)} data-drafted={live || undefined}>
       {children}
       {live && pill && (
-        <DraftedPill
-          live
-          onAccept={onAccept}
-          disabled={disabled}
-          className={cn(
-            'absolute right-1.5 top-1.5 bg-bgColor',
-            (!onAccept || disabled) && 'pointer-events-none',
-          )}
-        />
+        <DraftedPill live className='pointer-events-none absolute right-1.5 top-1.5 bg-bgColor' />
       )}
     </div>
   );

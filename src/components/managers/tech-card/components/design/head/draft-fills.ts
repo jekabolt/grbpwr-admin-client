@@ -99,13 +99,78 @@ export type Fill = {
    */
   restore?: true;
   /**
-   * ЗАПИСЬ ЧЕРНОВИКА, КОТОРУЮ ВОЗВРАТ ЗАМЕНИЛ, — только у `restore` (`restoreFill`). `✕` возврата
-   * ставит её на место (`unrestoredFill`): после отмены возврата журнал ровно тот, что был до него,
-   * и `restore previous ↶` снова на экране. Без неё отмена возврата стёрла бы прежние слова второй
+   * ЗАПИСЬ, КОТОРУЮ ВОЗВРАТ ЗАМЕНИЛ, — только у `restore` (`restoreFill`). `✕` возврата ставит её
+   * на место (`unrestoredFill`): после отмены возврата журнал ровно тот, что был до него, и
+   * `restore previous ↶` снова на экране. Без неё отмена возврата стёрла бы прежние слова второй
    * раз — тем самым путём, который возврат и закрывает.
+   *
+   * С раунда 3 (M-A) здесь ВСЯ заменённая запись (`Prior`): возврат может вернуть и НЕСЁННЫЕ
+   * слова, и слова, которые нёс другой возврат, — тогда её `before` не равен `after` возврата, а
+   * сама она бывает возвратом со своим `prior`. У записи раунда 2 есть только `after` и `at`: её
+   * возврат возвращал ровно `before` заменённой записи, то есть свой `after`.
    */
-  prior?: { after: string; at: string };
+  prior?: Prior;
+  /**
+   * ═══ НЕСЁННЫЕ СЛОВА ЧЕЛОВЕКА (раунд 3, M-A) ═══════════════════════════════════════════════════
+   *
+   * Адрес держит ОДНУ запись, и новая запись по нему заменяет прежнюю. Прежняя держала слова
+   * человека («H» в её `before`), а новая пишет уже поверх ПРАВЛЕНОГО черновика «D2» — `before` у неё
+   * «D2», и без этого поля «H» не оставалось бы нигде: ни в поле, ни в журнале. Так слова терялись
+   * через TO DECIDE (`take` поверх правки) и через второй GENERATE поверх правки.
+   *
+   * Поэтому запись, заменившая другую НЕ слиянием (`mergeFill`), несёт её слова дальше ступенями:
+   * каждая ступень — слова, стоявшие до одной из записей черновика, и то, что он на них написал;
+   * новейшая первой. `✕` записи ставит в журнал верхнюю ступень — запись, какой она была до замены
+   * (`poppedFill`), а WRITTEN предлагает вернуть каждую, чьих слов нет в поле (`offersOf`).
+   */
+  carried?: Words[];
 };
+
+/** Ступень несённых слов: `before` — слова человека, `after` — что черновик написал поверх них. */
+export type Words = { before: string; after: string; at: string };
+
+/**
+ * ЗАМЕНЁННАЯ ВОЗВРАТОМ ЗАПИСЬ — без адреса (он тот же). `✕` возврата ставит её ровно такой, какой
+ * она была (`unrestoredFill`), включая возврат, заменённый возвратом: иначе запись «возврат H поверх
+ * D» встала бы записью черновика «D → H», и её `✕` написал бы в поле черновик поверх слов человека.
+ */
+export type Prior = {
+  before?: string;
+  after: string;
+  at: string;
+  carried?: Words[];
+  restore?: true;
+  prior?: Prior;
+};
+
+/**
+ * Глубина цепочки «возврат поверх возврата». Каждое звено — явный жест человека; сверх потолка
+ * самое старое звено отпускается: `✕` дойдёт до него и дальше просто забудет запись.
+ */
+const MAX_PRIOR_DEPTH = 6;
+
+/** Запись без адреса — звено цепочки возвратов, не длиннее потолка. */
+function priorOf(f: Fill): Prior {
+  return capPrior(
+    {
+      before: f.before,
+      after: f.after,
+      at: f.at,
+      ...(f.carried?.length ? { carried: f.carried } : {}),
+      ...(f.restore ? { restore: true as const } : {}),
+      ...(f.prior ? { prior: f.prior } : {}),
+    },
+    1,
+  );
+}
+
+function capPrior(p: Prior, depth: number): Prior {
+  if (!p.prior) return p;
+  const out: Prior = { ...p };
+  if (depth >= MAX_PRIOR_DEPTH) delete out.prior;
+  else out.prior = capPrior(p.prior, depth + 1);
+  return out;
+}
 
 export function fillIdOf(target: FillTarget): string {
   switch (target.kind) {
@@ -232,23 +297,89 @@ export function fillIdOfSlot(slotId: number): string {
 }
 
 /**
- * ЗАПИСЬ ДЕРЖИТ СЛОВА ЧЕЛОВЕКА (фиксап раунда 2, BLK-1): скаляр, у которого до черновика стоял
- * текст. С фиксапа M1 черновик переписывает и написанное рукой, и тогда `before` — ЕДИНСТВЕННОЕ
- * место, где эти слова ещё живут: на карточке уже черновик (или правленый черновик), автосейв его
- * сохранил. Такую запись нельзя ни выбросить, ни отрезать потолком хранилища.
+ * СВОИ СЛОВА ЗАПИСИ (фиксап раунда 2, BLK-1): скаляр, у которого до черновика стоял текст. С фиксапа
+ * M1 черновик переписывает и написанное рукой, и тогда `before` — место, где эти слова ещё живут: на
+ * карточке уже черновик (или правленый черновик), автосейв его сохранил.
  *
- * Возврат (`restore`) слов не держит: его `before` — черновик, который человек сам отставил.
+ * Возврат (`restore`) своих слов не держит: его `before` — черновик, который человек сам отставил.
  */
-export function holdsWords(f: Fill): boolean {
+function ownWords(f: Fill): boolean {
   const t = f.target.kind;
   return (
     !f.restore && (t === 'detail' || t === 'fit' || t === 'concept') && normText(f.before) !== ''
   );
 }
 
-/** Прежние слова уже стоят в поле — человек вернул их сам (набрал заново, вставил). */
-function wordsBack(f: Fill, form: FormSnapshot): boolean {
-  return currentOf(f.target, form) === normText(f.before);
+/**
+ * ЗАПИСЬ ДЕРЖИТ СЛОВА ЧЕЛОВЕКА — свои (`before`) или несённые (`carried`, раунд 3, M-A). Такую
+ * запись нельзя ни выбросить уходом из поля (`acceptPlan`), ни отрезать потолком хранилища
+ * (`storedSlice`): она — единственное место, где эти слова ещё есть.
+ */
+export function holdsWords(f: Fill): boolean {
+  return ownWords(f) || (f.carried?.length ?? 0) > 0;
+}
+
+/** Ступени слов записи, новейшая первой: свои (если это слова) и несённые. */
+function levelsOf(f: Fill): Words[] {
+  const own = ownWords(f) ? [{ before: f.before, after: f.after, at: f.at }] : [];
+  return [...own, ...(f.carried ?? [])];
+}
+
+/**
+ * Потолок несённых ступеней. Ступень рождается только правкой человека поверх черновика и новой
+ * записью поверх правки, так что до потолка доходит разве что долгий спор с черновиком по одному
+ * полю. Сверх потолка выпадают СРЕДНИЕ ступени: новейшие остаются, и самая старая — слова, стоявшие
+ * до первого черновика, — тоже.
+ */
+const MAX_CARRIED = 8;
+
+/**
+ * ЗАПИСЬ С НЕСЁННЫМИ СТУПЕНЯМИ. Пустых слов и повторов нет: одинаковые слова — одна строка возврата.
+ * Слов, которые запись держит сама, среди несённых тоже нет: их вернёт её `✕` или её собственная
+ * строка возврата. Нечего нести — поля нет вовсе.
+ */
+function withCarried(f: Fill, levels: readonly Words[]): Fill {
+  const seen = new Set<string>(ownWords(f) ? [normText(f.before)] : []);
+  const kept = levels.filter((w) => {
+    const k = normText(w.before);
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  const out: Fill = { ...f };
+  delete out.carried;
+  if (!kept.length) return out;
+  out.carried =
+    kept.length > MAX_CARRIED ? [...kept.slice(0, MAX_CARRIED - 1), kept[kept.length - 1]] : kept;
+  return out;
+}
+
+/**
+ * ОДНО ПРЕДЛОЖЕНИЕ «restore previous ↶» — слова человека по одному адресу, дословно. `from` —
+ * откуда они в записи: `own` — её `before`, число — индекс в `carried`.
+ */
+export type WordsOffer = { fill: Fill; words: string; at: string; from: 'own' | number };
+
+/**
+ * ЧТО МОЖНО ВЕРНУТЬ ПО ОДНОЙ ЗАПИСИ — слова человека, которых в поле нет (фиксап раунда 2, BLK-1;
+ * раунд 3, M-A). Свои слова записи предлагаются, только когда она не живая: живой их возвращает её
+ * `✕`, а откат поверх правки стёр бы и правку. Несённые — всегда, пока их нет в поле: `✕` записи
+ * их не возвращает, он лишь ставит их ступень обратно в журнал. Одинаковые слова — одна строка.
+ */
+export function offersOf(f: Fill, form: FormSnapshot): WordsOffer[] {
+  const t = f.target.kind;
+  if (t !== 'detail' && t !== 'fit' && t !== 'concept') return [];
+  const seen = new Set<string>([currentOf(f.target, form)]);
+  const out: WordsOffer[] = [];
+  const offer = (w: Words, from: WordsOffer['from']) => {
+    const k = normText(w.before);
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    out.push({ fill: f, words: w.before, at: w.at, from });
+  };
+  if (ownWords(f) && !isLive(f, form)) offer(f, 'own');
+  (f.carried ?? []).forEach((w, i) => offer(w, i));
+  return out;
 }
 
 /**
@@ -258,11 +389,11 @@ function wordsBack(f: Fill, form: FormSnapshot): boolean {
  * только помечаются и никогда не выбрасываются отсюда:
  *   · слот верстака: его запись несёт имя минта (`mintedAs`), по которому переименованный слот
  *     узнаётся;
- *   · запись со словами человека (`holdsWords`, фиксап раунда 2, BLK-1): человек написал «H»,
+ *   · запись со словами человека (фиксап раунда 2, BLK-1; раунд 3, M-A): человек написал «H»,
  *     черновик переписал его на «D», человек поправил «D». Выбросив запись на уходе из поля, мы
  *     стёрли бы «H» навсегда — на карточке его уже нет. Она остаётся, принятой, и WRITTEN
- *     предлагает `restore previous ↶` (`restorable`). Выбрасывается, только когда «H» снова
- *     стоит в поле: беречь больше нечего.
+ *     предлагает `restore previous ↶` (`offersOf`). Выбрасывается, только когда ни одних её слов
+ *     не осталось вне поля: беречь больше нечего.
  */
 export function acceptPlan(
   fills: Fill[],
@@ -273,11 +404,7 @@ export function acceptPlan(
   const drop: string[] = [];
   for (const f of fills) {
     if (!ids.has(f.id)) continue;
-    if (
-      f.target.kind === 'detailSlot' ||
-      isLive(f, form) ||
-      (holdsWords(f) && !wordsBack(f, form))
-    ) {
+    if (f.target.kind === 'detailSlot' || isLive(f, form) || offersOf(f, form).length > 0) {
       if (!f.accepted) accept.push(f.id);
     } else {
       drop.push(f.id);
@@ -287,47 +414,133 @@ export function acceptPlan(
 }
 
 /**
- * ЧТО МОЖНО ВЕРНУТЬ — записи со словами человека, чей текст на карточке уже другой (фиксап раунда
- * 2, BLK-1). `✕` у них нет (запись не живая: откат поверх правки стёр бы и правку), и `undo all` их
- * не трогает; вместо этого WRITTEN даёт каждой `restore previous ↶` — явный возврат прежних слов,
- * который сам ложится в журнал (`restoreFill`) и отменяется своим `✕` (`unrestoredFill`). Слова,
- * которые уже стоят в поле, вернуть нельзя — там нечего возвращать.
+ * ЧТО МОЖНО ВЕРНУТЬ — по всему журналу (фиксап раунда 2, BLK-1; раунд 3, M-A). `✕` у этих строк
+ * нет, и `undo all` их не трогает; WRITTEN даёт каждой `restore previous ↶` — явный возврат слов,
+ * который сам ложится в журнал (`restoreFill`) и отменяется своим `✕` (`unrestoredFill`), — и тихий
+ * `✕` отказа (`withoutWords`, m6).
  */
-export function restorable(fills: Fill[], form: FormSnapshot): Fill[] {
-  return fills.filter((f) => holdsWords(f) && !isLive(f, form) && !wordsBack(f, form));
+export function restorable(fills: Fill[], form: FormSnapshot): WordsOffer[] {
+  return fills.flatMap((f) => offersOf(f, form));
 }
 
 /**
- * ЗАПИСЬ ВОЗВРАТА (BLK-1): в поле встают прежние слова (`after`), стоявшее перед возвратом уходит в
- * `before` — `✕` вернёт его. Принята сразу: это слова человека, рамки «drafted» у них нет. Запись
- * черновика, которую возврат заменяет по адресу, едет с ним (`prior`).
+ * ЗАПИСЬ ВОЗВРАТА (BLK-1, M-A): в поле встают слова предложения (`after`), стоявшее перед возвратом
+ * уходит в `before` — `✕` вернёт его. Принята сразу: это слова человека, рамки «drafted» у них нет.
+ * Запись, которую возврат заменяет по адресу, едет с ним целиком (`prior`), а её ОСТАЛЬНЫЕ слова —
+ * ступенями (`carried`): возврат выбирает одни слова, но не выбрасывает другие.
  */
-export function restoreFill(f: Fill, current: string, at: string): Fill {
+export function restoreFill(o: WordsOffer, current: string, at: string): Fill {
+  const f = o.fill;
+  const k = normText(o.words);
+  return withCarried(
+    {
+      id: f.id,
+      target: f.target,
+      label: f.label,
+      before: current,
+      after: o.words,
+      at,
+      accepted: true,
+      restore: true,
+      prior: priorOf(f),
+    },
+    levelsOf(f).filter((w) => normText(w.before) !== k),
+  );
+}
+
+/** Что встаёт в журнал по `✕` возврата — запись, какой она была до него (или ничего). */
+export function unrestoredFill(f: Fill): Fill | null {
+  if (!f.restore || !f.prior) return null;
+  const p = f.prior;
   return {
     id: f.id,
     target: f.target,
     label: f.label,
-    before: current,
-    after: f.before,
-    at,
+    // Возврат раунда 2 возвращал ровно `before` заменённой записи — это его `after`.
+    before: p.before ?? f.after,
+    after: p.after,
+    at: p.at,
     accepted: true,
-    restore: true,
-    prior: { after: f.after, at: f.at },
+    ...(p.carried?.length ? { carried: p.carried } : {}),
+    // Заменённая запись сама была возвратом — она встаёт возвратом, со своим `prior`.
+    ...(p.restore ? { restore: true as const } : {}),
+    ...(p.prior ? { prior: p.prior } : {}),
   };
 }
 
-/** Что встаёт в журнал по `✕` возврата — запись черновика, какой она была до него (или ничего). */
-export function unrestoredFill(f: Fill): Fill | null {
-  if (!f.restore || !f.prior) return null;
-  return {
-    id: f.id,
-    target: f.target,
-    label: f.label,
-    before: f.after,
-    after: f.prior.after,
-    at: f.prior.at,
-    accepted: true,
-  };
+/**
+ * ЧТО ВСТАЁТ В ЖУРНАЛ ПО `✕` ЗАПИСИ, НЕСУЩЕЙ СЛОВА (раунд 3, M-A): её верхняя ступень — запись,
+ * какой она была до замены, — с остальными ступенями. Поле при этом получает `before` снятой записи,
+ * а ступень в нём не живая (иначе запись и не заменила бы её, а слилась), — и её слова WRITTEN
+ * предлагает вернуть. Нести нечего — `null`: запись просто забывается.
+ */
+export function poppedFill(f: Fill): Fill | null {
+  if (f.restore || !f.carried?.length) return null;
+  const [top, ...rest] = f.carried;
+  return withCarried(
+    {
+      id: f.id,
+      target: f.target,
+      label: f.label,
+      before: top.before,
+      after: top.after,
+      at: top.at,
+      accepted: true,
+    },
+    rest,
+  );
+}
+
+/**
+ * ОТКАЗ ОТ ПРЕДЛОЖЕНИЯ ВЕРНУТЬ СЛОВА (раунд 3, m6): человек сам решил, что они не нужны. Несённые
+ * слова просто снимаются. Свои слова НЕ живой записи снимаются вместе с ней: на её место встаёт
+ * верхняя несённая ступень. Запись, у которой не осталось ни живого значения, ни слов вне поля, не
+ * держится вовсе — `null`, журнал её забывает.
+ */
+export function withoutWords(f: Fill, words: string, form: FormSnapshot): Fill | null {
+  const k = normText(words);
+  const rest = (f.carried ?? []).filter((w) => normText(w.before) !== k);
+  let out: Fill;
+  if (ownWords(f) && normText(f.before) === k && !isLive(f, form)) {
+    const [top, ...more] = rest;
+    if (!top) return null;
+    out = withCarried(
+      {
+        id: f.id,
+        target: f.target,
+        label: f.label,
+        before: top.before,
+        after: top.after,
+        at: top.at,
+        accepted: true,
+      },
+      more,
+    );
+  } else {
+    out = withCarried(f, rest);
+  }
+  return isLive(out, form) || offersOf(out, form).length > 0 ? out : null;
+}
+
+/**
+ * ТА ЖЕ ЛИ ЭТО ЗАПИСЬ — по всему, что в ней держится, кроме флага просмотра (его ставит `accept
+ * all`, а не правка журнала). Отмена отказа (m6) ставит прежнюю запись только поверх той, что отказ
+ * оставил: новый прогон или `✕` за эти секунды — уже другая запись, и её затирать нельзя.
+ */
+export function sameFill(a: Fill | null | undefined, b: Fill | null | undefined): boolean {
+  if (!a || !b) return !a && !b;
+  const key = (f: Fill) =>
+    JSON.stringify([
+      f.id,
+      f.before,
+      f.after,
+      f.at,
+      !!f.restore,
+      f.snapshot ?? '',
+      f.carried ?? [],
+      f.prior ?? null,
+    ]);
+  return key(a) === key(b);
 }
 
 /* ─── САМ ЗАКОН ────────────────────────────────────────────────────────────────────────────── */
@@ -391,9 +604,21 @@ export function autoFillPlan(
  * прогонами человек поправил поле (запись задремала), переписываются уже ЕГО слова, и откат обязан
  * вернуть их, а не текст до первого прогона (фиксап M1: с перезаписью это стало обычным путём).
  * «Своё ли слово переписано» — `before` новой записи равен `after` прежней.
+ *
+ * ⚠ НЕ СЛИЛИСЬ — ПРЕЖНИЕ СЛОВА ЕДУТ ДАЛЬШЕ (раунд 3, M-A). Новая запись держит правку человека в
+ * своём `before`, а слова, которые держала прежняя («H» до первого черновика), становятся её
+ * ступенью (`carried`). Прежде здесь возвращалась одна `next`, и «H» пропадало: `take` из TO DECIDE
+ * или новый GENERATE поверх правленого черновика стирали его из журнала, пока `restore previous ↶`
+ * ещё стояло в закрытом раскрытии WRITTEN.
  */
 export function mergeFill(prev: Fill | undefined, next: Fill): Fill {
-  // Возврат (`restore`) — слова ЧЕЛОВЕКА: черновик, переписавший их, пишет свой `before` — их же.
-  if (!prev || prev.restore || normText(prev.after) !== normText(next.before)) return next;
-  return { ...next, before: prev.before };
+  // Возврат строится целиком (`restoreFill`): его `before` — то, что стояло, а не слияние.
+  if (!prev || next.restore) return next;
+  // Возврат (`restore`) — слова ЧЕЛОВЕКА: черновик, переписавший их, пишет свой `before` — их же;
+  // слова, которые возврат нёс, едут дальше.
+  if (prev.restore) return withCarried(next, prev.carried ?? []);
+  if (normText(prev.after) === normText(next.before)) {
+    return withCarried({ ...next, before: prev.before }, prev.carried ?? []);
+  }
+  return withCarried(next, levelsOf(prev));
 }
