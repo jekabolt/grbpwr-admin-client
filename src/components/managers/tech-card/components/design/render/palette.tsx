@@ -6,7 +6,7 @@ import type {
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useMemo, useState, type JSX } from 'react';
+import { useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -32,12 +32,14 @@ import { PartsRow } from '../colour-plan/parts-row';
 import type { ColourPlanWrites } from '../colour-plan/use-colour-plan';
 import { InertDoor } from '../bench-slot';
 import { GROUP_GAP, GROUP_SEAM } from '../core';
+import { CornerLabel } from '../pattern/organs';
+import type { ClothSlot } from '../pattern/slot-fabrics';
 import { PictureTile, TILE_CORNER, TILE_QUIET } from '../picture-tile';
 import { PantonePicker } from '../../pantone-picker';
 import { PANTONE_SWATCHES, findPantone } from '../../pantone-swatches';
 import { benchSides } from './model';
 import { ClothIsRow } from './cloth-is';
-import type { ColourDraft } from './drafts';
+import { boundClothsOf, type BoundCloth, type ColourDraft } from './drafts';
 import { fabricStatement, hexIsPaintable } from './model';
 
 /**
@@ -129,6 +131,9 @@ import { fabricStatement, hexIsPaintable } from './model';
  *     цветовая карта фичи A. Две ткани без `parts` — ЗАКОННОЕ состояние, и промпт говорит про него
  *     дословно: «the division is yours to make. Use every cloth on this list, and change cloth only
  *     on a seam, a panel edge or a finished edge the drawings actually show».
+ *     ⚠ STEP 3 — ОДНО ИСКЛЮЧЕНИЕ, И ОНО НЕ ПИШЕТСЯ ЭКРАНОМ, А ПРИЕЗЖАЕТ: ткань, надетая на слот
+ *     колорвея на шаге PATTERN, засевается с `parts` = слот (`useColourDraft`), и сетка это слово
+ *     при переключении чипов СОХРАНЯЕТ (`pick`). Новых частей экран по-прежнему не сочиняет.
  *
  * ⚠ ПЛИТКА РИСУЕТ ТО, ЧТО УЕДЕТ, А НЕ СВОЙ ВЫБОР. Выбранные читаются из `draft.recipe.fabrics` —
  * того самого объекта, который читают ворота, строка денег и модалка «what the model gets».
@@ -155,10 +160,10 @@ const TEXTURE_ASPECT = '1/1';
 /**
  * ПОТОЛОК АКТИВОВ — ОДНА ФУНКЦИЯ НА ВСЕХ, КТО ЕГО НАЗЫВАЕТ (r3 п.22).
  *
- * Считается по ВСЕЙ карточке — он зеркало серверного: `UpsertDesignAsset` отвергает 41-й актив
- * независимо от полки. Но ОТЧЁТ раздельный (Д-2): сколько мест держит эта сетка и сколько — то,
- * чего она не показывает; иначе человек читает «40 активов», не имея ни одного способа освободить
- * место и ни одного слова о том, чем оно занято.
+ * Считается по ВСЕЙ карточке — он зеркало серверного: `UpsertDesignAsset` отвергает 121-й актив
+ * независимо от полки (`ASSETS_PER_CARD_MAX`, было 40 до STEP 3). Но ОТЧЁТ раздельный (Д-2):
+ * сколько мест держит эта сетка и сколько — то, чего она не показывает; иначе человек читает
+ * «120 активов», не имея ни одного способа освободить место и ни одного слова о том, чем оно занято.
  *
  * ⚠ ФУНКЦИЯ, А НЕ ТРИ КОПИИ СТРОКИ. Дверь ткани переехала в ДВА места (пустая полка — квадрат в
  * сетке, непустая — тихая дверь в заголовке группы), и повод отказа обязан быть у них дословно
@@ -343,7 +348,31 @@ function InMark(): JSX.Element {
  * Ширина дорожки 104px — та же, что у плит `also shown` в референсах, и по той же причине: это
  * наименьший кадр, на котором фактура ткани ещё различима, а раппорт набивки читается как раппорт.
  * Крупнее — и четыре ткани заняли бы экран; мельче — и сетка перестала бы отвечать на свой вопрос.
+ *
+ * ═══ STEP 3 · НАДЕТЫЕ ПЕРВЫМИ, ОСТАЛЬНОЕ — ЗА ОДНОЙ ДВЕРЬЮ (ревью §7, 2026-09-26) ═══════════════
+ *
+ * Шаг PATTERN делает свотч на каждую пару (колорвей, слот), и полка карточки выросла до 120
+ * (`ASSETS_PER_CARD_MAX`): три колорвея × три слота × несколько попыток — это десятки плиток, и
+ * сетка без свёртки стала бы стеной, в которой ткань ЭТОГО колорвея надо искать глазами. Поэтому:
+ *
+ *   · ПЛИТКИ, НАДЕТЫЕ НА СЛОТЫ ТЕКУЩЕЙ ЦЕЛИ (`boundClothsOf` — то же определение, по которому
+ *     засеяна подача), стоят ПЕРВЫМИ, в порядке слотов, и носят угловой ярлык с именем слота
+ *     (`CornerLabel` шага PATTERN, этажом выше ярлыка рода). Порядок совпадает с порядком засева,
+ *     поэтому «in · 1» стоит на первой плитке, а не где-то в середине стены;
+ *   · полка длиннее `FOLD_AT` — СВЁРНУТА по умолчанию: видны первые `FOLD_AT` плиток этого порядка,
+ *     остальное открывает ОДНА дверь «show all N» (она же «show fewer» — одна дверь в двух
+ *     положениях, как `show all` ↔ `paged again` истории). Других новых кнопок нет;
+ *   · ⚠ СВЁРТКА НИКОГДА НЕ ПРЯЧЕТ ТО, ЧТО УЕДЕТ. Надетая плитка, плитка в этом прогоне (`chosen`) и
+ *     плитка покрашенного цвета (`assignedTo`) видны всегда, где бы они ни стояли в порядке: сетка
+ *     рисует посылку (шапка файла), и ткань, едущая в платный промпт из-за закрытой двери, была бы
+ *     ровно «купили не то, что видели».
+ *
+ * ⚠ «FOLD_AT ВИДНЫ», А НЕ «ВИДНЫ ТОЛЬКО НАДЕТЫЕ», И ЭТО ВЫБОР. На верстаке `sample` привязок нет по
+ * построению, и правило «остальное свёрнуто» показало бы там пустую сетку с одной дверью — то есть
+ * отняло бы выбор ткани у самого частого экрана ради порядка на другом.
  */
+const FOLD_AT = 8;
+
 function TextureGrid({
   band,
   techCardId,
@@ -354,12 +383,18 @@ function TextureGrid({
   onAssign,
   assignedTo,
   trailing,
+  colorwayId = 0,
+  slots,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   state: ColourDraft;
   disabled?: boolean;
   onMakePattern?: () => void;
+  /** Цель прогона — чьи привязки ставят плитки первыми (STEP 3). `0` — `sample`, привязок нет. */
+  colorwayId?: number;
+  /** Слоты ткани композитора — тот же массив, по которому засеяна подача. */
+  slots?: readonly ClothSlot[];
   /**
    * ═══ СЕТКА ВЗВЕДЕНА ПОКРАШЕННЫМ ЦВЕТОМ (фича A) ══════════════════════════════════════════════
    *
@@ -416,6 +451,35 @@ function TextureGrid({
     return [...all.filter(assetIsPattern), ...all.filter((a) => !assetIsPattern(a))];
   }, [band]);
 
+  /* STEP 3 — надетые на слоты текущей цели, по ассету. Одно определение с засевом подачи. */
+  const boundBy = useMemo(() => {
+    const by = new Map<number, BoundCloth>();
+    for (const b of boundClothsOf(band, colorwayId, slots)) by.set(b.assetId, b);
+    return by;
+  }, [band, colorwayId, slots]);
+
+  /* ПОРЯДОК СЕТКИ: надетые — первыми и в порядке слотов (Map хранит порядок вставки), затем
+     остальная полка в прежнем порядке (паттерны, потом ткани). */
+  const ranked = useMemo(() => {
+    const byId = new Map(shelf.map((a) => [a.id ?? 0, a] as const));
+    const first = [...boundBy.keys()]
+      .map((id) => byId.get(id))
+      .filter((a): a is common_DesignAsset => !!a);
+    return [...first, ...shelf.filter((a) => !boundBy.has(a.id ?? 0))];
+  }, [shelf, boundBy]);
+
+  /**
+   * СВЁРТКА — СОСТОЯНИЕ ВИДА, НЕ ЧЕРНОВИКА, но и оно живёт карточкой: `StudioTab` между карточками
+   * не размонтируется (инвариант 12), и открытая на A стена не должна встречать человека на B.
+   * В теле рендера, тем же приёмом, что у черновиков.
+   */
+  const [unfolded, setUnfolded] = useState(false);
+  const shownCard = useRef(techCardId);
+  if (shownCard.current !== techCardId) {
+    shownCard.current = techCardId;
+    if (unfolded) setUnfolded(false);
+  }
+
   /**
    * ПОРЯДОК ВЫБРАННЫХ — ЭТО САМ СПИСОК `fabrics`, а не отдельное состояние рядом с ним. Второе
    * хранилище порядка разошлось бы с посылкой при первом же восстановлении рецепта из истории или
@@ -428,6 +492,18 @@ function TextureGrid({
 
   /** Потолок активов — ОДНА функция на всех, кто его называет (разбор у `clothCeiling`). */
   const { full, reason: fullReason } = clothCeiling(band, shelf);
+
+  /* ЧТО ВИДНО В СВЁРНУТОЙ СЕТКЕ: первые `FOLD_AT` плиток порядка — и, вне очереди, всё, что едет
+     с этим прогоном или надето на цель (довод — в шапке сетки). */
+  const foldable = shelf.length > FOLD_AT;
+  const folded = foldable && !unfolded;
+  const visible = folded
+    ? ranked.filter((a, i) => {
+        const id = a.id ?? 0;
+        return i < FOLD_AT || boundBy.has(id) || ordinalOf(id) > 0 || !!assignedTo?.has(id);
+      })
+    : ranked;
+  const hidden = ranked.length - visible.length;
 
   /**
    * ПЕРЕКЛЮЧАТЕЛЬ, А НЕ ЗАМЕНА (круг 19, C2). Раньше здесь стояло `fabrics: [эта одна]`, и потолок
@@ -454,17 +530,29 @@ function TextureGrid({
     }
     const ids = chosen.map((f) => f.assetId ?? 0).filter((v) => v > 0);
     const next = ids.includes(id) ? ids.filter((v) => v !== id) : [...ids, id];
-    state.echo({ from: 'cloths', fabrics: next.length ? fabricUses(band, next) : [] });
+    /* ⚠ НАДЕТАЯ ТКАНЬ СОХРАНЯЕТ СВОИ ЧАСТИ (STEP 3). Засев положил ей `parts` = слот; пересборка
+       `fabricUses` целиком (довод выше) отдаёт `parts: ''`, и первый же тычок в соседнюю плитку
+       молча стирал бы «outer» у всех надетых — промпт из «ткань A на outer, ткань B на lining»
+       превращался бы в «делите сами». Части берутся из того же `boundClothsOf`, что и засев;
+       ненадетая ткань остаётся без частей, то есть ОСТАТКОМ изделия (`renderClothPartsRule`). */
+    const fabrics = fabricUses(band, next).map((f) => {
+      const b = boundBy.get(f.assetId ?? 0);
+      return b ? { ...f, parts: b.parts } : f;
+    });
+    state.echo({ from: 'cloths', fabrics });
   };
 
   return (
     <>
       <Tiles min={118}>
-        {shelf.map((a) => {
+        {visible.map((a) => {
           const id = a.id ?? 0;
           const name = assetLabel(a);
           const url = assetThumb(a);
           const n = ordinalOf(id);
+          /* STEP 3: на какие слоты текущей цели эта плитка надета — `undefined`, если ни на какие. */
+          const worn = boundBy.get(id);
+          const wornAs = worn ? worn.slotNames.join(' · ') : '';
           /* ⚠ ПОД ПОКРАСКОЙ «ВЫБРАНА» ЗНАЧИТ «НЕСЁТ ХОТЯ БЫ ОДИН ПОКРАШЕННЫЙ ЦВЕТ». Порядковый
              номер прогона там ничего не описывает: список тканей собирается из палитры, а не из
              очерёдности тычков, и нарисованная «1» на плитке была бы номером, которого никто не
@@ -473,7 +561,12 @@ function TextureGrid({
           const on = armed !== undefined && assignedTo ? serves.length > 0 : n > 0;
           const pattern = assetIsPattern(a);
           return (
-            <div key={id} className='flex min-w-0 flex-col gap-1' data-texture={id}>
+            <div
+              key={id}
+              className='flex min-w-0 flex-col gap-1'
+              data-texture={id}
+              data-texture-bound={wornAs || undefined}
+            >
               <PictureTile
                 url={url}
                 alt={name}
@@ -510,14 +603,29 @@ function TextureGrid({
                   ) : on ? (
                     /* «in» — the mark of the mockup; with several cloths the ORDER is money (the
                        prompt calls the first CLOTH 1), so the number rides with it. */
-                    chosen.length > 1 ? `in · ${n}` : 'in'
+                    chosen.length > 1 ? (
+                      `in · ${n}`
+                    ) : (
+                      'in'
+                    )
                   ) : undefined
                 }
                 /* ПОВЕРХНОСТЬ ВЫБИРАЕТ — ЖЕСТОМ МЫШИ. Объявленный орган — чип ниже; довод целиком
                    в шапке файла. */
                 onOpen={disabled ? undefined : () => pick(id)}
-                /* The role corner of the mockup's tile — «cloth» / «pattern», bottom left. */
-                children={<RoleLabel>{pattern ? 'pattern' : 'cloth'}</RoleLabel>}
+                /* The role corner of the mockup's tile — «cloth» / «pattern», bottom left; a tile
+                   bound to a slot of this target wears the slot one storey above it (STEP 3) —
+                   the same corner organ the PATTERN step prints «in render» with. */
+                children={
+                  <>
+                    {worn && (
+                      <CornerLabel at='bl' stack>
+                        {wornAs}
+                      </CornerLabel>
+                    )}
+                    <RoleLabel>{pattern ? 'pattern' : 'cloth'}</RoleLabel>
+                  </>
+                }
                 gallery={
                   url
                     ? { src: assetFull(a) || url, thumbnail: url, type: 'image', alt: name }
@@ -546,15 +654,19 @@ function TextureGrid({
                 pressed={on}
                 disabled={disabled}
                 data-texture-pick={id}
-                title={
+                title={[
                   armed
                     ? `make ${name} the cloth of the parts painted ${armed}`
                     : serves.length > 0
                       ? `${name} is the cloth of ${serves.join(', ')} on the colour map — change it on that row below`
                       : on
                         ? `cloth ${n} of this run — press again to drop it. ${name} stays on the card`
-                        : `add ${name} to this run as cloth ${chosen.length + 1}`
-                }
+                        : `add ${name} to this run as cloth ${chosen.length + 1}`,
+                  /* Кто надел её и где это меняют — одна фраза, а не новая кнопка. */
+                  worn ? `bound to ${wornAs} of this colourway on the PATTERN step` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
                 onClick={() => pick(id)}
               >
                 <span className='block max-w-full truncate'>{name}</span>
@@ -596,6 +708,28 @@ function TextureGrid({
             соседями и читаются как пара, чем они и являются («a texture, a colour, or both»). */}
         {trailing}
       </Tiles>
+
+      {/* ═══ ОДНА ДВЕРЬ СВЁРТКИ (STEP 3) — в двух положениях, как `show all` ↔ `paged again`
+          истории. Рисуется, только когда ей есть что открыть или что свернуть: полка, где всё
+          и так на виду (надето, в прогоне), двери не получает. */}
+      {foldable && (hidden > 0 || !folded) && (
+        <div className='flex'>
+          <Button
+            variant='secondary'
+            size='xs'
+            data-texture-fold={folded ? 'folded' : 'open'}
+            aria-expanded={!folded}
+            onClick={() => setUnfolded(folded)}
+            title={
+              folded
+                ? `${hidden} more cloth${hidden === 1 ? '' : 's'} of this card are folded; the ones bound to this colourway and the ones in this run always stay in view`
+                : `fold the grid back to ${FOLD_AT} tiles; the bound cloths and the ones in this run stay in view`
+            }
+          >
+            {folded ? `show all ${shelf.length}` : 'show fewer'}
+          </Button>
+        </div>
+      )}
 
       {/* ═══ ПРОСТЫНЯ ПУСТОЙ ПОЛКИ СНЯТА (F-19) ══════════════════════════════════════════════
           Владелец, дословно: «убери текст». Абзац говорил ТРИ вещи, и каждая уже сказана органом,
@@ -830,7 +964,9 @@ function ColourTile({ state, disabled }: { state: ColourDraft; disabled?: boolea
         title={readBack ? 'read back from the hex of the last run' : undefined}
         className='min-w-0 break-words'
       >
-        {readBack ? `≈ ${readBack}` : reference || (paintable ? 'no pantone reference' : 'optional')}
+        {readBack
+          ? `≈ ${readBack}`
+          : reference || (paintable ? 'no pantone reference' : 'optional')}
       </Text>
     </div>
   );
@@ -844,8 +980,17 @@ export function Palette({
   band,
   techCardId,
   onMakePattern,
+  colorwayId,
+  slots,
 }: {
   band: GetDesignBandResponse;
+  /**
+   * STEP 3: цель прогона и слоты ткани композитора — по ним сетка CLOTHS ставит плитки, надетые на
+   * слоты этой цели, первыми и подписывает их слотом. Те же два числа, по которым засеяна подача
+   * (`useColourDraft`), — иначе ярлык «outer» стоял бы не на той плитке, что едет CLOTH 1.
+   */
+  colorwayId?: number;
+  slots?: readonly ClothSlot[];
   /**
    * ⚠ ОБЯЗАТЕЛЕН, И ЭТО ПОЧИНКА МЁРТВОГО ПИСАТЕЛЯ, А НЕ УЖЕСТОЧЕНИЕ РАДИ СТРОГОСТИ. Проп был
    * необязательным, а рядом безусловно звался `useColourDraft` — ЦЕЛЫЙ ВТОРОЙ ЧЕРНОВИК, который
@@ -907,16 +1052,16 @@ export function Palette({
        шов встал бы и между линейкой и её собственным содержимым. */
     <div className={GROUP_SEAM}>
       <div>
-      {/* ═══ ОДНА ГРУППА НА ДВА ОДНОРОДНЫХ ПРЕДМЕТА (E-8) ════════════════════════════════════
+        {/* ═══ ОДНА ГРУППА НА ДВА ОДНОРОДНЫХ ПРЕДМЕТА (E-8) ════════════════════════════════════
           `GroupLabel` — вес «под-группа» лестницы DESIGN.md (1px `#cccccc`), на ступень выше
           рулёных рядов ниже (`#e6e6e6`). Это верный вес: текстура с цветом теперь самая крупная
           вещь блока, а `cloth is` и `in words` — её свойства. Второй белой коробки при этом не
           заводится: блок в блоке запрещён, и группа рисуется ЛИНИЕЙ, а не рамкой. */}
-      {/* ⚠ ЯКОРЯ `data-*` НА `GroupLabel` НЕТ И БЫТЬ НЕ МОЖЕТ: примитив принимает ЗАКРЫТЫЙ список
+        {/* ⚠ ЯКОРЯ `data-*` НА `GroupLabel` НЕТ И БЫТЬ НЕ МОЖЕТ: примитив принимает ЗАКРЫТЫЙ список
           пропов и лишние молча выбрасывает — атрибут не доехал бы до DOM, а проба на нём была бы
           ВАКУУМНО ЗЕЛЁНОЙ. Заголовок группы проверяется текстом; коробку объявляет ряд ниже
           (`data-fabric-pair`) и сама секция (`id='design-fabric-menu'`). */}
-      {/* ═══ ОГОВОРКА ГРУППЫ СНЯТА ВМЕСТЕ С ПОТОЛКОМ, КОТОРЫЙ ОНА ОБЪЯВЛЯЛА (круг 19, C2) ══════
+        {/* ═══ ОГОВОРКА ГРУППЫ СНЯТА ВМЕСТЕ С ПОТОЛКОМ, КОТОРЫЙ ОНА ОБЪЯВЛЯЛА (круг 19, C2) ══════
           Здесь стояло «a texture, a colour, or both — one texture per run». Вторая половина
           («one texture per run») перестала быть правдой в тот же коммит, которым сетка научилась
           выбирать N, — и оставить её значило бы напечатать на экране запрет, которого нет.
@@ -926,41 +1071,41 @@ export function Palette({
           по-настоящему — палец над GENERATE, — его говорят сами ворота: «pick a cloth, pick a
           colour, say what the cloth is, or describe it in words above. Any one of them is enough,
           and they may be combined». */}
-      {/* ⚠ ОДНА КНОПКА НА ВСЮ ФИЧУ, И СТОИТ ОНА В СЛОТЕ ДЕЙСТВИЯ ЗАГОЛОВКА — там, где до круга 19
+        {/* ⚠ ОДНА КНОПКА НА ВСЮ ФИЧУ, И СТОИТ ОНА В СЛОТЕ ДЕЙСТВИЯ ЗАГОЛОВКА — там, где до круга 19
           жила снятая оговорка группы. Больше дверей покраски на этом экране НЕТ: у каждого вида
           есть своя `paint` на плитке ниже, но она появляется только когда ряд уже есть. Дверь
           гаснет вместе с планом: сервер, не знающий глагола, обязан быть назван словами, а не
           показан живой кнопкой, которая молча ничего не сделает. */}
-      {/* ⚠ СЧЁТЧИК `N of M cloths` СНЯТ (r3, слово владельца по п.2: «не нужно, и так видно»).
+        {/* ⚠ СЧЁТЧИК `N of M cloths` СНЯТ (r3, слово владельца по п.2: «не нужно, и так видно»).
           Он пересчитывал ровно то, что стоит под ним ЯРЛЫКАМИ: у каждой выбранной ткани в углу
           кадра стоит «in» с её номером, а вся полка — это сама сетка. Место счётчика заняла
           единственная дверь, которой на непустой полке больше негде стоять. */}
-      <GroupLabel
-        flush
-        className={GROUP_GAP}
-        action={
-          <span className='flex flex-wrap items-center gap-1.5'>
-            {!disabled && shelf.length > 0 && (
-              <ClothIntake band={band} techCardId={techCardId} shelf={shelf} variant='door' />
-            )}
-            {!disabled && plan.plan && firstSide && !painted ? (
-              <Button
-                variant='secondary'
-                size='xs'
-                data-paint-parts=''
-                onClick={() => setPainting(firstSide)}
-                title='flood the drawing part by part in flat colours; each colour then picks its own cloth below'
-              >
-                paint the parts ▸
-              </Button>
-            ) : null}
-          </span>
-        }
-      >
-        cloth and colour
-      </GroupLabel>
+        <GroupLabel
+          flush
+          className={GROUP_GAP}
+          action={
+            <span className='flex flex-wrap items-center gap-1.5'>
+              {!disabled && shelf.length > 0 && (
+                <ClothIntake band={band} techCardId={techCardId} shelf={shelf} variant='door' />
+              )}
+              {!disabled && plan.plan && firstSide && !painted ? (
+                <Button
+                  variant='secondary'
+                  size='xs'
+                  data-paint-parts=''
+                  onClick={() => setPainting(firstSide)}
+                  title='flood the drawing part by part in flat colours; each colour then picks its own cloth below'
+                >
+                  paint the parts ▸
+                </Button>
+              ) : null}
+            </span>
+          }
+        >
+          cloth and colour
+        </GroupLabel>
 
-      {/* ═══ ТЕКСТУРА И ЦВЕТ — ОДНОЙ СТРОКОЙ (D-8) ═══════════════════════════════════════════
+        {/* ═══ ТЕКСТУРА И ЦВЕТ — ОДНОЙ СТРОКОЙ (D-8) ═══════════════════════════════════════════
           Владелец, дословно: «GENERATION — FABRIC RENDER TEXTURE и COLOUR пусть будут в одной
           строке а не в одном столбце».
           Это не только компактнее — это ЧЕСТНЕЕ. Два ряда друг под другом читаются как две
@@ -977,51 +1122,53 @@ export function Palette({
           сказал это ровно теми же словами, и повторить их в левой колонке значило бы напечатать
           одно и то же дважды подряд. Плитка цвета называет себя сама — дверью `+ colour` и полем
           имени цвета под ней. */}
-      <div data-fabric-pair>
-        <div className='min-w-0'>
-          <TextureGrid
-            band={band}
-            techCardId={techCardId}
-            state={state}
-            disabled={disabled}
-            onMakePattern={onMakePattern}
-            trailing={<ColourTile state={state} disabled={disabled} />}
-            /* ⚠ СЕТКА ПЕРЕХОДИТ НА ЯЗЫК ПОКРАСКИ ТОЛЬКО КОГДА КАРТЫ ЕСТЬ, и это не осторожность.
+        <div data-fabric-pair>
+          <div className='min-w-0'>
+            <TextureGrid
+              band={band}
+              techCardId={techCardId}
+              state={state}
+              disabled={disabled}
+              onMakePattern={onMakePattern}
+              colorwayId={colorwayId}
+              slots={slots}
+              trailing={<ColourTile state={state} disabled={disabled} />}
+              /* ⚠ СЕТКА ПЕРЕХОДИТ НА ЯЗЫК ПОКРАСКИ ТОЛЬКО КОГДА КАРТЫ ЕСТЬ, и это не осторожность.
                `assignedTo` заданный, но пустой, переопределяет ВЫБРАННОСТЬ плиток на «носит ли
                она покрашенный цвет» — то есть на карточке с пустым планом обесцветил бы каждый
                выбранный чип, ничего не сказав. Пустой план — это «не красили», и сетка обязана
                в нём работать ровно как вчера. */
-            armed={painted ? armed : undefined}
-            assignedTo={painted ? assignedTo : undefined}
-            onAssign={(assetId) => {
-              const doc = plan.plan;
-              if (!doc || !armed) return;
-              const prev = doc.cloths.find((c) => c.hex === armed);
-              /* ПОВТОРНЫЙ ТЫЧОК В ТУ ЖЕ ПЛИТКУ СНИМАЕТ ТКАНЬ — тот же жест, что у чипов полосы,
+              armed={painted ? armed : undefined}
+              assignedTo={painted ? assignedTo : undefined}
+              onAssign={(assetId) => {
+                const doc = plan.plan;
+                if (!doc || !armed) return;
+                const prev = doc.cloths.find((c) => c.hex === armed);
+                /* ПОВТОРНЫЙ ТЫЧОК В ТУ ЖЕ ПЛИТКУ СНИМАЕТ ТКАНЬ — тот же жест, что у чипов полосы,
                  и единственный способ передумать, не выбирая «никакую» из списка, которого нет. */
-              const next = prev?.assetId === assetId ? 0 : assetId;
-              void plan.save({
-                maps: doc.maps,
-                cloths: [
-                  ...doc.cloths.filter((c) => c.hex !== armed),
-                  ...(next > 0 || prev?.colourHex || prev?.words
-                    ? [
-                        {
-                          hex: armed,
-                          assetId: next,
-                          colourHex: prev?.colourHex ?? '',
-                          words: prev?.words ?? '',
-                          parts: prev?.parts ?? '',
-                        },
-                      ]
-                    : []),
-                ],
-              });
-              setArmed('');
-            }}
-          />
-        </div>
-        {/* ⚠ ЗДЕСЬ СТОЯЛА ОБЩАЯ СТРОКА ПОРЯДКА СТАРШИНСТВА (`fabricAuthority`), И ОНА СНЯТА С
+                const next = prev?.assetId === assetId ? 0 : assetId;
+                void plan.save({
+                  maps: doc.maps,
+                  cloths: [
+                    ...doc.cloths.filter((c) => c.hex !== armed),
+                    ...(next > 0 || prev?.colourHex || prev?.words
+                      ? [
+                          {
+                            hex: armed,
+                            assetId: next,
+                            colourHex: prev?.colourHex ?? '',
+                            words: prev?.words ?? '',
+                            parts: prev?.parts ?? '',
+                          },
+                        ]
+                      : []),
+                  ],
+                });
+                setArmed('');
+              }}
+            />
+          </div>
+          {/* ⚠ ЗДЕСЬ СТОЯЛА ОБЩАЯ СТРОКА ПОРЯДКА СТАРШИНСТВА (`fabricAuthority`), И ОНА СНЯТА С
             ЭКРАНА — E-2. Она говорила ПРАВИЛО («the photo states the material · the picked colour
             overrides the photo’s colour · the words state what neither of them states»), а тремя
             рядами ниже то же самое говорилось ВТОРОЙ раз, применительно к этому прогону. Владелец
@@ -1033,26 +1180,26 @@ export function Palette({
             где опись читают целиком. Гарантия «одна поверхность не разойдётся с другой» при этом
             не потеряна и держится тем же, чем держалась: ОБЕ читают `clothWordsRank`. Проба
             сверяет `data-words-rank` экрана с `data-fabric-authority` модалки. */}
-      </div>
+        </div>
 
-      {/* ═══ PARTS — ПОКРАШЕННЫЕ ЦВЕТА И ТКАНЬ КАЖДОГО (фича A) ══════════════════════════════
+        {/* ═══ PARTS — ПОКРАШЕННЫЕ ЦВЕТА И ТКАНЬ КАЖДОГО (фича A) ══════════════════════════════
           Стоит ПОД сеткой, потому что читается сверху вниз как работа: вот полка тканей → вот
           виды, которые я покрасил → вот что каждый цвет значит. И ряд рисуется только когда
           сервер про план говорит: иначе экран предлагал бы разметку, которую провод молча
           выбросит. */}
-      {plan.plan && (painted || painting) && (
-        <PartsRow
-          band={band}
-          techCardId={techCardId}
-          plan={plan.plan}
-          writes={plan}
-          armed={armed}
-          onArm={setArmed}
-          painting={painting}
-          onPaint={setPainting}
-          disabled={disabled}
-        />
-      )}
+        {plan.plan && (painted || painting) && (
+          <PartsRow
+            band={band}
+            techCardId={techCardId}
+            plan={plan.plan}
+            writes={plan}
+            armed={armed}
+            onArm={setArmed}
+            painting={painting}
+            onPaint={setPainting}
+            disabled={disabled}
+          />
+        )}
       </div>
 
       {/* ── WHAT THE CLOTH IS — H-13. Свойство ТОЙ ЖЕ ткани, что в сетке, и уезжает в то же поле

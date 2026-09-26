@@ -564,6 +564,10 @@ export function StudioTab({
                              on-model. Второго состояния не заводится ни на одном экране. */
                           colorways={colorway.colorways}
                           onColorwayChange={colorway.setColorwayId}
+                          /* STEP 3: ТЕ ЖЕ слоты, что у шага PATTERN, — из ОДНОГО `useWatch`
+                             выше. По ним подача засевает ткани колорвея из привязок, а сетка
+                             CLOTHS ставит надетые плитки первыми. */
+                          slots={cloth.slots}
                         />
                         {/* J-18: the history filters to fabric renders by default; E-22: closed. */}
                         <GenerationHistory
