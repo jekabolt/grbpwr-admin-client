@@ -15,6 +15,7 @@ import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { Arrow } from 'ui/icons/arrow';
+import { FIELD_REVEAL_EVENT } from 'utils/field-errors';
 import { create } from 'zustand';
 
 import type { TechCardFormData } from '../schema';
@@ -533,6 +534,26 @@ export function MoodBoard({
   // серую оговорку рядом с именем блока: свёрнутый блок, который не говорит, сколько в нём лежит,
   // отвечает на вопрос «стоит ли разворачивать» молчанием.
   const [open, setOpen] = useState(true);
+  /**
+   * СВЁРНУТАЯ ДОСКА РАЗВОРАЧИВАЕТСЯ НА ПРОСЬБУ «ПОКАЖИ ПОЛЕ» (фиксап раунда 2, MIN-6). Дверь
+   * рельса `description ›` и отказ по полю (`revealField`) шлют `FIELD_REVEAL_EVENT` НА ЯКОРЬ поля,
+   * и он всплывает через свёрнутые обёртки — ровно этот контракт описан у `revealField`: «whichever
+   * ancestor folds it listens and opens». Слушают обе свёрнутые обёртки, где стоят якоря полей:
+   * DESCRIPTION (`concept`) и панель указаний (`callouts.N.description`). Без этого дверь молчала:
+   * у спрятанного якоря нет коробки, и прокрутить к нему нечего.
+   */
+  const foldBody = useRef<HTMLDivElement>(null);
+  const calloutsPanel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const hosts = [foldBody.current, calloutsPanel.current].filter(
+      (el): el is HTMLDivElement => !!el,
+    );
+    const onAsk = () => setOpen(true);
+    for (const el of hosts) el.addEventListener(FIELD_REVEAL_EVENT, onAsk);
+    return () => {
+      for (const el of hosts) el.removeEventListener(FIELD_REVEAL_EVENT, onAsk);
+    };
+  }, []);
 
   // ── боковое меню указаний (B-9) — выбор, наведение, правка ──────────────────────────────────
   //
@@ -1015,6 +1036,7 @@ export function MoodBoard({
             меню (выбранная строка, взвод «+ point», просьба фокуса) переживает сворачивание. Ширина
             — CSS-переменной `--cw` на обёртке, от `lg`; свёрнутая панель — полоска 28px. */}
         <div
+          ref={calloutsPanel}
           id={panelId}
           hidden={!open}
           data-mb-callouts=''
@@ -1130,7 +1152,7 @@ export function MoodBoard({
         </div>
       </SectionStack>
 
-      <div hidden={!open} className='contents' data-mb-fold-body=''>
+      <div ref={foldBody} hidden={!open} className='contents' data-mb-fold-body=''>
         {/* ОДНА ЗАПИСКА НА ДОСКУ — И ЭТО `concept` (V-16), СВОИМ БЛОКОМ `DESCRIPTION`. Текст
             печатается в тех-паке и входит в подпись DESIGN. Это по-прежнему НЕ описание изделия для
             генерации: то — `garment description` блока референсов, уходит в каждый прогон; этот
@@ -1185,6 +1207,7 @@ export function MoodBoard({
               {/* Легенда рамки — и есть «принять» описания (фиксап M3). */}
               <DraftedPill
                 live={conceptDrafted}
+                disabled={readOnly}
                 onAccept={() => draftedApi.acceptKey(draftedKey.concept)}
                 data-mb-concept-drafted=''
                 className='absolute -top-2 right-2 bg-bgColor'

@@ -56,6 +56,37 @@ export function useDraftDesignIdea(techCardId?: number) {
 }
 
 /**
+ * Машинная причина отказа: `google.rpc.Status.details` → `ErrorInfo.reason`.
+ *
+ * КАНАЛ НЕ ВЫДУМАН ПОД ЭТОТ СЛУЧАЙ. Шлюз проносит `details` в тело JSON, `api.ts` кладёт массив на
+ * саму ошибку, а `utils/field-errors.ts` уже читает оттуда нарушения полей — разбор тот же, тип
+ * детали другой (та же форма стоит в `files/api/notesService.ts`). Прозу сервера здесь не
+ * спрашивают ВООБЩЕ: фраза принадлежит серверу и будет переписана в тот день, когда её решат
+ * улучшить, а `reason` — это контракт.
+ *
+ * ⚠ ДОМЕН НЕ СВЕРЯЕТСЯ, И ЭТО НЕ НЕБРЕЖНОСТЬ. У этой двери их два — `design.grbpwr.com` и
+ * `ai.grbpwr.com`, — но словари их причин не пересекаются даже регистром (ai пишет
+ * `AI_NOT_CONFIGURED`). Второе условие ничего бы не различило, зато протухло бы молча.
+ *
+ * ПЕРЕЕХАЛА СЮДА ИЗ `construction-draft.tsx` (фиксап раунда 2, MIN-1) — ПЕРЕНОСОМ, а не копией:
+ * у отказа два читателя (`draftIdeaRefusal` ниже и ключ идемпотентности черновика, `runIsClosed`),
+ * и два разбора одной ошибки однажды разошлись бы в том, что она значит.
+ */
+export function refusalReason(error: unknown): string {
+  const details = (error as { details?: unknown } | null)?.details;
+  if (!Array.isArray(details)) return '';
+  for (const d of details) {
+    if (!d || typeof d !== 'object') continue;
+    const type = (d as { '@type'?: unknown })['@type'];
+    // Сверка по СУФФИКСУ типа, как в `field-errors.ts`; голый объект с `reason` тоже принимается.
+    if (typeof type === 'string' && !type.endsWith('ErrorInfo')) continue;
+    const reason = (d as { reason?: unknown }).reason;
+    if (typeof reason === 'string' && reason) return reason;
+  }
+  return '';
+}
+
+/**
  * Отказ, сказанный словами технолога. Сервер называет предпосылку токеном (`no_moodboard`), и это
  * не поломка, а состояние карточки: показывать это как «что-то сломалось» нельзя, потому что
  * чинить нечего — надо доложить картинок или написать описание.
@@ -63,6 +94,12 @@ export function useDraftDesignIdea(techCardId?: number) {
  * ФРАЗА `no_moodboard` — ФРАЗА ГЕЙТА МИНИМУМА (фиксап N1). Своей формулировки здесь больше нет:
  * вызывающий передаёт фразу своей двери, собранную `moodGateSentence` (`core/mood-gate.ts`) из тех
  * же частей, что запирают FLAT на рельсе, — картинка на доске, 40 символов описания, категория.
+ *
+ * ⚠ СЕГОДНЯШНИЙ СЕРВЕР ТОКЕНА НЕ ШЛЁТ (фиксап раунда 2, MIN-1). `DraftDesignIdea` отказывает
+ * голым FailedPrecondition «there is nothing to read: put a picture on the moodboard or write the
+ * description» — без `no_moodboard` и без ErrorInfo (`design_run.go`, designDraftIdea). Поэтому
+ * узнаётся и эта фраза, по её началу. Токен остаётся для сервера, который начнёт его называть, —
+ * в прозе и в ErrorInfo (`refusalReason`, машинная причина — контракт, проза — нет).
  *
  * ВТОРЫМ ЗДЕСЬ СТОЯЛ `budget_exceeded` («today’s generation budget is spent»). Такого отказа
  * больше НЕ СУЩЕСТВУЕТ: сервер снёс дневной потолок целиком — колонку, обе проверки и сам повод, —
@@ -78,6 +115,12 @@ export function useDraftDesignIdea(techCardId?: number) {
  */
 export function draftIdeaRefusal(error: unknown, moodSentence: string): string {
   const message = (error as Error | null)?.message ?? '';
-  if (message.includes('no_moodboard')) return moodSentence;
+  if (
+    refusalReason(error) === 'no_moodboard' ||
+    message.includes('no_moodboard') ||
+    /there is nothing to read/i.test(message)
+  ) {
+    return moodSentence;
+  }
   return message || 'the draft did not come back';
 }

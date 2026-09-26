@@ -132,7 +132,7 @@ export function ConstructionGeneralInfo({
         {/* Auxiliary cards carry no fit and no category — the same gate the CLASSIFICATION block
             applied. У aux-карты классификацию задаёт AUXILIARY TYPE в шапке; скрывается ТОЛЬКО
             строка фактов, значение `categoryId` остаётся в форме и раунд-трипится. */}
-        {!isAux && <StyleFacts categoryPath={facts.categoryPath ?? ''} />}
+        {!isAux && <StyleFacts categoryPath={facts.categoryPath ?? ''} readOnly={readOnly} />}
         <div className='min-w-0' data-c19-field-cell='silhouette'>
           <DetailTextField
             detailKey='silhouette'
@@ -225,7 +225,14 @@ function FieldLabel({ htmlFor, children }: { htmlFor?: string; children: ReactNo
  * факт, и именно его ждёт минимум мудборда) или пока посадки у вещи нет, иначе `fit`. Где нарисовано
  * поле — знает карта шагов.
  */
-function StyleFacts({ categoryPath }: { categoryPath: string }): JSX.Element {
+function StyleFacts({
+  categoryPath,
+  readOnly,
+}: {
+  categoryPath: string;
+  /** Без права записи пилюля `drafted` глухая (фиксап раунда 2, MIN-5). */
+  readOnly: boolean;
+}): JSX.Element {
   const { control } = useFormContext<TechCardFormData>();
   const fit = ((useWatch({ control, name: 'fit' }) as string | null | undefined) ?? '').trim();
   const categoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
@@ -237,6 +244,8 @@ function StyleFacts({ categoryPath }: { categoryPath: string }): JSX.Element {
     <div
       className='flex min-w-0 flex-wrap items-end gap-x-8 gap-y-3 sm:col-span-2'
       data-c19-facts=''
+      // Посадка здесь — факт, не поле: принятие с клавиатуры ведёт фокус к двери в CARD DETAILS.
+      data-drafted-scope=''
     >
       {fitShown && (
         <div className='min-w-0 space-y-1.5' data-c19-field='fit'>
@@ -253,6 +262,7 @@ function StyleFacts({ categoryPath }: { categoryPath: string }): JSX.Element {
             </DraftedField>
             <DraftedPill
               live={fitDrafted}
+              disabled={readOnly}
               onAccept={() => draftedApi.acceptKey(draftedKey.fit)}
               data-c19-drafted='fit'
             />
@@ -362,6 +372,7 @@ function DetailTextField({
         {/* Легенда рамки — и есть «принять» этого поля (фиксап M3). */}
         <DraftedPill
           live={drafted}
+          disabled={readOnly}
           onAccept={() => draftedApi.acceptKey(key)}
           data-c19-drafted={detailKey}
           className='absolute -top-2 right-2 bg-bgColor'

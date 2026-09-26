@@ -1,3 +1,4 @@
+import { techCardBomSectionOptions } from 'constants/filter';
 import { z } from 'zod';
 
 import { bomPurposeLabel, UNSET_PURPOSE } from '../../bom-purpose-labels';
@@ -261,7 +262,27 @@ export type ProposalRow = {
   current: string;
   state: ProposalState;
   write: ProposalWrite;
+  /**
+   * ЗАПИСАТЬ КАК ЕСТЬ НЕЛЬЗЯ — не хватает ответа человека (фиксап раунда 2, MIN-11). Сейчас одна
+   * причина: `section` — у строки спецификации нет секции, которую сервер примет. Такая строка не
+   * пишется сама (`autoFillPlan`), стоит в «TO DECIDE» с выбором секции и берётся только с ним.
+   */
+  hold?: 'section';
 };
+
+/**
+ * СЕКЦИИ, В КОТОРЫХ ЧЕРНОВИК ПИШЕТ СТРОКУ САМ — те, что предлагает сама вкладка BOM
+ * (`techCardBomSectionOptions`). Секцию, которую модель назвала непонятно, сервер разбора отдаёт
+ * как `TECH_CARD_BOM_SECTION_UNKNOWN`, а сохранение карточки со строкой в UNKNOWN он отвергает
+ * ЦЕЛИКОМ (`bom_items[i].section`, dto/techcard.go `parseTechCardBomItems`) — вместе со всем
+ * остальным, что черновик записал. `OTHER` сервер принимает, но вкладка BOM его не предлагает и не
+ * показывает, поэтому «прочее» тоже ждёт выбора человека, а не пишется молча.
+ */
+const DRAFT_SECTIONS: ReadonlySet<string> = new Set(techCardBomSectionOptions.map((o) => o.value));
+
+export function isDraftSection(section?: string | null): boolean {
+  return DRAFT_SECTIONS.has(normText(section));
+}
 
 /**
  * ПРЕДЛОЖЕННАЯ ДЕТАЛЬ ФЛЭТ-ВЕРСТАКА (r3 п.6) — ИМЯ БУДУЩЕГО СЛОТА, А НЕ ЗНАЧЕНИЕ ПОЛЯ.
@@ -579,7 +600,8 @@ export function diffProposal(
     const key = foldToken(name);
     if (seenBom.has(key)) continue;
     seenBom.add(key);
-    const section = normText(b.section);
+    // Секция, которую сервер не примет, в строку не едет вовсе — строка ждёт выбора (`hold`).
+    const section = isDraftSection(b.section) ? normText(b.section) : '';
     const purpose = normText(b.purpose);
     const kind = normText(b.kind);
     const composition = normText(b.composition);
@@ -605,6 +627,7 @@ export function diffProposal(
         .join(' · '),
       current: '',
       state: knownBom.has(key) ? 'same' : 'add',
+      ...(section ? {} : { hold: 'section' as const }),
       write: {
         kind: 'bom',
         line: {

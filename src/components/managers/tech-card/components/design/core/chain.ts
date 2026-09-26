@@ -224,23 +224,38 @@ export function stepOfField(path: string): StepId | null {
  * Returns false when nobody claimed the request — the field's step is already on screen or the
  * path is unknown — and then only scrolls. Pass a path, not a step: the map stays the one place
  * that knows where a field lives.
+ *
+ * ⚠ A HIDDEN ANCHOR (round-2 fix-up, MIN-6). The anchor can be in the DOM and not on screen — the
+ * moodboard folds DESCRIPTION away with its board. The event is therefore dispatched ON the anchor
+ * when there is one, exactly as `revealField` does, and bubbles: the fold around it opens, and the
+ * composer on `document` still hears it. An anchor that stays hidden a few frames — nobody folded
+ * it open — yields to `fallback`; before, it was found first on every frame, and the fallback was
+ * never tried at all.
  */
 export function openStepOf(path: string, fallback?: string): boolean {
   if (typeof document === 'undefined') return false;
+  const anchor = () => document.querySelector<HTMLElement>(`[data-field="${CSS.escape(path)}"]`);
+  const spare = () => (fallback ? document.querySelector<HTMLElement>(fallback) : null);
+  const shown = (el: HTMLElement | null): el is HTMLElement =>
+    !!el && el.getClientRects().length > 0;
   const ask = new CustomEvent<FieldRevealDetail>(FIELD_REVEAL_EVENT, {
     bubbles: true,
     cancelable: true,
     detail: { path },
   });
-  const claimed = !document.dispatchEvent(ask);
-  const find = () =>
-    document.querySelector<HTMLElement>(`[data-field="${CSS.escape(path)}"]`) ??
-    (fallback ? document.querySelector<HTMLElement>(fallback) : null);
+  const claimed = !(anchor() ?? document).dispatchEvent(ask);
   let left = 90;
+  let hiddenFrames = 0;
   const tick = (): void => {
-    const el = find();
-    if (el && el.getClientRects().length > 0) {
+    const el = anchor();
+    if (shown(el)) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    // No anchor — the fallback stands in for it, as it always did. A hidden one waits for its fold.
+    const alt = spare();
+    if ((!el || ++hiddenFrames > 12) && shown(alt)) {
+      alt.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
     if (--left > 0) requestAnimationFrame(tick);
@@ -555,12 +570,19 @@ export function stepDone(id: StepId, ctx: ChainCtx): boolean {
  * `nextUp`, says it on FABRIC RENDER after FLAT DONE). A garment without a print is still a
  * garment: the chain's next link after the flat is the render, and the pattern is a place one may
  * go, not the place one is sent. `nearestBlock` skips optional steps for the same reason.
+ *
+ * ⚠ A DONE FLAT PASSES THE MOODBOARD FOR THE QUEUE (round-2 fix-up, MIN-4 — D-13''). The minimum
+ * is the flat's entrance, and it grew stricter (picture AND 40 characters AND category): an older
+ * card that already HAS its flats may not meet it. Sending that card back to MOODBOARD as «next» —
+ * and opening it there (`defaultStep`) — would pull it behind work it has done. The moodboard is
+ * still not `done` (its cell and the flat's GENERATE keep the minimum); it is only not «next».
  */
 export function nextUp(ctx: ChainCtx): StepId | null {
   for (const s of STEPS) {
     if (s.id === ctx.now) continue;
     if (s.optional) continue;
     if (stepDone(s.id, ctx)) continue;
+    if (s.id === 'mood' && stepDone('flat', ctx)) continue;
     const g = chainGate(s.id, ctx);
     if (g.ok || g.own) return s.id;
   }
@@ -605,10 +627,16 @@ export type NearestBlock = {
  * The nearest obstacle — the first NON-optional link that refuses over something not fixable on
  * its own step. Optional steps are skipped, not repaired; `own` refusals are open steps, not
  * obstacles. Null means the bar under the rail is not drawn at all.
+ *
+ * ⚠ A DONE STEP IS NEVER LOCKED (round-2 fix-up, MIN-4 — D-13''). Its cell already reads `done`
+ * (`stepState` checks done first); a bar under the rail saying «LOCKED · flat» over flats that
+ * exist contradicts it. The gate still refuses what it guards — a NEW paid run (the flat's
+ * GENERATE asks `moodMinimumGate` itself) and progress into a step that is not done yet.
  */
 export function nearestBlock(ctx: ChainCtx): NearestBlock | null {
   for (const s of STEPS) {
     if (s.optional) continue;
+    if (stepDone(s.id, ctx)) continue;
     const g = chainGate(s.id, ctx);
     if (!g.ok && !g.own) {
       return { stepId: s.id, why: g.reason, door: g.door ?? null, doors: g.doors ?? [] };

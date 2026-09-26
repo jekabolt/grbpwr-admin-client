@@ -698,7 +698,12 @@ function SlotRow({
       <td data-align='left' className='w-[90px] align-top' data-b16-from={index}>
         {/* ОТКУДА СТРОКА — синяя `drafted`, пока строка черновика не просмотрена; пусто иначе.
             Пилюля — и есть «принять» этой строки (фиксап M3). */}
-        <DraftedPill live={drafted} onAccept={() => onEdited(line)} data-provenance='drafted' />
+        <DraftedPill
+          live={drafted}
+          disabled={readOnly}
+          onAccept={() => onEdited(line)}
+          data-provenance='drafted'
+        />
       </td>
       <td className='w-[110px] align-top'>
         <div className='flex items-start justify-end gap-1'>

@@ -140,12 +140,17 @@ export function DraftedProvider({
  *
  * «После правки» — значение на уходе отличается от значения на входе. Фокус и уход без правки
  * ничего не принимают: взгляд на поле ещё не просмотр, для этого есть `accept all N ▸`.
+ *
+ * ⚠ «ОТЛИЧАЕТСЯ» — ЕЩЁ НЕ «ПРАВИЛ ЧЕЛОВЕК» (фиксап раунда 2, MIN-7). Поле могло стоять в фокусе,
+ * пока ответ прогона переписал его: значение на уходе другое, а человек не нажал ни клавиши. Такой
+ * уход принял бы черновое слово без единого взгляда. Поэтому на уходе в поле НЕ должно стоять
+ * подсвеченное черновое слово (`isLive`): правка человека его гасит, запись черновика — нет.
  */
 export function useAcceptOnEdit(
   key: DraftedKey,
   value: string | null | undefined,
 ): { onFocus: () => void; onBlur: () => void } {
-  const { acceptKey } = useDrafted();
+  const { acceptKey, isLive } = useDrafted();
   const at = useRef<string | null>(null);
   const now = value ?? '';
   return {
@@ -155,7 +160,7 @@ export function useAcceptOnEdit(
     onBlur: () => {
       const was = at.current;
       at.current = null;
-      if (was !== null && was !== now) acceptKey(key);
+      if (was !== null && was !== now && !isLive(key, now)) acceptKey(key);
     },
   };
 }

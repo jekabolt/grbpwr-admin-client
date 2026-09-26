@@ -92,6 +92,19 @@ export type Fill = {
    * адресу (`mergeFill` берёт `next` целиком, кроме `before`) снова ждут взгляда человека.
    */
   accepted?: boolean;
+  /**
+   * ЗАПИСЬ — ЖЕСТ ЧЕЛОВЕКА «restore previous ↶», А НЕ СЛОВО ЧЕРНОВИКА (фиксап раунда 2, BLK-1).
+   * `after` — его прежние слова, `before` — то, что стояло до возврата (правленый им черновик), и
+   * `✕` возвращает это. `undo all` её не трогает: она не отменяет черновик, она его уже отменила.
+   */
+  restore?: true;
+  /**
+   * ЗАПИСЬ ЧЕРНОВИКА, КОТОРУЮ ВОЗВРАТ ЗАМЕНИЛ, — только у `restore` (`restoreFill`). `✕` возврата
+   * ставит её на место (`unrestoredFill`): после отмены возврата журнал ровно тот, что был до него,
+   * и `restore previous ↶` снова на экране. Без неё отмена возврата стёрла бы прежние слова второй
+   * раз — тем самым путём, который возврат и закрывает.
+   */
+  prior?: { after: string; at: string };
 };
 
 export function fillIdOf(target: FillTarget): string {
@@ -219,11 +232,37 @@ export function fillIdOfSlot(slotId: number): string {
 }
 
 /**
+ * ЗАПИСЬ ДЕРЖИТ СЛОВА ЧЕЛОВЕКА (фиксап раунда 2, BLK-1): скаляр, у которого до черновика стоял
+ * текст. С фиксапа M1 черновик переписывает и написанное рукой, и тогда `before` — ЕДИНСТВЕННОЕ
+ * место, где эти слова ещё живут: на карточке уже черновик (или правленый черновик), автосейв его
+ * сохранил. Такую запись нельзя ни выбросить, ни отрезать потолком хранилища.
+ *
+ * Возврат (`restore`) слов не держит: его `before` — черновик, который человек сам отставил.
+ */
+export function holdsWords(f: Fill): boolean {
+  const t = f.target.kind;
+  return (
+    !f.restore && (t === 'detail' || t === 'fit' || t === 'concept') && normText(f.before) !== ''
+  );
+}
+
+/** Прежние слова уже стоят в поле — человек вернул их сам (набрал заново, вставил). */
+function wordsBack(f: Fill, form: FormSnapshot): boolean {
+  return currentOf(f.target, form) === normText(f.before);
+}
+
+/**
  * ПРИНЯТИЕ ОДНОЙ ЗАПИСИ ПО ЖИВОЙ ФОРМЕ. Живая запись получает флаг `accepted` (откат остаётся);
  * НЕ живая — это уже слова человека (он поправил поле или удалил строку), и держать её незачем:
- * `undo` её всё равно не коснётся, а localStorage копил бы мусор. Слот верстака — исключение:
- * его запись несёт имя минта (`mintedAs`), по которому переименованный слот узнаётся, поэтому
- * он только помечается и никогда не выбрасывается отсюда.
+ * `undo` её всё равно не коснётся, а localStorage копил бы мусор. Два исключения — записи, которые
+ * только помечаются и никогда не выбрасываются отсюда:
+ *   · слот верстака: его запись несёт имя минта (`mintedAs`), по которому переименованный слот
+ *     узнаётся;
+ *   · запись со словами человека (`holdsWords`, фиксап раунда 2, BLK-1): человек написал «H»,
+ *     черновик переписал его на «D», человек поправил «D». Выбросив запись на уходе из поля, мы
+ *     стёрли бы «H» навсегда — на карточке его уже нет. Она остаётся, принятой, и WRITTEN
+ *     предлагает `restore previous ↶` (`restorable`). Выбрасывается, только когда «H» снова
+ *     стоит в поле: беречь больше нечего.
  */
 export function acceptPlan(
   fills: Fill[],
@@ -234,7 +273,11 @@ export function acceptPlan(
   const drop: string[] = [];
   for (const f of fills) {
     if (!ids.has(f.id)) continue;
-    if (f.target.kind === 'detailSlot' || isLive(f, form)) {
+    if (
+      f.target.kind === 'detailSlot' ||
+      isLive(f, form) ||
+      (holdsWords(f) && !wordsBack(f, form))
+    ) {
       if (!f.accepted) accept.push(f.id);
     } else {
       drop.push(f.id);
@@ -243,50 +286,69 @@ export function acceptPlan(
   return { accept, drop };
 }
 
+/**
+ * ЧТО МОЖНО ВЕРНУТЬ — записи со словами человека, чей текст на карточке уже другой (фиксап раунда
+ * 2, BLK-1). `✕` у них нет (запись не живая: откат поверх правки стёр бы и правку), и `undo all` их
+ * не трогает; вместо этого WRITTEN даёт каждой `restore previous ↶` — явный возврат прежних слов,
+ * который сам ложится в журнал (`restoreFill`) и отменяется своим `✕` (`unrestoredFill`). Слова,
+ * которые уже стоят в поле, вернуть нельзя — там нечего возвращать.
+ */
+export function restorable(fills: Fill[], form: FormSnapshot): Fill[] {
+  return fills.filter((f) => holdsWords(f) && !isLive(f, form) && !wordsBack(f, form));
+}
+
+/**
+ * ЗАПИСЬ ВОЗВРАТА (BLK-1): в поле встают прежние слова (`after`), стоявшее перед возвратом уходит в
+ * `before` — `✕` вернёт его. Принята сразу: это слова человека, рамки «drafted» у них нет. Запись
+ * черновика, которую возврат заменяет по адресу, едет с ним (`prior`).
+ */
+export function restoreFill(f: Fill, current: string, at: string): Fill {
+  return {
+    id: f.id,
+    target: f.target,
+    label: f.label,
+    before: current,
+    after: f.before,
+    at,
+    accepted: true,
+    restore: true,
+    prior: { after: f.after, at: f.at },
+  };
+}
+
+/** Что встаёт в журнал по `✕` возврата — запись черновика, какой она была до него (или ничего). */
+export function unrestoredFill(f: Fill): Fill | null {
+  if (!f.restore || !f.prior) return null;
+  return {
+    id: f.id,
+    target: f.target,
+    label: f.label,
+    before: f.after,
+    after: f.prior.after,
+    at: f.prior.at,
+    accepted: true,
+  };
+}
+
 /* ─── САМ ЗАКОН ────────────────────────────────────────────────────────────────────────────── */
 
 /**
- * ЧТО СЕЙЧАС ОТКРЫТО РЕШЕНИЮ — чтение НА РЕНДЕРЕ, против живого журнала. Само-заполнение после
- * прогона с фиксапа волны идёт по `autoFillPlan` ниже (пишет всё, кроме поправленного после
- * нажатия); здесь остаётся вопрос экрана: какие строки ждут клика человека. Это замены, у которых
- * на карточке стоит НЕ живая запись машины: слова, поправленные после нажатия, и поле, которое
- * человек переписал поверх черновика позже (строка предлагает вернуть черновое).
+ * ЧТО СЕЙЧАС ОТКРЫТО РЕШЕНИЮ — чтение НА РЕНДЕРЕ, против живой формы (фиксап раунда 2, MIN-3).
  *
- * `write` — то, что считается своим:
- *   · `add` — адресат ПУСТ. Заполнить пустое нечем навредить;
- *   · `replace`, у которого стоящее значение — ЖИВАЯ СОБСТВЕННАЯ ЗАПИСЬ прошлого прогона. Это
- *     слова машины, а не человека, и переписать их значит уточнить свой же черновик. `before`
- *     при этом СОХРАНЯЕТСЯ от первой записи (см. `mergeFill`), поэтому откат ведёт к состоянию
- *     ДО черновика, а не к предыдущему черновику: у человека одна отмена, а не лестница.
+ * С фиксапа M1 само-заполнение (`autoFillPlan` ниже) пишет всё, что может, и записанное СРАЗУ
+ * читается `same`. Значит, строка, которая на рендере НЕ `same`, — это предложение, которого на
+ * карточке нет, и прятать его нельзя: прогон оплачен. Сюда приходят:
+ *   · поле, поправленное после нажатия GENERATE (`heldBack`), — `replace`, а если его очистили,
+ *     пока ответ летел, — `add`;
+ *   · предложение, которое писатель не принял (описание длиннее поля; строка спецификации без
+ *     секции, `hold`);
+ *   · запись, которую человек потом снял `✕` / `undo all` или переписал поверх черновика.
  *
- * `decide` — остаётся строкой на органе:
- *   · `replace`, где стоит написанное ЧЕЛОВЕКОМ. Один клик, его.
- *
- * `same` не попадает никуда: писать нечего, решать нечего.
- *
- * ⚠ СТРОКА СПЕЦИФИКАЦИИ НИКОГДА НЕ БЫВАЕТ `replace` (список только добавляет), поэтому её
- * безадресность (`targetOfRow → null`) не может увести живое заполнение в «решить»: до этой
- * ветки доходят только скаляры.
+ * Прежде здесь стоял `fillPlan` с двумя ответами, и `add` считался «записанным» всегда — строка,
+ * которую само-заполнение НЕ написало, исчезала с экрана вместе с оплаченным предложением.
  */
-export function fillPlan(
-  rows: ProposalRow[],
-  fills: Fill[],
-): { write: ProposalRow[]; decide: ProposalRow[] } {
-  const byId = new Map(fills.map((f) => [f.id, f]));
-  const write: ProposalRow[] = [];
-  const decide: ProposalRow[] = [];
-  for (const row of rows) {
-    if (row.state === 'same') continue;
-    if (row.state === 'add') {
-      write.push(row);
-      continue;
-    }
-    const target = targetOfRow(row);
-    const own = target ? byId.get(fillIdOf(target)) : undefined;
-    if (own && normText(own.after) === normText(row.current)) write.push(row);
-    else decide.push(row);
-  }
-  return { write, decide };
+export function openToDecide(rows: ProposalRow[]): ProposalRow[] {
+  return rows.filter((row) => row.state !== 'same');
 }
 
 /**
@@ -296,8 +358,9 @@ export function fillPlan(
  * стоящее значение (`replace`) — чьё бы оно ни было. Журнал держит `before`, пометка «drafted»
  * показывает, что именно переписано, `undo all` возвращает всё разом.
  *
- * `decide` — одно исключение: адресат, который человек поправил ПОСЛЕ нажатия GENERATE, пока ответ
- * летел (`heldBack`). Его свежие слова машина не затирает; строка ждёт его клика в «TO DECIDE».
+ * `decide` — адресат, который человек поправил ПОСЛЕ нажатия GENERATE, пока ответ летел
+ * (`heldBack`): его свежие слова машина не затирает, строка ждёт его клика в «TO DECIDE». И строка,
+ * которую нельзя записать как есть (`hold`: спецификация без секции — ждёт, пока её выберут).
  *
  * `same` не попадает никуда. Строка спецификации (`bom`) адреса до рождения не имеет и
  * «поправленной после нажатия» быть не может — она только добавляется.
@@ -311,7 +374,9 @@ export function autoFillPlan(
   for (const row of rows) {
     if (row.state === 'same') continue;
     const target = targetOfRow(row);
-    if (target && heldBack(target)) decide.push(row);
+    // Строка, которую писатель принять не может (спецификация без секции, `hold`), не пишется
+    // вовсе: сервер отверг бы из-за неё ВСЁ сохранение карточки (фиксап раунда 2, MIN-11).
+    if (row.hold || (target && heldBack(target))) decide.push(row);
     else write.push(row);
   }
   return { write, decide };
@@ -328,6 +393,7 @@ export function autoFillPlan(
  * «Своё ли слово переписано» — `before` новой записи равен `after` прежней.
  */
 export function mergeFill(prev: Fill | undefined, next: Fill): Fill {
-  if (!prev || normText(prev.after) !== normText(next.before)) return next;
+  // Возврат (`restore`) — слова ЧЕЛОВЕКА: черновик, переписавший их, пишет свой `before` — их же.
+  if (!prev || prev.restore || normText(prev.after) !== normText(next.before)) return next;
   return { ...next, before: prev.before };
 }

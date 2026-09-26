@@ -451,6 +451,8 @@ function AspectRow({
       {...intake.regionHandlers}
       className='border-b border-hairline py-3'
       data-c19-aspect={aspectKey}
+      // Пилюля стоит у ярлыка, вне рамки поля: принятие с клавиатуры ведёт фокус в поле этого ряда.
+      data-drafted-scope=''
     >
       {/* ЯРЛЫК, А НЕ ЗНАЧЕНИЕ (п.8): метрика подписи поля — 10px, капслок, серый. Имя созданного
           аспекта не правится, и строка это показывает собой. */}

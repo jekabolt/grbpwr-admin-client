@@ -22,6 +22,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * записи из `GetCurrentAccount`, тот же запрос, что держит права). Пока учётная запись не известна,
  * читается умолчание и ничего не пишется. Ключ без имени (первая редакция волны) переезжает к
  * первой учётной записи, которая его прочтёт, и удаляется.
+ *
+ * Жест, сделанный ДО ответа `GetCurrentAccount` (фиксап раунда 2, MIN-8), не теряется: он стоит на
+ * экране сразу и уезжает под ключ пришедшей учётной записи — поверх того, что под ним лежало. Прежде
+ * приход ключа перечитывал хранилище и молча откатывал только что свёрнутую панель.
  */
 export type CalloutsPrefs = {
   /** Ширина раскрытой панели, px (от `lg`; ниже панель стоит под доской во всю ширину). */
@@ -124,9 +128,16 @@ export function useCalloutsPrefs() {
     key,
     prefs: readCalloutsPrefs(key),
   }));
+  /**
+   * Жесты, сделанные, пока учётная запись не известна (MIN-8). Приход ПЕРВОГО ключа кладёт их поверх
+   * прочитанного — на экран в том же рендере, в хранилище эффектом ниже. Смена одной учётной записи
+   * на другую их не несёт: там ключ был и раньше, и жест принадлежал ему.
+   */
+  const keyless = useRef<CalloutsPrefs | null>(null);
   let current = slot;
   if (slot.key !== key) {
-    current = { key, prefs: readCalloutsPrefs(key) };
+    const carried = slot.key === null && key ? keyless.current : null;
+    current = { key, prefs: { ...readCalloutsPrefs(key), ...carried } };
     setSlot(current);
   }
 
@@ -160,6 +171,17 @@ export function useCalloutsPrefs() {
     };
   }, [flush]);
 
+  // Ключ пришёл — несохранённые жесты без ключа уезжают под него тем же дебаунсом, что и прочие.
+  useEffect(() => {
+    const carried = keyless.current;
+    if (!key || !carried) return;
+    keyless.current = null;
+    if (pending.current && pending.current.key !== key) flush();
+    pending.current = { key, patch: { ...carried, ...pending.current?.patch } };
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(flush, WRITE_DELAY_MS);
+  }, [key, flush]);
+
   const set = useCallback(
     (patch: CalloutsPrefs) => {
       // Побочные эффекты — вне апдейтера: StrictMode зовёт апдейтеры дважды.
@@ -168,8 +190,10 @@ export function useCalloutsPrefs() {
         pending.current = { key, patch: { ...pending.current?.patch, ...patch } };
         if (timer.current) clearTimeout(timer.current);
         timer.current = setTimeout(flush, WRITE_DELAY_MS);
+      } else {
+        // Учётная запись ещё не известна — жест действует на экране и ждёт ключа (MIN-8).
+        keyless.current = { ...keyless.current, ...patch };
       }
-      // Учётная запись ещё не известна — жест действует на экране, но не пишется никуда.
       setSlot((cur) => ({ key: cur.key, prefs: { ...cur.prefs, ...patch } }));
     },
     [flush, key],

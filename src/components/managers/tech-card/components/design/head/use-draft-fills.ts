@@ -2,7 +2,7 @@ import { useLayoutEffect } from 'react';
 import { create } from 'zustand';
 
 import type { ProposedColourway, ProposedSlotColour } from '../colourway-proposals-model';
-import { fillIdOf, mergeFill, type Fill, type FillTarget } from './draft-fills';
+import { fillIdOf, holdsWords, mergeFill, type Fill, type FillTarget } from './draft-fills';
 
 /**
  * ПАМЯТЬ ЧЕРНОВИКА — ЖУРНАЛ ЗАПОЛНЕНИЙ И ПРЕДЛОЖЕННЫЕ КОЛОРВЕИ, ПЕРЕЖИВАЮЩИЕ СМЕНУ ВКЛАДКИ.
@@ -84,12 +84,15 @@ const MAX_STORED = 120;
 /**
  * ЧТО УХОДИТ В ХРАНИЛИЩЕ, КОГДА ЖУРНАЛ ДЛИННЕЕ ПОТОЛКА. НЕ принятые записи — ВСЕ, даже сверх
  * потолка: это пометки на экране, и отрезать хоть одну значило бы молча снять рамку и её откат после
- * F5 (ревью Codex, P1). Потолок режет только принятые — остаток места отдаётся новейшим из них.
- * Порядок журнала сохраняется. Память сеанса не режется вовсе.
+ * F5 (ревью Codex, P1). Записи со словами человека (`holdsWords`, фиксап раунда 2, BLK-1) — тоже
+ * все: принятая такая запись — единственная копия того, что стояло до черновика, и потолок не
+ * вправе её стереть; их не больше, чем скалярных полей у карточки. Потолок режет только прочие
+ * принятые — остаток места отдаётся новейшим из них. Порядок журнала сохраняется. Память сеанса не
+ * режется вовсе.
  */
 export function storedSlice(fills: Fill[], max = MAX_STORED): Fill[] {
   if (fills.length <= max) return fills;
-  const keep = new Set(fills.filter((f) => !f.accepted).map((f) => f.id));
+  const keep = new Set(fills.filter((f) => !f.accepted || holdsWords(f)).map((f) => f.id));
   for (const f of fills) {
     if (keep.size >= max) break;
     if (f.accepted) keep.add(f.id);
@@ -122,6 +125,13 @@ function isStoredFill(x: unknown): x is Fill {
   }
   if (typeof f.at !== 'string') return false;
   if (f.snapshot !== undefined && typeof f.snapshot !== 'string') return false;
+  if (f.restore !== undefined && f.restore !== true) return false;
+  if (f.prior !== undefined) {
+    const p = f.prior as Record<string, unknown> | null;
+    if (!p || typeof p !== 'object' || typeof p.after !== 'string' || typeof p.at !== 'string') {
+      return false;
+    }
+  }
   return f.accepted === undefined || typeof f.accepted === 'boolean';
 }
 
