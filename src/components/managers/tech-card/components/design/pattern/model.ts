@@ -1,14 +1,12 @@
 import type {
   GetDesignBandResponse,
   common_DesignAsset,
-  common_DesignColourRecipe,
   common_DesignPicture,
   common_DesignRun,
 } from 'api/proto-http/admin';
 
 import { ASSETS_PER_CARD_MAX, ASSET_PATTERN, assetLabel, shelfOf } from '../assets/model';
 import { cardOutputRows } from '../bench-kinds';
-import type { Gate } from '../render';
 
 /**
  * ═══ ЧТО ТАКОЕ ПРОГОН РОДА `pattern`, И ЧЕМ ОН НЕ ПОХОЖ НА ДВУХ СОСЕДЕЙ ═══════════════════════
@@ -121,16 +119,19 @@ export function seamWarningOf(run?: common_DesignRun | null): boolean {
  * сервер ловит плитку, которая НЕ заворачивается, и рамку по краю, но не ловит ту, которая
  * заворачивается и всё равно заметно повторяется. Это судит глаз, и только глаз.
  *
- * ⚠ ПОСЛЕДНЯЯ ФРАЗА ПОЧИНЕНА ВМЕСТЕ С J-12, И ЭТО НЕ КОСМЕТИКА. Она звала «посмотреть на 3×3
- * выше» — на сцену снесённого блока TILES. Строка ВИДИМАЯ (подсказка пилюли и тело предупреждения),
- * и указатель на орган, которого нет, читается как поломка экрана. Теперь она называет то, что
- * есть: лицо карточки замощено 2×2, и стык проходит по её середине.
+ * ⚠ ПОСЛЕДНЯЯ ФРАЗА ПОЧИНЕНА ВМЕСТЕ С J-12, И ЕЩЁ РАЗ — С ШАГОМ ТКАНЕЙ (STEP 3, 2026-09-26). Она
+ * звала «посмотреть на 3×3 выше», потом — на «лицо карточки», и оба раза на орган, которого на
+ * экране уже нет: строка ВИДИМАЯ, и указатель в пустоту читается как поломка экрана. Теперь плитка
+ * ткани стоит в карусели LAST FABRICS, и её лицо замощено 2×2 (`TiledFace`) — стык проходит по его
+ * середине. Слово «tile» заменено на «fabric»: свотч слота — тоже ткань, а не только плитка
+ * из фотографии.
  */
 export const SEAM_WORDS =
-  'the server measured this tile’s join and found it visible — a border round the edge, or two ' +
+  'the server measured this fabric’s join and found it visible — a border round the edge, or two ' +
   'sides that do not meet. The picture arrived and is saved, and it was paid for; what it will do ' +
-  'is show a seam every repeat when the cloth is laid out. The card’s face lays the tile out four ' +
-  'times, so the join runs through its middle — look there, and zoom in, before you use it.';
+  'is show a seam every repeat when the cloth is laid out. Its tile in LAST FABRICS lays it out ' +
+  'four times, so the join runs through the middle — look there, and zoom in, before you use it ' +
+  'for a slot.';
 
 /* ─────────────────────────── отказы, которые обязан рисовать экран ─────────────────────────── */
 
@@ -147,11 +148,22 @@ export const SEAM_WORDS =
  */
 export const REFUSAL_ADVICE: Record<string, string> = {
   no_source_picture:
-    'a tile is made out of one picture, and this run named none. Attach a picture above — from the ' +
-    'library or from the clipboard.',
+    'a fabric is extracted from one photograph, and this run named none. Put one into the cell of ' +
+    'IMAGE TO FABRIC — from the library or from the clipboard.',
   one_source_picture:
-    'a tile is made out of EXACTLY one picture — two swatches glued together cannot be made to ' +
-    'join to themselves. Leave one attached above.',
+    'a fabric is extracted from EXACTLY one photograph — two swatches glued together cannot be ' +
+    'made to join to themselves. Leave one in the cell.',
+  /* ─── три отказа свотча слота (режим `swatch`, STEP 3) ─── */
+  no_colour:
+    'a swatch is dyed from the colour it is given, and this run carried none. Pick a Pantone on ' +
+    'the row and generate again.',
+  one_texture_picture:
+    'a swatch takes at most ONE texture picture — the weave and the surface are read from it, ' +
+    'never its colour. Leave one texture on the row.',
+  foreign_bom_line:
+    'the slot this swatch was asked for is not a BOM line of this card any more — it was deleted ' +
+    'or the card changed under the screen. Reload the card, then make the swatch on the slot as ' +
+    'it stands now.',
   provider_model_retired:
     'the image model this route was pointed at no longer exists at the provider. Nothing on this ' +
     'card can fix that: the model is server configuration, and somebody has to point it at a live one.',
@@ -193,127 +205,14 @@ export function patternTwin(
   );
 }
 
-/**
- * ЧЕГО НЕ ХВАТАЕТ, ЧТОБЫ НАЖАТЬ GENERATE — три отказа, в порядке проверки и словами макета.
- *
- *   1. источник: ровно одна картинка (`a repeating tile is made out of exactly one picture`);
- *   2. имя пустое — имя ОБЯЗАТЕЛЬНО и не уезжает к модели: это то, по чему плитку найдут
- *      (`a pattern is found by its name · give it one`);
- *   3. тёзка на полке без регистра (`a pattern called "…" already stands here`).
- *
- * `name` необязателен в подписи ради читателей, которым известен только источник (рельс: там
- * отказ по имени «own» и цепь не запирает); экран передаёт его всегда.
- *
- * ДЕНЕГ В ЭТИХ ВОРОТАХ НЕТ ВОВСЕ, И У ДВУХ СОСЕДЕЙ ТОЖЕ. Здесь стоял отказ по исчерпанному
- * дневному потолку; потолок снесён с обеих сторон провода («убери потолок»), и ворота, которые
- * читали бы его остатки, отказывали бы по факту, которого больше не бывает. ПОЛКА В 40 АССЕТОВ
- * ВОРОТАМИ ТОЖЕ НЕ СЧИТАЕТСЯ: прогон идёт и оплачивается, а плитка падает в «made earlier, not
- * kept», где `keep it` гаснет под своей полосой.
- *
- * ЧИСЛО КАРТИНОК ПРОВЕРЯЕТСЯ ЗДЕСЬ, ХОТЯ ЕГО ПРОВЕРЯЕТ И СЕРВЕР. Это не дубль правила: сервер
- * отвечает `one_source_picture` бесплатно, ДО резервации, — но отвечает он по сети и с задержкой,
- * а человек тем временем уже нажал кнопку с надписью «это стоит денег». Клиентская проверка не
- * заменяет серверную и ничего не гарантирует; она только не даёт нажать заведомо мёртвое.
- */
-export function patternGate(
-  band: GetDesignBandResponse,
-  sourceMediaId: number,
-  name?: string,
-): Gate {
-  if (!sourceMediaId || sourceMediaId <= 0) {
-    return { ok: false, reason: 'a repeating tile is made out of exactly one picture' };
-  }
-  if (name !== undefined) {
-    const nm = name.trim();
-    if (!nm) {
-      return { ok: false, reason: 'a pattern is found by its name · give it one' };
-    }
-    const twin = patternTwin(band, nm);
-    if (twin) {
-      return { ok: false, reason: `a pattern called "${assetLabel(twin)}" already stands here` };
-    }
-  }
-  return { ok: true };
-}
-
-/* ─────────────────────────── цвет, который уезжает к модели ─────────────────────────── */
-
-/**
- * ═══ ЦВЕТ ПЛИТКИ НИ К ЧЕМУ НЕ ОБЯЗЫВАЕТ (владелец, r2 §26) ═════════════════════════════════════
- *
- * Владелец: «выбор цвета, который нас ни к чему не обязывает». Раньше цвет ПЛИТКИ выбирался из
- * КОЛОРВЕЕВ карточки — то есть, чтобы покрасить пробную плитку, надо было сначала завести колорвей,
- * а на момент первых генераций колорвеев у карточки обычно нет вовсе (тот же довод, по которому
- * плитка не привязывается к колорвею при создании, E-1). Цвет теперь — ПАРА СТРОК, ничья: код
- * (пантон или что набрали) и его экранный hex. Ничего на карточке от этого выбора не заводится и
- * ничего не меняется — он живёт ровно один прогон.
- */
-export type PatternColour = {
-  /** Ссылка, как её назвал человек: пантон `18-1248 TCX` или свой номер красильни. */
-  code: string;
-  /** ЭКРАННЫЙ hex — чтобы плитку было видно. Может быть пустым: пантон — это код, а не пиксели. */
-  hex: string;
-};
-
-/**
- * THE COLOUR AS THE RUN CARRIES IT — `params.colour`, the SAME field the render and the recolour
- * state theirs in. The server writes it into every kind's prompt without looking at the kind
- * (`designgen/snapshot.go`: `if c := p.Colour; c != nil { write("colour", colourStatement(c)) }`),
- * and its phrase is `colourway ROSSO — the exact value is #8d3a33`; with no hex the code alone
- * still travels. Nothing else of the recipe is stated: a tile has no cloth list and no colour
- * maps, and an empty list here is an empty list on the wire, not a second spelling.
- *
- * ⚠ ПРИБЛИЗИТЕЛЬНЫЙ HEX В ПЛАТНЫЙ ПРОМПТ НЕ УЕЗЖАЕТ. Свотчи пантонов в этом клиенте — экранное
- * приближение, и так сказано у самого списка (`pantone-swatches.ts`); серверная фраза при этом
- * читается как «the EXACT value is #…». Поэтому hex едет только тогда, когда он настоящий — то
- * есть пришёл с прошлого прогона, где его уже кто-то заявил, — а выбранный по коду пантон едет
- * ОДНИМ КОДОМ. Пустой hex сервер переживает: он печатает то, что названо.
- */
-export function patternColourRecipe(colour: PatternColour): common_DesignColourRecipe {
-  return {
-    source: '',
-    code: colour.code.trim(),
-    hex: colour.hex.trim(),
-    words: '',
-    fabricMediaId: 0,
-    fabrics: [],
-    colourMaps: [],
-  };
-}
-
-/** Ключ цвета для сравнения и дедупликации: код важнее hex, регистр не значит ничего. */
-export function patternColourKey(colour: PatternColour): string {
-  return (colour.code.trim() || colour.hex.trim()).toLowerCase();
-}
-
-/**
- * ═══ НЕДАВНИЕ ЦВЕТА — ИЗ ПРОГОНОВ ЭТОЙ КАРТОЧКИ, А НЕ ИЗ НАСТРОЙКИ ════════════════════════════
- *
- * Владелец: «история использованных последних цветов при генерации». История цвета УЖЕ существует
- * на проводе и ничего заводить под неё не надо: `params.colour` замораживается на прогоне (то же
- * поле читает `render/drafts.ts`, когда засевает рецепт колорвея). Читаются прогоны рода
- * `pattern` ЭТОЙ карточки, новейшие первыми (`band.runs` приходит новейшим вперёд), одинаковые
- * цвета схлопываются, и берётся не больше `max` — ряд историей быть должен, а не свалкой.
- *
- * ⚠ ПРЕДЕЛ ЧЕСТНЫЙ: `band.runs` — ПЕРВАЯ СТРАНИЦА ленты, а не вся история карточки. Цвет, чей
- * прогон с неё уже свалился, в ряду не появится, и это ухудшение против ничего: сегодня ряда нет.
- */
-export function recentPatternColours(band: GetDesignBandResponse, max = 6): PatternColour[] {
-  const out: PatternColour[] = [];
-  const seen = new Set<string>();
-  for (const run of patternRuns(band)) {
-    const c = run.params?.colour;
-    if (!c) continue;
-    const colour: PatternColour = { code: (c.code ?? '').trim(), hex: (c.hex ?? '').trim() };
-    if (!colour.code && !colour.hex) continue;
-    const key = patternColourKey(colour);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(colour);
-    if (out.length >= max) break;
-  }
-  return out;
-}
+/* ═══ `patternGate` И ЦВЕТ «НИЧЕЙ ПАРЫ» СНЕСЕНЫ ВМЕСТЕ С ЭКРАНОМ, КОТОРЫЙ ИХ ЧИТАЛ (STEP 3) ════════
+   Здесь стояли ворота прежнего экрана (источник · ИМЯ · двойник имени) и четыре органа цвета
+   плитки — `PatternColour`, `patternColourRecipe`, `patternColourKey`, `recentPatternColours`
+   (владелец, r2 §26: «цвет, который ни к чему не обязывает»). Экран шага переписан владельцем же
+   (2026-09-26): цвет теперь СВОЙСТВО ПАРЫ (колорвей, слот), имя минтится, а не набирается, и у
+   обоих прогонов свои ворота — `swatchGate` и `imageGate` в `slot-fabrics.ts`. Читателей у
+   снесённого не осталось ни одного; держать их «на будущее» значило бы держать второе правило
+   рядом с первым. */
 
 /* ─────────────────────────── плитка как ассет карточки ─────────────────────────── */
 
@@ -343,24 +242,14 @@ export function recentPatternColours(band: GetDesignBandResponse, max = 6): Patt
  * лице плитки, а не отсутствие записи.
  *
  * `UpsertDesignAsset` С КЛИЕНТА ОСТАЛСЯ ДВУМЯ ГЛАГОЛАМИ, И ОБА — НЕ «СОХРАНИТЬ»: переименование
- * плитки (`rename` на её лице) и легаси-дверь `keep` в полосе «made earlier, not kept», которая
- * подбирает ровно два рода сирот — прогоны без имени в `params` (заморожены до круга 15) и
- * прогоны, упёршиеся в `library_full`. Обе зовут `kind = pattern`, `media_id` плитки и
- * `repeat_mm` ТОГО ПРОГОНА, который её сделал: контракт `DesignPatternParams` прямо говорит, что
- * ассет наследует это число, «чтобы „сгенерировано при 120 мм“ и „положено при 120 мм“ остались
- * одним утверждением об одной ткани, а не двумя, которые разъезжаются».
+ * ткани (`rename` на её плитке в карусели LAST FABRICS) и нижняя половина ячейки IMAGE TO FABRIC
+ * (`+ tile from gallery` — снимок, который УЖЕ плитка, встаёт на полку как есть, без прогона).
+ * Легаси-дверь `keep` в полосе «made earlier, not kept» снята вместе с полосой (STEP 3): у шага одна
+ * история — карусель, а упёршийся в `library_full` прогон теперь не пускают ворота (`swatchGate`,
+ * `imageGate`), вместо того чтобы подбирать его сиротой после оплаты.
  */
 export function patternAssets(band: GetDesignBandResponse): common_DesignAsset[] {
   return (band.assets ?? []).filter((a) => shelfOf(a.kind ?? '') === ASSET_PATTERN);
-}
-
-/** Эта плитка уже лежит на полке? Ищем по медиа: ассет держит `media_id`, а не `picture_id`. */
-export function assetOfMedia(
-  band: GetDesignBandResponse,
-  mediaId: number,
-): common_DesignAsset | undefined {
-  if (!mediaId) return undefined;
-  return patternAssets(band).find((a) => (a.mediaId ?? 0) === mediaId);
 }
 
 /** Есть ли ещё место на полке. Потолок серверный и считается по ВСЕЙ карточке, не по полке. */
@@ -368,20 +257,9 @@ export function shelfIsFull(band: GetDesignBandResponse): boolean {
   return (band.assets ?? []).length >= ASSETS_PER_CARD_MAX;
 }
 
-/**
- * ИМЯ НОВОГО ПАТТЕРНА. Сервер обязывает имя быть непустым и коротким, а промпт ЦИТИРУЕТ ассет по
- * имени — значит «IMG_4471» здесь недопустимо. Считаем по занятым именам, а не по длине полки:
- * удалённый «pattern 2» освобождает своё слово, а занятое чужой строкой не переиспользуется.
- */
-export function nextPatternName(band: GetDesignBandResponse): string {
-  const taken = new Set(
-    (band.assets ?? []).map((a) => (a.name ?? '').trim().toLowerCase()).filter(Boolean),
-  );
-  for (let n = 1; n <= ASSETS_PER_CARD_MAX + 1; n += 1) {
-    if (!taken.has(`pattern ${n}`)) return `pattern ${n}`;
-  }
-  return `pattern ${(band.assets ?? []).length + 1}`;
-}
+/* `nextPatternName` («pattern N») и `assetOfMedia` СНЕСЕНЫ: первое заменено минтом имён шага
+   (`mintSlotName` / `mintFabricName`, `slot-fabrics.ts`), второе читала только полоса «made
+   earlier, not kept», которой больше нет (одна история на шаге — карусель LAST FABRICS). */
 
 /* ─────────────────────────── раппорт ─────────────────────────── */
 

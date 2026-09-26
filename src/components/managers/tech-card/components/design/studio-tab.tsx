@@ -32,7 +32,7 @@ import { MaterialSlots } from './material-slots';
 import { MoodBoard } from './mood-board';
 import { OnModelStudio } from './onmodel';
 import { PlaygroundStudio } from './playground';
-import { PatternStudio } from './pattern';
+import { PatternStudio, clothSlots } from './pattern';
 import { DraftedProvider } from './head/drafted-provider';
 import { useStudioKindSwitch } from './history-recall';
 import { PictureGalleryProvider } from './picture-tile';
@@ -166,6 +166,16 @@ export function StudioTab({
   const { control } = useFormContext<TechCardFormData>();
   const purpose = useWatch({ control, name: 'purpose' }) as string | undefined;
   const isAux = purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
+  /* ═══ СЛОТЫ ТКАНИ — ОДНО ЧТЕНИЕ `bomItems` НА ВСЮ СТУДИЮ (STEP 3) ══════════════════════════════
+     Шаг PATTERN рисует ряд на каждую пару (колорвей, слот ткани), а FABRIC RENDER засевает ткани
+     колорвея из тех же пар — значит оба экрана обязаны читать ОДИН список слотов, и читает его
+     композитор, раздавая массив пропом (`slots`). Второй `useWatch` в экране развёл бы их о том,
+     какие у изделия ткани, на первой же несохранённой правке строки.
+     `compute` + глубокое сравнение внутри `useWatch`: студия перерисовывается, только когда слоты
+     изменились ПО СМЫСЛУ (имя, состав, назначение, сохранённый id), а не на каждую правку нормы
+     расхода или строки ниток. Форма здесь только ЧИТАЕТСЯ: писатель `bomItems` — корневой
+     `setValue`, и `useFieldArray` над ним один (вкладка BOM). */
+  const cloth = useWatch({ control, name: 'bomItems', compute: (lines) => clothSlots(lines) });
   const { canWrite } = usePermissions();
   const canWriteCard = canWrite(SECTION.techCards);
 
@@ -192,8 +202,7 @@ export function StudioTab({
      его писатель развёл бы правило «replace, не трогая `tab`/`step`» на две редакции. */
   const addressedTab = params.get('tab');
   const askedColorway = addressedTab === 'studio' ? Number(params.get('colorway')) : NaN;
-  const deepLinkColorway =
-    Number.isFinite(askedColorway) && askedColorway > 0 ? askedColorway : 0;
+  const deepLinkColorway = Number.isFinite(askedColorway) && askedColorway > 0 ? askedColorway : 0;
   const dropColorwayParam = useCallback(() => {
     setParams(
       (prev) => {
@@ -506,23 +515,26 @@ export function StudioTab({
                         />
                       </>
                     )}
-                    {/* ═══ STEP 3 · PATTERN — the screen plus the SHARED run history, as on every
-                        generative step, and not for symmetry: `GenerationHistory` mounts
-                        `useRunPolling`, the one place a live run is re-read from; without it
-                        «making a tile…» would stand forever. No colourway picker here (E-1: «в MAKE
-                        A PATTERN оставь только имя убери колорвей»); the history opens on its own
-                        kind (J-12) and closed (E-21). */}
+                    {/* ═══ STEP 3 · PATTERN — a fabric swatch for every colourway and slot, and IMAGE
+                        TO FABRIC with its carousel (owner, 2026-09-26). The SHARED run history is
+                        NOT mounted here any more: the step's one history is its LAST FABRICS
+                        carousel (review B5), and the one thing the history block did for this
+                        step — `useRunPolling`, so «making the fabric…» ever ends — the screen now
+                        mounts itself. It draws EVERY colourway at once, so it takes the list and
+                        not the selected one; the axis stays this file's (`useColorwayChoice`).
+                        `onGoTab` is withheld on an auxiliary card: it has no colourways tab, and
+                        a door there would bounce straight back. */}
                     {step === 'pattern' && (
-                      <>
-                        <PatternStudio band={band} techCardId={techCardId} disabled={readOnly} />
-                        <GenerationHistory
-                          band={band}
-                          techCardId={techCardId}
-                          disabled={readOnly}
-                          defaultRep='pattern'
-                          defaultOpen={false}
-                        />
-                      </>
+                      <PatternStudio
+                        band={band}
+                        techCardId={techCardId}
+                        disabled={readOnly}
+                        colorways={colorway.colorways}
+                        slots={cloth.slots}
+                        unsavedSlots={cloth.unsavedCount}
+                        onGoTab={isAux ? undefined : (tab) => navTo(tab)}
+                        onGoStep={goStep}
+                      />
                     )}
                     {/* ═══ STEP 4 · FABRIC RENDER.
 
@@ -639,11 +651,7 @@ export function StudioTab({
                         is wired on this server» and names the keys. */}
                     {step === 'playground' && (
                       <>
-                        <PlaygroundStudio
-                          band={band}
-                          techCardId={techCardId}
-                          disabled={readOnly}
-                        />
+                        <PlaygroundStudio band={band} techCardId={techCardId} disabled={readOnly} />
                         <GenerationHistory
                           band={band}
                           techCardId={techCardId}
@@ -731,7 +739,10 @@ export function ArtifactsTab({
             пустого экрана значило бы звать человека к органу, которого нет. Ждёт эта заглушка
             ровно одного — сохранённой карточки: пластины живут в её медиа, а у несохранённой
             карточки медиа некуда положить. */}
-        <Section title='artifacts' question='— the pictures of this card, and the sheet the factory prints'>
+        <Section
+          title='artifacts'
+          question='— the pictures of this card, and the sheet the factory prints'
+        >
           <Text variant='inactive' size='control'>
             Save this tech card first — pictures are kept on a card that exists.
           </Text>

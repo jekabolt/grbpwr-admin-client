@@ -1,60 +1,24 @@
 import { cn } from 'lib/utility';
 import type { JSX, ReactNode } from 'react';
-import { Button } from 'ui/components/button';
+import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 
-import { InertDoor } from '../bench-slot';
-import { type DesignKind } from '../bench-kinds';
-import { stepOfKind } from '../core/chain';
-import { studioSwitchSolo, useStudioSwitchAvailable } from '../history-recall';
-import { LockBar } from '../render/generate-row';
+import { BENCH_CELL_PX } from '../bench-slot';
+import { useElapsed } from '../generation';
+
+/* ═══ `LockLine` И `GoToStep` СНЕСЕНЫ ВМЕСТЕ С ПОЛКОЙ, КОТОРАЯ ИХ ЗВАЛА (STEP 3) ═══════════════════
+   Оба стояли ровно в одном месте — в полосе «made earlier, not kept» (`pattern-library.tsx`):
+   замок полной полки с дверью на FABRIC RENDER. Полосы нет (одна история на шаге — карусель), а
+   двери шага на соседние экраны теперь пропсы композитора (`onGoStep`, `onGoTab`): писатель
+   `?step=` один, и это `goStep` в `studio-tab.tsx`. Экспорт без читателя — обещание, за которое
+   никто не платит. */
 
 /**
- * THE LOCK BAR AS THE RAIL SPELLS IT: the word LOCKED in bold, the reason in label grey, the door
- * at the right edge — the prototype's `lockBar`, composed over the band's `LockBar` exactly the way
- * `chain-rail.tsx` composes it, so the two bars on one screen read as one organ. A refusal is
- * never spoken as a button's `title` alone.
- */
-export function LockLine({
-  reason,
-  children,
-  ...rest
-}: {
-  reason: string;
-  children?: ReactNode;
-  [k: string]: unknown;
-}): JSX.Element {
-  return (
-    <LockBar>
-      <Text
-        size='micro'
-        variant='uppercase'
-        tracking='label'
-        component='span'
-        className='font-bold'
-      >
-        locked
-      </Text>
-      <Text
-        size='micro'
-        variant='label'
-        component='span'
-        className='min-w-0 flex-1 normal-case'
-        {...rest}
-      >
-        {reason}
-      </Text>
-      {children}
-    </LockBar>
-  );
-}
-
-/**
- * THE PATTERN STEP'S LOCAL ORGANS — three small printers this screen needs and the core does not
- * yet carry. Each is written once here and used by every file of this folder; none holds state or
- * reads the wire. ⚠ ALL THREE ASK TO LIVE IN `core/`: the colour tile of FABRIC RENDER and the
- * detached ON MODEL draw the same corner labels and the same «go to step» door, and a second copy
- * there would part from this one silently. The core is frozen in this round, so they stand here.
+ * THE PATTERN STEP'S LOCAL ORGANS — the small printers this screen needs and the core does not
+ * yet carry: a corner label, the 2×2 face of a repeat, the cell geometry and the hole of a live
+ * run. Each is written once here and used by every file of this folder; none reads the wire.
+ * ⚠ THE FIRST TWO ASK TO LIVE IN `core/`: the colour tile of FABRIC RENDER and the detached ON
+ * MODEL draw the same corner labels, and a second copy there would part from this one silently.
  */
 
 /**
@@ -142,47 +106,48 @@ export function TiledFace({ url, alt }: { url: string; alt: string }): JSX.Eleme
 }
 
 /**
- * A DOOR TO ANOTHER STEP OF THE STUDIO — `FABRIC RENDER ›` under an empty colour grid, under an
- * unbound tile, on a full shelf. It goes through the studio's own switch registry
- * (`useStudioKindSwitch`, the door history recall already uses), so the ONE writer of `?step=`
- * stays the studio; this file writes no address. When no studio has registered (a bandless card,
- * a screen mounted alone) the door is inert WITH its reason rather than absent: a missing door
- * teaches «there is no such step».
+ * ═══ ЯЧЕЙКА ТКАНИ — 138 × 162, ТА ЖЕ КОРОБКА, ЧТО У ФЛЭТ-СЛОТА И У ЯЧЕЙКИ IMAGE TO FABRIC ═══════
+ *
+ * Отношение СНАРУЖИ рамки: элементы, которые его носят (`PictureTile`, `Placeholder`), держат рамку
+ * на себе и `box-sizing: border-box`, поэтому 138 в ширину дают ровно 162 в высоту. Числа
+ * берутся у верстака (`BENCH_CELL_PX` + подвал 24), а не пишутся второй раз: «того же размера, что
+ * ячейки FLAT SLOTS» — это замер, который владелец проверяет глазами (r2 п.25).
  */
-export function GoToStep({
-  kind,
-  label,
+export const FABRIC_CELL_ASPECT = `${BENCH_CELL_PX}/${BENCH_CELL_PX + 24}`;
+
+/**
+ * THE HOLE OF A LIVE RUN — the shape of the answer, standing where the answer will land. A screen
+ * that does not change after the click reads as «nothing happened», and the next thing a person
+ * does is pay twice. Its own component because of the hook: `useElapsed` ticks once a second and
+ * must redraw one cell, not every tiled face around it.
+ *
+ * Слово — серое (`label`), а не цвет плейсхолдера: «идёт прогон» — это состояние, которое читают,
+ * а `#ccc` в этой админке только для рамок и пустоты.
+ */
+export function PendingTile({
+  startedAt,
+  label = 'making the fabric…',
+  aspect = FABRIC_CELL_ASPECT,
   className,
-  techCardId,
 }: {
-  kind: DesignKind;
+  startedAt?: string | null;
   label?: string;
+  aspect?: string;
   className?: string;
-  /** The card whose studio registered the switch — the registry is keyed by card. */
-  techCardId: number;
 }): JSX.Element {
-  const registered = useStudioSwitchAvailable(techCardId);
-  const available = registered || studioSwitchSolo() != null;
-  const step = stepOfKind(kind);
-  const text = label ?? `${step.label} ›`;
-  if (!available) {
-    return (
-      <InertDoor
-        label={text}
-        reason='the studio has not registered its rail here, so this door has nowhere to lead'
-        className={className}
-      />
-    );
-  }
+  const elapsed = useElapsed(startedAt ?? undefined);
   return (
-    <Button
-      variant='secondary'
-      size='xs'
-      className={className}
-      data-go-step={step.id}
-      onClick={() => studioSwitchSolo()?.go(kind)}
-    >
-      {text}
-    </Button>
+    <div data-pattern-pending='' className={cn('w-full', className)}>
+      <Placeholder dashed style={{ aspectRatio: aspect }} className='w-full px-2'>
+        <span className='flex flex-col items-center gap-0.5 text-center'>
+          <Text size='micro' variant='label' component='span' className='normal-case'>
+            {label}
+          </Text>
+          <Text size='nano' variant='label' component='span'>
+            {elapsed || '0:00'}
+          </Text>
+        </span>
+      </Placeholder>
+    </div>
   );
 }

@@ -1,85 +1,82 @@
 /**
- * THE PATTERN VIEW OF THE DESIGN BAND — «pattern creation», K-13.
+ * THE PATTERN VIEW OF THE DESIGN BAND — STEP 3, «a fabric swatch for every colourway and slot».
  *
- * `PatternStudio` is the whole of the view, and since round 19 it is ONE `Section` titled
- * `patterns`: hand it the band and it draws the maker row (frame · name · GENERATE), a hairline,
- * and the grid the answers land in. `PatternInput` and `PatternLibrary` are its two halves and are
- * exported because two organs underneath have readers outside this folder — `patternOutputs` and
- * `pictureFull` are what ARTIFACTS lists its PATTERNS segment from. They are not meant to be
- * reassembled by hand into the screen the studio already assembles: `PatternLibrary` in particular
- * no longer carries a `Section` of its own, so mounting it alone yields a body with no head.
+ * `PatternStudio` is the whole of the view: ONE `Section` with a `GroupLabel` per colourway, a row
+ * per cloth slot (BOM roll-goods line) under it, and the IMAGE TO FABRIC group with the one history
+ * of the step — the LAST FABRICS carousel — at the end. Hand it the band, the composer's colourways
+ * and the composer's cloth slots (`clothSlots` over `bomItems`, read ONCE in `studio-tab.tsx`).
  *
- * ONE READ, ONE WRITE, plus two the band already owns. The read is the band's own `useDesignBand`,
- * passed in as a prop and never called a second time here. The write is `StartDesignRun`.
- * The two borrowed ones are the band's own seams: the mark «chosen»
- * (`useDesignWrites().setPictureSelected`) and the card's asset shelf
- * (`useAssetWrites().upsertAsset`).
+ * ONE READ, TWO WRITES, plus the shelf's own. The read is the band's `useDesignBand`, passed in as
+ * a prop and never called a second time here. The writes are `StartDesignRun` (a swatch for a pair,
+ * or a fabric out of a photograph) and `SetDesignAssetBinding` (`use for ▸` in the carousel). The
+ * shelf's own are `UpsertDesignAsset` (rename; a picture that is already a tile) and
+ * `DeleteDesignAsset`.
  *
- * ⚠ NEITHER OF THOSE TWO IS THE SAVE PATH, and the header that said otherwise has been corrected
- * (see `pattern-library.tsx`). A named pattern run files its own `design_asset{kind:pattern}` on
- * the server, inside the transaction that closes the run (`keepPatternTx`), which is what makes it
- * visible to FABRIC RENDER. `upsertAsset` from this folder means `rename`, or the legacy `keep`
- * door that adopts tiles from runs frozen before round 15 and runs that hit `library_full`.
+ * ⚠ NONE OF THEM IS THE SAVE PATH OF A SWATCH. A run made for a pair files its own
+ * `design_asset{kind:pattern}` on the server, inside the transaction that closes the run
+ * (`keepPatternTx`), AND makes it the fabric of that pair (the binding upsert) — which is what makes
+ * it the cloth of FABRIC RENDER for that colourway. Nothing is written by the client after a run.
+ *
+ * `patternOutputs` and `pictureFull` stay exported for ARTIFACTS (its PATTERNS segment reads them
+ * from `./pattern/model` directly — the index pulls the screen in); the slot model is exported for
+ * the composer and for FABRIC RENDER, which seeds its cloths from the same bindings.
  */
-export { PatternStudio } from './pattern-studio';
+export { PatternStudio, type PatternStudioProps } from './pattern-studio';
 export { PatternInput } from './pattern-input';
-/* ═══ `PatternOutputs` И `tile-preview` СНЕСЕНЫ ВМЕСТЕ С БЛОКОМ TILES (J-12) ═══════════════════
-   Владелец: «блок TILES вообще не нужен … можно просто оставить блок PATTERNS OF THIS CARD».
-   Ушли ВСЕ их органы, потому что все они принадлежали снятому блоку и ни у одного не осталось
-   второго читателя: сцена 3×3 (`TileGrid`), линейка (`ScaleStrip`, `SPANS`), полоса плотности
-   ряда SCALE (`ClothSwatchStrip`, `swatchTiles`). Вопрос «оно тайлится?» решается теперь на лице
-   карточки паттерна (плитка 2×2) и в общем просмотрщике до 8×, а дверь `KEEP` переехала в полосу
-   «made earlier, not kept» внутри `pattern-library.tsx` — довод целиком в её шапке. */
-/* `ClothSource` СНЕСЁН ВМЕСТЕ СО СВОИМ ФАЙЛОМ (G-15). Он объяснял СЛОВАМИ, какой из двух
-   источников ткани сейчас действует, потому что связи «этот паттерн — ткань этого цвета» негде
-   было записать: на проводе стоял один `params.colour`, а полка была общей кучей. Связь теперь
-   существует (`SetDesignAssetColorway`) и ПОКАЗЫВАЕТСЯ — рядом `worn by` на плитке библиотеки
-   паттернов и рядом `fabric of` в палитре рендера. Объяснение, заменённое фактом, перестаёт быть
-   объяснением и становится вторым мнением.
-   ⚠ ОДИН КРУГ ЭТА ФРАЗА БЫЛА НЕПРАВДОЙ, И ЭТО СТОИТ ЗАПИСАТЬ: E-15 снял чипы носки, и «показывается»
-   перестало выполняться, пока абзац продолжал на него ссылаться. B-26 (круг 20, владелец: «также
-   что бы во вкладке паттернс мы могли привзать паттерн к колорвею») вернул орган — уже селектом, а
-   не строкой, — и фраза снова описывает экран. Название органа здесь поэтому точное, а не общее. */
-export { PatternLibrary } from './pattern-library';
-/* `WornByChips` И `usePatternColourways` СНЕСЕНЫ (владелец, r3 п.18: «TILES ON THIS CARD: никакой
-   связи с колорвеями»). Разбор — в конце `colourways.tsx`; связь плитки с колорвеем решается на оси
-   колорвеев, а не на экране, где плитку делают. */
-export { PatternColourRow, colourSwatchHex } from './colourways';
-export { CornerLabel, GoToStep, TiledFace } from './organs';
-/* `PatternGate` СНЕСЁН (r3c): его единственной прибавкой к общему `Gate` было поле `door`, а
-   читателя у поля не осталось. Разбор — на его месте в `model.ts`. */
-export type { PatternColour } from './model';
-/* `useStartPatternRun` ЖИЛ ЗДЕСЬ НЕДЕЛЮ И СНЕСЁН. Он минтил СВОЙ ключ идемпотентности по СВОЕМУ
-   отпечатку — то есть держал второй ответ на вопрос «то же ли это нажатие, что и прошлое», а
-   именно на этом вопросе и разъезжается оплаченный дважды прогон. Плитка стартует тем же
-   `useStartDesignRun`, что рендер, перекрас и 3D; параметры собирает вызывающий экран. */
-/* `pickableColourways` И `colourwayHex` СНЕСЕНЫ (волна 2). Записка на их месте обещала, что
-   вкладка COLOURWAYS их заберёт; она их не забрала — свотч колорвея читается там `dev_hex` с
-   фолбэком на словарь (`colourwaySwatchHex` в `colorway-recipe.tsx`), а список «каких колорвеев
-   можно выбрать» на оси колорвеев считает `useColorwayChoice`. Читателей не осталось ни одного,
-   и держать чистую функцию «на будущее» — это ровно тот мёртвый код, о котором записка и
-   предупреждала. */
+/* ═══ `PatternLibrary` И `PatternColourRow` СНЕСЕНЫ ВМЕСТЕ СО СВОИМИ ФАЙЛАМИ (STEP 3, 2026-09-26) ══
+   `pattern-library.tsx` держал две полки («tiles on this card», «made earlier, not kept») и
+   дверь `keep it`; `colourways.tsx` — ряд COLOUR «ничьего» цвета плитки (r2 §26) и
+   `colourSwatchHex`. Экран шага переписан владельцем: цвет — свойство пары (колорвей, слот), полка
+   и история стали одной каруселью (`fabric-carousel.tsx`), а легаси-сироты `keep it` больше не
+   рождаются — полная полка теперь ворота, а не примечание (`swatchGate` / `imageGate`). Читателей
+   у снесённого не осталось ни одного (проверено поиском по `src`). */
+export { CornerLabel, FABRIC_CELL_ASPECT, PendingTile, TiledFace } from './organs';
 export {
   PATTERN,
   REFUSAL_ADVICE,
   REPEAT_MAX,
   SEAM_CODE,
   SEAM_WORDS,
-  assetOfMedia,
-  nextPatternName,
   normaliseRepeat,
   patternAssets,
-  patternColourKey,
-  patternColourRecipe,
-  patternGate,
   patternOutputs,
   patternRuns,
   patternTwin,
   pictureFull,
   pictureThumb,
-  recentPatternColours,
   refusalAdvice,
   repeatOfRun,
   seamWarningOf,
   shelfIsFull,
 } from './model';
+export {
+  READ_ONLY_RUN_REASON,
+  READ_ONLY_SHELF_REASON,
+  SHELF_FULL_REASON,
+  SILENT_SERVER_REASON,
+  SLOT_WORDS_MAX,
+  bindingOf,
+  bindingsOf,
+  boundAsset,
+  boundAssetsByPair,
+  clothSlots,
+  colourIsStated,
+  imageGate,
+  mintFabricName,
+  mintSlotName,
+  pairKey,
+  pairOfRun,
+  pairsOfAsset,
+  recentFabrics,
+  rowColour,
+  slotSuggestions,
+  slotUsage,
+  slotUsageRow,
+  swatchColour,
+  swatchGate,
+  type BomLineLike,
+  type ClothSlot,
+  type ClothSlots,
+  type SlotUsage,
+  type SwatchColour,
+} from './slot-fabrics';
