@@ -371,6 +371,21 @@ export const READ_ONLY_RUN_REASON =
 export const READ_ONLY_SHELF_REASON = 'this card is read-only for you — the fabrics are card data';
 
 /**
+ * ═══ ГОВОРИТ ЛИ СЕРВЕР ПРИВЯЗКАМИ — ОДИН ПРЕДИКАТ НА ОБА БЛОКА ШАГА ═════════════════════════════
+ * `band.assetBindings === undefined` — бинарь старше привязок (контракт: «ABSENT ≠ EMPTY»): у него
+ * нет ни `SetDesignAssetBinding`, ни режима свотча. Блок PATTERN на таком сервере говорит одну серую
+ * строку; блок IMAGE TO FABRIC работает (режим «картинка» — легаси), но гасит `use for ▸` поводом
+ * ниже и не рисует «in render»: надеть ткань на слот там нечем, и сказать «в рендере» — неправда.
+ */
+export function bindingsSpoken(band: GetDesignBandResponse): boolean {
+  return band.assetBindings !== undefined;
+}
+
+/** Повод погашенной `use for ▸` на сервере без привязок (`bindingsSpoken`). */
+export const NO_BINDINGS_REASON =
+  'this server does not know fabric bindings yet — putting a fabric on a slot needs the backend of 2026-09-26 or later';
+
+/**
  * Библиотека пантонов ещё едет, а у названного кода hex пока нет (ревью M-2) — см. `swatchGate`.
  */
 export const PANTONE_LOADING_REASON = 'loading the Pantone list…';

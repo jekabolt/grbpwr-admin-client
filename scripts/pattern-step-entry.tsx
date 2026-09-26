@@ -2,8 +2,9 @@
 //
 // ЗАЧЕМ. Новый экран шага (колорвеи × слоты ткани, IMAGE TO FABRIC, карусель LAST FABRICS с
 // `use for ▸`) собран из десятка органов, и `tsc` зелен при любой их встрече на экране. Этот стенд
-// монтирует НАСТОЯЩИЙ `PatternStudio` так, как его монтирует композитор (`studio-tab.tsx`), и даёт
-// пробе (`pattern-step-probe.mjs`) снять его в браузере: ошибки исполнения и картинки для UX-разбора.
+// монтирует НАСТОЯЩИЕ `PatternStudio` и `ImageToFabricSection` так, как их монтирует композитор
+// (`studio-tab.tsx`): два соседних блока в одном `SectionStack`, с теми же сырыми пропами, — и даёт
+// пробе (`pattern-step-probe.mjs`) снять их в браузере: ошибки исполнения и картинки для UX-разбора.
 //
 // ЧТО НАСТОЯЩЕЕ, ЧТО ПОДМЕНЕНО:
 //   · компоненты, хуки, провайдеры — из репозитория, без правок;
@@ -27,6 +28,7 @@ import type {
 } from 'api/proto-http/admin';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
 import {
+  ImageToFabricSection,
   PatternStudio,
   clothSlots,
   type BomLineLike,
@@ -636,7 +638,9 @@ function CardForm({ bomItems }: { bomItems: BomLineLike[] }): JSX.Element {
 /**
  * Экран шага под теми же провайдерами и тем же чтением, что в `studio-tab.tsx`: слоты — один
  * `useWatch({ compute })` по форме из контекста, полоса — `useDesignBand`, возможность сервера —
- * её `serverSpeaks`, просмотрщик — один `PictureGalleryProvider` на экран.
+ * её `serverSpeaks`, просмотрщик — один `PictureGalleryProvider` на экран. Блоков ДВА, и оба —
+ * прямые дети стека (обёртка `contents`, как `data-step-screen` композитора): PATTERN, затем
+ * IMAGE TO FABRIC, с одними и теми же пропами; опрос полосы поднимает только первый.
  */
 function StepScreen(): JSX.Element {
   const { control } = useFormContext<FormShape>();
@@ -661,6 +665,12 @@ function StepScreen(): JSX.Element {
             unsavedSlots={cloth.unsavedCount}
             onGoTab={(tab) => probe.navigations.push(`tab:${tab}`)}
             onGoStep={(step) => probe.navigations.push(`step:${step}`)}
+          />
+          <ImageToFabricSection
+            band={current}
+            techCardId={TECH_CARD_ID}
+            colorways={shownColourways}
+            slots={cloth.slots}
           />
         </div>
       </PictureGalleryProvider>

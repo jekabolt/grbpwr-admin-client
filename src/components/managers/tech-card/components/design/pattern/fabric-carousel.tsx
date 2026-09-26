@@ -20,6 +20,7 @@ import { PictureTile } from '../picture-tile';
 import { SEAM_WORDS, patternOutputs, refusalAdvice, seamWarningOf } from './model';
 import { CornerLabel, PendingTile, TiledFace } from './organs';
 import {
+  NO_BINDINGS_REASON,
   READ_ONLY_SHELF_REASON,
   SILENT_SERVER_REASON,
   boundAssetsByPair,
@@ -55,11 +56,17 @@ import {
  * без повторов, полный список — в `title`; строка, дословно повторяющая имя плитки, не рисуется —
  * m-D). Угловой ярлык в 80px ширины обрезал адрес до
  * «IN RENDER · R…», то есть не говорил ни того, ни другого.
+ *
+ * НА СЕРВЕРЕ БЕЗ ПРИВЯЗОК (`bindings = false`) КАРУСЕЛЬ ТА ЖЕ, минус то, чего там нет: `use for ▸`
+ * гаснет поводом (`NO_BINDINGS_REASON`), а «in render» и строка пар не рисуются — надеть ткань на
+ * слот такой сервер не умеет, и сказать «она в рендере» было бы неправдой. Зум, `rename` и `✕`
+ * работают: полка старше привязок.
  */
 export function FabricCarousel({
   band,
   techCardId,
   disabled,
+  bindings,
   colorways,
   slots,
   live,
@@ -69,6 +76,8 @@ export function FabricCarousel({
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /** Сервер говорит привязками (`bindingsSpoken`): без них нет ни `use for ▸`, ни «in render». */
+  bindings: boolean;
   /**
    * Колорвеи, которые экран рисует рядами: ось композитора, из архивных — только дошедшие до шага
    * и носящие привязки (архив с одними привязками сюда не доходит — ревью m-5).
@@ -208,6 +217,7 @@ export function FabricCarousel({
               band={band}
               techCardId={techCardId}
               disabled={disabled}
+              bindings={bindings}
               seam={seamByMedia.get(a.mediaId ?? 0) === true}
               wearable={wearable}
               slots={slots}
@@ -270,6 +280,7 @@ function FabricTile({
   band,
   techCardId,
   disabled,
+  bindings,
   seam,
   wearable,
   slots,
@@ -281,6 +292,7 @@ function FabricTile({
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  bindings: boolean;
   seam: boolean;
   wearable: common_AdminColorwayRef[];
   slots: ClothSlot[];
@@ -306,13 +318,13 @@ function FabricTile({
      числом: привязка есть на сервере, и промолчать о ней значило бы удалить её вслепую. */
   const worn = useMemo(
     () =>
-      pairsOfAsset(band, id).map(
+      (bindings ? pairsOfAsset(band, id) : []).map(
         (p) =>
           `${names.cw.get(p.colorwayId) ?? `colourway #${p.colorwayId}`} · ${
             names.slot.get(p.bomItemId) ?? `line #${p.bomItemId}`
           }`,
       ),
-    [band, id, names],
+    [bindings, band, id, names],
   );
   /** Пары словами, без повторов (два слота с одним именем у одного колорвея — одна строка). */
   const wornLine = useMemo(() => [...new Set(worn)].join(', '), [worn]);
@@ -545,6 +557,8 @@ function FabricTile({
       <span data-fabric-use-for={id} className='flex'>
         {writesOff ? (
           <InertDoor label='use for ▸' reason={offReason} />
+        ) : !bindings ? (
+          <InertDoor label='use for ▸' reason={NO_BINDINGS_REASON} />
         ) : branches.length === 0 ? (
           <InertDoor
             label='use for ▸'

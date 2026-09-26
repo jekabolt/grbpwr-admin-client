@@ -153,6 +153,10 @@ export const REFUSAL_ADVICE: Record<string, string> = {
   one_source_picture:
     'a fabric is extracted from EXACTLY one photograph — two swatches glued together cannot be ' +
     'made to join to themselves. Leave one in the cell.',
+  /* Картинка, которую держит другая карточка: сервер до 2026-09-26 берёт источником только свою. */
+  foreign_media:
+    'this picture is held by another tech card — the server of 2026-09-26+ accepts library ' +
+    'pictures as a fabric source; on this server upload it again or pick another.',
   /* ─── три отказа свотча слота (режим `swatch`, STEP 3) ─── */
   no_colour:
     'a swatch is dyed from the colour it is given, and this run carried none. Pick a Pantone on ' +

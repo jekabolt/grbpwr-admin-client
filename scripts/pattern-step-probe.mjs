@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // ПРОБА-СКРИНШОТ ШАГА 3 PATTERN (студия тех-карты, 2026-09-26).
 //
-// Не сторож с порогами, а СТЕНД ДЛЯ ГЛАЗА: он монтирует настоящий `PatternStudio` (точка входа
-// `pattern-step-entry.tsx`) под провайдерами композитора, проводит экран по шести состояниям,
+// Не сторож с порогами, а СТЕНД ДЛЯ ГЛАЗА: он монтирует настоящие `PatternStudio` и
+// `ImageToFabricSection` — два соседних блока шага, как композитор (точка входа
+// `pattern-step-entry.tsx`), — под провайдерами композитора, проводит экран по шести состояниям,
 // снимает каждое в двух ширинах и собирает всё, что страница сказала в консоль. Картинки идут на
 // UX-разбор, консоль — на разбор ошибок исполнения. Падает проба только тогда, когда сценарий не
 // дошёл до своего кадра (экран не отрисовался, дверь не открылась) или страница бросила исключение.
@@ -10,8 +11,10 @@
 // СЦЕНАРИИ (номера — из постановки):
 //   1 empty      — колорвеев нет;
 //   2 no-slots   — колорвеи есть, тканей в BOM нет (только нитки и фурнитура);
-//   3 full       — 2 колорвея × 3 слота, две надетые ткани, живой прогон, IMAGE TO FABRIC и карусель;
-//   4 gate       — полоса без `assetBindings` (бинарь старше привязок);
+//   3 full       — 2 колорвея × 3 слота, две надетые ткани, живой прогон; IMAGE TO FABRIC с каруселью
+//                  — ОТДЕЛЬНЫМ блоком под PATTERN (владелец, с беты), зазор между ними — 24px поля;
+//   4 gate       — полоса без `assetBindings` (бинарь старше привязок): PATTERN — одна строка,
+//                  IMAGE TO FABRIC работает, но `use for ▸` погашен поводом и «in render» нет;
 //   5 pantone    — пикер пантона открыт на ряду ROSSO × outer: полоса оттенков и «from this card»;
 //   6 use-for    — `use for ▸` карусели: шаг 1 (колорвеи), шаг 2 (слоты), и после выбора — ткань
 //                  встала в ячейку пары через `SetDesignAssetBinding` и перечитывание полосы;
@@ -296,7 +299,39 @@ async function mount(page, scenario) {
   await page.evaluate((s) => window.__pattern.mount(s), scenario);
   await page.waitForSelector('[data-probe-state="ready"]', { timeout: 10000 });
   await page.waitForSelector('#design-pattern', { timeout: 10000 });
+  await page.waitForSelector('#design-image-to-fabric', { timeout: 10000 });
   await settle(page);
+}
+
+/**
+ * ДВА БЛОКА — СОСЕДИ, А НЕ ВЛОЖЕННЫЕ: низ PATTERN → верх IMAGE TO FABRIC по вертикали, в пикселях
+ * (ожидается `--spacing-gutter`, 24), и общий ли у них родитель.
+ */
+async function blockSeam(page, entry) {
+  const seam = await page.evaluate(() => {
+    const a = document.getElementById('design-pattern');
+    const b = document.getElementById('design-image-to-fabric');
+    if (!a || !b) return null;
+    const ra = a.getBoundingClientRect();
+    const rb = b.getBoundingClientRect();
+    return {
+      gap: Math.round(rb.top - ra.bottom),
+      siblings: a.parentElement === b.parentElement,
+      nested: a.contains(b) || b.contains(a),
+      order:
+        a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING
+          ? 'pattern → image'
+          : 'image → pattern',
+    };
+  });
+  if (!seam) {
+    entry.notes.push('DIFF шов блоков: одного из блоков нет');
+    return;
+  }
+  const ok = seam.gap === 24 && seam.siblings && !seam.nested && seam.order === 'pattern → image';
+  entry.notes.push(
+    `${ok ? 'ok  ' : 'DIFF'} шов блоков: зазор ${seam.gap}px, соседи ${seam.siblings}, вложены ${seam.nested}, порядок ${seam.order}`,
+  );
 }
 
 async function shoot(page, name, vp, opts = { fullPage: true }) {
@@ -350,7 +385,11 @@ for (const vp of VIEWPORTS) {
       ['надетых тканей в ячейках', '[data-slot-fabric]', 2],
       ['живой прогон в ячейке ROSSO × inner', `${cellOf(11, 2)} [data-pattern-pending]`, 1],
       ['строка «несохранённый слот»', '[data-slots-unsaved="1"]', 1],
-      ['блок IMAGE TO FABRIC', '[data-image-to-fabric]', 1],
+      ['блок IMAGE TO FABRIC — свой Section', 'section#design-image-to-fabric', 1],
+      ['IMAGE TO FABRIC внутри PATTERN', '#design-pattern #design-image-to-fabric', 0],
+      ['карусель в блоке IMAGE TO FABRIC', '#design-image-to-fabric [data-fabric-carousel]', 1],
+      ['карусель внутри PATTERN', '#design-pattern [data-fabric-carousel]', 0],
+      ['строк денег (по одной в шапке каждого блока)', '[data-probe$="run-price"]', 2],
       ['плиток карусели', '[data-fabric-tile]', 3],
       ['живых generate', '[data-slot-generate="live"]', 5],
       // Обе надетые ткани названы ровно своей парой («ROSSO · outer» на ROSSO × outer), и строка,
@@ -358,6 +397,7 @@ for (const vp of VIEWPORTS) {
       ['нано-строк «где в рендере», повторяющих имя (U-5, m-D)', '[data-fabric-worn-by]', 0],
       ['унаследованных цветов на двери (m-3/U-4)', '[data-slot-colour-inherited]', 2],
     ]);
+    await blockSeam(page, entry);
     await shoot(page, '3-full', vp);
     await shoot(page, '3-full-viewport', vp, { fullPage: false });
   });
@@ -368,8 +408,22 @@ for (const vp of VIEWPORTS) {
     await facts(page, entry, [
       ['строка ворот', '[data-pattern-capability="absent"]', 1],
       ['рядов пар', '[data-slot-row]', 0],
-      ['карусели', '[data-fabric-carousel]', 0],
+      // IMAGE TO FABRIC старше привязок и на таком сервере работает: ячейка, дверь, карусель.
+      ['блок IMAGE TO FABRIC', 'section#design-image-to-fabric', 1],
+      ['дверь extract fabric', '[data-image-extract]', 1],
+      ['карусели', '[data-fabric-carousel]', 1],
+      ['плиток карусели', '[data-fabric-tile]', 3],
+      // …но надеть ткань на слот нечем: `use for ▸` погашен поводом, «in render» нет.
+      [
+        'погашенных use for ▸ с поводом «нет привязок»',
+        '[data-fabric-use-for] [data-inert^="this server does not know fabric bindings"]',
+        3,
+      ],
+      ['живых use for ▸', '[data-fabric-use-for] button:not([disabled])', 0],
+      ['ярлыков «in render»', '[data-fabric-worn]', 0],
+      ['нано-строк «где в рендере»', '[data-fabric-worn-by]', 0],
     ]);
+    await blockSeam(page, entry);
     await shoot(page, '4-gate', vp);
   });
 

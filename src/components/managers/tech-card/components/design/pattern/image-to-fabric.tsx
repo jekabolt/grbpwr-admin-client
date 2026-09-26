@@ -1,19 +1,17 @@
 import type {
   GetDesignBandResponse,
   common_AdminColorwayRef,
-  common_DesignRun,
   common_MediaFull,
 } from 'api/proto-http/admin';
 import { useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import Text from 'ui/components/text';
+import { Section } from 'ui/components/section';
 
 import { ASSET_PATTERN } from '../assets/model';
 import { useAssetWrites } from '../assets/use-assets';
 import { InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
-import { GROUP_GAP, Reason } from '../core';
+import { Money, Reason } from '../core';
 import { RunRefusal } from '../render/generate-row';
 import { useStartDesignRun } from '../render/use-design-run';
 import { FabricCarousel } from './fabric-carousel';
@@ -22,11 +20,12 @@ import { PatternInput } from './pattern-input';
 import {
   READ_ONLY_RUN_REASON,
   SILENT_SERVER_REASON,
+  bindingsSpoken,
   imageGate,
   mintFabricName,
   type ClothSlot,
-  type ShelfCeiling,
 } from './slot-fabrics';
+import { usePatternStepView } from './step-view';
 
 /**
  * ═══ IMAGE TO FABRIC — ФОТОГРАФИЯ → БЕСШОВНАЯ ТКАНЬ, И ПОД НЕЙ ИСТОРИЯ ШАГА ═══════════════════
@@ -34,42 +33,58 @@ import {
  * Владелец (2026-09-26): «отдельный блок: загрузить картинку → Image to Fabric; его история — только
  * каруселью последних тканей; ткань из карусели можно назначить любому (колорвей, слот)».
  *
- * ЭТО СЕГОДНЯШНИЙ ПРОГОН ШАГА, ПЕРЕЕХАВШИЙ В СВОЮ ГРУППУ, А НЕ НОВЫЙ: `kind = pattern`, режим
- * пустой (картинка), ровно одна фотография в `extra_input_media_ids`, `colorwayId: 0` — ткань
- * встаёт на полку ничьей и надевается на пары дверью `use for ▸` в карусели. Имя — `fabric N`,
- * минтится (D5): поле NAME снято, переименовывают на плитке.
+ * ═══ СВОЙ БЛОК, А НЕ ГРУППА PATTERN (владелец, с беты: «IMAGE TO FABRIC должно быть отдельным
+ * блоком») ═══════════════════════════════════════════════════════════════════════════════════
+ * Здесь стояла линейка `GroupLabel` внутри `Section` PATTERN — и она читалась ещё одним колорвеем
+ * под последним. Теперь это второй `Section` шага: композитор (`studio-tab.tsx`) ставит его в стек
+ * СЛЕДОМ за `PatternStudio`, и отделяет их 24px серого поля, а не линия (DESIGN.md: блок в блок не
+ * кладут). Карусель LAST FABRICS с `use for ▸` — ЭТОГО блока: это история извлечённых тканей
+ * (а заодно и свотчей пар — ткань карточки одна полка), и её вход — дверь этого блока.
+ *
+ * ПРОПЫ — ТЕ ЖЕ СЫРЫЕ, ЧТО У `PatternStudio`, ИЗ ТЕХ ЖЕ РУК: полоса (одно `useDesignBand`
+ * композитора), колорвеи его оси, слоты его единственного `useWatch`. Всё выведенное из них — какие
+ * колорвеи нарисованы, какие живые прогоны ждут в карусели, чей свотч делается, след последнего
+ * извлечения, потолок полки — считает `usePatternStepView`, та же функция, что у соседа: граница
+ * «ячейка или карусель» проведена в одном месте. ОПРОСА ЗДЕСЬ НЕТ: `useRunPolling` — один на шаг,
+ * у `PatternStudio`, и живой прогон этого блока едет в той же полосе.
+ *
+ * ВОРОТА ПРИВЯЗОК — НЕ ВОРОТА БЛОКА. Режим «картинка» старше привязок, поэтому на сервере без
+ * `assetBindings` блок работает целиком, кроме того, что без привязок не существует: `use for ▸`
+ * гаснет поводом (`NO_BINDINGS_REASON`), «in render» не рисуется (`bindings` карусели).
+ *
+ * ЭТО СЕГОДНЯШНИЙ ПРОГОН ШАГА, А НЕ НОВЫЙ: `kind = pattern`, режим пустой (картинка), ровно одна
+ * фотография в `extra_input_media_ids`, `colorwayId: 0` — ткань встаёт на полку ничьей и
+ * надевается на пары дверью `use for ▸` в карусели. Имя — `fabric N`, минтится (D5): поле NAME
+ * снято, переименовывают на плитке.
  *
  * ГЛАГОЛ ДРУГОЙ, ЧЕМ У РЯДОВ СЛОТОВ, НАМЕРЕННО: `generate` там делает свотч из ЦВЕТА, здесь
  * `extract fabric` вынимает ткань из ФОТОГРАФИИ. Одно слово на два разных прогона читалось бы как
  * одна кнопка, стоящая дважды.
  *
- * ДЕНЕГ НА ЭТОЙ ДВЕРИ НЕ ПИШЕТСЯ: строка денег одна на весь блок и стоит в его шапке.
+ * ДЕНЕГ НА ЭТОЙ ДВЕРИ НЕ ПИШЕТСЯ: строка денег одна на блок и стоит в его шапке — теперь в шапке
+ * ЭТОГО блока, раз он свой (у PATTERN — своя, у его `generate`).
  */
-export function ImageToFabric({
+export type ImageToFabricSectionProps = {
+  band: GetDesignBandResponse;
+  techCardId: number;
+  disabled?: boolean;
+  /** Колорвеи карточки так, как их отдаёт ОДНА ось студии (`useColorwayChoice` композитора). */
+  colorways: common_AdminColorwayRef[];
+  /** Слоты ткани, прочитанные композитором ОДИН раз (`clothSlots` над `bomItems`). */
+  slots: ClothSlot[];
+};
+
+const QUESTION = '— a seamless fabric out of a photograph';
+
+export function ImageToFabricSection({
   band,
   techCardId,
   disabled,
   colorways,
   slots,
-  live,
-  making,
-  failed,
-  ceiling,
-}: {
-  band: GetDesignBandResponse;
-  techCardId: number;
-  disabled?: boolean;
-  colorways: common_AdminColorwayRef[];
-  slots: ClothSlot[];
-  /** Живые прогоны без своей ячейки на экране — карусель ставит их первыми. */
-  live: common_DesignRun[];
-  /** Пары (`pairKey`), чей свотч сейчас делается, — пометка «making…» в `use for ▸` (U-6). */
-  making: ReadonlySet<string>;
-  /** Новейший прогон «картинка → ткань», если он кончился без ткани (`runTraces`, ревью M-1). */
-  failed: common_DesignRun | null;
-  /** Потолок полки — один ответ на обе двери шага (`shelfCeiling`, ревью m-2). */
-  ceiling: ShelfCeiling;
-}): JSX.Element {
+}: ImageToFabricSectionProps): JSX.Element {
+  const { shown, unpaired, making, traces, ceiling } = usePatternStepView(band, colorways, slots);
+  const bindings = bindingsSpoken(band);
   const run = useStartDesignRun(techCardId);
   const { upsertAsset } = useAssetWrites(techCardId);
   const speaks = serverSpeaksDesign();
@@ -101,7 +116,7 @@ export function ImageToFabric({
   /**
    * НИЖНЯЯ ПОЛОВИНА ЯЧЕЙКИ: снимок, который УЖЕ плитка, встаёт на полку как есть — `UpsertDesignAsset`
    * с `asset_id = 0`, без прогона и без денег (владелец, 2026-09-07). Имя минтится тем же `fabric N`,
-   * что у прогона рядом: две двери одной группы не называют свои ткани двумя словарями.
+   * что у прогона рядом: две двери одного блока не называют свои ткани двумя словарями.
    * `repeatMm: 0` — «раппорт не назван»: этот снимок никто не мерил.
    */
   const fileFromGallery = (media: common_MediaFull) => {
@@ -164,20 +179,13 @@ export function ImageToFabric({
     });
 
   return (
-    <div data-image-to-fabric='' className='min-w-0'>
-      <GroupLabel
-        flush
-        className={GROUP_GAP}
-        lead={
-          <Text size='micro' variant='label' component='span' className='normal-case'>
-            — a seamless fabric out of a photograph
-          </Text>
-        }
-      >
-        image to fabric
-      </GroupLabel>
-
-      <div className='flex items-start gap-6'>
+    <Section
+      id='design-image-to-fabric'
+      title='image to fabric'
+      question={QUESTION}
+      action={<Money data-probe='image-run-price' />}
+    >
+      <div data-image-to-fabric='' className='flex items-start gap-6'>
         <PatternInput
           source={source}
           onPick={setSource}
@@ -189,7 +197,7 @@ export function ImageToFabric({
         />
         <div className='flex min-w-0 flex-1 flex-col items-start gap-3'>
           {/* THE SAME MEASURE AS THE ROW `generate` (`xs`, final review m-F): the two paid doors of
-              one block are siblings, and the inert door keeps the size of the live one it stands
+              the step are siblings, and the inert door keeps the size of the live one it stands
               in for (F-1), so nothing jumps when the gate opens. */}
           <span data-image-extract={sourceId || 'empty'}>
             {disabled ? (
@@ -228,12 +236,13 @@ export function ImageToFabric({
         band={band}
         techCardId={techCardId}
         disabled={disabled}
-        colorways={colorways}
+        bindings={bindings}
+        colorways={shown}
         slots={slots}
-        live={live}
+        live={unpaired}
         making={making}
-        failed={failed}
+        failed={traces.image}
       />
-    </div>
+    </Section>
   );
 }

@@ -1,10 +1,16 @@
 /**
  * THE PATTERN VIEW OF THE DESIGN BAND — STEP 3, «a fabric swatch for every colourway and slot».
  *
- * `PatternStudio` is the whole of the view: ONE `Section` with a `GroupLabel` per colourway, a row
- * per cloth slot (BOM roll-goods line) under it, and the IMAGE TO FABRIC group with the one history
- * of the step — the LAST FABRICS carousel — at the end. Hand it the band, the composer's colourways
- * and the composer's cloth slots (`clothSlots` over `bomItems`, read ONCE in `studio-tab.tsx`).
+ * The step is TWO SIBLING BLOCKS, mounted one after the other by the composer (`studio-tab.tsx`):
+ *   · `PatternStudio` — ONE `Section` with a `GroupLabel` per colourway and a row per cloth slot
+ *     (BOM roll-goods line) under it. It also mounts the step's ONE `useRunPolling`;
+ *   · `ImageToFabricSection` — its own `Section` (owner, from beta: «IMAGE TO FABRIC должно быть
+ *     отдельным блоком»): a photograph → a seamless fabric, and under it the one history of the
+ *     step, the LAST FABRICS carousel with `use for ▸`.
+ * Hand BOTH the same raw props: the band, the composer's colourways and the composer's cloth slots
+ * (`clothSlots` over `bomItems`, read ONCE in `studio-tab.tsx`). What each derives from them — the
+ * drawn colourways, which live run waits in a cell and which in the carousel — is one function,
+ * `usePatternStepView` (`step-view.ts`).
  *
  * ONE READ, TWO WRITES, plus the shelf's own. The read is the band's `useDesignBand`, passed in as
  * a prop and never called a second time here. The writes are `StartDesignRun` (a swatch for a pair,
@@ -23,7 +29,7 @@
  */
 export { PatternStudio, type PatternStudioProps } from './pattern-studio';
 export { PatternInput } from './pattern-input';
-export { ImageToFabric } from './image-to-fabric';
+export { ImageToFabricSection, type ImageToFabricSectionProps } from './image-to-fabric';
 export { FabricCarousel } from './fabric-carousel';
 /* ═══ `PatternLibrary` И `PatternColourRow` СНЕСЕНЫ ВМЕСТЕ СО СВОИМИ ФАЙЛАМИ (STEP 3, 2026-09-26) ══
    `pattern-library.tsx` держал две полки («tiles on this card», «made earlier, not kept») и
@@ -51,12 +57,14 @@ export {
   shelfIsFull,
 } from './model';
 export {
+  NO_BINDINGS_REASON,
   READ_ONLY_RUN_REASON,
   READ_ONLY_SHELF_REASON,
   SILENT_SERVER_REASON,
   SLOT_WORDS_MAX,
   bindingOf,
   bindingsOf,
+  bindingsSpoken,
   boundAsset,
   boundAssetsByPair,
   clothSlots,

@@ -29,38 +29,35 @@ import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
-import { wireInt } from '../../wire-int';
 import { assetFull, assetLabel, assetThumb } from '../assets/model';
 import { BENCH_CELL_STYLE, InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { archivedRef, colorwayLabel } from '../colorway-picker';
 import { Counter, EmptyState, GROUP_GAP, GROUP_SEAM, Money, Reason } from '../core';
 import { stepById, type StepId } from '../core/chain';
-import { Thumb, isRunLive, useRunPolling } from '../generation';
+import { Thumb, useRunPolling } from '../generation';
 import { PictureTile } from '../picture-tile';
 import { Swatch } from '../render/field-row';
 import { RunRefusal } from '../render/generate-row';
 import { archivedColorwayGate, type Gate } from '../render/model';
 import { useStartDesignRun } from '../render/use-design-run';
-import { ImageToFabric } from './image-to-fabric';
-import { patternRuns, refusalAdvice } from './model';
+import { refusalAdvice } from './model';
 import { CornerLabel, FABRIC_CELL_ASPECT, PendingTile, TiledFace } from './organs';
 import {
   READ_ONLY_RUN_REASON,
+  bindingsSpoken,
   boundAssetsByPair,
   mintSlotName,
   pairKey,
-  pairOfRun,
   rowColour,
   runTraceNote,
-  runTraces,
-  shelfCeiling,
   slotSuggestions,
   slotUsage,
   swatchGate,
   type ClothSlot,
   type ShelfCeiling,
 } from './slot-fabrics';
+import { usePatternStepView } from './step-view';
 
 /**
  * ═══ STEP 3 · PATTERN — ТКАНЬ НА КАЖДУЮ ПАРУ (КОЛОРВЕЙ, СЛОТ) ════════════════════════════════════
@@ -70,7 +67,8 @@ import {
  * по желанию, текстуры; пометить так, чтобы ушло в FABRIC RENDER. Отдельный блок IMAGE TO FABRIC,
  * его история — каруселью. Просто, просторно, без кучи кнопок, одна дверь на глагол».
  *
- * ОДИН `Section`, и его структура — только линейки (`GroupLabel`) и волосяные ряды:
+ * ШАГ — ДВА СОСЕДНИХ БЛОКА В СТЕКЕ КОМПОЗИТОРА, и этот файл — первый из них. Структура его
+ * `Section` — только линейки (`GroupLabel`) и волосяные ряды:
  *
  *   PATTERN — a fabric swatch for every colourway and slot     step 3 · k of n fabrics · money
  *   ■ ROSSO ───────────────────────────────────────────────────────────── 1 of 2 fabrics
@@ -78,9 +76,17 @@ import {
  *                       COLOUR [18-1664 TCX ▾]   [+ texture]   [generate]
  *     ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
  *     [ячейка]          LINING  lining  …
- *   IMAGE TO FABRIC — a seamless fabric out of a photograph ─────────────────────────────────
+ *   ░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 24px серого поля ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+ *   IMAGE TO FABRIC — a seamless fabric out of a photograph                          money
  *     [фото]  [extract fabric]
  *     LAST FABRICS  ‹ ›   [плитка] [плитка] [плитка] …
+ *
+ * ⚠ IMAGE TO FABRIC — СВОЙ `Section` (`ImageToFabricSection`, `image-to-fabric.tsx`), А НЕ ГРУППА
+ * ЭТОГО. Владелец, с беты: «IMAGE TO FABRIC должно быть отдельным блоком». Он и был задуман
+ * отдельным, но стоял линейкой внутри PATTERN — и читался продолжением последнего колорвея. Блок в
+ * блок не кладут (DESIGN.md), поэтому оба смонтированы композитором рядом, и разделяет их не
+ * линия, а 24px серого поля. Что им обоим нужно из полосы, выводит одна функция —
+ * `usePatternStepView` (`step-view.ts`): какой живой прогон ждут в ячейке, а какой в карусели.
  *
  * ═══ ЧТО ЗДЕСЬ СОЗНАТЕЛЬНО НЕ СТОИТ ═══════════════════════════════════════════════════════════
  *   · СТРОКА ДЕНЕГ — ОДНА, в шапке блока, а не у каждого `generate` (ревью, UX-решение): цена
@@ -90,7 +96,9 @@ import {
  *     (посадка прогона пишет привязку в той же транзакции), а прежние достаются из карусели
  *     дверью `use for ▸`. Вторая полоса «made for this slot» была бы второй историей;
  *   · БЛОКА GENERATION HISTORY ПОД ШАГОМ НЕТ: композитор снял его отсюда. Он стоял здесь ради
- *     `useRunPolling` — и опрос теперь поднимает сам этот экран (ниже), без истории;
+ *     `useRunPolling` — и опрос теперь поднимает сам этот экран (ниже), без истории. ОДИН ОПРОС НА
+ *     ШАГ: соседний блок IMAGE TO FABRIC его не зовёт — его живые прогоны едут в той же полосе,
+ *     которую опрашивает этот, а второй опрос удвоил бы чтения без единого нового факта;
  *   · ЗАПИСИ ПОСЛЕ ПРОГОНА НЕТ: пару связывает посадка на сервере, клиент не пишет ничего.
  *
  * ═══ ИНВАРИАНТЫ, КОТОРЫЕ ЭТОТ ФАЙЛ ДЕРЖИТ ════════════════════════════════════════════════════
@@ -109,6 +117,8 @@ import {
  * там нет ни `SetDesignAssetBinding`, ни режима свотча, и рисовать двери по слотам против него
  * значило бы продавать прогоны, которые сядут не туда. Превью Vercel против старого backend-beta —
  * обычный случай такого расхождения, поэтому экран говорит одну серую строку и больше ничего.
+ * Блок IMAGE TO FABRIC рядом на таком сервере работает (режим «картинка» — легаси) и гасит только
+ * `use for ▸` (`bindingsSpoken`, `NO_BINDINGS_REASON`).
  */
 export type PatternStudioProps = {
   band: GetDesignBandResponse;
@@ -146,7 +156,10 @@ export function PatternStudio({
   onGoStep,
 }: PatternStudioProps): JSX.Element {
   /* ОПРОС ПОЛОСЫ, ПОКА ИДЁТ ПРОГОН — здесь, потому что истории под шагом больше нет, а без опроса
-     «making the fabric…» стояло бы вечно. Хук сам молчит, когда живых прогонов нет. */
+     «making the fabric…» стояло бы вечно. Хук сам молчит, когда живых прогонов нет.
+     ОДИН НА ШАГ, И ОН ЗДЕСЬ, ДО ВОРОТ ВОЗМОЖНОСТИ: этот блок смонтирован на шаге всегда (на старом
+     сервере — одной строкой), поэтому живой «картинка → ткань» соседнего IMAGE TO FABRIC кончается
+     и там. Соседний блок опроса не зовёт. */
   useRunPolling(techCardId, band);
   const speaks = serverSpeaksDesign();
   const step = stepById('pattern');
@@ -169,7 +182,7 @@ export function PatternStudio({
     [],
   );
 
-  const capable = band.assetBindings !== undefined;
+  const capable = bindingsSpoken(band);
   const byPair = useMemo(() => boundAssetsByPair(band), [band]);
 
   /* ═══ ПОЛНАЯ БИБЛИОТЕКА ПАНТОНОВ — С ПЕРВОГО КАДРА ШАГА, А НЕ С ПЕРВОГО ОТКРЫТИЯ ПИКЕРА (ревью M-2)
@@ -185,52 +198,16 @@ export function PatternStudio({
   const libraryState = pantoneLibraryState();
   const pantonePending = libraryState === 'idle' || libraryState === 'loading';
 
-  /* ЖИВЫЕ КОЛОРВЕИ; АРХИВНЫЙ — ТОЛЬКО ЕСЛИ ОН ДОШЁЛ ДО ЭКРАНА И ЧТО-ТО НОСИТ. Архивный без
-     привязок — пустая строка «ничего и нельзя», и её не рисуют.
-     ⚠ ЭТО ФИЛЬТР, А НЕ ОБЕЩАНИЕ ПОКАЗАТЬ АРХИВ С ПРИВЯЗКАМИ (ревью m-5). Ось композитора
-     (`useColorwayChoice`) отдаёт архивный колорвей, только пока он цель студии или у него есть
-     рендеры на верстаке; архивный, у которого есть одни привязки, до этого шага НЕ ДОХОДИТ вовсе,
-     и его ткани видны лишь в карусели (ярлык плитки называет такую пару числом). Расширять ось
-     ради этого шага не стали: она одна на всю студию. */
-  const shown = useMemo(() => {
-    const dressed = new Set((band.assetBindings ?? []).map((b) => wireInt(b.colorwayId)));
-    return colorways.filter((c) => {
-      const id = c.colorwayId ?? 0;
-      return id > 0 && (!archivedRef(c) || dressed.has(id));
-    });
-  }, [colorways, band.assetBindings]);
-
-  /* ЖИВЫЕ ПРОГОНЫ: свотч нарисованной пары ждут в её ячейке, всё прочее — первым в карусели.
-     Пара прогона читается с его ПАРАМЕТРОВ (`colorwayId` + `pattern.bomItemId`), а не угадывается.
-     И СЛЕДЫ ПРОГОНОВ, НЕ ДАВШИХ ТКАНИ (ревью M-1, `runTraces`): пары — строкой под рядом,
-     «картинка → ткань» — пунктирной плиткой в голове карусели. */
-  const { liveByPair, unpaired, traces, making } = useMemo(() => {
-    const drawn = new Set<string>();
-    for (const c of shown)
-      for (const s of slots) drawn.add(pairKey(c.colorwayId ?? 0, s.bomItemId));
-    const byPairRun = new Map<string, common_DesignRun>();
-    const rest: common_DesignRun[] = [];
-    for (const r of patternRuns(band).filter(isRunLive)) {
-      const key = pairOfRun(r);
-      if (key && drawn.has(key)) {
-        if (!byPairRun.has(key)) byPairRun.set(key, r);
-      } else rest.push(r);
-    }
-    return {
-      liveByPair: byPairRun,
-      unpaired: rest,
-      traces: runTraces(band, drawn),
-      // Пары, чей свотч сейчас делается, — для «making…» у листа `use for ▸` (U-6).
-      making: new Set(byPairRun.keys()) as ReadonlySet<string>,
-    };
-  }, [band, shown, slots]);
+  /* КОЛОРВЕИ ЭКРАНА, ЖИВЫЕ ПРОГОНЫ ПАР И ИХ СЛЕДЫ, ПОТОЛОК ПОЛКИ — тем же выводом, что у соседнего
+     блока IMAGE TO FABRIC (`usePatternStepView`): свотч нарисованной пары ждут в её ячейке, всё
+     прочее — первым в его карусели, и граница между ними проведена в одном месте. */
+  const { shown, liveByPair, traces, ceiling } = usePatternStepView(band, colorways, slots);
 
   const total = shown.length * slots.length;
   const dressedPairs = shown.reduce(
     (n, c) => n + slots.filter((s) => byPair.has(pairKey(c.colorwayId ?? 0, s.bomItemId))).length,
     0,
   );
-  const ceiling = useMemo(() => shelfCeiling(band), [band]);
 
   const stepPill = (
     <Pill tone='ink' data-step-pill=''>
@@ -242,8 +219,8 @@ export function PatternStudio({
     return (
       <Section id='design-pattern' title='pattern' question={QUESTION} action={stepPill}>
         <Text size='micro' variant='label' component='p' data-pattern-capability='absent'>
-          this server does not know fabric bindings yet — the step needs the backend of 2026-09-26
-          or later
+          this server does not know fabric bindings yet — a fabric per slot needs the backend of
+          2026-09-26 or later
         </Text>
       </Section>
     );
@@ -357,18 +334,6 @@ export function PatternStudio({
           );
         })
       )}
-
-      <ImageToFabric
-        band={band}
-        techCardId={techCardId}
-        disabled={disabled}
-        colorways={shown}
-        slots={slots}
-        live={unpaired}
-        making={making}
-        failed={traces.image}
-        ceiling={ceiling}
-      />
     </Section>
   );
 }

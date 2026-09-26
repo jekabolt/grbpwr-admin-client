@@ -32,7 +32,7 @@ import { MaterialSlots } from './material-slots';
 import { MoodBoard } from './mood-board';
 import { OnModelStudio } from './onmodel';
 import { PlaygroundStudio } from './playground';
-import { PatternStudio, clothSlots } from './pattern';
+import { ImageToFabricSection, PatternStudio, clothSlots } from './pattern';
 import { DraftedProvider } from './head/drafted-provider';
 import { useStudioKindSwitch } from './history-recall';
 import { PictureGalleryProvider } from './picture-tile';
@@ -515,26 +515,40 @@ export function StudioTab({
                         />
                       </>
                     )}
-                    {/* ═══ STEP 3 · PATTERN — a fabric swatch for every colourway and slot, and IMAGE
-                        TO FABRIC with its carousel (owner, 2026-09-26). The SHARED run history is
-                        NOT mounted here any more: the step's one history is its LAST FABRICS
-                        carousel (review B5), and the one thing the history block did for this
-                        step — `useRunPolling`, so «making the fabric…» ever ends — the screen now
-                        mounts itself. It draws EVERY colourway at once, so it takes the list and
-                        not the selected one; the axis stays this file's (`useColorwayChoice`).
-                        `onGoTab` is withheld on an auxiliary card: it has no colourways tab, and
-                        a door there would bounce straight back. */}
+                    {/* ═══ STEP 3 · PATTERN — TWO SIBLING BLOCKS (owner, 2026-09-26; and from beta:
+                        «IMAGE TO FABRIC должно быть отдельным блоком»): PATTERN, a fabric swatch
+                        for every colourway and slot, then IMAGE TO FABRIC with the step's one
+                        history, the LAST FABRICS carousel. Two `Section`s side by side in the
+                        stack, parted by its 24px gutter — never one inside the other. The SHARED
+                        run history is NOT mounted here any more (review B5), and the one thing it
+                        did for this step — `useRunPolling`, so «making the fabric…» ever ends — is
+                        mounted ONCE, by `PatternStudio`; the second block does not poll again.
+                        Both take the same raw props from here (band, the colourway list, the slots
+                        of the one `useWatch`) and derive the rest with one function
+                        (`usePatternStepView`). They draw EVERY colourway at once, so they take the
+                        list and not the selected one; the axis stays this file's
+                        (`useColorwayChoice`). `onGoTab` is withheld on an auxiliary card: it has no
+                        colourways tab, and a door there would bounce straight back. */}
                     {step === 'pattern' && (
-                      <PatternStudio
-                        band={band}
-                        techCardId={techCardId}
-                        disabled={readOnly}
-                        colorways={colorway.colorways}
-                        slots={cloth.slots}
-                        unsavedSlots={cloth.unsavedCount}
-                        onGoTab={isAux ? undefined : (tab) => navTo(tab)}
-                        onGoStep={goStep}
-                      />
+                      <>
+                        <PatternStudio
+                          band={band}
+                          techCardId={techCardId}
+                          disabled={readOnly}
+                          colorways={colorway.colorways}
+                          slots={cloth.slots}
+                          unsavedSlots={cloth.unsavedCount}
+                          onGoTab={isAux ? undefined : (tab) => navTo(tab)}
+                          onGoStep={goStep}
+                        />
+                        <ImageToFabricSection
+                          band={band}
+                          techCardId={techCardId}
+                          disabled={readOnly}
+                          colorways={colorway.colorways}
+                          slots={cloth.slots}
+                        />
+                      </>
                     )}
                     {/* ═══ STEP 4 · FABRIC RENDER.
 
