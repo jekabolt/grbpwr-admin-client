@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { adminService } from 'api/api';
 import type { EnhanceTextField, EnhanceTextMode } from 'api/proto-http/admin';
@@ -26,6 +26,10 @@ import GenericPopover from 'ui/components/popover';
  * ОБЁРТКА ПОЛЯ: родитель делает `relative` и даёт textarea `pb-7`, чтобы последняя строка текста
  * не уезжала под кнопку. `maxRunes` — лимит поля назначения (2000 у DESCRIPTION/WORDS/NOTE): сервер
  * клампит ответ по границе предложения, а не режет посреди слова.
+ *
+ * `disabled` — ПОЛНЫЙ ЗАМОК (ревью CL-D): ни запуска, ни `undo ↶`, и ответ, пришедший в запертое
+ * поле или в поле, текст которого уже не тот, что ушёл на сервер, НЕ ПРИМЕНЯЕТСЯ — иначе FLAT
+ * GENERATE, сохраняющий слова, показал бы после себя слова, которых его прогон не получал.
  */
 export type EnhanceMode = 'improve' | 'expand' | 'shorten';
 
@@ -50,7 +54,7 @@ export type EnhanceRequest = {
 
 export class EnhanceRefusal extends Error {
   constructor(
-    public readonly reason: 'AI_NOT_CONFIGURED' | 'AI_MODEL_UNAVAILABLE' | 'AI_NOT_WIRED' | 'OTHER',
+    public readonly reason: 'AI_NOT_CONFIGURED' | 'AI_MODEL_UNAVAILABLE' | 'OTHER',
     message: string,
   ) {
     super(message);
@@ -144,6 +148,16 @@ export function AiEnhance({
   const [prev, setPrev] = useState<{ before: string; after: string } | null>(null);
   const abort = useRef<AbortController | null>(null);
   const undoTimer = useRef<number | null>(null);
+  // What the field holds and whether the control is open as of the LAST render — the answer lands
+  // renders after the click, and is checked against these, not against the click's own closure.
+  const latest = useRef({ value: value ?? '', disabled: !!disabled });
+  useLayoutEffect(() => {
+    latest.current = { value: value ?? '', disabled: !!disabled };
+  });
+  // A menu left open when the parent locks the control closes with the lock.
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   // Ручная правка после замены снимает откат: возвращать «что было» поверх чужой правки нельзя.
   useEffect(() => {
@@ -163,7 +177,7 @@ export function AiEnhance({
   const run = async (mode: EnhanceMode) => {
     setOpen(false);
     const before = value ?? '';
-    if (!before.trim() || busy) return;
+    if (!before.trim() || busy || disabled) return;
     abort.current?.abort();
     const ctrl = new AbortController();
     abort.current = ctrl;
@@ -171,6 +185,17 @@ export function AiEnhance({
     try {
       const after = await enhanceText({ text: before, mode, field, context, maxRunes }, ctrl.signal);
       if (ctrl.signal.aborted) return;
+      // THE ANSWER IS FOR THE TEXT THAT WAS SENT, INTO A FIELD THAT IS STILL OPEN. A field locked
+      // meanwhile (the card saving what it holds) or edited meanwhile gets nothing: applying would
+      // put words on the screen that the save never got, or write over the operator's typing.
+      const now = latest.current;
+      if (now.disabled || now.value !== before) {
+        showMessage(
+          now.disabled ? 'not applied: field locked' : 'not applied: field changed',
+          'success',
+        );
+        return;
+      }
       const next = after.trim();
       if (!next) {
         showMessage('the model returned nothing — the text is unchanged', 'error');
@@ -188,9 +213,7 @@ export function AiEnhance({
           ? 'AI is off on this server'
           : r === 'AI_MODEL_UNAVAILABLE'
             ? 'the AI model is unavailable right now'
-            : r === 'AI_NOT_WIRED'
-              ? 'AI enhance is not wired yet'
-              : `could not enhance: ${e instanceof Error ? e.message : String(e)}`,
+            : `could not enhance: ${e instanceof Error ? e.message : String(e)}`,
         'error',
       );
     } finally {
@@ -199,7 +222,7 @@ export function AiEnhance({
   };
 
   const undo = () => {
-    if (!prev) return;
+    if (!prev || disabled) return;
     onApply(prev.before);
     setPrev(null);
     if (undoTimer.current) window.clearTimeout(undoTimer.current);
@@ -208,7 +231,7 @@ export function AiEnhance({
   return (
     <div className={cn('absolute bottom-1.5 right-1.5 flex items-center gap-1.5', className)} data-ai-enhance>
       {prev && (
-        <Chip onClick={undo} title='put the previous text back'>
+        <Chip onClick={undo} disabled={disabled} title='put the previous text back'>
           undo ↶
         </Chip>
       )}

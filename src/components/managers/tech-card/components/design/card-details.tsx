@@ -21,7 +21,6 @@ import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import Media from 'ui/components/media';
-import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
 import Select from 'ui/components/select';
@@ -48,7 +47,7 @@ import {
 import { useRoleAssignments } from '../useRoles';
 import { Counter, EmptyState, GROUP_GAP, GROUP_SEAM } from './core';
 import { cardFactsContext } from './core/card-facts';
-import { DraftedField } from './core/drafted-field';
+import { DraftedField, DraftedPill } from './core/drafted-field';
 import { draftedKey, useDrafted } from './drafted-contract';
 import { categoryChain, fitChoicesFor, fitLabel, type FitChoice } from './fit-vocabulary';
 import { LockBar } from './render/generate-row';
@@ -310,9 +309,11 @@ const fitOfItem = (item: string) => (item.startsWith(FIT_ITEM) ? item.slice(FIT_
  * · `— unset —` is how a fit is removed; there is no second control for it.
  * · DRAFTED: the construction draft may have written this value; the frame and the word stand until
  *   the value is edited or accepted (`drafted-contract.ts`). The word sits in the label row — a
- *   22px select has no room for a corner pill. A genuine pick IS the review: it accepts the fit's
- *   journal entry (`acceptKey`), so going back to the drafted value later does not bring the mark
- *   back — the select's own form of `useAcceptOnEdit`, which a text field runs on blur.
+ *   22px select has no room for a corner pill — and it IS the accept control (`DraftedPill`, as
+ *   on every drafted field since CL-B's M3): pressing it accepts the fit's journal entry and
+ *   leaves the value alone. A genuine pick is a review too: it accepts the same entry, so going
+ *   back to the drafted value later does not bring the mark back — the select's own form of
+ *   `useAcceptOnEdit`, which a text field runs on blur.
  * · LOCKED without `products:write`: `UpdateStyle` is authorised by the catalog section, not by
  *   `tech_cards` (Codex M-05), so an edit here would be refused at save. Said in words under the
  *   control, not only in a `title` on a dead select.
@@ -346,7 +347,7 @@ function FitCell({ choices, locked }: { choices: FitChoice[]; locked: boolean })
           >
             <div className='flex items-center justify-between gap-1.5'>
               <FormLabel>fit</FormLabel>
-              {live && <Pill tone='attention'>drafted</Pill>}
+              <DraftedPill live={live} onAccept={() => drafted.acceptKey(draftedKey.fit)} />
             </div>
             <DraftedField live={live} pill={false}>
               <Select
@@ -380,14 +381,17 @@ function FitCell({ choices, locked }: { choices: FitChoice[]; locked: boolean })
 /**
  * AGE GROUP (T01, D-01') — the style's target age group, a style fact beside target gender. Bound
  * to the form field `ageGroup`; written, like FIT, only by the staged `UpdateStyle` in
- * `StyleFactsField` (mask path `age_group`), never by the card's own save.
+ * `StyleFactsField` (mask path `ageGroup`), never by the card's own save.
  *
  * · «— unset —» is offered only where it is TRUE: on a card being created and on a card whose
  *   stored age group is not set. Once a style has one, the server refuses UNKNOWN under the mask,
  *   so an «unset» picked there would fall out of the save without a word — the item is left out
  *   rather than drawn as a lie. A value that is unset right now is always drawn.
  * · A new card proposes adult (`techCardDefaultData`); an existing card shows what it holds.
- * · Locked exactly like FIT, for the same reason: UpdateStyle is `products:write`.
+ * · Locked exactly like FIT, for the same reason: UpdateStyle is `products:write`. A NEW card made
+ *   by such an account shows «— unset —», not a locked «adult»: the proposal is written only for
+ *   products:write (StyleFactsField), so the card would be created without it and reopen unset
+ *   (Codex m2). The field itself is left alone — nothing is dirtied on an account that cannot act.
  */
 function AgeGroupCell({ creating, locked }: { creating: boolean; locked: boolean }) {
   const { control } = useFormContext<TechCardFormData>();
@@ -396,7 +400,10 @@ function AgeGroupCell({ creating, locked }: { creating: boolean; locked: boolean
       control={control}
       name='ageGroup'
       render={({ field }) => {
-        const value = (field.value as string | undefined) || AGE_GROUP_UNSET;
+        const value =
+          creating && locked
+            ? AGE_GROUP_UNSET
+            : (field.value as string | undefined) || AGE_GROUP_UNSET;
         const loaded = (control._defaultValues as Partial<TechCardFormData>).ageGroup;
         const offerUnset = creating || !isAgeGroupSet(loaded) || !isAgeGroupSet(value);
         const items = [
@@ -640,9 +647,16 @@ export function CardDetails({
     [categories, categoryId, isAux],
   );
   const fitShown = fitChoices !== null;
+  // UpdateStyle — the one writer of fit and age group — is `products:write` on the server (Codex
+  // M-05): both cells lock on it.
+  const styleLocked = !canWrite(SECTION.products);
+  // A new card by an account that cannot write the style gets no age group (see AgeGroupCell): the
+  // counter and the ai context read it as the cell shows it — unset.
+  const ageShown = !techCardId && styleLocked ? AGE_GROUP_UNSET : ageGroup;
   const counted = META_FIELDS.filter((key) => key !== 'fit' || fitShown);
   const filled = META_FIELDS.reduce(
-    (n, key, i) => n + (counted.includes(key) && isFilled(key, meta[i]) ? 1 : 0),
+    (n, key, i) =>
+      n + (counted.includes(key) && isFilled(key, key === 'ageGroup' ? ageShown : meta[i]) ? 1 : 0),
     0,
   );
 
@@ -658,9 +672,6 @@ export function CardDetails({
     ...(isAux ? ['aux'] : []),
   ];
   const wc = (cell: string) => (classCells.length === 4 || classCells.indexOf(cell) >= 3 ? W3 : W2);
-  // UpdateStyle — the one writer of fit and age group — is `products:write` on the server (Codex
-  // M-05): both cells lock on it.
-  const styleLocked = !canWrite(SECTION.products);
 
   const categoryPath = categoryChain(categories, categoryId)
     .map((c) => c.name || `#${c.id}`)
@@ -668,7 +679,7 @@ export function CardDetails({
   const noteContext = cardFactsContext({
     categoryPath,
     fit: fitShown ? fitLabel(fit) : '',
-    ageGroup: ageGroupLabel(ageGroup),
+    ageGroup: ageGroupLabel(ageShown),
     concept,
   });
 
