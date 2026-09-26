@@ -1,5 +1,6 @@
-import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useQueryClient, type QueryClient, type QueryFunction } from '@tanstack/react-query';
 import type { GetDesignBandResponse, common_DesignRunParams } from 'api/proto-http/admin';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
@@ -37,7 +38,7 @@ import { useStartRun } from './generation/use-generation';
 import { WhatModelGetsModal } from './modals';
 import { isBoardRow, type BoardItem } from './mood-board';
 import { GenerateRow, LockBar, RunRefusal } from './render/generate-row';
-import { designKeys, serverSpeaksNow, type WriteContext } from './use-design-band';
+import { cardOnScreen, designKeys, serverSpeaksNow, type WriteContext } from './use-design-band';
 import type { CalloutLike } from './render/what-model-gets';
 import { ACTIVE_VIEWS, DETAIL_VIEW, viewLabel } from './views';
 import { materializeWords } from './words-seed';
@@ -174,24 +175,77 @@ function flatSnapshot(
   };
 }
 
+/** Сколько GENERATE ждёт незавершённых записей входа, прежде чем отказать (финальная сверка). */
+const BAND_WRITES_WAIT_MS = 15_000;
+
 /**
- * ЗАПИСИ ПОЛОСЫ ЭТОЙ КАРТОЧКИ ОТВЕТИЛИ (ревью раунда 4, MAJ-1). Каждая запись полосы несёт свою
- * карточку в контексте мутации (`onMutate` → `{ card }`, `use-design-band.ts`); ждём, пока ни одной
- * такой не останется в полёте — ни роли, ни слота, ни переименования.
+ * ЗАПИСЬ, ОТ КОТОРОЙ ЗАВИСИТ ОТПЕЧАТОК: роль референса (`SetDesignReferenceRole`: `mediaId` + `role`)
+ * или имя детали (`SetDesignBenchSlot` с `newDetailName`: переименование и заведение). Ключей у
+ * мутаций полосы нет (`use-design-band.ts`), поэтому запись узнаётся по форме аргументов — и ТОЛЬКО
+ * эти две: черновик идеи, прогон другого рода, плита верстака в промпт флэта не едут, и ждать их —
+ * значит держать GENERATE на «saving…» за чужое (финальная сверка).
  */
-async function bandWritesSettled(qc: QueryClient, card: number): Promise<void> {
+function isDigestWrite(variables: unknown): boolean {
+  if (!variables || typeof variables !== 'object') return false;
+  const v = variables as Record<string, unknown>;
+  return ('mediaId' in v && 'role' in v) || ('slot' in v && v.newDetailName !== undefined);
+}
+
+/**
+ * ЗАПИСИ ВХОДА ЭТОЙ КАРТОЧКИ ОТВЕТИЛИ (ревью раунда 4, MAJ-1): роли и имена деталей, несущие свою
+ * карточку в контексте мутации (`onMutate` → `{ card }`). Не дольше `timeoutMs`: запись, застрявшая
+ * без сети, иначе держала бы GENERATE на «saving…», пока сеть не вернётся. `false` — не дождались.
+ */
+async function bandWritesSettled(
+  qc: QueryClient,
+  card: number,
+  timeoutMs: number,
+): Promise<boolean> {
   const cache = qc.getMutationCache();
   const pendingHere = () =>
     cache
       .findAll({ status: 'pending' })
-      .some((m) => (m.state.context as WriteContext | undefined)?.card === card);
-  if (!pendingHere()) return;
-  await new Promise<void>((resolve) => {
-    const unsubscribe = cache.subscribe(() => {
-      if (pendingHere()) return;
+      .some(
+        (m) =>
+          (m.state.context as WriteContext | undefined)?.card === card &&
+          isDigestWrite(m.state.variables),
+      );
+  if (!pendingHere()) return true;
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let unsubscribe = () => {};
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
       unsubscribe();
-      resolve();
+      window.clearTimeout(timer);
+      resolve(ok);
+    };
+    const timer = window.setTimeout(() => finish(!pendingHere()), timeoutMs);
+    unsubscribe = cache.subscribe(() => {
+      if (!pendingHere()) finish(true);
     });
+  });
+}
+
+/**
+ * ПОЛОСА — СВЕЖИМ ЧТЕНИЕМ, КОТОРОЕ ОБЯЗАНО ДОЙТИ (финальная сверка). `refetchQueries` глотает ошибку
+ * и без сети отвечает сразу, оставляя в кэше старые роли, — отпечаток молча собрался бы из них.
+ * `fetchQuery` ОТКАЗЫВАЕТ: `networkMode: 'always'` — без сети он падает, а не ждёт её; `retry: false`
+ * — отказ сразу, «попробуйте ещё раз» скажет ряд. Описание чтения — ТО ЖЕ, что у экрана: функция
+ * запроса берётся у запроса полосы в кэше (`bandQuery`, `use-design-band.ts`), второе описание
+ * разошлось бы с первым на первом же новом аргументе.
+ */
+async function rereadBand(qc: QueryClient, card: number): Promise<GetDesignBandResponse> {
+  const queryKey = designKeys.band(card);
+  const queryFn = qc.getQueryCache().find({ queryKey, exact: true })?.options.queryFn;
+  if (typeof queryFn !== 'function') throw new Error('the band is not read on this page');
+  return qc.fetchQuery({
+    queryKey,
+    queryFn: queryFn as QueryFunction<GetDesignBandResponse>,
+    staleTime: 0,
+    retry: false,
+    networkMode: 'always',
   });
 }
 
@@ -208,6 +262,7 @@ export function FlatRunRow({
   const speaks = serverSpeaksDesign();
   const qc = useQueryClient();
   const startRun = useStartRun(techCardId);
+  const { showMessage } = useSnackBarStore();
   /* ЧИПЫ — С ЗАПРОСА В ПОЛЁТЕ, если он есть (ревью раунда 3, m2): ряд, вернувшийся после смены шага,
      рисует то, за что уже платят, а не выбор по умолчанию рядом со `starting…`. Пока запрос идёт,
      выбор заперт (`choiceOff`), поэтому локальное состояние с ним не расходится. */
@@ -445,9 +500,21 @@ export function FlatRunRow({
          после потерянного ответа повтор (кэш уже свежий) получил бы другой id — второй платный
          прогон за то же. Поэтому: дождаться записей полосы этой карточки, перечитать полосу и брать
          роли из этого чтения. */
-      await bandWritesSettled(qc, card);
-      await qc.refetchQueries({ queryKey: designKeys.band(card), exact: true });
-      const freshBand = qc.getQueryData<GetDesignBandResponse>(designKeys.band(card));
+      if (!(await bandWritesSettled(qc, card, BAND_WRITES_WAIT_MS))) {
+        if (cardOnScreen(card)) {
+          showMessage('the input is still being saved — try again; nothing was started', 'error');
+        }
+        return;
+      }
+      let freshBand: GetDesignBandResponse | undefined;
+      try {
+        freshBand = await rereadBand(qc, card);
+      } catch {
+        if (cardOnScreen(card)) {
+          showMessage('could not re-read the input — nothing was started; try again', 'error');
+        }
+        return;
+      }
       patchFlatInput(card, { run: 'starting' });
       // Ответ ждётся здесь, а не в наблюдателе ряда: «run started», сброс леджера, отказ сервера и
       // снятие занятости случаются и тогда, когда ряда уже нет (`useStartRun`).
