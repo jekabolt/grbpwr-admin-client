@@ -104,7 +104,7 @@ import { SizeChartField } from './size-chart-field';
 import { StyleFactsField } from './style-facts-field';
 import { STYLE_FACT_KEYS } from './tech-card-options';
 import { TechCardFittings } from './tech-card-fittings';
-import { useTechCardDraft, type DraftStamp } from './useTechCardDraft';
+import { fingerprintOf, useTechCardDraft, type DraftStamp } from './useTechCardDraft';
 import {
   auditOperationPresence,
   contradictsScreen,
@@ -1039,13 +1039,20 @@ export function TechCardForm({
     card: techCard ?? null,
   });
   const claimVersion = () => lockOverride.current ?? base.current.version;
-  // ревью MJ-3: the card a draft is typed on — its version, and its body's fingerprint when this page
-  // holds the card (once per card: every draft write asks).
+  // ревью MJ-3: the card a draft is typed on — its version, and when this page holds the card the
+  // fingerprint of what a restore would put back over it (once per card: every draft write asks): the
+  // body, and the style facts — a style write moves only the version and the facts, and a restore over
+  // it would bring the draft's stale facts back (a season put back re-mints the colourway SKUs).
   const stampCache = useRef<{ card: common_TechCard | null; body?: string }>({ card: null });
   function draftStamp(): DraftStamp {
     const cur = base.current;
     if (cur.card && stampCache.current.card !== cur.card) {
-      stampCache.current = { card: cur.card, body: bodyFingerprint(cur.card, canWriteCosting) };
+      const facts = mapTechCardToForm(cur.card) as unknown as Record<string, unknown>;
+      const style = fingerprintOf(JSON.stringify(STYLE_FACT_KEYS.map((k) => facts[k] ?? null)));
+      stampCache.current = {
+        card: cur.card,
+        body: `${bodyFingerprint(cur.card, canWriteCosting)}~${style}`,
+      };
     }
     return {
       version: cur.version,
@@ -2222,6 +2229,8 @@ export function TechCardForm({
       if (res.techCard) {
         rebaseOnto(res.techCard);
         adopt(res.techCard);
+        // ⌘Z right after «keep mine» must not put the pre-rebase callouts back over theirs.
+        calloutHistory.reset();
       }
       // И САМУ КАРТОЧКУ, А НЕ ТОЛЬКО НОМЕР ВЕРСИИ. Прочитанное здесь — это то, ЧТО лежит на
       // сервере сейчас, и от него зависит не только замок: маппер записи спреадит `original`

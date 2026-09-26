@@ -22,14 +22,17 @@ type StoredDraft = {
   /** Отпечаток набора полей формы на момент записи. Отсутствует у черновиков до этой правки. */
   shape?: string;
   /**
-   * ревью MJ-3: the card this draft was typed on — its version and a fingerprint of its body
-   * (useTechCardAutosave `bodyFingerprint`). A restore over a card whose body moved since asks first.
-   * Absent on a create page's draft and on drafts written before this field.
+   * ревью MJ-3: the card this draft was typed on — its version and a fingerprint of its body and its
+   * style facts (index.tsx `draftStamp`). A restore over a card whose body or facts moved since asks
+   * first. Absent on a create page's draft and on drafts written before this field.
    */
   base?: DraftBase;
 };
 
-/** The card a draft is typed on: its lock version, and its body's fingerprint when the page knows it. */
+/**
+ * The card a draft is typed on: its lock version, and — when the page holds that card — the fingerprint
+ * of what a restore would put back over it (its body and its style facts).
+ */
 export type DraftBase = { version: number; body?: string };
 /** What the page stands on now, for a restore to compare a draft's base with (MJ-3). */
 export type DraftStamp = DraftBase & { updatedAt?: string };
@@ -38,6 +41,16 @@ export type OfferedDraft = { id: string; savedAt: number };
 
 // ревью MJ-2: the newest draft and at most five earlier ones are offered; older ones go on open.
 const MAX_DRAFTS = 6;
+
+/** A short fingerprint of a text (FNV-1a) — for a draft's base; not a secret, not a lock. */
+export function fingerprintOf(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return `${text.length.toString(36)}.${(h >>> 0).toString(36)}`;
+}
 
 // ВЕРСИЯ В КЛЮЧЕ, А НЕ МОЛЧАЛИВОЕ СТИРАНИЕ. Черновик, записанный ДО операционных фотографий, не
 // несёт поля `media` на операциях — восстановленный, он уехал бы командой «сотри все снимки со
@@ -392,13 +405,16 @@ export function useTechCardDraft(
     const sub = form.watch(() =>
       queueMicrotask(() => {
         if (!alive) return;
-        if (!formWorkRef.current()) {
+        if (!formWorkRef.current() && !hasStagedRef.current) {
           // R-6: pristine again — a revert by hand, or a save that left the card quiet — with nothing
           // staged: this session's copy of work the form no longer holds goes, or the next open would
           // offer to «restore» what the operator took back. (mn-3: «pristine» is the form's work.)
-          if (!hasStagedRef.current) clearOwnRef.current();
+          clearOwnRef.current();
           return;
         }
+        // Staged work alone is written too (ревью r4, the mn-3 regression): a panel that keeps its queue
+        // entry across edits — the style facts re-stage only when their SET moves — is heard only here,
+        // and so is a rebase under staged-only work (MJ-1): the draft holds the form as it is now.
         schedule();
       }),
     );
@@ -496,8 +512,9 @@ export function useTechCardDraft(
    * ревью MJ-3: did the card move since this draft was typed on it? A restore puts the WHOLE draft back
    * over the card as it is now — every field the draft carries goes out with the next save — so over a
    * card whose body moved it would silently undo the other editor's work. Null: same card (or only its
-   * version moved, the body did not: a panel, a roll-up). A draft of an older build carries no base:
-   * then the card's update time against the draft's.
+   * version moved — a roll-up, a colourway — with the body and the style facts as they were, and no
+   * panel's snapshot in the draft). A draft of an older build carries no base: then the card's update
+   * time against the draft's.
    */
   const movedSince = (id?: string): { from: number | null; to: number } | null => {
     const chosen = chosenDraft(id);
@@ -506,7 +523,10 @@ export function useTechCardDraft(
     const b = chosen.draft.base;
     if (b) {
       if (b.version >= cur.version) return null;
-      if (b.body && cur.body && b.body === cur.body) return null;
+      // A panel's own write (the size chart, a recipe) moves only the version — its rows are not in the
+      // card this page reads — so a draft that would put a panel's snapshot back asks on any move.
+      const panels = (chosen.draft.staging?.length ?? 0) > 0;
+      if (!panels && b.body && cur.body && b.body === cur.body) return null;
       return { from: b.version, to: cur.version };
     }
     const at = Date.parse(cur.updatedAt ?? '');
