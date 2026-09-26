@@ -4,6 +4,7 @@ import type {
   common_DesignRunParams,
 } from 'api/proto-http/admin';
 
+import { clockStamp } from '../handles';
 import { stampIsSet } from '../visibility';
 import { normaliseViewKey, viewLabel } from '../views';
 
@@ -184,6 +185,58 @@ const OUTCOME_CHIP_MAX = 72;
 export function runOutcomeChip(run: common_DesignRun): string {
   const note = runOutcomeNote(run).replace(/\s+/g, ' ').trim();
   return note.length > OUTCOME_CHIP_MAX ? `${note.slice(0, OUTCOME_CHIP_MAX).trimEnd()}…` : note;
+}
+
+/**
+ * СОСТОЯНИЕ ПРОГОНА — СЛОВОМ, И ТОЛЬКО ПОКА О НЁМ ЕСТЬ ЧТО СКАЗАТЬ (r2 п.22).
+ *
+ * Владелец о ряде пилюль на строке: «RUN 30 · FLAT · DONE — эти все иконки надо убрать». Пилюли
+ * состояния больше нет; `null` здесь означает «прогон кончился ровно так, как его просили» — такая
+ * строка молчит вовсе, о её исходе говорят её же картинки под ней. Все остальные положения
+ * (`running 0:12`, `reserved`, `retrying · CODE`, `cancelling…`, `failed · CODE`, `cancelled`,
+ * `done · 1 of 2` — доставлено меньше, чем просили) остаются словом в мета-строке.
+ *
+ * ⚠ ДВА ЧТЕНИЯ ОДНОГО ИСХОДА (D-4): слово — усечённый `runOutcomeChip` (текст провайдера бывает до
+ * 4 000 знаков и увёл бы страницу вбок), `title` — целый `runOutcomeNote`.
+ *
+ * Lives here, beside the readers it is made of, since 26.09 (O-53): the history row's meta line and
+ * the latest-generation workbench's stamp say a run's state with the same word.
+ */
+export function runStateWord(
+  run: common_DesignRun,
+  elapsed: string,
+): { word: string; note?: string } | null {
+  const status = runStatus(run);
+  const note = runOutcomeNote(run);
+  const chip = runOutcomeChip(run);
+  if (isRunLive(run)) {
+    const failedOnce = !!((run.errorCode ?? '').trim() || (run.lastError ?? '').trim());
+    const word = isCancelling(run)
+      ? 'cancelling…'
+      : status === 'pending' && !failedOnce
+        ? 'reserved'
+        : chip;
+    const clock = status === 'running' || failedOnce ? elapsed : '';
+    return {
+      word: clock ? `${word} ${clock}` : word,
+      note: isCancelling(run) ? undefined : note,
+    };
+  }
+  // «done» без остатка — единственное молчаливое состояние; «done · 1 of 2» это уже недостача.
+  if (status === 'done' && note === 'done') return null;
+  return { word: chip, note };
+}
+
+/**
+ * КТО И КОГДА — `alina · 14:12`, то, по чему строку прогона узнают, раз номер и род с неё сняты
+ * (r2 п.22). The history row and the workbench stamp read it from here; neither prints a price on
+ * it by itself (the row adds its own, the workbench has none — O-37).
+ */
+export function runStamp(run: Pick<common_DesignRun, 'author' | 'createdAt'>): string {
+  return (
+    [(run.author ?? '').trim(), clockStamp(run.createdAt)].filter(Boolean).join(' · ') ||
+    'author not stated'
+  );
 }
 
 /* ⚠ ЗДЕСЬ ЖИЛ `archiveBlockReason`, И ЕГО СНЕСЛИ ПОТОМУ, ЧТО ОН БЫЛ ЗАПРЕТОМ КЛИЕНТА (J-22).
