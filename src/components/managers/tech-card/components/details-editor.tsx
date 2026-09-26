@@ -241,6 +241,9 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
     setPicker(false);
   };
 
+  // O-40: the door (and the picker that replaces it) breathes under the last row's rule.
+  const afterRows = allKeys.length > 0 ? 'mt-4 ' : '';
+
   return (
     /* СВОЯ `Section`; в её `action` — одно предупреждение доски (разбор в шапке файла).
        `data-c19-aspects` — якорь проб, остался на содержимом блока. */
@@ -284,12 +287,16 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
             />
           );
         })}
+        {/* ВОЗДУХ ПОД ПОСЛЕДНЕЙ ЛИНЕЙКОЙ (владелец, 2026-09-26, O-40): «от плейсхолдера + aspect до
+            подчеркивания выше сделай больше гэп». Ряды кончаются волосяной линейкой; дверь и пикер,
+            встающий на её место, отступают от неё на один шаг — только когда над ними есть ряды:
+            в пустом списке дверь остаётся первой строкой под шапкой, без лишнего зазора. */}
         {!picker ? (
           <button
             type='button'
             onClick={() => setPicker(true)}
             data-c19-aspect-add=''
-            className='flex w-full items-center border border-dashed border-borderColor bg-bgColor px-2 py-3 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            className={`${afterRows}flex w-full items-center border border-dashed border-borderColor bg-bgColor px-2 py-3 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor`}
           >
             + aspect
           </button>
@@ -299,7 +306,7 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
              контролов (`Toolbar` — единственная рамка, которой внутри блока можно): словарь, своё
              имя, `add`, `close`. Якорь проб стоит на обёртке: `Toolbar` чужие пропы не пропускает,
              и `data-*` на нём молча терялся бы. */
-          <div data-c19-aspect-picker=''>
+          <div data-c19-aspect-picker='' className={afterRows || undefined}>
             <Toolbar>
               {remainingStandard.length > 0 && (
                 <select
