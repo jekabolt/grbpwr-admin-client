@@ -54,6 +54,14 @@ import GenericPopover from 'ui/components/popover';
  * (закрытие меню — на кнопку или в текст; откат — в текст) или перечитывает. И чип отката фокуса по
  * нажатию не берёт (тоже `onMouseDown` → preventDefault): фокус, пришедший на чип, привёл бы рядом
  * `ai ✦`, ряд прижат вправо — чип уехал бы из-под указателя, и клик пропал бы (замерено стендом).
+ *
+ * РАСШИРИТЕЛЬ ПОЛЯ НЕ НАКРЫВАЕТСЯ (26.09, O-42; владелец: «если у нас есть расширитель блока текста,
+ * кнопка ai не должна наезжать на него»). У textarea без автовысоты (`resize-y`: GENERAL INFORMATION,
+ * WORDS) браузер рисует ручку в правом нижнем углу, 16px. Компонент сам читает `resize` у textarea
+ * поля и у такого поля отступает вправо на ширину ручки (`right: 22px` вместо 6), на той же высоте:
+ * ряд привязан к низу поля, а не к строке текста, и при любой высоте — минимальной или растянутой
+ * рукой — остаётся слева от ручки, в полосе `pb-7`, которую поле держит под ним. Появление и уход
+ * кнопки ряд не двигают: место ряда задано отступами, а не содержимым.
  */
 export type EnhanceMode = 'improve' | 'expand' | 'shorten';
 
@@ -204,6 +212,8 @@ export function AiEnhance({
   const leftOutside = useRef(false);
   /** The menu closed because a mode was chosen — focus goes back to the text, not the button. */
   const pickedMode = useRef(false);
+  /** The field's textarea keeps its resize grip in the corner — the row stands left of it (O-42). */
+  const [resizable, setResizable] = useState(false);
   // What the field holds and whether the control is open as of the LAST render — the answer lands
   // renders after the click, and is checked against these, not against the click's own closure.
   const latest = useRef({ value: value ?? '', disabled: !!disabled });
@@ -220,6 +230,18 @@ export function AiEnhance({
   useEffect(() => {
     if (disabled || empty) setOpen(false);
   }, [disabled, empty]);
+
+  // THE RESIZE GRIP IS NOT COVERED (O-42, owner: «кнопка ai не должна наезжать на расширитель»).
+  // A textarea that keeps its grip (`resize-y`: GENERAL INFORMATION, WORDS; `resize-none` on the
+  // auto-growing ones) draws it in the bottom-right 16px; the row then stands 16px further left,
+  // at the same height, at every height the operator drags the field to — it is anchored to the
+  // field's bottom, not to a line of text. Read when the row is about to be seen: the class is the
+  // caller's and does not change afterwards.
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const ta = root && fieldOf(root).querySelector('textarea');
+    setResizable(!!ta && getComputedStyle(ta).resize !== 'none');
+  }, [shown]);
 
   // Focus is read at the document: the menu lives outside the wrapper, and a field that is
   // already focused when this mounts (a card switch re-keys the control) sends no event.
@@ -358,8 +380,13 @@ export function AiEnhance({
   return (
     <div
       ref={rootRef}
-      className={cn('absolute bottom-1.5 right-1.5 flex items-center gap-1.5', className)}
+      className={cn(
+        'absolute bottom-1.5 right-1.5 flex items-center gap-1.5',
+        resizable && 'right-[22px]',
+        className,
+      )}
       data-ai-enhance
+      data-ai-enhance-clear={resizable ? 'resizer' : undefined}
     >
       {prev && (
         <Chip
