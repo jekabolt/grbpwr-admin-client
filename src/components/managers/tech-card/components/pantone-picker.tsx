@@ -10,6 +10,8 @@ import {
   pantoneCount,
   pantoneLibraryState,
   pantoneVersion,
+  recentPantone,
+  rememberPantone,
   searchPantone,
   subscribePantone,
   type PantoneFamily,
@@ -72,11 +74,31 @@ import {
  * Поэтому потолок — на корне (число берётся у поповера, `--popover-body-max`), а `min-h-0 flex-1`
  * отдаёт сетке ОСТАТОК: поиск и подвал стоят, листается только сетка. `overscroll-contain` не
  * пускает докрученное колесо дальше — иначе на упоре уезжала бы страница под модалкой.
+ *
+ * ═══ «RECENT» — ПОСЛЕДНИЕ 12 ВЫБОРОВ ВСЕЙ АДМИНКИ (26.09, O-44 зона B) ══════════════════════════
+ *
+ * Владелец о выборе свотча: «должно быть сделано удобно». Пока поиск пуст, над семьями стоит
+ * секция «recent» — те же ячейки 60px с кодом под свотчем, одна тихая подпись, без счётчика.
+ * Выбор из неё — обычный выбор и сам поднимает код в начало. Хранилище и недоверчивый разбор —
+ * у `rememberPantone` в `pantone-swatches.ts`.
+ *
+ *   · ЗАПОМИНАЕТ `choose`, А НЕ КАЖДАЯ КНОПКА: через него идёт любой выбор — сетка, строка
+ *     «as typed», Enter, сама секция «recent». `clear` выбором не считается.
+ *   · ЧИТАЕТСЯ ПРИ ОТКРЫТИИ, А НЕ ПРИ МАУНТЕ: соседний пикер страницы или другая вкладка могли
+ *     выбрать что-то после, а открытие — единственный момент, когда секцию вообще видно.
+ *   · ПРИ НАБРАННОМ ЗАПРОСЕ СЕКЦИИ НЕТ: набранное — другой вопрос, на него отвечает выдача.
+ *   · Код, которого нет в наборе (номер дайхауса), стоит пунктирным квадратом — тем же, что у
+ *     строки «as typed»: цвета у него нет, и выдумывать его нечем.
+ *
+ * ⚠ `recent` У `pattern/colourways.tsx` — ДРУГОЙ ОРГАН: цвета прогонов ЭТОЙ карточки, рядом с
+ * дверью пикера, а не внутри него. Пропа `recent` у пикера нет и не было; тот ряд не тронут.
  */
 
 /** Сколько свотчей семья рисует сразу и сколько добавляет «show more». */
 const PAGE = 120;
 const FIRST_PAGE: Record<PantoneFamily, number> = { textile: PAGE, solid: PAGE };
+/** 60px — потолок п.25 (56–64). Одна строка на обе сетки, чтобы «recent» не разошлась с семьями. */
+const GRID_COLUMNS = 'repeat(auto-fill, minmax(60px, 1fr))';
 
 export function PantonePicker({
   value,
@@ -97,6 +119,8 @@ export function PantonePicker({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [page, setPage] = useState<Record<PantoneFamily, number>>(FIRST_PAGE);
+  /** Недавние выборы, прочитанные при открытии (см. «RECENT» в шапке файла). */
+  const [recent, setRecent] = useState<string[]>([]);
 
   // Набор растёт в чужом такте — этим снимком рендер узнаёт, что он вырос.
   const version = useSyncExternalStore(subscribePantone, pantoneVersion, pantoneVersion);
@@ -117,7 +141,9 @@ export function PantonePicker({
   const current = findPantone(value);
 
   const choose = (code: string) => {
-    onPick(code.trim());
+    const picked = code.trim();
+    onPick(picked);
+    if (picked) rememberPantone(picked);
     setQuery('');
     setPage(FIRST_PAGE);
     setOpen(false);
@@ -145,6 +171,8 @@ export function PantonePicker({
       onOpenChange={(o) => {
         if (disabled) return;
         setOpen(o);
+        // В том же такте, что и открытие: первый же кадр поповера уже с секцией, без прыжка.
+        if (o) setRecent(recentPantone());
         if (!o) {
           setQuery('');
           setPage(FIRST_PAGE);
@@ -236,6 +264,43 @@ export function PantonePicker({
               nothing matches “{typed}” — type the reference itself, e.g. 19-4005 TCX or 407 C
             </Text>
           )}
+          {!typed && recent.length > 0 && (
+            /* Та же разметка, что у семьи: подпись снаружи listbox'а, внутри — только опции. */
+            <div data-pantone-recent={name}>
+              <div className='mb-1.5 flex items-baseline gap-2 border-b border-borderColor pb-0.5'>
+                <Text
+                  size='nano'
+                  variant='uppercase'
+                  tracking='group'
+                  component='span'
+                  className='text-labelColor'
+                >
+                  recent
+                </Text>
+              </div>
+              <div
+                role='listbox'
+                aria-label='recent'
+                className='grid gap-1.5'
+                style={{ gridTemplateColumns: GRID_COLUMNS }}
+              >
+                {recent.map((code) => {
+                  const known = findPantone(code);
+                  return (
+                    <SwatchOption
+                      key={code}
+                      code={code}
+                      hex={known?.hex}
+                      name={known?.name}
+                      on={code === value}
+                      onChoose={() => choose(code)}
+                      anchor={{ 'data-pantone-recent-option': code }}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {families.map((group) => {
             if (group.rows.length === 0) return null;
             const shown = Math.min(page[group.family], group.rows.length);
@@ -253,46 +318,25 @@ export function PantonePicker({
                     {group.rows.length.toLocaleString('en-US')}
                   </Text>
                 </div>
-                {/* 60px — потолок п.25 (56–64). Колонок столько, сколько влезет: ширина окна
-                    фиксирована, а сетка не обязана знать их число. */}
+                {/* Колонок столько, сколько влезет: ширина окна фиксирована, а сетка не обязана
+                    знать их число. */}
                 <div
                   role='listbox'
                   aria-label={group.head}
                   className='grid gap-1.5'
-                  style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(60px, 1fr))' }}
+                  style={{ gridTemplateColumns: GRID_COLUMNS }}
                 >
-                  {group.rows.slice(0, shown).map((s) => {
-                    const on = s.code === value;
-                    return (
-                      <button
-                        key={s.code}
-                        type='button'
-                        role='option'
-                        aria-selected={on}
-                        data-pantone-option={s.code}
-                        title={s.name ? `${s.code} · ${s.name}` : s.code}
-                        onClick={() => choose(s.code)}
-                        className={`flex min-w-0 flex-col gap-0.5 p-0.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor ${
-                          on ? 'bg-textColor' : 'hover:bg-bgZebra'
-                        }`}
-                      >
-                        <span
-                          aria-hidden
-                          className='block w-full border border-borderColor'
-                          style={{ background: s.hex, aspectRatio: '1/1' }}
-                        />
-                        {/* Код ПОД свотчем (п.25). Имя не печатается: в ячейку 60px оно легло бы
-                            тремя строками — оно живёт в `title` и в поиске. */}
-                        <span
-                          className={`block min-w-0 truncate text-nano uppercase tracking-label ${
-                            on ? '!text-bgColor' : ''
-                          }`}
-                        >
-                          {s.code}
-                        </span>
-                      </button>
-                    );
-                  })}
+                  {group.rows.slice(0, shown).map((s) => (
+                    <SwatchOption
+                      key={s.code}
+                      code={s.code}
+                      hex={s.hex}
+                      name={s.name}
+                      on={s.code === value}
+                      onChoose={() => choose(s.code)}
+                      anchor={{ 'data-pantone-option': s.code }}
+                    />
+                  ))}
                 </div>
                 {left > 0 && (
                   <button
@@ -347,5 +391,60 @@ export function PantonePicker({
         </div>
       </div>
     </GenericPopover>
+  );
+}
+
+/**
+ * Одна ячейка сетки — свотч и код ПОД ним (п.25). Общая для семей и для «recent»: размер свотча
+ * у двух сеток обязан совпадать, и держит это одна разметка, а не две копии классов.
+ */
+function SwatchOption({
+  code,
+  hex,
+  name,
+  on,
+  onChoose,
+  anchor,
+}: {
+  code: string;
+  /** Нет hex — кода нет в наборе (набранный номер): квадрат пунктирный, как у строки «as typed». */
+  hex?: string;
+  name?: string;
+  on: boolean;
+  onChoose: () => void;
+  /** Якорь проб: `data-pantone-option` у семьи, `data-pantone-recent-option` у «recent». */
+  anchor: Record<string, string>;
+}) {
+  return (
+    <button
+      type='button'
+      role='option'
+      aria-selected={on}
+      {...anchor}
+      title={name ? `${code} · ${name}` : code}
+      onClick={onChoose}
+      className={`flex min-w-0 flex-col gap-0.5 p-0.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor ${
+        on ? 'bg-textColor' : 'hover:bg-bgZebra'
+      }`}
+    >
+      <span
+        aria-hidden
+        className={
+          hex
+            ? 'block w-full border border-borderColor'
+            : 'block w-full border border-dashed border-borderColor'
+        }
+        style={{ background: hex || undefined, aspectRatio: '1/1' }}
+      />
+      {/* Имя не печатается: в ячейку 60px оно легло бы тремя строками — оно живёт в `title` и в
+          поиске. */}
+      <span
+        className={`block min-w-0 truncate text-nano uppercase tracking-label ${
+          on ? '!text-bgColor' : ''
+        }`}
+      >
+        {code}
+      </span>
+    </button>
   );
 }

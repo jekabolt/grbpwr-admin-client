@@ -559,3 +559,89 @@ export function findPantone(code?: string): PantoneSwatch | undefined {
   if (!c) return undefined;
   return byCode.get(c) ?? SWATCHES.find((s) => s.code.toLowerCase().startsWith(c));
 }
+
+/* ═══ НЕДАВНИЕ — ПАМЯТЬ ВЫБОРА, ОДНА НА ВСЮ АДМИНКУ (26.09, O-44 зона B) ═══════════════════════
+ *
+ * Владелец о выборе свотча: «должно быть сделано удобно». Один и тот же пантон ставят подряд в
+ * колорвей, в палитру рендера, в покраску ON MODEL — и каждый раз искали его заново. Пикер
+ * помнит последние 12 выборов: ОДИН список на все пикеры и все экраны, в
+ * `localStorage['plm.pantone.recent.v1']` — JSON-массив кодов, новейший первым:
+ * `["407 C","18-1662 TCX"]`.
+ *
+ * Хранится КОД — ровно то, что ушло в `onPick`: свотч сетки, набранный номер дайхауса (его нет
+ * ни в одной книге, и тем нужнее он в недавних) или код из самих недавних.
+ *
+ * ⚠ ХРАНИЛИЩЕ — УДОБСТВО, А НЕ ОПОРА. Каждое чтение и каждая запись — под try/catch: приватное
+ * окно, квота, запрещённые cookies (там бросает уже само ОБРАЩЕНИЕ к `localStorage`) не стоят
+ * пикеру ни рендера, ни выбора. Первый же отказ ОТЦЕПЛЯЕТ страницу от хранилища до
+ * перезагрузки, и список живёт в памяти модуля. Без отцепки отказ ЗАПИСИ при живом чтении
+ * (квота) при каждом открытии возвращал бы старый список поверх только что сделанного выбора.
+ *
+ * ⚠ ЧТЕНИЕ СВЕЖЕЕ, А НЕ СНИМОК ЗАГРУЗКИ: соседний пикер страницы или другая вкладка могли выбрать
+ * что-то после. Поэтому и запись идёт поверх свежего чтения, а не поверх того, что помнит один
+ * экземпляр, — та же ловушка, что записана у `use-panel-prefs.ts`.
+ *
+ * Разбор недоверчив: хранилище правит кто угодно. Не массив — пусто; не строка, пустая строка,
+ * строка длиннее 40 знаков (самый длинный код набора — 15) — пропуск; повтор без учёта регистра и
+ * пробелов — остаётся первое написание, то есть самое свежее.
+ */
+export const PANTONE_RECENT_KEY = 'plm.pantone.recent.v1';
+export const PANTONE_RECENT_MAX = 12;
+
+let recentMemory: string[] = [];
+/** Хранилище отказало хотя бы раз — до перезагрузки список живёт только в памяти. */
+let recentDetached = false;
+
+/** `first` впереди `then`, повторы по коду сняты, не длиннее `PANTONE_RECENT_MAX`. */
+export function mergeRecentPantone(
+  first: readonly unknown[],
+  then: readonly unknown[] = [],
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of [...first, ...then]) {
+    if (typeof item !== 'string') continue;
+    const code = item.trim().replace(/\s+/g, ' ');
+    const key = code.toLowerCase();
+    if (!code || code.length > 40 || seen.has(key)) continue;
+    seen.add(key);
+    out.push(code);
+    if (out.length === PANTONE_RECENT_MAX) break;
+  }
+  return out;
+}
+
+/** Хранимая строка → список. Всё, что не список кодов, читается как пусто. */
+export function parseRecentPantone(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? mergeRecentPantone(parsed) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Недавние выборы, новейший первым. Не бросает никогда. */
+export function recentPantone(): string[] {
+  if (!recentDetached) {
+    try {
+      recentMemory = parseRecentPantone(localStorage.getItem(PANTONE_RECENT_KEY));
+    } catch {
+      recentDetached = true;
+    }
+  }
+  return recentMemory.slice();
+}
+
+/** Запомнить выбор: в начало списка, без повтора, не длиннее 12. Не бросает никогда. */
+export function rememberPantone(code: string): void {
+  const next = mergeRecentPantone([code], recentPantone());
+  recentMemory = next;
+  if (recentDetached) return;
+  try {
+    localStorage.setItem(PANTONE_RECENT_KEY, JSON.stringify(next));
+  } catch {
+    recentDetached = true;
+  }
+}
