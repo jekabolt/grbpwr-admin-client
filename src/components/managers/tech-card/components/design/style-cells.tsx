@@ -1,3 +1,5 @@
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { SECTION } from 'constants/routes';
 import { useFormContext } from 'react-hook-form';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
@@ -21,8 +23,23 @@ import { fitLabel, type FitChoice } from './fit-vocabulary';
  *
  * Nothing here knows which step it is on. The cell edits the form field `fit` and nothing else;
  * the WRITER is still the staged `UpdateStyle` in `StyleFactsField` (mounted hidden by index.tsx),
- * the lock is still `products:write` (`locked`), and a genuine pick still accepts the draft's mark.
+ * the lock is the caller's answer to «would anything write this?» (`locked`), and a genuine pick
+ * still accepts the draft's mark.
  */
+
+/**
+ * WHY A STYLE-FACT CELL IS DEAD, IN WORDS (26.09, O-29 follow-up) — the grant that is missing, in
+ * the order the care row names them (`style-facts-field.tsx`, `careCannot`): `products:write` is
+ * UpdateStyle's own, `tech_cards:write` is the page's (`StyleFactsField` stages nothing without
+ * it). Null when both are held: the cell is dead then because the card is released, as every field
+ * on it is, and the page says that once — not under each cell.
+ */
+export function useStyleLockWords(): string | null {
+  const { canWrite } = usePermissions();
+  if (!canWrite(SECTION.products)) return 'needs products:write';
+  if (!canWrite(SECTION.techCards)) return 'needs tech_cards:write';
+  return null;
+}
 
 /**
  * THE SELECT'S VALUES ARE A NAMESPACE OF THEIR OWN (Codex m2). Every fit — listed or legacy — is
@@ -67,7 +84,7 @@ const fitOfItem = (item: string) => (item.startsWith(FIT_ITEM) ? item.slice(FIT_
  *   select's own form of `useAcceptOnEdit`, which a text field runs on blur.
  * · LOCKED without `products:write`: `UpdateStyle` is authorised by the catalog section, not by
  *   `tech_cards` (Codex M-05), so an edit here would be refused at save. Said in words under the
- *   control, not only in a `title` on a dead select.
+ *   control, not only in a `title` on a dead select (`useStyleLockWords`).
  */
 export function FitCell({
   choices,
@@ -77,11 +94,19 @@ export function FitCell({
   choices: FitChoice[];
   /** A card that does not exist yet (`/add-tech-card`): no `UpdateStyle` can reach it. */
   creating: boolean;
-  /** `products:write` missing, or a released card — the select and its pill are dead. */
+  /**
+   * The select and its pill are dead: no fit picked here would be written. `products:write`
+   * missing — or, from CARD DETAILS, a card the page does not save (released, or an account
+   * without `tech_cards:write`: `StyleFactsField` stages nothing then, and a disabled fieldset
+   * does not stop a Radix select). GENERAL INFORMATION opens the cell only on a card it may edit,
+   * so there it is the grant alone. The words under it name a missing grant, never the release.
+   */
   locked: boolean;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const drafted = useDrafted();
+  const lockWords = useStyleLockWords();
+  const why = locked ? lockWords : null;
   return (
     <FormField
       control={control}
@@ -104,10 +129,7 @@ export function FitCell({
           })),
         ];
         return (
-          <FormItem
-            data-card-fit={locked ? 'locked' : 'open'}
-            title={locked ? 'needs products:write' : undefined}
-          >
+          <FormItem data-card-fit={locked ? 'locked' : 'open'} title={why ?? undefined}>
             <div className='flex items-center justify-between gap-1.5'>
               <FormLabel>fit</FormLabel>
               <DraftedPill
@@ -133,9 +155,9 @@ export function FitCell({
                 onBlur={field.onBlur}
               />
             </DraftedField>
-            {locked && (
+            {why && (
               <Text size='micro' variant='label'>
-                needs products:write
+                {why}
               </Text>
             )}
           </FormItem>

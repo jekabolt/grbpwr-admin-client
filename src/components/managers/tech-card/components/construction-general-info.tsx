@@ -269,11 +269,14 @@ function FieldLabel({ htmlFor, children }: { htmlFor?: string; children: ReactNo
  * DETAILS (`fitChoicesFor` → null): строка печатает одну категорию, и `✎` открывает одну категорию.
  * Хранимое значение не трогается.
  *
- * КЛАВИАТУРА. `✎` — кнопка; нажатая с клавиатуры (`detail === 0`, так `DraftedPill` отличает клавишу
- * от указателя) она ведёт фокус в первую ячейку, а Escape откуда угодно внутри строки закрывает
- * ячейки и возвращает фокус кнопке — если Escape не потрачен слоем Radix (раскрытый список, поповер
- * категорий, подтверждение): тот гасит его `preventDefault`. Enter на пилюле печати
- * (`data-drafted-scope`) после принятия ведёт на `✎` — первую кнопку строки, как ищет `focusFieldIn`.
+ * КЛАВИАТУРА. `✎` — кнопка с `aria-expanded`; нажатая с клавиатуры (`detail === 0`, так `DraftedPill`
+ * отличает клавишу от указателя) она ведёт фокус в первую ЖИВУЮ ячейку — без `products:write` селект
+ * посадки мёртв, и фокус получает браузер категорий. Любое закрытие — `✓` или Escape откуда угодно
+ * внутри строки — возвращает фокус кнопке сам: Safari не фокусирует кнопку по щелчку, и фокус из
+ * снятой ячейки упал бы на body. Escape, потраченный слоем Radix (раскрытый список, поповер
+ * категорий, подтверждение), до строки не доходит — разбор у `onKeyDown`. Двойной щелчок по `✎` —
+ * одно нажатие. Enter на пилюле печати (`data-drafted-scope`) после принятия ведёт на `✎` — первую
+ * кнопку строки, как ищет `focusFieldIn`.
  */
 function StyleFacts({
   categoryPath,
@@ -286,7 +289,7 @@ function StyleFacts({
   readOnly: boolean;
   /** Утверждённая карточка — пилюля `drafted` и селект посадки глухие (фиксап раунда 2, MIN-5). */
   frozen: boolean;
-  /** 0 у ещё не сохранённой карточки (`/add-tech-card`) — ячейка посадки знает это как `creating`. */
+  /** Карточка на экране (из адреса): другая карточка под той же студией возвращает печать. */
   techCardId: number;
 }): JSX.Element {
   const { control } = useFormContext<TechCardFormData>();
@@ -336,8 +339,12 @@ function StyleFacts({
       // Принятие пилюли с клавиатуры ведёт фокус к первому полю строки, а без поля — к `✎`.
       data-drafted-scope=''
       onKeyDown={(e) => {
-        // Escape, уже потраченный слоем Radix (список, поповер, подтверждение), сюда не доходит
-        // «живым»: слой гасит его `preventDefault`, и ячейки остаются на месте.
+        // Escape, которым закрывается слой Radix (список, поповер, подтверждение), сюда в норме не
+        // доходит ВОВСЕ: `DismissableLayer` ловит его на document в фазе захвата и закрывает слой
+        // там же, обновление отрисовывается раньше, чем событие дойдёт до слушателей React, и
+        // пункт в фокусе к этому моменту снят — React не доставляет строке ничего, и ячейки стоят.
+        // `defaultPrevented` — подстраховка на слой, который переживает нажатие (выход с анимацией):
+        // тогда событие доходит, но с `preventDefault`, уже взведённым тем же захватом.
         if (!open || e.key !== 'Escape' || e.defaultPrevented) return;
         e.preventDefault();
         e.stopPropagation();
@@ -349,7 +356,11 @@ function StyleFacts({
         <>
           {fitChoices && (
             <div className={CELL} data-c19-field='fit'>
-              <FitCell choices={fitChoices} creating={techCardId === 0} locked={fitLocked} />
+              {/* `creating` — ложь по построению: блок монтируется только у сохранённой карточки
+                  (`studio-tab.tsx` без id рисует «save this tech card first»). Id из адреса здесь
+                  не свидетель: где его нет, запертая ячейка прятала бы хранимую посадку за
+                  «— unset —». */}
+              <FitCell choices={fitChoices} creating={false} locked={fitLocked} />
             </div>
           )}
           <div className={CELL} data-c19-field='meta'>
@@ -390,22 +401,32 @@ function StyleFacts({
       )}
       {canEdit && (
         /* ОДНА кнопка на оба режима — тот же узел DOM, поэтому щелчок по ней не роняет фокус. При
-           открытых ячейках она стоит на линии контролов: строка подписи 19px + шов 1px. */
+           открытых ячейках она стоит на линии контролов: строка подписи 19px + шов 1px, и ростом
+           с контрол (26px), а не с плотную кнопку `xs`. */
         <div className={cn('ml-auto', open && 'mt-[20px]')}>
           <Button
             type='button'
             variant='secondary'
             size='xs'
+            className={open ? 'h-[26px]' : undefined}
             aria-label={open ? 'done editing' : editLabel}
+            aria-expanded={open}
             title={open ? 'done — saved as you go' : editLabel}
             data-c19-facts-edit={open ? 'done' : 'edit'}
             onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+              // Двойной щелчок — одно нажатие: второй `click` (`detail === 2`) закрыл бы то, что
+              // открыл первый.
+              if (e.detail > 1) return;
               const next = !open;
               setEditing(next);
-              // Enter/Space — щелчок без указателя (`detail === 0`): фокус идёт в первую ячейку.
-              if (next && e.detail === 0) {
+              if (!next) {
+                // `✓` возвращает фокус кнопке сам, как Escape: Safari по щелчку кнопку не фокусирует.
+                focusIn('[data-c19-facts-edit]');
+              } else if (e.detail === 0) {
+                // Enter/Space — щелчок без указателя: фокус идёт в первую ЖИВУЮ ячейку (мёртвый
+                // селект посадки фокус не примет, и он остался бы на кнопке).
                 focusIn(
-                  '[data-c19-field] [role="combobox"], [data-c19-field] button:not([data-drafted-pill])',
+                  '[data-c19-field] [role="combobox"]:not(:disabled), [data-c19-field] button:not([data-drafted-pill]):not(:disabled)',
                 );
               }
             }}

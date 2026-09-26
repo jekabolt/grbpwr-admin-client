@@ -49,7 +49,7 @@ import { Counter, EmptyState, GROUP_GAP, GROUP_SEAM } from './core';
 import { cardFactsContext } from './core/card-facts';
 import { categoryChain, fitChoicesFor, fitLabel } from './fit-vocabulary';
 import { LockBar } from './render/generate-row';
-import { FitCell } from './style-cells';
+import { FitCell, useStyleLockWords } from './style-cells';
 
 /**
  * ═══ STEP 0 · CARD DETAILS — ONE BLOCK, SIX GROUPS (`design-band-flow/_step-card.js` + NOTE) ═════
@@ -292,13 +292,16 @@ function StyleNumberCell({ isIdea, seasonLocked }: { isIdea: boolean; seasonLock
  *   so an «unset» picked there would fall out of the save without a word — the item is left out
  *   rather than drawn as a lie. A value that is unset right now is always drawn.
  * · A new card proposes adult (`techCardDefaultData`); an existing card shows what it holds.
- * · Locked exactly like FIT, for the same reason: UpdateStyle is `products:write`. A NEW card made
- *   by such an account shows «— unset —», not a locked «adult»: the proposal is written only for
- *   products:write (StyleFactsField), so the card would be created without it and reopen unset
- *   (Codex m2). The field itself is left alone — nothing is dirtied on an account that cannot act.
+ * · Locked exactly like FIT, by the same `locked` (`factLocked`): UpdateStyle is `products:write`,
+ *   and nothing is staged on a card the page does not save. A NEW card made by such an account
+ *   shows «— unset —», not a locked «adult»: the proposal is written only for products:write
+ *   (StyleFactsField), so the card would be created without it and reopen unset (Codex m2). The
+ *   field itself is left alone — nothing is dirtied on an account that cannot act.
  */
 function AgeGroupCell({ creating, locked }: { creating: boolean; locked: boolean }) {
   const { control } = useFormContext<TechCardFormData>();
+  const lockWords = useStyleLockWords();
+  const why = locked ? lockWords : null;
   return (
     <FormField
       control={control}
@@ -315,10 +318,7 @@ function AgeGroupCell({ creating, locked }: { creating: boolean; locked: boolean
           ...ageGroupOptions,
         ];
         return (
-          <FormItem
-            data-card-age={locked ? 'locked' : 'open'}
-            title={locked ? 'needs products:write' : undefined}
-          >
+          <FormItem data-card-age={locked ? 'locked' : 'open'} title={why ?? undefined}>
             <FormLabel>age group</FormLabel>
             <Select
               name='ageGroup'
@@ -330,9 +330,9 @@ function AgeGroupCell({ creating, locked }: { creating: boolean; locked: boolean
               onValueChange={(v: string) => field.onChange(v)}
               onBlur={field.onBlur}
             />
-            {locked && (
+            {why && (
               <Text size='micro' variant='label'>
-                needs products:write
+                {why}
               </Text>
             )}
           </FormItem>
@@ -535,7 +535,10 @@ export function CardDetails({
   techCardId?: number;
   isIdea: boolean;
   isAux: boolean;
-  /** `canWrite(techCards) && !frozen` — gates the role writes, which bypass the form. */
+  /**
+   * `canWrite(techCards) && !frozen` — gates the role writes, which bypass the form, and the fit
+   * and age group cells (`factLocked`): StyleFactsField stages nothing without it.
+   */
   canEdit: boolean;
   /** The form's `outputMaterialId`, for the «saving as sellable clears it» warning. */
   outputMaterialId: number;
@@ -570,14 +573,20 @@ export function CardDetails({
   // UpdateStyle — the one writer of a saved card's style facts — is `products:write` on the server
   // (Codex M-05, R3; rbac.go:163): every style-fact cell locks on it.
   const styleLocked = !canWrite(SECTION.products);
+  // FIT AND AGE GROUP ARE ALSO DEAD WHERE NOTHING WOULD WRITE THEM (26.09, O-29 follow-up).
+  // `StyleFactsField` stages no style fact while `canEdit` is false — index.tsx hands both the same
+  // `canWrite(techCards) && !frozen` — and the page's disabled fieldset does not stop a Radix
+  // select, which opens on pointerdown: a fit picked on a released card was a dirty value no save
+  // could write. The words under the cells name only a missing grant (`useStyleLockWords`).
+  const factLocked = styleLocked || !canEdit;
   // …except brand, collection, season and gender on a card being CREATED: CreateTechCard seeds
   // those four from the card's own insert (AddTechCard — `skuSeason` included, schema.ts), so
   // there they are the create's to write (Codex M1).
   const seededLocked = styleLocked && !!techCardId;
   // Fit and age group reach the style through UpdateStyle ALONE, so a new card made by such an
   // account gets neither: the cells, the counter and the ai context read them as unset (m2) —
-  // never as a locked value that will not be written.
-  const unwritten = !techCardId && styleLocked;
+  // never as a locked value that will not be written. The cells' own lock, so the three agree.
+  const unwritten = !techCardId && factLocked;
   const ageShown = unwritten ? AGE_GROUP_UNSET : ageGroup;
   const shownMeta = (key: MetaField, v: unknown) => {
     if (!unwritten) return v;
@@ -695,12 +704,12 @@ export function CardDetails({
           {/* FIT right after the category it depends on (T02) — the shared cell (`style-cells.tsx`). */}
           {fitChoices && (
             <div className={wc('fit')} data-card-cell='fit'>
-              <FitCell choices={fitChoices} creating={!techCardId} locked={styleLocked} />
+              <FitCell choices={fitChoices} creating={!techCardId} locked={factLocked} />
             </div>
           )}
           {/* AGE GROUP beside fit — the style's other «who is it for» fact (T01). */}
           <div className={wc('age')} data-card-cell='age'>
-            <AgeGroupCell creating={!techCardId} locked={styleLocked} />
+            <AgeGroupCell creating={!techCardId} locked={factLocked} />
           </div>
           <div className={wc('purpose')}>
             <SelectField name='purpose' label='purpose' items={techCardPurposeFormOptions} />
