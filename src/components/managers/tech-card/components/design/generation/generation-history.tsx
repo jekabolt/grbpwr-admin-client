@@ -521,10 +521,21 @@ export function GenerationHistory({
    * краю окна по три. ПОРЯДОК РЯДА — ПОРЯДОК ПОКАЗА, и обход ПОВТОРЯЕТ решение строки построчно:
    * корни в проводном порядке, куски ОТКРЫТОЙ колоды — сразу за своим корнем, куски закрытых —
    * нигде; полка идёт ПОСЛЕ окна, как в документе.
+   *
+   * ═══ …ТОЛЬКО ТЕ СТРОКИ, ЧТО НА ЭКРАНЕ, И ЯКОРЬ ГРУППЫ НЕ РАЗМОНТИРУЕТСЯ (26.09, O-54) ═══════
+   * The group was anchored on the rows' wrapper INSIDE the fold, and `useGalleryGroup` registers
+   * its node once per shape of the row. A fold opened after mount — every step but FLAT, and FLAT
+   * too once it starts folded (O-54) — or closed and opened again left the group on no node or on
+   * a detached one, and a history tile's zoom opened nothing. Measured before this change: render
+   * step, fold opened → zoom → no viewer; FLAT, fold closed and reopened → the same.
+   * The anchor is now the header's door line (`data-rep-filter`), mounted for as long as the block
+   * is, and the row holds only the rows ON SCREEN: the window while the fold is open, the shelf
+   * while it is open. What is folded away is not walked — the band's other organs (the references,
+   * the latest generation under GENERATE, the flat slots) still are.
    */
   const gallery = useMemo(
-    () => runsGallery([...visible, ...(archShown ? archivedRows : [])], openDeck),
-    [visible, archShown, archivedRows, openDeck],
+    () => runsGallery([...(runsOpen ? visible : []), ...(archShown ? archivedRows : [])], openDeck),
+    [runsOpen, visible, archShown, archivedRows, openDeck],
   );
   const galleryGroup = useGalleryGroup(gallery.items);
 
@@ -682,7 +693,13 @@ export function GenerationHistory({
            первую. И `collapsible` этой секции НЕ ставить — свёрнутая коробка не рисует `action`
            вовсе, а кнопка внутри кнопки невалидна (разбор в `ui/components/section.tsx`). */
         action={
-          <div data-rep-filter={rep} className='flex flex-wrap items-center gap-1.5'>
+          /* ЯКОРЬ ГРУППЫ ПРОСМОТРЩИКА — ЭТА ЛИНЕЙКА (O-54): она стоит, пока стоит блок, свёрнут он
+             или нет, и её место в полосе — место истории (разбор у `gallery`). */
+          <div
+            ref={galleryGroup.anchorRef}
+            data-rep-filter={rep}
+            className='flex flex-wrap items-center gap-1.5'
+          >
             <Button
               variant='secondary'
               size='xs'
@@ -753,11 +770,9 @@ export function GenerationHistory({
               />
             )}
 
-            {/* ЯКОРЬ ГРУППЫ просмотрщика: место истории в полосе — между референсами сверху и
-                верстаком снизу; порядок внутри — из списка группы. */}
-            <div ref={galleryGroup.anchorRef} className='space-y-2'>
-              {rowsOf(shown, false)}
-            </div>
+            {/* Место истории в ряду просмотрщика держит линейка шапки (якорь группы, O-54);
+                порядок внутри — из списка группы. */}
+            <div className='space-y-2'>{rowsOf(shown, false)}</div>
 
             {/* ПУСТОЕ ОКНО — СЛОВАМИ, НА МЕСТЕ СТРОК, с дверью, которая его наполняет (макет
                 `histBody`): нет прогонов → к запуску; все в архиве → на полку; фильтр пуст →
