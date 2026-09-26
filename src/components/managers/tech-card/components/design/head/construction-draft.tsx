@@ -1610,8 +1610,9 @@ export function ConstructionDraft({
   /** Строки группы WRITTEN: записи с `✕` и прежние слова с `restore previous ↶` (BLK-1, M-A). */
   const writtenCount = live.length + restore.length;
 
-  /* СТАТУС В ШАПКЕ БЛОКА — только там, где заменить его нечем: прогона не было или он в полёте.
-     Прогон есть → шапка пуста, а «прогон был» стоит словами в ряду (`read N pictures · …`). */
+  /* СТАТУС В ШАПКЕ БЛОКА — только пока прогон в полёте или доливаются слоты. Прогона не было →
+     шапка пуста (O-31, 26.09: владелец не хочет видеть «not run yet»); прогон есть → «прогон был»
+     стоит словами в ряду (`read N pictures · …`). */
   const status =
     run.phase !== null ? (
       <Pill tone='attention' data-c19-draft-status='flight'>
@@ -1621,11 +1622,7 @@ export function ConstructionDraft({
       <Pill tone='attention' data-c19-draft-status='minting'>
         adding detail slots…
       </Pill>
-    ) : staged ? null : (
-      <Pill tone='mut' data-c19-draft-status='fresh'>
-        not run yet
-      </Pill>
-    );
+    ) : null;
 
   /* ═══ `accept all N ▸` — ЕДИНСТВЕННАЯ НОВАЯ КНОПКА ВОЛНЫ В ЭТОМ БЛОКЕ (D-07, Q-03) ═════════════
      Принять = «я это видел»: значения уже на карточке (автосейв), кнопка лишь снимает синие рамки
