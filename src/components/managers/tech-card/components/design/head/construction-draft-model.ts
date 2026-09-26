@@ -311,7 +311,7 @@ export type FormSnapshot = {
    * «рождённая черновиком строка ещё на карточке?» — вопрос, на который имя ответить не может:
    * человек имя переименовывает, а строка при этом остаётся той же самой.
    */
-  bomItems?: Array<{ name?: string; lineKey?: string }>;
+  bomItems?: BomLineLike[];
   /**
    * ⚠ ЭТО ЕДИНСТВЕННОЕ ПОЛЕ СНИМКА, КОТОРОЕ НЕ ЖИВЁТ В ФОРМЕ, И СКАЗАНО ЭТО ВСЛУХ. Детали
    * флэт-верстака — строки СЕРВЕРА (`design_bench_slot`, полоса `GetDesignBand`), а не значения
@@ -333,8 +333,75 @@ export type FormSnapshot = {
    * там переименованный слот снова читается как чужой. Настоящее лекарство — провенанс слота на
    * сервере (бэкенд-задача рядом с «suggested details»), а не второй реестр имён на клиенте.
    */
-  detailSlots?: Array<{ id?: number; name?: string; mintedAs?: string }>;
+  detailSlots?: Array<{
+    id?: number;
+    name?: string;
+    mintedAs?: string;
+    /**
+     * В слоте лежит картинка (`pictureId > 0`). Заполненный слот — уже ответ человека или прогона:
+     * пометки «proposed» у него нет (бенч её прячет), и журнал обязан считать так же — иначе
+     * `accept all N` считал бы рамку, которой не видно (фиксап M2).
+     */
+    filled?: boolean;
+  }>;
 };
+
+/**
+ * ═══ СТРОКА СПЕЦИФИКАЦИИ ГЛАЗАМИ ЖУРНАЛА (фиксап волны, ревью Codex M2) ═══════════════════════
+ *
+ * Поля строки, которые пишет черновик (`bornBomLine` из строки предложения) и которые человек
+ * правит руками. Их слепок (`bomLineSnapshot`) журнал запоминает В МОМЕНТ ЗАПИСИ, и пометка
+ * «drafted» живёт, пока строка равна этому слепку, — а не пока строка просто существует: правка
+ * имени, состава, расхода или назначения — это уже слова человека.
+ */
+export type BomLineLike = {
+  name?: string;
+  lineKey?: string;
+  section?: string;
+  purpose?: string;
+  kind?: string;
+  composition?: string;
+  color?: string;
+  pantone?: string;
+  materialId?: number | string;
+  estUsage?: string;
+  unit?: string;
+};
+
+/** Незаданный енум (`…_UNSET`, `…_UNKNOWN`, пусто) — одно значение: «не сказано». */
+function enumOrEmpty(v?: string | null): string {
+  const t = normText(v);
+  return /_(UNSET|UNKNOWN)$/.test(t) ? '' : t;
+}
+
+/** Число строкой без хвостовых нулей: `1.20` и `1.2` сервера — одно и то же значение. */
+function numberText(v?: string | number | null): string {
+  const t = normText(v == null ? '' : String(v));
+  if (!t) return '';
+  const n = Number(t);
+  return Number.isFinite(n) ? String(n) : t;
+}
+
+/**
+ * СЛЕПОК СТРОКИ — УСТОЙЧИВЫЙ К ОБРАТНОМУ ПУТИ С СЕРВЕРА. После автосейва форма получает значения
+ * сервера (`settleAfterBodySave`): незаданный енум может вернуться пустым, `1.20` — как `1.2`,
+ * `materialId` — строкой int64. Всё это приводится к одному виду, иначе пометка гасла бы на
+ * первом же сохранении, без единого движения человека.
+ */
+export function bomLineSnapshot(line: BomLineLike): string {
+  return JSON.stringify([
+    normText(line.name),
+    enumOrEmpty(line.section),
+    enumOrEmpty(line.purpose),
+    enumOrEmpty(line.kind),
+    normText(line.composition),
+    normText(line.color),
+    normText(line.pantone),
+    String(Number(line.materialId ?? 0) || 0),
+    numberText(line.estUsage),
+    normText(line.unit),
+  ]);
+}
 
 function detailText(form: FormSnapshot, key: string): string {
   return normText((form.details ?? []).find((d) => d.key === key)?.text);
@@ -368,11 +435,11 @@ function scalarState(proposed: string, current: string): ProposalState {
  * (B-11), так что строка «указание» вела бы предложение в поле, которого на экране нет вовсе.
  *
  * ⚠ ПРЕДЛОЖЕННЫЕ ДЕТАЛИ (r3 п.6) ВОЗВРАЩАЮТСЯ ТРЕТЬИМ ПОЛЕМ, А НЕ ЧЕТВЁРТОЙ ГРУППОЙ `rows`, И ЭТО
- * НЕСУЩЕЕ РЕШЕНИЕ, А НЕ РАСКЛАДКА. `rows` — это то, что орган ПИШЕТ САМ по правилу `fillPlan`
- * («`add` ⇒ заполнить пустой адресат»). Заведение слота на верстаке — это ЗАПИСЬ НА СЕРВЕР, а не
+ * НЕСУЩЕЕ РЕШЕНИЕ, А НЕ РАСКЛАДКА. `rows` — это то, что орган ПИШЕТ САМ по правилу
+ * `autoFillPlan` (значения полей формы). Заведение слота на верстаке — это ЗАПИСЬ НА СЕРВЕР, а не
  * значение поля формы: положив такие строки в `rows`, мы бы получили черновик, который сам,
  * без единого клика, создаёт строки в `design_bench_slot` на чужом шаге. Отдельное поле делает
- * такой исход физически невыразимым: `fillPlan` этих строк не видит вовсе.
+ * такой исход физически невыразимым: `autoFillPlan` этих строк не видит вовсе.
  */
 export function diffProposal(
   draft: ConstructionDraft | null,
@@ -436,15 +503,20 @@ export function diffProposal(
     });
   }
 
+  // ОПИСАНИЕ ПРЕДЛАГАЕТСЯ И ПОВЕРХ СТОЯЩЕГО (фиксап волны, M1 / O-09 «всё сгенерированное
+  // сохраняется»): раньше сгенерированное описание выбрасывалось, если человек что-то уже написал.
+  // Теперь это обычный скаляр — `add` над пустым, `replace` над написанным; журнал держит `before`,
+  // и `✕` / `undo all` возвращают слова человека дословно.
   const concept = normText(draft.concept);
-  if (concept && !normText(form.concept)) {
+  if (concept) {
+    const current = normText(form.concept);
     rows.push({
       id: 'general:concept',
       group: 'general',
       label: 'concept',
       value: concept,
-      current: '',
-      state: 'add',
+      current,
+      state: scalarState(concept, current),
       write: { kind: 'concept', text: concept },
     });
   }

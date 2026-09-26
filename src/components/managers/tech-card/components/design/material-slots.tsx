@@ -395,7 +395,7 @@ function SlotRow({
   family: Family;
   /** Строка рождена черновиком и ещё не просмотрена — синяя пилюля и лёгкий синий фон строки. */
   drafted: boolean;
-  /** Правка ячейки этой строки и уход из неё — строка просмотрена. */
+  /** Правка ячейки этой строки и уход из неё — строка просмотрена. Пилюля зовёт то же (M3). */
   onEdited: (line: Line) => void;
   lines: Line[];
   readOnly: boolean;
@@ -696,8 +696,9 @@ function SlotRow({
         )}
       </td>
       <td data-align='left' className='w-[90px] align-top' data-b16-from={index}>
-        {/* ОТКУДА СТРОКА — синяя `drafted`, пока строка черновика не просмотрена; пусто иначе. */}
-        <DraftedPill live={drafted} data-provenance='drafted' />
+        {/* ОТКУДА СТРОКА — синяя `drafted`, пока строка черновика не просмотрена; пусто иначе.
+            Пилюля — и есть «принять» этой строки (фиксап M3). */}
+        <DraftedPill live={drafted} onAccept={() => onEdited(line)} data-provenance='drafted' />
       </td>
       <td className='w-[110px] align-top'>
         <div className='flex items-start justify-end gap-1'>

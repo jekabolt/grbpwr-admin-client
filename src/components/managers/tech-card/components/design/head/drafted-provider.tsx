@@ -69,6 +69,8 @@ export function DraftedProvider({
         ? readBench(band, 'flat').details.map((s) => ({
             id: s.id ?? 0,
             name: (s.detailName ?? '').trim(),
+            // Заполненный слот пометки не несёт (бенч её прячет) — и в счёт `accept all` не идёт.
+            filled: (s.pictureId ?? 0) > 0,
           }))
         : undefined,
     [band, serverSpeaks],

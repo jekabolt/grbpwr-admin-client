@@ -17,8 +17,10 @@ import {
   doneCount,
   moodMinimumGate,
   nearestBlock,
+  openGateDoor,
   stepState,
   type ChainCtx,
+  type MoodMinimum,
   type Step,
   type StepId,
   type StepState,
@@ -255,11 +257,14 @@ export function useChainCtx({
  *
  * The flat's GENERATE (zone CL-D) refuses with EXACTLY the sentence the rail locks FLAT with,
  * because both read `moodMinimumGate` over the same three facts: pictures ON THE BOARD
- * (`isBoardRow`), the description, the category. `door` is where the refusal is fixed — `mood` for
- * the board's content, `card` when only the category is missing; open it with
- * `openStepOf('concept')` / `openStepOf('categoryId', '#card-details')` (core/chain.ts).
+ * (`isBoardRow`), the description, the category — ALL THREE are required (fix-up B1).
+ *
+ * THE NAME AND THE OLD FIELDS ARE STABLE: `ok`, `reason`, `door` (the step of the FIRST missing
+ * part — `mood` or `card`). Added: `doors` — one per missing part, each with its step, form path,
+ * anchor and label (`moodboard ›` → the board, `description ›` → DESCRIPTION, `card details ›` →
+ * the category) — open one with `openGateDoor(d)` (core/chain.ts); and `missing` — the parts.
  */
-export function useMoodMinimumGate(): ReturnType<typeof moodMinimumGate> {
+export function useMoodMinimumGate(): MoodMinimum {
   const { control } = useFormContext<TechCardFormData>();
   const boardPictures = (
     (useWatch({ control, name: 'moodboardMedia' }) as BoardItem[] | undefined) ?? []
@@ -286,8 +291,8 @@ function doorLabel(door: StepId): string {
       // render yet, and its flats may well be standing already.
       return 'the flat bench ›';
     case 'mood':
-      // The moodboard minimum (D-10) is «a picture OR forty characters of description» — the door
-      // names the place, not one of the two ways to satisfy it.
+      // A single door to the moodboard step. The moodboard minimum itself (D-10, fix-up B1) draws
+      // one door per missing part from `block.doors` and never reaches this label.
       return 'moodboard ›';
     case 'card':
       return 'card details ›';
@@ -406,11 +411,26 @@ export function ChainRail({
           >
             step {blockStep.n} · {blockStep.label} · {block.why}
           </Text>
-          {doorStep && (
-            <Button variant='secondary' size='xs' onClick={open(doorStep)}>
-              {doorLabel(doorStep.id)}
-            </Button>
-          )}
+          {/* ONE DOOR PER PART when the refusal has several (the moodboard minimum, Codex B1):
+              the picture is added on the board, the words are written in DESCRIPTION, the category
+              is picked in CARD DETAILS — three places, three doors, in the sentence's order. */}
+          {block.doors.length > 0
+            ? block.doors.map((d) => (
+                <Button
+                  key={d.field}
+                  variant='secondary'
+                  size='xs'
+                  onClick={() => openGateDoor(d)}
+                  data-gate-door={d.field}
+                >
+                  {d.label}
+                </Button>
+              ))
+            : doorStep && (
+                <Button variant='secondary' size='xs' onClick={open(doorStep)}>
+                  {doorLabel(doorStep.id)}
+                </Button>
+              )}
         </LockBar>
       )}
     </Section>

@@ -54,24 +54,11 @@ export function BoardMovedPill({ techCardId }: { techCardId: number }): JSX.Elem
 }
 
 /**
- * `drafted` — поле написано черновиком и человек его ещё не смотрел. Тон `attention`, тот же, что у
- * рамки `DraftedField`: одна и та же пометка не может быть чернильной в одной таблице и синей в
- * соседней. Рисует её тот, кто знает живость (`useDrafted().isLive`); сама пилюля ничего не читает.
+ * `drafted` — поле написано черновиком и человек его ещё не смотрел. С фиксапа волны пилюля живёт
+ * в `core/drafted-field.tsx` рядом с рамкой и сама принимает поле (кнопка, M3); здесь — реэкспорт
+ * для органов, которые брали её отсюда.
  */
-export function DraftedPill({
-  live,
-  ...rest
-}: {
-  live: boolean;
-  [k: string]: unknown;
-}): JSX.Element | null {
-  if (!live) return null;
-  return (
-    <Pill tone='attention' data-drafted-pill='' {...rest}>
-      drafted
-    </Pill>
-  );
-}
+export { DraftedPill } from '../core/drafted-field';
 
 /**
  * `LOCKED  причина  [дверь ›]` — единственная поверхность отказа макета. Продуктовый `LockBar`

@@ -4,8 +4,10 @@ import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 import type { DesignKind } from '../bench-kinds';
 import { benchSides, renderGate, threedGate, type Gate } from '../render/model';
 import {
+  draftInputGate,
   moodboardGate,
   moodGateSentence,
+  type MoodGateField,
   type MoodGateInput,
   type MoodGateResult,
 } from './mood-gate';
@@ -299,7 +301,27 @@ export type ChainGate =
       /** Where the refusal is fixed. Absent = no door to draw (e.g. the colourway select is already
        *  on the rail). */
       door?: StepId;
+      /** A refusal with SEVERAL parts, each fixed in its own place (the moodboard minimum): one
+       *  door per part, in the order of the sentence. When present it replaces `door` on screen. */
+      doors?: GateDoor[];
     };
+
+/**
+ * A DOOR TO THE FIELD THAT FIXES ONE PART OF A REFUSAL. Opened with `openGateDoor` — the field's
+ * step is brought on by the composer (`FIELD_REVEAL_EVENT`) and the field is scrolled to, no pulse.
+ */
+export type GateDoor = {
+  /** Which part of the refusal this door fixes. */
+  field: MoodGateField;
+  /** The step the field is drawn on. */
+  step: StepId;
+  /** The form path the step draws (`[data-field]` anchor). */
+  path: string;
+  /** The anchor to scroll to when the step draws no `[data-field]` for the path. */
+  fallback?: string;
+  /** The words on the door. */
+  label: string;
+};
 
 export type StepState = 'now' | 'done' | 'skipped' | 'optional' | 'blocked' | 'next' | 'ready';
 
@@ -315,30 +337,77 @@ export function moodGateOf(ctx: ChainCtx): MoodGateResult {
 }
 
 /**
- * Where a failed minimum is FIXED. The board's content is fixed on the moodboard; a missing category
- * is fixed in CARD DETAILS, where the category browser stands (GENERAL INFORMATION only prints it
- * since T05). Sending a person who lacks only the category to the moodboard would cost a second hop
- * through a door that says «edit in card details». The content reason comes first in
- * `moodboardGate`, so a card missing both is sent to the board first.
+ * ═══ EVERY PART OF A FAILED MINIMUM HAS ITS OWN DOOR (fix-up of the wave, Codex B1) ═════════════
+ *
+ * The picture is added on the BOARD, the description is written in DESCRIPTION — both on the
+ * moodboard step, but not in one place — and the category is picked in CARD DETAILS, where the
+ * category browser stands (GENERAL INFORMATION only prints it since T05). One door for all three
+ * sent a person lacking only the category to the moodboard, and one lacking only words to the top
+ * of the board. The order is the sentence's.
+ */
+const MOOD_DOORS: Record<MoodGateField, Omit<GateDoor, 'field'>> = {
+  board: { step: 'mood', path: 'moodboardMedia', fallback: '#mb-board', label: 'moodboard ›' },
+  concept: { step: 'mood', path: 'concept', label: 'description ›' },
+  category: {
+    step: 'card',
+    path: 'categoryId',
+    fallback: '#card-details',
+    label: 'card details ›',
+  },
+};
+
+export function moodGateDoors(r: MoodGateResult): GateDoor[] {
+  return r.missing.map((m) => ({ field: m.field, ...MOOD_DOORS[m.field] }));
+}
+
+/**
+ * The FIRST door's step — for a reader that draws one door only. Board content comes first in
+ * `moodboardGate`, so a card missing everything is sent to the board, one missing only the
+ * category to CARD DETAILS.
  */
 export function moodGateDoor(r: MoodGateResult): StepId {
-  const contentMissing = r.reasons.some((why) => !/category/i.test(why));
-  return contentMissing || r.reasons.length === 0 ? 'mood' : 'card';
+  return r.missing[0] ? MOOD_DOORS[r.missing[0].field].step : 'mood';
+}
+
+/** Opens a door: the composer brings the field's step on, the field is scrolled to, no pulse. */
+export function openGateDoor(d: Pick<GateDoor, 'path' | 'fallback'>): void {
+  openStepOf(d.path, d.fallback);
 }
 
 /**
  * ═══ THE MOODBOARD MINIMUM AS A GATE — for the flat's GENERATE (zone CL-D) and the draft's ═══════
  *
- * One call for a button that is about to spend money: the product's `Gate` shape plus the step the
- * refusal is fixed on. The rail locks FLAT with the SAME sentence (`chainGate('flat')` below), so the
+ * One call for a button that is about to spend money: the product's `Gate` shape, the step the
+ * refusal is fixed on first (`door`, kept for readers that draw one door) and one door per missing
+ * part (`doors`). The rail locks FLAT with the SAME sentence (`chainGate('flat')` below), so the
  * cell, the bar under the rail and the button can never disagree about why.
  */
-export function moodMinimumGate(
-  v: MoodGateInput,
-): { ok: true } | { ok: false; reason: string; door: StepId } {
-  const r = moodboardGate(v);
+export type MoodMinimum =
+  | { ok: true }
+  | { ok: false; reason: string; door: StepId; doors: GateDoor[]; missing: MoodGateField[] };
+
+export function moodMinimumGate(v: MoodGateInput): MoodMinimum {
+  return asMoodMinimum(moodboardGate(v));
+}
+
+/**
+ * The CONSTRUCTION DRAFT's own door (`draftInputGate`): something to READ — a board picture or the
+ * description — and the category. The draft is what writes the description; gating it on the full
+ * minimum would ask for its answer before the question. Same parts, same words, same doors.
+ */
+export function draftReadGate(v: MoodGateInput): MoodMinimum {
+  return asMoodMinimum(draftInputGate(v));
+}
+
+function asMoodMinimum(r: MoodGateResult): MoodMinimum {
   if (r.ok) return { ok: true };
-  return { ok: false, reason: moodGateSentence(r), door: moodGateDoor(r) };
+  return {
+    ok: false,
+    reason: moodGateSentence(r),
+    door: moodGateDoor(r),
+    doors: moodGateDoors(r),
+    missing: r.missing.map((m) => m.field),
+  };
 }
 
 /* ─────────────────────────── the gates, asked not written ─────────────────────────── */
@@ -370,7 +439,13 @@ export function chainGate(id: StepId, ctx: ChainCtx): ChainGate {
       // one door away) — so the step stays open; it is the NEXT link that locks (below).
       const r = moodGateOf(ctx);
       if (r.ok) return { ok: true };
-      return { ok: false, own: true, reason: moodGateSentence(r), door: moodGateDoor(r) };
+      return {
+        ok: false,
+        own: true,
+        reason: moodGateSentence(r),
+        door: moodGateDoor(r),
+        doors: moodGateDoors(r),
+      };
     }
     case 'flat': {
       // THE FLAT IS LOCKED UNTIL THE MOODBOARD MINIMUM HOLDS (D-10): a flat drawn from an empty board
@@ -379,7 +454,12 @@ export function chainGate(id: StepId, ctx: ChainCtx): ChainGate {
       // refusal (an empty prompt) stays local to its form and `own`, per SPEC §2 p.1.
       const r = moodGateOf(ctx);
       if (r.ok) return { ok: true };
-      return { ok: false, reason: moodGateSentence(r), door: moodGateDoor(r) };
+      return {
+        ok: false,
+        reason: moodGateSentence(r),
+        door: moodGateDoor(r),
+        doors: moodGateDoors(r),
+      };
     }
     case 'pattern':
       // `patternGate(band, sourceId)` needs the picked source: local to the screen, `own` by nature.
@@ -517,6 +597,8 @@ export type NearestBlock = {
   why: string;
   /** Where it is fixed, or null when the exit is already on the rail. */
   door: StepId | null;
+  /** One door per part when the refusal has several (the moodboard minimum); else empty. */
+  doors: GateDoor[];
 };
 
 /**
@@ -528,7 +610,9 @@ export function nearestBlock(ctx: ChainCtx): NearestBlock | null {
   for (const s of STEPS) {
     if (s.optional) continue;
     const g = chainGate(s.id, ctx);
-    if (!g.ok && !g.own) return { stepId: s.id, why: g.reason, door: g.door ?? null };
+    if (!g.ok && !g.own) {
+      return { stepId: s.id, why: g.reason, door: g.door ?? null, doors: g.doors ?? [] };
+    }
   }
   return null;
 }

@@ -1,5 +1,5 @@
 import { cn } from 'lib/utility';
-import { useId, type JSX, type ReactNode } from 'react';
+import { useId, useRef, type JSX, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
 import { AiEnhance, type EnhanceField } from 'ui/components/ai-enhance';
@@ -140,6 +140,7 @@ export function ConstructionGeneralInfo({
             placeholder='what this garment is, before how it is made'
             readOnly={readOnly}
             context={context}
+            techCardId={techCardId}
           />
         </div>
         <div className='min-w-0' data-c19-field-cell='fabric'>
@@ -149,6 +150,7 @@ export function ConstructionGeneralInfo({
             placeholder='the cloth this style is cut from'
             readOnly={readOnly}
             context={context}
+            techCardId={techCardId}
           />
         </div>
       </div>
@@ -228,7 +230,8 @@ function StyleFacts({ categoryPath }: { categoryPath: string }): JSX.Element {
   const fit = ((useWatch({ control, name: 'fit' }) as string | null | undefined) ?? '').trim();
   const categoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
   const fitShown = useFitKeys() !== null;
-  const fitDrafted = useDrafted().isLive(draftedKey.fit, fit);
+  const draftedApi = useDrafted();
+  const fitDrafted = draftedApi.isLive(draftedKey.fit, fit);
 
   return (
     <div
@@ -248,7 +251,11 @@ function StyleFacts({ categoryPath }: { categoryPath: string }): JSX.Element {
                 {fit ? fitLabel(fit) : '—'}
               </Text>
             </DraftedField>
-            <DraftedPill live={fitDrafted} data-c19-drafted='fit' />
+            <DraftedPill
+              live={fitDrafted}
+              onAccept={() => draftedApi.acceptKey(draftedKey.fit)}
+              data-c19-drafted='fit'
+            />
           </div>
         </div>
       )}
@@ -297,6 +304,7 @@ function DetailTextField({
   placeholder,
   readOnly,
   context,
+  techCardId,
 }: {
   detailKey: Extract<EnhanceField, 'silhouette' | 'fabric'>;
   label: string;
@@ -304,6 +312,8 @@ function DetailTextField({
   readOnly: boolean;
   /** Факты карточки для `ai ✦` (`cardFactsContext`). */
   context: string;
+  /** Чья карточка на экране — ответ `ai ✦` пишется только в неё (фиксап M5). */
+  techCardId: number;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const details = (useWatch({ control, name: 'details' }) ?? []) as Array<{
@@ -314,8 +324,14 @@ function DetailTextField({
   const value = details.find((d) => d.key === detailKey)?.text ?? '';
   const id = useId();
   const key = draftedKey.detail(detailKey);
-  const drafted = useDrafted().isLive(key, value);
+  const draftedApi = useDrafted();
+  const drafted = draftedApi.isLive(key, value);
   const settle = useAcceptOnEdit(key, value);
+  // ОТВЕТ `ai ✦` — ТОЛЬКО В ТУ КАРТОЧКУ, КОТОРАЯ ЕГО ПРОСИЛА (фиксап M5). Студия не размонтируется
+  // на переходе A → B, а запрос живёт секунды: без сверки текст A лёг бы в поле B. Кнопка к тому же
+  // пересоздаётся на смене карточки (`key`) — её запрос обрывается вместе с ней.
+  const shownCard = useRef(techCardId);
+  shownCard.current = techCardId;
 
   // ПИСАТЕЛЬ ОДИН НА ТРИ ПОВЕРХНОСТИ — `form-writers.ts`. Здесь стояла его первая копия (вторая
   // жила в `details-editor.tsx`, третья родилась бы в черновике construction); правило строки
@@ -343,15 +359,21 @@ function DetailTextField({
           onFocus={settle.onFocus}
           onBlur={settle.onBlur}
         />
+        {/* Легенда рамки — и есть «принять» этого поля (фиксап M3). */}
         <DraftedPill
           live={drafted}
+          onAccept={() => draftedApi.acceptKey(key)}
           data-c19-drafted={detailKey}
-          className='pointer-events-none absolute -top-2 right-2 bg-bgColor'
+          className='absolute -top-2 right-2 bg-bgColor'
         />
         <AiEnhance
+          key={techCardId}
           field={detailKey}
           value={value}
-          onApply={write}
+          onApply={(text) => {
+            if (shownCard.current !== techCardId) return;
+            write(text);
+          }}
           context={context}
           maxRunes={2000}
           disabled={readOnly}

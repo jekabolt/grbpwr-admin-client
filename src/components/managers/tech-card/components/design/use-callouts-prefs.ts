@@ -1,3 +1,4 @@
+import { useCurrentAccount } from 'components/managers/accounts/utils/hooks';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
@@ -13,6 +14,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  *
  * ПАТЧ ПОВЕРХ СВЕЖЕГО ЧТЕНИЯ, как у образца: писатель один, копит патч и сливает его с тем, что
  * лежит в хранилище СЕЙЧАС, — поле, записанное соседней вкладкой, не откатывается.
+ *
+ * ═══ КЛЮЧ — НА УЧЁТНУЮ ЗАПИСЬ, НЕ НА БРАУЗЕР (фиксап волны, ревью Codex N3) ═══════════════════════
+ *
+ * «На пользователя» значит на ЧЕЛОВЕКА: в одном браузере могут работать двое, и второй не должен
+ * получать чужую раскладку. Ключ — `plm.techcard.moodboard.callouts.<username>` (имя учётной
+ * записи из `GetCurrentAccount`, тот же запрос, что держит права). Пока учётная запись не известна,
+ * читается умолчание и ничего не пишется. Ключ без имени (первая редакция волны) переезжает к
+ * первой учётной записи, которая его прочтёт, и удаляется.
  */
 export type CalloutsPrefs = {
   /** Ширина раскрытой панели, px (от `lg`; ниже панель стоит под доской во всю ширину). */
@@ -25,8 +34,14 @@ export type CalloutsPrefs = {
   collapsed?: boolean;
 };
 
-/** Один ключ на пользователя: ни карточки, ни колорвея в нём нет намеренно. */
+/** Основа ключа; сам ключ — на учётную запись (`calloutsPrefsKey`). Ни карточки, ни колорвея. */
 export const CALLOUTS_PREFS_KEY = 'plm.techcard.moodboard.callouts';
+
+/** Ключ предпочтений этой учётной записи; `null`, пока она не известна. */
+export function calloutsPrefsKey(owner: string | null | undefined): string | null {
+  const who = (owner ?? '').trim().toLowerCase();
+  return who ? `${CALLOUTS_PREFS_KEY}.${who}` : null;
+}
 
 /** Дебаунс записи — разделитель рождает поток движений, а localStorage синхронный. */
 const WRITE_DELAY_MS = 400;
@@ -70,10 +85,22 @@ const num = (v: unknown): number | undefined =>
 
 const bool = (v: unknown): boolean | undefined => (typeof v === 'boolean' ? v : undefined);
 
-/** Чтение хранилища: берётся только то, что похоже на правду; испорченное — как отсутствующее. */
-export function readCalloutsPrefs(): CalloutsPrefs {
+/**
+ * Чтение хранилища: берётся только то, что похоже на правду; испорченное — как отсутствующее.
+ * Нет своего ключа, а есть безымянный (до фиксапа) — он переезжает сюда и удаляется.
+ */
+export function readCalloutsPrefs(key: string | null): CalloutsPrefs {
+  if (!key) return {};
   try {
-    const raw = localStorage.getItem(CALLOUTS_PREFS_KEY);
+    let raw = localStorage.getItem(key);
+    if (!raw) {
+      const legacy = localStorage.getItem(CALLOUTS_PREFS_KEY);
+      if (legacy) {
+        localStorage.setItem(key, legacy);
+        localStorage.removeItem(CALLOUTS_PREFS_KEY);
+        raw = legacy;
+      }
+    }
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Partial<CalloutsPrefs> | null;
     return { w: num(parsed?.w), collapsed: bool(parsed?.collapsed) };
@@ -88,9 +115,23 @@ export function readCalloutsPrefs(): CalloutsPrefs {
  * окне дебаунса иначе терял бы ровно то, что человек только что сделал).
  */
 export function useCalloutsPrefs() {
-  const [prefs, setPrefs] = useState<CalloutsPrefs>(readCalloutsPrefs);
+  const { data } = useCurrentAccount();
+  const key = calloutsPrefsKey(data?.account?.username);
 
-  const pending = useRef<CalloutsPrefs | null>(null);
+  // Предпочтения ТЕКУЩЕГО ключа. Ключ сменился (учётная запись пришла или сменилась) — читаются
+  // заново в том же рендере, без кадра чужой раскладки.
+  const [slot, setSlot] = useState<{ key: string | null; prefs: CalloutsPrefs }>(() => ({
+    key,
+    prefs: readCalloutsPrefs(key),
+  }));
+  let current = slot;
+  if (slot.key !== key) {
+    current = { key, prefs: readCalloutsPrefs(key) };
+    setSlot(current);
+  }
+
+  /** Патч и КЛЮЧ, под которым он сделан: смена учётной записи не переносит чужой жест. */
+  const pending = useRef<{ key: string; patch: CalloutsPrefs } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flush = useCallback(() => {
@@ -98,13 +139,13 @@ export function useCalloutsPrefs() {
       clearTimeout(timer.current);
       timer.current = null;
     }
-    const patch = pending.current;
+    const due = pending.current;
     pending.current = null;
-    if (!patch) return;
+    if (!due) return;
     try {
       localStorage.setItem(
-        CALLOUTS_PREFS_KEY,
-        JSON.stringify({ ...readCalloutsPrefs(), ...patch }),
+        due.key,
+        JSON.stringify({ ...readCalloutsPrefs(due.key), ...due.patch }),
       );
     } catch {
       // Квота или запрещённое хранилище: раскладка не переживёт перезагрузку, и только.
@@ -122,13 +163,17 @@ export function useCalloutsPrefs() {
   const set = useCallback(
     (patch: CalloutsPrefs) => {
       // Побочные эффекты — вне апдейтера: StrictMode зовёт апдейтеры дважды.
-      pending.current = { ...pending.current, ...patch };
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(flush, WRITE_DELAY_MS);
-      setPrefs((cur) => ({ ...cur, ...patch }));
+      if (key) {
+        if (pending.current && pending.current.key !== key) flush();
+        pending.current = { key, patch: { ...pending.current?.patch, ...patch } };
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(flush, WRITE_DELAY_MS);
+      }
+      // Учётная запись ещё не известна — жест действует на экране, но не пишется никуда.
+      setSlot((cur) => ({ key: cur.key, prefs: { ...cur.prefs, ...patch } }));
     },
-    [flush],
+    [flush, key],
   );
 
-  return { prefs, set };
+  return { prefs: current.prefs, set };
 }

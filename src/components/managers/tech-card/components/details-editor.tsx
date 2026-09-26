@@ -434,7 +434,8 @@ function AspectRow({
   // ярлыка и синяя рамка поля, пока текст — ровно тот, что написал черновик, и его не приняли.
   // Правка гасит обе сама; уход из поля после правки ставит запись принятой.
   const draftKey = draftedKey.detail(aspectKey);
-  const drafted = useDrafted().isLive(draftKey, text);
+  const draftedApi = useDrafted();
+  const drafted = draftedApi.isLive(draftKey, text);
   const settle = useAcceptOnEdit(draftKey, text);
   // ПРИЁМНИК РАЗМЕРОМ С РЯД. Раньше ⌘V и бросок ловил полосатый квадрат `+ image`; квадрата больше
   // нет, а жесты остались — теперь их принимает весь ряд аспекта, включая его текстовое поле.
@@ -463,7 +464,13 @@ function AspectRow({
         >
           {label}
         </Text>
-        <DraftedPill live={drafted} data-c19-prov={aspectKey} data-provenance='drafted' />
+        {/* Пилюля — и есть «принять» этого аспекта (фиксап M3): щелчок снимает пометку. */}
+        <DraftedPill
+          live={drafted}
+          onAccept={() => draftedApi.acceptKey(draftKey)}
+          data-c19-prov={aspectKey}
+          data-provenance='drafted'
+        />
         <Button
           type='button'
           variant='secondary'

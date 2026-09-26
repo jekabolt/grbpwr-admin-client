@@ -60,6 +60,10 @@ export function useDraftDesignIdea(techCardId?: number) {
  * не поломка, а состояние карточки: показывать это как «что-то сломалось» нельзя, потому что
  * чинить нечего — надо доложить картинок или написать описание.
  *
+ * ФРАЗА `no_moodboard` — ФРАЗА ГЕЙТА МИНИМУМА (фиксап N1). Своей формулировки здесь больше нет:
+ * вызывающий передаёт фразу своей двери, собранную `moodGateSentence` (`core/mood-gate.ts`) из тех
+ * же частей, что запирают FLAT на рельсе, — картинка на доске, 40 символов описания, категория.
+ *
  * ВТОРЫМ ЗДЕСЬ СТОЯЛ `budget_exceeded` («today’s generation budget is spent»). Такого отказа
  * больше НЕ СУЩЕСТВУЕТ: сервер снёс дневной потолок целиком — колонку, обе проверки и сам повод, —
  * по слову владельца «убери потолок». Ветка на несуществующий токен не защищает, а обещает
@@ -72,10 +76,8 @@ export function useDraftDesignIdea(techCardId?: number) {
  * одну фразу и отправил человека жать ту же кнопку до тех пор, пока он не бросит. Последняя
  * строка печатает сообщение сервера ДОСЛОВНО — это и есть правило волны.
  */
-export function draftIdeaRefusal(error: unknown): string {
+export function draftIdeaRefusal(error: unknown, moodSentence: string): string {
   const message = (error as Error | null)?.message ?? '';
-  if (message.includes('no_moodboard')) {
-    return 'there is nothing to read: put a picture on the moodboard or write the description';
-  }
+  if (message.includes('no_moodboard')) return moodSentence;
   return message || 'the draft did not come back';
 }

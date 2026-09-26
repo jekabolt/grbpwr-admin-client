@@ -628,9 +628,15 @@ export function MoodBoard({
   // ОПИСАНИЕ — ТЕ ЖЕ ДВА ОРГАНА ВОЛНЫ, ЧТО У ПОЛЕЙ GENERAL INFORMATION: синяя рамка `drafted`,
   // пока в поле стоит текст черновика и его не приняли, и `ai ✦` в правом нижнем углу.
   const conceptValue = (concept.field.value as string | null | undefined) ?? '';
-  const conceptDrafted = useDrafted().isLive(draftedKey.concept, conceptValue);
+  const draftedApi = useDrafted();
+  const conceptDrafted = draftedApi.isLive(draftedKey.concept, conceptValue);
   const conceptSettle = useAcceptOnEdit(draftedKey.concept, conceptValue);
   const facts = useCardFacts(isBoardRow);
+  // ОТВЕТ `ai ✦` — ТОЛЬКО В ТУ КАРТОЧКУ, КОТОРАЯ ЕГО ПРОСИЛА (фиксап M5): доска на переходе A → B не
+  // размонтируется, запрос живёт секунды. Кнопка пересоздаётся на смене карточки (`key`), а запись
+  // сверяет карточку на экране с той, чей рендер отдал колбэк.
+  const shownCard = useRef(techCardId);
+  shownCard.current = techCardId;
 
   /* ═══ ПОРЯДОК ЭКРАНА — МАКЕТА, БЛОК ЗА БЛОКОМ (`_step-mood.js`, RENDER['step-mood']) ═══════════
      Здесь был ОДИН блок доски, внутри которого лежали лента, описание и черновик, а справа —
@@ -1054,10 +1060,14 @@ export function MoodBoard({
               question='— pinned on the board, not numbered'
               action={
                 <span className='flex items-center gap-2'>
-                  {/* Ноль — пунктир «ещё нет», не красный: пустая доска не убыток (D-12). */}
-                  <Pill tone={calloutCount ? 'mut' : 'gap'} data-mb-callout-count=''>
-                    {calloutCount} on the board
-                  </Pill>
+                  {/* Счётчик — только когда считать есть что (фиксап N2, O-20 «не должно быть
+                      0 ON THE BOARD»). Ноль не рисуется ни красным, ни пунктиром: пустую панель и так
+                      видно, а свёрнутая полоска и без него говорит `callouts · 0`. */}
+                  {calloutCount > 0 && (
+                    <Pill tone='mut' data-mb-callout-count=''>
+                      {calloutCount} on the board
+                    </Pill>
+                  )}
                   <button
                     ref={collapseDoor}
                     type='button'
@@ -1147,10 +1157,11 @@ export function MoodBoard({
                 concept & construction description
               </Text>
             </label>
-            {/* ВОЛНА 25.09: рамка `drafted` (описание пишет и черновик — только в пустое поле) и
-                `ai ✦` в правом нижнем углу (T08/T16). Своя кромка поля снята, пока горит рамка, —
-                текст не сдвигается, когда её снимают; `pb-7` держит последнюю строку над кнопкой.
-                Пилюля `drafted` стоит на верхнем крае рамки, как легенда. */}
+            {/* ВОЛНА 25.09: рамка `drafted` (описание пишет и черновик — с фиксапа M1 и поверх
+                написанного, с `before` в журнале) и `ai ✦` в правом нижнем углу (T08/T16). Своя
+                кромка поля снята, пока горит рамка, — текст не сдвигается, когда её снимают; `pb-7`
+                держит последнюю строку над кнопкой. Пилюля `drafted` стоит на верхнем крае рамки,
+                как легенда, и она же принимает поле (фиксап M3). */}
             <DraftedField
               live={conceptDrafted}
               pill={false}
@@ -1171,17 +1182,21 @@ export function MoodBoard({
                   conceptSettle.onBlur();
                 }}
               />
+              {/* Легенда рамки — и есть «принять» описания (фиксап M3). */}
               <DraftedPill
                 live={conceptDrafted}
+                onAccept={() => draftedApi.acceptKey(draftedKey.concept)}
                 data-mb-concept-drafted=''
-                className='pointer-events-none absolute -top-2 right-2 bg-bgColor'
+                className='absolute -top-2 right-2 bg-bgColor'
               />
               <AiEnhance
+                key={techCardId}
                 field='description'
                 value={conceptValue}
-                onApply={(text) =>
-                  setValue('concept', text, { shouldDirty: true, shouldValidate: true })
-                }
+                onApply={(text) => {
+                  if (shownCard.current !== techCardId) return;
+                  setValue('concept', text, { shouldDirty: true, shouldValidate: true });
+                }}
                 context={cardFactsContext(facts)}
                 maxRunes={CONCEPT_MAX}
                 disabled={readOnly}
