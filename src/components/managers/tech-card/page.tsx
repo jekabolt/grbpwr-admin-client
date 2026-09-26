@@ -11,7 +11,7 @@ export function TechCard() {
   const { id } = useParams<{ id: string }>();
   const isEditMode = !!id;
   const numId = id ? parseInt(id, 10) : undefined;
-  const { data, isLoading, isError } = useTechCard(numId);
+  const { data, isLoading } = useTechCard(numId);
 
   if (isEditMode && isLoading) {
     return (
@@ -23,7 +23,9 @@ export function TechCard() {
     );
   }
 
-  if (isEditMode && (isError || !data)) {
+  // `!data` only: a REFETCH that fails keeps the card it had (TanStack keeps `data`, sets `isError`), and
+  // taking the editor away then — mid-save, under the operator's unsaved work — is not «not found».
+  if (isEditMode && !data) {
     return (
       <div className='flex flex-col items-center gap-4 py-20'>
         <Text variant='inactive' className='uppercase'>

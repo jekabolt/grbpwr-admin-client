@@ -74,12 +74,8 @@ export const COMMIT_ORDER = {
 export type CommitOutcome = {
   /** Changes that committed, in the order they went. */
   committed: StagedChange[];
-  /**
-   * The one that refused, if any. Everything from here on stays staged. `startedAt` (Date.now()) is
-   * when ITS commit began: a mutation submitted before it is not this panel's (R-5 — the caller reads
-   * a rewrapped 409 off the mutations this commit submitted, and only those).
-   */
-  failed?: { change: StagedChange; error: unknown; startedAt: number };
+  /** The one that refused, if any. Everything from here on stays staged. */
+  failed?: { change: StagedChange; error: unknown };
   /**
    * A TRUE re-stage: a panel this run committed that is queued again at its end — edited while its
    * own commit was in flight (the newer values are still staged), or re-staged after it settled. The
@@ -307,13 +303,12 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
           // Read AFTER picking the change, so an edit that landed while an EARLIER commit was in
           // flight (already folded into `change` above) does not read as a mid-flight edit here.
           const genBefore = stageGen.current.get(change.key);
-          const startedAt = Date.now();
           try {
             await change.commit();
           } catch (error) {
             // Stop. Everything not yet committed stays staged, including this one — the caller
             // names it in the partial-failure banner.
-            return { committed, failed: { change, error, startedAt }, restaged };
+            return { committed, failed: { change, error }, restaged };
           }
           committed.push(change);
           if (stageGen.current.get(change.key) !== genBefore) {

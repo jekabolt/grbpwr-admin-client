@@ -11,6 +11,9 @@
 //       она восстановлена из черновика-JSON (у профиля пресса без пара ключа `pressSteam` там нет, а
 //       маппер отдаёт его присутствующим `undefined`); карта грязного — разреженная (R-8). Настоящий
 //       RHF (createFormControl) и настоящий маппер схемы;
+//   (8) хелперы записи: «грязно ли что-то под узлом» по полной карте RHF (m4); отказ панели — только
+//       её собственный, в той же задаче (m2); сдвинулось ли ТЕЛО между двумя чтениями карточки (M-3);
+//       работа тела формы без фактов стиля (M2);
 //   (7) панель, которую правят во время каждого её коммита, не упирается в потолок `restaged` —
 //       потолок держит только панель, перестейдживающую саму себя (R-9); flush, не дождавшийся
 //       тишины, отвечает `busy` (R-10); работа, возникшая раньше машины, взводится при создании
@@ -118,6 +121,66 @@ const MUTANTS = {
   // (7c) ОТКАТ R-12: работа, возникшая до машины, ждёт следующей правки под «idle»
   noArmAtCreation: [
     [`${C}/useTechCardAutosave.ts`, 'if (deps.isEnabled() && deps.hasWork()) {', 'if (false) {'],
+  ],
+  // (7f) ОТКАТ m7: работа до машины без человека за ней всё равно пишется при открытии
+  mountDirtArmed: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "    if (deps.armAtCreation?.() ?? true) arm(deps.debounceMs, 'debounce');",
+      "    arm(deps.debounceMs, 'debounce');",
+    ],
+  ],
+  // (7g) ОТКАТ m9: цикл, пришедшийся на паузу, конец паузы не взводит
+  noResume: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      '      if (disposed || !skippedWhilePaused) return;',
+      '      return;',
+    ],
+  ],
+  // (8a) ОТКАТ m4: массив под узлом — «грязно», что бы в нём ни было
+  anyDirtyArrays: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      'if (Array.isArray(node)) return node.some(anyDirty);',
+      'if (Array.isArray(node)) return true;',
+    ],
+  ],
+  // (8b) ОТКАТ m2: отказ мутации помнится и после своей задачи — чужой 409 приписывается панели
+  failureOutlivesItsTask: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      '    setTimeout(() => {\n      if (last === failure) last = null;\n    }, 0);\n',
+      '',
+    ],
+  ],
+  // (8c) ОТКАТ M-3: тело «не сдвигается» никогда — чужая запись принимается молча
+  bodyNeverMoves: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      '  const echo = to.techCard;\n  return !deepEqual(',
+      '  const echo = to.techCard;\n  return false && !deepEqual(',
+    ],
+  ],
+  // (8d) ключи строк без ключа не прикалываются — два чтения одной карточки «расходятся» на ULID
+  keysNotPinned: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      '      mapTechCardToForm(pinRowKeys(card)),',
+      '      mapTechCardToForm(card),',
+    ],
+  ],
+  // (8e) факты стиля считаются движением тела
+  styleOwnedCounted: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      '  for (const k of STYLE_OWNED_INSERT_KEYS) delete wire[k];\n',
+      '',
+    ],
+  ],
+  // (8f) ОТКАТ M2: факт стиля — работа тела, и форма с ним не затихает никогда
+  styleFactsAreBodyWork: [
+    [`${C}/useTechCardAutosave.ts`, '    if (STYLE_FACTS.has(key)) continue;\n', ''],
   ],
   // (7d) ОТКАТ R-7: исход чужой записи машине не сообщается
   externalIgnored: [
@@ -729,11 +792,12 @@ async function promise7(mod) {
   const answer = await r.m.flush('paid door');
   out.neverQuietFlushIsBusy = answer === 'busy' && r.saves === 5;
 
-  // R-12 · work that was there before the machine (a child's effect on the first render): armed at
-  // creation, written at 2 s — not left under «idle» until the next edit
+  // R-12 · work that was there before the machine, with a person behind it (an organ asked early):
+  // armed at creation, written at 2 s — not left under «idle» until the next edit
   let dirty = true;
   r = bareRig(mod, (rig) => ({
     hasWork: () => dirty,
+    armAtCreation: () => true,
     save: async () => {
       rig.saves += 1;
       dirty = false;
@@ -744,6 +808,59 @@ async function promise7(mod) {
   await r.clock.advance(2000);
   out.workBeforeMachineIsWritten =
     armedAtCreation && r.saves === 1 && r.m.state().status === 'saved';
+
+  // m7 · the same work with nobody behind it (a child dirtied the form on mount): the chip says «dirty»
+  // at once, but opening the card writes nothing — the first change arms it
+  dirty = true;
+  r = bareRig(mod, (rig) => ({
+    hasWork: () => dirty,
+    armAtCreation: () => false,
+    save: async () => {
+      rig.saves += 1;
+      dirty = false;
+      return { outcome: 'complete' };
+    },
+  }));
+  const shownDirty = r.m.state().status === 'dirty';
+  await r.clock.advance(5000);
+  const quietOnOpen = r.saves === 0;
+  r.m.notifyChange();
+  await r.clock.advance(2000);
+  out.mountDirtWaitsForAPerson = shownDirty && quietOnOpen && r.saves === 1;
+
+  // m9 · a cycle comes due while the convert dialog holds the page: nothing written, nothing armed; the
+  // pause ends → it is armed then, and the work is written — not left at «dirty» for good
+  dirty = true;
+  let paused = true;
+  r = bareRig(mod, (rig) => ({
+    hasWork: () => dirty,
+    isPaused: () => paused,
+    armAtCreation: () => false,
+    save: async () => {
+      rig.saves += 1;
+      dirty = false;
+      return { outcome: 'complete' };
+    },
+  }));
+  r.m.notifyChange();
+  await r.clock.advance(2000);
+  const heldWhilePaused = r.saves === 0;
+  paused = false;
+  r.m.resume();
+  await r.clock.advance(2000);
+  // …and a pause no cycle came due under ends with nothing re-opened
+  const r2 = bareRig(mod, (rig) => ({
+    hasWork: () => true,
+    armAtCreation: () => false,
+    save: async () => {
+      rig.saves += 1;
+      return { outcome: 'needs-confirm' };
+    },
+  }));
+  r2.m.resume();
+  await r2.clock.advance(5000);
+  out.pausedCycleResumes =
+    heldWhilePaused && r.saves === 1 && r.m.state().status === 'saved' && r2.saves === 0;
 
   // R-7 · the convert: an explicit save handed its write to the dialog (needs-confirm); the dialog's
   // own write lands and leaves the card quiet → «saved» and the quiet-card bookkeeping, at once
@@ -759,6 +876,97 @@ async function promise7(mod) {
   r.m.settleExternal({ outcome: 'complete' }, 'convert');
   out.externalWriteSettlesStatus =
     heldForDialog && r.m.state().status === 'saved' && r.completes.join() === 'convert';
+  return out;
+}
+
+// ─── (8) хелперы записи: anyDirty / чей отказ / сдвинулось ли тело / работа тела (m4 / m2 / M-3 / M2) ─
+const tick = () => new Promise((r) => setTimeout(r, 5));
+const conflict409 = () => Promise.reject(Object.assign(new Error('moved on'), { status: 409 }));
+const BODY_CARD = (tc = {}, top = {}) => ({
+  id: 7,
+  lockVersion: 3,
+  techCard: {
+    name: 'parka',
+    styleNumber: 'ST-042',
+    stage: 'TECH_CARD_STAGE_IDEA',
+    approvalState: 'TECH_CARD_APPROVAL_STATE_DRAFT',
+    concept: 'mine',
+    ...tc,
+  },
+  ...top,
+});
+
+async function promise8(mod) {
+  const out = {};
+  // m4 · RHF's full map after a field-array operation: nothing dirty under `moodboardMedia: []`
+  out.fullMapEmptyArrayIsClean =
+    !mod.anyDirty({ moodboardMedia: [], name: false, pieces: [{ name: false }] }) &&
+    mod.anyDirty({ pieces: [{ name: false }, { area: true }] });
+
+  // m2 · the failure a panel re-throws is read in its own task; another mutation's 409 a moment
+  // earlier, and a panel failing before any mutation, find nothing
+  const qc = new mod.QueryClient();
+  const cache = qc.getMutationCache();
+  const w = mod.watchOwnFailure(cache);
+  const panel = async () => {
+    try {
+      await cache.build(qc, { mutationFn: conflict409, retry: false }).execute();
+    } catch (e) {
+      throw new Error(`the recipe was not saved: ${e.message}`); // the panels' rewrap, no status
+    }
+  };
+  let own = null;
+  try {
+    await panel();
+  } catch {
+    own = w.current();
+  }
+  await cache
+    .build(qc, { mutationFn: conflict409, retry: false })
+    .execute()
+    .catch(() => {});
+  await tick();
+  const failedWithoutMutation = async () => {
+    await tick();
+    throw new Error('the colourway version could not be read');
+  };
+  let foreign = 'unread';
+  try {
+    await failedWithoutMutation();
+  } catch {
+    foreign = w.current();
+  }
+  w.stop();
+  out.ownFailureOnlyInItsTask = own?.conflict === true && foreign === null;
+
+  // M-3 · two readings of the card: only what a body write would carry counts as a move
+  const from = BODY_CARD({
+    costing: { currency: 'EUR', notes: 'as read' },
+    bomItems: [{ name: 'shell' }],
+  });
+  const bump = (tc, top) => BODY_CARD({ ...from.techCard, ...tc }, { lockVersion: 4, ...top });
+  out.satelliteBumpIsNoMove = !mod.bodyMoved(
+    from,
+    bump({}, { colorways: [{ colorwayId: 1 }], markers: [{ id: 2 }] }),
+    true,
+  );
+  out.foreignConceptIsAMove = mod.bodyMoved(from, bump({ concept: 'theirs' }), true);
+  out.styleFactIsNoMove = !mod.bodyMoved(
+    from,
+    bump({ brand: 'ACME', skuSeason: { code: 'SEASON_ENUM_FW', year: 2027 } }),
+    true,
+  );
+  out.costingByWhoWritesIt =
+    !mod.bodyMoved(from, bump({ costing: { currency: 'EUR', notes: 'theirs' } }), false) &&
+    mod.bodyMoved(from, bump({ costing: { currency: 'EUR', notes: 'theirs' } }), true);
+  out.keylessRowsCompare = !mod.bodyMoved(from, bump({}), true);
+
+  // M2 · a style fact is not the body's work; any other field is
+  const form = formFor(mod, mod.mapTechCardToForm(BODY_CARD()));
+  form.setValue('fit', 'FIT_SLIM', { shouldDirty: true });
+  const styleOnly = mod.liveIsDirty(form) && !mod.bodyWorkOf(form);
+  form.setValue('name', 'parka 2', { shouldDirty: true });
+  out.styleFactIsNotBodyWork = styleOnly && mod.bodyWorkOf(form);
   return out;
 }
 
@@ -789,6 +997,7 @@ report('(4) flush over deferred writes', await promise4(real));
 report('(5) conflict / revert / dispose', await promise5(real));
 report('(6) settle after a save (real RHF, real mapper)', promise6(real));
 report('(7) restaged cap / busy / work before the machine / external write', await promise7(real));
+report('(8) anyDirty / own failure / body moved / body work', await promise8(real));
 // sanity for the shortcut: ⌘S on a Russian layout gives e.key 'ы' — the physical key decides
 const kb = real.isSaveShortcut;
 report('keyboard', {
@@ -861,9 +1070,37 @@ report('(7) mutant capSaysError', await promise7(await load('capSaysError')), [
 ]);
 report('(7) mutant noArmAtCreation', await promise7(await load('noArmAtCreation')), [
   'workBeforeMachineIsWritten',
+  'mountDirtWaitsForAPerson',
 ]);
 report('(7) mutant externalIgnored', await promise7(await load('externalIgnored')), [
   'externalWriteSettlesStatus',
+]);
+report('(7) mutant mountDirtArmed', await promise7(await load('mountDirtArmed')), [
+  'mountDirtWaitsForAPerson',
+  'pausedCycleResumes',
+]);
+report('(7) mutant noResume', await promise7(await load('noResume')), ['pausedCycleResumes']);
+report('(8) mutant anyDirtyArrays', await promise8(await load('anyDirtyArrays')), [
+  'fullMapEmptyArrayIsClean',
+]);
+report('(8) mutant failureOutlivesItsTask', await promise8(await load('failureOutlivesItsTask')), [
+  'ownFailureOnlyInItsTask',
+]);
+report('(8) mutant bodyNeverMoves', await promise8(await load('bodyNeverMoves')), [
+  'foreignConceptIsAMove',
+  'costingByWhoWritesIt',
+]);
+report('(8) mutant keysNotPinned', await promise8(await load('keysNotPinned')), [
+  'satelliteBumpIsNoMove',
+  'styleFactIsNoMove',
+  'costingByWhoWritesIt',
+  'keylessRowsCompare',
+]);
+report('(8) mutant styleOwnedCounted', await promise8(await load('styleOwnedCounted')), [
+  'styleFactIsNoMove',
+]);
+report('(8) mutant styleFactsAreBodyWork', await promise8(await load('styleFactsAreBodyWork')), [
+  'styleFactIsNotBodyWork',
 ]);
 
 console.log(

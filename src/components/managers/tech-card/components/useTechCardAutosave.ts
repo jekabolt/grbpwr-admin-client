@@ -1,7 +1,10 @@
+import type { MutationCache } from '@tanstack/react-query';
+import type { common_TechCard, common_TechCardInsert } from 'api/proto-http/admin';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { UseFormReturn } from 'react-hook-form';
 import type { AutosaveApi, AutosaveStatus, FlushResult } from './design/autosave-contract';
-import type { TechCardFormData } from './schema';
+import { mapFormToTechCardInsert, mapTechCardToForm, type TechCardFormData } from './schema';
+import { STYLE_FACT_KEYS } from './tech-card-options';
 
 /**
  * ═══ АВТОСЕЙВ КАРТОЧКИ (волна 25.09 · T21 · D-16/D-16' · ревью Codex B-02/B-03/M-02/M-03) ═══════
@@ -29,7 +32,11 @@ import type { TechCardFormData } from './schema';
  *     повторов. Жест оператора (ввод, клавиша, нажатие) счёт обнуляет: человек, который правит, пока
  *     идёт запись, — не петля (R-9). Flush, упёршийся в потолок, тоже слышит `busy` (R-10);
  *   · работа, появившаяся раньше самой машины (эффект ребёнка испачкал форму на первом рендере, до
- *     подписки), взводит дебаунс при создании, а не ждёт следующей правки (R-12);
+ *     подписки), видна сразу — статус `dirty` при создании (R-12); дебаунс при этом взводится, только
+ *     если за работой стоит человек (жест, явная просьба), — открытие карточки само не пишет (m7);
+ *   · правка формы доходит до машины микрозадачей позже события: `reset` RHF 7.62 шлёт значения
+ *     РАНЬШЕ, чем пересчитывает isDirty, и решение по событию видело бы прежнюю чистоту (ревью B-1);
+ *   · цикл, пришедшийся на паузу (диалог перевода), взводится концом паузы (m9);
  *   · запись, которую ведёт не машина (перевод в auxiliary после диалога), сообщает ей исход
  *     `settleExternal` — статус и уборка тихой карточки кончаются там же, где запись (R-7);
  *   · ошибка → повторы через 5 / 15 / 45 с, потом `not saved · retry`;
@@ -123,6 +130,12 @@ export type MachineDeps = {
    * жеста за спиной — эхо её собственного коммита; с жестом — правка человека (R-9).
    */
   operatorGen?: () => number;
+  /**
+   * Взводить ли дебаунс над работой, которая была раньше самой машины (R-12). Только если за ней стоит
+   * человек — жест оператора или явная просьба органа: дочерний эффект, испачкавший форму на
+   * монтировании, — не правка, и открытие карточки не пишет её (ревью m7). Без ответа — взводить.
+   */
+  armAtCreation?: () => boolean;
 };
 
 /**
@@ -148,6 +161,13 @@ export type AutosaveMachine = {
    * руках — ход вперёд, отказ — свой статус (R-7).
    */
   settleExternal: (r: SaveResult, reason: string) => void;
+  /**
+   * Пауза кончилась (диалог перевода закрыт, перевод дописан). Цикл, который пришёлся на паузу, не
+   * писал и ничего не взвёл, — он взводится сейчас, иначе статус так и стоит `dirty` без записи
+   * (ревью m9). Паузу, на которую не пришёлся ни один цикл, конец паузы не трогает: отменённый диалог
+   * не открывается снова сам.
+   */
+  resume: () => void;
   /** Включение/выключение (режим создания, frozen, права). */
   setEnabled: (enabled: boolean) => void;
   dispose: () => void;
@@ -179,6 +199,8 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
   let changeGen = 0;
   // R-9: the operator's gestures as of the last change heard (see notifyChange).
   let heardOperatorGen = deps.operatorGen?.();
+  // m9: a cycle came due while the convert dialog held the page — it wrote nothing and armed nothing.
+  let skippedWhilePaused = false;
 
   const set = (patch: Partial<MachineState>) => {
     const next = { ...state, ...patch };
@@ -224,8 +246,12 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       set({ status: 'off' });
       return 'off';
     }
-    // Диалог перевода в auxiliary открыт: запись, которую он перехватил, он же и повторит.
-    if (deps.isPaused()) return 'needs-confirm';
+    // Диалог перевода в auxiliary открыт: запись, которую он перехватил, он же и повторит. Цикл,
+    // пришедшийся на паузу, запоминается — его взведёт конец паузы (m9).
+    if (deps.isPaused()) {
+      skippedWhilePaused = true;
+      return 'needs-confirm';
+    }
     // M-01: 409 держит ВСЕ записи, явные тоже. Выходы — только двери модалки (см. шапку файла).
     if (state.status === 'conflict') return 'conflict';
     if (!deps.hasWork()) {
@@ -383,9 +409,11 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
   // R-12: work that exists before the machine does — a child's effect dirtied the form on the first
   // render, before `form.watch` subscribed — is armed now instead of waiting under «idle» for the next
   // edit.
+  // m7: the status says so at once (the chip does not claim «saved» over a form that differs), but the
+  // write waits for a person — a gesture or an explicit request — unless the caller does not say.
   if (deps.isEnabled() && deps.hasWork()) {
     state = { ...state, status: 'dirty' };
-    arm(deps.debounceMs, 'debounce');
+    if (deps.armAtCreation?.() ?? true) arm(deps.debounceMs, 'debounce');
   }
 
   return {
@@ -446,6 +474,20 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
     settleExternal: (r, reason) => {
       if (disposed || !deps.isEnabled()) return;
       settle(r, reason);
+    },
+
+    resume: () => {
+      if (disposed || !skippedWhilePaused) return;
+      skippedWhilePaused = false;
+      if (!deps.isEnabled() || state.status === 'conflict' || running) return;
+      if (!deps.hasWork()) {
+        restIfNoWork();
+        return;
+      }
+      if (state.status === 'saved' || state.status === 'idle' || state.status === 'error') {
+        set({ status: 'dirty', message: undefined, retrying: undefined });
+      }
+      arm(deps.debounceMs, 'resume');
     },
 
     resolveConflict: () => {
@@ -593,6 +635,161 @@ export function sparseDirtyFields(node: unknown): unknown {
   return undefined;
 }
 
+/**
+ * «Is anything under this dirty?» — over the sparse map AND over RHF's full one (ревью m4). RHF rebuilds
+ * the FULL map on a field-array operation or `setValue(arrayRoot, …, { shouldDirty })`: every leaf
+ * present, `false` included, `[]` for an array with nothing dirty in it — and `!![]` is true. A reader
+ * asking `!!dirtyFields.moodboardMedia` gets «dirty» over a board nobody touched; this one does not.
+ */
+export function anyDirty(node: unknown): boolean {
+  if (node === true) return true;
+  if (Array.isArray(node)) return node.some(anyDirty);
+  if (node && typeof node === 'object') return Object.values(node).some(anyDirty);
+  return false;
+}
+
+// ─── WHOSE 409 (B-06 / R-5 / m2) ────────────────────────────────────────────────────────────────
+
+const httpStatus = (x: unknown) => (x as { status?: number } | null | undefined)?.status;
+const causeOf = (e: unknown) => (e as { cause?: unknown } | null | undefined)?.cause;
+
+/** A 409 — on the error itself, or on the one a panel wrapped into its own sentence (`cause`). */
+export function isConflictError(e: unknown): boolean {
+  return httpStatus(e) === 409 || httpStatus(causeOf(e)) === 409;
+}
+
+/** Whether the error still says what the server answered (a panel's rewrap into a sentence drops it). */
+export function hasHttpStatus(e: unknown): boolean {
+  return typeof httpStatus(e) === 'number' || typeof httpStatus(causeOf(e)) === 'number';
+}
+
+/**
+ * THE FAILURE A REFUSING PANEL IS RE-THROWING RIGHT NOW (ревью m2).
+ *
+ * The recipe, lab-dip and sample panels catch their mutation's error and re-throw a sentence of their
+ * own, without the HTTP status. TanStack notifies the mutation cache of the failure synchronously, in
+ * the same task as the rejection those panels re-throw from (their catch is synchronous) — so the
+ * failure this watcher holds is that panel's only while the task lasts: a timer of 0 forgets it. A
+ * panel that fails before any mutation (its version read, a check of its own) finds nothing here, and
+ * another mutation of the page failing a second earlier is not taken for it — the window the previous
+ * rule used («any failure submitted since the commit began») did take it.
+ */
+export function watchOwnFailure(cache: MutationCache): {
+  current: () => { conflict: boolean } | null;
+  stop: () => void;
+} {
+  let last: { conflict: boolean } | null = null;
+  const stop = cache.subscribe((event) => {
+    if (event.type !== 'updated' || event.action.type !== 'error') return;
+    const failure = { conflict: isConflictError(event.action.error) };
+    last = failure;
+    setTimeout(() => {
+      if (last === failure) last = null;
+    }, 0);
+  });
+  return { current: () => last, stop };
+}
+
+// ─── DID THE BODY MOVE (M-3) ──────────────────────────────────────────────────────────────────
+
+/**
+ * The style facts the card body carries but UpdateTechCard does not write (R4/§14.7 — UpdateStyle owns
+ * brand, sku_season, collection and target_gender; techcard.go). A move there is never overwritten by a
+ * body write, so it is not a move of the body.
+ */
+const STYLE_OWNED_INSERT_KEYS = ['brand', 'collection', 'targetGender', 'skuSeason'] as const;
+
+/**
+ * Rows whose key a mapper MINTS when it is empty (the read mapper for BOM lines and pieces, the write
+ * mapper for equipment profiles) — pinned by position on the stored card, so two readings compare.
+ */
+function pinRowKeys(card: common_TechCard): common_TechCard {
+  const tc = card.techCard;
+  if (!tc) return card;
+  const pin = <T>(rows: T[] | undefined, key: string, tag: string): T[] | undefined =>
+    rows?.map((r, i) =>
+      String((r as Record<string, unknown>)?.[key] ?? '').trim()
+        ? r
+        : ({ ...r, [key]: `${tag}${i}` } as T),
+    );
+  const eq = tc.construction?.equipmentDefaults;
+  return {
+    ...card,
+    techCard: {
+      ...tc,
+      bomItems: pin(tc.bomItems, 'lineKey', 'bom#'),
+      pieces: pin(tc.pieces, 'lineKey', 'piece#'),
+      ...(tc.construction && eq
+        ? {
+            construction: {
+              ...tc.construction,
+              equipmentDefaults: {
+                ...eq,
+                machines: pin(eq.machines, 'profileKey', 'machine#'),
+                presses: pin(eq.presses, 'profileKey', 'press#'),
+              },
+            },
+          }
+        : {}),
+    },
+  };
+}
+
+/** The body a write built on `card` would put on the wire, `echo` standing in for the stored fields it echoes. */
+function bodyOnTheWire(
+  card: common_TechCard,
+  echo: common_TechCardInsert | undefined,
+  canWriteCosting: boolean,
+): Record<string, unknown> {
+  const wire = {
+    ...(mapFormToTechCardInsert(
+      mapTechCardToForm(pinRowKeys(card)),
+      echo,
+      canWriteCosting,
+    ) as unknown as Record<string, unknown>),
+  };
+  for (const k of STYLE_OWNED_INSERT_KEYS) delete wire[k];
+  return wire;
+}
+
+/**
+ * DID THE CARD'S BODY MOVE BETWEEN TWO READINGS — would a body write built on `from` put back something
+ * `to` has? (ревью M-3.) Both readings go through the SAME write mapper, with the same echo (`to`'s
+ * stored insert), so exactly what the PUT would carry is compared and nothing else: a panel's lock
+ * bump, a roll-up, a colourway, a style fact — all move the version, none moves the body.
+ */
+export function bodyMoved(
+  from: common_TechCard,
+  to: common_TechCard,
+  canWriteCosting: boolean,
+): boolean {
+  const echo = to.techCard;
+  return !deepEqual(
+    bodyOnTheWire(from, echo, canWriteCosting),
+    bodyOnTheWire(to, echo, canWriteCosting),
+  );
+}
+
+const STYLE_FACTS: ReadonlySet<string> = new Set(STYLE_FACT_KEYS);
+
+/**
+ * THE FORM'S WORK A BODY WRITE CAN CARRY (CL-C re-review M2). Every field but the style facts: the body
+ * never writes them — the style panel does, and only while it is staged, when the queue is the work.
+ * A fact dirtied by a path that does not stage it (the care mirror, a draft, an account without
+ * products:write) keeps its baseline through body saves, and must not be a cycle the autosave runs
+ * every two seconds, or a flush that never goes quiet.
+ */
+export function bodyWorkOf(form: UseFormReturn<TechCardFormData>): boolean {
+  if (!liveIsDirty(form)) return false;
+  const values = form.getValues() as Record<string, unknown>;
+  const baseline = form.control._defaultValues as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(values), ...Object.keys(baseline)])) {
+    if (STYLE_FACTS.has(key)) continue;
+    if (!deepEqual(values[key], baseline[key])) return true;
+  }
+  return false;
+}
+
 type ServerLists = Pick<TechCardFormData, 'signoffs' | 'patterns' | 'bomItems'>;
 
 /**
@@ -719,6 +916,24 @@ export type AutosaveController = AutosaveApi & {
   settleExternal: (r: SaveResult, reason: string) => void;
   /** При `error`: идут ли ещё автоматические повторы. */
   retrying?: boolean;
+  /**
+   * Жесты оператора (R-9, ревью m5) — обработчики фазы захвата для КОРНЯ страницы. React ведёт их и
+   * через порталы (диалог, открытый страницей, — тоже страница), глобальная шапка приложения сюда не
+   * попадает, а событие, которое компонент диспатчит сам (синтетический `change` Radix Select на
+   * программной записи), — не жест: считается только `isTrusted`.
+   */
+  gestureProps: GestureProps;
+};
+
+type GestureHandler = (e: { nativeEvent: Event }) => void;
+export type GestureProps = {
+  onInputCapture: GestureHandler;
+  onChangeCapture: GestureHandler;
+  onKeyDownCapture: GestureHandler;
+  onPointerDownCapture: GestureHandler;
+  onPasteCapture: GestureHandler;
+  onCutCapture: GestureHandler;
+  onDropCapture: GestureHandler;
 };
 
 /**
@@ -752,6 +967,11 @@ export function useTechCardAutosaveController(opts: {
   onComplete?: (reason: string) => void;
   /** Найденный на открытии черновик ждёт ответа оператора (R-11) — отдаётся органам как есть. */
   draftPending?: boolean;
+  /**
+   * Работа тела формы, которую может унести запись (M2: без фактов стиля — их пишет панель стиля, и
+   * работой они становятся через её очередь). Без ответа — «форма грязна».
+   */
+  bodyWork?: () => boolean;
   debounceMs?: number;
   retryDelaysMs?: readonly number[];
 }): AutosaveController {
@@ -761,17 +981,30 @@ export function useTechCardAutosaveController(opts: {
   const machineRef = useRef<AutosaveMachine | null>(null);
   // R-9: every gesture of the operator on the page, counted (capture phase, so a panel that stops
   // propagation is still heard). A panel re-staged with no gesture behind it is echoing its own commit.
+  // m5: heard on the page's root (see `gestureProps`), trusted events only.
   const gestures = useRef(0);
-  useEffect(() => {
-    const bump = () => {
-      gestures.current += 1;
+  const gestureProps = useMemo<GestureProps>(() => {
+    const bump: GestureHandler = (e) => {
+      if (e.nativeEvent.isTrusted) gestures.current += 1;
     };
-    const kinds = ['input', 'change', 'keydown', 'pointerdown', 'paste', 'cut', 'drop'] as const;
-    for (const k of kinds) window.addEventListener(k, bump, true);
-    return () => {
-      for (const k of kinds) window.removeEventListener(k, bump, true);
+    return {
+      onInputCapture: bump,
+      onChangeCapture: bump,
+      onKeyDownCapture: bump,
+      onPointerDownCapture: bump,
+      onPasteCapture: bump,
+      onCutCapture: bump,
+      onDropCapture: bump,
     };
   }, []);
+  // m7: an organ asked for a save before the machine existed — the work at creation has a person behind it.
+  const requestedEarly = useRef(false);
+  // m7: a change heard since the machine began (an edit, a panel's queue, an organ's request).
+  const heard = useRef(false);
+  // m7: is a person behind the work? Work found at creation alone is not: it is not armed, and the
+  // best-effort flushes on leaving (unmount, hidden, pagehide) do not write it either — opening a card
+  // and leaving it writes nothing.
+  const personBehind = () => gestures.current > 0 || requestedEarly.current || heard.current;
 
   // Машина живёт от монтирования до размонтирования и создаётся В ЭФФЕКТЕ, а не в рендере: StrictMode
   // размонтирует и монтирует эффекты заново, и машина, убитая первой уборкой, осталась бы мёртвой.
@@ -784,7 +1017,9 @@ export function useTechCardAutosaveController(opts: {
       now: () => Date.now(),
       isEnabled: () => optsRef.current.enabled && !(optsRef.current.halted?.() ?? false),
       isPaused: () => optsRef.current.paused,
-      hasWork: () => liveIsDirty(optsRef.current.form) || optsRef.current.hasStaged(),
+      hasWork: () =>
+        (optsRef.current.bodyWork?.() ?? liveIsDirty(optsRef.current.form)) ||
+        optsRef.current.hasStaged(),
       // NOT `form.trigger()`: that publishes an error onto every field, so a two-second pause turned
       // an empty row the operator had just added — and every hidden tab — red (Codex M-02).
       validate: () => optsRef.current.validate(),
@@ -793,14 +1028,17 @@ export function useTechCardAutosaveController(opts: {
       onState: setState,
       onComplete: (reason) => optsRef.current.onComplete?.(reason),
       operatorGen: () => gestures.current,
+      armAtCreation: personBehind,
     });
     machineRef.current = m;
-    // Already `dirty` and armed when a child's effect dirtied the form before this one ran (R-12).
+    // Already `dirty` when a child's effect dirtied the form before this one ran (R-12) — and armed only
+    // when a person is behind that work (m7).
     setState(m.state());
     return () => {
       // Лучшее, что можно сделать при уходе со страницы: отправить то, что есть. Гарантия на выгрузку —
-      // черновик в localStorage (useTechCardDraft), а не этот вызов (Codex M-02).
-      void m.flush('unmount');
+      // черновик в localStorage (useTechCardDraft), а не этот вызов (Codex M-02). Только работу, за
+      // которой стоит человек (m7).
+      if (personBehind()) void m.flush('unmount');
       m.dispose();
       if (machineRef.current === m) machineRef.current = null;
     };
@@ -810,12 +1048,30 @@ export function useTechCardAutosaveController(opts: {
     machineRef.current?.setEnabled(opts.enabled);
   }, [opts.enabled]);
 
+  // m9: the convert dialog let go of the page — a cycle that came due under it is armed now.
+  useEffect(() => {
+    if (!opts.paused) machineRef.current?.resume();
+  }, [opts.paused]);
+
   // Любая правка формы: значение, setValue, reset. Сброс, который делает сама запись, тоже сюда
   // попадает — машина это переживает: чистая форма в `notifyChange` ничего не взводит.
+  // B-1: МИКРОЗАДАЧЕЙ ПОЗЖЕ. `reset` RHF 7.62 шлёт событие значений ДО того, как пересчитает isDirty
+  // (`_reset`: `values`, потом `isDirty`), и решение по самому событию видело прежнюю чистоту: после
+  // «restore» черновика машина считала форму чистой, гасила статус и не взводила ни одной записи.
   const { form } = opts;
   useEffect(() => {
-    const sub = form.watch(() => machineRef.current?.notifyChange());
-    return () => sub.unsubscribe();
+    let alive = true;
+    const sub = form.watch(() =>
+      queueMicrotask(() => {
+        if (!alive) return;
+        heard.current = true;
+        machineRef.current?.notifyChange();
+      }),
+    );
+    return () => {
+      alive = false;
+      sub.unsubscribe();
+    };
   }, [form]);
 
   // Движение очереди панелей (B-03). Первое значение — это «как открыли», не правка.
@@ -823,6 +1079,7 @@ export function useTechCardAutosaveController(opts: {
   useEffect(() => {
     if (lastRevision.current === opts.stagingRevision) return;
     lastRevision.current = opts.stagingRevision;
+    heard.current = true;
     machineRef.current?.notifyChange();
   }, [opts.stagingRevision]);
 
@@ -842,9 +1099,12 @@ export function useTechCardAutosaveController(opts: {
   useEffect(() => {
     if (!opts.enabled) return;
     const onVisibility = () => {
-      if (document.visibilityState === 'hidden') void machineRef.current?.flush('hidden');
+      if (document.visibilityState === 'hidden' && personBehind())
+        void machineRef.current?.flush('hidden');
     };
-    const onPageHide = () => void machineRef.current?.flush('pagehide');
+    const onPageHide = () => {
+      if (personBehind()) void machineRef.current?.flush('pagehide');
+    };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pagehide', onPageHide);
     return () => {
@@ -862,13 +1122,21 @@ export function useTechCardAutosaveController(opts: {
       message: state.message,
       retrying: state.retrying,
       draftPending,
-      request: () => machineRef.current?.notifyChange(),
+      request: () => {
+        if (!machineRef.current) {
+          requestedEarly.current = true;
+          return;
+        }
+        heard.current = true;
+        machineRef.current.notifyChange();
+      },
       flush: (reason) => machineRef.current?.flush(reason) ?? Promise.resolve('off' as const),
       saveNow: (reason) =>
         machineRef.current?.flush(reason, 'explicit') ?? Promise.resolve('off' as const),
       resolveConflict: () => machineRef.current?.resolveConflict(),
       settleExternal: (r, reason) => machineRef.current?.settleExternal(r, reason),
+      gestureProps,
     }),
-    [state, draftPending],
+    [state, draftPending, gestureProps],
   );
 }

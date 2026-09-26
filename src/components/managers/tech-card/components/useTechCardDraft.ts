@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { UseFormReturn } from 'react-hook-form';
 import { techCardSchema, TechCardFormData } from './schema';
+import { deepEqual } from './useTechCardAutosave';
 import { PersistedStaging } from './useTechCardStaging';
 
 // Autosave draft (Q9b). Persists the tech-card form to localStorage as the user edits and offers to
@@ -149,15 +150,26 @@ export function useTechCardDraft(
 ) {
   sweepLegacyDrafts();
   const storageKey = PREFIX + key;
+  // THREE SLOTS (ревью M-1). `storageKey` — the draft the next open offers. `.session` — THIS visit's
+  // work while a found draft waits for its answer: it may not overwrite that draft, and it may not go
+  // unwritten either (the create page saves nothing until «add», and an edit page's work that cannot
+  // be saved — invalid, conflict, offline — has no other copy; the route has no navigation blocker).
+  // `.earlier` — the older of two drafts when a visit left without answering the banner: the next open
+  // offers the newer one first and keeps the other one on the same banner.
+  const sessionKey = `${storageKey}.session`;
+  const earlierKey = `${storageKey}.earlier`;
   const [pending, setPending] = useState<StoredDraft | null>(null);
+  const [earlier, setEarlier] = useState<StoredDraft | null>(null);
   // THE FOUND DRAFT, UNANSWERED (волна 25.09, R-11). Mirrored in a ref because the writer and the quiet
   // cleanup run inside watch callbacks and timers, where the render's `pending` is a render late. While
   // it is set, the stored draft is the operator's EARLIER work that nobody has restored or discarded:
-  // nothing overwrites it and no save clears it — only the banner's two doors answer it.
-  const pendingRef = useRef<StoredDraft | null>(null);
-  const offer = (draft: StoredDraft | null) => {
-    pendingRef.current = draft;
-    setPending(draft);
+  // nothing overwrites it and no save clears it — only the banner's doors answer it. This visit's own
+  // work goes to `.session` meanwhile (M-1).
+  const pendingRef = useRef<{ draft: StoredDraft; earlier: StoredDraft | null } | null>(null);
+  const offer = (found: { draft: StoredDraft; earlier: StoredDraft | null } | null) => {
+    pendingRef.current = found;
+    setPending(found?.draft ?? null);
+    setEarlier(found?.earlier ?? null);
   };
   // The queue's «anything staged», readable from the form's watch (R-6).
   const hasStagedRef = useRef(hasStagedChanges);
@@ -175,42 +187,69 @@ export function useTechCardDraft(
       offer(null);
       return;
     }
-    try {
-      const raw = localStorage.getItem(storageKey);
-      const draft = raw ? (JSON.parse(raw) as StoredDraft) : null;
-      // ЧЕРНОВИК, ГДЕ У ДЕТАЛИ НЕТ line_key, НЕ ВОССТАНАВЛИВАЕТСЯ ВООБЩЕ — он выбрасывается.
-      //
-      // Такой черновик записан до появления стабильного ключа детали (0168), то есть ему многие
-      // месяцы. Опознать в нём детали нечем: сопоставление по ИМЕНИ верно ровно до первого
-      // переименования, а обмен именами между двумя деталями оно принимает молча — строки
-      // рецепта, замеры и алиасы переехали бы на чужие детали, и ни одна проверка бы не
-      // возразила. Без ключа же сохранение чеканит новые ULID: сервер видит прежние детали
-      // исчезнувшими и сносит их каскадом, вместе с рецептом и площадями.
-      //
-      // Цена отказа — потерянная незаписанная правка полугодовой давности, о которой оператор
-      // не помнит. Цена восстановления — тихо испорченная карточка. Сегодняшний черновик под это
-      // правило не попадает: ключ чеканится и ручным заведением, и модалкой сопоставления DXF.
-      const keyless =
-        Array.isArray(draft?.data?.pieces) &&
-        draft.data.pieces.some((p) => !(p?.lineKey ?? '').trim());
-      if (keyless) {
-        localStorage.removeItem(storageKey);
-        offer(null);
-        return;
+    // One stored draft, read and judged by the two rules below; a draft that fails either is removed.
+    const readSlot = (slot: string): StoredDraft | null => {
+      try {
+        const raw = localStorage.getItem(slot);
+        const draft = raw ? (JSON.parse(raw) as StoredDraft) : null;
+        // ЧЕРНОВИК, ГДЕ У ДЕТАЛИ НЕТ line_key, НЕ ВОССТАНАВЛИВАЕТСЯ ВООБЩЕ — он выбрасывается.
+        //
+        // Такой черновик записан до появления стабильного ключа детали (0168), то есть ему многие
+        // месяцы. Опознать в нём детали нечем: сопоставление по ИМЕНИ верно ровно до первого
+        // переименования, а обмен именами между двумя деталями оно принимает молча — строки
+        // рецепта, замеры и алиасы переехали бы на чужие детали, и ни одна проверка бы не
+        // возразила. Без ключа же сохранение чеканит новые ULID: сервер видит прежние детали
+        // исчезнувшими и сносит их каскадом, вместе с рецептом и площадями.
+        //
+        // Цена отказа — потерянная незаписанная правка полугодовой давности, о которой оператор
+        // не помнит. Цена восстановления — тихо испорченная карточка. Сегодняшний черновик под это
+        // правило не попадает: ключ чеканится и ручным заведением, и модалкой сопоставления DXF.
+        const keyless =
+          Array.isArray(draft?.data?.pieces) &&
+          draft.data.pieces.some((p) => !(p?.lineKey ?? '').trim());
+        // ЧЕРНОВИК ЧУЖОЙ ФОРМЫ НЕ ПРЕДЛАГАЕТСЯ. Отпечаток меняется от всякого нового поля, а поля
+        // операции переносить с карточки не по чему — у операции нет стабильного ключа. Восстановить
+        // такой черновик значит уехать на сервер с zod-дефолтом там, где поля не было, то есть с
+        // командой «сотри». Пусто у черновиков, записанных до этой проверки, — они тоже не наши.
+        if (keyless || (draft && draft.shape !== FORM_SHAPE)) {
+          localStorage.removeItem(slot);
+          return null;
+        }
+        return draft;
+      } catch {
+        return null;
       }
-      // ЧЕРНОВИК ЧУЖОЙ ФОРМЫ НЕ ПРЕДЛАГАЕТСЯ. Отпечаток меняется от всякого нового поля, а поля
-      // операции переносить с карточки не по чему — у операции нет стабильного ключа. Восстановить
-      // такой черновик значит уехать на сервер с zod-дефолтом там, где поля не было, то есть с
-      // командой «сотри». Пусто у черновиков, записанных до этой проверки, — они тоже не наши.
-      if (draft && draft.shape !== FORM_SHAPE) {
-        localStorage.removeItem(storageKey);
-        offer(null);
-        return;
+    };
+    const found = readSlot(storageKey);
+    const session = readSlot(sessionKey);
+    let draft = found;
+    let older = readSlot(earlierKey);
+    if (session) {
+      // M-1: the last visit typed under a banner it never answered, and left. That work is the newest;
+      // the draft it was typed beside is kept as the older of the two, on the same banner.
+      draft = session;
+      older = found ?? older;
+      try {
+        if (found) localStorage.setItem(earlierKey, JSON.stringify(found));
+        localStorage.setItem(storageKey, JSON.stringify(session));
+        localStorage.removeItem(sessionKey);
+      } catch {
+        /* quota — the offer below still holds both */
       }
-      offer(draft);
-    } catch {
-      offer(null);
+    } else if (!draft && older) {
+      // Only the older one is left (its newer partner was answered elsewhere): it is the draft now.
+      draft = older;
+      older = null;
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(draft));
+        localStorage.removeItem(earlierKey);
+      } catch {
+        /* ignore */
+      }
     }
+    offer(draft ? { draft, earlier: older } : null);
+    // `offer` writes a ref and two states; the triggers are the key and the switch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey, enabled]);
 
   // draftPayload — единственное место, где черновик превращается в строку.
@@ -264,8 +303,13 @@ export function useTechCardDraft(
       timer.current = undefined;
       if (!due.current) return;
       due.current = false;
-      // Never over a found draft nobody has answered yet (R-11).
-      if (pendingRef.current) return;
+      // m8: nothing to guard — the form holds its baseline and nothing is staged (a quiet re-read that
+      // put everything back, a revert typed out). No copy of the server's own card is written: it would
+      // come back as a banner on the next open, and a banner holds the writer.
+      if (!hasStagedRef.current && deepEqual(form.getValues(), form.control._defaultValues)) {
+        clearOwnRef.current();
+        return;
+      }
       try {
         // assemblyCleared В ЧЕРНОВИК НЕ ПОПАДАЕТ НИКОГДА (см. draftPayload). Это намерение ОДНОГО
         // сохранения, а черновик — «незаписанные правки на потом»: восстановить намерение, которое,
@@ -277,35 +321,46 @@ export function useTechCardDraft(
         // Цена отказа мала и громкая: черновик, где кнопку нажали, но не сохранили, вернётся с
         // распакованными входами и без флага — сервер откажет бекстопом с внятной подсказкой
         // «нажмите снять разметку», и пользователь нажмёт её снова.
-        localStorage.setItem(storageKey, draftPayload(form.getValues(), staging));
+        // R-11: never over a found draft nobody has answered yet — this visit's work goes beside it
+        // (M-1), and the banner's answer decides what becomes of both.
+        localStorage.setItem(
+          pendingRef.current ? sessionKey : storageKey,
+          draftPayload(form.getValues(), staging),
+        );
       } catch {
         /* quota / serialization — best-effort, ignore */
       }
     };
     const schedule = () => {
-      // R-11: the found draft is the only copy of that earlier work until the banner is answered.
-      if (pendingRef.current) return;
       due.current = true;
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(writeNow, DEBOUNCE_MS);
     };
     scheduleRef.current = schedule;
-    const sub = form.watch(() => {
-      if (!form.control._formState.isDirty) {
-        // R-6: pristine again — a revert by hand, or a save that left the card quiet — with nothing
-        // staged: this session's copy of work the form no longer holds goes, or the next open would
-        // offer to «restore» what the operator took back.
-        if (!hasStagedRef.current) clearOwnRef.current();
-        return;
-      }
-      schedule();
-    });
+    // B-1: DECIDED A MICROTASK LATER. RHF 7.62's `reset` sends the values BEFORE it recomputes isDirty,
+    // so on the event itself a restored draft still read as pristine — and the R-6 branch below removed
+    // the very draft «restore» had just put into the form.
+    let alive = true;
+    const sub = form.watch(() =>
+      queueMicrotask(() => {
+        if (!alive) return;
+        if (!form.control._formState.isDirty) {
+          // R-6: pristine again — a revert by hand, or a save that left the card quiet — with nothing
+          // staged: this session's copy of work the form no longer holds goes, or the next open would
+          // offer to «restore» what the operator took back.
+          if (!hasStagedRef.current) clearOwnRef.current();
+          return;
+        }
+        schedule();
+      }),
+    );
     const onHidden = () => {
       if (document.visibilityState === 'hidden') writeNow();
     };
     window.addEventListener('pagehide', writeNow);
     document.addEventListener('visibilitychange', onHidden);
     return () => {
+      alive = false;
       sub.unsubscribe();
       window.removeEventListener('pagehide', writeNow);
       document.removeEventListener('visibilitychange', onHidden);
@@ -313,6 +368,8 @@ export function useTechCardDraft(
       writeNow();
       scheduleRef.current = () => {};
     };
+    // `sessionKey` follows `storageKey`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey, enabled, form, staging]);
 
   // The form's watch never fires for a sub-panel edit (they live outside RHF), so a card whose ONLY
@@ -345,33 +402,45 @@ export function useTechCardDraft(
     return () => window.removeEventListener('beforeunload', handler);
   }, [enabled, isDirty]);
 
-  const drop = () => {
-    // A due write would put back a copy of what was just answered (see the effect above).
+  const cancelDue = () => {
+    // A due write would put back a copy of what was just answered or spent (see the effect above).
     due.current = false;
     if (timer.current) clearTimeout(timer.current);
     timer.current = undefined;
+  };
+  const remove = (...slots: string[]) => {
     try {
-      localStorage.removeItem(storageKey);
+      for (const slot of slots) localStorage.removeItem(slot);
     } catch {
       /* ignore */
     }
   };
-  // The banner's «discard»: the operator's own answer to the found draft.
+  // The banner's «discard»: the operator's own answer to the found draft(s). What this visit typed
+  // under the banner is this visit's own work from now on — written to the ordinary slot.
   const clear = () => {
-    drop();
+    cancelDue();
+    remove(storageKey, earlierKey, sessionKey);
     offer(null);
+    if (form.control._formState.isDirty || hasStagedRef.current) scheduleRef.current();
   };
   // After a quiet save, a create, a revert to pristine: THIS session's copy of the work is spent. A found
-  // draft still waiting for its answer is not this session's to spend (R-11) — it stays, banner and all.
+  // draft still waiting for its answer is not this session's to spend (R-11) — it stays, banner and all;
+  // only this visit's copy beside it goes (M-1).
   const clearOwn = () => {
-    if (pendingRef.current) return;
-    drop();
+    cancelDue();
+    if (pendingRef.current) {
+      remove(sessionKey);
+      return;
+    }
+    remove(storageKey, sessionKey);
   };
   const clearOwnRef = useRef(clearOwn);
   clearOwnRef.current = clearOwn;
   // Restore into the form but keep it dirty (so Save stays enabled) by preserving the loaded
   // defaults — isDirty is then computed as draft ≠ loaded card.
-  const restore = () => {
+  const restore = (which: 'draft' | 'earlier' = 'draft') => {
+    const offered = pendingRef.current;
+    const pending = which === 'earlier' ? offered?.earlier : offered?.draft;
     if (!pending) return;
     // A draft written by an OLDER build has no idea about fields added since, and zod fills them
     // with their empty defaults — which the save path then sends as deliberate values. For the
@@ -595,7 +664,9 @@ export function useTechCardDraft(
     (data as Record<string, unknown>).stage = loaded.stage;
 
     // Answered — before the reset, so the writer hears the restored values as this session's own work.
+    // Both offered drafts and whatever this visit typed beside them are answered by it (M-1).
     pendingRef.current = null;
+    remove(earlierKey, sessionKey);
     form.reset(data, { keepDefaultValues: true });
     // Seed the sub-panel snapshots BEFORE clearing `pending`. hydrate() also bumps the staging
     // identity, which is what makes an ALREADY-MOUNTED panel re-run its claim effect and adopt its
@@ -603,8 +674,11 @@ export function useTechCardDraft(
     // already run against an empty map and the restore dropped every staged sub-panel edit.
     staging?.hydrate(pending.staging ?? null);
     offer(null);
+    // B-1: the restored work is this visit's unsaved work now — due at once, so an unload in the next
+    // 800 ms writes it too (the stored draft stays until a quiet save or a revert says otherwise).
+    scheduleRef.current();
   };
   const dismiss = () => offer(null);
 
-  return { pending, restore, dismiss, clear, clearOwn };
+  return { pending, earlier, restore, dismiss, clear, clearOwn };
 }

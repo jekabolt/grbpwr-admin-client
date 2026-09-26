@@ -123,10 +123,16 @@ import {
   type AutosaveApi,
 } from './design/autosave-contract';
 import {
+  bodyMoved,
+  bodyWorkOf,
   deepEqual,
+  hasHttpStatus,
+  isConflictError,
   liveIsDirty,
   settleFormAfterSave,
   useTechCardAutosaveController,
+  watchOwnFailure,
+  type GestureProps,
   type SaveMode,
   type SaveOutcome,
   type SaveResult,
@@ -342,6 +348,14 @@ const AUTO_STAGE_MAX_STEPS = 5;
 type WriteResult = { bodySaved: boolean; ok: boolean; outcome: SaveOutcome; message?: string };
 
 /**
+ * What a read of the card means for this page (M-3): `same` — nothing newer than the card it stands on;
+ * `adopted` — the version moved and the body did not (a panel, a roll-up); `rebased` — another editor
+ * moved the body and this form, pristine, now stands on theirs; `conflict` — they moved it under this
+ * page's unsaved work.
+ */
+type ReadVerdict = 'same' | 'adopted' | 'rebased' | 'conflict';
+
+/**
  * A deep copy of the form values, or null when the values cannot be cloned (then the caller skips
  * whatever needed the copy — never a reason to fail a save). RHF writes nested values IN PLACE, so
  * «what the form held at time T» needs a real copy, not `getValues()`'s shallow one.
@@ -366,19 +380,6 @@ function quietIssues(error: {
   return [...byPath.values()];
 }
 
-const httpStatus = (x: unknown) => (x as { status?: number } | null | undefined)?.status;
-const causeOf = (e: unknown) => (e as { cause?: unknown } | null | undefined)?.cause;
-
-/** A 409 — on the error itself, or on the one a panel wrapped into its own sentence (`cause`). */
-function isConflictError(e: unknown): boolean {
-  return httpStatus(e) === 409 || httpStatus(causeOf(e)) === 409;
-}
-
-/** Whether the error still says what the server answered (a panel's rewrap into a sentence drops it). */
-function hasHttpStatus(e: unknown): boolean {
-  return typeof httpStatus(e) === 'number' || typeof httpStatus(causeOf(e)) === 'number';
-}
-
 /**
  * The page's two providers as ONE element: the form, and the one autosave the header chip and the
  * studio's organs share (design/autosave-contract.ts). One element on purpose: nesting a second
@@ -387,15 +388,23 @@ function hasHttpStatus(e: unknown): boolean {
 function FormWithAutosave({
   form,
   autosave,
+  gestures,
   children,
 }: {
   form: UseFormReturn<TechCardFormData>;
   autosave: AutosaveApi;
+  /** m5: the operator's gestures, heard on the page's own root (portals of the page included). */
+  gestures: GestureProps;
   children: React.ReactNode;
 }) {
   return (
     <Form {...form}>
-      <AutosaveContext.Provider value={autosave}>{children}</AutosaveContext.Provider>
+      <AutosaveContext.Provider value={autosave}>
+        {/* `contents`: an element for the capture handlers, no box — the page's layout is unchanged. */}
+        <div className='contents' {...gestures}>
+          {children}
+        </div>
+      </AutosaveContext.Provider>
     </Form>
   );
 }
@@ -550,7 +559,9 @@ export function TechCardForm({
   const tabParam = rawTab ? FOLDED_TABS[rawTab] ?? rawTab : rawTab;
   const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'studio';
   // Whether this page is still on screen — for the side effects of a write that outlives it (R-13).
-  const pageMounted = useRef(false);
+  // m6: true from the first render — a child's mount effect runs BEFORE this one, and a tab it asks
+  // for on mount must not be dropped as «the page is gone».
+  const pageMounted = useRef(true);
   useEffect(() => {
     pageMounted.current = true;
     return () => {
@@ -984,16 +995,28 @@ export function TechCardForm({
   // Only a SAVED card that this account may write and that is not frozen saves itself. A new card
   // keeps its `add` button (the create IS the save), a released one its «re-open to draft».
   const autosaveEnabled = isEditMode && !!numId && canWrite(SECTION.techCards) && !frozen;
-  // The version the next body write claims: the freshest read in the cache, which is what the
-  // `techCard` prop becomes one render later. An autosave cycle can start in the same tick the
-  // previous save's read landed — before that render — and the prop would still name the version
-  // this very page has just moved past (a 409 against ourselves).
-  const currentLockVersion = () =>
-    (numId
-      ? queryClient.getQueryData<common_TechCard>(techCardKeys.detail(numId))?.lockVersion
-      : undefined) ??
-    techCard?.lockVersion ??
-    0;
+  // ═══ THE CARD THIS FORM STANDS ON (ревью M-3) ═════════════════════════════════════════════════
+  // `version` is what the next body write claims; `card` is the server's card at that version (null
+  // when this page does not know it). Both move only with this page's own writes, with an explicit
+  // adoption (keep mine, the auto-stage's quiet re-read, the rebase of a pristine form) and with a read
+  // whose BODY is the one `card` already has — a panel's lock bump, a roll-up, a colourway: the version
+  // moved, nothing a body write carries did (see bodyMoved). A read that moved the body is another
+  // editor's write and is never adopted in silence: a pristine form is rebased onto it, a dirty one
+  // stops at the conflict decision. The cache used to be the claim — every refetch that picked up
+  // someone else's write handed THEIR version to this page's next PUT, which then wrote this page's
+  // stale fields straight over theirs with nothing to refuse it.
+  const base = useRef<{ version: number; card: common_TechCard | null }>({
+    version: techCard?.lockVersion ?? 0,
+    card: techCard ?? null,
+  });
+  const claimVersion = () => lockOverride.current ?? base.current.version;
+  const adopt = (card: common_TechCard) => {
+    base.current = { version: card.lockVersion ?? 0, card };
+  };
+  // A write chain of this page is on the wire: its own reads settle `base`; a background read waits.
+  const writing = useRef(0);
+  // m1: a read this page needed after its own write did not come back — the next body write reads first.
+  const needsRead = useRef(false);
   // The stored card the same way: the cache first — every re-read of this page writes it before the
   // render that turns it into the `techCard` prop (R-2b).
   const storedCard = (): common_TechCard | undefined =>
@@ -1043,6 +1066,10 @@ export function TechCardForm({
         return;
       haltedRef.current = null;
     }
+    // M-2 / M-3: a read the page did not make for itself is judged before anything is taken from it —
+    // the re-open that lifted the halt above included: this page resumes on THEIR card, or at the
+    // conflict decision, never by writing its release-time form over their work.
+    reconcileLatest();
     if (approvalAttempt.current || autoStageInFlight.current) return;
     const stored = mapTechCardToForm(techCard);
     const base = form.control._defaultValues as Partial<TechCardFormData>;
@@ -1055,6 +1082,47 @@ export function TechCardForm({
     // `form` is stable for the page's life; the trigger is a new read of the card.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [techCard]);
+  // THE JUDGE OF A READ (M-3). Newer than the card this form stands on, with the same body → taken (the
+  // version moved under a panel, a roll-up, a colourway — nothing a body write carries). With a moved
+  // body — another editor's write — a PRISTINE form is rebased onto it (the same merge as after a
+  // save: minimal writes, no row re-keyed); a form with unsaved work stops at the conflict decision.
+  function reconcileRead(fresh: common_TechCard): ReadVerdict {
+    const v = fresh.lockVersion ?? 0;
+    const cur = base.current;
+    if (v < cur.version) return 'same';
+    if (v === cur.version) {
+      // The card at this page's own version, when the read that should have brought it failed.
+      if (!cur.card) adopt(fresh);
+      return 'same';
+    }
+    if (cur.card && !bodyMoved(cur.card, fresh, canWriteCosting)) {
+      adopt(fresh);
+      return 'adopted';
+    }
+    if (liveIsDirty(form) || staging.peek().length > 0) return 'conflict';
+    const before = cloneFormValues(form.getValues());
+    const server = mapTechCardToForm(fresh);
+    adopt(fresh);
+    lastBody.current = null;
+    settleAfterBodySave(before, { values: server, server });
+    calloutHistory.reset();
+    return 'rebased';
+  }
+  // A read that arrived by itself (a refetch after someone's invalidation, a reconnect): judged when no
+  // write chain of this page is on the wire — a chain settles `base` with its own reads, and this runs
+  // again when it ends.
+  function reconcileLatest() {
+    if (!numId || writing.current > 0 || lockOverride.current != null) return;
+    const fresh = storedCard();
+    if (!fresh) return;
+    if (reconcileRead(fresh) !== 'conflict') return;
+    leaveFullscreen();
+    setConflict(true);
+    autosave.settleExternal(
+      { outcome: 'conflict', message: 'another editor saved this card meanwhile' },
+      'read',
+    );
+  }
   // The quiet answer to a 409 on the auto-stage's own write: take the card the other save left, and
   // let the next readiness answer decide the stage again. `before` is the form as the auto-stage
   // wrote it. Returns whether the card was re-read.
@@ -1068,6 +1136,9 @@ export function TechCardForm({
       return false;
     }
     if (!fresh) return false;
+    // The card this form stands on from here (M-3): the merge below takes it everywhere untouched.
+    adopt(fresh);
+    lastBody.current = null;
     queryClient.setQueryData(techCardKeys.detail(numId), fresh);
     const server = mapTechCardToForm(fresh);
     // B-07: applied against what the form holds NOW, not what it held when the 409 came back. The
@@ -1097,7 +1168,7 @@ export function TechCardForm({
   // session's copy. A draft found on open and not yet answered is not touched (R-11).
   function afterQuiescentSave() {
     draft.clearOwn();
-    if (numId) history.push(textSnapshotOf(form.getValues()), currentLockVersion());
+    if (numId) history.push(textSnapshotOf(form.getValues()), base.current.version);
   }
 
   // After a body save the server owns values this form cannot compute, and `data` — the payload
@@ -1162,7 +1233,11 @@ export function TechCardForm({
     return { signoffs, patterns, bomItems };
   }
 
-  async function withServerAssignedValues(sent: TechCardFormData): Promise<{
+  async function withServerAssignedValues(
+    sent: TechCardFormData,
+    // The version this page's body write claimed and got: the server holds `expected + 1` now (M-3).
+    expected?: number,
+  ): Promise<{
     values: TechCardFormData;
     audit: PresenceAudit | null;
     /** The server's card in form coordinates — null when there was no read to take it from. */
@@ -1193,18 +1268,24 @@ export function TechCardForm({
       server,
     });
     if (!numId) return done(sent);
+    // M-3: the write landed under `expected + 1` — that version is this page's, whatever the read says.
+    if (expected !== undefined) base.current = { version: expected + 1, card: null };
     let fresh: common_TechCard | undefined;
     try {
       const res = await adminService.GetTechCard({ id: numId, vatCountryCode: undefined });
       fresh = res.techCard;
     } catch {
       // Not fatal — the save itself landed. Fall back to what was sent; useUpdateTechCard's own
-      // invalidation still refetches the card, and a reload re-seeds the form from the server.
+      // invalidation still refetches the card, and a reload re-seeds the form from the server. The
+      // card at our version is unknown until then: the next body write reads it first (m1).
+      needsRead.current = true;
       return done(sent);
     }
     if (!fresh) return done(sent);
-    // Prime the cache with the read we already paid for, so the detail this reset is built from is
-    // the same one the NEXT save reads its expectedLockVersion from.
+    // M-3: exactly this write's version is this write's card. Anything newer landed in the moment
+    // between the write and this read: not adopted — the next write claims ours and hears the 409.
+    if (expected !== undefined && (fresh.lockVersion ?? 0) === expected + 1) adopt(fresh);
+    // Prime the cache with the read we already paid for (the prop follows a render later).
     queryClient.setQueryData(techCardKeys.detail(numId), fresh);
     const server = mapTechCardToForm(fresh);
     const { signoffs, patterns, bomItems } = assignServerLists(sent, server);
@@ -1260,6 +1341,66 @@ export function TechCardForm({
     data: TechCardFormData,
     opts: { mode: SaveMode; autoStage?: boolean; keepPurpose?: string } = { mode: 'explicit' },
   ): Promise<WriteResult> {
+    writing.current += 1;
+    try {
+      // m1: the read this page needed after its last write never came back — the card it stands on is
+      // unknown, so nothing is built on it until it is read.
+      if (isEditMode && numId && needsRead.current) {
+        const r = await readInChain();
+        if (r === 'error') {
+          return {
+            bodySaved: false,
+            ok: false,
+            outcome: 'error',
+            message: 'the card could not be re-read — nothing was saved',
+          };
+        }
+        if (r === 'conflict') {
+          const message = 'another editor saved this card meanwhile';
+          leaveFullscreen();
+          setConflict(true);
+          if (opts.mode !== 'silent') showMessage(message, 'error');
+          return { bodySaved: false, ok: false, outcome: 'conflict', message };
+        }
+        // Rebased onto another editor's card: `data` is the form from before it — the next pass
+        // builds from the form as it is now.
+        if (r === 'rebased') return { bodySaved: false, ok: true, outcome: 'nothing' };
+      }
+      return await writeTechCardPass(data, opts);
+    } finally {
+      writing.current -= 1;
+      // A read that came in while this chain ran waited for it (M-3): judged now, against the card the
+      // chain left this page standing on.
+      if (writing.current === 0) queueMicrotask(reconcileLatest);
+    }
+  }
+
+  // THE READ THIS PAGE MAKES FOR ITSELF, INSIDE A WRITE CHAIN (M-3 / m1): after its panels moved the
+  // shared version, or before a write when the last such read failed. Errors are not swallowed — a
+  // version nobody read is not a version to claim.
+  async function readInChain(): Promise<ReadVerdict | 'error'> {
+    if (!numId) return 'same';
+    let fresh: common_TechCard | undefined;
+    try {
+      fresh = (await adminService.GetTechCard({ id: numId, vatCountryCode: undefined })).techCard;
+    } catch {
+      fresh = undefined;
+    }
+    if (!fresh) {
+      needsRead.current = true;
+      return 'error';
+    }
+    needsRead.current = false;
+    const verdict = reconcileRead(fresh);
+    // After `base` moved: the prop this makes a render later reads as nothing new.
+    queryClient.setQueryData(techCardKeys.detail(numId), fresh);
+    return verdict;
+  }
+
+  async function writeTechCardPass(
+    data: TechCardFormData,
+    opts: { mode: SaveMode; autoStage?: boolean; keepPurpose?: string },
+  ): Promise<WriteResult> {
     const silent = opts.mode === 'silent';
     setConflict(false);
     setStagingError(null);
@@ -1283,7 +1424,7 @@ export function TechCardForm({
     // up to date, and would put the other editor's fields back the way they were — under a fresh
     // version, so nothing would refuse it.
     const { payload: techCardInsert } = gateTechCardPayload(
-      mapFormToTechCardInsert(data, storedCard()?.techCard, canWriteCosting),
+      mapFormToTechCardInsert(data, (base.current.card ?? storedCard())?.techCard, canWriteCosting),
       { serverSpeaksDesign: designBandSpeaks },
     );
     let bodySaved = false;
@@ -1291,8 +1432,9 @@ export function TechCardForm({
       if (isEditMode) {
         // Count what this run intends to write BEFORE anything moves, so a partial-failure banner
         // can say "2 of 4" and mean it. The LIVE dirty flag, not the render snapshot: the auto-stage
-        // and the approval doors set a value and save in the same tick (see liveIsDirty).
-        const bodyDirty = liveIsDirty(form);
+        // and the approval doors set a value and save in the same tick (see liveIsDirty). The style
+        // facts are not the body's work (M2): the body never writes them.
+        const bodyDirty = bodyWorkOf(form);
         const planned = (bodyDirty ? 1 : 0) + staging.peek().length;
 
         // B-08: an approval is the LAST write, never one of several. A release that went out beside a
@@ -1309,12 +1451,11 @@ export function TechCardForm({
         }
 
         // The style facts are written by their own panel (StyleFactsField → UpdateStyle), which
-        // commits AFTER the body. Moving their baseline with the body made that panel read its fields
-        // as clean and unstage itself mid-commit, so a failed UpdateStyle left nothing queued — no
-        // retry, and nothing for «keep mine» to send (fit, care and age group are not in this body at
-        // all). While the panel is staged its fields keep the old baseline; its own settle moves it
-        // once its write has landed.
-        const styleFactsStaged = staging.peek().some((c) => c.key === 'styleFacts');
+        // commits AFTER the body — the body never writes them at all. A body save therefore never
+        // moves their baseline (CL-C re-review M2): moved while the panel was staged, it made the panel
+        // read its fields as clean and unstage itself mid-commit; moved while it was NOT staged (the
+        // care mirror, a drafted fit, an account without products:write), a fact read «saved» that the
+        // server never got. The panel's own settle is the only mover of those baselines.
         // R-1 BACKSTOP. The same body this page last wrote, against the version that write — and this
         // page's own panels after it — left, is on the server already. A form «dirty» over it is not an
         // edit but a difference RHF counts and the wire does not carry (a key present as undefined on
@@ -1326,13 +1467,13 @@ export function TechCardForm({
           !carriesApproval &&
           lockOverride.current == null &&
           lastBody.current?.payload === bodyKey &&
-          lastBody.current.lock === currentLockVersion();
+          lastBody.current.lock === claimVersion();
         if (phantomBody) {
           settleAfterBodySave(
             cloneFormValues(form.getValues()),
             { values: data, server: null },
             opts.keepPurpose,
-            styleFactsStaged ? STYLE_FACT_KEYS : [],
+            STYLE_FACT_KEYS,
           );
         }
         // The card body goes FIRST: it carries expectedLockVersion, so a 409 here must abort before
@@ -1343,9 +1484,9 @@ export function TechCardForm({
           // values in place (`set(_formValues, 'bomItems.3.name', …)` mutates the row object), and a
           // shallow copy would already «contain» the edits typed while the request is in flight.
           const before = cloneFormValues(form.getValues());
-          // Normally the freshest cached version; after «keep mine & overwrite» the version read
-          // back from the server, so that choice actually overwrites (see keepMineAndOverwrite).
-          const expected = lockOverride.current ?? currentLockVersion();
+          // The version this form stands on (M-3); after «keep mine & overwrite» the version read back
+          // from the server, so that choice actually overwrites (see keepMineAndOverwrite).
+          const expected = claimVersion();
           await updateTechCard.mutateAsync({
             id: parseInt(id || '0', 10),
             techCard: techCardInsert,
@@ -1367,18 +1508,13 @@ export function TechCardForm({
           // Reset to what the SERVER now holds, not to what we sent — above all so a sign-off that
           // was just approved carries its stamped digest instead of the blank that MEANS "approve
           // now" (see withServerAssignedValues).
-          const settled = await withServerAssignedValues(data);
-          // What the server holds as the body now, and the version it holds it under (the re-read
-          // above primed the cache) — the backstop above compares the next body against it.
-          lastBody.current = { payload: bodyKey, lock: currentLockVersion() };
+          const settled = await withServerAssignedValues(data, expected);
+          // What the server holds as the body now, and the version it holds it under — the backstop
+          // above compares the next body against it.
+          lastBody.current = { payload: bodyKey, lock: base.current.version };
           // M-03: the silent write carried the STORED purpose; the operator's pending switch to
           // auxiliary goes back into the form, still dirty, still waiting for its confirmation.
-          settleAfterBodySave(
-            before,
-            settled,
-            opts.keepPurpose,
-            styleFactsStaged ? STYLE_FACT_KEYS : [],
-          );
+          settleAfterBodySave(before, settled, opts.keepPurpose, STYLE_FACT_KEYS);
           // Ф7: сохранение прошло, но часть отправленных фактов не вернулась — молчать об этом
           // значит отдать человеку карточку, которая узнает о потере через неделю пустым полем.
           if (settled.audit && hasPresenceLoss(settled.audit)) setPresenceLoss(settled.audit);
@@ -1398,45 +1534,49 @@ export function TechCardForm({
         // status on the way, so the status is also read off the mutation that failed during this run
         // (TanStack keeps the original error).
         //
-        // R-5: but only the FAILING panel's own mutation. Every mutation that fails during the run is
-        // recorded in order; when the error in hand carries no HTTP status (it was rewrapped), the
-        // answer is the LAST failure among the mutations submitted since that panel's commit began —
-        // the one it rewrapped, which fails right before its rethrow — not whatever else on the page
-        // happened to 409 meanwhile. An error that still carries its status speaks for itself.
-        const failures: Array<{ submittedAt: number; conflict: boolean }> = [];
-        const stopWatching = queryClient.getMutationCache().subscribe((event) => {
-          if (event.type === 'updated' && event.action.type === 'error') {
-            failures.push({
-              submittedAt: event.mutation.state.submittedAt,
-              conflict: isConflictError(event.action.error),
-            });
-          }
-        });
+        // R-5 / m2: but only the FAILING panel's own mutation — the one failing in the very task its
+        // rethrow comes from (watchOwnFailure), not another mutation of the page that failed while the
+        // commit ran, and nothing at all when the panel failed before sending one. An error that still
+        // carries its HTTP status speaks for itself.
+        const ownFailure = watchOwnFailure(queryClient.getMutationCache());
         let outcome: CommitOutcome;
+        let failedOwn: { conflict: boolean } | null = null;
         try {
           outcome = await staging.commitAll();
+          failedOwn = ownFailure.current();
         } finally {
-          stopWatching();
+          ownFailure.stop();
         }
         // R-2a / R-3: a committed panel moves the SHARED tech_card.lock_version (UpdateStyle and
         // UpdateStyleSizeChart both do). The next write — a chained flush pass, the approval right
         // after the pre-flush — is built in this same chain, before any render, so the version it
         // claims is read back HERE: left to a background refetch, the release 409'd against this
         // page's own style write. A «keep mine» override is spent with it: its version is behind now.
+        //
+        // M-3 / m1: read back HERE, explicitly, and judged: a panel moves the version and not the body,
+        // so a read whose body moved is another editor's write that landed while this run went on —
+        // the conflict decision, not a version to take. A read that fails is not swallowed: this run
+        // says so, and the next body write reads first.
+        let reread: ReadVerdict | 'error' | null = null;
         if (numId && outcome.committed.length > 0) {
           lockOverride.current = null;
-          await queryClient.refetchQueries({ queryKey: techCardKeys.detail(numId), exact: true });
+          reread = await readInChain();
           void queryClient.invalidateQueries({ queryKey: techCardKeys.readiness(numId) });
           // The body the server holds is unchanged by a panel; only its version moved, and it was
           // this page that moved it.
-          if (lastBody.current)
-            lastBody.current = { ...lastBody.current, lock: currentLockVersion() };
+          if (lastBody.current && (reread === 'same' || reread === 'adopted'))
+            lastBody.current = { ...lastBody.current, lock: base.current.version };
+        }
+        if (reread === 'conflict') {
+          const message = 'another editor saved this card while it was being saved';
+          leaveFullscreen();
+          setConflict(true);
+          if (!silent) showMessage(message, 'error');
+          return { bodySaved, ok: false, outcome: 'conflict', message };
         }
         if (outcome.failed) {
-          const { change, error, startedAt } = outcome.failed;
-          const own = hasHttpStatus(error)
-            ? undefined
-            : [...failures].reverse().find((f) => f.submittedAt >= startedAt);
+          const { change, error } = outcome.failed;
+          const own = hasHttpStatus(error) ? null : failedOwn;
           if (isConflictError(error) || !!own?.conflict) {
             const message = `«${change.label}» was changed by someone else meanwhile`;
             leaveFullscreen();
@@ -1453,6 +1593,14 @@ export function TechCardForm({
           // Баннер «сохранено 2 из 4» стоит на странице, то есть под оверлеем фулскрина.
           leaveFullscreen();
           return { bodySaved, ok: false, outcome: 'partial', message: `«${change.label}»: ${why}` };
+        }
+        if (reread === 'error') {
+          return {
+            bodySaved,
+            ok: false,
+            outcome: 'error',
+            message: 'saved — but the card could not be re-read; the next save reads it first',
+          };
         }
         // No success toast for an autosave: the chip says «saved 18:42», and a toast every two
         // seconds of typing would be noise the operator learns to ignore — errors included.
@@ -1961,6 +2109,9 @@ export function TechCardForm({
     try {
       const res = await adminService.GetTechCard({ id: numId, vatCountryCode: undefined });
       lockOverride.current = res.techCard?.lockVersion ?? 0;
+      // The operator's own choice (M-3): this page stands on their card from here, and the write below
+      // claims its version — the one adoption a moved body gets without a rebase.
+      if (res.techCard) adopt(res.techCard);
       // И САМУ КАРТОЧКУ, А НЕ ТОЛЬКО НОМЕР ВЕРСИИ. Прочитанное здесь — это то, ЧТО лежит на
       // сервере сейчас, и от него зависит не только замок: маппер записи спреадит `original`
       // (поля, которых форма не ведёт), а щиты совместимости решают по нему, объявлять ли
@@ -2001,7 +2152,6 @@ export function TechCardForm({
   // If the ordinary flush does not end quiet, nothing is released: the chip, the modal or the walk to
   // the field already says why.
   const submitWithApproval = async (next: string) => {
-    const savedApproval = (storedCard()?.techCard?.approvalState as string | undefined) || DRAFT;
     if (autosaveEnabled) {
       const before = await autosave.saveNow(`before:${next}`);
       if (before !== 'ok' && before !== 'nothing') {
@@ -2031,11 +2181,20 @@ export function TechCardForm({
     } finally {
       landed = approvalAttempt.current?.landed ?? false;
       approvalAttempt.current = null;
-      if (!landed) form.setValue('approvalState', savedApproval, { shouldDirty: true });
+      // m3: back to the approval this page stands on NOW — the baseline, which a re-read during the
+      // pre-flush may have moved — not the one read before it: that stale value would go out with the
+      // next autosave and undo another editor's approval change.
+      if (!landed) {
+        const standing =
+          ((form.control._defaultValues as Partial<TechCardFormData>).approvalState as
+            | string
+            | undefined) || DRAFT;
+        form.setValue('approvalState', standing, { shouldDirty: true });
+      }
     }
     // Typed while the release was on the wire: the card is frozen now and saves nothing more. The
     // draft keeps it (it is cleared only by a quiet save) for the next «re-open to draft».
-    if (landed && next === RELEASED && (liveIsDirty(form) || staging.peek().length > 0)) {
+    if (landed && next === RELEASED && (bodyWorkOf(form) || staging.peek().length > 0)) {
       showMessage(
         'released. Edits made while it was being released were not saved; they wait in the draft for the next re-open',
         'error',
@@ -2068,6 +2227,8 @@ export function TechCardForm({
     onComplete: afterQuiescentSave,
     // R-11: organs read it off the contract (the WORDS seed waits while it is true).
     draftPending: !!draft.pending,
+    // M2: a style fact is work only through the style panel's queue — the body never writes it.
+    bodyWork: () => bodyWorkOf(form),
   });
 
   const saving = form.formState.isSubmitting || autosave.status === 'saving';
@@ -2092,7 +2253,7 @@ export function TechCardForm({
     // form and go out with a quiet save before the operator has said what to do with that work.
     if (draftPending) return;
     if (autosave.status !== 'idle' && autosave.status !== 'saved') return;
-    if (liveIsDirty(form) || staging.peek().length > 0) return;
+    if (bodyWorkOf(form) || staging.peek().length > 0) return;
     if (autoStageSteps.current >= AUTO_STAGE_MAX_STEPS) return;
     const next = decideAutoStage({
       readiness,
@@ -2299,7 +2460,7 @@ export function TechCardForm({
   );
 
   return (
-    <FormWithAutosave form={form} autosave={autosave}>
+    <FormWithAutosave form={form} autosave={autosave} gestures={autosave.gestureProps}>
       {/* ONE AUTOSAVE FOR THE WHOLE PAGE. The studio's organs read it through `useTechCardAutosave()`
           (design/autosave-contract.ts): the construction draft asks for a save after its autoFill,
           GENERATE awaits `flush()` before a paid run. The provider wraps the header too, so the chip
@@ -2502,7 +2663,7 @@ export function TechCardForm({
         onCancel={keepMineAndOverwrite}
         onConfirm={() => window.location.reload()}
       >
-        <Row label='your version' value={`v${techCard?.lockVersion ?? 0} · edited here`} />
+        <Row label='your version' value={`v${base.current.version} · edited here`} />
         <Row label='on the server' value='newer' />
         <Text size='micro' variant='label' className='mt-2'>
           Someone saved this card while you were editing. Reloading fetches their version and
@@ -2616,19 +2777,49 @@ export function TechCardForm({
       {/* Draft and frozen stay inline — they are context, not decisions. */}
       {draft.pending && (
         <CalloutBox tone='warning' className='mt-2.5 flex flex-wrap items-center gap-2'>
+          {/* M-1: two drafts when the last visit typed under this banner and left without answering
+              it — the newer one first, the older one kept beside it until one of them is chosen. */}
           <Text size='micro'>
-            an unsaved draft was found
+            {draft.earlier ? 'unsaved work was found' : 'an unsaved draft was found'}
             {draft.pending.savedAt
               ? ` from ${new Date(draft.pending.savedAt).toLocaleString('en-US')}`
-              : ''}{' '}
-            — restore it or discard it?
+              : ''}
+            {draft.earlier
+              ? `, and an earlier draft${
+                  draft.earlier.savedAt
+                    ? ` from ${new Date(draft.earlier.savedAt).toLocaleString('en-US')}`
+                    : ''
+                } — restore one (the other is discarded) or discard both?`
+              : ' — restore it or discard it?'}
           </Text>
           <div className='ml-auto flex gap-1.5'>
-            <Button type='button' variant='main' size='sm' onClick={draft.restore}>
-              restore
+            {/* B-1: the restored work is unsaved work — the autosave hears it at once. */}
+            <Button
+              type='button'
+              variant='main'
+              size='sm'
+              onClick={() => {
+                draft.restore('draft');
+                autosave.request('restore');
+              }}
+            >
+              {draft.earlier ? 'restore the newer' : 'restore'}
             </Button>
+            {draft.earlier && (
+              <Button
+                type='button'
+                variant='secondary'
+                size='sm'
+                onClick={() => {
+                  draft.restore('earlier');
+                  autosave.request('restore');
+                }}
+              >
+                restore the earlier
+              </Button>
+            )}
             <Button type='button' variant='secondary' size='sm' onClick={draft.clear}>
-              discard
+              {draft.earlier ? 'discard both' : 'discard'}
             </Button>
           </div>
         </CalloutBox>
