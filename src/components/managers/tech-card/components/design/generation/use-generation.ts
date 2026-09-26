@@ -17,6 +17,7 @@ import {
   useDesignWrites,
   type WriteContext,
 } from '../use-design-band';
+import { unstickPin } from './bench-store';
 import { refusalFromError, type RunRefusal } from './refusal';
 import { hasLiveRun } from './run-state';
 
@@ -281,6 +282,10 @@ export function useStartRun(techCardId?: number): StartRunState {
       if (cardOnScreen(card)) {
         showMessage('run started — the pictures land under GENERATE when it finishes', 'success');
       }
+      // …and the workbench goes to it (O-53 review, `bench-store.ts`): a pin left by earlier work
+      // stops holding the run it kept. Not a release — an editor opened while this answer travelled
+      // keeps its run until it closes.
+      if (input.kind === 'flat') unstickPin(card);
       // The caller clears its fields HERE and not on the click: clearing the ask before the row is
       // filed would change the fingerprint under a failed attempt, and the retry would mint a fresh
       // id and buy a second picture.

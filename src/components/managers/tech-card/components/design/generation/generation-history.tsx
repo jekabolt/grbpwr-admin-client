@@ -22,6 +22,7 @@ import { useGalleryGroup } from '../picture-tile';
 import { SplitModal } from '../split-modal';
 import { isRunArchived } from '../visibility';
 import { viewLabel } from '../views';
+import { closeSurface, openSurface, useBenchRun } from './bench-store';
 import { formatMoney } from './money';
 import { CountPill, RunPanel } from './run-panel';
 import { deckAfterZoom, deckOfRuns, runsGallery } from './run-gallery';
@@ -38,6 +39,8 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  *   · header  `GENERATION HISTORY · nothing here is deleted`  [2 PATTERN RUNS ▾]  ← И СВЁРТКА ТОЖЕ
  *   · row                                                          [· 0 ARCHIVED ▸]
  *   · body    rows of runs: the tiles of what came back, then the meta line
+ *             (the run standing on the workbench under GENERATE: «run N · on the bench ↑» in place
+ *             of its tiles — one copy of them, O-53 review)
  *             `alina · 14:12 · $0.38` и под ней ряд дверей `recall ▸  + results ▸  meta ▸ … archive ▸`,
  *             then the pager `‹ newer · page N of M · older › … show all`
  *   · shelf   `ARCHIVED [N RUNS] [HIDE ▾]` + its rows, under the window, only while open.
@@ -87,6 +90,7 @@ function RunRow({
   run,
   cardFit,
   shelf,
+  onBench,
   disabled,
   galleryKey,
   galleryIndexOf,
@@ -104,6 +108,14 @@ function RunRow({
    * что в архиве лежит: строка на ней разворачивается, плитки приглушены (`dim`).
    */
   shelf?: boolean;
+  /**
+   * ЭТОТ ПРОГОН СТОИТ НА ВЕРСТАКЕ ПОД GENERATE (26.09, O-53 review, решение координатора): его
+   * плитки живут там и только там. Строка держит свою мета-линию и двери (рекол, meta, архив), а на
+   * месте плиток — одна тихая строка «run 12 · on the bench ↑». Две живые копии одних картинок
+   * давали ряд просмотрщика с каждой дважды, две независимые колоды и две записи слота с одним и тем
+   * же CAS-токеном (Codex, MAJOR 3); одна копия снимает все три в корне.
+   */
+  onBench?: boolean;
   disabled?: boolean;
   galleryKey: string;
   /** picture id → its offset in the section's gallery group. Absent = no showable address. */
@@ -126,7 +138,8 @@ function RunRow({
    *  (архив исключён из `unfiltered`), на полке она показывает всё, ради чего полку и открыли. */
   const folded = archived && !shelf;
   const live = isRunLive(run);
-  const elapsed = useElapsed(run.startedAt || run.createdAt);
+  // The clock ticks only for a run in flight (review, MINOR): a finished row shows no elapsed time.
+  const elapsed = useElapsed(live ? run.startedAt || run.createdAt : undefined);
   const price = formatMoney(run.priceActual ?? run.priceEstimate, run.currency);
   /**
    * WHAT THIS ROW WAS ASKED TO FIX, WHOLE — the selection is counted, not its first member. ⚠ The
@@ -157,20 +170,47 @@ function RunRow({
   ];
 
   /* ═══ WHAT CAME BACK — `RunOutputs` (`run-outputs.tsx`), the block the latest-generation
-     workbench under GENERATE draws too. A folded row draws none of it; the gap between it and the
-     meta line exists only when it draws something. */
-  const outputsShown = !folded && runOutputsShown(run);
+     workbench under GENERATE draws too. A folded row draws none of it; a row whose run stands on
+     the workbench draws the pointer to it instead (`onBench`); the gap between either and the meta
+     line exists only when there is something. */
+  const pointer = !folded && !!onBench;
+  const outputsShown = !folded && !onBench && runOutputsShown(run);
+  const toBench = () =>
+    document
+      .querySelector('[data-latest-generation]')
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
 
   return (
     /* ЯКОРЯ СТРОКИ (G-1): её прогон и её представление — по ним читают строку и проба, и человек в
-       инспекторе; `data-rep` пуст ровно тогда, когда род прогона этой сборке неизвестен. Нижняя
-       линейка у КАЖДОЙ строки — макет: `border-bottom: 1px #e6e6e6`. */
+       инспекторе; `data-rep` пуст ровно тогда, когда род прогона этой сборке неизвестен.
+       ЛИНЕЙКА — МЕЖДУ СТРОКАМИ, А НЕ ПОД ПОСЛЕДНЕЙ (O-48, DESIGN.md «The Between-Rows Rule»):
+       `#e6e6e6` рисуется, только когда СРАЗУ за строкой стоит другая строка прогона (`data-run` —
+       та же метка соседства, что `data-row` у `Row`); последняя строка окна и полки кончается
+       воздухом. */
     <div
       data-run={runId || undefined}
       data-rep={rep ?? ''}
       data-run-archived={archived ? '' : undefined}
-      className='border-b border-hairline pb-2'
+      className='border-b border-hairline pb-2 [&:not(:has(+[data-run]))]:border-b-0'
     >
+      {pointer && (
+        <span className='flex flex-wrap items-center gap-1.5' data-run-on-bench={runId}>
+          <Text size='micro' variant='label' component='span'>
+            {handle} ·
+          </Text>
+          <Button
+            type='button'
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+            aria-label={`${handle} is on the bench under GENERATE — go to it`}
+            title='its pictures stand under GENERATE — split, edit, zoom and the slot marks are there'
+            onClick={toBench}
+          >
+            on the bench ↑
+          </Button>
+        </span>
+      )}
       {outputsShown && (
         <RunOutputs
           band={band}
@@ -202,7 +242,7 @@ function RunRow({
           НОМЕР ПРОГОНА И ЕГО РОД СНЯТЫ НАМЕРЕННО: после п.27 история шага держит РОВНО ОДИН род,
           а строку читают по часам и автору. Номер никуда не делся — он в `data-run`, в
           `aria-label` каждой двери и в панели `meta ▸`, то есть везде, где его ищут глазами. */}
-      <div className={cn('space-y-1.5', outputsShown ? 'mt-2.5' : undefined)}>
+      <div className={cn('space-y-1.5', outputsShown || pointer ? 'mt-2.5' : undefined)}>
         {/* ЯКОРЬ ЭТОЙ СТРОКИ — `data-run-line`, а НЕ `data-run-meta`: последним уже помечена панель
             `meta ▸` (`run-panel.tsx`), и два разных органа под одним именем читались бы как один. */}
         <Text size='nano' variant='label' component='p' data-run-line={runId || undefined}>
@@ -425,6 +465,19 @@ export function GenerationHistory({
     handle: string;
   } | null>(null);
   /**
+   * РАЗРЕЗ В ИСТОРИИ — ТОЖЕ ПОВЕРХНОСТЬ ПРОГОНА (`bench-store.ts`, O-53 review): пока он открыт,
+   * верстак под GENERATE не меняет прогон, и строка под модалкой не превращается в «on the bench».
+   */
+  useEffect(() => {
+    if (!splitting) return;
+    return () => closeSurface(techCardId, 'split:history');
+  }, [splitting, techCardId]);
+  /**
+   * ПРОГОН НА ВЕРСТАКЕ ПОД GENERATE (O-53 review): его строка здесь — без плиток, и в ряд
+   * просмотрщика и в колоды эта лента его не берёт. 0 — верстака нет (другой шаг) или он пуст.
+   */
+  const benchRunId = useBenchRun(techCardId);
+  /**
    * ОДНА ОТКРЫТАЯ КОЛОДА НА ВСЮ ЛЕНТУ (H-10): значение — id ЛИСТА, не индекс, потому что строки
    * перестраиваются от фильтра, страницы и дочитанных продолжений, а id картинки переживает всё.
    */
@@ -534,17 +587,30 @@ export function GenerationHistory({
    * is, and the row holds only the rows ON SCREEN: the window while the fold is open, the shelf
    * while it is open. What is folded away is not walked — the band's other organs (the references,
    * the latest generation under GENERATE, the flat slots) still are.
+   * The run on the workbench under GENERATE is not walked HERE either (O-53 review): its row has no
+   * tiles, and its pictures are in the row once — through the workbench's own group.
    */
   const gallery = useMemo(
-    () => runsGallery([...(runsOpen ? visible : []), ...(archShown ? archivedRows : [])], openDeck),
-    [runsOpen, visible, archShown, archivedRows, openDeck],
+    () =>
+      runsGallery(
+        [...(runsOpen ? visible : []), ...(archShown ? archivedRows : [])].filter(
+          (run) => (run.id ?? 0) !== benchRunId,
+        ),
+        openDeck,
+      ),
+    [runsOpen, visible, archShown, archivedRows, openDeck, benchRunId],
   );
   const galleryGroup = useGalleryGroup(gallery.items);
 
   /** ЧЕЙ КУСОК ЭТА КАРТИНКА — на всю показанную историю, без оглядки на `openDeck` (E-4). */
   const deckOf = useMemo(
-    () => deckOfRuns([...visible, ...(archShown ? archivedRows : [])]),
-    [visible, archShown, archivedRows],
+    () =>
+      deckOfRuns(
+        [...visible, ...(archShown ? archivedRows : [])].filter(
+          (run) => (run.id ?? 0) !== benchRunId,
+        ),
+      ),
+    [visible, archShown, archivedRows, benchRunId],
   );
 
   /**
@@ -649,6 +715,7 @@ export function GenerationHistory({
         run={run}
         cardFit={cardFit}
         shelf={shelf || undefined}
+        onBench={!!benchRunId && (run.id ?? 0) === benchRunId}
         disabled={disabled || !speaks}
         galleryKey={galleryGroup.key}
         galleryIndexOf={gallery.indexOf}
@@ -657,7 +724,10 @@ export function GenerationHistory({
            адрес; у состояния из одного значения второе открытое просто невыразимо. */
         onDeck={(rootId) => setOpenDeck((current) => (current === rootId ? null : rootId))}
         onZoomPicture={foldOnForeignZoom}
-        onSplit={(picture) => setSplitting({ picture, handle: pictureHandle(picture) })}
+        onSplit={(picture) => {
+          openSurface(techCardId, 'split:history', picture.runId ?? 0);
+          setSplitting({ picture, handle: pictureHandle(picture) });
+        }}
       />
     ));
 
