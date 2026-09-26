@@ -13,11 +13,7 @@ import { ACCESS, accessSatisfies, useAccountSections, useCurrentAccount } from '
 // therefore fail open rather than hiding legitimate navigation. The backend remains the
 // real enforcement boundary; this only tidies the UI.
 export function usePermissions() {
-  const {
-    data: accountData,
-    isLoading: accountLoading,
-    isError: accountError,
-  } = useCurrentAccount();
+  const { data: accountData, isLoading: accountLoading } = useCurrentAccount();
   const { data: sectionsData } = useAccountSections();
 
   const account = accountData?.account;
@@ -36,8 +32,12 @@ export function usePermissions() {
     return map;
   }, [account]);
 
-  // We only start gating once we have a definitive account that is not super.
-  const resolved = !accountLoading && !accountError && !!account;
+  // We only start gating once we have a definitive account that is not super. An account read
+  // ONCE stays definitive: a later refetch that fails keeps its data (TanStack v5 sets isError
+  // beside it), and reading that as «unknown» failed the whole screen open on a network blip —
+  // every locked control unlocked, its edits refused by the server on every save (25.09 CL-C m1).
+  // No account at all — still loading, or the first read failed — is still fail-open, as above.
+  const resolved = !accountLoading && !!account;
 
   const hasSection = useMemo(
     () =>

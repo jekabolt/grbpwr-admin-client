@@ -152,9 +152,11 @@ const MANUAL = 'STYLE_NUMBER_SOURCE_MANUAL';
  * он номер сам или нажал SUGGEST секунду назад, а пилюля добавляла второй орган в ряд подписи.
  *
  * Without a season the button is disabled and the cause stands as a VISIBLE `LockBar` with a door
- * to the season field — never as a `title` on a dead control (the prototype's rule, kept).
+ * to the season field — never as a `title` on a dead control (the prototype's rule, kept). A door
+ * to a cell this account cannot change is no door (Codex m3): with the season locked the bar names
+ * the grant it takes instead.
  */
-function StyleNumberCell({ isIdea }: { isIdea: boolean }) {
+function StyleNumberCell({ isIdea, seasonLocked }: { isIdea: boolean; seasonLocked: boolean }) {
   const { control, setValue, clearErrors } = useFormContext<TechCardFormData>();
   const season = useWatch({ control, name: 'season' }) as string | undefined;
   const source = useWatch({ control, name: 'styleNumberSource' }) as string | undefined;
@@ -242,17 +244,21 @@ function StyleNumberCell({ isIdea }: { isIdea: boolean }) {
                   component='span'
                   className='min-w-0 flex-1 normal-case'
                 >
-                  pick a season to enable suggest
+                  {seasonLocked
+                    ? 'no season — setting one needs products:write'
+                    : 'pick a season to enable suggest'}
                 </Text>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='xs'
-                  className='shrink-0 whitespace-nowrap'
-                  onClick={() => revealField('season')}
-                >
-                  season ›
-                </Button>
+                {!seasonLocked && (
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='xs'
+                    className='shrink-0 whitespace-nowrap'
+                    onClick={() => revealField('season')}
+                  >
+                    season ›
+                  </Button>
+                )}
               </LockBar>
             )}
             {suggestError && (
@@ -681,18 +687,19 @@ export function CardDetails({
   // UpdateStyle — the one writer of a saved card's style facts — is `products:write` on the server
   // (Codex M-05, R3; rbac.go:163): every style-fact cell locks on it.
   const styleLocked = !canWrite(SECTION.products);
-  // …except brand, collection and gender on a card being CREATED: CreateTechCard seeds those three
-  // from the card's own insert (AddTechCard), so there they are the create's to write.
+  // …except brand, collection, season and gender on a card being CREATED: CreateTechCard seeds
+  // those four from the card's own insert (AddTechCard — `skuSeason` included, schema.ts), so
+  // there they are the create's to write (Codex M1).
   const seededLocked = styleLocked && !!techCardId;
-  // Fit, season and age group reach the style through UpdateStyle ALONE, so a new card made by such
-  // an account gets none of them: the cells, the counter and the ai context read them as unset
-  // (m2) — never as a locked value that will not be written.
+  // Fit and age group reach the style through UpdateStyle ALONE, so a new card made by such an
+  // account gets neither: the cells, the counter and the ai context read them as unset (m2) —
+  // never as a locked value that will not be written.
   const unwritten = !techCardId && styleLocked;
   const ageShown = unwritten ? AGE_GROUP_UNSET : ageGroup;
   const shownMeta = (key: MetaField, v: unknown) => {
     if (!unwritten) return v;
     if (key === 'ageGroup') return AGE_GROUP_UNSET;
-    return key === 'fit' || key === 'season' ? '' : v;
+    return key === 'fit' ? '' : v;
   };
   const counted = META_FIELDS.filter((key) => key !== 'fit' || fitShown);
   const filled = META_FIELDS.reduce(
@@ -747,7 +754,7 @@ export function CardDetails({
             <InputField name='name' label='name *' placeholder='what this style is called' />
           </div>
           <div className={W3}>
-            <StyleNumberCell isIdea={isIdea} />
+            <StyleNumberCell isIdea={isIdea} seasonLocked={seededLocked} />
           </div>
           <div
             className={W2}
@@ -761,17 +768,20 @@ export function CardDetails({
           <div
             className={W2}
             data-card-cell='season'
-            data-style-lock={styleLocked ? 'locked' : 'open'}
-            title={styleLocked ? 'needs products:write' : undefined}
+            data-style-lock={seededLocked ? 'locked' : 'open'}
+            title={seededLocked ? 'needs products:write' : undefined}
           >
             {/* SeasonField has no lock of its own, and needs none here: its ONE writer is the
                 `pick` button's click (the input is read-only and the picker opens only from that
                 click), and a disabled fieldset kills click and focus on the buttons inside it —
-                measured; pointerdown still fires, but nothing in this cell listens to it. */}
-            <fieldset disabled={styleLocked} className='m-0 min-w-0 border-0 p-0'>
-              <SeasonField pickHint={seasonPickHint} />
+                measured; pointerdown still fires, but nothing in this cell listens to it. The
+                picker itself portals out of the fieldset, so the lock REMOUNTS the field (`key`):
+                a picker already open when the lock lands closes with it and writes nothing
+                (Codex m2). */}
+            <fieldset disabled={seededLocked} className='m-0 min-w-0 border-0 p-0'>
+              <SeasonField key={seededLocked ? 'locked' : 'open'} pickHint={seasonPickHint} />
             </fieldset>
-            <StyleLockNote locked={styleLocked} />
+            <StyleLockNote locked={seededLocked} />
           </div>
           {/* brand sits inline with the rest of the card's identity: pre-filled with GRBPWR
               (techCardDefaultData) and almost never changed, but hidden it looked absent rather
