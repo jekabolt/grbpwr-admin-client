@@ -75,8 +75,27 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
   const storefrontCareLocked = isCare && !canWrite(SECTION.products);
   // …and when the storefront's care is NOT this label (a legacy card, or a label edited without
   // that grant), StyleFactsField knows it and says so here, with the one door that stages the label
-  // as the style's care (`care-drift.ts`; nothing is written on open).
+  // as the style's care (`care-drift.ts`; nothing is written on open). Once staged, the row says
+  // that instead, with «cancel». Focus follows the door: the button that was pressed unmounts, so
+  // focus goes to what replaced it — the staged line, or the door again after «cancel».
   const careDrift = useCareDrift((s) => (isCare && s.drift?.row === index ? s.drift : null));
+  const careNoteId = `label-row-${index}-care-note`;
+  const careStagedId = `label-row-${index}-care-staged`;
+  const careSyncId = `label-row-${index}-care-sync`;
+  const [careFocus, setCareFocus] = useState<'staged' | 'door' | null>(null);
+  const careState = careDrift?.state;
+  useEffect(() => {
+    if (careFocus === 'staged' && careState === 'staged') {
+      document.getElementById(careStagedId)?.focus();
+      setCareFocus(null);
+    } else if (careFocus === 'door' && careState === 'differs') {
+      document.getElementById(careSyncId)?.focus();
+      setCareFocus(null);
+    } else if (careFocus && !careState) {
+      // The row has nothing to say any more: the hand-off is dropped, not kept for a later state.
+      setCareFocus(null);
+    }
+  }, [careFocus, careState, careStagedId, careSyncId]);
   // Which BOM article this label is printed on (§2.8). The wire carries the BOM line's server id,
   // so the picker offers ids — never a number the operator has to know, and never one belonging to
   // another card, which the backend now rejects outright.
@@ -113,20 +132,63 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
         {isCare ? (
           <div className='col-span-2 sm:col-span-3'>
             <CarePicker name={`labels.${index}.content`} label='care symbols' />
-            {careDrift && (
+            {careDrift?.state === 'differs' && (
               <div className='flex items-center gap-2' data-storefront-care-drift=''>
-                <Text size='micro' variant='label' component='span' className='min-w-0 flex-1'>
+                <Text
+                  id={careNoteId}
+                  size='micro'
+                  variant='label'
+                  component='span'
+                  className='min-w-0 flex-1'
+                >
                   storefront care differs from this label
+                  {careDrift.cannot ? ` — cannot sync: ${careDrift.cannot}` : ''}
                 </Text>
                 {careDrift.sync && (
+                  <Button
+                    id={careSyncId}
+                    type='button'
+                    variant='secondary'
+                    size='xs'
+                    className='shrink-0 whitespace-nowrap'
+                    aria-label='stage storefront care from this label'
+                    aria-describedby={careNoteId}
+                    onClick={() => {
+                      careDrift.sync?.();
+                      setCareFocus('staged');
+                    }}
+                  >
+                    sync ›
+                  </Button>
+                )}
+              </div>
+            )}
+            {careDrift?.state === 'staged' && (
+              <div className='flex items-center gap-2' data-storefront-care-staged=''>
+                <Text
+                  id={careStagedId}
+                  tabIndex={-1}
+                  size='micro'
+                  variant='label'
+                  component='span'
+                  className='min-w-0 flex-1'
+                >
+                  storefront care staged
+                </Text>
+                {careDrift.cancel && (
                   <Button
                     type='button'
                     variant='secondary'
                     size='xs'
                     className='shrink-0 whitespace-nowrap'
-                    onClick={careDrift.sync}
+                    aria-label='cancel the staged storefront care'
+                    aria-describedby={careStagedId}
+                    onClick={() => {
+                      careDrift.cancel?.();
+                      setCareFocus('door');
+                    }}
                   >
-                    sync ›
+                    cancel
                   </Button>
                 )}
               </div>

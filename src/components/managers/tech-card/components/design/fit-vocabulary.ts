@@ -40,12 +40,6 @@ export const FIT_KEYS = [
 
 export type FitKey = (typeof FIT_KEYS)[number];
 
-const KEYS: ReadonlySet<string> = new Set(FIT_KEYS);
-
-export function isFitKey(value: string | null | undefined): value is FitKey {
-  return KEYS.has((value ?? '').trim());
-}
-
 /**
  * Подпись ключа — так, как её печатает английский сторфронт: подчёркивание → пробел
  * (`wide_leg` → «wide leg»), и одно исключение `a_line` → «a-line». Значение вне словаря

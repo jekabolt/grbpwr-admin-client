@@ -24,7 +24,7 @@ import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { FormLabel } from 'ui/form';
 import SelectField from 'ui/form/fields/select-field';
-import { useCareDrift } from './care-drift';
+import { useCareDrift, type CareDrift } from './care-drift';
 import { FIT_KEYS, fitChoicesFor, fitLabel } from './design/fit-vocabulary';
 import { emptyLabel } from './labels-field';
 import { TechCardFormData, toPurposeEnum } from './schema';
@@ -59,6 +59,17 @@ let baselineDriftReported = false;
 /** Which facts one staged commit writes — frozen when it is staged (see the staging effect). */
 type FactsDirty = Record<Fact, boolean>;
 
+/**
+ * The facts CreateTechCard seeds from the card's own insert (AddTechCard). On a card being created
+ * they are the create's to write, whoever the account; CARD DETAILS leaves those cells open.
+ */
+const SEEDED_BY_CREATE: ReadonlySet<Fact> = new Set<Fact>([
+  'brand',
+  'collection',
+  'season',
+  'targetGender',
+]);
+
 /** How the header's label names each fact. */
 const FACT_WORD: Record<Fact, string> = {
   fit: 'fit',
@@ -90,6 +101,12 @@ const HEIGHT = 'BODY_MEASUREMENT_NAME_HEIGHT';
 // Derived from the schema rather than restated, so a new label field cannot slip past the
 // "is this row still blank" check below.
 type LabelRowValue = NonNullable<TechCardFormData['labels']>[number];
+
+/** The content of the first CARE label in a labels list: the one that feeds the storefront. */
+const careLabelContent = (rows: unknown): string => {
+  const list = Array.isArray(rows) ? (rows as LabelRowValue[]) : [];
+  return list.find((l) => l?.labelType === CARE_LABEL)?.content?.trim() ?? '';
+};
 
 // What the storefront will actually print from these fields. It is the same copy, built from the
 // same values — the care line is worded by the care dictionary, the same rows the storefront
@@ -447,52 +464,46 @@ export function StyleFactsField({
   // created: CreateTechCard seeds those four from its own insert).
   const { canWrite, isLoading: grantLoading } = usePermissions();
   const canStyle = canWrite(SECTION.products);
-  const firstCareSync = useRef(true);
-  // What the first sync found the style holding when it adopted the care label over it (see CARE
-  // DRIFT below). Null when it adopted nothing, and again once a care write has landed.
+  // What the style held when the mirror last adopted the care label over it (see CARE DRIFT
+  // below). Null when it adopted nothing, and again once a care write has landed.
   const [careAdopted, setCareAdopted] = useState<{ stored: string; label: string } | null>(null);
+  const careHeld = useWatch({ control, name: 'careInstructions' }) as string | undefined;
   useEffect(() => {
     // THE STYLE'S CARE IS LEFT ALONE FOR AN ACCOUNT THAT CANNOT WRITE IT (Codex M2). The care
     // label is the card's (LABELS, tech_cards:write) and saves as it always did; mirroring it into
     // `careInstructions` here only made an edit nobody could stage — and once the card body's
     // save took it as saved, the storefront care silently never followed. The LABELS row says so
-    // in words. An account still loading reads as allowed (the grants fail open), so the mirror —
-    // its first sync included — waits for the answer: nothing is adopted for an account that turns
-    // out not to hold the grant.
-    //
-    // ACCEPTED RACE (25.09 decision): a products:write account that edits the care label before
-    // its own account has loaded gets that edit adopted by the first sync — clean, not staged. The
-    // layout loads the account at app start, so the window is the first moments of a cold page,
-    // and CARE DRIFT below says so on the label row, with its `sync ›`.
+    // in words. An account still loading reads as allowed (the grants fail open), so the mirror
+    // waits for the answer: nothing is adopted for an account that turns out not to hold the grant.
     if (!canStyle || grantLoading) return;
     const held = live('careInstructions');
     const cur = factText(held).trim();
-    if (firstCareSync.current) {
-      firstCareSync.current = false;
-      // On mount only adopt a care label that actually carries symbols — never clear a stored value
-      // just because no care label exists yet.
-      //
-      // ADOPTED, NOT EDITED (Codex R2): the baseline moves WITH the value. Adopted with only
-      // `shouldDirty: false`, the value parted from its baseline, and the first rebuild of the
-      // dirty map — the card body's save does one whenever this panel is staged — read it as an
-      // edit: a fit-only save masked care too, and a label that is not care codes (a legacy card,
-      // care written on the product page) made UpdateStyle refuse the whole style write with
-      // unknown_care_code, again on every autosave. Care is masked only when the operator changes
-      // the care label in this session (below).
-      if (careFromLabel && careFromLabel !== cur) {
+    if (careFromLabel === cur) return;
+    // ADOPTED, NOT EDITED (Codex R2) — whenever the care AND the care label are what the server
+    // holds: the page has just read them, on open or on a rebase onto a newer read (which sets the
+    // care's value and baseline both — MJ-1: adopted once at mount only, a rebased card's `sync ›`
+    // then staged nothing). The label is the server's when it is its own baseline. The baseline
+    // moves WITH the value: adopted with only `shouldDirty: false`, the value parted from it, and
+    // the first rebuild of the dirty map read it as an edit — a fit-only save masked care too, and
+    // a label that is not care codes made UpdateStyle refuse the whole style write with
+    // unknown_care_code, on every autosave. What the adoption went over is kept, since the style
+    // still holds it (CARE DRIFT). An empty or missing care label adopts nothing: a stored care is
+    // never cleared just because no care label is filled yet.
+    const serverLabel = careLabelContent(get(control._defaultValues, 'labels'));
+    if (!getFieldState('careInstructions').isDirty && careFromLabel === serverLabel) {
+      if (careFromLabel) {
         moveBaseline('careInstructions', careFromLabel, careFromLabel);
-        // Nothing is written on open. What the adoption went over is kept, because the style
-        // still holds it (CARE DRIFT).
         setCareAdopted({ stored: factText(held), label: careFromLabel });
       }
       return;
     }
-    if (careFromLabel !== cur) {
-      setValue('careInstructions', careFromLabel, { shouldDirty: true });
-    }
-    // `live` and `moveBaseline` read the page's one form control.
+    // EDITED: the care label is not the one the server holds (the operator changed it in this
+    // session, or before the grant answered), or care is staged already and follows the label.
+    // Care is masked only then.
+    setValue('careInstructions', careFromLabel, { shouldDirty: true });
+    // `live`, `moveBaseline` and `getFieldState` read the page's one form control.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [careFromLabel, canStyle, grantLoading, setValue]);
+  }, [careFromLabel, canStyle, grantLoading, careHeld, setValue]);
   // brand / collection / season / targetGender / fit / age group are edited in CARD DETAILS and
   // care on the labels — but they are style catalogue facts, so UpdateStyle is their only writer.
   // UpdateTechCard deliberately excludes them (R4/§14.7, "no fact is written by two paths"), while
@@ -560,56 +571,126 @@ export function StyleFactsField({
   const changed = STYLE_FACT_KEYS.filter((f) => writes[f]).map((f) => FACT_WORD[f]);
   const writesKey = STYLE_FACT_KEYS.map((f) => (writes[f] ? 1 : 0)).join('');
 
+  // A STYLE FACT THIS ACCOUNT CANNOT WRITE IS NEVER LEFT DIRTY (CL-A round-3 review, mn-3). Without
+  // products:write the cells are locked and nothing here is staged. So a fact made dirty another
+  // way — a restored draft (`form.reset` keeps the baselines), a programmatic write — could be
+  // neither written nor put back by hand: the page asked «leave?» on every unload, and any foreign
+  // write to the card body opened the conflict modal over it. Once the grant has answered, each
+  // such fact goes back to its baseline, the value the server holds, by the hidden-fit rule's
+  // mechanism (`shouldDirty` with the baseline clears the flag, registered or not). Keyed by WHICH
+  // facts are dirty, so it runs at the answer and again after every restore or write that dirties
+  // one. On a card being created (`createMode`, taken at mount; the create's navigation remounts
+  // the page) brand, collection, season and gender are the create's own and stay as typed.
+  const unwritable =
+    grantLoading || canStyle
+      ? ''
+      : STYLE_FACT_KEYS.filter(
+          (f) => !!dirtyFields[f] && !(createMode && SEEDED_BY_CREATE.has(f)),
+        ).join(',');
+  useEffect(() => {
+    if (!unwritable) return;
+    for (const f of unwritable.split(',') as Fact[]) {
+      setValue(f, get(control._defaultValues, f) as never, { shouldDirty: true });
+    }
+  }, [unwritable, control, setValue]);
+
   // CARE DRIFT — THE STOREFRONT'S CARE IS NOT THE CARE LABEL (25.09 decision: no write on open).
-  // Two ways to get here. A legacy card's care was authored somewhere else, and the first sync
-  // adopted the label over it. Or the label was edited by an account that cannot write the style
-  // (M2), and the style kept its care. The care label row says so (`useCareDrift`, LABELS) and
-  // offers one door, `sync ›`: it puts the stored care back under the label as the baseline, so
-  // the label reads as the edit it is, and it is staged and written like any other care edit
-  // (mask [careInstructions]). An account without products:write gets the words and no door, and
-  // for it the care in the form IS the stored care, since nothing here ever writes it.
-  //  - Not while care is staged: that write is what ends the difference, and the save says how it
-  //    went.
-  //  - Only for a label that is care symbols the server takes: under the mask UpdateStyle refuses
-  //    any unknown code, and a refused write would stay staged and retry on every autosave.
+  // Two ways to get here. A legacy card's care was authored somewhere else, and the mirror adopted
+  // the label over it. Or the label was edited by an account that cannot write the style (M2), and
+  // the style kept its care. The care label row says so (`useCareDrift`, LABELS) and offers one
+  // door, `sync ›`: it puts the stored care back under the label as the baseline, so the label
+  // reads as the edit it is and is staged like any other care edit (mask [careInstructions]). An
+  // account without products:write gets the words and no door (the row's own line names that
+  // grant); for it the care in the form IS the stored care, since nothing here writes it.
+  //  - Not while care is staged: that write is what ends the difference.
   //  - The same symbols in another order are no difference: the server stores its own print order.
-  const careHeld = useWatch({ control, name: 'careInstructions' }) as string | undefined;
+  //  - Without a door the words say why (mn-4): UpdateStyle refuses any unknown code under the
+  //    mask, and a refused write would stay staged and retry on every autosave; a released card
+  //    and an account without tech_cards:write stage nothing at all.
+  //  - The latest card read only ever CLEARS the words (mn-1): a read that shows the label's
+  //    symbols stored ends the difference, whatever the form last knew. It never raises them — a
+  //    read that raced this panel's own write would bring back a difference already written. A
+  //    newer stored care reaches the form by the page's rebase, and the mirror re-adopts (above).
   const careVocabulary = useCareVocabulary();
+  const careDirty = !!dirtyFields.careInstructions;
+  const readCare = careEntries?.map((e) => e.code?.trim() ?? '').join(',');
+  const readShowsLabel = readCare !== undefined && sameCare(readCare, careFromLabel);
   const careDrift =
     !grantLoading &&
     careIdx >= 0 &&
     !!careFromLabel &&
+    !readShowsLabel &&
     (canStyle
       ? !!careAdopted &&
         careAdopted.label === careFromLabel &&
-        !dirtyFields.careInstructions &&
+        !careDirty &&
         !sameCare(careAdopted.stored, careFromLabel)
       : !sameCare(factText(careHeld), careFromLabel));
-  const labelCodes = careCodes(careFromLabel);
-  const careSyncable =
-    careDrift &&
+  // WHAT THE DOOR STAGED (mn-2): care staged exactly as `sync ›` stages it — the label as the
+  // value over the stored care as the baseline. The row says so, with «cancel»: a write that
+  // failed stays staged and is retried on every autosave (m5), and the label offers no way back.
+  const careStagedByDoor =
     canStyle &&
-    canEdit &&
-    !!staging &&
-    labelCodes.length > 0 &&
-    labelCodes.every((c) => !!careVocabulary.byCode[c] && !careVocabulary.byCode[c].archived);
+    !!careAdopted &&
+    careDirty &&
+    careAdopted.label === careFromLabel &&
+    factText(careHeld) === careFromLabel &&
+    factText(get(control._defaultValues, 'careInstructions')) === careAdopted.stored;
+  const labelCodes = careCodes(careFromLabel);
+  const unknownCodes = labelCodes.filter((c) => !careVocabulary.byCode[c]);
+  const archivedCodes = labelCodes.filter((c) => careVocabulary.byCode[c]?.archived);
+  const careCannot: string | null =
+    !careDrift || !canStyle
+      ? null
+      : !canWrite(SECTION.techCards)
+        ? 'needs tech_cards:write'
+        : !canEdit
+          ? 'the card is released'
+          : !staging
+            ? 'nothing on this page stages it'
+            : !careVocabulary.loaded
+              ? 'care symbols are still loading'
+              : labelCodes.length === 0
+                ? 'no care symbols'
+                : unknownCodes.length + archivedCodes.length > 0
+                  ? [
+                      unknownCodes.length > 0 ? `unknown ${unknownCodes.join(', ')}` : '',
+                      archivedCodes.length > 0 ? `archived ${archivedCodes.join(', ')}` : '',
+                    ]
+                      .filter(Boolean)
+                      .join(', ')
+                  : null;
   useEffect(() => {
     const adopted = careAdopted;
-    useCareDrift.setState({
-      drift: careDrift
-        ? {
-            row: careIdx,
-            sync:
-              careSyncable && adopted
-                ? () => moveBaseline('careInstructions', adopted.stored)
-                : null,
-          }
-        : null,
-    });
+    const label = careFromLabel;
+    let drift: CareDrift | null = null;
+    if (careStagedByDoor) {
+      drift = {
+        row: careIdx,
+        state: 'staged',
+        sync: null,
+        cannot: null,
+        // The label goes back over the label: care clean, the staged write gone, the words back.
+        cancel: () => moveBaseline('careInstructions', label, label),
+      };
+    } else if (careDrift) {
+      drift = {
+        row: careIdx,
+        state: 'differs',
+        // The value is the LABEL, handed in — never read back from the form (MJ-1).
+        sync:
+          canStyle && !careCannot && adopted
+            ? () => moveBaseline('careInstructions', adopted.stored, label)
+            : null,
+        cannot: careCannot,
+        cancel: null,
+      };
+    }
+    useCareDrift.setState({ drift });
     return () => useCareDrift.setState({ drift: null });
     // `moveBaseline` reads the page's one form control.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [careDrift, careSyncable, careIdx, careAdopted]);
+  }, [careDrift, careStagedByDoor, careCannot, canStyle, careIdx, careAdopted, careFromLabel]);
 
   // The panel's mutation, unwrapped: it THROWS on failure instead of toasting, because the header's
   // one save is what reports the outcome now — it needs the rejection to name this panel in a
