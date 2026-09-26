@@ -142,6 +142,9 @@ export function runWord(run?: Pick<common_DesignRun, 'kind'> | null): string {
   if (kind === 'draft_idea') return 'draft';
   if (kind === 'vector') return 'vector';
   const rep = runRepresentation(run);
+  // A recolour is the PLAYGROUND workflow Change a Color now (C-01/C-03); its step label would say
+  // «playground» over a picture the history calls «change a colour». One word in both places.
+  if (rep === 'onmodel') return 'change a colour';
   return rep ? stepOfKind(rep).label : kind || 'run';
 }
 

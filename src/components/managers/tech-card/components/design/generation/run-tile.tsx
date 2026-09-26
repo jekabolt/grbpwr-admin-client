@@ -122,7 +122,7 @@ export const REP_NOUN: Record<Representation, string> = {
   pattern: 'pattern',
   render: 'render',
   threed: '3D',
-  onmodel: 'on model',
+  onmodel: 'change a colour',
   playground: 'playground',
 };
 

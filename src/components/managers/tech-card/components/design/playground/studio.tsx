@@ -1,44 +1,39 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
-import { useMemo, useRef, useState, type JSX } from 'react';
-import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
+import { useCallback, type JSX } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { CalloutBox } from 'ui/components/callout-box';
 import { Section } from 'ui/components/section';
+import Text from 'ui/components/text';
 
-import { GenerateRow, LockBar, RunRefusal } from '../render/generate-row';
-import { useStartDesignRun } from '../render/use-design-run';
-import { AskGroup } from './ask-group';
-import { usePlaygroundDraft } from './drafts';
-import { asRowGate, playgroundGate, presetByKey, presetsOf, runShape, wireParams } from './model';
-import { PlaygroundOutputs } from './outputs';
-import { PicturesGroup } from './pictures-group';
+import { PLAYGROUND_WF_PARAM } from '../core/chain';
+import { WorkflowGrid, workflowOpenable } from './grid';
 import { PlaygroundRecallIntake } from './recall';
-import { WhatModelGetsPlaygroundModal } from './what-model-gets';
+import { workflowByKey } from './registry';
+import { NOT_ON_THIS_SERVER } from './registry/common';
+import type { Draft, WorkflowKey } from './registry/types';
+import { PlaygroundResults } from './results';
+import { WorkflowCard } from './workflow-card';
+import { useWorkflowDrafts } from './workflow-drafts';
+import { WorkflowPanel } from './workflow-panel';
 
 /**
- * ═══ PLAYGROUND — PICTURES, WORDS, ONE RUN (the second aside) ═════════════════════════════════
+ * ═══ PLAYGROUND — A GRID OF WORKFLOWS, THEN ONE OPEN WORKFLOW (C-03) ═════════════════════════════
  *
- * NOT A LINK OF THE CHAIN, and further outside it than ON MODEL: its input is whatever a person
- * lays on the table, nothing downstream reads what it makes, and it binds no colourway at all. The
- * rail draws it aside, without a number.
+ * The one aside of THE CHAIN (C-01). The owner: «они будут сначала гридом показываться и
+ * пользователь будет выбирать». So the screen has two states and the address says which:
  *
- * ⚠ THE CELL EXISTS ONLY WHERE THE SERVER SAYS SO. `band.freeformPresets` absent = a binary older
- * than the route, and the rail draws NO cell (`playgroundOffered`); `[]` = the code is there and
- * the keys are not, the cell exists and this screen says so in words (`AskGroup`). That doctrine —
- * «absent ≠ empty» — is the same one `has_fabric_render` and the colour plan already live by, and
- * it is what lets the client ship to production before the production backend catches up.
+ *   · no `?wf=`    → the grid of twelve (`WorkflowGrid`) and every picture the room made;
+ *   · `?wf=<key>`  → «Select a workflow» with the open one (`WorkflowCard`, whose |→ is the one way
+ *                    back), its form (`WorkflowPanel`) and its own results.
  *
- * THE ORDER OF THE BLOCK IS THE ARGUMENT, and it is the prototype's: first WHAT is on the table
- * (the strip, and marking on it), then WHAT IS ASKED of it (the preset and the words), then the
- * doors of the run (the refusal, the lock bar with the door that lifts it, GENERATE and the
- * inventory), and in the next block what came back.
+ * `?wf=` IS THIS SCREEN'S, written with `replace` like the rail's `?step=` (C-01): the address names
+ * the open workflow so a link lands on it, but opening one is not a history entry of its own.
  *
- * ⚠ ONE PICTURE PER RUN — the owner's own number, and the server's (`designRequestedOutputs`
- * returns 1 for both kinds). The row says «1 picture» / «1 cut-out» and never «3 variants».
+ * ⚠ A WORKFLOW THIS SERVER CANNOT RUN IS NEVER OPENED INTO A FORM. An address naming one (an old
+ * link, a server rolled back) draws the grid with one line saying which and why — a form whose
+ * GENERATE the server refuses would be worse than no form.
  *
- * ⚠ TWO KINDS BEHIND FOUR CHIPS. `cutout` is not a preset of `freeform`: it is a run kind of its
- * own with its own provider and its own key, so the chip decides which door the press takes. The
- * body is built by ONE function (`wireParams`) that the gate, the inventory and this press all
- * read — see the argument there.
+ * The drafts live per `{card, workflow}` (`useWorkflowDrafts`) and die with the card.
  */
 export function PlaygroundStudio({
   band,
@@ -49,113 +44,90 @@ export function PlaygroundStudio({
   techCardId: number;
   disabled?: boolean;
 }): JSX.Element {
-  const draft = usePlaygroundDraft(techCardId);
-  const run = useStartDesignRun(techCardId);
-  const [inspecting, setInspecting] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const drafts = useWorkflowDrafts(techCardId);
 
-  /**
-   * ⚠ THE CARD CHANGED — THE OPEN INVENTORY IS ABOUT THE OTHER CARD (invariant 12). The draft
-   * empties itself inside its own hook; what is left here is the modal, and a modal listing A's
-   * pictures over B's screen is the same lie one layer up. In the body of the render, never in an
-   * effect — the committed frame in between is a frame a person can act on.
-   */
-  const shownCard = useRef(techCardId);
-  if (shownCard.current !== techCardId) {
-    shownCard.current = techCardId;
-    if (inspecting) setInspecting(false);
-  }
+  const asked = (params.get(PLAYGROUND_WF_PARAM) ?? '').trim();
+  const def = workflowByKey(asked);
+  const open = def && workflowOpenable(def, band) ? def : null;
+  const flow = open?.run ?? null;
 
-  const presets = useMemo(() => presetsOf(band), [band]);
-  const preset = presetByKey(presets, draft.state.preset);
-  const gate = useMemo(() => playgroundGate(draft.state, preset), [draft.state, preset]);
+  const setWf = useCallback(
+    (key: WorkflowKey | null) =>
+      setParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          if (key) p.set(PLAYGROUND_WF_PARAM, key);
+          else p.delete(PLAYGROUND_WF_PARAM);
+          return p;
+        },
+        { replace: true },
+      ),
+    [setParams],
+  );
 
-  const generate = () => {
-    if (!preset || !gate.ok) return;
-    run.start({
-      kind: preset.kind,
-      /* A CUT-OUT CARRIES NO WORDS, AND THAT IS ENFORCED HERE RATHER THAN HOPED FOR: the ask box is
-         not drawn under that chip, but a person may have typed under another chip and then
-         switched. The server refuses `cutout_takes_no_words`, so what is not drawn is not sent. */
-      ask: preset.kind === 'cutout' ? '' : draft.state.ask.trim(),
-      params: wireParams(draft.state, preset),
-    });
-  };
+  const onRecall = useCallback(
+    (key: WorkflowKey, draft: Draft) => {
+      drafts.put(key, draft);
+      setWf(key);
+    },
+    [drafts, setWf],
+  );
 
-  /**
-   * THE DOOR OF THE LOCK BAR — the eye and the caret to the organ that lifts the refusal, and no
-   * organ of its own. Every refusal of this screen is fixed ON this screen, so a door that DID
-   * something would be a second copy of a control standing a few centimetres away.
-   */
-  const goTo = (id: string) => () => {
-    const group = document.getElementById(id);
-    if (!group) return;
-    group.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    const first = group.querySelector<HTMLElement>('button:not([disabled])');
-    (first ?? group).focus?.();
-  };
-
-  const door = !gate.ok ? gate.door : undefined;
+  /** Why the address's workflow is not open, in words — or nothing when there is nothing to say. */
+  const refused = asked && !open ? whyNotOpen(asked, def, band) : '';
 
   return (
     <>
       {/* «RUN THAT AGAIN» FROM THE HISTORY LANDS HERE — the receiver draws nothing (see its file). */}
-      <PlaygroundRecallIntake techCardId={techCardId} draft={draft} disabled={disabled} />
+      <PlaygroundRecallIntake techCardId={techCardId} disabled={disabled} onRecall={onRecall} />
 
       <Section
         id='design-playground'
         title='playground'
-        question='· pictures, words, one run'
-        action={<Pill tone='ink'>outside the chain</Pill>}
+        question={open ? `· ${open.title.toLowerCase()}` : '· pick a workflow'}
       >
-        <PicturesGroup
-          band={band}
-          techCardId={techCardId}
-          draft={draft}
-          preset={preset}
-          disabled={disabled}
-        />
-
-        <AskGroup presets={presets} preset={preset} draft={draft} disabled={disabled} />
-
-        <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
-
-        {!gate.ok && (
-          <LockBar reason={`locked · ${gate.reason}`}>
-            {door === 'preset' && !disabled ? (
-              <Button variant='secondary' size='xs' onClick={goTo('design-playground-ask')}>
-                the ask ›
-              </Button>
-            ) : door === 'areas' && !disabled ? (
-              <Button variant='secondary' size='xs' onClick={goTo('design-playground-pictures-in')}>
-                mark an area ›
-              </Button>
-            ) : door === 'pictures' && !disabled ? (
-              <Button variant='secondary' size='xs' onClick={goTo('design-playground-pictures-in')}>
-                add a picture ›
-              </Button>
-            ) : null}
-          </LockBar>
+        {open && flow ? (
+          <div className='flex flex-col gap-8' data-playground-open={open.key}>
+            <WorkflowCard def={open} onBack={() => setWf(null)} />
+            <WorkflowPanel
+              /* One panel per workflow: its run state (refusal, pending) is about THAT form. */
+              key={open.key}
+              def={open}
+              run={flow}
+              band={band}
+              techCardId={techCardId}
+              draft={drafts.of(open)}
+              onDraft={(fn) => drafts.update(open, fn)}
+              disabled={disabled}
+            />
+          </div>
+        ) : (
+          <div className='flex flex-col gap-4'>
+            {refused && (
+              <CalloutBox tone='note'>
+                <Text size='micro' component='p' className='normal-case'>
+                  {refused}
+                </Text>
+              </CalloutBox>
+            )}
+            <WorkflowGrid band={band} onOpen={setWf} />
+          </div>
         )}
-
-        <GenerateRow
-          gate={asRowGate(gate)}
-          shape={runShape(preset)}
-          pending={run.isPending}
-          disabled={disabled}
-          onGenerate={generate}
-          onInspect={() => setInspecting(true)}
-        />
       </Section>
 
-      <PlaygroundOutputs band={band} techCardId={techCardId} disabled={disabled} />
-
-      {/* The inventory reads the DRAFT through the same functions the wire does — see its header. */}
-      <WhatModelGetsPlaygroundModal
-        open={inspecting}
-        onOpenChange={setInspecting}
-        state={draft.state}
-        preset={preset}
-      />
+      <PlaygroundResults band={band} techCardId={techCardId} disabled={disabled} def={open} />
     </>
   );
+}
+
+function whyNotOpen(
+  asked: string,
+  def: ReturnType<typeof workflowByKey>,
+  band: GetDesignBandResponse,
+): string {
+  if (!def) return `«${asked}» is not a workflow of this playground — pick one below.`;
+  const gate = def.gate(band);
+  const reason = !def.run ? NOT_ON_THIS_SERVER : gate.available ? '' : gate.reason;
+  return `${def.title} is ${reason || 'not available'} — pick another workflow below.`;
 }

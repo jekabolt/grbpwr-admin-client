@@ -47,7 +47,7 @@ type Common = {
   sources?: readonly ReuseSource[];
   /** What the pictures are for — the header of the library and upload dialogs. */
   purpose?: string;
-  /** Label of the Reuse door; default «reuse» under a slot, «reuse an asset» under a strip. */
+  /** Label of the Reuse door; default «reuse» — it stands under the slot column in both modes. */
   reuseLabel?: string;
   disabled?: boolean;
 };
@@ -246,17 +246,21 @@ export function ImageSlots(props: ImageSlotsProps): JSX.Element {
           </div>
         )}
       </div>
+      {/* Under the slot column, as in the fixed mode: a door the width of the whole panel read as a
+          second primary action beside a 128px slot (impeccable pass, C-03). */}
       {room > 0 && (
-        <ReuseDoor
-          band={band}
-          techCardId={techCardId}
-          sources={sources}
-          room={room}
-          taken={slotMediaIds(value)}
-          label={props.reuseLabel ?? 'reuse an asset'}
-          disabled={disabled}
-          onPick={add}
-        />
+        <div className={CELL}>
+          <ReuseDoor
+            band={band}
+            techCardId={techCardId}
+            sources={sources}
+            room={room}
+            taken={slotMediaIds(value)}
+            label={props.reuseLabel ?? 'reuse'}
+            disabled={disabled}
+            onPick={add}
+          />
+        </div>
       )}
     </div>
   );

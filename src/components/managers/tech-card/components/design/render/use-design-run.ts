@@ -19,7 +19,6 @@ import { designKeys, newClientRequestId } from '../use-design-band';
  * When the seam next opens, this belongs inside `useDesignWrites` and this file disappears.
  */
 
-
 export type StartRunInput = {
   /**
    * flat | render | threed | recolor | pattern. `draft_idea` is refused by the server — it has its
@@ -59,7 +58,12 @@ export type StartRunInput = {
 };
 
 export type StartRunState = {
-  start: (input: StartRunInput) => void;
+  /**
+   * `onAccepted` — called once the door ACCEPTED this press (the run is booked), never on a refusal.
+   * PLAYGROUND remembers the prompt's words in «Recently used» there and only there (C-03): a text
+   * the server refused is not a text a run was bought with.
+   */
+  start: (input: StartRunInput, opts?: { onAccepted?: () => void }) => void;
   isPending: boolean;
   /**
    * THE REFUSAL OF THE LAST PRESS, VERBATIM, AND IT SURVIVES THE TOAST.
@@ -177,7 +181,7 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
   });
 
   const start = useCallback(
-    (input: StartRunInput) => {
+    (input: StartRunInput, opts?: { onAccepted?: () => void }) => {
       if (!techCardId || techCardId <= 0) return;
       // THE FINGERPRINT COVERS EVERY FIELD THAT REACHES THE WIRE — THE CARD INCLUDED. `techCardId`
       // is the first field of the request and the server's own idempotency key is scoped by it, so
@@ -195,7 +199,10 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
       if (ledger.current?.fingerprint !== fingerprint) {
         ledger.current = { fingerprint, id: newClientRequestId() };
       }
-      mutation.mutate({ ...input, techCardId, clientRequestId: ledger.current.id });
+      mutation.mutate(
+        { ...input, techCardId, clientRequestId: ledger.current.id },
+        opts?.onAccepted ? { onSuccess: () => opts.onAccepted?.() } : undefined,
+      );
     },
     [techCardId, mutation],
   );
