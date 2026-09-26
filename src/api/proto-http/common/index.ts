@@ -4658,11 +4658,13 @@ export type DesignRunParams = {
   // (the build reads ONLY this colourway's render bench) and — since round 15 — on PATTERN: there
   // it names the colourway this tile is being MADE FOR, and the asset the run lands on the shelf is
   // given to that colourway in the same transaction that closes the run (single-select, so it is
-  // taken off whatever cloth wore it before). REFUSED on flat / vector / draft_idea with
-  // `colorway_forbidden`: a flat is ONE markup for the whole card and has no colourway BY NATURE —
-  // not «not filled in yet». 0 = no colourway stated, which on a
-  // render keeps the legacy meaning (an unattributed render, exactly what every render made
-  // before this axis existed is) and on a 3D run selects ONLY the unattributed render bench —
+  // taken off whatever cloth wore it before) — unless the run is made for a slot
+  // (DesignPatternParams.bom_item_id > 0), in which case the tile becomes the fabric of the
+  // (colourway, slot) pair only (DesignAssetBinding) and DesignAsset.colorway_id is left alone.
+  // REFUSED on flat / vector / draft_idea with `colorway_forbidden`: a flat is ONE markup for the
+  // whole card and has no colourway BY NATURE — not «not filled in yet». 0 = no colourway stated,
+  // which on a render keeps the legacy meaning (an unattributed render, exactly what every render
+  // made before this axis existed is) and on a 3D run selects ONLY the unattributed render bench —
   // never a mixture of colourways.
   // FROZEN LIKE EVERY OTHER PARAM: a rerun inherits it from the parent's params, so repeating a
   // colourway-A render is a colourway-A render without restating it. An inherited colourway that
@@ -4924,8 +4926,10 @@ export type DesignPatternParams = {
   // 0 = not made for a slot, which is every image-mode run and every run frozen before this field.
   // WHEN BOTH ARE SET, THE KEPT TILE BECOMES THE FABRIC OF THAT PAIR: the transaction that files
   // the asset on the shelf also upserts the pair's DesignAssetBinding, replacing whatever the pair
-  // wore before. The newest swatch is what the person just asked for; the earlier ones stay on the
-  // shelf and can be bound back by hand (SetDesignAssetBinding).
+  // wore before — and that binding is ALL it writes: the legacy whole-colourway
+  // DesignAsset.colorway_id is neither set on the tile nor taken off any other asset. The newest
+  // swatch is what the person just asked for; the earlier ones stay on the shelf and can be bound
+  // back by hand (SetDesignAssetBinding).
   // A LINE OF ANOTHER CARD is refused at the door, free (`foreign_bom_line`). A line deleted
   // between the door and the landing does NOT fail the landing — the run is paid for and the tile
   // is still a tile — it simply lands unbound.
@@ -5290,7 +5294,13 @@ export type DesignAsset = {
   mediaId: number | undefined;
   // Resolved from media_id at read time. UNSET when media_id is 0 or the file is gone.
   media: MediaFull | undefined;
+  // A colourway code or a Pantone code, when this asset carries one. The LANDING OF A PATTERN RUN
+  // files the code its run stated in params.colour.code — for a swatch, the Pantone it was built
+  // from («18-1664 TCX») — so a landed swatch is not a nameless square of colour on the shelf.
+  // '' when the run stated none, and on every tile landed before migration 0368.
   colourCode: string | undefined;
+  // #RRGGBB screen approximation. On a landed pattern tile: the run's params.colour.hex, beside the
+  // code above.
   colourHex: string | undefined;
   // What the human wrote about this asset — «brushed, slight sheen», «matte gunmetal, 15 mm».
   note: string | undefined;
@@ -5315,7 +5325,12 @@ export type DesignAsset = {
   // devHex / pantone / colorCode / swatch, and a second field would be a competing answer to a
   // question that already has one. Only «colourway N wears asset X» needed a home.
   // ⚠ OUTPUT-ONLY, AND WRITTEN BY EXACTLY TWO PLACES: SetDesignAssetColorway, and the LANDING OF A
-  // PATTERN RUN (the tile is filed with the colourway its run named — see DesignRunParams.colorway_id).
+  // PATTERN RUN MADE WITHOUT A SLOT (DesignPatternParams.bom_item_id 0 — every image-mode run and
+  // every run frozen before that field): the tile is filed with the colourway its run named — see
+  // DesignRunParams.colorway_id. A run made FOR A SLOT (bom_item_id > 0) DOES NOT WRITE THIS
+  // COLUMN: its tile is the fabric of one (colourway, slot) pair, not of the whole colourway, so its
+  // landing writes only that pair's DesignAssetBinding, leaves this column unset on the new row and
+  // takes the colourway off no other asset.
   // UpsertDesignAsset NEITHER CARRIES NOR CLEARS IT. That is deliberate and it is the whole reason
   // the assignment does not live on Upsert: Upsert is a full replace, so a proto3 scalar there would
   // arrive as 0 from every client that predates this field — and from every unrelated save (a
@@ -5370,7 +5385,8 @@ export type DesignAssetPlacement = {
 // pointing at nobody.
 // WRITTEN BY TWO PLACES: SetDesignAssetBinding (the person's choice; asset_id 0 unbinds), and the
 // LANDING OF A PATTERN RUN made for a pair (DesignPatternParams.bom_item_id together with the run's
-// colorway_id), which replaces the pair's previous fabric with the tile it just filed.
+// colorway_id), which replaces the pair's previous fabric with the tile it just filed — and writes
+// nothing into the legacy DesignAsset.colorway_id.
 export type DesignAssetBinding = {
   id: number | undefined;
   techCardId: number | undefined;
