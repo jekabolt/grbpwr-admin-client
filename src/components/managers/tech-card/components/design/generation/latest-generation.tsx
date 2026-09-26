@@ -161,8 +161,10 @@ export function LatestGeneration({
     let next: number | null | undefined;
     if (!seen || seen.card !== techCardId || seen.runId !== runId) {
       next = decks[0]?.root ?? null;
-      // Another card or another run: a split of the old one has nothing left to cut.
-      if (splitting) setSplitting(null);
+      // ANOTHER CARD closes a split in progress: its picture is not on this screen. A newer run of
+      // the SAME card leaves it open — the picture still exists (the history row holds it), the
+      // person's frames are not thrown away, and the cut lands on that row.
+      if (seen && seen.card !== techCardId && splitting) setSplitting(null);
     } else {
       const grown = decks.find((d) => d.count > (seen.sizes.get(d.root) ?? 0));
       if (grown) next = grown.root;
