@@ -28,6 +28,7 @@ import { Swatch } from '../render/field-row';
 import { RunRefusal } from '../render/generate-row';
 import { archivedColorwayGate, type Gate } from '../render/model';
 import { useStartDesignRun } from '../render/use-design-run';
+import { ImageToFabric } from './image-to-fabric';
 import { patternRuns, refusalAdvice, shelfIsFull } from './model';
 import { CornerLabel, FABRIC_CELL_ASPECT, PendingTile, TiledFace } from './organs';
 import {
@@ -311,6 +312,15 @@ export function PatternStudio({
           );
         })
       )}
+
+      <ImageToFabric
+        band={band}
+        techCardId={techCardId}
+        disabled={disabled}
+        colorways={shown}
+        slots={slots}
+        live={unpaired}
+      />
     </Section>
   );
 }

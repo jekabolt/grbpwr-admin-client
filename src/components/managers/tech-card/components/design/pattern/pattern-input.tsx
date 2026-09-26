@@ -4,11 +4,8 @@ import { MediaSelector } from 'components/managers/media/components/media-select
 import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { cn } from 'lib/utility';
 import { useState, type JSX } from 'react';
-import Input from 'ui/components/input';
 import { PLACEHOLDER_SURFACE, Placeholder } from 'ui/components/placeholder';
-import Text from 'ui/components/text';
 
-import { ASSET_NAME_MAX } from '../assets/model';
 import { BENCH_CELL_PX, BENCH_CELL_STYLE } from '../bench-slot';
 import { EMPTY_WORD, HALF_FACE } from '../core';
 import { TILE_CORNER, TILE_QUIET } from '../picture-tile';
@@ -40,15 +37,8 @@ const CELL_STYLE = BENCH_CELL_STYLE;
 const CAP_PX = 24;
 /** Кадр держит ВСЮ коробку минус её рамку: 136 × 160 внутри 138 × 162. */
 const FRAME_ASPECT = `${BENCH_CELL_PX - 2}/${BENCH_CELL_PX + CAP_PX - 2}`;
-/**
- * The NAME column takes the rest of the row and drops under the cell when the row is narrow.
- *
- * ПОТОЛОК ШИРИНЫ — НЕ КОСМЕТИКА. Поле держит 60 знаков (`ASSET_NAME_MAX`), а без потолка оно
- * растягивалось на всю оставшуюся ширину блока (около 1100 px на десктопе): поле в пять раз шире
- * того, что в него влезает, читается как «сюда пишут абзац», и рядом с ним ячейка картинки
- * выглядит обрезком.
- */
-const NAME_STYLE: React.CSSProperties = { flex: '1 1 200px', minWidth: 0, maxWidth: 420 };
+/* КОЛОНКИ NAME БОЛЬШЕ НЕТ (STEP 3, D5): имя ткани минтится (`mintFabricName`, «fabric N»), а
+   переименовывают её на плитке карусели LAST FABRICS. Ячейка осталась одна — и она та же. */
 
 /**
  * ═══ ПУСТАЯ ЯЧЕЙКА — ДВЕ ПОЛОВИНЫ, И ЭТО ДВА РАЗНЫХ ИСХОДА, А НЕ ДВА ВХОДА ═══════════════════════
@@ -81,7 +71,11 @@ const NAME_STYLE: React.CSSProperties = { flex: '1 1 200px', minWidth: 0, maxWid
  * — та же типографика, тот же фокус, тот же зазор «знак + глагол») и деление коробки геометрией
  * (`SLOT_HALVES`). Кадр и коробка остаются свои — 138 × 162, решение r2 п.25.
  */
-const GENERATE_HALF = '+ to generate';
+/* ⚠ ВЕРХНЯЯ ПОЛОВИНА ЗОВЁТСЯ `+ picture`, А НЕ `+ to generate` (STEP 3). Глагол `generate` на
+   шаге теперь принадлежит рядам слотов (свотч из цвета), а у этой ячейки свой, другой глагол —
+   `extract fabric` рядом с ней. Два экрана одного шага с одним словом на разные прогоны читались
+   бы как одна кнопка, стоящая дважды. */
+const GENERATE_HALF = '+ picture';
 const GALLERY_HALF = '+ tile from gallery';
 /**
  * ЗАГОЛОВОК ПИКЕРА — ОДНА СТРОКА НА ОДИН ПРЕДМЕТ, И ИХ ЗДЕСЬ РОВНО ДВА. Верхняя половина,
@@ -90,11 +84,12 @@ const GALLERY_HALF = '+ tile from gallery';
  * пустой ячейки, читал над одной и той же библиотекой разные обещания. Нижняя половина — предмет
  * ДРУГОЙ, и потому у неё своя строка, а не третья редакция первой.
  */
-const SOURCE_PURPOSE = 'design · the picture a pattern is generated from';
+const SOURCE_PURPOSE = 'design · the photograph a fabric is extracted from';
 const GALLERY_PURPOSE = 'design · a picture that is already a repeating tile';
 const GALLERY_TITLE =
   'pick a picture that is ALREADY a repeating tile — it is filed on this card’s shelf as it is, ' +
-  'with no run, no model and nothing paid for. The tile is named for you; rename it on its face.';
+  'with no run, no model and nothing paid for. It is named for you; rename it on its tile in ' +
+  'LAST FABRICS.';
 
 /**
  * Деление коробки НАДВОЕ — ГЕОМЕТРИЕЙ, А НЕ ВЕРОЙ, теми же двумя строками, что у общей плитки
@@ -130,9 +125,9 @@ function RepeatGlyph({ className }: { className?: string }): JSX.Element {
 }
 
 /**
- * ═══ THE INPUT OF A TILE — ONE PICTURE AND ONE NAME, side by side ═══════════════════════════════
+ * ═══ THE INPUT OF IMAGE TO FABRIC — ONE PICTURE, ONE CELL ══════════════════════════════════════
  *
- * Two columns: the source cell on the left, the NAME field on the right.
+ * Была парой колонок «ячейка · NAME»; с шага тканей (STEP 3) — одна ячейка: имя минтится.
  *
  * ═══ ЯЧЕЙКА ГОВОРИТ СОБОЙ — ЧЕТЫРЕ НАДПИСИ СНЯТЫ (владелец, r3 п.12) ═══════════════════════════
  *
@@ -179,8 +174,6 @@ export function PatternInput({
   onPickFromGallery,
   galleryInert,
   galleryPending,
-  name,
-  onName,
   disabled,
 }: {
   /** What is about to travel. `null` — nothing, and GENERATE below says so. */
@@ -200,8 +193,6 @@ export function PatternInput({
   galleryInert?: string;
   /** Строка полки ещё пишется — вторая посадка тем же жестом завела бы двойника. */
   galleryPending?: boolean;
-  name: string;
-  onName: (next: string) => void;
   disabled?: boolean;
 }): JSX.Element {
   const sourceUrl = source?.media?.fullSize?.mediaUrl || source?.media?.thumbnail?.mediaUrl || '';
@@ -232,7 +223,7 @@ export function PatternInput({
   const corner = cn(TILE_CORNER, TILE_QUIET, 'py-0.5 leading-none');
 
   return (
-    <div data-pattern-input='' className='flex flex-wrap items-start gap-3'>
+    <div data-pattern-input='' className='flex shrink-0 items-start'>
       {/* ─── the source cell ────────────────────────────────────────────────────────────── */}
       <div
         data-pattern-source={sourceId || 'empty'}
@@ -270,7 +261,14 @@ export function PatternInput({
                строками этого кадра. Полосатая поверхность тоже здесь: нижняя половина — не
                `MediaSlot`, своей поверхности у неё нет, и без этой строки она была бы белой
                заплатой в полосатой рамке. */
-            <div style={{ ...PLACEHOLDER_SURFACE, aspectRatio: FRAME_ASPECT, minHeight: 0, ...SLOT_HALVES }}>
+            <div
+              style={{
+                ...PLACEHOLDER_SURFACE,
+                aspectRatio: FRAME_ASPECT,
+                minHeight: 0,
+                ...SLOT_HALVES,
+              }}
+            >
               {/* ─── верх: снимок, из которого модель СДЕЛАЕТ плитку ────────────────────────
                   Обёртка с нулевым минимумом и обрезкой несущая: у элемента грида `min-height:
                   auto`, и собственные пропорции кнопки слота распёрли бы строку (разбор —
@@ -412,7 +410,7 @@ export function PatternInput({
                           className={corner}
                           data-source-change=''
                           aria-label='change the source picture'
-                          title='pick another picture for this tile'
+                          title='pick another photograph for this fabric'
                         >
                           change
                         </button>
@@ -424,33 +422,6 @@ export function PatternInput({
             </>
           )}
         </div>
-      </div>
-
-      {/* ─── the name ───────────────────────────────────────────────────────────────────── */}
-      <div style={NAME_STYLE} className='flex flex-col gap-1'>
-        <label className='flex flex-col gap-0.5' htmlFor='design-pattern-name'>
-          <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
-            name <b className='text-textColor'>*</b>
-          </Text>
-          <Input
-            name='design-pattern-name'
-            data-pattern-name
-            aria-label='name'
-            value={name}
-            disabled={disabled}
-            // THE LIMIT LIVES IN ONE PLACE (`ASSET_NAME_MAX`): `design_asset.name` is VARCHAR(60),
-            // the door obeys the same rule, and the library screen reads the same constant.
-            maxLength={ASSET_NAME_MAX}
-            placeholder='twill repeat'
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => onName(e.target.value)}
-          />
-        </label>
-        {/* ПИЛЮЛЯ `NOT SENT` СНЯТА ВМЕСТЕ СО СВОЕЙ ПАРОЙ (п.12 снял `IN THE PROMPT`, п.14 — «goes
-            to the model»). Факт при этом не потерян: он сказан одной серой строкой там же, где
-            стоял, — то есть органов на этом месте стало одним меньше, а сведений столько же. */}
-        <Text size='nano' variant='label' component='span' data-name-note=''>
-          the name is how you will find it — it is not sent to the model
-        </Text>
       </div>
 
       {/* The dialog is mounted only with a live source: it pulls the original as a blob on every

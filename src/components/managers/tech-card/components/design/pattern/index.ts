@@ -23,6 +23,8 @@
  */
 export { PatternStudio, type PatternStudioProps } from './pattern-studio';
 export { PatternInput } from './pattern-input';
+export { ImageToFabric } from './image-to-fabric';
+export { FabricCarousel } from './fabric-carousel';
 /* ═══ `PatternLibrary` И `PatternColourRow` СНЕСЕНЫ ВМЕСТЕ СО СВОИМИ ФАЙЛАМИ (STEP 3, 2026-09-26) ══
    `pattern-library.tsx` держал две полки («tiles on this card», «made earlier, not kept») и
    дверь `keep it`; `colourways.tsx` — ряд COLOUR «ничьего» цвета плитки (r2 §26) и
