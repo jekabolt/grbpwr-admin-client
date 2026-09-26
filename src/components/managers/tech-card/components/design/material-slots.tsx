@@ -113,7 +113,7 @@ type Family = 'cloth' | 'thread' | 'hardware';
 
 const FAMILY_ORDER: Family[] = ['cloth', 'thread', 'hardware'];
 
-/** Слово семейства — в плейсхолдере рождения внизу таблицы и на пилюле строки (макет: `CLOTH`
+/** Слово семейства — в плейсхолдере рождения под таблицей и на пилюле строки (макет: `CLOTH`
  *  ink, `THREAD` / `HARDWARE` обычная). Одно слово, как в макете: «& trims» — не семейство. */
 const FAMILY_TITLE: Record<Family, string> = {
   cloth: 'cloth',
@@ -242,9 +242,17 @@ export function MaterialSlots({
    *
    * Три чипа в шапке были ТРЕМЯ кнопками на один жест, да ещё и в противоположном от списка
    * углу: рука выбирала семейство наверху, а строка появлялась внизу. Теперь орган один и стоит
-   * там, где появится результат, — селект в последней строке таблицы; выбор семейства И ЕСТЬ
+   * там, где появится результат, — селект под последней строкой таблицы; выбор семейства И ЕСТЬ
    * нажатие, поэтому второй кнопки «добавить» рядом нет. Селект возвращается в исходную подпись
    * сразу после рождения: он не хранит состояние, он его СОВЕРШАЕТ.
+   *
+   * ВИД — ДОМАШНИЙ РЯД-ПЛЕЙСХОЛДЕР (владелец, 2026-09-26, O-49: «add a slot должен быть оформлен
+   * по дизайну как плейсхолдер как везде мы это делаем»). Тот же пунктирный ряд во всю ширину, что
+   * `+ aspect` у CONSTRUCTION (`details-editor.tsx`): та же рамка, те же поля, кегль и ховер, и
+   * левый край — край рядов над ним, а не поле ячейки. Орган остался нативным селектом, сменился
+   * только вид: `block` вместо `flex` (внутренность селекта раскладывает браузер), и знак ▾ в
+   * подписи остаётся — `appearance-none` снимает родную стрелку, и без знака список не отличить
+   * от кнопки.
    */
   const addPlaceholder = readOnly ? null : (
     <select
@@ -255,7 +263,7 @@ export function MaterialSlots({
         const family = e.target.value as Family | '';
         if (family) addSlot(family);
       }}
-      className='min-h-[26px] w-full cursor-pointer appearance-none border border-dashed border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize text-labelColor hover:text-textColor focus:border-solid focus:border-textColor focus:outline-none'
+      className='block w-full cursor-pointer appearance-none border border-dashed border-borderColor bg-bgColor px-2 py-3 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
     >
       <option value=''>+ add a slot ▾</option>
       {FAMILY_ORDER.map((family) => (
@@ -281,7 +289,7 @@ export function MaterialSlots({
     >
       <div data-b16-slots=''>
         {lines.length === 0 ? (
-          <EmptyState action={addPlaceholder ? <div className='w-40'>{addPlaceholder}</div> : undefined}>
+          <EmptyState>
             <span className='uppercase text-textColor'>no material slots yet</span>
             {readOnly ? '' : ' · draft the construction above, or add one by hand'}
           </EmptyState>
@@ -364,16 +372,21 @@ export function MaterialSlots({
                   />
                 )),
               )}
-              {addPlaceholder && (
-                <tr data-b16-add-row=''>
-                  {/* Строка без волосяной линии снизу: это не запись, а место, где она появится. */}
-                  <td colSpan={6} data-align='left' className='border-b-0'>
-                    <div className='max-w-[280px]'>{addPlaceholder}</div>
-                  </td>
-                </tr>
-              )}
             </tbody>
           </DataTable>
+        )}
+        {/* ДВЕРЬ — ПОД СПИСКОМ, А НЕ ЕГО ПОСЛЕДНЕЙ СТРОКОЙ (владелец, 2026-09-26, O-48: «после
+            последнего чилда в списке не делать подчеркивание и если еще снизу есть плейсхолдер
+            для добавления делать гэп между последним элементом и плейсхолдером побольше»).
+            Последний слот кончается воздухом — линейку под последней строкой снимает сам
+            `DataTable`, — а дверь отступает от него на шаг (16px), и только когда слоты есть: под
+            фразой пустого списка она стоит штатным шагом блока (10px), отступать ей там не от
+            чего. Строкой таблицы дверь больше не стоит: это не запись, а место, где запись
+            появится, и её левый край — край рядов, а не поле ячейки (O-49). */}
+        {addPlaceholder && (
+          <div data-b16-add-row='' className={lines.length > 0 ? 'mt-4' : 'mt-2.5'}>
+            {addPlaceholder}
+          </div>
         )}
       </div>
     </Section>

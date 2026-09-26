@@ -1135,7 +1135,7 @@ export function BatchMarkerQueue({
       ) : null}
       {plan && jobs.length > 0 ? (
         <div className='w-full overflow-x-auto'>
-          <table className='w-full border-collapse'>
+          <table className='w-full border-collapse [&>tbody>tr:last-child>td]:border-b-0'>
             <thead>
               <tr>
                 <th className='border-b border-hairline px-1 py-1 text-left uppercase'> </th>

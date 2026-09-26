@@ -121,8 +121,13 @@ export function AttentionBadge() {
       openElement={<Chip tone='error'>⚠ {total}</Chip>}
     >
       {alerts.map((a) => (
-        <Link key={a.key} to={a.to} className='block hover:text-textColor'>
-          <Row label={a.label} value={a.count} />
+        // The link is the list item: it carries the rule between alerts, none under the last.
+        <Link
+          key={a.key}
+          to={a.to}
+          className='block border-b border-hairline last:border-b-0 hover:text-textColor'
+        >
+          <Row className='border-b-0' label={a.label} value={a.count} />
         </Link>
       ))}
     </GenericPopover>

@@ -11,6 +11,8 @@ import Text from 'ui/components/text';
  * in the wrong place. Every organ of this band that puts a control on a ruled line writes this same
  * flex line by hand (`artifacts-panel`, `references-section`); this is that idiom, once, so the render
  * menu and the 3D menu cannot drift by two pixels of padding.
+ *
+ * The rule sits BETWEEN rows (O-48): the last row of its column ends in air.
  */
 export function FieldRow({
   label,
@@ -27,7 +29,10 @@ export function FieldRow({
   return (
     <div
       {...rest}
-      className={cn('flex flex-wrap items-center gap-2 border-b border-hairline py-1', className)}
+      className={cn(
+        'flex flex-wrap items-center gap-2 border-b border-hairline py-1 last:border-b-0',
+        className,
+      )}
     >
       <Text
         size='micro'

@@ -813,7 +813,10 @@ export function PatternsField({
     const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes);
 
     return (
-      <tr key={row.lineKey || `row-${index}`} className='border-b border-hairline align-middle'>
+      <tr
+        key={row.lineKey || `row-${index}`}
+        className='border-b border-hairline align-middle last:border-b-0'
+      >
         <td className='py-1 pr-2'>
           {editing?.index === index ? (
             <Input

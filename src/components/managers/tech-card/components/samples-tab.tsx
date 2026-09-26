@@ -490,7 +490,7 @@ function InlineRow({
   children: React.ReactNode;
 }) {
   return (
-    <label className='grid grid-cols-[80px_minmax(0,1fr)] items-center gap-2 border-b border-hairline py-0.5'>
+    <label className='grid grid-cols-[80px_minmax(0,1fr)] items-center gap-2 border-b border-hairline py-0.5 last:border-b-0'>
       <Text size='nano' variant='label' tracking='label' component='span' className='uppercase'>
         {label}
       </Text>

@@ -468,8 +468,10 @@ export function OutputVariantsPanel({
         );
       })}
 
+      {/* The door stands a step below the last colour (O-48): the column's 8px gap plus 8px — the
+          last row ends in air, and a door right under it would read as one more row. */}
       {canEdit && (
-        <div>
+        <div className={variants.length > 0 ? 'mt-2' : undefined}>
           <Button
             type='button'
             variant='secondary'

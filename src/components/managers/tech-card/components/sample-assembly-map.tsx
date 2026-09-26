@@ -288,7 +288,7 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
             return (
               <div
                 key={i}
-                className='grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-2 border-b border-hairline py-1'
+                className='grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-2 border-b border-hairline py-1 last:border-b-0'
               >
                 <span className='flex size-4 shrink-0 items-center justify-center bg-textColor text-nano leading-none tabular-nums text-bgColor'>
                   {o.calloutNumber ? o.calloutNumber : i + 1}
@@ -347,7 +347,7 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
             {orphanCallouts.map((c) => (
               <div
                 key={c.number}
-                className='flex items-baseline gap-2 border-b border-hairline py-1'
+                className='flex items-baseline gap-2 border-b border-hairline py-1 last:border-b-0'
               >
                 <span className='flex size-4 shrink-0 items-center justify-center border border-error text-nano leading-none tabular-nums text-error'>
                   {c.number}

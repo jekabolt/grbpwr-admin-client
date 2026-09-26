@@ -5,7 +5,8 @@ import { cn } from 'lib/utility';
  *   - everything right-aligned except the first column and any cell marked `data-align="left"`
  *     (mark the `th` AND the `td` — a column of words, not digits)
  *   - `th` 10px grey uppercase over a `--borderColor` rule
- *   - `td` over a `--hairline` rule
+ *   - `td` over a `--hairline` rule — BETWEEN rows only: the last row of the last `tbody` ends in
+ *     air (O-48), and a door that adds a row stands under the table, not as its last row
  *   - tabular numerals throughout
  *   - the total row is bold with a full-weight rule ABOVE it
  *
@@ -57,6 +58,12 @@ export function DataTable({
           // ancestor happens to set.
           '[&_td]:px-1.5 [&_td]:py-1 [&_td]:text-textBaseSize [&_td]:text-right [&_td]:align-top',
           '[&_td]:border-b [&_td]:border-hairline',
+          // THE RULE SITS BETWEEN ROWS, NEVER UNDER THE LAST ONE (owner, 2026-09-26, O-48: «после
+          // последнего чилда в списке не делать подчеркивание»). The last row of the LAST `tbody`
+          // only: a table that groups its rows one `tbody` per item (cost-estimate-field's matrix)
+          // keeps the rule between those groups. A `TotalRow` closing the list already draws no
+          // rule below itself; the grid keeps its outline, so this is the list form alone.
+          variant === 'list' && '[&>tbody:last-of-type>tr:last-child>td]:border-b-0',
           '[&_th:first-child]:text-left [&_td:first-child]:text-left',
           // A TEXT COLUMN SAYS SO WITH `data-align="left"` ON BOTH ITS `th` AND ITS `td`, and it
           // has to live here rather than at the call site: `[&_th]:text-right` is a descendant

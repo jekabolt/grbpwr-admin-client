@@ -267,7 +267,7 @@ export function PartsRow({
                 <div
                   key={m.view}
                   data-colour-legacy-map={m.view}
-                  className='flex min-w-0 flex-wrap items-center gap-2 border-b border-hairline py-1'
+                  className='flex min-w-0 flex-wrap items-center gap-2 border-b border-hairline py-1 last:border-b-0'
                 >
                   <Text size='micro' component='span' className='uppercase'>
                     {viewLabel(m.view)}
@@ -385,7 +385,7 @@ function ColourRow({
     <div
       data-colour-row={colour.hex}
       data-colour-stated={colour.stated ? 'yes' : 'no'}
-      className='flex flex-wrap items-center gap-2 border-b border-hairline py-1'
+      className='flex flex-wrap items-center gap-2 border-b border-hairline py-1 last:border-b-0'
     >
       <Swatch hex={colour.hex} size={22} title={colour.hex} />
       <Text size='micro' component='span' className='w-[68px] shrink-0 uppercase tabular-nums'>

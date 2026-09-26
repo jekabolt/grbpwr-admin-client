@@ -723,10 +723,14 @@ export function SampleFabricMap({
 
       <div>
         <GroupLabel>fabrics on this sample</GroupLabel>
+        {/* The rule sits between fabrics, not under the last one — the unmapped-pieces callout
+            that may follow is not a row (O-48). */}
         {view.fabrics.map((f, fi) => (
           <div
             key={f.key}
-            className='flex items-start justify-between gap-2.5 border-b border-hairline py-1'
+            className={`flex items-start justify-between gap-2.5 py-1${
+              fi < view.fabrics.length - 1 ? ' border-b border-hairline' : ''
+            }`}
           >
             <span className='flex min-w-0 items-start gap-1.5'>
               <FabricSwatch index={fi} className='mt-0.5' />

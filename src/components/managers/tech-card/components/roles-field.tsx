@@ -45,6 +45,7 @@ function RoleRow({
   required,
   assignments,
   canEdit,
+  last,
 }: {
   techCardId?: number;
   role: common_TechCardRole;
@@ -52,6 +53,9 @@ function RoleRow({
   required: boolean;
   assignments: common_TechCardRoleAssignment[];
   canEdit: boolean;
+  /** The last of the four: no rule under it — the rule sits between rows (O-48), and on an
+   *  unsaved card the note that follows is not a row. */
+  last: boolean;
 }) {
   const { showMessage } = useSnackBarStore();
   // Options only — never captions: a disabled account drops out of this list, and whoever holds
@@ -94,7 +98,7 @@ function RoleRow({
 
   return (
     <div
-      className='flex flex-1 flex-col justify-center border-b border-hairline pb-1.5'
+      className={`flex flex-1 flex-col justify-center pb-1.5${last ? '' : ' border-b border-hairline'}`}
       data-role-row={label}
     >
       <div className='flex flex-wrap items-center gap-2'>
@@ -216,9 +220,10 @@ export function RolesField({
 }) {
   return (
     <div className='flex flex-1 flex-col gap-1.5' data-roles=''>
-      {ROLES.map((r) => (
+      {ROLES.map((r, i) => (
         <RoleRow
           key={r.role}
+          last={i === ROLES.length - 1}
           techCardId={techCardId}
           role={r.role}
           label={r.label}

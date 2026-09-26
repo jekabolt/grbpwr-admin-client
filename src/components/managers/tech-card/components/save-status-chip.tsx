@@ -186,7 +186,7 @@ export function SaveStatusChip({
             <div>
               <GroupLabel flush>waiting to save</GroupLabel>
               {bodyDirty && (
-                <div className='flex items-baseline justify-between gap-3 border-b border-hairline py-1'>
+                <div className='flex items-baseline justify-between gap-3 border-b border-hairline py-1 last:border-b-0'>
                   <Text size='micro'>card (header &amp; tabs)</Text>
                   <Text size='nano' variant='label' className='uppercase'>
                     form
@@ -196,7 +196,7 @@ export function SaveStatusChip({
               {staged.map((c) => (
                 <div
                   key={c.key}
-                  className='flex items-baseline justify-between gap-3 border-b border-hairline py-1'
+                  className='flex items-baseline justify-between gap-3 border-b border-hairline py-1 last:border-b-0'
                 >
                   <Text size='micro'>{c.label}</Text>
                   <Text size='nano' variant='label' className='uppercase'>

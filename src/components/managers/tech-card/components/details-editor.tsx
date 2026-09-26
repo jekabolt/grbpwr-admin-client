@@ -241,7 +241,8 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
     setPicker(false);
   };
 
-  // O-40: the door (and the picker that replaces it) breathes under the last row's rule.
+  // O-40 / O-48: the last row ends in air (no rule under it); the door (and the picker that
+  // replaces it) stands a step (16px) below it — only when rows exist.
   const afterRows = allKeys.length > 0 ? 'mt-4 ' : '';
 
   return (
@@ -269,12 +270,13 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
           списка, а не как отдельный орган. Пустой список ничего не объясняет словами — там этот
           ряд и есть всё содержимое блока, и он сам говорит, что делать. */}
       <div data-c19-aspect-list=''>
-        {allKeys.map((key) => {
+        {allKeys.map((key, i) => {
           const d = detailByKey(key);
           return (
             <AspectRow
               key={key}
               aspectKey={key}
+              last={i === allKeys.length - 1}
               text={d?.text ?? ''}
               ids={d?.mediaIds ?? []}
               inputIds={inputIds}
@@ -287,10 +289,12 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }): JSX
             />
           );
         })}
-        {/* ВОЗДУХ ПОД ПОСЛЕДНЕЙ ЛИНЕЙКОЙ (владелец, 2026-09-26, O-40): «от плейсхолдера + aspect до
-            подчеркивания выше сделай больше гэп». Ряды кончаются волосяной линейкой; дверь и пикер,
-            встающий на её место, отступают от неё на один шаг — только когда над ними есть ряды:
-            в пустом списке дверь остаётся первой строкой под шапкой, без лишнего зазора. */}
+        {/* ВОЗДУХ ПОД ПОСЛЕДНИМ РЯДОМ (владелец, 2026-09-26, O-40): «от плейсхолдера + aspect до
+            подчеркивания выше сделай больше гэп»; и O-48: «после последнего чилда в списке не
+            делать подчеркивание». Линейка стоит только МЕЖДУ рядами — последний ряд кончается
+            воздухом, — а дверь и пикер, встающий на её место, отступают от него на один шаг, и
+            только когда над ними есть ряды: в пустом списке дверь остаётся первой строкой под
+            шапкой, без лишнего зазора. */}
         {!picker ? (
           <button
             type='button'
@@ -423,6 +427,7 @@ function AspectRow({
   onRemoveImage,
   onRemoveAspect,
   onOpenViewer,
+  last,
 }: {
   aspectKey: string;
   text: string;
@@ -435,6 +440,8 @@ function AspectRow({
   onRemoveImage: (id: number) => void;
   onRemoveAspect: () => void;
   onOpenViewer: (index: number, ids: number[]) => void;
+  /** Последний ряд списка: линейки под ним нет, список кончается воздухом (O-48). */
+  last: boolean;
 }): JSX.Element {
   const label = detailKeyLabel(aspectKey);
   // «DRAFTED» — ИЗ ОДНОГО СОСТОЯНИЯ СТУДИИ (волна 25.09, `drafted-contract.ts`): синяя пилюля у
@@ -456,7 +463,7 @@ function AspectRow({
   return (
     <div
       {...intake.regionHandlers}
-      className='border-b border-hairline py-3'
+      className={last ? 'py-3' : 'border-b border-hairline py-3'}
       data-c19-aspect={aspectKey}
       // Пилюля стоит у ярлыка, вне рамки поля: принятие с клавиатуры ведёт фокус в поле этого ряда.
       data-drafted-scope=''

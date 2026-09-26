@@ -894,7 +894,7 @@ export function SampleMaterialsRollup({
           return (
             <div
               key={r.materialId}
-              className='flex items-start justify-between gap-2.5 border-b border-hairline py-1'
+              className='flex items-start justify-between gap-2.5 border-b border-hairline py-1 last:border-b-0'
             >
               <span className='min-w-0'>
                 <Text size='micro' component='span'>
@@ -1263,8 +1263,14 @@ export function SampleFittings({
       {fittings.length > 0 && (
         <div className='flex flex-col'>
           {fittings.map((f) => (
-            <Link key={f.id} to={`/fittings/${f.id}`} className='block'>
+            // The link is the list item: it carries the rule between fittings, none under the last.
+            <Link
+              key={f.id}
+              to={`/fittings/${f.id}`}
+              className='block border-b border-hairline last:border-b-0'
+            >
               <Row
+                className='border-b-0'
                 label={
                   <span className='flex min-w-0 flex-col'>
                     <Text size='micro'>

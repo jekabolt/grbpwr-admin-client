@@ -99,10 +99,12 @@ export function OrdersList({ orders, isLoading, activeFilters, onClearFilters }:
                 open(order);
               }
             }}
-            className='cursor-pointer transition-colors hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor [&:last-child>div]:border-b-0'
+            className='cursor-pointer border-b border-hairline transition-colors last:border-b-0 hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
           >
+            {/* The wrapper is the list item, so it carries the rule between rows and drops it
+                on the last one; the `Row` alone inside it has no sibling row to rule against. */}
             <Row
-              className='items-start px-2 py-2.5'
+              className='items-start border-b-0 px-2 py-2.5'
               label={
                 <span className='flex min-w-0 flex-col gap-0.5'>
                   <span className='flex flex-wrap items-center gap-1.5'>
