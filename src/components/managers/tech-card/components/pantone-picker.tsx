@@ -99,6 +99,8 @@ const PAGE = 120;
 const FIRST_PAGE: Record<PantoneFamily, number> = { textile: PAGE, solid: PAGE };
 /** 60px — потолок п.25 (56–64). Одна строка на обе сетки, чтобы «recent» не разошлась с семьями. */
 const GRID_COLUMNS = 'repeat(auto-fill, minmax(60px, 1fr))';
+/** Выдача закрытого пикера — одна пустая ссылка на все (см. семьи ниже). */
+const CLOSED: PantoneSwatch[] = [];
 
 export function PantonePicker({
   value,
@@ -128,8 +130,18 @@ export function PantonePicker({
     if (open) void ensurePantoneLibrary();
   }, [open]);
 
-  const textile = useMemo(() => searchPantone(query, { family: 'textile' }), [query, version]);
-  const solid = useMemo(() => searchPantone(query, { family: 'solid' }), [query, version]);
+  /* СЕМЬИ СЧИТАЮТСЯ ТОЛЬКО У ОТКРЫТОГО ПИКЕРА. Закрытый рисует один триггер — свой текущий свотч
+     (`current` ниже), а выдача ему не нужна: блок COLOURWAYS держит пикер на КАЖДОМ ряду каждого
+     колорвея, и две полные семьи (до ~4 700 записей после догрузки) на закрытый пикер множились бы
+     на колорвеи × слоты при каждой смене версии набора (ревью Codex O-44, minor). */
+  const textile = useMemo(
+    () => (open ? searchPantone(query, { family: 'textile' }) : CLOSED),
+    [open, query, version],
+  );
+  const solid = useMemo(
+    () => (open ? searchPantone(query, { family: 'solid' }) : CLOSED),
+    [open, query, version],
+  );
 
   const typed = query.trim();
   /**
