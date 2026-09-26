@@ -29,7 +29,7 @@ import { useTechCardAutosave } from './autosave-contract';
 import { displayDetailName, readBench } from './bench-slot';
 import { useMoodMinimumGate } from './chain-rail';
 import { cropFamilies } from './generation/composite';
-import { FlatRunRow } from './flat-run-row';
+import { FlatRunRow, readFlatInput, setFlatInputClearing, useFlatInput } from './flat-run-row';
 import { RecalledRunPrompt } from './history-recall';
 import { EmptyState, GROUP_GAP, PlaceOrDrawCell } from './core';
 import { cardFactsContext, composeWords } from './core/card-facts';
@@ -93,7 +93,8 @@ import { useDesignWrites } from './use-design-band';
  *        пусто → та же плитка одна в сетке (второй пары кнопок больше нет);
  *        под сеткой справа — тихая дверь `clear the input ✕` (D-21, волна 25.09);
  *   1.2  WORDS — textarea во всю ширину (`garmentDescription`), засеянная фактами карточки, когда
- *        она пуста (D-20''), раз за сессию; в правом нижнем углу счётчик `N / 2000` и `ai ✦`;
+ *        она пуста (D-20''/D-20'''), раз за сессию и только на экране — на сервер засев уезжает с
+ *        первой правкой или с GENERATE; в правом нижнем углу счётчик `N / 2000` и `ai ✦`;
  *   1.3  ряд запуска (`./flat-run-row.tsx`): VIEWS (продуктовая строка — проводу нужны
  *        `views[]`), GENERATE · цена · WHAT THE MODEL GETS ▸.
  * Двери `from construction ▸` и `also send the flat slots` (с лентой плит) сняты владельцем
@@ -490,10 +491,14 @@ export function ReferencesSection({
 
   // ── clear: ТОЛЬКО ПРОМПТ, картинки остаются (SPEC п.8, CONTRACT §B) ─────────────────────────
   const [clearAsk, setClearAsk] = useState(false);
-  const [clearing, setClearing] = useState(false);
-  /* GENERATE ждёт сохранения (`FlatRunRow` → `onSavingChange`): слова и CLEAR на это время заперты —
-     прогон прочтёт то, что сохраняется сейчас, и правка поверх уехала бы мимо него (ревью MAJOR). */
-  const [runSaving, setRunSaving] = useState(false);
+  /* ВХОД ЗАНЯТ — из модульного хранилища карточки (`useFlatInput`, `flat-run-row.tsx`), а не из
+     состояния секции: и GENERATE, и CLEAR переживают смену шага, а секция — нет.
+     · `run` — GENERATE ждёт сохранения или ответа: слова, роли, ✕, сплит и CLEAR заперты — прогон
+       прочтёт то, что сохраняется сейчас, и правка поверх уехала бы мимо него (ревью MAJOR и [2]);
+     · `clearing` — CLEAR снимает роли по одной: заперты те же органы, а GENERATE ждёт (ревью [2]). */
+  const flatInput = useFlatInput(techCardId);
+  const clearing = flatInput.clearing;
+  const inputBusy = flatInput.run !== null || flatInput.clearing;
 
   /**
    * ЧТО ЧИСТИТСЯ: слова (`garmentDescription`) и роли референсов (и с ними — порядок промпта).
@@ -514,21 +519,28 @@ export function ReferencesSection({
    */
   async function runClear() {
     setClearAsk(false);
-    setClearing(true);
+    const card = techCardId;
+    // Щелчок по двери, вернувшейся к идущему GENERATE или CLEAR, ничего не начинает.
+    const at = readFlatInput(card);
+    if (at.run !== null || at.clearing) return;
+    setFlatInputClearing(card, true);
     const roleIds = [...refOf.keys()];
     const failed = new Set<number>();
-    // Последовательно, а не залпом: «кто не очистился» должно совпадать с тем, что осталось на
-    // экране, детерминированно.
-    for (const mediaId of roleIds) {
-      try {
-        await setReferenceRole.mutateAsync({ mediaId, role: '', ordinal: 0 });
-      } catch {
-        failed.add(mediaId);
+    try {
+      // Последовательно, а не залпом: «кто не очистился» должно совпадать с тем, что осталось на
+      // экране, детерминированно.
+      for (const mediaId of roleIds) {
+        try {
+          await setReferenceRole.mutateAsync({ mediaId, role: '', ordinal: 0 });
+        } catch {
+          failed.add(mediaId);
+        }
       }
+      wordsSession.set(card, null);
+      setValue('garmentDescription', '', { shouldDirty: true });
+    } finally {
+      setFlatInputClearing(card, false);
     }
-    wordsSession.set(techCardId, null);
-    setValue('garmentDescription', '', { shouldDirty: true });
-    setClearing(false);
     if (failed.size) {
       showMessage(
         `cleared ${roleIds.length - failed.size} of ${roleIds.length} prompt roles — ${failed.size} reference${failed.size === 1 ? '' : 's'} kept ${failed.size === 1 ? 'its' : 'their'} role`,
@@ -574,14 +586,31 @@ export function ReferencesSection({
    *     «category: …» — засев дождётся доски и выйдет полным.
    * Принятое ограничение: очищенные и СОХРАНЁННЫЕ WORDS после перезагрузки засеются снова — сервер
    * хранит `''` как NULL (сказано владельцу; бэк этой волной не трогается).
+   *
+   * ⚠ ЗАСЕВ ТОЛЬКО НА ЭКРАНЕ (D-20''', уточняет D-20''). Он пишется БЕЗ пометки «грязно»
+   * (`shouldDirty: false`): карточка, которую только открыли и посмотрели, не сохраняется, не пишет
+   * черновика восстановления, не спрашивает при уходе со страницы и не двигает `lock_version`. На
+   * сервер засев уезжает, когда человек ДЕЙСТВУЕТ: правит поле (обычная грязь) или жмёт GENERATE —
+   * тот помечает показанные, но не сохранённые слова перед `flush` (`markShownWords`,
+   * `flat-run-row.tsx`), и прогон читает их из сохранённой карточки. (Правка любого другого поля
+   * сохраняет тело карточки целиком — засев на экране уезжает и с ней: это тоже действие человека.)
+   *
+   * ⚠ НЕ ПОВЕРХ НЕОТВЕЧЕННОГО ЧЕРНОВИКА (ревью раунда 2, MAJOR A). Пока баннер восстановления ждёт
+   * ответа (`autosave.draftPending`), форма — ещё не то, что человек выберет; засев поверх неё мог бы
+   * уйти записью мимо ответа и стереть найденную работу. После ответа эффект решает заново.
+   *
+   * ⚠ СЛОВАРЬ ОБЯЗАН ПРИЕХАТЬ, А НЕ ПРОСТО ПЕРЕСТАТЬ ГРУЗИТЬСЯ (ревью [5]): провал `GetDictionary`
+   * тоже снимает `loading`, но словаря нет — засев вышел бы без пути категории и замкнулся на сессию.
    */
   const facts = useCardFacts(isBoardRow);
   const composed = useMemo(() => composeWords(facts, GARMENT_MAX), [facts]);
   const factsContext = useMemo(() => cardFactsContext(facts), [facts]);
-  const { loading: dictionaryLoading } = useDictionary();
-  const seedCategoryId = Number(useWatch({ control, name: 'categoryId' }) ?? 0);
-  const factsReady = seedCategoryId <= 0 || !dictionaryLoading;
+  const { loading: dictionaryLoading, dictionary } = useDictionary();
+  const factsReady = !dictionaryLoading && !!dictionary;
   const autosave = useTechCardAutosave();
+  // `draftPending` — поле контракта автосейва (зона CL-A); проверка `in` держит сборку и там, где
+  // контракт его ещё не объявил.
+  const draftPending = 'draftPending' in autosave ? !!autosave.draftPending : false;
   const moodMinimum = useMoodMinimumGate();
   const wordsNow = (garment.field.value ?? '') as string;
   useEffect(() => {
@@ -594,10 +623,12 @@ export function ReferencesSection({
     }
     if (wordsSession.has(techCardId)) return;
     if (readOnly || !factsReady || !composed.text) return;
-    if (autosave.status === 'off') return;
+    if (autosave.status === 'off' || draftPending) return;
+    // Вход занят (GENERATE сохраняет, CLEAR снимает роли) — слова сейчас не меняются; решим после.
+    if (inputBusy) return;
     if (!moodMinimum.ok) return;
     wordsSession.set(techCardId, composed);
-    setValue('garmentDescription', composed.text, { shouldDirty: true });
+    setValue('garmentDescription', composed.text, { shouldDirty: false });
   }, [
     techCardId,
     wordsNow,
@@ -605,6 +636,8 @@ export function ReferencesSection({
     factsReady,
     composed,
     autosave.status,
+    draftPending,
+    inputBusy,
     moodMinimum.ok,
     getValues,
     setValue,
@@ -753,6 +786,7 @@ export function ReferencesSection({
               detailName={detailNameOf(refOf.get(mediaId)?.detailSlotId ?? 0)}
               onNameDetail={() => setNamingDetail({ mediaId })}
               readOnly={readOnly}
+              locked={inputBusy}
               onRole={(role) => setRole(mediaId, role)}
               onRemove={() => setPendingRemove(mediaId)}
               onSplit={() => {
@@ -814,7 +848,7 @@ export function ReferencesSection({
             size='sm'
             data-clear-prompt=''
             loading={clearing}
-            disabled={clearing || nothingToClear || runSaving}
+            disabled={inputBusy || nothingToClear}
             onClick={() => setClearAsk(true)}
             title='clears the words and the reference roles — the pictures stay'
           >
@@ -858,7 +892,7 @@ export function ReferencesSection({
             data-field='garmentDescription'
             id={garmentId}
             disabled={readOnly}
-            readOnly={runSaving}
+            readOnly={inputBusy}
             value={garment.field.value ?? ''}
             rows={3}
             maxLength={GARMENT_MAX}
@@ -895,7 +929,7 @@ export function ReferencesSection({
               value={garment.field.value}
               context={factsContext}
               maxRunes={GARMENT_MAX}
-              disabled={readOnly || runSaving}
+              disabled={readOnly || inputBusy}
               className='static pointer-events-auto'
               onApply={(text) => setValue('garmentDescription', text, { shouldDirty: true })}
             />
@@ -920,12 +954,7 @@ export function ReferencesSection({
           ⚠ НЕ ЗАВОРАЧИВАТЬ В СВОРАЧИВАНИЕ (`collapsible`/`Fold`): ниже смонтирован приёмник рекола
           `RecalledRunPrompt`, при размонтировании реестр стирает выбор (`recalled.delete`), и жест
           теряется молча. */}
-      <FlatRunRow
-        band={band}
-        techCardId={techCardId}
-        disabled={disabled}
-        onSavingChange={setRunSaving}
-      />
+      <FlatRunRow band={band} techCardId={techCardId} disabled={disabled} />
 
       {/* ПРИЁМНИК РЕКОЛА (T-10). Видимого органа у него нет — он рисует только вопрос про описание
           изделия, и только когда описание уже непустое. Внутри блока, не сворачивать. */}
@@ -1137,6 +1166,7 @@ function ReferenceCell({
   detailName,
   onNameDetail,
   readOnly,
+  locked,
   onRole,
   onRemove,
   onSplit,
@@ -1155,6 +1185,12 @@ function ReferenceCell({
   /** Дверь починки: завести деталь заново. Рисуется ТОЛЬКО когда имени нет. */
   onNameDetail: () => void;
   readOnly: boolean;
+  /**
+   * Вход занят (GENERATE сохраняет карточку или ждёт ответа, CLEAR снимает роли): роль, ✕, сплит,
+   * кроп и «name it» пишут полосу напрямую и поменяли бы промпт посреди прогона (ревью раунда 2,
+   * [2]). Органы остаются на месте, погашенными: пропадающие углы читались бы как поломка.
+   */
+  locked: boolean;
   onRole: (role: string) => void;
   onRemove: () => void;
   onSplit: () => void;
@@ -1206,6 +1242,7 @@ function ReferenceCell({
             ? {
                 onClick: onSplit,
                 pending: splitPending,
+                disabled: locked,
                 ariaLabel: `cut ${label} into views`,
                 title:
                   splitOffer === 'declared'
@@ -1221,6 +1258,7 @@ function ReferenceCell({
             ? {
                 onClick: onCrop,
                 pending: splitPending,
+                disabled: locked,
                 ariaLabel: `crop ${label} in place`,
                 title:
                   'crop — cut one frame out of this picture and put it in this row, with the same role',
@@ -1231,6 +1269,7 @@ function ReferenceCell({
           !readOnly
             ? {
                 onClick: onRemove,
+                disabled: locked,
                 ariaLabel: `take ${name} off the input`,
                 title: 'take this reference off the input — picture and role together',
               }
@@ -1264,7 +1303,7 @@ function ReferenceCell({
           items={roleItemsFor(role)}
           value={role}
           placeholder='— not sent —'
-          readOnly={readOnly}
+          readOnly={readOnly || locked}
           onValueChange={onRole}
           className='w-full min-w-0'
           renderValue={(value, item) =>
@@ -1282,7 +1321,13 @@ function ReferenceCell({
           }
         />
         {normaliseViewKey(role) === DETAIL_VIEW && !detailName && !readOnly && (
-          <Button variant='secondary' size='xs' onClick={onNameDetail} data-name-detail={mediaId}>
+          <Button
+            variant='secondary'
+            size='xs'
+            disabled={locked}
+            onClick={onNameDetail}
+            data-name-detail={mediaId}
+          >
             name it
           </Button>
         )}
