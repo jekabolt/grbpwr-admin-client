@@ -6,6 +6,10 @@
 // ячейка рельса пишет адрес через `useStepAddress`, экран PLAYGROUND и история под ним стоят только
 // на шаге `playground`, история получает матчер и имя списка теми же функциями, что `studio-tab`,
 // а переключатель вида (`useStudioKindSwitch`) заведён, чтобы рекол доходил до приёмника.
+//
+// Рядом — `RawStart`: настоящий `useStartDesignRun` без формы, которому проба сама подаёт запрос.
+// Так проба может прислать ОДНО намерение, собранное по-разному (порядок ключей, пробелы), и
+// увидеть, какой ключ оно получило (G-01 r2 N2), не подделывая ни одной строки хука.
 import type { GetDesignBandResponse, common_DesignRun } from 'api/proto-http/admin';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
@@ -21,6 +25,10 @@ import {
   playgroundHistoryScope,
   useStepAddress,
 } from 'components/managers/tech-card/components/design/playground';
+import {
+  useStartDesignRun,
+  type StartRunInput,
+} from 'components/managers/tech-card/components/design/render/use-design-run';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { createRoot, type Root } from 'react-dom/client';
@@ -60,8 +68,16 @@ function Screen({ band }: { band: GetDesignBandResponse }) {
   );
 }
 
+let rawStart: ((input: StartRunInput) => void) | null = null;
+function RawStart() {
+  const run = useStartDesignRun(CARD);
+  rawStart = run.start;
+  return <output id='raw-pending'>{run.isPending ? 'pending' : 'idle'}</output>;
+}
+
 type Probe = {
   mount: (band: GetDesignBandResponse) => void;
+  raw: (input: StartRunInput) => void;
   recall: (run: common_DesignRun) => void;
   alerts: () => string[];
 };
@@ -88,12 +104,14 @@ window.__pg = {
           <DesignCapabilityProvider value={true}>
             <BrowserRouter>
               <Screen band={band} />
+              <RawStart />
             </BrowserRouter>
           </DesignCapabilityProvider>
         </DictionaryProvider>
       </QueryClientProvider>,
     );
   },
+  raw: (input) => rawStart?.(input),
   recall: (run) => recallDesignRun(CARD, run, 'input'),
   alerts: () => useSnackBarStore.getState().alerts.map((a) => a.message),
 };
