@@ -6,6 +6,7 @@ import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { ViewSwitch, type ViewSwitchOption } from 'ui/components/view-switch';
 import { useAiConfig } from './utils/hooks';
+import { ProvidersView } from './views/providers';
 
 // admin → AI providers: which services may spend money, which model answers which job, and what
 // it cost. Two views in ?view= (accounting reports pattern: the selection lives in searchParams,
@@ -76,9 +77,7 @@ export function AiProviders() {
 
         {view === 'providers' && (
           <>
-            <Section title='providers' question='which services may spend money'>
-              {placeholder(`${data?.providers?.length ?? 0} providers`)}
-            </Section>
+            <ProvidersView config={data} loading={config.isPending} />
             <Section title='routes' question='which model answers which job'>
               {placeholder(`${data?.purposes?.length ?? 0} purposes`)}
             </Section>
