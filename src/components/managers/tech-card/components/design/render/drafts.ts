@@ -99,7 +99,7 @@ export function useCardFit(): string {
  *             отныне «свои».
  *   `echo`  — ПРОИЗВОДНОЕ: ассет, запись колорвея, прошлый рецепт. Ложится ТОЛЬКО в поля, которых
  *             человек не набирал, и получает не готовые скаляры, а ИСТОЧНИК. Слова — строже
- *             (O-61 r2): только пока в поле не показано ничего, ни своих слов, ни слов карточки.
+ *             (O-61 r3): только поверх пустого поля или заметки ткани (`WordsFrom`).
  *
  * ⚠ ПОЧЕМУ `echo` ПРИНИМАЕТ ИСТОЧНИК, А НЕ МЕШОК ЗНАЧЕНИЙ — В ЭТОМ ВСЯ ЗАЩИТА. Дверь, берущая
  * `{code, hex, words}`, отличается от старого `patch` только именем: следующий писатель передаст в
@@ -126,6 +126,17 @@ export type TypedColour = Partial<Record<ColourScalar, string>>;
 /** По одному флагу на скаляр: «это значение принадлежит человеку, эхо его не трогает». */
 export type OperatorOwned = Record<ColourScalar, boolean>;
 const NOTHING_OWNED: OperatorOwned = { code: false, hex: false, words: false };
+
+/**
+ * ОТКУДА СЛОВА В IN WORDS (O-61 r3). От этого зависит одно — заменит ли их заметка ткани:
+ *   · `person`  — набраны руками или приняты из `ai ✦`;
+ *   · `default` — слова карточки (WORDS флэта): показаны, пока свои пусты, или отданы подаче GENERATE;
+ *   · `run`     — слова прошлого прогона, засеянные из его рецепта;
+ *   · `cloth`   — заметка первой ткани, положенная выбором ткани;
+ *   · `none`    — в поле ничего нет.
+ * Заметка ткани — не слова человека: выбор ткани пишет слова только поверх `none` и `cloth`.
+ */
+type WordsFrom = 'person' | 'default' | 'run' | 'cloth' | 'none';
 
 /**
  * ОТКУДА ПРИШЛО ЭХО. Ровно три источника, потому что их ровно три и есть; четвёртый обязан
@@ -531,6 +542,12 @@ export function useColourDraft(
    * ЛИШНЯЯ. Читается и пишется она только в обработчиках, где рефы точны.
    */
   const owned = useRef<OperatorOwned>({ ...NOTHING_OWNED });
+  /**
+   * ОТКУДА СОБСТВЕННЫЕ СЛОВА ЧЕРНОВИКА (`recipe.words`) — разбор у `WordsFrom`. Реф по доводу `owned`:
+   * ничего не рисует. Пишут его все, кто пишет слова: `typed`, `echo`, `clear`, засев прошлым
+   * рецептом, смена карточки и `materializeWords`; читает — выбор ткани.
+   */
+  const wordsFrom = useRef<WordsFrom>('none');
   const { cloth, patchCloth, seedCloth } = useClothStatement(touched);
 
   /**
@@ -549,9 +566,10 @@ export function useColourDraft(
    * одно, а покупал другое: ворота запирали бы прогон при полном поле, опись говорила бы «none», а
    * провод уносил бы пустые слова.
    *
-   * ⚠ ЭХО ТКАНИ УМОЛЧАНИЯ НЕ ПЕРЕБИВАЕТ (O-61 r2). Заметка первой ткани (`echoOf`, ветка `cloths`)
-   * ложится в слова, только пока в поле не показано НИЧЕГО — ни своих слов, ни слов карточки; иначе
-   * показанное стоит, а заметка едет на своём месте, в `fabrics[].words` (разбор — у `echo` ниже).
+   * ⚠ ЭХО ТКАНИ УМОЛЧАНИЯ НЕ ПЕРЕБИВАЕТ (O-61 r2, r3). Заметка первой ткани (`echoOf`, ветка
+   * `cloths`) ложится в слова, только когда в поле нет ничего или там заметка ткани (`WordsFrom`);
+   * слова карточки, набранные и прошлого прогона стоят, а заметка едет на своём месте, в
+   * `fabrics[].words` (разбор — у `echo` ниже).
    *
    * `live` — ТО ЖЕ, ЧТО У ФЛЭТА: там это «карточку можно писать, и она сохраняется» (`!readOnly &&
    * autosave !== 'off'`). Проп `disabled` сюда не доходит и не нужен: автосейв страницы включён ТОЛЬКО
@@ -843,6 +861,7 @@ export function useColourDraft(
     seeded.current = false;
     touched.current = false;
     owned.current = { ...NOTHING_OWNED };
+    wordsFrom.current = 'none';
     setRecipe(EMPTY_RECIPE);
     seedCloth(EMPTY_CLOTH);
     setPantone('');
@@ -962,6 +981,8 @@ export function useColourDraft(
       ...(bound?.values ?? {}),
       words: restored.words,
     });
+    /* O-61 r3: слова прошлого прогона — не заметка ткани; выбор ткани их не заменит. */
+    wordsFrom.current = restored.words.trim() !== '' ? 'run' : 'none';
     seedCloth(restored.cloth);
     /* Ссылка засевается ровно там, где она есть на самом деле: у КОЛОРВЕЯ. Рецепт прогона её не
        несёт (B8), и выдумывать её из hex здесь нельзя — это делает экран и говорит об этом сам.
@@ -1005,8 +1026,12 @@ export function useColourDraft(
         owned.current[key] = value.trim() !== '';
       }
       setRecipe((prev) => ({ ...prev, ...clean }));
-      // O-61: слова, стёртые руками, остаются пустыми — засев рендера снят и под пальцами не вернётся.
-      if (clean.words !== undefined) settleScreenWords(wordsCard, 'render', clean.words);
+      if (clean.words !== undefined) {
+        // O-61: слова, стёртые руками, остаются пустыми — засев рендера снят и под пальцами не вернётся.
+        settleScreenWords(wordsCard, 'render', clean.words);
+        // O-61 r3: набранное — слова человека, заметка ткани их не заменит; стёртое — «ничего».
+        wordsFrom.current = clean.words.trim() !== '' ? 'person' : 'none';
+      }
     },
     echo: (source) => {
       touched.current = true;
@@ -1021,12 +1046,32 @@ export function useColourDraft(
         }
         listTouched.current = true;
       }
-      /* O-61 r2 · ЗАМЕТКА ТКАНИ ЛОЖИТСЯ В СЛОВА, ТОЛЬКО ПОКА В ПОЛЕ НИЧЕГО НЕ ПОКАЗАНО — ни своих
-         слов, ни слов карточки по умолчанию. Иначе показанное стоит, как набранное: выбор ткани
-         подменял умолчание (факты изделия) заметкой о лоскуте, а заметка и так едет на своём месте —
-         в `fabrics[].words` этой ткани. Показанное читается этого рендера — того, что на экране. */
-      const rank = shownWords.trim() !== '' ? { ...owned.current, words: true } : owned.current;
-      setRecipe((prev) => mergeEcho(prev, values, rank));
+      /* ═══ O-61 r3 · ЗАМЕТКА ТКАНИ И СЛОВА НА ЭКРАНЕ ═══════════════════════════════════════════
+         Заметка первой ткани (`echoOf`, ветка `cloths`) — не слова человека. Выбор ткани пишет слова,
+         только когда в поле нет ничего или там заметка ткани: тогда ткань, ставшая первой, заменяет
+         заметку своей (без заметки — поле возвращается к словам карточки, а без них пустеет), а
+         снятая последней ткань уносит свою заметку с собой. Набранное, слова карточки и слова
+         прошлого прогона стоят; заметка при этом едет на своём месте — `fabrics[].words` этой ткани.
+         Добавленная вторая ткань слов не меняет: первой осталась прежняя, а скаляры промпта говорят
+         о CLOTH 1. Показанное читается этого рендера — того, что на экране. */
+      const from: WordsFrom = wordsSeeded
+        ? 'default'
+        : (recipe.words ?? '').trim() === ''
+          ? 'none'
+          : wordsFrom.current;
+      const clothMayWrite = from === 'none' || from === 'cloth';
+      let words: string | undefined;
+      if (values.words !== undefined) {
+        if (clothMayWrite) words = values.words;
+      } else if (from === 'cloth' && (values.fabrics ?? []).length === 0) {
+        words = '';
+      }
+      if (words !== undefined) wordsFrom.current = words.trim() !== '' ? 'cloth' : 'none';
+      /* Ранг слов решён выше, по происхождению, а не флагом `owned.words`: слова прошлого прогона и
+         слова карточки не набраны, но стоят так же, как набранные. */
+      setRecipe((prev) =>
+        mergeEcho(prev, { ...values, words }, { ...owned.current, words: false }),
+      );
     },
     patchCloth,
     /**
@@ -1048,12 +1093,16 @@ export function useColourDraft(
         return;
       }
       owned.current.words = false;
+      wordsFrom.current = 'none';
       setRecipe((prev) => ({ ...prev, words: '' }));
       // O-61: CLEAR снимает засев РЕНДЕРА до перезагрузки страницы — WORDS флэта свои и остаются.
       dropScreenWords(wordsCard, 'render');
     },
     materializeWords: () => {
-      if (wordsSeeded) draft.typed({ words: shownWords });
+      if (!wordsSeeded) return;
+      draft.typed({ words: shownWords });
+      // Отданы подаче, но по происхождению это слова карточки, а не набранные (O-61 r3).
+      wordsFrom.current = 'default';
     },
   };
   return draft;
