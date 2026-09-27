@@ -4,19 +4,37 @@ import type {
   common_DesignRun,
   GetDesignBandResponse,
 } from 'api/proto-http/admin';
-import { useId, useMemo, useState, type JSX } from 'react';
+import { cn } from 'lib/utility';
+import {
+  createContext,
+  useContext,
+  useId,
+  useMemo,
+  useState,
+  type JSX,
+  type ReactNode,
+} from 'react';
 import { Button } from 'ui/components/button';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
 import { InertDoor } from '../bench-slot';
-import { COLORWAY_NONE, colorwayOf, refColorwayFor, slotHolding } from '../bench-kinds';
+import {
+  COLORWAY_NONE,
+  colorwayOf,
+  refColorwayFor,
+  slotHolding,
+  type Representation,
+} from '../bench-kinds';
 import { serverSpeaksDesign } from '../capability';
 /* Под другим именем: у экранов студии есть свои `colorwayLabel` (подпись цели). */
 import { colorwayLabel as refLabel } from '../colorway-picker';
 import { TwoStepPicker, type PickerBranch } from '../core';
+import type { OutputPlan } from '../generation/run-gallery';
+import type { PictureTileProps } from '../picture-tile';
 import { useDesignWrites } from '../use-design-band';
+import { isPictureHidden } from '../visibility';
 import { isActiveView, normaliseViewKey, viewLabel, type ActiveView } from '../views';
 import { ApplySplitDoor, type SplitPiece } from './apply-split';
 import {
@@ -306,7 +324,6 @@ export function useRenderDoors({
    * вместе с ней — то самое правило «строка отчёта, севшая на чужую строку, не путает её, а
    * СТИРАЕТ», только теперь оно держится монтированием, а не ключом `root`.
    */
-
 
   /**
    * ═══ ОСЬ КОЛОРВЕЕВ — ТА ЖЕ, ЧТО СТОЛБЦЫ SIDES, И ОДНИМ ОПРЕДЕЛЕНИЕМ ══════════════════════════
@@ -720,10 +737,17 @@ export function useRenderDoors({
  * самой двери (`aria-describedby`). Фокус — чернильная обводка 2px с отступом 2px, как у всякого
  * контрола системы. Хозяин ставит её над своей полосой; нет ни одной причины — нет и узла.
  */
-export function RefusalNotes({ doors }: { doors: RenderDoors }): JSX.Element | null {
+export function RefusalNotes({
+  doors,
+  className,
+}: {
+  doors: RenderDoors;
+  /** The host's spacing around the notes — only when there are any (O-63: the workbench). */
+  className?: string;
+}): JSX.Element | null {
   if (!doors.notes.length) return null;
   return (
-    <div data-refusal-notes='' className='flex flex-col gap-1'>
+    <div data-refusal-notes='' className={cn('flex flex-col gap-1', className)}>
       {doors.notes.map((note) => (
         <Text
           key={note.key}
@@ -757,6 +781,10 @@ export function RenderTile({
   run,
   src,
   className,
+  aspect,
+  dim,
+  galleryGroup,
+  runLine = true,
   onZoom,
   onDeck,
   onEdit,
@@ -769,6 +797,19 @@ export function RenderTile({
   /** The raster in the frame. Empty — the frame says so in a word. */
   src: string;
   className?: string;
+  /**
+   * O-63: the frame, the dimming and the viewer row of a RUN ROW's tile (`RunRenderTile`) — its
+   * track's 4/5 frame, the archive shelf's dim, the host's viewer group. Absent — the strip's cell.
+   */
+  aspect?: string;
+  dim?: boolean;
+  galleryGroup?: PictureTileProps['galleryGroup'];
+  /**
+   * The caption names the run — `run N · …` / `no run · …` — where plates of many runs stand in one
+   * strip. A run's own row (`RunRenderTile`) says the shape alone: the row IS the run, and the
+   * history names no run on its tiles (r2 п.22).
+   */
+  runLine?: boolean;
   /** The viewer was opened from this tile (E-4 — the host decides what a zoom folds). */
   onZoom?: () => void;
   /** Open or fold THIS tile's deck — the host's one open deck toggles to it or away from it. */
@@ -849,6 +890,9 @@ export function RenderTile({
       onOpen={deckSheet ? onDeck : undefined}
       cellPictureId={picture.id}
       className={className}
+      aspect={aspect}
+      dim={dim}
+      galleryGroup={galleryGroup}
       onZoom={onZoom}
       src={src}
       alt={`render ${picture.ordinal ?? ''}`}
@@ -938,7 +982,7 @@ export function RenderTile({
               : undefined
           }
         >
-          {stamped ? `run ${run.id} · ${shape}` : `no run · ${shape}`}
+          {!runLine ? shape : stamped ? `run ${run.id} · ${shape}` : `no run · ${shape}`}
         </span>,
         /* ═══ O-57 r2 · ГДЕ ПЛИТА СТОИТ, КОГДА ЕЁ СТОЛБЦА НА ЭКРАНЕ НЕТ ═══════════════════════
            У плиты в видимом столбце это слово пилюли в ряду дверей («in front»), а ✕ стоит в
@@ -1273,5 +1317,227 @@ export function RenderTile({
         </div>
       }
     />
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   O-63 step 2 · THE SAME TILE ON A RUN'S ROW — THE WORKBENCH UNDER GENERATE (D-62 п.1–2)
+   ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+   FABRIC RENDER shows what came back the way FLAT does: the latest generation under GENERATE and
+   the history below, both drawn by `RunOutputs` → `RunTile`. A render plate there is THIS tile with
+   THESE doors, not a second copy: `RunTile` switches by the kind of its run (`RunRenderTile`), and
+   the host of the row gives the tile its doors through `RenderHostContext`. */
+
+/**
+ * WHAT THE DOORS NEED FROM FABRIC RENDER ITSELF — the colourway axis of SIDES (the composer's list
+ * and the card's raw one, O-57 r4), whether the server adopts a sample plate (B7), and the step's
+ * one colourway birth window (`+ colourway…`). The studio provides it (`RenderStudio`); a host of run
+ * tiles under it draws its render plates with the render doors, a host anywhere else finds nothing
+ * and its tiles stay as they are.
+ */
+export type RenderStep = {
+  colorways?: common_AdminColorwayRef[];
+  cardColorways?: readonly common_AdminColorwayRef[];
+  adopts?: boolean;
+  onCreateColorway?: (then?: (colorwayId: number) => void) => void;
+};
+
+const RenderStepContext = createContext<RenderStep | null>(null);
+
+export function RenderStepScope({
+  step,
+  children,
+}: {
+  step: RenderStep;
+  children: ReactNode;
+}): JSX.Element {
+  return <RenderStepContext.Provider value={step}>{children}</RenderStepContext.Provider>;
+}
+
+/** One host of run tiles: the doors every render tile of it draws from, and what a tile asks it. */
+export type RenderHost = {
+  doors: RenderDoors;
+  /** The run a plate came out of — its tile says «run N · …». */
+  runOf: (picture: common_DesignPicture) => common_DesignRun;
+  /** Open or fold a deck of this host — one open deck per host (H-10). */
+  onDeck: (rootId: number) => void;
+};
+
+const RenderHostContext = createContext<RenderHost | null>(null);
+
+/**
+ * THE HOST WHOSE RENDER DOORS THE TILES OF A RUN DRAW — `null` for a run of any other kind and off
+ * FABRIC RENDER. `rep` is the RUN'S kind (E-12): a recolour's pictures say `render` on the wire, and
+ * a photograph of a person never gets `mark ▸`.
+ */
+export function useRenderHost(rep: Representation | null): RenderHost | null {
+  const host = useContext(RenderHostContext);
+  return host && rep === 'render' ? host : null;
+}
+
+/**
+ * …AND WHETHER THIS PLATE OF IT DOES. A plate with the old hidden stamp keeps the history's own tile
+ * (its «hidden» word, pickers and slots skip it, T-14). ONE predicate for the tile (`RunTile`) and
+ * for its deck (`RunOutputs`, `hostDoor`): the deck's own door goes exactly where `expand ▸` comes.
+ */
+export function renderHostOf(
+  host: RenderHost | null,
+  picture: common_DesignPicture,
+): RenderHost | null {
+  return host && !isPictureHidden(picture) ? host : null;
+}
+
+/**
+ * WHAT A HOST SHOWS, FOR ITS DOORS — every plate its rows draw, pieces of folded decks too (the notes
+ * read them all), and each sheet's pieces; the rows' own plans (`outputPlan`), so the doors and the
+ * grid can never disagree about a deck. Hidden plates are not the doors' (`renderHostOf`).
+ */
+export function hostPlates(plans: readonly OutputPlan[]): {
+  pictures: common_DesignPicture[];
+  membersOf: Map<number, common_DesignPicture[]>;
+} {
+  const pictures: common_DesignPicture[] = [];
+  const membersOf = new Map<number, common_DesignPicture[]>();
+  for (const plan of plans) {
+    for (const { picture, members } of plan.cards) {
+      for (const one of [picture, ...members]) if (!isPictureHidden(one)) pictures.push(one);
+      if (members.length) membersOf.set(picture.id ?? 0, members);
+    }
+  }
+  return { pictures, membersOf };
+}
+
+/**
+ * A HOST OF RUN TILES WITH RENDER DOORS — the workbench under GENERATE. ONE `useRenderDoors` over
+ * every plate it shows, as RENDERS OF THIS CARD had one over its strip, and the notes of its refused
+ * doors printed ONCE above the tiles (D-56′). Off FABRIC RENDER (no `RenderStepScope` above) it is
+ * a plain fragment, and the tiles below draw as they always did.
+ */
+export function RenderDoorsHost(props: RenderDoorsHostProps): JSX.Element {
+  const step = useContext(RenderStepContext);
+  if (!step) return <>{props.children}</>;
+  return <RenderDoorsHostOn {...props} step={step} />;
+}
+
+type RenderDoorsHostProps = {
+  band: GetDesignBandResponse;
+  techCardId: number;
+  /** The card is read-only for this person — NOT the server's silence, which the doors read themselves. */
+  disabled?: boolean;
+  /** `hostPlates` of the rows it draws. */
+  pictures: readonly common_DesignPicture[];
+  membersOf: ReadonlyMap<number, common_DesignPicture[]>;
+  openDeck: number | null;
+  onDeck: (rootId: number) => void;
+  runOf: (picture: common_DesignPicture) => common_DesignRun;
+  /** Spacing of the notes above the tiles — drawn only when there are any. */
+  notesClassName?: string;
+  children: ReactNode;
+};
+
+function RenderDoorsHostOn({
+  step,
+  band,
+  techCardId,
+  disabled,
+  pictures,
+  membersOf,
+  openDeck,
+  onDeck,
+  runOf,
+  notesClassName,
+  children,
+}: RenderDoorsHostProps & { step: RenderStep }): JSX.Element {
+  const doors = useRenderDoors({
+    band,
+    techCardId,
+    disabled,
+    colorways: step.colorways,
+    cardColorways: step.cardColorways,
+    adopts: step.adopts,
+    onCreateColorway: step.onCreateColorway,
+    pictures,
+    membersOf,
+    openDeck,
+    /* A run's row is not the card's `outputs` list: no horizon on its tiles. */
+    horizon: false,
+  });
+  const host: RenderHost = { doors, runOf, onDeck };
+  return (
+    <RenderHostContext.Provider value={host}>
+      <RefusalNotes doors={doors} className={notesClassName} />
+      {children}
+    </RenderHostContext.Provider>
+  );
+}
+
+/**
+ * THE FRAME OF A RUN ROW — `PictureTile`'s own 4/5, the frame `RunTile` draws and `RunOutputs` hands
+ * its decks (`frameAspect='4/5'`): the fan behind a sheet lines up with the sheet only on one frame.
+ */
+const RUN_FRAME_ASPECT = '4/5';
+
+/**
+ * ═══ A RENDER PLATE IN A RUN ROW — `RunTile`'s render branch (O-63, D-62 п.2) ═════════════════════
+ *
+ * The tile is `RenderTile` as RENDERS OF THIS CARD drew it — its badge, its caption, its six door
+ * states and two corners — on the row's grid track and frame, zooming through the host's viewer row.
+ * The row's anchors stay the history's (`data-picture`, `data-deck-member`). What the run row owns is
+ * handed in: the zoom (E-4 lives with the host), the split window, and the editor, which files a NEW
+ * picture here as everywhere on this step — «overwrite or save as new» is the flat workbench's
+ * question (07-FLAT-WORKBENCH §3c), asked of a flat that a sheet and its callouts cite.
+ */
+export function RunRenderTile({
+  host,
+  picture,
+  src,
+  dim,
+  deckMemberOf,
+  galleryGroup,
+  onZoom,
+  onSplit,
+  onEdit,
+  children,
+}: {
+  host: RenderHost;
+  picture: common_DesignPicture;
+  src: string;
+  dim?: boolean;
+  /** The sheet this piece was cut out of, when the tile stands in an OPEN deck (H-10). */
+  deckMemberOf?: number;
+  galleryGroup?: PictureTileProps['galleryGroup'];
+  onZoom?: () => void;
+  onSplit: () => void;
+  onEdit: () => void;
+  /** The editor the run row mounts over this tile while it is open. */
+  children?: ReactNode;
+}): JSX.Element {
+  const pictureId = picture.id ?? 0;
+  return (
+    <div
+      className='flex h-full w-full min-w-0 flex-col'
+      data-picture={pictureId || undefined}
+      data-deck-member={deckMemberOf || undefined}
+    >
+      <RenderTile
+        doors={host.doors}
+        picture={picture}
+        run={host.runOf(picture)}
+        src={src}
+        /* The grid's track, not the strip's 132px; the full height, so the door rows of one line of
+           the grid stand on one line (`mt-auto` on the doors). */
+        className='w-full flex-1'
+        aspect={RUN_FRAME_ASPECT}
+        dim={dim}
+        galleryGroup={galleryGroup}
+        runLine={false}
+        onZoom={onZoom}
+        onDeck={() => host.onDeck(pictureId)}
+        onEdit={onEdit}
+        onSplit={onSplit}
+      />
+      {children}
+    </div>
   );
 }

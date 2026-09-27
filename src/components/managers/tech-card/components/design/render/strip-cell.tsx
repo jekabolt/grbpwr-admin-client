@@ -7,7 +7,7 @@ import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder
 import Text from 'ui/components/text';
 
 import { EMPTY_WORD } from '../core';
-import { PictureTile, type PictureTileAction } from '../picture-tile';
+import { PictureTile, type PictureTileAction, type PictureTileProps } from '../picture-tile';
 import { viewLabel } from '../views';
 
 /**
@@ -72,6 +72,16 @@ export function StripCell({
    */
   gallery,
   /**
+   * ═══ МЕСТО КАДРА В РЯДУ ХОЗЯИНА, А НЕ СВОЙ РЯД (27.09, O-63) ═══════════════════════════════
+   * Ячейка, стоящая в строке прогона (верстак под GENERATE, история), ходит по просмотрщику
+   * вместе со всей строкой — `galleryGroup` хозяина побеждает `gallery` (разбор у `PictureTile`).
+   * Там же — рамка строки (`aspect`, у колоды та же `frameAspect`) и приглушение полки архива
+   * (`dim`, J-22). Не заданы — ячейка полосы, как была.
+   */
+  galleryGroup,
+  aspect = FRAME_ASPECT,
+  dim,
+  /**
    * КАДР, КОТОРЫЙ ЭТА ЯЧЕЙКА ПРЕДЛАГАЕТ ВЗЯТЬ, — не тот, что уже стоит. Едет в разметку как
    * `data-offered` и служит якорем и пробам, и человеку в инспекторе: список кандидатов — это
    * ровно то, что волна G-1 фильтрует, а «какая плитка сейчас предложена» иначе читается только
@@ -131,6 +141,9 @@ export function StripCell({
   alt: string;
   badge?: string;
   gallery?: MediaViewerItem;
+  galleryGroup?: PictureTileProps['galleryGroup'];
+  aspect?: string;
+  dim?: boolean;
   onOpen?: () => void;
   onSplit?: PictureTileAction;
   onZoom?: () => void;
@@ -160,10 +173,12 @@ export function StripCell({
           url={src}
           alt={alt}
           badge={badge}
-          aspect={FRAME_ASPECT}
+          aspect={aspect}
           fit='contain'
           selected={emphasis}
+          dim={dim}
           gallery={gallery}
+          galleryGroup={galleryGroup}
           onOpen={onOpen}
           onZoom={onZoom}
           onSplit={onSplit}

@@ -4,6 +4,7 @@ import type { common_DesignRunParams } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useRef, useState } from 'react';
 
+import { unstickPin } from '../generation/bench-store';
 import { isAborted, refusalFromError, type RunRefusal } from '../generation/refusal';
 import { designKeys, newClientRequestId } from '../use-design-band';
 
@@ -93,10 +94,13 @@ export type StartRunState = {
  * FABRICS carousel), and a swatch lands IN ITS SLOT, bound to the pair by the landing itself; an
  * extracted fabric lands in the carousel. A toast that names a place that is not on the screen
  * sends the person looking for it. Kinds without an entry keep their sentence byte for byte.
+ * FABRIC RENDER has FLAT's latest generation under its GENERATE since O-63 (D-62), and says FLAT's
+ * sentence (`useStartRun`).
  */
 const STARTED_DEFAULT = 'run started — the pictures land in the history when it finishes';
 const STARTED_BY_KIND: Partial<Record<StartRunInput['kind'], string>> = {
   pattern: 'run started · the fabric lands in its slot — or in LAST FABRICS — when it finishes',
+  render: 'run started — the pictures land under GENERATE when it finishes',
 };
 
 /**
@@ -170,6 +174,10 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
       // The run comes back PENDING, not done: the picture arrives in the feed when the provider
       // answers. Saying so is the difference between «nothing happened» and «it was booked».
       showMessage(STARTED_BY_KIND[input.kind] ?? STARTED_DEFAULT, 'success');
+      // …and FABRIC RENDER's workbench goes to it, as FLAT's does (O-63; `bench-store.ts`): a pin
+      // left by earlier work stops holding the run it kept. Not a release — an editor opened while
+      // this answer travelled keeps its run until it closes.
+      if (input.kind === 'render') unstickPin(input.techCardId);
     },
     onError: (error: unknown, input) => {
       const message = (error as Error)?.message?.trim() || 'the run did not start';

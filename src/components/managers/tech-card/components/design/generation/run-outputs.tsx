@@ -10,6 +10,7 @@ import { Tile, Tiles } from 'ui/components/tiles';
 
 import type { Representation } from '../bench-kinds';
 import { pictureHandle } from '../handles';
+import { renderHostOf, useRenderHost } from '../render/render-tile';
 import { CropDeck } from './crop-deck';
 import { outputPlan, type OutputPlan } from './run-gallery';
 import { GapPill } from './run-panel';
@@ -127,6 +128,12 @@ export function RunOutputs({
   const pictures = run.pictures ?? [];
   /** The cards of this row and the pieces behind each (H-10) — see `outputPlan`. */
   const plan = useMemo(() => planProp ?? outputPlan(pictures), [planProp, pictures]);
+  /**
+   * O-63 (D-62): ON FABRIC RENDER A RENDER RUN'S TILES CARRY THE RENDER DOORS (`RunTile` → the render
+   * tile), and `expand ▸` / `fold ▾` is one of them — so a deck of such a tile draws no door of its
+   * own (`hostDoor`), exactly as RENDERS OF THIS CARD drew it. Anywhere else: `null`, no change.
+   */
+  const renderHost = useRenderHost(rep);
   const status = runOutcomeNote(run);
   /** ПРОГОН, КОТОРЫЙ ОТВЕЧАЕТ СЛОВАМИ (D-2): черновик идеи возвращает текст, не картинки. */
   const textRun = isTextRun(run);
@@ -259,6 +266,7 @@ export function RunOutputs({
                 style={deckOpen ? undefined : { gridColumn: 'span 2' }}
                 open={deckOpen}
                 onToggle={() => onDeck(pictureId)}
+                hostDoor={!!renderHostOf(renderHost, picture)}
               >
                 {tile}
               </CropDeck>

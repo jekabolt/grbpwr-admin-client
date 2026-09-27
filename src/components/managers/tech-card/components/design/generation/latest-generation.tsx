@@ -14,6 +14,7 @@ import { runRepresentation } from '../bench-kinds';
 import { serverSpeaksDesign } from '../capability';
 import { pictureHandle, runHandle } from '../handles';
 import { useGalleryGroup, useGalleryViewerOpen } from '../picture-tile';
+import { RenderDoorsHost, hostPlates } from '../render/render-tile';
 import { SplitModal } from '../split-modal';
 import { isRunArchived } from '../visibility';
 import {
@@ -91,26 +92,41 @@ import { useElapsed, useRunById } from './use-generation';
  *
  * ANCHOR `data-latest-generation={runId}` — deliberately not `data-run`, which every reader of the
  * history takes to mean «a history row».
+ *
+ * ═══ AND ON FABRIC RENDER, THE SAME ORGAN (27.09, O-63, D-62) ═══════════════════════════════════
+ * Owner, verbatim: «после генерации результат показывать как во флетах те с LATEST GENERATION и
+ * GENERATION HISTORY свернут по дефолту и RENDERS OF THIS CARD получается не нужен». `kind='render'`
+ * mounts this row in the FABRIC RENDER block, under its GENERATE and above SIDES: the newest render
+ * run that is not archived and is live or holds pictures — of ANY colourway, as the history is —
+ * with the same pin, «newer run ready · show ›» and «the one before». Its tiles are `RunTile`s too;
+ * a render run's tile draws the render doors (`mark ▸`, `apply splitted`, `expand ▸`, `unmark ▸` —
+ * `render/render-tile.tsx`), whose rules are one hook over the plates of this row
+ * (`RenderDoorsHost`), their refusal notes printed once above the tiles. Its edit always files a
+ * NEW picture: «overwrite or save as new» is the flat's question.
  */
 
-/** A run of this block's GENERATE — `kind` exactly `flat`. */
-function isFlatRun(run: Pick<common_DesignRun, 'kind'>): boolean {
-  return (run.kind ?? '').trim().toLowerCase() === 'flat';
+/** Which step's workbench this is: FLAT's (the default) or FABRIC RENDER's (O-63). */
+export type WorkbenchKind = 'flat' | 'render';
+
+/** A run of this block's GENERATE — `kind` exactly `flat` on FLAT, exactly `render` on FABRIC RENDER. */
+function isRunOfKind(run: Pick<common_DesignRun, 'kind'>, kind: WorkbenchKind): boolean {
+  return (run.kind ?? '').trim().toLowerCase() === kind;
 }
 
 /**
- * THE NEWEST RUN THE WORKBENCH CAN SHOW, and EVERY newer flat run it passed over for having nothing,
- * newest first. Reads the band's first page only — the page the band already holds; the workbench
- * asks for no more.
+ * THE NEWEST RUN THE WORKBENCH CAN SHOW, and EVERY newer run of its kind it passed over for having
+ * nothing, newest first. Reads the band's first page only — the page the band already holds; the
+ * workbench asks for no more.
  */
-export function latestFlatRun(
+export function latestRunOf(
   band: Pick<GetDesignBandResponse, 'runs'>,
+  kind: WorkbenchKind = 'flat',
 ): { run: common_DesignRun; skipped: common_DesignRun[] } | null {
-  const flats = (band.runs ?? [])
-    .filter((run) => (run.id ?? 0) > 0 && isFlatRun(run) && !isRunArchived(run))
+  const runs = (band.runs ?? [])
+    .filter((run) => (run.id ?? 0) > 0 && isRunOfKind(run, kind) && !isRunArchived(run))
     .sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
   const skipped: common_DesignRun[] = [];
-  for (const run of flats) {
+  for (const run of runs) {
     if (isRunLive(run) || (run.pictures ?? []).length > 0) return { run, skipped };
     skipped.push(run);
   }
@@ -172,16 +188,19 @@ export function LatestGeneration({
   band,
   techCardId,
   disabled,
+  kind = 'flat',
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /** The step whose GENERATE this row answers — FLAT's by default, FABRIC RENDER's (O-63). */
+  kind?: WorkbenchKind;
 }) {
   const speaks = serverSpeaksDesign();
   const form = useFormContext<TechCardFormData>();
   const cardFit = (form?.watch('fit') ?? '').trim();
 
-  const newest = useMemo(() => latestFlatRun(band), [band]);
+  const newest = useMemo(() => latestRunOf(band, kind), [band, kind]);
   const newestId = newest?.run.id ?? 0;
 
   /* ═══ THE PIN (`bench-store.ts`) — the run shown while somebody works on it ═══════════════════
@@ -315,6 +334,10 @@ export function LatestGeneration({
     () => (run && plan ? deckOfRuns([run], () => plan) : new Map<number, number>()),
     [run, plan],
   );
+  /** O-63: what the render doors of this row read — its plates and its decks (`RenderDoorsHost`). */
+  const plates = useMemo(() => hostPlates(kind === 'render' && plan ? [plan] : []), [kind, plan]);
+  const toggleDeck = (rootId: number) =>
+    setOpenDeck((current) => (current === rootId ? null : rootId));
 
   if (!run) return null;
 
@@ -322,6 +345,34 @@ export function LatestGeneration({
   /** Said only over the newest run with pictures — a run pinned behind a newer one says the line. */
   const note = skippedNote(newest && newestId === runId ? newest.skipped : []);
   const newer = newest && newestId > runId ? newest.run : null;
+
+  /** The row's outputs block — the history's own (`RunOutputs`), on the workbench's track. */
+  const outputs = (
+    <RunOutputs
+      band={band}
+      techCardId={techCardId}
+      run={run}
+      rep={runRepresentation(run)}
+      cardFit={cardFit}
+      elapsed={elapsed}
+      disabled={disabled || !speaks}
+      galleryKey={galleryGroup.key}
+      galleryIndexOf={gallery.indexOf}
+      openDeck={openDeck}
+      onDeck={toggleDeck}
+      onZoomPicture={(pictureId) => {
+        // The viewer is a surface of this run too: pinned from the click, before any re-read.
+        pinShown(techCardId, true);
+        setOpenDeck((current) => deckAfterZoom(current, pictureId, deckOf));
+      }}
+      onSplit={(picture) => {
+        openSurface(techCardId, 'split:bench', picture.runId ?? 0);
+        setSplitting({ picture, handle: pictureHandle(picture) });
+      }}
+      workbench
+      plan={plan ?? undefined}
+    />
+  );
 
   return (
     <div data-latest-generation={runId} ref={galleryGroup.anchorRef}>
@@ -357,30 +408,27 @@ export function LatestGeneration({
         </Text>
       )}
 
-      <RunOutputs
-        band={band}
-        techCardId={techCardId}
-        run={run}
-        rep={runRepresentation(run)}
-        cardFit={cardFit}
-        elapsed={elapsed}
-        disabled={disabled || !speaks}
-        galleryKey={galleryGroup.key}
-        galleryIndexOf={gallery.indexOf}
-        openDeck={openDeck}
-        onDeck={(rootId) => setOpenDeck((current) => (current === rootId ? null : rootId))}
-        onZoomPicture={(pictureId) => {
-          // The viewer is a surface of this run too: pinned from the click, before any re-read.
-          pinShown(techCardId, true);
-          setOpenDeck((current) => deckAfterZoom(current, pictureId, deckOf));
-        }}
-        onSplit={(picture) => {
-          openSurface(techCardId, 'split:bench', picture.runId ?? 0);
-          setSplitting({ picture, handle: pictureHandle(picture) });
-        }}
-        workbench
-        plan={plan ?? undefined}
-      />
+      {/* O-63: ON FABRIC RENDER the tiles below draw the render doors, and their rules read this
+          row's plates (`RenderDoorsHost`); FLAT's row is drawn as it always was. The doors' notes
+          stand once above the tiles. `disabled` is the card's alone: the server's silence the
+          doors read themselves, and say so in their own words. */}
+      {kind === 'render' ? (
+        <RenderDoorsHost
+          band={band}
+          techCardId={techCardId}
+          disabled={disabled}
+          pictures={plates.pictures}
+          membersOf={plates.membersOf}
+          openDeck={openDeck}
+          onDeck={toggleDeck}
+          runOf={() => run}
+          notesClassName='mb-2'
+        >
+          {outputs}
+        </RenderDoorsHost>
+      ) : (
+        outputs
+      )}
 
       {/* A NEWER RUN, WHILE THIS ONE IS KEPT — one quiet line under the tiles; the click moves the
           workbench to the newest and lets the pin go. «started» while that run is in flight: it is
@@ -396,7 +444,7 @@ export function LatestGeneration({
             size='xs'
             className='text-labelColor hover:text-textColor'
             aria-label={`show ${runHandle(newestId)} here`}
-            title='the newest flat run — the one shown now stays in the history below'
+            title={`the newest ${kind} run — the one shown now stays in the history below`}
             onClick={() => releasePin(techCardId)}
           >
             show ›

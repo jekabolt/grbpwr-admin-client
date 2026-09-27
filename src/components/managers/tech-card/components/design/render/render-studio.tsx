@@ -1,5 +1,5 @@
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
-import { useMemo, useRef, useState, type JSX } from 'react';
+import { useCallback, useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
@@ -9,6 +9,7 @@ import { ColorwaySelect } from '../colorway-picker';
 import { ColourwayCreatePopover } from '../colourway-create';
 import { useColourPlan } from '../colour-plan/use-colour-plan';
 import { GROUP_SEAM } from '../core';
+import { LatestGeneration } from '../generation/latest-generation';
 import type { ClothSlot } from '../pattern/slot-fabrics';
 import { useCardFit, useColourDraft } from './drafts';
 import { GenerateRow, LockBar, RunRefusal } from './generate-row';
@@ -24,6 +25,7 @@ import {
 } from './model';
 import { OutputsSection } from './outputs';
 import { Palette } from './palette';
+import { RenderStepScope, type RenderStep } from './render-tile';
 import { SidesSection, useSidesTarget } from './side-row';
 import { useStartDesignRun } from './use-design-run';
 import { WhatModelGetsRenderModal } from './what-model-gets';
@@ -36,6 +38,7 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  *   ── CLOTH IS ─────── weight g/m² · opaque · semi sheer · sheer, one line
  *   ── IN WORDS ─────── the free text of the recipe
  *   GENERATE · priced by the server on start · WHAT THE MODEL GETS ▸
+ *   ── LATEST GENERATION  the newest render run, its tiles with the doors (O-63, `LatestGeneration`)
  *   SIDES ─────────────── one row per side: what went in, what came back (`SidesSection`)
  *   RENDERS OF THIS CARD  the plates themselves, and every door that puts one into a side
  *   GENERATION HISTORY    (mounted by the step screen)
@@ -201,10 +204,10 @@ export function RenderStudio({
    */
   const [creating, setCreating] = useState(false);
   const after = useRef<((id: number) => void) | null>(null);
-  const openCreate = (then?: (id: number) => void) => {
+  const openCreate = useCallback((then?: (id: number) => void) => {
     after.current = then ?? null;
     setCreating(true);
-  };
+  }, []);
 
   /**
    * ⚠ КАРТОЧКА СМЕНИЛАСЬ — ОКНО ЗАКРЫВАЕТСЯ, ПРОДОЛЖЕНИЕ ЖЕСТА ЗАБЫВАЕТСЯ (инвариант 12).
@@ -219,6 +222,25 @@ export function RenderStudio({
     after.current = null;
     if (creating) setCreating(false);
   }
+
+  /**
+   * ═══ WHAT THE RENDER DOORS OF THIS STEP READ — ONE VALUE FOR EVERY HOST (27.09, O-63, D-62) ═══
+   * The tiles of the latest generation below GENERATE put a render into a side with the doors
+   * RENDERS OF THIS CARD had (`render/render-tile.tsx`), and those doors read the step: the
+   * colourway axis of SIDES (the narrowed list and the card's raw one, O-57 r4), whether the server
+   * adopts a sample plate (B7 — `benchAdoptsUnattributed`, compared, never read as its absence) and
+   * the one birth window of the screen. Stable while they are: the tiles re-render with the band,
+   * not with every keystroke of the recipe above.
+   */
+  const renderStep = useMemo<RenderStep>(
+    () => ({
+      colorways,
+      cardColorways,
+      adopts: band.benchAdoptsUnattributed === true,
+      onCreateColorway: openCreate,
+    }),
+    [colorways, cardColorways, band.benchAdoptsUnattributed, openCreate],
+  );
 
   /**
    * THE VIEWS THIS RUN ASKS FOR, IN SHEET ORDER — a walk around the garment, narrowed to the slots
@@ -374,7 +396,7 @@ export function RenderStudio({
     ) : null;
 
   return (
-    <>
+    <RenderStepScope step={renderStep}>
       <Section
         /* THE ANCHOR OF THE STEP'S ONE BLOCK: statements of absence («no colourway picker in this
            block», E-16) and of belonging («the cloth grid lives HERE», E-7) are made about it. */
@@ -451,6 +473,14 @@ export function RenderStudio({
             ) : null
           }
         />
+
+        {/* ═══ THE LATEST GENERATION — UNDER GENERATE, AS ON FLAT (27.09, O-63, D-62 п.1) ════════
+            Owner: «после генерации результат показывать как во флетах те с LATEST GENERATION». The
+            newest render run of any colourway, live or with pictures, its tiles carrying the doors
+            that put a render into a side; the same pin while an editor, a split or the zoom is open
+            on it, «newer run ready · show ›», «the one before». The last row of the block: what
+            GENERATE bought stands right under it, and SIDES below reads what was marked. */}
+        <LatestGeneration band={band} techCardId={techCardId} disabled={disabled} kind='render' />
       </Section>
 
       {/* ═══ SIDES — СВОЙ БЛОК, НАД РЕНДЕРАМИ КАРТОЧКИ (r2 п.29) ══════════════════════════════
@@ -520,6 +550,6 @@ export function RenderStudio({
           then?.(id);
         }}
       />
-    </>
+    </RenderStepScope>
   );
 }

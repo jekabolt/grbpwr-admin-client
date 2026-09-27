@@ -27,6 +27,7 @@ import type { VectorReplace } from '../modals/vector-modal';
 import { usePickMode } from '../pick-mode';
 import { PictureTile } from '../picture-tile';
 import { mixedInputNote, provenanceLabel, readProvenance } from '../provenance';
+import { RunRenderTile, renderHostOf, useRenderHost } from '../render/render-tile';
 import { isModelUrl } from '../threed/media';
 import { useDesignWrites } from '../use-design-band';
 import { isPictureHidden } from '../visibility';
@@ -360,6 +361,8 @@ export function RunTile({
 }) {
   const pick = usePickMode();
   const { setBenchSlot } = useDesignWrites(techCardId);
+  /** O-63: the render doors of this row — set only for a render run's plate on FABRIC RENDER. */
+  const renderHost = renderHostOf(useRenderHost(rep), picture);
   /** Правка прямо в истории (V-10): состояние у плитки — редактор открыт над КОНКРЕТНОЙ картинкой. */
   const [editing, setEditing] = useState(false);
 
@@ -376,6 +379,10 @@ export function RunTile({
     if (!editing) return;
     return () => closeSurface(techCardId, surfaceKey);
   }, [editing, techCardId, surfaceKey]);
+  const openEditor = () => {
+    openSurface(techCardId, surfaceKey, picture.runId ?? 0);
+    setEditing(true);
+  };
   const hidden = isPictureHidden(picture);
   /**
    * AN EDIT TOOK THIS PICTURE'S PLACE (O-53 phase 2, `replaced_by`). Nothing about the picture
@@ -414,6 +421,41 @@ export function RunTile({
     galleryIndex == null
       ? undefined
       : { key: galleryKey, index: galleryIndex, mediaId: picture.media?.id ?? 0 };
+
+  /* ═══ A FABRIC RENDER IN A RUN ROW IS THE RENDER TILE (27.09, O-63, D-62 п.2) ═════════════════
+     On FABRIC RENDER a render run's plate draws the doors RENDERS OF THIS CARD drew — `mark ▸`,
+     `apply splitted`, `expand ▸`, `unmark ▸`, the states `in front` — by one set of rules
+     (`render/render-tile.tsx`, the row's `RenderDoorsHost`). The row keeps what it owns: the zoom
+     through its viewer row, its split window, and this tile's editor, opened as a surface of its
+     run (the workbench pins it) and filing a NEW picture, as a render's edit always has. */
+  if (renderHost) {
+    return (
+      <RunRenderTile
+        host={renderHost}
+        picture={picture}
+        src={url}
+        dim={dim}
+        deckMemberOf={deckMemberOf}
+        galleryGroup={galleryGroup}
+        onZoom={onZoom && pictureId ? () => onZoom(pictureId) : undefined}
+        onSplit={() => onSplit(picture)}
+        onEdit={openEditor}
+      >
+        {editing && (
+          <VectorModal
+            open
+            onOpenChange={setEditing}
+            techCardId={techCardId}
+            band={band}
+            base={picture}
+            slot={null}
+            replace={null}
+            disabled={disabled}
+          />
+        )}
+      </RunRenderTile>
+    );
+  }
 
   /**
    * ONE BADGE — the mock-up's top-left tag. A plate a slot reads wears its SIDE and nothing else
@@ -606,10 +648,7 @@ export function RunTile({
         onEdit={
           !disabled && !threedFile
             ? {
-                onClick: () => {
-                  openSurface(techCardId, surfaceKey, picture.runId ?? 0);
-                  setEditing(true);
-                },
+                onClick: openEditor,
                 ariaLabel: `edit ${handle} — draw over this picture`,
                 title:
                   (workbench
