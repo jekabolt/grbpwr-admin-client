@@ -18,7 +18,8 @@
 //   R · перезагрузка вкладки, пока ответа нет: то же намерение — тот же id;
 //   G · отказы: 4xx освобождает ключ; 5xx и потерянный ответ держат; отказ ПОВТОРА после тишины
 //       держит (прогон мог быть заведён первой отправкой);
-//   O · оператор: B в той же вкладке не наследует ключ A; A, вернувшись, получает свой;
+//   O · оператор: B в той же вкладке не наследует ключ A; A, вернувшись, получает свой; успех A,
+//       пришедший, пока в вкладке B, освобождает ключ A — A, вернувшись, получает НОВЫЙ id;
 //   S · устаревший ответ: ответ второго нажатия того же намерения, пришедший после того, как ключ
 //       уже освобождён и выдан новый, НОВЫЙ ключ не трогает.
 //
@@ -34,6 +35,7 @@
 //   --mutate-unsure-forgotten  отказ повтора после тишины освобождает ключ          → G
 //   --mutate-operator          журнал без оператора                                 → O
 //   --mutate-settle-any-id     ответ гасит запись, чей бы ключ в ней ни стоял       → S
+//   --mutate-settle-current-op ответ ищет запись под тем, кто вошёл СЕЙЧАС           → O
 //
 // --baseline=<rev> — вместо текущего `generation/use-generation.ts` собрать его из ревизии <rev>
 // (`git show`): так видно, что проба ловит прежний FLAT, а не только мутации.
@@ -73,6 +75,7 @@ const KNOWN = new Set([
   '--mutate-unsure-forgotten',
   '--mutate-operator',
   '--mutate-settle-any-id',
+  '--mutate-settle-current-op',
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN.has(a));
 if (stray) dieNotRun(`неизвестный флаг мутации ${stray}; известные: ${[...KNOWN].join(', ')}`);
@@ -186,6 +189,17 @@ if (on('--mutate-operator'))
     LEDGER,
     '`${operator}|${techCardId}|${scope}`',
     '`op|${techCardId}|${scope}`',
+  );
+if (on('--mutate-settle-current-op'))
+  patch(
+    'settle-current-op',
+    LEDGER,
+    `): { matched: boolean; freed: boolean } {
+  const all = book();
+  const at = scopeOf(operator, techCardId, scope);`,
+    `): { matched: boolean; freed: boolean } {
+  const all = book();
+  const at = scopeOf(operatorKey(), techCardId, scope);`,
   );
 if (on('--mutate-settle-any-id'))
   patch(
@@ -617,6 +631,21 @@ try {
   await signIn(ALICE);
   await press(FLAT);
   ck((await lastId()) === alice, 'A, вернувшись, получает свой прежний id');
+  await answer('ok'); // повтор A принят и появился в band; запись B (тишина) остаётся за B
+
+  // Смена оператора ПОСРЕДИ отправки: A жмёт, входит B, приходит успех A. Он обязан лечь в запись A,
+  // иначе A, вернувшись, повторит принятый ключ и получит СТАРЫЙ прогон с OK.
+  await press(FLAT);
+  const inFlight = await lastId();
+  await signIn(BOB);
+  await answer('ok');
+  await signIn(ALICE);
+  await press(FLAT);
+  ck(
+    (await lastId()) !== inFlight,
+    'успех A, пришедший при B, освободил ключ A — следующее нажатие A несёт НОВЫЙ id',
+    `${inFlight} → ${await lastId()}`,
+  );
   await answer('ok');
 } catch (e) {
   ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
