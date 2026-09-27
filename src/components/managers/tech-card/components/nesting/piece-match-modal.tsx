@@ -1195,11 +1195,17 @@ export function PieceMatchModal({
       // на сервере (operations[N].piece_line_key: no cut-piece "…") и откатывает всю транзакцию —
       // по ключу, которого оператор не видит, в строке, которую он не трогал. Выноски при этом
       // НЕ трогаются: выноска — номер на эскизе, она переживает деталь.
-      if (dropped.size > 0) {
+      // Сверка входов ПОБАЙТНАЯ, как у removePiece и classifyAssemblyInputs: снимаются сырые ключи
+      // ровно тех деталей, что ушли из массива выше. Свёрнутый `dropped` для входов не годится —
+      // деталь «ABC» и узел «abc» два разных входа, и удаление детали снимало бы заодно чужой узел.
+      const goneKeys = new Set(
+        all.map((p) => p.lineKey ?? '').filter((k) => k && dropped.has(k.trim().toLowerCase())),
+      );
+      if (goneKeys.size > 0) {
         const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
         (operations ?? []).forEach((o, oi) => {
           const keys = (o.inputKeys ?? []).filter(Boolean);
-          const kept = keys.filter((k) => !dropped.has(k.trim().toLowerCase()));
+          const kept = keys.filter((k) => !goneKeys.has(k));
           if (kept.length === keys.length) return;
           setValue(`operations.${oi}.inputKeys`, kept, { shouldDirty: true });
         });
