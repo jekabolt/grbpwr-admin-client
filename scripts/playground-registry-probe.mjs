@@ -307,6 +307,8 @@
 //                                                                   → краснеет A, AG
 //   node scripts/playground-registry-probe.mjs --mutate-pantone-prefix имя по префиксу кода
 //                                                                   → краснеет AG
+//   node scripts/playground-registry-probe.mjs --mutate-retouch-copy   change_text — копия списка
+//                                                                   ([...RETOUCH]) → краснеет AG
 //
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
@@ -413,6 +415,7 @@ const MUT = {
   retouchIdeas: process.argv.includes('--mutate-retouch-ideas'),
   pantoneName: process.argv.includes('--mutate-pantone-name'),
   pantonePrefix: process.argv.includes('--mutate-pantone-prefix'),
+  retouchCopy: process.argv.includes('--mutate-retouch-copy'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -456,6 +459,15 @@ if (MUT.retouchIdeas)
       /playground\/ideas\.ts$/,
       "'uncreased fabric continuing the surrounding cloth',",
       "'remove the crease',",
+    ),
+  );
+if (MUT.retouchCopy)
+  plugins.push(
+    swap(
+      'retouch-ideas-copy',
+      /playground\/ideas\.ts$/,
+      'retouch_zone: { zone: RETOUCH, change_text: RETOUCH },',
+      'retouch_zone: { zone: RETOUCH, change_text: [...RETOUCH] },',
     ),
   );
 if (MUT.pantoneName)
@@ -5476,7 +5488,13 @@ head('AG', '20-PROMPTS §3.5 идеи ретуши — результат; §3.7
   ck(same(zone, SIX), 'идеи ретуши — ровно шесть фраз §3.5, в их порядке', show(zone));
   const ops = zone.filter((p) => /^(remove|delete|fix|straighten)\b/i.test(p.trim()));
   ck(ops.length === 0, 'ни одна идея ретуши не начинается с операции', show(ops));
-  ck(same(text, zone), 'zone и change_text читают один список', show(text));
+  ck(same(text, zone), 'zone и change_text — те же фразы', show(text));
+  // Codex MINOR: equal contents would pass a copy (`change_text: [...RETOUCH]`) that drifts later.
+  ck(
+    !!M.PROMPT_IDEAS.retouch_zone?.zone &&
+      M.PROMPT_IDEAS.retouch_zone.zone === M.PROMPT_IDEAS.retouch_zone.change_text,
+    'zone и change_text — ОДИН список (та же ссылка, не копия)',
+  );
 
   // §3.7 — the name of the swatch travels in colour.words, exact codes only.
   const wireOf = (code, hex = '') =>

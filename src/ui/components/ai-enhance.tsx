@@ -173,8 +173,10 @@ export async function enhanceText(req: EnhanceRequest, _signal?: AbortSignal): P
       field: FIELD_WIRE[req.field],
       context: req.context ?? '',
       maxRunes: req.maxRunes ?? 0,
-      workflow: req.workflow ?? '',
-      fieldKey: req.fieldKey ?? '',
+      // Absent = undefined = not on the wire (JSON.stringify drops it): every other mode's body stays
+      // what an older server's strict gateway accepts, which refuses an unknown field even when ''.
+      workflow: req.workflow || undefined,
+      fieldKey: req.fieldKey || undefined,
     });
     return res.text ?? '';
   } catch (e) {

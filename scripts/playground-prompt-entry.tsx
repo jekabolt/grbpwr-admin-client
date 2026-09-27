@@ -24,6 +24,7 @@ import { useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FormProvider, useForm } from 'react-hook-form';
 import { BrowserRouter } from 'react-router-dom';
+import { ENHANCE_MODES } from 'ui/components/ai-enhance';
 import { TooltipProvider } from 'ui/components/tooltip';
 
 const CARD = 7;
@@ -64,6 +65,8 @@ type Probe = {
   reset: () => void;
   remember: (wf: string, field: string, text: string) => void;
   alerts: () => string[];
+  /** The generic `ai ✦` menu's modes (group K: `steer` is never one of them). */
+  enhanceModes: () => string[];
 };
 
 declare global {
@@ -120,4 +123,5 @@ window.__pp = {
   remember: (wf, field, text) =>
     rememberRecentText(`plm.playground.recent.v1:${wf}.${field}`, text),
   alerts: () => useSnackBarStore.getState().alerts.map((a) => a.message),
+  enhanceModes: () => ENHANCE_MODES.map((m) => m.mode),
 };

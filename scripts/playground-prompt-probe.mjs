@@ -44,15 +44,28 @@
 //   J · (G-03 Codex MINOR) вызов, который не отвечает, отпускается по сроку: «thinking…» снята,
 //       статический список, без тоста; тишина — следующее нажатие не зовёт; кэш пуст;
 //   E · (G-03 m-5) 404 С причиной (картинка вопроса удалена) — сессия НЕ выключается.
-//   K · (20-PROMPTS §3.8) Improve: EnhanceText уходит в режиме STEER, поле OTHER, контекст — тот же
-//       «Tool: … / This field: …», что у двери Ideas (и без ассистента на полосе, и в редакторе
-//       маски); старый сервер отказывает STEER (400, нарушение на `mode`, или 400 без нарушений) —
-//       ОДИН повтор в IMPROVE с тем же текстом и контекстом, ответ ложится в поле, без тоста; 400
-//       по другому полю (text) не повторяется и говорит своё.
+//   K · (20-PROMPTS §3.8) Improve: EnhanceText уходит в режиме STEER, поле OTHER, с парой
+//       workflow / fieldKey поля (change_color/garment; в редакторе маски retouch_zone/change_text),
+//       контекст — тот же «Tool: … / This field: …», что у двери Ideas (и без ассистента на полосе,
+//       и в редакторе маски). Повтор в IMPROVE — ТОЛЬКО на доказанный перекос enum (Codex MAJOR):
+//       400 с нарушением на `mode`, или 400 без нарушений, чьё сообщение называет enum
+//       (`invalid value for enum field mode: "ENHANCE_TEXT_MODE_STEER"` / имя члена) — ОДИН повтор
+//       с тем же текстом и контекстом и БЕЗ пары, ответ в поле, без тоста. НЕ повторяются и говорят
+//       своё: 400 по полю text; 400 без нарушений иной формы (отказ по содержанию «refused: …»);
+//       400 с нарушением на `workflow` / `field_key` (сервер знает STEER, не знает пары).
+//       Плейсхолдер редактора маски — «smooth clean fabric, the same colour and weave»; общее меню
+//       `ai ✦` (ENHANCE_MODES) — ровно improve/expand/shorten/prompt, без steer.
 //   --mutate-steer-mode      Improve снова в режиме improve                       → K
 //   --mutate-steer-context   контекст снова голая подсказка                       → K
 //   --mutate-steer-fallback  отказ STEER не повторяется в improve                 → K
 //   --mutate-steer-any-400   любой 400 повторяется в improve                      → K
+//   --mutate-steer-detail-free любой 400 без нарушений повторяется (отказ по содержанию) → K
+//   --mutate-steer-pair-retry нарушение на workflow/field_key принято за перекос → K
+//   --mutate-steer-no-enum-text сообщение с enum не доказывает перекоса         → K
+//   --mutate-steer-no-pair   STEER уходит без workflow / fieldKey                 → K
+//   --mutate-steer-retry-pair повтор в improve несёт пару                         → K
+//   --mutate-mask-placeholder плейсхолдер маски снова про операцию               → K
+//   --mutate-steer-in-menu   steer попадает в общее меню ai ✦                     → K
 //
 // Нет Chromium — КОД 2 и «НЕ ВЫПОЛНЕНА». `--shots <dir>` сохраняет снимки меню (1440/768/375).
 
@@ -91,6 +104,13 @@ const KNOWN = new Set([
   '--mutate-steer-context',
   '--mutate-steer-fallback',
   '--mutate-steer-any-400',
+  '--mutate-steer-detail-free',
+  '--mutate-steer-pair-retry',
+  '--mutate-steer-no-enum-text',
+  '--mutate-steer-no-pair',
+  '--mutate-steer-retry-pair',
+  '--mutate-mask-placeholder',
+  '--mutate-steer-in-menu',
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN.has(a));
 if (stray) dieNotRun(`неизвестный флаг мутации ${stray}; известные: ${[...KNOWN].join(', ')}`);
@@ -209,8 +229,52 @@ if (on('--mutate-steer-any-400'))
   patch(
     'steer-any-400',
     PROMPT_FIELD,
-    "return violations.length === 0 || violations.some((v) => v.field === 'mode');",
-    'return true;',
+    'const violations = extractFieldViolations(error);\n',
+    'const violations = extractFieldViolations(error);\n  if (violations) return true;\n',
+  );
+if (on('--mutate-steer-detail-free'))
+  patch(
+    'steer-detail-free',
+    PROMPT_FIELD,
+    '  if (violations.length > 0) return false;\n',
+    '  if (violations.length === 0) return true;\n',
+  );
+if (on('--mutate-steer-pair-retry'))
+  patch(
+    'steer-pair-retry',
+    PROMPT_FIELD,
+    'if (violations.some((v) => STEER_PAIR_FIELDS.has(v.field))) return false;',
+    'if (violations.some((v) => STEER_PAIR_FIELDS.has(v.field))) return true;',
+  );
+if (on('--mutate-steer-no-enum-text'))
+  patch(
+    'steer-no-enum-text',
+    PROMPT_FIELD,
+    "if (message.includes('ENHANCE_TEXT_MODE_STEER')) return true;",
+    'return false;',
+  );
+if (on('--mutate-steer-no-pair'))
+  patch('steer-no-pair', PROMPT_FIELD, 'workflow: workflowKey,\n          fieldKey,\n', '');
+if (on('--mutate-steer-retry-pair'))
+  patch(
+    'steer-retry-pair',
+    PROMPT_FIELD,
+    "mode: 'improve', workflow: undefined, fieldKey: undefined });",
+    "mode: 'improve' });",
+  );
+if (on('--mutate-mask-placeholder'))
+  patch(
+    'mask-placeholder',
+    /mask\/mask-editor\.tsx$/,
+    "placeholder='smooth clean fabric, the same colour and weave'",
+    "placeholder='Remove the stain, straighten the seam'",
+  );
+if (on('--mutate-steer-in-menu'))
+  patch(
+    'steer-in-menu',
+    /ui\/components\/ai-enhance\.tsx$/,
+    "{ mode: 'prompt', label: 'as a prompt', hint: 'rewrite as a generation prompt' },",
+    "{ mode: 'prompt', label: 'as a prompt', hint: 'rewrite as a generation prompt' },\n  { mode: 'steer', label: 'steer', hint: 'for this field' },",
   );
 
 // ─── заглушенная сеть ──────────────────────────────────────────────────────────────────────────
@@ -1013,6 +1077,11 @@ try {
     JSON.stringify(calls[0]),
   );
   ck(
+    calls[0]?.workflow === 'change_color' && calls[0]?.fieldKey === 'garment',
+    'пара поля: workflow change_color, fieldKey garment',
+    JSON.stringify([calls[0]?.workflow, calls[0]?.fieldKey]),
+  );
+  ck(
     calls[0]?.context === GARMENT_CTX,
     'без ассистента: контекст «Tool: Change a Color / This field: …»',
     JSON.stringify(calls[0]?.context),
@@ -1037,7 +1106,7 @@ try {
   );
   await closeMenu();
 
-  // An old binary: STEER refused as unknown_mode → one retry in IMPROVE, silently.
+  // An old binary: STEER refused as a proven enum skew → one retry in IMPROVE, silently.
   for (const [name, refuse] of [
     [
       'нарушение на mode',
@@ -1047,7 +1116,18 @@ try {
         details: violation('mode', 'unknown_mode'),
       },
     ],
-    ['400 без нарушений (шлюз не знает имени)', { status: 400, message: 'invalid value for enum' }],
+    [
+      '400 без нарушений, protojson называет enum-поле mode',
+      {
+        status: 400,
+        message: 'proto: (line 1:32): invalid value for enum field mode: "ENHANCE_TEXT_MODE_STEER"',
+        details: [],
+      },
+    ],
+    [
+      '400 без нарушений, сообщение называет член enum',
+      { status: 400, message: 'unknown value "ENHANCE_TEXT_MODE_STEER"' },
+    ],
   ]) {
     await fresh('change_color', OLD, { texts: { garment: 'the jaket' } });
     await answerEnhance(refuse, 'the cropped denim jacket');
@@ -1062,6 +1142,11 @@ try {
     ck(
       calls[1]?.text === 'the jaket' && calls[1]?.context === GARMENT_CTX,
       `${name}: повтор с тем же текстом и контекстом`,
+      JSON.stringify(calls[1]),
+    );
+    ck(
+      !!calls[1] && !('workflow' in calls[1]) && !('fieldKey' in calls[1]),
+      `${name}: повтор без пары workflow / fieldKey (старый шлюз не знает этих полей)`,
       JSON.stringify(calls[1]),
     );
     const said = await page.evaluate(() => window.__pp.alerts());
@@ -1092,6 +1177,59 @@ try {
     JSON.stringify(said),
   );
 
+  // Not a proven skew → no retry, the refusal's own words (Codex MAJOR): a detail-free content
+  // refusal, and a refusal of the tool/field pair by a server that knows STEER.
+  for (const [name, refuse, words] of [
+    [
+      '400 без нарушений, отказ по содержанию',
+      { status: 400, message: 'refused: the text asks for a real person', details: [] },
+      /could not improve: refused: the text asks for a real person/,
+    ],
+    [
+      '400 с нарушением на workflow',
+      {
+        status: 400,
+        message: 'workflow: unknown',
+        details: violation('workflow', 'unknown'),
+      },
+      /could not improve: workflow: unknown/,
+    ],
+    [
+      '400 с нарушением на field_key',
+      {
+        status: 400,
+        message: 'field_key: unknown',
+        details: violation('field_key', 'unknown'),
+      },
+      /could not improve: field_key: unknown/,
+    ],
+  ]) {
+    await fresh('change_color', OLD, { texts: { garment: 'the jaket' } });
+    await answerEnhance(refuse, 'never');
+    await improveIn('change_color.garment');
+    calls = await enhanceCalls();
+    const told = await page.evaluate(() => window.__pp.alerts());
+    ck(
+      JSON.stringify(calls.map((c) => c.mode)) === JSON.stringify(['ENHANCE_TEXT_MODE_STEER']) &&
+        (await textOf('change_color.garment')) === 'the jaket',
+      `${name}: без повтора, текст не тронут`,
+      JSON.stringify([calls.map((c) => c.mode), await textOf('change_color.garment')]),
+    );
+    ck(
+      told.some((m) => words.test(m)),
+      `${name}: тост его словами`,
+      JSON.stringify(told),
+    );
+  }
+
+  // The generic `ai ✦` menu never offers steer.
+  const modes = await page.evaluate(() => window.__pp.enhanceModes());
+  ck(
+    JSON.stringify(modes) === JSON.stringify(['improve', 'expand', 'shorten', 'prompt']),
+    'ENHANCE_MODES общего меню — improve/expand/shorten/prompt, без steer',
+    JSON.stringify(modes),
+  );
+
   // Tile 10's words in the mask editor: the same «Tool / This field» context.
   await page.goto('http://probe.local/start');
   await page.waitForFunction(() => !!window.__pp);
@@ -1100,6 +1238,14 @@ try {
   await page.waitForFunction(() => !!window.__pp);
   await page.evaluate(([band, m]) => window.__pp.mask(band, m), [OLD, media(5)]);
   await page.waitForSelector('[data-prompt-field="retouch_zone.change_text"]');
+  const maskPlaceholder = await field('retouch_zone.change_text')
+    .locator('textarea')
+    .getAttribute('placeholder');
+  ck(
+    maskPlaceholder === 'smooth clean fabric, the same colour and weave',
+    'редактор маски: плейсхолдер описывает результат',
+    JSON.stringify(maskPlaceholder),
+  );
   await field('retouch_zone.change_text').locator('textarea').fill('no stain');
   await answerEnhance(null, 'clean fabric, the same colour and weave');
   await improveIn('retouch_zone.change_text');
@@ -1110,6 +1256,11 @@ try {
         'Tool: Retouch a Zone\nThis field: what the painted zone should show when it is done — describe the result, not the operation',
     'редактор маски: STEER и «Tool: Retouch a Zone / This field: … the result, not the operation»',
     JSON.stringify(calls[0]),
+  );
+  ck(
+    calls[0]?.workflow === 'retouch_zone' && calls[0]?.fieldKey === 'change_text',
+    'редактор маски: пара workflow retouch_zone, fieldKey change_text',
+    JSON.stringify([calls[0]?.workflow, calls[0]?.fieldKey]),
   );
 } catch (e) {
   ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);

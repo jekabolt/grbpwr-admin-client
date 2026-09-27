@@ -41,9 +41,11 @@ import { recentTextKey, useRecentText } from '../recent';
  *    «more». Any failure is the fixed list alone, silently (`../ideas-server.ts`). Same door.
  *  · IMPROVE — `enhanceText` in mode `steer`, field `other` (20-PROMPTS §3.8, D9): not a grammar fix
  *    but the text rewritten as a short, concrete, visual phrase for THIS field of THIS tool. The
- *    context is the «Tool: … / This field: …» text the Ideas door sends (`improveContext`), so the
- *    server knows which tool and which field it is steering for. A server older than the mode
- *    refuses it and is asked once more in `improve`, silently (`steerText`). Locked while the text
+ *    request names the pair (`workflow` = `workflowKey`, `fieldKey`) — the server takes the tool and
+ *    the field from its own table by it and refuses STEER without a known pair; the context is the
+ *    «Tool: … / This field: …» text the Ideas door sends (`improveContext`), as data. A server older
+ *    than the mode refuses it and is asked once more in `improve`, silently — only on a proven enum
+ *    skew (`steerRefused`); any other 400 is said in its own words. Locked while the text
  *    is blank (the RPC refuses blank text) and while a request is out. The answer REPLACES the text
  *    only if the text is still the one that was sent; a text edited meanwhile is left alone.
  *  · RECENTLY USED ▾ — the texts this field was generated with (`../recent.ts`), newest first; a
@@ -99,8 +101,9 @@ const NO_TEXTS: readonly string[] = Object.freeze([]);
 
 /**
  * WHAT IMPROVE IS TOLD ABOUT THE FIELD — the same «Tool: … / This field: …» text the Ideas door asks
- * with (20-PROMPTS §3.8). The server's `steer` reads the CONTEXT's first line as the tool and the
- * field, so the bare hint is only the last resort.
+ * with (20-PROMPTS §3.8). The server names the tool and the field from its own table by the
+ * `workflow` / `fieldKey` pair and reads this only as data about the card; the bare hint is the
+ * last resort.
  */
 export function improveContext(opts: {
   serverIdeas?: ServerIdeasInput;
@@ -114,24 +117,42 @@ export function improveContext(opts: {
 }
 
 /**
- * A server older than `ENHANCE_TEXT_MODE_STEER` refuses it as InvalidArgument (400): with a field
- * violation on `mode` («unknown_mode», or «required» where the gateway dropped the unknown name), or
- * with no violation at all where the gateway refused the name itself. A 400 that names another field
- * (a too-long text) is the text's own refusal and is not retried.
+ * A server older than `ENHANCE_TEXT_MODE_STEER` refuses it as InvalidArgument (400), and ONLY that
+ * proven enum skew is retried in `improve` (Codex review of PR-03, MAJOR):
+ *  · a field violation on `mode` («unknown_mode», or «required» where the gateway dropped the
+ *    unknown name);
+ *  · a detail-free 400 whose message names the enum — the member itself (`ENHANCE_TEXT_MODE_STEER`)
+ *    or both «enum» and «mode» (protojson: `invalid value for enum field mode: "…"`).
+ * Everything else is the request's own refusal and is said in its own words, never retried: a
+ * detail-free 400 of any other shape (a content refusal), a violation on another field (a too-long
+ * text), and above all a violation on `workflow` / `field_key` — that server KNOWS steer and does not
+ * know this tool/field pair, so `improve` would only hide the mismatch.
  */
+const STEER_PAIR_FIELDS = new Set(['workflow', 'field_key', 'fieldKey']);
+
 function steerRefused(error: unknown): boolean {
   if ((error as { status?: number } | null)?.status !== 400) return false;
   const violations = extractFieldViolations(error);
-  return violations.length === 0 || violations.some((v) => v.field === 'mode');
+  if (violations.some((v) => STEER_PAIR_FIELDS.has(v.field))) return false;
+  if (violations.some((v) => v.field === 'mode')) return true;
+  if (violations.length > 0) return false;
+  const message = error instanceof Error ? error.message : '';
+  if (message.includes('ENHANCE_TEXT_MODE_STEER')) return true;
+  const lower = message.toLowerCase();
+  return lower.includes('enum') && lower.includes('mode');
 }
 
-/** Improve's call: `steer`, and ONCE `improve` when the server does not know `steer` yet. */
+/**
+ * Improve's call: `steer` for this tool/field pair, and ONCE `improve` when the server does not know
+ * `steer` yet. The retry drops the pair: a server that old does not know those fields either, and
+ * its strict gateway would refuse the unknown name before it read the mode.
+ */
 export async function steerText(req: Omit<EnhanceRequest, 'mode'>): Promise<string> {
   try {
     return await enhanceText({ ...req, mode: 'steer' });
   } catch (e) {
     if (!steerRefused(e)) throw e;
-    return enhanceText({ ...req, mode: 'improve' });
+    return enhanceText({ ...req, mode: 'improve', workflow: undefined, fieldKey: undefined });
   }
 }
 
@@ -287,6 +308,8 @@ export function PromptField({
         await steerText({
           text: before,
           field: 'other',
+          workflow: workflowKey,
+          fieldKey,
           context: improveContext({ serverIdeas, workflowTitle, hint }),
           maxRunes: maxLength,
         })
