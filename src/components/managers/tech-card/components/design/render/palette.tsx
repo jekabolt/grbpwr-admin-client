@@ -34,6 +34,7 @@ import { GROUP_GAP, GROUP_SEAM } from '../core';
 import { CornerLabel } from '../pattern/organs';
 import type { ClothSlot } from '../pattern/slot-fabrics';
 import { PictureTile, TILE_CORNER, TILE_QUIET } from '../picture-tile';
+import { useWordsSeeding } from '../use-words-seeding';
 import { WordsField } from '../words-field';
 import { omittedOf, useWordsSeed } from '../words-seed';
 import { PantonePicker } from '../../pantone-picker';
@@ -1066,19 +1067,25 @@ function renderWordsContext(state: ColourDraft): string {
  *     поле с самого начала, ровно как у флэта, где эта дверь снята тем же доводом (T24, D-20).
  *   · ПОДПИСЬ — линейка группы «in words», как у соседей «cloth and colour» и «cloth is»: у
  *     рендера своя грамматика заголовков, а одинаковым владелец просил само поле.
+ *   · ЗАСЕВ — ТОТ ЖЕ, ЧТО У ФЛЭТА (O-61 r2): `useWordsSeeding` с теми же входами, что зовёт секция
+ *     WORDS (карточка, полоса, «только чтение» экрана). Пока он стоял лишь во флэте, карточка без
+ *     сохранённых слов, открытая прямо здесь, показывала пустое поле до первого захода на FLAT.
  *
  * ⚠ ОБЁРТКА ОРГАНА — ОДИН `<div>`: соседом линейки группы должен быть блок, от которого меряется
  * зазор `GROUP_GAP` (r3 п.34), а орган — фрагмент (подпись для читалки, поле, строка «omitted»).
  */
 function InWords({
   state,
+  band,
   techCardId,
   disabled,
 }: {
   state: ColourDraft;
+  band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
 }): JSX.Element {
+  useWordsSeeding(techCardId, band, !!disabled);
   const words = state.recipe.words ?? '';
   /* Строка «+N omitted» — по засеву флэта: рендер показывает его слова, и правда о них та же. */
   const seed = useWordsSeed(techCardId);
@@ -1371,7 +1378,7 @@ export function Palette({
       {/* ── IN WORDS — the free text of the recipe: the lowest rank, and a legal statement on its
           own (mockup `r3WordsRow`). O-61: the same organ and, by default, the same words as WORDS
           on the flat — `InWords` above. */}
-      <InWords state={state} techCardId={techCardId} disabled={disabled} />
+      <InWords state={state} band={band} techCardId={techCardId} disabled={disabled} />
     </div>
   );
 }

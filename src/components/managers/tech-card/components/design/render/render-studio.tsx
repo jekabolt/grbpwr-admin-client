@@ -298,6 +298,11 @@ export function RenderStudio({
   }, [band, sent, wire, colourPlan.plan, colorwayArchived, colorwayLabel, target.nowhere]);
 
   const generate = () => {
+    /* O-61 (D-60): слова карточки, показанные в пустом IN WORDS, становятся СВОИМИ черновику до
+       запроса — как флэт отдаёт свой засев в форму перед `flush`. Тело ниже несёт их и без этого
+       (`draft.recipe` — слова на экране); вызов закрепляет их за подачей: правка WORDS флэта после
+       прогона их уже не подменит. Свои слова уже стоят — вызов ничего не делает. */
+    draft.materializeWords();
     run.start({
       kind: 'render',
       ask: '',
