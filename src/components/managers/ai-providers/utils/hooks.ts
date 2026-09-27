@@ -8,7 +8,7 @@ import {
 import { adminService } from 'api/api';
 import type { AiRouteCandidate, GetAiProvidersConfigResponse } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { fieldErrorSummary } from 'utils/field-errors';
+import { extractFieldViolations, fieldErrorSummary, violationReason } from 'utils/field-errors';
 
 // admin → AI providers. Every RPC behind these hooks is SuperOnly on the server; the page asks
 // only once the account is known to be super (see page.tsx), the server refuses everyone else.
@@ -59,6 +59,29 @@ export function isStaleConfigError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const { status } = error as Error & { status?: number };
   return (status === 400 || status === 409) && /\bstale\b/i.test(error.message);
+}
+
+// What a refused write says, normalised for the line under the control that made it: the stale
+// sentence for the optimistic lock; for a field-tagged refusal (google.rpc.BadRequest, description
+// "reason[; how to fix]") the human tail, with the field and the reason code kept so a view can pin
+// the line on the right control; otherwise the server's message, or the fallback.
+export type AiWriteFailure = { text: string; field: string | null; reason: string | null };
+
+export function aiWriteFailure(error: unknown, fallback: string): AiWriteFailure | null {
+  if (!error) return null;
+  if (isStaleConfigError(error)) return { text: STALE_CONFIG_MESSAGE, field: null, reason: null };
+  const [v] = extractFieldViolations(error);
+  if (v) {
+    const cut = v.description.indexOf(';');
+    const tail = cut >= 0 ? v.description.slice(cut + 1).trim() : '';
+    return {
+      text: tail || v.description,
+      field: v.field || null,
+      reason: violationReason(v.description) || null,
+    };
+  }
+  const message = error instanceof Error ? error.message.trim() : '';
+  return { text: message || fallback, field: null, reason: null };
 }
 
 // ---- Writes ----

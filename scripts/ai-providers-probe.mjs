@@ -12,6 +12,7 @@
 //   E  the edges: stale → "reload — the config changed" + a re-read; save key → inline probe, field
 //      emptied, secret nowhere on screen; no master key → callout + fields off; non-super → /me;
 //      clear a stored key → a one-line question first, then ONE PUT with an empty value
+//   FE1…FE9  the FIX-E items of the client review (06-BRIEF-FIX-E.md), one check group each
 //
 //   node scripts/ai-providers-probe.mjs                 all green expected
 //   node scripts/ai-providers-probe.mjs --mutate-<name> the named check must go red (list: --list)
@@ -165,6 +166,20 @@ const MUTATIONS = {
     from: 'const denied = resolved && !isSuper;',
     to: 'const denied = false;',
   },
+  'key-cleared-on-success-only': {
+    red: 'FE1',
+    what: 'the field lets go of the key only when the save succeeds',
+    edits: [
+      { from: 'const sent = trimmed;\n      setValue("");', to: 'const sent = trimmed;' },
+      { from: 'onSuccess: (resp) => {\n            setFailure(null);', to: 'onSuccess: (resp) => {\n            setValue("");\n            setFailure(null);' },
+    ],
+  },
+  'key-no-reset': {
+    red: 'FE1',
+    what: 'the settled key write is never reset (variables.value kept)',
+    from: 'onSettled: releaseSecret',
+    to: 'onSettled: () => {}',
+  },
   'clear-sends-old-value': {
     red: 'E5',
     what: 'clear sends the old key (its last four) instead of an empty value',
@@ -272,9 +287,12 @@ if (process.argv.includes('--dump')) {
 
 for (const k of chosen) {
   const m = MUTATIONS[k];
-  const n = bundle.split(m.from).length - 1;
-  if (n !== 1) dieNotRun(`MUTATION «${k}» NOT APPLIED: anchor found ${n} times instead of once`);
-  bundle = bundle.replace(m.from, m.to);
+  // A mutation is one edit (from → to) or several (`edits`), each anchored exactly once.
+  for (const e of m.edits ?? [{ from: m.from, to: m.to }]) {
+    const n = bundle.split(e.from).length - 1;
+    if (n !== 1) dieNotRun(`MUTATION «${k}» NOT APPLIED: anchor found ${n} times instead of once`);
+    bundle = bundle.replace(e.from, e.to);
+  }
   console.log(`  MUTATION: ${k} — ${m.what} (must turn ${m.red} red)`);
 }
 
@@ -342,6 +360,7 @@ function freshServer(opts = {}) {
     isSuper: opts.isSuper ?? true,
     forceStale: false,
     probe: { ok: true, code: '', message: '', balance: '24.50 USD' },
+    failKey: opts.failKey ?? false,
     calls: [],
     delayMs: opts.delayMs ?? 0,
   };
@@ -378,6 +397,8 @@ function answer(method, path, query, body) {
     });
   if (method === 'PUT' && (m = path.match(/^\/api\/admin\/ai\/providers\/([^/]+)\/key$/))) {
     const p = server.providers.find((x) => x.key === m[1]);
+    if (server.failKey && body.value !== '')
+      return { status: 400, body: { code: 3, message: 'the provider refused this key: it is not an api key', details: [] } };
     if (body.value === '') {
       // A clear: the slot empties, the env key (if any) answers again, and nothing is probed —
       // `probe` is unset, which the gateway writes as null.
@@ -477,6 +498,13 @@ if (process.argv.includes('--shots')) {
   };
   for (const w of [1280, 390]) {
     await shoot('providers', w, '/ai-providers', {}, openKeys);
+    await shoot('keyfail', w, '/ai-providers', { failKey: true }, async () => {
+      await page.waitForSelector('[data-provider="openai"]');
+      await openRow('openai');
+      await row('openai').getByLabel('OpenAI key', { exact: true }).fill('sk-shot-refused');
+      await row('openai').getByRole('button', { name: 'save key' }).first().click();
+      await page.waitForTimeout(600);
+    });
     await shoot('nomaster', w, '/ai-providers', { masterKey: false }, async () => {
       await page.waitForSelector('[data-provider="anthropic"]');
       await openRow('anthropic');
@@ -757,6 +785,40 @@ for (const env of ['', 'ab12']) {
   const want = env ? `key: from env ···${env}` : 'key: not set';
   ck('E5', after === want, `the line follows the returned config: "${want}"`, after);
 }
+// FE1 · the key never outlives its request — not in the field, not in the mutation cache.
+const secretsInCache = (secret) =>
+  page.evaluate((s) => JSON.stringify(window.__qc.getMutationCache().getAll().map((m) => m.state.variables ?? null)).includes(s), secret);
+{
+  const SECRET = 'sk-probe-refused-4411';
+  await mount({ failKey: true });
+  await page.waitForSelector('[data-provider="openai"]', { timeout: 8000 });
+  await openRow('openai');
+  const field = page.getByLabel('OpenAI key', { exact: true });
+  await field.fill(SECRET);
+  await row('openai').getByRole('button', { name: 'save key' }).first().click();
+  await page.waitForTimeout(900);
+  const w = writes('PUT', /^\/api\/admin\/ai\/providers\/openai\/key$/);
+  const left = await field.inputValue().catch(() => '<gone>');
+  ck('FE1', w.length === 1 && left === '', 'a REFUSED save still empties the field', `writes ${w.length}, field ${JSON.stringify(left)}`);
+  ck('FE1', !(await secretsInCache(SECRET)), 'no mutation in the cache holds the key after the refusal');
+  const alert = ((await row('openai').getByRole('alert').first().textContent().catch(() => '')) ?? '').trim();
+  ck('FE1', alert.includes('the provider refused this key'), 'the refusal stands under the field', alert);
+  // The field's id is its name (ui/components/input sets `id={name}`).
+  const focused = await page.evaluate(() => document.activeElement?.id);
+  const invalid = await field.getAttribute('aria-invalid');
+  ck('FE1', focused === 'ai-key-openai-api' && invalid === 'true', 'focus is back in the empty field, marked invalid', `focus=${focused} aria-invalid=${invalid}`);
+  ck('FE1', !(await page.content()).includes(SECRET), 'the key is nowhere in the page');
+
+  const OK = 'sk-probe-accepted-5522';
+  await mount();
+  await page.waitForSelector('[data-provider="openai"]', { timeout: 8000 });
+  await openRow('openai');
+  await page.getByLabel('OpenAI key', { exact: true }).fill(OK);
+  await row('openai').getByRole('button', { name: 'save key' }).first().click();
+  await page.waitForTimeout(900);
+  ck('FE1', !(await secretsInCache(OK)), 'no mutation in the cache holds the key after a success either');
+}
+
 // The reconciliation slot clears the same way, as its own kind.
 await mount({ patch: { openai: { adminKeySource: 'db', adminKeyLast4: 'ad01' } } });
 await page.waitForSelector('[data-provider="openai"]', { timeout: 8000 });

@@ -17,6 +17,8 @@ declare global {
 const qc = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: false, refetchOnWindowFocus: false } },
 });
+// The probe reads the mutation cache: a provider key must not survive its request there.
+(window as unknown as { __qc: QueryClient }).__qc = qc;
 
 function Spy() {
   const loc = useLocation();

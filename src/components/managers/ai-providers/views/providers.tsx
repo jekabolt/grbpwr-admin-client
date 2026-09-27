@@ -13,7 +13,12 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { ToggleSwitch } from 'ui/components/toggle-switch';
 import { adminKeyLine, faultLabel, keyLine, probeLine, type KeyLine } from '../utils/format';
-import { useSetAiProviderKey, useUpdateAiProvider, type AiKeyKind } from '../utils/hooks';
+import {
+  aiWriteFailure,
+  useSetAiProviderKey,
+  useUpdateAiProvider,
+  type AiKeyKind,
+} from '../utils/hooks';
 
 // PROVIDERS — which services may spend money. One line per provider of the registry, in the
 // server's order: name (+ the server's one-line note) · fault badge · "paused" · the switch.
@@ -154,8 +159,14 @@ function ProviderRow({
 }
 
 // ONE field and ONE button per slot. Saving is the check: the server stores the key, probes it with
-// the provider's free endpoint and answers with the result, which is shown under the key line. The
-// value leaves the field the moment it is stored and is never shown back — only its last four.
+// the provider's free endpoint and answers with the result, which is shown under the key line.
+//
+// THE KEY NEVER OUTLIVES ITS REQUEST. It leaves the field's state the moment the write is SENT —
+// not when it succeeds, or a refused key would sit in the input (and in React state) until the tab
+// closes — and when the write settles, either way, the mutation is reset so its `variables.value`
+// is released too (`gcTime: 0` alone does not drop a mutation its observer still holds). A refusal
+// leaves its sentence under the field and the focus in the (now empty) field, ready for the next
+// paste.
 //
 // A STORED key (source db) can also be cleared: "clear" at the end of the key line turns the line
 // into a one-line question in its place — yes / no, no modal — and yes sends the same write with an
@@ -179,9 +190,18 @@ function KeySlot({
   const save = useSetAiProviderKey();
   const [value, setValue] = useState('');
   const [probe, setProbe] = useState<AiProbeResult | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const clearDoor = useRef<HTMLButtonElement>(null);
   const field = useRef<HTMLInputElement>(null);
+  // The field is disabled while its write is in flight, so focus can only land once the settled
+  // render has enabled it again: asked for here, taken in the effect below.
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (!refocus.current || save.isPending) return;
+    refocus.current = false;
+    field.current?.focus();
+  });
   // Focus goes back to "clear" when the question is dismissed — the question's own buttons are
   // unmounted under it, and the browser would otherwise drop focus to <body>.
   const backToDoor = useRef(false);
@@ -195,17 +215,25 @@ function KeySlot({
   const trimmed = value.trim();
   const result = probe ? probeLine(probe) : null;
 
+  const releaseSecret = () => save.reset();
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!trimmed || locked || save.isPending) return;
+    const sent = trimmed;
+    setValue('');
     setProbe(null);
     save.mutate(
-      { providerKey: key, kind, value: trimmed },
+      { providerKey: key, kind, value: sent },
       {
         onSuccess: (resp) => {
-          setValue('');
+          setFailure(null);
           setProbe(resp.probe ?? null);
         },
+        onError: (error) => {
+          setFailure(aiWriteFailure(error, "couldn't save the key")?.text ?? null);
+          refocus.current = true;
+        },
+        onSettled: releaseSecret,
       },
     );
   };
@@ -223,9 +251,14 @@ function KeySlot({
         onSuccess: () => {
           setConfirming(false);
           setProbe(null);
-          field.current?.focus();
+          setFailure(null);
+          refocus.current = true;
         },
-        onError: () => setConfirming(false),
+        onError: (error) => {
+          setConfirming(false);
+          setFailure(aiWriteFailure(error, "couldn't clear the key")?.text ?? null);
+        },
+        onSettled: () => save.reset(),
       },
     );
   };
@@ -304,6 +337,7 @@ function KeySlot({
           data-1p-ignore=''
           data-lpignore='true'
           placeholder={kind === 'admin' ? 'paste the admin key' : 'paste a new key'}
+          aria-invalid={failure ? true : undefined}
           disabled={locked || save.isPending}
           className='w-64 max-w-full'
         />
@@ -317,6 +351,11 @@ function KeySlot({
           save key
         </Button>
       </div>
+      {failure && (
+        <Text size='micro' variant='errorLabel' role='alert' data-write-error={`key-${kind}`}>
+          ! {failure}
+        </Text>
+      )}
       {result && (
         <Text
           size='micro'
