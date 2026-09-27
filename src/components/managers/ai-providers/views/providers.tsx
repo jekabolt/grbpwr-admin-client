@@ -127,9 +127,20 @@ function ProviderRow({
         </div>
         <div className='flex shrink-0 items-center gap-2'>
           {fault && <Pill tone='attention'>{fault}</Pill>}
+          {/* The breaker's three words: closed says nothing; open = paused (red: calls skip it);
+              half-open = testing (the attention colour: one trial call is let through, and the
+              breaker closes again if it succeeds). */}
           {p.breaker === 'open' && (
             <Pill tone='warn' title='failing calls tripped the breaker — new calls skip it for now'>
               paused
+            </Pill>
+          )}
+          {(p.breaker === 'half-open' || p.breaker === 'half_open') && (
+            <Pill
+              tone='attention'
+              title='the breaker lets one trial call through; it closes again if that call succeeds'
+            >
+              testing
             </Pill>
           )}
           <label className='flex cursor-pointer items-center gap-1.5'>

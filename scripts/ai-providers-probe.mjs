@@ -223,6 +223,12 @@ const MUTATIONS = {
     from: 'staleTime: 6e4,\n      enabled: enabled && Boolean(from) && Boolean(to)',
     to: 'staleTime: 6e4,\n      placeholderData: (prev) => prev,\n      enabled: enabled && Boolean(from) && Boolean(to)',
   },
+  'half-open-unpilled': {
+    red: 'FE5',
+    what: 'a half-open breaker draws no pill',
+    from: '(p.breaker === "half-open" || p.breaker === "half_open") && ',
+    to: 'false && ',
+  },
   'clear-sends-old-value': {
     red: 'E5',
     what: 'clear sends the old key (its last four) instead of an empty value',
@@ -572,7 +578,7 @@ if (process.argv.includes('--shots')) {
     await page.waitForTimeout(500);
   };
   for (const w of [1280, 390]) {
-    await shoot('providers', w, '/ai-providers', {}, openKeys);
+    await shoot('providers', w, '/ai-providers', { patch: { anthropic: { breaker: 'half-open' } } }, openKeys);
     await shoot('routes', w, '/ai-providers', {}, async () => {
       await page.waitForSelector('[data-purpose="chat.techcard_analysis"]');
       await page.getByRole('combobox', { name: 'Construction audit fallback', exact: true }).click();
@@ -658,6 +664,26 @@ await page.waitForSelector('[data-provider="openai"]', { timeout: 8000 });
   ck('A6', recon.includes('reconciliation key (optional): not set'), 'admin-key providers show the reconciliation slot');
   const foot = await toast();
   ck('A6', foot.includes('master key: present · timezone: Europe/Warsaw · prices: 2026-09-27'), 'footer line');
+}
+
+// FE5 · each breaker state has its word: closed → none, open → paused, half-open → testing.
+{
+  await mount({ patch: { anthropic: { breaker: 'half-open' } } });
+  await page.waitForSelector('[data-provider="anthropic"]', { timeout: 8000 });
+  const pills = async (key) =>
+    row(key).locator('span').filter({ hasText: /^(paused|testing)$/ }).allTextContents();
+  const half = await pills('anthropic');
+  const open = await pills('openrouter');
+  const closed = await pills('google');
+  ck('FE5', JSON.stringify(half) === '["testing"]', 'half-open → "testing"', JSON.stringify(half));
+  ck('FE5', JSON.stringify(open) === '["paused"]' && closed.length === 0, 'open → "paused"; closed → nothing', `${JSON.stringify(open)} ${JSON.stringify(closed)}`);
+  const colours = await page.evaluate(() => {
+    const find = (key, word) => Array.from(document.querySelectorAll(`[data-provider="${key}"] span`)).find((s) => s.textContent === word);
+    const t = find('anthropic', 'testing');
+    const f = find('openrouter', 'out of credits');
+    return [t && getComputedStyle(t).color, f && getComputedStyle(f).color];
+  });
+  ck('FE5', !!colours[0] && colours[0] === colours[1], '"testing" wears the attention colour', JSON.stringify(colours));
 }
 
 // ═══ B · THE SWITCH ════════════════════════════════════════════════════════════════════════════
