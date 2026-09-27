@@ -147,6 +147,8 @@ export function recallTargetKind(
      стол и рисует. Без этой строки жест уводил бы стол прошлого прогона во ФЛЭТ — то есть
      превращал бы размеченные картинки в безымянные референсы чужого промпта, молча. */
   if (kind === 'freeform' || kind === 'cutout') return 'playground';
+  // Phase 3: Extend Image (tile 9) and the mask retouch (tile 10) are the playground's own kinds.
+  if (kind === 'extend' || kind === 'inpaint') return 'playground';
   // ON MODEL's recolour is the PLAYGROUND workflow `change_color` now (C-01). Recall switches the
   // step only; `?wf=` is the playground screen's to set from the run.
   if (kind === 'recolor') return 'playground';

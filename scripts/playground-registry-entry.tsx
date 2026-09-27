@@ -230,3 +230,12 @@ export function resultsMarkup(band: GetDesignBandResponse, key: string | null): 
     if (!had) delete g.document;
   }
 }
+// C-13 · tile 9 Extend Image: the free refusals, the server's «adds nothing» predicate, the gate.
+export {
+  EXTEND_FORMAT_KEY,
+  extendRefusal,
+  extendTargetAddsNothing,
+} from 'components/managers/tech-card/components/design/playground/registry/tiles/extend-image';
+export { runKindOffered } from 'components/managers/tech-card/components/design/playground/registry/common';
+export { inPlaygroundRoom } from 'components/managers/tech-card/components/design/playground/registry';
+export { runRepresentation } from 'components/managers/tech-card/components/design/bench-kinds';

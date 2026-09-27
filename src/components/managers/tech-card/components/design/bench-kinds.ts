@@ -159,7 +159,11 @@ export function runRepresentation(
       return 'pattern';
     case 'freeform':
     case 'cutout':
-      // TWO KINDS, ONE ROOM — see the argument on `REPRESENTATIONS`.
+    case 'extend':
+    case 'inpaint':
+      // TWO KINDS, ONE ROOM — see the argument on `REPRESENTATIONS`. Phase 3 (C-13/C-14): the
+      // outpaint and mask-fill routes are playground kinds too (one output, colourway 0, section 1
+      // of the window), so they join the same room.
       return 'playground';
     default:
       return null;

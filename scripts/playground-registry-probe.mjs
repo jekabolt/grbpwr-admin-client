@@ -224,6 +224,23 @@
 //   node scripts/playground-registry-probe.mjs --mutate-recent-inpaint ретушь по маске не читает
 //                                                                   ask → краснеет Z
 //
+// C-13 (плитка 9 Extend Image, фаза 3):
+//   AA · тело kind=extend целиком (одна картинка в extra_input_media_ids, params.extend.aspect_ratio,
+//        ask '', без image/freeform); ворота СТРОГО по run_kinds: нет списка → «not on this server
+//        yet» и приглушена в разметке сетки, список без extend → «not wired», с extend → живая;
+//        отказы до денег в порядке двери (картинка, формат, 64 px, «уже 2:3» с допуском 0.5 %
+//        сервера); форма 11.png (Image to expand REQUIRED, New final format открыт, 9 форматов без
+//        auto, с 9:21, без моделей тоже); workflowOfRun/runRepresentation/recallTargetKind для
+//        extend и inpaint; рекол тело → черновик → то же тело.
+//   node scripts/playground-registry-probe.mjs --mutate-extend-tolerance допуск «тот же формат» 5 %
+//                                                                   → краснеет AA
+//   node scripts/playground-registry-probe.mjs --mutate-extend-gate  нет run_kinds читается как
+//                                                                   «всё можно» → краснеет AA
+//   node scripts/playground-registry-probe.mjs --mutate-extend-run   extend не отдаётся плитке 9
+//                                                                   → краснеет AA
+//   node scripts/playground-registry-probe.mjs --mutate-extend-wire  формат не уезжает в
+//                                                                   params.extend → краснеет AA
+//
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
 
@@ -298,6 +315,10 @@ const MUT = {
   ideasMediaCap: process.argv.includes('--mutate-ideas-media-cap'),
   recentScene: process.argv.includes('--mutate-recent-scene'),
   recentInpaint: process.argv.includes('--mutate-recent-inpaint'),
+  extendTolerance: process.argv.includes('--mutate-extend-tolerance'),
+  extendGate: process.argv.includes('--mutate-extend-gate'),
+  extendRun: process.argv.includes('--mutate-extend-run'),
+  extendWire: process.argv.includes('--mutate-extend-wire'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -801,6 +822,38 @@ if (MUT.recentScene)
 if (MUT.recentInpaint)
   RECENT_SWAPS.push(["isMaskRetouch(run) ? run.ask ?? '' :", "isMaskRetouch(run) ? '' :"]);
 fileSwaps('c16-card-recent', /playground\/card-recent\.ts$/, RECENT_SWAPS);
+
+// ─── C-13: мутации плитки 9.
+const EXTEND_SWAPS = [];
+if (MUT.extendTolerance)
+  EXTEND_SWAPS.push([
+    'export const EXTEND_SAME_RATIO_TOLERANCE = 0.005;',
+    'export const EXTEND_SAME_RATIO_TOLERANCE = 0.05;',
+  ]);
+if (MUT.extendWire)
+  EXTEND_SWAPS.push([
+    'extend: { aspectRatio: formatOf(band, draft, FORMAT.field) },',
+    "extend: { aspectRatio: '' },",
+  ]);
+fileSwaps('c13-extend', /tiles\/extend-image\.tsx$/, EXTEND_SWAPS);
+if (MUT.extendGate)
+  plugins.push(
+    swap(
+      'run-kinds-absent-means-all',
+      /registry\/common\.ts$/,
+      'if (kinds === undefined) return notYet();',
+      'if (kinds === undefined) return { available: true };',
+    ),
+  );
+if (MUT.extendRun)
+  plugins.push(
+    swap(
+      'extend-no-tile',
+      /registry\/run-workflow\.ts$/,
+      "if (kind === 'extend') return 'extend_image';",
+      '',
+    ),
+  );
 
 const outfile = resolve(tmpdir(), `playground-registry-probe-${process.pid}.mjs`);
 try {
@@ -3951,6 +4004,218 @@ head('Z', 'C-16: cardRecentTexts по полосе, recentMenu');
     same(menu.card, ['walking toward the camera']) && same(menu.browser, ['HANDS in pockets']),
     'recentMenu: повтор остаётся в браузерной группе',
     show(menu),
+  );
+}
+
+// ─── AA · C-13: плитка 9 Extend Image ───────────────────────────────────────────────────────────
+head('AA', 'C-13 Extend Image: тело extend, ворота по run_kinds, отказы, форма 11.png, рекол');
+{
+  const sized = (id, width, height) => ({
+    id,
+    thumbnail: { mediaUrl: `https://x/${id}.jpg` },
+    media: { fullSize: { mediaUrl: `https://x/${id}-full.png`, width, height } },
+  });
+  const ext = run('extend_image');
+  const on = band({
+    runKinds: ['freeform', 'cutout', 'extend'],
+    playgroundWorkflows: ['extend_image'],
+  });
+  const octx = { band: on };
+  ck(!!ext, 'у плитки 9 есть run (фаза 3)');
+
+  // wire — whole body, written by hand.
+  const d = draft({ images: { image: [sized(21, 1000, 1500)] } });
+  ck(
+    same(ext.wire(d, octx), {
+      kind: 'extend',
+      ask: '',
+      params: { ...EMPTY_PARAMS, extraInputMediaIds: [21], extend: { aspectRatio: '2:3' } },
+    }),
+    'тело по умолчанию: kind extend, ask пуст, одна картинка, extend.aspect_ratio 2:3, без image',
+    show(ext.wire(d, octx)),
+  );
+  const d921 = draft({
+    images: { image: [sized(21, 1000, 1500), sized(22, 10, 10)] },
+    choices: { [M.EXTEND_FORMAT_KEY]: '9:21' },
+  });
+  ck(
+    same(ext.wire(d921, octx), {
+      kind: 'extend',
+      ask: '',
+      params: { ...EMPTY_PARAMS, extraInputMediaIds: [21], extend: { aspectRatio: '9:21' } },
+    }),
+    '9:21 уезжает; из двух картинок едет одна (первая)',
+    show(ext.wire(d921, octx)),
+  );
+  ck(
+    ext.wire(d, {
+      band: band({ runKinds: ['extend'], imageModels: [{ slug: 'm', aspectRatios: ['2:3'] }] }),
+    }).params.image === undefined,
+    'image не уезжает никогда, и на сервере с моделями (image_options_forbidden)',
+  );
+
+  // gate — strictly run_kinds.
+  const g = (b) => def('extend_image').gate(b);
+  ck(
+    same(g(band({ playgroundWorkflows: ['extend_image'] })), {
+      available: false,
+      reason: 'not on this server yet',
+    }),
+    'run_kinds нет (старый сервер) → «not on this server yet», даже если плитка в playground_workflows',
+    show(g(band({ playgroundWorkflows: ['extend_image'] }))),
+  );
+  ck(
+    same(g(band({ runKinds: ['freeform', 'cutout'] })), {
+      available: false,
+      reason: 'not wired on this server',
+    }),
+    'run_kinds без extend → «not wired on this server»',
+  );
+  ck(
+    same(g(band({ runKinds: [] })), { available: false, reason: 'not wired on this server' }),
+    'run_kinds пуст → погашена',
+  );
+  ck(same(g(on), { available: true }), 'run_kinds с extend → живая');
+  const oldGrid = M.gridMarkup(band({ playgroundWorkflows: ['create_edit'] }));
+  ck(
+    !liveKeys(oldGrid).has('extend_image') &&
+      /data-workflow-tile="extend_image"[^>]*>[\s\S]*?not on this server yet/.test(oldGrid),
+    'сетка старого сервера: плитка 9 приглушена со словами «not on this server yet»',
+  );
+  ck(
+    liveKeys(M.gridMarkup({ ...on, playgroundWorkflows: ['extend_image'] })).has('extend_image'),
+    'сетка сервера с extend: плитка 9 живая (кнопка)',
+  );
+  ck(
+    M.openWorkflow('extend_image', band()) === null,
+    'старый сервер: ?wf=extend_image не открывает форму',
+  );
+
+  // validate — the door's order.
+  const v = (dr) => ext.validate(dr, octx)?.reason ?? null;
+  ck(v(draft()) === 'add the picture to extend', 'нет картинки → «add the picture to extend»');
+  ck(
+    v(
+      draft({
+        images: { image: [sized(21, 1000, 1500)] },
+        choices: { [M.EXTEND_FORMAT_KEY]: 'auto' },
+      }),
+    ) === 'pick the new final format',
+    'auto (не из девяти) → «pick the new final format»',
+  );
+  ck(
+    v(
+      draft({ images: { image: [sized(21, 50, 80)] }, choices: { [M.EXTEND_FORMAT_KEY]: '16:9' } }),
+    ) === 'this picture is 50×80 px; an extend needs at least 64 px on each side',
+    'картинка меньше 64 px → отказ размера (раньше формата — порядок двери)',
+  );
+  ck(
+    v(draft({ images: { image: [sized(21, 1000, 1500)] } })) ===
+      'this picture is already 2:3 — pick another format',
+    '1000×1500 → 2:3: «this picture is already 2:3 — pick another format»',
+  );
+  ck(
+    v(draft({ images: { image: [sized(21, 1003, 1500)] } })) ===
+      'this picture is already 2:3 — pick another format',
+    '1003×1500 (0.45 % от 2:3) → тоже «already»',
+  );
+  ck(
+    v(draft({ images: { image: [sized(21, 1000, 1450)] } })) === null,
+    '1000×1450 (3.4 % от 2:3) → готово: сервер добавит пиксели (допуск сервера 0.5 %, не 5 %)',
+    String(v(draft({ images: { image: [sized(21, 1000, 1450)] } }))),
+  );
+  ck(
+    v(draft({ images: { image: [media(21)] } })) === null,
+    'размер не указан (0×0) → решает дверь, экран не отказывает',
+  );
+  ck(
+    M.extendTargetAddsNothing(1000, 1000, '1:1') === true &&
+      M.extendTargetAddsNothing(1000, 1000, '4:3') === false &&
+      M.extendTargetAddsNothing(0, 0, '4:3') === null &&
+      M.extendTargetAddsNothing(1000, 1000, '4:5') === null,
+    'extendTargetAddsNothing: тот же формат / растёт / нет размера / не из девяти',
+  );
+
+  // form — 11.png.
+  const html = M.panelMarkup(band({ runKinds: ['extend'] }), 'extend_image');
+  const ratios = [...html.matchAll(/>(auto|\d+:\d+)<\/span>/g)].map((m) => m[1]);
+  ck(
+    html.includes('Image to expand') && /REQUIRED|required/i.test(html),
+    'форма: «Image to expand» REQUIRED',
+  );
+  ck(html.includes('New final format'), 'форма: «New final format» (без моделей на сервере тоже)');
+  const grid = html.slice(html.indexOf('data-format-grid'));
+  const cells = [...grid.matchAll(/>(auto|\d+:\d+)<\/span>/g)].map((m) => m[1]);
+  ck(
+    same(cells, ['9:16', '1:1', '3:4', '2:3', '16:9', '4:3', '3:2', '21:9', '9:21']),
+    'сетка: ровно девять форматов владельца по порядку 11.png, без auto, с 9:21',
+    show(cells),
+  );
+  ck(
+    ratios.includes('2:3') && ratios.indexOf('2:3') < ratios.indexOf('9:16'),
+    'шапка New final format показывает 2:3',
+    show(ratios),
+  );
+  ck((html.match(/data-format-grid/g) ?? []).length === 1, 'New final format открыт по умолчанию');
+  ck(!html.includes('<textarea'), 'нет поля промпта');
+  ck(!html.includes('AI model'), 'нет складки AI model');
+
+  // run → tile, representation, recall target.
+  ck(
+    M.workflowOfRun({ kind: 'extend', params: {} }) === 'extend_image',
+    'workflowOfRun(extend) → extend_image',
+  );
+  ck(
+    M.workflowOfRun({ kind: 'extend' }) === 'extend_image',
+    'заглушка extend без params → extend_image',
+  );
+  ck(
+    M.workflowOfRun({ kind: 'inpaint', params: {} }) === 'retouch_zone',
+    'workflowOfRun(inpaint) → retouch_zone',
+  );
+  ck(
+    M.runRepresentation({ kind: 'extend' }) === 'playground' &&
+      M.runRepresentation({ kind: 'inpaint' }) === 'playground' &&
+      M.inPlaygroundRoom({ kind: 'extend' }),
+    'runRepresentation(extend|inpaint) → playground (комната)',
+  );
+  ck(
+    M.recallTargetKind({ kind: 'extend' }, 'input') === 'playground' &&
+      M.recallTargetKind({ kind: 'inpaint' }, 'input') === 'playground',
+    'recallTargetKind(extend|inpaint) → playground',
+  );
+  ck(
+    M.runWorkflowWord({ kind: 'extend', params: {} }) === 'extend image',
+    'слово под результатом: «extend image»',
+  );
+  const r = ext.results;
+  ck(
+    r.match({ kind: 'extend', params: {} }) && !r.match({ kind: 'cutout', params: {} }),
+    'итоги плитки 9 — только прогоны extend',
+  );
+
+  // recall: body → draft → the same body.
+  const body = ext.wire(d921, octx);
+  const pic = sized(21, 1000, 1500);
+  const back = ext.recall({ kind: 'extend', params: body.params }, new Map([[21, pic]]), octx);
+  ck(
+    same(ext.wire(back.draft, octx), body) && back.lost === 0,
+    'рекол: тело → черновик → то же тело',
+  );
+  const gone = ext.recall({ kind: 'extend', params: body.params }, new Map(), octx);
+  ck(
+    gone.lost === 1 && (gone.draft.images.image ?? []).length === 0,
+    'рекол без картинки в снимке: lost 1',
+  );
+  const odd = ext.recall(
+    { kind: 'extend', params: { ...body.params, extend: { aspectRatio: '5:4' } } },
+    new Map([[21, pic]]),
+    octx,
+  );
+  ck(
+    odd.draft.choices[M.EXTEND_FORMAT_KEY] === '2:3' && odd.said.length === 1,
+    'рекол с форматом не из девяти: 2:3 и слова об этом',
+    show(odd),
   );
 }
 

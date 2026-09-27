@@ -78,6 +78,19 @@ export function workflowOffered(band: GetDesignBandResponse, key: WorkflowKey): 
 }
 
 /**
+ * ⚠ A PHASE-3 ROUTE IS READ OFF `run_kinds` (band 32) AND NOTHING ELSE — the kinds the door accepts
+ * on this binary right now: wired, keyed, with a bounded reserve (the door's own ladder). Membership,
+ * never order. `undefined` = a binary older than phase 3: «not on this server yet», the rollback
+ * behaviour. A list without the kind = this server has not wired it (or switched it off).
+ */
+export function runKindOffered(band: GetDesignBandResponse, kind: string): Availability {
+  const kinds = band.runKinds;
+  if (kinds === undefined) return notYet();
+  if (kinds.some((raw) => (raw ?? '').trim() === kind)) return { available: true };
+  return { available: false, reason: 'not wired on this server' };
+}
+
+/**
  * A PHASE-1 TILE ON EITHER SERVER. The new list decides whenever the server sends it — exactly those
  * tiles are live, the phase-1 three included — and a server that does not send it keeps today's
  * answer (`legacy`, read off `freeform_presets`), so the beta that predates the list keeps working.
@@ -408,6 +421,10 @@ export function engineSection(opts: { key?: string; backgroundKey?: string } = {
  * THE FORMAT SECTION (tiles 1, 2, 3, 7, 11) — folded, the ratio on its header, bound to an engine
  * field (`boundTo`, default `ENGINE_KEY`: a tile with no picker reads the default model through it).
  * Drawn only where the server offers engines: without one the ratio has nowhere to travel.
+ *
+ * `unbound: true` (Extend Image's «New final format», C-13): a grid of the ROUTE's own ratios, not
+ * an image engine's — no `boundTo` (nothing dimmed, nothing snapped: `formatOf` reads the draft or
+ * `initial`), and no `when` (the ratio travels in the route's own block, engines or not).
  */
 export function formatSection(opts: {
   initial: FormatRatio;
@@ -415,13 +432,15 @@ export function formatSection(opts: {
   boundTo?: string;
   title?: string;
   ratios?: readonly FormatRatio[];
+  unbound?: boolean;
+  defaultOpen?: boolean;
 }): { section: SectionDef; field: FormatFieldDef } {
   const field: FormatFieldDef = {
     type: 'format',
     key: opts.key ?? FORMAT_KEY,
     ratios: opts.ratios ?? IMAGE_FORMAT_RATIOS,
     initial: opts.initial,
-    boundTo: opts.boundTo ?? ENGINE_KEY,
+    ...(opts.unbound ? {} : { boundTo: opts.boundTo ?? ENGINE_KEY }),
   };
   return {
     field,
@@ -430,8 +449,8 @@ export function formatSection(opts: {
       title: opts.title ?? 'Format',
       glyph: 'format',
       collapsible: true,
-      defaultOpen: false,
-      when: enginesOffered,
+      defaultOpen: opts.defaultOpen ?? false,
+      ...(opts.unbound ? {} : { when: enginesOffered }),
       value: (draft, ctx) => formatOf(ctx.band, draft, field),
       fields: [field],
     },

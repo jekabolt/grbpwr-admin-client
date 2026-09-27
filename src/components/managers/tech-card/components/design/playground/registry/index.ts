@@ -1,12 +1,13 @@
 import type { common_DesignRun } from 'api/proto-http/admin';
 
 import { runRepresentation, type Representation } from '../../bench-kinds';
-import { RETIRED_PRESET_WORD, notYet } from './common';
+import { RETIRED_PRESET_WORD } from './common';
 import { freeformPresetOf, workflowOfRun, type RoomKey } from './run-workflow';
 import { ADD_LOGO } from './tiles/add-logo';
 import { CHANGE_COLOR } from './tiles/change-color';
 import { CREATE_EDIT } from './tiles/create-edit';
 import { DESIGN_VARIATIONS } from './tiles/design-variations';
+import { EXTEND_IMAGE } from './tiles/extend-image';
 import { FABRIC_TO_IMAGE } from './tiles/fabric-to-image';
 import { GHOST_MANNEQUIN } from './tiles/ghost-mannequin';
 import { IMAGE_TO_3D } from './tiles/image-to-3d';
@@ -23,8 +24,8 @@ import type { WorkflowDef } from './types';
  * live where its gate passes — on a server that lists it in `playground_workflows` (D8; Image to 3D
  * also needs `threed_options`), and on a server older than that list only the three today's routes
  * serve (Change a Color → `recolor`, Remove Background → `cutout`, Create or edit →
- * `freeform/free`). Extend has no `run` yet (its own route, phase 3): it is drawn dimmed with its
- * reason and cannot be opened. Tile 6's description was cut off in the owner's message; the ending
+ * `freeform/free`). Extend Image (phase 3, C-13) runs on its own route and is live only where
+ * `run_kinds` (band 32) lists `extend`; elsewhere it is drawn dimmed with its reason. Tile 6's description was cut off in the owner's message; the ending
  * is the adopted default (Q12).
  */
 export const WORKFLOWS: readonly WorkflowDef[] = [
@@ -82,7 +83,7 @@ export const WORKFLOWS: readonly WorkflowDef[] = [
     title: 'Extend Image',
     blurb:
       'Extend a fashion image into a new ratio, and the scene continues instead of being cropped.',
-    gate: notYet,
+    ...EXTEND_IMAGE,
   },
   {
     key: 'retouch_zone',
@@ -161,6 +162,7 @@ const ROOM_WORD: Readonly<Record<RoomKey, string>> = {
   add_logo: 'add a logo',
   design_variations: 'design variation',
   remove_background: 'remove background',
+  extend_image: 'extend image',
   retouch_zone: 'retouch a zone',
   create_edit: 'create or edit',
   image_to_3d: 'image to 3d',

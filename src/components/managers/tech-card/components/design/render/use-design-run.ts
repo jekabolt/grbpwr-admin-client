@@ -47,7 +47,18 @@ export type StartRunInput = {
    * and not a string: `cutout` is a run kind of its own, not a preset of `freeform`, and a screen
    * that could send either spelling would be a screen whose refusals depend on a typo.
    */
-  kind: 'flat' | 'render' | 'threed' | 'recolor' | 'pattern' | 'freeform' | 'cutout';
+  kind:
+    | 'flat'
+    | 'render'
+    | 'threed'
+    | 'recolor'
+    | 'pattern'
+    | 'freeform'
+    | 'cutout'
+    /* PHASE 3 (C-13/C-14): tile 9's outpaint and tile 10's mask fill — two more fal routes, and
+       two more kinds of their own for the same reason `cutout` is one. */
+    | 'extend'
+    | 'inpaint';
   /** The delta phrase the human typed; the caption of the history row. May be empty. */
   ask: string;
   params: common_DesignRunParams;
