@@ -6,6 +6,13 @@ import { ViewSwitch } from 'ui/components/view-switch';
 import { FieldRow } from '../../render/field-row';
 
 /**
+ * The row, with its label no narrower than the band's 92px column but free to be WIDER: the control
+ * stands at the right edge (`ml-auto`), so a long label («Realistic materials», 14.png) takes the
+ * room it needs on one line instead of breaking in two (C-02 handoff f, fixed in C-10).
+ */
+const ROW = 'py-2 [&>span:first-child]:w-auto [&>span:first-child]:min-w-[92px]';
+
+/**
  * ═══ A LABELLED CHOICE ON ONE RULED LINE (C-02) ══════════════════════════════════════════════════
  *
  * Label on the left, the control pushed to the right edge: `Logo size [Medium ▾]`,
@@ -49,7 +56,7 @@ export function OptionRow<T extends string>({
   anchor,
 }: OptionRowProps<T>): JSX.Element {
   return (
-    <FieldRow label={label} className='py-2' data-option-row={anchor ?? label}>
+    <FieldRow label={label} className={ROW} data-option-row={anchor ?? label}>
       <div className='ml-auto flex min-w-0 items-center'>
         {control === 'segmented' ? (
           <ViewSwitch<T>

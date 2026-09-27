@@ -8,7 +8,19 @@ import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cardOutputRows } from 'components/managers/tech-card/components/design/bench-kinds';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
-import { legacyStep } from 'components/managers/tech-card/components/design/core/chain';
+import { ChainRail } from 'components/managers/tech-card/components/design/chain-rail';
+import {
+  type ChainCtx,
+  STEPS,
+  THREED_STEP,
+  addressedStep,
+  defaultStep,
+  doneCount,
+  legacyStep,
+  nearestBlock,
+  railSteps,
+  stepOfKind,
+} from 'components/managers/tech-card/components/design/core/chain';
 import {
   WorkflowGrid,
   workflowOpenable,
@@ -51,7 +63,9 @@ import {
 import {
   openWorkflow,
   playgroundHistoryMatch,
+  playgroundHistoryRep,
 } from 'components/managers/tech-card/components/design/playground/studio';
+import { plateColorway } from 'components/managers/tech-card/components/design/playground/registry/tiles/image-to-3d';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { TooltipProvider } from 'ui/components/tooltip';
 // C-09 · tile 1 (Virtual Try-On): the two pickers' pools and the owner's option lists.
@@ -90,12 +104,27 @@ export {
   legacyStep,
   openWorkflow,
   playgroundHistoryMatch,
+  // C-10: the rail without STEP 5, and tile 12's colourway binding.
+  STEPS,
+  THREED_STEP,
+  addressedStep,
+  defaultStep,
+  doneCount,
+  nearestBlock,
+  railSteps,
+  stepOfKind,
+  playgroundHistoryRep,
+  plateColorway,
   workflowByKey,
   workflowOfRun,
   workflowOpenable,
 };
 
 export { ANGLE_OPTIONS, FRAMING_OPTIONS, modelPhotosOf, productColorwaysOf, productRendersOf };
+/** THE CHAIN rail as the person sees it (C-10): its cells and its «N of M steps» counter. */
+export function railMarkup(ctx: ChainCtx): string {
+  return renderToStaticMarkup(<ChainRail ctx={ctx} onStepChange={() => {}} />);
+}
 
 /** The grid as the person sees it, drawn by React into a string. */
 export function gridMarkup(band: GetDesignBandResponse): string {

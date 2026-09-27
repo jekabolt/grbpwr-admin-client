@@ -19,7 +19,9 @@ function Harness() {
   const goStep = useStepAddress();
   const [params, setParams] = useSearchParams();
   const step = params.get('step');
-  const legacy = legacyStep(step);
+  // C-10: `?server=old` stands for a band without `playground_workflows` — STEP 5 is a live step
+  // there; any other address is a server that lists them (the composer's `threedStepRetired`).
+  const legacy = legacyStep(step, params.get('server') !== 'old');
   useLegacyStepRewrite(legacy);
   return (
     <div>
@@ -45,6 +47,10 @@ function Harness() {
       </button>
       <button id='rail-playground' onClick={() => goStep('playground')}>
         playground
+      </button>
+      {/* C-10: a door to 3D on a server where STEP 5 is the tile — the composer's `goKind('threed')`. */}
+      <button id='door-3d' onClick={() => goStep('playground', 'image_to_3d')}>
+        3d door
       </button>
       {/* A top-level card tab, written as `navTo` writes it: replace, other params kept. */}
       <button

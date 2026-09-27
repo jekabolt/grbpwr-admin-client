@@ -7,4 +7,9 @@
  */
 export { useLegacyStepRewrite, useStepAddress } from './address';
 export { inPlaygroundRoom } from './registry';
-export { PlaygroundStudio, playgroundHistoryMatch, playgroundHistoryScope } from './studio';
+export {
+  PlaygroundStudio,
+  playgroundHistoryMatch,
+  playgroundHistoryRep,
+  playgroundHistoryScope,
+} from './studio';

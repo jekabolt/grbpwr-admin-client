@@ -9,6 +9,7 @@ import { CREATE_EDIT } from './tiles/create-edit';
 import { DESIGN_VARIATIONS } from './tiles/design-variations';
 import { FABRIC_TO_IMAGE } from './tiles/fabric-to-image';
 import { GHOST_MANNEQUIN } from './tiles/ghost-mannequin';
+import { IMAGE_TO_3D } from './tiles/image-to-3d';
 import { REMOVE_BACKGROUND } from './tiles/remove-background';
 import { RETOUCH_ZONE } from './tiles/retouch-zone';
 import { SWAP_FABRICS } from './tiles/swap-fabrics';
@@ -98,7 +99,7 @@ export const WORKFLOWS: readonly WorkflowDef[] = [
     key: 'image_to_3d',
     title: 'Image to 3D',
     blurb: 'Create a 3D model from your fashion design.',
-    gate: notYet,
+    ...IMAGE_TO_3D,
   },
 ];
 

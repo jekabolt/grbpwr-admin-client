@@ -19,12 +19,13 @@ import type { DesignKind } from './bench-kinds';
 import { ChainRail, useChainCtx } from './chain-rail';
 import {
   PLAYGROUND_WF_PARAM,
+  addressedStep,
   defaultStep,
-  isStepId,
   kindOfStep,
   legacyStep,
   stepOfField,
   stepOfKind,
+  threedStepRetired,
   type StepId,
 } from './core/chain';
 import { RenderStudio, ThreedStudio } from './render';
@@ -36,6 +37,7 @@ import {
   PlaygroundStudio,
   inPlaygroundRoom,
   playgroundHistoryMatch,
+  playgroundHistoryRep,
   playgroundHistoryScope,
   useLegacyStepRewrite,
   useStepAddress,
@@ -278,13 +280,16 @@ export function StudioTab({
   }
   /* A step that no longer exists (`?step=aside`) is read as its new home in this very render and
      rewritten once below, so neither the default-step latch nor a blank frame ever sees it. An
-     unknown value falls through to the latch, as before. */
-  const legacy = legacyStep(urlStep);
-  const decided: StepId | null = isStepId(urlStep)
-    ? urlStep
-    : legacy
-      ? legacy.step
-      : opened.current.step;
+     unknown value falls through to the latch, as before.
+
+     ⚠ `?step=threed` IS BOTH A STEP AND A LEGACY ADDRESS (C-10), AND THE SERVER DECIDES WHICH. STEP 5
+     left the rail for the playground tile `image_to_3d` — on a server that lists its playground
+     workflows. On an older one it is still the only way to a 3D model and stays a step; while the
+     band has not answered it is neither (the screen says «loading…»). So the legacy answer is asked
+     FIRST (`addressedStep`): `threed` is a valid `StepId` and would otherwise win. */
+  const threedRetired = threedStepRetired(chain);
+  const legacy = legacyStep(urlStep, threedRetired);
+  const decided: StepId | null = addressedStep(urlStep, threedRetired) ?? opened.current.step;
   const ctx = { ...chain, now: decided };
   /* The rail's write and the legacy rewrite live with the playground's address rules
      (`playground/address.ts`): every one of them replaces, so the card's steps stay one history
@@ -298,7 +303,13 @@ export function StudioTab({
      generative screen — `kind` is undefined there, and that is a value, not a gap. Two states here
      would be two places that can disagree about which screen is on. */
   const kind: DesignKind | undefined = decided ? kindOfStep(decided) : undefined;
-  const goKind = (next: DesignKind) => goStep(stepOfKind(next).id);
+  /* A DOOR TO 3D WHERE STEP 5 HAS LEFT THE RAIL (C-10) opens the playground ON the workflow that
+     replaced it, in one write — «with ± the same functionality» (the owner), so the door keeps its
+     destination. Where STEP 5 is still drawn, or the server has not answered, it is the step. */
+  const goKind = (next: DesignKind) =>
+    next === 'threed' && threedRetired
+      ? goStep('playground', 'image_to_3d')
+      : goStep(stepOfKind(next).id);
   /* РЕКОЛ ПЕРЕКЛЮЧАЕТ ЭКРАН СТУДИИ (V-12в, владелец: «если мы нажимаем на рекол из генерации
      допустим фабрик рендера оно должно переключатся на фабрик рендер а не пихать их во флеты»).
      Наружу отдаётся не копия состояния, а дверь к владельцу: `goKind` — это `goStep` через таблицу
@@ -575,10 +586,15 @@ export function StudioTab({
                         />
                       </>
                     )}
-                    {/* ═══ STEP 5 · 3D — the same colourway number as the render, and NO remount:
-                        the 3D draft (presentation, model, body, size) is not a colour and must
-                        survive a change of colourway; everything colour-dependent (`threedSides`,
-                        the gate, the run body) is a selector over the band and follows the prop. */}
+                    {/* ═══ STEP 5 · 3D — ONLY WHERE THE RAIL STILL DRAWS IT (C-10). On a server that
+                        lists its playground workflows the step is the tile «Image to 3D» and
+                        `?step=threed` is rewritten before it gets here (`legacyStep`); this screen
+                        is the old server's one way to a 3D model and stays exactly as it was.
+
+                        The same colourway number as the render, and NO remount: the 3D draft
+                        (presentation, model, body, size) is not a colour and must survive a change
+                        of colourway; everything colour-dependent (`threedSides`, the gate, the run
+                        body) is a selector over the band and follows the prop. */}
                     {step === 'threed' && (
                       <>
                         <ThreedStudio
@@ -606,9 +622,9 @@ export function StudioTab({
                       </>
                     )}
                     {/* ═══ ASIDE · PLAYGROUND — the one room beside the chain (C-01). ON MODEL
-                        lives here now as the workflow `change_color`; a legacy `?step=aside` is
-                        rewritten above. NO colourway prop: a workflow that binds one carries it
-                        itself.
+                        lives here now as the workflow `change_color`, STEP 5 as `image_to_3d`; a
+                        legacy `?step=aside` / `?step=threed` is rewritten above. NO colourway
+                        prop: a workflow that binds one carries it itself.
 
                         ⚠ ONE MOUNT POINT FOR THE PLAYGROUND SCREEN. The screen owns `?wf=`; the
                         history below shows the room's runs (playground + recolour); an open
@@ -621,7 +637,9 @@ export function StudioTab({
                           band={band}
                           techCardId={techCardId}
                           disabled={readOnly}
-                          defaultRep='playground'
+                          /* The open workflow names its rows: «3D runs» under Image to 3D, whose
+                             models are not pictures of the room (C-10); «playground runs» else. */
+                          defaultRep={playgroundHistoryRep(params.get(PLAYGROUND_WF_PARAM), band)}
                           match={
                             playgroundHistoryMatch(params.get(PLAYGROUND_WF_PARAM), band) ??
                             inPlaygroundRoom

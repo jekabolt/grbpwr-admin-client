@@ -47,6 +47,11 @@
 //   --mutate-operator-pending «starting…» без оператора                           → I
 //   --mutate-no-deadline     срока ответа нет                                     → J
 //   --mutate-late-lost       поздний успех теряется                               → J
+//   --mutate-own-results     плитка 12 снова под итогами комнаты (C-10)            → K
+//
+//   K · (C-10) Image to 3D: под открытой плиткой — блок 3D-моделей карточки, а не итоги комнаты;
+//       строки опций — только объявленные сервером; текстура off гасит материалы со словами;
+//       Detailed — в шапке и в цене GENERATE; история называет строки «3D»; |→ — итоги комнаты.
 //
 // Нет Chromium — КОД 2 и слово «НЕ ВЫПОЛНЕНА»: пропуск — это не зелень. Сборка упала или якорь
 // мутации/настройки не найден — тоже код 2. Playwright не в зависимостях репозитория (как у
@@ -91,6 +96,7 @@ const KNOWN = new Set([
   '--mutate-operator-pending',
   '--mutate-no-deadline',
   '--mutate-late-lost',
+  '--mutate-own-results',
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN.has(a));
 if (stray) dieNotRun(`неизвестный флаг мутации ${stray}; известные: ${[...KNOWN].join(', ')}`);
@@ -300,6 +306,14 @@ if (on('--mutate-late-lost'))
     /render\/use-design-run\.ts$/,
     'if (over) late(answer);',
     'if (over) void answer;',
+  );
+
+if (on('--mutate-own-results'))
+  patch(
+    'room-results-for-3d',
+    /playground\/studio\.tsx$/,
+    'const OwnResults = flow?.results.view;',
+    'const OwnResults = undefined;',
   );
 
 // ─── заглушенная сеть ──────────────────────────────────────────────────────────────────────────
@@ -1171,6 +1185,73 @@ try {
     window.__pgDeadlineMs = undefined;
   });
   await settle();
+} catch (e) {
+  ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+head('K', 'Image to 3D: блок 3D-моделей, опции по слову сервера, Detailed в шапке и цене (C-10)');
+try {
+  await mount({
+    ...EMPTY_BAND,
+    playgroundWorkflows: ['create_edit', 'image_to_3d'],
+    threedOptions: ['texture', 'pbr', 'quality'],
+  });
+  await tileButton('image_to_3d').click();
+  await page.waitForSelector('[data-playground-open="image_to_3d"]');
+  await settle();
+  ck(
+    (await page.locator('#design-threed-outputs').count()) === 1 &&
+      (await page.locator('#design-playground-results').count()) === 0,
+    'под плиткой — «3D models of this card», итогов комнаты нет',
+  );
+  const open3 = page.locator('[data-playground-open="image_to_3d"]');
+  ck(
+    (await open3.locator('[data-toggle-row="texture"]').count()) === 1 &&
+      (await open3.locator('[data-toggle-row="pbr"]').count()) === 1 &&
+      (await open3.locator('[data-option-row="quality"]').count()) === 1 &&
+      (await open3.locator('[data-option-row="follow"]').count()) === 0,
+    'строки: Texture, Realistic materials, Quality; Follow нет',
+  );
+  const pbrSwitch = open3.locator('[data-toggle-row="pbr"] [role="switch"]');
+  ck(!(await pbrSwitch.isDisabled()), 'материалы включаемы, пока текстура есть');
+  await open3.locator('[data-toggle-row="texture"] [role="switch"]').click();
+  await settle();
+  ck(
+    (await pbrSwitch.isDisabled()) &&
+      (await open3.locator('[data-toggle-row="pbr"]').textContent()).includes('turn it on first'),
+    'текстура off — материалы погашены и сказано почему',
+  );
+  const fold = open3.locator('[data-fold-section="image_to_3d.options"] [data-fold-value]');
+  ck(
+    (await fold.textContent()) === 'standard',
+    'шапка 3D options — «standard»',
+    await fold.textContent(),
+  );
+  await open3.locator('[data-option-row="quality"]').getByText('Detailed', { exact: true }).click();
+  await settle();
+  ck(
+    (await fold.textContent()) === 'detailed',
+    'Detailed — «detailed» в шапке',
+    await fold.textContent(),
+  );
+  ck((await open3.textContent()).includes('about $1.40'), 'и «about $1.40» у GENERATE');
+  ck(
+    (await generate().isDisabled()) &&
+      (await open3.textContent()).includes('add the picture to build the model from'),
+    'без картинки GENERATE заперт, причина названа',
+  );
+  ck(
+    (await page.locator('[data-rep-filter="threed"]').count()) === 1,
+    'история под плиткой говорит о 3D-прогонах',
+  );
+  await backArrow().click();
+  await page.waitForSelector('[data-workflow-tile]');
+  await settle();
+  ck(
+    (await page.locator('#design-playground-results').count()) === 1 &&
+      (await page.locator('#design-threed-outputs').count()) === 0,
+    '|→ — на сетке снова итоги комнаты',
+  );
 } catch (e) {
   ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
 }
