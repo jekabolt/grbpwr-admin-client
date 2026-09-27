@@ -17280,6 +17280,177 @@ export type common_DesignFlatDetail = {
   note: string | undefined;
 };
 
+// AiRouteCandidate is one (provider, model) a purpose's call may go to.
+export type AiRouteCandidate = {
+  // "" = the capability's default provider — chat and image only
+  // (GetAiProvidersConfigResponse.default_chat_provider_key / default_image_provider_key); the other
+  // capabilities have no default, so their candidates name a provider.
+  providerKey: string | undefined;
+  model: string | undefined;
+};
+
+// AiModelInfo is one model of a provider: curated (the pricing catalogue) or custom (an ai_model row —
+// a slug an admin typed into a route).
+export type AiModelInfo = {
+  slug: string | undefined;
+  label: string | undefined;
+  kind: string | undefined;
+  custom: boolean | undefined;
+  priced: boolean | undefined;
+};
+
+// AiProviderInfo is one provider of the registry as the panel shows it. No key value is ever here:
+// only where the answering key comes from, its last four characters and who stored it when.
+export type AiProviderInfo = {
+  key: string | undefined;
+  label: string | undefined;
+  enabled: boolean | undefined;
+  // What a route may ask of it: chat | image | cutout | edit | threed | vector | video.
+  capabilities: string[] | undefined;
+  // none | env | db | unreadable. unreadable = a stored key that does not open with the master key;
+  // the env key, if any, answers meanwhile.
+  keySource: string | undefined;
+  keyLast4: string | undefined;
+  keyUpdatedBy: string | undefined;
+  keyUpdatedAt: wellKnownTimestamp | undefined;
+  adminKeySupported: boolean | undefined;
+  adminKeySource: string | undefined;
+  adminKeyLast4: string | undefined;
+  breaker: string | undefined;
+  // The provider badge from the last 24 h of ledger rows: key_rejected | out_of_credits |
+  // model_unknown | "" (none).
+  faultCode: string | undefined;
+  // One short sentence or "": "via openrouter" (recraft on the OpenRouter route), "design generation
+  // is off on this server" (image/3D providers when DESIGN_GENERATION_ENABLED is false).
+  note: string | undefined;
+  models: AiModelInfo[] | undefined;
+};
+
+// AiPurposeInfo is one purpose — what a call is FOR — with its route.
+export type AiPurposeInfo = {
+  key: string | undefined;
+  label: string | undefined;
+  hint: string | undefined;
+  group: string | undefined;
+  capability: string | undefined;
+  primary: AiRouteCandidate | undefined;
+  fallback: AiRouteCandidate | undefined;
+};
+
+export type GetAiProvidersConfigRequest = {
+};
+
+export type GetAiProvidersConfigResponse = {
+  providers: AiProviderInfo[] | undefined;
+  purposes: AiPurposeInfo[] | undefined;
+  defaultChatProviderKey: string | undefined;
+  defaultImageProviderKey: string | undefined;
+  configVersion: number | undefined;
+  // false = AI_KEYS_MASTER_KEY is not set on this server: SetAiProviderKey refuses to store a key.
+  masterKeyPresent: boolean | undefined;
+  timezone: string | undefined;
+  priceVersion: string | undefined;
+  designGenerationEnabled: boolean | undefined;
+};
+
+// UpdateAiProviderRequest switches one provider; enabled is sent every time.
+export type UpdateAiProviderRequest = {
+  providerKey: string | undefined;
+  enabled: boolean | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type UpdateAiProviderResponse = {
+  config: GetAiProvidersConfigResponse | undefined;
+};
+
+// AiProbeResult is what the provider's FREE endpoint said about a key the moment it was saved.
+export type AiProbeResult = {
+  ok: boolean | undefined;
+  code: string | undefined;
+  message: string | undefined;
+  balance: string | undefined;
+};
+
+export type SetAiProviderKeyRequest = {
+  providerKey: string | undefined;
+  kind: string | undefined;
+  value: string | undefined;
+};
+
+export type SetAiProviderKeyResponse = {
+  probe: AiProbeResult | undefined;
+  config: GetAiProvidersConfigResponse | undefined;
+};
+
+// SetAiDefaultsRequest carries both defaults every time; "" leaves that one unchanged.
+export type SetAiDefaultsRequest = {
+  chatProviderKey: string | undefined;
+  imageProviderKey: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type SetAiDefaultsResponse = {
+  config: GetAiProvidersConfigResponse | undefined;
+};
+
+export type SetAiRouteRequest = {
+  purpose: string | undefined;
+  primary: AiRouteCandidate | undefined;
+  fallback: AiRouteCandidate | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type SetAiRouteResponse = {
+  config: GetAiProvidersConfigResponse | undefined;
+};
+
+// GetAiSpendReportRequest names the period as calendar days. The presets (this month, last month,
+// last 7 days) are computed by the client; the server checks from_day ≤ to_day and a span of at most
+// 366 days.
+export type GetAiSpendReportRequest = {
+  fromDay: string | undefined;
+  toDay: string | undefined;
+};
+
+// AiSpendProviderRow is one provider's line: our number from the ledger beside their number from the
+// provider's cost API. A provider with only their number in the period still has a line.
+export type AiSpendProviderRow = {
+  providerKey: string | undefined;
+  // absent = unknown (no priced call in the period); otherwise the sum of the priced calls —
+  // unpriced counts the rest.
+  ourUsd: googletype_Decimal | undefined;
+  theirUsd: googletype_Decimal | undefined;
+  calls: number | undefined;
+  failed: number | undefined;
+  unpriced: number | undefined;
+};
+
+// AiSpendActorRow is one actor × purpose × provider × model line of the period.
+export type AiSpendActorRow = {
+  // The admin login the calls were made for; "system" = a background worker; "unknown" = calls whose
+  // path carried no actor (a wiring defect, kept as its own line rather than folded into someone's).
+  actor: string | undefined;
+  actorAdminId: number | undefined;
+  purpose: string | undefined;
+  providerKey: string | undefined;
+  model: string | undefined;
+  usd: googletype_Decimal | undefined;
+  calls: number | undefined;
+};
+
+export type GetAiSpendReportResponse = {
+  fromDay: string | undefined;
+  toDay: string | undefined;
+  timezone: string | undefined;
+  totalUsd: googletype_Decimal | undefined;
+  calls: number | undefined;
+  failed: number | undefined;
+  unpriced: number | undefined;
+  byProvider: AiSpendProviderRow[] | undefined;
+  byActor: AiSpendActorRow[] | undefined;
+};
+
 export interface AdminService {
   // Retrieves a key-value dictionary.
   GetDictionary(request: GetDictionaryRequest): Promise<GetDictionaryResponse>;
@@ -18994,6 +19165,29 @@ export interface AdminService {
   PostDepreciation(request: PostDepreciationRequest): Promise<PostDepreciationResponse>;
   // AccrueCorporationTax posts a corporation-tax accrual (Dr 8010 / Cr 2050) on the period's pre-tax profit.
   AccrueCorporationTax(request: AccrueCorporationTaxRequest): Promise<AccrueCorporationTaxResponse>;
+  // GetAiProvidersConfig returns the whole panel in one read: every provider of the registry (switch,
+  // key state, breaker, fault badge, models), the purposes with their routes, the two defaults and
+  // config_version. A key is never in it — only where it comes from and its last four characters.
+  GetAiProvidersConfig(request: GetAiProvidersConfigRequest): Promise<GetAiProvidersConfigResponse>;
+  // UpdateAiProvider switches one provider on or off. Off stops new calls through it; its routes stay
+  // as they are and skip it until it is switched back on.
+  UpdateAiProvider(request: UpdateAiProviderRequest): Promise<UpdateAiProviderResponse>;
+  // SetAiProviderKey stores (sealed with the server's master key) or clears one key slot of a
+  // provider: kind "api" is the key the calls are made with, kind "admin" the separate key a cost API
+  // needs (openai, anthropic, fal only). Saving probes the just-saved key with the provider's FREE
+  // endpoint and returns the result beside the config. The value is write-only: never echoed, never
+  // logged.
+  SetAiProviderKey(request: SetAiProviderKeyRequest): Promise<SetAiProviderKeyResponse>;
+  // SetAiDefaults sets the default chat provider and the default image provider — what a route
+  // candidate with provider_key "" means for those two capabilities.
+  SetAiDefaults(request: SetAiDefaultsRequest): Promise<SetAiDefaultsResponse>;
+  // SetAiRoute sets one purpose's route: the primary candidate and an optional fallback.
+  SetAiRoute(request: SetAiRouteRequest): Promise<SetAiRouteResponse>;
+  // GetAiSpendReport returns the AI spend over calendar days [from_day, to_day] in the org timezone:
+  // our number from the ledger (one row per physical call) by provider and by actor × purpose ×
+  // provider × model, and beside it, per provider, their number from the provider's cost API where
+  // one exists and a key is set.
+  GetAiSpendReport(request: GetAiSpendReportRequest): Promise<GetAiSpendReportResponse>;
 }
 
 type RequestType = {
@@ -27098,6 +27292,123 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "AccrueCorporationTax",
       }) as Promise<AccrueCorporationTaxResponse>;
+    },
+    GetAiProvidersConfig(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/ai/providers`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetAiProvidersConfig",
+      }) as Promise<GetAiProvidersConfigResponse>;
+    },
+    UpdateAiProvider(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.providerKey) {
+        throw new Error("missing required field request.provider_key");
+      }
+      const path = `api/admin/ai/providers/${request.providerKey}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateAiProvider",
+      }) as Promise<UpdateAiProviderResponse>;
+    },
+    SetAiProviderKey(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.providerKey) {
+        throw new Error("missing required field request.provider_key");
+      }
+      const path = `api/admin/ai/providers/${request.providerKey}/key`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetAiProviderKey",
+      }) as Promise<SetAiProviderKeyResponse>;
+    },
+    SetAiDefaults(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/ai/defaults`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetAiDefaults",
+      }) as Promise<SetAiDefaultsResponse>;
+    },
+    SetAiRoute(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.purpose) {
+        throw new Error("missing required field request.purpose");
+      }
+      const path = `api/admin/ai/routes/${request.purpose}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetAiRoute",
+      }) as Promise<SetAiRouteResponse>;
+    },
+    GetAiSpendReport(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/ai/spend`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.fromDay) {
+        queryParams.push(`fromDay=${encodeURIComponent(request.fromDay.toString())}`)
+      }
+      if (request.toDay) {
+        queryParams.push(`toDay=${encodeURIComponent(request.toDay.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetAiSpendReport",
+      }) as Promise<GetAiSpendReportResponse>;
     },
   };
 }
