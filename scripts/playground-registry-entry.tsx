@@ -40,6 +40,16 @@ import {
 } from 'components/managers/tech-card/components/design/playground/studio';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { TooltipProvider } from 'ui/components/tooltip';
+// C-09 · tile 1 (Virtual Try-On): the two pickers' pools and the owner's option lists.
+import {
+  modelPhotosOf,
+  productColorwaysOf,
+  productRendersOf,
+} from 'components/managers/tech-card/components/design/playground/fields';
+import {
+  ANGLE_OPTIONS,
+  FRAMING_OPTIONS,
+} from 'components/managers/tech-card/components/design/playground/registry/tiles/virtual-try-on';
 
 export {
   EMPTY_DRAFT,
@@ -61,6 +71,8 @@ export {
   workflowOfRun,
   workflowOpenable,
 };
+
+export { ANGLE_OPTIONS, FRAMING_OPTIONS, modelPhotosOf, productColorwaysOf, productRendersOf };
 
 /** The grid as the person sees it, drawn by React into a string. */
 export function gridMarkup(band: GetDesignBandResponse): string {

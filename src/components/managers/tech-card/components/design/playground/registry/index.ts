@@ -11,6 +11,7 @@ import { FABRIC_TO_IMAGE } from './tiles/fabric-to-image';
 import { GHOST_MANNEQUIN } from './tiles/ghost-mannequin';
 import { REMOVE_BACKGROUND } from './tiles/remove-background';
 import { SWAP_FABRICS } from './tiles/swap-fabrics';
+import { VIRTUAL_TRY_ON } from './tiles/virtual-try-on';
 import type { WorkflowDef } from './types';
 
 /**
@@ -28,7 +29,7 @@ export const WORKFLOWS: readonly WorkflowDef[] = [
     key: 'virtual_try_on',
     title: 'Virtual Try-On',
     blurb: 'Put your products on a model you supply.',
-    gate: notYet,
+    ...VIRTUAL_TRY_ON,
   },
   {
     key: 'fabric_to_image',

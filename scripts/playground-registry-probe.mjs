@@ -43,6 +43,11 @@
 //   N · (C-07) разметка форм пяти плиток (заголовки, REQUIRED, плейсхолдеры владельца, Logo size,
 //       Creative booster «Off», складки AI model / Format только где им место);
 //   O · (C-07) рекол: тело → черновик → то же тело у всех пяти плиток.
+//   P · (C-09) плитка 1 Virtual Try-On: тело freeform/tryon целиком (роли model → product → scene,
+//       options словарём сервера, image), сцена уезжает только «with reference», отказы до денег в
+//       порядке двери (модель, продукт, 1..4, сцена, повтор картинки, чужой рендер колорвея),
+//       ворота по playground_workflows, пулы пикеров (фото профиля = thumbnail ∪ media; рендеры
+//       колорвея = выходы kind=render этого колорвея + его рендер-верстак), рекол, разметка формы.
 //
 // МУТАЦИИ ЖИВУТ В ПАМЯТИ, А НЕ В ФАЙЛЕ (приём colour-plan-probe): одна строка настоящего модуля
 // подменяется в бандле, исходник не трогается. Каждая обязана уронить СВОЮ группу:
@@ -91,6 +96,20 @@
 //                                                                   change_color → краснеет M
 //   node scripts/playground-registry-probe.mjs --mutate-stamp       штамп run_workflow у заглушки
 //                                                                   не читается → краснеет M
+//   node scripts/playground-registry-probe.mjs --mutate-tryon-role  продукт уезжает без роли
+//                                                                   → краснеет P
+//   node scripts/playground-registry-probe.mjs --mutate-tryon-scene картинка сцены уезжает и в
+//                                                                   режиме edit → краснеет P
+//   node scripts/playground-registry-probe.mjs --mutate-tryon-validate отказ «сцена без картинки»
+//                                                                   снят → краснеет P
+//   node scripts/playground-registry-probe.mjs --mutate-tryon-colourway рендеры любого колорвея
+//                                                                   → краснеет P
+//   node scripts/playground-registry-probe.mjs --mutate-tryon-photos фото профиля без thumbnail
+//                                                                   → краснеет P
+//   node scripts/playground-registry-probe.mjs --mutate-tryon-gate  плитка открыта и без списка
+//                                                                   → краснеет P
+//   node scripts/playground-registry-probe.mjs --mutate-tryon-vocab слово кадра не из словаря
+//                                                                   сервера → краснеет P
 //
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
@@ -128,6 +147,13 @@ const MUT = {
   c07Gate: process.argv.includes('--mutate-c07-gate'),
   runWorkflow: process.argv.includes('--mutate-run-workflow'),
   stamp: process.argv.includes('--mutate-stamp'),
+  tryonRole: process.argv.includes('--mutate-tryon-role'),
+  tryonScene: process.argv.includes('--mutate-tryon-scene'),
+  tryonValidate: process.argv.includes('--mutate-tryon-validate'),
+  tryonColourway: process.argv.includes('--mutate-tryon-colourway'),
+  tryonPhotos: process.argv.includes('--mutate-tryon-photos'),
+  tryonGate: process.argv.includes('--mutate-tryon-gate'),
+  tryonVocab: process.argv.includes('--mutate-tryon-vocab'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -338,6 +364,71 @@ if (commonSwaps.length)
       });
     },
   });
+
+// ─── C-09: мутации плитки 1 и её пикеров — по плагину на файл, правки файла одним плагином.
+const fileSwaps = (name, file, pairs) =>
+  pairs.length
+    ? plugins.unshift({
+        name,
+        setup(b) {
+          b.onLoad({ filter: file }, async (args) => {
+            let src = await readFile(args.path, 'utf8');
+            for (const [needle, replacement] of pairs) {
+              if (!src.includes(needle))
+                throw new Error(`мутация ${name} не нашла свою строку: ${needle.slice(0, 60)}`);
+              src = src.replace(needle, replacement);
+            }
+            return { contents: src, loader: args.path.endsWith('.tsx') ? 'tsx' : 'ts' };
+          });
+        },
+      })
+    : 0;
+const tryonSwaps = [];
+if (MUT.tryonRole)
+  tryonSwaps.push(["out.push(item(m.id ?? 0, 'product'));", "out.push(item(m.id ?? 0, ''));"]);
+if (MUT.tryonScene)
+  tryonSwaps.push([
+    "if (sceneMode(draft) === 'reference' && scene) out.push(",
+    'if (scene) out.push(',
+  ]);
+if (MUT.tryonValidate)
+  tryonSwaps.push([
+    "if (sceneMode(draft) === 'reference' && !scenePhoto(draft)) {",
+    'if (false) {',
+  ]);
+if (MUT.tryonGate)
+  tryonSwaps.push([
+    "gate: (band) => workflowOffered(band, 'virtual_try_on'),",
+    'gate: () => ({ available: true }),',
+  ]);
+if (MUT.tryonVocab)
+  tryonSwaps.push(["{ value: 'portrait', label:", "{ value: 'portrait_face', label:"]);
+fileSwaps('c09-tile', /tiles\/virtual-try-on\.tsx$/, tryonSwaps);
+fileSwaps(
+  'c09-renders',
+  /fields\/colourway-render-picker\.tsx$/,
+  MUT.tryonColourway
+    ? [
+        [
+          'if (usable(picture) && isRender(picture) && colorwayOf(picture) === want) take(picture);',
+          'if (usable(picture) && isRender(picture)) take(picture);',
+        ],
+        ["outputsOfKind(band, 'render', want)", "outputsOfKind(band, 'render')"],
+      ]
+    : [],
+);
+fileSwaps(
+  'c09-photos',
+  /fields\/model-photo-picker\.tsx$/,
+  MUT.tryonPhotos
+    ? [
+        [
+          'for (const m of [model.thumbnail, ...(model.media ?? [])]) {',
+          'for (const m of model.media ?? []) {',
+        ],
+      ]
+    : [],
+);
 
 const outfile = resolve(tmpdir(), `playground-registry-probe-${process.pid}.mjs`);
 try {
@@ -769,17 +860,8 @@ head('F', 'ворота фазы 2: playgroundWorkflows решает, freeformPr
     [
       'список всех двенадцати, freeformPresets нет',
       band({ playgroundWorkflows: ALL, freeformPresets: undefined }),
-      // Плитки этой сборки (C-07 добавил 2, 3, 5, 6, 7); у остальных нет `run` — они приглушены.
-      [
-        'fabric_to_image',
-        'ghost_mannequin',
-        'change_color',
-        'swap_fabrics',
-        'add_logo',
-        'design_variations',
-        'remove_background',
-        'create_edit',
-      ],
+      // Every tile THIS build can run (one file per tile lands lane by lane — C-07, C-09, C-10…).
+      ALL.filter((k) => !!def(k).run),
     ],
     [
       'список [change_color, remove_background]',
@@ -1672,6 +1754,431 @@ head('O', 'C-07 рекол: тело → черновик → то же тело
     M.workflowOfRun({ kind: 'recolor', params: { colour: { fabrics: [{ mediaId: 52 }] } } }) ===
       'swap_fabrics',
     'рекол recolor с тканью открывает swap_fabrics',
+  );
+}
+
+// ─── P · плитка 1 Virtual Try-On (C-09) ──────────────────────────────────────────────────────
+head('P', 'virtual_try_on: тело tryon, отказы до денег, ворота, пулы пикеров, рекол, форма');
+{
+  // Картинка с адресом, как её рисует mediaThumb (media.media.thumbnail).
+  const pic = (id) => ({ id, media: { thumbnail: { mediaUrl: `https://x/${id}.jpg` } } });
+  const GPT = 'openai/gpt-image-2';
+  const tryBand = (over = {}) =>
+    band({
+      playgroundWorkflows: ['virtual_try_on', 'create_edit'],
+      imageModels: [
+        {
+          slug: GPT,
+          label: 'GPT Image 2',
+          isDefault: true,
+          qualities: ['low', 'medium', 'high'],
+          aspectRatios: ['auto', '1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'],
+          maxReferences: 16,
+          backgrounds: [],
+        },
+      ],
+      // Выходы карточки: рендеры ROSSO (7) и OLIVE (8), рендер без колорвея, скрытый и
+      // display-only рендер ROSSO, кроп рендера ROSSO — и вывод freeform (не рендер).
+      outputs: [
+        {
+          runId: 3,
+          runKind: 'render',
+          picture: { id: 301, kind: 'render', colorwayId: 7, media: pic(31) },
+        },
+        {
+          runId: 3,
+          runKind: 'render',
+          picture: { id: 302, kind: 'render', colorwayId: 7, media: pic(32) },
+        },
+        {
+          runId: 4,
+          runKind: 'render',
+          picture: { id: 401, kind: 'render', colorwayId: 8, media: pic(41) },
+        },
+        {
+          runId: 5,
+          runKind: 'render',
+          picture: { id: 501, kind: 'render', colorwayId: 0, media: pic(51) },
+        },
+        {
+          runId: 3,
+          runKind: 'render',
+          picture: {
+            id: 303,
+            kind: 'render',
+            colorwayId: 7,
+            media: pic(33),
+            hiddenAt: { seconds: 1 },
+          },
+        },
+        {
+          runId: 3,
+          runKind: 'render',
+          picture: { id: 304, kind: 'render', colorwayId: 7, media: pic(34), displayOnly: true },
+        },
+        {
+          runId: 6,
+          runKind: 'freeform',
+          picture: { id: 601, kind: 'freeform', colorwayId: 0, media: pic(61) },
+        },
+      ],
+      // Рендер-верстак ROSSO держит плиту 35 (своя картинка без колорвея — её колорвей скажет слот).
+      bench: [
+        {
+          id: 1,
+          kind: 'render',
+          colorwayId: 7,
+          viewKey: 'front',
+          picture: { id: 351, kind: 'render', colorwayId: 0, media: pic(35) },
+        },
+        {
+          id: 2,
+          kind: 'flat',
+          colorwayId: 0,
+          viewKey: 'front',
+          picture: { id: 361, kind: 'flat', colorwayId: 0, media: pic(36) },
+        },
+      ],
+      ...over,
+    });
+  const B = tryBand();
+  const tctx = { band: B };
+  const r = run('virtual_try_on');
+  const filled = (over = {}) =>
+    draft({
+      ...M.initialDraft(r),
+      ...over,
+      texts: {
+        pose: '  one hand on hip  ',
+        scene: '  concrete wall, late sun ',
+        ...(over.texts ?? {}),
+      },
+      images: {
+        model_photo: [pic(90)],
+        product: [pic(31), pic(35)],
+        scene_photo: [pic(77)],
+        ...(over.images ?? {}),
+      },
+      choices: {
+        ...M.initialDraft(r).choices,
+        model: '12',
+        product_colorway: '7',
+        framing: 'upper_body',
+        angle: 'low_angle',
+        ...(over.choices ?? {}),
+      },
+    });
+
+  // ── wire: тело целиком, написанное руками ──
+  const edit = r.wire(filled(), tctx);
+  const wantEdit = {
+    kind: 'freeform',
+    ask: 'one hand on hip',
+    params: {
+      ...EMPTY_PARAMS,
+      freeform: {
+        preset: 'tryon',
+        items: [
+          { mediaId: 90, regions: [], texts: [], role: 'model' },
+          { mediaId: 31, regions: [], texts: [], role: 'product' },
+          { mediaId: 35, regions: [], texts: [], role: 'product' },
+        ],
+        options: {
+          framing: 'upper_body',
+          angle: 'low_angle',
+          sceneMode: 'edit',
+          sceneText: 'concrete wall, late sun',
+          modelId: 12,
+          productColorwayId: 7,
+          logoSize: '',
+          creativity: 0,
+        },
+      },
+      image: { model: GPT, quality: 'medium', aspectRatio: '9:16', background: '' },
+    },
+  };
+  ck(
+    same(edit, wantEdit),
+    'edit scene: тело tryon целиком (картинка сцены НЕ уезжает)',
+    show(edit),
+  );
+  const ref = r.wire(filled({ choices: { scene_mode: 'reference' } }), tctx);
+  ck(
+    same(
+      ref.params.freeform.items.map((i) => [i.mediaId, i.role]),
+      [
+        [90, 'model'],
+        [31, 'product'],
+        [35, 'product'],
+        [77, 'scene'],
+      ],
+    ) && ref.params.freeform.options.sceneMode === 'reference',
+    'with reference: сцена последней, role=scene, scene_mode=reference',
+    show(ref.params.freeform),
+  );
+  ck(
+    ref.params.extraInputMediaIds.length === 0 && ref.params.colorwayId === 0,
+    'extra_input_media_ids пуст (one_list_per_fact), colorway_id 0',
+  );
+  const old = r.wire(filled(), { band: tryBand({ imageModels: undefined }) });
+  ck(
+    old.params.image === undefined,
+    'без imageModels params.image не уезжает',
+    show(old.params.image),
+  );
+  ck(same(r.shape(filled(), edit), '1 picture'), 'форма покупки: «1 picture»');
+
+  // ── словарь сервера (design_freeform.go: IsDesignFraming / IsDesignAngle) ──
+  const FRAMING = [
+    'auto',
+    'full_body',
+    'upper_body',
+    'portrait',
+    'hands',
+    'feet',
+    'product_detail',
+  ];
+  const ANGLE = ['auto', 'eye_level', 'slightly_above', 'slightly_below', 'low_angle'];
+  ck(
+    same(
+      M.FRAMING_OPTIONS.map((o) => o.value),
+      FRAMING,
+    ),
+    'framing: семь слов сервера в порядке владельца',
+    show(M.FRAMING_OPTIONS.map((o) => o.value)),
+  );
+  ck(
+    same(
+      M.ANGLE_OPTIONS.map((o) => o.value),
+      ANGLE,
+    ),
+    'angle: пять слов сервера',
+  );
+  ck(
+    M.FRAMING_OPTIONS[3].label === 'Portrait – face & neck' &&
+      M.ANGLE_OPTIONS[4].label === 'Low angle, from the ground',
+    'подписи — слова владельца',
+  );
+
+  // ── validate: отказы до денег ──
+  const why = (d, b = B) => r.validate(d, { band: b })?.reason ?? null;
+  ck(why(filled()) === null, 'заполненный черновик проходит', why(filled()));
+  ck(
+    /model profile/.test(why(filled({ images: { model_photo: [] } })) ?? ''),
+    'нет фото модели → отказ «model profile»',
+  );
+  ck(
+    /model profile/.test(why(filled({ choices: { model: '0' } })) ?? ''),
+    'фото без профиля → отказ (model_id обязателен для провенанса)',
+  );
+  ck(/colourway/.test(why(filled({ images: { product: [] } })) ?? ''), 'нет продукта → отказ');
+  ck(
+    /at most 4/.test(
+      why(
+        filled({
+          images: { product: [pic(31), pic(32), pic(35), pic(41), pic(51)] },
+          choices: { product_colorway: '0' },
+        }),
+      ) ?? '',
+    ),
+    'пять продуктов → отказ «at most 4»',
+  );
+  ck(
+    /scene picture/.test(
+      why(filled({ choices: { scene_mode: 'reference' }, images: { scene_photo: [] } })) ?? '',
+    ),
+    'with reference без картинки → отказ',
+  );
+  ck(
+    /used twice/.test(
+      why(filled({ choices: { scene_mode: 'reference' }, images: { scene_photo: [pic(90)] } })) ??
+        '',
+    ),
+    'сцена = фото модели → отказ (duplicate_picture)',
+  );
+  ck(
+    why(filled({ images: { scene_photo: [pic(90)] } })) === null,
+    'та же картинка в слоте сцены при edit не уезжает — и не отказ',
+  );
+  ck(
+    /no longer a render/.test(why(filled({ images: { product: [pic(41)] } })) ?? ''),
+    'рендер OLIVE под колорвеем ROSSO → отказ (product_not_colorway_render)',
+  );
+  ck(
+    why(filled({ images: { product: [pic(51)] }, choices: { product_colorway: '0' } })) === null,
+    'колорвей 0 ничего не утверждает → не отказ',
+  );
+
+  // ── ворота ──
+  const liveNow = (b) => liveKeys(M.gridMarkup(b));
+  ck(!liveNow(band()).has('virtual_try_on'), 'списка нет → плитка приглушена (откат)');
+  ck(liveNow(B).has('virtual_try_on'), 'в списке → плитка открыта');
+  ck(
+    !liveNow(band({ playgroundWorkflows: ['create_edit'] })).has('virtual_try_on'),
+    'список без ключа → приглушена',
+  );
+
+  // ── пулы пикеров ──
+  const ids = (list) => list.map((m) => m.id);
+  ck(
+    same(ids(M.productRendersOf(B, 7)), [35, 31, 32]),
+    'рендеры ROSSO: плита верстака, затем выходы; без скрытого, display-only, чужих и не-рендеров',
+    show(ids(M.productRendersOf(B, 7))),
+  );
+  ck(
+    same(ids(M.productRendersOf(B, 8)), [41]),
+    'рендеры OLIVE: только свой',
+    show(ids(M.productRendersOf(B, 8))),
+  );
+  ck(
+    same(ids(M.productRendersOf(B, 0)), [51]),
+    'колорвей 0: рендер без колорвея',
+    show(ids(M.productRendersOf(B, 0))),
+  );
+  const cws = M.productColorwaysOf(B, [
+    { colorwayId: 7, devName: 'ROSSO' },
+    { colorwayId: 8, devName: 'OLIVE' },
+    { colorwayId: 9, devName: 'NERO' },
+  ]);
+  ck(
+    same(cws, [
+      { id: 0, label: 'sample', renders: 1 },
+      { id: 7, label: 'ROSSO', renders: 3 },
+      { id: 8, label: 'OLIVE', renders: 1 },
+      { id: 9, label: 'NERO', renders: 0 },
+    ]),
+    'селект колорвеев: sample (есть рендер), колорвеи карточки со счётом',
+    show(cws),
+  );
+  const noSample = M.productColorwaysOf(
+    tryBand({ outputs: B.outputs.filter((o) => o.picture.id !== 501) }),
+    [],
+  );
+  ck(
+    !noSample.some((c) => c.id === 0),
+    'sample не предлагается без своих рендеров',
+    show(noSample),
+  );
+  const photos = M.modelPhotosOf({
+    id: 12,
+    thumbnail: pic(90),
+    media: [pic(91), pic(90), { id: 92 }, pic(93)],
+  });
+  ck(
+    same(ids(photos), [90, 91, 93]),
+    'фото профиля: thumbnail первым, без повторов и без картинок без адреса',
+    show(ids(photos)),
+  );
+  ck(M.modelPhotosOf(null).length === 0, 'нет профиля → нет фото');
+
+  // ── results и рекол ──
+  const past = {
+    id: 55,
+    kind: 'freeform',
+    ask: 'chin up',
+    params: {
+      ...EMPTY_PARAMS,
+      freeform: {
+        preset: 'tryon',
+        items: [
+          { mediaId: 90, role: 'model', regions: [], texts: [] },
+          { mediaId: 31, role: 'product', regions: [], texts: [] },
+          { mediaId: 77, role: 'scene', regions: [], texts: [] },
+        ],
+        options: {
+          framing: 'hands',
+          angle: 'eye_level',
+          sceneMode: 'reference',
+          sceneText: 'grey seamless',
+          modelId: 12,
+          productColorwayId: 7,
+          logoSize: '',
+          creativity: 0,
+        },
+      },
+      image: { model: GPT, quality: 'high', aspectRatio: '3:4', background: '' },
+    },
+  };
+  ck(r.results.match(past), 'results.match: прогон tryon — свой');
+  ck(
+    !r.results.match({
+      ...past,
+      params: { ...past.params, freeform: { ...past.params.freeform, preset: 'free' } },
+    }),
+    'results.match: freeform free — чужой',
+  );
+  const mediaMap = new Map([90, 31, 77].map((id) => [id, pic(id)]));
+  const back = r.recall(past, mediaMap);
+  const again = r.wire(back.draft, tctx);
+  ck(
+    same(again.params.freeform, past.params.freeform) && again.ask === 'chin up',
+    'рекол → wire: тот же freeform и те же слова',
+    show(again.params.freeform),
+  );
+  ck(
+    same(again.params.image, { model: GPT, quality: 'high', aspectRatio: '3:4', background: '' }),
+    'рекол → wire: та же модель, качество и формат',
+    show(again.params.image),
+  );
+  ck(
+    back.said.length === 0 && back.lost === 0,
+    'рекол полного прогона ничего не теряет',
+    show(back),
+  );
+  const noProfile = r.recall(
+    {
+      ...past,
+      params: {
+        ...past.params,
+        freeform: {
+          ...past.params.freeform,
+          options: { ...past.params.freeform.options, modelId: 0 },
+        },
+      },
+    },
+    mediaMap,
+  );
+  ck(
+    (noProfile.draft.images.model_photo ?? []).length === 0 && noProfile.said.length === 1,
+    'рекол без model_id: фото не ложится молча, сказано словами',
+    show(noProfile.said),
+  );
+
+  // ── разметка формы ──
+  const html = M.panelMarkup(B, 'virtual_try_on');
+  const order = [
+    'virtual_try_on.model',
+    'virtual_try_on.engine-section',
+    'virtual_try_on.shot',
+    'virtual_try_on.pose',
+    'virtual_try_on.product',
+    'virtual_try_on.scene',
+    'virtual_try_on.format-section',
+  ].map((a) => html.indexOf(`data-fold-section="${a}"`));
+  ck(
+    order.every((i) => i >= 0) && order.every((i, k) => k === 0 || i > order[k - 1]),
+    'секции в порядке владельца: модель, AI model, кадр, поза, продукт, сцена, формат',
+    show(order),
+  );
+  const values = [...html.matchAll(/data-fold-value="">([^<]*)</g)].map((m) => m[1]);
+  ck(
+    values.includes('edit scene') && values.includes('9:16') && values.includes('0/4'),
+    'шапки: «edit scene», «9:16», «0/4»',
+    show(values),
+  );
+  ck(
+    (html.match(/>required</gi) ?? []).length === 2,
+    'REQUIRED ровно у модели и продукта',
+    String((html.match(/>required</gi) ?? []).length),
+  );
+  ck(
+    /one hand on hip, weight on one leg, chin up/.test(html),
+    'плейсхолдер позы — слова владельца',
+  );
+  const oldHtml = M.panelMarkup(tryBand({ imageModels: undefined }), 'virtual_try_on');
+  ck(
+    !/engine-section|format-section/.test(oldHtml) && /virtual_try_on\.scene/.test(oldHtml),
+    'без моделей: ни AI model, ни Format, остальная форма на месте',
   );
 }
 
