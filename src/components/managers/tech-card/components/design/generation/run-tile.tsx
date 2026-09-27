@@ -5,8 +5,8 @@ import type {
   common_DesignRun,
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { useEffect, useState } from 'react';
-import { useFormContext } from 'react-hook-form';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
@@ -192,10 +192,17 @@ function standingPieces(pictures: readonly common_DesignPicture[], sheetId: numb
  *     the field on every picture of a server that has it (proto: DesignPicture.replaced_by);
  *   · an edit already took its place (only a picture held under an open editor is still drawn so on
  *     the workbench — `outputPlan`'s `keep`);
+ *   · the picture carries the old hidden stamp (27.09, review r2): a stamp from before per-picture
+ *     hiding was removed (T-14), which nothing on this screen can lift — the edit goes beside;
  *   · a sheet with pieces standing: they would stay cut from the original (`cut_sheet`);
  *   · the original is on the card's technical sheet (`technicalMedia`): `documentPlates` lists the
  *     card's media first and the bench plate after it, so the edit taking the slot would print a
- *     SECOND front beside the original — and its callouts would stay pinned to the original.
+ *     SECOND front beside the original — and its callouts would stay pinned to the original. The
+ *     server refuses the same (`technical_sheet`, D-55); this reading only spares the save and the
+ *     upload that its refusal would come after.
+ * Every fact here can change while the editor is open — a poll brings another tab's edit or cut,
+ * the card form takes a callout — so the tile re-renders the reason (`useWatch`, the band) and the
+ * editor asks for it again right before it writes (`VectorReplace.closedNow`).
  */
 function overwriteClosed(
   picture: common_DesignPicture,
@@ -205,6 +212,8 @@ function overwriteClosed(
   if (picture.replacedBy === undefined) return 'this server cannot replace a picture yet';
   if ((picture.replacedBy ?? 0) > 0)
     return 'an edit has already taken this picture’s place — edit that one instead';
+  if (isPictureHidden(picture))
+    return 'this picture is hidden — an old stamp nothing here can lift, so save the edit as new';
   const pieces = standingPieces(siblings, picture.id ?? 0);
   if (pieces > 0)
     return pieces === 1
@@ -218,6 +227,14 @@ function overwriteClosed(
       : 'the original is on the card’s technical sheet and would stay there beside the edit';
   }
   return null;
+}
+
+/** The card fields `overwriteClosed` reads — one array for the life of the page (`useWatch` keys on it). */
+const SHEET_FIELDS = ['technicalMedia', 'callouts'] as const;
+
+/** Where a picture stands on `band`'s bench, in prose — the editor's toast after an overwrite (D-55). */
+function slotLabelOf(band: GetDesignBandResponse, pictureId: number): string | null {
+  return slotOfPicture(band, pictureId)?.label ?? null;
 }
 
 /* ────────────────────────────── the tile ────────────────────────────── */
@@ -278,8 +295,27 @@ export function RunTile({
 }) {
   const pick = usePickMode();
   const { setBenchSlot } = useDesignWrites(techCardId);
-  /** The card form — `technicalMedia` and `callouts`, read as the editor opens. */
+  /**
+   * THE CARD FORM, WATCHED — `technicalMedia` and `callouts` (27.09, review r2, D-55). A snapshot read
+   * as the editor opened went stale the moment somebody pinned a callout; watched, the reason on
+   * the question moves with the form. RunTile lives under the card's form, as the whole studio does.
+   */
   const form = useFormContext<TechCardFormData>();
+  const [technicalMedia, callouts] = useWatch({ control: form.control, name: SHEET_FIELDS });
+  /**
+   * The picture and its row as of the last render, for `closedNow` — asked by the editor right
+   * before it writes an overwrite, long after the render that drew the question.
+   */
+  const latest = useRef({ picture, siblings });
+  latest.current = { picture, siblings };
+  const closedNow = useCallback(() => {
+    const { picture: p, siblings: row } = latest.current;
+    return overwriteClosed(
+      p,
+      row ?? [p],
+      form.getValues() as Parameters<typeof overwriteClosed>[2],
+    );
+  }, [form]);
   /** Правка прямо в истории (V-10): состояние у плитки — редактор открыт над КОНКРЕТНОЙ картинкой. */
   const [editing, setEditing] = useState(false);
 
@@ -552,8 +588,10 @@ export function RunTile({
           слот верстака, и результат правки не обязан никуда вставать. На ВЕРСТАКЕ правка
           спрашивает «overwrite или save as new» (`replace`): слот, где стоит картинка, переезжает
           на правку СЕРВЕРОМ, в той же транзакции, — клиент его не пишет. Причины закрытой
-          перезаписи читаются в момент открытия: пока редактор открыт, ни выноски, ни куски
-          поменяться под ним не могут. */}
+          перезаписи ЖИВЫЕ, пока редактор открыт (D-55): опрос полосы приносит чужую правку или
+          разрез, форма карточки — выноску на листе; поэтому `closed` перерисовывается с полосой и
+          с формой (`useWatch`), а `closedNow` редактор спрашивает прямо перед записью. Тост после
+          перезаписи называет слот по ПЕРЕЧИТАННОЙ полосе (`slotOf`), а не по вопросу. */}
       {editing && (
         <VectorModal
           open
@@ -567,11 +605,12 @@ export function RunTile({
               ? ({
                   pictureId,
                   slotLabel: inSlot?.label ?? null,
-                  closed: overwriteClosed(
-                    picture,
-                    siblings ?? [picture],
-                    form ? (form.getValues() as Parameters<typeof overwriteClosed>[2]) : null,
-                  ),
+                  closed: overwriteClosed(picture, siblings ?? [picture], {
+                    technicalMedia,
+                    callouts,
+                  }),
+                  closedNow,
+                  slotOf: slotLabelOf,
                 } satisfies VectorReplace)
               : null
           }
