@@ -16,6 +16,8 @@
 //
 //   node scripts/ai-providers-probe.mjs                 all green expected
 //   node scripts/ai-providers-probe.mjs --mutate-<name> the named check must go red (list: --list)
+//   node scripts/ai-providers-probe.mjs --shots DIR      the states as PNGs at 1280/390, FE9 asserted at 390
+//                                                        (takes --mutate-<name> too)
 
 import { build as esbuild } from 'esbuild';
 import { execFileSync } from 'node:child_process';
@@ -97,7 +99,7 @@ const MUTATIONS = {
   'route-drops-fallback': {
     red: 'C1',
     what: 'a primary change drops the fallback',
-    from: 'model: "" },\n                  fallback: serverFallback\n',
+    from: 'model: "" },\n                    fallback: serverFallback\n',
     to: 'model: "" }\n',
   },
   'route-twice': {
@@ -241,6 +243,18 @@ const MUTATIONS = {
     from: 'bg-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor data-[state=checked]:bg-bgColor',
     to: 'bg-textColor outline-none data-[state=checked]:bg-bgColor',
   },
+  'page-too-wide': {
+    red: 'FE9',
+    what: 'a 420 px wide child (the page title) pushes the page past a 390 px screen',
+    from: '(Text, { component: "h1", variant: "uppercase", size: "large", children: "ai providers" })',
+    to: '(Text, { component: "h1", variant: "uppercase", size: "large", style: { minWidth: 420 }, children: "ai providers" })',
+  },
+  'table-unboxed': {
+    red: 'FE9',
+    what: 'the DataTable loses its own scroll box, so a wide table widens the page',
+    from: 'className: "relative w-full overflow-x-auto"',
+    to: 'className: "relative w-full"',
+  },
   'clear-sends-old-value': {
     red: 'E5',
     what: 'clear sends the old key (its last four) instead of an empty value',
@@ -365,6 +379,18 @@ const ck = (id, ok, what, d = '') => {
     failed.add(id);
   }
   console.log(`${ok ? '  ok  ' : '  FAIL'} ${id} ${what}${d ? `  — ${d}` : ''}`);
+};
+// The verdict, for the checks and for --shots alike: under a mutation, its check must have gone red.
+const finish = () => {
+  console.log('');
+  if (chosen.length) {
+    const expected = new Set(chosen.map((k) => MUTATIONS[k].red));
+    const hit = [...expected].every((id) => failed.has(id));
+    console.log(hit ? `MUTATION CAUGHT: ${[...expected].join(', ')} went red` : `MUTATION MISSED: expected ${[...expected].join(', ')} red, failed: ${[...failed].join(', ') || 'none'}`);
+    process.exit(hit ? 1 : 3);
+  }
+  console.log(bad ? `${bad} FAILED` : 'ALL GREEN');
+  process.exit(bad ? 1 : 0);
 };
 
 // ─── SERVER ─────────────────────────────────────────────────────────────────────────────────────
@@ -562,9 +588,38 @@ const openRow = async (key) => {
   await page.waitForTimeout(150);
 };
 const toast = async () => ((await page.locator('body').textContent()) ?? '').replace(/\s+/g, ' ');
+// FE9 · does the page scroll sideways? null when it does not; else the widths and the first element
+// (in document order) whose right edge passes the viewport outside any scroll container of its own —
+// content inside a clipping box (the DataTable's overflow-x wrapper) is that box's business, not the page's.
+const pageOverflow = () =>
+  page.evaluate(() => {
+    const vw = window.innerWidth;
+    const sw = document.documentElement.scrollWidth;
+    if (sw <= vw) return null;
+    const contained = (el) => {
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement)
+        if (getComputedStyle(a).overflowX !== 'visible') return true;
+      return false;
+    };
+    const first = Array.from(document.body.querySelectorAll('*')).find((el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.right > vw + 0.5 && !contained(el);
+    });
+    const name = (el) => {
+      const data = Array.from(el.attributes).find((a) => a.name.startsWith('data-'));
+      const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 30);
+      const r = el.getBoundingClientRect();
+      return `<${el.tagName.toLowerCase()}${data ? ` ${data.name}="${data.value}"` : ''}> "${text}" ${Math.round(r.left)}→${Math.round(r.right)}px`;
+    };
+    return { sw, vw, first: first ? name(first) : 'none found outside a scroll container' };
+  });
+const noOverflow = async (state) => {
+  const o = await pageOverflow();
+  ck('FE9', !o, `${state} at ${await page.evaluate(() => window.innerWidth)} px: the page does not scroll sideways`, o ? `scrollWidth ${o.sw} > ${o.vw}; first past the edge: ${o.first}` : '');
+};
 
 // --shots DIR: screenshots of the tab's states (desktop and phone width) instead of the checks —
-// the evidence a design pass reads. Nothing is asserted in this mode.
+// the evidence a design pass reads. Asserted here: no state scrolls sideways at 390 px (FE9).
 if (process.argv.includes('--shots')) {
   const dir = process.argv[process.argv.indexOf('--shots') + 1];
   // PROBE_INJECT=<file.js>: a page-side checker (a design linter, say) injected into every state,
@@ -577,6 +632,7 @@ if (process.argv.includes('--shots')) {
     await mount({ start, ...opts });
     if (prep) await prep();
     await page.waitForTimeout(300);
+    if (width === 390) await noOverflow(name);
     if (inject) {
       heard = [];
       await page.addScriptTag({ content: readFileSync(inject, 'utf8') });
@@ -648,7 +704,7 @@ if (process.argv.includes('--shots')) {
   }
   await browser.close();
   console.log(`shots written to ${dir}`);
-  process.exit(0);
+  finish();
 }
 
 // ═══ A · THE FIVE ROW STATES ═══════════════════════════════════════════════════════════════════
@@ -1183,6 +1239,35 @@ await page.waitForSelector('[data-provider="openai"]', { timeout: 8000 });
     `door ${had} | ${q} | ${JSON.stringify(w.map((c) => c.body))} | ${line}`,
   );
 }
+// FE9 · at 390 px no view scrolls sideways (the full state set is asserted by --shots).
+{
+  await page.setViewportSize({ width: 390, height: 900 });
+  await mount({ patch: { anthropic: { breaker: 'half-open' } } });
+  await page.waitForSelector('[data-provider="openai"]', { timeout: 8000 });
+  await openRow('openai');
+  await noOverflow('providers + routes, a row open');
+  await mount({ start: '/ai-providers?view=spend&range=custom&from=2026-09-01&to=2026-09-27' });
+  await page.waitForSelector('[data-spend-actor="im"]', { timeout: 8000 });
+  await page.locator('[data-spend-actor="im"] button').click();
+  await page.waitForTimeout(200);
+  await noOverflow('spend, an actor open');
+  // The allowance, exercised: the probe's tables fit 390 px, so 600 px of content is put inside a
+  // table's own scroll box — it scrolls there and the page stays put.
+  const boxScrolls = await page.evaluate(() => {
+    const box = document.querySelector('table')?.parentElement;
+    if (!box) return null;
+    const wide = document.createElement('div');
+    wide.style.cssText = 'width:600px;height:1px';
+    wide.dataset.probeWide = '';
+    box.appendChild(wide);
+    return box.scrollWidth > box.clientWidth;
+  });
+  await noOverflow('spend, 600 px inside a table\'s own scroll box');
+  ck('FE9', boxScrolls === true, 'the injected content is wider than the table\'s box (the allowance is exercised)', `wider: ${boxScrolls}`);
+  await page.evaluate(() => document.querySelector('[data-probe-wide]')?.remove());
+  await page.setViewportSize({ width: 1280, height: 1000 });
+}
+
 await mount({ isSuper: false });
 {
   await page.waitForTimeout(500);
@@ -1193,12 +1278,4 @@ await mount({ isSuper: false });
 }
 
 await browser.close();
-console.log('');
-if (chosen.length) {
-  const expected = new Set(chosen.map((k) => MUTATIONS[k].red));
-  const hit = [...expected].every((id) => failed.has(id));
-  console.log(hit ? `MUTATION CAUGHT: ${[...expected].join(', ')} went red` : `MUTATION MISSED: expected ${[...expected].join(', ')} red, failed: ${[...failed].join(', ') || 'none'}`);
-  process.exit(hit ? 1 : 3);
-}
-console.log(bad ? `${bad} FAILED` : 'ALL GREEN');
-process.exit(bad ? 1 : 0);
+finish();
