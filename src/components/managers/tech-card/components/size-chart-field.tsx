@@ -301,9 +301,9 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
 
       {canEdit && dirty && (
         <div className='flex flex-wrap items-center gap-2'>
-          <Pill tone='attention'>{saving ? 'saving…' : 'staged for save'}</Pill>
+          <Pill tone='attention'>{saving ? 'saving…' : 'staged'}</Pill>
           <Text size='micro' variant='label' component='span' className='ml-auto'>
-            included in the card’s Save
+            saves with the card
           </Text>
         </div>
       )}

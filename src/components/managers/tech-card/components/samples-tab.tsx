@@ -1209,9 +1209,9 @@ function SampleEditor({
         <div className='flex flex-wrap items-center gap-2'>
           {staged && (
             <>
-              <Pill tone='attention'>{save.isPending ? 'saving…' : 'staged for save'}</Pill>
+              <Pill tone='attention'>{save.isPending ? 'saving…' : 'staged'}</Pill>
               <Text size='micro' variant='label' component='span'>
-                included in the card’s Save
+                saves with the card
               </Text>
               <Button
                 type='button'
@@ -1243,7 +1243,7 @@ function SampleEditor({
         confirmLabel='discard'
       >
         <Text size='micro'>
-          These edits are staged for the card’s Save — discarding drops them and restores this
+          These edits are staged and save with the card — discarding drops them and restores this
           sample from the server.
         </Text>
       </ConfirmationModal>

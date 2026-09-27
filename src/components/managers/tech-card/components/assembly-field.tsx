@@ -560,7 +560,7 @@ export function AssemblyField({
 
       {canEdit && changed && (
         <div className='flex flex-wrap items-center gap-2'>
-          <Pill tone='attention'>{upsert.isPending ? 'saving…' : 'staged for save'}</Pill>
+          <Pill tone='attention'>{upsert.isPending ? 'saving…' : 'staged'}</Pill>
           {/* Named here as well as thrown from the commit: the save button that used to report it
               on click is gone, and finding out at save time only would be a worse trade. */}
           {problem && (
@@ -569,7 +569,7 @@ export function AssemblyField({
             </Text>
           )}
           <Text size='micro' variant='label' component='span' className='ml-auto'>
-            included in the card’s Save
+            saves with the card
           </Text>
         </div>
       )}

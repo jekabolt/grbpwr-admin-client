@@ -3441,11 +3441,11 @@ function LabDipTimeline({
         </div>
       )}
 
-      {/* No save button of its own any more: the lab-dip write is queued behind the card's one Save,
-          which is what reports whether it landed. */}
+      {/* No save button of its own any more: the lab-dip write is queued behind the card's own write
+          (the card saves itself, O-60), which is what reports whether it landed. */}
       {canEdit && staged && (
         <Text size='micro' variant='label'>
-          included in the card’s Save
+          saves with the card
         </Text>
       )}
     </div>
@@ -4082,7 +4082,7 @@ function ColorwayRecipeEditor({
 
         {canEdit && staged && (
           <Text size='micro' variant='label'>
-            {save.isPending ? 'saving…' : 'staged'} · included in the card’s Save
+            {save.isPending ? 'saving…' : 'staged'} · saves with the card
           </Text>
         )}
       </Section>
@@ -4576,7 +4576,7 @@ export function ColorwayRecipes({
         question='— which catalog article goes on each part, in what colour and at what consumption'
       />
       <Text size='micro' variant='label'>
-        Each colourway is its own write, and every one you edit goes out with the card’s Save.
+        Each colourway is its own write, and every one you edit saves with the card.
       </Text>
 
       <Tiles min={150}>

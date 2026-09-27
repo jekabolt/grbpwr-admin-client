@@ -329,14 +329,14 @@ export function PackagingRecipeField({
 
       {canEdit && changed && (
         <div className='flex flex-wrap items-center gap-2'>
-          <Pill tone='attention'>{upsert.isPending ? 'saving…' : 'staged for save'}</Pill>
+          <Pill tone='attention'>{upsert.isPending ? 'saving…' : 'staged'}</Pill>
           {problem && (
             <Text size='micro' variant='error' component='span'>
               {problem}
             </Text>
           )}
           <Text size='micro' variant='label' component='span' className='ml-auto'>
-            included in the card’s Save
+            saves with the card
           </Text>
         </div>
       )}

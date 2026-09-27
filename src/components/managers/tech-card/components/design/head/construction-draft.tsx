@@ -1362,11 +1362,12 @@ export function ConstructionDraft({
           ? 'the card was released while it was being saved'
           : refused === 'stopped'
             ? 'the card stopped saving while GENERATE waited for it'
-            : flushRefusalSentence(refused, autosave.errorsCount) || 'save the card first';
+            : flushRefusalSentence(refused, autosave.errorsCount) || 'the card is not saved yet';
   /**
    * ДВЕРЬ У ОТКАЗА СОХРАНЕНИЯ: `invalid` — к первому полю с ошибкой (`revealField` сам приносит
-   * шаг студии), прочие исходы и поле, которого студия не рисует, — к чипу сохранения в шапке: он и
-   * есть дверь этих состояний (повторить, подтвердить, решить конфликт).
+   * шаг студии), прочие исходы и поле, которого студия не рисует, — к чипу сохранения в шапке: его
+   * поповер говорит причину. Сохранять там нечем (O-60, D-59): упавшая запись повторяется сама, а
+   * решения — подтвердить перевод в auxiliary, решить конфликт — ведёт слово чипа рядом с `▾`.
    */
   async function openSaveDoor() {
     if (refused === 'invalid') {
@@ -2799,7 +2800,7 @@ function DraftInventoryModal({
             <>
               {' '}
               <span className='text-warning'>
-                The board has unsaved changes — the draft reads the saved card, so save first.
+                The board has unsaved changes — the draft reads the saved card.
               </span>
             </>
           ) : null}

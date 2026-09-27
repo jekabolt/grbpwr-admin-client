@@ -33,7 +33,7 @@ export type AutosaveStatus =
   | 'needs-confirm'
   /** 409: сервер ушёл вперёд, открыта модалка конфликта; автосейв на паузе. */
   | 'conflict'
-  /** Сетевая/серверная ошибка; ретраи идут или исчерпаны. */
+  /** Сетевая/серверная ошибка; повторы идут сами — 5 / 15 / 45 с, дальше каждые 30 с (D-59). */
   | 'error';
 
 /** Исход `flush`: только `ok` и `nothing` разрешают платную дверь. */
@@ -95,16 +95,16 @@ export function flushRefusalSentence(r: FlushResult, errorsCount?: number): stri
   switch (r) {
     case 'invalid':
       return errorsCount
-        ? `save the card first — fix ${errorsCount} field${errorsCount === 1 ? '' : 's'}`
-        : 'save the card first — a field does not validate';
+        ? `fix ${errorsCount} field${errorsCount === 1 ? '' : 's'} first — the card saves itself once it validates`
+        : 'fix the fields first — the card saves itself once it validates';
     case 'needs-confirm':
-      return 'save the card first — the purpose change waits for your confirmation';
+      return 'confirm the switch to auxiliary first — the card saves itself once you do';
     case 'conflict':
-      return 'save the card first — someone else saved it meanwhile';
+      return 'decide the conflict first — someone else saved this card meanwhile';
     case 'error':
-      return 'save the card first — the last save failed';
+      return 'the card is not saved yet — the last save failed and it keeps retrying on its own';
     case 'busy':
-      return 'save the card first — it kept changing while it was being saved; try again in a moment';
+      return 'the card kept changing while it was being saved — try again in a moment';
     default:
       return '';
   }

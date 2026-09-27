@@ -900,9 +900,9 @@ export function StyleFactsField({
         <ResolvedCareEntries entries={careEntries} />
         {canEdit && changed.length > 0 && (
           <div className='flex flex-wrap items-center gap-2'>
-            <Pill tone='attention'>{saving ? 'saving…' : 'staged for save'}</Pill>
+            <Pill tone='attention'>{saving ? 'saving…' : 'staged'}</Pill>
             <Text size='micro' variant='label' component='span' className='ml-auto'>
-              included in the card’s Save
+              saves with the card
             </Text>
           </div>
         )}
