@@ -5,6 +5,7 @@ import { RETIRED_PRESET_WORD, notYet } from './common';
 import { CHANGE_COLOR } from './tiles/change-color';
 import { CREATE_EDIT } from './tiles/create-edit';
 import { REMOVE_BACKGROUND } from './tiles/remove-background';
+import { VIRTUAL_TRY_ON } from './tiles/virtual-try-on';
 import type { WorkflowDef, WorkflowKey } from './types';
 
 /**
@@ -22,7 +23,7 @@ export const WORKFLOWS: readonly WorkflowDef[] = [
     key: 'virtual_try_on',
     title: 'Virtual Try-On',
     blurb: 'Put your products on a model you supply.',
-    gate: notYet,
+    ...VIRTUAL_TRY_ON,
   },
   {
     key: 'fabric_to_image',
