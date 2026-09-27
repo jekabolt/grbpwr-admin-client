@@ -47,6 +47,12 @@ import {
  * the paint. The paint itself never leaves in phase 2: the server takes a polygon and redraws the
  * rectangle around it — «The rectangle around your zone may change», printed under the brush.
  *
+ * FOCUS GOES BACK TO THE DOOR THAT OPENED IT (G-02 m-4). The editor is opened by state from three
+ * doors — a result tile's `mask` corner, the viewer's Mask (the viewer closes first, so its button is
+ * gone by the time this closes) and tile 10's own picture slot — and none is a `Dialog.Trigger`, so
+ * Radix's own restore has nothing to go back to. The opener hands `onCloseAutoFocus` in
+ * (`useFocusReturn`, `../focus.ts`) with a fallback that still stands: that picture's `mask` corner.
+ *
  * ⚠ THE PRESS OUTLIVES THIS DIALOG. The idempotency key and «starting…» are the scoped hook's
  * (`playgroundRunScope('retouch_zone')`, render/run-ledger.ts), so closing the dialog while a run
  * is starting cannot buy a second one on the next press.
@@ -75,6 +81,8 @@ export function MaskEditor({
   techCardId,
   media,
   label,
+  initialWords = '',
+  onCloseAutoFocus,
   disabled,
 }: {
   open: boolean;
@@ -84,13 +92,17 @@ export function MaskEditor({
   media: common_MediaFull;
   /** How the picture is named on screen («picture 2 of run #41»). */
   label: string;
+  /** The words the box opens with — a recalled retouch's own (Codex 5). */
+  initialWords?: string;
+  /** Focus back to the opener on close (G-02 m-4, `useFocusReturn`). */
+  onCloseAutoFocus?: (event: Event) => void;
   disabled?: boolean;
 }): JSX.Element {
   const run = useStartDesignRun(techCardId, { scope: playgroundRunScope('retouch_zone') });
   const { showMessage } = useSnackBarStore();
   const [strokes, setStrokes] = useState<MaskStroke[]>([]);
   const [brush, setBrush] = useState<BrushSize>('m');
-  const [words, setWords] = useState('');
+  const [words, setWords] = useState(initialWords);
   const [aspect, setAspect] = useState(0);
   const [box, setBox] = useState<Box | null>(null);
 
@@ -182,7 +194,10 @@ export function MaskEditor({
     run.start(request, {
       onAccepted: () => {
         rememberRecentText(recentTextKey('retouch_zone', RETOUCH_WORDS_KEY), said);
-        showMessage('retouch started; the new picture lands in the results', 'success');
+        /* WHERE IT LANDS, TRULY (G-02 m-2): the answer is a retouch, filed under Retouch a Zone
+           (and on the grid) — not under the tile whose picture it started from, where only the
+           live run is shown (`results.tsx`, «pinned»). */
+        showMessage('retouch started — the new picture lands under Retouch a Zone', 'success');
         onOpenChange(false);
       },
     });
@@ -196,6 +211,7 @@ export function MaskEditor({
           aria-label={`mask ${label}`}
           className='fixed inset-0 z-[var(--z-modal)] flex flex-col bg-black/90 focus:outline-none'
           data-mask-editor={media.id ?? 0}
+          onCloseAutoFocus={onCloseAutoFocus}
         >
           <Dialog.Title className='sr-only'>mask {label}</Dialog.Title>
           <Dialog.Description className='sr-only'>

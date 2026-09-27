@@ -1,10 +1,12 @@
-import type { common_MediaFull } from 'api/proto-http/admin';
+import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useRef } from 'react';
 
 import { runHandle } from '../handles';
 import { recallDesignRun, useRecalledRun } from '../history-recall';
+import { workflowOpenable } from './grid';
 import { workflowByKey, workflowOfRun } from './registry';
+import { recallEngineNote, whyNot } from './registry/common';
 import type { Draft, WorkflowKey } from './registry/types';
 
 /**
@@ -22,14 +24,24 @@ import type { Draft, WorkflowKey } from './registry/types';
  * ⚠ THE MEDIA OBJECTS COME FROM THE RUN'S INPUT SNAPSHOT, the only place they survive once a
  * picture left the feed page. A picture the snapshot no longer carries is DROPPED and said out loud.
  *
+ * ⚠ ONLY A WORKFLOW THIS SERVER CAN OPEN TAKES A RECALL (G-02 Codex 6). The studio opens `?wf=` only
+ * through the same gate (`openWorkflow`); a draft laid under a gated tile would be announced «back in
+ * …» over a grid. So the gate is asked first and its own reason is said.
+ *
+ * ⚠ A SUBSTITUTED AI MODEL IS SAID (Codex 7): a run bought on a model this server no longer lists is
+ * laid back on the default, and the toast names which (`recallEngineNote`).
+ *
  * ⚠ THIS DOES NOT START A RUN. Recall fills the draft; GENERATE is still a press, and the gate still
  * has to pass. A rerun that spent money on arrival would be navigation that behaves like a purchase.
  */
 export function PlaygroundRecallIntake({
+  band,
   techCardId,
   disabled,
   onRecall,
 }: {
+  /** The band the draft lands on: the gate is asked against it, and the tile may reconcile. */
+  band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
   /** Put the rebuilt draft in place and open its workflow. */
@@ -70,6 +82,13 @@ export function PlaygroundRecallIntake({
       );
       return;
     }
+    if (!workflowOpenable(def, band)) {
+      showMessage(
+        `${handle} cannot be laid out here — ${def.title} is ${whyNot(def, band) || 'not available'}`,
+        'error',
+      );
+      return;
+    }
 
     const media = new Map<number, common_MediaFull>();
     for (const ref of run.inputs?.refs ?? []) {
@@ -77,15 +96,18 @@ export function PlaygroundRecallIntake({
       if (id > 0 && ref.media && !ref.deleted) media.set(id, ref.media);
     }
 
-    const back = def.run.recall(run, media);
-    const said = [`${handle} is back in ${def.title}`, ...back.said];
+    const back = def.run.recall(run, media, { band });
+    const engine = recallEngineNote(run, band);
+    const notes = engine ? [...back.said, engine] : back.said;
+    const said = [`${handle} is back in ${def.title}`, ...notes];
     if (back.lost) {
       said.push(
         `${back.lost} of its pictures ${back.lost === 1 ? 'is' : 'are'} no longer on this card`,
       );
     }
     answer.current(key, back.draft);
-    showMessage(said.join(' · '), back.said.length || back.lost ? 'error' : 'success');
+    showMessage(said.join(' · '), notes.length || back.lost ? 'error' : 'success');
+    // The band is read at the moment of the recall, not followed: a later band must not re-lay it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, disabled, techCardId]);
 

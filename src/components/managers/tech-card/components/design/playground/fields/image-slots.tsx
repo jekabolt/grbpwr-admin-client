@@ -6,7 +6,7 @@ import Text from 'ui/components/text';
 
 import { PictureTile } from '../../picture-tile';
 import { mediaThumb } from '../../render/model';
-import { ReuseDoor, type ReuseSource } from './reuse';
+import { REUSE_LABEL, ReuseDoor, type ReuseSource } from './reuse';
 
 /**
  * ═══ THE PICTURES A PLAYGROUND RUN STARTS FROM (C-02, owner refs 5, 8, 9, 13, 14) ═══════════════
@@ -22,7 +22,8 @@ import { ReuseDoor, type ReuseSource } from './reuse';
  * AN EMPTY SLOT IS THE UPLOAD DOOR. It is the product's `MediaSlot`: a dashed square with a +, click
  * to browse the library or upload, ⌘V to paste, drop a file on it. Under it stands ONE `Reuse` door
  * for everything else the admin already holds (this card, the model gallery, fittings, fabrics).
- * Those are the only two ways in; neither is repeated anywhere.
+ * Those are the only two ways in; neither is repeated anywhere. The door has one name wherever it
+ * stands (`REUSE_LABEL`): the owner's «Reuse an asset» on 13/14.png is the same door (G-02 n-5).
  *
  * A FILLED SLOT IS THE PICTURE AND ITS ✕. No `change`: taking a picture out and putting another in
  * is two obvious gestures, and a third button on a 128px frame is the clutter the owner asked us to
@@ -53,8 +54,6 @@ type Common = {
   sources?: readonly ReuseSource[];
   /** What the pictures are for — the header of the library and upload dialogs. */
   purpose?: string;
-  /** Label of the Reuse door; default «reuse» — it stands under the slot column in both modes. */
-  reuseLabel?: string;
   disabled?: boolean;
 };
 
@@ -200,7 +199,7 @@ export function ImageSlots(props: ImageSlotsProps): JSX.Element {
                     sources={slot.sources ?? sources}
                     room={1}
                     taken={taken}
-                    label={props.reuseLabel ?? 'reuse'}
+                    label={REUSE_LABEL}
                     disabled={disabled}
                     onPick={(list) => list[0] && put(slot.key, list[0])}
                   />
@@ -262,7 +261,7 @@ export function ImageSlots(props: ImageSlotsProps): JSX.Element {
             sources={sources}
             room={room}
             taken={slotMediaIds(value)}
-            label={props.reuseLabel ?? 'reuse'}
+            label={REUSE_LABEL}
             disabled={disabled}
             onPick={add}
           />

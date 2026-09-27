@@ -80,7 +80,12 @@ export function PlaygroundStudio({
   return (
     <>
       {/* «RUN THAT AGAIN» FROM THE HISTORY LANDS HERE — the receiver draws nothing (see its file). */}
-      <PlaygroundRecallIntake techCardId={techCardId} disabled={disabled} onRecall={onRecall} />
+      <PlaygroundRecallIntake
+        band={band}
+        techCardId={techCardId}
+        disabled={disabled}
+        onRecall={onRecall}
+      />
 
       <Section
         id='design-playground'

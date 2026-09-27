@@ -43,6 +43,12 @@ export type ReuseSource = 'card' | 'models' | 'fittings' | 'fabrics';
 
 export const REUSE_SOURCES: readonly ReuseSource[] = ['card', 'models', 'fittings', 'fabrics'];
 
+/**
+ * THE DOOR'S ONE NAME (G-02 n-5). The owner's references say «Reuse» under a slot and «Reuse an
+ * asset» on a wide button — one action, so one word everywhere it stands.
+ */
+export const REUSE_LABEL = 'Reuse';
+
 const SOURCE_WORD: Record<ReuseSource, string> = {
   card: 'this card',
   models: 'model gallery',
@@ -62,7 +68,7 @@ export type ReuseDoorProps = {
   /** Media ids the slots already hold: shown greyed, not takeable twice. */
   taken?: readonly number[];
   onPick: (media: common_MediaFull[]) => void;
-  /** Button text; the owner's references use «Reuse» under a slot, «Reuse an asset» full width. */
+  /** Button text — `REUSE_LABEL` unless a screen has a reason to say otherwise. */
   label?: string;
   disabled?: boolean;
 };
@@ -459,7 +465,7 @@ export function ReuseDoor({
   room,
   taken = [],
   onPick,
-  label = 'reuse',
+  label = REUSE_LABEL,
   disabled,
 }: ReuseDoorProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);

@@ -4,7 +4,7 @@ import type {
   common_DesignRun,
 } from 'api/proto-http/admin';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { useMemo, useRef, useState, type JSX } from 'react';
+import { useCallback, useMemo, useRef, useState, type JSX } from 'react';
 import { CalloutBox } from 'ui/components/callout-box';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
 import { Pill } from 'ui/components/pill';
@@ -16,6 +16,7 @@ import {
   cardOutputRows,
   outputsHorizon,
   runRepresentation,
+  workflowOutputsHorizon,
   type Representation,
 } from '../bench-kinds';
 import { serverSpeaksDesign } from '../capability';
@@ -28,10 +29,12 @@ import { PictureTile } from '../picture-tile';
 import { pictureIsSelected, pictureThumb, serverStatesSelected } from '../render/model';
 import { isPictureHidden } from '../visibility';
 import { useDesignWrites } from '../use-design-band';
+import { useFocusReturn } from './focus';
 import {
   PLAYGROUND_ROOM,
   inPlaygroundRoom,
   retiredPresetWord,
+  retouchSourceId,
   runWorkflowWord,
   workflowByKey,
   workflowOfRun,
@@ -53,11 +56,13 @@ import { MaskEditor } from './mask';
  *    that are still out — or that just failed — stand above the tiles, so the press has an answer
  *    on the same screen.
  *
- * ⚠ THE WINDOW IS 60 NEWEST PER COLOURWAY, and every playground run files under «no colourway», so
- * the room shares one window. When the server says it left pictures behind, the caption says so
- * (`outputsHorizon`) rather than letting an older result vanish silently — except under the tiles
- * of the colourway pool (`COLOURWAY_POOL`): a recolour may be filed under a colourway, so the
- * room's window says nothing true about their list.
+ * ⚠ THE WINDOW. The server sends the newest 60 per colourway, and inside the playground's own pool
+ * (colourway 0) the newest 60 PER WORKFLOW (band 31). When it says it left pictures behind, the
+ * caption says so rather than letting an older result vanish silently: on the grid (and under tile
+ * 10, which shows the room) the colourway-0 count (`outputsHorizon`); under an open tile ITS count
+ * (`workflowOutputsHorizon`, G-02 m-1) — and nothing on a server older than that count, or under
+ * the tiles of the colourway pool (`COLOURWAY_POOL`): a recolour or a 3D model may be filed under a
+ * colourway, so no playground window says anything true about their list.
  *
  * Corners: zoom (the gallery) and `edit ▸` (draw over it, saving a NEW picture) on every picture;
  * `mask` (C-11: paint a zone and retouch it, a new picture comes back) on every raster of the room
@@ -74,6 +79,15 @@ import { MaskEditor } from './mask';
  * Retouch a Zone works on a picture you already have, so under it stand the pictures it starts
  * from — every picture of the room, each with its Mask — and its answer lands among them, next to
  * the original. The history below it still narrows to retouches (`results.match`).
+ *
+ * ⚠ THE PINNED RUNS ARE THE OPEN WORKFLOW'S, whatever the pictures are (G-02 Codex 8): under tile 10
+ * the pictures are the room's but the live and failed runs above them are retouches only. And under
+ * any other tile, a live retouch started from one of ITS pictures stands there too (G-02 m-2) —
+ * saying truly where its answer lands (under Retouch a Zone), since that is not this tile's list.
+ *
+ * FOCUS AFTER THE MASK (G-02 m-4): the editor is opened by state — from a tile's `mask` corner or
+ * from the viewer, which closes first — so focus is handed back to the opener, or to that picture's
+ * `mask` corner when the opener is gone (`useFocusReturn`).
  */
 
 type Row = { picture: common_DesignPicture; run: common_DesignRun };
@@ -145,6 +159,17 @@ export function PlaygroundResults({
   const [editingId, setEditingId] = useState(0);
   const [maskingId, setMaskingId] = useState(0);
   const [selecting, setSelecting] = useState(0);
+  /* The picture whose editor is open — its `mask` corner is where focus returns when the door that
+     opened the editor (the viewer's Mask) is gone. A ref, so the fallback stays one function. */
+  const maskedPicture = useRef(0);
+  const maskDoor = useCallback(
+    () =>
+      document.querySelector<HTMLElement>(
+        `[data-pg-output="${maskedPicture.current}"] button[aria-label^="mask picture"]`,
+      ),
+    [],
+  );
+  const maskFocus = useFocusReturn(maskDoor);
 
   /* THE CARD CHANGED — the open editor is addressed by a picture id of the OTHER card (invariant
      12). Closed in the body of the render, never in an effect. */
@@ -160,6 +185,8 @@ export function PlaygroundResults({
   const results = roomView ? undefined : def?.run?.results;
   const reps = results?.reps ?? PLAYGROUND_ROOM;
   const match = results?.match ?? inPlaygroundRoom;
+  /** Whose live and failed runs stand above the pictures: the open workflow's, else the room's. */
+  const pinMatch = def?.run?.results.match ?? inPlaygroundRoom;
 
   const rows = useMemo(() => {
     const all = cardRows(band, reps) ?? pageRows(band, reps);
@@ -167,25 +194,37 @@ export function PlaygroundResults({
   }, [band, reps, match]);
 
   /* The runs of this workflow still out, and the newest one if it failed: the answer to a press
-     stands above what came back. Older failures live in the history, not here. */
+     stands above what came back. Older failures live in the history, not here. Then the live
+     retouches of THIS tile's pictures, which land elsewhere (the file head). */
   const pinned = useMemo(() => {
-    const mine = (band.runs ?? []).filter((run) => inPlaygroundRoom(run) && match(run));
+    const room = (band.runs ?? []).filter((run) => inPlaygroundRoom(run));
+    const mine = room.filter((run) => pinMatch(run));
     const live = mine.filter((run) => isRunLive(run));
     const newest = mine[0];
     const failed =
       newest && !isRunLive(newest) && (newest.status ?? '').trim().toLowerCase() === 'failed'
         ? [newest]
         : [];
-    return [...live, ...failed];
-  }, [band, match]);
+    const shown = new Set(rows.map((row) => row.picture.media?.id ?? 0).filter((id) => id > 0));
+    const retouching =
+      def && !roomView
+        ? room.filter((run) => !pinMatch(run) && isRunLive(run) && shown.has(retouchSourceId(run)))
+        : [];
+    return [
+      ...[...live, ...failed].map((run) => ({ run, elsewhere: false })),
+      ...retouching.map((run) => ({ run, elsewhere: true })),
+    ];
+  }, [band, pinMatch, rows, def, roomView]);
 
-  /* The colourway-0 window is the room's, not a recolour's: Change a Color and Swap Fabrics (and
-     Image to 3D, whose own view draws its models) read the COLOURWAY POOL — their pictures may be
-     filed under a colourway, so the sentence would count another list (m-5, G-02 m-8). */
-  const horizon = useMemo(
-    () => (def && COLOURWAY_POOL.has(def.key) ? null : outputsHorizon(band, 0)),
-    [band, def],
-  );
+  /* The caption of the window (the file head): the room's colourway-0 window on the grid and under
+     tile 10; the open tile's own window under it (band 31); none under the colourway pool — Change
+     a Color and Swap Fabrics (and Image to 3D, whose own view draws its models) may file under a
+     colourway, so the sentence would count another list (m-5, G-02 m-8). */
+  const horizon = useMemo(() => {
+    if (roomView) return outputsHorizon(band, 0);
+    if (!def || COLOURWAY_POOL.has(def.key)) return null;
+    return workflowOutputsHorizon(band, def.key);
+  }, [band, def, roomView]);
   const carries = rows.length ? serverStatesSelected(rows[0].picture) : true;
   const writesOff = !!disabled || !speaks;
   const masks = !writesOff && retouchOffered(band);
@@ -209,7 +248,7 @@ export function PlaygroundResults({
       action={<Counter n={rows.length} noun='picture' />}
     >
       <div className='flex flex-col gap-4'>
-        {pinned.map((run) => {
+        {pinned.map(({ run, elsewhere }) => {
           const live = isRunLive(run);
           return (
             <CalloutBox key={run.id} tone={live ? 'note' : 'error'}>
@@ -217,9 +256,11 @@ export function PlaygroundResults({
                 <b>
                   {runHandle(run.id) || 'run'} — {runOutcomeNote(run)}.
                 </b>{' '}
-                {live
-                  ? 'The picture lands here when the provider answers.'
-                  : 'These are the server’s words. Nothing was filed for this run.'}
+                {elsewhere
+                  ? 'A retouch of a picture below: it lands under Retouch a Zone when the provider answers.'
+                  : live
+                    ? 'The picture lands here when the provider answers.'
+                    : 'These are the server’s words. Nothing was filed for this run.'}
               </Text>
             </CalloutBox>
           );
@@ -288,7 +329,13 @@ export function PlaygroundResults({
                       (picture.media?.id ?? 0) > 0 &&
                       pictureThumb(picture)
                         ? {
-                            onClick: () => setMaskingId(id),
+                            onClick: () => {
+                              // The corner, or the viewer's Mask (gone by close): the fallback
+                              // below is this picture's corner.
+                              maskFocus.remember();
+                              maskedPicture.current = id;
+                              setMaskingId(id);
+                            },
                             ariaLabel:
                               `mask picture ${picture.ordinal ?? ''} — paint a zone to retouch`.trim(),
                             title:
@@ -333,9 +380,16 @@ export function PlaygroundResults({
         )}
 
         {horizon && (
-          <Text size='micro' variant='label' component='p' className='normal-case'>
-            Only the newest {horizon.carried} of this card’s {horizon.total} pictures without a
-            colourway are sent here; older ones stay in the history below.
+          <Text
+            size='micro'
+            variant='label'
+            component='p'
+            className='normal-case'
+            data-pg-horizon={roomView ? 'room' : 'workflow'}
+          >
+            {roomView
+              ? `Only the newest ${horizon.carried} of this card’s ${horizon.total} pictures without a colourway are sent here; older ones stay in the history below.`
+              : `Only the newest ${horizon.carried} of this workflow’s ${horizon.total} pictures are sent here; older ones stay in the history below.`}
           </Text>
         )}
       </div>
@@ -345,6 +399,7 @@ export function PlaygroundResults({
           key={maskingId}
           open
           onOpenChange={(next: boolean) => !next && setMaskingId(0)}
+          onCloseAutoFocus={maskFocus.onCloseAutoFocus}
           techCardId={techCardId}
           media={masking.picture.media}
           label={`${runHandle(masking.run.id) || 'run'} · picture ${masking.picture.ordinal ?? '—'}`}

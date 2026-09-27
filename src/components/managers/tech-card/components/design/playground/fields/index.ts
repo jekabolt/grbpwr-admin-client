@@ -41,6 +41,12 @@ export {
   type PantoneFieldProps,
 } from './pantone-field';
 export { PromptField, type PromptFieldProps } from './prompt-field';
-export { REUSE_SOURCES, ReuseDoor, type ReuseDoorProps, type ReuseSource } from './reuse';
+export {
+  REUSE_LABEL,
+  REUSE_SOURCES,
+  ReuseDoor,
+  type ReuseDoorProps,
+  type ReuseSource,
+} from './reuse';
 export { BOOST_STEPS, Slider, stepLabel, type SliderProps, type SliderStep } from './slider';
 export { ToggleRow, type ToggleRowProps } from './toggle-row';

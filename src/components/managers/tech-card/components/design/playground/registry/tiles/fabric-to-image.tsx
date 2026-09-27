@@ -30,8 +30,9 @@ import { EMPTY_DRAFT, type Draft, type WorkflowDef, type WorkflowRun } from '../
  *    the server's paragraph takes «the fabric named in the words above (the main fabric if they
  *    name none)», so an empty box is a legal, meaningful run.
  *  · Format → `params.image = {model: the server's default, quality: '', aspect_ratio}` (D6: no
- *    model picker on this tile; `imageOptionsOf` without an engine key). Default 1:1 — a seamless
- *    swatch is square (Q22). Drawn only where the band lists engines; `auto` sends no block.
+ *    model picker on this tile; `imageOptionsOf` without an engine key). Default 9:16 — the owner's
+ *    4.png heads the fold with it (G-02 m-6; Q22's square swatch was ours, not his). Drawn only
+ *    where the band lists engines; `auto` sends no block.
  *  · `options` stays empty: `fabric_extract` reads none (`option_not_read`).
  */
 const IMAGE = 'image';
@@ -39,7 +40,7 @@ const IMAGE = 'image';
 const REGION = 'region';
 const ASK_MAX = 4000;
 
-const FORMAT = formatSection({ initial: '1:1' });
+const FORMAT = formatSection({ initial: '9:16' });
 
 const NOT_SENT: readonly NotSentItem[] = [
   { label: 'colourway', reason: 'a playground run binds no colourway — it files under none' },

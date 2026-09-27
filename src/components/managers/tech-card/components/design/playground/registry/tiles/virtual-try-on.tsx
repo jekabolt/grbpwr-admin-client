@@ -225,7 +225,8 @@ const run: WorkflowRun = {
       title: 'Scene',
       glyph: 'image',
       collapsible: true,
-      defaultOpen: false,
+      // Open, as the owner's 2.png draws it (G-02 n-5): Source and the scene box in view.
+      defaultOpen: true,
       value: (draft) => labelOf(SCENE_OPTIONS, sceneMode(draft)).toLowerCase(),
       fields: [
         {

@@ -29,6 +29,7 @@ import { flatInputBusy, holdFlatInput, readFlatInput } from './flat-input';
 import { GapPill } from './generation/run-panel';
 import { isRunLive } from './generation/run-state';
 import { runHandle } from './handles';
+import { retouchSourceId, workflowOfRun } from './playground/registry/run-workflow';
 import type { DesignKind } from './bench-kinds';
 import {
   INPUT_MAX,
@@ -754,12 +755,22 @@ export function RecallDoors({
    * не выбор, а ловушка, и её место — в погашенной двери с причиной. У 3D мерка другая: там жест —
    * это ещё и переход на свой экран, и он осмыслен сам по себе.
    */
+  /* A RETOUCH HANDS OVER ITS PICTURE, OR NOTHING (G-02 Codex 5): its recall opens the mask editor
+     on the picture it painted, so the door is live only while the snapshot still carries that
+     picture — a words-only recall would open a tile that cannot start from anything. */
+  const retouch = workflowOfRun(run) === 'retouch_zone';
+  const retouchSource = retouchSourceId(run);
   const handsOver =
     kind === 'threed'
       ? true
-      : inputTarget === 'render'
-        ? (run.inputs?.slots ?? []).some((s) => (s.mediaId ?? 0) > 0)
-        : (run.inputs?.refs ?? []).length > 0 || !!(run.inputs?.garmentNote ?? '').trim();
+      : retouch
+        ? retouchSource > 0 &&
+          (run.inputs?.refs ?? []).some(
+            (ref) => (ref.mediaId ?? 0) === retouchSource && !!ref.media && !ref.deleted,
+          )
+        : inputTarget === 'render'
+          ? (run.inputs?.slots ?? []).some((s) => (s.mediaId ?? 0) > 0)
+          : (run.inputs?.refs ?? []).length > 0 || !!(run.inputs?.garmentNote ?? '').trim();
   /**
    * ═══ ПРОГОН 3D ДВЕРИ РЕЗУЛЬТАТА НЕ ИМЕЕТ ВОВСЕ (J-11) ═══════════════════════════════════════
    *
@@ -778,11 +789,13 @@ export function RecallDoors({
      стоит раньше «некому отдать», потому что вторая причина лечится переходом на другой шаг, а
      первая — нет, и человек должен знать, что переход ему не поможет. */
   const inputWhy =
-    !run.inputs || !handsOver
-      ? 'nothing went in'
-      : !answerable(inputTarget)
-        ? `${kindLabel(inputTarget)} is not on screen`
-        : null;
+    retouch && run.inputs && !handsOver
+      ? 'its picture is gone'
+      : !run.inputs || !handsOver
+        ? 'nothing went in'
+        : !answerable(inputTarget)
+          ? `${kindLabel(inputTarget)} is not on screen`
+          : null;
   const resultsWhy = isThreed
     ? 'its output is a model'
     : live
@@ -836,7 +849,9 @@ export function RecallDoors({
           ? // ПОДПИСЬ КНОПКИ НАЗЫВАЕТ ПОСЛЕДСТВИЕ, А ОНО СТАЛО РАЗРУШИТЕЛЬНЫМ (J-4): дверь больше
             // не «добавляет», она замещает вход результатами прогона.
             'replace the input with its results'
-          : 'replace the prompt';
+          : retouch
+            ? 'open the mask'
+            : 'replace the prompt';
 
   const inputDark = !!disabled || !!inputWhy;
   const resultsDark = !!disabled || !!resultsWhy;
@@ -897,6 +912,12 @@ export function RecallDoors({
       >
         <div className='space-y-2'>
           {target === 'flat' && plan && <FlatQuestion plan={plan} handle={handle} mode={asking!} />}
+          {target === 'playground' && retouch && asking === 'input' && (
+            <Text size='control' component='p'>
+              Retouch a Zone opens with the mask on {handle}’s picture and its words in the box. The
+              zone is not carried over — paint it again, then GENERATE.
+            </Text>
+          )}
           {target === 'render' && plates && (
             <PlateQuestion plates={plates} handle={handle} switches={canSwitch} />
           )}

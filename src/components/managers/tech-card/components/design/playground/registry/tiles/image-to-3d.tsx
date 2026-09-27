@@ -4,6 +4,7 @@ import type {
   common_MediaFull,
 } from 'api/proto-http/admin';
 import type { JSX } from 'react';
+import Text from 'ui/components/text';
 
 import { benchKindOf, colorwayOf } from '../../../bench-kinds';
 import type { NotSentItem } from '../../../core';
@@ -49,6 +50,14 @@ import {
  *     form says so on the row and never sends that pair.
  *   · `presentation: 'air'` (the garment on its own, the old step's default) — the one word of the
  *     old body/size/fit block that reached the provider; body, size and fit are gone (Q20: inert).
+ *     A RECALLED run keeps its own (G-02 Codex 4): a STEP 5 build «on a model» comes back «on a
+ *     model», with the old block's inert fields as they were (`CARRY`), and the form says so — the
+ *     tile draws no presentation row, so silence would turn «model» into «air».
+ *   · `surface_hint: ''` ALWAYS — A DECIDED NON-USE, NOT A GAP (G-02 Codex 1). The band may list
+ *     `surface_hint` (routes with a text field, `threed_route.go`), but the owner's tile 12 (14.png)
+ *     has exactly four rows — Texture, Realistic materials, Quality, Follow — and no words box. The
+ *     capability is deliberately unused: no field is drawn for it, '' is sent, and the route's own
+ *     texturing words stand. Adding a box is the owner's call, not this tile's.
  *   · `colorway_id` = the colourway of the picture WHEN it is a render plate standing on this card's
  *     render bench (Reuse → this card → «fabric render · <colourway>»): the model files under that
  *     colourway, as a STEP 5 build did. Any other picture → 0.
@@ -62,6 +71,24 @@ import {
  */
 const REFERENCE = 'reference';
 const OPTIONS = 'options';
+
+/**
+ * THE OLD 3D BLOCK A RECALLED RUN CARRIES (G-02 Codex 4) — draft `choices` keys of fields the tile
+ * does not draw and sends back as they were: the presentation (the one word that reaches the
+ * provider's texturing steer) and the inert body / size / fit (Q20 — the door takes them silently).
+ * A fresh draft has none of them: `presentation` then leaves as `air`, the rest empty.
+ */
+const CARRY = {
+  presentation: 'carry.presentation',
+  modelId: 'carry.modelId',
+  garmentSizeId: 'carry.garmentSizeId',
+  fitOverride: 'carry.fitOverride',
+  bodyType: 'carry.bodyType',
+} as const;
+
+/** The presentation a draft sends: the recalled run's own word, else `air`. */
+const presentationOf = (draft: Draft): string =>
+  (draft.choices[CARRY.presentation] ?? '').trim() || 'air';
 
 /** Draft keys of the options (flags / choices), read with their defaults by `chosenOf`. */
 const TEXTURE = 'texture';
@@ -126,6 +153,27 @@ const anyOption = (band: GetDesignBandResponse): boolean =>
 const one = (draft: Draft) => mediaIdsOf(imagesOf(draft, REFERENCE)).slice(0, 1);
 
 /**
+ * The line under the picture while the draft carries a recalled presentation other than `air` — the
+ * form has no row for it, and the build would silently differ from the form without it (Codex 4).
+ */
+function CarriedPresentation({ draft }: CustomFieldProps): JSX.Element | null {
+  const presentation = presentationOf(draft);
+  if (presentation === 'air') return null;
+  return (
+    <Text
+      size='micro'
+      variant='label'
+      component='p'
+      className='normal-case'
+      data-threed-carried={presentation}
+    >
+      Kept from the recalled run: presentation «{presentation}»
+      {presentation === 'model' ? ' (the garment is textured as worn on a body)' : ''}.
+    </Text>
+  );
+}
+
+/**
  * The colourway a picture belongs to WHEN it stands on a render slot of this card — the one case
  * the old step's colourway binding still means something. 0 for everything else.
  */
@@ -139,14 +187,13 @@ export function plateColorway(band: GetDesignBandResponse, mediaId: number): num
   return 0;
 }
 
-/**
- * The price words of the press: fal's published $1.20 a build, $1.40 in «ultra» (detailed). «About»:
- * the row itself adds that the server prices the run when it starts (a configured tariff may reserve
- * more), so a bare «reserved» here would contradict it (impeccable pass).
+/*
+ * NO DOLLAR FIGURE ON THIS TILE (G-02 Codex 3). The server reserves max(the published estimate, the
+ * CONFIGURED route's ceiling) — `designThreedRunEstimate`, backend design_threed_reference.go — and
+ * the band states neither the tariff nor the reserve. Any number printed here is one the server may
+ * legitimately exceed, so the row says what the band can say: the server prices the run when it
+ * starts, and the history shows what it cost.
  */
-function priceWords(quality: string): string {
-  return quality === 'detailed' ? 'about $1.40' : 'about $1.20';
-}
 
 /* ─────────────────────────── the options fold ─────────────────────────── */
 
@@ -155,7 +202,7 @@ const QUALITY_OPTIONS = [
   {
     value: 'detailed' as const,
     label: 'Detailed',
-    hint: 'finer geometry · $1.40 instead of $1.20',
+    hint: 'finer geometry · a higher reserve than Standard',
   },
 ];
 
@@ -271,6 +318,11 @@ const run: WorkflowRun = {
           key: 'reference-note',
           text: 'Read as the front of the garment. Works best on a plain background (Remove Background cuts one out).',
         },
+        {
+          type: 'custom',
+          key: 'carried',
+          render: (props) => <CarriedPresentation {...props} />,
+        },
       ],
     },
     {
@@ -304,26 +356,29 @@ const run: WorkflowRun = {
         colorwayId: plateColorway(band, ids[0] ?? 0),
         threed: {
           // EXPLICIT ZERO / EMPTY: the old block's fields are «not said» (frames since K-11; body,
-          // size and fit are inert — Q20). `presentation: air` is the old step's default.
+          // size and fit are inert — Q20). `presentation: air` is the old step's default; a
+          // recalled run sends its own block back as it was (`CARRY`, Codex 4).
           frames: 0,
-          presentation: 'air',
-          modelId: 0,
-          garmentSizeId: 0,
-          fitOverride: '',
-          bodyType: '',
+          presentation: presentationOf(draft),
+          modelId: Number(draft.choices[CARRY.modelId] ?? 0) || 0,
+          garmentSizeId: Number(draft.choices[CARRY.garmentSizeId] ?? 0) || 0,
+          fitOverride: draft.choices[CARRY.fitOverride] ?? '',
+          bodyType: draft.choices[CARRY.bodyType] ?? '',
           sourcePictureIds: [],
           referenceMediaIds: ids,
           texture: o.texture,
           pbr: o.pbr,
           quality: o.quality,
           follow: o.follow,
+          // Deliberately unused (the file head, G-02 Codex 1): the owner's form has no words box.
           surfaceHint: '',
         },
       },
     };
   },
 
-  shape: (_draft, request) => `1 model · ${priceWords(request.params.threed?.quality ?? '')}`,
+  // The row adds «priced by the server when the run starts» itself — no figure (Codex 3).
+  shape: () => '1 model',
 
   inventory: (draft, request) => {
     const sent = request.params.threed?.referenceMediaIds ?? [];
@@ -373,10 +428,17 @@ const run: WorkflowRun = {
         {
           key: 'craft',
           label: 'what the server adds',
-          text: '«presentation air» as the surface hint: the garment on its own, no body.',
+          text:
+            (t?.presentation ?? 'air') === 'air'
+              ? '«presentation air» as the surface hint: the garment on its own, no body.'
+              : `«presentation ${t?.presentation}» as the surface hint — kept from the recalled run.`,
         },
       ],
-      notSent: NOT_SENT,
+      // A recalled STEP 5 block travels back as it was (`CARRY`): «not sent» would then be untrue.
+      notSent:
+        (t?.modelId ?? 0) > 0 || (t?.garmentSizeId ?? 0) > 0 || !!t?.fitOverride || !!t?.bodyType
+          ? NOT_SENT.filter((item) => item.label !== 'body, size, fit')
+          : NOT_SENT,
     };
   },
 
@@ -390,8 +452,13 @@ const run: WorkflowRun = {
    * A 3D run laid back: its first reference and its options. A STEP 5 build (bench plates, no
    * references) has no picture to lay out — said, not guessed; extra angles past the first are
    * said too (this tile takes one picture).
+   *
+   * ⚠ NOTHING OF THE OLD RUN IS DROPPED IN SILENCE (G-02 Codex 4). Its presentation and the inert
+   * body / size / fit ride along (`CARRY`) and are sent back as they were; an option it stated that
+   * THIS server's route no longer honours (`threed_options`) is named — the build uses the route's
+   * own setting for it; and its surface words, which this tile never sends, are named too.
    */
-  recall: (past: common_DesignRun, media) => {
+  recall: (past: common_DesignRun, media, ctx) => {
     const t = past.params?.threed;
     const ids = (t?.referenceMediaIds ?? []).filter((id) => (id ?? 0) > 0);
     const said: string[] = [];
@@ -416,6 +483,38 @@ const run: WorkflowRun = {
     if (t?.pbr) flags[PBR] = t.pbr === 'on';
     if (t?.quality) choices[QUALITY] = t.quality === 'detailed' ? 'detailed' : 'standard';
     if (t?.follow) choices[FOLLOW] = t.follow === 'shape' ? 'shape' : 'photo';
+
+    const presentation = (t?.presentation ?? '').trim();
+    if (presentation && presentation !== 'air') {
+      choices[CARRY.presentation] = presentation;
+      said.push(`it was built «${presentation}» — this build keeps that`);
+    }
+    if ((t?.modelId ?? 0) > 0) choices[CARRY.modelId] = String(t?.modelId);
+    if ((t?.garmentSizeId ?? 0) > 0) choices[CARRY.garmentSizeId] = String(t?.garmentSizeId);
+    if ((t?.fitOverride ?? '').trim()) choices[CARRY.fitOverride] = t!.fitOverride!.trim();
+    if ((t?.bodyType ?? '').trim()) choices[CARRY.bodyType] = t!.bodyType!.trim();
+
+    const band = ctx?.band;
+    if (band) {
+      const gone = (
+        [
+          [TEXTURE, t?.texture ? `texture ${t.texture}` : ''],
+          [PBR, t?.pbr ? `materials ${t.pbr}` : ''],
+          [QUALITY, t?.quality ? `${t.quality} quality` : ''],
+          [FOLLOW, t?.follow ? `follow the ${t.follow}` : ''],
+        ] as const
+      )
+        .filter(([name, word]) => word && !offers(band, name))
+        .map(([, word]) => word);
+      if (gone.length) {
+        said.push(
+          `this server no longer offers ${gone.join(', ')} — the build uses its own setting`,
+        );
+      }
+    }
+    if ((t?.surfaceHint ?? '').trim()) {
+      said.push('its surface words did not come along — this tile sends none');
+    }
     return {
       draft: { ...EMPTY_DRAFT, images: { [REFERENCE]: list }, flags, choices },
       said,

@@ -84,3 +84,14 @@ export function freeformPresetOf(run: common_DesignRun): string {
   if (run.params === undefined) return '';
   return (run.params.freeform?.preset ?? '').trim();
 }
+
+/**
+ * THE PICTURE A RETOUCH PAINTED ON (`params.freeform.items[0].mediaId`, the one item the door takes)
+ * — or 0 where the run is no retouch or does not say (an off-page stub carries no params). Read by
+ * the results (a live retouch shown under the tile its picture came from, G-02 m-2) and by the
+ * history's recall door (a retouch recalls only while that picture is still in its snapshot).
+ */
+export function retouchSourceId(run: Pick<common_DesignRun, 'kind' | 'params'>): number {
+  if (run.params === undefined || workflowOfRun(run) !== 'retouch_zone') return 0;
+  return run.params.freeform?.items?.[0]?.mediaId ?? 0;
+}

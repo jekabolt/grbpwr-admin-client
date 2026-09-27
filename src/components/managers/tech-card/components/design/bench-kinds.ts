@@ -493,6 +493,34 @@ export function outputsHorizon(
   return total > carried ? { total, carried } : null;
 }
 
+/**
+ * WHAT ONE PLAYGROUND WORKFLOW'S WINDOW LEFT BEHIND (band 31, G-02 m-1 / Codex 2), or `null` when it
+ * left nothing behind — and when this server states no count (`outputsTotalByWorkflow` absent: a
+ * binary older than the field; no caption rather than one counted over another list).
+ *
+ * The server cuts the playground's pool (colourway 0, section 1) PER WORKFLOW: each tile gets its own
+ * «newest 60» (backend `designCardOutputsWindowKey`). So a tile's caption is ITS count — `carried` =
+ * the outputs that arrived stamped with it (`run_workflow`), `total` = the server's count for it —
+ * never the colourway-0 sum, which would caption Create or edit's 60 with the whole room's numbers.
+ *
+ * ⚠ ONLY FOR A WORKFLOW OF THE PLAYGROUND'S OWN POOL. Change a Color, Swap Fabrics and Image to 3D
+ * file into the per-colourway pool they share with renders (section 0): their window is not theirs,
+ * and the caller does not ask this for them.
+ */
+export function workflowOutputsHorizon(
+  band: GetDesignBandResponse,
+  workflow: string,
+): { total: number; carried: number } | null {
+  if (!outputsCarryRows(band)) return null;
+  const totals = band.outputsTotalByWorkflow;
+  if (totals === undefined) return null;
+  const total = totals[workflow] ?? 0;
+  const carried = (band.outputs ?? []).filter(
+    (output) => (output.runWorkflow ?? '').trim() === workflow,
+  ).length;
+  return total > carried ? { total, carried } : null;
+}
+
 /* ═══════════════════ THE COLOURWAY AXIS — the THIRD axis of the bench, said once ═══════════════
  *
  * L-2, the owner: «у фабрик-рендера 1 колорвей — там мультивью, из него сплитом стороны, и так на

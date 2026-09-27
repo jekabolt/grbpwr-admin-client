@@ -13,20 +13,31 @@ import {
 import Text from 'ui/components/text';
 import { inputToDecimal } from 'utils/decimal';
 
+import { PRICED_LATER } from '../../../core';
+import { slotCounter } from '../../fields';
 import { cornerText, type MaskPoint } from '../../mask/geometry';
-import { emptyParams, workflowOffered } from '../common';
-import { matchesWorkflow } from '../run-workflow';
-import type { Refusal, RunRequest, WorkflowDef, WorkflowRun } from '../types';
+import { RetouchSource } from '../../mask/retouch-source';
+import { emptyParams, imagesOf, workflowOffered } from '../common';
+import { matchesWorkflow, retouchSourceId } from '../run-workflow';
+import {
+  EMPTY_DRAFT,
+  type Refusal,
+  type RunRequest,
+  type WorkflowDef,
+  type WorkflowRun,
+} from '../types';
 
 /**
  * ═══ TILE 10 · RETOUCH A ZONE → kind `freeform`, preset `retouch` (C-11, D3 phase 2) ═════════════
  *
  * Owner: «Paint over part of a design and describe what should change there.» His 12.png has NO
- * form: the tile explains, and the work starts on a picture — «press Mask, paint the zone, describe
- * what should be there». So this file holds two things:
+ * form: the tile explains, and the work starts on a picture — «Open or upload any picture …, press
+ * Mask, paint the zone, describe what should be there». So this file holds two things:
  *
- *   · the tile's panel: the explanation and nothing else (`startsElsewhere` — the panel draws no
- *     GENERATE; one action, one button, and that button is in the mask editor);
+ *   · the tile's panel: the explanation, the honest lines, and ONE picture slot (+ upload / Reuse,
+ *     G-02 M-1, `../../mask/retouch-source.tsx`) whose pick opens the same mask editor the result
+ *     tiles open (`startsElsewhere` — the panel draws no GENERATE; one action, one button, and that
+ *     button is in the mask editor);
  *   · THE ONE WRITER OF A RETOUCH REQUEST (`retouchRequest`) and its free refusals
  *     (`retouchRefusal`), which the mask editor (`../../mask/mask-editor.tsx`) calls.
  *
@@ -44,6 +55,10 @@ import type { Refusal, RunRequest, WorkflowDef, WorkflowRun } from '../types';
 
 /** The prompt's field key — also its Ideas and Recently used key (`ideas.ts` `retouch_zone`). */
 export const RETOUCH_WORDS_KEY = 'change_text';
+/** Draft `images` key of the panel's one picture — the picture a retouch starts from (M-1). */
+export const RETOUCH_SOURCE_KEY = 'source';
+/** Draft flag: the mask editor is open on that picture (a pick, a `mask` corner, a recall). */
+export const RETOUCH_MASKING_KEY = 'masking';
 /** The door's ceiling on one text of an item (`MaxDesignFreeformTextRunes`). */
 export const RETOUCH_WORDS_MAX = 1000;
 /** A window cannot be cut from a picture under this on either side (`WindowMinSourcePx`). */
@@ -151,17 +166,35 @@ export function retouchRequest(input: RetouchInput): RunRequest {
   };
 }
 
-/** The panel's words (12.png, adapted: our results, no credits — we price in $). */
+/**
+ * The price line of a retouch (G-02 m-3). The band states no price — `image_models` carries slugs,
+ * ratios and tiers, not their ceilings — so no number is derived here; the server prices the run when
+ * it starts and the history shows what it cost.
+ */
+export const RETOUCH_PRICE = `1 new picture per retouch · ${PRICED_LATER}`;
+
+/** The panel's words: the owner's 12.png, less the credit (we price in $, by the server). */
 function Explanation(): JSX.Element {
   return (
     <div className='flex max-w-[60ch] flex-col gap-3' data-retouch-explanation=''>
+      <Text component='p' className='normal-case font-bold'>
+        Retouch a Zone works on a picture you already have.
+      </Text>
       <Text component='p' className='normal-case'>
-        Retouch a Zone works on a picture you already have. Open any picture in the results, press{' '}
-        <b>Mask</b>, paint the zone to change and describe what should be there. The retouch is
-        generated in place.
+        Open or upload any picture here or in the results, press <b>Mask</b>, paint the zone to
+        change and describe what should be there. The retouch is generated in place.
       </Text>
       <Text size='micro' variant='label' component='p' className='normal-case'>
         {RETOUCH_CAVEAT}
+      </Text>
+      <Text
+        size='micro'
+        variant='label'
+        component='p'
+        className='normal-case'
+        data-retouch-price=''
+      >
+        {RETOUCH_PRICE}
       </Text>
     </div>
   );
@@ -177,6 +210,20 @@ const run: WorkflowRun = {
       glyph: 'text',
       fields: [{ type: 'custom', key: 'explanation', render: () => <Explanation /> }],
     },
+    {
+      key: RETOUCH_SOURCE_KEY,
+      title: 'Picture',
+      glyph: 'image',
+      // «0/1», as every picture section of the room counts its slots (C-12).
+      value: (draft) => slotCounter(imagesOf(draft, RETOUCH_SOURCE_KEY).length, 1),
+      fields: [
+        {
+          type: 'custom',
+          key: RETOUCH_SOURCE_KEY,
+          render: (props) => <RetouchSource {...props} />,
+        },
+      ],
+    },
   ],
   startsElsewhere: true,
   // The panel never presses: these answer for the empty form, and the editor asks the same writer.
@@ -185,7 +232,8 @@ const run: WorkflowRun = {
   shape: () => '1 picture',
   inventory: () => ({
     kindWord: 'retouch a zone',
-    intro: 'A retouch starts from the Mask action on a picture in the results.',
+    intro:
+      'A retouch starts from the Mask action on a picture: the one above, or one in the results.',
     groups: [],
     notSent: [],
   }),
@@ -196,6 +244,28 @@ const run: WorkflowRun = {
        answer lands next to it. A stub run off the feed's first page states no preset; the server's
        stamp on its output (`run_workflow`) says whether it was a retouch (`workflowOfRun`). */
     match: matchesWorkflow('retouch_zone'),
+  },
+  /**
+   * «Run that again» on a retouch (Codex 5): its picture back in the panel's slot WITH THE MASK
+   * EDITOR OPEN ON IT, and its words in the box. The zone is not carried: phase 2 froze a polygon,
+   * the brush paints strokes, and a hull redrawn as paint would be a zone nobody painted — said, not
+   * guessed. The history offers this door only while the snapshot still carries that picture
+   * (`history-recall.tsx`, `handsOver`); a picture gone since is said here too.
+   */
+  recall: (past, media) => {
+    const id = retouchSourceId(past);
+    const found = id > 0 ? media.get(id) ?? null : null;
+    const words = past.params?.freeform?.items?.[0]?.texts?.[0] ?? '';
+    return {
+      draft: {
+        ...EMPTY_DRAFT,
+        images: { [RETOUCH_SOURCE_KEY]: found ? [found] : [] },
+        texts: { [RETOUCH_WORDS_KEY]: words },
+        flags: { [RETOUCH_MASKING_KEY]: !!found },
+      },
+      said: found ? ['paint the zone again — the brush opens on its picture'] : [],
+      lost: found || id <= 0 ? 0 : 1,
+    };
   },
 };
 

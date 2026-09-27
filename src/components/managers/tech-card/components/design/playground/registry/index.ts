@@ -110,7 +110,13 @@ export function workflowByKey(key: string | null | undefined): WorkflowDef | nul
 }
 
 // Which workflow a past run belongs to — the server's rule in TS, one answer for every reader.
-export { freeformPresetOf, matchesWorkflow, workflowOfRun, type RoomKey } from './run-workflow';
+export {
+  freeformPresetOf,
+  matchesWorkflow,
+  retouchSourceId,
+  workflowOfRun,
+  type RoomKey,
+} from './run-workflow';
 
 /** The representations of the playground room: its own kinds and the recolours ON MODEL held (C-01). */
 export const PLAYGROUND_ROOM: readonly Representation[] = ['playground', 'onmodel'];

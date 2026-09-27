@@ -268,7 +268,6 @@ function Field({
           techCardId={techCardId}
           sources={field.sources}
           purpose={field.purpose ?? def.title}
-          reuseLabel={field.reuseLabel}
           disabled={disabled}
         />
       ) : (
@@ -281,7 +280,6 @@ function Field({
           techCardId={techCardId}
           sources={field.sources}
           purpose={field.purpose ?? def.title}
-          reuseLabel={field.reuseLabel}
           disabled={disabled}
         />
       );

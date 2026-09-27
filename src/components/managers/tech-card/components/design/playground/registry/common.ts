@@ -363,6 +363,27 @@ export function recallImage(
 }
 
 /**
+ * THE ONE LINE A RECALL SAYS ABOUT ITS AI MODEL (G-02 Codex 7) — `null` when there is nothing to say.
+ * `recallImage` lays the frozen slug back into the draft and `engineOf` falls back to the server's
+ * default when that slug is gone; without this line the substitution would be silent. Said when the
+ * run named a model this server no longer lists: which default replaces it, or — on a server that
+ * takes no per-run model at all — that the server's own model draws it.
+ */
+export function recallEngineNote(
+  past: common_DesignRun,
+  band: GetDesignBandResponse,
+): string | null {
+  const want = (past.params?.image?.model ?? '').trim();
+  if (!want) return null;
+  const rows = imageModelsOf(band);
+  if (!rows)
+    return `its AI model (${want}) cannot be chosen on this server — the server's own draws it`;
+  if (rows.some((m) => (m.slug ?? '').trim() === want)) return null;
+  const now = rows.find((m) => m.isDefault) ?? rows[0];
+  return `its AI model (${want}) is no longer offered — ${(now.label ?? '').trim() || now.slug} replaces it`;
+}
+
+/**
  * THE AI MODEL SECTION (D6: tiles 1, 7, 11) — folded, «<label> · <quality>» on its header, drawn
  * only where the server offers engines. One per tile; its field key is the one `imageOptionsOf` and
  * a bound Format name.

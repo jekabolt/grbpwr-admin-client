@@ -100,7 +100,6 @@ export type PromptFieldDef = FieldBase & {
 export type ImagesFieldDef = FieldBase & {
   type: 'images';
   purpose?: string;
-  reuseLabel?: string;
   sources?: readonly ReuseSource[];
 } & ({ mode: 'grow'; max: number } | { mode: 'fixed'; slots: readonly ImageSlotDef[] });
 
@@ -324,9 +323,14 @@ export type WorkflowRun = {
   /**
    * «Run that again» from the history: the draft rebuilt from a past run's FROZEN parameters and
    * the media its input snapshot still carries (`media`, by id). `said` = what could not be carried
-   * over, in words; the intake prints it. Absent = this workflow recalls nothing.
+   * over, in words; the intake prints it. Absent = this workflow recalls nothing. `ctx` = the band
+   * the draft lands on (the intake always passes it; a tile may reconcile against it — G-02 Codex 4).
    */
-  recall?: (run: common_DesignRun, media: ReadonlyMap<number, common_MediaFull>) => Recalled;
+  recall?: (
+    run: common_DesignRun,
+    media: ReadonlyMap<number, common_MediaFull>,
+    ctx?: WireCtx,
+  ) => Recalled;
 };
 
 export type Recalled = { draft: Draft; said: readonly string[]; lost: number };
