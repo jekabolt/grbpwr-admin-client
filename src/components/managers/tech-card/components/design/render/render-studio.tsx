@@ -27,7 +27,7 @@ import { OutputsSection } from './outputs';
 import { Palette } from './palette';
 import { RenderStepScope, type RenderStep } from './render-tile';
 import { SidesSection, useSidesTarget } from './side-row';
-import { useStartDesignRun } from './use-design-run';
+import { useStartDesignRun, type StartRunInput } from './use-design-run';
 import { WhatModelGetsRenderModal } from './what-model-gets';
 
 /**
@@ -327,12 +327,15 @@ export function RenderStudio({
   }, [band, sent, wire, colourPlan.plan, colorwayArchived, colorwayLabel, target.nowhere]);
 
   const generate = () => {
-    /* O-61 (D-60): слова карточки, показанные в пустом IN WORDS, становятся СВОИМИ черновику до
-       запроса — как флэт отдаёт свой засев в форму перед `flush`. Тело ниже несёт их и без этого
-       (`draft.recipe` — слова на экране); вызов закрепляет их за подачей: правка WORDS флэта после
-       прогона их уже не подменит. Свои слова уже стоят — вызов ничего не делает. */
-    draft.materializeWords();
-    run.start({
+    /* O-61 (D-60, D-71): слова карточки, показанные в пустом IN WORDS, становятся СВОИМИ черновику —
+       как флэт отдаёт свой засев в форму перед `flush`; правка WORDS флэта после прогона их уже не
+       подменит. Тело ниже несёт их и без этого (`wire` — слова на экране), поэтому до ответа
+       черновик НЕ трогается (r4; ревью Codex FIX FIRST, Major 2): квитанция нажатия уходит в
+       `onStarted` и отдаётся, только когда прогон заведён и поле показывает всё тот же засев. Отказ
+       или обрыв не трогают ничего — слова остаются живым засевом. Свои слова уже стоят — квитанции
+       нет. */
+    const pressed = draft.wordsAtPress();
+    const body: StartRunInput = {
       kind: 'render',
       ask: '',
       params: {
@@ -370,7 +373,8 @@ export function RenderStudio({
         // Meaningful on kind=flat only; named because the contract wants the field named.
         flatSlotIds: [],
       },
-    });
+    };
+    run.start(body, pressed ? () => draft.materializeWords(pressed) : undefined);
   };
 
   /* ⚠ СТРОКА СОСТАВА СНЯТА ЦЕЛИКОМ (r3 п.27) — «made of pattern 1 — … · split into the slots

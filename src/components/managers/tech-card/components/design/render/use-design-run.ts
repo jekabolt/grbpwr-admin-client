@@ -59,7 +59,18 @@ export type StartRunInput = {
 };
 
 export type StartRunState = {
-  start: (input: StartRunInput) => void;
+  /**
+   * `onStarted` — WHAT THE SCREEN DOES ONCE THE RUN EXISTS, AND ONLY THEN (O-61 r4, D-71).
+   *
+   * A press can have a consequence on the screen that pressed it which must not outlive a press that
+   * bought nothing: FABRIC RENDER makes the card's words shown in IN WORDS the draft's own. Done
+   * before this void call, it stood after a refusal, a 409 or a dropped connection too (Codex, FIX
+   * FIRST, Major 2). So it waits for the server's answer: called after this hook's own success (the
+   * band invalidated, the ledger cleared), never on a failure — the failure path is untouched — and,
+   * as react-query's per-call callback, only for this hook's LAST press and only while the screen
+   * that pressed is mounted: a screen that is gone has nothing to make its own.
+   */
+  start: (input: StartRunInput, onStarted?: () => void) => void;
   isPending: boolean;
   /**
    * THE REFUSAL OF THE LAST PRESS, VERBATIM, AND IT SURVIVES THE TOAST.
@@ -198,7 +209,7 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
   });
 
   const start = useCallback(
-    (input: StartRunInput) => {
+    (input: StartRunInput, onStarted?: () => void) => {
       if (!techCardId || techCardId <= 0) return;
       // THE FINGERPRINT COVERS EVERY FIELD THAT REACHES THE WIRE — THE CARD INCLUDED. `techCardId`
       // is the first field of the request and the server's own idempotency key is scoped by it, so
@@ -216,7 +227,11 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
       if (ledger.current?.fingerprint !== fingerprint) {
         ledger.current = { fingerprint, id: newClientRequestId() };
       }
-      mutation.mutate({ ...input, techCardId, clientRequestId: ledger.current.id });
+      // `onStarted` on success only — the reason is on `StartRunState.start`.
+      mutation.mutate(
+        { ...input, techCardId, clientRequestId: ledger.current.id },
+        onStarted ? { onSuccess: () => onStarted() } : undefined,
+      );
     },
     [techCardId, mutation],
   );
