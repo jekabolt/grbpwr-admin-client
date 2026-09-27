@@ -36,6 +36,12 @@ export type ImageSlotDef = {
   key: string;
   /** Shown above the slot. `''` draws no label (a lone slot under a titled fold). */
   label: string;
+  /**
+   * This slot's own Reuse sources, when its pictures are of another kind than its neighbour's
+   * (Swap Fabrics: «Your design» from the card, «New fabric» from the fabrics). Default: the
+   * field's `sources`.
+   */
+  sources?: readonly ReuseSource[];
 };
 
 type Common = {
@@ -191,7 +197,7 @@ export function ImageSlots(props: ImageSlotsProps): JSX.Element {
                   <ReuseDoor
                     band={band}
                     techCardId={techCardId}
-                    sources={sources}
+                    sources={slot.sources ?? sources}
                     room={1}
                     taken={taken}
                     label={props.reuseLabel ?? 'reuse'}

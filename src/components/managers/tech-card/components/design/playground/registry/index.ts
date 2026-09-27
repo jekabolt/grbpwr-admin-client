@@ -2,10 +2,16 @@ import type { common_DesignRun } from 'api/proto-http/admin';
 
 import { runRepresentation, type Representation } from '../../bench-kinds';
 import { RETIRED_PRESET_WORD, notYet } from './common';
+import { freeformPresetOf, workflowOfRun, type RoomKey } from './run-workflow';
+import { ADD_LOGO } from './tiles/add-logo';
 import { CHANGE_COLOR } from './tiles/change-color';
 import { CREATE_EDIT } from './tiles/create-edit';
+import { DESIGN_VARIATIONS } from './tiles/design-variations';
+import { FABRIC_TO_IMAGE } from './tiles/fabric-to-image';
+import { GHOST_MANNEQUIN } from './tiles/ghost-mannequin';
 import { REMOVE_BACKGROUND } from './tiles/remove-background';
-import type { WorkflowDef, WorkflowKey } from './types';
+import { SWAP_FABRICS } from './tiles/swap-fabrics';
+import type { WorkflowDef } from './types';
 
 /**
  * ═══ THE TWELVE, IN THE OWNER'S GRID ORDER (00-OWNER-SPEC, tiles 1–12) ═════════════════════════
@@ -28,13 +34,13 @@ export const WORKFLOWS: readonly WorkflowDef[] = [
     key: 'fabric_to_image',
     title: 'Fabric to Image',
     blurb: 'Extract a print or fabric pattern from any image.',
-    gate: notYet,
+    ...FABRIC_TO_IMAGE,
   },
   {
     key: 'ghost_mannequin',
     title: 'Image to Ghost Mannequin',
     blurb: 'Turn any image into a ghost mannequin visual.',
-    gate: notYet,
+    ...GHOST_MANNEQUIN,
   },
   {
     key: 'change_color',
@@ -46,20 +52,20 @@ export const WORKFLOWS: readonly WorkflowDef[] = [
     key: 'swap_fabrics',
     title: 'Swap Fabrics',
     blurb: 'Swap a fabric on a fashion design or any image.',
-    gate: notYet,
+    ...SWAP_FABRICS,
   },
   {
     key: 'add_logo',
     title: 'Add a Logo',
     blurb:
       'Place your logo on a garment: upload the clothing image and the logo as a PNG, the AI sets it into the fabric realistically.',
-    gate: notYet,
+    ...ADD_LOGO,
   },
   {
     key: 'design_variations',
     title: 'Create Design Variations',
     blurb: 'Create fashion design variations from a reference image.',
-    gate: notYet,
+    ...DESIGN_VARIATIONS,
   },
   {
     key: 'remove_background',
@@ -99,29 +105,8 @@ export function workflowByKey(key: string | null | undefined): WorkflowDef | nul
   return WORKFLOWS.find((w) => w.key === key) ?? null;
 }
 
-/**
- * ═══ WHICH WORKFLOW A PAST RUN BELONGS TO — the recall address and the results label ════════════
- *
- * `recolor` is ON MODEL's kind and now Change a Color; `cutout` is Remove Background; `freeform`
- * is Create or edit — including the retired presets `add_hardware` / `repaint_parts` (Q17): their
- * pictures and words are recalled there and the intake says what did not come along (roles,
- * marked areas). A kind outside the room answers `null`.
- */
-export type RoomKey = Extract<WorkflowKey, 'change_color' | 'remove_background' | 'create_edit'>;
-
-export function workflowOfRun(run: Pick<common_DesignRun, 'kind'>): RoomKey | null {
-  const kind = (run.kind ?? '').trim().toLowerCase();
-  if (kind === 'recolor') return 'change_color';
-  if (kind === 'cutout') return 'remove_background';
-  if (kind === 'freeform') return 'create_edit';
-  return null;
-}
-
-/** The preset a freeform run was bought under, or `''` where the run does not say (an off-page stub). */
-export function freeformPresetOf(run: common_DesignRun): string {
-  if (run.params === undefined) return '';
-  return (run.params.freeform?.preset ?? '').trim();
-}
+// Which workflow a past run belongs to — the server's rule in TS, one answer for every reader.
+export { freeformPresetOf, matchesWorkflow, workflowOfRun, type RoomKey } from './run-workflow';
 
 /** The representations of the playground room: its own kinds and the recolours ON MODEL held (C-01). */
 export const PLAYGROUND_ROOM: readonly Representation[] = ['playground', 'onmodel'];
@@ -158,7 +143,14 @@ export function retiredPresetWord(run: common_DesignRun): string {
  * picker print for a recolour too (`runWord`, `REP_NOUN`), so the three places agree.
  */
 const ROOM_WORD: Readonly<Record<RoomKey, string>> = {
+  virtual_try_on: 'virtual try-on',
+  fabric_to_image: 'fabric to image',
+  ghost_mannequin: 'ghost mannequin',
   change_color: 'change a colour',
+  swap_fabrics: 'swap fabrics',
+  add_logo: 'add a logo',
+  design_variations: 'design variation',
   remove_background: 'remove background',
+  retouch_zone: 'retouch a zone',
   create_edit: 'create or edit',
 };
