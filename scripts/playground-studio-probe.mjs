@@ -58,6 +58,22 @@
 //   --mutate-recall-gate     рекол не спрашивает ворота плитки (Codex 6)          → M
 //   --mutate-mask-upload-each маска грузится на каждое нажатие (C-14)            → N
 //   --mutate-mask-route-always редактор шлёт маску и старому серверу (C-14)      → N
+//   --mutate-mask-draft-lost  нажатая краска не переживает закрытие (G-03 BLOCKER) → O
+//   --mutate-mask-id-lost     маска краски не переживает закрытие (G-03 BLOCKER)   → O
+//   --mutate-close-mid-upload закрытие во время загрузки маски не заперто (m-3)    → O
+//   --mutate-upload-label     во время загрузки кнопка говорит «starting…» (m-4)   → O
+//   --mutate-null-painter     холст не нарисовал маску — картинка не уходит в окно (M-1) → O
+//   --mutate-canvas-cap       бюджета холста нет — 24 МП идут маской (M-1)         → O
+//   --mutate-no-keyboard      у кисти нет клавиатуры (Codex MAJOR)                 → O
+//   --mutate-exif-blind       повёрнутый файл не отказан (m-1)                     → O
+//
+//   O · (G-03 client fix) маска живьём: нажатие, потерянный ответ, ЗАКРЫТЬ и открыть снова —
+//       краска и слова на месте, второе нажатие без новой загрузки и с ТЕМ ЖЕ ключом (и на пути
+//       окна тоже), и после перезагрузки вкладки; принятый прогон краску забывает; во время
+//       загрузки маски — «uploading the mask…», Escape и ✕ не закрывают; холст без маски (null) —
+//       ничего не начато, строка «cannot draw», следующее нажатие — тело окна; 24 МП — окно сразу;
+//       клавиатура: дверь Mask с клавиатуры, кисть стрелками и пробелом, Enter — прогон inpaint,
+//       Escape поднимает кисть, затем закрывает; повёрнутый файл — отказ даром.
 //
 //   N · (C-14) маршрут маски живьём: кисть по настоящему холсту, GENERATE → ОДНА загрузка PNG
 //       (verbatim, размер картинки 800×1000, белое там, где кисть, чёрное вокруг) → StartDesignRun
@@ -131,6 +147,14 @@ const KNOWN = new Set([
   '--mutate-recall-gate',
   '--mutate-mask-upload-each',
   '--mutate-mask-route-always',
+  '--mutate-mask-draft-lost',
+  '--mutate-mask-id-lost',
+  '--mutate-close-mid-upload',
+  '--mutate-upload-label',
+  '--mutate-null-painter',
+  '--mutate-canvas-cap',
+  '--mutate-no-keyboard',
+  '--mutate-exif-blind',
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN.has(a));
 if (stray) dieNotRun(`неизвестный флаг мутации ${stray}; известные: ${[...KNOWN].join(', ')}`);
@@ -407,15 +431,80 @@ if (on('--mutate-recall-gate'))
     'if (false) {',
   );
 
-if (on('--mutate-mask-upload-each'))
+if (on('--mutate-mask-upload-each')) {
+  // Neither memory: the uploader's own, nor the id kept with the pressed paint.
+  patch('mask-upload-each', /mask\/mask-upload\.ts$/, 'if (held) return held;', '');
   patch(
-    'mask-upload-each',
+    'mask-upload-each-store',
     /mask\/mask-upload\.ts$/,
-    'if (last && last.key === key) return last.id;',
-    '',
+    'const kept = store?.recall(mediaId, key);',
+    'const kept = undefined;',
   );
+}
 if (on('--mutate-mask-route-always'))
   patch('mask-route-always', /mask\/mask-editor\.tsx$/, "if (route === 'mask') {", 'if (true) {');
+
+// СТЕНД (не мутация, всегда): `window.__pgNoCanvas` — холст «не рисует» маску (null), как Safari
+// сверх своего предела площади (G-03 M-1).
+patch(
+  'no-canvas-knob',
+  /mask\/mask-upload\.ts$/,
+  'const blob = await maskPng(strokes, width, height);',
+  'const blob = globalThis.__pgNoCanvas ? null : await maskPng(strokes, width, height);',
+);
+const MASK_EDITOR = /mask\/mask-editor\.tsx$/;
+if (on('--mutate-mask-draft-lost'))
+  patch(
+    'mask-draft-lost',
+    /mask\/mask-draft\.ts$/,
+    'return book()[at(techCardId, mediaId)] ?? null;',
+    'return null;',
+  );
+if (on('--mutate-mask-id-lost')) {
+  patch(
+    'mask-id-lost-memo',
+    /mask\/mask-upload\.ts$/,
+    'let up = uploaders.get(at);',
+    'let up: MaskUploader | undefined = undefined;',
+  );
+  patch(
+    'mask-id-lost-store',
+    /mask\/mask-upload\.ts$/,
+    'recall: (mediaId, key) => keptMaskId(techCardId, mediaId, key),',
+    'recall: () => undefined,',
+  );
+}
+if (on('--mutate-close-mid-upload')) {
+  patch('close-mid-upload-root', MASK_EDITOR, 'if (!next && uploading) return;', '');
+  patch(
+    'close-mid-upload-esc',
+    MASK_EDITOR,
+    `            if (uploading) {
+              e.preventDefault();
+              return;
+            }`,
+    '',
+  );
+}
+if (on('--mutate-upload-label'))
+  patch(
+    'upload-label',
+    MASK_EDITOR,
+    "pendingLabel={uploading ? 'uploading the mask…' : undefined}",
+    '',
+  );
+if (on('--mutate-null-painter'))
+  patch('null-painter', MASK_EDITOR, 'if (alive.current) setCanDraw(false);', '');
+if (on('--mutate-canvas-cap'))
+  patch('canvas-cap', /mask\/geometry\.ts$/, '  width * height <= MASK_MAX_AREA;', '  true;');
+if (on('--mutate-no-keyboard')) patch('no-keyboard', MASK_EDITOR, 'onKeyDown={onKey}', '');
+if (on('--mutate-exif-blind'))
+  patch(
+    'exif-blind',
+    /tiles\/retouch-zone\.tsx$/,
+    'if (pictureTurned(input.media, input.shownAspect)) return { reason: RETOUCH_TURNED };',
+    '',
+  );
 
 // ─── заглушенная сеть ──────────────────────────────────────────────────────────────────────────
 // По суффиксу пути: `api/api` достижим и алиасом, и относительным импортом. Маркер ищется в
@@ -441,7 +530,11 @@ const call = (method) => (req) => {
   if (method === 'GetDesignBand') return Promise.resolve(g.__pgBand || {});
   if (method === 'UploadContentImage') {
     g.__pgUploads = (g.__pgUploads || 0) + 1;
-    return Promise.resolve({ media: { id: 6000 + g.__pgUploads } });
+    const answer = { media: { id: 6000 + g.__pgUploads } };
+    // G-03 m-3: the probe may hold the upload and release it when it wants.
+    if (g.__pgUploadHold)
+      return new Promise((res) => (g.__pgUploadOut = g.__pgUploadOut || []).push(() => res(answer)));
+    return Promise.resolve(answer);
   }
   if (method === 'ListDesignRuns') {
     const page = (g.__pgPages || {})[req.pageToken] || { runs: [], nextPageToken: '' };
@@ -1609,7 +1702,9 @@ try {
   ck(
     text10.includes('Open or upload any picture') &&
       text10.includes('press Mask, paint the zone to change and describe what should be there') &&
-      text10.includes('The retouch is generated in place.') &&
+      text10.includes(
+        'The retouch is generated as a new picture beside the original — nothing is overwritten.',
+      ) &&
       text10.includes('The rectangle around your zone may change.') &&
       !/credit/i.test(text10),
     'панель плитки 10: слова владельца (12.png), честная строка, без «credit»',
@@ -1761,98 +1856,114 @@ try {
   ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
 }
 
+// ─── стенд маски (N и O): настоящая картинка 4×5, полоса с одним результатом, помощники ────────
+// A real 4×5 PNG for the stage (the stand aborts every other picture): the editor needs its
+// natural size to lay the canvas on it.
+const png = (w, h) => {
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(td));
+    return Buffer.concat([len, td, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const raw = Buffer.alloc((w * 3 + 1) * h, 0x80);
+  for (let y = 0; y < h; y++) raw[y * (w * 3 + 1)] = 0;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', deflateSync(raw)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+};
+// `-wide` serves a 6×4 picture (the 6000×4000 case of O); every other name a 4×5 one.
+await page.route('http://probe.local/inpaint-*', (route) =>
+  route.fulfill({
+    status: 200,
+    contentType: 'image/png',
+    body: route.request().url().includes('-wide') ? png(6, 4) : png(4, 5),
+  }),
+);
+const pmedia = (id, w, h, shown = w > h ? 'wide' : 'tall') => ({
+  id,
+  media: {
+    thumbnail: { mediaUrl: `http://probe.local/inpaint-${id}-${shown}.png` },
+    fullSize: { mediaUrl: `http://probe.local/inpaint-${id}-${shown}.png`, width: w, height: h },
+  },
+});
+const bandOf = (over, w = 800, h = 1000, shown) => ({
+  ...EMPTY_BAND,
+  playgroundWorkflows: ['retouch_zone', 'create_edit'],
+  runs: [
+    {
+      id: 85,
+      kind: 'freeform',
+      status: 'done',
+      ask: 'a coat',
+      params: { freeform: { preset: 'free', items: [] } },
+      pictures: [{ id: 850, ordinal: 1, media: pmedia(850, w, h, shown) }],
+    },
+  ],
+  ...over,
+});
+const uploads = () => page.evaluate(() => window.__pgUploads || 0);
+const uploadReqs = () =>
+  page.evaluate(() => window.__pgCalls.filter((c) => c.method === 'UploadContentImage'));
+const starts = () =>
+  page.evaluate(() =>
+    window.__pgCalls.filter((c) => c.method === 'StartDesignRun').map((c) => c.req),
+  );
+const editorGenerate = () =>
+  page.locator('[data-mask-editor] button', {
+    hasText: /^(GENERATE|starting…|uploading the mask…)$/,
+  });
+const maskDoor = () => page.locator('[data-pg-output="850"] button[aria-label^="mask picture"]');
+/** A fresh page on `band`; `clear` = forget the tab's storage (the ledger and the kept paints). */
+const mountMask = async (band, clear = true) => {
+  await page.goto('http://probe.local/start');
+  await page.goto(CARD);
+  await page.waitForFunction(() => !!window.__pg);
+  await page.evaluate((b) => {
+    window.__pgBand = b;
+    window.__pg.mount(b);
+  }, band);
+  await page.waitForSelector('[data-workflow-tile]');
+  await page.evaluate((clear) => {
+    if (clear) sessionStorage.clear();
+    window.__pgCalls.length = 0;
+    window.__pgUploads = 0;
+  }, clear);
+};
+const openMask = async () => {
+  await maskDoor().click();
+  await page.waitForSelector('[data-mask-canvas]');
+  // The stand has no stylesheet: the dialog lies in the flow, below the fold — bring the canvas
+  // into view, or the pointer lands outside the dialog and Radix closes it.
+  await page.locator('[data-mask-canvas]').scrollIntoViewIfNeeded();
+};
+const openAndPaint = async (band) => {
+  await mountMask(band);
+  await openMask();
+  const box = await page.locator('[data-mask-canvas]').boundingBox();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + box.width * 0.05, cy + box.height * 0.02, { steps: 4 });
+  await page.mouse.up();
+  await page.locator('[data-mask-editor] textarea').fill('a clean pocket');
+  await settle(100);
+};
+const editorText = async () => (await page.locator('[data-mask-editor]').textContent()) ?? '';
+
 head('N', 'C-14 маршрут маски живьём: одна загрузка на краску, тот же ключ, тело inpaint');
 try {
-  // A real 4×5 PNG for the stage (the stand aborts every other picture): the editor needs its
-  // natural size to lay the canvas on it.
-  const png = (w, h) => {
-    const chunk = (type, data) => {
-      const len = Buffer.alloc(4);
-      len.writeUInt32BE(data.length);
-      const td = Buffer.concat([Buffer.from(type), data]);
-      const crc = Buffer.alloc(4);
-      crc.writeUInt32BE(crc32(td));
-      return Buffer.concat([len, td, crc]);
-    };
-    const ihdr = Buffer.alloc(13);
-    ihdr.writeUInt32BE(w, 0);
-    ihdr.writeUInt32BE(h, 4);
-    ihdr[8] = 8;
-    ihdr[9] = 2;
-    const raw = Buffer.alloc((w * 3 + 1) * h, 0x80);
-    for (let y = 0; y < h; y++) raw[y * (w * 3 + 1)] = 0;
-    return Buffer.concat([
-      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-      chunk('IHDR', ihdr),
-      chunk('IDAT', deflateSync(raw)),
-      chunk('IEND', Buffer.alloc(0)),
-    ]);
-  };
-  await page.route('http://probe.local/inpaint-*', (route) =>
-    route.fulfill({ status: 200, contentType: 'image/png', body: png(4, 5) }),
-  );
-  const pmedia = (id, w, h) => ({
-    id,
-    media: {
-      thumbnail: { mediaUrl: `http://probe.local/inpaint-${id}.png` },
-      fullSize: { mediaUrl: `http://probe.local/inpaint-${id}.png`, width: w, height: h },
-    },
-  });
-  const bandOf = (over, w = 800, h = 1000) => ({
-    ...EMPTY_BAND,
-    playgroundWorkflows: ['retouch_zone', 'create_edit'],
-    runs: [
-      {
-        id: 85,
-        kind: 'freeform',
-        status: 'done',
-        ask: 'a coat',
-        params: { freeform: { preset: 'free', items: [] } },
-        pictures: [{ id: 850, ordinal: 1, media: pmedia(850, w, h) }],
-      },
-    ],
-    ...over,
-  });
-  const uploads = () => page.evaluate(() => window.__pgUploads || 0);
-  const uploadReqs = () =>
-    page.evaluate(() => window.__pgCalls.filter((c) => c.method === 'UploadContentImage'));
-  const starts = () =>
-    page.evaluate(() =>
-      window.__pgCalls.filter((c) => c.method === 'StartDesignRun').map((c) => c.req),
-    );
-  const editorGenerate = () =>
-    page.locator('[data-mask-editor] button', { hasText: /^(GENERATE|starting…)$/ });
-  const openAndPaint = async (band) => {
-    await page.goto('http://probe.local/start');
-    await page.goto(CARD);
-    await page.waitForFunction(() => !!window.__pg);
-    await page.evaluate((b) => {
-      window.__pgBand = b;
-      window.__pg.mount(b);
-    }, band);
-    await page.waitForSelector('[data-workflow-tile]');
-    await page.evaluate(() => {
-      sessionStorage.clear();
-      window.__pgCalls.length = 0;
-      window.__pgUploads = 0;
-    });
-    await page.locator('[data-pg-output="850"] button[aria-label^="mask picture"]').click();
-    await page.waitForSelector('[data-mask-canvas]');
-    // The stand has no stylesheet: the dialog lies in the flow, below the fold — bring the canvas
-    // into view, or the pointer lands outside the dialog and Radix closes it.
-    await page.locator('[data-mask-canvas]').scrollIntoViewIfNeeded();
-    const box = await page.locator('[data-mask-canvas]').boundingBox();
-    const cx = box.x + box.width / 2;
-    const cy = box.y + box.height / 2;
-    await page.mouse.move(cx, cy);
-    await page.mouse.down();
-    await page.mouse.move(cx + box.width * 0.05, cy + box.height * 0.02, { steps: 4 });
-    await page.mouse.up();
-    await page.locator('[data-mask-editor] textarea').fill('a clean pocket');
-    await settle(100);
-  };
-  const editorText = async () => (await page.locator('[data-mask-editor]').textContent()) ?? '';
-
   // 1 · the mask route
   await openAndPaint(bandOf({ runKinds: ['freeform', 'inpaint'] }));
   const t1 = await editorText();
@@ -1976,6 +2087,304 @@ try {
   await settle(150);
 } catch (e) {
   ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+head('O', 'G-03: краска переживает закрытие, замок загрузки, холст без маски, клавиатура, поворот');
+const MASK_BAND = () => bandOf({ runKinds: ['freeform', 'inpaint'] });
+const closeMask = async () => {
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('[data-mask-editor]', { state: 'detached' });
+  await settle(100);
+};
+const priceLine = async () => (await page.locator('[data-mask-price]').textContent()) ?? '';
+const TOO_LARGE = 'this browser cannot draw a mask this size; the rectangle path is used';
+/** What the uploaded mask holds at two pixels (white = painted). */
+const maskAt = (dataUrl, points) =>
+  page.evaluate(
+    async ([url, points]) => {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      return points.map(([x, y]) => Array.from(ctx.getImageData(x, y, 1, 1).data).slice(0, 3));
+    },
+    [dataUrl, points],
+  );
+
+// 1 · BLOCKER: a lost answer, a close, a reopen — the same paint, the same mask, the same key
+try {
+  await openAndPaint(MASK_BAND());
+  await editorGenerate().click();
+  await page.waitForFunction(() => window.__pgCalls.some((c) => c.method === 'StartDesignRun'));
+  const [first] = await starts();
+  await answer('lost');
+  await settle(150);
+  await closeMask();
+  await openMask();
+  ck(
+    (await page.locator('[data-mask-editor] textarea').inputValue()) === 'a clean pocket' &&
+      !(await page.locator('[data-mask-editor] button', { hasText: /^undo$/ }).isDisabled()) &&
+      (await editorGenerate().textContent()) === 'GENERATE',
+    'закрыть и открыть после потерянного ответа: краска и слова на месте, GENERATE жив',
+    JSON.stringify({
+      words: await page.locator('[data-mask-editor] textarea').inputValue(),
+      door: await editorGenerate().textContent(),
+      text: (await editorText()).slice(0, 400),
+    }),
+  );
+  await editorGenerate().click();
+  await page.waitForFunction(
+    () => window.__pgCalls.filter((c) => c.method === 'StartDesignRun').length === 2,
+  );
+  const again = (await starts())[1];
+  ck(
+    (await uploads()) === 1 &&
+      again.clientRequestId === first.clientRequestId &&
+      again.params.inpaint?.maskMediaId === first.params.inpaint?.maskMediaId,
+    'повтор после закрытия: загрузок одна, та же маска, ТОТ ЖЕ client_request_id — оплата одна',
+    `${first.clientRequestId}/${first.params.inpaint?.maskMediaId} → ${again.clientRequestId}/${again.params.inpaint?.maskMediaId} (${await uploads()})`,
+  );
+  await answer('lost');
+  await settle(150);
+  // …and a reload of the tab: the kept paint and its mask come back from sessionStorage
+  await mountMask(MASK_BAND(), false);
+  await openMask();
+  await editorGenerate().click();
+  await page.waitForFunction(() => window.__pgCalls.some((c) => c.method === 'StartDesignRun'));
+  const [reloaded] = await starts();
+  ck(
+    (await uploadReqs()).length === 0 &&
+      reloaded.clientRequestId === first.clientRequestId &&
+      reloaded.params.inpaint?.maskMediaId === first.params.inpaint?.maskMediaId,
+    'после перезагрузки вкладки: без новой загрузки, та же маска, тот же ключ',
+    `${reloaded.clientRequestId}/${reloaded.params.inpaint?.maskMediaId}`,
+  );
+  // accepted → the paint is spent: the next open starts clean
+  await answer('ok');
+  await page.waitForSelector('[data-mask-editor]', { state: 'detached' });
+  await settle(100);
+  await openMask();
+  ck(
+    (await page.locator('[data-mask-editor] button', { hasText: /^undo$/ }).isDisabled()) &&
+      (await page.locator('[data-mask-editor] textarea').inputValue()) === '',
+    'принятый прогон забывает краску: новое открытие — чистый лист',
+  );
+  await closeMask();
+} catch (e) {
+  ck(false, 'O1 оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+// 2 · the same on the window path (an old server): the hull comes back from the same strokes
+try {
+  await openAndPaint(bandOf({}));
+  await editorGenerate().click();
+  await page.waitForFunction(() => window.__pgCalls.some((c) => c.method === 'StartDesignRun'));
+  const [first] = await starts();
+  await answer('lost');
+  await settle(150);
+  await closeMask();
+  await openMask();
+  await editorGenerate().click();
+  await page.waitForFunction(
+    () => window.__pgCalls.filter((c) => c.method === 'StartDesignRun').length === 2,
+  );
+  const again = (await starts())[1];
+  ck(
+    again.kind === 'freeform' && again.clientRequestId === first.clientRequestId,
+    'путь окна: закрыть, открыть, повторить — тот же ключ (та же оболочка)',
+  );
+  await answer('lost');
+  await settle(150);
+  await closeMask();
+} catch (e) {
+  ck(false, 'O2 оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+// 3 · m-3 / m-4: while the mask goes up — «uploading the mask…», no close
+try {
+  await openAndPaint(MASK_BAND());
+  await page.evaluate(() => {
+    window.__pgUploadHold = true;
+  });
+  await editorGenerate().click();
+  await page.waitForFunction(() => (window.__pgUploadOut || []).length === 1);
+  ck(
+    (await editorGenerate().textContent()) === 'uploading the mask…',
+    'во время загрузки кнопка говорит «uploading the mask…», а не «starting…» (m-4)',
+    await editorGenerate().textContent(),
+  );
+  await page.keyboard.press('Escape');
+  await settle(150);
+  ck(
+    (await page.locator('[data-mask-editor]').count()) === 1 &&
+      (await page.locator('[data-mask-editor] button[aria-label="close the mask"]').isDisabled()),
+    'во время загрузки Escape не закрывает, ✕ выключен (m-3)',
+  );
+  await page.evaluate(() => {
+    window.__pgUploadHold = false;
+    window.__pgUploadOut.shift()();
+  });
+  await page.waitForFunction(() => window.__pgCalls.some((c) => c.method === 'StartDesignRun'));
+  ck(
+    (await starts())[0].kind === 'inpaint' && (await uploads()) === 1,
+    'загрузка дошла — прогон inpaint стартовал из того же редактора',
+  );
+  await answer('lost');
+  await settle(150);
+  await closeMask();
+} catch (e) {
+  ck(false, 'O3 оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+// 4 · M-1: a canvas that answers null — nothing started, the rectangle said, then its body
+try {
+  await openAndPaint(MASK_BAND());
+  await page.evaluate(() => {
+    window.__pgNoCanvas = true;
+  });
+  await editorGenerate().click();
+  await settle(300);
+  ck(
+    (await starts()).length === 0 && (await uploads()) === 0,
+    'холст не нарисовал маску: ничего не начато, ничего не загружено',
+  );
+  ck(
+    (await priceLine()).startsWith(TOO_LARGE) &&
+      (await editorText()).includes('The rectangle around your zone may change.'),
+    'строка цены «cannot draw a mask this size», под кистью — прямоугольник',
+    await priceLine(),
+  );
+  ck(
+    (await page.evaluate(() => window.__pg.alerts())).some((a) =>
+      a.startsWith('nothing was started: this browser could not draw the mask at 800×1000 px'),
+    ),
+    'тост: ничего не начато, и почему',
+    JSON.stringify(await page.evaluate(() => window.__pg.alerts())),
+  );
+  await editorGenerate().click();
+  await page.waitForFunction(() => window.__pgCalls.some((c) => c.method === 'StartDesignRun'));
+  const [s] = await starts();
+  ck(
+    s.kind === 'freeform' &&
+      s.params.freeform?.preset === 'retouch' &&
+      !s.params.inpaint &&
+      (await uploads()) === 0,
+    'следующее нажатие — тело окна (freeform/retouch), без inpaint и без загрузки',
+    JSON.stringify({ kind: s.kind, uploads: await uploads() }),
+  );
+  await answer('lost');
+  await settle(150);
+  await page.evaluate(() => {
+    window.__pgNoCanvas = false;
+  });
+  await closeMask();
+} catch (e) {
+  ck(false, 'O4 оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+// 5 · M-1: 24 MP over the budget — the window from the start, said before any press
+try {
+  await openAndPaint(bandOf({ runKinds: ['freeform', 'inpaint'] }, 6000, 4000));
+  ck(
+    (await priceLine()).startsWith(TOO_LARGE),
+    '6000×4000 на сервере с маской: строка «cannot draw a mask this size» до нажатия',
+    await priceLine(),
+  );
+  await editorGenerate().click();
+  await page.waitForFunction(() => window.__pgCalls.some((c) => c.method === 'StartDesignRun'));
+  ck(
+    (await starts())[0].kind === 'freeform' && (await uploads()) === 0,
+    '6000×4000: тело окна, холст на 24 МП не создаётся, загрузки нет',
+  );
+  await answer('lost');
+  await settle(150);
+  await closeMask();
+} catch (e) {
+  ck(false, 'O5 оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+// 6 · Codex MAJOR: the whole retouch from the keyboard
+try {
+  await mountMask(MASK_BAND());
+  await maskDoor().focus();
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-mask-canvas]');
+  await settle(100);
+  const onCanvas = () =>
+    page.evaluate(() => !!document.activeElement?.hasAttribute('data-mask-canvas'));
+  for (let i = 0; i < 4 && !(await onCanvas()); i++) await page.keyboard.press('Tab');
+  ck(
+    await onCanvas(),
+    'дверь Mask открыта клавишей Enter, Tab доводит до картинки (фокус на кисти)',
+  );
+  await page.keyboard.press('Space');
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight');
+  for (let i = 0; i < 2; i++) await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Space');
+  await settle(80);
+  ck(
+    (await page.locator('[data-mask-ring]').count()) === 1 &&
+      !(await page.locator('[data-mask-editor] button', { hasText: /^undo$/ }).isDisabled()),
+    'Space · стрелки · Space: мазок лёг (undo жив), кольцо кисти видно',
+  );
+  await page.keyboard.press('Space');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('Escape');
+  await settle(120);
+  ck(
+    (await page.locator('[data-mask-editor]').count()) === 1,
+    'Escape при опущенной кисти поднимает её, а не закрывает редактор',
+  );
+  await page.locator('[data-mask-editor] textarea').fill('a clean pocket');
+  await page.locator('[data-mask-canvas]').focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__pgCalls.some((c) => c.method === 'StartDesignRun'));
+  const [s] = await starts();
+  const [up] = await uploadReqs();
+  const px = await maskAt(up?.req.rawB64Image ?? '', [
+    [400, 500],
+    [470, 540],
+    [5, 5],
+  ]);
+  ck(
+    s.kind === 'inpaint' &&
+      s.ask === 'a clean pocket' &&
+      px[0].every((v) => v === 255) &&
+      px[1].every((v) => v === 255) &&
+      px[2].every((v) => v === 0),
+    'Enter на картинке: прогон inpaint, маска белая по пути кисти, чёрная вокруг',
+    JSON.stringify({ kind: s.kind, px }),
+  );
+  await answer('lost');
+  await settle(150);
+  await page.locator('[data-mask-canvas]').focus();
+  await closeMask();
+  ck(true, 'Escape при поднятой кисти закрывает редактор');
+} catch (e) {
+  ck(false, 'O6 оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+// 7 · m-1: a file stored turned — refused for free, before the paint
+try {
+  await openAndPaint(bandOf({ runKinds: ['freeform', 'inpaint'] }, 1000, 800, 'tall'));
+  ck(
+    (await editorText()).includes('this picture is stored turned (its camera orientation)'),
+    'файл хранится повёрнутым (1000×800, показан 4:5): отказ словами',
+  );
+  await page.locator('[data-mask-canvas]').focus();
+  await page.keyboard.press('Enter');
+  await settle(200);
+  ck(
+    (await starts()).length === 0 && (await uploads()) === 0,
+    'повёрнутый файл: ни загрузки, ни прогона',
+  );
+  await closeMask();
+} catch (e) {
+  ck(false, 'O7 оборвалась', String(e?.message ?? e).split('\n')[0]);
 }
 
 ck(errors.length === 0, 'страница без ошибок', errors.join(' | '));

@@ -118,6 +118,12 @@ export function GenerateRow({
    * не про экран.
    */
   label = 'GENERATE',
+  /**
+   * The word the door says while `pending`. `starting…` is the machine's (the run is being booked);
+   * a screen that does something else first says what (the mask editor: `uploading the mask…`,
+   * G-03 m-4 — nothing has started while the mask goes up, and a refused upload starts nothing).
+   */
+  pendingLabel = 'starting…',
 }: {
   gate: Gate;
   shape?: string;
@@ -127,6 +133,7 @@ export function GenerateRow({
   onInspect?: () => void;
   trailing?: ReactNode;
   label?: string;
+  pendingLabel?: string;
 }): JSX.Element {
   const speaks = serverSpeaksDesign();
 
@@ -154,7 +161,7 @@ export function GenerateRow({
         <InertDoor label={label} reason={frozen} size='sm' />
       ) : gate.ok ? (
         <Button variant='main' size='sm' onClick={onGenerate} disabled={pending}>
-          {pending ? 'starting…' : label}
+          {pending ? pendingLabel : label}
         </Button>
       ) : (
         <InertDoor label={label} reason={gate.reason} size='sm' />

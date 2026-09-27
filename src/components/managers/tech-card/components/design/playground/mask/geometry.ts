@@ -210,23 +210,47 @@ export function paintStrokes(
 }
 
 /**
+ * THE LARGEST MASK THIS CLIENT DRAWS (G-03 M-1). The server takes sources up to 12000 px a side and
+ * 40 MP; a browser does not draw every canvas that size. Safari (iOS, and macOS before 16) refuses a
+ * canvas over 16 777 216 pixels (4096²) — `getContext`/`toBlob` answer null — and every browser caps a
+ * side (Chromium and Firefox at 32 767). Over this budget the mask is not attempted: the picture takes
+ * the phase-2 rectangle path and the editor says so (`retouchRoute`). A null from a canvas under the
+ * budget (memory) is caught at the press the same way (`MaskNotDrawn`).
+ */
+export const MASK_MAX_AREA = 4096 * 4096;
+export const MASK_MAX_SIDE = 16384;
+
+/** Whether this client will try to draw a mask at `width` × `height` pixels. */
+export const maskDrawable = (width: number, height: number): boolean =>
+  width > 0 &&
+  height > 0 &&
+  width <= MASK_MAX_SIDE &&
+  height <= MASK_MAX_SIDE &&
+  width * height <= MASK_MAX_AREA;
+
+/**
  * THE INPAINT MASK (C-14): white where painted, black elsewhere, at the picture's own pixel size, as
  * a PNG (white = repaint, the fill route's polarity). Uploaded by `mask-upload.ts`; the dimension
- * check against the source and the composite through the mask are the server's.
+ * check against the source and the composite through the mask are the server's. `null` = this
+ * browser cannot draw it (over the budget, no context, or an encoder that answers nothing).
  */
 export async function maskPng(
   strokes: readonly MaskStroke[],
   width: number,
   height: number,
 ): Promise<Blob | null> {
-  if (width <= 0 || height <= 0) return null;
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, width, height);
-  paintStrokes(ctx, strokes, width, height, '#ffffff');
-  return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  if (!maskDrawable(width, height)) return null;
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, width, height);
+    paintStrokes(ctx, strokes, width, height, '#ffffff');
+    return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+  } catch {
+    return null;
+  }
 }

@@ -249,6 +249,28 @@ export {
   retouchRoute,
 } from 'components/managers/tech-card/components/design/playground/registry/tiles/retouch-zone';
 export {
+  MaskNotDrawn,
   createMaskUploader,
   maskKey,
 } from 'components/managers/tech-card/components/design/playground/mask/mask-upload';
+// G-03 client fix · the canvas budget, the turned-file refusal, the fallback words.
+export {
+  MASK_MAX_AREA,
+  MASK_MAX_SIDE,
+  maskDrawable,
+} from 'components/managers/tech-card/components/design/playground/mask/geometry';
+export {
+  RETOUCH_PANEL_FALLBACK,
+  RETOUCH_TOO_LARGE,
+  RETOUCH_TURNED,
+  pictureTurned,
+  retouchWindowReason,
+} from 'components/managers/tech-card/components/design/playground/registry/tiles/retouch-zone';
+// G-03 · backend d8b7bca: `submit_unconfirmed` said in words wherever a run's reason is shown.
+export {
+  RUN_CODE_WORDS,
+  runCodeWords,
+  runFailureText,
+  runOutcomeChip,
+  runOutcomeNote,
+} from 'components/managers/tech-card/components/design/generation/run-state';

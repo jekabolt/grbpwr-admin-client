@@ -15,7 +15,7 @@ import { inputToDecimal } from 'utils/decimal';
 
 import { PRICED_LATER } from '../../../core';
 import { slotCounter } from '../../fields';
-import { cornerText, type MaskPoint } from '../../mask/geometry';
+import { cornerText, maskDrawable, type MaskPoint } from '../../mask/geometry';
 import { RetouchSource } from '../../mask/retouch-source';
 import { emptyParams, imagesOf, runKindOffered, workflowOffered } from '../common';
 import { matchesWorkflow, retouchSourceId } from '../run-workflow';
@@ -60,8 +60,16 @@ import {
  *   params.inpaint = {source_media_id, mask_media_id}; no freeform, no extra ids (`one_list_per_fact`),
  *   no image. The door checks the mask's size, PNG and paint before any money; the server
  *   composites through the mask, so only the painted zone changes — and the rectangle line goes.
- * A picture whose media row states no pixel size cannot be given a mask of its size: that one
- * picture takes the phase-2 path, and the price line says so.
+ * A picture whose media row states no pixel size cannot be given a mask of its size, and one over
+ * this browser's canvas budget (`maskDrawable`, G-03 M-1) cannot be drawn: that one picture takes the
+ * phase-2 path, and the price line says why (`retouchWindowReason`). A mask the canvas refuses at the
+ * press (`MaskNotDrawn`) flips the picture to the same path, said the same way, and starts nothing.
+ *
+ * ⚠ A FILE STORED TURNED (G-03 m-1). A verbatim JPEG with an EXIF orientation of 5–8 is shown upright
+ * by the browser, but its stored size — the size the server crops and masks at, reading no EXIF — is
+ * the other way round, so a zone painted on the upright picture would land transposed on either
+ * route. The editor compares the shown proportion with the stored one and refuses for free
+ * (`RETOUCH_TURNED`) rather than guess which way it turns (6 and 8 look alike from the size alone).
  */
 
 /** The prompt's field key — also its Ideas and Recently used key (`ideas.ts` `retouch_zone`). */
@@ -82,6 +90,15 @@ export const RETOUCH_MASK_CAVEAT =
   'Only the painted zone changes; everything else keeps its pixels.';
 /** Said in the price line when the mask route is offered but this picture states no size. */
 export const RETOUCH_NO_SIZE = 'this picture states no size; the rectangle path is used';
+/** Said in the price line when the mask route is offered but this browser cannot draw its mask. */
+export const RETOUCH_TOO_LARGE =
+  'this browser cannot draw a mask this size; the rectangle path is used';
+/** The panel's clause on a mask server (G-03 n-2): not every picture takes the mask. */
+export const RETOUCH_PANEL_FALLBACK =
+  'A picture with no stated size, or too large for this browser, takes the rectangle path; the editor says when.';
+/** The free refusal of a picture whose file is stored turned (G-03 m-1). */
+export const RETOUCH_TURNED =
+  'this picture is stored turned (its camera orientation), so the zone would land in the wrong place; upload it again and retouch the new copy';
 
 /** Whether THIS server takes a retouch — the Mask action is not drawn at all when it does not. */
 export const retouchOffered = (band: GetDesignBandResponse): boolean =>
@@ -98,24 +115,53 @@ export const inpaintOffered = (band: GetDesignBandResponse): boolean =>
 export type RetouchRoute = 'mask' | 'window';
 
 /**
- * THE ROUTE OF ONE RETOUCH: the mask where the server takes it AND the picture states its pixel size
- * (the mask is painted at that size), else the phase-2 window. With no picture, the server decides.
+ * WHY THIS PICTURE TAKES THE RECTANGLE ALTHOUGH THE SERVER TAKES A MASK — or null when it does not
+ * (the server offers no mask, or the mask can be drawn). `canDraw` = false once this browser's canvas
+ * refused the mask at a press (`MaskNotDrawn`).
+ */
+export function retouchWindowReason(
+  band: GetDesignBandResponse,
+  media: common_MediaFull | null | undefined,
+  canDraw = true,
+): string | null {
+  if (!inpaintOffered(band) || media === undefined || media === null) return null;
+  const { w, h } = sourceSize(media);
+  if (!(w > 0 && h > 0)) return RETOUCH_NO_SIZE;
+  if (!canDraw || !maskDrawable(w, h)) return RETOUCH_TOO_LARGE;
+  return null;
+}
+
+/**
+ * THE ROUTE OF ONE RETOUCH: the mask where the server takes it AND this client can paint the mask at
+ * the picture's stated size, else the phase-2 window. With no picture, the server decides.
  */
 export function retouchRoute(
   band: GetDesignBandResponse,
   media?: common_MediaFull | null,
+  canDraw = true,
 ): RetouchRoute {
   if (!inpaintOffered(band)) return 'window';
-  if (media === undefined || media === null) return 'mask';
-  const { w, h } = sourceSize(media);
-  return w > 0 && h > 0 ? 'mask' : 'window';
+  return retouchWindowReason(band, media, canDraw) === null ? 'mask' : 'window';
 }
 
 /** The honest line under the brush and on the panel — ONE function for both (C-14). */
 export const retouchCaveat = (
   band: GetDesignBandResponse,
   media?: common_MediaFull | null,
-): string => (retouchRoute(band, media) === 'mask' ? RETOUCH_MASK_CAVEAT : RETOUCH_CAVEAT);
+  canDraw = true,
+): string => (retouchRoute(band, media, canDraw) === 'mask' ? RETOUCH_MASK_CAVEAT : RETOUCH_CAVEAT);
+
+/**
+ * Whether the picture is SHOWN the other way round from how it is STORED (G-03 m-1): the proportion
+ * the browser drew (`shownAspect`, width / height after EXIF) is nearer the stored size turned than
+ * the stored size itself. A square-ish picture (sides within 1 %) cannot tell, and is not refused.
+ */
+export function pictureTurned(media: common_MediaFull | null, shownAspect?: number): boolean {
+  const { w, h } = sourceSize(media);
+  if (!(w > 0 && h > 0) || !shownAspect || !Number.isFinite(shownAspect)) return false;
+  if (Math.abs(w - h) / Math.max(w, h) <= 0.01) return false;
+  return Math.abs(shownAspect - h / w) < Math.abs(shownAspect - w / h);
+}
 
 /**
  * The pictures a Mask is offered on: rasters the playground made (freeform, cut-out, recolour).
@@ -148,6 +194,8 @@ export type RetouchInput = {
    * the request is the mask route's; 0 / absent = the window's.
    */
   maskMediaId?: number;
+  /** The proportion the editor SHOWS the picture at (G-03 m-1, `pictureTurned`); absent = unknown. */
+  shownAspect?: number;
 };
 
 /** The words as they leave: trimmed, at most the door's ceiling in characters (runes). */
@@ -168,6 +216,7 @@ function sourceSize(media: common_MediaFull | null): { w: number; h: number } {
  */
 export function retouchRefusal(input: RetouchInput): Refusal | null {
   if (!input.media || (input.media.id ?? 0) <= 0) return { reason: 'pick a picture to retouch' };
+  if (pictureTurned(input.media, input.shownAspect)) return { reason: RETOUCH_TURNED };
   if (!input.painted) return { reason: 'paint the zone to change' };
   if (input.route !== 'mask' && !input.zone)
     return { reason: 'the painted zone is too small: paint a larger one' };
@@ -250,11 +299,11 @@ export const RETOUCH_PRICE = `1 new picture per retouch · ${PRICED_LATER}`;
 export function retouchPriceLine(
   band: GetDesignBandResponse,
   media: common_MediaFull | null,
+  canDraw = true,
 ): string {
   const base = `1 picture · ${PRICED_LATER}`;
-  return inpaintOffered(band) && retouchRoute(band, media) === 'window'
-    ? `${RETOUCH_NO_SIZE} · ${base}`
-    : base;
+  const why = retouchWindowReason(band, media, canDraw);
+  return why ? `${why} · ${base}` : base;
 }
 
 /** The panel's words: the owner's 12.png, less the credit (we price in $, by the server). */
@@ -266,10 +315,12 @@ function Explanation({ band }: { band: GetDesignBandResponse }): JSX.Element {
       </Text>
       <Text component='p' className='normal-case'>
         Open or upload any picture here or in the results, press <b>Mask</b>, paint the zone to
-        change and describe what should be there. The retouch is generated in place.
+        change and describe what should be there. The retouch is generated as a new picture beside
+        the original — nothing is overwritten.
       </Text>
       <Text size='micro' variant='label' component='p' className='normal-case'>
         {retouchCaveat(band)}
+        {inpaintOffered(band) ? ` ${RETOUCH_PANEL_FALLBACK}` : ''}
       </Text>
       <Text
         size='micro'

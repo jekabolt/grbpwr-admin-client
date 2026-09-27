@@ -258,6 +258,7 @@ function Field({
               hint: field.hint,
               sections,
               draft,
+              skip: key,
               extra: from?.context,
             }),
           }

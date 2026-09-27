@@ -107,6 +107,26 @@ export function expectedTileCount(run: common_DesignRun): number {
 }
 
 /**
+ * ═══ A CODE THAT MUST BE SAID IN WORDS (G-03, backend d8b7bca) ══════════════════════════════════
+ *
+ * Every other `error_code` is shown as the server spells it — a stable token a person can quote.
+ * `submit_unconfirmed` is not a refusal but a fact about MONEY: the submit to fal (extend, inpaint,
+ * cut-out, fal 3D) went out and no usable answer came back, so the provider may have charged for a
+ * job the worker will never collect — and the worker does not buy it a second time. A bare token
+ * would read as «failed, try again»; these words say what happened and why nothing retries it.
+ */
+export const RUN_CODE_WORDS: Readonly<Record<string, string>> = {
+  submit_unconfirmed:
+    'the provider did not confirm the request; it may have been charged; this run is not retried automatically',
+};
+
+/** The words of a run's (or an attempt's) code: its sentence when it has one, else the code. */
+export const runCodeWords = (code: string | undefined): string => {
+  const c = (code ?? '').trim();
+  return RUN_CODE_WORDS[c] ?? c;
+};
+
+/**
  * The right-hand note of a finished row: how it ended, and — when it ended badly — why.
  *
  * `done · 2 of 3` is not decoration: without the denominator a partial provider answer is
@@ -124,7 +144,7 @@ export function runOutcomeNote(run: common_DesignRun): string {
       : 'done';
   }
   if (status === 'failed') {
-    const why = (run.errorCode ?? '').trim() || (run.lastError ?? '').trim();
+    const why = runCodeWords(run.errorCode) || (run.lastError ?? '').trim();
     return why ? `failed · ${why}` : 'failed';
   }
   /* ОТКАЗ ВИДЕН НЕ ТОЛЬКО У МЁРТВОГО ПРОГОНА, И ЭТО НЕ УКРАШЕНИЕ (S-12).
@@ -143,7 +163,7 @@ export function runOutcomeNote(run: common_DesignRun): string {
    *
    * Причина берётся тем же порядком, что и у `failed`: машинный код, а если его нет — текст
    * последней ошибки. */
-  const why = (run.errorCode ?? '').trim() || (run.lastError ?? '').trim();
+  const why = runCodeWords(run.errorCode) || (run.lastError ?? '').trim();
   if (status === 'cancelled') return why ? `cancelled · ${why}` : 'cancelled';
   if (isCancelling(run)) return 'cancelling…';
   return why ? `retrying · ${why}` : status;
@@ -154,10 +174,14 @@ export function runOutcomeNote(run: common_DesignRun): string {
  * paragraph. `error_code` is the stable machine token; `last_error` is the human tail, and the
  * server caps it at 4 000 characters (`designMaxErrorText`), never at a line.
  */
-export function runFailureText(
-  run: Pick<common_DesignRun, 'errorCode' | 'lastError'>,
-): { code: string; text: string } {
-  return { code: (run.errorCode ?? '').trim(), text: (run.lastError ?? '').trim() };
+export function runFailureText(run: Pick<common_DesignRun, 'errorCode' | 'lastError'>): {
+  code: string;
+  text: string;
+  /** The code's sentence (`RUN_CODE_WORDS`), or '' when the code speaks for itself. */
+  words: string;
+} {
+  const code = (run.errorCode ?? '').trim();
+  return { code, text: (run.lastError ?? '').trim(), words: RUN_CODE_WORDS[code] ?? '' };
 }
 
 /**

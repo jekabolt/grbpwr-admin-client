@@ -38,7 +38,8 @@ import {
   type MaskPoint,
   type MaskStroke,
 } from './geometry';
-import { createMaskUploader, maskDataUrl, uploadMask } from './mask-upload';
+import { forgetMaskDraft, readMaskDraft, writeMaskDraft } from './mask-draft';
+import { MaskNotDrawn, maskUploaderFor } from './mask-upload';
 
 /**
  * ═══ MASK — PAINT A ZONE OF A PICTURE, SAY WHAT GOES THERE, GENERATE (C-11, tile 10) ══════════════
@@ -66,7 +67,19 @@ import { createMaskUploader, maskDataUrl, uploadMask } from './mask-upload';
  *
  * ⚠ THE PRESS OUTLIVES THIS DIALOG. The idempotency key and «starting…» are the scoped hook's
  * (`playgroundRunScope('retouch_zone')`, render/run-ledger.ts), so closing the dialog while a run
- * is starting cannot buy a second one on the next press.
+ * is starting cannot buy a second one on the next press — AND THE PAINT OUTLIVES IT TOO (G-03 Codex
+ * BLOCKER): from the first press on, the strokes, the words and the uploaded mask of this picture
+ * are kept (`mask-draft.ts`) until the door accepts a run from them, so a reopened editor lays the
+ * same paint back and its press repeats the same request and so the same key. The mask's uploader is
+ * the card's, not this dialog's (`maskUploaderFor`). While the mask is going up the dialog does not
+ * close (✕ off, Escape and a click outside ignored): the upload is one short wait, and a close in the
+ * middle of it used to throw the paint away (G-03 m-3).
+ *
+ * ⚠ THE KEYBOARD PAINTS TOO (G-03 Codex MAJOR). The picture is a focusable brush: arrows move a ring
+ * (one brush radius a press, four with Shift), Space puts the brush down and lifts it (the stroke
+ * follows the arrows between), Enter generates, Escape lifts a stroke that is down, then closes. The
+ * toolbar stays the owner's three controls; the keys are told on the picture while it has focus and
+ * to a screen reader through one status line.
  */
 
 const RETOUCH_WORDS_HINT =
@@ -117,9 +130,12 @@ export function MaskEditor({
   // Ideas ask the server only where it names the assistant (C-15).
   const { band } = useDesignBand(techCardId);
   const { showMessage } = useSnackBarStore();
-  const [strokes, setStrokes] = useState<MaskStroke[]>([]);
+  const mediaId = media.id ?? 0;
+  /* The paint kept from an earlier press on this picture (Codex BLOCKER), read once per mount. */
+  const [kept] = useState(() => readMaskDraft(techCardId, mediaId));
+  const [strokes, setStrokes] = useState<MaskStroke[]>(() => kept?.strokes ?? []);
   const [brush, setBrush] = useState<BrushSize>('m');
-  const [words, setWords] = useState(initialWords);
+  const [words, setWords] = useState(() => (kept ? kept.words : initialWords));
   const [aspect, setAspect] = useState(0);
   const [box, setBox] = useState<Box | null>(null);
 
@@ -128,10 +144,13 @@ export function MaskEditor({
   /** The stroke under the pointer — a ref, redrawn per move without a render per move. */
   const live = useRef<MaskStroke | null>(null);
 
-  /* The mask of this paint goes up once (C-14); `alive` stops a press whose upload outlived the
-     editor from starting a run nobody is looking at. */
-  const uploader = useRef(createMaskUploader(maskDataUrl, uploadMask));
+  /* The mask of this paint goes up once (C-14) — once per paint for the CARD, not for this dialog
+     (Codex BLOCKER); `alive` stops a press whose upload outlived the editor from starting a run
+     nobody is looking at. */
+  const uploader = maskUploaderFor(techCardId);
   const [uploading, setUploading] = useState(false);
+  /** This browser's canvas refused the mask at a press: the rectangle path from now on (M-1). */
+  const [canDraw, setCanDraw] = useState(true);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -140,9 +159,34 @@ export function MaskEditor({
     };
   }, []);
 
-  const route = retouchRoute(band, media);
+  /* A PRESSED PAINT IS KEPT (Codex BLOCKER): from the first press — or from a kept paint this
+     editor opened on — every change of the strokes or the words is written through, until the door
+     accepts a run from them (`onAccepted` below forgets it). */
+  const keep = useRef(!!kept);
+  useEffect(() => {
+    if (keep.current) writeMaskDraft(techCardId, mediaId, { strokes, words });
+  }, [techCardId, mediaId, strokes, words]);
+
+  /* THE KEYBOARD BRUSH (Codex MAJOR): where the ring stands, whether the brush is down, whether the
+     picture has keyboard focus (the ring and the key line show only then), and the one status line a
+     screen reader hears. */
+  const [cursor, setCursor] = useState<MaskPoint>({ x: 0.5, y: 0.5 });
+  const [penDown, setPenDown] = useState(false);
+  const [keyFocus, setKeyFocus] = useState(false);
+  const [status, setStatus] = useState('');
+  /** Enter pressed with the brush down: the stroke lands first, the press follows on that render. */
+  const [queued, setQueued] = useState(false);
+
+  const route = retouchRoute(band, media, canDraw);
   const zone = useMemo(() => (aspect ? zoneOfStrokes(strokes, aspect) : null), [strokes, aspect]);
-  const input = { media, zone, painted: strokes.length > 0, words, route };
+  const input = {
+    media,
+    zone,
+    painted: strokes.length > 0,
+    words,
+    route,
+    shownAspect: aspect || undefined,
+  };
   const refusal = retouchRefusal(input);
   const request = retouchRequest(input);
 
@@ -197,7 +241,10 @@ export function MaskEditor({
   const onDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (frozen || e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    live.current = { size: BRUSH_SIZES[brush], points: [at(e)] };
+    setKeyFocus(false);
+    const p = at(e);
+    setCursor(p);
+    live.current = { size: BRUSH_SIZES[brush], points: [p] };
     draw();
   };
   const onMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -218,16 +265,95 @@ export function MaskEditor({
     if (stroke) setStrokes((list) => [...list, stroke]);
   };
 
+  /** Lift the keyboard brush: the stroke it drew joins the paint. */
+  const lift = () => {
+    const stroke = live.current;
+    live.current = null;
+    setPenDown(false);
+    if (!stroke) return;
+    setStrokes((list) => [...list, stroke]);
+    setStatus(`stroke ${strokes.length + 1} painted`);
+  };
+
+  /** One brush radius on screen, as fractions of the picture's width and height. */
+  const stepOf = (big: boolean) => {
+    if (!box) return { dx: 0.02, dy: 0.02 };
+    const px = BRUSH_SIZES[brush] * Math.min(box.width, box.height) * (big ? 4 : 1);
+    return { dx: px / box.width, dy: px / box.height };
+  };
+
+  const ARROWS: Record<string, [number, number]> = {
+    ArrowLeft: [-1, 0],
+    ArrowRight: [1, 0],
+    ArrowUp: [0, -1],
+    ArrowDown: [0, 1],
+  };
+
+  const onKey = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (live.current) {
+        lift();
+        setQueued(true);
+      } else if (refusal) setStatus(refusal.reason);
+      else void generate();
+      return;
+    }
+    const arrow = ARROWS[e.key];
+    if (!arrow && e.key !== ' ') return;
+    e.preventDefault();
+    setKeyFocus(true);
+    if (frozen) return;
+    if (arrow) {
+      const { dx, dy } = stepOf(e.shiftKey);
+      const next = {
+        x: Math.min(1, Math.max(0, cursor.x + arrow[0] * dx)),
+        y: Math.min(1, Math.max(0, cursor.y + arrow[1] * dy)),
+      };
+      setCursor(next);
+      const stroke = live.current;
+      if (stroke) {
+        live.current = { ...stroke, points: [...stroke.points, next] };
+        draw();
+      }
+      return;
+    }
+    if (live.current) {
+      lift();
+      return;
+    }
+    live.current = { size: BRUSH_SIZES[brush], points: [cursor] };
+    setPenDown(true);
+    setStatus('brush down: the arrows paint, Space lifts it');
+    draw();
+  };
+
+  /* Enter with the brush down: `lift` has put the stroke in the paint; press on the render that
+     holds it (the request and the refusal are that render's). */
+  const pressRef = useRef<() => void>(() => undefined);
+  pressRef.current = () => {
+    if (refusal) setStatus(refusal.reason);
+    else void generate();
+  };
+  useEffect(() => {
+    if (!queued) return;
+    setQueued(false);
+    pressRef.current();
+  }, [queued]);
+
   const generate = async () => {
     if (refusal || frozen) return;
     const said = words;
+    // From this press on the paint is kept (Codex BLOCKER): a close and a reopen repeat THIS request.
+    keep.current = true;
+    writeMaskDraft(techCardId, mediaId, { strokes, words });
     let wire = request;
     if (route === 'mask') {
       const full = media.media?.fullSize;
       setUploading(true);
       let maskMediaId = 0;
       try {
-        maskMediaId = await uploader.current.maskFor(
+        maskMediaId = await uploader.maskFor(
           media.id ?? 0,
           strokes,
           full?.width ?? 0,
@@ -235,6 +361,17 @@ export function MaskEditor({
         );
       } catch (e) {
         if (alive.current) setUploading(false);
+        if (e instanceof MaskNotDrawn) {
+          /* M-1: this browser cannot draw the mask at the picture's size. Nothing started; the
+             picture takes the rectangle path from now on and the lines under the brush and beside
+             GENERATE say so — the next press is the person's, on what they now read. */
+          if (alive.current) setCanDraw(false);
+          showMessage(
+            `nothing was started: ${e.message} — the rectangle path is used now`,
+            'error',
+          );
+          return;
+        }
         showMessage(
           `the mask did not upload, nothing was started: ${e instanceof Error ? e.message : String(e)}`,
           'error',
@@ -253,6 +390,9 @@ export function MaskEditor({
     }
     run.start(wire, {
       onAccepted: () => {
+        // Accepted: this paint is spent — the next press on the picture is a new run.
+        keep.current = false;
+        forgetMaskDraft(techCardId, mediaId);
         rememberRecentText(recentTextKey('retouch_zone', RETOUCH_WORDS_KEY), said);
         /* WHERE IT LANDS, TRULY (G-02 m-2): the answer is a retouch, filed under Retouch a Zone
            (and on the grid) — not under the tile whose picture it started from, where only the
@@ -264,7 +404,14 @@ export function MaskEditor({
   };
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root
+      open={open}
+      onOpenChange={(next) => {
+        // m-3: no close while the mask is going up (the ✕ is off; Escape and outside are ignored).
+        if (!next && uploading) return;
+        onOpenChange(next);
+      }}
+    >
       <Dialog.Portal>
         <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-black/90' />
         <Dialog.Content
@@ -272,6 +419,20 @@ export function MaskEditor({
           className='fixed inset-0 z-[var(--z-modal)] flex flex-col bg-black/90 focus:outline-none'
           data-mask-editor={media.id ?? 0}
           onCloseAutoFocus={onCloseAutoFocus}
+          onEscapeKeyDown={(e) => {
+            if (uploading) {
+              e.preventDefault();
+              return;
+            }
+            // Escape lifts a keyboard stroke that is down before it closes anything.
+            if (live.current && penDown) {
+              e.preventDefault();
+              lift();
+            }
+          }}
+          onInteractOutside={(e) => {
+            if (uploading) e.preventDefault();
+          }}
         >
           <Dialog.Title className='sr-only'>mask {label}</Dialog.Title>
           <Dialog.Description className='sr-only'>
@@ -290,7 +451,11 @@ export function MaskEditor({
             </Text>
             <Dialog.Close
               aria-label='close the mask'
-              className='flex size-8 shrink-0 items-center justify-center border border-bgColor/40 text-bgColor transition-colors hover:bg-bgColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor'
+              disabled={uploading}
+              title={
+                uploading ? 'the mask is uploading; the editor closes once it is up' : undefined
+              }
+              className='flex size-8 shrink-0 items-center justify-center border border-bgColor/40 text-bgColor transition-colors hover:bg-bgColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-bgColor'
             >
               ✕
             </Dialog.Close>
@@ -322,13 +487,22 @@ export function MaskEditor({
               {box && (
                 <canvas
                   ref={canvas}
-                  role='img'
-                  aria-label='the painted zone — drag over the picture to paint'
+                  tabIndex={0}
+                  role='application'
+                  aria-roledescription='brush'
+                  aria-label='the picture: drag to paint, or move the brush with the arrows, Space puts it down and lifts it, Enter generates'
+                  aria-describedby='mask-brush-status'
                   onPointerDown={onDown}
                   onPointerMove={onMove}
                   onPointerUp={onUp}
                   onPointerCancel={onUp}
-                  className='absolute touch-none opacity-50'
+                  onKeyDown={onKey}
+                  onFocus={(e) => setKeyFocus(e.currentTarget.matches(':focus-visible'))}
+                  onBlur={() => {
+                    setKeyFocus(false);
+                    if (live.current && penDown) lift();
+                  }}
+                  className='absolute touch-none opacity-50 focus:outline-none'
                   style={{
                     left: box.left,
                     top: box.top,
@@ -339,6 +513,45 @@ export function MaskEditor({
                   data-mask-canvas=''
                 />
               )}
+              {box && keyFocus && (
+                <>
+                  {/* The picture's focus frame and the keyboard brush's ring — drawn beside the
+                      half-through canvas so they read at full strength. */}
+                  <div
+                    aria-hidden
+                    className='pointer-events-none absolute outline outline-2 outline-offset-2 outline-bgColor'
+                    style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+                  />
+                  <div
+                    aria-hidden
+                    data-mask-ring=''
+                    // Two tones, hard edges: a white ring inside a black one reads on any picture.
+                    className={`pointer-events-none absolute rounded-full border-2 border-bgColor outline outline-1 outline-textColor ${penDown ? 'bg-bgColor/40' : ''}`}
+                    style={(() => {
+                      const r = BRUSH_SIZES[brush] * Math.min(box.width, box.height);
+                      return {
+                        left: box.left + cursor.x * box.width - r,
+                        top: box.top + cursor.y * box.height - r,
+                        width: 2 * r,
+                        height: 2 * r,
+                      };
+                    })()}
+                  />
+                  <Text
+                    size='micro'
+                    variant='label'
+                    component='p'
+                    aria-hidden
+                    className='pointer-events-none absolute bottom-2 left-1/2 w-max max-w-[calc(100%-16px)] -translate-x-1/2 bg-textColor px-2 py-1 text-center normal-case !text-bgColor'
+                  >
+                    arrows move · space {penDown ? 'lifts' : 'paints'} · shift+arrows go further ·
+                    enter generates
+                  </Text>
+                </>
+              )}
+              <p id='mask-brush-status' role='status' aria-live='polite' className='sr-only'>
+                {status}
+              </p>
             </div>
 
             {/* THE PANEL — two sections headed like the tile forms (the zone; the words), then the
@@ -368,7 +581,11 @@ export function MaskEditor({
                       variant='secondary'
                       size='xs'
                       disabled={frozen || strokes.length === 0}
-                      onClick={() => setStrokes([])}
+                      onClick={() => {
+                        live.current = null;
+                        setPenDown(false);
+                        setStrokes([]);
+                      }}
                     >
                       clear
                     </Button>
@@ -380,7 +597,7 @@ export function MaskEditor({
                     className='normal-case'
                     data-mask-caveat=''
                   >
-                    {retouchCaveat(band, media)}
+                    {retouchCaveat(band, media, canDraw)}
                   </Text>
                 </div>
               </FoldSection>
@@ -424,6 +641,7 @@ export function MaskEditor({
                 <GenerateRow
                   gate={refusal ? { ok: false, reason: refusal.reason } : { ok: true }}
                   pending={run.isPending || uploading}
+                  pendingLabel={uploading ? 'uploading the mask…' : undefined}
                   disabled={disabled}
                   onGenerate={() => void generate()}
                   trailing={
@@ -434,7 +652,7 @@ export function MaskEditor({
                       className='min-w-0'
                       data-mask-price=''
                     >
-                      {retouchPriceLine(band, media)}
+                      {retouchPriceLine(band, media, canDraw)}
                     </Text>
                   }
                 />

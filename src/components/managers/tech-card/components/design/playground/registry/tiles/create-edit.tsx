@@ -89,7 +89,9 @@ const run: WorkflowRun = {
           hint: 'an instruction to an image model that creates or edits a picture from reference images',
           maxLength: ASK_MAX,
           // C-15: what the server's Ideas look at.
-          ideasFrom: (draft) => ({ mediaIds: ideaMediaIds(imagesOf(draft, REFS)[0]) }),
+          // Its first two references (Codex MINOR): the door takes two, and the second is often
+          // the one the words are about («put the print of the second on the first»).
+          ideasFrom: (draft) => ({ mediaIds: ideaMediaIds(...imagesOf(draft, REFS)) }),
         },
       ],
     },

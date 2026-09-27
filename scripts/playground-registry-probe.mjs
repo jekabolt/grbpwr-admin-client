@@ -253,6 +253,21 @@
 //                                                                   сервера → краснеет AB
 //   node scripts/playground-registry-probe.mjs --mutate-mask-once    загрузчик не помнит краску
 //                                                                   → краснеет AB
+//   AC · (G-03 client fix) бюджет холста маски (M-1: сверх 4096² — окно и строка «cannot draw»;
+//        canDraw=false — то же), повёрнутый файл (m-1: отказ RETOUCH_TURNED на обоих маршрутах),
+//        хранилище id маски (BLOCKER: новый загрузчик с тем же хранилищем отдаёт ту же маску без
+//        загрузки), слова панели (m-2, n-2).
+//   node scripts/playground-registry-probe.mjs --mutate-canvas-cap   бюджета холста нет → AC
+//   node scripts/playground-registry-probe.mjs --mutate-exif-blind   повёрнутый файл не видим → AC
+//   node scripts/playground-registry-probe.mjs --mutate-mask-store   загрузчик не читает хранилище
+//                                                                   → краснеет AC
+//   node scripts/playground-registry-probe.mjs --mutate-ideas-first-ref Create/Edit снова шлёт
+//                                                                   Ideas одну картинку → Y
+//   AD · (G-03, бэкенд d8b7bca) submit_unconfirmed словами: исход прогона (история, пин
+//        итогов), пилюля, выноска панели; прочие коды — как есть.
+//   node scripts/playground-registry-probe.mjs --mutate-unconfirmed-words код без слов → AD
+//   node scripts/playground-registry-probe.mjs --mutate-recent-kind  «on this card» без правила
+//                                                                   inpaint в workflowOfRun → Z
 //
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
@@ -334,6 +349,12 @@ const MUT = {
   extendWire: process.argv.includes('--mutate-extend-wire'),
   inpaintRoute: process.argv.includes('--mutate-inpaint-route'),
   maskOnce: process.argv.includes('--mutate-mask-once'),
+  canvasCap: process.argv.includes('--mutate-canvas-cap'),
+  exifBlind: process.argv.includes('--mutate-exif-blind'),
+  maskStore: process.argv.includes('--mutate-mask-store'),
+  ideasFirstRef: process.argv.includes('--mutate-ideas-first-ref'),
+  recentKind: process.argv.includes('--mutate-recent-kind'),
+  unconfirmedWords: process.argv.includes('--mutate-unconfirmed-words'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -891,10 +912,60 @@ if (MUT.inpaintRoute && retouchSwaps.length === 1)
       });
     },
   });
+fileSwaps('c14-mask-once', /mask\/mask-upload\.ts$/, [
+  ...(MUT.maskOnce ? [['if (held) return held;', '']] : []),
+  ...(MUT.maskStore
+    ? [['const kept = store?.recall(mediaId, key);', 'const kept = undefined;']]
+    : []),
+]);
 fileSwaps(
-  'c14-mask-once',
-  /mask\/mask-upload\.ts$/,
-  MUT.maskOnce ? [['if (last && last.key === key) return last.id;', '']] : [],
+  'g03-canvas-cap',
+  /mask\/geometry\.ts$/,
+  MUT.canvasCap ? [['  width * height <= MASK_MAX_AREA;', '  true;']] : [],
+);
+fileSwaps(
+  'g03-ideas-first-ref',
+  /tiles\/create-edit\.tsx$/,
+  MUT.ideasFirstRef
+    ? [['ideaMediaIds(...imagesOf(draft, REFS))', 'ideaMediaIds(imagesOf(draft, REFS)[0])']]
+    : [],
+);
+fileSwaps(
+  'g03-recent-kind',
+  /playground\/card-recent\.ts$/,
+  MUT.recentKind
+    ? [
+        [
+          "if ((workflowOfRun(run) ?? '') !== workflowKey) continue;",
+          "if ((run.kind === 'inpaint' ? null : workflowOfRun(run) ?? '') !== workflowKey) continue;",
+        ],
+      ]
+    : [],
+);
+fileSwaps(
+  'g03-unconfirmed-words',
+  /generation\/run-state\.ts$/,
+  MUT.unconfirmedWords
+    ? [
+        [
+          `  submit_unconfirmed:
+    'the provider did not confirm the request; it may have been charged; this run is not retried automatically',`,
+          '',
+        ],
+      ]
+    : [],
+);
+fileSwaps(
+  'g03-exif-blind',
+  RETOUCH,
+  MUT.exifBlind
+    ? [
+        [
+          'if (pictureTurned(input.media, input.shownAspect)) return { reason: RETOUCH_TURNED };',
+          '',
+        ],
+      ]
+    : [],
 );
 
 const outfile = resolve(tmpdir(), `playground-registry-probe-${process.pid}.mjs`);
@@ -3532,7 +3603,9 @@ head(
       p10.includes(
         'press <b>Mask</b>, paint the zone to change and describe what should be there.',
       ) &&
-      p10.includes('The retouch is generated in place.') &&
+      p10.includes(
+        'The retouch is generated as a new picture beside the original — nothing is overwritten.',
+      ) &&
       p10.includes(M.RETOUCH_CAVEAT) &&
       !/credit/i.test(p10),
     'плитка 10: слова владельца (12.png) и честная строка, без «credit»',
@@ -3896,7 +3969,7 @@ head('Y', 'C-15: ideasFrom плиток, тело SuggestPrompts, чистка, 
     'swap_fabrics.garment': [501],
     'add_logo.placement': [601],
     'design_variations.variation': [301],
-    'create_edit.prompt': [301],
+    'create_edit.prompt': [301, 302],
   };
   const seen = {};
   for (const wf of M.WORKFLOWS) {
@@ -4378,8 +4451,9 @@ await (async () => {
   );
   const again = await up.maskFor(800, stroke, 1024, 1536);
   ck(
-    again !== a1 && uploads === 3,
-    'назад к прежней краске (undo) — ключ сменился дважды, загрузка новая',
+    again === a1 && uploads === 2,
+    'назад к краске, уже загруженной (штрих, затем undo), — её маска, без новой загрузки',
+    `${again} ${a1} (${uploads})`,
   );
   ck(
     M.maskKey(800, stroke, 1024, 1536) !== M.maskKey(801, stroke, 1024, 1536) &&
@@ -4412,10 +4486,12 @@ await (async () => {
     async () => null,
     async () => 1,
   );
+  const notDrawn = await noCanvas.maskFor(1, stroke, 10, 10).catch((e) => e);
   ck(
-    (await noCanvas.maskFor(1, stroke, 10, 10).catch((e) => e.message)) ===
-      'the mask could not be drawn at 10×10 px',
-    'маску не нарисовать (холст) → слова, без загрузки',
+    notDrawn instanceof M.MaskNotDrawn &&
+      notDrawn.message === 'this browser could not draw the mask at 10×10 px',
+    'маску не нарисовать (холст) → MaskNotDrawn со словами, без загрузки',
+    String(notDrawn?.message),
   );
 
   // caveat per route — the panel and the editor read one function
@@ -4472,6 +4548,186 @@ await (async () => {
     'inpaint в run_kinds без retouch_zone в списке: Mask не предлагается (плитка решает)',
   );
 })();
+
+// ─── AC · G-03 client fix: бюджет холста, повёрнутый файл, хранилище маски, слова панели ───────
+head('AC', 'G-03: бюджет холста маски (M-1), повёрнутый файл (m-1), маска переживает редактор');
+await (async () => {
+  const sized = (id, width, height) => ({
+    id,
+    thumbnail: { mediaUrl: `https://x/${id}.jpg` },
+    media: { fullSize: { mediaUrl: `https://x/${id}-full.jpg`, width, height } },
+  });
+  const NEW = band({ runKinds: ['freeform', 'inpaint'], playgroundWorkflows: ['retouch_zone'] });
+  const OLD = band({ playgroundWorkflows: ['retouch_zone'] });
+  const base = '1 picture · priced by the server when the run starts';
+
+  // M-1 · the budget
+  ck(
+    M.MASK_MAX_AREA === 16777216 &&
+      M.maskDrawable(4096, 4096) &&
+      M.maskDrawable(2048, 8192) &&
+      !M.maskDrawable(4097, 4096) &&
+      !M.maskDrawable(6000, 4000) &&
+      !M.maskDrawable(16385, 10) &&
+      !M.maskDrawable(0, 10),
+    'бюджет маски: 4096² пикселей и 16384 на сторону — больше не рисуется',
+  );
+  const big = sized(900, 6000, 4000);
+  const ok = sized(901, 1024, 1536);
+  ck(
+    M.retouchRoute(NEW, big) === 'window' &&
+      M.retouchWindowReason(NEW, big) === M.RETOUCH_TOO_LARGE &&
+      M.retouchPriceLine(NEW, big) === `${M.RETOUCH_TOO_LARGE} · ${base}` &&
+      M.retouchCaveat(NEW, big) === M.RETOUCH_CAVEAT,
+    '24 МП на сервере с маской: окно, строка цены «cannot draw a mask this size», строка про прямоугольник',
+    M.retouchPriceLine(NEW, big),
+  );
+  ck(
+    M.RETOUCH_TOO_LARGE === 'this browser cannot draw a mask this size; the rectangle path is used',
+    'слова отката: одна строка',
+  );
+  ck(
+    M.retouchRoute(NEW, ok, false) === 'window' &&
+      M.retouchPriceLine(NEW, ok, false) === `${M.RETOUCH_TOO_LARGE} · ${base}` &&
+      M.retouchRoute(NEW, ok) === 'mask' &&
+      M.retouchWindowReason(NEW, ok) === null,
+    'холст отказал при нажатии (canDraw=false) → та же картинка идёт окном и говорит почему',
+  );
+  ck(
+    M.retouchWindowReason(OLD, big) === null && M.retouchPriceLine(OLD, big) === base,
+    'старый сервер: причины отката нет (маски и не предлагали)',
+  );
+
+  // m-1 · a file stored turned
+  const stored = sized(902, 1000, 800);
+  const words = { zone: M.zoneOfStrokes([{ size: 0.03, points: [{ x: 0.5, y: 0.5 }] }], 0.8) };
+  ck(
+    M.pictureTurned(stored, 0.8) &&
+      !M.pictureTurned(stored, 1.25) &&
+      !M.pictureTurned(sized(903, 1000, 1000), 1) &&
+      !M.pictureTurned(sized(904, 1000, 995), 0.995) &&
+      !M.pictureTurned(stored, undefined) &&
+      !M.pictureTurned(media(905), 0.8),
+    'повёрнутый файл: показанная пропорция ближе к перевёрнутому размеру; квадрат и неизвестное — нет',
+  );
+  for (const route of ['mask', 'window'])
+    ck(
+      M.retouchRefusal({
+        media: stored,
+        ...words,
+        painted: true,
+        words: 'x',
+        route,
+        shownAspect: 0.8,
+      })?.reason === M.RETOUCH_TURNED &&
+        M.retouchRefusal({
+          media: stored,
+          ...words,
+          painted: false,
+          words: '',
+          route,
+          shownAspect: 0.8,
+        })?.reason === M.RETOUCH_TURNED &&
+        M.retouchRefusal({
+          media: stored,
+          ...words,
+          painted: true,
+          words: 'x',
+          route,
+          shownAspect: 1.25,
+        }) === null,
+      `${route}: повёрнутый файл отказан даром, до краски; неповёрнутый — нет`,
+    );
+
+  // BLOCKER · the mask id outlives the uploader (a closed editor)
+  const shelf = new Map();
+  const store = {
+    recall: (mediaId, key) => shelf.get(`${mediaId}|${key}`),
+    keep: (mediaId, key, id) => shelf.set(`${mediaId}|${key}`, id),
+  };
+  let ups = 0;
+  const paintOf = async () => 'data:image/png;base64,AA';
+  const uploadOf = async () => 7000 + ++ups;
+  const stroke = [{ size: 0.03, points: [{ x: 0.4, y: 0.4 }] }];
+  const first = await M.createMaskUploader(paintOf, uploadOf, store).maskFor(
+    901,
+    stroke,
+    1024,
+    1536,
+  );
+  const reopened = await M.createMaskUploader(paintOf, uploadOf, store).maskFor(
+    901,
+    stroke,
+    1024,
+    1536,
+  );
+  ck(
+    first === 7001 && reopened === 7001 && ups === 1,
+    'новый загрузчик (редактор закрыт и открыт) с тем же хранилищем — та же маска, без загрузки',
+    `${first} ${reopened} (${ups})`,
+  );
+  const other = await M.createMaskUploader(paintOf, uploadOf, store).maskFor(
+    901,
+    [...stroke, ...stroke],
+    1024,
+    1536,
+  );
+  ck(other === 7002 && ups === 2, 'другая краска — новая маска');
+
+  // m-2 · n-2 · the panel's words
+  const pNew = M.panelMarkup(NEW, 'retouch_zone');
+  const pOld = M.panelMarkup(OLD, 'retouch_zone');
+  ck(
+    pNew.includes(M.RETOUCH_PANEL_FALLBACK) && !pOld.includes(M.RETOUCH_PANEL_FALLBACK),
+    'панель на сервере с маской говорит, что не каждая картинка идёт маской (n-2); старый сервер — нет',
+  );
+  ck(
+    !pNew.includes('generated in place') && pNew.includes('nothing is overwritten'),
+    'панель: ответ — новая картинка рядом, ничего не перезаписано (m-2)',
+  );
+})();
+
+// ─── AD · submit_unconfirmed словами (G-03, бэкенд d8b7bca) ─────────────────────────────────────
+head('AD', 'G-03: submit_unconfirmed — «провайдер не подтвердил, мог списать, не повторяется»');
+{
+  const WORDS =
+    'the provider did not confirm the request; it may have been charged; this run is not retried automatically';
+  const failed = {
+    id: 1,
+    kind: 'inpaint',
+    status: 'failed',
+    errorCode: 'submit_unconfirmed',
+    lastError: 'fal: submit unconfirmed: the provider may have been charged; reconcile with fal',
+  };
+  ck(
+    M.runOutcomeNote(failed) === `failed · ${WORDS}`,
+    'исход прогона (история, пин итогов плейграунда): словами, а не голым кодом',
+    M.runOutcomeNote(failed),
+  );
+  ck(
+    M.runOutcomeChip(failed).startsWith('failed · the provider did not confirm') &&
+      M.runOutcomeChip(failed).endsWith('…'),
+    'пилюля: те же слова, усечены по ширине (целиком — в title)',
+    M.runOutcomeChip(failed),
+  );
+  const f = M.runFailureText(failed);
+  ck(
+    f.code === 'submit_unconfirmed' && f.words === WORDS && f.text.includes('reconcile with fal'),
+    'выноска панели: код, слова и текст сервера',
+    JSON.stringify(f),
+  );
+  ck(
+    M.runCodeWords('submit_unconfirmed') === WORDS &&
+      M.runCodeWords(' source_too_small ') === 'source_too_small' &&
+      M.runOutcomeNote({ ...failed, errorCode: 'job_too_large' }) === 'failed · job_too_large' &&
+      M.runFailureText({ errorCode: 'job_too_large' }).words === '',
+    'прочие коды (job_too_large, source_too_small) — как сервер их пишет',
+  );
+  ck(
+    M.runOutcomeNote({ ...failed, status: 'cancelled' }) === `cancelled · ${WORDS}`,
+    'отменённый с этим кодом — те же слова',
+  );
+}
 
 const expected = MUTATED ? ' (прогон С МУТАЦИЕЙ — провалы ожидаются)' : '';
 console.log(

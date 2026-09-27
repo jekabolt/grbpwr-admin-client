@@ -31,6 +31,18 @@ import type { Draft, SectionDef } from './registry/types';
  * (`src/api/api.ts` builds `fetch` without one), so a menu that closes does not cancel the request —
  * the field ignores the late answer by ticket, and the answer still lands in the cache: it was paid
  * for, and the next press of the same question shows it at once.
+ *
+ * ⚠ THE QUESTION IS WHAT CHANGES THE ANSWER (G-03 Codex MINOR). The context carries the form's
+ * VALUES — each filled section with what it holds (a choice, a colour, a text, the pictures by id),
+ * not only its title — so changing the framing, the angle or a logo's size is a new question, and
+ * the cache, keyed by the request, asks again instead of showing the answer to the old form.
+ *
+ * ⚠ A CALL THAT NEVER ANSWERS IS GIVEN UP (G-03 Codex MINOR). A proxy that takes the request and never
+ * closes it would have left «thinking…» on that question for the page's life. After
+ * `IDEAS_DEADLINE_MS` the call counts as failed: the menu shows the static list, the pending entry is
+ * dropped (nothing is cached), and for `IDEAS_COOLDOWN_MS` no press asks the server at all, so a
+ * stalled connection cannot turn every changed letter into another hung call. A late answer to the
+ * given-up call still lands in the cache — it was paid for.
  */
 
 /** The door's limits (admin.proto `SuggestPromptsRequest`): ≤ 2 pictures, ≤ 2000 runes each text. */
@@ -38,6 +50,12 @@ export const SUGGEST_MEDIA_MAX = 2;
 export const SUGGEST_TEXT_MAX = 2000;
 /** The server returns 3–5; the menu never shows more than this whatever arrives. */
 export const SERVER_IDEAS_MAX = 5;
+/** How long a SuggestPrompts call may go unanswered before the menu gives it up. */
+export const IDEAS_DEADLINE_MS = 20_000;
+/** After a given-up call, how long no press asks the server. */
+export const IDEAS_COOLDOWN_MS = 60_000;
+/** A text value's share of the context (a long sentence elsewhere on the form must not eat it). */
+const CONTEXT_VALUE_MAX = 200;
 
 /** What a prompt field asks with, besides its own text. `mediaIds` ≤ 2, `context` ≤ 2000. */
 export type ServerIdeasInput = {
@@ -85,19 +103,59 @@ export function ideaMediaIds(
   return out;
 }
 
-/** A field of a section holds something in the draft (a text, a picture, a colour, a choice). */
-function holds(draft: Draft, key: string): boolean {
-  if ((draft.texts[key] ?? '').trim()) return true;
-  if ((draft.images[key] ?? []).some((m) => (m.id ?? 0) > 0)) return true;
-  if (Object.values(draft.slots[key] ?? {}).some((m) => (m?.id ?? 0) > 0)) return true;
+const pictureIds = (list: readonly (common_MediaFull | null | undefined)[]): string =>
+  list
+    .map((m) => m?.id ?? 0)
+    .filter((id) => id > 0)
+    .map((id) => `#${id}`)
+    .join(' ');
+
+/**
+ * What a draft key holds, as one short phrase — or '' when it holds nothing: a text (quoted, capped),
+ * the pictures by id, the fixed slots by name, a colour, a choice, a switch.
+ */
+function valueOf(draft: Draft, key: string): string {
+  const out: string[] = [];
+  const text = (draft.texts[key] ?? '').trim().replace(/\s+/g, ' ');
+  if (text) out.push(`"${runes(text, CONTEXT_VALUE_MAX)}"`);
+  const images = pictureIds(draft.images[key] ?? []);
+  if (images) out.push(`pictures ${images}`);
+  const slots = Object.entries(draft.slots[key] ?? {})
+    .map(([slot, m]) => ((m?.id ?? 0) > 0 ? `${slot} #${m?.id}` : ''))
+    .filter(Boolean);
+  if (slots.length) out.push(slots.join(', '));
   const colour = draft.colours[key];
-  if (colour && (colour.code || colour.hex)) return true;
-  return (draft.choices[key] ?? '') !== '';
+  if (colour && (colour.code || colour.hex))
+    out.push([colour.code, colour.hex].filter(Boolean).join(' '));
+  const choice = draft.choices[key] ?? '';
+  if (choice !== '') out.push(choice);
+  if (key in draft.flags) out.push(draft.flags[key] ? 'on' : 'off');
+  return out.join('; ');
+}
+
+/** Every draft key a field writes: its own, its sub-keys (`engine.quality`), and its named partners. */
+function keysOf(field: SectionDef['fields'][number], draft: Draft): string[] {
+  const own = [field.key];
+  if ('photoKey' in field && field.photoKey) own.push(field.photoKey);
+  if ('colorwayKey' in field && field.colorwayKey) own.push(field.colorwayKey);
+  if ('backgroundKey' in field && field.backgroundKey) own.push(field.backgroundKey);
+  const all = new Set([
+    ...Object.keys(draft.texts),
+    ...Object.keys(draft.images),
+    ...Object.keys(draft.slots),
+    ...Object.keys(draft.colours),
+    ...Object.keys(draft.choices),
+    ...Object.keys(draft.flags),
+  ]);
+  const subs = [...all].filter((k) => k.startsWith(`${field.key}.`)).sort();
+  return [...own, ...subs];
 }
 
 /**
  * THE CARD FACTS a field asks with — the same kind Improve sends (the field's purpose), plus what is
- * filled so far on the form, by section title. DATA, never instructions: the server says so in its
+ * filled so far on the form: each section by title WITH ITS VALUES (Codex MINOR — a title alone
+ * would let the cache answer a changed form with the old form's ideas). The asking field's own text
+ * is left out (`skip`): it travels as `text`. DATA, never instructions: the server says so in its
  * own system line. At most 2000 runes.
  */
 export function ideasContext(opts: {
@@ -105,6 +163,8 @@ export function ideasContext(opts: {
   hint?: string;
   sections?: readonly SectionDef[];
   draft?: Draft;
+  /** The asking field's key: its own text is `text`, not context. */
+  skip?: string;
   /** A tile's own extra fact (`PromptFieldDef.ideasFrom`), if it has one. */
   extra?: string;
 }): string {
@@ -112,10 +172,19 @@ export function ideasContext(opts: {
   if (opts.hint?.trim()) lines.push(`This field: ${opts.hint.trim()}`);
   if (opts.sections && opts.draft) {
     const draft = opts.draft;
-    const filled = opts.sections
-      .filter((s) => s.fields.some((f) => holds(draft, f.key)))
-      .map((s) => s.title);
-    if (filled.length) lines.push(`Filled so far: ${filled.join(', ')}`);
+    const filled: string[] = [];
+    for (const section of opts.sections) {
+      const parts: string[] = [];
+      for (const field of section.fields) {
+        for (const key of keysOf(field, draft)) {
+          if (key === opts.skip) continue;
+          const value = valueOf(draft, key);
+          if (value) parts.push(`${key}: ${value}`);
+        }
+      }
+      if (parts.length) filled.push(`${section.title} (${parts.join(', ')})`);
+    }
+    if (filled.length) lines.push(`Filled so far: ${filled.join('; ')}`);
   }
   if (opts.extra?.trim()) lines.push(opts.extra.trim());
   return runes(lines.join('\n'), SUGGEST_TEXT_MAX);
@@ -227,10 +296,33 @@ function refusalReason(error: unknown): string | undefined {
   return undefined;
 }
 
-/** The refusal says this server cannot answer at all — asking again would only pay for it again. */
+/**
+ * The refusal says this server cannot answer at all — asking again would only pay for it again.
+ * A 404 counts only BARE (G-03 m-5): the gateway's «no such route» carries no ErrorInfo, while the
+ * server's own NotFound (a picture of the question deleted meanwhile) names its reason — that one is
+ * about this question, not about the route.
+ */
 function cannotAnswer(error: unknown): boolean {
   const status = (error as { status?: number } | null)?.status;
-  return status === 404 || status === 501 || refusalReason(error) === 'AI_NOT_CONFIGURED';
+  const reason = refusalReason(error);
+  return (
+    (status === 404 && reason === undefined) || status === 501 || reason === 'AI_NOT_CONFIGURED'
+  );
+}
+
+/** Until when no press asks the server (a call was given up, see the file head). */
+let quietUntil = 0;
+
+/** The deadline of one call, readable by a probe stand. */
+const deadlineMs = (): number =>
+  (globalThis as { __ideasDeadlineMs?: number }).__ideasDeadlineMs ?? IDEAS_DEADLINE_MS;
+
+/** The given-up call's error: the menu treats it as any failure (static list, no toast). */
+export class IdeasGivenUp extends Error {
+  constructor() {
+    super('the assistant did not answer in time');
+    this.name = 'IdeasGivenUp';
+  }
 }
 
 /** A settled answer to this exact question, if there is one. */
@@ -245,7 +337,8 @@ export function fetchServerIdeas(req: SuggestRequest): Promise<string[]> {
   const key = suggestKey(req);
   const out = asked.get(key);
   if (out) return out;
-  const call = adminService
+  if (Date.now() < quietUntil) return Promise.reject(new IdeasGivenUp());
+  const answer = adminService
     .SuggestPrompts({
       techCardId: req.techCardId,
       workflow: req.workflow,
@@ -261,11 +354,24 @@ export function fetchServerIdeas(req: SuggestRequest): Promise<string[]> {
         return ideas;
       },
       (error: unknown) => {
-        asked.delete(key);
+        if (asked.get(key) === call) asked.delete(key);
         if (cannotAnswer(error)) sessionOff = true;
         throw error;
       },
     );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const call = Promise.race([
+    answer,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        if (asked.get(key) === call) asked.delete(key);
+        quietUntil = Date.now() + IDEAS_COOLDOWN_MS;
+        reject(new IdeasGivenUp());
+      }, deadlineMs());
+    }),
+  ]).finally(() => clearTimeout(timer));
+  // The given-up call's own failure (if it ever fails) has nobody left to hear it.
+  answer.catch(() => undefined);
   asked.set(key, call);
   return call;
 }
@@ -275,4 +381,5 @@ export function resetServerIdeasForProbe(): void {
   asked.clear();
   answered.clear();
   sessionOff = false;
+  quietUntil = 0;
 }

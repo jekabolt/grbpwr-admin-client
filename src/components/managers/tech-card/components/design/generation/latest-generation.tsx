@@ -115,7 +115,8 @@ export function latestFlatRun(
 /** «the newest run failed · CODE — this is the one before», worded by how the newer run ended. */
 function passedOverNote(run: common_DesignRun): string {
   const status = runStatus(run);
-  const { code } = runFailureText(run);
+  const failure = runFailureText(run);
+  const code = failure.words || failure.code;
   const tail = ' — this is the one before';
   if (status === 'failed') return `the newest run failed${code ? ` · ${code}` : ''}${tail}`;
   if (status === 'cancelled')

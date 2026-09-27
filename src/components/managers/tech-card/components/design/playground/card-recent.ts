@@ -18,9 +18,9 @@ import { workflowOfRun } from './registry/run-workflow';
  *   · `virtual_try_on.scene` → `params.freeform.options.sceneText`;
  *   · `retouch_zone.change_text` → a phase-2 retouch: `params.freeform.items[0].texts[0]`; a mask
  *     retouch (kind `inpaint`, phase 3): `run.ask`.
- * A run is the field's when `workflowOfRun` (the server's rule) files it under that workflow; a mask
- * retouch is filed under `retouch_zone` here by its kind, so the list is right before and after the
- * kind lands in `workflowOfRun`. An off-page stub (no params) gives its `ask` and nothing else.
+ * A run is the field's when `workflowOfRun` (the server's rule, ONE rule — it files a mask retouch,
+ * kind `inpaint`, under `retouch_zone`; G-03 n-4) files it under that workflow. An off-page stub (no
+ * params) gives its `ask` and nothing else.
  *
  * Newest first (the band's order), trimmed, no blanks, no repeats by the `mergeRecentText` rule, at
  * most eight. The browser's group wins a repeat: `recentMenu` drops from «on this card» what «in this
@@ -49,9 +49,6 @@ export const CARD_RECENT_SOURCES: Readonly<Record<string, Readonly<Record<string
   retouch_zone: { change_text: retouchWords },
 };
 
-const workflowOf = (run: common_DesignRun): string =>
-  isMaskRetouch(run) ? 'retouch_zone' : workflowOfRun(run) ?? '';
-
 /** The card's own past texts of one field, newest first, at most eight. */
 export function cardRecentTexts(
   band: Pick<GetDesignBandResponse, 'runs'>,
@@ -62,7 +59,7 @@ export function cardRecentTexts(
   if (!source) return [];
   const texts: string[] = [];
   for (const run of band.runs ?? []) {
-    if (workflowOf(run) !== workflowKey) continue;
+    if ((workflowOfRun(run) ?? '') !== workflowKey) continue;
     // A stub states no params: every source but `ask` reads '' from it.
     const text = source(run);
     if (text.trim()) texts.push(text);

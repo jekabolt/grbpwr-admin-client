@@ -34,6 +34,15 @@
 //   --mutate-recent-order    группа карточки встаёт ниже браузерной               → H
 //   --mutate-recent-mask     редактор маски не получает слов карточки             → H
 //   --mutate-door-skin       открытая дверь снова чёрным по чёрному без наведения → H
+//   --mutate-ideas-coarse    контекст снова только заголовки секций               → I
+//   --mutate-ideas-no-deadline зависший вызов не отпускается                     → J
+//   --mutate-ideas-404-any   любой 404 выключает сессию                           → E
+//
+//   I · (G-03 Codex MINOR) ключ кэша — значения формы: другой цвет Pantone при том же тексте — новый
+//       вопрос и новый вызов; тот же цвет — кэш; текст самого поля в контекст не идёт;
+//   J · (G-03 Codex MINOR) вызов, который не отвечает, отпускается по сроку: «thinking…» снята,
+//       статический список, без тоста; тишина — следующее нажатие не зовёт; кэш пуст;
+//   E · (G-03 m-5) 404 С причиной (картинка вопроса удалена) — сессия НЕ выключается.
 //
 // Нет Chromium — КОД 2 и «НЕ ВЫПОЛНЕНА». `--shots <dir>` сохраняет снимки меню (1440/768/375).
 
@@ -64,6 +73,9 @@ const KNOWN = new Set([
   '--mutate-recent-order',
   '--mutate-recent-mask',
   '--mutate-door-skin',
+  '--mutate-ideas-coarse',
+  '--mutate-ideas-no-deadline',
+  '--mutate-ideas-404-any',
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN.has(a));
 if (stray) dieNotRun(`неизвестный флаг мутации ${stray}; известные: ${[...KNOWN].join(', ')}`);
@@ -136,6 +148,22 @@ if (on('--mutate-door-skin'))
     PROMPT_FIELD,
     "open && 'bg-textColor !text-bgColor',",
     "open && 'bg-textColor text-bgColor',",
+  );
+if (on('--mutate-ideas-coarse'))
+  patch(
+    'ideas-coarse',
+    IDEAS_SERVER,
+    'if (value) parts.push(`${key}: ${value}`);',
+    "if (value) parts.push('');",
+  );
+if (on('--mutate-ideas-no-deadline'))
+  patch('ideas-no-deadline', IDEAS_SERVER, '}, deadlineMs());', '}, 1e9);');
+if (on('--mutate-ideas-404-any'))
+  patch(
+    'ideas-404-any',
+    IDEAS_SERVER,
+    '(status === 404 && reason === undefined) || status === 501',
+    'status === 404 || status === 501',
   );
 if (on('--mutate-recent-mask'))
   patch(
@@ -437,8 +465,9 @@ try {
       req.text === 'the jacket' &&
       /^Tool: Change a Color\n/.test(req.context) &&
       /This field: which garment in the photographs/.test(req.context) &&
-      /Filled so far: .*Garment to recolor/.test(req.context),
-    'запрос: карточка, workflow, поле, ПЕРВОЕ фото формы, текст, контекст карточки',
+      /Filled so far: Reference image \(photos: pictures #101 #102 #103\)/.test(req.context) &&
+      !req.context.includes('the jacket'),
+    'запрос: карточка, workflow, поле, ПЕРВОЕ фото формы, текст, контекст со ЗНАЧЕНИЯМИ (без своего текста)',
     JSON.stringify(req),
   );
   await shoot('ideas-thinking');
@@ -580,6 +609,24 @@ try {
   ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
 }
 
+// m-5 · a 404 WITH a reason is the server's NotFound about this question, not a missing route.
+try {
+  await fresh('change_color', NEW, { images: { photos: [media(101)] } });
+  await openIdeas('change_color.garment');
+  await answerIdeas({ status: 404, reason: 'DESIGN_NOT_FOUND', message: 'media 101 not found' });
+  await settle();
+  await closeMenu();
+  await field('change_color.garment').locator('textarea').fill('another question');
+  await openIdeas('change_color.garment');
+  ck(
+    (await suggestCalls()).length === 2 && (await thinking()) === 1,
+    '404 с причиной (картинка вопроса удалена): сессия не выключена — следующее нажатие спрашивает',
+    String((await suggestCalls()).length),
+  );
+} catch (e) {
+  ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
 // ─── F · закрыто, пока ответ в пути ────────────────────────────────────────────────────────────
 head('F', 'меню закрыто до ответа: поздний ответ ложится в кэш, страница цела');
 try {
@@ -616,6 +663,100 @@ try {
     (await groupLabels())[0] === 'for this field',
     'подпись «for this field»',
     JSON.stringify(await groupLabels()),
+  );
+} catch (e) {
+  ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+// ─── I · ключ кэша — значения формы (G-03 Codex MINOR) ─────────────────────────────────────────
+head('I', 'кэш по значениям формы: другой цвет при том же тексте — новый вопрос');
+try {
+  const colour = (code, hex) => ({ colour: { code, hex } });
+  await fresh('change_color', NEW, {
+    images: { photos: [media(101)] },
+    texts: { garment: 'coat' },
+    colours: colour('19-4052 TCX', '#0F4C81'),
+  });
+  await openIdeas('change_color.garment');
+  await answerIdeas({ ideas: ['the lapels', 'the pockets', 'the belt'] });
+  await settle();
+  await closeMenu();
+  const [first] = await suggestCalls();
+  ck(
+    /colour: 19-4052 TCX #0F4C81/.test(first?.context ?? ''),
+    'контекст несёт значение цвета, а не только заголовок секции',
+    first?.context,
+  );
+  // the same question on a remounted form (module memory lives): the cache answers
+  await page.evaluate(
+    ([band, over]) => window.__pp.mount('change_color', band, over),
+    [
+      NEW,
+      {
+        images: { photos: [media(101)] },
+        texts: { garment: 'coat' },
+        colours: colour('19-4052 TCX', '#0F4C81'),
+      },
+    ],
+  );
+  await page.waitForSelector('[data-prompt-field]');
+  await openIdeas('change_color.garment');
+  ck((await suggestCalls()).length === 1, 'та же форма — ответ из кэша, без вызова');
+  await closeMenu();
+  // another colour, the same text: a new question
+  await page.evaluate(
+    ([band, over]) => window.__pp.mount('change_color', band, over),
+    [
+      NEW,
+      {
+        images: { photos: [media(101)] },
+        texts: { garment: 'coat' },
+        colours: colour('11-0601 TCX', '#F4F5F0'),
+      },
+    ],
+  );
+  await page.waitForSelector('[data-prompt-field]');
+  await openIdeas('change_color.garment');
+  ck(
+    (await suggestCalls()).length === 2 && (await thinking()) === 1,
+    'другой цвет при том же тексте — новый вопрос, новый вызов (старый ответ не показан)',
+    String((await suggestCalls()).length),
+  );
+} catch (e) {
+  ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+// ─── J · вызов без ответа отпускается по сроку (G-03 Codex MINOR) ───────────────────────────────
+head('J', 'вызов, который не отвечает: срок, статический список, тишина, без кэша');
+try {
+  await fresh('change_color', NEW, { images: { photos: [media(101)] } });
+  await page.evaluate(() => {
+    window.__ideasDeadlineMs = 300;
+  });
+  await openIdeas('change_color.garment');
+  ck((await thinking()) === 1, 'нажатие — «thinking…»');
+  await settle(600);
+  ck(
+    (await thinking()) === 0 &&
+      (await page.locator('[data-ideas-group="server"]').count()) === 0 &&
+      JSON.stringify(await rows('static')) === JSON.stringify(STATIC_GARMENT),
+    'срок вышел: «thinking…» снята, только статический список',
+  );
+  ck((await page.evaluate(() => window.__pp.alerts())).length === 0, 'без тоста');
+  await closeMenu();
+  await openIdeas('change_color.garment');
+  ck(
+    (await suggestCalls()).length === 1 && (await thinking()) === 0,
+    'тишина после срока: нажатие того же вопроса не зовёт сервер и не «думает» (зависший не в кэше)',
+    String((await suggestCalls()).length),
+  );
+  await closeMenu();
+  await field('change_color.garment').locator('textarea').fill('another question');
+  await openIdeas('change_color.garment');
+  ck(
+    (await suggestCalls()).length === 1,
+    'тишина: и другой вопрос не зовёт — зависшее соединение не множит вызовы',
+    String((await suggestCalls()).length),
   );
 } catch (e) {
   ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
