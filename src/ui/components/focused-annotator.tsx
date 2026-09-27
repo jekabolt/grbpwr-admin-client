@@ -347,6 +347,13 @@ export type FocusedAnnotatorProps = {
    */
   kindsFirst?: boolean;
   /**
+   * СЛОТ «+ ДОБАВИТЬ» — ПЕРВЫМ В ЛЕНТЕ, А НЕ ПОСЛЕДНИМ (27.09, O-62; раскладка `grid`). Порядком
+   * DOM, а не `order:` — Tab и экранный диктор идут за глазом. Номера кадров, адреса указаний и
+   * перестановка от этого не меняются: позиция 0 — по-прежнему первая КАРТИНКА, а слот в
+   * перестановке не участвует (он не плитка `registerTile`), и встать перед ним картинке некуда.
+   */
+  addFirst?: boolean;
+  /**
    * Стрелки ‹ › над рельсой. По умолчанию есть (лист эскиза листает ими полосу в 480px); мудборд
    * их снимает: его лента и так короче экрана чаще всего, а прокрутка остаётся жестом и
    * скроллбаром. ОТДЕЛЬНЫЙ проп, а не «нет стрелок в rowMode»: rowMode — это и полоса эскиза, и
@@ -436,6 +443,7 @@ export function FocusedAnnotator({
   railWrap = false,
   viewControls,
   kindsFirst = false,
+  addFirst = false,
   railArrows = true,
   editorHeight = ANNOTATION_EDITOR_H,
   pinText = 'legend',
@@ -501,7 +509,7 @@ export function FocusedAnnotator({
   /** Индекс кадра, открытого во весь экран. */
   const [zoomIndex, setZoomIndex] = useState<number | null>(null);
   const [focusedId, setFocusedId] = useState<number | null>(null);
-  // +1 for the trailing "+ add view" slot, which is part of what can overflow.
+  // +1 for the "+ add view" slot (trailing, or leading with `addFirst`), part of what can overflow.
   const rail = useRailScroll(views.length + 1);
 
   const isGrid = layout === 'grid';
@@ -724,6 +732,27 @@ export function FocusedAnnotator({
     />
   );
 
+  /* "+ add view" — a dashed slot in the grid itself, so the empty spot IS the control that fills
+     it. Clicking opens the media library: a sketch view is nearly always an image that already
+     exists, and sending the click straight to the OS file dialog made the library the harder path
+     to reach. Dropping a file on the tile — or ⌘V — goes through the intake dialog: that gesture
+     already carries the picture, and what it needs is a look and a crop, not a silent upload.
+     Trailing by default; `addFirst` puts it before the pictures (O-62). */
+  const railAddSlot = readOnly ? null : (
+    <MediaSlot
+      aspectRatio={pickerAspectRatio ?? ['Custom']}
+      frameAspect={fallbackAspect}
+      heightPx={rowMode ? gridRowHeight : undefined}
+      label={addLabel}
+      purpose={purpose}
+      allowMultiple
+      showVideos
+      onSelect={handlePick}
+      sizeClassName={rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]'}
+      className='shrink-0 snap-start'
+    />
+  );
+
   return (
     <div className='space-y-2.5' {...regionHandlers}>
       {hasMedia &&
@@ -814,6 +843,7 @@ export function FocusedAnnotator({
               rowMode && 'overflow-y-hidden',
             )}
           >
+            {addFirst && railAddSlot}
             {views.map((v, i) => {
               const url = mediaUrl(v.full);
               const dim = v.full?.media?.fullSize ?? v.full?.media?.thumbnail;
@@ -968,26 +998,7 @@ export function FocusedAnnotator({
               );
             })}
 
-            {/* "+ add view" — a dashed slot in the grid itself, so the empty spot IS the control
-                that fills it. Clicking opens the media library: a sketch view is nearly always an
-                image that already exists, and sending the click straight to the OS file dialog
-                made the library the harder path to reach. Dropping a file on the tile — or ⌘V —
-                goes through the intake dialog: that gesture already carries the picture, and what
-                it needs is a look and a crop, not a silent upload. */}
-            {!readOnly && (
-              <MediaSlot
-                aspectRatio={pickerAspectRatio ?? ['Custom']}
-                frameAspect={fallbackAspect}
-                heightPx={rowMode ? gridRowHeight : undefined}
-                label={addLabel}
-                purpose={purpose}
-                allowMultiple
-                showVideos
-                onSelect={handlePick}
-                sizeClassName={rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]'}
-                className='shrink-0 snap-start'
-              />
-            )}
+            {!addFirst && railAddSlot}
           </div>
 
           {!hasMedia && (
