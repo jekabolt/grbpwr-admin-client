@@ -8,7 +8,7 @@ import type { JSX } from 'react';
 import { benchKindOf, colorwayOf } from '../../../bench-kinds';
 import type { NotSentItem } from '../../../core';
 import { OutputsSection } from '../../../render/outputs';
-import { OptionRow, ToggleRow } from '../../fields';
+import { OptionRow, ToggleRow, slotCounter } from '../../fields';
 import {
   emptyParams,
   imagesOf,
@@ -253,6 +253,8 @@ const run: WorkflowRun = {
       title: 'Reference image',
       glyph: 'image',
       required: true,
+      // «0/1» beside REQUIRED, as every picture section of the room counts its slots.
+      value: (draft) => slotCounter(imagesOf(draft, REFERENCE).length, 1),
       fields: [
         {
           type: 'images',

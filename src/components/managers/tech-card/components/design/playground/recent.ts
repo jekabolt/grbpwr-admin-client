@@ -102,11 +102,6 @@ function emit(key: string) {
   listeners.get(key)?.forEach((notify) => notify());
 }
 
-/** The list of one key, newest first. Never throws. */
-export function readRecentText(key: string): readonly string[] {
-  return load(key);
-}
-
 /** Put a text at the head of the list, without repeats, at most `max`. Never throws. */
 export function rememberRecentText(key: string, text: string, max = RECENT_TEXT_MAX): void {
   if (!text.trim()) return;

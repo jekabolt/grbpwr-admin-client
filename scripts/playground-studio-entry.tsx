@@ -36,6 +36,7 @@ import type { ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FormProvider, useForm } from 'react-hook-form';
 import { BrowserRouter, useSearchParams } from 'react-router-dom';
+import { TooltipProvider } from 'ui/components/tooltip';
 
 const CARD = 7;
 
@@ -115,10 +116,14 @@ window.__pg = {
         <DictionaryProvider>
           <DesignCapabilityProvider value={true}>
             <BrowserRouter>
-              <CardForm>
-                <Screen band={band} />
-                <RawStart />
-              </CardForm>
+              {/* The app holds one TooltipProvider at its root (context/index.tsx); a section's ⓘ
+                  (Create Design Variations' booster) needs it. */}
+              <TooltipProvider>
+                <CardForm>
+                  <Screen band={band} />
+                  <RawStart />
+                </CardForm>
+              </TooltipProvider>
             </BrowserRouter>
           </DesignCapabilityProvider>
         </DictionaryProvider>

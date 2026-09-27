@@ -1,6 +1,7 @@
 import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
 
 import type { NotSentItem } from '../../../core';
+import { slotCounter } from '../../fields';
 import {
   emptyParams,
   enginesOffered,
@@ -66,6 +67,8 @@ const run: WorkflowRun = {
       title: 'Reference image',
       glyph: 'image',
       required: true,
+      // «0/1» beside REQUIRED, as every picture section of the room counts its slots.
+      value: (draft) => slotCounter(imagesOf(draft, IMAGE).length, 1),
       fields: [
         {
           type: 'images',

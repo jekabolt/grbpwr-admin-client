@@ -61,7 +61,7 @@
 //       открывает плитку 12 (workflowOfRun → image_to_3d, recallTargetKind → playground на новом
 //       сервере, STEP 5 на старом) с её референсом и опциями; у плитки 12 «Realistic materials»
 //       и Texture по умолчанию ON, где сервер их перечисляет; surface_hint в списке — поля нет,
-//       подсказка уезжает пустой.
+//       подсказка уезжает пустой; каждая растущая секция картинки считает слоты («0/N»).
 //
 // МУТАЦИИ ЖИВУТ В ПАМЯТИ, А НЕ В ФАЙЛЕ (приём colour-plan-probe): одна строка настоящего модуля
 // подменяется в бандле, исходник не трогается. Каждая обязана уронить СВОЮ группу:
@@ -1928,15 +1928,16 @@ head('N', 'C-07 разметка форм пяти плиток');
     'design_variations: «Describe the variation» и слайдер Creative booster',
   );
   ck(
-    same(values(v), ['Off', 'GPT Image 2 · medium', '2:3']),
-    'design_variations: шапки — «Off», «GPT Image 2 · medium», «2:3»',
+    // C-12: the picture section counts its slot («0/1») like every picture section of the room.
+    same(values(v), ['0/1', 'Off', 'GPT Image 2 · medium', '2:3']),
+    'design_variations: шапки — «0/1», «Off», «GPT Image 2 · medium», «2:3»',
     show(values(v)),
   );
   const v2 = M.panelMarkup(b, 'design_variations', {
     ...fresh7('design_variations'),
     choices: { ...fresh7('design_variations').choices, booster: '3' },
   });
-  ck(values(v2)[0] === 'High', 'design_variations: шаг 3 → «High» в шапке', show(values(v2)));
+  ck(values(v2)[1] === 'High', 'design_variations: шаг 3 → «High» в шапке', show(values(v2)));
 }
 
 // ─── O · C-07: рекол ──────────────────────────────────────────────────────────────────────────
@@ -3222,6 +3223,25 @@ head('V', 'C-12: заглушки под своей плиткой, рекол 3
     band: band({ playgroundWorkflows: ['image_to_3d'], threedOptions: ['texture'] }),
   }).params.threed;
   ck(noPbr.pbr === '', 'pbr не в списке: уезжает пустым (константа маршрута)', show(noPbr.pbr));
+
+  // impeccable (C-12): every grown picture section counts its slots beside REQUIRED — «0/N».
+  const everyBand = band({
+    playgroundWorkflows: M.WORKFLOWS.map((d) => d.key),
+    threedOptions: ['texture', 'pbr', 'quality'],
+  });
+  for (const [key, want] of [
+    ['fabric_to_image', '0/1'],
+    ['ghost_mannequin', '0/1'],
+    ['design_variations', '0/1'],
+    ['image_to_3d', '0/1'],
+    ['remove_background', '0/1'],
+    ['change_color', '0/24'],
+  ]) {
+    const heads = [...M.panelMarkup(everyBand, key).matchAll(/data-fold-value="">([^<]*)</g)].map(
+      (x) => x[1],
+    );
+    ck(heads[0] === want, `${key}: секция картинки считает слоты «${want}»`, show(heads));
+  }
 }
 
 const expected = MUTATED ? ' (прогон С МУТАЦИЕЙ — провалы ожидаются)' : '';

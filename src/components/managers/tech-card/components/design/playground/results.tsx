@@ -55,7 +55,9 @@ import { MaskEditor } from './mask';
  *
  * ⚠ THE WINDOW IS 60 NEWEST PER COLOURWAY, and every playground run files under «no colourway», so
  * the room shares one window. When the server says it left pictures behind, the caption says so
- * (`outputsHorizon`) rather than letting an older result vanish silently.
+ * (`outputsHorizon`) rather than letting an older result vanish silently — except under the tiles
+ * of the colourway pool (`COLOURWAY_POOL`): a recolour may be filed under a colourway, so the
+ * room's window says nothing true about their list.
  *
  * Corners: zoom (the gallery) and `edit ▸` (draw over it, saving a NEW picture) on every picture;
  * `mask` (C-11: paint a zone and retouch it, a new picture comes back) on every raster of the room
@@ -65,7 +67,7 @@ import { MaskEditor } from './mask';
  * neutral ground with the word «no background» under it: its subject is on transparency, over white
  * it would read as a picture with a white background, and the ground alone does not say «alpha».
  *
- * ⚠ THE ROW ASKS THE WORKFLOW THAT MADE IT, not the one open: on the grid the rows of three
+ * ⚠ THE ROW ASKS THE WORKFLOW THAT MADE IT, not the one open: on the grid the rows of several
  * workflows stand together, and each keeps its own corners.
  *
  * ⚠ A WORKFLOW THAT STARTS ELSEWHERE SHOWS THE ROOM (`WorkflowRun.startsElsewhere`, tile 10):

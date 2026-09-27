@@ -5,7 +5,7 @@ import type {
 } from 'api/proto-http/admin';
 
 import type { NotSentItem } from '../../../core';
-import { BOOST_STEPS, stepLabel, type SliderStep } from '../../fields';
+import { BOOST_STEPS, slotCounter, stepLabel, type SliderStep } from '../../fields';
 import {
   ENGINE_KEY,
   emptyParams,
@@ -104,6 +104,8 @@ const run: WorkflowRun = {
       title: 'Reference image',
       glyph: 'image',
       required: true,
+      // «0/1» beside REQUIRED, as every picture section of the room counts its slots.
+      value: (draft) => slotCounter(imagesOf(draft, IMAGE).length, 1),
       fields: [
         {
           type: 'images',

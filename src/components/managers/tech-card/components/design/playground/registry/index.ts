@@ -19,12 +19,13 @@ import type { WorkflowDef } from './types';
 /**
  * ═══ THE TWELVE, IN THE OWNER'S GRID ORDER (00-OWNER-SPEC, tiles 1–12) ═════════════════════════
  *
- * Titles and one-line descriptions are the owner's own words. A workflow whose `run` is absent is
- * drawn dimmed with its reason and cannot be opened: phase 1 runs three of them on today's server
- * (Change a Color → `recolor`, Remove Background → `cutout`, Create or edit → `freeform/free`); the
- * other nine wait for the server to list them (`playground_workflows`, D8) or for their own route
- * (Extend → phase 3). Tile 6's description was cut off in the owner's message; the ending is the
- * adopted default (Q12).
+ * Titles and one-line descriptions are the owner's own words. Eleven of them run (phase 2); each is
+ * live where its gate passes — on a server that lists it in `playground_workflows` (D8; Image to 3D
+ * also needs `threed_options`), and on a server older than that list only the three today's routes
+ * serve (Change a Color → `recolor`, Remove Background → `cutout`, Create or edit →
+ * `freeform/free`). Extend has no `run` yet (its own route, phase 3): it is drawn dimmed with its
+ * reason and cannot be opened. Tile 6's description was cut off in the owner's message; the ending
+ * is the adopted default (Q12).
  */
 export const WORKFLOWS: readonly WorkflowDef[] = [
   {
