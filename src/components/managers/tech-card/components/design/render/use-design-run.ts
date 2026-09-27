@@ -106,6 +106,20 @@ export type StartRunState = {
 };
 
 /**
+ * ═══ WHERE THE ANSWER WILL LAND — SAID PER KIND, BECAUSE THE PLACE IS NOT THE SAME (UX pass, U-7) ═
+ *
+ * The success toast used to say one sentence for every kind: «the pictures land in the history».
+ * On the PATTERN step that is false — the step has no history block (one history there: the LAST
+ * FABRICS carousel), and a swatch lands IN ITS SLOT, bound to the pair by the landing itself; an
+ * extracted fabric lands in the carousel. A toast that names a place that is not on the screen
+ * sends the person looking for it. Kinds without an entry keep their sentence byte for byte.
+ */
+const STARTED_DEFAULT = 'run started — the pictures land in the history when it finishes';
+const STARTED_BY_KIND: Partial<Record<StartRunInput['kind'], string>> = {
+  pattern: 'run started · the fabric lands in its slot — or in LAST FABRICS — when it finishes',
+};
+
+/**
  * `client_request_id` IS THE WHOLE POINT OF THE FIELD, so it is minted the way the contract asks
  * for: ONCE PER HUMAN INTENT, and it survives a retry.
  *
@@ -176,7 +190,7 @@ export function useStartDesignRun(
     if (shownCard.current === input.techCardId) setRefusal(null);
     // The run comes back PENDING, not done: the picture arrives in the feed when the provider
     // answers. Saying so is the difference between «nothing happened» and «it was booked».
-    showMessage('run started — the pictures land in the history when it finishes', 'success');
+    showMessage(STARTED_BY_KIND[input.wire.kind] ?? STARTED_DEFAULT, 'success');
   };
 
   const mutation = useMutation({

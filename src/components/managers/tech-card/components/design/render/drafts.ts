@@ -8,7 +8,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, type UseFormReturn } from 'react-hook-form';
 
 import type { TechCardFormData } from '../../schema';
+import { assetById, fabricUseOf } from '../assets/model';
 import { COLORWAY_NONE } from '../bench-kinds';
+import { bindingsOf, type ClothSlot } from '../pattern/slot-fabrics';
 import {
   EMPTY_CLOTH,
   EMPTY_RECIPE,
@@ -257,6 +259,95 @@ export function mergeEcho(
   return out;
 }
 
+/* ─────────────────────────── the cloths bound to a colourway (STEP 3) ─────────────────────────── */
+
+/** Одна ткань, надетая на слоты колорвея на шаге PATTERN. */
+export type BoundCloth = {
+  assetId: number;
+  /**
+   * ЧАСТИ ИЗДЕЛИЯ, КОТОРЫЕ ОНА ОДЕВАЕТ, — `DesignFabricUse.parts` провода: подпись назначения слота
+   * («main material», «lining»…), а без назначения — имя строки. Сервер печатает её при двух и более
+   * тканях как «It is used on: … — and on no other part of this garment», а ткань без частей
+   * становится ОСТАТКОМ (`renderprompt.go`, `renderClothPartsRule`).
+   */
+  parts: string;
+  /** Имена слотов — угловой ярлык плитки в сетке CLOTHS. */
+  slotNames: string[];
+};
+
+/**
+ * ═══ ТКАНИ КОЛОРВЕЯ ПО ЕГО СЛОТАМ — ОДНО ОПРЕДЕЛЕНИЕ НА ЗАСЕВ И НА СЕТКУ ═══════════════════════
+ *
+ * Читают ДВОЕ: засев черновика ниже (`useColourDraft`) и сетка текстур (`palette.tsx`, ранжирует
+ * надетые плитки первыми, подписывает их слотом и не теряет их `parts` при переключении чипа).
+ * Второе написание «какие части одевает эта ткань» разошлось бы с первым молча — и промпт сказал бы
+ * одно, а плитка другое.
+ *
+ * ИСТОЧНИК — ТОЛЬКО ПРИВЯЗКИ (`bindingsOf`: `band.assetBindings` × слоты композитора × полка), в
+ * порядке слотов: CLOTH 1 промпта — основная ткань, а не последняя привязанная. Легаси-колонку
+ * `design_asset.colorway_id` не читает никто нового (ревью, S3).
+ *
+ * ⚠ ОДНА ТКАНЬ НА НЕСКОЛЬКО СЛОТОВ — ОДНА СТРОКА С ЧАСТЯМИ ЧЕРЕЗ ЗАПЯТУЮ, а не два одинаковых
+ * `assetId` в списке. Сервер разрешает одному ассету одевать несколько пар; дубль в `fabrics` дал бы
+ * промпту две «разные» ткани с одной фотографией, а сетке — плитку с двумя порядковыми номерами.
+ *
+ * Колорвей `0` (верстак `sample`) привязок не имеет по построению — пустой список.
+ */
+export function boundClothsOf(
+  band: GetDesignBandResponse,
+  colorwayId: number,
+  slots: readonly ClothSlot[] | null | undefined,
+): BoundCloth[] {
+  if (colorwayId <= 0 || !slots || slots.length === 0) return [];
+  // Map хранит порядок вставки — то есть порядок слотов, в котором их отдал `bindingsOf`.
+  const byAsset = new Map<number, { parts: string[]; slotNames: string[] }>();
+  for (const { slot, asset } of bindingsOf(band, colorwayId, slots)) {
+    const assetId = asset.id ?? 0;
+    if (assetId <= 0) continue;
+    const cloth = byAsset.get(assetId) ?? { parts: [], slotNames: [] };
+    byAsset.set(assetId, cloth);
+    const part = (slot.purposeLabel || slot.name).trim();
+    if (part && !cloth.parts.includes(part)) cloth.parts.push(part);
+    if (!cloth.slotNames.includes(slot.name)) cloth.slotNames.push(slot.name);
+  }
+  return [...byAsset].map(([assetId, c]) => ({
+    assetId,
+    parts: c.parts.join(', '),
+    slotNames: c.slotNames,
+  }));
+}
+
+/**
+ * Засев из привязок: СТРУКТУРНАЯ половина эха `cloths` и только она. Скаляры цвета (`code`/`hex`/
+ * `words`) эхо этой ветки тоже говорит — про первую ткань, — но у именованного колорвея цвет уже
+ * сказан его собственным источником (его последний рецепт или его `devHex`), и привязка ткани к
+ * слоту его не переименовывает. `sig` — отпечаток привязок: засев повторяется, только когда он
+ * меняется, а не на каждом рефетче полосы.
+ */
+type BoundSeed = { sig: string; values: Pick<EchoValues, 'fabrics' | 'fabricMediaId'> };
+
+/** Настоящие (`> 0`) `assetId` списка тканей — множество происхождения правила 2а (M-B). */
+function assetIdsOf(fabrics: readonly common_DesignFabricUse[] | undefined): Set<number> {
+  return new Set((fabrics ?? []).map((f) => f.assetId ?? 0).filter((id) => id > 0));
+}
+
+function boundSeedOf(
+  band: GetDesignBandResponse,
+  colorwayId: number,
+  slots: readonly ClothSlot[] | null | undefined,
+): BoundSeed | null {
+  const cloths = boundClothsOf(band, colorwayId, slots);
+  if (cloths.length === 0) return null;
+  const echo = echoOf({
+    from: 'cloths',
+    fabrics: cloths.map((c) => fabricUseOf(band, c.assetId, { parts: c.parts })),
+  });
+  return {
+    sig: `${colorwayId}|${cloths.map((c) => `${c.assetId}:${c.parts}`).join(',')}`,
+    values: { fabrics: echo.fabrics ?? [], fabricMediaId: echo.fabricMediaId ?? 0 },
+  };
+}
+
 export type ColourDraft = {
   recipe: common_DesignColourRecipe;
   /**
@@ -396,6 +487,13 @@ export function useColourDraft(
    * корень): `undefined !== undefined` ложно, и такой черновик просто не сбрасывается никогда.
    */
   techCardId?: number,
+  /**
+   * СЛОТЫ ТКАНИ КАРТОЧКИ — тот же массив, что композитор отдаёт шагу PATTERN (ОДИН `useWatch`
+   * над `bomItems` в `studio-tab.tsx`; второе чтение формы развело бы шаги о том, какие у изделия
+   * ткани). Нужен ради засева тканей из привязок (STEP 3). Не задан — привязок нет, и засев
+   * работает ровно как до STEP 3.
+   */
+  slots?: readonly ClothSlot[],
 ): ColourDraft {
   const [recipe, setRecipe] = useState<common_DesignColourRecipe>(EMPTY_RECIPE);
   /** Ссылка красильни, которой выбран цвет. На провод не едет — довод у `ColourDraft.pantone`. */
@@ -468,12 +566,65 @@ export function useColourDraft(
    * слова, прозрачность, граммаж, — то есть наказывал за взгляд на соседний цвет потерей работы,
    * которая к цвету не относится вовсе. Ткань есть свойство ИЗДЕЛИЯ (одна и та же вещь шьётся из
    * одного полотна во всех цветах), цвет есть свойство КОЛОРВЕЯ. Поэтому на смене цели меняются
-   * `hex` и `code`, и больше ничего.
+   * `hex` и `code`, и больше ничего — кроме тканей, ПРИВЯЗАННЫХ к слотам новой цели, тканей,
+   * приехавших из привязок прошлой, и ручного выбора, отложенного под этой целью (STEP 3, отмена
+   * ниже: правила 2, 2а и 2б).
    *
    * ⚠ ПЕРЕСЕВ ЦВЕТА СТАРШЕ «СВОЕГО» ЗНАЧЕНИЯ, и это не нарушение старшинства, а его применение:
    * набранный человеком цвет принадлежал ПРОШЛОЙ цели, а вопрос сменился («каким цветом ROSSO?»
    * вместо «каким цветом семпл?»). Флаги принадлежности `code`/`hex` при этом снимаются — новое
    * значение приехало эхом, и следующий жест волен его заменить.
+   *
+   * ═══ ⚠ ДОКУМЕНТИРОВАННАЯ ОТМЕНА D6 — ДЛЯ ПРИВЯЗАННЫХ ТКАНЕЙ И ТОЛЬКО ДЛЯ НИХ (STEP 3, 2026-09-26) ═
+   *
+   * Абзац выше говорит «ткань есть свойство ИЗДЕЛИЯ». Шаг PATTERN сделал это неправдой для одного
+   * класса тканей: свотч, надетый на пару (колорвей, слот) — `band.assetBindings`, — это ткань
+   * ИМЕННО ЭТОГО КОЛОРВЕЯ (ROSSO · outer — красный твил, OLIVE · outer — оливковый), то есть
+   * свойство колорвея, как и его цвет. Владелец: «пометить его так, чтобы он сам уехал в FABRIC
+   * RENDER». Отсюда три правила с двумя оговорками второго, и только они:
+   *
+   *   1. ЗАСЕВ: у колорвея N с привязками ткани подачи = его привязанные ткани, в порядке слотов,
+   *      `parts` = подпись назначения слота (или имя строки). ПРИВЯЗКА СТАРШЕ ПОСЛЕДНЕГО РЕЦЕПТА:
+   *      рецепт по-прежнему даёт цвет и слова, но список тканей берётся из привязок (последний
+   *      рендер мог быть сделан до того, как слоту выбрали свотч). Засев идёт ТОЙ ЖЕ дверью
+   *      `echoOf({from:'cloths'})`, что и тычок в плитку, — берётся её структурная половина
+   *      (`fabrics` и эхо `fabricMediaId`).
+   *   2. СМЕНА ЦЕЛИ: ткани пересеваются ТОЛЬКО если у НОВОГО колорвея есть привязки — вопрос
+   *      сменился («из чего ROSSO?»), и выбор, сделанный для прошлой цели, ему не ответ. У колорвея
+   *      без привязок, и у `sample`, правило абзаца выше держится — С ДВУМЯ ОГОВОРКАМИ (2а, 2б).
+   *   2а. ⚠ СВОТЧИ ПРИВЯЗОК НЕ ПЕРЕЕЗЖАЮТ В ЧУЖОЙ РЕНДЕР, И ПРОИСХОЖДЕНИЕ ПОМНИТСЯ ПО ТКАНИ, А НЕ ПО
+   *      СПИСКУ (B6-1; финальное ревью, M-B). Реф `seededBound` — множество `assetId`, которые в
+   *      список положил засев привязками (правила 1, 2, 3). Он ЗАМЕНЯЕТСЯ целиком всякий раз, когда
+   *      новый засев привязками заменяет список, ОПУСТОШАЕТСЯ со сменой карточки, а `echo` (тычок в
+   *      плитку CLOTHS) его только СУЖАЕТ до тканей, оставшихся в списке: ткань, снятая рукой,
+   *      теряет происхождение, и надетая заново — уже выбор человека. Целого флага на список больше
+   *      нет, и это починка: здесь стоял `fabricsFromBindings`, и ОДИН тычок в соседнюю плитку
+   *      объявлял ручным ВЕСЬ список — после «ROSSO засеян свотчем, рукой добавлен linen» переход
+   *      на OLIVE оставлял красный свотч «ROSSO · outer» тканью платного рендера OLIVE.
+   *      На смене цели на колорвей БЕЗ привязок (и на `sample`) снимаются РОВНО
+   *      `fabrics.filter(f => seededBound.has(f.assetId))`; ткани, добавленные рукой, стоят (D6 байт
+   *      в байт), а `fabricMediaId` пересчитывается той же дверью `echoOf({from:'cloths'})`, что у
+   *      тычка, — первая фотография того, что осталось. Снимать нечего — список не трогается вовсе.
+   *      Не осталось ничего, а черновик не тронут, — ответ даёт сегодняшнее правило новой цели: её
+   *      последний рецепт (у `sample` — последний рецепт карточки).
+   *   2б. РУЧНОЙ ВЫБОР ЦЕЛИ ОТКЛАДЫВАЕТСЯ, КОГДА ЕГО СМЕНЯЕТ ЗАСЕВ ПРИВЯЗКАМИ (финальное ревью, m-A).
+   *      Правило 2 заменяет список целиком, и ткани, выбранные рукой, пропадали навсегда: `sample`
+   *      + linen → ROSSO (привязки) → назад на `sample` давало пустой список. Поэтому ПЕРЕД такой
+   *      заменой ручная часть списка (всё, чего нет в `seededBound`) откладывается в реф
+   *      `parkedCloths` (Map: id цели → ткани) под покидаемой целью — если список трогали рукой с
+   *      последнего засева привязками (`listTouched`). Вернулись к этой цели, и у неё НЕТ привязок —
+   *      отложенное встаёт в список первым (без дублей и только ткани, ещё стоящие на полке); есть
+   *      привязки — ответ даёт правило 2, отложенное выбрасывается. Прибытие к цели съедает её
+   *      парковку в обоих случаях, поэтому ткань, снятая позже, из парковки не воскресает. Смена цели
+   *      на колорвей БЕЗ привязок не откладывает ничего: ручной выбор и так едет с черновиком (D6).
+   *   3. ПРИВЯЗКИ СМЕНИЛИСЬ ПОД ЧЕРНОВИКОМ (свотч сел, пока экран открыт; рефетч): пересев один раз
+   *      на отпечаток привязок (`BoundSeed.sig`) и ТОЛЬКО пока человек ничего не трогал
+   *      (`touched`) — иначе рефетч затирал бы выбор, сделанный руками, прямо под пальцами.
+   *      Привязки пропали — ничего не снимается: без привязок правило «ткань стоит» то же.
+   *
+   * ПЕТЕЛЬ НЕТ ПО ПОСТРОЕНИЮ: отпечаток записывается в реф ДО `setRecipe`, а сам рецепт отпечаток
+   * не меняет (он выводится из полосы, цели и слотов). Карточка сменилась — отпечаток обнуляется
+   * вместе со всем черновиком.
    */
   const latest = (band.colourRecipes ?? [])[0];
   /**
@@ -580,6 +731,30 @@ export function useColourDraft(
   }, [colorwayId, colorway, ofColorway]);
 
   /**
+   * ТКАНИ, ПРИВЯЗАННЫЕ К СЛОТАМ ЭТОЙ ЦЕЛИ (STEP 3) — `null` у `sample` и у колорвея без привязок.
+   * Правила засева и пересева — в шапке («документированная отмена D6»). Полоса приходит из
+   * React Query со структурным разделением, поэтому рефетч без перемен не пересчитывает ничего.
+   */
+  const bound = useMemo(() => boundSeedOf(band, colorwayId, slots), [band, colorwayId, slots]);
+  const boundSig = bound?.sig ?? '';
+  /** Отпечаток привязок, которым черновик засеян последний раз. Рисовать нечего — реф. */
+  const shownBound = useRef('');
+  /**
+   * ПРОИСХОЖДЕНИЕ — ПО ТКАНИ (правило 2а шапки, M-B): `assetId`, которые в текущий список положил
+   * засев привязками (правила 1–3). Всё, чего здесь нет, — рука человека, прошлый рецепт или
+   * отложенный выбор. Нужен ровно одному решению: ЧТО снимать на смене цели на колорвей без
+   * привязок. Рисовать нечего — реф.
+   */
+  const seededBound = useRef<Set<number>>(new Set());
+  /**
+   * Список тканей трогали рукой (`echo` с `fabrics`) с последнего засева привязками — правило 2б
+   * (m-A): только такой список есть смысл откладывать, когда его сменяет засев. Реф.
+   */
+  const listTouched = useRef(false);
+  /** Отложенный ручной выбор по цели (0 — `sample`), правило 2б шапки. Реф. */
+  const parkedCloths = useRef<Map<number, common_DesignFabricUse[]>>(new Map());
+
+  /**
    * ⚠ В ТЕЛЕ РЕНДЕРА, А НЕ В ЭФФЕКТЕ (инвариант 12, и по той же причине). Эффект оставил бы один
    * ЗАКОММИЧЕННЫЙ кадр, в котором селект уже говорит ROSSO, а квадрат цвета ещё показывает цвет
    * семпла, — и этого кадра хватает, чтобы нажать GENERATE и купить лист не того цвета. `setState`
@@ -600,6 +775,10 @@ export function useColourDraft(
   if (shownCard.current !== techCardId) {
     shownCard.current = techCardId;
     shownColorway.current = colorwayId;
+    shownBound.current = '';
+    seededBound.current = new Set();
+    listTouched.current = false;
+    parkedCloths.current = new Map();
     seeded.current = false;
     touched.current = false;
     owned.current = { ...NOTHING_OWNED };
@@ -607,25 +786,88 @@ export function useColourDraft(
     seedCloth(EMPTY_CLOTH);
     setPantone('');
   } else if (shownColorway.current !== colorwayId) {
+    const leaving = shownColorway.current;
     shownColorway.current = colorwayId;
     owned.current.code = false;
     owned.current.hex = false;
     const next = colourHalf;
+    /* STEP 3, правила 2, 2а и 2б (шапка) — ткани меняются ОДНОЙ записью с цветом новой цели:
+       · у новой цели есть привязки — её ткани приезжают вместе с её цветом (2), а ручная часть
+         покидаемого списка перед этим откладывается под покидаемой целью, если его трогали (2б);
+       · привязок нет — снимаются РОВНО ткани, положенные засевом привязками (2а, M-B), ручные
+         стоят, `fabricMediaId` пересчитывается дверью тычка; не осталось ничего и черновик не
+         тронут — последний рецепт новой цели. Отложенное под этой целью встаёт первым (2б, m-A).
+       Прибытие съедает парковку цели в обоих случаях — довод у 2б. Читается `recipe` ЭТОГО
+       рендера: запись ниже — в теле рендера, и очереди между ними нет. */
+    const cloths = bound;
+    shownBound.current = boundSig;
+    const current = recipe.fabrics ?? [];
+    const handPicked = current.filter((f) => !seededBound.current.has(f.assetId ?? 0));
+    const parked = parkedCloths.current.get(colorwayId) ?? [];
+    parkedCloths.current.delete(colorwayId);
+    let fabricHalf: Pick<EchoValues, 'fabrics' | 'fabricMediaId'> = {};
+    if (cloths) {
+      if (listTouched.current && handPicked.length > 0) {
+        parkedCloths.current.set(leaving, handPicked);
+      }
+      fabricHalf = cloths.values;
+      seededBound.current = assetIdsOf(cloths.values.fabrics);
+      listTouched.current = false;
+    } else {
+      const dropped = handPicked.length < current.length;
+      let list = current;
+      if (dropped) {
+        list = handPicked;
+        seededBound.current = new Set();
+        const last = colorwayId > 0 ? ofColorway : latest;
+        if (list.length === 0 && !touched.current && last) {
+          list = echoOf({ from: 'recipe', recipe: last }).fabrics ?? [];
+        }
+      }
+      // Отложенное — только ткани, ещё стоящие на полке: удалённую за время отлучки не вернуть.
+      const shelf = assetById(band);
+      const restored = parked.filter((f) => shelf.has(f.assetId ?? 0));
+      if (restored.length > 0) {
+        const have = assetIdsOf(list);
+        list = [...restored.filter((f) => !have.has(f.assetId ?? 0)), ...list];
+        listTouched.current = true;
+      }
+      if (dropped || restored.length > 0) {
+        fabricHalf = {
+          fabrics: list,
+          fabricMediaId: echoOf({ from: 'cloths', fabrics: list }).fabricMediaId ?? 0,
+        };
+      }
+    }
     setRecipe((prev) => ({
       ...prev,
       code: next ? next.code : '',
       hex: next ? next.hex : prev.hex ?? '',
+      ...fabricHalf,
     }));
     /* ССЫЛКА ЕДЕТ ВМЕСТЕ СО СВОИМ ЦВЕТОМ, А НЕ ОТДЕЛЬНО. У цели N ссылка — та, что записана у
        колорвея; у прогона своей ссылки нет (поля в рецепте нет — B8), поэтому ставится пусто, и
        квадрат сам скажет, что знает: экран прочтёт код обратно по hex, если такой свотч есть.
        У `sample` цвет остаётся стоять, значит остаётся и ссылка к нему. */
     if (colorwayId > 0) setPantone(ofColorway ? '' : (colorway?.pantone ?? '').trim());
+  } else if (seeded.current && shownBound.current !== boundSig) {
+    /* STEP 3, правило 3 (шапка): привязки ЭТОЙ ЖЕ цели сменились под открытым черновиком. Отпечаток
+       принимается всегда (иначе ветка входила бы на каждом рендере), а ткани пересеваются, только
+       если новые привязки есть и человек ещё ничего не трогал. До первого засева ветка молчит:
+       тогда засевает эффект ниже, и привязки он берёт сам. */
+    shownBound.current = boundSig;
+    const cloths = bound;
+    if (cloths && !touched.current) {
+      seededBound.current = assetIdsOf(cloths.values.fabrics);
+      listTouched.current = false;
+      setRecipe((prev) => ({ ...prev, ...cloths.values }));
+    }
   }
 
   useEffect(() => {
-    if (touched.current || seeded.current || !seed) return;
+    if (touched.current || seeded.current || (!seed && !bound)) return;
     seeded.current = true;
+    shownBound.current = bound?.sig ?? '';
     /**
      * ⚠ ЗАСЕВ РАЗБИРАЕТ `words` ОБРАТНО НА СТРУКТУРНУЮ ПОЛОВИНУ И ХВОСТ (H-13, замеренный дефект).
      *
@@ -635,7 +877,7 @@ export function useColourDraft(
      * «opaque, about 220 g/m², semi-sheer, about 180 g/m², fine rib», где два взаимоисключающих
      * заявления о прозрачности стоят в одной фразе. Довод и грамматика разбора — у `splitStatedWords`.
      */
-    const restored = splitStatedWords(seed.words ?? '');
+    const restored = splitStatedWords(seed?.words ?? '');
     /**
      * ⚠ ЗАСЕВ — НЕ «СВОЁ» ЗНАЧЕНИЕ, И ФЛАГИ ПРИНАДЛЕЖНОСТИ ОН НЕ ПОДНИМАЕТ. Он ЭХО по природе:
      * колорвей, ассет или прошлый рецепт, — и следующий жест (одеть ткань, снять её) обязан его
@@ -646,12 +888,25 @@ export function useColourDraft(
      * Раньше клампилась ОДНА ветка из трёх: `setRecipe` шёл мимо единственной двери, которая про
      * предел знала.
      */
-    setRecipe({ ...EMPTY_RECIPE, ...seed, words: restored.words });
+    /* ПРИВЯЗКА СТАРШЕ ПОСЛЕДНЕГО РЕЦЕПТА (STEP 3, правило 1): её структурная половина ложится
+       ПОВЕРХ засева, то есть заменяет `fabrics` и `fabricMediaId` рецепта и не трогает ни цвета,
+       ни слов. Засева нет вовсе (колорвей без цвета и без рендеров), а привязки есть — ткани
+       всё равно приезжают: «ткань надета» — полный ответ на вопрос «из чего». В `seededBound`
+       ложатся её ткани и только они (правило 2а): ткани прошлого рецепта свотчами пар не являются. */
+    seededBound.current = assetIdsOf(bound?.values.fabrics);
+    listTouched.current = false;
+    setRecipe({
+      ...EMPTY_RECIPE,
+      ...(seed ?? {}),
+      ...(bound?.values ?? {}),
+      words: restored.words,
+    });
     seedCloth(restored.cloth);
     /* Ссылка засевается ровно там, где она есть на самом деле: у КОЛОРВЕЯ. Рецепт прогона её не
-       несёт (B8), и выдумывать её из hex здесь нельзя — это делает экран и говорит об этом сам. */
-    if (colorwayId > 0 && !ofColorway) setPantone((colorway?.pantone ?? '').trim());
-  }, [seed, seedCloth, colorwayId, colorway, ofColorway]);
+       несёт (B8), и выдумывать её из hex здесь нельзя — это делает экран и говорит об этом сам.
+       Только вместе с цветной половиной засева: без неё ссылка стояла бы у пустого квадрата. */
+    if (seed && colorwayId > 0 && !ofColorway) setPantone((colorway?.pantone ?? '').trim());
+  }, [seed, bound, seedCloth, colorwayId, colorway, ofColorway]);
 
   return {
     recipe,
@@ -692,7 +947,18 @@ export function useColourDraft(
     },
     echo: (source) => {
       touched.current = true;
-      setRecipe((prev) => mergeEcho(prev, echoOf(source), owned.current));
+      const values = echoOf(source);
+      /* ПРОИСХОЖДЕНИЕ СУЖАЕТСЯ, А НЕ ПЕРЕВОРАЧИВАЕТСЯ (правило 2а, M-B): свотч привязки, оставшийся
+         в списке, остаётся свотчем привязки и на смене цели снимется; снятый рукой происхождение
+         теряет, и надетый заново — уже выбор человека. Флага на весь список больше нет. */
+      if (values.fabrics !== undefined) {
+        const kept = assetIdsOf(values.fabrics);
+        for (const id of [...seededBound.current]) {
+          if (!kept.has(id)) seededBound.current.delete(id);
+        }
+        listTouched.current = true;
+      }
+      setRecipe((prev) => mergeEcho(prev, values, owned.current));
     },
     patchCloth,
     /**

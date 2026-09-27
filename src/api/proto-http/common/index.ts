@@ -4890,7 +4890,8 @@ export type DesignThreedParams = {
   // '' | photo | shape — whether the surface follows the photograph or only the shape. Refused
   // unless GetDesignBandResponse.threed_options advertises `follow`.
   follow: string | undefined;
-  // Free words about the surface; they steer the texture.
+  // Free words about the surface; they steer the texture. Refused (option_not_read) unless
+  // GetDesignBandResponse.threed_options advertises `surface_hint`, and on an untextured build.
   surfaceHint: string | undefined;
 };
 

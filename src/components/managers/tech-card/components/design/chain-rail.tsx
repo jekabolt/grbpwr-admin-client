@@ -231,6 +231,9 @@ export function useChainCtx({
   const repOf = (p: (typeof shown)[number]) => pictureRepresentation(band, p);
   const counts = {
     pattern: shown.filter((p) => repOf(p) === 'pattern').length,
+    /* PAIRS THAT WEAR A FABRIC (STEP 3): a row of the band per bound (colourway, slot). Absent on a
+       binary older than the bindings — then zero, and the legacy `pattern` count above decides. */
+    bindings: (band.assetBindings ?? []).filter((b) => (b.assetId ?? 0) > 0).length,
     render: shown.filter((p) => repOf(p) === 'render').length,
     threed: countThreedResults(shown.filter((p) => repOf(p) === 'threed')),
     onmodel: shown.filter((p) => repOf(p) === 'onmodel').length,

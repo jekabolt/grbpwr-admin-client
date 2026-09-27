@@ -325,8 +325,9 @@ export function isDraftSection(section?: string | null): boolean {
  * У НИТКИ НЕТ СОСТАВА ИЗДЕЛИЯ (D-44; владелец, O-47: «THREAD не должен добалятся в композишен в
  * MATERIAL SLOTS»). Нитка сшивает вещь, а не составляет её: состав, названный моделью нитке, не
  * едет ни в подпись строки, ни в запись. Токен сверен с генерённым енумом — второго написания нет.
+ * Экспорт — для `applyRow`: строке без секции нитку выбирает человек, и состав снимается там.
  */
-const THREAD_SECTION: common_TechCardBomSection = 'TECH_CARD_BOM_SECTION_THREAD';
+export const THREAD_SECTION: common_TechCardBomSection = 'TECH_CARD_BOM_SECTION_THREAD';
 
 /**
  * ПРЕДЛОЖЕННАЯ ДЕТАЛЬ ФЛЭТ-ВЕРСТАКА (r3 п.6) — ИМЯ БУДУЩЕГО СЛОТА, А НЕ ЗНАЧЕНИЕ ПОЛЯ.

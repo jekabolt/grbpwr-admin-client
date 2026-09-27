@@ -60,6 +60,7 @@ import {
   draftSays,
   isDraftSection,
   parseConstructionDraft,
+  THREAD_SECTION,
   wordDiff,
   type BomLineLike,
   type ConstructionDraft,
@@ -764,6 +765,9 @@ export function ConstructionDraft({
       if (line.purpose && !isRollGoodsSection(section)) delete line.purpose;
       if (line.kind && !(kindsForSection(section) as string[]).includes(line.kind))
         delete line.kind;
+      // D-44 (O-47): у нитки нет состава изделия. Модель назвала состав строке, ещё не зная её
+      // секции, — нитка, выбранная человеком, его не наследует (как вид и назначение выше).
+      if (section === THREAD_SECTION) delete line.composition;
     }
     const cur = (getValues('bomItems') ?? []) as unknown[];
     const born = bornBomLine(line);

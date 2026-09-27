@@ -334,12 +334,14 @@ const SOLID: readonly Row[] = [
   ['445 C', 'Dark Gray', '#3F4444'],
 ];
 
-const row = (family: PantoneFamily) => ([code, name, hex]: Row): PantoneSwatch => ({
-  code,
-  name,
-  hex,
-  family,
-});
+const row =
+  (family: PantoneFamily) =>
+  ([code, name, hex]: Row): PantoneSwatch => ({
+    code,
+    name,
+    hex,
+    family,
+  });
 
 /**
  * ПОРЯДОК СЕМЕЙ НЕСУЩИЙ: текстиль первым, потому что здесь шьют, а не печатают, и человек,
@@ -350,8 +352,20 @@ const row = (family: PantoneFamily) => ([code, name, hex]: Row): PantoneSwatch =
  * на которую жаловался владелец. Внутри семьи цветá идут спектром (красные → розовые → жёлтые →
  * зелёные → синие → фиолетовые), потом коричневые, и только потом нейтральные: белые и чёрные
  * ищут КОДОМ, а глазами выбирают цвет.
+ *
+ * С оттенками (ниже) это правило держит уже не рука, а `searchPantone`: пустой запрос раскладывает
+ * лицо по `PANTONE_SHADES` — спектр, земля, нейтральные — и каждый оттенок от светлого к тёмному.
+ * Ручной порядок остался порядком выдачи ПО ЗАПРОСУ (там решает код, потом имя) и порядком чтения
+ * этого файла.
  */
 const SWATCHES: PantoneSwatch[] = [...TEXTILE.map(row('textile')), ...SOLID.map(row('solid'))];
+
+/**
+ * ЛИЦО — ЭТО ИМЕННО ЭТИ 274, И ЗАПОМИНАЮТСЯ ОНИ ДО ТОГО, КАК МАССИВ НАЧНЁТ РАСТИ. Пустой запрос без
+ * оттенка показывает сначала их, потом библиотеку (`searchPantone`), и отличать одних от других
+ * по индексу нельзя: фильтр семьи индексы сдвигает.
+ */
+const FACE: ReadonlySet<PantoneSwatch> = new Set(SWATCHES);
 
 /**
  * ⚠ МАССИВ ЖИВОЙ, А НЕ ЗАМОРОЖЕННЫЙ, И ЭТО НЕСУЩЕЕ. Полная библиотека (см. ниже) ДОПИСЫВАЕТСЯ В
@@ -501,7 +515,10 @@ const PANTONE_SOLID_RE = /^(\d{3,4})\s*(C|U|CP|UP)$/i;
  * строка предложит «use “407 C” as typed», а положит в поле что-то другое.
  */
 export function normalizePantone(input?: string): string {
-  const body = (input ?? '').trim().replace(/\s+/g, ' ').replace(/^PANTONE\s+/i, '');
+  const body = (input ?? '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/^PANTONE\s+/i, '');
   if (!body) return '';
   const textile = PANTONE_TEXTILE_RE.exec(body);
   if (textile) {
@@ -513,6 +530,176 @@ export function normalizePantone(input?: string): string {
   return '';
 }
 
+/* ═══ ОТТЕНКИ: ЧЕМ ИСКАТЬ, А НЕ ЧТО УТВЕРЖДАТЬ ═════════════════════════════════════════════════
+ *
+ * Владелец: «юзер должен иметь возможность выбрать цвет из пантон пикера удобным интерфейсом с
+ * поиском по подцветам». 4 700 кодов — это сорок страниц сетки по 120, а ни имя («Kombu Green»,
+ * «Moonbeam»), ни номер («18-0426») не говорят, где лежат оливковые, пока ответ не известен заранее.
+ * Оттенок — это вторая дверь в тот же набор: «покажи мне синие», и сетка становится градиентом.
+ *
+ * ⚠ ОТТЕНОК ВЫЧИСЛЯЕТСЯ ИЗ `hex`, А `hex` — ЭКРАННОЕ ПРИБЛИЖЕНИЕ (см. шапку). Поэтому оттенок —
+ * способ НАЙТИ код и никогда не суждение о стандарте: «Moonbeam лежит в grey» значит «на экране
+ * он серый, ищи его среди серых», и больше ничего. Он нигде не хранится, на провод не уезжает и в
+ * спецификацию не попадает; цвет на границе двух оттенков лежит в одном из них, а к другому его
+ * по-прежнему ведут имя и код.
+ *
+ * ПРАВИЛА (HSL экранного hex; порядок несущий — решает первое сработавшее):
+ *   · white   L ≥ 0.88 и хрома ≤ 0.10
+ *   · black   L ≤ 0.10, или L < 0.20 и S ≤ 0.25
+ *   · grey    S ≤ 0.12 или хрома ≤ 0.07
+ *   · brown   тон 15–45 и L < 0.45 · тон 15–55 и S ≤ 0.45 (песок, беж, хаки, тауп) ·
+ *             красный тон, L < 0.45 и S ≤ 0.35 (рыжевато-бурые, «Russet», «Brown Out»)
+ *   · дальше по тону: red 345–15 (при L > 0.7 — pink) · orange 15–40 · yellow 40–70 (тёмный и
+ *     приглушённый, тон ≥ 45, L < 0.45, S < 0.5 — это олива, green) · green 70–170 ·
+ *     teal 170–190 · blue 190–255 · violet 255–320 · pink 320–345
+ *
+ * ⚠ БЕЛЫЙ И СЕРЫЙ МЕРЯЮТСЯ ХРОМОЙ (max − min), А НЕ ТОЛЬКО S, И ЭТО НЕ ВКУС. HSL-насыщенность
+ * делит хрому на то, сколько её вообще возможно при этой светлоте, а у самого белого возможно
+ * почти ноль: «Snow White» #F2F0EB с хромой 0.027 получает S = 0.21 и уезжал бы в жёлтые, ivory
+ * #FFFFF0 — S = 1.0. Хрома отвечает на тот вопрос, который здесь задан: «много ли тут цвета».
+ *
+ * ⚠ ГРАНИЦЫ СВЕРЕНЫ С ИМЕНАМИ БИБЛИОТЕКИ, А НЕ С УЧЕБНИКОМ. На тоне 160–170 лежат 25 имён со
+ * словом «Green» и три с «Blue» — поэтому teal начинается с 170; на 190–200 — 46 «Blue» против
+ * четырёх «Aqua»/«Teal», поэтому на 190 он кончается; на 300–320 — 21 «Purple», «Violet»,
+ * «Orchid» и ни одного «Pink», поэтому pink начинается с 320. Чёрные Pantone («Jet Black»,
+ * «Caviar», «Black C») на экране светлее 0.10, и один порог «L ≤ 0.10» оставил бы в black горстку
+ * кодов на 4 700; угольный #333 (L = 0.20) при этом остаётся серым — black строго ниже.
+ */
+export type PantoneShade =
+  | 'red'
+  | 'orange'
+  | 'yellow'
+  | 'green'
+  | 'teal'
+  | 'blue'
+  | 'violet'
+  | 'pink'
+  | 'brown'
+  | 'grey'
+  | 'white'
+  | 'black';
+
+/**
+ * Спектром, потом земля и нейтральные — тот же принцип, что у лица набора: глазами выбирают цвет,
+ * белые и чёрные ищут кодом. `hex` — образец для квадрата в пикере, взятый из самого набора
+ * (Flame Scarlet, Vibrant Orange, Illuminating, Classic Green, 320 C, Classic Blue, Ultra
+ * Violet, 213 C, Leather Brown, Ultimate Gray, Snow White, Jet Black), и каждый из них
+ * `shadeOf` относит к своему же оттенку.
+ */
+export const PANTONE_SHADES: readonly { id: PantoneShade; label: string; hex: string }[] = [
+  { id: 'red', label: 'red', hex: '#CD212A' },
+  { id: 'orange', label: 'orange', hex: '#FF7420' },
+  { id: 'yellow', label: 'yellow', hex: '#F5DF4D' },
+  { id: 'green', label: 'green', hex: '#39A845' },
+  { id: 'teal', label: 'teal', hex: '#009CA6' },
+  { id: 'blue', label: 'blue', hex: '#0F4C81' },
+  { id: 'violet', label: 'violet', hex: '#5F4B8B' },
+  { id: 'pink', label: 'pink', hex: '#E31C79' },
+  { id: 'brown', label: 'brown', hex: '#97572B' },
+  { id: 'grey', label: 'grey', hex: '#939597' },
+  { id: 'white', label: 'white', hex: '#F2F0EB' },
+  { id: 'black', label: 'black', hex: '#2D2C2F' },
+];
+
+/** `null` — не hex. H в градусах, S/L/хрома — 0…1. */
+function hslOf(hex: string): { h: number; s: number; l: number; c: number } | null {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  const digits = m[1].length === 3 ? m[1].replace(/./g, (d) => d + d) : m[1];
+  const n = parseInt(digits, 16);
+  const r = ((n >> 16) & 255) / 255;
+  const g = ((n >> 8) & 255) / 255;
+  const b = (n & 255) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const c = max - min;
+  const l = (max + min) / 2;
+  const s = c === 0 ? 0 : c / (1 - Math.abs(2 * l - 1));
+  let h = 0;
+  if (c !== 0) {
+    if (max === r) h = ((g - b) / c) % 6;
+    else if (max === g) h = (b - r) / c + 2;
+    else h = (r - g) / c + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return { h, s, l, c };
+}
+
+/** HSL-светлота экранного hex, 0 (чёрный) … 1 (белый). Не hex — середина, 0.5. */
+export function lightnessOf(hex: string): number {
+  return hslOf(hex)?.l ?? 0.5;
+}
+
+/** Оттенок экранного hex — правила в шапке раздела. Не hex — grey: цвета в нём не прочесть. */
+export function shadeOf(hex: string): PantoneShade {
+  const hsl = hslOf(hex);
+  if (!hsl) return 'grey';
+  const { h, s, l, c } = hsl;
+  if (l >= 0.88 && c <= 0.1) return 'white';
+  if (l <= 0.1 || (l < 0.2 && s <= 0.25)) return 'black';
+  if (s <= 0.12 || c <= 0.07) return 'grey';
+  const redHue = h >= 345 || h < 15;
+  if (h >= 15 && h < 45 && l < 0.45) return 'brown';
+  if (h >= 15 && h < 55 && s <= 0.45) return 'brown';
+  if (redHue && l < 0.45 && s <= 0.35) return 'brown';
+  if (redHue) return l > 0.7 ? 'pink' : 'red';
+  if (h < 40) return 'orange';
+  if (h < 70) return h >= 45 && l < 0.45 && s < 0.5 ? 'green' : 'yellow';
+  if (h < 170) return 'green';
+  if (h < 190) return 'teal';
+  if (h < 255) return 'blue';
+  if (h < 320) return 'violet';
+  return 'pink';
+}
+
+/**
+ * Оттенок и светлота свотча, посчитанные ОДИН РАЗ. Ключ — сам свотч, а не набор: библиотека
+ * дописывается в массив при первом открытии (`absorb`), и её строки получают тон при первом же
+ * вопросе, ничего не зная об этом кэше. `WeakMap` — чтобы кэш не держал записи, которых нет.
+ */
+type Tone = { shade: PantoneShade; rank: number; l: number };
+const SHADE_RANK = new Map(PANTONE_SHADES.map((s, i) => [s.id, i] as const));
+const tones = new WeakMap<PantoneSwatch, Tone>();
+function toneOf(s: PantoneSwatch): Tone {
+  let tone = tones.get(s);
+  if (!tone) {
+    const shade = shadeOf(s.hex);
+    tone = { shade, rank: SHADE_RANK.get(shade) ?? 0, l: lightnessOf(s.hex) };
+    tones.set(s, tone);
+  }
+  return tone;
+}
+
+/** Светлые впереди: внутри одного оттенка сетка читается градиентом. */
+const lighterFirst = (a: PantoneSwatch, b: PantoneSwatch) => toneOf(b).l - toneOf(a).l;
+/** Оттенки спектром, внутри оттенка — от светлого к тёмному. */
+const bySpectrum = (a: PantoneSwatch, b: PantoneSwatch) =>
+  toneOf(a).rank - toneOf(b).rank || lighterFirst(a, b);
+
+/**
+ * Слово запроса, которое само есть оттенок. Помимо двенадцати имён — то, чем оттенок называют в
+ * цеху: «navy» — синий, «olive» — зелёный, «beige» и «khaki» — коричневый, «ivory» и «cream» —
+ * белый. Совпадение — по слову целиком: «tan» здесь нет, потому что это и «Tangerine».
+ * `Map`, а не литерал объекта: у литерала есть прототип, и «constructor» в поле поиска нашёлся бы
+ * в нём как оттенок.
+ */
+const SHADE_WORDS: ReadonlyMap<string, PantoneShade> = new Map<string, PantoneShade>([
+  ...PANTONE_SHADES.map((s) => [s.id, s.id] as const),
+  ['gray', 'grey'],
+  ['navy', 'blue'],
+  ['olive', 'green'],
+  ['beige', 'brown'],
+  ['khaki', 'brown'],
+  ['ivory', 'white'],
+  ['cream', 'white'],
+  ['purple', 'violet'],
+  ['turquoise', 'teal'],
+]);
+
+/** Имена Pantone пишут «Gray», люди — «grey»: для поиска по имени это одно слово. */
+const spelling = (text: string) => text.replace(/grey/g, 'gray');
+
 /**
  * Case-insensitive, «19 4005» and «19-4005» both find the swatch; a name word finds by name.
  *
@@ -523,26 +710,66 @@ export function normalizePantone(input?: string): string {
  * кнопка «show more»), и решается он там. Здесь считается только КТО подошёл.
  *
  * ⚠ КОД СТАРШЕ ИМЕНИ В ВЫДАЧЕ. Набравший «19-4052» ищет ссылку, а не слово: попадания по коду
- * идут первыми, и внутри каждой половины сохраняется порядок набора — отобранные 274 (спектром)
- * впереди библиотечных.
+ * идут первыми, и внутри каждой половины сохраняется порядок набора — отобранные 274 впереди
+ * библиотечных.
+ *
+ * ═══ ОТТЕНОК — ФИЛЬТР, И ОН ЖЕ СЛОВО ЗАПРОСА ═══════════════════════════════════════════════════
+ *
+ *   · `shade` сужает пул ДО поиска: всё, что ниже, происходит внутри одного оттенка.
+ *   · Слово запроса из `SHADE_WORDS` («green», «grey», «navy») добавляет ПОСЛЕ попаданий по коду и
+ *     имени весь свой оттенок — а если рядом стоят другие слова («dark green»), то те из него, чьё
+ *     имя или код их содержит. Имя по-прежнему впереди: набравший «olive» первым видит 22
+ *     «…Olive», а только за ними — остальные оливковые. «Blue Turquoise» на «blue» при этом
+ *     находится, хотя на экране он teal: попадание по имени оттенком не фильтруется.
+ *   · ПОРЯДОК. Без запроса: внутри оттенка — от светлого к тёмному; без оттенка — оттенки спектром,
+ *     каждый градиентом, но СНАЧАЛА лицо набора (отобранные 274), потом библиотека. Иначе первая
+ *     страница сетки — 120 красных из 2 800, и человек не видит, что в наборе вообще есть синие.
+ *     С запросом — прежний порядок (код, потом имя), а добранный словом оттенок — градиентом.
  */
 export function searchPantone(
   query: string,
-  { limit, family }: { limit?: number; family?: PantoneFamily } = {},
+  { limit, family, shade }: { limit?: number; family?: PantoneFamily; shade?: PantoneShade } = {},
 ): PantoneSwatch[] {
-  const pool = family ? SWATCHES.filter((s) => s.family === family) : SWATCHES;
+  const cap = (list: PantoneSwatch[]) => (limit === undefined ? list : list.slice(0, limit));
+  const pool = SWATCHES.filter(
+    (s) => (!family || s.family === family) && (!shade || toneOf(s).shade === shade),
+  );
   const q = query.trim().toLowerCase().replace(/\s+/g, ' ');
-  if (!q) return limit === undefined ? pool.slice() : pool.slice(0, limit);
+  if (!q) {
+    if (shade) return cap(pool.sort(lighterFirst));
+    const face = pool.filter((s) => FACE.has(s)).sort(bySpectrum);
+    const rest = pool.filter((s) => !FACE.has(s)).sort(bySpectrum);
+    return cap(face.concat(rest));
+  }
+
   const qCode = q.replace(/\s/g, '-');
+  const qName = spelling(q);
   const byCodeHit: PantoneSwatch[] = [];
   const byNameHit: PantoneSwatch[] = [];
   for (const s of pool) {
     const code = s.code.toLowerCase();
     if (code.includes(q) || code.includes(qCode)) byCodeHit.push(s);
-    else if (s.name.toLowerCase().includes(q)) byNameHit.push(s);
+    else if (spelling(s.name.toLowerCase()).includes(qName)) byNameHit.push(s);
   }
   const hits = byCodeHit.concat(byNameHit);
-  return limit === undefined ? hits : hits.slice(0, limit);
+
+  const words = q.split(' ');
+  const asked = new Set(words.flatMap((w) => SHADE_WORDS.get(w) ?? []));
+  if (asked.size === 0) return cap(hits);
+  const rest = words.filter((w) => !SHADE_WORDS.has(w)).join(' ');
+  const restName = spelling(rest);
+  const taken = new Set(hits);
+  const byShade = pool
+    .filter(
+      (s) =>
+        !taken.has(s) &&
+        asked.has(toneOf(s).shade) &&
+        (!rest ||
+          s.code.toLowerCase().includes(rest) ||
+          spelling(s.name.toLowerCase()).includes(restName)),
+    )
+    .sort(bySpectrum);
+  return cap(hits.concat(byShade));
 }
 
 /**

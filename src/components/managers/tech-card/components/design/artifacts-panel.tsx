@@ -2517,6 +2517,8 @@ function plateAsPicture(plate: DocumentPlate): common_DesignPicture {
     createdAt: undefined,
     selected: undefined,
     displayOnly: undefined,
+    // ЗАМЕНА (O-53) — ТОЖЕ МОЛЧАНИЕ: `0` на проводе значит «голова цепочки замен», то есть
+    // утверждение о картинке, а эта подделка о заменах не знает ничего.
     replacedBy: undefined,
   };
 }

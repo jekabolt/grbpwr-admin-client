@@ -9,6 +9,7 @@ import { ColorwaySelect } from '../colorway-picker';
 import { ColourwayCreatePopover } from '../colourway-create';
 import { useColourPlan } from '../colour-plan/use-colour-plan';
 import { GROUP_SEAM } from '../core';
+import type { ClothSlot } from '../pattern/slot-fabrics';
 import { useCardFit, useColourDraft } from './drafts';
 import { GenerateRow, LockBar, RunRefusal } from './generate-row';
 import {
@@ -84,6 +85,7 @@ export function RenderStudio({
   colorwayArchived = false,
   colorways = [],
   onColorwayChange,
+  slots,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -114,6 +116,16 @@ export function RenderStudio({
    */
   colorwayArchived?: boolean;
   /**
+   * ═══ СЛОТЫ ТКАНИ КАРТОЧКИ — ТОТ ЖЕ МАССИВ, ЧТО У ШАГА PATTERN (STEP 3) ═══════════════════════
+   *
+   * Читает их ОДИН `useWatch` композитора (`studio-tab.tsx`) и раздаёт обоим шагам: второе чтение
+   * `bomItems` здесь развело бы PATTERN и FABRIC RENDER о том, какие у изделия ткани. Нужны ровно
+   * двум органам, и оба про привязки (колорвей, слот): засеву тканей подачи (`useColourDraft`) и
+   * сетке CLOTHS, которая ставит надетые плитки первыми и подписывает их слотом (`Palette`). Не
+   * задан — привязок нет, и экран работает как до STEP 3.
+   */
+  slots?: readonly ClothSlot[];
+  /**
    * Go to another step of the studio. The step lives in ONE place (`StudioTab`); a screen that kept
    * its own would desynchronise the rail from its own content.
    */
@@ -123,7 +135,7 @@ export function RenderStudio({
      умирает он ПО ЭТОМУ ЧИСЛУ (`StudioTab` между карточками не размонтируется — инвариант 12).
      Без него на карточке B стояли бы ткани карточки A — `design_asset.id` ЧУЖОЙ полки, — и
      GENERATE покупал бы лист по чужому рецепту. Довод целиком — в шапке `useColourDraft`. */
-  const draft = useColourDraft(band, colorwayId, colorwayRef, techCardId);
+  const draft = useColourDraft(band, colorwayId, colorwayRef, techCardId, slots);
   /**
    * ⚠ THE PLAN LIVES HERE, NOT IN THE PALETTE, for the reason the draft does: the gate and the run
    * body read it together with the parts row; two hooks would be two documents of different
@@ -339,6 +351,11 @@ export function RenderStudio({
             disabled={disabled}
             draft={draft}
             colourPlan={colourPlan}
+            /* STEP 3: whose bindings rank and label the CLOTHS grid — the same target and the
+               same slots the draft was seeded from, so the tile marked «outer» is the cloth
+               the seed put first. */
+            colorwayId={colorwayId}
+            slots={slots}
             /* K-16: the second door of the cloth shelf. Without `onGoToKind` it does not exist —
                a button with nowhere to lead is worse than none. */
             onMakePattern={onGoToKind && (() => onGoToKind('pattern'))}

@@ -3,18 +3,27 @@ import type {
   common_DesignPicture,
   common_DesignRun,
 } from 'api/proto-http/admin';
-import { useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
+import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../../schema';
 import { runRepresentation } from '../bench-kinds';
 import { serverSpeaksDesign } from '../capability';
-import { pictureHandle } from '../handles';
-import { useGalleryGroup } from '../picture-tile';
+import { pictureHandle, runHandle } from '../handles';
+import { useGalleryGroup, useGalleryViewerOpen } from '../picture-tile';
 import { SplitModal } from '../split-modal';
 import { isRunArchived } from '../visibility';
+import {
+  closeSurface,
+  openSurface,
+  pinShown,
+  publishShown,
+  releasePin,
+  useBench,
+} from './bench-store';
 import { cropFamilies } from './composite';
 import { deckAfterZoom, deckOfRuns, runsGallery } from './run-gallery';
 import { RunOutputs } from './run-outputs';
@@ -26,7 +35,7 @@ import {
   runStateWord,
   runStatus,
 } from './run-state';
-import { useElapsed } from './use-generation';
+import { useElapsed, useRunById } from './use-generation';
 
 /**
  * ═══ THE LATEST GENERATION, UNDER GENERATE (26.09, O-53, phase 1) ═══════════════════════════════
@@ -48,9 +57,24 @@ import { useElapsed } from './use-generation';
  *
  * WHICH RUN (§3a, D-40 п.4). The newest run on the band's first page whose `kind` is `flat` (the
  * GENERATE of this block — a text draft, a vector redraw, a render never), not archived, and either
- * live or holding pictures. A newer flat run that came back with nothing (failed, cancelled, empty)
- * is passed over and SAID: «the newest run failed · CODE — this is the one before». Nothing to show
- * on the first page → no workbench at all; the history below still has every run.
+ * live or holding pictures. Newer flat runs that came back with nothing (failed, cancelled, empty)
+ * are passed over and SAID, every one of them counted: one — «the newest run failed · CODE — this
+ * is the one before»; more — «newest N runs finished empty · showing the last one with pictures».
+ * Nothing to show on the first page → no workbench at all; the history below still has every run.
+ *
+ * …BUT ONLY WHILE NOBODY IS WORKING ON THE SHOWN RUN (26.09, O-53 review; `bench-store.ts`). An
+ * editor, a split or the zoom viewer opened on a tile here PINS the shown run: a newer run landing on
+ * a poll does not replace it, so nothing under the open surface unmounts, and the pieces of a split
+ * land where the person cut them. When the surface closes and a newer run exists, the workbench stays
+ * put and says one quiet line under the tiles — «newer run ready · show ›»; the click moves it to the
+ * newest. This tab's GENERATE, archiving the pinned run and a card switch let go as well. A surface
+ * elsewhere (a history tile, the viewer opened from another block) only holds the workbench while it
+ * is open. A kept run that newer rows push off the band's first page is NOT archived by that (27.09,
+ * D-49): it is read by id from then on, and only an archival seen on such a read lets it go.
+ *
+ * ONE COPY OF THE RUN'S TILES. The history below draws the run that stands here as its header line
+ * alone — «run 12 · on the bench ↑» (`generation-history.tsx`), so the viewer row, the deck and the
+ * slot writes of these pictures exist once.
  *
  * THE DECK OF THIS RUN IS OPEN BY DEFAULT, AND A SPLIT THAT LANDS OPENS IT: the pieces are what the
  * owner asked to keep seeing «после сплита». One open deck per host (H-10), and zooming a picture
@@ -70,19 +94,20 @@ function isFlatRun(run: Pick<common_DesignRun, 'kind'>): boolean {
 }
 
 /**
- * THE RUN THE WORKBENCH SHOWS, and the newest run it passed over for having nothing, if any. Reads
- * the band's first page only — the page the band already holds; the workbench asks for no more.
+ * THE NEWEST RUN THE WORKBENCH CAN SHOW, and EVERY newer flat run it passed over for having nothing,
+ * newest first. Reads the band's first page only — the page the band already holds; the workbench
+ * asks for no more.
  */
 export function latestFlatRun(
   band: Pick<GetDesignBandResponse, 'runs'>,
-): { run: common_DesignRun; passedOver: common_DesignRun | null } | null {
+): { run: common_DesignRun; skipped: common_DesignRun[] } | null {
   const flats = (band.runs ?? [])
     .filter((run) => (run.id ?? 0) > 0 && isFlatRun(run) && !isRunArchived(run))
     .sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
-  let passedOver: common_DesignRun | null = null;
+  const skipped: common_DesignRun[] = [];
   for (const run of flats) {
-    if (isRunLive(run) || (run.pictures ?? []).length > 0) return { run, passedOver };
-    passedOver ??= run;
+    if (isRunLive(run) || (run.pictures ?? []).length > 0) return { run, skipped };
+    skipped.push(run);
   }
   return null;
 }
@@ -97,6 +122,22 @@ function passedOverNote(run: common_DesignRun): string {
     return `the newest run was cancelled${code ? ` · ${code}` : ''}${tail}`;
   if (status === 'done') return `the newest run came back empty${tail}`;
   return `the newest run brought no picture${tail}`;
+}
+
+/**
+ * WHAT THE WORKBENCH SAYS ABOUT THE RUNS IT PASSED OVER — every one counted (review, MINOR). «This is
+ * the one before» is true only of ONE skipped run; with two, the run shown is not the one before the
+ * newest, and the line says how many finished empty instead. The title names each and how it ended.
+ */
+function skippedNote(skipped: readonly common_DesignRun[]): { text: string; title: string } | null {
+  if (skipped.length === 0) return null;
+  if (skipped.length === 1) {
+    return { text: passedOverNote(skipped[0]), title: runOutcomeNote(skipped[0]) };
+  }
+  return {
+    text: `newest ${skipped.length} runs finished empty · showing the last one with pictures`,
+    title: skipped.map((run) => `${runHandle(run.id)} · ${runOutcomeNote(run)}`).join('; '),
+  };
 }
 
 /** The decks of one run in display order: every sheet that has cut pieces, and how many. */
@@ -126,16 +167,81 @@ export function LatestGeneration({
   const form = useFormContext<TechCardFormData>();
   const cardFit = (form?.watch('fit') ?? '').trim();
 
-  const picked = useMemo(() => latestFlatRun(band), [band]);
-  const run = picked?.run ?? null;
+  const newest = useMemo(() => latestFlatRun(band), [band]);
+  const newestId = newest?.run.id ?? 0;
+
+  /* ═══ THE PIN (`bench-store.ts`) — the run shown while somebody works on it ═══════════════════
+     The pinned run is read from the band while the band's first page holds it, so a split's pieces
+     and an edit's new picture arrive in it. Once newer rows push it off that page it is read BY ID
+     (`useRunById`, D-49) — absence from the first page is not archival — and the same re-reads bring
+     its new outputs. Its last copy stands in while a read is in flight or fails: an open editor
+     above it must not unmount for that either. */
+  const bench = useBench(techCardId);
+  const viewerOpen = useGalleryViewerOpen();
+  const pin = bench.pin;
+  const pinnedLive = useMemo(
+    () => (pin ? (band.runs ?? []).find((r) => (r.id ?? 0) === pin.runId) ?? null : null),
+    [band, pin],
+  );
+  const byId = useRunById(techCardId, pin?.runId ?? 0, !!pin && !pinnedLive);
+  const byIdRun = byId.data?.run;
+  /** The pinned run from a read that CONTAINS it — the band's first page, or its own by-id read. */
+  const pinnedFresh =
+    pinnedLive ?? (pin && byIdRun && (byIdRun.id ?? 0) === pin.runId ? byIdRun : null);
+  const [pinnedCopy, setPinnedCopy] = useState<common_DesignRun | null>(null);
+  if (pinnedFresh && pinnedFresh !== pinnedCopy) setPinnedCopy(pinnedFresh);
+  const pinnedRun = pin
+    ? pinnedFresh ?? (pinnedCopy && (pinnedCopy.id ?? 0) === pin.runId ? pinnedCopy : null)
+    : null;
+  /** Archival OBSERVED (D-49): the archived stamp on a read that contains the run — never inferred. */
+  const archivedSeen = !!pinnedFresh && isRunArchived(pinnedFresh);
+  const run = pinnedRun ?? newest?.run ?? null;
   const runId = run?.id ?? 0;
-  const elapsed = useElapsed(run ? run.startedAt || run.createdAt : undefined);
+  /** Somebody is working — a surface open anywhere on the step, or the viewer. */
+  const held = bench.surfaces.size > 0 || viewerOpen;
+  // The clock ticks only while the run is in flight (review, MINOR): a finished run shows no elapsed
+  // time, and a ticking hook re-rendered the whole tile grid once a second for nothing.
+  const elapsed = useElapsed(run && isRunLive(run) ? run.startedAt || run.createdAt : undefined);
+
+  /* What this row shows is published for the history (its row of this run turns «on the bench»)
+     and for the tiles' surfaces (a surface on this run pins it). Leaving — the step, or the card —
+     lets the pin go: coming back shows the newest. */
+  useLayoutEffect(() => {
+    publishShown(techCardId, runId);
+  }, [techCardId, runId]);
+  useLayoutEffect(
+    () => () => {
+      publishShown(techCardId, 0);
+      releasePin(techCardId);
+    },
+    [techCardId],
+  );
+  /* The viewer opened from another block HOLDS the run (its row would rebuild under the frame on
+     stage). With nothing open any more, a hold goes; a STICKY pin stays until «show ›», this tab's
+     GENERATE (it unsticks, `useStartRun`) or an archival OBSERVED on a read that contains the run
+     (D-49) — or until the pinned run is itself the newest the workbench would show, where letting go
+     changes nothing on screen and the workbench follows the newest again. A run that merely left
+     the band's first page keeps its pin: it is read by id, and a newer run is what pushed it off. */
+  useLayoutEffect(() => {
+    if (!runId) return;
+    if (viewerOpen) {
+      pinShown(techCardId, false);
+      return;
+    }
+    if (!pin || held) return;
+    if (!pin.sticky || archivedSeen || newestId === pin.runId) releasePin(techCardId);
+  }, [techCardId, runId, viewerOpen, held, pin, archivedSeen, newestId]);
 
   const [openDeck, setOpenDeck] = useState<number | null>(null);
   const [splitting, setSplitting] = useState<{
     picture: common_DesignPicture;
     handle: string;
   } | null>(null);
+  /** The split is a surface of its run (`bench-store.ts`); it goes when the modal does. */
+  useEffect(() => {
+    if (!splitting) return;
+    return () => closeSurface(techCardId, 'split:bench');
+  }, [splitting, techCardId]);
 
   /**
    * ═══ THE DECK OPENS ITSELF — ON A NEW RUN, AND WHEN A SPLIT LANDS ═════════════════════════════
@@ -162,8 +268,8 @@ export function LatestGeneration({
     if (!seen || seen.card !== techCardId || seen.runId !== runId) {
       next = decks[0]?.root ?? null;
       // ANOTHER CARD closes a split in progress: its picture is not on this screen. A newer run of
-      // the SAME card leaves it open — the picture still exists (the history row holds it), the
-      // person's frames are not thrown away, and the cut lands on that row.
+      // the SAME card never gets here while the modal is open — the split pins the run it cuts
+      // (`bench-store.ts`), and the pieces land on this row.
       if (seen && seen.card !== techCardId && splitting) setSplitting(null);
     } else {
       const grown = decks.find((d) => d.count > (seen.sizes.get(d.root) ?? 0));
@@ -186,7 +292,9 @@ export function LatestGeneration({
   if (!run) return null;
 
   const state = runStateWord(run, elapsed);
-  const passedOver = picked?.passedOver ?? null;
+  /** Said only over the newest run with pictures — a run pinned behind a newer one says the line. */
+  const note = skippedNote(newest && newestId === runId ? newest.skipped : []);
+  const newer = newest && newestId > runId ? newest.run : null;
 
   return (
     <div data-latest-generation={runId} ref={galleryGroup.anchorRef}>
@@ -208,16 +316,17 @@ export function LatestGeneration({
         latest generation
       </GroupLabel>
 
-      {passedOver && (
+      {note && newest && (
         <Text
           size='micro'
           variant='label'
           component='p'
           className='mb-2'
-          data-latest-passed-over={passedOver.id ?? 0}
-          title={runOutcomeNote(passedOver)}
+          data-latest-passed-over={newest.skipped[0]?.id ?? 0}
+          data-latest-skipped={newest.skipped.length}
+          title={note.title}
         >
-          {passedOverNote(passedOver)}
+          {note.text}
         </Text>
       )}
 
@@ -233,12 +342,39 @@ export function LatestGeneration({
         galleryIndexOf={gallery.indexOf}
         openDeck={openDeck}
         onDeck={(rootId) => setOpenDeck((current) => (current === rootId ? null : rootId))}
-        onZoomPicture={(pictureId) =>
-          setOpenDeck((current) => deckAfterZoom(current, pictureId, deckOf))
-        }
-        onSplit={(picture) => setSplitting({ picture, handle: pictureHandle(picture) })}
+        onZoomPicture={(pictureId) => {
+          // The viewer is a surface of this run too: pinned from the click, before any re-read.
+          pinShown(techCardId, true);
+          setOpenDeck((current) => deckAfterZoom(current, pictureId, deckOf));
+        }}
+        onSplit={(picture) => {
+          openSurface(techCardId, 'split:bench', picture.runId ?? 0);
+          setSplitting({ picture, handle: pictureHandle(picture) });
+        }}
         workbench
       />
+
+      {/* A NEWER RUN, WHILE THIS ONE IS KEPT — one quiet line under the tiles; the click moves the
+          workbench to the newest and lets the pin go. «started» while that run is in flight: it is
+          not ready yet. */}
+      {newer && (
+        <span className='mt-2 flex flex-wrap items-center gap-1.5' data-latest-newer={newestId}>
+          <Text size='micro' variant='label' component='span'>
+            {isRunLive(newer) ? 'newer run started' : 'newer run ready'} ·
+          </Text>
+          <Button
+            type='button'
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+            aria-label={`show ${runHandle(newestId)} here`}
+            title='the newest flat run — the one shown now stays in the history below'
+            onClick={() => releasePin(techCardId)}
+          >
+            show ›
+          </Button>
+        </span>
+      )}
 
       {splitting && (
         <SplitModal

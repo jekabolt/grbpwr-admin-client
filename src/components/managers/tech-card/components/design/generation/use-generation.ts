@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import type {
   GetDesignBandResponse,
@@ -17,6 +17,7 @@ import {
   useDesignWrites,
   type WriteContext,
 } from '../use-design-band';
+import { unstickPin } from './bench-store';
 import { refusalFromError, type RunRefusal } from './refusal';
 import { hasLiveRun } from './run-state';
 
@@ -281,6 +282,10 @@ export function useStartRun(techCardId?: number): StartRunState {
       if (cardOnScreen(card)) {
         showMessage('run started — the pictures land under GENERATE when it finishes', 'success');
       }
+      // …and the workbench goes to it (O-53 review, `bench-store.ts`): a pin left by earlier work
+      // stops holding the run it kept. Not a release — an editor opened while this answer travelled
+      // keeps its run until it closes.
+      if (input.kind === 'flat') unstickPin(card);
       // The caller clears its fields HERE and not on the click: clearing the ask before the row is
       // filed would change the fingerprint under a failed attempt, and the retry would mint a fresh
       // id and buy a second picture.
@@ -349,6 +354,30 @@ export function useElapsed(stamp?: string | null): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/**
+ * ═══ ONE RUN, READ BY ITS ID (27.09, sweep S2, D-49) ═════════════════════════════════════════════
+ *
+ * The workbench under GENERATE keeps the run somebody works on (`bench-store.ts`). The band carries
+ * only its FIRST PAGE of runs, and enough newer rows push the kept run off it — which is not
+ * archival and must never be read as such. From then on the run is read HERE: `GetDesignRun`
+ * answers the history row's own shape (pictures with media, attempts, `archived_at`), so the answer
+ * drops into the row the workbench already draws, and an archival is OBSERVED on a read that
+ * actually contains the run.
+ *
+ * THE KEY STANDS UNDER THE BAND'S (the `'more'` continuation's idiom): every write that re-reads the
+ * band — a split, a flatten, an archive, the poll of a live run — re-reads this run with it, so the
+ * pieces of a cut and the picture of an edit arrive without anyone remembering to ask.
+ */
+export function useRunById(techCardId: number, runId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: [...designKeys.band(techCardId), 'run', runId] as const,
+    queryFn: () => adminService.GetDesignRun({ runId }),
+    enabled: enabled && techCardId > 0 && runId > 0,
+    staleTime: 0,
+    retry: 1,
+  });
 }
 
 export type MoreHistory = {

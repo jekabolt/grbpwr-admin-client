@@ -26,16 +26,17 @@ import { fillIdOf, holdsWords, mergeFill, type Fill, type FillTarget } from './d
  * КЛЮЧ — `techCardId`. Модульный стор переживает и размонтирование, и переход на другую карточку;
  * без ключа журнал одной карточки подсвечивал бы поля другой.
  *
- * ═══ ЖУРНАЛ ПЕРЕЖИВАЕТ ПЕРЕЗАГРУЗКУ (волна 25.09, D-08 / ревью Codex B-09) ═══════════════════
+ * ═══ ЖУРНАЛ ПЕРЕЖИВАЕТ ПЕРЕЗАГРУЗКУ (волна 25.09, D-08 / ревью Codex B-09) ═════════════════════
  *
  * Здесь стояло «сохранения между перезагрузками нет, журнал сессионный». Волна 25.09 сделала
  * журнал ИСТОЧНИКОМ пометок «drafted» (синие рамки полей, `accept all N ▸`), а пометка, гаснущая от
  * F5, врала бы: поле, которое человек ещё не смотрел, выглядело бы просмотренным. Поэтому записи
  * `fills` пишутся в localStorage `plm.techcard.drafted.v1.<cardId>` на КАЖДОЙ правке журнала и
  * читаются при первом обращении к карточке; отклонённые строки `dismissed` (O-39) — под СВОИМ
- * ключом `plm.techcard.dismissed.v1.<cardId>` (ревью O-39: в одном блобе две вкладки стирали друг
- * друга). Предложения колорвеев и флаг «доска ушла» остаются сессионными. Две вкладки одной
- * карточки — см. «ДВЕ ВКЛАДКИ ОДНОЙ КАРТОЧКИ» ниже.
+ * ключом `plm.techcard.dismissed.v1.<cardId>` вместе с МЕТКОЙ ОТВЕТА, которому они принадлежат
+ * (ревью O-39: в одном блобе две вкладки стирали друг друга). Предложения колорвеев и флаг «доска
+ * ушла» остаются сессионными. Две вкладки одной карточки, отказ квоты и свой слой экрана — см.
+ * «ДВЕ ВКЛАДКИ ОДНОЙ КАРТОЧКИ» ниже.
  *
  * ⚠ ВЛАДЕЛЕЦ — КАРТОЧКА, И ЭТО ПРОВЕРЯЕТСЯ ПРИ ЧТЕНИИ. Ключ уже несёт id, но хранилище правит кто
  * угодно (соседняя вкладка, ручная чистка, старая сборка), поэтому в значении лежит `owner`, и
@@ -44,7 +45,8 @@ import { fillIdOf, holdsWords, mergeFill, type Fill, type FillTarget } from './d
  * (`isStoredFill`); всё остальное молча отбрасывается.
  *
  * ПОРЧА ХРАНИЛИЩА НЕ ЛОМАЕТ ЭКРАН: любое исключение localStorage (квота, приватный режим, запрет)
- * глотается — журнал просто остаётся сессионным, как было до волны.
+ * глотается — журнал просто остаётся сессионным, как было до волны; об отказе квоты человеку
+ * говорят один раз (`storeRefused`).
  */
 
 /**
@@ -59,7 +61,8 @@ import { fillIdOf, holdsWords, mergeFill, type Fill, type FillTarget } from './d
  * Запись несёт то, что рисует строка DISMISSED без живого ответа: подпись поля и фразу предложения
  * словами. Ключ — строка предложения (`ProposalRow.id`): по нему строка уходит из TO DECIDE, и по нему
  * `put it back` возвращает её, пока ответ жив. Срок — ОТВЕТ ПРОГОНА, как у квитанций (D5): новый
- * ответ предлагает заново, и отказ прошлому предложению не отказ новому.
+ * ответ предлагает заново, и отказ прошлому предложению не отказ новому. Чей это ответ, говорит не
+ * строка, а МЕТКА под ключом отказов (`AnswerToken`): весь список под ключом — одного ответа.
  */
 export type Dismissal = {
   row: string;
@@ -69,25 +72,42 @@ export type Dismissal = {
   says: string;
   /** Когда, `HH:MM`. Только для глаз. */
   at: string;
-  /**
-   * ПОКОЛЕНИЕ ОТВЕТА, которому отказ принадлежит (`answerGen` карточки), — ставит стор при записи.
-   * Отказ чужого поколения — отказ прошлому предложению: он не читается, не сливается и не пишется.
-   * Не время: часы двух вкладок и две записи в одну миллисекунду не порядок (ревью O-39 №2).
-   */
-  gen?: number;
 };
 
+/**
+ * МЕТКА ОТВЕТА — чей список отказов лежит под ключом (ревью O-39 №3, B). `seq` растёт на каждый
+ * применённый ответ (`clearDismissed`: старший из известных + 1); `id` — восемь случайных знаков,
+ * потому что один и тот же `seq` законно выдают ДВЕ вкладки (у одной GENERATE не лёг в хранилище, у
+ * другой лёг), и счётчик один их ответы не различил бы. Порядок: старший `seq` новее; при равном
+ * `seq` и разных `id` новее ХРАНИМАЯ — она легла, вторая нет. Нулевая метка — «ответа ещё не было».
+ */
+export type AnswerToken = { seq: number; id: string };
+const ZERO_TOKEN: AnswerToken = { seq: 0, id: '' };
+
+/** Тронутое одной операцией: строки, которые она ставит (`put`), и ключи, которые снимает (`drop`). */
+type Touch<T> = { put: T[]; drop: string[] };
+const NOTHING: Touch<never> = { put: [], drop: [] };
+
+/**
+ * СВОЙ СЛОЙ ЭКРАНА (ревью O-39 №3, A): тронутое, которое хранилище не приняло. Живёт только в памяти
+ * вкладки, не пишется и не повторяется, не больше потолков журнала — см. «ДВЕ ВКЛАДКИ ОДНОЙ
+ * КАРТОЧКИ».
+ */
+type LocalOnly = { fills: Touch<Fill>; dismissed: Touch<Dismissal> };
+const NO_LOCAL: LocalOnly = { fills: NOTHING, dismissed: NOTHING };
+
 type CardMemory = {
+  /** Журнал НА ЭКРАНЕ: хранимое ∪ свой слой. */
   fills: Fill[];
-  /** Отклонённые строки ПОСЛЕДНЕГО ответа, новейшая первой (O-39); не больше `MAX_DISMISSED`. */
+  /** Отклонённые строки ТЕКУЩЕГО ответа на экране, новейшая первой (O-39): хранимое ∪ свой слой. */
   dismissed: Dismissal[];
   /**
-   * ПОКОЛЕНИЕ ТЕКУЩЕГО ОТВЕТА — счётчик карточки: +1 на каждый применённый ответ (`clearDismissed`),
-   * хранится в ключе отказов. Это ограда для отказов (ревью O-39 №2): устойчивый id ответа сюда не
-   * доходит, а счётчик, в отличие от uuid, ещё и УПОРЯДОЧЕН — вкладка с более новым ответом
-   * побеждает вкладку с прошлым, даже если её собственная запись поколения не легла (квота).
+   * Метка ответа, который вкладка считает текущим: при подъёме берётся из хранилища, растёт со
+   * своим `clearDismissed`. Чужой более новый ответ её НЕ меняет (D-46) — новую метку вкладка
+   * получает только своим GENERATE.
    */
-  answerGen: number;
+  token: AnswerToken;
+  localOnly: LocalOnly;
   proposals: ProposedColourway[];
   /** Вердикт по предложению колорвея: подтверждён (с id продукта) или отклонён. */
   verdicts: Record<string, ColourwayVerdict>;
@@ -116,7 +136,8 @@ export type ColourwayVerdict =
 const EMPTY: CardMemory = {
   fills: [],
   dismissed: [],
-  answerGen: 0,
+  token: ZERO_TOKEN,
+  localOnly: NO_LOCAL,
   proposals: [],
   verdicts: {},
   boardMoved: false,
@@ -224,8 +245,8 @@ const MAX_STORED = 120;
  * несённые — раунд 3, M-A) — тоже все: принятая такая запись — единственная копия того, что стояло
  * до черновика, и потолок не вправе её стереть; их не больше, чем скалярных полей у карточки
  * (адрес — поле, ступени едут внутри записи). Потолок режет только прочие
- * принятые — остаток места отдаётся новейшим из них. Порядок журнала сохраняется. Память сеанса не
- * режется вовсе.
+ * принятые — остаток места отдаётся новейшим из них. Порядок журнала сохраняется. Что срезано, того
+ * нет и в памяти: писатель возвращает положенное, и память равняется на него (E).
  */
 export function storedSlice(fills: Fill[], max = MAX_STORED): Fill[] {
   if (fills.length <= max) return fills;
@@ -290,7 +311,7 @@ function isStoredFill(x: unknown): x is Fill {
   return f.accepted === undefined || typeof f.accepted === 'boolean';
 }
 
-/** Отклонённая строка (O-39) — четыре строки и поколение; ничего больше не читается; пустой ключ — мусор. */
+/** Отклонённая строка (O-39) — четыре строки; ничего больше не читается; пустой ключ — мусор. */
 function isStoredDismissal(x: unknown): x is Dismissal {
   if (!x || typeof x !== 'object') return false;
   const d = x as Record<string, unknown>;
@@ -299,54 +320,56 @@ function isStoredDismissal(x: unknown): x is Dismissal {
     d.row.length > 0 &&
     typeof d.label === 'string' &&
     typeof d.says === 'string' &&
-    typeof d.at === 'string' &&
-    (d.gen === undefined || typeof d.gen === 'number')
+    typeof d.at === 'string'
   );
 }
 
-/** Отказ, каким он идёт в память и в хранилище: строки в потолках, поколение проставлено. */
-function boundDismissal(d: Dismissal, gen: number): Dismissal {
+/** Отказ, каким он идёт в память и в хранилище: ровно четыре поля, строки в потолках. */
+function boundDismissal(d: Dismissal): Dismissal {
   return {
     row: d.row,
     label: runes(d.label, MAX_DISMISSAL_LABEL),
     says: runes(d.says, MAX_DISMISSAL_SAYS),
     at: d.at,
-    gen,
   };
 }
 
-/** Что лежит под ключом отказов: поколение текущего ответа и его список (новейшие первыми). */
-type StoredDismissed = { gen: number; list: Dismissal[] };
+/**
+ * Метка ответа из хранилища — ТОЛЬКО правильная (ревью O-39 №3, F): `seq` — безопасное целое ≥ 0,
+ * `id` — короткая строка, нулевой `seq` — только с пустым `id`. Иначе блоб отказов порчен и читается
+ * как ОТСУТСТВУЮЩИЙ: `2^53 + 1 === 2^53`, и GENERATE с таким счётчиком не открыл бы новый ответ
+ * никогда, а `1e400` — это `Infinity`, которая пишется как `null`.
+ */
+function isToken(x: unknown): x is AnswerToken {
+  if (!x || typeof x !== 'object') return false;
+  const { seq, id } = x as Record<string, unknown>;
+  if (!Number.isSafeInteger(seq) || (seq as number) < 0) return false;
+  return typeof id === 'string' && id.length <= 16 && ((seq as number) > 0 || id === '');
+}
+
+/** Что лежит под ключом отказов: метка текущего ответа и его список (новейшие первыми). */
+type StoredDismissed = { token: AnswerToken; list: Dismissal[] };
 
 /**
- * Журнал карточки из хранилища. Чужой владелец, мусор, запрет хранилища — пусто. `legacy` — отказы,
- * которые сборка 1931c256 (до этого ревью) вшивала в тот же блоб: их забирает и снимает с блоба
- * ПЕРВАЯ ЗАПИСЬ отказов (`editDismissed`), а не чтение — чтение хранилища ничего не пишет.
+ * Журнал карточки из хранилища. Чужой владелец, мусор, запрет хранилища — пусто. Чужое свойство в
+ * блобе не читается (сборка 1931c256 вшивала сюда `dismissed`; до беты она не дошла — D-47: ни
+ * переезда, ни отметки), а следующая запись журнала (`putFills`) кладёт блоб уже без него.
  */
-function readFillsBlob(card: number): { fills: Fill[]; legacy: Dismissal[] | null } {
-  const none = { fills: [] as Fill[], legacy: null };
-  if (!(card > 0)) return none;
+function readFillsBlob(card: number): Fill[] {
+  if (!(card > 0)) return [];
   try {
     const raw = localStorage.getItem(fillsKey(card));
-    if (!raw) return none;
-    const parsed = JSON.parse(raw) as {
-      v?: unknown;
-      owner?: unknown;
-      fills?: unknown;
-      dismissed?: unknown;
-    } | null;
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { v?: unknown; owner?: unknown; fills?: unknown } | null;
     if (!parsed || parsed.v !== 1 || parsed.owner !== card || !Array.isArray(parsed.fills))
-      return none;
-    return {
-      fills: storedSlice(parsed.fills.filter(isStoredFill)),
-      legacy: Array.isArray(parsed.dismissed) ? parsed.dismissed.filter(isStoredDismissal) : null,
-    };
+      return [];
+    return storedSlice(parsed.fills.filter(isStoredFill));
   } catch {
-    return none;
+    return [];
   }
 }
 
-/** Отказы карточки из хранилища; `null` — ключа нет. Чужой владелец, мусор, запрет — тоже `null`. */
+/** Отказы карточки из хранилища; `null` — ключа нет. Чужой владелец, мусор, порченая метка, запрет — тоже `null`. */
 function readDismissedBlob(card: number): StoredDismissed | null {
   if (!(card > 0)) return null;
   try {
@@ -355,18 +378,16 @@ function readDismissedBlob(card: number): StoredDismissed | null {
     const parsed = JSON.parse(raw) as {
       v?: unknown;
       owner?: unknown;
-      gen?: unknown;
+      token?: unknown;
       list?: unknown;
     } | null;
-    if (!parsed || parsed.v !== 1 || parsed.owner !== card || !Array.isArray(parsed.list))
+    if (!parsed || parsed.v !== 1 || parsed.owner !== card || !Array.isArray(parsed.list)) {
       return null;
-    const gen = typeof parsed.gen === 'number' && parsed.gen > 0 ? Math.floor(parsed.gen) : 0;
+    }
+    if (!isToken(parsed.token)) return null;
     return {
-      gen,
-      list: parsed.list
-        .filter(isStoredDismissal)
-        .map((d) => boundDismissal(d, typeof d.gen === 'number' ? d.gen : gen))
-        .slice(0, MAX_DISMISSED),
+      token: { seq: parsed.token.seq, id: parsed.token.id },
+      list: parsed.list.filter(isStoredDismissal).map(boundDismissal).slice(0, MAX_DISMISSED),
     };
   } catch {
     return null;
@@ -384,12 +405,18 @@ function slimFill(f: Fill): Fill {
 /**
  * ОТКАЗ ХРАНИЛИЩА ГОВОРИТСЯ ВСЛУХ — ОДИН РАЗ (ревью O-39, MAJOR-2). До сих пор `setItem`, упёршийся
  * в квоту, глотался, и экран показывал сеансовое как сохранённое. Один раз на карточку и на полосу
- * отказов: удавшаяся запись снимает отметку, и следующий отказ скажется снова.
+ * отказов: удавшаяся запись снимает отметку, и следующий отказ скажется снова. Свой слой при этом не
+ * бездонный (ревью S1, Low): переполнился — старшие строки ушли, и об отказе сказано ещё раз, один.
  */
 const STORE_REFUSED =
   'the browser refused to store the draft journal — this tab keeps it until reload';
 const refusedCards = new Set<number>();
-function storeRefused(card: number): void {
+const evictedCards = new Set<number>();
+function storeRefused(card: number, evicted = false): void {
+  if (evicted && !evictedCards.has(card)) {
+    evictedCards.add(card);
+    refusedCards.delete(card);
+  }
   if (refusedCards.has(card)) return;
   refusedCards.add(card);
   try {
@@ -400,100 +427,157 @@ function storeRefused(card: number): void {
 }
 function storeWorked(card: number): void {
   refusedCards.delete(card);
+  evictedCards.delete(card);
 }
 
 /**
- * ЖУРНАЛ — В ХРАНИЛИЩЕ; `false` — не влез, и ключ оставлен КАК БЫЛ. Здесь стояло «не влезла и
- * облегчённая копия — ключ снимается: пустой журнал после F5 честнее воскресшего» (MIN-4). Ревью
- * O-39 перевесило: снятый ключ уносит единственную запись «что стояло до черновика» у КАЖДОГО поля,
- * а воскресший журнал — одну лишнюю строку «restore previous ↶»; и человеку об отказе теперь говорят
- * (`storeRefused`). Очередь попыток: целиком → без ключа отказов (он дешевле журнала, и следующий
- * отказ его перепишет) → без цепочек возвратов (`slimFill`: `✕` возврата тогда просто забудет
- * запись, но ни одно слово и ни одна пометка не потеряются). Не влезло — стоит прежняя копия.
+ * ЧУЖОЙ ОТВЕТ НОВЕЕ СВОЕГО — ТОЖЕ ВСЛУХ, ОДИН РАЗ ЗА ЭПИЗОД (D-46). Соседняя вкладка сделала GENERATE:
+ * отказы этой вкладки больше нигде не хранятся, и пока она не сделает GENERATE сама, её «keep mine»
+ * никуда не ложится. Эпизод кончается своим GENERATE (`answerFresh`).
+ */
+const STALE_ANSWER =
+  'another tab generated a newer answer — dismissals here are not saved until you generate again';
+const staleCards = new Set<number>();
+function answerStale(card: number): void {
+  if (staleCards.has(card)) return;
+  staleCards.add(card);
+  try {
+    useSnackBarStore.getState().showMessage(STALE_ANSWER, 'error');
+  } catch {
+    // Стенд без снекбара.
+  }
+}
+function answerFresh(card: number): void {
+  staleCards.delete(card);
+}
+
+/** Журнал — под ключ как есть (пустой — ключ снят); возвращает положенное. Бросает, что бросит `setItem`. */
+function putFills(card: number, list: Fill[]): Fill[] {
+  if (!list.length) localStorage.removeItem(fillsKey(card));
+  else localStorage.setItem(fillsKey(card), JSON.stringify({ v: 1, owner: card, fills: list }));
+  return list;
+}
+
+/** Отказы — под ключ как есть, с меткой; возвращает положенное. Бросает, что бросит `setItem`. */
+function putDismissed(card: number, d: StoredDismissed): Dismissal[] {
+  const blob = { v: 1, owner: card, token: d.token, list: d.list };
+  localStorage.setItem(dismissedKey(card), JSON.stringify(blob));
+  return d.list;
+}
+
+/**
+ * ЖУРНАЛ — В ХРАНИЛИЩЕ. `stored` — РОВНО ТО, ЧТО ЛЕГЛО (ревью O-39 №3, E): срез потолка или
+ * облегчённая копия, и память равняется на возвращённое, а не на то, что хотела положить; `null` —
+ * не влезло, и ключ оставлен КАК БЫЛ. Здесь стояло «не влезла и облегчённая копия — ключ снимается:
+ * пустой журнал после F5 честнее воскресшего» (MIN-4). Ревью O-39 перевесило: снятый ключ уносит
+ * единственную запись «что стояло до черновика» у КАЖДОГО поля, а воскресший журнал — одну лишнюю
+ * строку «restore previous ↶»; и человеку об отказе теперь говорят (`storeRefused`). Очередь попыток:
+ * целиком → список отказов ужат до одной метки (`shrank`: список дешевле журнала, а МЕТКА ОТВЕТА
+ * остаётся под ключом — снять ключ значило бы отдать отставшей вкладке следующий ответ, C) → без
+ * цепочек возвратов (`slimFill`: `✕` возврата тогда просто забудет запись, но ни одно слово и ни
+ * одна пометка не потеряются). Не влезло — стоит прежняя копия.
  */
 type FillsOutcome = {
-  /** Журнал лёг (целиком, без ключа отказов или облегчённым). */
-  stored: boolean;
-  /** Ключ отказов снят ради места — вкладка обязана забыть свои отказы тем же шагом (ревью №2, D). */
-  dropped: boolean;
+  /** Что легло под ключ журнала; `null` — ничего, прежняя копия на месте. */
+  stored: Fill[] | null;
+  /** Список отказов ужат ради места — вкладка обязана забыть свои хранимые отказы тем же шагом. */
+  shrank: boolean;
 };
 function writeFills(card: number, fills: Fill[]): FillsOutcome {
-  if (!(card > 0)) return { stored: false, dropped: false };
-  const key = fillsKey(card);
-  const write = (list: Fill[]) =>
-    localStorage.setItem(key, JSON.stringify({ v: 1, owner: card, fills: list }));
+  if (!(card > 0)) return { stored: null, shrank: false };
   try {
-    if (!fills.length) localStorage.removeItem(key);
-    else write(storedSlice(fills));
-    return { stored: true, dropped: false };
+    return { stored: putFills(card, storedSlice(fills)), shrank: false };
   } catch {
-    let dropped = false;
-    try {
-      localStorage.removeItem(dismissedKey(card));
-      dropped = true;
-      write(storedSlice(fills));
-      return { stored: true, dropped };
-    } catch {
-      // Всё ещё не влезает — облегчённая копия.
+    // Не влезло — по лестнице.
+  }
+  let shrank = false;
+  try {
+    const d = readDismissedBlob(card);
+    if (d?.list.length) {
+      putDismissed(card, { token: d.token, list: [] });
+      shrank = true;
+      return { stored: putFills(card, storedSlice(fills)), shrank };
     }
-    try {
-      write(storedSlice(fills).map(slimFill));
-      return { stored: true, dropped };
-    } catch {
-      return { stored: false, dropped }; // прежняя копия остаётся: снять ключ значило бы стереть «что стояло до»
-    }
+  } catch {
+    // Всё ещё не влезает — облегчённая копия.
+  }
+  try {
+    return { stored: putFills(card, storedSlice(fills).map(slimFill)), shrank };
+  } catch {
+    return { stored: null, shrank }; // прежняя копия остаётся: снять ключ значило бы стереть «что стояло до»
   }
 }
 
 /**
- * ОТКАЗЫ — В ХРАНИЛИЩЕ; `false` — не влезли, журнал не тронут. Пустой список нулевого поколения
- * снимает ключ; с поколением — остаётся: поколение и есть ограда, не дающая отставшей вкладке
- * воскресить отказы, обнулённые чужим ответом. Не влезли все — влезут новейшие: отказ старше
- * десяти других уже история.
+ * ОТКАЗЫ — В ХРАНИЛИЩЕ; возвращает РОВНО положенный список (E): не влезли сорок — лягут десять
+ * новейших, и память покажет десять (отказ старше десяти других уже история); `null` — не влезли и
+ * они, журнал и прежний список не тронуты. Ключ не снимается никогда: под ним метка ответа (C).
  */
-function writeDismissed(card: number, d: StoredDismissed): boolean {
-  if (!(card > 0)) return false;
-  const key = dismissedKey(card);
-  const write = (list: Dismissal[]) =>
-    localStorage.setItem(key, JSON.stringify({ v: 1, owner: card, gen: d.gen, list }));
+function writeDismissed(card: number, d: StoredDismissed): Dismissal[] | null {
+  if (!(card > 0)) return null;
   try {
-    if (!d.list.length && !d.gen) localStorage.removeItem(key);
-    else write(d.list.slice(0, MAX_DISMISSED));
-    return true;
+    return putDismissed(card, { ...d, list: d.list.slice(0, MAX_DISMISSED) });
   } catch {
-    try {
-      write(d.list.slice(0, 10));
-      return true;
-    } catch {
-      return false;
-    }
+    // Не влезли — десять новейших.
+  }
+  try {
+    return putDismissed(card, { ...d, list: d.list.slice(0, 10) });
+  } catch {
+    return null;
   }
 }
 
 /**
- * ═══ ДВЕ ВКЛАДКИ ОДНОЙ КАРТОЧКИ — ЗАПИСЬ НЕСЁТ ТОЛЬКО ТО, ЧТО ТРОНУЛА (ревью O-39 №2) ══════════════
+ * ═══ ДВЕ ВКЛАДКИ ОДНОЙ КАРТОЧКИ — ЗАПИСЬ НЕСЁТ ТОЛЬКО ТО, ЧТО ТРОНУЛА (ревью O-39 №2, №3) ═════════
  *
- * Журнал — память ОДНОГО оператора по карточке; две вкладки одной карточки редки. Обещание ровно
- * такое: ПОСЛЕДОВАТЕЛЬНЫЕ действия двух вкладок не теряются (A записала — B прочтёт или запишет
- * после), отказы обнулённого ответа не воскресают, квота не стирает журнал. Одновременная запись в
- * одну миллисекунду — «последний пишет» на уровне ключа: у localStorage нет сравнения-и-обмена, и
- * замок ради редкого случая владелец не просит.
+ * Журнал — память ОДНОГО оператора по карточке; две вкладки одной карточки редки. Обещание (D-41)
+ * ровно такое: ПОСЛЕДОВАТЕЛЬНЫЕ действия двух вкладок не теряются (A записала — B прочтёт или
+ * запишет после), отказы обнулённого ответа не воскресают, квота не стирает журнал. Одновременная
+ * запись в одну миллисекунду — «последний пишет» на уровне ключа: у localStorage нет
+ * сравнения-и-обмена, и замок ради редкого случая владелец не просит.
  *
- * Как: каждая запись ПЕРЕЧИТЫВАЕТ свой ключ и пишет ХРАНИМОЕ ∪ ТРОНУТОЕ. Тронутое — строки, которые
- * ЭТА операция ставит (они побеждают) или снимает (уходят). Строки, которые вкладка лишь держит в
- * памяти, а операция не трогала, берутся ИЗ ХРАНИЛИЩА, не из памяти: устаревшая память не
- * перепишет более новую строку соседа. Память после записи = записанное. Ни множества «виденного»,
- * ни надгробий: каждое действие стора называет тронутое явно (`Touch`).
+ * ТРОНУТОЕ (`Touch`). Каждая запись ПЕРЕЧИТЫВАЕТ свой ключ и пишет ХРАНИМОЕ ∪ ТРОНУТОЕ: строки,
+ * которые ЭТА операция ставит (они побеждают) или снимает (уходят). Что вкладка лишь держит в
+ * памяти, а операция не трогала, берётся ИЗ ХРАНИЛИЩА, не из памяти: устаревшая память не
+ * перепишет строку соседа. Ни множеств «виденного», ни надгробий, ни часов — у двух вкладок разные
+ * часы, а две записи в одну миллисекунду не порядок.
  *
- * Тронутое, которое хранилище не приняло (квота), едет со следующей записью (`unsaved`) — иначе
- * «this tab keeps it until reload» было бы неправдой уже на второй записи. Легло — забыто; F5 —
- * забыто тоже, как и обещано. Что потолок `storedSlice` не положил в хранилище, уходит из памяти со
- * следующей записью — цена простоты, и это только принятые строки сверх ста двадцати.
+ * СВОЙ СЛОЙ (A). Тронутое, которое хранилище не приняло (квота), НЕ повторяется следующей записью:
+ * повтор лёг бы поверх более поздней чужой операции (A поставила X — отказ; B сняла X; следующая
+ * запись A воскресила бы X). Оно ложится в `localOnly` карточки — слой ТОЛЬКО ДЛЯ ЭКРАНА: экран =
+ * хранимое ∪ слой; слой не пишется; чужая запись (событие `storage`) освежает хранимую часть, а слой
+ * оставляет; удавшаяся запись по тому же ключу снимает ключ из слоя; перезагрузка снимает слой
+ * целиком — ровно то, что сказано человеку: «this tab keeps it until reload». Правка по ключу,
+ * который лежит в слое, идёт ОТ строки слоя (она и на экране), а не от хранимой; прочие ключи — от
+ * хранимого (ревью S1). Слой не больше потолков журнала (120 записей / 40 отказов на карточку):
+ * старшие уходят с хвоста, и об этом сказано ещё раз.
+ *
+ * МЕТКА ОТВЕТА (B). Отказы принадлежат ответу: под ключом отказов лежит его метка `{seq, id}`, и
+ * КАЖДОЕ тронутое — и поставленное, и снятое — несёт метку своей вкладки. Перед записью, после
+ * перечитывания, выбирается ТЕКУЩАЯ метка: старший `seq`, при равном — хранимая. Метка вкладки не
+ * текущая — тронутое ОТБРАСЫВАЕТСЯ, запись не делается: отказ прошлому предложению не ложится в
+ * список нового, и «put it back» отставшей вкладки не снимает чужую строку. Чужую метку вкладка НЕ
+ * перенимает (D-46): экран у неё показывает свой, прошлый ответ, и перенятая метка узаконила бы
+ * следующий отказ прошлому предложению как отказ новому. Список на экране пуст (отказы этого
+ * ответа больше нигде не хранятся), метка остаётся своей, человеку сказано один раз за эпизод, и
+ * новую метку вкладка получает только своим GENERATE (`clearDismissed`): `seq` = старший из
+ * известных + 1 и свежий `id`, запись без проверки — это и есть новый ответ.
+ *
+ * ПОТОЛКИ И КВОТА (C, E). Лестница журнала при отказе квоты ужимает список отказов до одной метки,
+ * но ключ не снимает: снятая метка отдала бы отставшей вкладке следующий ответ. Что легло с потерей
+ * (срез ста двадцати, облегчённая копия, десять новейших отказов) — то и память: писатель
+ * возвращает ровно положенное.
+ *
+ * ЧУЖОЕ СВОЙСТВО (D-47). Сборка 1931c256 вшивала отказы в блоб журнала (`dismissed`), но до беты не
+ * дошла, и переезда нет: чужое свойство блоба не читается, а следующая запись журнала кладёт блоб
+ * без него.
+ *
+ * ПОРЧА (F). Метка из хранилища — только безопасное целое ≥ 0 и строка; иначе блоб отказов читается
+ * как отсутствующий, и GENERATE открывает ответ 1, а не «2^53 + 1 === 2^53».
  */
-type Touch<T> = { put: T[]; drop: string[] };
-const NOTHING: Touch<never> = { put: [], drop: [] };
 const idOf = (f: Fill) => f.id;
 const rowOf = (d: Dismissal) => d.row;
+const isNothing = (t: Touch<unknown>) => !t.put.length && !t.drop.length;
 
 /** Хранимое ∪ тронутое: снятое уходит, поставленное встаёт на своё место, новое — в голову. */
 function overlay<T>(stored: T[], t: Touch<T>, keyOf: (x: T) => string): T[] {
@@ -505,33 +589,73 @@ function overlay<T>(stored: T[], t: Touch<T>, keyOf: (x: T) => string): T[] {
   return fresh.length ? [...fresh, ...kept] : kept;
 }
 
-/** Тронутое двух операций: новое побеждает старое по ключу. */
-function joinTouch<T>(
-  older: Touch<T> | undefined,
-  newer: Touch<T>,
-  keyOf: (x: T) => string,
-): Touch<T> {
-  if (!older) return newer;
+/** Слой ∪ новое тронутое: новое побеждает по ключу и стоит первым — новейшее в голову журнала. */
+function joinTouch<T>(older: Touch<T>, newer: Touch<T>, keyOf: (x: T) => string): Touch<T> {
+  if (isNothing(older)) return newer;
   const taken = new Set([...newer.put.map(keyOf), ...newer.drop]);
   return {
-    put: [...older.put.filter((x) => !taken.has(keyOf(x))), ...newer.put],
-    drop: [...older.drop.filter((k) => !taken.has(k)), ...newer.drop],
+    put: [...newer.put, ...older.put.filter((x) => !taken.has(keyOf(x)))],
+    drop: [...newer.drop, ...older.drop.filter((k) => !taken.has(k))],
   };
 }
 
-/** Тронутое, которое хранилище не приняло, — по карточке; снимается первой удавшейся записью. */
-const unsaved = {
-  fills: new Map<number, Touch<Fill>>(),
-  dismissed: new Map<number, Touch<Dismissal>>(),
-};
+/** Слой без ключей, которые легли: удавшаяся запись по ключу снимает его из своего слоя. */
+function withoutKeys<T>(layer: Touch<T>, done: Touch<T>, keyOf: (x: T) => string): Touch<T> {
+  if (isNothing(layer)) return layer;
+  const gone = new Set([...done.put.map(keyOf), ...done.drop]);
+  const put = layer.put.filter((x) => !gone.has(keyOf(x)));
+  const drop = layer.drop.filter((k) => !gone.has(k));
+  return put.length || drop.length ? { put, drop } : NOTHING;
+}
 
-/** Отказы поколения `gen` — и только они: чужое поколение не читается, не сливается, не пишется. */
-function ofGen(list: Dismissal[], gen: number): Dismissal[] {
-  return list.filter((d) => d.gen === gen);
+/**
+ * Свой слой в потолке журнала (ревью S1, Low): столько же строк и снятых ключей, сколько хранилище
+ * держит записей (120) или отказов (40); старшие уходят с хвоста — новое стоит в голове.
+ */
+function boundTouch<T>(t: Touch<T>, cap: number): { touch: Touch<T>; evicted: boolean } {
+  if (t.put.length <= cap && t.drop.length <= cap) return { touch: t, evicted: false };
+  return { touch: { put: t.put.slice(0, cap), drop: t.drop.slice(0, cap) }, evicted: true };
+}
+
+/** Восемь случайных знаков для метки ответа. */
+function freshId(): string {
+  const abc = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = new Uint8Array(8);
+  try {
+    crypto.getRandomValues(bytes);
+  } catch {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(bytes, (b) => abc[b % abc.length]).join('');
+}
+
+const sameToken = (a: AnswerToken, b: AnswerToken) => a.seq === b.seq && a.id === b.id;
+
+/** Текущий ответ из двух меток: старший `seq`; при равном — хранимая (она легла, вторая нет). */
+function currentToken(memory: AnswerToken, stored: AnswerToken): AnswerToken {
+  return memory.seq > stored.seq ? memory : stored;
 }
 
 const sameList = (a: unknown[], b: unknown[]) =>
   a.length === b.length && JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Отказы на экране при перечитанном ключе. Хранимая метка новее своей (или тот же `seq`, но не
+ * наш `id`) — соседняя вкладка сделала GENERATE: отказы этой вкладки больше нигде не хранятся,
+ * список пуст, свой слой отказов снят, метка ОСТАЁТСЯ своей (D-46), сказано один раз за эпизод —
+ * если вкладке вообще есть что терять (нулевая метка — ответа не было). Своя метка текущая —
+ * хранимый список её же, либо прошлого ответа, и тогда его нет.
+ */
+function settleDismissed(card: number, m: CardMemory, stored: StoredDismissed | null): CardMemory {
+  const st = stored?.token ?? ZERO_TOKEN;
+  if (!sameToken(currentToken(m.token, st), m.token)) {
+    if (m.token.seq > 0) answerStale(card);
+    if (!m.dismissed.length && isNothing(m.localOnly.dismissed)) return m;
+    return { ...m, dismissed: [], localOnly: { ...m.localOnly, dismissed: NOTHING } };
+  }
+  const list = stored && sameToken(st, m.token) ? stored.list : [];
+  return { ...m, dismissed: overlay(list, m.localOnly.dismissed, rowOf) };
+}
 
 type Store = {
   byCard: Record<number, CardMemory>;
@@ -549,7 +673,7 @@ type Store = {
   dismiss: (card: number, d: Dismissal) => void;
   /** «put it back»: отказ снят, строка снова работа. */
   undismiss: (card: number, row: string) => void;
-  /** Новый ответ прогона — поколение +1, отказы прошлого ответа обнуляются, как квитанции (D5). */
+  /** Новый ответ прогона — новая метка, отказы прошлого ответа обнуляются, как квитанции (D5). */
   clearDismissed: (card: number) => void;
   /** Чужая вкладка записала ключ карточки (событие `storage`) — память освежается из хранилища. */
   refresh: (card: number, which: 'fills' | 'dismissed') => void;
@@ -568,29 +692,20 @@ type Store = {
 
 /**
  * Память карточки С ПОДНЯТЫМ ЖУРНАЛОМ. Любая правка сначала поднимает хранимое — иначе запись,
- * сделанная до первого чтения, затёрла бы в хранилище записи прошлого сеанса. Записи сеанса
- * побеждают хранимые по адресу.
+ * сделанная до первого чтения, затёрла бы в хранилище записи прошлого сеанса. До подъёма память
+ * карточки пуста по построению (всякая правка идёт через `edit`, а он поднимает первым делом), так
+ * что подъём — это чтение обоих ключей и ничего больше: метка ответа берётся хранимая — это
+ * единственный момент, когда вкладка берёт метку не своим GENERATE (у неё ещё нет ответа).
  */
 function memoryOf(state: Store, card: number): CardMemory {
   const cur = state.byCard[card] ?? EMPTY;
   if (state.hydrated[card] || !(card > 0)) return cur;
-  const blob = readFillsBlob(card);
   const stored = readDismissedBlob(card);
-  const have = new Set(cur.fills.map(idOf));
-  const fills = blob.fills.filter((f) => !have.has(f.id));
-  const answerGen = Math.max(cur.answerGen, stored?.gen ?? 0);
-  // Отказы сеанса своего поколения побеждают хранимые по ключу строки — как записи (O-39).
-  const mine = ofGen(cur.dismissed, answerGen);
-  const rows = new Set(mine.map(rowOf));
-  const foreign = stored ? ofGen(stored.list, answerGen).filter((d) => !rows.has(d.row)) : [];
-  const dismissed = foreign.length ? [...mine, ...foreign] : mine;
-  if (!fills.length && answerGen === cur.answerGen && dismissed.length === cur.dismissed.length)
-    return cur;
   return {
     ...cur,
-    fills: fills.length ? [...cur.fills, ...fills] : cur.fills,
-    dismissed,
-    answerGen,
+    fills: readFillsBlob(card),
+    token: stored?.token ?? ZERO_TOKEN,
+    dismissed: stored?.list ?? [],
   };
 }
 
@@ -603,82 +718,90 @@ function edit(state: Store, card: number, fn: (m: CardMemory) => CardMemory): Pa
   };
 }
 
+/** Строка-основа правки по ключу: своя из слоя (она и на экране), иначе хранимая, иначе память. */
+type BaseOf = (id: string) => Fill | undefined;
+
 /**
  * Правка ЖУРНАЛА — та же `edit`, плюс перечитывание ключа и запись «хранимое ∪ тронутое» (см.
- * «ДВЕ ВКЛАДКИ»). `touch` называет тронутое по памяти вкладки И по хранимому — строка, которую
- * операция меняет, берётся из хранимого, если оно её знает (там она новее), иначе из памяти.
+ * «ДВЕ ВКЛАДКИ»). `touch` называет тронутое по памяти вкладки И по хранимому; строку, которую
+ * операция меняет по ключу, даёт `base`: своя из слоя, если хранилище её не приняло (человек видит
+ * и принимает ЕЁ — ревью S1), иначе хранимая (там она новее памяти), иначе память.
  * Побочный эффект внутри апдейтера законен: zustand зовёт его ровно один раз (это не апдейтер
- * React под StrictMode). Не влезло — память всё равно правится, тронутое ждёт, человеку сказано.
+ * React под StrictMode). Легло — память = положенное ∪ свой слой без ключей, которые легли (E);
+ * не влезло — тронутое уходит в свой слой (A) в потолке журнала, человеку сказано, хранилище не
+ * тронуто.
  */
 function editFills(
   state: Store,
   card: number,
-  touch: (mine: Fill[], stored: Fill[]) => Touch<Fill>,
+  touch: (mine: Fill[], stored: Fill[], base: BaseOf) => Touch<Fill>,
 ): Partial<Store> {
   return edit(state, card, (m) => {
-    const stored = readFillsBlob(card).fills;
-    const t = joinTouch(unsaved.fills.get(card), touch(m.fills, stored), idOf);
-    if (!t.put.length && !t.drop.length) return m;
+    const stored = readFillsBlob(card);
+    const local = m.localOnly.fills;
+    const base: BaseOf = (id) =>
+      local.put.find((f) => f.id === id) ??
+      stored.find((f) => f.id === id) ??
+      m.fills.find((f) => f.id === id);
+    const t = touch(m.fills, stored, base);
+    if (isNothing(t)) return m;
     const next = overlay(stored, t, idOf);
     const w = writeFills(card, next);
+    // Список отказов ужат ради места (C): вкладка забывает свои хранимые отказы тем же шагом.
+    const dismissed = w.shrank ? overlay([], m.localOnly.dismissed, rowOf) : m.dismissed;
     if (w.stored) {
-      unsaved.fills.delete(card);
       storeWorked(card);
-    } else {
-      unsaved.fills.set(card, t);
-      storeRefused(card);
+      const kept = withoutKeys(local, t, idOf);
+      const fills = overlay(w.stored, kept, idOf);
+      return { ...m, fills, dismissed, localOnly: { ...m.localOnly, fills: kept } };
     }
-    if (!w.dropped) return { ...m, fills: next };
-    // Ключ отказов снят ради места (ревью №2, D): память вкладки об отказах — тем же шагом, иначе
-    // экран показывал бы отказы, которых в хранилище больше нет. Поколение остаётся.
-    unsaved.dismissed.delete(card);
-    return { ...m, fills: next, dismissed: [] };
+    const grown = boundTouch(joinTouch(local, t, idOf), MAX_STORED);
+    storeRefused(card, grown.evicted);
+    const fills = overlay(stored, grown.touch, idOf);
+    return { ...m, fills, dismissed, localOnly: { ...m.localOnly, fills: grown.touch } };
   });
 }
 
 /**
- * Правка ОТКАЗОВ (O-39) — та же `edit` под своим ключом, за оградой поколения. `newGen` — новый
- * ответ: поколение +1 к старшему из известных (памяти и хранилища), список пуст по построению.
- * Своё тронутое несёт поколение ПАМЯТИ вкладки: у отставшей вкладки оно старше хранимого, и её
- * отказ — отказ прошлому предложению — не пишется. Отказы, вшитые в блоб журнала сборкой 1931c256,
- * переезжают ОДНОЙ записью: складываются сюда как тронутые однажды (не в новое поколение — оно пусто
- * по смыслу) и снимаются с блоба журнала; не легло — не легло, наружу не говорится.
+ * Правка ОТКАЗОВ (O-39) — та же `edit` под своим ключом, за оградой метки ответа (B). `clear` —
+ * новый ответ: метка `seq` + 1 к старшему из известных со свежим `id`, список пуст по построению,
+ * запись без проверки, эпизод «чужой ответ новее» закрыт. Иначе тронутое несёт метку ПАМЯТИ
+ * вкладки, и если текущая (после перечитывания) — не она, тронутое отброшено, список пуст, метка
+ * своя (D-46, `settleDismissed`).
  */
 function editDismissed(
   state: Store,
   card: number,
   touch: (mine: Dismissal[], base: Dismissal[]) => Touch<Dismissal>,
-  newGen = false,
+  clear = false,
 ): Partial<Store> {
   return edit(state, card, (m) => {
-    const blob = readFillsBlob(card);
     const stored = readDismissedBlob(card);
-    const gen = Math.max(m.answerGen, stored?.gen ?? 0) + (newGen ? 1 : 0);
-    let base = stored ? ofGen(stored.list, gen) : [];
-    if (blob.legacy) {
-      if (!newGen) {
-        const moved = blob.legacy.map((d) => boundDismissal(d, gen));
-        base = overlay(base, { put: moved, drop: [] }, rowOf);
-      }
-      writeFills(card, blob.fills);
-    }
+    const st = stored?.token ?? ZERO_TOKEN;
+    // База — хранимый список, если он ЭТОГО ответа; у нового ответа и у прошлого чужого базы нет.
+    const base = !clear && stored && sameToken(st, m.token) ? stored.list : [];
     const own = touch(m.dismissed, base);
-    const t = joinTouch(
-      unsaved.dismissed.get(card),
-      { put: own.put.map((d) => boundDismissal(d, m.answerGen)), drop: own.drop },
-      rowOf,
-    );
-    if (!newGen && !blob.legacy && !t.put.length && !t.drop.length) return m;
-    const grown = ofGen(overlay(base, t, rowOf), gen);
-    const next = grown.length > MAX_DISMISSED ? grown.slice(0, MAX_DISMISSED) : grown;
-    if (writeDismissed(card, { gen, list: next })) {
-      unsaved.dismissed.delete(card);
-      storeWorked(card);
-    } else {
-      unsaved.dismissed.set(card, t);
-      storeRefused(card);
+    if (!clear && !sameToken(currentToken(m.token, st), m.token)) {
+      return settleDismissed(card, m, stored);
     }
-    return { ...m, dismissed: next, answerGen: gen };
+    if (clear) answerFresh(card);
+    const token = clear ? { seq: Math.max(m.token.seq, st.seq) + 1, id: freshId() } : m.token;
+    const t = { put: own.put.map(boundDismissal), drop: own.drop };
+    if (!clear && isNothing(t)) return m;
+    const list = overlay(base, t, rowOf).slice(0, MAX_DISMISSED);
+    const kept = writeDismissed(card, { token, list });
+    if (kept) {
+      storeWorked(card);
+      const local = clear ? NOTHING : withoutKeys(m.localOnly.dismissed, t, rowOf);
+      const dismissed = overlay(kept, local, rowOf);
+      return { ...m, token, dismissed, localOnly: { ...m.localOnly, dismissed: local } };
+    }
+    const grown = clear
+      ? { touch: NOTHING as Touch<Dismissal>, evicted: false }
+      : boundTouch(joinTouch(m.localOnly.dismissed, t, rowOf), MAX_DISMISSED);
+    storeRefused(card, grown.evicted);
+    const dismissed = overlay(base, grown.touch, rowOf);
+    return { ...m, token, dismissed, localOnly: { ...m.localOnly, dismissed: grown.touch } };
   });
 }
 
@@ -717,10 +840,10 @@ export const useDraftMemory = create<Store>((set, get) => ({
    */
   record: (card, fill) =>
     set((s) =>
-      editFills(s, card, (mine, stored) => {
-        const prev = stored.find((f) => f.id === fill.id) ?? mine.find((f) => f.id === fill.id);
-        return { put: [mergeFill(prev, fill)], drop: [] };
-      }),
+      editFills(s, card, (_mine, _stored, base) => ({
+        put: [mergeFill(base(fill.id), fill)],
+        drop: [],
+      })),
     ),
 
   /**
@@ -752,10 +875,10 @@ export const useDraftMemory = create<Store>((set, get) => ({
 
   accept: (card, ids) =>
     set((s) =>
-      editFills(s, card, (mine, stored) => {
+      editFills(s, card, (_mine, _stored, base) => {
         const put: Fill[] = [];
         for (const id of ids) {
-          const row = stored.find((f) => f.id === id) ?? mine.find((f) => f.id === id);
+          const row = base(id);
           if (row && !row.accepted) put.push({ ...row, accepted: true });
         }
         return put.length ? { put, drop: [] } : NOTHING;
@@ -763,7 +886,7 @@ export const useDraftMemory = create<Store>((set, get) => ({
     ),
 
   /* ОТКАЗЫ (O-39): по ключу строки, новейший первым; повтор по тому же ключу заменяет запись;
-     строки — в потолках, поколение — памяти вкладки (`editDismissed`). */
+     строки — в потолках, метка ответа — памяти вкладки (`editDismissed`). */
   dismiss: (card, d) => set((s) => editDismissed(s, card, () => ({ put: [d], drop: [] }))),
 
   undismiss: (card, row) =>
@@ -777,23 +900,24 @@ export const useDraftMemory = create<Store>((set, get) => ({
 
   clearDismissed: (card) => set((s) => editDismissed(s, card, () => NOTHING, true)),
 
-  /* ЧУЖАЯ ЗАПИСЬ (событие `storage` из другой вкладки): память = хранимое; своё непринятое
-     хранилищем поедет со следующей записью (`unsaved`). Неподнятая карточка не освежается — её
-     поднимет первое обращение. */
+  /* ЧУЖАЯ ЗАПИСЬ (событие `storage` из другой вкладки): хранимая часть освежается, свой слой
+     остаётся (A); чужой ответ новее своего — список пуст, метка своя, сказано (D-46). Неподнятая
+     карточка не освежается — её поднимет первое обращение. */
   refresh: (card, which) =>
     set((s) => {
       const cur = s.byCard[card];
       if (!cur || !s.hydrated[card]) return {};
-      if (which === 'fills') {
-        const fills = readFillsBlob(card).fills;
-        if (sameList(fills, cur.fills)) return {};
-        return { byCard: { ...s.byCard, [card]: { ...cur, fills } } };
-      }
-      const stored = readDismissedBlob(card);
-      const answerGen = Math.max(cur.answerGen, stored?.gen ?? 0);
-      const dismissed = stored ? ofGen(stored.list, answerGen) : [];
-      if (answerGen === cur.answerGen && sameList(dismissed, cur.dismissed)) return {};
-      return { byCard: { ...s.byCard, [card]: { ...cur, dismissed, answerGen } } };
+      const next =
+        which === 'fills'
+          ? { ...cur, fills: overlay(readFillsBlob(card), cur.localOnly.fills, idOf) }
+          : settleDismissed(card, cur, readDismissedBlob(card));
+      if (
+        sameToken(next.token, cur.token) &&
+        sameList(next.fills, cur.fills) &&
+        sameList(next.dismissed, cur.dismissed)
+      )
+        return {};
+      return { byCard: { ...s.byCard, [card]: next } };
     }),
 
   /**

@@ -5,7 +5,7 @@ import type {
   common_DesignRun,
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
@@ -28,6 +28,7 @@ import { isModelUrl } from '../threed/media';
 import { useDesignWrites } from '../use-design-band';
 import { isPictureHidden } from '../visibility';
 import { isActiveView, isLegacyView, normaliseViewKey, viewLabel } from '../views';
+import { closeSurface, openSurface } from './bench-store';
 import { compositeTail, readComposite, splitVerb } from './composite';
 import { SlotPicker } from './slot-picker';
 import { thumbUrl } from './thumb';
@@ -192,6 +193,18 @@ export function RunTile({
   const [editing, setEditing] = useState(false);
 
   const pictureId = picture.id ?? 0;
+  /**
+   * ═══ РЕДАКТОР — ПОВЕРХНОСТЬ ПРОГОНА, И ВЕРСТАК ОБ ЭТОМ ЗНАЕТ (26.09, O-53 review) ═══════════════
+   * Пока он открыт, верстак последней генерации не меняет прогон (`bench-store.ts`): новый прогон,
+   * приехавший опросом, иначе размонтировал бы эту плитку вместе с редактором — мимо его вопроса о
+   * несохранённом. Открытие пишется В ЖЕСТЕ (до любого перечитывания полосы), закрытие — уборкой
+   * эффекта: и закрыли, и плитку размонтировали под ним (смена карточки) — поверхность уходит.
+   */
+  const surfaceKey = `edit:${pictureId}`;
+  useEffect(() => {
+    if (!editing) return;
+    return () => closeSurface(techCardId, surfaceKey);
+  }, [editing, techCardId, surfaceKey]);
   const hidden = isPictureHidden(picture);
   // WHAT THIS FILE DECLARES ABOUT ITSELF — see `composite.tsx`. Nothing here infers compositeness
   // from what the run ASKED for.
@@ -219,7 +232,11 @@ export function RunTile({
   const threedFile = (picture.kind ?? '').trim().toLowerCase() === 'threed' || isModelUrl(url);
   /** Плитка ткани: ни в один слот не встаёт и об этом не объясняется (r3 п.20, `footer` ниже). */
   const patternTile = (picture.kind ?? '').trim().toLowerCase() === 'pattern' || rep === 'pattern';
-  const galleryGroup = galleryIndex == null ? undefined : { key: galleryKey, index: galleryIndex };
+  // The frame opens by its MEDIA (`openAt`), the offset stays the fallback.
+  const galleryGroup =
+    galleryIndex == null
+      ? undefined
+      : { key: galleryKey, index: galleryIndex, mediaId: picture.media?.id ?? 0 };
 
   /**
    * ONE BADGE — the mock-up's top-left tag. A plate a slot reads wears its SIDE and nothing else
@@ -399,7 +416,10 @@ export function RunTile({
         onEdit={
           !disabled && !threedFile
             ? {
-                onClick: () => setEditing(true),
+                onClick: () => {
+                  openSurface(techCardId, surfaceKey, picture.runId ?? 0);
+                  setEditing(true);
+                },
                 ariaLabel: `edit ${handle} — draw over this picture`,
                 title:
                   'draw over this picture — saving makes a NEW picture in this same run row; the original is never overwritten' +

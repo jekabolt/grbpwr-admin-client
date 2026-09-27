@@ -129,3 +129,51 @@ export function useAssetWrites(techCardId: number) {
     [upsertAsset, deleteAsset, setAssetColorway, invalidate],
   );
 }
+
+/**
+ * ═══ «ТКАНЬ ПАРЫ (КОЛОРВЕЙ N, СЛОТ M) — ЭТОТ АССЕТ» — `SetDesignAssetBinding` (STEP 3) ═══════════
+ *
+ * СВОЙ ХУК, А НЕ ЧЕТВЁРТЫЙ ГЛАГОЛ `useAssetWrites`, и причина в том, кто его зовёт: дверь `use for ▸`
+ * стоит на КАЖДОЙ плитке карусели, и если бы вместе с ней каждая плитка поднимала ещё заведение,
+ * удаление и снятие колорвея, «записывается» светилось бы на плитках, к которым человек не
+ * прикасался. Форма мутации — та же, что у `setAssetColorway` рядом, и шов тот же: полоса
+ * перечитывается ОДНИМ ключом (`designKeys.band`), отказ сервера печатается дословно.
+ *
+ * ПОЧЕМУ ЭТО НЕ `setAssetColorway`. Та ручка пишет легаси-колонку `design_asset.colorway_id` —
+ * «ткань ВСЕГО колорвея», одну на колорвей, — и крадёт её у прочих ассетов карточки. Привязка —
+ * факт уже: ткань ОДНОЙ ПАРЫ (колорвей, строка BOM), своя строка, и один ассет законно носит
+ * несколько пар (одна и та же ткань — верх двух колорвеев). `UpsertDesignAsset` её не касается
+ * вовсе (полная замена строки ассета снимала бы выбор на каждом переименовании).
+ *
+ * `assetId: 0` — СНЯТИЕ («у этого слота ткани пока нет»), и это ответ, а не пропуск.
+ *
+ * ⚠ КАРТОЧКА ЕДЕТ ИЗ ВЫЗОВА В ОТВЕТ, А НЕ ЧИТАЕТСЯ ИЗ ЗАМЫКАНИЯ КОГДА ОТВЕТ ПРИШЁЛ. react-query
+ * зовёт `onSuccess` с САМЫМИ СВЕЖИМИ опциями: смена карточки, пока запись летит, перечитала бы
+ * полосу другой карточки, а эта осталась бы со старой привязкой на экране (довод тот же, что у
+ * `useStartDesignRun`). Поэтому `mutationFn` возвращает карточку, за которую писал.
+ */
+export function useAssetBindingWrites(techCardId: number) {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+
+  const setBinding = useMutation({
+    mutationFn: async (input: { colorwayId: number; bomItemId: number; assetId: number }) => {
+      const card = techCardId;
+      await adminService.SetDesignAssetBinding({
+        techCardId: card,
+        colorwayId: Math.trunc(input.colorwayId || 0),
+        bomItemId: Math.trunc(input.bomItemId || 0),
+        assetId: Math.max(0, Math.trunc(input.assetId || 0)),
+      });
+      return card;
+    },
+    onSuccess: (card: number) => {
+      qc.invalidateQueries({ queryKey: designKeys.band(card) });
+    },
+    onError: (error: unknown) => {
+      showMessage((error as Error)?.message || 'the fabric was not set for that slot', 'error');
+    },
+  });
+
+  return useMemo(() => ({ setBinding }), [setBinding]);
+}

@@ -42,7 +42,7 @@ import {
   useLegacyStepRewrite,
   useStepAddress,
 } from './playground';
-import { PatternStudio } from './pattern';
+import { ImageToFabricSection, PatternStudio, clothSlots } from './pattern';
 import { DraftedProvider } from './head/drafted-provider';
 import { useStudioKindSwitch } from './history-recall';
 import { PictureGalleryProvider } from './picture-tile';
@@ -176,6 +176,16 @@ export function StudioTab({
   const { control } = useFormContext<TechCardFormData>();
   const purpose = useWatch({ control, name: 'purpose' }) as string | undefined;
   const isAux = purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
+  /* ═══ СЛОТЫ ТКАНИ — ОДНО ЧТЕНИЕ `bomItems` НА ВСЮ СТУДИЮ (STEP 3) ══════════════════════════════
+     Шаг PATTERN рисует ряд на каждую пару (колорвей, слот ткани), а FABRIC RENDER засевает ткани
+     колорвея из тех же пар — значит оба экрана обязаны читать ОДИН список слотов, и читает его
+     композитор, раздавая массив пропом (`slots`). Второй `useWatch` в экране развёл бы их о том,
+     какие у изделия ткани, на первой же несохранённой правке строки.
+     `compute` + глубокое сравнение внутри `useWatch`: студия перерисовывается, только когда слоты
+     изменились ПО СМЫСЛУ (имя, состав, назначение, сохранённый id), а не на каждую правку нормы
+     расхода или строки ниток. Форма здесь только ЧИТАЕТСЯ: писатель `bomItems` — корневой
+     `setValue`, и `useFieldArray` над ним один (вкладка BOM). */
+  const cloth = useWatch({ control, name: 'bomItems', compute: (lines) => clothSlots(lines) });
   const { canWrite } = usePermissions();
   const canWriteCard = canWrite(SECTION.techCards);
 
@@ -529,21 +539,38 @@ export function StudioTab({
                         />
                       </>
                     )}
-                    {/* ═══ STEP 3 · PATTERN — the screen plus the SHARED run history, as on every
-                        generative step, and not for symmetry: `GenerationHistory` mounts
-                        `useRunPolling`, the one place a live run is re-read from; without it
-                        «making a tile…» would stand forever. No colourway picker here (E-1: «в MAKE
-                        A PATTERN оставь только имя убери колорвей»); the history opens on its own
-                        kind (J-12) and closed (E-21). */}
+                    {/* ═══ STEP 3 · PATTERN — TWO SIBLING BLOCKS (owner, 2026-09-26; and from beta:
+                        «IMAGE TO FABRIC должно быть отдельным блоком»): PATTERN, a fabric swatch
+                        for every colourway and slot, then IMAGE TO FABRIC with the step's one
+                        history, the LAST FABRICS carousel. Two `Section`s side by side in the
+                        stack, parted by its 24px gutter — never one inside the other. The SHARED
+                        run history is NOT mounted here any more (review B5), and the one thing it
+                        did for this step — `useRunPolling`, so «making the fabric…» ever ends — is
+                        mounted ONCE, by `PatternStudio`; the second block does not poll again.
+                        Both take the same raw props from here (band, the colourway list, the slots
+                        of the one `useWatch`) and derive the rest with one function
+                        (`usePatternStepView`). They draw EVERY colourway at once, so they take the
+                        list and not the selected one; the axis stays this file's
+                        (`useColorwayChoice`). `onGoTab` is withheld on an auxiliary card: it has no
+                        colourways tab, and a door there would bounce straight back. */}
                     {step === 'pattern' && (
                       <>
-                        <PatternStudio band={band} techCardId={techCardId} disabled={readOnly} />
-                        <GenerationHistory
+                        <PatternStudio
                           band={band}
                           techCardId={techCardId}
                           disabled={readOnly}
-                          defaultRep='pattern'
-                          defaultOpen={false}
+                          colorways={colorway.colorways}
+                          slots={cloth.slots}
+                          unsavedSlots={cloth.unsavedCount}
+                          onGoTab={isAux ? undefined : (tab) => navTo(tab)}
+                          onGoStep={goStep}
+                        />
+                        <ImageToFabricSection
+                          band={band}
+                          techCardId={techCardId}
+                          disabled={readOnly}
+                          colorways={colorway.colorways}
+                          slots={cloth.slots}
                         />
                       </>
                     )}
@@ -575,6 +602,10 @@ export function StudioTab({
                              on-model. Второго состояния не заводится ни на одном экране. */
                           colorways={colorway.colorways}
                           onColorwayChange={colorway.setColorwayId}
+                          /* STEP 3: ТЕ ЖЕ слоты, что у шага PATTERN, — из ОДНОГО `useWatch`
+                             выше. По ним подача засевает ткани колорвея из привязок, а сетка
+                             CLOTHS ставит надетые плитки первыми. */
+                          slots={cloth.slots}
                         />
                         {/* J-18: the history filters to fabric renders by default; E-22: closed. */}
                         <GenerationHistory
