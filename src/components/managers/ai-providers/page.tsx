@@ -7,6 +7,7 @@ import Text from 'ui/components/text';
 import { ViewSwitch, type ViewSwitchOption } from 'ui/components/view-switch';
 import { useAiConfig } from './utils/hooks';
 import { ProvidersView } from './views/providers';
+import { RoutesView } from './views/routes';
 
 // admin → AI providers: which services may spend money, which model answers which job, and what
 // it cost. Two views in ?view= (accounting reports pattern: the selection lives in searchParams,
@@ -48,12 +49,6 @@ export function AiProviders() {
   if (accountLoading) return null;
   if (denied) return <Navigate to={ROUTES.me} replace />;
 
-  const placeholder = (text: string) => (
-    <Text size='micro' variant='label'>
-      {config.isPending ? 'loading…' : text}
-    </Text>
-  );
-
   return (
     <div className='flex w-full flex-col gap-4 pb-16'>
       <div className='flex flex-wrap items-center justify-between gap-3'>
@@ -78,9 +73,7 @@ export function AiProviders() {
         {view === 'providers' && (
           <>
             <ProvidersView config={data} loading={config.isPending} />
-            <Section title='routes' question='which model answers which job'>
-              {placeholder(`${data?.purposes?.length ?? 0} purposes`)}
-            </Section>
+            <RoutesView config={data} loading={config.isPending} />
           </>
         )}
 
