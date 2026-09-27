@@ -138,6 +138,7 @@ export function makeBand(input: {
        обязана читаться на таком же сервере; пустой список означал бы «плейграунд есть, ключей
        нет» и рисовал бы на рельсе ячейку, которой этому стенду взяться неоткуда. */
     freeformPresets: undefined,
+    assetBindings: undefined,
   };
 }
 

@@ -22,9 +22,9 @@ import {
  * to disagree about the same card; the rail therefore only ASKS, never decides.
  *
  * ═══ GATES THE RAIL CANNOT READ, AND WHY THAT IS NOT A GAP ═══════════════════════════════════════
- * `colourPlanGate` (colour-plan), `patternGate(band, sourceId)` (pattern) and `recolorGate(sources)`
- * (on-model) refuse over LOCAL state of a mounted screen — the recipe being typed, the picture
- * picked as a tile source, the photos gathered for a repaint. The rail stands above all screens and
+ * `colourPlanGate` (colour-plan), `swatchGate` / `imageGate` (pattern) and `recolorGate(sources)`
+ * (on-model) refuse over LOCAL state of a mounted screen — the recipe being typed, the colour
+ * picked for a slot or the photograph put into the cell, the photos gathered for a repaint. The rail stands above all screens and
  * outlives each of them, so it has nothing to hand these functions: reading them here would mean
  * inventing a state to call them with, i.e. a second copy of the screen's draft. Their refusals stay
  * where they are answered — on the step's own screen, next to its GENERATE. Every one of them is,
@@ -300,8 +300,20 @@ export type ChainCtx = {
   moodPictures: number;
   /** The board's description (`concept`) — the other half of the moodboard minimum. */
   moodConcept: string;
-  /** Counters the strip already computed with `pictureRepresentation` — not recomputed here. */
-  counts: { pattern: number; render: number; threed: number; onmodel: number; playground: number };
+  /**
+   * Counters the strip already computed with `pictureRepresentation` — not recomputed here.
+   * `bindings` is the other kind of count: rows of `band.assetBindings` — pairs (colourway, slot)
+   * that wear a fabric (STEP 3). It is what the pattern step is FOR now; `pattern` (pictures of the
+   * kind) stays beside it for the cards that made tiles before the slots existed.
+   */
+  counts: {
+    pattern: number;
+    bindings: number;
+    render: number;
+    threed: number;
+    onmodel: number;
+    playground: number;
+  };
   colorway: { id: number; label: string; archived: boolean };
 };
 
@@ -486,7 +498,8 @@ export function chainGate(id: StepId, ctx: ChainCtx): ChainGate {
       };
     }
     case 'pattern':
-      // `patternGate(band, sourceId)` needs the picked source: local to the screen, `own` by nature.
+      // `swatchGate` / `imageGate` need the colour picked for a slot or the photograph put into
+      // the cell: local to the screen, `own` by nature.
       return { ok: true };
     case 'render': {
       if (ctx.bandless) return { ok: true };
@@ -553,7 +566,9 @@ export function stepDone(id: StepId, ctx: ChainCtx): boolean {
     case 'flat':
       return !ctx.bandless && benchSides(ctx.band).some((s) => !!s.picture);
     case 'pattern':
-      return ctx.counts.pattern > 0;
+      // A SLOT THAT WEARS A FABRIC is the step's work (STEP 3, D9) — and a pattern picture made
+      // before the slots existed still counts, so an older card does not lose its tick.
+      return ctx.counts.bindings > 0 || ctx.counts.pattern > 0;
     case 'render':
       return (
         !ctx.bandless && benchSides(ctx.band, 'render', ctx.colorway.id).some((s) => !!s.picture)

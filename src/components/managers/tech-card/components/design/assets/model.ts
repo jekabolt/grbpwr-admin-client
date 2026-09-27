@@ -88,7 +88,13 @@ export const kindTakesRepeat = (kind: string): boolean => kind === ASSET_PATTERN
 export const ASSET_NAME_MAX = 60;
 export const ASSET_NOTE_MAX = 500;
 export const ASSET_REPEAT_MAX = 2000;
-export const ASSETS_PER_CARD_MAX = 40;
+/**
+ * ПОТОЛОК ПОЛКИ КАРТОЧКИ — 120, А НЕ 40 (STEP 3, D4). Зеркало `entity.MaxDesignAssetsPerCard`
+ * бэкенда: свотч теперь делается на каждую пару (колорвей, слот), и три колорвея × три слота ×
+ * несколько попыток выбирали прежние сорок за один день. Сетка CLOTHS рендера поэтому СВОРАЧИВАЕТ
+ * полку (`render/palette.tsx`, `TextureGrid`) — иначе сто двадцать плиток стали бы стеной.
+ */
+export const ASSETS_PER_CARD_MAX = 120;
 
 export const assetThumb = (a?: common_DesignAsset): string =>
   a?.media?.media?.thumbnail?.mediaUrl || a?.media?.media?.fullSize?.mediaUrl || '';
@@ -254,6 +260,10 @@ export function fabricUseOf(
     // на строке покрашенного цвета, а не список, выведенный из невидимых меток; и place-ment'ом
     // теперь занимается `map_hex`, то есть сама картинка. Пусто по-прежнему значит «разделения не
     // заявлено», и на этом пути (сетка текстур) оно и есть правда.
+    // ⚠ STEP 3 — ТРЕТИЙ АВТОР, ТОЖЕ ЧЕРЕЗ `over`: ткань, надетая на слот колорвея (привязка
+    // шага PATTERN), едет с `parts` = подпись назначения слота (`render/drafts.ts`,
+    // `boundClothsOf`). Выводится из ВИДИМОЙ строки — привязки, которую показывает ячейка шага и
+    // угловой ярлык сетки, — а не из невидимых меток, и именно этим отличается от снесённой J-21.
     parts: '',
     // ЧТО ЭТА ТКАНЬ ТАКОЕ — 'fabric' | 'pattern', род строки полки НА МОМЕНТ ЗАПУСКА.
     // Промпт спрашивает «из чего сшито» и «чем покрыто» одним вопросом, но плитку от
@@ -280,7 +290,6 @@ export function normaliseHex(hex?: string): string {
   if (v.length === 4) return `#${v[1]}${v[1]}${v[2]}${v[2]}${v[3]}${v[3]}`;
   return v;
 }
-
 
 /* ─────────────────────────── ткань колорвея (G-15) ─────────────────────────── */
 

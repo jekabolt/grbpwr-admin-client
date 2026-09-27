@@ -14806,10 +14806,11 @@ export type GetDesignBandResponse = {
   // the reason every other member of this message does: the studio draws bench, references and
   // shelves in one frame, and a second read would let them disagree about which instant of the
   // card is on screen.
-  // UNLIKE THE RUNS, THIS LIST IS NOT PAGED. A card's shelves are a handful of rows by
-  // construction — a garment made of forty cloths is not a garment — and the server caps them
-  // rather than paging them (UpsertDesignAsset refuses past the ceiling), so the count on the
-  // shelf wall is always the whole truth.
+  // UNLIKE THE RUNS, THIS LIST IS NOT PAGED. A card's shelves are bounded by construction: the
+  // server caps them at 120 rows (MaxDesignAssetsPerCard — the cloths of the garment plus the
+  // swatch candidates made per (colourway, slot) pair) rather than paging them (UpsertDesignAsset
+  // refuses past the ceiling, and a pattern run is refused `library_full` before it spends), so the
+  // count on the shelf wall is always the whole truth.
   assets: common_DesignAsset[] | undefined;
   // EVERY MARK THOSE ASSETS LEFT ON THIS CARD'S FLATS, flat by flat. They come beside the assets
   // rather than nested inside them because the screen reads them the other way round — «what is
@@ -14911,6 +14912,16 @@ export type GetDesignBandResponse = {
   // sends nothing → the client draws NO PLAYGROUND cell on the rail. A binary that knows it sends at
   // least [] → the cell exists; an empty list means «nothing wired», and the screen says so.
   freeformPresets: string[] | undefined;
+  // THE FABRIC OF EVERY (COLOURWAY, SLOT) OF THIS CARD — one row per bound pair (see
+  // common.DesignAssetBinding); a pair with no row has no fabric chosen.
+  // WHOLE CARD, NEVER NARROWED BY bench_colorway_id. The pattern step draws every colourway's slots
+  // on one screen, and the render step reads the bound fabrics of whichever colourway it is about
+  // to paint; a list cut down to the bench's colourway would blank all the others.
+  // ⚠ ABSENT ≠ EMPTY (the has_fabric_render / colour_plan doctrine). A server that knows this field
+  // always sends at least [] — «nothing bound yet»; NOTHING AT ALL means a binary older than the
+  // bindings, where SetDesignAssetBinding does not exist either, and a client must not draw the
+  // per-slot doors against it.
+  assetBindings: common_DesignAssetBinding[] | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The six
@@ -15066,7 +15077,7 @@ export type common_DesignPicture = {
   layerRev: number | undefined;
   // Reversible invisibility — the ONLY persistent verb for hiding a picture. The guards live in
   // HideDesignPicture: a plate in a slot, feeding a live run, or parenting a live crop cannot be
-  // hidden.
+  // hidden. A hidden picture is not cut either: SplitDesignPicture answers hidden_picture.
   hiddenAt: wellKnownTimestamp | undefined;
   hiddenBy: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
@@ -15098,6 +15109,23 @@ export type common_DesignPicture = {
   // `display_only_input` (a run or a draft, before the reserve). A run's own outputs are never
   // display-only: the flag is a statement about a file a person brought in, not about pixels.
   displayOnly: boolean | undefined;
+  // THE EDIT THAT TOOK THIS PICTURE'S PLACE (O-53) — the id of the flatten filed by
+  // FlattenDesignEditLayer with replace_picture_id = this picture. 0 = not replaced. OUTPUT-ONLY:
+  // no request carries it, and no verb clears it (there is no «un-replace» in v1).
+  // A REPLACED PICTURE IS NOT HIDDEN AND NOT CHANGED. Its pixels, run row, crops, reference roles
+  // and hidden_at are exactly what they were; what moved is the bench slot that held it, which now
+  // holds the edit. The history keeps showing it — captioned «replaced by an edit» — and it can be
+  // put back into a slot like any other plate.
+  // A CHAIN, NOT A PAIR. The edit may be overwritten in its turn, so the ids form a chain whose
+  // HEAD is the one picture with replaced_by = 0; a view of «the latest generation» shows the head
+  // in the original's place. Every link is filed under the SAME run or batch row as the original,
+  // so a whole chain arrives inside one row of the band.
+  // A REPLACED PICTURE IS NEITHER OVERWRITTEN AGAIN NOR CUT: FlattenDesignEditLayer with
+  // replace_picture_id and SplitDesignPicture both refuse it with already_replaced, and the
+  // ErrorInfo metadata names the head of its chain as head_picture_id.
+  // ⚠ ABSENT — not 0 — on a server older than the field, and that absence is how a client knows
+  // the server cannot replace a picture yet (FlattenDesignEditLayerRequest.replace_picture_id).
+  replacedBy: number | undefined;
 };
 
 // DesignBudget is the band's money bar: `today $0.41 of $2.00`.
@@ -15578,7 +15606,9 @@ export type common_DesignRunParams = {
   // each, one of which somebody eventually forgets.
   // COUNTS ARE PER KIND AND ARE ENFORCED AT THE DOOR, before anything is reserved: `recolor` needs
   // at least one, `pattern` needs exactly one (a tile glued out of two swatches cannot join to
-  // itself), and every kind is capped at the snapshot's own reference ceiling.
+  // itself) — zero or one in swatch mode, where the picture is a texture reference and not the
+  // source (DesignPatternParams.mode) — and every kind is capped at the snapshot's own reference
+  // ceiling.
   extraInputMediaIds: number[] | undefined;
   // WHICH SIDES OF THE BENCH this run was asked to fix — «select everything in FLAT SLOTS» (W-10),
   // which a single string could not express at all: the studio marks up three plates and asks for
@@ -15627,11 +15657,13 @@ export type common_DesignRunParams = {
   // (the build reads ONLY this colourway's render bench) and — since round 15 — on PATTERN: there
   // it names the colourway this tile is being MADE FOR, and the asset the run lands on the shelf is
   // given to that colourway in the same transaction that closes the run (single-select, so it is
-  // taken off whatever cloth wore it before). REFUSED on flat / vector / draft_idea with
-  // `colorway_forbidden`: a flat is ONE markup for the whole card and has no colourway BY NATURE —
-  // not «not filled in yet». 0 = no colourway stated, which on a
-  // render keeps the legacy meaning (an unattributed render, exactly what every render made
-  // before this axis existed is) and on a 3D run selects ONLY the unattributed render bench —
+  // taken off whatever cloth wore it before) — unless the run is made for a slot
+  // (DesignPatternParams.bom_item_id > 0), in which case the tile becomes the fabric of the
+  // (colourway, slot) pair only (DesignAssetBinding) and DesignAsset.colorway_id is left alone.
+  // REFUSED on flat / vector / draft_idea with `colorway_forbidden`: a flat is ONE markup for the
+  // whole card and has no colourway BY NATURE — not «not filled in yet». 0 = no colourway stated,
+  // which on a render keeps the legacy meaning (an unattributed render, exactly what every render
+  // made before this axis existed is) and on a 3D run selects ONLY the unattributed render bench —
   // never a mixture of colourways.
   // FROZEN LIKE EVERY OTHER PARAM: a rerun inherits it from the parent's params, so repeating a
   // colourway-A render is a colourway-A render without restating it. An inherited colourway that
@@ -15728,6 +15760,38 @@ export type common_DesignPatternParams = {
   // standing with its parentage cleared (the FK's ON DELETE SET NULL), because a tile with a
   // picture is still a usable instruction after its swatch is gone.
   sourceAssetId: number | undefined;
+  // WHAT THE TILE IS BUILT FROM: "" or "image" | "swatch".
+  // · "" / "image" — TODAY'S ROUTE, and what every run frozen before this field means: the tile
+  // is extracted from exactly ONE source photograph in DesignRunParams.extra_input_media_ids
+  // (`one_source_picture` otherwise).
+  // · "swatch" — a fabric swatch built from the STATED COLOUR. DesignRunParams.colour is
+  // REQUIRED (`no_colour`), and any one of hex, code or words satisfies it. The client sends
+  // the Pantone's screen hex AND its name in `words`: a Pantone code alone is a text token an
+  // image model holds no colour for, so this is the one place the screen approximation travels
+  // on purpose. extra_input_media_ids then holds ZERO or ONE picture (`one_texture_picture`
+  // past one), and that picture is a TEXTURE reference — the model takes the material, the
+  // weave and the surface from it and NOTHING of its colour.
+  // WHY A FIELD AND NOT A KIND. A swatch is still a seamless `pattern` picture: the same seam check
+  // guards it, it lands on the same shelf as the same asset kind, and the render lays it out with
+  // the same repeat-tile paragraph. A new run kind would have had to be taught to every closed kind
+  // switch of the band — the door, the price, the queue, the landing, the history, the counters,
+  // ten of them — only to end up doing exactly what `pattern` already does. What differs is where
+  // the cloth comes from, and that is a parameter of the ask, not a different ask.
+  mode: string | undefined;
+  // THE SLOT THIS TILE IS MADE FOR — tech_card_bom_item(id), a roll-goods line (fabric, lining,
+  // interlining, insulation) of THIS card, read TOGETHER WITH DesignRunParams.colorway_id: the pair
+  // (colourway, slot) is the address of one fabric («white → outer, inner» is two addresses).
+  // 0 = not made for a slot, which is every image-mode run and every run frozen before this field.
+  // WHEN BOTH ARE SET, THE KEPT TILE BECOMES THE FABRIC OF THAT PAIR: the transaction that files
+  // the asset on the shelf also upserts the pair's DesignAssetBinding, replacing whatever the pair
+  // wore before — and that binding is ALL it writes: the legacy whole-colourway
+  // DesignAsset.colorway_id is neither set on the tile nor taken off any other asset. The newest
+  // swatch is what the person just asked for; the earlier ones stay on the shelf and can be bound
+  // back by hand (SetDesignAssetBinding).
+  // A LINE OF ANOTHER CARD is refused at the door, free (`foreign_bom_line`). A line deleted
+  // between the door and the landing does NOT fail the landing — the run is paid for and the tile
+  // is still a tile — it simply lands unbound.
+  bomItemId: number | undefined;
 };
 
 // DesignFreeformParams is the frozen ask of a PLAYGROUND run (kind=freeform): the pictures a person
@@ -15962,7 +16026,13 @@ export type common_DesignAsset = {
   mediaId: number | undefined;
   // Resolved from media_id at read time. UNSET when media_id is 0 or the file is gone.
   media: common_MediaFull | undefined;
+  // A colourway code or a Pantone code, when this asset carries one. The LANDING OF A PATTERN RUN
+  // files the code its run stated in params.colour.code — for a swatch, the Pantone it was built
+  // from («18-1664 TCX») — so a landed swatch is not a nameless square of colour on the shelf.
+  // '' when the run stated none, and on every tile landed before migration 0368.
   colourCode: string | undefined;
+  // #RRGGBB screen approximation. On a landed pattern tile: the run's params.colour.hex, beside the
+  // code above.
   colourHex: string | undefined;
   // What the human wrote about this asset — «brushed, slight sheen», «matte gunmetal, 15 mm».
   note: string | undefined;
@@ -15987,7 +16057,12 @@ export type common_DesignAsset = {
   // devHex / pantone / colorCode / swatch, and a second field would be a competing answer to a
   // question that already has one. Only «colourway N wears asset X» needed a home.
   // ⚠ OUTPUT-ONLY, AND WRITTEN BY EXACTLY TWO PLACES: SetDesignAssetColorway, and the LANDING OF A
-  // PATTERN RUN (the tile is filed with the colourway its run named — see DesignRunParams.colorway_id).
+  // PATTERN RUN MADE WITHOUT A SLOT (DesignPatternParams.bom_item_id 0 — every image-mode run and
+  // every run frozen before that field): the tile is filed with the colourway its run named — see
+  // DesignRunParams.colorway_id. A run made FOR A SLOT (bom_item_id > 0) DOES NOT WRITE THIS
+  // COLUMN: its tile is the fabric of one (colourway, slot) pair, not of the whole colourway, so its
+  // landing writes only that pair's DesignAssetBinding, leaves this column unset on the new row and
+  // takes the colourway off no other asset.
   // UpsertDesignAsset NEITHER CARRIES NOR CLEARS IT. That is deliberate and it is the whole reason
   // the assignment does not live on Upsert: Upsert is a full replace, so a proto3 scalar there would
   // arrive as 0 from every client that predates this field — and from every unrelated save (a
@@ -16119,6 +16194,31 @@ export type common_DesignColourCloth = {
   parts: string | undefined;
 };
 
+// DesignAssetBinding — THE FABRIC OF ONE (COLOURWAY, SLOT): which asset colourway N wears on BOM
+// roll-goods line M. One row per pair (UNIQUE), one asset may serve many pairs; legacy
+// DesignAsset.colorway_id stays the whole-colourway fabric and is not touched by bindings.
+// WHY A ROW OF ITS OWN AND NOT A COLUMN ON THE ASSET. The choice belongs to the PAIR — «what does
+// white wear outside» — not to the tile, and the same cloth is routinely the outer of two
+// colourways, or the outer and the lining of one: a slot column on design_asset could name one slot
+// per tile and would have to steal across all of them. With the pair as the key, choosing again is
+// one upsert and never a hunt for the previous holder.
+// IT DIES WITH ANY OF ITS FOUR ENDS — card, colourway, BOM line, asset (every FK is ON DELETE
+// CASCADE). A pair missing either half is not a statement about anything, so nothing is left
+// pointing at nobody.
+// WRITTEN BY TWO PLACES: SetDesignAssetBinding (the person's choice; asset_id 0 unbinds), and the
+// LANDING OF A PATTERN RUN made for a pair (DesignPatternParams.bom_item_id together with the run's
+// colorway_id), which replaces the pair's previous fabric with the tile it just filed — and writes
+// nothing into the legacy DesignAsset.colorway_id.
+export type common_DesignAssetBinding = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  colorwayId: number | undefined;
+  bomItemId: number | undefined;
+  assetId: number | undefined;
+  setBy: string | undefined;
+  setAt: wellKnownTimestamp | undefined;
+};
+
 export type ListDesignRunsRequest = {
   techCardId: number | undefined;
   // Max 24, default 12 when 0. The history shows about 4 rows per screen; three screens of slack is
@@ -16183,13 +16283,24 @@ export type StartDesignRunRequest = {
   // target stated at all in params.colour, meaning neither a code, a hex, words, NOR a cloth
   // carrying a picture («no_target_colour»); or a cloth named in words alone, with no picture
   // to lay on the photograph and no colour either («cloth_without_picture»);
-  // · pattern — anything other than exactly one picture in params.extra_input_media_ids
-  // («one_source_picture»); no name in params.pattern.name («pattern_name_required»); or a card
-  // whose asset shelves are already full, so the tile this run buys would have nowhere to land
-  // («library_full», FailedPrecondition).
-  // Each of those is FailedPrecondition-shaped news in an InvalidArgument wrapper, except
-  // `library_full`, which IS FailedPrecondition: the request is incomplete, and the sentence says
-  // which half is missing.
+  // · pattern — no name in params.pattern.name («pattern_name_required»); a card whose asset
+  // shelves are already full, so the tile this run buys would have nowhere to land
+  // («library_full», FailedPrecondition); a params.pattern.bom_item_id that is not a line of
+  // THIS card's BOM («foreign_bom_line», FailedPrecondition — the sibling of foreign_colorway);
+  // a NEGATIVE params.pattern.bom_item_id, which is not a BOM line id at all — 0 means «not
+  // made for a slot» («bad_bom_line_id», InvalidArgument); and, by params.pattern.mode:
+  // - "" / "image" — anything other than exactly one picture in
+  // params.extra_input_media_ids («one_source_picture»);
+  // - "swatch" — no colour stated in params.colour, meaning neither a hex, a code nor words
+  // («no_colour»); or more than one picture in params.extra_input_media_ids, which in this
+  // mode is a texture reference and not the source («one_texture_picture»);
+  // - anything else — «unknown_pattern_mode» (InvalidArgument). An unknown mode is NOT read
+  // as "image": the door and the worker would then disagree about what was bought.
+  // Each of those is FailedPrecondition-shaped news in an InvalidArgument wrapper — the request is
+  // incomplete, and the sentence says which half is missing — except `library_full` and
+  // `foreign_bom_line`, which ARE FailedPrecondition, and `bad_bom_line_id` and
+  // `unknown_pattern_mode`, which are InvalidArgument in the plain sense: the request is malformed,
+  // not incomplete.
   // `freeform` AND `cutout` ARE THE PLAYGROUND, and they take this same door for the same reason:
   // both spend a key's money (the image key and FAL_KEY respectively), both are counted against the
   // day, both show up in the one history. Each returns EXACTLY ONE picture. What they refuse for
@@ -16360,6 +16471,8 @@ export type DesignSplitFrame = {
 };
 
 export type SplitDesignPictureRequest = {
+  // The picture to cut — any visible picture of the band that no edit has replaced: the frames, not
+  // composite_views, are the precondition (see the RPC).
   pictureId: number | undefined;
   clientRequestId: string | undefined;
   frames: DesignSplitFrame[] | undefined;
@@ -16462,6 +16575,56 @@ export type FlattenDesignEditLayerRequest = {
   // UploadContentImage. The server does not rasterise — see the RPC comment. It must belong to this
   // installation and not already be filed as another picture of this card.
   mediaId: number | undefined;
+  // THE PICTURE THIS EDIT TAKES THE PLACE OF — the «overwrite» answer to «overwrite or save as
+  // new» (O-53). 0 = file the edit BESIDE its base, which is exactly what this verb did before the
+  // field existed; a client that never sends it keeps that behaviour byte for byte.
+  // NOTHING IS RE-PIXELLED AND NOTHING IS HIDDEN. The edit is filed as the same flatten sibling,
+  // under the same run or batch row, with this picture as its derived_from — and in the SAME
+  // transaction:
+  // * the bench slot holding this picture, if any, moves onto the edit — slot_rev + 1, through
+  // every placement guard of SetDesignBenchSlot (kind, colourway, hidden, display-only);
+  // * this picture is stamped DesignPicture.replaced_by = the edit.
+  // Its pixels, its run row, its crops, its reference roles and its visibility stay what they were:
+  // the history still shows it, and putting it back into a slot is SetDesignBenchSlot as usual.
+  // THE MOVE ECHOES NO slot_rev, and that is not a gap in the compare-and-set. The move is decided
+  // by the server from the slot row it reads inside the transaction; the client requests no
+  // placement, so there is no stale intention to compare. A tab that still shows the original in
+  // that slot learns it from slot_rev_mismatch on its next placement.
+  // InvalidArgument: replace_mismatch — the picture is on another card, or it is not the picture
+  // this layer is drawn over (its media is not the layer's base_media_id; a layer drawn from
+  // nothing replaces nothing). FailedPrecondition: already_replaced — the picture has a
+  // replacement already; a retry of an overwrite WITHOUT client_request_id lands here BEFORE
+  // anything is filed, and the ErrorInfo metadata carries head_picture_id: the head of the
+  // picture's replacement chain, i.e. the picture standing in its place now. FailedPrecondition:
+  // cut_sheet — pieces cut from this sheet still stand on screen, and they would stay cut from the
+  // original. A piece stands while ANYTHING GROWN FROM IT is visible: the piece itself, an edit that
+  // took its place (replaced_by, followed to the end), a piece cut from any of those, and so on down
+  // the branch — every one of them was drawn from the sheet's old pixels. An edit filed beside a
+  // picture (no replace_picture_id) takes no place and holds nothing. Hide what stands of those
+  // branches before overwriting the sheet, or edit a piece instead of the sheet. NotFound — no such
+  // picture.
+  // ⚠ AN OLDER SERVER ANSWERS 400 TO THIS FIELD: the JSON gateway refuses unknown fields. Send it
+  // only after a read has carried DesignPicture.replaced_by, which an older server never emits.
+  replacePictureId: number | undefined;
+  // IDEMPOTENCY KEY OF THIS GESTURE (O-53): one per click of «overwrite» or «save as new», a UUID
+  // being the intended shape; at most 64 characters, compared exactly, surrounding whitespace
+  // trimmed. A retry after a lost response, with the same key, returns the picture the first
+  // attempt filed — neither a second edit nor already_replaced.
+  // EMPTY = NO REPLAY PROTECTION, which is what this verb did before the field existed: a retry of
+  // «save as new» files a second sibling, and a retry of an overwrite is refused already_replaced
+  // with head_picture_id.
+  // THE KEY NAMES THE GESTURE, NOT THE BYTES. The replay is answered before the layer's rev is
+  // compared and before replace_picture_id is judged, so it succeeds even after a colleague saved
+  // the layer or overwrote the edit in turn — the picture then comes back with that replaced_by.
+  // media_id is not compared: a client that re-uploaded its raster for the retry gets the first
+  // attempt's picture, and the new upload stays unreferenced. The key lives within the tech card.
+  // InvalidArgument: a key over 64 characters; a key this card already spent on a DIFFERENT
+  // flatten — another layer, another expected_rev, another replace_picture_id, or the other mode
+  // (beside versus in the place of a picture). The layer is compared by id: two layers of one card
+  // at the same rev do not share a key.
+  // ⚠ SAME AGE AS replace_picture_id: an older server answers 400 to it, and a server that emits
+  // DesignPicture.replaced_by accepts it — both arrived in one release.
+  clientRequestId: string | undefined;
 };
 
 export type FlattenDesignEditLayerResponse = {
@@ -16470,6 +16633,8 @@ export type FlattenDesignEditLayerResponse = {
   // (base_media_id = 0) has no parent to inherit from, so its flatten is filed into a
   // single-picture BATCH, which is what puts it on the upload shelf and keeps it readable after a
   // reload.
+  // With replace_picture_id the base IS that picture, and the answer is still the edit alone: the
+  // moved slot and the stamped original arrive with the next read of the band.
   picture: common_DesignPicture | undefined;
 };
 
@@ -16649,6 +16814,20 @@ export type SetDesignAssetColorwayResponse = {
   asset: common_DesignAsset | undefined;
 };
 
+// SetDesignAssetBindingRequest — «the fabric of colourway N on slot M is this asset». The card is
+// named in the path and every one of the three ids is checked against it: an asset, a colourway or
+// a BOM line of a DIFFERENT card is refused, never silently bound.
+export type SetDesignAssetBindingRequest = {
+  techCardId: number | undefined;
+  colorwayId: number | undefined;
+  bomItemId: number | undefined;
+  assetId: number | undefined;
+};
+
+export type SetDesignAssetBindingResponse = {
+  binding: common_DesignAssetBinding | undefined;
+};
+
 // DeleteDesignAssetPlacementRequest names BOTH the mark and the card it is being taken off.
 // See DeleteDesignAssetRequest for why the card is stated; the scoping runs THROUGH the asset,
 // since a placement row deliberately carries no tech_card_id.
@@ -16808,15 +16987,21 @@ export type common_DesignColourwayProposal = {
   colorCode: string | undefined;
   pantone: string | undefined;
   hex: string | undefined;
-  // One entry per cloth slot the answer named. BOUND BY THE SLOT'S FOLDED NAME, never by index or
-  // id: the same fold the BOM/slot table dedupes on, so a colourway proposed beside its slots
-  // binds to them and to hand-typed slots of the same name alike.
+  // One entry per material slot the answer named. BOUND BY THE SLOT'S FOLDED NAME, never by index
+  // or id: the same fold the BOM/slot table dedupes on, so a colourway proposed beside its slots
+  // binds to them and to hand-typed slots of the same name alike. At most 8, and the prompt asks
+  // for them in one order — the main cloths, the thread, then the rest — so that the cap falls on
+  // the rest rather than on the thread.
   slots: common_DesignColourwaySlotColour[] | undefined;
 };
 
-// DesignColourwaySlotColour is one cloth slot wearing one colour, in the two spellings the recipe
-// row holds: a Pantone code and the words a person reads.
+// DesignColourwaySlotColour is one material slot of the card wearing one colour — cloth, lining,
+// thread, hardware or a trim, not only the cloths (O-44) — in the two spellings the recipe row
+// holds: a Pantone code (TCX for cloth, TCX or C otherwise) and the words a person reads.
 export type common_DesignColourwaySlotColour = {
+  // The slot's NAME — never an index and never an id — as the answer spelled it, with one
+  // exception: a card line whose name is longer than the 60 characters the prompt lists it with can
+  // only be echoed shortened, and the server puts that line's FULL name back, so the fold binds it.
   slot: string | undefined;
   pantone: string | undefined;
   hex: string | undefined;
@@ -18049,12 +18234,31 @@ export interface AdminService {
   // mush» is a label on the client, not a refusal here.
   // InvalidArgument: an empty item list, an unknown ghost_view. Aborted: slot_rev_mismatch.
   RegisterDesignUpload(request: RegisterDesignUploadRequest): Promise<RegisterDesignUploadResponse>;
-  // SplitDesignPicture cuts a composite into per-view pictures SERVER-SIDE and LOSSLESSLY, from the
+  // SplitDesignPicture cuts a picture into per-view pictures SERVER-SIDE and LOSSLESSLY, from the
   // original bytes. The crops are SIBLINGS OF THEIR SOURCE — they inherit its run_id or its
   // batch_id, whichever it has, and never get a history row of their own: no money was spent on
   // them. A crop of an uploaded composite therefore lands on the same upload shelf row.
-  // Idempotent by client_request_id. FailedPrecondition: not_composite. InvalidArgument for frames
-  // outside 0..1 or of zero area.
+  // THE PRECONDITION IS THE FRAMES, NOT COMPOSITENESS. Any visible, unreplaced picture of the band
+  // can be cut: composite_views is not consulted (nothing fills it in this wave, and a check on it
+  // refused every split that could reach it), and not_composite is never answered. What is checked
+  // is that every frame describes a rectangle inside the source — x, y, w and h are ordinary
+  // fractions from 0 to 1 with at most six decimal places, w and h are above 0, x + w and y + h are
+  // at most 1 — and names a view of the garment or none. InvalidArgument: no frames, a frame that is
+  // not such a rectangle, an unknown view_key, a missing client_request_id.
+  // IDEMPOTENT BY DERIVATION, NOT YET BY client_request_id: while the crops of an earlier cut of
+  // this picture are visible, a repeat returns THEM and cuts nothing. The key is required but not
+  // stored yet (backlog) — a retry that lands after those crops were hidden cuts again.
+  // A REPLACED PICTURE IS NOT CUT (O-53): FailedPrecondition already_replaced, whose ErrorInfo
+  // metadata carries head_picture_id — the head of its replacement chain, the picture a stale tab
+  // should cut instead. A HIDDEN PICTURE IS NOT CUT EITHER: FailedPrecondition hidden_picture. Its
+  // crops would be born visible under a parent nobody can see — the state HideDesignPicture refuses
+  // as live_crop_parent — and a crop of a hidden edit would hold the sheet that edit descends from
+  // against an overwrite (cut_sheet) through a branch the screen does not show. Show it first
+  // (HideDesignPicture with hidden = false). A picture both replaced and hidden gets
+  // already_replaced. Both refusals come before a repeat is answered with the crops of an earlier
+  // cut. FailedPrecondition display_only: for_input on a display-only picture. A plain
+  // FailedPrecondition when the picture's file is gone or cannot be read. NotFound — no such
+  // picture.
   SplitDesignPicture(request: SplitDesignPictureRequest): Promise<SplitDesignPictureResponse>;
   // SetDesignBenchSlot places, displaces or unmarks a plate. COMPARE-AND-SET on slot_rev; a slot
   // that does not exist yet is born by this same act (expected_slot_rev = 0), through an upsert
@@ -18085,7 +18289,8 @@ export interface AdminService {
   // derived_from_asset_id belonging to another card, or a repeat outside 1..2000 mm.
   UpsertDesignAsset(request: UpsertDesignAssetRequest): Promise<UpsertDesignAssetResponse>;
   // DeleteDesignAsset removes ONE shelf row and, with it, every mark it left on a flat — the marks
-  // are the asset's own statements about itself and have no meaning once it is gone. A pattern
+  // are the asset's own statements about itself and have no meaning once it is gone — and every
+  // (colourway, slot) it was the fabric of, which is left with no fabric chosen. A pattern
   // built from this asset SURVIVES with its parentage cleared; it still carries a picture and a
   // repeat, which is a usable instruction on its own.
   // THE CARD IS NAMED IN THE PATH, and it is not decoration: the server refuses an asset_id that
@@ -18111,6 +18316,32 @@ export interface AdminService {
   // NotFound on an asset of another card, exactly like DeleteDesignAsset. InvalidArgument on a
   // negative colorway_id.
   SetDesignAssetColorway(request: SetDesignAssetColorwayRequest): Promise<SetDesignAssetColorwayResponse>;
+  // SetDesignAssetBinding says WHICH ASSET IS THE FABRIC OF ONE (COLOURWAY, SLOT): colourway N wears
+  // asset X on BOM roll-goods line M (see common.DesignAssetBinding). asset_id 0 takes the fabric
+  // off the pair, which is a real answer («nothing chosen for this slot yet»), not an omission;
+  // unbinding a pair that wears nothing is OK and changes nothing. SO IS UNBINDING A PAIR WHOSE BOM
+  // LINE NO LONGER EXISTS — the line was deleted, its bindings went with it by cascade, and the
+  // state the unbind asks for has already arrived: asset_id 0 on a vanished line answers OK
+  // (idempotent), not `foreign_bom_line`. BINDING (asset_id > 0) to a vanished line is still
+  // refused `foreign_bom_line`, and so is either call on a line that exists on ANOTHER card.
+  // SINGLE-SELECT PER PAIR, AND THE WRITE IS THE WHOLE STEAL: the pair is the row's unique key, so
+  // binding X to (N, M) replaces whatever (N, M) wore before, in one statement. One asset may serve
+  // any number of pairs — the same cloth as the outer of two colourways is one tile, not two.
+  // IT DOES NOT TOUCH DesignAsset.colorway_id. That column is the legacy whole-colourway fabric
+  // (SetDesignAssetColorway and the landing of a pattern run made WITHOUT a slot write it; a run
+  // made for a slot writes only the binding); a binding is a narrower fact of its own and the two
+  // live side by side.
+  // WHY A VERB OF ITS OWN: the reason SetDesignAssetColorway has one — UpsertDesignAsset is a full
+  // replace and would clear the choice on every unrelated save — and one more: the binding belongs
+  // to the PAIR, not to the asset, so it could not be a field of the asset at all.
+  // InvalidArgument `colorway_forbidden`: the asset is hardware (a zip is not what a slot is cut
+  // from). FailedPrecondition `foreign_colorway`: the colourway is not this card's.
+  // FailedPrecondition `foreign_bom_line`: the line is not one of this card's BOM lines — the
+  // server checks whose line it is, not which section it sits in (on an unbind, only a line that
+  // still exists is refused — see above). NotFound on an asset of another card, exactly like
+  // DeleteDesignAsset. InvalidArgument on a colorway_id or bom_item_id that is not positive, or a
+  // negative asset_id.
+  SetDesignAssetBinding(request: SetDesignAssetBindingRequest): Promise<SetDesignAssetBindingResponse>;
   // SetDesignAssetPlacement puts ONE mark on ONE flat: this asset, this drawing, here. Creates when
   // placement_id is 0, moves it otherwise.
   // InvalidArgument: an asset or a picture of another card, a shape whose point count does not
@@ -18156,8 +18387,16 @@ export interface AdminService {
   // presses flatten, and r4 is materialised under an intention that never saw it. The compare-and-
   // set does not weaken by moving the pixels to the client — it guards the INTENTION, not the
   // rendering.
-  // Aborted: layer_rev_mismatch. FailedPrecondition: empty_layer. InvalidArgument: an unknown or
-  // foreign media_id.
+  // «OVERWRITE» IS THIS SAME VERB (O-53). With replace_picture_id the edit is still filed as a
+  // flatten sibling — nothing is re-pixelled, nothing is hidden — and in the same transaction it
+  // takes the named picture's place: the bench slot holding that picture moves onto the edit and
+  // the picture is stamped replaced_by. The request field names the refusals.
+  // IDEMPOTENT BY client_request_id WHEN ONE IS SENT: a retry after a lost response answers with
+  // the picture the first attempt filed — see the request field.
+  // Aborted: layer_rev_mismatch. FailedPrecondition: empty_layer, already_replaced (ErrorInfo
+  // metadata head_picture_id), cut_sheet, and the placement refusals of SetDesignBenchSlot when the
+  // slot being moved refuses the edit. InvalidArgument: an unknown or foreign media_id,
+  // replace_mismatch, a client_request_id already spent on a different flatten.
   FlattenDesignEditLayer(request: FlattenDesignEditLayerRequest): Promise<FlattenDesignEditLayerResponse>;
   // ImportDesignVector files an ALREADY-UPLOADED vector file into the band as an edit layer: the
   // media row keeps the authoritative SVG, the layer keeps the editable projection of it, and
@@ -24480,6 +24719,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SetDesignAssetColorway",
       }) as Promise<SetDesignAssetColorwayResponse>;
+    },
+    SetDesignAssetBinding(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/asset/binding`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignAssetBinding",
+      }) as Promise<SetDesignAssetBindingResponse>;
     },
     SetDesignAssetPlacement(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {

@@ -4607,7 +4607,9 @@ export type DesignRunParams = {
   // each, one of which somebody eventually forgets.
   // COUNTS ARE PER KIND AND ARE ENFORCED AT THE DOOR, before anything is reserved: `recolor` needs
   // at least one, `pattern` needs exactly one (a tile glued out of two swatches cannot join to
-  // itself), and every kind is capped at the snapshot's own reference ceiling.
+  // itself) — zero or one in swatch mode, where the picture is a texture reference and not the
+  // source (DesignPatternParams.mode) — and every kind is capped at the snapshot's own reference
+  // ceiling.
   extraInputMediaIds: number[] | undefined;
   // WHICH SIDES OF THE BENCH this run was asked to fix — «select everything in FLAT SLOTS» (W-10),
   // which a single string could not express at all: the studio marks up three plates and asks for
@@ -4656,11 +4658,13 @@ export type DesignRunParams = {
   // (the build reads ONLY this colourway's render bench) and — since round 15 — on PATTERN: there
   // it names the colourway this tile is being MADE FOR, and the asset the run lands on the shelf is
   // given to that colourway in the same transaction that closes the run (single-select, so it is
-  // taken off whatever cloth wore it before). REFUSED on flat / vector / draft_idea with
-  // `colorway_forbidden`: a flat is ONE markup for the whole card and has no colourway BY NATURE —
-  // not «not filled in yet». 0 = no colourway stated, which on a
-  // render keeps the legacy meaning (an unattributed render, exactly what every render made
-  // before this axis existed is) and on a 3D run selects ONLY the unattributed render bench —
+  // taken off whatever cloth wore it before) — unless the run is made for a slot
+  // (DesignPatternParams.bom_item_id > 0), in which case the tile becomes the fabric of the
+  // (colourway, slot) pair only (DesignAssetBinding) and DesignAsset.colorway_id is left alone.
+  // REFUSED on flat / vector / draft_idea with `colorway_forbidden`: a flat is ONE markup for the
+  // whole card and has no colourway BY NATURE — not «not filled in yet». 0 = no colourway stated,
+  // which on a render keeps the legacy meaning (an unattributed render, exactly what every render
+  // made before this axis existed is) and on a 3D run selects ONLY the unattributed render bench —
   // never a mixture of colourways.
   // FROZEN LIKE EVERY OTHER PARAM: a rerun inherits it from the parent's params, so repeating a
   // colourway-A render is a colourway-A render without restating it. An inherited colourway that
@@ -4898,6 +4902,38 @@ export type DesignPatternParams = {
   // standing with its parentage cleared (the FK's ON DELETE SET NULL), because a tile with a
   // picture is still a usable instruction after its swatch is gone.
   sourceAssetId: number | undefined;
+  // WHAT THE TILE IS BUILT FROM: "" or "image" | "swatch".
+  // · "" / "image" — TODAY'S ROUTE, and what every run frozen before this field means: the tile
+  // is extracted from exactly ONE source photograph in DesignRunParams.extra_input_media_ids
+  // (`one_source_picture` otherwise).
+  // · "swatch" — a fabric swatch built from the STATED COLOUR. DesignRunParams.colour is
+  // REQUIRED (`no_colour`), and any one of hex, code or words satisfies it. The client sends
+  // the Pantone's screen hex AND its name in `words`: a Pantone code alone is a text token an
+  // image model holds no colour for, so this is the one place the screen approximation travels
+  // on purpose. extra_input_media_ids then holds ZERO or ONE picture (`one_texture_picture`
+  // past one), and that picture is a TEXTURE reference — the model takes the material, the
+  // weave and the surface from it and NOTHING of its colour.
+  // WHY A FIELD AND NOT A KIND. A swatch is still a seamless `pattern` picture: the same seam check
+  // guards it, it lands on the same shelf as the same asset kind, and the render lays it out with
+  // the same repeat-tile paragraph. A new run kind would have had to be taught to every closed kind
+  // switch of the band — the door, the price, the queue, the landing, the history, the counters,
+  // ten of them — only to end up doing exactly what `pattern` already does. What differs is where
+  // the cloth comes from, and that is a parameter of the ask, not a different ask.
+  mode: string | undefined;
+  // THE SLOT THIS TILE IS MADE FOR — tech_card_bom_item(id), a roll-goods line (fabric, lining,
+  // interlining, insulation) of THIS card, read TOGETHER WITH DesignRunParams.colorway_id: the pair
+  // (colourway, slot) is the address of one fabric («white → outer, inner» is two addresses).
+  // 0 = not made for a slot, which is every image-mode run and every run frozen before this field.
+  // WHEN BOTH ARE SET, THE KEPT TILE BECOMES THE FABRIC OF THAT PAIR: the transaction that files
+  // the asset on the shelf also upserts the pair's DesignAssetBinding, replacing whatever the pair
+  // wore before — and that binding is ALL it writes: the legacy whole-colourway
+  // DesignAsset.colorway_id is neither set on the tile nor taken off any other asset. The newest
+  // swatch is what the person just asked for; the earlier ones stay on the shelf and can be bound
+  // back by hand (SetDesignAssetBinding).
+  // A LINE OF ANOTHER CARD is refused at the door, free (`foreign_bom_line`). A line deleted
+  // between the door and the landing does NOT fail the landing — the run is paid for and the tile
+  // is still a tile — it simply lands unbound.
+  bomItemId: number | undefined;
 };
 
 // DesignFreeformParams is the frozen ask of a PLAYGROUND run (kind=freeform): the pictures a person
@@ -5150,7 +5186,7 @@ export type DesignPicture = {
   layerRev: number | undefined;
   // Reversible invisibility — the ONLY persistent verb for hiding a picture. The guards live in
   // HideDesignPicture: a plate in a slot, feeding a live run, or parenting a live crop cannot be
-  // hidden.
+  // hidden. A hidden picture is not cut either: SplitDesignPicture answers hidden_picture.
   hiddenAt: wellKnownTimestamp | undefined;
   hiddenBy: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
@@ -5182,6 +5218,23 @@ export type DesignPicture = {
   // `display_only_input` (a run or a draft, before the reserve). A run's own outputs are never
   // display-only: the flag is a statement about a file a person brought in, not about pixels.
   displayOnly: boolean | undefined;
+  // THE EDIT THAT TOOK THIS PICTURE'S PLACE (O-53) — the id of the flatten filed by
+  // FlattenDesignEditLayer with replace_picture_id = this picture. 0 = not replaced. OUTPUT-ONLY:
+  // no request carries it, and no verb clears it (there is no «un-replace» in v1).
+  // A REPLACED PICTURE IS NOT HIDDEN AND NOT CHANGED. Its pixels, run row, crops, reference roles
+  // and hidden_at are exactly what they were; what moved is the bench slot that held it, which now
+  // holds the edit. The history keeps showing it — captioned «replaced by an edit» — and it can be
+  // put back into a slot like any other plate.
+  // A CHAIN, NOT A PAIR. The edit may be overwritten in its turn, so the ids form a chain whose
+  // HEAD is the one picture with replaced_by = 0; a view of «the latest generation» shows the head
+  // in the original's place. Every link is filed under the SAME run or batch row as the original,
+  // so a whole chain arrives inside one row of the band.
+  // A REPLACED PICTURE IS NEITHER OVERWRITTEN AGAIN NOR CUT: FlattenDesignEditLayer with
+  // replace_picture_id and SplitDesignPicture both refuse it with already_replaced, and the
+  // ErrorInfo metadata names the head of its chain as head_picture_id.
+  // ⚠ ABSENT — not 0 — on a server older than the field, and that absence is how a client knows
+  // the server cannot replace a picture yet (FlattenDesignEditLayerRequest.replace_picture_id).
+  replacedBy: number | undefined;
 };
 
 // DesignColourPlan is the DURABLE colour plan of a card — the pre-launch state, one document per
@@ -5258,7 +5311,13 @@ export type DesignAsset = {
   mediaId: number | undefined;
   // Resolved from media_id at read time. UNSET when media_id is 0 or the file is gone.
   media: MediaFull | undefined;
+  // A colourway code or a Pantone code, when this asset carries one. The LANDING OF A PATTERN RUN
+  // files the code its run stated in params.colour.code — for a swatch, the Pantone it was built
+  // from («18-1664 TCX») — so a landed swatch is not a nameless square of colour on the shelf.
+  // '' when the run stated none, and on every tile landed before migration 0368.
   colourCode: string | undefined;
+  // #RRGGBB screen approximation. On a landed pattern tile: the run's params.colour.hex, beside the
+  // code above.
   colourHex: string | undefined;
   // What the human wrote about this asset — «brushed, slight sheen», «matte gunmetal, 15 mm».
   note: string | undefined;
@@ -5283,7 +5342,12 @@ export type DesignAsset = {
   // devHex / pantone / colorCode / swatch, and a second field would be a competing answer to a
   // question that already has one. Only «colourway N wears asset X» needed a home.
   // ⚠ OUTPUT-ONLY, AND WRITTEN BY EXACTLY TWO PLACES: SetDesignAssetColorway, and the LANDING OF A
-  // PATTERN RUN (the tile is filed with the colourway its run named — see DesignRunParams.colorway_id).
+  // PATTERN RUN MADE WITHOUT A SLOT (DesignPatternParams.bom_item_id 0 — every image-mode run and
+  // every run frozen before that field): the tile is filed with the colourway its run named — see
+  // DesignRunParams.colorway_id. A run made FOR A SLOT (bom_item_id > 0) DOES NOT WRITE THIS
+  // COLUMN: its tile is the fabric of one (colourway, slot) pair, not of the whole colourway, so its
+  // landing writes only that pair's DesignAssetBinding, leaves this column unset on the new row and
+  // takes the colourway off no other asset.
   // UpsertDesignAsset NEITHER CARRIES NOR CLEARS IT. That is deliberate and it is the whole reason
   // the assignment does not live on Upsert: Upsert is a full replace, so a proto3 scalar there would
   // arrive as 0 from every client that predates this field — and from every unrelated save (a
@@ -5321,6 +5385,31 @@ export type DesignAssetPlacement = {
   annotation: TechCardAnnotation | undefined;
   // What this mark says beyond naming the asset — «cut on the bias here», «two of these».
   note: string | undefined;
+  setBy: string | undefined;
+  setAt: wellKnownTimestamp | undefined;
+};
+
+// DesignAssetBinding — THE FABRIC OF ONE (COLOURWAY, SLOT): which asset colourway N wears on BOM
+// roll-goods line M. One row per pair (UNIQUE), one asset may serve many pairs; legacy
+// DesignAsset.colorway_id stays the whole-colourway fabric and is not touched by bindings.
+// WHY A ROW OF ITS OWN AND NOT A COLUMN ON THE ASSET. The choice belongs to the PAIR — «what does
+// white wear outside» — not to the tile, and the same cloth is routinely the outer of two
+// colourways, or the outer and the lining of one: a slot column on design_asset could name one slot
+// per tile and would have to steal across all of them. With the pair as the key, choosing again is
+// one upsert and never a hunt for the previous holder.
+// IT DIES WITH ANY OF ITS FOUR ENDS — card, colourway, BOM line, asset (every FK is ON DELETE
+// CASCADE). A pair missing either half is not a statement about anything, so nothing is left
+// pointing at nobody.
+// WRITTEN BY TWO PLACES: SetDesignAssetBinding (the person's choice; asset_id 0 unbinds), and the
+// LANDING OF A PATTERN RUN made for a pair (DesignPatternParams.bom_item_id together with the run's
+// colorway_id), which replaces the pair's previous fabric with the tile it just filed — and writes
+// nothing into the legacy DesignAsset.colorway_id.
+export type DesignAssetBinding = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  colorwayId: number | undefined;
+  bomItemId: number | undefined;
+  assetId: number | undefined;
   setBy: string | undefined;
   setAt: wellKnownTimestamp | undefined;
 };
@@ -5750,15 +5839,21 @@ export type DesignColourwayProposal = {
   colorCode: string | undefined;
   pantone: string | undefined;
   hex: string | undefined;
-  // One entry per cloth slot the answer named. BOUND BY THE SLOT'S FOLDED NAME, never by index or
-  // id: the same fold the BOM/slot table dedupes on, so a colourway proposed beside its slots
-  // binds to them and to hand-typed slots of the same name alike.
+  // One entry per material slot the answer named. BOUND BY THE SLOT'S FOLDED NAME, never by index
+  // or id: the same fold the BOM/slot table dedupes on, so a colourway proposed beside its slots
+  // binds to them and to hand-typed slots of the same name alike. At most 8, and the prompt asks
+  // for them in one order — the main cloths, the thread, then the rest — so that the cap falls on
+  // the rest rather than on the thread.
   slots: DesignColourwaySlotColour[] | undefined;
 };
 
-// DesignColourwaySlotColour is one cloth slot wearing one colour, in the two spellings the recipe
-// row holds: a Pantone code and the words a person reads.
+// DesignColourwaySlotColour is one material slot of the card wearing one colour — cloth, lining,
+// thread, hardware or a trim, not only the cloths (O-44) — in the two spellings the recipe row
+// holds: a Pantone code (TCX for cloth, TCX or C otherwise) and the words a person reads.
 export type DesignColourwaySlotColour = {
+  // The slot's NAME — never an index and never an id — as the answer spelled it, with one
+  // exception: a card line whose name is longer than the 60 characters the prompt lists it with can
+  // only be echoed shortened, and the server puts that line's FULL name back, so the fold binds it.
   slot: string | undefined;
   pantone: string | undefined;
   hex: string | undefined;

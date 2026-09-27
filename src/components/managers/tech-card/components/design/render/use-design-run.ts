@@ -19,7 +19,6 @@ import { designKeys, newClientRequestId } from '../use-design-band';
  * When the seam next opens, this belongs inside `useDesignWrites` and this file disappears.
  */
 
-
 export type StartRunInput = {
   /**
    * flat | render | threed | recolor | pattern. `draft_idea` is refused by the server — it has its
@@ -84,6 +83,20 @@ export type StartRunState = {
   refusal: RunRefusal | null;
   /** Убрать отказ с экрана. Ничего не отменяет — просто человек его прочёл. */
   dismissRefusal: () => void;
+};
+
+/**
+ * ═══ WHERE THE ANSWER WILL LAND — SAID PER KIND, BECAUSE THE PLACE IS NOT THE SAME (UX pass, U-7) ═
+ *
+ * The success toast used to say one sentence for every kind: «the pictures land in the history».
+ * On the PATTERN step that is false — the step has no history block (one history there: the LAST
+ * FABRICS carousel), and a swatch lands IN ITS SLOT, bound to the pair by the landing itself; an
+ * extracted fabric lands in the carousel. A toast that names a place that is not on the screen
+ * sends the person looking for it. Kinds without an entry keep their sentence byte for byte.
+ */
+const STARTED_DEFAULT = 'run started — the pictures land in the history when it finishes';
+const STARTED_BY_KIND: Partial<Record<StartRunInput['kind'], string>> = {
+  pattern: 'run started · the fabric lands in its slot — or in LAST FABRICS — when it finishes',
 };
 
 /**
@@ -156,7 +169,7 @@ export function useStartDesignRun(techCardId?: number): StartRunState {
       }
       // The run comes back PENDING, not done: the picture arrives in the feed when the provider
       // answers. Saying so is the difference between «nothing happened» and «it was booked».
-      showMessage('run started — the pictures land in the history when it finishes', 'success');
+      showMessage(STARTED_BY_KIND[input.kind] ?? STARTED_DEFAULT, 'success');
     },
     onError: (error: unknown, input) => {
       const message = (error as Error)?.message?.trim() || 'the run did not start';

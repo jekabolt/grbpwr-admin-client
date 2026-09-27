@@ -7,6 +7,7 @@ import {
   ensurePantoneLibrary,
   findPantone,
   normalizePantone,
+  PANTONE_SHADES,
   pantoneCount,
   pantoneLibraryState,
   pantoneVersion,
@@ -15,6 +16,7 @@ import {
   searchPantone,
   subscribePantone,
   type PantoneFamily,
+  type PantoneShade,
   type PantoneSwatch,
 } from './pantone-swatches';
 
@@ -75,6 +77,41 @@ import {
  * отдаёт сетке ОСТАТОК: поиск и подвал стоят, листается только сетка. `overscroll-contain` не
  * пускает докрученное колесо дальше — иначе на упоре уезжала бы страница под модалкой.
  *
+ * ═══ ОТТЕНКИ И «FROM THIS CARD» (шаг 3 выкроек, B5) ═══════════════════════════════════════════
+ *
+ * Владелец: «юзер должен иметь возможность выбрать цвет из пантон пикера удобным интерфейсом с
+ * поиском по подцветам» — и в том же сообщении: «не усложняй дизайн … не пихай кучу кнопок … дай
+ * больше спейсинга».
+ *
+ * ПОЛОСА ОТТЕНКОВ — ДВЕНАДЦАТЬ КВАДРАТОВ 16px, А НЕ ДВЕНАДЦАТЬ СЛОВ. Ряд текстовых чипов
+ * («all · red · orange · …») занял бы 634px и лёг бы в окне 420px двумя строками — та самая «куча
+ * кнопок». Квадрат, залитый образцом оттенка, опознаётся быстрее слова и укладывает все двенадцать
+ * в одну строку. Слово при этом не пропало, оно живёт в двух местах: в подсказке (`title`,
+ * `aria-label`) и в ПОИСКЕ — «green», «grey»/«gray», «navy», «olive», «beige», «ivory», «cream»
+ * сужают выдачу по оттенку так же, как щелчок по квадрату (`searchPantone`). Ведущее «all»
+ * снимает фильтр; повторный щелчок по выбранному квадрату — тоже.
+ *
+ * ⚠ ОТТЕНОК ПОСЧИТАН ИЗ ЭКРАННОГО ПРИБЛИЖЕНИЯ (`hex`, см. шапку `pantone-swatches.ts`), ПОЭТОМУ ОН
+ * — СПОСОБ НАЙТИ КОД И НИКОГДА НЕ УТВЕРЖДЕНИЕ О СТАНДАРТЕ. «Этот код лежит в teal» значит «на
+ * экране он бирюзовый, ищи его там», и ничего больше: в карточку по-прежнему уезжает один код, а
+ * цвет на границе двух оттенков лежит в одном из них и находится во втором по имени.
+ *
+ * ФИЛЬТР СУЖАЕТ ОБЕ СЕМЬИ, И ЧИСЛО В ЗАГОЛОВКЕ СЕМЬИ СЧИТАЕТ УЖЕ ОТФИЛЬТРОВАННОЕ. Внутри оттенка
+ * сетка идёт от светлого к тёмному — градиентом, где соседа ищут глазом. Выбранный квадрат обведён
+ * 2px чернилом, а СЛОВО оттенка печатается ещё и в заголовке каждой семьи: какой фильтр включён,
+ * не должно держаться на одном цвете квадрата (DESIGN.md, Monochrome Rule). Фокус при открытии —
+ * по-прежнему поле поиска; квадраты стоят после него в порядке таба.
+ *
+ * «FROM THIS CARD». Вызывающий передаёт `suggested` — пантон колорвея, рецепт слота, — и пока
+ * запрос пуст, они стоят первой секцией: ради них пикер открывают чаще всего, и листать к ним
+ * через 4 700 кодов незачем. Дубли схлопываются (подписи — через « · »); код, которого нет в
+ * наборе, рисуется пунктирным квадратом и выбирается так же — это тот же «use as typed», только
+ * набранный раньше и в другом месте карточки.
+ *
+ * Ширина осталась 420px, и ни одной новой кнопки-глагола: «clear», «show more», «use as typed» —
+ * прежние. Отступы — токенами системы: 10px между полем, полосой и выдачей, 16px между секциями
+ * выдачи (было 8 и 10).
+ *
  * ═══ «RECENT» — ПОСЛЕДНИЕ 12 ВЫБОРОВ ВСЕЙ АДМИНКИ (26.09, O-44 зона B) ══════════════════════════
  *
  * Владелец о выборе свотча: «должно быть сделано удобно». Пока поиск пуст, над семьями стоит
@@ -90,17 +127,126 @@ import {
  *   · Код, которого нет в наборе (номер дайхауса), стоит пунктирным квадратом — тем же, что у
  *     строки «as typed»: цвета у него нет, и выдумывать его нечем.
  *
- * ⚠ `recent` У `pattern/colourways.tsx` — ДРУГОЙ ОРГАН: цвета прогонов ЭТОЙ карточки, рядом с
- * дверью пикера, а не внутри него. Пропа `recent` у пикера нет и не было; тот ряд не тронут.
+ * ⚠ «FROM THIS CARD» И «RECENT» — ДВА РАЗНЫХ ОРГАНА, И СТОЯТ ОНИ ИМЕННО В ЭТОМ ПОРЯДКЕ (слияние
+ * с волной PATTERN, 27.09). «From this card» — коды, которые говорит ЭТА карточка (`suggested`
+ * от вызывающего); «recent» — то, что ЭТОТ человек выбирал в любом пикере админки (память общая
+ * и живёт в `pantone-swatches.ts`, пропа `recent` у пикера нет). Обе секции — только при пустом
+ * запросе, и оттенок их не сужает: фильтр — вопрос к семьям. Порядок в скроллере — «from this
+ * card», «recent», семьи (или строка «nothing …» вместо них); Enter без кода берёт первый видимый
+ * свотч в том же порядке. Ряд `recent` у прежнего `pattern/colourways.tsx` (цвета прогонов
+ * карточки у двери пикера) ушёл вместе с файлом: свои коды карточки теперь внутри пикера.
  */
 
 /** Сколько свотчей семья рисует сразу и сколько добавляет «show more». */
 const PAGE = 120;
 const FIRST_PAGE: Record<PantoneFamily, number> = { textile: PAGE, solid: PAGE };
-/** 60px — потолок п.25 (56–64). Одна строка на обе сетки, чтобы «recent» не разошлась с семьями. */
+/**
+ * 60px — потолок п.25 (56–64). Одна строка на все сетки: «from this card», «recent» и семьи не
+ * расходятся.
+ */
 const GRID_COLUMNS = 'repeat(auto-fill, minmax(60px, 1fr))';
 /** Выдача закрытого пикера — одна пустая ссылка на все (см. семьи ниже). */
 const CLOSED: PantoneSwatch[] = [];
+
+/** Предложение «from this card», уже сведённое с набором: `hex` нет — кода нет в наборе. */
+type Suggestion = { code: string; hex?: string; name?: string; note: string };
+/** «From this card» закрытого пикера — одна пустая ссылка, как `CLOSED` у семей. */
+const NO_SUGGESTIONS: Suggestion[] = [];
+
+/**
+ * Сводит `suggested` с набором. Код ищется так же, как его ищет триггер (`findPantone`, после
+ * `normalizePantone`, чтобы «407c» нашёл «407 C»), но ⚠ ПРЕФИКСНЫЙ ХВОСТ `findPantone` ЗДЕСЬ НЕ
+ * ПРИНИМАЕТСЯ: огрызок «19-40» он отдал бы первым попавшимся «19-4007 TCX», и предложение молча
+ * подменило бы код карточки чужим. Принимается только сам код или он же с хвостом семьи.
+ */
+function resolveSuggestions(suggested: { code: string; label: string }[]): Suggestion[] {
+  const out: Suggestion[] = [];
+  for (const { code: raw, label } of suggested) {
+    const typed = raw.trim();
+    if (!typed) continue;
+    const want = (normalizePantone(typed) || typed).toLowerCase();
+    const hit = findPantone(want);
+    const found = hit?.code.toLowerCase();
+    const swatch = found === want || found?.startsWith(`${want} `) ? hit : undefined;
+    const code = swatch?.code ?? typed;
+    const twin = out.find((o) => o.code.toLowerCase() === code.toLowerCase());
+    if (twin) {
+      if (label && !twin.note.split(' · ').includes(label)) {
+        twin.note = twin.note ? `${twin.note} · ${label}` : label;
+      }
+      continue;
+    }
+    out.push({ code, hex: swatch?.hex, name: swatch?.name, note: label });
+  }
+  return out;
+}
+
+/**
+ * Одна ячейка сетки — свотч и код ПОД ним (п.25). Общая для «from this card», «recent» и семей:
+ * размер свотча у всех сеток обязан совпадать, и держит это одна разметка, а не копии классов.
+ * Без `hex` квадрат пунктирный: так же, как у строки «use as typed», пунктир значит «код есть,
+ * образца нет».
+ */
+function SwatchOption({
+  code,
+  hex,
+  note,
+  title,
+  on,
+  onPick,
+  anchor,
+}: {
+  code: string;
+  hex?: string;
+  /** Вторая строка под кодом — откуда предложение («colourway», «recipe»). */
+  note?: string;
+  title: string;
+  on: boolean;
+  onPick: () => void;
+  /**
+   * Якорь проб: `data-pantone-option` у семей и у «from this card», `data-pantone-recent-option` у
+   * «recent» — чтобы счёт опций семьи не путался с недавними.
+   */
+  anchor: Record<string, string>;
+}) {
+  return (
+    <button
+      type='button'
+      role='option'
+      aria-selected={on}
+      {...anchor}
+      title={title}
+      onClick={onPick}
+      className={`flex min-w-0 flex-col gap-0.5 p-0.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor ${
+        on ? 'bg-textColor' : 'hover:bg-bgZebra'
+      }`}
+    >
+      <span
+        aria-hidden
+        className={`block w-full border border-borderColor ${hex ? '' : 'border-dashed'}`}
+        style={{ background: hex, aspectRatio: '1/1' }}
+      />
+      {/* Код ПОД свотчем (п.25). Имя не печатается: в ячейку 60px оно легло бы тремя строками —
+          оно живёт в `title` и в поиске. */}
+      <span
+        className={`block min-w-0 truncate text-nano uppercase tracking-label ${
+          on ? '!text-bgColor' : ''
+        }`}
+      >
+        {code}
+      </span>
+      {note && (
+        <span
+          className={`block min-w-0 truncate text-nano uppercase tracking-label ${
+            on ? '!text-bgColor' : 'text-labelColor'
+          }`}
+        >
+          {note}
+        </span>
+      )}
+    </button>
+  );
+}
 
 export function PantonePicker({
   value,
@@ -108,6 +254,7 @@ export function PantonePicker({
   disabled,
   label = 'pick',
   name,
+  suggested,
 }: {
   value?: string;
   /** '' clears. */
@@ -117,9 +264,15 @@ export function PantonePicker({
   label?: string;
   /** Anchor for probes and labels — one per row. */
   name: string;
+  /**
+   * Codes this card already speaks — the colourway's pantone, the slot's recipe pantone. Shown as
+   * the first section «from this card» while the query is empty; `label` says where each is from.
+   */
+  suggested?: { code: string; label: string }[];
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [shade, setShade] = useState<PantoneShade | undefined>(undefined);
   const [page, setPage] = useState<Record<PantoneFamily, number>>(FIRST_PAGE);
   /** Недавние выборы, прочитанные при открытии (см. «RECENT» в шапке файла). */
   const [recent, setRecent] = useState<string[]>([]);
@@ -133,14 +286,23 @@ export function PantonePicker({
   /* СЕМЬИ СЧИТАЮТСЯ ТОЛЬКО У ОТКРЫТОГО ПИКЕРА. Закрытый рисует один триггер — свой текущий свотч
      (`current` ниже), а выдача ему не нужна: блок COLOURWAYS держит пикер на КАЖДОМ ряду каждого
      колорвея, и две полные семьи (до ~4 700 записей после догрузки) на закрытый пикер множились бы
-     на колорвеи × слоты при каждой смене версии набора (ревью Codex O-44, minor). */
+     на колорвеи × слоты при каждой смене версии набора (ревью Codex O-44, minor). С оттенками
+     пустой запрос ещё и сортирует весь набор спектром, а экран PATTERN держит пикер на каждом
+     слоте каждого колорвея, — поэтому по тому же правилу живёт и «from this card»: это секция
+     открытого пикера, закрытому она не нужна. */
   const textile = useMemo(
-    () => (open ? searchPantone(query, { family: 'textile' }) : CLOSED),
-    [open, query, version],
+    () => (open ? searchPantone(query, { family: 'textile', shade }) : CLOSED),
+    [open, query, shade, version],
   );
   const solid = useMemo(
-    () => (open ? searchPantone(query, { family: 'solid' }) : CLOSED),
-    [open, query, version],
+    () => (open ? searchPantone(query, { family: 'solid', shade }) : CLOSED),
+    [open, query, shade, version],
+  );
+  // Библиотека дописывается в набор — код, который до её приезда был «не из набора», после
+  // приезда находит свой образец, поэтому `version` здесь тоже зависимость.
+  const fromCard = useMemo(
+    () => (open ? resolveSuggestions(suggested ?? []) : NO_SUGGESTIONS),
+    [open, suggested, version],
   );
 
   const typed = query.trim();
@@ -151,13 +313,20 @@ export function PantonePicker({
    */
   const typedCode = normalizePantone(typed);
   const current = findPantone(value);
+  /** «From this card» — только пока запрос пуст: набравший уже знает, чего ищет. */
+  const showCard = !typed && fromCard.length > 0;
+
+  const reset = () => {
+    setQuery('');
+    setShade(undefined);
+    setPage(FIRST_PAGE);
+  };
 
   const choose = (code: string) => {
     const picked = code.trim();
     onPick(picked);
     if (picked) rememberPantone(picked);
-    setQuery('');
-    setPage(FIRST_PAGE);
+    reset();
     setOpen(false);
   };
 
@@ -167,12 +336,26 @@ export function PantonePicker({
     setPage(FIRST_PAGE);
   };
 
+  const pickShade = (next: PantoneShade | undefined) => {
+    setShade(next);
+    // Та же причина, что у `search`: другой оттенок — другая выдача.
+    setPage(FIRST_PAGE);
+  };
+
   /** Две секции одного списка. Пустая не рисуется — поиск сам решает, какие семьи остались. */
   const families: { family: PantoneFamily; head: string; rows: PantoneSwatch[] }[] = [
     { family: 'textile', head: 'textile · tcx', rows: textile },
     { family: 'solid', head: 'solid coated · c', rows: solid },
   ];
-  const firstHit = textile[0] ?? solid[0];
+  /**
+   * Enter без кода в запросе берёт ПЕРВЫЙ ВИДИМЫЙ свотч, в порядке скроллера: «from this card»,
+   * «recent» (обе — только при пустом запросе), семьи.
+   */
+  const firstCode =
+    (showCard ? fromCard[0]?.code : undefined) ??
+    (typed ? undefined : recent[0]) ??
+    textile[0]?.code ??
+    solid[0]?.code;
 
   const libraryState = pantoneLibraryState();
   const total = pantoneCount();
@@ -185,10 +368,7 @@ export function PantonePicker({
         setOpen(o);
         // В том же такте, что и открытие: первый же кадр поповера уже с секцией, без прыжка.
         if (o) setRecent(recentPantone());
-        if (!o) {
-          setQuery('');
-          setPage(FIRST_PAGE);
-        }
+        if (!o) reset();
       }}
       title='pantone'
       noTail
@@ -214,7 +394,12 @@ export function PantonePicker({
               style={{ background: current.hex }}
             />
           )}
-          <Text component='span' size='micro' variant={value ? 'default' : 'label'} className='uppercase'>
+          <Text
+            component='span'
+            size='micro'
+            variant={value ? 'default' : 'label'}
+            className='uppercase'
+          >
             {value?.trim() || label}
           </Text>
           <Text size='micro' variant='label' component='span' aria-hidden>
@@ -230,7 +415,7 @@ export function PantonePicker({
           ⚠ ПОДЧЁРКИВАНИЯ В `calc` — НЕ ОПЕЧАТКА: в произвольном значении Tailwind пробел пишется
           как `_`, а без пробелов вокруг минуса `calc` невалиден и потолок молча не применяется.
           Первый заход именно так и промахнулся: сетка выросла на 5 326px и не листалась вовсе. */}
-      <div className='flex max-h-[calc(var(--popover-body-max)_-_12px)] min-h-0 flex-col gap-2'>
+      <div className='flex max-h-[calc(var(--popover-body-max)_-_12px)] min-h-0 flex-col gap-2.5'>
         <Input
           name={`pantone-search-${name}`}
           value={query}
@@ -244,9 +429,51 @@ export function PantonePicker({
             if (e.key !== 'Enter') return;
             e.preventDefault();
             if (typedCode) choose(typedCode);
-            else if (firstHit) choose(firstHit.code);
+            else if (firstCode) choose(firstCode);
           }}
         />
+
+        {/* ПОЛОСА ОТТЕНКОВ — см. шапку. Кнопки с `aria-pressed`, а не радиогруппа: радиогруппа
+            обещает стрелки, а здесь обычный таб, и обещание, которое не выполняется, хуже
+            отсутствующего. Нажата ровно одна из тринадцати: «all» или квадрат. */}
+        <div
+          role='group'
+          aria-label='shade'
+          data-pantone-shades={name}
+          className='flex shrink-0 flex-wrap items-center gap-1.5'
+        >
+          <button
+            type='button'
+            aria-pressed={!shade}
+            data-pantone-shade='all'
+            onClick={() => pickShade(undefined)}
+            className={`text-nano uppercase tracking-label focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor ${
+              shade ? 'text-labelColor hover:text-textColor' : 'font-bold text-textColor'
+            }`}
+          >
+            all
+          </button>
+          {PANTONE_SHADES.map((s) => {
+            const on = shade === s.id;
+            return (
+              <button
+                key={s.id}
+                type='button'
+                aria-pressed={on}
+                aria-label={s.label}
+                title={s.label}
+                data-pantone-shade={s.id}
+                onClick={() => pickShade(on ? undefined : s.id)}
+                style={{ background: s.hex }}
+                className={`size-4 shrink-0 border border-borderColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor ${
+                  on
+                    ? 'outline outline-2 outline-offset-1 outline-textColor'
+                    : 'hover:border-textColor'
+                }`}
+              />
+            );
+          })}
+        </div>
 
         {typedCode && (
           <button
@@ -268,13 +495,46 @@ export function PantonePicker({
             — ни то, ни другое, и читалка объявила бы её пунктом списка. Поэтому listbox теперь
             СЕТКА каждой семьи, а заголовок и «show more» лежат снаружи неё. */}
         <div
-          className='min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-contain'
+          className='min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain'
           data-pantone-scroll={name}
         >
-          {textile.length === 0 && solid.length === 0 && !typedCode && (
-            <Text size='micro' variant='label' className='py-1' data-pantone-empty={name}>
-              nothing matches “{typed}” — type the reference itself, e.g. 19-4005 TCX or 407 C
-            </Text>
+          {/* «From this card» — та же раскладка, что у семьи: заголовок снаружи listbox'а. */}
+          {showCard && (
+            <div data-pantone-suggested={name}>
+              <div className='mb-1.5 flex items-baseline gap-2 border-b border-borderColor pb-0.5'>
+                <Text
+                  size='nano'
+                  variant='uppercase'
+                  tracking='group'
+                  component='span'
+                  className='text-labelColor'
+                >
+                  from this card
+                </Text>
+                <Text size='nano' variant='label' component='span' className='ml-auto'>
+                  {fromCard.length}
+                </Text>
+              </div>
+              <div
+                role='listbox'
+                aria-label='from this card'
+                className='grid gap-1.5'
+                style={{ gridTemplateColumns: GRID_COLUMNS }}
+              >
+                {fromCard.map((s) => (
+                  <SwatchOption
+                    key={s.code}
+                    code={s.code}
+                    hex={s.hex}
+                    note={s.note}
+                    title={[s.code, s.name, s.note].filter(Boolean).join(' · ')}
+                    on={s.code === value}
+                    onPick={() => choose(s.code)}
+                    anchor={{ 'data-pantone-option': s.code }}
+                  />
+                ))}
+              </div>
+            </div>
           )}
           {!typed && recent.length > 0 && (
             /* Та же разметка, что у семьи: подпись снаружи listbox'а, внутри — только опции. */
@@ -303,9 +563,9 @@ export function PantonePicker({
                       key={code}
                       code={code}
                       hex={known?.hex}
-                      name={known?.name}
+                      title={known?.name ? `${code} · ${known.name}` : code}
                       on={code === value}
-                      onChoose={() => choose(code)}
+                      onPick={() => choose(code)}
                       anchor={{ 'data-pantone-recent-option': code }}
                     />
                   );
@@ -313,19 +573,34 @@ export function PantonePicker({
               </div>
             </div>
           )}
+          {textile.length === 0 && solid.length === 0 && !typedCode && (
+            <Text size='micro' variant='label' className='py-1' data-pantone-empty={name}>
+              {typed ? `nothing matches “${typed}”` : 'nothing'}
+              {shade ? ` in ${shade}` : ''} — type the reference itself, e.g. 19-4005 TCX or 407 C
+            </Text>
+          )}
           {families.map((group) => {
             if (group.rows.length === 0) return null;
             const shown = Math.min(page[group.family], group.rows.length);
             const left = group.rows.length - shown;
+            // Слово оттенка — в заголовке семьи, чтобы фильтр читался словом, а не только обводкой.
+            const head = shade ? `${group.head} · ${shade}` : group.head;
             return (
               /* Семья — заголовок плюс список. `div`, а не `section`: секция без
                  доступного имени всё равно остаётся обычным узлом, только выглядит обещанием. */
               <div key={group.family} data-pantone-family={group.family}>
                 <div className='mb-1.5 flex items-baseline gap-2 border-b border-borderColor pb-0.5'>
-                  <Text size='nano' variant='uppercase' tracking='group' component='span' className='text-labelColor'>
-                    {group.head}
+                  <Text
+                    size='nano'
+                    variant='uppercase'
+                    tracking='group'
+                    component='span'
+                    className='text-labelColor'
+                  >
+                    {head}
                   </Text>
-                  {/* Сколько семья нашла — иначе «показано 120» и «нашлось 120» неотличимы. */}
+                  {/* Сколько семья нашла — иначе «показано 120» и «нашлось 120» неотличимы. С
+                      оттенком — сколько нашлось В НЁМ. */}
                   <Text size='nano' variant='label' component='span' className='ml-auto'>
                     {group.rows.length.toLocaleString('en-US')}
                   </Text>
@@ -334,7 +609,7 @@ export function PantonePicker({
                     знать их число. */}
                 <div
                   role='listbox'
-                  aria-label={group.head}
+                  aria-label={head}
                   className='grid gap-1.5'
                   style={{ gridTemplateColumns: GRID_COLUMNS }}
                 >
@@ -343,9 +618,9 @@ export function PantonePicker({
                       key={s.code}
                       code={s.code}
                       hex={s.hex}
-                      name={s.name}
+                      title={s.name ? `${s.code} · ${s.name}` : s.code}
                       on={s.code === value}
-                      onChoose={() => choose(s.code)}
+                      onPick={() => choose(s.code)}
                       anchor={{ 'data-pantone-option': s.code }}
                     />
                   ))}
@@ -381,7 +656,8 @@ export function PantonePicker({
             className='normal-case'
             data-pantone-total={name}
           >
-            {libraryState === 'loading' && `${total.toLocaleString('en-US')} references, loading the rest…`}
+            {libraryState === 'loading' &&
+              `${total.toLocaleString('en-US')} references, loading the rest…`}
             {libraryState === 'ready' &&
               `${total.toLocaleString('en-US')} references · swatches are approximate · any code can be typed`}
             {libraryState === 'failed' &&
@@ -403,60 +679,5 @@ export function PantonePicker({
         </div>
       </div>
     </GenericPopover>
-  );
-}
-
-/**
- * Одна ячейка сетки — свотч и код ПОД ним (п.25). Общая для семей и для «recent»: размер свотча
- * у двух сеток обязан совпадать, и держит это одна разметка, а не две копии классов.
- */
-function SwatchOption({
-  code,
-  hex,
-  name,
-  on,
-  onChoose,
-  anchor,
-}: {
-  code: string;
-  /** Нет hex — кода нет в наборе (набранный номер): квадрат пунктирный, как у строки «as typed». */
-  hex?: string;
-  name?: string;
-  on: boolean;
-  onChoose: () => void;
-  /** Якорь проб: `data-pantone-option` у семьи, `data-pantone-recent-option` у «recent». */
-  anchor: Record<string, string>;
-}) {
-  return (
-    <button
-      type='button'
-      role='option'
-      aria-selected={on}
-      {...anchor}
-      title={name ? `${code} · ${name}` : code}
-      onClick={onChoose}
-      className={`flex min-w-0 flex-col gap-0.5 p-0.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor ${
-        on ? 'bg-textColor' : 'hover:bg-bgZebra'
-      }`}
-    >
-      <span
-        aria-hidden
-        className={
-          hex
-            ? 'block w-full border border-borderColor'
-            : 'block w-full border border-dashed border-borderColor'
-        }
-        style={{ background: hex || undefined, aspectRatio: '1/1' }}
-      />
-      {/* Имя не печатается: в ячейку 60px оно легло бы тремя строками — оно живёт в `title` и в
-          поиске. */}
-      <span
-        className={`block min-w-0 truncate text-nano uppercase tracking-label ${
-          on ? '!text-bgColor' : ''
-        }`}
-      >
-        {code}
-      </span>
-    </button>
   );
 }
