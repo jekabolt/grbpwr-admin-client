@@ -103,6 +103,13 @@ export type EnhanceRequest = {
   context?: string;
   /** Лимит поля назначения; сервер не вернёт длиннее. */
   maxRunes?: number;
+  /**
+   * STEER only: the PLAYGROUND workflow key and the field key of its prompt. The server names the
+   * tool and the field from its own table by this pair and refuses STEER without a known one
+   * (InvalidArgument on `workflow` / `field_key`); every other mode ignores both.
+   */
+  workflow?: string;
+  fieldKey?: string;
 };
 
 export class EnhanceRefusal extends Error {
@@ -166,6 +173,8 @@ export async function enhanceText(req: EnhanceRequest, _signal?: AbortSignal): P
       field: FIELD_WIRE[req.field],
       context: req.context ?? '',
       maxRunes: req.maxRunes ?? 0,
+      workflow: req.workflow ?? '',
+      fieldKey: req.fieldKey ?? '',
     });
     return res.text ?? '';
   } catch (e) {

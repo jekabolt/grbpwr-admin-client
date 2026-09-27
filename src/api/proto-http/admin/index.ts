@@ -124,12 +124,15 @@ export type EnhanceTextMode =
   // model draws what a prompt names). Same language as the input.
   | "ENHANCE_TEXT_MODE_PROMPT"
   // Rewrite ONE field of an image tool (the PLAYGROUND prompt fields' «Improve»)
-  // as a short, concrete, visual phrase for that field: the CONTEXT's first line
-  // names the tool and the field; the person's intent, every fact and their
-  // language are kept; a vague part, place, material, colour or light is named;
-  // filler is cut; at most 40 words. When the CONTEXT says the field describes a
-  // RESULT (the mask retouch), the answer describes what should be seen and drops
-  // the operation words.
+  // as a short, concrete, visual phrase for that field. The tool and the field
+  // come from `workflow` / `field_key` and the SERVER'S OWN table (the same one
+  // SuggestPrompts reads), never from CONTEXT, which stays data: the person's
+  // intent, every fact and their language are kept; a vague part, place, colour
+  // or light is named (a material only when the text or the context states it);
+  // filler is cut; at most 40 words. For a field the server's table marks as
+  // describing a RESULT (the mask retouch), the answer describes what should be
+  // seen and drops the operation words. STEER without a known workflow/field
+  // pair is InvalidArgument (`workflow` / `field_key`, `unknown`).
   | "ENHANCE_TEXT_MODE_STEER";
 // EnhanceTextField names WHICH field is being rewritten. It is an enum and not a
 // string on purpose (review M-07): the server maps it to its own fixed phrase in
@@ -6256,6 +6259,12 @@ export type EnhanceTextRequest = {
   // sentence end (. ! ?) inside the limit — for PROMPT, a list of descriptors,
   // also at the last comma or semicolon — or at the limit when there is none.
   maxRunes: number | undefined;
+  // STEER only: a GetDesignBandResponse.playground_workflows key and the field
+  // key of that workflow's prompt (the SuggestPrompts table). Required for STEER,
+  // ignored by every other mode. The server names the tool and the field from
+  // its own table; nothing the request carries becomes an instruction.
+  workflow: string | undefined;
+  fieldKey: string | undefined;
 };
 
 export type EnhanceTextResponse = {
