@@ -5,7 +5,6 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useId, useMemo, useState, type ChangeEvent } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
-import { AiEnhance } from 'ui/components/ai-enhance';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
@@ -14,7 +13,6 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
 import { Tiles } from 'ui/components/tiles';
 
 import type { TechCardFormData } from '../schema';
@@ -52,11 +50,13 @@ import { benchSides, pictureOffersSplit } from './render/model';
 import { useSplitToInput } from './split-to-input';
 import { ACTIVE_VIEWS, DETAIL_VIEW, normaliseViewKey, viewLabel } from './views';
 import { cardOnScreen, useDesignWrites } from './use-design-band';
+import { WORDS_MAX, WordsField } from './words-field';
 import {
   dropWords,
   followWords,
   lockWords,
   offerWords,
+  omittedOf,
   pickShownWords,
   settleWords,
   useWordsSeed,
@@ -143,12 +143,11 @@ import {
  * фантомную пустоту скрытого нативного `<select>`.
  */
 /**
- * Потолок `garmentDescription` — ЕДИНСТВЕННОЕ НАПИСАНИЕ ЭТОГО ЧИСЛА. Его читают `maxLength`
- * самого поля, засев фактами (`composeWords` — опускает секции ЦЕЛИКОМ, а не режет хвост) и
- * `ai ✦` (`maxRunes`). Два разных потолка на одно поле — это способ потерять текст на том из них,
- * который меньше (ровно тот же довод, что у `CONCEPT_MAX` в `./mood-board`).
+ * Потолок `garmentDescription` — `WORDS_MAX` органа слов (`./words-field.tsx`), ЕДИНСТВЕННОЕ
+ * НАПИСАНИЕ ЭТОГО ЧИСЛА: его читают `maxLength` поля, счётчик, `ai ✦` и засев фактами ниже
+ * (`composeWords` — опускает секции ЦЕЛИКОМ, а не режет хвост). Орган общий с IN WORDS рендера
+ * (O-61), поэтому и число живёт при нём.
  */
-const GARMENT_MAX = 2000;
 
 /**
  * ЗАМОК ЗАСЕВА WORDS НА СЕССИЮ (D-20'') и сам засев (D-20'''') живут в `words-seed.ts`: засев в
@@ -665,7 +664,7 @@ export function ReferencesSection({
    * тоже снимает `loading`, но словаря нет — засев вышел бы без пути категории и замкнулся на сессию.
    */
   const facts = useCardFacts(isBoardRow);
-  const composed = useMemo(() => composeWords(facts, GARMENT_MAX), [facts]);
+  const composed = useMemo(() => composeWords(facts, WORDS_MAX), [facts]);
   const factsContext = useMemo(() => cardFactsContext(facts), [facts]);
   const { loading: dictionaryLoading, dictionary } = useDictionary();
   const factsReady = !dictionaryLoading && !!dictionary;
@@ -847,12 +846,10 @@ export function ReferencesSection({
   const shown = pickShownWords(seed, garment.field.value, wordsLive);
   /** Кнопке нечего чистить — она выключена, а не спрятана: пустое место не объясняет, куда она делась. */
   const garmentChars = shown.trim().length;
-  /* Счётчик внутри поля считает СЫРУЮ длину — ту же, по которой режет `maxLength`; разбор у поля. */
-  const garmentLen = shown.length;
   const nothingToClear = refOf.size === 0 && garmentChars === 0;
   /* Сколько секций не влезло — из засева: строка переживает смену шага, пока на экране тот же текст,
      что засеян. */
-  const omittedShown = seed && seed.omitted > 0 && shown === seed.text ? seed.omitted : 0;
+  const omittedShown = omittedOf(seed, shown);
 
   return (
     <Section
@@ -979,88 +976,34 @@ export function ReferencesSection({
         >
           words
         </Text>
-        <label htmlFor={garmentId} className='sr-only'>
-          words for the model
-        </label>
-        {/* ═══ ПРАВЫЙ НИЖНИЙ УГОЛ ПОЛЯ — СЧЁТЧИК И `ai ✦`, ОДНОЙ СТРОКОЙ (r3 п.7 + D-20) ═════════
-            Владелец: «счётчик characters у WORDS — внутри поля снизу справа» (r3) и «WORDS … с AI
-            ENHANCE» (T24). Угол один, органов два — поэтому они стоят в нём ОДНОЙ СТРОКОЙ: число
-            `N / 2000` и сразу за ним тихая кнопка `ai ✦` (контракт `AiEnhance`: правый нижний угол
-            обёртки поля). Своё абсолютное место кнопки снято (`static`), чтобы она не легла на
-            счётчик, — строку держит обёртка.
-
-            ⚠ ЧИСЛО — СЫРАЯ ДЛИНА, А НЕ ОБРЕЗАННАЯ: режет `maxLength` по сырой длине.
-            ⚠ `pointer-events: none` НЕСУЩИЙ, и кнопка его ОТМЕНЯЕТ для себя: угол лежит НАД полем, и
-            клик в него мимо кнопки обязан ставить каретку. Полка под угол — нижний отступ поля
-            (30px, инлайном: класса такого роста в собранном CSS может не быть). */}
-        <div className='relative'>
-          <Textarea
-            {...garment.field}
-            data-field='garmentDescription'
-            id={garmentId}
-            disabled={readOnly}
-            readOnly={wordsBusy}
-            /* D-20'''': поле показывает засев, пока значение формы пусто; первая правка отдаёт в форму
-               то, что человек видит и поправил, — «грязным», как любая правка, — и засев больше не
-               подставляется (стёртое руками остаётся пустым). */
-            value={shown}
-            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-              garment.field.onChange(event);
-              settleWords(techCardId, event.target.value);
-            }}
-            rows={3}
-            maxLength={GARMENT_MAX}
-            placeholder='what this flat has to show'
-            aria-label='words for the model'
-            style={{ paddingBottom: 30 }}
-            className='resize-y'
-          />
-          <div
-            data-words-corner=''
-            /* `right: 16`, а не 6: в самом углу стоит ручка `resize-y` поля, и кнопка на ней
-               закрывала бы её (замерено снимком стенда). */
-            style={{
-              position: 'absolute',
-              bottom: 6,
-              right: 16,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              pointerEvents: 'none',
-            }}
-          >
-            <Text
-              size='nano'
-              variant='label'
-              component='span'
-              data-words-count={garmentLen}
-              className='tabular-nums'
-            >
-              {garmentLen} / {GARMENT_MAX}
-            </Text>
-            <AiEnhance
-              field='words'
-              value={shown}
-              context={factsContext}
-              maxRunes={GARMENT_MAX}
-              disabled={readOnly || wordsBusy}
-              className='static pointer-events-auto'
-              onApply={(text) => {
-                setValue('garmentDescription', text, { shouldDirty: true });
-                settleWords(techCardId, text);
-              }}
-            />
-          </div>
-        </div>
-        {/* ЗАСЕВ НЕ ВЛЕЗ ЦЕЛИКОМ — сказано числом секций, а не молчанием (D-20''): пока текст тот,
-            что засеян (число живёт в сессионном замке и переживает смену шага); первая же правка
-            делает строку неправдой, и она уходит. */}
-        {omittedShown > 0 && (
-          <Text size='micro' variant='label' component='p' data-words-omitted={omittedShown}>
-            (+{omittedShown} section{omittedShown === 1 ? '' : 's'} omitted — the words hold{' '}
-            {GARMENT_MAX} characters)
-          </Text>
-        )}
+        {/* ═══ ОРГАН ПОЛЯ — ОБЩИЙ С IN WORDS РЕНДЕРА (27.09, O-61, D-60): `./words-field.tsx` ═══════
+            Поле, счётчик `N / 2000` и `ai ✦` в правом нижнем углу, строка «+N omitted» — один орган
+            на оба экрана, вынесенный отсюда без изменения поведения: те же пропы, тот же DOM. Здесь
+            остаётся только то, что знает флэт: поле формы, засев и замок входа. */}
+        <WordsField
+          {...garment.field}
+          data-field='garmentDescription'
+          id={garmentId}
+          label='words for the model'
+          disabled={readOnly}
+          readOnly={wordsBusy}
+          /* D-20'''': поле показывает засев, пока значение формы пусто; первая правка отдаёт в форму
+             то, что человек видит и поправил, — «грязным», как любая правка, — и засев больше не
+             подставляется (стёртое руками остаётся пустым). */
+          value={shown}
+          onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+            garment.field.onChange(event);
+            settleWords(techCardId, event.target.value);
+          }}
+          placeholder='what this flat has to show'
+          omitted={omittedShown}
+          aiContext={factsContext}
+          aiDisabled={readOnly || wordsBusy}
+          onApply={(text) => {
+            setValue('garmentDescription', text, { shouldDirty: true });
+            settleWords(techCardId, text);
+          }}
+        />
       </div>
 
       {/* ═══ РЯДЫ ПРОГОНА — ОДИН КОМПОНЕНТ, ОДИН РИТМ (r3 п.5; ряд источников снят D-20) ═══════════

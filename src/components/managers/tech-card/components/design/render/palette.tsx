@@ -11,7 +11,6 @@ import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
-import Input from 'ui/components/input';
 import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
@@ -35,12 +34,14 @@ import { GROUP_GAP, GROUP_SEAM } from '../core';
 import { CornerLabel } from '../pattern/organs';
 import type { ClothSlot } from '../pattern/slot-fabrics';
 import { PictureTile, TILE_CORNER, TILE_QUIET } from '../picture-tile';
+import { WordsField } from '../words-field';
+import { omittedOf, useWordsSeed } from '../words-seed';
 import { PantonePicker } from '../../pantone-picker';
 import { PANTONE_SWATCHES, findPantone } from '../../pantone-swatches';
 import { benchSides } from './model';
 import { ClothIsRow } from './cloth-is';
 import { boundClothsOf, type BoundCloth, type ColourDraft } from './drafts';
-import { fabricStatement, hexIsPaintable } from './model';
+import { hexIsPaintable, statedWords } from './model';
 
 /**
  * TEXTURE & COLOUR — what a render is clothed and coloured with, and the ONLY place on the band
@@ -1003,6 +1004,135 @@ function ColourTile({ state, disabled }: { state: ColourDraft; disabled?: boolea
   );
 }
 
+/**
+ * ═══ КОНТЕКСТ `ai ✦` У IN WORDS — ТКАНЬ И ЦВЕТ ЭТОГО ПРОГОНА (O-61, D-60) ══════════════════════
+ *
+ * `AiEnhance` принимает контекст: факты, которые модель правки вправе назвать, но не выдумывать
+ * (сервер: «never invent … materials … that are not in the input or the context»). У WORDS флэта это
+ * факты карточки (`cardFactsContext`); здесь — то, что знает только рендер: выбранные ткани (имя,
+ * плитка ли это паттерна, части, слова о ней), выбранный цвет и что сказано про саму ткань
+ * (прозрачность и граммаж — тем же композитором, что уезжает на провод, `statedWords`). Факты
+ * карточки уже стоят в самих словах по умолчанию, второй раз в контексте им делать нечего.
+ *
+ * ⚠ ЦВЕТ — HEX, А НЕ НОМЕР ПАНТОНА (D7): номер красильни — жетон, которого модель рисунка не знает,
+ * и ответ `ai ✦`, вписавший «18-1664 TCX» в слова, унёс бы его в промпт.
+ * ⚠ ПРЕДЕЛ — 2000 ЗНАКОВ КОНТЕКСТА НА СЕРВЕРЕ (`enhanceMaxContextRunes`, отказ `too_long`): строки
+ * кладутся целиком, пока влезают.
+ */
+const WORDS_CONTEXT_MAX = 2000;
+
+function renderWordsContext(state: ColourDraft): string {
+  const recipe = state.recipe;
+  const lines: string[] = [];
+  for (const f of recipe.fabrics ?? []) {
+    const name = (f.name ?? '').trim();
+    if (!name) continue;
+    const pattern = (f.kind ?? '').trim() === 'pattern' ? ' (a pattern tile)' : '';
+    const parts = (f.parts ?? '').trim();
+    const note = (f.words ?? '').trim();
+    lines.push(`cloth: ${name}${pattern}${parts ? `, on ${parts}` : ''}${note ? `: ${note}` : ''}`);
+  }
+  if (hexIsPaintable(recipe.hex)) lines.push(`colour: ${(recipe.hex ?? '').trim()}`);
+  const said = statedWords({ cloth: state.cloth });
+  if (said) lines.push(`the cloth is: ${said}`);
+  const kept: string[] = [];
+  let length = 0;
+  for (const line of lines) {
+    const add = line.length + (kept.length ? 1 : 0);
+    if (length + add > WORDS_CONTEXT_MAX) continue;
+    kept.push(line);
+    length += add;
+  }
+  return kept.join('\n');
+}
+
+/**
+ * ═══ IN WORDS — ТЕ ЖЕ СЛОВА И ТОТ ЖЕ ОРГАН, ЧТО WORDS ФЛЭТА (27.09, O-61, D-60) ═══════════════
+ *
+ * Владелец: «в FABRIC RENDER в IN WORDS подефолту должно быть тоже самое что и в WORDS во флете …
+ * с возможностью редактирования и что бы сама форма поля выглядела также как во флетах».
+ *
+ *   · ПОЛЕ — `WordsField`, тот же орган, что у флэта: textarea во всю ширину, счётчик `N / 2000` и
+ *     `ai ✦` в правом нижнем углу, строка «+N omitted». Здесь стоял однострочный `Input`.
+ *   · СЛОВА — `recipe.words` черновика, а он уже отдаёт СЛОВА НА ЭКРАНЕ: пока собственные пусты и
+ *     засев рендера не снят — те, что показывает WORDS флэта (разбор — в `useColourDraft`). Правка и
+ *     ответ `ai ✦` идут дверью `typed` и отдают показанное в рецепт; дальше слова свои.
+ *   · CLEAR — дверь группы, как была, и снимает засев РЕНДЕРА (`clear('words')`): поле пусто и не
+ *     засевается до перезагрузки страницы, WORDS флэта не тронуты. Нечего чистить — дверь погашена,
+ *     а не спрятана, как `clear the input ✕` флэта: пустое место не объясняет, куда она делась, а
+ *     прыгающая строка заголовка двигала бы поле под пальцами.
+ *   · ДВЕРИ «from construction ▸» БОЛЬШЕ НЕТ. Она стояла погашенной с причиной («a pasted part of
+ *     the construction is not on the wire») — мёртвая дверь; факты карточки теперь стоят в самом
+ *     поле с самого начала, ровно как у флэта, где эта дверь снята тем же доводом (T24, D-20).
+ *   · ПОДПИСЬ — линейка группы «in words», как у соседей «cloth and colour» и «cloth is»: у
+ *     рендера своя грамматика заголовков, а одинаковым владелец просил само поле.
+ *
+ * ⚠ ОБЁРТКА ОРГАНА — ОДИН `<div>`: соседом линейки группы должен быть блок, от которого меряется
+ * зазор `GROUP_GAP` (r3 п.34), а орган — фрагмент (подпись для читалки, поле, строка «omitted»).
+ */
+function InWords({
+  state,
+  techCardId,
+  disabled,
+}: {
+  state: ColourDraft;
+  techCardId: number;
+  disabled?: boolean;
+}): JSX.Element {
+  const words = state.recipe.words ?? '';
+  /* Строка «+N omitted» — по засеву флэта: рендер показывает его слова, и правда о них та же. */
+  const seed = useWordsSeed(techCardId);
+  return (
+    <div>
+      <GroupLabel
+        flush
+        className={GROUP_GAP}
+        action={
+          disabled ? undefined : (
+            <Button
+              variant='secondary'
+              size='xs'
+              data-words-clear=''
+              disabled={words.trim() === ''}
+              title='takes the words off this run — WORDS on the flat stay'
+              onClick={() => state.clear('words')}
+            >
+              clear
+            </Button>
+          )
+        }
+      >
+        in words
+      </GroupLabel>
+      <div data-render-words=''>
+        <WordsField
+          id='design-fabric-words'
+          name='design-fabric-words'
+          label='the cloth in words'
+          value={words}
+          disabled={disabled}
+          placeholder='fine rib jersey, matte'
+          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+            state.typed({ words: e.target.value })
+          }
+          omitted={omittedOf(seed, words)}
+          aiContext={renderWordsContext(state)}
+          aiDisabled={disabled}
+          onApply={(text) => state.typed({ words: text })}
+        />
+      </div>
+      {/* ⚠ СТРОКА «the words above travel with the recipe · goes to the model as «…»» СНЯТА
+          (r3 п.26, слово владельца: «убрать»). Она эхом печатала СОДЕРЖИМОЕ поля, которое человек
+          в этот момент печатает, — и стояла в двух сантиметрах под ним. Всё, что она добавляла
+          сверх эха, — оговорка «уедет вместе с рецептом», а это ровно то, чем поле под подписью
+          IN WORDS и является.
+          ⚠ ЗНАНИЕ НЕ ПОТЕРЯНО, И ЭТО ПРОВЕРЯЕТСЯ, А НЕ ОБЕЩАЕТСЯ. Полная склейка (`statedWords` —
+          та же функция, что уезжает на провод) печатается в модалке «what the model gets», в одном
+          нажатии отсюда, в ряду GENERATE. Там её читают, когда ПРОВЕРЯЮТ, а не когда печатают. */}
+    </div>
+  );
+}
+
 export function Palette({
   disabled,
   /** Supplied by `RenderStudio`, so the palette and the studio's gate read one draft. */
@@ -1045,8 +1175,6 @@ export function Palette({
   disabled?: boolean;
 }): JSX.Element {
   const state = draft;
-  const recipe = state.recipe;
-  const stated = fabricStatement(recipe);
 
   /* ═══ ЦВЕТОВОЙ ПЛАН (фича A). `plan === undefined` — сервер про него не говорит вовсе, и тогда
      на экране нет ни двери, ни ряда: клиент новее сервера отправил бы прогон, у которого protojson
@@ -1241,49 +1369,9 @@ export function Palette({
       <ClothIsRow draft={state} disabled={disabled} />
 
       {/* ── IN WORDS — the free text of the recipe: the lowest rank, and a legal statement on its
-          own (mockup `r3WordsRow`). The door FROM CONSTRUCTION ▸ stands where the mockup puts it,
-          INERT WITH ITS REASON: the render prompt is assembled by the SERVER from the card, and a
-          pasted part of the construction is not on the wire — there is nothing to paste it into. */}
-      <div>
-        <GroupLabel
-          flush
-          className={GROUP_GAP}
-          action={
-            <span className='flex flex-wrap items-center gap-1.5'>
-              {!disabled && stated.words && (
-                <Button variant='secondary' size='xs' onClick={() => state.clear('words')}>
-                  clear
-                </Button>
-              )}
-              <InertDoor
-                label='from construction ▸'
-                reason='the render prompt is assembled by the server from the card itself; a pasted part of the construction is not on the wire, so there is nothing here to paste it into'
-              />
-            </span>
-          }
-        >
-          in words
-        </GroupLabel>
-        <Input
-          name='design-fabric-words'
-          aria-label='the cloth in words'
-          value={recipe.words ?? ''}
-          disabled={disabled}
-          placeholder='fine rib jersey, matte'
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-            state.typed({ words: e.target.value })
-          }
-        />
-        {/* ⚠ СТРОКА «the words above travel with the recipe · goes to the model as «…»» СНЯТА
-            (r3 п.26, слово владельца: «убрать»). Она эхом печатала СОДЕРЖИМОЕ поля, которое
-            человек в этот момент печатает, — и стояла в двух сантиметрах под ним. Всё, что она
-            добавляла сверх эха, — оговорка «уедет вместе с рецептом», а это ровно то, чем поле
-            под подписью IN WORDS и является.
-            ⚠ ЗНАНИЕ НЕ ПОТЕРЯНО, И ЭТО ПРОВЕРЯЕТСЯ, А НЕ ОБЕЩАЕТСЯ. Полная склейка (`statedWords`
-            — та же функция, что уезжает на провод) печатается в модалке «what the model gets», в
-            одном нажатии отсюда, в ряду GENERATE. Там её читают, когда ПРОВЕРЯЮТ, а не когда
-            печатают. */}
-      </div>
+          own (mockup `r3WordsRow`). O-61: the same organ and, by default, the same words as WORDS
+          on the flat — `InWords` above. */}
+      <InWords state={state} techCardId={techCardId} disabled={disabled} />
     </div>
   );
 }

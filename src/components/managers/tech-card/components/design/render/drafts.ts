@@ -9,8 +9,16 @@ import { useFormContext, type UseFormReturn } from 'react-hook-form';
 
 import type { TechCardFormData } from '../../schema';
 import { assetById, fabricUseOf } from '../assets/model';
+import { useTechCardAutosave } from '../autosave-contract';
 import { COLORWAY_NONE } from '../bench-kinds';
 import { bindingsOf, type ClothSlot } from '../pattern/slot-fabrics';
+import {
+  dropScreenWords,
+  pickScreenWords,
+  settleScreenWords,
+  useCardWords,
+  useScreenWordsDropped,
+} from '../words-seed';
 import {
   EMPTY_CLOTH,
   EMPTY_RECIPE,
@@ -349,6 +357,13 @@ function boundSeedOf(
 }
 
 export type ColourDraft = {
+  /**
+   * ЧТО УЕДЕТ — рецепт, который читают поле, ворота, опись «what the model gets» и тело прогона.
+   * ⚠ ЕГО `words` — СЛОВА НА ЭКРАНЕ (O-61, D-60): собственные слова черновика, а пока они пусты и
+   * засев рендера не снят — слова карточки на экране FLAT. В собственное состояние засев не пишется,
+   * пока человек не подействовал (`typed`, `materializeWords`), но читатель рецепта получает ровно
+   * то, что показано в поле: поле и провод не могут разойтись. Разбор — у засева в `useColourDraft`.
+   */
   recipe: common_DesignColourRecipe;
   /**
    * ЧТО СКАЗАНО ПРО САМУ ТКАНЬ ЭТОГО ПРОГОНА (H-13) — прозрачность и граммаж.
@@ -411,6 +426,14 @@ export type ColourDraft = {
    * значило бы допустить состояние «ссылка от одного цвета, hex от другого».
    */
   setColour: (pantone: string, hex: string) => void;
+  /**
+   * GENERATE (O-61, D-60): слова карточки, показанные в пустом IN WORDS, отдаются в рецепт — как
+   * флэт отдаёт свой засев в форму перед `flush` (`materializeWords`, `words-seed.ts`). Тело
+   * прогона несёт их и без этого (`recipe` отдаёт показанное); вызов делает их СВОИМИ черновику:
+   * дальше они правятся независимо, эхо ткани их не перебивает, и слова флэта, изменившись, их не
+   * заменят. Собственные слова уже стоят — трогать нечего.
+   */
+  materializeWords: () => void;
 };
 
 /**
@@ -508,6 +531,45 @@ export function useColourDraft(
    */
   const owned = useRef<OperatorOwned>({ ...NOTHING_OWNED });
   const { cloth, patchCloth, seedCloth } = useClothStatement(touched);
+
+  /**
+   * ═══ СЛОВА ПО УМОЛЧАНИЮ — СЛОВА КАРТОЧКИ НА ЭКРАНЕ FLAT (27.09, O-61, D-60) ═══════════════════
+   *
+   * Владелец: «в FABRIC RENDER в IN WORDS по дефолту должно быть то же самое, что и в WORDS во флете
+   * … с возможностью редактирования». Пока `recipe.words` пуст и засев рендера не снят, черновик
+   * отдаёт наружу ТЕ слова, что показывает WORDS флэта (`useCardWords` — тот же `pickShownWords`:
+   * значение формы, а при пустом — засев фактами). В собственное состояние они не пишутся: первое
+   * действие человека (правка, ответ `ai ✦`, GENERATE — `materializeWords`) отдаёт показанное в
+   * `recipe.words` через `typed`, и дальше слова правятся независимо от флэта. CLEAR и стёртое руками
+   * снимают засев РЕНДЕРА (`words-seed.ts`, замок «карточка + экран»); флэт при этом не тронут.
+   *
+   * ⚠ ПОЧЕМУ ЗДЕСЬ, А НЕ В ПОЛЕ. Рецепт черновика читают четверо — поле, ворота, опись и тело прогона
+   * (`render-studio.tsx`, одна точка композиции `sent`). Засев, живущий только в поле, показывал бы
+   * одно, а покупал другое: ворота запирали бы прогон при полном поле, опись говорила бы «none», а
+   * провод уносил бы пустые слова.
+   *
+   * ⚠ ЗАСЕВ НЕ «СВОЁ» ЗНАЧЕНИЕ, КАК И ЗАСЕВ ПРОШЛЫМ РЕЦЕПТОМ НИЖЕ: эхо ткани, у которой есть свои
+   * слова (`echoOf`, ветка `cloths`), ложится в пустые `words` и становится показанным — по контракту
+   * провода слова первой ткани едут в `colour.words`. Отданные в рецепт (правка, GENERATE) слова эхо
+   * уже не трогает.
+   *
+   * `live` — ТО ЖЕ, ЧТО У ФЛЭТА: там это «карточку можно писать, и она сохраняется» (`!readOnly &&
+   * autosave !== 'off'`). Проп `disabled` сюда не доходит и не нужен: автосейв страницы включён ТОЛЬКО
+   * на карточке, которую можно писать и которая не заморожена (`autosaveEnabled`, `index.tsx`), то есть
+   * `autosave !== 'off'` уже несёт обе половины. Без провайдера (стенд, печать) — `off`, и рендер, как
+   * и флэт, засева не показывает.
+   */
+  const wordsCard = techCardId ?? 0;
+  const wordsLive = useTechCardAutosave().status !== 'off';
+  const cardWords = useCardWords(wordsCard, wordsLive);
+  const wordsDropped = useScreenWordsDropped(wordsCard, 'render');
+  const shownWords = pickScreenWords(recipe.words, wordsDropped, cardWords);
+  /** На экране слова карточки, а не собственные: их и отдаёт в рецепт первое действие. */
+  const wordsSeeded = shownWords !== (recipe.words ?? '');
+  const shown = useMemo(
+    () => (wordsSeeded ? { ...recipe, words: shownWords } : recipe),
+    [recipe, wordsSeeded, shownWords],
+  );
 
   /**
    * ═══ ВЫБОР КОЛОРВЕЯ ЗАСЕВАЕТ ПОДАЧУ — ЭТО И ЕСТЬ ПРОБРОС ПАТТЕРНА В РЕНДЕР (G-15) ═══════════
@@ -907,8 +969,8 @@ export function useColourDraft(
     if (seed && colorwayId > 0 && !ofColorway) setPantone((colorway?.pantone ?? '').trim());
   }, [seed, bound, seedCloth, colorwayId, colorway, ofColorway]);
 
-  return {
-    recipe,
+  const draft: ColourDraft = {
+    recipe: shown,
     cloth,
     pantone,
     setColour: (nextPantone, hex) => {
@@ -943,6 +1005,8 @@ export function useColourDraft(
         owned.current[key] = value.trim() !== '';
       }
       setRecipe((prev) => ({ ...prev, ...clean }));
+      // O-61: слова, стёртые руками, остаются пустыми — засев рендера снят и под пальцами не вернётся.
+      if (clean.words !== undefined) settleScreenWords(wordsCard, 'render', clean.words);
     },
     echo: (source) => {
       touched.current = true;
@@ -980,8 +1044,14 @@ export function useColourDraft(
       }
       owned.current.words = false;
       setRecipe((prev) => ({ ...prev, words: '' }));
+      // O-61: CLEAR снимает засев РЕНДЕРА до перезагрузки страницы — WORDS флэта свои и остаются.
+      dropScreenWords(wordsCard, 'render');
+    },
+    materializeWords: () => {
+      if (wordsSeeded) draft.typed({ words: shownWords });
     },
   };
+  return draft;
 }
 
 /* ─────────────────────────── the 3D draft ─────────────────────────── */
