@@ -14,7 +14,9 @@ import { useSyncExternalStore } from 'react';
  *     the workbench stays where the work was done and says «newer run ready · show ›»;
  *   · a surface on another run (a history tile, the viewer opened elsewhere) only HOLDS the workbench
  *     while it is open — the history row it stands in must not turn into «on the bench» under it;
- *   · «show ›», this tab's GENERATE and archiving the pinned run let go.
+ *   · «show ›», this tab's GENERATE and archiving the pinned run let go — an archival OBSERVED on a
+ *     read that contains the run (27.09, D-49): newer rows pushing it off the band's first page are
+ *     not archival, and from then on the workbench reads it by id (`useRunById`).
  *
  * A STORE, NOT A PROP: the writers are the tiles of two hosts (the workbench and the history — both
  * draw `RunTile`), the two split modals and this tab's GENERATE (`useStartRun`); the readers are the

@@ -35,7 +35,7 @@ import {
   runStateWord,
   runStatus,
 } from './run-state';
-import { useElapsed } from './use-generation';
+import { useElapsed, useRunById } from './use-generation';
 
 /**
  * ═══ THE LATEST GENERATION, UNDER GENERATE (26.09, O-53, phase 1) ═══════════════════════════════
@@ -69,7 +69,8 @@ import { useElapsed } from './use-generation';
  * put and says one quiet line under the tiles — «newer run ready · show ›»; the click moves it to the
  * newest. This tab's GENERATE, archiving the pinned run and a card switch let go as well. A surface
  * elsewhere (a history tile, the viewer opened from another block) only holds the workbench while it
- * is open.
+ * is open. A kept run that newer rows push off the band's first page is NOT archived by that (27.09,
+ * D-49): it is read by id from then on, and only an archival seen on such a read lets it go.
  *
  * ONE COPY OF THE RUN'S TILES. The history below draws the run that stands here as its header line
  * alone — «run 12 · on the bench ↑» (`generation-history.tsx`), so the viewer row, the deck and the
@@ -170,9 +171,11 @@ export function LatestGeneration({
   const newestId = newest?.run.id ?? 0;
 
   /* ═══ THE PIN (`bench-store.ts`) — the run shown while somebody works on it ═══════════════════
-     The pinned run is read from the band, so a split's pieces and an edit's new picture arrive in
-     it; its last copy stands in if a run falls off the band's first page while it is pinned — an
-     open editor above it must not unmount for that either. */
+     The pinned run is read from the band while the band's first page holds it, so a split's pieces
+     and an edit's new picture arrive in it. Once newer rows push it off that page it is read BY ID
+     (`useRunById`, D-49) — absence from the first page is not archival — and the same re-reads bring
+     its new outputs. Its last copy stands in while a read is in flight or fails: an open editor
+     above it must not unmount for that either. */
   const bench = useBench(techCardId);
   const viewerOpen = useGalleryViewerOpen();
   const pin = bench.pin;
@@ -180,11 +183,18 @@ export function LatestGeneration({
     () => (pin ? (band.runs ?? []).find((r) => (r.id ?? 0) === pin.runId) ?? null : null),
     [band, pin],
   );
+  const byId = useRunById(techCardId, pin?.runId ?? 0, !!pin && !pinnedLive);
+  const byIdRun = byId.data?.run;
+  /** The pinned run from a read that CONTAINS it — the band's first page, or its own by-id read. */
+  const pinnedFresh =
+    pinnedLive ?? (pin && byIdRun && (byIdRun.id ?? 0) === pin.runId ? byIdRun : null);
   const [pinnedCopy, setPinnedCopy] = useState<common_DesignRun | null>(null);
-  if (pinnedLive && pinnedLive !== pinnedCopy) setPinnedCopy(pinnedLive);
+  if (pinnedFresh && pinnedFresh !== pinnedCopy) setPinnedCopy(pinnedFresh);
   const pinnedRun = pin
-    ? pinnedLive ?? (pinnedCopy && (pinnedCopy.id ?? 0) === pin.runId ? pinnedCopy : null)
+    ? pinnedFresh ?? (pinnedCopy && (pinnedCopy.id ?? 0) === pin.runId ? pinnedCopy : null)
     : null;
+  /** Archival OBSERVED (D-49): the archived stamp on a read that contains the run — never inferred. */
+  const archivedSeen = !!pinnedFresh && isRunArchived(pinnedFresh);
   const run = pinnedRun ?? newest?.run ?? null;
   const runId = run?.id ?? 0;
   /** Somebody is working — a surface open anywhere on the step, or the viewer. */
@@ -207,8 +217,11 @@ export function LatestGeneration({
     [techCardId],
   );
   /* The viewer opened from another block HOLDS the run (its row would rebuild under the frame on
-     stage). With nothing open any more, the pin goes unless it is sticky AND still has a reason: the
-     pinned run is in the band, not archived, and a newer run exists. */
+     stage). With nothing open any more, a hold goes; a STICKY pin stays until «show ›», this tab's
+     GENERATE (it unsticks, `useStartRun`) or an archival OBSERVED on a read that contains the run
+     (D-49) — or until the pinned run is itself the newest the workbench would show, where letting go
+     changes nothing on screen and the workbench follows the newest again. A run that merely left
+     the band's first page keeps its pin: it is read by id, and a newer run is what pushed it off. */
   useLayoutEffect(() => {
     if (!runId) return;
     if (viewerOpen) {
@@ -216,10 +229,8 @@ export function LatestGeneration({
       return;
     }
     if (!pin || held) return;
-    if (!pin.sticky || !pinnedLive || isRunArchived(pinnedLive) || newestId <= pin.runId) {
-      releasePin(techCardId);
-    }
-  }, [techCardId, runId, viewerOpen, held, pin, pinnedLive, newestId]);
+    if (!pin.sticky || archivedSeen || newestId === pin.runId) releasePin(techCardId);
+  }, [techCardId, runId, viewerOpen, held, pin, archivedSeen, newestId]);
 
   const [openDeck, setOpenDeck] = useState<number | null>(null);
   const [splitting, setSplitting] = useState<{
