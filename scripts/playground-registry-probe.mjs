@@ -241,6 +241,19 @@
 //   node scripts/playground-registry-probe.mjs --mutate-extend-wire  формат не уезжает в
 //                                                                   params.extend → краснеет AA
 //
+// C-14 (плитка 10: маршрут маски, kind=inpaint):
+//   AB · один RetouchInput → два тела: окно (freeform/retouch, как в фазе 2) и маска (inpaint:
+//        ask = слова, params.inpaint = {source, mask}, без freeform/extra/image); маршрут: маска
+//        только где run_kinds перечисляет inpaint И картинка знает свой размер, иначе окно и строка
+//        цены «states no size»; отказы маски без оболочки; загрузчик маски — одна загрузка на одну
+//        краску (повтор, параллельные нажатия), новая краска — новая, сбой забывается; честная
+//        строка по маршруту (панель и редактор — одна функция); retouchSourceId и рекол inpaint;
+//        maskableRun(extend|inpaint); угол Mask без retouch_zone не рисуется и при inpaint.
+//   node scripts/playground-registry-probe.mjs --mutate-inpaint-route маршрут маски без слова
+//                                                                   сервера → краснеет AB
+//   node scripts/playground-registry-probe.mjs --mutate-mask-once    загрузчик не помнит краску
+//                                                                   → краснеет AB
+//
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
 
@@ -319,6 +332,8 @@ const MUT = {
   extendGate: process.argv.includes('--mutate-extend-gate'),
   extendRun: process.argv.includes('--mutate-extend-run'),
   extendWire: process.argv.includes('--mutate-extend-wire'),
+  inpaintRoute: process.argv.includes('--mutate-inpaint-route'),
+  maskOnce: process.argv.includes('--mutate-mask-once'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -854,6 +869,33 @@ if (MUT.extendRun)
       '',
     ),
   );
+
+// ─── C-14: мутации маршрута маски.
+if (MUT.inpaintRoute)
+  retouchSwaps.push([
+    "if (!inpaintOffered(band)) return 'window';",
+    "if (inpaintOffered(band) && false) return 'window';",
+  ]);
+if (MUT.inpaintRoute && retouchSwaps.length === 1)
+  plugins.unshift({
+    name: 'c14-retouch',
+    setup(b) {
+      b.onLoad({ filter: RETOUCH }, async (args) => {
+        let src = await readFile(args.path, 'utf8');
+        for (const [needle, replacement] of retouchSwaps) {
+          if (!src.includes(needle))
+            throw new Error(`мутация C-14 не нашла свою строку: ${needle.slice(0, 60)}`);
+          src = src.replace(needle, replacement);
+        }
+        return { contents: src, loader: 'tsx' };
+      });
+    },
+  });
+fileSwaps(
+  'c14-mask-once',
+  /mask\/mask-upload\.ts$/,
+  MUT.maskOnce ? [['if (last && last.key === key) return last.id;', '']] : [],
+);
 
 const outfile = resolve(tmpdir(), `playground-registry-probe-${process.pid}.mjs`);
 try {
@@ -4218,6 +4260,218 @@ head('AA', 'C-13 Extend Image: тело extend, ворота по run_kinds, о�
     show(odd),
   );
 }
+
+// ─── AB · C-14: маршрут маски плитки 10 ─────────────────────────────────────────────────────────
+head(
+  'AB',
+  'C-14 Retouch: маршрут маски (inpaint), загрузка маски раз на краску, строки по маршруту',
+);
+await (async () => {
+  const sized = (id, width, height) => ({
+    id,
+    thumbnail: { mediaUrl: `https://x/${id}.jpg` },
+    media: { fullSize: { mediaUrl: `https://x/${id}-full.png`, width, height } },
+  });
+  const NEW = band({ runKinds: ['freeform', 'inpaint'], playgroundWorkflows: ['retouch_zone'] });
+  const OLD = band({ playgroundWorkflows: ['retouch_zone'] });
+  const NO_INPAINT = band({ runKinds: ['freeform'], playgroundWorkflows: ['retouch_zone'] });
+  const pic = sized(800, 1024, 1536);
+  const bare = media(801);
+  const stroke = [{ size: 0.03, points: [{ x: 0.5, y: 0.5 }] }];
+  const zone = M.zoneOfStrokes(stroke, 1024 / 1536);
+
+  // the route
+  ck(M.retouchRoute(OLD, pic) === 'window', 'старый сервер (run_kinds нет) → окно фазы 2');
+  ck(M.retouchRoute(NO_INPAINT, pic) === 'window', 'run_kinds без inpaint → окно');
+  ck(M.retouchRoute(NEW, pic) === 'mask', 'run_kinds с inpaint и размер картинки известен → маска');
+  ck(
+    M.retouchRoute(NEW, bare) === 'window',
+    'маска предложена, но размер 0×0 → окно для ЭТОЙ картинки',
+  );
+  ck(
+    M.retouchPriceLine(NEW, bare) ===
+      'this picture states no size; the rectangle path is used · 1 picture · priced by the server when the run starts' &&
+      M.retouchPriceLine(NEW, pic) === '1 picture · priced by the server when the run starts' &&
+      M.retouchPriceLine(OLD, bare) === '1 picture · priced by the server when the run starts',
+    'строка цены: «states no size» только где маска предложена, а картинка без размера',
+    M.retouchPriceLine(NEW, bare),
+  );
+
+  // one RetouchInput, two bodies (written by hand)
+  const input = { media: pic, zone, painted: true, words: '  remove the stain  ' };
+  const window = M.retouchRequest({ ...input, route: 'window' });
+  ck(
+    window.kind === 'freeform' &&
+      window.ask === '' &&
+      window.params.freeform.preset === 'retouch' &&
+      window.params.freeform.items[0].mediaId === 800 &&
+      window.params.freeform.items[0].texts[0] === 'remove the stain' &&
+      window.params.inpaint === undefined,
+    'окно: тело фазы 2 (freeform/retouch, слова в texts[0]), inpaint не уезжает',
+    show(window),
+  );
+  const mask = M.retouchRequest({ ...input, route: 'mask', maskMediaId: 5001 });
+  ck(
+    same(mask, {
+      kind: 'inpaint',
+      ask: 'remove the stain',
+      params: { ...EMPTY_PARAMS, inpaint: { sourceMediaId: 800, maskMediaId: 5001 } },
+    }),
+    'маска: kind inpaint, ask = слова, params.inpaint = {800, 5001}, больше ничего',
+    show(mask),
+  );
+  ck(
+    same(M.retouchRequest({ ...input, route: 'mask' }), window),
+    'маршрут маски без загруженной маски (0) — тело не inpaint: маска приходит только с нажатием',
+  );
+
+  // refusals on the mask route: no hull
+  ck(
+    M.retouchRefusal({ media: pic, zone: null, painted: true, words: 'x', route: 'mask' }) === null,
+    'маска: нарисованное без годной оболочки не отказывает (оболочка не уезжает)',
+  );
+  ck(
+    M.retouchRefusal({ media: pic, zone: null, painted: true, words: 'x', route: 'window' })
+      ?.reason === 'the painted zone is too small: paint a larger one',
+    'окно: та же краска — «too small», как в фазе 2',
+  );
+  ck(
+    M.retouchRefusal({ media: pic, zone: null, painted: false, words: 'x', route: 'mask' })
+      ?.reason === 'paint the zone to change' &&
+      M.retouchRefusal({ media: pic, zone: null, painted: true, words: ' ', route: 'mask' })
+        ?.reason === 'describe what should be there' &&
+      M.retouchRefusal({
+        media: sized(9, 40, 90),
+        zone: null,
+        painted: true,
+        words: 'x',
+        route: 'mask',
+      })?.reason === 'this picture is 40×90 px; a retouch needs at least 64 px on each side',
+    'маска: порядок двери — картинка → краска → слова → размер',
+  );
+
+  // the uploader: once per paint
+  let uploads = 0;
+  let painted = 0;
+  const up = M.createMaskUploader(
+    async (strokes, w, h) => {
+      painted++;
+      return `data:image/png;base64,${w}x${h}:${strokes.length}`;
+    },
+    async () => 5000 + ++uploads,
+  );
+  const a1 = await up.maskFor(800, stroke, 1024, 1536);
+  const a2 = await up.maskFor(800, stroke, 1024, 1536);
+  ck(
+    a1 === a2 && uploads === 1,
+    'та же краска дважды → одна загрузка, тот же id',
+    `${a1} ${a2} (${uploads})`,
+  );
+  const both = await Promise.all([
+    up.maskFor(800, [...stroke, ...stroke], 1024, 1536),
+    up.maskFor(800, [...stroke, ...stroke], 1024, 1536),
+  ]);
+  ck(
+    both[0] === both[1] && uploads === 2,
+    'новая краска → новая загрузка; два быстрых нажатия — одна',
+    `${both} (${uploads})`,
+  );
+  const again = await up.maskFor(800, stroke, 1024, 1536);
+  ck(
+    again !== a1 && uploads === 3,
+    'назад к прежней краске (undo) — ключ сменился дважды, загрузка новая',
+  );
+  ck(
+    M.maskKey(800, stroke, 1024, 1536) !== M.maskKey(801, stroke, 1024, 1536) &&
+      M.maskKey(800, stroke, 1024, 1536) !== M.maskKey(800, stroke, 1024, 1537),
+    'ключ краски различает картинку и её размер',
+  );
+  const body1 = M.retouchRequest({ ...input, route: 'mask', maskMediaId: a1 });
+  const body2 = M.retouchRequest({ ...input, route: 'mask', maskMediaId: a2 });
+  ck(
+    same(body1, body2),
+    'два нажатия одной краски → одно и то же тело (отпечаток журнала повторится)',
+  );
+  let fails = 1;
+  let tries = 0;
+  const flaky = M.createMaskUploader(
+    async () => 'data:image/png;base64,AA',
+    async () => {
+      tries++;
+      if (fails-- > 0) throw new Error('network');
+      return 77;
+    },
+  );
+  const firstTry = await flaky.maskFor(1, stroke, 10, 10).catch((e) => e.message);
+  const secondTry = await flaky.maskFor(1, stroke, 10, 10);
+  ck(
+    firstTry === 'network' && secondTry === 77 && tries === 2,
+    'сбой загрузки не запоминается: следующее нажатие грузит снова',
+  );
+  const noCanvas = M.createMaskUploader(
+    async () => null,
+    async () => 1,
+  );
+  ck(
+    (await noCanvas.maskFor(1, stroke, 10, 10).catch((e) => e.message)) ===
+      'the mask could not be drawn at 10×10 px',
+    'маску не нарисовать (холст) → слова, без загрузки',
+  );
+
+  // caveat per route — the panel and the editor read one function
+  ck(
+    M.retouchCaveat(OLD) === M.RETOUCH_CAVEAT &&
+      M.retouchCaveat(NEW) === M.RETOUCH_MASK_CAVEAT &&
+      M.retouchCaveat(NEW, bare) === M.RETOUCH_CAVEAT &&
+      M.RETOUCH_MASK_CAVEAT === 'Only the painted zone changes; everything else keeps its pixels.',
+    'честная строка: окно — «rectangle may change», маска — «only the painted zone», без размера — окно',
+  );
+  const pNew = M.panelMarkup(NEW, 'retouch_zone');
+  const pOld = M.panelMarkup(OLD, 'retouch_zone');
+  ck(
+    pNew.includes('Only the painted zone changes') &&
+      !pNew.includes('The rectangle around your zone may change'),
+    'панель плитки 10 на сервере с inpaint: строки про прямоугольник нет',
+  );
+  ck(
+    pOld.includes('The rectangle around your zone may change') &&
+      !pOld.includes('Only the painted zone'),
+    'панель плитки 10 на старом сервере: прежняя строка',
+  );
+
+  // run → tile, source, recall
+  const INPAINT = {
+    id: 93,
+    kind: 'inpaint',
+    status: 'done',
+    ask: 'a clean pocket',
+    params: { ...EMPTY_PARAMS, inpaint: { sourceMediaId: 800, maskMediaId: 5001 } },
+  };
+  ck(
+    M.retouchSourceId(INPAINT) === 800,
+    'retouchSourceId(inpaint) = params.inpaint.source_media_id',
+  );
+  ck(M.retouchSourceId({ kind: 'inpaint' }) === 0, 'заглушка inpaint без params → 0');
+  const rec = run('retouch_zone').recall(INPAINT, new Map([[800, pic]]), { band: NEW });
+  ck(
+    rec.draft.texts.change_text === 'a clean pocket' &&
+      (rec.draft.images.source ?? [])[0]?.id === 800 &&
+      rec.draft.flags[M.RETOUCH_MASKING_KEY] === true &&
+      rec.lost === 0,
+    'рекол inpaint: картинка в слоте, маска открыта, слова из ask',
+    show(rec.draft),
+  );
+  ck(
+    M.maskableRun({ kind: 'extend' }) &&
+      M.maskableRun({ kind: 'inpaint' }) &&
+      !M.maskableRun({ kind: 'threed' }),
+    'maskableRun: ответы extend и inpaint — растры, угол Mask у них есть',
+  );
+  ck(
+    !M.retouchOffered(band({ runKinds: ['inpaint'], playgroundWorkflows: ['create_edit'] })),
+    'inpaint в run_kinds без retouch_zone в списке: Mask не предлагается (плитка решает)',
+  );
+})();
 
 const expected = MUTATED ? ' (прогон С МУТАЦИЕЙ — провалы ожидаются)' : '';
 console.log(

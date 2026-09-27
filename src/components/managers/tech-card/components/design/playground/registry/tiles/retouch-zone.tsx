@@ -17,7 +17,7 @@ import { PRICED_LATER } from '../../../core';
 import { slotCounter } from '../../fields';
 import { cornerText, type MaskPoint } from '../../mask/geometry';
 import { RetouchSource } from '../../mask/retouch-source';
-import { emptyParams, imagesOf, workflowOffered } from '../common';
+import { emptyParams, imagesOf, runKindOffered, workflowOffered } from '../common';
 import { matchesWorkflow, retouchSourceId } from '../run-workflow';
 import {
   EMPTY_DRAFT,
@@ -51,6 +51,17 @@ import {
  * ⚠ PHASE 2 REDRAWS A RECTANGLE (window.go): the server crops a box around the zone, padded to at
  * least 512 px, has it redrawn and pastes the whole box back. «The rectangle around your zone may
  * change» is said on the panel and under the brush [Codex 7].
+ *
+ * ═══ PHASE 3 · THE MASK ROUTE (C-14, kind `inpaint`) ═══
+ * Where `run_kinds` (band 32) lists `inpaint` — and only there; absent = the phase-2 path exactly,
+ * the rollback behaviour — the paint itself travels: the editor uploads the mask PNG once per paint
+ * (`../../mask/mask-upload.ts`) and the request is
+ *   kind 'inpaint', ask = the words (the fill route reads plain words: `words_required`);
+ *   params.inpaint = {source_media_id, mask_media_id}; no freeform, no extra ids (`one_list_per_fact`),
+ *   no image. The door checks the mask's size, PNG and paint before any money; the server
+ *   composites through the mask, so only the painted zone changes — and the rectangle line goes.
+ * A picture whose media row states no pixel size cannot be given a mask of its size: that one
+ * picture takes the phase-2 path, and the price line says so.
  */
 
 /** The prompt's field key — also its Ideas and Recently used key (`ideas.ts` `retouch_zone`). */
@@ -64,12 +75,47 @@ export const RETOUCH_WORDS_MAX = 1000;
 /** A window cannot be cut from a picture under this on either side (`WindowMinSourcePx`). */
 export const RETOUCH_MIN_SOURCE_PX = 64;
 
-/** The honest line of phase 2, verbatim wherever the retouch is offered [Codex 7]. */
+/** The honest line of phase 2, verbatim wherever the window retouch is offered [Codex 7]. */
 export const RETOUCH_CAVEAT = 'The rectangle around your zone may change.';
+/** The line of the mask route (C-14): the server composites through the painted mask. */
+export const RETOUCH_MASK_CAVEAT =
+  'Only the painted zone changes; everything else keeps its pixels.';
+/** Said in the price line when the mask route is offered but this picture states no size. */
+export const RETOUCH_NO_SIZE = 'this picture states no size; the rectangle path is used';
 
 /** Whether THIS server takes a retouch — the Mask action is not drawn at all when it does not. */
 export const retouchOffered = (band: GetDesignBandResponse): boolean =>
   workflowOffered(band, 'retouch_zone').available;
+
+/**
+ * Whether THIS server takes the mask route (C-14): `run_kinds` lists `inpaint`. Absent (a server
+ * older than phase 3) or missing → the phase-2 window path, exactly as before.
+ */
+export const inpaintOffered = (band: GetDesignBandResponse): boolean =>
+  runKindOffered(band, 'inpaint').available;
+
+/** The two routes a retouch can take. */
+export type RetouchRoute = 'mask' | 'window';
+
+/**
+ * THE ROUTE OF ONE RETOUCH: the mask where the server takes it AND the picture states its pixel size
+ * (the mask is painted at that size), else the phase-2 window. With no picture, the server decides.
+ */
+export function retouchRoute(
+  band: GetDesignBandResponse,
+  media?: common_MediaFull | null,
+): RetouchRoute {
+  if (!inpaintOffered(band)) return 'window';
+  if (media === undefined || media === null) return 'mask';
+  const { w, h } = sourceSize(media);
+  return w > 0 && h > 0 ? 'mask' : 'window';
+}
+
+/** The honest line under the brush and on the panel — ONE function for both (C-14). */
+export const retouchCaveat = (
+  band: GetDesignBandResponse,
+  media?: common_MediaFull | null,
+): string => (retouchRoute(band, media) === 'mask' ? RETOUCH_MASK_CAVEAT : RETOUCH_CAVEAT);
 
 /**
  * The pictures a Mask is offered on: rasters the playground made (freeform, cut-out, recolour).
@@ -77,7 +123,14 @@ export const retouchOffered = (band: GetDesignBandResponse): boolean =>
  */
 export function maskableRun(run: Pick<common_DesignRun, 'kind'>): boolean {
   const kind = (run.kind ?? '').trim().toLowerCase();
-  return kind === 'freeform' || kind === 'cutout' || kind === 'recolor';
+  return (
+    kind === 'freeform' ||
+    kind === 'cutout' ||
+    kind === 'recolor' ||
+    // Phase 3: an extend's and a mask retouch's answers are rasters too.
+    kind === 'extend' ||
+    kind === 'inpaint'
+  );
 }
 
 /** What one retouch is made of: the picture, the painted zone, the words. */
@@ -88,6 +141,13 @@ export type RetouchInput = {
   /** Whether anything at all is painted (tells «paint the zone» from «paint a larger zone»). */
   painted: boolean;
   words: string;
+  /** The route (C-14, `retouchRoute`). Absent = the phase-2 window. */
+  route?: RetouchRoute;
+  /**
+   * The uploaded mask of THIS paint (C-14) — set only at the press, after the one upload. `> 0` =
+   * the request is the mask route's; 0 / absent = the window's.
+   */
+  maskMediaId?: number;
 };
 
 /** The words as they leave: trimmed, at most the door's ceiling in characters (runes). */
@@ -102,13 +162,15 @@ function sourceSize(media: common_MediaFull | null): { w: number; h: number } {
 
 /**
  * EVERY REFUSAL THE SCREEN CAN MAKE FOR FREE, in the door's order: the region's shape, then one
- * region, then words, then the source size (`source_too_small`, checked after the shape). `null` =
- * ready.
+ * region, then words, then the source size (`source_too_small`, checked after the shape). On the
+ * mask route there is no region: picture → painted → words → size (the hull is never sent, so its
+ * size refuses nothing; the door counts the mask's own painted pixels). `null` = ready.
  */
 export function retouchRefusal(input: RetouchInput): Refusal | null {
   if (!input.media || (input.media.id ?? 0) <= 0) return { reason: 'pick a picture to retouch' };
   if (!input.painted) return { reason: 'paint the zone to change' };
-  if (!input.zone) return { reason: 'the painted zone is too small: paint a larger one' };
+  if (input.route !== 'mask' && !input.zone)
+    return { reason: 'the painted zone is too small: paint a larger one' };
   if (!retouchWords(input.words)) return { reason: 'describe what should be there' };
   const { w, h } = sourceSize(input.media);
   if (w > 0 && h > 0 && (w < RETOUCH_MIN_SOURCE_PX || h < RETOUCH_MIN_SOURCE_PX)) {
@@ -145,6 +207,14 @@ export function zoneToRegion(zone: readonly MaskPoint[]): common_TechCardAnnotat
 /** THE ONE WRITER OF A RETOUCH REQUEST (see the file head for every field and why). */
 export function retouchRequest(input: RetouchInput): RunRequest {
   const mediaId = input.media?.id ?? 0;
+  const maskMediaId = input.maskMediaId ?? 0;
+  if (maskMediaId > 0) {
+    return {
+      kind: 'inpaint',
+      ask: retouchWords(input.words),
+      params: { ...emptyParams(), inpaint: { sourceMediaId: mediaId, maskMediaId } },
+    };
+  }
   const items =
     mediaId > 0 && input.zone
       ? [
@@ -173,8 +243,22 @@ export function retouchRequest(input: RetouchInput): RunRequest {
  */
 export const RETOUCH_PRICE = `1 new picture per retouch · ${PRICED_LATER}`;
 
+/**
+ * The editor's price line (C-14): the same words, preceded by the one fact a person would otherwise
+ * not see — this picture falls back to the rectangle although the server takes a mask.
+ */
+export function retouchPriceLine(
+  band: GetDesignBandResponse,
+  media: common_MediaFull | null,
+): string {
+  const base = `1 picture · ${PRICED_LATER}`;
+  return inpaintOffered(band) && retouchRoute(band, media) === 'window'
+    ? `${RETOUCH_NO_SIZE} · ${base}`
+    : base;
+}
+
 /** The panel's words: the owner's 12.png, less the credit (we price in $, by the server). */
-function Explanation(): JSX.Element {
+function Explanation({ band }: { band: GetDesignBandResponse }): JSX.Element {
   return (
     <div className='flex max-w-[60ch] flex-col gap-3' data-retouch-explanation=''>
       <Text component='p' className='normal-case font-bold'>
@@ -185,7 +269,7 @@ function Explanation(): JSX.Element {
         change and describe what should be there. The retouch is generated in place.
       </Text>
       <Text size='micro' variant='label' component='p' className='normal-case'>
-        {RETOUCH_CAVEAT}
+        {retouchCaveat(band)}
       </Text>
       <Text
         size='micro'
@@ -208,7 +292,9 @@ const run: WorkflowRun = {
       key: 'how',
       title: 'How it works',
       glyph: 'text',
-      fields: [{ type: 'custom', key: 'explanation', render: () => <Explanation /> }],
+      fields: [
+        { type: 'custom', key: 'explanation', render: ({ band }) => <Explanation band={band} /> },
+      ],
     },
     {
       key: RETOUCH_SOURCE_KEY,
@@ -249,13 +335,17 @@ const run: WorkflowRun = {
    * «Run that again» on a retouch (Codex 5): its picture back in the panel's slot WITH THE MASK
    * EDITOR OPEN ON IT, and its words in the box. The zone is not carried: phase 2 froze a polygon,
    * the brush paints strokes, and a hull redrawn as paint would be a zone nobody painted — said, not
-   * guessed. The history offers this door only while the snapshot still carries that picture
+   * guessed. A mask retouch (C-14, `inpaint`) recalls the same way: its words are `ask`, and its mask
+   * is a PNG, not strokes the brush could edit — so it is not carried either. The history offers this door only while the snapshot still carries that picture
    * (`history-recall.tsx`, `handsOver`); a picture gone since is said here too.
    */
   recall: (past, media) => {
     const id = retouchSourceId(past);
     const found = id > 0 ? media.get(id) ?? null : null;
-    const words = past.params?.freeform?.items?.[0]?.texts?.[0] ?? '';
+    const words =
+      (past.kind ?? '').trim().toLowerCase() === 'inpaint'
+        ? (past.ask ?? '').trim()
+        : past.params?.freeform?.items?.[0]?.texts?.[0] ?? '';
     return {
       draft: {
         ...EMPTY_DRAFT,

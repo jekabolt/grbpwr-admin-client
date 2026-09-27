@@ -22,9 +22,10 @@
  * (padded to ≥ 512 px), has it redrawn and pastes the whole rectangle back. The polygon decides
  * WHERE; it does not protect the pixels around the zone — the editor says so under the brush.
  *
- * ⚠ PHASE 3 SEAM. A real inpaint mask is the SAME strokes rasterised white on black at the
+ * ⚠ PHASE 3 (C-14). A real inpaint mask is the SAME strokes rasterised white on black at the
  * picture's own size: `paintStrokes` is the one painter (the overlay on screen and the mask use
- * it), and `maskPng` below is the whole of the phase-3 half. Nothing uploads it in phase 2.
+ * it), and `maskPng` below draws it; `mask-upload.ts` sends it once per paint where the server
+ * lists `inpaint` in `run_kinds`. Elsewhere the polygon above is still the whole request.
  */
 
 /** A point in fractions of the picture: x of its width, y of its height, both 0..1. */
@@ -209,9 +210,9 @@ export function paintStrokes(
 }
 
 /**
- * PHASE 3 (not called in phase 2): the inpaint mask — white where painted, black elsewhere, at the
- * picture's own pixel size, as a PNG. The upload, the dimension check against the source and the
- * composite through the mask are the phase-3 server's (05-CODEX-S02 §7).
+ * THE INPAINT MASK (C-14): white where painted, black elsewhere, at the picture's own pixel size, as
+ * a PNG (white = repaint, the fill route's polarity). Uploaded by `mask-upload.ts`; the dimension
+ * check against the source and the composite through the mask are the server's.
  */
 export async function maskPng(
   strokes: readonly MaskStroke[],

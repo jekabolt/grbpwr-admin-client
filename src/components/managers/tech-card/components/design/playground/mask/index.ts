@@ -8,3 +8,12 @@ export {
   type MaskPoint,
   type MaskStroke,
 } from './geometry';
+export {
+  createMaskUploader,
+  maskDataUrl,
+  maskKey,
+  uploadMask,
+  type MaskPainter,
+  type MaskUploadFn,
+  type MaskUploader,
+} from './mask-upload';

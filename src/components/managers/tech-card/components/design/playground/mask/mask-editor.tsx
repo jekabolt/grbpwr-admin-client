@@ -22,11 +22,13 @@ import { FoldSection, OptionRow, PromptField } from '../fields';
 import { bandSuggestsPrompts, ideaMediaIds, ideasContext } from '../ideas-server';
 import { recentTextKey, rememberRecentText } from '../recent';
 import {
-  RETOUCH_CAVEAT,
   RETOUCH_WORDS_KEY,
   RETOUCH_WORDS_MAX,
+  retouchCaveat,
+  retouchPriceLine,
   retouchRefusal,
   retouchRequest,
+  retouchRoute,
 } from '../registry/tiles/retouch-zone';
 import {
   BRUSH_SIZES,
@@ -36,6 +38,7 @@ import {
   type MaskPoint,
   type MaskStroke,
 } from './geometry';
+import { createMaskUploader, maskDataUrl, uploadMask } from './mask-upload';
 
 /**
  * ═══ MASK — PAINT A ZONE OF A PICTURE, SAY WHAT GOES THERE, GENERATE (C-11, tile 10) ══════════════
@@ -47,8 +50,13 @@ import {
  * for any of these (owner: few buttons, never two for one action).
  *
  * THE REQUEST IS `retouchRequest`'s (the tile's one writer), fed the zone `zoneOfStrokes` makes of
- * the paint. The paint itself never leaves in phase 2: the server takes a polygon and redraws the
- * rectangle around it — «The rectangle around your zone may change», printed under the brush.
+ * the paint. On the phase-2 window route the paint never leaves: the server takes a polygon and
+ * redraws the rectangle around it — «The rectangle around your zone may change», under the brush.
+ * On the mask route (C-14: `run_kinds` lists `inpaint` and the picture states its pixel size) the
+ * press first uploads the mask PNG — ONCE PER PAINT (`mask-upload.ts`), so a second press on the
+ * same strokes sends the same request and the ledger's idempotency key repeats — then starts the
+ * `inpaint` run; the line under the brush says only the painted zone changes. The editor is frozen
+ * while the mask goes up; closed before it is up, nothing is started (and it says so).
  *
  * FOCUS GOES BACK TO THE DOOR THAT OPENED IT (G-02 m-4). The editor is opened by state from three
  * doors — a result tile's `mask` corner, the viewer's Mask (the viewer closes first, so its button is
@@ -120,8 +128,21 @@ export function MaskEditor({
   /** The stroke under the pointer — a ref, redrawn per move without a render per move. */
   const live = useRef<MaskStroke | null>(null);
 
+  /* The mask of this paint goes up once (C-14); `alive` stops a press whose upload outlived the
+     editor from starting a run nobody is looking at. */
+  const uploader = useRef(createMaskUploader(maskDataUrl, uploadMask));
+  const [uploading, setUploading] = useState(false);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  const route = retouchRoute(band, media);
   const zone = useMemo(() => (aspect ? zoneOfStrokes(strokes, aspect) : null), [strokes, aspect]);
-  const input = { media, zone, painted: strokes.length > 0, words };
+  const input = { media, zone, painted: strokes.length > 0, words, route };
   const refusal = retouchRefusal(input);
   const request = retouchRequest(input);
 
@@ -171,7 +192,7 @@ export function MaskEditor({
       y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
     };
   };
-  const frozen = disabled || run.isPending;
+  const frozen = disabled || run.isPending || uploading;
 
   const onDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (frozen || e.button !== 0) return;
@@ -197,10 +218,40 @@ export function MaskEditor({
     if (stroke) setStrokes((list) => [...list, stroke]);
   };
 
-  const generate = () => {
+  const generate = async () => {
     if (refusal || frozen) return;
     const said = words;
-    run.start(request, {
+    let wire = request;
+    if (route === 'mask') {
+      const full = media.media?.fullSize;
+      setUploading(true);
+      let maskMediaId = 0;
+      try {
+        maskMediaId = await uploader.current.maskFor(
+          media.id ?? 0,
+          strokes,
+          full?.width ?? 0,
+          full?.height ?? 0,
+        );
+      } catch (e) {
+        if (alive.current) setUploading(false);
+        showMessage(
+          `the mask did not upload, nothing was started: ${e instanceof Error ? e.message : String(e)}`,
+          'error',
+        );
+        return;
+      }
+      if (!alive.current) {
+        showMessage(
+          'the mask closed before its paint was uploaded; no retouch was started',
+          'error',
+        );
+        return;
+      }
+      setUploading(false);
+      wire = retouchRequest({ ...input, maskMediaId });
+    }
+    run.start(wire, {
       onAccepted: () => {
         rememberRecentText(recentTextKey('retouch_zone', RETOUCH_WORDS_KEY), said);
         /* WHERE IT LANDS, TRULY (G-02 m-2): the answer is a retouch, filed under Retouch a Zone
@@ -329,7 +380,7 @@ export function MaskEditor({
                     className='normal-case'
                     data-mask-caveat=''
                   >
-                    {RETOUCH_CAVEAT}
+                    {retouchCaveat(band, media)}
                   </Text>
                 </div>
               </FoldSection>
@@ -372,12 +423,18 @@ export function MaskEditor({
                 {refusal && !disabled && <LockBar reason={refusal.reason} />}
                 <GenerateRow
                   gate={refusal ? { ok: false, reason: refusal.reason } : { ok: true }}
-                  pending={run.isPending}
+                  pending={run.isPending || uploading}
                   disabled={disabled}
-                  onGenerate={generate}
+                  onGenerate={() => void generate()}
                   trailing={
-                    <Text size='micro' variant='label' component='span' className='min-w-0'>
-                      1 picture · priced by the server when the run starts
+                    <Text
+                      size='micro'
+                      variant='label'
+                      component='span'
+                      className='min-w-0'
+                      data-mask-price=''
+                    >
+                      {retouchPriceLine(band, media)}
                     </Text>
                   }
                 />

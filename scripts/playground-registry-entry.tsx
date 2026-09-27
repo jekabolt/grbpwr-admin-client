@@ -239,3 +239,16 @@ export {
 export { runKindOffered } from 'components/managers/tech-card/components/design/playground/registry/common';
 export { inPlaygroundRoom } from 'components/managers/tech-card/components/design/playground/registry';
 export { runRepresentation } from 'components/managers/tech-card/components/design/bench-kinds';
+// C-14 · the mask route of tile 10: the route, its words, the once-per-paint uploader.
+export {
+  RETOUCH_MASK_CAVEAT,
+  RETOUCH_NO_SIZE,
+  inpaintOffered,
+  retouchCaveat,
+  retouchPriceLine,
+  retouchRoute,
+} from 'components/managers/tech-card/components/design/playground/registry/tiles/retouch-zone';
+export {
+  createMaskUploader,
+  maskKey,
+} from 'components/managers/tech-card/components/design/playground/mask/mask-upload';
