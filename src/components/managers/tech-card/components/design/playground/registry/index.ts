@@ -10,6 +10,7 @@ import { DESIGN_VARIATIONS } from './tiles/design-variations';
 import { FABRIC_TO_IMAGE } from './tiles/fabric-to-image';
 import { GHOST_MANNEQUIN } from './tiles/ghost-mannequin';
 import { REMOVE_BACKGROUND } from './tiles/remove-background';
+import { RETOUCH_ZONE } from './tiles/retouch-zone';
 import { SWAP_FABRICS } from './tiles/swap-fabrics';
 import { VIRTUAL_TRY_ON } from './tiles/virtual-try-on';
 import type { WorkflowDef } from './types';
@@ -85,7 +86,7 @@ export const WORKFLOWS: readonly WorkflowDef[] = [
     key: 'retouch_zone',
     title: 'Retouch a Zone',
     blurb: 'Paint over part of a design and describe what should change there.',
-    gate: notYet,
+    ...RETOUCH_ZONE,
   },
   {
     key: 'create_edit',

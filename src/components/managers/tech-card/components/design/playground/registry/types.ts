@@ -294,6 +294,13 @@ export type ResultsDef = {
 /** The runnable half of a workflow. Absent on a tile this build cannot run yet. */
 export type WorkflowRun = {
   sections: readonly SectionDef[];
+  /**
+   * THE RUN STARTS SOMEWHERE ELSE (tile 10, C-11): the panel draws the sections — an explanation —
+   * and no generate row, and the results above the history are the room's pictures, the ones the
+   * run starts from. Retouch a Zone is bought from the Mask action on a picture; a GENERATE here
+   * would be a second button for one action.
+   */
+  startsElsewhere?: boolean;
   /** Every refusal the screen makes before money, in the server's order. `null` = ready. */
   validate: (draft: Draft, ctx: WireCtx) => Refusal | null;
   wire: (draft: Draft, ctx: WireCtx) => RunRequest;

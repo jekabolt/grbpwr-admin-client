@@ -18,6 +18,7 @@ import {
   FILE_MISSING_TITLE,
   FILE_MISSING_WORDS,
   MediaViewer,
+  ViewerAction,
   type MediaViewerItem,
 } from 'ui/components/media-viewer';
 import Text from 'ui/components/text';
@@ -207,10 +208,17 @@ export function ModelSnapshotScope({
 
 /* ── ГАЛЕРЕЯ ────────────────────────────────────────────────────────────────────────────────── */
 
+type MaskDoor = () => void;
+
 interface GalleryEntry {
   node: HTMLElement;
   /** Кадры этой записи, в порядке показа. У плитки один; у ГРУППЫ — сколько угодно. */
   items: MediaViewerItem[];
+  /**
+   * THE MASK OF THIS PICTURE (C-11): the tile's own `onMask`, offered in the viewer while its frame
+   * is on stage. Absent = no Mask in the viewer for it. A group registers none.
+   */
+  mask?: MaskDoor;
 }
 
 interface GalleryApi {
@@ -248,7 +256,11 @@ export function PictureGalleryProvider({
   band?: GetDesignBandResponse;
 }) {
   const registry = useRef(new Map<string, GalleryEntry>());
-  const [row, setRow] = useState<{ items: MediaViewerItem[]; index: number } | null>(null);
+  const [row, setRow] = useState<{
+    items: MediaViewerItem[];
+    index: number;
+    masks: (MaskDoor | undefined)[];
+  } | null>(null);
   /** Адрес кадра, стоящего на сцене. Держит место человека при пересборке ряда. */
   const onStage = useRef<string | null>(null);
 
@@ -264,13 +276,15 @@ export function PictureGalleryProvider({
     });
     let before = -1;
     const items: MediaViewerItem[] = [];
+    const masks: (MaskDoor | undefined)[] = [];
     for (const [k, e] of entries) {
       if (k === key) before = items.length;
       // Павший крупный адрес подменяется миниатюрой ЗДЕСЬ, при сборке ряда, — и только здесь:
       // плитки регистрируют кадр как есть, а «что показывать вместо битого» решает ряд (D-7).
       items.push(...e.items.map(withFallback));
+      masks.push(...e.items.map(() => e.mask));
     }
-    return { items, before };
+    return { items, before, masks };
   }, []);
 
   /**
@@ -287,12 +301,12 @@ export function PictureGalleryProvider({
   const rebuild = useCallback(() => {
     setRow((prev) => {
       if (!prev) return prev;
-      const { items } = collect();
+      const { items, masks } = collect();
       if (!items.length) return null;
       const at = onStage.current ? items.findIndex((i) => i.src === onStage.current) : -1;
       const index = at >= 0 ? at : Math.min(prev.index, items.length - 1);
       onStage.current = items[index]?.src ?? null;
-      return { items, index };
+      return { items, index, masks };
     });
   }, [collect]);
 
@@ -332,11 +346,11 @@ export function PictureGalleryProvider({
 
   const openAt = useCallback(
     (key: string, offset = 0) => {
-      const { items, before } = collect(key);
+      const { items, before, masks } = collect(key);
       if (before < 0 || !items.length) return;
       const index = Math.min(Math.max(before + offset, 0), items.length - 1);
       onStage.current = items[index]?.src ?? null;
-      setRow({ items, index });
+      setRow({ items, index, masks });
     },
     [collect],
   );
@@ -439,7 +453,9 @@ export function PictureGalleryProvider({
 
   return (
     <GalleryContext.Provider value={api}>
-      <ThreedModelIndexContext.Provider value={modelIndex}>{children}</ThreedModelIndexContext.Provider>
+      <ThreedModelIndexContext.Provider value={modelIndex}>
+        {children}
+      </ThreedModelIndexContext.Provider>
       <MediaViewer
         items={row?.items ?? []}
         index={row?.index ?? 0}
@@ -459,6 +475,24 @@ export function PictureGalleryProvider({
         /* Дверь ставится ТОЛЬКО когда есть куда писать. Без `techCardId` или без полосы кнопки
            «save as a new picture» не будет вовсе — это честнее, чем кнопка, которая отказывает. */
         onSaveAsPicture={techCardId && band ? saveAsPicture : undefined}
+        /* THE MASK OF THE FRAME ON STAGE (C-11) — only a frame whose tile offers one. The viewer
+           closes first: the mask is its own full-screen surface, not a layer over this one. */
+        actions={(_item, index) => {
+          const mask = row?.masks[index];
+          if (!mask) return null;
+          return (
+            <ViewerAction
+              title='paint a zone of this picture and say what should be there'
+              onClick={() => {
+                onStage.current = null;
+                setRow(null);
+                mask();
+              }}
+            >
+              mask
+            </ViewerAction>
+          );
+        }}
       />
     </GalleryContext.Provider>
   );
@@ -636,6 +670,16 @@ export interface PictureTileProps {
   onCrop?: PictureTileAction;
   onEdit?: PictureTileAction;
   /**
+   * ═══ MASK — PAINT A ZONE OF THIS PICTURE AND RETOUCH IT (C-11, tile 10) ═══════════════════
+   *
+   * The ONE Mask door of a picture: a corner in the lower-left cluster (it acts on a region of THIS
+   * picture, like split and crop), and the same handler in the viewer while this frame is on stage
+   * — the viewer reads it from the gallery entry, the screen does not pass it twice. Absent = no
+   * Mask anywhere for this picture: the screen decides (the server offers `retouch_zone`, the
+   * picture is a raster of the playground).
+   */
+  onMask?: PictureTileAction;
+  /**
    * ═══ «ЭТА — ТА САМАЯ» (E-25) ══════════════════════════════════════════════════════════════
    *
    * Владелец, дословно: «в 3D MODELS OF THIS CARD кнопки OPEN DOWNLOAD SELECT должны появляться
@@ -699,9 +743,15 @@ function Corner({
       aria-busy={action.pending || undefined}
       disabled={action.disabled || action.pending}
       onClick={action.onClick}
-      className={cn('z-20 py-0.5 leading-none', TILE_CORNER, TILE_QUIET, className, action.pending && 'opacity-100')}
+      className={cn(
+        'z-20 py-0.5 leading-none',
+        TILE_CORNER,
+        TILE_QUIET,
+        className,
+        action.pending && 'opacity-100',
+      )}
     >
-      {action.pending ? (pendingLabel ?? `${label}…`) : label}
+      {action.pending ? pendingLabel ?? `${label}…` : label}
     </button>
   );
 }
@@ -723,6 +773,7 @@ export function PictureTile({
   onSplit,
   onCrop,
   onEdit,
+  onMask,
   onSelect,
   onRemove,
   splitLabel = 'split',
@@ -839,6 +890,10 @@ export function PictureTile({
    */
   const surfaceToModel = opensModel;
 
+  /** The Mask door of this tile, current (the viewer calls it through the gallery entry). */
+  const maskRef = useRef(onMask);
+  maskRef.current = onMask;
+  const masks = !!onMask && !onMask.disabled;
   // Регистрация переигрывается на смене адреса кадра, иначе просмотрщик листал бы вчерашние
   // ссылки: строка истории переезжает с картинки на картинку, не размонтируясь.
   useEffect(() => {
@@ -855,9 +910,24 @@ export function PictureTile({
     // показывается одинаково.
     if (!ctx || galleryGroup || !gallery?.src || isModelUrl(gallery.src) || opensModel || !node)
       return;
-    ctx.register(key, { node, items: [gallery] });
+    ctx.register(key, {
+      node,
+      items: [gallery],
+      // Through the ref: the screen hands a fresh handler every render, the entry stays one.
+      mask: masks ? () => maskRef.current?.onClick() : undefined,
+    });
     return () => ctx.register(key, null);
-  }, [ctx, key, galleryGroup?.key, gallery?.src, gallery?.thumbnail, gallery?.alt, opensModel]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    ctx,
+    key,
+    galleryGroup?.key,
+    gallery?.src,
+    gallery?.thumbnail,
+    gallery?.alt,
+    opensModel,
+    masks,
+  ]);
 
   const zoomable = !!ctx && !!url && !opensModel && (!!galleryGroup || !!gallery);
   /* ⚠ ИЗВЕЩЕНИЕ ИДЁТ ПОСЛЕ ОТКРЫТИЯ, И ПОРЯДОК НЕСУЩИЙ. `openAt` собирает ряд ПО ТЕКУЩЕМУ
@@ -993,7 +1063,12 @@ export function PictureTile({
       {badge && (
         <div className='pointer-events-none absolute left-1 top-1 z-20 max-w-[calc(100%-64px)]'>
           <span className='inline-block bg-textColor px-1.5 py-0.5'>
-            <Text size='nano' variant='uppercase' component='span' className='!text-bgColor break-words'>
+            <Text
+              size='nano'
+              variant='uppercase'
+              component='span'
+              className='!text-bgColor break-words'
+            >
               {badge}
             </Text>
           </span>
@@ -1005,7 +1080,11 @@ export function PictureTile({
         <div className='absolute right-1 top-1 z-20 flex items-start gap-1'>
           {zoomable && (
             <Corner
-              action={{ onClick: openZoom, ariaLabel: `zoom ${alt}`, title: 'zoom — open the viewer' }}
+              action={{
+                onClick: openZoom,
+                ariaLabel: `zoom ${alt}`,
+                title: 'zoom — open the viewer',
+              }}
               label='zoom'
               className=''
             />
@@ -1039,10 +1118,11 @@ export function PictureTile({
           «сплит» и «кроп» режут одну картинку, стоят рядом и не наезжают. Единственный орган
           рисуется ровно там, где рисовался всегда (первый в ряду, отступ 4px от края), поэтому
           плитка с одним лишь `split` выглядит побайтово как прежде. */}
-      {(onSplit || onCrop) && (
+      {(onSplit || onCrop || onMask) && (
         <div className='absolute bottom-1 left-1 z-20 flex items-end gap-1'>
           {onSplit && <Corner action={onSplit} label={splitLabel} className='' />}
           {onCrop && <Corner action={onCrop} label={cropLabel} className='' />}
+          {onMask && <Corner action={onMask} label='mask' className='' />}
         </div>
       )}
       {/* НИЗ СПРАВА — ТОЖЕ КЛАСТЕР (E-25), и по той же причине, что низ слева: у плитки выходов
