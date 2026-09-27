@@ -311,7 +311,9 @@ export type AssemblyFullscreenProps = {
    */
   railTotal: ReactNode;
   frozen: boolean;
-  onSave: () => void;
+  /** Сохранение карточки. Нет его — нет и кнопки save: у карточки, которая сохраняет себя сама, её нет
+   *  и в шапке (O-60, D-59); остаётся только новой, у которой сохранение — это создание. */
+  onSave?: () => void;
   saving: boolean;
   pieceClothByColorway: { label: string; map: Map<string, PieceCloth> }[];
   /** ЗАРЕЗЕРВИРОВАН: наполнит Ф6б (`construction-tab.tsx`). */
@@ -1786,7 +1788,7 @@ export function AssemblyFullscreen({
                     <Pill tone='mut' title='the card is released — it can be read and laid out, not edited'>
                       released · read-only
                     </Pill>
-                  ) : (
+                  ) : onSave ? (
                     <Button
                       type='button'
                       variant='main'
@@ -1797,7 +1799,7 @@ export function AssemblyFullscreen({
                     >
                       save
                     </Button>
-                  )}
+                  ) : null}
                   {/* Без глифа: «⤡» в подключённом моноширинном не нарисован и приезжает
                       подстановкой из системного шрифта — рядом с «⤢» на чипе входа это читается
                       как две разные иконки об одном действии. */}

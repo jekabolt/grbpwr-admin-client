@@ -19,7 +19,7 @@ import { STYLE_FACT_KEYS } from './tech-card-options';
  *     B-03: длина очереди не видит правку уже застейдженной панели);
  *   · перед тихой записью — ТИХАЯ проверка (ревью M-02): значения разбираются схемой, полям не
  *     публикуется ни одна ошибка; невалидная форма НЕ пишется — статус `invalid` с числом ошибок.
- *     Красным поля становятся только по явному жесту: ⌘S, щелчок по чипу, раскрытие его поповера;
+ *     Красным поля становятся только по явному жесту: ⌘S, раскрытие чипа, строка предупреждений;
  *   · один вызов в полёте; правки во время записи — ещё один цикл после неё, без второго параллельного;
  *   · «saved» — только над ТИХОЙ карточкой (ревью B-03): запись легла, а правка, набранная пока она
  *     летела, всё ещё только в браузере, — это ход вперёд (`progress`), а не конец. История и уборка
@@ -39,7 +39,10 @@ import { STYLE_FACT_KEYS } from './tech-card-options';
  *   · цикл, пришедшийся на паузу (диалог перевода), взводится концом паузы (m9);
  *   · запись, которую ведёт не машина (перевод в auxiliary после диалога), сообщает ей исход
  *     `settleExternal` — статус и уборка тихой карточки кончаются там же, где запись (R-7);
- *   · ошибка → повторы через 5 / 15 / 45 с, потом `not saved · retry`;
+ *   · ошибка → повторы через 5 / 15 / 45 с, а дальше каждые 30 с, пока у карточки есть работа;
+ *     следующая правка пишет своим обычным дебаунсом, не дожидаясь шага. Двери «retry» нет: кнопки
+ *     сохранения нет вовсе, карточка сохраняет себя сама (O-60, D-59). Потолок `restaged` тоже не
+ *     конец: панель, перестейдживающая сама себя, пишется раз в 30 с, а не раз в две;
  *   · 409 → статус `conflict`, и автосейв стоит ЦЕЛИКОМ, явные записи тоже (ревью M-01: ⌘S под
  *     модалкой отправил бы ту же протухшую версию). Выходов два, и оба в модалке: «reload theirs»
  *     уходит со страницы, «keep mine» читает текущую версию и снимает паузу `resolveConflict()`.
@@ -54,10 +57,16 @@ import { STYLE_FACT_KEYS } from './tech-card-options';
 export const AUTOSAVE_DEBOUNCE_MS = 2000;
 export const AUTOSAVE_RETRY_MS: readonly number[] = [5000, 15000, 45000];
 /**
- * Сколько циклов подряд может кончиться `restaged`, прежде чем автосейв перестанет повторять сам.
- * Панель, которую оператор правит прямо во время её коммита, даёт один-два таких цикла; панель,
- * которая перестейдживается САМА после каждого коммита, давала бы их бесконечно — и гоняла бы
- * одну и ту же запись на сервер каждые две секунды.
+ * Шаг повторов ПОСЛЕ лестницы `AUTOSAVE_RETRY_MS` (O-60, D-59). Двери «retry» больше нет, и запись,
+ * упавшая трижды, не ждёт человека: она повторяется сама, пока у карточки есть работа, — редко, чтобы
+ * лежащий сервер не получал запрос на каждую секунду открытой вкладки.
+ */
+export const AUTOSAVE_RETRY_INTERVAL_MS = 30000;
+/**
+ * Сколько циклов подряд может кончиться `restaged`, прежде чем автосейв перестанет повторять
+ * дебаунсом. Панель, которую оператор правит прямо во время её коммита, даёт один-два таких цикла;
+ * панель, которая перестейдживается САМА после каждого коммита, давала бы их бесконечно — и гоняла
+ * бы одну и ту же запись на сервер каждые две секунды. За потолком — шаг повторов (30 с).
  */
 const RESTAGED_CAP = 4;
 /**
@@ -103,13 +112,13 @@ export type MachineState = {
   lastSavedAt?: number;
   errorsCount?: number;
   message?: string;
-  /** При `error`: идут ли ещё автоматические повторы (`false` — исчерпаны, нужен человек). */
-  retrying?: boolean;
 };
 
 export type MachineDeps = {
   debounceMs: number;
   retryDelaysMs: readonly number[];
+  /** Шаг повторов после лестницы `retryDelaysMs` (D-59); без ответа — `AUTOSAVE_RETRY_INTERVAL_MS`. */
+  retryIntervalMs?: number;
   setTimer: (fn: () => void, ms: number) => unknown;
   clearTimer: (handle: unknown) => void;
   now: () => number;
@@ -149,9 +158,9 @@ export type AutosaveMachine = {
   state: () => MachineState;
   /** Что-то изменилось (правка формы, движение очереди, просьба органа): взвести дебаунс. */
   notifyChange: () => void;
-  /** Сохранить сейчас и сказать, вышло ли, — над тихой карточкой. `explicit` — ⌘S / «save now»:
-   *  первый проход валидирует сам конвейер (с прыжком к полю), и только там работает диалог перевода
-   *  purpose; добирающие проходы тихие. */
+  /** Сохранить сейчас и сказать, вышло ли, — над тихой карточкой. `explicit` — ⌘S, «keep mine», двери
+   *  релиза: первый проход валидирует сам конвейер (с прыжком к полю) и открывает диалог перевода,
+   *  если смена purpose так и не подтверждена; добирающие проходы тихие. */
   flush: (reason: string, mode?: SaveMode) => Promise<FlushResult>;
   /** «keep mine» модалки конфликта: снять паузу, чтобы следующая явная запись могла пойти. */
   resolveConflict: () => void;
@@ -181,12 +190,12 @@ function sameState(a: MachineState, b: MachineState) {
     a.status === b.status &&
     a.lastSavedAt === b.lastSavedAt &&
     a.errorsCount === b.errorsCount &&
-    a.message === b.message &&
-    a.retrying === b.retrying
+    a.message === b.message
   );
 }
 
 export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
+  const retryInterval = deps.retryIntervalMs ?? AUTOSAVE_RETRY_INTERVAL_MS;
   let state: MachineState = { status: deps.isEnabled() ? 'idle' : 'off' };
   let timer: unknown = null;
   let retryIndex = 0;
@@ -236,7 +245,6 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       status: restingStatus(),
       errorsCount: undefined,
       message: undefined,
-      retrying: undefined,
     });
   };
 
@@ -265,11 +273,11 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       // (read afresh: the check above narrowed `state` for TypeScript, not for the code that ran since)
       if ((state as MachineState).status === 'conflict') return 'conflict';
       if (!v.ok) {
-        set({ status: 'invalid', errorsCount: v.errors, message: undefined, retrying: undefined });
+        set({ status: 'invalid', errorsCount: v.errors, message: undefined });
         return 'invalid';
       }
     }
-    set({ status: 'saving', message: undefined, retrying: undefined });
+    set({ status: 'saving', message: undefined });
     let r: SaveResult;
     try {
       r = await deps.save(mode, reason);
@@ -286,7 +294,6 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       ...(at !== undefined ? { lastSavedAt: at } : {}),
       errorsCount: undefined,
       message: undefined,
-      retrying: undefined,
     });
     if (timer == null) arm(deps.debounceMs, 'debounce');
     return 'progress';
@@ -304,7 +311,6 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
             lastSavedAt: at,
             errorsCount: undefined,
             message: r.message,
-            retrying: undefined,
           });
           return 'needs-confirm';
         }
@@ -321,7 +327,6 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
           lastSavedAt: at,
           errorsCount: undefined,
           message: undefined,
-          retrying: undefined,
         });
         return 'ok';
       }
@@ -337,11 +342,12 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       case 'restaged': {
         restagedStreak += 1;
         if (restagedStreak >= RESTAGED_CAP) {
-          clearTimer();
+          // D-59: the cap ends the two-second loop, not the saving — nobody is left to press a retry.
+          // The panel's values stay queued and go out at the retry step.
+          arm(retryInterval, 'retry');
           set({
             status: 'error',
             message: r.message ?? 'a panel kept changing while it was being saved',
-            retrying: false,
           });
           // No write failed here either: a flush that ends on the cap hears `busy`, and its door says
           // that the card kept changing — not «the last save failed» (R-10).
@@ -358,26 +364,27 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
           status: 'invalid',
           errorsCount: r.errorsCount || deps.countErrors() || undefined,
           message: r.message,
-          retrying: undefined,
         });
         return 'invalid';
       case 'conflict':
         restagedStreak = 0;
         clearTimer();
-        set({ status: 'conflict', message: r.message, retrying: undefined });
+        set({ status: 'conflict', message: r.message });
         return 'conflict';
       case 'partial':
       case 'error':
       default: {
         restagedStreak = 0;
+        // D-59: the ladder, then the step — for as long as the card has work (a cycle over a quiet card
+        // rests and clears the timer, see runCycle). The next change does not wait for either: it arms
+        // its own debounce (notifyChange).
         if (retryIndex < deps.retryDelaysMs.length) {
           arm(deps.retryDelaysMs[retryIndex], 'retry');
           retryIndex += 1;
-          set({ status: 'error', message: r.message, retrying: true });
         } else {
-          clearTimer();
-          set({ status: 'error', message: r.message, retrying: false });
+          arm(retryInterval, 'retry');
         }
+        set({ status: 'error', message: r.message });
         return 'error';
       }
     }
@@ -448,7 +455,7 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       }
       retryIndex = 0;
       if (state.status === 'saved' || state.status === 'idle' || state.status === 'error') {
-        set({ status: 'dirty', message: undefined, retrying: undefined });
+        set({ status: 'dirty', message: undefined });
       }
       arm(deps.debounceMs, 'debounce');
     },
@@ -489,7 +496,7 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
         return;
       }
       if (state.status === 'saved' || state.status === 'idle' || state.status === 'error') {
-        set({ status: 'dirty', message: undefined, retrying: undefined });
+        set({ status: 'dirty', message: undefined });
       }
       arm(deps.debounceMs, 'resume');
     },
@@ -499,7 +506,6 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       set({
         status: deps.hasWork() ? 'dirty' : restingStatus(),
         message: undefined,
-        retrying: undefined,
       });
     },
 
@@ -508,7 +514,7 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
         clearTimer();
         retryIndex = 0;
         restagedStreak = 0;
-        set({ status: 'off', errorsCount: undefined, message: undefined, retrying: undefined });
+        set({ status: 'off', errorsCount: undefined, message: undefined });
         return;
       }
       if (state.status !== 'off') return;
@@ -953,14 +959,15 @@ export function isSaveShortcut(
 }
 
 export type AutosaveController = AutosaveApi & {
-  /** Явное сохранение: ⌘S, «save now», «retry», «keep mine». */
+  /**
+   * Явное сохранение: ⌘S, неявный submit формы, «keep mine», двери релиза. Органа на экране у него нет
+   * (O-60, D-59): чип сохранения никогда не пишет.
+   */
   saveNow: (reason: string) => Promise<FlushResult>;
   /** «keep mine» модалки конфликта — единственный, кроме ухода со страницы, выход из паузы (M-01). */
   resolveConflict: () => void;
   /** Исход записи, которую вела не машина (перевод в auxiliary, R-7). */
   settleExternal: (r: SaveResult, reason: string) => void;
-  /** При `error`: идут ли ещё автоматические повторы. */
-  retrying?: boolean;
   /**
    * Жесты оператора (R-9, ревью m5) — обработчики фазы захвата для КОРНЯ страницы. React ведёт их и
    * через порталы (диалог, открытый страницей, — тоже страница), глобальная шапка приложения сюда не
@@ -1019,6 +1026,7 @@ export function useTechCardAutosaveController(opts: {
   bodyWork?: () => boolean;
   debounceMs?: number;
   retryDelaysMs?: readonly number[];
+  retryIntervalMs?: number;
 }): AutosaveController {
   const optsRef = useRef(opts);
   optsRef.current = opts;
@@ -1065,6 +1073,7 @@ export function useTechCardAutosaveController(opts: {
     const m = createAutosaveMachine({
       debounceMs: optsRef.current.debounceMs ?? AUTOSAVE_DEBOUNCE_MS,
       retryDelaysMs: optsRef.current.retryDelaysMs ?? AUTOSAVE_RETRY_MS,
+      retryIntervalMs: optsRef.current.retryIntervalMs ?? AUTOSAVE_RETRY_INTERVAL_MS,
       setTimer: (fn, ms) => window.setTimeout(fn, ms),
       clearTimer: (h) => window.clearTimeout(h as number),
       now: () => Date.now(),
@@ -1145,6 +1154,7 @@ export function useTechCardAutosaveController(opts: {
   }, [opts.stagingRevision]);
 
   // ⌘S / Ctrl+S — «сохранить сейчас», и браузерный диалог «сохранить страницу» при этом не нужен.
+  // Невидимый (O-60, D-59): кнопки и подсказки на экране у него нет, привычка остаётся привычкой.
   useEffect(() => {
     if (!opts.enabled) return;
     const onKey = (e: KeyboardEvent) => {
@@ -1181,7 +1191,6 @@ export function useTechCardAutosaveController(opts: {
       lastSavedAt: state.lastSavedAt,
       errorsCount: state.errorsCount,
       message: state.message,
-      retrying: state.retrying,
       draftPending,
       request: () => {
         if (!machineRef.current) {

@@ -6056,7 +6056,10 @@ export function OperationsField({
    * «restore», нажатый после выхода, затирает всё, что сделано в фулскрине.
    */
   draftPending?: boolean;
-  /** Сохранение карточки — то же самое, что жмёт кнопка в шапке. Хром фулскрина зовёт его же. */
+  /**
+   * Сохранение карточки — то же самое, что жмёт кнопка в шапке. Хром фулскрина зовёт его же. Нет его —
+   * нет и кнопки: карточка, которая сохраняет себя сама, кнопки сохранения не носит (O-60, D-59).
+   */
   onSave?: () => void;
   /** Сохранение идёт: кнопка фулскрина обязана знать это так же, как шапка. */
   saving?: boolean;
@@ -7890,7 +7893,7 @@ export function OperationsField({
           // где он не нужен.
           railTotal={<RailTotal />}
           frozen={frozen}
-          onSave={() => onSave?.()}
+          onSave={onSave}
           saving={saving}
           pieceClothByColorway={pieceClothByColorway ?? []}
           sketchNote={sketchNote}

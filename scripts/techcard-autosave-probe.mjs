@@ -19,6 +19,9 @@
 //       потолок держит только панель, перестейдживающую саму себя (R-9); flush, не дождавшийся
 //       тишины, отвечает `busy` (R-10); работа, возникшая раньше машины, взводится при создании
 //       (R-12); запись, которую вела не машина, заканчивает её статус там же, где кончилась (R-7);
+//       упавшая запись повторяется сама — лестница 5 / 15 / 45 с, потом каждые 30 с, пока есть
+//       работа, правка не ждёт шага, затихшая карточка повторы снимает; потолок `restaged` — тоже
+//       шаг, а не конец (O-60, D-59: двери «retry» нет);
 //   (2) авто-стейдж не поднимает стейдж, если хоть одна строка готовности `unknown` (Codex B-01);
 //   (3) откат из истории меняет ТОЛЬКО текстовые секции, картинки аспектов остаются текущими (B-04).
 //
@@ -222,6 +225,31 @@ const MUTANTS = {
   // (3b) аспект без текста и без картинок больше не снимается
   restoreKeepsEmptyRows: [
     [`${C}/save-history.ts`, 'if (!text.trim() && (d.mediaIds?.length ?? 0) === 0) continue;', ''],
+  ],
+  // (7k) ОТКАТ D-59 (1): лестница 5 / 15 / 45 с кончилась — повторов больше нет, запись ждёт человека
+  // с «retry», которого нет
+  noRetryStep: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "        } else {\n          arm(retryInterval, 'retry');\n        }",
+      '        } else {\n          clearTimer();\n        }',
+    ],
+  ],
+  // (7l) ОТКАТ D-59 (2): потолок `restaged` снова останавливает запись насовсем
+  capStopsSaving: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "go out at the retry step.\n          arm(retryInterval, 'retry');",
+      'go out at the retry step.\n          clearTimer();',
+    ],
+  ],
+  // (7m) правка поверх упавшей записи ждёт шага повторов, а не пишет своим дебаунсом
+  changeWaitsForTheStep: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "      retryIndex = 0;\n      if (state.status === 'saved' || state.status === 'idle' || state.status === 'error') {",
+      "      if (state.status === 'error') return;\n      retryIndex = 0;\n      if (state.status === 'saved' || state.status === 'idle' || state.status === 'error') {",
+    ],
   ],
 };
 
@@ -792,12 +820,55 @@ async function promise7(mod) {
   r = restaged(false);
   r.m.notifyChange();
   await r.clock.advance(20_000);
-  out.selfRestagingStillCapped =
-    r.saves === 4 && r.m.state().status === 'error' && r.m.state().retrying === false;
+  const cappedAtFour = r.saves === 4 && r.m.state().status === 'error';
+  // D-59: the cap ends the two-second loop, not the saving — nobody is left to press a retry. The step
+  // (30 s after the cap at 8 s) writes it once more, and only once, by 40 s.
+  await r.clock.advance(20_000);
+  out.selfRestagingStillCapped = cappedAtFour && r.saves === 5 && r.m.state().status === 'error';
   // …and a paid door's flush that runs into that cap hears `busy`: nothing failed, the panel kept moving
   r = restaged(false);
   const capped = await r.m.flush('paid door');
   out.flushOnTheCapIsBusy = capped === 'busy' && r.saves === 4 && r.m.state().status === 'error';
+
+  // D-59 · a write that keeps failing: the ladder (5 / 15 / 45 s), then the step — every 30 s, for as
+  // long as the card has work; a change does not wait for either (its own debounce); a card that went
+  // quiet stops the retries (no save, no timer). Saves at 2 (debounce) · 7 · 22 · 67 · 97 · 127.
+  let failing = true;
+  r = bareRig(mod, (rig) => ({
+    hasWork: () => failing,
+    save: async () => {
+      rig.saves += 1;
+      return { outcome: 'error', message: 'network down' };
+    },
+  }));
+  r.m.notifyChange();
+  await r.clock.advance(66_000);
+  const ladder = r.saves === 3 && r.m.state().status === 'error';
+  await r.clock.advance(2_000); // 68 s: the last rung (67 s) has come
+  const afterLadder = r.saves === 4;
+  await r.clock.advance(28_000); // 96 s: the step is not due yet
+  const stepNotEarly = r.saves === 4;
+  await r.clock.advance(2_000); // 98 s: the step (97 s) came — once
+  const stepOnce = r.saves === 5;
+  await r.clock.advance(30_000); // 128 s: and again (127 s)
+  out.retryStepAfterLadder =
+    ladder &&
+    afterLadder &&
+    stepNotEarly &&
+    stepOnce &&
+    r.saves === 6 &&
+    r.m.state().status === 'error';
+  // a change while the step is pending writes at its own debounce (130 s), not at the step (157 s)
+  const beforeChange = r.saves;
+  r.m.notifyChange();
+  await r.clock.advance(2_000);
+  out.changeDoesNotWaitForTheStep = r.saves === beforeChange + 1;
+  // the work went away (reverted by hand, written by another door): the next retry finds nothing, rests
+  const beforeQuiet = r.saves;
+  failing = false;
+  await r.clock.advance(120_000);
+  out.retryStopsOverAQuietCard =
+    r.saves === beforeQuiet && r.m.state().status !== 'error' && r.clock.pending() === 0;
 
   // R-10 · a flush over a card that is never quiet (every pass leaves work) answers `busy`
   r = bareRig(mod, (rig) => ({
@@ -1146,6 +1217,15 @@ report('(7) mutant mountDirtArmed', await promise7(await load('mountDirtArmed'))
   'pausedCycleResumes',
 ]);
 report('(7) mutant noResume', await promise7(await load('noResume')), ['pausedCycleResumes']);
+report('(7) mutant noRetryStep', await promise7(await load('noRetryStep')), [
+  'retryStepAfterLadder',
+]);
+report('(7) mutant capStopsSaving', await promise7(await load('capStopsSaving')), [
+  'selfRestagingStillCapped',
+]);
+report('(7) mutant changeWaitsForTheStep', await promise7(await load('changeWaitsForTheStep')), [
+  'changeDoesNotWaitForTheStep',
+]);
 report(
   '(7) mutant conflictDuringCheckOverwritten',
   await promise7(await load('conflictDuringCheckOverwritten')),
