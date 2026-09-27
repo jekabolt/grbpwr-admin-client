@@ -4,6 +4,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 import { adminService } from 'api/api';
 import type { AiRouteCandidate, GetAiProvidersConfigResponse } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -104,20 +105,37 @@ function expectedVersion(qc: QueryClient): number {
   return version;
 }
 
+// ONE ANNOUNCEMENT PER REFUSAL. The control that made a write draws its refusal under itself
+// (WriteError, role=alert), and that line IS the announcement: a snackbar saying it again would
+// interrupt a screen reader twice for one answer. So a refusal goes to the snackbar only when its
+// owner is gone — the panel closed or the view switched before the answer came — and there is no
+// line left to stand in. The reads (config, spend) keep their own callouts.
 function useAiWrite(failed: string) {
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
+  const ownerOnScreen = useRef(false);
+  useEffect(() => {
+    ownerOnScreen.current = true;
+    return () => {
+      ownerOnScreen.current = false;
+    };
+  }, []);
   return {
     qc,
     done: (config: GetAiProvidersConfigResponse | undefined, message: string) => {
       if (config) qc.setQueryData(aiKeys.config(), config);
       showMessage(message, 'success');
     },
-    onError: (error: unknown) =>
+    onError: (error: unknown) => {
+      if (ownerOnScreen.current) return;
+      // Said away from its control, the sentence names the write it answers.
       showMessage(
-        isStaleConfigError(error) ? STALE_CONFIG_MESSAGE : fieldErrorSummary(error, failed),
+        isStaleConfigError(error)
+          ? STALE_CONFIG_MESSAGE
+          : `${failed}: ${fieldErrorSummary(error, failed)}`,
         'error',
-      ),
+      );
+    },
     // Success or not, the screen is re-read: a refused autosave must snap its control back to what
     // the server holds. Returned, so the next queued write waits for the fresh config.
     onSettled: () => qc.invalidateQueries({ queryKey: aiKeys.all }),

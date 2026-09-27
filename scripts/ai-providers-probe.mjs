@@ -267,6 +267,18 @@ const MUTATIONS = {
     from: 'const sameError = sameOn === base;',
     to: 'const sameError = sameOn !== null;',
   },
+  'snackbar-kept': {
+    red: 'FE11',
+    what: 'a refusal with its line on screen is announced by the snackbar too',
+    from: 'if (ownerOnScreen.current) return;',
+    to: 'if (false) return;',
+  },
+  'snackbar-never': {
+    red: 'FE11',
+    what: 'a refusal whose control is gone is announced nowhere',
+    from: 'if (ownerOnScreen.current) return;',
+    to: 'return;',
+  },
   'clear-sends-old-value': {
     red: 'E5',
     what: 'clear sends the old key (its last four) instead of an empty value',
@@ -706,6 +718,17 @@ if (process.argv.includes('--shots')) {
       await page.waitForTimeout(900);
       await page.locator('[data-purpose="chat.techcard_analysis"]').scrollIntoViewIfNeeded();
     });
+    // FE11: a refusal whose row left the screen (the view switched first) — the snackbar carries it.
+    await shoot('ownergone', w, '/ai-providers', {}, async () => {
+      await page.waitForSelector('[data-purpose="chat.email_translate"]');
+      server.delayMs = 700;
+      server.fail = [{ method: 'PUT', re: /email_translate$/, status: 400, body: { code: 3, message: 'anthropic does not serve this purpose', details: [] } }];
+      await page.getByRole('combobox', { name: 'Email translate primary', exact: true }).click();
+      await page.getByRole('option', { name: 'Anthropic', exact: true }).click();
+      await page.getByRole('radio', { name: 'spend', exact: true }).click();
+      await page.waitForTimeout(1600);
+      server.delayMs = 0;
+    });
     await shoot('switchfocus', w, '/ai-providers', {}, async () => {
       await page.waitForSelector('[data-provider="openai"]');
       await page.locator('h1').first().click();
@@ -1067,6 +1090,43 @@ await page.waitForSelector('[data-purpose="chat.note_markdown"]', { timeout: 800
   await page.waitForTimeout(900);
   const dc = await alertsIn('[data-route-defaults]');
   ck('FE7', dc.length === 1 && dc[0].includes('google does not serve chat') && (await page.locator('[data-write-error="default-chat"]').count()) === 1, 'a refused default: the sentence under THAT select', JSON.stringify(dc));
+}
+
+// FE11 · one announcement per refusal: the line under the control is THE alert; the snackbar
+// speaks only when that control is gone (the view switched before the answer came).
+{
+  const refuse = (method, re, message) => ({ method, re, status: 400, body: { code: 3, message, details: [] } });
+  const alertsSaying = (text) =>
+    page.locator('[role="alert"]').evaluateAll((els, t) => els.filter((e) => (e.textContent ?? '').includes(t)).length, text);
+
+  await mount();
+  await page.waitForSelector('[data-purpose="chat.note_markdown"]', { timeout: 8000 });
+  server.fail = [refuse('PUT', /^\/api\/admin\/ai\/routes\/chat\.note_markdown$/, 'the model is not served by this provider')];
+  await page.getByRole('combobox', { name: 'Note to markdown primary', exact: true }).click();
+  await page.getByRole('option', { name: 'Anthropic', exact: true }).click();
+  await page.waitForTimeout(900);
+  const nRoute = await alertsSaying('the model is not served by this provider');
+  ck('FE11', nRoute === 1, 'a refused route write → exactly ONE role=alert with its sentence', `alerts ${nRoute}`);
+
+  server.fail = [refuse('PATCH', /^\/api\/admin\/ai\/providers\/openai$/, 'openai cannot be switched off while it is the only chat provider')];
+  await row('openai').getByRole('switch').click();
+  await page.waitForTimeout(900);
+  const nSwitch = await alertsSaying('cannot be switched off');
+  ck('FE11', nSwitch === 1, 'a refused switch → exactly ONE role=alert', `alerts ${nSwitch}`);
+
+  // The owner leaves before the answer: the refusal has no line to stand in, so the snackbar says it.
+  server.delayMs = 700;
+  server.fail = [refuse('PUT', /^\/api\/admin\/ai\/routes\/chat\.email_translate$/, 'anthropic does not serve this purpose')];
+  await page.getByRole('combobox', { name: 'Email translate primary', exact: true }).click();
+  await page.getByRole('option', { name: 'Anthropic', exact: true }).click();
+  await page.getByRole('radio', { name: 'spend', exact: true }).click();
+  await page.waitForTimeout(1600);
+  server.delayMs = 0;
+  const gone = await page.locator('[data-purpose="chat.email_translate"]').count();
+  const nGone = await alertsSaying('anthropic does not serve this purpose');
+  const said = await page.locator('[role="alert"]').allTextContents();
+  ck('FE11', gone === 0 && nGone === 1, 'its row gone (view switched) → the snackbar carries it, ONE alert', `row on screen ${gone}, alerts ${nGone}`);
+  ck('FE11', said.some((t) => t.includes("couldn't save the route: anthropic does not serve this purpose")), 'said away from its control, it names the write it answers', JSON.stringify(said));
 }
 
 // FE6 · a purpose with no route is shown as such.
