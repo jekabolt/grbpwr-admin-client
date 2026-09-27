@@ -22,6 +22,14 @@
 //       упавшая запись повторяется сама — лестница 5 / 15 / 45 с, потом каждые 30 с, пока есть
 //       работа, правка не ждёт шага, затихшая карточка повторы снимает; потолок `restaged` — тоже
 //       шаг, а не конец (O-60, D-59: двери «retry» нет);
+//   (9) ревью Codex O-60 (r4): диалог перевода, ждущий записи, ушедшей до него, слышит её 409 как
+//       `conflict`, а не как паузу; правка, пришедшая, пока летела падающая запись, пишется своим
+//       дебаунсом, а не ступенью лестницы; `off` терминален для записи в полёте — ни «saved», ни
+//       «not saved», ни таймера, а бухгалтерия лёгшей записи (история, черновик) остаётся; `error`
+//       помнит причину — упала запись или панель менялась, пока писалась;
+//  (10) D-66 (27.09): отказ сервера самому телу (4xx, кроме 408/409/429) не едет по лестнице — «not
+//       saved» со словами сервера, ни одного таймера, следующая попытка — со следующей правкой; 503 и
+//       сеть едут по лестнице, как ехали;
 //   (2) авто-стейдж не поднимает стейдж, если хоть одна строка готовности `unknown` (Codex B-01);
 //   (3) откат из истории меняет ТОЛЬКО текстовые секции, картинки аспектов остаются текущими (B-04).
 //
@@ -243,6 +251,87 @@ const MUTANTS = {
       'go out at the retry step.\n          clearTimer();',
     ],
   ],
+  // (9a) ОТКАТ O-60 r4 / P1-1: пауза снова раньше конфликта — ожидающий диалог слышит 409 как паузу
+  pauseBeforeConflict: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      '    // M-01: 409 держит ВСЕ записи, явные тоже.',
+      "    if (deps.isPaused()) {\n      skippedWhilePaused = true;\n      return 'needs-confirm';\n    }\n    // M-01: 409 держит ВСЕ записи, явные тоже.",
+    ],
+  ],
+  // (9b) ОТКАТ P1-3: падение записи меняет дебаунс правки, пришедшей во время полёта, на ступень лестницы
+  failureTakesLadder: [
+    [`${C}/useTechCardAutosave.ts`, '        if (changedMeanwhile) {', '        if (false) {'],
+  ],
+  // (9f) P1-3 без жеста: правка самой страницы во время записи (стейдж возвращён после упавшего
+  // перечтения, B-07) снова меняет ступень лестницы на дебаунс
+  pageChangeKeepsDebounce: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      '          (gesturesAtStart === undefined || heardOperatorGen !== gesturesAtStart);',
+      '          true;',
+    ],
+  ],
+  // (9g) страж `off` в settle читает устаревший статус: конфликт, найденный страницей на чтении, пока
+  // setEnabled(true) ещё не прошёл, не слышен — чип «unsaved» над модалкой конфликта (M-2)
+  staleOffSwallowsTheReport: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "    if (!deps.isEnabled()) return 'off';\n",
+      "    if (state.status === 'off' || !deps.isEnabled()) return 'off';\n",
+    ],
+  ],
+  // (9c) ОТКАТ P2-1: исход записи, пришедший после выключения, снова рисует статус и взводит таймер
+  settleOverOff: [
+    [`${C}/useTechCardAutosave.ts`, '    if (stoppedMeanwhile()) {', '    if (false) {'],
+    [`${C}/useTechCardAutosave.ts`, "    if (!deps.isEnabled()) return 'off';\n", ''],
+  ],
+  // (9d) страж `off` проглатывает и бухгалтерию лёгшей записи: релиз не пишет историю, черновик висит
+  offDropsBookkeeping: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "      if (r.outcome === 'complete' && !r.pendingConfirm && !deps.hasWork()) {\n        deps.onComplete?.(reason);\n      }\n",
+      '',
+    ],
+  ],
+  // (9e) ОТКАТ P2-3: потолок `restaged` называет себя упавшей записью
+  capBlamesAFailure: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "            cause: 'restaged',",
+      "            cause: 'failed',",
+    ],
+  ],
+  // (10a) ОТКАТ D-66: отказ сервера снова едет по лестнице — 412 шлётся каждые 5 / 15 / 45 / 30 с
+  refusalRidesLadder: [
+    [`${C}/useTechCardAutosave.ts`, '        if (r.refused) {', '        if (false) {'],
+  ],
+  // (10b) машина не узнаёт отказ в брошенной ошибке (статус есть, а она его не читает)
+  catchNeverRefuses: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "r = { outcome: 'error', message: errorText(e), refused: isRefusalError(e) };",
+      "r = { outcome: 'error', message: errorText(e), refused: false };",
+    ],
+  ],
+  // (10c) любая брошенная ошибка — отказ: 503 и сеть больше не повторяются сами
+  everyThrowRefused: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "r = { outcome: 'error', message: errorText(e), refused: isRefusalError(e) };",
+      "r = { outcome: 'error', message: errorText(e), refused: true };",
+    ],
+  ],
+  // (10e) конец паузы (диалог перевода закрыт) снова шлёт тело, которому сервер отказал
+  resumeResendsRefusal: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "      if (state.status === 'error' && state.cause === 'refused') return;\n",
+      '',
+    ],
+  ],
+  // (10d) 429 (лимит частоты — проходит сам) принят за отказ
+  rateLimitRefused: [[`${C}/useTechCardAutosave.ts`, '    status !== 429\n', '    true\n']],
   // (7m) правка поверх упавшей записи ждёт шага повторов, а не пишет своим дебаунсом
   changeWaitsForTheStep: [
     [
@@ -983,6 +1072,265 @@ async function promise7(mod) {
   return out;
 }
 
+// ─── (9) ревью Codex O-60 r4: конфликт раньше паузы, правка во время падающей записи, `off`, причина ─
+async function promise9(mod) {
+  const out = {};
+  // Записи ОТЛОЖЕННЫЕ: каждая ждёт, пока проба сама не скажет её исход.
+  const deferredRig = (over = () => ({})) => {
+    const pending = [];
+    const r = bareRig(mod, (rig) => ({
+      save: () => {
+        rig.saves += 1;
+        (rig.at ??= []).push(rig.clock.now());
+        return new Promise((res) => pending.push(res));
+      },
+      ...over(rig),
+    }));
+    r.answer = async (result) => {
+      pending.shift()(result);
+      await r.clock.advance(0);
+    };
+    return r;
+  };
+
+  // P1-1 · a write is out; the convert dialog opens (the page pauses) and its confirm flushes; the write
+  // comes back 409 → the flush answers `conflict`, not the pause's `needs-confirm` — nothing more written
+  let paused = false;
+  let r = deferredRig(() => ({ isPaused: () => paused }));
+  r.m.notifyChange();
+  await r.clock.advance(2000);
+  const inFlight = r.saves === 1 && r.m.state().status === 'saving';
+  paused = true;
+  const flushed = r.m.flush('convert');
+  await r.answer({ outcome: 'conflict', message: 'moved on' });
+  const answer = await flushed;
+  out.conflictBeatsPause =
+    inFlight && answer === 'conflict' && r.saves === 1 && r.m.state().status === 'conflict';
+
+  // P1-3 · the write fails (2 s), the retry goes out at 7 s; an edit at 7.5 s, the retry fails at 8 s
+  // → the edit's own debounce writes at 9.5 s, not the next rung (15 s after the failure, at 23 s)
+  r = deferredRig();
+  r.m.notifyChange();
+  await r.clock.advance(2000);
+  await r.answer({ outcome: 'error', message: 'down' });
+  await r.clock.advance(5000); // 7 s: the first rung
+  const retryOut = r.saves === 2;
+  await r.clock.advance(500);
+  r.m.notifyChange(); // 7.5 s, while the retry is out
+  await r.clock.advance(500);
+  await r.answer({ outcome: 'error', message: 'down' }); // 8 s: fails AFTER the edit
+  await r.clock.advance(1499);
+  const notEarly = r.saves === 2;
+  await r.clock.advance(1);
+  out.editDuringFailingWriteKeepsDebounce =
+    retryOut && notEarly && r.saves === 3 && r.at[2] === 9500 && r.m.state().cause === 'failed';
+
+  // …the OPERATOR's change, that is: with gestures wired (the page), a change the page makes itself
+  // while the write is out (B-07's stage put back after a failed re-read) takes the ladder rung, 5 s
+  // after the failure — and the same change behind a gesture keeps its 2 s debounce
+  const gestured = async (withGesture) => {
+    const g = deferredRig((rig) => {
+      rig.gen = 0;
+      return { operatorGen: () => rig.gen };
+    });
+    g.m.notifyChange();
+    await g.clock.advance(2000); // out at 2 s
+    if (withGesture) g.gen += 1;
+    g.m.notifyChange(); // at 2 s, while it is out
+    await g.answer({ outcome: 'error', message: 'down' }); // fails at 2 s
+    await g.clock.advance(2000);
+    const atDebounce = g.saves;
+    await g.clock.advance(3000);
+    return { atDebounce, atRung: g.saves, second: g.at[1] };
+  };
+  const byPage = await gestured(false);
+  const byOperator = await gestured(true);
+  out.pageOwnChangeTakesTheRung =
+    byPage.atDebounce === 1 &&
+    byPage.atRung === 2 &&
+    byPage.second === 7000 &&
+    byOperator.atDebounce === 2 &&
+    byOperator.second === 4000;
+
+  // P2-1 · switched off while a write is out (frozen, rights gone): its failure neither paints
+  // «not saved» nor arms a retry — and a release's own write, which raises the halt the moment it
+  // lands, leaves the machine `off` too
+  let enabled = true;
+  r = deferredRig(() => ({ isEnabled: () => enabled }));
+  r.m.notifyChange();
+  await r.clock.advance(2000);
+  enabled = false;
+  r.m.setEnabled(false);
+  await r.answer({ outcome: 'error', message: 'down' });
+  await r.clock.advance(60_000);
+  const failedLate = r.m.state().status === 'off' && r.clock.pending() === 0 && r.saves === 1;
+  let halted = false;
+  let work = true;
+  const release = deferredRig(() => ({ isEnabled: () => !halted, hasWork: () => work }));
+  release.m.notifyChange();
+  await release.clock.advance(2000);
+  halted = true; // B-08: the halt rises the moment the release's PUT lands
+  work = false;
+  await release.answer({ outcome: 'complete' });
+  await release.clock.advance(60_000);
+  out.offSurvivesLateSettle =
+    failedLate && release.m.state().status === 'off' && release.clock.pending() === 0;
+  // …and that write's bookkeeping still happens: history and the draft's clean-up, once
+  out.releaseWriteStillBooksItsHistory = release.completes.join() === 'debounce';
+
+  // M-2 over P2-1 · the halt lifted (a re-open elsewhere), setEnabled(true) not yet run: the status still
+  // reads `off`, and the conflict the page judged on that read is heard — the chip says «conflict»
+  let live = false;
+  const lifted = bareRig(mod, () => ({ isEnabled: () => live }));
+  lifted.m.setEnabled(false);
+  live = true; // the render sees the halt gone; the effect that calls setEnabled(true) is still to come
+  lifted.m.settleExternal(
+    { outcome: 'conflict', message: 'another editor saved this card' },
+    'read',
+  );
+  const heard = lifted.m.state().status === 'conflict';
+  lifted.m.setEnabled(true);
+  out.conflictHeardOverAStaleOff = heard && lifted.m.state().status === 'conflict';
+
+  // P2-3 · why the card is not saved: the restaged cap says «restaged», a failed write «failed»
+  const capped = bareRig(mod, (rig) => ({
+    save: async () => {
+      rig.saves += 1;
+      return { outcome: 'restaged' };
+    },
+  }));
+  capped.m.notifyChange();
+  await capped.clock.advance(20_000);
+  const failed = bareRig(mod, () => ({
+    save: async () => ({ outcome: 'error', message: 'down' }),
+  }));
+  failed.m.notifyChange();
+  await failed.clock.advance(2000);
+  out.causeSaysWhy =
+    capped.m.state().status === 'error' &&
+    capped.m.state().cause === 'restaged' &&
+    failed.m.state().status === 'error' &&
+    failed.m.state().cause === 'failed';
+  return out;
+}
+
+// ─── (10) D-66: ОТКАЗ СЕРВЕРА НЕ ЕДЕТ ПО ЛЕСТНИЦЕ ────────────────────────────────────────────────────
+async function promise10(mod) {
+  const out = {};
+  // The page's save throws what api.ts throws: an Error carrying the HTTP status.
+  const BACKSTOP = 'this save would erase the assembly units on this tech card';
+  const thrower = (status) =>
+    bareRig(mod, (rig) => ({
+      save: async () => {
+        rig.saves += 1;
+        (rig.at ??= []).push(rig.clock.now());
+        throw Object.assign(new Error(status === 412 ? BACKSTOP : 'unavailable'), { status });
+      },
+    }));
+
+  // 412 at 2 s → «not saved» with the server's words, cause `refused`, NO timer: five minutes pass and
+  // nothing goes out; the next change writes at its own debounce (and is refused again, held again)
+  let r = thrower(412);
+  r.m.notifyChange();
+  await r.clock.advance(2000);
+  const held =
+    r.saves === 1 &&
+    r.m.state().status === 'error' &&
+    r.m.state().cause === 'refused' &&
+    r.m.state().message === BACKSTOP &&
+    r.clock.pending() === 0;
+  await r.clock.advance(300_000);
+  const quiet = r.saves === 1;
+  r.m.notifyChange(); // 302 s
+  await r.clock.advance(1999);
+  const notEarly = r.saves === 1;
+  await r.clock.advance(1);
+  out.refusalHoldsUntilTheNextChange =
+    held &&
+    quiet &&
+    notEarly &&
+    r.saves === 2 &&
+    r.at[1] === 304_000 &&
+    r.m.state().cause === 'refused' &&
+    r.clock.pending() === 0;
+
+  // 503 at 2 s → transient: the ladder's first rung writes at 7 s
+  r = thrower(503);
+  r.m.notifyChange();
+  await r.clock.advance(2000);
+  const failedAt2 = r.saves === 1 && r.m.state().cause === 'failed' && r.clock.pending() === 1;
+  await r.clock.advance(5000);
+  out.serverErrorKeepsTheLadder = failedAt2 && r.saves === 2 && r.at[1] === 7000;
+
+  // what a refusal is: a 4xx other than 408 / 409 / 429 — on the error or on its `cause`
+  out.whatIsARefusal =
+    [400, 401, 403, 404, 412, 422].every((s) => mod.isRefusalStatus(s)) &&
+    ![undefined, 408, 409, 429, 500, 502, 503, 504].some((s) => mod.isRefusalStatus(s)) &&
+    mod.isRefusalError(Object.assign(new Error('x'), { cause: { status: 412 } })) &&
+    !mod.isRefusalError(new Error('network down'));
+
+  // the page's pipeline says it itself (SaveResult.refused): the same hold, and the controller's
+  // sentence is the server's
+  r = bareRig(mod, (rig) => ({
+    save: async () => {
+      rig.saves += 1;
+      return { outcome: 'error', message: BACKSTOP, refused: true };
+    },
+  }));
+  r.m.notifyChange();
+  await r.clock.advance(122_000);
+  out.pipelineRefusalHolds =
+    r.saves === 1 &&
+    r.m.state().cause === 'refused' &&
+    r.clock.pending() === 0 &&
+    mod.refusalOf(r.m.state()) === BACKSTOP;
+
+  // the convert dialog opens while the write is out (the page pauses), the write is refused, the
+  // dialog's flush is skipped by the pause; the dialog closes (resume) — the refused body is not sent
+  // again: nothing in five minutes. A change made under the dialog is the next change: it does go out.
+  const pausedRig = (edit) => {
+    let paused = false;
+    const pending = [];
+    const rig = bareRig(mod, (g) => ({
+      isPaused: () => paused,
+      save: () => {
+        g.saves += 1;
+        return new Promise((res) => pending.push(res));
+      },
+    }));
+    return {
+      rig,
+      async run() {
+        rig.m.notifyChange();
+        await rig.clock.advance(2000); // out
+        paused = true;
+        const flushed = rig.m.flush('convert');
+        pending.shift()({ outcome: 'error', message: BACKSTOP, refused: true });
+        await rig.clock.advance(0);
+        await flushed;
+        if (edit) {
+          rig.m.notifyChange();
+          await rig.clock.advance(2000); // due under the pause: skipped
+        }
+        paused = false;
+        rig.m.resume();
+        await rig.clock.advance(300_000);
+        for (const res of pending.splice(0)) res({ outcome: 'complete' });
+        await rig.clock.advance(0);
+      },
+    };
+  };
+  const quietDialog = pausedRig(false);
+  await quietDialog.run();
+  const editedDialog = pausedRig(true);
+  await editedDialog.run();
+  out.pauseEndKeepsTheRefusal =
+    quietDialog.rig.saves === 1 &&
+    quietDialog.rig.m.state().cause === 'refused' &&
+    editedDialog.rig.saves === 2;
+  return out;
+}
+
 // ─── (8) хелперы записи: anyDirty / чей отказ / сдвинулось ли тело / работа тела (m4 / m2 / M-3 / M2) ─
 const tick = () => new Promise((r) => setTimeout(r, 5));
 const conflict409 = () => Promise.reject(Object.assign(new Error('moved on'), { status: 409 }));
@@ -1133,6 +1481,11 @@ report('(5) conflict / revert / dispose', await promise5(real));
 report('(6) settle after a save (real RHF, real mapper)', promise6(real));
 report('(7) restaged cap / busy / work before the machine / external write', await promise7(real));
 report('(8) anyDirty / own failure / body moved / body work', await promise8(real));
+report(
+  '(9) O-60 r4: conflict before pause / edit during a failing write / off / cause',
+  await promise9(real),
+);
+report('(10) D-66: a refusal holds, a 503 retries', await promise10(real));
 // sanity for the shortcut: ⌘S on a Russian layout gives e.key 'ы' — the physical key decides
 const kb = real.isSaveShortcut;
 report('keyboard', {
@@ -1231,6 +1584,51 @@ report(
   await promise7(await load('conflictDuringCheckOverwritten')),
   ['conflictDuringCheckStands'],
 );
+report('(9) mutant pauseBeforeConflict', await promise9(await load('pauseBeforeConflict')), [
+  'conflictBeatsPause',
+]);
+// the operator's change (with a gesture) loses its debounce too — two checks, one rule
+report('(9) mutant failureTakesLadder', await promise9(await load('failureTakesLadder')), [
+  'editDuringFailingWriteKeepsDebounce',
+  'pageOwnChangeTakesTheRung',
+]);
+report(
+  '(9) mutant pageChangeKeepsDebounce',
+  await promise9(await load('pageChangeKeepsDebounce')),
+  ['pageOwnChangeTakesTheRung'],
+);
+report(
+  '(9) mutant staleOffSwallowsTheReport',
+  await promise9(await load('staleOffSwallowsTheReport')),
+  ['conflictHeardOverAStaleOff'],
+);
+report('(9) mutant settleOverOff', await promise9(await load('settleOverOff')), [
+  'offSurvivesLateSettle',
+]);
+report('(9) mutant offDropsBookkeeping', await promise9(await load('offDropsBookkeeping')), [
+  'releaseWriteStillBooksItsHistory',
+]);
+report('(9) mutant capBlamesAFailure', await promise9(await load('capBlamesAFailure')), [
+  'causeSaysWhy',
+]);
+// without the hold nothing is `refused`, so the pause's end re-sends too — three checks, one cause
+report('(10) mutant refusalRidesLadder', await promise10(await load('refusalRidesLadder')), [
+  'refusalHoldsUntilTheNextChange',
+  'pipelineRefusalHolds',
+  'pauseEndKeepsTheRefusal',
+]);
+report('(10) mutant catchNeverRefuses', await promise10(await load('catchNeverRefuses')), [
+  'refusalHoldsUntilTheNextChange',
+]);
+report('(10) mutant everyThrowRefused', await promise10(await load('everyThrowRefused')), [
+  'serverErrorKeepsTheLadder',
+]);
+report('(10) mutant rateLimitRefused', await promise10(await load('rateLimitRefused')), [
+  'whatIsARefusal',
+]);
+report('(10) mutant resumeResendsRefusal', await promise10(await load('resumeResendsRefusal')), [
+  'pauseEndKeepsTheRefusal',
+]);
 report('(8) mutant anyDirtyArrays', await promise8(await load('anyDirtyArrays')), [
   'fullMapEmptyArrayIsClean',
 ]);

@@ -1362,7 +1362,8 @@ export function ConstructionDraft({
           ? 'the card was released while it was being saved'
           : refused === 'stopped'
             ? 'the card stopped saving while GENERATE waited for it'
-            : flushRefusalSentence(refused, autosave.errorsCount) || 'the card is not saved yet';
+            : flushRefusalSentence(refused, autosave.errorsCount, autosave.refusal) ||
+              'the card is not saved yet';
   /**
    * ДВЕРЬ У ОТКАЗА СОХРАНЕНИЯ: `invalid` — к первому полю с ошибкой (`revealField` сам приносит
    * шаг студии), прочие исходы и поле, которого студия не рисует, — к чипу сохранения в шапке: его

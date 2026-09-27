@@ -975,7 +975,7 @@ export function CostingField({
           tone: 'error',
           sentence: 'the costing currency was changed — there is nothing to compute with yet',
           cause:
-            'the materials and the per-colourway costs are still in the previous currency: only the server can convert them, at the costing rates. Save the card.',
+            'the materials and the per-colourway costs are still in the previous currency: only the server can convert them, at the costing rates — the figure comes back once the card has saved.',
         }
       : costIncomplete
         ? {

@@ -7,6 +7,7 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { sameText, TEXT_SECTION_LABEL, type HistoryEntry, type TextSnapshot } from './save-history';
 import type { FormErrorRow } from './stage-progress';
+import type { MachineState } from './useTechCardAutosave';
 import type { StagedChange } from './useTechCardStaging';
 
 /**
@@ -20,6 +21,11 @@ import type { StagedChange } from './useTechCardStaging';
  *   unsaved · 2 errors             — красный: форма не проходит проверку, и ничего не пишется;
  *   not saved · retrying           — красный: запись падает, автосейв повторяет её сам (5 / 15 / 45 с,
  *                                    потом каждые 30 с) и со следующей правкой — двери «retry» нет.
+ *                                    Или ни одна запись не падала, а панель менялась, пока писалась
+ *                                    (потолок `restaged`): поповер говорит именно это (O-60 r4).
+ *   not saved                      — красный: сервер ОТКАЗАЛ самому телу (4xx, D-66). Повторов по
+ *                                    таймеру нет — та же запись получила бы тот же отказ; она уходит
+ *                                    снова со следующей правкой. Поповер — слова сервера как есть.
  * У этих состояний ОДНА дверь: щелчок по всему чипу раскрывает поповер — что ждёт записи, причина,
  * ИСТОРИЯ (откат текста к любому из последних сохранений). При `invalid` раскрытие — жест «покажи»:
  * ошибки тихой проверки выходят на поля (M-02), а ПЕРВАЯ строка поповера ведёт к первому полю
@@ -38,6 +44,8 @@ import type { StagedChange } from './useTechCardStaging';
  */
 
 type Tone = 'mut' | 'attention' | 'warn';
+/** Why an `error` stands: a failed write, the `restaged` cap (O-60 r4) or a server refusal (D-66). */
+type SaveCause = MachineState['cause'];
 
 const FOCUS =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
@@ -55,6 +63,7 @@ function describe(
   status: AutosaveStatus,
   lastSavedAt: number | undefined,
   errorsCount: number | undefined,
+  cause?: SaveCause,
 ): { label: string; tone: Tone } {
   switch (status) {
     case 'saving':
@@ -73,7 +82,8 @@ function describe(
     case 'conflict':
       return { label: 'conflict', tone: 'warn' };
     case 'error':
-      return { label: 'not saved · retrying', tone: 'warn' };
+      // D-66: a refusal is not retried on a timer — «retrying» over it would be a promise nobody keeps.
+      return { label: cause === 'refused' ? 'not saved' : 'not saved · retrying', tone: 'warn' };
     case 'saved':
     case 'idle':
     default:
@@ -82,7 +92,12 @@ function describe(
 }
 
 /** One sentence for the popover head: the chip is four words, this is where the reason fits. */
-function sentence(status: AutosaveStatus, message: string | undefined, errorsCount?: number) {
+function sentence(
+  status: AutosaveStatus,
+  message: string | undefined,
+  errorsCount?: number,
+  cause?: SaveCause,
+) {
   switch (status) {
     case 'saving':
       return 'saving to the server…';
@@ -97,6 +112,14 @@ function sentence(status: AutosaveStatus, message: string | undefined, errorsCou
     case 'conflict':
       return message || 'someone saved this card meanwhile; autosave waits for your decision';
     case 'error':
+      // O-60 r4: at the `restaged` cap no write failed — every one landed, and a panel kept moving.
+      if (cause === 'restaged')
+        return 'the card kept changing while it was being saved — it retries on its own';
+      // D-66: the server's own sentence, as it is — it names the way out itself.
+      if (cause === 'refused')
+        return (
+          message || 'the server refused the last save — it goes out again with your next change'
+        );
       return message
         ? `the last save failed: ${message}; the card keeps retrying on its own`
         : 'the last save failed; the card keeps retrying on its own';
@@ -110,6 +133,7 @@ export function SaveStatusChip({
   lastSavedAt,
   errorsCount,
   message,
+  cause,
   bodyDirty,
   staged,
   history,
@@ -126,6 +150,11 @@ export function SaveStatusChip({
   lastSavedAt?: number;
   errorsCount?: number;
   message?: string;
+  /**
+   * `error`: a failed write, the `restaged` cap (every write landed, a panel kept moving), or a server
+   * refusal of the body (D-66: no timer, the next change sends it again).
+   */
+  cause?: SaveCause;
   bodyDirty: boolean;
   staged: StagedChange[];
   history: HistoryEntry[];
@@ -146,7 +175,7 @@ export function SaveStatusChip({
   // The walk closes the popover and moves focus to the field; the popover must not take it back.
   const walking = useRef(false);
   if (status === 'off') return null;
-  const { label, tone } = describe(status, lastSavedAt, errorsCount);
+  const { label, tone } = describe(status, lastSavedAt, errorsCount, cause);
 
   // A DECISION, never a save: the word itself leads to it. In every other state the whole chip is the
   // popover's door, and nothing in it writes.
@@ -227,7 +256,7 @@ export function SaveStatusChip({
             </button>
           )}
           <Text size='micro' variant='label' component='p'>
-            {sentence(status, message, errorsCount)}
+            {sentence(status, message, errorsCount, cause)}
           </Text>
 
           {pendingCount > 0 && (

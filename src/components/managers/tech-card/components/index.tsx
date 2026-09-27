@@ -120,6 +120,7 @@ import {
   AutosaveContext,
   flushRefusalSentence,
   type AutosaveApi,
+  type FlushResult,
 } from './design/autosave-contract';
 import {
   bodyFingerprint,
@@ -130,6 +131,7 @@ import {
   formOnTheWire,
   hasHttpStatus,
   isConflictError,
+  isRefusalError,
   settleFormAfterSave,
   useTechCardAutosaveController,
   watchOwnFailure,
@@ -346,7 +348,49 @@ const AUTO_STAGE = true;
 const AUTO_STAGE_MAX_STEPS = 5;
 
 /** What one write of the card did (see writeTechCard). */
-type WriteResult = { bodySaved: boolean; ok: boolean; outcome: SaveOutcome; message?: string };
+type WriteResult = {
+  bodySaved: boolean;
+  ok: boolean;
+  outcome: SaveOutcome;
+  message?: string;
+  /** D-66: the server refused the body itself (a 4xx a resend cannot change) — see SaveResult. */
+  refused?: boolean;
+};
+
+/**
+ * How long «archive & switch» waits for a write that was already on the wire (O-60 r4, P1-2). The API has
+ * no request timeout, and a hung write must not hold the dialog: past this the confirm says so and is
+ * live again, nothing archived.
+ */
+const CONVERT_WAIT_MS = 15_000;
+type ConvertWait = FlushResult | 'aborted' | 'timeout';
+/**
+ * The flush, awaited only until the operator cancels (`signal`) or `ms` pass. Nothing underneath is
+ * cancelled: the write in flight goes on and the autosave settles it as usual — only the dialog stops
+ * waiting for it.
+ */
+function waitForTheWrite(
+  flush: Promise<FlushResult>,
+  signal: AbortSignal,
+  ms: number,
+): Promise<ConvertWait> {
+  return new Promise((resolve) => {
+    let timer = 0;
+    const done = (v: ConvertWait) => {
+      window.clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      resolve(v);
+    };
+    const onAbort = () => done('aborted');
+    if (signal.aborted) {
+      resolve('aborted');
+      return;
+    }
+    signal.addEventListener('abort', onAbort);
+    timer = window.setTimeout(() => done('timeout'), ms);
+    flush.then(done, () => done('error'));
+  });
+}
 
 /**
  * What a read of the card means for this page (M-3): `same` — nothing newer than the card it stands on;
@@ -641,6 +685,14 @@ export function TechCardForm({
     previousPurpose?: string;
   } | null>(null);
   const [converting, setConverting] = useState(false);
+  // O-60 r4 (P1-2): THE WAIT before the switch — for a write that was already on the wire when «archive
+  // & switch» was pressed. Nothing irreversible has happened yet, so it is cancelable (✕, Esc and «keep
+  // sellable» abort it and put the purpose back) and bounded (CONVERT_WAIT_MS). Only the archive loop and
+  // the write after it (`converting`) hold the dialog shut.
+  const [convertWaiting, setConvertWaiting] = useState(false);
+  const convertWait = useRef<AbortController | null>(null);
+  // Said inside the dialog when the wait ran out; the confirm is live again and nothing was archived.
+  const [convertRefusal, setConvertRefusal] = useState<string | null>(null);
   // What a half-finished convert left behind. Like stagingError this is a fact about a write that
   // already partly happened, so it stays on screen instead of passing through a toast.
   const [convertReport, setConvertReport] = useState<string | null>(null);
@@ -1699,7 +1751,14 @@ export function TechCardForm({
           if (!silent) showMessage(`«${change.label}» failed — the rest is still staged`, 'error');
           // Баннер «сохранено 2 из 4» стоит на странице, то есть под оверлеем фулскрина.
           leaveFullscreen();
-          return { bodySaved, ok: false, outcome: 'partial', message: `«${change.label}»: ${why}` };
+          return {
+            bodySaved,
+            ok: false,
+            outcome: 'partial',
+            message: `«${change.label}»: ${why}`,
+            // D-66: the panel's own write refused (its status survived the rewrap) — held, not laddered.
+            refused: isRefusalError(error),
+          };
         }
         if (reread === 'error') {
           return {
@@ -1913,7 +1972,15 @@ export function TechCardForm({
       console.error('Failed to submit tech card', error);
       const outcome: SaveOutcome =
         status === 409 ? 'conflict' : applied.length > 0 ? 'invalid' : 'error';
-      return { bodySaved, ok: false, outcome, message };
+      // D-66: a 4xx the same body would earn again (the assembly backstop's FailedPrecondition, a strict
+      // marshaller's 400) is held until the next change instead of re-sent on the retry ladder.
+      return {
+        bodySaved,
+        ok: false,
+        outcome,
+        message,
+        refused: outcome === 'error' && isRefusalError(error),
+      };
     }
   }
 
@@ -2000,6 +2067,7 @@ export function TechCardForm({
   const openConvert = (opts: { data?: TechCardFormData; previousPurpose?: string } = {}) => {
     if (converting) return;
     setConvertReport(null);
+    setConvertRefusal(null);
     setConvert({ colorways: liveColorways, ...opts });
   };
 
@@ -2035,6 +2103,9 @@ export function TechCardForm({
   // before the gesture — or to the saved one when the dialog was opened later — and the auxiliary type
   // with it: the quiet save treats the two as one change (`withoutFlip`).
   function dismissConvert() {
+    // Cancelled during the wait (O-60 r4): the confirm stops waiting and archives nothing.
+    convertWait.current?.abort();
+    setConvertRefusal(null);
     const stored = form.control._defaultValues as Partial<TechCardFormData>;
     const back = convert?.previousPurpose ?? stored.purpose ?? 'TECH_CARD_PURPOSE_SELLABLE';
     setConvert(null);
@@ -2055,7 +2126,7 @@ export function TechCardForm({
       return { outcome: 'needs-confirm' };
     }
     const r = await writeTechCard(data, { mode: 'explicit' });
-    return { outcome: r.outcome, message: r.message };
+    return { outcome: r.outcome, message: r.message, refused: r.refused };
   }
 
   // «archive & switch»: retire every live colourway, then run the same save again. Client-guided and
@@ -2064,18 +2135,53 @@ export function TechCardForm({
   // save that follows still claims the version this page loaded; a genuine 409 here is a real
   // concurrent edit and falls through to the existing conflict modal.
   async function confirmConvert() {
-    if (!convert || converting) return;
+    if (!convert || converting || convertWaiting || convertWait.current) return;
     const queue = convert.colorways;
     const archived: string[] = [];
+    // D-59: opened at the gesture, a quiet write of the edits before it may still be on the wire — the
+    // switch goes out after it, never beside it. The flush writes nothing itself (the dialog holds the
+    // autosave: its cycle answers `needs-confirm`); it only waits for the one in flight.
+    // O-60 r4 (P1-2): the wait is cancelable and bounded — nothing has happened yet.
+    setConvertRefusal(null);
+    const wait = new AbortController();
+    convertWait.current = wait;
+    setConvertWaiting(true);
+    let waited: ConvertWait;
+    try {
+      waited = await waitForTheWrite(autosave.flush('convert'), wait.signal, CONVERT_WAIT_MS);
+    } finally {
+      if (convertWait.current === wait) convertWait.current = null;
+      setConvertWaiting(false);
+    }
+    // Cancelled while waiting: dismissConvert has put the purpose back already.
+    if (waited === 'aborted') return;
+    if (waited === 'timeout') {
+      setConvertRefusal('the card is still saving — try the switch again in a moment');
+      return;
+    }
+    // O-60 r4 (P1-1): the write it waited for came back 409, and the conflict decision is open. Nothing is
+    // archived over a card that can no longer be written: the dialog closes and says why. The switch stays
+    // in the form — «keep mine & overwrite» brings this dialog back with the rest of the card.
+    if (waited === 'conflict' || conflictOpen.current) {
+      setConvert(null);
+      showMessage('someone else saved this card meanwhile — decide the conflict first', 'error');
+      return;
+    }
+    // D-66: the server refused the card's last write (a 4xx the same body earns again), and the switch
+    // would carry that same body. Nothing is archived before a write already answered «no»: the dialog
+    // closes with the server's words. The switch stays in the form — once a change lands, the chip's
+    // «confirm the switch ›» brings this dialog back.
+    const refusal = autosave.refusalNow();
+    if (refusal) {
+      setConvert(null);
+      showMessage(`nothing was archived — the server refused the last save: ${refusal}`, 'error');
+      return;
+    }
     // Held across the check, the archive loop AND the save that follows: this path bypasses
     // form.handleSubmit, so `isSubmitting` never rises, and the dialog's own button, the history's
     // restore and the fullscreen's doors read `converting` to stay shut while the flip PUT is in flight.
     setConverting(true);
     try {
-      // D-59: opened at the gesture, a quiet write of the edits before it may still be on the wire —
-      // the switch goes out after it, never beside it. The flush writes nothing itself (the dialog holds
-      // the autosave: its cycle answers `needs-confirm`); it only waits for the one in flight.
-      await autosave.flush('convert');
       // …and there is no payload yet: the form is checked now, with the walk to the first field when it
       // does not validate. The switch stays in the form; once the field is fixed, the quiet save holds it
       // and the chip's «confirm the switch ›» brings this dialog back.
@@ -2125,12 +2231,12 @@ export function TechCardForm({
       // query, and archivedIds already covers the gap).
       if (numId) queryClient.invalidateQueries({ queryKey: techCardKeys.detail(numId) });
       setConvert(null);
-      const { bodySaved, ok, outcome, message } = await writeTechCard(data);
+      const { bodySaved, ok, outcome, message, refused } = await writeTechCard(data);
       // R-7: the autosave handed this write to the dialog and does not run it, so it hears the outcome
       // here — its status ends where the write did (no «unsaved · confirm the switch ›» over a card
       // that is saved), and a quiet card gets the same bookkeeping as after its own cycle (draft,
       // history).
-      autosave.settleExternal({ outcome, message }, 'convert');
+      autosave.settleExternal({ outcome, message, refused }, 'convert');
       if (ok) {
         // Only now: the card has to BE auxiliary before a colour variant is allowed on it (the
         // server refuses one on a sellable card), so seeding is a follow-up to the flip, not part
@@ -2301,6 +2407,7 @@ export function TechCardForm({
       outcome: r.outcome,
       message: r.message,
       pendingConfirm: keepPurpose !== undefined && r.outcome === 'complete',
+      refused: r.refused,
     };
   }
 
@@ -2384,7 +2491,7 @@ export function TechCardForm({
         const why =
           before === 'off'
             ? 'this card is not saving right now — reload it'
-            : flushRefusalSentence(before, autosave.errorsCount);
+            : flushRefusalSentence(before, autosave.errorsCount, autosave.refusalNow());
         showMessage(
           `${next === RELEASED ? 'not released' : 'not moved back to draft'}: ${why}`,
           'error',
@@ -2747,6 +2854,7 @@ export function TechCardForm({
                 lastSavedAt={autosave.lastSavedAt}
                 errorsCount={autosave.errorsCount}
                 message={autosave.message}
+                cause={autosave.cause}
                 // mn-3: dirt nobody can write is not «waiting» (read after the subscription).
                 bodyDirty={form.formState.isDirty && bodyWorkOf(form)}
                 staged={staging.changes}
@@ -2922,7 +3030,8 @@ export function TechCardForm({
           handler closes this itself, after the archive loop has either finished or reported.
           D-59: it opens at the gesture (the purpose field), with colourways to retire or without —
           confirming is the one place a switch to auxiliary is decided — and dismissing it (✕, Esc,
-          «keep sellable») puts the purpose back. */}
+          «keep sellable») puts the purpose back. O-60 r4: dismissing works while it waits for a write
+          already on the wire too; only the archive loop and the write after it hold it shut. */}
       <ConfirmationModal
         open={!!convert}
         onOpenChange={(open) => {
@@ -2931,19 +3040,26 @@ export function TechCardForm({
         title='switch to auxiliary?'
         width='sm'
         confirmLabel={
-          convertArchives
-            ? converting
+          converting
+            ? convertArchives
               ? 'archiving…'
-              : 'archive & switch'
-            : converting
-              ? 'switching…'
-              : 'switch to auxiliary'
+              : 'switching…'
+            : convertWaiting
+              ? 'waiting for the save…'
+              : convertArchives
+                ? 'archive & switch'
+                : 'switch to auxiliary'
         }
         cancelLabel='keep sellable'
-        confirmDisabled={converting}
+        confirmDisabled={converting || convertWaiting}
         closeOnConfirm={false}
         onConfirm={confirmConvert}
       >
+        {convertRefusal && (
+          <Text size='micro' variant='error' component='p' className='mb-2' data-convert-refusal=''>
+            {convertRefusal}
+          </Text>
+        )}
         {convertArchives && (
           <>
             <Row label='live colourways' value={convert?.colorways.length ?? 0} />
@@ -3473,8 +3589,10 @@ export function TechCardForm({
                 // Прокладка до хрома фулскрина: его кнопка save обязана быть той же самой, что в
                 // шапке карточки, — второй путь сохранения разошёлся бы с первым. У карточки, которая
                 // сохраняет себя сама, кнопки нет и там (O-60, D-59): без прокладки хром её не рисует.
-                // Остаётся она только новой карточке — там это создание, как `add` в шапке.
-                onSave={autosaveEnabled ? undefined : () => void save()}
+                // Остаётся она только новой карточке, которую можно писать, — там это создание, как
+                // `add` в шапке. Не `!autosaveEnabled`: автосейв выключен и у существующей карточки без
+                // права записи, и живая кнопка там писала бы в отказ (O-60 r4, P2-2).
+                onSave={!isEditMode && canWrite(SECTION.techCards) ? () => void save() : undefined}
                 // `converting` наравне с `isSubmitting`: управляемый перевод в aux гоняет свою
                 // пере-запись МИМО handleSubmit, и без него кнопка фулскрина оставалась бы живой
                 // всё время, пока летит переворот. `saving` несёт и цикл автосейва.

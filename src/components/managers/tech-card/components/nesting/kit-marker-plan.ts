@@ -166,7 +166,7 @@ export function kitWidthDisagreement(jobWidthCm: number, rowWidthCm: number): st
   if (!Number.isFinite(rowWidthCm) || rowWidthCm <= 0) return '';
   if (!Number.isFinite(jobWidthCm) || jobWidthCm <= 0) return '';
   if (Math.abs(jobWidthCm - rowWidthCm) <= 0.5) return '';
-  return `the marker would be computed on ${jobWidthCm} cm of cloth, while the recipe line shows a cutting width of ${rowWidthCm} cm — these are different fabrics, and nothing here can choose for you. the width for the marker comes from the SAVED colourway pin (the width and selvedge of the article itself), the line comes from its own draft and its BOM line. there are exactly two causes: either the article on the line was changed and the card wasn't saved — save it and retry; or the BOM line has its OWN width filled in that doesn't match the article's catalog width — reconcile them on the BOM tab`;
+  return `the marker would be computed on ${jobWidthCm} cm of cloth, while the recipe line shows a cutting width of ${rowWidthCm} cm — these are different fabrics, and nothing here can choose for you. the width for the marker comes from the SAVED colourway pin (the width and selvedge of the article itself), the line comes from its own draft and its BOM line. there are exactly two causes: either the article on the line was changed and the card has not saved it yet — retry once it has; or the BOM line has its OWN width filled in that doesn't match the article's catalog width — reconcile them on the BOM tab`;
 }
 
 /** Оговорка о границе — ОДНА формулировка на экран и на блоб раскладки (см. шапку). */

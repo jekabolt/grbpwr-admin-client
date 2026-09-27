@@ -360,7 +360,8 @@ export function FlatRunRow({
       : refused === 'stopped'
         ? 'the card stopped saving while GENERATE waited for it'
         : refused
-          ? flushRefusalSentence(refused, autosave.errorsCount) || 'the card is not saved yet'
+          ? flushRefusalSentence(refused, autosave.errorsCount, autosave.refusal) ||
+            'the card is not saved yet'
           : null;
 
   /**

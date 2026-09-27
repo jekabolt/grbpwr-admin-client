@@ -8,8 +8,11 @@ export {
   formOnTheWire,
   createAutosaveMachine,
   deepEqual,
+  isRefusalError,
+  isRefusalStatus,
   isSaveShortcut,
   liveIsDirty,
+  refusalOf,
   settleFormAfterSave,
   watchOwnFailure,
 } from '../src/components/managers/tech-card/components/useTechCardAutosave';

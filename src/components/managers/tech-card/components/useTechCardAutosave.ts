@@ -105,6 +105,12 @@ export type SaveResult = {
   pendingConfirm?: boolean;
   /** `invalid`: сколько полей держат запись, когда конвейер сосчитал их сам (тихий разбор). */
   errorsCount?: number;
+  /**
+   * `error`/`partial`: сервер ОТКАЗАЛ этому телу — 4xx, который повтор того же тела не изменит (не 408,
+   * не 409, не 429; см. `isRefusalError`). Машина держит «not saved» со словами сервера и шлёт снова
+   * только со следующей правкой, не по таймеру (D-66, 27.09).
+   */
+  refused?: boolean;
 };
 
 export type MachineState = {
@@ -112,6 +118,13 @@ export type MachineState = {
   lastSavedAt?: number;
   errorsCount?: number;
   message?: string;
+  /**
+   * При `error` — ПОЧЕМУ карточка не сохранена (O-60 r4): `failed` — запись упала; `restaged` — ни одна
+   * запись не падала, а панель менялась, пока писалась, и потолок `restaged` отдал её шагу повторов.
+   * Поповер чипа не говорит «the last save failed» над картой, чьи записи все легли. `refused` — сервер
+   * отказал самому телу (D-66): повторов по таймеру нет, следующая попытка — со следующей правкой.
+   */
+  cause?: 'failed' | 'restaged' | 'refused';
 };
 
 export type MachineDeps = {
@@ -190,7 +203,8 @@ function sameState(a: MachineState, b: MachineState) {
     a.status === b.status &&
     a.lastSavedAt === b.lastSavedAt &&
     a.errorsCount === b.errorsCount &&
-    a.message === b.message
+    a.message === b.message &&
+    a.cause === b.cause
   );
 }
 
@@ -254,20 +268,25 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       set({ status: 'off' });
       return 'off';
     }
+    // M-01: 409 держит ВСЕ записи, явные тоже. Выходы — только двери модалки (см. шапку файла).
+    // РАНЬШЕ паузы (O-60 r4, P1-1): диалог перевода, который ждёт записи, ушедшей до него, обязан
+    // услышать её 409 как `conflict`, а не как «пауза» — иначе он пошёл бы архивировать колорвеи над
+    // карточкой, которую уже нельзя записать.
+    if (state.status === 'conflict') return 'conflict';
     // Диалог перевода в auxiliary открыт: запись, которую он перехватил, он же и повторит. Цикл,
     // пришедшийся на паузу, запоминается — его взведёт конец паузы (m9).
     if (deps.isPaused()) {
       skippedWhilePaused = true;
       return 'needs-confirm';
     }
-    // M-01: 409 держит ВСЕ записи, явные тоже. Выходы — только двери модалки (см. шапку файла).
-    if (state.status === 'conflict') return 'conflict';
     if (!deps.hasWork()) {
       restIfNoWork();
       return 'nothing';
     }
     if (mode === 'silent') {
       const v = await deps.validate();
+      // P2-1 (O-60 r4): switched off while the check ran — nothing is written.
+      if (stoppedMeanwhile()) return goneOff();
       // ревью mn-5: a read judged while the check ran may have opened the conflict decision — it
       // stands; neither «invalid» nor «saving» is painted over it, and nothing is written.
       // (read afresh: the check above narrowed `state` for TypeScript, not for the code that ran since)
@@ -278,13 +297,40 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       }
     }
     set({ status: 'saving', message: undefined });
+    // P1-3 (O-60 r4): what the machine had heard when this write left, and the operator's gestures then.
+    // A change the operator makes while it is out keeps its own debounce if the write fails (see settle).
+    const genAtStart = changeGen;
+    const gesturesAtStart = deps.operatorGen?.();
     let r: SaveResult;
     try {
       r = await deps.save(mode, reason);
     } catch (e) {
-      r = { outcome: 'error', message: errorText(e) };
+      r = { outcome: 'error', message: errorText(e), refused: isRefusalError(e) };
     }
-    return settle(r, reason);
+    // P2-1 (O-60 r4): `off` is terminal. The card stopped saving while this write was out — released by
+    // this very write (its halt rises the moment the PUT lands, B-08), frozen, the rights gone. The
+    // write's own bookkeeping still happens, explicitly: a complete write over a quiet card records its
+    // history and clears the draft (the release's own write is exactly this case). Nothing else — no
+    // «saved», no «not saved», no timer.
+    if (stoppedMeanwhile()) {
+      if (r.outcome === 'complete' && !r.pendingConfirm && !deps.hasWork()) {
+        deps.onComplete?.(reason);
+      }
+      return goneOff();
+    }
+    return settle(r, reason, genAtStart, gesturesAtStart);
+  }
+
+  /** Switched off (or unmounted) while a cycle awaited — `disposed` counts only outside the unmount flush. */
+  function stoppedMeanwhile() {
+    return !deps.isEnabled() || state.status === 'off';
+  }
+  function goneOff(): CycleResult {
+    clearTimer();
+    retryIndex = 0;
+    restagedStreak = 0;
+    set({ status: 'off', errorsCount: undefined, message: undefined, cause: undefined });
+    return 'off';
   }
 
   /** A pass that moved the card forward but left work behind: say so, and make sure a cycle follows. */
@@ -299,7 +345,17 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
     return 'progress';
   }
 
-  function settle(r: SaveResult, reason: string): CycleResult {
+  function settle(
+    r: SaveResult,
+    reason: string,
+    genAtStart?: number,
+    gesturesAtStart?: number,
+  ): CycleResult {
+    // P2-1 (O-60 r4): nothing settles once the card stopped saving (disabled, halted by a release). A
+    // write that was out when it stopped never gets here (runCycle's stoppedMeanwhile); the page's own
+    // report does, and in the render between the halt lifting and setEnabled(true) the status still
+    // reads `off` over a card that saves again — a conflict judged on that read is heard (M-2).
+    if (!deps.isEnabled()) return 'off';
     switch (r.outcome) {
       case 'complete': {
         retryIndex = 0;
@@ -348,6 +404,7 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
           set({
             status: 'error',
             message: r.message ?? 'a panel kept changing while it was being saved',
+            cause: 'restaged',
           });
           // No write failed here either: a flush that ends on the cap hears `busy`, and its door says
           // that the card kept changing — not «the last save failed» (R-10).
@@ -375,16 +432,42 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       case 'error':
       default: {
         restagedStreak = 0;
-        // D-59: the ladder, then the step — for as long as the card has work (a cycle over a quiet card
-        // rests and clears the timer, see runCycle). The next change does not wait for either: it arms
-        // its own debounce (notifyChange).
-        if (retryIndex < deps.retryDelaysMs.length) {
+        // P1-3: a change heard while this write was out — by the OPERATOR (a gesture since the write
+        // left stands behind the last change heard). The page's own correction inside the write — the
+        // stage put back after a failed re-read (B-07) — is no new work: it takes the ladder with the
+        // failure it belongs to. Without a gesture source (the probe's bare machine) every change counts.
+        const changedMeanwhile =
+          genAtStart !== undefined &&
+          changeGen !== genAtStart &&
+          (gesturesAtStart === undefined || heardOperatorGen !== gesturesAtStart);
+        if (r.refused) {
+          // D-66 (27.09): the server refused THIS body — a 4xx a resend cannot change (the assembly
+          // backstop's FailedPrecondition, a validation nobody pinned on a field). On the ladder the same
+          // body earned the same refusal every few seconds for minutes. The card holds instead: «not
+          // saved» with the server's own sentence, no timer. It goes out again with the next change —
+          // notifyChange arms its debounce, and a change heard while this write was out keeps the one it
+          // armed (P1-3) — or with an explicit flush.
+          retryIndex = 0;
+          if (!changedMeanwhile) clearTimer();
+          else if (timer == null && !queued) arm(deps.debounceMs, 'debounce');
+          set({ status: 'error', message: r.message, cause: 'refused' });
+          return 'error';
+        }
+        if (changedMeanwhile) {
+          // P1-3 (O-60 r4): a change was heard while this write was out, and it armed its own debounce
+          // (notifyChange). The failure does not trade that for a retry rung: the debounce stays — or,
+          // when it already fired, the pass it queued runs next — and the ladder starts over.
+          retryIndex = 0;
+          if (timer == null && !queued) arm(deps.debounceMs, 'debounce');
+        } else if (retryIndex < deps.retryDelaysMs.length) {
+          // D-59: the ladder, then the step — for as long as the card has work (a cycle over a quiet
+          // card rests and clears the timer, see runCycle).
           arm(deps.retryDelaysMs[retryIndex], 'retry');
           retryIndex += 1;
         } else {
           arm(retryInterval, 'retry');
         }
-        set({ status: 'error', message: r.message });
+        set({ status: 'error', message: r.message, cause: 'failed' });
         return 'error';
       }
     }
@@ -491,6 +574,9 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       if (disposed || !skippedWhilePaused) return;
       skippedWhilePaused = false;
       if (!deps.isEnabled() || state.status === 'conflict' || running) return;
+      // D-66: a refusal holds until the next change, and the end of a pause is not one — a change made
+      // under the dialog has already turned the status to `dirty`.
+      if (state.status === 'error' && state.cause === 'refused') return;
       if (!deps.hasWork()) {
         restIfNoWork();
         return;
@@ -666,6 +752,35 @@ const causeOf = (e: unknown) => (e as { cause?: unknown } | null | undefined)?.c
 /** A 409 — on the error itself, or on the one a panel wrapped into its own sentence (`cause`). */
 export function isConflictError(e: unknown): boolean {
   return httpStatus(e) === 409 || httpStatus(causeOf(e)) === 409;
+}
+
+/** D-66: the server's sentence while the machine holds a refusal (`AutosaveApi.refusal`), else nothing. */
+export function refusalOf(s: MachineState): string | undefined {
+  return s.status === 'error' && s.cause === 'refused'
+    ? s.message || 'the server refused the last save'
+    : undefined;
+}
+
+/**
+ * D-66: a refusal a resend of the same body cannot change — a 4xx other than 408 (the request timed
+ * out), 409 (the conflict door) and 429 (the rate limit, which passes). 401/403 are here too: the
+ * session or the rights, not the network — the ladder would only repeat them. No status (the network),
+ * 408, 429 and 5xx stay transient and keep the ladder.
+ */
+export function isRefusalStatus(status: number | undefined): boolean {
+  return (
+    typeof status === 'number' &&
+    status >= 400 &&
+    status < 500 &&
+    status !== 408 &&
+    status !== 409 &&
+    status !== 429
+  );
+}
+
+/** A refusal (`isRefusalStatus`) — on the error itself, or on the one a panel wrapped (`cause`). */
+export function isRefusalError(e: unknown): boolean {
+  return isRefusalStatus(httpStatus(e)) || isRefusalStatus(httpStatus(causeOf(e)));
 }
 
 /** Whether the error still says what the server answered (a panel's rewrap into a sentence drops it). */
@@ -960,6 +1075,16 @@ export function isSaveShortcut(
 
 export type AutosaveController = AutosaveApi & {
   /**
+   * При `error`: упала запись (`failed`), панель менялась, пока писалась (`restaged`, O-60 r4), или
+   * сервер отказал самому телу (`refused`, D-66).
+   */
+  cause?: MachineState['cause'];
+  /**
+   * D-66: `refusal` СЕЙЧАС — из машины, а не из кадра. Дверь, дождавшаяся flush, читает его после
+   * `await`: кадр с отказом ещё не отрисован, а её замыкание — из кадра до нажатия.
+   */
+  refusalNow: () => string | undefined;
+  /**
    * Явное сохранение: ⌘S, неявный submit формы, «keep mine», двери релиза. Органа на экране у него нет
    * (O-60, D-59): чип сохранения никогда не пишет.
    */
@@ -1191,6 +1316,12 @@ export function useTechCardAutosaveController(opts: {
       lastSavedAt: state.lastSavedAt,
       errorsCount: state.errorsCount,
       message: state.message,
+      cause: state.cause,
+      refusal: refusalOf(state),
+      refusalNow: () => {
+        const live = machineRef.current?.state();
+        return live ? refusalOf(live) : undefined;
+      },
       draftPending,
       request: () => {
         if (!machineRef.current) {

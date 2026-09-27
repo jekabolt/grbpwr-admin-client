@@ -3377,8 +3377,8 @@ export function NestingModal({
           )}
           {lockedUnsaved && (
             <CalloutBox tone='note'>
-              the fabric of these DXF is not saved on the card yet — save the card and the marker
-              will bind to it; right now it goes off unbound
+              the fabric of these DXF is not saved on the card yet — once the card has saved, the
+              marker binds to it; right now it goes off unbound
             </CalloutBox>
           )}
           {unsavedSlots > 0 && !lockedSlot && !lockedUnsaved && (

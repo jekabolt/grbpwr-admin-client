@@ -387,7 +387,7 @@ export function BomWastageSuggestion({
           </Button>
           <Text size='micro' variant='label'>
             goes into the field together with the lay count — by this pair the server tells applying
-            the suggestion apart from manual entry; you save the card yourself
+            the suggestion apart from manual entry; the card saves itself once it validates
           </Text>
         </div>
       ) : null}

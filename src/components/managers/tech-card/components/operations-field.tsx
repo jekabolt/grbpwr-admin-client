@@ -1832,7 +1832,7 @@ function ClearOperationMediaButton({
     // Намерение живёт ровно одно сохранение: маппер записи гасит его сам, а черновик не хранит.
     setValue('mediaCleared', true, { shouldDirty: true });
     setConfirming(false);
-    showMessage('the step photos are cleared — save the card', 'success');
+    showMessage('the step photos are cleared — the card saves itself once it validates', 'success');
   };
 
   return (
@@ -1944,8 +1944,8 @@ function ClearAssemblyButton({
     setConfirming(false);
     showMessage(
       droppedDangling > 0
-        ? `the unit markup is cleared; dangling references dropped: ${droppedDangling} — save the card`
-        : 'the unit markup is cleared — save the card for it to apply',
+        ? `the unit markup is cleared; dangling references dropped: ${droppedDangling} — the card saves itself once it validates`
+        : 'the unit markup is cleared — it applies once the card has saved',
       'success',
     );
   };
