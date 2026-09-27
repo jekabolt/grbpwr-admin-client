@@ -77,7 +77,7 @@ function expectedVersion(qc: QueryClient): number {
   // uint64 arrives as a JSON string ("42"); it goes back exactly as it came. Only absence is an
   // error: no config in hand means there is nothing the write could be checked against.
   if (version === undefined || version === null) {
-    throw new Error('the AI config has not loaded yet — reload');
+    throw new Error('the AI config has not loaded yet; reload the page');
   }
   return version;
 }

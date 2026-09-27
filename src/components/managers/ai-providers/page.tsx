@@ -65,7 +65,7 @@ export function AiProviders() {
             <Text size='micro'>
               couldn't read the AI config
               {config.error instanceof Error && config.error.message
-                ? ` — ${config.error.message}`
+                ? `: ${config.error.message}`
                 : ''}
             </Text>
           </CalloutBox>

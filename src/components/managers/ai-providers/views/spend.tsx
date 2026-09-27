@@ -113,7 +113,7 @@ export function SpendView({ config }: { config: GetAiProvidersConfigResponse | u
             <Text size='micro'>
               couldn't read the spend report
               {spend.error instanceof Error && spend.error.message
-                ? ` — ${spend.error.message}`
+                ? `: ${spend.error.message}`
                 : ''}
             </Text>
           </CalloutBox>
@@ -319,8 +319,8 @@ function ActorTable({
               {isOpen &&
                 g.lines.map((l, i) => (
                   <tr key={`${l.purpose}|${l.providerKey}|${l.model}|${i}`} data-spend-line=''>
-                    <td className='pl-5'>
-                      <Text component='span' size='micro' variant='label'>
+                    <td>
+                      <Text component='span' size='micro' variant='label' className='block pl-3.5'>
                         {purposeLabel(l.purpose)} · {providerLabel(l.providerKey)} ·{' '}
                         {l.model || 'default model'}
                       </Text>

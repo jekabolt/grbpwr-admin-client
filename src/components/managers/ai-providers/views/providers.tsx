@@ -32,7 +32,9 @@ export function ProvidersView({
   const keysLocked = config?.masterKeyPresent === false;
 
   return (
-    <Section title='providers' question='which services may spend money'>
+    <>
+      {/* Above the block, not inside it: a callout is a box of its own, and a block never holds
+          another box (DESIGN.md, "The Block"). */}
       {keysLocked && (
         <CalloutBox tone='warning'>
           <Text size='micro'>
@@ -41,36 +43,37 @@ export function ProvidersView({
           </Text>
         </CalloutBox>
       )}
+      <Section title='providers' question='which services may spend money'>
+        {!config ? (
+          <Text size='micro' variant='label'>
+            {loading ? 'loading…' : '—'}
+          </Text>
+        ) : providers.length === 0 ? (
+          <Text size='micro' variant='label'>
+            no providers on this server
+          </Text>
+        ) : (
+          <div className='divide-y divide-hairline'>
+            {providers.map((p) => (
+              <ProviderRow
+                key={p.key}
+                provider={p}
+                open={openKey === p.key}
+                onOpenChange={(open) => setOpenKey(open ? (p.key ?? null) : null)}
+                keysLocked={keysLocked}
+              />
+            ))}
+          </div>
+        )}
 
-      {!config ? (
-        <Text size='micro' variant='label'>
-          {loading ? 'loading…' : '—'}
-        </Text>
-      ) : providers.length === 0 ? (
-        <Text size='micro' variant='label'>
-          no providers on this server
-        </Text>
-      ) : (
-        <div className='divide-y divide-hairline'>
-          {providers.map((p) => (
-            <ProviderRow
-              key={p.key}
-              provider={p}
-              open={openKey === p.key}
-              onOpenChange={(open) => setOpenKey(open ? (p.key ?? null) : null)}
-              keysLocked={keysLocked}
-            />
-          ))}
-        </div>
-      )}
-
-      {config && (
-        <Text size='micro' variant='label'>
-          master key: {config.masterKeyPresent ? 'present' : 'missing'} · timezone:{' '}
-          {config.timezone || '—'} · prices: {config.priceVersion || '—'}
-        </Text>
-      )}
-    </Section>
+        {config && (
+          <Text size='micro' variant='label'>
+            master key: {config.masterKeyPresent ? 'present' : 'missing'} · timezone:{' '}
+            {config.timezone || '—'} · prices: {config.priceVersion || '—'}
+          </Text>
+        )}
+      </Section>
+    </>
   );
 }
 

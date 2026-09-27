@@ -128,7 +128,7 @@ function DefaultsRow({ config }: { config: GetAiProvidersConfigResponse }) {
           value={chat}
           items={providerItems(providers, 'chat')}
           disabled={save.isPending}
-          className='w-40'
+          className='w-48'
           onValueChange={(v: string) => {
             if (v && v !== chat) save.mutate({ chatProviderKey: v, imageProviderKey: '' });
           }}
@@ -141,14 +141,14 @@ function DefaultsRow({ config }: { config: GetAiProvidersConfigResponse }) {
           value={image}
           items={providerItems(providers, 'image')}
           disabled={save.isPending}
-          className='w-40'
+          className='w-48'
           onValueChange={(v: string) => {
             if (v && v !== image) save.mutate({ chatProviderKey: '', imageProviderKey: v });
           }}
         />
       </Labelled>
       <Text size='micro' variant='label' className='pb-1'>
-        what “default” means in a route below
+        a route set to “default” uses these
       </Text>
     </div>
   );
@@ -284,14 +284,14 @@ function CandidateControls({
           value={selected}
           items={items}
           disabled={disabled}
-          className='w-40'
+          className='w-48'
           onValueChange={(v: string) => {
             if (!v || v === selected) return;
             // A new provider starts on its own default model: the old slug named the old one's.
             onChange(v === NONE ? undefined : { providerKey: v === DEFAULT ? '' : v, model: '' });
           }}
         />
-        {value && (
+        {value ? (
           <ModelField
             key={`${answering}|${value.model}`}
             label={`${purposeLabel} ${role} model`}
@@ -300,6 +300,9 @@ function CandidateControls({
             disabled={disabled}
             onCommit={(model) => onChange({ providerKey: value.providerKey, model })}
           />
+        ) : (
+          // No fallback, no model: the slot stays, so the columns of the next row still line up.
+          <span aria-hidden className='hidden w-48 sm:block' />
         )}
       </div>
     </div>

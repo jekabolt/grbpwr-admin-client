@@ -46,7 +46,7 @@ export function keyLine(p: AiProviderInfo): KeyLine {
     case 'unreadable':
       return {
         text: p.keyLast4
-          ? `key: the stored key does not open — env${last4(p.keyLast4)} answers meanwhile`
+          ? `key: the stored key does not open; env${last4(p.keyLast4)} answers meanwhile`
           : 'key: the stored key does not open, and there is no env key',
         broken: true,
       };
