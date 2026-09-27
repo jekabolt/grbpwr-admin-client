@@ -311,12 +311,6 @@ function pictureOfMedia(full: common_MediaFull): common_DesignPicture {
  * дальше — жест, и щелчка у него нет.
  */
 const DRAG_SLOP = 4;
-/**
- * Сколько после жеста живёт глушение его `click` (см. `swallowFrom`). Щелчок касания приходит через
- * миллисекунды, под нагрузкой — через десятки; секунда — запас, а не ожидание: следующее нажатие
- * снимает глушение сразу.
- */
-const SWALLOW_MS = 1000;
 
 export function MoodBoard({
   techCardId,
@@ -712,18 +706,31 @@ export function MoodBoard({
      ЗАХВАТ — НА РАЗДЕЛИТЕЛЕ, откуда бы жест ни начался: его узел смонтирован всегда, и смена
      полоска ↔ панель посреди жеста захват не роняет (полоска уронила бы — она уходит из DOM).
 
-     ЩЕЛЧОК ПО ПОЛОСКЕ — ЖЕСТ МЕНЬШЕ 4px, И ЕГО `click` ПРИХОДИТ НЕ ТУДА, ГДЕ ЕГО ЖДУТ. Замерено в
-     Chromium: `click` захваченной МЫШИ уходит цели захвата, разделителю, — полоска его не видит,
-     поэтому щелчок мыши раскрывает панель на отпускании. `click` КАСАНИЯ, наоборот, ищется под
-     пальцем: раскрой панель на отпускании — и он попал бы в её шапку, в шеврон «свернуть». Поэтому
-     касание раскрывает своим `click` на полоске, а жест в 4px и больше этот `click` глушит
-     (`swallowFrom`). Приходит он ОТДЕЛЬНЫМ вводом после отпускания — касание становится щелчком
-     лишь по отпусканию — и под нагрузкой уже после таймеров нулевой задержки: флаг «до конца
-     задачи» его пропускал, и жест в 8px раскрывал панель (замерено 27.09). Поэтому отметка живёт до
-     следующего нажатия и не дольше `SWALLOW_MS`: настоящий щелчок всегда начинается нажатием.
+     ЩЕЛЧОК ПО ПОЛОСКЕ — НАЖАТИЕ, УШЕДШЕЕ МЕНЬШЕ ЧЕМ НА 4px, И РЕШАЕТСЯ ОН НА ОТПУСКАНИИ — для мыши,
+     касания и пера одинаково (ревью Codex r3). `click`, который браузер шлёт следом, — этого же
+     отпускания, а не новая просьба, и попасть он может куда угодно: замерено в Chromium, `click`
+     захваченной мыши уходит цели захвата (разделителю), а `click` касания ищется под пальцем — где
+     после раскрытия уже шеврон «свернуть» или строка указания, а после жеста, раскрывшего панель, —
+     её органы или кадр доски. Поэтому его съедает ловушка на ОКНЕ в фазе перехвата (`eatClickOf`),
+     куда бы он ни попал; прежде глушение жило на полоске, которая к этому времени уже снята.
+     Ловушка узнаёт `click` по `pointerId` отпускания и снимается им же или следующим нажатием
+     любого указателя — `click` жеста всегда приходит раньше. Времени у неё нет: `click` под
+     нагрузкой опаздывает на десятки миллисекунд (так краснел O-58.8), и окно в секунду глотало бы
+     и щелчок ассистивной техники.
 
-     Ниже `lg` разделителя нет — нет и жеста: полоска там строка под доской и открывается щелчком. */
+     `click` БЕЗ НАЖАТИЯ — ДВЕРЬ ВСЕГДА. Клавиатура, ассистивная техника и `element.click()` шлют его
+     с `pointerId` −1 и `detail` 0 (замерено), ловушка его не трогает, и полоска раскрывается своим
+     `onClick`, как любая дверь.
+
+     ОДИН ЖЕСТ — ОДИН УКАЗАТЕЛЬ (ревью Codex r3). Жест помнит свой `pointerId`: второй палец и не
+     главный указатель его не начинают, не водят и не кончают.
+
+     Ниже `lg` разделителя нет — нет и жеста: полоска там строка под доской и открывается щелчком.
+     Окно, ушедшее ниже `lg` посреди жеста, жест кончает: Chromium не снимает захват с узла,
+     ставшего `display: none` (замерено), и движения писали бы ширину панели, которой нет. */
   const drag = useRef<{
+    /** Указатель жеста: чужие события жест не водят и не кончают. */
+    id: number;
     x: number;
     y: number;
     /** Нарисованная ширина в начале жеста: у полоски 28. */
@@ -736,8 +743,45 @@ export function MoodBoard({
     strip: boolean;
   } | null>(null);
   const [dragging, setDragging] = useState(false);
-  /** Отпускание жеста в 4px и больше (`performance.now()`): `click` полоски после него — жеста. */
-  const swallowFrom = useRef<number | null>(null);
+  /** Снять ловушку `click` жеста — ставит её `eatClickOf`. Объект один на монтаж. */
+  const clickTrap = useRef<{ off: (() => void) | null }>({ off: null });
+  const dropClickTrap = () => {
+    clickTrap.current.off?.();
+    clickTrap.current.off = null;
+  };
+  /**
+   * Следующий `click` указателя `id` — этого отпускания, а не двери: съедается на окне, куда бы ни
+   * попал (см. шапку жеста). `click` в Chromium несёт `pointerId` своего указателя; без него
+   * (движок постарше) своим считается любой `click` от указателя (`detail` > 0).
+   */
+  const eatClickOf = (id: number) => {
+    dropClickTrap();
+    const onClick = (e: MouseEvent) => {
+      const pid = (e as Partial<PointerEvent>).pointerId;
+      if (typeof pid === 'number' ? pid !== id : e.detail === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dropClickTrap();
+    };
+    window.addEventListener('click', onClick, true);
+    window.addEventListener('pointerdown', dropClickTrap, true);
+    clickTrap.current.off = () => {
+      window.removeEventListener('click', onClick, true);
+      window.removeEventListener('pointerdown', dropClickTrap, true);
+    };
+  };
+  useEffect(() => {
+    const trap = clickTrap.current;
+    return () => trap.off?.();
+  }, []);
+  /** Кончить жест, не дожидаясь отпускания: снять и состояние, и захват. */
+  const endDrag = () => {
+    const d = drag.current;
+    drag.current = null;
+    setDragging(false);
+    const sep = separator.current;
+    if (d && sep?.hasPointerCapture(d.id)) sep.releasePointerCapture(d.id);
+  };
   /** Сторона порога — это предпочтение; открытая сторона несёт ширину. Удержание на сеанс снимается. */
   const settle = (fold: boolean, w = panelW) => {
     setHeldFor(null);
@@ -746,14 +790,18 @@ export function MoodBoard({
     );
   };
   const grab = (e: React.PointerEvent, strip: boolean) => {
-    // Новое нажатие: `click` прошлого жеста пришёл бы раньше него — глушить больше нечего.
-    swallowFrom.current = null;
     const sep = separator.current;
-    // Разделитель не нарисован (ниже `lg`, свёрнутая доска) — нет и жеста.
-    if (e.button !== 0 || !sep?.offsetWidth) return;
+    // Разделитель не нарисован (ниже `lg`, свёрнутая доска) — нет и жеста. Начинает его только
+    // главный указатель и только левой кнопкой (касание и перо — тоже 0).
+    if (!sep?.offsetWidth || !e.isPrimary || e.button !== 0) return;
+    // Жест уже идёт — второе нажатие его не перехватывает. Состояние без захвата — след жеста,
+    // потерявшего конец, и новому нажатию оно не мешает.
+    const live = drag.current;
+    if (live && sep.hasPointerCapture(live.id)) return;
     e.preventDefault();
     sep.setPointerCapture(e.pointerId);
     drag.current = {
+      id: e.pointerId,
       x: e.clientX,
       y: e.clientY,
       w: calloutsPanel.current?.offsetWidth ?? panelW,
@@ -765,7 +813,12 @@ export function MoodBoard({
   };
   const follow = (e: React.PointerEvent) => {
     const d = drag.current;
-    if (!d) return;
+    if (!d || e.pointerId !== d.id) return;
+    // Окно ушло ниже `lg` (или доска свернулась) посреди жеста — разделителя нет, жеста тоже.
+    if (!separator.current?.offsetWidth) {
+      endDrag();
+      return;
+    }
     if (Math.hypot(e.clientX - d.x, e.clientY - d.y) >= DRAG_SLOP) d.moved = true;
     // Влево — шире: панель стоит СПРАВА, и её левый край идёт за рукой.
     const w = d.w + (d.x - e.clientX);
@@ -777,13 +830,14 @@ export function MoodBoard({
   };
   const release = (e: React.PointerEvent) => {
     const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
     drag.current = null;
     setDragging(false);
-    if (!d?.strip) return;
-    // Щелчок мыши по полоске решается здесь: её `click` уходит разделителю (см. шапку).
-    if (!d.moved && e.type === 'pointerup' && e.pointerType === 'mouse') setCollapsed(false);
-    // `click` касания придёт полоске позже, отдельным вводом; после жеста он жеста, а не двери.
-    if (d.moved) swallowFrom.current = performance.now();
+    // Отменённый указатель и снятый захват `click` не шлют — съедать и раскрывать нечего.
+    if (e.type !== 'pointerup') return;
+    eatClickOf(d.id);
+    // Нажатие на полоске без движения — щелчок по ней (см. шапку жеста).
+    if (d.strip && !d.moved) setCollapsed(false);
   };
 
   // ОПИСАНИЕ — ТЕ ЖЕ ДВА ОРГАНА ВОЛНЫ, ЧТО У ПОЛЕЙ GENERAL INFORMATION: синяя рамка `drafted`,
@@ -1119,9 +1173,12 @@ export function MoodBoard({
               if (collapsed) settle(false, CALLOUTS_MIN_W);
               else resizeTo(panelW + CALLOUTS_KEY_STEP);
             } else if (e.key === 'ArrowRight') {
-              if (collapsed) return;
-              if (panelW <= CALLOUTS_MIN_W) settle(true);
-              else resizeTo(panelW - CALLOUTS_KEY_STEP);
+              // Свёрнутая панель — край шкалы: делать нечего, но клавиша по-прежнему разделителя, а
+              // не страницы, которая иначе поехала бы вбок (ревью Codex r3).
+              if (!collapsed) {
+                if (panelW <= CALLOUTS_MIN_W) settle(true);
+                else resizeTo(panelW - CALLOUTS_KEY_STEP);
+              }
             } else return;
             e.preventDefault();
           }}
@@ -1184,10 +1241,11 @@ export function MoodBoard({
               role='button'
               tabIndex={0}
               onPointerDown={(e) => grab(e, true)}
+              // `click` жеста сюда не доходит (его съедает `eatClickOf`); доходит щелчок без нажатия
+              // — клавиатуры, ассистивной техники, ниже `lg` — обычный. Посреди жеста `click` —
+              // чужой (второго пальца), а не двери.
               onClick={() => {
-                const from = swallowFrom.current;
-                if (from !== null && performance.now() - from < SWALLOW_MS) return;
-                setCollapsed(false);
+                if (!drag.current) setCollapsed(false);
               }}
               onKeyDown={onDoorKey(() => setCollapsed(false))}
               aria-expanded={false}

@@ -8,7 +8,7 @@ import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ANNOTATION_EDITOR_H } from './annotation/editor';
 import {
   AnnotationSurface,
@@ -28,10 +28,11 @@ import { Toolbar, ToolbarSpacer } from './toolbar';
 
 // An annotate-in-place gallery. Two layouts over one set of bindings:
 //
-//   `grid`     EVERY view visible at once, each with its own pins — the tech-card sketch and
-//              moodboard AND the fitting photos. Comparing front to back is how both a tech
-//              review and a fitting conversation actually go, so nothing should have to be
-//              clicked to see both.
+//   `grid`     EVERY view on the surface itself, each with its own pins — no thumbnail to click
+//              first. Comparing front to back is how both a tech review and a fitting
+//              conversation actually go. The views stand in one row that scrolls sideways (the
+//              moodboard: a strip of equal-height frames, its only layout since O-59; the fitting
+//              photos) or wrap into rows with `railWrap` (the sketch sheet's grid).
 //   `focused`  ONE large image + a thumbnail carousel. No caller left: the fitting used to stand
 //              here, and a second grammar on one component is what let the focused frame collapse
 //              to zero width unnoticed for a whole day. Kept because it is still a legitimate
@@ -207,7 +208,7 @@ export type FocusedAnnotatorProps = {
   purpose: string;
   pickerAspectRatio?: string[];
 
-  /** `focused` = one big image + thumbs. `grid` = every view at once, each with its own pins. */
+  /** `focused` = one big image + thumbs. `grid` = every view on the surface, each with its pins. */
   layout?: 'focused' | 'grid';
   emptyLabel: string;
   /** Aspect used only when a media has no known dimensions (e.g. '4/5', '3/4'). */
@@ -511,6 +512,66 @@ export function FocusedAnnotator({
   const [focusedId, setFocusedId] = useState<number | null>(null);
   // +1 for the "+ add view" slot (trailing, or leading with `addFirst`), part of what can overflow.
   const rail = useRailScroll(views.length + 1);
+  /**
+   * КАДР, ТОЛЬКО ЧТО ЛЁГШИЙ НА ЛЕНТУ, ДОЛЖЕН БЫТЬ ВИДЕН (27.09, O-62 r2, ревью Codex). Новые картинки
+   * встают в КОНЕЦ ленты, а слот «+» мудборда стоит первым (`addFirst`): на длинной доске счёт рос,
+   * а картинка ложилась за правым краем — без знака, что что-то вышло. Выбор отдаёт id добавленных
+   * (`onPickMedia`), и когда первый из них нарисован, лента прокручивается к нему — сама лента, не
+   * страница; порядок и номера прежние. Виден кадр — не двигается ничего. Иначе он встаёт к левому
+   * краю ленты (у конца ленты — сколько позволит её длина): лента щёлкает по НАЧАЛАМ плиток
+   * (`snap-start`), и остановка «правым краем к правому краю» перещёлкнулась бы к соседнему началу,
+   * пряча кадр наполовину; заодно видны и кадры, добавленные вместе с ним. Плавно — кроме тех, кто
+   * просил систему не двигать картинку.
+   *
+   * ⚠ ДИАЛОГ БИБЛИОТЕКИ ВОЗВРАЩАЕТ ФОКУС СЛОТУ ПОСЛЕ ЭТОГО ПОКАЗА — и прокручивает ленту назад, к
+   * слоту (Radix: `trigger.focus()` таймером после закрытия, без `preventScroll`; замерено — лента
+   * стояла на 0, а под нагрузкой прокрутка фокуса обрывала и плавный повторный показ). Поэтому, пока
+   * человек сам не нажал ни указателя, ни клавиши и не крутил колесо, лента ДЕРЖИТ новый кадр:
+   * прокрутка, кончившаяся без него на виду (`scrollend`), — не его, и кадр показывается снова; фокус,
+   * вернувшийся на ленту мимо кадров, делает то же таймером — для движков без `scrollend`.
+   */
+  const [revealId, setRevealId] = useState<number | null>(null);
+  /** Снять ожидание возврата фокуса; живёт дольше эффекта, который его завёл. */
+  const revealWait = useRef<(() => void) | null>(null);
+  useEffect(() => () => revealWait.current?.(), []);
+  useLayoutEffect(() => {
+    if (revealId == null) return;
+    const strip = rail.ref.current;
+    const tile = strip?.querySelector<HTMLElement>(`[data-rail-view="${revealId}"]`);
+    // Кадра ещё нет на ленте — он придёт со следующими `views`.
+    if (!strip || !tile) return;
+    setRevealId(null);
+    const show = () => {
+      if (!tile.isConnected) return;
+      const s = strip.getBoundingClientRect();
+      const t = tile.getBoundingClientRect();
+      if (t.left >= s.left - 1 && t.right <= s.right + 1) return;
+      const max = strip.scrollWidth - strip.clientWidth;
+      const left = Math.max(0, Math.min(max, strip.scrollLeft + (t.left - s.left)));
+      const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      strip.scrollTo({ left, behavior: reduced ? 'auto' : 'smooth' });
+    };
+    show();
+    revealWait.current?.();
+    // Прокрутка фокуса идёт ПОСЛЕ его событий — показ ставится за неё таймером.
+    const onFocusBack = (e: FocusEvent) => {
+      if (!(e.target as Element | null)?.closest?.('[data-rail-view]')) setTimeout(show, 0);
+    };
+    const stop = () => {
+      strip.removeEventListener('scrollend', show);
+      strip.removeEventListener('focusin', onFocusBack);
+      window.removeEventListener('pointerdown', stop, true);
+      window.removeEventListener('keydown', stop, true);
+      window.removeEventListener('wheel', stop, true);
+      revealWait.current = null;
+    };
+    strip.addEventListener('scrollend', show);
+    strip.addEventListener('focusin', onFocusBack);
+    window.addEventListener('pointerdown', stop, true);
+    window.addEventListener('keydown', stop, true);
+    window.addEventListener('wheel', stop, { capture: true, passive: true });
+    revealWait.current = stop;
+  }, [revealId, views, rail.ref]);
 
   const isGrid = layout === 'grid';
   // Перенос по строкам — режим ЧТЕНИЯ листа целиком; он старше филмстрипа, поэтому гасит его.
@@ -540,7 +601,11 @@ export function FocusedAnnotator({
   // immediately annotatable.
   function handlePick(items: common_MediaFull[]) {
     const added = onPickMedia(items);
-    if (added.length && added[0] != null) setFocusedId(added[0]);
+    if (added.length && added[0] != null) {
+      setFocusedId(added[0]);
+      // На ленте — ещё и показать его (см. `revealId`).
+      if (isGrid) setRevealId(added[0]);
+    }
   }
 
   // ⌘V И БРОСОК ПРЯМО В ГАЛЕРЕЮ. Референс почти всегда рождается в буфере — скрин с чужого показа,
@@ -850,6 +915,7 @@ export function FocusedAnnotator({
               return (
                 <div
                   key={v.key}
+                  data-rail-view={v.mediaId}
                   ref={canOrder ? reorder.registerTile(i) : undefined}
                   {...(canOrder ? reorder.tileProps(i) : {})}
                   className={cn(

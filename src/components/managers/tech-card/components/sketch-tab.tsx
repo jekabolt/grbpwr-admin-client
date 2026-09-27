@@ -52,14 +52,17 @@ type MediaListName = 'moodboardMedia' | 'technicalMedia';
 
 // ── КАК Я СМОТРЮ НА ЛИСТ ────────────────────────────────────────────────────────────────────────
 //
-// Лента или сетка — свойство РУК И ЭКРАНА, а не карточки: у мудборда пятнадцать референсов и грид
-// это рабочий режим, у эскиза три вида и лента — ежедневный, и человек с 27" хочет одного, а с 13"
-// другого. Поэтому предпочтение, а не поле формы: переключить вид не имеет права сделать карточку
-// «изменённой» — иначе beforeunload и заряженный Save появляются от того, что на лист посмотрели
-// иначе. Тот же довод, что у `use-panel-prefs.ts`.
+// Лента или сетка — свойство РУК И ЭКРАНА, а не карточки: у эскиза три вида и лента — ежедневный
+// режим, и человек с 27" хочет одного, а с 13" другого. Поэтому предпочтение, а не поле формы:
+// переключить вид не имеет права сделать карточку «изменённой» — иначе beforeunload и заряженный
+// Save появляются от того, что на лист посмотрели иначе. Тот же довод, что у `use-panel-prefs.ts`.
+//
+// ВЫБОР ЕСТЬ ТОЛЬКО У ЭСКИЗА. Мудборд — одна лента, без сетки и без переключателя (27.09, O-59): его
+// предпочтения здесь больше нет, а оставшееся в хранилище `moodboard` не читается и уходит с первой
+// записью ключа.
 
 type RailMode = 'strip' | 'grid';
-type RailPrefs = { sketch?: RailMode; moodboard?: RailMode };
+type RailPrefs = { sketch?: RailMode };
 
 const RAIL_PREF_KEY = 'plm.techcard.gallery.rail';
 
@@ -72,23 +75,23 @@ function readRailPrefs(): RailPrefs {
     // не «доверять и упасть», а взять только то, что похоже на правду.
     const one = (v: unknown): RailMode | undefined =>
       v === 'strip' || v === 'grid' ? v : undefined;
-    return { sketch: one(parsed?.sketch), moodboard: one(parsed?.moodboard) };
+    return { sketch: one(parsed?.sketch) };
   } catch {
     return {};
   }
 }
 
 /**
- * Режим показа ленты для ОДНОГО листа. Запись — ПАТЧЕМ поверх свежего чтения: эскиз и мудборд
- * смонтированы одновременно и пишут один ключ, и запись состояния целиком у одного стирала бы то,
- * что после его монтирования записал другой.
+ * Режим показа ленты эскиза. Запись — ПАТЧЕМ поверх свежего чтения: вкладок с листом может быть
+ * несколько, и запись состояния целиком у одной стирала бы то, что после её монтирования записала
+ * другая.
  */
-function useRailMode(sheet: keyof RailPrefs) {
-  const [mode, setMode] = useState<RailMode>(() => readRailPrefs()[sheet] ?? 'strip');
+function useRailMode() {
+  const [mode, setMode] = useState<RailMode>(() => readRailPrefs().sketch ?? 'strip');
   const set = (next: RailMode) => {
     setMode(next);
     try {
-      localStorage.setItem(RAIL_PREF_KEY, JSON.stringify({ ...readRailPrefs(), [sheet]: next }));
+      localStorage.setItem(RAIL_PREF_KEY, JSON.stringify({ ...readRailPrefs(), sketch: next }));
     } catch {
       // Квота или запрещённое хранилище: режим не переживёт перезагрузку, работать не мешает.
     }
@@ -171,13 +174,13 @@ function TechCardGallery({
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const mediaFA = useFieldArray({ control, name: listName });
-  const [railMode, setRailMode] = useRailMode(
-    listName === 'moodboardMedia' ? 'moodboard' : 'sketch',
-  );
+  const isMoodboard = listName === 'moodboardMedia';
+  const [sketchRailMode, setRailMode] = useRailMode();
+  // Мудборд — только лента (O-59): предпочтение и переключатель — у эскиза.
+  const railMode: RailMode = isMoodboard ? 'strip' : sketchRailMode;
   const calloutFA = useFieldArray({ control, name: 'callouts' });
   const calloutValues = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
 
-  const isMoodboard = listName === 'moodboardMedia';
   const siblingName: MediaListName = isMoodboard ? 'technicalMedia' : 'moodboardMedia';
   const kinds = isMoodboard ? MOODBOARD_KINDS : TECHNICAL_KINDS;
   const kindOptions = techCardMediaKindOptions.filter((o) => kinds.includes(o.value));
@@ -616,21 +619,23 @@ function TechCardGallery({
       pickerAspectRatio={['Custom']}
       emptyLabel={emptyLabel}
       fallbackAspect='3/4'
-      // ЛЕНТА ИЛИ СЕТКА — ПО ПРЕДПОЧТЕНИЮ. Лента: фиксированная высота, натуральная ширина
-      // (альбомные шире), прокрутка только вбок; снимки не обрезаются, поэтому пины по-прежнему
-      // ложатся 1:1. Сетка: та же лента с переносом строк — «все кадры разом».
+      // ЛЕНТА ИЛИ СЕТКА — ПО ПРЕДПОЧТЕНИЮ, И ТОЛЬКО У ЭСКИЗА. Лента: фиксированная высота,
+      // натуральная ширина (альбомные шире), прокрутка только вбок; снимки не обрезаются, поэтому
+      // пины по-прежнему ложатся 1:1. Сетка: та же лента с переносом строк — «все кадры разом».
       gridRowHeight={railMode === 'strip' ? 480 : undefined}
       railWrap={railMode === 'grid'}
       viewControls={
-        <ViewSwitch
-          label='gallery layout'
-          value={railMode}
-          onChange={setRailMode}
-          options={[
-            { value: 'strip', label: 'strip', hint: 'one row, fixed height, scrolls sideways' },
-            { value: 'grid', label: 'grid', hint: 'every view at once, wrapped into rows' },
-          ]}
-        />
+        isMoodboard ? undefined : (
+          <ViewSwitch
+            label='gallery layout'
+            value={railMode}
+            onChange={setRailMode}
+            options={[
+              { value: 'strip', label: 'strip', hint: 'one row, fixed height, scrolls sideways' },
+              { value: 'grid', label: 'grid', hint: 'every view at once, wrapped into rows' },
+            ]}
+          />
+        )
       }
       // ПОРЯДОК КАДРОВ — КОРНЕВОЙ ЗАПИСЬЮ, А НЕ `mediaFA.move`. Тот же класс риска, что уже пойман
       // на `callouts` выше: в react-hook-form 7.62 мутаторы поля-массива не эмитят `_subjects.array`,
