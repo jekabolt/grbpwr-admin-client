@@ -34,6 +34,9 @@ const norm = (c: AiRouteCandidate | undefined): Candidate => ({
   providerKey: c?.providerKey ?? '',
   model: c?.model ?? '',
 });
+// A candidate as the server holds it, in one comparable string; absent (null) is its own value.
+const signature = (c: AiRouteCandidate | null | undefined) =>
+  c ? `${c.providerKey ?? ''}/${c.model ?? ''}` : '-';
 
 const serves = (p: AiProviderInfo, capability: string) =>
   (p.capabilities ?? []).includes(capability);
@@ -269,13 +272,23 @@ function PurposeRow({
       ? { providerKey: '', model: '' }
       : undefined;
   const serverFallback = shownFallback ? norm(shownFallback) : undefined;
+  // WHAT IS STAGED BELONGS TO THE ROUTE IT WAS STAGED ON. The base is the config version and this
+  // row's route as the server returned it; a refetch that moves any of it (another admin's change,
+  // a new default) leaves the staged provider and the same-pair sentence answering a route that is
+  // gone, so they are dropped before render — a model typed afterwards can never pair the fresh
+  // primary with a stale staged fallback under the fresh version.
+  const base = `${config.configVersion ?? ''}|${signature(purpose.primary)}|${signature(purpose.fallback)}`;
   // A fallback provider chosen but not sent yet: the same provider as the primary, which needs a
   // model of its own first. Only the model field can send it.
-  const [staged, setStaged] = useState<string | null>(null);
+  const [stagedOn, setStagedOn] = useState<{ value: string; base: string } | null>(null);
+  const staged = stagedOn?.base === base ? stagedOn.value : null;
+  const setStaged = (value: string | null) => setStagedOn(value === null ? null : { value, base });
   const fallback: Candidate | undefined =
     staged !== null ? { providerKey: staged === DEFAULT ? '' : staged, model: '' } : serverFallback;
   // The server's sentence, said before the server has to: a pair that would be refused is not sent.
-  const [sameError, setSameError] = useState(false);
+  const [sameOn, setSameOn] = useState<string | null>(null);
+  const sameError = sameOn === base;
+  const setSameError = (on: boolean) => setSameOn(on ? base : null);
 
   const send = (next: { primary: Candidate; fallback?: Candidate }) => {
     if (next.fallback && sameCandidate(config, capability, next.primary, next.fallback)) {

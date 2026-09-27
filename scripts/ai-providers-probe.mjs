@@ -12,7 +12,7 @@
 //   E  the edges: stale → "reload — the config changed" + a re-read; save key → inline probe, field
 //      emptied, secret nowhere on screen; no master key → callout + fields off; non-super → /me;
 //      clear a stored key → a one-line question first, then ONE PUT with an empty value
-//   FE1…FE9  the FIX-E items of the client review (06-BRIEF-FIX-E.md), one check group each
+//   FE1…FE13 the FIX-E items of the client reviews (06-BRIEF-FIX-E.md + round 2), one check group each
 //
 //   node scripts/ai-providers-probe.mjs                 all green expected
 //   node scripts/ai-providers-probe.mjs --mutate-<name> the named check must go red (list: --list)
@@ -254,6 +254,18 @@ const MUTATIONS = {
     what: 'the DataTable loses its own scroll box, so a wide table widens the page',
     from: 'className: "relative w-full overflow-x-auto"',
     to: 'className: "relative w-full"',
+  },
+  'staged-kept': {
+    red: 'FE10',
+    what: 'a staged fallback survives a refetch that moved its route',
+    from: 'const staged = stagedOn?.base === base ? stagedOn.value : null;',
+    to: 'const staged = stagedOn ? stagedOn.value : null;',
+  },
+  'same-sentence-kept': {
+    red: 'FE10',
+    what: 'the same-pair sentence survives a refetch that moved its route',
+    from: 'const sameError = sameOn === base;',
+    to: 'const sameError = sameOn !== null;',
   },
   'clear-sends-old-value': {
     red: 'E5',
@@ -677,6 +689,23 @@ if (process.argv.includes('--shots')) {
       await page.getByRole('option', { name: 'Anthropic', exact: true }).click();
       await page.waitForTimeout(600);
     });
+    // FE10: OpenAI staged as the fallback (before), then another admin's route after a stale refetch.
+    const stageOpenAi = async () => {
+      await page.waitForSelector('[data-purpose="chat.techcard_analysis"]');
+      await page.getByRole('combobox', { name: 'Construction audit fallback', exact: true }).click();
+      await page.getByRole('option', { name: 'OpenAI', exact: true }).click();
+      await page.waitForTimeout(300);
+      await page.locator('[data-purpose="chat.techcard_analysis"]').scrollIntoViewIfNeeded();
+    };
+    await shoot('staged', w, '/ai-providers', {}, stageOpenAi);
+    await shoot('refetched', w, '/ai-providers', {}, async () => {
+      await stageOpenAi();
+      server.purposes.find((x) => x.key === 'chat.techcard_analysis').fallback = { providerKey: 'anthropic', model: 'claude-sonnet-5' };
+      server.version += 1;
+      await row('fal').getByRole('switch').click();
+      await page.waitForTimeout(900);
+      await page.locator('[data-purpose="chat.techcard_analysis"]').scrollIntoViewIfNeeded();
+    });
     await shoot('switchfocus', w, '/ai-providers', {}, async () => {
       await page.waitForSelector('[data-provider="openai"]');
       await page.locator('h1').first().click();
@@ -943,6 +972,49 @@ await page.waitForSelector('[data-purpose="chat.note_markdown"]', { timeout: 800
       ck('FE2', w.length === 1 && b.primary?.providerKey === 'openai' && b.primary?.model === 'gpt-5' && b.fallback?.providerKey === 'openai' && b.fallback?.model === 'gpt-5-mini', 'another model → ONE PUT with (openai, gpt-5) → (openai, gpt-5-mini)', JSON.stringify(b));
     }
   }
+}
+
+// FE10 · what is staged belongs to the route it was staged on: a refetch that moved the route drops it.
+{
+  await mount();
+  await page.waitForSelector('[data-purpose="chat.techcard_analysis"]', { timeout: 8000 });
+  const rowSel = '[data-purpose="chat.techcard_analysis"]';
+  const fbSelect = page.getByRole('combobox', { name: 'Construction audit fallback', exact: true });
+  const fbModel = page.getByRole('combobox', { name: 'Construction audit fallback model', exact: true });
+  await fbSelect.click();
+  await page.getByRole('option', { name: 'OpenAI', exact: true }).click();
+  await page.waitForTimeout(400);
+  // Staged, and its model refused on the spot (the primary's own): both states are on screen.
+  await fbModel.fill('gpt-5');
+  await fbModel.press('Enter');
+  await page.waitForTimeout(400);
+  const before = ((await page.locator(rowSel).textContent()) ?? '').replace(/\s+/g, ' ');
+  ck('FE10', before.includes('same provider as the primary') || before.includes('the fallback is the primary itself'), 'set-up: OpenAI staged as the fallback, the same-pair sentence under it', before.slice(0, 160));
+  // Another admin gives the route a fallback of its own; this page still holds version 7.
+  const pu = server.purposes.find((x) => x.key === 'chat.techcard_analysis');
+  pu.fallback = { providerKey: 'anthropic', model: 'claude-sonnet-5' };
+  server.version += 1;
+  // This admin's next write elsewhere is refused as stale, and the config is read again.
+  await row('fal').getByRole('switch').click();
+  await page.waitForTimeout(900);
+  const shownProvider = ((await fbSelect.textContent()) ?? '').trim();
+  const shownModel = await fbModel.inputValue().catch(() => '');
+  const after = ((await page.locator(rowSel).textContent()) ?? '').replace(/\s+/g, ' ');
+  ck('FE10', shownProvider === 'Anthropic' && shownModel === 'claude-sonnet-5', 'after the refetch the fresh fallback shows, the staged provider is gone', `"${shownProvider}" / "${shownModel}"`);
+  ck('FE10', !after.includes('same provider as the primary') && !after.includes('the fallback is the primary itself'), 'the staged ask and the same-pair sentence went with it', after.slice(0, 160));
+  // A model typed now edits the route as it stands: the fresh fallback's provider, the fresh version.
+  const n0 = writes('PUT', /^\/api\/admin\/ai\/routes\//).length;
+  await fbModel.fill('claude-opus-5');
+  await fbModel.press('Enter');
+  await page.waitForTimeout(700);
+  const w = writes('PUT', /^\/api\/admin\/ai\/routes\//).slice(n0);
+  const b = w[0]?.body ?? {};
+  ck(
+    'FE10',
+    w.length === 1 && b.expectedVersion === '8' && b.primary?.providerKey === 'openai' && b.primary?.model === 'gpt-5' && b.fallback?.providerKey === 'anthropic' && b.fallback?.model === 'claude-opus-5',
+    'the next model pairs the fresh primary with the FRESH fallback, never the stale staged one',
+    JSON.stringify(w.map((c) => c.body)),
+  );
 }
 
 // FE7 · a refusal stands beside the control that made it, and only there.
