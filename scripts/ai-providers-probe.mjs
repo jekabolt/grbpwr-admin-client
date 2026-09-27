@@ -178,7 +178,7 @@ const MUTATIONS = {
   },
   'key-no-reset': {
     red: 'FE1',
-    what: 'the settled key write is never reset (variables.value kept)',
+    what: 'the settled key write is never reset (the observer keeps it in the cache)',
     from: 'onSettled: releaseSecret',
     to: 'onSettled: () => {}',
   },
@@ -284,6 +284,12 @@ const MUTATIONS = {
     what: 'a refused clear leaves focus on <body> (the flag is not set)',
     from: 'onError: (error) => {\n            refocus.current = true;\n            setConfirming(false);',
     to: 'onError: (error) => {\n            setConfirming(false);',
+  },
+  'key-not-blanked': {
+    red: 'FE13',
+    what: 'the settled key write keeps its value until the reset and the gc timer',
+    from: 'vars.value = "";\n        return w.onSettled();',
+    to: 'return w.onSettled();',
   },
   'clear-sends-old-value': {
     red: 'E5',
@@ -1324,6 +1330,9 @@ for (const env of ['', 'ab12']) {
 // FE1 · the key never outlives its request — not in the field, not in the mutation cache.
 const secretsInCache = (secret) =>
   page.evaluate((s) => JSON.stringify(window.__qc.getMutationCache().getAll().map((m) => m.state.variables ?? null)).includes(s), secret);
+// Key writes still in the cache at all (blank or not): reset() detaches the observer, gcTime 0 drops it.
+const keyWritesInCache = () =>
+  page.evaluate(() => window.__qc.getMutationCache().getAll().filter((m) => m.state.variables && 'kind' in m.state.variables).length);
 {
   const SECRET = 'sk-probe-refused-4411';
   await mount({ failKey: true });
@@ -1337,6 +1346,7 @@ const secretsInCache = (secret) =>
   const left = await field.inputValue().catch(() => '<gone>');
   ck('FE1', w.length === 1 && left === '', 'a REFUSED save still empties the field', `writes ${w.length}, field ${JSON.stringify(left)}`);
   ck('FE1', !(await secretsInCache(SECRET)), 'no mutation in the cache holds the key after the refusal');
+  ck('FE1', (await keyWritesInCache()) === 0, 'the refused key write itself is gone from the cache (reset, then gcTime 0)');
   const alert = ((await row('openai').getByRole('alert').first().textContent().catch(() => '')) ?? '').trim();
   ck('FE1', alert.includes('the provider refused this key'), 'the refusal stands under the field', alert);
   // The field's id is its name (ui/components/input sets `id={name}`).
@@ -1353,6 +1363,38 @@ const secretsInCache = (secret) =>
   await row('openai').getByRole('button', { name: 'save key' }).first().click();
   await page.waitForTimeout(900);
   ck('FE1', !(await secretsInCache(OK)), 'no mutation in the cache holds the key after a success either');
+  ck('FE1', (await keyWritesInCache()) === 0, 'and the saved key write is gone from the cache too');
+}
+
+// FE13 · the cache holds no key past settle: blanked the moment the write settles, before the re-read
+// is awaited — not only once the per-call reset and the gcTime-0 timer get round to it.
+for (const refused of [false, true]) {
+  const SECRET = refused ? 'sk-probe-settle-refused-6633' : 'sk-probe-settle-saved-7744';
+  const kind = refused ? 'a refusal' : 'a success';
+  await mount({ failKey: refused });
+  await page.waitForSelector('[data-provider="openai"]', { timeout: 8000 });
+  await openRow('openai');
+  // The mutation's own settle (its success/error dispatch), seen from inside the cache.
+  await page.evaluate((s) => {
+    window.__settleSaw = [];
+    window.__qc.getMutationCache().subscribe((e) => {
+      const t = e.type === 'updated' ? e.action?.type : null;
+      if (t === 'success' || t === 'error') window.__settleSaw.push(JSON.stringify(e.mutation.state.variables ?? null).includes(s));
+    });
+  }, SECRET);
+  // The re-read after the write is held back, so "after settle, before the cleanup" lasts a while.
+  server.configDelayMs = 1000;
+  await page.getByLabel('OpenAI key', { exact: true }).fill(SECRET);
+  await row('openai').getByRole('button', { name: 'save key' }).first().click();
+  for (let i = 0; i < 40 && writes('PUT', /\/openai\/key$/).length === 0; i++) await page.waitForTimeout(25);
+  await page.waitForTimeout(300);
+  const reread = server.calls.filter((c) => c.method === 'GET' && c.path === '/api/admin/ai/providers').length;
+  const during = await secretsInCache(SECRET);
+  await page.waitForTimeout(1500);
+  server.configDelayMs = 0;
+  const saw = await page.evaluate(() => window.__settleSaw);
+  ck('FE13', !during && reread >= 2, `${kind}: while the re-read is still in flight the cache holds no key`, `in cache ${during}, config reads ${reread}`);
+  ck('FE13', saw.length === 1 && saw[0] === false, `${kind}: at the mutation's own settle its variables hold no key`, JSON.stringify(saw));
 }
 
 // The reconciliation slot clears the same way, as its own kind.

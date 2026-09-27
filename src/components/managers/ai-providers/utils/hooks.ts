@@ -202,7 +202,14 @@ export function useSetAiProviderKey() {
       w.done(resp.config, `${vars.providerKey} ${slot} ${vars.value ? 'saved' : 'cleared'}`);
     },
     onError: w.onError,
-    onSettled: w.onSettled,
+    // THE SECRET IS BLANKED THE MOMENT THE WRITE SETTLES, in the mutation's own variables — the
+    // very object the cache holds — before the re-read is awaited. The view's per-call reset()
+    // still detaches the observer, and gcTime 0 still drops the mutation, but both come later
+    // (after the re-read, on a timer); until then the cache must hold nothing worth reading.
+    onSettled: (_data, _error, vars) => {
+      vars.value = '';
+      return w.onSettled();
+    },
   });
   // The key slot keeps its own copy of the refusal: it resets this mutation the moment the write
   // settles (the key must not stay in `variables`), and a reset clears `error` with it.
