@@ -107,8 +107,11 @@ import { orientationOf, type PictureOrientation } from './orientation';
  * to a screen reader through one status line.
  */
 
+/* The mask route sends these words to a fill model, which paints what they DESCRIBE (20-PROMPTS
+   §3.6, D2): the hint and the placeholder ask for the result, never the operation. */
+const RETOUCH_TITLE = 'Retouch a Zone';
 const RETOUCH_WORDS_HINT =
-  'an instruction to an image model that repaints one painted zone of a garment picture';
+  'what the painted zone should show when it is done — describe the result, not the operation';
 
 /** The paint's tone on screen: the system's one highlight accent, half through (DESIGN.md). */
 const PAINT = '#311eee';
@@ -687,10 +690,11 @@ export function MaskEditor({
                   value={words}
                   onChange={setWords}
                   label='What should be there'
-                  placeholder='Remove the stain, keep the fabric texture'
+                  placeholder='smooth clean fabric, the same colour and weave'
                   workflowKey='retouch_zone'
                   fieldKey={RETOUCH_WORDS_KEY}
                   hint={RETOUCH_WORDS_HINT}
+                  workflowTitle={RETOUCH_TITLE}
                   maxLength={RETOUCH_WORDS_MAX}
                   disabled={frozen}
                   cardRecent={cardRecentTexts(band, 'retouch_zone', RETOUCH_WORDS_KEY)}
@@ -700,7 +704,7 @@ export function MaskEditor({
                           techCardId,
                           mediaIds: ideaMediaIds(media),
                           context: ideasContext({
-                            workflowTitle: 'Retouch a Zone',
+                            workflowTitle: RETOUCH_TITLE,
                             hint: RETOUCH_WORDS_HINT,
                           }),
                         }

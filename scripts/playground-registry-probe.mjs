@@ -295,6 +295,19 @@
 //   node scripts/playground-registry-probe.mjs --mutate-source-cap   18 МП не отказывается даром → AA, AE
 //   node scripts/playground-registry-probe.mjs --mutate-waiting-words paid_collect_waiting без слов → AD
 //
+// 20-PROMPTS (PR-03, слова, которые уезжают в модель; живой Improve — playground-prompt-probe.mjs, K):
+//   AG · §3.5 статические идеи ретуши описывают РЕЗУЛЬТАТ: ровно шесть фраз документа, ни одна не
+//        начинается с remove/delete/fix/straighten, zone и change_text читают один список;
+//        §3.7 плитка 4 везёт ИМЯ свотча в colour.words: знакомый код — «Classic Blue», незнакомый и
+//        огрызок кода — ''; строка цены и «what the model gets» называют имя; рекол имени не
+//        жалуется, чужие слова — жалуется.
+//   node scripts/playground-registry-probe.mjs --mutate-retouch-ideas  в списке снова «remove the
+//                                                                   crease» → краснеет AG
+//   node scripts/playground-registry-probe.mjs --mutate-pantone-name   имя не уезжает (words '')
+//                                                                   → краснеет A, AG
+//   node scripts/playground-registry-probe.mjs --mutate-pantone-prefix имя по префиксу кода
+//                                                                   → краснеет AG
+//
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
 
@@ -397,6 +410,9 @@ const MUT = {
   extendList: process.argv.includes('--mutate-extend-list'),
   sourceCap: process.argv.includes('--mutate-source-cap'),
   waitingWords: process.argv.includes('--mutate-waiting-words'),
+  retouchIdeas: process.argv.includes('--mutate-retouch-ideas'),
+  pantoneName: process.argv.includes('--mutate-pantone-name'),
+  pantonePrefix: process.argv.includes('--mutate-pantone-prefix'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -433,6 +449,33 @@ const swap = (name, file, needle, replacement) => ({
   },
 });
 const plugins = [];
+if (MUT.retouchIdeas)
+  plugins.push(
+    swap(
+      'retouch-ideas-operation',
+      /playground\/ideas\.ts$/,
+      "'uncreased fabric continuing the surrounding cloth',",
+      "'remove the crease',",
+    ),
+  );
+if (MUT.pantoneName)
+  plugins.push(
+    swap(
+      'pantone-name-dropped',
+      /tiles\/change-color\.tsx$/,
+      'words: pantoneName(pick.code) },',
+      "words: '' },",
+    ),
+  );
+if (MUT.pantonePrefix)
+  plugins.push(
+    swap(
+      'pantone-name-prefix',
+      /tiles\/change-color\.tsx$/,
+      "return hit && hit.code.toLowerCase() === clean.toLowerCase() ? hit.name.trim() : '';",
+      "return hit ? hit.name.trim() : '';",
+    ),
+  );
 if (MUT.wire)
   plugins.push(
     swap(
@@ -1162,7 +1205,8 @@ head('A', 'wire(): тело, которое уезжает, на заполне�
         source: 'dictionary',
         code: '19-4052 TCX',
         hex: '#0f4c81',
-        words: '',
+        // 20-PROMPTS §3.7: the swatch's name travels beside the code.
+        words: 'Classic Blue',
         fabricMediaId: 0,
         fabrics: [],
       },
@@ -1170,7 +1214,7 @@ head('A', 'wire(): тело, которое уезжает, на заполне�
   };
   ck(
     same(got, want),
-    'change_color → recolor: фото без повторов и нулей, слова обрезаны, Pantone со своим hex, colorwayId 0',
+    'change_color → recolor: фото без повторов и нулей, слова обрезаны, Pantone со своим hex и именем, colorwayId 0',
     show(got),
   );
 
@@ -5414,6 +5458,111 @@ await (async () => {
   );
   delete globalThis.window;
 })();
+
+// ─── AG · 20-PROMPTS: слова, которые уезжают в модель ────────────────────────────────────────
+head('AG', '20-PROMPTS §3.5 идеи ретуши — результат; §3.7 имя Pantone на проводе плитки 4');
+{
+  // §3.5 — written out by hand from the document, not read from the module.
+  const SIX = [
+    'uncreased fabric continuing the surrounding cloth',
+    'a clean hem line continuing the stitching',
+    'the same print continuing across the zone',
+    'a patch pocket in the same fabric',
+    'a metal zip in the same cloth',
+    'plain cloth matching the surroundings',
+  ];
+  const zone = [...(M.PROMPT_IDEAS.retouch_zone?.zone ?? [])];
+  const text = [...(M.PROMPT_IDEAS.retouch_zone?.change_text ?? [])];
+  ck(same(zone, SIX), 'идеи ретуши — ровно шесть фраз §3.5, в их порядке', show(zone));
+  const ops = zone.filter((p) => /^(remove|delete|fix|straighten)\b/i.test(p.trim()));
+  ck(ops.length === 0, 'ни одна идея ретуши не начинается с операции', show(ops));
+  ck(same(text, zone), 'zone и change_text читают один список', show(text));
+
+  // §3.7 — the name of the swatch travels in colour.words, exact codes only.
+  const wireOf = (code, hex = '') =>
+    run('change_color').wire(
+      draft({ images: { photos: [media(11)] }, colours: { colour: { code, hex } } }),
+      ctx,
+    );
+  const known = wireOf('19-4052 TCX', '#0f4c81');
+  ck(
+    known.params.colour?.words === 'Classic Blue',
+    'знакомый код 19-4052 TCX → words «Classic Blue»',
+    show(known.params.colour),
+  );
+  const unknown = wireOf('DH-0412');
+  ck(
+    unknown.params.colour?.words === '' && unknown.params.colour?.code === 'DH-0412',
+    'незнакомый код (номер дайхауса) → words пуст, код уезжает',
+    show(unknown.params.colour),
+  );
+  const prefix = wireOf('19-4052');
+  ck(
+    prefix.params.colour?.words === '',
+    'огрызок кода «19-4052» не занимает имя книжного свотча',
+    show(prefix.params.colour),
+  );
+  const none = wireOf('');
+  ck(none.params.colour?.words === '', 'нет цвета → words пуст', show(none.params.colour));
+
+  const d = draft({
+    images: { photos: [media(11)] },
+    colours: { colour: { code: '19-4052 TCX', hex: '#0f4c81' } },
+  });
+  const shape = run('change_color').shape(d, known);
+  ck(
+    /recoloured to 19-4052 TCX, Classic Blue$/.test(shape),
+    'строка цены: «recoloured to 19-4052 TCX, Classic Blue»',
+    shape,
+  );
+  const inv = run('change_color').inventory(d, known, ctx);
+  const colourLine = inv.groups.find((g) => g.key === 'colour')?.text ?? '';
+  ck(
+    /^Pantone 19-4052 TCX, Classic Blue — its name and the value #0f4c81 travel beside it$/.test(
+      colourLine,
+    ),
+    '«what the model gets»: код, имя и значение',
+    colourLine,
+  );
+  const invUnknown = run('change_color').inventory(d, unknown, ctx);
+  const unknownLine = invUnknown.groups.find((g) => g.key === 'colour')?.text ?? '';
+  ck(
+    /the code alone travels$/.test(unknownLine) && !/Classic Blue/.test(unknownLine),
+    '«what the model gets» без имени у незнакомого кода',
+    unknownLine,
+  );
+
+  const recalled = (words) =>
+    run('change_color').recall(
+      {
+        kind: 'recolor',
+        ask: '',
+        params: {
+          extraInputMediaIds: [11],
+          colour: { code: '19-4052 TCX', hex: '#0f4c81', words },
+        },
+      },
+      new Map([[11, media(11)]]),
+    );
+  const own = recalled('Classic Blue');
+  ck(
+    !own.said.some((w) => /colour words/.test(w)),
+    'рекол: имя свотча — свои слова плитки, о потере не сказано',
+    show(own.said),
+  );
+  const other = recalled('a deep navy');
+  ck(
+    other.said.some((w) => /colour words did not come along/.test(w)),
+    'рекол: чужие слова цвета — сказано, что не пришли',
+    show(other.said),
+  );
+  const again = run('change_color').wire(own.draft, ctx);
+  ck(
+    again.params.colour?.words === 'Classic Blue',
+    'рекол → провод: имя собирается заново из кода',
+    show(again.params.colour),
+  );
+}
 
 const expected = MUTATED ? ' (прогон С МУТАЦИЕЙ — провалы ожидаются)' : '';
 console.log(

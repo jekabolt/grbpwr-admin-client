@@ -44,6 +44,15 @@
 //   J · (G-03 Codex MINOR) вызов, который не отвечает, отпускается по сроку: «thinking…» снята,
 //       статический список, без тоста; тишина — следующее нажатие не зовёт; кэш пуст;
 //   E · (G-03 m-5) 404 С причиной (картинка вопроса удалена) — сессия НЕ выключается.
+//   K · (20-PROMPTS §3.8) Improve: EnhanceText уходит в режиме STEER, поле OTHER, контекст — тот же
+//       «Tool: … / This field: …», что у двери Ideas (и без ассистента на полосе, и в редакторе
+//       маски); старый сервер отказывает STEER (400, нарушение на `mode`, или 400 без нарушений) —
+//       ОДИН повтор в IMPROVE с тем же текстом и контекстом, ответ ложится в поле, без тоста; 400
+//       по другому полю (text) не повторяется и говорит своё.
+//   --mutate-steer-mode      Improve снова в режиме improve                       → K
+//   --mutate-steer-context   контекст снова голая подсказка                       → K
+//   --mutate-steer-fallback  отказ STEER не повторяется в improve                 → K
+//   --mutate-steer-any-400   любой 400 повторяется в improve                      → K
 //
 // Нет Chromium — КОД 2 и «НЕ ВЫПОЛНЕНА». `--shots <dir>` сохраняет снимки меню (1440/768/375).
 
@@ -78,6 +87,10 @@ const KNOWN = new Set([
   '--mutate-ideas-no-deadline',
   '--mutate-ideas-404-any',
   '--mutate-ideas-no-abort',
+  '--mutate-steer-mode',
+  '--mutate-steer-context',
+  '--mutate-steer-fallback',
+  '--mutate-steer-any-400',
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN.has(a));
 if (stray) dieNotRun(`неизвестный флаг мутации ${stray}; известные: ${[...KNOWN].join(', ')}`);
@@ -176,6 +189,29 @@ if (on('--mutate-recent-mask'))
     "cardRecent={cardRecentTexts(band, 'retouch_zone', RETOUCH_WORDS_KEY)}",
     '',
   );
+if (on('--mutate-steer-mode'))
+  patch(
+    'steer-mode',
+    PROMPT_FIELD,
+    "return await enhanceText({ ...req, mode: 'steer' });",
+    "return await enhanceText({ ...req, mode: 'improve' });",
+  );
+if (on('--mutate-steer-context'))
+  patch(
+    'steer-context',
+    PROMPT_FIELD,
+    'context: improveContext({ serverIdeas, workflowTitle, hint }),',
+    'context: hint,',
+  );
+if (on('--mutate-steer-fallback'))
+  patch('steer-fallback', PROMPT_FIELD, 'if (!steerRefused(e)) throw e;', 'throw e;');
+if (on('--mutate-steer-any-400'))
+  patch(
+    'steer-any-400',
+    PROMPT_FIELD,
+    "return violations.length === 0 || violations.some((v) => v.field === 'mode');",
+    'return true;',
+  );
 
 // ─── заглушенная сеть ──────────────────────────────────────────────────────────────────────────
 const STUB_MARKER = 'PROBE_STUB_C15_PROMPT_NETWORK';
@@ -189,6 +225,8 @@ g.__ppOut = g.__ppOut || [];
 const call = (method) => (req) => {
   g.__ppCalls.push({ method, req: JSON.parse(JSON.stringify(req ?? {})) });
   if (method === 'SuggestPrompts') return new Promise((res, rej) => g.__ppOut.push({ req, res, rej }));
+  // Improve (group K): the page answers EnhanceText itself when it has set a handler.
+  if (method === 'EnhanceText' && typeof g.__ppEnhance === 'function') return g.__ppEnhance(req);
   return Promise.resolve({});
 };
 const service = new Proxy({}, { get: (_t, k) => (typeof k === 'string' ? call(k) : undefined) });
@@ -914,6 +952,164 @@ try {
       JSON.stringify(['remove the stain', 'straighten the hem']),
     'редактор маски: слова прошлых ретушей карточки (по маске — ask, окном — texts[0])',
     JSON.stringify(await recentRows('card')),
+  );
+} catch (e) {
+  ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+// ─── K · 20-PROMPTS §3.8: Improve в режиме steer ──────────────────────────────────────────────
+head(
+  'K',
+  'Improve: режим STEER и контекст «Tool / This field»; старый сервер — один повтор в IMPROVE',
+);
+const enhanceCalls = () =>
+  page.evaluate(() => window.__ppCalls.filter((c) => c.method === 'EnhanceText').map((c) => c.req));
+// The page's EnhanceText: `refuse` = what the FIRST call is refused with (null = none); every other
+// call answers `answer`.
+const answerEnhance = (refuse, answer) =>
+  page.evaluate(
+    ([refuse, answer]) => {
+      let n = 0;
+      window.__ppEnhance = () => {
+        n++;
+        if (n === 1 && refuse)
+          return Promise.reject(
+            Object.assign(new Error(refuse.message), {
+              status: refuse.status,
+              details: refuse.details,
+            }),
+          );
+        return Promise.resolve({ text: answer });
+      };
+    },
+    [refuse, answer],
+  );
+const improveIn = async (key) => {
+  await field(key).getByRole('button', { name: 'improve' }).click();
+  await settle(150);
+};
+const GARMENT_CTX =
+  'Tool: Change a Color\nThis field: which garment in the photographs gets the new colour; everything else stays as it is';
+const violation = (f, reason) => [
+  {
+    '@type': 'type.googleapis.com/google.rpc.BadRequest',
+    fieldViolations: [{ field: f, description: `${reason}: refused` }],
+  },
+];
+try {
+  // No assistant on the band: the context is still «Tool / This field».
+  await fresh('change_color', OLD, { texts: { garment: 'the jaket' } });
+  await answerEnhance(null, 'the cropped denim jacket');
+  await improveIn('change_color.garment');
+  let calls = await enhanceCalls();
+  ck(
+    calls.length === 1 && calls[0].mode === 'ENHANCE_TEXT_MODE_STEER',
+    'один вызов, режим ENHANCE_TEXT_MODE_STEER',
+    JSON.stringify(calls.map((c) => c.mode)),
+  );
+  ck(
+    calls[0]?.field === 'ENHANCE_TEXT_FIELD_OTHER' && calls[0]?.text === 'the jaket',
+    'поле OTHER, текст как есть',
+    JSON.stringify(calls[0]),
+  );
+  ck(
+    calls[0]?.context === GARMENT_CTX,
+    'без ассистента: контекст «Tool: Change a Color / This field: …»',
+    JSON.stringify(calls[0]?.context),
+  );
+  ck(
+    (await textOf('change_color.garment')) === 'the cropped denim jacket',
+    'ответ заменяет текст',
+    await textOf('change_color.garment'),
+  );
+
+  // With the assistant: the very context the Ideas door asks with.
+  await fresh('change_color', NEW, { texts: { garment: 'the jaket' } });
+  await answerEnhance(null, 'the cropped denim jacket');
+  await improveIn('change_color.garment');
+  await openIdeas('change_color.garment');
+  calls = await enhanceCalls();
+  const asked = (await suggestCalls())[0];
+  ck(
+    !!asked && calls[0]?.context === asked.context && calls[0].context.startsWith(GARMENT_CTX),
+    'с ассистентом: контекст Improve — ровно тот, что у двери Ideas',
+    JSON.stringify([calls[0]?.context, asked?.context]),
+  );
+  await closeMenu();
+
+  // An old binary: STEER refused as unknown_mode → one retry in IMPROVE, silently.
+  for (const [name, refuse] of [
+    [
+      'нарушение на mode',
+      {
+        status: 400,
+        message: 'choose improve, expand, shorten or prompt',
+        details: violation('mode', 'unknown_mode'),
+      },
+    ],
+    ['400 без нарушений (шлюз не знает имени)', { status: 400, message: 'invalid value for enum' }],
+  ]) {
+    await fresh('change_color', OLD, { texts: { garment: 'the jaket' } });
+    await answerEnhance(refuse, 'the cropped denim jacket');
+    await improveIn('change_color.garment');
+    calls = await enhanceCalls();
+    ck(
+      JSON.stringify(calls.map((c) => c.mode)) ===
+        JSON.stringify(['ENHANCE_TEXT_MODE_STEER', 'ENHANCE_TEXT_MODE_IMPROVE']),
+      `${name}: STEER, затем ОДИН повтор в IMPROVE`,
+      JSON.stringify(calls.map((c) => c.mode)),
+    );
+    ck(
+      calls[1]?.text === 'the jaket' && calls[1]?.context === GARMENT_CTX,
+      `${name}: повтор с тем же текстом и контекстом`,
+      JSON.stringify(calls[1]),
+    );
+    const said = await page.evaluate(() => window.__pp.alerts());
+    ck(
+      (await textOf('change_color.garment')) === 'the cropped denim jacket' && said.length === 0,
+      `${name}: ответ повтора в поле, без тоста`,
+      JSON.stringify([await textOf('change_color.garment'), said]),
+    );
+  }
+
+  // A 400 that names the text is the text's own refusal: no retry, its words are said.
+  await fresh('change_color', OLD, { texts: { garment: 'the jaket' } });
+  await answerEnhance(
+    { status: 400, message: 'the text is too long', details: violation('text', 'too_long') },
+    'never',
+  );
+  await improveIn('change_color.garment');
+  calls = await enhanceCalls();
+  const said = await page.evaluate(() => window.__pp.alerts());
+  ck(
+    calls.length === 1 && (await textOf('change_color.garment')) === 'the jaket',
+    '400 по полю text: без повтора, текст не тронут',
+    JSON.stringify(calls.map((c) => c.mode)),
+  );
+  ck(
+    said.some((m) => /could not improve: the text is too long/.test(m)),
+    '400 по полю text: сказано его словами',
+    JSON.stringify(said),
+  );
+
+  // Tile 10's words in the mask editor: the same «Tool / This field» context.
+  await page.goto('http://probe.local/start');
+  await page.waitForFunction(() => !!window.__pp);
+  await page.evaluate(() => window.__pp.reset());
+  await page.goto('http://probe.local/tech-cards/7');
+  await page.waitForFunction(() => !!window.__pp);
+  await page.evaluate(([band, m]) => window.__pp.mask(band, m), [OLD, media(5)]);
+  await page.waitForSelector('[data-prompt-field="retouch_zone.change_text"]');
+  await field('retouch_zone.change_text').locator('textarea').fill('no stain');
+  await answerEnhance(null, 'clean fabric, the same colour and weave');
+  await improveIn('retouch_zone.change_text');
+  calls = await enhanceCalls();
+  ck(
+    calls[0]?.mode === 'ENHANCE_TEXT_MODE_STEER' &&
+      calls[0]?.context ===
+        'Tool: Retouch a Zone\nThis field: what the painted zone should show when it is done — describe the result, not the operation',
+    'редактор маски: STEER и «Tool: Retouch a Zone / This field: … the result, not the operation»',
+    JSON.stringify(calls[0]),
   );
 } catch (e) {
   ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);

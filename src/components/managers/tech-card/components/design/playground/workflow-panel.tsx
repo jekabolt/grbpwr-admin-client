@@ -272,6 +272,7 @@ function Field({
           workflowKey={def.key}
           fieldKey={key}
           hint={field.hint}
+          workflowTitle={def.title}
           maxLength={field.maxLength}
           disabled={disabled}
           serverIdeas={serverIdeas}

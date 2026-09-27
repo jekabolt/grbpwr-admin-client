@@ -4,6 +4,7 @@ import type {
   common_MediaFull,
 } from 'api/proto-http/admin';
 
+import { findPantone } from '../../../../pantone-swatches';
 import type { NotSentItem } from '../../../core';
 import {
   RECOLOR_SOURCES_MAX,
@@ -37,9 +38,12 @@ import { EMPTY_DRAFT, type Draft, type WorkflowDef, type WorkflowRun } from '../
  *    (`imageCalls`, `requested_outputs = len(extra_input_media_ids)`).
  *  · Garment to recolor → `ask`. The recolour door takes words (only `cutout` refuses them), and
  *    `composePrompt` writes `ask` first, before the colour block and the recolour craft.
- *  · New color → `params.colour {code, hex}` through `recolourWireColour` — the ON MODEL writer, so a
- *    half-typed hex never travels and `source` is derived from what actually leaves. No cloth: this
- *    tile recolours; re-clothing is Swap Fabrics (tile 5).
+ *  · New color → `params.colour {code, hex, words}` through `recolourWireColour` — the ON MODEL
+ *    writer, so a half-typed hex never travels and `source` is derived from what actually leaves.
+ *    `words` is the swatch's NAME («Classic Blue») when the book knows the code exactly, else ''
+ *    (20-PROMPTS §3.7, D3): an image model reads a colour name far better than a Pantone code or a
+ *    hex, and the server writes `words` as its own block. No cloth: this tile recolours;
+ *    re-clothing is Swap Fabrics (tile 5).
  *  · `colorwayId: 0` — the playground binds no colourway (the ON MODEL chips are gone, Q10).
  *
  * ⚠ A RECOLOUR READS THE CARD'S GARMENT NOTE AND FIT (`designKindReadsTheGarmentNote(recolor)` is
@@ -61,10 +65,25 @@ const NOT_SENT: readonly NotSentItem[] = [
   },
 ];
 
+/**
+ * The book's NAME of a picked code («19-4052 TCX» → «Classic Blue»), or '' when the book does not know
+ * it. EXACT match only, the rule of `pantoneColour`: `findPantone` also answers a prefix, and a
+ * hand-typed dye-house number must not borrow the name of whichever book entry starts the same way.
+ */
+function pantoneName(code: string): string {
+  const clean = code.trim();
+  const hit = clean ? findPantone(clean) : undefined;
+  return hit && hit.code.toLowerCase() === clean.toLowerCase() ? hit.name.trim() : '';
+}
+
 /** `params.colour`, exactly as it leaves — the gate, the price words and the wire read this. */
 function colourWire(band: GetDesignBandResponse, draft: Draft): common_DesignColourRecipe {
   const pick = colourOf(draft, COLOUR);
-  return recolourWireColour(band, { ...EMPTY_RECIPE, code: pick.code, hex: pick.hex }, 0);
+  return recolourWireColour(
+    band,
+    { ...EMPTY_RECIPE, code: pick.code, hex: pick.hex, words: pantoneName(pick.code) },
+    0,
+  );
 }
 
 const photoIds = (draft: Draft) => mediaIdsOf(imagesOf(draft, PHOTOS));
@@ -145,10 +164,16 @@ const run: WorkflowRun = {
     },
   }),
 
-  // «N pictures back · N paid calls, one per photograph · recoloured to 19-4052 TCX» — the ON MODEL
-  // words, read off the colour that leaves.
-  shape: (_draft, request) =>
-    recolorShape((request.params.extraInputMediaIds ?? []).length, request.params.colour),
+  // «N pictures back · N paid calls, one per photograph · recoloured to 19-4052 TCX, Classic Blue» —
+  // the ON MODEL words, read off the colour that leaves, and the name that travels beside the code.
+  shape: (_draft, request) => {
+    const line = recolorShape(
+      (request.params.extraInputMediaIds ?? []).length,
+      request.params.colour,
+    );
+    const name = (request.params.colour?.words ?? '').trim();
+    return name ? `${line}, ${name}` : line;
+  },
 
   inventory: (draft, request) => {
     const sent = request.params.extraInputMediaIds ?? [];
@@ -158,6 +183,7 @@ const run: WorkflowRun = {
     const colour = request.params.colour;
     const code = (colour?.code ?? '').trim();
     const hex = (colour?.hex ?? '').trim();
+    const name = (colour?.words ?? '').trim();
     return {
       kindWord: 'change a colour',
       intro: list.length
@@ -186,7 +212,13 @@ const run: WorkflowRun = {
           label: 'new colour',
           aside: code || '—',
           text: code
-            ? `Pantone ${code}${hex ? ` — the value sent beside it is ${hex}` : ' — no screen value is known for this code; the code alone travels'}`
+            ? `Pantone ${code}${name ? `, ${name}` : ''}${
+                hex
+                  ? name
+                    ? ` — its name and the value ${hex} travel beside it`
+                    : ` — the value sent beside it is ${hex}`
+                  : ` — no screen value is known for this code; ${name ? 'the code and its name travel' : 'the code alone travels'}`
+              }`
             : 'no colour picked yet',
         },
         {
@@ -229,7 +261,10 @@ const run: WorkflowRun = {
     if ((recipe?.fabrics ?? []).some((f) => (f.mediaId ?? 0) > 0)) {
       said.push('its cloth did not come along — this workflow recolours with a Pantone');
     }
-    if ((recipe?.words ?? '').trim()) said.push('its colour words did not come along');
+    // The swatch's own name is what this tile sends beside a code (§3.7); the form rebuilds it from
+    // the code, so only OTHER words are lost.
+    const words = (recipe?.words ?? '').trim();
+    if (words && words !== pantoneName(code)) said.push('its colour words did not come along');
     return {
       draft: {
         ...EMPTY_DRAFT,

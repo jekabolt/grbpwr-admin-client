@@ -2,17 +2,19 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { EnhanceRefusal, enhanceText } from 'ui/components/ai-enhance';
+import { EnhanceRefusal, enhanceText, type EnhanceRequest } from 'ui/components/ai-enhance';
 import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
 import GenericPopover from 'ui/components/popover';
 import Textarea from 'ui/components/text-area';
+import { extractFieldViolations } from 'utils/field-errors';
 
 import { recentMenu } from '../card-recent';
 import { ideasFor, insertIdea } from '../ideas';
 import {
   answeredIdeas,
   fetchServerIdeas,
+  ideasContext,
   ideasMenu,
   serverIdeasOff,
   suggestRequest,
@@ -37,9 +39,13 @@ import { recentTextKey, useRecentText } from '../recent';
  *    Phase 3 (C-15): where the band names the assistant (`serverIdeas`), a press also asks
  *    `SuggestPrompts` — «thinking…», then its phrases above one hairline, the fixed list below as
  *    «more». Any failure is the fixed list alone, silently (`../ideas-server.ts`). Same door.
- *  · IMPROVE — `enhanceText` in mode `improve`, field `other`, `hint` as context. Locked while the
- *    text is blank (the RPC refuses blank text) and while a request is out. The answer REPLACES the
- *    text only if the text is still the one that was sent; a text edited meanwhile is left alone.
+ *  · IMPROVE — `enhanceText` in mode `steer`, field `other` (20-PROMPTS §3.8, D9): not a grammar fix
+ *    but the text rewritten as a short, concrete, visual phrase for THIS field of THIS tool. The
+ *    context is the «Tool: … / This field: …» text the Ideas door sends (`improveContext`), so the
+ *    server knows which tool and which field it is steering for. A server older than the mode
+ *    refuses it and is asked once more in `improve`, silently (`steerText`). Locked while the text
+ *    is blank (the RPC refuses blank text) and while a request is out. The answer REPLACES the text
+ *    only if the text is still the one that was sent; a text edited meanwhile is left alone.
  *  · RECENTLY USED ▾ — the texts this field was generated with (`../recent.ts`), newest first; a
  *    pick replaces the text. The field only reads the list; the panel remembers on submit.
  *    Phase 3 (C-16): the card's own past texts (`cardRecent`, from the band's runs) stand above
@@ -67,6 +73,11 @@ export type PromptFieldProps = {
   fieldKey: string;
   /** Context for Improve: what this text is for («the garment to recolour in a photo»). */
   hint?: string;
+  /**
+   * The tile's title («Change a Color»): the «Tool:» line of Improve's context when the band names
+   * no Ideas assistant (with one, `serverIdeas.context` already carries it). Absent = the hint alone.
+   */
+  workflowTitle?: string;
   /** Hard cap on the text; the counter shows near it. Default 2000. */
   maxLength?: number;
   disabled?: boolean;
@@ -86,6 +97,44 @@ type Replaced = { before: string; after: string };
 
 const NO_TEXTS: readonly string[] = Object.freeze([]);
 
+/**
+ * WHAT IMPROVE IS TOLD ABOUT THE FIELD — the same «Tool: … / This field: …» text the Ideas door asks
+ * with (20-PROMPTS §3.8). The server's `steer` reads the CONTEXT's first line as the tool and the
+ * field, so the bare hint is only the last resort.
+ */
+export function improveContext(opts: {
+  serverIdeas?: ServerIdeasInput;
+  workflowTitle?: string;
+  hint?: string;
+}): string | undefined {
+  if (opts.serverIdeas?.context) return opts.serverIdeas.context;
+  if (opts.workflowTitle?.trim())
+    return ideasContext({ workflowTitle: opts.workflowTitle.trim(), hint: opts.hint });
+  return opts.hint;
+}
+
+/**
+ * A server older than `ENHANCE_TEXT_MODE_STEER` refuses it as InvalidArgument (400): with a field
+ * violation on `mode` («unknown_mode», or «required» where the gateway dropped the unknown name), or
+ * with no violation at all where the gateway refused the name itself. A 400 that names another field
+ * (a too-long text) is the text's own refusal and is not retried.
+ */
+function steerRefused(error: unknown): boolean {
+  if ((error as { status?: number } | null)?.status !== 400) return false;
+  const violations = extractFieldViolations(error);
+  return violations.length === 0 || violations.some((v) => v.field === 'mode');
+}
+
+/** Improve's call: `steer`, and ONCE `improve` when the server does not know `steer` yet. */
+export async function steerText(req: Omit<EnhanceRequest, 'mode'>): Promise<string> {
+  try {
+    return await enhanceText({ ...req, mode: 'steer' });
+  } catch (e) {
+    if (!steerRefused(e)) throw e;
+    return enhanceText({ ...req, mode: 'improve' });
+  }
+}
+
 const MENU_ROW =
   'w-full px-2.5 py-2 text-left text-textBaseSize hover:bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor';
 
@@ -97,6 +146,7 @@ export function PromptField({
   workflowKey,
   fieldKey,
   hint,
+  workflowTitle,
   maxLength = 2000,
   disabled,
   serverIdeas,
@@ -234,11 +284,10 @@ export function PromptField({
     setBusy(true);
     try {
       const after = (
-        await enhanceText({
+        await steerText({
           text: before,
-          mode: 'improve',
           field: 'other',
-          context: hint,
+          context: improveContext({ serverIdeas, workflowTitle, hint }),
           maxRunes: maxLength,
         })
       ).trim();
@@ -357,7 +406,7 @@ export function PromptField({
           title={
             empty
               ? 'write something first, then improve it'
-              : 'fix errors and make the text clearer, same meaning'
+              : 'make it short and concrete for this field, same meaning'
           }
         >
           {busy ? 'improving…' : 'improve'}

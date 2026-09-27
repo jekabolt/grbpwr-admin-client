@@ -12,14 +12,21 @@
  *
  * Each phrase is short, concrete and in the words a person would type: a pose, a place, a garment
  * part. Nothing brand-specific, nothing that promises a result the route cannot give.
+ *
+ * ⚠ RETOUCH DESCRIBES THE RESULT, NEVER THE OPERATION (20-PROMPTS §3.5, D2). The mask route hands the
+ * words verbatim to FLUX Fill, and a fill model paints what the words DESCRIBE: «remove the stain»
+ * names a stain, so it is as likely to paint one as to take it away, and every such run is paid.
+ * Each idea therefore says what the painted zone shows when it is done — the cloth, the part, the
+ * material — and none of them is a verb of repair.
  */
 
 const RETOUCH: readonly string[] = [
-  'remove the crease',
-  'smooth the fabric, keep the texture',
-  'remove the loose thread',
-  'straighten the hem',
-  'match the stitching to the body colour',
+  'uncreased fabric continuing the surrounding cloth',
+  'a clean hem line continuing the stitching',
+  'the same print continuing across the zone',
+  'a patch pocket in the same fabric',
+  'a metal zip in the same cloth',
+  'plain cloth matching the surroundings',
 ];
 
 export const PROMPT_IDEAS: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
