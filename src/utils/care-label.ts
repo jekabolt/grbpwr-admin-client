@@ -56,7 +56,8 @@ function formatItems(items: Item[]): string {
 }
 
 // section → care-label group name; the order is the preferred print order too. An unknown section
-// prints as Material. Thread has no entry: its lines never reach the label (`carriesComposition`).
+// prints as Material. Thread has no entry: its lines never reach the label
+// (`carriesGarmentComposition`).
 const SECTION_LABELS: Record<string, string> = {
   TECH_CARD_BOM_SECTION_FABRIC: 'Shell',
   TECH_CARD_BOM_SECTION_LINING: 'Lining',
@@ -72,11 +73,16 @@ const SECTION_LABELS: Record<string, string> = {
 const SECTION_ORDER = Object.keys(SECTION_LABELS);
 
 // Thread carries no fibre composition of the garment (D-44, O-47): it sews the garment together,
-// it is not what the garment is made of. A thread line never prints on the care label and never
-// counts as "composition is set", whatever string it holds — a linked thread article keeps its
-// catalog snapshot on the line, and that snapshot stays inert here.
+// it is not what the garment is made of. D-50: this is the ONE rule every AGGREGATE of the
+// garment's composition applies — the care label and «is composition set» below, a colourway's
+// derived composition (colorway-recipe.tsx), the labels → BOM handoff (bom-field.tsx). Per-line
+// views (a BOM row, a release's frozen BOM, the draft's inventory) keep printing a thread's own
+// composition: that is a fact about the article, not the garment. A linked thread article keeps
+// its catalog snapshot on the line; the aggregates simply never read it.
 const THREAD_SECTION: common_TechCardBomSection = 'TECH_CARD_BOM_SECTION_THREAD';
-const carriesComposition = (b: { section?: string }): boolean => b.section !== THREAD_SECTION;
+export function carriesGarmentComposition(line: { section?: string }): boolean {
+  return line.section !== THREAD_SECTION;
+}
 
 // The care line is NOT built here. `careInstructions` is a comma-joined ISO-3758 code string
 // ("MW30,DNB,DNTD"), and the wording for each code — plus its print order — is dictionary data
@@ -89,13 +95,13 @@ const carriesComposition = (b: { section?: string }): boolean => b.section !== T
 export function hasAnyComposition(
   bomItems: Array<{ section?: string; composition?: string }>,
 ): boolean {
-  return (bomItems ?? []).some((b) => carriesComposition(b) && !!b.composition?.trim());
+  return (bomItems ?? []).some((b) => carriesGarmentComposition(b) && !!b.composition?.trim());
 }
 
 // Build a care-label composition block from the BOM catalog: one line per section that has a
 // parseable composition (Shell / Lining / Filling / …), using that section's primary article,
-// plus an optional "Made in …". Thread lines are skipped (`carriesComposition`). Returns '' when
-// nothing parseable is found.
+// plus an optional "Made in …". Thread lines are skipped (`carriesGarmentComposition`). Returns ''
+// when nothing parseable is found.
 export function generateCareLabel(
   bomItems: Array<{ section?: string; composition?: string }>,
   originCountry?: string,
@@ -103,7 +109,7 @@ export function generateCareLabel(
   // first parseable composition per section
   const bySection = new Map<string, string>();
   for (const b of bomItems ?? []) {
-    if (!carriesComposition(b)) continue;
+    if (!carriesGarmentComposition(b)) continue;
     const section = b.section || 'TECH_CARD_BOM_SECTION_OTHER';
     if (bySection.has(section)) continue;
     const formatted = formatItems(parseComposition(b.composition));

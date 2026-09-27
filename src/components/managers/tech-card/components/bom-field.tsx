@@ -58,6 +58,7 @@ import DecimalField from 'ui/form/fields/decimal-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
+import { carriesGarmentComposition } from 'utils/care-label';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { flattenFieldErrors } from 'utils/field-errors';
 import { sectionShort } from './bom-line-picker';
@@ -1562,11 +1563,17 @@ export function BomField({
   const [highlightActive, setHighlightActive] = useState(false);
 
   // When the labels tab asks for composition (care-gen with empty composition), jump here: open the
-  // first article missing composition and pulse its empty field.
+  // first article missing composition and pulse its empty field. Only a GARMENT article is a
+  // destination (D-44 / D-50, `carriesGarmentComposition`): a thread line's composition counts for
+  // nothing, so pointing at it sent the operator to fill a field the label never reads. With no
+  // article missing one, the first garment article opens (its blend lacks the percentages); with no
+  // garment article at all, nothing opens — never a blind row 0, which could be the thread.
   useEffect(() => {
     if (!highlightComposition || !bomWatch.length) return;
-    const firstEmpty = bomWatch.findIndex((b) => !b.composition?.trim());
-    setEditing(firstEmpty >= 0 ? firstEmpty : 0);
+    const garment = bomWatch.flatMap((b, i) => (carriesGarmentComposition(b) ? [i] : []));
+    const target = garment.find((i) => !bomWatch[i].composition?.trim()) ?? garment[0];
+    if (target === undefined) return;
+    setEditing(target);
     setHighlightActive(true);
     const t = setTimeout(() => setHighlightActive(false), 2600);
     return () => clearTimeout(t);

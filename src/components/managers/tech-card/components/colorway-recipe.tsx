@@ -49,6 +49,7 @@ import { Section, SectionStack } from 'ui/components/section';
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
+import { carriesGarmentComposition } from 'utils/care-label';
 import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ColorwayDeleteControl } from './colorway-delete';
 import {
@@ -643,7 +644,9 @@ function cuttingWidthOf(material?: common_Material, slot?: BomLine, pinned = fal
 // bar blank, or claiming "no readable composition", on cards whose blends were fully entered).
 // Each line's fibres are weighted by that usage's per-garment consumption (fallback: equal weight),
 // then normalised to 100%. Approximate by construction — flagged in the UI.
-function deriveComposition(
+// Thread usages are left out entirely (D-44 / D-50, `carriesGarmentComposition`): thread carries no
+// composition of the garment, so it neither weighs into the bar nor counts as «excluded».
+export function deriveComposition(
   usages: UsageDraft[],
   bomItems: BomLine[],
   materials: common_Material[],
@@ -653,6 +656,7 @@ function deriveComposition(
   for (const u of usages) {
     if (!u.bomLineKey) continue;
     const slot = bomItems.find((b) => b.lineKey === u.bomLineKey);
+    if (slot && !carriesGarmentComposition(slot)) continue;
     const line = articleForUsage(
       slot,
       effectiveMaterial(u, slot, materials),
