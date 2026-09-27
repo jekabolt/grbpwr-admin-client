@@ -16,8 +16,16 @@ import { inputToDecimal } from 'utils/decimal';
 import { PRICED_LATER } from '../../../core';
 import { slotCounter } from '../../fields';
 import { cornerText, maskDrawable, type MaskPoint } from '../../mask/geometry';
+import { orientationMoves, type PictureOrientation } from '../../mask/orientation';
 import { RetouchSource } from '../../mask/retouch-source';
-import { emptyParams, imagesOf, runKindOffered, workflowOffered } from '../common';
+import {
+  SOURCE_TOO_LARGE,
+  emptyParams,
+  imagesOf,
+  overCompositeCap,
+  runKindOffered,
+  workflowOffered,
+} from '../common';
 import { matchesWorkflow, retouchSourceId } from '../run-workflow';
 import {
   EMPTY_DRAFT,
@@ -65,11 +73,13 @@ import {
  * phase-2 path, and the price line says why (`retouchWindowReason`). A mask the canvas refuses at the
  * press (`MaskNotDrawn`) flips the picture to the same path, said the same way, and starts nothing.
  *
- * ⚠ A FILE STORED TURNED (G-03 m-1). A verbatim JPEG with an EXIF orientation of 5–8 is shown upright
- * by the browser, but its stored size — the size the server crops and masks at, reading no EXIF — is
- * the other way round, so a zone painted on the upright picture would land transposed on either
- * route. The editor compares the shown proportion with the stored one and refuses for free
- * (`RETOUCH_TURNED`) rather than guess which way it turns (6 and 8 look alike from the size alone).
+ * ⚠ A FILE STORED TURNED (G-03 m-1, Codex r2 MAJOR). A verbatim JPEG with an EXIF orientation is
+ * shown turned (or mirrored) by the browser, but the server crops and masks its RAW pixels, reading no
+ * EXIF — so a zone painted on the shown picture would land elsewhere on either route. The editor reads
+ * the tag from the shown file's own bytes (`../../mask/orientation.ts`) and refuses for free
+ * (`RETOUCH_TURNED`) when it is anything but «as stored»; until the tag is read — or when the file
+ * cannot be read at all — it refuses too, rather than guess. The r1 guess from the shown proportion
+ * could not see a square picture turned or one upside down, and refused an unturned cropped copy.
  */
 
 /** The prompt's field key — also its Ideas and Recently used key (`ideas.ts` `retouch_zone`). */
@@ -99,6 +109,11 @@ export const RETOUCH_PANEL_FALLBACK =
 /** The free refusal of a picture whose file is stored turned (G-03 m-1). */
 export const RETOUCH_TURNED =
   'this picture is stored turned (its camera orientation), so the zone would land in the wrong place; upload it again and retouch the new copy';
+/** Said while the shown file's orientation is being read (a moment, before any press). */
+export const RETOUCH_READING = 'checking the picture…';
+/** The file could not be read, so its orientation is unknown: no retouch rather than a guess. */
+export const RETOUCH_UNREADABLE =
+  "this picture's file could not be read to check its orientation; close the editor and open it again";
 
 /** Whether THIS server takes a retouch — the Mask action is not drawn at all when it does not. */
 export const retouchOffered = (band: GetDesignBandResponse): boolean =>
@@ -152,15 +167,15 @@ export const retouchCaveat = (
 ): string => (retouchRoute(band, media, canDraw) === 'mask' ? RETOUCH_MASK_CAVEAT : RETOUCH_CAVEAT);
 
 /**
- * Whether the picture is SHOWN the other way round from how it is STORED (G-03 m-1): the proportion
- * the browser drew (`shownAspect`, width / height after EXIF) is nearer the stored size turned than
- * the stored size itself. A square-ish picture (sides within 1 %) cannot tell, and is not refused.
+ * THE FREE REFUSAL OF THE SHOWN FILE'S ORIENTATION (G-03 m-1, Codex r2 MAJOR) — from its EXIF tag,
+ * never from its proportion: a tag that moves the pixels, a tag not read yet, a file that cannot be
+ * read. `undefined` = not asked (a caller that shows no picture): nothing to refuse.
  */
-export function pictureTurned(media: common_MediaFull | null, shownAspect?: number): boolean {
-  const { w, h } = sourceSize(media);
-  if (!(w > 0 && h > 0) || !shownAspect || !Number.isFinite(shownAspect)) return false;
-  if (Math.abs(w - h) / Math.max(w, h) <= 0.01) return false;
-  return Math.abs(shownAspect - h / w) < Math.abs(shownAspect - w / h);
+export function orientationRefusal(orientation?: PictureOrientation): Refusal | null {
+  if (orientation === undefined) return null;
+  if (orientation === 'reading') return { reason: RETOUCH_READING };
+  if (orientation === 'unknown') return { reason: RETOUCH_UNREADABLE };
+  return orientationMoves(orientation) ? { reason: RETOUCH_TURNED } : null;
 }
 
 /**
@@ -194,8 +209,8 @@ export type RetouchInput = {
    * the request is the mask route's; 0 / absent = the window's.
    */
   maskMediaId?: number;
-  /** The proportion the editor SHOWS the picture at (G-03 m-1, `pictureTurned`); absent = unknown. */
-  shownAspect?: number;
+  /** The EXIF orientation of the file the editor SHOWS (G-03 m-1, `orientationRefusal`). */
+  orientation?: PictureOrientation;
 };
 
 /** The words as they leave: trimmed, at most the door's ceiling in characters (runes). */
@@ -216,7 +231,11 @@ function sourceSize(media: common_MediaFull | null): { w: number; h: number } {
  */
 export function retouchRefusal(input: RetouchInput): Refusal | null {
   if (!input.media || (input.media.id ?? 0) <= 0) return { reason: 'pick a picture to retouch' };
-  if (pictureTurned(input.media, input.shownAspect)) return { reason: RETOUCH_TURNED };
+  const turned = orientationRefusal(input.orientation);
+  if (turned) return turned;
+  // Over 18 MP neither route can composite it (G-03 r2): said before any paint, on both routes.
+  const stated = sourceSize(input.media);
+  if (overCompositeCap(stated.w, stated.h)) return { reason: SOURCE_TOO_LARGE };
   if (!input.painted) return { reason: 'paint the zone to change' };
   if (input.route !== 'mask' && !input.zone)
     return { reason: 'the painted zone is too small: paint a larger one' };

@@ -268,6 +268,23 @@
 //   node scripts/playground-registry-probe.mjs --mutate-unconfirmed-words код без слов → AD
 //   node scripts/playground-registry-probe.mjs --mutate-recent-kind  «on this card» без правила
 //                                                                   inpaint в workflowOfRun → Z
+//   AE · (G-03 Codex r2) ориентация EXIF из байтов (JPEG II/MM, PNG eXIf, WebP EXIF, мусор → 1) и
+//        отказ по ней (квадратный 1000×995 с 6 — отказ, 1011×1000 без тега — нет, 3 — отказ);
+//        черновик краски: сравни-и-удали (поздний A не трогает B), адрес с оператором, взятый при
+//        нажатии; сбой sessionStorage виден (false); перезагрузка и старый формат v1 отдают ту же
+//        маску; зависшая загрузка маски бросается по сроку и поздний id не хранится; отказ двери
+//        по маске (mask_invalid …) забывает маску; журнал говорит «ключ освобождён».
+//   node scripts/playground-registry-probe.mjs --mutate-draft-cas    удаление без сравнения → AE
+//   node scripts/playground-registry-probe.mjs --mutate-save-silent  сбой хранилища молчит → AE
+//   node scripts/playground-registry-probe.mjs --mutate-exif-parse   big-endian читается как II → AE
+//   node scripts/playground-registry-probe.mjs --mutate-exif-moves   отказ только при 5–8 → AE
+//   node scripts/playground-registry-probe.mjs --mutate-upload-deadline срока загрузки маски нет → AE
+//   node scripts/playground-registry-probe.mjs --mutate-late-mask    поздний id хранится → AE
+//   node scripts/playground-registry-probe.mjs --mutate-mask-forget  отказанная маска помнится → AE
+//   node scripts/playground-registry-probe.mjs --mutate-ledger-freed журнал не говорит «освобождён» → AE
+//   node scripts/playground-registry-probe.mjs --mutate-extend-list  Extend снова только по run_kinds → AA
+//   node scripts/playground-registry-probe.mjs --mutate-source-cap   18 МП не отказывается даром → AA, AE
+//   node scripts/playground-registry-probe.mjs --mutate-waiting-words paid_collect_waiting без слов → AD
 //
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
@@ -355,6 +372,17 @@ const MUT = {
   ideasFirstRef: process.argv.includes('--mutate-ideas-first-ref'),
   recentKind: process.argv.includes('--mutate-recent-kind'),
   unconfirmedWords: process.argv.includes('--mutate-unconfirmed-words'),
+  draftCas: process.argv.includes('--mutate-draft-cas'),
+  saveSilent: process.argv.includes('--mutate-save-silent'),
+  exifParse: process.argv.includes('--mutate-exif-parse'),
+  exifMoves: process.argv.includes('--mutate-exif-moves'),
+  uploadDeadline: process.argv.includes('--mutate-upload-deadline'),
+  lateMask: process.argv.includes('--mutate-late-mask'),
+  maskForget: process.argv.includes('--mutate-mask-forget'),
+  ledgerFreed: process.argv.includes('--mutate-ledger-freed'),
+  extendList: process.argv.includes('--mutate-extend-list'),
+  sourceCap: process.argv.includes('--mutate-source-cap'),
+  waitingWords: process.argv.includes('--mutate-waiting-words'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -555,6 +583,8 @@ if (MUT.p06Params)
   ]);
 if (MUT.drawn)
   commonSwaps.push(['return out.length ? out : [...field.ratios];', 'return [...field.ratios];']);
+if (MUT.sourceCap)
+  commonSwaps.push(['w > 0 && h > 0 && w * h > COMPOSITE_MAX_SOURCE_PIXELS;', 'false;']);
 if (commonSwaps.length)
   plugins.unshift({
     name: 'c08-common',
@@ -871,6 +901,11 @@ if (MUT.extendWire)
     'extend: { aspectRatio: formatOf(band, draft, FORMAT.field) },',
     "extend: { aspectRatio: '' },",
   ]);
+if (MUT.extendList)
+  EXTEND_SWAPS.push([
+    "return route.available ? workflowOffered(band, 'extend_image') : route;",
+    'return route;',
+  ]);
 fileSwaps('c13-extend', /tiles\/extend-image\.tsx$/, EXTEND_SWAPS);
 if (MUT.extendGate)
   plugins.push(
@@ -917,7 +952,47 @@ fileSwaps('c14-mask-once', /mask\/mask-upload\.ts$/, [
   ...(MUT.maskStore
     ? [['const kept = store?.recall(mediaId, key);', 'const kept = undefined;']]
     : []),
+  ...(MUT.uploadDeadline
+    ? [['abandoned = true;\n            reject(new MaskUploadStalled(deadlineMs));', '']]
+    : []),
+  ...(MUT.lateMask
+    ? [['if (!abandoned) store?.keep(mediaId, key, got);', 'store?.keep(mediaId, key, got);']]
+    : []),
+  ...(MUT.maskForget
+    ? [['      memo.delete(key);\n      store?.forget?.(mediaId, key);', '']]
+    : []),
 ]);
+fileSwaps('g03r2-mask-draft', /mask\/mask-draft\.ts$/, [
+  ...(MUT.draftCas
+    ? [
+        [
+          'if (paintSignature(was.strokes, was.words) !== pressed.paint || was.sent !== pressed.sent)\n    return false;',
+          '',
+        ],
+      ]
+    : []),
+  ...(MUT.saveSilent
+    ? [['  } catch {\n    return false;\n  }', '  } catch {\n    return true;\n  }']]
+    : []),
+]);
+fileSwaps('g03r2-orientation', /mask\/orientation\.ts$/, [
+  ...(MUT.exifParse ? [["const little = order === 'II';", 'const little = true;']] : []),
+  ...(MUT.exifMoves
+    ? [['orientation >= 2 && orientation <= 8;', 'orientation >= 5 && orientation <= 8;']]
+    : []),
+]);
+fileSwaps(
+  'g03r2-run-words',
+  /generation\/run-state\.ts$/,
+  MUT.waitingWords
+    ? [["  paid_collect_waiting: 'already paid, waiting to collect the result',\n", '']]
+    : [],
+);
+fileSwaps(
+  'g03r2-ledger-freed',
+  /render\/run-ledger\.ts$/,
+  MUT.ledgerFreed ? [['    freed = true;\n', '']] : [],
+);
 fileSwaps(
   'g03-canvas-cap',
   /mask\/geometry\.ts$/,
@@ -959,12 +1034,7 @@ fileSwaps(
   'g03-exif-blind',
   RETOUCH,
   MUT.exifBlind
-    ? [
-        [
-          'if (pictureTurned(input.media, input.shownAspect)) return { reason: RETOUCH_TURNED };',
-          '',
-        ],
-      ]
+    ? [['const turned = orientationRefusal(input.orientation);\n  if (turned) return turned;', '']]
     : [],
 );
 
@@ -4191,6 +4261,13 @@ head('AA', 'C-13 Extend Image: тело extend, ворота по run_kinds, о�
     'run_kinds пуст → погашена',
   );
   ck(same(g(on), { available: true }), 'run_kinds с extend → живая');
+  ck(
+    same(g(band({ runKinds: ['extend'], playgroundWorkflows: ['create_edit'] })), {
+      available: false,
+      reason: 'not wired on this server',
+    }),
+    'run_kinds с extend, но playground_workflows без extend_image → погашена (G-03 n-1: и список плиток)',
+  );
   const oldGrid = M.gridMarkup(band({ playgroundWorkflows: ['create_edit'] }));
   ck(
     !liveKeys(oldGrid).has('extend_image') &&
@@ -4208,6 +4285,14 @@ head('AA', 'C-13 Extend Image: тело extend, ворота по run_kinds, о�
 
   // validate — the door's order.
   const v = (dr) => ext.validate(dr, octx)?.reason ?? null;
+  ck(
+    v(draft({ images: { image: [sized(23, 6000, 4000)] } })) === M.SOURCE_TOO_LARGE &&
+      v(draft({ images: { image: [sized(24, 4000, 4500)] } })) === null &&
+      M.SOURCE_TOO_LARGE ===
+        'this picture is too large to edit here (over 18 MP); downscale it and upload it again',
+    'больше 18 МП (6000×4000) — отказ даром до сети; ровно 18 МП (4000×4500) — нет (source_too_large)',
+    String(v(draft({ images: { image: [sized(23, 6000, 4000)] } }))),
+  );
   ck(v(draft()) === 'add the picture to extend', 'нет картинки → «add the picture to extend»');
   ck(
     v(
@@ -4598,18 +4683,9 @@ await (async () => {
     'старый сервер: причины отката нет (маски и не предлагали)',
   );
 
-  // m-1 · a file stored turned
+  // m-1 (Codex r2) · the shown file's orientation, from its tag: the refusal on both routes
   const stored = sized(902, 1000, 800);
   const words = { zone: M.zoneOfStrokes([{ size: 0.03, points: [{ x: 0.5, y: 0.5 }] }], 0.8) };
-  ck(
-    M.pictureTurned(stored, 0.8) &&
-      !M.pictureTurned(stored, 1.25) &&
-      !M.pictureTurned(sized(903, 1000, 1000), 1) &&
-      !M.pictureTurned(sized(904, 1000, 995), 0.995) &&
-      !M.pictureTurned(stored, undefined) &&
-      !M.pictureTurned(media(905), 0.8),
-    'повёрнутый файл: показанная пропорция ближе к перевёрнутому размеру; квадрат и неизвестное — нет',
-  );
   for (const route of ['mask', 'window'])
     ck(
       M.retouchRefusal({
@@ -4618,7 +4694,7 @@ await (async () => {
         painted: true,
         words: 'x',
         route,
-        shownAspect: 0.8,
+        orientation: 6,
       })?.reason === M.RETOUCH_TURNED &&
         M.retouchRefusal({
           media: stored,
@@ -4626,7 +4702,7 @@ await (async () => {
           painted: false,
           words: '',
           route,
-          shownAspect: 0.8,
+          orientation: 6,
         })?.reason === M.RETOUCH_TURNED &&
         M.retouchRefusal({
           media: stored,
@@ -4634,9 +4710,10 @@ await (async () => {
           painted: true,
           words: 'x',
           route,
-          shownAspect: 1.25,
-        }) === null,
-      `${route}: повёрнутый файл отказан даром, до краски; неповёрнутый — нет`,
+          orientation: 1,
+        }) === null &&
+        M.retouchRefusal({ media: stored, ...words, painted: true, words: 'x', route }) === null,
+      `${route}: файл с тегом 6 отказан даром, до краски; тег 1 и «не спрашивали» — нет`,
     );
 
   // BLOCKER · the mask id outlives the uploader (a closed editor)
@@ -4726,8 +4803,396 @@ head('AD', 'G-03: submit_unconfirmed — «провайдер не подтве�
   ck(
     M.runOutcomeNote({ ...failed, status: 'cancelled' }) === `cancelled · ${WORDS}`,
     'отменённый с этим кодом — те же слова',
+  ); // G-03 r2 (backend): two waits of a live run and the 18 MP refusal, in words
+  ck(
+    M.runOutcomeNote({ id: 2, kind: 'extend', status: 'pending', errorCode: 'submit_settling' }) ===
+      'pending · waiting for the provider to confirm the earlier request' &&
+      M.runOutcomeNote({
+        id: 3,
+        kind: 'inpaint',
+        status: 'running',
+        errorCode: 'paid_collect_waiting',
+      }) === 'running · already paid, waiting to collect the result' &&
+      M.runOutcomeNote({
+        id: 4,
+        kind: 'extend',
+        status: 'pending',
+        errorCode: 'provider_timeout',
+      }) === 'retrying · provider_timeout' &&
+      M.runFailureText({ errorCode: 'paid_collect_waiting' }).code === 'paid_collect_waiting',
+    'submit_settling / paid_collect_waiting: живой прогон «ждёт» словами (не «retrying»), код в панели цел',
+  );
+  ck(
+    M.runOutcomeNote({ id: 5, kind: 'extend', status: 'failed', errorCode: 'source_too_large' }) ===
+      'failed · the picture is too large to edit here (over 18 MP); downscale it and try again',
+    'source_too_large словами',
   );
 }
+
+// ─── AE · G-03 Codex r2: ориентация из байтов, сравни-и-удали, хранилище, срок и отказ маски ────
+head(
+  'AE',
+  'G-03 r2: EXIF из байтов, черновик краски (CAS, оператор, хранилище), срок и отказ маски',
+);
+await (async () => {
+  const sized = (id, width, height) => ({
+    id,
+    media: { thumbnail: { mediaUrl: `https://x/${id}.jpg` }, fullSize: { width, height } },
+  });
+
+  // ── 4 · the EXIF parser, on hand-built byte fixtures ──
+  const tiff = (order, orientation, withTag = true) => {
+    const le = order === 'II';
+    const u16 = (v) => (le ? [v & 255, v >> 8] : [v >> 8, v & 255]);
+    const u32 = (v) =>
+      le
+        ? [v & 255, (v >> 8) & 255, (v >> 16) & 255, v >>> 24]
+        : [v >>> 24, (v >> 16) & 255, (v >> 8) & 255, v & 255];
+    // IFD0 at 8: an ImageWidth entry first (so the tag is not simply the first), then Orientation.
+    const entries = [[...u16(0x0100), ...u16(3), ...u32(1), ...u16(640), 0, 0]];
+    if (withTag) entries.push([...u16(0x0112), ...u16(3), ...u32(1), ...u16(orientation), 0, 0]);
+    return Uint8Array.from([
+      ...[...order].map((c) => c.charCodeAt(0)),
+      ...u16(42),
+      ...u32(8),
+      ...u16(entries.length),
+      ...entries.flat(),
+      ...u32(0),
+    ]);
+  };
+  const bytes = (s) => [...s].map((c) => c.charCodeAt(0));
+  const be16 = (v) => [v >> 8, v & 255];
+  const jpeg = (block) => {
+    const app0 = [0xff, 0xe0, ...be16(16), ...bytes('JFIF\0'), 1, 1, 0, 0, 1, 0, 1, 0, 0];
+    const xmp = [0xff, 0xe1, ...be16(2 + 5), ...bytes('http:')]; // an APP1 that is not EXIF
+    const app1 = block
+      ? [0xff, 0xe1, ...be16(2 + 6 + block.length), ...bytes('Exif\0\0'), ...block]
+      : [];
+    return Uint8Array.from([0xff, 0xd8, ...app0, ...xmp, ...app1, 0xff, 0xda, 0, 2, 0xff, 0xd9]);
+  };
+  const png = (block) => {
+    const len = (n) => [(n >>> 24) & 255, (n >> 16) & 255, (n >> 8) & 255, n & 255];
+    const ch = (type, data) => [...len(data.length), ...bytes(type), ...data, 0, 0, 0, 0];
+    return Uint8Array.from([
+      0x89,
+      ...bytes('PNG\r\n\x1a\n'),
+      ...ch('IHDR', new Array(13).fill(0)),
+      ...(block ? ch('eXIf', [...block]) : []),
+      ...ch('IDAT', [1, 2, 3]),
+      ...ch('IEND', []),
+    ]);
+  };
+  const webp = (block, prefix) => {
+    const le32 = (n) => [n & 255, (n >> 8) & 255, (n >> 16) & 255, n >>> 24];
+    const data = block ? [...(prefix ? bytes('Exif\0\0') : []), ...block] : [];
+    const pad = data.length & 1 ? [0] : [];
+    const vp8x = [...bytes('VP8X'), ...le32(10), ...new Array(10).fill(0)];
+    const img = [...bytes('VP8L'), ...le32(5), 1, 2, 3, 4, 5, 0];
+    const exif = block ? [...bytes('EXIF'), ...le32(data.length), ...data, ...pad] : [];
+    const body = [...bytes('WEBP'), ...vp8x, ...img, ...exif];
+    return Uint8Array.from([...bytes('RIFF'), ...le32(body.length), ...body]);
+  };
+  const o = M.exifOrientation;
+  ck(
+    o(jpeg(tiff('II', 6))) === 6 && o(jpeg(tiff('MM', 6))) === 6 && o(jpeg(tiff('MM', 3))) === 3,
+    'JPEG APP1 «Exif»: тег 0x0112 в обоих порядках байт (II и MM), после APP0 и чужого APP1',
+    `${o(jpeg(tiff('II', 6)))} ${o(jpeg(tiff('MM', 6)))} ${o(jpeg(tiff('MM', 3)))}`,
+  );
+  ck(
+    o(jpeg(null)) === 1 && o(jpeg(tiff('II', 6, false))) === 1 && o(jpeg(tiff('II', 9))) === 1,
+    'JPEG без EXIF, EXIF без тега, тег вне 1–8 → 1 («как хранится»)',
+  );
+  ck(
+    o(png(tiff('MM', 8))) === 8 && o(png(null)) === 1,
+    'PNG: eXIf до IDAT читается; без него — 1',
+    `${o(png(tiff('MM', 8)))} ${o(png(null))}`,
+  );
+  ck(
+    o(webp(tiff('II', 5), false)) === 5 &&
+      o(webp(tiff('II', 7), true)) === 7 &&
+      o(webp(null)) === 1,
+    'WebP: чанк EXIF (голый TIFF и с префиксом «Exif\\0\\0»); без него — 1',
+    `${o(webp(tiff('II', 5), false))} ${o(webp(tiff('II', 7), true))}`,
+  );
+  const cut = jpeg(tiff('MM', 6)).slice(0, 40);
+  ck(
+    o(cut) === 1 &&
+      o(new Uint8Array(0)) === 1 &&
+      o(Uint8Array.from([0xff, 0xd8, 0xff])) === 1 &&
+      o(Uint8Array.from(bytes('GIF89a'))) === 1,
+    'обрезанный файл, пустой, мусор, GIF → 1 и без исключения',
+  );
+  // the decision: from the tag, never from the proportion
+  const squareish = sized(910, 1000, 995);
+  const cropped = sized(911, 1011, 1000);
+  const ready = (media, orientation) =>
+    M.retouchRefusal({ media, zone: null, painted: true, words: 'x', route: 'mask', orientation });
+  ck(
+    ready(squareish, 6)?.reason === M.RETOUCH_TURNED &&
+      ready(squareish, 8)?.reason === M.RETOUCH_TURNED &&
+      ready(squareish, o(jpeg(tiff('MM', 6))))?.reason === M.RETOUCH_TURNED,
+    '1000×995 с тегом 6/8 (эвристика r1 его пропускала) — отказ даром',
+  );
+  ck(
+    ready(cropped, 1) === null && ready(cropped, o(jpeg(null))) === null,
+    '1011×1000 без тега (эвристика r1 его отказывала) — не отказ',
+  );
+  ck(
+    ready(squareish, 3)?.reason === M.RETOUCH_TURNED &&
+      ready(squareish, 2)?.reason === M.RETOUCH_TURNED,
+    'тег 3 (вверх ногами) и 2 (зеркало) тоже двигают зону — отказ',
+  );
+  ck(
+    ready(sized(912, 6000, 4000), 1)?.reason === M.SOURCE_TOO_LARGE &&
+      M.retouchRefusal({
+        media: sized(912, 6000, 4000),
+        zone: null,
+        painted: false,
+        words: '',
+        route: 'window',
+        orientation: 1,
+      })?.reason === M.SOURCE_TOO_LARGE &&
+      ready(sized(913, 4000, 4500), 1) === null,
+    'ретушь больше 18 МП — отказ на обоих маршрутах, ещё до краски; 18 МП ровно — нет',
+  );
+  ck(
+    ready(squareish, 'reading')?.reason === M.RETOUCH_READING &&
+      ready(squareish, 'unknown')?.reason === M.RETOUCH_UNREADABLE &&
+      M.orientationMoves(1) === false,
+    'пока тег читается — «checking the picture…»; файл не прочитан — отказ, а не догадка',
+  );
+
+  // ── the kept paint: a fake tab (sessionStorage) and two operators (localStorage.authToken) ──
+  const jwt = (sub) => `x.${Buffer.from(JSON.stringify({ sub })).toString('base64url')}.y`;
+  const session = new Map();
+  let full = false;
+  const local = new Map([['authToken', jwt('operator-a')]]);
+  globalThis.window = {
+    sessionStorage: {
+      getItem: (k) => session.get(k) ?? null,
+      setItem: (k, v) => {
+        if (full) throw new Error('QuotaExceededError');
+        session.set(k, String(v));
+      },
+    },
+    localStorage: { getItem: (k) => local.get(k) ?? null },
+  };
+  const A = [
+    {
+      size: 0.03,
+      points: [
+        { x: 0.1, y: 0.1 },
+        { x: 0.2, y: 0.1 },
+      ],
+    },
+  ];
+  const B = [...A, { size: 0.06, points: [{ x: 0.7, y: 0.8 }] }];
+  const at = M.maskDraftAt(7, 900);
+  const keyA = M.maskKey(900, A, 800, 1000);
+  const keyB = M.maskKey(900, B, 800, 1000);
+  // press A (its answer lost), then B
+  M.recordPress(at, {
+    strokes: A,
+    words: 'a pocket',
+    mask: { key: keyA, id: 6001 },
+    sent: 'wire-A',
+  });
+  const pressedA = { paint: M.paintSignature(A, 'a pocket'), sent: 'wire-A' };
+  M.writeMaskDraft(at, { strokes: B, words: 'a pocket' });
+  M.recordPress(at, {
+    strokes: B,
+    words: 'a pocket',
+    mask: { key: keyB, id: 6002 },
+    sent: 'wire-B',
+  });
+  const pressedB = { paint: M.paintSignature(B, 'a pocket'), sent: 'wire-B' };
+  const lateA = M.forgetMaskDraft(at, pressedA);
+  ck(
+    lateA === false &&
+      JSON.stringify(M.readMaskDraft(at)?.strokes) === JSON.stringify(B) &&
+      M.keptMaskId(at, keyB) === 6002,
+    'BLOCKER: поздний «принят» для A не удаляет черновик B — краска и маска B на месте',
+    JSON.stringify({ lateA, draft: M.readMaskDraft(at) }),
+  );
+  // an unpressed edit after A: A's paint no longer on screen → kept
+  const at2 = M.maskDraftAt(7, 901);
+  M.recordPress(at2, { strokes: A, words: 'w', sent: 'wire-A2' });
+  M.writeMaskDraft(at2, { strokes: B, words: 'w' });
+  ck(
+    M.forgetMaskDraft(at2, { paint: M.paintSignature(A, 'w'), sent: 'wire-A2' }) === false &&
+      !!M.readMaskDraft(at2),
+    'краска изменена после нажатия A (не нажата) — ответ A её не стирает',
+  );
+  ck(
+    M.forgetMaskDraft(at, pressedB) === true && M.readMaskDraft(at) === null,
+    'ответ ровно на тот запрос и ту краску — черновик забыт',
+  );
+  // the operator is taken at the press: A's late answer after B signs in touches only A's draft
+  const atOpA = M.maskDraftAt(7, 902);
+  M.recordPress(atOpA, { strokes: A, words: 'mine', sent: 'wire-opA' });
+  local.set('authToken', jwt('operator-b'));
+  const atOpB = M.maskDraftAt(7, 902);
+  M.recordPress(atOpB, { strokes: A, words: 'mine', sent: 'wire-opA' });
+  const spentA = M.forgetMaskDraft(atOpA, { paint: M.paintSignature(A, 'mine'), sent: 'wire-opA' });
+  ck(
+    atOpA !== atOpB && spentA && M.readMaskDraft(atOpA) === null && !!M.readMaskDraft(atOpB),
+    'адрес с оператором, взятый при нажатии: поздний ответ A после входа B стирает только черновик A',
+  );
+  local.set('authToken', jwt('operator-a'));
+
+  // ── 2 · storage that refuses is SAID, and the reload gives back the same mask ──
+  const at3 = M.maskDraftAt(7, 903);
+  const keyC = M.maskKey(903, B, 800, 1000);
+  ck(
+    M.recordPress(at3, {
+      strokes: B,
+      words: 'kept',
+      mask: { key: keyC, id: 7003 },
+      sent: 'wire-C',
+    }) === true,
+    'запись в sessionStorage прошла — true',
+  );
+  M.resetMaskDraftsForProbe();
+  ck(
+    M.keptMaskId(at3, keyC) === 7003 &&
+      JSON.stringify(M.readMaskDraft(at3)?.strokes) === JSON.stringify(B) &&
+      M.readMaskDraft(at3)?.sent === 'wire-C',
+    'перезагрузка (память сброшена): краска, запрос и id маски из sessionStorage, тот же ключ маски',
+    JSON.stringify(M.readMaskDraft(at3)),
+  );
+  const stored = JSON.parse(session.get(M.MASK_DRAFT_STORAGE_KEY))[at3];
+  ck(
+    Array.isArray(stored.s) &&
+      typeof stored.s[0][0] === 'number' &&
+      stored.m &&
+      stored.m.s === undefined,
+    'хранится плоско: мазок — список чисел, маска своих мазков не повторяет',
+    JSON.stringify(stored),
+  );
+  full = true;
+  ck(
+    M.writeMaskDraft(at3, { strokes: A, words: 'x' }) === false &&
+      M.recordPress(at3, { strokes: A, words: 'x', sent: 'wire-D' }) === false &&
+      M.keepMaskId(at3, keyC, 1) === false,
+    'хранилище отказало (квота) — каждая запись говорит false (редактор не шлёт платный запрос)',
+  );
+  full = false;
+  // the r1 shape (objects, the full key) still reads back into the same mask
+  const at4 = M.maskDraftAt(7, 904);
+  session.set(
+    M.MASK_DRAFT_STORAGE_KEY,
+    JSON.stringify({
+      [at4]: {
+        strokes: A,
+        words: 'old',
+        mask: { key: JSON.stringify([904, 800, 1000, A]), id: 5004 },
+      },
+    }),
+  );
+  M.resetMaskDraftsForProbe();
+  ck(
+    M.keptMaskId(at4, M.maskKey(904, A, 800, 1000)) === 5004 &&
+      M.readMaskDraft(at4)?.words === 'old',
+    'черновик формата r1 читается: та же маска под новым ключом',
+  );
+
+  // ── 5 · a mask the door refused is forgotten, here and where it is kept ──
+  ck(
+    M.maskRefused({
+      status: 400,
+      details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'mask_invalid' }],
+    }) &&
+      M.maskRefused({ status: 400, details: [{ reason: 'mask_size_mismatch' }] }) &&
+      !M.maskRefused({ status: 400, details: [{ reason: 'words_required' }] }) &&
+      !M.maskRefused({ status: 400 }),
+    'отказ по маске (mask_invalid, mask_size_mismatch) узнаётся; прочие отказы — нет',
+  );
+  let ups = 0;
+  const shelf = new Map();
+  const store = {
+    recall: (m, k) => shelf.get(`${m}|${k}`),
+    keep: (m, k, id) => shelf.set(`${m}|${k}`, id),
+    forget: (m, k) => shelf.delete(`${m}|${k}`),
+  };
+  const paintOf = async () => 'data:image/png;base64,AA';
+  const up = M.createMaskUploader(paintOf, async () => 8000 + ++ups, store);
+  const first = await up.maskFor(905, A, 800, 1000);
+  const same = await up.maskFor(905, A, 800, 1000);
+  up.forget(905, A, 800, 1000);
+  const after = await up.maskFor(905, A, 800, 1000);
+  ck(
+    first === 8001 &&
+      same === 8001 &&
+      after === 8002 &&
+      shelf.get(`905|${M.maskKey(905, A, 800, 1000)}`) === 8002,
+    'forget после отказа: следующее нажатие грузит маску заново (и в памяти, и в хранилище)',
+    `${first} ${same} ${after}`,
+  );
+  const at5 = M.maskDraftAt(7, 906);
+  const keyE = M.maskKey(906, A, 800, 1000);
+  M.recordPress(at5, { strokes: A, words: 'w', mask: { key: keyE, id: 9006 }, sent: 's' });
+  M.forgetMaskId(at5, M.maskKey(906, B, 800, 1000));
+  const kept = M.keptMaskId(at5, keyE);
+  M.forgetMaskId(at5, keyE);
+  ck(
+    kept === 9006 && M.keptMaskId(at5, keyE) === undefined && !!M.readMaskDraft(at5),
+    'forgetMaskId: только маска с этим ключом, краска остаётся',
+  );
+
+  // ── 3 · an upload that never answers is given up; its late id is nobody's ──
+  let release;
+  let sent = 0;
+  const kept3 = new Map();
+  const slow = M.createMaskUploader(
+    paintOf,
+    () => {
+      sent++;
+      return sent === 1 ? new Promise((res) => (release = res)) : Promise.resolve(9100 + sent);
+    },
+    { recall: (m, k) => kept3.get(k), keep: (m, k, id) => kept3.set(k, id) },
+    60,
+  );
+  const stalled = await Promise.race([
+    slow.maskFor(907, A, 800, 1000).then(
+      () => 'resolved',
+      (e) => e,
+    ),
+    new Promise((r) => setTimeout(() => r('still waiting'), 400)),
+  ]);
+  ck(
+    stalled instanceof M.MaskUploadStalled &&
+      stalled.message === 'the mask upload got no answer in 0 s',
+    'загрузка без ответа: по сроку — MaskUploadStalled, а не вечное ожидание',
+    String(stalled?.message ?? stalled),
+  );
+  const retry = await Promise.race([
+    slow.maskFor(907, A, 800, 1000),
+    new Promise((r) => setTimeout(() => r('hung'), 400)),
+  ]);
+  release?.(9100);
+  await new Promise((r) => setTimeout(r, 20));
+  ck(
+    retry === 9102 && sent === 2 && kept3.get(M.maskKey(907, A, 800, 1000)) === 9102,
+    'после срока следующее нажатие грузит заново; поздний id брошенной загрузки не хранится',
+    `${retry} (${sent}) kept ${kept3.get(M.maskKey(907, A, 800, 1000))}`,
+  );
+
+  // ── the ledger says whether a refusal freed the key (only then is a mask forgotten) ──
+  const fp = 'fp-ledger';
+  M.ledgerSend(7, 'probe', fp);
+  const refusedClean = M.ledgerSettle(7, 'probe', fp, 'refused');
+  M.ledgerSend(7, 'probe', fp);
+  M.ledgerSettle(7, 'probe', fp, 'unknown');
+  M.ledgerSend(7, 'probe', fp);
+  const refusedAfterSilence = M.ledgerSettle(7, 'probe', fp, 'refused');
+  const accepted = M.ledgerSettle(7, 'probe', fp, 'accepted');
+  ck(
+    refusedClean === true && refusedAfterSilence === false && accepted === true,
+    'журнал: отказ — ключ освобождён (true); отказ повтора после тишины — ключ держится (false)',
+    `${refusedClean} ${refusedAfterSilence} ${accepted}`,
+  );
+  delete globalThis.window;
+})();
 
 const expected = MUTATED ? ' (прогон С МУТАЦИЕЙ — провалы ожидаются)' : '';
 console.log(

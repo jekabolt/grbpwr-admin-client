@@ -118,7 +118,16 @@ export function expectedTileCount(run: common_DesignRun): number {
 export const RUN_CODE_WORDS: Readonly<Record<string, string>> = {
   submit_unconfirmed:
     'the provider did not confirm the request; it may have been charged; this run is not retried automatically',
+  /* G-03 r2 (backend): two waits a PENDING run may show, and one free refusal. A pending run's code
+     is not a failure — the worker comes back to it — so the words say what it is waiting for. */
+  submit_settling: 'waiting for the provider to confirm the earlier request',
+  paid_collect_waiting: 'already paid, waiting to collect the result',
+  source_too_large:
+    'the picture is too large to edit here (over 18 MP); downscale it and try again',
 };
+
+/** The codes of a live run that WAITS rather than retries: its note says «pending», not «retrying». */
+const WAITING_CODES = new Set(['submit_settling', 'paid_collect_waiting']);
 
 /** The words of a run's (or an attempt's) code: its sentence when it has one, else the code. */
 export const runCodeWords = (code: string | undefined): string => {
@@ -166,7 +175,10 @@ export function runOutcomeNote(run: common_DesignRun): string {
   const why = runCodeWords(run.errorCode) || (run.lastError ?? '').trim();
   if (status === 'cancelled') return why ? `cancelled · ${why}` : 'cancelled';
   if (isCancelling(run)) return 'cancelling…';
-  return why ? `retrying · ${why}` : status;
+  if (!why) return status;
+  return WAITING_CODES.has((run.errorCode ?? '').trim())
+    ? `${status} · ${why}`
+    : `retrying · ${why}`;
 }
 
 /**

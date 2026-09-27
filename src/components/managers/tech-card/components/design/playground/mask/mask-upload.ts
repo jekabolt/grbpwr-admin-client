@@ -1,8 +1,11 @@
 import { adminService } from 'api/api';
 
+import { errorInfoReason } from '../../generation/refusal';
 import { operatorKey } from '../../render/run-ledger';
 import { maskPng, type MaskStroke } from './geometry';
-import { keepMaskId, keptMaskId } from './mask-draft';
+import { forgetMaskId, keepMaskId, keptMaskId, maskDraftAt, maskKey } from './mask-draft';
+
+export { maskKey };
 
 /**
  * ═══ THE MASK GOES UP ONCE PER PAINT (C-14, the phase-3 mask route) ══════════════════════════════
@@ -30,6 +33,17 @@ import { keepMaskId, keptMaskId } from './mask-draft';
  * ⚠ A BROWSER THAT CANNOT DRAW THE MASK (G-03 M-1). `maskPng` answers null when the canvas cannot be
  * made or encoded at the picture's size (Safari's area cap, memory): that press starts nothing, and
  * the error is a `MaskNotDrawn`, which the editor reads as «take the rectangle path for this picture».
+ *
+ * ⚠ AN UPLOAD THAT NEVER ANSWERS IS GIVEN UP (G-03 Codex r2 MAJOR). The editor cannot be closed while
+ * its mask goes up, so a proxy that took the request and never answered held the person in a
+ * full-screen dialog until a reload. After `MASK_UPLOAD_DEADLINE_MS` (the run door's own 45 s) the
+ * press fails with `MaskUploadStalled`: the pending upload is forgotten (the next press uploads
+ * again) and the editor unlocks. An answer that arrives after that is dropped — not remembered, not
+ * kept with the paint — so it can never become the mask of a run nobody pressed for.
+ *
+ * ⚠ A MASK THE DOOR REFUSED IS FORGOTTEN (G-03 Codex r2 MINOR). `mask_invalid`, `mask_size_mismatch`,
+ * `mask_empty` or `mask_required` are about that uploaded PNG: kept, it would be sent again on every
+ * identical press and refused again. `forget` drops it from the memory and from the kept paint.
  */
 
 /** Draws the mask of `strokes` at `width` × `height` and returns it as a data URL (null = cannot). */
@@ -41,15 +55,8 @@ export type MaskPainter = (
 /** Uploads a data URL and returns the media id. */
 export type MaskUploadFn = (dataUrl: string) => Promise<number>;
 
-/** The identity of one paint: the picture, its pixel size and every stroke, exactly. */
-export function maskKey(
-  mediaId: number,
-  strokes: readonly MaskStroke[],
-  width: number,
-  height: number,
-): string {
-  return JSON.stringify([mediaId, width, height, strokes]);
-}
+/** How long a mask may take to draw and go up before the press gives it up (the run door's 45 s). */
+export const MASK_UPLOAD_DEADLINE_MS = 45_000;
 
 export type MaskUploader = {
   /** The mask's media id for this paint — uploaded on the first ask, remembered after. */
@@ -59,6 +66,8 @@ export type MaskUploader = {
     width: number,
     height: number,
   ) => Promise<number>;
+  /** The door refused this paint's mask: forget it, here and where it is kept. */
+  forget: (mediaId: number, strokes: readonly MaskStroke[], width: number, height: number) => void;
 };
 
 /** The painter answered null: this browser cannot draw the mask at the picture's size. */
@@ -69,16 +78,38 @@ export class MaskNotDrawn extends Error {
   }
 }
 
+/** The mask did not go up within the deadline; the upload is given up and nothing was started. */
+export class MaskUploadStalled extends Error {
+  constructor(ms: number) {
+    super(`the mask upload got no answer in ${Math.round(ms / 1000)} s`);
+    this.name = 'MaskUploadStalled';
+  }
+}
+
+/** The door's refusals that are about the uploaded mask itself (`design_inpaint.go`). */
+const MASK_REFUSALS = new Set([
+  'mask_invalid',
+  'mask_size_mismatch',
+  'mask_empty',
+  'mask_required',
+]);
+
+/** Whether a refused run was refused for its mask — the one refusal a new upload can cure. */
+export const maskRefused = (error: unknown): boolean =>
+  MASK_REFUSALS.has(errorInfoReason(error) ?? '');
+
 /** Where an uploader may also keep an uploaded id beyond its own memory (`mask-draft.ts`). */
 export type MaskIdStore = {
   recall: (mediaId: number, key: string) => number | undefined;
   keep: (mediaId: number, key: string, id: number) => void;
+  forget?: (mediaId: number, key: string) => void;
 };
 
 export function createMaskUploader(
   paint: MaskPainter,
   upload: MaskUploadFn,
   store?: MaskIdStore,
+  deadlineMs = MASK_UPLOAD_DEADLINE_MS,
 ): MaskUploader {
   const memo = new Map<string, Promise<number>>();
   return {
@@ -87,22 +118,46 @@ export function createMaskUploader(
       const held = memo.get(key);
       if (held) return held;
       const kept = store?.recall(mediaId, key);
-      const id =
-        kept !== undefined && kept > 0
-          ? Promise.resolve(kept)
-          : (async () => {
-              const dataUrl = await paint(strokes, width, height);
-              if (!dataUrl) throw new MaskNotDrawn(width, height);
-              const got = await upload(dataUrl);
-              if (!(got > 0)) throw new Error('the mask went up but came back without an id');
-              store?.keep(mediaId, key, got);
-              return got;
-            })();
+      let id: Promise<number>;
+      if (kept !== undefined && kept > 0) id = Promise.resolve(kept);
+      else {
+        let abandoned = false;
+        const work = (async () => {
+          const dataUrl = await paint(strokes, width, height);
+          if (!dataUrl) throw new MaskNotDrawn(width, height);
+          const got = await upload(dataUrl);
+          if (!(got > 0)) throw new Error('the mask went up but came back without an id');
+          // Given up meanwhile: this id is nobody's mask (see the file head).
+          if (!abandoned) store?.keep(mediaId, key, got);
+          return got;
+        })();
+        id = new Promise<number>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            abandoned = true;
+            reject(new MaskUploadStalled(deadlineMs));
+          }, deadlineMs);
+          work.then(
+            (got) => {
+              clearTimeout(timer);
+              resolve(got);
+            },
+            (error: unknown) => {
+              clearTimeout(timer);
+              reject(error);
+            },
+          );
+        });
+      }
       memo.set(key, id);
       id.catch(() => {
         if (memo.get(key) === id) memo.delete(key);
       });
       return id;
+    },
+    forget(mediaId, strokes, width, height) {
+      const key = maskKey(mediaId, strokes, width, height);
+      memo.delete(key);
+      store?.forget?.(mediaId, key);
     },
   };
 }
@@ -114,12 +169,16 @@ const uploaders = new Map<string, MaskUploader>();
  * a closed and reopened editor asks the same one.
  */
 export function maskUploaderFor(techCardId: number): MaskUploader {
-  const at = `${operatorKey()}|${techCardId}`;
+  const operator = operatorKey();
+  const at = `${operator}|${techCardId}`;
   let up = uploaders.get(at);
   if (!up) {
+    // The operator is this uploader's, taken once: an answer read after a sign-in writes nowhere else.
+    const draft = (mediaId: number) => maskDraftAt(techCardId, mediaId, operator);
     up = createMaskUploader(maskDataUrl, uploadMask, {
-      recall: (mediaId, key) => keptMaskId(techCardId, mediaId, key),
-      keep: (mediaId, key, id) => keepMaskId(techCardId, mediaId, key, id),
+      recall: (mediaId, key) => keptMaskId(draft(mediaId), key),
+      keep: (mediaId, key, id) => void keepMaskId(draft(mediaId), key, id),
+      forget: (mediaId, key) => forgetMaskId(draft(mediaId), key),
     });
     uploaders.set(at, up);
   }

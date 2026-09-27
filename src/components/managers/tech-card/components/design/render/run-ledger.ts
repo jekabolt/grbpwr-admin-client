@@ -145,17 +145,21 @@ export function ledgerSend(techCardId: number, scope: string, fingerprint: strin
   return id;
 }
 
-/** What the send of this intent's key came to — see the file head for the three rules. */
+/**
+ * What the send of this intent's key came to — see the file head for the three rules. Answers whether
+ * the key was FREED: a refusal that freed it proves nothing was booked under it, ever.
+ */
 export function ledgerSettle(
   techCardId: number,
   scope: string,
   fingerprint: string,
   outcome: LedgerOutcome,
-): void {
+): boolean {
   const all = book();
   const at = scopeOf(techCardId, scope);
   const found = all[at]?.[fingerprint];
-  if (!found) return;
+  if (!found) return false;
+  let freed = false;
   if (outcome === 'unknown') {
     all[at] = { ...all[at], [fingerprint]: { ...found, pending: false, unsure: true } };
   } else if (outcome === 'refused' && found.unsure) {
@@ -165,8 +169,10 @@ export function ledgerSettle(
     delete rest[fingerprint];
     if (Object.keys(rest).length) all[at] = rest;
     else delete all[at];
+    freed = true;
   }
   save();
+  return freed;
 }
 
 /**

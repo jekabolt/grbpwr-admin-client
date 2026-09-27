@@ -13,10 +13,7 @@ interface ProtoMetaParams {
   method: string;
 }
 
-export const requestHandler = async (
-  { path, method, body }: RequestHandlerParams,
-  // { method: serviceMethod }: ProtoMetaParams, // eslint-disable-line @typescript-eslint/no-unused-vars
-) => {
+const send = async ({ path, method, body }: RequestHandlerParams, signal?: AbortSignal) => {
   const authToken = localStorage.getItem('authToken');
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -33,6 +30,7 @@ export const requestHandler = async (
       method,
       headers,
       body,
+      signal,
     });
 
     console.log('[BE] response: ', response.status, response.statusText);
@@ -73,6 +71,19 @@ export const requestHandler = async (
     throw new Error(`Request failed: ${error}`);
   }
 };
+
+export const requestHandler = (
+  params: RequestHandlerParams,
+  // { method: serviceMethod }: ProtoMetaParams, // eslint-disable-line @typescript-eslint/no-unused-vars
+) => send(params);
+
+/**
+ * The admin client whose calls `signal` cancels: the generated client takes no `AbortSignal` of its
+ * own, so a caller with a deadline (`SuggestPrompts`) builds one of these per call and aborts it —
+ * the connection is closed, not merely ignored.
+ */
+export const abortableAdminService = (signal: AbortSignal) =>
+  createAdminServiceClient((params) => send(params, signal));
 
 export const frontendService = createFrontendServiceClient(requestHandler);
 export const adminService = createAdminServiceClient(requestHandler);

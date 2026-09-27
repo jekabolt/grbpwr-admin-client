@@ -261,11 +261,44 @@ export {
 } from 'components/managers/tech-card/components/design/playground/mask/geometry';
 export {
   RETOUCH_PANEL_FALLBACK,
+  RETOUCH_READING,
   RETOUCH_TOO_LARGE,
   RETOUCH_TURNED,
-  pictureTurned,
+  RETOUCH_UNREADABLE,
+  orientationRefusal,
   retouchWindowReason,
 } from 'components/managers/tech-card/components/design/playground/registry/tiles/retouch-zone';
+// G-03 Codex r2 · the shown file's EXIF orientation, the kept paint's compare-and-delete, the stalled
+// and the refused mask, the ledger's «freed».
+export {
+  COMPOSITE_MAX_SOURCE_PIXELS,
+  SOURCE_TOO_LARGE,
+} from 'components/managers/tech-card/components/design/playground/registry/common';
+export {
+  exifOrientation,
+  orientationMoves,
+} from 'components/managers/tech-card/components/design/playground/mask/orientation';
+export {
+  MASK_DRAFT_STORAGE_KEY,
+  forgetMaskDraft,
+  forgetMaskId,
+  keepMaskId,
+  keptMaskId,
+  maskDraftAt,
+  paintSignature,
+  readMaskDraft,
+  recordPress,
+  resetMaskDraftsForProbe,
+  writeMaskDraft,
+} from 'components/managers/tech-card/components/design/playground/mask/mask-draft';
+export {
+  MaskUploadStalled,
+  maskRefused,
+} from 'components/managers/tech-card/components/design/playground/mask/mask-upload';
+export {
+  ledgerSend,
+  ledgerSettle,
+} from 'components/managers/tech-card/components/design/render/run-ledger';
 // G-03 · backend d8b7bca: `submit_unconfirmed` said in words wherever a run's reason is shown.
 export {
   RUN_CODE_WORDS,

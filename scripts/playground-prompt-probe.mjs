@@ -37,6 +37,7 @@
 //   --mutate-ideas-coarse    контекст снова только заголовки секций               → I
 //   --mutate-ideas-no-deadline зависший вызов не отпускается                     → J
 //   --mutate-ideas-404-any   любой 404 выключает сессию                           → E
+//   --mutate-ideas-no-abort  срок не обрывает запрос (G-03 Codex r2)              → J
 //
 //   I · (G-03 Codex MINOR) ключ кэша — значения формы: другой цвет Pantone при том же тексте — новый
 //       вопрос и новый вызов; тот же цвет — кэш; текст самого поля в контекст не идёт;
@@ -76,6 +77,7 @@ const KNOWN = new Set([
   '--mutate-ideas-coarse',
   '--mutate-ideas-no-deadline',
   '--mutate-ideas-404-any',
+  '--mutate-ideas-no-abort',
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN.has(a));
 if (stray) dieNotRun(`неизвестный флаг мутации ${stray}; известные: ${[...KNOWN].join(', ')}`);
@@ -165,6 +167,8 @@ if (on('--mutate-ideas-404-any'))
     '(status === 404 && reason === undefined) || status === 501',
     'status === 404 || status === 501',
   );
+if (on('--mutate-ideas-no-abort'))
+  patch('ideas-no-abort', IDEAS_SERVER, '        abort.abort();\n', '');
 if (on('--mutate-recent-mask'))
   patch(
     'recent-mask',
@@ -188,6 +192,24 @@ const call = (method) => (req) => {
   return Promise.resolve({});
 };
 const service = new Proxy({}, { get: (_t, k) => (typeof k === 'string' ? call(k) : undefined) });
+// The abortable client (G-03 Codex r2): the same calls; an abort of the signal is counted, and the
+// held call rejects as fetch does.
+g.__ppAborted = g.__ppAborted || 0;
+export const abortableAdminService = (signal) =>
+  new Proxy({}, {
+    get: (_t, k) =>
+      typeof k === 'string'
+        ? (req) => {
+            const p = call(k)(req);
+            signal.addEventListener('abort', () => {
+              g.__ppAborted++;
+              const out = g.__ppOut.find((o) => o.req === req);
+              if (out) out.rej(new DOMException('aborted', 'AbortError'));
+            });
+            return p;
+          }
+        : undefined,
+  });
 export const adminService = service;
 export const authService = service;
 export const frontendService = service;
@@ -743,6 +765,11 @@ try {
     'срок вышел: «thinking…» снята, только статический список',
   );
   ck((await page.evaluate(() => window.__pp.alerts())).length === 0, 'без тоста');
+  ck(
+    (await page.evaluate(() => window.__ppAborted)) === 1,
+    'срок ОБРЫВАЕТ запрос (AbortController), а не оставляет его висеть (G-03 Codex r2)',
+    String(await page.evaluate(() => window.__ppAborted)),
+  );
   await closeMenu();
   await openIdeas('change_color.garment');
   ck(

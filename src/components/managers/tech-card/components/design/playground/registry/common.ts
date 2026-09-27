@@ -91,6 +91,19 @@ export function runKindOffered(band: GetDesignBandResponse, kind: string): Avail
 }
 
 /**
+ * THE WORKING PIXEL CAP OF AN EXTEND OR A RETOUCH SOURCE (`designgen.CompositeMaxSourcePixels`, G-03
+ * r2): the server composites the answer at the source's full size inside a small process, and refuses
+ * a larger source as `source_too_large` — at the door for extend and the mask route, at the pickup for
+ * the window route; free either way. The screen says it first, from the size the media row states.
+ */
+export const COMPOSITE_MAX_SOURCE_PIXELS = 18_000_000;
+export const SOURCE_TOO_LARGE =
+  'this picture is too large to edit here (over 18 MP); downscale it and upload it again';
+/** The stated size is past the cap (an unstated size is left to the server). */
+export const overCompositeCap = (w: number, h: number): boolean =>
+  w > 0 && h > 0 && w * h > COMPOSITE_MAX_SOURCE_PIXELS;
+
+/**
  * A PHASE-1 TILE ON EITHER SERVER. The new list decides whenever the server sends it — exactly those
  * tiles are live, the phase-1 three included — and a server that does not send it keeps today's
  * answer (`legacy`, read off `freeform_presets`), so the beta that predates the list keeps working.

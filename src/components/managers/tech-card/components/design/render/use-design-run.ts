@@ -74,6 +74,17 @@ export type StartRunInput = {
   rerunOfRunId?: number;
 };
 
+/** What travels with one press and hears its outcome (see `StartRunState.start`). */
+export type StartRunCallbacks = {
+  onAccepted?: () => void;
+  /**
+   * The door refused this press DEFINITIVELY and its key was freed — nothing was ever booked under
+   * it. The mask editor forgets a refused mask here (G-03 Codex r2 MINOR). A refusal of a repeat
+   * after a silence does not reach it: that key is kept, and so is what it was made of.
+   */
+  onRefused?: (error: unknown) => void;
+};
+
 export type StartRunState = {
   /**
    * `onAccepted` — called once the door ACCEPTED this press (the run is booked), never on a refusal.
@@ -85,7 +96,7 @@ export type StartRunState = {
    * has unmounted, and a playground form is unmounted by |→, Back or the rail while «starting…»
    * (G-01, Fable m-7). The run was booked all the same, so the words are remembered all the same.
    */
-  start: (input: StartRunInput, opts?: { onAccepted?: () => void }) => void;
+  start: (input: StartRunInput, opts?: StartRunCallbacks) => void;
   /**
    * A press is out. With a `scope` this reads the mutation cache, not this component: a form that
    * was left and reopened while its run was starting is still «starting…».
@@ -226,12 +237,14 @@ export function useStartDesignRun(
       ),
     onSuccess: (_answer: unknown, input) => accepted(input),
     onError: (error: unknown, input) => {
-      ledgerSettle(
+      const definitive = isDefinitiveRefusal(error);
+      const freed = ledgerSettle(
         input.techCardId,
         input.scope,
         input.fingerprint,
-        isDefinitiveRefusal(error) ? 'refused' : 'unknown',
+        definitive ? 'refused' : 'unknown',
       );
+      if (definitive && freed) input.onRefused?.(error);
       const message = (error as Error)?.message?.trim() || 'the run did not start';
       if (isAborted(error)) {
         showMessage(`someone changed this first — ${message}`, 'error');
@@ -250,7 +263,7 @@ export function useStartDesignRun(
   });
 
   const start = useCallback(
-    (input: StartRunInput, opts?: { onAccepted?: () => void }) => {
+    (input: StartRunInput, opts?: StartRunCallbacks) => {
       if (!techCardId || techCardId <= 0) return;
       // THE WIRE OBJECT IS BUILT ONCE, AND THE FINGERPRINT IS TAKEN OF IT (r2 N2): every field that
       // reaches the server is in it — the card (the server scopes its idempotency by it), `rerun_of`
@@ -271,6 +284,7 @@ export function useStartDesignRun(
         scope,
         fingerprint,
         onAccepted: opts?.onAccepted,
+        onRefused: opts?.onRefused,
       });
     },
     [techCardId, mutation, scope],
@@ -338,6 +352,7 @@ type SentRun = {
   scope: string;
   fingerprint: string;
   onAccepted?: () => void;
+  onRefused?: (error: unknown) => void;
 };
 
 /** The mutation key of a scoped form's presses — the cache is asked «is one of them out?». */

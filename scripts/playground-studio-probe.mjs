@@ -66,6 +66,10 @@
 //   --mutate-canvas-cap       бюджета холста нет — 24 МП идут маской (M-1)         → O
 //   --mutate-no-keyboard      у кисти нет клавиатуры (Codex MAJOR)                 → O
 //   --mutate-exif-blind       повёрнутый файл не отказан (m-1)                     → O
+//   --mutate-draft-cas        поздний «принят» A стирает черновик B (r2 BLOCKER)   → O
+//   --mutate-save-silent      сбой sessionStorage молчит, прогон уходит (r2 MAJOR) → O
+//   --mutate-mask-deadline    у загрузки маски нет срока (r2 MAJOR)                → O
+//   --mutate-mask-forget      отказанная дверью маска помнится (r2 MINOR)          → O
 //
 //   O · (G-03 client fix) маска живьём: нажатие, потерянный ответ, ЗАКРЫТЬ и открыть снова —
 //       краска и слова на месте, второе нажатие без новой загрузки и с ТЕМ ЖЕ ключом (и на пути
@@ -74,6 +78,11 @@
 //       ничего не начато, строка «cannot draw», следующее нажатие — тело окна; 24 МП — окно сразу;
 //       клавиатура: дверь Mask с клавиатуры, кисть стрелками и пробелом, Enter — прогон inpaint,
 //       Escape поднимает кисть, затем закрывает; повёрнутый файл — отказ даром.
+//       G-03 Codex r2: JPEG с EXIF 6 (1000×995, почти квадрат) — отказ по тегу из байтов, PNG без
+//       тега 1011×1000 — не отказ; A потерян, нажат B, поздний «принят» A — редактор открыт с B,
+//       повтор B после закрытия — тот же ключ и та же маска; хранилище отказало — ничего не начато;
+//       зависшая загрузка — по сроку редактор отпускает, поздняя загрузка не становится маской;
+//       отказ двери mask_invalid — следующее нажатие грузит маску заново.
 //
 //   N · (C-14) маршрут маски живьём: кисть по настоящему холсту, GENERATE → ОДНА загрузка PNG
 //       (verbatim, размер картинки 800×1000, белое там, где кисть, чёрное вокруг) → StartDesignRun
@@ -155,6 +164,10 @@ const KNOWN = new Set([
   '--mutate-canvas-cap',
   '--mutate-no-keyboard',
   '--mutate-exif-blind',
+  '--mutate-draft-cas',
+  '--mutate-save-silent',
+  '--mutate-mask-deadline',
+  '--mutate-mask-forget',
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN.has(a));
 if (stray) dieNotRun(`неизвестный флаг мутации ${stray}; известные: ${[...KNOWN].join(', ')}`);
@@ -194,6 +207,14 @@ patch(
         () => accepted(input),`,
   `        globalThis.__pgDeadlineMs ?? START_RUN_DEADLINE_MS,
         () => accepted(input),`,
+);
+
+// …and the mask upload's deadline from `window.__pgMaskDeadlineMs` (group O, the stalled upload).
+patch(
+  'mask-deadline-knob',
+  /mask\/mask-upload\.ts$/,
+  '          }, deadlineMs);',
+  '          }, globalThis.__pgMaskDeadlineMs ?? deadlineMs);',
 );
 
 if (on('--mutate-ledger'))
@@ -502,7 +523,36 @@ if (on('--mutate-exif-blind'))
   patch(
     'exif-blind',
     /tiles\/retouch-zone\.tsx$/,
-    'if (pictureTurned(input.media, input.shownAspect)) return { reason: RETOUCH_TURNED };',
+    'const turned = orientationRefusal(input.orientation);\n  if (turned) return turned;',
+    '',
+  );
+
+if (on('--mutate-draft-cas'))
+  patch(
+    'draft-cas',
+    /mask\/mask-draft\.ts$/,
+    'if (paintSignature(was.strokes, was.words) !== pressed.paint || was.sent !== pressed.sent)\n    return false;',
+    '',
+  );
+if (on('--mutate-save-silent'))
+  patch(
+    'save-silent',
+    /mask\/mask-draft\.ts$/,
+    '  } catch {\n    return false;\n  }',
+    '  } catch {\n    return true;\n  }',
+  );
+if (on('--mutate-mask-deadline'))
+  patch(
+    'mask-no-deadline',
+    /mask\/mask-upload\.ts$/,
+    'abandoned = true;\n            reject(new MaskUploadStalled(deadlineMs));',
+    '',
+  );
+if (on('--mutate-mask-forget'))
+  patch(
+    'mask-remembered',
+    /mask\/mask-upload\.ts$/,
+    '      memo.delete(key);\n      store?.forget?.(mediaId, key);',
     '',
   );
 
@@ -544,6 +594,7 @@ const call = (method) => (req) => {
 };
 const service = new Proxy({}, { get: (_t, k) => (typeof k === 'string' ? call(k) : undefined) });
 export const adminService = service;
+export const abortableAdminService = () => service;
 export const authService = service;
 export const frontendService = service;
 export const requestHandler = () => Promise.reject(new Error('${STUB_MARKER}'));
@@ -1882,13 +1933,18 @@ const png = (w, h) => {
     chunk('IEND', Buffer.alloc(0)),
   ]);
 };
-// `-wide` serves a 6×4 picture (the 6000×4000 case of O); every other name a 4×5 one.
+/** A 4×5 JPEG with EXIF Orientation 6 (O, Codex r2): made by the page's own encoder, tagged here. */
+let EXIF6_JPEG = null;
+// `-wide` serves a 6×4 picture (the 6000×4000 case of O); `-exif6` that JPEG; every other name a
+// 4×5 PNG.
 await page.route('http://probe.local/inpaint-*', (route) =>
-  route.fulfill({
-    status: 200,
-    contentType: 'image/png',
-    body: route.request().url().includes('-wide') ? png(6, 4) : png(4, 5),
-  }),
+  route.request().url().includes('-exif6') && EXIF6_JPEG
+    ? route.fulfill({ status: 200, contentType: 'image/jpeg', body: EXIF6_JPEG })
+    : route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: route.request().url().includes('-wide') ? png(6, 4) : png(4, 5),
+      }),
 );
 const pmedia = (id, w, h, shown = w > h ? 'wide' : 'tall') => ({
   id,
@@ -2286,22 +2342,33 @@ try {
   ck(false, 'O4 оборвалась', String(e?.message ?? e).split('\n')[0]);
 }
 
-// 5 · M-1: 24 MP over the budget — the window from the start, said before any press
+// 5 · M-1: 17.6 MP — over the canvas budget, under the server's 18 MP cap: the window from the
+// start, said before any press. 24 MP is past the cap (G-03 r2 source_too_large): refused for free.
 try {
-  await openAndPaint(bandOf({ runKinds: ['freeform', 'inpaint'] }, 6000, 4000));
+  await openAndPaint(bandOf({ runKinds: ['freeform', 'inpaint'] }, 4200, 4200));
   ck(
     (await priceLine()).startsWith(TOO_LARGE),
-    '6000×4000 на сервере с маской: строка «cannot draw a mask this size» до нажатия',
+    '4200×4200 на сервере с маской: строка «cannot draw a mask this size» до нажатия',
     await priceLine(),
   );
   await editorGenerate().click();
   await page.waitForFunction(() => window.__pgCalls.some((c) => c.method === 'StartDesignRun'));
   ck(
     (await starts())[0].kind === 'freeform' && (await uploads()) === 0,
-    '6000×4000: тело окна, холст на 24 МП не создаётся, загрузки нет',
+    '4200×4200: тело окна, холст на 17,6 МП не создаётся, загрузки нет',
   );
   await answer('lost');
   await settle(150);
+  await closeMask();
+  await openAndPaint(bandOf({ runKinds: ['freeform', 'inpaint'] }, 6000, 4000));
+  ck(
+    (await editorText()).includes('this picture is too large to edit here (over 18 MP)'),
+    '6000×4000 (24 МП): отказ «too large to edit here (over 18 MP)» до нажатия',
+  );
+  await page.locator('[data-mask-canvas]').focus();
+  await page.keyboard.press('Enter');
+  await settle(200);
+  ck((await starts()).length === 0 && (await uploads()) === 0, '24 МП: ни загрузки, ни прогона');
   await closeMask();
 } catch (e) {
   ck(false, 'O5 оборвалась', String(e?.message ?? e).split('\n')[0]);
@@ -2368,12 +2435,35 @@ try {
   ck(false, 'O6 оборвалась', String(e?.message ?? e).split('\n')[0]);
 }
 
-// 7 · m-1: a file stored turned — refused for free, before the paint
+// 7 · m-1 (Codex r2): the orientation is the file's EXIF tag, read from its bytes
 try {
-  await openAndPaint(bandOf({ runKinds: ['freeform', 'inpaint'] }, 1000, 800, 'tall'));
+  if (!EXIF6_JPEG) {
+    // The page's own JPEG encoder makes a 4×5 picture; an APP1 «Exif» with Orientation 6 goes in
+    // right after SOI (big-endian TIFF, one IFD0 entry).
+    const b64 = await page.evaluate(() => {
+      const c = document.createElement('canvas');
+      c.width = 4;
+      c.height = 5;
+      c.getContext('2d').fillRect(0, 0, 4, 5);
+      return c.toDataURL('image/jpeg').split(',')[1];
+    });
+    const raw = Buffer.from(b64, 'base64');
+    const tiffMM = Buffer.from([
+      0x4d, 0x4d, 0, 42, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0,
+    ]);
+    const body = Buffer.concat([Buffer.from('Exif\0\0', 'binary'), tiffMM]);
+    const app1 = Buffer.concat([
+      Buffer.from([0xff, 0xe1, (body.length + 2) >> 8, (body.length + 2) & 255]),
+      body,
+    ]);
+    EXIF6_JPEG = Buffer.concat([raw.subarray(0, 2), app1, raw.subarray(2)]);
+  }
+  // 1000×995: sides within 0.5 % — the r1 proportion guess let this one through
+  await openAndPaint(bandOf({ runKinds: ['freeform', 'inpaint'] }, 1000, 995, 'exif6'));
   ck(
     (await editorText()).includes('this picture is stored turned (its camera orientation)'),
-    'файл хранится повёрнутым (1000×800, показан 4:5): отказ словами',
+    'JPEG с EXIF 6, 1000×995 (почти квадрат): отказ словами, по тегу из байтов',
+    (await editorText()).slice(0, 300),
   );
   await page.locator('[data-mask-canvas]').focus();
   await page.keyboard.press('Enter');
@@ -2383,8 +2473,207 @@ try {
     'повёрнутый файл: ни загрузки, ни прогона',
   );
   await closeMask();
+  // 1011×1000 stored, a 4×5 PNG shown, no tag: the r1 guess refused it as turned — not any more
+  await openAndPaint(bandOf({ runKinds: ['freeform', 'inpaint'] }, 1011, 1000, 'plain'));
+  ck(
+    !(await editorText()).includes('stored turned') &&
+      !(await editorText()).includes('checking the picture'),
+    'PNG без тега (1011×1000, показан 4:5): не отказ — пропорция больше не решает',
+    (await editorText()).slice(0, 300),
+  );
+  await closeMask();
 } catch (e) {
   ck(false, 'O7 оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+/** One more stroke on the open canvas, at a fraction of it. */
+const strokeAt = async (fx, fy) => {
+  await page.locator('[data-mask-canvas]').scrollIntoViewIfNeeded();
+  const box = await page.locator('[data-mask-canvas]').boundingBox();
+  const x = box.x + box.width * fx;
+  const y = box.y + box.height * fy;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + box.width * 0.05, y + box.height * 0.02, { steps: 4 });
+  await page.mouse.up();
+  await settle(80);
+};
+
+// 8 · r2 BLOCKER: A lost, B pressed, A's late «accepted» — B's paint, mask and editor stay
+try {
+  await openAndPaint(MASK_BAND());
+  await page.evaluate(() => {
+    window.__pgDeadlineMs = 400;
+  });
+  await editorGenerate().click();
+  await page.waitForFunction(() => window.__pgCalls.some((c) => c.method === 'StartDesignRun'));
+  await settle(600); // A's deadline: «no answer», the key kept, A still out at the «server»
+  await strokeAt(0.5, 0.65);
+  await editorGenerate().click();
+  await page.waitForFunction(
+    () => window.__pgCalls.filter((c) => c.method === 'StartDesignRun').length === 2,
+  );
+  const [a, b] = await starts();
+  await answer('ok'); // the FIRST held press — A — answers, late
+  await settle(250);
+  ck(
+    a.params.inpaint?.maskMediaId !== b.params.inpaint?.maskMediaId &&
+      (await page.locator('[data-mask-editor]').count()) === 1 &&
+      (await page.locator('[data-mask-editor] textarea').inputValue()) === 'a clean pocket',
+    'поздний «принят» для A: редактор, на котором стоит B, не закрыт',
+    JSON.stringify({
+      open: await page.locator('[data-mask-editor]').count(),
+      masks: [a.params.inpaint?.maskMediaId, b.params.inpaint?.maskMediaId],
+    }),
+  );
+  await settle(400); // B's deadline too: its answer is lost
+  ck(
+    !(await page.locator('[data-mask-editor] button', { hasText: /^undo$/ }).isDisabled()) &&
+      (await page.locator('[data-mask-editor] textarea').inputValue()) === 'a clean pocket',
+    'краска B и слова на месте (undo жив)',
+  );
+  await closeMask();
+  await openMask();
+  await editorGenerate().click();
+  await page.waitForFunction(
+    () => window.__pgCalls.filter((c) => c.method === 'StartDesignRun').length === 3,
+  );
+  const again = (await starts())[2];
+  ck(
+    (await uploads()) === 2 &&
+      again.clientRequestId === b.clientRequestId &&
+      again.params.inpaint?.maskMediaId === b.params.inpaint?.maskMediaId,
+    'повтор B после закрытия: без новой загрузки, маска B, ТОТ ЖЕ ключ B — оплата одна',
+    `${b.clientRequestId}/${b.params.inpaint?.maskMediaId} → ${again.clientRequestId}/${again.params.inpaint?.maskMediaId} (${await uploads()})`,
+  );
+  await answer('lost');
+  await answer('lost');
+  await settle(150);
+  await closeMask();
+} catch (e) {
+  ck(false, 'O8 оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+await page.evaluate(() => {
+  window.__pgDeadlineMs = undefined;
+});
+
+// 9 · r2 MAJOR: the paint cannot be saved — nothing is uploaded, nothing is started, it says why
+try {
+  await openAndPaint(MASK_BAND());
+  await page.evaluate(() => {
+    const own = Storage.prototype.setItem;
+    window.__pgSetItem = own;
+    Storage.prototype.setItem = function (k, v) {
+      if (k === 'plm.design.mask-drafts.v1') throw new DOMException('full', 'QuotaExceededError');
+      return own.call(this, k, v);
+    };
+  });
+  await editorGenerate().click();
+  await settle(300);
+  ck(
+    (await starts()).length === 0 && (await uploads()) === 0,
+    'хранилище отказало: ни загрузки, ни прогона',
+    `${(await starts()).length} / ${await uploads()}`,
+  );
+  ck(
+    (await page.evaluate(() => window.__pg.alerts())).some((a) =>
+      a.startsWith('nothing was started: this browser could not save the paint'),
+    ),
+    'тост: ничего не начато, краску не сохранить',
+    JSON.stringify(await page.evaluate(() => window.__pg.alerts())),
+  );
+  await page.evaluate(() => {
+    Storage.prototype.setItem = window.__pgSetItem;
+  });
+  await closeMask();
+} catch (e) {
+  ck(false, 'O9 оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+// 10 · r2 MAJOR: an upload that never answers — the deadline frees the editor; the late one is dropped
+try {
+  await openAndPaint(MASK_BAND());
+  await page.evaluate(() => {
+    window.__pgMaskDeadlineMs = 400;
+    window.__pgUploadHold = true;
+  });
+  await editorGenerate().click();
+  await page.waitForFunction(() => (window.__pgUploadOut || []).length === 1);
+  await settle(700);
+  ck(
+    (await editorGenerate().textContent()) === 'GENERATE' &&
+      !(await page.locator('[data-mask-editor] button[aria-label="close the mask"]').isDisabled()),
+    'срок загрузки вышел: GENERATE снова жив, ✕ включён',
+    await editorGenerate().textContent(),
+  );
+  ck(
+    (await page.evaluate(() => window.__pg.alerts())).some((a) =>
+      a.startsWith('nothing was started: the mask upload got no answer in 45 s'),
+    ),
+    'тост: ничего не начато, загрузка без ответа',
+    JSON.stringify(await page.evaluate(() => window.__pg.alerts())),
+  );
+  await closeMask();
+  ck(true, 'Escape закрывает редактор после срока');
+  await page.evaluate(() => {
+    window.__pgUploadHold = false;
+    window.__pgUploadOut.shift()(); // the given-up upload answers now: 6001
+  });
+  await settle(150);
+  await openMask();
+  await editorGenerate().click();
+  await page.waitForFunction(() => window.__pgCalls.some((c) => c.method === 'StartDesignRun'));
+  const [s] = await starts();
+  ck(
+    (await starts()).length === 1 &&
+      (await uploads()) === 2 &&
+      s.params.inpaint?.maskMediaId === 6002,
+    'поздний ответ брошенной загрузки не стал маской: повтор грузит заново и шлёт 6002',
+    JSON.stringify({ starts: (await starts()).length, mask: s.params.inpaint?.maskMediaId }),
+  );
+  await answer('lost');
+  await settle(150);
+  await closeMask();
+} catch (e) {
+  ck(false, 'O10 оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+await page.evaluate(() => {
+  window.__pgMaskDeadlineMs = undefined;
+  window.__pgUploadHold = false;
+});
+
+// 11 · r2 MINOR: the door refuses the mask itself — the next press uploads it anew
+try {
+  await openAndPaint(MASK_BAND());
+  await editorGenerate().click();
+  await page.waitForFunction(() => window.__pgCalls.some((c) => c.method === 'StartDesignRun'));
+  await page.evaluate(() => {
+    const out = window.__pgOut.shift();
+    out.rej(
+      Object.assign(new Error('the mask 6001 cannot be used: it is not a readable PNG'), {
+        status: 400,
+        details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'mask_invalid' }],
+      }),
+    );
+  });
+  await settle(200);
+  await editorGenerate().click();
+  await page.waitForFunction(
+    () => window.__pgCalls.filter((c) => c.method === 'StartDesignRun').length === 2,
+  );
+  const [first, second] = await starts();
+  ck(
+    (await uploads()) === 2 &&
+      first.params.inpaint?.maskMediaId === 6001 &&
+      second.params.inpaint?.maskMediaId === 6002,
+    'отказ mask_invalid: следующее нажатие грузит маску заново (6001 → 6002)',
+    `${first.params.inpaint?.maskMediaId} → ${second.params.inpaint?.maskMediaId} (${await uploads()})`,
+  );
+  await answer('lost');
+  await settle(150);
+  await closeMask();
+} catch (e) {
+  ck(false, 'O11 оборвалась', String(e?.message ?? e).split('\n')[0]);
 }
 
 ck(errors.length === 0, 'страница без ошибок', errors.join(' | '));

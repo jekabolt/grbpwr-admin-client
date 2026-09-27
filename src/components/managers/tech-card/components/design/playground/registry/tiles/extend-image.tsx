@@ -8,8 +8,11 @@ import {
   formatSection,
   imagesOf,
   mediaIdsOf,
+  overCompositeCap,
   pictureLines,
   runKindOffered,
+  SOURCE_TOO_LARGE,
+  workflowOffered,
 } from '../common';
 import { matchesWorkflow } from '../run-workflow';
 import {
@@ -117,7 +120,7 @@ const NOT_SENT: readonly NotSentItem[] = [
 /**
  * EVERY REFUSAL THE SCREEN CAN MAKE FOR FREE, in the door's order: the picture
  * (`one_source_picture`), the ratio (`extend_aspect_unknown`), then — only where the media row states
- * its size — the source's size (`source_too_small`) and a target that adds nothing
+ * its size — the source's size (`source_too_large` over 18 MP, `source_too_small`) and a target that adds nothing
  * (`target_aspect_must_extend`). `null` = ready.
  */
 export function extendRefusal(draft: Draft, band: GetDesignBandResponse): Refusal | null {
@@ -127,6 +130,7 @@ export function extendRefusal(draft: Draft, band: GetDesignBandResponse): Refusa
   if (!(EXTEND_FORMAT_RATIOS as readonly string[]).includes(ratio))
     return { reason: 'pick the new final format', section: formatSectionKey };
   const { w, h } = sizeOf(picture(draft));
+  if (overCompositeCap(w, h)) return { reason: SOURCE_TOO_LARGE, section: IMAGE };
   if (w > 0 && h > 0 && (w < EXTEND_MIN_SOURCE_PX || h < EXTEND_MIN_SOURCE_PX)) {
     return {
       reason: `this picture is ${w}×${h} px; an extend needs at least ${EXTEND_MIN_SOURCE_PX} px on each side`,
@@ -236,6 +240,11 @@ const run: WorkflowRun = {
 };
 
 export const EXTEND_IMAGE: Pick<WorkflowDef, 'gate' | 'run'> = {
-  gate: (band) => runKindOffered(band, 'extend'),
+  // The route (band 32) first — its reason is the one said — then the tile list (band 28), as the
+  // other phase-3 tile does (G-03 Fable n-1): the server lists `extend_image` iff it takes `extend`.
+  gate: (band) => {
+    const route = runKindOffered(band, 'extend');
+    return route.available ? workflowOffered(band, 'extend_image') : route;
+  },
   run,
 };

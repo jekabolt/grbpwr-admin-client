@@ -14,6 +14,7 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 
 import { GenerateRow, LockBar, RunRefusal } from '../../render/generate-row';
+import { requestFingerprint } from '../../render/run-ledger';
 import { useStartDesignRun } from '../../render/use-design-run';
 import { useDesignBand } from '../../use-design-band';
 import { playgroundRunScope } from '../address';
@@ -38,8 +39,23 @@ import {
   type MaskPoint,
   type MaskStroke,
 } from './geometry';
-import { forgetMaskDraft, readMaskDraft, writeMaskDraft } from './mask-draft';
-import { MaskNotDrawn, maskUploaderFor } from './mask-upload';
+import {
+  forgetMaskDraft,
+  maskDraftAt,
+  paintSignature,
+  readMaskDraft,
+  recordPress,
+  writeMaskDraft,
+} from './mask-draft';
+import {
+  MASK_UPLOAD_DEADLINE_MS,
+  MaskNotDrawn,
+  MaskUploadStalled,
+  maskKey,
+  maskRefused,
+  maskUploaderFor,
+} from './mask-upload';
+import { orientationOf, type PictureOrientation } from './orientation';
 
 /**
  * ═══ MASK — PAINT A ZONE OF A PICTURE, SAY WHAT GOES THERE, GENERATE (C-11, tile 10) ══════════════
@@ -73,7 +89,16 @@ import { MaskNotDrawn, maskUploaderFor } from './mask-upload';
  * same paint back and its press repeats the same request and so the same key. The mask's uploader is
  * the card's, not this dialog's (`maskUploaderFor`). While the mask is going up the dialog does not
  * close (✕ off, Escape and a click outside ignored): the upload is one short wait, and a close in the
- * middle of it used to throw the paint away (G-03 m-3).
+ * middle of it used to throw the paint away (G-03 m-3). The wait has an end (Codex r2 MAJOR): after
+ * `MASK_UPLOAD_DEADLINE_MS` the upload is given up, nothing is started, and the editor closes again —
+ * the paint is already kept, so a close loses nothing.
+ *
+ * ⚠ A LATE ANSWER CLOSES ONLY ITS OWN PAINT (Codex r2 BLOCKER). A press remembers the draft's address
+ * (operator, card, picture — taken at the press) and what it sent; its acceptance forgets the draft
+ * only while it still holds that paint and that request (`forgetMaskDraft`), and closes the editor
+ * only if this very editor is open and was holding it. An old press answering while a newer paint is
+ * on screen leaves both the paint and the editor alone. And no paid press goes out unless its paint
+ * and mask id reached `sessionStorage` (`recordPress`): a reload must find them.
  *
  * ⚠ THE KEYBOARD PAINTS TOO (G-03 Codex MAJOR). The picture is a focusable brush: arrows move a ring
  * (one brush radius a press, four with Shift), Space puts the brush down and lifts it (the stroke
@@ -93,6 +118,13 @@ const SIZE_OPTIONS: readonly { value: BrushSize; label: string }[] = [
   { value: 'm', label: 'M' },
   { value: 'l', label: 'L' },
 ];
+
+/** Said when the paint could not be saved: the press is refused before it costs anything. */
+const NOT_SAVED =
+  'nothing was started: this browser could not save the paint (storage full or blocked); free some storage, then generate again';
+
+/** A painted point, rounded to 1/10 000 of the picture — sub-pixel, and a smaller kept paint. */
+const snap = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 10_000) / 10_000;
 
 /** The picture's rendered box inside the stage (object-fit: contain, done by hand). */
 type Box = { left: number; top: number; width: number; height: number };
@@ -132,7 +164,7 @@ export function MaskEditor({
   const { showMessage } = useSnackBarStore();
   const mediaId = media.id ?? 0;
   /* The paint kept from an earlier press on this picture (Codex BLOCKER), read once per mount. */
-  const [kept] = useState(() => readMaskDraft(techCardId, mediaId));
+  const [kept] = useState(() => readMaskDraft(maskDraftAt(techCardId, mediaId)));
   const [strokes, setStrokes] = useState<MaskStroke[]>(() => kept?.strokes ?? []);
   const [brush, setBrush] = useState<BrushSize>('m');
   const [words, setWords] = useState(() => (kept ? kept.words : initialWords));
@@ -164,8 +196,24 @@ export function MaskEditor({
      accepts a run from them (`onAccepted` below forgets it). */
   const keep = useRef(!!kept);
   useEffect(() => {
-    if (keep.current) writeMaskDraft(techCardId, mediaId, { strokes, words });
+    if (keep.current) writeMaskDraft(maskDraftAt(techCardId, mediaId), { strokes, words });
   }, [techCardId, mediaId, strokes, words]);
+
+  /* THE SHOWN FILE'S EXIF ORIENTATION (Codex r2 MAJOR): read from its bytes before any press; a
+     picture whose tag moves its pixels — or whose file cannot be read — is refused for free. */
+  const src = mediaSrc(media);
+  const [orientation, setOrientation] = useState<PictureOrientation>('reading');
+  useEffect(() => {
+    let live = true;
+    setOrientation('reading');
+    orientationOf(src).then(
+      (o) => live && setOrientation(o),
+      () => live && setOrientation('unknown'),
+    );
+    return () => {
+      live = false;
+    };
+  }, [src]);
 
   /* THE KEYBOARD BRUSH (Codex MAJOR): where the ring stands, whether the brush is down, whether the
      picture has keyboard focus (the ring and the key line show only then), and the one status line a
@@ -185,7 +233,7 @@ export function MaskEditor({
     painted: strokes.length > 0,
     words,
     route,
-    shownAspect: aspect || undefined,
+    orientation,
   };
   const refusal = retouchRefusal(input);
   const request = retouchRequest(input);
@@ -231,10 +279,7 @@ export function MaskEditor({
 
   const at = (e: React.PointerEvent<HTMLCanvasElement>): MaskPoint => {
     const r = e.currentTarget.getBoundingClientRect();
-    return {
-      x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
-      y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
-    };
+    return { x: snap((e.clientX - r.left) / r.width), y: snap((e.clientY - r.top) / r.height) };
   };
   const frozen = disabled || run.isPending || uploading;
 
@@ -306,10 +351,7 @@ export function MaskEditor({
     if (frozen) return;
     if (arrow) {
       const { dx, dy } = stepOf(e.shiftKey);
-      const next = {
-        x: Math.min(1, Math.max(0, cursor.x + arrow[0] * dx)),
-        y: Math.min(1, Math.max(0, cursor.y + arrow[1] * dy)),
-      };
+      const next = { x: snap(cursor.x + arrow[0] * dx), y: snap(cursor.y + arrow[1] * dy) };
       setCursor(next);
       const stroke = live.current;
       if (stroke) {
@@ -344,21 +386,25 @@ export function MaskEditor({
   const generate = async () => {
     if (refusal || frozen) return;
     const said = words;
+    // THE PRESS'S ADDRESS, TAKEN NOW (Codex r2 BLOCKER): its answer forgets this operator's draft of
+    // this picture, whoever is signed in when it comes.
+    const at = maskDraftAt(techCardId, mediaId);
     // From this press on the paint is kept (Codex BLOCKER): a close and a reopen repeat THIS request.
     keep.current = true;
-    writeMaskDraft(techCardId, mediaId, { strokes, words });
+    if (!writeMaskDraft(at, { strokes, words })) {
+      showMessage(NOT_SAVED, 'error');
+      return;
+    }
     let wire = request;
+    let mask: { key: string; id: number } | undefined;
+    const full = media.media?.fullSize;
+    const width = full?.width ?? 0;
+    const height = full?.height ?? 0;
     if (route === 'mask') {
-      const full = media.media?.fullSize;
       setUploading(true);
       let maskMediaId = 0;
       try {
-        maskMediaId = await uploader.maskFor(
-          media.id ?? 0,
-          strokes,
-          full?.width ?? 0,
-          full?.height ?? 0,
-        );
+        maskMediaId = await uploader.maskFor(mediaId, strokes, width, height);
       } catch (e) {
         if (alive.current) setUploading(false);
         if (e instanceof MaskNotDrawn) {
@@ -370,6 +416,11 @@ export function MaskEditor({
             `nothing was started: ${e.message} — the rectangle path is used now`,
             'error',
           );
+          return;
+        }
+        if (e instanceof MaskUploadStalled) {
+          // Codex r2 MAJOR: the upload is given up; the editor closes again and GENERATE retries.
+          showMessage(`nothing was started: ${e.message}; press GENERATE to try again`, 'error');
           return;
         }
         showMessage(
@@ -386,19 +437,36 @@ export function MaskEditor({
         return;
       }
       setUploading(false);
+      mask = { key: maskKey(mediaId, strokes, width, height), id: maskMediaId };
       wire = retouchRequest({ ...input, maskMediaId });
     }
+    // THE PRESS IS RECORDED BEFORE IT IS PAID FOR (Codex r2 MAJOR): the paint, the mask id this
+    // request names and the request itself — or nothing is sent.
+    const sent = requestFingerprint(wire);
+    if (!recordPress(at, { strokes, words, mask, sent })) {
+      showMessage(NOT_SAVED, 'error');
+      return;
+    }
+    const pressed = { paint: paintSignature(strokes, words), sent };
     run.start(wire, {
       onAccepted: () => {
-        // Accepted: this paint is spent — the next press on the picture is a new run.
-        keep.current = false;
-        forgetMaskDraft(techCardId, mediaId);
+        // Accepted: THIS paint is spent — the next press on the picture is a new run. A newer paint
+        // on the picture is not this one, and stays (compare-and-delete).
+        const spent = forgetMaskDraft(at, pressed);
         rememberRecentText(recentTextKey('retouch_zone', RETOUCH_WORDS_KEY), said);
         /* WHERE IT LANDS, TRULY (G-02 m-2): the answer is a retouch, filed under Retouch a Zone
            (and on the grid) — not under the tile whose picture it started from, where only the
            live run is shown (`results.tsx`, «pinned»). */
         showMessage('retouch started — the new picture lands under Retouch a Zone', 'success');
-        onOpenChange(false);
+        // Close only the editor that sent it, and only while it still shows the paint it sent.
+        if (spent && alive.current) {
+          keep.current = false;
+          onOpenChange(false);
+        }
+      },
+      onRefused: (error) => {
+        // Codex r2 MINOR: the door refused the mask itself — the next press uploads it anew.
+        if (mask && maskRefused(error)) uploader.forget(mediaId, strokes, width, height);
       },
     });
   };
@@ -453,7 +521,9 @@ export function MaskEditor({
               aria-label='close the mask'
               disabled={uploading}
               title={
-                uploading ? 'the mask is uploading; the editor closes once it is up' : undefined
+                uploading
+                  ? `the mask is uploading; you can close the editor once it is up, or after ${MASK_UPLOAD_DEADLINE_MS / 1000} s`
+                  : undefined
               }
               className='flex size-8 shrink-0 items-center justify-center border border-bgColor/40 text-bgColor transition-colors hover:bg-bgColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-bgColor'
             >
@@ -469,7 +539,7 @@ export function MaskEditor({
               data-mask-stage=''
             >
               <img
-                src={mediaSrc(media)}
+                src={src}
                 alt={label}
                 draggable={false}
                 onLoad={(e) => {

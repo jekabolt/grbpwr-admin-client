@@ -59,3 +59,20 @@ export function refusalFromError(error: unknown, clientRequestId: string): RunRe
   const words = (error as Error | null | undefined)?.message?.trim() || 'the run did not start';
   return { words, status: statusOf(error), clientRequestId };
 }
+
+/**
+ * `ErrorInfo.reason` of a google.rpc.Status refusal (`api/api.ts` keeps `details`) — the machine
+ * reason next to the prose, or undefined when the refusal carries none (a gateway's bare 404).
+ */
+export function errorInfoReason(error: unknown): string | undefined {
+  const details = (error as { details?: unknown } | null)?.details;
+  if (!Array.isArray(details)) return undefined;
+  for (const d of details) {
+    if (!d || typeof d !== 'object') continue;
+    const type = (d as { '@type'?: unknown })['@type'];
+    if (typeof type === 'string' && !type.endsWith('ErrorInfo')) continue;
+    const reason = (d as { reason?: unknown }).reason;
+    if (typeof reason === 'string' && reason) return reason;
+  }
+  return undefined;
+}

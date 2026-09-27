@@ -1,6 +1,7 @@
-import { adminService } from 'api/api';
+import { abortableAdminService } from 'api/api';
 import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
 
+import { errorInfoReason } from '../generation/refusal';
 import type { Draft, SectionDef } from './registry/types';
 
 /**
@@ -27,10 +28,9 @@ import type { Draft, SectionDef } from './registry/types';
  * ONE CALL PER QUESTION. The answer is kept in module memory for the page's life, keyed by workflow,
  * field and a fingerprint of what was asked (pictures, context, text). The PROMISE is what is kept,
  * so a second press while the first is out waits for it instead of buying another; a failed promise
- * is dropped, so the next press may ask again. The generated client takes no `AbortSignal`
- * (`src/api/api.ts` builds `fetch` without one), so a menu that closes does not cancel the request —
- * the field ignores the late answer by ticket, and the answer still lands in the cache: it was paid
- * for, and the next press of the same question shows it at once.
+ * is dropped, so the next press may ask again. A menu that closes does not cancel the request — the
+ * field ignores the late answer by ticket, and the answer still lands in the cache: it was paid for,
+ * and the next press of the same question shows it at once.
  *
  * ⚠ THE QUESTION IS WHAT CHANGES THE ANSWER (G-03 Codex MINOR). The context carries the form's
  * VALUES — each filled section with what it holds (a choice, a colour, a text, the pictures by id),
@@ -41,8 +41,10 @@ import type { Draft, SectionDef } from './registry/types';
  * closes it would have left «thinking…» on that question for the page's life. After
  * `IDEAS_DEADLINE_MS` the call counts as failed: the menu shows the static list, the pending entry is
  * dropped (nothing is cached), and for `IDEAS_COOLDOWN_MS` no press asks the server at all, so a
- * stalled connection cannot turn every changed letter into another hung call. A late answer to the
- * given-up call still lands in the cache — it was paid for.
+ * stalled connection cannot turn every changed letter into another hung call. The given-up call is
+ * ABORTED (G-03 Codex r2 MINOR): it goes out through `abortableAdminService`, and the deadline closes
+ * its connection rather than leaving it open for the page's life — each cooldown would otherwise add
+ * one more hung request.
  */
 
 /** The door's limits (admin.proto `SuggestPromptsRequest`): ≤ 2 pictures, ≤ 2000 runes each text. */
@@ -282,20 +284,6 @@ const asked = new Map<string, Promise<string[]>>();
 /** Settled answers, readable without awaiting: a press of a question already answered shows it at once. */
 const answered = new Map<string, string[]>();
 
-/** `ErrorInfo.reason` of a google.rpc.Status refusal (`api/api.ts` keeps `details`). */
-function refusalReason(error: unknown): string | undefined {
-  const details = (error as { details?: unknown } | null)?.details;
-  if (!Array.isArray(details)) return undefined;
-  for (const d of details) {
-    if (!d || typeof d !== 'object') continue;
-    const type = (d as { '@type'?: unknown })['@type'];
-    if (typeof type === 'string' && !type.endsWith('ErrorInfo')) continue;
-    const reason = (d as { reason?: unknown }).reason;
-    if (typeof reason === 'string' && reason) return reason;
-  }
-  return undefined;
-}
-
 /**
  * The refusal says this server cannot answer at all — asking again would only pay for it again.
  * A 404 counts only BARE (G-03 m-5): the gateway's «no such route» carries no ErrorInfo, while the
@@ -304,7 +292,7 @@ function refusalReason(error: unknown): string | undefined {
  */
 function cannotAnswer(error: unknown): boolean {
   const status = (error as { status?: number } | null)?.status;
-  const reason = refusalReason(error);
+  const reason = errorInfoReason(error);
   return (
     (status === 404 && reason === undefined) || status === 501 || reason === 'AI_NOT_CONFIGURED'
   );
@@ -338,7 +326,8 @@ export function fetchServerIdeas(req: SuggestRequest): Promise<string[]> {
   const out = asked.get(key);
   if (out) return out;
   if (Date.now() < quietUntil) return Promise.reject(new IdeasGivenUp());
-  const answer = adminService
+  const abort = new AbortController();
+  const answer = abortableAdminService(abort.signal)
     .SuggestPrompts({
       techCardId: req.techCardId,
       workflow: req.workflow,
@@ -367,10 +356,11 @@ export function fetchServerIdeas(req: SuggestRequest): Promise<string[]> {
         if (asked.get(key) === call) asked.delete(key);
         quietUntil = Date.now() + IDEAS_COOLDOWN_MS;
         reject(new IdeasGivenUp());
+        abort.abort();
       }, deadlineMs());
     }),
   ]).finally(() => clearTimeout(timer));
-  // The given-up call's own failure (if it ever fails) has nobody left to hear it.
+  // The given-up call's own failure (its abort) has nobody left to hear it.
   answer.catch(() => undefined);
   asked.set(key, call);
   return call;
