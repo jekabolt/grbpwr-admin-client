@@ -4,7 +4,6 @@ import {
   common_TechCardButtonholeOrientation,
   common_TechCardButtonholeStyle,
   common_TechCardMachineType,
-  common_TechCardOperation,
   common_TechCardOperationType,
 } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -21,9 +20,8 @@ import { Combobox, type ComboboxGroup } from 'ui/components/combobox';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
-import { Row, RowTotal } from 'ui/components/row';
+import { RowTotal } from 'ui/components/row';
 import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
 import Input from 'ui/components/input';
 import Select from 'ui/components/select';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
@@ -35,7 +33,7 @@ import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
-import { fieldErrorSummary, revealField } from 'utils/field-errors';
+import { revealField } from 'utils/field-errors';
 import {
   // ВИДЫ ОПЕРАЦИЙ (0324): подписи пятнадцати новых словарей берутся ТАМ ЖЕ, где их берёт печатный
   // лист. Второй набор слов здесь означал бы, что экран и бумага могут разойтись в названии одного
@@ -74,7 +72,6 @@ import {
   trimActionLabel,
   wetProcessKindLabel,
   zipperApplicationLabel,
-  canonicalReinforcement,
   effectiveMachineSettings,
   effectivePressSettings,
   operationHeading,
@@ -116,7 +113,6 @@ import {
   workDefaultsForForm,
   workNaming,
   type StepDefaultFill,
-  type WorkCatalog,
   type WorkItem,
 } from './operation-work';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
@@ -737,116 +733,6 @@ type EquipmentDefaultsForm = NonNullable<TechCardFormData['construction']['equip
 type MachineProfileRow = NonNullable<EquipmentDefaultsForm['machines']>[number];
 type PressProfileRow = NonNullable<EquipmentDefaultsForm['presses']>[number];
 
-// #66: AI generation is unavailable when the backend has no OPENROUTER_API_KEY configured — the
-// RPC reports this as FailedPrecondition (grpc-gateway → HTTP 412, same convention as
-// useSamples.ts / useProductionRuns.ts). Shown verbatim so a technologist knows this is an admin
-// setup gap, not something wrong with their description.
-const AI_NOT_CONFIGURED_MESSAGE =
-  "AI generation isn't configured yet — ask an admin to set OPENROUTER_API_KEY";
-
-// Maps one AI-drafted operation (GenerateTechCardOperations, #66) into this field array's row
-// shape — the same fields the manual «+ операция» row starts from (emptyOperation). Only stages
-// the row into the form; operationNumber stays positional (recomputed on save like every other
-// row, never trusted from the model) and nothing here is persisted until the technologist accepts
-// the draft and saves the card through the normal flow.
-function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationFormValue {
-  return {
-    operationNumber: 0,
-    operationType: o.operationType || NONE_OP_TYPE,
-    // Работа едет и в черновике — тем же сырым токеном. Генератор её сегодня не заполняет вовсе;
-    // ключ стоит здесь заранее по тому же доводу, что и узловые входы ниже: научившийся работам
-    // генератор иначе молча ронял бы её, а RHF не зарегистрировал бы поля вовсе.
-    work: (o.work ?? '').trim(),
-    zone: o.zone || NONE_ZONE,
-    bomLineKeys: (o.bomLineKeys ?? []).filter(Boolean),
-    // TODO(T-26): генератор узлов пока не существует — aiOperationToPb на бэке не заполняет ни
-    // 21, ни 46, так что черновик приходит вовсе без привязок. Фолбэк написан заранее: без него
-    // научившийся узлам генератор молча выбрасывал бы узловые входы, и tsc это не поймал бы.
-    inputKeys: (o.inputKeys?.length ? o.inputKeys : (o.pieceLineKeys ?? [])).filter(Boolean),
-    outputUnitKey: o.outputUnitKey ?? '',
-    outputUnitName: o.outputUnitName ?? '',
-    calloutNumber: o.calloutNumber || 0,
-    smv: decimalToInput(o.smv),
-    seamClass: o.seamClass || NONE_SEAM_CLASS,
-    stitchesPerCm: decimalToInput(o.stitchesPerCm),
-    seamAllowanceMm: decimalToInput(o.seamAllowanceMm),
-    topstitchMode: o.topstitch?.mode || NONE_TOPSTITCH,
-    topstitchWidthMm: decimalToInput(o.topstitch?.widthMm),
-    topstitchRows: o.topstitch?.rows || 0,
-    attachmentKind: o.attachmentKind || NONE_ATTACHMENT,
-    attachmentSizeMm: decimalToInput(o.attachmentSizeMm),
-    // The equipment blocks ride the draft too. The model is asked for a machine on every machine
-    // step and for the ВТО mode on every press step (the prompt carries both vocabularies), so
-    // dropping them here would quietly hand the technologist a list of steps that all fail the
-    // «pick the machine» check — the one field the draft was best placed to answer.
-    machineType: o.machineType || NONE_MACHINE,
-    machineProfileKey: o.machineProfileKey ?? '',
-    threadCount: o.threadCount || 0,
-    needleType: o.needleType || NONE_NEEDLE,
-    needleSizeNm: o.needleSizeNm || 0,
-    threadTension: o.threadTension || NONE_TENSION,
-    threadTensionNote: o.threadTensionNote?.trim() || '',
-    stitchWidthMm: decimalToInput(o.stitchWidthMm),
-    pressEquipment: o.pressEquipment || NONE_PRESS_EQUIPMENT,
-    pressProfileKey: o.pressProfileKey ?? '',
-    pressTemperatureC: o.pressTemperatureC || 0,
-    pressDwellSec: o.pressDwellSec || 0,
-    pressPressureNCm2: decimalToInput(o.pressPressureNCm2),
-    // Verbatim, undefined included — see emptyOperation.
-    pressSteam: o.pressSteam,
-    pressCloth: o.pressCloth || NONE_PRESS_CLOTH,
-    // ВИДЫ ОПЕРАЦИЙ (0324): ВТОРОЙ КОНСТРУКТОР СТРОКИ ШАГА, И ОН РАСХОДИТСЯ С ПЕРВЫМ МОЛЧА. Ключ,
-    // забытый здесь, у AI-черновика просто отсутствует — RHF его не регистрирует, поле пустует, и
-    // ничто в типах об этом не скажет (возвращаемый тип — строка формы, а у неё все новые ключи
-    // необязательны на входе).
-    //
-    // ЧИТАЕТСЯ ЧЕРЕЗ `?.`, как и в techCardToForm: незаполненное блок-сообщение приходит с провода
-    // ЯВНЫМ `null` (EmitUnpopulated), а не отсутствующим ключом, поэтому `o.stitching.needleCount`
-    // упал бы на первом же шаге без строчки. Модель сегодня не заполняет ни одного из этих блоков
-    // (aiOperationToPb их не строит) — фолбэки написаны заранее, ровно как у узловых входов выше:
-    // научившийся им генератор иначе молча ронял бы половину шага.
-    needleCount: o.stitching?.needleCount || 0,
-    needleGaugeMm: decimalToInput(o.stitching?.needleGaugeMm),
-    seamSecuring: o.stitching?.seamSecuring || NONE_SEAM_SECURING,
-    rowSpacingMm: decimalToInput(o.stitching?.rowSpacingMm),
-    fullnessRatio: decimalToInput(o.stitching?.fullnessRatio),
-    // Имя поля на проводе — `placementLayout`: «placement» занято reserved-именем легаси-поля
-    // свободного текста, снять его нельзя (на JSON-ключах легаси держится разбор архивных
-    // релизных снапшотов). Колонки при этом остались placement_count / pitch_mm.
-    placementCount: o.placementLayout?.count || 0,
-    pitchMm: decimalToInput(o.placementLayout?.pitchMm),
-    attachMethod: o.hardware?.attachMethod || NONE_ATTACH_METHOD,
-    holePrep: o.hardware?.holePrep || NONE_HOLE_PREP,
-    // 0328 — ПЕРЕНОС: `fusible_patch` и `fabric_stay` читаются как `patch`, иначе редактор
-    // показал бы «— not stated —» там, где ответ есть, и стёр бы его первым же сохранением.
-    reinforcement: canonicalReinforcement(o.hardware?.reinforcement) || NONE_REINFORCEMENT,
-    foldbackMm: decimalToInput(o.hardware?.foldbackMm),
-    cycleStitchCount: o.hardware?.cycleStitchCount || 0,
-    printMethod: o.printMethod || NONE_PRINT_METHOD,
-    peelMode: o.print?.peelMode || NONE_PEEL_MODE,
-    secondPressSec: o.print?.secondPressSec || 0,
-    airTemperatureC: o.weld?.airTemperatureC || 0,
-    feedSpeedMMin: decimalToInput(o.weld?.feedSpeedMMin),
-    trimAction: o.trim?.action || NONE_TRIM_ACTION,
-    residualAllowanceMm: decimalToInput(o.trim?.residualAllowanceMm),
-    residualTailMaxMm: decimalToInput(o.threadTrim?.residualTailMaxMm),
-    pressAction: o.press?.action || NONE_PRESS_ACTION,
-    pressToward: o.press?.toward || NONE_PRESS_TOWARD,
-    cleaningKind: o.clean?.kind || NONE_CLEANING_KIND,
-    coverageMode: o.inspect?.coverageMode || NONE_COVERAGE_MODE,
-    wetProcessKind: o.wetProcessKind || NONE_WET_PROCESS,
-    buttonholeStyle: o.fastening?.buttonholeStyle || NONE_BUTTONHOLE_STYLE,
-    cutLengthMm: decimalToInput(o.fastening?.cutLengthMm),
-    buttonholeOrientation: o.fastening?.buttonholeOrientation || NONE_BUTTONHOLE_ORIENTATION,
-    bartackLengthMm: decimalToInput(o.fastening?.bartackLengthMm),
-    attachPattern: o.fastening?.attachPattern || NONE_ATTACH_PATTERN,
-    zipperApplication: o.fastening?.zipperApplication || NONE_ZIPPER_APPLICATION,
-    bindingStyle: o.stitching?.bindingStyle || NONE_BINDING_STYLE,
-    labelAttachStitch: o.stitching?.labelAttachStitch || NONE_LABEL_ATTACH,
-    note: o.note?.trim() || '',
-  };
-}
-
 type PickerOption = { value: number; label: string };
 // materialId is the SLOT DEFAULT article. It is read from the form (not from the card read) so an
 // article picked on the BOM tab and not yet saved still resolves here.
@@ -923,7 +809,7 @@ function readPieceDrag(dt: DataTransfer): string {
 // ── derived-state leaves ─────────────────────────────────────────────────────────────────────
 // Both of these watch the WHOLE operations array, which changes on every keystroke anywhere in the
 // section. They render nothing (or one line), so the re-render stops at them instead of running
-// through the rail and the editor — the same discipline readReplaceImpact uses.
+// through the rail and the editor.
 
 // PlacementSync lived here and is gone with the column it fed. It derived `placement` from the
 // linked piece names and WROTE IT INTO THE ROW — a computed value stored as a fact, hashed into a
@@ -1965,8 +1851,8 @@ function ClearAssemblyButton({
         onConfirm={clear}
         title='clear the unit markup?'
         confirmLabel='clear'
-        // Тот же щит, что у соседа выше и у модалки генератора: правило «после портала фокус
-        // возвращается экрану» едет с модалкой, а no-op вне фулскрина обеспечивает сам возврат.
+        // Тот же щит, что у соседа выше: правило «после портала фокус возвращается экрану» едет
+        // с модалкой, а no-op вне фулскрина обеспечивает сам возврат.
         onCloseAutoFocus={restoreScreenFocus}
       >
         <Text size='micro'>
@@ -5337,8 +5223,8 @@ function OperationEditor({
               inside them: the chip is the ROLE (the durable thing the step links), and folding a
               per-colourway article into it would claim the operation itself is colourway-specific. */}
           {slotArticles.map((slot, i) => (
-            // Indexed key: toggleBom dedupes, but the AI-accept path and the save mapper do not, so
-            // a persisted duplicate line key would otherwise collide here.
+            // Indexed key: toggleBom dedupes, but the save mapper does not, so a persisted duplicate
+            // line key would otherwise collide here.
             <Text key={`${slot.lineKey}:${i}`} size='micro' variant='label' className='mt-1'>
               {slot.name} →{' '}
               {!slot.usedAnywhere
@@ -5701,296 +5587,6 @@ function OperationEditor({
   );
 }
 
-type ReplaceImpact = {
-  operations: number;
-  sam: number;
-  pieceLinks: number;
-  units: number;
-  photos: number;
-  equipment: number;
-};
-
-// #66: draft assembly operations from a plain-language description — «мы описываем все операции
-// словами (у нас есть знания о деталях/BOM), через OpenRouter генерируем структурированные
-// операции, технолог проверит». Collapsed by default: an optional accelerant next to the manual
-// «+ операция» flow, not a replacement for it. Never persists on its own — a successful generation
-// only stages a DRAFT for review; the technologist explicitly appends or replaces it into the
-// real (editable) operations list below, then saves through the normal tech-card save.
-//
-// «заменить весь список» now states its price before it is paid: the pick kept this panel, it did
-// not ask to keep it dangerous.
-function GenerateOperationsPanel({
-  techCardId,
-  hasExistingOperations,
-  readReplaceImpact,
-  onAccept,
-  frozen = false,
-  workCatalog,
-}: {
-  techCardId?: number;
-  hasExistingOperations: boolean;
-  /**
-   * Каталог работ — ПРОПОМ, а не своим хуком: предпросмотр обязан называть шаг ровно тем же
-   * словом, каким назовёт его список после вставки, и брать это слово из того же каталога.
-   * Сегодня генератор поля `work` не заполняет, и все строки черновика идут выведенным именем;
-   * начнёт заполнять — предпросмотр не соврёт задним числом.
-   *
-   * Обязателен тем же приёмом, что аргументы композитора: «предпросмотр без каталога» — решение
-   * вызывателя, написанное `undefined` вслух, а не забытый проп.
-   */
-  workCatalog: WorkCatalog | undefined;
-  // Counted at the moment the button is pressed rather than watched continuously — this panel does
-  // not need to re-render on every keystroke in the 14 operations above it.
-  readReplaceImpact: () => ReplaceImpact;
-  onAccept: (operations: common_TechCardOperation[], mode: 'append' | 'replace') => void;
-  /** Карточка выпущена: свои кнопки глушит внешний fieldset, но модалка replace — портал. */
-  frozen?: boolean;
-}) {
-  const [description, setDescription] = useState('');
-  const [generating, setGenerating] = useState(false);
-  const [error, setError] = useState('');
-  const [impact, setImpact] = useState<ReplaceImpact | null>(null);
-  const [draft, setDraft] = useState<{
-    operations: common_TechCardOperation[];
-    model?: string;
-    notes?: string;
-  } | null>(null);
-
-  // Карточку выпустили, пока модалка «replace the whole list» открыта, — модалка обязана закрыться
-  // сама: она живёт ПОРТАЛОМ в body, куда внешний `<fieldset disabled>` не достаёт (тот же приём,
-  // что у кнопок «снять фотографии шагов» и «снять разметку узлов»). Гейт стоит и в самом
-  // мутаторе `acceptGeneratedOperations`.
-  useEffect(() => {
-    if (frozen) setImpact(null);
-  }, [frozen]);
-
-  const generate = async () => {
-    if (!techCardId || !description.trim() || generating) return;
-    setGenerating(true);
-    setError('');
-    setDraft(null);
-    try {
-      const res = await adminService.GenerateTechCardOperations({
-        techCardId,
-        description: description.trim(),
-      });
-      const operations = res.operations ?? [];
-      if (operations.length === 0) {
-        setError('the AI returned no operations — refine the description and try again');
-      } else {
-        setDraft({ operations, model: res.model, notes: res.notes });
-      }
-    } catch (e) {
-      const status = (e as { status?: number } | undefined)?.status;
-      setError(
-        status === 412
-          ? AI_NOT_CONFIGURED_MESSAGE
-          : fieldErrorSummary(e, "couldn't generate the operations"),
-      );
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  const accept = (mode: 'append' | 'replace') => {
-    if (!draft) return;
-    onAccept(draft.operations, mode);
-    setDraft(null);
-    setDescription('');
-  };
-
-  return (
-    <>
-      <Accordion
-        title={
-          <Text size='control' variant='uppercase' tracking='label' component='span'>
-            generate operations from description (ai)
-          </Text>
-        }
-        meta={
-          draft ? (
-            <Pill tone='attention'>{`draft: ${draft.operations.length}`}</Pill>
-          ) : (
-            <Text size='micro' variant='label' component='span'>
-              draft
-            </Text>
-          )
-        }
-      >
-        <div className='space-y-2'>
-          <Text size='micro' variant='label'>
-            describe the construction in your own words — units, pieces, materials, the order of
-            assembly. the AI proposes structured operations from that description and the card's
-            data (pieces, BOM) — this is a DRAFT, and the technologist must check it before saving.
-          </Text>
-
-          {!techCardId ? (
-            <Text size='micro' variant='label'>
-              save the tech card first — generation uses the already saved pieces and BOM as context
-            </Text>
-          ) : (
-            <>
-              <Textarea
-                name='ai-operations-description'
-                variant='secondary'
-                placeholder='e.g.: set the sleeve into an open armhole, overlock the side seams with 4 threads, turn the hem up 2 cm and edge-stitch it…'
-                className='mb-0 min-h-24 border border-borderColor'
-                maxLength={4000}
-                value={description}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                  setDescription(e.target.value)
-                }
-                disabled={generating}
-              />
-              <Button
-                type='button'
-                variant='main'
-                size='sm'
-                loading={generating}
-                disabled={generating || !description.trim()}
-                onClick={generate}
-              >
-                generate operations
-              </Button>
-            </>
-          )}
-
-          {error && (
-            <Text size='micro' variant='error'>
-              {error}
-            </Text>
-          )}
-
-          {draft && (
-            <div className='space-y-1.5 border-t border-hairline pt-2'>
-              <GroupLabel
-                action={
-                  <Text size='micro' variant='label' component='span'>
-                    operations: {draft.operations.length}
-                    {draft.model ? ` · ${draft.model}` : ''}
-                  </Text>
-                }
-              >
-                ai draft — review before saving
-              </GroupLabel>
-              {draft.notes?.trim() && (
-                <Text size='micro' variant='label'>
-                  {draft.notes.trim()}
-                </Text>
-              )}
-              <div className='max-h-64 overflow-y-auto'>
-                {draft.operations.map((o, i) => (
-                  <Row
-                    key={i}
-                    label={
-                      <span>
-                        <span className='text-labelColor tabular-nums'>{(i + 1) * 10}.</span>{' '}
-                        {operationHeading({
-                          operationType: o.operationType,
-                          // The draft's own machine, so the preview reads «overlock · side seams»
-                          // rather than fourteen lines of «machine».
-                          machineType: o.machineType,
-                          // ...и класс шва: у отстрочки якорь вида там, и предпросмотр обязан
-                          // называть шаг тем же словом, каким назовёт его список после вставки.
-                          seamClass: o.seamClass,
-                          // ...и работа, если черновик её несёт: тем же счётом, что рельс (R8).
-                          work: o.work,
-                          workCatalog,
-                          zone: o.zone,
-                          pieceNames: [],
-                          note: o.note,
-                        })}
-                      </span>
-                    }
-                    value={o.smv?.value ? `${o.smv.value} min` : '—'}
-                  />
-                ))}
-              </div>
-              <div className='flex flex-wrap gap-1.5'>
-                {hasExistingOperations && (
-                  <Button type='button' variant='main' size='sm' onClick={() => accept('append')}>
-                    append to the list
-                  </Button>
-                )}
-                <Button
-                  type='button'
-                  variant={hasExistingOperations ? 'secondary' : 'main'}
-                  size='sm'
-                  onClick={() =>
-                    hasExistingOperations ? setImpact(readReplaceImpact()) : accept('append')
-                  }
-                >
-                  {hasExistingOperations ? 'replace the whole list' : 'accept into the list'}
-                </Button>
-                <Button type='button' variant='secondary' size='sm' onClick={() => setDraft(null)}>
-                  discard the draft
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-      </Accordion>
-
-      <ConfirmationModal
-        open={impact != null}
-        onOpenChange={(next) => !next && setImpact(null)}
-        title='replace the whole list of operations'
-        width='sm'
-        confirmLabel='replace'
-        cancelLabel='cancel'
-        onConfirm={() => accept('replace')}
-        // ЩИТ ТОТ ЖЕ, ЧТО У ОСТАЛЬНЫХ МОДАЛОК ТЕХ-КАРТЫ, и сегодня он не срабатывает ни разу:
-        // генератор живёт только в инлайне, а из-под открытого фулскрина до него не дотянуться —
-        // оверлей гасит указатель и держит фокус. `restoreScreenFocus` это видит (экрана в DOM нет)
-        // и не делает ничего. Оставлено сознательно: панель уже переезжала между видами, и правило
-        // «после портала фокус возвращается экрану» должно ехать вместе с ней.
-        onCloseAutoFocus={restoreScreenFocus}
-      >
-        <div className='space-y-1.5'>
-          <CalloutBox tone='error'>
-            <Text size='micro'>
-              <b>{impact?.operations ?? 0}</b> operations will be deleted: the SAM on{' '}
-              <b>{impact?.sam ?? 0}</b> of them and the piece links on <b>{impact?.pieceLinks ?? 0}</b>
-              . defect references to operation numbers will be reset too.
-            </Text>
-          </CalloutBox>
-          {(impact?.units ?? 0) > 0 && (
-            <CalloutBox tone='error'>
-              <Text size='micro'>
-                and <b>{impact?.units}</b> assembly units: the draft does not carry them, so the
-                markup disappears entirely. the server refuses such a write — the markup has to be
-                cleared with the “clear the unit markup” button, not by replacing the list.
-              </Text>
-            </CalloutBox>
-          )}
-          {(impact?.photos ?? 0) > 0 && (
-            <CalloutBox tone='error'>
-              <Text size='micro'>
-                and <b>{impact?.photos}</b> step photos along with every callout on them:
-                measurements, captions, spans. the server refuses with a shield, and the only way out
-                of that refusal is to agree to erase the photos for good.
-              </Text>
-            </CalloutBox>
-          )}
-          {(impact?.equipment ?? 0) > 0 && (
-            <CalloutBox tone='error'>
-              <Text size='micro'>
-                and the machines and pressing modes on <b>{impact?.equipment}</b> steps. there is no
-                shield here: the write goes through silently, and there will be nowhere to learn
-                about the loss — the floor will simply start sewing with a different needle on a
-                different machine.
-              </Text>
-            </CalloutBox>
-          )}
-          <Text size='micro' variant='label'>
-            instead you can “append to the list” — the draft lands after the existing operations.
-          </Text>
-        </div>
-      </ConfirmationModal>
-    </>
-  );
-}
-
 // Per-node sewing operations (Sheet «Обработка», lower block). Operations are an ordered
 // assembly sequence (№ 10, 20, 30…); the backend returns them sorted by number.
 //
@@ -6070,20 +5666,20 @@ export function OperationsField({
   sketchNote?: ReactNode;
 } = {}) {
   const { control, getValues, setValue, watch } = useFormContext<TechCardFormData>();
-  const { fields, append, remove, replace, insert, move } = useFieldArray({
+  const { fields, append, remove, insert, move } = useFieldArray({
     control,
     name: 'operations',
   });
-  // #66: the AI-generation RPC needs the card's numeric id for grounding context (its saved
-  // pieces/BOM/type). This component isn't given one via props — read it off the route instead
-  // (this field only ever renders under /tech-cards/:id or /add-tech-card, same as the `numId`
-  // every sibling section derives in index.tsx). Undefined on an unsaved card — the panel below
-  // shows a "save first" hint instead of the generator in that case.
+  // The card's numeric id, read off the route: this component isn't given one via props (it only
+  // ever renders under /tech-cards/:id or /add-tech-card, same as the `numId` every sibling
+  // section derives in index.tsx). Two readers: the schematic's per-card prefs and the door that
+  // prints the SAVED assembly order. Undefined on an unsaved card — the prefs then live in memory
+  // only, and the print door is not drawn.
   const { id: routeId } = useParams<{ id: string }>();
   const techCardId = routeId ? parseInt(routeId, 10) : undefined;
   const [params, setParams] = useSearchParams();
   // КАТАЛОГ РАБОТ НА ВЕСЬ РЕЛЬС — ОДНОЙ ПОДПИСКОЙ (R8). Имя шага теперь спрашивает работу, а
-  // спрашивают его здесь три места сразу: строка рельса, схема сборки и предпросмотр черновика.
+  // спрашивают его здесь три места сразу: строка рельса, схема сборки и панель ратификации.
   // Ключ у запроса один на приложение, поэтому второго обращения к сети хук не делает; но
   // подписка на строку рельса означала бы сто двадцать шесть подписок на карточке свалки, и
   // каталог обязан приехать сюда, а не в каждую строку.
@@ -6131,17 +5727,6 @@ export function OperationsField({
     },
     [getValues, setValue],
   );
-
-  // Every operation number in the card is about to become meaningless (AI replace). Unlinks
-  // dangling references too, which remapIssues deliberately leaves alone.
-  const clearIssueOperationRefs = useCallback(() => {
-    const issues = getValues('issues') ?? [];
-    issues.forEach((iss, ii) => {
-      if ((iss.operationNumber ?? 0) > 0) {
-        setValue(`issues.${ii}.operationNumber`, 0, { shouldDirty: true });
-      }
-    });
-  }, [getValues, setValue]);
 
   // --- ИСТОРИЯ ЖЕСТОВ ---------------------------------------------------------------------------
   //
@@ -6340,72 +5925,6 @@ export function OperationsField({
     onAdded?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addRequest?.nonce]);
-
-  // Accept an AI-drafted batch (#66) into the real, editable field array — nothing above this
-  // point has touched form state; the technologist still saves via the normal tech-card save.
-  // Append leaves existing rows (and their operation numbers) untouched. Replace swaps the whole
-  // list, so every old operation number an issue[].operationNumber pointed at is now meaningless —
-  // unlink it rather than let it silently point at a DIFFERENT new operation that happens to land
-  // on the same position (same discipline as removeOperation above).
-  const acceptGeneratedOperations = (
-    generated: common_TechCardOperation[],
-    mode: 'append' | 'replace',
-  ) => {
-    // ГЕЙТ ЗАМОРОЗКИ ПЕРВОЙ СТРОКОЙ, как у остальных мутаторов массива. Кнопки панели — настоящие
-    // <button> под внешним fieldset и на выпущенной карточке мертвы, но модалка «replace the whole
-    // list» — ПОРТАЛ: карточку могли выпустить, пока она открыта (та же гонка Release, что у
-    // `appendStep`), и «replace» переписал бы выпущенную карточку целиком. Отказ произносится:
-    // жест начат на живом органе.
-    if (frozen) {
-      showMessage(FROZEN_REFUSAL, 'error');
-      return;
-    }
-    // (5/11) Черновик генератора переписывает список целиком или дописывает пачку: ни то, ни
-    // другое жестовым ⌘Z не отменяется, а адрес записи после `replace` указывает на другой шаг.
-    clearFormHistory();
-    const mapped = generated.map(mapGeneratedOperationToForm);
-    if (mode === 'replace') {
-      clearIssueOperationRefs();
-      replace(mapped);
-      setSelected(0);
-    } else {
-      setSelected(fields.length);
-      append(mapped);
-    }
-  };
-
-  // What «заменить весь список» would destroy, read at press time off form state — watching the
-  // whole operations array here would re-render every row on every keystroke.
-  const readReplaceImpact = (): ReplaceImpact => {
-    const ops = (getValues('operations') ?? []) as OperationFormValue[];
-    return {
-      operations: ops.length,
-      sam: ops.filter((o) => (o.smv ?? '').trim()).length,
-      pieceLinks: ops.filter((o) => (o.inputKeys ?? []).length > 0).length,
-      // СНИМКИ ШАГА С УКАЗАНИЯМИ. Черновик генератора их не несёт (`mapGeneratedOperationToForm`
-      // строит шаг с нуля), поэтому «заменить весь список» уносит каждую фотографию и каждую
-      // выноску на ней. Сервер потом откажет щитом медиа, но к этому моменту работа в форме уже
-      // потеряна, а единственный выход из отказа — согласиться стереть снимки НАВСЕГДА. Цена
-      // обязана читаться ДО нажатия.
-      photos: ops.reduce((n, o) => n + (o.media ?? []).length, 0),
-      // Машинные факты и режимы ВТО. У них щита с бекстопом нет вовсе, так что их пропажу вообще
-      // никто не окликнет: ни отказа, ни сообщения — просто в следующий раз шаг шьётся на другой
-      // машине другой иглой.
-      equipment: ops.filter(
-        (o) =>
-          (o.machineType && o.machineType !== NONE_MACHINE) ||
-          (o.machineProfileKey ?? '').trim() ||
-          (o.pressEquipment && o.pressEquipment !== NONE_PRESS_EQUIPMENT) ||
-          (o.pressProfileKey ?? '').trim(),
-      ).length,
-      // РАЗМЕТКА УЗЛОВ — самый дорогой ручной ввод на карточке, и черновик сносит её целиком
-      // вместе со списком. Сервер откажет бекстопом («запись не несёт узлов против карточки,
-      // которая их несёт»), но узнать об этом на сохранении, уже потеряв работу в форме, —
-      // не то же самое, что прочитать цену до нажатия.
-      units: ops.filter((o) => ((o as { outputUnitKey?: string }).outputUnitKey ?? '').trim())
-        .length,
-    };
-  };
 
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as BomLine[];
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as Array<{
@@ -7533,8 +7052,7 @@ export function OperationsField({
       {fsOpen ? null : fields.length === 0 && effectiveMode !== 'schematic' ? (
         <div className='flex flex-col items-center gap-2 border border-dashed border-borderColor px-3 py-8 text-center'>
           <Text size='micro' variant='label'>
-            the assembly sequence is empty so far. add the first step — or describe the construction
-            in words and generate a draft below.
+            the assembly sequence is empty so far. add the first step.
           </Text>
           <div className='flex items-center gap-2'>
             <Button type='button' variant='main' size='sm' onClick={addOperation}>
@@ -7947,15 +7465,6 @@ export function OperationsField({
         unitOfPlanned={unitOfPlanned}
         pieceOfPlanned={pieceOfPlanned}
         onCloseAutoFocus={restoreScreenFocus}
-      />
-
-      <GenerateOperationsPanel
-        techCardId={techCardId}
-        hasExistingOperations={fields.length > 0}
-        readReplaceImpact={readReplaceImpact}
-        onAccept={acceptGeneratedOperations}
-        frozen={frozen}
-        workCatalog={workCatalog}
       />
     </div>
   );
