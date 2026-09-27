@@ -550,7 +550,8 @@ export function Bench({
                 disabled={disabled}
                 shelfOrdinals={shelfOrdinals}
                 /* ПИКТОГРАММА ИЗДЕЛИЯ (D-22): «штаны фронт, штаны бэк», еле видно, во всю высоту
-                   кадра. Нет семейства (аксессуар, обувь, сумка, нет категории) — нет и рисунка. */
+                   кадра. Семейство есть у каждой категории, включая сумки, обувь, объекты и каждый
+                   вид аксессуара (D-36/D-51); без рисунка остаётся только карточка без категории. */
                 backdrop={family ? <PictogramBackdrop family={family} view={view} /> : undefined}
                 onPlaceMedia={(media) => placeMedia(media, ref, rev)}
                 onCancelPick={pick.cancel}
