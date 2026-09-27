@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import type { common_DesignEditLayer, common_MediaFull } from 'api/proto-http/admin';
+import type {
+  GetDesignBandResponse,
+  common_DesignEditLayer,
+  common_MediaFull,
+} from 'api/proto-http/admin';
 import { useCallback, useMemo } from 'react';
 
 import { designKeys } from '../use-design-band';
@@ -56,6 +60,17 @@ export function useEditLayerWrites(techCardId: number) {
     // The BAND, not the layer: `layer_rev` on a bench picture and the layer list both live there,
     // and the stale-plate badge on ARTIFACTS is computed from them.
     qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
+  }, [qc, techCardId]);
+
+  /**
+   * THE BAND AS IT IS NOW — re-read, and handed back once the read has landed (27.09, O-53 phase 2,
+   * D-55). For an answer that has to be told from the band and not from memory: where the edit of
+   * an overwrite stands. `invalidate` starts the same read and does not wait for it. A read that
+   * failed leaves the cache as it was, and the caller knows no more than before — never less.
+   */
+  const reread = useCallback(async (): Promise<GetDesignBandResponse | undefined> => {
+    await qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
+    return qc.getQueryData<GetDesignBandResponse>(designKeys.band(techCardId));
   }, [qc, techCardId]);
 
   /**
@@ -115,10 +130,11 @@ export function useEditLayerWrites(techCardId: number) {
    *
    * `clientRequestId` names the GESTURE — one per answer, minted by the caller and handed in again
    * when the same answer over the same drawing is retried, so a lost response cannot file the edit
-   * twice (the server answers the replay with the picture the first attempt filed). It goes on
-   * EVERY flatten now, beside or in place: the backend that reads it is live (cbf69dc), and a
-   * server older than it answers 400 to the field — this bundle must not reach a backend without
-   * it.
+   * twice (the server answers the replay with the picture the first attempt filed). The caller keeps
+   * it in the tab's ledger until a definite answer (`flatten-ledger.ts`, D-54), so the retry survives
+   * the editor. It goes on EVERY flatten now, beside or in place: the backend that reads it is live
+   * (cbf69dc), and a server older than it answers 400 to the field — this bundle must not reach a
+   * backend without it.
    */
   const flattenLayer = useMutation({
     mutationFn: (input: {
@@ -142,8 +158,8 @@ export function useEditLayerWrites(techCardId: number) {
   });
 
   return useMemo(
-    () => ({ saveLayer, flattenLayer, invalidate }),
-    [saveLayer, flattenLayer, invalidate],
+    () => ({ saveLayer, flattenLayer, invalidate, reread }),
+    [saveLayer, flattenLayer, invalidate, reread],
   );
 }
 
@@ -207,8 +223,7 @@ export function flattenRefusal(error: unknown): { reason: string; headPictureId:
     }
   }
   const raw = error instanceof Error ? error.message : '';
-  const known = ['already_replaced', 'cut_sheet', 'replace_mismatch', 'layer_rev_mismatch'];
-  return { reason: known.find((code) => raw.includes(code)) ?? '', headPictureId: 0 };
+  return { reason: /\bdesign: ([a-z_]+)/.exec(raw)?.[1] ?? '', headPictureId: 0 };
 }
 
 /**
@@ -235,9 +250,12 @@ export function layerRefusalText(error: unknown): string {
   const raw = error instanceof Error ? error.message : '';
   const has = (code: string) => raw.includes(code);
 
+  // A 409 IS A LAYER CONFLICT ONLY WHEN IT SAYS SO, or says nothing: Aborted is a class, and a flatten
+  // that moves a slot could one day answer another member of it — its own words are then the truth.
+  const code = flattenRefusal(error).reason;
   if (status === 404 || status === 501 || has('Unimplemented'))
     return 'this server has no vector editor yet — the layer routes are not deployed. Nothing was saved; download the SVG if you need to keep this drawing.';
-  if (status === 409 || has('layer_rev_mismatch'))
+  if (code === 'layer_rev_mismatch' || has('layer_rev_mismatch') || (status === 409 && !code))
     return 'somebody saved this drawing while it was open. Nothing was written — reopen the layer to see their version, then redraw on top of it. Your strokes are still on screen until you close this.';
   if (has('strokes_too_large'))
     return 'too many strokes for one layer (the ceiling is 512 KB). Split the drawing across two layers rather than thinning it — thinning silently moves lines somebody drew on purpose.';
