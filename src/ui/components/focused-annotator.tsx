@@ -355,6 +355,13 @@ export type FocusedAnnotatorProps = {
    */
   addFirst?: boolean;
   /**
+   * ПОКАЗАТЬ ДОБАВЛЕННУЮ КАРТИНКУ (27.09, O-62 r3; раскладка `grid`). Новые картинки встают в КОНЕЦ
+   * ленты, и при слоте «+» в её начале (`addFirst`) ложились за правым краем. С этим пропом лента
+   * один раз доезжает до первой из них, а библиотека, закрываясь, возвращает фокус слоту без
+   * прокрутки. Только мудборд: у примерки и листа эскиза всё как было.
+   */
+  revealAdded?: boolean;
+  /**
    * Стрелки ‹ › над рельсой. По умолчанию есть (лист эскиза листает ими полосу в 480px); мудборд
    * их снимает: его лента и так короче экрана чаще всего, а прокрутка остаётся жестом и
    * скроллбаром. ОТДЕЛЬНЫЙ проп, а не «нет стрелок в rowMode»: rowMode — это и полоса эскиза, и
@@ -445,6 +452,7 @@ export function FocusedAnnotator({
   viewControls,
   kindsFirst = false,
   addFirst = false,
+  revealAdded = false,
   railArrows = true,
   editorHeight = ANNOTATION_EDITOR_H,
   pinText = 'legend',
@@ -513,27 +521,20 @@ export function FocusedAnnotator({
   // +1 for the "+ add view" slot (trailing, or leading with `addFirst`), part of what can overflow.
   const rail = useRailScroll(views.length + 1);
   /**
-   * КАДР, ТОЛЬКО ЧТО ЛЁГШИЙ НА ЛЕНТУ, ДОЛЖЕН БЫТЬ ВИДЕН (27.09, O-62 r2, ревью Codex). Новые картинки
-   * встают в КОНЕЦ ленты, а слот «+» мудборда стоит первым (`addFirst`): на длинной доске счёт рос,
-   * а картинка ложилась за правым краем — без знака, что что-то вышло. Выбор отдаёт id добавленных
-   * (`onPickMedia`), и когда первый из них нарисован, лента прокручивается к нему — сама лента, не
-   * страница; порядок и номера прежние. Виден кадр — не двигается ничего. Иначе он встаёт к левому
-   * краю ленты (у конца ленты — сколько позволит её длина): лента щёлкает по НАЧАЛАМ плиток
-   * (`snap-start`), и остановка «правым краем к правому краю» перещёлкнулась бы к соседнему началу,
-   * пряча кадр наполовину; заодно видны и кадры, добавленные вместе с ним. Плавно — кроме тех, кто
-   * просил систему не двигать картинку.
+   * КАДР, ТОЛЬКО ЧТО ЛЁГШИЙ НА ЛЕНТУ, ВИДЕН (27.09, O-62 r3, ревью Codex; `revealAdded`). Выбор
+   * отдаёт id добавленных (`onPickMedia`), и когда первый из них нарисован, он ОДИН раз
+   * прокручивается в ленту — к её левому краю, `inline: 'start'` (у конца ленты — сколько позволит
+   * её длина): лента щёлкает по НАЧАЛАМ плиток (`snap-start`), и остановка «правым краем к правому
+   * краю» перещёлкнулась бы к соседнему началу, пряча кадр наполовину; заодно видны и кадры,
+   * добавленные вместе с ним. По вертикали — `nearest`: страница не едет, если кадр и так виден.
+   * Виден кадр целиком — не двигается ничего. Плавно — кроме тех, кто просил систему не двигать
+   * картинку.
    *
-   * ⚠ ДИАЛОГ БИБЛИОТЕКИ ВОЗВРАЩАЕТ ФОКУС СЛОТУ ПОСЛЕ ЭТОГО ПОКАЗА — и прокручивает ленту назад, к
-   * слоту (Radix: `trigger.focus()` таймером после закрытия, без `preventScroll`; замерено — лента
-   * стояла на 0, а под нагрузкой прокрутка фокуса обрывала и плавный повторный показ). Поэтому, пока
-   * человек сам не нажал ни указателя, ни клавиши и не крутил колесо, лента ДЕРЖИТ новый кадр:
-   * прокрутка, кончившаяся без него на виду (`scrollend`), — не его, и кадр показывается снова; фокус,
-   * вернувшийся на ленту мимо кадров, делает то же таймером — для движков без `scrollend`.
+   * УДЕРЖАНИЯ НЕТ. Назад ленту уводил фокус, который библиотека возвращает слоту после закрытия
+   * (Radix: `trigger.focus()` без `preventScroll`), — теперь он возвращается без прокрутки
+   * (`returnFocusWithoutScroll` у слота), и после показа ленту двигает только сам человек.
    */
   const [revealId, setRevealId] = useState<number | null>(null);
-  /** Снять ожидание возврата фокуса; живёт дольше эффекта, который его завёл. */
-  const revealWait = useRef<(() => void) | null>(null);
-  useEffect(() => () => revealWait.current?.(), []);
   useLayoutEffect(() => {
     if (revealId == null) return;
     const strip = rail.ref.current;
@@ -541,36 +542,15 @@ export function FocusedAnnotator({
     // Кадра ещё нет на ленте — он придёт со следующими `views`.
     if (!strip || !tile) return;
     setRevealId(null);
-    const show = () => {
-      if (!tile.isConnected) return;
-      const s = strip.getBoundingClientRect();
-      const t = tile.getBoundingClientRect();
-      if (t.left >= s.left - 1 && t.right <= s.right + 1) return;
-      const max = strip.scrollWidth - strip.clientWidth;
-      const left = Math.max(0, Math.min(max, strip.scrollLeft + (t.left - s.left)));
-      const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-      strip.scrollTo({ left, behavior: reduced ? 'auto' : 'smooth' });
-    };
-    show();
-    revealWait.current?.();
-    // Прокрутка фокуса идёт ПОСЛЕ его событий — показ ставится за неё таймером.
-    const onFocusBack = (e: FocusEvent) => {
-      if (!(e.target as Element | null)?.closest?.('[data-rail-view]')) setTimeout(show, 0);
-    };
-    const stop = () => {
-      strip.removeEventListener('scrollend', show);
-      strip.removeEventListener('focusin', onFocusBack);
-      window.removeEventListener('pointerdown', stop, true);
-      window.removeEventListener('keydown', stop, true);
-      window.removeEventListener('wheel', stop, true);
-      revealWait.current = null;
-    };
-    strip.addEventListener('scrollend', show);
-    strip.addEventListener('focusin', onFocusBack);
-    window.addEventListener('pointerdown', stop, true);
-    window.addEventListener('keydown', stop, true);
-    window.addEventListener('wheel', stop, { capture: true, passive: true });
-    revealWait.current = stop;
+    const s = strip.getBoundingClientRect();
+    const t = tile.getBoundingClientRect();
+    if (t.left >= s.left - 1 && t.right <= s.right + 1) return;
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    tile.scrollIntoView({
+      inline: 'start',
+      block: 'nearest',
+      behavior: reduced ? 'auto' : 'smooth',
+    });
   }, [revealId, views, rail.ref]);
 
   const isGrid = layout === 'grid';
@@ -603,8 +583,8 @@ export function FocusedAnnotator({
     const added = onPickMedia(items);
     if (added.length && added[0] != null) {
       setFocusedId(added[0]);
-      // На ленте — ещё и показать его (см. `revealId`).
-      if (isGrid) setRevealId(added[0]);
+      // На ленте мудборда — ещё и показать его (см. `revealId`).
+      if (revealAdded && isGrid) setRevealId(added[0]);
     }
   }
 
@@ -813,6 +793,7 @@ export function FocusedAnnotator({
       allowMultiple
       showVideos
       onSelect={handlePick}
+      returnFocusWithoutScroll={revealAdded}
       sizeClassName={rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]'}
       className='shrink-0 snap-start'
     />
