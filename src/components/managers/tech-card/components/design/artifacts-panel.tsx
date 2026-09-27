@@ -15,7 +15,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
+import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import type { EditHistory } from 'ui/components/annotation/history';
 // ПЛИТА АРТЕФАКТА — ТА ЖЕ ПОВЕРХНОСТЬ, ЧТО ЛИСТ ЭСКИЗА И СНИМОК ШАГА СБОРКИ, а не третья
 // отрисовка «для превью». Прежняя своя рисовалка на плитке была третьим словарём видов: дуга или
@@ -41,6 +41,7 @@ import { Pill } from 'ui/components/pill';
 import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { ViewSwitch } from 'ui/components/view-switch';
+import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 
 import type { AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
 import {
@@ -226,6 +227,12 @@ export type DocumentPlate = {
 export type SheetCell =
   | { type: 'plate'; plate: DocumentPlate; index: number }
   | { type: 'slot'; benchKind: 'flat' | 'render'; view: string; slotRev: number };
+
+/**
+ * Адрес карточной плиты в форме — `technicalMedia.<i>.mediaId` — и отказ сейва по этому адресу
+ * (`error`, пусто — отказа нет). Разбор индекса — у `sheetIndexOf` в `ArtifactsPanel` (D-57).
+ */
+type SheetField = { path: string; error: string };
 
 /**
  * ═══ WHICH REPRESENTATION A PICTURE IS — the axis ARTIFACTS switches along (W-14) ══════════════
@@ -714,12 +721,17 @@ function sideRank(view: string): number {
  *    colorway_id`). Вывести первое из второго нельзя ни в какую сторону: у карточки бывает цвет
  *    без единого рендера (и группы у него не будет) и рендер под колорвеем, снятым с карточки
  *    позже (и группа у него всё равно есть — работа достижима).
- * 2. ПОРЯДОК ГРУПП — ТОТ ЖЕ, ЧТО У СТОЛБЦОВ SIDES В СТУДИИ (D1/D8, `colourwayColumns`): `sample`
- *    первым, дальше колорвеи В ПОРЯДКЕ КАРТОЧКИ. Иначе один и тот же набор цветов читался бы на
- *    двух экранах в двух разных порядках, и «второй столбец» перестал бы означать одно и то же.
- *    Здесь порядок повторён, а не импортирован: `side-row.tsx` — это ЭКРАН со своими хуками,
- *    словарём и `SidesSection`; тянуть его сюда ради семи строк сортировки значило бы затащить
- *    в лист половину студии (тот же довод, что у `./pattern/model` в шапке файла).
+ * 2. ПОРЯДОК КОЛОРВЕЙНЫХ ГРУПП — ТОТ ЖЕ, ЧТО У СТОЛБЦОВ КОЛОРВЕЕВ В SIDES (D1/D8,
+ *    `colourwayColumns`): В ПОРЯДКЕ КАРТОЧКИ. Иначе один и тот же набор цветов читался бы на двух
+ *    экранах в двух разных порядках, и «второй столбец» перестал бы означать одно и то же. Здесь
+ *    порядок повторён, а не импортирован: `side-row.tsx` — это ЭКРАН со своими хуками, словарём и
+ *    `SidesSection`; тянуть его сюда ради семи строк сортировки значило бы затащить в лист
+ *    половину студии (тот же довод, что у `./pattern/model` в шапке файла).
+ *    ⚠ `sample` В ЭТО СОВПАДЕНИЕ БОЛЬШЕ НЕ ВХОДИТ (O-57). Таблица SIDES рисует столбец `sample`
+ *    ТОЛЬКО когда не рисует ни одного колорвея (живые — всегда, архивные — только с плитами), и
+ *    тогда он её единственный столбец; рядом с колорвеями его там нет. Лист группу `sample` держит
+ *    — ПЕРВОЙ и только пока в ней есть плиты (правило 3): O-57 прячет столбец, а не плиты, и
+ *    семпл-рендеры, стоящие в верстаке, остаются размеченными — здесь они видны своей группой.
  * 3. ПУСТЫХ ЯЧЕЕК НЕТ ВОВСЕ, И ГРУППЫ БЕЗ ПЛИТ ТОЖЕ НЕТ. Это и есть «криво выглядит»: шесть
  *    пустых рамок во весь рост кадра ради четырёх сторон, которых никто не размечал. Разметка
  *    рендера живёт на STUDIO → FABRIC RENDER, где колорвей НАЗВАН; у пустой ячейки листа ответа
@@ -1119,6 +1131,44 @@ export function ArtifactsPanel({
   }[];
 
   /**
+   * ═══ АДРЕС КАРТОЧНОЙ ПЛИТЫ — ЕЁ МЕСТО В `technicalMedia`, И ОТКАЗ СЕЙВА ПО НЕМУ (D-57) ════════
+   *
+   * Сейв карточки отказывает поимённо (`replaced_picture`), когда файл на листе принадлежит кадру,
+   * которого уже заменила правка: поле `technical_media[i].media_id`, `i` — место в СПИСКЕ ЛИСТА с
+   * нуля. `utils/field-errors` переводит его в `technicalMedia.i.mediaId`, и этот путь обязан вести
+   * к ПЛИТЕ: на ней якорь `data-field` для `revealField`, под ней — текст отказа.
+   *
+   * ИНДЕКС — ПЕРВОЕ МЕСТО МЕДИА В МАССИВЕ ФОРМЫ, и у сервера он тот же. Массив уходит на провод
+   * один к одному (`mapMediaItemOut`: без фильтра, без перестановок), сервер считает только строки
+   * листа (мудборд едет в том же сейве ПЕРВЫМ, но в счёт не входит) и называет первую строку с
+   * заменённым файлом, а лист рисует медиа одной плитой по первому вхождению (`documentPlates`).
+   * Не порядок плит сегмента — это порядок ЭКРАНА (стороны, группы колорвеев) — и не склейка
+   * «мудборд + лист»: отказ адресует массив. Считается здесь, по живому массиву, а не штампуется
+   * в `documentPlates`: карточную плиту рендер-верстака строит `renderBenchPlates`, мимо него.
+   */
+  const sheetIndexOf = useMemo(() => {
+    const at = new Map<number, number>();
+    technicalMedia.forEach((item, i) => {
+      const id = item.mediaId ?? 0;
+      if (id > 0 && !at.has(id)) at.set(id, i);
+    });
+    return at;
+  }, [technicalMedia]);
+  // Подписка сужена именем: ошибки других полей формы этот экран не перерисовывают.
+  const { errors: formErrors } = useFormState({ control: form.control, name: 'technicalMedia' });
+  const sheetErrors = formErrors.technicalMedia;
+  const sheetFieldOf = (plate: DocumentPlate): SheetField | undefined => {
+    if (plate.origin !== 'card') return undefined;
+    const at = sheetIndexOf.get(plate.mediaId);
+    if (at === undefined) return undefined;
+    const message = sheetErrors?.[at]?.mediaId?.message;
+    return {
+      path: `technicalMedia.${at}.mediaId`,
+      error: typeof message === 'string' ? message : '',
+    };
+  };
+
+  /**
    * ═══ media id → КАРТИНКА. ДВА ИСТОЧНИКА, И ВТОРОЙ — ЭТО ПОЧИНКА T-20 ════════════════════════
    *
    * Жалоба владельца дословно: «когда делаю TAKE IN + DRAW ▸ в артефактах оно теряет картинку и
@@ -1470,6 +1520,41 @@ export function ArtifactsPanel({
   const onScreen = segment.plates;
 
   /**
+   * ═══ ОТКАЗ ПО ПЛИТЕ ДРУГОГО СЕГМЕНТА ПЕРЕКЛЮЧАЕТ СЕГМЕНТ (D-57) ═══════════════════════════════
+   *
+   * На экране один сегмент из пяти, и плиты остальных не смонтированы. Отказ `replaced_picture`
+   * про рендер, пока открыты флэты, `revealField` не нашёл бы вовсе: якоря в DOM нет, и путь до
+   * плиты кончался бы честным «нет поля». Поэтому, как у шагов студии (`stepOfField` в
+   * `studio-tab.tsx`), лист отвечает на запрос документа: путь — якорь карточной плиты, и эта
+   * плита стоит в другом сегменте → заявка (`preventDefault`) и переключение; дальше
+   * `revealField` сам ждёт кадров, пока плита смонтируется, и подсвечивает её.
+   * Не заявляется: чужой путь; плита текущего сегмента (якорь уже на экране); повтор медиа в
+   * массиве — якорь стоит только на первом вхождении (довод у `sheetIndexOf`), и переключение
+   * ради пути, которого не несёт ни одна плита, было бы сменой экрана впустую.
+   */
+  const revealAsk = useRef({ technicalMedia, sheetIndexOf, segments, kind });
+  revealAsk.current = { technicalMedia, sheetIndexOf, segments, kind };
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const path = (e as CustomEvent<FieldRevealDetail>).detail?.path ?? '';
+      const hit = /^technicalMedia\.(\d+)\.mediaId$/.exec(path);
+      if (!hit) return;
+      const now = revealAsk.current;
+      const at = Number(hit[1]);
+      const mediaId = now.technicalMedia[at]?.mediaId ?? 0;
+      if (mediaId <= 0 || now.sheetIndexOf.get(mediaId) !== at) return;
+      const home = ARTIFACT_KINDS.find(({ value }) =>
+        now.segments[value].plates.some((p) => p.origin === 'card' && p.mediaId === mediaId),
+      )?.value;
+      if (!home || home === now.kind) return;
+      e.preventDefault();
+      setKind(home);
+    };
+    document.addEventListener(FIELD_REVEAL_EVENT, onAsk);
+    return () => document.removeEventListener(FIELD_REVEAL_EVENT, onAsk);
+  }, []);
+
+  /**
    * ═══ ГДЕ ПОМЕТКА `chosen` ВООБЩЕ ЕСТЬ ВЕРДИКТ — И ГДЕ ЕЁ ВЫНОСИТ СЛОТ (H-39/H-41) ══════════════
    *
    * Флэт выбирают, поставив его в слот флэт-верстака; после H-39 ровно так же выбирают и РЕНДЕР —
@@ -1759,6 +1844,12 @@ export function ArtifactsPanel({
       media.filter((m) => (m.mediaId ?? 0) !== plate.mediaId),
       { shouldDirty: true },
     );
+    // ОТКАЗЫ СПИСКА СНИМАЮТСЯ ВМЕСТЕ С ПЛИТОЙ (D-57). Отказ сейва адресует строку ИНДЕКСОМ (довод
+    // у `sheetIndexOf`), а снятая плита сдвигает хвост: оставленный, он переехал бы на плиту,
+    // вставшую на её место, — и после исполненного «take this one off» красной стояла бы
+    // невиновная. Правка грязная, следующая запись отправит лист заново, и то, что ещё не так,
+    // сервер назовёт по новому месту.
+    form.clearErrors('technicalMedia');
     const cs = form.getValues('callouts') ?? [];
     if (cs.some((c) => (c.mediaId ?? 0) === plate.mediaId)) {
       form.setValue(
@@ -2099,6 +2190,7 @@ export function ArtifactsPanel({
               ? 'filed as a render: the card has no on-model kind'
               : undefined
       }
+      sheetFieldOf={sheetFieldOf}
       onDetach={!disabled ? askDetach : undefined}
       detachInert={detachInert}
       /* ═══ ДВЕ ДВЕРИ, КОТОРЫЕ РАНЬШЕ БЫЛИ ОДНОЙ (K-7) ══════════════════════════════
@@ -2790,6 +2882,7 @@ function PlateGrid({
   onAddPlate,
   addPlateLabel,
   addPlateNote,
+  sheetFieldOf,
   onDetach,
   detachInert,
   onEdit,
@@ -2839,6 +2932,11 @@ function PlateGrid({
    * знает кадра турнтейбла (см. `addPlateFromLibrary`).
    */
   addPlateNote?: string;
+  /**
+   * Адрес карточной плиты в форме и отказ сейва по нему (D-57), или `undefined` — плита не строка
+   * `technicalMedia` (верстак, прогон). Разбор индекса — у `sheetIndexOf` панели.
+   */
+  sheetFieldOf: (plate: DocumentPlate) => SheetField | undefined;
   /** Take a plate off the document, or `undefined` — and then `detachInert` says why not. */
   onDetach?: (plate: DocumentPlate) => void;
   detachInert: string;
@@ -2944,6 +3042,8 @@ function PlateGrid({
             : plate.origin === 'run'
               ? 'this picture is not in the card’s media, so there is nothing here to take off'
               : null;
+        /** Адрес в форме и отказ по нему (D-57) — только у карточной плиты; разбор у `sheetIndexOf`. */
+        const sheet = sheetFieldOf(plate);
 
         return (
           // ШИРИНУ ПЛИТЫ ЗАДАЁТ КАДР, И ТОЛЬКО ОН. `w-0 min-w-full` на всём, что стоит над и под
@@ -2956,7 +3056,11 @@ function PlateGrid({
           // в ширину блока, и лента «прокручивалась» бы, ничего не прокручивая.
           <div
             key={plate.key}
-            data-field={plate.door}
+            /* ЯКОРЬ ПЛИТЫ — ЕЁ АДРЕС В ФОРМЕ, когда она строка `technicalMedia` (D-57): сюда ведёт
+               `revealField` по отказу сейва `technicalMedia.i.mediaId`, и пульс обводит плиту
+               целиком. Остальные плиты несут дверь верстака, как несли; карточная плита
+               рендер-верстака свою дверь не теряет — та переезжает на обёртку кадра ниже. */
+            data-field={sheet?.path ?? plate.door}
 /* ЯКОРЬ ДЛЯ ПРОБ, ПАРНЫЙ К `data-annot-frame`: тот метит КАДР, этот — ПЛИТКУ целиком
                (рамка, шапка, кадр, подпись, подвал дверей). Пробы геометрии меряют вписанность
                кадра в плитку, и опознавать плитку по классам оказалось нельзя — «p-1» ушёл вместе
@@ -3067,7 +3171,7 @@ function PlateGrid({
                 `PLATE_FRAME_HEIGHT`). `preferNaturalAspect`: если сервер размеров не назвал, коробка
                 переходит на пропорции ЗАГРУЖЕННОЙ картинки — тогда доли выносок честны и на таком
                 медиа, а не «маркеры не рисуем», как было. */}
-            <div>
+            <div data-field={sheet ? plate.door : undefined}>
               <AnnotationSurface
                 {...bindings}
                 src={sources[0] ?? ''}
@@ -3212,6 +3316,27 @@ function PlateGrid({
                 }
               />
             </div>
+
+            {/* ═══ ОТКАЗ СЕЙВА ПО ЭТОЙ ПЛИТЕ — СТРОКОЙ ПОД КАДРОМ (D-57) ═══════════════════════════
+                Текст серверный, как есть: он называет строку листа, кадр, который её заменил, и
+                оба выхода; второй из них («take this one off») — `✕` этой же плиты. Вид — тот же,
+                что у отказа поля формы (`FormMessage`: 10px, красный, регистр предложения), и с
+                ведущим `!`: состояние не держится одним цветом. ОДНА СТРОКА: ряд выравнивает
+                `items-stretch`, и абзац под одной плитой вытянул бы все; обрезанный хвост
+                дочитывается `title`, а целиком фраза стоит и в `warnings` страницы («fields that
+                block saving»).
+                `w-0 min-w-full` — идиома всего подкадрового: ширину плиты задаёт кадр, не текст. */}
+            {sheet?.error ? (
+              <Text
+                size='micro'
+                variant='errorLabel'
+                data-plate-error=''
+                title={sheet.error}
+                className='mt-1 w-0 min-w-full truncate'
+              >
+                ! {sheet.error}
+              </Text>
+            ) : null}
 
             {/* СТРОКИ ПОДПИСИ ПОД КАДРОМ БОЛЬШЕ НЕТ. Она стояла здесь всегда, даже пустая, ради
                 выравнивания ряда — и была половиной «пустого подбородка» (K-2). Провенанс переехал
