@@ -157,6 +157,9 @@ function seenSavedOn(card: number): Set<number> {
 type HalfSave = { colours: BoundSlot[]; orphans: boolean };
 const halfSaved = new Map<number, HalfSave>();
 
+/** Слова вердикта при сироте; экран говорит своими (`SavedColourway`, `recipeOrphans`). */
+const ORPHAN_WORDS = 'a row of its recipe names no live BOM line';
+
 /**
  * ТРЁХШАГОВАЯ ЗАПИСЬ, ТОЧНО ТА ЖЕ, КАКОЙ ЕЁ ДЕЛАЕТ ВКЛАДКА: сперва личность, потом рецепт.
  *
@@ -181,7 +184,8 @@ const halfSaved = new Map<number, HalfSave>();
  * которую нечем адресовать, полная замена удалила бы молча (`recipeForColourway`, `orphans`). Шаг
  * рецепта не делается вовсе, ни одного `UpdateColorwayRecipe`: колорвей создан, рецепт цел, а под
  * рядом стоит «recipe not written — resolve the orphan row in COLORWAYS ›» — там сироту видно, и там
- * человек решает, куда её деть.
+ * человек решает, куда её деть. Потом «write the colours ›» доделывает шаг рецепта (раунд 4): это
+ * `writeColours` — ТОТ ЖЕ шаг, что у `confirm ▸`, с теми же цветами, а не второй писатель.
  *
  * ⚠ ОТКАТА У ПОЛОВИНЫ НЕТ, И ОН ЗДЕСЬ БЫЛ БЫ ХУЖЕ САМОЙ ПОЛОВИНЫ. Упавший второй шаг оставляет
  * СОЗДАННЫЙ колорвей без рецепта; удалять его в ответ значило бы стирать продукт из-за сетевой
@@ -190,9 +194,6 @@ const halfSaved = new Map<number, HalfSave>();
  * `colorwayId` — int64 с провода, то есть СТРОКА в JSON при объявленном `number`; сравнивается
  * только через `wireInt`, иначе `"42" === 42` молча не находит только что созданный колорвей.
  */
-/** Слова вердикта при сироте; экран говорит своими (`SavedColourway`, `recipeOrphans`). */
-const ORPHAN_WORDS = 'a row of its recipe names no live BOM line';
-
 function useConfirmColourway(techCardId: number) {
   const create = useCreateColorway(techCardId);
   const recipe = useUpdateColorwayRecipe(techCardId);
@@ -230,10 +231,20 @@ function useConfirmColourway(techCardId: number) {
     if (!colorwayId) throw new Error('the server created no colourway id');
     onCreated(colorwayId);
     if (bound.length === 0) return { status: 'confirmed', colorwayId };
+    return writeColours(colorwayId, bound);
+  }
+
+  /**
+   * ШАГ РЕЦЕПТА — ОДИН НА ДВЕ ДВЕРИ: `confirm ▸` сразу после создания и «write the colours ›» под
+   * рядом, чей рецепт не записался из-за сироты (раунд 4). Явное перечитывание карточки, слияние с её
+   * рецептом (`recipeForColourway` → `savableUsage`), замок того же чтения; сирота — записи нет; отказ —
+   * полу-запись словами. Удача стирает память полу-записи: предупреждению больше нечего помнить.
+   */
+  async function writeColours(colorwayId: number, bound: BoundSlot[]): Promise<ColourwayVerdict> {
     try {
       const fresh = await adminService.GetTechCard({ id: techCardId, vatCountryCode: undefined });
       const ref = fresh.techCard?.colorways?.find((c) => wireInt(c.colorwayId) === colorwayId);
-      if (!ref) throw new Error('the re-read card came back without the new colourway');
+      if (!ref) throw new Error('the re-read card came back without this colourway');
       const plan = recipeForColourway(ref.usages, bound, fresh.techCard?.techCard);
       if (plan.kind === 'orphans') {
         halfSaved.set(colorwayId, { colours: bound, orphans: true });
@@ -247,10 +258,11 @@ function useConfirmColourway(techCardId: number) {
     } finally {
       await qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
     }
+    halfSaved.delete(colorwayId);
     return { status: 'confirmed', colorwayId };
   }
 
-  return { confirm, pending: create.isPending || recipe.isPending };
+  return { confirm, writeColours, pending: create.isPending || recipe.isPending };
 }
 
 /**
@@ -273,6 +285,7 @@ function SavedColourway({
   dictionaryColour,
   recipeFailed,
   recipeOrphans,
+  colourDoor,
   onDismissFailure,
   onOpen,
 }: {
@@ -282,6 +295,11 @@ function SavedColourway({
   recipeFailed?: string;
   /** Рецепт не писался вовсе: в нём сирота (D-48). Дверь ведёт туда, где её видно. */
   recipeOrphans?: boolean;
+  /**
+   * «write the colours ›» (раунд 4) — у того, кто вправе писать рецепт: `writing` — летит запись этого
+   * колорвея, `locked` — летит любая запись блока.
+   */
+  colourDoor?: { run: () => void; writing: boolean; locked: boolean };
   onDismissFailure: () => void;
   onOpen: (colorwayId: number) => void;
 }): JSX.Element {
@@ -336,7 +354,8 @@ function SavedColourway({
       {/* ПОЛУ-ЗАПИСЬ — НЕ ТОСТ (DESIGN.md, Callout Box): колорвей есть, цвета слотов нет, и это стоит
           под рядом, пока не станет неправдой (рецепт донесли) или человек не снимет его сам. Рецепт
           с сиротой не писался вовсе (D-48) — тогда слова другие, и в них дверь на вкладку COLORWAYS,
-          та же, что у `open ›`: сироту видно и решают там. */}
+          та же, что у `open ›`: сироту видно и решают там; а после — «write the colours ›», тот же шаг
+          рецепта, что у `confirm ▸` (раунд 4). */}
       {recipeFailed && (
         <div
           className='mt-1'
@@ -359,6 +378,25 @@ function SavedColourway({
                 >
                   resolve the orphan row in COLORWAYS ›
                 </Button>
+                {colourDoor && (
+                  <>
+                    <Text size='micro' variant='label' component='span'>
+                      then
+                    </Text>
+                    <Button
+                      type='button'
+                      variant='underline'
+                      size='xs'
+                      data-cw-orphan-retry={id}
+                      disabled={colourDoor.locked}
+                      loading={colourDoor.writing}
+                      title='read the card again and write the slot colours — nothing is written while an orphan row is still there'
+                      onClick={colourDoor.run}
+                    >
+                      write the colours ›
+                    </Button>
+                  </>
+                )}
               </span>
             ) : (
               <Text size='micro'>created, but its slot colours did not save — {recipeFailed}</Text>
@@ -441,7 +479,7 @@ export function ColourwayProposals({
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
   const { data: techCard } = useTechCard(techCardId);
-  const { confirm, pending } = useConfirmColourway(techCardId);
+  const { confirm, writeColours, pending } = useConfirmColourway(techCardId);
   const qc = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
   /** Идёт ручное перечитывание карточки из ряда «created · re-read the card». */
@@ -603,6 +641,29 @@ export function ColourwayProposals({
     halfSaved.delete(colorwayId);
     if (failure) setVerdict(techCardId, failure.verdict, { status: 'confirmed', colorwayId });
   };
+  /**
+   * «WRITE THE COLOURS ›» — ДОДЕЛАТЬ ТО, ЧЕГО НЕ СМОГ `confirm ▸` (раунд 4). Тот же шаг рецепта
+   * (`writeColours`) с теми цветами, что тогда не записались (`halfSaved`), и его вердикт встаёт на место
+   * прежнего: сироту устранили — запись идёт, предупреждение уходит; сирота на месте — ни одной записи,
+   * и предупреждение то же, слово в слово; 409 — обычное «did not save». Вторая запись поверх летящей
+   * не начинается: засов — ref, потому что второй щелчок успевает раньше перерисовки.
+   */
+  const rewriting = useRef<number | null>(null);
+  const [writingColours, setWritingColours] = useState<number | null>(null);
+  const writeColoursAgain = async (colorwayId: number) => {
+    const failure = failures.get(colorwayId);
+    const half = halfSaved.get(colorwayId);
+    if (!failure || !half || rewriting.current !== null) return;
+    rewriting.current = colorwayId;
+    setWritingColours(colorwayId);
+    try {
+      const v = await writeColours(colorwayId, half.colours);
+      setVerdict(techCardId, failure.verdict, v);
+    } finally {
+      rewriting.current = null;
+      setWritingColours(null);
+    }
+  };
   useEffect(() => {
     for (const cw of saved) {
       const id = wireInt(cw.colorwayId);
@@ -705,6 +766,15 @@ export function ColourwayProposals({
                   repaired(cw) ? undefined : failures.get(wireInt(cw.colorwayId))?.words
                 }
                 recipeOrphans={!!halfSaved.get(wireInt(cw.colorwayId))?.orphans}
+                colourDoor={
+                  readOnly
+                    ? undefined
+                    : {
+                        run: () => void writeColoursAgain(wireInt(cw.colorwayId)),
+                        writing: writingColours === wireInt(cw.colorwayId),
+                        locked: pending || writingColours !== null,
+                      }
+                }
                 onDismissFailure={() => settleFailure(wireInt(cw.colorwayId))}
                 onOpen={openOnColorways}
               />
