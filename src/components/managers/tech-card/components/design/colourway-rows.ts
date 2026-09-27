@@ -293,27 +293,41 @@ type UsageLike = {
 };
 
 /**
- * ВСЕ СЛОТЫ КАРТОЧКИ, И У КАЖДОГО — ЕГО СТРОКА РЕЦЕПТА УРОВНЯ ИЗДЕЛИЯ.
+ * ВСЕ СТРОКИ РЕЦЕПТА УРОВНЯ ИЗДЕЛИЯ — ПО СЛОТАМ, КАЖДАЯ, В ПОРЯДКЕ РЕЦЕПТА.
  *
  * Строка детали кроя (`piece_line_key` / `piece_id`) — назначение ткани на деталь, а не цвет слота,
  * и здесь не читается. Адрес строки — `bom_line_key`, а у старой записи без него — `bom_item_id`,
  * разрешённый по строкам сохранённой карточки (тот же путь, что `fromRead` у `colorway-recipe.tsx`).
- * Первая строка на слот побеждает.
+ * Строк на слот бывает несколько (сервер держит их по `placement`), и не теряется ни одна.
+ */
+function garmentRowsBySlot(
+  usages: readonly UsageLike[] | null | undefined,
+  card: readonly CardSlot[],
+): Map<string, UsageLike[]> {
+  const keyById = new Map(card.filter((c) => c.bomItemId > 0).map((c) => [c.bomItemId, c.lineKey]));
+  const bySlot = new Map<string, UsageLike[]>();
+  for (const u of usages ?? []) {
+    if ((u.pieceLineKey ?? '').trim() || wireInt(u.pieceId) > 0) continue;
+    const key = (u.bomLineKey ?? '').trim() || keyById.get(wireInt(u.bomItemId)) || '';
+    if (!key) continue;
+    const rows = bySlot.get(key);
+    if (rows) rows.push(u);
+    else bySlot.set(key, [u]);
+  }
+  return bySlot;
+}
+
+/**
+ * ВСЕ СЛОТЫ КАРТОЧКИ, И У КАЖДОГО — ЕГО СТРОКА РЕЦЕПТА УРОВНЯ ИЗДЕЛИЯ (`garmentRowsBySlot`).
+ * Ряд показывает первую строку слота; судит о донесённых цветах `recipeCarries` — по всем.
  */
 export function savedSlotRows(
   usages: readonly UsageLike[] | null | undefined,
   card: readonly CardSlot[],
 ): SavedSlotRow[] {
-  const keyById = new Map(card.filter((c) => c.bomItemId > 0).map((c) => [c.bomItemId, c.lineKey]));
-  const garment = new Map<string, UsageLike>();
-  for (const u of usages ?? []) {
-    if ((u.pieceLineKey ?? '').trim() || wireInt(u.pieceId) > 0) continue;
-    const key = (u.bomLineKey ?? '').trim() || keyById.get(wireInt(u.bomItemId)) || '';
-    if (!key || garment.has(key)) continue;
-    garment.set(key, u);
-  }
+  const garment = garmentRowsBySlot(usages, card);
   return card.map((c) => {
-    const u = garment.get(c.lineKey);
+    const u = garment.get(c.lineKey)?.[0];
     return {
       key: c.lineKey,
       slot: c.name,
@@ -331,9 +345,12 @@ export function savedSlotRows(
  * Запись цветов слотов после `confirm ▸` упала — под сохранённым рядом стоит «its slot colours did
  * not save». Потом человек донёс их сам (вкладка COLORWAYS), и предупреждение, которое этого не
  * замечает, врёт до конца вкладки. Предупреждение снимается, когда ПРОЧИТАННЫЙ рецепт несёт каждый
- * из цветов, которые не записались: на строке изделия того же слота — тот же пантон, а у слота без
- * пантона — те же слова (без регистра и лишних пробелов). Слот, которого на карточке больше нет,
- * не донесён никогда — такое предупреждение снимает только человек («dismiss»).
+ * из цветов, которые не записались: тот же пантон, а у слота без пантона — те же слова (без регистра
+ * и лишних пробелов) — на КАЖДОЙ строке изделия этого слота (sweep S1, minor). Писатель красит все
+ * строки изделия слота, и донесено ровно тогда, когда донесено на все: вторая строка (манжета при
+ * планке) со старым пантоном — это недописанный рецепт, а не починка. Слот, у которого строк
+ * изделия нет (или которого на карточке больше нет), не донесён никогда — такое предупреждение
+ * снимает только человек («dismiss»).
  */
 export function recipeCarries(
   expected: readonly Pick<BoundSlot, 'bomLineKey' | 'pantone' | 'colour'>[],
@@ -341,15 +358,14 @@ export function recipeCarries(
   card: readonly CardSlot[],
 ): boolean {
   if (expected.length === 0) return false;
-  const saved = new Map(
-    savedSlotRows(usages, card)
-      .filter((r) => r.recorded)
-      .map((r) => [r.key, r]),
-  );
-  const same = (a: string, b: string) => normText(a).toLowerCase() === normText(b).toLowerCase();
+  const garment = garmentRowsBySlot(usages, card);
+  const same = (a: string | undefined, b: string) =>
+    normText(a).toLowerCase() === normText(b).toLowerCase();
   return expected.every((e) => {
-    const r = saved.get(e.bomLineKey);
-    if (!r) return false;
-    return normText(e.pantone) ? same(r.pantone, e.pantone) : same(r.colour, e.colour);
+    const rows = garment.get(e.bomLineKey) ?? [];
+    if (rows.length === 0) return false;
+    return rows.every((u) =>
+      normText(e.pantone) ? same(u.pantone, e.pantone) : same(u.color, e.colour),
+    );
   });
 }

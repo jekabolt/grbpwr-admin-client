@@ -3,6 +3,7 @@ import type { common_TechCardColorwayUsage } from 'api/proto-http/admin';
 import {
   blankDraft,
   fromRead,
+  isBlankUsage,
   savableUsage,
   toWire,
   type UsageDraft,
@@ -184,6 +185,11 @@ function refsOf(rows: readonly Keyed[] | null | undefined): { id: number; lineKe
   return out;
 }
 
+/** Шаг рецепта после `confirm ▸`: записать эти строки — или не писать вовсе (в рецепте есть сироты). */
+export type ColourwayRecipe =
+  | { kind: 'write'; usages: common_TechCardColorwayUsage[] }
+  | { kind: 'orphans'; orphans: number };
+
 /**
  * ═══ РЕЦЕПТ КОЛОРВЕЯ = ПЕРЕЧИТАННЫЙ РЕЦЕПТ + ЦВЕТА СЛОТОВ, ОТПРАВЛЕННЫЙ ТАК, КАК ОТПРАВИЛА БЫ ВКЛАДКА ═
  *
@@ -198,21 +204,34 @@ function refsOf(rows: readonly Keyed[] | null | undefined): { id: number; lineKe
  * MAJOR 1). Каждая сохранённая строка читается в черновик (`fromRead`); цвет слота садится в черновик
  * — `color`/`pantone` строк уровня изделия (без детали) покрашенных слотов, а у слота без такой
  * строки она рождается так же, как рождает её вкладка (`blankDraft` с адресом слота); на провод уходит
- * ровно то, что вкладка отправила бы своим сохранением: `savableUsage` отсекает строку без разрешимого
- * `bom_line_key` (адресовать её нечем, и полная замена уронила бы весь рецепт) и пустую строку
- * изделия, и только потом — `toWire`. Строки деталей, чужие слоты, нормы и пины не трогаются.
+ * ровно то, что вкладка отправила бы своим сохранением: `savableUsage` отсекает пустую строку
+ * изделия (строки без адреса до этого места не доходят — см. сирот ниже), и только потом — `toWire`.
+ * Строки деталей, чужие слоты, нормы и пины не трогаются.
  *
  * Строк уровня изделия у слота бывает несколько (одна пуговица на планке, другая на манжете —
  * сервер держит их по `placement`); цвет слота садится на каждую: предложение говорит про СЛОТ.
+ *
+ * ⚠ СИРОТА ОСТАНАВЛИВАЕТ ЗАПИСЬ ЦЕЛИКОМ (sweep S1, High; решение D-48). Сирота — строка перечитанного
+ * рецепта, которая НЕ пуста (`isBlankUsage` — правило редактора) и которую нечем адресовать: ни её
+ * `bom_line_key`, ни разрешённый по карточке `bom_item_id` не называют живой строки BOM. `savableUsage`
+ * её отсёк бы, и полная замена молча удалила бы чужие данные. Редактор в том же положении говорит
+ * «сохранение её удалит» и даёт выбор человеку; у автоматического писателя выбора нет, поэтому шаг
+ * рецепта не делается вовсе (`orphans`): колорвей остаётся созданным, а его ряд говорит, куда идти
+ * чинить. Пустая строка — не сирота: её отсекают оба писателя.
  */
 export function recipeForColourway(
   existing: readonly common_TechCardColorwayUsage[] | null | undefined,
   bound: readonly BoundSlot[],
   card: { bomItems?: readonly Keyed[] | null; pieces?: readonly Keyed[] | null } | null | undefined,
-): common_TechCardColorwayUsage[] {
+): ColourwayRecipe {
   const bomItems = refsOf(card?.bomItems);
   const pieces = refsOf(card?.pieces);
   const drafts: UsageDraft[] = (existing ?? []).map((u) => fromRead(u, bomItems, pieces));
+  const live = new Set(bomItems.map((b) => b.lineKey));
+  const orphans = drafts.filter(
+    (d) => !isBlankUsage(d) && (!d.bomLineKey || !live.has(d.bomLineKey)),
+  ).length;
+  if (orphans > 0) return { kind: 'orphans', orphans };
   for (const s of bound) {
     if (!s.bomLineKey) continue;
     let carried = false;
@@ -229,7 +248,7 @@ export function recipeForColourway(
         pantone: s.pantone,
       });
   }
-  return drafts.filter(savableUsage).map(toWire);
+  return { kind: 'write', usages: drafts.filter(savableUsage).map(toWire) };
 }
 
 /* ─── ВОРОТА ПОДТВЕРЖДЕНИЯ ─────────────────────────────────────────────────────────────────── */

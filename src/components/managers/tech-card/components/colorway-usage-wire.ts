@@ -181,7 +181,11 @@ export function toWire(d: UsageDraft): common_TechCardColorwayUsage {
 // несёт ПО УСТРОЙСТВУ. Посчитать её пустой значило бы, что каждое «назначить детали» тихо
 // выбрасывается при сохранении, — то есть ровно тот дефект, из-за которого владелец назначил ткань
 // девяти деталям и не увидел ничего.
-function isBlankUsage(u: UsageDraft): boolean {
+//
+// Экспорт — для второго писателя рецепта (блок COLOURWAYS, `recipeForColourway`): строка, которая
+// не пуста и которую нечем адресовать, останавливает его запись целиком, а пустую он отсекает так же,
+// как редактор. «Пусто» у обоих — это одно и то же правило.
+export function isBlankUsage(u: UsageDraft): boolean {
   if (u.pieceLineKey) return false;
   return (
     !u.consumption.trim() &&
