@@ -18,6 +18,7 @@ import {
   textOf,
   workflowOfferedOr,
 } from '../common';
+import { ideaMediaIds } from '../../ideas-server';
 import { matchesWorkflow } from '../run-workflow';
 import { EMPTY_DRAFT, type InventoryGroupDef, type WorkflowDef, type WorkflowRun } from '../types';
 
@@ -87,6 +88,8 @@ const run: WorkflowRun = {
             "'Create a man wearing this t-shirt', 'add sunglasses', 'create a background for this product'…",
           hint: 'an instruction to an image model that creates or edits a picture from reference images',
           maxLength: ASK_MAX,
+          // C-15: what the server's Ideas look at.
+          ideasFrom: (draft) => ({ mediaIds: ideaMediaIds(imagesOf(draft, REFS)[0]) }),
         },
       ],
     },

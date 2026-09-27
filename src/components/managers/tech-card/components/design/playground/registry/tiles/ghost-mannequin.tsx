@@ -15,6 +15,7 @@ import {
   textOf,
   workflowOffered,
 } from '../common';
+import { ideaMediaIds } from '../../ideas-server';
 import { matchesWorkflow } from '../run-workflow';
 import { EMPTY_DRAFT, type Draft, type WorkflowDef, type WorkflowRun } from '../types';
 
@@ -92,6 +93,8 @@ const run: WorkflowRun = {
           placeholder: 'The cropped denim jacket',
           hint: 'which garment of the picture to recreate as a ghost-mannequin product shot on white',
           maxLength: ASK_MAX,
+          // C-15: what the server's Ideas look at.
+          ideasFrom: (draft) => ({ mediaIds: ideaMediaIds(imagesOf(draft, IMAGE)[0]) }),
         },
       ],
     },

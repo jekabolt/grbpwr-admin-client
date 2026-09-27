@@ -21,6 +21,7 @@ import {
   textOf,
   workflowOffered,
 } from '../common';
+import { ideaMediaIds } from '../../ideas-server';
 import { matchesWorkflow } from '../run-workflow';
 import { EMPTY_DRAFT, type Draft, type WorkflowDef, type WorkflowRun } from '../types';
 
@@ -130,6 +131,8 @@ const run: WorkflowRun = {
           placeholder: 'Same jacket, cropped shorter, wider sleeves',
           hint: 'what to change in the reference design to make a variation of it',
           maxLength: ASK_MAX,
+          // C-15: what the server's Ideas look at.
+          ideasFrom: (draft) => ({ mediaIds: ideaMediaIds(imagesOf(draft, IMAGE)[0]) }),
         },
       ],
     },

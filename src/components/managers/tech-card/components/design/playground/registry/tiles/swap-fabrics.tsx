@@ -9,6 +9,7 @@ import type { NotSentItem } from '../../../core';
 import { recolorShape, recolourWireColour, targetIsStated } from '../../../recolor/model';
 import { EMPTY_RECIPE, wireColourSource } from '../../../render/model';
 import { emptyParams, pictureLines, textOf, workflowOffered } from '../common';
+import { ideaMediaIds } from '../../ideas-server';
 import { matchesWorkflow } from '../run-workflow';
 import { EMPTY_DRAFT, type Draft, type WorkflowDef, type WorkflowRun } from '../types';
 
@@ -111,6 +112,8 @@ const run: WorkflowRun = {
           label: 'Garment to swap fabric on',
           placeholder: 'The cropped denim jacket',
           hint: 'which garment in the design gets the new fabric; everything else stays as it is',
+          // C-15: what the server's Ideas look at.
+          ideasFrom: (draft) => ({ mediaIds: ideaMediaIds(slotOf(draft, DESIGN)) }),
         },
       ],
     },

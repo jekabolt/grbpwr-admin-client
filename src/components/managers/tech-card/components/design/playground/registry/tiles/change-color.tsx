@@ -22,6 +22,7 @@ import {
   textOf,
   workflowOfferedOr,
 } from '../common';
+import { ideaMediaIds } from '../../ideas-server';
 import { matchesWorkflow } from '../run-workflow';
 import { EMPTY_DRAFT, type Draft, type WorkflowDef, type WorkflowRun } from '../types';
 
@@ -100,6 +101,8 @@ const run: WorkflowRun = {
           label: 'Garment to recolor',
           placeholder: 'The cropped denim jacket',
           hint: 'which garment in the photographs gets the new colour; everything else stays as it is',
+          // C-15: what the server's Ideas look at.
+          ideasFrom: (draft) => ({ mediaIds: ideaMediaIds(imagesOf(draft, PHOTOS)[0]) }),
         },
       ],
     },

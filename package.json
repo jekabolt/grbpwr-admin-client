@@ -44,6 +44,7 @@
     "playground:registry": "node scripts/playground-registry-probe.mjs",
     "playground:back": "node scripts/playground-back-probe.mjs",
     "playground:studio": "node scripts/playground-studio-probe.mjs",
+    "playground:prompt": "node scripts/playground-prompt-probe.mjs",
     "fix": "yarn lint && yarn format",
     "lint": "eslint --fix './src/**/*.{js,ts,tsx,json}'",
     "format": "prettier --write './src/**/*.{js,ts,tsx,scss,md,json}'",

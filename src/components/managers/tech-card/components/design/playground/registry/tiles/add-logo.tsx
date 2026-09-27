@@ -3,6 +3,7 @@ import type { common_DesignWorkflowOptions, common_MediaFull } from 'api/proto-h
 import type { NotSentItem } from '../../../core';
 import type { OptionRowOption } from '../../fields';
 import { emptyParams, pictureLines, textOf, workflowOffered } from '../common';
+import { ideaMediaIds } from '../../ideas-server';
 import { matchesWorkflow } from '../run-workflow';
 import { EMPTY_DRAFT, type Draft, type WorkflowDef, type WorkflowRun } from '../types';
 
@@ -119,6 +120,8 @@ const run: WorkflowRun = {
           placeholder: 'On the chest, left sleeve, back, hip pocket…',
           hint: 'where on the garment the logo goes',
           maxLength: ASK_MAX,
+          // C-15: what the server's Ideas look at.
+          ideasFrom: (draft) => ({ mediaIds: ideaMediaIds(slotOf(draft, GARMENT)) }),
         },
       ],
     },

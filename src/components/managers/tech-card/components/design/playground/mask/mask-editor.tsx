@@ -15,8 +15,10 @@ import Text from 'ui/components/text';
 
 import { GenerateRow, LockBar, RunRefusal } from '../../render/generate-row';
 import { useStartDesignRun } from '../../render/use-design-run';
+import { useDesignBand } from '../../use-design-band';
 import { playgroundRunScope } from '../address';
 import { FoldSection, OptionRow, PromptField } from '../fields';
+import { bandSuggestsPrompts, ideaMediaIds, ideasContext } from '../ideas-server';
 import { recentTextKey, rememberRecentText } from '../recent';
 import {
   RETOUCH_CAVEAT,
@@ -57,6 +59,9 @@ import {
  * (`playgroundRunScope('retouch_zone')`, render/run-ledger.ts), so closing the dialog while a run
  * is starting cannot buy a second one on the next press.
  */
+
+const RETOUCH_WORDS_HINT =
+  'an instruction to an image model that repaints one painted zone of a garment picture';
 
 /** The paint's tone on screen: the system's one highlight accent, half through (DESIGN.md). */
 const PAINT = '#311eee';
@@ -99,6 +104,9 @@ export function MaskEditor({
   disabled?: boolean;
 }): JSX.Element {
   const run = useStartDesignRun(techCardId, { scope: playgroundRunScope('retouch_zone') });
+  // The card's band, from the query every organ of the studio shares (no second read): the words'
+  // Ideas ask the server only where it names the assistant (C-15).
+  const { band } = useDesignBand(techCardId);
   const { showMessage } = useSnackBarStore();
   const [strokes, setStrokes] = useState<MaskStroke[]>([]);
   const [brush, setBrush] = useState<BrushSize>('m');
@@ -339,9 +347,21 @@ export function MaskEditor({
                   placeholder='Remove the stain, keep the fabric texture'
                   workflowKey='retouch_zone'
                   fieldKey={RETOUCH_WORDS_KEY}
-                  hint='an instruction to an image model that repaints one painted zone of a garment picture'
+                  hint={RETOUCH_WORDS_HINT}
                   maxLength={RETOUCH_WORDS_MAX}
                   disabled={frozen}
+                  serverIdeas={
+                    bandSuggestsPrompts(band)
+                      ? {
+                          techCardId,
+                          mediaIds: ideaMediaIds(media),
+                          context: ideasContext({
+                            workflowTitle: 'Retouch a Zone',
+                            hint: RETOUCH_WORDS_HINT,
+                          }),
+                        }
+                      : undefined
+                  }
                 />
               </FoldSection>
 

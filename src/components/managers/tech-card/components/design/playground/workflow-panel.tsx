@@ -19,6 +19,7 @@ import {
   ToggleRow,
 } from './fields';
 import { playgroundRunScope } from './address';
+import { bandSuggestsPrompts, ideasContext } from './ideas-server';
 import { rememberRecentText, recentTextKey } from './recent';
 import {
   chooseEngine,
@@ -243,7 +244,23 @@ function Field({
 }): JSX.Element | null {
   const key = field.key;
   switch (field.type) {
-    case 'prompt':
+    case 'prompt': {
+      // THE SERVER'S IDEAS (C-15): drawn into the same `ideas ▾` menu, only where the band names the
+      // assistant's model. The question is built here, per render, and costs nothing until a press.
+      const from = bandSuggestsPrompts(band) ? field.ideasFrom?.(draft, { band }) : undefined;
+      const serverIdeas = bandSuggestsPrompts(band)
+        ? {
+            techCardId,
+            mediaIds: from?.mediaIds ?? [],
+            context: ideasContext({
+              workflowTitle: def.title,
+              hint: field.hint,
+              sections,
+              draft,
+              extra: from?.context,
+            }),
+          }
+        : undefined;
       return (
         <PromptField
           value={textOf(draft, key)}
@@ -255,8 +272,10 @@ function Field({
           hint={field.hint}
           maxLength={field.maxLength}
           disabled={disabled}
+          serverIdeas={serverIdeas}
         />
       );
+    }
     case 'images':
       return field.mode === 'grow' ? (
         <ImageSlots

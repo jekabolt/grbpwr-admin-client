@@ -20,6 +20,7 @@ import {
   textOf,
   workflowOffered,
 } from '../common';
+import { ideaMediaIds } from '../../ideas-server';
 import { matchesWorkflow } from '../run-workflow';
 import {
   EMPTY_DRAFT,
@@ -143,6 +144,10 @@ const products = (draft: Draft) => imagesOf(draft, PRODUCT).filter((m) => (m.id 
 const sceneMode = (draft: Draft) =>
   choice(draft, SCENE_MODE, 'edit') === 'reference' ? 'reference' : 'edit';
 const scenePhoto = (draft: Draft) => firstId(imagesOf(draft, SCENE_PHOTO));
+/** C-15: both prompts of tile 1 ask the server's Ideas about the model photo and the first product. */
+const tryonIdeas = (draft: Draft) => ({
+  mediaIds: ideaMediaIds(imagesOf(draft, MODEL_PHOTO)[0], imagesOf(draft, PRODUCT)[0]),
+});
 
 const item = (mediaId: number, role: string): common_DesignFreeformItem => ({
   mediaId,
@@ -202,6 +207,8 @@ const run: WorkflowRun = {
           placeholder: 'one hand on hip, weight on one leg, chin up',
           hint: 'how the person in a try-on photo should change: pose, body, hair; their face stays theirs',
           maxLength: ASK_MAX,
+          // C-15: what the server's Ideas look at.
+          ideasFrom: tryonIdeas,
         },
       ],
     },
@@ -268,6 +275,8 @@ const run: WorkflowRun = {
           placeholder: 'Same as model reference',
           hint: 'the place, the backdrop and the light around the person in a try-on photo',
           maxLength: SCENE_TEXT_MAX,
+          // C-15: what the server's Ideas look at.
+          ideasFrom: tryonIdeas,
         },
       ],
     },

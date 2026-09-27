@@ -15,6 +15,7 @@ import {
   textOf,
   workflowOffered,
 } from '../common';
+import { ideaMediaIds } from '../../ideas-server';
 import { matchesWorkflow } from '../run-workflow';
 import { EMPTY_DRAFT, type Draft, type WorkflowDef, type WorkflowRun } from '../types';
 
@@ -93,6 +94,8 @@ const run: WorkflowRun = {
           placeholder: 'The pleated skirt',
           hint: 'which garment or area of the picture holds the fabric or print to extract as a flat seamless swatch',
           maxLength: ASK_MAX,
+          // C-15: what the server's Ideas look at.
+          ideasFrom: (draft) => ({ mediaIds: ideaMediaIds(imagesOf(draft, IMAGE)[0]) }),
         },
       ],
     },

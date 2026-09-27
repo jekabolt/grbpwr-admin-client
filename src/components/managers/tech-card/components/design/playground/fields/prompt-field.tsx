@@ -9,6 +9,16 @@ import GenericPopover from 'ui/components/popover';
 import Textarea from 'ui/components/text-area';
 
 import { ideasFor, insertIdea } from '../ideas';
+import {
+  answeredIdeas,
+  fetchServerIdeas,
+  ideasMenu,
+  serverIdeasOff,
+  suggestRequest,
+  type IdeasMenu,
+  type ServerIdeasInput,
+  type ServerIdeasState,
+} from '../ideas-server';
 import { recentTextKey, useRecentText } from '../recent';
 
 /**
@@ -23,6 +33,9 @@ import { recentTextKey, useRecentText } from '../recent';
  *  · IDEAS ▾ — a short fixed list per workflow and field (`../ideas.ts`); a pick is INSERTED AT THE
  *    CARET (`setRangeText`), joined to what is there with `, `, and the caret lands after it so
  *    typing continues. No Ideas list for this field → no door (never an empty menu).
+ *    Phase 3 (C-15): where the band names the assistant (`serverIdeas`), a press also asks
+ *    `SuggestPrompts` — «thinking…», then its phrases above one hairline, the fixed list below as
+ *    «more». Any failure is the fixed list alone, silently (`../ideas-server.ts`). Same door.
  *  · IMPROVE — `enhanceText` in mode `improve`, field `other`, `hint` as context. Locked while the
  *    text is blank (the RPC refuses blank text) and while a request is out. The answer REPLACES the
  *    text only if the text is still the one that was sent; a text edited meanwhile is left alone.
@@ -53,6 +66,11 @@ export type PromptFieldProps = {
   /** Hard cap on the text; the counter shows near it. Default 2000. */
   maxLength?: number;
   disabled?: boolean;
+  /**
+   * What the server's Ideas are asked with (C-15). Present ONLY where the band names the assistant's
+   * model (`suggest_prompts_model` non-empty); absent = the fixed list alone and no call, ever.
+   */
+  serverIdeas?: ServerIdeasInput;
 };
 
 type Replaced = { before: string; after: string };
@@ -70,6 +88,7 @@ export function PromptField({
   hint,
   maxLength = 2000,
   disabled,
+  serverIdeas,
 }: PromptFieldProps): JSX.Element {
   const box = useRef<HTMLTextAreaElement | null>(null);
   const { showMessage } = useSnackBarStore();
@@ -77,6 +96,9 @@ export function PromptField({
   const recent = useRecentText(recentTextKey(workflowKey, fieldKey));
 
   const [ideasOpen, setIdeasOpen] = useState(false);
+  const [server, setServer] = useState<ServerIdeasState>({ status: 'off' });
+  /** Bumped by every open and close of the Ideas menu: an answer for an older opening is ignored. */
+  const ideasTicket = useRef(0);
   const [recentOpen, setRecentOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [prev, setPrev] = useState<Replaced | null>(null);
@@ -119,6 +141,7 @@ export function PromptField({
   useEffect(
     () => () => {
       ticket.current += 1;
+      ideasTicket.current += 1;
       clearUndoTimer();
     },
     [],
@@ -144,6 +167,34 @@ export function PromptField({
     setPrev(null);
     clearUndoTimer();
     box.current?.focus();
+  };
+
+  /**
+   * THE IDEAS DOOR. Opening shows the fixed list at once; where the band names the assistant, it
+   * also asks the server — once per question (the answer is cached for the page), never on mount.
+   * Closing only makes a late answer stale: the request cannot be aborted (the generated client
+   * takes no signal), and its answer still lands in the cache for the next press.
+   */
+  const openIdeas = (open: boolean) => {
+    if (disabled) return;
+    setIdeasOpen(open);
+    const mine = ++ideasTicket.current;
+    if (!open) return;
+    if (!serverIdeas || serverIdeasOff()) {
+      setServer({ status: 'off' });
+      return;
+    }
+    const req = suggestRequest(workflowKey, fieldKey, serverIdeas, latest.current.value);
+    const ready = answeredIdeas(req);
+    if (ready) {
+      setServer({ status: 'done', ideas: ready });
+      return;
+    }
+    setServer({ status: 'thinking' });
+    fetchServerIdeas(req).then(
+      (ideas) => ideasTicket.current === mine && setServer({ status: 'done', ideas }),
+      () => ideasTicket.current === mine && setServer({ status: 'failed' }),
+    );
   };
 
   const insert = (idea: string) => {
@@ -264,7 +315,7 @@ export function PromptField({
         {ideas.length > 0 && (
           <GenericPopover
             open={ideasOpen}
-            onOpenChange={(o) => !disabled && setIdeasOpen(o)}
+            onOpenChange={openIdeas}
             title='ideas'
             noTail
             className='w-[300px]'
@@ -276,13 +327,10 @@ export function PromptField({
               </Button>
             }
           >
-            <div role='group' aria-label='ideas' className='flex flex-col py-1'>
-              {ideas.map((idea) => (
-                <button key={idea} type='button' onClick={() => insert(idea)} className={MENU_ROW}>
-                  {idea}
-                </button>
-              ))}
-            </div>
+            <IdeasMenuBody
+              menu={ideasMenu(ideas, server, serverIdeas?.mediaIds.length ?? 0)}
+              onPick={insert}
+            />
           </GenericPopover>
         )}
 
@@ -357,6 +405,74 @@ export function PromptField({
           </GenericPopover>
         </span>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A group's name inside a menu: quieter than the popover's own ruled head (10px bold uppercase) —
+ * grey, small, lowercase, no rule of its own. The hairline between two groups is the divider.
+ */
+export function MenuGroupLabel({ children }: { children: string }): JSX.Element {
+  return (
+    <p aria-hidden className='px-2.5 pb-0.5 pt-1.5 text-micro text-labelColor'>
+      {children}
+    </p>
+  );
+}
+
+/**
+ * THE IDEAS MENU (C-15), drawn from `ideasMenu`'s data: the server's group — «thinking…» while the
+ * call is out, then its phrases — above one hairline, the fixed list below it as «more». With no
+ * server group the fixed list stands alone and unlabelled, exactly as in phase 2.
+ */
+export function IdeasMenuBody({
+  menu,
+  onPick,
+}: {
+  menu: IdeasMenu;
+  onPick: (idea: string) => void;
+}): JSX.Element {
+  const { server, more } = menu;
+  return (
+    <div className='flex flex-col py-1' data-ideas-menu=''>
+      {server && (
+        <div
+          role='group'
+          aria-label={server.label}
+          data-ideas-group='server'
+          className='flex flex-col'
+        >
+          <MenuGroupLabel>{server.label}</MenuGroupLabel>
+          {server.thinking ? (
+            // A row that says the answer is coming — not a spinner, not a control.
+            <p role='status' className='px-2.5 py-2 text-textBaseSize text-labelColor'>
+              thinking…
+            </p>
+          ) : (
+            server.ideas.map((idea) => (
+              <button key={idea} type='button' onClick={() => onPick(idea)} className={MENU_ROW}>
+                {idea}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+      {more.length > 0 && (
+        <div
+          role='group'
+          aria-label={server ? 'more' : 'ideas'}
+          data-ideas-group='static'
+          className={cn('flex flex-col', server && 'mt-1 border-t border-hairline pt-1')}
+        >
+          {server && <MenuGroupLabel>more</MenuGroupLabel>}
+          {more.map((idea) => (
+            <button key={idea} type='button' onClick={() => onPick(idea)} className={MENU_ROW}>
+              {idea}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

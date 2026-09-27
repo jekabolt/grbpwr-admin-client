@@ -207,6 +207,14 @@
 //   node scripts/playground-registry-probe.mjs --mutate-p06-band    пустая полоса утверждает
 //                                                                   runKinds: [] → краснеет X
 //
+// C-15 (Ideas от сервера; живое меню — scripts/playground-prompt-probe.mjs):
+//   Y · ideasFrom каждой плитки даёт ≤ 2 положительных id (и первые картинки формы); тело
+//       SuggestPrompts обрезано по двери (2 картинки, 2000 рун контекста и текста); чистка фраз;
+//       меню как данные (сервер выше, повтор уходит из статических, сбой — только статические);
+//       ключи PROMPT_IDEAS печатаются для сверки с таблицей сервера (B-15).
+//   node scripts/playground-registry-probe.mjs --mutate-ideas-media-cap  потолок картинок 3
+//                                                                   → краснеет Y
+//
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
 
@@ -278,6 +286,7 @@ const MUT = {
   sceneFold: process.argv.includes('--mutate-scene-fold'),
   p06Params: process.argv.includes('--mutate-p06-params'),
   p06Band: process.argv.includes('--mutate-p06-band'),
+  ideasMediaCap: process.argv.includes('--mutate-ideas-media-cap'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -760,6 +769,16 @@ if (MUT.sceneFold)
 if (MUT.p06Band)
   plugins.push(
     swap('p06-band', /design\/use-design-band\.ts$/, '  runKinds: undefined,', '  runKinds: [],'),
+  );
+
+if (MUT.ideasMediaCap)
+  plugins.push(
+    swap(
+      'ideas-media-cap',
+      /playground\/ideas-server\.ts$/,
+      'export const SUGGEST_MEDIA_MAX = 2;',
+      'export const SUGGEST_MEDIA_MAX = 3;',
+    ),
   );
 
 const outfile = resolve(tmpdir(), `playground-registry-probe-${process.pid}.mjs`);
@@ -3733,6 +3752,111 @@ head('X', 'P-06: новые ключи контракта стоят undefined �
     'suggestPromptsModel' in EMPTY && EMPTY.suggestPromptsModel === undefined,
     'пустая полоса: suggestPromptsModel отсутствует — Ideas рисуют только статический список',
     show(EMPTY.suggestPromptsModel),
+  );
+}
+
+// ─── Y · C-15: вопрос серверу Ideas ─────────────────────────────────────────────────────────────
+head('Y', 'C-15: ideasFrom плиток, тело SuggestPrompts, чистка, меню как данные');
+{
+  const many = [media(301), media(302), media(301), media(0), media(303)];
+  const full = draft({
+    images: {
+      photos: many,
+      image: many,
+      refs: many,
+      model_photo: [media(401)],
+      product: [media(402), media(403)],
+    },
+    slots: {
+      images: { design: media(501), fabric: media(502), garment: media(601), logo: media(602) },
+    },
+  });
+  const WANT = {
+    'virtual_try_on.pose': [401, 402],
+    'virtual_try_on.scene': [401, 402],
+    'fabric_to_image.region': [301],
+    'ghost_mannequin.garment': [301],
+    'change_color.garment': [301],
+    'swap_fabrics.garment': [501],
+    'add_logo.placement': [601],
+    'design_variations.variation': [301],
+    'create_edit.prompt': [301],
+  };
+  const seen = {};
+  for (const wf of M.WORKFLOWS) {
+    for (const section of wf.run?.sections ?? [])
+      for (const f of section.fields)
+        if (f.type === 'prompt') {
+          const ids = f.ideasFrom ? [...f.ideasFrom(full, ctx).mediaIds] : null;
+          seen[`${wf.key}.${f.key}`] = ids;
+        }
+  }
+  for (const [key, want] of Object.entries(WANT))
+    ck(
+      same(seen[key], want) && seen[key].length <= 2 && seen[key].every((id) => id > 0),
+      `${key}: ideasFrom → ${show(want)} (≤ 2, без нулей и повторов)`,
+      show(seen[key]),
+    );
+  ck(
+    M.ideaMediaIds(media(1), media(2), media(3)).length === 2 &&
+      same(M.ideaMediaIds(media(0), null, media(5), media(5)), [5]),
+    'ideaMediaIds: не больше двух, без нулей, пустых и повторов',
+  );
+  const long = 'ж'.repeat(2100);
+  const req = M.suggestRequest(
+    'change_color',
+    'garment',
+    { techCardId: 7, mediaIds: [9, 9, 0, 8, 7], context: long },
+    long,
+  );
+  ck(
+    same(req.mediaIds, [9, 8]) &&
+      Array.from(req.context).length === 2000 &&
+      Array.from(req.text).length === 2000,
+    'тело SuggestPrompts: 2 картинки, 2000 рун контекста и текста — до всякой траты',
+    show({ ids: req.mediaIds, c: req.context.length, t: req.text.length }),
+  );
+  ck(
+    same(M.cleanServerIdeas([' a  b ', 'A B', '', 7, 'c', 'd', 'e', 'f', 'g']), [
+      'a b',
+      'c',
+      'd',
+      'e',
+      'f',
+    ]),
+    'чистка: обрезка, схлопывание, без повторов в любом регистре, не больше пяти',
+  );
+  const statics = ['one', 'two', 'three'];
+  const done = M.ideasMenu(statics, { status: 'done', ideas: ['TWO', 'four'] }, 1);
+  ck(
+    done.server?.label === 'for this picture' &&
+      same(done.server?.ideas, ['TWO', 'four']) &&
+      same(done.more, ['one', 'three']),
+    'меню: сервер выше, повтор уходит из статических, «for this picture»',
+    show(done),
+  );
+  ck(
+    M.ideasMenu(statics, { status: 'failed' }, 1).server === null &&
+      M.ideasMenu(statics, { status: 'done', ideas: [] }, 0).server === null &&
+      M.ideasMenu(statics, { status: 'off' }, 0).server === null &&
+      M.ideasMenu(statics, { status: 'thinking' }, 0).server?.label === 'for this field' &&
+      M.ideasMenu(statics, { status: 'thinking' }, 2).server?.label === 'for these pictures',
+    'сбой, пустой ответ и «off» — только статические; подпись по числу картинок (0 / 1 / 2)',
+  );
+  ck(
+    M.bandSuggestsPrompts({ suggestPromptsModel: 'google/gemini-3.1-flash-lite' }) &&
+      !M.bandSuggestsPrompts({ suggestPromptsModel: '  ' }) &&
+      !M.bandSuggestsPrompts({}),
+    'поле 33: непустое — да; пустое и отсутствующее — нет',
+  );
+  const keys = Object.entries(M.PROMPT_IDEAS)
+    .flatMap(([wf, fields]) => Object.keys(fields).map((f) => `${wf}.${f}`))
+    .sort();
+  console.log(`  ключи PROMPT_IDEAS (для сверки с B-15): ${keys.join(' ')}`);
+  ck(
+    keys.length === 11,
+    'ключей PROMPT_IDEAS 11 (9 плиток, у retouch_zone два)',
+    String(keys.length),
   );
 }
 

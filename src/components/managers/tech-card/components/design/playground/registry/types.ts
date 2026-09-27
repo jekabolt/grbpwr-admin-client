@@ -95,6 +95,12 @@ export type PromptFieldDef = FieldBase & {
   /** Context handed to Improve. */
   hint?: string;
   maxLength?: number;
+  /**
+   * What the server's Ideas look at besides the field's purpose and text (C-15, `SuggestPrompts`):
+   * at most two pictures of this form (`ideaMediaIds`), and an extra card fact if the tile has one.
+   * Absent = the Ideas are asked about the field alone («for this field»).
+   */
+  ideasFrom?: (draft: Draft, ctx: WireCtx) => { mediaIds: readonly number[]; context?: string };
 };
 
 export type ImagesFieldDef = FieldBase & {

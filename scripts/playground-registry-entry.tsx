@@ -136,6 +136,15 @@ export {
 // P-06 · the phase-3 keys: the literal every tile starts from, and the band before the server speaks.
 export { emptyParams } from 'components/managers/tech-card/components/design/playground/registry/common';
 export { EMPTY_BAND } from 'components/managers/tech-card/components/design/use-design-band';
+// C-15 · the server's Ideas: the question, the cleaning, the menu as data, the static keys.
+export {
+  bandSuggestsPrompts,
+  cleanServerIdeas,
+  ideaMediaIds,
+  ideasMenu,
+  suggestRequest,
+} from 'components/managers/tech-card/components/design/playground/ideas-server';
+export { PROMPT_IDEAS } from 'components/managers/tech-card/components/design/playground/ideas';
 export { REUSE_LABEL } from 'components/managers/tech-card/components/design/playground/fields';
 /** THE CHAIN rail as the person sees it (C-10): its cells and its «N of M steps» counter. */
 export function railMarkup(ctx: ChainCtx): string {
