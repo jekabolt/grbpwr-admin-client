@@ -43,9 +43,9 @@ export function ToggleRow({
 }: ToggleRowProps): JSX.Element {
   return (
     <FieldRow label={label} className={ROW} data-toggle-row={anchor ?? label}>
-      {/* The shared switch draws `outline-none` and no focus ring of its own; the label draws the
-          system's 2px ink outline while the switch inside it holds keyboard focus. */}
-      <label className='ml-auto flex cursor-pointer items-center has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-textColor'>
+      {/* The shared switch draws the system's 2px ink focus ring itself (ai-providers FIX-E8); a
+          ring on this label as well would double it. */}
+      <label className='ml-auto flex cursor-pointer items-center'>
         <span className='sr-only'>{label}</span>
         <ToggleSwitch checked={checked} disabled={disabled} onCheckedChange={onChange} />
       </label>

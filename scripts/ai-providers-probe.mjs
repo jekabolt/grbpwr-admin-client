@@ -235,6 +235,12 @@ const MUTATIONS = {
     from: 'const primary = shownPrimary ? norm(shownPrimary) : defaultable ? { providerKey: "", model: "" } : void 0;',
     to: 'const primary = norm(shownPrimary);',
   },
+  'switch-focus-hidden': {
+    red: 'FE8',
+    what: 'the switch draws no focus ring (outline-none, as before)',
+    from: 'bg-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor data-[state=checked]:bg-bgColor',
+    to: 'bg-textColor outline-none data-[state=checked]:bg-bgColor',
+  },
   'clear-sends-old-value': {
     red: 'E5',
     what: 'clear sends the old key (its last four) instead of an empty value',
@@ -615,6 +621,12 @@ if (process.argv.includes('--shots')) {
       await page.getByRole('option', { name: 'Anthropic', exact: true }).click();
       await page.waitForTimeout(600);
     });
+    await shoot('switchfocus', w, '/ai-providers', {}, async () => {
+      await page.waitForSelector('[data-provider="openai"]');
+      await page.locator('h1').first().click();
+      for (let i = 0; i < 60 && !(await page.evaluate(() => document.activeElement?.getAttribute('role') === 'switch')); i++)
+        await page.keyboard.press('Tab');
+    });
     await shoot('spendtz', w, '/ai-providers?view=spend', { spendTz: 'UTC' }, async () => {
       await page.waitForSelector('[data-spend-provider="openai"]');
     });
@@ -693,6 +705,43 @@ await page.waitForSelector('[data-provider="openai"]', { timeout: 8000 });
     return [t && getComputedStyle(t).color, f && getComputedStyle(f).color];
   });
   ck('FE5', !!colours[0] && colours[0] === colours[1], '"testing" wears the attention colour', JSON.stringify(colours));
+}
+
+// FE8 · the switch shows its focus: a keyboard focus draws the system's 2px ink ring, a click draws none.
+{
+  await mount();
+  await page.waitForSelector('[data-provider="openai"]', { timeout: 8000 });
+  await page.locator('h1').first().click();
+  let tabs = 0;
+  while (tabs < 60 && !(await page.evaluate(() => document.activeElement?.getAttribute('role') === 'switch'))) {
+    await page.keyboard.press('Tab');
+    tabs += 1;
+  }
+  const ringOf = () =>
+    page.evaluate(() => {
+      const el = document.activeElement;
+      if (el?.getAttribute('role') !== 'switch') return null;
+      const cs = getComputedStyle(el);
+      return { style: cs.outlineStyle, width: cs.outlineWidth, offset: cs.outlineOffset, colour: cs.outlineColor, ink: cs.borderTopColor, visible: el.matches(':focus-visible') };
+    });
+  const kb = await ringOf();
+  ck(
+    'FE8',
+    !!kb && kb.visible && kb.style === 'solid' && kb.width === '2px' && kb.offset === '2px' && kb.colour === kb.ink,
+    'Tab onto a switch → a 2px solid ring, 2px off, in the ink colour',
+    JSON.stringify(kb),
+  );
+  await mount();
+  await page.waitForSelector('[data-provider="fal"]', { timeout: 8000 });
+  // Press the pointer on the switch and read it there: focus lands on press; the write it would
+  // send disables the switch (and drops its focus), so the release happens off the switch.
+  const box = await row('fal').getByRole('switch').boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  const ms = await ringOf();
+  await page.mouse.move(2, 2);
+  await page.mouse.up();
+  ck('FE8', !!ms && !ms.visible && ms.style === 'none', 'a pointer press on a switch → focus without a ring', JSON.stringify(ms));
 }
 
 // ═══ B · THE SWITCH ════════════════════════════════════════════════════════════════════════════
