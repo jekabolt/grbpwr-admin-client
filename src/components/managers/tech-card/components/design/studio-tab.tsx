@@ -287,8 +287,8 @@ export function StudioTab({
       : opened.current.step;
   const ctx = { ...chain, now: decided };
   /* The rail's write and the legacy rewrite live with the playground's address rules
-     (`playground/address.ts`): leaving a workflow opened from the grid has to pop that entry
-     before it replaces, or the grid stays behind as an orphan entry (G-01). */
+     (`playground/address.ts`): every one of them replaces, so the card's steps stay one history
+     entry and Back leaves the card (G-01 r2). */
   const goStep = useStepAddress();
   useLegacyStepRewrite(legacy);
 

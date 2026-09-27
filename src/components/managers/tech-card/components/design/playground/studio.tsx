@@ -26,10 +26,9 @@ import { WorkflowPanel } from './workflow-panel';
  *   · `?wf=<key>`  → «Select a workflow» with the open one (`WorkflowCard`, whose |→ is the one way
  *                    back), its form (`WorkflowPanel`) and its own results.
  *
- * `?wf=` IS THIS SCREEN'S (`useWorkflowAddress`, `./address.ts`). Opening a workflow from the grid
- * is a history entry, so the browser's Back returns to the grid (C-05); the recall intake and the
- * legacy `?step=aside` rewrite stay `replace`; |→ walks back to the grid it was opened from, or
- * writes the grid over a workflow a link landed on.
+ * `?wf=` IS THIS SCREEN'S (`useWorkflowAddress`, `./address.ts`), and every write of it REPLACES:
+ * |→ is the way back to the grid, and the browser's Back leaves the playground (G-01 r2 — why the
+ * C-05 history entry per opened workflow was taken out is argued in `./address.ts`).
  *
  * ⚠ A WORKFLOW THIS SERVER CANNOT RUN IS NEVER OPENED INTO A FORM. An address naming one (an old
  * link, a server rolled back) draws the grid with one line saying which and why — a form whose
@@ -56,7 +55,8 @@ export function PlaygroundStudio({
   disabled?: boolean;
 }): JSX.Element {
   const drafts = useWorkflowDrafts(techCardId);
-  const { asked, setWf, openFromGrid, backToGrid } = useWorkflowAddress();
+  const { asked, setWf } = useWorkflowAddress();
+  const backToGrid = useCallback(() => setWf(null), [setWf]);
 
   const def = workflowByKey(asked);
   const open = openWorkflow(asked, band);
@@ -110,7 +110,7 @@ export function PlaygroundStudio({
                 </Text>
               </CalloutBox>
             )}
-            <WorkflowGrid band={band} onOpen={openFromGrid} />
+            <WorkflowGrid band={band} onOpen={setWf} />
           </div>
         )}
       </Section>
