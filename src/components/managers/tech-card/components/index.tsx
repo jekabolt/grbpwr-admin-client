@@ -103,7 +103,6 @@ import { SizeChartField } from './size-chart-field';
 import { StyleFactsField } from './style-facts-field';
 import { STYLE_FACT_KEYS } from './tech-card-options';
 import { TechCardFittings } from './tech-card-fittings';
-import { fingerprintOf, useTechCardDraft, type DraftStamp } from './useTechCardDraft';
 import {
   auditOperationPresence,
   contradictsScreen,
@@ -123,7 +122,6 @@ import {
   type FlushResult,
 } from './design/autosave-contract';
 import {
-  bodyFingerprint,
   bodyMoved,
   bodyOnTheWire,
   bodyWorkOf,
@@ -147,6 +145,7 @@ import {
   useSaveHistory,
   type HistoryEntry,
 } from './save-history';
+import { SaveFailureLine } from './save-failure-line';
 import { formatSavedAt, SaveStatusChip } from './save-status-chip';
 import { decideAutoStage, StageProgress, stageLabel, type FormErrorRow } from './stage-progress';
 
@@ -413,6 +412,29 @@ function cloneFormValues(v: TechCardFormData): TechCardFormData | null {
   }
 }
 
+/**
+ * D-63 (27.09, O-64): the card keeps no local drafts. What the draft journal of earlier builds left in
+ * this browser — every key under its prefix: the v2 slots with their «beside», «session» and «earlier»
+ * slots, and the pre-v2 ones — goes on the first open of a card, without a word. (The CONSTRUCTION
+ * DRAFT's own keys, `plm.techcard.drafted.*` / `…dismissed.*`, are another thing and stay.)
+ */
+const LOCAL_DRAFT_PREFIX = 'plm.techcard.draft.';
+let localDraftsForgotten = false;
+function forgetLocalDrafts() {
+  if (localDraftsForgotten) return;
+  localDraftsForgotten = true;
+  try {
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(LOCAL_DRAFT_PREFIX)) stale.push(key);
+    }
+    stale.forEach((key) => localStorage.removeItem(key));
+  } catch {
+    /* a private window or blocked storage — nothing to forget, nothing to break */
+  }
+}
+
 /** M-02: what the quiet check found, one row per field (a field can fail several rules at once). */
 function quietIssues(error: {
   issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>;
@@ -659,12 +681,6 @@ export function TechCardForm({
     );
   };
   const [conflict, setConflict] = useState(false);
-  // ревью MJ-3: a restore over a card that moved since the draft waits for this answer.
-  const [restoreAsk, setRestoreAsk] = useState<{
-    id: string | undefined;
-    from: number | null;
-    to: number;
-  } | null>(null);
   // ревью mn-5: the conflict decision is PENDING from the moment it opens until «keep mine» answers it
   // (the modal's own close only hides it; the chip shows it again). While it is pending nothing is
   // written — a write that was already on its way to the wire (the check before it awaited) included.
@@ -894,33 +910,30 @@ export function TechCardForm({
   // retired is back to needing the single output material before anything can be planned.
   const liveVariants = activeVariantCount(outputVariants);
 
-  // Autosave the working draft to localStorage (Q9b): leaving the route (to /materials, /fitting,
-  // the product manager) or a hard refresh no longer loses unsaved edits — restore on return.
-  const draftKey = isEditMode ? `edit.${numId ?? id ?? '0'}` : 'new';
-  // Only the two staging functions, pinned: `staging` itself is a fresh object every render (it
-  // carries the live `changes` array), and handing that straight to the hook restarted its debounced
-  // autosave timer on every render — a card being edited could keep re-arming the timer and never
-  // actually persist the staged snapshots the restore banner then promises.
-  const stagingIO = useMemo(
-    () => ({ serialize: staging.serialize, hydrate: staging.hydrate }),
-    [staging.serialize, staging.hydrate],
-  );
-  const draft = useTechCardDraft(
-    form,
-    draftKey,
-    canWrite(SECTION.techCards) && !frozen,
-    staging.changes.length > 0,
-    stagingIO,
-    // Every movement of the staged queue re-writes the draft, not only the first (B-04).
-    staging.revision,
-    {
-      // mn-3: on a saved card the work worth a draft is the body's (and the queue's); a new card's
-      // create writes the style facts too, so all of its dirt counts.
-      formWork: isEditMode ? () => bodyWorkOf(form) : undefined,
-      // MJ-3: the card under the work — its version and body fingerprint (computed once per card).
-      stamp: isEditMode && numId ? () => draftStamp() : undefined,
-    },
-  );
+  // ═══ NO LOCAL DRAFTS (27.09 · O-64, D-63) ═══════════════════════════════════════════════════════
+  // The owner: «оно просто должно автосохранять все и все если сохранение не прошло просто на этом
+  // месте должна быть ошибка». The card keeps no draft journal — no localStorage copy, no «unsaved work
+  // was found» banner, no restore / discard. The autosave saves; a write that did not pass is said at
+  // the top of the form (SaveFailureLine). What earlier builds left in this browser goes, silently.
+  useEffect(() => forgetLocalDrafts(), []);
+  // THE ONE GUARD LEFT in place of the drafts: the browser asks before a tab with unsaved work is closed
+  // or reloaded. Asked at the moment of leaving (mn-3: dirt nobody can write is no reason to hold the
+  // page); a new card's create writes the style facts too, so all of its dirt counts.
+  const canWriteCard = canWrite(SECTION.techCards) && !frozen;
+  const unsavedWork = form.formState.isDirty || staging.changes.length > 0;
+  useEffect(() => {
+    if (!canWriteCard || !unsavedWork) return;
+    const guard = (e: BeforeUnloadEvent) => {
+      const work = isEditMode ? bodyWorkOf(form) : !!form.control._formState.isDirty;
+      if (!work && staging.peek().length === 0) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', guard);
+    return () => window.removeEventListener('beforeunload', guard);
+    // `form` and `staging` are read live, at the moment of leaving.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canWriteCard, unsavedWork, isEditMode]);
 
   // Section-completion progress (Q9): a visible "how filled is this card" signal, per tab + overall.
   const len = (v: unknown) => (Array.isArray(v) ? v.length : 0);
@@ -1094,27 +1107,6 @@ export function TechCardForm({
     card: techCard ?? null,
   });
   const claimVersion = () => lockOverride.current ?? base.current.version;
-  // ревью MJ-3: the card a draft is typed on — its version, and when this page holds the card the
-  // fingerprint of what a restore would put back over it (once per card: every draft write asks): the
-  // body, and the style facts — a style write moves only the version and the facts, and a restore over
-  // it would bring the draft's stale facts back (a season put back re-mints the colourway SKUs).
-  const stampCache = useRef<{ card: common_TechCard | null; body?: string }>({ card: null });
-  function draftStamp(): DraftStamp {
-    const cur = base.current;
-    if (cur.card && stampCache.current.card !== cur.card) {
-      const facts = mapTechCardToForm(cur.card) as unknown as Record<string, unknown>;
-      const style = fingerprintOf(JSON.stringify(STYLE_FACT_KEYS.map((k) => facts[k] ?? null)));
-      stampCache.current = {
-        card: cur.card,
-        body: `${bodyFingerprint(cur.card, canWriteCosting)}~${style}`,
-      };
-    }
-    return {
-      version: cur.version,
-      body: cur.card ? stampCache.current.body : undefined,
-      updatedAt: (cur.card ?? techCard)?.updatedAt,
-    };
-  }
   const adopt = (card: common_TechCard) => {
     base.current = { version: card.lockVersion ?? 0, card };
   };
@@ -1304,11 +1296,9 @@ export function TechCardForm({
       : null,
   );
   const history = useSaveHistory(isEditMode ? numId : undefined, openedText);
-  // The QUIET complete (B-03 / B-04): everything on screen is on the server. History records the text
-  // that is there now; the draft, the unload copy of unsaved work, has nothing left to guard — THIS
-  // session's copy. A draft found on open and not yet answered is not touched (R-11).
+  // The QUIET complete (B-03 / B-04): everything on screen is on the server — history records the text
+  // that is there now.
   function afterQuiescentSave() {
-    draft.clearOwn();
     if (numId) history.push(textSnapshotOf(form.getValues()), base.current.version);
   }
 
@@ -1446,7 +1436,7 @@ export function TechCardForm({
     // than refused (mapEquipmentDefaultsOut — a half-added row must not block a save carrying nine
     // other tabs' work), and a row with no key gets one minted. Reset to what was SENT, such a row
     // comes back as a pristine, clean row of a card that does not contain it: no unsaved-changes
-    // guard, no draft, and it disappears at the next navigation without anything having said so.
+    // guard, and it disappears at the next navigation without anything having said so.
     // The section carries nothing else the form owns and the server does not round-trip, so taking
     // the server's copy costs nothing and makes «saved» mean saved.
     // assemblyCleared — НАМЕРЕНИЕ ОДНОГО СОХРАНЕНИЯ, а не свойство карточки, и после успешной
@@ -1776,8 +1766,7 @@ export function TechCardForm({
         // A panel edited WHILE its own commit was in flight wrote the older values and kept the newer
         // ones staged (see commitAll); a panel staged for the first time meanwhile is queued too. With
         // the autosave on, the next cycle carries both without a word from anyone; the banner that
-        // says «Press Save again» stays only where no autosave runs. The draft stays too: it is the
-        // only copy of that work until it is written.
+        // says «Press Save again» stays only where no autosave runs.
         const stillStaged = [...(outcome.restaged ?? []), ...(outcome.pending ?? [])];
         if (stillStaged.length > 0 && !autosaveEnabled) {
           setStagingError(
@@ -1788,12 +1777,9 @@ export function TechCardForm({
         // outcome the autosave counts toward its cap. New work staged meanwhile is ordinary work: the
         // write is `complete`, and the autosave's own «work left» check (B-03) carries it next cycle.
         if (outcome.restaged?.length) return { bodySaved, ok: true, outcome: 'restaged' };
-        // B-03 / B-04: history and the draft cleanup belong to a QUIET card, and the autosave decides
-        // that — its onComplete runs only when nothing is left to write (an edit typed while this
-        // write was on the wire is still only in the draft). The one edit-mode write WITHOUT the
-        // autosave is a frozen card's «re-open to draft», and it clears nothing: a draft present then
-        // was left by edits typed while the card was being released, and the banner offers it once
-        // the card is open again.
+        // B-03 / B-04: history belongs to a QUIET card, and the autosave decides that — its onComplete
+        // runs only when nothing is left to write (an edit typed while this write was on the wire is
+        // not on the server yet).
         return { bodySaved, ok: true, outcome: 'complete' };
       }
 
@@ -1844,9 +1830,7 @@ export function TechCardForm({
           // once, by name). Nothing here is theirs to look at any more — no banner, no params, no
           // navigation — and nothing is «still staged»: the queue went with the page. One sentence
           // says what is missing — the refused panel and every one queued after it — and where to put
-          // it back. This session's copy of the create form goes too: the card exists, and «restore»
-          // on the next new card would «add» it a second time (a draft found on open and not answered
-          // is not this session's, and stays — R-11).
+          // it back.
           const queued = staging.peek();
           const missing = queued.length > 0 ? queued : [outcome.failed.change];
           showMessage(
@@ -1855,7 +1839,6 @@ export function TechCardForm({
               : `created without «${missing.map((c) => c.label).join('», «')}» — open the card to retry`,
             'error',
           );
-          draft.clearOwn();
           return { bodySaved: true, ok: false, outcome: 'partial' };
         }
         if (outcome.failed) {
@@ -1872,8 +1855,6 @@ export function TechCardForm({
         }
       }
       showMessage('tech card created', 'success');
-      // This session's copy only: a found «new» draft nobody answered is the operator's earlier work (R-11).
-      draft.clearOwn();
       // R-13: landed after the operator left — they are somewhere else now, and stay there.
       if (!pageMounted.current) return { bodySaved: true, ok: true, outcome: 'complete' };
       // If they were working on labels & pkg, land on the saved card's labels tab so the
@@ -2074,7 +2055,7 @@ export function TechCardForm({
   // THE GESTURE (D-59): the purpose field turning auxiliary on a card that saves itself opens the dialog
   // at once — the switch is confirmed where it is made, not at a save nobody presses any more. Only a
   // person's change counts: RHF tags a field's own onChange `change`, while a programmatic write (the
-  // quiet save putting a held switch back, a restored draft) carries no type and lands in the safety
+  // quiet save putting a held switch back) carries no type and lands in the safety
   // state instead (`needs-confirm`: the chip opens this same dialog).
   const onPurposeGesture = useRef<(prev: unknown, next: unknown) => void>(() => {});
   onPurposeGesture.current = (prev, next) => {
@@ -2234,8 +2215,7 @@ export function TechCardForm({
       const { bodySaved, ok, outcome, message, refused } = await writeTechCard(data);
       // R-7: the autosave handed this write to the dialog and does not run it, so it hears the outcome
       // here — its status ends where the write did (no «unsaved · confirm the switch ›» over a card
-      // that is saved), and a quiet card gets the same bookkeeping as after its own cycle (draft,
-      // history).
+      // that is saved), and a quiet card gets the same bookkeeping as after its own cycle (history).
       autosave.settleExternal({ outcome, message, refused }, 'convert');
       if (ok) {
         // Only now: the card has to BE auxiliary before a colour variant is allowed on it (the
@@ -2369,8 +2349,8 @@ export function TechCardForm({
   // handleSubmit would hand them to doSubmit (zod OUTPUT, defaults and all).
   //
   // M-03 → D-59: a sellable→auxiliary flip is confirmed at its gesture — the purpose field opens its
-  // dialog. A flip that still reaches a quiet write unconfirmed (a restored draft, a confirm that could
-  // not write the card) is HELD: the write carries the STORED purpose so every other edit still lands,
+  // dialog. A flip that still reaches a quiet write unconfirmed (a confirm that could not write the
+  // card) is HELD: the write carries the STORED purpose so every other edit still lands,
   // the flip goes back into the form afterwards, and the status says `needs-confirm` — the safety
   // state, whose chip opens the dialog, never a write.
   async function silentSave(): Promise<SaveResult> {
@@ -2519,11 +2499,11 @@ export function TechCardForm({
         form.setValue('approvalState', standing, { shouldDirty: true });
       }
     }
-    // Typed while the release was on the wire: the card is frozen now and saves nothing more. The
-    // draft keeps it (it is cleared only by a quiet save) for the next «re-open to draft».
+    // Typed while the release was on the wire: the card is frozen now and saves nothing more — and no
+    // draft keeps it (O-64, D-63), so it is said plainly.
     if (landed && next === RELEASED && (bodyWorkOf(form) || staging.peek().length > 0)) {
       showMessage(
-        'released. Edits made while it was being released were not saved; they wait in the draft for the next re-open',
+        'released. Edits made while it was being released were not saved — the card is frozen',
         'error',
       );
     }
@@ -2552,28 +2532,9 @@ export function TechCardForm({
     // LIVE errors (the published ones: an explicit save, a server violation), before any re-render.
     countErrors: () => flattenFieldErrors(form.control._formState.errors as FieldErrors).length,
     onComplete: afterQuiescentSave,
-    // R-11: organs read it off the contract (the WORDS seed waits while it is true).
-    draftPending: !!draft.pending,
     // M2: a style fact is work only through the style panel's queue — the body never writes it.
     bodyWork: () => bodyWorkOf(form),
   });
-
-  // THE DRAFT BANNER'S DOORS. A restore over a card whose body moved since the draft asks first (ревью
-  // MJ-3); restored work is unsaved work — the autosave hears it at once (B-1).
-  function doRestore(id: string | undefined) {
-    setRestoreAsk(null);
-    draft.restore(id);
-    autosave.request('restore');
-  }
-  function askRestore(id: string | undefined) {
-    const moved = draft.movedSince(id);
-    if (moved) setRestoreAsk({ id, ...moved });
-    else doRestore(id);
-  }
-  function discardDrafts() {
-    setRestoreAsk(null);
-    draft.clear();
-  }
 
   const saving = form.formState.isSubmitting || autosave.status === 'saving';
   // A card at rest has nothing to answer for: the quiet check's list goes with the work it was about
@@ -2590,12 +2551,8 @@ export function TechCardForm({
   // nothing staged — so a 409 on this write can be answered with a quiet re-read, M-01), at most five
   // steps per page life, each step its own save and its own «stage → …».
   const savedStage = techCard?.techCard?.stage;
-  const draftPending = !!draft.pending;
   useEffect(() => {
     if (!AUTO_STAGE || !autosaveEnabled || autoStageInFlight.current) return;
-    // R-11: a found draft still waiting for its answer holds the stage too — the raise would dirty the
-    // form and go out with a quiet save before the operator has said what to do with that work.
-    if (draftPending) return;
     if (autosave.status !== 'idle' && autosave.status !== 'saved') return;
     if (bodyWorkOf(form) || staging.peek().length > 0) return;
     if (autoStageSteps.current >= AUTO_STAGE_MAX_STEPS) return;
@@ -2621,7 +2578,7 @@ export function TechCardForm({
     // `form` and `staging` are read live inside; the triggers are the readiness answer, the saved
     // stage, the form's stage and the autosave settling.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readiness, savedStage, stage, autosave.status, autosaveEnabled, isAux, draftPending]);
+  }, [readiness, savedStage, stage, autosave.status, autosaveEnabled, isAux]);
 
   // ROLLBACK (D-17'): text sections only, everything else stays as it is now; then save.
   const restoreHistory = (entry: HistoryEntry) => {
@@ -3168,104 +3125,23 @@ export function TechCardForm({
         <PresenceLossBanner audit={presenceLoss} onDismiss={() => setPresenceLoss(null)} />
       )}
 
-      {/* Draft and frozen stay inline — they are context, not decisions. */}
-      {draft.pending && (
-        <CalloutBox tone='warning' className='mt-2.5 flex flex-col gap-2'>
-          {draft.drafts.length <= 1 ? (
-            <div className='flex flex-wrap items-center gap-2'>
-              <Text size='micro'>
-                an unsaved draft was found
-                {draft.pending.savedAt
-                  ? ` from ${new Date(draft.pending.savedAt).toLocaleString('en-US')}`
-                  : ''}{' '}
-                — restore it or discard it?
-              </Text>
-              <div className='ml-auto flex gap-1.5'>
-                <Button
-                  type='button'
-                  variant='main'
-                  size='sm'
-                  onClick={() => askRestore(draft.drafts[0]?.id)}
-                >
-                  restore
-                </Button>
-                <Button type='button' variant='secondary' size='sm' onClick={discardDrafts}>
-                  discard
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* MJ-2: every visit that left work beside an unanswered draft left a draft of its own —
-                  all of them are here, the newest first, until one is restored or all are discarded. */}
-              <div className='flex flex-wrap items-center gap-2'>
-                <Text size='micro'>
-                  unsaved work was found — {draft.drafts.length} drafts, the newest first: restore
-                  one (the others are discarded) or discard all?
-                </Text>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='sm'
-                  className='ml-auto'
-                  onClick={discardDrafts}
-                >
-                  discard all
-                </Button>
-              </div>
-              {draft.drafts.map((d, i) => (
-                <div key={d.id} className='flex flex-wrap items-center gap-2'>
-                  <Text size='micro'>
-                    {i === 0 ? 'the newest' : `draft ${i + 1}`}
-                    {d.savedAt ? ` · ${new Date(d.savedAt).toLocaleString('en-US')}` : ''}
-                  </Text>
-                  <Button
-                    type='button'
-                    variant={i === 0 ? 'main' : 'secondary'}
-                    size='sm'
-                    className='ml-auto'
-                    onClick={() => askRestore(d.id)}
-                  >
-                    {i === 0 ? 'restore the newest' : `restore draft ${i + 1}`}
-                  </Button>
-                </div>
-              ))}
-            </>
-          )}
-          {/* MJ-3: the draft is the WHOLE card as it was typed; over a card whose body moved since, a
-              restore puts back what the other editor changed — said before it happens. */}
-          {restoreAsk && (
-            <div className='flex flex-wrap items-center gap-2' data-draft-moved=''>
-              <Text size='micro'>
-                the card changed (
-                {restoreAsk.from !== null
-                  ? `v${restoreAsk.from} → v${restoreAsk.to}`
-                  : `now v${restoreAsk.to}`}
-                ) since this draft; restoring overwrites those changes
-              </Text>
-              <div className='ml-auto flex gap-1.5'>
-                <Button
-                  type='button'
-                  variant='main'
-                  size='sm'
-                  onClick={() => doRestore(restoreAsk.id)}
-                >
-                  restore anyway
-                </Button>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='sm'
-                  onClick={() => setRestoreAsk(null)}
-                >
-                  cancel
-                </Button>
-              </div>
-            </div>
-          )}
-        </CalloutBox>
+      {/* THE SAVE THAT DID NOT PASS (O-64, D-63): one line where the drafts' banner stood, and only
+          while a write has not passed — invalid, failed, refused, conflicted. Saving, unsaved and
+          saved are the chip's to say, in the header; this is no second chip. */}
+      {autosaveEnabled && (
+        <SaveFailureLine
+          status={autosave.status}
+          errorsCount={autosave.errorsCount}
+          message={autosave.message}
+          cause={autosave.cause}
+          refusal={autosave.refusal}
+          firstError={formErrorRows[0]}
+          onRevealError={revealError}
+          onOpenConflict={() => setConflict(true)}
+        />
       )}
 
+      {/* Frozen stays inline — it is context, not a decision. */}
       {frozen && (
         <CalloutBox tone='note' className='mt-2.5'>
           <Text size='micro'>
@@ -3597,7 +3473,6 @@ export function TechCardForm({
                 // пере-запись МИМО handleSubmit, и без него кнопка фулскрина оставалась бы живой
                 // всё время, пока летит переворот. `saving` несёт и цикл автосейва.
                 saving={saving || converting}
-                draftPending={Boolean(draft.pending)}
                 // Якоря находок аудита («op:460», «piece:SL_INS_L») ведут по карточке. Прокладка
                 // та же, что у ленты жизненного цикла: имя вкладки приходит строкой, а `TabId`,
                 // свёрнутые псевдонимы и видимость вкладок остаются знанием этой страницы.

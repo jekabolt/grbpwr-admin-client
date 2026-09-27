@@ -8,13 +8,13 @@
 //   (5) 409 держит ВСЕ записи, явные тоже (M-01); откат всей работы гасит любой статус о ней (N-02);
 //       после dispose машина не рендерит и не взводит таймеров (N-01);
 //   (6) после записи форма чиста, если никто не правил (R-1), — и когда карточка пришла маппером, и когда
-//       она восстановлена из черновика-JSON (у профиля пресса без пара ключа `pressSteam` там нет, а
-//       маппер отдаёт его присутствующим `undefined`); карта грязного — разреженная (R-8). Настоящий
-//       RHF (createFormControl) и настоящий маппер схемы;
+//       форма собрана из JSON (так восстанавливался черновик до O-64: у профиля пресса без пара ключа
+//       `pressSteam` там нет, а маппер отдаёт его присутствующим `undefined`); карта грязного —
+//       разреженная (R-8). Настоящий RHF (createFormControl) и настоящий маппер схемы;
 //   (8) хелперы записи: «грязно ли что-то под узлом» по полной карте RHF (m4); отказ панели — только
 //       её собственный, в той же задаче (m2); сдвинулось ли ТЕЛО между двумя чтениями карточки (M-3);
 //       работа тела формы без фактов стиля (M2); тело, которое страница ОТПРАВИЛА, против прочитанного
-//       потом (mn-1); отпечаток тела, по которому черновик узнаёт, сдвинулась ли карточка (MJ-3);
+//       потом (mn-1);
 //   (7) панель, которую правят во время каждого её коммита, не упирается в потолок `restaged` —
 //       потолок держит только панель, перестейдживающую саму себя (R-9); flush, не дождавшийся
 //       тишины, отвечает `busy` (R-10); работа, возникшая раньше машины, взводится при создании
@@ -25,7 +25,7 @@
 //   (9) ревью Codex O-60 (r4): диалог перевода, ждущий записи, ушедшей до него, слышит её 409 как
 //       `conflict`, а не как паузу; правка, пришедшая, пока летела падающая запись, пишется своим
 //       дебаунсом, а не ступенью лестницы; `off` терминален для записи в полёте — ни «saved», ни
-//       «not saved», ни таймера, а бухгалтерия лёгшей записи (история, черновик) остаётся; `error`
+//       «not saved», ни таймера, а бухгалтерия лёгшей записи (история) остаётся; `error`
 //       помнит причину — упала запись или панель менялась, пока писалась;
 //  (10) D-66 (27.09): отказ сервера самому телу (4xx, кроме 408/409/429) не едет по лестнице — «not
 //       saved» со словами сервера, ни одного таймера, следующая попытка — со следующей правкой; 503 и
@@ -100,7 +100,7 @@ const MUTANTS = {
       '',
     ],
   ],
-  // (6a) ОТКАТ R-1: база нетронутого ключа снова с сервера — форма из JSON-черновика «грязна» навсегда
+  // (6a) ОТКАТ R-1: база нетронутого ключа снова с сервера — форма, собранная из JSON, «грязна» навсегда
   baselineFromServer: [[`${C}/useTechCardAutosave.ts`, '        : now;', '        : landed;']],
   // (6b) ОТКАТ R-8: полная карта RHF остаётся — `!![]` читается «грязно» у каждого массива
   fullDirtyMap: [
@@ -188,14 +188,6 @@ const MUTANTS = {
       `${C}/useTechCardAutosave.ts`,
       "      if ((state as MachineState).status === 'conflict') return 'conflict';\n",
       '',
-    ],
-  ],
-  // (8g) отпечаток не видит тела: восстановление поверх сдвинутой карточки не спросит
-  fingerprintBlind: [
-    [
-      `${C}/useTechCardAutosave.ts`,
-      '  const text = stableJson(bodyOnTheWire(card, card.techCard, canWriteCosting));',
-      "  const text = '';",
     ],
   ],
   // (8e) факты стиля считаются движением тела
@@ -286,7 +278,7 @@ const MUTANTS = {
     [`${C}/useTechCardAutosave.ts`, '    if (stoppedMeanwhile()) {', '    if (false) {'],
     [`${C}/useTechCardAutosave.ts`, "    if (!deps.isEnabled()) return 'off';\n", ''],
   ],
-  // (9d) страж `off` проглатывает и бухгалтерию лёгшей записи: релиз не пишет историю, черновик висит
+  // (9d) страж `off` проглатывает и бухгалтерию лёгшей записи: релиз не пишет историю
   offDropsBookkeeping: [
     [
       `${C}/useTechCardAutosave.ts`,
@@ -776,7 +768,7 @@ async function promise5(mod) {
 
 // ─── (6) после записи: база по ключу, разреженная карта грязного (R-1 / R-8) ─────────────────
 // Настоящий RHF и настоящий маппер. Профиль пресса без пара: маппер отдаёт `pressSteam: undefined`
-// ПРИСУТСТВУЮЩИМ ключом (schema.ts), а черновик — JSON, и у восстановленной формы ключа нет вовсе.
+// ПРИСУТСТВУЮЩИМ ключом (schema.ts), а у формы, собранной из JSON, ключа нет вовсе.
 const PRESS_CARD = {
   id: 7,
   lockVersion: 3,
@@ -840,7 +832,7 @@ function promise6(mod) {
   let s = landedSave(mod, form);
   mod.settleFormAfterSave(form, s.before, s.settled);
   out.mapperShapedQuietAfterSave = !mod.liveIsDirty(form);
-  // b) the same card restored from a JSON draft: dirty by key presence alone, quiet after one save
+  // b) the same card as a JSON-built form: dirty by key presence alone, quiet after one save
   form = formFor(mod, mapped);
   form.reset(JSON.parse(JSON.stringify(mapped)), { keepDefaultValues: true });
   const dirtyByPresenceOnly = mod.liveIsDirty(form);
@@ -1175,7 +1167,7 @@ async function promise9(mod) {
   await release.clock.advance(60_000);
   out.offSurvivesLateSettle =
     failedLate && release.m.state().status === 'off' && release.clock.pending() === 0;
-  // …and that write's bookkeeping still happens: history and the draft's clean-up, once
+  // …and that write's bookkeeping still happens: its history, once
   out.releaseWriteStillBooksItsHistory = release.completes.join() === 'debounce';
 
   // M-2 over P2-1 · the halt lifted (a re-open elsewhere), setEnabled(true) not yet run: the status still
@@ -1435,15 +1427,6 @@ async function promise8(mod) {
     mod.deepEqual(mod.bodyOnTheWire(readBack, echo, true), sentBody) &&
     !mod.deepEqual(mod.bodyOnTheWire(theirsOnTop, echo, true), sentBody);
 
-  // MJ-3 · the fingerprint a draft keeps of its card: the same through a version bump, a colourway and
-  // a reordered object; another with a moved body
-  const shuffled = JSON.parse(JSON.stringify(from));
-  shuffled.techCard = Object.fromEntries(Object.entries(shuffled.techCard).reverse());
-  out.fingerprintFollowsTheBody =
-    mod.bodyFingerprint(from, true) ===
-      mod.bodyFingerprint({ ...shuffled, lockVersion: 9, colorways: [{ colorwayId: 3 }] }, true) &&
-    mod.bodyFingerprint(from, true) !== mod.bodyFingerprint(bump({ concept: 'theirs' }), true);
-
   // M2 · a style fact is not the body's work; any other field is
   const form = formFor(mod, mod.mapTechCardToForm(BODY_CARD()));
   form.setValue('fit', 'FIT_SLIM', { shouldDirty: true });
@@ -1644,16 +1627,12 @@ report('(8) mutant keysNotPinned', await promise8(await load('keysNotPinned')), 
   'styleFactIsNoMove',
   'costingByWhoWritesIt',
   'keylessRowsCompare',
-  'fingerprintFollowsTheBody',
 ]);
 report('(8) mutant styleOwnedCounted', await promise8(await load('styleOwnedCounted')), [
   'styleFactIsNoMove',
 ]);
 report('(8) mutant styleFactsAreBodyWork', await promise8(await load('styleFactsAreBodyWork')), [
   'styleFactIsNotBodyWork',
-]);
-report('(8) mutant fingerprintBlind', await promise8(await load('fingerprintBlind')), [
-  'fingerprintFollowsTheBody',
 ]);
 
 console.log(

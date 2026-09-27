@@ -22,8 +22,8 @@ import { STYLE_FACT_KEYS } from './tech-card-options';
  *     Красным поля становятся только по явному жесту: ⌘S, раскрытие чипа, строка предупреждений;
  *   · один вызов в полёте; правки во время записи — ещё один цикл после неё, без второго параллельного;
  *   · «saved» — только над ТИХОЙ карточкой (ревью B-03): запись легла, а правка, набранная пока она
- *     летела, всё ещё только в браузере, — это ход вперёд (`progress`), а не конец. История и уборка
- *     черновика висят на том проходе, после которого работы не осталось;
+ *     летела, всё ещё только в браузере, — это ход вперёд (`progress`), а не конец. История висит на
+ *     том проходе, после которого работы не осталось;
  *   · `flush()` — немедленно и с ответом, и отвечает он только над тихой карточкой: проходит цикл за
  *     циклом, пока за проход не пришло ни одной правки и писать больше нечего. Платные двери
  *     стартуют только при `ok`/`nothing` (B-05). Не затихла за все проходы — `busy`, а не `error`:
@@ -145,7 +145,7 @@ export type MachineDeps = {
   save: (mode: SaveMode, reason: string) => Promise<SaveResult>;
   countErrors: () => number;
   onState: (state: MachineState) => void;
-  /** Только на ТИХОМ `complete` (B-03): сюда вешаются запись истории и уборка черновика. */
+  /** Только на ТИХОМ `complete` (B-03): сюда вешается запись истории. */
   onComplete?: (reason: string) => void;
   /**
    * Счётчик жестов оператора на странице (ввод, клавиша, нажатие, вставка). Перестейдж панели без
@@ -310,8 +310,8 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
     // P2-1 (O-60 r4): `off` is terminal. The card stopped saving while this write was out — released by
     // this very write (its halt rises the moment the PUT lands, B-08), frozen, the rights gone. The
     // write's own bookkeeping still happens, explicitly: a complete write over a quiet card records its
-    // history and clears the draft (the release's own write is exactly this case). Nothing else — no
-    // «saved», no «not saved», no timer.
+    // history (the release's own write is exactly this case). Nothing else — no «saved», no «not
+    // saved», no timer.
     if (stoppedMeanwhile()) {
       if (r.outcome === 'complete' && !r.pendingConfirm && !deps.hasWork()) {
         deps.onComplete?.(reason);
@@ -371,8 +371,8 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
           return 'needs-confirm';
         }
         // B-03: правка, набранная, пока запись летела, или панель, застейдженная за это время, — ещё
-        // только в браузере. «saved» над ней было бы ложью, история записала бы не то, что на
-        // сервере, а черновик — единственная копия этой правки — был бы стёрт.
+        // только в браузере. «saved» над ней было бы ложью, а история записала бы не то, что на
+        // сервере.
         if (deps.hasWork()) return progress(at);
         // Тихо: всё, что есть на экране, лежит на сервере. Эхо самой записи (её сброс базы будит
         // form.watch) успело взвести дебаунс — он пустой, и его снимаем.
@@ -888,36 +888,6 @@ export function bodyOnTheWire(
   return formOnTheWire(mapTechCardToForm(pinRowKeys(card)), echo, canWriteCosting);
 }
 
-/** JSON with sorted keys and no null/undefined members — two equal bodies (deepEqual) print the same. */
-function stableJson(v: unknown): string {
-  if (v == null) return 'null';
-  if (Array.isArray(v)) return `[${v.map(stableJson).join(',')}]`;
-  if (v instanceof Date) return JSON.stringify(v.toISOString());
-  if (typeof v === 'object') {
-    const o = v as Record<string, unknown>;
-    const keys = Object.keys(o)
-      .filter((k) => o[k] != null)
-      .sort();
-    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableJson(o[k])}`).join(',')}}`;
-  }
-  return JSON.stringify(v);
-}
-
-/**
- * A FINGERPRINT OF THE CARD'S BODY (ревью MJ-3) — what a draft remembers of the card it was typed on, so a
- * restore over a card whose body moved since can ask first, and one whose version moved without the body
- * (a panel, a roll-up) does not. FNV-1a over the stable JSON of the wire body; not a secret, not a lock.
- */
-export function bodyFingerprint(card: common_TechCard, canWriteCosting: boolean): string {
-  const text = stableJson(bodyOnTheWire(card, card.techCard, canWriteCosting));
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return `${text.length.toString(36)}.${(h >>> 0).toString(36)}`;
-}
-
 /**
  * DID THE CARD'S BODY MOVE BETWEEN TWO READINGS — would a body write built on `from` put back something
  * `to` has? (ревью M-3.) Both readings go through the SAME write mapper, with the same echo (`to`'s
@@ -975,7 +945,8 @@ type ServerLists = Pick<TechCardFormData, 'signoffs' | 'patterns' | 'bomItems'>;
  * БАЗА — ПО КЛЮЧУ (ревью R-1). Нетронутый ключ получает базой СОБСТВЕННОЕ значение формы после записи
  * выше, а не `settled.values`: они равны для нашего сравнения (`undefined` = нет ключа, null = undefined),
  * но не для RHF, который считает ключи строго. Маппер отдаёт `pressSteam: undefined` ПРИСУТСТВУЮЩИМ
- * ключом у каждого профиля без пара, а черновик — это JSON, и у восстановленной формы ключа нет вовсе;
+ * ключом у каждого профиля без пара, а у формы, собранной из JSON (так восстанавливался черновик до
+ * D-63), ключа нет вовсе;
  * база с сервера делала такую форму «грязной» после каждой записи — и автосейв переписывал карточку
  * каждые две секунды, навсегда. Тронутый ключ и отложенный purpose получают базой то, что легло, —
  * они и должны остаться грязными. `keepBaseline` сохраняет прежнюю базу полям, которые пишет панель
@@ -1142,8 +1113,6 @@ export function useTechCardAutosaveController(opts: {
   countErrors: () => number;
   /** Только на тихом `complete` (B-03). */
   onComplete?: (reason: string) => void;
-  /** Найденный на открытии черновик ждёт ответа оператора (R-11) — отдаётся органам как есть. */
-  draftPending?: boolean;
   /**
    * Работа тела формы, которую может унести запись (M2: без фактов стиля — их пишет панель стиля, и
    * работой они становятся через её очередь). Без ответа — «форма грязна».
@@ -1223,9 +1192,10 @@ export function useTechCardAutosaveController(opts: {
     // when a person is behind that work (m7).
     setState(m.state());
     return () => {
-      // Лучшее, что можно сделать при уходе со страницы: отправить то, что есть. Гарантия на выгрузку —
-      // черновик в localStorage (useTechCardDraft), а не этот вызов (Codex M-02). Только работу, за
-      // которой стоит человек (m7).
+      // Лучшее, что можно сделать при уходе со страницы: отправить то, что есть. Гарантии на выгрузку
+      // этот вызов не даёт (Codex M-02); черновиков нет (O-64, D-63) — перед закрытием вкладки с
+      // несохранённой работой переспрашивает браузер (index.tsx). Только работу, за которой стоит
+      // человек (m7).
       if (personBehind()) void m.flush('unmount');
       m.dispose();
       if (machineRef.current === m) machineRef.current = null;
@@ -1309,7 +1279,6 @@ export function useTechCardAutosaveController(opts: {
     };
   }, [opts.enabled]);
 
-  const draftPending = !!opts.draftPending;
   return useMemo<AutosaveController>(
     () => ({
       status: state.status,
@@ -1322,7 +1291,6 @@ export function useTechCardAutosaveController(opts: {
         const live = machineRef.current?.state();
         return live ? refusalOf(live) : undefined;
       },
-      draftPending,
       request: () => {
         if (!machineRef.current) {
           requestedEarly.current = true;
@@ -1338,6 +1306,6 @@ export function useTechCardAutosaveController(opts: {
       settleExternal: (r, reason) => machineRef.current?.settleExternal(r, reason),
       gestureProps,
     }),
-    [state, draftPending, gestureProps],
+    [state, gestureProps],
   );
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TechCardFormData } from './schema';
 import { deepEqual } from './useTechCardAutosave';
-import { FORM_SHAPE } from './useTechCardDraft';
+import { FORM_SHAPE } from './form-shape';
 
 /**
  * ═══ ИСТОРИЯ СОХРАНЕНИЙ — ОТКАТ ТЕКСТА (волна 25.09 · T21 · D-17/D-17' · ревью Codex B-04) ════════
@@ -18,10 +18,10 @@ import { FORM_SHAPE } from './useTechCardDraft';
  * не разорвав: `name`, `concept` (DESCRIPTION доски), `notes` (NOTE), `garmentDescription` (WORDS)
  * и ТЕКСТЫ аспектов `details[]` по ключу — картинки аспекта остаются текущими. Всё остальное при
  * откате берётся из ТЕКУЩИХ значений формы. Поэтому и хранится только текст: снимок всей формы
- * в localStorage × 3 рядом с черновиком съедал бы квоту ради полей, которые откат не трогает.
+ * в localStorage × 3 съедал бы квоту ради полей, которые откат не трогает.
  *
- * Отпечаток формы (`FORM_SHAPE`) и lockVersion у сохранённых снимков — тот же довод, что у
- * черновика: снимок, записанный формой другого состава или «из будущего» карточки, не наш.
+ * Отпечаток формы (`FORM_SHAPE`, form-shape.ts) и lockVersion у сохранённых снимков: снимок,
+ * записанный формой другого состава или «из будущего» карточки, не наш.
  */
 
 export const HISTORY_RING = 20;

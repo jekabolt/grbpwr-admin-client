@@ -60,14 +60,10 @@ import { followWords, lockWords, offerWords, wordsDecided } from './words-seed';
  * записями, которых никто не делал (ревью раунда 3, M1). Теперь засев живёт в `words-seed.ts`, поле
  * показывает его, пока значение формы пусто, и в форму («грязным») его отдаёт ДЕЙСТВИЕ человека:
  * правка поля, ответ `ai ✦`, GENERATE (`materializeWords` перед `flush`, `flat-run-row.tsx`).
- * Карточка, которую открыли и посмотрели, не сохраняется, не пишет черновика, не спрашивает при
- * уходе и не двигает `lock_version` — и правка ЛЮБОГО другого поля засева тоже не несёт. Рендер
+ * Карточка, которую открыли и посмотрели, не сохраняется, не спрашивает при уходе и не двигает
+ * `lock_version` — и правка ЛЮБОГО другого поля засева тоже не несёт. Рендер
  * засева в форму не отдаёт вовсе: его первое действие отдаёт показанное в СВОЙ рецепт
  * (`render/drafts.ts`).
- *
- * ⚠ НЕ ПОВЕРХ НЕОТВЕЧЕННОГО ЧЕРНОВИКА (ревью раунда 2, MAJOR A). Пока баннер восстановления ждёт
- * ответа (`autosave.draftPending`), форма — ещё не то, что человек выберет; засев поверх неё мог бы
- * уйти записью мимо ответа и стереть найденную работу. После ответа эффект решает заново.
  *
  * ⚠ СЛОВАРЬ ОБЯЗАН ПРИЕХАТЬ, А НЕ ПРОСТО ПЕРЕСТАТЬ ГРУЗИТЬСЯ (ревью [5]): провал `GetDictionary`
  * тоже снимает `loading`, но словаря нет — засев вышел бы без пути категории и замкнулся на сессию.
@@ -93,7 +89,6 @@ export function useWordsSeeding(
   const { loading: dictionaryLoading, dictionary } = useDictionary();
   const factsReady = !dictionaryLoading && !!dictionary;
   const autosave = useTechCardAutosave();
-  const draftPending = autosave.draftPending;
   const moodMinimum = useMoodMinimumGate();
   // D-13'': сделанный шаг не запирается — у карточки с флэтами WORDS засевается и при неполном
   // минимуме мудборда. GENERATE минимум требует.
@@ -116,7 +111,7 @@ export function useWordsSeeding(
       lockWords(techCardId);
       return;
     }
-    if (!wordsLive || !factsReady || !composed.text || draftPending) return;
+    if (!wordsLive || !factsReady || !composed.text) return;
     // Прогон, CLEAR или рекол со словами — слова сейчас не меняются; решим после.
     if (wordsBusy) return;
     if (wordsDecided(techCardId)) {
@@ -134,7 +129,6 @@ export function useWordsSeeding(
     wordsLive,
     factsReady,
     composed,
-    draftPending,
     wordsBusy,
     moodMinimum.ok,
     flatDone,

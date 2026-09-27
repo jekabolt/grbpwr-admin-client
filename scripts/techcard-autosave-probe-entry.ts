@@ -1,7 +1,6 @@
 // Точка входа пробы автосейва / авто-стейджа / отката текста (волна 25.09, CL-A).
 export {
   anyDirty,
-  bodyFingerprint,
   bodyMoved,
   bodyOnTheWire,
   bodyWorkOf,
