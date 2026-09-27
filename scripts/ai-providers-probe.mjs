@@ -9,7 +9,8 @@
 //   C  a route change sends ONE PUT with the whole route (fallback kept); a model is committed once
 //   D  spend: an absent Decimal is —, a present "0" is 0.00; the preset asks for the right days
 //   E  the edges: stale → "reload — the config changed" + a re-read; save key → inline probe, field
-//      emptied, secret nowhere on screen; no master key → callout + fields off; non-super → /me
+//      emptied, secret nowhere on screen; no master key → callout + fields off; non-super → /me;
+//      clear a stored key → a one-line question first, then ONE PUT with an empty value
 //
 //   node scripts/ai-providers-probe.mjs                 all green expected
 //   node scripts/ai-providers-probe.mjs --mutate-<name> the named check must go red (list: --list)
@@ -40,14 +41,14 @@ const MUTATIONS = {
   'key-none': {
     red: 'A1',
     what: 'no key reads as something else',
-    from: `return { text: "key: not set", broken: false };`,
-    to: `return { text: "key: none", broken: false };`,
+    from: `return { text: "key: not set", broken: false, stored: false };`,
+    to: `return { text: "key: none", broken: false, stored: false };`,
   },
   'key-env': {
     red: 'A2',
     what: 'the env key hides its last four',
-    from: 'return { text: `key: from env${last4(p.keyLast4)}`, broken: false };',
-    to: 'return { text: `key: from env`, broken: false };',
+    from: 'return { text: `key: from env${last4(p.keyLast4)}`, broken: false, stored: false };',
+    to: 'return { text: `key: from env`, broken: false, stored: false };',
   },
   'key-db': {
     red: 'A3',
@@ -150,6 +151,30 @@ const MUTATIONS = {
     what: 'a non-super account stays on the page',
     from: 'const denied = resolved && !isSuper;',
     to: 'const denied = false;',
+  },
+  'clear-sends-old-value': {
+    red: 'E5',
+    what: 'clear sends the old key (its last four) instead of an empty value',
+    from: '{ providerKey: key, kind, value: "" }',
+    to: '{ providerKey: key, kind, value: p.keyLast4 ?? "" }',
+  },
+  'clear-skipped': {
+    red: 'E5',
+    what: '"yes" never sends the clear',
+    from: 'onClick: clear, disabled: save.isPending',
+    to: 'onClick: () => {}, disabled: save.isPending',
+  },
+  'clear-no-confirm': {
+    red: 'E5',
+    what: '"clear" writes at once, without the question',
+    from: 'onClick: () => setConfirming(true)',
+    to: 'onClick: clear',
+  },
+  'clear-everywhere': {
+    red: 'E5',
+    what: '"clear" is offered on an env key too',
+    from: 'line.stored && ',
+    to: 'true && ',
   },
 };
 
@@ -294,11 +319,13 @@ let server;
 function freshServer(opts = {}) {
   server = {
     version: 7,
-    providers: clone(PROVIDERS),
+    providers: clone(PROVIDERS).map((p) => ({ ...p, ...(opts.patch?.[p.key] ?? {}) })),
     purposes: clone(PURPOSES),
     defaultChat: 'openrouter',
     defaultImage: 'openrouter',
     masterKey: opts.masterKey ?? true,
+    // The server's env keys (their last four): what answers once a stored key is cleared.
+    env: { anthropic: 'ab12', openrouter: 'zz99', fal: 'f00d', ...(opts.env ?? {}) },
     isSuper: opts.isSuper ?? true,
     forceStale: false,
     probe: { ok: true, code: '', message: '', balance: '24.50 USD' },
@@ -338,6 +365,14 @@ function answer(method, path, query, body) {
     });
   if (method === 'PUT' && (m = path.match(/^\/api\/admin\/ai\/providers\/([^/]+)\/key$/))) {
     const p = server.providers.find((x) => x.key === m[1]);
+    if (body.value === '') {
+      // A clear: the slot empties, the env key (if any) answers again, and nothing is probed —
+      // `probe` is unset, which the gateway writes as null.
+      const env = server.env[p.key] ?? '';
+      if (body.kind === 'admin') Object.assign(p, { adminKeySource: 'none', adminKeyLast4: '' });
+      else Object.assign(p, { keySource: env ? 'env' : 'none', keyLast4: env, keyUpdatedBy: '', keyUpdatedAt: null });
+      return { status: 200, body: { probe: null, config: config() } };
+    }
     if (body.kind === 'admin') Object.assign(p, { adminKeySource: 'db', adminKeyLast4: body.value.slice(-4) });
     else Object.assign(p, { keySource: 'db', keyLast4: body.value.slice(-4), keyUpdatedBy: 'im', keyUpdatedAt: '2026-09-27T12:00:00Z' });
     return { status: 200, body: { probe: server.probe, config: config() } };
@@ -635,6 +670,74 @@ await page.waitForSelector('[data-provider="openai"]', { timeout: 8000 });
   ck('E3', t.includes('keys cannot be stored until AI_KEYS_MASTER_KEY is set on the server'), 'no master key → the warning callout');
   const disabled = await page.getByLabel('OpenAI key', { exact: true }).isDisabled();
   ck('E3', disabled, '…and the key field is off');
+}
+for (const env of ['', 'ab12']) {
+  // google holds a stored key; once without an env key behind it, once with one.
+  await mount({ env: env ? { google: env } : {} });
+  await page.waitForSelector('[data-provider="google"]', { timeout: 8000 });
+  await openRow('google');
+  const keyWrites = () => writes('PUT', /^\/api\/admin\/ai\/providers\/google\/key$/);
+  const clearBtn = () => row('google').getByRole('button', { name: 'clear the key', exact: true });
+  if (!env) {
+    const onEnv = await row('anthropic').getByRole('button', { name: /^clear/ }).count();
+    ck('E5', (await clearBtn().count()) === 1 && onEnv === 0, '"clear" stands on a stored key only (google db: yes, anthropic env: no)', `google ${await clearBtn().count()}, anthropic ${onEnv}`);
+    const clearLine = ((await row('google').locator('[data-key-line="api"]').textContent()) ?? '').replace(/\s+/g, ' ');
+    ck('E5', clearLine.endsWith('· 27 sep · clear'), 'at the end of the key line', clearLine);
+    await clearBtn().click();
+    await page.waitForTimeout(300);
+    const q = ((await row('google').locator('[data-key-confirm="api"]').textContent().catch(() => '')) ?? '').replace(/\s+/g, ' ');
+    ck('E5', q.includes('clear the stored key? the env key, if any, takes over · yes / no') && keyWrites().length === 0, 'the line becomes the question; nothing is written yet', `${q} | writes ${keyWrites().length}`);
+    const no = row('google').getByRole('button', { name: 'no', exact: true });
+    if (await no.count()) await no.click();
+    await page.waitForTimeout(300);
+    const back = ((await row('google').locator('[data-key-line="api"]').textContent().catch(() => '')) ?? '');
+    const focused = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
+    ck('E5', back.includes('key: set ···9f3c') && keyWrites().length === 0 && focused === 'clear the key', '"no" puts the line back, writes nothing, focus returns to "clear"', `focus=${focused}`);
+    if (!(await clearBtn().count())) {
+      ck('E5', false, '"clear" is gone after "no"');
+      continue;
+    }
+    await clearBtn().click();
+  } else {
+    if (!(await clearBtn().count())) {
+      ck('E5', false, '"clear" is on the stored key');
+      continue;
+    }
+    await clearBtn().click();
+  }
+  await page.waitForTimeout(200);
+  const yes = row('google').getByRole('button', { name: 'yes', exact: true });
+  if (await yes.count()) await yes.click();
+  await page.waitForTimeout(800);
+  const w = keyWrites();
+  ck('E5', w.length === 1 && w[0].body.kind === 'api' && w[0].body.value === '', '"yes" → exactly ONE PUT …/google/key {kind:"api", value:""}', JSON.stringify(w.map((c) => c.body)));
+  const status = await row('google').getByRole('status').count();
+  ck('E5', status === 0, 'no probe answer is drawn after a clear', `status lines: ${status}`);
+  const after = ((await row('google').locator('[data-key-line="api"]').textContent().catch(() => '')) ?? '').replace(/\s+/g, ' ');
+  const want = env ? `key: from env ···${env}` : 'key: not set';
+  ck('E5', after === want, `the line follows the returned config: "${want}"`, after);
+}
+// The reconciliation slot clears the same way, as its own kind.
+await mount({ patch: { openai: { adminKeySource: 'db', adminKeyLast4: 'ad01' } } });
+await page.waitForSelector('[data-provider="openai"]', { timeout: 8000 });
+{
+  await openRow('openai');
+  const door = row('openai').getByRole('button', { name: 'clear the reconciliation key', exact: true });
+  const had = await door.count();
+  if (had) await door.click();
+  await page.waitForTimeout(200);
+  const q = ((await row('openai').locator('[data-key-confirm="admin"]').textContent().catch(() => '')) ?? '').replace(/\s+/g, ' ');
+  const yes = row('openai').getByRole('button', { name: 'yes', exact: true });
+  if (await yes.count()) await yes.click();
+  await page.waitForTimeout(800);
+  const w = writes('PUT', /^\/api\/admin\/ai\/providers\/openai\/key$/);
+  const line = ((await row('openai').locator('[data-key-line="admin"]').textContent().catch(() => '')) ?? '').replace(/\s+/g, ' ');
+  ck(
+    'E5',
+    had === 1 && q.startsWith('clear the stored reconciliation key?') && w.length === 1 && w[0].body.kind === 'admin' && w[0].body.value === '' && line === 'reconciliation key (optional): not set',
+    'the reconciliation key clears the same way: question, ONE PUT {kind:"admin", value:""}, "not set"',
+    `door ${had} | ${q} | ${JSON.stringify(w.map((c) => c.body))} | ${line}`,
+  );
 }
 await mount({ isSuper: false });
 {

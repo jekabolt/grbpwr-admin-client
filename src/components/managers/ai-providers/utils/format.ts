@@ -19,7 +19,9 @@ export function faultLabel(code?: string): string | null {
   return FAULT_LABEL[c] ?? c.replace(/_/g, ' ');
 }
 
-export type KeyLine = { text: string; broken: boolean };
+// `stored` = a key this server holds in its database (source "db"): the one kind the screen can
+// clear. An env key is the server's configuration, not the panel's.
+export type KeyLine = { text: string; broken: boolean; stored: boolean };
 
 // "27 sep", or "27 sep 2025" outside the current year. Lowercase like every label on this screen.
 export function shortDate(iso?: string, now = new Date()): string {
@@ -37,11 +39,15 @@ const last4 = (s?: string) => (s ? ` ···${s}` : '');
 export function keyLine(p: AiProviderInfo): KeyLine {
   switch (p.keySource) {
     case 'env':
-      return { text: `key: from env${last4(p.keyLast4)}`, broken: false };
+      return { text: `key: from env${last4(p.keyLast4)}`, broken: false, stored: false };
     case 'db': {
       const by = p.keyUpdatedBy ? ` · by ${p.keyUpdatedBy}` : '';
       const when = shortDate(p.keyUpdatedAt);
-      return { text: `key: set${last4(p.keyLast4)}${by}${when ? ` · ${when}` : ''}`, broken: false };
+      return {
+        text: `key: set${last4(p.keyLast4)}${by}${when ? ` · ${when}` : ''}`,
+        broken: false,
+        stored: true,
+      };
     }
     case 'unreadable':
       return {
@@ -49,9 +55,10 @@ export function keyLine(p: AiProviderInfo): KeyLine {
           ? `key: the stored key does not open; env${last4(p.keyLast4)} answers meanwhile`
           : 'key: the stored key does not open, and there is no env key',
         broken: true,
+        stored: false,
       };
     default:
-      return { text: 'key: not set', broken: false };
+      return { text: 'key: not set', broken: false, stored: false };
   }
 }
 
@@ -59,11 +66,19 @@ export function keyLine(p: AiProviderInfo): KeyLine {
 export function adminKeyLine(p: AiProviderInfo): KeyLine {
   switch (p.adminKeySource) {
     case 'db':
-      return { text: `reconciliation key (optional): set${last4(p.adminKeyLast4)}`, broken: false };
+      return {
+        text: `reconciliation key (optional): set${last4(p.adminKeyLast4)}`,
+        broken: false,
+        stored: true,
+      };
     case 'unreadable':
-      return { text: 'reconciliation key (optional): the stored key does not open', broken: true };
+      return {
+        text: 'reconciliation key (optional): the stored key does not open',
+        broken: true,
+        stored: false,
+      };
     default:
-      return { text: 'reconciliation key (optional): not set', broken: false };
+      return { text: 'reconciliation key (optional): not set', broken: false, stored: false };
   }
 }
 

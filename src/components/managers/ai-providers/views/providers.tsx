@@ -4,7 +4,7 @@ import type {
   AiProviderInfo,
   GetAiProvidersConfigResponse,
 } from 'api/proto-http/admin';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import Input from 'ui/components/input';
@@ -156,6 +156,15 @@ function ProviderRow({
 // ONE field and ONE button per slot. Saving is the check: the server stores the key, probes it with
 // the provider's free endpoint and answers with the result, which is shown under the key line. The
 // value leaves the field the moment it is stored and is never shown back — only its last four.
+//
+// A STORED key (source db) can also be cleared: "clear" at the end of the key line turns the line
+// into a one-line question in its place — yes / no, no modal — and yes sends the same write with an
+// empty value. Nothing is probed after a clear, so no answer line is drawn.
+
+// A text action inside a micro line: it inherits the line's size and says it is clickable by its
+// underline, like a link, because it does one small thing in place.
+const LINE_ACTION =
+  'cursor-pointer underline underline-offset-2 hover:opacity-70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50';
 function KeySlot({
   provider: p,
   kind,
@@ -170,6 +179,17 @@ function KeySlot({
   const save = useSetAiProviderKey();
   const [value, setValue] = useState('');
   const [probe, setProbe] = useState<AiProbeResult | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const clearDoor = useRef<HTMLButtonElement>(null);
+  const field = useRef<HTMLInputElement>(null);
+  // Focus goes back to "clear" when the question is dismissed — the question's own buttons are
+  // unmounted under it, and the browser would otherwise drop focus to <body>.
+  const backToDoor = useRef(false);
+  useEffect(() => {
+    if (confirming || !backToDoor.current) return;
+    backToDoor.current = false;
+    clearDoor.current?.focus();
+  }, [confirming]);
   const key = p.key ?? '';
   const fieldName = `ai-key-${key}-${kind}`;
   const trimmed = value.trim();
@@ -190,17 +210,88 @@ function KeySlot({
     );
   };
 
+  const dismiss = () => {
+    backToDoor.current = true;
+    setConfirming(false);
+  };
+  const clear = () => {
+    if (save.isPending) return;
+    setProbe(null);
+    save.mutate(
+      { providerKey: key, kind, value: '' },
+      {
+        onSuccess: () => {
+          setConfirming(false);
+          setProbe(null);
+          field.current?.focus();
+        },
+        onError: () => setConfirming(false),
+      },
+    );
+  };
+  const question =
+    kind === 'admin'
+      ? 'clear the stored reconciliation key? their number for this provider stops'
+      : 'clear the stored key? the env key, if any, takes over';
+
   return (
     <form onSubmit={submit} autoComplete='off' className='flex flex-col gap-1'>
-      <Text size='micro' variant={line.broken ? 'errorLabel' : 'label'}>
-        {line.broken && '! '}
-        {line.text}
-      </Text>
+      {confirming ? (
+        <Text
+          size='micro'
+          role='group'
+          aria-label={question}
+          data-key-confirm={kind}
+          onKeyDown={(e: React.KeyboardEvent) => {
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              dismiss();
+            }
+          }}
+        >
+          {question} ·{' '}
+          <button type='button' onClick={clear} disabled={save.isPending} className={LINE_ACTION}>
+            yes
+          </button>{' '}
+          /{' '}
+          <button
+            type='button'
+            // The safe answer holds the focus: Enter on an unread question keeps the key.
+            autoFocus
+            onClick={dismiss}
+            disabled={save.isPending}
+            className={LINE_ACTION}
+          >
+            no
+          </button>
+        </Text>
+      ) : (
+        <Text size='micro' variant={line.broken ? 'errorLabel' : 'label'} data-key-line={kind}>
+          {line.broken && '! '}
+          {line.text}
+          {line.stored && (
+            <>
+              {' · '}
+              <button
+                ref={clearDoor}
+                type='button'
+                onClick={() => setConfirming(true)}
+                disabled={save.isPending}
+                aria-label={kind === 'admin' ? 'clear the reconciliation key' : 'clear the key'}
+                className={LINE_ACTION}
+              >
+                clear
+              </button>
+            </>
+          )}
+        </Text>
+      )}
       <div className='flex flex-wrap items-center gap-1.5'>
         <label htmlFor={fieldName} className='sr-only'>
           {kind === 'admin' ? `${p.label || key} reconciliation key` : `${p.label || key} key`}
         </label>
         <Input
+          ref={field}
           type='password'
           name={fieldName}
           value={value}
