@@ -1,4 +1,6 @@
-import type { AiProbeResult, AiProviderInfo } from 'api/proto-http/admin';
+import type { AiProbeResult, AiProviderInfo, googletype_Decimal } from 'api/proto-http/admin';
+import { decimalToNumber } from 'components/managers/tech-card/components/design/generation/money';
+import { MONTHS } from './period';
 
 // What the panel SAYS about a provider, as pure functions of the wire — so the probe can check the
 // words without a screen, and the screen never re-derives them inline.
@@ -25,13 +27,7 @@ export function shortDate(iso?: string, now = new Date()): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const sameYear = d.getFullYear() === now.getFullYear();
-  return d
-    .toLocaleDateString('en-GB', {
-      day: 'numeric',
-      month: 'short',
-      year: sameYear ? undefined : 'numeric',
-    })
-    .toLowerCase();
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}${sameYear ? '' : ` ${d.getFullYear()}`}`;
 }
 
 const last4 = (s?: string) => (s ? ` ···${s}` : '');
@@ -87,4 +83,34 @@ export function probeLine(p: AiProbeResult): ProbeLine {
   }
   const label = PROBE_LABEL[(p.code ?? '').trim()];
   return { ok: false, text: label || message || 'the check failed', detail: label ? message : '' };
+}
+
+// ---- Money (the spend report) ----
+//
+// Every amount on this wire is USD, and ABSENCE IS MEANINGFUL: an unset Decimal is "unknown" and
+// renders as —, never as 0; a real zero arrives as a present "0" and renders as 0.00. Same
+// semantics as `formatMoney` (tech-card design money.ts): 2 fraction digits at least — cents — and
+// 4 at most, so a $0.0004 call does not round to "free". No symbol: the column says usd.
+const USD = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+
+export function formatUsd(n: number | null): string | null {
+  return n === null ? null : USD.format(n);
+}
+
+export function usd(d?: googletype_Decimal | null): string | null {
+  return formatUsd(decimalToNumber(d));
+}
+
+// The sum of the amounts that ARE known; null when none is. Summed in millionths so a column of
+// four-decimal prices does not drift in floating point.
+export function sumUsd(list: (googletype_Decimal | null | undefined)[]): number | null {
+  let known = false;
+  let micros = 0;
+  for (const d of list) {
+    const n = decimalToNumber(d);
+    if (n === null) continue;
+    known = true;
+    micros += Math.round(n * 1_000_000);
+  }
+  return known ? micros / 1_000_000 : null;
 }

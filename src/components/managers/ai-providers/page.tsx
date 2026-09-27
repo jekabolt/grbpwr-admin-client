@@ -2,12 +2,13 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES } from 'constants/routes';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import { CalloutBox } from 'ui/components/callout-box';
-import { Section, SectionStack } from 'ui/components/section';
+import { SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { ViewSwitch, type ViewSwitchOption } from 'ui/components/view-switch';
 import { useAiConfig } from './utils/hooks';
 import { ProvidersView } from './views/providers';
 import { RoutesView } from './views/routes';
+import { SpendView } from './views/spend';
 
 // admin → AI providers: which services may spend money, which model answers which job, and what
 // it cost. Two views in ?view= (accounting reports pattern: the selection lives in searchParams,
@@ -77,13 +78,7 @@ export function AiProviders() {
           </>
         )}
 
-        {view === 'spend' && (
-          <Section title='spend' question='what the calls cost, by provider and by account'>
-            <Text size='micro' variant='label'>
-              —
-            </Text>
-          </Section>
-        )}
+        {view === 'spend' && <SpendView config={data} />}
       </SectionStack>
     </div>
   );
