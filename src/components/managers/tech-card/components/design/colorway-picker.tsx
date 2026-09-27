@@ -187,12 +187,18 @@ export function useColorwayChoice(
   const settled = useRef(false);
   /** Адрес прочитан для ЭТОЙ карточки. Ref, а не состояние: ничего не рисует. */
   const linkTaken = useRef(false);
+  /**
+   * Колорвей, который адрес только что записал, — пока рендер его не увидел. Читает и гасит его
+   * уборка дрейфа ниже (O-57 r3): запись адреса старше уборки, разбор — у самой уборки.
+   */
+  const linkWrote = useRef<number>(COLORWAY_NONE);
 
   const shownCard = useRef(techCardId);
   if (shownCard.current !== techCardId) {
     shownCard.current = techCardId;
     settled.current = false;
     linkTaken.current = false;
+    linkWrote.current = COLORWAY_NONE;
     if (colorwayId !== COLORWAY_NONE) setColorwayId(COLORWAY_NONE);
   }
 
@@ -295,6 +301,7 @@ export function useColorwayChoice(
     );
     if (named) {
       settled.current = true;
+      linkWrote.current = deepLinkColorwayId;
       setColorwayId(deepLinkColorwayId);
     }
     takenRef.current?.();
@@ -355,8 +362,24 @@ export function useColorwayChoice(
    *
    * `settled.current` этой поправке не сторож нарочно: он про УМОЛЧАНИЕ («не двигать человека
    * после того, как выбор однажды сделан»), а здесь двигать уже нечего — пункта нет.
+   *
+   * ⚠ АДРЕС СТАРШЕ УБОРКИ (O-57 r3, ревью Codex r2 — High). Оба эффекта могут исполниться В ОДНОМ
+   * коммите: перечитанная карточка уже без ROSSO (его снесли), и в тот же рендер приехал адрес
+   * `?colorway=` к живому OLIVE. Эффект адреса объявлен выше и ставит OLIVE; этот исполняется
+   * следом и читает `colorwayId` РЕНДЕРА — то есть ещё ROSSO, которого в списке нет, — и ставит
+   * `sample`. React применяет обе записи по порядку, побеждает поздняя, а параметр адреса к этому
+   * моменту уже снят: дверь «open in studio ›» молча открыла бы студию не на том цвете.
+   *
+   * Поэтому ПЕРВЫЙ проход после записи адреса уступает, если его рендер эту запись ещё не видел
+   * (`linkWrote` ≠ `colorwayId`): записанное адресом значение проверено на ТОЙ ЖЕ карточке, и
+   * следующий проход проверит его уже как текущее. Метка гасится при любом исходе — жест
+   * человека, перебивший адрес в том же такте, не может заморозить уборку навсегда: она уступает
+   * ровно один раз.
    */
   useEffect(() => {
+    const wrote = linkWrote.current;
+    linkWrote.current = COLORWAY_NONE;
+    if (wrote !== COLORWAY_NONE && wrote !== colorwayId) return;
     if (isLoading || colorwayId === COLORWAY_NONE) return;
     if (colorways.some((c) => (c.colorwayId ?? 0) === colorwayId)) return;
     setColorwayId(COLORWAY_NONE);

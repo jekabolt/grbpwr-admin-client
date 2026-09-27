@@ -6,8 +6,9 @@ import { CalloutBox } from 'ui/components/callout-box';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 
-import { InertDoor } from '../bench-slot';
 import { AskModal } from '../core';
+/* Прямым путём, а не через `../core`: поверхность `core/index.ts` этой правкой не расширялась. */
+import { RefusedDoor } from '../core/two-step-picker';
 import { useDesignWrites } from '../use-design-band';
 import { viewLabel, type ActiveView } from '../views';
 import type { BenchSide } from './model';
@@ -198,9 +199,10 @@ export function ApplySplitDoor({
    *     цвета, экран не менялся, следа не оставалось даже в виде отказа.
    *
    * Отказ решается ВЫЗЫВАЮЩИМ, потому что только он знает, чем сужена его секция; дверь при
-   * заданном отказе рисуется `InertDoor` со СТРОКОЙ причины (`Reason`, `reasonVisible`) — колода
-   * раскрыта, и исчезнувшая дверь читалась бы как пропажа, а серая без слов — как поломка. Пустой
-   * `pieces` при заданном отказе тоже рисуется: причина важнее состава.
+   * заданном отказе рисуется `RefusedDoor` со СТРОКОЙ причины (`Reason`, привязанной к кнопке
+   * `aria-describedby`) — колода раскрыта, и исчезнувшая дверь читалась бы как пропажа, а серая
+   * без слов — как поломка. Пустой `pieces` при заданном отказе тоже рисуется: причина важнее
+   * состава.
    */
   refusal?: string | null;
   /**
@@ -238,14 +240,17 @@ export function ApplySplitDoor({
   if (!targets.length && !refusal) return null;
 
   /* ОТКАЗ ХОЗЯИНА — дверь стоит, но мертва, и говорит почему. Ни одной записи: `run` ниже
-     недостижим, потому что живой кнопки нет. */
+     недостижим, потому что живой кнопки нет.
+     O-57 r3 (ревью Codex r2, Medium): не `InertDoor` — её `disabled`-кнопка выпадала из порядка Tab
+     и причину слышала только мышь. `RefusedDoor` держит дверь в фокусе (`aria-disabled`), глушит
+     жест и привязывает напечатанную причину к кнопке (`aria-describedby`). Обёртка та же —
+     `[data-inert]` с кнопкой прямым ребёнком, — поэтому классы хозяина (`[&>button]:…`) доходят. */
   if (refusal) {
     return (
-      <InertDoor
+      <RefusedDoor
         className={cn('[&>button]:w-full', className)}
         label='apply splitted'
         reason={refusal}
-        reasonVisible
       />
     );
   }

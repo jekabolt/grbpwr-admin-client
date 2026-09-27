@@ -1,7 +1,10 @@
-import { useRef, useState, type JSX } from 'react';
+import { cn } from 'lib/utility';
+import { useId, useRef, useState, type JSX } from 'react';
 import { buttonVariants } from 'ui/components/button';
 import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
+
+import { Reason } from './reason';
 
 /**
  * ═══ ПИКЕР, КОТОРЫЙ ЗАДАЁТ ДВА ВОПРОСА ПО ОДНОМУ, А НЕ ОБА СРАЗУ ══════════════════════════════
@@ -71,6 +74,82 @@ const ROW =
    плашкой внутри списка, а не выбранной строкой списка. Отбивку панели снимает обёртка. */
 const BLEED = '-mx-2 -my-1.5';
 
+/**
+ * Вид погашенной двери БЕЗ `disabled`: те же три цвета, что `disabled:` у `secondary` в
+ * `ui/components/button`, но по `aria-disabled`. Вариант `aria-disabled:` выигрывает у
+ * `hover:bg-textColor` специфичностью (атрибут + класс), а не порядком классов в строке.
+ */
+const REFUSED_LOOK =
+  'aria-disabled:cursor-not-allowed aria-disabled:border-textInactiveColor aria-disabled:bg-bgColor aria-disabled:text-textInactiveColor aria-disabled:hover:bg-bgColor aria-disabled:hover:text-textInactiveColor';
+
+/**
+ * ═══ ДВЕРЬ, КОТОРОЙ НЕТ ХОДА, — ДОСТИЖИМАЯ С КЛАВИАТУРЫ И СКАЗАННАЯ СЛОВАМИ (O-57 r3) ═══════════
+ *
+ * Ревью Codex r2 (Medium): погашенная дверь была НАСТОЯЩЕЙ `disabled`-кнопкой внутри обёртки с
+ * `title`. Такую кнопку браузер выбрасывает из порядка Tab, читалка её не находит, а `title` на
+ * обёртке виден только мыши, — то есть человек с клавиатуры или со скринридером не мог даже
+ * узнать, ПОЧЕМУ здесь ничего не делают.
+ *
+ * Здесь дверь остаётся в порядке фокуса (`aria-disabled`, а не `disabled`), жест на ней не делает
+ * ничего (щелчок, Enter и Space глушатся одним `onClick`: у `<button>` клавиши приходят щелчком), а
+ * причина НАПЕЧАТАНА — тем же `Reason`, которым `InertDoor` печатает свою при `reasonVisible`, — и
+ * привязана к кнопке `aria-describedby`. `title` и `data-inert` на обёртке остаются: мышь читает
+ * подсказку, как читала, а пробы и отладка — атрибут.
+ *
+ * ⚠ ПРИЧИНА НАД ДВЕРЬЮ, А НЕ ПОД НЕЙ, — И ЭТО ЗАМЕР СНИМКОМ, А НЕ ВКУС. Дверь стоит в РЯДУ дверей
+ * полосы, а ряд прижат к низу ячейки (`mt-auto` у `StripCell`): причина под дверью поднимала саму
+ * дверь на свою высоту, и погашенная `mark ▸` стояла на шесть строк выше соседних `in front` и
+ * `mark ▸` — ряд терял общую линию (F-9). Над дверью причина читается раньше двери («почему» → «что
+ * не работает»), а дверь остаётся на линии ряда. Порядок в DOM тот же, что на экране: читалка и Tab
+ * идут сверху вниз, а фокус всё равно встаёт только на кнопку.
+ *
+ * Живёт здесь, а не в `../bench-slot` рядом с `InertDoor`: тот импортирует `./core`, и обратный
+ * импорт замкнул бы круг. Вторым читателем её берёт `../render/apply-split` (отказ
+ * `apply splitted`).
+ */
+export function RefusedDoor({
+  label,
+  reason,
+  className,
+  buttonClassName,
+}: {
+  label: React.ReactNode;
+  reason: string;
+  /** Класс обёртки: ширину и место в ряду задаёт хозяин (`[&>button]:…` доходит до кнопки). */
+  className?: string;
+  /** Класс самой кнопки — мера ряда дверей хозяина (F-9). */
+  buttonClassName?: string;
+}): JSX.Element {
+  const reasonId = useId();
+  return (
+    <span
+      data-inert={reason}
+      title={reason}
+      className={cn('inline-flex min-w-0 flex-col items-stretch gap-0.5', className)}
+    >
+      <span id={reasonId} className='block min-w-0'>
+        <Reason>{reason}</Reason>
+      </span>
+      <button
+        type='button'
+        aria-disabled='true'
+        aria-describedby={reasonId}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        className={buttonVariants({
+          variant: 'secondary',
+          size: 'xs',
+          className: cn(REFUSED_LOOK, buttonClassName),
+        })}
+      >
+        {label}
+      </button>
+    </span>
+  );
+}
+
 export function TwoStepPicker({
   face,
   title,
@@ -104,9 +183,10 @@ export function TwoStepPicker({
   /** Как назвать список шага 2 («sides») — имя ветки дописывается само. */
   leafNoun?: string;
   /**
-   * ПОЧЕМУ ВЕТОК НЕТ — словами вызывающего. Веток нет и `create` нет — дверь стоит ПОГАШЕННОЙ, и
-   * это её `title`. Веток нет, но `create` есть — дверь жива, а фраза стоит на шаге 1 над строкой
-   * рождения. Не задана — погашенная дверь говорит общим «no … to pick».
+   * ПОЧЕМУ ВЕТОК НЕТ — словами вызывающего. Веток нет и `create` нет — дверь стоит ПОГАШЕННОЙ
+   * (`RefusedDoor`): фраза напечатана над ней, привязана `aria-describedby` и стоит в `title`.
+   * Веток нет, но `create` есть — дверь жива, а фраза стоит на шаге 1 над строкой рождения. Не
+   * задана — погашенная дверь говорит общим «no … to pick».
    */
   emptyReason?: string;
 }): JSX.Element {
@@ -136,32 +216,22 @@ export function TwoStepPicker({
   const branch = only ?? branches.find((b) => b.id === branchId) ?? null;
 
   /**
-   * ═══ ВЕТОК НЕТ И ЗАВЕСТИ НЕЧЕГО — ДВЕРЬ ПОГАШЕНА, А НЕ СНЯТА (O-57 r2) ══════════════════════
+   * ═══ ВЕТОК НЕТ И ЗАВЕСТИ НЕЧЕГО — ДВЕРЬ ПОГАШЕНА, А НЕ СНЯТА (O-57 r2, r3) ═══════════════════
    *
    * Здесь стоял `return null`, и ячейка теряла свою единственную дверь: ряд читался «здесь ничего
-   * не делают» там, где не делают ПО ПРИЧИНЕ (семпл-плита рядом с колорвеями на сервере без B7 —
-   * своего столбца на экране нет, а чужой сервер не примет). Дверь стоит на своём месте, своим
-   * лицом и своей мерой (`triggerClassName`), погашенная, с причиной в `title` обёртки — идиома
-   * `InertDoor`. Сам `InertDoor` живёт в `../bench-slot`, а тот импортирует `./core`: взять его
-   * отсюда значило бы замкнуть круг импорта. Обёртка — `contents`: коробки у неё нет, и кнопка
-   * встаёт в ряд ровно тем элементом, каким встал бы живой триггер.
+   * не делают» там, где не делают ПО ПРИЧИНЕ (семпл-плита рядом с колорвеями на сервере без B7;
+   * плита колорвея, которого на карточке больше нет). Дверь стоит на своём месте, своим лицом и
+   * своей мерой (`triggerClassName`), а причина напечатана над ней и привязана к кнопке —
+   * `RefusedDoor` выше, с разбором, почему не `disabled` и почему над дверью (r3).
    */
   if (!branches.length && !create) {
-    const reason = emptyReason ?? `no ${branchNoun} to pick`;
     return (
-      <span data-inert={reason} title={reason} className='contents'>
-        <button
-          type='button'
-          disabled
-          className={buttonVariants({
-            variant: 'secondary',
-            size: 'xs',
-            className: triggerClassName,
-          })}
-        >
-          {face}
-        </button>
-      </span>
+      <RefusedDoor
+        label={face}
+        reason={emptyReason ?? `no ${branchNoun} to pick`}
+        className='w-full'
+        buttonClassName={triggerClassName}
+      />
     );
   }
 
