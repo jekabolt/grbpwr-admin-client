@@ -69,10 +69,11 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * (`designSelectBench`) — второй владелец числа заставил бы 3D смотреть в один верстак, пока
  * рендер наполняет другой.
  *
- * ⚠ `sample` В `for:` — ТОЛЬКО У КАРТОЧКИ БЕЗ КОЛОРВЕЕВ (O-57). Таблица SIDES рисует столбец
- * `sample` лишь пока ей не из чего рисовать колорвеи, и цель обязана остаться там, где столбец
- * виден: при колорвеях пункта `sample` нет, а сохранённый `sample` экран читает первым столбцом
- * колорвея и отдаёт это число композитору (`useSidesTarget`, `./side-row`).
+ * ⚠ `for:` ПРЕДЛАГАЕТ РОВНО СТОЛБЦЫ SIDES (O-57). Таблица рисует столбец `sample` лишь пока ей не
+ * из чего рисовать колорвеи, и экран работает там, где столбец виден: сохранённая цель без
+ * столбца (`sample` у карточки с колорвеями, списанный пустой колорвей) читается ПЕРВЫМ столбцом.
+ * Это число экран ВЫВОДИТ и никуда не пишет — общий выбор студии двигает только жест человека
+ * (G2-7; разбор у `useSidesTarget`, `./side-row`).
  *
  * ⚠ РЕМОУНТА ПО `key={colorwayId}` БОЛЬШЕ НЕТ, И ОН БЫЛ БЫ ТЕПЕРЬ ПРЯМЫМ ДЕФЕКТОМ: экран,
  * ремоунтящий сам себя на смене цели, закрывал бы собственный список прямо под пальцем. Пересев
@@ -108,8 +109,9 @@ export function RenderStudio({
   /**
    * WHOSE render this is. `0` — верстак `sample`: не пропуск, а настоящее и вечно законное
    * значение, на котором стоит всякий рендер, сделанный до появления оси, и всякая проба цвета.
-   * ⚠ ЦЕЛЬЮ ОН ОСТАЁТСЯ ТОЛЬКО У КАРТОЧКИ БЕЗ КОЛОРВЕЕВ (O-57): при колорвеях экран работает под
-   * первым столбцом SIDES и отдаёт его композитору — разбор у `useSidesTarget` (`./side-row`).
+   * ⚠ ЭТО СОХРАНЁННАЯ ЦЕЛЬ СТУДИИ, А НЕ ОБЯЗАТЕЛЬНО ЦЕЛЬ ЭКРАНА (O-57): у `sample` рядом с
+   * колорвеями столбца нет, и экран работает под первым столбцом SIDES, не трогая этого числа —
+   * разбор у `useSidesTarget` (`./side-row`).
    */
   colorwayId?: number;
   /** Its row — the second half of the seed («its own colour», when it has no renders yet). */
@@ -139,29 +141,18 @@ export function RenderStudio({
   onGoToKind?: (kind: 'flat' | 'pattern' | 'render' | 'threed' | 'onmodel') => void;
 }): JSX.Element {
   /* ═══ O-57 · ЦЕЛЬ, ПОД КОТОРОЙ РАБОТАЕТ ЭКРАН, — ПЕРВЫМ ДЕЛОМ, ДО ВСЕХ ЕЁ ЧИТАТЕЛЕЙ ═════════════
-     Сохранённый `sample` на карточке с колорвеями — это первый столбец SIDES, и читают его под
-     прежними именами ВСЕ органы ниже: черновик рецепта, ворота, тело прогона, `for:` и сама
-     таблица. Поднять число в одном из них (скажем, в лице селекта) значило бы купить лист под
-     `sample`, показывая ROSSO. Композитору поднятое число уходит тем же сеттером
-     (`useSidesTarget`). */
-  const target = useSidesTarget(
-    band,
-    colorways,
-    {
-      colorwayId: storedColorwayId,
-      ref: storedColorwayRef,
-      label: storedColorwayLabel,
-      archived: storedColorwayArchived,
-    },
-    onColorwayChange,
-  );
+     У сохранённой цели нет столбца в SIDES — экран работает под первым столбцом, и читают это
+     число под прежними именами ВСЕ органы ниже: черновик рецепта, ворота, тело прогона, `for:` и
+     сама таблица. Поднять его в одном из них (скажем, в лице селекта) значило бы купить лист под
+     `sample`, показывая ROSSO. Композитору оно НЕ уходит: число выведено, а не выбрано, и общий
+     выбор студии двигает только жест человека (G2-7, разбор у `useSidesTarget`). */
+  const target = useSidesTarget(band, colorways, {
+    colorwayId: storedColorwayId,
+    ref: storedColorwayRef,
+    label: storedColorwayLabel,
+    archived: storedColorwayArchived,
+  });
   const { colorwayId, ref: colorwayRef, label: colorwayLabel, archived: colorwayArchived } = target;
-  /** Пункты `for:` при колорвеях — только колорвеи: `sample` не предлагается (O-57). */
-  const offered = useMemo(
-    () =>
-      target.named ? colorways.map((c) => c.colorwayId ?? 0).filter((id) => id > 0) : undefined,
-    [colorways, target.named],
-  );
   /* ⚠ `techCardId` ЗДЕСЬ НЕСУЩИЙ, А НЕ СПРАВОЧНЫЙ: черновик подачи умирает вместе с карточкой, и
      умирает он ПО ЭТОМУ ЧИСЛУ (`StudioTab` между карточками не размонтируется — инвариант 12).
      Без него на карточке B стояли бы ткани карточки A — `design_asset.id` ЧУЖОЙ полки, — и
@@ -415,8 +406,8 @@ export function RenderStudio({
                 probe='design-render-target'
                 disabled={disabled}
                 onCreate={() => openCreate()}
-                /* O-57: при колорвеях список сужен ими — `sample` не пункт (`offered` выше). */
-                only={offered}
+                /* O-57: пункты — РОВНО столбцы SIDES, и цель экрана всегда среди них. */
+                only={target.drawn}
                 choice={{
                   colorwayId,
                   setColorwayId: onColorwayChange,

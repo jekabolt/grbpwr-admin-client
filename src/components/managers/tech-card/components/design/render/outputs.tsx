@@ -16,7 +16,7 @@ import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 
 import { InertDoor } from '../bench-slot';
-import { colorwayOf, refColorwayFor, slotHolding } from '../bench-kinds';
+import { COLORWAY_NONE, colorwayOf, refColorwayFor, slotHolding } from '../bench-kinds';
 import { Counter, TwoStepPicker, type PickerBranch } from '../core';
 import { serverSpeaksDesign } from '../capability';
 import { cropFamilies } from '../generation/composite';
@@ -49,6 +49,7 @@ import {
   pictureThumb,
   serverStatesSelected,
   threedSides,
+  type BenchSide,
 } from './model';
 import { CELL_WIDTH, STRIP_CELL_PX, STRIP_FRAME_ASPECT, Strip, StripCell } from './strip-cell';
 
@@ -113,6 +114,14 @@ const DOOR = 'h-5 w-full bg-bgColor';
  *  примитив её наружу не пускает, а мёртвая дверь обязана занимать ровно то место, которое заняла
  *  бы живая. Иначе отказ выглядит уже своей причины и читается как другой орган. */
 const INERT_DOOR = 'w-full [&>button]:h-5 [&>button]:w-full [&>button]:bg-bgColor';
+
+/**
+ * O-57 r2 · ПОЧЕМУ СЕМПЛ-ПЛИТЕ НЕКУДА ВСТАТЬ — два случая, две причины (`destinationsOf`). Одна
+ * строка кода на `title` погашенной `mark ▸`, строку шага 1 её панели и отказ `apply splitted`.
+ */
+const SAMPLE_UNDRAWN_NO_ADOPTION =
+  'the sample bench is not drawn while the card has colourways, and this server cannot adopt a sample render into a colourway';
+const EVERY_COLOURWAY_ARCHIVED = 'every colourway on this card is archived — add or revive one';
 
 /**
  * ═══ ЗАТЕМНЁННЫЙ ГРУНТ ПОД РАСКРЫТОЙ ГРУППОЙ — F-6 ═══════════════════════════════════════════
@@ -298,6 +307,11 @@ export function OutputsSection({
    * поля — «не сказано», а не «нет»: бинарь старше флага молчит, и рисовать по его молчанию дверь
    * в чужой столбец значило бы обещать жест, который отвечает `colorway_mismatch` («попробуй —
    * увидишь»). Поэтому вызывающий передаёт СРАВНЕНИЕ (`=== true`), а не само поле.
+   *
+   * ⚠ ОТ НЕГО ЖЕ ЗАВИСИТ, ЕСТЬ ЛИ У СЕМПЛ-ПЛИТЫ ДВЕРЬ ВООБЩЕ (O-57 r2). Рядом с колорвеями столбца
+   * `sample` в таблице нет, и без флага плите встать некуда: своя ось не видна, чужую сервер не
+   * примет. Двери `mark ▸` и `apply splitted` стоят тогда погашенными со своей причиной
+   * (`destinationsOf`) — а не пишут в верстак, которого человек не видит и не может очистить.
    */
   adopts?: boolean;
   /**
@@ -549,16 +563,42 @@ export function OutputsSection({
    * `colourwayColumns` (`./side-row`) — второе написание правила «архивный только с плитами»
    * разошлось бы с первым в первый же день.
    *
-   * Целью здесь передаётся 0, потому что «цель прогона» этот раздел не знает и знать не должен;
-   * ось 0 это НЕ держит. По O-57 (27.09) столбец `sample` рисуется только у карточки, которой
-   * не из чего рисовать колорвеи, — ноль ЗДЕСЬ лишь оставляет его на пустой карточке (ни плит,
-   * ни столбцов), где иначе не было бы ни одного верстака. Как только таблица рисует колорвей,
-   * оси 0 нет и в этих дверях: «в sample» ни `mark ▸`, ни `apply splitted` не предлагают —
-   * столбца на экране нет. Семпл-плиты при этом остаются в данных и в ряду ниже.
+   * «Цели прогона» этот раздел не знает и знать не должен — и ось её больше не спрашивает: по
+   * O-57 столбец `sample` стоит РОВНО тогда, когда таблице не из чего рисовать колорвеи (ни
+   * живого, ни архивного с плитами), с плитами и без. Как только таблица рисует колорвей, оси 0
+   * нет и в этих дверях: «в sample» ни `mark ▸`, ни `apply splitted` не предлагают — столбца на
+   * экране нет. Семпл-плиты при этом остаются в данных и в ряду ниже; куда они встают рядом с
+   * колорвеями — у `destinationsOf`, а как снимается стоящая в невидимом слоте — у `heldAway`.
    */
-  const axis = useMemo(() => colourwayColumns(band, colorways, 0), [band, colorways]);
+  const axis = useMemo(() => colourwayColumns(band, colorways), [band, colorways]);
   const colourwayName = (id: number): string =>
     id === 0 ? SAMPLE_LABEL : (axis.find((c) => c.colorwayId === id)?.label ?? `#${id}`);
+
+  /**
+   * ═══ O-57 r2 · КУДА ВСТАЁТ ПЛИТА — ОДИН ОТВЕТ НА ДВЕ ДВЕРИ (`mark ▸`, `apply splitted`) ═══════
+   *
+   * Плита колорвея N — только в N: N→M и N→0 сервер отвергает (`colorway_mismatch`) даже с флагом
+   * B7. Семпл-плита (0) — по тому, рисует ли таблица столбец `sample`:
+   *   · рисует (у карточки нет колорвея со столбцом) — как до O-57: её собственная ось;
+   *   · не рисует, при `adopts` — ЖИВЫЕ столбцы колорвеев: сервер усыновит плиту (B7), а архивный
+   *     столбец в усыновление не предлагается — этим цветом больше не работают. Живых нет (все
+   *     столбцы архивные, с плитами) — целей нет, и причина названа; `+ colourway…` у `mark ▸`
+   *     остаётся, новый колорвей и есть выход;
+   *   · не рисует, без `adopts` (старый бинарь; молчание о флаге — «не сказано», доктрина
+   *     `has_fabric_render`) — ЦЕЛИ НЕТ. Своя ось на экране не видна, чужую сервер не примет, и
+   *     дверь стоит погашенной со своей причиной. Молча писать «в sample» значило бы класть плиту
+   *     в верстак, которого человек не видит и не может очистить (ревью Codex, Medium 1).
+   */
+  const sampleDrawn = axis.some((c) => c.colorwayId === COLORWAY_NONE);
+  const destinationsOf = (own: number): { ids: number[]; refusal: string | null } => {
+    if (own !== COLORWAY_NONE) return { ids: [own], refusal: null };
+    if (sampleDrawn) return { ids: [COLORWAY_NONE], refusal: null };
+    if (!adopts) return { ids: [], refusal: SAMPLE_UNDRAWN_NO_ADOPTION };
+    const live = axis.filter((c) => !c.archived).map((c) => c.colorwayId);
+    return live.length
+      ? { ids: live, refusal: null }
+      : { ids: [], refusal: EVERY_COLOURWAY_ARCHIVED };
+  };
 
   /**
    * ═══ КУСКИ РАЗРЕЗА, ПРИВЯЗАННЫЕ К СТОРОНАМ, — ВХОД `applyPlan` (F-7) ══════════════════════
@@ -711,6 +751,54 @@ export function OutputsSection({
   };
 
   /**
+   * ═══ O-57 r2 · СНЯТЬ ПЛИТУ СО СТОРОНЫ, КОТОРОЙ SIDES НЕ РИСУЕТ ════════════════════════════════
+   *
+   * Плита, стоящая в слоте, снимается ✕ на ней же в таблице SIDES. У столбца, которого таблица не
+   * рисует (`sample` рядом с колорвеями), ✕ нет, а сервер не поставит стоящую плиту никуда больше
+   * (`ErrDesignPictureAlreadyInSlot`) — без этой двери она заперта в невидимом слоте (ревью Codex,
+   * High 3). Запись ТА ЖЕ, что у ✕ (`unmark` в `./side-row`): `SetDesignBenchSlot`,
+   * `picture_id = 0` — освободить, ничего не удаляя; род `render`; колорвей слота; CAS — ревизия
+   * ЭТОЙ стороны.
+   */
+  const unmarkHeld = (picture: common_DesignPicture, colorwayId: number, side: BenchSide) => {
+    const pictureId = picture.id ?? 0;
+    if (pictureId <= 0) return;
+    setMarking(pictureId);
+    setBenchSlot.mutate(
+      {
+        /* ⚠ БЕЗ `slotId` — он в одном `oneof` с `viewKey`, как у всех писателей верстака. */
+        slot: {
+          viewKey: side.view,
+          kind: 'render',
+          colorwayId: refColorwayFor('render', colorwayId),
+        },
+        pictureId: 0,
+        expectedSlotRev: side.slotRev,
+      },
+      { onSettled: () => setMarking(null) },
+    );
+  };
+
+  /**
+   * ГДЕ СТОИТ ПЛИТА, ЕСЛИ ЕЁ СТОЛБЦА SIDES НЕ РИСУЕТ: колорвей слота и сторона с CAS-токеном.
+   * `null` — плита свободна, её столбец на экране (тогда дверь — ✕ в таблице) или она стоит в
+   * снятом виде 3/4 (у тех своя дверь — ряд «legacy views» под таблицей, для всех колорвеев).
+   * Сторона ищется на верстаке колорвея САМОЙ плиты: сервер ставит плиту только в слот её
+   * колорвея (и переписывает колорвей при усыновлении), так что это и есть слот, где она стоит.
+   */
+  const heldAway = (picture: common_DesignPicture) => {
+    const pictureId = picture.id ?? 0;
+    if (kind !== 'render' || pictureId <= 0) return null;
+    const colorwayId = colorwayOf(picture);
+    if (axis.some((c) => c.colorwayId === colorwayId)) return null;
+    const side = threedSides(band, refColorwayFor('render', colorwayId)).find(
+      (s) => (s.picture?.id ?? 0) === pictureId,
+    );
+    if (!side) return null;
+    return { colorwayId, side, where: `${colourwayName(colorwayId)} · ${viewLabel(side.view)}` };
+  };
+
+  /**
    * ═══ КУДА ЭТА ПЛИТА МОЖЕТ ВСТАТЬ — ВЕТКАМИ, А НЕ ОДНИМ ПЛОСКИМ СПИСКОМ ════════════════════════
    *
    * Владелец по бете, дословно: «надо спросить колорвей сначала, потом уже сторону — сейчас в
@@ -719,18 +807,16 @@ export function OutputsSection({
    * столбца шесть раз подряд и ставил сторону — то, ради чего список открыли, — третьим словом
    * строки; при двух колорвеях в нём стояло девятнадцать пунктов.
    *
-   * ТРИ ПРАВИЛА СОСТАВА, И КАЖДОЕ — ЗЕРКАЛО СЕРВЕРА, А НЕ ВКУС:
+   * ТРИ ПРАВИЛА СОСТАВА, И КАЖДОЕ — ЗЕРКАЛО СЕРВЕРА, А НЕ ВКУС (считает их `destinationsOf`):
    *   · плита колорвея N предлагает ТОЛЬКО стороны N. N→M и N→0 сервер отвергает
    *     (`colorway_mismatch`) даже с флагом B7 — предлагать их значило бы рисовать дверь, за
    *     которой отказ. Ветка при этом одна, и шага «выбери столбец» не существует вовсе: жест
    *     остаётся ровно таким, каким был до этой правки;
-   *   · семпл-плита (0) при `adopts` предлагает СТОЛБЦЫ ТАБЛИЦЫ: на карточке без колорвеев это
-   *     её собственная ось, на карточке с колорвеями — только живые столбцы колорвеев, а своей
-   *     оси там нет (O-57: столбец `sample` не рисуется — см. `colourwayColumns`). Если все
-   *     столбцы архивные (с плитами), веток нет вовсе, и `TwoStepPicker` двери не рисует.
-   *     Молчание сервера о флаге читается как «не сказано» (доктрина `has_fabric_render`), и на
-   *     старом бинаре ветка снова остаётся одна — собственная ось 0, которую таблица рядом с
-   *     колорвеями уже не показывает; это остаток старого бинаря, а не правило;
+   *   · семпл-плита (0) предлагает свою ось, пока таблица рисует столбец `sample` (у карточки нет
+   *     колорвеев), — как до O-57. Рядом с колорвеями её оси на экране нет: при `adopts` ветки —
+   *     живые столбцы колорвеев (усыновление, B7); все столбцы архивные — веток нет, остаётся
+   *     `+ colourway…`, и шаг 1 говорит почему; без `adopts` веток нет ВОВСЕ, и дверь стоит
+   *     погашенной с причиной (`emptyReason`) — ни одной записи в верстак, которого не видно;
    *   · архивный столбец в усыновление не предлагается: этим цветом больше не работают. Своя
    *     собственная ось плиты при этом остаётся всегда — иначе у плиты архивного колорвея не
    *     осталось бы НИ ОДНОЙ ветки, и дверь вела бы в пустоту.
@@ -744,11 +830,7 @@ export function OutputsSection({
    * собраны листья, — второго счёта занятости рядом не заводится.
    */
   const markBranches = (picture: common_DesignPicture): PickerBranch[] => {
-    const own = colorwayOf(picture);
-    const ids =
-      own === 0 && adopts
-        ? axis.filter((c) => c.colorwayId === 0 || !c.archived).map((c) => c.colorwayId)
-        : [own];
+    const { ids } = destinationsOf(colorwayOf(picture));
     return ids.map((id) => {
       const name = colourwayName(id);
       const sides = threedSides(band, refColorwayFor('render', id));
@@ -797,19 +879,23 @@ export function OutputsSection({
    * section is not narrowed to a colourway»: он назывался ОТСУТСТВИЕМ выбора там, где выбор
    * теперь делается в самой двери.
    *
-   * ПРАВИЛО ЦЕЛИ, ОДНО НА ТРИ СЛУЧАЯ:
+   * ПРАВИЛО ЦЕЛИ — ТО ЖЕ, ЧТО У ВЕТОК `mark ▸` (`destinationsOf`, O-57 r2):
    *   · лист колорвея N → в N, без вопроса. Он и не может встать никуда больше: сервер сверяет
    *     колорвей плиты с колорвеем слота, и N→M отвергается даже с флагом B7;
-   *   · семпл-лист БЕЗ флага → в `sample`, молча. Единственная законная цель;
-   *   · семпл-лист ПРИ флаге → дверь становится СЕЛЕКТОМ целей (`sample | ROSSO | … |
-   *     + colourway…`), и план считается по слотам ВЫБРАННОЙ цели. Второго органа рядом с дверью
-   *     не появилось: селект — это и есть дверь, тот же глагол, тот же вопрос, тот же отчёт.
+   *   · семпл-лист на карточке без колорвеев (столбец `sample` нарисован) → в `sample`, молча, с
+   *     флагом и без — как до O-57;
+   *   · семпл-лист рядом с колорвеями ПРИ флаге → дверь становится СЕЛЕКТОМ живых столбцов
+   *     (`ROSSO | OLIVE | … | + colourway…`), и план считается по слотам ВЫБРАННОЙ цели. Второго
+   *     органа рядом с дверью не появилось: селект — это и есть дверь, тот же глагол, тот же
+   *     вопрос, тот же отчёт;
+   *   · семпл-лист рядом с колорвеями БЕЗ флага — или при флаге, но все столбцы архивные, — цели
+   *     нет, и это ОТКАЗ с причиной, а не запись в невидимый `sample`.
    *
-   * ОТКАЗ ОСТАЛСЯ ОДИН СОДЕРЖАТЕЛЬНЫЙ (плюс два общих): в разрезе нет ни одной стороны силуэта.
-   * Он уезжает в `ApplySplitDoor` пропом `refusal`: дверь погашена, причина напечатана строкой, и
-   * на провод не уходит ни одной записи. Порядок — от общего к частному: карточка только читается
-   * / сервер молчит → в разрезе нет ни одной стороны силуэта (куски — детали, а у детали нет
-   * слота).
+   * ОТКАЗОВ ДВА СОДЕРЖАТЕЛЬНЫХ (плюс два общих): листу некуда встать (причины `destinationsOf`) и
+   * в разрезе нет ни одной стороны силуэта. Оба уезжают в `ApplySplitDoor` пропом `refusal`: дверь
+   * погашена, причина напечатана строкой, и на провод не уходит ни одной записи. Порядок — от
+   * общего к частному: карточка только читается / сервер молчит → листу некуда встать → в разрезе
+   * нет ни одной стороны силуэта (куски — детали, а у детали нет слота).
    */
   const applyRefusalFor = (rootId: number): string | null => {
     if (disabled)
@@ -817,6 +903,8 @@ export function OutputsSection({
     if (!speaks) return 'this server does not answer the design routes';
     const sheet = rowById.get(rootId)?.picture;
     if (!sheet) return null;
+    const nowhere = destinationsOf(colorwayOf(sheet)).refusal;
+    if (nowhere) return nowhere;
     if (!piecesOf(rootId).length)
       return 'nothing in this split names a side of the silhouette — the pieces are details, and a detail has no slot to stand in. Cut the sheet again and name front, back or a side on the frames.';
     return null;
@@ -895,6 +983,8 @@ export function OutputsSection({
      */
     const composite = pictureIsComposite(picture);
     const held = kind === 'render' ? slotHolding(band, picture.id ?? 0) : null;
+    /** O-57 r2: стоит, но в столбце, которого SIDES не рисует, — дверь снятия у самой плитки. */
+    const away = held ? heldAway(picture) : null;
     /** Сколько видов объявлено в листе — число для бейджа полки 3D, оно же счёт кадров разреза. */
     const declaredViews = (picture.compositeViews ?? []).length;
     /**
@@ -1136,6 +1226,19 @@ export function OutputsSection({
           >
             {stamped ? `run ${run.id} · ${shape}` : `no run · ${shape}`}
           </span>,
+          /* ═══ O-57 r2 · ГДЕ ПЛИТА СТОИТ, КОГДА ЕЁ СТОЛБЦА НА ЭКРАНЕ НЕТ ═══════════════════════
+             У плиты в видимом столбце это слово пилюли в ряду дверей («in front»), а ✕ стоит в
+             таблице. Здесь ряд занят дверью снятия, а таблица этой стороны не показывает вовсе,
+             поэтому место называется строкой подписи — тем же кеглем, что строка прогона. Это не
+             проза под каждой плиткой (J-19), а факт одной плитки: строки нет, пока плита
+             свободна или стоит в видимом столбце. */
+          ...(away
+            ? [
+                <span key='held-away' data-held-away={`${away.colorwayId}:${away.side.view}`}>
+                  in {away.where}
+                </span>,
+              ]
+            : []),
         ]}
         /* ⚠ РЯД ПОД КАДРОМ РИСУЕТСЯ, ТОЛЬКО ЕСЛИ В НЁМ ЧТО-ТО ЕСТЬ (E-25). У здоровой ячейки 3D
            под карточкой теперь не должно быть НИЧЕГО — а пустой `<div>` это всё-таки орган:
@@ -1156,10 +1259,12 @@ export function OutputsSection({
              самое «кнопки скачут». Разбор метрики — у `DOOR_ROW` в шапке файла. */
           <div data-door-row='' className={DOOR_ROW}>
             {/* ═══ ДВЕРЬ В СЛОТ — ЗДЕСЬ, ГДЕ ЛЕЖИТ МАТЕРИАЛ (J-25) ═════════════════════════════
-                Пять состояний, и каждое отвечает на СВОЙ вопрос человека:
+                Шесть состояний, и каждое отвечает на СВОЙ вопрос человека:
                   · «в какой стороне это уже стоит» — читаемая плашка (Pill), не кнопка: сторону
                     освобождает ✕ на самой плите в FABRIC RENDER SLOTS, и второй глагол снятия
                     здесь был бы вторым реестром одного действия;
+                  · «а если её столбца в SIDES нет» (O-57 r2) — ✕ там нет вовсе, и снятие стоит
+                    здесь: `unmark ▸`, а где плита стоит, говорит строка подписи;
                   · «этот лист уже разрезан — где куски» — `expand ▸`, а раскрытым `apply splitted` + `▾`
                     (F-7, разбор у самой ветки);
                   · «этот лист ещё не разрезан» — живой `split ▸`;
@@ -1212,14 +1317,13 @@ export function OutputsSection({
                     {(() => {
                       const rootId = picture.id ?? 0;
                       const own = colorwayOf(picture);
-                      /* ЦЕЛИ — ТОЛЬКО У СЕМПЛ-ЛИСТА И ТОЛЬКО ПРИ ФЛАГЕ (разбор у `applyRefusalFor`).
-                         В остальных случаях цель одна и вопроса нет: дверь остаётся кнопкой. */
-                      const targets =
-                        own === 0 && adopts
-                          ? axis
-                              .filter((c) => c.colorwayId === 0 || !c.archived)
-                              .map((c) => ({ colorwayId: c.colorwayId, label: c.label }))
-                          : [{ colorwayId: own, label: colourwayName(own) }];
+                      /* ЦЕЛИ — ТЕ ЖЕ, ЧТО ВЕТКИ `mark ▸` (`destinationsOf`, разбор у
+                         `applyRefusalFor`): одна — дверь остаётся кнопкой; несколько (семпл-лист
+                         рядом с колорвеями при флаге) — селект; ни одной — отказ с причиной. */
+                      const targets = destinationsOf(own).ids.map((id) => ({
+                        colorwayId: id,
+                        label: colourwayName(id),
+                      }));
                       return (
                         <ApplySplitDoor
                           techCardId={techCardId}
@@ -1266,6 +1370,41 @@ export function OutputsSection({
                   >
                     expand ▸
                   </Button>
+                )
+              ) : away ? (
+                /* ═══ O-57 r2 · ПЛИТА В СТОЛБЦЕ, КОТОРОГО SIDES НЕ РИСУЕТ ═════════════════════════
+                   Зеркало `mark ▸` на том же месте и той же меры (`DOOR`): там кладут, здесь
+                   снимают. Жест не удаляет ничего — картинка остаётся на карточке и в этом ряду,
+                   дальше её дверь снова `mark ▸`. Без права записи — погашенная дверь со словом,
+                   как у соседей (`INERT_DOOR`). */
+                writesOff ? (
+                  <InertDoor
+                    className={INERT_DOOR}
+                    label='unmark ▸'
+                    reason={
+                      disabled
+                        ? 'this card is read-only for you — emptying a side is an edit of the card'
+                        : 'this server does not answer the design routes'
+                    }
+                  />
+                ) : (
+                  <span data-unmark-held={picture.id || undefined} className='flex w-full'>
+                    <Button
+                      variant='secondary'
+                      size='xs'
+                      className={DOOR}
+                      disabled={marking === (picture.id ?? 0)}
+                      aria-label={`unmark ${spokenNoun} ${picture.ordinal ?? ''} from ${away.where}`}
+                      title={`unmark — empty ${away.where}; the render stays on the card. ${
+                        away.colorwayId === COLORWAY_NONE
+                          ? 'SIDES draws no sample column while the card has colourways'
+                          : `SIDES draws no column for ${colourwayName(away.colorwayId)}`
+                      }`}
+                      onClick={() => unmarkHeld(picture, away.colorwayId, away.side)}
+                    >
+                      unmark ▸
+                    </Button>
+                  </span>
                 )
               ) : held ? (
                 <span
@@ -1361,6 +1500,10 @@ export function OutputsSection({
                        пересобран), панель открывается снова и сразу на сторонах нового столбца.
                        Второго нажатия больше не нужно. */
                     const branches = markBranches(picture);
+                    /* O-57 r2: ПОЧЕМУ ВЕТОК НЕТ — у семпл-плиты рядом с колорвеями
+                       (`destinationsOf`). Без `create` дверь стоит погашенной с этой фразой в
+                       `title`; с `create` — жива, и фраза стоит на шаге 1 над строкой рождения. */
+                    const nowhere = destinationsOf(colorwayOf(picture)).refusal;
                     /* Рождение колорвея предлагается ровно там же, где предлагается усыновление:
                        без флага семпл-плита в новый столбец не встанет, и строка вела бы к
                        рождению колорвея, которым нечего было бы наполнить отсюда. */
@@ -1376,11 +1519,14 @@ export function OutputsSection({
                         branchNoun='colourways'
                         leafNoun='sides'
                         branches={branches}
+                        emptyReason={nowhere ?? undefined}
                         disabled={marking === (picture.id ?? 0)}
                         triggerTitle={
-                          asksColourway
-                            ? 'put this render into a side — the colourway first, then the side'
-                            : `put this render into a side of ${branches[0]?.label ?? ''}`
+                          nowhere
+                            ? nowhere
+                            : asksColourway
+                              ? 'put this render into a side — the colourway first, then the side'
+                              : `put this render into a side of ${branches[0]?.label ?? ''}`
                         }
                         /* ⚠ МЕТРИКА РЯДА ОТДАЁТСЯ СНАРУЖИ, КАК У ВСЕХ СОСЕДЕЙ (F-9): триггер
                            поповера — это САМА `<button>`, и `DOOR` садится на неё тем же классом,
@@ -1625,7 +1771,7 @@ export function OutputsSection({
            свёрнутой колоды и тонированный грунт группы остаются ровно теми же.
 
            ⚠ ИМЯ БЕРЁТСЯ У ПРОПА, А НЕ У `colourwayName`, И ЭТО НЕ МЕЛОЧЬ. `colourwayName` читает
-           `axis` (`colourwayColumns(band, colorways, 0)`), а `colorways` этому разделу с экрана 3D
+           `axis` (`colourwayColumns(band, colorways)`), а `colorways` этому разделу с экрана 3D
            не передают вовсе — там список пуст, и имя выбранного цвета вышло бы запасным `#5` ровно
            на том экране, ради которого подпись и заведена. `colorwayLabel` — то же слово, которым
            студия подписывает свою шапку (`useColorwayChoice`), значит окно и шапка над ним не

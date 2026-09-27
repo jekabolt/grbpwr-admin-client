@@ -11,7 +11,6 @@ import SelectComponent from 'ui/components/select';
 import { ViewSwitch } from 'ui/components/view-switch';
 
 import type { TechCardFormData } from '../../schema';
-import { COLORWAY_NONE } from '../bench-kinds';
 import { InertDoor } from '../bench-slot';
 import { ColorwaySelect } from '../colorway-picker';
 import { EmptyState, GROUP_GAP, GROUP_SEAM } from '../core';
@@ -32,7 +31,7 @@ import {
 } from './model';
 import { BodyPicker } from './model-picker';
 import { OutputsSection } from './outputs';
-import { RendersByViewGroup, useSidesTarget } from './side-row';
+import { RendersByViewGroup } from './side-row';
 import { useStartDesignRun } from './use-design-run';
 import { WhatModelGetsRenderModal } from './what-model-gets';
 
@@ -77,9 +76,9 @@ export function ThreedStudio({
   techCardId,
   disabled,
   onGoToKind,
-  colorwayId: storedColorwayId = 0,
-  colorwayLabel: storedColorwayLabel = '',
-  colorwayArchived: storedColorwayArchived = false,
+  colorwayId = 0,
+  colorwayLabel = '',
+  colorwayArchived = false,
   colorways = [],
   onColorwayChange,
 }: {
@@ -100,8 +99,6 @@ export function ThreedStudio({
   /**
    * THE BENCH BEING BUILT — one number for the whole studio (`useColorwayChoice`). It addresses the
    * bench the SERVER reads (`designSelectBench`) and the set the door opens on (`no_fabric_render`).
-   * ⚠ `sample` СТОИТ ЦЕЛЬЮ ТОЛЬКО У КАРТОЧКИ БЕЗ КОЛОРВЕЕВ (O-57) — правило то же, что на FABRIC
-   * RENDER, и то же число: `useSidesTarget` (`./side-row`).
    */
   colorwayId?: number;
   /** Its human name; `''` под `sample` — отказы называют его тем же словом (`benchName`). */
@@ -109,21 +106,6 @@ export function ThreedStudio({
   /** ⚠ Read by the GATE only: reading and the input strip work under an archived colourway. */
   colorwayArchived?: boolean;
 }): JSX.Element {
-  /* ═══ O-57 · ТА ЖЕ ЦЕЛЬ, ЧТО НА FABRIC RENDER, И ПОДНЯТА ОНА ТЕМ ЖЕ ПРАВИЛОМ ════════════════════
-     Сохранённый `sample` на карточке с колорвеями читается первым столбцом SIDES — вход, ворота,
-     тело сборки и `for:` ниже видят его под прежними именами, — а композитору уходит тем же
-     сеттером. Разбор, почему это не переезд G2-7, — у `useSidesTarget`. */
-  const target = useSidesTarget(
-    band,
-    colorways,
-    {
-      colorwayId: storedColorwayId,
-      label: storedColorwayLabel,
-      archived: storedColorwayArchived,
-    },
-    onColorwayChange,
-  );
-  const { colorwayId, label: colorwayLabel, archived: colorwayArchived } = target;
   /* Черновик ключуется КАРТОЧКОЙ, а не монтированием: разбор — в шапке хука (`./drafts`). */
   const { draft, patch } = useThreedDraft(techCardId);
   const cardFit = useCardFit();
@@ -144,13 +126,10 @@ export function ThreedStudio({
    * по `render_bench_colorway_ids`: серверное множество отвечает «занят ХОТЯ БЫ ОДИН слот», и
    * колорвей с одной спинкой в нём есть, а собрать его нельзя (разбор — у `threedColorwayOptions`).
    */
-  const buildable = useMemo(() => {
-    const all = threedColorwayOptions(band, colorways);
-    /* O-57: при колорвеях `sample` не цель и здесь — даже когда FRONT стоит только у него. Его
-       верстак остаётся в данных, но собирать из столбца, которого SIDES не рисует, значило бы
-       покупать модель из невидимых плит. */
-    return target.named ? all.filter((id) => id !== COLORWAY_NONE) : all;
-  }, [band, colorways, target.named]);
+  const buildable = useMemo(
+    () => threedColorwayOptions(band, colorways),
+    [band, colorways],
+  );
 
   /**
    * ═══ ⚠ ЗАХОД НА 3D НЕ ПЕРЕДВИГАЕТ ОБЩИЙ ВЫБОР СТУДИИ. НИКОГДА (G2-7, побочка G2a) ════════════
@@ -170,12 +149,6 @@ export function ThreedStudio({
    * сам `ColorwaySelect`, см. проп `unmatched`). Причину и ИМЯ цели называет полоса LOCKED ниже
    * («the render bench of sample holds renders, but not on FRONT»), поэтому приглашение не
    * пересказывает её второй раз. Общее состояние меняет ТОЛЬКО клик человека по этому селекту.
-   *
-   * ⚠ ОДНО ИСКЛЮЧЕНИЕ — O-57, И ОНО НЕ ПРО 3D. `sample` при колорвеях не цель ни здесь, ни на
-   * FABRIC RENDER (его столбца в SIDES нет), и сохранённый `sample` оба экрана поднимают ОДНИМ И
-   * ТЕМ ЖЕ числом — первым столбцом таблицы, а не «первым собираемым» (`useSidesTarget`). Значит
-   * `for:` на FABRIC RENDER после захода сюда показывает ровно то, что показал бы и без него, — а
-   * это и было всё, что сторожит G2-7. Колорвей, выбранный человеком, не двигается и здесь.
    */
 
   const sizes = dictionary?.sizes ?? [];

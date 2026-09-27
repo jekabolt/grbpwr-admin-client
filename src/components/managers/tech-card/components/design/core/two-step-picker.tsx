@@ -82,6 +82,7 @@ export function TwoStepPicker({
   triggerTitle,
   branchNoun = 'branches',
   leafNoun = 'items',
+  emptyReason,
 }: {
   /** Лицо двери. Метрика ряда — снаружи, `triggerClassName` (F-9). */
   face: string;
@@ -102,7 +103,13 @@ export function TwoStepPicker({
   branchNoun?: string;
   /** Как назвать список шага 2 («sides») — имя ветки дописывается само. */
   leafNoun?: string;
-}): JSX.Element | null {
+  /**
+   * ПОЧЕМУ ВЕТОК НЕТ — словами вызывающего. Веток нет и `create` нет — дверь стоит ПОГАШЕННОЙ, и
+   * это её `title`. Веток нет, но `create` есть — дверь жива, а фраза стоит на шаге 1 над строкой
+   * рождения. Не задана — погашенная дверь говорит общим «no … to pick».
+   */
+  emptyReason?: string;
+}): JSX.Element {
   const [open, setOpen] = useState(false);
   /** На чьих листьях стоит панель. `null` — на шаге 1. */
   const [branchId, setBranchId] = useState<number | null>(null);
@@ -128,7 +135,35 @@ export function TwoStepPicker({
    */
   const branch = only ?? branches.find((b) => b.id === branchId) ?? null;
 
-  if (!branches.length && !create) return null;
+  /**
+   * ═══ ВЕТОК НЕТ И ЗАВЕСТИ НЕЧЕГО — ДВЕРЬ ПОГАШЕНА, А НЕ СНЯТА (O-57 r2) ══════════════════════
+   *
+   * Здесь стоял `return null`, и ячейка теряла свою единственную дверь: ряд читался «здесь ничего
+   * не делают» там, где не делают ПО ПРИЧИНЕ (семпл-плита рядом с колорвеями на сервере без B7 —
+   * своего столбца на экране нет, а чужой сервер не примет). Дверь стоит на своём месте, своим
+   * лицом и своей мерой (`triggerClassName`), погашенная, с причиной в `title` обёртки — идиома
+   * `InertDoor`. Сам `InertDoor` живёт в `../bench-slot`, а тот импортирует `./core`: взять его
+   * отсюда значило бы замкнуть круг импорта. Обёртка — `contents`: коробки у неё нет, и кнопка
+   * встаёт в ряд ровно тем элементом, каким встал бы живой триггер.
+   */
+  if (!branches.length && !create) {
+    const reason = emptyReason ?? `no ${branchNoun} to pick`;
+    return (
+      <span data-inert={reason} title={reason} className='contents'>
+        <button
+          type='button'
+          disabled
+          className={buttonVariants({
+            variant: 'secondary',
+            size: 'xs',
+            className: triggerClassName,
+          })}
+        >
+          {face}
+        </button>
+      </span>
+    );
+  }
 
   const close = () => {
     setOpen(false);
@@ -314,32 +349,51 @@ export function TwoStepPicker({
           </>
         ) : (
           <>
-            <div role='listbox' aria-label={branchNoun}>
-              {branches.map((b) => (
-                <button
-                  key={b.id}
-                  type='button'
-                  role='option'
-                  aria-selected={false}
-                  data-picker-row=''
-                  data-picker-branch={b.id}
-                  tabIndex={-1}
-                  title={b.title}
-                  onClick={() => goTo(b.id)}
-                  className={ROW}
-                >
-                  <span className='min-w-0 flex-1 truncate uppercase'>{b.label}</span>
-                  {b.note ? (
-                    <Text size='micro' variant='label' component='span' className='shrink-0 tabular-nums'>
-                      {b.note}
-                    </Text>
-                  ) : null}
-                  <span aria-hidden className='shrink-0 text-labelColor'>
-                    ▸
-                  </span>
-                </button>
-              ))}
-            </div>
+            {branches.length ? (
+              <div role='listbox' aria-label={branchNoun}>
+                {branches.map((b) => (
+                  <button
+                    key={b.id}
+                    type='button'
+                    role='option'
+                    aria-selected={false}
+                    data-picker-row=''
+                    data-picker-branch={b.id}
+                    tabIndex={-1}
+                    title={b.title}
+                    onClick={() => goTo(b.id)}
+                    className={ROW}
+                  >
+                    <span className='min-w-0 flex-1 truncate uppercase'>{b.label}</span>
+                    {b.note ? (
+                      <Text
+                        size='micro'
+                        variant='label'
+                        component='span'
+                        className='shrink-0 tabular-nums'
+                      >
+                        {b.note}
+                      </Text>
+                    ) : null}
+                    <span aria-hidden className='shrink-0 text-labelColor'>
+                      ▸
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : emptyReason ? (
+              /* ВЕТОК НЕТ, НО ЗАВЕСТИ МОЖНО. Пустой список без слова читался бы поломкой, поэтому шаг
+                 1 говорит почему — той же фразой, что `title` двери у вызывающего. */
+              <Text
+                size='micro'
+                variant='label'
+                component='p'
+                className='px-2 py-1 normal-case'
+                data-picker-empty=''
+              >
+                {emptyReason}
+              </Text>
+            ) : null}
             {create ? (
               /* ⚠ ВНЕ СПИСКА НАМЕРЕННО: это не «ещё одна ветка», а глагол — он не выбирает
                  существующее, а заводит новое, и `role="option"` над ним обещал бы читалке
