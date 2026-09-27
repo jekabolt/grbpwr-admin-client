@@ -5303,7 +5303,9 @@ export type DesignPicture = {
   layerRev: number | undefined;
   // Reversible invisibility — the ONLY persistent verb for hiding a picture. The guards live in
   // HideDesignPicture: a plate in a slot, feeding a live run, or parenting a live crop cannot be
-  // hidden. A hidden picture is not cut either: SplitDesignPicture answers hidden_picture.
+  // hidden. A hidden picture is neither cut nor overwritten: SplitDesignPicture and
+  // FlattenDesignEditLayer with replace_picture_id answer hidden_picture (an edit of it is filed
+  // beside it instead — «save as new»).
   hiddenAt: wellKnownTimestamp | undefined;
   hiddenBy: string | undefined;
   createdAt: wellKnownTimestamp | undefined;

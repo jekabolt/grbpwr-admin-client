@@ -122,7 +122,15 @@ export type EnhanceTextMode =
   // comma-separated descriptors; every fact kept, none added; no marketing
   // words, no negations (what the garment does NOT have is left out — an image
   // model draws what a prompt names). Same language as the input.
-  | "ENHANCE_TEXT_MODE_PROMPT";
+  | "ENHANCE_TEXT_MODE_PROMPT"
+  // Rewrite ONE field of an image tool (the PLAYGROUND prompt fields' «Improve»)
+  // as a short, concrete, visual phrase for that field: the CONTEXT's first line
+  // names the tool and the field; the person's intent, every fact and their
+  // language are kept; a vague part, place, material, colour or light is named;
+  // filler is cut; at most 40 words. When the CONTEXT says the field describes a
+  // RESULT (the mask retouch), the answer describes what should be seen and drops
+  // the operation words.
+  | "ENHANCE_TEXT_MODE_STEER";
 // EnhanceTextField names WHICH field is being rewritten. It is an enum and not a
 // string on purpose (review M-07): the server maps it to its own fixed phrase in
 // the system prompt, so nothing the request carries can become an instruction.
@@ -15127,7 +15135,9 @@ export type common_DesignPicture = {
   layerRev: number | undefined;
   // Reversible invisibility — the ONLY persistent verb for hiding a picture. The guards live in
   // HideDesignPicture: a plate in a slot, feeding a live run, or parenting a live crop cannot be
-  // hidden. A hidden picture is not cut either: SplitDesignPicture answers hidden_picture.
+  // hidden. A hidden picture is neither cut nor overwritten: SplitDesignPicture and
+  // FlattenDesignEditLayer with replace_picture_id answer hidden_picture (an edit of it is filed
+  // beside it instead — «save as new»).
   hiddenAt: wellKnownTimestamp | undefined;
   hiddenBy: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
@@ -16825,13 +16835,27 @@ export type FlattenDesignEditLayerRequest = {
   // replacement already; a retry of an overwrite WITHOUT client_request_id lands here BEFORE
   // anything is filed, and the ErrorInfo metadata carries head_picture_id: the head of the
   // picture's replacement chain, i.e. the picture standing in its place now. FailedPrecondition:
-  // cut_sheet — pieces cut from this sheet still stand on screen, and they would stay cut from the
-  // original. A piece stands while ANYTHING GROWN FROM IT is visible: the piece itself, an edit that
-  // took its place (replaced_by, followed to the end), a piece cut from any of those, and so on down
-  // the branch — every one of them was drawn from the sheet's old pixels. An edit filed beside a
-  // picture (no replace_picture_id) takes no place and holds nothing. Hide what stands of those
-  // branches before overwriting the sheet, or edit a piece instead of the sheet. NotFound — no such
-  // picture.
+  // hidden_picture — the picture is hidden (DesignPicture.hidden_at). An overwrite makes the edit
+  // the picture's successor, the head of its replacement chain, and a hidden picture has no place
+  // on screen to hand over: the edit, born visible, would bring back what was hidden. Save the edit
+  // as a new picture — a flatten beside takes no place, and this refusal never applies to it — or
+  // show the picture first (HideDesignPicture with hidden = false); SplitDesignPicture refuses a
+  // hidden picture for the same reason. FailedPrecondition:
+  // technical_sheet — the picture's file is on the card's technical sheet (TechCard.technical_media
+  // as last SAVED, not the form being edited): the tech pack prints that sheet, so the original
+  // would stay on it beside the edit and the pack would carry two plates of one view, the sheet's
+  // callouts still pinned to the original. Take it off the sheet (and save the card) first, or save
+  // the edit as a new picture — a flatten beside takes no place, and this refusal never applies to
+  // it. FailedPrecondition: cut_sheet — pieces cut from this sheet still stand on screen, and they
+  // would stay cut from the original. A piece stands while ANYTHING GROWN FROM IT is visible: the
+  // piece itself, an edit that took its place (replaced_by, followed to the end), a piece cut from
+  // any of those, and so on down the branch — every one of them was drawn from the sheet's old
+  // pixels. An edit filed beside a picture (no replace_picture_id) takes no place and holds nothing.
+  // Hide what stands of those branches before overwriting the sheet, or edit a piece instead of the
+  // sheet. NotFound — no such picture. Judged in the order written: NotFound, replace_mismatch,
+  // already_replaced, hidden_picture, technical_sheet, cut_sheet — so a picture both replaced and
+  // hidden gets already_replaced with head_picture_id, and a hidden picture on the sheet gets
+  // hidden_picture.
   // ⚠ AN OLDER SERVER ANSWERS 400 TO THIS FIELD: the JSON gateway refuses unknown fields. Send it
   // only after a read has carried DesignPicture.replaced_by, which an older server never emits.
   replacePictureId: number | undefined;
@@ -18631,9 +18655,10 @@ export interface AdminService {
   // IDEMPOTENT BY client_request_id WHEN ONE IS SENT: a retry after a lost response answers with
   // the picture the first attempt filed — see the request field.
   // Aborted: layer_rev_mismatch. FailedPrecondition: empty_layer, already_replaced (ErrorInfo
-  // metadata head_picture_id), cut_sheet, and the placement refusals of SetDesignBenchSlot when the
-  // slot being moved refuses the edit. InvalidArgument: an unknown or foreign media_id,
-  // replace_mismatch, a client_request_id already spent on a different flatten.
+  // metadata head_picture_id), hidden_picture, technical_sheet, cut_sheet, and the placement
+  // refusals of SetDesignBenchSlot when the slot being moved refuses the edit. InvalidArgument: an
+  // unknown or foreign media_id, replace_mismatch, a client_request_id already spent on a different
+  // flatten.
   FlattenDesignEditLayer(request: FlattenDesignEditLayerRequest): Promise<FlattenDesignEditLayerResponse>;
   // ImportDesignVector files an ALREADY-UPLOADED vector file into the band as an edit layer: the
   // media row keeps the authoritative SVG, the layer keeps the editable projection of it, and
