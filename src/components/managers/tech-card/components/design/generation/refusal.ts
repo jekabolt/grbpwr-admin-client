@@ -33,6 +33,18 @@ export function isAborted(error: unknown): boolean {
   return statusOf(error) === 409;
 }
 
+/**
+ * THE SERVER ANSWERED AND NOTHING WAS BOOKED — a 4xx (grpc-gateway: InvalidArgument,
+ * FailedPrecondition, NotFound, PermissionDenied, Unauthenticated, ResourceExhausted, Aborted all land
+ * there, every one of them before or instead of the booking). 408 and 499 are timeouts in 4xx dress;
+ * a 5xx may come after a commit; no status at all is no answer. Those three are NOT definitive: the
+ * run may exist, and the idempotency key must survive them (`render/run-ledger.ts`).
+ */
+export function isDefinitiveRefusal(error: unknown): boolean {
+  const s = statusOf(error);
+  return s !== null && s >= 400 && s < 500 && s !== 408 && s !== 499;
+}
+
 function statusOf(error: unknown): number | null {
   const s = (error as { status?: unknown } | null | undefined)?.status;
   return typeof s === 'number' && s > 0 ? s : null;

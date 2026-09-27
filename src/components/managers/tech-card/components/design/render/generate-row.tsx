@@ -298,7 +298,9 @@ export function RunRefusal({
         className='flex items-start gap-2'
       >
         <Text size='micro' component='p' className='min-w-0 flex-1 normal-case'>
-          <b>the run did not start.</b>{' '}
+          {/* THE LEAD SAYS ONLY WHAT IS KNOWN (G-01 r2). Without an answer «did not start» was a
+              guess, and the wrong one whenever the answer was lost AFTER the run was booked. */}
+          <b>{answered ? 'the run did not start.' : 'no answer from the server.'}</b>{' '}
           {answered ? (
             <>
               The server answered: «<span data-probe='refusal-verbatim'>{words}</span>». These are
@@ -307,10 +309,10 @@ export function RunRefusal({
             </>
           ) : (
             <>
-              No answer came back from the server («
-              <span data-probe='refusal-verbatim'>{words}</span>»), so whether the run was filed and
-              charged is not known here. Pressing GENERATE again with nothing changed carries the
-              same request id, and the server files one run per id — a repeat cannot pay twice.
+              («<span data-probe='refusal-verbatim'>{words}</span>») Whether the run was booked is
+              not known here. To check, press GENERATE again without changing anything: it resends
+              the same request id, so the server returns the run if it exists and starts it once if
+              it does not. It cannot be charged twice.
             </>
           )}
         </Text>

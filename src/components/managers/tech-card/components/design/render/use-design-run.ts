@@ -4,9 +4,14 @@ import type { common_DesignRunParams } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useRef, useState } from 'react';
 
-import { isAborted, refusalFromError, type RunRefusal } from '../generation/refusal';
-import { designKeys, newClientRequestId } from '../use-design-band';
-import { ledgerRefused, ledgerSend, ledgerSettle } from './run-ledger';
+import {
+  isAborted,
+  isDefinitiveRefusal,
+  refusalFromError,
+  type RunRefusal,
+} from '../generation/refusal';
+import { designKeys } from '../use-design-band';
+import { ledgerSend, ledgerSettle, operatorKey, requestFingerprint } from './run-ledger';
 
 /**
  * STARTING A RUN — the one write the two generative screens make.
@@ -106,21 +111,22 @@ export type StartRunState = {
  *
  * Minting it inside the mutation would defeat the mechanism entirely — a retry after a network
  * timeout would carry a fresh id and the server would honestly start a SECOND PAID JOB, having
- * already started the first. So the id is remembered against a fingerprint of what was asked for:
- * pressing GENERATE again after a failure, with nothing changed, replays the same id and the server
- * hands back the run that already exists; changing anything mints a new one, because that is a new
- * intent. A success clears the ledger, so the next press is a new run rather than an idempotent
+ * already started the first. So the id is remembered against a fingerprint of what was asked for,
+ * in one ledger shared by every screen (`./run-ledger.ts`, which holds the rules): pressing GENERATE
+ * again after a lost answer, with nothing changed, replays the same id and the server hands back the
+ * run that already exists; changing anything mints a new one, because that is a new intent; an
+ * accepted run or a definitive refusal frees the id, so the next press is a new run rather than an
  * echo of the last one.
  */
 export function useStartDesignRun(
   techCardId?: number,
   opts?: {
     /**
-     * THE FORM THIS PRESS BELONGS TO (`playground:change_color`). Given, the idempotency key lives in
-     * the shared ledger (`./run-ledger.ts`) keyed by `{card, scope, fingerprint}` instead of in this
-     * component, and «pending» is read from the mutation cache — both outlive an unmounted form
-     * (G-01, Codex 1). Absent, the hook behaves exactly as it always has: the other generative
-     * screens (fabric render, 3D, pattern) stay mounted for as long as their step is open.
+     * THE FORM THIS PRESS BELONGS TO (`playground:change_color`). It narrows the ledger to that form
+     * and, given, «pending» is read from the mutation cache — which outlives an unmounted form
+     * (G-01, Codex 1). Absent, pending is this component's own: the other generative screens
+     * (fabric render, 3D, pattern) stay mounted for as long as their step is open. The ledger is
+     * shared either way, so their key survives an unmount too.
      */
     scope?: string;
   },
@@ -128,30 +134,24 @@ export function useStartDesignRun(
   const scope = opts?.scope ?? '';
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
-  const ledger = useRef<{ fingerprint: string; id: string } | null>(null);
   const [refusal, setRefusal] = useState<RunRefusal | null>(null);
 
   /**
-   * ═══ ⚠ THE LEDGER AND THE REFUSAL BELONG TO ONE CARD, AND THE STUDIO IS NOT REMOUNTED ═════════
+   * ═══ ⚠ THE REFUSAL BELONGS TO ONE CARD, AND THE STUDIO IS NOT REMOUNTED ════════════════════════
    *
    * The two generative screens live inside a tab that SURVIVES the walk from card A to card B
-   * (invariant 12, and the draft next door empties itself for exactly this reason). This hook was
-   * the last thing on them still holding A's answer: B's screen opened with A's refusal standing
-   * over it — words naming a fault of another card, next to a GENERATE that is not refused — and
-   * the ledger held A's `client_request_id`, minted against a fingerprint that did not name the
-   * card at all. A press on B with the same kind, the same words and the same pictures replayed
-   * that id, and the server reads an idempotency key against the CARD it was minted for
-   * (`designSameStartRequest`): it hands back «that is not this request», i.e. a refusal for a run
-   * a person is entitled to buy.
+   * (invariant 12, and the draft next door empties itself for exactly this reason). B's screen
+   * opened with A's refusal standing over it — words naming a fault of another card, next to a
+   * GENERATE that is not refused. The idempotency key cannot leak the same way: the ledger is keyed
+   * by the card, and the card is the first field of the fingerprinted request.
    *
-   * SO BOTH DIE WITH THE CARD, IN THE BODY OF THE RENDER. Not in an effect: an effect leaves one
-   * COMMITTED frame in which the card is already B and the refusal is still A's, and one frame is
-   * enough to read a sentence and act on it.
+   * SO THE REFUSAL DIES WITH THE CARD, IN THE BODY OF THE RENDER. Not in an effect: an effect leaves
+   * one COMMITTED frame in which the card is already B and the refusal is still A's, and one frame
+   * is enough to read a sentence and act on it.
    */
   const shownCard = useRef(techCardId);
   if (shownCard.current !== techCardId) {
     shownCard.current = techCardId;
-    ledger.current = null;
     // By VALUE: clearing an already-empty refusal would cost a render that changes nothing.
     if (refusal) setRefusal(null);
   }
@@ -161,6 +161,24 @@ export function useStartDesignRun(
     predicate: () => !!scope,
   });
 
+  /**
+   * THE DOOR ACCEPTED THIS PRESS — from its answer, or from an answer that came after our deadline
+   * had already given up on it (`answerWithin`). Either way the run is booked: the ledger frees the
+   * key, the band is re-read, the words are remembered.
+   */
+  const accepted = (input: SentRun) => {
+    qc.invalidateQueries({ queryKey: designKeys.band(input.techCardId) });
+    ledgerSettle(input.techCardId, input.scope, input.fingerprint, 'accepted');
+    input.onAccepted?.();
+    // The screen's own state is cleared only where the answer is ABOUT the card on screen; the
+    // switch above has already cleared it otherwise, and writing it again would be a statement
+    // about B made by A.
+    if (shownCard.current === input.techCardId) setRefusal(null);
+    // The run comes back PENDING, not done: the picture arrives in the feed when the provider
+    // answers. Saying so is the difference between «nothing happened» and «it was booked».
+    showMessage('run started — the pictures land in the history when it finishes', 'success');
+  };
+
   const mutation = useMutation({
     mutationKey: scope ? startRunKey(techCardId ?? 0, scope) : undefined,
     /**
@@ -168,33 +186,27 @@ export function useStartDesignRun(
      * react-query calls the callbacks with the LATEST options object, so a card switch while the
      * call is in flight would have `onSuccess` invalidating B's band for a run started on A —
      * B repainting for work it does not hold, A never repainting for work it does.
+     *
+     * ⚠ AND IT HAS A DEADLINE (r2 N5). `fetch` has none: a connection that stays open and never
+     * answers kept the mutation — and with it GENERATE and |→ — pending until a reload. After
+     * `START_RUN_DEADLINE_MS` the press is given up as «no answer»: the key is kept (the run may
+     * exist), the screen unlocks and says so, and the next press replays the same key — which is
+     * how the person checks: the server hands back the run if it was booked.
      */
     mutationFn: (input: SentRun) =>
-      adminService.StartDesignRun({
-        techCardId: input.techCardId,
-        clientRequestId: input.clientRequestId,
-        kind: input.kind,
-        ask: input.ask,
-        params: input.params,
-        rerunOfRunId: input.rerunOfRunId ?? 0,
-      }),
-    onSuccess: (_answer: unknown, input) => {
-      qc.invalidateQueries({ queryKey: designKeys.band(input.techCardId) });
-      if (input.scope) ledgerSettle(input.techCardId, input.scope, input.fingerprint);
-      input.onAccepted?.();
-      // The screen's own state is cleared only where the answer is ABOUT the card on screen; the
-      // switch above has already cleared it otherwise, and writing it again would be a statement
-      // about B made by A.
-      if (shownCard.current === input.techCardId) {
-        ledger.current = null;
-        setRefusal(null);
-      }
-      // The run comes back PENDING, not done: the picture arrives in the feed when the provider
-      // answers. Saying so is the difference between «nothing happened» and «it was booked».
-      showMessage('run started — the pictures land in the history when it finishes', 'success');
-    },
+      answerWithin(
+        adminService.StartDesignRun({ ...input.wire, clientRequestId: input.clientRequestId }),
+        START_RUN_DEADLINE_MS,
+        () => accepted(input),
+      ),
+    onSuccess: (_answer: unknown, input) => accepted(input),
     onError: (error: unknown, input) => {
-      if (input.scope) ledgerRefused(input.techCardId, input.scope, input.fingerprint);
+      ledgerSettle(
+        input.techCardId,
+        input.scope,
+        input.fingerprint,
+        isDefinitiveRefusal(error) ? 'refused' : 'unknown',
+      );
       const message = (error as Error)?.message?.trim() || 'the run did not start';
       if (isAborted(error)) {
         showMessage(`someone changed this first — ${message}`, 'error');
@@ -215,30 +227,20 @@ export function useStartDesignRun(
   const start = useCallback(
     (input: StartRunInput, opts?: { onAccepted?: () => void }) => {
       if (!techCardId || techCardId <= 0) return;
-      // THE FINGERPRINT COVERS EVERY FIELD THAT REACHES THE WIRE — THE CARD INCLUDED. `techCardId`
-      // is the first field of the request and the server's own idempotency key is scoped by it, so
-      // a fingerprint that left it out could replay one id across two cards. `rerun_of_run_id` is
-      // part of the intent too — «run 7 again» is not the same request as «run this» — so leaving
-      // it out would replay one idempotency key across two different jobs and hand back the wrong
-      // run.
-      const fingerprint = JSON.stringify([
+      // THE WIRE OBJECT IS BUILT ONCE, AND THE FINGERPRINT IS TAKEN OF IT (r2 N2): every field that
+      // reaches the server is in it — the card (the server scopes its idempotency by it), `rerun_of`
+      // («run 7 again» is not «run this») — and nothing that does not.
+      const wire = {
         techCardId,
-        input.kind,
-        input.ask,
-        input.params,
-        input.rerunOfRunId ?? 0,
-      ]);
-      let clientRequestId: string;
-      if (scope) {
-        clientRequestId = ledgerSend(techCardId, scope, fingerprint);
-      } else {
-        if (ledger.current?.fingerprint !== fingerprint) {
-          ledger.current = { fingerprint, id: newClientRequestId() };
-        }
-        clientRequestId = ledger.current.id;
-      }
+        kind: input.kind,
+        ask: input.ask,
+        params: input.params,
+        rerunOfRunId: input.rerunOfRunId ?? 0,
+      };
+      const fingerprint = requestFingerprint(wire);
+      const clientRequestId = ledgerSend(techCardId, scope, fingerprint);
       mutation.mutate({
-        ...input,
+        wire,
         techCardId,
         clientRequestId,
         scope,
@@ -259,11 +261,55 @@ export function useStartDesignRun(
   };
 }
 
+/**
+ * How long a start may go unanswered before it is given up as «no answer». The door books a run and
+ * returns — the paid work happens later, in the worker — so a live answer takes seconds; this is
+ * generous on purpose: giving up early only costs a replay of the same key, never a second run.
+ */
+export const START_RUN_DEADLINE_MS = 45_000;
+
+/**
+ * The call's own answer, or — once `ms` pass without one — a rejection with NO status (the same
+ * shape as a dropped connection, so every reader treats it as «not known»). An answer that arrives
+ * after the deadline is not lost: a late success still reaches `late`, because that run was booked.
+ */
+function answerWithin<T>(call: Promise<T>, ms: number, late: (answer: T) => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let over = false;
+    const timer = setTimeout(() => {
+      over = true;
+      reject(new Error(`no answer from the server in ${Math.round(ms / 1000)} s`));
+    }, ms);
+    call.then(
+      (answer) => {
+        if (over) late(answer);
+        else {
+          clearTimeout(timer);
+          resolve(answer);
+        }
+      },
+      (error: unknown) => {
+        if (over) return;
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 /** What one press carries into the mutation — everything its answer needs, nothing from a closure. */
-type SentRun = StartRunInput & {
+type SentRun = {
+  /** The request exactly as it goes on the wire, minus the key — and what the fingerprint is of. */
+  wire: {
+    techCardId: number;
+    kind: StartRunInput['kind'];
+    ask: string;
+    params: common_DesignRunParams;
+    rerunOfRunId: number;
+  };
   clientRequestId: string;
   techCardId: number;
-  /** `''` = the unscoped hook (its ledger is a ref of the component). */
+  /** `''` = a screen that names no form; the ledger is shared either way. */
   scope: string;
   fingerprint: string;
   onAccepted?: () => void;
@@ -271,7 +317,9 @@ type SentRun = StartRunInput & {
 
 /** The mutation key of a scoped form's presses — the cache is asked «is one of them out?». */
 export function startRunKey(techCardId: number, scope: string) {
-  return ['design', 'start-run', techCardId, scope] as const;
+  // The operator is in the key for the ledger's reason (r2 N4): B, signing into A's tab while A's
+  // start hangs, must not see B's own form «starting…» for A's press.
+  return ['design', 'start-run', operatorKey(), techCardId, scope] as const;
 }
 
 /**
