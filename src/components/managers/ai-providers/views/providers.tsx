@@ -270,6 +270,9 @@ function KeySlot({
           refocus.current = true;
         },
         onError: (error) => {
+          // The focused "yes" goes with the question: focus lands in the field the refusal
+          // stands under, as on every other settled key write — never on <body>.
+          refocus.current = true;
           setConfirming(false);
           setFailure(aiWriteFailure(error, "couldn't clear the key")?.text ?? null);
         },

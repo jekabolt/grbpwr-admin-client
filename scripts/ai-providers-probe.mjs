@@ -279,6 +279,12 @@ const MUTATIONS = {
     from: 'if (ownerOnScreen.current) return;',
     to: 'return;',
   },
+  'clear-refusal-drops-focus': {
+    red: 'FE12',
+    what: 'a refused clear leaves focus on <body> (the flag is not set)',
+    from: 'onError: (error) => {\n            refocus.current = true;\n            setConfirming(false);',
+    to: 'onError: (error) => {\n            setConfirming(false);',
+  },
   'clear-sends-old-value': {
     red: 'E5',
     what: 'clear sends the old key (its last four) instead of an empty value',
@@ -1371,6 +1377,27 @@ await page.waitForSelector('[data-provider="openai"]', { timeout: 8000 });
     `door ${had} | ${q} | ${JSON.stringify(w.map((c) => c.body))} | ${line}`,
   );
 }
+// FE12 · a refused clear puts focus back in the key field, never on <body>.
+{
+  await mount();
+  await page.waitForSelector('[data-provider="google"]', { timeout: 8000 });
+  await openRow('google');
+  server.fail = [{ method: 'PUT', re: /^\/api\/admin\/ai\/providers\/google\/key$/, status: 400, body: { code: 9, message: 'AI_KEYS_MASTER_KEY is not set', details: [] } }];
+  await row('google').getByRole('button', { name: 'clear the key', exact: true }).click();
+  await page.waitForTimeout(200);
+  // A keyboard user: from the focused "no", Shift+Tab to "yes", then Enter.
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(900);
+  const focus = await page.evaluate(() => {
+    const el = document.activeElement;
+    return { tag: el?.tagName.toLowerCase(), id: el?.id ?? '', invalid: el?.getAttribute('aria-invalid') ?? null };
+  });
+  const said = ((await row('google').locator('[data-write-error="key-api"]').textContent().catch(() => '')) ?? '').trim();
+  ck('FE12', said.includes('AI_KEYS_MASTER_KEY is not set'), 'set-up: the clear was refused, its sentence under the field', said);
+  ck('FE12', focus.id === 'ai-key-google-api' && focus.invalid === 'true', 'focus is in the key field, marked invalid — not on <body>', JSON.stringify(focus));
+}
+
 // FE9 · at 390 px no view scrolls sideways (the full state set is asserted by --shots).
 {
   await page.setViewportSize({ width: 390, height: 900 });
