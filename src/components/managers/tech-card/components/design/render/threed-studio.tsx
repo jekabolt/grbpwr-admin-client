@@ -562,7 +562,6 @@ export function ThreedStudio({
       <OutputsSection
         band={band}
         techCardId={techCardId}
-        kind='threed'
         disabled={disabled}
         colorwayId={colorwayId}
         colorwayLabel={colorwayLabel}

@@ -23,7 +23,6 @@ import {
   wireColourSource,
   type Gate,
 } from './model';
-import { OutputsSection } from './outputs';
 import { Palette } from './palette';
 import { RenderStepScope, type RenderStep } from './render-tile';
 import { SidesSection, useSidesTarget } from './side-row';
@@ -31,7 +30,7 @@ import { useStartDesignRun, type StartRunInput } from './use-design-run';
 import { WhatModelGetsRenderModal } from './what-model-gets';
 
 /**
- * THE FABRIC RENDER STUDIO — step 4 of the chain, FOUR BLOCKS IN THE ORDER OF THE WORK:
+ * THE FABRIC RENDER STUDIO — step 4 of the chain, THREE BLOCKS IN THE ORDER OF THE WORK:
  *
  *   FABRIC RENDER · the cloth on the flats                                          [STEP 4]
  *   ── CLOTH AND COLOUR  one grid: cloth tiles and the colour tile
@@ -40,18 +39,26 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  *   GENERATE · priced by the server on start · WHAT THE MODEL GETS ▸
  *   ── LATEST GENERATION  the newest render run, its tiles with the doors (O-63, `LatestGeneration`)
  *   SIDES ─────────────── one row per side: what went in, what came back (`SidesSection`)
- *   RENDERS OF THIS CARD  the plates themselves, and every door that puts one into a side
- *   GENERATION HISTORY    (the step screen's, drawn here last — `children`, O-63)
+ *   GENERATION HISTORY    (the step screen's, drawn here last — `children`, O-63), folded
  *
  * The rows INSIDE the first block are separated by group rules (`GroupLabel`), never by nested
  * boxes: a block never contains another block (DESIGN.md).
+ *
+ * ═══ RENDERS OF THIS CARD IS GONE (27.09, O-63, D-62) ════════════════════════════════════════
+ * Owner, verbatim: «после генерации результат показывать как во флетах те с LATEST GENERATION и
+ * GENERATION HISTORY свернут по дефолту и RENDERS OF THIS CARD получается не нужен». A render
+ * lands under GENERATE as a flat does; the older runs stand in the history, folded; the plates
+ * brought by hand that SIDES does not show stand there too, as one folded group («N brought ▸»).
+ * Every one of those tiles carries the doors the section had (`./render-tile`), their rules one
+ * hook per host and their refusal notes printed once per host.
  *
  * ⚠ ДВЕ ЛЕНТЫ С ВЕРХА ЭТОГО БЛОКА СНЯТЫ (r2 п.29–30, рулинги r1 §8.3/§8.10). Владелец, дословно:
  * «в FABRIC RENDER раньше было лучше чем сейчас … только таблицу вместо двух лент» и «весь блок
  * FLATS OF THIS CARD в FABRIC RENDER убери полностью и маркировка в SIDES будет происходить только
  * в блоке RENDERS OF THIS CARD». Поэтому здесь больше НЕТ ни `InputFlatsGroup`, ни `SidesGroup`, ни
  * пула неразмеченных чертежей (`RenderInputStrip bare`): стороны — своим блоком ниже, а разметка —
- * у самих картинок, в `OutputsSection`, где лежит материал.
+ * у самих картинок, где лежит материал (тогда в RENDERS OF THIS CARD, с O-63 — на плитках
+ * последней генерации и истории).
  *
  * THE REFERENCES ARE NOT DRAWN HERE: a fabric render is coloured over THE FLATS OF THIS CARD, and
  * the model never sees the reference photographs. They belong to FLAT, one click away.
@@ -117,9 +124,9 @@ export function RenderStudio({
    * O-57 r4 · КОЛОРВЕИ КАРТОЧКИ КАК ЕСТЬ — сырой список (`useColorwayChoice().cardColorways`),
    * архивные без плит тоже; `colorways` выше сужен. Нужен двум вопросам: стоит ли столбец `sample`
    * (D-56″: только пока у карточки нет ни одного колорвея, архивные тоже считаются —
-   * `colourwayColumns`) и членству плиты в RENDERS OF THIS CARD (колорвей, снесённый с карточки,
-   * против архивного пустого, — разбор у `OutputsSection`). Не задан — «не сказано»: правило семпла
-   * считает по `colorways`, а раздел не отказывает по членству.
+   * `colourwayColumns`) и членству плиты у дверей рендера (колорвей, снесённый с карточки, против
+   * архивного пустого, — разбор у `useRenderDoors`, `./render-tile`). Не задан — «не сказано»:
+   * правило семпла считает по `colorways`, а двери не отказывают по членству.
    */
   cardColorways?: common_AdminColorwayRef[];
   /**
@@ -494,11 +501,11 @@ export function RenderStudio({
         <LatestGeneration band={band} techCardId={techCardId} disabled={disabled} kind='render' />
       </Section>
 
-      {/* ═══ SIDES — СВОЙ БЛОК, НАД РЕНДЕРАМИ КАРТОЧКИ (r2 п.29) ══════════════════════════════
+      {/* ═══ SIDES — СВОЙ БЛОК, МЕЖДУ ПОСЛЕДНЕЙ ГЕНЕРАЦИЕЙ И ИСТОРИЕЙ (r2 п.29, O-63) ════════════
           Строка на сторону: слева — чертёж, который пошёл в прогон (пустой заводится прямо тут:
           половина «из медиатеки», половина «draw»), справа — рендер, который вернулся. Класть
-          рендер в сторону эта таблица не умеет намеренно — жест `mark ▸` стоит у самой картинки,
-          в блоке ниже. */}
+          рендер в сторону эта таблица не умеет намеренно — жест `mark ▸` стоит у самой картинки:
+          на плитках последней генерации выше и истории ниже. */}
       <SidesSection
         band={band}
         techCardId={techCardId}
@@ -513,27 +520,6 @@ export function RenderStudio({
         onPickColorway={onColorwayChange ?? (() => {})}
         onCreateColorway={() => openCreate()}
         onGoToKind={onGoToKind}
-      />
-
-      {/* The renders this card holds — where `mark ▸`, `split ▸` and `apply splitted` live: the
-          doors that put a render into a side from the card's own pictures. `mark ▸` addresses the
-          bench of the PICTURE's colourway (see `./outputs`). */}
-      {/* ═══ РЕНДЕРЫ КАРТОЧКИ — НЕ СУЖЕНЫ ЦЕЛЬЮ (D5) ══════════════════════════════════════════
-          Список показывает ВСЕ рендеры карточки, а чей каждый — говорит пилюля на самой плитке.
-          Сужение фильтром прятало плиты, которые человек видел минуту назад, и вопрос «куда её
-          положить» всё равно задаётся у двери `mark ▸`, а не фильтром над разделом.
-          `adopts` — сказал ли СЕРВЕР, что семпл-плита усыновляется при постановке в слот
-          колорвея (B7). Отсутствие поля читается как «не сказано» (доктрина `has_fabric_render`),
-          и тогда дверей в чужой столбец не рисуется вовсе. */}
-      <OutputsSection
-        band={band}
-        techCardId={techCardId}
-        kind='render'
-        disabled={disabled}
-        colorways={colorways}
-        cardColorways={cardColorways}
-        adopts={band.benchAdoptsUnattributed === true}
-        onCreateColorway={openCreate}
       />
 
       {/* THE HISTORY — last, inside the scope: its render rows read the same doors (O-63). */}

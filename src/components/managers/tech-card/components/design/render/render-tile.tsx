@@ -53,12 +53,13 @@ import { StripCell } from './strip-cell';
 /**
  * ═══ ONE FABRIC RENDER, WITH THE DOORS THAT PUT IT INTO A SIDE (27.09, O-63 step 1, D-62) ═══════
  *
- * Moved out of `outputs.tsx` (RENDERS OF THIS CARD) without a change of behaviour, so the render
- * tile and its door rules exist ONCE and any host can draw them: the strip of that section today,
- * the latest-generation workbench and the history rows of FABRIC RENDER next (`RunTile`, by the
- * kind of its run). Owner, verbatim: «после генерации результат показывать как во флетах те с
- * LATEST GENERATION и GENERATION HISTORY свернут по дефолту и RENDERS OF THIS CARD получается не
- * нужен» — the section goes, its doors must not.
+ * Moved out of `outputs.tsx` (RENDERS OF THIS CARD) without a change of behaviour (step 1), so the
+ * render tile and its door rules exist ONCE and any host can draw them: the latest-generation
+ * workbench under GENERATE and the rows of GENERATION HISTORY on FABRIC RENDER, its «brought»
+ * group among them (`RunTile`, by the kind of its run — steps 2 and 3). Owner, verbatim: «после
+ * генерации результат показывать как во флетах те с LATEST GENERATION и GENERATION HISTORY
+ * свернут по дефолту и RENDERS OF THIS CARD получается не нужен» — the section went (step 4), its
+ * doors did not.
  *
  * WHAT LIVES HERE:
  *   · the door row's metric (`DOOR_ROW`, `DOOR`, `INERT_DOOR`, F-9) — the 3D shelf's row reads it too;
@@ -223,7 +224,7 @@ export type RenderDoors = {
   ) => { colorwayId: number; side: BenchSide; where: string } | null;
   piecesOf: (rootId: number) => SplitPiece[];
   applyRefusalFor: (rootId: number) => string | null;
-  /** Горизонт колорвея ОДНОЙ плитки — только у хозяина, который показывает список `outputs`. */
+  /** Горизонт колорвея ОДНОЙ плитки — только у принесённой, прочитанной из списка `outputs`. */
   horizonOf: (picture: common_DesignPicture) => { total: number; carried: number } | null;
   /** Записки над полосой — по одной на причину (O-57 r4). */
   notes: readonly { key: string; reason: string; note: string }[];
@@ -249,7 +250,6 @@ export function useRenderDoors({
   pictures,
   membersOf,
   openDeck,
-  horizon = false,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -283,11 +283,6 @@ export function useRenderDoors({
   membersOf: ReadonlyMap<number, common_DesignPicture[]>;
   /** The host's one open deck (H-10). */
   openDeck: number | null;
-  /**
-   * The host shows the card's whole outputs list (`band.outputs`), so each tile says how far that
-   * list reaches for its colourway (the title of its caption). A run row is not that list.
-   */
-  horizon?: boolean;
 }): RenderDoors {
   const speaks = serverSpeaksDesign();
   const { setBenchSlot } = useDesignWrites(techCardId);
@@ -667,9 +662,15 @@ export function useRenderDoors({
     return null;
   };
 
-  /** Горизонт колорвея ОДНОЙ плитки — «у него N, доехало M»; `null` — за горизонтом ничего. */
+  /**
+   * Горизонт колорвея ОДНОЙ плитки — «у него N, доехало M»; `null` — за горизонтом ничего. Только у
+   * ПРИНЕСЁННОЙ плиты (`run_id` 0): её читают из списка `outputs` карточки (группа «brought»
+   * истории, `broughtRun`), а этот список сервер режет поколорвейно. Плиты прогона приезжают со
+   * своим прогоном целиком — горизонта у них нет (O-63; RENDERS OF THIS CARD и был этим списком, и
+   * горизонт стоял на каждой его плитке).
+   */
   const horizonOf = (picture: common_DesignPicture) =>
-    horizon ? outputsHorizon(band, colorwayOf(picture)) : null;
+    (picture.runId ?? 0) <= 0 ? outputsHorizon(band, colorwayOf(picture)) : null;
 
   /**
    * ═══ O-57 r4 · ЗАПИСКИ НАД ПОЛОСОЙ — ПО ОДНОЙ НА ПРИЧИНУ, А НЕ НА ДВЕРЬ ══════════════════════
@@ -787,7 +788,6 @@ export function RenderTile({
   aspect,
   dim,
   galleryGroup,
-  runLine = true,
   onZoom,
   onDeck,
   onEdit,
@@ -807,12 +807,6 @@ export function RenderTile({
   aspect?: string;
   dim?: boolean;
   galleryGroup?: PictureTileProps['galleryGroup'];
-  /**
-   * The caption names the run — `run N · …` / `no run · …` — where plates of many runs stand in one
-   * strip. A run's own row (`RunRenderTile`) says the shape alone: the row IS the run, and the
-   * history names no run on its tiles (r2 п.22).
-   */
-  runLine?: boolean;
   /** The viewer was opened from this tile (E-4 — the host decides what a zoom folds). */
   onZoom?: () => void;
   /** Open or fold THIS tile's deck — the host's one open deck toggles to it or away from it. */
@@ -863,18 +857,10 @@ export function RenderTile({
   const held = slotHolding(band, pictureId);
   /** O-57 r2: стоит, но в столбце, которого SIDES не рисует, — дверь снятия у самой плитки. */
   const away = held ? heldAway(picture) : null;
-  /**
-   * ⚠ `run 0` — ЭТО НЕ ПРОГОН НОМЕР НОЛЬ. Со времён H-9 в списке стоят и плиты, за которыми
-   * прогона нет вовсе: загруженная руками и «плоская» правка без основы обе приходят с
-   * `run_id = 0`. Печатать им `run 0` значило бы назвать номер, которого нет.
-   *
-   * И слово тут именно «no run», а не «upload», хотя загрузка — частый случай: контракт
-   * прямо предупреждает, что `run_id 0` НЕ влечёт «пришло из партии» (`batch_id` тоже
-   * бывает нулём). Откуда плита взялась на самом деле, говорит вторая строка — она читает
-   * `source_class` и печатает `uploaded` / `drawn` / `imported SVG`. Первая строка отвечает
-   * только за прогон, и её честный ответ — что прогона нет.
-   */
-  const stamped = (run.id ?? 0) > 0;
+  /* ПОДПИСЬ БОЛЬШЕ НЕ НАЗЫВАЕТ ПРОГОН (O-63). `run N · …` / `no run · …` стояли там, где плиты
+     многих прогонов шли одной полосой (RENDERS OF THIS CARD, с разбором «`run 0` — не прогон номер
+     ноль»). Плитка стоит теперь в строке своего прогона — строка и есть прогон, и история не
+     называет прогона на своих плитках (r2 п.22); принесённые стоят группой «brought». */
   /**
    * ЧЕЙ ЭТОТ РЕНДЕР — читается у САМОЙ КАРТИНКИ (`picture.colorway_id`), а не у прогона: на
    * сервере они законно расходятся (загруженная плита несёт свой колорвей при `run_colorway_id`
@@ -985,7 +971,7 @@ export function RenderTile({
               : undefined
           }
         >
-          {!runLine ? shape : stamped ? `run ${run.id} · ${shape}` : `no run · ${shape}`}
+          {shape}
         </span>,
         /* ═══ O-57 r2 · ГДЕ ПЛИТА СТОИТ, КОГДА ЕЁ СТОЛБЦА НА ЭКРАНЕ НЕТ ═══════════════════════
            У плиты в видимом столбце это слово пилюли в ряду дверей («in front»), а ✕ стоит в
@@ -1066,13 +1052,15 @@ export function RenderTile({
                     Ширина и метрика — ряда дверей (F-9): `flex-1` ячейке, `h-5 bg-bgColor`
                     кнопке, как у соседей.
 
-                    ⚠ ЛИЦО ОТКАЗА — ОДНОЙ СТРОКОЙ И В СВОЕЙ КОРОБКЕ (O-57 r2). Рядом с `▾`
-                    двери достаётся 110px, и «APPLY SPLITTED» в `InertDoor` ложилось на вторую
-                    строку, вылезало из `h-5` и наезжало на строку причины (замерено снимком).
-                    С r2 отказ стоит чаще (семпл-лист рядом с колорвеями без B7, все столбцы
-                    архивные), поэтому погашенной кнопке отсюда отдаются `nowrap` и поля `px-0.5`:
-                    с полями `xs` подпись одной строкой вылезала бы за рамку на 5px. Селектор
-                    `[data-inert]` — обёртка `InertDoor`: живую дверь правило не трогает. */}
+                    ⚠ ЛИЦО ОТКАЗА — ОДНОЙ СТРОКОЙ И В СВОЕЙ КОРОБКЕ (O-57 r2). В ячейке полосы
+                    RENDERS OF THIS CARD (132px) рядом с `▾` двери доставалось 110px, и «APPLY
+                    SPLITTED» в `InertDoor` ложилось на вторую строку, вылезало из `h-5` и наезжало
+                    на строку причины (замерено снимком) — погашенной кнопке отдавались `nowrap`
+                    и поля `px-0.5`. С O-63 плитка стоит в дорожке строки прогона — не уже 148px
+                    (`RunOutputs`, `.fgrid`), двери достаётся от 126px, и подпись с полями `xs`
+                    помещается: поля `px-0.5` сняты вместе с полосой, `nowrap` остаётся — подпись
+                    двери не переносится ни при какой ширине. Селектор `[data-inert]` — обёртка
+                    `InertDoor`: живую дверь правило не трогает. */}
                 {(() => {
                   const rootId = picture.id ?? 0;
                   const own = colorwayOf(picture);
@@ -1094,7 +1082,7 @@ export function RenderTile({
                       refusal={refusal}
                       refusalDescribedBy={noteIdOf(refusal)}
                       onCreateColorway={own === 0 && adopts ? onCreateColorway : undefined}
-                      className='min-w-0 flex-1 [&>button]:h-5 [&>button]:bg-bgColor [&[data-inert]>button]:whitespace-nowrap [&[data-inert]>button]:px-0.5'
+                      className='min-w-0 flex-1 [&>button]:h-5 [&>button]:bg-bgColor [&[data-inert]>button]:whitespace-nowrap'
                       doorClassName='h-5 bg-bgColor'
                     />
                   );
@@ -1481,8 +1469,6 @@ function RenderDoorsHostOn({
     pictures,
     membersOf,
     openDeck,
-    /* A run's row is not the card's `outputs` list: no horizon on its tiles. */
-    horizon: false,
   });
   const host: RenderHost = { doors, runOf, onDeck };
   return (
@@ -1552,7 +1538,6 @@ export function RunRenderTile({
         aspect={RUN_FRAME_ASPECT}
         dim={dim}
         galleryGroup={galleryGroup}
-        runLine={false}
         onZoom={onZoom}
         onDeck={() => host.onDeck(pictureId)}
         onEdit={onEdit}
