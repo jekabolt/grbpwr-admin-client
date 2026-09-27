@@ -5,6 +5,7 @@ import { RETIRED_PRESET_WORD, notYet } from './common';
 import { CHANGE_COLOR } from './tiles/change-color';
 import { CREATE_EDIT } from './tiles/create-edit';
 import { REMOVE_BACKGROUND } from './tiles/remove-background';
+import { RETOUCH_ZONE } from './tiles/retouch-zone';
 import type { WorkflowDef, WorkflowKey } from './types';
 
 /**
@@ -78,7 +79,7 @@ export const WORKFLOWS: readonly WorkflowDef[] = [
     key: 'retouch_zone',
     title: 'Retouch a Zone',
     blurb: 'Paint over part of a design and describe what should change there.',
-    gate: notYet,
+    ...RETOUCH_ZONE,
   },
   {
     key: 'create_edit',

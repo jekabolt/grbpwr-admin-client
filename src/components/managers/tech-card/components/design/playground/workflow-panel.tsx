@@ -136,24 +136,27 @@ export function WorkflowPanel({
           </div>
         ))}
 
-      <div className='flex flex-col gap-3'>
-        <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
-        {/* THE REASON, NOT A DOOR. The section that lifts it is on screen a few lines up and names
+      {/* A workflow bought elsewhere (tile 10: the Mask action) has no press here. */}
+      {!flow.startsElsewhere && (
+        <div className='flex flex-col gap-3'>
+          <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
+          {/* THE REASON, NOT A DOOR. The section that lifts it is on screen a few lines up and names
             itself in the reason; a scroll-to button here was one more button for the same place
             (owner: few buttons, never two for one action). */}
-        {refusal && !disabled && <LockBar reason={refusal.reason} />}
-        <GenerateRow
-          gate={refusal ? { ok: false, reason: refusal.reason } : { ok: true }}
-          shape={shape}
-          pending={run.isPending}
-          disabled={disabled}
-          onGenerate={generate}
-          onInspect={() => {
-            inspectFocus.remember();
-            setInspecting(true);
-          }}
-        />
-      </div>
+          {refusal && !disabled && <LockBar reason={refusal.reason} />}
+          <GenerateRow
+            gate={refusal ? { ok: false, reason: refusal.reason } : { ok: true }}
+            shape={shape}
+            pending={run.isPending}
+            disabled={disabled}
+            onGenerate={generate}
+            onInspect={() => {
+              inspectFocus.remember();
+              setInspecting(true);
+            }}
+          />
+        </div>
+      )}
 
       <WhatModelGetsPlaygroundModal
         open={inspecting}

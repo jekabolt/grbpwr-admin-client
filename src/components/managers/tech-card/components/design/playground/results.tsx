@@ -36,7 +36,9 @@ import {
   workflowByKey,
   workflowOfRun,
 } from './registry';
+import { maskableRun, retouchOffered } from './registry/tiles/retouch-zone';
 import type { ResultsDef, WorkflowDef } from './registry/types';
+import { MaskEditor } from './mask';
 
 /**
  * ═══ WHAT CAME BACK — the room's results, or one workflow's (C-03) ═════════════════════════════════
@@ -56,6 +58,8 @@ import type { ResultsDef, WorkflowDef } from './registry/types';
  * (`outputsHorizon`) rather than letting an older result vanish silently.
  *
  * Corners: zoom (the gallery) and `edit ▸` (draw over it, saving a NEW picture) on every picture;
+ * `mask` (C-11: paint a zone and retouch it, a new picture comes back) on every raster of the room
+ * while the server offers Retouch a Zone — the same door the viewer shows for that picture;
  * the `select` mark where the workflow says so (`ResultsDef.selectable` — recolours, as ON MODEL
  * had it; ARTIFACTS offers the chosen ones for markup). A cut-out (`ResultsDef.cutout`) stands on a
  * neutral ground with the word «no background» under it: its subject is on transparency, over white
@@ -63,6 +67,11 @@ import type { ResultsDef, WorkflowDef } from './registry/types';
  *
  * ⚠ THE ROW ASKS THE WORKFLOW THAT MADE IT, not the one open: on the grid the rows of three
  * workflows stand together, and each keeps its own corners.
+ *
+ * ⚠ A WORKFLOW THAT STARTS ELSEWHERE SHOWS THE ROOM (`WorkflowRun.startsElsewhere`, tile 10):
+ * Retouch a Zone works on a picture you already have, so under it stand the pictures it starts
+ * from — every picture of the room, each with its Mask — and its answer lands among them, next to
+ * the original. The history below it still narrows to retouches (`results.match`).
  */
 
 type Row = { picture: common_DesignPicture; run: common_DesignRun };
@@ -125,6 +134,7 @@ export function PlaygroundResults({
   const { setPictureSelected } = useDesignWrites(techCardId);
   const { data: techCard } = useTechCard(techCardId || undefined);
   const [editingId, setEditingId] = useState(0);
+  const [maskingId, setMaskingId] = useState(0);
   const [selecting, setSelecting] = useState(0);
 
   /* THE CARD CHANGED — the open editor is addressed by a picture id of the OTHER card (invariant
@@ -133,9 +143,12 @@ export function PlaygroundResults({
   if (shownCard.current !== techCardId) {
     shownCard.current = techCardId;
     if (editingId) setEditingId(0);
+    if (maskingId) setMaskingId(0);
   }
 
-  const results = def?.run?.results;
+  /** The room's view: the grid, or a workflow that starts from the room's pictures (tile 10). */
+  const roomView = !def || !!def.run?.startsElsewhere;
+  const results = roomView ? undefined : def?.run?.results;
   const reps = results?.reps ?? PLAYGROUND_ROOM;
   const match = results?.match ?? inPlaygroundRoom;
 
@@ -165,6 +178,8 @@ export function PlaygroundResults({
   );
   const carries = rows.length ? serverStatesSelected(rows[0].picture) : true;
   const writesOff = !!disabled || !speaks;
+  const masks = !writesOff && retouchOffered(band);
+  const masking = maskingId > 0 ? rows.find((o) => (o.picture.id ?? 0) === maskingId) : undefined;
 
   const wayName = (id?: number | null): string => {
     if (!id) return '';
@@ -176,7 +191,11 @@ export function PlaygroundResults({
     <Section
       id='design-playground-results'
       title='what came back'
-      question={def ? `· ${def.title.toLowerCase()}` : '· every playground picture of this card'}
+      question={
+        roomView || !def
+          ? '· every playground picture of this card'
+          : `· ${def.title.toLowerCase()}`
+      }
       action={<Counter n={rows.length} noun='picture' />}
     >
       <div className='flex flex-col gap-4'>
@@ -198,7 +217,9 @@ export function PlaygroundResults({
 
         {rows.length === 0 ? (
           <EmptyState>
-            {def ? 'nothing has come back from this workflow yet' : 'nothing has come back yet'}
+            {roomView
+              ? 'nothing has come back yet'
+              : 'nothing has come back from this workflow yet'}
           </EmptyState>
         ) : (
           <Tiles min={148} className='gap-3'>
@@ -210,7 +231,7 @@ export function PlaygroundResults({
               const chosen = selectable && pictureIsSelected(picture);
               const words = [
                 // An open workflow names only what differs from it: a retired preset's run.
-                def ? retiredPresetWord(run) : runWorkflowWord(run),
+                roomView ? runWorkflowWord(run) : retiredPresetWord(run),
                 wayName(run.colorwayId),
                 clockStamp(run.completedAt ?? run.createdAt),
               ].filter(Boolean);
@@ -251,6 +272,20 @@ export function PlaygroundResults({
                         : undefined
                     }
                     selectLabel={chosen ? 'un-select' : 'select'}
+                    onMask={
+                      masks &&
+                      maskableRun(run) &&
+                      (picture.media?.id ?? 0) > 0 &&
+                      pictureThumb(picture)
+                        ? {
+                            onClick: () => setMaskingId(id),
+                            ariaLabel:
+                              `mask picture ${picture.ordinal ?? ''} — paint a zone to retouch`.trim(),
+                            title:
+                              'paint a zone of this picture and say what should be there — a NEW picture comes back',
+                          }
+                        : undefined
+                    }
                     onEdit={
                       !writesOff && pictureThumb(picture)
                         ? {
@@ -294,6 +329,18 @@ export function PlaygroundResults({
           </Text>
         )}
       </div>
+
+      {masking?.picture.media && (
+        <MaskEditor
+          key={maskingId}
+          open
+          onOpenChange={(next: boolean) => !next && setMaskingId(0)}
+          techCardId={techCardId}
+          media={masking.picture.media}
+          label={`${runHandle(masking.run.id) || 'run'} · picture ${masking.picture.ordinal ?? '—'}`}
+          disabled={disabled}
+        />
+      )}
 
       {editingId > 0 && rows.some((o) => (o.picture.id ?? 0) === editingId) && (
         <VectorModal

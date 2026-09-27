@@ -32,6 +32,20 @@ import {
   type Draft,
 } from 'components/managers/tech-card/components/design/playground/registry/types';
 import { WorkflowPanel } from 'components/managers/tech-card/components/design/playground/workflow-panel';
+import { PlaygroundResults } from 'components/managers/tech-card/components/design/playground/results';
+import {
+  convexHull,
+  paintedSamples,
+  polygonArea,
+  zoneOfStrokes,
+} from 'components/managers/tech-card/components/design/playground/mask/geometry';
+import {
+  RETOUCH_CAVEAT,
+  maskableRun,
+  retouchOffered,
+  retouchRefusal,
+  retouchRequest,
+} from 'components/managers/tech-card/components/design/playground/registry/tiles/retouch-zone';
 import {
   openWorkflow,
   playgroundHistoryMatch,
@@ -39,6 +53,15 @@ import {
 import { renderToStaticMarkup } from 'react-dom/server';
 
 export {
+  RETOUCH_CAVEAT,
+  convexHull,
+  maskableRun,
+  paintedSamples,
+  polygonArea,
+  retouchOffered,
+  retouchRefusal,
+  retouchRequest,
+  zoneOfStrokes,
   EMPTY_DRAFT,
   WORKFLOWS,
   chooseEngine,
@@ -103,4 +126,28 @@ function renderPanel(
       </DesignCapabilityProvider>
     </QueryClientProvider>,
   );
+}
+
+/**
+ * The results block as the person sees it (C-11): the real `PlaygroundResults`, drawn by React
+ * into a string, so «the Mask corner is drawn only where the server offers the retouch» is
+ * measured on the markup the tiles make.
+ */
+export function resultsMarkup(band: GetDesignBandResponse, key: string | null): string {
+  const def = key ? workflowByKey(key) : null;
+  const qc = new QueryClient();
+  const g = globalThis as { document?: unknown };
+  const had = 'document' in g;
+  if (!had) g.document = { body: null };
+  try {
+    return renderToStaticMarkup(
+      <QueryClientProvider client={qc}>
+        <DesignCapabilityProvider value={true}>
+          <PlaygroundResults band={band} techCardId={7} def={def} />
+        </DesignCapabilityProvider>
+      </QueryClientProvider>,
+    );
+  } finally {
+    if (!had) delete g.document;
+  }
 }

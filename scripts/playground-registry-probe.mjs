@@ -32,6 +32,14 @@
 //       переносится, если он есть у новой модели, иначе medium; строка шапки «<label> · <tier>»;
 //   I · (C-08) разметка формы create_edit: сворачиваемые секции AI model и Format есть только на
 //       сервере с моделями, строка «needs at least one» — только на старом.
+//   J · (C-11) Retouch a Zone: тело из набора мазков — оболочка кисти (диски, выпуклая оболочка,
+//       4 знака) в items[0].regions[0], слова в texts[0], ask '', без image/options; оболочка
+//       больше 12 углов — описанный 12-угольник, покрывающий всю краску; слишком мелкая — null;
+//   K · (C-11) отказы маски до денег: не нарисовано → «paint the zone», мелко → «too small», нет
+//       слов, картинка меньше 64 px; не нарисовано — items пуст (такое тело не уходит);
+//   L · (C-11) ворота: плитка 10 жива только в playgroundWorkflows; угол mask в итогах — только
+//       там же; панель плитки — объяснение и честная строка, без GENERATE; итоги под плиткой 10 —
+//       все картинки комнаты.
 //
 // МУТАЦИИ ЖИВУТ В ПАМЯТИ, А НЕ В ФАЙЛЕ (приём colour-plan-probe): одна строка настоящего модуля
 // подменяется в бандле, исходник не трогается. Каждая обязана уронить СВОЮ группу:
@@ -64,6 +72,14 @@
 //                                                                   делает ни одна модель → краснеет H
 //   node scripts/playground-registry-probe.mjs --mutate-sections    секции модели/формата рисуются
 //                                                                   всегда → краснеет I
+//   node scripts/playground-registry-probe.mjs --mutate-mask-hull   точка мазка без диска кисти
+//                                                                   → краснеет J (тело)
+//   node scripts/playground-registry-probe.mjs --mutate-mask-ring   оболочка >12 углов не
+//                                                                   описывается → краснеет J
+//   node scripts/playground-registry-probe.mjs --mutate-mask-refusal «не нарисовано» не отказывает
+//                                                                   само → краснеет K
+//   node scripts/playground-registry-probe.mjs --mutate-mask-gate   ретушь «предложена» без
+//                                                                   playgroundWorkflows → краснеет L
 //
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
@@ -93,6 +109,10 @@ const MUT = {
   snapRead: process.argv.includes('--mutate-snap-read'),
   sections: process.argv.includes('--mutate-sections'),
   drawn: process.argv.includes('--mutate-drawn'),
+  maskHull: process.argv.includes('--mutate-mask-hull'),
+  maskRing: process.argv.includes('--mutate-mask-ring'),
+  maskRefusal: process.argv.includes('--mutate-mask-refusal'),
+  maskGate: process.argv.includes('--mutate-mask-gate'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -231,6 +251,56 @@ if (commonSwaps.length)
           src = src.replace(needle, replacement);
         }
         return { contents: src, loader: 'ts' };
+      });
+    },
+  });
+
+// ─── C-11: мутации маски ──────────────────────────────────────────────────────────────────────
+const GEOMETRY = /mask\/geometry\.ts$/;
+const geometrySwaps = [];
+if (MUT.maskHull)
+  geometrySwaps.push([
+    'const { rx, ry } = radiiOf(stroke.size, aspect);',
+    'const { rx, ry } = { rx: 0 * stroke.size * aspect, ry: 0 };',
+  ]);
+if (MUT.maskRing)
+  geometrySwaps.push(['if (hull.length > REGION_MAX_POINTS) hull = circumscribed(hull);', '']);
+if (geometrySwaps.length)
+  plugins.unshift({
+    name: 'c11-geometry',
+    setup(b) {
+      b.onLoad({ filter: GEOMETRY }, async (args) => {
+        let src = await readFile(args.path, 'utf8');
+        for (const [needle, replacement] of geometrySwaps) {
+          if (!src.includes(needle))
+            throw new Error(`мутация C-11 не нашла свою строку: ${needle.slice(0, 60)}`);
+          src = src.replace(needle, replacement);
+        }
+        return { contents: src, loader: 'ts' };
+      });
+    },
+  });
+const RETOUCH = /tiles\/retouch-zone\.tsx$/;
+const retouchSwaps = [];
+if (MUT.maskRefusal)
+  retouchSwaps.push(["if (!input.painted) return { reason: 'paint the zone to change' };", '']);
+if (MUT.maskGate)
+  retouchSwaps.push([
+    "workflowOffered(band, 'retouch_zone').available;",
+    "workflowOffered(band, 'retouch_zone').available || true;",
+  ]);
+if (retouchSwaps.length)
+  plugins.unshift({
+    name: 'c11-retouch',
+    setup(b) {
+      b.onLoad({ filter: RETOUCH }, async (args) => {
+        let src = await readFile(args.path, 'utf8');
+        for (const [needle, replacement] of retouchSwaps) {
+          if (!src.includes(needle))
+            throw new Error(`мутация C-11 не нашла свою строку: ${needle.slice(0, 60)}`);
+          src = src.replace(needle, replacement);
+        }
+        return { contents: src, loader: 'tsx' };
       });
     },
   });
@@ -665,7 +735,8 @@ head('F', 'ворота фазы 2: playgroundWorkflows решает, freeformPr
     [
       'список всех двенадцати, freeformPresets нет',
       band({ playgroundWorkflows: ALL, freeformPresets: undefined }),
-      ['change_color', 'remove_background', 'create_edit'],
+      // C-11: retouch_zone runs on a phase-2 server too.
+      ['change_color', 'remove_background', 'retouch_zone', 'create_edit'],
     ],
     [
       'список [change_color, remove_background]',
@@ -981,6 +1052,279 @@ head('I', 'форма create_edit: секции AI model и Format только 
   ck(
     !/engine-section|format-section/.test(noModels) && !/needs at least one/.test(noModels),
     'список есть, моделей нет: без AI model/Format, но и без «needs at least one» (текст → картинка)',
+  );
+}
+
+// ─── J · Retouch a Zone: тело из мазков ───────────────────────────────────────────────────────
+head('J', 'Retouch a Zone: оболочка кисти → items[0].regions[0], слова → texts[0]');
+const corner = (x, y) => ({ x: { value: x }, y: { value: y } });
+/** A polygon region as the door reads it — written out by hand, every field of the annotation. */
+const polygon = (points) => ({
+  kind: 'TECH_CARD_ANNOTATION_KIND_POLYGON',
+  points,
+  text: '',
+  labelX: undefined,
+  labelY: undefined,
+  color: 'TECH_CARD_ANNOTATION_COLOR_UNKNOWN',
+  dashed: false,
+  filled: false,
+  caps: 'TECH_CARD_ANNOTATION_CAPS_UNSPECIFIED',
+  pieceLineKey: '',
+  pieceLineKeys: [],
+});
+const photo = (id, w = 1200, h = 1600) => ({
+  id,
+  media: {
+    thumbnail: { mediaUrl: `https://x/${id}.jpg` },
+    fullSize: { mediaUrl: `https://x/${id}-full.jpg`, width: w, height: h },
+  },
+});
+{
+  // One stroke from (0.4, 0.5) to (0.6, 0.5), brush radius 0.05 of the shorter side, square
+  // picture. Each end is a disc sampled at 8 angles; the hull is the two half-octagons joined by
+  // straight top and bottom edges: 10 corners, by hand (0.05·cos45° = 0.035355 → 4 decimals).
+  const strokes = [
+    {
+      size: 0.05,
+      points: [
+        { x: 0.4, y: 0.5 },
+        { x: 0.6, y: 0.5 },
+      ],
+    },
+  ];
+  const zone = M.zoneOfStrokes(strokes, 1);
+  const got = M.retouchRequest({
+    media: photo(41),
+    zone,
+    painted: true,
+    words: '  remove the stain, keep the twill  ',
+  });
+  const want = {
+    kind: 'freeform',
+    ask: '',
+    params: {
+      ...EMPTY_PARAMS,
+      freeform: {
+        preset: 'retouch',
+        items: [
+          {
+            mediaId: 41,
+            regions: [
+              polygon([
+                corner('0.3500', '0.5000'),
+                corner('0.3646', '0.4646'),
+                corner('0.4000', '0.4500'),
+                corner('0.6000', '0.4500'),
+                corner('0.6354', '0.4646'),
+                corner('0.6500', '0.5000'),
+                corner('0.6354', '0.5354'),
+                corner('0.6000', '0.5500'),
+                corner('0.4000', '0.5500'),
+                corner('0.3646', '0.5354'),
+              ]),
+            ],
+            texts: ['remove the stain, keep the twill'],
+            role: '',
+          },
+        ],
+        options: undefined,
+      },
+    },
+  };
+  ck(
+    same(got, want),
+    'один мазок → freeform/retouch: 1 картинка, 1 полигон из 10 углов, слова в texts[0], ask пуст, без image',
+    show(got),
+  );
+  const tall = M.zoneOfStrokes([{ size: 0.05, points: [{ x: 0.5, y: 0.5 }] }], 0.5);
+  const xs = tall ? tall.map((p) => p.x) : [];
+  const ys = tall ? tall.map((p) => p.y) : [];
+  const spanX = Math.max(...xs) - Math.min(...xs);
+  const spanY = Math.max(...ys) - Math.min(...ys);
+  ck(
+    !!tall && Math.abs(spanX - 0.1) < 1e-9 && Math.abs(spanY - 0.05) < 1e-9,
+    'кисть круглая на высокой картинке (1:2): диск 0.1 по x и 0.05 по y (доли своих осей)',
+    show(tall),
+  );
+}
+{
+  // Forty dabs on a ring: the hull has far more than 12 corners and must become the
+  // circumscribed twelve-gon — at most 12 corners, and every painted sample inside it.
+  const strokes = Array.from({ length: 40 }, (_, i) => {
+    const t = (2 * Math.PI * i) / 40;
+    return { size: 0.01, points: [{ x: 0.5 + 0.3 * Math.cos(t), y: 0.5 + 0.3 * Math.sin(t) }] };
+  });
+  const hull = M.convexHull(M.paintedSamples(strokes, 1));
+  ck(hull.length > 12, `кольцо: оболочка краски больше 12 углов (${hull.length})`);
+  const zone = M.zoneOfStrokes(strokes, 1);
+  ck(
+    !!zone && zone.length >= 3 && zone.length <= 12,
+    `кольцо → зона из 3..12 углов (${zone?.length ?? 'null'})`,
+    show(zone),
+  );
+  const inside = (poly, p) => {
+    // Convex, any orientation: the point is on one side of every edge (4-decimal rounding slack).
+    let sign = 0;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      const c = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+      if (Math.abs(c) < 1e-4) continue;
+      if (sign === 0) sign = Math.sign(c);
+      else if (Math.sign(c) !== sign) return false;
+    }
+    return true;
+  };
+  const samples = M.paintedSamples(strokes, 1);
+  const out = zone ? samples.filter((p) => !inside(zone, p)) : samples;
+  ck(out.length === 0, 'кольцо: вся краска внутри зоны (описанный, а не урезанный)', show(out[0]));
+  const fourDecimals = (v) => Math.abs(Math.round(v * 1e4) - v * 1e4) < 1e-6;
+  ck(
+    !!zone && zone.every((p) => p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1),
+    'кольцо: углы в 0..1',
+  );
+  ck(!!zone && zone.every((p) => fourDecimals(p.x) && fourDecimals(p.y)), 'кольцо: 4 знака');
+  ck(!!zone && M.polygonArea(zone) >= 1e-5, 'кольцо: площадь ≥ 1e-5');
+  const edge = M.zoneOfStrokes([{ size: 0.06, points: [{ x: 0, y: 0 }] }], 1);
+  ck(
+    !!edge && edge.every((p) => p.x >= 0 && p.y >= 0) && M.polygonArea(edge) >= 1e-5,
+    'мазок в углу картинки: зона прижата к краю, не выходит за 0',
+    show(edge),
+  );
+  ck(
+    M.zoneOfStrokes([{ size: 0.001, points: [{ x: 0.5, y: 0.5 }] }], 1) === null,
+    'мазок меньше 1e-5 площади кадра → null (дверь отказала бы region_degenerate)',
+  );
+  ck(M.zoneOfStrokes([], 1) === null, 'нет мазков → null');
+}
+
+// ─── K · отказы маски ─────────────────────────────────────────────────────────────────────────
+head('K', 'маска: отказы до денег, в порядке двери');
+{
+  const zone = M.zoneOfStrokes([{ size: 0.05, points: [{ x: 0.5, y: 0.5 }] }], 1);
+  const ok = { media: photo(41), zone, painted: true, words: 'a clean pocket' };
+  ck(M.retouchRefusal(ok) === null, 'нарисовано, слова есть, картинка большая → готово');
+  const blank = M.retouchRefusal({ ...ok, zone: null, painted: false });
+  ck(
+    blank?.reason === 'paint the zone to change',
+    'ничего не нарисовано → «paint the zone to change»',
+    show(blank),
+  );
+  const tiny = M.retouchRefusal({ ...ok, zone: null, painted: true });
+  ck(/too small/.test(tiny?.reason ?? ''), 'нарисовано, но без площади → «too small»', show(tiny));
+  const mute = M.retouchRefusal({ ...ok, words: '   ' });
+  ck(
+    mute?.reason === 'describe what should be there',
+    'нет слов (пробелы) → «describe what should be there»',
+    show(mute),
+  );
+  const small = M.retouchRefusal({ ...ok, media: photo(41, 50, 900) });
+  ck(
+    /50×900 px/.test(small?.reason ?? '') && /64 px/.test(small?.reason ?? ''),
+    'картинка 50×900 → отказ, называет размер и 64 px (source_too_small до денег)',
+    show(small),
+  );
+  ck(
+    M.retouchRefusal({ ...ok, media: { id: 41, media: { thumbnail: { mediaUrl: 'x' } } } }) ===
+      null,
+    'размер не указан (старая строка медиа) → не отказ: сервер проверит сам',
+  );
+  ck(
+    M.retouchRefusal({ ...ok, media: null })?.reason === 'pick a picture to retouch',
+    'нет картинки → «pick a picture to retouch»',
+  );
+  const empty = M.retouchRequest({ ...ok, zone: null, painted: false });
+  ck(
+    same(empty.params.freeform, { preset: 'retouch', items: [], options: undefined }),
+    'не нарисовано → items пуст (тело без зоны не собирается)',
+    show(empty.params.freeform),
+  );
+  const long = M.retouchRequest({ ...ok, words: 'ж'.repeat(1200) });
+  ck(
+    Array.from(long.params.freeform.items[0]?.texts?.[0] ?? '').length === 1000,
+    'слова срезаны по потолку двери 1000 символов',
+  );
+}
+
+// ─── L · ворота ретуши ────────────────────────────────────────────────────────────────────────
+head('L', 'ворота: плитка 10 и угол mask — только где сервер перечислил retouch_zone');
+{
+  const withList = band({ playgroundWorkflows: ['retouch_zone'] });
+  const withoutKey = band({ playgroundWorkflows: ['create_edit'] });
+  ck(liveKeys(M.gridMarkup(withList)).has('retouch_zone'), 'сетка: retouch_zone в списке → жива');
+  ck(!liveKeys(M.gridMarkup(band())).has('retouch_zone'), 'сетка: списка нет → приглушена');
+  ck(
+    !liveKeys(M.gridMarkup(withoutKey)).has('retouch_zone'),
+    'сетка: в списке нет retouch_zone → приглушена',
+  );
+  ck(
+    M.retouchOffered(withList) && !M.retouchOffered(band()) && !M.retouchOffered(withoutKey),
+    'retouchOffered: да только при retouch_zone в playgroundWorkflows',
+  );
+  const pic = (id, ordinal, mediaId) => ({
+    id,
+    ordinal,
+    media: { id: mediaId, media: { thumbnail: { mediaUrl: `https://x/${mediaId}.jpg` } } },
+  });
+  const runs = [
+    {
+      id: 41,
+      kind: 'freeform',
+      status: 'succeeded',
+      params: { ...EMPTY_PARAMS, freeform: { preset: 'free', items: [], options: undefined } },
+      pictures: [pic(501, 1, 77)],
+    },
+    {
+      id: 42,
+      kind: 'freeform',
+      status: 'succeeded',
+      params: { ...EMPTY_PARAMS, freeform: { preset: 'retouch', items: [], options: undefined } },
+      pictures: [pic(502, 1, 78)],
+    },
+  ];
+  const masks = (markup) => (markup.match(/aria-label="mask picture/g) ?? []).length;
+  const off = M.resultsMarkup(band({ runs }), null);
+  ck(off.includes('data-pg-output="501"'), 'итоги нарисованы (сетка, старый сервер)');
+  ck(masks(off) === 0, 'старый сервер: угла mask нет ни на одной картинке', `${masks(off)}`);
+  ck(
+    masks(M.resultsMarkup(band({ runs, playgroundWorkflows: ['create_edit'] }), null)) === 0,
+    'список без retouch_zone: угла mask нет',
+  );
+  const on = M.resultsMarkup(band({ runs, playgroundWorkflows: ['retouch_zone'] }), null);
+  ck(
+    masks(on) === 2,
+    'retouch_zone в списке: угол mask на каждой картинке комнаты',
+    `${masks(on)}`,
+  );
+  ck(
+    M.maskableRun({ kind: 'freeform' }) &&
+      M.maskableRun({ kind: 'cutout' }) &&
+      M.maskableRun({ kind: 'recolor' }) &&
+      !M.maskableRun({ kind: 'threed' }) &&
+      !M.maskableRun({ kind: 'flat' }),
+    'mask — на растрах плейграунда (freeform, cutout, recolor), не на 3D и не на флэтах',
+  );
+  const under = M.resultsMarkup(
+    band({ runs, playgroundWorkflows: ['retouch_zone', 'create_edit'] }),
+    'retouch_zone',
+  );
+  ck(
+    under.includes('data-pg-output="501"') && under.includes('data-pg-output="502"'),
+    'итоги под плиткой 10 — вся комната (картинка «free» тоже, с ней и начинают)',
+  );
+  const panel = M.panelMarkup(withList, 'retouch_zone');
+  ck(panel.includes('data-retouch-explanation'), 'панель плитки 10: объяснение нарисовано');
+  ck(
+    panel.includes(M.RETOUCH_CAVEAT) &&
+      M.RETOUCH_CAVEAT === 'The rectangle around your zone may change.',
+    'панель плитки 10: честная строка «The rectangle around your zone may change.»',
+  );
+  ck(!/credit/i.test(panel), 'панель плитки 10: ни слова о кредитах');
+  ck(!/GENERATE/.test(panel), 'панель плитки 10: GENERATE нет — прогон начинается с Mask', '');
+  const retouchMatch = M.playgroundHistoryMatch('retouch_zone', withList);
+  ck(
+    !!retouchMatch && retouchMatch(runs[1]) && !retouchMatch(runs[0]),
+    'история под плиткой 10 сужается до ретушей',
   );
 }
 
