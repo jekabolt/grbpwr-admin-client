@@ -1878,6 +1878,11 @@ export function TechCardForm({
       if (applied.length > 0 && !silent) {
         const root = applied[0].split('.')[0];
         setActiveTab(errorTabFor(root));
+        // …and the walk itself, the one `onInvalid` takes for a client-side error (D-57). The
+        // `shouldFocus` of `setError` above runs BEFORE this switch and reaches only a registered
+        // input already on screen: a field of another tab, or one with no input at all — a plate of
+        // the technical sheet (`technicalMedia.i.mediaId`) — was left for the operator to find.
+        setFocusTarget((prev) => ({ path: applied[0], nonce: (prev?.nonce ?? 0) + 1 }));
       }
       if (transport || contradictions.length > 0) {
         if (silent) leaveFullscreen();
