@@ -54,6 +54,60 @@ function providerOff(
   return !!p && !p.enabled;
 }
 
+// THE FALLBACK IS NEVER THE PRIMARY (the server refuses it: field `fallback`, `same_as_primary`).
+// Same-ness is the server's rule: the model is equal AND the provider is equal once "" is resolved to
+// the capability's default provider — chat → the default chat provider, image → the default image
+// provider, a blank default → openrouter.
+const BLANK_DEFAULT = 'openrouter';
+const SAME_AS_PRIMARY =
+  'the fallback is the primary itself; choose another provider or model, or no fallback';
+
+function resolvedProvider(
+  config: GetAiProvidersConfigResponse,
+  capability: string,
+  providerKey: string,
+): string {
+  if (providerKey) return providerKey;
+  const d = defaultKeyFor(config, capability);
+  return d === null ? '' : d || BLANK_DEFAULT;
+}
+
+function sameCandidate(
+  config: GetAiProvidersConfigResponse,
+  capability: string,
+  a: Candidate,
+  b: Candidate,
+): boolean {
+  return (
+    a.model === b.model &&
+    resolvedProvider(config, capability, a.providerKey) ===
+      resolvedProvider(config, capability, b.providerKey)
+  );
+}
+
+// What choosing a provider in one candidate's select would do, given the OTHER candidate. A new
+// provider starts on its own default model (""), so the pair it would make is (choice, ""):
+// identical to the other → the choice is not offered; the same provider as the other but with the
+// other on a named model → the choice is STAGED (the model field asks for a model before anything is
+// sent); anything else is sent at once.
+type ChoiceFate = 'send' | 'stage' | 'omit';
+
+function choiceFate(
+  config: GetAiProvidersConfigResponse,
+  capability: string,
+  choice: string,
+  other: Candidate | undefined,
+): ChoiceFate {
+  if (!other || choice === NONE) return 'send';
+  const providerKey = choice === DEFAULT ? '' : choice;
+  if (
+    resolvedProvider(config, capability, providerKey) !==
+    resolvedProvider(config, capability, other.providerKey)
+  )
+    return 'send';
+  return other.model === '' ? 'omit' : 'stage';
+}
+
 // Only chat and image have a default provider (proto: AiRouteCandidate.provider_key).
 function defaultKeyFor(config: GetAiProvidersConfigResponse, capability: string): string | null {
   if (capability === 'chat') return config.defaultChatProviderKey ?? '';
@@ -191,17 +245,45 @@ function PurposeRow({
   const route = useSetAiRoute();
   const key = purpose.key ?? '';
   const label = purpose.label || key;
+  const capability = purpose.capability ?? '';
   const pending = route.isPending ? route.variables : undefined;
   // An absent fallback arrives as null (the gateway emits unpopulated fields), not undefined.
   const shownFallback = pending ? pending.fallback : purpose.fallback;
   const primary = norm(pending ? pending.primary : purpose.primary);
-  const fallback = shownFallback ? norm(shownFallback) : undefined;
+  const serverFallback = shownFallback ? norm(shownFallback) : undefined;
+  // A fallback provider chosen but not sent yet: the same provider as the primary, which needs a
+  // model of its own first. Only the model field can send it.
+  const [staged, setStaged] = useState<string | null>(null);
+  const fallback: Candidate | undefined =
+    staged !== null ? { providerKey: staged === DEFAULT ? '' : staged, model: '' } : serverFallback;
+  // The server's sentence, said before the server has to: a pair that would be refused is not sent.
+  const [sameError, setSameError] = useState(false);
 
-  const send = (next: { primary: Candidate; fallback?: Candidate }) =>
+  const send = (next: { primary: Candidate; fallback?: Candidate }) => {
+    if (next.fallback && sameCandidate(config, capability, next.primary, next.fallback)) {
+      setSameError(true);
+      return;
+    }
+    setSameError(false);
+    setStaged(null);
     route.mutate({ purpose: key, primary: next.primary, fallback: next.fallback });
-  const capability = purpose.capability ?? '';
+  };
+  const chooseFallback = (value: string) => {
+    setSameError(false);
+    if (value === NONE) {
+      setStaged(null);
+      // Unstaging a fallback the server never had changes nothing on the server.
+      if (serverFallback) send({ primary });
+      return;
+    }
+    if (choiceFate(config, capability, value, primary) === 'stage') {
+      setStaged(value);
+      return;
+    }
+    send({ primary, fallback: { providerKey: value === DEFAULT ? '' : value, model: '' } });
+  };
   const primaryOff = providerOff(config, capability, primary);
-  const fallbackOff = providerOff(config, capability, fallback);
+  const fallbackOff = providerOff(config, capability, serverFallback);
 
   return (
     <div
@@ -228,24 +310,37 @@ function PurposeRow({
           </Text>
         )}
       </div>
-      <div className='flex flex-wrap items-end gap-x-4 gap-y-1.5'>
+      {/* Top-aligned: a sentence under one candidate (a refusal, a staged provider's ask) hangs
+          below it instead of pushing the other candidate's select down out of line. */}
+      <div className='flex flex-wrap items-start gap-x-4 gap-y-1.5'>
         <CandidateControls
           role='primary'
           purposeLabel={label}
-          capability={purpose.capability ?? ''}
+          capability={capability}
           config={config}
           value={primary}
+          other={serverFallback}
           disabled={route.isPending}
-          onChange={(c) => c && send({ primary: c, fallback })}
+          onChoose={(v) =>
+            send({
+              primary: { providerKey: v === DEFAULT ? '' : v, model: '' },
+              fallback: serverFallback,
+            })
+          }
+          onModel={(model) => send({ primary: { ...primary, model }, fallback: serverFallback })}
         />
         <CandidateControls
           role='fallback'
           purposeLabel={label}
-          capability={purpose.capability ?? ''}
+          capability={capability}
           config={config}
           value={fallback}
+          other={primary}
+          staged={staged !== null}
           disabled={route.isPending}
-          onChange={(c) => send({ primary, fallback: c })}
+          error={sameError ? SAME_AS_PRIMARY : null}
+          onChoose={chooseFallback}
+          onModel={(model) => fallback && send({ primary, fallback: { ...fallback, model } })}
         />
       </div>
     </div>
@@ -258,16 +353,27 @@ function CandidateControls({
   capability,
   config,
   value,
+  other,
+  staged = false,
   disabled,
-  onChange,
+  error = null,
+  onChoose,
+  onModel,
 }: {
   role: 'primary' | 'fallback';
   purposeLabel: string;
   capability: string;
   config: GetAiProvidersConfigResponse;
   value: Candidate | undefined;
+  /** The route's other candidate: a choice that would copy it is not offered. */
+  other: Candidate | undefined;
+  /** A fallback provider chosen but waiting for its model. */
+  staged?: boolean;
   disabled: boolean;
-  onChange: (next: Candidate | undefined) => void;
+  /** One sentence under the control, in the error colour. */
+  error?: string | null;
+  onChoose: (value: string) => void;
+  onModel: (model: string) => void;
 }) {
   const providers = config.providers ?? [];
   const defaultKey = defaultKeyFor(config, capability);
@@ -284,7 +390,7 @@ function CandidateControls({
         ]
       : []),
     ...providerItems(providers, capability),
-  ];
+  ].filter((i) => i.value === selected || choiceFate(config, capability, i.value, other) !== 'omit');
   // A route the server holds is shown as it is even when it no longer fits the list (a provider
   // that stopped serving the capability): an empty select would claim there is no route at all.
   if (!items.some((i) => i.value === selected)) {
@@ -302,7 +408,7 @@ function CandidateControls({
   );
 
   return (
-    <div className='flex flex-col gap-0.5'>
+    <div className='flex flex-col gap-0.5' data-candidate={role}>
       <Text size='micro' variant='label' tracking='label' className='uppercase'>
         {role}
       </Text>
@@ -313,27 +419,45 @@ function CandidateControls({
           value={selected}
           items={items}
           disabled={disabled}
+          invalid={!!error}
           className='w-48'
           onValueChange={(v: string) => {
             if (!v || v === selected) return;
-            // A new provider starts on its own default model: the old slug named the old one's.
-            onChange(v === NONE ? undefined : { providerKey: v === DEFAULT ? '' : v, model: '' });
+            onChoose(v);
           }}
         />
         {value ? (
           <ModelField
-            key={`${answering}|${value.model}`}
+            key={`${answering}|${value.model}|${staged ? 'staged' : ''}`}
             label={`${purposeLabel} ${role} model`}
             value={value.model}
             models={models}
             disabled={disabled}
-            onCommit={(model) => onChange({ providerKey: value.providerKey, model })}
+            invalid={!!error}
+            placeholder={staged ? 'type a model' : 'provider default'}
+            onCommit={onModel}
           />
         ) : (
           // No fallback, no model: the slot stays, so the columns of the next row still line up.
           <span aria-hidden className='hidden w-48 sm:block' />
         )}
       </div>
+      {staged && !error && other && (
+        <Text size='micro' variant='label' className='max-w-96'>
+          same provider as the primary: type a model other than {other.model}
+        </Text>
+      )}
+      {error && (
+        <Text
+          size='micro'
+          variant='errorLabel'
+          role='alert'
+          className='max-w-96'
+          data-write-error={`route-${role}`}
+        >
+          ! {error}
+        </Text>
+      )}
     </div>
   );
 }
@@ -345,12 +469,16 @@ function ModelField({
   value,
   models,
   disabled,
+  invalid = false,
+  placeholder,
   onCommit,
 }: {
   label: string;
   value: string;
   models: AiModelInfo[];
   disabled: boolean;
+  invalid?: boolean;
+  placeholder: string;
   onCommit: (model: string) => void;
 }) {
   const [draft, setDraft] = useState(value);
@@ -372,7 +500,8 @@ function ModelField({
         aria-label={label}
         list={listId}
         value={draft}
-        placeholder='provider default'
+        placeholder={placeholder}
+        aria-invalid={invalid || undefined}
         maxLength={128}
         autoComplete='off'
         spellCheck={false}

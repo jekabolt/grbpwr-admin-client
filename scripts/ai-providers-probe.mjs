@@ -97,8 +97,8 @@ const MUTATIONS = {
   'route-drops-fallback': {
     red: 'C1',
     what: 'a primary change drops the fallback',
-    from: '({ primary: c, fallback })',
-    to: '({ primary: c })',
+    from: 'model: "" },\n                  fallback: serverFallback\n',
+    to: 'model: "" }\n',
   },
   'route-twice': {
     red: 'C1',
@@ -127,8 +127,8 @@ const MUTATIONS = {
   'fallback-none-kept': {
     red: 'C3',
     what: '"none" still sends a fallback',
-    from: 'onChange(v === NONE ? void 0 : { providerKey: v === DEFAULT ? "" : v, model: "" });',
-    to: 'onChange({ providerKey: v === DEFAULT || v === NONE ? "" : v, model: "" });',
+    from: 'if (serverFallback) send2({ primary });',
+    to: 'if (serverFallback) send2({ primary, fallback: { providerKey: "", model: "" } });',
   },
   'absent-is-zero': {
     red: 'D1',
@@ -179,6 +179,18 @@ const MUTATIONS = {
     what: 'the settled key write is never reset (variables.value kept)',
     from: 'onSettled: releaseSecret',
     to: 'onSettled: () => {}',
+  },
+  'fallback-send-anyway': {
+    red: 'FE2',
+    what: 'a fallback identical to the primary is sent anyway',
+    from: 'if (next.fallback && sameCandidate(config, capability, next.primary, next.fallback)) {',
+    to: 'if (false) {',
+  },
+  'fallback-list-unfiltered': {
+    red: 'FE2',
+    what: 'the fallback list offers the choice that copies the primary',
+    from: '.filter((i) => i.value === selected || choiceFate(config, capability, i.value, other) !== "omit")',
+    to: '.filter(() => true)',
   },
   'clear-sends-old-value': {
     red: 'E5',
@@ -325,6 +337,9 @@ const PROVIDERS = [
 const PURPOSES = [
   { key: 'chat.note_markdown', label: 'Note to markdown', hint: 'the ✦ button in a library note', group: 'chat', capability: 'chat', primary: { providerKey: '', model: '' }, fallback: { providerKey: 'openai', model: 'gpt-5-mini' } },
   { key: 'threed', label: '3D', hint: 'the 3D tile', group: '3d', capability: 'threed', primary: { providerKey: 'fal', model: 'fal-ai/trellis' }, fallback: null },
+  // FE2: a primary on its provider's default model, and one on a named model; neither has a fallback.
+  { key: 'chat.email_translate', label: 'Email translate', hint: 'auto-translate a campaign', group: 'chat', capability: 'chat', primary: { providerKey: 'openai', model: '' }, fallback: null },
+  { key: 'chat.techcard_analysis', label: 'Construction audit', hint: 'the audit on a tech card', group: 'chat', capability: 'chat', primary: { providerKey: 'openai', model: 'gpt-5' }, fallback: null },
   { key: 'image.generate', label: 'Design images', hint: 'flat, render, recolour, pattern, playground tiles', group: 'images', capability: 'image', primary: { providerKey: '', model: '' }, fallback: null },
 ];
 const dec = (v) => (v === null ? null : { value: v });
@@ -416,6 +431,22 @@ function answer(method, path, query, body) {
       if (body.chatProviderKey) server.defaultChat = body.chatProviderKey;
       if (body.imageProviderKey) server.defaultImage = body.imageProviderKey;
     });
+  if (method === 'PUT' && (m = path.match(/^\/api\/admin\/ai\/routes\/([^/]+)$/))) {
+    // The server's same-ness rule (FD-8): model equal AND provider equal once "" is resolved to the
+    // capability's default (a blank default = openrouter).
+    const pu = server.purposes.find((x) => x.key === decodeURIComponent(m[1]));
+    const resolve = (k) => k || (pu.capability === 'chat' ? server.defaultChat : pu.capability === 'image' ? server.defaultImage : '') || 'openrouter';
+    const f = body.fallback;
+    if (f && (f.model ?? '') === (body.primary?.model ?? '') && resolve(f.providerKey) === resolve(body.primary?.providerKey))
+      return {
+        status: 400,
+        body: {
+          code: 3,
+          message: 'fallback: same_as_primary; the fallback is the primary itself; choose another provider or model, or no fallback',
+          details: [{ '@type': 'type.googleapis.com/google.rpc.BadRequest', fieldViolations: [{ field: 'fallback', description: 'same_as_primary; the fallback is the primary itself; choose another provider or model, or no fallback' }] }],
+        },
+      };
+  }
   if (method === 'PUT' && (m = path.match(/^\/api\/admin\/ai\/routes\/([^/]+)$/)))
     return versioned(body, () => {
       const pu = server.purposes.find((x) => x.key === decodeURIComponent(m[1]));
@@ -498,6 +529,17 @@ if (process.argv.includes('--shots')) {
   };
   for (const w of [1280, 390]) {
     await shoot('providers', w, '/ai-providers', {}, openKeys);
+    await shoot('routes', w, '/ai-providers', {}, async () => {
+      await page.waitForSelector('[data-purpose="chat.techcard_analysis"]');
+      await page.getByRole('combobox', { name: 'Construction audit fallback', exact: true }).click();
+      await page.getByRole('option', { name: 'OpenAI', exact: true }).click();
+      await page.waitForTimeout(300);
+      const f = page.getByRole('combobox', { name: 'Construction audit fallback model', exact: true });
+      await f.fill('gpt-5');
+      await f.press('Enter');
+      await page.waitForTimeout(300);
+      await page.locator('[data-purpose="chat.techcard_analysis"]').scrollIntoViewIfNeeded();
+    });
     await shoot('keyfail', w, '/ai-providers', { failKey: true }, async () => {
       await page.waitForSelector('[data-provider="openai"]');
       await openRow('openai');
@@ -653,6 +695,51 @@ await page.waitForSelector('[data-purpose="chat.note_markdown"]', { timeout: 800
   const images = await warn('image.generate');
   ck('C4', JSON.stringify(chat) === '["primary provider is off","fallback provider is off"]', '"default" primary (→ openrouter, off) and fallback openai (off) both warn', JSON.stringify(chat));
   ck('C4', JSON.stringify(images) === '["primary provider is off"]', 'the images purpose on "default" (→ openrouter, off) warns', JSON.stringify(images));
+}
+
+// FE2 · the fallback can never equal the primary.
+{
+  await mount();
+  await page.waitForSelector('[data-purpose="chat.email_translate"]', { timeout: 8000 });
+  const optionsOf = async (name) => {
+    await page.getByRole('combobox', { name, exact: true }).click();
+    await page.waitForTimeout(250);
+    const texts = await page.getByRole('option').allTextContents();
+    return texts.map((t) => t.trim());
+  };
+  const plain = await optionsOf('Email translate fallback');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+  ck('FE2', plain.length > 0 && !plain.includes('OpenAI') && plain.includes('Anthropic'), 'primary (openai, "") → the fallback list has no OpenAI', JSON.stringify(plain));
+  const named = await optionsOf('Construction audit fallback');
+  ck('FE2', named.includes('OpenAI'), 'primary (openai, gpt-5) → OpenAI is offered for the fallback', JSON.stringify(named));
+  if (named.includes('OpenAI')) {
+    await page.getByRole('option', { name: 'OpenAI', exact: true }).click();
+    await page.waitForTimeout(500);
+    const field = page.getByRole('combobox', { name: 'Construction audit fallback model', exact: true });
+    const shown = await field.count();
+    const put0 = writes('PUT', /^\/api\/admin\/ai\/routes\//).length;
+    ck('FE2', shown === 1 && put0 === 0, 'choosing it stages the provider: the model field, no PUT', `field ${shown}, PUTs ${put0}`);
+    if (shown) {
+      await field.fill('gpt-5');
+      await field.press('Enter');
+      await page.waitForTimeout(600);
+      const put1 = writes('PUT', /^\/api\/admin\/ai\/routes\//).length;
+      const said = ((await page.locator('[data-purpose="chat.techcard_analysis"] [data-candidate="fallback"] [role="alert"]').textContent().catch(() => '')) ?? '').trim();
+      ck('FE2', put1 === 0 && said.includes('the fallback is the primary itself'), 'the primary\'s own model is not sent; the sentence stands under the fallback', `PUTs ${put1}; ${said}`);
+      // The staged field must still be there, holding the refused slug for a correction.
+      const still = (await field.count()) === 1 && (await field.isEnabled().catch(() => false));
+      ck('FE2', still, 'the staged field stays for the correction');
+      if (still) {
+        await field.fill('gpt-5-mini');
+        await field.press('Enter');
+        await page.waitForTimeout(700);
+      }
+      const w = writes('PUT', /^\/api\/admin\/ai\/routes\//);
+      const b = w[0]?.body ?? {};
+      ck('FE2', w.length === 1 && b.primary?.providerKey === 'openai' && b.primary?.model === 'gpt-5' && b.fallback?.providerKey === 'openai' && b.fallback?.model === 'gpt-5-mini', 'another model → ONE PUT with (openai, gpt-5) → (openai, gpt-5-mini)', JSON.stringify(b));
+    }
+  }
 }
 
 // ═══ D · SPEND ═════════════════════════════════════════════════════════════════════════════════
