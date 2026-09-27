@@ -4432,7 +4432,8 @@ export type DesignRun = {
   id: number | undefined;
   techCardId: number | undefined;
   // Which state of the studio produced this row: flat | render | threed | vector | draft_idea |
-  // recolor | pattern | freeform | cutout. Written by the client at start; immutable afterwards.
+  // recolor | pattern | freeform | cutout | extend | inpaint. Written by the client at start;
+  // immutable afterwards.
   // `recolor` IS THE ON MODEL SECTION'S OWN VERB (K-17). The owner's ask — «мы можем загрузить фото
   // реальное на модели с разных сторон и нам можно будет поменять цвет вещи» — and the owner's own
   // decision on how: the colour is changed BY GENERATION, not by a filter, so the weave, the folds
@@ -4451,6 +4452,10 @@ export type DesignRun = {
   // still «spend the key's money and give me a picture back».
   // ImportDesignVector is NOT that verb and does not belong to this list: it files an SVG that
   // already exists and spends nothing.
+  // `extend` EXTENDS ONE PICTURE INTO A NEW PROPORTION on fal's outpaint route (params.extend + one
+  // params.extra_input_media_ids). `inpaint` REPAINTS ONE PAINTED ZONE of a picture on fal's fill
+  // route (params.inpaint + ask). Both are playground kinds: one output, colourway 0, section 1 of
+  // the window.
   kind: string | undefined;
   // OUTPUT-ONLY lifecycle: pending | running | done | failed | cancelled. A tile that is still
   // running renders differently from a finished one, so this is the field the band polls.
@@ -4702,12 +4707,16 @@ export type DesignRunParams = {
   // never in extra_input_media_ids (one list per fact — a run naming a picture in both is refused).
   freeform: DesignFreeformParams | undefined;
   // THE PER-RUN ENGINE of every OpenRouter image kind: flat | render | recolor | pattern | freeform.
-  // Refused on threed | cutout | vector, whose routes are not OpenRouter images
+  // Refused on threed | cutout | vector | extend | inpaint, whose routes are not OpenRouter images
   // (`image_options_forbidden`). Absent or empty = the deployment's dial, exactly as before the
   // field existed — which is what keeps every frozen run and every old client meaning what it meant.
   // Offered only where GetDesignBandResponse.image_models is present; a client must not send it to a
   // server that did not list any engine.
   image: DesignImageOptions | undefined;
+  // THE MASK RETOUCH OF A PLAYGROUND RUN (kind=inpaint). Refused on every other kind (`inpaint_forbidden`).
+  inpaint: DesignInpaintParams | undefined;
+  // THE TARGET FORMAT OF AN EXTEND RUN (kind=extend). Refused on every other kind (`extend_forbidden`).
+  extend: DesignExtendParams | undefined;
 };
 
 // DesignColourRecipe is the colour submission of a render run, in a form that a history chip can
@@ -5047,6 +5056,26 @@ export type DesignImageOptions = {
   aspectRatio: string | undefined;
   // '' | transparent — only when the engine lists it in image_models[].backgrounds.
   background: string | undefined;
+};
+
+// DesignInpaintParams — one picture of this card and its painted mask, a PNG of the SAME pixel size, white where the
+// picture changes, black elsewhere (the client paints it; UploadContentImage with preserve_original=true). Both are
+// validated BEFORE anything is reserved: `mask_required`, `mask_size_mismatch`, `mask_invalid` (not a readable PNG),
+// `mask_empty` (nothing painted). The words travel in StartDesignRunRequest.ask (`words_required` when blank).
+// The answer is a NEW picture beside the source; pixels outside the mask are the source's own bytes.
+export type DesignInpaintParams = {
+  sourceMediaId: number | undefined;
+  maskMediaId: number | undefined;
+};
+
+// DesignExtendParams — the final proportion of an extend (outpaint) run. The ONE source travels in
+// DesignRunParams.extra_input_media_ids (exactly one, `one_source_picture`); the route takes no words
+// (`extend_takes_no_words`). aspect_ratio ∈ 9:16 | 1:1 | 3:4 | 2:3 | 16:9 | 4:3 | 3:2 | 21:9 | 9:21 — never auto
+// (`extend_aspect_unknown`); a target that adds no pixels on either side is `target_aspect_must_extend`. The
+// server computes the per-side expansion, caps the canvas at 3 megapixels (downscaling the source first), and
+// re-composites the untouched source pixels into the answer, so «the original is kept» is a fact of the bytes.
+export type DesignExtendParams = {
+  aspectRatio: string | undefined;
 };
 
 // DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
@@ -5551,8 +5580,8 @@ export type DesignCardOutput = {
   // FK design_run(id). 0 = no run: an uploaded picture, or a parentless flatten. It does NOT imply
   // «a run produced this picture» when non-zero — see the ancestry note above.
   runId: number | undefined;
-  // render | threed | pattern | recolor | freeform | cutout — the kind of the RUN, never of the
-  // picture. "" when there is no run at all.
+  // render | threed | pattern | recolor | freeform | cutout | extend | inpaint — the kind of the
+  // RUN, never of the picture. "" when there is no run at all.
   runKind: string | undefined;
   runRrev: number | undefined;
   // The run's colourway — product(id), 0 = unattributed or no run.

@@ -282,6 +282,8 @@ export function ThreedStudio({
         useFlatSlots: false,
         flatSlotIds: [],
         image: undefined,
+        inpaint: undefined,
+        extend: undefined,
       },
     });
   };

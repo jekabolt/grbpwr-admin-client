@@ -376,6 +376,8 @@ function band(parts: Partial<GetDesignBandResponse>): GetDesignBandResponse {
     imageModels: undefined,
     threedOptions: undefined,
     outputsTotalByWorkflow: undefined,
+    runKinds: undefined,
+    suggestPromptsModel: undefined,
     ...parts,
   };
 }

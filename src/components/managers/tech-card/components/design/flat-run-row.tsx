@@ -447,6 +447,8 @@ export function FlatRunRow({
       flatSlotIds: [],
       extraInputMediaIds: [],
       image: undefined,
+      inpaint: undefined,
+      extend: undefined,
     };
     patchFlatInput(card, { run: 'saving', refused: null, serverRefusal: null, ask });
     let refusal: ServerRefusal | null = null;

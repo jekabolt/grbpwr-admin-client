@@ -177,6 +177,8 @@ export function ImageToFabricSection({
         flatSlotIds: [],
         // НЕ ПЛЕЙГРАУНД: движок прогона называет только плейграунд; `undefined` провод не меняет.
         image: undefined,
+        inpaint: undefined,
+        extend: undefined,
       },
     });
 

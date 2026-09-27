@@ -49,7 +49,7 @@ function isUnimplemented(error: unknown): boolean {
  * Новое обязательное поле контракта — это вопрос «а что полоса показывает, пока его нет», и ответ
  * на него принимает человек, а не приведение типа.
  */
-const EMPTY_BAND: GetDesignBandResponse = {
+export const EMPTY_BAND: GetDesignBandResponse = {
   // ОТВЕТ НА ВОПРОС ЭТОЙ ШАПКИ ДЛЯ `colour_plan` (фича A): пока плана НЕТ — не «пустой план», а
   // именно его отсутствие. Пустой план это утверждение «карточку красили и стёрли всё», и у него
   // есть ревизия, которую пришлось бы выдумать. `undefined` говорит «на этой карточке не красили
@@ -126,6 +126,9 @@ const EMPTY_BAND: GetDesignBandResponse = {
   imageModels: undefined,
   threedOptions: undefined,
   outputsTotalByWorkflow: undefined,
+  // Поля 32/33 (фаза 3) — то же правило отсутствия: бинарь без них рисует формы второй фазы.
+  runKinds: undefined,
+  suggestPromptsModel: undefined,
 };
 
 export type DesignBandState = {

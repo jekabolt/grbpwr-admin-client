@@ -114,6 +114,8 @@ export function emptyParams(): common_DesignRunParams {
     flatSlotIds: [],
     freeform: undefined,
     image: undefined,
+    inpaint: undefined,
+    extend: undefined,
   };
 }
 

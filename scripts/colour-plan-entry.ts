@@ -143,6 +143,8 @@ export function makeBand(input: {
     imageModels: undefined,
     threedOptions: undefined,
     outputsTotalByWorkflow: undefined,
+    runKinds: undefined,
+    suggestPromptsModel: undefined,
   };
 }
 

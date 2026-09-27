@@ -198,6 +198,15 @@
 //   node scripts/playground-registry-probe.mjs --mutate-scene-fold   Scene снова свёрнута
 //                                                                   → краснеет W
 //
+// P-06 (регенерация под контракт фазы 3):
+//   X · новые обязательные ключи сгенерированных типов стоят `undefined`, провод НЕ меняется:
+//       emptyParams() несёт ключи inpaint/extend, а тело плитки их не везёт; пустая полоса
+//       НЕ утверждает поля 32/33 (runKinds / suggestPromptsModel отсутствуют, а не пусты).
+//   node scripts/playground-registry-probe.mjs --mutate-p06-params  emptyParams шлёт inpaint
+//                                                                   → краснеет X (и A)
+//   node scripts/playground-registry-probe.mjs --mutate-p06-band    пустая полоса утверждает
+//                                                                   runKinds: [] → краснеет X
+//
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
 
@@ -267,6 +276,8 @@ const MUT = {
   threedPrice: process.argv.includes('--mutate-threed-price'),
   reuseLabel: process.argv.includes('--mutate-reuse-label'),
   sceneFold: process.argv.includes('--mutate-scene-fold'),
+  p06Params: process.argv.includes('--mutate-p06-params'),
+  p06Band: process.argv.includes('--mutate-p06-band'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -459,6 +470,11 @@ if (MUT.sections)
     `export const enginesOffered = (band: GetDesignBandResponse): boolean =>
   imageModelsOf(band) !== null;`,
     'export const enginesOffered = (_band: GetDesignBandResponse): boolean => true;',
+  ]);
+if (MUT.p06Params)
+  commonSwaps.push([
+    '    inpaint: undefined,',
+    '    inpaint: { sourceMediaId: 0, maskMediaId: 0 },',
   ]);
 if (MUT.drawn)
   commonSwaps.push(['return out.length ? out : [...field.ratios];', 'return [...field.ratios];']);
@@ -739,6 +755,11 @@ if (MUT.sceneFold)
       '      defaultOpen: true,',
       '      defaultOpen: false,',
     ),
+  );
+
+if (MUT.p06Band)
+  plugins.push(
+    swap('p06-band', /design\/use-design-band\.ts$/, '  runKinds: undefined,', '  runKinds: [],'),
   );
 
 const outfile = resolve(tmpdir(), `playground-registry-probe-${process.pid}.mjs`);
@@ -3676,6 +3697,42 @@ head(
       /aria-expanded="true"/.test(scene.slice(0, 1500)) &&
       scene.includes('placeholder="Same as model reference"'),
     'Scene открыта по умолчанию (2.png): Source и поле сцены видны',
+  );
+}
+
+// ─── X · P-06: ключи фазы 3 — `undefined`, провод прежний ────────────────────────────────────
+head('X', 'P-06: новые ключи контракта стоят undefined — тело и пустая полоса прежние');
+{
+  const params = M.emptyParams();
+  ck(
+    'inpaint' in params && 'extend' in params,
+    'emptyParams() перечисляет inpaint и extend (обязательные ключи сгенерированного типа)',
+    Object.keys(params).join(','),
+  );
+  const body = run('change_color').wire(
+    draft({
+      images: { photos: [media(11)] },
+      texts: { garment: 'jacket' },
+      colours: { colour: { code: '19-4052 TCX', hex: '#0f4c81' } },
+    }),
+    ctx,
+  );
+  const wire = JSON.parse(JSON.stringify(body));
+  ck(
+    !('inpaint' in wire.params) && !('extend' in wire.params),
+    'тело плитки фазы 1 не везёт inpaint / extend — провод прежний',
+    show(wire.params),
+  );
+  const EMPTY = M.EMPTY_BAND;
+  ck(
+    'runKinds' in EMPTY && EMPTY.runKinds === undefined,
+    'пустая полоса: runKinds ОТСУТСТВУЕТ (старый бинарь), а не пуст (генерация выключена)',
+    show(EMPTY.runKinds),
+  );
+  ck(
+    'suggestPromptsModel' in EMPTY && EMPTY.suggestPromptsModel === undefined,
+    'пустая полоса: suggestPromptsModel отсутствует — Ideas рисуют только статический список',
+    show(EMPTY.suggestPromptsModel),
   );
 }
 

@@ -133,6 +133,9 @@ export {
   RETOUCH_MASKING_KEY,
   RETOUCH_SOURCE_KEY,
 } from 'components/managers/tech-card/components/design/playground/registry/tiles/retouch-zone';
+// P-06 · the phase-3 keys: the literal every tile starts from, and the band before the server speaks.
+export { emptyParams } from 'components/managers/tech-card/components/design/playground/registry/common';
+export { EMPTY_BAND } from 'components/managers/tech-card/components/design/use-design-band';
 export { REUSE_LABEL } from 'components/managers/tech-card/components/design/playground/fields';
 /** THE CHAIN rail as the person sees it (C-10): its cells and its «N of M steps» counter. */
 export function railMarkup(ctx: ChainCtx): string {
