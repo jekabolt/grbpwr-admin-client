@@ -79,6 +79,12 @@ export const EMPTY_DRAFT: Draft = {
 type FieldBase = {
   /** Draft key; also the Ideas / Recently used key of a prompt (`recentTextKey(wf, key)`). */
   key: string;
+  /**
+   * Whether THIS server draws the field at all (a capability of the band). Absent = always. A field
+   * the server cannot use is not drawn rather than drawn dead: create-or-edit's «this server needs at
+   * least one» line is said only to a server that does (C-08).
+   */
+  when?: (band: GetDesignBandResponse) => boolean;
 };
 
 export type PromptFieldDef = FieldBase & {
@@ -102,6 +108,69 @@ export type FormatFieldDef = FieldBase & {
   type: 'format';
   ratios: readonly FormatRatio[];
   initial: FormatRatio;
+  /**
+   * The draft key of the `engine` field whose AI model decides which ratios are live (C-08). The
+   * grid dims what that model cannot draw and the value is SNAPPED to the nearest live ratio — on
+   * screen, in the header and on the wire alike (`formatOf`). A tile with no picker (D6: tiles 2,
+   * 3) binds to a key no field writes and so reads the server's default model. Absent = a grid of
+   * its own, not an image engine's (Extend Image, phase 3).
+   */
+  boundTo?: string;
+};
+
+/**
+ * THE AI MODEL AND ITS QUALITY (C-08, D6 — tiles 1, 7, 11). One field, two rows: «Model» (a select
+ * of `band.imageModels`) and «Quality» (the chosen model's own tiers, segmented). Draft:
+ * `choices[key]` = slug, `choices[key + '.quality']` = tier (`engineChoiceKeys`). Nothing written =
+ * the server's default model at `medium`. Drawn only where the band lists engines; put it in the
+ * section `engineSection()` builds, which folds it and prints «<label> · <quality>» on the header.
+ */
+export type EngineFieldDef = FieldBase & {
+  type: 'engine';
+  /**
+   * Draft FLAG key of a «Transparent background» row, drawn only while the chosen model lists
+   * `transparent` in its backgrounds. Absent = no such row on this tile.
+   */
+  backgroundKey?: string;
+};
+
+/**
+ * TILE 1's model profile (C-09 owns the picker, `fields/model-photo-picker.tsx`). Draft:
+ * `choices[key]` = the profile id, `images[photoKey]` = the one chosen photograph of it.
+ */
+export type ModelProfileFieldDef = FieldBase & {
+  type: 'model-profile';
+  /** Draft `images` key of the chosen photograph. */
+  photoKey: string;
+};
+
+/**
+ * TILE 1's products: renders of this card's colourways (C-09 owns the picker,
+ * `fields/colourway-render-picker.tsx`). Draft: `images[key]` = the picked renders in order,
+ * `choices[colorwayKey]` = the colourway of the first pick ('0' when it has none).
+ */
+export type ColourwayRenderFieldDef = FieldBase & {
+  type: 'colourway-render';
+  max: number;
+  colorwayKey: string;
+};
+
+/**
+ * A field drawn by the tile itself: `render` gets the same props every built-in field gets. The
+ * door for a one-off control (tile 10's explanation, tile 12's option rows) that would otherwise
+ * need a new `case` in the shared panel (C-10, C-11).
+ */
+export type CustomFieldDef = FieldBase & {
+  type: 'custom';
+  render: (props: CustomFieldProps) => ReactNode;
+};
+
+export type CustomFieldProps = {
+  band: GetDesignBandResponse;
+  techCardId: number;
+  draft: Draft;
+  onDraft: (fn: (draft: Draft) => Draft) => void;
+  disabled?: boolean;
 };
 
 export type OptionFieldDef = FieldBase & {
@@ -127,8 +196,9 @@ export type PantoneFieldDef = FieldBase & { type: 'pantone'; placeholder?: strin
 export type NoteFieldDef = FieldBase & { type: 'note'; text: string };
 
 /**
- * The fields a section can hold. `model-profile` and `colourway-render` (tile 1) arrive with their
- * pickers in C-09; engine/quality with C-08.
+ * The fields a section can hold. `engine` is C-08's; `model-profile` and `colourway-render` (tile 1)
+ * are drawn by C-09's pickers once they exist (until then the panel draws nothing for them);
+ * `custom` is a tile's own control.
  */
 export type FieldDef =
   | PromptFieldDef
@@ -138,7 +208,11 @@ export type FieldDef =
   | ToggleFieldDef
   | SliderFieldDef
   | PantoneFieldDef
-  | NoteFieldDef;
+  | NoteFieldDef
+  | EngineFieldDef
+  | ModelProfileFieldDef
+  | ColourwayRenderFieldDef
+  | CustomFieldDef;
 
 /**
  * One section of the form: the owner's header (glyph · title · REQUIRED · value) over its fields.
@@ -153,7 +227,9 @@ export type SectionDef = {
   collapsible?: boolean;
   defaultOpen?: boolean;
   /** The value printed on the right of the header, open or folded. */
-  value?: (draft: Draft) => ReactNode;
+  value?: (draft: Draft, ctx: WireCtx) => ReactNode;
+  /** Whether THIS server draws the section at all. Absent = always (see `FieldBase.when`). */
+  when?: (band: GetDesignBandResponse) => boolean;
   fields: readonly FieldDef[];
 };
 

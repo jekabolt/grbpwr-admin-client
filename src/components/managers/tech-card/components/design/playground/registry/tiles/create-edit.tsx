@@ -1,17 +1,24 @@
-import type { common_MediaFull } from 'api/proto-http/admin';
+import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
 
 import type { NotSentItem } from '../../../core';
 import { slotCounter } from '../../fields';
 import {
+  ENGINE_KEY,
   RETIRED_PRESET_WORD,
   emptyParams,
+  engineSection,
+  formatSection,
+  imageInventoryGroup,
+  imageOptionsOf,
   imagesOf,
   mediaIdsOf,
   pictureLines,
   presetOffered,
+  recallImage,
   textOf,
+  workflowOfferedOr,
 } from '../common';
-import { EMPTY_DRAFT, type WorkflowDef, type WorkflowRun } from '../types';
+import { EMPTY_DRAFT, type InventoryGroupDef, type WorkflowDef, type WorkflowRun } from '../types';
 
 /**
  * ═══ TILE 11 · CREATE OR EDIT IMAGES → kind `freeform`, preset `free` (C-04, today's backend) ════
@@ -19,38 +26,49 @@ import { EMPTY_DRAFT, type WorkflowDef, type WorkflowRun } from '../types';
  * Owner: «Create or edit any image from a text prompt or reference images.» The Prompt comes FIRST
  * and is the main field (13.png); the references follow, up to 3.
  *
- * ⚠ TODAY'S DOOR NEEDS A PICTURE. `designRefuseUnworkableSources` refuses a freeform run with no
- * `params.freeform.items` (`no_source_picture`), so in phase 1 one reference is required and the form
- * says so in words; text-only arrives with B-04 (`free` accepting 0 pictures when `ask` is set).
+ * ⚠ TWO SERVERS, ONE TILE (C-08). The capability is `playground_workflows` (band 28):
  *
- * ⚠ NO FORMAT YET. The owner's reference shows a Format fold (2:3), but today's `DesignRunParams`
- * carries no aspect ratio at all (the server never sends one — 10-CURRENT-SYSTEM §2.2); a grid
- * whose choice goes nowhere would be a control that lies. It arrives with the per-run engine
- * (phase 2, `DesignRunParams.image`).
+ *   · the server LISTS `create_edit` → it is a phase-2 server whose `free` door draws from words
+ *     alone (text → image, B-04: `designRefuseMalformedFreeform` takes zero pictures when `ask` is
+ *     set), so the references are optional, 0..3, and the «needs at least one» line is not drawn;
+ *   · the server does not send the list → today's door: `designRefuseUnworkableSources` refuses a
+ *     freeform run with no `params.freeform.items`, so one reference is required and said in words.
+ *
+ * THE AI MODEL AND FORMAT (D6) exist only where the band lists engines (`imageModels`): the folded
+ * «AI model» section (model, quality, and «Transparent background» while the model offers it) and
+ * the folded Format grid, 2:3 by default as the owner's 13.png shows it. Without engines neither is
+ * drawn and no `params.image` leaves — a grid whose choice went nowhere would be a control that lies.
  *
  * The request: `ask` = the prompt; `params.freeform = {preset:'free', items:[{media_id}…]}` with no
  * regions, no texts and no role (the retired area UI is gone, Q17); `extra_input_media_ids` EMPTY —
- * one list per fact (`one_list_per_fact`).
+ * one list per fact (`one_list_per_fact`); `params.image` = `imageOptionsOf` (C-08).
  */
 const PROMPT = 'prompt';
 const REFS = 'refs';
 const REFS_MAX = 3;
 /** The door's own ceiling on `ask` (the old playground's `ASK_MAX`, removed in C-06). */
 const ASK_MAX = 4000;
+const BACKGROUND = 'background';
 
-const NOT_SENT: readonly NotSentItem[] = [
+const NOT_SENT_ALWAYS: readonly NotSentItem[] = [
   { label: 'colourway', reason: 'a playground run binds no colourway — it files under none' },
   {
     label: 'the card',
     reason: 'nothing of the card travels: no bench, no references, no garment description',
   },
-  {
-    label: 'format',
-    reason: 'this server takes no aspect ratio yet — the model picks the frame',
-  },
 ];
+const NOT_SENT_FORMAT: NotSentItem = {
+  label: 'format',
+  reason: 'this server takes no aspect ratio yet — the model picks the frame',
+};
 
 const refIds = (list: readonly common_MediaFull[]) => mediaIdsOf(list).slice(0, REFS_MAX);
+
+/** Text → image: a server that lists this tile takes a run with words and no picture (B-04). */
+const textToImage = (band: GetDesignBandResponse) =>
+  (band.playgroundWorkflows ?? []).some((k) => (k ?? '').trim() === 'create_edit');
+
+const FORMAT = formatSection({ initial: '2:3' });
 
 const run: WorkflowRun = {
   sections: [
@@ -92,23 +110,26 @@ const run: WorkflowRun = {
           type: 'note',
           key: 'refs-note',
           text: 'For now this server needs at least one.',
+          when: (band) => !textToImage(band),
         },
       ],
     },
+    engineSection({ backgroundKey: BACKGROUND }),
+    FORMAT.section,
   ],
 
-  validate: (draft) => {
+  validate: (draft, { band }) => {
     if (!textOf(draft, PROMPT).trim()) {
       return { reason: 'write what to create or change', section: PROMPT };
     }
     const ids = refIds(imagesOf(draft, REFS));
-    if (ids.length === 0) {
+    if (ids.length === 0 && !textToImage(band)) {
       return { reason: 'add a reference image', section: REFS };
     }
     return null;
   },
 
-  wire: (draft) => ({
+  wire: (draft, { band }) => ({
     kind: 'freeform',
     ask: textOf(draft, PROMPT).trim().slice(0, ASK_MAX),
     params: {
@@ -123,12 +144,17 @@ const run: WorkflowRun = {
         })),
         options: undefined,
       },
+      image: imageOptionsOf(band, draft, {
+        engine: ENGINE_KEY,
+        format: FORMAT.field,
+        background: BACKGROUND,
+      }),
     },
   }),
 
   shape: () => '1 picture',
 
-  inventory: (draft, request) => {
+  inventory: (draft, request, { band }) => {
     const sent = (request.params.freeform?.items ?? []).map((i) => i.mediaId ?? 0);
     const list = sent
       .map((id) => imagesOf(draft, REFS).find((m) => (m.id ?? 0) === id))
@@ -137,7 +163,9 @@ const run: WorkflowRun = {
       kindWord: 'create or edit',
       intro: list.length
         ? `${list.length} reference ${list.length === 1 ? 'image travels' : 'images travel'} with the prompt, numbered in the order below. One picture comes back.`
-        : 'No reference image yet: this server needs at least one. One picture comes back.',
+        : textToImage(band)
+          ? 'No reference image: the picture is drawn from the prompt alone. One picture comes back.'
+          : 'No reference image yet: this server needs at least one. One picture comes back.',
       groups: [
         {
           key: 'pictures',
@@ -154,13 +182,14 @@ const run: WorkflowRun = {
           words: request.ask,
           text: request.ask ? undefined : 'nothing typed yet',
         },
+        ...engineGroup(band, request.params.image),
         {
           key: 'craft',
           label: 'what the server adds',
           text: 'its own closing sentence for this route: follow the words above; the pictures are numbered as listed; one picture comes back.',
         },
       ],
-      notSent: NOT_SENT,
+      notSent: request.params.image ? NOT_SENT_ALWAYS : [...NOT_SENT_ALWAYS, NOT_SENT_FORMAT],
     };
   },
 
@@ -200,11 +229,18 @@ const run: WorkflowRun = {
         `${list.length - REFS_MAX} pictures over the ${REFS_MAX} this workflow takes were left out`,
       );
     }
+    const image = recallImage(past, {
+      engine: ENGINE_KEY,
+      format: FORMAT.field.key,
+      background: BACKGROUND,
+    });
     return {
       draft: {
         ...EMPTY_DRAFT,
         texts: { [PROMPT]: (past.ask ?? '').trim() },
         images: { [REFS]: list.slice(0, REFS_MAX) },
+        choices: image.choices,
+        flags: image.flags,
       },
       said,
       lost,
@@ -212,7 +248,16 @@ const run: WorkflowRun = {
   },
 };
 
+function engineGroup(
+  band: GetDesignBandResponse,
+  image: Parameters<typeof imageInventoryGroup>[1],
+): InventoryGroupDef[] {
+  const group = imageInventoryGroup(band, image);
+  return group ? [group] : [];
+}
+
 export const CREATE_EDIT: Pick<WorkflowDef, 'gate' | 'run'> = {
-  gate: (band) => presetOffered(band, 'free'),
+  // The new list when the server sends it; today's `freeform_presets` answer when it does not.
+  gate: (band) => workflowOfferedOr(band, 'create_edit', () => presetOffered(band, 'free')),
   run,
 };

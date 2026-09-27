@@ -6,9 +6,12 @@ import { GenerateRow, LockBar, RunRefusal } from '../render/generate-row';
 import { useStartDesignRun } from '../render/use-design-run';
 import { useFocusReturn } from './focus';
 import {
+  ColourwayRenderPicker,
+  EnginePicker,
   FoldSection,
   FormatGrid,
   ImageSlots,
+  ModelPhotoPicker,
   OptionRow,
   PantoneField,
   PromptField,
@@ -17,8 +20,28 @@ import {
 } from './fields';
 import { playgroundRunScope } from './address';
 import { rememberRecentText, recentTextKey } from './recent';
-import { colourOf, imagesOf, promptKeys, textOf } from './registry/common';
-import type { Draft, FieldDef, SectionDef, WorkflowDef, WorkflowRun } from './registry/types';
+import {
+  chooseEngine,
+  colourOf,
+  drawnOn,
+  drawnRatios,
+  engineChoiceKeys,
+  engineOf,
+  formatOf,
+  imageModelsOf,
+  imagesOf,
+  promptKeys,
+  qualityOf,
+  textOf,
+} from './registry/common';
+import type {
+  Draft,
+  FieldDef,
+  SectionDef,
+  WireCtx,
+  WorkflowDef,
+  WorkflowRun,
+} from './registry/types';
 import { WhatModelGetsPlaygroundModal } from './what-model-gets';
 
 /**
@@ -93,19 +116,25 @@ export function WorkflowPanel({
 
   return (
     <>
-      {flow.sections.map((section) => (
-        <div key={section.key} id={sectionId(section.key)}>
-          <PanelSection
-            def={def}
-            section={section}
-            band={band}
-            techCardId={techCardId}
-            draft={draft}
-            onDraft={onDraft}
-            disabled={disabled}
-          />
-        </div>
-      ))}
+      {/* A section THIS server cannot use is not drawn (its `when`): the AI model and Format folds
+          exist only where the band lists engines (C-08). */}
+      {flow.sections
+        .filter((section) => drawnOn(band, section))
+        .map((section) => (
+          <div key={section.key} id={sectionId(section.key)}>
+            <PanelSection
+              def={def}
+              section={section}
+              sections={flow.sections}
+              ctx={ctx}
+              band={band}
+              techCardId={techCardId}
+              draft={draft}
+              onDraft={onDraft}
+              disabled={disabled}
+            />
+          </div>
+        ))}
 
       <div className='flex flex-col gap-3'>
         <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
@@ -139,6 +168,8 @@ export function WorkflowPanel({
 function PanelSection({
   def,
   section,
+  sections,
+  ctx,
   band,
   techCardId,
   draft,
@@ -147,6 +178,8 @@ function PanelSection({
 }: {
   def: WorkflowDef;
   section: SectionDef;
+  sections: readonly SectionDef[];
+  ctx: WireCtx;
   band: GetDesignBandResponse;
   techCardId: number;
   draft: Draft;
@@ -159,24 +192,27 @@ function PanelSection({
       glyph={section.glyph}
       required={section.required}
       info={section.info}
-      value={section.value?.(draft)}
+      value={section.value?.(draft, ctx)}
       collapsible={section.collapsible ?? false}
       defaultOpen={section.defaultOpen ?? true}
       anchor={`${def.key}.${section.key}`}
     >
       <div className='flex flex-col gap-3'>
-        {section.fields.map((field) => (
-          <Field
-            key={field.key}
-            def={def}
-            field={field}
-            band={band}
-            techCardId={techCardId}
-            draft={draft}
-            onDraft={onDraft}
-            disabled={disabled}
-          />
-        ))}
+        {section.fields
+          .filter((field) => drawnOn(band, field))
+          .map((field) => (
+            <Field
+              key={field.key}
+              def={def}
+              field={field}
+              sections={sections}
+              band={band}
+              techCardId={techCardId}
+              draft={draft}
+              onDraft={onDraft}
+              disabled={disabled}
+            />
+          ))}
       </div>
     </FoldSection>
   );
@@ -186,6 +222,7 @@ function PanelSection({
 function Field({
   def,
   field,
+  sections,
   band,
   techCardId,
   draft,
@@ -194,12 +231,13 @@ function Field({
 }: {
   def: WorkflowDef;
   field: FieldDef;
+  sections: readonly SectionDef[];
   band: GetDesignBandResponse;
   techCardId: number;
   draft: Draft;
   onDraft: (fn: (draft: Draft) => Draft) => void;
   disabled?: boolean;
-}): JSX.Element {
+}): JSX.Element | null {
   const key = field.key;
   switch (field.type) {
     case 'prompt':
@@ -244,15 +282,88 @@ function Field({
           disabled={disabled}
         />
       );
-    case 'format':
+    case 'format': {
+      // Bound to an AI model: what it cannot draw is dimmed, and the value shown is the snapped one
+      // the header prints and the wire sends (`formatOf`).
+      const model = field.boundTo === undefined ? null : engineOf(band, draft, field.boundTo);
+      const label = model ? (model.label ?? '').trim() || (model.slug ?? '') : '';
       return (
         <FormatGrid
-          value={draft.choices[key] ?? field.initial}
+          value={formatOf(band, draft, field)}
           onChange={(ratio) => onDraft((d) => ({ ...d, choices: { ...d.choices, [key]: ratio } }))}
-          ratios={field.ratios}
+          ratios={drawnRatios(band, field)}
+          allowed={model ? model.aspectRatios ?? [] : undefined}
+          disallowedReason={model ? `not made by ${label}` : undefined}
           disabled={disabled}
         />
       );
+    }
+    case 'engine': {
+      const models = imageModelsOf(band);
+      const model = engineOf(band, draft, key);
+      if (!models || !model) return null;
+      const keys = engineChoiceKeys(key);
+      const bg = field.backgroundKey;
+      return (
+        <EnginePicker
+          models={models}
+          model={model.slug ?? ''}
+          quality={qualityOf(model, draft, key)}
+          onModel={(slug) => onDraft((d) => chooseEngine(d, band, sections, key, slug))}
+          onQuality={(tier) =>
+            onDraft((d) => ({ ...d, choices: { ...d.choices, [keys.quality]: tier } }))
+          }
+          background={
+            bg
+              ? {
+                  checked: draft.flags[bg] ?? false,
+                  onChange: (on) => onDraft((d) => ({ ...d, flags: { ...d.flags, [bg]: on } })),
+                }
+              : undefined
+          }
+          disabled={disabled}
+        />
+      );
+    }
+    case 'model-profile': {
+      const photoKey = field.photoKey;
+      return (
+        <ModelPhotoPicker
+          modelId={Number(draft.choices[key] ?? 0) || 0}
+          photo={imagesOf(draft, photoKey)[0] ?? null}
+          onChange={({ modelId, photo }) =>
+            onDraft((d) => ({
+              ...d,
+              choices: { ...d.choices, [key]: String(modelId) },
+              images: { ...d.images, [photoKey]: photo ? [photo] : [] },
+            }))
+          }
+          disabled={disabled}
+        />
+      );
+    }
+    case 'colourway-render': {
+      const cwKey = field.colorwayKey;
+      return (
+        <ColourwayRenderPicker
+          band={band}
+          techCardId={techCardId}
+          value={imagesOf(draft, key)}
+          colorwayId={Number(draft.choices[cwKey] ?? 0) || 0}
+          max={field.max}
+          onChange={({ renders, colorwayId }) =>
+            onDraft((d) => ({
+              ...d,
+              images: { ...d.images, [key]: renders },
+              choices: { ...d.choices, [cwKey]: String(colorwayId) },
+            }))
+          }
+          disabled={disabled}
+        />
+      );
+    }
+    case 'custom':
+      return <>{field.render({ band, techCardId, draft, onDraft, disabled })}</>;
     case 'option':
       return (
         <OptionRow

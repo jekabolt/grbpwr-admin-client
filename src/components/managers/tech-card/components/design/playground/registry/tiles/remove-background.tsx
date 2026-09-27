@@ -2,7 +2,14 @@ import type { common_MediaFull } from 'api/proto-http/admin';
 
 import type { NotSentItem } from '../../../core';
 import { slotCounter } from '../../fields';
-import { emptyParams, imagesOf, mediaIdsOf, pictureLines, presetOffered } from '../common';
+import {
+  emptyParams,
+  imagesOf,
+  mediaIdsOf,
+  pictureLines,
+  presetOffered,
+  workflowOfferedOr,
+} from '../common';
 import { EMPTY_DRAFT, type Draft, type WorkflowDef, type WorkflowRun } from '../types';
 
 /**
@@ -14,8 +21,8 @@ import { EMPTY_DRAFT, type Draft, type WorkflowDef, type WorkflowRun } from '../
  * (`cutout_takes_no_words`) and anything but exactly one picture (`one_source_picture`) — so this
  * form has no prompt and one slot.
  *
- * Offered only where the server lists `cutout` in `freeform_presets` (its own gate reads the same
- * list, `presetOffered`).
+ * Offered only where the server lists `remove_background` in `playground_workflows` — or, on a
+ * server older than that list, `cutout` in `freeform_presets` (`presetOffered`).
  */
 const IMAGE = 'image';
 
@@ -107,6 +114,7 @@ const run: WorkflowRun = {
 };
 
 export const REMOVE_BACKGROUND: Pick<WorkflowDef, 'gate' | 'run'> = {
-  gate: (band) => presetOffered(band, 'cutout'),
+  // The new list when the server sends it (C-08); today's `freeform_presets` answer when it does not.
+  gate: (band) => workflowOfferedOr(band, 'remove_background', () => presetOffered(band, 'cutout')),
   run,
 };

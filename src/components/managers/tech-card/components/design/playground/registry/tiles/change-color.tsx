@@ -13,7 +13,15 @@ import {
 } from '../../../recolor/model';
 import { EMPTY_RECIPE, hexIsPaintable } from '../../../render/model';
 import { NO_PANTONE, PantoneValue, pantoneColour, slotCounter } from '../../fields';
-import { colourOf, emptyParams, imagesOf, mediaIdsOf, pictureLines, textOf } from '../common';
+import {
+  colourOf,
+  emptyParams,
+  imagesOf,
+  mediaIdsOf,
+  pictureLines,
+  textOf,
+  workflowOfferedOr,
+} from '../common';
 import { EMPTY_DRAFT, type Draft, type WorkflowDef, type WorkflowRun } from '../types';
 
 /**
@@ -231,8 +239,9 @@ const run: WorkflowRun = {
 };
 
 export const CHANGE_COLOR: Pick<WorkflowDef, 'gate' | 'run'> = {
-  // `recolor` has no capability field: every server that speaks the design band has the door, and
-  // a route whose key is not configured answers GENERATE with its own words (`RunRefusal`).
-  gate: () => ({ available: true }),
+  // A server that sends `playground_workflows` decides (C-08). One older than it has no capability
+  // field for `recolor`: every server that speaks the design band has the door, and a route whose
+  // key is not configured answers GENERATE with its own words (`RunRefusal`).
+  gate: (band) => workflowOfferedOr(band, 'change_color', () => ({ available: true })),
   run,
 };

@@ -2,6 +2,8 @@
  * Shared form primitives of the PLAYGROUND tab (C-02). Tiles (C-04, C-07…) compose their panels
  * from these; none of them knows a wire shape.
  */
+export { ColourwayRenderPicker, type ColourwayRenderPickerProps } from './colourway-render-picker';
+export { EnginePicker, type EnginePickerProps } from './engine-picker';
 export { FoldSection, type FoldSectionProps } from './fold-section';
 export {
   EXTEND_FORMAT_RATIOS,
@@ -22,6 +24,7 @@ export {
   type ImageSlotDef,
   type ImageSlotsProps,
 } from './image-slots';
+export { ModelPhotoPicker, type ModelPhotoPickerProps } from './model-photo-picker';
 export { OptionRow, type OptionRowOption, type OptionRowProps } from './option-row';
 export {
   NO_PANTONE,

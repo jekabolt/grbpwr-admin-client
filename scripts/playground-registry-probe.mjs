@@ -21,6 +21,17 @@
 //       и он отбирает свои прогоны;
 //   E · рекол: recolor → change_color, cutout → remove_background, freeform free → create_edit,
 //       freeform add_hardware → честные слова, без падения; прочие роды → null.
+//   F · (C-08) ворота фазы 2: playgroundWorkflows ЕСТЬ → живы ровно перечисленные плитки, и
+//       freeformPresets не читается вовсе; пустой список гасит всё; ключа нет → «not wired»;
+//   G · (C-08) params.image: тело create_edit на новом сервере (модель, качество, формат, фон),
+//       auto → '', фон только у модели, которая его перечисляет, текст → картинка без референсов;
+//       старый сервер (imageModels нет / пуст) — image не уезжает вовсе и ≥1 референс; плитка без
+//       пикера (D6, плитки 2/3) — модель по умолчанию, quality '', и ничего при auto;
+//   H · (C-08) защёлкивание формата: смена модели сносит выбор к ближайшей пропорции новой модели,
+//       начальный 4:5 у модели без 4:5 показывается, печатается и уезжает как 3:4, уровень
+//       переносится, если он есть у новой модели, иначе medium; строка шапки «<label> · <tier>»;
+//   I · (C-08) разметка формы create_edit: сворачиваемые секции AI model и Format есть только на
+//       сервере с моделями, строка «needs at least one» — только на старом.
 //
 // МУТАЦИИ ЖИВУТ В ПАМЯТИ, А НЕ В ФАЙЛЕ (приём colour-plan-probe): одна строка настоящего модуля
 // подменяется в бандле, исходник не трогается. Каждая обязана уронить СВОЮ группу:
@@ -37,6 +48,22 @@
 //                                                                   → краснеет E
 //   node scripts/playground-registry-probe.mjs --mutate-preset-match create_edit снова сверяет
 //                                                                   пресет (G-01 m-3) → краснеет D
+//   node scripts/playground-registry-probe.mjs --mutate-gate-legacy плитки фазы 1 читают
+//                                                                   freeformPresets и при новом
+//                                                                   списке → краснеет F
+//   node scripts/playground-registry-probe.mjs --mutate-image-absent «нет imageModels» читается как
+//                                                                   «есть модель по умолчанию»
+//                                                                   → краснеет G
+//   node scripts/playground-registry-probe.mjs --mutate-quality     тир не уезжает (quality '')
+//                                                                   → краснеет G
+//   node scripts/playground-registry-probe.mjs --mutate-snap        смена модели не защёлкивает
+//                                                                   формат → краснеет H
+//   node scripts/playground-registry-probe.mjs --mutate-snap-read   формат читается без
+//                                                                   защёлкивания → краснеет H
+//   node scripts/playground-registry-probe.mjs --mutate-drawn      сетка рисует и то, чего не
+//                                                                   делает ни одна модель → краснеет H
+//   node scripts/playground-registry-probe.mjs --mutate-sections    секции модели/формата рисуются
+//                                                                   всегда → краснеет I
 //
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
@@ -59,6 +86,13 @@ const MUT = {
   capability: process.argv.includes('--mutate-capability'),
   recall: process.argv.includes('--mutate-recall'),
   presetMatch: process.argv.includes('--mutate-preset-match'),
+  gateLegacy: process.argv.includes('--mutate-gate-legacy'),
+  imageAbsent: process.argv.includes('--mutate-image-absent'),
+  quality: process.argv.includes('--mutate-quality'),
+  snap: process.argv.includes('--mutate-snap'),
+  snapRead: process.argv.includes('--mutate-snap-read'),
+  sections: process.argv.includes('--mutate-sections'),
+  drawn: process.argv.includes('--mutate-drawn'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -150,6 +184,56 @@ if (MUT.presetMatch)
       "match: (run) => (run.kind ?? '').trim().toLowerCase() === 'freeform' && (run.params === undefined || (run.params.freeform?.preset ?? '').trim() === 'free'),",
     ),
   );
+
+// ─── C-08: мутации ворот фазы 2 и движка. Две правки одного файла — одним плагином (esbuild
+// берёт первый onLoad, который ответил).
+const COMMON = /registry\/common\.ts$/;
+const commonSwaps = [];
+if (MUT.gateLegacy)
+  commonSwaps.push([
+    'return band.playgroundWorkflows === undefined ? legacy() : workflowOffered(band, key);',
+    'return legacy();',
+  ]);
+if (MUT.imageAbsent)
+  commonSwaps.push([
+    "const rows = (band.imageModels ?? []).filter((m) => (m.slug ?? '').trim() !== '');",
+    "const rows = (band.imageModels ?? [{ slug: 'openai/gpt-image-2', label: 'GPT Image 2', isDefault: true, qualities: ['low', 'medium', 'high'], aspectRatios: ['auto', '2:3'] }]).filter((m) => (m.slug ?? '').trim() !== '');",
+  ]);
+if (MUT.quality)
+  commonSwaps.push(['quality: qualityOf(model, draft, opts.engine),', "quality: '',"]);
+if (MUT.snap)
+  commonSwaps.push([
+    `    choices[field.key] = snapRatio(
+      draft.choices[field.key] ?? field.initial,
+      allowedRatios(model, field),
+    );`,
+    '    choices[field.key] = draft.choices[field.key] ?? field.initial;',
+  ]);
+if (MUT.snapRead)
+  commonSwaps.push(['return snapRatio(chosen, allowedRatios(model, field));', 'return chosen;']);
+if (MUT.sections)
+  commonSwaps.push([
+    `export const enginesOffered = (band: GetDesignBandResponse): boolean =>
+  imageModelsOf(band) !== null;`,
+    'export const enginesOffered = (_band: GetDesignBandResponse): boolean => true;',
+  ]);
+if (MUT.drawn)
+  commonSwaps.push(['return out.length ? out : [...field.ratios];', 'return [...field.ratios];']);
+if (commonSwaps.length)
+  plugins.unshift({
+    name: 'c08-common',
+    setup(b) {
+      b.onLoad({ filter: COMMON }, async (args) => {
+        let src = await readFile(args.path, 'utf8');
+        for (const [needle, replacement] of commonSwaps) {
+          if (!src.includes(needle))
+            throw new Error(`мутация C-08 не нашла свою строку: ${needle.slice(0, 60)}`);
+          src = src.replace(needle, replacement);
+        }
+        return { contents: src, loader: 'ts' };
+      });
+    },
+  });
 
 const outfile = resolve(tmpdir(), `playground-registry-probe-${process.pid}.mjs`);
 try {
@@ -549,6 +633,354 @@ head('E', 'рекол: прогон → плитка, и честные слов
   ck(
     !!hw && hw.draft.texts.prompt === 'brass snaps' && hw.draft.images.refs.length === 1,
     'freeform add_hardware: слова и картинка разложены в create_edit',
+  );
+}
+
+// ─── F · ворота фазы 2 ────────────────────────────────────────────────────────────────────────
+head('F', 'ворота фазы 2: playgroundWorkflows решает, freeformPresets не читается');
+{
+  const ALL = [
+    'virtual_try_on',
+    'fabric_to_image',
+    'ghost_mannequin',
+    'change_color',
+    'swap_fabrics',
+    'add_logo',
+    'design_variations',
+    'remove_background',
+    'extend_image',
+    'retouch_zone',
+    'create_edit',
+    'image_to_3d',
+  ];
+  const cases = [
+    // freeformPresets говорит «free, cutout», новый список — только create_edit: решает список.
+    [
+      'список [create_edit] при freeformPresets free+cutout',
+      band({ playgroundWorkflows: ['create_edit'] }),
+      ['create_edit'],
+    ],
+    ['пустой список гасит все три плитки фазы 1', band({ playgroundWorkflows: [] }), []],
+    // freeformPresets НЕТ (старый ключ сервер мог бы и не слать) — список всё равно открывает.
+    [
+      'список всех двенадцати, freeformPresets нет',
+      band({ playgroundWorkflows: ALL, freeformPresets: undefined }),
+      ['change_color', 'remove_background', 'create_edit'],
+    ],
+    [
+      'список [change_color, remove_background]',
+      band({ playgroundWorkflows: [' change_color ', 'remove_background'] }),
+      ['change_color', 'remove_background'],
+    ],
+  ];
+  for (const [name, b, open] of cases) {
+    const live = liveKeys(M.gridMarkup(b));
+    ck(
+      same([...live].sort(), [...open].sort()),
+      `${name}: живые = ${open.join(', ') || 'ни одной'}`,
+      `живые: ${[...live].join(', ')}`,
+    );
+  }
+  const off = band({ playgroundWorkflows: ['create_edit'] });
+  ck(
+    /not wired on this server/.test(M.gridMarkup(off)),
+    'ключа нет в списке → плитка говорит «not wired on this server»',
+  );
+  ck(
+    M.openWorkflow('remove_background', off) === null,
+    'не перечисленная remove_background не открывается по адресу',
+  );
+  const w = (b, k) => M.workflowOffered(b, k);
+  ck(
+    same(w(band(), 'virtual_try_on'), { available: false, reason: 'not on this server yet' }),
+    'workflowOffered: списка нет → «not on this server yet» (откат)',
+    show(w(band(), 'virtual_try_on')),
+  );
+  ck(
+    same(w(band({ playgroundWorkflows: ['create_edit'] }), 'add_logo'), {
+      available: false,
+      reason: 'not wired on this server',
+    }),
+    'workflowOffered: ключа нет → «not wired on this server»',
+  );
+  ck(
+    w(band({ playgroundWorkflows: ['add_logo'], freeformPresets: [] }), 'add_logo').available ===
+      true,
+    'workflowOffered: ключ есть → доступно, пустой freeformPresets не мешает',
+  );
+}
+
+// ─── G · params.image ─────────────────────────────────────────────────────────────────────────
+head('G', 'params.image: тело движка, старый сервер, плитка без пикера');
+const GPT2 = 'openai/gpt-image-2';
+const GPT25 = 'openai/gpt-image-2.5-sunburst';
+const RATIOS = ['auto', '9:16', '1:1', '3:4', '2:3', '16:9', '4:3', '3:2', '21:9'];
+const MODELS = [
+  {
+    slug: GPT2,
+    label: 'GPT Image 2',
+    aspectRatios: RATIOS,
+    qualities: ['low', 'medium', 'high'],
+    isDefault: true,
+    maxReferences: 16,
+    backgrounds: [],
+  },
+  {
+    slug: GPT25,
+    label: 'GPT Image 2.5',
+    aspectRatios: RATIOS,
+    qualities: ['low', 'medium', 'high'],
+    isDefault: false,
+    maxReferences: 16,
+    backgrounds: ['transparent'],
+  },
+];
+const newBand = (over = {}) =>
+  band({ playgroundWorkflows: ['create_edit'], imageModels: MODELS, ...over });
+const ce = () => run('create_edit');
+const fresh = () => ({
+  ...M.initialDraft(ce()),
+  texts: { prompt: ' a red coat on a white ground ' },
+});
+{
+  const b = newBand();
+  const got = ce().wire(
+    {
+      ...fresh(b),
+      choices: { engine: GPT25, 'engine.quality': 'high', format: '16:9' },
+      flags: { background: true },
+    },
+    { band: b },
+  );
+  const want = {
+    kind: 'freeform',
+    ask: 'a red coat on a white ground',
+    params: {
+      ...EMPTY_PARAMS,
+      freeform: { preset: 'free', items: [], options: undefined },
+      image: { model: GPT25, quality: 'high', aspectRatio: '16:9', background: 'transparent' },
+    },
+  };
+  ck(
+    same(got, want),
+    'create_edit, новый сервер: 2.5 · high · 16:9 · transparent, без референсов — тело целиком',
+    show(got),
+  );
+
+  const def0 = ce().wire(fresh(b), { band: b });
+  ck(
+    same(def0.params.image, { model: GPT2, quality: 'medium', aspectRatio: '2:3', background: '' }),
+    'свежий черновик: модель по умолчанию (isDefault), medium, 2:3 — как в шапках',
+    show(def0.params.image),
+  );
+  const auto = ce().wire({ ...fresh(b), choices: { format: 'auto' } }, { band: b });
+  ck(auto.params.image?.aspectRatio === '', "формат auto уезжает как ''", show(auto.params.image));
+  const noBg = ce().wire(
+    { ...fresh(b), choices: { engine: GPT2 }, flags: { background: true } },
+    { band: b },
+  );
+  ck(
+    noBg.params.image?.background === '',
+    'флаг фона у модели без transparent не уезжает',
+    show(noBg.params.image),
+  );
+  const gone = ce().wire({ ...fresh(b), choices: { engine: 'openai/retired' } }, { band: b });
+  ck(
+    gone.params.image?.model === GPT2,
+    'снятая с сервера модель читается как модель по умолчанию',
+    show(gone.params.image),
+  );
+
+  ck(
+    ce().validate(fresh(b), { band: b }) === null,
+    'новый сервер: промпт без референсов проходит (текст → картинка)',
+  );
+}
+{
+  const choices = { engine: GPT25, 'engine.quality': 'high', format: '16:9' };
+  for (const [name, b] of [
+    ['imageModels нет', band({ playgroundWorkflows: ['create_edit'] })],
+    ['imageModels пуст', band({ playgroundWorkflows: ['create_edit'], imageModels: [] })],
+    ['старый сервер целиком', band()],
+  ]) {
+    const got = ce().wire({ ...fresh(b), choices, images: { refs: [media(31)] } }, { band: b });
+    ck(got.params.image === undefined, `${name}: params.image не уезжает`, show(got.params.image));
+  }
+  const old = band();
+  const v = ce().validate(fresh(old), { band: old });
+  ck(
+    v?.section === 'refs',
+    'старый сервер: 0 референсов → отказ на секции refs (дверь фазы 1)',
+    show(v),
+  );
+}
+{
+  // Плитка без пикера (D6: 2, 3) — через тот же imageOptionsOf.
+  const b = newBand();
+  const F11 = M.formatSection({ initial: '1:1' }).field;
+  const one = M.imageOptionsOf(
+    b,
+    { ...M.EMPTY_DRAFT, choices: { format: '1:1' } },
+    { format: F11 },
+  );
+  ck(
+    same(one, { model: GPT2, quality: '', aspectRatio: '1:1', background: '' }),
+    "без пикера, 1:1: модель по умолчанию, quality '' (тир развёртывания), 1:1",
+    show(one),
+  );
+  const none = M.imageOptionsOf(
+    b,
+    { ...M.EMPTY_DRAFT, choices: { format: 'auto' } },
+    { format: F11 },
+  );
+  ck(none === undefined, 'без пикера, auto: блок не уезжает вовсе (сказать нечего)', show(none));
+  ck(
+    M.imageOptionsOf(band(), { ...M.EMPTY_DRAFT, choices: { format: '1:1' } }, { format: F11 }) ===
+      undefined,
+    'без пикера, старый сервер: блок не уезжает',
+  );
+}
+
+// ─── H · защёлкивание ─────────────────────────────────────────────────────────────────────────
+head('H', 'формат защёлкивается к модели; уровень переносится; строка шапки');
+{
+  const NARROW = {
+    slug: 'x/narrow',
+    label: 'Narrow',
+    aspectRatios: ['auto', '1:1', '9:16', '16:9'],
+    qualities: ['low', 'medium'],
+    isDefault: false,
+  };
+  const b = newBand({ imageModels: [...MODELS, NARROW] });
+  const sections = ce().sections;
+  const start = { ...fresh(b), choices: { format: '2:3', engine: GPT2, 'engine.quality': 'high' } };
+  const next = M.chooseEngine(start, b, sections, 'engine', 'x/narrow');
+  ck(
+    next.choices.format === '9:16',
+    'смена на модель без 2:3 → формат 9:16 (ближайшая форма)',
+    show(next.choices),
+  );
+  ck(
+    next.choices['engine.quality'] === 'medium',
+    'high нет у новой модели → medium',
+    show(next.choices),
+  );
+  const wire = ce().wire(next, { band: b });
+  ck(
+    same(wire.params.image, {
+      model: 'x/narrow',
+      quality: 'medium',
+      aspectRatio: '9:16',
+      background: '',
+    }),
+    'после смены тело говорит то же, что форма',
+    show(wire.params.image),
+  );
+  const back = M.chooseEngine(
+    { ...start, choices: { ...start.choices, engine: GPT25 } },
+    b,
+    sections,
+    'engine',
+    GPT2,
+  );
+  ck(
+    back.choices['engine.quality'] === 'high' && back.choices.format === '2:3',
+    'уровень и формат, которые есть у новой модели, остаются',
+    show(back.choices),
+  );
+  const autoKeep = M.chooseEngine(
+    { ...start, choices: { format: 'auto' } },
+    b,
+    sections,
+    'engine',
+    'x/narrow',
+  );
+  ck(
+    autoKeep.choices.format === 'auto',
+    'auto остаётся auto, если модель его делает',
+    show(autoKeep.choices),
+  );
+
+  // Начальный 4:5 у модели без 4:5: сетка, шапка и провод — одно значение.
+  const F45 = M.formatSection({ initial: '4:5' }).field;
+  const d45 = { ...M.EMPTY_DRAFT };
+  ck(
+    M.formatOf(b, d45, F45) === '3:4',
+    'начальный 4:5 у GPT Image 2 читается как 3:4',
+    M.formatOf(b, d45, F45),
+  );
+  const img = M.imageOptionsOf(b, d45, { engine: 'engine', format: F45 });
+  ck(img?.aspectRatio === '3:4', '…и уезжает как 3:4', show(img));
+  ck(
+    M.formatOf(band(), d45, F45) === '4:5',
+    'без моделей формат не трогается (не к чему защёлкивать)',
+  );
+
+  ck(
+    M.engineSummary(b, fresh(b), 'engine') === 'GPT Image 2 · medium',
+    'шапка свежего черновика: «GPT Image 2 · medium»',
+    M.engineSummary(b, fresh(b), 'engine'),
+  );
+  ck(
+    M.engineSummary(
+      b,
+      { ...M.EMPTY_DRAFT, choices: { engine: GPT25, 'engine.quality': 'high' } },
+      'engine',
+    ) === 'GPT Image 2.5 · high',
+    'шапка после выбора: «GPT Image 2.5 · high»',
+  );
+  ck(M.engineSummary(band(), fresh(b), 'engine') === '—', 'без моделей шапка — прочерк');
+  // Сетка рисует то, что делает ХОТЬ ОДНА модель сервера: 4:5 и 5:4 не делает ни одна GPT Image.
+  const drawn = M.drawnRatios(newBand(), F45);
+  ck(
+    !drawn.includes('4:5') &&
+      !drawn.includes('5:4') &&
+      drawn.includes('21:9') &&
+      drawn[0] === 'auto',
+    'сетка на сервере с GPT Image: без 4:5 и 5:4, порядок владельца',
+    show(drawn),
+  );
+  const withNarrow = M.drawnRatios(b, F45);
+  ck(
+    same(withNarrow, drawn),
+    'сетка не зависит от выбранной модели (объединение по серверу)',
+    show(withNarrow),
+  );
+  ck(
+    M.drawnRatios(band(), F45).length === 11,
+    'без моделей — полный список поля',
+    show(M.drawnRatios(band(), F45)),
+  );
+}
+
+// ─── I · разметка формы ───────────────────────────────────────────────────────────────────────
+head('I', 'форма create_edit: секции AI model и Format только на сервере с моделями');
+{
+  const neu = M.panelMarkup(newBand(), 'create_edit');
+  ck(
+    /data-fold-section="create_edit\.engine-section"/.test(neu),
+    'новый сервер: секция AI model есть',
+  );
+  ck(/GPT Image 2 · medium/.test(neu), 'новый сервер: её шапка «GPT Image 2 · medium»');
+  ck(
+    /data-fold-section="create_edit\.format-section"/.test(neu),
+    'новый сервер: секция Format есть',
+  );
+  const values = [...neu.matchAll(/data-fold-value="">([^<]*)</g)].map((m) => m[1]);
+  ck(
+    values.includes('GPT Image 2 · medium') && values.includes('2:3'),
+    'новый сервер: шапки свёрнутых секций — «GPT Image 2 · medium» и «2:3»',
+    show(values),
+  );
+  ck(!/needs at least one/.test(neu), 'новый сервер: строки «needs at least one» нет');
+  const old = M.panelMarkup(band(), 'create_edit');
+  ck(old.length > 0, 'старый сервер: форма нарисована', `${old.length} символов`);
+  ck(!/engine-section|format-section/.test(old), 'старый сервер: ни AI model, ни Format');
+  ck(/needs at least one/.test(old), 'старый сервер: строка «needs at least one» есть');
+  const noModels = M.panelMarkup(band({ playgroundWorkflows: ['create_edit'] }), 'create_edit');
+  ck(
+    !/engine-section|format-section/.test(noModels) && !/needs at least one/.test(noModels),
+    'список есть, моделей нет: без AI model/Format, но и без «needs at least one» (текст → картинка)',
   );
 }
 
