@@ -258,7 +258,16 @@ function PurposeRow({
   const pending = route.isPending ? route.variables : undefined;
   // An absent fallback arrives as null (the gateway emits unpopulated fields), not undefined.
   const shownFallback = pending ? pending.fallback : purpose.fallback;
-  const primary = norm(pending ? pending.primary : purpose.primary);
+  // AN ABSENT PRIMARY STAYS ABSENT. For chat and image the contract's "" IS the default provider,
+  // so a purpose with no route there reads as "default"; any other capability has no default, and
+  // making one up would show a route that does not exist — and send a provider the server refuses.
+  const shownPrimary = pending ? pending.primary : purpose.primary;
+  const defaultable = defaultKeyFor(config, capability) !== null;
+  const primary: Candidate | undefined = shownPrimary
+    ? norm(shownPrimary)
+    : defaultable
+      ? { providerKey: '', model: '' }
+      : undefined;
   const serverFallback = shownFallback ? norm(shownFallback) : undefined;
   // A fallback provider chosen but not sent yet: the same provider as the primary, which needs a
   // model of its own first. Only the model field can send it.
@@ -279,6 +288,8 @@ function PurposeRow({
   };
   const chooseFallback = (value: string) => {
     setSameError(false);
+    // No primary, no fallback: a route starts from its primary.
+    if (!primary) return;
     if (value === NONE) {
       setStaged(null);
       // Unstaging a fallback the server never had changes nothing on the server.
@@ -348,7 +359,9 @@ function PurposeRow({
                 fallback: serverFallback,
               })
             }
-            onModel={(model) => send({ primary: { ...primary, model }, fallback: serverFallback })}
+            onModel={(model) =>
+              primary && send({ primary: { ...primary, model }, fallback: serverFallback })
+            }
           />
           <CandidateControls
             role='fallback'
@@ -358,10 +371,12 @@ function PurposeRow({
             value={fallback}
             other={primary}
             staged={staged !== null}
-            disabled={route.isPending}
+            disabled={route.isPending || !primary}
             error={fallbackError}
             onChoose={chooseFallback}
-            onModel={(model) => fallback && send({ primary, fallback: { ...fallback, model } })}
+            onModel={(model) =>
+            primary && fallback && send({ primary, fallback: { ...fallback, model } })
+          }
           />
         </div>
         <WriteError text={rowError} id='route' />
@@ -400,7 +415,8 @@ function CandidateControls({
 }) {
   const providers = config.providers ?? [];
   const defaultKey = defaultKeyFor(config, capability);
-  const selected = !value ? NONE : value.providerKey || DEFAULT;
+  // No candidate: "none" for a fallback; for a primary, nothing — the placeholder asks for one.
+  const selected = value ? value.providerKey || DEFAULT : role === 'fallback' ? NONE : '';
 
   const items: { value: string; label: string }[] = [
     ...(role === 'fallback' ? [{ value: NONE, label: 'none' }] : []),
@@ -416,7 +432,7 @@ function CandidateControls({
   ].filter((i) => i.value === selected || choiceFate(config, capability, i.value, other) !== 'omit');
   // A route the server holds is shown as it is even when it no longer fits the list (a provider
   // that stopped serving the capability): an empty select would claim there is no route at all.
-  if (!items.some((i) => i.value === selected)) {
+  if (selected && !items.some((i) => i.value === selected)) {
     items.push({
       value: selected,
       label: selected === DEFAULT ? 'default' : labelOf(providers, selected),
@@ -438,12 +454,14 @@ function CandidateControls({
       <div className='flex flex-wrap items-center gap-1'>
         <SelectComponent
           name={`ai-route-${role}`}
-          placeholder={`${purposeLabel} ${role}`}
+          placeholder={selected ? `${purposeLabel} ${role}` : 'choose a provider'}
           value={selected}
           items={items}
           disabled={disabled}
           invalid={!!error}
-          className='w-48'
+          // The placeholder is an ask, not a value — label grey, like an empty field's; a select
+          // that cannot be used yet (a fallback before its primary) says so the same way.
+          className='w-48 data-[disabled]:cursor-not-allowed data-[disabled]:text-labelColor data-[placeholder]:text-labelColor'
           onValueChange={(v: string) => {
             if (!v || v === selected) return;
             onChoose(v);

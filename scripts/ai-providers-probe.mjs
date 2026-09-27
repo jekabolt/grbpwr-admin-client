@@ -229,6 +229,12 @@ const MUTATIONS = {
     from: '(p.breaker === "half-open" || p.breaker === "half_open") && ',
     to: 'false && ',
   },
+  'fabricated-default': {
+    red: 'FE6',
+    what: 'a purpose with no route is shown (and sent) as "default"',
+    from: 'const primary = shownPrimary ? norm(shownPrimary) : defaultable ? { providerKey: "", model: "" } : void 0;',
+    to: 'const primary = norm(shownPrimary);',
+  },
   'clear-sends-old-value': {
     red: 'E5',
     what: 'clear sends the old key (its last four) instead of an empty value',
@@ -377,6 +383,9 @@ const PURPOSES = [
   // FE2: a primary on its provider's default model, and one on a named model; neither has a fallback.
   { key: 'chat.email_translate', label: 'Email translate', hint: 'auto-translate a campaign', group: 'chat', capability: 'chat', primary: { providerKey: 'openai', model: '' }, fallback: null },
   { key: 'chat.techcard_analysis', label: 'Construction audit', hint: 'the audit on a tech card', group: 'chat', capability: 'chat', primary: { providerKey: 'openai', model: 'gpt-5' }, fallback: null },
+  // FE6: purposes with no route yet — one whose capability has a default (chat), one without (threed).
+  { key: 'chat.design_draft_idea', label: 'Draft idea', hint: 'the idea draft on a design card', group: 'chat', capability: 'chat', primary: null, fallback: null },
+  { key: 'threed.reference', label: '3D from a picture', hint: 'the 3D tile from a reference', group: '3d', capability: 'threed', primary: null, fallback: null },
   { key: 'image.generate', label: 'Design images', hint: 'flat, render, recolour, pattern, playground tiles', group: 'images', capability: 'image', primary: { providerKey: '', model: '' }, fallback: null },
 ];
 const dec = (v) => (v === null ? null : { value: v });
@@ -881,6 +890,27 @@ await page.waitForSelector('[data-purpose="chat.note_markdown"]', { timeout: 800
   await page.waitForTimeout(900);
   const dc = await alertsIn('[data-route-defaults]');
   ck('FE7', dc.length === 1 && dc[0].includes('google does not serve chat') && (await page.locator('[data-write-error="default-chat"]').count()) === 1, 'a refused default: the sentence under THAT select', JSON.stringify(dc));
+}
+
+// FE6 · a purpose with no route is shown as such.
+{
+  await mount();
+  await page.waitForSelector('[data-purpose="threed.reference"]', { timeout: 8000 });
+  await page.waitForTimeout(400);
+  const cand = (purpose, role) => page.locator(`[data-purpose="${purpose}"] [data-candidate="${role}"]`);
+  const trig = ((await cand('threed.reference', 'primary').getByRole('combobox').first().textContent()) ?? '').trim();
+  const models = await cand('threed.reference', 'primary').getByRole('textbox').count() + (await page.getByRole('combobox', { name: /3D from a picture primary model/ }).count());
+  const fbDisabled = await cand('threed.reference', 'fallback').getByRole('combobox').first().isDisabled();
+  const onMount = server.calls.filter((c) => c.method !== 'GET').length;
+  ck('FE6', trig === 'choose a provider' && onMount === 0, 'threed with no route → "choose a provider", 0 writes on mount', `"${trig}", writes ${onMount}`);
+  ck('FE6', models === 0 && fbDisabled, 'no model field before a provider is chosen; the fallback waits for a primary', `model fields ${models}, fallback disabled ${fbDisabled}`);
+  const chat = ((await cand('chat.design_draft_idea', 'primary').getByRole('combobox').first().textContent()) ?? '').trim();
+  ck('FE6', chat.toLowerCase() === 'default · openrouter', 'chat with no route → "default" (the contract\'s "")', `"${chat}"`);
+  await cand('threed.reference', 'primary').getByRole('combobox').first().click();
+  await page.getByRole('option', { name: /^fal/ }).click();
+  await page.waitForTimeout(700);
+  const w = writes('PUT', /^\/api\/admin\/ai\/routes\/threed\.reference$/);
+  ck('FE6', w.length === 1 && w[0].body.primary?.providerKey === 'fal' && !('fallback' in w[0].body), 'choosing one sends ONE PUT with that primary', JSON.stringify(w.map((c) => c.body)));
 }
 
 // ═══ D · SPEND ═════════════════════════════════════════════════════════════════════════════════
