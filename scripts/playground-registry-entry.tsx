@@ -121,6 +121,9 @@ export {
 };
 
 export { ANGLE_OPTIONS, FRAMING_OPTIONS, modelPhotosOf, productColorwaysOf, productRendersOf };
+
+// C-12 · where «run that again» sends a 3D run (STEP 5 on an old server, tile 12 on a new one).
+export { recallTargetKind } from 'components/managers/tech-card/components/design/history-recall';
 /** THE CHAIN rail as the person sees it (C-10): its cells and its «N of M steps» counter. */
 export function railMarkup(ctx: ChainCtx): string {
   return renderToStaticMarkup(<ChainRail ctx={ctx} onStepChange={() => {}} />);

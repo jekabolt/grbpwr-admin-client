@@ -15,6 +15,7 @@ import { inputToDecimal } from 'utils/decimal';
 
 import { cornerText, type MaskPoint } from '../../mask/geometry';
 import { emptyParams, workflowOffered } from '../common';
+import { matchesWorkflow } from '../run-workflow';
 import type { Refusal, RunRequest, WorkflowDef, WorkflowRun } from '../types';
 
 /**
@@ -192,11 +193,9 @@ const run: WorkflowRun = {
     reps: ['playground'],
     /* The history under the open tile narrows to retouches. The pictures above it are the room's
        (`startsElsewhere`, results.tsx): a retouch starts from a picture you already have, and its
-       answer lands next to it. A stub run off the feed's first page states no preset and is not a
-       retouch here; its picture is still in the room above. */
-    match: (r) =>
-      (r.kind ?? '').trim().toLowerCase() === 'freeform' &&
-      (r.params?.freeform?.preset ?? '').trim() === 'retouch',
+       answer lands next to it. A stub run off the feed's first page states no preset; the server's
+       stamp on its output (`run_workflow`) says whether it was a retouch (`workflowOfRun`). */
+    match: matchesWorkflow('retouch_zone'),
   },
 };
 

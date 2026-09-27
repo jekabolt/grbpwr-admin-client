@@ -76,6 +76,13 @@ import { MaskEditor } from './mask';
 
 type Row = { picture: common_DesignPicture; run: common_DesignRun };
 
+/** The workflows whose pictures live in the colourway pool, not the room's colourway-0 window. */
+const COLOURWAY_POOL: ReadonlySet<string> = new Set([
+  'change_color',
+  'swap_fabrics',
+  'image_to_3d',
+]);
+
 /** The results contract of the workflow a run belongs to (`null` = a kind outside the room). */
 const resultsOfRun = (run: common_DesignRun): ResultsDef | null =>
   workflowByKey(workflowOfRun(run))?.run?.results ?? null;
@@ -170,11 +177,12 @@ export function PlaygroundResults({
     return [...live, ...failed];
   }, [band, match]);
 
-  /* The colourway-0 window is the room's, not Change a Color's: its recolours may be filed under a
-     colourway and its rows are not that window — the sentence would count another list (m-5). */
+  /* The colourway-0 window is the room's, not a recolour's: Change a Color and Swap Fabrics (and
+     Image to 3D, whose own view draws its models) read the COLOURWAY POOL — their pictures may be
+     filed under a colourway, so the sentence would count another list (m-5, G-02 m-8). */
   const horizon = useMemo(
-    () => (def?.key === 'change_color' ? null : outputsHorizon(band, 0)),
-    [band, def?.key],
+    () => (def && COLOURWAY_POOL.has(def.key) ? null : outputsHorizon(band, 0)),
+    [band, def],
   );
   const carries = rows.length ? serverStatesSelected(rows[0].picture) : true;
   const writesOff = !!disabled || !speaks;

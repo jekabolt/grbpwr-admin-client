@@ -156,4 +156,5 @@ const ROOM_WORD: Readonly<Record<RoomKey, string>> = {
   remove_background: 'remove background',
   retouch_zone: 'retouch a zone',
   create_edit: 'create or edit',
+  image_to_3d: 'image to 3d',
 };

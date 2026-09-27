@@ -56,6 +56,12 @@
 //   S · (C-11) ворота: плитка 10 жива только в playgroundWorkflows; угол mask в итогах — только
 //       там же; панель плитки — объяснение и честная строка, без GENERATE; итоги под плиткой 10 —
 //       все картинки комнаты.
+//   V · (C-12) интеграция полос: заглушка вне страницы (без params) со штампом run_workflow стоит
+//       под своей плиткой и только под ней — у всех десяти плиток комнаты; рекол 3D-прогона
+//       открывает плитку 12 (workflowOfRun → image_to_3d, recallTargetKind → playground на новом
+//       сервере, STEP 5 на старом) с её референсом и опциями; у плитки 12 «Realistic materials»
+//       и Texture по умолчанию ON, где сервер их перечисляет; surface_hint в списке — поля нет,
+//       подсказка уезжает пустой.
 //
 // МУТАЦИИ ЖИВУТ В ПАМЯТИ, А НЕ В ФАЙЛЕ (приём colour-plan-probe): одна строка настоящего модуля
 // подменяется в бандле, исходник не трогается. Каждая обязана уронить СВОЮ группу:
@@ -150,6 +156,17 @@
 //   node scripts/playground-registry-probe.mjs --mutate-step-first  композитор спрашивает шаг раньше
 //                                                                   старого адреса → краснеет U
 //
+// C-12 (интеграция):
+//   node scripts/playground-registry-probe.mjs --mutate-stub-tryon  try-on снова сверяет только
+//                                                                   пресет (штамп заглушки не
+//                                                                   читается) → краснеет V
+//   node scripts/playground-registry-probe.mjs --mutate-threed-run  threed не отдаётся плитке 12
+//                                                                   → краснеет E, V
+//   node scripts/playground-registry-probe.mjs --mutate-threed-recall рекол 3D всегда в STEP 5
+//                                                                   → краснеет V
+//   node scripts/playground-registry-probe.mjs --mutate-pbr-default материалы по умолчанию OFF
+//                                                                   → краснеет T, V
+//
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
 
@@ -204,6 +221,10 @@ const MUT = {
   railThreed: process.argv.includes('--mutate-rail-threed'),
   legacyThreed: process.argv.includes('--mutate-legacy-threed'),
   stepFirst: process.argv.includes('--mutate-step-first'),
+  stubTryon: process.argv.includes('--mutate-stub-tryon'),
+  threedRun: process.argv.includes('--mutate-threed-run'),
+  threedRecall: process.argv.includes('--mutate-threed-recall'),
+  pbrDefault: process.argv.includes('--mutate-pbr-default'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -561,6 +582,8 @@ if (MUT.threedGate)
   ]);
 if (MUT.threedColorway)
   tileSwaps.push(['if ((media?.id ?? 0) === mediaId) return colorwayOf(slot);', '']);
+if (MUT.pbrDefault)
+  tileSwaps.push(['pbr: draft.flags[PBR] ?? true,', 'pbr: draft.flags[PBR] ?? false,']);
 if (tileSwaps.length)
   plugins.unshift(multiSwap('c10-tile', /tiles\/image-to-3d\.tsx$/, 'tsx', tileSwaps));
 const chainSwaps = [];
@@ -581,6 +604,35 @@ if (MUT.stepFirst)
   ]);
 if (chainSwaps.length)
   plugins.unshift(multiSwap('c10-chain', /core\/chain\.ts$/, 'ts', chainSwaps));
+
+// ─── C-12: мутации интеграции полос.
+if (MUT.stubTryon)
+  plugins.push(
+    swap(
+      'tryon-preset-only',
+      /tiles\/virtual-try-on\.tsx$/,
+      "match: matchesWorkflow('virtual_try_on'),",
+      "match: (run) => (run.params?.freeform?.preset ?? '').trim() === 'tryon',",
+    ),
+  );
+if (MUT.threedRun)
+  plugins.push(
+    swap(
+      'threed-no-tile',
+      /registry\/run-workflow\.ts$/,
+      "if (kind === 'threed') return 'image_to_3d';",
+      '',
+    ),
+  );
+if (MUT.threedRecall)
+  plugins.push(
+    swap(
+      'threed-recall-step5',
+      /design\/history-recall\.tsx$/,
+      "if (kind === 'threed') return threedRetired ? 'playground' : 'threed';",
+      "if (kind === 'threed') return 'threed';",
+    ),
+  );
 
 const outfile = resolve(tmpdir(), `playground-registry-probe-${process.pid}.mjs`);
 try {
@@ -905,9 +957,11 @@ head('E', 'рекол: прогон → плитка, и честные слов
   ck(M.workflowOfRun({ kind: 'recolor' }) === 'change_color', 'recolor → change_color');
   ck(M.workflowOfRun({ kind: 'cutout' }) === 'remove_background', 'cutout → remove_background');
   ck(M.workflowOfRun({ kind: ' Freeform ' }) === 'create_edit', 'freeform → create_edit');
+  // C-12: a 3D run is tile 12's (its recall opens Image to 3D); render / vector are no tile's.
+  ck(M.workflowOfRun({ kind: ' Threed ' }) === 'image_to_3d', 'threed → image_to_3d');
   ck(
-    M.workflowOfRun({ kind: 'threed' }) === null && M.workflowOfRun({ kind: 'render' }) === null,
-    'threed / render → не плитка комнаты',
+    M.workflowOfRun({ kind: 'render' }) === null && M.workflowOfRun({ kind: 'vector' }) === null,
+    'render / vector → не плитка',
   );
 
   const byId = new Map([
@@ -2719,12 +2773,13 @@ const THREED = (over) => ({
         threed: THREED({
           referenceMediaIds: [42],
           texture: 'on',
-          pbr: 'off',
+          // C-12: materials default ON where the band lists pbr (the owner's 14.png).
+          pbr: 'on',
           quality: 'standard',
         }),
       },
     }),
-    'свежий черновик, картинка не с верстака: [42] (одна), on/off/standard, colorwayId 0',
+    'свежий черновик, картинка не с верстака: [42] (одна), on/on/standard, colorwayId 0',
     show(plain),
   );
   ck(
@@ -3076,6 +3131,97 @@ head('U', 'рельс: STEP 5 только у сервера без playground_w
     show(cells(newRail)),
   );
   ck(cells(newRail).includes('playground'), 'PLAYGROUND на месте');
+}
+
+// ─── V · C-12: интеграция полос ───────────────────────────────────────────────────────────────
+head('V', 'C-12: заглушки под своей плиткой, рекол 3D → плитка 12, материалы ON, surface_hint');
+{
+  // [run id, kind, the server's stamp = the ONE tile whose results take the stub]
+  const STUBS = [
+    [601, 'freeform', 'virtual_try_on'],
+    [602, 'freeform', 'fabric_to_image'],
+    [603, 'freeform', 'ghost_mannequin'],
+    [604, 'freeform', 'add_logo'],
+    [605, 'freeform', 'design_variations'],
+    [606, 'freeform', 'retouch_zone'],
+    [607, 'freeform', 'create_edit'],
+    [608, 'recolor', 'swap_fabrics'],
+    [609, 'recolor', 'change_color'],
+    [610, 'cutout', 'remove_background'],
+  ];
+  const stubBand = band({
+    runs: [],
+    outputs: STUBS.map(([id, kind, stamp]) => ({
+      picture: { id: id + 300, runId: id },
+      runId: id,
+      runKind: kind,
+      runWorkflow: stamp,
+    })),
+  });
+  const rows = [
+    ...(M.cardOutputRows(stubBand, 'playground') ?? []),
+    ...(M.cardOutputRows(stubBand, 'onmodel') ?? []),
+  ];
+  for (const [id, , key] of STUBS) {
+    const stub = rows.find((r) => r.run.id === id)?.run;
+    const claimed = M.WORKFLOWS.filter((w) => !!stub && !!w.run?.results.match(stub)).map(
+      (w) => w.key,
+    );
+    ck(
+      !!stub && stub.params === undefined && claimed.length === 1 && claimed[0] === key,
+      `заглушка со штампом ${key} — под ${key} и только под ней`,
+      show(claimed),
+    );
+  }
+
+  // «Run that again» on a 3D run: STEP 5 on an old server, tile 12 on a new one, prefilled.
+  ck(
+    M.recallTargetKind({ kind: 'threed' }, 'input', true) === 'playground' &&
+      M.recallTargetKind({ kind: 'threed' }, 'input', false) === 'threed' &&
+      M.recallTargetKind({ kind: 'threed' }, 'input') === 'threed',
+    'рекол 3D: новый сервер → playground, старый (и без слова) → STEP 5',
+  );
+  const run3 = {
+    id: 77,
+    kind: 'threed',
+    params: {
+      threed: { referenceMediaIds: [41], texture: 'on', pbr: 'off', quality: 'detailed' },
+    },
+  };
+  const key3 = M.workflowOfRun(run3);
+  const back3 = M.workflowByKey(key3)?.run?.recall?.(run3, new Map([[41, media(41)]]));
+  ck(
+    key3 === 'image_to_3d' &&
+      back3?.draft.images.reference?.[0]?.id === 41 &&
+      back3.draft.flags.texture === true &&
+      back3.draft.flags.pbr === false &&
+      back3.draft.choices.quality === 'detailed',
+    'рекол 3D-прогона: плитка 12, его референс, texture on / pbr off / detailed',
+    show({ key3, draft: back3?.draft }),
+  );
+
+  // Tile 12's defaults and the surface hint the backend made a route capability.
+  const t12 = M.workflowByKey('image_to_3d').run;
+  const drafted = { ...M.initialDraft(t12), images: { reference: [media(42)] } };
+  const withHint = band({
+    playgroundWorkflows: ['image_to_3d'],
+    threedOptions: ['texture', 'pbr', 'quality', 'surface_hint'],
+  });
+  const w = t12.wire(drafted, { band: withHint }).params.threed;
+  ck(w.texture === 'on' && w.pbr === 'on', 'pbr и texture в списке: по умолчанию оба ON', show(w));
+  ck(w.surfaceHint === '', 'surface_hint в списке: подсказка уезжает пустой', show(w.surfaceHint));
+  const form12 = M.panelMarkup(withHint, 'image_to_3d');
+  ck(
+    form12.length > 0 &&
+      /data-toggle-row="pbr"/.test(form12) &&
+      !/data-(toggle|option)-row="surface/.test(form12) &&
+      !/surface hint/i.test(form12),
+    'surface_hint в списке: поля подсказки в форме нет',
+  );
+  const noPbr = t12.wire(drafted, {
+    band: band({ playgroundWorkflows: ['image_to_3d'], threedOptions: ['texture'] }),
+  }).params.threed;
+  ck(noPbr.pbr === '', 'pbr не в списке: уезжает пустым (константа маршрута)', show(noPbr.pbr));
 }
 
 const expected = MUTATED ? ' (прогон С МУТАЦИЕЙ — провалы ожидаются)' : '';

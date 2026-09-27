@@ -81,8 +81,9 @@ function offers(band: GetDesignBandResponse, name: OptionName): boolean {
 
 /**
  * What the form SHOWS for each option — the draft's value, else the default: texture on (the
- * route's own constant), materials OFF (PBR maps multiply the model file; 11-3D §6 — a person turns
- * them on), Standard, The photo.
+ * route's own constant), materials ON (the owner's 14.png shows «Realistic materials» switched on;
+ * the row — and so this default — exists only where the band lists `pbr`, which the backend
+ * advertises only after the GLB-size smoke), Standard, The photo.
  */
 function chosenOf(draft: Draft): {
   texture: boolean;
@@ -92,7 +93,7 @@ function chosenOf(draft: Draft): {
 } {
   return {
     texture: draft.flags[TEXTURE] ?? true,
-    pbr: draft.flags[PBR] ?? false,
+    pbr: draft.flags[PBR] ?? true,
     quality: draft.choices[QUALITY] === 'detailed' ? 'detailed' : 'standard',
     follow: draft.choices[FOLLOW] === 'shape' ? 'shape' : 'photo',
   };

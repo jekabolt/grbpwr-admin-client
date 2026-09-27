@@ -20,6 +20,7 @@ import {
   textOf,
   workflowOffered,
 } from '../common';
+import { matchesWorkflow } from '../run-workflow';
 import {
   EMPTY_DRAFT,
   type Draft,
@@ -451,11 +452,9 @@ const run: WorkflowRun = {
   results: {
     reps: ['playground'],
     /* A try-on is a freeform run whose preset says so. An off-page stub states no preset
-       (`RUN_NOT_STATED`) and is not claimed here — see the report: the output's own
-       `run_workflow` is the fix, and it lives in a shared file. */
-    match: (run) =>
-      (run.kind ?? '').trim().toLowerCase() === 'freeform' &&
-      (run.params?.freeform?.preset ?? '').trim() === 'tryon',
+       (`RUN_NOT_STATED`); the server's stamp on its output (`run_workflow`) answers for it
+       (`workflowOfRun` → `stampedWorkflowOf`), so a try-on off the feed's first page stays here. */
+    match: matchesWorkflow('virtual_try_on'),
   },
 
   recall: (past, media) => {

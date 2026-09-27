@@ -10,10 +10,12 @@ import type { Draft, WorkflowKey } from './registry/types';
 /**
  * ═══ «RUN THAT AGAIN» — THE PLAYGROUND'S RECEIVER (C-03) ═════════════════════════════════════════
  *
- * `recallTargetKind` sends a `recolor`, `freeform` or `cutout` run HERE (`history-recall.tsx`), and
- * this is what answers: the run's workflow (`workflowOfRun`) is opened and its draft is rebuilt by
- * that workflow's own `recall` from the run's FROZEN parameters — recolour → Change a Color (photos,
- * garment words, Pantone), cut-out → Remove Background, freeform → Create or edit. The retired
+ * `recallTargetKind` sends a `recolor`, `freeform` or `cutout` run HERE (`history-recall.tsx`) — and
+ * a `threed` run where STEP 5 has left the rail — and this is what answers: the run's workflow
+ * (`workflowOfRun`) is opened and its draft is rebuilt by that workflow's own `recall` from the
+ * run's FROZEN parameters — recolour → Change a Color or Swap Fabrics, cut-out → Remove Background,
+ * freeform → its preset's tile (free → Create or edit), 3D → Image to 3D (its reference and
+ * options). The retired
  * presets (`add_hardware`, `repaint_parts`) land in Create or edit with their pictures and words,
  * and the intake says what did not come along; a rerun of those runs stays legal on the server.
  *

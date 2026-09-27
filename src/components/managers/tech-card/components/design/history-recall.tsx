@@ -128,11 +128,19 @@ function hostCount(techCardId: number, kind: DesignKind): number {
  * «сделать их референсами следующего промпта», а промпт — это INPUT — REFERENCES; ни у рендера, ни у
  * 3D места для картинки-референса нет вовсе.
  */
-export function recallTargetKind(run: common_DesignRun, mode: RecallMode): DesignKind {
+export function recallTargetKind(
+  run: common_DesignRun,
+  mode: RecallMode,
+  threedRetired = false,
+): DesignKind {
   if (mode === 'results') return 'flat';
   const kind = (run.kind ?? '').trim().toLowerCase();
   if (kind === 'render') return 'render';
-  if (kind === 'threed') return 'threed';
+  /* A 3D RUN GOES WHERE 3D IS BUILT ON THIS SERVER (C-10, C-12): STEP 5 on a server older than
+     `playground_workflows`, the playground tile Image to 3D where STEP 5 has left the rail
+     (`threedStepRetired`, core/chain.ts) — there the playground's receiver opens tile 12 with the
+     run's reference and options (`workflowOfRun` → `image_to_3d`). */
+  if (kind === 'threed') return threedRetired ? 'playground' : 'threed';
   /* ПЛЕЙГРАУНД ЗАБИРАЕТ СВОЙ ВХОД СЕБЕ. Его вход — не референсы промпта и не слоты верстака, а
      СТОЛ (`params.freeform.items[]` с областями), и разложить его может только тот экран, который
      стол и рисует. Без этой строки жест уводил бы стол прошлого прогона во ФЛЭТ — то есть
@@ -156,6 +164,8 @@ export function recallDesignRun(
   techCardId: number,
   run: common_DesignRun | null,
   mode: RecallMode = 'input',
+  /** STEP 5 has left the rail on this server (`threedStepRetired`): a 3D run goes to tile 12. */
+  threedRetired = false,
 ): void {
   if (!techCardId || techCardId <= 0) return;
   // Снятие выбора разрешено всегда: убрать несделанное можно и без приёмника.
@@ -164,7 +174,7 @@ export function recallDesignRun(
     return;
   }
 
-  const kind = recallTargetKind(run, mode);
+  const kind = recallTargetKind(run, mode, threedRetired);
   const sw = switches.get(techCardId);
   if (!sw && hostCount(techCardId, kind) === 0) {
     // ОТКАЗ ПРОИЗНОСИТСЯ ВСЛУХ И НИЧЕГО НЕ СОХРАНЯЕТ. Так выглядит эта дверь на сборке, где
@@ -730,8 +740,11 @@ export function RecallDoors({
   const handle = runHandle(runId) || 'that run';
   const kind = (run.kind ?? '').trim().toLowerCase();
   const isVector = kind === 'vector';
-  const target = recallTargetKind(run, asking ?? 'input');
-  const inputTarget = recallTargetKind(run, 'input');
+  /* The band answered (this row stands on it): STEP 5 has left the rail exactly when it lists the
+     playground workflows — `threedStepRetired` of core/chain.ts on a loaded band. */
+  const threedRetired = band.playgroundWorkflows !== undefined;
+  const target = recallTargetKind(run, asking ?? 'input', threedRetired);
+  const inputTarget = recallTargetKind(run, 'input', threedRetired);
 
   /**
    * ДВЕРЬ ВХОДА ОТДАЁТ ЧТО-ТО, ТОЛЬКО ЕСЛИ ПРОГОНУ ЕСТЬ ЧТО ОТДАТЬ ИМЕННО ЭТОМУ ЭКРАНУ.
@@ -742,7 +755,7 @@ export function RecallDoors({
    * это ещё и переход на свой экран, и он осмыслен сам по себе.
    */
   const handsOver =
-    inputTarget === 'threed'
+    kind === 'threed'
       ? true
       : inputTarget === 'render'
         ? (run.inputs?.slots ?? []).some((s) => (s.mediaId ?? 0) > 0)
@@ -785,7 +798,7 @@ export function RecallDoors({
    * пересобирать карты по всей форме на каждую букву, набранную где-то ещё на карточке.
    */
   const plan = useMemo<FlatPlan | null>(() => {
-    if (!asking || recallTargetKind(run, asking) !== 'flat' || !form) return null;
+    if (!asking || recallTargetKind(run, asking, threedRetired) !== 'flat' || !form) return null;
     const rows = (form.getValues('moodboardMedia') ?? []) as BoardItem[];
     const roled = new Map<number, boolean>();
     for (const r of band.references ?? []) {
@@ -870,7 +883,7 @@ export function RecallDoors({
         onConfirm={() => {
           const mode = asking;
           setAsking(null);
-          if (mode) recallDesignRun(techCardId, run, mode);
+          if (mode) recallDesignRun(techCardId, run, mode, threedRetired);
         }}
         onCancel={() => setAsking(null)}
         title={

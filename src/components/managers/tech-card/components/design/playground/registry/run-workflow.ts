@@ -16,10 +16,11 @@ import type { WorkflowKey } from './types';
  *     `repaint_parts`, Q17) → Create or edit;
  *   · recolor → Swap Fabrics when some cloth of `params.colour.fabrics` carries a picture, else
  *     Change a Color (the server's `designAnyClothWithPicture`);
- *   · cutout → Remove Background.
- *
- * `threed` answers `null` here: its results and history live outside the playground room until
- * Image to 3D (C-10) takes them in.
+ *   · cutout → Remove Background;
+ *   · threed → Image to 3D (C-10, C-12): «run that again» on a 3D run opens tile 12 prefilled
+ *     where STEP 5 has left the rail (`recallTargetKind`). Its models are not the room's pictures
+ *     (`inPlaygroundRoom` reads representations, and a 3D run has its own), so the room's views
+ *     never file one under a tile; only the recall and tile 12's own history read this answer.
  *
  * ⚠ AN OFF-PAGE STUB STATES NO PARAMS. Its answer is the server's stamp on the output
  * (`stampedWorkflowOf`, read beside the stub); a server older than the stamp leaves only the kind,
@@ -27,7 +28,7 @@ import type { WorkflowKey } from './types';
  * phase-1 behaviour, never a flip between two tiles as the feed pages (G-01, m-3): a stub and its
  * loaded run give the same answer wherever the server stamps.
  */
-export type RoomKey = Exclude<WorkflowKey, 'extend_image' | 'image_to_3d'>;
+export type RoomKey = Exclude<WorkflowKey, 'extend_image'>;
 
 const ROOM_KEYS: readonly RoomKey[] = [
   'virtual_try_on',
@@ -40,6 +41,7 @@ const ROOM_KEYS: readonly RoomKey[] = [
   'remove_background',
   'retouch_zone',
   'create_edit',
+  'image_to_3d',
 ];
 
 /** The freeform presets that have a tile of their own; every other preset is Create or edit's. */
@@ -56,6 +58,7 @@ const isRoomKey = (key: string): key is RoomKey => (ROOM_KEYS as readonly string
 
 export function workflowOfRun(run: Pick<common_DesignRun, 'kind' | 'params'>): RoomKey | null {
   const kind = (run.kind ?? '').trim().toLowerCase();
+  if (kind === 'threed') return 'image_to_3d';
   if (kind !== 'freeform' && kind !== 'recolor' && kind !== 'cutout') return null;
   if (kind === 'cutout') return 'remove_background';
   if (run.params === undefined) {

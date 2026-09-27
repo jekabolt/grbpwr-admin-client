@@ -48,6 +48,7 @@
 //   --mutate-no-deadline     срока ответа нет                                     → J
 //   --mutate-late-lost       поздний успех теряется                               → J
 //   --mutate-own-results     плитка 12 снова под итогами комнаты (C-10)            → K
+//   --mutate-pool-caption    «Only the newest …» снова и у Swap Fabrics (C-12, m-8)  → L
 //
 //   K · (C-10) Image to 3D: под открытой плиткой — блок 3D-моделей карточки, а не итоги комнаты;
 //       строки опций — только объявленные сервером; текстура off гасит материалы со словами;
@@ -97,6 +98,7 @@ const KNOWN = new Set([
   '--mutate-no-deadline',
   '--mutate-late-lost',
   '--mutate-own-results',
+  '--mutate-pool-caption',
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN.has(a));
 if (stray) dieNotRun(`неизвестный флаг мутации ${stray}; известные: ${[...KNOWN].join(', ')}`);
@@ -314,6 +316,13 @@ if (on('--mutate-own-results'))
     /playground\/studio\.tsx$/,
     'const OwnResults = flow?.results.view;',
     'const OwnResults = undefined;',
+  );
+if (on('--mutate-pool-caption'))
+  patch(
+    'pool-caption-back',
+    /playground\/results\.tsx$/,
+    '() => (def && COLOURWAY_POOL.has(def.key) ? null : outputsHorizon(band, 0)),',
+    "() => (def?.key === 'change_color' ? null : outputsHorizon(band, 0)),",
   );
 
 // ─── заглушенная сеть ──────────────────────────────────────────────────────────────────────────
@@ -1214,6 +1223,13 @@ try {
   );
   const pbrSwitch = open3.locator('[data-toggle-row="pbr"] [role="switch"]');
   ck(!(await pbrSwitch.isDisabled()), 'материалы включаемы, пока текстура есть');
+  ck(
+    (await pbrSwitch.getAttribute('aria-checked')) === 'true' &&
+      (await open3
+        .locator('[data-toggle-row="texture"] [role="switch"]')
+        .getAttribute('aria-checked')) === 'true',
+    'по умолчанию Texture и Realistic materials включены (14.png, C-12)',
+  );
   await open3.locator('[data-toggle-row="texture"] [role="switch"]').click();
   await settle();
   ck(
@@ -1251,6 +1267,74 @@ try {
     (await page.locator('#design-playground-results').count()) === 1 &&
       (await page.locator('#design-threed-outputs').count()) === 0,
     '|→ — на сетке снова итоги комнаты',
+  );
+} catch (e) {
+  ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+head('L', 'итоги: «Only the newest …» — не у перекраса, свопа тканей и 3D (G-02 m-8, C-12)');
+try {
+  const out = (id, runId, kind, stamp) => ({
+    picture: {
+      id,
+      runId,
+      colorwayId: 0,
+      ordinal: 1,
+      media: { id, media: { thumbnail: { mediaUrl: `http://probe.local/${id}.png` } } },
+    },
+    runId,
+    runKind: kind,
+    runWorkflow: stamp,
+  });
+  await mount({
+    ...EMPTY_BAND,
+    playgroundWorkflows: ['change_color', 'swap_fabrics', 'create_edit', 'image_to_3d'],
+    threedOptions: [],
+    // Three pictures of colourway 0 arrived; the server says it holds 500: a window was cut.
+    outputs: [
+      out(821, 71, 'freeform', 'create_edit'),
+      out(822, 72, 'recolor', 'swap_fabrics'),
+      out(823, 73, 'recolor', 'change_color'),
+    ],
+    outputsTotalByColorway: { 0: 500 },
+  });
+  // The rendered words only: the stand's bundle is an inline <script> in the same body.
+  const captioned = async () =>
+    (await page.evaluate(() => document.getElementById('root')?.innerText ?? '')).includes(
+      'Only the newest',
+    );
+  ck(await captioned(), 'на сетке подпись окна есть (окно комнаты)');
+  const openTile = async (key) => {
+    await tileButton(key).click();
+    await page.waitForSelector(`[data-playground-open="${key}"]`);
+    await settle();
+  };
+  const leave = async () => {
+    await backArrow().click();
+    await page.waitForSelector('[data-workflow-tile]');
+    await settle();
+  };
+  await openTile('create_edit');
+  ck(await captioned(), 'Create or edit: подпись есть');
+  await leave();
+  await openTile('swap_fabrics');
+  ck(
+    (await page.locator('[data-pg-output="822"]').count()) === 1 && !(await captioned()),
+    'Swap Fabrics: заглушка со штампом на месте, подписи окна нет',
+  );
+  await leave();
+  await openTile('change_color');
+  ck(
+    (await page.locator('[data-pg-output="823"]').count()) === 1 &&
+      (await page.locator('[data-pg-output="822"]').count()) === 0 &&
+      !(await captioned()),
+    'Change a Color: только своя заглушка, подписи окна нет',
+  );
+  await leave();
+  await openTile('image_to_3d');
+  ck(
+    !(await captioned()) && (await page.locator('[data-outputs-horizon]').count()) === 0,
+    'Image to 3D: ни подписи окна, ни «newest N of M»',
   );
 } catch (e) {
   ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
