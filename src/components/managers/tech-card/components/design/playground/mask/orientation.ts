@@ -126,19 +126,49 @@ function tiffOrientation(t: Uint8Array): number {
 
 const read = new Map<string, Promise<number>>();
 
+/** How long reading the shown file may take before it counts as unreadable (G-03 Codex r3 MAJOR). */
+export const ORIENTATION_DEADLINE_MS = 15_000;
+
+/** The file could not be read in time: the fetch is aborted and the retouch refused (not guessed). */
+export class OrientationTimeout extends Error {
+  constructor(ms: number) {
+    super(`the picture's file did not arrive in ${Math.round(ms / 1000)} s`);
+    this.name = 'OrientationTimeout';
+  }
+}
+
 /**
  * The orientation of the file at `url`, read once per address for the page's life. Rejects when the
  * file cannot be fetched at all (the caller refuses the retouch rather than guess); a failure is not
  * remembered, so the next open asks again.
+ *
+ * ⚠ THE READ HAS A DEADLINE (G-03 Codex r3 MAJOR). `fetch` has none: a direct fetch or a proxy that
+ * never answered held the picture on «checking the picture…», and — the pending promise being cached
+ * — every reopen waited on the same dead request until a reload. After `deadlineMs` the fetch is
+ * aborted, the read rejects (the editor says the file could not be read) and the entry is dropped,
+ * so closing and reopening the editor reads again.
  */
-export function orientationOf(url: string): Promise<number> {
+export function orientationOf(url: string, deadlineMs = ORIENTATION_DEADLINE_MS): Promise<number> {
   let got = read.get(url);
   if (!got) {
-    got = fetchMediaBlob(url)
-      .then((blob) => blob.arrayBuffer())
-      .then((buf) => exifOrientation(new Uint8Array(buf)));
+    const abort = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    got = Promise.race([
+      fetchMediaBlob(url, abort.signal)
+        .then((blob) => blob.arrayBuffer())
+        .then((buf) => exifOrientation(new Uint8Array(buf))),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new OrientationTimeout(deadlineMs));
+          abort.abort();
+        }, deadlineMs);
+      }),
+    ]).finally(() => clearTimeout(timer));
     read.set(url, got);
-    got.catch(() => read.delete(url));
+    const mine = got;
+    got.catch(() => {
+      if (read.get(url) === mine) read.delete(url);
+    });
   }
   return got;
 }

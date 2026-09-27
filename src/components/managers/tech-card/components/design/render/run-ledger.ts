@@ -36,7 +36,19 @@ import { newClientRequestId } from '../use-design-band';
  * which errs toward a fresh key for a different person rather than a shared one.
  *
  * Storage that throws (private window, blocked site data) leaves the in-memory copy, which still
- * covers every unmount inside the tab.
+ * covers every unmount inside the tab. THAT FALLBACK IS THE CALLER'S CHOICE, NOT THIS FILE'S (G-03
+ * Codex r3 MAJOR): `ledgerSend` says whether the entry reached `sessionStorage` (`stored`). The
+ * generate screens keep going on the memory copy (a reload is the only thing it does not survive);
+ * the mask retouch, whose other half — the paint and its mask id — already fails closed, refuses to
+ * send instead (`useStartDesignRun`'s `beforeSend`).
+ *
+ * ⚠ AN ANSWER SETTLES ONLY ITS OWN KEY (G-03 Codex r3 BLOCKER). A late answer to a timed-out send can
+ * arrive after that key was already settled by its retry — and after the SAME request was pressed
+ * again as a new intent under a NEW key. Settling by fingerprint alone let the old answer free the new
+ * key; its retry then minted a third id, and two of them could be paid. So `ledgerSettle` is a
+ * compare-and-settle: it touches the entry only while that entry still holds the id whose answer
+ * arrived, in the operator namespace captured when that id was SENT (`ledgerSend`'s `operator`), and
+ * says whether it matched — an answer that matched nothing is not about the intent on screen.
  */
 export type LedgerEntry = {
   /** The `client_request_id` of this intent. */
@@ -48,7 +60,13 @@ export type LedgerEntry = {
 };
 
 /** How a send of a key ended, as far as the idempotency of that key is concerned. */
-export type LedgerOutcome = 'accepted' | 'refused' | 'unknown';
+export type LedgerOutcome =
+  | 'accepted'
+  | 'refused'
+  | 'unknown'
+  /* A refusal that proves THIS id was never booked — even after a silence (the caller knows the
+     refusal is decided by facts of the request that cannot have changed since its first send). */
+  | 'void';
 
 type Book = Record<string, Record<string, LedgerEntry>>;
 
@@ -81,11 +99,13 @@ function book(): Book {
   return memory;
 }
 
-function save(): void {
+/** Whether the book reached `sessionStorage`; the in-memory copy holds it for this tab either way. */
+function save(): boolean {
   try {
     window.sessionStorage.setItem(RUN_LEDGER_STORAGE_KEY, JSON.stringify(book()));
+    return true;
   } catch {
-    /* the in-memory copy still holds it for this tab */
+    return false;
   }
 }
 
@@ -128,37 +148,46 @@ function hash(s: string): string {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 
-const scopeOf = (techCardId: number, scope: string) => `${operatorKey()}|${techCardId}|${scope}`;
+const scopeOf = (operator: string, techCardId: number, scope: string) =>
+  `${operator}|${techCardId}|${scope}`;
 
 /**
  * The key for this intent, marked as sent: the entry's own key while it is unresolved, a fresh one
  * otherwise. A key found still `pending` was sent and never answered here, so it becomes `unsure`.
+ * `stored` = the entry reached `sessionStorage` (see the file head for who may go on without it).
  */
-export function ledgerSend(techCardId: number, scope: string, fingerprint: string): string {
+export function ledgerSend(
+  techCardId: number,
+  scope: string,
+  fingerprint: string,
+  operator = operatorKey(),
+): { id: string; stored: boolean } {
   const all = book();
-  const at = scopeOf(techCardId, scope);
+  const at = scopeOf(operator, techCardId, scope);
   const found = all[at]?.[fingerprint];
   const id = found ? found.id : newClientRequestId();
   const unsure = !!found && (found.unsure || found.pending);
   all[at] = { ...all[at], [fingerprint]: { id, pending: true, unsure } };
-  save();
-  return id;
+  return { id, stored: save() };
 }
 
 /**
- * What the send of this intent's key came to — see the file head for the three rules. Answers whether
- * the key was FREED: a refusal that freed it proves nothing was booked under it, ever.
+ * What the send of key `id` came to — see the file head for the rules. `matched` = the entry still
+ * held `id` (in `operator`'s namespace, the one it was sent in); nothing else is touched. `freed` =
+ * the entry went: a refusal that freed it proves nothing was booked under it, ever.
  */
 export function ledgerSettle(
   techCardId: number,
   scope: string,
   fingerprint: string,
   outcome: LedgerOutcome,
-): boolean {
+  id: string,
+  operator: string,
+): { matched: boolean; freed: boolean } {
   const all = book();
-  const at = scopeOf(techCardId, scope);
+  const at = scopeOf(operator, techCardId, scope);
   const found = all[at]?.[fingerprint];
-  if (!found) return false;
+  if (!found || found.id !== id) return { matched: false, freed: false };
   let freed = false;
   if (outcome === 'unknown') {
     all[at] = { ...all[at], [fingerprint]: { ...found, pending: false, unsure: true } };
@@ -172,7 +201,7 @@ export function ledgerSettle(
     freed = true;
   }
   save();
-  return freed;
+  return { matched: true, freed };
 }
 
 /**

@@ -76,13 +76,30 @@ export type StartRunInput = {
 
 /** What travels with one press and hears its outcome (see `StartRunState.start`). */
 export type StartRunCallbacks = {
-  onAccepted?: () => void;
+  /**
+   * The door accepted THIS press's key, and the ledger still held that key for this intent. A late
+   * answer to a key already settled (by its retry) is not about the intent on screen and does not
+   * reach it (G-03 Codex r3 BLOCKER): the band is re-read, nothing else.
+   */
+  onAccepted?: (clientRequestId: string) => void;
   /**
    * The door refused this press DEFINITIVELY and its key was freed — nothing was ever booked under
    * it. The mask editor forgets a refused mask here (G-03 Codex r2 MINOR). A refusal of a repeat
-   * after a silence does not reach it: that key is kept, and so is what it was made of.
+   * after a silence does not reach it (that key is kept) unless `provesUnbooked` says it may.
    */
   onRefused?: (error: unknown) => void;
+  /**
+   * This definitive refusal proves the key was NEVER booked, even after a silence: the door decided
+   * it from facts of the request that cannot have changed since its first send (the mask's own bytes
+   * and size, G-03 Codex r3 MINOR). The key is then freed as after a plain refusal.
+   */
+  provesUnbooked?: (error: unknown) => boolean;
+  /**
+   * Called with the key after the ledger marked it and BEFORE anything is sent; `stored` = the ledger
+   * entry reached `sessionStorage`. Answer false and nothing is sent. A screen without it goes on
+   * whatever `stored` says — the ledger's documented memory fallback (run-ledger.ts, file head).
+   */
+  beforeSend?: (clientRequestId: string, stored: boolean) => boolean;
 };
 
 export type StartRunState = {
@@ -204,8 +221,19 @@ export function useStartDesignRun(
    */
   const accepted = (input: SentRun) => {
     qc.invalidateQueries({ queryKey: designKeys.band(input.techCardId) });
-    ledgerSettle(input.techCardId, input.scope, input.fingerprint, 'accepted');
-    input.onAccepted?.();
+    const { matched } = ledgerSettle(
+      input.techCardId,
+      input.scope,
+      input.fingerprint,
+      'accepted',
+      input.clientRequestId,
+      input.operator,
+    );
+    // A LATE ANSWER TO A KEY ALREADY SETTLED (G-03 Codex r3 BLOCKER) was announced when its retry
+    // was accepted; the intent on screen now may be a new press of the same request under a new key,
+    // and nothing of it — the ledger entry, the kept paint, the open editor — is this answer's.
+    if (!matched) return;
+    input.onAccepted?.(input.clientRequestId);
     // The screen's own state is cleared only where the answer is ABOUT the card on screen; the
     // switch above has already cleared it otherwise, and writing it again would be a statement
     // about B made by A.
@@ -238,13 +266,15 @@ export function useStartDesignRun(
     onSuccess: (_answer: unknown, input) => accepted(input),
     onError: (error: unknown, input) => {
       const definitive = isDefinitiveRefusal(error);
-      const freed = ledgerSettle(
+      const { matched, freed } = ledgerSettle(
         input.techCardId,
         input.scope,
         input.fingerprint,
-        definitive ? 'refused' : 'unknown',
+        !definitive ? 'unknown' : input.provesUnbooked?.(error) ? 'void' : 'refused',
+        input.clientRequestId,
+        input.operator,
       );
-      if (definitive && freed) input.onRefused?.(error);
+      if (definitive && matched && freed) input.onRefused?.(error);
       const message = (error as Error)?.message?.trim() || 'the run did not start';
       if (isAborted(error)) {
         showMessage(`someone changed this first — ${message}`, 'error');
@@ -276,15 +306,20 @@ export function useStartDesignRun(
         rerunOfRunId: input.rerunOfRunId ?? 0,
       };
       const fingerprint = requestFingerprint(wire);
-      const clientRequestId = ledgerSend(techCardId, scope, fingerprint);
+      // The operator is taken ONCE, here: the answer settles the namespace this key was sent in.
+      const operator = operatorKey();
+      const { id: clientRequestId, stored } = ledgerSend(techCardId, scope, fingerprint, operator);
+      if (opts?.beforeSend && !opts.beforeSend(clientRequestId, stored)) return;
       mutation.mutate({
         wire,
         techCardId,
         clientRequestId,
+        operator,
         scope,
         fingerprint,
         onAccepted: opts?.onAccepted,
         onRefused: opts?.onRefused,
+        provesUnbooked: opts?.provesUnbooked,
       });
     },
     [techCardId, mutation, scope],
@@ -347,12 +382,15 @@ type SentRun = {
     rerunOfRunId: number;
   };
   clientRequestId: string;
+  /** The ledger namespace the key was sent in (`operatorKey()` at the press). */
+  operator: string;
   techCardId: number;
   /** `''` = a screen that names no form; the ledger is shared either way. */
   scope: string;
   fingerprint: string;
-  onAccepted?: () => void;
+  onAccepted?: (clientRequestId: string) => void;
   onRefused?: (error: unknown) => void;
+  provesUnbooked?: (error: unknown) => boolean;
 };
 
 /** The mutation key of a scoped form's presses — the cache is asked «is one of them out?». */

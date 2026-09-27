@@ -14,7 +14,6 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 
 import { GenerateRow, LockBar, RunRefusal } from '../../render/generate-row';
-import { requestFingerprint } from '../../render/run-ledger';
 import { useStartDesignRun } from '../../render/use-design-run';
 import { useDesignBand } from '../../use-design-band';
 import { playgroundRunScope } from '../address';
@@ -52,6 +51,7 @@ import {
   MaskNotDrawn,
   MaskUploadStalled,
   maskKey,
+  maskRefusalProvesUnbooked,
   maskRefused,
   maskUploaderFor,
 } from './mask-upload';
@@ -440,19 +440,21 @@ export function MaskEditor({
       mask = { key: maskKey(mediaId, strokes, width, height), id: maskMediaId };
       wire = retouchRequest({ ...input, maskMediaId });
     }
-    // THE PRESS IS RECORDED BEFORE IT IS PAID FOR (Codex r2 MAJOR): the paint, the mask id this
-    // request names and the request itself — or nothing is sent.
-    const sent = requestFingerprint(wire);
-    if (!recordPress(at, { strokes, words, mask, sent })) {
-      showMessage(NOT_SAVED, 'error');
-      return;
-    }
-    const pressed = { paint: paintSignature(strokes, words), sent };
+    const paint = paintSignature(strokes, words);
     run.start(wire, {
-      onAccepted: () => {
+      // THE PRESS IS RECORDED BEFORE IT IS PAID FOR (Codex r2/r3 MAJOR): the ledger's key, the paint,
+      // the mask id this request names and the key itself — all in `sessionStorage`, or nothing is
+      // sent. This screen does not take the ledger's memory fallback: a reload must find the key.
+      beforeSend: (clientRequestId, stored) => {
+        if (stored && recordPress(at, { strokes, words, mask, sent: clientRequestId })) return true;
+        showMessage(NOT_SAVED, 'error');
+        return false;
+      },
+      onAccepted: (clientRequestId) => {
         // Accepted: THIS paint is spent — the next press on the picture is a new run. A newer paint
-        // on the picture is not this one, and stays (compare-and-delete).
-        const spent = forgetMaskDraft(at, pressed);
+        // on the picture, or the same paint pressed again under another key, is not this one, and
+        // stays (compare-and-delete).
+        const spent = forgetMaskDraft(at, { paint, sent: clientRequestId });
         rememberRecentText(recentTextKey('retouch_zone', RETOUCH_WORDS_KEY), said);
         /* WHERE IT LANDS, TRULY (G-02 m-2): the answer is a retouch, filed under Retouch a Zone
            (and on the grid) — not under the tile whose picture it started from, where only the
@@ -468,6 +470,8 @@ export function MaskEditor({
         // Codex r2 MINOR: the door refused the mask itself — the next press uploads it anew.
         if (mask && maskRefused(error)) uploader.forget(mediaId, strokes, width, height);
       },
+      // Codex r3 MINOR: a refusal of the mask's own bytes or size frees the key even after a silence.
+      provesUnbooked: mask ? maskRefusalProvesUnbooked : undefined,
     });
   };
 

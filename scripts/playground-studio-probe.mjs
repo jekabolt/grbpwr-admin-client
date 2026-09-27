@@ -70,6 +70,10 @@
 //   --mutate-save-silent      сбой sessionStorage молчит, прогон уходит (r2 MAJOR) → O
 //   --mutate-mask-deadline    у загрузки маски нет срока (r2 MAJOR)                → O
 //   --mutate-mask-forget      отказанная дверью маска помнится (r2 MINOR)          → O
+//   --mutate-settle-any-id    журнал закрывает ключ без сравнения id (r3 BLOCKER)  → O
+//   --mutate-ledger-fail-open маска шлёт и без записанного ключа (r3 MAJOR)        → O
+//   --mutate-orientation-hang у чтения EXIF нет срока (r3 MAJOR)                   → O
+//   --mutate-mask-void        отказ маски после тишины держит ключ (r3 MINOR)      → O
 //
 //   O · (G-03 client fix) маска живьём: нажатие, потерянный ответ, ЗАКРЫТЬ и открыть снова —
 //       краска и слова на месте, второе нажатие без новой загрузки и с ТЕМ ЖЕ ключом (и на пути
@@ -83,6 +87,10 @@
 //       повтор B после закрытия — тот же ключ и та же маска; хранилище отказало — ничего не начато;
 //       зависшая загрузка — по сроку редактор отпускает, поздняя загрузка не становится маской;
 //       отказ двери mask_invalid — следующее нажатие грузит маску заново.
+//       G-03 Codex r3: поздний ответ id1 после принятого повтора не трогает нового нажатия того же
+//       запроса (id2): редактор открыт, повтор несёт id2; журнал не записал ключ — ничего не ушло;
+//       файл картинки не пришёл — по сроку «could not be read», повторное открытие читает снова;
+//       после тишины отказ mask_invalid того же ключа — новый ключ и новая маска.
 //
 //   N · (C-14) маршрут маски живьём: кисть по настоящему холсту, GENERATE → ОДНА загрузка PNG
 //       (verbatim, размер картинки 800×1000, белое там, где кисть, чёрное вокруг) → StartDesignRun
@@ -168,6 +176,10 @@ const KNOWN = new Set([
   '--mutate-save-silent',
   '--mutate-mask-deadline',
   '--mutate-mask-forget',
+  '--mutate-settle-any-id',
+  '--mutate-ledger-fail-open',
+  '--mutate-orientation-hang',
+  '--mutate-mask-void',
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN.has(a));
 if (stray) dieNotRun(`неизвестный флаг мутации ${stray}; известные: ${[...KNOWN].join(', ')}`);
@@ -215,6 +227,14 @@ patch(
   /mask\/mask-upload\.ts$/,
   '          }, deadlineMs);',
   '          }, globalThis.__pgMaskDeadlineMs ?? deadlineMs);',
+);
+
+// …and the orientation read's deadline from `window.__pgOrientationDeadlineMs` (group O, r3).
+patch(
+  'orientation-deadline-knob',
+  /mask\/orientation\.ts$/,
+  'export function orientationOf(url: string, deadlineMs = ORIENTATION_DEADLINE_MS): Promise<number> {',
+  'export function orientationOf(url: string, deadlineMs = globalThis.__pgOrientationDeadlineMs ?? ORIENTATION_DEADLINE_MS): Promise<number> {',
 );
 
 if (on('--mutate-ledger'))
@@ -547,6 +567,34 @@ if (on('--mutate-mask-deadline'))
     /mask\/mask-upload\.ts$/,
     'abandoned = true;\n            reject(new MaskUploadStalled(deadlineMs));',
     '',
+  );
+if (on('--mutate-settle-any-id'))
+  patch(
+    'settle-any-id',
+    /render\/run-ledger\.ts$/,
+    'if (!found || found.id !== id)',
+    'if (!found)',
+  );
+if (on('--mutate-ledger-fail-open'))
+  patch(
+    'ledger-fail-open',
+    /mask\/mask-editor\.tsx$/,
+    'if (stored && recordPress(',
+    'if (recordPress(',
+  );
+if (on('--mutate-orientation-hang'))
+  patch(
+    'orientation-hang',
+    /mask\/orientation\.ts$/,
+    '        }, deadlineMs);',
+    '        }, 1e9);',
+  );
+if (on('--mutate-mask-void'))
+  patch(
+    'mask-void',
+    /mask\/mask-upload\.ts$/,
+    "return errorInfoWhy(error) !== 'the mask picture does not exist';",
+    'return false;',
   );
 if (on('--mutate-mask-forget'))
   patch(
@@ -1935,16 +1983,22 @@ const png = (w, h) => {
 };
 /** A 4×5 JPEG with EXIF Orientation 6 (O, Codex r2): made by the page's own encoder, tagged here. */
 let EXIF6_JPEG = null;
+/** O14: the page's own FETCH of a `-hang` picture never answers (the <img> of it still loads). */
+let HANG_ORIENTATION = false;
 // `-wide` serves a 6×4 picture (the 6000×4000 case of O); `-exif6` that JPEG; every other name a
 // 4×5 PNG.
 await page.route('http://probe.local/inpaint-*', (route) =>
-  route.request().url().includes('-exif6') && EXIF6_JPEG
-    ? route.fulfill({ status: 200, contentType: 'image/jpeg', body: EXIF6_JPEG })
-    : route.fulfill({
-        status: 200,
-        contentType: 'image/png',
-        body: route.request().url().includes('-wide') ? png(6, 4) : png(4, 5),
-      }),
+  HANG_ORIENTATION &&
+  route.request().url().includes('-hang') &&
+  route.request().resourceType() !== 'image'
+    ? undefined
+    : route.request().url().includes('-exif6') && EXIF6_JPEG
+      ? route.fulfill({ status: 200, contentType: 'image/jpeg', body: EXIF6_JPEG })
+      : route.fulfill({
+          status: 200,
+          contentType: 'image/png',
+          body: route.request().url().includes('-wide') ? png(6, 4) : png(4, 5),
+        }),
 );
 const pmedia = (id, w, h, shown = w > h ? 'wide' : 'tall') => ({
   id,
@@ -2675,6 +2729,206 @@ try {
 } catch (e) {
   ck(false, 'O11 оборвалась', String(e?.message ?? e).split('\n')[0]);
 }
+
+/** Answer the held StartDesignRun at position `i` (0 = the oldest still out). */
+const answerAt = (i, how) =>
+  page.evaluate(
+    ([i, how]) => {
+      const [out] = window.__pgOut.splice(i, 1);
+      if (!out) return false;
+      if (how === 'ok') out.res({ run: { id: 950 + i, status: 'pending' } });
+      else out.rej(new Error('network: the answer was lost'));
+      return true;
+    },
+    [i, how],
+  );
+/** The very paint `openAndPaint` lays down, on the editor already open. */
+const paintAsBefore = async () => {
+  await page.locator('[data-mask-canvas]').scrollIntoViewIfNeeded();
+  const box = await page.locator('[data-mask-canvas]').boundingBox();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + box.width * 0.05, cy + box.height * 0.02, { steps: 4 });
+  await page.mouse.up();
+  await page.locator('[data-mask-editor] textarea').fill('a clean pocket');
+  await settle(100);
+};
+
+// 12 · r3 BLOCKER: id1 lost, its retry accepted, the SAME retouch pressed again (id2) — id1's
+// original answer arrives late and must not touch id2's key, paint or editor
+try {
+  await openAndPaint(MASK_BAND());
+  await page.evaluate(() => {
+    window.__pgDeadlineMs = 400;
+  });
+  await editorGenerate().click();
+  await page.waitForFunction(() => window.__pgCalls.some((c) => c.method === 'StartDesignRun'));
+  await settle(600); // id1: no answer
+  await editorGenerate().click(); // the retry — the same key id1
+  await page.waitForFunction(
+    () => window.__pgCalls.filter((c) => c.method === 'StartDesignRun').length === 2,
+  );
+  await answerAt(1, 'ok'); // the retry is accepted: the paint is spent, the editor closes
+  await page.waitForSelector('[data-mask-editor]', { state: 'detached' });
+  await settle(100);
+  await openMask();
+  await paintAsBefore(); // the same retouch again: a new intent
+  await editorGenerate().click();
+  await page.waitForFunction(
+    () => window.__pgCalls.filter((c) => c.method === 'StartDesignRun').length === 3,
+  );
+  const [s1, s1retry, s2] = await starts();
+  await answerAt(0, 'ok'); // id1's ORIGINAL answer, late
+  await settle(250);
+  ck(
+    s1retry.clientRequestId === s1.clientRequestId &&
+      s2.clientRequestId !== s1.clientRequestId &&
+      (await page.locator('[data-mask-editor]').count()) === 1,
+    'поздний ответ id1 после принятого повтора: редактор нового нажатия (id2) не закрыт',
+    JSON.stringify({ ids: [s1, s1retry, s2].map((s) => s.clientRequestId) }),
+  );
+  await settle(400); // id2's answer is lost too
+  await closeMask();
+  await openMask();
+  await editorGenerate().click();
+  await page.waitForFunction(
+    () => window.__pgCalls.filter((c) => c.method === 'StartDesignRun').length === 4,
+  );
+  const s2retry = (await starts())[3];
+  ck(
+    s2retry.clientRequestId === s2.clientRequestId &&
+      s2retry.params.inpaint?.maskMediaId === s2.params.inpaint?.maskMediaId,
+    'повтор id2 после закрытия: ТОТ ЖЕ ключ id2 и та же маска (а не id3) — оплата одна',
+    `${s2.clientRequestId} → ${s2retry.clientRequestId}`,
+  );
+  while (await answerAt(0, 'lost'));
+  await settle(150);
+  await closeMask();
+} catch (e) {
+  ck(false, 'O12 оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+await page.evaluate(() => {
+  window.__pgDeadlineMs = undefined;
+});
+
+// 13 · r3 MAJOR: the run ledger cannot store its key — nothing is started on the mask route
+try {
+  await openAndPaint(MASK_BAND());
+  await page.evaluate(() => {
+    const own = Storage.prototype.setItem;
+    window.__pgSetItem = own;
+    Storage.prototype.setItem = function (k, v) {
+      if (k === 'plm.design.run-ledger.v2') throw new DOMException('full', 'QuotaExceededError');
+      return own.call(this, k, v);
+    };
+  });
+  await editorGenerate().click();
+  await settle(400);
+  ck(
+    (await starts()).length === 0,
+    'журнал не записал ключ: платный запрос не ушёл',
+    String((await starts()).length),
+  );
+  ck(
+    (await page.evaluate(() => window.__pg.alerts())).some((a) =>
+      a.startsWith('nothing was started: this browser could not save the paint'),
+    ),
+    'тост: ничего не начато',
+    JSON.stringify(await page.evaluate(() => window.__pg.alerts())),
+  );
+  await page.evaluate(() => {
+    Storage.prototype.setItem = window.__pgSetItem;
+  });
+  await closeMask();
+} catch (e) {
+  ck(false, 'O13 оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+// 14 · r3 MAJOR: the shown file never arrives — the read ends, the editor says so, a reopen reads again
+try {
+  HANG_ORIENTATION = true;
+  await mountMask(bandOf({ runKinds: ['freeform', 'inpaint'] }, 800, 1000, 'hang'));
+  await page.evaluate(() => {
+    window.__pgOrientationDeadlineMs = 300;
+  });
+  await openMask();
+  await settle(600);
+  ck(
+    (await editorText()).includes("this picture's file could not be read to check its orientation"),
+    'файл не пришёл: по сроку «could not be read», а не вечное «checking the picture…»',
+    (await editorText()).slice(0, 300),
+  );
+  HANG_ORIENTATION = false;
+  await closeMask();
+  await openMask();
+  await settle(300);
+  ck(
+    !(await editorText()).includes('could not be read') &&
+      !(await editorText()).includes('checking the picture'),
+    'закрыть и открыть: файл читается заново (сорванное чтение не закэшировано)',
+    (await editorText()).slice(0, 300),
+  );
+  await closeMask();
+} catch (e) {
+  ck(false, 'O14 оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+HANG_ORIENTATION = false;
+await page.evaluate(() => {
+  window.__pgOrientationDeadlineMs = undefined;
+});
+
+// 15 · r3 MINOR: a silence, then mask_invalid for the SAME key — the key is freed, the mask re-uploaded
+try {
+  await openAndPaint(MASK_BAND());
+  await page.evaluate(() => {
+    window.__pgDeadlineMs = 400;
+  });
+  await editorGenerate().click();
+  await page.waitForFunction(() => window.__pgCalls.some((c) => c.method === 'StartDesignRun'));
+  await settle(600); // unsure
+  await editorGenerate().click();
+  await page.waitForFunction(
+    () => window.__pgCalls.filter((c) => c.method === 'StartDesignRun').length === 2,
+  );
+  await page.evaluate(() => {
+    const [out] = window.__pgOut.splice(1, 1);
+    out.rej(
+      Object.assign(new Error('the mask 6001 cannot be used: it is not a readable PNG'), {
+        status: 400,
+        details: [
+          {
+            '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
+            reason: 'mask_invalid',
+            metadata: { why: 'it is not a readable PNG' },
+          },
+        ],
+      }),
+    );
+  });
+  await settle(200);
+  await editorGenerate().click();
+  await page.waitForFunction(
+    () => window.__pgCalls.filter((c) => c.method === 'StartDesignRun').length === 3,
+  );
+  const [first, , third] = await starts();
+  ck(
+    (await uploads()) === 2 &&
+      third.params.inpaint?.maskMediaId === 6002 &&
+      third.clientRequestId !== first.clientRequestId,
+    'после тишины отказ mask_invalid того же ключа: ключ освобождён, маска загружена заново',
+    `${first.clientRequestId}/${first.params.inpaint?.maskMediaId} → ${third.clientRequestId}/${third.params.inpaint?.maskMediaId} (${await uploads()})`,
+  );
+  while (await answerAt(0, 'lost'));
+  await settle(150);
+  await closeMask();
+} catch (e) {
+  ck(false, 'O15 оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+await page.evaluate(() => {
+  window.__pgDeadlineMs = undefined;
+});
 
 ck(errors.length === 0, 'страница без ошибок', errors.join(' | '));
 await browser.close();

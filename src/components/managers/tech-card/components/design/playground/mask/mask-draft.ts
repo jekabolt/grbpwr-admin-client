@@ -24,9 +24,10 @@ import type { MaskPoint, MaskStroke } from './geometry';
  * after its deadline — after the person repainted and pressed again. A late «accepted» for press A
  * used to delete whatever this picture held, i.e. B's paint and B's mask id: B's answer lost too, a
  * reopen showed nothing, the repaint uploaded a new mask → a new key → a second paid run. So a press
- * records WHICH request it sent (`sent`, the canonical wire request) and its paint
+ * records WHICH key it sent (`sent`, its `client_request_id` — r3: the key, not the request, since
+ * the same request pressed again later is a new intent under a new key) and its paint
  * (`paintSignature`), and `forgetMaskDraft` is a compare-and-delete: the draft goes only while it is
- * still exactly that paint and that request. The address — operator, card, picture — is taken ONCE,
+ * still exactly that paint and the key whose answer arrived. The address — operator, card, picture — is taken ONCE,
  * at the press (`maskDraftAt`), never when the answer comes: A's late answer after a sign-out and a
  * sign-in cannot reach the next operator's draft.
  *
@@ -42,11 +43,11 @@ export type MaskDraft = {
   words: string;
   /** The mask uploaded for `key` (`maskKey` of these strokes at the picture's size), if any. */
   mask?: { key: string; id: number };
-  /** The request last pressed from this draft (`requestFingerprint` of its wire), if any. */
+  /** The `client_request_id` last sent from this draft, if any. */
   sent?: string;
 };
 
-/** What one accepted press may forget: the paint it was pressed from and the request it sent. */
+/** What one accepted press may forget: the paint it was pressed from and the key it sent. */
 export type PressedPaint = { paint: string; sent: string };
 
 export const MASK_DRAFT_STORAGE_KEY = 'plm.design.mask-drafts.v1';

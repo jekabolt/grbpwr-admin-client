@@ -275,8 +275,10 @@ export {
   SOURCE_TOO_LARGE,
 } from 'components/managers/tech-card/components/design/playground/registry/common';
 export {
+  OrientationTimeout,
   exifOrientation,
   orientationMoves,
+  orientationOf,
 } from 'components/managers/tech-card/components/design/playground/mask/orientation';
 export {
   MASK_DRAFT_STORAGE_KEY,
@@ -293,11 +295,13 @@ export {
 } from 'components/managers/tech-card/components/design/playground/mask/mask-draft';
 export {
   MaskUploadStalled,
+  maskRefusalProvesUnbooked,
   maskRefused,
 } from 'components/managers/tech-card/components/design/playground/mask/mask-upload';
 export {
   ledgerSend,
   ledgerSettle,
+  operatorKey,
 } from 'components/managers/tech-card/components/design/render/run-ledger';
 // G-03 · backend d8b7bca: `submit_unconfirmed` said in words wherever a run's reason is shown.
 export {

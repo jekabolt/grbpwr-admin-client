@@ -1,4 +1,4 @@
-import { adminService } from 'api/api';
+import { abortableAdminService, adminService } from 'api/api';
 
 import { errorInfoReason } from '../../generation/refusal';
 import { operatorKey } from '../../render/run-ledger';
@@ -38,7 +38,8 @@ export { maskKey };
  * its mask goes up, so a proxy that took the request and never answered held the person in a
  * full-screen dialog until a reload. After `MASK_UPLOAD_DEADLINE_MS` (the run door's own 45 s) the
  * press fails with `MaskUploadStalled`: the pending upload is forgotten (the next press uploads
- * again) and the editor unlocks. An answer that arrives after that is dropped — not remembered, not
+ * again), its request is ABORTED (r3: through `abortableAdminService`, so a hung connection and the
+ * mask it carries are released, not left open per retry) and the editor unlocks. An answer that arrives after that is dropped — not remembered, not
  * kept with the paint — so it can never become the mask of a run nobody pressed for.
  *
  * ⚠ A MASK THE DOOR REFUSED IS FORGOTTEN (G-03 Codex r2 MINOR). `mask_invalid`, `mask_size_mismatch`,
@@ -52,8 +53,8 @@ export type MaskPainter = (
   width: number,
   height: number,
 ) => Promise<string | null>;
-/** Uploads a data URL and returns the media id. */
-export type MaskUploadFn = (dataUrl: string) => Promise<number>;
+/** Uploads a data URL and returns the media id; `signal` cancels the upload (the deadline). */
+export type MaskUploadFn = (dataUrl: string, signal?: AbortSignal) => Promise<number>;
 
 /** How long a mask may take to draw and go up before the press gives it up (the run door's 45 s). */
 export const MASK_UPLOAD_DEADLINE_MS = 45_000;
@@ -98,6 +99,37 @@ const MASK_REFUSALS = new Set([
 export const maskRefused = (error: unknown): boolean =>
   MASK_REFUSALS.has(errorInfoReason(error) ?? '');
 
+/**
+ * ═══ A MASK REFUSAL THAT PROVES THE KEY WAS NEVER BOOKED (G-03 Codex r3 MINOR) ═══════════════════
+ *
+ * After a silence the ledger keeps a key (`unsure`): the first send may have booked a run, and a
+ * refusal of the repeat says nothing about it — a gate may have closed meanwhile. The mask gate is
+ * different. The door runs it BEFORE the store looks the key up (`StartDesignRun`: every refusal
+ * precedes the booking), on the very same ids, and it decides from facts that do not change after
+ * an upload: the PNG's bytes (`mask_invalid` «not a PNG», «not readable», «the picture itself»), its
+ * size against the source's (`mask_size_mismatch`), its painted pixels (`mask_empty`), the id being
+ * set (`mask_required`). The first send carried the same ids, met the same facts at the same gate,
+ * and was refused the same way — so nothing was ever booked under this key, and it may be freed.
+ *
+ * ONE EXCEPTION: «the mask picture does not exist». A row can be deleted AFTER the first send was
+ * booked, so that refusal proves nothing about the first send; its key is kept.
+ */
+export function maskRefusalProvesUnbooked(error: unknown): boolean {
+  if (!maskRefused(error)) return false;
+  return errorInfoWhy(error) !== 'the mask picture does not exist';
+}
+
+/** `ErrorInfo.metadata.why` of a refusal (the door's words for which mask fact failed). */
+function errorInfoWhy(error: unknown): string | undefined {
+  const details = (error as { details?: unknown } | null)?.details;
+  if (!Array.isArray(details)) return undefined;
+  for (const d of details) {
+    const why = (d as { metadata?: { why?: unknown } } | null)?.metadata?.why;
+    if (typeof why === 'string') return why;
+  }
+  return undefined;
+}
+
 /** Where an uploader may also keep an uploaded id beyond its own memory (`mask-draft.ts`). */
 export type MaskIdStore = {
   recall: (mediaId: number, key: string) => number | undefined;
@@ -122,10 +154,12 @@ export function createMaskUploader(
       if (kept !== undefined && kept > 0) id = Promise.resolve(kept);
       else {
         let abandoned = false;
+        const abort = new AbortController();
         const work = (async () => {
           const dataUrl = await paint(strokes, width, height);
           if (!dataUrl) throw new MaskNotDrawn(width, height);
-          const got = await upload(dataUrl);
+          if (abandoned) throw new MaskUploadStalled(deadlineMs);
+          const got = await upload(dataUrl, abort.signal);
           if (!(got > 0)) throw new Error('the mask went up but came back without an id');
           // Given up meanwhile: this id is nobody's mask (see the file head).
           if (!abandoned) store?.keep(mediaId, key, got);
@@ -135,6 +169,7 @@ export function createMaskUploader(
           const timer = setTimeout(() => {
             abandoned = true;
             reject(new MaskUploadStalled(deadlineMs));
+            abort.abort();
           }, deadlineMs);
           work.then(
             (got) => {
@@ -198,10 +233,12 @@ export const maskDataUrl: MaskPainter = async (strokes, width, height) => {
 };
 
 /** The verbatim upload (`preserve_original`: the PNG the door reads is the PNG painted here). */
-export const uploadMask: MaskUploadFn = async (dataUrl) => {
-  const response = await adminService.UploadContentImage({
-    rawB64Image: dataUrl,
-    preserveOriginal: true,
-  });
+export const uploadMask: MaskUploadFn = async (dataUrl, signal) => {
+  const response = await (signal ? abortableAdminService(signal) : adminService).UploadContentImage(
+    {
+      rawB64Image: dataUrl,
+      preserveOriginal: true,
+    },
+  );
   return response.media?.id ?? 0;
 };

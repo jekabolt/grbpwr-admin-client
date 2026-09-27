@@ -282,6 +282,15 @@
 //   node scripts/playground-registry-probe.mjs --mutate-late-mask    поздний id хранится → AE
 //   node scripts/playground-registry-probe.mjs --mutate-mask-forget  отказанная маска помнится → AE
 //   node scripts/playground-registry-probe.mjs --mutate-ledger-freed журнал не говорит «освобождён» → AE
+//   AF · (G-03 Codex r3) журнал закрывает ключ только по его id и оператору отправки (поздний id1 не
+//        трогает id2 того же запроса); ledgerSend говорит «записан ли»; отказ маски, решённый по её
+//        байтам, освобождает ключ и после тишины («маски нет» — нет); чтение EXIF со сроком и без
+//        кэша сбоя; брошенная загрузка маски оборвана.
+//   node scripts/playground-registry-probe.mjs --mutate-settle-any-id  закрытие без сравнения id → AF
+//   node scripts/playground-registry-probe.mjs --mutate-ledger-stored-lie журнал всегда «записан» → AF
+//   node scripts/playground-registry-probe.mjs --mutate-orientation-hang у чтения EXIF нет срока → AF
+//   node scripts/playground-registry-probe.mjs --mutate-mask-void    «маски нет» тоже «не заведён» → AF
+//   node scripts/playground-registry-probe.mjs --mutate-upload-no-abort брошенная загрузка не обрывается → AF
 //   node scripts/playground-registry-probe.mjs --mutate-extend-list  Extend снова только по run_kinds → AA
 //   node scripts/playground-registry-probe.mjs --mutate-source-cap   18 МП не отказывается даром → AA, AE
 //   node scripts/playground-registry-probe.mjs --mutate-waiting-words paid_collect_waiting без слов → AD
@@ -380,6 +389,11 @@ const MUT = {
   lateMask: process.argv.includes('--mutate-late-mask'),
   maskForget: process.argv.includes('--mutate-mask-forget'),
   ledgerFreed: process.argv.includes('--mutate-ledger-freed'),
+  settleAnyId: process.argv.includes('--mutate-settle-any-id'),
+  ledgerStoredLie: process.argv.includes('--mutate-ledger-stored-lie'),
+  orientationHang: process.argv.includes('--mutate-orientation-hang'),
+  maskVoid: process.argv.includes('--mutate-mask-void'),
+  uploadNoAbort: process.argv.includes('--mutate-upload-no-abort'),
   extendList: process.argv.includes('--mutate-extend-list'),
   sourceCap: process.argv.includes('--mutate-source-cap'),
   waitingWords: process.argv.includes('--mutate-waiting-words'),
@@ -948,6 +962,17 @@ if (MUT.inpaintRoute && retouchSwaps.length === 1)
     },
   });
 fileSwaps('c14-mask-once', /mask\/mask-upload\.ts$/, [
+  ...(MUT.maskVoid
+    ? [["return errorInfoWhy(error) !== 'the mask picture does not exist';", 'return true;']]
+    : []),
+  ...(MUT.uploadNoAbort
+    ? [
+        [
+          '            reject(new MaskUploadStalled(deadlineMs));\n            abort.abort();',
+          '            reject(new MaskUploadStalled(deadlineMs));',
+        ],
+      ]
+    : []),
   ...(MUT.maskOnce ? [['if (held) return held;', '']] : []),
   ...(MUT.maskStore
     ? [['const kept = store?.recall(mediaId, key);', 'const kept = undefined;']]
@@ -988,10 +1013,17 @@ fileSwaps(
     ? [["  paid_collect_waiting: 'already paid, waiting to collect the result',\n", '']]
     : [],
 );
+fileSwaps('g03r2-ledger-freed', /render\/run-ledger\.ts$/, [
+  ...(MUT.ledgerFreed ? [['    freed = true;\n', '']] : []),
+  ...(MUT.settleAnyId ? [['if (!found || found.id !== id)', 'if (!found)']] : []),
+  ...(MUT.ledgerStoredLie
+    ? [['  } catch {\n    return false;\n  }', '  } catch {\n    return true;\n  }']]
+    : []),
+]);
 fileSwaps(
-  'g03r2-ledger-freed',
-  /render\/run-ledger\.ts$/,
-  MUT.ledgerFreed ? [['    freed = true;\n', '']] : [],
+  'g03r3-orientation-deadline',
+  /mask\/orientation\.ts$/,
+  MUT.orientationHang ? [['        }, deadlineMs);', '        }, 1e9);']] : [],
 );
 fileSwaps(
   'g03-canvas-cap',
@@ -5178,18 +5210,207 @@ await (async () => {
   );
 
   // ── the ledger says whether a refusal freed the key (only then is a mask forgotten) ──
+  const OP = M.operatorKey();
   const fp = 'fp-ledger';
-  M.ledgerSend(7, 'probe', fp);
-  const refusedClean = M.ledgerSettle(7, 'probe', fp, 'refused');
-  M.ledgerSend(7, 'probe', fp);
-  M.ledgerSettle(7, 'probe', fp, 'unknown');
-  M.ledgerSend(7, 'probe', fp);
-  const refusedAfterSilence = M.ledgerSettle(7, 'probe', fp, 'refused');
-  const accepted = M.ledgerSettle(7, 'probe', fp, 'accepted');
+  const s1 = M.ledgerSend(7, 'probe', fp, OP);
+  const refusedClean = M.ledgerSettle(7, 'probe', fp, 'refused', s1.id, OP).freed;
+  const s2 = M.ledgerSend(7, 'probe', fp, OP);
+  M.ledgerSettle(7, 'probe', fp, 'unknown', s2.id, OP);
+  M.ledgerSend(7, 'probe', fp, OP);
+  const refusedAfterSilence = M.ledgerSettle(7, 'probe', fp, 'refused', s2.id, OP).freed;
+  const accepted = M.ledgerSettle(7, 'probe', fp, 'accepted', s2.id, OP).freed;
   ck(
     refusedClean === true && refusedAfterSilence === false && accepted === true,
     'журнал: отказ — ключ освобождён (true); отказ повтора после тишины — ключ держится (false)',
     `${refusedClean} ${refusedAfterSilence} ${accepted}`,
+  );
+  delete globalThis.window;
+})();
+
+// ─── AF · G-03 Codex r3: ключ по id, журнал говорит «записан», срок чтения картинки, отказ маски ──
+head(
+  'AF',
+  'G-03 r3: сравни-и-закрой по id и оператору, «записан ли ключ», срок EXIF, отказ маски после тишины',
+);
+await (async () => {
+  const jwt = (sub) => `x.${Buffer.from(JSON.stringify({ sub })).toString('base64url')}.y`;
+  const session = new Map();
+  let full = false;
+  const local = new Map([['authToken', jwt('operator-a')]]);
+  globalThis.window = {
+    sessionStorage: {
+      getItem: (k) => session.get(k) ?? null,
+      setItem: (k, v) => {
+        if (full) throw new Error('QuotaExceededError');
+        session.set(k, String(v));
+      },
+    },
+    localStorage: { getItem: (k) => local.get(k) ?? null },
+  };
+  const opA = M.operatorKey();
+  const fp = 'fp-r3';
+  // A/id1 goes out, its answer is lost; the retry of id1 is accepted
+  const a = M.ledgerSend(7, 'r3', fp, opA);
+  M.ledgerSettle(7, 'r3', fp, 'unknown', a.id, opA);
+  const retry = M.ledgerSend(7, 'r3', fp, opA);
+  const retryAccepted = M.ledgerSettle(7, 'r3', fp, 'accepted', retry.id, opA);
+  // the same request is pressed again: a new intent, a new key
+  const b = M.ledgerSend(7, 'r3', fp, opA);
+  // A's ORIGINAL answer arrives now, late
+  const lateA = M.ledgerSettle(7, 'r3', fp, 'accepted', a.id, opA);
+  const bRetry = M.ledgerSend(7, 'r3', fp, opA);
+  ck(
+    retry.id === a.id &&
+      retryAccepted.matched &&
+      b.id !== a.id &&
+      lateA.matched === false &&
+      lateA.freed === false &&
+      bRetry.id === b.id,
+    'BLOCKER r3: поздний ответ id1 не трогает ключ id2 того же запроса — повтор B несёт id2, не id3',
+    JSON.stringify({ a: a.id, b: b.id, bRetry: bRetry.id, lateA }),
+  );
+  // the operator of the SEND: an answer read after B signs in settles A's namespace only
+  local.set('authToken', jwt('operator-b'));
+  const opB = M.operatorKey();
+  const bOwn = M.ledgerSend(7, 'r3', 'fp-op', opB);
+  const aOwn = M.ledgerSend(7, 'r3', 'fp-op', opA);
+  const settledA = M.ledgerSettle(7, 'r3', 'fp-op', 'accepted', aOwn.id, opA);
+  const crossed = M.ledgerSettle(7, 'r3', 'fp-op', 'accepted', aOwn.id, opB);
+  ck(
+    opA !== opB &&
+      settledA.matched &&
+      !crossed.matched &&
+      M.ledgerSend(7, 'r3', 'fp-op', opB).id === bOwn.id,
+    'оператор взят при отправке: ответ A закрывает ключ A, ключ B того же запроса цел',
+  );
+  local.set('authToken', jwt('operator-a'));
+  // MAJOR r3: the ledger says whether its entry reached sessionStorage
+  const kept = M.ledgerSend(7, 'r3', 'fp-store', opA);
+  full = true;
+  const lost = M.ledgerSend(7, 'r3', 'fp-store-2', opA);
+  full = false;
+  ck(
+    kept.stored === true && lost.stored === false && !!lost.id,
+    'ledgerSend: запись дошла — stored true; квота — stored false (id всё равно есть в памяти)',
+  );
+  // MINOR r3: a mask refusal of the same id after a silence frees the key ('void')
+  const u = M.ledgerSend(7, 'r3', 'fp-void', opA);
+  M.ledgerSettle(7, 'r3', 'fp-void', 'unknown', u.id, opA);
+  M.ledgerSend(7, 'r3', 'fp-void', opA);
+  const voided = M.ledgerSettle(7, 'r3', 'fp-void', 'void', u.id, opA);
+  const refusal = (reason, why) => ({
+    status: 400,
+    details: [
+      { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason, metadata: why ? { why } : {} },
+    ],
+  });
+  ck(
+    voided.matched && voided.freed && M.ledgerSend(7, 'r3', 'fp-void', opA).id !== u.id,
+    'отказ, доказывающий «не заведён» (void), освобождает ключ и после тишины',
+  );
+  ck(
+    M.maskRefusalProvesUnbooked(refusal('mask_invalid', 'it is not a readable PNG')) &&
+      M.maskRefusalProvesUnbooked(refusal('mask_size_mismatch')) &&
+      M.maskRefusalProvesUnbooked(refusal('mask_empty')) &&
+      !M.maskRefusalProvesUnbooked(refusal('mask_invalid', 'the mask picture does not exist')) &&
+      !M.maskRefusalProvesUnbooked(refusal('words_required')),
+    'доказывают: байты/размер/пустота маски; НЕ доказывают: «маски больше нет» и прочие отказы',
+  );
+
+  // MAJOR r3: reading the shown file has a deadline, and a timed-out read is not cached
+  const realFetch = globalThis.fetch;
+  let fetches = 0;
+  let firstSignal;
+  const jpeg6 = Uint8Array.from([
+    0xff,
+    0xd8,
+    0xff,
+    0xe1,
+    0,
+    34,
+    ...[...'Exif\0\0'].map((c) => c.charCodeAt(0)),
+    0x4d,
+    0x4d,
+    0,
+    42,
+    0,
+    0,
+    0,
+    8,
+    0,
+    1,
+    0x01,
+    0x12,
+    0,
+    3,
+    0,
+    0,
+    0,
+    1,
+    0,
+    6,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0xff,
+    0xda,
+    0,
+    2,
+    0xff,
+    0xd9,
+  ]);
+  globalThis.fetch = (url, init) => {
+    fetches++;
+    if (fetches === 1) {
+      firstSignal = init?.signal;
+      return new Promise(() => {}); // a proxy that never answers, and ignores the abort
+    }
+    return Promise.resolve(new Response(jpeg6));
+  };
+  const first = await Promise.race([
+    M.orientationOf('https://x/hang.jpg', 60).then(
+      (o) => o,
+      (e) => e,
+    ),
+    new Promise((r) => setTimeout(() => r('still reading'), 400)),
+  ]);
+  const second = await Promise.race([
+    M.orientationOf('https://x/hang.jpg', 60).catch((e) => e),
+    new Promise((r) => setTimeout(() => r('still reading'), 400)),
+  ]);
+  globalThis.fetch = realFetch;
+  ck(
+    first instanceof M.OrientationTimeout && firstSignal?.aborted === true,
+    'чтение картинки без ответа: по сроку — отказ OrientationTimeout, запрос оборван (abort)',
+    String(first?.message ?? first),
+  );
+  ck(
+    second === 6 && fetches === 2,
+    'сорванное чтение не кэшируется: повторное открытие читает снова и получает тег 6',
+    `${second} (${fetches})`,
+  );
+
+  // MINOR r3: the given-up mask upload is aborted
+  let uploadSignal;
+  const hung = M.createMaskUploader(
+    async () => 'data:image/png;base64,AA',
+    (_url, signal) => {
+      uploadSignal = signal;
+      return new Promise(() => {});
+    },
+    undefined,
+    60,
+  );
+  const gaveUp = await Promise.race([
+    hung.maskFor(1, [{ size: 0.03, points: [{ x: 0.5, y: 0.5 }] }], 10, 10).catch((e) => e),
+    new Promise((r) => setTimeout(() => r('hung'), 400)),
+  ]);
+  ck(
+    gaveUp instanceof M.MaskUploadStalled && uploadSignal?.aborted === true,
+    'брошенная загрузка маски ОБОРВАНА (сигнал отменён), а не висит',
   );
   delete globalThis.window;
 })();
