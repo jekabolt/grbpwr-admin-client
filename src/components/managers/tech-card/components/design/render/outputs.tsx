@@ -1313,7 +1313,15 @@ export function OutputsSection({
                         обязана остаться на месте и сказать почему.
 
                         Ширина и метрика — ряда дверей (F-9): `flex-1` ячейке, `h-5 bg-bgColor`
-                        кнопке, как у соседей. */}
+                        кнопке, как у соседей.
+
+                        ⚠ ЛИЦО ОТКАЗА — ОДНОЙ СТРОКОЙ И В СВОЕЙ КОРОБКЕ (O-57 r2). Рядом с `▾`
+                        двери достаётся 110px, и «APPLY SPLITTED» в `InertDoor` ложилось на вторую
+                        строку, вылезало из `h-5` и наезжало на строку причины (замерено снимком).
+                        С r2 отказ стоит чаще (семпл-лист рядом с колорвеями без B7, все столбцы
+                        архивные), поэтому погашенной кнопке отсюда отдаются `nowrap` и поля `px-0.5`:
+                        с полями `xs` подпись одной строкой вылезала бы за рамку на 5px. Селектор
+                        `[data-inert]` — обёртка `InertDoor`: живую дверь правило не трогает. */}
                     {(() => {
                       const rootId = picture.id ?? 0;
                       const own = colorwayOf(picture);
@@ -1333,7 +1341,7 @@ export function OutputsSection({
                           noun='render'
                           refusal={applyRefusalFor(rootId)}
                           onCreateColorway={own === 0 && adopts ? onCreateColorway : undefined}
-                          className='min-w-0 flex-1 [&>button]:h-5 [&>button]:bg-bgColor'
+                          className='min-w-0 flex-1 [&>button]:h-5 [&>button]:bg-bgColor [&[data-inert]>button]:whitespace-nowrap [&[data-inert]>button]:px-0.5'
                           doorClassName='h-5 bg-bgColor'
                         />
                       );
