@@ -6,10 +6,12 @@ import type {
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
+import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
+import type { TechCardFormData } from '../../schema';
 import { isPickablePicture } from '../band-feed';
 import {
   COLORWAY_NONE,
@@ -21,6 +23,7 @@ import {
 import { displayDetailName, readBench, refBenchKind } from '../bench-slot';
 import { pictureHandle } from '../handles';
 import { VectorModal } from '../modals';
+import type { VectorReplace } from '../modals/vector-modal';
 import { usePickMode } from '../pick-mode';
 import { PictureTile } from '../picture-tile';
 import { mixedInputNote, provenanceLabel, readProvenance } from '../provenance';
@@ -29,7 +32,7 @@ import { useDesignWrites } from '../use-design-band';
 import { isPictureHidden } from '../visibility';
 import { isActiveView, isLegacyView, normaliseViewKey, viewLabel } from '../views';
 import { closeSurface, openSurface } from './bench-store';
-import { compositeTail, readComposite, splitVerb } from './composite';
+import { compositeTail, isCutOut, readComposite, splitVerb } from './composite';
 import { SlotPicker } from './slot-picker';
 import { thumbUrl } from './thumb';
 
@@ -140,6 +143,83 @@ function kindWord(run: Pick<common_DesignRun, 'kind'>, rep: Representation | nul
   return rep ? REP_NOUN[rep] : kind || 'run';
 }
 
+/* ─────────────────────── «overwrite» — when it is closed (O-53 phase 2) ─────────────────────── */
+
+/**
+ * HOW MANY PIECES CUT STRAIGHT OUT OF `sheetId` STILL STAND — the server's `cut_sheet` guard, read
+ * off the row (`DesignStandingPieces`, entity/design_replace.go): a piece stands while anything
+ * grown from it is visible — the piece itself, an edit that took its place (`replaced_by`, followed
+ * to the end), a piece cut from any of those, and so on down the branch. Crops and edits inherit
+ * their parent's run, so the row IS the whole branch.
+ */
+function standingPieces(pictures: readonly common_DesignPicture[], sheetId: number): number {
+  const byId = new Map<number, common_DesignPicture>();
+  const cutsOf = new Map<number, number[]>();
+  for (const picture of pictures) {
+    const id = picture.id ?? 0;
+    if (id <= 0) continue;
+    byId.set(id, picture);
+    const parent = picture.derivedFrom ?? 0;
+    if (!isCutOut(picture) || parent <= 0) continue;
+    const list = cutsOf.get(parent);
+    if (list) list.push(id);
+    else cutsOf.set(parent, [id]);
+  }
+  let standing = 0;
+  for (const piece of cutsOf.get(sheetId) ?? []) {
+    const stack = [piece];
+    const seen = new Set<number>([sheetId]);
+    let stands = false;
+    while (stack.length && !stands) {
+      const id = stack.pop() ?? 0;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const node = byId.get(id);
+      if (!node) continue;
+      if (!isPictureHidden(node)) stands = true;
+      stack.push(...(cutsOf.get(id) ?? []));
+      if ((node.replacedBy ?? 0) > 0) stack.push(node.replacedBy ?? 0);
+    }
+    if (stands) standing += 1;
+  }
+  return standing;
+}
+
+/**
+ * WHY «OVERWRITE» IS CLOSED FOR THIS PICTURE, as the end of «overwrite is closed: …» — or null.
+ * 07-FLAT-WORKBENCH.md §3c/3d, in this order:
+ *   · the server predates the verb — `replaced_by` ABSENT (not 0) on the read; the gateway emits
+ *     the field on every picture of a server that has it (proto: DesignPicture.replaced_by);
+ *   · an edit already took its place (only a picture held under an open editor is still drawn so on
+ *     the workbench — `outputPlan`'s `keep`);
+ *   · a sheet with pieces standing: they would stay cut from the original (`cut_sheet`);
+ *   · the original is on the card's technical sheet (`technicalMedia`): `documentPlates` lists the
+ *     card's media first and the bench plate after it, so the edit taking the slot would print a
+ *     SECOND front beside the original — and its callouts would stay pinned to the original.
+ */
+function overwriteClosed(
+  picture: common_DesignPicture,
+  siblings: readonly common_DesignPicture[],
+  form: { technicalMedia?: { mediaId?: number }[]; callouts?: { mediaId?: number }[] } | null,
+): string | null {
+  if (picture.replacedBy === undefined) return 'this server cannot replace a picture yet';
+  if ((picture.replacedBy ?? 0) > 0)
+    return 'an edit has already taken this picture’s place — edit that one instead';
+  const pieces = standingPieces(siblings, picture.id ?? 0);
+  if (pieces > 0)
+    return pieces === 1
+      ? 'this sheet is already cut into 1 piece and it stays cut from the original — edit the piece instead'
+      : `this sheet is already cut into ${pieces} pieces and they stay cut from the original — edit a piece instead`;
+  const mediaId = picture.media?.id ?? 0;
+  if (mediaId > 0 && (form?.technicalMedia ?? []).some((m) => (m.mediaId ?? 0) === mediaId)) {
+    const callouts = (form?.callouts ?? []).filter((c) => (c.mediaId ?? 0) === mediaId).length;
+    return callouts > 0
+      ? `${callouts} callout${callouts === 1 ? '' : 's'} on the sheet ${callouts === 1 ? 'is' : 'are'} pinned to the original and would stay with it`
+      : 'the original is on the card’s technical sheet and would stay there beside the edit';
+  }
+  return null;
+}
+
 /* ────────────────────────────── the tile ────────────────────────────── */
 
 /**
@@ -156,6 +236,8 @@ export function RunTile({
   band,
   techCardId,
   picture,
+  siblings,
+  workbench,
   rep,
   cardFit,
   runFit,
@@ -171,6 +253,13 @@ export function RunTile({
   band: GetDesignBandResponse;
   techCardId: number;
   picture: common_DesignPicture;
+  /** Every picture of the run row this tile stands in — the branch `overwrite` is judged by. */
+  siblings?: readonly common_DesignPicture[];
+  /**
+   * The tile stands on the latest-generation WORKBENCH: its editor asks «overwrite or save as new»
+   * (`VectorModal.replace`). In the history an edit is always new.
+   */
+  workbench?: boolean;
   /** The kind of the RUN this tile stands in — the row knows it, the picture does not (E-12). */
   rep: Representation | null;
   cardFit: string;
@@ -189,6 +278,8 @@ export function RunTile({
 }) {
   const pick = usePickMode();
   const { setBenchSlot } = useDesignWrites(techCardId);
+  /** The card form — `technicalMedia` and `callouts`, read as the editor opens. */
+  const form = useFormContext<TechCardFormData>();
   /** Правка прямо в истории (V-10): состояние у плитки — редактор открыт над КОНКРЕТНОЙ картинкой. */
   const [editing, setEditing] = useState(false);
 
@@ -206,6 +297,12 @@ export function RunTile({
     return () => closeSurface(techCardId, surfaceKey);
   }, [editing, techCardId, surfaceKey]);
   const hidden = isPictureHidden(picture);
+  /**
+   * AN EDIT TOOK THIS PICTURE'S PLACE (O-53 phase 2, `replaced_by`). Nothing about the picture
+   * changed — it is not hidden, its pixels and crops are its own; the history says so under it,
+   * «replaced by an edit», and no cut is offered (the server refuses one: `already_replaced`).
+   */
+  const replaced = (picture.replacedBy ?? 0) > 0;
   // WHAT THIS FILE DECLARES ABOUT ITSELF — see `composite.tsx`. Nothing here infers compositeness
   // from what the run ASKED for.
   const facts = readComposite(band, picture);
@@ -248,6 +345,17 @@ export function RunTile({
    */
   const badge = composite ? `${facts.views.length} views` : inSlot ? inSlot.badge : undefined;
   const place = inSlot ? inSlot.place : 'not standing';
+  /**
+   * «REPLACED BY AN EDIT» TAKES THE CAPTION'S ROOM (O-53 phase 2). It is the one fact about the tile
+   * that the frame does not show, and «flat · replaced by an edit» does not fit the history's 148px
+   * track — measured: it cut at «replaced by an e…». The kind word goes (only a flat is ever replaced:
+   * the question lives on the FLAT workbench); a slot the original was put back into stays named.
+   */
+  const replacedCaption = replaced
+    ? inSlot
+      ? `${inSlot.place} · replaced by an edit`
+      : 'replaced by an edit'
+    : null;
 
   // `flat · front` — the mock-up's `picName`. The address (`run 7 · b`), the provenance and the
   // composite tail ride in the title: the row already says which run, and the caption is one line.
@@ -260,14 +368,16 @@ export function RunTile({
   // бейдж `N views` уже несёт единственный факт, который эта строка повторяла словами.
   const caption = (
     <>
-      {!composite && (
+      {/* A REPLACED SHEET SAYS SO TOO: the owner took «flat · sheet of 6» off the sheet because the
+          badge already said it; «replaced by an edit» is a state no badge carries. */}
+      {(!composite || replaced) && (
         <Text
           size='micro'
           component='p'
           className='mt-1 truncate'
-          title={`${handle} · ${provenanceLabel(provenance)}${compositeTail(facts)}${mixed ? ` · ${mixed}` : ''}`}
+          title={`${handle} · ${provenanceLabel(provenance)}${compositeTail(facts)}${mixed ? ` · ${mixed}` : ''}${replaced ? ' · replaced by an edit: the edit stands in its place in the latest generation, and this picture stays here' : ''}`}
         >
-          {patternTile && !inSlot ? word : `${word} · ${place}`}
+          {replacedCaption ?? (patternTile && !inSlot ? word : `${word} · ${place}`)}
         </Text>
       )}
       {fitMismatch && (
@@ -402,7 +512,7 @@ export function RunTile({
            человек ОБЪЯВЛЯЕТ свой лист многовидовым (полосы входов показывают колоды только для
            машинных композитов). У уже разрезанной угла нет (F-8). У файла 3D — тем более (E-32). */
         onSplit={
-          !disabled && !hidden && !threedFile && facts.splitInto === 0
+          !disabled && !hidden && !replaced && !threedFile && facts.splitInto === 0
             ? {
                 onClick: () => onSplit(picture),
                 ariaLabel: `split ${handle} into views`,
@@ -422,7 +532,9 @@ export function RunTile({
                 },
                 ariaLabel: `edit ${handle} — draw over this picture`,
                 title:
-                  'draw over this picture — saving makes a NEW picture in this same run row; the original is never overwritten' +
+                  (workbench
+                    ? 'draw over this picture — saving asks whether the edit takes this picture’s place in the latest generation or stands beside it; the original stays in the history either way'
+                    : 'draw over this picture — saving makes a NEW picture in this same run row; the original is never overwritten') +
                   (composite
                     ? '. This file holds several views at once, so the edit keeps them together — cut it into views first if you want them apart'
                     : '') +
@@ -437,7 +549,11 @@ export function RunTile({
       {footer && <div className='mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5'>{footer}</div>}
 
       {/* Редактор монтируется только раскрытым. `slot` НЕ ПЕРЕДАЁТСЯ НАРОЧНО: плитка истории — не
-          слот верстака, и результат правки не обязан никуда вставать. */}
+          слот верстака, и результат правки не обязан никуда вставать. На ВЕРСТАКЕ правка
+          спрашивает «overwrite или save as new» (`replace`): слот, где стоит картинка, переезжает
+          на правку СЕРВЕРОМ, в той же транзакции, — клиент его не пишет. Причины закрытой
+          перезаписи читаются в момент открытия: пока редактор открыт, ни выноски, ни куски
+          поменяться под ним не могут. */}
       {editing && (
         <VectorModal
           open
@@ -446,6 +562,19 @@ export function RunTile({
           band={band}
           base={picture}
           slot={null}
+          replace={
+            workbench && pictureId > 0
+              ? ({
+                  pictureId,
+                  slotLabel: inSlot?.label ?? null,
+                  closed: overwriteClosed(
+                    picture,
+                    siblings ?? [picture],
+                    form ? (form.getValues() as Parameters<typeof overwriteClosed>[2]) : null,
+                  ),
+                } satisfies VectorReplace)
+              : null
+          }
           disabled={disabled}
         />
       )}

@@ -10,8 +10,8 @@ import { Tile, Tiles } from 'ui/components/tiles';
 
 import type { Representation } from '../bench-kinds';
 import { pictureHandle } from '../handles';
-import { cropFamilies } from './composite';
 import { CropDeck } from './crop-deck';
+import { outputPlan, type OutputPlan } from './run-gallery';
 import { GapPill } from './run-panel';
 import {
   expectedTileCount,
@@ -79,6 +79,7 @@ export function RunOutputs({
   onZoomPicture,
   onSplit,
   workbench,
+  plan: planProp,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -100,11 +101,18 @@ export function RunOutputs({
   onZoomPicture?: (pictureId: number) => void;
   onSplit: (picture: common_DesignPicture) => void;
   /**
-   * THE HOST IS THE WORKBENCH UNDER GENERATE, not a history row. Today it changes one thing — the
-   * grid runs on the block's 190px track instead of the history's 148px; the tiles, their doors and
-   * the deck are the history's own.
+   * THE HOST IS THE WORKBENCH UNDER GENERATE, not a history row. It changes two things: the grid
+   * runs on the block's 190px track instead of the history's 148px, and each tile's editor asks
+   * «overwrite or save as new» (`RunTile` → `VectorModal.replace`, O-53 phase 2). The doors and the
+   * deck are otherwise the history's own.
    */
   workbench?: boolean;
+  /**
+   * HOW THE ROW IS DRAWN — its cards and their decks (`outputPlan`). The workbench hands in its
+   * own, drawn by the heads of replacement chains and reused for its viewer row and deck memory;
+   * absent, the history's plan of every picture the run produced.
+   */
+  plan?: OutputPlan;
 }) {
   /**
    * Развёрнут ли ОТВЕТ текстового прогона (D-2). Отдельно от `meta ▸` строки: та дверь показывает,
@@ -117,8 +125,8 @@ export function RunOutputs({
   const live = isRunLive(run);
   /** EVERY PICTURE THE RUN PRODUCED, UNFILTERED (T-14): a stamped picture is marked, never dropped. */
   const pictures = run.pictures ?? [];
-  /** Which pictures of this row were cut out of which (H-10), from `derived_from`, inside this row. */
-  const families = useMemo(() => cropFamilies(pictures), [pictures]);
+  /** The cards of this row and the pieces behind each (H-10) — see `outputPlan`. */
+  const plan = useMemo(() => planProp ?? outputPlan(pictures), [planProp, pictures]);
   const status = runOutcomeNote(run);
   /** ПРОГОН, КОТОРЫЙ ОТВЕЧАЕТ СЛОВАМИ (D-2): черновик идеи возвращает текст, не картинки. */
   const textRun = isTextRun(run);
@@ -208,17 +216,17 @@ export function RunOutputs({
          же ряд, сразу за своим листом. Фрагмент не создаёт DOM-узла, поэтому `[&>*]:min-w-0` у
          `Tiles` по-прежнему достаётся самим плиткам. */
       <Tiles min={track}>
-        {pictures.map((picture) => {
+        {plan.cards.map(({ picture, members }) => {
           const pictureId = picture.id ?? 0;
-          // Кусок рисуется ТОЛЬКО под своим листом.
-          if (families.rootOf.has(pictureId)) return null;
-          const members = families.membersOf.get(pictureId) ?? [];
+          // Кусок рисуется ТОЛЬКО под своим листом: план уже разложил их по колодам.
           const deckOpen = openDeck === pictureId;
           const tile = (
             <RunTile
               band={band}
               techCardId={techCardId}
               picture={picture}
+              siblings={pictures}
+              workbench={workbench}
               rep={rep}
               cardFit={cardFit}
               runFit={(run.fitAtLaunch ?? '').trim()}
@@ -261,6 +269,8 @@ export function RunOutputs({
                     band={band}
                     techCardId={techCardId}
                     picture={member}
+                    siblings={pictures}
+                    workbench={workbench}
                     rep={rep}
                     cardFit={cardFit}
                     runFit={(run.fitAtLaunch ?? '').trim()}

@@ -24,8 +24,7 @@ import {
   releasePin,
   useBench,
 } from './bench-store';
-import { cropFamilies } from './composite';
-import { deckAfterZoom, deckOfRuns, runsGallery } from './run-gallery';
+import { deckAfterZoom, deckOfRuns, outputPlan, runsGallery, type OutputPlan } from './run-gallery';
 import { RunOutputs } from './run-outputs';
 import {
   isRunLive,
@@ -71,6 +70,12 @@ import { useElapsed, useRunById } from './use-generation';
  * elsewhere (a history tile, the viewer opened from another block) only holds the workbench while it
  * is open. A kept run that newer rows push off the band's first page is NOT archived by that (27.09,
  * D-49): it is read by id from then on, and only an archival seen on such a read lets it go.
+ *
+ * WHAT STANDS NOW, NOT EVERYTHING FILED (27.09, O-53 phase 2). An edit made here asks «overwrite or
+ * save as new» (`RunTile` → `VectorModal.replace`); an overwrite stamps the original `replaced_by`,
+ * and this row draws only the HEAD of each replacement chain, in the original's place — as a card
+ * or as a piece in its deck (`outputPlan` with `heads`). A picture under an open editor is drawn as
+ * itself until the editor closes (`keep`). The history keeps every link, captioned.
  *
  * ONE COPY OF THE RUN'S TILES. The history below draws the run that stands here as its header line
  * alone — «run 12 · on the bench ↑» (`generation-history.tsx`), so the viewer row, the deck and the
@@ -140,18 +145,27 @@ function skippedNote(skipped: readonly common_DesignRun[]): { text: string; titl
   };
 }
 
-/** The decks of one run in display order: every sheet that has cut pieces, and how many. */
-function decksOf(run: common_DesignRun | null): { root: number; count: number }[] {
-  if (!run) return [];
-  const pictures = run.pictures ?? [];
-  const families = cropFamilies(pictures);
-  const out: { root: number; count: number }[] = [];
-  for (const picture of pictures) {
-    const id = picture.id ?? 0;
-    const members = families.membersOf.get(id);
-    if (members?.length && !families.rootOf.has(id)) out.push({ root: id, count: members.length });
+/** The decks of the row in display order: each card with pieces behind it, and how many. */
+function decksOf(plan: OutputPlan | null): { root: number; count: number }[] {
+  if (!plan) return [];
+  return plan.cards
+    .filter((card) => card.members.length > 0)
+    .map((card) => ({ root: card.picture.id ?? 0, count: card.members.length }));
+}
+
+/**
+ * Pictures an editor is open over, anywhere on the step (`RunTile`'s `edit:<id>` surfaces), as a
+ * sorted key — the store hands a new map on every write of any surface, the key changes only when
+ * this set does.
+ */
+function editedKey(surfaces: ReadonlyMap<string, number>): string {
+  const ids: number[] = [];
+  for (const key of surfaces.keys()) {
+    if (!key.startsWith('edit:')) continue;
+    const id = Number(key.slice('edit:'.length));
+    if (id > 0) ids.push(id);
   }
-  return out;
+  return ids.sort((a, b) => a - b).join(',');
 }
 
 export function LatestGeneration({
@@ -255,7 +269,14 @@ export function LatestGeneration({
    * Nothing else touches `openDeck` here: the person's own toggles and the E-4 fold stand until the
    * next run or the next split.
    */
-  const decks = useMemo(() => decksOf(run), [run]);
+  /** THE ROW AS DRAWN — heads in their originals' places; the tiles under an open editor kept. */
+  const editingKey = editedKey(bench.surfaces);
+  const plan = useMemo(() => {
+    if (!run) return null;
+    const keep = new Set(editingKey ? editingKey.split(',').map(Number) : []);
+    return outputPlan(run.pictures ?? [], { heads: true, keep });
+  }, [run, editingKey]);
+  const decks = useMemo(() => decksOf(plan), [plan]);
   const deckKey = `${techCardId}:${runId}|${decks.map((d) => `${d.root}x${d.count}`).join(',')}`;
   const [seen, setSeen] = useState<{
     card: number;
@@ -285,9 +306,15 @@ export function LatestGeneration({
   }
 
   /** The viewer row of THIS row: its pictures in the order shown, the open deck's pieces inside. */
-  const gallery = useMemo(() => runsGallery(run ? [run] : [], openDeck), [run, openDeck]);
+  const gallery = useMemo(
+    () => (run && plan ? runsGallery([run], openDeck, () => plan) : runsGallery([], openDeck)),
+    [run, plan, openDeck],
+  );
   const galleryGroup = useGalleryGroup(gallery.items);
-  const deckOf = useMemo(() => deckOfRuns(run ? [run] : []), [run]);
+  const deckOf = useMemo(
+    () => (run && plan ? deckOfRuns([run], () => plan) : new Map<number, number>()),
+    [run, plan],
+  );
 
   if (!run) return null;
 
@@ -352,6 +379,7 @@ export function LatestGeneration({
           setSplitting({ picture, handle: pictureHandle(picture) });
         }}
         workbench
+        plan={plan ?? undefined}
       />
 
       {/* A NEWER RUN, WHILE THIS ONE IS KEPT — one quiet line under the tiles; the click moves the
