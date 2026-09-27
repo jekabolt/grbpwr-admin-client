@@ -7,7 +7,7 @@ import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
 import GenericPopover from 'ui/components/popover';
 import Textarea from 'ui/components/text-area';
-import { extractFieldViolations } from 'utils/field-errors';
+import { extractFieldViolations, transportRefusal } from 'utils/field-errors';
 
 import { recentMenu } from '../card-recent';
 import { ideasFor, insertIdea } from '../ideas';
@@ -121,14 +121,20 @@ export function improveContext(opts: {
  * proven enum skew is retried in `improve` (Codex review of PR-03, MAJOR):
  *  · a field violation on `mode` («unknown_mode», or «required» where the gateway dropped the
  *    unknown name);
- *  · a detail-free 400 whose message names the enum — the member itself (`ENHANCE_TEXT_MODE_STEER`)
- *    or both «enum» and «mode» (protojson: `invalid value for enum field mode: "…"`).
- * Everything else is the request's own refusal and is said in its own words, never retried: a
- * detail-free 400 of any other shape (a content refusal), a violation on another field (a too-long
- * text), and above all a violation on `workflow` / `field_key` — that server KNOWS steer and does not
- * know this tool/field pair, so `improve` would only hide the mismatch.
+ *  · a detail-free 400 that the repository's ONE transport classifier (`transportRefusal`, the
+ *    canonical `proto: (line …)` prefix of the strict protojson gateway) calls a parse refusal AND
+ *    that names the member (`ENHANCE_TEXT_MODE_STEER`) or the `mode` field
+ *    (`proto: (line 1:32): invalid value for enum field mode: "ENHANCE_TEXT_MODE_STEER"`).
+ * Prose is never proof (Codex review r2, MAJOR): a business 400 «selected mode is outside the enabled
+ * model enum» has both words and no protojson prefix — it is the request's own refusal. Everything
+ * else is said in its own words, never retried: a detail-free 400 of any other shape (a content
+ * refusal, or a message naming the member without the protojson prefix), a violation on another
+ * field (a too-long text), and above all a violation on `workflow` / `field_key` — that server KNOWS
+ * steer and does not know this tool/field pair, so `improve` would only hide the mismatch.
  */
 const STEER_PAIR_FIELDS = new Set(['workflow', 'field_key', 'fieldKey']);
+/** protojson names the field it could not read: `enum field mode: …` / `unknown field "mode"`. */
+const STEER_MODE_FIELD = /\bfield "?mode\b/;
 
 function steerRefused(error: unknown): boolean {
   if ((error as { status?: number } | null)?.status !== 400) return false;
@@ -136,10 +142,9 @@ function steerRefused(error: unknown): boolean {
   if (violations.some((v) => STEER_PAIR_FIELDS.has(v.field))) return false;
   if (violations.some((v) => v.field === 'mode')) return true;
   if (violations.length > 0) return false;
-  const message = error instanceof Error ? error.message : '';
-  if (message.includes('ENHANCE_TEXT_MODE_STEER')) return true;
-  const lower = message.toLowerCase();
-  return lower.includes('enum') && lower.includes('mode');
+  const parse = transportRefusal(error);
+  if (parse === null) return false;
+  return parse.includes('ENHANCE_TEXT_MODE_STEER') || STEER_MODE_FIELD.test(parse);
 }
 
 /**

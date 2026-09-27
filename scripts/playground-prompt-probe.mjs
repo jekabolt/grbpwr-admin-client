@@ -48,11 +48,15 @@
 //       workflow / fieldKey поля (change_color/garment; в редакторе маски retouch_zone/change_text),
 //       контекст — тот же «Tool: … / This field: …», что у двери Ideas (и без ассистента на полосе,
 //       и в редакторе маски). Повтор в IMPROVE — ТОЛЬКО на доказанный перекос enum (Codex MAJOR):
-//       400 с нарушением на `mode`, или 400 без нарушений, чьё сообщение называет enum
-//       (`invalid value for enum field mode: "ENHANCE_TEXT_MODE_STEER"` / имя члена) — ОДИН повтор
-//       с тем же текстом и контекстом и БЕЗ пары, ответ в поле, без тоста. НЕ повторяются и говорят
-//       своё: 400 по полю text; 400 без нарушений иной формы (отказ по содержанию «refused: …»);
-//       400 с нарушением на `workflow` / `field_key` (сервер знает STEER, не знает пары).
+//       400 с нарушением на `mode`, или 400 без нарушений, которое канонический классификатор
+//       транспорта (`transportRefusal`, префикс `proto: (line …`) признаёт отказом разбора И которое
+//       называет член `ENHANCE_TEXT_MODE_STEER` или поле `mode` — ОДИН повтор с тем же текстом и
+//       контекстом и БЕЗ пары, ответ в поле, без тоста. НЕ повторяются и говорят своё: 400 по полю
+//       text; 400 без нарушений иной формы (отказ по содержанию «refused: …»); 400 без нарушений
+//       «selected mode is outside the enabled model enum» (есть и enum, и mode, нет префикса —
+//       проза не доказывает перекоса, Codex r2 MAJOR); 400 без нарушений, называющее член
+//       ENHANCE_TEXT_MODE_STEER без префикса protojson; 400 с нарушением на `workflow` /
+//       `field_key` (сервер знает STEER, не знает пары).
 //       Плейсхолдер редактора маски — «smooth clean fabric, the same colour and weave»; общее меню
 //       `ai ✦` (ENHANCE_MODES) — ровно improve/expand/shorten/prompt, без steer.
 //   --mutate-steer-mode      Improve снова в режиме improve                       → K
@@ -61,7 +65,9 @@
 //   --mutate-steer-any-400   любой 400 повторяется в improve                      → K
 //   --mutate-steer-detail-free любой 400 без нарушений повторяется (отказ по содержанию) → K
 //   --mutate-steer-pair-retry нарушение на workflow/field_key принято за перекос → K
-//   --mutate-steer-no-enum-text сообщение с enum не доказывает перекоса         → K
+//   --mutate-steer-no-enum-text канонический отказ protojson не доказывает перекоса → K
+//   --mutate-steer-prose-enum   снова прозаическая эвристика «enum && mode» / член где угодно → K
+//   --mutate-steer-member-anywhere член ENHANCE_TEXT_MODE_STEER без префикса — перекос → K
 //   --mutate-steer-no-pair   STEER уходит без workflow / fieldKey                 → K
 //   --mutate-steer-retry-pair повтор в improve несёт пару                         → K
 //   --mutate-mask-placeholder плейсхолдер маски снова про операцию               → K
@@ -107,6 +113,8 @@ const KNOWN = new Set([
   '--mutate-steer-detail-free',
   '--mutate-steer-pair-retry',
   '--mutate-steer-no-enum-text',
+  '--mutate-steer-prose-enum',
+  '--mutate-steer-member-anywhere',
   '--mutate-steer-no-pair',
   '--mutate-steer-retry-pair',
   '--mutate-mask-placeholder',
@@ -246,12 +254,30 @@ if (on('--mutate-steer-pair-retry'))
     'if (violations.some((v) => STEER_PAIR_FIELDS.has(v.field))) return false;',
     'if (violations.some((v) => STEER_PAIR_FIELDS.has(v.field))) return true;',
   );
+const STEER_PARSE =
+  '  const parse = transportRefusal(error);\n' +
+  '  if (parse === null) return false;\n' +
+  "  return parse.includes('ENHANCE_TEXT_MODE_STEER') || STEER_MODE_FIELD.test(parse);\n";
 if (on('--mutate-steer-no-enum-text'))
+  patch('steer-no-enum-text', PROMPT_FIELD, STEER_PARSE, '  return false;\n');
+// The r1 prose heuristic, verbatim: what Codex r2 held as MAJOR.
+if (on('--mutate-steer-prose-enum'))
   patch(
-    'steer-no-enum-text',
+    'steer-prose-enum',
     PROMPT_FIELD,
-    "if (message.includes('ENHANCE_TEXT_MODE_STEER')) return true;",
-    'return false;',
+    STEER_PARSE,
+    "  const message = error instanceof Error ? error.message : '';\n" +
+      "  if (message.includes('ENHANCE_TEXT_MODE_STEER')) return true;\n" +
+      '  const lower = message.toLowerCase();\n' +
+      "  return lower.includes('enum') && lower.includes('mode');\n",
+  );
+if (on('--mutate-steer-member-anywhere'))
+  patch(
+    'steer-member-anywhere',
+    PROMPT_FIELD,
+    STEER_PARSE,
+    "  if (error instanceof Error && error.message.includes('ENHANCE_TEXT_MODE_STEER')) return true;\n" +
+      STEER_PARSE,
   );
 if (on('--mutate-steer-no-pair'))
   patch('steer-no-pair', PROMPT_FIELD, 'workflow: workflowKey,\n          fieldKey,\n', '');
@@ -1124,10 +1150,6 @@ try {
         details: [],
       },
     ],
-    [
-      '400 без нарушений, сообщение называет член enum',
-      { status: 400, message: 'unknown value "ENHANCE_TEXT_MODE_STEER"' },
-    ],
   ]) {
     await fresh('change_color', OLD, { texts: { garment: 'the jaket' } });
     await answerEnhance(refuse, 'the cropped denim jacket');
@@ -1178,8 +1200,24 @@ try {
   );
 
   // Not a proven skew → no retry, the refusal's own words (Codex MAJOR): a detail-free content
-  // refusal, and a refusal of the tool/field pair by a server that knows STEER.
+  // refusal, and a refusal of the tool/field pair by a server that knows STEER. The boundary of the
+  // proof (Codex r2 MAJOR): prose that says «enum» and «mode», and even names the member, is not the
+  // strict gateway's parse refusal — only the canonical `proto: (line …` prefix is.
   for (const [name, refuse, words] of [
+    [
+      '400 без нарушений, проза «enum» и «mode» без префикса protojson',
+      {
+        status: 400,
+        message: 'selected mode is outside the enabled model enum',
+        details: [],
+      },
+      /could not improve: selected mode is outside the enabled model enum/,
+    ],
+    [
+      '400 без нарушений, член ENHANCE_TEXT_MODE_STEER без префикса protojson',
+      { status: 400, message: 'unknown value "ENHANCE_TEXT_MODE_STEER"', details: [] },
+      /could not improve: unknown value "ENHANCE_TEXT_MODE_STEER"/,
+    ],
     [
       '400 без нарушений, отказ по содержанию',
       { status: 400, message: 'refused: the text asks for a real person', details: [] },
