@@ -1537,7 +1537,9 @@ await inject();
     'read as «fix your form» rather than «this reads the saved card»',
   );
   ck(
-    (await panelText()).includes('unsaved changes are not analyzed — save first'),
+    (await panelText()).includes(
+      'unsaved changes are not analyzed yet — the card saves itself in a moment',
+    ),
     'and the caption says which card is actually being read',
   );
 }

@@ -937,7 +937,7 @@ export function ConstructionAudit({
   const analyzeCaption = aiUnavailable
     ? 'AI review is not available on this deployment'
     : dirty
-      ? 'unsaved changes are not analyzed — save first'
+      ? 'unsaved changes are not analyzed yet — the card saves itself in a moment'
       : '';
 
   const analyzeControl = techCardId ? (

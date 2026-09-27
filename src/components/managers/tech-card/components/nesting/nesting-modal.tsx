@@ -1515,7 +1515,7 @@ export function NestingModal({
           : "the marker's size is unknown — the block names carry no sizes, and the slot does not name one",
       );
     if (sizeUnsaved)
-      out.push('the size was added but the card is not saved — save the card first');
+      out.push('the size was added — the card is not saved yet');
     if (sizesWithoutPieces.length > 0)
       out.push(
         `the composition took sizes with not a single piece picked: ${sizesWithoutPieces.join(', ')}`,

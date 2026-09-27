@@ -144,12 +144,13 @@ const NO_CODES = new Set<string>();
  * же предложений разошлось бы с первым при первой же правке. Отсюда два вызова: первый спрашивает
  * ворота, которые не про поля (код — заглушка, занятых кодов нет), второй — только про код.
  *
- * ⚠ ЕДИНСТВЕННЫЙ ОТКАЗ, НАПИСАННЫЙ ЗДЕСЬ СВОИМИ СЛОВАМИ, — «save the card first», и это не
+ * ⚠ ЕДИНСТВЕННЫЙ ОТКАЗ, НАПИСАННЫЙ ЗДЕСЬ СВОИМИ СЛОВАМИ, — «the card is not saved yet», и это не
  * расхождение, а честность. У соседа причина — «рецепт ссылается на несохранённые строки BOM»; это
  * окно рецепта НЕ ПИШЕТ вовсе, и та половина довода была бы про то, чего оно не делает. Общая
  * половина — она же настоящая — остаётся: `CreateColorway` двигает `tech_card.lock_version`, и
- * следующий Save несохранённой карточки получил бы 409 (D11). Дверь названа теми же словами, чтобы
- * два экрана читались как одно правило.
+ * следующая запись несохранённой карточки получила бы 409 (D11). Отказ говорит теми же словами, что
+ * сосед («the card is not saved yet»), чтобы два экрана читались как одно правило; кнопки сохранения
+ * у карточки нет (O-60) — запись идёт сама, и отказ снимается, как только она легла.
  */
 export function createRefusal(i: CreateGateInput): string | null {
   const head = confirmRefusal({
@@ -164,7 +165,7 @@ export function createRefusal(i: CreateGateInput): string | null {
     boundCount: 1,
   });
   if (head) return head;
-  if (i.dirty) return 'save the card first — a new colourway bumps the card version, and your unsaved edits would then fail to save';
+  if (i.dirty) return 'the card is not saved yet — a new colourway bumps the card version, and your unsaved edits would then fail to save';
   if (!i.name) return 'give it a name — it is what the colourway is called';
   if (i.nameTaken) return 'a colourway with this name already exists';
   if (!i.pantone) return 'pick the pantone — it is the colour this colourway is dyed to';
