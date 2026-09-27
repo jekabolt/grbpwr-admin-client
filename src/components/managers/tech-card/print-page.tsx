@@ -9,8 +9,8 @@ import { useTechCardRelease } from 'components/managers/tech-card/components/use
 import { wireInt } from 'components/managers/tech-card/components/schema';
 import { useTechCardPrint } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
-import { useMemo, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { TechPackDocument } from './components/tech-pack-document';
@@ -146,6 +146,36 @@ export function TechCardPrint() {
     ...docDeps,
   ]);
 
+  // НАЗАД — один путь у двери «← back» и у Esc (O-65). Карточка открывает этот экран в той же
+  // вкладке, поэтому назад — это шаг по истории: карточка возвращается тем адресом, каким её
+  // оставили. Ключ 'default' значит, что вкладка началась прямо с печати (открыта отдельно или
+  // адрес вставлен руками) — шагать внутри приложения некуда, и путь ведёт на карточку.
+  // Один жест — один шаг: BrowserRouter меняет адрес внутри startTransition, и пока карточка
+  // рисуется, этот экран ещё стоит и принимает щелчки и Esc — второй navigate(-1) увёл бы на два
+  // шага назад.
+  const navigate = useNavigate();
+  const locationKey = useLocation().key;
+  const leaving = useRef(false);
+  const goBack = useCallback(() => {
+    if (leaving.current) return;
+    leaving.current = true;
+    if (locationKey !== 'default') navigate(-1);
+    else navigate(id ? `/tech-cards/${id}` : ROUTES.techCards);
+  }, [id, locationKey, navigate]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Не жест «назад»: Esc, который уже кто-то обработал; Esc набора через IME; автоповтор
+      // зажатой клавиши — это не новое нажатие. В поле ввода Esc принадлежит полю.
+      if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing || e.repeat) return;
+      const from = e.target as HTMLElement | null;
+      if (from?.isContentEditable || from?.closest?.('input, textarea, select')) return;
+      goBack();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [goBack]);
+
   return (
     <div className='mx-auto flex max-w-[230mm] flex-col gap-4 p-4 pb-10'>
       <style>{PRINT_CSS}</style>
@@ -153,7 +183,19 @@ export function TechCardPrint() {
       <div className='techpack-toolbar flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
         <div className='flex items-center gap-3'>
           <Button asChild variant='secondary' size='lg'>
-            <Link to={id ? `/tech-cards/${id}` : ROUTES.techCards}>← back</Link>
+            <Link
+              to={id ? `/tech-cards/${id}` : ROUTES.techCards}
+              title='back to the tech card · esc'
+              onClick={(e) => {
+                // Ссылка остаётся ссылкой: щелчок с модификатором или средней кнопкой открывает
+                // карточку по href, как прежде. Простой щелчок — тот же шаг назад, что и Esc.
+                if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                e.preventDefault();
+                goBack();
+              }}
+            >
+              ← back
+            </Link>
           </Button>
           <Text variant='uppercase' size='large'>
             tech pack — pdf
