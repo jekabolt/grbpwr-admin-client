@@ -53,6 +53,12 @@ export function useDesignEditLayer(techCardId: number, layerId: number) {
   });
 }
 
+/**
+ * How long the answer to an overwrite waits for the band's re-read before it speaks without the
+ * slot (review r3): long enough for a slow gateway, short enough that «saved» is never withheld.
+ */
+export const REREAD_BOUND_MS = 8000;
+
 export function useEditLayerWrites(techCardId: number) {
   const qc = useQueryClient();
 
@@ -65,12 +71,38 @@ export function useEditLayerWrites(techCardId: number) {
   /**
    * THE BAND AS IT IS NOW — re-read, and handed back once the read has landed (27.09, O-53 phase 2,
    * D-55). For an answer that has to be told from the band and not from memory: where the edit of
-   * an overwrite stands. `invalidate` starts the same read and does not wait for it. A read that
-   * failed leaves the cache as it was, and the caller knows no more than before — never less.
+   * an overwrite stands. `invalidate` starts the same read and does not wait for it.
+   *
+   * ⚠ BOUNDED, AND ONLY A FRESH READ COUNTS (review r3). The answer to the person waits on this read,
+   * and `fetch` has no timeout of its own: past `REREAD_BOUND_MS` the wait is given up (the read
+   * itself runs on, and the next poll brings it to the workbench) and the caller gets undefined —
+   * as it does for a read that failed, or that never ran because nothing on the page watches the
+   * band. The cache is NOT an answer then: it is the band from before the write, and a slot named
+   * off it would be the lie this re-read exists to avoid.
    */
   const reread = useCallback(async (): Promise<GetDesignBandResponse | undefined> => {
-    await qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
-    return qc.getQueryData<GetDesignBandResponse>(designKeys.band(techCardId));
+    const queryKey = designKeys.band(techCardId);
+    const askedAt = Date.now();
+    const bound = new AbortController();
+    const timer = setTimeout(() => bound.abort(), REREAD_BOUND_MS);
+    const gaveUp = new Promise<'gave up'>((resolve) =>
+      bound.signal.addEventListener('abort', () => resolve('gave up'), { once: true }),
+    );
+    try {
+      const outcome = await Promise.race([
+        qc.invalidateQueries({ queryKey }).then(
+          () => 'read' as const,
+          () => 'failed' as const,
+        ),
+        gaveUp,
+      ]);
+      if (outcome !== 'read') return undefined;
+    } finally {
+      clearTimeout(timer);
+    }
+    const state = qc.getQueryState<GetDesignBandResponse>(queryKey);
+    if (!state || state.status === 'error' || state.dataUpdatedAt < askedAt) return undefined;
+    return state.data;
   }, [qc, techCardId]);
 
   /**
