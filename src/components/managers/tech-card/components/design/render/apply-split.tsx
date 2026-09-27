@@ -49,7 +49,12 @@ import type { BenchSide } from './model';
  *     поведение верстака, а не наше добавление);
  *   · сторона, которую разрез НЕ называет и которая занята → очищается (`picture_id = 0`);
  *   · сторона, которую разрез не называет и которая пуста → не трогается вовсе. Запись, ничего не
- *     меняющая, — это CAS-конфликт, купленный за просто так.
+ *     меняющая, — это CAS-конфликт, купленный за просто так;
+ *   · сторона, в которой УЖЕ стоит её кусок этого разреза → не трогается тоже, по тому же доводу
+ *     (O-63 r2). Раньше план «клал» кусок на его же место: запись без перемены, а вопрос называл
+ *     сторону теряющей свой рендер — и терял человек разве что доверие к вопросу. С O-63 r2 это не
+ *     редкость: колода группы «brought» показывает лист без кусков, которые SIDES уже держит, а
+ *     дверь кладёт разрез целиком — стоящие куски в нём есть (`piecesOf`, `render-tile.tsx`).
  *
  * ⚠ РАЗРУШИТЕЛЬНОЕ ДЕЙСТВИЕ НАЗЫВАЕТСЯ ДО ЗАПИСИ, А НЕ ПОСЛЕ. Если опустеть или быть вытесненным
  * есть чему — вопрос задаётся модалкой, поимённо по сторонам, и ни одна запись не уходит, пока на
@@ -97,13 +102,14 @@ const APPLY_NEW_COLOURWAY = '__new_colourway__';
 
 /* `splitDecks` И ТИП `SplitDeck` СНЕСЕНЫ (r3c). Они строили список «склеенный лист + его куски»
    ДЛЯ ЯЧЕЙКИ МУЛЬТИВЬЮ, и ячейка эта своего второго источника не завела: раскрытый лист рисует
-   `outputs.tsx` по родословной куска (`cropFamilies` + `piecesOf` там же), потому что
-   вопрос там другой — «что показать под ЭТОЙ плиткой», а не «какие листы есть у карточки».
-   Читателей не осталось ни одного; экспортированный список, который никто не читает, — это второй
-   ответ на вопрос, ждущий, когда он разойдётся с первым. Механизм применения (`applyPlan` ниже и
-   `ApplySplitDoor`) на месте: он принимает КУСКИ, а не листы. Живых ссылок на имя не осталось:
-   в `bench.tsx` разрез теперь назван своей дверью (`split ▸` в полосе выходов), а само слово
-   встречается только в двух записках о сносе — этой и в `outputs.tsx`. */
+   плитка рендера (`render-tile.tsx`; до O-63 — `outputs.tsx`) по родословной куска
+   (`cropFamilies` + `piecesOf` там же), потому что вопрос там другой — «что показать под ЭТОЙ
+   плиткой», а не «какие листы есть у карточки». Читателей не осталось ни одного;
+   экспортированный список, который никто не читает, — это второй ответ на вопрос, ждущий, когда
+   он разойдётся с первым. Механизм применения (`applyPlan` ниже и `ApplySplitDoor`) на месте: он
+   принимает КУСКИ, а не листы. Живых ссылок на имя не осталось: в `bench.tsx` разрез теперь назван
+   своей дверью (`split ▸` в полосе выходов), а само слово встречается только в двух записках о
+   сносе — этой и у `piecesOf` в `render-tile.tsx`. */
 
 /** Одна запись плана: что делаем со стороной и что при этом теряем. */
 type Step = {
@@ -121,6 +127,8 @@ export function applyPlan(sides: BenchSide[], pieces: SplitPiece[]): Step[] {
   for (const side of sides) {
     const piece = byView.get(side.view);
     if (piece) {
+      // Its piece already stands in it — nothing to write, nothing to lose (see the file's head).
+      if ((side.picture?.id ?? 0) > 0 && side.picture?.id === piece.id) continue;
       steps.push({
         view: side.view,
         act: 'place',
@@ -343,9 +351,11 @@ export function ApplySplitDoor({
           data-apply-split-door=''
           data-apply-split-losing={losing.length}
           title={
-            losing.length
-              ? `${placeWords || 'no side'} take the pieces; ${losingWords} ${losing.length === 1 ? `loses its ${noun}` : `lose their ${noun}s`} — you are asked first`
-              : `${placeWords || 'no side'} take the pieces; no side loses anything`
+            steps.length === 0
+              ? 'the sides already hold exactly this split — nothing to write'
+              : losing.length
+                ? `${placeWords || 'no side'} take the pieces; ${losingWords} ${losing.length === 1 ? `loses its ${noun}` : `lose their ${noun}s`} — you are asked first`
+                : `${placeWords || 'no side'} take the pieces; no side loses anything`
           }
           onClick={() => start(only)}
         >

@@ -27,7 +27,7 @@ import type { VectorReplace } from '../modals/vector-modal';
 import { usePickMode } from '../pick-mode';
 import { PictureTile } from '../picture-tile';
 import { mixedInputNote, provenanceLabel, readProvenance } from '../provenance';
-import { RunRenderTile, renderHostOf, useRenderHost } from '../render/render-tile';
+import { RunRenderTile, useRenderHost } from '../render/render-tile';
 import { isModelUrl } from '../threed/media';
 import { useDesignWrites } from '../use-design-band';
 import { isPictureHidden } from '../visibility';
@@ -361,8 +361,12 @@ export function RunTile({
 }) {
   const pick = usePickMode();
   const { setBenchSlot } = useDesignWrites(techCardId);
-  /** O-63: the render doors of this row — set only for a render run's plate on FABRIC RENDER. */
-  const renderHost = renderHostOf(useRenderHost(rep), picture);
+  /**
+   * O-63: the render doors of this row — set for every plate of a render run on FABRIC RENDER, the
+   * ones with the old hidden stamp too (O-63 r2, D-72 п.2: the render tile draws them with the
+   * doors a hidden picture may have — `unmark ▸` of a slot SIDES does not draw among them).
+   */
+  const renderHost = useRenderHost(rep);
   /** Правка прямо в истории (V-10): состояние у плитки — редактор открыт над КОНКРЕТНОЙ картинкой. */
   const [editing, setEditing] = useState(false);
 
@@ -427,7 +431,9 @@ export function RunTile({
      `apply splitted`, `expand ▸`, `unmark ▸`, the states `in front` — by one set of rules
      (`render/render-tile.tsx`, the row's `RenderDoorsHost`). The row keeps what it owns: the zoom
      through its viewer row, its split window, and this tile's editor, opened as a surface of its
-     run (the workbench pins it) and filing a NEW picture, as a render's edit always has. */
+     run (the workbench pins it) and filing a NEW picture, as a render's edit always has. A plate
+     with the old hidden stamp is drawn here too (O-63 r2) — the `hidden` branch below is the other
+     steps' tile. */
   if (renderHost) {
     return (
       <RunRenderTile

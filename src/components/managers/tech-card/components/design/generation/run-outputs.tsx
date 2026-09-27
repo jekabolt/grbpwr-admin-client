@@ -10,7 +10,7 @@ import { Tile, Tiles } from 'ui/components/tiles';
 
 import type { Representation } from '../bench-kinds';
 import { pictureHandle } from '../handles';
-import { renderHostOf, useRenderHost } from '../render/render-tile';
+import { useRenderHost } from '../render/render-tile';
 import { CropDeck } from './crop-deck';
 import { outputPlan, type OutputPlan } from './run-gallery';
 import { GapPill } from './run-panel';
@@ -266,7 +266,7 @@ export function RunOutputs({
                 style={deckOpen ? undefined : { gridColumn: 'span 2' }}
                 open={deckOpen}
                 onToggle={() => onDeck(pictureId)}
-                hostDoor={!!renderHostOf(renderHost, picture)}
+                hostDoor={!!renderHost}
               >
                 {tile}
               </CropDeck>

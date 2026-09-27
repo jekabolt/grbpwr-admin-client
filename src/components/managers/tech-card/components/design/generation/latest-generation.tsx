@@ -3,9 +3,10 @@ import type {
   common_DesignPicture,
   common_DesignRun,
 } from 'api/proto-http/admin';
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, type JSX } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 
@@ -60,7 +61,9 @@ import { useElapsed, useRunById } from './use-generation';
  * live or holding pictures. Newer flat runs that came back with nothing (failed, cancelled, empty)
  * are passed over and SAID, every one of them counted: one — «the newest run failed · CODE — this
  * is the one before»; more — «newest N runs finished empty · showing the last one with pictures».
- * Nothing to show on the first page → no workbench at all; the history below still has every run.
+ * No run of the kind on the first page → no workbench at all; the history below still has every run.
+ * Runs, but none came back with pictures → the newest of them stands here BARE (27.09, O-63 r2,
+ * D-72 п.3): its stamp, how it ended and why — see `BareOutcome`.
  *
  * …BUT ONLY WHILE NOBODY IS WORKING ON THE SHOWN RUN (26.09, O-53 review; `bench-store.ts`). An
  * editor, a split or the zoom viewer opened on a tile here PINS the shown run: a newer run landing on
@@ -117,20 +120,27 @@ function isRunOfKind(run: Pick<common_DesignRun, 'kind'>, kind: WorkbenchKind): 
  * THE NEWEST RUN THE WORKBENCH CAN SHOW, and EVERY newer run of its kind it passed over for having
  * nothing, newest first. Reads the band's first page only — the page the band already holds; the
  * workbench asks for no more.
+ *
+ * ⚠ «NOTHING WITH PICTURES» IS NOT «NOTHING TO SHOW» (27.09, O-63 r2, D-72 п.3). When no run of the
+ * kind is live or came back with pictures, the newest of them is the answer — `bare`: it failed,
+ * was cancelled or came back empty, and that is exactly what the person under GENERATE has to see.
+ * Until round 2 this returned null there, and the card's first run, failed, left no trace above the
+ * history, which both steps fold by default. `skipped` of a bare answer are the older runs, all of
+ * them bare too. One rule for FLAT and FABRIC RENDER.
  */
 export function latestRunOf(
   band: Pick<GetDesignBandResponse, 'runs'>,
   kind: WorkbenchKind = 'flat',
-): { run: common_DesignRun; skipped: common_DesignRun[] } | null {
+): { run: common_DesignRun; skipped: common_DesignRun[]; bare: boolean } | null {
   const runs = (band.runs ?? [])
     .filter((run) => (run.id ?? 0) > 0 && isRunOfKind(run, kind) && !isRunArchived(run))
     .sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
   const skipped: common_DesignRun[] = [];
   for (const run of runs) {
-    if (isRunLive(run) || (run.pictures ?? []).length > 0) return { run, skipped };
+    if (isRunLive(run) || (run.pictures ?? []).length > 0) return { run, skipped, bare: false };
     skipped.push(run);
   }
-  return null;
+  return runs.length ? { run: runs[0], skipped: runs.slice(1), bare: true } : null;
 }
 
 /** «the newest run failed · CODE — this is the one before», worded by how the newer run ended. */
@@ -159,6 +169,73 @@ function skippedNote(skipped: readonly common_DesignRun[]): { text: string; titl
     text: `newest ${skipped.length} runs finished empty · showing the last one with pictures`,
     title: skipped.map((run) => `${runHandle(run.id)} · ${runOutcomeNote(run)}`).join('; '),
   };
+}
+
+/**
+ * ═══ A BARE RUN — HOW IT ENDED, AND WHY (27.09, O-63 r2, D-72 п.3) ════════════════════════════════
+ *
+ * What the workbench draws instead of tiles when nothing of its kind came back with pictures: one
+ * line, worded by how the newest run ended («failed — nothing came back», «was cancelled — nothing
+ * came back», «came back empty»), counting the older runs that brought nothing either; then the
+ * provider's own words, the context a retry needs — under the same heading the run's `meta ▸` panel
+ * gives them (`run-panel.tsx`), cut to four lines with the whole text in the title (up to 4 000
+ * characters, D-4). The code stands in the header's state word already.
+ */
+function BareOutcome({
+  run,
+  earlier,
+}: {
+  run: common_DesignRun;
+  earlier: readonly common_DesignRun[];
+}): JSX.Element {
+  const status = runStatus(run);
+  const { code, text } = runFailureText(run);
+  const head =
+    status === 'failed'
+      ? 'the newest run failed — nothing came back'
+      : status === 'cancelled'
+        ? 'the newest run was cancelled — nothing came back'
+        : status === 'done'
+          ? 'the newest run came back empty'
+          : 'the newest run brought no picture';
+  const n = earlier.length;
+  const before = n ? ` · the ${n === 1 ? 'run' : `${n} runs`} before it brought none either` : '';
+  return (
+    <div data-latest-outcome={status || 'unknown'} data-latest-skipped={n} className='space-y-1.5'>
+      <Text
+        size='micro'
+        variant='label'
+        component='p'
+        title={[run, ...earlier].map((r) => `${runHandle(r.id)} · ${runOutcomeNote(r)}`).join('; ')}
+      >
+        {head}
+        {before}
+      </Text>
+      {(code || text) && (
+        <CalloutBox tone='note'>
+          <Text size='nano' variant='label' component='p' className='uppercase tracking-label'>
+            {status === 'failed'
+              ? 'why it failed'
+              : status === 'cancelled'
+                ? 'what was cut short'
+                : 'the last attempt'}
+            {code ? ` · ${code}` : ''}
+          </Text>
+          {text && (
+            <Text
+              size='micro'
+              variant='label'
+              component='p'
+              className='line-clamp-4 max-w-[75ch] whitespace-pre-wrap break-words'
+              title={text}
+            >
+              {text}
+            </Text>
+          )}
+        </CalloutBox>
+      )}
+    </div>
+  );
 }
 
 /** The decks of the row in display order: each card with pieces behind it, and how many. */
@@ -230,6 +307,12 @@ export function LatestGeneration({
   const archivedSeen = !!pinnedFresh && isRunArchived(pinnedFresh);
   const run = pinnedRun ?? newest?.run ?? null;
   const runId = run?.id ?? 0;
+  /**
+   * THE RUN STANDS HERE BARE (O-63 r2, D-72 п.3): nothing of the kind came back with pictures, and
+   * the newest run is shown for its outcome. A pinned run is never bare — a pin is a surface opened
+   * on a tile, and a bare run has none.
+   */
+  const bare = !!newest?.bare && runId === newestId;
   /** Somebody is working — a surface open anywhere on the step, or the viewer. */
   const held = bench.surfaces.size > 0 || viewerOpen;
   // The clock ticks only while the run is in flight (review, MINOR): a finished run shows no elapsed
@@ -238,10 +321,13 @@ export function LatestGeneration({
 
   /* What this row shows is published for the history (its row of this run turns «on the bench»)
      and for the tiles' surfaces (a surface on this run pins it). Leaving — the step, or the card —
-     lets the pin go: coming back shows the newest. */
+     lets the pin go: coming back shows the newest. A bare run is not published (O-63 r2): its
+     history row would turn into «on the bench ↑», pointing at tiles that do not exist — it stays
+     its own row, the outcome in its meta line. */
+  const shownId = bare ? 0 : runId;
   useLayoutEffect(() => {
-    publishShown(techCardId, runId);
-  }, [techCardId, runId]);
+    publishShown(techCardId, shownId);
+  }, [techCardId, shownId]);
   useLayoutEffect(
     () => () => {
       publishShown(techCardId, 0);
@@ -343,7 +429,7 @@ export function LatestGeneration({
 
   const state = runStateWord(run, elapsed);
   /** Said only over the newest run with pictures — a run pinned behind a newer one says the line. */
-  const note = skippedNote(newest && newestId === runId ? newest.skipped : []);
+  const note = skippedNote(newest && newestId === runId && !bare ? newest.skipped : []);
   const newer = newest && newestId > runId ? newest.run : null;
 
   /** The row's outputs block — the history's own (`RunOutputs`), on the workbench's track. */
@@ -394,6 +480,8 @@ export function LatestGeneration({
         latest generation
       </GroupLabel>
 
+      {bare && newest && <BareOutcome run={run} earlier={newest.skipped} />}
+
       {note && newest && (
         <Text
           size='micro'
@@ -412,7 +500,7 @@ export function LatestGeneration({
           row's plates (`RenderDoorsHost`); FLAT's row is drawn as it always was. The doors' notes
           stand once above the tiles. `disabled` is the card's alone: the server's silence the
           doors read themselves, and say so in their own words. */}
-      {kind === 'render' ? (
+      {bare ? null : kind === 'render' ? (
         <RenderDoorsHost
           band={band}
           techCardId={techCardId}
@@ -436,7 +524,12 @@ export function LatestGeneration({
       {newer && (
         <span className='mt-2 flex flex-wrap items-center gap-1.5' data-latest-newer={newestId}>
           <Text size='micro' variant='label' component='span'>
-            {isRunLive(newer) ? 'newer run started' : 'newer run ready'} ·
+            {isRunLive(newer)
+              ? 'newer run started'
+              : newest?.bare
+                ? 'newer run came back with nothing'
+                : 'newer run ready'}{' '}
+            ·
           </Text>
           <Button
             type='button'

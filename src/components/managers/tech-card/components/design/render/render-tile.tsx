@@ -9,6 +9,7 @@ import {
   createContext,
   useContext,
   useId,
+  useLayoutEffect,
   useMemo,
   useState,
   type JSX,
@@ -22,6 +23,7 @@ import Text from 'ui/components/text';
 import { InertDoor } from '../bench-slot';
 import {
   COLORWAY_NONE,
+  RUN_NOT_STATED,
   benchKindOf,
   colorwayOf,
   refColorwayFor,
@@ -47,7 +49,7 @@ import {
   threedSides,
   type BenchSide,
 } from './model';
-import { SAMPLE_LABEL, colourwayColumns } from './side-row';
+import { SAMPLE_LABEL, colourwayColumns, picturesOnSides } from './side-row';
 import { StripCell } from './strip-cell';
 
 /**
@@ -170,6 +172,14 @@ const SPLIT_NAMES_NO_SIDE =
  * В таблице — ТОЛЬКО отказы ПОСТАНОВКИ: почему эту плиту некуда положить. Отказы, общие для всех
  * дверей экрана (карточка только для чтения, сервер молчит), записок не заводят и стоят в `title`,
  * как у всякой погашенной двери студии.
+ *
+ * ONCE PER STEP, NOT PER HOST (27.09, O-63 r2, D-72 п.5). Since O-63 a step has two hosts of these
+ * doors — the workbench under GENERATE and the open history — and each printed the reasons of its
+ * own plates: a reason both showed stood twice, twice in the Tab order. The step keeps one board
+ * (`RenderStepScope`) where every mounted host lists the reasons it shows; a reason is printed by
+ * the FIRST host in the step's order that shows it (`order`: the workbench 0, the history 1) and
+ * only there, and every door refused for it — in any host — points at that one note. A folded
+ * history lists nothing: its rows draw no plates.
  */
 const REFUSAL_NOTES: readonly { key: string; reason: string; note: string }[] = [
   {
@@ -223,14 +233,79 @@ export type RenderDoors = {
     picture: common_DesignPicture,
   ) => { colorwayId: number; side: BenchSide; where: string } | null;
   piecesOf: (rootId: number) => SplitPiece[];
+  /** How many pieces were cut from a sheet — its whole split, wherever each piece stands (O-63 r2). */
+  piecesCut: (rootId: number) => number;
   applyRefusalFor: (rootId: number) => string | null;
   /** Горизонт колорвея ОДНОЙ плитки — только у принесённой, прочитанной из списка `outputs`. */
   horizonOf: (picture: common_DesignPicture) => { total: number; carried: number } | null;
-  /** Записки над полосой — по одной на причину (O-57 r4). */
+  /**
+   * The notes THIS host prints — one per reason (O-57 r4), and only the reasons no earlier host of
+   * the step prints already (O-63 r2, D-72 п.5).
+   */
   notes: readonly { key: string; reason: string; note: string }[];
+  /** The prefix of every note's id — the step's, so a door of any host names the printed note. */
   noteBase: string;
   noteIdOf: (reason: string | null) => string | undefined;
 };
+
+/**
+ * ═══ THE STEP'S BOARD OF REFUSAL NOTES (27.09, O-63 r2, D-72 п.5) ═══════════════════════════════
+ *
+ * Which reasons each mounted host shows, and its place in the step's order. A store outside React:
+ * the hosts sit in different blocks of the step (the workbench in FABRIC RENDER, the history below
+ * SIDES) and neither renders the other, so the question «is this reason printed already» has no
+ * common parent state to live in. A host lists its reasons in a layout effect — the list settles
+ * before the frame is painted, so a note never shows twice for one frame — and takes itself off
+ * when it unmounts.
+ */
+type NoteBoard = {
+  /** The prefix of every note id on the step. */
+  base: string;
+  subscribe: (listener: () => void) => () => void;
+  list: (host: string, order: number, keys: string) => void;
+  drop: (host: string) => void;
+  /** The host that prints this reason: the first in the step's order among those showing it. */
+  printer: (key: string) => string | null;
+};
+
+function noteBoard(base: string): NoteBoard {
+  const hosts = new Map<string, { order: number; keys: readonly string[] }>();
+  const listeners = new Set<() => void>();
+  const changed = () => {
+    for (const listener of listeners) listener();
+  };
+  return {
+    base,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    list: (host, order, keys) => {
+      const was = hosts.get(host);
+      if (was && was.order === order && was.keys.join(',') === keys) return;
+      hosts.set(host, { order, keys: keys ? keys.split(',') : [] });
+      changed();
+    },
+    drop: (host) => {
+      if (hosts.delete(host)) changed();
+    },
+    printer: (key) => {
+      let first: { host: string; order: number } | null = null;
+      for (const [host, { order, keys }] of hosts) {
+        if (!keys.includes(key)) continue;
+        // One order per host in practice; the id breaks a tie so the answer never depends on
+        // the order the hosts happened to mount in.
+        if (!first || order < first.order || (order === first.order && host < first.host))
+          first = { host, order };
+      }
+      return first?.host ?? null;
+    },
+  };
+}
+
+const NoteBoardContext = createContext<NoteBoard | null>(null);
 
 /**
  * ═══ THE RULES OF ONE HOST — HOOKS OF THE HOST, CALLED ONCE PER HOST ═════════════════════════════
@@ -249,7 +324,9 @@ export function useRenderDoors({
   onCreateColorway,
   pictures,
   membersOf,
+  wholeDecks,
   openDeck,
+  order = 0,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -281,8 +358,16 @@ export function useRenderDoors({
   pictures: readonly common_DesignPicture[];
   /** The host's decks: sheet id → the pieces cut out of it. */
   membersOf: ReadonlyMap<number, common_DesignPicture[]>;
+  /**
+   * THE WHOLE SPLIT of a sheet whose deck this host draws only in part (O-63 r2): the «brought»
+   * group leaves out the pieces SIDES shows, and `apply splitted` still puts the WHOLE split into
+   * the sides (`piecesOf`). Absent for a sheet — its deck here is its whole split.
+   */
+  wholeDecks?: ReadonlyMap<number, common_DesignPicture[]>;
   /** The host's one open deck (H-10). */
   openDeck: number | null;
+  /** The host's place in the step's order — of two hosts showing one reason, the earlier prints it. */
+  order?: number;
 }): RenderDoors {
   const speaks = serverSpeaksDesign();
   const { setBenchSlot } = useDesignWrites(techCardId);
@@ -378,8 +463,18 @@ export function useRenderDoors({
     const ref = cardRefs?.get(id);
     return ref ? refLabel(ref) : `#${id}`;
   };
-  /** Префикс id записок об отказах (O-57 r4, `REFUSAL_NOTES`). Хук — выше раннего выхода. */
-  const noteBase = useId();
+  /**
+   * THE HOST ON THE STEP'S BOARD OF NOTES (O-63 r2, D-72 п.5): its own key, and a re-render whenever
+   * any host's list changes — the notes this host prints depend on what the others show.
+   * ⚠ SUBSCRIBED IN A LAYOUT EFFECT, NOT THROUGH `useSyncExternalStore`: that hook subscribes after
+   * the paint, and two hosts mounting in one commit would both print a shared reason for a frame.
+   * Here the subscription stands before this host lists its own reasons (the effect below), and a
+   * change heard in the layout phase re-renders before the frame is painted.
+   */
+  const board = useContext(NoteBoardContext);
+  const hostKey = useId();
+  const [, heard] = useState(0);
+  useLayoutEffect(() => board?.subscribe(() => heard((n) => n + 1)), [board]);
   /** Лист по id — дверь `apply splitted` спрашивает его колорвей. */
   const pictureById = useMemo(() => {
     const m = new Map<number, common_DesignPicture>();
@@ -447,11 +542,23 @@ export function useRenderDoors({
    *
    * Первый кусок на сторону: разрез — один на лист, а кусок без стороны силуэта (`detail`, пустой
    * вид) в слот не встаёт и в план не входит.
+   *
+   * O-63 r2 (D-72 п.1) · …КРОМЕ КОЛОДЫ, КОТОРУЮ ХОЗЯИН ПОКАЗЫВАЕТ НЕ ЦЕЛИКОМ. Группа «brought»
+   * решает членство по каждой картинке: кусок, который SIDES уже показывает, стоит там со своим ✕,
+   * а не в колоде листа. Но `apply splitted` — «вход становится РОВНО этим разрезом»
+   * (`./apply-split`), и разрез — это все его куски: читая одни показанные, дверь ОЧИЩАЛА бы
+   * сторону, где стоит кусок того же разреза, и вопрос называл бы её «the split does not name that
+   * side» — неправдой. Поэтому для такой колоды куски берутся из разреза целиком (`wholeDecks`), а
+   * кусок, уже стоящий в своей стороне, план не трогает вовсе (`applyPlan`).
+   *
+   * Скрытый кусок (старый штамп `hidden`) в план не входит: в слот его сервер не поставит
+   * (`hidden_plate`), и запись за ним была бы отказом.
    */
   const piecesOf = (rootId: number): SplitPiece[] => {
     const seen = new Set<string>();
     const out: SplitPiece[] = [];
-    for (const member of membersOf.get(rootId) ?? []) {
+    for (const member of wholeDecks?.get(rootId) ?? membersOf.get(rootId) ?? []) {
+      if (isPictureHidden(member)) continue;
       const view = normaliseViewKey(member.ghostView);
       // A piece cut as a retired three-quarter (D-18) goes into no slot: the bench no longer has one.
       if (!isActiveView(view) || seen.has(view)) continue;
@@ -696,10 +803,32 @@ export function useRenderDoors({
     const applyRefusal = openDeck === null ? null : applyRefusalFor(openDeck);
     if (applyRefusal) shownRefusals.add(applyRefusal);
   }
-  const notes = REFUSAL_NOTES.filter((n) => shownRefusals.has(n.reason));
-  /** Id записки этой причины; `undefined` — записки у причины нет (общий отказ экрана). */
+  /** The reasons this host's plates show — listed on the step's board (O-63 r2, D-72 п.5). */
+  const shown = REFUSAL_NOTES.filter((n) => shownRefusals.has(n.reason));
+  const shownKeys = shown.map((n) => n.key).join(',');
+  useLayoutEffect(() => {
+    board?.list(hostKey, order, shownKeys);
+  }, [board, hostKey, order, shownKeys]);
+  useLayoutEffect(() => () => board?.drop(hostKey), [board, hostKey]);
+  /**
+   * …AND THE ONES IT PRINTS: those no earlier host of the step prints. Before the board has heard of
+   * anyone showing a reason (this host's first render), the host prints it — the layout effects above
+   * settle that before the frame is painted. Off a step (no board) — every reason it shows, as before.
+   */
+  const notes = board
+    ? shown.filter((n) => {
+        const printer = board.printer(n.key);
+        return printer === null || printer === hostKey;
+      })
+    : shown;
+  const noteBase = board?.base ?? hostKey;
+  /**
+   * Id записки этой причины; `undefined` — записки у причины нет (общий отказ экрана). Записка
+   * ищется среди ПОКАЗАННЫХ причин, а не напечатанных здесь: у общей причины записка стоит у
+   * первого хозяина шага, и дверь любого хозяина ссылается на неё (O-63 r2).
+   */
   const noteIdOf = (reason: string | null): string | undefined => {
-    const note = reason === null ? undefined : notes.find((n) => n.reason === reason);
+    const note = reason === null ? undefined : shown.find((n) => n.reason === reason);
     return note ? `${noteBase}-${note.key}` : undefined;
   };
 
@@ -722,6 +851,7 @@ export function useRenderDoors({
     unmarkHeld,
     heldAway,
     piecesOf,
+    piecesCut: (rootId: number) => (wholeDecks?.get(rootId) ?? membersOf.get(rootId) ?? []).length,
     applyRefusalFor,
     horizonOf,
     notes,
@@ -841,6 +971,28 @@ export function RenderTile({
   const deck = members.length ? { open: doors.openDeck === pictureId } : undefined;
   const deckSheet = !!deck && !deck.open;
   /**
+   * ═══ A PICTURE WITH THE OLD HIDDEN STAMP STAYS ON THIS TILE (27.09, O-63 r2, D-72 п.2) ═══════════
+   *
+   * It used to fall back to the history's own tile (`RunTile`'s «hidden» pill), which has no door
+   * for a slot the SIDES table does not draw — and a hidden render held in such a slot (a sample
+   * column beside colourways) had no way out of it at all. Now it is this tile: the frame dimmed,
+   * «hidden» in the caption (the stamp's story in its title), and only the doors that make sense
+   * for a picture nobody may place, cut or draw over:
+   *   · kept — `unmark ▸` of a plate held away (the one door that empties that slot), the «in X»
+   *     word of a plate standing in a drawn column, `expand ▸` / `▾` of its deck (a view, no write);
+   *   · gone — `mark ▸` (the server refuses a hidden plate a slot: `hidden_plate`), `split ▸` and the
+   *     corner split (`hidden_picture`), `apply splitted` of its open deck, and the edit corner
+   *     (D-72 — the history's tile offered it, K-6; the render step does not).
+   */
+  const hidden = isPictureHidden(picture);
+  /**
+   * O-63 r2 (D-72 п.1) · A CUT SHEET WHOSE EVERY PIECE STANDS ON SIDES. The «brought» group draws a
+   * sheet without the pieces SIDES shows, so such a sheet has no deck there — and it is not uncut:
+   * `split ▸` would only hand back the same crops (the server's split is idempotent while they are
+   * visible). Its row says where its pieces went instead, and no corner offers a cut.
+   */
+  const cutAway = !deck && doors.piecesCut(pictureId) > 0;
+  /**
    * ═══ ТРИ ФАКТА, РЕШАЮЩИЕ СУДЬБУ ДВЕРИ `mark ▸` (J-25) ═════════════════════════════════════
    *
    * Все три — ЗЕРКАЛА СЕРВЕРНЫХ ОТКАЗОВ, а не вкус экрана, и потому дверь не рисуется живой там,
@@ -880,7 +1032,7 @@ export function RenderTile({
       cellPictureId={picture.id}
       className={className}
       aspect={aspect}
-      dim={dim}
+      dim={dim || hidden}
       galleryGroup={galleryGroup}
       onZoom={onZoom}
       src={src}
@@ -925,7 +1077,7 @@ export function RenderTile({
       /* ПРАВКА (E-3) — от растра, и результат правки никуда вставать не обязан: хозяин открывает
          редактор со `slot={null}`, сохранение рождает НОВУЮ картинку. */
       onEdit={
-        !writesOff
+        !writesOff && !hidden
           ? {
               onClick: onEdit,
               ariaLabel: `edit render ${picture.ordinal ?? ''} — draw over this picture`.trim(),
@@ -935,7 +1087,7 @@ export function RenderTile({
           : undefined
       }
       onSplit={
-        !writesOff && pictureOffersSplit(picture, !!deck)
+        !writesOff && !hidden && pictureOffersSplit(picture, !!deck || cutAway)
           ? {
               onClick: onSplit,
               ariaLabel: `split render ${picture.ordinal ?? ''} into views`,
@@ -973,6 +1125,19 @@ export function RenderTile({
         >
           {shape}
         </span>,
+        /* O-63 r2 (D-72 п.2): the old hidden stamp, said as a word — the frame is dimmed, and a
+           dimmed frame alone reads as a loading image. The same title as the history's pill. */
+        ...(hidden
+          ? [
+              <span
+                key='hidden'
+                data-hidden-marker=''
+                title='hidden in an earlier session, before per-picture hiding was removed — pickers and slots still skip it. Runs are archived whole now.'
+              >
+                hidden
+              </span>,
+            ]
+          : []),
         /* ═══ O-57 r2 · ГДЕ ПЛИТА СТОИТ, КОГДА ЕЁ СТОЛБЦА НА ЭКРАНЕ НЕТ ═══════════════════════
            У плиты в видимом столбце это слово пилюли в ряду дверей («in front»), а ✕ стоит в
            таблице. Здесь ряд занят дверью снятия, а таблица этой стороны не показывает вовсе,
@@ -1061,32 +1226,34 @@ export function RenderTile({
                     помещается: поля `px-0.5` сняты вместе с полосой, `nowrap` остаётся — подпись
                     двери не переносится ни при какой ширине. Селектор `[data-inert]` — обёртка
                     `InertDoor`: живую дверь правило не трогает. */}
-                {(() => {
-                  const rootId = picture.id ?? 0;
-                  const own = colorwayOf(picture);
-                  /* ЦЕЛИ — ТЕ ЖЕ, ЧТО ВЕТКИ `mark ▸` (`destinationsOf`, разбор у
-                     `applyRefusalFor`): одна — дверь остаётся кнопкой; несколько (семпл-лист
-                     рядом с колорвеями при флаге) — селект; ни одной — отказ с причиной. */
-                  const targets = destinationsOf(own).ids.map((id) => ({
-                    colorwayId: id,
-                    label: colourwayName(id),
-                  }));
-                  const refusal = applyRefusalFor(rootId);
-                  return (
-                    <ApplySplitDoor
-                      techCardId={techCardId}
-                      sidesOf={(target) => threedSides(band, refColorwayFor('render', target))}
-                      targets={targets}
-                      pieces={piecesOf(rootId)}
-                      noun='render'
-                      refusal={refusal}
-                      refusalDescribedBy={noteIdOf(refusal)}
-                      onCreateColorway={own === 0 && adopts ? onCreateColorway : undefined}
-                      className='min-w-0 flex-1 [&>button]:h-5 [&>button]:bg-bgColor [&[data-inert]>button]:whitespace-nowrap'
-                      doorClassName='h-5 bg-bgColor'
-                    />
-                  );
-                })()}
+                {/* O-63 r2: a hidden sheet puts nothing into the sides — its pieces stay a view. */}
+                {!hidden &&
+                  (() => {
+                    const rootId = picture.id ?? 0;
+                    const own = colorwayOf(picture);
+                    /* ЦЕЛИ — ТЕ ЖЕ, ЧТО ВЕТКИ `mark ▸` (`destinationsOf`, разбор у
+                       `applyRefusalFor`): одна — дверь остаётся кнопкой; несколько (семпл-лист
+                       рядом с колорвеями при флаге) — селект; ни одной — отказ с причиной. */
+                    const targets = destinationsOf(own).ids.map((id) => ({
+                      colorwayId: id,
+                      label: colourwayName(id),
+                    }));
+                    const refusal = applyRefusalFor(rootId);
+                    return (
+                      <ApplySplitDoor
+                        techCardId={techCardId}
+                        sidesOf={(target) => threedSides(band, refColorwayFor('render', target))}
+                        targets={targets}
+                        pieces={piecesOf(rootId)}
+                        noun='render'
+                        refusal={refusal}
+                        refusalDescribedBy={noteIdOf(refusal)}
+                        onCreateColorway={own === 0 && adopts ? onCreateColorway : undefined}
+                        className='min-w-0 flex-1 [&>button]:h-5 [&>button]:bg-bgColor [&[data-inert]>button]:whitespace-nowrap'
+                        doorClassName='h-5 bg-bgColor'
+                      />
+                    );
+                  })()}
                 {/* ⚠ ЭТО БЫЛ СЫРОЙ `<button>` — ЕДИНСТВЕННЫЙ КОНТРОЛ РЯДА МИМО `buttonVariants`,
                     и он один держал СВОЮ рамку, СВОЙ ховер и СВОЙ фокус, переписанные тут же
                     строкой классов. Пока их четыре штуки совпадали с примитивом на глаз, он
@@ -1176,6 +1343,9 @@ export function RenderTile({
                 in {viewLabel((held.viewKey ?? '').trim()) || 'a slot'}
               </Pill>
             </span>
+          ) : hidden ? (
+            /* O-63 r2: nothing a hidden picture may do from here — the caption says why. */
+            <span data-hidden-doors={picture.id || undefined} className='flex w-full' />
           ) : composite ? (
             /* ═══ У ЛИСТА ДВЕРЬ ЖИВАЯ, И ЭТО ПОЧИНКА, А НЕ УКРАШЕНИЕ ══════════════════════
                Здесь стояла ПОГАШЕННАЯ дверь «split first ▸», чья причина отправляла человека
@@ -1184,8 +1354,18 @@ export function RenderTile({
                куда пойти, вместо того чтобы туда вести, — самый дорогой вид мёртвого контрола:
                она занимает то самое место, где нужный жест и ожидается.
                Теперь глагол один и он исполним отсюда. «Почему нельзя пометить лист» переехало
-               в `title` — это ответ на вопрос, который человек задаёт ПОСЛЕ, а не вместо. */
-            writesOff ? (
+               в `title` — это ответ на вопрос, который человек задаёт ПОСЛЕ, а не вместо.
+               O-63 r2: a sheet already cut, its every piece standing on SIDES, says so instead —
+               a status, like «in front», not a door (`cutAway`). */
+            cutAway ? (
+              <span
+                data-cut-away={picture.id || undefined}
+                title='every piece cut from this sheet stands in a side — SIDES shows them, each with its ✕. The sheet holds several views and stands in no side itself.'
+                className='flex w-full'
+              >
+                <Pill className='h-5 w-full justify-center leading-4'>pieces in sides</Pill>
+              </span>
+            ) : writesOff ? (
               <InertDoor
                 className={INERT_DOOR}
                 label='split ▸'
@@ -1343,7 +1523,15 @@ export function RenderStepScope({
   step: RenderStep;
   children: ReactNode;
 }): JSX.Element {
-  return <RenderStepContext.Provider value={step}>{children}</RenderStepContext.Provider>;
+  /* The step's one board of refusal notes (O-63 r2, D-72 п.5) — for the life of the step, whatever
+     its values do; the ids of its notes start with the step's own prefix. */
+  const base = useId();
+  const [board] = useState(() => noteBoard(base));
+  return (
+    <RenderStepContext.Provider value={step}>
+      <NoteBoardContext.Provider value={board}>{children}</NoteBoardContext.Provider>
+    </RenderStepContext.Provider>
+  );
 }
 
 /** The step's values, or `null` off FABRIC RENDER (no `RenderStepScope` above). */
@@ -1366,6 +1554,12 @@ const RenderHostContext = createContext<RenderHost | null>(null);
  * THE HOST WHOSE RENDER DOORS THE TILES OF A RUN DRAW — `null` for a run of any other kind and off
  * FABRIC RENDER. `rep` is the RUN'S kind (E-12): a recolour's pictures say `render` on the wire, and
  * a photograph of a person never gets `mark ▸`.
+ *
+ * EVERY PLATE OF SUCH A RUN, THE HIDDEN ONES TOO (O-63 r2, D-72 п.2). A plate with the old hidden
+ * stamp kept the history's own tile until round 2 (`renderHostOf`, gone), and that tile has no door
+ * for a slot SIDES does not draw: a hidden render held there was stranded. The render tile draws it
+ * now with the doors a hidden picture may have (`RenderTile`), and the deck's own door stays off
+ * for every sheet of the host (`RunOutputs`, `hostDoor`) — `expand ▸` is the tile's.
  */
 export function useRenderHost(rep: Representation | null): RenderHost | null {
   const host = useContext(RenderHostContext);
@@ -1373,21 +1567,10 @@ export function useRenderHost(rep: Representation | null): RenderHost | null {
 }
 
 /**
- * …AND WHETHER THIS PLATE OF IT DOES. A plate with the old hidden stamp keeps the history's own tile
- * (its «hidden» word, pickers and slots skip it, T-14). ONE predicate for the tile (`RunTile`) and
- * for its deck (`RunOutputs`, `hostDoor`): the deck's own door goes exactly where `expand ▸` comes.
- */
-export function renderHostOf(
-  host: RenderHost | null,
-  picture: common_DesignPicture,
-): RenderHost | null {
-  return host && !isPictureHidden(picture) ? host : null;
-}
-
-/**
  * WHAT A HOST SHOWS, FOR ITS DOORS — every plate its rows draw, pieces of folded decks too (the notes
  * read them all), and each sheet's pieces; the rows' own plans (`outputPlan`), so the doors and the
- * grid can never disagree about a deck. Hidden plates are not the doors' (`renderHostOf`).
+ * grid can never disagree about a deck. A hidden plate is left out of `pictures`: it offers no door
+ * that could be refused (`RenderTile`), so it has no note to print.
  */
 export function hostPlates(plans: readonly OutputPlan[]): {
   pictures: common_DesignPicture[];
@@ -1436,7 +1619,15 @@ type RenderDoorsHostProps = {
   /** `hostPlates` of the rows it draws. */
   pictures: readonly common_DesignPicture[];
   membersOf: ReadonlyMap<number, common_DesignPicture[]>;
+  /** The whole split of a sheet the host draws only in part — the «brought» group (`broughtDecks`). */
+  wholeDecks?: ReadonlyMap<number, common_DesignPicture[]>;
   openDeck: number | null;
+  /**
+   * The host's place in the step's order (O-63 r2, D-72 п.5): of two hosts showing one refusal
+   * reason, the earlier prints its note. The workbench under GENERATE is 0 (the default), the
+   * history below SIDES 1.
+   */
+  order?: number;
   onDeck: (rootId: number) => void;
   runOf: (picture: common_DesignPicture) => common_DesignRun;
   /** Spacing of the notes above the tiles — drawn only when there are any. */
@@ -1452,7 +1643,9 @@ function RenderDoorsHostOn({
   disabled,
   pictures,
   membersOf,
+  wholeDecks,
   openDeck,
+  order,
   onDeck,
   runOf,
   notesClassName,
@@ -1468,7 +1661,9 @@ function RenderDoorsHostOn({
     onCreateColorway: step.onCreateColorway,
     pictures,
     membersOf,
+    wholeDecks,
     openDeck,
+    order,
   });
   const host: RenderHost = { doors, runOf, onDeck };
   return (
@@ -1557,31 +1752,62 @@ export function RunRenderTile({
  * would vanish with the section — so they stand as one pseudo-row of the history («N brought ▸»,
  * `GenerationHistory`), drawn by the same `RunOutputs` → `RunTile` → render tile, with the same
  * doors: those standing in no slot, and those standing in a slot of a column SIDES does not draw
- * (held away — `unmark ▸` on the tile is the only door that empties it, O-57 r2). A deck goes with
- * its sheet: the pieces cut from a sheet in the group stand behind it wherever each is placed.
+ * (held away — `unmark ▸` on the tile is the only door that empties it, O-57 r2).
  *
- * `null` — nothing brought stands off SIDES, or this server lists no outputs (the page walk of an
- * older binary reaches runs only). The run is the stamp of the first brought row, id 0: «no run».
+ * ═══ PICTURE BY PICTURE, THEN DECKS (27.09, O-63 r2, D-72 п.1) ════════════════════════════════════
+ * Whether a plate stands on SIDES is asked of THAT plate (`picturesOnSides` — a side of a drawn
+ * column, or the legacy shelf, which is drawn for every colourway), and only the plates that do not
+ * are grouped into decks — by `RunOutputs`, within this run's list, so a piece whose sheet stands on
+ * SIDES is a card of its own here, and a sheet whose piece stands there keeps the rest behind it.
+ * The first edition asked the family's root and let the answer ride down the family: a free piece
+ * of a placed sheet was nowhere, and a placed piece of a free sheet was drawn twice.
+ *
+ * ═══ A PLATE HELD AWAY IS HERE EVEN WHEN THE LIST LEFT IT OUT (O-63 r2, D-72 п.2) ═════════════════
+ * The card's outputs list drops a hidden plate (and ships only the newest of a colourway —
+ * `outputsHorizon`), and a plate standing in a slot of a column SIDES does not draw has no door but
+ * `unmark ▸` on its own tile. So the group also takes, from the bench itself, every brought plate
+ * held in an active side of such a column: its slot is never stranded.
+ *
+ * `null` — nothing brought stands off SIDES, or this server lists no outputs and no such plate is
+ * held away (the page walk of an older binary reaches runs only). The run is the stamp of the first
+ * brought row, id 0: «no run».
  */
 export function broughtRun(band: GetDesignBandResponse, step: RenderStep): common_DesignRun | null {
-  const rows = outputsOfKind(band, 'render').filter(({ run }) => (run.id ?? 0) <= 0);
-  if (!rows.length) return null;
   const axis = colourwayColumns(band, step.colorways ?? NO_COLOURWAYS, step.cardColorways);
-  /** SIDES shows it: it stands in a render slot of a column the table draws. */
-  const onSides = (picture: common_DesignPicture): boolean => {
-    const row = slotHolding(band, picture.id ?? 0);
-    if (!row || benchKindOf(row) !== 'render') return false;
-    const colorwayId = colorwayOf(row);
-    return axis.some((c) => c.colorwayId === colorwayId);
-  };
-  const plates = rows.map(({ picture }) => picture);
-  const families = cropFamilies(plates);
-  const byId = new Map(plates.map((picture) => [picture.id ?? 0, picture] as const));
-  const pictures = plates.filter((picture) => {
+  const onSides = picturesOnSides(band, axis);
+  const rows = outputsOfKind(band, 'render').filter(({ run }) => (run.id ?? 0) <= 0);
+  const pictures: common_DesignPicture[] = [];
+  const taken = new Set<number>();
+  const take = (picture: common_DesignPicture) => {
     const id = picture.id ?? 0;
-    const sheet = byId.get(families.rootOf.get(id) ?? id) ?? picture;
-    return !onSides(sheet);
-  });
+    if (id <= 0 || taken.has(id) || onSides.has(id)) return;
+    taken.add(id);
+    pictures.push(picture);
+  };
+  for (const { picture } of rows) take(picture);
+  /* Held away: an active side of a render column the table does not draw. */
+  for (const row of band.bench ?? []) {
+    if (benchKindOf(row) !== 'render') continue;
+    if (!isActiveView(normaliseViewKey(row.viewKey))) continue;
+    const colorwayId = colorwayOf(row);
+    if (axis.some((c) => c.colorwayId === colorwayId)) continue;
+    const plate = row.picture;
+    if (!plate || (plate.runId ?? 0) > 0) continue;
+    take(plate);
+  }
   if (!pictures.length) return null;
-  return { ...rows[0].run, id: 0, kind: 'render', pictures };
+  return { ...(rows[0]?.run ?? RUN_NOT_STATED), id: 0, kind: 'render', pictures };
+}
+
+/**
+ * THE WHOLE SPLIT OF EVERY BROUGHT SHEET — its pieces wherever each of them stands (O-63 r2, D-72
+ * п.1). The group draws a sheet with the pieces SIDES does not show; `apply splitted` on it puts
+ * the whole split into the sides, the pieces already standing there included (`piecesOf`,
+ * `useRenderDoors`). Keyed by the sheet's id; every brought plate the card's list carries.
+ */
+export function broughtDecks(band: GetDesignBandResponse): Map<number, common_DesignPicture[]> {
+  const plates = outputsOfKind(band, 'render')
+    .filter(({ run }) => (run.id ?? 0) <= 0)
+    .map(({ picture }) => picture);
+  return cropFamilies(plates).membersOf;
 }

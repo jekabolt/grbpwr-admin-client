@@ -22,6 +22,7 @@ import { useGalleryGroup } from '../picture-tile';
 import {
   RenderDoorsHost,
   RenderDoorsNotes,
+  broughtDecks,
   broughtRun,
   hostPlates,
   useRenderStep,
@@ -78,8 +79,9 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  * above this history there (`RenderStudio`), and a render run's tiles are the render tile with the
  * doors RENDERS OF THIS CARD had — `mark ▸`, `apply splitted`, `expand ▸`, `unmark ▸` — their rules
  * ONE hook over the plates this history shows (`RenderDoorsHost`), their refusal notes once at the
- * top of the block. The plates brought by hand that SIDES does not show stand here as well, as one
- * folded group after the shelf: `· N brought ▸` in the header line (`broughtRun`).
+ * top of the block — the ones the workbench above does not print already (O-63 r2: one note per
+ * reason on the step). The plates brought by hand that SIDES does not show stand here as well, as
+ * one folded group after the shelf: `· N brought ▸` in the header line (`broughtRun`).
  *
  * WHERE THE MOCK-UP'S FORM MEETS THE PRODUCT'S DATA, THE DATA WINS AND THE FORM STAYS: the tile's
  * top-left badge names the SIDE THE PLATE STANDS IN — a fact, never `ghost_view`, a guess (F-17);
@@ -520,6 +522,14 @@ export function GenerationHistory({
   const [broughtShown, setBroughtShown] = useState(false);
   /** Nothing brought left off SIDES — the group closes with its door. */
   if (broughtShown && !brought) setBroughtShown(false);
+  /**
+   * The whole split of each brought sheet (O-63 r2, D-72 п.1): the group draws a sheet with the
+   * pieces SIDES does not show, and its `apply splitted` puts the whole split into the sides.
+   */
+  const wholeDecks = useMemo(
+    () => (rendersHere && broughtShown ? broughtDecks(band) : undefined),
+    [rendersHere, broughtShown, band],
+  );
 
   /**
    * ВКЛАДКА СМЕНИЛАСЬ — ФИЛЬТР И СВЁРТКА ВОЗВРАЩАЮТСЯ К ЕЁ СОБСТВЕННОМУ ПОЛОЖЕНИЮ. В РЕНДЕРЕ, а не
@@ -807,7 +817,8 @@ export function GenerationHistory({
 
   return (
     /* O-63: ON FABRIC RENDER the render doors of every row below read ONE host (`RenderDoorsHost`);
-       its notes stand at the top of the block (`RenderDoorsNotes`). Any other step: a fragment. */
+       its notes stand at the top of the block (`RenderDoorsNotes`) — those the workbench above does
+       not print (O-63 r2). Any other step: a fragment. */
     <RenderDoorsHost
       off={!rendersHere}
       notes={false}
@@ -816,7 +827,11 @@ export function GenerationHistory({
       disabled={disabled}
       pictures={plates.pictures}
       membersOf={plates.membersOf}
+      wholeDecks={wholeDecks}
       openDeck={openDeck}
+      /* Below the workbench on the step: a reason both show is printed above the workbench's
+         tiles, and the doors here point at that note (O-63 r2, D-72 п.5). */
+      order={1}
       onDeck={toggleDeck}
       runOf={runOf}
     >

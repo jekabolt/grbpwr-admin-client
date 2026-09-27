@@ -495,10 +495,9 @@ export function colourwayColumns(
    * ⚠ O-57 ПРЯЧЕТ СТОЛБЕЦ, А НЕ ПЛИТЫ. Верстак `sample` остаётся в данных как был: слоты не
    * чистятся, картинки не переписываются, и все они лежат в строках своих прогонов — на верстаке
    * под GENERATE и в истории генераций, принесённые руками в её группе «brought» (O-63); свободную
-   * семпл-плиту жест `mark ▸` там же отдаёт в столбец колорвея,
-   * когда сервер её усыновляет (B7), а плиту, стоящую в слоте невидимого столбца, снимает дверь
-   * `unmark ▸` на её же плитке (✕ в таблице у неё больше нет). Этот файл перестаёт только РИСОВАТЬ
-   * ось 0 рядом с колорвеями.
+   * семпл-плиту жест `mark ▸` там же отдаёт в столбец колорвея, когда сервер её усыновляет (B7),
+   * а плиту, стоящую в слоте невидимого столбца, снимает дверь `unmark ▸` на её же плитке (✕ в
+   * таблице у неё больше нет). Этот файл перестаёт только РИСОВАТЬ ось 0 рядом с колорвеями.
    *
    * ЧТО СЧИТАЕТСЯ КОЛОРВЕЕМ — ЛЮБОЙ КОЛОРВЕЙ КАРТОЧКИ, АРХИВНЫЙ ТОЖЕ (D-56″). Владелец на вопрос
    * «архивный без плит — колорвей?», дословно: «семпл показывается только если нет ни одного
@@ -521,6 +520,39 @@ export function colourwayColumns(
   const carded = cardColorways ?? colorways;
   const sampleDrawn = !carded.some((c) => (c.colorwayId ?? 0) > 0);
   return sampleDrawn ? [column(COLORWAY_NONE, null)] : named;
+}
+
+/**
+ * ═══ WHAT SIDES SHOWS — PICTURE BY PICTURE (27.09, O-63 r2, D-72 п.1) ═══════════════════════════
+ *
+ * Every render this block draws, by id: the plate in a side of a column the table draws (`columns`
+ * — `colourwayColumns` of the same band), and every plate of the legacy shelf under the table
+ * (`legacyRenderSides`), which stands for EVERY colourway, drawn or not — so a plate held in a
+ * retired 3/4 of a column the table does not draw is still on this block, with its ✕.
+ *
+ * ⚠ THE ANSWER IS ABOUT ONE PICTURE — WHERE IT STANDS. A piece cut from a sheet does not stand
+ * where its sheet stands, and a sheet does not stand where one of its pieces does: the «brought»
+ * group of the history (`broughtRun`, `./render-tile`) asks this of each plate first and only then
+ * puts the rest into decks. Asked of a family's root instead (the first edition), a free piece of a
+ * placed sheet vanished from the group, and a free sheet brought its placed piece along — drawn
+ * twice, here with its ✕ and there with the doors of a free plate.
+ */
+export function picturesOnSides(
+  band: GetDesignBandResponse,
+  columns: readonly ColourwayColumn[],
+): Set<number> {
+  const ids = new Set<number>();
+  for (const column of columns) {
+    for (const side of column.sides) {
+      const id = side.picture?.id ?? 0;
+      if (id > 0) ids.add(id);
+    }
+  }
+  for (const side of legacyRenderSides(band)) {
+    const id = side.picture.id ?? 0;
+    if (id > 0) ids.add(id);
+  }
+  return ids;
 }
 
 /**
