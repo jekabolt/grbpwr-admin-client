@@ -12,12 +12,13 @@ import type { TechCardFormData } from '../schema';
 import { pictureRepresentation } from './bench-kinds';
 import {
   ASIDES,
-  STEPS,
   chainGate,
   doneCount,
   moodMinimumGate,
   nearestBlock,
   openGateDoor,
+  railSteps,
+  stepById,
   stepState,
   type ChainCtx,
   type MoodMinimum,
@@ -57,7 +58,7 @@ import { countThreedResults } from './threed/media';
  * closing it would hide the one place that says so. The refusal itself lives on the server.
  *
  * `Section`, not a bare strip: the rail has a title, a question and a counter in its header, which
- * is what a `Section` is for. Inside, the six links are ONE ruled row (a table, the way `StatGrid`
+ * is what a `Section` is for. Inside, the links are ONE ruled row (a table, the way `StatGrid`
  * is a table: one outline, inner rules) and the aside is a second full-width row pressed to it —
  * `_shell.html`'s `.steps` + `.steps-aside`, `border-top: 0`.
  */
@@ -89,7 +90,7 @@ function StatePill({ state, inverted }: { state: StepState; inverted: boolean })
   return <span className={cn(PILL_BASE, tone)}>{state}</span>;
 }
 
-/** `3 of 6 steps` — the header counter; a dashed pill at zero, never a red one. */
+/** `3 of 5 steps` — the header counter; a dashed pill at zero, never a red one. */
 function StepsCounter({ n, total }: { n: number; total: number }) {
   return (
     <span
@@ -298,7 +299,7 @@ function doorLabel(door: StepId): string {
     case 'card':
       return 'card details ›';
     default:
-      return `go to ${[...STEPS, ...ASIDES].find((s) => s.id === door)?.label ?? door} ›`;
+      return `go to ${stepById(door).label} ›`;
   }
 }
 
@@ -347,32 +348,35 @@ export function ChainRail({
     );
   };
 
+  /* THE LINKS OF THIS SERVER'S RAIL (C-10): five, or six where STEP 5 is still the only way to a
+     3D model (`railSteps`, core/chain.ts). The cells, the counter and the bar walk the same list. */
+  const steps = railSteps(ctx);
   const block = nearestBlock(ctx);
-  const blockStep = block ? STEPS.find((s) => s.id === block.stepId) : null;
-  const doorStep = block?.door ? [...STEPS, ...ASIDES].find((s) => s.id === block.door) : null;
+  const blockStep = block ? steps.find((s) => s.id === block.stepId) : null;
+  const doorStep = block?.door ? [...steps, ...ASIDES].find((s) => s.id === block.door) : null;
 
   return (
     <Section
       title='the chain'
       question='· where this card stands'
-      action={<StepsCounter n={doneCount(ctx)} total={STEPS.length} />}
+      action={<StepsCounter n={doneCount(ctx)} total={steps.length} />}
     >
       <TooltipProvider>
-        {/* SIX LINKS IN ONE OUTLINED ROW, RULED BY HAIRLINES. The cells share the width (`flex-1` —
+        {/* THE LINKS IN ONE OUTLINED ROW, RULED BY HAIRLINES. The cells share the width (`flex-1` —
             grow, shrink AND a zero basis; `min-w` is the floor under the longest name). Then the
             ASIDE on a full-width row of its own, pressed to the first (`border-t-0`): PLAYGROUND is
             not a link of the chain — a row of equal cells would claim it is a step — so it stands
-            apart, without a number, and does not count in «N of 6 steps». */}
+            apart, without a number, and does not count in «N of 5 steps». */}
         <div className='overflow-x-auto'>
-          {/* `min-w-max`: below the floor both rows are as wide as the six cells, so the aside's
+          {/* `min-w-max`: below the floor both rows are as wide as the link cells, so the aside's
               outline stays under the first row's while the block scrolls. */}
           <div className='min-w-max'>
             <div className='flex items-stretch border border-borderColor'>
-              {STEPS.map((s, i) => cell(s, i > 0 ? 'border-l border-hairline' : undefined))}
+              {steps.map((s, i) => cell(s, i > 0 ? 'border-l border-hairline' : undefined))}
             </div>
             {/* ═══ THE ASIDE ROW — PLAYGROUND alone (C-01) ═══════════════════════════════════
                 A room rather than a link: a full-width row pressed to the first (`border-t-0`),
-                counted in neither «N of 6 steps» nor the queue. Unconditional — the screen, not
+                counted in neither «N of 5 steps» nor the queue. Unconditional — the screen, not
                 the rail, says which workflow this server cannot run. */}
             <div className='flex items-stretch border border-t-0 border-borderColor'>
               {ASIDES.map((s, i) => cell(s, i > 0 ? 'border-l border-hairline' : undefined))}

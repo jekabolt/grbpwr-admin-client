@@ -22,6 +22,7 @@ import {
   PlaygroundStudio,
   inPlaygroundRoom,
   playgroundHistoryMatch,
+  playgroundHistoryRep,
   playgroundHistoryScope,
   useStepAddress,
 } from 'components/managers/tech-card/components/design/playground';
@@ -31,7 +32,9 @@ import {
 } from 'components/managers/tech-card/components/design/render/use-design-run';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
+import type { ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { FormProvider, useForm } from 'react-hook-form';
 import { BrowserRouter, useSearchParams } from 'react-router-dom';
 
 const CARD = 7;
@@ -57,7 +60,7 @@ function Screen({ band }: { band: GetDesignBandResponse }) {
           <GenerationHistory
             band={band}
             techCardId={CARD}
-            defaultRep='playground'
+            defaultRep={playgroundHistoryRep(wf, band)}
             match={playgroundHistoryMatch(wf, band) ?? inPlaygroundRoom}
             scopeKey={playgroundHistoryScope(wf, band)}
             defaultOpen={false}
@@ -66,6 +69,15 @@ function Screen({ band }: { band: GetDesignBandResponse }) {
       )}
     </div>
   );
+}
+
+/**
+ * The tech card's form, as `StudioTab` stands inside it (C-10): Image to 3D's results are the
+ * studio's own 3D block (`OutputsSection`), whose split doors read the card form.
+ */
+function CardForm({ children }: { children: ReactNode }) {
+  const form = useForm();
+  return <FormProvider {...form}>{children}</FormProvider>;
 }
 
 let rawStart: ((input: StartRunInput) => void) | null = null;
@@ -103,8 +115,10 @@ window.__pg = {
         <DictionaryProvider>
           <DesignCapabilityProvider value={true}>
             <BrowserRouter>
-              <Screen band={band} />
-              <RawStart />
+              <CardForm>
+                <Screen band={band} />
+                <RawStart />
+              </CardForm>
             </BrowserRouter>
           </DesignCapabilityProvider>
         </DictionaryProvider>

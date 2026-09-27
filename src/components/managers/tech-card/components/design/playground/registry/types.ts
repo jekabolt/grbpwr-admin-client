@@ -4,7 +4,7 @@ import type {
   common_DesignRunParams,
   common_MediaFull,
 } from 'api/proto-http/admin';
-import type { ReactNode } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 
 import type { Representation } from '../../bench-kinds';
 import type { NotSentItem } from '../../core';
@@ -289,6 +289,19 @@ export type ResultsDef = {
   cutout?: boolean;
   /** Recolour outputs keep the ON MODEL «select» mark (ARTIFACTS reads it). */
   selectable?: boolean;
+  /**
+   * THE WORKFLOW DRAWS ITS OWN RESULTS BLOCK in place of the room's (C-10). Image to 3D's results
+   * are 3D models, and their block already exists with everything a model needs — the viewer,
+   * «snapshot this angle», BRING YOUR OWN (`OutputsSection kind='threed'`); the room's picture
+   * tiles would draw a `.glb` as a broken frame. Absent = the room's block, narrowed by `match`.
+   */
+  view?: ComponentType<ResultsViewProps>;
+};
+
+export type ResultsViewProps = {
+  band: GetDesignBandResponse;
+  techCardId: number;
+  disabled?: boolean;
 };
 
 /** The runnable half of a workflow. Absent on a tile this build cannot run yet. */

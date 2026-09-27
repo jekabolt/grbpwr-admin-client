@@ -12,7 +12,8 @@ import {
 } from './mood-gate';
 
 /**
- * THE CHAIN — six named steps of the DESIGN band, and where this card stands on them.
+ * THE CHAIN — the named steps of the DESIGN band (five; six on a server without the playground
+ * list, see `THREED_STEP`), and where this card stands on them.
  *
  * This module is the rail's brain and holds NO gate of its own. Every refusal it reports is one of
  * the gates that already refuse a run on the step's own screen — `renderGate`, `threedGate` (which
@@ -86,9 +87,14 @@ export function isStepId(x: unknown): x is StepId {
 }
 
 /**
- * The six links of the chain, in the order of the work. Numbers are the prototype's (`_core.js`
+ * The links of the chain, in the order of the work. Numbers are the prototype's (`_core.js`
  * STEPS): CARD DETAILS is 0 because it is where the card is named and filed before anything is
  * drawn; PATTERN is optional because a garment without a print is still a garment.
+ *
+ * FIVE LINKS SINCE THE PLAYGROUND WAVE (C-10). STEP 5 «3D» left the rail: the owner, «STEP 5 3D
+ * уберется и на место его прийдет Image to 3D с +- тем же функционалом» — the build is the
+ * playground workflow `image_to_3d` now. The rail a card actually draws is `railSteps(ctx)`: these
+ * five, plus `THREED_STEP` on a server too old to run that workflow (see there).
  */
 export const STEPS: readonly Step[] = [
   { id: 'card', n: '0', label: 'card details' },
@@ -96,8 +102,52 @@ export const STEPS: readonly Step[] = [
   { id: 'flat', n: '2', label: 'flat', kind: 'flat' },
   { id: 'pattern', n: '3', label: 'pattern', optional: true, kind: 'pattern' },
   { id: 'render', n: '4', label: 'fabric render', kind: 'render' },
-  { id: 'threed', n: '5', label: '3d', kind: 'threed' },
 ];
+
+/**
+ * ═══ STEP 5 «3D» — KEPT ONLY FOR A SERVER THAT CANNOT RUN «IMAGE TO 3D» (C-10) ═════════════════
+ *
+ * The step left the rail for the playground tile, but the tile needs a server that lists its
+ * workflows (`playground_workflows`, band 28). A server older than that list — today's beta until
+ * the phase-2 backend lands, or one rolled back to it — draws the tile dimmed «not on this server
+ * yet»; dropping the step there too would leave the card with NO way to build a 3D model. So the
+ * step stays exactly as it was on such a server (`threedStepOnRail`), and leaves the rail the
+ * moment the server says which workflows it runs (`threedStepRetired`).
+ *
+ * THREE ANSWERS, NOT TWO. While the band is loading (or not served at all) the server has said
+ * nothing: the step is neither drawn (it would blink out when a new server answers) nor rewritten
+ * (a bookmarked `?step=threed` must wait for the answer, not be sent to a tile the server may not
+ * run). The id stays a `StepId` for the same reason — it is a real step on the old server.
+ *
+ * `stepOfKind('threed')` still answers THIS step (its label «3d» is the word the pickers print for a
+ * 3D run); a door that goes there on a new server lands on the tile through the composer
+ * (`studio-tab.tsx`, `goKind`) or through the legacy rewrite (`legacyStep`).
+ */
+export const THREED_STEP: Step = { id: 'threed', n: '5', label: '3d', kind: 'threed' };
+
+/** The rail of an old server: the five links and STEP 5 after them, as before the wave. */
+const STEPS_WITH_THREED: readonly Step[] = [...STEPS, THREED_STEP];
+
+/** The band says nothing yet, or the server does not serve it: the step's fate is unknown. */
+type ServerWords = Pick<ChainCtx, 'band' | 'bandless'>;
+
+/** An answering server that predates `playground_workflows`: STEP 5 stays on the rail. */
+export function threedStepOnRail(ctx: ServerWords): boolean {
+  return !ctx.bandless && ctx.band.playgroundWorkflows === undefined;
+}
+
+/** An answering server that lists its playground workflows: STEP 5 is the tile `image_to_3d`. */
+export function threedStepRetired(ctx: ServerWords): boolean {
+  return !ctx.bandless && ctx.band.playgroundWorkflows !== undefined;
+}
+
+/**
+ * THE LINKS THIS CARD'S RAIL DRAWS — the one list the rail, the counter («N of 5»), `nextUp`,
+ * `nearestBlock` and `doneCount` walk. A module constant per answer, so the identity is stable.
+ */
+export function railSteps(ctx: ServerWords): readonly Step[] {
+  return threedStepOnRail(ctx) ? STEPS_WITH_THREED : STEPS;
+}
 
 /**
  * ═══ PLAYGROUND — THE ONE ASIDE (PLAYGROUND wave, C-01) ═══════════════════════════════════════
@@ -127,18 +177,47 @@ export const PLAYGROUND_WF_PARAM = 'wf';
  * A bookmarked `?step=aside` (ON MODEL) must land where its work lives now, not on the card's
  * default step. The composer rewrites the address once, with `replace`, and reads the new step
  * in the same render, so the old value never reaches `decided`.
+ *
+ * `?step=threed` (STEP 5, C-10) is legacy ONLY where the step has left the rail: pass
+ * `threedRetired` (`threedStepRetired`). On an old server it is a live step and stays; while the
+ * server has not answered it waits (see `THREED_STEP`). The entries are module constants, so the
+ * rewrite's effect sees one identity per address.
  */
 const LEGACY_STEPS: ReadonlyMap<string, { step: StepId; wf: string }> = new Map<
   string,
   { step: StepId; wf: string }
->([['aside', { step: 'playground', wf: 'change_color' }]]);
+>([
+  ['aside', { step: 'playground', wf: 'change_color' }],
+  ['threed', { step: 'playground', wf: 'image_to_3d' }],
+]);
 
-export function legacyStep(value: string | null): { step: StepId; wf: string } | null {
+export function legacyStep(
+  value: string | null,
+  threedRetired = false,
+): { step: StepId; wf: string } | null {
+  if (value === 'threed' && !threedRetired) return null;
   return (value && LEGACY_STEPS.get(value)) || null;
 }
 
-/** Every step of the rail, chain and asides together — the list every lookup below walks. */
-const ALL_STEPS: readonly Step[] = [...STEPS, ...ASIDES];
+/**
+ * THE STEP AN ADDRESS NAMES, read in the render that sees it: a legacy value as its new home, a step
+ * id as itself, anything else `null` (the composer's default-step latch decides then).
+ *
+ * ⚠ THE LEGACY ANSWER IS ASKED FIRST (C-10). `threed` is a valid `StepId` — it IS a step on an old
+ * server — so asked second it would win on a new one and draw the retired STEP 5 screen.
+ */
+export function addressedStep(value: string | null, threedRetired = false): StepId | null {
+  const legacy = legacyStep(value, threedRetired);
+  if (legacy) return legacy.step;
+  return isStepId(value) ? value : null;
+}
+
+/**
+ * Every step, chain and asides together, STEP 5 included — the list every lookup below walks. A
+ * lookup is not the rail: `stepById('threed')` answers on every server, the rail draws it on an
+ * old one only (`railSteps`).
+ */
+const ALL_STEPS: readonly Step[] = [...STEPS, THREED_STEP, ...ASIDES];
 
 /** `onmodel` has no step of its own any more: a recolour is a PLAYGROUND workflow. */
 export function stepOfKind(kind: DesignKind): Step {
@@ -487,6 +566,7 @@ export function chainGate(id: StepId, ctx: ChainCtx): ChainGate {
       return { ok: false, reason: g.reason, door: g.next ? doorOf(g) : 'flat' };
     }
     case 'threed': {
+      // STEP 5 of an OLD server only (`THREED_STEP`); on a new one no reader walks it.
       if (ctx.bandless) return { ok: true };
       const g = threedGate(ctx.band, ctx.colorway.id, ctx.colorway.label, ctx.colorway.archived);
       if (g.ok) return g;
@@ -586,7 +666,7 @@ export function stepDone(id: StepId, ctx: ChainCtx): boolean {
  * the rail. The work is on the flat bench, so the flat is not passed over while it owes the side.
  */
 export function nextUp(ctx: ChainCtx): StepId | null {
-  for (const s of STEPS) {
+  for (const s of railSteps(ctx)) {
     if (s.id === ctx.now) continue;
     if (s.optional) continue;
     if (stepDone(s.id, ctx) && !(s.id === 'flat' && flatOwesRender(ctx))) continue;
@@ -648,7 +728,7 @@ export type NearestBlock = {
  * GENERATE asks `moodMinimumGate` itself) and progress into a step that is not done yet.
  */
 export function nearestBlock(ctx: ChainCtx): NearestBlock | null {
-  for (const s of STEPS) {
+  for (const s of railSteps(ctx)) {
     if (s.optional) continue;
     if (stepDone(s.id, ctx)) continue;
     const g = chainGate(s.id, ctx);
@@ -683,8 +763,9 @@ function flatOwesRender(ctx: ChainCtx): boolean {
   return !g.ok && g.door === 'flat';
 }
 
+/** How many links of THIS rail are done — «N of 5», or «N of 6» where STEP 5 is still drawn. */
 export function doneCount(ctx: ChainCtx): number {
-  return STEPS.filter((s) => stepDone(s.id, ctx)).length;
+  return railSteps(ctx).filter((s) => stepDone(s.id, ctx)).length;
 }
 
 /** Whether the band holds a single picture — on the bench or in any run. */

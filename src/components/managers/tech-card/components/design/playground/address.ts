@@ -56,16 +56,21 @@ export function useWorkflowAddress(): {
  * `replace`, as the prototype's `replaceState`: Back leaves the card, it does not walk the rail
  * backwards one cell at a time. `?wf=` belongs to the playground screen and does not outlive its
  * step.
+ *
+ * `wf` — a door that leads to ONE WORKFLOW of the playground rather than to the step (C-10: a door
+ * to 3D on a server where STEP 5 is the tile `image_to_3d`): step and workflow in one write, so no
+ * frame shows the grid between them. Without it the playground's own `?wf=` is left as it is.
  */
-export function useStepAddress(): (next: StepId) => void {
+export function useStepAddress(): (next: StepId, wf?: WorkflowKey) => void {
   const [, setParams] = useSearchParams();
   return useCallback(
-    (next: StepId) =>
+    (next: StepId, wf?: WorkflowKey) =>
       setParams(
         (prev) => {
           const p = new URLSearchParams(prev);
           p.set('step', next);
           if (next !== 'playground') p.delete(PLAYGROUND_WF_PARAM);
+          else if (wf) p.set(PLAYGROUND_WF_PARAM, wf);
           return p;
         },
         { replace: true },
@@ -76,6 +81,9 @@ export function useStepAddress(): (next: StepId) => void {
 
 /**
  * ═══ `?step=aside` IS REWRITTEN ONCE, AND THE LEGACY STEP OWNS BOTH PARAMETERS (G-01, Codex 3) ═══
+ *
+ * The same for `?step=threed` on a server where STEP 5 left the rail (C-10, `legacyStep`):
+ * `step=playground&wf=image_to_3d`.
  *
  * The old address maps to one complete new address, `step=playground&wf=change_color` — a `?wf=`
  * that rode along with it (a stale link, a hand-edited one) does not override the destination the

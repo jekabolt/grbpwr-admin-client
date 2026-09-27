@@ -65,6 +65,29 @@
 //   node scripts/playground-registry-probe.mjs --mutate-sections    секции модели/формата рисуются
 //                                                                   всегда → краснеет I
 //
+// C-10 (плитка 12 Image to 3D, STEP 5 уходит с рельса):
+//   J · wire() / validate() / ворота / разметка / рекол плитки image_to_3d: тело режима референса
+//       ЦЕЛИКОМ; опции уезжают только объявленные сервером (threed_options), иначе ''; pbr без
+//       текстуры не уезжает никогда; follow — только если объявлен; колорвей — только у плиты
+//       рендер-верстака; результаты — свой блок моделей, история — threed-прогоны, слово «3D runs»;
+//   K · рельс: STEP 5 есть ровно у отвечающего сервера без playground_workflows (6 ячеек, «N of 6»),
+//       у нового — 5 ячеек и «N of 5», пока сервер молчит — тоже 5; `?step=threed` переписывается
+//       только у нового; defaultStep/nearestBlock на новом не называют threed.
+//   node scripts/playground-registry-probe.mjs --mutate-threed-options  опции рисуются и уезжают без
+//                                                                   слова сервера → краснеет J
+//   node scripts/playground-registry-probe.mjs --mutate-threed-pbr  pbr уезжает и без текстуры
+//                                                                   → краснеет J
+//   node scripts/playground-registry-probe.mjs --mutate-threed-gate ворота не ждут threed_options
+//                                                                   → краснеет J
+//   node scripts/playground-registry-probe.mjs --mutate-threed-colorway колорвей плиты не
+//                                                                   привязывается → краснеет J
+//   node scripts/playground-registry-probe.mjs --mutate-rail-threed STEP 5 на рельсе всегда
+//                                                                   → краснеет K
+//   node scripts/playground-registry-probe.mjs --mutate-legacy-threed `?step=threed` переписывается
+//                                                                   и у старого сервера → краснеет K
+//   node scripts/playground-registry-probe.mjs --mutate-step-first  композитор спрашивает шаг раньше
+//                                                                   старого адреса → краснеет K
+//
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
 
@@ -93,6 +116,13 @@ const MUT = {
   snapRead: process.argv.includes('--mutate-snap-read'),
   sections: process.argv.includes('--mutate-sections'),
   drawn: process.argv.includes('--mutate-drawn'),
+  threedOptions: process.argv.includes('--mutate-threed-options'),
+  threedPbr: process.argv.includes('--mutate-threed-pbr'),
+  threedGate: process.argv.includes('--mutate-threed-gate'),
+  threedColorway: process.argv.includes('--mutate-threed-colorway'),
+  railThreed: process.argv.includes('--mutate-rail-threed'),
+  legacyThreed: process.argv.includes('--mutate-legacy-threed'),
+  stepFirst: process.argv.includes('--mutate-step-first'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -234,6 +264,60 @@ if (commonSwaps.length)
       });
     },
   });
+
+// ─── C-10: мутации плитки 12 и рельса. Правки одного файла — одним плагином, как у C-08.
+const multiSwap = (name, file, loader, pairs) => ({
+  name,
+  setup(b) {
+    b.onLoad({ filter: file }, async (args) => {
+      let src = await readFile(args.path, 'utf8');
+      for (const [needle, replacement] of pairs) {
+        if (!src.includes(needle))
+          throw new Error(`мутация ${name} не нашла свою строку: ${needle.slice(0, 60)}`);
+        src = src.replace(needle, replacement);
+      }
+      return { contents: src, loader };
+    });
+  },
+});
+const tileSwaps = [];
+if (MUT.threedOptions)
+  tileSwaps.push([
+    "return (band.threedOptions ?? []).some((raw) => (raw ?? '').trim() === name);",
+    'return true;',
+  ]);
+if (MUT.threedPbr)
+  tileSwaps.push([
+    "pbr: offers(band, PBR) ? (textured && c.pbr ? 'on' : 'off') : '',",
+    "pbr: offers(band, PBR) ? (c.pbr ? 'on' : 'off') : '',",
+  ]);
+if (MUT.threedGate)
+  tileSwaps.push([
+    'return band.threedOptions === undefined ? notYet() : { available: true };',
+    'return { available: true };',
+  ]);
+if (MUT.threedColorway)
+  tileSwaps.push(['if ((media?.id ?? 0) === mediaId) return colorwayOf(slot);', '']);
+if (tileSwaps.length)
+  plugins.unshift(multiSwap('c10-tile', /tiles\/image-to-3d\.tsx$/, 'tsx', tileSwaps));
+const chainSwaps = [];
+if (MUT.railThreed)
+  chainSwaps.push([
+    'return threedStepOnRail(ctx) ? STEPS_WITH_THREED : STEPS;',
+    'return STEPS_WITH_THREED;',
+  ]);
+if (MUT.legacyThreed)
+  chainSwaps.push(["if (value === 'threed' && !threedRetired) return null;", '']);
+if (MUT.stepFirst)
+  chainSwaps.push([
+    `  const legacy = legacyStep(value, threedRetired);
+  if (legacy) return legacy.step;
+  return isStepId(value) ? value : null;`,
+    `  if (isStepId(value)) return value;
+  return legacyStep(value, threedRetired)?.step ?? null;`,
+  ]);
+if (chainSwaps.length)
+  plugins.unshift(multiSwap('c10-chain', /core\/chain\.ts$/, 'ts', chainSwaps));
 
 const outfile = resolve(tmpdir(), `playground-registry-probe-${process.pid}.mjs`);
 try {
@@ -982,6 +1066,443 @@ head('I', 'форма create_edit: секции AI model и Format только 
     !/engine-section|format-section/.test(noModels) && !/needs at least one/.test(noModels),
     'список есть, моделей нет: без AI model/Format, но и без «needs at least one» (текст → картинка)',
   );
+}
+
+// ─── J · плитка 12 Image to 3D (C-10) ─────────────────────────────────────────────────────────
+head('J', 'Image to 3D: тело режима референса, опции по слову сервера, ворота, разметка, рекол');
+const OPTS3 = ['texture', 'pbr', 'quality'];
+/** A render plate of colourway 5 on the render bench, and a flat plate — media 41 and 43. */
+const BENCH3 = [
+  {
+    id: 1,
+    kind: 'render',
+    viewKey: 'front',
+    colorwayId: 5,
+    picture: { id: 901, media: media(41) },
+  },
+  { id: 2, kind: 'flat', viewKey: 'front', colorwayId: 0, picture: { id: 902, media: media(43) } },
+];
+const band3 = (over = {}) =>
+  band({ playgroundWorkflows: ['image_to_3d'], threedOptions: OPTS3, bench: BENCH3, ...over });
+const t3 = () => run('image_to_3d');
+/** Every field of DesignThreedParams, written by hand. */
+const THREED = (over) => ({
+  frames: 0,
+  presentation: 'air',
+  modelId: 0,
+  garmentSizeId: 0,
+  fitOverride: '',
+  bodyType: '',
+  sourcePictureIds: [],
+  referenceMediaIds: [],
+  texture: '',
+  pbr: '',
+  quality: '',
+  follow: '',
+  surfaceHint: '',
+  ...over,
+});
+{
+  ck(!!t3(), 'image_to_3d: плитка runnable (run есть)');
+  const b = band3();
+  const fresh3 = (images) => ({ ...M.initialDraft(t3()), images: { reference: images } });
+
+  // A plate of colourway 5, every option stated.
+  const full = t3().wire(
+    {
+      ...fresh3([media(41)]),
+      flags: { texture: true, pbr: true },
+      choices: { quality: 'detailed' },
+    },
+    { band: b },
+  );
+  ck(
+    same(full, {
+      kind: 'threed',
+      ask: '',
+      params: {
+        ...EMPTY_PARAMS,
+        colorwayId: 5,
+        threed: THREED({
+          referenceMediaIds: [41],
+          texture: 'on',
+          pbr: 'on',
+          quality: 'detailed',
+        }),
+      },
+    }),
+    'плита рендер-верстака колорвея 5, всё названо: тело целиком (colorwayId 5, [41], on/on/detailed, follow пуст)',
+    show(full),
+  );
+
+  // A fresh draft over a picture that is not a render plate: the defaults, colourway 0.
+  const plain = t3().wire(fresh3([media(42), media(44)]), { band: b });
+  ck(
+    same(plain, {
+      kind: 'threed',
+      ask: '',
+      params: {
+        ...EMPTY_PARAMS,
+        threed: THREED({
+          referenceMediaIds: [42],
+          texture: 'on',
+          pbr: 'off',
+          quality: 'standard',
+        }),
+      },
+    }),
+    'свежий черновик, картинка не с верстака: [42] (одна), on/off/standard, colorwayId 0',
+    show(plain),
+  );
+  ck(
+    t3().wire(fresh3([media(43)]), { band: b }).params.colorwayId === 0,
+    'плита ФЛЭТ-верстака колорвея не даёт (colorwayId 0)',
+  );
+  ck(M.plateColorway(b, 41) === 5 && M.plateColorway(b, 0) === 0, 'plateColorway: 41 → 5, 0 → 0');
+
+  // Materials without the texture never leave as `on` (the door refuses the pair).
+  const bare = t3().wire(
+    { ...fresh3([media(42)]), flags: { texture: false, pbr: true } },
+    { band: b },
+  );
+  ck(
+    bare.params.threed.texture === 'off' && bare.params.threed.pbr === 'off',
+    'текстура off + материалы on → уезжает off/off, никогда off/on',
+    show(bare.params.threed),
+  );
+  // …and where the texture row is not the server's to switch, the texture is ON (its constant).
+  const pbrOnly = t3().wire(
+    { ...fresh3([media(42)]), flags: { texture: false, pbr: true } },
+    { band: band3({ threedOptions: ['pbr'] }) },
+  );
+  ck(
+    same(pbrOnly.params.threed, THREED({ referenceMediaIds: [42], pbr: 'on' })),
+    'сервер объявил только pbr: texture/quality пусты (константа маршрута), pbr on',
+    show(pbrOnly.params.threed),
+  );
+
+  // Nothing advertised → every option '' — today's constants.
+  const none = t3().wire(
+    {
+      ...fresh3([media(42)]),
+      flags: { texture: false, pbr: true },
+      choices: { quality: 'detailed' },
+    },
+    { band: band3({ threedOptions: [] }) },
+  );
+  ck(
+    same(none.params.threed, THREED({ referenceMediaIds: [42] })),
+    'threed_options пуст: texture/pbr/quality/follow — все пустые',
+    show(none.params.threed),
+  );
+
+  // Follow travels only when the server lists it (never in phase 2).
+  ck(plain.params.threed.follow === '', 'follow не объявлен → пусто');
+  const withFollow = t3().wire(
+    { ...fresh3([media(42)]), choices: { follow: 'shape' } },
+    { band: band3({ threedOptions: [...OPTS3, 'follow'] }) },
+  );
+  ck(
+    withFollow.params.threed.follow === 'shape',
+    'follow объявлен → уезжает выбранное слово (shape)',
+    show(withFollow.params.threed),
+  );
+
+  // validate: the picture is the one refusal before money.
+  const empty = t3().validate(M.initialDraft(t3()), { band: b });
+  ck(empty?.section === 'reference', 'нет картинки → отказ на секции reference', show(empty));
+  ck(t3().validate(fresh3([media(42)]), { band: b }) === null, 'с картинкой — отказа нет');
+
+  // Shape and price words.
+  ck(
+    t3().shape(fresh3([media(42)]), plain) === '1 model · about $1.20' &&
+      t3().shape(fresh3([media(41)]), full) === '1 model · about $1.40',
+    'строка GENERATE: «1 model · about $1.20» / «about $1.40» у detailed',
+    `${t3().shape(null, plain)} | ${t3().shape(null, full)}`,
+  );
+
+  // The gate: the list AND the options field.
+  const g = (bb) => def('image_to_3d').gate(bb);
+  ck(
+    same(g(band()), { available: false, reason: 'not on this server yet' }),
+    'ворота: списка нет (старый сервер) → «not on this server yet»',
+    show(g(band())),
+  );
+  ck(
+    same(g(band({ playgroundWorkflows: ['image_to_3d'] })), {
+      available: false,
+      reason: 'not on this server yet',
+    }),
+    'ворота: в списке, но threed_options нет → приглушена',
+    show(g(band({ playgroundWorkflows: ['image_to_3d'] }))),
+  );
+  ck(
+    g(band({ playgroundWorkflows: ['image_to_3d'], threedOptions: [] })).available === true,
+    'ворота: в списке и threed_options есть (даже пустой) → открыта',
+  );
+  ck(
+    /not wired/.test(
+      g(band({ playgroundWorkflows: ['create_edit'], threedOptions: OPTS3 })).reason ?? '',
+    ),
+    'ворота: не в списке → «not wired on this server»',
+  );
+  ck(
+    liveKeys(M.gridMarkup(band3())).has('image_to_3d') &&
+      !liveKeys(M.gridMarkup(band({ playgroundWorkflows: ['image_to_3d'] }))).has('image_to_3d'),
+    'сетка: плитка жива только при threed_options',
+  );
+
+  // The form's markup: rows only for what the server lists; the fold's header says the quality.
+  const all = M.panelMarkup(b, 'image_to_3d');
+  ck(
+    /data-toggle-row="texture"/.test(all) &&
+      /data-toggle-row="pbr"/.test(all) &&
+      /data-option-row="quality"/.test(all) &&
+      !/data-option-row="follow"/.test(all),
+    'форма: Texture, Realistic materials, Quality есть, Follow нет (не объявлен)',
+  );
+  ck(/Realistic materials/.test(all), 'строка «Realistic materials» названа словами владельца');
+  const heads = [...all.matchAll(/data-fold-value="">([^<]*)</g)].map((m) => m[1]);
+  ck(heads.includes('standard'), 'шапка «3D options» — «standard»', show(heads));
+  ck(/data-fold-section="image_to_3d\.options"/.test(all), 'секция 3D options есть');
+  const pbrOnlyForm = M.panelMarkup(band3({ threedOptions: ['pbr'] }), 'image_to_3d');
+  ck(
+    /data-toggle-row="pbr"/.test(pbrOnlyForm) &&
+      !/data-toggle-row="texture"/.test(pbrOnlyForm) &&
+      !/data-option-row="quality"/.test(pbrOnlyForm),
+    'объявлен только pbr → только его строка',
+  );
+  const noneForm = M.panelMarkup(band3({ threedOptions: [] }), 'image_to_3d');
+  ck(
+    noneForm.length > 0 && !/data-fold-section="image_to_3d\.options"/.test(noneForm),
+    'threed_options пуст → секции 3D options нет вовсе',
+  );
+  const followForm = M.panelMarkup(band3({ threedOptions: [...OPTS3, 'follow'] }), 'image_to_3d');
+  ck(
+    /data-option-row="follow"/.test(followForm) && /The photo/.test(followForm),
+    'follow объявлен → строка Follow «The photo | The shape»',
+  );
+  const bareForm = M.panelMarkup(b, 'image_to_3d', {
+    ...fresh3([media(42)]),
+    flags: { texture: false, pbr: true },
+  });
+  ck(
+    /turn it on first/.test(bareForm),
+    'текстура off → у строки материалов сказано, почему она выключена',
+  );
+
+  // Results: its own block (the card's 3D models); the history narrows to threed runs.
+  const r = t3().results;
+  ck(
+    typeof r.view === 'function' && same(r.reps, ['threed']),
+    'результаты: свой блок (view) и reps [threed]',
+  );
+  const runs3 = [
+    { id: 1, kind: 'threed' },
+    { id: 2, kind: 'freeform' },
+    { id: 3, kind: 'render' },
+  ];
+  const m3 = M.playgroundHistoryMatch('image_to_3d', b);
+  ck(
+    same(
+      runs3.filter(m3).map((x) => x.id),
+      [1],
+    ),
+    'история под плиткой: только threed-прогоны',
+  );
+  ck(
+    M.playgroundHistoryRep('image_to_3d', b) === 'threed' &&
+      M.playgroundHistoryRep('create_edit', band({ playgroundWorkflows: ['create_edit'] })) ===
+        'playground' &&
+      M.playgroundHistoryRep(null, b) === 'playground',
+    'слово истории: threed под Image to 3D, playground под другими и на сетке',
+  );
+
+  // Recall: the first reference and the options; a bench build is said, not guessed.
+  const past = {
+    id: 77,
+    kind: 'threed',
+    params: {
+      threed: THREED({
+        referenceMediaIds: [42, 43],
+        texture: 'off',
+        pbr: 'off',
+        quality: 'detailed',
+      }),
+    },
+  };
+  const back = t3().recall(
+    past,
+    new Map([
+      [42, media(42)],
+      [43, media(43)],
+    ]),
+  );
+  ck(
+    same(
+      back.draft.images.reference.map((x) => x.id),
+      [42],
+    ) &&
+      back.draft.flags.texture === false &&
+      back.draft.choices.quality === 'detailed' &&
+      back.said.some((w) => /1 more angle/.test(w)),
+    'рекол: первая картинка, опции, лишний ракурс назван',
+    show(back),
+  );
+  const bench = t3().recall({ id: 78, kind: 'threed', params: { threed: THREED({}) } }, new Map());
+  ck(
+    bench.draft.images.reference.length === 0 && bench.said.some((w) => /render bench/.test(w)),
+    'рекол сборки STEP 5 (верстак): картинки нет, сказано почему',
+    show(bench),
+  );
+}
+
+// ─── K · рельс без STEP 5 (C-10) ───────────────────────────────────────────────────────────────
+head('K', 'рельс: STEP 5 только у сервера без playground_workflows; ?step=threed; счёт шагов');
+{
+  const ids = (list) => list.map((st) => st.id).join(',');
+  const oldSrv = { band: band(), bandless: false };
+  const newSrv = { band: band({ playgroundWorkflows: [] }), bandless: false };
+  const silent = { band: {}, bandless: true };
+  ck(
+    ids(M.railSteps(oldSrv)) === 'card,mood,flat,pattern,render,threed',
+    'старый сервер (band без playground_workflows): шесть ячеек, STEP 5 последней',
+    ids(M.railSteps(oldSrv)),
+  );
+  ck(
+    ids(M.railSteps(newSrv)) === 'card,mood,flat,pattern,render',
+    'новый сервер (список есть, даже пустой): пять ячеек, без 3d',
+    ids(M.railSteps(newSrv)),
+  );
+  ck(
+    ids(M.railSteps(silent)) === 'card,mood,flat,pattern,render',
+    'сервер молчит (полоса грузится / не отвечает): STEP 5 не рисуется',
+    ids(M.railSteps(silent)),
+  );
+  ck(
+    !M.STEPS.some((st) => st.id === 'threed') && M.THREED_STEP.label === '3d',
+    'STEPS без threed; STEP 5 — отдельная константа «3d»',
+  );
+  ck(M.stepOfKind('threed').label === '3d', 'stepOfKind(threed) — ярлык «3d» (слово пикеров)');
+
+  ck(
+    same(M.legacyStep('threed', true), { step: 'playground', wf: 'image_to_3d' }),
+    '?step=threed на новом сервере → playground + image_to_3d',
+    show(M.legacyStep('threed', true)),
+  );
+  ck(M.legacyStep('threed', false) === null, '?step=threed на старом — живой шаг, не старый адрес');
+  ck(M.legacyStep('threed') === null, '…и без ответа сервера (флаг по умолчанию) — тоже нет');
+  ck(
+    M.legacyStep('threed', true) === M.legacyStep('threed', true),
+    'ответ — одна ссылка (эффект перезаписи не перезапускается)',
+  );
+  ck(
+    same(M.legacyStep('aside', true), { step: 'playground', wf: 'change_color' }),
+    '?step=aside — как было',
+  );
+  // The composer's reading of `?step=` (studio-tab: `decided`).
+  const at = (v, r) => M.addressedStep(v, r);
+  ck(
+    at('threed', true) === 'playground' &&
+      at('threed', false) === 'threed' &&
+      at('aside', false) === 'playground' &&
+      at('flat', true) === 'flat' &&
+      at('junk', true) === null &&
+      at(null, true) === null,
+    'addressedStep: threed → playground на новом, threed на старом; aside, flat, мусор — как прежде',
+    show([
+      at('threed', true),
+      at('threed', false),
+      at('aside', false),
+      at('flat', true),
+      at('junk', true),
+    ]),
+  );
+
+  // A card where everything is done: the counter's ceiling is the rail's length.
+  const plate = (kind, viewKey, id) => ({
+    id,
+    kind,
+    viewKey,
+    colorwayId: 0,
+    picture: { id: 800 + id, media: media(800 + id) },
+  });
+  const doneBand = (over) =>
+    band({
+      bench: [
+        plate('flat', 'front', 1),
+        plate('flat', 'back', 2),
+        plate('render', 'front', 3),
+        plate('render', 'back', 4),
+      ],
+      runs: [{ id: 5, kind: 'threed', pictures: [{ id: 9 }] }],
+      ...over,
+    });
+  const ctxOf = (b, threed) => ({
+    band: b,
+    bandless: false,
+    now: null,
+    card: { name: 'coat', styleNumber: 'S1', categoryId: 3, baseSampleSizeId: 0, pastIdea: false },
+    moodPictures: 1,
+    moodConcept: 'a coat',
+    counts: { pattern: 1, render: 2, threed, onmodel: 0, playground: 0 },
+    colorway: { id: 0, label: '', archived: false },
+  });
+  const oldDone = ctxOf(doneBand({}), 1);
+  const newDone = ctxOf(doneBand({ playgroundWorkflows: ['image_to_3d'] }), 1);
+  ck(
+    M.doneCount(newDone) === 5 && M.railSteps(newDone).length === 5,
+    'новый сервер, всё сделано: «5 of 5»',
+    `${M.doneCount(newDone)} of ${M.railSteps(newDone).length}`,
+  );
+  ck(
+    M.doneCount(oldDone) === 6 && M.railSteps(oldDone).length === 6,
+    'старый сервер, всё сделано вместе с 3D: «6 of 6» (как до волны)',
+    `${M.doneCount(oldDone)} of ${M.railSteps(oldDone).length}`,
+  );
+  // Only the 3D model is missing: the old server opens on STEP 5, the new one's chain is complete.
+  const oldNo3d = ctxOf(doneBand({}), 0);
+  const newNo3d = ctxOf(doneBand({ playgroundWorkflows: ['image_to_3d'] }), 0);
+  ck(
+    M.defaultStep(oldNo3d) === 'threed',
+    'старый сервер без 3D-модели: карточка открывается на STEP 5',
+    M.defaultStep(oldNo3d),
+  );
+  ck(
+    M.defaultStep(newNo3d) === 'card',
+    'новый сервер: цепь из пяти завершена — открывается там, где начиналась, не на 3d',
+    M.defaultStep(newNo3d),
+  );
+  // A render bench with no FRONT blocks STEP 5 on the old rail; the new rail has no such link.
+  const noFront = (over) =>
+    band({
+      bench: [plate('flat', 'front', 1), plate('flat', 'back', 2), plate('render', 'back', 4)],
+      ...over,
+    });
+  const oldBlock = M.nearestBlock(ctxOf(noFront({}), 0));
+  const newBlock = M.nearestBlock(ctxOf(noFront({ playgroundWorkflows: [] }), 0));
+  ck(
+    oldBlock?.stepId === 'threed',
+    'старый сервер: рендер без FRONT держит STEP 5 (полоса LOCKED как прежде)',
+    show(oldBlock),
+  );
+  ck(newBlock === null, 'новый сервер: полосы LOCKED про 3d нет', show(newBlock));
+
+  // The rail itself, drawn by React: the cells and the counter on each server.
+  const cells = (markup) => [...markup.matchAll(/data-step="([a-z]+)"/g)].map((m) => m[1]);
+  const oldRail = M.railMarkup(oldDone);
+  const newRail = M.railMarkup(newDone);
+  ck(
+    cells(oldRail).includes('threed') && /6 of 6 steps/.test(oldRail),
+    'рельс старого сервера: ячейка 3d и «6 of 6 steps»',
+    show(cells(oldRail)),
+  );
+  ck(
+    !cells(newRail).includes('threed') && /5 of 5 steps/.test(newRail),
+    'рельс нового сервера: без ячейки 3d, «5 of 5 steps»',
+    show(cells(newRail)),
+  );
+  ck(cells(newRail).includes('playground'), 'PLAYGROUND на месте');
 }
 
 const expected = MUTATED ? ' (прогон С МУТАЦИЕЙ — провалы ожидаются)' : '';

@@ -8,7 +8,8 @@ import { useStartRunPending } from '../render/use-design-run';
 import { playgroundRunScope, useWorkflowAddress } from './address';
 import { WorkflowGrid, workflowOpenable } from './grid';
 import { PlaygroundRecallIntake } from './recall';
-import { workflowByKey } from './registry';
+import type { Representation } from '../bench-kinds';
+import { PLAYGROUND_ROOM, workflowByKey } from './registry';
 import { whyNot } from './registry/common';
 import type { Draft, ResultsDef, WorkflowDef, WorkflowKey } from './registry/types';
 import { PlaygroundResults } from './results';
@@ -61,6 +62,7 @@ export function PlaygroundStudio({
   const def = workflowByKey(asked);
   const open = openWorkflow(asked, band);
   const flow = open?.run ?? null;
+  const OwnResults = flow?.results.view;
   const starting = useStartRunPending(techCardId, open ? playgroundRunScope(open.key) : '');
   useFocusFollows(open?.key ?? null);
 
@@ -115,7 +117,13 @@ export function PlaygroundStudio({
         )}
       </Section>
 
-      <PlaygroundResults band={band} techCardId={techCardId} disabled={disabled} def={open} />
+      {/* A workflow whose results are not pictures of the room draws its own block (C-10: Image to
+          3D → the card's 3D models); every other one, and the grid, the room's. */}
+      {OwnResults ? (
+        <OwnResults band={band} techCardId={techCardId} disabled={disabled} />
+      ) : (
+        <PlaygroundResults band={band} techCardId={techCardId} disabled={disabled} def={open} />
+      )}
     </>
   );
 }
@@ -157,6 +165,19 @@ export function playgroundHistoryScope(
   band: GetDesignBandResponse,
 ): string {
   return openWorkflow(asked, band)?.key ?? 'playground-room';
+}
+
+/**
+ * HOW THE HISTORY UNDER THE PLAYGROUND NAMES ITS ROWS (C-10): the open workflow's own representation
+ * when its results live outside the room (Image to 3D → `threed`, «3D runs»), else `playground`.
+ * Only the words: which rows are drawn is `playgroundHistoryMatch`.
+ */
+export function playgroundHistoryRep(
+  asked: string | null | undefined,
+  band: GetDesignBandResponse,
+): Representation {
+  const reps = openWorkflow(asked, band)?.run?.results.reps ?? [];
+  return reps.length === 1 && !PLAYGROUND_ROOM.includes(reps[0]) ? reps[0] : 'playground';
 }
 
 function whyNotOpen(

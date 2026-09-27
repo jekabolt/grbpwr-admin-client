@@ -4,6 +4,7 @@ import { runRepresentation, type Representation } from '../../bench-kinds';
 import { RETIRED_PRESET_WORD, notYet } from './common';
 import { CHANGE_COLOR } from './tiles/change-color';
 import { CREATE_EDIT } from './tiles/create-edit';
+import { IMAGE_TO_3D } from './tiles/image-to-3d';
 import { REMOVE_BACKGROUND } from './tiles/remove-background';
 import type { WorkflowDef, WorkflowKey } from './types';
 
@@ -90,7 +91,7 @@ export const WORKFLOWS: readonly WorkflowDef[] = [
     key: 'image_to_3d',
     title: 'Image to 3D',
     blurb: 'Create a 3D model from your fashion design.',
-    gate: notYet,
+    ...IMAGE_TO_3D,
   },
 ];
 
