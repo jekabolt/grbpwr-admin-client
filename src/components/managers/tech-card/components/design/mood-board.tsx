@@ -315,19 +315,18 @@ const DRAG_SLOP = 4;
 const LG_UP = '(min-width: 64rem)';
 
 /**
- * ЛОВУШКИ `click` ЖЕСТОВ ШИРИНЫ (27.09, O-58 r4, ревью Codex). `click`, который браузер шлёт за
- * отпусканием жеста, — этого отпускания, а не двери, и попасть он может куда угодно (см. шапку
- * жеста в `MoodBoard`). Каждое отпускание взводит СВОЮ ловушку — жетон «указатель, точка, время» —
+ * ЛОВУШКИ `click` ЖЕСТОВ ШИРИНЫ (27.09, O-58 r4–r5, ревью Codex; D-70′). `click`, который браузер
+ * шлёт за отпусканием жеста, — этого отпускания, а не двери, и попасть он может куда угодно (см.
+ * шапку жеста в `MoodBoard`). Отпускание взводит СВОЮ ловушку — жетон «указатель, точка, время» —
  * и она съедает не больше одного `click`: с `pointerId` жеста либо, без числового `pointerId`
  * (движок, где `click` — ещё `MouseEvent`), упавший не дальше 24px от точки отпускания. Ловушка
- * кончается на этом `click`, через секунду или на следующем нажатии ТОГО ЖЕ указателя — что
- * раньше: `click` отпускания приходит до следующего нажатия своего указателя или не приходит вовсе
- * (мышь после щелчка по полоске: полоска снята отпусканием, и Chromium `click` не шлёт — замерено;
- * без этого ловушка съела бы следующий щелчок мыши по панели). Новое отпускание взводит свою, а
- * прежние живут до своего срока. Нажатие ДРУГОГО указателя её не снимает (`click` касания бывает
- * отложен, и второй палец успевает нажать раньше), и больше она не ест ничего. `click` с
- * `pointerId` −1 или `detail` 0 — клавиатура, ассистивная техника, `element.click()` (замерено) —
- * дверь всегда.
+ * кончается ТОЛЬКО на этом `click` или через секунду — что раньше. Никакое нажатие её не снимает:
+ * `pointerId` — имя живого контакта, а не пальца, и повторяется, а отложенный `click` касания
+ * (iOS Safari, WebView) приходит и после нового нажатия с тем же `pointerId` (ревью Codex r5).
+ * Новое отпускание взводит свою, а прежние живут до своего срока; больше ловушка не ест ничего.
+ * `click` с `pointerId` −1 или `detail` 0 — клавиатура, ассистивная техника, `element.click()`
+ * (замерено) — дверь всегда. Взводит ли отпускание ловушку, решает `release`: у мыши — только
+ * после жеста с движением.
  */
 const CLICK_TRAP_MS = 1000;
 const CLICK_TRAP_PX = 24;
@@ -340,18 +339,10 @@ type ClickTrap = {
 };
 function createClickTraps() {
   let armed: ClickTrap[] = [];
-  const listen = () => {
-    window.addEventListener('click', onClick, true);
-    window.addEventListener('pointerdown', onPress, true);
-  };
-  const unlisten = () => {
-    window.removeEventListener('click', onClick, true);
-    window.removeEventListener('pointerdown', onPress, true);
-  };
   const drop = (trap: ClickTrap) => {
     clearTimeout(trap.timer);
     armed = armed.filter((t) => t !== trap);
-    if (!armed.length) unlisten();
+    if (!armed.length) window.removeEventListener('click', onClick, true);
   };
   function onClick(e: MouseEvent) {
     const pid = (e as Partial<PointerEvent>).pointerId;
@@ -369,14 +360,10 @@ function createClickTraps() {
     e.preventDefault();
     e.stopPropagation();
   }
-  /** Нажатие того же указателя: `click` его прежнего отпускания уже в прошлом. */
-  function onPress(e: PointerEvent) {
-    armed.filter((t) => t.id === e.pointerId).forEach(drop);
-  }
   return {
     /** Взвести ловушку отпускания: его указатель и точка, время — сейчас. */
     arm(pointerId: number, x: number, y: number) {
-      if (!armed.length) listen();
+      if (!armed.length) window.addEventListener('click', onClick, true);
       const trap: ClickTrap = { id: pointerId, x, y, t: performance.now() };
       trap.timer = setTimeout(() => drop(trap), CLICK_TRAP_MS);
       armed.push(trap);
@@ -385,7 +372,7 @@ function createClickTraps() {
     clear() {
       armed.forEach((t) => clearTimeout(t.timer));
       armed = [];
-      unlisten();
+      window.removeEventListener('click', onClick, true);
     },
   };
 }
@@ -792,9 +779,10 @@ export function MoodBoard({
      её органы или кадр доски. Поэтому его съедает ловушка на ОКНЕ в фазе перехвата
      (`createClickTraps`), куда бы он ни попал; прежде глушение жило на полоске, которая к этому
      времени уже снята. Ловушка у каждого отпускания своя и узнаёт только `click` этого отпускания:
-     по `pointerId`, а где его нет — по точке; живёт до него, до следующего нажатия того же
-     указателя или секунду (ревью Codex r4: прежняя снималась любым следующим нажатием, и
-     отложенный `click` касания проходил, а без `pointerId` она глотала любой `click` страницы).
+     по `pointerId`, а где его нет — по точке; живёт до него или секунду, и никакое нажатие её не
+     снимает (ревью Codex r4–r5: прежняя снималась следующим нажатием, и отложенный `click` касания
+     проходил, а без `pointerId` она глотала любой `click` страницы). У мыши ловушку взводит только
+     жест с движением: отложенного `click` у мыши нет (D-70′).
 
      `click` БЕЗ НАЖАТИЯ — ДВЕРЬ ВСЕГДА. Клавиатура, ассистивная техника и `element.click()` шлют его
      с `pointerId` −1 и `detail` 0 (замерено), ловушка его не трогает, и полоска раскрывается своим
@@ -901,7 +889,11 @@ export function MoodBoard({
     // Разделитель, пропавший без движения (окно ниже `lg` в том же кадре, свёрнутая доска), — жеста
     // нет, как в `follow`: ни раскрытия, ни ловушки.
     if (e.type !== 'pointerup' || !separator.current?.offsetWidth) return;
-    clickTraps.arm(e.pointerId, e.clientX, e.clientY);
+    // МЫШЬ — ТОЛЬКО ПОСЛЕ ЖЕСТА С ДВИЖЕНИЕМ (D-70′). Отложенного `click` у мыши не бывает: Chromium
+    // шлёт его сразу за отпусканием или не шлёт вовсе (щелчок раскрыл панель, полоска снята —
+    // `click` нет, замерено), и ловушка простого щелчка секунду ждала бы, чтобы съесть следующий
+    // щелчок мыши по панели. Касание и перо — ловушка всегда.
+    if (e.pointerType !== 'mouse' || d.moved) clickTraps.arm(e.pointerId, e.clientX, e.clientY);
     // Нажатие на полоске без движения — щелчок по ней (см. шапку жеста).
     if (d.strip && !d.moved) setCollapsed(false);
   };
