@@ -1,5 +1,4 @@
 import {
-  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
@@ -35,13 +34,13 @@ export function useAiConfig(enabled = true) {
 }
 
 // `from` / `to` are calendar days YYYY-MM-DD, inclusive, in the org timezone (the server checks
-// from ≤ to and a span of at most 366 days). The previous period's numbers stay on screen while the
-// next one loads, so switching a preset does not blank the tables.
+// from ≤ to and a span of at most 366 days). A new period starts BLANK: no previous report is kept
+// as a placeholder, because last month's numbers under this month's label are a wrong answer, not
+// a smooth one — the tables say "loading…" until this period's report is in.
 export function useAiSpend(from: string, to: string, enabled = true) {
   return useQuery({
     queryKey: aiKeys.spend(from, to),
     queryFn: () => adminService.GetAiSpendReport({ fromDay: from, toDay: to }),
-    placeholderData: keepPreviousData,
     staleTime: 60_000,
     enabled: enabled && Boolean(from) && Boolean(to),
   });

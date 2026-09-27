@@ -211,6 +211,18 @@ const MUTATIONS = {
     from: 'label: "their total \\xB7 usd \\xB7 provider days"',
     to: 'label: "their total \\xB7 usd"',
   },
+  'spend-before-config': {
+    red: 'FE4',
+    what: 'the spend report is asked for before the org timezone is known (browser zone)',
+    from: 'const orgTz = config?.timezone || "";',
+    to: 'const orgTz = config?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;',
+  },
+  'spend-keeps-previous': {
+    red: 'FE4',
+    what: 'a new period keeps the previous report on screen while it loads',
+    from: 'staleTime: 6e4,\n      enabled: enabled && Boolean(from) && Boolean(to)',
+    to: 'staleTime: 6e4,\n      placeholderData: (prev) => prev,\n      enabled: enabled && Boolean(from) && Boolean(to)',
+  },
   'clear-sends-old-value': {
     red: 'E5',
     what: 'clear sends the old key (its last four) instead of an empty value',
@@ -395,6 +407,9 @@ function freshServer(opts = {}) {
     forceStale: false,
     probe: { ok: true, code: '', message: '', balance: '24.50 USD' },
     failKey: opts.failKey ?? false,
+    configDelayMs: opts.configDelayMs ?? 0,
+    spendDelayMs: 0,
+    spendTz: opts.spendTz,
     calls: [],
     delayMs: opts.delayMs ?? 0,
   };
@@ -473,7 +488,7 @@ function answer(method, path, query, body) {
       pu.fallback = body.fallback ?? null;
     });
   if (method === 'GET' && path === '/api/admin/ai/spend')
-    return { status: 200, body: { ...clone(SPEND), fromDay: query.get('fromDay'), toDay: query.get('toDay') } };
+    return { status: 200, body: { ...clone(SPEND), timezone: server.spendTz ?? TZ, fromDay: query.get('fromDay'), toDay: query.get('toDay') } };
   return { status: 404, body: { code: 5, message: `probe server: no ${method} ${path}` } };
 }
 
@@ -491,6 +506,11 @@ await page.route(`${STUB_ORIGIN}/**`, async (r) => {
   const body = raw ? JSON.parse(raw) : null;
   server.calls.push({ method: rq.method(), path: url.pathname, query: url.search, body });
   if (server.delayMs) await new Promise((res) => setTimeout(res, server.delayMs));
+  // FE4: the config (the org timezone) and the spend report can each be held back.
+  if (server.configDelayMs && rq.method() === 'GET' && url.pathname === '/api/admin/ai/providers')
+    await new Promise((res) => setTimeout(res, server.configDelayMs));
+  if (server.spendDelayMs && url.pathname === '/api/admin/ai/spend')
+    await new Promise((res) => setTimeout(res, server.spendDelayMs));
   // Injected refusals (FE7): the first matching entry answers instead of the server, once.
   const hit = (server.fail ?? []).findIndex((f) => f.method === rq.method() && f.re.test(url.pathname));
   const injected = hit >= 0 ? server.fail.splice(hit, 1)[0] : null;
@@ -579,6 +599,9 @@ if (process.argv.includes('--shots')) {
       await page.getByRole('combobox', { name: 'Note to markdown primary', exact: true }).click();
       await page.getByRole('option', { name: 'Anthropic', exact: true }).click();
       await page.waitForTimeout(600);
+    });
+    await shoot('spendtz', w, '/ai-providers?view=spend', { spendTz: 'UTC' }, async () => {
+      await page.waitForSelector('[data-spend-provider="openai"]');
     });
     await shoot('keyfail', w, '/ai-providers', { failKey: true }, async () => {
       await page.waitForSelector('[data-provider="openai"]');
@@ -878,6 +901,35 @@ await page.waitForSelector('[data-spend-provider="openai"]', { timeout: 8000 });
   ck('D2', q === `?fromDay=${first}&toDay=${last}`, `"last month" asks for ${first}…${last} (${TZ})`, q);
   const loc = await page.evaluate(() => window.__loc);
   ck('D2', loc.includes('range=last-month'), 'the preset lives in the address', loc);
+}
+
+// FE4 · no spend request before the org timezone is known; a new period starts blank.
+{
+  await mount({ start: '/ai-providers?view=spend', configDelayMs: 1500 });
+  await page.waitForTimeout(700);
+  const early = server.calls.filter((c) => c.path === '/api/admin/ai/spend').length;
+  const waiting = ((await page.locator('[data-spend-period]').textContent().catch(() => '')) ?? '').trim();
+  ck('FE4', early === 0, 'config pending → 0 spend requests', `${early}; "${waiting}"`);
+  await page.waitForSelector('[data-spend-provider="openai"]', { timeout: 8000 });
+  await page.waitForTimeout(500);
+  const after = server.calls.filter((c) => c.path === '/api/admin/ai/spend').length;
+  ck('FE4', after === 1, 'config in → exactly 1 spend request', `${after}`);
+  const line = ((await page.locator('[data-spend-period]').textContent()) ?? '').trim();
+  ck('FE4', line.endsWith('· days in Europe/Warsaw'), 'the period line names the zone the report counted in', line);
+
+  server.spendDelayMs = 1500;
+  await page.getByRole('radio', { name: 'last month' }).click();
+  await page.waitForTimeout(400);
+  const stale = await page.locator('[data-spend-provider]').count();
+  ck('FE4', stale === 0, 'a new period shows no rows of the previous one while it loads', `rows on screen: ${stale}`);
+  const ours = ((await page.locator('body').textContent()) ?? '').replace(/\s+/g, ' ');
+  ck('FE4', !/our total · usd\s*12\.50/i.test(ours), 'nor the previous total');
+  await page.waitForTimeout(1500);
+
+  await mount({ start: '/ai-providers?view=spend', spendTz: 'UTC' });
+  await page.waitForSelector('[data-spend-provider="openai"]', { timeout: 8000 });
+  const other = ((await page.locator('body').textContent()) ?? '').replace(/\s+/g, ' ');
+  ck('FE4', other.includes('days in UTC') && other.includes('the report counted its days in UTC, not Europe/Warsaw'), 'a report counted in another zone says so', other.slice(other.indexOf('days in'), other.indexOf('days in') + 120));
 }
 
 // ═══ E · EDGES ═════════════════════════════════════════════════════════════════════════════════

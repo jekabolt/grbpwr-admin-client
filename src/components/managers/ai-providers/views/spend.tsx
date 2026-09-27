@@ -15,7 +15,6 @@ import { ViewSwitch, type ViewSwitchOption } from 'ui/components/view-switch';
 import { formatUsd, sumUsd, usd } from '../utils/format';
 import { useAiSpend } from '../utils/hooks';
 import {
-  localTimeZone,
   periodLabel,
   presetRange,
   rangeProblem,
@@ -47,20 +46,26 @@ const isPreset = (v: string | null): v is Preset => PRESETS.some((p) => p.value 
 
 export function SpendView({ config }: { config: GetAiProvidersConfigResponse | undefined }) {
   const [params, setParams] = useSearchParams();
-  // The days are the server's days: counted in the timezone the config reports. Only when the
-  // config could not be read does the browser's own zone stand in.
-  const tz = config?.timezone || localTimeZone();
-  const today = todayIn(tz);
+  // The days are the server's days, counted in the org timezone the config reports — and ONLY in
+  // it: until the config is in, nothing is computed and nothing is asked. A browser zone standing in
+  // meanwhile asked for the wrong month around midnight and then showed it under the right label.
+  const orgTz = config?.timezone || '';
+  const today = orgTz ? todayIn(orgTz) : '';
 
   const raw = params.get('range');
   const preset: Preset = isPreset(raw) ? raw : 'this-month';
   const range: DayRange =
     preset === 'custom'
       ? { from: params.get('from') ?? '', to: params.get('to') ?? '' }
-      : presetRange(preset, today);
-  const problem = rangeProblem(range);
-  const spend = useAiSpend(range.from, range.to, problem === null);
-  const report = problem === null ? spend.data : undefined;
+      : today
+        ? presetRange(preset, today)
+        : { from: '', to: '' };
+  const problem = orgTz ? rangeProblem(range) : null;
+  const ready = !!orgTz && problem === null;
+  const spend = useAiSpend(range.from, range.to, ready);
+  const report = ready ? spend.data : undefined;
+  // The zone the report says it counted in — shown, and checked against the config's.
+  const reportTz = report?.timezone || '';
 
   const patch = (next: Record<string, string | undefined>) =>
     setParams(
@@ -88,7 +93,7 @@ export function SpendView({ config }: { config: GetAiProvidersConfigResponse | u
 
   const byProvider = report?.byProvider ?? [];
   const theirTotal = sumUsd(byProvider.map((r) => r.theirUsd));
-  const loading = problem === null && spend.isPending;
+  const loading = !orgTz || (problem === null && spend.isPending);
   const dash = (s: string | null) => s ?? '—';
   const count = (n: number | undefined) => (report ? String(n ?? 0) : '—');
 
@@ -104,10 +109,17 @@ export function SpendView({ config }: { config: GetAiProvidersConfigResponse | u
             </>
           )}
         </div>
-        <Text size='micro' variant='label' aria-live='polite'>
-          {periodLabel(range)} · days in {tz}
+        <Text size='micro' variant='label' aria-live='polite' data-spend-period=''>
+          {orgTz
+            ? `${periodLabel(range)} · days in ${reportTz || orgTz}`
+            : 'waiting for the org timezone…'}
           {spend.isFetching && !spend.isPending ? ' · updating…' : ''}
         </Text>
+        {reportTz && reportTz !== orgTz && (
+          <Text size='micro' variant='errorLabel'>
+            ! the report counted its days in {reportTz}, not {orgTz}; reload the page
+          </Text>
+        )}
         {problem && (
           <Text size='micro' variant='errorLabel'>
             ! {problem}
