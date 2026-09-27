@@ -22,6 +22,7 @@ import Text from 'ui/components/text';
 import { InertDoor } from '../bench-slot';
 import {
   COLORWAY_NONE,
+  benchKindOf,
   colorwayOf,
   refColorwayFor,
   slotHolding,
@@ -31,6 +32,7 @@ import { serverSpeaksDesign } from '../capability';
 /* Под другим именем: у экранов студии есть свои `colorwayLabel` (подпись цели). */
 import { colorwayLabel as refLabel } from '../colorway-picker';
 import { TwoStepPicker, type PickerBranch } from '../core';
+import { cropFamilies } from '../generation/composite';
 import type { OutputPlan } from '../generation/run-gallery';
 import type { PictureTileProps } from '../picture-tile';
 import { useDesignWrites } from '../use-design-band';
@@ -39,6 +41,7 @@ import { isActiveView, normaliseViewKey, viewLabel, type ActiveView } from '../v
 import { ApplySplitDoor, type SplitPiece } from './apply-split';
 import {
   outputsHorizon,
+  outputsOfKind,
   pictureIsComposite,
   pictureOffersSplit,
   threedSides,
@@ -1355,6 +1358,11 @@ export function RenderStepScope({
   return <RenderStepContext.Provider value={step}>{children}</RenderStepContext.Provider>;
 }
 
+/** The step's values, or `null` off FABRIC RENDER (no `RenderStepScope` above). */
+export function useRenderStep(): RenderStep | null {
+  return useContext(RenderStepContext);
+}
+
 /** One host of run tiles: the doors every render tile of it draws from, and what a tile asks it. */
 export type RenderHost = {
   doors: RenderDoors;
@@ -1409,18 +1417,30 @@ export function hostPlates(plans: readonly OutputPlan[]): {
 }
 
 /**
- * A HOST OF RUN TILES WITH RENDER DOORS — the workbench under GENERATE. ONE `useRenderDoors` over
- * every plate it shows, as RENDERS OF THIS CARD had one over its strip, and the notes of its refused
- * doors printed ONCE above the tiles (D-56′). Off FABRIC RENDER (no `RenderStepScope` above) it is
- * a plain fragment, and the tiles below draw as they always did.
+ * A HOST OF RUN TILES WITH RENDER DOORS — the workbench under GENERATE, the history below it. ONE
+ * `useRenderDoors` over every plate it shows, as RENDERS OF THIS CARD had one over its strip, and
+ * the notes of its refused doors printed ONCE (D-56′): above the tiles, or where the host puts
+ * `RenderDoorsNotes` (`notes={false}` — the history, whose block begins below its own header).
+ * Off FABRIC RENDER (no `RenderStepScope` above), or `off`, it is a plain fragment, and the tiles
+ * below draw as they always did.
  */
 export function RenderDoorsHost(props: RenderDoorsHostProps): JSX.Element {
   const step = useContext(RenderStepContext);
-  if (!step) return <>{props.children}</>;
+  if (!step || props.off) return <>{props.children}</>;
   return <RenderDoorsHostOn {...props} step={step} />;
 }
 
+/** The host's refusal notes, where its own layout wants them (`RenderDoorsHost notes={false}`). */
+export function RenderDoorsNotes({ className }: { className?: string }): JSX.Element | null {
+  const host = useContext(RenderHostContext);
+  return host ? <RefusalNotes doors={host.doors} className={className} /> : null;
+}
+
 type RenderDoorsHostProps = {
+  /** A host that draws no render plates here (another step's history): a plain fragment. */
+  off?: boolean;
+  /** Print the notes above the children (the default), or leave them to `RenderDoorsNotes`. */
+  notes?: boolean;
   band: GetDesignBandResponse;
   techCardId: number;
   /** The card is read-only for this person — NOT the server's silence, which the doors read themselves. */
@@ -1438,6 +1458,7 @@ type RenderDoorsHostProps = {
 
 function RenderDoorsHostOn({
   step,
+  notes = true,
   band,
   techCardId,
   disabled,
@@ -1466,7 +1487,7 @@ function RenderDoorsHostOn({
   const host: RenderHost = { doors, runOf, onDeck };
   return (
     <RenderHostContext.Provider value={host}>
-      <RefusalNotes doors={doors} className={notesClassName} />
+      {notes && <RefusalNotes doors={doors} className={notesClassName} />}
       {children}
     </RenderHostContext.Provider>
   );
@@ -1540,4 +1561,42 @@ export function RunRenderTile({
       {children}
     </div>
   );
+}
+
+/**
+ * ═══ THE BROUGHT PLATES — ONE FOLDED GROUP AT THE END OF THE HISTORY (27.09, O-63, D-62 п.4) ═════
+ *
+ * RENDERS OF THIS CARD was the one place a plate brought by hand («no run»: an upload, a flatten
+ * with no parent) stood among the card's renders. A run has its row in the history; these have
+ * none. SIDES shows the ones standing in a column it draws, with their ✕; every OTHER brought plate
+ * would vanish with the section — so they stand as one pseudo-row of the history («N brought ▸»,
+ * `GenerationHistory`), drawn by the same `RunOutputs` → `RunTile` → render tile, with the same
+ * doors: those standing in no slot, and those standing in a slot of a column SIDES does not draw
+ * (held away — `unmark ▸` on the tile is the only door that empties it, O-57 r2). A deck goes with
+ * its sheet: the pieces cut from a sheet in the group stand behind it wherever each is placed.
+ *
+ * `null` — nothing brought stands off SIDES, or this server lists no outputs (the page walk of an
+ * older binary reaches runs only). The run is the stamp of the first brought row, id 0: «no run».
+ */
+export function broughtRun(band: GetDesignBandResponse, step: RenderStep): common_DesignRun | null {
+  const rows = outputsOfKind(band, 'render').filter(({ run }) => (run.id ?? 0) <= 0);
+  if (!rows.length) return null;
+  const axis = colourwayColumns(band, step.colorways ?? NO_COLOURWAYS, step.cardColorways);
+  /** SIDES shows it: it stands in a render slot of a column the table draws. */
+  const onSides = (picture: common_DesignPicture): boolean => {
+    const row = slotHolding(band, picture.id ?? 0);
+    if (!row || benchKindOf(row) !== 'render') return false;
+    const colorwayId = colorwayOf(row);
+    return axis.some((c) => c.colorwayId === colorwayId);
+  };
+  const plates = rows.map(({ picture }) => picture);
+  const families = cropFamilies(plates);
+  const byId = new Map(plates.map((picture) => [picture.id ?? 0, picture] as const));
+  const pictures = plates.filter((picture) => {
+    const id = picture.id ?? 0;
+    const sheet = byId.get(families.rootOf.get(id) ?? id) ?? picture;
+    return !onSides(sheet);
+  });
+  if (!pictures.length) return null;
+  return { ...rows[0].run, id: 0, kind: 'render', pictures };
 }

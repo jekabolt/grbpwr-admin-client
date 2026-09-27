@@ -1,5 +1,5 @@
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
-import { useCallback, useMemo, useRef, useState, type JSX } from 'react';
+import { useCallback, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { Button } from 'ui/components/button';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
@@ -41,7 +41,7 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  *   ── LATEST GENERATION  the newest render run, its tiles with the doors (O-63, `LatestGeneration`)
  *   SIDES ─────────────── one row per side: what went in, what came back (`SidesSection`)
  *   RENDERS OF THIS CARD  the plates themselves, and every door that puts one into a side
- *   GENERATION HISTORY    (mounted by the step screen)
+ *   GENERATION HISTORY    (the step screen's, drawn here last — `children`, O-63)
  *
  * The rows INSIDE the first block are separated by group rules (`GroupLabel`), never by nested
  * boxes: a block never contains another block (DESIGN.md).
@@ -98,6 +98,7 @@ export function RenderStudio({
   onColorwayChange,
   cardColorways,
   slots,
+  children,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -154,6 +155,11 @@ export function RenderStudio({
    * its own would desynchronise the rail from its own content.
    */
   onGoToKind?: (kind: 'flat' | 'pattern' | 'render' | 'threed' | 'onmodel') => void;
+  /**
+   * THE STEP'S GENERATION HISTORY, handed in by the composer (`studio-tab.tsx`) and drawn last, under
+   * this studio's render scope (O-63, D-62): its rows carry the render doors, which read the step.
+   */
+  children?: ReactNode;
 }): JSX.Element {
   /* ═══ O-57 · ЦЕЛЬ, ПОД КОТОРОЙ РАБОТАЕТ ЭКРАН, — ПЕРВЫМ ДЕЛОМ, ДО ВСЕХ ЕЁ ЧИТАТЕЛЕЙ ═════════════
      У сохранённой цели нет столбца в SIDES — экран работает под первым столбцом, и читают это
@@ -225,8 +231,9 @@ export function RenderStudio({
 
   /**
    * ═══ WHAT THE RENDER DOORS OF THIS STEP READ — ONE VALUE FOR EVERY HOST (27.09, O-63, D-62) ═══
-   * The tiles of the latest generation below GENERATE put a render into a side with the doors
-   * RENDERS OF THIS CARD had (`render/render-tile.tsx`), and those doors read the step: the
+   * The tiles of the latest generation below GENERATE and the rows of GENERATION HISTORY (drawn
+   * last, `children`) put a render into a side with the doors RENDERS OF THIS CARD had
+   * (`render/render-tile.tsx`), and those doors read the step: the
    * colourway axis of SIDES (the narrowed list and the card's raw one, O-57 r4), whether the server
    * adopts a sample plate (B7 — `benchAdoptsUnattributed`, compared, never read as its absence) and
    * the one birth window of the screen. Stable while they are: the tiles re-render with the band,
@@ -524,6 +531,9 @@ export function RenderStudio({
         adopts={band.benchAdoptsUnattributed === true}
         onCreateColorway={openCreate}
       />
+
+      {/* THE HISTORY — last, inside the scope: its render rows read the same doors (O-63). */}
+      {children}
 
       <WhatModelGetsRenderModal
         open={inspecting}

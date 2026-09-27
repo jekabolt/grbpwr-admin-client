@@ -588,15 +588,18 @@ export function StudioTab({
                              выше. По ним подача засевает ткани колорвея из привязок, а сетка
                              CLOTHS ставит надетые плитки первыми. */
                           slots={cloth.slots}
-                        />
-                        {/* J-18: the history filters to fabric renders by default; E-22: closed. */}
-                        <GenerationHistory
-                          band={band}
-                          techCardId={techCardId}
-                          disabled={readOnly}
-                          defaultRep='render'
-                          defaultOpen={false}
-                        />
+                        >
+                          {/* J-18: the history filters to fabric renders by default; E-22: closed.
+                              O-63 (D-62): it stands INSIDE the studio — the studio's render scope
+                              reaches its rows, and a render run's tiles carry the render doors. */}
+                          <GenerationHistory
+                            band={band}
+                            techCardId={techCardId}
+                            disabled={readOnly}
+                            defaultRep='render'
+                            defaultOpen={false}
+                          />
+                        </RenderStudio>
                       </>
                     )}
                     {/* ═══ STEP 5 · 3D — the same colourway number as the render, and NO remount:
