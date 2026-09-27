@@ -323,6 +323,13 @@ export function slotFootnote(
  * The wave's own rule: what was cut is `data-inert` with a reason, never absence. A missing door
  * teaches the human that the flow does not exist; a dead one with a reason teaches that it is not
  * here YET, which is the true statement.
+ *
+ * ⚠ ОДНА ПОГАШЕННАЯ ДВЕРЬ НА ВСЮ СТУДИЮ — ЭТА (O-57 r4, ревью Codex r3). Круг r3 завёл рядом
+ * вторую, `RefusedDoor`: фокусируемую (`aria-disabled`) и с причиной, напечатанной у каждой двери.
+ * На полке из десятков рендеров это стало десятками остановок Tab, каждая с абзацем одной и той же
+ * причины. Она снята; правило теперь одно: дверь — настоящая `disabled`-кнопка вне порядка Tab,
+ * причина — в `title`, а если хозяин печатает её ОДИН РАЗ на весь ряд (записка с `role='note'`,
+ * сама в порядке Tab), дверь ссылается на неё `describedBy`.
  */
 export function InertDoor({
   label,
@@ -330,6 +337,7 @@ export function InertDoor({
   size = 'xs',
   className,
   reasonVisible = false,
+  describedBy,
 }: {
   label: React.ReactNode;
   reason: string;
@@ -353,6 +361,12 @@ export function InertDoor({
    * room opts in. `title` stays either way, so a hover still reads it.
    */
   reasonVisible?: boolean;
+  /**
+   * Id записки, где хозяин печатает причину ОДИН раз на много дверей (O-57 r4: над полосой
+   * RENDERS OF THIS CARD). Едет в `aria-describedby` кнопки: читалка называет причину у самой
+   * двери, клавиатура находит её у записки, а на каждой плитке абзаца нет.
+   */
+  describedBy?: string;
 }) {
   return (
     <span
@@ -360,7 +374,7 @@ export function InertDoor({
       title={reason}
       className={cn(reasonVisible ? 'inline-flex flex-col items-start gap-0.5' : 'inline-flex', className)}
     >
-      <Button variant='secondary' size={size} disabled>
+      <Button variant='secondary' size={size} disabled aria-describedby={describedBy}>
         {label}
       </Button>
       {reasonVisible && <Reason>{reason}</Reason>}

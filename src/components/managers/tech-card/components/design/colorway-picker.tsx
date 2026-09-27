@@ -91,6 +91,21 @@ export function archivedRef(ref?: common_AdminColorwayRef | null): boolean {
   return ref?.status === 'COLORWAY_LIFECYCLE_STATUS_ARCHIVED';
 }
 
+/**
+ * НАЗЫВАЕТ ЛИ ПРОЧИТАННАЯ КАРТОЧКА ЭТОТ КОЛОРВЕЙ — по СЫРОМУ списку (архивные тоже). Один предикат
+ * на оба эффекта адреса ниже: тот, что принимает цель, и уборку дрейфа, которая ему уступает, —
+ * два написания одного вопроса разошлись бы на первой правке.
+ */
+function cardNames(
+  card: { colorways?: common_AdminColorwayRef[] } | undefined,
+  id: number,
+): boolean {
+  return id > 0 && (card?.colorways ?? []).some((c) => (c.colorwayId ?? 0) === id);
+}
+
+/** Прочитанная карточка без колорвеев — одна ссылка на все рендеры, а не новый массив на каждый. */
+const NO_COLOURWAYS: common_AdminColorwayRef[] = [];
+
 /** ЧЕЛОВЕЧЕСКОЕ ИМЯ КОЛОРВЕЯ — одно определение на пикер, палитру и библиотеку паттернов. */
 export function colorwayLabel(ref?: common_AdminColorwayRef | null): string {
   const dev = (ref?.devName ?? '').trim();
@@ -109,6 +124,17 @@ export type ColorwayChoice = {
   setColorwayId: (id: number) => void;
   /** The card's colourways, in the card's own order. */
   colorways: common_AdminColorwayRef[];
+  /**
+   * O-57 r4 · КОЛОРВЕИ КАРТОЧКИ КАК ЕСТЬ — СЫРОЙ `techCard.colorways`. `colorways` выше сужен
+   * (архивный без плит из него выброшен), а членство плиты в RENDERS OF THIS CARD различает ровно
+   * этих двоих: колорвей, СНЕСЁННЫЙ с карточки (плите встать некуда), и архивный пустой (стоит на
+   * карточке, и плита встаёт в свою ось). `undefined` — карточка ещё не прочитана, «не сказано».
+   * Отдаётся отсюда, от ЕДИНСТВЕННОГО чтения карточки в студии: второй наблюдатель того же
+   * запроса у раздела рендеров перечитывал карточку фоном при каждом монтировании после пяти
+   * минут (ревью Codex r3, Low). Необязателен в типе: лица `ColorwaySelect` собирают `choice`
+   * сами, и этот список им не нужен.
+   */
+  cardColorways?: common_AdminColorwayRef[];
   /** The picked one, or `null` under NO COLOURWAY. */
   current: common_AdminColorwayRef | null;
   /** Its human name; `''` under NO COLOURWAY, which the refusals spell out in words instead. */
@@ -175,9 +201,11 @@ export function useColorwayChoice(
    */
   deepLinkColorwayId: number = 0,
   /**
-   * СНЯТЬ ПАРАМЕТР ИЗ АДРЕСА. Зовётся РОВНО ОДИН РАЗ на карточку и при любом исходе — и когда цель
+   * СНЯТЬ ПАРАМЕТР ИЗ АДРЕСА. Зовётся РОВНО ОДИН РАЗ на каждый id, названный адресом (O-57 r4: и под
+   * StrictMode, где эффект монтирования проходит дважды), и при любом исходе — и когда цель
    * принята, и когда названного колорвея у карточки нет: иначе `?colorway=` пережил бы жест,
-   * который его написал, и следующая смена карточки читала бы чужое имя как приказ.
+   * который его написал, и следующая смена карточки читала бы чужое имя как приказ. Уборка дрейфа
+   * уступает адресу, только пока этот зов задан (разбор у неё).
    */
   onDeepLinkTaken?: () => void,
 ): ColorwayChoice {
@@ -185,20 +213,22 @@ export function useColorwayChoice(
 
   const [colorwayId, setColorwayId] = useState<number>(COLORWAY_NONE);
   const settled = useRef(false);
-  /** Адрес прочитан для ЭТОЙ карточки. Ref, а не состояние: ничего не рисует. */
-  const linkTaken = useRef(false);
   /**
-   * Колорвей, который адрес только что записал, — пока рендер его не увидел. Читает и гасит его
-   * уборка дрейфа ниже (O-57 r3): запись адреса старше уборки, разбор — у самой уборки.
+   * КАКОЙ АДРЕС УЖЕ ОБРАБОТАН ДЛЯ ЭТОЙ КАРТОЧКИ — его id; `COLORWAY_NONE` — никакой. Ref, а не
+   * состояние: ничего не рисует.
+   *
+   * ⚠ ЧИСЛО, А НЕ ФЛАГ (O-57 r4). Флагом он значил «прочитано — до пустого адреса», и адрес,
+   * сменивший id МИНУЯ пустой (`?colorway=X` → `?colorway=Z` раньше, чем X снят), не читался и не
+   * снимался вовсе: Z висел бы в адресе, а уборка дрейфа ниже, уступающая живому адресу, ждала бы
+   * его снятия вечно. По числу каждый живой id берётся ровно один раз.
    */
-  const linkWrote = useRef<number>(COLORWAY_NONE);
+  const linkTaken = useRef<number>(COLORWAY_NONE);
 
   const shownCard = useRef(techCardId);
   if (shownCard.current !== techCardId) {
     shownCard.current = techCardId;
     settled.current = false;
-    linkTaken.current = false;
-    linkWrote.current = COLORWAY_NONE;
+    linkTaken.current = COLORWAY_NONE;
     if (colorwayId !== COLORWAY_NONE) setColorwayId(COLORWAY_NONE);
   }
 
@@ -286,22 +316,19 @@ export function useColorwayChoice(
      * поэтому человек уходит на COLOURWAYS и возвращается в студию за ДРУГИМ цветом, НЕ МЕНЯЯ
      * карточки. Флаг «однажды прочитано» (первая редакция этой строки) съедал бы второй адрес
      * молча — и второй прогон уезжал бы за первым цветом, ровно тот дефект, ради которого дверь
-     * и назвала колорвей. `linkTaken` поэтому значит «ТЕКУЩИЙ адрес обработан», а пустой адрес
-     * его снимает. Сравнивать с ПРОЧИТАННЫМ id нельзя по той же причине: дважды подряд названный
-     * один и тот же цвет — законный жест, и он бы не прошёл.
+     * и назвала колорвей. `linkTaken` поэтому помнит id ТЕКУЩЕГО адреса, а пустой адрес его
+     * сбрасывает. Сравнивать с прочитанным id безопасно ровно из-за сброса (O-57 r4): дважды подряд
+     * названный один и тот же цвет — законный жест, и он проходит, потому что между двумя жестами
+     * адрес пустеет (снимает его этот же эффект). А адрес, сменивший id минуя пустой, берётся тоже.
      */
     if (deepLinkColorwayId <= 0) {
-      linkTaken.current = false;
+      linkTaken.current = COLORWAY_NONE;
       return;
     }
-    if (linkTaken.current || isLoading) return;
-    linkTaken.current = true;
-    const named = (techCard?.colorways ?? []).some(
-      (c) => (c.colorwayId ?? 0) === deepLinkColorwayId,
-    );
-    if (named) {
+    if (linkTaken.current === deepLinkColorwayId || isLoading) return;
+    linkTaken.current = deepLinkColorwayId;
+    if (cardNames(techCard, deepLinkColorwayId)) {
       settled.current = true;
-      linkWrote.current = deepLinkColorwayId;
       setColorwayId(deepLinkColorwayId);
     }
     takenRef.current?.();
@@ -363,27 +390,34 @@ export function useColorwayChoice(
    * `settled.current` этой поправке не сторож нарочно: он про УМОЛЧАНИЕ («не двигать человека
    * после того, как выбор однажды сделан»), а здесь двигать уже нечего — пункта нет.
    *
-   * ⚠ АДРЕС СТАРШЕ УБОРКИ (O-57 r3, ревью Codex r2 — High). Оба эффекта могут исполниться В ОДНОМ
-   * коммите: перечитанная карточка уже без ROSSO (его снесли), и в тот же рендер приехал адрес
-   * `?colorway=` к живому OLIVE. Эффект адреса объявлен выше и ставит OLIVE; этот исполняется
-   * следом и читает `colorwayId` РЕНДЕРА — то есть ещё ROSSO, которого в списке нет, — и ставит
+   * ⚠ АДРЕС СТАРШЕ УБОРКИ (O-57 r3/r4, ревью Codex r2 и r3 — High). Оба эффекта могут исполниться
+   * В ОДНОМ коммите: перечитанная карточка уже без ROSSO (его снесли), и в тот же рендер приехал
+   * адрес `?colorway=` к живому OLIVE. Эффект адреса объявлен выше и ставит OLIVE; этот исполняется
+   * следом и читает `colorwayId` РЕНДЕРА — то есть ещё ROSSO, которого в списке нет, — и ставил бы
    * `sample`. React применяет обе записи по порядку, побеждает поздняя, а параметр адреса к этому
    * моменту уже снят: дверь «open in studio ›» молча открыла бы студию не на том цвете.
    *
-   * Поэтому ПЕРВЫЙ проход после записи адреса уступает, если его рендер эту запись ещё не видел
-   * (`linkWrote` ≠ `colorwayId`): записанное адресом значение проверено на ТОЙ ЖЕ карточке, и
-   * следующий проход проверит его уже как текущее. Метка гасится при любом исходе — жест
-   * человека, перебивший адрес в том же такте, не может заморозить уборку навсегда: она уступает
-   * ровно один раз.
+   * ПОЭТОМУ УБОРКА УСТУПАЕТ, ПОКА АДРЕС НАЗЫВАЕТ ЖИВОЙ КОЛОРВЕЙ ЭТОЙ КАРТОЧКИ, — И ТОЛЬКО ТОГДА.
+   * Уступка безопасна, потому что следующий проход ОБЕСПЕЧЕН, а не обещан: такой адрес эффект выше
+   * берёт (каждый id — один раз) и просит композитора снять; снятие меняет `deepLinkColorwayId`,
+   * он стоит в зависимостях — и уборка проходит снова, уже над тем, что стоит после адреса. Снять
+   * нечем (хозяин не дал `onDeepLinkTaken`) — адрес висел бы вечно, а с ним и уступка; тогда не
+   * уступаем вовсе.
+   *
+   * ⚠ МЕТКИ «АДРЕС ТОЛЬКО ЧТО ЗАПИСАЛ» (r3, `linkWrote`) БОЛЬШЕ НЕТ, И ЭТО ПОЧИНКА (ревью Codex
+   * r3, High). Метка писалась и тогда, когда запись была пустой: адрес называл цвет, на котором
+   * студия уже стоит, `setColorwayId` ничего не менял, зависимости уборки не двигались — и метка
+   * переживала и запись, и снятие адреса. Позже жест «выбрать B» в один такт с перечитанной
+   * карточкой без B тратил её чужую уступку: уборка гасила метку и выходила, а второго прохода не
+   * было — снесённый B оставался целью. Уступка теперь читается у САМОГО адреса, а не у памяти о
+   * нём, и пережить свою причину ей нечем.
    */
   useEffect(() => {
-    const wrote = linkWrote.current;
-    linkWrote.current = COLORWAY_NONE;
-    if (wrote !== COLORWAY_NONE && wrote !== colorwayId) return;
     if (isLoading || colorwayId === COLORWAY_NONE) return;
+    if (takenRef.current && cardNames(techCard, deepLinkColorwayId)) return;
     if (colorways.some((c) => (c.colorwayId ?? 0) === colorwayId)) return;
     setColorwayId(COLORWAY_NONE);
-  }, [isLoading, colorways, colorwayId]);
+  }, [isLoading, colorways, colorwayId, deepLinkColorwayId, techCard]);
 
   const current = useMemo(
     () => colorways.find((c) => (c.colorwayId ?? 0) === colorwayId) ?? null,
@@ -394,6 +428,7 @@ export function useColorwayChoice(
     colorwayId,
     setColorwayId,
     colorways,
+    cardColorways: techCard ? techCard.colorways ?? NO_COLOURWAYS : undefined,
     current,
     label: current ? colorwayLabel(current) : '',
     archived: archivedRef(current),

@@ -4,9 +4,8 @@ import type {
   common_DesignRun,
   GetDesignBandResponse,
 } from 'api/proto-http/admin';
-import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
-import { Fragment, useMemo, useRef, useState, type JSX } from 'react';
+import { Fragment, useId, useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Pill } from 'ui/components/pill';
@@ -107,11 +106,11 @@ import { CELL_WIDTH, STRIP_CELL_PX, STRIP_FRAME_ASPECT, Strip, StripCell } from 
    видел это как «не помещается». Двух пикселей хватает: 110px против 107px. Поля самой кнопки не
    трогаются — `px-1.5` метрики `size='xs'` едина для всех дверей ряда, и сузить её у одной значило
    бы завести вторую метрику там, где весь смысл ряда в одной. */
-/* O-57 r3: `items-end`, А НЕ `items-center`. В здоровом ряду разницы нет — все органы ростом в 20px.
-   Разница — у ряда с погашенной дверью `RefusedDoor`: её причина напечатана НАД дверью, ряд растёт
-   вверх, и складывающая `▾` раскрытой колоды обязана стоять рядом с дверью `apply splitted`, а не
-   висеть посередине абзаца причины. */
-const DOOR_ROW = 'flex min-h-5 items-end gap-0.5';
+/* O-57 r4: СНОВА `items-center`. Круг r3 прижимал ряд к низу (`items-end`): причина погашенной
+   двери печаталась в самом ряду, над дверью, и `▾` раскрытой колоды обязана была стоять рядом с
+   `apply splitted`, а не посередине абзаца. Причины теперь печатаются один раз, над полосой
+   (`REFUSAL_NOTES`), и все органы ряда снова ростом в 20px. */
+const DOOR_ROW = 'flex min-h-5 items-center gap-0.5';
 /** ⚠ `bg-bgColor` ЯВНО, А НЕ ПО УМОЛЧАНИЮ. Вторичная кнопка системы — «white fill, 1px edge
  *  border», но БЕЛОГО В НЕЙ НЕТ: она полагается на белую страницу под собой. Над затемнённым
  *  грунтом группы (`Bay`) сквозь неё просвечивал #ededed, и `set` читался залитым — то есть
@@ -136,6 +135,49 @@ const EVERY_COLOURWAY_ARCHIVED = 'every colourway on this card is archived — a
  */
 const COLOURWAY_GONE =
   "this render's colourway is no longer on the card — a render goes only into its own colourway's sides, so it cannot be placed";
+/** Отказ `apply splitted`: ни один кусок разреза не называет стороны силуэта (все — детали). */
+const SPLIT_NAMES_NO_SIDE =
+  'nothing in this split names a side of the silhouette — the pieces are details, and a detail has no slot to stand in. Cut the sheet again and name front, back or a side on the frames.';
+
+/**
+ * ═══ O-57 r4 · ПРИЧИНА ОТКАЗА ПЕЧАТАЕТСЯ ОДИН РАЗ НА ПОЛОСУ, А НЕ У КАЖДОЙ ДВЕРИ ═══════════════
+ *
+ * Ревью Codex r3 (Medium): r3 печатал причину у каждой погашенной двери и держал каждую в порядке
+ * Tab — на полке из десятков рендеров снесённого колорвея это десятки остановок и десятки
+ * одинаковых абзацев. Теперь двери — `InertDoor` (вне Tab, причина в `title`), а словами причина
+ * стоит ОДИН раз, над полосой, запиской с `role='note'` — единственной остановкой Tab на причину;
+ * каждая погашенная дверь ссылается на свою записку `aria-describedby`.
+ *
+ * `reason` — фраза двери (`title`), она про свою плиту; `note` — фраза записки, она про все плиты с
+ * той же причиной, поэтому своя. Порядок записок — порядок этой таблицы, а не появления плит:
+ * строки над полосой не переставляются, когда в ней что-то раскрыли или перечитали.
+ *
+ * В таблице — ТОЛЬКО отказы ПОСТАНОВКИ: почему эту плиту некуда положить. Отказы, общие для всех
+ * дверей экрана (карточка только для чтения, сервер молчит), записок не заводят и стоят в `title`,
+ * как у всякой погашенной двери студии.
+ */
+const REFUSAL_NOTES: readonly { key: string; reason: string; note: string }[] = [
+  {
+    key: 'sample',
+    reason: SAMPLE_UNDRAWN_NO_ADOPTION,
+    note: 'sample renders beside colourways cannot be placed on this server: the sample bench is not drawn while the card has colourways, and this server cannot adopt a sample render into a colourway',
+  },
+  {
+    key: 'archived',
+    reason: EVERY_COLOURWAY_ARCHIVED,
+    note: 'sample renders have no live colourway to go into: every colourway on this card is archived, add or revive one',
+  },
+  {
+    key: 'gone',
+    reason: COLOURWAY_GONE,
+    note: "renders of a colourway no longer on the card cannot be placed: a render goes only into its own colourway's sides",
+  },
+  {
+    key: 'details',
+    reason: SPLIT_NAMES_NO_SIDE,
+    note: 'nothing in the open split names a side of the silhouette: its pieces are details, and a detail has no slot to stand in. Cut the sheet again and name front, back or a side on the frames.',
+  },
+];
 
 /**
  * ═══ ЗАТЕМНЁННЫЙ ГРУНТ ПОД РАСКРЫТОЙ ГРУППОЙ — F-6 ═══════════════════════════════════════════
@@ -284,6 +326,7 @@ export function OutputsSection({
   colorwayId,
   colorwayLabel,
   colorways = [],
+  cardColorways,
   adopts = false,
   onCreateColorway,
 }: {
@@ -309,10 +352,18 @@ export function OutputsSection({
   /** Имя выбранного колорвея для подписи (только 3D); пусто = безколорвейный верстак. */
   colorwayLabel?: string;
   /**
-   * Колорвеи карточки в её порядке — из них строятся цели `mark ▸` и `apply splitted`. Пустой
-   * список = «у карточки их нет», и тогда единственная цель — `sample`.
+   * Колорвеи карточки в её порядке (список хозяина, суженный) — из них строятся цели `mark ▸` и
+   * `apply splitted`. Стоит ли при этом ось `sample`, решает не он, а сырой список (`cardColorways`,
+   * D-56″): пустой суженный список при архивных колорвеях карточки — это не «колорвеев нет».
    */
   colorways?: common_AdminColorwayRef[];
+  /**
+   * O-57 r4 · КОЛОРВЕИ КАРТОЧКИ КАК ЕСТЬ — сырой `techCard.colorways` от хозяина
+   * (`useColorwayChoice().cardColorways` через экран): архивные без плит тоже, в отличие от
+   * `colorways`. Нужен одному вопросу — членству плиты (разбор у `onCard` ниже). `undefined` — «не
+   * сказано» (карточка не прочитана, хозяин без оси), и по членству тогда не отказывают.
+   */
+  cardColorways?: readonly common_AdminColorwayRef[];
   /**
    * ═══ ФЛАГ СЕРВЕРА: УСЫНОВЛЯЕТ ЛИ ВЕРСТАК СЕМПЛ-ПЛИТУ (B7, доктрина `has_fabric_render`) ══════
    *
@@ -578,13 +629,17 @@ export function OutputsSection({
    * разошлось бы с первым в первый же день.
    *
    * «Цели прогона» этот раздел не знает и знать не должен — и ось её больше не спрашивает: по
-   * O-57 столбец `sample` стоит РОВНО тогда, когда таблице не из чего рисовать колорвеи (ни
-   * живого, ни архивного с плитами), с плитами и без. Как только таблица рисует колорвей, оси 0
-   * нет и в этих дверях: «в sample» ни `mark ▸`, ни `apply splitted` не предлагают — столбца на
-   * экране нет. Семпл-плиты при этом остаются в данных и в ряду ниже; куда они встают рядом с
-   * колорвеями — у `destinationsOf`, а как снимается стоящая в невидимом слоте — у `heldAway`.
+   * O-57 (D-56″) столбец `sample` стоит РОВНО тогда, когда у карточки нет ни одного колорвея,
+   * архивные тоже считаются (поэтому ось получает и сырой список, `cardColorways`), с плитами и
+   * без. Как только колорвей у карточки есть, оси 0 нет и в этих дверях: «в sample» ни `mark ▸`,
+   * ни `apply splitted` не предлагают — столбца на экране нет. Семпл-плиты при этом остаются в
+   * данных и в ряду ниже; куда они встают рядом с колорвеями — у `destinationsOf`, а как снимается
+   * стоящая в невидимом слоте — у `heldAway`.
    */
-  const axis = useMemo(() => colourwayColumns(band, colorways), [band, colorways]);
+  const axis = useMemo(
+    () => colourwayColumns(band, colorways, cardColorways),
+    [band, colorways, cardColorways],
+  );
 
   /**
    * ═══ O-57 r3 · ЧЛЕНСТВО В СЫРОМ СПИСКЕ КАРТОЧКИ — ОТДЕЛЬНО ОТ ОСИ ═══════════════════════════
@@ -593,23 +648,35 @@ export function OutputsSection({
    * противоположные двери (ревью Codex r2, High): архивный колорвей БЕЗ плит стоит на карточке —
    * плиту в него класть законно, и его столбец от этого появится; колорвей, СНЕСЁННЫЙ с карточки,
    * сервер не примет (`foreign_colorway`), и запись либо откажет, либо запрёт плиту в невидимом
-   * верстаке. Поэтому членство читается у САМОЙ карточки — `useTechCard`, тот же ключ, что у
-   * студии, то есть попадание в кэш, — а не выводится из оси и не из пропа `colorways`, который
-   * хозяин уже сузил. Карточка ещё не прочитана — «не сказано»: дверь стоит как до r3, отказывать
-   * по незнанию хуже, чем подождать ответа.
+   * верстаке. Поэтому членство читается у сырого списка карточки (`cardColorways`), а не выводится
+   * из оси и не из пропа `colorways`, который хозяин уже сузил. Список не сказан (карточка ещё не
+   * прочитана) — дверь стоит как до r3: отказывать по незнанию хуже, чем подождать ответа.
+   *
+   * ⚠ СПИСОК ПРИХОДИТ ПРОПОМ, А НЕ ЧИТАЕТСЯ ЗДЕСЬ (O-57 r4, ревью Codex r3, Low). В r3 раздел звал
+   * `useTechCard` сам — второй наблюдатель того же запроса, и на 3D, где членство не спрашивается
+   * вовсе, и у раздела, который тут же возвращает `null`; смонтированный после пяти минут, он
+   * перечитывал карточку фоном. Карточку в студии читает один хук (`useColorwayChoice`), и список
+   * едет от него. Поиск — по карте id → колорвей, а не проходом по списку на каждую плитку.
    */
-  const { data: card } = useTechCard(techCardId);
-  const onCard = (id: number): boolean =>
-    card === undefined || (card.colorways ?? []).some((c) => (c.colorwayId ?? 0) === id);
+  const cardRefs = useMemo(
+    () =>
+      cardColorways === undefined
+        ? null
+        : new Map(cardColorways.map((c) => [c.colorwayId ?? 0, c] as const)),
+    [cardColorways],
+  );
+  const onCard = (id: number): boolean => cardRefs === null || cardRefs.has(id);
 
   /** Имя столбца; у колорвея карточки без столбца (архивный пустой) — его имя с карточки, а не `#8`. */
   const colourwayName = (id: number): string => {
     if (id === COLORWAY_NONE) return SAMPLE_LABEL;
     const drawn = axis.find((c) => c.colorwayId === id);
     if (drawn) return drawn.label;
-    const ref = (card?.colorways ?? []).find((c) => (c.colorwayId ?? 0) === id);
+    const ref = cardRefs?.get(id);
     return ref ? refLabel(ref) : `#${id}`;
   };
+  /** Префикс id записок об отказах (O-57 r4, `REFUSAL_NOTES`). Хук — выше раннего выхода. */
+  const noteBase = useId();
 
   /**
    * ═══ O-57 r2/r3 · КУДА ВСТАЁТ ПЛИТА — ОДИН ОТВЕТ НА ДВЕ ДВЕРИ (`mark ▸`, `apply splitted`) ════
@@ -618,11 +685,12 @@ export function OutputsSection({
    * B7. И в N — только пока N есть: его столбец нарисован ИЛИ он стоит в сыром списке карточки
    * (`onCard`, r3). Снесённый N — целей нет, и дверь стоит погашенной со своей причиной
    * (`COLOURWAY_GONE`). Семпл-плита (0) — по тому, рисует ли таблица столбец `sample`:
-   *   · рисует (у карточки нет колорвея со столбцом) — как до O-57: её собственная ось;
+   *   · рисует (у карточки нет ни одного колорвея, D-56″) — как до O-57: её собственная ось;
    *   · не рисует, при `adopts` — ЖИВЫЕ столбцы колорвеев: сервер усыновит плиту (B7), а архивный
    *     столбец в усыновление не предлагается — этим цветом больше не работают. Живых нет (все
-   *     столбцы архивные, с плитами) — целей нет, и причина названа; `+ colourway…` у `mark ▸`
-   *     остаётся, новый колорвей и есть выход;
+   *     столбцы архивные, с плитами, — или столбцов нет вовсе: одни архивные без плит, D-56″) —
+   *     целей нет, и причина названа; `+ colourway…` у `mark ▸` остаётся, новый колорвей и есть
+   *     выход;
    *   · не рисует, без `adopts` (старый бинарь; молчание о флаге — «не сказано», доктрина
    *     `has_fabric_render`) — ЦЕЛИ НЕТ. Своя ось на экране не видна, чужую сервер не примет, и
    *     дверь стоит погашенной со своей причиной. Молча писать «в sample» значило бы класть плиту
@@ -640,6 +708,23 @@ export function OutputsSection({
     return live.length
       ? { ids: live, refusal: null }
       : { ids: [], refusal: EVERY_COLOURWAY_ARCHIVED };
+  };
+
+  /**
+   * O-57 r4 · ПОГАШЕНА ЛИ ДВЕРЬ `mark ▸` СВОБОДНОЙ ПЛИТЫ — И ПОЧЕМУ. Погашена ровно тогда, когда
+   * встать некуда (`destinationsOf`) и завести колорвей отсюда нельзя: `+ colourway…` — тоже выбор,
+   * и с ним дверь жива, а причина стоит на шаге 1 её панели. Один ответ на три места: саму дверь,
+   * записки над полосой и связь между ними.
+   *
+   * Рождение колорвея предлагается ровно там же, где усыновление: без флага семпл-плита в новый
+   * столбец не встанет, и строка вела бы к колорвею, которым нечего наполнить отсюда.
+   */
+  const createsColourwayFor = (picture: common_DesignPicture): boolean =>
+    !!onCreateColorway && colorwayOf(picture) === COLORWAY_NONE && adopts;
+  const markRefusal = (picture: common_DesignPicture): string | null => {
+    const { ids, refusal } = destinationsOf(colorwayOf(picture));
+    if (ids.length || createsColourwayFor(picture)) return null;
+    return refusal ?? 'this render has no side to go into';
   };
 
   /**
@@ -949,8 +1034,7 @@ export function OutputsSection({
     if (!sheet) return null;
     const nowhere = destinationsOf(colorwayOf(sheet)).refusal;
     if (nowhere) return nowhere;
-    if (!piecesOf(rootId).length)
-      return 'nothing in this split names a side of the silhouette — the pieces are details, and a detail has no slot to stand in. Cut the sheet again and name front, back or a side on the frames.';
+    if (!piecesOf(rootId).length) return SPLIT_NAMES_NO_SIDE;
     return null;
   };
 
@@ -984,6 +1068,37 @@ export function OutputsSection({
    * сборкой объёма из видов. Слово «кадр» звало человека искать ряд картинок, которого нет.
    */
   const noun = kind === 'threed' ? 'model' : 'render';
+
+  /**
+   * ═══ O-57 r4 · ЗАПИСКИ НАД ПОЛОСОЙ — ПО ОДНОЙ НА ПРИЧИНУ, А НЕ НА ДВЕРЬ ══════════════════════
+   *
+   * Какие отказы ПОСТАНОВКИ стоят на полосе. Считаются по всем рендерам раздела, а не по одним
+   * видимым ячейкам: куски свёрнутой колоды — тоже рендеры карточки, и записка, появляющаяся
+   * только на раскрытии, сдвигала бы всю полосу вниз ровно под пальцем, нажавшим `expand ▸`.
+   * Ветки — те же, что у ряда дверей в `cell` (лист колоды — свои двери; стоит в слоте — плашка
+   * или `unmark ▸`; склеенный лист — `split ▸`; запись выключена — общий отказ в `title`), и
+   * спрашивается тот же `markRefusal`. Дверь `apply splitted` есть только у РАСКРЫТОЙ колоды, и её
+   * отказ берётся, пока колода раскрыта.
+   */
+  const shownRefusals = new Set<string>();
+  if (kind === 'render' && !writesOff) {
+    for (const { picture } of rows) {
+      const id = picture.id ?? 0;
+      if ((families.membersOf.get(id) ?? []).length) continue;
+      if (slotHolding(band, id)) continue;
+      if (pictureIsComposite(picture)) continue;
+      const refusal = markRefusal(picture);
+      if (refusal) shownRefusals.add(refusal);
+    }
+    const applyRefusal = openDeck === null ? null : applyRefusalFor(openDeck);
+    if (applyRefusal) shownRefusals.add(applyRefusal);
+  }
+  const notes = REFUSAL_NOTES.filter((n) => shownRefusals.has(n.reason));
+  /** Id записки этой причины; `undefined` — записки у причины нет (общий отказ экрана). */
+  const noteIdOf = (reason: string | null): string | undefined => {
+    const note = reason === null ? undefined : notes.find((n) => n.reason === reason);
+    return note ? `${noteBase}-${note.key}` : undefined;
+  };
 
   /**
    * ═══ ОДНА ЯЧЕЙКА ПОЛОСЫ — ФУНКЦИЕЙ, А НЕ ТЕЛОМ MAP (J-23) ═════════════════════════════════
@@ -1350,8 +1465,9 @@ export function OutputsSection({
                         третьим написанием `set` в этом файле.
                         Этот экран отдаёт ей АДРЕС ВЕРСТАКА ЦЕЛИ (`sidesOf(target)` — цель
                         выбирают пунктом селекта, а не секция) и свои отказы (`refusal`, разбор у
-                        `applyRefusalFor`): при отказе дверь стоит погашенной со строкой
-                        причины — колода раскрыта, и исчезнувшая дверь читалась бы как пропажа.
+                        `applyRefusalFor`): при отказе дверь стоит погашенной — причина в её
+                        `title`, а у отказа постановки ещё и одной запиской над полосой (O-57 r4),
+                        — колода раскрыта, и исчезнувшая дверь читалась бы как пропажа.
                         Пустой план (куски без стороны силуэта) — тоже отказ, а не живая кнопка,
                         которая молчит; полосы входа на него дверь не рисуют вовсе, здесь она
                         обязана остаться на месте и сказать почему.
@@ -1376,6 +1492,7 @@ export function OutputsSection({
                         colorwayId: id,
                         label: colourwayName(id),
                       }));
+                      const refusal = applyRefusalFor(rootId);
                       return (
                         <ApplySplitDoor
                           techCardId={techCardId}
@@ -1383,7 +1500,8 @@ export function OutputsSection({
                           targets={targets}
                           pieces={piecesOf(rootId)}
                           noun='render'
-                          refusal={applyRefusalFor(rootId)}
+                          refusal={refusal}
+                          refusalDescribedBy={noteIdOf(refusal)}
                           onCreateColorway={own === 0 && adopts ? onCreateColorway : undefined}
                           className='min-w-0 flex-1 [&>button]:h-5 [&>button]:bg-bgColor [&[data-inert]>button]:whitespace-nowrap [&[data-inert]>button]:px-0.5'
                           doorClassName='h-5 bg-bgColor'
@@ -1551,15 +1669,26 @@ export function OutputsSection({
                        (`onCreated` резолвится после `invalidateQueries`, то есть список веток уже
                        пересобран), панель открывается снова и сразу на сторонах нового столбца.
                        Второго нажатия больше не нужно. */
+                    /* O-57 r4: ВСТАТЬ НЕКУДА И ЗАВЕСТИ НЕЧЕГО — дверь погашена общим органом
+                       студии (`InertDoor`: вне порядка Tab, причина в `title`), а словами причина
+                       стоит один раз над полосой — записка, на которую дверь ссылается
+                       `describedBy` (разбор у `REFUSAL_NOTES`). */
+                    const refused = markRefusal(picture);
+                    if (refused)
+                      return (
+                        <InertDoor
+                          className={INERT_DOOR}
+                          label='mark ▸'
+                          reason={refused}
+                          describedBy={noteIdOf(refused)}
+                        />
+                      );
                     const branches = markBranches(picture);
-                    /* O-57 r2: ПОЧЕМУ ВЕТОК НЕТ — у семпл-плиты рядом с колорвеями
-                       (`destinationsOf`). Без `create` дверь стоит погашенной с этой фразой в
-                       `title`; с `create` — жива, и фраза стоит на шаге 1 над строкой рождения. */
+                    /* O-57 r2: ПОЧЕМУ ВЕТОК НЕТ — у семпл-плиты рядом с колорвеями, когда все
+                       столбцы архивные (`destinationsOf`). Дверь жива ради `+ colourway…`, и фраза
+                       стоит на шаге 1 над строкой рождения. */
                     const nowhere = destinationsOf(colorwayOf(picture)).refusal;
-                    /* Рождение колорвея предлагается ровно там же, где предлагается усыновление:
-                       без флага семпл-плита в новый столбец не встанет, и строка вела бы к
-                       рождению колорвея, которым нечего было бы наполнить отсюда. */
-                    const canCreate = !!onCreateColorway && colorwayOf(picture) === 0 && adopts;
+                    const canCreate = createsColourwayFor(picture);
                     /* ⚠ ПОДПИСЬ ДВЕРИ ЧИТАЕТ ТО ЖЕ ПРАВИЛО, ЧТО И САМА ПАНЕЛЬ: шаг 1 есть, когда
                        есть из чего выбирать, а `+ colourway…` — тоже выбор. Второе написание этого
                        условия обещало бы «сразу сторона» там, где панель спросит столбец. */
@@ -1795,6 +1924,34 @@ export function OutputsSection({
           failed — press again», полный разбор по сторонам в `title`), и уходит вместе с колодой.
           Один орган — один отчёт; второе написание здесь стояло ровно до этой фазы. */}
 
+      {/* ═══ O-57 r4 · ПОЧЕМУ ДВЕРИ ПОГАШЕНЫ — ОДНОЙ СТРОКОЙ НА ПРИЧИНУ, НАД ПОЛОСОЙ ════════════
+          Не коробка и не `CalloutBox`: у раздела своя рамка, а вторая внутри неё — box-in-box
+          (DESIGN.md). Кегль и тон подписи (`micro`, `labelColor`), регистр предложения: это фраза,
+          а не ярлык; длина строки — предел прозы студии, `75ch`, иначе на широком экране фраза
+          тянется во всю полосу. Каждая строка — записка (`role='note'`) и остановка Tab,
+          единственная на свою причину: погашенные двери вне порядка Tab, и клавиатура находит
+          причину здесь, а читалка — и здесь, и у самой двери (`aria-describedby`). Фокус —
+          чернильная обводка 2px с отступом 2px, как у всякого контрола системы. */}
+      {notes.length > 0 && (
+        <div data-refusal-notes='' className='flex flex-col gap-1'>
+          {notes.map((note) => (
+            <Text
+              key={note.key}
+              id={`${noteBase}-${note.key}`}
+              role='note'
+              tabIndex={0}
+              size='micro'
+              variant='label'
+              component='p'
+              data-refusal-note={note.key}
+              className='min-w-0 max-w-[75ch] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+            >
+              {note.note}
+            </Text>
+          ))}
+        </div>
+      )}
+
       {kind === 'threed' ? (
         /* ═══ THE SHELF — `.fgrid`, minmax 148px: the models built here and the ones brought, one
            grid, told apart by their corner.
@@ -1823,11 +1980,11 @@ export function OutputsSection({
            свёрнутой колоды и тонированный грунт группы остаются ровно теми же.
 
            ⚠ ИМЯ БЕРЁТСЯ У ПРОПА, А НЕ У `colourwayName`, И ЭТО НЕ МЕЛОЧЬ. `colourwayName` читает
-           `axis` (`colourwayColumns(band, colorways)`), а `colorways` этому разделу с экрана 3D
-           не передают вовсе — там список пуст, и имя выбранного цвета вышло бы запасным `#5` ровно
-           на том экране, ради которого подпись и заведена. `colorwayLabel` — то же слово, которым
-           студия подписывает свою шапку (`useColorwayChoice`), значит окно и шапка над ним не
-           могут разойтись. */
+           `axis` (`colourwayColumns(band, colorways, cardColorways)`), а ни одного из двух
+           списков этому разделу с экрана 3D не передают — колорвеев в оси там нет, и имя
+           выбранного цвета вышло бы запасным `#5` ровно на том экране, ради которого подпись и
+           заведена. `colorwayLabel` — то же слово, которым студия подписывает свою шапку
+           (`useColorwayChoice`), значит окно и шапка над ним не могут разойтись. */
         <ModelSnapshotScope target={{ colorwayId: scope ?? 0, label: colorwayLabel ?? '' }}>
           <Tiles min={148}>
             {/* ═══ «ПРИНЕСТИ СВОЮ» — ПЕРВАЯ КАРТОЧКА ПОЛКИ (r2 п.32) ═══════════════════════════

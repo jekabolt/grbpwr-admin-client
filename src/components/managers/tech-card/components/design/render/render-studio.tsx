@@ -69,11 +69,13 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * (`designSelectBench`) — второй владелец числа заставил бы 3D смотреть в один верстак, пока
  * рендер наполняет другой.
  *
- * ⚠ `for:` ПРЕДЛАГАЕТ РОВНО СТОЛБЦЫ SIDES (O-57). Таблица рисует столбец `sample` лишь пока ей не
- * из чего рисовать колорвеи, и экран работает там, где столбец виден: сохранённая цель без
- * столбца (`sample` у карточки с колорвеями, списанный пустой колорвей) читается ПЕРВЫМ столбцом.
- * Это число экран ВЫВОДИТ и никуда не пишет — общий выбор студии двигает только жест человека
- * (G2-7; разбор у `useSidesTarget`, `./side-row`).
+ * ⚠ `for:` ПРЕДЛАГАЕТ РОВНО СТОЛБЦЫ SIDES (O-57). Таблица рисует столбец `sample`, только пока у
+ * карточки нет ни одного колорвея (архивные тоже считаются, D-56″), и экран работает там, где
+ * столбец виден: сохранённая цель без столбца (`sample` у карточки с колорвеями, списанный пустой
+ * колорвей) читается ПЕРВЫМ столбцом. Столбца нет ни одного (одни архивные без плит) — цели нет,
+ * и GENERATE закрыт той же фразой, что стоит строкой в таблице. Это число экран ВЫВОДИТ и никуда
+ * не пишет — общий выбор студии двигает только жест человека (G2-7; разбор у `useSidesTarget`,
+ * `./side-row`).
  *
  * ⚠ РЕМОУНТА ПО `key={colorwayId}` БОЛЬШЕ НЕТ, И ОН БЫЛ БЫ ТЕПЕРЬ ПРЯМЫМ ДЕФЕКТОМ: экран,
  * ремоунтящий сам себя на смене цели, закрывал бы собственный список прямо под пальцем. Пересев
@@ -91,6 +93,7 @@ export function RenderStudio({
   colorwayArchived: storedColorwayArchived = false,
   colorways = [],
   onColorwayChange,
+  cardColorways,
   slots,
 }: {
   band: GetDesignBandResponse;
@@ -106,6 +109,15 @@ export function RenderStudio({
    */
   colorways?: common_AdminColorwayRef[];
   onColorwayChange?: (id: number) => void;
+  /**
+   * O-57 r4 · КОЛОРВЕИ КАРТОЧКИ КАК ЕСТЬ — сырой список (`useColorwayChoice().cardColorways`),
+   * архивные без плит тоже; `colorways` выше сужен. Нужен двум вопросам: стоит ли столбец `sample`
+   * (D-56″: только пока у карточки нет ни одного колорвея, архивные тоже считаются —
+   * `colourwayColumns`) и членству плиты в RENDERS OF THIS CARD (колорвей, снесённый с карточки,
+   * против архивного пустого, — разбор у `OutputsSection`). Не задан — «не сказано»: правило семпла
+   * считает по `colorways`, а раздел не отказывает по членству.
+   */
+  cardColorways?: common_AdminColorwayRef[];
   /**
    * WHOSE render this is. `0` — верстак `sample`: не пропуск, а настоящее и вечно законное
    * значение, на котором стоит всякий рендер, сделанный до появления оси, и всякая проба цвета.
@@ -146,12 +158,18 @@ export function RenderStudio({
      сама таблица. Поднять его в одном из них (скажем, в лице селекта) значило бы купить лист под
      `sample`, показывая ROSSO. Композитору оно НЕ уходит: число выведено, а не выбрано, и общий
      выбор студии двигает только жест человека (G2-7, разбор у `useSidesTarget`). */
-  const target = useSidesTarget(band, colorways, {
-    colorwayId: storedColorwayId,
-    ref: storedColorwayRef,
-    label: storedColorwayLabel,
-    archived: storedColorwayArchived,
-  });
+  const target = useSidesTarget(
+    band,
+    colorways,
+    {
+      colorwayId: storedColorwayId,
+      ref: storedColorwayRef,
+      label: storedColorwayLabel,
+      archived: storedColorwayArchived,
+    },
+    /* D-56″: столбец `sample` решает СЫРОЙ список карточки — архивный без плит тоже колорвей. */
+    cardColorways,
+  );
   const { colorwayId, ref: colorwayRef, label: colorwayLabel, archived: colorwayArchived } = target;
   /* ⚠ `techCardId` ЗДЕСЬ НЕСУЩИЙ, А НЕ СПРАВОЧНЫЙ: черновик подачи умирает вместе с карточкой, и
      умирает он ПО ЭТОМУ ЧИСЛУ (`StudioTab` между карточками не размонтируется — инвариант 12).
@@ -252,6 +270,11 @@ export function RenderStudio({
   );
 
   const gate: Gate = useMemo(() => {
+    /* O-57 · D-56″: NO COLUMN AT ALL — the card has colourways, every one archived and without a
+       plate, so the sample column is hidden and nothing is drawn in its place. There is no bench
+       to buy into; the refusal is the SAME sentence the table prints, and its one way out — `+
+       colourway…` — stands in `for:` in this very row, so no door is drawn (`next: 'colourway'`). */
+    if (target.nowhere) return { ok: false, reason: target.nowhere, next: 'colourway' };
     /* An archived name refuses first — even before an empty bench: under a retired colour «front
        and back must hold a drawing» sends a person to draw what will not be bought anyway. */
     const base = renderGate(band, colorwayArchived, colorwayLabel);
@@ -272,7 +295,7 @@ export function RenderStudio({
       };
     }
     return { ok: true };
-  }, [band, sent, wire, colourPlan.plan, colorwayArchived, colorwayLabel]);
+  }, [band, sent, wire, colourPlan.plan, colorwayArchived, colorwayLabel, target.nowhere]);
 
   const generate = () => {
     run.start({
@@ -406,8 +429,10 @@ export function RenderStudio({
                 probe='design-render-target'
                 disabled={disabled}
                 onCreate={() => openCreate()}
-                /* O-57: пункты — РОВНО столбцы SIDES, и цель экрана всегда среди них. */
+                /* O-57: пункты — РОВНО столбцы SIDES, и цель экрана всегда среди них. D-56″: столбца
+                   нет ни одного — на лице слово об этом, а пункт один, `+ colourway…`. */
                 only={target.drawn}
+                unmatched={target.nowhere ? 'no live colourway' : undefined}
                 choice={{
                   colorwayId,
                   setColorwayId: onColorwayChange,
@@ -437,6 +462,7 @@ export function RenderStudio({
            заголовок столбца есть ВТОРАЯ ДВЕРЬ к той же цели, что и `for:` выше (`onPickColorway`
            — тот же единственный сеттер). `onCreateColorway` открывает то же окно рождения. */
         colorways={colorways}
+        cardColorways={cardColorways}
         targetColorwayId={colorwayId}
         onPickColorway={onColorwayChange ?? (() => {})}
         onCreateColorway={() => openCreate()}
@@ -459,6 +485,7 @@ export function RenderStudio({
         kind='render'
         disabled={disabled}
         colorways={colorways}
+        cardColorways={cardColorways}
         adopts={band.benchAdoptsUnattributed === true}
         onCreateColorway={openCreate}
       />

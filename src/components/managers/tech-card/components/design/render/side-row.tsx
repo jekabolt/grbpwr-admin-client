@@ -384,15 +384,18 @@ const PLUS_COL_PX = 104;
  * поэтому второго круга запроса на соседний цвет не нужно: строки всех колорвеев уже на руках, и
  * `expectedSlotRev` берётся из строки ЦЕЛИ, а не из строки семпла того же вида.
  *
- * ПОРЯДОК И СОСТАВ — РЕШЕНИЕ D1/D8 (ось 0 — O-57), и он один на три органа:
- *   · `sample` (ось 0) — ТОЛЬКО у карточки, которой таблица не рисует ни одного колорвея, и тогда
- *     ВСЕГДА: с плитами и без, на чём бы ни стояла цель прогона. Это не «ничего не выбрано»:
- *     безколорвейный верстак законен вечно, и на нём стоит всё, сделанное до оси, — но с первым
- *     столбцом колорвея его столбец уходит (разбор — у самой строки правила ниже);
+ * ПОРЯДОК И СОСТАВ — РЕШЕНИЕ D1/D8 (ось 0 — O-57, D-56″), и он один на три органа:
+ *   · `sample` (ось 0) — ТОЛЬКО у карточки без единого колорвея, и тогда ВСЕГДА: с плитами и без,
+ *     на чём бы ни стояла цель прогона. Это не «ничего не выбрано»: безколорвейный верстак законен
+ *     вечно, и на нём стоит всё, сделанное до оси, — но с первым колорвеем карточки, архивным
+ *     тоже, его столбец уходит (разбор — у самой строки правила ниже);
  *   · живые колорвеи карточки — ВСЕ, в порядке карточки, с плитами и без (пустой столбец и есть
  *     приглашение его наполнить);
  *   · архивные — ТОЛЬКО с плитами: этим цветом больше не работают, и рисовать ему пустые ячейки
  *     значило бы предлагать начать.
+ * Отсюда законное состояние БЕЗ ЕДИНОГО СТОЛБЦА: у карточки только архивные колорвеи без плит.
+ * Таблица говорит это строкой `NO_LIVE_COLOURWAY` при двери `+ colourway`, а экран закрывает
+ * GENERATE той же фразой (`useSidesTarget().nowhere`).
  *
  * ЭКСПОРТИРУЕТСЯ РАДИ ВТОРОГО ЧИТАТЕЛЯ, А НЕ «НА ВСЯКИЙ СЛУЧАЙ»: `render/outputs.tsx` строит из
  * той же оси пункты `mark ▸` и цели `apply splitted`. Второе написание порядка разошлось бы с
@@ -413,6 +416,12 @@ export type ColourwayColumn = {
 
 /** Слово оси 0 на экране. В коде она остаётся `COLORWAY_NONE`; таблицу семплов 0108 не путать. */
 export const SAMPLE_LABEL = 'sample';
+
+/**
+ * O-57 · D-56″ · У КАРТОЧКИ ЕСТЬ КОЛОРВЕИ, А СТОЛБЦА НЕТ НИ ОДНОГО — все архивные и без плит.
+ * Одна фраза на два места: строку таблицы SIDES и отказ GENERATE (`useSidesTarget().nowhere`).
+ */
+export const NO_LIVE_COLOURWAY = 'no live colourway — add or revive one';
 
 /**
  * ═══ ЗАПРОС «ФАЙЛ ИЗ БИБЛИОТЕКИ В ЯЧЕЙКУ СТОЛБЦА» — ЧИСТОЙ ФУНКЦИЕЙ (п.30) ═══════════════════
@@ -443,6 +452,12 @@ export function renderUploadWrite(v: {
 export function colourwayColumns(
   band: GetDesignBandResponse,
   colorways: common_AdminColorwayRef[],
+  /**
+   * O-57 · D-56″ — СЫРОЙ список карточки (`useColorwayChoice().cardColorways`): правило семпла
+   * считает ВСЕ её колорвеи, архивные без плит тоже, а `colorways` хозяина их уже выбросил. Не
+   * задан — «не сказано», и правило считает по `colorways`.
+   */
+  cardColorways?: readonly common_AdminColorwayRef[],
 ): ColourwayColumn[] {
   const column = (colorwayId: number, ref: common_AdminColorwayRef | null): ColourwayColumn => {
     const sides = threedSides(band, colorwayId);
@@ -460,7 +475,8 @@ export function colourwayColumns(
     const id = ref.colorwayId ?? 0;
     if (id <= 0) continue;
     const col = column(id, ref);
-    // ⚠ Вопрос владельцу, не решение: «архивный без плит — не колорвей» для O-57 им не подтверждено.
+    /* Архивный без плит столбца не получает (D8). Колорвеем для правила семпла он при этом
+       остаётся — ответ владельца (D-56″), разбор у строки правила ниже. */
     if (col.archived && !col.plated) continue;
     named.push(col);
   }
@@ -479,25 +495,26 @@ export function colourwayColumns(
    * `unmark ▸` на её же плитке (✕ в таблице у неё больше нет). Этот файл перестаёт только РИСОВАТЬ
    * ось 0 рядом с колорвеями.
    *
-   * ЧТО СЧИТАЕТСЯ КОЛОРВЕЕМ — ТО, ЧЕМУ ТАБЛИЦА РИСУЕТ СТОЛБЕЦ (`named`); правило архива то же, что
-   * в цикле выше: живой — всегда, архивный — только с плитами. Архивный с плитами стоит столбцом,
-   * значит колорвей у карточки есть, и семпл уходит. Архивный БЕЗ плит столбца не получает и семпл
-   * не прячет — буквальное «никаких колорвеев» считало бы и его; это вопрос владельцу (строка в
-   * цикле выше), а не решение этого файла.
+   * ЧТО СЧИТАЕТСЯ КОЛОРВЕЕМ — ЛЮБОЙ КОЛОРВЕЙ КАРТОЧКИ, АРХИВНЫЙ ТОЖЕ (D-56″). Владелец на вопрос
+   * «архивный без плит — колорвей?», дословно: «семпл показывается только если нет ни одного
+   * колорвея». Правило поэтому читает СЫРОЙ список карточки (`cardColorways`), а не столбцы
+   * (`named`) и не список хозяина, из которого архивный без плит уже выброшен. Столбец архивному
+   * без плит по-прежнему не рисуется (правило архива в цикле выше), так что у карточки с одними
+   * такими колорвеями таблица остаётся БЕЗ ЕДИНОГО СТОЛБЦА — и это законное состояние, а не дыра:
+   * строка `NO_LIVE_COLOURWAY` при двери `+ colourway`, GENERATE закрыт той же фразой.
    *
-   * ⚠ СЕМПЛ СТОИТ, КОГДА `named` ПУСТ, И НИ ОТ ЧЕГО БОЛЬШЕ НЕ ЗАВИСИТ (r2, D-56). Первая редакция
-   * держала его ещё и «при плитах или когда он цель», и это давало таблицу БЕЗ ЕДИНОГО СТОЛБЦА:
-   * свежая полоса, один списанный пустой колорвей, названный адресом, — `named` пуст, плит нет, цель
-   * ненулевая (ревью Codex, Medium 2). Теперь цель прогона правило не читает вовсе (что рисовать,
-   * решают колорвеи карточки, а не то, на чём стоит студия), и таблица держит инвариант, на который
-   * опираются `for:` и цель экрана: СТОЛБЕЦ ЕСТЬ ВСЕГДА — колорвеи либо `sample`.
+   * ⚠ ЦЕЛЬ ПРОГОНА ПРАВИЛО НЕ ЧИТАЕТ ВОВСЕ (r2, D-56). Первая редакция держала семпл ещё и «при
+   * плитах или когда он цель» — и столбец зависел от того, на чём стоит студия, а не от карточки
+   * (ревью Codex, Medium 2). Что рисовать, решают колорвеи карточки; отсюда и прежний инвариант
+   * «столбец есть всегда» снят D-56″ в одном случае — у карточки без живого колорвея и без плит.
    *
    * ⚠ ТЕ ЖЕ СТОЛБЦЫ ЧИТАЮТ `mark ▸` И `apply splitted` (`./outputs`) и цель экрана с её `for:`
    * (`useSidesTarget` ниже). Плита не ляжет «в sample», которого на экране нет: куда встаёт
    * семпл-плита рядом с колорвеями, решает `./outputs` (`destinationsOf`) — при B7 в живой
    * колорвей, без B7 никуда, и тогда дверь стоит погашенной со своей причиной.
    */
-  const sampleDrawn = named.length === 0;
+  const carded = cardColorways ?? colorways;
+  const sampleDrawn = !carded.some((c) => (c.colorwayId ?? 0) > 0);
   return sampleDrawn ? [column(COLORWAY_NONE, null)] : named;
 }
 
@@ -509,7 +526,10 @@ export function colourwayColumns(
  *   · у сохранённой цели студии есть столбец в таблице → она и есть цель, как была;
  *   · столбца нет (сохранён `sample` у карточки с колорвеями; списанный пустой колорвей, названный
  *     адресом) → ПЕРВЫЙ СТОЛБЕЦ таблицы: у карточки без колорвеев это `sample`, у остальных —
- *     первый колорвей.
+ *     первый колорвей;
+ *   · у таблицы нет ни одного столбца (D-56″: у карточки только архивные без плит) → цели нет:
+ *     живого колорвея нет, а семпл спрятан колорвеями. Экран держит сохранённое число, а GENERATE
+ *     закрыт фразой `nowhere` — той же, что стоит строкой в таблице.
  * Её читают все органы экрана — черновик рецепта, ворота, тело прогона, `for:` и SIDES, — а `for:`
  * предлагает РОВНО столбцы таблицы (`drawn`), поэтому значение всегда среди пунктов.
  *
@@ -531,6 +551,8 @@ export type SidesTarget = {
   archived: boolean;
   /** Столбцы таблицы в её порядке — ровно пункты `for:` (`only`). */
   drawn: number[];
+  /** D-56″: столбца нет ни одного — почему прогона нет (`NO_LIVE_COLOURWAY`); иначе `null`. */
+  nowhere: string | null;
 };
 
 export function useSidesTarget(
@@ -542,20 +564,27 @@ export function useSidesTarget(
     label: string;
     archived: boolean;
   },
+  /** D-56″: сырой список карточки — правило семпла (`colourwayColumns`). */
+  cardColorways?: readonly common_AdminColorwayRef[],
 ): SidesTarget {
-  const columns = useMemo(() => colourwayColumns(band, colorways), [band, colorways]);
+  const columns = useMemo(
+    () => colourwayColumns(band, colorways, cardColorways),
+    [band, colorways, cardColorways],
+  );
   const drawn = useMemo(() => columns.map((c) => c.colorwayId), [columns]);
   /** У сохранённой цели есть столбец — экран работает под ней как есть. */
   const standing = drawn.includes(stored.colorwayId);
-  /* Столбец есть всегда (`colourwayColumns`: колорвеи либо `sample`); `?? null` — страховка типов. */
+  /* Столбца может не быть ни одного (D-56″) — тогда цели у экрана нет, и это говорит `nowhere`. */
   const first = columns[0] ?? null;
-  if (standing || !first) return { ...stored, drawn };
+  if (!first) return { ...stored, drawn, nowhere: NO_LIVE_COLOURWAY };
+  if (standing) return { ...stored, drawn, nowhere: null };
   return {
     colorwayId: first.colorwayId,
     ref: first.ref,
     label: first.colorwayId === COLORWAY_NONE ? '' : first.label,
     archived: first.archived,
     drawn,
+    nowhere: null,
   };
 }
 
@@ -563,6 +592,7 @@ export function SidesSection({
   band,
   techCardId,
   colorways,
+  cardColorways,
   targetColorwayId,
   onPickColorway,
   onCreateColorway,
@@ -571,8 +601,13 @@ export function SidesSection({
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
-  /** Колорвеи карточки в её собственном порядке (`useTechCard().colorways`). */
+  /**
+   * Колорвеи карточки в её собственном порядке — список хозяина (`useColorwayChoice().colorways`):
+   * архивный без плит из него выброшен, если он не цель. Сырой список — `cardColorways` ниже.
+   */
   colorways: common_AdminColorwayRef[];
+  /** D-56″: сырой список карточки, архивные без плит тоже — правило столбца `sample`. */
+  cardColorways?: readonly common_AdminColorwayRef[];
   /**
    * ЦЕЛЬ ПРОГОНА — то же число, что стоит в `for:` у GENERATE: эффективная цель экрана
    * (`useSidesTarget`) — цель студии, если у неё есть столбец, иначе первый столбец таблицы.
@@ -590,7 +625,10 @@ export function SidesSection({
   const writes = useDesignWrites(techCardId);
   const { dictionary } = useDictionary();
   const flats = useMemo(() => benchSides(band, 'flat', 0), [band]);
-  const columns = useMemo(() => colourwayColumns(band, colorways), [band, colorways]);
+  const columns = useMemo(
+    () => colourwayColumns(band, colorways, cardColorways),
+    [band, colorways, cardColorways],
+  );
   /** Занятые снятые 3/4 рендер-верстака, всех колорвеев (D-18', ревью Codex M1) — хвост блока. */
   const legacy = useMemo(() => legacyRenderSides(band), [band]);
   const colourwayName = (colorwayId: number): string => {
@@ -1022,6 +1060,25 @@ export function SidesSection({
               />
             )}
           </div>
+
+          {/* ═══ O-57 · D-56″ · СТОЛБЦА НЕТ НИ ОДНОГО — СТРОКА, А НЕ ПУСТАЯ ШАПКА ═══════════════
+              У карточки есть колорвеи (семпл ими спрятан), но все архивные и без плит — рисовать
+              нечего. Без слова таблица стояла бы шапкой `SIDE · FLATS IN · + COLOURWAY` над
+              пустотой. Строка встаёт под дверь `+ colourway` — её единственный выход — в ту же
+              дорожку, где стояли бы столбцы; тон и кегль подписи, регистр предложения, ни коробки,
+              ни рамки (DESIGN.md). Второй двери нет: «add» — это дверь над строкой, «revive» —
+              статус колорвея на вкладке COLOURWAYS. */}
+          {columns.length === 0 && (
+            <div
+              data-side-no-colourway=''
+              className='min-w-0 pt-1 pb-2'
+              style={{ gridColumn: '3 / -1' }}
+            >
+              <Text size='micro' variant='label' component='p'>
+                {NO_LIVE_COLOURWAY}
+              </Text>
+            </div>
+          )}
 
           {flats.map((flat, i) => {
             const label = viewLabel(flat.view);

@@ -6,9 +6,8 @@ import { CalloutBox } from 'ui/components/callout-box';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 
+import { InertDoor } from '../bench-slot';
 import { AskModal } from '../core';
-/* Прямым путём, а не через `../core`: поверхность `core/index.ts` этой правкой не расширялась. */
-import { RefusedDoor } from '../core/two-step-picker';
 import { useDesignWrites } from '../use-design-band';
 import { viewLabel, type ActiveView } from '../views';
 import type { BenchSide } from './model';
@@ -163,6 +162,7 @@ export function ApplySplitDoor({
    */
   noun,
   refusal = null,
+  refusalDescribedBy,
   onCreateColorway,
   className,
   doorClassName,
@@ -198,13 +198,20 @@ export function ApplySplitDoor({
    *     ТИХО ЗАПОЛНЯЛА ЧУЖОЙ ВЕРСТАК (дефект L-1 под другим именем): стороны наполнялись у другого
    *     цвета, экран не менялся, следа не оставалось даже в виде отказа.
    *
-   * Отказ решается ВЫЗЫВАЮЩИМ, потому что только он знает, чем сужена его секция; дверь при
-   * заданном отказе рисуется `RefusedDoor` со СТРОКОЙ причины (`Reason`, привязанной к кнопке
-   * `aria-describedby`) — колода раскрыта, и исчезнувшая дверь читалась бы как пропажа, а серая
-   * без слов — как поломка. Пустой `pieces` при заданном отказе тоже рисуется: причина важнее
+   * Отказ решается ВЫЗЫВАЮЩИМ, потому что только он знает, куда листу можно встать; дверь при
+   * заданном отказе рисуется `InertDoor` — погашенная `disabled`-кнопка с причиной в `title`:
+   * колода раскрыта, и исчезнувшая дверь читалась бы как пропажа. Словами причину вызывающий
+   * печатает сам, ОДИН раз на ряд (O-57 r4: записка над полосой RENDERS OF THIS CARD), и отдаёт
+   * её id `refusalDescribedBy`. Пустой `pieces` при заданном отказе тоже рисуется: причина важнее
    * состава.
    */
   refusal?: string | null;
+  /**
+   * Id записки вызывающего, где причина отказа напечатана (O-57 r4), — едет в `aria-describedby`
+   * погашенной двери. Не задан — записки у этой причины нет (карточка только для чтения, сервер
+   * молчит: причина общая для всех дверей экрана), и она остаётся в `title`, как у соседей.
+   */
+  refusalDescribedBy?: string;
   /**
    * Завести колорвей прямо отсюда — тем же поповером, что заголовок `+ colourway` в SIDES. Задан
    * только там, где новый столбец законная цель (семпл-лист при усыновлении); `then` зовётся с
@@ -241,16 +248,18 @@ export function ApplySplitDoor({
 
   /* ОТКАЗ ХОЗЯИНА — дверь стоит, но мертва, и говорит почему. Ни одной записи: `run` ниже
      недостижим, потому что живой кнопки нет.
-     O-57 r3 (ревью Codex r2, Medium): не `InertDoor` — её `disabled`-кнопка выпадала из порядка Tab
-     и причину слышала только мышь. `RefusedDoor` держит дверь в фокусе (`aria-disabled`), глушит
-     жест и привязывает напечатанную причину к кнопке (`aria-describedby`). Обёртка та же —
-     `[data-inert]` с кнопкой прямым ребёнком, — поэтому классы хозяина (`[&>button]:…`) доходят. */
+     O-57 r4 (ревью Codex r3, Medium): снова `InertDoor`, единственный орган погашенной двери
+     студии, — вне порядка Tab, причина в `title`, а напечатана она у вызывающего, одной запиской
+     на ряд, на которую дверь ссылается `describedBy`. Круг r3 держал здесь фокусируемую дверь с
+     причиной у самой двери — вторую семантику рядом с `InertDoor`. Классы хозяина (`[&>button]:…`)
+     доходят: обёртка — `[data-inert]` с кнопкой прямым ребёнком. */
   if (refusal) {
     return (
-      <RefusedDoor
+      <InertDoor
         className={cn('[&>button]:w-full', className)}
         label='apply splitted'
         reason={refusal}
+        describedBy={refusalDescribedBy}
       />
     );
   }
