@@ -201,8 +201,9 @@ function standingPieces(pictures: readonly common_DesignPicture[], sheetId: numb
  *     server refuses the same (`technical_sheet`, D-55); this reading only spares the save and the
  *     upload that its refusal would come after.
  * Every fact here can change while the editor is open — a poll brings another tab's edit or cut,
- * the card form takes a callout — so the tile re-renders the reason (`useWatch`, the band) and the
- * editor asks for it again right before it writes (`VectorReplace.closedNow`).
+ * the card form takes a callout — so the open workbench editor re-renders the reason
+ * (`WorkbenchEditor`: `useWatch`, the band) and asks for it again right before it writes
+ * (`VectorReplace.closedNow`).
  */
 function overwriteClosed(
   picture: common_DesignPicture,
@@ -235,6 +236,70 @@ const SHEET_FIELDS = ['technicalMedia', 'callouts'] as const;
 /** Where a picture stands on `band`'s bench, in prose — the editor's toast after an overwrite (D-55). */
 function slotLabelOf(band: GetDesignBandResponse, pictureId: number): string | null {
   return slotOfPicture(band, pictureId)?.label ?? null;
+}
+
+/**
+ * ═══ THE WORKBENCH'S EDITOR OVER ONE TILE — AND THE ONLY WATCHER OF THE CARD FORM (review r3) ═══
+ *
+ * Overwrite's reasons read the card form — `technicalMedia` and `callouts` — and move with it while
+ * the question stands (27.09, review r2, D-55): a snapshot read as the editor opened went stale the
+ * moment somebody pinned a callout. Watched by every tile, though, a keystroke in a callout made
+ * every picture of the history render again, for a question none of them can ask. Mounted only
+ * while a workbench tile's editor is open, this watches for exactly one tile, and only then.
+ *
+ * `closedNow` is the same reading made at the moment of the call — the editor asks it right before
+ * it writes an overwrite, long after the render that drew the question (`VectorReplace.closedNow`).
+ */
+function WorkbenchEditor({
+  band,
+  techCardId,
+  picture,
+  siblings,
+  slotLabel,
+  disabled,
+  onOpenChange,
+}: {
+  band: GetDesignBandResponse;
+  techCardId: number;
+  picture: common_DesignPicture;
+  siblings?: readonly common_DesignPicture[];
+  slotLabel: string | null;
+  disabled?: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const form = useFormContext<TechCardFormData>();
+  const [technicalMedia, callouts] = useWatch({ control: form.control, name: SHEET_FIELDS });
+  /** The picture and its row as of the last render — what `closedNow` judges. */
+  const latest = useRef({ picture, siblings });
+  latest.current = { picture, siblings };
+  const closedNow = useCallback(() => {
+    const { picture: p, siblings: row } = latest.current;
+    return overwriteClosed(
+      p,
+      row ?? [p],
+      form.getValues() as Parameters<typeof overwriteClosed>[2],
+    );
+  }, [form]);
+  return (
+    <VectorModal
+      open
+      onOpenChange={onOpenChange}
+      techCardId={techCardId}
+      band={band}
+      base={picture}
+      slot={null}
+      replace={
+        {
+          pictureId: picture.id ?? 0,
+          slotLabel,
+          closed: overwriteClosed(picture, siblings ?? [picture], { technicalMedia, callouts }),
+          closedNow,
+          slotOf: slotLabelOf,
+        } satisfies VectorReplace
+      }
+      disabled={disabled}
+    />
+  );
 }
 
 /* ────────────────────────────── the tile ────────────────────────────── */
@@ -295,27 +360,6 @@ export function RunTile({
 }) {
   const pick = usePickMode();
   const { setBenchSlot } = useDesignWrites(techCardId);
-  /**
-   * THE CARD FORM, WATCHED — `technicalMedia` and `callouts` (27.09, review r2, D-55). A snapshot read
-   * as the editor opened went stale the moment somebody pinned a callout; watched, the reason on
-   * the question moves with the form. RunTile lives under the card's form, as the whole studio does.
-   */
-  const form = useFormContext<TechCardFormData>();
-  const [technicalMedia, callouts] = useWatch({ control: form.control, name: SHEET_FIELDS });
-  /**
-   * The picture and its row as of the last render, for `closedNow` — asked by the editor right
-   * before it writes an overwrite, long after the render that drew the question.
-   */
-  const latest = useRef({ picture, siblings });
-  latest.current = { picture, siblings };
-  const closedNow = useCallback(() => {
-    const { picture: p, siblings: row } = latest.current;
-    return overwriteClosed(
-      p,
-      row ?? [p],
-      form.getValues() as Parameters<typeof overwriteClosed>[2],
-    );
-  }, [form]);
   /** Правка прямо в истории (V-10): состояние у плитки — редактор открыт над КОНКРЕТНОЙ картинкой. */
   const [editing, setEditing] = useState(false);
 
@@ -590,33 +634,33 @@ export function RunTile({
           на правку СЕРВЕРОМ, в той же транзакции, — клиент его не пишет. Причины закрытой
           перезаписи ЖИВЫЕ, пока редактор открыт (D-55): опрос полосы приносит чужую правку или
           разрез, форма карточки — выноску на листе; поэтому `closed` перерисовывается с полосой и
-          с формой (`useWatch`), а `closedNow` редактор спрашивает прямо перед записью. Тост после
-          перезаписи называет слот по ПЕРЕЧИТАННОЙ полосе (`slotOf`), а не по вопросу. */}
-      {editing && (
-        <VectorModal
-          open
-          onOpenChange={setEditing}
-          techCardId={techCardId}
-          band={band}
-          base={picture}
-          slot={null}
-          replace={
-            workbench && pictureId > 0
-              ? ({
-                  pictureId,
-                  slotLabel: inSlot?.label ?? null,
-                  closed: overwriteClosed(picture, siblings ?? [picture], {
-                    technicalMedia,
-                    callouts,
-                  }),
-                  closedNow,
-                  slotOf: slotLabelOf,
-                } satisfies VectorReplace)
-              : null
-          }
-          disabled={disabled}
-        />
-      )}
+          с формой, а `closedNow` редактор спрашивает прямо перед записью. Форму смотрит ТОЛЬКО
+          открытый редактор верстака (`WorkbenchEditor`, review r3): подписка на каждой плитке
+          перерисовывала всю историю на каждую букву выноски. Тост после перезаписи называет слот
+          по ПЕРЕЧИТАННОЙ полосе (`slotOf`), а не по вопросу. */}
+      {editing &&
+        (workbench && pictureId > 0 ? (
+          <WorkbenchEditor
+            band={band}
+            techCardId={techCardId}
+            picture={picture}
+            siblings={siblings}
+            slotLabel={inSlot?.label ?? null}
+            disabled={disabled}
+            onOpenChange={setEditing}
+          />
+        ) : (
+          <VectorModal
+            open
+            onOpenChange={setEditing}
+            techCardId={techCardId}
+            band={band}
+            base={picture}
+            slot={null}
+            replace={null}
+            disabled={disabled}
+          />
+        ))}
     </div>
   );
 }
