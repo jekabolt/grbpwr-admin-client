@@ -19,6 +19,7 @@ import {
   ToggleRow,
 } from './fields';
 import { playgroundRunScope } from './address';
+import { cardRecentTexts } from './card-recent';
 import { bandSuggestsPrompts, ideasContext } from './ideas-server';
 import { rememberRecentText, recentTextKey } from './recent';
 import {
@@ -273,6 +274,7 @@ function Field({
           maxLength={field.maxLength}
           disabled={disabled}
           serverIdeas={serverIdeas}
+          cardRecent={cardRecentTexts(band, def.key, key)}
         />
       );
     }

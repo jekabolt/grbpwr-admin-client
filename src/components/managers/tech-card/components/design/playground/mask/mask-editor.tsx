@@ -17,6 +17,7 @@ import { GenerateRow, LockBar, RunRefusal } from '../../render/generate-row';
 import { useStartDesignRun } from '../../render/use-design-run';
 import { useDesignBand } from '../../use-design-band';
 import { playgroundRunScope } from '../address';
+import { cardRecentTexts } from '../card-recent';
 import { FoldSection, OptionRow, PromptField } from '../fields';
 import { bandSuggestsPrompts, ideaMediaIds, ideasContext } from '../ideas-server';
 import { recentTextKey, rememberRecentText } from '../recent';
@@ -350,6 +351,7 @@ export function MaskEditor({
                   hint={RETOUCH_WORDS_HINT}
                   maxLength={RETOUCH_WORDS_MAX}
                   disabled={frozen}
+                  cardRecent={cardRecentTexts(band, 'retouch_zone', RETOUCH_WORDS_KEY)}
                   serverIdeas={
                     bandSuggestsPrompts(band)
                       ? {

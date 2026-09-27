@@ -8,6 +8,7 @@ import { Chip } from 'ui/components/chip';
 import GenericPopover from 'ui/components/popover';
 import Textarea from 'ui/components/text-area';
 
+import { recentMenu } from '../card-recent';
 import { ideasFor, insertIdea } from '../ideas';
 import {
   answeredIdeas,
@@ -41,6 +42,9 @@ import { recentTextKey, useRecentText } from '../recent';
  *    text only if the text is still the one that was sent; a text edited meanwhile is left alone.
  *  · RECENTLY USED ▾ — the texts this field was generated with (`../recent.ts`), newest first; a
  *    pick replaces the text. The field only reads the list; the panel remembers on submit.
+ *    Phase 3 (C-16): the card's own past texts (`cardRecent`, from the band's runs) stand above
+ *    one hairline as «on this card», this browser's below as «in this browser»; an empty group is
+ *    not drawn, and a text both lists hold stays in the browser's.
  *
  * ONE UNDO FOR BOTH REPLACEMENTS. Improve and a recent pick both swap the whole text, so for ten
  * seconds `undo ↶` stands in the footer and puts the previous text back; typing over the new text
@@ -71,9 +75,16 @@ export type PromptFieldProps = {
    * model (`suggest_prompts_model` non-empty); absent = the fixed list alone and no call, ever.
    */
   serverIdeas?: ServerIdeasInput;
+  /**
+   * This field's past texts ON THIS CARD, newest first (C-16, `cardRecentTexts` over the band's
+   * runs): the «on this card» group of Recently used, above the browser's own list. Absent = none.
+   */
+  cardRecent?: readonly string[];
 };
 
 type Replaced = { before: string; after: string };
+
+const NO_TEXTS: readonly string[] = Object.freeze([]);
 
 const MENU_ROW =
   'w-full px-2.5 py-2 text-left text-textBaseSize hover:bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor';
@@ -89,6 +100,7 @@ export function PromptField({
   maxLength = 2000,
   disabled,
   serverIdeas,
+  cardRecent = NO_TEXTS,
 }: PromptFieldProps): JSX.Element {
   const box = useRef<HTMLTextAreaElement | null>(null);
   const { showMessage } = useSnackBarStore();
@@ -284,7 +296,9 @@ export function PromptField({
   const doorSkin = (open: boolean) =>
     cn(
       disabled && 'pointer-events-none border-textInactiveColor text-textInactiveColor',
-      open && 'bg-textColor text-bgColor',
+      // `!`: the Button's variant sets `text-textColor` and cva does not merge classes, so a plain
+      // `text-bgColor` lost to it and the open door read black on black unless hovered.
+      open && 'bg-textColor !text-bgColor',
     );
 
   return (
@@ -383,25 +397,7 @@ export function PromptField({
               </Button>
             }
           >
-            {recent.items.length === 0 ? (
-              <p className='px-2.5 py-2 text-micro text-labelColor'>
-                Nothing yet. Texts you generate with appear here.
-              </p>
-            ) : (
-              <div role='group' aria-label='recently used' className='flex flex-col py-1'>
-                {recent.items.map((text) => (
-                  <button
-                    key={text}
-                    type='button'
-                    title={text}
-                    onClick={() => pickRecent(text)}
-                    className={cn(MENU_ROW, 'line-clamp-2')}
-                  >
-                    {text}
-                  </button>
-                ))}
-              </div>
-            )}
+            <RecentMenuBody menu={recentMenu(cardRecent, recent.items)} onPick={pickRecent} />
           </GenericPopover>
         </span>
       </div>
@@ -471,6 +467,64 @@ export function IdeasMenuBody({
               {idea}
             </button>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * THE RECENTLY USED MENU (C-16): «on this card» (the band's runs) above one hairline, «in this
+ * browser» below. An empty group is not drawn; the browser's list alone stands unlabelled, as in
+ * phase 2; both empty is the «nothing yet» line.
+ */
+export function RecentMenuBody({
+  menu,
+  onPick,
+}: {
+  menu: { card: readonly string[]; browser: readonly string[] };
+  onPick: (text: string) => void;
+}): JSX.Element {
+  const { card, browser } = menu;
+  if (card.length === 0 && browser.length === 0)
+    return (
+      <p className='px-2.5 py-2 text-micro text-labelColor' data-recent-menu=''>
+        Nothing yet. Texts you generate with appear here.
+      </p>
+    );
+  const row = (text: string) => (
+    <button
+      key={text}
+      type='button'
+      title={text}
+      onClick={() => onPick(text)}
+      className={cn(MENU_ROW, 'line-clamp-2')}
+    >
+      {text}
+    </button>
+  );
+  return (
+    <div className='flex flex-col py-1' data-recent-menu=''>
+      {card.length > 0 && (
+        <div
+          role='group'
+          aria-label='on this card'
+          data-recent-group='card'
+          className='flex flex-col'
+        >
+          <MenuGroupLabel>on this card</MenuGroupLabel>
+          {card.map(row)}
+        </div>
+      )}
+      {browser.length > 0 && (
+        <div
+          role='group'
+          aria-label={card.length > 0 ? 'in this browser' : 'recently used'}
+          data-recent-group='browser'
+          className={cn('flex flex-col', card.length > 0 && 'mt-1 border-t border-hairline pt-1')}
+        >
+          {card.length > 0 && <MenuGroupLabel>in this browser</MenuGroupLabel>}
+          {browser.map(row)}
         </div>
       )}
     </div>

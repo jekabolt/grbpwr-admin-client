@@ -145,6 +145,11 @@ export {
   suggestRequest,
 } from 'components/managers/tech-card/components/design/playground/ideas-server';
 export { PROMPT_IDEAS } from 'components/managers/tech-card/components/design/playground/ideas';
+// C-16 · the card's own past words of a field, and the menu's two groups.
+export {
+  cardRecentTexts,
+  recentMenu,
+} from 'components/managers/tech-card/components/design/playground/card-recent';
 export { REUSE_LABEL } from 'components/managers/tech-card/components/design/playground/fields';
 /** THE CHAIN rail as the person sees it (C-10): its cells and its «N of M steps» counter. */
 export function railMarkup(ctx: ChainCtx): string {

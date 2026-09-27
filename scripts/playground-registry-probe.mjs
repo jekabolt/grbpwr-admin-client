@@ -215,6 +215,15 @@
 //   node scripts/playground-registry-probe.mjs --mutate-ideas-media-cap  потолок картинок 3
 //                                                                   → краснеет Y
 //
+// C-16 (Recently used «on this card»; живое меню — scripts/playground-prompt-probe.mjs, группа H):
+//   Z · cardRecentTexts по полосе с try-on, ретушью (оба маршрута), заглушками и чужими плитками:
+//       ожидаемые списки по полям, новые сверху, без повторов, не больше восьми; неизвестная пара
+//       — []; recentMenu отдаёт повтор браузерной группе.
+//   node scripts/playground-registry-probe.mjs --mutate-recent-scene   сцена читается из ask
+//                                                                   → краснеет Z
+//   node scripts/playground-registry-probe.mjs --mutate-recent-inpaint ретушь по маске не читает
+//                                                                   ask → краснеет Z
+//
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
 
@@ -287,6 +296,8 @@ const MUT = {
   p06Params: process.argv.includes('--mutate-p06-params'),
   p06Band: process.argv.includes('--mutate-p06-band'),
   ideasMediaCap: process.argv.includes('--mutate-ideas-media-cap'),
+  recentScene: process.argv.includes('--mutate-recent-scene'),
+  recentInpaint: process.argv.includes('--mutate-recent-inpaint'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -780,6 +791,16 @@ if (MUT.ideasMediaCap)
       'export const SUGGEST_MEDIA_MAX = 3;',
     ),
   );
+
+const RECENT_SWAPS = [];
+if (MUT.recentScene)
+  RECENT_SWAPS.push([
+    'virtual_try_on: { pose: ask, scene: sceneText },',
+    'virtual_try_on: { pose: ask, scene: ask },',
+  ]);
+if (MUT.recentInpaint)
+  RECENT_SWAPS.push(["isMaskRetouch(run) ? run.ask ?? '' :", "isMaskRetouch(run) ? '' :"]);
+fileSwaps('c16-card-recent', /playground\/card-recent\.ts$/, RECENT_SWAPS);
 
 const outfile = resolve(tmpdir(), `playground-registry-probe-${process.pid}.mjs`);
 try {
@@ -3857,6 +3878,79 @@ head('Y', 'C-15: ideasFrom плиток, тело SuggestPrompts, чистка, 
     keys.length === 11,
     'ключей PROMPT_IDEAS 11 (9 плиток, у retouch_zone два)',
     String(keys.length),
+  );
+}
+
+// ─── Z · C-16: прошлые слова карточки ──────────────────────────────────────────────────────────
+head('Z', 'C-16: cardRecentTexts по полосе, recentMenu');
+{
+  const tryon = (id, ask, sceneText) => ({
+    id,
+    kind: 'freeform',
+    ask,
+    params: { freeform: { preset: 'tryon', items: [], options: { sceneText } } },
+  });
+  const retouch = (id, words) => ({
+    id,
+    kind: 'freeform',
+    ask: '',
+    params: { freeform: { preset: 'retouch', items: [{ mediaId: 5, texts: [words] }] } },
+  });
+  const inpaint = (id, ask) => ({
+    id,
+    kind: 'inpaint',
+    ask,
+    params: { inpaint: { sourceMediaId: 5 } },
+  });
+  // Newest first, as the band orders them.
+  const runs = [
+    tryon(20, 'hands in pockets', 'grey seamless backdrop'),
+    inpaint(19, 'remove the stain'),
+    // An off-page stub: no params — it gives its `ask` and nothing else.
+    { id: 18, kind: 'recolor', ask: 'the sleeves only' },
+    retouch(17, 'straighten the hem'),
+    { id: 16, kind: 'recolor', ask: 'the cropped jacket', params: { colour: { fabrics: [] } } },
+    tryon(15, '  Hands   in pockets ', ''),
+    tryon(14, '', 'concrete wall at dusk'),
+    {
+      id: 13,
+      kind: 'freeform',
+      ask: 'add sunglasses',
+      params: { freeform: { preset: 'free', items: [] } },
+    },
+  ];
+  const band = { runs };
+  const cases = [
+    ['virtual_try_on', 'pose', ['hands in pockets']],
+    ['virtual_try_on', 'scene', ['grey seamless backdrop', 'concrete wall at dusk']],
+    ['retouch_zone', 'change_text', ['remove the stain', 'straighten the hem']],
+    ['change_color', 'garment', ['the sleeves only', 'the cropped jacket']],
+    ['create_edit', 'prompt', ['add sunglasses']],
+    ['swap_fabrics', 'garment', []],
+    ['retouch_zone', 'zone', []],
+    ['nope', 'nothing', []],
+  ];
+  for (const [wf, f, want] of cases)
+    ck(
+      same(M.cardRecentTexts(band, wf, f), want),
+      `${wf}.${f} → ${show(want)}`,
+      show(M.cardRecentTexts(band, wf, f)),
+    );
+  const nine = { runs: Array.from({ length: 9 }, (_, i) => tryon(100 - i, `pose ${i}`, '')) };
+  const got = M.cardRecentTexts(nine, 'virtual_try_on', 'pose');
+  ck(
+    got.length === 8 && got[0] === 'pose 0' && got[7] === 'pose 7',
+    '9 прогонов → 8 текстов, новые сверху',
+    show(got),
+  );
+  const menu = M.recentMenu(
+    ['hands in pockets', 'walking toward the camera'],
+    ['HANDS in pockets'],
+  );
+  ck(
+    same(menu.card, ['walking toward the camera']) && same(menu.browser, ['HANDS in pockets']),
+    'recentMenu: повтор остаётся в браузерной группе',
+    show(menu),
   );
 }
 

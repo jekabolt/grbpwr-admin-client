@@ -19,6 +19,10 @@
 //   F · меню закрыто, пока ответ в пути: поздний ответ не роняет страницу и ложится в кэш — новое
 //       открытие показывает его без вызова;
 //   G · без картинки подпись «for this field», mediaIds пуст (create_edit без референсов).
+//   H · (C-16) Recently used: «on this card» (прогоны полосы) ВЫШЕ волосяной линии, «in this
+//       browser» ниже; текст, который есть в обоих, — только в браузерной; выбор заменяет текст и
+//       даёт undo; одна браузерная группа — без подписей, как во второй фазе; обе пусты — «Nothing
+//       yet»; редактор маски плитки 10 показывает слова прошлых ретушей карточки (оба маршрута).
 //
 // МУТАЦИИ В ПАМЯТИ (исходник не трогается), каждая роняет СВОЮ группу:
 //   --mutate-ideas-always    сервер спрашивается и без поля 33                    → A
@@ -26,6 +30,10 @@
 //   --mutate-ideas-cache     ответ не кэшируется                                  → C, F
 //   --mutate-ideas-stuck     сбой не снимает «thinking…»                          → D
 //   --mutate-ideas-session   AI_NOT_CONFIGURED не выключает сессию                → E
+//   --mutate-recent-dedupe   повтор остаётся и в группе карточки                  → H
+//   --mutate-recent-order    группа карточки встаёт ниже браузерной               → H
+//   --mutate-recent-mask     редактор маски не получает слов карточки             → H
+//   --mutate-door-skin       открытая дверь снова чёрным по чёрному без наведения → H
 //
 // Нет Chromium — КОД 2 и «НЕ ВЫПОЛНЕНА». `--shots <dir>` сохраняет снимки меню (1440/768/375).
 
@@ -52,6 +60,10 @@ const KNOWN = new Set([
   '--mutate-ideas-cache',
   '--mutate-ideas-stuck',
   '--mutate-ideas-session',
+  '--mutate-recent-dedupe',
+  '--mutate-recent-order',
+  '--mutate-recent-mask',
+  '--mutate-door-skin',
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN.has(a));
 if (stray) dieNotRun(`неизвестный флаг мутации ${stray}; известные: ${[...KNOWN].join(', ')}`);
@@ -104,6 +116,34 @@ if (on('--mutate-ideas-stuck'))
   );
 if (on('--mutate-ideas-session'))
   patch('ideas-session', IDEAS_SERVER, 'if (cannotAnswer(error)) sessionOff = true;', '');
+if (on('--mutate-recent-dedupe'))
+  patch(
+    'recent-dedupe',
+    /playground\/card-recent\.ts$/,
+    'card: card.filter((t) => !shown.has(norm(t))),',
+    'card,',
+  );
+if (on('--mutate-recent-order'))
+  patch(
+    'recent-order',
+    PROMPT_FIELD,
+    "<div className='flex flex-col py-1' data-recent-menu=''>",
+    "<div className='flex flex-col-reverse py-1' data-recent-menu=''>",
+  );
+if (on('--mutate-door-skin'))
+  patch(
+    'door-skin',
+    PROMPT_FIELD,
+    "open && 'bg-textColor !text-bgColor',",
+    "open && 'bg-textColor text-bgColor',",
+  );
+if (on('--mutate-recent-mask'))
+  patch(
+    'recent-mask',
+    /mask\/mask-editor\.tsx$/,
+    "cardRecent={cardRecentTexts(band, 'retouch_zone', RETOUCH_WORDS_KEY)}",
+    '',
+  );
 
 // ─── заглушенная сеть ──────────────────────────────────────────────────────────────────────────
 const STUB_MARKER = 'PROBE_STUB_C15_PROMPT_NETWORK';
@@ -270,10 +310,13 @@ const MODEL = 'google/gemini-3.1-flash-lite';
 const OLD = { freeformPresets: ['free', 'cutout'], runs: [], nextPageToken: '', totalRuns: 0 };
 const NEW = { ...OLD, suggestPromptsModel: MODEL };
 
-async function fresh(wf, band, over = {}) {
+async function fresh(wf, band, over = {}, browserTexts = []) {
   await page.goto('http://probe.local/start');
   await page.waitForFunction(() => !!window.__pp);
   await page.evaluate(() => window.__pp.reset());
+  // This browser's own list, written to storage before the page that reads it loads.
+  for (const [w, f, t] of browserTexts)
+    await page.evaluate(([w, f, t]) => window.__pp.remember(w, f, t), [w, f, t]);
   await page.goto('http://probe.local/tech-cards/7');
   await page.waitForFunction(() => !!window.__pp);
   await page.evaluate(([wf, band, over]) => window.__pp.mount(wf, band, over), [wf, band, over]);
@@ -573,6 +616,136 @@ try {
     (await groupLabels())[0] === 'for this field',
     'подпись «for this field»',
     JSON.stringify(await groupLabels()),
+  );
+} catch (e) {
+  ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+// ─── H · C-16: Recently used «on this card» ────────────────────────────────────────────────────
+head('H', 'Recently used: «on this card» над линией, «in this browser» ниже, без повторов');
+const recolor = (id, ask) => ({ id, kind: 'recolor', ask, params: { colour: { fabrics: [] } } });
+const openRecent = async (key) => {
+  await field(key).locator('button[aria-label="recently used"]').click();
+  await page.waitForSelector('[data-recent-menu]');
+  await settle();
+};
+const recentRows = (which) =>
+  page.locator(`[data-recent-group="${which}"] button`).allTextContents();
+const recentLabels = () => page.locator('[data-recent-menu] p[aria-hidden]').allTextContents();
+try {
+  const band = {
+    ...OLD,
+    runs: [
+      recolor(30, 'the coat shell, not the lining'),
+      recolor(29, 'the shirt only'),
+      recolor(28, 'The Coat shell, not the lining'),
+      { id: 27, kind: 'freeform', ask: 'add sunglasses', params: { freeform: { preset: 'free' } } },
+    ],
+  };
+  await fresh('change_color', band, { texts: { garment: 'my own words' } }, [
+    ['change_color', 'garment', 'the shirt only'],
+    ['change_color', 'garment', 'the dress'],
+  ]);
+  await openRecent('change_color.garment');
+  ck(
+    JSON.stringify(await recentRows('card')) === JSON.stringify(['the coat shell, not the lining']),
+    'на карточке: свои прогоны плитки, новые сверху, без повторов и без того, что есть в браузере',
+    JSON.stringify(await recentRows('card')),
+  );
+  ck(
+    JSON.stringify(await recentRows('browser')) === JSON.stringify(['the dress', 'the shirt only']),
+    'в браузере: список второй фазы, как был',
+    JSON.stringify(await recentRows('browser')),
+  );
+  ck(
+    JSON.stringify(await recentLabels()) === JSON.stringify(['on this card', 'in this browser']),
+    'подписи: «on this card» и «in this browser»',
+    JSON.stringify(await recentLabels()),
+  );
+  const cardTop = await boxTop('[data-recent-group="card"]');
+  const browserTop = await boxTop('[data-recent-group="browser"]');
+  ck(
+    cardTop < browserTop,
+    'группа карточки ВЫШЕ браузерной на экране',
+    `${cardTop} / ${browserTop}`,
+  );
+  ck(
+    /border-t/.test(
+      (await page.locator('[data-recent-group="browser"]').getAttribute('class')) ?? '',
+    ),
+    'между группами одна волосяная линия',
+  );
+  // The open door reads without a hover: its words and its ground differ (pointer moved away).
+  await page.mouse.move(1, 1);
+  await settle();
+  const skin = await field('change_color.garment')
+    .locator('button[aria-label="recently used"] span')
+    .evaluate((e) => [getComputedStyle(e).color, getComputedStyle(e).backgroundColor]);
+  ck(
+    skin[0] !== skin[1],
+    'открытая дверь читается без наведения (слова не цвета фона)',
+    JSON.stringify(skin),
+  );
+  await shoot('recent-two-groups');
+  await page.locator('[data-recent-group="card"] button').first().click();
+  await settle();
+  ck(
+    (await textOf('change_color.garment')) === 'the coat shell, not the lining' &&
+      (await field('change_color.garment').getByText('undo ↶').count()) === 1,
+    'выбор заменяет текст и даёт undo на 10 с, как у браузерного списка',
+    await textOf('change_color.garment'),
+  );
+
+  await fresh('change_color', OLD, {}, [['change_color', 'garment', 'the dress']]);
+  await openRecent('change_color.garment');
+  ck(
+    (await recentLabels()).length === 0 &&
+      JSON.stringify(await recentRows('browser')) === JSON.stringify(['the dress']),
+    'только браузерная группа — без подписей, как во второй фазе',
+  );
+  await fresh('create_edit', OLD);
+  await openRecent('create_edit.prompt');
+  ck(
+    /Nothing yet/.test((await page.locator('[data-recent-menu]').textContent()) ?? ''),
+    'обе пусты — строка «Nothing yet»',
+  );
+
+  // Tile 10's words live in the mask editor: the card's past retouches, both routes.
+  await page.goto('http://probe.local/start');
+  await page.waitForFunction(() => !!window.__pp);
+  await page.evaluate(() => window.__pp.reset());
+  await page.goto('http://probe.local/tech-cards/7');
+  await page.waitForFunction(() => !!window.__pp);
+  await page.evaluate(
+    ([band, m]) => window.__pp.mask(band, m),
+    [
+      {
+        ...OLD,
+        runs: [
+          { id: 41, kind: 'inpaint', ask: 'remove the stain', params: {} },
+          {
+            id: 40,
+            kind: 'freeform',
+            ask: '',
+            params: {
+              freeform: {
+                preset: 'retouch',
+                items: [{ mediaId: 5, texts: ['straighten the hem'] }],
+              },
+            },
+          },
+        ],
+      },
+      media(5),
+    ],
+  );
+  await page.waitForSelector('[data-prompt-field="retouch_zone.change_text"]');
+  await openRecent('retouch_zone.change_text');
+  ck(
+    JSON.stringify(await recentRows('card')) ===
+      JSON.stringify(['remove the stain', 'straighten the hem']),
+    'редактор маски: слова прошлых ретушей карточки (по маске — ask, окном — texts[0])',
+    JSON.stringify(await recentRows('card')),
   );
 } catch (e) {
   ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
