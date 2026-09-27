@@ -28,6 +28,11 @@ import {
 // (one row per physical call, priced at call time); their number is the provider's own cost API,
 // where one exists and a reconciliation key is set — until then it is —, never 0.
 //
+// THEIR NUMBER IS COUNTED IN THEIR DAYS (D-17). A provider's cost API buckets by its own day — UTC
+// for most — and the ledger by the org's; near midnight the two disagree by up to the offset at
+// each end of the period. So every "their" figure says "provider days", and one line under the
+// table says what that means: a boundary difference must not read as drift in our ledger.
+//
 // searchParams contract (beside ?view=spend): range=this-month|last-month|last-7|custom, and for
 // custom from & to (YYYY-MM-DD). A preset link means "this month" whenever it is opened; a custom
 // link keeps its days.
@@ -123,7 +128,7 @@ export function SpendView({ config }: { config: GetAiProvidersConfigResponse | u
       <StatGrid min={140}>
         <Stat label='our total · usd' value={dash(usd(report?.totalUsd))} sub='from our ledger' />
         <Stat
-          label='their total · usd'
+          label='their total · usd · provider days'
           value={dash(formatUsd(theirTotal))}
           sub={theirTotal === null ? 'no provider reports yet' : 'from their cost APIs'}
         />
@@ -150,7 +155,7 @@ export function SpendView({ config }: { config: GetAiProvidersConfigResponse | u
               <tr>
                 <th>provider</th>
                 <th>our usd</th>
-                <th>their usd</th>
+                <th>their usd · provider days</th>
                 <th>calls</th>
                 <th>failed</th>
               </tr>
@@ -177,6 +182,12 @@ export function SpendView({ config }: { config: GetAiProvidersConfigResponse | u
               ))}
             </tbody>
           </DataTable>
+        )}
+        {report && byProvider.length > 0 && (
+          <Text size='micro' variant='label' data-provider-days=''>
+            a provider counts its own days (utc for most); a local day can differ by up to 2 h at
+            each end
+          </Text>
         )}
       </Section>
 

@@ -204,6 +204,13 @@ const MUTATIONS = {
     from: '(WriteError, { text: toggle.failure?.text, id: "switch", className: "ml-auto text-right" })',
     to: '(WriteError, { text: null, id: "switch", className: "ml-auto text-right" })',
   },
+  'their-label-dropped': {
+    red: 'FE3',
+    what: 'the "provider days" label is dropped from their total',
+    // esbuild writes the middle dot as the escape \xB7 (backslash included) in its output.
+    from: 'label: "their total \\xB7 usd \\xB7 provider days"',
+    to: 'label: "their total \\xB7 usd"',
+  },
   'clear-sends-old-value': {
     red: 'E5',
     what: 'clear sends the old key (its last four) instead of an empty value',
@@ -841,7 +848,13 @@ await page.waitForSelector('[data-spend-provider="openai"]', { timeout: 8000 });
   ck('D1', a[1] === '0.00', 'a present "0" → 0.00', JSON.stringify(a));
   ck('D1', g[1] === '—', 'an absent our_usd → —', JSON.stringify(g));
   const stats = ((await page.locator('body').textContent()) ?? '').replace(/\s+/g, ' ');
-  ck('D1', /their total · usd\s*—/i.test(stats), 'their total with no provider number → —');
+  ck('D1', /their total · usd · provider days\s*—/i.test(stats), 'their total with no provider number → —');
+  // FE3 · their number is labelled as counted in the provider's days (D-17).
+  const heads = await page.locator('[data-spend-provider="openai"]').locator('xpath=ancestor::table//th').allTextContents();
+  const hint = ((await page.locator('[data-provider-days]').textContent().catch(() => '')) ?? '').replace(/\s+/g, ' ').trim();
+  ck('FE3', /their total · usd · provider days/i.test(stats), 'the stat reads "their total · usd · provider days"');
+  ck('FE3', heads.map((h) => h.trim().toLowerCase()).includes('their usd · provider days'), 'the column reads "their usd · provider days"', JSON.stringify(heads));
+  ck('FE3', hint === 'a provider counts its own days (utc for most); a local day can differ by up to 2 h at each end', 'one hint under the table says what provider days mean', hint);
   const q = server.calls.find((c) => c.path === '/api/admin/ai/spend')?.query ?? '';
   ck('D1', q === '?fromDay=2026-09-01&toDay=2026-09-27', 'custom days go out as asked', q);
   await page.locator('[data-spend-actor="im"] button').click();
