@@ -5062,7 +5062,12 @@ export type DesignImageOptions = {
 // picture changes, black elsewhere (the client paints it; UploadContentImage with preserve_original=true). Both are
 // validated BEFORE anything is reserved: `mask_required`, `mask_size_mismatch`, `mask_invalid` (not a readable PNG),
 // `mask_empty` (nothing painted). The words travel in StartDesignRunRequest.ask (`words_required` when blank).
-// The answer is a NEW picture beside the source; pixels outside the mask are the source's own bytes.
+// The answer is a NEW picture beside the source, a lossless PNG: every pixel outside the mask is the source's own
+// decoded pixel (bit-exact for a PNG source; the decoded pixels of a JPEG/WebP one). Only an OPAQUE picture whose PNG
+// would EXCEED the store's verbatim ceiling (about 21 MB) is stored as JPEG instead — the best of q92 / q85 / q75
+// that fits. A picture with transparency is never stored as JPEG: past the ceiling the composite is not made and the
+// repainted crop is filed as delivered (`inpaint_not_composited`). The source may be at most 18 MP
+// (`source_too_large`).
 export type DesignInpaintParams = {
   sourceMediaId: number | undefined;
   maskMediaId: number | undefined;
@@ -5073,7 +5078,9 @@ export type DesignInpaintParams = {
 // (`extend_takes_no_words`). aspect_ratio ∈ 9:16 | 1:1 | 3:4 | 2:3 | 16:9 | 4:3 | 3:2 | 21:9 | 9:21 — never auto
 // (`extend_aspect_unknown`); a target that adds no pixels on either side is `target_aspect_must_extend`. The
 // server computes the per-side expansion, caps the canvas at 3 megapixels (downscaling the source first), and
-// re-composites the untouched source pixels into the answer, so «the original is kept» is a fact of the bytes.
+// re-composites the untouched source pixels into the answer, stored as a lossless PNG, so «the original is kept» is a
+// fact of the pixels: the source region is the source's own decoded pixels (at the scale the cap allows). The source
+// may be at most 18 MP (`source_too_large`).
 export type DesignExtendParams = {
   aspectRatio: string | undefined;
 };

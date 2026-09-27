@@ -15970,7 +15970,12 @@ export type common_DesignImageOptions = {
 // picture changes, black elsewhere (the client paints it; UploadContentImage with preserve_original=true). Both are
 // validated BEFORE anything is reserved: `mask_required`, `mask_size_mismatch`, `mask_invalid` (not a readable PNG),
 // `mask_empty` (nothing painted). The words travel in StartDesignRunRequest.ask (`words_required` when blank).
-// The answer is a NEW picture beside the source; pixels outside the mask are the source's own bytes.
+// The answer is a NEW picture beside the source, a lossless PNG: every pixel outside the mask is the source's own
+// decoded pixel (bit-exact for a PNG source; the decoded pixels of a JPEG/WebP one). Only an OPAQUE picture whose PNG
+// would EXCEED the store's verbatim ceiling (about 21 MB) is stored as JPEG instead — the best of q92 / q85 / q75
+// that fits. A picture with transparency is never stored as JPEG: past the ceiling the composite is not made and the
+// repainted crop is filed as delivered (`inpaint_not_composited`). The source may be at most 18 MP
+// (`source_too_large`).
 export type common_DesignInpaintParams = {
   sourceMediaId: number | undefined;
   maskMediaId: number | undefined;
@@ -15981,7 +15986,9 @@ export type common_DesignInpaintParams = {
 // (`extend_takes_no_words`). aspect_ratio ∈ 9:16 | 1:1 | 3:4 | 2:3 | 16:9 | 4:3 | 3:2 | 21:9 | 9:21 — never auto
 // (`extend_aspect_unknown`); a target that adds no pixels on either side is `target_aspect_must_extend`. The
 // server computes the per-side expansion, caps the canvas at 3 megapixels (downscaling the source first), and
-// re-composites the untouched source pixels into the answer, so «the original is kept» is a fact of the bytes.
+// re-composites the untouched source pixels into the answer, stored as a lossless PNG, so «the original is kept» is a
+// fact of the pixels: the source region is the source's own decoded pixels (at the scale the cap allows). The source
+// may be at most 18 MP (`source_too_large`).
 export type common_DesignExtendParams = {
   aspectRatio: string | undefined;
 };
@@ -16487,7 +16494,10 @@ export type StartDesignRunRequest = {
   // no region marked on the subject («mark_the_area»); a picture named both in
   // params.freeform.items and in params.extra_input_media_ids («one_list_per_fact»); more
   // pictures than the snapshot's reference ceiling once the marked copies and the crops of the
-  // regions are counted («too_many_pictures», with the numbers);
+  // regions are counted («too_many_pictures», with the numbers); a run that takes a generation
+  // window (`add_hardware` or `retouch` with exactly one marked area) whose picture is under the
+  // minimum side («source_too_small») or over 18 MP, by its stored size or its header
+  // («source_too_large») — the answer is pasted back into the whole picture;
   // · cutout — anything other than exactly one picture in params.extra_input_media_ids
   // («one_source_picture»); an `ask` or a params.freeform on a route that reads neither
   // («cutout_takes_no_words») — a refusal rather than silence, so nobody pays for words that
@@ -16502,18 +16512,23 @@ export type StartDesignRunRequest = {
   // («extend_takes_no_words»); a params.extend.aspect_ratio outside the nine targets, `auto`
   // and '' included («extend_aspect_unknown»); a target within 0.5 % of the source's own
   // proportion, which adds no pixels on either side («target_aspect_must_extend»); a source
-  // under the minimum side («source_too_small»). A params.extend on any other kind is
-  // «extend_forbidden»;
+  // under the minimum side («source_too_small»); a source over 18 MP, by its stored size or its
+  // header («source_too_large»). A params.extend on any other kind is «extend_forbidden»;
   // · inpaint — no params.inpaint.source_media_id («no_source_picture»); no
   // params.inpaint.mask_media_id («mask_required»); a mask whose width and height differ from
   // the source's («mask_size_mismatch»); a mask that is not a readable PNG, or is the source
   // itself («mask_invalid»); a mask with nothing painted («mask_empty»); a blank `ask`
   // («words_required»); a params.freeform or params.extra_input_media_ids beside it
-  // («one_list_per_fact»); a source under the minimum side («source_too_small»). A
-  // params.inpaint on any other kind is «inpaint_forbidden»;
+  // («one_list_per_fact»); a source under the minimum side («source_too_small»); a source
+  // (or its mask) over 18 MP («source_too_large»). A params.inpaint on any other kind is
+  // «inpaint_forbidden»;
   // · either — the fal tariff of the wired route set without its units ceiling, so the reserve
-  // would not be an absolute bound («route_reserve_unbounded», naming FAL_UNITS_CEILING_OUTPAINT
-  // or FAL_UNITS_CEILING_FILL); any params.image («image_options_forbidden»).
+  // would not be an absolute bound («route_reserve_unbounded», FailedPrecondition, naming
+  // FAL_UNITS_CEILING_OUTPAINT or FAL_UNITS_CEILING_FILL); a FAL_MODEL_OUTPAINT / FAL_MODEL_FILL
+  // slug the route builds no body for («kind_not_available», FailedPrecondition); a source id
+  // with no media row («no_source_picture»); a mask that is the source's own file under another
+  // id («mask_invalid»); a rerun naming another picture than its parent — the inpaint mask may
+  // change («rerun_changes_pictures»); any params.image («image_options_forbidden»).
   // Neither kind reads the card, and neither states a colourway.
   // THE PLAYGROUND PRESETS AND THE PER-RUN ENGINE refuse for free, before anything is reserved, too
   // (InvalidArgument unless noted):
