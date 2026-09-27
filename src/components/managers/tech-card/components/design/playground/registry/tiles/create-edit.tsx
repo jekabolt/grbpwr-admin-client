@@ -18,6 +18,7 @@ import {
   textOf,
   workflowOfferedOr,
 } from '../common';
+import { matchesWorkflow } from '../run-workflow';
 import { EMPTY_DRAFT, type InventoryGroupDef, type WorkflowDef, type WorkflowRun } from '../types';
 
 /**
@@ -195,12 +196,12 @@ const run: WorkflowRun = {
 
   results: {
     reps: ['playground'],
-    /* EVERY freeform run, on the kind alone (G-01, m-3). Matching on the preset flipped a paid
-       picture in and out of this tile as the feed paged: off the first page a run is a four-field
-       stub that states no preset (in), and once its page loaded it said `add_hardware` (out). The
-       retired presets are absorbed by this workflow anyway (Q17) — recall lays them out here — and
-       their rows say which preset made them (`retiredPresetWord`). */
-    match: (run) => (run.kind ?? '').trim().toLowerCase() === 'freeform',
+    /* Every freeform run the server files under this tile (C-07): `free` and the retired presets
+       (Q17 — recall lays them out here, and their rows say which preset made them,
+       `retiredPresetWord`), never a preset that has a tile of its own. ONE rule for a loaded run and
+       an off-page stub (`workflowOfRun` reads the server's stamp beside the stub), so a paid picture
+       does not flip between two tiles as the feed pages (G-01, m-3). */
+    match: matchesWorkflow('create_edit'),
   },
 
   recall: (past, media) => {

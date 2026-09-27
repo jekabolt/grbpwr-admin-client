@@ -6,6 +6,7 @@
 // которую сетка могла бы перестать звать.
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { cardOutputRows } from 'components/managers/tech-card/components/design/bench-kinds';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
 import { legacyStep } from 'components/managers/tech-card/components/design/core/chain';
 import {
@@ -14,6 +15,7 @@ import {
 } from 'components/managers/tech-card/components/design/playground/grid';
 import {
   WORKFLOWS,
+  runWorkflowWord,
   workflowByKey,
   workflowOfRun,
 } from 'components/managers/tech-card/components/design/playground/registry';
@@ -37,10 +39,13 @@ import {
   playgroundHistoryMatch,
 } from 'components/managers/tech-card/components/design/playground/studio';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { TooltipProvider } from 'ui/components/tooltip';
 
 export {
   EMPTY_DRAFT,
   WORKFLOWS,
+  cardOutputRows,
+  runWorkflowWord,
   chooseEngine,
   drawnRatios,
   engineSummary,
@@ -92,14 +97,17 @@ function renderPanel(
   return renderToStaticMarkup(
     <QueryClientProvider client={qc}>
       <DesignCapabilityProvider value={true}>
-        <WorkflowPanel
-          def={def}
-          run={def.run}
-          band={band}
-          techCardId={7}
-          draft={draft ?? initialDraft(def.run)}
-          onDraft={() => {}}
-        />
+        {/* The app holds one TooltipProvider at its root (context/index.tsx); a section's ⓘ needs it. */}
+        <TooltipProvider>
+          <WorkflowPanel
+            def={def}
+            run={def.run}
+            band={band}
+            techCardId={7}
+            draft={draft ?? initialDraft(def.run)}
+            onDraft={() => {}}
+          />
+        </TooltipProvider>
       </DesignCapabilityProvider>
     </QueryClientProvider>,
   );

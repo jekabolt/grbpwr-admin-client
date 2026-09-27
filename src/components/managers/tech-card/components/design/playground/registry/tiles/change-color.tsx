@@ -22,6 +22,7 @@ import {
   textOf,
   workflowOfferedOr,
 } from '../common';
+import { matchesWorkflow } from '../run-workflow';
 import { EMPTY_DRAFT, type Draft, type WorkflowDef, type WorkflowRun } from '../types';
 
 /**
@@ -197,7 +198,8 @@ const run: WorkflowRun = {
 
   results: {
     reps: ['onmodel'],
-    match: (run) => (run.kind ?? '').trim().toLowerCase() === 'recolor',
+    // A recolour with a pictured cloth is Swap Fabrics' (C-07, the server's `designWorkflowOf`).
+    match: matchesWorkflow('change_color'),
     selectable: true,
   },
 

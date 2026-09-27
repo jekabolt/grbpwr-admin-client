@@ -32,6 +32,17 @@
 //       переносится, если он есть у новой модели, иначе medium; строка шапки «<label> · <tier>»;
 //   I · (C-08) разметка формы create_edit: сворачиваемые секции AI model и Format есть только на
 //       сервере с моделями, строка «needs at least one» — только на старом.
+//   J · (C-07) wire(): тела плиток 2, 3, 5, 6, 7 целиком — fabric_extract / ghost_mannequin с
+//       моделью по умолчанию и форматом плитки, swap_fabrics = recolor с fabrics[] И эхом
+//       fabric_media_id (картинка не с полки и ткань полки), add_logo = subject + logo + logo_size,
+//       variations = creativity + движок; старый сервер — без image;
+//   K · (C-07) validate(): отказы до денег у пяти плиток; слова плиток 2/3 необязательны;
+//   L · (C-07) ворота: пять плиток живы ровно по playgroundWorkflows;
+//   M · (C-07) прогон → плитка по правилу сервера (пресет, recolor + ткань с картинкой), штамп
+//       run_workflow у заглушки вне страницы, матчеры результатов не делят картинку на две плитки;
+//   N · (C-07) разметка форм пяти плиток (заголовки, REQUIRED, плейсхолдеры владельца, Logo size,
+//       Creative booster «Off», складки AI model / Format только где им место);
+//   O · (C-07) рекол: тело → черновик → то же тело у всех пяти плиток.
 //
 // МУТАЦИИ ЖИВУТ В ПАМЯТИ, А НЕ В ФАЙЛЕ (приём colour-plan-probe): одна строка настоящего модуля
 // подменяется в бандле, исходник не трогается. Каждая обязана уронить СВОЮ группу:
@@ -64,6 +75,22 @@
 //                                                                   делает ни одна модель → краснеет H
 //   node scripts/playground-registry-probe.mjs --mutate-sections    секции модели/формата рисуются
 //                                                                   всегда → краснеет I
+//   node scripts/playground-registry-probe.mjs --mutate-swap-echo   swap_fabrics теряет эхо
+//                                                                   fabric_media_id → краснеет J
+//   node scripts/playground-registry-probe.mjs --mutate-logo-role   логотип уезжает role=subject
+//                                                                   → краснеет J
+//   node scripts/playground-registry-probe.mjs --mutate-creativity  шаг бустера не уезжает
+//                                                                   → краснеет J
+//   node scripts/playground-registry-probe.mjs --mutate-format-default формат плитки 2 по умолчанию
+//                                                                   2:3 вместо 1:1 → краснеет J
+//   node scripts/playground-registry-probe.mjs --mutate-c07-validate swap пускает одну картинку в
+//                                                                   оба слота → краснеет K
+//   node scripts/playground-registry-probe.mjs --mutate-c07-gate    add_logo открыт без списка
+//                                                                   → краснеет L
+//   node scripts/playground-registry-probe.mjs --mutate-run-workflow recolor с тканью читается как
+//                                                                   change_color → краснеет M
+//   node scripts/playground-registry-probe.mjs --mutate-stamp       штамп run_workflow у заглушки
+//                                                                   не читается → краснеет M
 //
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
@@ -93,6 +120,14 @@ const MUT = {
   snapRead: process.argv.includes('--mutate-snap-read'),
   sections: process.argv.includes('--mutate-sections'),
   drawn: process.argv.includes('--mutate-drawn'),
+  swapEcho: process.argv.includes('--mutate-swap-echo'),
+  logoRole: process.argv.includes('--mutate-logo-role'),
+  creativity: process.argv.includes('--mutate-creativity'),
+  formatDefault: process.argv.includes('--mutate-format-default'),
+  c07Validate: process.argv.includes('--mutate-c07-validate'),
+  c07Gate: process.argv.includes('--mutate-c07-gate'),
+  runWorkflow: process.argv.includes('--mutate-run-workflow'),
+  stamp: process.argv.includes('--mutate-stamp'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -169,7 +204,7 @@ if (MUT.recall)
   plugins.push(
     swap(
       'cutout-lost',
-      /registry\/index\.ts$/,
+      /registry\/run-workflow\.ts$/,
       "if (kind === 'cutout') return 'remove_background';",
       '',
     ),
@@ -180,8 +215,77 @@ if (MUT.presetMatch)
     swap(
       'match-on-preset',
       /tiles\/create-edit\.tsx$/,
-      "match: (run) => (run.kind ?? '').trim().toLowerCase() === 'freeform',",
+      "match: matchesWorkflow('create_edit'),",
       "match: (run) => (run.kind ?? '').trim().toLowerCase() === 'freeform' && (run.params === undefined || (run.params.freeform?.preset ?? '').trim() === 'free'),",
+    ),
+  );
+
+// ─── C-07: плитки 2, 3, 5, 6, 7 и правило «прогон → плитка» ────────────────────────────────────
+if (MUT.swapEcho)
+  plugins.push(
+    swap('swap-no-echo', /tiles\/swap-fabrics\.tsx$/, 'fabricMediaId: id,', 'fabricMediaId: 0,'),
+  );
+if (MUT.logoRole)
+  plugins.push(
+    swap(
+      'logo-as-subject',
+      /tiles\/add-logo\.tsx$/,
+      "[{ mediaId: logo, regions: [], texts: [], role: 'logo' }]",
+      "[{ mediaId: logo, regions: [], texts: [], role: 'subject' }]",
+    ),
+  );
+if (MUT.creativity)
+  plugins.push(
+    swap(
+      'booster-dropped',
+      /tiles\/design-variations\.tsx$/,
+      'creativity: creativityOf(draft),',
+      'creativity: 0,',
+    ),
+  );
+if (MUT.formatDefault)
+  plugins.push(
+    swap(
+      'fabric-format-2-3',
+      /tiles\/fabric-to-image\.tsx$/,
+      "formatSection({ initial: '1:1' })",
+      "formatSection({ initial: '2:3' })",
+    ),
+  );
+if (MUT.c07Validate)
+  plugins.push(
+    swap(
+      'swap-same-picture',
+      /tiles\/swap-fabrics\.tsx$/,
+      'if (design === fabric) {',
+      'if (false) {',
+    ),
+  );
+if (MUT.c07Gate)
+  plugins.push(
+    swap(
+      'logo-always-open',
+      /tiles\/add-logo\.tsx$/,
+      "gate: (band) => workflowOffered(band, 'add_logo'),",
+      'gate: () => ({ available: true }),',
+    ),
+  );
+if (MUT.runWorkflow)
+  plugins.push(
+    swap(
+      'cloth-is-change-color',
+      /registry\/run-workflow\.ts$/,
+      "return cloth ? 'swap_fabrics' : 'change_color';",
+      "return 'change_color';",
+    ),
+  );
+if (MUT.stamp)
+  plugins.push(
+    swap(
+      'stamp-dropped',
+      /design\/bench-kinds\.ts$/,
+      'if (!onPage && stamped) STAMPED_WORKFLOW.set(run, stamped);',
+      '',
     ),
   );
 
@@ -665,7 +769,17 @@ head('F', 'ворота фазы 2: playgroundWorkflows решает, freeformPr
     [
       'список всех двенадцати, freeformPresets нет',
       band({ playgroundWorkflows: ALL, freeformPresets: undefined }),
-      ['change_color', 'remove_background', 'create_edit'],
+      // Плитки этой сборки (C-07 добавил 2, 3, 5, 6, 7); у остальных нет `run` — они приглушены.
+      [
+        'fabric_to_image',
+        'ghost_mannequin',
+        'change_color',
+        'swap_fabrics',
+        'add_logo',
+        'design_variations',
+        'remove_background',
+        'create_edit',
+      ],
     ],
     [
       'список [change_color, remove_background]',
@@ -981,6 +1095,583 @@ head('I', 'форма create_edit: секции AI model и Format только 
   ck(
     !/engine-section|format-section/.test(noModels) && !/needs at least one/.test(noModels),
     'список есть, моделей нет: без AI model/Format, но и без «needs at least one» (текст → картинка)',
+  );
+}
+
+// ─── J · C-07: тела пяти плиток ───────────────────────────────────────────────────────────────
+head('J', 'C-07 wire(): тела плиток 2, 3, 5, 6, 7 целиком');
+const FIVE = [
+  'fabric_to_image',
+  'ghost_mannequin',
+  'swap_fabrics',
+  'add_logo',
+  'design_variations',
+];
+const c07Band = (over = {}) =>
+  band({ playgroundWorkflows: [...FIVE, 'create_edit'], imageModels: MODELS, ...over });
+const fresh7 = (key, over = {}) => ({ ...M.initialDraft(run(key)), ...over });
+const item0 = (mediaId, role = '') => ({ mediaId, regions: [], texts: [], role });
+const OPTIONS0 = {
+  framing: '',
+  angle: '',
+  sceneMode: '',
+  sceneText: '',
+  modelId: 0,
+  productColorwayId: 0,
+  logoSize: '',
+  creativity: 0,
+};
+const SHELF = {
+  id: 7,
+  kind: 'pattern',
+  name: 'Stripe 40',
+  mediaId: 53,
+  media: media(53),
+  colourCode: '',
+  colourHex: '',
+  note: '',
+  repeatMm: 40,
+};
+const cloth = (over) => ({
+  mapHex: '',
+  assetId: 0,
+  name: 'fabric',
+  mediaId: 0,
+  colourCode: '',
+  colourHex: '',
+  words: '',
+  parts: '',
+  kind: '',
+  repeatMm: 0,
+  ...over,
+});
+const recolour = (fabric) => ({
+  colourMaps: [],
+  source: 'photo',
+  code: '',
+  hex: '',
+  words: '',
+  fabricMediaId: fabric.mediaId,
+  fabrics: [fabric],
+});
+const W = {};
+{
+  const b = c07Band();
+  const d = fresh7('fabric_to_image', {
+    images: { image: [media(41), media(42)] },
+    texts: { region: '  the pleated skirt ' },
+  });
+  W.fabric = { d, w: run('fabric_to_image').wire(d, { band: b }) };
+  ck(
+    same(W.fabric.w, {
+      kind: 'freeform',
+      ask: 'the pleated skirt',
+      params: {
+        ...EMPTY_PARAMS,
+        freeform: { preset: 'fabric_extract', items: [item0(41)], options: undefined },
+        image: { model: GPT2, quality: '', aspectRatio: '1:1', background: '' },
+      },
+    }),
+    'fabric_to_image → freeform/fabric_extract: одна картинка, role "", модель по умолчанию, 1:1',
+    show(W.fabric.w),
+  );
+  const old = run('fabric_to_image').wire(d, { band: band({ playgroundWorkflows: FIVE }) });
+  ck(old.params.image === undefined, 'fabric_to_image без моделей: image не уезжает', show(old));
+  const auto = run('fabric_to_image').wire({ ...d, choices: { format: 'auto' } }, { band: b });
+  ck(auto.params.image === undefined, 'fabric_to_image, auto: блока image нет', show(auto));
+}
+{
+  const b = c07Band();
+  const d = fresh7('ghost_mannequin', {
+    images: { image: [media(43)] },
+    texts: { garment: ' the cropped denim jacket ' },
+  });
+  W.ghost = { d, w: run('ghost_mannequin').wire(d, { band: b }) };
+  ck(
+    same(W.ghost.w, {
+      kind: 'freeform',
+      ask: 'the cropped denim jacket',
+      params: {
+        ...EMPTY_PARAMS,
+        freeform: { preset: 'ghost_mannequin', items: [item0(43)], options: undefined },
+        image: { model: GPT2, quality: '', aspectRatio: '2:3', background: '' },
+      },
+    }),
+    'ghost_mannequin → freeform/ghost_mannequin: одна картинка, модель по умолчанию, 2:3',
+    show(W.ghost.w),
+  );
+}
+{
+  const b = c07Band();
+  const d = fresh7('swap_fabrics', {
+    slots: { images: { design: media(51), fabric: media(52) } },
+    texts: { garment: ' the jacket body ' },
+  });
+  W.swap = { d, w: run('swap_fabrics').wire(d, { band: b }) };
+  ck(
+    same(W.swap.w, {
+      kind: 'recolor',
+      ask: 'the jacket body',
+      params: {
+        ...EMPTY_PARAMS,
+        extraInputMediaIds: [51],
+        colour: recolour(cloth({ mediaId: 52 })),
+      },
+    }),
+    'swap_fabrics → recolor: дизайн в extraInputMediaIds, ткань в fabrics[] И эхом в fabricMediaId, цвета нет',
+    show(W.swap.w),
+  );
+  const shelf = c07Band({ assets: [SHELF] });
+  const ds = { ...d, slots: { images: { design: media(51), fabric: media(53) } } };
+  W.swapShelf = { d: ds, w: run('swap_fabrics').wire(ds, { band: shelf }), band: shelf };
+  ck(
+    same(
+      W.swapShelf.w.params.colour,
+      recolour(
+        cloth({ assetId: 7, name: 'Stripe 40', mediaId: 53, kind: 'pattern', repeatMm: 40 }),
+      ),
+    ),
+    'swap_fabrics, ткань с полки: строка полки (asset 7, имя, род, раппорт) и эхо 53',
+    show(W.swapShelf.w.params.colour),
+  );
+  ck(
+    /re-clothed in Stripe 40/.test(run('swap_fabrics').shape(ds, W.swapShelf.w)),
+    'swap_fabrics: строка у кнопки читается с тела — «re-clothed in Stripe 40»',
+    run('swap_fabrics').shape(ds, W.swapShelf.w),
+  );
+}
+{
+  const b = c07Band();
+  const d = fresh7('add_logo', {
+    slots: { images: { garment: media(61), logo: media(62) } },
+    texts: { placement: ' on the chest, left side ' },
+    choices: { logo_size: 'large' },
+  });
+  W.logo = { d, w: run('add_logo').wire(d, { band: b }) };
+  ck(
+    same(W.logo.w, {
+      kind: 'freeform',
+      ask: 'on the chest, left side',
+      params: {
+        ...EMPTY_PARAMS,
+        freeform: {
+          preset: 'add_logo',
+          items: [item0(61, 'subject'), item0(62, 'logo')],
+          options: { ...OPTIONS0, logoSize: 'large' },
+        },
+      },
+    }),
+    'add_logo → freeform/add_logo: subject + logo по порядку, logo_size, без image',
+    show(W.logo.w),
+  );
+  const def0 = run('add_logo').wire(fresh7('add_logo'), { band: b });
+  ck(
+    def0.params.freeform?.options?.logoSize === 'medium',
+    'add_logo: размер по умолчанию — medium',
+    show(def0.params.freeform?.options),
+  );
+}
+{
+  const b = c07Band();
+  const d = fresh7('design_variations', {
+    images: { image: [media(71)] },
+    texts: { variation: ' longer length, relaxed fit ' },
+  });
+  const w0 = run('design_variations').wire(d, { band: b });
+  ck(
+    same(w0, {
+      kind: 'freeform',
+      ask: 'longer length, relaxed fit',
+      params: {
+        ...EMPTY_PARAMS,
+        freeform: { preset: 'variations', items: [item0(71)], options: OPTIONS0 },
+        image: { model: GPT2, quality: 'medium', aspectRatio: '2:3', background: '' },
+      },
+    }),
+    'design_variations, свежий черновик: creativity 0 (Off), GPT Image 2 · medium · 2:3',
+    show(w0),
+  );
+  const dh = {
+    ...d,
+    choices: { ...d.choices, booster: '2', engine: GPT25, 'engine.quality': 'high', format: '3:4' },
+  };
+  W.vary = { d: dh, w: run('design_variations').wire(dh, { band: b }) };
+  ck(
+    W.vary.w.params.freeform?.options?.creativity === 2 &&
+      same(W.vary.w.params.image, {
+        model: GPT25,
+        quality: 'high',
+        aspectRatio: '3:4',
+        background: '',
+      }),
+    'design_variations: Medium → creativity 2, выбранные модель/качество/формат',
+    show(W.vary.w.params),
+  );
+}
+
+// ─── K · C-07: отказы до денег ────────────────────────────────────────────────────────────────
+head('K', 'C-07 validate(): отказы пяти плиток');
+{
+  const b = c07Band();
+  const v = (key, d) => run(key).validate({ ...fresh7(key), ...d }, { band: b });
+  for (const key of ['fabric_to_image', 'ghost_mannequin']) {
+    ck(v(key, {})?.section === 'image', `${key}: нет картинки → отказ на секции image`);
+    ck(
+      v(key, { images: { image: [media(41)] } }) === null,
+      `${key}: картинка без слов проходит (слова необязательны, как у владельца и у ремесла)`,
+    );
+  }
+  const sw = (slots, texts) => v('swap_fabrics', { slots: { images: slots }, texts });
+  ck(sw({})?.section === 'images', 'swap_fabrics: пусто → отказ на секции images');
+  ck(
+    /new fabric/.test(sw({ design: media(51) })?.reason ?? ''),
+    'swap_fabrics: без ткани → «add the new fabric»',
+    show(sw({ design: media(51) })),
+  );
+  ck(
+    /your design/.test(sw({ fabric: media(52) })?.reason ?? ''),
+    'swap_fabrics: без дизайна → «add your design»',
+  );
+  ck(
+    /same picture/.test(sw({ design: media(51), fabric: media(51) })?.reason ?? ''),
+    'swap_fabrics: одна картинка в обоих слотах → отказ (cloth_is_also_a_photograph)',
+    show(sw({ design: media(51), fabric: media(51) })),
+  );
+  ck(
+    sw({ design: media(51), fabric: media(52) }) === null,
+    'swap_fabrics: дизайн + ткань без слов проходят',
+  );
+  const lg = (slots, placement) =>
+    v('add_logo', { slots: { images: slots }, texts: placement ? { placement } : {} });
+  ck(/garment/.test(lg({}, 'chest')?.reason ?? ''), 'add_logo: без вещи → отказ');
+  ck(
+    /logo/.test(lg({ garment: media(61) }, 'chest')?.reason ?? ''),
+    'add_logo: без логотипа → отказ',
+  );
+  ck(
+    /same picture/.test(lg({ garment: media(61), logo: media(61) }, 'chest')?.reason ?? ''),
+    'add_logo: одна картинка в обоих слотах → отказ',
+  );
+  ck(
+    lg({ garment: media(61), logo: media(62) }, '  ')?.section === 'placement',
+    'add_logo: без места → отказ на секции placement',
+  );
+  ck(
+    lg({ garment: media(61), logo: media(62) }, 'chest') === null,
+    'add_logo: заполнено → проходит',
+  );
+  ck(
+    v('design_variations', { texts: { variation: 'x' } })?.section === 'image',
+    'design_variations: нет картинки → отказ на секции image',
+  );
+  ck(
+    v('design_variations', { images: { image: [media(71)] } })?.section === 'variation',
+    'design_variations: нет слов → отказ на секции variation',
+  );
+  ck(
+    v('design_variations', { images: { image: [media(71)] }, texts: { variation: 'x' } }) === null,
+    'design_variations: заполнено → проходит',
+  );
+}
+
+// ─── L · C-07: ворота ─────────────────────────────────────────────────────────────────────────
+head('L', 'C-07 ворота: пять плиток живы ровно по playgroundWorkflows');
+{
+  const absent = band();
+  const live0 = liveKeys(M.gridMarkup(absent));
+  ck(
+    FIVE.every((k) => !live0.has(k)),
+    'списка нет → все пять приглушены',
+    [...live0].join(', '),
+  );
+  for (const k of FIVE) {
+    ck(
+      same(M.workflowOffered(absent, k), { available: false, reason: 'not on this server yet' }) &&
+        M.openWorkflow(k, absent) === null,
+      `${k}: списка нет → «not on this server yet», адрес не открывает`,
+    );
+  }
+  const other = band({ playgroundWorkflows: ['create_edit'] });
+  const liveO = liveKeys(M.gridMarkup(other));
+  ck(
+    FIVE.every((k) => !liveO.has(k)),
+    'ключей нет в списке → все пять приглушены',
+  );
+  ck(M.openWorkflow('add_logo', other) === null, 'add_logo не в списке → адрес не открывает');
+  const on = band({ playgroundWorkflows: FIVE });
+  const liveOn = liveKeys(M.gridMarkup(on));
+  ck(
+    FIVE.every((k) => liveOn.has(k)) && !liveOn.has('create_edit'),
+    'список пяти → живы ровно они (create_edit не в списке — приглушён)',
+    [...liveOn].join(', '),
+  );
+  ck(
+    FIVE.every((k) => M.openWorkflow(k, on)?.key === k),
+    'список пяти → каждая открывается',
+  );
+  const half = band({ playgroundWorkflows: ['swap_fabrics'] });
+  const liveH = liveKeys(M.gridMarkup(half));
+  ck(
+    liveH.has('swap_fabrics') && !liveH.has('add_logo'),
+    'список [swap_fabrics] → жив только он',
+    [...liveH].join(', '),
+  );
+}
+
+// ─── M · C-07: прогон → плитка ────────────────────────────────────────────────────────────────
+head('M', 'C-07 прогон → плитка: правило сервера, штамп заглушки, матчеры');
+{
+  const ff = (preset) => ({ kind: 'freeform', params: { freeform: { preset } } });
+  const rows = [
+    [ff('fabric_extract'), 'fabric_to_image'],
+    [ff('ghost_mannequin'), 'ghost_mannequin'],
+    [ff('add_logo'), 'add_logo'],
+    [ff('variations'), 'design_variations'],
+    [ff('tryon'), 'virtual_try_on'],
+    [ff('retouch'), 'retouch_zone'],
+    [ff('free'), 'create_edit'],
+    [ff('add_hardware'), 'create_edit'],
+    [{ kind: 'recolor', params: { colour: { fabrics: [{ mediaId: 52 }] } } }, 'swap_fabrics'],
+    [
+      { kind: 'recolor', params: { colour: { fabrics: [{ mediaId: 0 }], code: 'x' } } },
+      'change_color',
+    ],
+    [{ kind: 'recolor', params: {} }, 'change_color'],
+  ];
+  for (const [r, want] of rows) {
+    const got = M.workflowOfRun(r);
+    ck(
+      got === want,
+      `${r.kind}/${r.params.freeform?.preset ?? (r.params.colour ? 'colour' : '')} → ${want}`,
+      got,
+    );
+  }
+
+  const stubBand = band({
+    runs: [],
+    outputs: [
+      {
+        picture: { id: 901, runId: 555 },
+        runId: 555,
+        runKind: 'freeform',
+        runWorkflow: 'fabric_to_image',
+      },
+      { picture: { id: 903, runId: 557 }, runId: 557, runKind: 'freeform', runWorkflow: '' },
+      {
+        picture: { id: 902, runId: 556 },
+        runId: 556,
+        runKind: 'recolor',
+        runWorkflow: 'swap_fabrics',
+      },
+      {
+        picture: { id: 904, runId: 558 },
+        runId: 558,
+        runKind: 'recolor',
+        runWorkflow: 'change_color',
+      },
+    ],
+  });
+  const pg = M.cardOutputRows(stubBand, 'playground') ?? [];
+  const om = M.cardOutputRows(stubBand, 'onmodel') ?? [];
+  const byRun = (list, id) => list.find((r) => r.run.id === id)?.run;
+  const s555 = byRun(pg, 555);
+  const s557 = byRun(pg, 557);
+  const s556 = byRun(om, 556);
+  const s558 = byRun(om, 558);
+  ck(
+    !!s555 && s555.params === undefined && M.workflowOfRun(s555) === 'fabric_to_image',
+    'заглушка вне страницы со штампом fabric_to_image → fabric_to_image',
+    show(s555 && M.workflowOfRun(s555)),
+  );
+  ck(
+    !!s557 && M.workflowOfRun(s557) === 'create_edit',
+    'заглушка без штампа → create_edit (как в фазе 1)',
+  );
+  ck(
+    !!s556 && M.workflowOfRun(s556) === 'swap_fabrics',
+    'заглушка recolor со штампом swap_fabrics → swap_fabrics',
+  );
+  ck(
+    !!s558 && M.workflowOfRun(s558) === 'change_color',
+    'заглушка recolor со штампом change_color → change_color',
+  );
+  ck(
+    !!s555 && M.runWorkflowWord(s555) === 'fabric to image',
+    'подпись результата на сетке: «fabric to image»',
+    s555 && M.runWorkflowWord(s555),
+  );
+
+  const loaded555 = {
+    id: 555,
+    kind: 'freeform',
+    params: { freeform: { preset: 'fabric_extract' } },
+  };
+  const m = (key) => run(key).results.match;
+  ck(
+    !!s555 && m('fabric_to_image')(s555) && m('fabric_to_image')(loaded555),
+    'fabric_to_image: заглушка и загруженный прогон — оба свои (картинка не прыгает при листании)',
+  );
+  ck(
+    !!s555 && !m('create_edit')(s555) && !m('create_edit')(loaded555),
+    'create_edit больше не забирает картинки fabric_extract',
+  );
+  const swapRun = { id: 556, kind: 'recolor', params: { colour: { fabrics: [{ mediaId: 52 }] } } };
+  ck(
+    m('swap_fabrics')(swapRun) && !m('change_color')(swapRun) && !!s556 && m('swap_fabrics')(s556),
+    'swap_fabrics забирает recolor с тканью, change_color — нет',
+  );
+  const plain = { id: 558, kind: 'recolor', params: { colour: { code: '19-4052 TCX' } } };
+  ck(m('change_color')(plain) && !m('swap_fabrics')(plain), 'recolor с Pantone — change_color');
+  for (const [key, preset] of [
+    ['ghost_mannequin', 'ghost_mannequin'],
+    ['add_logo', 'add_logo'],
+    ['design_variations', 'variations'],
+  ]) {
+    const r = ff(preset);
+    const owners = FIVE.concat(['create_edit', 'change_color']).filter((k) => m(k)(r));
+    ck(same(owners, [key]), `freeform/${preset} — ровно одна плитка: ${key}`, show(owners));
+  }
+  ck(
+    same(run('swap_fabrics').results.reps, ['onmodel']) && run('swap_fabrics').results.selectable,
+    'swap_fabrics: результаты — представление onmodel, с отметкой select',
+  );
+}
+
+// ─── N · C-07: разметка форм ──────────────────────────────────────────────────────────────────
+head('N', 'C-07 разметка форм пяти плиток');
+{
+  const b = c07Band();
+  const noModels = band({ playgroundWorkflows: FIVE });
+  const values = (markup) => [...markup.matchAll(/data-fold-value="">([^<]*)</g)].map((x) => x[1]);
+  const has = (markup, re) => re.test(markup);
+
+  const f = M.panelMarkup(b, 'fabric_to_image');
+  ck(
+    has(f, /Reference image/) && has(f, />required</i) && has(f, /Fabric pattern to extract from/),
+    'fabric_to_image: Reference image (REQUIRED) и «Fabric pattern to extract from»',
+  );
+  ck(has(f, /placeholder="The pleated skirt"/), 'fabric_to_image: плейсхолдер владельца');
+  ck(
+    has(f, /fabric_to_image\.format-section/) &&
+      values(f).includes('1:1') &&
+      !has(f, /engine-section/),
+    'fabric_to_image: Format 1:1 в шапке, без пикера модели (D6)',
+    show(values(f)),
+  );
+  const g = M.panelMarkup(b, 'ghost_mannequin');
+  ck(
+    has(g, /Image with your garment/) &&
+      has(g, /Garment to recreate/) &&
+      has(g, /placeholder="The cropped denim jacket"/) &&
+      values(g).includes('2:3') &&
+      !has(g, /engine-section/),
+    'ghost_mannequin: «Image with your garment», «Garment to recreate», Format 2:3, без пикера',
+    show(values(g)),
+  );
+  for (const key of ['fabric_to_image', 'ghost_mannequin', 'design_variations']) {
+    const mk = M.panelMarkup(noModels, key);
+    ck(
+      mk.length > 0 && !has(mk, /format-section|engine-section/),
+      `${key}: сервер без моделей — ни Format, ни AI model`,
+    );
+  }
+  const s5 = M.panelMarkup(b, 'swap_fabrics');
+  ck(
+    has(s5, /data-image-slot="design"/) &&
+      has(s5, /Your design/) &&
+      has(s5, /data-image-slot="fabric"/) &&
+      has(s5, /New fabric/) &&
+      has(s5, /Garment to swap fabric on/) &&
+      !has(s5, /format-section|engine-section/),
+    'swap_fabrics: два слота «Your design» / «New fabric», промпт, без Format и модели',
+  );
+  const l = M.panelMarkup(b, 'add_logo');
+  ck(
+    has(l, /Your garment/) &&
+      has(l, /Your logo \(PNG\)/) &&
+      has(l, /data-option-row="Logo size"/) &&
+      has(l, /Logo placement/) &&
+      has(l, /placeholder="On the chest, left sleeve, back, hip pocket…"/),
+    'add_logo: слоты, строка «Logo size», «Logo placement» с плейсхолдером владельца',
+  );
+  ck(
+    l.indexOf('data-option-row="Logo size"') < l.indexOf('Logo placement'),
+    'add_logo: «Logo size» стоит между картинками и местом, как на 9.png',
+  );
+  const v = M.panelMarkup(b, 'design_variations');
+  ck(
+    has(v, /Describe the variation/) &&
+      has(v, /placeholder="Same jacket, cropped shorter, wider sleeves"/) &&
+      has(v, /data-slider="Creative booster"/),
+    'design_variations: «Describe the variation» и слайдер Creative booster',
+  );
+  ck(
+    same(values(v), ['Off', 'GPT Image 2 · medium', '2:3']),
+    'design_variations: шапки — «Off», «GPT Image 2 · medium», «2:3»',
+    show(values(v)),
+  );
+  const v2 = M.panelMarkup(b, 'design_variations', {
+    ...fresh7('design_variations'),
+    choices: { ...fresh7('design_variations').choices, booster: '3' },
+  });
+  ck(values(v2)[0] === 'High', 'design_variations: шаг 3 → «High» в шапке', show(values(v2)));
+}
+
+// ─── O · C-07: рекол ──────────────────────────────────────────────────────────────────────────
+head('O', 'C-07 рекол: тело → черновик → то же тело');
+{
+  const b = c07Band();
+  const all = new Map([41, 43, 51, 52, 53, 61, 62, 71].map((id) => [id, media(id)]));
+  const trip = (key, entry, bb = b) => {
+    const past = { kind: entry.w.kind, ask: entry.w.ask, params: entry.w.params };
+    const back = run(key).recall(past, all);
+    const again = run(key).wire(back.draft, { band: bb });
+    ck(
+      same(again, entry.w) && back.said.length === 0 && back.lost === 0,
+      `${key}: рекол собирает то же тело`,
+      show({ again, said: back.said }),
+    );
+  };
+  trip('fabric_to_image', W.fabric);
+  trip('ghost_mannequin', W.ghost);
+  trip('swap_fabrics', W.swap);
+  trip('swap_fabrics', W.swapShelf, W.swapShelf.band);
+  trip('add_logo', W.logo);
+  trip('design_variations', W.vary);
+
+  const bare = run('fabric_to_image').recall(
+    {
+      kind: 'freeform',
+      ask: '',
+      params: { freeform: { preset: 'fabric_extract', items: [{ mediaId: 41 }] } },
+    },
+    all,
+  );
+  ck(
+    bare.draft.choices.format === 'auto',
+    'fabric_to_image: прогон без image → формат auto',
+    show(bare.draft.choices),
+  );
+  const multi = run('swap_fabrics').recall(
+    {
+      kind: 'recolor',
+      ask: '',
+      params: {
+        extraInputMediaIds: [51, 54],
+        colour: { code: '19-4052 TCX', fabrics: [{ mediaId: 52 }], fabricMediaId: 52 },
+      },
+    },
+    all,
+  );
+  ck(
+    multi.said.some((x) => /1 more photograph/.test(x)) && multi.said.some((x) => /colour/.test(x)),
+    'swap_fabrics: лишние фото и цвет прошлого прогона названы словами',
+    show(multi.said),
+  );
+  ck(
+    M.workflowOfRun({ kind: 'recolor', params: { colour: { fabrics: [{ mediaId: 52 }] } } }) ===
+      'swap_fabrics',
+    'рекол recolor с тканью открывает swap_fabrics',
   );
 }
 

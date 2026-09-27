@@ -384,6 +384,18 @@ export function runIsOnPage(band: GetDesignBandResponse, run?: common_DesignRun 
   return (band.runs ?? []).some((r) => r.id === id);
 }
 
+/**
+ * THE PLAYGROUND WORKFLOW THE SERVER STAMPED ON AN OFF-PAGE OUTPUT (`DesignCardOutput.run_workflow`,
+ * PLAYGROUND C-07). A stub run carries no params, so a freeform stub cannot say its preset and a
+ * recolour stub cannot say whether it re-clothed; the stamp can. Kept BESIDE the stub, not in it:
+ * written into `params` it would be read as frozen parameters the run never had (recall, rerun).
+ * `''` for a run on the page (its own params answer) and for a server older than the field.
+ */
+const STAMPED_WORKFLOW = new WeakMap<common_DesignRun, string>();
+
+export const stampedWorkflowOf = (run: object): string =>
+  STAMPED_WORKFLOW.get(run as common_DesignRun) ?? '';
+
 export function cardOutputRows(
   band: GetDesignBandResponse,
   rep: Representation,
@@ -409,13 +421,16 @@ export function cardOutputRows(
     if (mine !== rep) continue;
 
     const runId = output.runId ?? 0;
-    const run: common_DesignRun = (runId > 0 ? runOfPicture(band, picture) : null) ?? {
+    const onPage = runId > 0 ? runOfPicture(band, picture) : null;
+    const run: common_DesignRun = onPage ?? {
       ...RUN_NOT_STATED,
       id: runId,
       kind: runKind,
       rrev: output.runRrev,
       colorwayId: output.runColorwayId,
     };
+    const stamped = (output.runWorkflow ?? '').trim();
+    if (!onPage && stamped) STAMPED_WORKFLOW.set(run, stamped);
 
     const key = runId > 0 ? `r${runId}` : `p${pictureId}`;
     const group = groups.get(key);
@@ -676,7 +691,7 @@ export function slotRunRrev(
   // возможный. Он по-прежнему врёт нулём на плите старше страницы, и это ровно то поведение,
   // которое у такого сервера было вчера; заменить его нечем, и делать вид, что заменили, нельзя.
   const picture = slot?.picture;
-  return picture ? (runOfPicture(band, picture)?.rrev ?? 0) : 0;
+  return picture ? runOfPicture(band, picture)?.rrev ?? 0 : 0;
 }
 
 /**
