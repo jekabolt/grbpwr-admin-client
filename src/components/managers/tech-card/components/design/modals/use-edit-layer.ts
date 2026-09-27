@@ -112,6 +112,11 @@ export function useEditLayerWrites(techCardId: number) {
         layerId: input.layerId,
         expectedRev: input.expectedRev,
         mediaId: input.mediaId,
+        // O-53's «overwrite» and gesture key are not sent from here: this verb files the edit
+        // BESIDE its base, as before. `undefined` never reaches the wire (JSON.stringify drops
+        // it), and that is load-bearing — a server older than these fields answers 400 to either.
+        replacePictureId: undefined,
+        clientRequestId: undefined,
       }),
     onSuccess: invalidate,
   });

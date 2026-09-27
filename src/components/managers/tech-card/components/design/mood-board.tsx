@@ -301,6 +301,7 @@ function pictureOfMedia(full: common_MediaFull): common_DesignPicture {
     selected: undefined,
     colorwayId: undefined,
     displayOnly: undefined,
+    replacedBy: undefined,
   };
 }
 
