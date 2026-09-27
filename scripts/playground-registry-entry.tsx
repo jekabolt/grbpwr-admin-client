@@ -124,6 +124,16 @@ export { ANGLE_OPTIONS, FRAMING_OPTIONS, modelPhotosOf, productColorwaysOf, prod
 
 // C-12 · where «run that again» sends a 3D run (STEP 5 on an old server, tile 12 on a new one).
 export { recallTargetKind } from 'components/managers/tech-card/components/design/history-recall';
+// G-02 client fix · the per-workflow window caption, the recall's AI-model line, the retouch source.
+export { workflowOutputsHorizon } from 'components/managers/tech-card/components/design/bench-kinds';
+export { recallEngineNote } from 'components/managers/tech-card/components/design/playground/registry/common';
+export { retouchSourceId } from 'components/managers/tech-card/components/design/playground/registry/run-workflow';
+export {
+  RETOUCH_PRICE,
+  RETOUCH_MASKING_KEY,
+  RETOUCH_SOURCE_KEY,
+} from 'components/managers/tech-card/components/design/playground/registry/tiles/retouch-zone';
+export { REUSE_LABEL } from 'components/managers/tech-card/components/design/playground/fields';
 /** THE CHAIN rail as the person sees it (C-10): its cells and its «N of M steps» counter. */
 export function railMarkup(ctx: ChainCtx): string {
   return renderToStaticMarkup(<ChainRail ctx={ctx} onStepChange={() => {}} />);

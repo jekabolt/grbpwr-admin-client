@@ -49,7 +49,20 @@
 //   --mutate-late-lost       поздний успех теряется                               → J
 //   --mutate-own-results     плитка 12 снова под итогами комнаты (C-10)            → K
 //   --mutate-pool-caption    «Only the newest …» снова и у Swap Fabrics (C-12, m-8)  → L
+//   --mutate-workflow-caption подпись окна плитки снова по колорвею 0 (G-02 m-1)   → L
+//   --mutate-mask-focus      маска закрывается без возврата фокуса (G-02 m-4)     → M
+//   --mutate-source-opens    выбор картинки в слоте плитки 10 не открывает маску  → M
+//   --mutate-pin-room        под плиткой 10 приколоты все прогоны комнаты         → M
+//   --mutate-retouch-door    рекол ретуши жив и без её картинки (Codex 5)         → M
+//   --mutate-retouch-recall  рекол ретуши не открывает маску (Codex 5)            → M
+//   --mutate-recall-gate     рекол не спрашивает ворота плитки (Codex 6)          → M
 //
+//   L · (G-02 m-1) подпись окна: комнаты — на сетке и у плитки 10; своя (поле 31) — у плитки; нет —
+//       у пула колорвеев и у старого сервера;
+//   M · (G-02) Retouch a Zone: слот картинки на панели открывает маску (M-1), слова владельца и
+//       строка цены (m-3); фокус после маски — на угол mask, и из просмотрщика (m-4); под плиткой
+//       10 не приколоты чужие прогоны (Codex 8); рекол ретуши открывает маску на её картинке, а без
+//       картинки погашен (Codex 5); рекол в плитку, которую сервер не открывает, — отказ (Codex 6).
 //   K · (C-10) Image to 3D: под открытой плиткой — блок 3D-моделей карточки, а не итоги комнаты;
 //       строки опций — только объявленные сервером; текстура off гасит материалы со словами;
 //       Detailed — в шапке и в цене GENERATE; история называет строки «3D»; |→ — итоги комнаты.
@@ -99,6 +112,13 @@ const KNOWN = new Set([
   '--mutate-late-lost',
   '--mutate-own-results',
   '--mutate-pool-caption',
+  '--mutate-workflow-caption',
+  '--mutate-mask-focus',
+  '--mutate-source-opens',
+  '--mutate-pin-room',
+  '--mutate-retouch-door',
+  '--mutate-retouch-recall',
+  '--mutate-recall-gate',
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN.has(a));
 if (stray) dieNotRun(`неизвестный флаг мутации ${stray}; известные: ${[...KNOWN].join(', ')}`);
@@ -321,8 +341,58 @@ if (on('--mutate-pool-caption'))
   patch(
     'pool-caption-back',
     /playground\/results\.tsx$/,
-    '() => (def && COLOURWAY_POOL.has(def.key) ? null : outputsHorizon(band, 0)),',
-    "() => (def?.key === 'change_color' ? null : outputsHorizon(band, 0)),",
+    'if (!def || COLOURWAY_POOL.has(def.key)) return null;',
+    "if (!def || def.key === 'change_color') return null;",
+  );
+
+if (on('--mutate-workflow-caption'))
+  patch(
+    'workflow-caption-room',
+    /playground\/results\.tsx$/,
+    'return workflowOutputsHorizon(band, def.key);',
+    'return outputsHorizon(band, 0);',
+  );
+if (on('--mutate-mask-focus'))
+  patch(
+    'mask-no-return',
+    /playground\/results\.tsx$/,
+    '          onCloseAutoFocus={maskFocus.onCloseAutoFocus}\n',
+    '',
+  );
+if (on('--mutate-source-opens'))
+  patch(
+    'source-stays-shut',
+    /mask\/retouch-source\.tsx$/,
+    'flags: { ...d.flags, [RETOUCH_MASKING_KEY]: !disabled },',
+    'flags: { ...d.flags, [RETOUCH_MASKING_KEY]: false },',
+  );
+if (on('--mutate-pin-room'))
+  patch(
+    'pin-the-room',
+    /playground\/results\.tsx$/,
+    'const pinMatch = def?.run?.results.match ?? inPlaygroundRoom;',
+    'const pinMatch = match;',
+  );
+if (on('--mutate-retouch-door'))
+  patch(
+    'retouch-door-always',
+    /design\/history-recall\.tsx$/,
+    '? retouchSource > 0 &&',
+    '? true || retouchSource > 0 &&',
+  );
+if (on('--mutate-retouch-recall'))
+  patch(
+    'retouch-recall-shut',
+    /tiles\/retouch-zone\.tsx$/,
+    'flags: { [RETOUCH_MASKING_KEY]: !!found },',
+    'flags: { [RETOUCH_MASKING_KEY]: false },',
+  );
+if (on('--mutate-recall-gate'))
+  patch(
+    'recall-no-gate',
+    /playground\/recall\.tsx$/,
+    'if (!workflowOpenable(def, band)) {',
+    'if (false) {',
   );
 
 // ─── заглушенная сеть ──────────────────────────────────────────────────────────────────────────
@@ -523,6 +593,13 @@ const tileButton = (key) =>
 const generate = () =>
   page.locator('[data-playground-open] button', { hasText: /^(GENERATE|starting…)$/ });
 const backArrow = () => page.locator('[data-workflow-back]');
+/** Back to the grid when a workflow is open (|→); a no-op on the grid. */
+const leaveTo = async () => {
+  if ((await backArrow().count()) === 0) return;
+  await backArrow().click();
+  await page.waitForSelector('[data-workflow-tile]');
+  await settle();
+};
 const calls = () =>
   page.evaluate(() =>
     window.__pgCalls.filter((c) => c.method === 'StartDesignRun').map((c) => c.req.clientRequestId),
@@ -713,7 +790,7 @@ try {
     await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80)),
   );
   const reuse = page.locator('[data-fold-section="change_color.photos"] button', {
-    hasText: /^reuse/,
+    hasText: /^Reuse/,
   });
   await reuse.focus();
   await page.keyboard.press('Enter');
@@ -729,7 +806,7 @@ try {
     await page.evaluate(
       () =>
         document.activeElement?.tagName === 'BUTTON' &&
-        /^reuse/.test((document.activeElement.textContent ?? '').trim()),
+        /^Reuse/.test((document.activeElement.textContent ?? '').trim()),
     ),
     'галерея «reuse» закрыта — фокус снова на двери «reuse»',
     await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80)),
@@ -742,7 +819,7 @@ try {
   await page.waitForSelector('[data-playground-open="create_edit"]');
   await settle();
   const refsReuse = page.locator('[data-fold-section="create_edit.refs"] button', {
-    hasText: /^reuse/,
+    hasText: /^Reuse/,
   });
   await refsReuse.focus();
   await page.keyboard.press('Enter');
@@ -1250,7 +1327,12 @@ try {
     'Detailed — «detailed» в шапке',
     await fold.textContent(),
   );
-  ck((await open3.textContent()).includes('about $1.40'), 'и «about $1.40» у GENERATE');
+  // G-02 Codex 3: the server reserves max(estimate, the configured route) — no figure is shown.
+  ck(
+    !(await open3.textContent()).includes('$') &&
+      (await open3.textContent()).includes('1 model · priced by the server when the run starts'),
+    'у GENERATE ни одной суммы: «1 model · priced by the server when the run starts»',
+  );
   ck(
     (await generate().isDisabled()) &&
       (await open3.textContent()).includes('add the picture to build the model from'),
@@ -1272,7 +1354,10 @@ try {
   ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
 }
 
-head('L', 'итоги: «Only the newest …» — не у перекраса, свопа тканей и 3D (G-02 m-8, C-12)');
+head(
+  'L',
+  'итоги: подпись окна — комнаты на сетке и у плитки 10, своя у плитки, нет у пула колорвеев (G-02 m-1)',
+);
 try {
   const out = (id, runId, kind, stamp) => ({
     picture: {
@@ -1286,24 +1371,48 @@ try {
     runKind: kind,
     runWorkflow: stamp,
   });
+  const OUTS = [
+    out(821, 71, 'freeform', 'create_edit'),
+    out(822, 72, 'recolor', 'swap_fabrics'),
+    out(823, 73, 'recolor', 'change_color'),
+    out(824, 74, 'freeform', 'virtual_try_on'),
+  ];
+  const WFS = [
+    'change_color',
+    'swap_fabrics',
+    'create_edit',
+    'virtual_try_on',
+    'retouch_zone',
+    'image_to_3d',
+  ];
+  // Four pictures of colourway 0 arrived; the server holds 500 of them, 200 of Create or edit's,
+  // and every Try-On it has (1 of 1) — each tile has its own window of 60 (band 31).
   await mount({
     ...EMPTY_BAND,
-    playgroundWorkflows: ['change_color', 'swap_fabrics', 'create_edit', 'image_to_3d'],
+    playgroundWorkflows: WFS,
     threedOptions: [],
-    // Three pictures of colourway 0 arrived; the server says it holds 500: a window was cut.
-    outputs: [
-      out(821, 71, 'freeform', 'create_edit'),
-      out(822, 72, 'recolor', 'swap_fabrics'),
-      out(823, 73, 'recolor', 'change_color'),
-    ],
+    outputs: OUTS,
     outputsTotalByColorway: { 0: 500 },
+    outputsTotalByWorkflow: {
+      create_edit: 200,
+      virtual_try_on: 1,
+      change_color: 10,
+      swap_fabrics: 50,
+      image_to_3d: 9,
+    },
   });
   // The rendered words only: the stand's bundle is an inline <script> in the same body.
-  const captioned = async () =>
-    (await page.evaluate(() => document.getElementById('root')?.innerText ?? '')).includes(
-      'Only the newest',
-    );
-  ck(await captioned(), 'на сетке подпись окна есть (окно комнаты)');
+  const caption = async () =>
+    page.evaluate(() => {
+      const el = document.querySelector('[data-pg-horizon]');
+      return el ? `${el.getAttribute('data-pg-horizon')}|${el.textContent}` : '';
+    });
+  ck(
+    (await caption()) ===
+      'room|Only the newest 4 of this card’s 500 pictures without a colourway are sent here; older ones stay in the history below.',
+    'сетка: подпись окна комнаты (колорвей 0)',
+    await caption(),
+  );
   const openTile = async (key) => {
     await tileButton(key).click();
     await page.waitForSelector(`[data-playground-open="${key}"]`);
@@ -1315,26 +1424,309 @@ try {
     await settle();
   };
   await openTile('create_edit');
-  ck(await captioned(), 'Create or edit: подпись есть');
+  ck(
+    (await caption()) ===
+      'workflow|Only the newest 1 of this workflow’s 200 pictures are sent here; older ones stay in the history below.',
+    'Create or edit: своя подпись — 1 из 200 этой плитки, не 4 из 500 комнаты',
+    await caption(),
+  );
+  await leave();
+  await openTile('virtual_try_on');
+  ck(
+    (await caption()) === '',
+    'Virtual Try-On: всё пришло (1 из 1) — подписи нет',
+    await caption(),
+  );
+  await leave();
+  await openTile('retouch_zone');
+  ck(
+    (await caption()).startsWith('room|Only the newest 4 of this card’s 500'),
+    'Retouch a Zone (картинки комнаты): подпись окна комнаты',
+    await caption(),
+  );
   await leave();
   await openTile('swap_fabrics');
   ck(
-    (await page.locator('[data-pg-output="822"]').count()) === 1 && !(await captioned()),
-    'Swap Fabrics: заглушка со штампом на месте, подписи окна нет',
+    (await page.locator('[data-pg-output="822"]').count()) === 1 && (await caption()) === '',
+    'Swap Fabrics: заглушка со штампом на месте, подписи окна нет (пул колорвеев)',
+    await caption(),
   );
   await leave();
   await openTile('change_color');
   ck(
     (await page.locator('[data-pg-output="823"]').count()) === 1 &&
       (await page.locator('[data-pg-output="822"]').count()) === 0 &&
-      !(await captioned()),
+      (await caption()) === '',
     'Change a Color: только своя заглушка, подписи окна нет',
+    await caption(),
   );
   await leave();
   await openTile('image_to_3d');
   ck(
-    !(await captioned()) && (await page.locator('[data-outputs-horizon]').count()) === 0,
+    (await caption()) === '' && (await page.locator('[data-outputs-horizon]').count()) === 0,
     'Image to 3D: ни подписи окна, ни «newest N of M»',
+  );
+
+  // A server older than band 31: no per-tile count — no caption under a tile (never the room's).
+  await mount({
+    ...EMPTY_BAND,
+    playgroundWorkflows: WFS,
+    threedOptions: [],
+    outputs: OUTS,
+    outputsTotalByColorway: { 0: 500 },
+  });
+  ck((await caption()).startsWith('room|'), 'старый сервер: на сетке подпись комнаты есть');
+  await openTile('create_edit');
+  ck(
+    (await caption()) === '',
+    'старый сервер (поля 31 нет): под Create or edit подписи нет',
+    await caption(),
+  );
+} catch (e) {
+  ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);
+}
+
+head(
+  'M',
+  'Retouch a Zone: слот картинки на панели, фокус после маски, рекол ретуши, ворота рекола (G-02)',
+);
+try {
+  const media = (id) => ({
+    id,
+    media: {
+      thumbnail: { mediaUrl: `http://probe.local/${id}.png` },
+      fullSize: { mediaUrl: `http://probe.local/${id}-full.png`, width: 800, height: 1000 },
+    },
+  });
+  const pic = (id) => ({ id, ordinal: 1, media: media(id) });
+  const RETOUCH = (id, refs) => ({
+    id,
+    kind: 'freeform',
+    status: 'done',
+    ask: '',
+    params: {
+      freeform: {
+        preset: 'retouch',
+        items: [{ mediaId: 800, regions: [], texts: ['remove the stain'], role: '' }],
+      },
+    },
+    inputs: { refs },
+    pictures: [pic(id * 10)],
+  });
+  const WFS = ['retouch_zone', 'create_edit', 'change_color'];
+  const band = {
+    ...EMPTY_BAND,
+    playgroundWorkflows: WFS,
+    runs: [
+      RETOUCH(90, [{ mediaId: 800, deleted: false, media: media(800) }]),
+      RETOUCH(91, []),
+      {
+        id: 80,
+        kind: 'freeform',
+        status: 'done',
+        ask: 'a coat',
+        params: { freeform: { preset: 'free', items: [] } },
+        pictures: [pic(800)],
+      },
+      { id: 70, kind: 'render', status: 'done', pictures: [pic(700), pic(701)] },
+    ],
+  };
+  await mount(band);
+  const active = () => page.evaluate(() => document.activeElement?.outerHTML.slice(0, 120) ?? '');
+  const escapeEditor = async () => {
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('[data-mask-editor]', { state: 'detached' });
+    await settle(150);
+  };
+
+  // m-4 · the result tile's `mask` corner → the editor → Escape: focus back on that corner.
+  const corner = page.locator('[data-pg-output="800"] button[aria-label^="mask picture"]');
+  await corner.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-mask-editor="800"]');
+  await escapeEditor();
+  ck(
+    await page.evaluate(
+      () =>
+        (document.activeElement?.getAttribute('aria-label') ?? '').startsWith('mask picture') &&
+        !!document.activeElement?.closest('[data-pg-output="800"]'),
+    ),
+    'угол mask → маска → Escape: фокус снова на углу mask',
+    await active(),
+  );
+  // m-4 · the viewer's Mask (the viewer closes first, its button is gone): focus on the corner.
+  await page.locator('[data-pg-output="800"] button[aria-label^="zoom"]').click();
+  const viewerMask = page.locator('[role="dialog"] button', { hasText: /^mask$/ });
+  await viewerMask.waitFor();
+  await viewerMask.click();
+  await page.waitForSelector('[data-mask-editor="800"]');
+  await escapeEditor();
+  ck(
+    await page.evaluate(
+      () =>
+        (document.activeElement?.getAttribute('aria-label') ?? '').startsWith('mask picture') &&
+        !!document.activeElement?.closest('[data-pg-output="800"]'),
+    ),
+    'зум → Mask в просмотрщике → Escape: фокус на углу mask этой картинки, не на <body>',
+    await active(),
+  );
+
+  // M-1 · tile 10's own picture slot: + and Reuse, and the pick opens the same editor.
+  await tileButton('retouch_zone').click();
+  await page.waitForSelector('[data-playground-open="retouch_zone"]');
+  await settle();
+  const open10 = page.locator('[data-playground-open="retouch_zone"]');
+  const text10 = (await open10.textContent()) ?? '';
+  ck(
+    text10.includes('Open or upload any picture') &&
+      text10.includes('press Mask, paint the zone to change and describe what should be there') &&
+      text10.includes('The retouch is generated in place.') &&
+      text10.includes('The rectangle around your zone may change.') &&
+      !/credit/i.test(text10),
+    'панель плитки 10: слова владельца (12.png), честная строка, без «credit»',
+    text10.slice(0, 200),
+  );
+  ck(
+    text10.includes('priced by the server when the run starts') && !text10.includes('$'),
+    'панель плитки 10: строка цены — «priced by the server», без выдуманной суммы (m-3)',
+  );
+  const slot = open10.locator('[data-retouch-source]');
+  ck(
+    (await slot.count()) === 1 &&
+      (await slot.locator('button', { hasText: /^Reuse$/ }).count()) === 1 &&
+      (await open10.locator('button', { hasText: /^(GENERATE|starting…)$/ }).count()) === 0,
+    'панель плитки 10: ОДИН слот (+ и Reuse), GENERATE на панели нет',
+  );
+  await slot.locator('button', { hasText: /^Reuse$/ }).click();
+  await page.waitForSelector('[data-reuse-source="card"]:not([disabled])');
+  await page.locator('[data-reuse-source="card"]').click();
+  await page.waitForSelector('[data-card-picker]');
+  await page.locator('[data-card-picker] [data-card-picture="700"] button').first().click();
+  await page.locator('[data-card-picker-foot] button', { hasText: 'done' }).click();
+  const opened = await page
+    .waitForSelector('[data-mask-editor="700"]', { timeout: 3000 })
+    .then(() => true)
+    .catch(() => false);
+  ck(opened, 'Reuse → картинка карточки → маска открыта на ней (тот же редактор)');
+  if (opened) {
+    ck(
+      (await page
+        .locator('[data-mask-editor] button', { hasText: /^(GENERATE|starting…)$/ })
+        .count()) === 1,
+      'в редакторе — ровно один GENERATE',
+    );
+    await escapeEditor();
+  }
+  ck(
+    (await open10.locator('[data-retouch-source="700"]').count()) === 1,
+    'после маски картинка осталась в слоте',
+  );
+  ck(
+    await page.evaluate(
+      () =>
+        (document.activeElement?.getAttribute('aria-label') ?? '').startsWith(
+          'mask this picture',
+        ) && !!document.activeElement?.closest('[data-retouch-source]'),
+    ),
+    'редактор закрыт — фокус на углу mask слота (открыватель — галерея — ушёл)',
+    await active(),
+  );
+  await open10.locator('[data-retouch-source] button[aria-label^="mask this picture"]').click();
+  ck(
+    await page
+      .waitForSelector('[data-mask-editor="700"]', { timeout: 3000 })
+      .then(() => true)
+      .catch(() => false),
+    'угол mask слота открывает маску снова',
+  );
+  await escapeEditor();
+
+  // Codex 8 · under tile 10 nothing of another workflow is pinned (a live Create or edit run).
+  await leaveTo();
+  await mount({
+    ...band,
+    runs: [
+      {
+        id: 95,
+        kind: 'freeform',
+        status: 'pending',
+        ask: 'x',
+        params: { freeform: { preset: 'free', items: [] } },
+        pictures: [],
+      },
+      ...band.runs,
+    ],
+  });
+  await tileButton('retouch_zone').click();
+  await page.waitForSelector('[data-playground-open="retouch_zone"]');
+  await settle();
+  ck(
+    (await page.locator('[data-pg-pinned="95"]').count()) === 0,
+    'под плиткой 10 живой прогон Create or edit не приколот',
+  );
+  await leaveTo();
+
+  // Codex 5 · a retouch's recall: the door is live only with its picture; it opens the mask on it.
+  await mount(band);
+  await tileButton('retouch_zone').click();
+  await page.waitForSelector('[data-playground-open="retouch_zone"]');
+  await page.locator('[aria-controls="design-history-runs"]').click();
+  await settle(250);
+  const door = (id) =>
+    page.locator(
+      `#design-history [data-run="${id}"] button[aria-label="take the input of run ${id} back"]`,
+    );
+  ck(
+    (await door(91).count()) === 1 &&
+      (await door(91).isDisabled()) &&
+      ((await page.locator('#design-history [data-run="91"]').textContent()) ?? '').includes(
+        'its picture is gone',
+      ),
+    'ретушь без своей картинки в снимке: рекол погашен — «its picture is gone»',
+  );
+  await door(90).click();
+  const confirm = page.locator('[role="dialog"] button', { hasText: 'open the mask' });
+  await confirm.waitFor();
+  await confirm.click();
+  const recalled = await page
+    .waitForSelector('[data-mask-editor="800"]', { timeout: 3000 })
+    .then(() => true)
+    .catch(() => false);
+  ck(recalled, 'рекол ретуши: плитка 10, маска открыта на её картинке');
+  if (recalled) {
+    ck(
+      (await page.locator('[data-mask-editor] textarea').inputValue()) === 'remove the stain',
+      'рекол ретуши: её слова в поле',
+    );
+    await escapeEditor();
+  }
+  ck(
+    (await page
+      .locator('[data-playground-open="retouch_zone"] [data-retouch-source="800"]')
+      .count()) === 1,
+    'рекол ретуши: её картинка в слоте панели',
+  );
+  await leaveTo();
+
+  // Codex 6 · recall into a tile this server cannot open: said with the gate's reason, no ?wf.
+  await mount({ ...EMPTY_BAND, playgroundWorkflows: ['create_edit'], threedOptions: [] });
+  await page.evaluate((run) => window.__pg.recall(run, true), {
+    id: 77,
+    kind: 'threed',
+    status: 'done',
+    params: { threed: { referenceMediaIds: [41] } },
+    inputs: { refs: [] },
+  });
+  await settle(200);
+  const alerts = await page.evaluate(() => window.__pg.alerts());
+  ck(
+    wf() === null &&
+      alerts.some((a) =>
+        a.includes('run 77 cannot be laid out here — Image to 3D is not wired on this server'),
+      ) &&
+      !alerts.some((a) => a.includes('is back in')),
+    'рекол в плитку, которую сервер не открывает: причина ворот, без «back in», без ?wf',
+    JSON.stringify(alerts),
   );
 } catch (e) {
   ck(false, 'группа оборвалась', String(e?.message ?? e).split('\n')[0]);

@@ -14,6 +14,7 @@ import type { GetDesignBandResponse, common_DesignRun } from 'api/proto-http/adm
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
 import { GenerationHistory } from 'components/managers/tech-card/components/design/generation';
+import { PictureGalleryProvider } from 'components/managers/tech-card/components/design/picture-tile';
 import {
   recallDesignRun,
   useStudioKindSwitch,
@@ -91,7 +92,7 @@ function RawStart() {
 type Probe = {
   mount: (band: GetDesignBandResponse) => void;
   raw: (input: StartRunInput) => void;
-  recall: (run: common_DesignRun) => void;
+  recall: (run: common_DesignRun, threedRetired?: boolean) => void;
   alerts: () => string[];
 };
 
@@ -120,7 +121,11 @@ window.__pg = {
                   (Create Design Variations' booster) needs it. */}
               <TooltipProvider>
                 <CardForm>
-                  <Screen band={band} />
+                  {/* The studio's one viewer (studio-tab.tsx mounts it): a result's zoom and the
+                      viewer's own Mask need it (G-02 m-4). */}
+                  <PictureGalleryProvider techCardId={CARD} band={band}>
+                    <Screen band={band} />
+                  </PictureGalleryProvider>
                   <RawStart />
                 </CardForm>
               </TooltipProvider>
@@ -131,6 +136,6 @@ window.__pg = {
     );
   },
   raw: (input) => rawStart?.(input),
-  recall: (run) => recallDesignRun(CARD, run, 'input'),
+  recall: (run, threedRetired) => recallDesignRun(CARD, run, 'input', !!threedRetired),
   alerts: () => useSnackBarStore.getState().alerts.map((a) => a.message),
 };

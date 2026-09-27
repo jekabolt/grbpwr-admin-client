@@ -101,7 +101,8 @@
 //   node scripts/playground-registry-probe.mjs --mutate-creativity  шаг бустера не уезжает
 //                                                                   → краснеет J
 //   node scripts/playground-registry-probe.mjs --mutate-format-default формат плитки 2 по умолчанию
-//                                                                   2:3 вместо 1:1 → краснеет J
+//                                                                   снова 1:1, а не 9:16 (4.png)
+//                                                                   → краснеет J, N
 //   node scripts/playground-registry-probe.mjs --mutate-c07-validate swap пускает одну картинку в
 //                                                                   оба слота → краснеет K
 //   node scripts/playground-registry-probe.mjs --mutate-c07-gate    add_logo открыт без списка
@@ -167,6 +168,36 @@
 //   node scripts/playground-registry-probe.mjs --mutate-pbr-default материалы по умолчанию OFF
 //                                                                   → краснеет T, V
 //
+// G-02 client fix (W · каждая починка ревью — своей проверкой и своей мутацией):
+//   W · плитка 10: слот картинки на панели (M-1), слова владельца, строка цены без суммы (m-3), рекол
+//       ретуши — картинка + слова + маска открыта (Codex 5); источник ретуши; приколотые прогоны —
+//       свои у плитки 10 и живая ретушь картинки этой плитки у других (Codex 8, m-2); подпись окна по
+//       workflow (m-1, Codex 2); рекол 3D хранит presentation и немые поля, говорит о снятых опциях
+//       (Codex 4); строка про модель, которой больше нет (Codex 7); цена 3D без суммы (Codex 3);
+//       одна подпись двери «Reuse»; Scene открыта (2.png); surface_hint — решение, поле не рисуется.
+//   node scripts/playground-registry-probe.mjs --mutate-retouch-slot   слот картинки плитки 10 не
+//                                                                   рисуется → краснеет W
+//   node scripts/playground-registry-probe.mjs --mutate-retouch-recall рекол ретуши не открывает
+//                                                                   маску → краснеет W
+//   node scripts/playground-registry-probe.mjs --mutate-pin-room     приколоты все прогоны комнаты,
+//                                                                   как до починки → краснеет W
+//   node scripts/playground-registry-probe.mjs --mutate-retouch-pin  живая ретушь картинки плитки не
+//                                                                   видна под ней → краснеет W
+//   node scripts/playground-registry-probe.mjs --mutate-workflow-caption подпись окна плитки снова
+//                                                                   по колорвею 0 → краснеет W
+//   node scripts/playground-registry-probe.mjs --mutate-threed-carry  рекол 3D снова шлёт air
+//                                                                   → краснеет W
+//   node scripts/playground-registry-probe.mjs --mutate-threed-reconcile снятая опция маршрута не
+//                                                                   названа → краснеет W
+//   node scripts/playground-registry-probe.mjs --mutate-engine-note  подмена модели молчит
+//                                                                   → краснеет W
+//   node scripts/playground-registry-probe.mjs --mutate-threed-price снова «about $1.20»
+//                                                                   → краснеет T, W
+//   node scripts/playground-registry-probe.mjs --mutate-reuse-label  дверь снова «reuse»
+//                                                                   → краснеет W
+//   node scripts/playground-registry-probe.mjs --mutate-scene-fold   Scene снова свёрнута
+//                                                                   → краснеет W
+//
 // Проба СЧИТАЕТ ПРОВАЛЫ и печатает число исходов всегда: ноль провалов при упавшей сборке — это
 // молчание, а не зелень.
 
@@ -225,6 +256,17 @@ const MUT = {
   threedRun: process.argv.includes('--mutate-threed-run'),
   threedRecall: process.argv.includes('--mutate-threed-recall'),
   pbrDefault: process.argv.includes('--mutate-pbr-default'),
+  retouchSlot: process.argv.includes('--mutate-retouch-slot'),
+  retouchRecall: process.argv.includes('--mutate-retouch-recall'),
+  pinRoom: process.argv.includes('--mutate-pin-room'),
+  retouchPin: process.argv.includes('--mutate-retouch-pin'),
+  workflowCaption: process.argv.includes('--mutate-workflow-caption'),
+  threedCarry: process.argv.includes('--mutate-threed-carry'),
+  threedReconcile: process.argv.includes('--mutate-threed-reconcile'),
+  engineNote: process.argv.includes('--mutate-engine-note'),
+  threedPrice: process.argv.includes('--mutate-threed-price'),
+  reuseLabel: process.argv.includes('--mutate-reuse-label'),
+  sceneFold: process.argv.includes('--mutate-scene-fold'),
 };
 const MUTATED = Object.values(MUT).some(Boolean);
 
@@ -345,8 +387,8 @@ if (MUT.formatDefault)
     swap(
       'fabric-format-2-3',
       /tiles\/fabric-to-image\.tsx$/,
+      "formatSection({ initial: '9:16' })",
       "formatSection({ initial: '1:1' })",
-      "formatSection({ initial: '2:3' })",
     ),
   );
 if (MUT.c07Validate)
@@ -534,6 +576,19 @@ if (MUT.maskGate)
     "workflowOffered(band, 'retouch_zone').available;",
     "workflowOffered(band, 'retouch_zone').available || true;",
   ]);
+if (MUT.retouchSlot)
+  retouchSwaps.push([
+    `      key: RETOUCH_SOURCE_KEY,
+      title: 'Picture',`,
+    `      key: RETOUCH_SOURCE_KEY,
+      when: () => false,
+      title: 'Picture',`,
+  ]);
+if (MUT.retouchRecall)
+  retouchSwaps.push([
+    'flags: { [RETOUCH_MASKING_KEY]: !!found },',
+    'flags: { [RETOUCH_MASKING_KEY]: false },',
+  ]);
 if (retouchSwaps.length)
   plugins.unshift({
     name: 'c11-retouch',
@@ -584,6 +639,15 @@ if (MUT.threedColorway)
   tileSwaps.push(['if ((media?.id ?? 0) === mediaId) return colorwayOf(slot);', '']);
 if (MUT.pbrDefault)
   tileSwaps.push(['pbr: draft.flags[PBR] ?? true,', 'pbr: draft.flags[PBR] ?? false,']);
+if (MUT.threedCarry)
+  tileSwaps.push(['presentation: presentationOf(draft),', "presentation: 'air',"]);
+if (MUT.threedReconcile)
+  tileSwaps.push([
+    '.filter(([name, word]) => word && !offers(band, name))',
+    '.filter(() => false)',
+  ]);
+if (MUT.threedPrice)
+  tileSwaps.push(["shape: () => '1 model',", "shape: () => '1 model · about $1.20',"]);
 if (tileSwaps.length)
   plugins.unshift(multiSwap('c10-tile', /tiles\/image-to-3d\.tsx$/, 'tsx', tileSwaps));
 const chainSwaps = [];
@@ -631,6 +695,49 @@ if (MUT.threedRecall)
       /design\/history-recall\.tsx$/,
       "if (kind === 'threed') return threedRetired ? 'playground' : 'threed';",
       "if (kind === 'threed') return 'threed';",
+    ),
+  );
+
+// ─── G-02 client fix: мутации починок ревью.
+const resultsSwaps = [];
+if (MUT.pinRoom)
+  resultsSwaps.push([
+    'const pinMatch = def?.run?.results.match ?? inPlaygroundRoom;',
+    'const pinMatch = match;',
+  ]);
+if (MUT.retouchPin) resultsSwaps.push(['shown.has(retouchSourceId(run))', 'shown.has(-1)']);
+if (MUT.workflowCaption)
+  resultsSwaps.push([
+    'return workflowOutputsHorizon(band, def.key);',
+    'return outputsHorizon(band, 0);',
+  ]);
+if (resultsSwaps.length)
+  plugins.unshift(multiSwap('g02-results', /playground\/results\.tsx$/, 'tsx', resultsSwaps));
+if (MUT.engineNote)
+  plugins.push(
+    swap(
+      'engine-note-silent',
+      /registry\/common\.ts$/,
+      "if (rows.some((m) => (m.slug ?? '').trim() === want)) return null;",
+      'return null;',
+    ),
+  );
+if (MUT.reuseLabel)
+  plugins.push(
+    swap(
+      'reuse-lowercase',
+      /fields\/reuse\.tsx$/,
+      "export const REUSE_LABEL = 'Reuse';",
+      "export const REUSE_LABEL = 'reuse';",
+    ),
+  );
+if (MUT.sceneFold)
+  plugins.push(
+    swap(
+      'scene-folded',
+      /tiles\/virtual-try-on\.tsx$/,
+      '      defaultOpen: true,',
+      '      defaultOpen: false,',
     ),
   );
 
@@ -1491,10 +1598,10 @@ const W = {};
       params: {
         ...EMPTY_PARAMS,
         freeform: { preset: 'fabric_extract', items: [item0(41)], options: undefined },
-        image: { model: GPT2, quality: '', aspectRatio: '1:1', background: '' },
+        image: { model: GPT2, quality: '', aspectRatio: '9:16', background: '' },
       },
     }),
-    'fabric_to_image → freeform/fabric_extract: одна картинка, role "", модель по умолчанию, 1:1',
+    'fabric_to_image → freeform/fabric_extract: одна картинка, role "", модель по умолчанию, 9:16 (4.png, G-02 m-6)',
     show(W.fabric.w),
   );
   const old = run('fabric_to_image').wire(d, { band: band({ playgroundWorkflows: FIVE }) });
@@ -1875,9 +1982,9 @@ head('N', 'C-07 разметка форм пяти плиток');
   ck(has(f, /placeholder="The pleated skirt"/), 'fabric_to_image: плейсхолдер владельца');
   ck(
     has(f, /fabric_to_image\.format-section/) &&
-      values(f).includes('1:1') &&
+      values(f).includes('9:16') &&
       !has(f, /engine-section/),
-    'fabric_to_image: Format 1:1 в шапке, без пикера модели (D6)',
+    'fabric_to_image: Format 9:16 в шапке (4.png), без пикера модели (D6)',
     show(values(f)),
   );
   const g = M.panelMarkup(b, 'ghost_mannequin');
@@ -2842,12 +2949,17 @@ const THREED = (over) => ({
   ck(empty?.section === 'reference', 'нет картинки → отказ на секции reference', show(empty));
   ck(t3().validate(fresh3([media(42)]), { band: b }) === null, 'с картинкой — отказа нет');
 
-  // Shape and price words.
+  // Shape and price words: NO FIGURE — the server may reserve more than any static number (G-02
+  // Codex 3); the row adds «priced by the server when the run starts» itself.
   ck(
-    t3().shape(fresh3([media(42)]), plain) === '1 model · about $1.20' &&
-      t3().shape(fresh3([media(41)]), full) === '1 model · about $1.40',
-    'строка GENERATE: «1 model · about $1.20» / «about $1.40» у detailed',
+    t3().shape(fresh3([media(42)]), plain) === '1 model' &&
+      t3().shape(fresh3([media(41)]), full) === '1 model',
+    'строка GENERATE: «1 model» без суммы (обычная и detailed)',
     `${t3().shape(null, plain)} | ${t3().shape(null, full)}`,
+  );
+  ck(
+    !/\$/.test(M.panelMarkup(band3({ threedOptions: OPTS3 }), 'image_to_3d')),
+    'форма плитки 12: ни одной суммы в $ (и у Detailed)',
   );
 
   // The gate: the list AND the options field.
@@ -3242,6 +3354,329 @@ head('V', 'C-12: заглушки под своей плиткой, рекол 3
     );
     ck(heads[0] === want, `${key}: секция картинки считает слоты «${want}»`, show(heads));
   }
+}
+
+// ─── W · починки G-02 (клиент) ─────────────────────────────────────────────────────────────────
+head(
+  'W',
+  'G-02: слот плитки 10, рекол ретуши, приколотое, подпись окна, рекол 3D, модель, Reuse, Scene',
+);
+{
+  const wfBand = (over = {}) =>
+    band({
+      playgroundWorkflows: M.WORKFLOWS.map((d) => d.key),
+      threedOptions: ['texture', 'pbr', 'quality'],
+      ...over,
+    });
+
+  // M-1 · tile 10's panel: the owner's words, the honest line, the price line, ONE picture slot.
+  const p10 = M.panelMarkup(wfBand(), 'retouch_zone');
+  ck(
+    p10.includes('Open or upload any picture') &&
+      p10.includes(
+        'press <b>Mask</b>, paint the zone to change and describe what should be there.',
+      ) &&
+      p10.includes('The retouch is generated in place.') &&
+      p10.includes(M.RETOUCH_CAVEAT) &&
+      !/credit/i.test(p10),
+    'плитка 10: слова владельца (12.png) и честная строка, без «credit»',
+  );
+  ck(
+    M.RETOUCH_PRICE === '1 new picture per retouch · priced by the server when the run starts' &&
+      p10.includes('data-retouch-price') &&
+      !p10.includes('$'),
+    'плитка 10: строка цены — сервер ценит при старте, суммы нет (полоса цен не даёт) (m-3)',
+    M.RETOUCH_PRICE,
+  );
+  ck(
+    (p10.match(/data-retouch-source=/g) ?? []).length === 1 &&
+      /data-fold-section="retouch_zone.source"/.test(p10) &&
+      />Reuse</.test(p10) &&
+      !/GENERATE/.test(p10),
+    'плитка 10: один слот (+ / Reuse) в секции Picture, GENERATE на панели нет',
+  );
+
+  // Codex 5 · a retouch recalled: its picture, its words, the editor open on it; the zone is said.
+  const r10 = run('retouch_zone');
+  const past10 = {
+    id: 90,
+    kind: 'freeform',
+    params: {
+      ...EMPTY_PARAMS,
+      freeform: {
+        preset: 'retouch',
+        items: [{ mediaId: 800, regions: [], texts: ['remove the stain'], role: '' }],
+        options: undefined,
+      },
+    },
+  };
+  ck(M.retouchSourceId(past10) === 800, 'источник ретуши — items[0].mediaId');
+  ck(
+    M.retouchSourceId({
+      kind: 'freeform',
+      params: { freeform: { preset: 'free', items: [{ mediaId: 5 }] } },
+    }) === 0 && M.retouchSourceId({ kind: 'freeform' }) === 0,
+    'не ретушь / заглушка без params — источника нет (0)',
+  );
+  const back10 = r10.recall(past10, new Map([[800, media(800)]]), { band: wfBand() });
+  ck(
+    back10.draft.images[M.RETOUCH_SOURCE_KEY]?.[0]?.id === 800 &&
+      back10.draft.texts.change_text === 'remove the stain' &&
+      back10.draft.flags[M.RETOUCH_MASKING_KEY] === true &&
+      back10.lost === 0 &&
+      back10.said.some((w) => /paint the zone again/.test(w)),
+    'рекол ретуши: картинка в слоте, слова, маска открыта, «paint the zone again»',
+    show(back10),
+  );
+  const gone10 = r10.recall(past10, new Map(), { band: wfBand() });
+  ck(
+    (gone10.draft.images[M.RETOUCH_SOURCE_KEY] ?? []).length === 0 &&
+      gone10.draft.flags[M.RETOUCH_MASKING_KEY] === false &&
+      gone10.lost === 1,
+    'рекол ретуши без картинки: маска не открывается, потеря названа',
+    show(gone10),
+  );
+  const with10 = M.panelMarkup(wfBand(), 'retouch_zone', {
+    ...M.EMPTY_DRAFT,
+    images: { [M.RETOUCH_SOURCE_KEY]: [media(800)] },
+  });
+  ck(
+    /data-retouch-source="800"/.test(with10) &&
+      /aria-label="mask this picture/.test(with10) &&
+      /aria-label="remove the picture to retouch"/.test(with10) &&
+      /data-fold-value="">1\/1</.test(with10),
+    'слот с картинкой: угол mask и ✕, шапка «1/1»',
+  );
+
+  // Codex 8 + m-2 · what is pinned above the pictures.
+  const pic = (id, mediaId) => ({
+    id,
+    ordinal: 1,
+    media: { id: mediaId, media: { thumbnail: { mediaUrl: `https://x/${mediaId}.jpg` } } },
+  });
+  const free = (id, status, pictures = []) => ({
+    id,
+    kind: 'freeform',
+    status,
+    params: { ...EMPTY_PARAMS, freeform: { preset: 'free', items: [], options: undefined } },
+    pictures,
+  });
+  const retouch = (id, status, source) => ({
+    id,
+    kind: 'freeform',
+    status,
+    params: {
+      ...EMPTY_PARAMS,
+      freeform: {
+        preset: 'retouch',
+        items: [{ mediaId: source, regions: [], texts: ['x'], role: '' }],
+        options: undefined,
+      },
+    },
+    pictures: [],
+  });
+  const pinBand = wfBand({
+    runs: [
+      retouch(93, 'pending', 777),
+      retouch(92, 'pending', 500),
+      free(91, 'pending'),
+      free(41, 'succeeded', [pic(601, 500)]),
+    ],
+  });
+  const pinned = (markup) => [...markup.matchAll(/data-pg-pinned="(\d+)"/g)].map((x) => +x[1]);
+  const under10 = M.resultsMarkup(pinBand, 'retouch_zone');
+  ck(
+    same(pinned(under10).sort(), [92, 93]),
+    'под плиткой 10: приколоты только ретуши — живой Create or edit нет (Codex 8)',
+    show(pinned(under10)),
+  );
+  const underCE = M.resultsMarkup(pinBand, 'create_edit');
+  ck(
+    same(pinned(underCE).sort(), [91, 92]) &&
+      /A retouch of a picture below: it lands under Retouch a Zone/.test(underCE),
+    'под Create or edit: свой живой прогон и живая ретушь ЕГО картинки, со словами куда она ляжет (m-2)',
+    show(pinned(underCE)),
+  );
+  ck(!pinned(underCE).includes(93), 'ретушь чужой картинки под Create or edit не приколота');
+
+  // m-1 / Codex 2 · the caption of a tile's own window (band 31).
+  const out = (id, stamp) => ({
+    picture: { id, runId: id, colorwayId: 0, ordinal: 1 },
+    runId: id,
+    runKind: 'freeform',
+    runWorkflow: stamp,
+  });
+  const winBand = (over = {}) =>
+    wfBand({
+      outputs: [out(1, 'create_edit'), out(2, 'create_edit'), out(3, 'virtual_try_on')],
+      outputsTotalByColorway: { 0: 500 },
+      ...over,
+    });
+  ck(
+    same(
+      M.workflowOutputsHorizon(
+        winBand({ outputsTotalByWorkflow: { create_edit: 120 } }),
+        'create_edit',
+      ),
+      {
+        total: 120,
+        carried: 2,
+      },
+    ),
+    'окно Create or edit: 2 пришли из 120 — его число, не 3 из 500',
+  );
+  ck(
+    M.workflowOutputsHorizon(winBand(), 'create_edit') === null &&
+      M.workflowOutputsHorizon(
+        winBand({ outputsTotalByWorkflow: { virtual_try_on: 1 } }),
+        'virtual_try_on',
+      ) === null,
+    'поля 31 нет — подписи нет; всё пришло (1 из 1) — подписи нет',
+  );
+  const capCE = M.resultsMarkup(
+    winBand({ outputsTotalByWorkflow: { create_edit: 120 } }),
+    'create_edit',
+  );
+  ck(
+    /data-pg-horizon="workflow"/.test(capCE) &&
+      capCE.includes('Only the newest 2 of this workflow’s 120 pictures are sent here'),
+    'под Create or edit подпись — «2 of this workflow’s 120»',
+  );
+  ck(
+    !/data-pg-horizon/.test(M.resultsMarkup(winBand(), 'create_edit')),
+    'старый сервер (поля 31 нет): под плиткой подписи нет',
+  );
+  ck(
+    /data-pg-horizon="room"/.test(M.resultsMarkup(winBand(), null)),
+    'сетка: подпись окна комнаты (колорвей 0) осталась',
+  );
+
+  // Codex 4 · a STEP 5 build «on a model» recalled into tile 12 keeps its block.
+  const t12 = run('image_to_3d');
+  const step5 = {
+    id: 66,
+    kind: 'threed',
+    params: {
+      ...EMPTY_PARAMS,
+      threed: {
+        frames: 0,
+        presentation: 'model',
+        modelId: 12,
+        garmentSizeId: 3,
+        fitOverride: 'relaxed',
+        bodyType: 'tall',
+        sourcePictureIds: [],
+        referenceMediaIds: [42],
+        texture: 'off',
+        pbr: '',
+        quality: 'detailed',
+        follow: '',
+        surfaceHint: 'matte wool',
+      },
+    },
+  };
+  const onlyTexture = band({ playgroundWorkflows: ['image_to_3d'], threedOptions: ['texture'] });
+  const back12 = t12.recall(step5, new Map([[42, media(42)]]), { band: onlyTexture });
+  const w12 = t12.wire(back12.draft, { band: onlyTexture }).params.threed;
+  ck(
+    w12.presentation === 'model' &&
+      w12.modelId === 12 &&
+      w12.garmentSizeId === 3 &&
+      w12.fitOverride === 'relaxed' &&
+      w12.bodyType === 'tall',
+    'рекол 3D: presentation «model» и немые поля уезжают как были, не «air»',
+    show(w12),
+  );
+  ck(
+    back12.said.some((w) => /built «model» — this build keeps that/.test(w)),
+    'рекол 3D: сказано, что presentation сохранён',
+    show(back12.said),
+  );
+  ck(
+    back12.said.some((w) => /no longer offers detailed quality/.test(w)) &&
+      !back12.said.some((w) => /texture off/.test(w)),
+    'рекол 3D: снятая маршрутом опция названа (detailed), объявленная (texture) — нет',
+    show(back12.said),
+  );
+  ck(
+    back12.said.some((w) => /surface words did not come along/.test(w)) && w12.surfaceHint === '',
+    'рекол 3D: слова поверхности не уезжают (surface_hint — решение) и это сказано',
+    show(back12.said),
+  );
+  const shown12 = M.panelMarkup(onlyTexture, 'image_to_3d', back12.draft);
+  ck(
+    /data-threed-carried="model"/.test(shown12),
+    'форма плитки 12 говорит, что presentation взят из рекола',
+  );
+  const fresh12 = t12.wire(
+    { ...M.initialDraft(t12), images: { reference: [media(42)] } },
+    { band: onlyTexture },
+  ).params.threed;
+  ck(
+    fresh12.presentation === 'air' && fresh12.modelId === 0 && fresh12.bodyType === '',
+    'свежий черновик: presentation «air», немые поля пусты',
+    show(fresh12),
+  );
+  ck(
+    !/data-threed-carried/.test(M.panelMarkup(onlyTexture, 'image_to_3d')),
+    'свежая форма плитки 12 — строки о реколе нет',
+  );
+
+  // Codex 3 · no figure on tile 12.
+  ck(
+    t12.shape(null, {}) === '1 model' &&
+      !/\$/.test(
+        M.panelMarkup(
+          band({ playgroundWorkflows: ['image_to_3d'], threedOptions: OPTS3 }),
+          'image_to_3d',
+        ),
+      ),
+    'плитка 12: «1 model», ни одной суммы в форме',
+  );
+
+  // Codex 7 · a model the server no longer lists: the default that replaces it is named.
+  const models = [
+    { slug: 'openai/gpt-image-2', label: 'GPT Image 2', isDefault: true, qualities: ['medium'] },
+    { slug: 'openai/gpt-image-2.5-sunburst', label: 'GPT Image 2.5', qualities: ['medium'] },
+  ];
+  const ran = (model) => ({
+    id: 5,
+    kind: 'freeform',
+    params: { ...EMPTY_PARAMS, image: { model } },
+  });
+  ck(
+    M.recallEngineNote(ran('google/gemini-3'), band({ imageModels: models })) ===
+      'its AI model (google/gemini-3) is no longer offered — GPT Image 2 replaces it',
+    'модели больше нет — названа замена по умолчанию',
+    String(M.recallEngineNote(ran('google/gemini-3'), band({ imageModels: models }))),
+  );
+  ck(
+    M.recallEngineNote(ran('openai/gpt-image-2.5-sunburst'), band({ imageModels: models })) ===
+      null && M.recallEngineNote(ran(''), band({ imageModels: models })) === null,
+    'модель есть / не названа — строки нет',
+  );
+  ck(
+    /cannot be chosen on this server/.test(
+      M.recallEngineNote(ran('openai/gpt-image-2'), band()) ?? '',
+    ),
+    'сервер без выбора модели — сказано, что рисует его собственная',
+  );
+
+  // n-5 · one name for the door; Scene open (2.png); surface_hint: no field (documented decision).
+  ck(
+    M.REUSE_LABEL === 'Reuse' &&
+      />Reuse</.test(M.panelMarkup(wfBand(), 'change_color')) &&
+      !/>reuse</.test(M.panelMarkup(wfBand(), 'create_edit')),
+    'дверь называется «Reuse» везде',
+  );
+  const tryon = M.panelMarkup(wfBand({ imageModels: models }), 'virtual_try_on');
+  const scene = tryon.slice(tryon.indexOf('data-fold-section="virtual_try_on.scene"'));
+  ck(
+    scene.length > 0 &&
+      /aria-expanded="true"/.test(scene.slice(0, 1500)) &&
+      scene.includes('placeholder="Same as model reference"'),
+    'Scene открыта по умолчанию (2.png): Source и поле сцены видны',
+  );
 }
 
 const expected = MUTATED ? ' (прогон С МУТАЦИЕЙ — провалы ожидаются)' : '';
