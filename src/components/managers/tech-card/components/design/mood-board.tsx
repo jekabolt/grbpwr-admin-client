@@ -311,6 +311,12 @@ function pictureOfMedia(full: common_MediaFull): common_DesignPicture {
  * дальше — жест, и щелчка у него нет.
  */
 const DRAG_SLOP = 4;
+/**
+ * Сколько после жеста живёт глушение его `click` (см. `swallowFrom`). Щелчок касания приходит через
+ * миллисекунды, под нагрузкой — через десятки; секунда — запас, а не ожидание: следующее нажатие
+ * снимает глушение сразу.
+ */
+const SWALLOW_MS = 1000;
 
 export function MoodBoard({
   techCardId,
@@ -711,7 +717,10 @@ export function MoodBoard({
      поэтому щелчок мыши раскрывает панель на отпускании. `click` КАСАНИЯ, наоборот, ищется под
      пальцем: раскрой панель на отпускании — и он попал бы в её шапку, в шеврон «свернуть». Поэтому
      касание раскрывает своим `click` на полоске, а жест в 4px и больше этот `click` глушит
-     (`swallow`): приходит он в той же задаче, что и отпускание, — дольше флаг и не живёт.
+     (`swallowFrom`). Приходит он ОТДЕЛЬНЫМ вводом после отпускания — касание становится щелчком
+     лишь по отпусканию — и под нагрузкой уже после таймеров нулевой задержки: флаг «до конца
+     задачи» его пропускал, и жест в 8px раскрывал панель (замерено 27.09). Поэтому отметка живёт до
+     следующего нажатия и не дольше `SWALLOW_MS`: настоящий щелчок всегда начинается нажатием.
 
      Ниже `lg` разделителя нет — нет и жеста: полоска там строка под доской и открывается щелчком. */
   const drag = useRef<{
@@ -727,7 +736,8 @@ export function MoodBoard({
     strip: boolean;
   } | null>(null);
   const [dragging, setDragging] = useState(false);
-  const swallow = useRef(false);
+  /** Отпускание жеста в 4px и больше (`performance.now()`): `click` полоски после него — жеста. */
+  const swallowFrom = useRef<number | null>(null);
   /** Сторона порога — это предпочтение; открытая сторона несёт ширину. Удержание на сеанс снимается. */
   const settle = (fold: boolean, w = panelW) => {
     setHeldFor(null);
@@ -736,6 +746,8 @@ export function MoodBoard({
     );
   };
   const grab = (e: React.PointerEvent, strip: boolean) => {
+    // Новое нажатие: `click` прошлого жеста пришёл бы раньше него — глушить больше нечего.
+    swallowFrom.current = null;
     const sep = separator.current;
     // Разделитель не нарисован (ниже `lg`, свёрнутая доска) — нет и жеста.
     if (e.button !== 0 || !sep?.offsetWidth) return;
@@ -770,11 +782,8 @@ export function MoodBoard({
     if (!d?.strip) return;
     // Щелчок мыши по полоске решается здесь: её `click` уходит разделителю (см. шапку).
     if (!d.moved && e.type === 'pointerup' && e.pointerType === 'mouse') setCollapsed(false);
-    // `click` касания придёт полоске в этой же задаче; после жеста он жеста, а не двери.
-    swallow.current = d.moved;
-    setTimeout(() => {
-      swallow.current = false;
-    }, 0);
+    // `click` касания придёт полоске позже, отдельным вводом; после жеста он жеста, а не двери.
+    if (d.moved) swallowFrom.current = performance.now();
   };
 
   // ОПИСАНИЕ — ТЕ ЖЕ ДВА ОРГАНА ВОЛНЫ, ЧТО У ПОЛЕЙ GENERAL INFORMATION: синяя рамка `drafted`,
@@ -1176,7 +1185,9 @@ export function MoodBoard({
               tabIndex={0}
               onPointerDown={(e) => grab(e, true)}
               onClick={() => {
-                if (!swallow.current) setCollapsed(false);
+                const from = swallowFrom.current;
+                if (from !== null && performance.now() - from < SWALLOW_MS) return;
+                setCollapsed(false);
               }}
               onKeyDown={onDoorKey(() => setCollapsed(false))}
               aria-expanded={false}
