@@ -8,8 +8,8 @@
  * filed a second picture beside the first (REVIEW-T53-pkg2-codex.md, High 2).
  *
  * So a flatten is written here BEFORE it is sent, and struck off on a DEFINITE answer — the picture,
- * or any refusal. What stays is exactly the flattens whose outcome is unknown. Reopening the same
- * editor over the same drawing finds its entry: the editor's question offers «retry the earlier
+ * or any refusal. What stays is exactly the flattens whose outcome is unknown. The next save of the
+ * same layer finds them, whichever editor makes it: the editor's question offers «retry the earlier
  * save ›» first, and that door resends the stored body as is.
  *
  * WHERE: `sessionStorage`, one key per card — `plm.techcard.flatten-gesture.v1.<card>`. Per TAB on
@@ -26,13 +26,15 @@
  * place of, or 0 — beside) and the fingerprint of the DRAWING the raster was made of
  * (`drawingFingerprint`); it carries the key and the media the flatten echoed.
  *
- * ⚠ NOTHING UNANSWERED IS DROPPED TO MAKE ROOM (review r3). At `GESTURES_PER_CARD` a card takes no
- * new gesture — `rememberGesture` answers false and the editor asks for one to be settled first. An
- * entry leaves the list in three ways only:
- *   · a definite answer to its own key (`forgetGesture`);
- *   · a newer gesture of the same layer and the same answer: the person saved afresh instead of
- *     retrying it, and a retry of the older one after that could only file a second picture;
+ * ⚠ AN UNANSWERED ENTRY LEAVES BY ITS OWN ANSWER, OR WITH ITS LAYER (review r3, r4). Two ways only:
+ *   · a definite answer to its own key (`forgetGesture`) — the flatten's own, or a resend's;
  *   · its layer provably no longer exists on the card (`live`) — it can never be matched again.
+ * Not to make room: at `GESTURES_PER_CARD` a card takes no new gesture — `rememberGesture` answers
+ * false and the editor asks for one to be settled first. And not for a fresh save of the same layer
+ * and answer, as round 3 had it: «the same drawing» is a fingerprint, and a media id alone moves it
+ * (the same pixels stored again under a new raster), so that rule dropped a key whose picture may
+ * already be filed — before the fresh save was even sent. A fresh save leaves every entry in place,
+ * and the editor asks over the layer for as long as one stands (`layerGesture`).
  */
 
 export type FlattenGesture = {
@@ -147,9 +149,8 @@ function readLive(cardId: number, layers: readonly number[] | undefined): Flatte
 
 /**
  * Write a gesture down BEFORE its flatten goes out. FALSE — the card's list is at its ceiling: the
- * gesture is not written and must not be sent (nothing unanswered is dropped to make room). A
- * gesture already on the list — a retry — is always taken. An earlier unanswered gesture of the same
- * layer and the same answer leaves: the person saved afresh instead of retrying it.
+ * gesture is not written and must not be sent. A gesture already on the list — a retry — is always
+ * taken. Nothing on the list leaves for a new one (review r4): not to make room, not as «older».
  */
 export function rememberGesture(
   cardId: number,
@@ -158,13 +159,10 @@ export function rememberGesture(
 ): boolean {
   const list = readLive(cardId, layers);
   if (list.some((g) => g.key === gesture.key)) return true;
-  const rest = list.filter(
-    (g) => !(g.layerId === gesture.layerId && g.replacePictureId === gesture.replacePictureId),
-  );
-  if (rest.length >= GESTURES_PER_CARD) return false;
+  if (list.length >= GESTURES_PER_CARD) return false;
   writeCard(
     cardId,
-    [...rest, gesture].sort((a, b) => a.at - b.at),
+    [...list, gesture].sort((a, b) => a.at - b.at),
   );
   return true;
 }
@@ -191,25 +189,34 @@ export function oldestGesture(cardId: number, layers?: readonly number[]): Flatt
   return found;
 }
 
+/** The earlier save a question puts first — and whether it is of the drawing on screen. */
+export type LayerGesture = { gesture: FlattenGesture; same: boolean };
+
 /**
- * THE EARLIER GESTURE OF THIS EDITOR OVER THIS DRAWING whose answer never came — the newest, among
- * the answers `targets` names (0 — beside; a picture id — in its place). The rev is NOT compared:
- * the flatten does not move the layer's rev, and a save of the same drawing since does — a match on
- * it would hide a gesture the server may already have filed. The resend answers either way: the
- * picture, or `layer_rev_mismatch` — which proves it was never filed.
+ * THE EARLIER SAVE OF THIS LAYER WHOSE ANSWER NEVER CAME — any answer, any drawing (review r4) — or
+ * null. `same`: made of the drawing on screen (`doc`, its `drawingFingerprint`; null — the screen
+ * holds what no save stored) with an answer this editor gives (`targets`: 0 — beside, a picture id —
+ * in its place). The newest such one comes first: its resend files what is on the screen. Without
+ * one, the newest of the layer: its resend files THAT drawing, and a fresh save leaves it in place.
+ * The rev is NOT compared: the flatten does not move the layer's rev, and a save of the same drawing
+ * since does — a match on it would hide a gesture the server may already have filed. The resend
+ * answers either way: the picture, or `layer_rev_mismatch` — which proves it was never filed.
  */
-export function findGesture(
+export function layerGesture(
   cardId: number,
-  at: { layerId: number; doc: string; targets: readonly number[] },
+  at: { layerId: number; doc: string | null; targets: readonly number[] },
   layers?: readonly number[],
-): FlattenGesture | null {
-  let found: FlattenGesture | null = null;
+): LayerGesture | null {
+  let same: FlattenGesture | null = null;
+  let other: FlattenGesture | null = null;
   for (const g of readLive(cardId, layers)) {
-    if (g.layerId !== at.layerId || g.doc !== at.doc || !at.targets.includes(g.replacePictureId))
-      continue;
-    if (!found || g.at > found.at) found = g;
+    if (g.layerId !== at.layerId) continue;
+    if (g.doc === at.doc && at.targets.includes(g.replacePictureId)) {
+      if (!same || g.at > same.at) same = g;
+    } else if (!other || g.at > other.at) other = g;
   }
-  return found;
+  if (same) return { gesture: same, same: true };
+  return other ? { gesture: other, same: false } : null;
 }
 
 /**
@@ -236,9 +243,11 @@ function docFingerprint(doc: string): string {
  * the layer document (strokes and placed pictures), the layer's stored pixel channel (a media id;
  * 0 — never painted) and its vector file (0 — none). The base is the layer's own and cannot change.
  * Two visits that agree on all three rasterise the same picture; a visit that differs in any is
- * another drawing, and an earlier save's raster must not be filed under its name — so the retry
- * door stands only over the drawing it would resend (review r3: the pixels were not in it, and a
- * painting saved since let an old raster pass for the drawing on screen).
+ * another drawing, and an earlier save's raster must not be filed under its name — so an earlier
+ * save counts as the drawing on screen only when it would resend exactly it (review r3: the pixels
+ * were not in it, and a painting saved since let an old raster pass for the drawing on screen).
+ * Unequal is not proof of another picture, though: a media id alone moves it — the same pixels
+ * stored again — which is why nothing is ever dropped for being unequal (review r4, `layerGesture`).
  */
 export function drawingFingerprint(
   doc: string,
