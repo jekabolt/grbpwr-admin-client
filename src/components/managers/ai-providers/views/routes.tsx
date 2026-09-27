@@ -12,6 +12,7 @@ import { Section } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 import { useSetAiDefaults, useSetAiRoute } from '../utils/hooks';
+import { WriteError } from './write-error';
 
 // ROUTES — which model answers which job. The purposes, their labels, hints and groups all come
 // from the server (`purposes[]`); nothing here names a purpose. On top, the two defaults a route's
@@ -186,36 +187,44 @@ function DefaultsRow({ config }: { config: GetAiProvidersConfigResponse }) {
   const pending = save.isPending ? save.variables : undefined;
   const chat = pending?.chatProviderKey || config.defaultChatProviderKey || '';
   const image = pending?.imageProviderKey || config.defaultImageProviderKey || '';
+  // One write carries both; the one it named is the select that failed.
+  const failedOn = save.failure ? (save.variables?.chatProviderKey ? 'chat' : 'image') : null;
 
   return (
-    <div data-route-defaults='' className='flex flex-wrap items-end gap-x-4 gap-y-1.5'>
-      <Labelled label='default for chat'>
-        <SelectComponent
-          name='ai-default-chat'
-          placeholder='default for chat'
-          value={chat}
-          items={providerItems(providers, 'chat')}
-          disabled={save.isPending}
-          className='w-48'
-          onValueChange={(v: string) => {
-            if (v && v !== chat) save.mutate({ chatProviderKey: v, imageProviderKey: '' });
-          }}
-        />
-      </Labelled>
-      <Labelled label='default for images'>
-        <SelectComponent
-          name='ai-default-image'
-          placeholder='default for images'
-          value={image}
-          items={providerItems(providers, 'image')}
-          disabled={save.isPending}
-          className='w-48'
-          onValueChange={(v: string) => {
-            if (v && v !== image) save.mutate({ chatProviderKey: '', imageProviderKey: v });
-          }}
-        />
-      </Labelled>
-      <Text size='micro' variant='label' className='pb-1'>
+    <div data-route-defaults='' className='flex flex-col gap-1'>
+      <div className='flex flex-wrap items-start gap-x-4 gap-y-1.5'>
+        <Labelled label='default for chat'>
+          <SelectComponent
+            name='ai-default-chat'
+            placeholder='default for chat'
+            value={chat}
+            items={providerItems(providers, 'chat')}
+            disabled={save.isPending}
+            invalid={failedOn === 'chat'}
+            className='w-48'
+            onValueChange={(v: string) => {
+              if (v && v !== chat) save.mutate({ chatProviderKey: v, imageProviderKey: '' });
+            }}
+          />
+          <WriteError text={failedOn === 'chat' ? save.failure?.text : null} id='default-chat' />
+        </Labelled>
+        <Labelled label='default for images'>
+          <SelectComponent
+            name='ai-default-image'
+            placeholder='default for images'
+            value={image}
+            items={providerItems(providers, 'image')}
+            disabled={save.isPending}
+            invalid={failedOn === 'image'}
+            className='w-48'
+            onValueChange={(v: string) => {
+              if (v && v !== image) save.mutate({ chatProviderKey: '', imageProviderKey: v });
+            }}
+          />
+          <WriteError text={failedOn === 'image' ? save.failure?.text : null} id='default-image' />
+        </Labelled>
+      </div>
+      <Text size='micro' variant='label'>
         a route set to “default” uses these
       </Text>
     </div>
@@ -284,6 +293,16 @@ function PurposeRow({
   };
   const primaryOff = providerOff(config, capability, primary);
   const fallbackOff = providerOff(config, capability, serverFallback);
+  // The server's refusal, pinned where it points: a `primary` / `fallback` field violation under
+  // that candidate, anything else under the row's controls.
+  const failure = route.failure;
+  const primaryError = failure?.field === 'primary' ? failure.text : null;
+  const fallbackError = sameError
+    ? SAME_AS_PRIMARY
+    : failure?.field === 'fallback'
+      ? failure.text
+      : null;
+  const rowError = failure && !primaryError && failure.field !== 'fallback' ? failure.text : null;
 
   return (
     <div
@@ -310,38 +329,42 @@ function PurposeRow({
           </Text>
         )}
       </div>
-      {/* Top-aligned: a sentence under one candidate (a refusal, a staged provider's ask) hangs
-          below it instead of pushing the other candidate's select down out of line. */}
-      <div className='flex flex-wrap items-start gap-x-4 gap-y-1.5'>
-        <CandidateControls
-          role='primary'
-          purposeLabel={label}
-          capability={capability}
-          config={config}
-          value={primary}
-          other={serverFallback}
-          disabled={route.isPending}
-          onChoose={(v) =>
-            send({
-              primary: { providerKey: v === DEFAULT ? '' : v, model: '' },
-              fallback: serverFallback,
-            })
-          }
-          onModel={(model) => send({ primary: { ...primary, model }, fallback: serverFallback })}
-        />
-        <CandidateControls
-          role='fallback'
-          purposeLabel={label}
-          capability={capability}
-          config={config}
-          value={fallback}
-          other={primary}
-          staged={staged !== null}
-          disabled={route.isPending}
-          error={sameError ? SAME_AS_PRIMARY : null}
-          onChoose={chooseFallback}
-          onModel={(model) => fallback && send({ primary, fallback: { ...fallback, model } })}
-        />
+      <div className='flex flex-col gap-1'>
+        {/* Top-aligned: a sentence under one candidate (a refusal, a staged provider's ask) hangs
+            below it instead of pushing the other candidate's select down out of line. */}
+        <div className='flex flex-wrap items-start gap-x-4 gap-y-1.5'>
+          <CandidateControls
+            role='primary'
+            purposeLabel={label}
+            capability={capability}
+            config={config}
+            value={primary}
+            other={serverFallback}
+            disabled={route.isPending}
+            error={primaryError}
+            onChoose={(v) =>
+              send({
+                primary: { providerKey: v === DEFAULT ? '' : v, model: '' },
+                fallback: serverFallback,
+              })
+            }
+            onModel={(model) => send({ primary: { ...primary, model }, fallback: serverFallback })}
+          />
+          <CandidateControls
+            role='fallback'
+            purposeLabel={label}
+            capability={capability}
+            config={config}
+            value={fallback}
+            other={primary}
+            staged={staged !== null}
+            disabled={route.isPending}
+            error={fallbackError}
+            onChoose={chooseFallback}
+            onModel={(model) => fallback && send({ primary, fallback: { ...fallback, model } })}
+          />
+        </div>
+        <WriteError text={rowError} id='route' />
       </div>
     </div>
   );
@@ -447,17 +470,7 @@ function CandidateControls({
           same provider as the primary: type a model other than {other.model}
         </Text>
       )}
-      {error && (
-        <Text
-          size='micro'
-          variant='errorLabel'
-          role='alert'
-          className='max-w-96'
-          data-write-error={`route-${role}`}
-        >
-          ! {error}
-        </Text>
-      )}
+      <WriteError text={error} id={`route-${role}`} />
     </div>
   );
 }

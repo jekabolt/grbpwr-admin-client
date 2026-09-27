@@ -8,11 +8,14 @@ export function ToggleSwitch({
   checked = false,
   label,
   disabled,
+  invalid,
   onCheckedChange,
 }: {
   checked?: boolean;
   label?: string;
   disabled?: boolean;
+  /** The last write of this switch was refused; the reason stands in the caller's line. */
+  invalid?: boolean;
   onCheckedChange?: (checked: boolean) => void;
 }) {
   const id = useId();
@@ -23,6 +26,7 @@ export function ToggleSwitch({
         id={id}
         checked={checked}
         disabled={disabled}
+        aria-invalid={invalid || undefined}
         onCheckedChange={onCheckedChange}
         className='relative mt-0.5 h-3 w-6 shrink-0 cursor-pointer border border-textColor bg-textColor outline-none data-[state=checked]:bg-bgColor'
       >

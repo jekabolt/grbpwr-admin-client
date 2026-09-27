@@ -125,6 +125,15 @@ function useAiWrite(failed: string) {
   };
 }
 
+// Each write hook hands the view its own normalised refusal (`failure`) beside the mutation: the
+// line under the control that failed reads it; it goes away when that control writes again.
+function withFailure<M extends { error: unknown }>(
+  mutation: M,
+  fallback: string,
+): M & { failure: AiWriteFailure | null } {
+  return { ...mutation, failure: aiWriteFailure(mutation.error, fallback) };
+}
+
 // Common to every write: a refusal is shown at once — a stale version or a validation error is
 // the same answer the second time, and a retried key write would probe the provider twice.
 const WRITE_OPTIONS = { retry: false, scope: WRITE_SCOPE } as const;
@@ -134,7 +143,7 @@ export type UpdateAiProviderVars = { providerKey: string; enabled: boolean };
 // The provider's switch. Off stops new calls through it; its routes stay and skip it.
 export function useUpdateAiProvider() {
   const w = useAiWrite("couldn't switch the provider");
-  return useMutation({
+  const m = useMutation({
     ...WRITE_OPTIONS,
     mutationFn: (vars: UpdateAiProviderVars) =>
       adminService.UpdateAiProvider({
@@ -147,6 +156,7 @@ export function useUpdateAiProvider() {
     onError: w.onError,
     onSettled: w.onSettled,
   });
+  return withFailure(m, "couldn't switch the provider");
 }
 
 // api = the key calls are made with; admin = the reconciliation key a cost API needs (openai,
@@ -161,7 +171,7 @@ export type SetAiProviderKeyVars = { providerKey: string; kind: AiKeyKind; value
 // variables hold it — is dropped from the cache at once instead of lingering for five minutes.
 export function useSetAiProviderKey() {
   const w = useAiWrite("couldn't save the key");
-  return useMutation({
+  const m = useMutation({
     ...WRITE_OPTIONS,
     gcTime: 0,
     mutationFn: (vars: SetAiProviderKeyVars) =>
@@ -177,6 +187,9 @@ export function useSetAiProviderKey() {
     onError: w.onError,
     onSettled: w.onSettled,
   });
+  // The key slot keeps its own copy of the refusal: it resets this mutation the moment the write
+  // settles (the key must not stay in `variables`), and a reset clears `error` with it.
+  return withFailure(m, "couldn't save the key");
 }
 
 // Both defaults go every time; "" leaves that one unchanged.
@@ -184,7 +197,7 @@ export type SetAiDefaultsVars = { chatProviderKey: string; imageProviderKey: str
 
 export function useSetAiDefaults() {
   const w = useAiWrite("couldn't save the defaults");
-  return useMutation({
+  const m = useMutation({
     ...WRITE_OPTIONS,
     mutationFn: (vars: SetAiDefaultsVars) =>
       adminService.SetAiDefaults({
@@ -196,6 +209,7 @@ export function useSetAiDefaults() {
     onError: w.onError,
     onSettled: w.onSettled,
   });
+  return withFailure(m, "couldn't save the defaults");
 }
 
 // One purpose's whole route: the primary (required) and the fallback (absent = none) go together
@@ -208,7 +222,7 @@ export type SetAiRouteVars = {
 
 export function useSetAiRoute() {
   const w = useAiWrite("couldn't save the route");
-  return useMutation({
+  const m = useMutation({
     ...WRITE_OPTIONS,
     mutationFn: (vars: SetAiRouteVars) =>
       adminService.SetAiRoute({
@@ -221,4 +235,5 @@ export function useSetAiRoute() {
     onError: w.onError,
     onSettled: w.onSettled,
   });
+  return withFailure(m, "couldn't save the route");
 }

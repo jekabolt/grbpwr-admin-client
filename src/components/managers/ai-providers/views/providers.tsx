@@ -13,6 +13,7 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { ToggleSwitch } from 'ui/components/toggle-switch';
 import { adminKeyLine, faultLabel, keyLine, probeLine, type KeyLine } from '../utils/format';
+import { WriteError } from './write-error';
 import {
   aiWriteFailure,
   useSetAiProviderKey,
@@ -135,6 +136,7 @@ function ProviderRow({
             <ToggleSwitch
               checked={enabled}
               disabled={toggle.isPending}
+              invalid={!!toggle.failure}
               onCheckedChange={(next) => toggle.mutate({ providerKey: key, enabled: next })}
             />
             <span className='sr-only'>use {name}</span>
@@ -144,6 +146,8 @@ function ProviderRow({
           </label>
         </div>
       </div>
+      {/* Under the switch, at its edge: the refusal belongs to it, not to the provider's name. */}
+      <WriteError text={toggle.failure?.text} id='switch' className='ml-auto text-right' />
 
       {open && (
         <div id={panelId} className='mt-1 mb-1.5 flex flex-col gap-2.5 pl-3.5'>
@@ -351,11 +355,7 @@ function KeySlot({
           save key
         </Button>
       </div>
-      {failure && (
-        <Text size='micro' variant='errorLabel' role='alert' data-write-error={`key-${kind}`}>
-          ! {failure}
-        </Text>
-      )}
+      <WriteError text={failure} id={`key-${kind}`} />
       {result && (
         <Text
           size='micro'

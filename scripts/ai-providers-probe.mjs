@@ -192,6 +192,18 @@ const MUTATIONS = {
     from: '.filter((i) => i.value === selected || choiceFate(config, capability, i.value, other) !== "omit")',
     to: '.filter(() => true)',
   },
+  'route-error-unrendered': {
+    red: 'FE7',
+    what: 'a refused route write leaves no line under its row',
+    from: '(WriteError, { text: rowError, id: "route" })',
+    to: '(WriteError, { text: null, id: "route" })',
+  },
+  'switch-error-unrendered': {
+    red: 'FE7',
+    what: 'a refused switch leaves no line under it',
+    from: '(WriteError, { text: toggle.failure?.text, id: "switch", className: "ml-auto text-right" })',
+    to: '(WriteError, { text: null, id: "switch", className: "ml-auto text-right" })',
+  },
   'clear-sends-old-value': {
     red: 'E5',
     what: 'clear sends the old key (its last four) instead of an empty value',
@@ -472,7 +484,12 @@ await page.route(`${STUB_ORIGIN}/**`, async (r) => {
   const body = raw ? JSON.parse(raw) : null;
   server.calls.push({ method: rq.method(), path: url.pathname, query: url.search, body });
   if (server.delayMs) await new Promise((res) => setTimeout(res, server.delayMs));
-  const { status, body: out } = answer(rq.method(), url.pathname, url.searchParams, body ?? {});
+  // Injected refusals (FE7): the first matching entry answers instead of the server, once.
+  const hit = (server.fail ?? []).findIndex((f) => f.method === rq.method() && f.re.test(url.pathname));
+  const injected = hit >= 0 ? server.fail.splice(hit, 1)[0] : null;
+  const { status, body: out } = injected
+    ? { status: injected.status ?? 400, body: injected.body }
+    : answer(rq.method(), url.pathname, url.searchParams, body ?? {});
   await r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(out) });
 });
 // Anything else — a real backend, a CDN — never answers.
@@ -539,6 +556,22 @@ if (process.argv.includes('--shots')) {
       await f.press('Enter');
       await page.waitForTimeout(300);
       await page.locator('[data-purpose="chat.techcard_analysis"]').scrollIntoViewIfNeeded();
+    });
+    await shoot('errors', w, '/ai-providers', {}, async () => {
+      await page.waitForSelector('[data-purpose="chat.note_markdown"]');
+      server.fail = [
+        { method: 'PATCH', re: /openai$/, status: 400, body: { code: 3, message: 'openai cannot be switched off while it is the only chat provider', details: [] } },
+        { method: 'PUT', re: /defaults$/, status: 400, body: { code: 3, message: 'google does not serve chat on this server', details: [] } },
+        { method: 'PUT', re: /note_markdown$/, status: 400, body: { code: 3, message: 'the model is not served by this provider', details: [] } },
+      ];
+      await row('openai').getByRole('switch').click();
+      await page.waitForTimeout(500);
+      await page.getByRole('combobox', { name: 'default for chat', exact: true }).click();
+      await page.getByRole('option', { name: 'Google', exact: true }).click();
+      await page.waitForTimeout(500);
+      await page.getByRole('combobox', { name: 'Note to markdown primary', exact: true }).click();
+      await page.getByRole('option', { name: 'Anthropic', exact: true }).click();
+      await page.waitForTimeout(600);
     });
     await shoot('keyfail', w, '/ai-providers', { failKey: true }, async () => {
       await page.waitForSelector('[data-provider="openai"]');
@@ -740,6 +773,58 @@ await page.waitForSelector('[data-purpose="chat.note_markdown"]', { timeout: 800
       ck('FE2', w.length === 1 && b.primary?.providerKey === 'openai' && b.primary?.model === 'gpt-5' && b.fallback?.providerKey === 'openai' && b.fallback?.model === 'gpt-5-mini', 'another model → ONE PUT with (openai, gpt-5) → (openai, gpt-5-mini)', JSON.stringify(b));
     }
   }
+}
+
+// FE7 · a refusal stands beside the control that made it, and only there.
+{
+  const refuse = (method, re, message, details = []) => ({ method, re, status: 400, body: { code: 3, message, details } });
+  const alertsIn = (sel) => page.locator(`${sel} [role="alert"]`).allTextContents();
+  const allAlerts = () => page.locator('[data-write-error]').count();
+
+  await mount();
+  await page.waitForSelector('[data-purpose="chat.note_markdown"]', { timeout: 8000 });
+  server.fail = [refuse('PUT', /^\/api\/admin\/ai\/routes\/chat\.note_markdown$/, 'the model is not served by this provider')];
+  await page.getByRole('combobox', { name: 'Note to markdown primary', exact: true }).click();
+  await page.getByRole('option', { name: 'Anthropic', exact: true }).click();
+  await page.waitForTimeout(900);
+  const row1 = await alertsIn('[data-purpose="chat.note_markdown"]');
+  const n1 = await allAlerts();
+  ck('FE7', row1.some((t) => t.includes('the model is not served by this provider')) && n1 === 1, 'a 400 on a route row: the sentence under THAT row, nowhere else', `${JSON.stringify(row1)}; lines on page ${n1}`);
+  // The next successful write of that control clears it.
+  await page.getByRole('combobox', { name: 'Note to markdown primary', exact: true }).click();
+  await page.getByRole('option', { name: 'Google', exact: true }).click();
+  await page.waitForTimeout(900);
+  ck('FE7', (await alertsIn('[data-purpose="chat.note_markdown"]')).length === 0, 'the next successful write of the row clears it');
+
+  // A field-tagged refusal lands under its candidate: the server's own same_as_primary.
+  const same = 'fallback: same_as_primary; the fallback is the primary itself; choose another provider or model, or no fallback';
+  server.fail = [
+    refuse('PUT', /^\/api\/admin\/ai\/routes\/chat\.email_translate$/, same, [
+      { '@type': 'type.googleapis.com/google.rpc.BadRequest', fieldViolations: [{ field: 'fallback', description: 'same_as_primary; the fallback is the primary itself; choose another provider or model, or no fallback' }] },
+    ]),
+  ];
+  await page.getByRole('combobox', { name: 'Email translate fallback', exact: true }).click();
+  await page.getByRole('option', { name: 'Anthropic', exact: true }).click();
+  await page.waitForTimeout(900);
+  const fb = await alertsIn('[data-purpose="chat.email_translate"] [data-candidate="fallback"]');
+  const inv = await page.getByRole('combobox', { name: 'Email translate fallback', exact: true }).getAttribute('aria-invalid');
+  ck('FE7', fb.some((t) => t === '! the fallback is the primary itself; choose another provider or model, or no fallback') && inv === 'true', 'the server\'s same_as_primary stands under the fallback, its select marked invalid', `${JSON.stringify(fb)} aria-invalid=${inv}`);
+
+  // The switch.
+  server.fail = [refuse('PATCH', /^\/api\/admin\/ai\/providers\/openai$/, 'openai cannot be switched off while it is the only chat provider')];
+  await row('openai').getByRole('switch').click();
+  await page.waitForTimeout(900);
+  const sw = await alertsIn('[data-provider="openai"]');
+  const swInv = await row('openai').getByRole('switch').getAttribute('aria-invalid');
+  ck('FE7', sw.some((t) => t.includes('cannot be switched off')) && swInv === 'true', 'a refused switch: the sentence under the switch, the switch marked invalid', `${JSON.stringify(sw)} aria-invalid=${swInv}`);
+
+  // A default select.
+  server.fail = [refuse('PUT', /^\/api\/admin\/ai\/defaults$/, 'google does not serve chat on this server')];
+  await page.getByRole('combobox', { name: 'default for chat', exact: true }).click();
+  await page.getByRole('option', { name: 'Google', exact: true }).click();
+  await page.waitForTimeout(900);
+  const dc = await alertsIn('[data-route-defaults]');
+  ck('FE7', dc.length === 1 && dc[0].includes('google does not serve chat') && (await page.locator('[data-write-error="default-chat"]').count()) === 1, 'a refused default: the sentence under THAT select', JSON.stringify(dc));
 }
 
 // ═══ D · SPEND ═════════════════════════════════════════════════════════════════════════════════
