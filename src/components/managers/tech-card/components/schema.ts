@@ -3054,13 +3054,20 @@ export function mapFormToTechCardInsert(
   // сохранение: предикат пустоты спрашивает его для каждого ряда, а сами списки за время одного
   // маппинга не меняются.
   const referencedCallouts = referencedCalloutNumbers(data);
+  // B-01 · a reference to a BOM line this payload does not carry never leaves. The server refuses
+  // an unknown line_key by name and fails the WHOLE save with it (resolveBomRef), and no screen can
+  // show such a key to take it off: the operation's chip row offers only existing lines, the fabric
+  // map is round-tripped data this admin does not edit. Dangling by definition, so the write drops
+  // it (27.09, B-01). Trimmed exact match — the way the server looks the key up.
+  const liveBomKey = (lineKey?: string): string => {
+    const lk = (lineKey || '').trim();
+    return lk && bomIndexByKey.has(lk) ? lk : '';
+  };
   const outBomRef = (
     lineKey?: string,
   ): { bomLineKey: string | undefined; bomItemIndex: number | undefined } => {
-    const lk = (lineKey || '').trim();
+    const lk = liveBomKey(lineKey);
     if (!lk) return { bomLineKey: undefined, bomItemIndex: undefined };
-    // idx undefined = the referenced line was removed (dangling) — still send the key; the server
-    // resolves/RESTRICTs and returns a field-tagged error rather than silently mis-mapping.
     return { bomLineKey: lk, bomItemIndex: bomIndexByKey.get(lk) };
   };
   return {
@@ -3290,7 +3297,12 @@ export function mapFormToTechCardInsert(
           // A cell that CARRIES something but resolves no colourway is NOT dropped here: the schema
           // blocks the save on it (pieceSchema's superRefine), because dropping it deleted content
           // this admin has no editor for and the operator never saw.
-          .filter((m) => !!m.bomLineKey?.trim() || !!m.fusingBomLineKey?.trim() || !!m.note?.trim())
+          // A key to a line this payload does not carry counts as no fabric / no fusing (B-01,
+          // `liveBomKey`): a cell holding nothing else would go out empty, so it is not sent.
+          .filter(
+            (m) =>
+              !!liveBomKey(m.bomLineKey) || !!liveBomKey(m.fusingBomLineKey) || !!m.note?.trim(),
+          )
           .map((m) => {
             const fabric = outBomRef(m.bomLineKey);
             const fusing = outBomRef(m.fusingBomLineKey);
@@ -3481,7 +3493,8 @@ export function mapFormToTechCardInsert(
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
     construction: mapConstructionOut(data.construction, !!original?.construction),
     operations: (data.operations ?? []).map((o, i) => {
-      const opBomKeys = (o.bomLineKeys ?? []).map((k) => k.trim()).filter(Boolean);
+      // Only lines this payload carries: a dangling key fails the whole save (B-01, liveBomKey).
+      const opBomKeys = (o.bomLineKeys ?? []).map((k) => liveBomKey(k)).filter(Boolean);
       // An override goes out ONLY when it is set. An empty control means «inherit the card
       // standard», and sending 0 for it would state the opposite — 0 is the real setting «cut on
       // the line as drawn». That distinction is the entire point of the cascade, so it is preserved
