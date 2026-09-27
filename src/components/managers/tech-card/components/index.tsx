@@ -2831,10 +2831,8 @@ export function TechCardForm({
             ) : null}
             {isEditMode && numId && (
               <>
-                <Button asChild variant='underline' size='sm'>
-                  <Link to={`/tech-cards/${numId}/print`} target='_blank' rel='noopener'>
-                    pdf
-                  </Link>
+                <Button asChild variant='secondary' size='sm'>
+                  <Link to={`/tech-cards/${numId}/print`}>pdf</Link>
                 </Button>
                 {/* Гейт — ПРАВО ЗАПИСИ, тот же `canWrite(SECTION.techCards)`, что у соседних
                     пишущих действий шапки, а не право чтения карточки: архив уносит приватные
