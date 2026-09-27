@@ -12,12 +12,16 @@ import Text from './text';
 
 export function MobileNavMenu() {
   const [open, setOpen] = useState(false);
-  const { canRead, account } = usePermissions();
+  const { canRead, isSuper, account } = usePermissions();
   const { pathname } = useLocation();
 
-  // Same grouped source as desktop; drop unreadable items, then drop empty groups.
+  // Same grouped source and same filter as desktop: drop unreadable items and, for a non-super
+  // account, super-only ones; then drop empty groups.
   const groups = [...NAV_GROUPS, ADMIN_GROUP]
-    .map((group) => ({ ...group, items: group.items.filter((item) => canRead(item.section)) }))
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => (isSuper || !item.superOnly) && canRead(item.section)),
+    }))
     .filter((group) => group.items.length > 0);
 
   // «Мой профиль» — вне гейтов и вне `groups`: он не привязан ни к какой секции, и человек

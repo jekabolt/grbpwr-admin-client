@@ -7,6 +7,10 @@ export type NavItem = {
   label: string;
   route: string;
   section?: string;
+  // Shown to super accounts only, whatever the section grants say. For screens the backend
+  // gates on `is_super` itself (rbac SuperOnly) rather than on a section: a section key would
+  // fail open for a scoped account and hand it a menu entry whose every read is refused.
+  superOnly?: boolean;
 };
 
 // A labeled group of destinations. On desktop each group is a dropdown in the top
@@ -80,6 +84,8 @@ export enum ROUTES {
   customOrders = '/custom-orders',
   customerSupport = '/customer-support',
   shipping = '/shipping',
+  // admin → AI providers: keys, routes and the spend report. Super only — see ADMIN_GROUP.
+  aiProviders = '/ai-providers',
   members = '/members',
   memberDetails = '/members/:id',
   tierConfig = '/tier-config',
@@ -257,6 +263,11 @@ export const ADMIN_GROUP: NavGroup = {
     { label: 'dictionaries', route: ROUTES.dictionaries, section: SECTION.settings },
     { label: 'shipping', route: ROUTES.shipping, section: SECTION.shipping },
     { label: 'accounts', route: ROUTES.accounts, section: SECTION.accounts },
+    // Keys, routes and the spend report are money: every AiProviders RPC is SuperOnly on the
+    // server (no section, owner decision D-03), so the entry is drawn for super accounts only.
+    // Last in the last group, and skipped by `homeRoute` for everyone else, so it can never
+    // become a scoped account's landing page.
+    { label: 'ai providers', route: ROUTES.aiProviders, superOnly: true },
   ],
 };
 
