@@ -6,7 +6,8 @@
 //
 //   A  the five row states: no key · env key · stored key · fault (+ paused) · switched off
 //   B  a switch sends ONE PATCH carrying expected_version as the config's own string
-//   C  a route change sends ONE PUT with the whole route (fallback kept); a model is committed once
+//   C  a route change sends ONE PUT with the whole route (fallback kept); a model is committed once;
+//      a route through a switched-off provider says so on its row
 //   D  spend: an absent Decimal is —, a present "0" is 0.00; the preset asks for the right days
 //   E  the edges: stale → "reload — the config changed" + a re-read; save key → inline probe, field
 //      emptied, secret nowhere on screen; no master key → callout + fields off; non-super → /me;
@@ -103,6 +104,18 @@ const MUTATIONS = {
     what: 'one route change sends two writes',
     from: 'route.mutate({ purpose: key, primary: next.primary, fallback: next.fallback });',
     to: '{ route.mutate({ purpose: key, primary: next.primary, fallback: next.fallback }); route.mutate({ purpose: key, primary: next.primary, fallback: next.fallback }); }',
+  },
+  'off-note-from-fallback': {
+    red: 'C4',
+    what: 'the "primary provider is off" note is computed from the fallback',
+    from: 'const primaryOff = providerOff(config, capability, primary);',
+    to: 'const primaryOff = providerOff(config, capability, fallback);',
+  },
+  'off-ignores-default': {
+    red: 'C4',
+    what: 'a "default" candidate is never checked against the default provider\'s switch',
+    from: 'const key = c.providerKey || defaultKeyFor(config, capability) || "";',
+    to: 'const key = c.providerKey;',
   },
   'model-no-commit': {
     red: 'C2',
@@ -585,6 +598,33 @@ await page.waitForSelector('[data-purpose="chat.note_markdown"]', { timeout: 800
   await page.waitForTimeout(700);
   const w = writes('PUT', /^\/api\/admin\/ai\/routes\//);
   ck('C3', w.length === 1 && !('fallback' in (w[0]?.body ?? {})), 'fallback "none" → the PUT carries no fallback', JSON.stringify(w[0]?.body));
+}
+
+// C4 · a route through a switched-off provider says so on its row, in the fault pill's colour.
+{
+  await mount();
+  await page.waitForSelector('[data-purpose="threed"]', { timeout: 8000 });
+  const warn = async (purpose) =>
+    page.locator(`[data-purpose="${purpose}"] [data-route-warning]`).evaluateAll((els) => els.map((e) => (e.textContent ?? '').trim()));
+  const threed = await warn('threed');
+  const healthy = await warn('chat.note_markdown');
+  ck('C4', JSON.stringify(threed) === '["primary provider is off"]', 'primary on fal while fal is off → "primary provider is off"', JSON.stringify(threed));
+  ck('C4', healthy.length === 0, 'a purpose on switched-on providers carries no note', JSON.stringify(healthy));
+  const colours = await page.evaluate(() => {
+    const note = document.querySelector('[data-purpose="threed"] [data-route-warning]');
+    const pill = Array.from(document.querySelectorAll('[data-provider="openrouter"] span')).find((s) => s.textContent === 'out of credits');
+    return [note && getComputedStyle(note).color, pill && getComputedStyle(pill).color];
+  });
+  ck('C4', !!colours[0] && colours[0] === colours[1], 'in the fault pill\'s colour', JSON.stringify(colours));
+
+  // "" is the default provider: with openrouter (both defaults) and openai off, the chat purpose
+  // warns for both candidates and the images purpose for its default primary.
+  await mount({ patch: { openrouter: { enabled: false }, openai: { enabled: false } } });
+  await page.waitForSelector('[data-purpose="threed"]', { timeout: 8000 });
+  const chat = await warn('chat.note_markdown');
+  const images = await warn('image.generate');
+  ck('C4', JSON.stringify(chat) === '["primary provider is off","fallback provider is off"]', '"default" primary (→ openrouter, off) and fallback openai (off) both warn', JSON.stringify(chat));
+  ck('C4', JSON.stringify(images) === '["primary provider is off"]', 'the images purpose on "default" (→ openrouter, off) warns', JSON.stringify(images));
 }
 
 // ═══ D · SPEND ═════════════════════════════════════════════════════════════════════════════════

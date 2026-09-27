@@ -40,6 +40,20 @@ const serves = (p: AiProviderInfo, capability: string) =>
 const labelOf = (providers: AiProviderInfo[], key: string) =>
   providers.find((p) => p.key === key)?.label || key;
 
+// A candidate whose provider is switched off: its calls walk past it. "" is the capability's default
+// provider, so it is that provider's switch that counts; a capability with no default names no one.
+function providerOff(
+  config: GetAiProvidersConfigResponse,
+  capability: string,
+  c: Candidate | undefined,
+): boolean {
+  if (!c) return false;
+  const key = c.providerKey || defaultKeyFor(config, capability) || '';
+  if (!key) return false;
+  const p = (config.providers ?? []).find((x) => x.key === key);
+  return !!p && !p.enabled;
+}
+
 // Only chat and image have a default provider (proto: AiRouteCandidate.provider_key).
 function defaultKeyFor(config: GetAiProvidersConfigResponse, capability: string): string | null {
   if (capability === 'chat') return config.defaultChatProviderKey ?? '';
@@ -185,6 +199,9 @@ function PurposeRow({
 
   const send = (next: { primary: Candidate; fallback?: Candidate }) =>
     route.mutate({ purpose: key, primary: next.primary, fallback: next.fallback });
+  const capability = purpose.capability ?? '';
+  const primaryOff = providerOff(config, capability, primary);
+  const fallbackOff = providerOff(config, capability, fallback);
 
   return (
     <div
@@ -196,6 +213,18 @@ function PurposeRow({
         {purpose.hint && (
           <Text size='micro' variant='label'>
             {purpose.hint}
+          </Text>
+        )}
+        {/* The fault pill's colour (attention), said in words — no pill: this is the route's
+            state, not the provider's, and the provider's own row already carries its switch. */}
+        {primaryOff && (
+          <Text size='micro' variant='label' className='text-warning' data-route-warning='primary'>
+            primary provider is off
+          </Text>
+        )}
+        {fallbackOff && (
+          <Text size='micro' variant='label' className='text-warning' data-route-warning='fallback'>
+            fallback provider is off
           </Text>
         )}
       </div>
