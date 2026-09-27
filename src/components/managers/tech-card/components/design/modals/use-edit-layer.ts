@@ -104,19 +104,39 @@ export function useEditLayerWrites(techCardId: number) {
    * THE CLIENT RASTERISES AND THE SERVER RECORDS THE PROVENANCE — there is no vector renderer
    * anywhere in the backend and the strokes are this client's own format, so the only place that
    * can honestly turn them into pixels is the canvas that drew them.
+   *
+   * ═══ «OVERWRITE» IS THIS SAME VERB, AND EVERY PRESS CARRIES ITS KEY (27.09, O-53 phase 2) ════
+   *
+   * `replacePictureId` is the answer «overwrite» of the workbench's question (`VectorModal`,
+   * `replace`): the edit is filed as the same sibling and, in the same transaction, takes that
+   * picture's place — its bench slot moves onto the edit and it is stamped `replaced_by`. Absent is
+   * «beside», byte for byte what this verb always did: `undefined` never reaches the wire
+   * (JSON.stringify drops it), so «save as new» and every edit from the history send no such field.
+   *
+   * `clientRequestId` names the GESTURE — one per answer, minted by the caller and handed in again
+   * when the same answer over the same drawing is retried, so a lost response cannot file the edit
+   * twice (the server answers the replay with the picture the first attempt filed). It goes on
+   * EVERY flatten now, beside or in place: the backend that reads it is live (cbf69dc), and a
+   * server older than it answers 400 to the field — this bundle must not reach a backend without
+   * it.
    */
   const flattenLayer = useMutation({
-    mutationFn: (input: { layerId: number; expectedRev: number; mediaId: number }) =>
+    mutationFn: (input: {
+      layerId: number;
+      expectedRev: number;
+      mediaId: number;
+      /** «overwrite»: the picture this edit takes the place of. Absent = beside its base. */
+      replacePictureId?: number;
+      /** The gesture's idempotency key — the same on a retry of the same answer. */
+      clientRequestId: string;
+    }) =>
       adminService.FlattenDesignEditLayer({
         techCardId,
         layerId: input.layerId,
         expectedRev: input.expectedRev,
         mediaId: input.mediaId,
-        // O-53's «overwrite» and gesture key are not sent from here: this verb files the edit
-        // BESIDE its base, as before. `undefined` never reaches the wire (JSON.stringify drops
-        // it), and that is load-bearing — a server older than these fields answers 400 to either.
-        replacePictureId: undefined,
-        clientRequestId: undefined,
+        replacePictureId: input.replacePictureId || undefined,
+        clientRequestId: input.clientRequestId,
       }),
     onSuccess: invalidate,
   });
@@ -165,6 +185,41 @@ export async function uploadRaster(dataUrl: string): Promise<common_MediaFull> {
   const media = response.media;
   if (!media?.id) throw new Error('the raster went up but came back without an id');
   return media;
+}
+
+/**
+ * WHICH REFUSAL A FLATTEN GOT, by the code the server's `designError` attaches as a
+ * `google.rpc.ErrorInfo` (its `reason`, plus `head_picture_id` on `already_replaced` — the picture
+ * standing in the named one's place now). The message is the fallback: a gateway that dropped the
+ * details still carries `design: <code>: …` in the words.
+ */
+export function flattenRefusal(error: unknown): { reason: string; headPictureId: number } {
+  const details = (error as { details?: unknown } | null)?.details;
+  if (Array.isArray(details)) {
+    for (const d of details) {
+      if (!d || typeof d !== 'object') continue;
+      const type = (d as { '@type'?: unknown })['@type'];
+      const reason = (d as { reason?: unknown }).reason;
+      if (typeof type !== 'string' || !type.endsWith('ErrorInfo') || typeof reason !== 'string')
+        continue;
+      const metadata = (d as { metadata?: Record<string, unknown> }).metadata ?? {};
+      return { reason, headPictureId: Number(metadata.head_picture_id) || 0 };
+    }
+  }
+  const raw = error instanceof Error ? error.message : '';
+  const known = ['already_replaced', 'cut_sheet', 'replace_mismatch', 'layer_rev_mismatch'];
+  return { reason: known.find((code) => raw.includes(code)) ?? '', headPictureId: 0 };
+}
+
+/**
+ * DID THE SERVER ANSWER AT ALL. No status is a request that never came back (`Failed to fetch`, a
+ * timeout, a dropped connection — `api.ts` rethrows those without one); a 5xx is a gateway or a
+ * server that fell over mid-way. Either way the flatten MAY have been filed, and the only honest
+ * next step is a retry of the same gesture under the same key.
+ */
+export function flattenOutcomeUnknown(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status !== 'number' || status <= 0 || status >= 500;
 }
 
 /**

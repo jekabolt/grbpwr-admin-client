@@ -21,7 +21,7 @@ import { FIT_INSET, FIT_MIN, fitView, revealDelta, toWorld, zoomAt, type View } 
 import { exactPalette, isMapInk, planHex } from '../colour-plan/model';
 import { pictureHandle } from '../handles';
 import { provenanceLabel, readProvenance } from '../provenance';
-import { findMediaUrlInBand, useDesignWrites } from '../use-design-band';
+import { findMediaUrlInBand, newClientRequestId, useDesignWrites } from '../use-design-band';
 import { RASTER_FALLBACK_W, composeScene, pickSceneInk } from './rasterise-layer';
 import {
   clearImageBytes,
@@ -39,6 +39,8 @@ import {
 } from './vector-image-stroke';
 import {
   findLayerForMedia,
+  flattenOutcomeUnknown,
+  flattenRefusal,
   layerRasterUrl,
   layerRefusalText,
   uploadRaster,
@@ -957,6 +959,37 @@ function seedInitialImage(
  * входящая достраивается зеркалом» не могла выразить Alt-размыкание пары (две независимые
  * величины не восстановить из одной) и переехала туда, вырастя, — см. довод в шапке того файла. */
 
+/**
+ * ONE PRESS OF A SAVE, AS THE FLATTEN SENDS IT — kept by `saveAsPicture` while the outcome of that
+ * flatten is unknown, so a retry of the same answer resends exactly this (see there).
+ */
+type FlattenGesture = {
+  /** `client_request_id` — the server's key for this gesture. */
+  key: string;
+  /** The picture the edit takes the place of; 0 — beside its base. */
+  replacePictureId: number;
+  layerId: number;
+  /** The revision the layer was saved at for this gesture. */
+  expectedRev: number;
+  /** The raster uploaded for this gesture. */
+  mediaId: number;
+  /** The layer document that save wrote — «the same drawing» is this, compared whole. */
+  doc: string;
+};
+
+/**
+ * What the WORKBENCH hands the editor about the picture it was opened over (27.09, O-53 phase 2):
+ * which picture an «overwrite» takes the place of, the slot that moves with it, and why overwrite
+ * is closed, when it is.
+ */
+export type VectorReplace = {
+  pictureId: number;
+  /** The bench slot holding the picture, in prose (`front`, `render · front`); null — none. */
+  slotLabel: string | null;
+  /** Why overwrite is closed, as the end of «overwrite is closed: …»; null — open. */
+  closed: string | null;
+};
+
 export function VectorModal({
   open,
   onOpenChange,
@@ -964,6 +997,7 @@ export function VectorModal({
   band,
   base,
   slot,
+  replace,
   disabled,
   onFlattened,
   mode = 'edit',
@@ -984,6 +1018,17 @@ export function VectorModal({
    * that slot, so nothing is guessed. `slotRev` is the CAS token read with the band.
    */
   slot?: { ref: DesignBenchSlotRef; label: string; slotRev: number } | null;
+  /**
+   * ═══ «OVERWRITE OR SAVE AS NEW» — THE WORKBENCH'S QUESTION (27.09, O-53 phase 2) ═══════════════
+   *
+   * Set by the latest-generation workbench only (`run-tile.tsx`, 07-FLAT-WORKBENCH.md §3b–3d). The
+   * picture button then reads «save ›» and opens a question BEFORE anything is written — «save the
+   * edit»: «overwrite» files the edit in this picture's place (the slot that holds it moves onto
+   * the edit, the original stays in the history), «save as new» files it beside the original, ✕
+   * goes back to drawing. `closed` disables «overwrite» and says why. Absent — every other host,
+   * the history's edits among them — the button stays «save as a new picture», always new.
+   */
+  replace?: VectorReplace | null;
   disabled?: boolean;
   /** The new picture, for a caller that wants to walk to it. */
   onFlattened?: (picture: common_DesignPicture) => void;
@@ -1048,7 +1093,7 @@ export function VectorModal({
 }) {
   const { showMessage } = useSnackBarStore();
   const { setBenchSlot } = useDesignWrites(techCardId);
-  const { saveLayer, flattenLayer } = useEditLayerWrites(techCardId);
+  const { saveLayer, flattenLayer, invalidate: rereadBand } = useEditLayerWrites(techCardId);
 
   /** Режим карты цветов — читается двумя десятками мест ниже, поэтому назван один раз здесь. */
   const colourMode = mode === 'colour';
@@ -1236,6 +1281,10 @@ export function VectorModal({
   const [fileMediaId, setFileMediaId] = useState(0);
   const [fileUrl, setFileUrl] = useState('');
   const [confirmExit, setConfirmExit] = useState(false);
+  /** The workbench's question is open (`replace`). Nothing is written while it stands. */
+  const [asking, setAsking] = useState(false);
+  /** The flatten whose outcome is unknown — its retry is the same gesture (`saveAsPicture`). */
+  const gestureRef = useRef<FlattenGesture | null>(null);
   const [zoomPct, setZoomPct] = useState(100);
   const [panning, setPanning] = useState(false);
   const [spaceHeld, setSpaceHeld] = useState(false);
@@ -6184,52 +6233,105 @@ export function VectorModal({
     }
   };
 
-  const saveAsPicture = async () => {
+  /**
+   * ═══ FILE THE EDIT AS A PICTURE — BESIDE ITS BASE, OR IN ITS PLACE (27.09, O-53 phase 2) ══════
+   *
+   * `answer` is what the person chose. 'new' files the edit BESIDE its base — every host, and the
+   * only thing this editor did before the workbench's question. 'overwrite' exists only under
+   * `replace` with nothing closing it: the same flatten, naming `replace.pictureId`, and the edit
+   * takes that picture's place in the latest generation (its bench slot moves onto the edit, the
+   * picture is stamped `replaced_by`; nothing is deleted — the history keeps it).
+   *
+   * ONE KEY PER GESTURE, AND A RETRY IS THE SAME GESTURE. The flatten carries `client_request_id`,
+   * minted when the raster is ready to file. When the flatten fails without a verdict (no answer, a
+   * 5xx — `flattenOutcomeUnknown`) the gesture is KEPT, and the same answer over the same drawing
+   * resends it whole: the same key, the same revision, the same uploaded raster, with no second
+   * save of the layer. That is what lets the server recognise the replay and answer it with the
+   * picture the first attempt filed — a fresh save would move the layer's rev, and a key spent on
+   * another rev is refused as a different flatten. Another answer, a stroke drawn since, or a save
+   * of the layer in between is a NEW gesture with a new key.
+   */
+  const saveAsPicture = async (answer: 'new' | 'overwrite' = 'new') => {
     if (frozen || tooLarge || !anyContent || busy) return;
+    const replacing = answer === 'overwrite' ? replace ?? null : null;
+    // The closed door is disabled; a press that reaches here anyway files nothing.
+    if (answer === 'overwrite' && (!replacing || replacing.closed || !replacing.pictureId)) return;
+    const replacePictureId = replacing?.pictureId ?? 0;
     await settleFloatFirst();
     setRefusal(null);
+    /* «THE SAME DRAWING» IS READ FROM THE REFS, AFTER THE FLOAT IS SETTLED: a paste this very press
+       just put down is a change, and the render-time `dirty` does not know about it yet. The whole
+       document is compared (strokes, the sheet's ratio, placed pictures) plus the pixel channel. */
+    const docNow = () => joinImageDoc(writeLayer(strokesRef.current, ratio), imagesRef.current);
+    const pending = gestureRef.current;
+    const sameGesture =
+      !!pending &&
+      pending.replacePictureId === replacePictureId &&
+      pending.layerId === layerRef.current.id &&
+      pending.expectedRev === layerRef.current.rev &&
+      pending.doc === docNow() &&
+      !rasterDirtyRef.current;
     try {
-      setBusy('saving the drawing…');
-      const id = await persist();
+      let gesture = sameGesture ? pending : null;
+      if (!gesture) {
+        gestureRef.current = null;
+        setBusy('saving the drawing…');
+        const doc = docNow();
+        const id = await persist();
 
-      setBusy('rasterising…');
-      const flat = await rasterise();
-      if (flat.missing.length) {
-        /* ОТКАЗ ЦЕЛИКОМ, А НЕ КАРТИНКА С ДЫРКОЙ. Слой уже сохранён выше — это правда, и она
-           названа: терять человеку нечего, а сплющенная вещь без пуговицы уехала бы в верстак
-           и оттуда в тех-пакет, где её никто уже не опознает как неполную. */
-        /* ⚠ И ПОЛКА БАЙТОВ ПРО ЭТИ АДРЕСА ЗАБЫВАЕТСЯ. Отказ обещает «press this again», и обещание
-           обязано быть выполнимым: без этого повтор спрашивал бы у полки тот же ответ. Полка и
-           сама не помнит провалов (см. `loadImageBytes`), но обещание не вправе опираться на то,
-           что у соседнего модуля такая политика — оно опирается на этот вызов. */
-        for (const i of flat.missing) forgetImageBytes(imagesRef.current[i]?.src ?? '');
-        setRefusal(
-          `${flat.missing.length === 1 ? 'one of the placed pictures' : `${flat.missing.length} of the placed pictures`} could not be fetched, so the flat would come out with a hole where it stands. The drawing itself IS saved. Remove the picture the sheet marks as gone, or wait for the media server, then press this again.`,
-        );
-        return;
-      }
-      if (flat.missingFile) {
-        /* ТОТ ЖЕ ОТКАЗ ПРО ФАЙЛ СЛОЯ. На плате он и есть чертёж; сплющить без него значило бы
-           отдать наружу подложку с пуговицами и назвать её вещью. */
-        setRefusal(
-          'the vector file of this layer could not be fetched, and it IS the drawing on the sheet — flattening without it would hand out the plate with the marks and no drawing. The layer itself IS saved. Wait for the media server and press this again.',
-        );
-        return;
-      }
+        setBusy('rasterising…');
+        const flat = await rasterise();
+        if (flat.missing.length) {
+          /* ОТКАЗ ЦЕЛИКОМ, А НЕ КАРТИНКА С ДЫРКОЙ. Слой уже сохранён выше — это правда, и она
+             названа: терять человеку нечего, а сплющенная вещь без пуговицы уехала бы в верстак
+             и оттуда в тех-пакет, где её никто уже не опознает как неполную. */
+          /* ⚠ И ПОЛКА БАЙТОВ ПРО ЭТИ АДРЕСА ЗАБЫВАЕТСЯ. Отказ обещает «press this again», и
+             обещание обязано быть выполнимым: без этого повтор спрашивал бы у полки тот же
+             ответ. Полка и сама не помнит провалов (см. `loadImageBytes`), но обещание не вправе
+             опираться на то, что у соседнего модуля такая политика — оно опирается на этот
+             вызов. */
+          for (const i of flat.missing) forgetImageBytes(imagesRef.current[i]?.src ?? '');
+          setRefusal(
+            `${flat.missing.length === 1 ? 'one of the placed pictures' : `${flat.missing.length} of the placed pictures`} could not be fetched, so the flat would come out with a hole where it stands. The drawing itself IS saved. Remove the picture the sheet marks as gone, or wait for the media server, then press this again.`,
+          );
+          return;
+        }
+        if (flat.missingFile) {
+          /* ТОТ ЖЕ ОТКАЗ ПРО ФАЙЛ СЛОЯ. На плате он и есть чертёж; сплющить без него значило бы
+             отдать наружу подложку с пуговицами и назвать её вещью. */
+          setRefusal(
+            'the vector file of this layer could not be fetched, and it IS the drawing on the sheet — flattening without it would hand out the plate with the marks and no drawing. The layer itself IS saved. Wait for the media server and press this again.',
+          );
+          return;
+        }
 
-      setBusy('uploading the picture…');
-      const media = await uploadRaster(flat.dataUrl);
+        setBusy('uploading the picture…');
+        const media = await uploadRaster(flat.dataUrl);
+
+        gesture = {
+          key: newClientRequestId(),
+          replacePictureId,
+          layerId: id,
+          expectedRev: layerRef.current.rev,
+          mediaId: media.id ?? 0,
+          doc,
+        };
+        gestureRef.current = gesture;
+      }
 
       setBusy('filing it into the band…');
       const res = await flattenLayer.mutateAsync({
-        layerId: id,
-        expectedRev: layerRef.current.rev,
-        mediaId: media.id ?? 0,
+        layerId: gesture.layerId,
+        expectedRev: gesture.expectedRev,
+        mediaId: gesture.mediaId,
+        replacePictureId: gesture.replacePictureId || undefined,
+        clientRequestId: gesture.key,
       });
+      gestureRef.current = null;
       const picture = res.picture;
 
       let placed = false;
-      if (slot && picture?.id) {
+      if (slot && !replacing && picture?.id) {
         setBusy(`putting it into ${slot.label}…`);
         // A SEPARATE CALL, AND A FAILURE HERE IS NOT A LOST DRAWING — by this point the picture
         // EXISTS in the band; a slot CAS refusal must not read as «the drawing did not go through».
@@ -6248,15 +6350,43 @@ export function VectorModal({
         }
       }
 
-      if (placed) showMessage(`saved and put into ${slot?.label}`, 'success');
+      if (replacing)
+        showMessage(
+          `saved — the edit took the original’s place${replacing.slotLabel ? ` in the ${replacing.slotLabel} slot` : ''}`,
+          'success',
+        );
+      else if (placed) showMessage(`saved and put into ${slot?.label}`, 'success');
+      else if (replace) showMessage('saved as a new picture beside the original', 'success');
       else if (!slot) showMessage('saved as a new picture', 'success');
       if (picture) onFlattened?.(picture);
       onOpenChange(false);
     } catch (error) {
-      setRefusal(layerRefusalText(error));
+      // A verdict ends the gesture; only a flatten that may have been filed keeps its key.
+      if (!flattenOutcomeUnknown(error)) gestureRef.current = null;
+      if (flattenRefusal(error).reason === 'already_replaced') {
+        /* SOMEBODY'S EDIT TOOK THIS PICTURE'S PLACE FIRST — nothing was filed. The band is re-read
+           so the workbench shows what stands there now once this editor closes (the picture under
+           an open editor is not swapped under it, `outputPlan`'s `keep`); the drawing stays on
+           screen and saved as the layer, and «save as new» is still open. */
+        rereadBand();
+        showMessage('this picture was already replaced — re-read', 'error');
+      } else if (gestureRef.current) {
+        setRefusal(
+          'no answer came back from the server, so the picture may already be filed. Saving it the same way again is safe: the retry carries the same key and cannot file the edit twice.',
+        );
+      } else {
+        // cut_sheet, replace_mismatch, a refused slot move — the server's own words (400).
+        setRefusal(layerRefusalText(error));
+      }
     } finally {
       setBusy(null);
     }
+  };
+
+  /** «save ›» under `replace`: the question opens; nothing is written until it is answered. */
+  const askToSave = () => {
+    if (frozen || tooLarge || !anyContent || busy) return;
+    setAsking(true);
   };
 
   const saveBlob = (blob: Blob) => {
@@ -6641,11 +6771,18 @@ export function VectorModal({
    */
   const anyCallout = unreadable || readPending || readFailed || !!refusal || tooLarge || fileOnly;
 
-  const saveNote = base
-    ? `saving writes the vector over «${pictureHandle(base)}» into a NEW picture — a sibling of the base${
-        slot ? `, taking the ${slot.label} slot` : ''
-      }. The original is never overwritten. «Save the drawing only» keeps the strokes and makes no picture.`
-    : 'no raster underneath: the vector base is the drawing itself — it lands on the upload shelf as its own single-picture batch.';
+  /* ON THE WORKBENCH THE NOTE SAYS WHAT THE QUESTION WILL ASK (O-53 phase 2): «never overwritten»
+     beside an «overwrite» door would read as a contradiction — the pixels are still never changed,
+     but the edit may take the original's place. */
+  const saveNote = !base
+    ? 'no raster underneath: the vector base is the drawing itself — it lands on the upload shelf as its own single-picture batch.'
+    : replace
+      ? `saving asks first: the edit takes the place of «${pictureHandle(base)}» in the latest generation${
+          replace.slotLabel ? ` and in the ${replace.slotLabel} slot` : ''
+        }, or stands beside it as a NEW picture. Either way the original stays in the history, untouched. «Save the drawing only» keeps the strokes and makes no picture.`
+      : `saving writes the vector over «${pictureHandle(base)}» into a NEW picture — a sibling of the base${
+          slot ? `, taking the ${slot.label} slot` : ''
+        }. The original is never overwritten. «Save the drawing only» keeps the strokes and makes no picture.`;
 
   /**
    * ГДЕ СТОИТ ШАБЛОН — ОДИН ОТВЕТ НА ДВА ЭЛЕМЕНТА (над растром и под ним).
@@ -6941,7 +7078,10 @@ export function VectorModal({
                 <>
                   <Pill tone='ink'>base: {pictureHandle(base)}</Pill>
                   <Text size='nano' variant='label' component='span' className='hidden lg:inline'>
-                    {provenanceLabel(readProvenance(base))} · the original is never overwritten
+                    {provenanceLabel(readProvenance(base))} ·{' '}
+                    {replace
+                      ? 'the original stays in the history'
+                      : 'the original is never overwritten'}
                   </Text>
                 </>
               ) : (
@@ -7087,9 +7227,15 @@ export function VectorModal({
                         variant='main'
                         size='sm'
                         disabled={!ready}
-                        onClick={saveAsPicture}
+                        data-save-picture={replace ? 'ask' : 'new'}
+                        onClick={replace ? askToSave : () => void saveAsPicture('new')}
+                        title={
+                          replace
+                            ? 'make a picture of this edit — you choose: overwrite the one it is drawn over, or save it beside'
+                            : undefined
+                        }
                       >
-                        {busy ?? 'save as a new picture'}
+                        {busy ?? (replace ? 'save ›' : 'save as a new picture')}
                       </Button>
                   </>
                 )}
@@ -7145,9 +7291,9 @@ export function VectorModal({
                           size='sm'
                           disabled={!ready}
                           data-refusal-door='picture'
-                          onClick={saveAsPicture}
+                          onClick={replace ? askToSave : () => void saveAsPicture('new')}
                         >
-                          {busy ?? 'save as a new picture'}
+                          {busy ?? (replace ? 'save ›' : 'save as a new picture')}
                         </Button>
                       </div>
                     )}
@@ -8381,6 +8527,57 @@ export function VectorModal({
               picture.
             </Text>
           </ConfirmationModal>
+
+          {/* ═══ «SAVE THE EDIT» — OVERWRITE OR SAVE AS NEW (27.09, O-53 phase 2) ═════════════════
+              The exit guard's grammar: a ConfirmationModal inside this Dialog.Content, focus handed
+              back to the editor on close. Its three ways out are three different acts: «overwrite»
+              (disabled with the reason when closed), «save as new», and ✕ / Esc — back to drawing,
+              nothing written. Esc closes ONLY the question: it is the top layer.
+              ⚠ THE WRAPPER STOPS THE KEYS AT THE QUESTION. A portal's events still bubble through
+              the React tree into this editor's key router, and there Space is taken for the hand
+              tool (preventDefault — a focused «overwrite» would not press) and ⌘Z would undo the
+              drawing behind the question. `display: contents` — the wrapper draws nothing. */}
+          {replace && (
+            <div
+              className='contents'
+              onKeyDown={(event) => event.stopPropagation()}
+              onKeyUp={(event) => event.stopPropagation()}
+            >
+              <ConfirmationModal
+                open={asking}
+                onOpenChange={setAsking}
+                onConfirm={() => void saveAsPicture('overwrite')}
+                onCancel={() => void saveAsPicture('new')}
+                width='md'
+                title='save the edit'
+                confirmLabel='overwrite'
+                cancelLabel='save as new'
+                confirmDisabled={!!replace.closed}
+                onCloseAutoFocus={(event) => {
+                  event.preventDefault();
+                  contentRef.current?.focus();
+                }}
+              >
+                <div className='space-y-1.5' data-save-question={replace.pictureId}>
+                  <Text size='micro' component='p'>
+                    <b>overwrite</b> — the edit takes this picture&rsquo;s place in the latest
+                    generation
+                    {replace.slotLabel ? ` and in the ${replace.slotLabel} slot` : ''}. the original
+                    stays in the generation history; nothing is deleted.
+                  </Text>
+                  <Text size='micro' component='p'>
+                    <b>save as new</b> — the edit is added beside the original
+                    {replace.slotLabel ? `; the ${replace.slotLabel} slot keeps the original` : ''}.
+                  </Text>
+                  {replace.closed && (
+                    <Text size='micro' variant='label' component='p' data-overwrite-closed=''>
+                      overwrite is closed: {replace.closed}.
+                    </Text>
+                  )}
+                </div>
+              </ConfirmationModal>
+            </div>
+          )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
