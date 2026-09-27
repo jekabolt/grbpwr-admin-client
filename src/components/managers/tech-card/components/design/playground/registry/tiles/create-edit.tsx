@@ -121,6 +121,7 @@ const run: WorkflowRun = {
           texts: [],
           role: '',
         })),
+        options: undefined,
       },
     },
   }),

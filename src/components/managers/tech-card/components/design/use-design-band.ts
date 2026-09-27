@@ -114,6 +114,13 @@ const EMPTY_BAND: GetDesignBandResponse = {
   // его словами; отсутствие — «бинарь про плейграунд не знает вовсе», и тогда ячейки на рельсе
   // нет совсем. Пустая полоса — второй случай, а не первый.
   freeformPresets: undefined,
+  // `undefined` — ТО ЖЕ ПРАВИЛО ОТСУТСТВИЯ: у бинаря, не знающего маршрутов, нет ни привязок ассетов,
+  // ни возможностей плейграунда второй фазы (поля 28–31); плитки, ждущие их, остаются приглушены.
+  assetBindings: undefined,
+  playgroundWorkflows: undefined,
+  imageModels: undefined,
+  threedOptions: undefined,
+  outputsTotalByWorkflow: undefined,
 };
 
 export type DesignBandState = {

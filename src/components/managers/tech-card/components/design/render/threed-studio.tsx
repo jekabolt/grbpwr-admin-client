@@ -262,6 +262,13 @@ export function ThreedStudio({
           // THE BUILD IS A PERSON'S CHOICE, NOT A STUB (V-15): '' reads as «not said».
           bodyType: draft.presentation === 'model' ? draft.bodyType : '',
           sourcePictureIds,
+          // Phase-2 reference mode and its knobs: not said here (undefined never reaches the wire).
+          referenceMediaIds: undefined,
+          texture: undefined,
+          pbr: undefined,
+          quality: undefined,
+          follow: undefined,
+          surfaceHint: undefined,
         },
         fixTarget: '',
         extraInputMediaIds: [],
@@ -274,6 +281,7 @@ export function ThreedStudio({
         freeform: undefined,
         useFlatSlots: false,
         flatSlotIds: [],
+        image: undefined,
       },
     });
   };

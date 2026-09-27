@@ -2517,6 +2517,7 @@ function plateAsPicture(plate: DocumentPlate): common_DesignPicture {
     createdAt: undefined,
     selected: undefined,
     displayOnly: undefined,
+    replacedBy: undefined,
   };
 }
 

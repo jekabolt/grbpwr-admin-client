@@ -328,12 +328,19 @@ export function PatternStudio({
               // THE REPEAT TRAVELS AS A LITERAL ZERO: the density is the model's (owner, J-12).
               // THE NAME IS THE FIELD'S, and the gate has made sure it is there and unique.
               // `sourceAssetId` is 0: the only door is the library/paste, which has no parent.
-              pattern: { repeatMm: 0, name: name.trim(), sourceAssetId: 0 },
+              pattern: {
+                repeatMm: 0,
+                name: name.trim(),
+                sourceAssetId: 0,
+                mode: undefined,
+                bomItemId: undefined,
+              },
               // НЕ ПЛЕЙГРАУНД: поле осмысленно только на kind=freeform и на любом другом роде
               // отвергается сервером (`freeform_forbidden`), поэтому здесь оно названо пустым вслух.
               freeform: undefined,
               useFlatSlots: false,
               flatSlotIds: [],
+              image: undefined,
             },
           })
         }

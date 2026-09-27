@@ -112,6 +112,8 @@ export function useEditLayerWrites(techCardId: number) {
         layerId: input.layerId,
         expectedRev: input.expectedRev,
         mediaId: input.mediaId,
+        replacePictureId: undefined,
+        clientRequestId: undefined,
       }),
     onSuccess: invalidate,
   });

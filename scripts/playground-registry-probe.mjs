@@ -215,6 +215,9 @@ const EMPTY_PARAMS = {
   colorwayId: 0,
   flatSlotIds: [],
   freeform: undefined,
+  // Phase-2 per-run engine (P-04): the playground tiles of phase 1 do not state it, so it never
+  // reaches the wire — `same()` compares the JSON the request becomes.
+  image: undefined,
 };
 const same = (got, want) =>
   isDeepStrictEqual(JSON.parse(JSON.stringify(got)), JSON.parse(JSON.stringify(want)));
@@ -291,7 +294,7 @@ head('A', 'wire(): тело, которое уезжает, на заполне�
     ask: 'add sunglasses',
     params: {
       ...EMPTY_PARAMS,
-      freeform: { preset: 'free', items: [item(31), item(32), item(33)] },
+      freeform: { preset: 'free', items: [item(31), item(32), item(33)], options: undefined },
     },
   };
   ck(

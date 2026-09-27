@@ -278,6 +278,7 @@ export function RenderStudio({
         useFlatSlots: false,
         // Meaningful on kind=flat only; named because the contract wants the field named.
         flatSlotIds: [],
+        image: undefined,
       },
     });
   };

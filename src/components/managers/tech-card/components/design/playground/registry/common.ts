@@ -73,6 +73,7 @@ export function emptyParams(): common_DesignRunParams {
     colorwayId: 0,
     flatSlotIds: [],
     freeform: undefined,
+    image: undefined,
   };
 }
 
