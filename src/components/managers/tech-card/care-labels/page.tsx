@@ -10,7 +10,7 @@ import { PrintDegradedNotice } from 'components/managers/print/degraded-notice';
 import { usePrintReady } from 'components/managers/print/use-print-ready';
 import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import CheckboxCommon from 'ui/components/checkbox';
@@ -19,15 +19,24 @@ import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
-import { useCareLabelSource, variantSku, type CareLabelColorway } from './adapter';
+import { useCareLabelSource, variantSku } from './adapter';
 import { isBlocking } from './holes';
 import { holeAddress, HolesPanel } from './holes-panel';
 import { computeQuantities, emptyGrid, fromRun, type QtyGrid } from './quantities';
 import { QuantitiesGrid } from './quantities-grid';
 import { QrSettings } from './qr-settings';
 import { collectReadiness } from './readiness';
-import { placeholderSide, SidesPreview, type PreviewSide, type PreviewView } from './sides-preview';
-import { useCareLabelPrefs, type PrintMode } from './use-care-label-prefs';
+import type { ManifestColorway } from './manifest';
+import { planPrint, type PrintSet } from './pages';
+import { buildPrintJob, compositionsOf, planAll } from './print-job';
+import { SidesPreview, type PreviewSide, type PreviewView } from './sides-preview';
+import { createShaper, type Shaper } from './text-outline';
+import {
+  effectiveQrTemplate,
+  qrLink,
+  useCareLabelPrefs,
+  type PrintMode,
+} from './use-care-label-prefs';
 
 /**
  * Подпись входов экрана: карточка ИЗ АДРЕСА. Роутер переиспользует страницу при смене `:id`, и без
@@ -35,47 +44,49 @@ import { useCareLabelPrefs, type PrintMode } from './use-care-label-prefs';
  */
 export const docKey = (routeId: string | undefined) => `care-labels|${routeId ?? ''}`;
 
-/** Стороны превью выбранного варианта. До раскладки E6 — заглушки с данными варианта. */
+/**
+ * Стороны превью выбранного варианта — из полного плана колорвея (настоящая раскладка E6, припуск
+ * как в режиме). A-изнанка общая на колорвей, если ссылка QR не зависит от размера.
+ */
 function previewSides(
-  cw: CareLabelColorway | undefined,
-  size: { label: string; skuOrd: number | null } | undefined,
-  mode: PrintMode,
+  set: PrintSet | undefined,
+  sizeLabel: string | undefined,
+  said: { aFace: string; aBack: string },
 ): PreviewSide[] {
-  const sku =
-    cw?.baseSku && size?.skuOrd != null ? variantSku(cw.baseSku, size.skuOrd) : cw?.baseSku || '—';
-  const head = [
-    `${sku} / ${(cw?.colourName || '—').toUpperCase()} / [${size?.label || '—'}]`,
-    `MADE IN ${(cw?.countryName || '—').toUpperCase()}`,
-  ];
-  // В дуплексе изнанка сверстана припуском слева (переворот по короткой стороне); в симплексе обе
-  // стороны — отдельные ленты с припуском справа (план §6.5).
-  const backSeam = mode === 'duplex' ? 'left' : 'right';
-  return [
-    {
+  if (!set || !sizeLabel) return [];
+  const all = [...set.sides.values()];
+  const out: PreviewSide[] = [];
+  const faceA = all.find((p) => p.label === 'A' && p.role === 'face' && p.size === sizeLabel);
+  const backA =
+    all.find((p) => p.label === 'A' && p.role === 'back' && p.size === sizeLabel) ??
+    all.find((p) => p.label === 'A' && p.role === 'back' && p.size === undefined);
+  if (faceA)
+    out.push({
       key: 'A-face',
       title: 'A · face',
       back: false,
-      doc: placeholderSide('A face', 'right', [...head, 'layout pending']),
-    },
-    {
+      doc: faceA.side.doc,
+      text: said.aFace,
+    });
+  if (backA)
+    out.push({
       key: 'A-back',
-      title: 'A · back',
+      title: 'A · back (QR)',
       back: true,
-      doc: placeholderSide('A back', backSeam, ['SCAN QR CODE', 'layout pending']),
-    },
-    {
-      key: 'B-face',
-      title: 'B · face (composition)',
-      back: false,
-      doc: placeholderSide('B face', 'right', ['composition', 'layout pending']),
-    },
-    {
-      key: 'B-back',
-      title: 'B · back (composition)',
-      back: true,
-      doc: placeholderSide('B back', backSeam, ['composition', 'layout pending']),
-    },
-  ];
+      doc: backA.side.doc,
+      text: said.aBack,
+    });
+  for (const p of all) {
+    if (p.label === 'A') continue;
+    out.push({
+      key: `${p.label}-${p.role}`,
+      title: `${p.label} · ${p.role} (composition)`,
+      back: p.role === 'back',
+      doc: p.side.doc,
+      text: p.side.report.columns.map((c) => c.part).join(' · ') || undefined,
+    });
+  }
+  return out;
 }
 
 export function TechCardCareLabels() {
@@ -103,6 +114,8 @@ export function TechCardCareLabels() {
   const mode = prefs.mode;
   const setMode = (m: PrintMode) => updatePrefs({ mode: m });
   const [view, setView] = useState<PreviewView>('ribbon');
+  // «После переворота» есть только в дуплексе: в симплексе переворота нет (обе стороны — ленты).
+  const shownView: PreviewView = mode === 'duplex' ? view : 'ribbon';
   const [zoom, setZoom] = useState<1 | 2>(1);
 
   const colorways = data?.colorways ?? [];
@@ -138,13 +151,55 @@ export function TechCardCareLabels() {
     };
   }, [selectedCw, selectedSize, data?.styleNumber]);
 
-  const sides = useMemo(
-    () => previewSides(selectedCw, selectedSize, mode),
-    [selectedCw, selectedSize, mode],
+  // Шейпер (три шрифта ленты) — один на вкладку; не загрузился — общий блок `fonts-failed`.
+  const [shaper, setShaper] = useState<Shaper | null>(null);
+  const [fontsFailed, setFontsFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    createShaper().then(
+      (sh) => live && setShaper(sh),
+      () => live && setFontsFailed(true),
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // Полный план (каждый колорвей × размер по копии): стороны превью и дыры раскладки. Шаблон QR
+  // печатается в поле посимвольно — вёрстка всех колорвеев идёт за отложенным значением.
+  const qrPrefs = useDeferredValue(
+    useMemo(
+      () => ({ qrPreset: prefs.qrPreset, qrTemplate: prefs.qrTemplate }),
+      [prefs.qrPreset, prefs.qrTemplate],
+    ),
+  );
+  const compositions = useMemo(() => (data ? compositionsOf(data) : null), [data]);
+  const fullPlan = useMemo(
+    () =>
+      shaper && data && compositions ? planAll(shaper, data, compositions, mode, qrPrefs) : null,
+    [shaper, data, compositions, mode, qrPrefs],
   );
 
+  const sides = useMemo(() => {
+    if (!selectedCw || !selectedSize) return [];
+    const sku =
+      selectedCw.baseSku && selectedSize.skuOrd != null
+        ? variantSku(selectedCw.baseSku, selectedSize.skuOrd)
+        : selectedCw.baseSku;
+    const qrUrl = qrExample ? qrLink(qrPrefs, qrExample.vars) : '';
+    return previewSides(fullPlan?.sets.get(selectedCw.id), selectedSize.label, {
+      aFace: [
+        `${sku} / ${selectedCw.colourName.toUpperCase()} / [${selectedSize.label}]`,
+        selectedCw.countryName ? `MADE IN ${selectedCw.countryName.toUpperCase()}` : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      aBack: `QR ${qrUrl}`,
+    });
+  }, [fullPlan, qrExample, qrPrefs, selectedCw, selectedSize]);
+
   // Дыры со всех источников и гейт кнопки (readiness.ts): блок колорвея держит только его,
-  // общий — весь архив. Раскладка (E6) добавит свои дыры по колорвею.
+  // общий — весь архив. Раскладка (E6) приходит из полного плана по колорвею.
   // Количества (§9.4): сетка из прогона или ручная, запас на ячейку, итоги A/B.
   const qtyColorways = useMemo(
     () => colorways.map((c) => ({ id: c.id, label: c.baseSku || c.colourName || `#${c.id}` })),
@@ -185,13 +240,66 @@ export function TechCardCareLabels() {
             prefs: { qrPreset: prefs.qrPreset, qrTemplate: prefs.qrTemplate },
             quantityHoles: quantities.holes,
             zeroColorways: quantities.zeroColorways,
+            layoutHoles: fullPlan?.layoutHoles,
+            fontsFailed,
           })
         : null,
-    [data, current.excluded, prefs.qrPreset, prefs.qrTemplate, quantities],
+    [data, current.excluded, prefs.qrPreset, prefs.qrTemplate, quantities, fullPlan, fontsFailed],
   );
   const blocking = readiness?.blockers ?? [];
-  const canExport = ready && !!readiness?.canExport;
+  // Архив верстается шейпером: пока шрифты едут, кнопка ждёт (упали — блок `fonts-failed`).
+  const layoutReady =
+    !!fullPlan && qrPrefs.qrTemplate === prefs.qrTemplate && qrPrefs.qrPreset === prefs.qrPreset;
+  const canExport = ready && layoutReady && !!readiness?.canExport;
   const showMessage = useSnackBarStore((st) => st.showMessage);
+  const [building, setBuilding] = useState(false);
+
+  // ZIP (план §9.6): только колорвеи в архиве (чекбокс + ненулевая строка), настоящие копии с
+  // запасом; ячейка 0 файла не даёт. Вёрстка заново — полный план по копии нужен лишь превью.
+  const downloadZip = async () => {
+    if (!data || !shaper || !compositions || !readiness || !readiness.canExport) return;
+    setBuilding(true);
+    try {
+      const colorwayIds = readiness.colorways.filter((r) => r.included).map((r) => r.colorwayId);
+      const job = buildPrintJob({
+        data,
+        compositions,
+        mode,
+        qr: prefs,
+        colorwayIds,
+        copies: (cw, size) => quantities.cells[cw]?.[size] ?? 0,
+      });
+      const set = planPrint(shaper, job);
+      const block = set.holes.find(isBlocking);
+      if (block) throw new Error(block.message);
+      if (set.files.length === 0) throw new Error('nothing to put into the zip');
+      const manifestCws = new Map<number, ManifestColorway>(
+        data.colorways.map((c) => [c.id, { baseSku: c.baseSku, colour: c.colourName }]),
+      );
+      const { buildCareLabelZip, saveBlob } = await import('./zip');
+      const zip = await buildCareLabelZip({
+        shaper,
+        set,
+        style: data.styleNumber,
+        styleName: data.styleName,
+        colorways: manifestCws,
+        qrTemplate: effectiveQrTemplate(prefs),
+        adminUrl: `${window.location.origin}/tech-cards/${data.techCardId || techCardId || ''}`,
+        warnings: [...readiness.warnings, ...set.holes.filter((h) => h.level === 'warn')].filter(
+          (h, i, all) => all.findIndex((x) => x.message === h.message) === i,
+        ),
+      });
+      saveBlob(zip.bytes, zip.name);
+      showMessage(
+        `${zip.name}: ${zip.counts.labelsA} A + ${zip.counts.labelsB} B labels`,
+        'success',
+      );
+    } catch (e) {
+      showMessage(`zip failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
+    } finally {
+      setBuilding(false);
+    }
+  };
 
   return (
     <div className='flex min-h-screen flex-col bg-pageBg' data-care-labels-page={key}>
@@ -222,18 +330,20 @@ export function TechCardCareLabels() {
             data-care-download=''
             data-care-gate={canExport ? 'open' : 'blocked'}
             // Гейт: данные доехали и ни один блок не держит архив. Адрес первого блока — в подсказке.
-            disabled={!canExport}
+            data-care-building={building ? '' : undefined}
+            disabled={!canExport || building}
             title={
               !ready
                 ? 'waiting for the data'
-                : blocking.length > 0
-                  ? `blocked: ${[holeAddress(blocking[0], colorways), blocking[0].message].filter(Boolean).join(' — ')}`
-                  : 'build the zip for the ticked colourways'
+                : !layoutReady && !fontsFailed
+                  ? 'typesetting the labels…'
+                  : blocking.length > 0
+                    ? `blocked: ${[holeAddress(blocking[0], colorways), blocking[0].message].filter(Boolean).join(' — ')}`
+                    : 'build the zip for the ticked colourways'
             }
-            // Сборка архива — S5; до неё кнопка только честно говорит, что гейт открыт.
-            onClick={() => showMessage('the zip export is not built yet', 'error')}
+            onClick={() => void downloadZip()}
           >
-            download zip
+            {building ? 'building…' : 'download zip'}
           </Button>
         </div>
       </div>
@@ -344,8 +454,8 @@ export function TechCardCareLabels() {
                     <ChipRow>
                       <Chip
                         nonForm
-                        pressed={view === 'ribbon'}
-                        selected={view === 'ribbon'}
+                        pressed={shownView === 'ribbon'}
+                        selected={shownView === 'ribbon'}
                         onClick={() => setView('ribbon')}
                         title='each side as it is printed on the ribbon'
                       >
@@ -353,10 +463,15 @@ export function TechCardCareLabels() {
                       </Chip>
                       <Chip
                         nonForm
-                        pressed={view === 'flipped'}
-                        selected={view === 'flipped'}
+                        pressed={shownView === 'flipped'}
+                        selected={shownView === 'flipped'}
+                        disabled={mode !== 'duplex'}
                         onClick={() => setView('flipped')}
-                        title='backs mirrored, as they lie after the flip — the seam allowances must coincide'
+                        title={
+                          mode === 'duplex'
+                            ? 'backs mirrored, as they lie after the flip — the seam allowances must coincide'
+                            : 'simplex has no flip: face and back are separate labels, both with the allowance on the right'
+                        }
                       >
                         after the flip
                       </Chip>
@@ -386,12 +501,25 @@ export function TechCardCareLabels() {
                     </ChipRow>
                   </div>
                 </div>
-                {selectedCw ? (
-                  <SidesPreview sides={sides} view={view} zoom={zoom} />
-                ) : (
+                {!selectedCw ? (
                   <Text size='micro' variant='label'>
                     nothing to preview — the card has no colourways
                   </Text>
+                ) : fontsFailed ? (
+                  <Text size='micro' variant='errorLabel'>
+                    the label fonts did not load — reload the page
+                  </Text>
+                ) : sides.length === 0 ? (
+                  <Text
+                    size='micro'
+                    variant='label'
+                    className='animate-pulse'
+                    data-care-preview-pending=''
+                  >
+                    typesetting the labels…
+                  </Text>
+                ) : (
+                  <SidesPreview sides={sides} view={shownView} zoom={zoom} />
                 )}
               </div>
             </Section>
