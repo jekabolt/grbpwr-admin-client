@@ -98,7 +98,7 @@ export type PartComposition = {
   part: PrintedPart;
   /** По убыванию %, при равенстве — по коду; сумма ровно 100 (у NOTE — пусто). */
   fibers: FiberShare[];
-  /** Есть волокно с `animalNonTextile` — ради него на ленте колонка NOTE. */
+  /** Есть волокно с `animalNonTextile` с долей > 0 ДО округления — ради него колонка NOTE. */
   animal: boolean;
   /** Готовые строки ленты по языкам (`55% COTTON  35% LINEN`); у NOTE — фраза ст. 12. */
   rows: Record<LabelLang, string>;
@@ -534,7 +534,9 @@ export function resolveColorwayComposition(input: ColorwayCompositionInput): Res
     parts.push({
       part,
       fibers: fibersOut,
-      animal: fibersOut.some((f) => fibers.get(f.code)?.animalNonTextile),
+      // Ст. 12 1007/2011 — по ДОЛЯМ ДО ОКРУГЛЕНИЯ: кожаная нашивка 0,4 % округляется в 0 и уходит из
+      // строки части, но животная не-текстильная часть в изделии есть, и фраза обязана напечататься.
+      animal: [...merged].some(([code, v]) => v > 0 && !!fibers.get(code)?.animalNonTextile),
       rows: {} as Record<LabelLang, string>,
       lineKeys: [...new Set(sources.map((s) => s.lineKey))],
     });
