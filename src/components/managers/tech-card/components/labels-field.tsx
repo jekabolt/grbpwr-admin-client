@@ -34,7 +34,7 @@ import {
   adaptUsages,
   originCountryText,
 } from '../care-labels/adapter';
-import type { LabelBomLine, LabelMaterial } from '../care-labels/composition-resolver';
+import type { LabelBomLine } from '../care-labels/composition-resolver';
 import { isBlocking } from '../care-labels/holes';
 import { useBomItemIdOptions } from './bom-line-picker';
 import { useCareDrift } from './care-drift';
@@ -318,8 +318,9 @@ function withMaterialComposition<T extends BomComp>(
 // «Made in Made in Poland».
 //
 // ⚠ id ЧЕРЕЗ wireInt. int64 с провода приезжает СТРОКОЙ («501»), а форма держит число: ключи
-// материалов и пины usages приводятся к числу, иначе материал строки не находится вовсе, а
-// «пин того же артикула» выглядит пином ДРУГОГО и закрывает часть дырой.
+// каталога и пины usages приводит к числу адаптер ленты (`adaptMaterials` / `adaptUsages`), строки
+// формы — здесь; иначе материал строки не находится вовсе, а «пин того же артикула» выглядит пином
+// ДРУГОГО и закрывает часть дырой.
 function useCareComposer(techCardId: number | undefined) {
   const { data: materialsData } = useMaterials('', true);
   const { dictionary } = useDictionary();
@@ -337,17 +338,11 @@ function useCareComposer(techCardId: number | undefined) {
         name: b.name ?? '',
         unit: b.unit,
       }));
-      const materials = new Map<number, LabelMaterial>();
-      for (const m of adaptMaterials(materialsRaw).values()) {
-        materials.set(wireInt(m.id), { ...m, id: wireInt(m.id) });
-      }
+      // Каталог и usages — через адаптер ленты: id с провода он приводит к числу сам, а легаси-usage
+      // без bom_line_key находит строку по bom_item_id СОХРАНЁННОЙ карточки.
+      const materials = adaptMaterials(materialsRaw);
       const colorway = defaultCareColorway(savedCard?.colorways);
-      const usages = colorway
-        ? adaptUsages(colorway).map((u) => ({
-            ...u,
-            materialId: wireInt(u.materialId) || undefined,
-          }))
-        : [];
+      const usages = colorway ? adaptUsages(colorway, savedCard?.techCard?.bomItems) : [];
       return generateCareLabel({
         colorwayId: colorway ? wireInt(colorway.colorwayId) : undefined,
         bom,

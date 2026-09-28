@@ -169,12 +169,20 @@ export function adaptFibers(fibers: readonly common_Fiber[] | undefined): FiberD
   return out;
 }
 
+// ID С ПРОВОДА. grpc-gateway отдаёт int64 JSON-СТРОКОЙ («501»), а сгенерированный тип говорит
+// `number` — компилятор расхождения не видит. Все id, по которым составники что-то ищут (материал
+// слота, каталог, пин колорвея, строка BOM по bom_item_id, колорвей, прогон), приводятся к числу
+// ЗДЕСЬ, на границе провода, одним `wireInt`: дальше ни одна выборка не зависит от того, строкой или
+// числом пришёл id. Иначе «пин того же артикула» (`"1" !== 1`) выглядит пином ДРУГОГО, а колорвей
+// не находит своего ответа GetColorwayByID и берёт страну ORIGIN.
+
 export function adaptMaterials(materials: readonly common_Material[]): Map<number, LabelMaterial> {
   const out = new Map<number, LabelMaterial>();
   for (const m of materials) {
-    if (!m.id) continue;
-    out.set(m.id, {
-      id: m.id,
+    const id = wireInt(m.id);
+    if (!id) continue;
+    out.set(id, {
+      id,
       compositionEntries: (m.compositionEntries ?? [])
         .filter((e) => !!e.fiberCode)
         .map((e) => ({ fiberCode: e.fiberCode!, percent: decimalNumber(e.percent) ?? 0 })),
@@ -192,19 +200,37 @@ export function adaptBom(items: readonly common_TechCardBomItem[] | undefined): 
       section: b.section,
       purpose: b.purpose,
       labelPart: b.labelPart ?? null,
-      materialId: b.materialId || undefined,
+      materialId: wireInt(b.materialId) || undefined,
       composition: b.composition ?? undefined,
       name: b.name ?? '',
       unit: b.unit ?? undefined,
     }));
 }
 
-export function adaptUsages(c: common_AdminColorwayRef): LabelUsage[] {
+/**
+ * Usages колорвея. Строка BOM — по `bom_line_key`, а у легаси-usage без ключа — по серверному
+ * `bom_item_id` через id строк BOM (ровно как `fromRead` рецепта, `colorway-usage-wire.ts`):
+ * отбросить такой usage значило бы потерять его пин и напечатать артикул слота. Usage, который не
+ * адресуется ни так, ни так, не относится ни к одной строке и в состав не идёт.
+ */
+export function adaptUsages(
+  c: common_AdminColorwayRef,
+  bomItems: readonly Pick<common_TechCardBomItem, 'id' | 'lineKey'>[] | undefined,
+): LabelUsage[] {
+  const keyByBomItemId = new Map<number, string>();
+  for (const b of bomItems ?? []) {
+    const id = wireInt(b.id);
+    if (id && b.lineKey) keyByBomItemId.set(id, b.lineKey);
+  }
   return (c.usages ?? [])
-    .filter((u) => !!u.bomLineKey)
     .map((u) => ({
-      bomLineKey: u.bomLineKey!,
-      materialId: u.materialId || undefined,
+      u,
+      key: (u.bomLineKey ?? '').trim() || keyByBomItemId.get(wireInt(u.bomItemId)) || '',
+    }))
+    .filter(({ key }) => !!key)
+    .map(({ u, key }) => ({
+      bomLineKey: key,
+      materialId: wireInt(u.materialId) || undefined,
       consumption: decimalNumber(u.consumption),
       sizeConsumptions: (u.sizeConsumptions ?? [])
         .map((s) => decimalNumber(s.consumption))
@@ -227,18 +253,19 @@ const RUN_STATUS_WORD: Partial<Record<common_ProductionRunStatus, string>> = {
 
 export function adaptRuns(runs: readonly common_ProductionRun[]): CareLabelRun[] {
   return runs
-    .filter((r) => !!r.id)
-    .map((r) => {
+    .map((r) => ({ r, id: wireInt(r.id) }))
+    .filter(({ id }) => id > 0)
+    .map(({ r, id }) => {
       const status = r.run?.status;
       const word = (status && RUN_STATUS_WORD[status]) || 'run';
       const date = r.createdAt ? String(r.createdAt).slice(0, 10) : '';
       return {
-        id: r.id!,
+        id,
         status,
-        label: [`run #${r.id}`, word, date].filter(Boolean).join(' · '),
+        label: [`run #${id}`, word, date].filter(Boolean).join(' · '),
         lines: (r.run?.lines ?? []).map((l) => ({
-          productId: l.productId ?? 0,
-          sizeId: l.sizeId ?? 0,
+          productId: wireInt(l.productId),
+          sizeId: wireInt(l.sizeId),
           plannedQty: l.plannedQty ?? 0,
         })),
       };
@@ -252,7 +279,7 @@ export function adaptRuns(runs: readonly common_ProductionRun[]): CareLabelRun[]
 export function adaptCareLabels(src: CareLabelSourceInput): CareLabelData {
   const insert = src.techCard.techCard;
   const dict = src.dictionary;
-  const techCardId = src.techCard.id ?? 0;
+  const techCardId = wireInt(src.techCard.id);
 
   // Язык `en` — по коду из словаря, не хардкодом id (прецедент order/invoice-page.tsx).
   const enId = dict?.languages?.find((l) => norm(l.code ?? '') === 'en')?.id;
@@ -285,9 +312,9 @@ export function adaptCareLabels(src: CareLabelSourceInput): CareLabelData {
   });
 
   const colorways: CareLabelColorway[] = (src.techCard.colorways ?? [])
-    .filter((c) => !!c.colorwayId)
-    .map((c) => {
-      const id = c.colorwayId!;
+    .map((c) => ({ c, id: wireInt(c.colorwayId) }))
+    .filter(({ id }) => id > 0)
+    .map(({ c, id }) => {
       const cwHoles: Hole[] = [];
       const ref = { colorwayId: id };
       const baseSku = (c.baseSku ?? '').trim();
@@ -355,7 +382,7 @@ export function adaptCareLabels(src: CareLabelSourceInput): CareLabelData {
         active,
         countryCode,
         countryName,
-        usages: adaptUsages(c),
+        usages: adaptUsages(c, insert?.bomItems),
         holes: cwHoles,
       };
     });
@@ -421,7 +448,7 @@ export function useCareLabelSource(techCardId: number | undefined): {
   const runs = useProductionRuns(techCardId ?? 0, '', 0, false, !!techCardId);
 
   const colorwayIds = useMemo(
-    () => (tc.data?.colorways ?? []).map((c) => c.colorwayId ?? 0).filter((id) => id > 0),
+    () => (tc.data?.colorways ?? []).map((c) => wireInt(c.colorwayId)).filter((id) => id > 0),
     [tc.data],
   );
   const full = useQueries({
