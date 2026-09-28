@@ -91,6 +91,14 @@ import {
   roleSuggestions,
 } from './bom-roles';
 import { bornBomLine, emptyBomItem } from './form-writers';
+import {
+  LABEL_PART_NAME,
+  LABEL_PART_UNSPECIFIED,
+  SELECTABLE_LABEL_PARTS,
+  defaultLabelPart,
+  labelPartFromWire,
+  labelPartToWire,
+} from '../care-labels/label-parts';
 import { materialFabricWeight, materialFabricWidth } from './nesting/fabric-weight';
 import { bomUnitKind, markersForLine } from './nesting/marker-io';
 import { TechCardFormData, wireInt } from './schema';
@@ -194,6 +202,9 @@ export function SlotIdentityFields({ index }: { index: number }) {
     | string
     | undefined;
   const rowKindNote = useWatch({ control, name: `bomItems.${index}.kindNote` }) as
+    | string
+    | undefined;
+  const rowLabelPart = useWatch({ control, name: `bomItems.${index}.labelPart` }) as
     | string
     | undefined;
   const rollGoods = isRollGoodsSection(rowSection);
@@ -326,6 +337,19 @@ export function SlotIdentityFields({ index }: { index: number }) {
   const foreignPurpose =
     purposeSet && rollGoods && !purposeEditorOptions.some((o) => o.value === rowPurpose);
 
+  // ЧАСТЬ СОСТАВНИКА (care labels, план §3.4/§5.2). «Авто» — не пустота, а ответ: пункт называет
+  // ту часть, которую напечатает лента, считая ТЕМ ЖЕ `defaultLabelPart`, что и резолвер. Секция и
+  // назначение читаются здесь же через useWatch, так что смена назначения переписывает подпись
+  // сразу, без сохранения. Контрол на любой секции: часть — свойство ленты, а не геометрии, и
+  // кожаная отделка (TRIM) ставится на ленту только явным выбором.
+  const autoLabelPart = `auto → ${LABEL_PART_NAME[defaultLabelPart(rowSection, rowPurpose)]}`;
+  // Токен новее этой сборки: Radix нарисовал бы над ним пустой триггер, и первый выбор затёр бы
+  // то, что записал более новый бандл, — тот же приём, что у назначения и вида выше.
+  const foreignLabelPart =
+    !!rowLabelPart &&
+    rowLabelPart !== LABEL_PART_UNSPECIFIED &&
+    labelPartFromWire(rowLabelPart) === undefined;
+
   return (
     <div className='space-y-2'>
       <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
@@ -417,6 +441,30 @@ export function SlotIdentityFields({ index }: { index: number }) {
           )}
         </div>
       )}
+      <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+        <SelectField
+          name={`bomItems.${index}.labelPart`}
+          label='care label part'
+          // Строка без ключа (черновик старого бандла, новая строка) — то же «авто», словами.
+          placeholder={autoLabelPart}
+          items={[
+            { value: LABEL_PART_UNSPECIFIED, label: autoLabelPart },
+            ...SELECTABLE_LABEL_PARTS.map((p) => ({
+              value: labelPartToWire(p),
+              label: LABEL_PART_NAME[p],
+            })),
+            ...(foreignLabelPart
+              ? [
+                  {
+                    value: rowLabelPart as string,
+                    label: `${rowLabelPart} — unknown to this app version`,
+                    disabled: true,
+                  },
+                ]
+              : []),
+          ]}
+        />
+      </div>
     </div>
   );
 }
