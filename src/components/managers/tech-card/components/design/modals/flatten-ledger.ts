@@ -182,10 +182,18 @@ export function ledgerFull(cardId: number, layers?: readonly number[]): boolean 
   return readLive(cardId, layers).length >= GESTURES_PER_CARD;
 }
 
-/** The card's oldest unanswered save — the one «settle one» resends first. */
-export function oldestGesture(cardId: number, layers?: readonly number[]): FlattenGesture | null {
+/**
+ * The card's oldest unanswered save — the one «settle one» resends first. `among` narrows it to the
+ * entries the asking editor may resend (D-72′: beside, or in the place of its own picture — a resend
+ * never reinterprets a gesture through another picture's editor); absent, any entry of the card.
+ */
+export function oldestGesture(
+  cardId: number,
+  layers?: readonly number[],
+  among: (gesture: FlattenGesture) => boolean = () => true,
+): FlattenGesture | null {
   let found: FlattenGesture | null = null;
-  for (const g of readLive(cardId, layers)) if (!found || g.at < found.at) found = g;
+  for (const g of readLive(cardId, layers)) if (among(g) && (!found || g.at < found.at)) found = g;
   return found;
 }
 
@@ -201,6 +209,13 @@ export type LayerGesture = { gesture: FlattenGesture; same: boolean };
  * The rev is NOT compared: the flatten does not move the layer's rev, and a save of the same drawing
  * since does — a match on it would hide a gesture the server may already have filed. The resend
  * answers either way: the picture, or `layer_rev_mismatch` — which proves it was never filed.
+ *
+ * AMONG THE OTHER DRAWINGS, ONE THIS EDITOR MAY RESEND COMES FIRST (D-72′): `targets` are also the
+ * answers this editor is entitled to resend, and a save aimed at another picture of the layer (an
+ * overwrite lost in that picture's editor — the layer is the media's, and one media may stand as
+ * two pictures) is only NAMED here, with no door. Named ahead of a resendable one it would stand in
+ * the way of this editor's own lost save until settled elsewhere; so it is named last, when nothing
+ * of the layer can be resent from here. A layer whose every entry is resendable here reads as before.
  */
 export function layerGesture(
   cardId: number,
@@ -209,14 +224,19 @@ export function layerGesture(
 ): LayerGesture | null {
   let same: FlattenGesture | null = null;
   let other: FlattenGesture | null = null;
+  let foreign: FlattenGesture | null = null;
   for (const g of readLive(cardId, layers)) {
     if (g.layerId !== at.layerId) continue;
-    if (g.doc === at.doc && at.targets.includes(g.replacePictureId)) {
+    const here = at.targets.includes(g.replacePictureId);
+    if (g.doc === at.doc && here) {
       if (!same || g.at > same.at) same = g;
-    } else if (!other || g.at > other.at) other = g;
+    } else if (here) {
+      if (!other || g.at > other.at) other = g;
+    } else if (!foreign || g.at > foreign.at) foreign = g;
   }
   if (same) return { gesture: same, same: true };
-  return other ? { gesture: other, same: false } : null;
+  const named = other ?? foreign;
+  return named ? { gesture: named, same: false } : null;
 }
 
 /**

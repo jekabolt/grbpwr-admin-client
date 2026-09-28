@@ -1004,9 +1004,17 @@ class LedgerAtCeiling extends Error {}
 /**
  * WHAT THE RETRY RESENDS — ONE SENTENCE AND ONE NAME PER CASE (review r3, r4): the earlier overwrite
  * of this picture or the earlier save as new, both of the drawing on screen — or an earlier save of
- * another drawing of the layer, which the retry files instead of this one.
+ * another drawing of the layer, which the retry files instead of this one. NOT `here` (D-72′): an
+ * overwrite of ANOTHER picture of this layer — named, and sent from nowhere but that picture's
+ * editor, which is on FLAT (only the flat workbench overwrites); its `name` names no door.
  */
-function retryWordsOf(u: LayerGesture): { sentence: string; name: string } {
+function retryWordsOf(u: LayerGesture, here: boolean): { sentence: string; name: string } {
+  if (!here)
+    return {
+      sentence:
+        'an earlier overwrite of another picture of this layer got no answer — retry it from that picture’s editor on FLAT; saving this one leaves it in place',
+      name: 'the earlier overwrite of another picture — retried from that picture’s editor',
+    };
   if (!u.same)
     return {
       sentence:
@@ -6332,6 +6340,33 @@ export function VectorModal({
   /** The card's layers as the band lists them — what lets the ledger strike a gone layer's entry. */
   const cardLayers = () => (band.layers ?? []).map((l) => l.id ?? 0).filter((id) => id > 0);
 
+  /**
+   * ═══ THE ANSWERS THIS EDITOR MAY RESEND — AND THE DOORS FOLLOW THEM (28.09, O-63 r3, D-72′) ══════
+   *
+   * The layer is the media's (0343: one per card and base media), and one media may stand as two
+   * pictures of the card — a flat on the workbench and a render brought into SIDES, say. So the
+   * ledger's question, which stands over the LAYER (D-68: an unanswered entry of the layer is asked
+   * about in every editor of it, and never taken off by a fresh save), can find in a render editor
+   * an overwrite lost on the flat workbench. Round 2 offered it the door all the same — «retry the
+   * earlier save ›» from a render editor filing a successor to a FLAT picture. Now the RESEND door
+   * belongs to the editor whose targets cover the entry's: beside (0), or in the place of the very
+   * picture this editor is drawn over (`replace`, or the base of an editor without one — the
+   * history's over its picture, D-68 r4). Another picture's entry is named without a door, and
+   * «save as new» stays open beside it (it answers nothing of that entry). At the ceiling the settle
+   * door offers the oldest entry THIS editor may resend; with none, the text points to FLAT.
+   *
+   * ⚠ A RESEND NEVER REINTERPRETS A GESTURE THROUGH THE CURRENT EDITOR. The entry carries all the
+   * flatten needs — the layer, the rev, the raster, the target, the key — and `sendGesture` builds
+   * the body from the entry alone; the picture's kind is the server's, by the layer's base, on the
+   * wire from any editor alike. What the entry does NOT carry is a slot: `filed` puts a picture
+   * saved beside its base into the editor's own `slot` (the flat slots' editor, the SIDES cell's)
+   * — an act of that editor after the answer, never part of the gesture, and dropped by every
+   * `resendEarlier` already. The editors this ruling is about — a render's, from the workbench or
+   * the history — have no slot, so a resend from them is the entry byte for byte and nothing more.
+   */
+  const resendTargets = () => [0, replaceRef.current?.pictureId || base?.id || 0];
+  const mayResend = (gesture: FlattenGesture) => resendTargets().includes(gesture.replacePictureId);
+
   /** Why overwrite is closed at this very moment — the host's live reading, or its last render. */
   const closedNow = (): string | null => {
     const host = replaceRef.current;
@@ -6360,7 +6395,7 @@ export function VectorModal({
       {
         layerId: layerRef.current.id,
         doc: pending ? null : drawingNow(docNow()),
-        targets: [0, replaceRef.current?.pictureId || base?.id || 0],
+        targets: resendTargets(),
       },
       cardLayers(),
     );
@@ -6369,7 +6404,8 @@ export function VectorModal({
   /**
    * THE QUESTION, DRAWN FROM THE TAB'S LEDGER AS IT STANDS NOW (D-53/D-54, review r3, r4): an earlier
    * save of this layer whose answer never came puts its retry first; a ledger at its ceiling lets no
-   * new save out, and with nothing of this layer to retry it offers the card's oldest to settle.
+   * new save out, and with nothing of this layer to retry FROM HERE it offers the oldest of the card
+   * this editor may resend (D-72′ — none: the text points to FLAT, and no door is drawn).
    */
   const openQuestion = () => {
     const layers = cardLayers();
@@ -6377,7 +6413,11 @@ export function VectorModal({
     const atCeiling = ledgerFull(techCardId, layers);
     setUnanswered(earlier);
     setLedgerAtCeiling(atCeiling);
-    setSettle(atCeiling && !earlier ? oldestGesture(techCardId, layers) : null);
+    setSettle(
+      atCeiling && !(earlier && mayResend(earlier.gesture))
+        ? oldestGesture(techCardId, layers, mayResend)
+        : null,
+    );
     setAsking(true);
   };
 
@@ -6640,7 +6680,8 @@ export function VectorModal({
    */
   const retrySave = oncePerPress(async () => {
     const found = unanswered;
-    if (!found || frozen || busy) return;
+    // No door for an entry this editor may not resend (D-72′) — and no resend by any other way in.
+    if (!found || !mayResend(found.gesture) || frozen || busy) return;
     if (!found.same) {
       await resendEarlier(found.gesture, 'layer');
       return;
@@ -7119,6 +7160,8 @@ export function VectorModal({
    * found (`lateClosed`) when the host had not caught up yet.
    */
   const overwriteShut = replace ? replace.closed ?? lateClosed : null;
+  /** The earlier save named first is one THIS editor may resend — its door is drawn (D-72′). */
+  const retryHere = !!unanswered && mayResend(unanswered.gesture);
 
   /* ON THE WORKBENCH THE NOTE SAYS WHAT THE QUESTION WILL ASK (O-53 phase 2): «never overwritten»
      beside an «overwrite» door would read as a contradiction — the pixels are still never changed,
@@ -8895,6 +8938,11 @@ export function VectorModal({
               fresh save, «keep editing» back to drawing.
               AT THE CEILING no door here saves anew: settle one first — the retry above, or, with
               nothing of this layer to retry, «retry the oldest save ›».
+              THE DOOR IS THE EDITOR'S THAT MAY RESEND (28.09, O-63 r3, D-72′): an entry aimed at
+              another picture of the layer is named without a door — «retry it from that picture's
+              editor on FLAT» — and the doors below stay as they are; the settle door offers only the
+              oldest entry this editor may resend, and with none the sentence points to FLAT and no
+              door is drawn (`mayResend`, the argument above `resendTargets`).
               THE DOOR PUT FORWARD TAKES THE FOCUS AS THE QUESTION OPENS — inside the question's own
               focus scope (`onOpenAutoFocus`), not by a timer that could pull the focus back from
               wherever the person had already moved it. Enter on the retry resends a key the server
@@ -8941,35 +8989,42 @@ export function VectorModal({
                   <div
                     data-retry-save={unanswered.gesture.replacePictureId ? 'overwrite' : 'new'}
                     data-retry-drawing={unanswered.same ? 'same' : 'other'}
+                    data-retry-from={retryHere ? 'here' : 'elsewhere'}
                   >
                     <CalloutBox tone='warning'>
                       <Text size='micro' component='p' id={retrySentenceId}>
-                        {retryWordsOf(unanswered).sentence}
+                        {retryWordsOf(unanswered, retryHere).sentence}
                       </Text>
-                      <div className='mt-1.5'>
-                        <Button
-                          type='button'
-                          variant='main'
-                          size='sm'
-                          disabled={!!busy}
-                          data-retry-door=''
-                          aria-label={retryWordsOf(unanswered).name}
-                          aria-describedby={retrySentenceId}
-                          onClick={() => void retrySave()}
-                          title={`resends the earlier «${unanswered.gesture.replacePictureId ? 'overwrite' : 'save as new'}» exactly as it went — the same key, revision and raster: the server files it once, or answers with the picture it already filed`}
-                        >
-                          retry the earlier save ›
-                        </Button>
-                      </div>
+                      {retryHere && (
+                        <div className='mt-1.5'>
+                          <Button
+                            type='button'
+                            variant='main'
+                            size='sm'
+                            disabled={!!busy}
+                            data-retry-door=''
+                            aria-label={retryWordsOf(unanswered, retryHere).name}
+                            aria-describedby={retrySentenceId}
+                            onClick={() => void retrySave()}
+                            title={`resends the earlier «${unanswered.gesture.replacePictureId ? 'overwrite' : 'save as new'}» exactly as it went — the same key, revision and raster: the server files it once, or answers with the picture it already filed`}
+                          >
+                            retry the earlier save ›
+                          </Button>
+                        </div>
+                      )}
                     </CalloutBox>
                   </div>
                 )}
                 {ledgerAtCeiling && (
-                  <div data-ledger-ceiling={GESTURES_PER_CARD}>
+                  <div
+                    data-ledger-ceiling={GESTURES_PER_CARD}
+                    data-settle-from={settle || retryHere ? 'here' : 'elsewhere'}
+                  >
                     <CalloutBox tone='warning'>
                       <Text size='micro' component='p'>
-                        {GESTURES_PER_CARD} earlier saves of this card have no answer yet — settle
-                        one before saving again
+                        {settle || retryHere
+                          ? `${GESTURES_PER_CARD} earlier saves of this card have no answer yet — settle one before saving again`
+                          : `${GESTURES_PER_CARD} earlier saves of this card have no answer yet, and none of them can be resent from here — settle one from its picture’s editor on FLAT before saving again`}
                       </Text>
                       {settle && (
                         <div className='mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1'>
