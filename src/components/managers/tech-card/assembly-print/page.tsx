@@ -77,7 +77,7 @@ const SCREEN_CSS = `
   html, body { background: #fff !important; margin: 0; }
   .ap-toolbar { display: none !important; }
   .ap-stage-wrap { padding: 0 !important; height: auto !important; }
-  .ap-stage { transform: none !important; }
+  .ap-stage { transform: none !important; width: auto !important; }
   .ap-sheet { box-shadow: none; }
   .ap-pages { display: block !important; }
   .ap-page { break-after: page; }
@@ -202,6 +202,11 @@ function Document({
       if (next.scale === size.scale && paperNote(next) === paperNote(size)) break;
       size = next;
     }
+    // Не сошлось за три прохода — последний набор по последнему размеру, чтобы подвал не называл
+    // масштаб или число страниц, которых в файле нет.
+    const last = pdfSize(d, target);
+    if (last.scale !== size.scale || paperNote(last) !== paperNote(size))
+      d = set({ ...meta, scale: last.scale, paper: paperNote(last) });
     return d;
   }, [M, meta, shapeOf, form, target]);
   useEffect(() => onDoc(doc, key), [doc, key, onDoc]);

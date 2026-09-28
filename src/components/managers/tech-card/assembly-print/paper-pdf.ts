@@ -100,7 +100,8 @@ function tileFurniture(
   const out: Prim[] = [
     {
       k: 'text',
-      x: M,
+      // Правее уголка: штрих обреза не должен идти по первой букве подписи.
+      x: M + 8,
       y: M - 3,
       s: `${paper} · PAGE ${row * cols + col + 1} OF ${cols * rows} · ROW ${row + 1} OF ${rows} · COLUMN ${col + 1} OF ${cols} · TRIM AT THE CORNER MARKS, BUTT AND TAPE`,
       size: 7,
