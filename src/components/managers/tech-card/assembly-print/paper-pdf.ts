@@ -89,6 +89,30 @@ export async function exportPaperPdf(doc: PaperDoc): Promise<void> {
           pdf.setFillColor('#000000');
         }
         break;
+      case 'path': {
+        const sw = p.sw ?? 0;
+        if (!p.fill && sw <= 0) break;
+        for (const c of p.d) {
+          if (c[0] === 'M') pdf.moveTo(c[1], c[2]);
+          else if (c[0] === 'L') pdf.lineTo(c[1], c[2]);
+          else if (c[0] === 'C') pdf.curveTo(c[1], c[2], c[3], c[4], c[5], c[6]);
+          else pdf.close();
+        }
+        if (sw > 0) {
+          pdf.setLineWidth(sw);
+          pdf.setLineJoin(p.join === 'round' ? 'round' : 'miter');
+        }
+        const evenOdd = p.fillRule === 'evenodd';
+        if (p.fill && sw > 0) {
+          if (evenOdd) pdf.fillStrokeEvenOdd();
+          else pdf.fillStroke();
+        } else if (p.fill) {
+          if (evenOdd) pdf.fillEvenOdd();
+          else pdf.fill();
+        } else pdf.stroke();
+        pdf.setLineJoin('miter');
+        break;
+      }
     }
   }
   pdf.save(`${doc.fileStem}.pdf`);

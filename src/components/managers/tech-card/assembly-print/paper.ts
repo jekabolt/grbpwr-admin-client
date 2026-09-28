@@ -47,7 +47,29 @@ export type Prim =
       /** Контуры деталей — round: острый мыс с митровым углом выстреливает шипом за плитку. */
       join?: 'round' | 'miter';
     }
-  | { k: 'circle'; cx: number; cy: number; r: number; sw: number; fill: boolean };
+  | { k: 'circle'; cx: number; cy: number; r: number; sw: number; fill: boolean }
+  | {
+      k: 'path';
+      d: PathCmd[];
+      /** Заливка чёрным. Без неё и без `sw` путь невидим. */
+      fill?: boolean;
+      /** Толщина штриха, мм; 0 или нет — без штриха. */
+      sw?: number;
+      /** Правило заливки: дырки пиктограмм ухода (DNI и др.) нарисованы как evenodd. */
+      fillRule?: 'nonzero' | 'evenodd';
+      join?: 'round' | 'miter';
+    };
+
+/**
+ * Команда контура — всегда абсолютная и уже в мм листа, без transform: так оба читателя (SVG и
+ * PDF) рисуют ровно одни числа. Составники печатают весь текст и графику контурами (кривые, не
+ * шрифт) — это их единственный примитив.
+ */
+export type PathCmd =
+  | ['M', number, number]
+  | ['L', number, number]
+  | ['C', number, number, number, number, number, number]
+  | ['Z'];
 
 export type SheetMeta = {
   code: string;
@@ -246,6 +268,20 @@ function shift(p: Prim, dx: number, dy: number): Prim {
       return { ...p, pts: p.pts.map(([x, y]) => [x + dx, y + dy] as [number, number]) };
     case 'circle':
       return { ...p, cx: p.cx + dx, cy: p.cy + dy };
+    case 'path':
+      return { ...p, d: p.d.map((c) => shiftCmd(c, dx, dy)) };
+  }
+}
+
+function shiftCmd(c: PathCmd, dx: number, dy: number): PathCmd {
+  switch (c[0]) {
+    case 'M':
+    case 'L':
+      return [c[0], c[1] + dx, c[2] + dy];
+    case 'C':
+      return ['C', c[1] + dx, c[2] + dy, c[3] + dx, c[4] + dy, c[5] + dx, c[6] + dy];
+    case 'Z':
+      return c;
   }
 }
 
