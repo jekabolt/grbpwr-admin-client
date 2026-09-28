@@ -59,6 +59,12 @@ export type SheetMeta = {
   /** Что НЕ доехало к моменту печати — на бумагу. */
   warnings: string[];
   printedOn: string;
+  /**
+   * Масштаб файла (свой размер PDF): лист набирается как обычно и масштабируется целиком, но
+   * подвал обязан говорить правду о БУМАГЕ — размер файла, а не листа, и линейка, которая на
+   * бумаге меряет ровно столько, сколько подписано. Нет или 1 — файл размером с лист.
+   */
+  scale?: number;
 };
 
 /** Контур по ключу детали; `null` целиком — силуэты выключены. */
@@ -444,13 +450,21 @@ function head(
 }
 
 const FOOT_RIGHT = 'SHEET 1 OF 1';
-const footLeft = (meta: SheetMeta, W: number, H: number) =>
-  `${[meta.code, meta.revision].filter(Boolean).join(' · ')} · SHEET ${W} × ${H} MM · PRINT AT 100 % · BLACK ONLY`;
+const round1 = (v: number) => Math.round(v * 10) / 10;
+const scaled = (meta: SheetMeta) => !!meta.scale && meta.scale !== 1;
+/** `H = null` — замер до того, как высота известна: берётся самая длинная запись числа. */
+const footLeft = (meta: SheetMeta, W: number, H: number | null) => {
+  const k = scaled(meta) ? meta.scale! : 1;
+  const h = H == null ? (k === 1 ? '0' : '9999.9') : String(round1(H * k));
+  const size = k === 1 ? `${W} × ${h}` : `${round1(W * k)} × ${h}`;
+  const pct = k === 1 ? '' : ` (${round1(k * 100)} % OF THE ${W} MM SHEET)`;
+  return `${[meta.code, meta.revision].filter(Boolean).join(' · ')} · SHEET ${size} MM${pct} · PRINT AT 100 % · BLACK ONLY`;
+};
 /** Ширина левой строки подвала: до правой подписи, с зазором. */
 const footWidth = (W: number, margin: number) => W - 2 * margin - textW(FOOT_RIGHT, 10) - 6;
 /** Высота подвала без верхнего отступа: линейка + 2 мм + строки (длинный код стиля переносится). */
 function footHeight(meta: SheetMeta, W: number, margin: number): number {
-  return 2 + paraHeight(footWidth(W, margin), [{ s: footLeft(meta, W, 0), size: 10 }]);
+  return 2 + paraHeight(footWidth(W, margin), [{ s: footLeft(meta, W, null), size: 10 }]);
 }
 
 function foot(P: Painter, meta: SheetMeta, W: number, H: number, margin: number, top: number) {
@@ -459,17 +473,23 @@ function foot(P: Painter, meta: SheetMeta, W: number, H: number, margin: number,
   const width = footWidth(W, margin);
   P.para(margin, top + 2, width, [{ s: left, size: 10 }]);
   P.text(W - margin, top + 2 + BASE * mmOf(10), FOOT_RIGHT, 10, false, 'right');
-  // Мерная линейка 50 мм — против «вписать в страницу» в драйвере. По центру, но не поверх
-  // текста: на узком листе левая строка длиннее половины ширины; не влезает — не рисуется.
-  const label = '50 MM';
+  // Мерная линейка — против «вписать в страницу» в драйвере. По центру, но не поверх текста: на
+  // узком листе левая строка длиннее половины ширины; не влезает — не рисуется. Длина — НА БУМАГЕ:
+  // в масштабированном файле линейка набирается длиной mm / scale, чтобы подпись оставалась правдой;
+  // не влезает 50 — пробуются 20 и 10.
+  const k = scaled(meta) ? meta.scale! : 1;
   const firstLineW = wrapRuns([{ s: left, size: 10 }], width)[0]?.w ?? 0;
-  const lx = Math.max(W / 2 - 25, margin + firstLineW + 6 + textW(label, 10) + 2);
   const ly = top + 2 + lineH(10) / 2;
-  if (lx + 50 <= W - margin - textW(FOOT_RIGHT, 10) - 6) {
+  for (const mm of [50, 20, 10]) {
+    const label = `${mm} MM`;
+    const len = mm / k;
+    const lx = Math.max(W / 2 - len / 2, margin + firstLineW + 6 + textW(label, 10) + 2);
+    if (lx + len > W - margin - textW(FOOT_RIGHT, 10) - 6) continue;
     P.text(lx - 2, ly + 0.35 * mmOf(10), label, 10, false, 'right');
-    P.hline(lx, lx + 50, ly, RULE);
+    P.hline(lx, lx + len, ly, RULE);
     P.vline(lx, ly - 1.5, ly + 1.5, RULE);
-    P.vline(lx + 50, ly - 1.5, ly + 1.5, RULE);
+    P.vline(lx + len, ly - 1.5, ly + 1.5, RULE);
+    break;
   }
 }
 

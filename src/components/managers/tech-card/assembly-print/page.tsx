@@ -59,8 +59,8 @@ const formatTarget = (t: PdfTarget) => `${t.side}${t.mm}`;
 // Подпись входов листа: карточка ИЗ АДРЕСА (id в ответе бэка — необязательное поле), форма,
 // силуэты. Роутер переиспользует страницу при смене `:id`, и без подписи кнопка могла бы скачать
 // ПРЕДЫДУЩУЮ карточку, пока грузится новая.
-const docKey = (routeId: string | undefined, form: Form, shapes: boolean) =>
-  `${routeId ?? ''}|${form}|${shapes ? 'on' : 'off'}`;
+const docKey = (routeId: string | undefined, form: Form, shapes: boolean, size: string) =>
+  `${routeId ?? ''}|${form}|${shapes ? 'on' : 'off'}|${size}`;
 
 // Экранная обвязка: на печати (⌘P) прячется тулбар и снимается масштаб; лист печатается как есть.
 const SCREEN_CSS = `
@@ -143,10 +143,13 @@ function Document({
   onShapesAvailable,
   onDoc,
   docKey: key,
+  target,
 }: {
   techCard: common_TechCard;
   form: Form;
   shapes: boolean;
+  /** Свой размер файла; лист набирается с этим масштабом (подвал и линейка — о бумаге). */
+  target: PdfTarget | null;
   workCatalog: WorkCatalog;
   meta: SheetMeta;
   onDeps: (deps: PrintDep[]) => void;
@@ -173,15 +176,29 @@ function Document({
     if (!shapes || !hasDxf) return null;
     return (key) => shapeByKey?.get(pieceRefKey(key))?.piece ?? null;
   }, [shapes, hasDxf, shapeByKey]);
-  const doc = useMemo(
-    () => (form === 'map' ? typesetMap(M, meta, shapeOf) : typesetRoute(M, meta, shapeOf)),
-    [M, meta, shapeOf, form],
-  );
+  const doc = useMemo(() => {
+    const set = (m: SheetMeta) =>
+      form === 'map' ? typesetMap(M, m, shapeOf) : typesetRoute(M, m, shapeOf);
+    let d = set(meta);
+    if (!target) return d;
+    // Подвал масштабированного листа длиннее (размер файла, процент) и может лечь лишней строкой —
+    // тогда меняется высота листа, а с ней масштаб под заданную высоту. Пара проходов сходится.
+    let k = pdfSize(d, target).scale;
+    for (let i = 0; i < 3; i++) {
+      d = set({ ...meta, scale: k });
+      const next = pdfSize(d, target).scale;
+      if (next === k) break;
+      k = next;
+    }
+    return d;
+  }, [M, meta, shapeOf, form, target]);
   useEffect(() => onDoc(doc, key), [doc, key, onDoc]);
+  // Экран и ⌘P показывают ФАЙЛ: тот же лист в физическом размере файла.
+  const out = pdfSize(doc, target);
   return (
     <>
-      <style>{`@page { size: ${doc.w}mm ${doc.h}mm; margin: 0; }`}</style>
-      <PaperSvg doc={doc} />
+      <style>{`@page { size: ${out.w}mm ${out.h}mm; margin: 0; }`}</style>
+      <PaperSvg doc={doc} w={out.w} h={out.h} />
     </>
   );
 }
@@ -192,7 +209,9 @@ export function TechCardAssemblyPrint() {
   const [searchParams, setSearchParams] = useSearchParams();
   const form: Form = searchParams.get('form') === 'map' ? 'map' : 'route';
   const shapes = searchParams.get('shapes') !== 'off';
-  const target = parseTarget(searchParams.get('size'));
+  const sizeParam = searchParams.get('size');
+  // Мемо по строке адреса: объект цели входит в зависимости набора листа.
+  const target = useMemo(() => parseTarget(sizeParam), [sizeParam]);
   const setChoice = (next: { form?: Form; shapes?: boolean; target?: PdfTarget | null }) => {
     const f = next.form ?? form;
     const s = next.shapes ?? shapes;
@@ -228,7 +247,7 @@ export function TechCardAssemblyPrint() {
   const [shapesAvailable, setShapesAvailable] = useState<boolean | null>(null);
   const [docState, setDocState] = useState<{ doc: PaperDoc; key: string } | null>(null);
   const onDoc = useCallback((doc: PaperDoc, key: string) => setDocState({ doc, key }), []);
-  const currentKey = docKey(id, form, shapes);
+  const currentKey = docKey(id, form, shapes, target ? formatTarget(target) : '');
   const doc = docState && docState.key === currentKey ? docState.doc : null;
   const [exporting, setExporting] = useState(false);
   // Размер файла: лист как есть или масштаб целиком под заданную сторону. Предел страницы PDF
@@ -291,8 +310,8 @@ export function TechCardAssemblyPrint() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
-  const sheetWpx = (doc?.w ?? 420) * PX_PER_MM;
-  const sheetHpx = (doc?.h ?? 0) * PX_PER_MM;
+  const sheetWpx = (size?.w ?? 420) * PX_PER_MM;
+  const sheetHpx = (size?.h ?? 0) * PX_PER_MM;
   const k = view === 'fit' ? Math.min(1, (winW - 48) / sheetWpx) : 1;
 
   const report = doc?.report;
@@ -523,7 +542,7 @@ export function TechCardAssemblyPrint() {
           </div>
           <div
             className='ap-stage origin-top-left'
-            style={{ transform: `scale(${k})`, width: `${doc?.w ?? 420}mm` }}
+            style={{ transform: `scale(${k})`, width: `${size?.w ?? 420}mm` }}
           >
             <FormProvider {...methods}>
               <Document
@@ -536,6 +555,7 @@ export function TechCardAssemblyPrint() {
                 onShapesAvailable={setShapesAvailable}
                 onDoc={onDoc}
                 docKey={currentKey}
+                target={target}
               />
             </FormProvider>
           </div>
