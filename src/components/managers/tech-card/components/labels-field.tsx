@@ -6,10 +6,12 @@ import { CarePicker } from 'components/managers/product/components/care/care-pic
 import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
 import { materialCompositionCode } from 'components/managers/materials/components/material-code';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
+import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { techCardLabelTypeOptions } from 'constants/filter';
-import { SECTION } from 'constants/routes';
+import { ROUTES, SECTION } from 'constants/routes';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
@@ -20,7 +22,20 @@ import { TooltipProvider } from 'ui/components/tooltip';
 import ComboField from 'ui/form/fields/combo-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
-import { generateCareLabel, hasAnyComposition } from 'utils/care-label';
+import {
+  defaultCareColorway,
+  generateCareLabel,
+  hasAnyComposition,
+  type CareLabelText,
+} from 'utils/care-label';
+import {
+  adaptFibers,
+  adaptMaterials,
+  adaptUsages,
+  originCountryText,
+} from '../care-labels/adapter';
+import type { LabelBomLine } from '../care-labels/composition-resolver';
+import { hole, isBlocking, type Hole } from '../care-labels/holes';
 import { useBomItemIdOptions } from './bom-line-picker';
 import { useCareDrift } from './care-drift';
 import { LabelsChecklist } from './labels-checklist';
@@ -50,6 +65,14 @@ export const emptyLabel = {
 
 // Labels carry no image, so the "thumbnail" is a typographic square badge of the label type — it
 // keeps the card scannable at a glance (which kind of label this card is).
+// The door to the care-label print screen (`/tech-cards/:id/care-labels`). It prints the SAVED card
+// in a new tab — the screen reads GetTechCard, not this form — so an unsaved card has no door at
+// all: a button that would print something other than what is on screen is worse than none
+// (the same rule as the assembly order's `print ⎙` in operations-field).
+function openCareLabels(techCardId: number) {
+  window.open(ROUTES.techCardCareLabels.replace(':id', String(techCardId)), '_blank', 'noopener');
+}
+
 const LABEL_TYPE_BADGE: Record<string, string> = {
   TECH_CARD_LABEL_TYPE_MAIN: 'main',
   TECH_CARD_LABEL_TYPE_SIZE: 'size',
@@ -64,7 +87,15 @@ const LABEL_TYPE_BADGE: Record<string, string> = {
 // One label card. A CARE label gets the care-instruction picker for its content (laundry
 // symbols); the composition text lives in its note. Other types use a free-text content. One clean
 // uniform grid — no per-row pictogram, so the fields align instead of stepping around a badge.
-function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) {
+function LabelRow({
+  index,
+  onRemove,
+  techCardId,
+}: {
+  index: number;
+  onRemove: () => void;
+  techCardId?: number;
+}) {
   const { control } = useFormContext<TechCardFormData>();
   const labelType = useWatch({ control, name: `labels.${index}.labelType` }) as string;
   const isCare = labelType === CARE;
@@ -110,7 +141,19 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
         <Text size='micro' variant='label' component='span' tracking='label' className='uppercase'>
           label {index + 1}
         </Text>
-        <span className='ml-auto'>
+        <span className='ml-auto flex items-center gap-1.5'>
+          {isCare && techCardId ? (
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              data-care-labels-door='row'
+              title='print the care labels of the SAVED card for every colourway (opens in a new tab)'
+              onClick={() => openCareLabels(techCardId)}
+            >
+              print care labels ⎙
+            </Button>
+          ) : null}
           <Button
             type='button'
             variant='secondary'
@@ -238,7 +281,17 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
   );
 }
 
-type BomComp = { section?: string; composition?: string; materialId?: number };
+type BomComp = {
+  section?: string;
+  purpose?: string;
+  labelPart?: string;
+  composition?: string;
+  materialId?: number;
+  lineKey?: string;
+  name?: string;
+  unit?: string;
+};
+type LabelRowLite = { labelType?: string; content?: string };
 
 // Backfill a BOM line's composition from its linked material when the line itself carries none. A
 // line linked to a structurally-composed material before its blend existed (or snapshotted from an
@@ -257,30 +310,111 @@ function withMaterialComposition<T extends BomComp>(
   });
 }
 
+// СОСТАВ ДЛЯ ВКЛАДКИ — ТЕМ ЖЕ РЕЗОЛВЕРОМ, ЧТО ЛЕНТА (план §5.4). BOM — живой из формы (правка строки
+// видна сразу, без сохранения); колорвей — СОХРАНЁННЫЙ (форма колорвеев не ведёт, RHF `colorways`
+// всегда пуст): дефолтный — первый ACTIVE, иначе первый, его пины артикулов и расход — веса; без
+// колорвеев (или без сохранённой карточки) — пустые usages, то есть веса 1 и материал слота.
+// Страна — ORIGIN-этикетка формы, «Made in» снимается (`originCountryText`), чтобы не вышло
+// «Made in Made in Poland».
+//
+// ⚠ id ЧЕРЕЗ wireInt. int64 с провода приезжает СТРОКОЙ («501»), а форма держит число: ключи
+// каталога и пины usages приводит к числу адаптер ленты (`adaptMaterials` / `adaptUsages`), строки
+// формы — здесь; иначе материал строки не находится вовсе, а «пин того же артикула» выглядит пином
+// ДРУГОГО и закрывает часть дырой.
+//
+// «НЕ ЗАГРУЗИЛОСЬ» — НЕ «ПУСТО» (как у ленты, holes.ts). Каталог, который упал или ещё едет, — это не
+// пустой каталог: без него резолвер законно берёт снимок состава из строки BOM, а снимок бывает
+// устаревшим, и «generate» записал бы в CARE неверный юридический состав. Пока каталог и словарь не
+// приехали УСПЕШНО, состав не собирается вовсе: дыры `materials-unavailable` / `dictionary-unavailable`
+// — генератор отказывает, превью их показывает. Успешный пустой ответ — законный `[]`.
+function useCareComposer(techCardId: number | undefined) {
+  const materialsQuery = useMaterials('', true);
+  const materialsOk = materialsQuery.isSuccess;
+  const materialsData = materialsQuery.data;
+  const { dictionary, error: dictionaryError } = useDictionary();
+  const dictionaryOk = !!dictionary && !dictionaryError;
+  const { data: savedCard } = useTechCard(techCardId);
+  return useCallback(
+    (bomRows: BomComp[], labels: LabelRowLite[]): CareLabelText => {
+      const unavailable: Hole[] = [];
+      if (!dictionaryOk) {
+        unavailable.push(
+          hole(
+            'dictionary-unavailable',
+            'the dictionary did not load (still loading or the request failed) — the composition cannot be generated; reload the page',
+          ),
+        );
+      }
+      if (!materialsOk) {
+        unavailable.push(
+          hole(
+            'materials-unavailable',
+            'the materials catalogue did not load (still loading or the request failed) — the composition cannot be generated; reload the page',
+          ),
+        );
+      }
+      if (unavailable.length) return { text: '', parts: [], holes: unavailable };
+      const materialsRaw = materialsData?.materials ?? [];
+      const bom: LabelBomLine[] = withMaterialComposition(bomRows, materialsRaw).map((b, i) => ({
+        lineKey: b.lineKey || `row-${i}`,
+        section: b.section,
+        purpose: b.purpose,
+        labelPart: b.labelPart ?? null,
+        materialId: wireInt(b.materialId) || undefined,
+        composition: b.composition,
+        name: b.name ?? '',
+        unit: b.unit,
+      }));
+      // Каталог и usages — через адаптер ленты: id с провода он приводит к числу сам, а легаси-usage
+      // без bom_line_key находит строку по bom_item_id СОХРАНЁННОЙ карточки.
+      const materials = adaptMaterials(materialsRaw);
+      const colorway = defaultCareColorway(savedCard?.colorways);
+      const usages = colorway ? adaptUsages(colorway, savedCard?.techCard?.bomItems) : [];
+      return generateCareLabel({
+        colorwayId: colorway ? wireInt(colorway.colorwayId) : undefined,
+        bom,
+        usages,
+        materials,
+        fibers: adaptFibers(dictionary?.fibers),
+        originCountry: originCountryText(labels.find((l) => l.labelType === ORIGIN)?.content),
+      });
+    },
+    [materialsOk, materialsData, dictionaryOk, dictionary, savedCard],
+  );
+}
+
+const UNAVAILABLE = new Set(['materials-unavailable', 'dictionary-unavailable']);
+
+/**
+ * Предупреждения резолвера (не блоки): состав собран, но оператору есть что проверить — деталь из
+ * другого артикула (`piece-pin-differs`, возможно контрастная вставка), сумма не 100, строка без
+ * расхода … Лента кладёт их в README; вкладка — в тост генератора и под превью, а не в «успех».
+ */
+const labelWarnings = (holes: readonly Hole[]): Hole[] => holes.filter((h) => h.level === 'warn');
+
 // A live printed-label preview, composed from the SAME react-hook-form data the checklist reads
 // (bomItems + labels), so it can never word the tag differently from the spec. Nothing here writes:
 // it recomposes on every keystroke in the BOM, the CarePicker or the origin label, which is what
 // lets the operator catch a stale blend or a wrong symbol before the order goes to print.
-function LabelPreview() {
+function LabelPreview({ techCardId }: { techCardId?: number }) {
   const { control } = useFormContext<TechCardFormData>();
   const vocabulary = useCareVocabulary();
-  const { data: materialsData } = useMaterials('', true);
-  const bomItemsRaw = (useWatch({ control, name: 'bomItems' }) ?? []) as BomComp[];
-  const bomItems = withMaterialComposition(bomItemsRaw, materialsData?.materials ?? []);
-  const labels = (useWatch({ control, name: 'labels' }) ?? []) as Array<{
-    labelType?: string;
-    content?: string;
-  }>;
+  const compose = useCareComposer(techCardId);
+  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as BomComp[];
+  const labels = (useWatch({ control, name: 'labels' }) ?? []) as LabelRowLite[];
 
-  const origin = labels.find((l) => l.labelType === ORIGIN)?.content?.trim() || undefined;
   const careContent = labels.find((l) => l.labelType === CARE)?.content ?? '';
   const symbolCodes = careCodes(careContent);
   // Same wording the storefront and the printed tag use — the dictionary's canonical care prose.
   const careProse = vocabulary.prose(careContent);
 
-  // The composition / care text is the EXISTING generator's output, split so the "Made in …" line
-  // can print at the foot of the tag (as it does on a real care label) below the symbols.
-  const composed = generateCareLabel(bomItems, origin)
+  // The composition / care text is the ONE generator's output (the label resolver, default
+  // colourway), split so the "Made in …" line can print at the foot of the tag (as it does on a
+  // real care label) below the symbols.
+  const result = compose(bomItems, labels);
+  // Что мешает составу (блоки: не загрузилось, волокна нет в словаре …) — прямо под превью.
+  const shownHoles = [...result.holes.filter(isBlocking), ...labelWarnings(result.holes)];
+  const composed = result.text
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
@@ -358,6 +492,21 @@ function LabelPreview() {
           </div>
         )}
       </div>
+      {shownHoles.length > 0 && (
+        <div className='flex flex-col gap-0.5 pt-1' data-care-preview-holes=''>
+          {shownHoles.map((h, i) => (
+            <Text
+              key={`${h.code}-${i}`}
+              size='micro'
+              variant={h.level === 'block' ? 'errorLabel' : 'label'}
+              data-care-preview-hole={h.code}
+              data-hole-level={h.level}
+            >
+              {h.level}: {h.message}
+            </Text>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -365,11 +514,18 @@ function LabelPreview() {
 // Labels / tags (Sheet «Этикетки и упаковка»). label_type is required on each. The care
 // generator builds a composition block from the BOM into the CARE label's note; the laundry
 // symbols are chosen with the CarePicker on the CARE label's content.
-export function LabelsField({ onMissingComposition }: { onMissingComposition?: () => void }) {
+export function LabelsField({
+  onMissingComposition,
+  techCardId,
+}: {
+  onMissingComposition?: () => void;
+  /** The SAVED card's id; absent on an unsaved card, which then has no print door. */
+  techCardId?: number;
+}) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'labels' });
   const { showMessage } = useSnackBarStore();
-  const { data: materialsData } = useMaterials('', true);
+  const compose = useCareComposer(techCardId);
 
   // Which row the checklist just sent us to. `nonce` re-arms the effect when the SAME row is asked
   // for twice, so a second click scrolls again instead of sitting silent.
@@ -403,17 +559,24 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
   };
 
   const generateCare = () => {
-    // Backfill each line's composition from its linked material so a structurally-composed material
-    // generates its care label even when the line's own composition string is still blank.
-    const bomItems = withMaterialComposition(
-      (getValues('bomItems') ?? []) as BomComp[],
-      materialsData?.materials ?? [],
-    );
-    const labels = (getValues('labels') ?? []) as Array<{ labelType?: string; content?: string }>;
-    const origin = labels.find((l) => l.labelType === ORIGIN)?.content?.trim();
-    const text = generateCareLabel(bomItems, origin);
+    const bomItems = (getValues('bomItems') ?? []) as BomComp[];
+    const labels = (getValues('labels') ?? []) as LabelRowLite[];
+    const { text, holes } = compose(bomItems, labels);
+    // Каталог или словарь не приехали — состав не собирается и ничего не пишется (ни снимок из BOM,
+    // ни переход в BOM: чинить там нечего, нужен ответ сервера).
+    const unavailable = holes.find((h) => UNAVAILABLE.has(h.code));
+    if (unavailable) {
+      showMessage(`the composition is not generated: ${unavailable.message}`, 'error');
+      return;
+    }
+    // Блок резолвера говорит точнее двух старых фраз: КАКАЯ строка и ЧТО с ней (волокна нет в
+    // словаре, смесевой код, пин артикула без состава…).
+    const block = holes.find(isBlocking);
     if (!text) {
-      if (hasAnyComposition(bomItems)) {
+      if (block) {
+        showMessage(`no composition for the label: ${block.message}`, 'error');
+        onMissingComposition?.();
+      } else if (hasAnyComposition(bomItems)) {
         // composition strings exist but yielded no %s — most likely percentages weren't set
         showMessage(
           'composition is set but without percentages: in the composition (BOM) field press “select” and set a % for every material',
@@ -435,6 +598,24 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
     } else {
       append({ ...emptyLabel, labelType: CARE, note: text });
     }
+    // Записано, но часть строк не дошла до ленты (одна строка с неизвестным волокном не прячет
+    // остальные части) — сказать об этом, а не рапортовать успех.
+    if (block) {
+      showMessage(
+        `the composition is written into the “care” label, but not all of it: ${block.message}`,
+        'error',
+      );
+      return;
+    }
+    // Записано, но есть что проверить — предупреждения вместо голого «успеха».
+    const warnings = labelWarnings(holes);
+    if (warnings.length) {
+      showMessage(
+        `the composition is written into the “care” label — check ${warnings.length === 1 ? 'the warning' : `${warnings.length} warnings`}: ${warnings.map((h) => h.message).join(' · ')}`,
+        'error',
+      );
+      return;
+    }
     showMessage(
       'the composition is written into the “care” label (the “composition / care text” field)',
       'success',
@@ -450,6 +631,18 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
           <Button type='button' variant='secondary' size='sm' onClick={generateCare}>
             generate composition / care
           </Button>
+          {techCardId ? (
+            <Button
+              type='button'
+              variant='secondary'
+              size='sm'
+              data-care-labels-door='toolbar'
+              title='print the care labels of the SAVED card for every colourway (opens in a new tab)'
+              onClick={() => openCareLabels(techCardId)}
+            >
+              print care labels ⎙
+            </Button>
+          ) : null}
           <ToolbarSpacer />
           <Button type='button' variant='main' size='sm' onClick={() => append({ ...emptyLabel })}>
             + label
@@ -468,7 +661,12 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
         ) : (
           <div className='flex flex-col gap-1.5'>
             {fields.map((f, index) => (
-              <LabelRow key={f.id} index={index} onRemove={() => remove(index)} />
+              <LabelRow
+                key={f.id}
+                index={index}
+                onRemove={() => remove(index)}
+                techCardId={techCardId}
+              />
             ))}
           </div>
         )}
@@ -476,7 +674,7 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
         {/* SECONDARY — the printed-label preview + a compact completeness checklist, separated from
             the editing above so label creation stays the focus. */}
         <div className='flex flex-col gap-2 border-t border-hairline pt-3'>
-          <LabelPreview />
+          <LabelPreview techCardId={techCardId} />
           <LabelsChecklist onAddLabel={addLabel} onOpenPackaging={openPackaging} />
         </div>
       </div>

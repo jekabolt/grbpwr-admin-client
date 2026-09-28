@@ -959,6 +959,25 @@ export type TechCardBomKind =
   // назвать шоппер СТРОКОЙ СПЕЦИФИКАЦИИ было нечем — при том, что строка спецификации это
   // единственное место, где вспомогательный компонент вообще стоит денег.
   | "TECH_CARD_BOM_KIND_TOTE_BAG";
+// TechCardBomLabelPart — В КАКУЮ ЧАСТЬ СОСТАВНИКА (care label) идёт состав этой строки: SHELL,
+// BODY LINING, SLEEVE LINING … Свойство ЛЕНТЫ, а не геометрии и не закупки, поэтому отдельная ось
+// рядом с purpose/kind, а не их производная: подкладка рукава и подкладка стана — обе
+// purpose=LINING, но на ленте это две колонки.
+// UNSPECIFIED (0) = «авто»: хранится NULL, и дефолт части по section/purpose считает КЛИЕНТ
+// (defaultLabelPart), а не сервер. Хранимый NULL честно значит «не решали», поэтому смена правила
+// дефолта не требует миграции данных. NOT_ON_LABEL — явное «на ленту не идёт» (молния, пуговица),
+// в отличие от UNSPECIFIED, которое ленту не исключает.
+// Mirrors entity.ValidTechCardBomLabelParts and the DB CHECK chk_bom_item_label_part.
+export type TechCardBomLabelPart =
+  | "TECH_CARD_BOM_LABEL_PART_UNSPECIFIED"
+  | "TECH_CARD_BOM_LABEL_PART_SHELL"
+  | "TECH_CARD_BOM_LABEL_PART_BODY_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_SLEEVE_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_POCKET_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_HOOD_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_FILLING"
+  | "TECH_CARD_BOM_LABEL_PART_TRIM"
+  | "TECH_CARD_BOM_LABEL_PART_NOT_ON_LABEL";
 // TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
 export type TechCardLabDipStatus =
   | "TECH_CARD_LAB_DIP_STATUS_UNKNOWN"
@@ -2490,6 +2509,15 @@ export type TechCardBomItem = {
   // ОЧИСТИТЬ можно ТОЛЬКО явным Decimal{value:""}. Присутствие здесь одиночное: у оценки нет
   // второй половины, в отличие от счётной пары.
   estUsage: googletype_Decimal | undefined;
+  // ЧАСТЬ СОСТАВНИКА (care labels) — see TechCardBomLabelPart. UNSPECIFIED = «авто»: сервер хранит
+  // NULL, дефолт по section/purpose выводит клиент. Валидации по секции нет: часть — свойство
+  // ленты, любой раздел может попасть на этикетку явно. В дайджест подписи MATERIALS НЕ входит
+  // (как kind).
+  // OPTIONAL — тот же протокол «нет на проводе = не трогай», что у purpose/kind: карточка
+  // сохраняется целиком, и вкладка со старым бандлом, которая про поле не знает, иначе прислала бы
+  // proto3-дефолт UNSPECIFIED и стёрла бы выбор части у ВСЕХ строк карточки. Явно присланный
+  // UNSPECIFIED (поле присутствует) очищает в NULL.
+  labelPart?: TechCardBomLabelPart;
 };
 
 // MaterialFabricAttrs are the typed attributes of a fabric-class material (material_fabric_attr).
@@ -6540,6 +6568,21 @@ export type Fiber = {
   code: string | undefined;
   name: string | undefined;
   archived: boolean | undefined;
+  // Names printed on the care label, one per label language that has one (order: the closed label
+  // language list en fr de it es pt nl pl cn jp). A missing language is a hole the label screen
+  // reports; the full set ships with the dictionary and the client picks, as CareSymbol.translations.
+  translations: FiberLabelTranslation[] | undefined;
+  // Non-textile part of animal origin (leather, fur): a label with this fibre prints the
+  // "contains non-textile parts of animal origin" phrase (EU 1007/2011 Art. 12).
+  animalNonTextile: boolean | undefined;
+};
+
+// FiberLabelTranslation is a fibre name in one care-label language. label_lang is from the CLOSED
+// care-label list en fr de it es pt nl pl cn jp — not a storefront language code (Japanese is `jp`
+// here, and ES/PT/NL/PL are not storefront languages at all).
+export type FiberLabelTranslation = {
+  labelLang: string | undefined;
+  name: string | undefined;
 };
 
 // Tag is a controlled merchandising tag dictionary (R9). Storefront receives tags by code/name; id is

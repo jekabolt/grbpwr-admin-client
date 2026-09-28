@@ -36,29 +36,37 @@ import { assemblyPrintModel, type PrintCardInput } from './model';
 import { typesetMap, typesetRoute, type PaperDoc, type SheetMeta, type ShapeLookup } from './paper';
 import {
   exportPaperPdf,
+  isPaper,
+  PAPERS,
+  paperNote,
   pdfFileName,
   pdfSize,
   pdfSizeProblem,
   smallestTextPt,
   type PdfTarget,
 } from './paper-pdf';
-import { PaperSvg } from './paper-svg';
+import { PaperPages } from './paper-svg';
 
 type Form = 'route' | 'map';
 
 const PX_PER_MM = 96 / 25.4;
 
-// `size=w600` — ширина 600 мм, `size=h900` — высота 900 мм; мм до десятых.
+// `size=w600` — ширина 600 мм, `size=h900` — высота 900 мм (мм до десятых), `size=A4` — формат.
 const parseTarget = (v: string | null): PdfTarget | null => {
+  if (v && isPaper(v)) return { paper: v };
   const m = v?.match(/^([wh])(\d+(?:\.\d+)?)$/);
   if (!m) return null;
   const mm = Math.round(parseFloat(m[2]) * 10) / 10;
   return mm > 0 ? { side: m[1] as 'w' | 'h', mm } : null;
 };
-const formatTarget = (t: PdfTarget) => `${t.side}${t.mm}`;
+const formatTarget = (t: PdfTarget) => ('paper' in t ? t.paper : `${t.side}${t.mm}`);
+const PAPER_NAMES = Object.keys(PAPERS) as (keyof typeof PAPERS)[];
 // Подпись входов листа: карточка ИЗ АДРЕСА (id в ответе бэка — необязательное поле), форма,
 // силуэты. Роутер переиспользует страницу при смене `:id`, и без подписи кнопка могла бы скачать
 // ПРЕДЫДУЩУЮ карточку, пока грузится новая.
+/** Зазор между страницами разбивки на экране, мм. */
+const PAGE_GAP_MM = 6;
+
 const docKey = (routeId: string | undefined, form: Form, shapes: boolean, size: string) =>
   `${routeId ?? ''}|${form}|${shapes ? 'on' : 'off'}|${size}`;
 
@@ -69,8 +77,11 @@ const SCREEN_CSS = `
   html, body { background: #fff !important; margin: 0; }
   .ap-toolbar { display: none !important; }
   .ap-stage-wrap { padding: 0 !important; height: auto !important; }
-  .ap-stage { transform: none !important; }
+  .ap-stage { transform: none !important; width: auto !important; }
   .ap-sheet { box-shadow: none; }
+  .ap-pages { display: block !important; }
+  .ap-page { break-after: page; }
+  .ap-page:last-child { break-after: auto; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 }
 `;
@@ -181,24 +192,30 @@ function Document({
       form === 'map' ? typesetMap(M, m, shapeOf) : typesetRoute(M, m, shapeOf);
     let d = set(meta);
     if (!target) return d;
-    // Подвал масштабированного листа длиннее (размер файла, процент) и может лечь лишней строкой —
-    // тогда меняется высота листа, а с ней масштаб под заданную высоту. Пара проходов сходится.
-    let k = pdfSize(d, target).scale;
+    // Подвал масштабированного листа длиннее (размер файла, процент, формат и число страниц) и может
+    // лечь лишней строкой — тогда меняется высота листа, а с ней масштаб под заданную высоту или
+    // число страниц разбивки. Пара проходов сходится.
+    let size = pdfSize(d, target);
     for (let i = 0; i < 3; i++) {
-      d = set({ ...meta, scale: k });
-      const next = pdfSize(d, target).scale;
-      if (next === k) break;
-      k = next;
+      d = set({ ...meta, scale: size.scale, paper: paperNote(size) });
+      const next = pdfSize(d, target);
+      if (next.scale === size.scale && paperNote(next) === paperNote(size)) break;
+      size = next;
     }
+    // Не сошлось за три прохода — последний набор по последнему размеру, чтобы подвал не называл
+    // масштаб или число страниц, которых в файле нет.
+    const last = pdfSize(d, target);
+    if (last.scale !== size.scale || paperNote(last) !== paperNote(size))
+      d = set({ ...meta, scale: last.scale, paper: paperNote(last) });
     return d;
   }, [M, meta, shapeOf, form, target]);
   useEffect(() => onDoc(doc, key), [doc, key, onDoc]);
-  // Экран и ⌘P показывают ФАЙЛ: тот же лист в физическом размере файла.
+  // Экран и ⌘P показывают ФАЙЛ: те же страницы в физическом размере, разбивка — сеткой склейки.
   const out = pdfSize(doc, target);
   return (
     <>
       <style>{`@page { size: ${out.w}mm ${out.h}mm; margin: 0; }`}</style>
-      <PaperSvg doc={doc} w={out.w} h={out.h} />
+      <PaperPages doc={doc} size={out} gapMm={PAGE_GAP_MM} />
     </>
   );
 }
@@ -310,8 +327,11 @@ export function TechCardAssemblyPrint() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
-  const sheetWpx = (size?.w ?? 420) * PX_PER_MM;
-  const sheetHpx = (size?.h ?? 0) * PX_PER_MM;
+  // Сцена — все страницы файла сеткой склейки (одна страница — просто страница).
+  const stageWmm = size ? size.cols * size.w + (size.cols - 1) * PAGE_GAP_MM : 420;
+  const stageHmm = size ? size.rows * size.h + (size.rows - 1) * PAGE_GAP_MM : 0;
+  const sheetWpx = stageWmm * PX_PER_MM;
+  const sheetHpx = stageHmm * PX_PER_MM;
   const k = view === 'fit' ? Math.min(1, (winW - 48) / sheetWpx) : 1;
 
   const report = doc?.report;
@@ -323,7 +343,7 @@ export function TechCardAssemblyPrint() {
         `${report.crossings} crossings`,
         report.overWidth ? 'wider than A0 — print from a roll' : '',
         size?.custom
-          ? `pdf ${size.w} × ${size.h} mm · ${Math.round(size.scale * 1000) / 10} %` +
+          ? `pdf ${size.tiles.length > 1 ? `${size.tiles.length} pages · ` : ''}${size.paper ? `${size.paper} ${size.landscape ? 'landscape' : 'portrait'} ` : ''}${size.w} × ${size.h} mm${size.tiles.length > 1 ? ` · ${size.cols} across × ${size.rows} down — trim and tape` : ''} · ${Math.round(size.scale * 1000) / 10} %` +
             (minPt != null ? ` · smallest text ${Math.round(minPt * size.scale * 10) / 10} pt` : '')
           : '',
         sizeProblem
@@ -458,6 +478,25 @@ export function TechCardAssemblyPrint() {
               >
                 sheet
               </Chip>
+              {PAPER_NAMES.map((paper) => {
+                const on = !!target && 'paper' in target && target.paper === paper;
+                const [pw, ph] = PAPERS[paper];
+                return (
+                  <Chip
+                    key={paper}
+                    nonForm
+                    pressed={on}
+                    selected={on}
+                    onClick={() => {
+                      setSizeEdit(null);
+                      setChoice({ target: { paper } });
+                    }}
+                    title={`${paper} pages (${pw} × ${ph} mm): the whole sheet on one page, centred — unless that makes it smaller than one paper size down (70.7 %); then it is split across several ${paper} pages at 70.7 % with trim marks, to tape together`}
+                  >
+                    {paper}
+                  </Chip>
+                );
+              })}
             </ChipRow>
             {(['w', 'h'] as const).map((side, i) => (
               <div key={side} className='flex items-center gap-1'>
@@ -542,7 +581,7 @@ export function TechCardAssemblyPrint() {
           </div>
           <div
             className='ap-stage origin-top-left'
-            style={{ transform: `scale(${k})`, width: `${size?.w ?? 420}mm` }}
+            style={{ transform: `scale(${k})`, width: `${stageWmm}mm` }}
           >
             <FormProvider {...methods}>
               <Document

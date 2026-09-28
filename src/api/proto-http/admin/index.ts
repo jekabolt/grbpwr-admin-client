@@ -436,6 +436,21 @@ export type common_Fiber = {
   code: string | undefined;
   name: string | undefined;
   archived: boolean | undefined;
+  // Names printed on the care label, one per label language that has one (order: the closed label
+  // language list en fr de it es pt nl pl cn jp). A missing language is a hole the label screen
+  // reports; the full set ships with the dictionary and the client picks, as CareSymbol.translations.
+  translations: common_FiberLabelTranslation[] | undefined;
+  // Non-textile part of animal origin (leather, fur): a label with this fibre prints the
+  // "contains non-textile parts of animal origin" phrase (EU 1007/2011 Art. 12).
+  animalNonTextile: boolean | undefined;
+};
+
+// FiberLabelTranslation is a fibre name in one care-label language. label_lang is from the CLOSED
+// care-label list en fr de it es pt nl pl cn jp — not a storefront language code (Japanese is `jp`
+// here, and ES/PT/NL/PL are not storefront languages at all).
+export type common_FiberLabelTranslation = {
+  labelLang: string | undefined;
+  name: string | undefined;
 };
 
 // Tag is a controlled merchandising tag dictionary (R9). Storefront receives tags by code/name; id is
@@ -1720,6 +1735,9 @@ export type CreateFiberRequest = {
   code: string | undefined;
   name: string | undefined;
   expectedVersion: number | undefined;
+  // Optional care-label names for the new fibre (closed label language list; an empty name is
+  // skipped). Omitted = the fibre starts with none and the label screen reports the holes.
+  translations: common_FiberLabelTranslation[] | undefined;
 };
 
 export type CreateFiberResponse = {
@@ -1733,6 +1751,21 @@ export type ArchiveFiberRequest = {
 };
 
 export type ArchiveFiberResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type UpsertFiberLabelTranslationsRequest = {
+  code: string | undefined;
+  // The complete set after the call: languages from the closed care-label list, each at most once;
+  // an empty name (or a language left out) deletes that language's row.
+  translations: common_FiberLabelTranslation[] | undefined;
+  expectedVersion: number | undefined;
+  // Absent = leave the flag as it is; present = set it.
+  animalNonTextile?: boolean;
+};
+
+export type UpsertFiberLabelTranslationsResponse = {
+  fiber: common_Fiber | undefined;
   revision: common_DictionaryRevision | undefined;
 };
 
@@ -8435,6 +8468,15 @@ export type common_TechCardBomItem = {
   // ОЧИСТИТЬ можно ТОЛЬКО явным Decimal{value:""}. Присутствие здесь одиночное: у оценки нет
   // второй половины, в отличие от счётной пары.
   estUsage: googletype_Decimal | undefined;
+  // ЧАСТЬ СОСТАВНИКА (care labels) — see TechCardBomLabelPart. UNSPECIFIED = «авто»: сервер хранит
+  // NULL, дефолт по section/purpose выводит клиент. Валидации по секции нет: часть — свойство
+  // ленты, любой раздел может попасть на этикетку явно. В дайджест подписи MATERIALS НЕ входит
+  // (как kind).
+  // OPTIONAL — тот же протокол «нет на проводе = не трогай», что у purpose/kind: карточка
+  // сохраняется целиком, и вкладка со старым бандлом, которая про поле не знает, иначе прислала бы
+  // proto3-дефолт UNSPECIFIED и стёрла бы выбор части у ВСЕХ строк карточки. Явно присланный
+  // UNSPECIFIED (поле присутствует) очищает в NULL.
+  labelPart?: common_TechCardBomLabelPart;
 };
 
 // TechCardBomSection groups a BOM line by material family (Sheet «Спецификация»).
@@ -8622,6 +8664,25 @@ export type common_TechCardBomKind =
   // назвать шоппер СТРОКОЙ СПЕЦИФИКАЦИИ было нечем — при том, что строка спецификации это
   // единственное место, где вспомогательный компонент вообще стоит денег.
   | "TECH_CARD_BOM_KIND_TOTE_BAG";
+// TechCardBomLabelPart — В КАКУЮ ЧАСТЬ СОСТАВНИКА (care label) идёт состав этой строки: SHELL,
+// BODY LINING, SLEEVE LINING … Свойство ЛЕНТЫ, а не геометрии и не закупки, поэтому отдельная ось
+// рядом с purpose/kind, а не их производная: подкладка рукава и подкладка стана — обе
+// purpose=LINING, но на ленте это две колонки.
+// UNSPECIFIED (0) = «авто»: хранится NULL, и дефолт части по section/purpose считает КЛИЕНТ
+// (defaultLabelPart), а не сервер. Хранимый NULL честно значит «не решали», поэтому смена правила
+// дефолта не требует миграции данных. NOT_ON_LABEL — явное «на ленту не идёт» (молния, пуговица),
+// в отличие от UNSPECIFIED, которое ленту не исключает.
+// Mirrors entity.ValidTechCardBomLabelParts and the DB CHECK chk_bom_item_label_part.
+export type common_TechCardBomLabelPart =
+  | "TECH_CARD_BOM_LABEL_PART_UNSPECIFIED"
+  | "TECH_CARD_BOM_LABEL_PART_SHELL"
+  | "TECH_CARD_BOM_LABEL_PART_BODY_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_SLEEVE_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_POCKET_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_HOOD_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_FILLING"
+  | "TECH_CARD_BOM_LABEL_PART_TRIM"
+  | "TECH_CARD_BOM_LABEL_PART_NOT_ON_LABEL";
 // TechCardConstruction holds the card's DEFAULTS — the values an operation inherits when it does
 // not override them. Until the operations break it was a block of free-text notes that nothing
 // inherited (the editor said so out loud: «общие параметры по умолчанию, конкретные задавайте в
@@ -17901,6 +17962,10 @@ export interface AdminService {
   ArchiveTag(request: ArchiveTagRequest): Promise<ArchiveTagResponse>;
   CreateFiber(request: CreateFiberRequest): Promise<CreateFiberResponse>;
   ArchiveFiber(request: ArchiveFiberRequest): Promise<ArchiveFiberResponse>;
+  // UpsertFiberLabelTranslations replaces a fibre's care-label names as a whole set (a language not
+  // sent, or sent with an empty name, is removed) and, when animal_non_textile is present, sets the
+  // flag. Bumps the fiber dictionary revision like every other fibre mutation.
+  UpsertFiberLabelTranslations(request: UpsertFiberLabelTranslationsRequest): Promise<UpsertFiberLabelTranslationsResponse>;
   ListCountries(request: ListCountriesRequest): Promise<ListCountriesResponse>;
   SetCountryActive(request: SetCountryActiveRequest): Promise<SetCountryActiveResponse>;
   // Adds a new promotional code
@@ -20558,6 +20623,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ArchiveFiber",
       }) as Promise<ArchiveFiberResponse>;
+    },
+    UpsertFiberLabelTranslations(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.code) {
+        throw new Error("missing required field request.code");
+      }
+      const path = `api/admin/dictionaries/fibers/${request.code}/label-translations`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertFiberLabelTranslations",
+      }) as Promise<UpsertFiberLabelTranslationsResponse>;
     },
     ListCountries(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dictionaries/countries`; // eslint-disable-line quotes

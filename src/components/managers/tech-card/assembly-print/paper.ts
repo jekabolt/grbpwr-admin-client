@@ -47,7 +47,29 @@ export type Prim =
       /** Контуры деталей — round: острый мыс с митровым углом выстреливает шипом за плитку. */
       join?: 'round' | 'miter';
     }
-  | { k: 'circle'; cx: number; cy: number; r: number; sw: number; fill: boolean };
+  | { k: 'circle'; cx: number; cy: number; r: number; sw: number; fill: boolean }
+  | {
+      k: 'path';
+      d: PathCmd[];
+      /** Заливка чёрным. Без неё и без `sw` путь невидим. */
+      fill?: boolean;
+      /** Толщина штриха, мм; 0 или нет — без штриха. */
+      sw?: number;
+      /** Правило заливки: дырки пиктограмм ухода (DNI и др.) нарисованы как evenodd. */
+      fillRule?: 'nonzero' | 'evenodd';
+      join?: 'round' | 'miter';
+    };
+
+/**
+ * Команда контура — всегда абсолютная и уже в мм листа, без transform: так оба читателя (SVG и
+ * PDF) рисуют ровно одни числа. Составники печатают весь текст и графику контурами (кривые, не
+ * шрифт) — это их единственный примитив.
+ */
+export type PathCmd =
+  | ['M', number, number]
+  | ['L', number, number]
+  | ['C', number, number, number, number, number, number]
+  | ['Z'];
 
 export type SheetMeta = {
   code: string;
@@ -65,6 +87,8 @@ export type SheetMeta = {
    * бумаге меряет ровно столько, сколько подписано. Нет или 1 — файл размером с лист.
    */
   scale?: number;
+  /** Пресет формата (A4…A0): лист вписан в страницу этого формата — подвал называет её. */
+  paper?: string;
 };
 
 /** Контур по ключу детали; `null` целиком — силуэты выключены. */
@@ -252,6 +276,20 @@ function shift(p: Prim, dx: number, dy: number): Prim {
       return { ...p, pts: p.pts.map(([x, y]) => [x + dx, y + dy] as [number, number]) };
     case 'circle':
       return { ...p, cx: p.cx + dx, cy: p.cy + dy };
+    case 'path':
+      return { ...p, d: p.d.map((c) => shiftCmd(c, dx, dy)) };
+  }
+}
+
+function shiftCmd(c: PathCmd, dx: number, dy: number): PathCmd {
+  switch (c[0]) {
+    case 'M':
+    case 'L':
+      return [c[0], c[1] + dx, c[2] + dy];
+    case 'C':
+      return ['C', c[1] + dx, c[2] + dy, c[3] + dx, c[4] + dy, c[5] + dx, c[6] + dy];
+    case 'Z':
+      return c;
   }
 }
 
@@ -452,13 +490,18 @@ function head(
 const FOOT_RIGHT = 'SHEET 1 OF 1';
 const round1 = (v: number) => Math.round(v * 10) / 10;
 const scaled = (meta: SheetMeta) => !!meta.scale && meta.scale !== 1;
-/** `H = null` — замер до того, как высота известна: берётся самая длинная запись числа. */
+/**
+ * `H = null` — замер до того, как высота известна: берётся самая длинная запись числа (лист — целые
+ * мм до 5080, масштабированный — с десятыми), иначе набранная строка может лечь лишней строкой ниже
+ * замеренной высоты.
+ */
 const footLeft = (meta: SheetMeta, W: number, H: number | null) => {
   const k = scaled(meta) ? meta.scale! : 1;
-  const h = H == null ? (k === 1 ? '0' : '9999.9') : String(round1(H * k));
+  const h = H == null ? (k === 1 ? '9999' : '9999.9') : String(round1(H * k));
   const size = k === 1 ? `${W} × ${h}` : `${round1(W * k)} × ${h}`;
   const pct = k === 1 ? '' : ` (${round1(k * 100)} % OF THE ${W} MM SHEET)`;
-  return `${[meta.code, meta.revision].filter(Boolean).join(' · ')} · SHEET ${size} MM${pct} · PRINT AT 100 % · BLACK ONLY`;
+  const on = meta.paper ? ` ON ${meta.paper}` : '';
+  return `${[meta.code, meta.revision].filter(Boolean).join(' · ')} · SHEET ${size} MM${pct}${on} · PRINT AT 100 % · BLACK ONLY`;
 };
 /** Ширина левой строки подвала: до правой подписи, с зазором. */
 const footWidth = (W: number, margin: number) => W - 2 * margin - textW(FOOT_RIGHT, 10) - 6;

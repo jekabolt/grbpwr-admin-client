@@ -5,6 +5,7 @@ import {
   common_TechCardApprovalState,
   common_TechCardAuxSubtype,
   common_TechCardBomKind,
+  common_TechCardBomLabelPart,
   common_TechCardBomPurpose,
   common_TechCardBomSection,
   common_TechCardConstruction,
@@ -73,6 +74,7 @@ import { validateSeamAllowanceStandard } from 'utils/seam-allowance';
 import { ulid } from 'utils/ulid';
 import { KIND_HOME_SECTION, UNSET_KIND, isKindEligibleSection } from './bom-kind';
 import { UNSET_PURPOSE, fabricScopeKey, isOtherPurpose, isRollGoodsSection } from './bom-purpose';
+import { LABEL_PART_UNSPECIFIED } from '../care-labels/label-parts';
 import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
 import { AGE_GROUP_NEW_CARD, AGE_GROUP_UNSET, AGE_GROUP_VALUES } from './tech-card-options';
 import {
@@ -408,6 +410,16 @@ const bomItemSchema = z
     // is deliberately unclassified, and demanding a kind here would make those cards unsavable.
     kind: z.string().optional().default(UNSET_KIND),
     kindNote: z.string().optional().default(''),
+    // ЧАСТЬ СОСТАВНИКА (care labels, план §3.4) — на какую колонку ленты идёт состав строки.
+    // `TECH_CARD_BOM_LABEL_PART_UNSPECIFIED` = «авто»: часть выводит клиент (`defaultLabelPart`),
+    // сервер хранит NULL. Карточка с провода без поля читается как UNSPECIFIED (маппер ниже).
+    //
+    // ⚠ БЕЗ `.default(UNSPECIFIED)`, И ЭТО НЕСУЩЕЕ. Поле на проводе `optional`: ключа нет — «не
+    // трогай сохранённое», явное UNSPECIFIED — «очисти в авто». zod-дефолт сделал бы из черновика
+    // localStorage старого бандла (строки без ключа) команду «очисти» и стёр бы на сохранении
+    // явный выбор, поставленный другой вкладкой, — порода `techcard-draft-restore-wipes-absent-fields`,
+    // та же, что у `estUsage`/`wastageSource`. `undefined` = «эта форма не знает» → ключ не едет.
+    labelPart: z.string().optional(),
     isSample: z.boolean().optional().default(false),
     name: z.string().optional().default(''), // required — see the superRefine below for WHY it lives there
     supplier: z.string().optional().default(''),
@@ -2358,6 +2370,9 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
     purposeNote: b.purposeNote || '',
     kind: b.kind || UNSET_KIND,
     kindNote: b.kindNote || '',
+    // Карточка до поля (или строка с NULL = «авто») читается как явное UNSPECIFIED: форма ЗНАЕТ
+    // поле, и селект показывает «auto → <часть>». Обратно уедет UNSPECIFIED = NULL — то же самое.
+    labelPart: b.labelPart || LABEL_PART_UNSPECIFIED,
     isSample: !!b.isSample,
     name: b.name || '',
     supplier: b.supplier || '',
@@ -3365,6 +3380,8 @@ export function mapFormToTechCardInsert(
       // is the exact write MySQL has to reject.
       kind: (b.kind || UNSET_KIND) as common_TechCardBomKind,
       kindNote: b.kindNote?.trim() ?? '',
+      // Присутствие решает форма (довод у `labelPart` в bomItemSchema): не знает — ключа нет.
+      labelPart: b.labelPart ? (b.labelPart as common_TechCardBomLabelPart) : undefined,
       isSample: !!b.isSample,
       name: b.name?.trim() || '',
       supplier: b.supplier?.trim() || '',

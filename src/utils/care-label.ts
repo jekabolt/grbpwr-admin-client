@@ -1,76 +1,12 @@
 import type { common_TechCardBomSection } from 'api/proto-http/admin';
-import { composition as dict } from 'constants/garment-composition';
-
-// reverse map material CODE → display name across every garment-composition category
-const codeToName: Record<string, string> = (() => {
-  const m: Record<string, string> = {};
-  for (const cat of Object.values(dict.garment_composition)) {
-    for (const [name, code] of Object.entries(cat as Record<string, string>)) m[code] = name;
-  }
-  return m;
-})();
-
-type Item = { code: string; percent: number };
-
-// parse a BOM composition cell: either the structured JSON the picker writes
-// ({ part: [{code, percent}] }) or the legacy "COT:60, POL:40" string.
-function parseComposition(value?: string): Item[] {
-  const v = value?.trim();
-  if (!v) return [];
-  let struct: unknown = null;
-  try {
-    struct = JSON.parse(v);
-  } catch {
-    struct = null;
-  }
-  if (struct && typeof struct === 'object') {
-    const items: Item[] = [];
-    for (const part of Object.values(struct as Record<string, unknown>)) {
-      if (Array.isArray(part)) {
-        for (const it of part) {
-          if (it?.code) items.push({ code: String(it.code), percent: Number(it.percent) || 0 });
-        }
-      }
-    }
-    return items;
-  }
-  return v
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((it) => {
-      const [code, p] = it.split(':').map((x) => x.trim());
-      return { code, percent: parseInt(p, 10) || 0 };
-    })
-    .filter((i) => i.code);
-}
-
-function formatItems(items: Item[]): string {
-  const byCode = new Map<string, number>();
-  for (const it of items) byCode.set(it.code, (byCode.get(it.code) ?? 0) + it.percent);
-  return Array.from(byCode.entries())
-    .filter(([, p]) => p > 0)
-    .sort((a, b) => b[1] - a[1])
-    .map(([code, p]) => `${p}% ${codeToName[code] ?? code}`)
-    .join(', ');
-}
-
-// section → care-label group name; the order is the preferred print order too. An unknown section
-// prints as Material. Thread has no entry: its lines never reach the label
-// (`carriesGarmentComposition`).
-const SECTION_LABELS: Record<string, string> = {
-  TECH_CARD_BOM_SECTION_FABRIC: 'Shell',
-  TECH_CARD_BOM_SECTION_LINING: 'Lining',
-  TECH_CARD_BOM_SECTION_INSULATION: 'Filling',
-  TECH_CARD_BOM_SECTION_INTERLINING: 'Interlining',
-  TECH_CARD_BOM_SECTION_TRIM: 'Trim',
-  TECH_CARD_BOM_SECTION_DECORATION: 'Decoration',
-  TECH_CARD_BOM_SECTION_HARDWARE: 'Hardware',
-  TECH_CARD_BOM_SECTION_LABEL: 'Label',
-  TECH_CARD_BOM_SECTION_PACKAGING: 'Packaging',
-  TECH_CARD_BOM_SECTION_OTHER: 'Other',
-};
-const SECTION_ORDER = Object.keys(SECTION_LABELS);
+import {
+  FIBER_SEPARATOR,
+  resolveColorwayComposition,
+  type ColorwayCompositionInput,
+  type PartComposition,
+} from 'components/managers/tech-card/care-labels/composition-resolver';
+import type { Hole } from 'components/managers/tech-card/care-labels/holes';
+import { LABEL_PART_NAME } from 'components/managers/tech-card/care-labels/label-parts';
 
 // Thread carries no fibre composition of the garment (D-44, O-47): it sews the garment together,
 // it is not what the garment is made of. D-50: this is the ONE rule every AGGREGATE of the
@@ -98,30 +34,53 @@ export function hasAnyComposition(
   return (bomItems ?? []).some((b) => carriesGarmentComposition(b) && !!b.composition?.trim());
 }
 
-// Build a care-label composition block from the BOM catalog: one line per section that has a
-// parseable composition (Shell / Lining / Filling / …), using that section's primary article,
-// plus an optional "Made in …". Thread lines are skipped (`carriesGarmentComposition`). Returns ''
-// when nothing parseable is found.
-export function generateCareLabel(
-  bomItems: Array<{ section?: string; composition?: string }>,
-  originCountry?: string,
-): string {
-  // first parseable composition per section
-  const bySection = new Map<string, string>();
-  for (const b of bomItems ?? []) {
-    if (!carriesGarmentComposition(b)) continue;
-    const section = b.section || 'TECH_CARD_BOM_SECTION_OTHER';
-    if (bySection.has(section)) continue;
-    const formatted = formatItems(parseComposition(b.composition));
-    if (formatted) bySection.set(section, formatted);
-  }
+// ОДИН ГЕНЕРАТОР СОСТАВА В СИСТЕМЕ (план §5.4). Здесь жил второй: строка на СЕКЦИЮ BOM
+// (таблица «секция → Shell / Lining / …»), свой парсер ячейки и своя таблица имён пикера. Он
+// разошёлся с лентой в трёх местах сразу: брал первую строку секции вместо слияния по расходу,
+// печатал имя пикера вместо имени словаря волокон и не знал ни части этикетки (две подкладки —
+// две колонки), ни колорвея (пин артикула меняет состав). Теперь это форматтер над тем же
+// `resolveColorwayComposition`, по которому печатается лента, — EN-строки одного колорвея:
+//
+//   SHELL: 55% COTTON, 35% LINEN, 10% POLYAMIDE
+//   BODY LINING: 100% COTTON
+//   Made in Poland
+//
+// Колорвей выбирает вызывающий (`defaultCareColorway`); без колорвеев — пустые usages: веса 1,
+// материал слота (резолвер так и определяет «без колорвея»).
+export type CareLabelInput = ColorwayCompositionInput & {
+  /** Страна как текст («Poland»); пусто — строки `Made in` нет. */
+  originCountry?: string;
+};
 
-  const order = [...SECTION_ORDER, ...bySection.keys()].filter((s, i, a) => a.indexOf(s) === i);
-  const lines: string[] = [];
-  for (const section of order) {
-    const formatted = bySection.get(section);
-    if (formatted) lines.push(`${SECTION_LABELS[section] ?? 'Material'}: ${formatted}`);
-  }
-  if (originCountry?.trim()) lines.push(`Made in ${originCountry.trim()}`);
-  return lines.join('\n');
+export type CareLabelText = {
+  /** Строки через `\n`; '' — ни одна часть не собралась. */
+  text: string;
+  parts: PartComposition[];
+  /** Дыры резолвера, относящиеся к EN-тексту (переводы на прочие 9 языков — дело экрана ленты). */
+  holes: Hole[];
+};
+
+export function generateCareLabel(input: CareLabelInput): CareLabelText {
+  const { parts, holes } = resolveColorwayComposition(input);
+  const lines = parts.map((p) =>
+    // NOTE — фраза ст. 12 целиком, у неё нет долей; прочие части — заголовок колонки ленты и те же
+    // EN-ячейки, что на ленте, только через запятую (строка, а не колонка).
+    p.part === 'NOTE'
+      ? p.rows.en
+      : `${LABEL_PART_NAME[p.part]}: ${p.rows.en.split(FIBER_SEPARATOR).join(', ')}`,
+  );
+  const origin = input.originCountry?.trim();
+  if (lines.length && origin) lines.push(`Made in ${origin}`);
+  return {
+    text: lines.join('\n'),
+    parts,
+    holes: holes.filter((h) => !h.ref.lang || h.ref.lang === 'en'),
+  };
+}
+
+/** Колорвей старого генератора и превью (§5.4): первый ACTIVE, иначе первый; нет — undefined. */
+export function defaultCareColorway<T extends { status?: string }>(
+  colorways: readonly T[] | undefined,
+): T | undefined {
+  return colorways?.find((c) => c.status === 'COLORWAY_LIFECYCLE_STATUS_ACTIVE') ?? colorways?.[0];
 }
