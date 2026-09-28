@@ -170,7 +170,13 @@ function parsePlacement(raw: unknown): GesturePlacement | null {
   const hasView = ref.viewKey !== undefined;
   const hasSlot = ref.slotId !== undefined;
   if (hasView === hasSlot) return null;
-  const viewKey = typeof ref.viewKey === 'string' ? ref.viewKey.trim() : '';
+  /* A view key is taken as written or not at all: a padded or blank one is dropped, never
+     trimmed into a valid key — a normalised address is an address the gesture did not name
+     (O-63 r6, Codex r5). */
+  const viewKey =
+    typeof ref.viewKey === 'string' && ref.viewKey.length > 0 && ref.viewKey === ref.viewKey.trim()
+      ? ref.viewKey
+      : '';
   if (hasView && !viewKey) return null;
   const slotId = wholeAtLeast(ref.slotId, 1);
   if (hasSlot && slotId === null) return null;
