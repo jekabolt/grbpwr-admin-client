@@ -22,6 +22,8 @@ import Text from 'ui/components/text';
 import { useCareLabelSource, variantSku, type CareLabelColorway } from './adapter';
 import { isBlocking } from './holes';
 import { holeAddress, HolesPanel } from './holes-panel';
+import { computeQuantities, emptyGrid, fromRun, type QtyGrid } from './quantities';
+import { QuantitiesGrid } from './quantities-grid';
 import { QrSettings } from './qr-settings';
 import { collectReadiness } from './readiness';
 import { placeholderSide, SidesPreview, type PreviewSide, type PreviewView } from './sides-preview';
@@ -91,8 +93,11 @@ export function TechCardCareLabels() {
     colorwayId: number | null;
     sizeId: number | null;
     excluded: number[];
-  }>({ key, colorwayId: null, sizeId: null, excluded: [] });
-  const current = pick.key === key ? pick : { key, colorwayId: null, sizeId: null, excluded: [] };
+    /** Ручная сетка количеств — НЕ хранится (§9.3): введена на один раз. */
+    manual: QtyGrid;
+  }>({ key, colorwayId: null, sizeId: null, excluded: [], manual: {} });
+  const current =
+    pick.key === key ? pick : { key, colorwayId: null, sizeId: null, excluded: [], manual: {} };
   // Режим, QR, запас и источник количеств — на карточку, в localStorage (`care-labels:v1:<id>`).
   const { prefs, update: updatePrefs } = useCareLabelPrefs(techCardId);
   const mode = prefs.mode;
@@ -140,6 +145,37 @@ export function TechCardCareLabels() {
 
   // Дыры со всех источников и гейт кнопки (readiness.ts): блок колорвея держит только его,
   // общий — весь архив. Раскладка (E6) добавит свои дыры по колорвею.
+  // Количества (§9.4): сетка из прогона или ручная, запас на ячейку, итоги A/B.
+  const qtyColorways = useMemo(
+    () => colorways.map((c) => ({ id: c.id, label: c.baseSku || c.colourName || `#${c.id}` })),
+    [colorways],
+  );
+  const selectedRun =
+    typeof prefs.source === 'object'
+      ? (data?.runs ?? []).find((r) => r.id === (prefs.source as { runId: number }).runId) ?? null
+      : null;
+  const qtyBase = useMemo<QtyGrid>(() => {
+    const cwIds = colorways.map((c) => c.id);
+    const sizeIds = sizes.map((s) => s.id);
+    if (selectedRun) return fromRun(selectedRun, cwIds, sizeIds);
+    // Выбранного прогона нет среди прогонов карточки — пустая сетка, а не чужие цифры.
+    if (typeof prefs.source === 'object') return emptyGrid(cwIds, sizeIds);
+    return current.manual;
+  }, [colorways, sizes, selectedRun, prefs.source, current.manual]);
+  const quantities = useMemo(
+    () =>
+      computeQuantities({
+        base: qtyBase,
+        colorways: qtyColorways,
+        sizeIds: sizes.map((s) => s.id),
+        overagePct: prefs.overagePct,
+        mode: prefs.mode,
+        excluded: current.excluded,
+        run: selectedRun,
+      }),
+    [qtyBase, qtyColorways, sizes, prefs.overagePct, prefs.mode, current.excluded, selectedRun],
+  );
+
   const readiness = useMemo(
     () =>
       data
@@ -147,9 +183,11 @@ export function TechCardCareLabels() {
             data,
             excluded: current.excluded,
             prefs: { qrPreset: prefs.qrPreset, qrTemplate: prefs.qrTemplate },
+            quantityHoles: quantities.holes,
+            zeroColorways: quantities.zeroColorways,
           })
         : null,
-    [data, current.excluded, prefs.qrPreset, prefs.qrTemplate],
+    [data, current.excluded, prefs.qrPreset, prefs.qrTemplate, quantities],
   );
   const blocking = readiness?.blockers ?? [];
   const canExport = ready && !!readiness?.canExport;
@@ -390,9 +428,16 @@ export function TechCardCareLabels() {
                 <GroupLabel>qr code</GroupLabel>
                 <QrSettings prefs={prefs} onChange={updatePrefs} example={qrExample} />
                 <GroupLabel>quantities</GroupLabel>
-                <Text size='micro' variant='label' data-care-zone='quantities'>
-                  colourway × size grid — coming next
-                </Text>
+                <QuantitiesGrid
+                  colorways={qtyColorways}
+                  sizes={sizes}
+                  runs={data.runs}
+                  prefs={prefs}
+                  onPrefs={updatePrefs}
+                  base={qtyBase}
+                  onBase={(manual) => setChoice({ manual })}
+                  quantities={quantities}
+                />
               </div>
             </Section>
           </div>
