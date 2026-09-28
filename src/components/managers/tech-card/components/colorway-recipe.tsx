@@ -37,6 +37,7 @@ import { useFormContext, useWatch } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import { Button, buttonVariants } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
@@ -52,6 +53,7 @@ import { Tile, Tiles } from 'ui/components/tiles';
 import { carriesGarmentComposition } from 'utils/care-label';
 import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ColorwayDeleteControl } from './colorway-delete';
+import { PaletteSwatches, SkuToken } from './colourway-palette';
 import {
   blankDraft,
   fromRead,
@@ -61,7 +63,7 @@ import {
   type UsageDraft,
 } from './colorway-usage-wire';
 import { normSourceLabel } from './costing-vocab';
-import { pictureUrl } from './design/bench-slot';
+import { InertDoor, pictureUrl } from './design/bench-slot';
 import { benchSides, type BenchSide } from './design/render/model';
 import { useDesignBand } from './design/use-design-band';
 import { viewLabel } from './design/views';
@@ -98,7 +100,12 @@ import { PieceSilhouette } from './piece-silhouette';
 import { TechCardFormData, wireInt } from './schema';
 import type { RecipePieceLink } from './use-fabric-dxf-pieces';
 import { usePieceShapes } from './use-piece-shapes';
-import { recipeSaveErrorMessage, useUpdateColorwayRecipe } from './useColorwayRecipe';
+import {
+  applyPaletteErrorMessage,
+  recipeSaveErrorMessage,
+  useApplyColorwayPalette,
+  useUpdateColorwayRecipe,
+} from './useColorwayRecipe';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 
 // Пересчёт dxf-нормы по текущим данным (Ф2) — lazy() ровно потому же, почему dxf-apply.tsx лениво
@@ -3476,6 +3483,148 @@ function CompositionBar({ fibers, skipped }: ReturnType<typeof deriveComposition
 // is not — the panel STAGES into the card's one save under `recipe:<colorwayId>`, one key per
 // colourway, so three colourways edited before a single Save are three lines in the header's list and
 // three separate writes.
+// ═══ «APPLY PALETTE TO SLOTS ›» — ПОДТВЕРЖДЕНИЕ С ПЕРЕЧНЕМ СЛОТОВ (T45, решение владельца 7) ═════
+//
+// Никаких автоматических применений: человек называет, какой слот какой цвет палитры берёт, и
+// видит, что стоит в слоте сейчас. Слот на «keep» не трогается вовсе — не уезжает в запрос.
+// Кнопка называет число: «apply to 3 slots». Ответ сервера (сколько строк перекрашено, сколько
+// заведено) — одним тостом. Замок читается перед записью, как у всех записей колорвея
+// (`readColorwayVersion`): под одним сохранением карточки версия к этому месту уже сдвинулась.
+function ApplyPaletteModal({
+  open,
+  onOpenChange,
+  colorway,
+  slots,
+  currentColour,
+  techCardId,
+  lockVersion,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  colorway: common_AdminColorwayRef;
+  /** Сохранённые слоты BOM разделов рецепта. */
+  slots: readonly BomLine[];
+  /** lineKey → что слот носит сейчас (строка уровня изделия), словами. */
+  currentColour: ReadonlyMap<string, string>;
+  techCardId: number;
+  lockVersion: number;
+}) {
+  const { showMessage } = useSnackBarStore();
+  const apply = useApplyColorwayPalette(techCardId);
+  /** lineKey → позиция цвета палитры; отсутствие = «keep». */
+  const [picks, setPicks] = useState<Record<string, number>>({});
+  const wasOpen = useRef(open);
+  if (wasOpen.current !== open) {
+    wasOpen.current = open;
+    if (!open && Object.keys(picks).length) setPicks({});
+  }
+  const palette = colorway.colours ?? [];
+  const chosen = slots.filter((sl) => picks[sl.lineKey ?? ''] != null);
+  const n = chosen.length;
+
+  async function submit() {
+    if (n === 0 || apply.isPending) return;
+    const colorwayId = colorway.colorwayId ?? 0;
+    try {
+      const expectedColorwayVersion = await readColorwayVersion(
+        techCardId,
+        colorwayId,
+        lockVersion,
+      );
+      const res = await apply.mutateAsync({
+        colorwayId,
+        expectedColorwayVersion,
+        assignments: chosen.map((sl) => ({
+          bomLineKey: sl.lineKey ?? '',
+          colourPosition: picks[sl.lineKey ?? ''],
+        })),
+      });
+      const updated = res?.rowsUpdated ?? 0;
+      const created = res?.rowsCreated ?? 0;
+      showMessage(
+        `palette applied · ${updated} ${plural(updated, 'slot')} recoloured · ${created} ${plural(created, 'row')} added`,
+        'success',
+      );
+      onOpenChange(false);
+    } catch (e) {
+      showMessage(applyPaletteErrorMessage(e), 'error');
+    }
+  }
+
+  return (
+    <ConfirmationModal
+      open={open}
+      onOpenChange={onOpenChange}
+      onConfirm={() => void submit()}
+      title='apply palette to slots'
+      confirmLabel={n > 0 ? `apply to ${n} ${plural(n, 'slot')}` : 'apply'}
+      confirmDisabled={n === 0 || apply.isPending}
+      closeOnConfirm={false}
+      width='md'
+    >
+      <div className='flex flex-col gap-5' data-cw-apply=''>
+        <span className='flex flex-wrap items-center gap-2'>
+          <PaletteSwatches colours={palette} size={4} />
+          <Text size='micro' variant='label' component='span'>
+            {colourwayName(colorway)} · the first colour is the main one
+          </Text>
+        </span>
+        <Text size='micro' variant='label'>
+          each slot below takes the palette colour you pick; a slot left on «keep» is not touched.
+          consumption, pins and per-piece rows stay as they are.
+        </Text>
+        <div className='flex flex-col'>
+          {slots.map((sl) => {
+            const key = sl.lineKey ?? '';
+            const now = currentColour.get(key);
+            return (
+              <div
+                key={key}
+                className='flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline py-1.5 last:border-b-0'
+                data-cw-apply-slot={key}
+              >
+                <span className='flex min-w-0 flex-col'>
+                  <Text component='span' className='truncate'>
+                    {sl.name?.trim() || key}
+                  </Text>
+                  <Text size='micro' variant='label' component='span'>
+                    {[sectionShort(sl.section), now ? `now: ${now}` : 'no colour yet']
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </Text>
+                </span>
+                <select
+                  className='ml-auto block min-h-[22px] w-56 appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none'
+                  value={picks[key] ?? ''}
+                  aria-label={`palette colour for ${sl.name?.trim() || key}`}
+                  data-cw-apply-pick={key}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setPicks((prev) => {
+                      const next = { ...prev };
+                      if (v === '') delete next[key];
+                      else next[key] = Number(v);
+                      return next;
+                    });
+                  }}
+                >
+                  <option value=''>keep</option>
+                  {palette.map((c, i) => (
+                    <option key={i} value={i}>
+                      {i + 1} · {c.pantone?.trim() || c.label?.trim() || '—'}
+                      {i === 0 ? ' · main' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </ConfirmationModal>
+  );
+}
+
 function ColorwayRecipeEditor({
   colorway,
   bomItems,
@@ -3584,6 +3733,8 @@ function ColorwayRecipeEditor({
   const title = colourwayName(colorway);
   const [dirty, setDirty] = useState(false);
   const [labDipStaged, setLabDipStaged] = useState(false);
+  /** Дверь «apply palette to slots ›» открыта (T45, решение владельца 7). */
+  const [applying, setApplying] = useState(false);
   // CRITICAL (full-replace): the draft starts from the LIVE read (colorway.usages), never from empty.
   // This is also the baseline the header's line count is measured against.
   const baseline = useMemo(
@@ -3675,6 +3826,32 @@ function ColorwayRecipeEditor({
     () => new Set(bomItems.map((b) => b.lineKey ?? '').filter(Boolean)),
     [bomItems],
   );
+  /**
+   * Слоты для двери палитры — только СОХРАНЁННЫЕ строки BOM (серверный id есть): сервер знает
+   * слот по bom_line_key сохранённой карточки, а строка, добавленная минуту назад, ляжет с
+   * карточкой и попадёт в список после её сохранения.
+   */
+  const savedSlots = useMemo(() => cardSlots.filter((b) => (b.id ?? 0) > 0), [cardSlots]);
+  /** Что слот носит сейчас — строка уровня изделия (без детали), словами и кодом. */
+  const currentColourBySlot = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const [key, e] of rowsBySlot) {
+      const g = e.garment[0]?.draft;
+      if (!g) continue;
+      const words = [g.pantone?.trim(), g.color?.trim()].filter(Boolean).join(' · ');
+      if (words) m.set(key, words);
+    }
+    return m;
+  }, [rowsBySlot]);
+  const applyRefusal = !canEdit
+    ? 'this card is read-only'
+    : frozen
+      ? 'the card is released — its recipes are frozen'
+      : dirty
+        ? 'the recipe has unsaved edits — they save with the card; apply after that'
+        : savedSlots.length === 0
+          ? 'no saved material slot to colour yet'
+          : null;
   // Куда МОЖНО переселить потерянную строку: те же секции, что заводятся в рецепт. Предлагать
   // упаковку и этикетку значило бы починкой создавать ровно ту карточку вне рецепта, которую
   // соседний гейт держит только для чтения.
@@ -3894,8 +4071,41 @@ function ColorwayRecipeEditor({
         ]
           .filter(Boolean)
           .join(' · ')}
-        action={staged ? <Pill tone='attention'>staged</Pill> : undefined}
+        action={
+          <span className='flex items-center gap-2'>
+            {staged && <Pill tone='attention'>staged</Pill>}
+            {/* ═══ ДВЕРЬ «APPLY PALETTE TO SLOTS ›» — ЯВНАЯ, ОДНА, И ТОЛЬКО ПРИ ПАЛИТРЕ (T45, решение
+                владельца 7). Правка палитры рецепт не трогает никогда; сюда цвет попадает лишь этим
+                жестом и только для названных слотов. Без палитры двери нет вовсе — она обещала бы
+                то, чего применить нечего. Грязный черновик рецепта закрывает дверь: сервер
+                перекрашивает СОХРАНЁННЫЕ строки, а несохранённые правки редактор пересобрал бы из
+                свежего чтения молча. */}
+            {(colorway.colours?.length ?? 0) > 0 &&
+              (applyRefusal ? (
+                <InertDoor label='apply palette to slots ›' reason={applyRefusal} size='sm' />
+              ) : (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='sm'
+                  data-cw-apply-door=''
+                  onClick={() => setApplying(true)}
+                >
+                  apply palette to slots ›
+                </Button>
+              ))}
+          </span>
+        }
       >
+        <ApplyPaletteModal
+          open={applying}
+          onOpenChange={setApplying}
+          colorway={colorway}
+          slots={savedSlots}
+          currentColour={currentColourBySlot}
+          techCardId={techCardId}
+          lockVersion={lockVersion}
+        />
         {/* МОДЕЛЬ СКАЗАНА ОДИН РАЗ, В ШАПКЕ РАЗДЕЛА. Прежде она была сказана дважды и разными
             словами — в разделе «детали» и в разделе «на изделие», — и это само по себе было частью
             жалобы: два раздела читались как два способа завести одно и то же, а нормой обладал
@@ -4150,6 +4360,7 @@ function ColorwayTile({
 }) {
   const name = colourwayName(colorway);
   const code = colorway.colorCode?.trim() || '';
+  const palette = colorway.colours ?? [];
   const count = status?.count ?? colorway.usages?.length ?? 0;
   const pantone = [colorway.pantone?.trim(), colorway.pantoneSystem?.trim()]
     .filter(Boolean)
@@ -4173,12 +4384,25 @@ function ColorwayTile({
       {/* ИМЯ КРУПНО (12px — потолок системы), КОД МЕЛКО. `Tile.name` зашивает 10px, поэтому обе
           строки пишутся здесь: у имени и кода разный вес, а не разный шрифт. */}
       <Text className='mt-1.5 truncate font-bold uppercase'>{name}</Text>
+      {/* T45: ПАЛИТРА СВОТЧАМИ (главный первым), семейство — меткой, токен SKU — только чтение.
+          Легаси-колорвей без палитры показывает один свотч, как прежде: пантон, словарь фолбэком. */}
       <span className='mt-1 flex min-w-0 items-center gap-1.5'>
-        <Swatch hex={hex} title={pantone || hex || undefined} />
-        <Text size='micro' variant='label' component='span' className='truncate'>
-          {code || 'no SKU colour'}
+        {palette.length > 0 ? (
+          <PaletteSwatches colours={palette} data-cw-tile-palette='' />
+        ) : (
+          <Swatch hex={hex} title={pantone || hex || undefined} />
+        )}
+        <Text
+          size='micro'
+          variant='label'
+          component='span'
+          className='truncate'
+          data-cw-tile-family=''
+        >
+          {code ? `family · ${code}` : 'no family'}
         </Text>
       </span>
+      <SkuToken token={colorway.skuColorToken} className='mt-1.5' data-cw-tile-token='' />
       <div className='mt-2 flex flex-wrap items-center gap-1'>
         <LabDipPill status={colorway.labDipStatus} />
         {/* A colourway with no recipe is red right here in the grid — you should never have to open

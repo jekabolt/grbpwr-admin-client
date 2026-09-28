@@ -6,11 +6,9 @@
 // stays client-side because it is an asset, not data: the server has no business shipping SVG, and
 // a renderer that wants a different drawing for the same code should be free to have one.
 //
-// The set is one family, not a collection: every symbol is drawn on the same 24x24 grid with the
-// same 2px round-capped stroke. The set it replaced was assembled from four different sources and
-// had five coordinate systems, seven stroke weights and one symbol filled grey instead of black —
-// at 24px that read as a different icon set per category. Source and derivation are documented in
-// ui/icons/care/README.md.
+// The set is one family, not a collection: the brand's own care iconset, every symbol drawn on the
+// same 108x108 grid in solid black at one line weight. The code→file mapping and the parts of the
+// delivery that are deliberately not used are documented in ui/icons/care/README.md.
 //
 // A code the dictionary offers but this map has no picture for still renders (as its code alone),
 // and a picture here for a code the dictionary no longer offers is simply never asked for. Neither

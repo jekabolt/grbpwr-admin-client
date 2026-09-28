@@ -29,7 +29,7 @@ import {
   type StepId,
 } from './core/chain';
 import { RenderStudio, ThreedStudio } from './render';
-import { GenerationHistory } from './generation';
+import { GenerationHistory, LatestGeneration } from './generation';
 import { DesignCapabilityProvider } from './capability';
 import { MaterialSlots } from './material-slots';
 import { MoodBoard } from './mood-board';
@@ -516,8 +516,8 @@ export function StudioTab({
                   </Section>
                 ) : (
                   <>
-                    {/* ═══ STEP 2 · FLAT — input (references, words, GENERATE), the history, the
-                        flat slots. The input section is THIS step's (prototype: «референсы
+                    {/* ═══ STEP 2 · FLAT — input (references, words, GENERATE), the latest
+                        generation (O-67), the history, the flat slots. The input section is THIS step's (prototype: «референсы
                         рисуются только у FLAT; в render и 3D они в одном клике, не на экране»).
                         `#design-input` is the anchor the doors «+ add files» of the empty studio
                         and of the folded generation form lead to. */}
@@ -532,6 +532,16 @@ export function StudioTab({
                             disabled={readOnly || !canWriteCard}
                           />
                         </div>
+                        {/* ═══ LATEST GENERATION — A BLOCK OF ITS OWN, RIGHT UNDER INPUT — REFERENCES
+                            (28.09, O-67, D-73). What this step's GENERATE brought back, with the
+                            history's doors; until O-67 the last row of the input block. Its
+                            `[data-latest-generation]` wrapper is the next sibling of `#design-input`,
+                            and with no flat run at all it draws nothing — no empty header. */}
+                        <LatestGeneration
+                          band={band}
+                          techCardId={techCardId}
+                          disabled={readOnly || !canWriteCard}
+                        />
                         <GenerationStudio
                           band={band}
                           techCardId={techCardId}
