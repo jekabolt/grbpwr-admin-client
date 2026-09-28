@@ -34,6 +34,7 @@ import GDC from 'ui/icons/care/GDC.svg';
 import GPWC from 'ui/icons/care/GPWC.svg';
 import GW from 'ui/icons/care/GW.svg';
 import HW from 'ui/icons/care/HW.svg';
+import IA from 'ui/icons/care/IA.svg';
 import IH from 'ui/icons/care/IH.svg';
 import IL from 'ui/icons/care/IL.svg';
 import IM from 'ui/icons/care/IM.svg';
@@ -79,6 +80,7 @@ export const CARE_ARTWORK: Record<string, string> = {
   LDS,
   DFS,
   DDS,
+  IA,
   IL,
   IM,
   IH,
