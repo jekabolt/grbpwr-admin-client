@@ -133,7 +133,7 @@ export type CareBResult = { labels: CareLabelB[]; holes: Hole[] };
 
 // ---------- текст ----------
 
-type TextOut = { prim: Prim | null; w: number };
+export type TextOut = { prim: Prim | null; w: number };
 
 /** Кегль → трекинг, мм. */
 const track = (pt: number) => L.TRACK_EM * pt * (25.4 / 72);
@@ -149,7 +149,7 @@ export function textWidth(sh: Shaper, s: string, lang: LabelLang, pt: number): n
 }
 
 /** Контуры строки с трекингом: перо в (x, базовая y). Пустая строка — без примитива. */
-function textRun(
+export function textRun(
   sh: Shaper,
   s: string,
   lang: LabelLang,
@@ -177,7 +177,7 @@ function textRun(
 }
 
 /** Пунктир припуска: отрезки 1 мм через 1 мм от верха листа — один `path` со штрихом. */
-function seamDash(seam: Seam): Prim {
+export function seamDash(seam: Seam): Prim {
   const x = seam === 'left' ? L.SEAM : L.W - L.SEAM;
   const d: PathCmd[] = [];
   for (let y = 0; y + L.DASH <= L.H + 1e-9; y += 2 * L.DASH)
