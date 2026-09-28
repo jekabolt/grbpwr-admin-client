@@ -54,8 +54,8 @@ export function ProvidersView({
       {keysLocked && (
         <CalloutBox tone='warning'>
           <Text size='micro'>
-            keys cannot be stored until AI_KEYS_MASTER_KEY is set on the server; providers keep
-            using their env keys
+            keys cannot be stored until AI_KEYS_MASTER_KEY is set on the server; no provider can be
+            called until then
           </Text>
         </CalloutBox>
       )}
@@ -299,7 +299,7 @@ function KeySlot({
   const question =
     kind === 'admin'
       ? 'clear the stored reconciliation key? their number for this provider stops'
-      : 'clear the stored key? the env key, if any, takes over';
+      : 'clear the stored key? this provider stops until a new key is saved';
 
   return (
     <form onSubmit={submit} autoComplete='off' className='flex flex-col gap-1'>
