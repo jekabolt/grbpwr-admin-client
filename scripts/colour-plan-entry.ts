@@ -139,6 +139,12 @@ export function makeBand(input: {
        нет» и рисовал бы на рельсе ячейку, которой этому стенду взяться неоткуда. */
     freeformPresets: undefined,
     assetBindings: undefined,
+    playgroundWorkflows: undefined,
+    imageModels: undefined,
+    threedOptions: undefined,
+    outputsTotalByWorkflow: undefined,
+    runKinds: undefined,
+    suggestPromptsModel: undefined,
   };
 }
 

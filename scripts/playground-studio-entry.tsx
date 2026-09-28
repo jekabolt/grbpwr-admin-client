@@ -1,0 +1,141 @@
+// Точка входа пробы «PLAYGROUND живьём» (G-01): НАСТОЯЩИЙ `PlaygroundStudio` и НАСТОЯЩАЯ
+// `GenerationHistory` под настоящим BrowserRouter и react-query, сеть заглушена (проба сама
+// отвечает на `StartDesignRun` — когда захочет и как захочет).
+//
+// Здесь не переписано ни одной проверяемой строки. Стенд повторяет ровно то, что делает студия:
+// ячейка рельса пишет адрес через `useStepAddress`, экран PLAYGROUND и история под ним стоят только
+// на шаге `playground`, история получает матчер и имя списка теми же функциями, что `studio-tab`,
+// а переключатель вида (`useStudioKindSwitch`) заведён, чтобы рекол доходил до приёмника.
+//
+// Рядом — `RawStart`: настоящий `useStartDesignRun` без формы, которому проба сама подаёт запрос.
+// Так проба может прислать ОДНО намерение, собранное по-разному (порядок ключей, пробелы), и
+// увидеть, какой ключ оно получило (G-01 r2 N2), не подделывая ни одной строки хука.
+import type { GetDesignBandResponse, common_DesignRun } from 'api/proto-http/admin';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
+import { GenerationHistory } from 'components/managers/tech-card/components/design/generation';
+import { PictureGalleryProvider } from 'components/managers/tech-card/components/design/picture-tile';
+import {
+  recallDesignRun,
+  useStudioKindSwitch,
+} from 'components/managers/tech-card/components/design/history-recall';
+import {
+  PlaygroundStudio,
+  inPlaygroundRoom,
+  playgroundHistoryMatch,
+  playgroundHistoryRep,
+  playgroundHistoryScope,
+  useStepAddress,
+} from 'components/managers/tech-card/components/design/playground';
+import {
+  useStartDesignRun,
+  type StartRunInput,
+} from 'components/managers/tech-card/components/design/render/use-design-run';
+import { DictionaryProvider } from 'lib/providers/dictionary-provider';
+import { useSnackBarStore } from 'lib/stores/store';
+import type { ReactNode } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { FormProvider, useForm } from 'react-hook-form';
+import { BrowserRouter, useSearchParams } from 'react-router-dom';
+import { TooltipProvider } from 'ui/components/tooltip';
+
+const CARD = 7;
+
+function Screen({ band }: { band: GetDesignBandResponse }) {
+  const [params] = useSearchParams();
+  const goStep = useStepAddress();
+  useStudioKindSwitch(CARD, 'playground', () => {});
+  const wf = params.get('wf');
+  return (
+    <div>
+      <nav>
+        <button id='rail-flat' type='button' onClick={() => goStep('flat')}>
+          flat
+        </button>
+        <button id='rail-playground' type='button' onClick={() => goStep('playground')}>
+          playground
+        </button>
+      </nav>
+      {params.get('step') === 'playground' && (
+        <>
+          <PlaygroundStudio band={band} techCardId={CARD} />
+          <GenerationHistory
+            band={band}
+            techCardId={CARD}
+            defaultRep={playgroundHistoryRep(wf, band)}
+            match={playgroundHistoryMatch(wf, band) ?? inPlaygroundRoom}
+            scopeKey={playgroundHistoryScope(wf, band)}
+            defaultOpen={false}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The tech card's form, as `StudioTab` stands inside it (C-10): Image to 3D's results are the
+ * studio's own 3D block (`OutputsSection`), whose split doors read the card form.
+ */
+function CardForm({ children }: { children: ReactNode }) {
+  const form = useForm();
+  return <FormProvider {...form}>{children}</FormProvider>;
+}
+
+let rawStart: ((input: StartRunInput) => void) | null = null;
+function RawStart() {
+  const run = useStartDesignRun(CARD);
+  rawStart = run.start;
+  return <output id='raw-pending'>{run.isPending ? 'pending' : 'idle'}</output>;
+}
+
+type Probe = {
+  mount: (band: GetDesignBandResponse) => void;
+  raw: (input: StartRunInput) => void;
+  recall: (run: common_DesignRun, threedRetired?: boolean) => void;
+  alerts: () => string[];
+};
+
+declare global {
+  interface Window {
+    __pg: Probe;
+  }
+}
+
+let root: Root | null = null;
+window.__pg = {
+  mount: (band) => {
+    useSnackBarStore.setState({ alerts: [] });
+    root?.unmount();
+    const host = document.getElementById('root')!;
+    root = createRoot(host);
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 60_000 }, mutations: { retry: false } },
+    });
+    root.render(
+      <QueryClientProvider client={qc}>
+        <DictionaryProvider>
+          <DesignCapabilityProvider value={true}>
+            <BrowserRouter>
+              {/* The app holds one TooltipProvider at its root (context/index.tsx); a section's ⓘ
+                  (Create Design Variations' booster) needs it. */}
+              <TooltipProvider>
+                <CardForm>
+                  {/* The studio's one viewer (studio-tab.tsx mounts it): a result's zoom and the
+                      viewer's own Mask need it (G-02 m-4). */}
+                  <PictureGalleryProvider techCardId={CARD} band={band}>
+                    <Screen band={band} />
+                  </PictureGalleryProvider>
+                  <RawStart />
+                </CardForm>
+              </TooltipProvider>
+            </BrowserRouter>
+          </DesignCapabilityProvider>
+        </DictionaryProvider>
+      </QueryClientProvider>,
+    );
+  },
+  raw: (input) => rawStart?.(input),
+  recall: (run, threedRetired) => recallDesignRun(CARD, run, 'input', !!threedRetired),
+  alerts: () => useSnackBarStore.getState().alerts.map((a) => a.message),
+};

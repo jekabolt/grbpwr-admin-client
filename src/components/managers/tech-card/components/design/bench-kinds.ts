@@ -83,7 +83,7 @@ export function pictureBenchKind(
  * states: a vocabulary spelled per organ drifts silently and by construction. Before this block
  * the rule existed in FOUR spellings — `runKindOf || declaredKind` inside `render/model.ts`, the
  * hand-made recolor subtraction in `kinds-strip.tsx`, `runKindByMediaId` in `artifacts-panel.tsx`
- * and `recolorRuns` in `onmodel/model.ts` — and the fourth missing copy of the FIRST axis is
+ * and `recolorRuns` in `recolor/model.ts` — and the fourth missing copy of the FIRST axis is
  * already recorded as a shipped bug (L-1/L-5).
  */
 export const REPRESENTATIONS = [
@@ -159,7 +159,11 @@ export function runRepresentation(
       return 'pattern';
     case 'freeform':
     case 'cutout':
-      // TWO KINDS, ONE ROOM — see the argument on `REPRESENTATIONS`.
+    case 'extend':
+    case 'inpaint':
+      // TWO KINDS, ONE ROOM — see the argument on `REPRESENTATIONS`. Phase 3 (C-13/C-14): the
+      // outpaint and mask-fill routes are playground kinds too (one output, colourway 0, section 1
+      // of the window), so they join the same room.
       return 'playground';
     default:
       return null;
@@ -388,6 +392,18 @@ export function runIsOnPage(band: GetDesignBandResponse, run?: common_DesignRun 
   return (band.runs ?? []).some((r) => r.id === id);
 }
 
+/**
+ * THE PLAYGROUND WORKFLOW THE SERVER STAMPED ON AN OFF-PAGE OUTPUT (`DesignCardOutput.run_workflow`,
+ * PLAYGROUND C-07). A stub run carries no params, so a freeform stub cannot say its preset and a
+ * recolour stub cannot say whether it re-clothed; the stamp can. Kept BESIDE the stub, not in it:
+ * written into `params` it would be read as frozen parameters the run never had (recall, rerun).
+ * `''` for a run on the page (its own params answer) and for a server older than the field.
+ */
+const STAMPED_WORKFLOW = new WeakMap<common_DesignRun, string>();
+
+export const stampedWorkflowOf = (run: object): string =>
+  STAMPED_WORKFLOW.get(run as common_DesignRun) ?? '';
+
 export function cardOutputRows(
   band: GetDesignBandResponse,
   rep: Representation,
@@ -413,13 +429,16 @@ export function cardOutputRows(
     if (mine !== rep) continue;
 
     const runId = output.runId ?? 0;
-    const run: common_DesignRun = (runId > 0 ? runOfPicture(band, picture) : null) ?? {
+    const onPage = runId > 0 ? runOfPicture(band, picture) : null;
+    const run: common_DesignRun = onPage ?? {
       ...RUN_NOT_STATED,
       id: runId,
       kind: runKind,
       rrev: output.runRrev,
       colorwayId: output.runColorwayId,
     };
+    const stamped = (output.runWorkflow ?? '').trim();
+    if (!onPage && stamped) STAMPED_WORKFLOW.set(run, stamped);
 
     const key = runId > 0 ? `r${runId}` : `p${pictureId}`;
     const group = groups.get(key);
@@ -479,6 +498,34 @@ export function outputsHorizon(
   const cw = colorwayOf({ colorwayId });
   const total = (band.outputsTotalByColorway ?? {})[String(cw)] ?? 0;
   const carried = outputs.filter((output) => colorwayOf(output.picture) === cw).length;
+  return total > carried ? { total, carried } : null;
+}
+
+/**
+ * WHAT ONE PLAYGROUND WORKFLOW'S WINDOW LEFT BEHIND (band 31, G-02 m-1 / Codex 2), or `null` when it
+ * left nothing behind — and when this server states no count (`outputsTotalByWorkflow` absent: a
+ * binary older than the field; no caption rather than one counted over another list).
+ *
+ * The server cuts the playground's pool (colourway 0, section 1) PER WORKFLOW: each tile gets its own
+ * «newest 60» (backend `designCardOutputsWindowKey`). So a tile's caption is ITS count — `carried` =
+ * the outputs that arrived stamped with it (`run_workflow`), `total` = the server's count for it —
+ * never the colourway-0 sum, which would caption Create or edit's 60 with the whole room's numbers.
+ *
+ * ⚠ ONLY FOR A WORKFLOW OF THE PLAYGROUND'S OWN POOL. Change a Color, Swap Fabrics and Image to 3D
+ * file into the per-colourway pool they share with renders (section 0): their window is not theirs,
+ * and the caller does not ask this for them.
+ */
+export function workflowOutputsHorizon(
+  band: GetDesignBandResponse,
+  workflow: string,
+): { total: number; carried: number } | null {
+  if (!outputsCarryRows(band)) return null;
+  const totals = band.outputsTotalByWorkflow;
+  if (totals === undefined) return null;
+  const total = totals[workflow] ?? 0;
+  const carried = (band.outputs ?? []).filter(
+    (output) => (output.runWorkflow ?? '').trim() === workflow,
+  ).length;
   return total > carried ? { total, carried } : null;
 }
 
@@ -680,7 +727,7 @@ export function slotRunRrev(
   // возможный. Он по-прежнему врёт нулём на плите старше страницы, и это ровно то поведение,
   // которое у такого сервера было вчера; заменить его нечем, и делать вид, что заменили, нельзя.
   const picture = slot?.picture;
-  return picture ? (runOfPicture(band, picture)?.rrev ?? 0) : 0;
+  return picture ? runOfPicture(band, picture)?.rrev ?? 0 : 0;
 }
 
 /**

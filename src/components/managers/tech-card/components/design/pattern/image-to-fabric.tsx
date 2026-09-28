@@ -175,6 +175,10 @@ export function ImageToFabricSection({
         freeform: undefined,
         useFlatSlots: false,
         flatSlotIds: [],
+        // НЕ ПЛЕЙГРАУНД: движок прогона называет только плейграунд; `undefined` провод не меняет.
+        image: undefined,
+        inpaint: undefined,
+        extend: undefined,
       },
     });
 

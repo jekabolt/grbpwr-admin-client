@@ -379,9 +379,12 @@ export function RenderStudio({
         useFlatSlots: false,
         // Meaningful on kind=flat only; named because the contract wants the field named.
         flatSlotIds: [],
+        image: undefined,
+        inpaint: undefined,
+        extend: undefined,
       },
     };
-    run.start(body, pressed ? () => draft.materializeWords(pressed) : undefined);
+    run.start(body, pressed ? { onStarted: () => draft.materializeWords(pressed) } : undefined);
   };
 
   /* ⚠ СТРОКА СОСТАВА СНЯТА ЦЕЛИКОМ (r3 п.27) — «made of pattern 1 — … · split into the slots

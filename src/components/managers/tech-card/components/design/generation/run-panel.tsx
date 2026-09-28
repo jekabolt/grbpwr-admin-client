@@ -13,7 +13,14 @@ import { GROUP_GAP } from '../core';
 import { PictureTile } from '../picture-tile';
 import { normaliseViewKey, viewLabel } from '../views';
 import { formatMoney } from './money';
-import { isCancelling, isRunLive, runFailureText, runStatus, viewsLine } from './run-state';
+import {
+  isCancelling,
+  isRunLive,
+  runCodeWords,
+  runFailureText,
+  runStatus,
+  viewsLine,
+} from './run-state';
 import { Thumb, thumbUrl } from './thumb';
 import { useGenerationWrites } from './use-generation';
 
@@ -411,7 +418,7 @@ export function RunPanel({
                   `attempt ${attempt.attemptNo ?? i + 1}`,
                   (attempt.provider ?? '').trim(),
                   (attempt.state ?? '').trim(),
-                  (attempt.errorCode ?? '').trim(),
+                  runCodeWords(attempt.errorCode),
                   formatMoney(attempt.price, run.currency),
                 ]
                   .filter(Boolean)
@@ -446,6 +453,11 @@ export function RunPanel({
                 : 'the attempt before this one'}
             {failure.code ? ` · ${failure.code}` : ''}
           </Text>
+          {failure.words && (
+            <Text size='micro' component='p' className='max-w-[75ch] break-words'>
+              {failure.words}
+            </Text>
+          )}
           {failure.text && (
             <Text
               size='micro'

@@ -1,56 +1,58 @@
-import type { common_MediaFull, common_TechCardAnnotation } from 'api/proto-http/admin';
+import type { GetDesignBandResponse, common_MediaFull } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useRef } from 'react';
-import { decimalToInput } from 'utils/decimal';
 
 import { runHandle } from '../handles';
 import { recallDesignRun, useRecalledRun } from '../history-recall';
-import type { PlaygroundDraft } from './drafts';
-import {
-  PLAYGROUND_ITEMS_MAX,
-  REGIONS_PER_ITEM_MAX,
-  isPlaygroundRole,
-  type PlaygroundItem,
-  type PlaygroundRegion,
-} from './model';
+import { workflowOpenable } from './grid';
+import { workflowByKey, workflowOfRun } from './registry';
+import { recallEngineNote, whyNot } from './registry/common';
+import type { Draft, WorkflowKey } from './registry/types';
 
 /**
- * ═══ «RUN THAT AGAIN» — THE PLAYGROUND'S OWN RECEIVER ═════════════════════════════════════════
+ * ═══ «RUN THAT AGAIN» — THE PLAYGROUND'S RECEIVER (C-03) ═════════════════════════════════════════
  *
- * `recallTargetKind` sends a `freeform`/`cutout` run HERE (`history-recall.tsx`), and this is what
- * answers. Without a receiver the door would switch the step and do nothing — a gesture that moves
- * a person and leaves them where they cannot see why.
+ * `recallTargetKind` sends a `recolor`, `freeform` or `cutout` run HERE (`history-recall.tsx`) — and
+ * a `threed` run where STEP 5 has left the rail — and this is what answers: the run's workflow
+ * (`workflowOfRun`) is opened and its draft is rebuilt by that workflow's own `recall` from the
+ * run's FROZEN parameters — recolour → Change a Color or Swap Fabrics, cut-out → Remove Background,
+ * freeform → its preset's tile (free → Create or edit), 3D → Image to 3D (its reference and
+ * options). The retired
+ * presets (`add_hardware`, `repaint_parts`) land in Create or edit with their pictures and words,
+ * and the intake says what did not come along; a rerun of those runs stays legal on the server.
  *
- * ⚠ THE TABLE IS REBUILT FROM THE RUN'S OWN FROZEN PARAMETERS, NOT FROM TODAY'S CARD. The pictures
- * and the areas are in `params.freeform.items[]` exactly as they left; the media OBJECTS (the thumb
- * a cell draws) come from the run's input snapshot, which is the only place they survive at all
- * once a picture has left the feed page. An item whose media the snapshot no longer carries is
- * DROPPED and said out loud: putting an id on the table with no picture behind it would give a cell
- * that cannot be looked at and a run that cannot be checked before it is paid for.
+ * ⚠ THE MEDIA OBJECTS COME FROM THE RUN'S INPUT SNAPSHOT, the only place they survive once a
+ * picture left the feed page. A picture the snapshot no longer carries is DROPPED and said out loud.
  *
- * ⚠ THIS DOES NOT START A RUN. Recall fills the draft; GENERATE is still a press, and the gate
- * still has to pass. A rerun that spent money on arrival would be a door that reads like navigation
- * and behaves like a purchase.
+ * ⚠ ONLY A WORKFLOW THIS SERVER CAN OPEN TAKES A RECALL (G-02 Codex 6). The studio opens `?wf=` only
+ * through the same gate (`openWorkflow`); a draft laid under a gated tile would be announced «back in
+ * …» over a grid. So the gate is asked first and its own reason is said.
+ *
+ * ⚠ A SUBSTITUTED AI MODEL IS SAID (Codex 7): a run bought on a model this server no longer lists is
+ * laid back on the default, and the toast names which (`recallEngineNote`).
+ *
+ * ⚠ THIS DOES NOT START A RUN. Recall fills the draft; GENERATE is still a press, and the gate still
+ * has to pass. A rerun that spent money on arrival would be navigation that behaves like a purchase.
  */
-function pointsOf(region: common_TechCardAnnotation): { x: number; y: number }[] {
-  return (region.points ?? [])
-    .map((p) => ({ x: Number(decimalToInput(p.x)), y: Number(decimalToInput(p.y)) }))
-    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
-}
-
 export function PlaygroundRecallIntake({
+  band,
   techCardId,
-  draft,
   disabled,
+  onRecall,
 }: {
+  /** The band the draft lands on: the gate is asked against it, and the tile may reconcile. */
+  band: GetDesignBandResponse;
   techCardId: number;
-  draft: PlaygroundDraft;
   disabled?: boolean;
+  /** Put the rebuilt draft in place and open its workflow. */
+  onRecall: (key: WorkflowKey, draft: Draft) => void;
 }): null {
   const selection = useRecalledRun(techCardId);
   const { showMessage } = useSnackBarStore();
-  /** The run already taken, so a re-render does not re-lay the same table over an edited one. */
+  /** The run already taken, so a re-render does not re-lay the same form over an edited one. */
   const taken = useRef('');
+  const answer = useRef(onRecall);
+  answer.current = onRecall;
 
   useEffect(() => {
     if (!selection || selection.kind !== 'playground') {
@@ -62,13 +64,29 @@ export function PlaygroundRecallIntake({
     const stamp = `${runId}:${selection.mode}`;
     if (!runId || taken.current === stamp) return;
     taken.current = stamp;
-    // The choice is consumed the moment it is read: leaving it armed would re-lay the table on the
-    // next card switch, over work done since.
+    // Consumed the moment it is read: left armed it would re-lay the form on the next card switch.
     recallDesignRun(techCardId, null);
 
     const handle = runHandle(runId) || 'that run';
     if (disabled) {
       showMessage(`this card is read-only — nothing was taken from ${handle}`, 'error');
+      return;
+    }
+
+    const key = workflowOfRun(run);
+    const def = workflowByKey(key);
+    if (!key || !def?.run?.recall) {
+      showMessage(
+        `${handle} cannot be laid out here — ${def ? `${def.title} is not on this build yet` : 'its kind is not a playground workflow'}`,
+        'error',
+      );
+      return;
+    }
+    if (!workflowOpenable(def, band)) {
+      showMessage(
+        `${handle} cannot be laid out here — ${def.title} is ${whyNot(def, band) || 'not available'}`,
+        'error',
+      );
       return;
     }
 
@@ -78,63 +96,18 @@ export function PlaygroundRecallIntake({
       if (id > 0 && ref.media && !ref.deleted) media.set(id, ref.media);
     }
 
-    const kind = (run.kind ?? '').trim().toLowerCase();
-    const wire = run.params?.freeform;
-    const items: PlaygroundItem[] = [];
-    let lost = 0;
-
-    if (kind === 'cutout') {
-      // A cut-out names its one picture in `extra_input_media_ids`, never in `freeform` — one list
-      // per fact, both on the way out and on the way back.
-      for (const id of run.params?.extraInputMediaIds ?? []) {
-        const found = media.get(id ?? 0);
-        if (found) items.push({ media: found, role: '', regions: [] });
-        else lost++;
-      }
-    } else {
-      for (const item of wire?.items ?? []) {
-        const id = item.mediaId ?? 0;
-        const found = media.get(id);
-        if (!found) {
-          lost++;
-          continue;
-        }
-        const texts = item.texts ?? [];
-        const regions: PlaygroundRegion[] = (item.regions ?? [])
-          .map((region, i) => ({ points: pointsOf(region), text: (texts[i] ?? '').trim() }))
-          .filter((r) => r.points.length >= 3)
-          .slice(0, REGIONS_PER_ITEM_MAX);
-        /* ⚠ THE ROLE IS READ, NOT CAST. `item.role` is a plain string off the wire — a run frozen
-           by a server that knows a role this bundle does not carries that word, and a cast would
-           put it on the table typed as one of four. From there it would ride the next paid call
-           into `unknown_role`, refused after the reservation for a word the person never typed.
-           A role this build cannot spell becomes «just a picture», which is what the empty role
-           means to the server and what the missing chip says on screen. */
-        const role = (item.role ?? '').trim();
-        items.push({ media: found, role: isPlaygroundRole(role) ? role : '', regions });
-      }
-    }
-
-    if (items.length === 0) {
-      showMessage(
-        lost > 0
-          ? `nothing was laid out — the ${lost === 1 ? 'picture' : `${lost} pictures`} of ${handle} ${lost === 1 ? 'is' : 'are'} no longer on this card`
-          : `${handle} put no picture on the table`,
-        'error',
+    const back = def.run.recall(run, media, { band });
+    const engine = recallEngineNote(run, band);
+    const notes = engine ? [...back.said, engine] : back.said;
+    const said = [`${handle} is back in ${def.title}`, ...notes];
+    if (back.lost) {
+      said.push(
+        `${back.lost} of its pictures ${back.lost === 1 ? 'is' : 'are'} no longer on this card`,
       );
-      return;
     }
-
-    const dropped = Math.max(0, items.length - PLAYGROUND_ITEMS_MAX);
-    draft.adopt(
-      items,
-      kind === 'cutout' ? 'cutout' : (wire?.preset ?? '').trim(),
-      kind === 'cutout' ? '' : (run.ask ?? '').trim(),
-    );
-    const said = [`the table of ${handle} is back`];
-    if (lost) said.push(`${lost} of its pictures ${lost === 1 ? 'is' : 'are'} gone from this card`);
-    if (dropped) said.push(`${dropped} over the ${PLAYGROUND_ITEMS_MAX} the run takes, skipped`);
-    showMessage(said.join(' · '), lost || dropped ? 'error' : 'success');
+    answer.current(key, back.draft);
+    showMessage(said.join(' · '), notes.length || back.lost ? 'error' : 'success');
+    // The band is read at the moment of the recall, not followed: a later band must not re-lay it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, disabled, techCardId]);
 

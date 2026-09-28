@@ -48,12 +48,15 @@ export type Say = (message: string, type: 'error' | 'success') => void;
 export function WmgShell({
   open,
   onOpenChange,
+  onCloseAutoFocus,
   kindWord,
   intro,
   children,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Where focus goes on close; absent = Radix's default, as before. */
+  onCloseAutoFocus?: (event: Event) => void;
   /** «flat», «fabric render», «3D», «on model», «moodboard draft» — spelled once by the arm. */
   kindWord: string;
   intro: ReactNode;
@@ -63,6 +66,7 @@ export function WmgShell({
     <ConfirmationModal
       open={open}
       onOpenChange={onOpenChange}
+      onCloseAutoFocus={onCloseAutoFocus}
       /* Required by the primitive's contract; with `hideActions` nothing calls it — ✕ closes. */
       onConfirm={() => onOpenChange(false)}
       width='lg'

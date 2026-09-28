@@ -372,6 +372,12 @@ function band(parts: Partial<GetDesignBandResponse>): GetDesignBandResponse {
     benchAdoptsUnattributed: undefined,
     freeformPresets: undefined,
     assetBindings: [],
+    playgroundWorkflows: undefined,
+    imageModels: undefined,
+    threedOptions: undefined,
+    outputsTotalByWorkflow: undefined,
+    runKinds: undefined,
+    suggestPromptsModel: undefined,
     ...parts,
   };
 }

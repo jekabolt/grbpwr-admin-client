@@ -53,10 +53,14 @@ export function usePermissions() {
 
   // First navigable section the account can read, in sidebar order. Used to land
   // scoped accounts on a page they can actually open instead of the analytics home.
+  // A super-only item has no section, so `hasSection` alone would call it readable and land an
+  // account with no other grant on a page that bounces it to /me; it counts for supers only.
   const homeRoute = useMemo(() => {
-    const item = SIDE_BAR_ITEMS.find((it) => hasSection(it.section, ACCESS.READ));
+    const item = SIDE_BAR_ITEMS.find(
+      (it) => (isSuper || !it.superOnly) && hasSection(it.section, ACCESS.READ),
+    );
     return item?.route ?? null;
-  }, [hasSection]);
+  }, [hasSection, isSuper]);
 
   return {
     account,

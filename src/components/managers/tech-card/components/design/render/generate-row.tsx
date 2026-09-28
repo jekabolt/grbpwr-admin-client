@@ -118,6 +118,12 @@ export function GenerateRow({
    * не про экран.
    */
   label = 'GENERATE',
+  /**
+   * The word the door says while `pending`. `starting…` is the machine's (the run is being booked);
+   * a screen that does something else first says what (the mask editor: `uploading the mask…`,
+   * G-03 m-4 — nothing has started while the mask goes up, and a refused upload starts nothing).
+   */
+  pendingLabel = 'starting…',
 }: {
   gate: Gate;
   shape?: string;
@@ -127,6 +133,7 @@ export function GenerateRow({
   onInspect?: () => void;
   trailing?: ReactNode;
   label?: string;
+  pendingLabel?: string;
 }): JSX.Element {
   const speaks = serverSpeaksDesign();
 
@@ -154,7 +161,7 @@ export function GenerateRow({
         <InertDoor label={label} reason={frozen} size='sm' />
       ) : gate.ok ? (
         <Button variant='main' size='sm' onClick={onGenerate} disabled={pending}>
-          {pending ? 'starting…' : label}
+          {pending ? pendingLabel : label}
         </Button>
       ) : (
         <InertDoor label={label} reason={gate.reason} size='sm' />
@@ -183,29 +190,29 @@ export function GenerateRow({
 
       {trailing}
 
-      {shape === undefined && !onInspect ? null : (
-        /* THE PROMPT INVENTORY DOOR, AND IT IS LIVE ON BOTH GENERATIVE SCREENS.
-           It used to be inert, on the ground that the prompt is assembled server-side from a
-           PROFILE this client cannot read. That sentence is true and it is still printed — at
-           the head of the panel itself. What it never justified was hiding the payload: the
-           profile is the wrapper, and everything it wraps around (which plates go in, which
-           colour rides with them, which renders a turntable turns, and what is NOT sent at all)
-           is on this card and is knowable exactly. A person about to spend money on two screens
-           out of three was being asked to do it blind.
+      {/* THE PROMPT INVENTORY DOOR, AND IT IS LIVE ON BOTH GENERATIVE SCREENS.
+          It used to be inert, on the ground that the prompt is assembled server-side from a
+          PROFILE this client cannot read. That sentence is true and it is still printed — at
+          the head of the panel itself. What it never justified was hiding the payload: the
+          profile is the wrapper, and everything it wraps around (which plates go in, which
+          colour rides with them, which renders a turntable turns, and what is NOT sent at all)
+          is on this card and is knowable exactly. A person about to spend money on two screens
+          out of three was being asked to do it blind.
 
-           `ml-auto` — у правого края ряда, как в макете; при переносе на узком экране дверь
-           уходит на свою строку и прижимается к её правому краю, а не вылезает за него. */
-        onInspect ? (
-          <Button variant='secondary' size='xs' className='ml-auto' onClick={onInspect}>
-            what the model gets ▸
-          </Button>
-        ) : (
-          <InertDoor
-            label='what the model gets ▸'
-            reason='this screen was mounted without the inventory panel — it lists what the card contributes to the run, and the composer did not hand it in'
-            className='ml-auto'
-          />
-        )
+          `ml-auto` — у правого края ряда, как в макете; при переносе на узком экране дверь
+          уходит на свою строку и прижимается к её правому краю, а не вылезает за него.
+          (The comment stands above the expression: inside the ternary, prettier 3.2 moved it
+          between runs and never settled.) */}
+      {shape === undefined && !onInspect ? null : onInspect ? (
+        <Button variant='secondary' size='xs' className='ml-auto' onClick={onInspect}>
+          what the model gets ▸
+        </Button>
+      ) : (
+        <InertDoor
+          label='what the model gets ▸'
+          reason='this screen was mounted without the inventory panel — it lists what the card contributes to the run, and the composer did not hand it in'
+          className='ml-auto'
+        />
       )}
     </div>
   );
@@ -253,10 +260,11 @@ export function GenerateRow({
  * ═══ ОТКАЗ ПРОГОНА — СТОЙКАЯ ПОЛОСА, А НЕ СЕКУНДЫ СНЕКБАРА (Ф4, контракт §E) ══════════════════
  *
  * `useStartDesignRun` кладёт отказ сервера в `refusal` и даёт `dismissRefusal`. Три экрана его
- * РИСОВАЛИ (on model, pattern, flat); render и 3D — нет: отказ жил секунды всплывашки, а деньги при
- * этом двигаются (резервация освобождена, попытка списана). Молчать нельзя. Форма СПИСАНА с
- * `onmodel/studio.tsx` (заголовок, слова сервера в «», приписка про деньги) и `pattern-studio.tsx`
- * (дверь `dismiss`), не выдумана.
+ * РИСОВАЛИ (бывший ON MODEL, pattern, flat); render и 3D — нет: отказ жил секунды всплывашки, а
+ * деньги при этом двигаются (резервация освобождена, попытка списана). Молчать нельзя. Форма
+ * СПИСАНА с экрана ON MODEL (снят в C-06; полосу теперь рисует форма PLAYGROUND,
+ * `playground/workflow-panel.tsx`) — заголовок, слова сервера в «», приписка про деньги — и с
+ * `pattern-studio.tsx` (дверь `dismiss`), не выдумана.
  *
  * ЧТО ГОВОРИТСЯ И ОТ ЧЬЕГО ИМЕНИ:
  *   · слова сервера — ДОСЛОВНО, они единственное, что называет причину (переменную окружения,
@@ -297,7 +305,9 @@ export function RunRefusal({
         className='flex items-start gap-2'
       >
         <Text size='micro' component='p' className='min-w-0 flex-1 normal-case'>
-          <b>the run did not start.</b>{' '}
+          {/* THE LEAD SAYS ONLY WHAT IS KNOWN (G-01 r2). Without an answer «did not start» was a
+              guess, and the wrong one whenever the answer was lost AFTER the run was booked. */}
+          <b>{answered ? 'the run did not start.' : 'no answer from the server.'}</b>{' '}
           {answered ? (
             <>
               The server answered: «<span data-probe='refusal-verbatim'>{words}</span>». These are
@@ -306,10 +316,10 @@ export function RunRefusal({
             </>
           ) : (
             <>
-              No answer came back from the server («
-              <span data-probe='refusal-verbatim'>{words}</span>»), so whether the run was filed
-              and charged is not known here. Pressing GENERATE again with nothing changed carries
-              the same request id, and the server files one run per id — a repeat cannot pay twice.
+              («<span data-probe='refusal-verbatim'>{words}</span>») Whether the run was booked is
+              not known here. To check, press GENERATE again without changing anything: it resends
+              the same request id, so the server returns the run if it exists and starts it once if
+              it does not. It cannot be charged twice.
             </>
           )}
         </Text>

@@ -195,6 +195,9 @@ const Accounts = lazyRoute(() =>
 const MyProfile = lazyRoute(() =>
   import('components/managers/accounts/profile-page').then((m) => ({ default: m.MyProfile })),
 );
+const AiProviders = lazyRoute(() =>
+  import('components/managers/ai-providers/page').then((m) => ({ default: m.AiProviders })),
+);
 const FilesLibrary = lazyRoute(() => import('components/managers/files/page'));
 const FileTopics = lazyRoute(() => import('components/managers/files/topics/topics-page'));
 const FilesShared = lazyRoute(() => import('components/managers/files/shared/shared-page'));
@@ -400,6 +403,9 @@ root.render(
                   <Route path={ROUTES.settings} element={<Settings />} />
                   <Route path={ROUTES.dictionaries} element={<Dictionaries />} />
                   <Route path={ROUTES.shipping} element={<Shipping />} />
+                  {/* Super only: the page itself sends everyone else to /me (no route guard
+                      exists; each page gates itself, as /accounts does). */}
+                  <Route path={ROUTES.aiProviders} element={<AiProviders />} />
                   <Route path={ROUTES.orderDetails} element={<OrderDetails />} />
                   <Route path={ROUTES.customOrders} element={<CustomOrders />} />
                   <Route path={ROUTES.orders} element={<OrdersCatalog />} />

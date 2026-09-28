@@ -4432,7 +4432,8 @@ export type DesignRun = {
   id: number | undefined;
   techCardId: number | undefined;
   // Which state of the studio produced this row: flat | render | threed | vector | draft_idea |
-  // recolor | pattern. Written by the client at start; immutable afterwards.
+  // recolor | pattern | freeform | cutout | extend | inpaint. Written by the client at start;
+  // immutable afterwards.
   // `recolor` IS THE ON MODEL SECTION'S OWN VERB (K-17). The owner's ask — «мы можем загрузить фото
   // реальное на модели с разных сторон и нам можно будет поменять цвет вещи» — and the owner's own
   // decision on how: the colour is changed BY GENERATION, not by a filter, so the weave, the folds
@@ -4451,6 +4452,10 @@ export type DesignRun = {
   // still «spend the key's money and give me a picture back».
   // ImportDesignVector is NOT that verb and does not belong to this list: it files an SVG that
   // already exists and spends nothing.
+  // `extend` EXTENDS ONE PICTURE INTO A NEW PROPORTION on fal's outpaint route (params.extend + one
+  // params.extra_input_media_ids). `inpaint` REPAINTS ONE PAINTED ZONE of a picture on fal's fill
+  // route (params.inpaint + ask). Both are playground kinds: one output, colourway 0, section 1 of
+  // the window.
   kind: string | undefined;
   // OUTPUT-ONLY lifecycle: pending | running | done | failed | cancelled. A tile that is still
   // running renders differently from a finished one, so this is the field the band polls.
@@ -4701,6 +4706,17 @@ export type DesignRunParams = {
   // other kind with `freeform_forbidden`. The pictures a person laid on the playground travel HERE,
   // never in extra_input_media_ids (one list per fact — a run naming a picture in both is refused).
   freeform: DesignFreeformParams | undefined;
+  // THE PER-RUN ENGINE of every OpenRouter image kind: flat | render | recolor | pattern | freeform.
+  // Refused on threed | cutout | vector | extend | inpaint, whose routes are not OpenRouter images
+  // (`image_options_forbidden`). Absent or empty = the deployment's dial, exactly as before the
+  // field existed — which is what keeps every frozen run and every old client meaning what it meant.
+  // Offered only where GetDesignBandResponse.image_models is present; a client must not send it to a
+  // server that did not list any engine.
+  image: DesignImageOptions | undefined;
+  // THE MASK RETOUCH OF A PLAYGROUND RUN (kind=inpaint). Refused on every other kind (`inpaint_forbidden`).
+  inpaint: DesignInpaintParams | undefined;
+  // THE TARGET FORMAT OF AN EXTEND RUN (kind=extend). Refused on every other kind (`extend_forbidden`).
+  extend: DesignExtendParams | undefined;
 };
 
 // DesignColourRecipe is the colour submission of a render run, in a form that a history chip can
@@ -4867,6 +4883,25 @@ export type DesignThreedParams = {
   // people writing the ask, and an enum would freeze today's four words into the contract and into
   // every already-frozen run's history.
   bodyType: string | undefined;
+  // REFERENCE MODE: 1..4 media ids, ORDERED front, back, left, right — the order is the claim about
+  // which side each picture shows, so it is frozen as sent. When non-empty the run reads NO bench
+  // plate and `source_picture_ids` stays empty; more than 4 is `too_many_pictures`. Empty = today's
+  // behaviour, the bench's render plates.
+  referenceMediaIds: number[] | undefined;
+  // '' | on | off — whether the model is textured. '' = on. A STRING, not a bool: a proto3 bool
+  // cannot say «not stated», and «not stated» must keep meaning today's behaviour for every frozen
+  // run and every old client.
+  texture: string | undefined;
+  // '' | on | off — physically based materials. '' = off. A string for the same reason as `texture`.
+  pbr: string | undefined;
+  // '' | standard | detailed. '' = standard.
+  quality: string | undefined;
+  // '' | photo | shape — whether the surface follows the photograph or only the shape. Refused
+  // unless GetDesignBandResponse.threed_options advertises `follow`.
+  follow: string | undefined;
+  // Free words about the surface; they steer the texture. Refused (option_not_read) unless
+  // GetDesignBandResponse.threed_options advertises `surface_hint`, and on an untextured build.
+  surfaceHint: string | undefined;
 };
 
 // DesignPatternParams is the frozen ask of a REPEATING-TILE run (kind=pattern, K-13).
@@ -4942,11 +4977,17 @@ export type DesignPatternParams = {
 // DesignRunParams.extra_input_media_ids — one list per fact — and a run naming a picture in both is
 // refused (`one_list_per_fact`) rather than quietly sending it twice.
 export type DesignFreeformParams = {
-  // free | add_hardware | repaint_parts — the server's own dictionary (designgen.FreeformPresets);
-  // `cutout` is NOT a preset of this kind: cutting the background is kind=cutout, another route.
+  // free | add_hardware | repaint_parts | tryon | fabric_extract | ghost_mannequin | add_logo |
+  // variations | retouch — the server's own dictionary (designgen.FreeformPresets); `cutout` is NOT
+  // a preset of this kind: cutting the background is kind=cutout, another route.
   preset: string | undefined;
   // 1..8 pictures, in the order they are numbered on screen and in the prompt («image 1» is items[0]).
   items: DesignFreeformItem[] | undefined;
+  // The typed options of the chosen preset. Each preset reads only its own fields (named on each
+  // field of DesignWorkflowOptions); a field a preset does not read must be empty, and a stated one
+  // is refused `option_not_read` rather than silently dropped — nobody pays for a choice that was
+  // never sent.
+  options: DesignWorkflowOptions | undefined;
 };
 
 // DesignFreeformItem is ONE picture of a playground run, with the places on it a person marked and
@@ -4964,8 +5005,84 @@ export type DesignFreeformItem = {
   // What about this picture / these regions, ≤ 1000 runes. Regions and texts pair by index:
   // regions[i] is described by texts[i]; a text with no region describes the whole picture.
   texts: string[] | undefined;
-  // '' | subject | hardware | cloth — what the preset expects this picture to be. Empty on `free`.
+  // '' | subject | hardware | cloth | model | product | scene | logo — what the preset expects this
+  // picture to be. Empty on `free`.
   role: string | undefined;
+};
+
+// DesignWorkflowOptions are the typed choices of a PLAYGROUND preset (DesignFreeformParams.options).
+// FLAT ON PURPOSE, NO ONEOF. protojson materialises a oneof member from its zero value, so a oneof
+// here would turn «not stated» into «stated as empty» on the way through the gateway. Every field is
+// empty-means-not-stated instead, and the door refuses a field the chosen preset does not read
+// (`option_not_read`) and a word outside a field's vocabulary (`unknown_option`).
+export type DesignWorkflowOptions = {
+  // Read by `tryon`. auto | full_body | upper_body | portrait | hands | feet | product_detail.
+  // '' = auto.
+  framing: string | undefined;
+  // Read by `tryon`. auto | eye_level | slightly_above | slightly_below | low_angle. '' = auto.
+  angle: string | undefined;
+  // Read by `tryon`. edit | reference — whether the scene picture is edited in place or only
+  // referenced for its mood. '' = edit.
+  sceneMode: string | undefined;
+  // Read by `tryon`. Free words about the scene, ≤ 1000 runes.
+  sceneText: string | undefined;
+  // Read by `tryon`. FK model(id); 0 = no model profile named. PROVENANCE for the history: when > 0
+  // the door checks that the `model` item's media is a photograph of this model's profile
+  // (`model_photo_mismatch`; an id that does not exist is `model_not_found`).
+  modelId: number | undefined;
+  // Read by `tryon`. FK product(id) — the colourway whose render the product picture was taken
+  // from; 0 = not stated. Provenance only: the run itself still carries no colourway.
+  productColorwayId: number | undefined;
+  // Read by `add_logo`. small | medium | large. '' = the preset's default.
+  logoSize: string | undefined;
+  // Read by `variations`. 0..3 — how far a variation may wander from the source (0 = closest).
+  creativity: number | undefined;
+};
+
+// DesignImageOptions is the engine a person chose for ONE image run — the model and how it is asked
+// to draw. Every value is validated against the server's engine table before anything is reserved:
+// a slug the table does not hold is `unknown_image_model`, a tier the engine lacks is
+// `quality_not_supported`, a ratio it lacks is `aspect_not_supported`, a background it lacks is
+// `background_not_supported`. Frozen with the run like every other param, so a rerun repeats the
+// same engine without restating it.
+export type DesignImageOptions = {
+  // An OpenRouter slug from GetDesignBandResponse.image_models[].slug. '' = the deployment's default
+  // engine.
+  model: string | undefined;
+  // A UI tier word of that engine: low | medium | high (one of image_models[].qualities).
+  // '' = the engine's default tier.
+  quality: string | undefined;
+  // One of the engine's ratios (image_models[].aspect_ratios) or `auto`. '' = auto.
+  aspectRatio: string | undefined;
+  // '' | transparent — only when the engine lists it in image_models[].backgrounds.
+  background: string | undefined;
+};
+
+// DesignInpaintParams — one picture of this card and its painted mask, a PNG of the SAME pixel size, white where the
+// picture changes, black elsewhere (the client paints it; UploadContentImage with preserve_original=true). Both are
+// validated BEFORE anything is reserved: `mask_required`, `mask_size_mismatch`, `mask_invalid` (not a readable PNG),
+// `mask_empty` (nothing painted). The words travel in StartDesignRunRequest.ask (`words_required` when blank).
+// The answer is a NEW picture beside the source, a lossless PNG: every pixel outside the mask is the source's own
+// decoded pixel (bit-exact for a PNG source; the decoded pixels of a JPEG/WebP one). Only an OPAQUE picture whose PNG
+// would EXCEED the store's verbatim ceiling (about 21 MB) is stored as JPEG instead — the best of q92 / q85 / q75
+// that fits. A picture with transparency is never stored as JPEG: past the ceiling the composite is not made and the
+// repainted crop is filed as delivered (`inpaint_not_composited`). The source may be at most 18 MP
+// (`source_too_large`).
+export type DesignInpaintParams = {
+  sourceMediaId: number | undefined;
+  maskMediaId: number | undefined;
+};
+
+// DesignExtendParams — the final proportion of an extend (outpaint) run. The ONE source travels in
+// DesignRunParams.extra_input_media_ids (exactly one, `one_source_picture`); the route takes no words
+// (`extend_takes_no_words`). aspect_ratio ∈ 9:16 | 1:1 | 3:4 | 2:3 | 16:9 | 4:3 | 3:2 | 21:9 | 9:21 — never auto
+// (`extend_aspect_unknown`); a target that adds no pixels on either side is `target_aspect_must_extend`. The
+// server computes the per-side expansion, caps the canvas at 3 megapixels (downscaling the source first), and
+// re-composites the untouched source pixels into the answer, stored as a lossless PNG, so «the original is kept» is a
+// fact of the pixels: the source region is the source's own decoded pixels (at the scale the cap allows). The source
+// may be at most 18 MP (`source_too_large`).
+export type DesignExtendParams = {
+  aspectRatio: string | undefined;
 };
 
 // DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
@@ -5186,7 +5303,9 @@ export type DesignPicture = {
   layerRev: number | undefined;
   // Reversible invisibility — the ONLY persistent verb for hiding a picture. The guards live in
   // HideDesignPicture: a plate in a slot, feeding a live run, or parenting a live crop cannot be
-  // hidden. A hidden picture is not cut either: SplitDesignPicture answers hidden_picture.
+  // hidden. A hidden picture is neither cut nor overwritten: SplitDesignPicture and
+  // FlattenDesignEditLayer with replace_picture_id answer hidden_picture (an edit of it is filed
+  // beside it instead — «save as new»).
   hiddenAt: wellKnownTimestamp | undefined;
   hiddenBy: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
@@ -5470,8 +5589,8 @@ export type DesignCardOutput = {
   // FK design_run(id). 0 = no run: an uploaded picture, or a parentless flatten. It does NOT imply
   // «a run produced this picture» when non-zero — see the ancestry note above.
   runId: number | undefined;
-  // render | threed | pattern | recolor | freeform | cutout — the kind of the RUN, never of the
-  // picture. "" when there is no run at all.
+  // render | threed | pattern | recolor | freeform | cutout | extend | inpaint — the kind of the
+  // RUN, never of the picture. "" when there is no run at all.
   runKind: string | undefined;
   runRrev: number | undefined;
   // The run's colourway — product(id), 0 = unattributed or no run.
@@ -5482,6 +5601,10 @@ export type DesignCardOutput = {
   // with no run, where this field is 0 while the picture's own colourway is named and real.
   runColorwayId: number | undefined;
   batchId: number | undefined;
+  // The PLAYGROUND workflow key this output belongs to (virtual_try_on … image_to_3d, see
+  // GetDesignBandResponse.playground_workflows), derived by the server from the run's kind and
+  // frozen params. '' for a run of no workflow (render, pattern) or no run at all.
+  runWorkflow: string | undefined;
 };
 
 // DesignReference is the ROLE of one reference image inside the band's prompt: which side of the

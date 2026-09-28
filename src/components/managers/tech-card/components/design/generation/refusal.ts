@@ -33,6 +33,18 @@ export function isAborted(error: unknown): boolean {
   return statusOf(error) === 409;
 }
 
+/**
+ * THE SERVER ANSWERED AND NOTHING WAS BOOKED — a 4xx (grpc-gateway: InvalidArgument,
+ * FailedPrecondition, NotFound, PermissionDenied, Unauthenticated, ResourceExhausted, Aborted all land
+ * there, every one of them before or instead of the booking). 408 and 499 are timeouts in 4xx dress;
+ * a 5xx may come after a commit; no status at all is no answer. Those three are NOT definitive: the
+ * run may exist, and the idempotency key must survive them (`render/run-ledger.ts`).
+ */
+export function isDefinitiveRefusal(error: unknown): boolean {
+  const s = statusOf(error);
+  return s !== null && s >= 400 && s < 500 && s !== 408 && s !== 499;
+}
+
 function statusOf(error: unknown): number | null {
   const s = (error as { status?: unknown } | null | undefined)?.status;
   return typeof s === 'number' && s > 0 ? s : null;
@@ -46,4 +58,21 @@ export function refusalFromError(error: unknown, clientRequestId: string): RunRe
   if (isAborted(error)) return null;
   const words = (error as Error | null | undefined)?.message?.trim() || 'the run did not start';
   return { words, status: statusOf(error), clientRequestId };
+}
+
+/**
+ * `ErrorInfo.reason` of a google.rpc.Status refusal (`api/api.ts` keeps `details`) — the machine
+ * reason next to the prose, or undefined when the refusal carries none (a gateway's bare 404).
+ */
+export function errorInfoReason(error: unknown): string | undefined {
+  const details = (error as { details?: unknown } | null)?.details;
+  if (!Array.isArray(details)) return undefined;
+  for (const d of details) {
+    if (!d || typeof d !== 'object') continue;
+    const type = (d as { '@type'?: unknown })['@type'];
+    if (typeof type === 'string' && !type.endsWith('ErrorInfo')) continue;
+    const reason = (d as { reason?: unknown }).reason;
+    if (typeof reason === 'string' && reason) return reason;
+  }
+  return undefined;
 }

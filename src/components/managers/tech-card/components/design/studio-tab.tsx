@@ -3,7 +3,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 import type { EditHistory } from 'ui/components/annotation/history';
 import Text from 'ui/components/text';
@@ -18,11 +18,14 @@ import { GenerationStudio } from './generation';
 import type { DesignKind } from './bench-kinds';
 import { ChainRail, useChainCtx } from './chain-rail';
 import {
+  PLAYGROUND_WF_PARAM,
+  addressedStep,
   defaultStep,
-  isStepId,
   kindOfStep,
+  legacyStep,
   stepOfField,
   stepOfKind,
+  threedStepRetired,
   type StepId,
 } from './core/chain';
 import { RenderStudio, ThreedStudio } from './render';
@@ -30,8 +33,15 @@ import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
 import { MaterialSlots } from './material-slots';
 import { MoodBoard } from './mood-board';
-import { OnModelStudio } from './onmodel';
-import { PlaygroundStudio } from './playground';
+import {
+  PlaygroundStudio,
+  inPlaygroundRoom,
+  playgroundHistoryMatch,
+  playgroundHistoryRep,
+  playgroundHistoryScope,
+  useLegacyStepRewrite,
+  useStepAddress,
+} from './playground';
 import { ImageToFabricSection, PatternStudio, clothSlots } from './pattern';
 import { DraftedProvider } from './head/drafted-provider';
 import { useStudioKindSwitch } from './history-recall';
@@ -59,8 +69,8 @@ import { useDesignBand } from './use-design-band';
  *                            blocks, all drawn by `MoodBoard`), then GENERAL INFORMATION,
  *                            CONSTRUCTION, MATERIAL SLOTS (and the colourway proposals, a product
  *                            block the prototype has no row for) — each organ draws its OWN block;
- *   · steps 2–5 and the aside → the generative screens (flat · pattern · fabric render · 3D · on
- *                            model), each with its own input, GENERATE and history.
+ *   · steps 2–5 and the aside → the generative screens (flat · pattern · fabric render · 3D ·
+ *                            playground), each with its own input, GENERATE and history.
  * Nothing is «always on screen above the rail» any more: the previous build stacked steps 0 and 1
  * over the rail and switched only the screens below it, and the owner, seeing it, said «не как в
  * референсе». Clicking a cell — any cell — switches the step, as `ACTIONS['go']` sets `S.step`.
@@ -203,6 +213,9 @@ export function StudioTab({
   const addressedTab = params.get('tab');
   const askedColorway = addressedTab === 'studio' ? Number(params.get('colorway')) : NaN;
   const deepLinkColorway = Number.isFinite(askedColorway) && askedColorway > 0 ? askedColorway : 0;
+  /* The entry's own state rides along: dropping a spent `?colorway=` is not a navigation, and it
+     must not wipe the playground's «opened from the grid» mark (G-01). */
+  const entryState = useLocation().state as unknown;
   const dropColorwayParam = useCallback(() => {
     setParams(
       (prev) => {
@@ -210,9 +223,9 @@ export function StudioTab({
         p.delete('colorway');
         return p;
       },
-      { replace: true },
+      { replace: true, state: entryState },
     );
-  }, [setParams]);
+  }, [setParams, entryState]);
   const colorway = useColorwayChoice(techCardId, band, deepLinkColorway, dropColorwayParam);
 
   const readOnly = !!disabled;
@@ -275,19 +288,24 @@ export function StudioTab({
     if (!techCardId) opened.current.step = 'card';
     else if (!isLoading && chain.card.name.trim()) opened.current.step = defaultStep(chain);
   }
-  const decided: StepId | null = isStepId(urlStep) ? urlStep : opened.current.step;
+  /* A step that no longer exists (`?step=aside`) is read as its new home in this very render and
+     rewritten once below, so neither the default-step latch nor a blank frame ever sees it. An
+     unknown value falls through to the latch, as before.
+
+     ⚠ `?step=threed` IS BOTH A STEP AND A LEGACY ADDRESS (C-10), AND THE SERVER DECIDES WHICH. STEP 5
+     left the rail for the playground tile `image_to_3d` — on a server that lists its playground
+     workflows. On an older one it is still the only way to a 3D model and stays a step; while the
+     band has not answered it is neither (the screen says «loading…»). So the legacy answer is asked
+     FIRST (`addressedStep`): `threed` is a valid `StepId` and would otherwise win. */
+  const threedRetired = threedStepRetired(chain);
+  const legacy = legacyStep(urlStep, threedRetired);
+  const decided: StepId | null = addressedStep(urlStep, threedRetired) ?? opened.current.step;
   const ctx = { ...chain, now: decided };
-  const goStep = (next: StepId) =>
-    setParams(
-      (prev) => {
-        const p = new URLSearchParams(prev);
-        p.set('step', next);
-        return p;
-      },
-      // `replace`, as the prototype's `replaceState`: Back leaves the card, it does not walk the
-      // rail backwards one cell at a time.
-      { replace: true },
-    );
+  /* The rail's write and the legacy rewrite live with the playground's address rules
+     (`playground/address.ts`): every one of them replaces, so the card's steps stay one history
+     entry and Back leaves the card (G-01 r2). */
+  const goStep = useStepAddress();
+  useLegacyStepRewrite(legacy);
 
   /* ═══ THE GENERATIVE KIND IS DERIVED FROM THE STEP, NEVER HELD BESIDE IT ═════════════════════════
      `kind` was the studio's state (`state.kind` of the old prototype); now the step is, and the
@@ -295,7 +313,13 @@ export function StudioTab({
      generative screen — `kind` is undefined there, and that is a value, not a gap. Two states here
      would be two places that can disagree about which screen is on. */
   const kind: DesignKind | undefined = decided ? kindOfStep(decided) : undefined;
-  const goKind = (next: DesignKind) => goStep(stepOfKind(next).id);
+  /* A DOOR TO 3D WHERE STEP 5 HAS LEFT THE RAIL (C-10) opens the playground ON the workflow that
+     replaced it, in one write — «with ± the same functionality» (the owner), so the door keeps its
+     destination. Where STEP 5 is still drawn, or the server has not answered, it is the step. */
+  const goKind = (next: DesignKind) =>
+    next === 'threed' && threedRetired
+      ? goStep('playground', 'image_to_3d')
+      : goStep(stepOfKind(next).id);
   /* РЕКОЛ ПЕРЕКЛЮЧАЕТ ЭКРАН СТУДИИ (V-12в, владелец: «если мы нажимаем на рекол из генерации
      допустим фабрик рендера оно должно переключатся на фабрик рендер а не пихать их во флеты»).
      Наружу отдаётся не копия состояния, а дверь к владельцу: `goKind` — это `goStep` через таблицу
@@ -603,10 +627,15 @@ export function StudioTab({
                         </RenderStudio>
                       </>
                     )}
-                    {/* ═══ STEP 5 · 3D — the same colourway number as the render, and NO remount:
-                        the 3D draft (presentation, model, body, size) is not a colour and must
-                        survive a change of colourway; everything colour-dependent (`threedSides`,
-                        the gate, the run body) is a selector over the band and follows the prop. */}
+                    {/* ═══ STEP 5 · 3D — ONLY WHERE THE RAIL STILL DRAWS IT (C-10). On a server that
+                        lists its playground workflows the step is the tile «Image to 3D» and
+                        `?step=threed` is rewritten before it gets here (`legacyStep`); this screen
+                        is the old server's one way to a 3D model and stays exactly as it was.
+
+                        The same colourway number as the render, and NO remount: the 3D draft
+                        (presentation, model, body, size) is not a colour and must survive a change
+                        of colourway; everything colour-dependent (`threedSides`, the gate, the run
+                        body) is a selector over the band and follows the prop. */}
                     {step === 'threed' && (
                       <>
                         <ThreedStudio
@@ -633,50 +662,15 @@ export function StudioTab({
                         />
                       </>
                     )}
-                    {/* ═══ ASIDE · ON MODEL — a recolour of a photograph of a real person (K-17).
-                        No remount on a change of colourway, measured: `useTargetColourDraft` seeds
-                        from the card's last recipe (not narrowed by colourway), the input row shows
-                        library media, the outputs are card-wide — a remount would guard nothing and
-                        cost four gathered photographs. The name and the archive ride here for the
-                        reason the number does: the screen FREEZES `colorwayId` in the run. */}
-                    {step === 'aside' && (
-                      <>
-                        <OnModelStudio
-                          band={band}
-                          techCardId={techCardId}
-                          disabled={readOnly}
-                          colorwayId={colorway.colorwayId}
-                          colorwayLabel={colorway.label}
-                          colorwayArchived={colorway.archived}
-                          /* THE COLOURWAY CHIPS OF THE PAINT GROUP (r1, mock-up `_step-aside.js`
-                             `om:way`): the card's colourways and THE SAME SETTER the select on the
-                             rail calls. The one writer of the choice stays this file's
-                             `useColorwayChoice`; the chips are a second door to it, not a second
-                             state, and nothing is written into the form. */
-                          colorways={colorway.colorways}
-                          onColorwayChange={colorway.setColorwayId}
-                        />
-                        {/* J-31 / E-23: sorted to on-model, closed by default. */}
-                        <GenerationHistory
-                          band={band}
-                          techCardId={techCardId}
-                          disabled={readOnly}
-                          defaultRep='onmodel'
-                          defaultOpen={false}
-                        />
-                      </>
-                    )}
-                    {/* ═══ ASIDE · PLAYGROUND — pictures, words, one run. NO colourway prop, and
-                        that is the contract rather than an omission: this kind binds none, and a
-                        run carrying `colorway_id > 0` is refused (`colorway_forbidden`). No
-                        remount on a change of colourway either — there is nothing here a colour
-                        could invalidate.
+                    {/* ═══ ASIDE · PLAYGROUND — the one room beside the chain (C-01). ON MODEL
+                        lives here now as the workflow `change_color`, STEP 5 as `image_to_3d`; a
+                        legacy `?step=aside` / `?step=threed` is rewritten above. NO colourway
+                        prop: a workflow that binds one carries it itself.
 
-                        ⚠ THE CELL THAT LEADS HERE IS DRAWN ONLY WHERE THE SERVER OFFERS THE ROUTE
-                        (`ASIDES[].visible`), but the STEP is mounted whenever the address names
-                        it: a link pasted from a contour that has the route must land on a screen
-                        that explains itself, not on a blank. The screen says «no playground route
-                        is wired on this server» and names the keys. */}
+                        ⚠ ONE MOUNT POINT FOR THE PLAYGROUND SCREEN. The screen owns `?wf=`; the
+                        history below shows the room's runs (playground + recolour); an open
+                        workflow narrows it to its own (`playgroundHistoryMatch`, C-05 — a stable
+                        matcher per workflow, the room's on the grid). */}
                     {step === 'playground' && (
                       <>
                         <PlaygroundStudio band={band} techCardId={techCardId} disabled={readOnly} />
@@ -684,7 +678,16 @@ export function StudioTab({
                           band={band}
                           techCardId={techCardId}
                           disabled={readOnly}
-                          defaultRep='playground'
+                          /* The open workflow names its rows: «3D runs» under Image to 3D, whose
+                             models are not pictures of the room (C-10); «playground runs» else. */
+                          defaultRep={playgroundHistoryRep(params.get(PLAYGROUND_WF_PARAM), band)}
+                          match={
+                            playgroundHistoryMatch(params.get(PLAYGROUND_WF_PARAM), band) ??
+                            inPlaygroundRoom
+                          }
+                          /* Which list this is: the page and the autofill budget belong to it,
+                             not to the shared `defaultRep` (G-01, Codex 4). */
+                          scopeKey={playgroundHistoryScope(params.get(PLAYGROUND_WF_PARAM), band)}
                           defaultOpen={false}
                         />
                       </>
@@ -758,7 +761,7 @@ export function ArtifactsTab({
    */
   calloutHistory?: EditHistory<SheetCallout>;
 }) {
-  const { band, isLoading, serverSpeaks, error } = useDesignBand(techCardId);
+  const { band, isLoading, serverSpeaks } = useDesignBand(techCardId);
 
   if (!techCardId) {
     return (

@@ -76,7 +76,14 @@ import GenericPopover from 'ui/components/popover';
  * рукой — остаётся слева от ручки, в полосе `pb-7`, которую поле держит под ним. Появление и уход
  * кнопки ряд не двигают: место ряда задано отступами, а не содержимым.
  */
-export type EnhanceMode = 'improve' | 'expand' | 'shorten' | 'prompt';
+export type EnhanceMode =
+  | 'improve'
+  | 'expand'
+  | 'shorten'
+  | 'prompt'
+  // The PLAYGROUND prompt field's Improve (20-PROMPTS §3.8): one field of an image tool rewritten for
+  // that field. Not in `ENHANCE_MODES` — never a choice of this menu.
+  | 'steer';
 
 /** Что за поле — закрытый список (сервер держит такой же enum; свободный текст в промпт не идёт). */
 export type EnhanceField = 'description' | 'note' | 'words' | 'silhouette' | 'fabric' | 'other';
@@ -96,6 +103,13 @@ export type EnhanceRequest = {
   context?: string;
   /** Лимит поля назначения; сервер не вернёт длиннее. */
   maxRunes?: number;
+  /**
+   * STEER only: the PLAYGROUND workflow key and the field key of its prompt. The server names the
+   * tool and the field from its own table by this pair and refuses STEER without a known one
+   * (InvalidArgument on `workflow` / `field_key`); every other mode ignores both.
+   */
+  workflow?: string;
+  fieldKey?: string;
 };
 
 export class EnhanceRefusal extends Error {
@@ -112,6 +126,7 @@ const MODE_WIRE: Record<EnhanceMode, EnhanceTextMode> = {
   expand: 'ENHANCE_TEXT_MODE_EXPAND',
   shorten: 'ENHANCE_TEXT_MODE_SHORTEN',
   prompt: 'ENHANCE_TEXT_MODE_PROMPT',
+  steer: 'ENHANCE_TEXT_MODE_STEER',
 };
 
 const FIELD_WIRE: Record<EnhanceField, EnhanceTextField> = {
@@ -158,6 +173,10 @@ export async function enhanceText(req: EnhanceRequest, _signal?: AbortSignal): P
       field: FIELD_WIRE[req.field],
       context: req.context ?? '',
       maxRunes: req.maxRunes ?? 0,
+      // Absent = undefined = not on the wire (JSON.stringify drops it): every other mode's body stays
+      // what an older server's strict gateway accepts, which refuses an unknown field even when ''.
+      workflow: req.workflow || undefined,
+      fieldKey: req.fieldKey || undefined,
     });
     return res.text ?? '';
   } catch (e) {

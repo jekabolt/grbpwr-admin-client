@@ -5,13 +5,15 @@ const MEDIA_PROXY =
   (import.meta.env.VITE_MEDIA_PROXY_URL as string | undefined) ||
   (typeof window !== 'undefined' ? `${window.location.origin}/media-proxy` : '/media-proxy');
 
-export async function fetchMediaBlob(url: string): Promise<Blob> {
+export async function fetchMediaBlob(url: string, signal?: AbortSignal): Promise<Blob> {
   let res: Response;
   try {
-    res = await fetch(url);
-  } catch {
+    res = await fetch(url, { signal });
+  } catch (e) {
+    // An abort is the caller's deadline, not a CORS wall: it does not go round through the proxy.
+    if (signal?.aborted) throw e;
     // TypeError = network/CORS wall; an HTTP error status would not throw and gets no retry.
-    res = await fetch(`${MEDIA_PROXY}?url=${encodeURIComponent(url)}`);
+    res = await fetch(`${MEDIA_PROXY}?url=${encodeURIComponent(url)}`, { signal });
   }
   if (!res.ok) throw new Error(`media fetch failed: ${res.status}`);
   return res.blob();

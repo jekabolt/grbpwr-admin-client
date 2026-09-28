@@ -35,8 +35,8 @@ import { Reason } from './reason';
  * ⚠ IT IS NOT `TwoStepPicker`, AND THAT WAS A DECISION. That organ is a 132px text popover —
  * branch, then leaf — and it is right where the leaves are WORDS. Here the leaves are pictures: a
  * person recognises the sheet they cut yesterday by looking at it, not by reading «run 12 · b». So
- * the shape is the one the on-model chooser already uses (`onmodel/shot-group.tsx`): the app's one
- * modal shell, groups with a `GroupLabel`, tiles picked by looking, and the modal STAYS OPEN while
+ * the shape is the one the playground's reuse gallery uses (`playground/fields/reuse.tsx`): the app's
+ * one modal shell, groups with a `GroupLabel`, tiles picked by looking, and the modal STAYS OPEN while
  * several are taken — taking four crops of one sheet is the ordinary gesture, and a modal that shut
  * on the first would make it four round trips.
  *
@@ -72,6 +72,8 @@ export type CardPicturePickerProps = {
   reps?: readonly Representation[];
   onPick(media: common_MediaFull[]): void;
   title?: string;
+  /** Where focus goes on close — the door that opened it (the modal has no `Dialog.Trigger`). */
+  onCloseAutoFocus?: (event: Event) => void;
 };
 
 const CHILD_WIDTH = 'w-[104px] shrink-0';
@@ -206,6 +208,7 @@ export function CardPicturePicker({
   reps,
   onPick,
   title = 'pictures of this card',
+  onCloseAutoFocus,
 }: CardPicturePickerProps): JSX.Element {
   /* The card's own names for its colourways — the ONE fact the band does not carry and the props
      do not either. Read through the shared query key, so the studio's own read of the card is
@@ -311,6 +314,7 @@ export function CardPicturePicker({
     <ConfirmationModal
       open={open}
       onOpenChange={onOpenChange}
+      onCloseAutoFocus={onCloseAutoFocus}
       onConfirm={commit}
       hideActions
       width='lg'

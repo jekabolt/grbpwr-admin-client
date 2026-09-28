@@ -122,7 +122,20 @@ export type EnhanceTextMode =
   // comma-separated descriptors; every fact kept, none added; no marketing
   // words, no negations (what the garment does NOT have is left out — an image
   // model draws what a prompt names). Same language as the input.
-  | "ENHANCE_TEXT_MODE_PROMPT";
+  | "ENHANCE_TEXT_MODE_PROMPT"
+  // Rewrite ONE field of an image tool (the PLAYGROUND prompt fields' «Improve»)
+  // as a short, concrete, visual phrase for that field. The tool and the field
+  // come from `workflow` / `field_key` and the SERVER'S OWN table (the same one
+  // SuggestPrompts reads), never from CONTEXT, which stays data: the person's
+  // intent, every fact and their language are kept; a vague part, place, colour
+  // or light is named (a material only when the text or the context states it);
+  // filler is cut; at most 40 words. For a field the server's table marks as
+  // describing a RESULT (the mask retouch), the answer describes what should be
+  // seen and drops the operation words. STEER takes `field` OTHER only (any
+  // other field: InvalidArgument on `field`, `steer_takes_other`), and STEER
+  // without a known workflow/field pair is InvalidArgument (`workflow` /
+  // `field_key`, `required` or `unknown`).
+  | "ENHANCE_TEXT_MODE_STEER";
 // EnhanceTextField names WHICH field is being rewritten. It is an enum and not a
 // string on purpose (review M-07): the server maps it to its own fixed phrase in
 // the system prompt, so nothing the request carries can become an instruction.
@@ -6248,12 +6261,32 @@ export type EnhanceTextRequest = {
   // sentence end (. ! ?) inside the limit — for PROMPT, a list of descriptors,
   // also at the last comma or semicolon — or at the limit when there is none.
   maxRunes: number | undefined;
+  // STEER only: a GetDesignBandResponse.playground_workflows key and the field
+  // key of that workflow's prompt (the SuggestPrompts table). Required for STEER,
+  // ignored by every other mode. The server names the tool and the field from
+  // its own table; nothing the request carries becomes an instruction.
+  workflow: string | undefined;
+  fieldKey: string | undefined;
 };
 
 export type EnhanceTextResponse = {
   // The rewritten text, trimmed, never empty, at most max_runes runes. Nothing is
   // stored: applying it is the client's ordinary write of that field.
   text: string | undefined;
+};
+
+export type SuggestPromptsRequest = {
+  techCardId: number | undefined;
+  workflow: string | undefined;
+  field: string | undefined;
+  mediaIds: number[] | undefined;
+  context: string | undefined;
+  text: string | undefined;
+};
+
+export type SuggestPromptsResponse = {
+  ideas: string[] | undefined;
+  model: string | undefined;
 };
 
 export type UpdateTaskRequest = {
@@ -14922,6 +14955,42 @@ export type GetDesignBandResponse = {
   // bindings, where SetDesignAssetBinding does not exist either, and a client must not draw the
   // per-slot doors against it.
   assetBindings: common_DesignAssetBinding[] | undefined;
+  // THE PLAYGROUND WORKFLOWS THIS BINARY CAN RUN RIGHT NOW, in grid order — keys from
+  // virtual_try_on | fabric_to_image | ghost_mannequin | change_color | swap_fabrics | add_logo |
+  // design_variations | remove_background | extend_image | retouch_zone | create_edit | image_to_3d.
+  // Computed from the same pre-flight the door uses (designKindGate), so a tile is live only where
+  // GENERATE would not refuse for a missing key or an unwired route.
+  // `freeform_presets` KEEPS ITS MEANING AND ITS FOUR KEYS: an older client draws any unknown key
+  // there as a chip of kind freeform, so the new presets travel here and only here.
+  // ⚠ ABSENT ≠ EMPTY (the has_fabric_render / colour_plan doctrine). A binary older than this field
+  // sends nothing → the client draws every phase-2 tile dimmed «not on this server yet». A binary
+  // that knows it sends at least [] → the grid exists; a key missing from the list is a tile that
+  // cannot run here, and the screen says so.
+  playgroundWorkflows: string[] | undefined;
+  // THE ENGINES THE DOOR ACCEPTS in common.DesignRunParams.image, from the server's engine table.
+  // ABSENT = this server takes no per-run engine: draw no picker and send no `image`.
+  imageModels: DesignImageModel[] | undefined;
+  // WHICH OPTIONS THE WIRED 3D ROUTE HONOURS, from texture | pbr | quality | surface_hint | follow.
+  // A row of common.DesignThreedParams whose word is not listed here is not drawn (and a non-default
+  // value of it is refused as option_not_read when stated — also by the worker at pickup, should the
+  // route change in between). surface_hint is listed only where the model has a text field, and is
+  // refused on an untextured build. ABSENT = none of them; the 3D form is today's.
+  threedOptions: string[] | undefined;
+  // HOW MANY OUTPUTS EACH PLAYGROUND WORKFLOW HAS IN TOTAL — key: common.DesignCardOutput
+  // .run_workflow, value: the true count over the whole card, uncapped, in the same read and by the
+  // same predicate as `outputs`. It is what captions «newest 60 of N» on a workflow's results; a
+  // workflow with no outputs is simply absent from the map, read a missing key as 0. Outputs of no
+  // workflow (run_workflow '') are not counted here.
+  outputsTotalByWorkflow: { [key: string]: number } | undefined;
+  // THE RUN KINDS StartDesignRun ACCEPTS ON THIS BINARY RIGHT NOW — the same designKindGate ladder as the door and as
+  // playground_workflows: a kind is here only where its route is wired, has its key and a bounded reserve. Keys from
+  // common.DesignRun.kind. A client reads MEMBERSHIP (`inpaint` present → the mask retouch route; `extend` present →
+  // Extend Image), never the order. ⚠ ABSENT ≠ EMPTY: absent = a binary older than phase 3 (draw the phase-2 forms);
+  // present-and-empty = generation is off.
+  runKinds: string[] | undefined;
+  // THE MODEL SuggestPrompts ANSWERS WITH ('' = the assistant is not configured: draw the static Ideas list only).
+  // ABSENT = a binary without SuggestPrompts.
+  suggestPromptsModel: string | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The six
@@ -15077,7 +15146,9 @@ export type common_DesignPicture = {
   layerRev: number | undefined;
   // Reversible invisibility — the ONLY persistent verb for hiding a picture. The guards live in
   // HideDesignPicture: a plate in a slot, feeding a live run, or parenting a live crop cannot be
-  // hidden. A hidden picture is not cut either: SplitDesignPicture answers hidden_picture.
+  // hidden. A hidden picture is neither cut nor overwritten: SplitDesignPicture and
+  // FlattenDesignEditLayer with replace_picture_id answer hidden_picture (an edit of it is filed
+  // beside it instead — «save as new»).
   hiddenAt: wellKnownTimestamp | undefined;
   hiddenBy: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
@@ -15431,7 +15502,8 @@ export type common_DesignRun = {
   id: number | undefined;
   techCardId: number | undefined;
   // Which state of the studio produced this row: flat | render | threed | vector | draft_idea |
-  // recolor | pattern. Written by the client at start; immutable afterwards.
+  // recolor | pattern | freeform | cutout | extend | inpaint. Written by the client at start;
+  // immutable afterwards.
   // `recolor` IS THE ON MODEL SECTION'S OWN VERB (K-17). The owner's ask — «мы можем загрузить фото
   // реальное на модели с разных сторон и нам можно будет поменять цвет вещи» — and the owner's own
   // decision on how: the colour is changed BY GENERATION, not by a filter, so the weave, the folds
@@ -15450,6 +15522,10 @@ export type common_DesignRun = {
   // still «spend the key's money and give me a picture back».
   // ImportDesignVector is NOT that verb and does not belong to this list: it files an SVG that
   // already exists and spends nothing.
+  // `extend` EXTENDS ONE PICTURE INTO A NEW PROPORTION on fal's outpaint route (params.extend + one
+  // params.extra_input_media_ids). `inpaint` REPAINTS ONE PAINTED ZONE of a picture on fal's fill
+  // route (params.inpaint + ask). Both are playground kinds: one output, colourway 0, section 1 of
+  // the window.
   kind: string | undefined;
   // OUTPUT-ONLY lifecycle: pending | running | done | failed | cancelled. A tile that is still
   // running renders differently from a finished one, so this is the field the band polls.
@@ -15700,6 +15776,17 @@ export type common_DesignRunParams = {
   // other kind with `freeform_forbidden`. The pictures a person laid on the playground travel HERE,
   // never in extra_input_media_ids (one list per fact — a run naming a picture in both is refused).
   freeform: common_DesignFreeformParams | undefined;
+  // THE PER-RUN ENGINE of every OpenRouter image kind: flat | render | recolor | pattern | freeform.
+  // Refused on threed | cutout | vector | extend | inpaint, whose routes are not OpenRouter images
+  // (`image_options_forbidden`). Absent or empty = the deployment's dial, exactly as before the
+  // field existed — which is what keeps every frozen run and every old client meaning what it meant.
+  // Offered only where GetDesignBandResponse.image_models is present; a client must not send it to a
+  // server that did not list any engine.
+  image: common_DesignImageOptions | undefined;
+  // THE MASK RETOUCH OF A PLAYGROUND RUN (kind=inpaint). Refused on every other kind (`inpaint_forbidden`).
+  inpaint: common_DesignInpaintParams | undefined;
+  // THE TARGET FORMAT OF AN EXTEND RUN (kind=extend). Refused on every other kind (`extend_forbidden`).
+  extend: common_DesignExtendParams | undefined;
 };
 
 // DesignThreedParams are the parameters of a turntable run.
@@ -15725,6 +15812,25 @@ export type common_DesignThreedParams = {
   // people writing the ask, and an enum would freeze today's four words into the contract and into
   // every already-frozen run's history.
   bodyType: string | undefined;
+  // REFERENCE MODE: 1..4 media ids, ORDERED front, back, left, right — the order is the claim about
+  // which side each picture shows, so it is frozen as sent. When non-empty the run reads NO bench
+  // plate and `source_picture_ids` stays empty; more than 4 is `too_many_pictures`. Empty = today's
+  // behaviour, the bench's render plates.
+  referenceMediaIds: number[] | undefined;
+  // '' | on | off — whether the model is textured. '' = on. A STRING, not a bool: a proto3 bool
+  // cannot say «not stated», and «not stated» must keep meaning today's behaviour for every frozen
+  // run and every old client.
+  texture: string | undefined;
+  // '' | on | off — physically based materials. '' = off. A string for the same reason as `texture`.
+  pbr: string | undefined;
+  // '' | standard | detailed. '' = standard.
+  quality: string | undefined;
+  // '' | photo | shape — whether the surface follows the photograph or only the shape. Refused
+  // unless GetDesignBandResponse.threed_options advertises `follow`.
+  follow: string | undefined;
+  // Free words about the surface; they steer the texture. Refused (option_not_read) unless
+  // GetDesignBandResponse.threed_options advertises `surface_hint`, and on an untextured build.
+  surfaceHint: string | undefined;
 };
 
 // DesignPatternParams is the frozen ask of a REPEATING-TILE run (kind=pattern, K-13).
@@ -15800,11 +15906,17 @@ export type common_DesignPatternParams = {
 // DesignRunParams.extra_input_media_ids — one list per fact — and a run naming a picture in both is
 // refused (`one_list_per_fact`) rather than quietly sending it twice.
 export type common_DesignFreeformParams = {
-  // free | add_hardware | repaint_parts — the server's own dictionary (designgen.FreeformPresets);
-  // `cutout` is NOT a preset of this kind: cutting the background is kind=cutout, another route.
+  // free | add_hardware | repaint_parts | tryon | fabric_extract | ghost_mannequin | add_logo |
+  // variations | retouch — the server's own dictionary (designgen.FreeformPresets); `cutout` is NOT
+  // a preset of this kind: cutting the background is kind=cutout, another route.
   preset: string | undefined;
   // 1..8 pictures, in the order they are numbered on screen and in the prompt («image 1» is items[0]).
   items: common_DesignFreeformItem[] | undefined;
+  // The typed options of the chosen preset. Each preset reads only its own fields (named on each
+  // field of DesignWorkflowOptions); a field a preset does not read must be empty, and a stated one
+  // is refused `option_not_read` rather than silently dropped — nobody pays for a choice that was
+  // never sent.
+  options: common_DesignWorkflowOptions | undefined;
 };
 
 // DesignFreeformItem is ONE picture of a playground run, with the places on it a person marked and
@@ -15822,8 +15934,84 @@ export type common_DesignFreeformItem = {
   // What about this picture / these regions, ≤ 1000 runes. Regions and texts pair by index:
   // regions[i] is described by texts[i]; a text with no region describes the whole picture.
   texts: string[] | undefined;
-  // '' | subject | hardware | cloth — what the preset expects this picture to be. Empty on `free`.
+  // '' | subject | hardware | cloth | model | product | scene | logo — what the preset expects this
+  // picture to be. Empty on `free`.
   role: string | undefined;
+};
+
+// DesignWorkflowOptions are the typed choices of a PLAYGROUND preset (DesignFreeformParams.options).
+// FLAT ON PURPOSE, NO ONEOF. protojson materialises a oneof member from its zero value, so a oneof
+// here would turn «not stated» into «stated as empty» on the way through the gateway. Every field is
+// empty-means-not-stated instead, and the door refuses a field the chosen preset does not read
+// (`option_not_read`) and a word outside a field's vocabulary (`unknown_option`).
+export type common_DesignWorkflowOptions = {
+  // Read by `tryon`. auto | full_body | upper_body | portrait | hands | feet | product_detail.
+  // '' = auto.
+  framing: string | undefined;
+  // Read by `tryon`. auto | eye_level | slightly_above | slightly_below | low_angle. '' = auto.
+  angle: string | undefined;
+  // Read by `tryon`. edit | reference — whether the scene picture is edited in place or only
+  // referenced for its mood. '' = edit.
+  sceneMode: string | undefined;
+  // Read by `tryon`. Free words about the scene, ≤ 1000 runes.
+  sceneText: string | undefined;
+  // Read by `tryon`. FK model(id); 0 = no model profile named. PROVENANCE for the history: when > 0
+  // the door checks that the `model` item's media is a photograph of this model's profile
+  // (`model_photo_mismatch`; an id that does not exist is `model_not_found`).
+  modelId: number | undefined;
+  // Read by `tryon`. FK product(id) — the colourway whose render the product picture was taken
+  // from; 0 = not stated. Provenance only: the run itself still carries no colourway.
+  productColorwayId: number | undefined;
+  // Read by `add_logo`. small | medium | large. '' = the preset's default.
+  logoSize: string | undefined;
+  // Read by `variations`. 0..3 — how far a variation may wander from the source (0 = closest).
+  creativity: number | undefined;
+};
+
+// DesignImageOptions is the engine a person chose for ONE image run — the model and how it is asked
+// to draw. Every value is validated against the server's engine table before anything is reserved:
+// a slug the table does not hold is `unknown_image_model`, a tier the engine lacks is
+// `quality_not_supported`, a ratio it lacks is `aspect_not_supported`, a background it lacks is
+// `background_not_supported`. Frozen with the run like every other param, so a rerun repeats the
+// same engine without restating it.
+export type common_DesignImageOptions = {
+  // An OpenRouter slug from GetDesignBandResponse.image_models[].slug. '' = the deployment's default
+  // engine.
+  model: string | undefined;
+  // A UI tier word of that engine: low | medium | high (one of image_models[].qualities).
+  // '' = the engine's default tier.
+  quality: string | undefined;
+  // One of the engine's ratios (image_models[].aspect_ratios) or `auto`. '' = auto.
+  aspectRatio: string | undefined;
+  // '' | transparent — only when the engine lists it in image_models[].backgrounds.
+  background: string | undefined;
+};
+
+// DesignInpaintParams — one picture of this card and its painted mask, a PNG of the SAME pixel size, white where the
+// picture changes, black elsewhere (the client paints it; UploadContentImage with preserve_original=true). Both are
+// validated BEFORE anything is reserved: `mask_required`, `mask_size_mismatch`, `mask_invalid` (not a readable PNG),
+// `mask_empty` (nothing painted). The words travel in StartDesignRunRequest.ask (`words_required` when blank).
+// The answer is a NEW picture beside the source, a lossless PNG: every pixel outside the mask is the source's own
+// decoded pixel (bit-exact for a PNG source; the decoded pixels of a JPEG/WebP one). Only an OPAQUE picture whose PNG
+// would EXCEED the store's verbatim ceiling (about 21 MB) is stored as JPEG instead — the best of q92 / q85 / q75
+// that fits. A picture with transparency is never stored as JPEG: past the ceiling the composite is not made and the
+// repainted crop is filed as delivered (`inpaint_not_composited`). The source may be at most 18 MP
+// (`source_too_large`).
+export type common_DesignInpaintParams = {
+  sourceMediaId: number | undefined;
+  maskMediaId: number | undefined;
+};
+
+// DesignExtendParams — the final proportion of an extend (outpaint) run. The ONE source travels in
+// DesignRunParams.extra_input_media_ids (exactly one, `one_source_picture`); the route takes no words
+// (`extend_takes_no_words`). aspect_ratio ∈ 9:16 | 1:1 | 3:4 | 2:3 | 16:9 | 4:3 | 3:2 | 21:9 | 9:21 — never auto
+// (`extend_aspect_unknown`); a target that adds no pixels on either side is `target_aspect_must_extend`. The
+// server computes the per-side expansion, caps the canvas at 3 megapixels (downscaling the source first), and
+// re-composites the untouched source pixels into the answer, stored as a lossless PNG, so «the original is kept» is a
+// fact of the pixels: the source region is the source's own decoded pixels (at the scale the cap allows). The source
+// may be at most 18 MP (`source_too_large`).
+export type common_DesignExtendParams = {
+  aspectRatio: string | undefined;
 };
 
 // DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
@@ -16140,8 +16328,8 @@ export type common_DesignCardOutput = {
   // FK design_run(id). 0 = no run: an uploaded picture, or a parentless flatten. It does NOT imply
   // «a run produced this picture» when non-zero — see the ancestry note above.
   runId: number | undefined;
-  // render | threed | pattern | recolor | freeform | cutout — the kind of the RUN, never of the
-  // picture. "" when there is no run at all.
+  // render | threed | pattern | recolor | freeform | cutout | extend | inpaint — the kind of the
+  // RUN, never of the picture. "" when there is no run at all.
   runKind: string | undefined;
   runRrev: number | undefined;
   // The run's colourway — product(id), 0 = unattributed or no run.
@@ -16152,6 +16340,10 @@ export type common_DesignCardOutput = {
   // with no run, where this field is 0 while the picture's own colourway is named and real.
   runColorwayId: number | undefined;
   batchId: number | undefined;
+  // The PLAYGROUND workflow key this output belongs to (virtual_try_on … image_to_3d, see
+  // GetDesignBandResponse.playground_workflows), derived by the server from the run's kind and
+  // frozen params. '' for a run of no workflow (render, pattern) or no run at all.
+  runWorkflow: string | undefined;
 };
 
 // DesignColourPlan is the DURABLE colour plan of a card — the pre-launch state, one document per
@@ -16219,6 +16411,19 @@ export type common_DesignAssetBinding = {
   setAt: wellKnownTimestamp | undefined;
 };
 
+// DesignImageModel is ONE engine the image door accepts (GetDesignBandResponse.image_models) and
+// what it can be asked for. The picker is drawn from these rows and the door validates
+// common.DesignImageOptions against the same table, so the two cannot disagree.
+export type DesignImageModel = {
+  slug: string | undefined;
+  label: string | undefined;
+  aspectRatios: string[] | undefined;
+  qualities: string[] | undefined;
+  isDefault: boolean | undefined;
+  maxReferences: number | undefined;
+  backgrounds: string[] | undefined;
+};
+
 export type ListDesignRunsRequest = {
   techCardId: number | undefined;
   // Max 24, default 12 when 0. The history shows about 4 rows per screen; three screens of slack is
@@ -16268,8 +16473,8 @@ export type StartDesignRunRequest = {
   // Client-minted UUID. A repeat returns the existing run with OK — a double click on GENERATE is
   // one payment.
   clientRequestId: string | undefined;
-  // flat | render | threed | vector | recolor | pattern | freeform | cutout. `draft_idea` is
-  // REFUSED here with
+  // flat | render | threed | vector | recolor | pattern | freeform | cutout | extend | inpaint.
+  // `draft_idea` is REFUSED here with
   // InvalidArgument: a text run executes inline and returns its answer, so it has its own verb
   // (DraftDesignIdea) rather than a shared one that would return a pending row nobody ever polls.
   // `vector` IS ACCEPTED HERE and has no verb of its own on purpose: machine vectorisation spends
@@ -16310,7 +16515,10 @@ export type StartDesignRunRequest = {
   // no region marked on the subject («mark_the_area»); a picture named both in
   // params.freeform.items and in params.extra_input_media_ids («one_list_per_fact»); more
   // pictures than the snapshot's reference ceiling once the marked copies and the crops of the
-  // regions are counted («too_many_pictures», with the numbers);
+  // regions are counted («too_many_pictures», with the numbers); a run that takes a generation
+  // window (`add_hardware` or `retouch` with exactly one marked area) whose picture is under the
+  // minimum side («source_too_small») or over 18 MP, by its stored size or its header
+  // («source_too_large») — the answer is pasted back into the whole picture;
   // · cutout — anything other than exactly one picture in params.extra_input_media_ids
   // («one_source_picture»); an `ask` or a params.freeform on a route that reads neither
   // («cutout_takes_no_words») — a refusal rather than silence, so nobody pays for words that
@@ -16318,6 +16526,48 @@ export type StartDesignRunRequest = {
   // A non-empty params.freeform on ANY other kind is «freeform_forbidden». Neither kind reads the
   // card: no references, no bench plates, no garment description, no colourway (a positive
   // params.colorway_id is still `colorway_forbidden`).
+  // `extend` AND `inpaint` ARE PLAYGROUND KINDS on fal (FAL_KEY), one picture each, and refuse for
+  // free, before anything is reserved:
+  // · extend — anything other than exactly one picture in params.extra_input_media_ids
+  // («one_source_picture»); an `ask` or a params.freeform on a route that reads no words
+  // («extend_takes_no_words»); a params.extend.aspect_ratio outside the nine targets, `auto`
+  // and '' included («extend_aspect_unknown»); a target within 0.5 % of the source's own
+  // proportion, which adds no pixels on either side («target_aspect_must_extend»); a source
+  // under the minimum side («source_too_small»); a source over 18 MP, by its stored size or its
+  // header («source_too_large»). A params.extend on any other kind is «extend_forbidden»;
+  // · inpaint — no params.inpaint.source_media_id («no_source_picture»); no
+  // params.inpaint.mask_media_id («mask_required»); a mask whose width and height differ from
+  // the source's («mask_size_mismatch»); a mask that is not a readable PNG, or is the source
+  // itself («mask_invalid»); a mask with nothing painted («mask_empty»); a blank `ask`
+  // («words_required»); a params.freeform or params.extra_input_media_ids beside it
+  // («one_list_per_fact»); a source under the minimum side («source_too_small»); a source
+  // (or its mask) over 18 MP («source_too_large»). A params.inpaint on any other kind is
+  // «inpaint_forbidden»;
+  // · either — the fal tariff of the wired route set without its units ceiling, so the reserve
+  // would not be an absolute bound («route_reserve_unbounded», FailedPrecondition, naming
+  // FAL_UNITS_CEILING_OUTPAINT or FAL_UNITS_CEILING_FILL); a FAL_MODEL_OUTPAINT / FAL_MODEL_FILL
+  // slug the route builds no body for («kind_not_available», FailedPrecondition); a source id
+  // with no media row («no_source_picture»); a mask that is the source's own file under another
+  // id («mask_invalid»); a rerun naming another picture than its parent — the inpaint mask may
+  // change («rerun_changes_pictures»); any params.image («image_options_forbidden»).
+  // Neither kind reads the card, and neither states a colourway.
+  // THE PLAYGROUND PRESETS AND THE PER-RUN ENGINE refuse for free, before anything is reserved, too
+  // (InvalidArgument unless noted):
+  // · a preset missing a picture of the role it needs («role_required»); a preset that takes
+  // exactly one picture given more or fewer («one_source_picture»); a preset that needs words
+  // given none («words_required»); `retouch` with anything other than one marked region
+  // («one_region»);
+  // · params.freeform.options — a word outside a field's vocabulary («unknown_option»); a field
+  // the chosen preset does not read («option_not_read»); options.model_id naming no model
+  // («model_not_found») or a `model` picture that is not a photograph of that model
+  // («model_photo_mismatch»);
+  // · a rerun whose params would move the run to another PLAYGROUND workflow
+  // («rerun_changes_workflow»);
+  // · params.image — a slug the engine table does not hold («unknown_image_model»), a tier, ratio
+  // or background the chosen engine does not list («quality_not_supported»,
+  // «aspect_not_supported», «background_not_supported»), or any params.image on threed | cutout
+  // | vector | extend | inpaint («image_options_forbidden»);
+  // · threed — more than 4 params.threed.reference_media_ids («too_many_pictures»).
   kind: string | undefined;
   ask: string | undefined;
   // What is being asked for; at most 8 KB encoded. The INPUTS are not here and cannot be: the
@@ -16596,13 +16846,27 @@ export type FlattenDesignEditLayerRequest = {
   // replacement already; a retry of an overwrite WITHOUT client_request_id lands here BEFORE
   // anything is filed, and the ErrorInfo metadata carries head_picture_id: the head of the
   // picture's replacement chain, i.e. the picture standing in its place now. FailedPrecondition:
-  // cut_sheet — pieces cut from this sheet still stand on screen, and they would stay cut from the
-  // original. A piece stands while ANYTHING GROWN FROM IT is visible: the piece itself, an edit that
-  // took its place (replaced_by, followed to the end), a piece cut from any of those, and so on down
-  // the branch — every one of them was drawn from the sheet's old pixels. An edit filed beside a
-  // picture (no replace_picture_id) takes no place and holds nothing. Hide what stands of those
-  // branches before overwriting the sheet, or edit a piece instead of the sheet. NotFound — no such
-  // picture.
+  // hidden_picture — the picture is hidden (DesignPicture.hidden_at). An overwrite makes the edit
+  // the picture's successor, the head of its replacement chain, and a hidden picture has no place
+  // on screen to hand over: the edit, born visible, would bring back what was hidden. Save the edit
+  // as a new picture — a flatten beside takes no place, and this refusal never applies to it — or
+  // show the picture first (HideDesignPicture with hidden = false); SplitDesignPicture refuses a
+  // hidden picture for the same reason. FailedPrecondition:
+  // technical_sheet — the picture's file is on the card's technical sheet (TechCard.technical_media
+  // as last SAVED, not the form being edited): the tech pack prints that sheet, so the original
+  // would stay on it beside the edit and the pack would carry two plates of one view, the sheet's
+  // callouts still pinned to the original. Take it off the sheet (and save the card) first, or save
+  // the edit as a new picture — a flatten beside takes no place, and this refusal never applies to
+  // it. FailedPrecondition: cut_sheet — pieces cut from this sheet still stand on screen, and they
+  // would stay cut from the original. A piece stands while ANYTHING GROWN FROM IT is visible: the
+  // piece itself, an edit that took its place (replaced_by, followed to the end), a piece cut from
+  // any of those, and so on down the branch — every one of them was drawn from the sheet's old
+  // pixels. An edit filed beside a picture (no replace_picture_id) takes no place and holds nothing.
+  // Hide what stands of those branches before overwriting the sheet, or edit a piece instead of the
+  // sheet. NotFound — no such picture. Judged in the order written: NotFound, replace_mismatch,
+  // already_replaced, hidden_picture, technical_sheet, cut_sheet — so a picture both replaced and
+  // hidden gets already_replaced with head_picture_id, and a hidden picture on the sheet gets
+  // hidden_picture.
   // ⚠ AN OLDER SERVER ANSWERS 400 TO THIS FIELD: the JSON gateway refuses unknown fields. Send it
   // only after a read has carried DesignPicture.replaced_by, which an older server never emits.
   replacePictureId: number | undefined;
@@ -17014,6 +17278,177 @@ export type common_DesignColourwaySlotColour = {
 export type common_DesignFlatDetail = {
   name: string | undefined;
   note: string | undefined;
+};
+
+// AiRouteCandidate is one (provider, model) a purpose's call may go to.
+export type AiRouteCandidate = {
+  // "" = the capability's default provider — chat and image only
+  // (GetAiProvidersConfigResponse.default_chat_provider_key / default_image_provider_key); the other
+  // capabilities have no default, so their candidates name a provider.
+  providerKey: string | undefined;
+  model: string | undefined;
+};
+
+// AiModelInfo is one model of a provider: curated (the pricing catalogue) or custom (an ai_model row —
+// a slug an admin typed into a route).
+export type AiModelInfo = {
+  slug: string | undefined;
+  label: string | undefined;
+  kind: string | undefined;
+  custom: boolean | undefined;
+  priced: boolean | undefined;
+};
+
+// AiProviderInfo is one provider of the registry as the panel shows it. No key value is ever here:
+// only where the answering key comes from, its last four characters and who stored it when.
+export type AiProviderInfo = {
+  key: string | undefined;
+  label: string | undefined;
+  enabled: boolean | undefined;
+  // What a route may ask of it: chat | image | cutout | edit | threed | vector | video.
+  capabilities: string[] | undefined;
+  // none | env | db | unreadable. unreadable = a stored key that does not open with the master key;
+  // the env key, if any, answers meanwhile.
+  keySource: string | undefined;
+  keyLast4: string | undefined;
+  keyUpdatedBy: string | undefined;
+  keyUpdatedAt: wellKnownTimestamp | undefined;
+  adminKeySupported: boolean | undefined;
+  adminKeySource: string | undefined;
+  adminKeyLast4: string | undefined;
+  breaker: string | undefined;
+  // The provider badge from the last 24 h of ledger rows: key_rejected | out_of_credits |
+  // model_unknown | "" (none).
+  faultCode: string | undefined;
+  // One short sentence or "": "via openrouter" (recraft on the OpenRouter route), "design generation
+  // is off on this server" (image/3D providers when DESIGN_GENERATION_ENABLED is false).
+  note: string | undefined;
+  models: AiModelInfo[] | undefined;
+};
+
+// AiPurposeInfo is one purpose — what a call is FOR — with its route.
+export type AiPurposeInfo = {
+  key: string | undefined;
+  label: string | undefined;
+  hint: string | undefined;
+  group: string | undefined;
+  capability: string | undefined;
+  primary: AiRouteCandidate | undefined;
+  fallback: AiRouteCandidate | undefined;
+};
+
+export type GetAiProvidersConfigRequest = {
+};
+
+export type GetAiProvidersConfigResponse = {
+  providers: AiProviderInfo[] | undefined;
+  purposes: AiPurposeInfo[] | undefined;
+  defaultChatProviderKey: string | undefined;
+  defaultImageProviderKey: string | undefined;
+  configVersion: number | undefined;
+  // false = AI_KEYS_MASTER_KEY is not set on this server: SetAiProviderKey refuses to store a key.
+  masterKeyPresent: boolean | undefined;
+  timezone: string | undefined;
+  priceVersion: string | undefined;
+  designGenerationEnabled: boolean | undefined;
+};
+
+// UpdateAiProviderRequest switches one provider; enabled is sent every time.
+export type UpdateAiProviderRequest = {
+  providerKey: string | undefined;
+  enabled: boolean | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type UpdateAiProviderResponse = {
+  config: GetAiProvidersConfigResponse | undefined;
+};
+
+// AiProbeResult is what the provider's FREE endpoint said about a key the moment it was saved.
+export type AiProbeResult = {
+  ok: boolean | undefined;
+  code: string | undefined;
+  message: string | undefined;
+  balance: string | undefined;
+};
+
+export type SetAiProviderKeyRequest = {
+  providerKey: string | undefined;
+  kind: string | undefined;
+  value: string | undefined;
+};
+
+export type SetAiProviderKeyResponse = {
+  probe: AiProbeResult | undefined;
+  config: GetAiProvidersConfigResponse | undefined;
+};
+
+// SetAiDefaultsRequest carries both defaults every time; "" leaves that one unchanged.
+export type SetAiDefaultsRequest = {
+  chatProviderKey: string | undefined;
+  imageProviderKey: string | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type SetAiDefaultsResponse = {
+  config: GetAiProvidersConfigResponse | undefined;
+};
+
+export type SetAiRouteRequest = {
+  purpose: string | undefined;
+  primary: AiRouteCandidate | undefined;
+  fallback: AiRouteCandidate | undefined;
+  expectedVersion: number | undefined;
+};
+
+export type SetAiRouteResponse = {
+  config: GetAiProvidersConfigResponse | undefined;
+};
+
+// GetAiSpendReportRequest names the period as calendar days. The presets (this month, last month,
+// last 7 days) are computed by the client; the server checks from_day ≤ to_day and a span of at most
+// 366 days.
+export type GetAiSpendReportRequest = {
+  fromDay: string | undefined;
+  toDay: string | undefined;
+};
+
+// AiSpendProviderRow is one provider's line: our number from the ledger beside their number from the
+// provider's cost API. A provider with only their number in the period still has a line.
+export type AiSpendProviderRow = {
+  providerKey: string | undefined;
+  // absent = unknown (no priced call in the period); otherwise the sum of the priced calls —
+  // unpriced counts the rest.
+  ourUsd: googletype_Decimal | undefined;
+  theirUsd: googletype_Decimal | undefined;
+  calls: number | undefined;
+  failed: number | undefined;
+  unpriced: number | undefined;
+};
+
+// AiSpendActorRow is one actor × purpose × provider × model line of the period.
+export type AiSpendActorRow = {
+  // The admin login the calls were made for; "system" = a background worker; "unknown" = calls whose
+  // path carried no actor (a wiring defect, kept as its own line rather than folded into someone's).
+  actor: string | undefined;
+  actorAdminId: number | undefined;
+  purpose: string | undefined;
+  providerKey: string | undefined;
+  model: string | undefined;
+  usd: googletype_Decimal | undefined;
+  calls: number | undefined;
+};
+
+export type GetAiSpendReportResponse = {
+  fromDay: string | undefined;
+  toDay: string | undefined;
+  timezone: string | undefined;
+  totalUsd: googletype_Decimal | undefined;
+  calls: number | undefined;
+  failed: number | undefined;
+  unpriced: number | undefined;
+  byProvider: AiSpendProviderRow[] | undefined;
+  byActor: AiSpendActorRow[] | undefined;
 };
 
 export interface AdminService {
@@ -17699,6 +18134,14 @@ export interface AdminService {
   // AI key, and a grant to spend is an authoring grant. The route sits under
   // /api/admin/ai/, not /tech-card/, so it cannot be shadowed by /tech-card/{id}.
   EnhanceText(request: EnhanceTextRequest): Promise<EnhanceTextResponse>;
+  // SuggestPrompts — the `Ideas ▾` door of a PLAYGROUND prompt field: 3–5 short starting phrases for one field of one
+  // workflow, from the field's purpose, the card facts the client attaches, the text so far and at most two pictures
+  // (their thumbnails). Nothing is stored; the answer is cached in memory for ten minutes per identical request.
+  // Limits, in order: no key → FailedPrecondition AI_NOT_CONFIGURED; unknown workflow/field, > 2 media ids, context or
+  // text over 2000 runes → InvalidArgument; media not of this card / display-only / hidden → the run door's own
+  // refusals; 4 in flight and 30 calls per admin per hour SHARED with EnhanceText → ResourceExhausted.
+  // Classified as a WRITE on tech_cards, like EnhanceText (a press spends the AI key).
+  SuggestPrompts(request: SuggestPromptsRequest): Promise<SuggestPromptsResponse>;
   // GetFulfillmentBoard returns the three columns of cards (compact order +
   // annotation summary), oldest order first within each column.
   GetFulfillmentBoard(request: GetFulfillmentBoardRequest): Promise<GetFulfillmentBoardResponse>;
@@ -18394,9 +18837,10 @@ export interface AdminService {
   // IDEMPOTENT BY client_request_id WHEN ONE IS SENT: a retry after a lost response answers with
   // the picture the first attempt filed — see the request field.
   // Aborted: layer_rev_mismatch. FailedPrecondition: empty_layer, already_replaced (ErrorInfo
-  // metadata head_picture_id), cut_sheet, and the placement refusals of SetDesignBenchSlot when the
-  // slot being moved refuses the edit. InvalidArgument: an unknown or foreign media_id,
-  // replace_mismatch, a client_request_id already spent on a different flatten.
+  // metadata head_picture_id), hidden_picture, technical_sheet, cut_sheet, and the placement
+  // refusals of SetDesignBenchSlot when the slot being moved refuses the edit. InvalidArgument: an
+  // unknown or foreign media_id, replace_mismatch, a client_request_id already spent on a different
+  // flatten.
   FlattenDesignEditLayer(request: FlattenDesignEditLayerRequest): Promise<FlattenDesignEditLayerResponse>;
   // ImportDesignVector files an ALREADY-UPLOADED vector file into the band as an edit layer: the
   // media row keeps the authoritative SVG, the layer keeps the editable projection of it, and
@@ -18721,6 +19165,29 @@ export interface AdminService {
   PostDepreciation(request: PostDepreciationRequest): Promise<PostDepreciationResponse>;
   // AccrueCorporationTax posts a corporation-tax accrual (Dr 8010 / Cr 2050) on the period's pre-tax profit.
   AccrueCorporationTax(request: AccrueCorporationTaxRequest): Promise<AccrueCorporationTaxResponse>;
+  // GetAiProvidersConfig returns the whole panel in one read: every provider of the registry (switch,
+  // key state, breaker, fault badge, models), the purposes with their routes, the two defaults and
+  // config_version. A key is never in it — only where it comes from and its last four characters.
+  GetAiProvidersConfig(request: GetAiProvidersConfigRequest): Promise<GetAiProvidersConfigResponse>;
+  // UpdateAiProvider switches one provider on or off. Off stops new calls through it; its routes stay
+  // as they are and skip it until it is switched back on.
+  UpdateAiProvider(request: UpdateAiProviderRequest): Promise<UpdateAiProviderResponse>;
+  // SetAiProviderKey stores (sealed with the server's master key) or clears one key slot of a
+  // provider: kind "api" is the key the calls are made with, kind "admin" the separate key a cost API
+  // needs (openai, anthropic, fal only). Saving probes the just-saved key with the provider's FREE
+  // endpoint and returns the result beside the config. The value is write-only: never echoed, never
+  // logged.
+  SetAiProviderKey(request: SetAiProviderKeyRequest): Promise<SetAiProviderKeyResponse>;
+  // SetAiDefaults sets the default chat provider and the default image provider — what a route
+  // candidate with provider_key "" means for those two capabilities.
+  SetAiDefaults(request: SetAiDefaultsRequest): Promise<SetAiDefaultsResponse>;
+  // SetAiRoute sets one purpose's route: the primary candidate and an optional fallback.
+  SetAiRoute(request: SetAiRouteRequest): Promise<SetAiRouteResponse>;
+  // GetAiSpendReport returns the AI spend over calendar days [from_day, to_day] in the org timezone:
+  // our number from the ledger (one row per physical call) by provider and by actor × purpose ×
+  // provider × model, and beside it, per provider, their number from the provider's cost API where
+  // one exists and a key is set.
+  GetAiSpendReport(request: GetAiSpendReportRequest): Promise<GetAiSpendReportResponse>;
 }
 
 type RequestType = {
@@ -22563,6 +23030,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "EnhanceText",
       }) as Promise<EnhanceTextResponse>;
+    },
+    SuggestPrompts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/ai/suggest-prompts`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestPrompts",
+      }) as Promise<SuggestPromptsResponse>;
     },
     GetFulfillmentBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/board`; // eslint-disable-line quotes
@@ -26808,6 +27292,123 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "AccrueCorporationTax",
       }) as Promise<AccrueCorporationTaxResponse>;
+    },
+    GetAiProvidersConfig(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/ai/providers`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetAiProvidersConfig",
+      }) as Promise<GetAiProvidersConfigResponse>;
+    },
+    UpdateAiProvider(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.providerKey) {
+        throw new Error("missing required field request.provider_key");
+      }
+      const path = `api/admin/ai/providers/${request.providerKey}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateAiProvider",
+      }) as Promise<UpdateAiProviderResponse>;
+    },
+    SetAiProviderKey(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.providerKey) {
+        throw new Error("missing required field request.provider_key");
+      }
+      const path = `api/admin/ai/providers/${request.providerKey}/key`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetAiProviderKey",
+      }) as Promise<SetAiProviderKeyResponse>;
+    },
+    SetAiDefaults(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/ai/defaults`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetAiDefaults",
+      }) as Promise<SetAiDefaultsResponse>;
+    },
+    SetAiRoute(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.purpose) {
+        throw new Error("missing required field request.purpose");
+      }
+      const path = `api/admin/ai/routes/${request.purpose}`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetAiRoute",
+      }) as Promise<SetAiRouteResponse>;
+    },
+    GetAiSpendReport(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/ai/spend`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.fromDay) {
+        queryParams.push(`fromDay=${encodeURIComponent(request.fromDay.toString())}`)
+      }
+      if (request.toDay) {
+        queryParams.push(`toDay=${encodeURIComponent(request.toDay.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetAiSpendReport",
+      }) as Promise<GetAiSpendReportResponse>;
     },
   };
 }
