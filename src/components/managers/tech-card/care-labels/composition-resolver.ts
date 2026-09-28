@@ -11,7 +11,7 @@ import type { common_TechCardBomPurpose, common_TechCardBomSection } from 'api/p
 import { composition as compositionDict } from 'constants/garment-composition';
 import { parseCompositionCode } from 'components/managers/materials/components/material-code';
 
-import { hole, withColorway, type Hole } from './holes';
+import { COMPOSITION_EMPTY_MESSAGE, hole, withColorway, type Hole } from './holes';
 import { effectiveLabelPart, LABEL_PART_NAME, LABEL_PARTS, type PrintedPart } from './label-parts';
 import { LABEL_LANGS, NON_TEXTILE_ANIMAL_PHRASE, type LabelLang } from './phrases';
 
@@ -541,6 +541,7 @@ export function resolveColorwayComposition(input: ColorwayCompositionInput): Res
       lineKeys: [...new Set(sources.map((s) => s.lineKey))],
     });
   }
+  if (!parts.length) holes.push(hole('composition-empty', COMPOSITION_EMPTY_MESSAGE));
   if (parts.some((p) => p.animal)) {
     parts.push({
       part: 'NOTE',

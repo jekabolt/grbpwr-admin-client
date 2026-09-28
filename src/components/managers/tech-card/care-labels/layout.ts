@@ -20,7 +20,7 @@
 import type { PaperDoc, PathCmd, Prim } from '../assembly-print/paper';
 import { careSymbolPath, hasCareArtwork, logoPath } from './artwork';
 import type { PartComposition } from './composition-resolver';
-import { hole, type Hole } from './holes';
+import { COMPOSITION_EMPTY_MESSAGE, hole, type Hole } from './holes';
 import { LABEL_PART_NAME, type PrintedPart } from './label-parts';
 import { LABEL_LANGS, labelLangTag, type LabelLang } from './phrases';
 import { qrPrims, QR_SIZE_MM } from './qr';
@@ -507,6 +507,12 @@ export function typesetB(
     cols.push({ part: p.part, header, rows, w });
   }
   holes.push(...probe.holes);
+  // Ни одной колонки состава (только NOTE или ничего) — чистая B не печатается вовсе: нет этикеток,
+  // значит нет и файлов B в архиве, а блок держит колорвей (тот же, что у резолвера).
+  if (!cols.some((c) => c.part !== 'NOTE')) {
+    holes.push(hole('composition-empty', COMPOSITION_EMPTY_MESSAGE));
+    return { labels: [], holes: dedupeHoles(holes) };
+  }
 
   const langW = Math.max(...LABEL_LANGS.map((lang) => textWidth(sh, labelLangTag(lang), 'en', pt)));
   const roleOf = (i: number): SideRole => (i % 2 === 0 ? 'face' : 'back');

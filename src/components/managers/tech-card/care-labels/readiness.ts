@@ -172,6 +172,7 @@ const DICTIONARY: ReadonlySet<string> = new Set([
 ]);
 const BOM: ReadonlySet<string> = new Set([
   'part-no-composition',
+  'composition-empty',
   'fibre-blend-code',
   'pinned-material-no-composition',
   'part-not-100',

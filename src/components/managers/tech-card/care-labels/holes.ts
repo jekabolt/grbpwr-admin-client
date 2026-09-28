@@ -33,6 +33,7 @@ export const BLOCK_HOLE_CODES = [
   'glyph-missing',
   'artwork-missing',
   'part-no-composition',
+  'composition-empty',
   'pinned-material-no-composition',
   'part-too-wide',
   'care-overflow',
@@ -106,6 +107,14 @@ export const hole = (code: HoleCode, message: string, ref: HoleRef = {}): Hole =
 });
 
 export const isBlocking = (h: Hole): boolean => h.level === 'block';
+
+/**
+ * Ни одна часть этикетки не собралась (BOM пуст, все строки NOT_ON_LABEL, все источники без состава):
+ * лента B вышла бы ЧИСТОЙ — юридическая этикетка без состава. Это блок колорвея, а не «пусто».
+ * Одно сообщение на резолвер и раскладку: готовность склеивает дыры по коду и тексту.
+ */
+export const COMPOSITION_EMPTY_MESSAGE =
+  'composition: no label part resolves for this colourway — the composition label (B) would print blank; set the BOM fibres or the label parts';
 
 /** Общие дыры: держат весь экспорт, а не один колорвей (§9.5). */
 export const GLOBAL_HOLE_CODES: ReadonlySet<HoleCode> = new Set<HoleCode>([
