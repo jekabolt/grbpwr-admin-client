@@ -1,10 +1,16 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import {
+  LABEL_LANGS,
+  LabelLang,
+  labelLangTag,
+} from 'components/managers/tech-card/care-labels/phrases';
 import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { FC, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
+import CheckboxCommon from 'ui/components/checkbox';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
@@ -19,11 +25,13 @@ import {
   createColor,
   createFiber,
   createTag,
+  FiberRow,
   setCountryActive,
   TagRow,
   updateCollection,
   updateColor,
   updateTag,
+  upsertFiberLabelTranslations,
 } from './dictionary-adapters';
 
 // R9 — controlled dictionaries (colors / collections / tags / fibers / countries). This is the admin
@@ -45,6 +53,20 @@ const th = 'border border-borderColor bg-bgSecondary px-2 py-1 text-left upperca
 const td = 'border border-borderColor px-2 py-1';
 const inputCls =
   'w-full border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
+
+// Сколько языков ленты у волокна заполнено: считаются только языки закрытого списка с непустым
+// именем — пустая строка или язык вне списка дыру не закрывают.
+type LabelNames = Record<LabelLang, string>;
+const countLabelNames = (names: Partial<Record<string, string | undefined>>): number =>
+  LABEL_LANGS.filter((l) => (names[l] ?? '').trim() !== '').length;
+const labelNamesOf = (f: FiberRow): LabelNames => {
+  const names = Object.fromEntries(LABEL_LANGS.map((l) => [l, ''])) as LabelNames;
+  for (const t of f.translations ?? []) {
+    const lang = t.labelLang as LabelLang;
+    if (lang in names) names[lang] = t.name ?? '';
+  }
+  return names;
+};
 
 export const Dictionaries: FC = () => {
   const { dictionary, loading, refetch } = useDictionary();
@@ -91,6 +113,7 @@ export const Dictionaries: FC = () => {
     // ConfirmationModals can never end up stacked from a stray double-click.
     setEditState(null);
     setArchiveTarget(null);
+    setLabelEdit(null);
     setCreateOpen(true);
   };
 
@@ -155,6 +178,7 @@ export const Dictionaries: FC = () => {
   const openEditColor = (c: ColorRow) => {
     setCreateOpen(false);
     setArchiveTarget(null);
+    setLabelEdit(null);
     setEditState({
       tab: 'colors',
       code: c.code ?? '',
@@ -165,11 +189,13 @@ export const Dictionaries: FC = () => {
   const openEditCollection = (c: CollectionRow) => {
     setCreateOpen(false);
     setArchiveTarget(null);
+    setLabelEdit(null);
     setEditState({ tab: 'collections', id: c.id ?? 0, name: c.name ?? '' });
   };
   const openEditTag = (t: TagRow) => {
     setCreateOpen(false);
     setArchiveTarget(null);
+    setLabelEdit(null);
     setEditState({ tab: 'tags', id: t.id ?? 0, name: t.name ?? '' });
   };
 
@@ -219,6 +245,7 @@ export const Dictionaries: FC = () => {
   const askArchive = (target: ArchiveTarget) => {
     setCreateOpen(false);
     setEditState(null);
+    setLabelEdit(null);
     setArchiveTarget(target);
   };
 
@@ -231,6 +258,36 @@ export const Dictionaries: FC = () => {
       return archiveFiber(archiveTarget.key);
     });
     if (ok) setArchiveTarget(null);
+  };
+
+  // Care-label names of one fibre (10 label languages) + the animal-non-textile flag, saved as a
+  // whole set through UpsertFiberLabelTranslations (blank inputs are not sent, i.e. removed).
+  type LabelEdit = { code: string; label: string; names: LabelNames; animal: boolean };
+  const [labelEdit, setLabelEdit] = useState<LabelEdit | null>(null);
+
+  const openLabelEdit = (f: FiberRow) => {
+    setCreateOpen(false);
+    setEditState(null);
+    setArchiveTarget(null);
+    setLabelEdit({
+      code: f.code ?? '',
+      label: f.name || f.code || '',
+      names: labelNamesOf(f),
+      animal: !!f.animalNonTextile,
+    });
+  };
+
+  const handleLabelSave = async () => {
+    if (!labelEdit) return;
+    const translations = LABEL_LANGS.map((l) => ({ labelLang: l, name: labelEdit.names[l] }));
+    const ok = await run(() =>
+      upsertFiberLabelTranslations({
+        code: labelEdit.code,
+        translations,
+        animalNonTextile: labelEdit.animal,
+      }),
+    );
+    if (ok) setLabelEdit(null);
   };
 
   const colors = dictionary?.colors ?? [];
@@ -447,19 +504,33 @@ export const Dictionaries: FC = () => {
           </div>
           <Text variant='inactive' size='small'>
             feeds material composition (a style's composition is derived from its shell-fabric
-            materials' fibres) and label generation. No edit action — the contract only ships
-            create/archive for fibers.
+            materials' fibres) and label generation. Code and name are fixed once created; label
+            names — the fibre's name on the care label in each of the {LABEL_LANGS.length} label
+            languages — are edited per fibre.
           </Text>
           <Table
-            headers={['code', 'name', 'status', '']}
+            headers={['code', 'name', 'label names', 'status', '']}
             rows={fibers.map((f) => ({
               key: f.code ?? '',
               archived: !!f.archived,
               cells: [
                 <Text variant='uppercase'>{f.code}</Text>,
                 <Text>{f.name}</Text>,
+                <span className='flex items-center gap-2'>
+                  <LabelNamesBadge code={f.code ?? ''} count={countLabelNames(labelNamesOf(f))} />
+                  {f.animalNonTextile && (
+                    <Text variant='inactive' size='small'>
+                      animal (non-textile)
+                    </Text>
+                  )}
+                </span>,
                 <StatusCell archived={!!f.archived} />,
                 <RowActions>
+                  <RowAction
+                    disabled={!writable || busy}
+                    label='label names'
+                    onClick={() => openLabelEdit(f)}
+                  />
                   <RowAction
                     disabled={!writable || busy || !!f.archived}
                     label='archive'
@@ -684,6 +755,63 @@ export const Dictionaries: FC = () => {
         </div>
       </ConfirmationModal>
 
+      {/* Care-label names of a fibre: one input per label language (closed list), the animal
+          non-textile flag, and a live N/10 badge. Save replaces the whole set. */}
+      <ConfirmationModal
+        open={labelEdit !== null}
+        onOpenChange={(open) => {
+          if (!open) setLabelEdit(null);
+        }}
+        onConfirm={handleLabelSave}
+        title={`label names · ${labelEdit?.code ?? ''}`}
+        confirmLabel={busy ? 'saving…' : 'save'}
+        confirmDisabled={busy}
+        closeOnConfirm={false}
+      >
+        {labelEdit && (
+          <div className='flex min-w-[min(90vw,28rem)] flex-col gap-3' data-fiber-label-editor>
+            <div className='flex items-center justify-between gap-2'>
+              <Text variant='uppercase'>{labelEdit.label}</Text>
+              <LabelNamesBadge code={labelEdit.code} count={countLabelNames(labelEdit.names)} />
+            </div>
+            <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+              {LABEL_LANGS.map((lang) => (
+                <Field key={lang} label={labelLangTag(lang)}>
+                  <input
+                    className={inputCls}
+                    maxLength={64}
+                    disabled={busy}
+                    data-label-lang={lang}
+                    value={labelEdit.names[lang]}
+                    onChange={(e) =>
+                      setLabelEdit({
+                        ...labelEdit,
+                        names: { ...labelEdit.names, [lang]: e.target.value },
+                      })
+                    }
+                  />
+                </Field>
+              ))}
+            </div>
+            <label className='flex items-center gap-2'>
+              <CheckboxCommon
+                name='fiber-animal-non-textile'
+                checked={labelEdit.animal}
+                disabled={busy}
+                onChange={(checked) => setLabelEdit({ ...labelEdit, animal: checked })}
+              />
+              <Text size='small' className='uppercase'>
+                animal (non-textile)
+              </Text>
+            </label>
+            <Text variant='inactive' size='small'>
+              leather, fur: a label with this fibre also prints the non-textile parts of animal
+              origin phrase. A blank name is removed from the label set.
+            </Text>
+          </div>
+        )}
+      </ConfirmationModal>
+
       {/* #81 P0 — archive now requires an explicit confirm (previously a single, unconfirmed click).
           There is no unarchive RPC for colors/collections/tags/fibers, so this dialog spells out that
           the action is not reversible from the UI instead of offering an "undo" that doesn't exist. */}
@@ -754,6 +882,22 @@ function Table({
         </tbody>
       </table>
     </Section>
+  );
+}
+
+// N/10 — how many label languages have a name; red until every language is covered.
+function LabelNamesBadge({ code, count }: { code: string; count: number }) {
+  const total = LABEL_LANGS.length;
+  return (
+    <span className='border border-borderColor px-1.5 py-0.5' data-fiber-label-badge={code}>
+      <Text
+        variant='inactive'
+        size='small'
+        className={count < total ? '!text-error' : '!text-success'}
+      >
+        {count}/{total}
+      </Text>
+    </span>
   );
 }
 

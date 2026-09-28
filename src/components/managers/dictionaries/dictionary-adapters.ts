@@ -5,6 +5,7 @@ import {
   common_Country,
   common_DictionaryRevision,
   common_Fiber,
+  common_FiberLabelTranslation,
   common_Tag,
 } from 'api/proto-http/admin';
 
@@ -93,16 +94,45 @@ export async function updateTag(input: {
 }
 
 // Fibers are keyed by their canonical code (FK Dictionary.fibers), same shape as colors minus hex.
-// There is no UpdateFiber RPC in the contract yet (Create/Archive only) — see the report for that gap.
+// There is no UpdateFiber RPC in the contract yet (Create/Archive only); the care-label names and the
+// animal-non-textile flag have their own RPC (upsertFiberLabelTranslations).
 export async function archiveFiber(code: string): Promise<common_DictionaryRevision | undefined> {
   const res = await adminService.ArchiveFiber({ code, expectedVersion: UNCONDITIONAL });
   return res.revision;
 }
+// Care-label names are not entered at creation (the plan keeps this wave's create form to code +
+// name); the new fibre starts with none and the label editor below fills them in.
 export async function createFiber(input: {
   code: string;
   name: string;
 }): Promise<common_DictionaryRevision | undefined> {
-  const res = await adminService.CreateFiber({ ...input, expectedVersion: UNCONDITIONAL });
+  const res = await adminService.CreateFiber({
+    ...input,
+    translations: [],
+    expectedVersion: UNCONDITIONAL,
+  });
+  return res.revision;
+}
+
+// Care-label names of a fibre, one per label language (closed list en fr de it es pt nl pl cn jp).
+// The RPC replaces the whole set: a language left out is deleted, so the caller sends every
+// non-empty name it wants to keep. Blank names are dropped here rather than sent — the server would
+// treat them as deletions too, but the wire then carries only real rows. animalNonTextile is always
+// sent (the editor shows the current value), so it is set, never left as it was.
+export async function upsertFiberLabelTranslations(input: {
+  code: string;
+  translations: common_FiberLabelTranslation[];
+  animalNonTextile: boolean;
+}): Promise<common_DictionaryRevision | undefined> {
+  const translations = input.translations
+    .map((t) => ({ labelLang: t.labelLang, name: (t.name ?? '').trim() }))
+    .filter((t) => !!t.labelLang && t.name !== '');
+  const res = await adminService.UpsertFiberLabelTranslations({
+    code: input.code,
+    translations,
+    animalNonTextile: input.animalNonTextile,
+    expectedVersion: UNCONDITIONAL,
+  });
   return res.revision;
 }
 
