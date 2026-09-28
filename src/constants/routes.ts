@@ -108,6 +108,9 @@ export enum ROUTES {
   // ПЕЧАТЬ СХЕМЫ СБОРКИ — свой голый маршрут рядом с тех-паком: другой лист (420 / 841 мм, свой
   // @page), другая бумага. Выбор формы и силуэтов — в query (?form=route|map&shapes=on|off).
   techCardAssemblyPrint = '/tech-cards/:id/assembly-print',
+  // СОСТАВНИКИ (care labels) → ZIP для печати ленты: своя голая страница рядом со схемой сборки —
+  // превью четырёх сторон ленты в реальном масштабе, настройки печати/QR/количеств, дыры.
+  techCardCareLabels = '/tech-cards/:id/care-labels',
   // PUBLIC pattern viewer — the page a printed tech-pack QR opens (no JWT, no dictionary).
   // Registered in src/index.tsx OUTSIDE ProtectedRoute/DictionaryProvider on purpose.
   patternViewer = '/p/:token',

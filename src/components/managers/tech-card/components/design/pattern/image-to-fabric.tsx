@@ -179,6 +179,7 @@ export function ImageToFabricSection({
         image: undefined,
         inpaint: undefined,
         extend: undefined,
+        video: undefined,
       },
     });
 

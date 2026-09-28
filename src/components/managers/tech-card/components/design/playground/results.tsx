@@ -27,6 +27,7 @@ import { clockStamp, runHandle } from '../handles';
 import { VectorModal } from '../modals';
 import { PictureTile } from '../picture-tile';
 import { pictureIsSelected, pictureThumb, serverStatesSelected } from '../render/model';
+import { isVideoUrl } from '../video-media';
 import { isPictureHidden } from '../visibility';
 import { useDesignWrites } from '../use-design-band';
 import { useFocusReturn } from './focus';
@@ -278,6 +279,9 @@ export function PlaygroundResults({
               const id = picture.id ?? 0;
               const own = resultsOfRun(run);
               const cut = !!own?.cutout;
+              /* B-32: a clip plays in its tile; it has no mask and no draw-over (both are raster
+                 doors — the mask editor and the vector modal read pixels), only zoom. */
+              const clip = isVideoUrl(pictureThumb(picture));
               const selectable = !!own?.selectable;
               const chosen = selectable && pictureIsSelected(picture);
               const words = [
@@ -325,6 +329,7 @@ export function PlaygroundResults({
                     selectLabel={chosen ? 'un-select' : 'select'}
                     onMask={
                       masks &&
+                      !clip &&
                       maskableRun(run) &&
                       (picture.media?.id ?? 0) > 0 &&
                       pictureThumb(picture)
@@ -344,7 +349,7 @@ export function PlaygroundResults({
                         : undefined
                     }
                     onEdit={
-                      !writesOff && pictureThumb(picture)
+                      !writesOff && !clip && pictureThumb(picture)
                         ? {
                             onClick: () => setEditingId(id),
                             ariaLabel:

@@ -149,6 +149,8 @@ export function recallTargetKind(
   if (kind === 'freeform' || kind === 'cutout') return 'playground';
   // Phase 3: Extend Image (tile 9) and the mask retouch (tile 10) are the playground's own kinds.
   if (kind === 'extend' || kind === 'inpaint') return 'playground';
+  // B-32: a clip run recalls into the playground's Image to Video tile (`workflowOfRun`).
+  if (kind === 'video') return 'playground';
   // ON MODEL's recolour is the PLAYGROUND workflow `change_color` now (C-01). Recall switches the
   // step only; `?wf=` is the playground screen's to set from the run.
   if (kind === 'recolor') return 'playground';

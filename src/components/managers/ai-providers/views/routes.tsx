@@ -182,7 +182,9 @@ export function RoutesView({
           )}
           {groups.map((g) => (
             <div key={g.key} data-route-group={g.key}>
-              <GroupLabel>{g.key}</GroupLabel>
+              {/* B-32: the 3D group also holds video.generate (runblob's clip route) — the heading
+                  says so; the group key stays `3d` on the wire and in GROUP_ORDER. */}
+              <GroupLabel>{g.key === '3d' ? '3d & video' : g.key}</GroupLabel>
               <div className='divide-y divide-hairline'>
                 {g.purposes.map((p) => (
                   <PurposeRow key={p.key} purpose={p} config={config} />

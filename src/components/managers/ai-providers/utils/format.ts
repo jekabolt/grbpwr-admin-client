@@ -20,7 +20,7 @@ export function faultLabel(code?: string): string | null {
 }
 
 // `stored` = a key this server holds in its database (source "db"): the one kind the screen can
-// clear. An env key is the server's configuration, not the panel's.
+// clear — and, since B-33, the ONLY kind that answers a call.
 export type KeyLine = { text: string; broken: boolean; stored: boolean };
 
 // "27 sep", or "27 sep 2025" outside the current year. Lowercase like every label on this screen.
@@ -34,12 +34,18 @@ export function shortDate(iso?: string, now = new Date()): string {
 
 const last4 = (s?: string) => (s ? ` ···${s}` : '');
 
-// The api key slot: where the key that ANSWERS comes from. "unreadable" is a stored key the
-// server's master key no longer opens — the env key, when there is one, answers meanwhile.
+// The api key slot: where the key that ANSWERS comes from. The panel is the only key source
+// (B-33): "env" is a legacy answer an older server may still give, and "unreadable" is a stored
+// key the server's master key no longer opens — nothing answers for the provider until it is
+// re-entered here.
 export function keyLine(p: AiProviderInfo): KeyLine {
   switch (p.keySource) {
     case 'env':
-      return { text: `key: from env${last4(p.keyLast4)}`, broken: false, stored: false };
+      return {
+        text: `key: from env${last4(p.keyLast4)} (legacy — save it here)`,
+        broken: false,
+        stored: false,
+      };
     case 'db': {
       const by = p.keyUpdatedBy ? ` · by ${p.keyUpdatedBy}` : '';
       const when = shortDate(p.keyUpdatedAt);
@@ -51,9 +57,7 @@ export function keyLine(p: AiProviderInfo): KeyLine {
     }
     case 'unreadable':
       return {
-        text: p.keyLast4
-          ? `key: the stored key does not open; env${last4(p.keyLast4)} answers meanwhile`
-          : 'key: the stored key does not open, and there is no env key',
+        text: 'key: the stored key does not open — re-enter it',
         broken: true,
         stored: false,
       };

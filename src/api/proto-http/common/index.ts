@@ -959,6 +959,25 @@ export type TechCardBomKind =
   // назвать шоппер СТРОКОЙ СПЕЦИФИКАЦИИ было нечем — при том, что строка спецификации это
   // единственное место, где вспомогательный компонент вообще стоит денег.
   | "TECH_CARD_BOM_KIND_TOTE_BAG";
+// TechCardBomLabelPart — В КАКУЮ ЧАСТЬ СОСТАВНИКА (care label) идёт состав этой строки: SHELL,
+// BODY LINING, SLEEVE LINING … Свойство ЛЕНТЫ, а не геометрии и не закупки, поэтому отдельная ось
+// рядом с purpose/kind, а не их производная: подкладка рукава и подкладка стана — обе
+// purpose=LINING, но на ленте это две колонки.
+// UNSPECIFIED (0) = «авто»: хранится NULL, и дефолт части по section/purpose считает КЛИЕНТ
+// (defaultLabelPart), а не сервер. Хранимый NULL честно значит «не решали», поэтому смена правила
+// дефолта не требует миграции данных. NOT_ON_LABEL — явное «на ленту не идёт» (молния, пуговица),
+// в отличие от UNSPECIFIED, которое ленту не исключает.
+// Mirrors entity.ValidTechCardBomLabelParts and the DB CHECK chk_bom_item_label_part.
+export type TechCardBomLabelPart =
+  | "TECH_CARD_BOM_LABEL_PART_UNSPECIFIED"
+  | "TECH_CARD_BOM_LABEL_PART_SHELL"
+  | "TECH_CARD_BOM_LABEL_PART_BODY_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_SLEEVE_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_POCKET_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_HOOD_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_FILLING"
+  | "TECH_CARD_BOM_LABEL_PART_TRIM"
+  | "TECH_CARD_BOM_LABEL_PART_NOT_ON_LABEL";
 // TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
 export type TechCardLabDipStatus =
   | "TECH_CARD_LAB_DIP_STATUS_UNKNOWN"
@@ -2490,6 +2509,15 @@ export type TechCardBomItem = {
   // ОЧИСТИТЬ можно ТОЛЬКО явным Decimal{value:""}. Присутствие здесь одиночное: у оценки нет
   // второй половины, в отличие от счётной пары.
   estUsage: googletype_Decimal | undefined;
+  // ЧАСТЬ СОСТАВНИКА (care labels) — see TechCardBomLabelPart. UNSPECIFIED = «авто»: сервер хранит
+  // NULL, дефолт по section/purpose выводит клиент. Валидации по секции нет: часть — свойство
+  // ленты, любой раздел может попасть на этикетку явно. В дайджест подписи MATERIALS НЕ входит
+  // (как kind).
+  // OPTIONAL — тот же протокол «нет на проводе = не трогай», что у purpose/kind: карточка
+  // сохраняется целиком, и вкладка со старым бандлом, которая про поле не знает, иначе прислала бы
+  // proto3-дефолт UNSPECIFIED и стёрла бы выбор части у ВСЕХ строк карточки. Явно присланный
+  // UNSPECIFIED (поле присутствует) очищает в NULL.
+  labelPart?: TechCardBomLabelPart;
 };
 
 // MaterialFabricAttrs are the typed attributes of a fabric-class material (material_fabric_attr).
@@ -4535,8 +4563,8 @@ export type DesignRun = {
   id: number | undefined;
   techCardId: number | undefined;
   // Which state of the studio produced this row: flat | render | threed | vector | draft_idea |
-  // recolor | pattern | freeform | cutout | extend | inpaint. Written by the client at start;
-  // immutable afterwards.
+  // recolor | pattern | freeform | cutout | extend | inpaint | video. Written by the client at
+  // start; immutable afterwards.
   // `recolor` IS THE ON MODEL SECTION'S OWN VERB (K-17). The owner's ask — «мы можем загрузить фото
   // реальное на модели с разных сторон и нам можно будет поменять цвет вещи» — and the owner's own
   // decision on how: the colour is changed BY GENERATION, not by a filter, so the weave, the folds
@@ -4820,6 +4848,8 @@ export type DesignRunParams = {
   inpaint: DesignInpaintParams | undefined;
   // THE TARGET FORMAT OF AN EXTEND RUN (kind=extend). Refused on every other kind (`extend_forbidden`).
   extend: DesignExtendParams | undefined;
+  // THE SOURCE PICTURE OF A VIDEO RUN (kind=video, B-32). Refused on every other kind (`video_forbidden`).
+  video: DesignVideoParams | undefined;
 };
 
 // DesignColourRecipe is the colour submission of a render run, in a form that a history chip can
@@ -5188,6 +5218,20 @@ export type DesignExtendParams = {
   aspectRatio: string | undefined;
 };
 
+// DesignVideoParams is the frozen ask of a VIDEO run (kind=video, the playground's «Image to Video»,
+// B-32): a short clip animated from ONE picture of the card by runblob's Kling image-to-video route.
+// ONE PICTURE, ONE CLIP. The source travels HERE (`source_media_id`), never in extra_input_media_ids
+// (one list per fact); the words are `ask` — REQUIRED, since Kling takes a prompt of 1–2500
+// characters («words_required» when empty, InvalidArgument past 2500). The clip's length is fixed at
+// 5 seconds today (`duration` 0 or 5; any other number is «unknown_option»), and the model is the
+// route row's Kling slug (admin → AI providers → video.generate), frozen by the server when the run
+// starts; a model the client states must be a `kling_*` slug («unknown_option»).
+export type DesignVideoParams = {
+  sourceMediaId: number | undefined;
+  duration: number | undefined;
+  model: string | undefined;
+};
+
 // DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
 // IDS ARE STORED, MediaFull IS SERVED. The stored snapshot freezes media_id — freezing a URL is
 // wrong because objects move — and the read joins media and hands back a ready picture. Nothing
@@ -5347,7 +5391,10 @@ export type DesignPicture = {
   runId: number | undefined;
   batchId: number | undefined;
   ordinal: number | undefined;
-  // flat | render | threed | pattern | freeform | cutout.
+  // flat | render | threed | pattern | freeform | cutout | video.
+  // `video` is the clip a VIDEO run made (kind=video, B-32): an mp4 whose media row points every
+  // variant at the one object. Never a plate, never an input of another run (the door refuses a
+  // video as a picture), and never uploaded by hand — it exists only as the OUTPUT of a run.
   // `freeform` and `cutout` are the outputs of the PLAYGROUND (kind=freeform / kind=cutout). They
   // are named apart for the same reason `pattern` is: neither is a plate. A playground picture that
   // called itself a flat would become selectable into a bench slot, and one that called itself a
@@ -6521,6 +6568,21 @@ export type Fiber = {
   code: string | undefined;
   name: string | undefined;
   archived: boolean | undefined;
+  // Names printed on the care label, one per label language that has one (order: the closed label
+  // language list en fr de it es pt nl pl cn jp). A missing language is a hole the label screen
+  // reports; the full set ships with the dictionary and the client picks, as CareSymbol.translations.
+  translations: FiberLabelTranslation[] | undefined;
+  // Non-textile part of animal origin (leather, fur): a label with this fibre prints the
+  // "contains non-textile parts of animal origin" phrase (EU 1007/2011 Art. 12).
+  animalNonTextile: boolean | undefined;
+};
+
+// FiberLabelTranslation is a fibre name in one care-label language. label_lang is from the CLOSED
+// care-label list en fr de it es pt nl pl cn jp — not a storefront language code (Japanese is `jp`
+// here, and ES/PT/NL/PL are not storefront languages at all).
+export type FiberLabelTranslation = {
+  labelLang: string | undefined;
+  name: string | undefined;
 };
 
 // Tag is a controlled merchandising tag dictionary (R9). Storefront receives tags by code/name; id is

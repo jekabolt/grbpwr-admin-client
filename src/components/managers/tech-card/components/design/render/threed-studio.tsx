@@ -126,10 +126,7 @@ export function ThreedStudio({
    * по `render_bench_colorway_ids`: серверное множество отвечает «занят ХОТЯ БЫ ОДИН слот», и
    * колорвей с одной спинкой в нём есть, а собрать его нельзя (разбор — у `threedColorwayOptions`).
    */
-  const buildable = useMemo(
-    () => threedColorwayOptions(band, colorways),
-    [band, colorways],
-  );
+  const buildable = useMemo(() => threedColorwayOptions(band, colorways), [band, colorways]);
 
   /**
    * ═══ ⚠ ЗАХОД НА 3D НЕ ПЕРЕДВИГАЕТ ОБЩИЙ ВЫБОР СТУДИИ. НИКОГДА (G2-7, побочка G2a) ════════════
@@ -236,7 +233,6 @@ export function ThreedStudio({
   const fitStated = (cardFit ?? '').trim();
   const fitDiffers = !!draft.fitOverride && draft.fitOverride !== fitStated;
 
-
   const generate = () => {
     const sourcePictureIds = turntableSourceIds(sides);
     // The gate already refuses an incomplete set; this is the second, cheap guard.
@@ -284,6 +280,7 @@ export function ThreedStudio({
         image: undefined,
         inpaint: undefined,
         extend: undefined,
+        video: undefined,
       },
     });
   };
@@ -473,9 +470,7 @@ export function ThreedStudio({
                 списке НЕ ВИДНО: что отклонение будет проштамповано на результате, а карточка при
                 этом не меняется. Она и осталась — и только когда она правда. */}
             {fitDiffers && (
-              <Hint>
-                this run only · the result carries the badge and the card is not changed
-              </Hint>
+              <Hint>this run only · the result carries the badge and the card is not changed</Hint>
             )}
           </FieldRow>
         </div>

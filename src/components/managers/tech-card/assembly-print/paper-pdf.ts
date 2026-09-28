@@ -280,6 +280,30 @@ function drawPrims(pdf: Pdf, prims: Prim[], k: number, tx: number, ty: number) {
           pdf.setFillColor('#000000');
         }
         break;
+      case 'path': {
+        const sw = p.sw ?? 0;
+        if (!p.fill && sw <= 0) break;
+        for (const c of p.d) {
+          if (c[0] === 'M') pdf.moveTo(X(c[1]), Y(c[2]));
+          else if (c[0] === 'L') pdf.lineTo(X(c[1]), Y(c[2]));
+          else if (c[0] === 'C') pdf.curveTo(X(c[1]), Y(c[2]), X(c[3]), Y(c[4]), X(c[5]), Y(c[6]));
+          else pdf.close();
+        }
+        if (sw > 0) {
+          pdf.setLineWidth(sw * k);
+          pdf.setLineJoin(p.join === 'round' ? 'round' : 'miter');
+        }
+        const evenOdd = p.fillRule === 'evenodd';
+        if (p.fill && sw > 0) {
+          if (evenOdd) pdf.fillStrokeEvenOdd();
+          else pdf.fillStroke();
+        } else if (p.fill) {
+          if (evenOdd) pdf.fillEvenOdd();
+          else pdf.fill();
+        } else pdf.stroke();
+        pdf.setLineJoin('miter');
+        break;
+      }
     }
   }
 }

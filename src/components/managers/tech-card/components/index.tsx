@@ -3459,7 +3459,11 @@ export function TechCardForm({
             <SectionStack hidden={activeTab !== 'labels'}>
               <SectionStack row>
                 <Section title='labels' className='w-full lg:w-1/2'>
-                  <LabelsField onMissingComposition={goToBomComposition} />
+                  <LabelsField
+                    onMissingComposition={goToBomComposition}
+                    // Only a SAVED card has the print door (the screen reads GetTechCard).
+                    techCardId={isEditMode && numId ? numId : undefined}
+                  />
                 </Section>
                 <Section title='packaging' className='w-full lg:w-1/2'>
                   <PackagingField />

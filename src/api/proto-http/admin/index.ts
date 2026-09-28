@@ -436,6 +436,21 @@ export type common_Fiber = {
   code: string | undefined;
   name: string | undefined;
   archived: boolean | undefined;
+  // Names printed on the care label, one per label language that has one (order: the closed label
+  // language list en fr de it es pt nl pl cn jp). A missing language is a hole the label screen
+  // reports; the full set ships with the dictionary and the client picks, as CareSymbol.translations.
+  translations: common_FiberLabelTranslation[] | undefined;
+  // Non-textile part of animal origin (leather, fur): a label with this fibre prints the
+  // "contains non-textile parts of animal origin" phrase (EU 1007/2011 Art. 12).
+  animalNonTextile: boolean | undefined;
+};
+
+// FiberLabelTranslation is a fibre name in one care-label language. label_lang is from the CLOSED
+// care-label list en fr de it es pt nl pl cn jp — not a storefront language code (Japanese is `jp`
+// here, and ES/PT/NL/PL are not storefront languages at all).
+export type common_FiberLabelTranslation = {
+  labelLang: string | undefined;
+  name: string | undefined;
 };
 
 // Tag is a controlled merchandising tag dictionary (R9). Storefront receives tags by code/name; id is
@@ -1720,6 +1735,9 @@ export type CreateFiberRequest = {
   code: string | undefined;
   name: string | undefined;
   expectedVersion: number | undefined;
+  // Optional care-label names for the new fibre (closed label language list; an empty name is
+  // skipped). Omitted = the fibre starts with none and the label screen reports the holes.
+  translations: common_FiberLabelTranslation[] | undefined;
 };
 
 export type CreateFiberResponse = {
@@ -1733,6 +1751,21 @@ export type ArchiveFiberRequest = {
 };
 
 export type ArchiveFiberResponse = {
+  revision: common_DictionaryRevision | undefined;
+};
+
+export type UpsertFiberLabelTranslationsRequest = {
+  code: string | undefined;
+  // The complete set after the call: languages from the closed care-label list, each at most once;
+  // an empty name (or a language left out) deletes that language's row.
+  translations: common_FiberLabelTranslation[] | undefined;
+  expectedVersion: number | undefined;
+  // Absent = leave the flag as it is; present = set it.
+  animalNonTextile?: boolean;
+};
+
+export type UpsertFiberLabelTranslationsResponse = {
+  fiber: common_Fiber | undefined;
   revision: common_DictionaryRevision | undefined;
 };
 
@@ -8435,6 +8468,15 @@ export type common_TechCardBomItem = {
   // ОЧИСТИТЬ можно ТОЛЬКО явным Decimal{value:""}. Присутствие здесь одиночное: у оценки нет
   // второй половины, в отличие от счётной пары.
   estUsage: googletype_Decimal | undefined;
+  // ЧАСТЬ СОСТАВНИКА (care labels) — see TechCardBomLabelPart. UNSPECIFIED = «авто»: сервер хранит
+  // NULL, дефолт по section/purpose выводит клиент. Валидации по секции нет: часть — свойство
+  // ленты, любой раздел может попасть на этикетку явно. В дайджест подписи MATERIALS НЕ входит
+  // (как kind).
+  // OPTIONAL — тот же протокол «нет на проводе = не трогай», что у purpose/kind: карточка
+  // сохраняется целиком, и вкладка со старым бандлом, которая про поле не знает, иначе прислала бы
+  // proto3-дефолт UNSPECIFIED и стёрла бы выбор части у ВСЕХ строк карточки. Явно присланный
+  // UNSPECIFIED (поле присутствует) очищает в NULL.
+  labelPart?: common_TechCardBomLabelPart;
 };
 
 // TechCardBomSection groups a BOM line by material family (Sheet «Спецификация»).
@@ -8622,6 +8664,25 @@ export type common_TechCardBomKind =
   // назвать шоппер СТРОКОЙ СПЕЦИФИКАЦИИ было нечем — при том, что строка спецификации это
   // единственное место, где вспомогательный компонент вообще стоит денег.
   | "TECH_CARD_BOM_KIND_TOTE_BAG";
+// TechCardBomLabelPart — В КАКУЮ ЧАСТЬ СОСТАВНИКА (care label) идёт состав этой строки: SHELL,
+// BODY LINING, SLEEVE LINING … Свойство ЛЕНТЫ, а не геометрии и не закупки, поэтому отдельная ось
+// рядом с purpose/kind, а не их производная: подкладка рукава и подкладка стана — обе
+// purpose=LINING, но на ленте это две колонки.
+// UNSPECIFIED (0) = «авто»: хранится NULL, и дефолт части по section/purpose считает КЛИЕНТ
+// (defaultLabelPart), а не сервер. Хранимый NULL честно значит «не решали», поэтому смена правила
+// дефолта не требует миграции данных. NOT_ON_LABEL — явное «на ленту не идёт» (молния, пуговица),
+// в отличие от UNSPECIFIED, которое ленту не исключает.
+// Mirrors entity.ValidTechCardBomLabelParts and the DB CHECK chk_bom_item_label_part.
+export type common_TechCardBomLabelPart =
+  | "TECH_CARD_BOM_LABEL_PART_UNSPECIFIED"
+  | "TECH_CARD_BOM_LABEL_PART_SHELL"
+  | "TECH_CARD_BOM_LABEL_PART_BODY_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_SLEEVE_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_POCKET_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_HOOD_LINING"
+  | "TECH_CARD_BOM_LABEL_PART_FILLING"
+  | "TECH_CARD_BOM_LABEL_PART_TRIM"
+  | "TECH_CARD_BOM_LABEL_PART_NOT_ON_LABEL";
 // TechCardConstruction holds the card's DEFAULTS — the values an operation inherits when it does
 // not override them. Until the operations break it was a block of free-text notes that nothing
 // inherited (the editor said so out loud: «общие параметры по умолчанию, конкретные задавайте в
@@ -15205,7 +15266,10 @@ export type common_DesignPicture = {
   runId: number | undefined;
   batchId: number | undefined;
   ordinal: number | undefined;
-  // flat | render | threed | pattern | freeform | cutout.
+  // flat | render | threed | pattern | freeform | cutout | video.
+  // `video` is the clip a VIDEO run made (kind=video, B-32): an mp4 whose media row points every
+  // variant at the one object. Never a plate, never an input of another run (the door refuses a
+  // video as a picture), and never uploaded by hand — it exists only as the OUTPUT of a run.
   // `freeform` and `cutout` are the outputs of the PLAYGROUND (kind=freeform / kind=cutout). They
   // are named apart for the same reason `pattern` is: neither is a plate. A playground picture that
   // called itself a flat would become selectable into a bench slot, and one that called itself a
@@ -15620,8 +15684,8 @@ export type common_DesignRun = {
   id: number | undefined;
   techCardId: number | undefined;
   // Which state of the studio produced this row: flat | render | threed | vector | draft_idea |
-  // recolor | pattern | freeform | cutout | extend | inpaint. Written by the client at start;
-  // immutable afterwards.
+  // recolor | pattern | freeform | cutout | extend | inpaint | video. Written by the client at
+  // start; immutable afterwards.
   // `recolor` IS THE ON MODEL SECTION'S OWN VERB (K-17). The owner's ask — «мы можем загрузить фото
   // реальное на модели с разных сторон и нам можно будет поменять цвет вещи» — and the owner's own
   // decision on how: the colour is changed BY GENERATION, not by a filter, so the weave, the folds
@@ -15905,6 +15969,8 @@ export type common_DesignRunParams = {
   inpaint: common_DesignInpaintParams | undefined;
   // THE TARGET FORMAT OF AN EXTEND RUN (kind=extend). Refused on every other kind (`extend_forbidden`).
   extend: common_DesignExtendParams | undefined;
+  // THE SOURCE PICTURE OF A VIDEO RUN (kind=video, B-32). Refused on every other kind (`video_forbidden`).
+  video: common_DesignVideoParams | undefined;
 };
 
 // DesignThreedParams are the parameters of a turntable run.
@@ -16130,6 +16196,20 @@ export type common_DesignInpaintParams = {
 // may be at most 18 MP (`source_too_large`).
 export type common_DesignExtendParams = {
   aspectRatio: string | undefined;
+};
+
+// DesignVideoParams is the frozen ask of a VIDEO run (kind=video, the playground's «Image to Video»,
+// B-32): a short clip animated from ONE picture of the card by runblob's Kling image-to-video route.
+// ONE PICTURE, ONE CLIP. The source travels HERE (`source_media_id`), never in extra_input_media_ids
+// (one list per fact); the words are `ask` — REQUIRED, since Kling takes a prompt of 1–2500
+// characters («words_required» when empty, InvalidArgument past 2500). The clip's length is fixed at
+// 5 seconds today (`duration` 0 or 5; any other number is «unknown_option»), and the model is the
+// route row's Kling slug (admin → AI providers → video.generate), frozen by the server when the run
+// starts; a model the client states must be a `kling_*` slug («unknown_option»).
+export type common_DesignVideoParams = {
+  sourceMediaId: number | undefined;
+  duration: number | undefined;
+  model: string | undefined;
 };
 
 // DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
@@ -16591,8 +16671,8 @@ export type StartDesignRunRequest = {
   // Client-minted UUID. A repeat returns the existing run with OK — a double click on GENERATE is
   // one payment.
   clientRequestId: string | undefined;
-  // flat | render | threed | vector | recolor | pattern | freeform | cutout | extend | inpaint.
-  // `draft_idea` is REFUSED here with
+  // flat | render | threed | vector | recolor | pattern | freeform | cutout | extend | inpaint |
+  // video. `draft_idea` is REFUSED here with
   // InvalidArgument: a text run executes inline and returns its answer, so it has its own verb
   // (DraftDesignIdea) rather than a shared one that would return a pending row nobody ever polls.
   // `vector` IS ACCEPTED HERE and has no verb of its own on purpose: machine vectorisation spends
@@ -16684,8 +16764,14 @@ export type StartDesignRunRequest = {
   // · params.image — a slug the engine table does not hold («unknown_image_model»), a tier, ratio
   // or background the chosen engine does not list («quality_not_supported»,
   // «aspect_not_supported», «background_not_supported»), or any params.image on threed | cutout
-  // | vector | extend | inpaint («image_options_forbidden»);
-  // · threed — more than 4 params.threed.reference_media_ids («too_many_pictures»).
+  // | vector | extend | inpaint | video («image_options_forbidden»);
+  // · threed — more than 4 params.threed.reference_media_ids («too_many_pictures»);
+  // · video (B-32) — no params.video.source_media_id («one_source_picture»); no words
+  // («words_required»); words past 2500 characters (InvalidArgument); a duration other than 5
+  // or a model that is not a `kling_*` slug («unknown_option»); params.video on any other kind
+  // («video_forbidden»); the source must be a picture of this card (or a fresh upload) that the
+  // provider can read — a model or a video is refused (`input_not_a_picture`). FailedPrecondition
+  // `kind_not_available` names runblob's missing key, before anything is reserved.
   kind: string | undefined;
   ask: string | undefined;
   // What is being asked for; at most 8 KB encoded. The INPUTS are not here and cannot be: the
@@ -17876,6 +17962,10 @@ export interface AdminService {
   ArchiveTag(request: ArchiveTagRequest): Promise<ArchiveTagResponse>;
   CreateFiber(request: CreateFiberRequest): Promise<CreateFiberResponse>;
   ArchiveFiber(request: ArchiveFiberRequest): Promise<ArchiveFiberResponse>;
+  // UpsertFiberLabelTranslations replaces a fibre's care-label names as a whole set (a language not
+  // sent, or sent with an empty name, is removed) and, when animal_non_textile is present, sets the
+  // flag. Bumps the fiber dictionary revision like every other fibre mutation.
+  UpsertFiberLabelTranslations(request: UpsertFiberLabelTranslationsRequest): Promise<UpsertFiberLabelTranslationsResponse>;
   ListCountries(request: ListCountriesRequest): Promise<ListCountriesResponse>;
   SetCountryActive(request: SetCountryActiveRequest): Promise<SetCountryActiveResponse>;
   // Adds a new promotional code
@@ -20533,6 +20623,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ArchiveFiber",
       }) as Promise<ArchiveFiberResponse>;
+    },
+    UpsertFiberLabelTranslations(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.code) {
+        throw new Error("missing required field request.code");
+      }
+      const path = `api/admin/dictionaries/fibers/${request.code}/label-translations`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertFiberLabelTranslations",
+      }) as Promise<UpsertFiberLabelTranslationsResponse>;
     },
     ListCountries(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dictionaries/countries`; // eslint-disable-line quotes
