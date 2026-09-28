@@ -824,6 +824,21 @@ export type common_Fiber = {
   code: string | undefined;
   name: string | undefined;
   archived: boolean | undefined;
+  // Names printed on the care label, one per label language that has one (order: the closed label
+  // language list en fr de it es pt nl pl cn jp). A missing language is a hole the label screen
+  // reports; the full set ships with the dictionary and the client picks, as CareSymbol.translations.
+  translations: common_FiberLabelTranslation[] | undefined;
+  // Non-textile part of animal origin (leather, fur): a label with this fibre prints the
+  // "contains non-textile parts of animal origin" phrase (EU 1007/2011 Art. 12).
+  animalNonTextile: boolean | undefined;
+};
+
+// FiberLabelTranslation is a fibre name in one care-label language. label_lang is from the CLOSED
+// care-label list en fr de it es pt nl pl cn jp — not a storefront language code (Japanese is `jp`
+// here, and ES/PT/NL/PL are not storefront languages at all).
+export type common_FiberLabelTranslation = {
+  labelLang: string | undefined;
+  name: string | undefined;
 };
 
 // Tag is a controlled merchandising tag dictionary (R9). Storefront receives tags by code/name; id is
