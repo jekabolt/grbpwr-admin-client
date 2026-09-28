@@ -19,17 +19,74 @@ export const PDF_MIN_MM = 20;
  * пропорции листа. Лист не перенабирается — он масштабируется целиком, как вектор: координаты,
  * кегли, толщины линий, штрих. Перенабор под чужую ширину разложил бы шаги иначе, чем на экране.
  */
-export type PdfTarget = { side: 'w' | 'h'; mm: number };
-export type PdfSize = { w: number; h: number; scale: number; custom: boolean };
+/** Форматы бумаги (книжно, мм). Пресет даёт страницу РОВНО этого формата, лист вписан по центру. */
+export const PAPERS = {
+  A4: [210, 297],
+  A3: [297, 420],
+  A2: [420, 594],
+  A1: [594, 841],
+  A0: [841, 1189],
+} as const;
+export type Paper = keyof typeof PAPERS;
+// Свои ключи, не унаследованные: `?size=constructor` не должен стать форматом бумаги.
+export const isPaper = (v: string): v is Paper => Object.prototype.hasOwnProperty.call(PAPERS, v);
+
+export type PdfTarget = { side: 'w' | 'h'; mm: number } | { paper: Paper };
+export type PdfSize = {
+  /** Страница файла, мм. */
+  w: number;
+  h: number;
+  scale: number;
+  custom: boolean;
+  /** Лист на странице: сдвиг левого верхнего угла и размер после масштаба, мм. */
+  ox: number;
+  oy: number;
+  sheetW: number;
+  sheetH: number;
+  /** Пресет формата и поворот страницы; у своей стороны — нет. */
+  paper?: Paper;
+  landscape?: boolean;
+};
 
 const round1 = (v: number) => Math.round(v * 10) / 10;
 
 export function pdfSize(doc: Pick<PaperDoc, 'w' | 'h'>, target: PdfTarget | null): PdfSize {
-  if (!target) return { w: doc.w, h: doc.h, scale: 1, custom: false };
+  if (!target)
+    return {
+      w: doc.w,
+      h: doc.h,
+      scale: 1,
+      custom: false,
+      ox: 0,
+      oy: 0,
+      sheetW: doc.w,
+      sheetH: doc.h,
+    };
+  if ('paper' in target) {
+    // Поворот — тот, при котором лист крупнее; поровну — книжно.
+    const [pw, ph] = PAPERS[target.paper];
+    const portrait = Math.min(pw / doc.w, ph / doc.h);
+    const landscapeK = Math.min(ph / doc.w, pw / doc.h);
+    const landscape = landscapeK > portrait;
+    const scale = landscape ? landscapeK : portrait;
+    const [w, h] = landscape ? [ph, pw] : [pw, ph];
+    return {
+      w,
+      h,
+      scale,
+      custom: true,
+      ox: (w - doc.w * scale) / 2,
+      oy: (h - doc.h * scale) / 2,
+      sheetW: round1(doc.w * scale),
+      sheetH: round1(doc.h * scale),
+      paper: target.paper,
+      landscape,
+    };
+  }
   const scale = target.mm / (target.side === 'w' ? doc.w : doc.h);
-  return target.side === 'w'
-    ? { w: target.mm, h: round1(doc.h * scale), scale, custom: true }
-    : { w: round1(doc.w * scale), h: target.mm, scale, custom: true };
+  const [w, h] =
+    target.side === 'w' ? [target.mm, round1(doc.h * scale)] : [round1(doc.w * scale), target.mm];
+  return { w, h, scale, custom: true, ox: 0, oy: 0, sheetW: w, sheetH: h };
 }
 
 /** Что с размером не так — строкой для тулбара; null — файл можно делать. */
@@ -43,7 +100,11 @@ export function pdfSizeProblem(size: PdfSize): string | null {
 
 /** Имя файла: свой размер дописывается, чтобы два файла одной карточки не звались одинаково. */
 export const pdfFileName = (doc: Pick<PaperDoc, 'fileStem'>, size: PdfSize) =>
-  size.custom ? `${doc.fileStem}-${size.w}x${size.h}mm.pdf` : `${doc.fileStem}.pdf`;
+  size.paper
+    ? `${doc.fileStem}-${size.paper}.pdf`
+    : size.custom
+      ? `${doc.fileStem}-${size.w}x${size.h}mm.pdf`
+      : `${doc.fileStem}.pdf`;
 
 /** Самый мелкий кегль листа (pt) до масштаба — чтобы назвать, во что он превратится в файле. */
 export function smallestTextPt(doc: PaperDoc): number | null {
@@ -70,6 +131,9 @@ export async function exportPaperPdf(
   const problem = pdfSizeProblem(size);
   if (problem) throw new Error(`${size.w} × ${size.h} mm: ${problem}`);
   const k = size.scale;
+  // Лист на странице: масштаб + сдвиг (пресет формата центрирует лист, своя сторона — 0).
+  const X = (v: number) => v * k + size.ox;
+  const Y = (v: number) => v * k + size.oy;
   const [{ jsPDF }, regular, bold] = await Promise.all([
     import('jspdf'),
     base64Of(regularTtf),
@@ -96,27 +160,27 @@ export async function exportPaperPdf(
       case 'text':
         pdf.setFont(FAMILY, p.bold ? 'bold' : 'normal');
         pdf.setFontSize(p.size * k);
-        pdf.text(p.s, p.x * k, p.y * k, {
+        pdf.text(p.s, X(p.x), Y(p.y), {
           align: p.align === 'right' ? 'right' : 'left',
           baseline: 'alphabetic',
         });
         break;
       case 'line':
         pdf.setLineWidth(p.w * k);
-        pdf.line(p.x1 * k, p.y1 * k, p.x2 * k, p.y2 * k);
+        pdf.line(X(p.x1), Y(p.y1), X(p.x2), Y(p.y2));
         break;
       case 'rect':
         if (p.dashed) pdf.setLineDashPattern([k, k], 0);
         pdf.setLineWidth(p.sw * k);
-        pdf.rect(p.x * k, p.y * k, p.w * k, p.h * k, p.fill ? 'F' : 'S');
+        pdf.rect(X(p.x), Y(p.y), p.w * k, p.h * k, p.fill ? 'F' : 'S');
         if (p.dashed) pdf.setLineDashPattern([], 0);
         break;
       case 'poly': {
         if (p.pts.length < 2) break;
         pdf.setLineWidth(p.sw * k);
         pdf.setLineJoin(p.join === 'round' ? 'round' : 'miter');
-        pdf.moveTo(p.pts[0][0] * k, p.pts[0][1] * k);
-        for (let i = 1; i < p.pts.length; i++) pdf.lineTo(p.pts[i][0] * k, p.pts[i][1] * k);
+        pdf.moveTo(X(p.pts[0][0]), Y(p.pts[0][1]));
+        for (let i = 1; i < p.pts.length; i++) pdf.lineTo(X(p.pts[i][0]), Y(p.pts[i][1]));
         if (p.closed) pdf.close();
         if (p.fill) pdf.fill();
         else pdf.stroke();
@@ -126,10 +190,10 @@ export async function exportPaperPdf(
       case 'circle':
         pdf.setLineWidth(p.sw * k);
         // Пустой кружок («open») закрашен белым, чтобы перекрыть дорожку под собой.
-        if (p.fill) pdf.circle(p.cx * k, p.cy * k, p.r * k, 'F');
+        if (p.fill) pdf.circle(X(p.cx), Y(p.cy), p.r * k, 'F');
         else {
           pdf.setFillColor('#ffffff');
-          pdf.circle(p.cx * k, p.cy * k, p.r * k, 'FD');
+          pdf.circle(X(p.cx), Y(p.cy), p.r * k, 'FD');
           pdf.setFillColor('#000000');
         }
         break;

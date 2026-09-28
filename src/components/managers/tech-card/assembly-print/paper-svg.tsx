@@ -69,15 +69,25 @@ function PrimView({ p }: { p: Prim }) {
   }
 }
 
-/** `w`/`h` — физический размер (свой размер файла); лист масштабируется целиком через viewBox. */
-export function PaperSvg({ doc, w = doc.w, h = doc.h }: { doc: PaperDoc; w?: number; h?: number }) {
+/**
+ * `page` — страница файла (свой размер или формат A): физический размер в мм, масштаб и сдвиг листа.
+ * Лист масштабируется целиком через viewBox; поля формата вокруг листа — белые.
+ */
+export function PaperSvg({
+  doc,
+  page,
+}: {
+  doc: PaperDoc;
+  page?: { w: number; h: number; scale: number; ox: number; oy: number };
+}) {
+  const p = page ?? { w: doc.w, h: doc.h, scale: 1, ox: 0, oy: 0 };
   return (
     <svg
       xmlns='http://www.w3.org/2000/svg'
       className='ap-sheet'
-      width={`${w}mm`}
-      height={`${h}mm`}
-      viewBox={`0 0 ${doc.w} ${doc.h}`}
+      width={`${p.w}mm`}
+      height={`${p.h}mm`}
+      viewBox={`${-p.ox / p.scale} ${-p.oy / p.scale} ${p.w / p.scale} ${p.h / p.scale}`}
       style={{ display: 'block', fontFamily: FONT, background: '#fff' }}
       role='img'
       aria-label='assembly order sheet'

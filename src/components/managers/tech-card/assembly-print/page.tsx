@@ -36,6 +36,8 @@ import { assemblyPrintModel, type PrintCardInput } from './model';
 import { typesetMap, typesetRoute, type PaperDoc, type SheetMeta, type ShapeLookup } from './paper';
 import {
   exportPaperPdf,
+  isPaper,
+  PAPERS,
   pdfFileName,
   pdfSize,
   pdfSizeProblem,
@@ -48,14 +50,16 @@ type Form = 'route' | 'map';
 
 const PX_PER_MM = 96 / 25.4;
 
-// `size=w600` — ширина 600 мм, `size=h900` — высота 900 мм; мм до десятых.
+// `size=w600` — ширина 600 мм, `size=h900` — высота 900 мм (мм до десятых), `size=A4` — формат.
 const parseTarget = (v: string | null): PdfTarget | null => {
+  if (v && isPaper(v)) return { paper: v };
   const m = v?.match(/^([wh])(\d+(?:\.\d+)?)$/);
   if (!m) return null;
   const mm = Math.round(parseFloat(m[2]) * 10) / 10;
   return mm > 0 ? { side: m[1] as 'w' | 'h', mm } : null;
 };
-const formatTarget = (t: PdfTarget) => `${t.side}${t.mm}`;
+const formatTarget = (t: PdfTarget) => ('paper' in t ? t.paper : `${t.side}${t.mm}`);
+const PAPER_NAMES = Object.keys(PAPERS) as (keyof typeof PAPERS)[];
 // Подпись входов листа: карточка ИЗ АДРЕСА (id в ответе бэка — необязательное поле), форма,
 // силуэты. Роутер переиспользует страницу при смене `:id`, и без подписи кнопка могла бы скачать
 // ПРЕДЫДУЩУЮ карточку, пока грузится новая.
@@ -185,7 +189,7 @@ function Document({
     // тогда меняется высота листа, а с ней масштаб под заданную высоту. Пара проходов сходится.
     let k = pdfSize(d, target).scale;
     for (let i = 0; i < 3; i++) {
-      d = set({ ...meta, scale: k });
+      d = set({ ...meta, scale: k, paper: 'paper' in target ? target.paper : undefined });
       const next = pdfSize(d, target).scale;
       if (next === k) break;
       k = next;
@@ -198,7 +202,7 @@ function Document({
   return (
     <>
       <style>{`@page { size: ${out.w}mm ${out.h}mm; margin: 0; }`}</style>
-      <PaperSvg doc={doc} w={out.w} h={out.h} />
+      <PaperSvg doc={doc} page={out} />
     </>
   );
 }
@@ -323,7 +327,7 @@ export function TechCardAssemblyPrint() {
         `${report.crossings} crossings`,
         report.overWidth ? 'wider than A0 — print from a roll' : '',
         size?.custom
-          ? `pdf ${size.w} × ${size.h} mm · ${Math.round(size.scale * 1000) / 10} %` +
+          ? `pdf ${size.paper ? `${size.paper} ${size.landscape ? 'landscape' : 'portrait'} ` : ''}${size.w} × ${size.h} mm · ${Math.round(size.scale * 1000) / 10} %` +
             (minPt != null ? ` · smallest text ${Math.round(minPt * size.scale * 10) / 10} pt` : '')
           : '',
         sizeProblem
@@ -458,6 +462,25 @@ export function TechCardAssemblyPrint() {
               >
                 sheet
               </Chip>
+              {PAPER_NAMES.map((paper) => {
+                const on = !!target && 'paper' in target && target.paper === paper;
+                const [pw, ph] = PAPERS[paper];
+                return (
+                  <Chip
+                    key={paper}
+                    nonForm
+                    pressed={on}
+                    selected={on}
+                    onClick={() => {
+                      setSizeEdit(null);
+                      setChoice({ target: { paper } });
+                    }}
+                    title={`a ${paper} page (${pw} × ${ph} mm, turned whichever way the sheet is larger) — the whole sheet scaled to fit, centred`}
+                  >
+                    {paper}
+                  </Chip>
+                );
+              })}
             </ChipRow>
             {(['w', 'h'] as const).map((side, i) => (
               <div key={side} className='flex items-center gap-1'>
