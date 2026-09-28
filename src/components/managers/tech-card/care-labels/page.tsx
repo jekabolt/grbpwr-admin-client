@@ -225,8 +225,19 @@ export function TechCardCareLabels() {
         mode: prefs.mode,
         excluded: current.excluded,
         run: selectedRun,
+        // Итоги лент — по файлам полного плана (B2 перелива, пустая изнанка B в simplex), как README.
+        plans: fullPlan?.sets ?? null,
       }),
-    [qtyBase, qtyColorways, sizes, prefs.overagePct, prefs.mode, current.excluded, selectedRun],
+    [
+      qtyBase,
+      qtyColorways,
+      sizes,
+      prefs.overagePct,
+      prefs.mode,
+      current.excluded,
+      selectedRun,
+      fullPlan,
+    ],
   );
 
   const readiness = useMemo(

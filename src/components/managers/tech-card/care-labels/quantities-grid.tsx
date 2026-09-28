@@ -183,9 +183,11 @@ export function QuantitiesGrid({
           </tfoot>
         </table>
       </div>
-      <Text size='micro' data-care-totals={`${quantities.labelsA}/${quantities.labelsB}`}>
-        labels A {quantities.labelsA} · labels B {quantities.labelsB}
-        {k === 2 ? ' (simplex: face and back are separate labels, ×2)' : ''}
+      {/* Итоги — по плану печати, как README: B2 / B3 перелива — ещё этикетки, пустая изнанка B в
+          simplex — не этикетка. Пока план верстается, числа B нет — «…», а не догадка. */}
+      <Text size='micro' data-care-totals={`${quantities.labelsA}/${quantities.labelsB ?? '…'}`}>
+        labels A {quantities.labelsA} · labels B {quantities.labelsB ?? '…'}
+        {k === 2 ? ' (simplex: face and back are separate labels)' : ''}
       </Text>
     </div>
   );

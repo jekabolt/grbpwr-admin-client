@@ -7,7 +7,9 @@
 //
 // Ячейка 0 — вариант не в ZIP; колорвей с нулевой строкой — не в ZIP (предупреждение
 // `colorway-excluded`); все нули — БЛОК `nothing-to-export`. Копии A(колорвей, размер) = ячейка;
-// копии B(колорвей) = Σ строки. В simplex лицо и изнанка — две отдельные ленты: обе цифры ×2.
+// копии B(колорвей) = Σ строки на КАЖДЫЙ файл B колорвея. Итоги лент на экране — по плану печати
+// (`planLabelsB`), ровно как README: перелив состава на B2 / B3 — ещё этикетки, в simplex лицо и
+// изнанка — две ленты, а пустая изнанка B файла не даёт.
 import type { common_ProductionRunStatus } from 'api/proto-http/admin';
 import type { CareLabelRun } from './adapter';
 import { hole, type Hole } from './holes';
@@ -54,6 +56,30 @@ export function fromRun(
   return grid;
 }
 
+/** Файлы плана печати колорвея — ровно то, что нужно для счёта лент (`PrintSet.files`). */
+export type PlanFiles = ReadonlyMap<
+  number,
+  { files: readonly { label: string; sizeId?: number }[] }
+>;
+
+/**
+ * Лент B по плану печати — то же правило, что `archiveCounts` README: КАЖДЫЙ файл B колорвея (B, B2
+ * …; в simplex — лицо и непустая изнанка) несёт Σ строки колорвея. План — полный (`planAll`): файлы
+ * в нём те же, что в архиве, копии берутся из сетки. Колорвей с лентами, но без плана (вёрстка ещё
+ * идёт или упала) — число неизвестно: `null`, а не догадка.
+ */
+export function planLabelsB(plans: PlanFiles, cells: QtyGrid): number | null {
+  let labelsB = 0;
+  for (const [cwKey, row] of Object.entries(cells)) {
+    const rowTotal = Object.values(row).reduce((a, v) => a + v, 0);
+    if (rowTotal === 0) continue;
+    const plan = plans.get(Number(cwKey));
+    if (!plan) return null;
+    labelsB += plan.files.filter((f) => f.label !== 'A').length * rowTotal;
+  }
+  return labelsB;
+}
+
 /** Запас: `ceil(q × (100 + pct) / 100)` в целых; 0 остаётся 0. */
 export const withOverage = (q: number, pct: number): number =>
   q <= 0 ? 0 : Math.ceil((q * (100 + Math.max(0, Math.round(pct)))) / 100);
@@ -70,10 +96,10 @@ export type Quantities = {
   cells: QtyGrid;
   rowTotals: Record<number, number>;
   colTotals: Record<number, number>;
-  /** Лент A всего (Σ ячеек); в simplex ×2. */
+  /** Лент A всего (Σ ячеек); в simplex ×2 — у A всегда две стороны (QR), файлов ровно столько. */
   labelsA: number;
-  /** Лент B всего (Σ строк); в simplex ×2. */
-  labelsB: number;
+  /** Лент B всего по плану печати (каждая B, B2 …); `null` — план ещё не свёрстан, число неизвестно. */
+  labelsB: number | null;
   /** Колорвеи, у которых строка нулевая: в архив не идут. */
   zeroColorways: Set<number>;
   holes: Hole[];
@@ -89,6 +115,8 @@ export function computeQuantities(input: {
   excluded?: readonly number[];
   /** Выбранный прогон (для `run-stale`). */
   run?: Pick<CareLabelRun, 'id' | 'status' | 'label'> | null;
+  /** Полный план печати по колорвею (`planAll().sets`); нет — лент B не знаем. */
+  plans?: PlanFiles | null;
 }): Quantities {
   const { base, colorways, sizeIds, overagePct, mode } = input;
   const excluded = new Set(input.excluded ?? []);
@@ -140,7 +168,8 @@ export function computeQuantities(input: {
     rowTotals,
     colTotals,
     labelsA: total * k,
-    labelsB: total * k,
+    // Ноль лент — ноль и без плана; иначе B только по плану (перелив B2, пустая изнанка в simplex).
+    labelsB: total === 0 ? 0 : input.plans ? planLabelsB(input.plans, cells) : null,
     zeroColorways,
     holes,
   };
