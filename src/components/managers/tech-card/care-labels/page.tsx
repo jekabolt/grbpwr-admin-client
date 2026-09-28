@@ -27,7 +27,7 @@ import { QuantitiesGrid } from './quantities-grid';
 import { QrSettings } from './qr-settings';
 import { collectReadiness } from './readiness';
 import type { ManifestColorway } from './manifest';
-import { planPrint, type PrintSet } from './pages';
+import { planPrint, previewASides, type PrintSet } from './pages';
 import { buildPrintJob, compositionsOf, planAll } from './print-job';
 import { SidesPreview, type PreviewSide, type PreviewView } from './sides-preview';
 import { createShaper, type Shaper } from './text-outline';
@@ -46,20 +46,18 @@ export const docKey = (routeId: string | undefined) => `care-labels|${routeId ??
 
 /**
  * Стороны превью выбранного варианта — из полного плана колорвея (настоящая раскладка E6, припуск
- * как в режиме). A-изнанка общая на колорвей, если ссылка QR не зависит от размера.
+ * как в режиме). A — по ID размера (`previewASides`): подпись `XS [44]` бывает у двух размеров, и
+ * превью показало бы лицо соседа с его SKU. A-изнанка общая на колорвей, если QR не по размеру.
  */
 function previewSides(
   set: PrintSet | undefined,
-  sizeLabel: string | undefined,
+  sizeId: number | undefined,
   said: { aFace: string; aBack: string },
 ): PreviewSide[] {
-  if (!set || !sizeLabel) return [];
+  if (!set || sizeId == null) return [];
   const all = [...set.sides.values()];
   const out: PreviewSide[] = [];
-  const faceA = all.find((p) => p.label === 'A' && p.role === 'face' && p.size === sizeLabel);
-  const backA =
-    all.find((p) => p.label === 'A' && p.role === 'back' && p.size === sizeLabel) ??
-    all.find((p) => p.label === 'A' && p.role === 'back' && p.size === undefined);
+  const { face: faceA, back: backA } = previewASides(set, sizeId);
   if (faceA)
     out.push({
       key: 'A-face',
@@ -187,7 +185,7 @@ export function TechCardCareLabels() {
         ? variantSku(selectedCw.baseSku, selectedSize.skuOrd)
         : selectedCw.baseSku;
     const qrUrl = qrExample ? qrLink(qrPrefs, qrExample.vars) : '';
-    return previewSides(fullPlan?.sets.get(selectedCw.id), selectedSize.label, {
+    return previewSides(fullPlan?.sets.get(selectedCw.id), selectedSize.id, {
       aFace: [
         `${sku} / ${selectedCw.colourName.toUpperCase()} / [${selectedSize.label}]`,
         selectedCw.countryName ? `MADE IN ${selectedCw.countryName.toUpperCase()}` : '',

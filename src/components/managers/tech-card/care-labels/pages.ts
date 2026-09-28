@@ -33,8 +33,10 @@ import type { Shaper } from './text-outline';
 
 export type SizePrintJob = {
   sizeId: number;
-  /** Размер как на ленте (`XL`, `XS [44]`). */
+  /** Размер как на ленте (`XL`, `XS [44]`). НЕ уникален: `xs_44ta_m` и `xs_44ta_f` — оба `XS [44]`. */
   label: string;
+  /** Порядковый номер размера в SKU варианта (1..99); null — нет (дыра `size-no-ord`). */
+  skuOrd: number | null;
   /** SKU варианта (`RC27-99999-OFW-76`). */
   sku: string;
   /** Копий этикетки A этого размера (= изделий); 0 — размер не печатается. */
@@ -72,15 +74,17 @@ export type PlannedSide = {
   role: SideRole;
   /** Размер — только у сторон, которые от него зависят (A-лицо; A-изнанка, если QR по размеру). */
   size?: string;
+  /** Id размера у тех же сторон: подпись размера не уникальна, сторону ищут по id. */
+  sizeId?: number;
   side: CareSide;
-  /** Имя файла в `svg/` без расширения: `<folder>-A-face-xl`, `<folder>-B-back`. */
+  /** Имя файла в `svg/` без расширения: `<folder>-A-face-06-xl`, `<folder>-B-back`. */
   svgStem: string;
 };
 
 export type PlannedFile = {
   colorwayId: number;
   folder: string;
-  /** Имя файла без расширения: `A-main-xl`, `A-main-xl-face`, `B-composition`, `B2-composition-back`. */
+  /** Имя файла без расширения: `A-main-06-xl`, `A-main-06-xl-face`, `B-composition`, `B2-composition-back`. */
   stem: string;
   label: LabelName;
   size?: string;
@@ -100,9 +104,12 @@ export type PrintSet = {
   holes: Hole[];
 };
 
-/** Ключ уникальной стороны (§6.5): `colorway|label|side|size?`. */
-export const sideKey = (colorwayId: number, label: LabelName, role: SideRole, size = '') =>
-  `${colorwayId}|${label}|${role}|${size}`;
+/**
+ * Ключ уникальной стороны (§6.5): `colorway|label|side|sizeId?`. Размер — по ID, не по подписи: две
+ * записи словаря с одной подписью (`XS [44]`) — разные размеры с разными SKU на лице.
+ */
+export const sideKey = (colorwayId: number, label: LabelName, role: SideRole, sizeId = '') =>
+  `${colorwayId}|${label}|${role}|${sizeId}`;
 
 /** Слаг для имён файлов: `[a-z0-9-]`, `XS [44]` → `xs-44`. */
 export const fileSlug = (s: string) =>
@@ -110,6 +117,31 @@ export const fileSlug = (s: string) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
+
+/**
+ * Часть имени файла A на размер: порядковый номер из SKU варианта + подпись (`06-xl`, `76-xs-44`).
+ * Номер уникален на колорвей и сортирует файлы по размерному ряду; без номера (блок `size-no-ord`,
+ * в архив не попадёт) — id размера, чтобы превью и план всё равно не склеили два размера.
+ */
+export const sizeStem = (s: Pick<SizePrintJob, 'sizeId' | 'label' | 'skuOrd'>) =>
+  [s.skuOrd != null ? String(s.skuOrd).padStart(2, '0') : `id${s.sizeId}`, fileSlug(s.label)]
+    .filter(Boolean)
+    .join('-');
+
+/** Стороны A размера для превью — по id размера; изнанка общая на колорвей, если QR не по размеру. */
+export function previewASides(
+  set: PrintSet | undefined,
+  sizeId: number | undefined,
+): { face?: PlannedSide; back?: PlannedSide } {
+  if (!set || sizeId == null) return {};
+  const all = [...set.sides.values()].filter((p) => p.label === 'A');
+  return {
+    face: all.find((p) => p.role === 'face' && p.sizeId === sizeId),
+    back:
+      all.find((p) => p.role === 'back' && p.sizeId === sizeId) ??
+      all.find((p) => p.role === 'back' && p.sizeId === undefined),
+  };
+}
 
 // ---------- план ----------
 
@@ -119,11 +151,9 @@ export function planPrint(sh: Shaper, job: PrintJob): PrintSet {
   const files: PlannedFile[] = [];
   const holes: Hole[] = [];
 
-  const addSide = (p: Omit<PlannedSide, 'svgStem'>, folder: string): string => {
+  const addSide = (p: Omit<PlannedSide, 'svgStem'>, folder: string, stemSize = ''): string => {
     if (!sides.has(p.key)) {
-      const svgStem = [folder, p.label, p.role, p.size ? fileSlug(p.size) : '']
-        .filter(Boolean)
-        .join('-');
+      const svgStem = [folder, p.label, p.role, stemSize].filter(Boolean).join('-');
       sides.set(p.key, { ...p, svgStem });
     }
     return p.key;
@@ -157,6 +187,7 @@ export function planPrint(sh: Shaper, job: PrintJob): PrintSet {
     const qrPerSize = new Set(printed.map((s) => s.qrUrl)).size > 1;
 
     for (const s of printed) {
+      const stem = sizeStem(s);
       const face = typesetAFace(
         sh,
         { sku: s.sku, colour: cw.colour, size: s.label, care: job.care, country: cw.country },
@@ -164,17 +195,18 @@ export function planPrint(sh: Shaper, job: PrintJob): PrintSet {
       );
       const faceKey = addSide(
         {
-          key: sideKey(cw.colorwayId, 'A', 'face', s.label),
+          key: sideKey(cw.colorwayId, 'A', 'face', String(s.sizeId)),
           colorwayId: cw.colorwayId,
           label: 'A',
           role: 'face',
           size: s.label,
+          sizeId: s.sizeId,
           side: face,
         },
         cw.folder,
+        stem,
       );
-      const backSize = qrPerSize ? s.label : '';
-      const bKey = sideKey(cw.colorwayId, 'A', 'back', backSize);
+      const bKey = sideKey(cw.colorwayId, 'A', 'back', qrPerSize ? String(s.sizeId) : '');
       if (!sides.has(bKey)) {
         const back = typesetABack(sh, { url: s.qrUrl }, seamFor(mode, 'back'));
         addSide(
@@ -183,10 +215,12 @@ export function planPrint(sh: Shaper, job: PrintJob): PrintSet {
             colorwayId: cw.colorwayId,
             label: 'A',
             role: 'back',
-            size: backSize || undefined,
+            size: qrPerSize ? s.label : undefined,
+            sizeId: qrPerSize ? s.sizeId : undefined,
             side: back,
           },
           cw.folder,
+          qrPerSize ? stem : '',
         );
         cwHoles.push(...back.holes);
       }
@@ -200,7 +234,7 @@ export function planPrint(sh: Shaper, job: PrintJob): PrintSet {
           sizeId: s.sizeId,
           copies: s.copies,
         },
-        `A-main-${fileSlug(s.label)}`,
+        `A-main-${stem}`,
         faceKey,
         bKey,
         false,

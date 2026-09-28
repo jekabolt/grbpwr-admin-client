@@ -69,6 +69,7 @@ export function buildPrintJob(input: PrintJobInput): PrintJob {
           return {
             sizeId: s.id,
             label: s.label,
+            skuOrd: s.skuOrd,
             sku: sku || cw.baseSku,
             copies: Math.max(0, Math.floor(input.copies(cw.id, s.id) || 0)),
             qrUrl: qrLink(qr, {

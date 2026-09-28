@@ -61,7 +61,7 @@ export function readmeText(r: ReadmeInput): string {
       ? '4. Pages go face, back, face, back ...: one label = one page pair printed on both sides of the ribbon.'
       : '4. Face and back are SEPARATE labels (-face / -back files, same copies). Stack them and sew both by the seam allowance edge (dashed line, 10 mm on the right).',
     '5. Black only (100 % K). Turn toner saving / draft mode OFF.',
-    '6. Folder = colourway, file = size; the copies are already inside each file. Cross-check with manifest.csv.',
+    '6. Folder = colourway, file = size (A-main-<size no. from the variant SKU>-<size>); the copies are already inside each file. Cross-check with manifest.csv.',
     '',
     'SUMMARY',
     `style ${r.style || '-'}`,
