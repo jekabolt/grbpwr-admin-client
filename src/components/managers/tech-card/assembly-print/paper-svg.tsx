@@ -1,6 +1,8 @@
 // ЛИСТ НА ЭКРАНЕ — тот же список примитивов, что уходит в PDF, нарисованный SVG в миллиметрах.
 // Никакого текста в HTML: всё, что видно, — ровно то, что скачается.
+import { useId } from 'react';
 import type { PaperDoc, Prim } from './paper';
+import type { PdfSize, Tile } from './paper-pdf';
 
 const PT = 25.4 / 72;
 const FONT = "FeatureMono, 'Inter', 'Helvetica Neue', Arial, sans-serif";
@@ -69,33 +71,80 @@ function PrimView({ p }: { p: Prim }) {
   }
 }
 
+/** Лист на экране в размере листа — стенд и всё, что не знает про страницы файла. */
+export function PaperSvg({ doc }: { doc: PaperDoc }) {
+  return <PaperPage doc={doc} page={{ w: doc.w, h: doc.h }} scale={1} tile={SHEET_TILE} />;
+}
+
+const SHEET_TILE: Tile = { tx: 0, ty: 0, clip: null, furniture: [] };
+
 /**
- * `page` — страница файла (свой размер или формат A): физический размер в мм, масштаб и сдвиг листа.
- * Лист масштабируется целиком через viewBox; поля формата вокруг листа — белые.
+ * Одна страница файла: лист в масштабе со сдвигом плитки, обрезанный её окном, и поля плитки
+ * (подпись, уголки) поверх — та же геометрия, что в `exportPaperPdf`.
  */
-export function PaperSvg({
+function PaperPage({
   doc,
   page,
+  scale,
+  tile,
+  clipId,
 }: {
   doc: PaperDoc;
-  page?: { w: number; h: number; scale: number; ox: number; oy: number };
+  page: { w: number; h: number };
+  scale: number;
+  tile: Tile;
+  clipId?: string;
 }) {
-  const p = page ?? { w: doc.w, h: doc.h, scale: 1, ox: 0, oy: 0 };
   return (
     <svg
       xmlns='http://www.w3.org/2000/svg'
       className='ap-sheet'
-      width={`${p.w}mm`}
-      height={`${p.h}mm`}
-      viewBox={`${-p.ox / p.scale} ${-p.oy / p.scale} ${p.w / p.scale} ${p.h / p.scale}`}
+      width={`${page.w}mm`}
+      height={`${page.h}mm`}
+      viewBox={`0 0 ${page.w} ${page.h}`}
       style={{ display: 'block', fontFamily: FONT, background: '#fff' }}
       role='img'
       aria-label='assembly order sheet'
     >
-      <rect x={0} y={0} width={doc.w} height={doc.h} fill='#fff' />
-      {doc.prims.map((p, i) => (
-        <PrimView key={i} p={p} />
+      <rect x={0} y={0} width={page.w} height={page.h} fill='#fff' />
+      {tile.clip && clipId && (
+        <defs>
+          <clipPath id={clipId} clipPathUnits='userSpaceOnUse'>
+            <rect x={tile.clip[0]} y={tile.clip[1]} width={tile.clip[2]} height={tile.clip[3]} />
+          </clipPath>
+        </defs>
+      )}
+      <g clipPath={tile.clip && clipId ? `url(#${clipId})` : undefined}>
+        <g transform={`translate(${tile.tx} ${tile.ty}) scale(${scale})`}>
+          {doc.prims.map((p, i) => (
+            <PrimView key={i} p={p} />
+          ))}
+        </g>
+      </g>
+      {tile.furniture.map((p, i) => (
+        <PrimView key={`f${i}`} p={p} />
       ))}
     </svg>
+  );
+}
+
+/** Файл на экране: страницы в раскладке сетки (как склеивать), на печати — по одной на лист. */
+export function PaperPages({ doc, size, gapMm }: { doc: PaperDoc; size: PdfSize; gapMm: number }) {
+  const id = useId().replace(/:/g, '');
+  return (
+    <div
+      className='ap-pages'
+      style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${size.cols}, ${size.w}mm)`,
+        gap: `${gapMm}mm`,
+      }}
+    >
+      {size.tiles.map((t, i) => (
+        <div key={i} className='ap-page'>
+          <PaperPage doc={doc} page={size} scale={size.scale} tile={t} clipId={`${id}-c${i}`} />
+        </div>
+      ))}
+    </div>
   );
 }
