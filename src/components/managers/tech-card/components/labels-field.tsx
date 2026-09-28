@@ -35,7 +35,7 @@ import {
   originCountryText,
 } from '../care-labels/adapter';
 import type { LabelBomLine } from '../care-labels/composition-resolver';
-import { isBlocking } from '../care-labels/holes';
+import { hole, isBlocking, type Hole } from '../care-labels/holes';
 import { useBomItemIdOptions } from './bom-line-picker';
 import { useCareDrift } from './care-drift';
 import { LabelsChecklist } from './labels-checklist';
@@ -321,12 +321,39 @@ function withMaterialComposition<T extends BomComp>(
 // каталога и пины usages приводит к числу адаптер ленты (`adaptMaterials` / `adaptUsages`), строки
 // формы — здесь; иначе материал строки не находится вовсе, а «пин того же артикула» выглядит пином
 // ДРУГОГО и закрывает часть дырой.
+//
+// «НЕ ЗАГРУЗИЛОСЬ» — НЕ «ПУСТО» (как у ленты, holes.ts). Каталог, который упал или ещё едет, — это не
+// пустой каталог: без него резолвер законно берёт снимок состава из строки BOM, а снимок бывает
+// устаревшим, и «generate» записал бы в CARE неверный юридический состав. Пока каталог и словарь не
+// приехали УСПЕШНО, состав не собирается вовсе: дыры `materials-unavailable` / `dictionary-unavailable`
+// — генератор отказывает, превью их показывает. Успешный пустой ответ — законный `[]`.
 function useCareComposer(techCardId: number | undefined) {
-  const { data: materialsData } = useMaterials('', true);
-  const { dictionary } = useDictionary();
+  const materialsQuery = useMaterials('', true);
+  const materialsOk = materialsQuery.isSuccess;
+  const materialsData = materialsQuery.data;
+  const { dictionary, error: dictionaryError } = useDictionary();
+  const dictionaryOk = !!dictionary && !dictionaryError;
   const { data: savedCard } = useTechCard(techCardId);
   return useCallback(
     (bomRows: BomComp[], labels: LabelRowLite[]): CareLabelText => {
+      const unavailable: Hole[] = [];
+      if (!dictionaryOk) {
+        unavailable.push(
+          hole(
+            'dictionary-unavailable',
+            'the dictionary did not load (still loading or the request failed) — the composition cannot be generated; reload the page',
+          ),
+        );
+      }
+      if (!materialsOk) {
+        unavailable.push(
+          hole(
+            'materials-unavailable',
+            'the materials catalogue did not load (still loading or the request failed) — the composition cannot be generated; reload the page',
+          ),
+        );
+      }
+      if (unavailable.length) return { text: '', parts: [], holes: unavailable };
       const materialsRaw = materialsData?.materials ?? [];
       const bom: LabelBomLine[] = withMaterialComposition(bomRows, materialsRaw).map((b, i) => ({
         lineKey: b.lineKey || `row-${i}`,
@@ -352,9 +379,11 @@ function useCareComposer(techCardId: number | undefined) {
         originCountry: originCountryText(labels.find((l) => l.labelType === ORIGIN)?.content),
       });
     },
-    [materialsData, dictionary, savedCard],
+    [materialsOk, materialsData, dictionaryOk, dictionary, savedCard],
   );
 }
+
+const UNAVAILABLE = new Set(['materials-unavailable', 'dictionary-unavailable']);
 
 // A live printed-label preview, composed from the SAME react-hook-form data the checklist reads
 // (bomItems + labels), so it can never word the tag differently from the spec. Nothing here writes:
@@ -375,8 +404,11 @@ function LabelPreview({ techCardId }: { techCardId?: number }) {
   // The composition / care text is the ONE generator's output (the label resolver, default
   // colourway), split so the "Made in …" line can print at the foot of the tag (as it does on a
   // real care label) below the symbols.
-  const composed = compose(bomItems, labels)
-    .text.split('\n')
+  const result = compose(bomItems, labels);
+  // Что мешает составу (блоки: не загрузилось, волокна нет в словаре …) — прямо под превью.
+  const shownHoles = result.holes.filter(isBlocking);
+  const composed = result.text
+    .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
   const madeIn = composed.find((l) => /^made in/i.test(l));
@@ -453,6 +485,21 @@ function LabelPreview({ techCardId }: { techCardId?: number }) {
           </div>
         )}
       </div>
+      {shownHoles.length > 0 && (
+        <div className='flex flex-col gap-0.5 pt-1' data-care-preview-holes=''>
+          {shownHoles.map((h, i) => (
+            <Text
+              key={`${h.code}-${i}`}
+              size='micro'
+              variant={h.level === 'block' ? 'errorLabel' : 'label'}
+              data-care-preview-hole={h.code}
+              data-hole-level={h.level}
+            >
+              {h.level}: {h.message}
+            </Text>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -508,6 +555,13 @@ export function LabelsField({
     const bomItems = (getValues('bomItems') ?? []) as BomComp[];
     const labels = (getValues('labels') ?? []) as LabelRowLite[];
     const { text, holes } = compose(bomItems, labels);
+    // Каталог или словарь не приехали — состав не собирается и ничего не пишется (ни снимок из BOM,
+    // ни переход в BOM: чинить там нечего, нужен ответ сервера).
+    const unavailable = holes.find((h) => UNAVAILABLE.has(h.code));
+    if (unavailable) {
+      showMessage(`the composition is not generated: ${unavailable.message}`, 'error');
+      return;
+    }
     // Блок резолвера говорит точнее двух старых фраз: КАКАЯ строка и ЧТО с ней (волокна нет в
     // словаре, смесевой код, пин артикула без состава…).
     const block = holes.find(isBlocking);
