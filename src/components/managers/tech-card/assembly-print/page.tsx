@@ -7,9 +7,10 @@
 // Печатается СОХРАНЁННАЯ карточка (GetTechCard), не черновик редактора: бумага в цеху обязана
 // совпадать с тем, что лежит в базе, а не с тем, что было на экране у того, кто нажал кнопку.
 //
-// Два выбора оператора живут в адресе (`?form=route|map&shapes=on|off`), чтобы ссылку можно было
-// отдать как есть: ROUTE — ведомость операций с дорожками узлов (основной документ), MAP — дерево
-// карточек узлов; силуэты деталей — из DXF карточки, только там, где чертежи вообще есть.
+// Выборы оператора живут в адресе (`?form=route|map&shapes=on|off&size=w600|h900`), чтобы ссылку
+// можно было отдать как есть: ROUTE — ведомость операций с дорожками узлов (основной документ), MAP —
+// дерево карточек узлов; силуэты деталей — из DXF карточки, только там, где чертежи вообще есть;
+// `size` — свой размер файла по одной стороне (вторая из пропорции), без него файл размером с лист.
 import { PrintDegradedNotice } from 'components/managers/print/degraded-notice';
 import { depStatus, usePrintReady, type PrintDep } from 'components/managers/print/use-print-ready';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
@@ -21,6 +22,7 @@ import { FormProvider, useForm } from 'react-hook-form';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
+import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { operationHeading, zoneLabel } from '../components/operation-options';
 import type { WorkCatalog } from '../components/operation-work';
@@ -32,17 +34,33 @@ import { useOperationWorkCatalog } from '../components/useOperationWorkCatalog';
 import { useTechCardReleases } from '../components/useSamples';
 import { assemblyPrintModel, type PrintCardInput } from './model';
 import { typesetMap, typesetRoute, type PaperDoc, type SheetMeta, type ShapeLookup } from './paper';
-import { exportPaperPdf, PDF_MAX_MM } from './paper-pdf';
+import {
+  exportPaperPdf,
+  pdfFileName,
+  pdfSize,
+  pdfSizeProblem,
+  smallestTextPt,
+  type PdfTarget,
+} from './paper-pdf';
 import { PaperSvg } from './paper-svg';
 
 type Form = 'route' | 'map';
 
 const PX_PER_MM = 96 / 25.4;
+
+// `size=w600` — ширина 600 мм, `size=h900` — высота 900 мм; мм до десятых.
+const parseTarget = (v: string | null): PdfTarget | null => {
+  const m = v?.match(/^([wh])(\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+  const mm = Math.round(parseFloat(m[2]) * 10) / 10;
+  return mm > 0 ? { side: m[1] as 'w' | 'h', mm } : null;
+};
+const formatTarget = (t: PdfTarget) => `${t.side}${t.mm}`;
 // Подпись входов листа: карточка ИЗ АДРЕСА (id в ответе бэка — необязательное поле), форма,
 // силуэты. Роутер переиспользует страницу при смене `:id`, и без подписи кнопка могла бы скачать
 // ПРЕДЫДУЩУЮ карточку, пока грузится новая.
-const docKey = (routeId: string | undefined, form: Form, shapes: boolean) =>
-  `${routeId ?? ''}|${form}|${shapes ? 'on' : 'off'}`;
+const docKey = (routeId: string | undefined, form: Form, shapes: boolean, size: string) =>
+  `${routeId ?? ''}|${form}|${shapes ? 'on' : 'off'}|${size}`;
 
 // Экранная обвязка: на печати (⌘P) прячется тулбар и снимается масштаб; лист печатается как есть.
 const SCREEN_CSS = `
@@ -125,10 +143,13 @@ function Document({
   onShapesAvailable,
   onDoc,
   docKey: key,
+  target,
 }: {
   techCard: common_TechCard;
   form: Form;
   shapes: boolean;
+  /** Свой размер файла; лист набирается с этим масштабом (подвал и линейка — о бумаге). */
+  target: PdfTarget | null;
   workCatalog: WorkCatalog;
   meta: SheetMeta;
   onDeps: (deps: PrintDep[]) => void;
@@ -155,15 +176,29 @@ function Document({
     if (!shapes || !hasDxf) return null;
     return (key) => shapeByKey?.get(pieceRefKey(key))?.piece ?? null;
   }, [shapes, hasDxf, shapeByKey]);
-  const doc = useMemo(
-    () => (form === 'map' ? typesetMap(M, meta, shapeOf) : typesetRoute(M, meta, shapeOf)),
-    [M, meta, shapeOf, form],
-  );
+  const doc = useMemo(() => {
+    const set = (m: SheetMeta) =>
+      form === 'map' ? typesetMap(M, m, shapeOf) : typesetRoute(M, m, shapeOf);
+    let d = set(meta);
+    if (!target) return d;
+    // Подвал масштабированного листа длиннее (размер файла, процент) и может лечь лишней строкой —
+    // тогда меняется высота листа, а с ней масштаб под заданную высоту. Пара проходов сходится.
+    let k = pdfSize(d, target).scale;
+    for (let i = 0; i < 3; i++) {
+      d = set({ ...meta, scale: k });
+      const next = pdfSize(d, target).scale;
+      if (next === k) break;
+      k = next;
+    }
+    return d;
+  }, [M, meta, shapeOf, form, target]);
   useEffect(() => onDoc(doc, key), [doc, key, onDoc]);
+  // Экран и ⌘P показывают ФАЙЛ: тот же лист в физическом размере файла.
+  const out = pdfSize(doc, target);
   return (
     <>
-      <style>{`@page { size: ${doc.w}mm ${doc.h}mm; margin: 0; }`}</style>
-      <PaperSvg doc={doc} />
+      <style>{`@page { size: ${out.w}mm ${out.h}mm; margin: 0; }`}</style>
+      <PaperSvg doc={doc} w={out.w} h={out.h} />
     </>
   );
 }
@@ -174,10 +209,17 @@ export function TechCardAssemblyPrint() {
   const [searchParams, setSearchParams] = useSearchParams();
   const form: Form = searchParams.get('form') === 'map' ? 'map' : 'route';
   const shapes = searchParams.get('shapes') !== 'off';
-  const setChoice = (next: { form?: Form; shapes?: boolean }) => {
+  const sizeParam = searchParams.get('size');
+  // Мемо по строке адреса: объект цели входит в зависимости набора листа.
+  const target = useMemo(() => parseTarget(sizeParam), [sizeParam]);
+  const setChoice = (next: { form?: Form; shapes?: boolean; target?: PdfTarget | null }) => {
     const f = next.form ?? form;
     const s = next.shapes ?? shapes;
-    setSearchParams({ form: f, shapes: s ? 'on' : 'off' }, { replace: true });
+    const t = next.target === undefined ? target : next.target;
+    setSearchParams(
+      { form: f, shapes: s ? 'on' : 'off', ...(t ? { size: formatTarget(t) } : {}) },
+      { replace: true },
+    );
   };
   const showMessage = useSnackBarStore((s) => s.showMessage);
 
@@ -205,11 +247,25 @@ export function TechCardAssemblyPrint() {
   const [shapesAvailable, setShapesAvailable] = useState<boolean | null>(null);
   const [docState, setDocState] = useState<{ doc: PaperDoc; key: string } | null>(null);
   const onDoc = useCallback((doc: PaperDoc, key: string) => setDocState({ doc, key }), []);
-  const currentKey = docKey(id, form, shapes);
+  const currentKey = docKey(id, form, shapes, target ? formatTarget(target) : '');
   const doc = docState && docState.key === currentKey ? docState.doc : null;
   const [exporting, setExporting] = useState(false);
-  // Предел страницы PDF (5080 мм): лист крупнее jsPDF молча обрежет — честнее не отдавать файл.
-  const tooBigForPdf = !!doc && (doc.w > PDF_MAX_MM || doc.h > PDF_MAX_MM);
+  // Размер файла: лист как есть или масштаб целиком под заданную сторону. Предел страницы PDF
+  // (5080 мм; крупнее jsPDF молча обрежет) проверяется по ФАЙЛУ, а не по листу: лист шире предела
+  // можно отдать, уменьшив его.
+  const size = doc ? pdfSize(doc, target) : null;
+  const sizeProblem = size ? pdfSizeProblem(size) : null;
+  const minPt = doc && size?.custom ? smallestTextPt(doc) : null;
+  // Поле, которое правят прямо сейчас, показывает набранное как есть («6», «60», «600»), а не
+  // пересчитанное; соседнее — выведенное из пропорции. Потеря фокуса возвращает оба к размеру файла.
+  const [sizeEdit, setSizeEdit] = useState<{ side: 'w' | 'h'; text: string } | null>(null);
+  const sideValue = (side: 'w' | 'h') =>
+    sizeEdit?.side === side ? sizeEdit.text : size ? String(size[side]) : '';
+  const onSideChange = (side: 'w' | 'h', text: string) => {
+    setSizeEdit({ side, text });
+    const mm = Math.round(parseFloat(text) * 10) / 10;
+    if (Number.isFinite(mm) && mm > 0) setChoice({ target: { side, mm } });
+  };
 
   const { ready, degraded } = usePrintReady([
     { label: 'tech card', status: depStatus(isLoading, isError) },
@@ -254,8 +310,8 @@ export function TechCardAssemblyPrint() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
-  const sheetWpx = (doc?.w ?? 420) * PX_PER_MM;
-  const sheetHpx = (doc?.h ?? 0) * PX_PER_MM;
+  const sheetWpx = (size?.w ?? 420) * PX_PER_MM;
+  const sheetHpx = (size?.h ?? 0) * PX_PER_MM;
   const k = view === 'fit' ? Math.min(1, (winW - 48) / sheetWpx) : 1;
 
   const report = doc?.report;
@@ -266,8 +322,14 @@ export function TechCardAssemblyPrint() {
         report.cols != null ? `${report.cols} columns × ${report.colW} mm` : '',
         `${report.crossings} crossings`,
         report.overWidth ? 'wider than A0 — print from a roll' : '',
-        tooBigForPdf
-          ? `exceeds the PDF page limit of ${PDF_MAX_MM} mm — use the other diagram`
+        size?.custom
+          ? `pdf ${size.w} × ${size.h} mm · ${Math.round(size.scale * 1000) / 10} %` +
+            (minPt != null ? ` · smallest text ${Math.round(minPt * size.scale * 10) / 10} pt` : '')
+          : '',
+        sizeProblem
+          ? size?.custom
+            ? `${sizeProblem} — change the pdf size`
+            : `sheet ${sizeProblem} — set a smaller pdf size`
           : '',
       ]
         .filter(Boolean)
@@ -278,7 +340,7 @@ export function TechCardAssemblyPrint() {
     if (!doc) return;
     setExporting(true);
     try {
-      await exportPaperPdf(doc);
+      await exportPaperPdf(doc, pdfSize(doc, target));
     } catch (e) {
       showMessage(`pdf failed: ${e instanceof Error ? e.message : String(e)}`, 'error');
     } finally {
@@ -379,6 +441,54 @@ export function TechCardAssemblyPrint() {
               </Chip>
             </ChipRow>
           </div>
+          <div className='flex items-center gap-2'>
+            <Text variant='label' size='small'>
+              pdf size
+            </Text>
+            <ChipRow>
+              <Chip
+                nonForm
+                pressed={!target}
+                selected={!target}
+                onClick={() => {
+                  setSizeEdit(null);
+                  setChoice({ target: null });
+                }}
+                title='the file is exactly the sheet'
+              >
+                sheet
+              </Chip>
+            </ChipRow>
+            {(['w', 'h'] as const).map((side, i) => (
+              <div key={side} className='flex items-center gap-1'>
+                {i === 1 && <Text size='small'>×</Text>}
+                <Text variant='label' size='small'>
+                  {side}
+                </Text>
+                <Input
+                  type='number'
+                  min={0}
+                  step={1}
+                  inputMode='decimal'
+                  aria-label={side === 'w' ? 'pdf width, mm' : 'pdf height, mm'}
+                  title={`type the ${side === 'w' ? 'width' : 'height'} in mm — the other side follows the sheet's proportions, the whole sheet is scaled`}
+                  className='w-[76px] tabular-nums'
+                  disabled={!doc}
+                  value={sideValue(side)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    onSideChange(side, e.target.value)
+                  }
+                  onBlur={() => setSizeEdit(null)}
+                  onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                    if (e.key === 'Enter') e.currentTarget.blur();
+                  }}
+                />
+              </div>
+            ))}
+            <Text variant='label' size='small'>
+              mm
+            </Text>
+          </div>
         </div>
         <div className='ml-auto flex items-center gap-3'>
           {readout && (
@@ -392,10 +502,12 @@ export function TechCardAssemblyPrint() {
             className='uppercase'
             // Не «пришла ли карта», а «готов ли весь лист»: данные и контуры. По таймауту гейт
             // отпускает кнопку сам и называет недостающее строкой на листе.
-            disabled={!doc || !ready || exporting || tooBigForPdf}
+            disabled={!doc || !ready || exporting || !!sizeProblem}
             onClick={download}
             title={
-              doc ? `${doc.fileStem}.pdf · ${doc.w} × ${doc.h} mm · vector, black only` : undefined
+              doc && size
+                ? `${pdfFileName(doc, size)} · ${size.w} × ${size.h} mm · vector, black only`
+                : undefined
             }
           >
             {exporting ? 'preparing pdf…' : 'download pdf'}
@@ -430,7 +542,7 @@ export function TechCardAssemblyPrint() {
           </div>
           <div
             className='ap-stage origin-top-left'
-            style={{ transform: `scale(${k})`, width: `${doc?.w ?? 420}mm` }}
+            style={{ transform: `scale(${k})`, width: `${size?.w ?? 420}mm` }}
           >
             <FormProvider {...methods}>
               <Document
@@ -443,6 +555,7 @@ export function TechCardAssemblyPrint() {
                 onShapesAvailable={setShapesAvailable}
                 onDoc={onDoc}
                 docKey={currentKey}
+                target={target}
               />
             </FormProvider>
           </div>
