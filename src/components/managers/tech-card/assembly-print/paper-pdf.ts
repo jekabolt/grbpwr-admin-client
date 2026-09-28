@@ -28,7 +28,8 @@ export const PAPERS = {
   A0: [841, 1189],
 } as const;
 export type Paper = keyof typeof PAPERS;
-export const isPaper = (v: string): v is Paper => v in PAPERS;
+// Свои ключи, не унаследованные: `?size=constructor` не должен стать форматом бумаги.
+export const isPaper = (v: string): v is Paper => Object.prototype.hasOwnProperty.call(PAPERS, v);
 
 export type PdfTarget = { side: 'w' | 'h'; mm: number } | { paper: Paper };
 export type PdfSize = {
