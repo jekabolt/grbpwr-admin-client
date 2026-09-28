@@ -14,10 +14,13 @@ import type {
   common_AdminColorwayRef,
   common_ColorwayLifecycleStatus,
   common_Dictionary,
+  common_Fiber,
   common_Material,
   common_ProductionRun,
   common_ProductionRunStatus,
   common_TechCard,
+  common_TechCardBomItem,
+  common_TechCardBomLabelPart,
   GetColorwayByIDResponse,
   googletype_Decimal,
 } from 'api/proto-http/admin';
@@ -40,8 +43,14 @@ import type {
   LabelUsage,
 } from './composition-resolver';
 import { hole, type Hole } from './holes';
+import type { LabelPartWire } from './label-parts';
 import { isLabelLang, type LabelLang } from './phrases';
-import type { WireBomItem, WireFiber } from './wire-shim';
+
+// Строки энума части в движке (`label-parts.ts`, без импорта генерата) и в генерате — один и тот же
+// набор. Разъедутся (новая часть в прото без правки движка или наоборот) — здесь красный tsc.
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+const LABEL_PART_WIRE_MATCHES_PROTO: Same<LabelPartWire, common_TechCardBomLabelPart> = true;
+void LABEL_PART_WIRE_MATCHES_PROTO;
 
 const ORIGIN = 'TECH_CARD_LABEL_TYPE_ORIGIN';
 const CARE = 'TECH_CARD_LABEL_TYPE_CARE';
@@ -138,7 +147,7 @@ const norm = (s: string) => s.trim().toLowerCase();
 
 // ---------- чистый адаптер ----------
 
-export function adaptFibers(fibers: readonly WireFiber[] | undefined): FiberDict {
+export function adaptFibers(fibers: readonly common_Fiber[] | undefined): FiberDict {
   const out = new Map<string, LabelFiber>();
   for (const f of fibers ?? []) {
     if (!f.code) continue;
@@ -174,7 +183,7 @@ export function adaptMaterials(materials: readonly common_Material[]): Map<numbe
   return out;
 }
 
-export function adaptBom(items: readonly WireBomItem[] | undefined): LabelBomLine[] {
+export function adaptBom(items: readonly common_TechCardBomItem[] | undefined): LabelBomLine[] {
   return (items ?? [])
     .filter((b) => !!b.lineKey)
     .map((b) => ({
@@ -376,9 +385,9 @@ export function adaptCareLabels(src: CareLabelSourceInput): CareLabelData {
     styleName: insert?.name ?? '',
     colorways,
     sizes,
-    bom: adaptBom(insert?.bomItems as WireBomItem[] | undefined),
+    bom: adaptBom(insert?.bomItems),
     materials: adaptMaterials(src.materials),
-    fibers: adaptFibers(dict?.fibers as WireFiber[] | undefined),
+    fibers: adaptFibers(dict?.fibers),
     care: { codes, prose },
     runs: adaptRuns(src.runs),
     holes,
