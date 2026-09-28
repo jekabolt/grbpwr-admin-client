@@ -1,5 +1,6 @@
 import { common_GenderEnum, common_SeasonEnum } from 'api/proto-http/admin';
 import { LANGUAGES, SELLING_CURRENCIES } from 'constants/constants';
+import { paletteRefusal } from 'components/managers/tech-card/components/colourway-palette-model';
 import { z } from 'zod';
 
 const requiredLanguageIds = LANGUAGES.map((l) => l.id);
@@ -114,6 +115,37 @@ const missingPriceCurrencies = (arr: { currency: string; price?: { value?: strin
 // checklist by <LifecycleControls/>), so the client only hard-gates completeness for an already-live
 // (strict) colourway. `strict = false` yields the DRAFT schema used on create and while a colourway
 // is still DRAFT.
+// T45: the colourway's own name, its palette (1…8 colours, the first one main; each a pantone code
+// or a label, hex for preview) and the name per storefront language. Optional as a whole — a
+// legacy colourway carries none — but a palette needs a name (server: name_required_with_palette)
+// and every colour needs a pantone code or a label (paletteRefusal is the one rule both the studio
+// window and this form apply). The SKU token is never a form field: the server mints it.
+const paletteRowSchema = z.object({
+  pantone: z.string(),
+  pantoneSystem: z.string(),
+  label: z.string(),
+  hex: z.string(),
+});
+const developmentSchema = z
+  .object({
+    name: z.string().max(64, 'the colourway name is up to 64 characters'),
+    colours: z.array(paletteRowSchema),
+    nameI18n: z.record(z.string(), z.string()),
+  })
+  .superRefine((d, ctx) => {
+    if (d.colours.length > 0 && !d.name.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['name'],
+        message: 'give the colourway a name — a colourway with a palette carries its own',
+      });
+    }
+    const refusal = paletteRefusal(d.colours);
+    if (refusal) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['colours'], message: refusal });
+    }
+  });
+
 const makeProductSchema = (strict: boolean) =>
   z
     .object({
@@ -123,6 +155,7 @@ const makeProductSchema = (strict: boolean) =>
       styleId: z.string().optional(),
       product: z.object({
         productBodyInsert: makeProductBodySchema(strict),
+        development: developmentSchema,
         thumbnailMediaId: strict ? z.number().min(1, 'Thumbnail must be selected') : z.number(),
         secondaryThumbnailMediaId: z.number().optional(),
         translations: strict
@@ -261,6 +294,7 @@ export const defaultData = {
       fit: '',
       season: '' as common_SeasonEnum,
     },
+    development: { name: '', colours: [], nameI18n: {} },
     thumbnailMediaId: 0,
     secondaryThumbnailMediaId: 0,
     translations: LANGUAGES.map((l) => ({ languageId: l.id, name: '', description: '' })),

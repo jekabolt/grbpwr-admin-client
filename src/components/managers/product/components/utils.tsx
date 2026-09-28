@@ -7,6 +7,12 @@ import {
   CreateColorwayRequest,
   StylePatch,
 } from 'api/proto-http/admin';
+import {
+  nameI18nPatch,
+  paletteFromWire,
+  paletteSignature,
+  paletteToWire,
+} from 'components/managers/tech-card/components/colourway-palette-model';
 import { LANGUAGES, SELLING_CURRENCIES } from 'constants/constants';
 import { ProductFormData } from '../utility/schema';
 
@@ -31,8 +37,12 @@ function toWellKnownTimestamp(value: string | undefined): string {
 // The fields shared by CreateColorway and UpdateColorway (everything but the request-specific keys —
 // style_id on create, colorway_id/expected_colorway_version/update_mask on update). Typing it as
 // Omit<CreateColorwayRequest,'styleId'> guarantees the two call sites stay in lockstep with the proto.
-export function buildColorwayWrite(data: ProductFormData): Omit<CreateColorwayRequest, 'styleId'> {
+export function buildColorwayWrite(
+  data: ProductFormData,
+  initial?: ProductFormData,
+): Omit<CreateColorwayRequest, 'styleId'> {
   const b = data.product.productBodyInsert;
+  const dev = developmentDelta(data, initial);
 
   const merchandising: common_ColorwayMerchandisingInsert = {
     preorder: toWellKnownTimestamp(b.preorder),
@@ -55,7 +65,31 @@ export function buildColorwayWrite(data: ProductFormData): Omit<CreateColorwayRe
 
   return {
     merchandising,
-    development: undefined, // dev/lab-dip recipe is edited on the tech card, not this form
+    // T45: the colourway's name, palette and name translations are written here; the lab-dip block
+    // and the recipe stay on the tech card. Sent only when something of them changed (the update
+    // mask names exactly those leaves), undefined otherwise — a legacy colourway keeps carrying none.
+    development: dev.changed
+      ? {
+          devCode: undefined,
+          name: dev.name,
+          labDipStatus: undefined,
+          comment: undefined,
+          // The server mirrors colours[0] into pantone / pantoneSystem / devHex itself.
+          pantone: undefined,
+          pantoneSystem: undefined,
+          devHex: undefined,
+          swatchMediaId: undefined,
+          labDipRound: undefined,
+          labDipSubmittedAt: undefined,
+          labDipDecidedAt: undefined,
+          labDipDecidedBy: undefined,
+          labDipRejectReason: undefined,
+          usages: undefined,
+          displayOrder: undefined,
+          colours: dev.colours.length ? dev.colours : undefined,
+          nameI18n: dev.nameI18n,
+        }
+      : undefined,
     thumbnailMediaId: data.product.thumbnailMediaId,
     secondaryThumbnailMediaId: data.product.secondaryThumbnailMediaId || 0,
     mediaIds: data.mediaIds,
@@ -71,9 +105,36 @@ export function buildColorwayWrite(data: ProductFormData): Omit<CreateColorwayRe
   };
 }
 
+/**
+ * What of the development block this save changes against the loaded form (T45). The palette is
+ * replace-all by position and an EMPTY list under the mask is refused (a palette holds at least one
+ * colour), so an emptied palette is not a write here — the form refuses it before saving. The name
+ * translations are an upsert: only the languages that changed travel, '' deletes one.
+ */
+export function developmentDelta(data: ProductFormData, initial?: ProductFormData) {
+  const dev = data.product.development;
+  const was = initial?.product.development;
+  const name = dev.name.trim();
+  const nameChanged = name !== (was?.name ?? '').trim();
+  const colours = paletteToWire(dev.colours);
+  const coloursChanged =
+    colours.length > 0 && paletteSignature(dev.colours) !== paletteSignature(was?.colours ?? []);
+  const nameI18n = nameI18nPatch(was?.nameI18n, dev.nameI18n);
+  return {
+    name,
+    nameChanged,
+    colours,
+    coloursChanged,
+    nameI18n,
+    changed: nameChanged || coloursChanged || !!nameI18n,
+  };
+}
+
 // The update_mask paths for UpdateColorway. costPrice is included only when a value was entered, so an
 // empty cost field is "keep current" rather than "clear". Paths are lowerCamelCase (protojson).
-export function buildColorwayUpdateMask(data: ProductFormData): string {
+// T45: development leaves are named one by one and only when they changed — a mask path under
+// `development` selects that leaf alone, so an untouched palette or name is never rewritten.
+export function buildColorwayUpdateMask(data: ProductFormData, initial?: ProductFormData): string {
   const paths = [
     'merchandising',
     'thumbnailMediaId',
@@ -86,6 +147,10 @@ export function buildColorwayUpdateMask(data: ProductFormData): string {
   ];
   const costTrimmed = data.product.costPrice?.trim();
   if (costTrimmed && parseFloat(costTrimmed) > 0) paths.push('costPrice');
+  const dev = developmentDelta(data, initial);
+  if (dev.nameChanged) paths.push('development.name');
+  if (dev.coloursChanged) paths.push('development.colours');
+  if (dev.nameI18n) paths.push('development.nameI18n');
   return paths.join(',');
 }
 
@@ -202,6 +267,14 @@ export function mapProductFullToFormData(
         collection: merch?.collection || '',
         fit: merch?.fit || '',
         season: merch?.season || undefined,
+      },
+      // T45: colour_name is the colourway's own name once it has a palette and the family's
+      // dictionary name otherwise — so it is prefilled only when a palette stands; a legacy
+      // colourway starts nameless here rather than carrying the family name as its own.
+      development: {
+        name: merch?.colours?.length ? merch.colourName?.trim() || '' : '',
+        colours: paletteFromWire(merch?.colours),
+        nameI18n: { ...(merch?.nameI18n ?? {}) },
       },
       thumbnailMediaId: colorway?.display?.thumbnail?.id || 0,
       secondaryThumbnailMediaId: colorway?.display?.secondaryThumbnail?.id || 0,
