@@ -1,11 +1,9 @@
 import { GetDesignBandResponse, common_DesignPicture, common_MediaFull } from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { cn } from 'lib/utility';
-import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useId, useMemo, useState, type ChangeEvent } from 'react';
+import { useId, useMemo, useState, type ChangeEvent } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
-import { AiEnhance } from 'ui/components/ai-enhance';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
@@ -14,7 +12,6 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
-import Textarea from 'ui/components/text-area';
 import { Tiles } from 'ui/components/tiles';
 
 import type { TechCardFormData } from '../schema';
@@ -22,13 +19,10 @@ import {
   INPUT_MAX,
   REFERENCE_KIND,
   appendBoardPictures,
-  isBoardRow,
   isInputRow,
   type BoardItem,
 } from './mood-board';
-import { useTechCardAutosave } from './autosave-contract';
 import { displayDetailName, readBench } from './bench-slot';
-import { useMoodMinimumGate } from './chain-rail';
 import { useDrafted } from './drafted-contract';
 import { cropFamilies } from './generation/composite';
 import { LatestGeneration } from './generation/latest-generation';
@@ -44,24 +38,15 @@ import {
 import { FlatRunRow } from './flat-run-row';
 import { RecalledRunPrompt } from './history-recall';
 import { EmptyState, GROUP_GAP, PlaceOrDrawCell } from './core';
-import { cardFactsContext, composeWords } from './core/card-facts';
-import { useCardFacts } from './head/card-facts-form';
 import { VectorModal } from './modals';
 import { PictureTile } from './picture-tile';
-import { benchSides, pictureOffersSplit } from './render/model';
+import { pictureOffersSplit } from './render/model';
 import { useSplitToInput } from './split-to-input';
 import { ACTIVE_VIEWS, DETAIL_VIEW, normaliseViewKey, viewLabel } from './views';
 import { cardOnScreen, useDesignWrites } from './use-design-band';
-import {
-  dropWords,
-  followWords,
-  lockWords,
-  offerWords,
-  pickShownWords,
-  settleWords,
-  useWordsSeed,
-  wordsDecided,
-} from './words-seed';
+import { useWordsSeeding } from './use-words-seeding';
+import { WordsField } from './words-field';
+import { dropWords, omittedOf, pickShownWords, settleWords, useWordsSeed } from './words-seed';
 
 /**
  * РЕФЕРЕНСЫ — ВХОД, а не доска. Мудборд собирает настроение для человека; здесь лежит то, что
@@ -143,17 +128,16 @@ import {
  * фантомную пустоту скрытого нативного `<select>`.
  */
 /**
- * Потолок `garmentDescription` — ЕДИНСТВЕННОЕ НАПИСАНИЕ ЭТОГО ЧИСЛА. Его читают `maxLength`
- * самого поля, засев фактами (`composeWords` — опускает секции ЦЕЛИКОМ, а не режет хвост) и
- * `ai ✦` (`maxRunes`). Два разных потолка на одно поле — это способ потерять текст на том из них,
- * который меньше (ровно тот же довод, что у `CONCEPT_MAX` в `./mood-board`).
+ * Потолок `garmentDescription` — `WORDS_MAX` органа слов (`./words-field.tsx`), ЕДИНСТВЕННОЕ
+ * НАПИСАНИЕ ЭТОГО ЧИСЛА: его читают `maxLength` поля, счётчик, `ai ✦` и засев фактами
+ * (`composeWords` в `use-words-seeding.ts` — опускает секции ЦЕЛИКОМ, а не режет хвост). Орган
+ * общий с IN WORDS рендера (O-61), поэтому и число живёт при нём.
  */
-const GARMENT_MAX = 2000;
 
 /**
  * ЗАМОК ЗАСЕВА WORDS НА СЕССИЮ (D-20'') и сам засев (D-20'''') живут в `words-seed.ts`: засев в
  * значения формы не пишется, пока человек не подействовал, и все, кто читает слова на экране, читают
- * их оттуда.
+ * их оттуда. Предлагает засев эффект `use-words-seeding.ts` — общий с FABRIC RENDER (O-61 r2).
  */
 
 type RoleItem = { value: string; label: string; disabled?: boolean };
@@ -620,100 +604,10 @@ export function ReferencesSection({
   const garmentId = useId();
 
   // ── WORDS: ФАКТЫ КАРТОЧКИ, ОДИН РАЗ ЗА СЕССИЮ И ТОЛЬКО В ПУСТОЕ ПОЛЕ (T24, D-20'') ─────────────
-  /**
-   * Владелец: «WORDS по умолчанию = вся информация из полей мудборда, редактируемо, с AI ENHANCE».
-   * Здесь стояла дверь `from construction ▸`, приносившая посадку и аспекты по кнопке; теперь то,
-   * что она приносила (и больше), стоит в поле с самого начала, а дверь снята.
-   *
-   * ОДИН ЧИТАТЕЛЬ, ОДИН КОМПОЗИТОР. Факты формы читает `useCardFacts` (тот же, что у кнопок `ai ✦`
-   * DESCRIPTION, SILHOUETTE и FABRIC), строку собирает `composeWords` (`core/card-facts.ts`):
-   * `garment:` (имя листа категории словами — «cargo pants», не путь, O-35) · посадка · описание ·
-   * силуэт · ткань · аспекты · указания доски — в этом порядке, в потолок поля ЦЕЛЫМИ секциями;
-   * сколько не влезло, говорится под полем. Материалов в WORDS нет (O-35): для рисунка флэта они
-   * не нужны; в контексте `ai ✦` (`cardFactsContext`) они остаются.
-   *
-   * ⚠ «ПУСТО ПРИ ЗАГРУЗКЕ = ОТСУТСТВУЕТ» (D-20'', заменяет D-20'). Прежнее «сеять только при
-   * `undefined`» было мёртвым на любой настоящей карточке: сервер отдаёт NULL как `""` (dto
-   * `pbStringFromNull`), схема держит `''` как `''`, и провод не отличает «никогда не писали» от
-   * «стёрли». Поэтому засев применяется, когда ВСЁ сразу:
-   *   · поле пусто после trim;
-   *   · о карточке в этой сессии ещё не решено (`words-seed.ts`: засеяно, очищено CLEAR, стояло
-   *     непустым или стёрто руками — тогда не засевается);
-   *   · факты готовы (словарь приехал — иначе строки `garment:` не будет никогда) и строка непуста;
-   *   · карточку можно писать, и автосейв не `off` (засев, который не сохранится, — неправда на
-   *     экране: прогон читает СОХРАНЁННУЮ карточку);
-   *   · минимум доски пройден (`useMoodMinimumGate`, D-31: категория И (картинка на доске ИЛИ
-   *     непустое описание)): ранний визит не замораживает однострочник «garment: …» — засев дождётся
-   *     доски и выйдет полным; ИЛИ флэт уже сделан (D-13'').
-   * Принятое ограничение: очищенные и СОХРАНЁННЫЕ WORDS после перезагрузки засеются снова — сервер
-   * хранит `''` как NULL (сказано владельцу; бэк этой волной не трогается).
-   *
-   * ⚠ ЗАСЕВ — ТОЛЬКО НА ЭКРАНЕ, И В ФОРМУ ОН НЕ ПИШЕТСЯ (D-20'''', заменяет D-20'''). D-20''' клал его в
-   * форму без пометки «грязно» — но `isDirty` формы общий, а запись карточки шлёт все значения:
-   * подъём стадии, тихая запись с сохранённым назначением и синхронизация R-4 уносили засев на сервер
-   * записями, которых никто не делал (ревью раунда 3, M1). Теперь засев живёт в `words-seed.ts`, поле
-   * показывает его, пока значение формы пусто, и в форму («грязным») его отдаёт ДЕЙСТВИЕ человека:
-   * правка поля, ответ `ai ✦`, GENERATE (`materializeWords` перед `flush`, `flat-run-row.tsx`).
-   * Карточка, которую открыли и посмотрели, не сохраняется, не пишет черновика, не спрашивает при
-   * уходе и не двигает `lock_version` — и правка ЛЮБОГО другого поля засева тоже не несёт.
-   *
-   * ⚠ НЕ ПОВЕРХ НЕОТВЕЧЕННОГО ЧЕРНОВИКА (ревью раунда 2, MAJOR A). Пока баннер восстановления ждёт
-   * ответа (`autosave.draftPending`), форма — ещё не то, что человек выберет; засев поверх неё мог бы
-   * уйти записью мимо ответа и стереть найденную работу. После ответа эффект решает заново.
-   *
-   * ⚠ СЛОВАРЬ ОБЯЗАН ПРИЕХАТЬ, А НЕ ПРОСТО ПЕРЕСТАТЬ ГРУЗИТЬСЯ (ревью [5]): провал `GetDictionary`
-   * тоже снимает `loading`, но словаря нет — засев вышел бы без пути категории и замкнулся на сессию.
-   */
-  const facts = useCardFacts(isBoardRow);
-  const composed = useMemo(() => composeWords(facts, GARMENT_MAX), [facts]);
-  const factsContext = useMemo(() => cardFactsContext(facts), [facts]);
-  const { loading: dictionaryLoading, dictionary } = useDictionary();
-  const factsReady = !dictionaryLoading && !!dictionary;
-  const autosave = useTechCardAutosave();
-  const draftPending = autosave.draftPending;
-  const moodMinimum = useMoodMinimumGate();
-  // D-13'': сделанный шаг не запирается — у карточки с флэтами WORDS засевается и при неполном
-  // минимуме мудборда. GENERATE минимум требует.
-  // ⚠ КОПИЯ `stepDone('flat')` (core/chain.ts, ветка 'flat'), и копия НАМЕРЕННАЯ: общего `flatDone(band)`
-  // там нет, а файл — зоны CL-B. Правило одно — сторона флэтового верстака с картинкой; меняется
-  // там — меняется и здесь (в бэклог: экспортировать `flatDone` из chain.ts и звать его отсюда).
-  const flatDone = useMemo(() => benchSides(band).some((s) => !!s.picture), [band]);
-  const wordsNow = (garment.field.value ?? '') as string;
-  /* (c) Предложение видно только там, где его можно отдать: карточку можно писать, и она сохраняется
-     (ревью раунда 4, MIN-4). */
-  const wordsLive = !readOnly && autosave.status !== 'off';
-  useEffect(() => {
-    if (techCardId <= 0) return;
-    const blank = ((getValues('garmentDescription') ?? '') as string).trim() === '';
-    if (!blank) {
-      // Текст стоит (загружен, восстановлен, напечатан): в этой сессии поле больше не засевается.
-      lockWords(techCardId);
-      return;
-    }
-    if (!wordsLive || !factsReady || !composed.text || draftPending) return;
-    // Прогон, CLEAR или рекол со словами — слова сейчас не меняются; решим после.
-    if (wordsBusy) return;
-    if (wordsDecided(techCardId)) {
-      // (a) Предложение, уже стоящее на экране, ИДЁТ ЗА ФАКТАМИ (ревью раунда 4, MIN-4): новая
-      // категория или описание — новый текст. Снятое (`null`) не возвращается.
-      followWords(techCardId, composed.text, composed.omitted);
-      return;
-    }
-    if (!moodMinimum.ok && !flatDone) return;
-    // D-20'''': засев — ПРЕДЛОЖЕНИЕ НА ЭКРАНЕ, в значения формы он не пишется (см. `words-seed.ts`).
-    offerWords(techCardId, composed.text, composed.omitted);
-  }, [
-    techCardId,
-    wordsNow,
-    wordsLive,
-    factsReady,
-    composed,
-    draftPending,
-    wordsBusy,
-    moodMinimum.ok,
-    flatDone,
-    getValues,
-  ]);
+  /* Засев — общий хук флэта и FABRIC RENDER › IN WORDS (`use-words-seeding.ts`, O-61 r2): тот же
+     эффект, те же входы, перенесён как есть; правила засева расписаны там. Здесь — только то, что
+     нужно полю: видно ли предложение (`wordsLive`, (c)) и контекст `ai ✦` из фактов карточки. */
+  const { wordsLive, factsContext } = useWordsSeeding(techCardId, band, readOnly);
 
   // ── сплит референса → строки входа с ролями (R-17) ──────────────────────────────────────────
   // `addToInput` СКАЗАН ЯВНО и только здесь: кадры разреза становятся референсами лишь тогда,
@@ -847,12 +741,10 @@ export function ReferencesSection({
   const shown = pickShownWords(seed, garment.field.value, wordsLive);
   /** Кнопке нечего чистить — она выключена, а не спрятана: пустое место не объясняет, куда она делась. */
   const garmentChars = shown.trim().length;
-  /* Счётчик внутри поля считает СЫРУЮ длину — ту же, по которой режет `maxLength`; разбор у поля. */
-  const garmentLen = shown.length;
   const nothingToClear = refOf.size === 0 && garmentChars === 0;
   /* Сколько секций не влезло — из засева: строка переживает смену шага, пока на экране тот же текст,
      что засеян. */
-  const omittedShown = seed && seed.omitted > 0 && shown === seed.text ? seed.omitted : 0;
+  const omittedShown = omittedOf(seed, shown);
 
   return (
     <Section
@@ -979,88 +871,34 @@ export function ReferencesSection({
         >
           words
         </Text>
-        <label htmlFor={garmentId} className='sr-only'>
-          words for the model
-        </label>
-        {/* ═══ ПРАВЫЙ НИЖНИЙ УГОЛ ПОЛЯ — СЧЁТЧИК И `ai ✦`, ОДНОЙ СТРОКОЙ (r3 п.7 + D-20) ═════════
-            Владелец: «счётчик characters у WORDS — внутри поля снизу справа» (r3) и «WORDS … с AI
-            ENHANCE» (T24). Угол один, органов два — поэтому они стоят в нём ОДНОЙ СТРОКОЙ: число
-            `N / 2000` и сразу за ним тихая кнопка `ai ✦` (контракт `AiEnhance`: правый нижний угол
-            обёртки поля). Своё абсолютное место кнопки снято (`static`), чтобы она не легла на
-            счётчик, — строку держит обёртка.
-
-            ⚠ ЧИСЛО — СЫРАЯ ДЛИНА, А НЕ ОБРЕЗАННАЯ: режет `maxLength` по сырой длине.
-            ⚠ `pointer-events: none` НЕСУЩИЙ, и кнопка его ОТМЕНЯЕТ для себя: угол лежит НАД полем, и
-            клик в него мимо кнопки обязан ставить каретку. Полка под угол — нижний отступ поля
-            (30px, инлайном: класса такого роста в собранном CSS может не быть). */}
-        <div className='relative'>
-          <Textarea
-            {...garment.field}
-            data-field='garmentDescription'
-            id={garmentId}
-            disabled={readOnly}
-            readOnly={wordsBusy}
-            /* D-20'''': поле показывает засев, пока значение формы пусто; первая правка отдаёт в форму
-               то, что человек видит и поправил, — «грязным», как любая правка, — и засев больше не
-               подставляется (стёртое руками остаётся пустым). */
-            value={shown}
-            onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-              garment.field.onChange(event);
-              settleWords(techCardId, event.target.value);
-            }}
-            rows={3}
-            maxLength={GARMENT_MAX}
-            placeholder='what this flat has to show'
-            aria-label='words for the model'
-            style={{ paddingBottom: 30 }}
-            className='resize-y'
-          />
-          <div
-            data-words-corner=''
-            /* `right: 16`, а не 6: в самом углу стоит ручка `resize-y` поля, и кнопка на ней
-               закрывала бы её (замерено снимком стенда). */
-            style={{
-              position: 'absolute',
-              bottom: 6,
-              right: 16,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              pointerEvents: 'none',
-            }}
-          >
-            <Text
-              size='nano'
-              variant='label'
-              component='span'
-              data-words-count={garmentLen}
-              className='tabular-nums'
-            >
-              {garmentLen} / {GARMENT_MAX}
-            </Text>
-            <AiEnhance
-              field='words'
-              value={shown}
-              context={factsContext}
-              maxRunes={GARMENT_MAX}
-              disabled={readOnly || wordsBusy}
-              className='static pointer-events-auto'
-              onApply={(text) => {
-                setValue('garmentDescription', text, { shouldDirty: true });
-                settleWords(techCardId, text);
-              }}
-            />
-          </div>
-        </div>
-        {/* ЗАСЕВ НЕ ВЛЕЗ ЦЕЛИКОМ — сказано числом секций, а не молчанием (D-20''): пока текст тот,
-            что засеян (число живёт в сессионном замке и переживает смену шага); первая же правка
-            делает строку неправдой, и она уходит. */}
-        {omittedShown > 0 && (
-          <Text size='micro' variant='label' component='p' data-words-omitted={omittedShown}>
-            (+{omittedShown} section{omittedShown === 1 ? '' : 's'} omitted — the words hold{' '}
-            {GARMENT_MAX} characters)
-          </Text>
-        )}
+        {/* ═══ ОРГАН ПОЛЯ — ОБЩИЙ С IN WORDS РЕНДЕРА (27.09, O-61, D-60): `./words-field.tsx` ═══════
+            Поле, счётчик `N / 2000` и `ai ✦` в правом нижнем углу, строка «+N omitted» — один орган
+            на оба экрана, вынесенный отсюда без изменения поведения: те же пропы, тот же DOM. Здесь
+            остаётся только то, что знает флэт: поле формы, засев и замок входа. */}
+        <WordsField
+          {...garment.field}
+          data-field='garmentDescription'
+          id={garmentId}
+          label='words for the model'
+          disabled={readOnly}
+          readOnly={wordsBusy}
+          /* D-20'''': поле показывает засев, пока значение формы пусто; первая правка отдаёт в форму
+             то, что человек видит и поправил, — «грязным», как любая правка, — и засев больше не
+             подставляется (стёртое руками остаётся пустым). */
+          value={shown}
+          onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+            garment.field.onChange(event);
+            settleWords(techCardId, event.target.value);
+          }}
+          placeholder='what this flat has to show'
+          omitted={omittedShown}
+          aiContext={factsContext}
+          aiDisabled={readOnly || wordsBusy}
+          onApply={(text) => {
+            setValue('garmentDescription', text, { shouldDirty: true });
+            settleWords(techCardId, text);
+          }}
+        />
       </div>
 
       {/* ═══ РЯДЫ ПРОГОНА — ОДИН КОМПОНЕНТ, ОДИН РИТМ (r3 п.5; ряд источников снят D-20) ═══════════

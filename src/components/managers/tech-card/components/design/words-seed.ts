@@ -1,5 +1,5 @@
-import { useSyncExternalStore } from 'react';
-import { useWatch, type Control, type UseFormReturn } from 'react-hook-form';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useFormContext, useWatch, type Control, type UseFormReturn } from 'react-hook-form';
 
 import type { TechCardFormData } from '../schema';
 
@@ -30,8 +30,9 @@ import type { TechCardFormData } from '../schema';
  *
  * «ОТДАН В ФОРМУ» (materialized) — НЕ ФЛАГ, А ФАКТ ФОРМЫ (ревью раунда 4, MIN-4): засев показывается
  * тогда и только тогда, когда значение формы пусто, а предложение не снято. Поэтому:
- *   (a) неотданное предложение ИДЁТ ЗА ФАКТАМИ — эффект секции перезаписывает его текст на каждый
- *       новый `composed`; отданное стоит в форме и фактами не трогается;
+ *   (a) неотданное предложение ИДЁТ ЗА ФАКТАМИ — эффект засева (`use-words-seeding.ts`)
+ *       перезаписывает его текст на каждый новый `composed`; отданное стоит в форме и фактами не
+ *       трогается;
  *   (b) форма, ПЕРЕБАЗИРОВАННАЯ в пустое (сброс черновика, «reload theirs», тихое перечтение), снова
  *       показывает предложение — отдача «сбрасывается» сама, без слежки за базой формы;
  *   (c) на карточке, которую нельзя писать или которая не сохраняется, предложения НЕ ВИДНО —
@@ -130,6 +131,15 @@ export function pickShownWords(
   return live && seed && isBlank(value) ? seed.text : value;
 }
 
+/**
+ * Сколько секций засева не влезло — число строки «+N omitted» под полем. Строка правдива, пока на
+ * экране ровно засеянный текст: первая правка делает её неправдой, и она уходит. Одно написание на
+ * оба экрана, которые показывают эти слова (FLAT и FABRIC RENDER, O-61).
+ */
+export function omittedOf(seed: WordsSeed | null | undefined, shown: string): number {
+  return seed && seed.omitted > 0 && shown === seed.text ? seed.omitted : 0;
+}
+
 /** СЛОВА НА ЭКРАНЕ СЕЙЧАС — для щелчков и планов: значение формы, а пока оно пусто — засев. */
 export function shownWords(
   card: number,
@@ -163,4 +173,95 @@ export function materializeWords(
   const seed = readWordsSeed(card);
   if (!live || !seed || !isBlank(form.getValues('garmentDescription'))) return;
   form.setValue('garmentDescription', seed.text, { shouldDirty: true });
+}
+
+/**
+ * ═══ ВТОРОЙ ЭКРАН ТЕХ ЖЕ СЛОВ — FABRIC RENDER › IN WORDS (27.09, O-61, D-60) ═══════════════════
+ *
+ * Владелец: «в FABRIC RENDER в IN WORDS по дефолту должно быть то же самое, что и в WORDS во флете …
+ * с возможностью редактирования». Слова, которые рендер показывает по умолчанию, — СЛОВА КАРТОЧКИ
+ * НА ЭКРАНЕ FLAT: тот же `pickShownWords` над тем же засевом и тем же значением формы. Своего засева
+ * у рендера нет и заводиться не должно: два предложения одного текста разошлись бы на первой же
+ * правке фактов. Предлагает засев ОДИН эффект на оба экрана (`use-words-seeding.ts`, O-61 r2): его
+ * зовёт и IN WORDS, поэтому рендер, открытый первым, показывает умолчание сам, без захода на FLAT.
+ *
+ * СВОЁ У ЭКРАНА — ТОЛЬКО ЗАМОК, И КЛЮЧ ЗАМКА — КАРТОЧКА + ЭКРАН. CLEAR рендера и стёртое там руками
+ * снимают засев ЭТОГО экрана до перезагрузки страницы и не трогают флэта; CLEAR флэта (`dropWords`)
+ * не трогает рендера — тот после него просто показывает то, что показывает флэт, то есть пусто.
+ * Замок флэта — карта `session` выше, как была; замки прочих экранов — множество `dropped`. Модуль
+ * один: подписка одна, и снятие на любом экране будит всех читателей.
+ *
+ * СОБСТВЕННЫЕ СЛОВА ЭКРАНА ЖИВУТ НЕ ЗДЕСЬ. У рендера это `recipe.words` черновика подачи
+ * (`render/drafts.ts`): пока они пусты и замок не снят, экран показывает слова карточки; первое
+ * действие (правка, ответ `ai ✦`, GENERATE) отдаёт показанное в `recipe.words`, и дальше слова
+ * правятся независимо от флэта.
+ */
+export type WordsScreen = 'render';
+
+const dropped = new Set<string>();
+const screenKey = (card: number, screen: WordsScreen): string => `${screen}:${card}`;
+
+/** Засев экрана снят (CLEAR, стёрто руками) — или карточки нет, и засевать нечем. */
+export function screenWordsDropped(card: number, screen: WordsScreen): boolean {
+  return card <= 0 || dropped.has(screenKey(card, screen));
+}
+
+/** Снят ли засев экрана — живое, для отрисовки. */
+export function useScreenWordsDropped(card: number, screen: WordsScreen): boolean {
+  const read = () => screenWordsDropped(card, screen);
+  return useSyncExternalStore(subscribe, read, read);
+}
+
+/** CLEAR экрана: засев экрана снят до перезагрузки страницы; флэт и прочие экраны не тронуты. */
+export function dropScreenWords(card: number, screen: WordsScreen): void {
+  if (screenWordsDropped(card, screen)) return;
+  dropped.add(screenKey(card, screen));
+  notify();
+}
+
+/**
+ * Человек подействовал на экране сам — правкой или ответом `ai ✦`. Непустое стоит в собственных
+ * словах экрана; ПУСТОЕ — стёрто руками: засев экрана снимается, и пустое поле остаётся пустым, а
+ * не заливается словами карточки прямо под пальцами (то же правило, что `settleWords` у флэта).
+ */
+export function settleScreenWords(card: number, screen: WordsScreen, value: unknown): void {
+  if (isBlank(value)) dropScreenWords(card, screen);
+}
+
+/**
+ * Слова экрана на экране: собственные, а пока они пусты и засев экрана не снят — слова карточки
+ * (`cardWords`: то, что показывает FLAT). Пустые слова карточки не подставляются — тогда
+ * собственные показываются как есть.
+ */
+export function pickScreenWords(own: unknown, droppedNow: boolean, cardWords: string): string {
+  const value = (own ?? '') as string;
+  return !droppedNow && isBlank(value) && cardWords !== '' ? cardWords : value;
+}
+
+/**
+ * СЛОВА КАРТОЧКИ НА ЭКРАНЕ FLAT — для черновика подачи рендера (O-61). Тот же `pickShownWords`, что
+ * у `useShownWords`, но значение формы читается подпиской руками — правилом `render/drafts.ts`
+ * (`useCardFit`: `useWatch` без `control` разыменовал бы контекст сам). Сама форма у рендера есть
+ * всегда: экран монтирует только `StudioTab`, и засев, который зовёт IN WORDS
+ * (`use-words-seeding.ts`), без неё не работает. Число хуков одно и то же при любом ответе.
+ */
+export function useCardWords(card: number, live: boolean): string {
+  const form = useFormContext<TechCardFormData>() as UseFormReturn<TechCardFormData> | null;
+  /* Подписка держится за `watch`/`getValues`, а не за весь объект формы: их создаёт `useForm` один
+     раз, а объект контекста `FormProvider` отдаёт новым на каждом своём рендере — подписка на него
+     переподписывалась бы на каждую правку любого поля карточки. */
+  const watch = form?.watch;
+  const getValues = form?.getValues;
+  const [stored, setStored] = useState<unknown>(() => getValues?.('garmentDescription'));
+  useEffect(() => {
+    if (!watch || !getValues) return;
+    setStored(getValues('garmentDescription'));
+    const subscription = watch((values, { name }) => {
+      if (name && name !== 'garmentDescription') return;
+      setStored(values.garmentDescription);
+    });
+    return () => subscription.unsubscribe();
+  }, [watch, getValues]);
+  const seed = useWordsSeed(card);
+  return pickShownWords(seed, stored, live);
 }

@@ -1515,7 +1515,7 @@ export function NestingModal({
           : "the marker's size is unknown — the block names carry no sizes, and the slot does not name one",
       );
     if (sizeUnsaved)
-      out.push('the size was added but the card is not saved — save the card first');
+      out.push('the size was added — the card is not saved yet');
     if (sizesWithoutPieces.length > 0)
       out.push(
         `the composition took sizes with not a single piece picked: ${sizesWithoutPieces.join(', ')}`,
@@ -3377,8 +3377,8 @@ export function NestingModal({
           )}
           {lockedUnsaved && (
             <CalloutBox tone='note'>
-              the fabric of these DXF is not saved on the card yet — save the card and the marker
-              will bind to it; right now it goes off unbound
+              the fabric of these DXF is not saved on the card yet — once the card has saved, the
+              marker binds to it; right now it goes off unbound
             </CalloutBox>
           )}
           {unsavedSlots > 0 && !lockedSlot && !lockedUnsaved && (

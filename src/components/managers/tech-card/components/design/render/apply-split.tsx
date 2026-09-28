@@ -3,6 +3,7 @@ import { cn } from 'lib/utility';
 import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
+import { Pill } from 'ui/components/pill';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 
@@ -26,8 +27,9 @@ import type { BenchSide } from './model';
  * — «вход фабрик-рендера пишет ФЛЭТОВЫЙ верстак, вход 3D — рендерный». Круг r2 (п.29/30) снял с
  * полос входа ВСЕ двери постановки: у пустой стороны нет ни половины «из медиатеки», ни
  * `apply splitted` — единственный жест это `mark ▸` на самой картинке в RENDERS OF THIS CARD.
- * С тех пор у двери ровно один хозяин — раскрытая колода мультивью в `outputs.tsx`, — и он
- * передавал `'render'`. Флэтовая ветка не исполнялась ни разу.
+ * С тех пор у двери ровно один хозяин — раскрытая колода мультивью (тогда в `outputs.tsx`, с O-63
+ * — плитка рендера, `render-tile.tsx`, в строках прогонов), — и он передавал `'render'`.
+ * Флэтовая ветка не исполнялась ни разу.
  *
  * ⚠ И ЭТО НЕ ПРОСТО МЁРТВАЯ ВЕТКА, А ЗАРЯЖЕННАЯ. Род и колорвей у верстака связаны инвариантом 4
  * (`00-STATE.md`): у флэта `colorway_id` строго `0`, и `slot: { kind: 'flat', colorwayId: target }`
@@ -48,7 +50,12 @@ import type { BenchSide } from './model';
  *     поведение верстака, а не наше добавление);
  *   · сторона, которую разрез НЕ называет и которая занята → очищается (`picture_id = 0`);
  *   · сторона, которую разрез не называет и которая пуста → не трогается вовсе. Запись, ничего не
- *     меняющая, — это CAS-конфликт, купленный за просто так.
+ *     меняющая, — это CAS-конфликт, купленный за просто так;
+ *   · сторона, в которой УЖЕ стоит её кусок этого разреза → не трогается тоже, по тому же доводу
+ *     (O-63 r2). Раньше план «клал» кусок на его же место: запись без перемены, а вопрос называл
+ *     сторону теряющей свой рендер — и терял человек разве что доверие к вопросу. С O-63 r2 это не
+ *     редкость: колода группы «brought» показывает лист без кусков, которые SIDES уже держит, а
+ *     дверь кладёт разрез целиком — стоящие куски в нём есть (`piecesOf`, `render-tile.tsx`).
  *
  * ⚠ РАЗРУШИТЕЛЬНОЕ ДЕЙСТВИЕ НАЗЫВАЕТСЯ ДО ЗАПИСИ, А НЕ ПОСЛЕ. Если опустеть или быть вытесненным
  * есть чему — вопрос задаётся модалкой, поимённо по сторонам, и ни одна запись не уходит, пока на
@@ -96,13 +103,14 @@ const APPLY_NEW_COLOURWAY = '__new_colourway__';
 
 /* `splitDecks` И ТИП `SplitDeck` СНЕСЕНЫ (r3c). Они строили список «склеенный лист + его куски»
    ДЛЯ ЯЧЕЙКИ МУЛЬТИВЬЮ, и ячейка эта своего второго источника не завела: раскрытый лист рисует
-   `outputs.tsx` по родословной куска (`cropFamilies` + `piecesOf` там же), потому что
-   вопрос там другой — «что показать под ЭТОЙ плиткой», а не «какие листы есть у карточки».
-   Читателей не осталось ни одного; экспортированный список, который никто не читает, — это второй
-   ответ на вопрос, ждущий, когда он разойдётся с первым. Механизм применения (`applyPlan` ниже и
-   `ApplySplitDoor`) на месте: он принимает КУСКИ, а не листы. Живых ссылок на имя не осталось:
-   в `bench.tsx` разрез теперь назван своей дверью (`split ▸` в полосе выходов), а само слово
-   встречается только в двух записках о сносе — этой и в `outputs.tsx`. */
+   плитка рендера (`render-tile.tsx`; до O-63 — `outputs.tsx`) по родословной куска
+   (`cropFamilies` + `piecesOf` там же), потому что вопрос там другой — «что показать под ЭТОЙ
+   плиткой», а не «какие листы есть у карточки». Читателей не осталось ни одного;
+   экспортированный список, который никто не читает, — это второй ответ на вопрос, ждущий, когда
+   он разойдётся с первым. Механизм применения (`applyPlan` ниже и `ApplySplitDoor`) на месте: он
+   принимает КУСКИ, а не листы. Живых ссылок на имя не осталось: в `bench.tsx` разрез теперь назван
+   своей дверью (`split ▸` в полосе выходов), а само слово встречается только в двух записках о
+   сносе — этой и у `piecesOf` в `render-tile.tsx`. */
 
 /** Одна запись плана: что делаем со стороной и что при этом теряем. */
 type Step = {
@@ -120,6 +128,8 @@ export function applyPlan(sides: BenchSide[], pieces: SplitPiece[]): Step[] {
   for (const side of sides) {
     const piece = byView.get(side.view);
     if (piece) {
+      // Its piece already stands in it — nothing to write, nothing to lose (see the file's head).
+      if ((side.picture?.id ?? 0) > 0 && side.picture?.id === piece.id) continue;
       steps.push({
         view: side.view,
         act: 'place',
@@ -162,6 +172,7 @@ export function ApplySplitDoor({
    */
   noun,
   refusal = null,
+  refusalDescribedBy,
   onCreateColorway,
   className,
   doorClassName,
@@ -189,20 +200,28 @@ export function ApplySplitDoor({
   /**
    * ═══ ОТКАЗ ВЫЗЫВАЮЩЕГО — ДВЕРЬ ПОГАШЕНА, ПРИЧИНА НАПЕЧАТАНА, НА ПРОВОД НЕ УХОДИТ НИЧЕГО ═════
    *
-   * Заведён для третьего хозяина этой двери — раскрытой колоды в `outputs.tsx` (Ф4). У него есть
-   * два отказа, которых у полос входа нет ПО ПОСТРОЕНИЮ (полоса читает верстак своего же
+   * Заведён для третьего хозяина этой двери — раскрытой колоды (Ф4; с O-63 — `render-tile.tsx`). У
+   * него есть два отказа, которых у полос входа нет ПО ПОСТРОЕНИЮ (полоса читает верстак своего же
    * колорвея, лист там чужим быть не может):
    *   · секция выходов не сужена колорвеем — верстака, в который «надо», не существует как факта;
    *   · лист принадлежит ДРУГОМУ колорвею, чем слоты под секцией, — до починки круга 19 дверь
    *     ТИХО ЗАПОЛНЯЛА ЧУЖОЙ ВЕРСТАК (дефект L-1 под другим именем): стороны наполнялись у другого
    *     цвета, экран не менялся, следа не оставалось даже в виде отказа.
    *
-   * Отказ решается ВЫЗЫВАЮЩИМ, потому что только он знает, чем сужена его секция; дверь при
-   * заданном отказе рисуется `InertDoor` со СТРОКОЙ причины (`Reason`, `reasonVisible`) — колода
-   * раскрыта, и исчезнувшая дверь читалась бы как пропажа, а серая без слов — как поломка. Пустой
-   * `pieces` при заданном отказе тоже рисуется: причина важнее состава.
+   * Отказ решается ВЫЗЫВАЮЩИМ, потому что только он знает, куда листу можно встать; дверь при
+   * заданном отказе рисуется `InertDoor` — погашенная `disabled`-кнопка с причиной в `title`:
+   * колода раскрыта, и исчезнувшая дверь читалась бы как пропажа. Словами причину вызывающий
+   * печатает сам, ОДИН раз на ряд (O-57 r4: записка над плитками хозяина — `RefusalNotes`), и
+   * отдаёт её id `refusalDescribedBy`. Пустой `pieces` при заданном отказе тоже рисуется: причина
+   * важнее состава.
    */
   refusal?: string | null;
+  /**
+   * Id записки вызывающего, где причина отказа напечатана (O-57 r4), — едет в `aria-describedby`
+   * погашенной двери. Не задан — записки у этой причины нет (карточка только для чтения, сервер
+   * молчит: причина общая для всех дверей экрана), и она остаётся в `title`, как у соседей.
+   */
+  refusalDescribedBy?: string;
   /**
    * Завести колорвей прямо отсюда — тем же поповером, что заголовок `+ colourway` в SIDES. Задан
    * только там, где новый столбец законная цель (семпл-лист при усыновлении); `then` зовётся с
@@ -237,15 +256,52 @@ export function ApplySplitDoor({
   if (!pieces.length && !refusal) return null;
   if (!targets.length && !refusal) return null;
 
+  /**
+   * ═══ NOTHING TO WRITE — A STATUS, NOT A DOOR (28.09, O-63 r3, REVIEW-T64-codex-2 Minor) ═══════
+   *
+   * A target whose sides already hold exactly this split gives an EMPTY plan (`applyPlan` leaves a
+   * piece standing in its own side alone, O-63 r2, and an empty side the split does not name is
+   * not touched). Round 2 drew the live door over it — its title admitted there was nothing to
+   * write, and a press ran a loop of zero writes: a button that does nothing reads as broken.
+   * With every target exact, the cell says so the way the folded sheet does («pieces in sides»,
+   * `RenderTile`), as a status like «in front» — not a door. A target among several whose sides
+   * already hold the split is a choice that would do nothing, and the select says so on its line
+   * and lets it be read, not chosen (`disabled`, the label saying why — `SelectComponent`).
+   * ⚠ ONLY OVER PIECES THAT CAN STAND SOMEWHERE (O-63 r4, Codex r3 Minor): a split with no usable
+   * piece — every descendant hidden, or none naming a side of the silhouette — gives an empty plan
+   * against empty sides too, and that is not «done» but the caller's refusal (`applyRefusalFor`,
+   * «nothing in this split names a side»), which the branch below keeps for it.
+   */
+  const exactTargets = new Set(
+    targets.filter((t) => planFor(t.colorwayId).length === 0).map((t) => t.colorwayId),
+  );
+  const done = pieces.length > 0 && targets.length > 0 && exactTargets.size === targets.length;
+  if (done) {
+    return (
+      <span
+        data-apply-split-done={pieces.length}
+        title='every piece of this split already stands in its side — nothing to write'
+        className={cn('flex min-w-0', className)}
+      >
+        <Pill className='h-5 w-full justify-center leading-4'>pieces in sides</Pill>
+      </span>
+    );
+  }
+
   /* ОТКАЗ ХОЗЯИНА — дверь стоит, но мертва, и говорит почему. Ни одной записи: `run` ниже
-     недостижим, потому что живой кнопки нет. */
+     недостижим, потому что живой кнопки нет.
+     O-57 r4 (ревью Codex r3, Medium): снова `InertDoor`, единственный орган погашенной двери
+     студии, — вне порядка Tab, причина в `title`, а напечатана она у вызывающего, одной запиской
+     на ряд, на которую дверь ссылается `describedBy`. Круг r3 держал здесь фокусируемую дверь с
+     причиной у самой двери — вторую семантику рядом с `InertDoor`. Классы хозяина (`[&>button]:…`)
+     доходят: обёртка — `[data-inert]` с кнопкой прямым ребёнком. */
   if (refusal) {
     return (
       <InertDoor
         className={cn('[&>button]:w-full', className)}
         label='apply splitted'
         reason={refusal}
-        reasonVisible
+        describedBy={refusalDescribedBy}
       />
     );
   }
@@ -289,7 +345,11 @@ export function ApplySplitDoor({
 
   /** Начать жест целью: терять нечего — пишем; есть что — сперва вопрос, поимённо по сторонам. */
   const start = (target: number) => {
-    if (planFor(target).some((s) => s.displaces)) setAsking(target);
+    const plan = planFor(target);
+    // The sides of this target already hold exactly this split — nothing to write (O-63 r3): the
+    // single-target door is a status by now, and the select's line for such a target is disabled.
+    if (!plan.length) return;
+    if (plan.some((s) => s.displaces)) setAsking(target);
     else void run(target);
   };
 
@@ -328,9 +388,11 @@ export function ApplySplitDoor({
           data-apply-split-door=''
           data-apply-split-losing={losing.length}
           title={
-            losing.length
-              ? `${placeWords || 'no side'} take the pieces; ${losingWords} ${losing.length === 1 ? `loses its ${noun}` : `lose their ${noun}s`} — you are asked first`
-              : `${placeWords || 'no side'} take the pieces; no side loses anything`
+            steps.length === 0
+              ? 'the sides already hold exactly this split — nothing to write'
+              : losing.length
+                ? `${placeWords || 'no side'} take the pieces; ${losingWords} ${losing.length === 1 ? `loses its ${noun}` : `lose their ${noun}s`} — you are asked first`
+                : `${placeWords || 'no side'} take the pieces; no side loses anything`
           }
           onClick={() => start(only)}
         >
@@ -368,10 +430,15 @@ export function ApplySplitDoor({
             )}
             items={[
               { value: APPLY_PROMPT, label: 'apply ▸' },
-              ...targets.map((t) => ({
-                value: String(t.colorwayId),
-                label: `into ${t.label}`,
-              })),
+              ...targets.map((t) =>
+                exactTargets.has(t.colorwayId)
+                  ? {
+                      value: String(t.colorwayId),
+                      label: `into ${t.label} · already there`,
+                      disabled: true,
+                    }
+                  : { value: String(t.colorwayId), label: `into ${t.label}` },
+              ),
               ...(onCreateColorway ? [{ value: APPLY_NEW_COLOURWAY, label: '+ colourway…' }] : []),
             ]}
             onValueChange={(value: string) => {

@@ -339,7 +339,7 @@ export function FlatRunRow({
    */
   const refused = input.refused;
   /* Отказ снимается сам, как только карточка сохранилась: поправленное поле — это и есть ответ на
-     него, и строка «save the card first» над сохранённой карточкой была бы неправдой. */
+     него, и строка отказа («fix 1 field first …») над сохранённой карточкой была бы неправдой. */
   useEffect(() => {
     if (autosave.status === 'saved' || autosave.status === 'idle') {
       patchFlatInput(techCardId, { refused: null });
@@ -360,15 +360,17 @@ export function FlatRunRow({
       : refused === 'stopped'
         ? 'the card stopped saving while GENERATE waited for it'
         : refused
-          ? flushRefusalSentence(refused, autosave.errorsCount) || 'save the card first'
+          ? flushRefusalSentence(refused, autosave.errorsCount, autosave.refusal) ||
+            'the card is not saved yet'
           : null;
 
   /**
    * ДВЕРЬ У ОТКАЗА СОХРАНЕНИЯ (ревью m3). `invalid` — к первому полю с ошибкой: проверка громкая
    * (человек сам попросил показать), путь — первый из `flattenFieldErrors`, показ — `revealField`
    * (шаг студии он приносит сам). Поле, которого эта вкладка не рисует, и прочие исходы — к чипу
-   * сохранения в шапке (`save-status-chip.tsx`, зона CL-A): он и есть дверь этих состояний
-   * (повторить, подтвердить, решить конфликт), и его поповер говорит причину целиком.
+   * сохранения в шапке (`save-status-chip.tsx`, зона CL-A): его поповер говорит причину целиком.
+   * Сохранять там нечем (O-60, D-59): упавшая запись повторяется сама, а решения — подтвердить
+   * перевод в auxiliary, решить конфликт — ведёт слово чипа рядом с `▾`.
    */
   const form = useFormContext<TechCardFormData>();
   const openSaveDoor = async () => {

@@ -211,6 +211,8 @@ export function ColourwayCreatePopover({
           // Вложенный рецепт сервер отвергает прямым текстом — и этому окну он не нужен вовсе.
           usages: undefined,
           displayOrder: undefined,
+          colours: undefined,
+          nameI18n: undefined,
         },
       });
       const colorwayId = res?.colorwayId ?? 0;

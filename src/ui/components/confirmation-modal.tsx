@@ -73,6 +73,16 @@ interface Props {
    * свой возврат фокуса; для всех остальных дефолт Radix остаётся дефолтом Radix.
    */
   onCloseAutoFocus?: (event: Event) => void;
+  /**
+   * Where the focus lands when the dialog opens. OPTIONAL — without it Radix focuses the first
+   * control (✕ in a titled shell). A caller that puts one control forward calls
+   * `event.preventDefault()` and focuses it itself. This runs inside the dialog's own focus scope,
+   * once the scope of a dialog it is nested in has stepped back — which a React `autoFocus` or a
+   * timer cannot promise: at commit the outer scope still traps the focus and pulls it back.
+   */
+  onOpenAutoFocus?: (event: Event) => void;
+  /** The cancel button disabled — for a dialog whose cancel is a second answer, not a way out. */
+  cancelDisabled?: boolean;
 }
 
 export function ConfirmationModal({
@@ -91,6 +101,8 @@ export function ConfirmationModal({
   typeToConfirm,
   closeOnConfirm = true,
   onCloseAutoFocus,
+  onOpenAutoFocus,
+  cancelDisabled,
 }: Props) {
   const [typed, setTyped] = useState('');
   // Never carry a satisfied guard across openings — reopening must re-arm it.
@@ -123,6 +135,7 @@ export function ConfirmationModal({
             z-[var(--z-nav)] = 45. max-h-[90vh] keeps a tall form scrollable and its buttons
             reachable on a short viewport; inset-x-2.5 already spans nearly the full width there. */}
         <DialogPrimitives.Content
+          onOpenAutoFocus={onOpenAutoFocus}
           onCloseAutoFocus={onCloseAutoFocus}
           className={`fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col border border-textColor bg-bgColor text-textColor shadow-[var(--shadow-modal)] lg:inset-x-auto lg:left-1/2 lg:-translate-x-1/2 ${WIDTH[width]}`}
         >
@@ -190,7 +203,13 @@ export function ConfirmationModal({
               )}
               {!hideActions && (
                 <>
-              <Button type='button' onClick={handleCancel} variant='secondary' size='sm'>
+              <Button
+                type='button'
+                onClick={handleCancel}
+                variant='secondary'
+                size='sm'
+                disabled={cancelDisabled}
+              >
                 {cancelLabel}
               </Button>
               <Button

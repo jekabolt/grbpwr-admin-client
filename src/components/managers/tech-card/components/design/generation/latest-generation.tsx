@@ -3,9 +3,10 @@ import type {
   common_DesignPicture,
   common_DesignRun,
 } from 'api/proto-http/admin';
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, type JSX } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 
@@ -14,6 +15,7 @@ import { runRepresentation } from '../bench-kinds';
 import { serverSpeaksDesign } from '../capability';
 import { pictureHandle, runHandle } from '../handles';
 import { useGalleryGroup, useGalleryViewerOpen } from '../picture-tile';
+import { RenderDoorsHost, hostPlates } from '../render/render-tile';
 import { SplitModal } from '../split-modal';
 import { isRunArchived } from '../visibility';
 import {
@@ -24,8 +26,7 @@ import {
   releasePin,
   useBench,
 } from './bench-store';
-import { cropFamilies } from './composite';
-import { deckAfterZoom, deckOfRuns, runsGallery } from './run-gallery';
+import { deckAfterZoom, deckOfRuns, outputPlan, runsGallery, type OutputPlan } from './run-gallery';
 import { RunOutputs } from './run-outputs';
 import {
   isRunLive,
@@ -60,7 +61,9 @@ import { useElapsed, useRunById } from './use-generation';
  * live or holding pictures. Newer flat runs that came back with nothing (failed, cancelled, empty)
  * are passed over and SAID, every one of them counted: one — «the newest run failed · CODE — this
  * is the one before»; more — «newest N runs finished empty · showing the last one with pictures».
- * Nothing to show on the first page → no workbench at all; the history below still has every run.
+ * No run of the kind on the first page → no workbench at all; the history below still has every run.
+ * Runs, but none came back with pictures → the newest of them stands here BARE (27.09, O-63 r2,
+ * D-72 п.3): its stamp, how it ended and why — see `BareOutcome`.
  *
  * …BUT ONLY WHILE NOBODY IS WORKING ON THE SHOWN RUN (26.09, O-53 review; `bench-store.ts`). An
  * editor, a split or the zoom viewer opened on a tile here PINS the shown run: a newer run landing on
@@ -71,6 +74,12 @@ import { useElapsed, useRunById } from './use-generation';
  * elsewhere (a history tile, the viewer opened from another block) only holds the workbench while it
  * is open. A kept run that newer rows push off the band's first page is NOT archived by that (27.09,
  * D-49): it is read by id from then on, and only an archival seen on such a read lets it go.
+ *
+ * WHAT STANDS NOW, NOT EVERYTHING FILED (27.09, O-53 phase 2). An edit made here asks «overwrite or
+ * save as new» (`RunTile` → `VectorModal.replace`); an overwrite stamps the original `replaced_by`,
+ * and this row draws only the HEAD of each replacement chain, in the original's place — as a card
+ * or as a piece in its deck (`outputPlan` with `heads`). A picture under an open editor is drawn as
+ * itself until the editor closes (`keep`). The history keeps every link, captioned.
  *
  * ONE COPY OF THE RUN'S TILES. The history below draws the run that stands here as its header line
  * alone — «run 12 · on the bench ↑» (`generation-history.tsx`), so the viewer row, the deck and the
@@ -86,30 +95,52 @@ import { useElapsed, useRunById } from './use-generation';
  *
  * ANCHOR `data-latest-generation={runId}` — deliberately not `data-run`, which every reader of the
  * history takes to mean «a history row».
+ *
+ * ═══ AND ON FABRIC RENDER, THE SAME ORGAN (27.09, O-63, D-62) ═══════════════════════════════════
+ * Owner, verbatim: «после генерации результат показывать как во флетах те с LATEST GENERATION и
+ * GENERATION HISTORY свернут по дефолту и RENDERS OF THIS CARD получается не нужен». `kind='render'`
+ * mounts this row in the FABRIC RENDER block, under its GENERATE and above SIDES: the newest render
+ * run that is not archived and is live or holds pictures — of ANY colourway, as the history is —
+ * with the same pin, «newer run ready · show ›» and «the one before». Its tiles are `RunTile`s too;
+ * a render run's tile draws the render doors (`mark ▸`, `apply splitted`, `expand ▸`, `unmark ▸` —
+ * `render/render-tile.tsx`), whose rules are one hook over the plates of this row
+ * (`RenderDoorsHost`), their refusal notes printed once above the tiles. Its edit always files a
+ * NEW picture: «overwrite or save as new» is the flat's question.
  */
 
-/** A run of this block's GENERATE — `kind` exactly `flat`. */
-function isFlatRun(run: Pick<common_DesignRun, 'kind'>): boolean {
-  return (run.kind ?? '').trim().toLowerCase() === 'flat';
+/** Which step's workbench this is: FLAT's (the default) or FABRIC RENDER's (O-63). */
+export type WorkbenchKind = 'flat' | 'render';
+
+/** A run of this block's GENERATE — `kind` exactly `flat` on FLAT, exactly `render` on FABRIC RENDER. */
+function isRunOfKind(run: Pick<common_DesignRun, 'kind'>, kind: WorkbenchKind): boolean {
+  return (run.kind ?? '').trim().toLowerCase() === kind;
 }
 
 /**
- * THE NEWEST RUN THE WORKBENCH CAN SHOW, and EVERY newer flat run it passed over for having nothing,
- * newest first. Reads the band's first page only — the page the band already holds; the workbench
- * asks for no more.
+ * THE NEWEST RUN THE WORKBENCH CAN SHOW, and EVERY newer run of its kind it passed over for having
+ * nothing, newest first. Reads the band's first page only — the page the band already holds; the
+ * workbench asks for no more.
+ *
+ * ⚠ «NOTHING WITH PICTURES» IS NOT «NOTHING TO SHOW» (27.09, O-63 r2, D-72 п.3). When no run of the
+ * kind is live or came back with pictures, the newest of them is the answer — `bare`: it failed,
+ * was cancelled or came back empty, and that is exactly what the person under GENERATE has to see.
+ * Until round 2 this returned null there, and the card's first run, failed, left no trace above the
+ * history, which both steps fold by default. `skipped` of a bare answer are the older runs, all of
+ * them bare too. One rule for FLAT and FABRIC RENDER.
  */
-export function latestFlatRun(
+export function latestRunOf(
   band: Pick<GetDesignBandResponse, 'runs'>,
-): { run: common_DesignRun; skipped: common_DesignRun[] } | null {
-  const flats = (band.runs ?? [])
-    .filter((run) => (run.id ?? 0) > 0 && isFlatRun(run) && !isRunArchived(run))
+  kind: WorkbenchKind = 'flat',
+): { run: common_DesignRun; skipped: common_DesignRun[]; bare: boolean } | null {
+  const runs = (band.runs ?? [])
+    .filter((run) => (run.id ?? 0) > 0 && isRunOfKind(run, kind) && !isRunArchived(run))
     .sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
   const skipped: common_DesignRun[] = [];
-  for (const run of flats) {
-    if (isRunLive(run) || (run.pictures ?? []).length > 0) return { run, skipped };
+  for (const run of runs) {
+    if (isRunLive(run) || (run.pictures ?? []).length > 0) return { run, skipped, bare: false };
     skipped.push(run);
   }
-  return null;
+  return runs.length ? { run: runs[0], skipped: runs.slice(1), bare: true } : null;
 }
 
 /** «the newest run failed · CODE — this is the one before», worded by how the newer run ended. */
@@ -141,34 +172,113 @@ function skippedNote(skipped: readonly common_DesignRun[]): { text: string; titl
   };
 }
 
-/** The decks of one run in display order: every sheet that has cut pieces, and how many. */
-function decksOf(run: common_DesignRun | null): { root: number; count: number }[] {
-  if (!run) return [];
-  const pictures = run.pictures ?? [];
-  const families = cropFamilies(pictures);
-  const out: { root: number; count: number }[] = [];
-  for (const picture of pictures) {
-    const id = picture.id ?? 0;
-    const members = families.membersOf.get(id);
-    if (members?.length && !families.rootOf.has(id)) out.push({ root: id, count: members.length });
+/**
+ * ═══ A BARE RUN — HOW IT ENDED, AND WHY (27.09, O-63 r2, D-72 п.3) ════════════════════════════════
+ *
+ * What the workbench draws instead of tiles when nothing of its kind came back with pictures: one
+ * line, worded by how the newest run ended («failed — nothing came back», «was cancelled — nothing
+ * came back», «came back empty»), counting the older runs that brought nothing either; then the
+ * provider's own words, the context a retry needs — under the same heading the run's `meta ▸` panel
+ * gives them (`run-panel.tsx`), cut to four lines with the whole text in the title (up to 4 000
+ * characters, D-4). The code stands in the header's state word already.
+ */
+function BareOutcome({
+  run,
+  earlier,
+}: {
+  run: common_DesignRun;
+  earlier: readonly common_DesignRun[];
+}): JSX.Element {
+  const status = runStatus(run);
+  const { code, text } = runFailureText(run);
+  const head =
+    status === 'failed'
+      ? 'the newest run failed — nothing came back'
+      : status === 'cancelled'
+        ? 'the newest run was cancelled — nothing came back'
+        : status === 'done'
+          ? 'the newest run came back empty'
+          : 'the newest run brought no picture';
+  const n = earlier.length;
+  const before = n ? ` · the ${n === 1 ? 'run' : `${n} runs`} before it brought none either` : '';
+  return (
+    <div data-latest-outcome={status || 'unknown'} data-latest-skipped={n} className='space-y-1.5'>
+      <Text
+        size='micro'
+        variant='label'
+        component='p'
+        title={[run, ...earlier].map((r) => `${runHandle(r.id)} · ${runOutcomeNote(r)}`).join('; ')}
+      >
+        {head}
+        {before}
+      </Text>
+      {(code || text) && (
+        <CalloutBox tone='note'>
+          <Text size='nano' variant='label' component='p' className='uppercase tracking-label'>
+            {status === 'failed'
+              ? 'why it failed'
+              : status === 'cancelled'
+                ? 'what was cut short'
+                : 'the last attempt'}
+            {code ? ` · ${code}` : ''}
+          </Text>
+          {text && (
+            <Text
+              size='micro'
+              variant='label'
+              component='p'
+              className='line-clamp-4 max-w-[75ch] whitespace-pre-wrap break-words'
+              title={text}
+            >
+              {text}
+            </Text>
+          )}
+        </CalloutBox>
+      )}
+    </div>
+  );
+}
+
+/** The decks of the row in display order: each card with pieces behind it, and how many. */
+function decksOf(plan: OutputPlan | null): { root: number; count: number }[] {
+  if (!plan) return [];
+  return plan.cards
+    .filter((card) => card.members.length > 0)
+    .map((card) => ({ root: card.picture.id ?? 0, count: card.members.length }));
+}
+
+/**
+ * Pictures an editor is open over, anywhere on the step (`RunTile`'s `edit:<id>` surfaces), as a
+ * sorted key — the store hands a new map on every write of any surface, the key changes only when
+ * this set does.
+ */
+function editedKey(surfaces: ReadonlyMap<string, number>): string {
+  const ids: number[] = [];
+  for (const key of surfaces.keys()) {
+    if (!key.startsWith('edit:')) continue;
+    const id = Number(key.slice('edit:'.length));
+    if (id > 0) ids.push(id);
   }
-  return out;
+  return ids.sort((a, b) => a - b).join(',');
 }
 
 export function LatestGeneration({
   band,
   techCardId,
   disabled,
+  kind = 'flat',
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /** The step whose GENERATE this row answers — FLAT's by default, FABRIC RENDER's (O-63). */
+  kind?: WorkbenchKind;
 }) {
   const speaks = serverSpeaksDesign();
   const form = useFormContext<TechCardFormData>();
   const cardFit = (form?.watch('fit') ?? '').trim();
 
-  const newest = useMemo(() => latestFlatRun(band), [band]);
+  const newest = useMemo(() => latestRunOf(band, kind), [band, kind]);
   const newestId = newest?.run.id ?? 0;
 
   /* ═══ THE PIN (`bench-store.ts`) — the run shown while somebody works on it ═══════════════════
@@ -198,6 +308,12 @@ export function LatestGeneration({
   const archivedSeen = !!pinnedFresh && isRunArchived(pinnedFresh);
   const run = pinnedRun ?? newest?.run ?? null;
   const runId = run?.id ?? 0;
+  /**
+   * THE RUN STANDS HERE BARE (O-63 r2, D-72 п.3): nothing of the kind came back with pictures, and
+   * the newest run is shown for its outcome. A pinned run is never bare — a pin is a surface opened
+   * on a tile, and a bare run has none.
+   */
+  const bare = !!newest?.bare && runId === newestId;
   /** Somebody is working — a surface open anywhere on the step, or the viewer. */
   const held = bench.surfaces.size > 0 || viewerOpen;
   // The clock ticks only while the run is in flight (review, MINOR): a finished run shows no elapsed
@@ -206,10 +322,13 @@ export function LatestGeneration({
 
   /* What this row shows is published for the history (its row of this run turns «on the bench»)
      and for the tiles' surfaces (a surface on this run pins it). Leaving — the step, or the card —
-     lets the pin go: coming back shows the newest. */
+     lets the pin go: coming back shows the newest. A bare run is not published (O-63 r2): its
+     history row would turn into «on the bench ↑», pointing at tiles that do not exist — it stays
+     its own row, the outcome in its meta line. */
+  const shownId = bare ? 0 : runId;
   useLayoutEffect(() => {
-    publishShown(techCardId, runId);
-  }, [techCardId, runId]);
+    publishShown(techCardId, shownId);
+  }, [techCardId, shownId]);
   useLayoutEffect(
     () => () => {
       publishShown(techCardId, 0);
@@ -256,7 +375,14 @@ export function LatestGeneration({
    * Nothing else touches `openDeck` here: the person's own toggles and the E-4 fold stand until the
    * next run or the next split.
    */
-  const decks = useMemo(() => decksOf(run), [run]);
+  /** THE ROW AS DRAWN — heads in their originals' places; the tiles under an open editor kept. */
+  const editingKey = editedKey(bench.surfaces);
+  const plan = useMemo(() => {
+    if (!run) return null;
+    const keep = new Set(editingKey ? editingKey.split(',').map(Number) : []);
+    return outputPlan(run.pictures ?? [], { heads: true, keep });
+  }, [run, editingKey]);
+  const decks = useMemo(() => decksOf(plan), [plan]);
   const deckKey = `${techCardId}:${runId}|${decks.map((d) => `${d.root}x${d.count}`).join(',')}`;
   const [seen, setSeen] = useState<{
     card: number;
@@ -286,16 +412,54 @@ export function LatestGeneration({
   }
 
   /** The viewer row of THIS row: its pictures in the order shown, the open deck's pieces inside. */
-  const gallery = useMemo(() => runsGallery(run ? [run] : [], openDeck), [run, openDeck]);
+  const gallery = useMemo(
+    () => (run && plan ? runsGallery([run], openDeck, () => plan) : runsGallery([], openDeck)),
+    [run, plan, openDeck],
+  );
   const galleryGroup = useGalleryGroup(gallery.items);
-  const deckOf = useMemo(() => deckOfRuns(run ? [run] : []), [run]);
+  const deckOf = useMemo(
+    () => (run && plan ? deckOfRuns([run], () => plan) : new Map<number, number>()),
+    [run, plan],
+  );
+  /** O-63: what the render doors of this row read — its plates and its decks (`RenderDoorsHost`). */
+  const plates = useMemo(() => hostPlates(kind === 'render' && plan ? [plan] : []), [kind, plan]);
+  const toggleDeck = (rootId: number) =>
+    setOpenDeck((current) => (current === rootId ? null : rootId));
 
   if (!run) return null;
 
   const state = runStateWord(run, elapsed);
   /** Said only over the newest run with pictures — a run pinned behind a newer one says the line. */
-  const note = skippedNote(newest && newestId === runId ? newest.skipped : []);
+  const note = skippedNote(newest && newestId === runId && !bare ? newest.skipped : []);
   const newer = newest && newestId > runId ? newest.run : null;
+
+  /** The row's outputs block — the history's own (`RunOutputs`), on the workbench's track. */
+  const outputs = (
+    <RunOutputs
+      band={band}
+      techCardId={techCardId}
+      run={run}
+      rep={runRepresentation(run)}
+      cardFit={cardFit}
+      elapsed={elapsed}
+      disabled={disabled || !speaks}
+      galleryKey={galleryGroup.key}
+      galleryIndexOf={gallery.indexOf}
+      openDeck={openDeck}
+      onDeck={toggleDeck}
+      onZoomPicture={(pictureId) => {
+        // The viewer is a surface of this run too: pinned from the click, before any re-read.
+        pinShown(techCardId, true);
+        setOpenDeck((current) => deckAfterZoom(current, pictureId, deckOf));
+      }}
+      onSplit={(picture) => {
+        openSurface(techCardId, 'split:bench', picture.runId ?? 0);
+        setSplitting({ picture, handle: pictureHandle(picture) });
+      }}
+      workbench
+      plan={plan ?? undefined}
+    />
+  );
 
   return (
     <div data-latest-generation={runId} ref={galleryGroup.anchorRef}>
@@ -317,6 +481,8 @@ export function LatestGeneration({
         latest generation
       </GroupLabel>
 
+      {bare && newest && <BareOutcome run={run} earlier={newest.skipped} />}
+
       {note && newest && (
         <Text
           size='micro'
@@ -331,29 +497,27 @@ export function LatestGeneration({
         </Text>
       )}
 
-      <RunOutputs
-        band={band}
-        techCardId={techCardId}
-        run={run}
-        rep={runRepresentation(run)}
-        cardFit={cardFit}
-        elapsed={elapsed}
-        disabled={disabled || !speaks}
-        galleryKey={galleryGroup.key}
-        galleryIndexOf={gallery.indexOf}
-        openDeck={openDeck}
-        onDeck={(rootId) => setOpenDeck((current) => (current === rootId ? null : rootId))}
-        onZoomPicture={(pictureId) => {
-          // The viewer is a surface of this run too: pinned from the click, before any re-read.
-          pinShown(techCardId, true);
-          setOpenDeck((current) => deckAfterZoom(current, pictureId, deckOf));
-        }}
-        onSplit={(picture) => {
-          openSurface(techCardId, 'split:bench', picture.runId ?? 0);
-          setSplitting({ picture, handle: pictureHandle(picture) });
-        }}
-        workbench
-      />
+      {/* O-63: ON FABRIC RENDER the tiles below draw the render doors, and their rules read this
+          row's plates (`RenderDoorsHost`); FLAT's row is drawn as it always was. The doors' notes
+          stand once above the tiles. `disabled` is the card's alone: the server's silence the
+          doors read themselves, and say so in their own words. */}
+      {bare ? null : kind === 'render' ? (
+        <RenderDoorsHost
+          band={band}
+          techCardId={techCardId}
+          disabled={disabled}
+          pictures={plates.pictures}
+          membersOf={plates.membersOf}
+          openDeck={openDeck}
+          onDeck={toggleDeck}
+          runOf={() => run}
+          notesClassName='mb-2'
+        >
+          {outputs}
+        </RenderDoorsHost>
+      ) : (
+        outputs
+      )}
 
       {/* A NEWER RUN, WHILE THIS ONE IS KEPT — one quiet line under the tiles; the click moves the
           workbench to the newest and lets the pin go. «started» while that run is in flight: it is
@@ -361,7 +525,12 @@ export function LatestGeneration({
       {newer && (
         <span className='mt-2 flex flex-wrap items-center gap-1.5' data-latest-newer={newestId}>
           <Text size='micro' variant='label' component='span'>
-            {isRunLive(newer) ? 'newer run started' : 'newer run ready'} ·
+            {isRunLive(newer)
+              ? 'newer run started'
+              : newest?.bare
+                ? 'newer run came back with nothing'
+                : 'newer run ready'}{' '}
+            ·
           </Text>
           <Button
             type='button'
@@ -369,7 +538,7 @@ export function LatestGeneration({
             size='xs'
             className='text-labelColor hover:text-textColor'
             aria-label={`show ${runHandle(newestId)} here`}
-            title='the newest flat run — the one shown now stays in the history below'
+            title={`the newest ${kind} run — the one shown now stays in the history below`}
             onClick={() => releasePin(techCardId)}
           >
             show ›

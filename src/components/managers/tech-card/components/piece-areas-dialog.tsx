@@ -334,13 +334,13 @@ export default function PieceAreasDialog({
             links of this fabric were edited it refuses, citing the absence of block→piece links; if
             the edits touched another fabric the measurement is written, but against the old links.
             there is nothing here to tell those two cases apart, and the cost of the mistake is areas
-            recorded for the wrong geometry. save the card and retry the measurement.
+            recorded for the wrong geometry. retry the measurement once the card has saved.
           </CalloutBox>
         )}
 
         {unsavedPieces.length > 0 && (
           <CalloutBox tone='warning'>
-            {`these pieces are not saved on the server yet: ${unsavedPieces.join(', ')}. an area lands on a piece by its key, and there is no key yet — the set would travel without them and look complete. save the card and retry the measurement.`}
+            {`these pieces are not saved on the server yet: ${unsavedPieces.join(', ')}. an area lands on a piece by its key, and there is no key yet — the set would travel without them and look complete. retry the measurement once the card has saved.`}
           </CalloutBox>
         )}
 

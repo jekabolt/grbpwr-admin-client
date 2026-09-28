@@ -225,6 +225,8 @@ function useConfirmColourway(techCardId: number) {
         // Вложенный рецепт сервер отвергает прямым текстом — он пишется отдельным шагом ниже.
         usages: undefined,
         displayOrder: undefined,
+        colours: undefined,
+        nameI18n: undefined,
       },
     });
     const colorwayId = wireInt(res?.colorwayId);

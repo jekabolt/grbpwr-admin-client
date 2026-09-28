@@ -71,6 +71,10 @@ const ROW =
    плашкой внутри списка, а не выбранной строкой списка. Отбивку панели снимает обёртка. */
 const BLEED = '-mx-2 -my-1.5';
 
+/* ЗДЕСЬ ЖИЛА `RefusedDoor` (O-57 r3) — вторая погашенная дверь студии, фокусируемая и с причиной,
+   напечатанной у каждой двери. Снята (O-57 r4, ревью Codex r3): правило погашенной двери одно —
+   `InertDoor` (`../bench-slot`), разбор у неё и у ветки «веток нет» ниже. */
+
 export function TwoStepPicker({
   face,
   title,
@@ -82,6 +86,7 @@ export function TwoStepPicker({
   triggerTitle,
   branchNoun = 'branches',
   leafNoun = 'items',
+  emptyReason,
 }: {
   /** Лицо двери. Метрика ряда — снаружи, `triggerClassName` (F-9). */
   face: string;
@@ -102,6 +107,12 @@ export function TwoStepPicker({
   branchNoun?: string;
   /** Как назвать список шага 2 («sides») — имя ветки дописывается само. */
   leafNoun?: string;
+  /**
+   * ПОЧЕМУ ВЕТОК НЕТ — словами вызывающего, для двери, у которой веток нет, но `create` есть: дверь
+   * жива, а фраза стоит на шаге 1 над строкой рождения. Веток нет и `create` нет — это уже не
+   * пикер: пикер не рисует ничего, погашенную дверь с причиной ставит вызывающий (`InertDoor`).
+   */
+  emptyReason?: string;
 }): JSX.Element | null {
   const [open, setOpen] = useState(false);
   /** На чьих листьях стоит панель. `null` — на шаге 1. */
@@ -128,6 +139,17 @@ export function TwoStepPicker({
    */
   const branch = only ?? branches.find((b) => b.id === branchId) ?? null;
 
+  /**
+   * ═══ ВЕТОК НЕТ И ЗАВЕСТИ НЕЧЕГО — ЭТО НЕ ПИКЕР, И ДВЕРЬ СТАВИТ ВЫЗЫВАЮЩИЙ (O-57 r4) ═══════════
+   *
+   * Погашенная дверь на месте пикера обязана стоять — ряд без двери читается «здесь ничего не
+   * делают» там, где не делают ПО ПРИЧИНЕ (r2). Но рисует её не пикер, а вызывающий, ОБЩИМ органом
+   * студии — `InertDoor`: так делает `use for ▸` (`../pattern/fabric-carousel`), и так с r4 делает
+   * `mark ▸` (`../render/render-tile`). Своя погашенная дверь здесь была бы вторым написанием
+   * одного правила (r2 — копия `InertDoor`, r3 — `RefusedDoor` со своей семантикой), а взять
+   * `InertDoor` отсюда нельзя: `../bench-slot` импортирует `./core`, и круг замкнулся бы. Поэтому
+   * здесь — ничего, и оба вызывающих до этой ветки не доходят.
+   */
   if (!branches.length && !create) return null;
 
   const close = () => {
@@ -314,32 +336,51 @@ export function TwoStepPicker({
           </>
         ) : (
           <>
-            <div role='listbox' aria-label={branchNoun}>
-              {branches.map((b) => (
-                <button
-                  key={b.id}
-                  type='button'
-                  role='option'
-                  aria-selected={false}
-                  data-picker-row=''
-                  data-picker-branch={b.id}
-                  tabIndex={-1}
-                  title={b.title}
-                  onClick={() => goTo(b.id)}
-                  className={ROW}
-                >
-                  <span className='min-w-0 flex-1 truncate uppercase'>{b.label}</span>
-                  {b.note ? (
-                    <Text size='micro' variant='label' component='span' className='shrink-0 tabular-nums'>
-                      {b.note}
-                    </Text>
-                  ) : null}
-                  <span aria-hidden className='shrink-0 text-labelColor'>
-                    ▸
-                  </span>
-                </button>
-              ))}
-            </div>
+            {branches.length ? (
+              <div role='listbox' aria-label={branchNoun}>
+                {branches.map((b) => (
+                  <button
+                    key={b.id}
+                    type='button'
+                    role='option'
+                    aria-selected={false}
+                    data-picker-row=''
+                    data-picker-branch={b.id}
+                    tabIndex={-1}
+                    title={b.title}
+                    onClick={() => goTo(b.id)}
+                    className={ROW}
+                  >
+                    <span className='min-w-0 flex-1 truncate uppercase'>{b.label}</span>
+                    {b.note ? (
+                      <Text
+                        size='micro'
+                        variant='label'
+                        component='span'
+                        className='shrink-0 tabular-nums'
+                      >
+                        {b.note}
+                      </Text>
+                    ) : null}
+                    <span aria-hidden className='shrink-0 text-labelColor'>
+                      ▸
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : emptyReason ? (
+              /* ВЕТОК НЕТ, НО ЗАВЕСТИ МОЖНО. Пустой список без слова читался бы поломкой, поэтому шаг
+                 1 говорит почему — той же фразой, что `title` двери у вызывающего. */
+              <Text
+                size='micro'
+                variant='label'
+                component='p'
+                className='px-2 py-1 normal-case'
+                data-picker-empty=''
+              >
+                {emptyReason}
+              </Text>
+            ) : null}
             {create ? (
               /* ⚠ ВНЕ СПИСКА НАМЕРЕННО: это не «ещё одна ветка», а глагол — он не выбирает
                  существующее, а заводит новое, и `role="option"` над ним обещал бы читалке

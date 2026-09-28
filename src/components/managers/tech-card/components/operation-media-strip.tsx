@@ -263,7 +263,7 @@ export function OperationMediaStrip({
                     // ЧЕСТНОЕ СОСТОЯНИЕ, А НЕ ПУСТОЙ ПРЯМОУГОЛЬНИК: адрес не пришёл ни с чтения,
                     // ни из сессии — значит картинку показать нечем, и сказать это надо словом.
                     <Placeholder
-                      label='address not resolved — save the card'
+                      label='address not resolved — it resolves once the card has saved'
                       className='w-40 px-2 text-center'
                       style={{ height: STRIP_HEIGHT }}
                     />

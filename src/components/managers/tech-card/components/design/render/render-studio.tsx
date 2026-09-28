@@ -1,5 +1,5 @@
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
-import { useMemo, useRef, useState, type JSX } from 'react';
+import { useCallback, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { Button } from 'ui/components/button';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
@@ -9,6 +9,7 @@ import { ColorwaySelect } from '../colorway-picker';
 import { ColourwayCreatePopover } from '../colourway-create';
 import { useColourPlan } from '../colour-plan/use-colour-plan';
 import { GROUP_SEAM } from '../core';
+import { LatestGeneration } from '../generation/latest-generation';
 import type { ClothSlot } from '../pattern/slot-fabrics';
 import { useCardFit, useColourDraft } from './drafts';
 import { GenerateRow, LockBar, RunRefusal } from './generate-row';
@@ -22,33 +23,42 @@ import {
   wireColourSource,
   type Gate,
 } from './model';
-import { OutputsSection } from './outputs';
 import { Palette } from './palette';
-import { SidesSection } from './side-row';
-import { useStartDesignRun } from './use-design-run';
+import { RenderStepScope, type RenderStep } from './render-tile';
+import { SidesSection, useSidesTarget } from './side-row';
+import { useStartDesignRun, type StartRunInput } from './use-design-run';
 import { WhatModelGetsRenderModal } from './what-model-gets';
 
 /**
- * THE FABRIC RENDER STUDIO — step 4 of the chain, FOUR BLOCKS IN THE ORDER OF THE WORK:
+ * THE FABRIC RENDER STUDIO — step 4 of the chain, THREE BLOCKS IN THE ORDER OF THE WORK:
  *
  *   FABRIC RENDER · the cloth on the flats                                          [STEP 4]
  *   ── CLOTH AND COLOUR  one grid: cloth tiles and the colour tile
  *   ── CLOTH IS ─────── weight g/m² · opaque · semi sheer · sheer, one line
  *   ── IN WORDS ─────── the free text of the recipe
  *   GENERATE · priced by the server on start · WHAT THE MODEL GETS ▸
+ *   ── LATEST GENERATION  the newest render run, its tiles with the doors (O-63, `LatestGeneration`)
  *   SIDES ─────────────── one row per side: what went in, what came back (`SidesSection`)
- *   RENDERS OF THIS CARD  the plates themselves, and every door that puts one into a side
- *   GENERATION HISTORY    (mounted by the step screen)
+ *   GENERATION HISTORY    (the step screen's, drawn here last — `children`, O-63), folded
  *
  * The rows INSIDE the first block are separated by group rules (`GroupLabel`), never by nested
  * boxes: a block never contains another block (DESIGN.md).
+ *
+ * ═══ RENDERS OF THIS CARD IS GONE (27.09, O-63, D-62) ════════════════════════════════════════
+ * Owner, verbatim: «после генерации результат показывать как во флетах те с LATEST GENERATION и
+ * GENERATION HISTORY свернут по дефолту и RENDERS OF THIS CARD получается не нужен». A render
+ * lands under GENERATE as a flat does; the older runs stand in the history, folded; the plates
+ * brought by hand that SIDES does not show stand there too, as one folded group («N brought ▸»).
+ * Every one of those tiles carries the doors the section had (`./render-tile`), their rules one
+ * hook per host and their refusal notes printed once per host.
  *
  * ⚠ ДВЕ ЛЕНТЫ С ВЕРХА ЭТОГО БЛОКА СНЯТЫ (r2 п.29–30, рулинги r1 §8.3/§8.10). Владелец, дословно:
  * «в FABRIC RENDER раньше было лучше чем сейчас … только таблицу вместо двух лент» и «весь блок
  * FLATS OF THIS CARD в FABRIC RENDER убери полностью и маркировка в SIDES будет происходить только
  * в блоке RENDERS OF THIS CARD». Поэтому здесь больше НЕТ ни `InputFlatsGroup`, ни `SidesGroup`, ни
  * пула неразмеченных чертежей (`RenderInputStrip bare`): стороны — своим блоком ниже, а разметка —
- * у самих картинок, в `OutputsSection`, где лежит материал.
+ * у самих картинок, где лежит материал (тогда в RENDERS OF THIS CARD, с O-63 — на плитках
+ * последней генерации и истории).
  *
  * THE REFERENCES ARE NOT DRAWN HERE: a fabric render is coloured over THE FLATS OF THIS CARD, and
  * the model never sees the reference photographs. They belong to FLAT, one click away.
@@ -69,6 +79,14 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * (`designSelectBench`) — второй владелец числа заставил бы 3D смотреть в один верстак, пока
  * рендер наполняет другой.
  *
+ * ⚠ `for:` ПРЕДЛАГАЕТ РОВНО СТОЛБЦЫ SIDES (O-57). Таблица рисует столбец `sample`, только пока у
+ * карточки нет ни одного колорвея (архивные тоже считаются, D-56″), и экран работает там, где
+ * столбец виден: сохранённая цель без столбца (`sample` у карточки с колорвеями, списанный пустой
+ * колорвей) читается ПЕРВЫМ столбцом. Столбца нет ни одного (одни архивные без плит) — цели нет,
+ * и GENERATE закрыт той же фразой, что стоит строкой в таблице. Это число экран ВЫВОДИТ и никуда
+ * не пишет — общий выбор студии двигает только жест человека (G2-7; разбор у `useSidesTarget`,
+ * `./side-row`).
+ *
  * ⚠ РЕМОУНТА ПО `key={colorwayId}` БОЛЬШЕ НЕТ, И ОН БЫЛ БЫ ТЕПЕРЬ ПРЯМЫМ ДЕФЕКТОМ: экран,
  * ремоунтящий сам себя на смене цели, закрывал бы собственный список прямо под пальцем. Пересев
  * цветной половины рецепта переехал внутрь `useColourDraft` — ткань и слова там остаются, потому
@@ -79,13 +97,15 @@ export function RenderStudio({
   techCardId,
   disabled,
   onGoToKind,
-  colorwayId = 0,
-  colorwayRef = null,
-  colorwayLabel = '',
-  colorwayArchived = false,
+  colorwayId: storedColorwayId = 0,
+  colorwayRef: storedColorwayRef = null,
+  colorwayLabel: storedColorwayLabel = '',
+  colorwayArchived: storedColorwayArchived = false,
   colorways = [],
   onColorwayChange,
+  cardColorways,
   slots,
+  children,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -101,8 +121,20 @@ export function RenderStudio({
   colorways?: common_AdminColorwayRef[];
   onColorwayChange?: (id: number) => void;
   /**
+   * O-57 r4 · КОЛОРВЕИ КАРТОЧКИ КАК ЕСТЬ — сырой список (`useColorwayChoice().cardColorways`),
+   * архивные без плит тоже; `colorways` выше сужен. Нужен двум вопросам: стоит ли столбец `sample`
+   * (D-56″: только пока у карточки нет ни одного колорвея, архивные тоже считаются —
+   * `colourwayColumns`) и членству плиты у дверей рендера (колорвей, снесённый с карточки, против
+   * архивного пустого, — разбор у `useRenderDoors`, `./render-tile`). Не задан — «не сказано»:
+   * правило семпла считает по `colorways`, а двери не отказывают по членству.
+   */
+  cardColorways?: common_AdminColorwayRef[];
+  /**
    * WHOSE render this is. `0` — верстак `sample`: не пропуск, а настоящее и вечно законное
    * значение, на котором стоит всякий рендер, сделанный до появления оси, и всякая проба цвета.
+   * ⚠ ЭТО СОХРАНЁННАЯ ЦЕЛЬ СТУДИИ, А НЕ ОБЯЗАТЕЛЬНО ЦЕЛЬ ЭКРАНА (O-57): у `sample` рядом с
+   * колорвеями столбца нет, и экран работает под первым столбцом SIDES, не трогая этого числа —
+   * разбор у `useSidesTarget` (`./side-row`).
    */
   colorwayId?: number;
   /** Its row — the second half of the seed («its own colour», when it has no renders yet). */
@@ -130,7 +162,31 @@ export function RenderStudio({
    * its own would desynchronise the rail from its own content.
    */
   onGoToKind?: (kind: 'flat' | 'pattern' | 'render' | 'threed' | 'onmodel') => void;
+  /**
+   * THE STEP'S GENERATION HISTORY, handed in by the composer (`studio-tab.tsx`) and drawn last, under
+   * this studio's render scope (O-63, D-62): its rows carry the render doors, which read the step.
+   */
+  children?: ReactNode;
 }): JSX.Element {
+  /* ═══ O-57 · ЦЕЛЬ, ПОД КОТОРОЙ РАБОТАЕТ ЭКРАН, — ПЕРВЫМ ДЕЛОМ, ДО ВСЕХ ЕЁ ЧИТАТЕЛЕЙ ═════════════
+     У сохранённой цели нет столбца в SIDES — экран работает под первым столбцом, и читают это
+     число под прежними именами ВСЕ органы ниже: черновик рецепта, ворота, тело прогона, `for:` и
+     сама таблица. Поднять его в одном из них (скажем, в лице селекта) значило бы купить лист под
+     `sample`, показывая ROSSO. Композитору оно НЕ уходит: число выведено, а не выбрано, и общий
+     выбор студии двигает только жест человека (G2-7, разбор у `useSidesTarget`). */
+  const target = useSidesTarget(
+    band,
+    colorways,
+    {
+      colorwayId: storedColorwayId,
+      ref: storedColorwayRef,
+      label: storedColorwayLabel,
+      archived: storedColorwayArchived,
+    },
+    /* D-56″: столбец `sample` решает СЫРОЙ список карточки — архивный без плит тоже колорвей. */
+    cardColorways,
+  );
+  const { colorwayId, ref: colorwayRef, label: colorwayLabel, archived: colorwayArchived } = target;
   /* ⚠ `techCardId` ЗДЕСЬ НЕСУЩИЙ, А НЕ СПРАВОЧНЫЙ: черновик подачи умирает вместе с карточкой, и
      умирает он ПО ЭТОМУ ЧИСЛУ (`StudioTab` между карточками не размонтируется — инвариант 12).
      Без него на карточке B стояли бы ткани карточки A — `design_asset.id` ЧУЖОЙ полки, — и
@@ -161,10 +217,10 @@ export function RenderStudio({
    */
   const [creating, setCreating] = useState(false);
   const after = useRef<((id: number) => void) | null>(null);
-  const openCreate = (then?: (id: number) => void) => {
+  const openCreate = useCallback((then?: (id: number) => void) => {
     after.current = then ?? null;
     setCreating(true);
-  };
+  }, []);
 
   /**
    * ⚠ КАРТОЧКА СМЕНИЛАСЬ — ОКНО ЗАКРЫВАЕТСЯ, ПРОДОЛЖЕНИЕ ЖЕСТА ЗАБЫВАЕТСЯ (инвариант 12).
@@ -179,6 +235,26 @@ export function RenderStudio({
     after.current = null;
     if (creating) setCreating(false);
   }
+
+  /**
+   * ═══ WHAT THE RENDER DOORS OF THIS STEP READ — ONE VALUE FOR EVERY HOST (27.09, O-63, D-62) ═══
+   * The tiles of the latest generation below GENERATE and the rows of GENERATION HISTORY (drawn
+   * last, `children`) put a render into a side with the doors RENDERS OF THIS CARD had
+   * (`render/render-tile.tsx`), and those doors read the step: the
+   * colourway axis of SIDES (the narrowed list and the card's raw one, O-57 r4), whether the server
+   * adopts a sample plate (B7 — `benchAdoptsUnattributed`, compared, never read as its absence) and
+   * the one birth window of the screen. Stable while they are: the tiles re-render with the band,
+   * not with every keystroke of the recipe above.
+   */
+  const renderStep = useMemo<RenderStep>(
+    () => ({
+      colorways,
+      cardColorways,
+      adopts: band.benchAdoptsUnattributed === true,
+      onCreateColorway: openCreate,
+    }),
+    [colorways, cardColorways, band.benchAdoptsUnattributed, openCreate],
+  );
 
   /**
    * THE VIEWS THIS RUN ASKS FOR, IN SHEET ORDER — a walk around the garment, narrowed to the slots
@@ -230,6 +306,11 @@ export function RenderStudio({
   );
 
   const gate: Gate = useMemo(() => {
+    /* O-57 · D-56″: NO COLUMN AT ALL — the card has colourways, every one archived and without a
+       plate, so the sample column is hidden and nothing is drawn in its place. There is no bench
+       to buy into; the refusal is the SAME sentence the table prints, and its one way out — `+
+       colourway…` — stands in `for:` in this very row, so no door is drawn (`next: 'colourway'`). */
+    if (target.nowhere) return { ok: false, reason: target.nowhere, next: 'colourway' };
     /* An archived name refuses first — even before an empty bench: under a retired colour «front
        and back must hold a drawing» sends a person to draw what will not be bought anyway. */
     const base = renderGate(band, colorwayArchived, colorwayLabel);
@@ -250,10 +331,18 @@ export function RenderStudio({
       };
     }
     return { ok: true };
-  }, [band, sent, wire, colourPlan.plan, colorwayArchived, colorwayLabel]);
+  }, [band, sent, wire, colourPlan.plan, colorwayArchived, colorwayLabel, target.nowhere]);
 
   const generate = () => {
-    run.start({
+    /* O-61 (D-60, D-71): слова карточки, показанные в пустом IN WORDS, становятся СВОИМИ черновику —
+       как флэт отдаёт свой засев в форму перед `flush`; правка WORDS флэта после прогона их уже не
+       подменит. Тело ниже несёт их и без этого (`wire` — слова на экране), поэтому до ответа
+       черновик НЕ трогается (r4; ревью Codex FIX FIRST, Major 2): квитанция нажатия уходит в
+       `onStarted` и отдаётся, только когда прогон заведён и поле показывает всё тот же засев. Отказ
+       или обрыв не трогают ничего — слова остаются живым засевом. Свои слова уже стоят — квитанции
+       нет. */
+    const pressed = draft.wordsAtPress();
+    const body: StartRunInput = {
       kind: 'render',
       ask: '',
       params: {
@@ -294,7 +383,8 @@ export function RenderStudio({
         inpaint: undefined,
         extend: undefined,
       },
-    });
+    };
+    run.start(body, pressed ? { onStarted: () => draft.materializeWords(pressed) } : undefined);
   };
 
   /* ⚠ СТРОКА СОСТАВА СНЯТА ЦЕЛИКОМ (r3 п.27) — «made of pattern 1 — … · split into the slots
@@ -327,7 +417,7 @@ export function RenderStudio({
     ) : null;
 
   return (
-    <>
+    <RenderStepScope step={renderStep}>
       <Section
         /* THE ANCHOR OF THE STEP'S ONE BLOCK: statements of absence («no colourway picker in this
            block», E-16) and of belonging («the cloth grid lives HERE», E-7) are made about it. */
@@ -387,6 +477,10 @@ export function RenderStudio({
                 probe='design-render-target'
                 disabled={disabled}
                 onCreate={() => openCreate()}
+                /* O-57: пункты — РОВНО столбцы SIDES, и цель экрана всегда среди них. D-56″: столбца
+                   нет ни одного — на лице слово об этом, а пункт один, `+ colourway…`. */
+                only={target.drawn}
+                unmatched={target.nowhere ? 'no live colourway' : undefined}
                 choice={{
                   colorwayId,
                   setColorwayId: onColorwayChange,
@@ -400,47 +494,39 @@ export function RenderStudio({
             ) : null
           }
         />
+
+        {/* ═══ THE LATEST GENERATION — UNDER GENERATE, AS ON FLAT (27.09, O-63, D-62 п.1) ════════
+            Owner: «после генерации результат показывать как во флетах те с LATEST GENERATION». The
+            newest render run of any colourway, live or with pictures, its tiles carrying the doors
+            that put a render into a side; the same pin while an editor, a split or the zoom is open
+            on it, «newer run ready · show ›», «the one before». The last row of the block: what
+            GENERATE bought stands right under it, and SIDES below reads what was marked. */}
+        <LatestGeneration band={band} techCardId={techCardId} disabled={disabled} kind='render' />
       </Section>
 
-      {/* ═══ SIDES — СВОЙ БЛОК, НАД РЕНДЕРАМИ КАРТОЧКИ (r2 п.29) ══════════════════════════════
+      {/* ═══ SIDES — СВОЙ БЛОК, МЕЖДУ ПОСЛЕДНЕЙ ГЕНЕРАЦИЕЙ И ИСТОРИЕЙ (r2 п.29, O-63) ════════════
           Строка на сторону: слева — чертёж, который пошёл в прогон (пустой заводится прямо тут:
           половина «из медиатеки», половина «draw»), справа — рендер, который вернулся. Класть
-          рендер в сторону эта таблица не умеет намеренно — жест `mark ▸` стоит у самой картинки,
-          в блоке ниже. */}
+          рендер в сторону эта таблица не умеет намеренно — жест `mark ▸` стоит у самой картинки:
+          на плитках последней генерации выше и истории ниже. */}
       <SidesSection
         band={band}
         techCardId={techCardId}
         disabled={disabled}
         /* ═══ ТАБЛИЦА ЕДЕТ ПО ОСИ КОЛОРВЕЕВ, А НЕ ОДНОГО ВЫБРАННОГО (п.28/29) ═══════════════════
-           Столбец на каждый занятый верстак — `sample` первым, затем колорвеи карточки, — и
+           Столбец на каждый колорвей карточки (`sample` — только у карточки без них, O-57), и
            заголовок столбца есть ВТОРАЯ ДВЕРЬ к той же цели, что и `for:` выше (`onPickColorway`
            — тот же единственный сеттер). `onCreateColorway` открывает то же окно рождения. */
         colorways={colorways}
+        cardColorways={cardColorways}
         targetColorwayId={colorwayId}
         onPickColorway={onColorwayChange ?? (() => {})}
         onCreateColorway={() => openCreate()}
         onGoToKind={onGoToKind}
       />
 
-      {/* The renders this card holds — where `mark ▸`, `split ▸` and `apply splitted` live: the
-          doors that put a render into a side from the card's own pictures. `mark ▸` addresses the
-          bench of the PICTURE's colourway (see `./outputs`). */}
-      {/* ═══ РЕНДЕРЫ КАРТОЧКИ — НЕ СУЖЕНЫ ЦЕЛЬЮ (D5) ══════════════════════════════════════════
-          Список показывает ВСЕ рендеры карточки, а чей каждый — говорит пилюля на самой плитке.
-          Сужение фильтром прятало плиты, которые человек видел минуту назад, и вопрос «куда её
-          положить» всё равно задаётся у двери `mark ▸`, а не фильтром над разделом.
-          `adopts` — сказал ли СЕРВЕР, что семпл-плита усыновляется при постановке в слот
-          колорвея (B7). Отсутствие поля читается как «не сказано» (доктрина `has_fabric_render`),
-          и тогда дверей в чужой столбец не рисуется вовсе. */}
-      <OutputsSection
-        band={band}
-        techCardId={techCardId}
-        kind='render'
-        disabled={disabled}
-        colorways={colorways}
-        adopts={band.benchAdoptsUnattributed === true}
-        onCreateColorway={openCreate}
-      />
+      {/* THE HISTORY — last, inside the scope: its render rows read the same doors (O-63). */}
+      {children}
 
       <WhatModelGetsRenderModal
         open={inspecting}
@@ -467,6 +553,6 @@ export function RenderStudio({
           then?.(id);
         }}
       />
-    </>
+    </RenderStepScope>
   );
 }

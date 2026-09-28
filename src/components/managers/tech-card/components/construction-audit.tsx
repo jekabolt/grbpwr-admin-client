@@ -23,6 +23,11 @@ import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { ViewSwitch } from 'ui/components/view-switch';
 import { FingerprintableOperation, formOperationFingerprints } from './analysis-fp';
+import {
+  flushRefusalSentence,
+  useTechCardAutosave,
+  type AutosaveStatus,
+} from './design/autosave-contract';
 import { assignUids, loadAnalysis, saveAnalysis, StoredAnalysis } from './analysis-identity';
 import { DEFAULT_ISSUE_SEVERITY, DEFAULT_ISSUE_STATUS, TechCardFormData } from './schema';
 
@@ -230,7 +235,7 @@ function AnchorStaleNote({
         <Text size='micro'>
           {changed.length > 0
             ? `${opList(changed)} changed since the run — the anchor still goes there, but that step is no longer the one the model read. Re-run to have it read again.`
-            : `${opList(edited)} has unsaved edits since the run — the run read the SAVED step. Save the card, then re-run.`}
+            : `${opList(edited)} has unsaved edits since the run — the run read the SAVED step. Re-run once the card has saved.`}
         </Text>
       </CalloutBox>
     </div>
@@ -706,6 +711,24 @@ function statusLine(
   }
 }
 
+/**
+ * THE CAPTION OVER UNSAVED EDITS (O-60 r4, P2-4). The run reads the SAVED card, so edits made since are
+ * not in it — and when they will be is the autosave's to say, not a promise read off `isDirty`: an
+ * invalid, conflicted, unconfirmed or failing card does not save «in a moment». Those four say the
+ * contract's own sentence; every other state is the plain fact.
+ */
+function unsavedCaption(status: AutosaveStatus, errorsCount?: number, refusal?: string): string {
+  switch (status) {
+    case 'invalid':
+    case 'conflict':
+    case 'needs-confirm':
+    case 'error':
+      return flushRefusalSentence(status, errorsCount, refusal);
+    default:
+      return 'these edits are not analyzed yet';
+  }
+}
+
 export function ConstructionAudit({
   techCardId,
   active,
@@ -830,13 +853,14 @@ export function ConstructionAudit({
     setValue('issues', [...(getValues('issues') ?? []), issue], { shouldDirty: true });
     // Никакой навигации: человек читает отчёт сверху вниз, и уводить его со списка на середине —
     // ровно тот способ подать одну претензию вместо пяти.
-    showMessage('filed on the issues tab — save the card to keep it', 'success');
+    showMessage('filed on the issues tab — the card saves itself once it validates', 'success');
   };
 
   // ─── the Analyze control ─────────────────────────────────────────────────────────────────────
   const aiUnavailable = data?.aiEnabled === false;
   const inFlight = analyze.isPending;
   const dirty = formState.isDirty;
+  const autosave = useTechCardAutosave();
   const canAnalyze = !!techCardId && !aiUnavailable && !inFlight && !isError;
 
   const runAnalysis = () => {
@@ -937,7 +961,7 @@ export function ConstructionAudit({
   const analyzeCaption = aiUnavailable
     ? 'AI review is not available on this deployment'
     : dirty
-      ? 'unsaved changes are not analyzed — save first'
+      ? unsavedCaption(autosave.status, autosave.errorsCount, autosave.refusal)
       : '';
 
   const analyzeControl = techCardId ? (
@@ -1028,10 +1052,9 @@ export function ConstructionAudit({
       meta={auditOpen ? undefined : headerMeta}
       open={auditOpen}
       onOpenChange={setAuditOpen}
-      // ЗАКРЫТ ПРИ ОТКРЫТИИ ВКЛАДКИ — тем же органом и с тем же видом, что и соседний «generate
-      // operations from description (ai)». Вкладка CONSTRUCTION несёт под аудитом ещё и сто
-      // двадцать шагов маршрута; развёрнутый отчёт, прочитанный час назад, отодвигает вниз всё,
-      // ради чего вкладку открыли.
+      // ЗАКРЫТ ПРИ ОТКРЫТИИ ВКЛАДКИ — органом аккордеона, свёрнутым по умолчанию. Вкладка
+      // CONSTRUCTION несёт под аудитом ещё и сто двадцать шагов маршрута; развёрнутый отчёт,
+      // прочитанный час назад, отодвигает вниз всё, ради чего вкладку открыли.
       //
       // РАСКРЫТИЕ НЕУПРАВЛЯЕМОЕ, И ЭТО РЕШЕНИЕ. Кнопка разбора живёт в теле, поэтому свёрнутым
       // блок во время прогона может быть только если человек СВЕРНУЛ ЕГО САМ — а раскрывать его

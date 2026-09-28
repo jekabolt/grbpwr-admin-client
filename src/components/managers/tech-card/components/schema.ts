@@ -120,8 +120,8 @@ import {
 // the bare entity word. The generated client types both as `string`, so swapping them compiles
 // cleanly and fails silently: the gateway reads an unknown enum as UNKNOWN and the backend then
 // keeps its own default, which is how every card saved as auxiliary came back sellable.
-// Read tolerates either shape — a locally restored draft (useTechCardDraft persists raw form
-// values) can still carry the old bare word.
+// Read tolerates either shape — raw form values written by an older build (a history snapshot, the
+// local drafts before D-63) can still carry the old bare word.
 export function toPurposeEnum(value?: string): string {
   return value === 'auxiliary' || value === 'TECH_CARD_PURPOSE_AUXILIARY'
     ? 'TECH_CARD_PURPOSE_AUXILIARY'

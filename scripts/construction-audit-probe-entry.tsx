@@ -26,6 +26,11 @@ import { FormProvider, useForm } from 'react-hook-form';
 
 import { ConstructionAudit } from 'components/managers/tech-card/components/construction-audit';
 import {
+  AUTOSAVE_OFF,
+  AutosaveContext,
+  type AutosaveStatus,
+} from 'components/managers/tech-card/components/design/autosave-contract';
+import {
   formOperationFingerprints,
   operationFingerprint,
 } from 'components/managers/tech-card/components/analysis-fp';
@@ -64,6 +69,11 @@ type MountOpts = {
    * is irrelevant to it BY CONSTRUCTION, and giving it here would suggest otherwise.
    */
   operations?: { operationNumber: number; outputUnitKey: string; inputKeys: string[] }[];
+  /**
+   * The card's autosave as the page would provide it (O-60 r4): the caption over unsaved edits reads
+   * its status. Absent = no provider at all, the contract's own `off`.
+   */
+  autosave?: { status: AutosaveStatus; errorsCount?: number; refusal?: string };
 };
 
 type GoCall = [string, Record<string, string> | undefined];
@@ -138,6 +148,7 @@ function Harness({
   dirty,
   operationCount,
   operations,
+  autosave,
 }: {
   techCardId?: number;
   active: boolean;
@@ -146,6 +157,7 @@ function Harness({
   dirty: boolean;
   operationCount?: number;
   operations?: MountOpts['operations'];
+  autosave?: MountOpts['autosave'];
 }) {
   const methods = useForm<TechCardFormData>({
     resolver: zodResolver(techCardSchema) as never,
@@ -179,28 +191,30 @@ function Harness({
   });
   return (
     <QueryClientProvider client={qc}>
-      <FormProvider {...methods}>
-        {/* The construction tab's own wrapper, verbatim. */}
-        <fieldset disabled={frozen}>
-          <form>
-            <div data-probe-panel>
-              <ConstructionAudit
-                techCardId={techCardId}
-                active={active}
-                frozen={frozen}
-                operationCount={operationCount}
-                onGoTab={
-                  noGoTab
-                    ? undefined
-                    : (tab, extra) => {
-                        gone.push([tab, extra]);
-                      }
-                }
-              />
-            </div>
-          </form>
-        </fieldset>
-      </FormProvider>
+      <AutosaveContext.Provider value={autosave ? { ...AUTOSAVE_OFF, ...autosave } : AUTOSAVE_OFF}>
+        <FormProvider {...methods}>
+          {/* The construction tab's own wrapper, verbatim. */}
+          <fieldset disabled={frozen}>
+            <form>
+              <div data-probe-panel>
+                <ConstructionAudit
+                  techCardId={techCardId}
+                  active={active}
+                  frozen={frozen}
+                  operationCount={operationCount}
+                  onGoTab={
+                    noGoTab
+                      ? undefined
+                      : (tab, extra) => {
+                          gone.push([tab, extra]);
+                        }
+                  }
+                />
+              </div>
+            </form>
+          </fieldset>
+        </FormProvider>
+      </AutosaveContext.Provider>
     </QueryClientProvider>
   );
 }
@@ -221,6 +235,7 @@ probe.mount = (opts) => {
       dirty={!!opts.dirty}
       operationCount={opts.operationCount}
       operations={opts.operations}
+      autosave={opts.autosave}
     />,
   );
 };

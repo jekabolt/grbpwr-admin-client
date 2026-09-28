@@ -15,7 +15,7 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
-import { refColorwayFor } from '../bench-kinds';
+import { COLORWAY_NONE, refColorwayFor } from '../bench-kinds';
 import { InertDoor, pictureUrl } from '../bench-slot';
 import { archivedRef, colorwayLabel } from '../colorway-picker';
 import { PlaceOrDrawCell, EMPTY_WORD } from '../core';
@@ -51,10 +51,14 @@ import {
  * ⚠ ДВЕ ЛЕНТЫ НАД БЛОКОМ FABRIC RENDER СНЯТЫ, ВМЕСТО НИХ ОДНА ТАБЛИЦА (r2 п.29, рулинг r1 §8.3).
  * Владелец: «в FABRIC RENDER раньше было лучше чем сейчас … только таблицу вместо двух лент». Две
  * ленты показывали одну и ту же сторону дважды, в двух местах экрана, и связь «что во что
- * превратилось» приходилось угадывать по порядку ячеек. `SidesSection` — СВОЙ БЛОК, стоящий над
- * RENDERS OF THIS CARD (r2 п.29 перекрывает рулинг r1 §8.9 «под»), строкой на сторону:
+ * превратилось» приходилось угадывать по порядку ячеек. `SidesSection` — СВОЙ БЛОК (r2 п.29 ставил
+ * его над RENDERS OF THIS CARD, перекрыв рулинг r1 §8.9 «под»; с O-63 того раздела нет, и блок
+ * стоит между последней генерацией и историей), строкой на сторону:
  *
- *   SIDE · FLATS IN · sample · ROSSO · OLIVE (archived) · + colourway
+ *   SIDE · FLATS IN · ROSSO · OLIVE (archived) · + colourway
+ *
+ * (`sample` стоит на месте колорвеев только у карточки, у которой их нет вовсе, — O-57, разбор у
+ * `colourwayColumns`.)
  *
  * ⚠ ТАБЛИЦА ПЕРЕЕХАЛА НА ОСЬ КОЛОРВЕЯ (r3 п.28/29/32). Столбец «RENDERS BACK» был ОДИН и показывал
  * верстак ВЫБРАННОГО цвета — то есть две трети экрана пустовали, а соседний цвет был невидим, пока
@@ -329,7 +333,8 @@ function ThreedWord({ side }: { side: BenchSide }): JSX.Element {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════════════════════
-   SIDES — ONE ROW PER SIDE: WHAT WENT IN, WHAT CAME BACK. Its own block, above the card's renders.
+   SIDES — ONE ROW PER SIDE: WHAT WENT IN, WHAT CAME BACK. Its own block, under the latest
+   generation and above the history (O-63).
    ═══════════════════════════════════════════════════════════════════════════════════════════════
 
    Владелец (r2 п.29): «раздел SIDES — отдельным блоком над RENDERS OF THIS CARD», и состав — по
@@ -345,8 +350,9 @@ function ThreedWord({ side }: { side: BenchSide }): JSX.Element {
      · СТОЛБЕЦ КОЛОРВЕЯ — снятие (✕ на плите), правка и ОДНА дверь у пустой ячейки: «+ media»,
        файл из библиотеки прямо в этот слот одной транзакцией (r3 п.30, `RegisterDesignUpload` с
        колорвеем и в кадре, и в цели). Положить в сторону картинку, УЖЕ ЛЕЖАЩУЮ НА КАРТОЧКЕ, —
-       по-прежнему жест `mark ▸` у самой картинки, в блоке RENDERS OF THIS CARD ниже: там лежит
-       материал, там и дверь. Два разных глагола на два разных предмета, ни одного дубля.
+       по-прежнему жест `mark ▸` у самой картинки — на её плитке в последней генерации выше или в
+       истории ниже (O-63; до него — в блоке RENDERS OF THIS CARD): там лежит материал, там и
+       дверь. Два разных глагола на два разных предмета, ни одного дубля.
        Ни `fill N empty sides`, ни `apply splitted` здесь нет — они были вторым написанием того же
        глагола на экране, где картинок не видно.
 
@@ -381,17 +387,23 @@ const PLUS_COL_PX = 104;
  * поэтому второго круга запроса на соседний цвет не нужно: строки всех колорвеев уже на руках, и
  * `expectedSlotRev` берётся из строки ЦЕЛИ, а не из строки семпла того же вида.
  *
- * ПОРЯДОК И СОСТАВ — РЕШЕНИЕ D1/D8, и он один на три органа:
- *   · `sample` (ось 0) первым — если у него есть плиты ИЛИ он текущая цель. Это не «ничего не
- *     выбрано»: безколорвейный верстак законен вечно, и на нём стоит всё, сделанное до оси;
+ * ПОРЯДОК И СОСТАВ — РЕШЕНИЕ D1/D8 (ось 0 — O-57, D-56″), и он один на три органа:
+ *   · `sample` (ось 0) — ТОЛЬКО у карточки без единого колорвея, и тогда ВСЕГДА: с плитами и без,
+ *     на чём бы ни стояла цель прогона. Это не «ничего не выбрано»: безколорвейный верстак законен
+ *     вечно, и на нём стоит всё, сделанное до оси, — но с первым колорвеем карточки, архивным
+ *     тоже, его столбец уходит (разбор — у самой строки правила ниже);
  *   · живые колорвеи карточки — ВСЕ, в порядке карточки, с плитами и без (пустой столбец и есть
  *     приглашение его наполнить);
  *   · архивные — ТОЛЬКО с плитами: этим цветом больше не работают, и рисовать ему пустые ячейки
  *     значило бы предлагать начать.
+ * Отсюда законное состояние БЕЗ ЕДИНОГО СТОЛБЦА: у карточки только архивные колорвеи без плит.
+ * Таблица говорит это строкой `NO_LIVE_COLOURWAY` при двери `+ colourway`, а экран закрывает
+ * GENERATE той же фразой (`useSidesTarget().nowhere`).
  *
- * ЭКСПОРТИРУЕТСЯ РАДИ ВТОРОГО ЧИТАТЕЛЯ, А НЕ «НА ВСЯКИЙ СЛУЧАЙ»: `render/outputs.tsx` строит из
- * той же оси пункты `mark ▸` и цели `apply splitted`. Второе написание порядка разошлось бы с
- * первым в первый же день, когда карточка заведёт архивный колорвей.
+ * ЭКСПОРТИРУЕТСЯ РАДИ ВТОРОГО ЧИТАТЕЛЯ, А НЕ «НА ВСЯКИЙ СЛУЧАЙ»: двери плитки рендера
+ * (`render/render-tile.tsx`) строят из той же оси пункты `mark ▸` и цели `apply splitted`. Второе
+ * написание порядка разошлось бы с первым в первый же день, когда карточка заведёт архивный
+ * колорвей.
  */
 export type ColourwayColumn = {
   /** 0 = `sample`. Значение, а не отсутствие. */
@@ -408,6 +420,12 @@ export type ColourwayColumn = {
 
 /** Слово оси 0 на экране. В коде она остаётся `COLORWAY_NONE`; таблицу семплов 0108 не путать. */
 export const SAMPLE_LABEL = 'sample';
+
+/**
+ * O-57 · D-56″ · У КАРТОЧКИ ЕСТЬ КОЛОРВЕИ, А СТОЛБЦА НЕТ НИ ОДНОГО — все архивные и без плит.
+ * Одна фраза на два места: строку таблицы SIDES и отказ GENERATE (`useSidesTarget().nowhere`).
+ */
+export const NO_LIVE_COLOURWAY = 'no live colourway — add or revive one';
 
 /**
  * ═══ ЗАПРОС «ФАЙЛ ИЗ БИБЛИОТЕКИ В ЯЧЕЙКУ СТОЛБЦА» — ЧИСТОЙ ФУНКЦИЕЙ (п.30) ═══════════════════
@@ -438,7 +456,12 @@ export function renderUploadWrite(v: {
 export function colourwayColumns(
   band: GetDesignBandResponse,
   colorways: common_AdminColorwayRef[],
-  targetColorwayId: number,
+  /**
+   * O-57 · D-56″ — СЫРОЙ список карточки (`useColorwayChoice().cardColorways`): правило семпла
+   * считает ВСЕ её колорвеи, архивные без плит тоже, а `colorways` хозяина их уже выбросил. Не
+   * задан — «не сказано», и правило считает по `colorways`.
+   */
+  cardColorways?: readonly common_AdminColorwayRef[],
 ): ColourwayColumn[] {
   const column = (colorwayId: number, ref: common_AdminColorwayRef | null): ColourwayColumn => {
     const sides = threedSides(band, colorwayId);
@@ -451,23 +474,162 @@ export function colourwayColumns(
       sides,
     };
   };
-  const out: ColourwayColumn[] = [];
-  const sample = column(0, null);
-  if (sample.plated || targetColorwayId === 0) out.push(sample);
+  const named: ColourwayColumn[] = [];
   for (const ref of colorways) {
     const id = ref.colorwayId ?? 0;
     if (id <= 0) continue;
     const col = column(id, ref);
+    /* Архивный без плит столбца не получает (D8). Колорвеем для правила семпла он при этом
+       остаётся — ответ владельца (D-56″), разбор у строки правила ниже. */
     if (col.archived && !col.plated) continue;
-    out.push(col);
+    named.push(col);
   }
-  return out;
+  /*
+   * ═══ O-57 · СТОЛБЕЦ `sample` — ТОЛЬКО ПОКА ТАБЛИЦЕ НЕ ИЗ ЧЕГО РИСОВАТЬ КОЛОРВЕИ ═══════════════
+   *
+   * Владелец (27.09), дословно: «в FABRIC RENDER SIDES колонка SAMPLE должна показываться только
+   * если нет никаких колорвеев». Прежнее правило («первым, если есть плиты ИЛИ он цель») держало
+   * семпл рядом с ROSSO и OLIVE вечно — у всякой карточки, начатой до оси, — и столбец, в котором
+   * больше никто не работает, стоял первым и забирал цель прогона.
+   *
+   * ⚠ O-57 ПРЯЧЕТ СТОЛБЕЦ, А НЕ ПЛИТЫ. Верстак `sample` остаётся в данных как был: слоты не
+   * чистятся, картинки не переписываются, и все они лежат в строках своих прогонов — на верстаке
+   * под GENERATE и в истории генераций, принесённые руками в её группе «brought» (O-63); свободную
+   * семпл-плиту жест `mark ▸` там же отдаёт в столбец колорвея, когда сервер её усыновляет (B7),
+   * а плиту, стоящую в слоте невидимого столбца, снимает дверь `unmark ▸` на её же плитке (✕ в
+   * таблице у неё больше нет). Этот файл перестаёт только РИСОВАТЬ ось 0 рядом с колорвеями.
+   *
+   * ЧТО СЧИТАЕТСЯ КОЛОРВЕЕМ — ЛЮБОЙ КОЛОРВЕЙ КАРТОЧКИ, АРХИВНЫЙ ТОЖЕ (D-56″). Владелец на вопрос
+   * «архивный без плит — колорвей?», дословно: «семпл показывается только если нет ни одного
+   * колорвея». Правило поэтому читает СЫРОЙ список карточки (`cardColorways`), а не столбцы
+   * (`named`) и не список хозяина, из которого архивный без плит уже выброшен. Столбец архивному
+   * без плит по-прежнему не рисуется (правило архива в цикле выше), так что у карточки с одними
+   * такими колорвеями таблица остаётся БЕЗ ЕДИНОГО СТОЛБЦА — и это законное состояние, а не дыра:
+   * строка `NO_LIVE_COLOURWAY` при двери `+ colourway`, GENERATE закрыт той же фразой.
+   *
+   * ⚠ ЦЕЛЬ ПРОГОНА ПРАВИЛО НЕ ЧИТАЕТ ВОВСЕ (r2, D-56). Первая редакция держала семпл ещё и «при
+   * плитах или когда он цель» — и столбец зависел от того, на чём стоит студия, а не от карточки
+   * (ревью Codex, Medium 2). Что рисовать, решают колорвеи карточки; отсюда и прежний инвариант
+   * «столбец есть всегда» снят D-56″ в одном случае — у карточки без живого колорвея и без плит.
+   *
+   * ⚠ ТЕ ЖЕ СТОЛБЦЫ ЧИТАЮТ `mark ▸` И `apply splitted` (`./render-tile`) и цель экрана с её `for:`
+   * (`useSidesTarget` ниже). Плита не ляжет «в sample», которого на экране нет: куда встаёт
+   * семпл-плита рядом с колорвеями, решает `./render-tile` (`destinationsOf`) — при B7 в живой
+   * колорвей, без B7 никуда, и тогда дверь стоит погашенной со своей причиной.
+   */
+  const carded = cardColorways ?? colorways;
+  const sampleDrawn = !carded.some((c) => (c.colorwayId ?? 0) > 0);
+  return sampleDrawn ? [column(COLORWAY_NONE, null)] : named;
+}
+
+/**
+ * ═══ WHAT SIDES SHOWS — PICTURE BY PICTURE (27.09, O-63 r2, D-72 п.1) ═══════════════════════════
+ *
+ * Every render this block draws, by id: the plate in a side of a column the table draws (`columns`
+ * — `colourwayColumns` of the same band), and every plate of the legacy shelf under the table
+ * (`legacyRenderSides`), which stands for EVERY colourway, drawn or not — so a plate held in a
+ * retired 3/4 of a column the table does not draw is still on this block, with its ✕.
+ *
+ * ⚠ THE ANSWER IS ABOUT ONE PICTURE — WHERE IT STANDS. A piece cut from a sheet does not stand
+ * where its sheet stands, and a sheet does not stand where one of its pieces does: the «brought»
+ * group of the history (`broughtGroup`, `./render-tile`) asks this of each plate first and only then
+ * puts the rest into decks. Asked of a family's root instead (the first edition), a free piece of a
+ * placed sheet vanished from the group, and a free sheet brought its placed piece along — drawn
+ * twice, here with its ✕ and there with the doors of a free plate.
+ */
+export function picturesOnSides(
+  band: GetDesignBandResponse,
+  columns: readonly ColourwayColumn[],
+): Set<number> {
+  const ids = new Set<number>();
+  for (const column of columns) {
+    for (const side of column.sides) {
+      const id = side.picture?.id ?? 0;
+      if (id > 0) ids.add(id);
+    }
+  }
+  for (const side of legacyRenderSides(band)) {
+    const id = side.picture.id ?? 0;
+    if (id > 0) ids.add(id);
+  }
+  return ids;
+}
+
+/**
+ * ═══ O-57 · ЦЕЛЬ ЭКРАНА FABRIC RENDER — ВЫВОДИТСЯ ИЗ СТОЛБЦОВ, А НЕ ЗАПИСЫВАЕТСЯ (G2-7) ═════════
+ *
+ * Спрятав столбец `sample`, нельзя оставить экрану цель `sample`: `for: [sample ▾]` покупал бы
+ * листы в верстак, которого на экране нет. Поэтому экран работает под ЭФФЕКТИВНОЙ целью:
+ *   · у сохранённой цели студии есть столбец в таблице → она и есть цель, как была;
+ *   · столбца нет (сохранён `sample` у карточки с колорвеями; списанный пустой колорвей, названный
+ *     адресом) → ПЕРВЫЙ СТОЛБЕЦ таблицы: у карточки без колорвеев это `sample`, у остальных —
+ *     первый колорвей;
+ *   · у таблицы нет ни одного столбца (D-56″: у карточки только архивные без плит) → цели нет:
+ *     живого колорвея нет, а семпл спрятан колорвеями. Экран держит сохранённое число, а GENERATE
+ *     закрыт фразой `nowhere` — той же, что стоит строкой в таблице.
+ * Её читают все органы экрана — черновик рецепта, ворота, тело прогона, `for:` и SIDES, — а `for:`
+ * предлагает РОВНО столбцы таблицы (`drawn`), поэтому значение всегда среди пунктов.
+ *
+ * ⚠ ЧИСЛО ВЫВОДИТСЯ, А НЕ ПИШЕТСЯ НАЗАД — ЭТО G2-7, А НЕ ОСТОРОЖНОСТЬ. Цель студии
+ * (`useColorwayChoice`) — одно состояние на FABRIC RENDER, 3D и чипы ON MODEL. Первая редакция
+ * (59a23c76) писала поднятое число в него из `useLayoutEffect` при монтировании — и одним заходом
+ * на экран отменяла жест человека на соседнем: колорвей, снятый на ON MODEL (`sample`), после
+ * визита сюда снова стоял ROSSO, и 3D строил уже из другого верстака (ревью Codex, High 1). Заход
+ * на экран общий выбор не двигает НИКОГДА: у хука нет ни эффекта, ни сеттера, и сохранённое число
+ * остаётся тем, что поставил человек. Двигает его только жест — `for:`, заголовок столбца,
+ * рождение колорвея (у каждого органа свой вызов `onColorwayChange`).
+ */
+export type SidesTarget = {
+  /** Цель, под которой работает экран: сохранённая, если у неё есть столбец, иначе первый столбец. */
+  colorwayId: number;
+  ref: common_AdminColorwayRef | null;
+  /** Имя цели — `''` под `sample`, как у `useColorwayChoice`. */
+  label: string;
+  archived: boolean;
+  /** Столбцы таблицы в её порядке — ровно пункты `for:` (`only`). */
+  drawn: number[];
+  /** D-56″: столбца нет ни одного — почему прогона нет (`NO_LIVE_COLOURWAY`); иначе `null`. */
+  nowhere: string | null;
+};
+
+export function useSidesTarget(
+  band: GetDesignBandResponse,
+  colorways: common_AdminColorwayRef[],
+  stored: {
+    colorwayId: number;
+    ref: common_AdminColorwayRef | null;
+    label: string;
+    archived: boolean;
+  },
+  /** D-56″: сырой список карточки — правило семпла (`colourwayColumns`). */
+  cardColorways?: readonly common_AdminColorwayRef[],
+): SidesTarget {
+  const columns = useMemo(
+    () => colourwayColumns(band, colorways, cardColorways),
+    [band, colorways, cardColorways],
+  );
+  const drawn = useMemo(() => columns.map((c) => c.colorwayId), [columns]);
+  /** У сохранённой цели есть столбец — экран работает под ней как есть. */
+  const standing = drawn.includes(stored.colorwayId);
+  /* Столбца может не быть ни одного (D-56″) — тогда цели у экрана нет, и это говорит `nowhere`. */
+  const first = columns[0] ?? null;
+  if (!first) return { ...stored, drawn, nowhere: NO_LIVE_COLOURWAY };
+  if (standing) return { ...stored, drawn, nowhere: null };
+  return {
+    colorwayId: first.colorwayId,
+    ref: first.ref,
+    label: first.colorwayId === COLORWAY_NONE ? '' : first.label,
+    archived: first.archived,
+    drawn,
+    nowhere: null,
+  };
 }
 
 export function SidesSection({
   band,
   techCardId,
   colorways,
+  cardColorways,
   targetColorwayId,
   onPickColorway,
   onCreateColorway,
@@ -476,10 +638,16 @@ export function SidesSection({
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
-  /** Колорвеи карточки в её собственном порядке (`useTechCard().colorways`). */
-  colorways: common_AdminColorwayRef[];
   /**
-   * ЦЕЛЬ ПРОГОНА — то же одно число студии (`useColorwayChoice`), что стоит в `for:` у GENERATE.
+   * Колорвеи карточки в её собственном порядке — список хозяина (`useColorwayChoice().colorways`):
+   * архивный без плит из него выброшен, если он не цель. Сырой список — `cardColorways` ниже.
+   */
+  colorways: common_AdminColorwayRef[];
+  /** D-56″: сырой список карточки, архивные без плит тоже — правило столбца `sample`. */
+  cardColorways?: readonly common_AdminColorwayRef[];
+  /**
+   * ЦЕЛЬ ПРОГОНА — то же число, что стоит в `for:` у GENERATE: эффективная цель экрана
+   * (`useSidesTarget`) — цель студии, если у неё есть столбец, иначе первый столбец таблицы.
    * Таблица его не ВЛАДЕЕТ: клик по заголовку столбца — вторая дверь к тому же состоянию, как чипы
    * on-model. Столбцы при этом рисуются ВСЕ, а не один: сужение таблицы целью и было той «третью
    * экрана белого пятна», на которую жаловался владелец (п.28).
@@ -495,8 +663,8 @@ export function SidesSection({
   const { dictionary } = useDictionary();
   const flats = useMemo(() => benchSides(band, 'flat', 0), [band]);
   const columns = useMemo(
-    () => colourwayColumns(band, colorways, targetColorwayId),
-    [band, colorways, targetColorwayId],
+    () => colourwayColumns(band, colorways, cardColorways),
+    [band, colorways, cardColorways],
   );
   /** Занятые снятые 3/4 рендер-верстака, всех колорвеев (D-18', ревью Codex M1) — хвост блока. */
   const legacy = useMemo(() => legacyRenderSides(band), [band]);
@@ -897,8 +1065,8 @@ export function SidesSection({
               рамка съедает те самые два пикселя, поэтому поле у кнопки `py-px`, а не `py-0.5`
               (1 + 1 + 15 строки + 1 + 1 = 19, ровно как `py-0.5` без рамки). Числа сторожит
               `probe-sides.mjs` (`checkHeadRow`: ширина против собственного слова, `top`/`height`
-              и строка текста против заголовка `sample`) — «на глаз одинаково» здесь уже один раз
-              разошлось с числом.
+              и строка текста против заголовка первого столбца — `sample` или, с O-57, первого
+              колорвея) — «на глаз одинаково» здесь уже один раз разошлось с числом.
               Пустоты под кнопкой это НЕ трогает: 1fr остаётся у дорожки, таблица занимает ширину
               блока (п.28), и пустое место под приглашением читается тем, чем является, — местом
               для следующего цвета.
@@ -929,6 +1097,25 @@ export function SidesSection({
               />
             )}
           </div>
+
+          {/* ═══ O-57 · D-56″ · СТОЛБЦА НЕТ НИ ОДНОГО — СТРОКА, А НЕ ПУСТАЯ ШАПКА ═══════════════
+              У карточки есть колорвеи (семпл ими спрятан), но все архивные и без плит — рисовать
+              нечего. Без слова таблица стояла бы шапкой `SIDE · FLATS IN · + COLOURWAY` над
+              пустотой. Строка встаёт под дверь `+ colourway` — её единственный выход — в ту же
+              дорожку, где стояли бы столбцы; тон и кегль подписи, регистр предложения, ни коробки,
+              ни рамки (DESIGN.md). Второй двери нет: «add» — это дверь над строкой, «revive» —
+              статус колорвея на вкладке COLOURWAYS. */}
+          {columns.length === 0 && (
+            <div
+              data-side-no-colourway=''
+              className='min-w-0 pt-1 pb-2'
+              style={{ gridColumn: '3 / -1' }}
+            >
+              <Text size='micro' variant='label' component='p'>
+                {NO_LIVE_COLOURWAY}
+              </Text>
+            </div>
+          )}
 
           {flats.map((flat, i) => {
             const label = viewLabel(flat.view);
@@ -1147,9 +1334,10 @@ export function RendersByViewGroup({
                   onOpen={toRender}
                   /* ⚠ ФАЙЛ ЭТА СТОРОНА БОЛЬШЕ НЕ ПРИНИМАЕТ (r2 п.29/30): у пустой рендер-стороны
                      нет ни половины «из медиатеки», ни `apply splitted` — единственный жест это
-                     `mark ▸` на самой картинке в RENDERS OF THIS CARD. Подсказка «or from a file»
-                     обещала дверь, которой на том экране нет вовсе, и посылала искать её. */
-                  title={`fill ${label} on FABRIC RENDER — from RENDERS OF THIS CARD (mark ▸)`}
+                     `mark ▸` на самой картинке, а картинки FABRIC RENDER стоят с O-63 в LATEST
+                     GENERATION и в GENERATION HISTORY. Подсказка «or from a file» обещала дверь,
+                     которой на том экране нет вовсе, и посылала искать её. */
+                  title={`fill ${label} on FABRIC RENDER — mark ▸ on a render in LATEST GENERATION or GENERATION HISTORY`}
                 />
               )}
               {/* The 3D word stands under a FILLED plate only: an empty side is in no run, and

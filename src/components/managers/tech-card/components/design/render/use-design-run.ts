@@ -4,6 +4,7 @@ import type { common_DesignRunParams } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useRef, useState } from 'react';
 
+import { unstickPin } from '../generation/bench-store';
 import {
   isAborted,
   isDefinitiveRefusal,
@@ -100,6 +101,24 @@ export type StartRunCallbacks = {
    * whatever `stored` says — the ledger's documented memory fallback (run-ledger.ts, file head).
    */
   beforeSend?: (clientRequestId: string, stored: boolean) => boolean;
+  /**
+   * `onStarted` — WHAT THE SCREEN DOES ONCE THE RUN EXISTS, AND ONLY THEN (O-61 r4, D-71).
+   *
+   * A press can have a consequence on the screen that pressed it which must not outlive a press that
+   * bought nothing: FABRIC RENDER makes the card's words shown in IN WORDS the draft's own. Done
+   * before this void call, it stood after a refusal, a 409 or a dropped connection too (Codex, FIX
+   * FIRST, Major 2). So it waits for the server's answer: called after this hook's own success (the
+   * band invalidated, the key settled), never on a failure — the failure path is untouched — and,
+   * as react-query's PER-CALL callback, only for this hook's LAST press and only while the screen
+   * that pressed is mounted: a screen that is gone has nothing to make its own. That is the one way
+   * it differs from `onAccepted`, which the mutation itself calls and which survives an unmount.
+   *
+   * ⚠ AND IT KEEPS `onAccepted`'S GATE: an answer to a key the ledger had already settled — a late
+   * success announced by its retry, or a replay answered after that late success — is not this
+   * press's, and does not reach it either (G-03 Codex r3 BLOCKER). A press given up as «no answer»
+   * whose answer then arrives late is a rejected mutation: its `onAccepted` fires, this does not.
+   */
+  onStarted?: () => void;
 };
 
 export type StartRunState = {
@@ -112,6 +131,9 @@ export type StartRunState = {
    * per-call option: react-query drops per-call callbacks once the component that called `mutate`
    * has unmounted, and a playground form is unmounted by |→, Back or the rail while «starting…»
    * (G-01, Fable m-7). The run was booked all the same, so the words are remembered all the same.
+   *
+   * `onStarted` — the per-call one, for a consequence that belongs to the screen that pressed and
+   * to nothing else (FABRIC RENDER's IN WORDS): the rules are on `StartRunCallbacks.onStarted`.
    */
   start: (input: StartRunInput, opts?: StartRunCallbacks) => void;
   /**
@@ -152,10 +174,13 @@ export type StartRunState = {
  * FABRICS carousel), and a swatch lands IN ITS SLOT, bound to the pair by the landing itself; an
  * extracted fabric lands in the carousel. A toast that names a place that is not on the screen
  * sends the person looking for it. Kinds without an entry keep their sentence byte for byte.
+ * FABRIC RENDER has FLAT's latest generation under its GENERATE since O-63 (D-62), and says FLAT's
+ * sentence (`useStartRun`).
  */
 const STARTED_DEFAULT = 'run started — the pictures land in the history when it finishes';
 const STARTED_BY_KIND: Partial<Record<StartRunInput['kind'], string>> = {
   pattern: 'run started · the fabric lands in its slot — or in LAST FABRICS — when it finishes',
+  render: 'run started — the pictures land under GENERATE when it finishes',
 };
 
 /**
@@ -233,6 +258,8 @@ export function useStartDesignRun(
     // was accepted; the intent on screen now may be a new press of the same request under a new key,
     // and nothing of it — the ledger entry, the kept paint, the open editor — is this answer's.
     if (!matched) return;
+    // Written for the per-call `onStarted` (`start`), which fires after this and reads it.
+    input.matched = true;
     input.onAccepted?.(input.clientRequestId);
     // The screen's own state is cleared only where the answer is ABOUT the card on screen; the
     // switch above has already cleared it otherwise, and writing it again would be a statement
@@ -241,6 +268,10 @@ export function useStartDesignRun(
     // The run comes back PENDING, not done: the picture arrives in the feed when the provider
     // answers. Saying so is the difference between «nothing happened» and «it was booked».
     showMessage(STARTED_BY_KIND[input.wire.kind] ?? STARTED_DEFAULT, 'success');
+    // …and FABRIC RENDER's workbench goes to it, as FLAT's does (O-63; `bench-store.ts`): a pin
+    // left by earlier work stops holding the run it kept. Not a release — an editor opened while
+    // this answer travelled keeps its run until it closes.
+    if (input.wire.kind === 'render') unstickPin(input.techCardId);
   };
 
   const mutation = useMutation({
@@ -310,7 +341,7 @@ export function useStartDesignRun(
       const operator = operatorKey();
       const { id: clientRequestId, stored } = ledgerSend(techCardId, scope, fingerprint, operator);
       if (opts?.beforeSend && !opts.beforeSend(clientRequestId, stored)) return;
-      mutation.mutate({
+      const sent: SentRun = {
         wire,
         techCardId,
         clientRequestId,
@@ -320,7 +351,21 @@ export function useStartDesignRun(
         onAccepted: opts?.onAccepted,
         onRefused: opts?.onRefused,
         provesUnbooked: opts?.provesUnbooked,
-      });
+      };
+      // `onStarted` is the per-call one, and it fires after `accepted` ran for THIS press — so it
+      // reads the gate `accepted` wrote rather than the bare fact that the call resolved. The
+      // reasons are on `StartRunCallbacks.onStarted`.
+      const onStarted = opts?.onStarted;
+      mutation.mutate(
+        sent,
+        onStarted
+          ? {
+              onSuccess: () => {
+                if (sent.matched) onStarted();
+              },
+            }
+          : undefined,
+      );
     },
     [techCardId, mutation, scope],
   );
@@ -391,6 +436,12 @@ type SentRun = {
   onAccepted?: (clientRequestId: string) => void;
   onRefused?: (error: unknown) => void;
   provesUnbooked?: (error: unknown) => boolean;
+  /**
+   * WRITTEN BY `accepted`, READ BY THE PER-CALL `onStarted`: the door's answer to this press came
+   * while the ledger still held its key — the answer is this press's own. Never set for a late
+   * answer to a settled key; and a press whose mutation was rejected never reads it.
+   */
+  matched?: boolean;
 };
 
 /** The mutation key of a scoped form's presses — the cache is asked «is one of them out?». */

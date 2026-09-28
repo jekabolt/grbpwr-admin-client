@@ -482,6 +482,8 @@ function buildLabDipRequest(
     labDipRejectReason: draft.labDipStatus === REJECTED ? draft.labDipRejectReason.trim() : '',
     usages: undefined, // recipe is owned by UpdateColorwayRecipe — never write it through here.
     displayOrder: undefined,
+    colours: undefined,
+    nameI18n: undefined,
   };
   return {
     colorwayId: cw.colorwayId ?? 0,
@@ -3128,25 +3130,6 @@ function LabDipTimeline({
     setDraft(stored);
   }, [stored, dirty]);
 
-  // Claim any edit this panel had staged when the tab was refreshed (19.6). Declared AFTER the re-sync
-  // above on purpose: both run in the same mount flush and the LAST setDraft is the one that sticks, so
-  // the restored draft has to be second. Claims exactly once — takeSnapshot removes what it returns.
-  useEffect(() => {
-    if (!staging || !colorwayId) return;
-    const snap = staging.takeSnapshot(stagingKey) as LabDipDraft | undefined;
-    if (!snap) return;
-    // Only the three writable leaves come back. The audit mirrors stay whatever the server says NOW —
-    // they were never the operator's to restore, and a snapshot taken before a colleague's save would
-    // otherwise resurrect a superseded stamp on screen.
-    setDraft((d) => ({
-      ...d,
-      labDipStatus: snap.labDipStatus,
-      labDipRound: snap.labDipRound,
-      labDipRejectReason: snap.labDipRejectReason,
-    }));
-    setDirty(true);
-  }, [staging, colorwayId, stagingKey]);
-
   // Dirty says a control was touched; STAGED says the write would actually change something. Compared on
   // the WIRE form, so it counts only what the request carries: poking a status and putting it back writes
   // nothing, and neither does a draft that differs solely in the server-owned audit mirrors — that one
@@ -3182,8 +3165,9 @@ function LabDipTimeline({
       const expected = await readColorwayVersion(techCardId, colorwayId, lockVersion);
       await save.mutateAsync(buildLabDipRequest(colorway, draft, expected));
     } catch (e) {
-      // Re-throw carrying this panel's copy: the header prints the message it is handed.
-      throw new Error(labDipSaveErrorMessage(e));
+      // Re-throw carrying this panel's copy: the header prints the message it is handed — and the
+      // server's error as `cause`, whose status the card's save classifies (D-66′).
+      throw new Error(labDipSaveErrorMessage(e), { cause: e });
     }
   }
 
@@ -3441,11 +3425,11 @@ function LabDipTimeline({
         </div>
       )}
 
-      {/* No save button of its own any more: the lab-dip write is queued behind the card's one Save,
-          which is what reports whether it landed. */}
+      {/* No save button of its own any more: the lab-dip write is queued behind the card's own write
+          (the card saves itself, O-60), which is what reports whether it landed. */}
       {canEdit && staged && (
         <Text size='micro' variant='label'>
-          included in the card’s Save
+          saves with the card
         </Text>
       )}
     </div>
@@ -3622,17 +3606,6 @@ function ColorwayRecipeEditor({
     if (dirty) return;
     setUsages(baseline);
   }, [baseline, dirty]);
-
-  // Claim any edits this panel had staged when the tab was refreshed (19.6). Declared AFTER the re-sync
-  // above on purpose: both run in the same mount flush and the LAST setUsages is the one that sticks, so
-  // the restored rows have to be second. Claims exactly once — takeSnapshot removes what it returns.
-  useEffect(() => {
-    if (!staging || !colorwayId) return;
-    const snap = staging.takeSnapshot(stagingKey) as RecipeSnapshot | undefined;
-    if (!snap) return;
-    setUsages(snap.usages);
-    setDirty(true);
-  }, [staging, colorwayId, stagingKey]);
 
   // A declared piece claims EVERY usage that names it. Empty piece_line_key is a first-class
   // per-garment usage; only a non-empty key that no longer resolves is orphaned.
@@ -3859,8 +3832,9 @@ function ColorwayRecipeEditor({
         usages: saveUsages.map(toWire),
       });
     } catch (e) {
-      // Re-throw carrying this panel's copy: the header prints the message it is handed.
-      throw new Error(recipeSaveErrorMessage(e));
+      // Re-throw carrying this panel's copy: the header prints the message it is handed — and the
+      // server's error as `cause`, whose status the card's save classifies (D-66′).
+      throw new Error(recipeSaveErrorMessage(e), { cause: e });
     }
   }
 
@@ -4082,7 +4056,7 @@ function ColorwayRecipeEditor({
 
         {canEdit && staged && (
           <Text size='micro' variant='label'>
-            {save.isPending ? 'saving…' : 'staged'} · included in the card’s Save
+            {save.isPending ? 'saving…' : 'staged'} · saves with the card
           </Text>
         )}
       </Section>
@@ -4576,7 +4550,7 @@ export function ColorwayRecipes({
         question='— which catalog article goes on each part, in what colour and at what consumption'
       />
       <Text size='micro' variant='label'>
-        Each colourway is its own write, and every one you edit goes out with the card’s Save.
+        Each colourway is its own write, and every one you edit saves with the card.
       </Text>
 
       <Tiles min={150}>

@@ -250,14 +250,36 @@ export type CategorySizeSystem = {
   skuSystem: SizeSkuSystem | undefined;
 };
 
-// Color is a controlled colour-dictionary entry. code is exactly 3 chars and unique; it feeds the
-// colour segment of the SKU and is referenced by product.color_code.
+// Color is a controlled colour-dictionary entry. code is exactly 3 chars and unique; it is the
+// FAMILY a colourway is filed under (product.color_code, catalogue filter, aux-output assembly).
+// Since T45 it no longer feeds the SKU: the SKU colour segment is the colourway's own
+// sku_color_token. A colourway created before T45 kept its dictionary code as that token, so its
+// SKU did not change.
 export type Color = {
   id: number | undefined;
   code: string | undefined;
   name: string | undefined;
   hex: string | undefined;
   archived: boolean | undefined;
+};
+
+// ColorwayColour is one colour of a colourway's palette (T45, table product_colour). A palette is
+// ordered: the first colour is the MAIN one — thumbnails and single-colour readers use it, and the
+// server mirrors it into the colourway's development pantone / pantone_system / dev_hex.
+// A colour is a Pantone code OR a free label (at least one of the two); hex is only a screen
+// preview. On writes values are trimmed, hex and pantone_system upper-cased; limits are those of
+// the columns (label 64, pantone 64, pantone_system 8 characters).
+export type ColorwayColour = {
+  // Free words for the colour («bone white»). Required when pantone is empty.
+  label: string | undefined;
+  // Screen preview "#RRGGBB", or "" when none is known. Never authoritative — the Pantone code is.
+  hex: string | undefined;
+  // The Pantone code as typed («19-4005 TCX», «Black 6 C»), free text: the Pantone catalogue is not
+  // a dictionary here. Required when label is empty.
+  pantone: string | undefined;
+  // The Pantone book the code is from (TCX, TPG, C, …). Only together with pantone — a system
+  // without a code is refused.
+  pantoneSystem: string | undefined;
 };
 
 export type MeasurementName = {
@@ -286,8 +308,13 @@ export type Colorway = {
   status: ColorwayLifecycleStatus | undefined;
   styleId: number | undefined;
   lockVersion: number | undefined;
+  // The dictionary FAMILY tag (FK Dictionary.colors), T45: what the catalogue filter and aux-output
+  // assembly match on. Several colourways of one style may share it. Not the SKU segment any more.
   colorCode: string | undefined;
   publishedAt: wellKnownTimestamp | undefined;
+  // OUTPUT-ONLY. The colour segment of the SKU (T45): three characters [A-Z0-9] the server minted
+  // when the colourway was created, unique within the style and never changed afterwards.
+  skuColorToken: string | undefined;
 };
 
 export type ColorwayDisplay = {
@@ -327,9 +354,23 @@ export type ColorwayMerchandising = {
   collection: string | undefined;
   fit: string | undefined;
   minTier: number | undefined;
+  // The dictionary FAMILY tag (T45) — see ColorwayMerchandisingInsert.color_code.
   colorCode: string | undefined;
   dictionaryColor: Color | undefined;
   countryCode: string | undefined;
+  // The SKU colour token (T45): minted on create, immutable, unique within the style.
+  skuColorToken: string | undefined;
+  // The colourway's palette in order, the main colour first (T45). EMPTY for a legacy
+  // single-colour colourway: its colour then reads as before — the development pantone / dev_hex,
+  // else dictionary_color. Returned by GetColorwayByID; paged lists leave it empty.
+  colours: ColorwayColour[] | undefined;
+  // The colourway name per storefront language, keyed by Language.id (T45). A language missing
+  // here reads colour_name. Returned by GetColorwayByID; paged lists leave it empty.
+  nameI18n: { [key: string]: string } | undefined;
+  // product.color — the name legacy readers print (orders, lays, run pack, the storefront cart):
+  // the colourway's own name (development.name) once it has a palette, the family's dictionary
+  // name otherwise.
+  colourName: string | undefined;
 };
 
 // A representation of a decimal value, such as 2.5. Clients may convert values
@@ -441,12 +482,36 @@ export type ColorwayMerchandisingInsert = {
   salePercentage: googletype_Decimal | undefined;
   // min_tier is the minimum loyalty tier code required to buy (0/1/2/99).
   minTier: number | undefined;
-  // REQUIRED canonical FK to Dictionary.colors; the sole color/SKU identity on writes.
+  // The dictionary FAMILY tag (FK Dictionary.colors), MANDATORY on every colourway (T45, owner's
+  // decision 4): the filter and assembly key. It is no longer the SKU identity — see sku_color_token
+  // — so two colourways of one style may share a family.
+  // CreateColorway: a dictionary code, or "" to let the server propose the family — the
+  // non-archived dictionary colour nearest to the main colour's hex (development.colours[0].hex,
+  // else development.dev_hex), in OKLab: a grey-scale colour is compared with the grey-scale
+  // families by lightness, a chromatic one with the chromatic families by hue first, then lightness
+  // and chroma (so a fabric black such as 19-4005 TCX files under BLK, not NAV). With no hex to go
+  // by, "" is refused (InvalidArgument, merchandising.color_code, family_required).
+  // UpdateColorway: a dictionary code replaces the family; "" proposes it again from the request's
+  // development.colours[0].hex when the request carries a palette, and otherwise keeps the stored
+  // family. A code must be exactly three upper-case characters present in the dictionary.
   colorCode: string | undefined;
   // OUTPUT-ONLY resolved dictionary entry. Ignored on write.
   dictionaryColor: Color | undefined;
   // country_code is the ISO 3166-1 alpha-2 manufacture country (R9; FK Country dict). Colourway-owned.
   countryCode: string | undefined;
+  // The SKU colour token (T45) is minted by the SERVER and immutable. On CreateColorway it must be
+  // empty (a value is refused: InvalidArgument, field merchandising.sku_color_token). On
+  // UpdateColorway it is an echo guard only: empty or the stored token pass, any other value is
+  // refused (InvalidArgument, reason immutable). Read it from ColorwayMerchandising / Colorway /
+  // AdminColorwayRef.
+  // How the server mints it: a colourway created WITH a palette (development.colours) gets a token
+  // read from its name (dev name, else the main colour's label, else the family name) —
+  // «Black» → BLK, «black and white» → BKW — that is not already a token of the style and not a
+  // dictionary code other than its own family. A colourway created WITHOUT a palette (the
+  // pre-T45 shape: a dictionary code only) takes its dictionary code as the token when the style
+  // does not hold it yet, exactly as its SKU segment used to be, and a token read from its name
+  // otherwise.
+  skuColorToken: string | undefined;
 };
 
 export type ColorwayPriceInsert = {
@@ -1849,6 +1914,30 @@ export type ColorwayDevelopmentInsert = {
   labDipRejectReason: string | undefined;
   usages: TechCardColorwayUsage[] | undefined;
   displayOrder: number | undefined;
+  // The colourway's palette, the main colour first (T45; owner's decisions 5 and 6): 1 to 8
+  // colours, each a Pantone code or a free label, hex for preview (see ColorwayColour).
+  // WRITE SEMANTICS — replace-all by position, sparse like the rest of UpdateColorway:
+  // - empty (and not named by update_mask) = leave the stored palette as it is — an old client
+  // that never heard of colours cannot wipe it;
+  // - non-empty = the new palette, whole. Writing it mirrors colours[0] into pantone /
+  // pantone_system / dev_hex above (values sent for those three in the same request are
+  // overwritten by the mirror);
+  // - update_mask path `development.colours` naming an EMPTY list is refused: a palette holds at
+  // least one colour.
+  // On a colourway that HAS a palette, changing pantone / pantone_system / dev_hex without sending
+  // colours is refused (they are the palette's mirror): edit colours instead.
+  // A palette edit NEVER touches the per-slot recipe (owner's decision 7); colouring slots from
+  // the palette is the explicit ApplyColorwayPaletteToSlots call.
+  // A colourway with a palette also changes what product.color (the name orders, lays and the
+  // storefront cart print) holds: the colourway's name (`name` above) instead of the family's
+  // dictionary name.
+  colours: ColorwayColour[] | undefined;
+  // Translations of the colourway name (`name` above) per storefront language, keyed by Language.id
+  // (T45, owner's decision 3). An UPSERT, never a replace: a non-empty value writes that language, ""
+  // deletes it (the reader then falls back to `name`), a language absent from the map is left as it
+  // is. Empty map = no change. Mask path `development.name_i18n`. At most 128 characters per name;
+  // an unknown language id is refused.
+  nameI18n: { [key: string]: string } | undefined;
 };
 
 // TechCardColorwayUsage is one material use inside a colourway: which catalog article
@@ -1999,6 +2088,8 @@ export type StyleSizeChart = {
 export type AdminColorwayRef = {
   colorwayId: number | undefined;
   baseSku: string | undefined;
+  // The dictionary FAMILY tag (T45): mandatory, the catalogue-filter and assembly key; several
+  // colourways of one style may share it. The SKU colour segment is sku_color_token.
   colorCode: string | undefined;
   status: ColorwayLifecycleStatus | undefined;
   // usages is this colourway's material recipe (H1 fix, WS3/S2-S3): the constructor view of a
@@ -2119,6 +2210,18 @@ export type AdminColorwayRef = {
   // ею не засевается, чек-лист релиза её не называет, план материалов её не видит. Публикация
   // ШИРЕ множества, которое СЧИТАЕТСЯ, — и это разделение намеренное.
   shadowAreaEstimates: TechCardSlotAreaEstimate[] | undefined;
+  // OUTPUT-ONLY. The SKU colour token (T45): three characters [A-Z0-9], minted by the server when
+  // the colourway was created, unique within the style, never changed afterwards. The colour
+  // segment of base_sku once the colourway is published. Pre-T45 colourways carry their old
+  // dictionary code here, so their SKUs did not move.
+  skuColorToken: string | undefined;
+  // OUTPUT-ONLY. The palette, main colour first (T45) — see ColorwayDevelopmentInsert.colours.
+  // EMPTY for a legacy single-colour colourway: read its colour from pantone / dev_hex above, then
+  // from the dictionary family (color_code), exactly as before T45.
+  colours: ColorwayColour[] | undefined;
+  // OUTPUT-ONLY. The colourway name (dev_name) per storefront language, keyed by Language.id (T45).
+  // A language missing here reads dev_name.
+  nameI18n: { [key: string]: string } | undefined;
 };
 
 // TechCardSlotAreaEstimate — ОЦЕНКА РАСХОДА ОДНОГО РУЛОННОГО СЛОТА в ЭТОМ колорвее: сколько ткани
@@ -5946,21 +6049,28 @@ export type DesignConstructionBomLine = {
   unit: string | undefined;
 };
 
-// DesignColourwayProposal is ONE proposed colourway: what to call it, which dictionary colour it
-// is, what the swatch looks like, and which Pantone goes on which cloth slot.
-// THE SHAPE IS EXACTLY WHAT THE COLORWAYS TAB ALREADY NEEDS AND NOTHING MORE. `color_code` is what
-// CreateColorway requires (a colourway is a product and a product needs a dictionary colour);
-// name / pantone / hex are the colourway's own development row; `slots` are the recipe rows keyed
-// by the BOM line the slot's NAME folds onto. Nothing is invented for the wire that the tab does
-// not already draw.
+// DesignColourwayProposal is ONE proposed colourway: what to call it, its palette, which
+// dictionary family it is filed under, and which Pantone goes on which material slot.
+// THE SHAPE IS WHAT CreateColorway + UpdateColorwayRecipe TAKE. name / colours become the
+// colourway's development name and palette (CreateColorway development.name / development.colours);
+// `color_code` is its family (merchandising.color_code); `slots` are the recipe rows keyed by the
+// BOM line the slot's NAME folds onto. pantone / hex are the main colour, kept for clients that
+// predate the palette (T45).
 export type DesignColourwayProposal = {
   name: string | undefined;
-  // A code the SERVER VERIFIED against the colour dictionary, or '' when none was close.
-  // ⚠ '' IS A LEGAL ANSWER AND THE CLIENT MUST ASK FOR A CODE. A model that names a colour we do
-  // not stock produces a proposal that cannot become a product; an unverified code would produce
-  // one that fails at CreateColorway with the server's own words instead of ours.
+  // The dictionary FAMILY of the main colour (T45). Either a code the SERVER VERIFIED against the
+  // colour dictionary, or — when the answer named none the dictionary knows — the nearest
+  // non-archived dictionary colour to the main colour's hex (colours[0].hex, else hex), by the same
+  // measure CreateColorway uses (see ColorwayMerchandisingInsert.color_code). Several proposals may
+  // share a family: a family is a filter tag, not the SKU, and confirming both creates two
+  // colourways with two different SKU tokens.
+  // '' only when there was neither a verified code nor a hex to go by — the client then asks for
+  // the family, or sends CreateColorway with an empty color_code and a palette hex.
   colorCode: string | undefined;
+  // The main colour's Pantone, e.g. «19-4005 TCX», kept as typed — colours[0].pantone (T45; mirrored
+  // from the palette for clients that predate it).
   pantone: string | undefined;
+  // #RRGGBB screen approximation of the main colour — colours[0].hex — or '' when the answer was not a hex.
   hex: string | undefined;
   // One entry per material slot the answer named. BOUND BY THE SLOT'S FOLDED NAME, never by index
   // or id: the same fold the BOM/slot table dedupes on, so a colourway proposed beside its slots
@@ -5968,6 +6078,12 @@ export type DesignColourwayProposal = {
   // for them in one order — the main cloths, the thread, then the rest — so that the cap falls on
   // the rest rather than on the thread.
   slots: DesignColourwaySlotColour[] | undefined;
+  // The proposed palette (T45): 1 to 4 colours, the main one first — the colour of the main cloth.
+  // Each is a Pantone code (TCX for cloth) or, when no Pantone fits, a short label, with a hex
+  // (ColorwayColour; label ≤ 40 characters, pantone ≤ 24). Confirming the proposal sends it as
+  // CreateColorway development.colours. A proposal read back from a run recorded before T45 carries
+  // no colours: use pantone / hex above.
+  colours: ColorwayColour[] | undefined;
 };
 
 // DesignColourwaySlotColour is one material slot of the card wearing one colour — cloth, lining,

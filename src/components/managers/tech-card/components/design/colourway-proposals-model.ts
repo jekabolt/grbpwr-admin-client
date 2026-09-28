@@ -305,7 +305,7 @@ export function confirmRefusal(i: ConfirmGateInput): string | null {
     return 'no colours in the dictionary yet — add them under settings › colors';
   if (!i.dictionaryHasColours)
     return 'every colour in the dictionary is archived — un-archive one under settings › colors';
-  if (i.dirty) return 'save the card first — the colourway binds to saved slots';
+  if (i.dirty) return 'the colourway binds to saved slots — the card is not saved yet';
   if (!i.colorCode) return 'pick the dictionary colour — a colourway is a product and needs one';
   if (!i.codeKnown) return 'that colour is gone from the dictionary — pick another';
   if (!i.codeChoosable) return 'that colour has been archived — pick one still in the dictionary';

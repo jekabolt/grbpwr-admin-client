@@ -109,6 +109,10 @@ const KNOWN_MUTATIONS = new Set([
   '--mutate-ai-hides-the-count', // 22
   '--mutate-budget-as-weather', // 13
   '--mutate-head-failed-as-none', // 22
+  // ── O-60 r4: the caption over unsaved edits tells the autosave's truth ──
+  '--mutate-unsaved-caption-promises', // 23
+  '--mutate-unsaved-caption-ignores-autosave', // 23
+  '--mutate-unsaved-caption-drops-refusal', // 23 (D-66)
 ]);
 const stray = process.argv.slice(2).find((a) => a.startsWith('--mutate') && !KNOWN_MUTATIONS.has(a));
 if (stray) {
@@ -425,6 +429,15 @@ const GROUPS_WITH_BANNER = `                  <div data-stale-note>
 
 // THE FORM HALF, DECIDED BY THE DIRTY FLAG INSTEAD OF BY THE HASH. This is the plausible bug: it
 // looks right on a card somebody edited and is a lie on every step they did not touch.
+// 23 · O-60 r4: the caption over unsaved edits. PROMISES — the old «saves itself in a moment», said
+// whatever the autosave is doing; IGNORES — the caption never reads the autosave's status; DROPS THE
+// REFUSAL (D-66) — over a refused save the caption says «keeps retrying on its own», which it does not.
+const CAPTION_NEUTRAL_FIX = `      return 'these edits are not analyzed yet';`;
+const CAPTION_NEUTRAL_PROMISES = `      return 'unsaved changes are not analyzed yet — the card saves itself in a moment';`;
+const CAPTION_STATUS_FIX = `      ? unsavedCaption(autosave.status, autosave.errorsCount, autosave.refusal)`;
+const CAPTION_STATUS_IGNORED = `      ? unsavedCaption('dirty', autosave.errorsCount, autosave.refusal)`;
+const CAPTION_REFUSAL_DROPPED = `      ? unsavedCaption(autosave.status, autosave.errorsCount)`;
+
 const UNSAVED_HASH_FIX = `        return !!then && !!inForm && then !== inForm;`;
 const UNSAVED_HASH_BLIND = `        return !!then && !!inForm;`;
 // The other direction: the form half never fires at all. Without this, «swapping two inputs is an
@@ -558,6 +571,18 @@ const mutations = () => {
   add('--mutate-ai-hides-the-count', auditPairs, [AI_COUNT_FIX, AI_COUNT_HIDDEN]);
   add('--mutate-budget-as-weather', auditPairs, [BUDGET_STATUS_FIX, BUDGET_STATUS_AS_WEATHER]);
   add('--mutate-head-failed-as-none', auditPairs, [HEAD_FAILED_FIX, HEAD_FAILED_BLIND]);
+  add('--mutate-unsaved-caption-promises', auditPairs, [
+    CAPTION_NEUTRAL_FIX,
+    CAPTION_NEUTRAL_PROMISES,
+  ]);
+  add('--mutate-unsaved-caption-ignores-autosave', auditPairs, [
+    CAPTION_STATUS_FIX,
+    CAPTION_STATUS_IGNORED,
+  ]);
+  add('--mutate-unsaved-caption-drops-refusal', auditPairs, [
+    CAPTION_STATUS_FIX,
+    CAPTION_REFUSAL_DROPPED,
+  ]);
 
   add('--mutate-uid-includes-title', identPairs, [UID_PLAIN_FIX, UID_PLAIN_TITLED]);
   add('--mutate-session-write-off', identPairs, [SESSION_WRITE_FIX, SESSION_WRITE_OFF]);
@@ -935,6 +960,7 @@ async function mount({
   fast = false,
   operations = undefined,
   closed = false,
+  autosave = undefined,
 }) {
   await page.goto('http://probe.local/');
   // sessionStorage OUTLIVES `goto` — that is the mechanism the F5 case measures, and the leak
@@ -948,7 +974,16 @@ async function mount({
     },
     [
       s,
-      { techCardId: techCardId ?? undefined, active, frozen, noGoTab, dirty, operationCount, operations },
+      {
+        techCardId: techCardId ?? undefined,
+        active,
+        frozen,
+        noGoTab,
+        dirty,
+        operationCount,
+        operations,
+        autosave,
+      },
     ],
   );
   await page.waitForSelector('[data-probe-panel]', { timeout: 15000 });
@@ -1527,7 +1562,8 @@ await inject();
   );
 }
 
-await mount({ stub: AI_ON(), dirty: true });
+// The page's autosave with the edit still waiting for its debounce: `dirty`.
+await mount({ stub: AI_ON(), dirty: true, autosave: { status: 'dirty' } });
 await inject();
 {
   const a = await anchor('analyze (ai)');
@@ -1536,9 +1572,46 @@ await inject();
     'ON A DIRTY FORM THE BUTTON STAYS ACTIVE — the saved card is analysable, and refusing would',
     'read as «fix your form» rather than «this reads the saved card»',
   );
+  const caption = await panelText();
   ck(
-    (await panelText()).includes('unsaved changes are not analyzed — save first'),
-    'and the caption says which card is actually being read',
+    caption.includes('these edits are not analyzed yet') &&
+      !caption.includes('saves itself in a moment') &&
+      !caption.includes('save first'),
+    '23 · and the caption says which card is actually being read — a fact, no promise of a save (O-60 r4)',
+    caption.slice(0, 200),
+  );
+}
+
+// 23 · O-60 r4: the same edits over a card that does not validate — it does not save «in a moment»,
+// and the caption says what holds it: the contract's own sentence.
+await mount({ stub: AI_ON(), dirty: true, autosave: { status: 'invalid', errorsCount: 2 } });
+await inject();
+{
+  const caption = await panelText();
+  ck(
+    caption.includes('fix 2 fields first — the card saves itself once it validates') &&
+      !caption.includes('these edits are not analyzed yet'),
+    '23 · over an INVALID card the caption says what holds the save («fix 2 fields first …»), not a neutral line',
+    caption.slice(0, 200),
+  );
+}
+
+// 23 · D-66: the server REFUSED the last save (a 4xx the same body earns again) — nothing retries it on
+// a timer, so «keeps retrying on its own» would be false: the caption says the server's words.
+await mount({
+  stub: AI_ON(),
+  dirty: true,
+  autosave: { status: 'error', refusal: 'this save would erase the assembly units on this tech card' },
+});
+await inject();
+{
+  const caption = await panelText();
+  ck(
+    caption.includes(
+      'the card is not saved — this save would erase the assembly units on this tech card',
+    ) && !caption.includes('keeps retrying on its own'),
+    '23 · over a REFUSED save the caption is the server’s sentence, not «keeps retrying on its own» (D-66)',
+    caption.slice(0, 200),
   );
 }
 

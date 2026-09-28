@@ -33,7 +33,10 @@ export type AutosaveStatus =
   | 'needs-confirm'
   /** 409: сервер ушёл вперёд, открыта модалка конфликта; автосейв на паузе. */
   | 'conflict'
-  /** Сетевая/серверная ошибка; ретраи идут или исчерпаны. */
+  /**
+   * Сетевая/серверная ошибка; повторы идут сами — 5 / 15 / 45 с, дальше каждые 30 с (D-59). Отказ
+   * сервера самому телу (4xx, D-66) повторов по таймеру не получает: см. `refusal`.
+   */
   | 'error';
 
 /** Исход `flush`: только `ok` и `nothing` разрешают платную дверь. */
@@ -57,11 +60,12 @@ export type AutosaveApi = {
   /** Человекочитаемая причина при `error`/`conflict`/`needs-confirm`. */
   message?: string;
   /**
-   * На открытии найден несохранённый черновик, и оператор ещё не ответил баннеру (restore / discard).
-   * Пока это так, тихая запись его не трогает, авто-стейдж стоит, и орган не сеет в форму значений
-   * сам: сеянное грязнит форму и уезжает тихой записью мимо ответа (волна 25.09, R-11).
+   * D-66: при `error` — слова сервера, когда он ОТКАЗАЛ самому телу (4xx, который повтор не изменит).
+   * Такую запись карточка по таймеру не повторяет: она уходит снова со следующей правкой. Иначе нет.
+   * Слова — КАК ЕСТЬ (D-66′, T61 r5): и там, где страница объясняет отказ своей фразой (строгий
+   * маршалер: баннер «the backend did not recognise part of this card»), здесь — ответ сервера.
    */
-  draftPending: boolean;
+  refusal?: string;
   /** «Сохрани скоро»: перезапускает дебаунс. `reason` — для логов/телеметрии, не для UI. */
   request: (reason: string) => void;
   /** «Сохрани сейчас и скажи, вышло ли». Ждёт завершения текущего сохранения, если оно идёт. */
@@ -73,7 +77,6 @@ const noop = () => {};
 /** Умолчание: автосейва нет — стенды, печать, режим создания. */
 export const AUTOSAVE_OFF: AutosaveApi = {
   status: 'off',
-  draftPending: false,
   request: noop,
   flush: async () => 'off',
 };
@@ -90,21 +93,30 @@ export function flushAllowsRun(r: FlushResult): boolean {
   return r === 'ok' || r === 'nothing' || r === 'off';
 }
 
-/** Одна фраза отказа на все платные двери, когда flush не разрешил. */
-export function flushRefusalSentence(r: FlushResult, errorsCount?: number): string {
+/**
+ * Одна фраза отказа на все платные двери, когда flush не разрешил. `refusal` — `AutosaveApi.refusal`:
+ * над отказом сервера (D-66) «keeps retrying on its own» было бы неправдой, и дверь говорит его слова.
+ */
+export function flushRefusalSentence(
+  r: FlushResult,
+  errorsCount?: number,
+  refusal?: string,
+): string {
   switch (r) {
     case 'invalid':
       return errorsCount
-        ? `save the card first — fix ${errorsCount} field${errorsCount === 1 ? '' : 's'}`
-        : 'save the card first — a field does not validate';
+        ? `fix ${errorsCount} field${errorsCount === 1 ? '' : 's'} first — the card saves itself once it validates`
+        : 'fix the fields first — the card saves itself once it validates';
     case 'needs-confirm':
-      return 'save the card first — the purpose change waits for your confirmation';
+      return 'confirm the switch to auxiliary first — the card saves itself once you do';
     case 'conflict':
-      return 'save the card first — someone else saved it meanwhile';
+      return 'decide the conflict first — someone else saved this card meanwhile';
     case 'error':
-      return 'save the card first — the last save failed';
+      return refusal
+        ? `the card is not saved — ${refusal}`
+        : 'the card is not saved yet — the last save failed and it keeps retrying on its own';
     case 'busy':
-      return 'save the card first — it kept changing while it was being saved; try again in a moment';
+      return 'the card kept changing while it was being saved — try again in a moment';
     default:
       return '';
   }

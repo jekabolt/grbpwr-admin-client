@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import type { AutosaveStatus } from './design/autosave-contract';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
@@ -5,29 +6,46 @@ import GenericPopover from 'ui/components/popover';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { sameText, TEXT_SECTION_LABEL, type HistoryEntry, type TextSnapshot } from './save-history';
+import type { FormErrorRow } from './stage-progress';
+import type { MachineState } from './useTechCardAutosave';
 import type { StagedChange } from './useTechCardStaging';
 
 /**
- * ═══ СТАТУС СОХРАНЕНИЯ — ОДИН ЧИП ВМЕСТО «N UNSAVED CHANGES ▾» И КНОПКИ SAVE (волна 25.09 · T21) ═══
+ * ═══ СТАТУС СОХРАНЕНИЯ — ЧИП, КОТОРЫЙ НИКОГДА НЕ СОХРАНЯЕТ (волна 25.09 · T21 → 27.09 · O-60, D-59) ═══
  *
- * Кнопки «save» в режиме правки больше нет: карточка сохраняется сама (useTechCardAutosave). Чип
- * говорит ОДНО слово о том, где сейчас правки, и когда человеку есть что сделать — сам становится
- * этой дверью:
- *   saved 18:42           — серый, всё на сервере;
- *   unsaved / saving…     — синий: в полёте (дебаунс, запись);
- *   unsaved · 2 errors    — красный, щелчок = явное сохранение: ошибки выходят на поля, фокус уходит
- *                           к первому (автосейв проверяет ТИХО и полям ничего не публикует, M-02);
- *   unsaved · save now    — синий, смена purpose ждёт явного сохранения с диалогом перевода;
- *   conflict              — красный, щелчок снова открывает модалку конфликта;
- *   not saved · retry     — красный, повторы исчерпаны, щелчок пробует снова.
- * `▾` рядом открывает то, что раньше открывал старый чип (что именно ждёт записи), и под ним —
- * ИСТОРИЮ: откат текста к любому из последних сохранений. Раскрытие поповера при `invalid` — тоже
- * «покажи»: ошибки выходят на поля без прыжка.
+ * Кнопки «save» у сохранённой карточки нет: каждое действие уже ведёт к записи (useTechCardAutosave),
+ * и чип говорит только, ГДЕ сейчас правки. Сам он не пишет ни в одном состоянии — ни щелчком, ни
+ * раскрытием. Состояния:
+ *   saved 18:42                    — серый, всё на сервере;
+ *   unsaved / saving…              — синий: в полёте (дебаунс, запись);
+ *   unsaved · 2 errors             — красный: форма не проходит проверку, и ничего не пишется;
+ *   not saved · retrying           — красный: запись падает, автосейв повторяет её сам (5 / 15 / 45 с,
+ *                                    потом каждые 30 с) и со следующей правкой — двери «retry» нет.
+ *                                    Или ни одна запись не падала, а панель менялась, пока писалась
+ *                                    (потолок `restaged`): поповер говорит именно это (O-60 r4).
+ *   not saved                      — красный: сервер ОТКАЗАЛ самому телу (4xx, D-66). Повторов по
+ *                                    таймеру нет — та же запись получила бы тот же отказ; она уходит
+ *                                    снова со следующей правкой. Поповер — слова сервера как есть.
+ * У этих состояний ОДНА дверь: щелчок по всему чипу раскрывает поповер — что ждёт записи, причина,
+ * ИСТОРИЯ (откат текста к любому из последних сохранений). При `invalid` раскрытие — жест «покажи»:
+ * ошибки тихой проверки выходят на поля (M-02), а ПЕРВАЯ строка поповера ведёт к первому полю
+ * (→ вкладка) тем же путём, что строка предупреждений.
  *
+ * Два состояния — не запись, а РЕШЕНИЕ человека, и слово чипа ведёт прямо к нему:
+ *   unsaved · confirm the switch › — синий: смена purpose на auxiliary дошла до записи неподтверждённой
+ *                                    (подтверждение, которое не смогло записать карточку). Сама смена
+ *                                    подтверждается в момент жеста, в диалоге перевода; здесь —
+ *                                    страховка, и щелчок открывает ДИАЛОГ;
+ *   conflict                       — красный: щелчок снова открывает модалку конфликта.
+ * У этих двух `▾` рядом остаётся дверью того же поповера.
+ *
+ * ⌘S — невидимый явный flush: подсказки о нём здесь нет, органа на экране тоже.
  * Цвет никогда не несёт состояние один: у каждого тона своё слово (DESIGN.md, Monochrome Rule).
  */
 
 type Tone = 'mut' | 'attention' | 'warn';
+/** Why an `error` stands: a failed write, the `restaged` cap (O-60 r4) or a server refusal (D-66). */
+type SaveCause = MachineState['cause'];
 
 const FOCUS =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
@@ -45,7 +63,7 @@ function describe(
   status: AutosaveStatus,
   lastSavedAt: number | undefined,
   errorsCount: number | undefined,
-  retrying: boolean | undefined,
+  cause?: SaveCause,
 ): { label: string; tone: Tone } {
   switch (status) {
     case 'saving':
@@ -60,11 +78,12 @@ function describe(
       };
     }
     case 'needs-confirm':
-      return { label: 'unsaved · save now', tone: 'attention' };
+      return { label: 'unsaved · confirm the switch ›', tone: 'attention' };
     case 'conflict':
       return { label: 'conflict', tone: 'warn' };
     case 'error':
-      return { label: retrying ? 'not saved · retrying' : 'not saved · retry', tone: 'warn' };
+      // D-66: a refusal is not retried on a timer — «retrying» over it would be a promise nobody keeps.
+      return { label: cause === 'refused' ? 'not saved' : 'not saved · retrying', tone: 'warn' };
     case 'saved':
     case 'idle':
     default:
@@ -72,8 +91,22 @@ function describe(
   }
 }
 
-/** One sentence for the popover head: the chip is four words, this is where the reason fits. */
-function sentence(status: AutosaveStatus, message: string | undefined, errorsCount?: number) {
+/**
+ * One sentence for the popover head: the chip is four words, this is where the reason fits — and THE
+ * ONE SOURCE of the words a save that did not pass is said in (D-63′, 27.09 · O-64 r2): the line at
+ * the top of the form (SaveFailureLine) prints exactly this sentence for the same machine state, so
+ * the two organs cannot drift apart. Over a held refusal (D-66) the words are the server's as it said
+ * them (`refusal`), never a paraphrase; over the `restaged` cap its own truthful sentence; over a
+ * 401/403 stop (`off` with cause `auth`, D-66′) why the card no longer saves itself — the chip is
+ * not drawn at `off`, and the line is where that is said.
+ */
+export function saveSentence(
+  status: AutosaveStatus,
+  message: string | undefined,
+  errorsCount?: number,
+  cause?: SaveCause,
+  refusal?: string,
+): string {
   switch (status) {
     case 'saving':
       return 'saving to the server…';
@@ -88,7 +121,26 @@ function sentence(status: AutosaveStatus, message: string | undefined, errorsCou
     case 'conflict':
       return message || 'someone saved this card meanwhile; autosave waits for your decision';
     case 'error':
-      return message ? `the last save failed: ${message}` : 'the last save failed';
+      // O-60 r4: at the `restaged` cap no write failed — every one landed, and a panel kept moving.
+      if (cause === 'restaged')
+        return 'the card kept changing while it was being saved — it retries on its own';
+      // D-66: the server's own sentence, as it is — it names the way out itself. D-66′: the words the
+      // server said (`refusal`), even where the page explains the refusal with a banner of its own.
+      if (cause === 'refused')
+        return (
+          refusal ||
+          message ||
+          'the server refused the last save — it goes out again with your next change'
+        );
+      return message
+        ? `the last save failed: ${message}; the card keeps retrying on its own`
+        : 'the last save failed; the card keeps retrying on its own';
+    case 'off':
+      // D-66′: only a 401/403 stop has words — the chip is not drawn at `off`; the line at the top of
+      // the form prints this over a card that stopped saving itself, with the server's reason.
+      return cause === 'auth'
+        ? `the card is not saved and no longer saves itself${message ? ` — ${message}` : ''}`
+        : '';
     default:
       return 'every change is saved on its own';
   }
@@ -99,15 +151,17 @@ export function SaveStatusChip({
   lastSavedAt,
   errorsCount,
   message,
-  retrying,
+  cause,
+  refusal,
   bodyDirty,
   staged,
   history,
   currentText,
   canRestore,
-  onJumpToError,
+  firstError,
+  onRevealError,
   onOpenDetails,
-  onSaveNow,
+  onConfirmSwitch,
   onOpenConflict,
   onRestore,
 }: {
@@ -115,44 +169,55 @@ export function SaveStatusChip({
   lastSavedAt?: number;
   errorsCount?: number;
   message?: string;
-  retrying?: boolean;
+  /**
+   * `error`: a failed write, the `restaged` cap (every write landed, a panel kept moving), or a server
+   * refusal of the body (D-66: no timer, the next change sends it again).
+   */
+  cause?: SaveCause;
+  /** D-66′: over a refusal, the server's words as it said them (`AutosaveApi.refusal`). */
+  refusal?: string;
   bodyDirty: boolean;
   staged: StagedChange[];
   history: HistoryEntry[];
   currentText: TextSnapshot;
   canRestore: boolean;
-  onJumpToError: () => void;
+  /** `invalid`: the first field that holds the write — the popover's first line walks to it. */
+  firstError?: FormErrorRow;
+  /** The walk to a field: its tab, focus, pulse — the one the warnings organ takes. */
+  onRevealError: (path: string) => void;
   /** The popover opened: the operator is looking — publish what the quiet check found (M-02). */
   onOpenDetails?: () => void;
-  onSaveNow: () => void;
+  /** `needs-confirm`: open the purpose-switch dialog. A dialog, never a write (D-59). */
+  onConfirmSwitch: () => void;
   onOpenConflict: () => void;
   onRestore: (entry: HistoryEntry) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  // The walk closes the popover and moves focus to the field; the popover must not take it back.
+  const walking = useRef(false);
   if (status === 'off') return null;
-  const { label, tone } = describe(status, lastSavedAt, errorsCount, retrying);
+  const { label, tone } = describe(status, lastSavedAt, errorsCount, cause);
 
-  // The chip IS the door when there is something for a human to do — and only then.
-  const action =
-    status === 'invalid'
-      ? { run: onJumpToError, title: 'go to the first field with an error' }
-      : status === 'needs-confirm'
-        ? { run: onSaveNow, title: 'save now and confirm the switch to auxiliary' }
-        : status === 'conflict'
-          ? { run: onOpenConflict, title: 'someone saved this card meanwhile: decide what to keep' }
-          : status === 'error' && !retrying
-            ? { run: onSaveNow, title: 'try saving again' }
-            : null;
+  // A DECISION, never a save: the word itself leads to it. In every other state the whole chip is the
+  // popover's door, and nothing in it writes.
+  const decision =
+    status === 'needs-confirm'
+      ? { run: onConfirmSwitch, title: 'confirm the switch to auxiliary' }
+      : status === 'conflict'
+        ? { run: onOpenConflict, title: 'someone saved this card meanwhile: decide what to keep' }
+        : null;
+  const walk = status === 'invalid' ? firstError : undefined;
 
   const pendingCount = staged.length + (bodyDirty ? 1 : 0);
   const rows = [...history].reverse();
 
   return (
     <div className='inline-flex items-stretch' data-save-status={status}>
-      {action && (
+      {decision && (
         <button
           type='button'
-          onClick={action.run}
-          title={action.title}
+          onClick={decision.run}
+          title={decision.title}
           className={`flex items-stretch ${FOCUS}`}
         >
           <Pill tone={tone} className='cursor-pointer hover:bg-bgZebra'>
@@ -163,23 +228,56 @@ export function SaveStatusChip({
       <GenericPopover
         title='saving'
         className='w-[300px]'
-        onOpenChange={(open) => {
-          if (open) onOpenDetails?.();
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (next) onOpenDetails?.();
+        }}
+        contentProps={{
+          onCloseAutoFocus: (e) => {
+            if (!walking.current) return;
+            walking.current = false;
+            e.preventDefault();
+          },
         }}
         triggerProps={{
-          className: `flex items-stretch ${action ? '-ml-px' : ''} ${FOCUS}`,
-          'aria-label': action ? 'saving details and history' : `${label}, details and history`,
+          className: `flex items-stretch ${decision ? '-ml-px' : ''} ${FOCUS}`,
+          'aria-label': decision ? 'saving details and history' : `${label}, details and history`,
         }}
         openElement={
           <Pill tone={tone} className='cursor-pointer gap-1.5 hover:bg-bgZebra'>
-            {!action && <span>{label}</span>}
+            {!decision && <span>{label}</span>}
             <span aria-hidden>▾</span>
           </Pill>
         }
       >
         <div className='flex flex-col gap-2 py-0.5'>
+          {walk && (
+            <button
+              type='button'
+              data-save-first-error={walk.path}
+              onClick={() => {
+                walking.current = true;
+                setOpen(false);
+                onRevealError(walk.path);
+              }}
+              className={`flex w-full items-baseline gap-2 border-b border-hairline pb-1 text-left hover:bg-bgZebra ${FOCUS}`}
+            >
+              <span className='flex min-w-0 flex-1 flex-col'>
+                <Text size='micro' component='span' className='truncate'>
+                  {walk.path}
+                </Text>
+                <Text size='micro' variant='label' component='span'>
+                  {walk.message || 'invalid'}
+                </Text>
+              </span>
+              <Text size='micro' variant='label' component='span' className='shrink-0 underline'>
+                → {walk.tab}
+              </Text>
+            </button>
+          )}
           <Text size='micro' variant='label' component='p'>
-            {sentence(status, message, errorsCount)}
+            {saveSentence(status, message, errorsCount, cause, refusal)}
           </Text>
 
           {pendingCount > 0 && (
@@ -257,10 +355,6 @@ export function SaveStatusChip({
               text sections only; panels with their own RPC are not covered
             </Text>
           </div>
-
-          <Text size='nano' variant='label' component='p' className='uppercase'>
-            ⌘S saves now
-          </Text>
         </div>
       </GenericPopover>
     </div>

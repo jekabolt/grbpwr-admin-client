@@ -26,6 +26,13 @@ interface MediaSelectorProps {
   /** Custom trigger element (rendered through Radix `asChild`) in place of the default button —
    *  lets a caller demote the library to a quiet "browse all…" beside an inline add strip. */
   trigger?: React.ReactNode;
+  /**
+   * On close, focus goes back to the trigger WITHOUT scrolling it into view. Radix returns focus
+   * with a plain `focus()`, which scrolls the trigger's scroll container back to it — in a strip
+   * whose add slot stands first, that undoes the scroll that shows the picture just added
+   * (the moodboard, O-62). Off by default: every other caller keeps Radix's behaviour.
+   */
+  returnFocusWithoutScroll?: boolean;
   saveSelectedMedia: (media: common_MediaFull[]) => void;
 }
 
@@ -37,9 +44,11 @@ export function MediaSelector({
   showVideos = true,
   triggerClassName,
   trigger,
+  returnFocusWithoutScroll = false,
   saveSelectedMedia,
 }: MediaSelectorProps) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [selectedMedia, setSelectedMedia] = useState<common_MediaFull[]>([]);
   const [dialogKey, setDialogKey] = useState(0);
 
@@ -302,7 +311,7 @@ export function MediaSelector({
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange}>
-      <DialogPrimitive.Trigger asChild>
+      <DialogPrimitive.Trigger asChild ref={triggerRef}>
         {trigger ?? (
           <Button
             variant='main'
@@ -315,7 +324,18 @@ export function MediaSelector({
       </DialogPrimitive.Trigger>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-overlay' />
-        <DialogPrimitive.Content className='fixed left-[50%] top-[50%] z-[var(--z-modal)] flex h-[90vh] w-full max-w-6xl translate-x-[-50%] translate-y-[-50%] flex-col border border-textInactiveColor bg-bgColor p-2.5'>
+        <DialogPrimitive.Content
+          onCloseAutoFocus={
+            returnFocusWithoutScroll
+              ? (e) => {
+                  // Radix skips its own `trigger.focus()` once this is prevented.
+                  e.preventDefault();
+                  triggerRef.current?.focus({ preventScroll: true });
+                }
+              : undefined
+          }
+          className='fixed left-[50%] top-[50%] z-[var(--z-modal)] flex h-[90vh] w-full max-w-6xl translate-x-[-50%] translate-y-[-50%] flex-col border border-textInactiveColor bg-bgColor p-2.5'
+        >
           <div className='flex flex-shrink-0 flex-wrap items-center gap-2'>
             {/* ХЛЕБНЫЕ КРОШКИ ВМЕСТО ПОДМЕНЫ ЗАГОЛОВКА. Кроп не отдельный экран, а второй шаг
                 того же выбора: раньше тело диалога подменялось целиком и слово в заголовке

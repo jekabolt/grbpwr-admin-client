@@ -262,7 +262,7 @@ export default function DxfApplyDialog({
     // Не уезжают только площади — и об этом говорится вслух, вместе с тем, что делать.
     if (publishTarget && outcome?.ok && sourceDirty) {
       showMessage(
-        'the norm is applied; the areas are NOT saved: the patterns or the block→piece links have been edited and not saved — the server checks the set against the saved links. save the card and measure the areas on the patterns tab',
+        'the norm is applied; the areas are NOT saved: the patterns or the block→piece links have been edited and not saved — the server checks the set against the saved links. once the card has saved, measure the areas on the patterns tab',
         'error',
       );
     } else if (publishTarget && outcome?.ok) {

@@ -1,5 +1,4 @@
 import type {
-  common_AdminColorwayRef,
   common_DesignPicture,
   common_DesignRun,
   GetDesignBandResponse,
@@ -8,7 +7,6 @@ import { cn } from 'lib/utility';
 import { Fragment, useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
-import { Pill } from 'ui/components/pill';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
@@ -16,11 +14,10 @@ import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 
 import { InertDoor } from '../bench-slot';
-import { colorwayOf, refColorwayFor, slotHolding } from '../bench-kinds';
-import { Counter, TwoStepPicker, type PickerBranch } from '../core';
+import { Counter } from '../core';
 import { serverSpeaksDesign } from '../capability';
 import { cropFamilies } from '../generation/composite';
-import { CropDeck, DECK_PEEK_MAX } from '../generation/crop-deck';
+import { CropDeck } from '../generation/crop-deck';
 import { runStatus } from '../generation/run-state';
 import { useElapsed } from '../generation/use-generation';
 import { VectorModal } from '../modals';
@@ -29,14 +26,6 @@ import { useSplitToInput } from '../split-to-input';
 import { threedResults } from '../threed/media';
 import { useBringOwnModel } from '../threed/model-upload-cell';
 import { useDesignWrites } from '../use-design-band';
-import {
-  isActiveView,
-  normaliseViewKey,
-  viewLabel,
-  type ActiveView,
-} from '../views';
-import { ApplySplitDoor, type SplitPiece } from './apply-split';
-import { SAMPLE_LABEL, colourwayColumns } from './side-row';
 import {
   SELECT_MARK_NOT_STATED,
   liveRunsOfKind,
@@ -48,71 +37,13 @@ import {
   pictureIsSelected,
   pictureThumb,
   serverStatesSelected,
-  threedSides,
 } from './model';
-import { CELL_WIDTH, STRIP_CELL_PX, STRIP_FRAME_ASPECT, Strip, StripCell } from './strip-cell';
-
-/**
- * ═══ ЗДЕСЬ СТОЯЛИ ДВА СЕНТИНЕЛА ПЛОСКОГО СПИСКА — `MARK_PROMPT` И `MARK_NEW_COLOURWAY` ═════════
- *
- * Оба были платой за то, что ОДИН селект отвечал на ДВА вопроса: «ничего не выбрано» приходилось
- * называть строкой (Radix запрещает пустое значение пункта), а «завести колорвей» — второй
- * строкой, которую нельзя спутать с парой «верстак:сторона». Вопросы разведены по шагам
- * (`TwoStepPicker`), и оба сентинела стали невыразимы: у двери нет «значения» вовсе, а рождение
- * колорвея — отдельный глагол шага 1, а не пункт того же списка.
- */
+import { DOOR, DOOR_ROW, INERT_DOOR } from './render-tile';
+import { CELL_WIDTH, STRIP_FRAME_ASPECT, StripCell } from './strip-cell';
 
 /* ЗДЕСЬ ЖИЛ `EMPTY_FAMILIES` — пустая карта родства «для рода, который колодой не группируется».
    Такого рода на этом экране больше нет: колоду группируют ОБА (разбор у самого `families`), и
    живая константа осталась бы приглашением снова выключить семьи одному из них. */
-
-/**
- * ═══ ОДНА СЕТКА НА ВЕСЬ РЯД ДВЕРЕЙ — F-9, И ЭТО ЗАМЕР, А НЕ ВКУС ══════════════════════════════
- *
- * Владелец, дословно: «отполируй дизайн импакаблом тк сейчас там все кнопки скачут селекторы
- * болшего размера чем кнопки».
- *
- * ЗАМЕРЕНО ДО ПРАВКИ (`tmp/dsgprobe/k17w1-measure.mjs` над той же сборкой):
- *   · органы ряда стояли трёх разных высот — Pill 19px, Button xs 20px, Radix-триггер 24px
- *     (`min-h-[22px]` + две рамки), то есть селектор был на пятую часть выше соседней кнопки;
- *   · верхние кромки органов разъезжались на 18.5px (1243 против 1261.5), потому что ячейка
- *     листа колоды мерилась по содержимому, а соседние — по растянутому ряду;
- *   · ряд был `flex-wrap`, и селектор шириной 104px в колонке 132px переносил соседа на вторую
- *     строку, меняя высоту ячейки от её содержимого.
- *
- * ЛЕЧИТСЯ ТРЕМЯ ЧИСЛАМИ, А НЕ ПОДБОРОМ. Ряд — коробка ФИКСИРОВАННОЙ высоты в 20px (высота
- * `Button size='xs'`: 16px `leading-4` + 2px паддинга + 2px рамок), органы центрируются по ней, и
- * ровно ОДНА живая дверь на ячейку. Селектор приводится к той же высоте и к тому же кеглю
- * (`text-micro uppercase`), а не остаётся полем ввода: `min-h-0` обязателен — `min-height` и
- * `height` у twMerge разные группы, и без него 22px тихо победили бы 20px.
- *
- * ⚠ МЕТРИКА ЖИВЁТ ЗДЕСЬ, А НЕ В `StripCell`. Тот же примитив несёт ряды других экранов, и там в
- * `action` стоят КОЛОНКИ (кнопка + абзац последствия у `ApplySplitDoor`): фиксированные 20px
- * обрезали бы их молча.
- */
-/* ⚠ `min-h-5`, А НЕ `h-5` — И ЭТО ПОЧИНКА БАГА, А НЕ ОСЛАБЛЕНИЕ ЗАМЕРА (r2 п.31). Владелец:
-   «APPLY SPLITTED не помещается в кнопку, из-за этого вертикальный скролл в блоке». Механизм:
-   полоса выходов объявлена `overflow-x-auto`, а по CSS ось, оставленная `visible` рядом с
-   не-`visible`, ВЫЧИСЛЯЕТСЯ в `auto` — то есть любое содержимое выше жёстких 20px делало полосу
-   вертикально прокручиваемой. Переносил текст двери (починен `whitespace-nowrap` у самой двери) и
-   растил её редкий отчёт об отказе. Высота ряда по-прежнему ОДНА (20px) во всех здоровых
-   состояниях — это и есть замер F-9, — но она больше не режет содержимое молча. */
-/* ⚠ ЗАЗОР РЯДА — 2px, А НЕ 4px, И ЭТО ЗАМЕР (r2 п.31). В ячейке 132px раскрытая колода держит два
-   органа: дверь `apply splitted` и складывающую `▾` (20px). При зазоре 4px коробка двери мерилась
-   106px против 107px подписи — то есть подпись вылезала за кнопку ровно на пиксель, и владелец
-   видел это как «не помещается». Двух пикселей хватает: 110px против 107px. Поля самой кнопки не
-   трогаются — `px-1.5` метрики `size='xs'` едина для всех дверей ряда, и сузить её у одной значило
-   бы завести вторую метрику там, где весь смысл ряда в одной. */
-const DOOR_ROW = 'flex min-h-5 items-center gap-0.5';
-/** ⚠ `bg-bgColor` ЯВНО, А НЕ ПО УМОЛЧАНИЮ. Вторичная кнопка системы — «white fill, 1px edge
- *  border», но БЕЛОГО В НЕЙ НЕТ: она полагается на белую страницу под собой. Над затемнённым
- *  грунтом группы (`Bay`) сквозь неё просвечивал #ededed, и `set` читался залитым — то есть
- *  нажатым или выключенным, — стоя рядом с белыми селекторами. Замерено снимком 2×. */
-const DOOR = 'h-5 w-full bg-bgColor';
-/** То же для `InertDoor`: класс приезжает на ЕЁ обёртку, а ширину надо отдать кнопке внутри —
- *  примитив её наружу не пускает, а мёртвая дверь обязана занимать ровно то место, которое заняла
- *  бы живая. Иначе отказ выглядит уже своей причины и читается как другой орган. */
-const INERT_DOOR = 'w-full [&>button]:h-5 [&>button]:w-full [&>button]:bg-bgColor';
 
 /**
  * ═══ ЗАТЕМНЁННЫЙ ГРУНТ ПОД РАСКРЫТОЙ ГРУППОЙ — F-6 ═══════════════════════════════════════════
@@ -152,7 +83,6 @@ function Bay({
    * ⚠ ТОЛЬКО НА СЕТКЕ ПОЛКИ 3D И ТОЛЬКО У СВЁРНУТОЙ КОЛОДЫ. Веер `CropDeck` — это лист ПЛЮС края
    * кусков, торчащие справа: в одной дорожке лист сжался бы до трети её ширины, и выглядывать
    * было бы не из-за чего. Раскрытая колода снова занимает одну дорожку и меряется как соседи.
-   * В полосе рендеров (`Strip`) свойства не существует: там ширину задаёт сама колода, дорожек нет.
    */
   spanTwo,
   children,
@@ -192,10 +122,11 @@ function Bay({
  * он перерисовывал бы вместе с собой ВСЮ полосу — каждую замощённую плитку, каждую открытую колоду.
  * Здесь он перерисовывает одну ячейку.
  *
- * ⚠ ЭКСПОРТИРУЕТСЯ РАДИ ВТОРОГО ХОЗЯИНА, А НЕ «НА ВСЯКИЙ СЛУЧАЙ» (B-24). Владелец потребовал,
- * чтобы правая половина полосы входа 3D показывала ТО ЖЕ, что этот раздел на FABRIC RENDER, — с
- * теми же органами. Дыра живого прогона — один из них, и второе её написание разошлось бы с этим
- * первым же круглым числом (пропорция кадра, слово состояния с провода, тик секунд).
+ * ⚠ ЭКСПОРТИРУЕТСЯ РАДИ ВТОРОГО ХОЗЯИНА, А НЕ «НА ВСЯКИЙ СЛУЧАЙ» (B-24). Владелец потребовал, чтобы
+ * правая половина полосы входа 3D показывала ТО ЖЕ, что этот раздел (тогда стоявший и на FABRIC
+ * RENDER, до O-63), — с теми же органами. Дыра живого прогона — один из них, и второе её написание
+ * разошлось бы с этим первым же круглым числом (пропорция кадра, слово состояния с провода, тик
+ * секунд).
  */
 export function PendingCell({ run }: { run: common_DesignRun }): JSX.Element {
   const elapsed = useElapsed(run.startedAt ?? run.createdAt);
@@ -219,16 +150,22 @@ export function PendingCell({ run }: { run: common_DesignRun }): JSX.Element {
 }
 
 /**
- * ═══ THE OUTPUTS OF ONE KIND, AND THE MARK «CHOSEN» ON THEM — W-12 ════════════════════════════
+ * ═══ 3D MODELS OF THIS CARD, AND THE MARK «CHOSEN» ON THEM — W-12 ══════════════════════════════
  *
- * ONE SECTION FOR BOTH GENERATIVE SCREENS. The owner's sentence names 3D («мы так же можем маркать
- * 3д рендеры как выбранные»), but the mark is one notion across the band: ARTIFACTS narrows each
- * of its representations to the chosen pictures of that kind (W-14), so a kind whose outputs had
- * no place to BE chosen would carry a switch position that filters on a mark nobody can set. So
- * the turntable frames get this section on 3D and the fabric renders get the same section on
- * FABRIC RENDER — same cells, same doors, same rules, because two copies would drift by a word.
- * FLATS deliberately have no such section: the bench slot IS the choice for a flat (a slot holds
- * at most one plate), and a second mark there would be two registries of one election.
+ * THE SHELF OF 3D: the models built here and the ones brought, and the mark that elects one. The
+ * owner's sentence names 3D («мы так же можем маркать 3д рендеры как выбранные»), and the mark is
+ * one notion across the band: ARTIFACTS narrows each of its representations to the chosen
+ * pictures of that kind (W-14), so a kind whose outputs had no place to BE chosen would carry a
+ * switch position that filters on a mark nobody can set.
+ *
+ * ⚠ ONCE THE SECTION OF BOTH GENERATIVE SCREENS, 3D'S ALONE SINCE O-63 (27.09, D-62). Owner,
+ * verbatim: «после генерации результат показывать как во флетах те с LATEST GENERATION и
+ * GENERATION HISTORY свернут по дефолту и RENDERS OF THIS CARD получается не нужен». Its twin on
+ * FABRIC RENDER is gone: a render lands under GENERATE as a flat does, the older runs stand in
+ * GENERATION HISTORY, the plates brought by hand in its «brought» group — each tile the render
+ * tile with the doors that put it into a side (`./render-tile`). The render's mark had gone
+ * before (J-23), and FLATS never had one: for both the bench slot IS the choice (a slot holds at
+ * most one plate), and a second mark would be two registries of one election.
  *
  * WHY THE VERDICT LIVES BESIDE THE MENU THAT PRODUCES IT. A run comes back as a handful of
  * pictures of ONE ask, and the owner's requirement is to be able to say which of them is THE one.
@@ -242,8 +179,8 @@ export function PendingCell({ run }: { run: common_DesignRun }): JSX.Element {
  * in the plural, so the doors toggle each picture on its own and never un-mark a neighbour.
  */
 /**
- * Одна ячейка полосы. `modelUrl` непуст ровно тогда, когда за ячейкой стоит файл модели: у
- * рендеров он пуст всегда, у 3D — всегда, кроме исторической строки, приехавшей без `.glb`.
+ * Одна ячейка полки. `modelUrl` непуст ровно тогда, когда за ячейкой стоит файл модели — всегда,
+ * кроме исторической строки, приехавшей без `.glb`, и растра, снятого с модели.
  */
 interface Row {
   picture: common_DesignPicture;
@@ -256,68 +193,35 @@ interface Row {
 export function OutputsSection({
   band,
   techCardId,
-  kind = 'render',
   disabled,
   colorwayId,
   colorwayLabel,
-  colorways = [],
-  adopts = false,
-  onCreateColorway,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
-  /** Умолчание — рендеры: так этот раздел зовёт его хозяин на FABRIC RENDER (`<Outputs .../>`). */
-  kind?: 'render' | 'threed';
   disabled?: boolean;
   /**
-   * ═══ СУЖЕНИЕ ОСТАЛОСЬ ТОЛЬКО У 3D (r3 D5) ═══════════════════════════════════════════════════
+   * ═══ ПОЛКА СУЖЕНА КОЛОРВЕЕМ МЕНЮ НАД НЕЙ (r3 D5) ═════════════════════════════════════════════
    *
-   * Владелец (п.29 → дизайн колорвея): RENDERS OF THIS CARD — это ВСЕ цветные плиты карточки, а
-   * какого они цвета, говорит пилюля на самой плитке. Сужение секции одним колорвеем прятало
-   * материал соседнего цвета ровно тогда, когда его и ищут («а где мой рендер»), и рождало отказ
-   * «this section is not narrowed to a colourway» у двери разреза — отказ, которого больше нет.
-   *
-   * У 3D сужение остаётся и означает другое: полка моделей стоит под меню, которое СОБИРАЕТ
-   * модель из верстака ОДНОГО колорвея, и чужая модель в этом списке была бы обещанием входа,
-   * которого прогон не увидит. Поэтому число читается только при `kind === 'threed'` — правило
-   * живёт здесь (`scope`), а не в том, что передал хозяин.
+   * Полка моделей стоит под меню, которое СОБИРАЕТ модель из верстака ОДНОГО колорвея, и чужая
+   * модель в этом списке была бы обещанием входа, которого прогон не увидит. Правило живёт здесь
+   * (`scope`), а не в том, что передал хозяин. (У рендеров сужения не было с r3 D5 — «а где мой
+   * рендер», — а с O-63 нет и их раздела.) Не задан — полка всех колорвеев.
    */
   colorwayId?: number;
-  /** Имя выбранного колорвея для подписи (только 3D); пусто = безколорвейный верстак. */
+  /** Имя выбранного колорвея для подписи; пусто = безколорвейный верстак. */
   colorwayLabel?: string;
-  /**
-   * Колорвеи карточки в её порядке — из них строятся цели `mark ▸` и `apply splitted`. Пустой
-   * список = «у карточки их нет», и тогда единственная цель — `sample`.
-   */
-  colorways?: common_AdminColorwayRef[];
-  /**
-   * ═══ ФЛАГ СЕРВЕРА: УСЫНОВЛЯЕТ ЛИ ВЕРСТАК СЕМПЛ-ПЛИТУ (B7, доктрина `has_fabric_render`) ══════
-   *
-   * `band.benchAdoptsUnattributed === true` — сервер переписывает `colorway_id` 0 → N в той же
-   * транзакции, что и постановка, и семпл-плиту МОЖНО положить в столбец колорвея. Отсутствие
-   * поля — «не сказано», а не «нет»: бинарь старше флага молчит, и рисовать по его молчанию дверь
-   * в чужой столбец значило бы обещать жест, который отвечает `colorway_mismatch` («попробуй —
-   * увидишь»). Поэтому вызывающий передаёт СРАВНЕНИЕ (`=== true`), а не само поле.
-   */
-  adopts?: boolean;
-  /**
-   * Открыть поповер рождения колорвея. `then` зовётся с id созданного — жест продолжается в новый
-   * столбец, не начинаясь заново.
-   */
-  onCreateColorway?: (then?: (colorwayId: number) => void) => void;
 }): JSX.Element | null {
   // HOOKS ABOVE THE EARLY RETURN, unconditionally — a hook below it would change the hook count
   // between renders and take the whole tree down (React #310; this screen has paid for it once).
   const speaks = serverSpeaksDesign();
-  const { setPictureSelected, setBenchSlot } = useDesignWrites(techCardId);
+  const { setPictureSelected } = useDesignWrites(techCardId);
   /* ⚠ `openModel` СНЯТ ВМЕСТЕ С КНОПКОЙ `open` (E-25). Единственным, кто взводил это состояние,
      была она; окно модели теперь поднимает сама плитка, у которой на руках адрес `.glb`.
      И довод прежней сноски («одно окно на весь раздел, а не по одному на ячейку: сцена WebGL
      дорога») от переезда НЕ нарушен: плитка монтирует окно только раскрытым
      (`{modelOpen && modelHref && …}`), поэтому смонтированных сцен по-прежнему не больше одной —
      ровно той, которую человек открыл. */
-  /** Для какой плитки идёт запись слота. Общий `isPending` сказал бы «saving» на всех сразу. */
-  const [marking, setMarking] = useState<number | null>(null);
   /**
    * ⚠ И ТО ЖЕ САМОЕ ДЛЯ ПОМЕТКИ — ПРАВИЛО СТРОКОЙ ВЫШЕ НАКОНЕЦ РАСПРОСТРАНЕНО НА ВТОРУЮ ЗАПИСЬ.
    *
@@ -335,8 +239,9 @@ export function OutputsSection({
    * ═══ РЕЗАТЬ МОЖНО ЗДЕСЬ ЖЕ (J-25) ═══════════════════════════════════════════════════════════
    *
    * Владелец: слоты «можно заполнять в разделе RENDERS OF THIS CARD и там же можно и сплитить их».
-   * Тот же хук, что у верстака и у блока референсов, — второй механизм разъехался бы с первым в
-   * значении роли.
+   * Раздела рендеров нет с O-63 (их режут в строках прогонов — `RunOutputs`), а лист полки 3D
+   * (`snapshot 4 sides`) режется здесь. Тот же хук, что у верстака и у блока референсов, — второй
+   * механизм разъехался бы с первым в значении роли.
    *
    * ⚠ `addToInput` НЕ ПЕРЕДАЁТСЯ, И ЭТО ДЕНЕЖНОЕ УМОЛЧАНИЕ, А НЕ ЭКОНОМИЯ БУКВ. Оно `false`, и
    * потому на провод уезжает `SplitDesignPicture.for_input = false`: сервер тогда НЕ заводит
@@ -352,8 +257,8 @@ export function OutputsSection({
     /**
      * ═══ ИТОГ РЕЗА НЕ ОБЕЩАЕТ СЛОТОВ ТАМ, ГДЕ ИХ НЕТ (r3f) ═══════════════════════════════════
      *
-     * Умолчание хука — «mark them into slots from the band», и оно верно у РЕНДЕРОВ: под их
-     * ячейкой стоит дверь `mark ▸`, и человек делает ровно то, что ему сказали. На полке 3D
+     * Умолчание хука — «mark them into slots from the band», и оно верно у рендера: под его
+     * плиткой стоит дверь `mark ▸`, и человек делает ровно то, что ему сказали. На полке 3D
      * этой двери НЕТ И БЫТЬ НЕ МОЖЕТ: слот верстака кадр рода `threed` не принимает вовсе
      * (сервер ответил бы `wrong_kind`), и та же строка отправляла человека искать орган,
      * которого на экране не нарисовано ни одного.
@@ -361,8 +266,7 @@ export function OutputsSection({
      * Поэтому слово называет то, что у кусков ЕСТЬ, и не называет ничего сверх: у каждого куска
      * стоит угол `edit`, и каждый открывается зумом, как всякий кадр полосы.
      */
-    cutSays:
-      kind === 'threed' ? (views) => `${views} cut — each can be edited or zoomed` : undefined,
+    cutSays: (views) => `${views} cut — each can be edited or zoomed`,
   });
   /* КАКУЮ ИМЕННО КАРТИНКУ ПРАВИМ. Не булево `editing`: ячеек в полосе много, а модалка одна,
      и флаг открыл бы редактор сразу над всеми. Ноль — закрыто. */
@@ -372,28 +276,6 @@ export function OutputsSection({
    * старый колапсится обратно». Состояние из одного значения делает второе открытое невыразимым.
    */
   const [openDeck, setOpenDeck] = useState<number | null>(null);
-  /**
-   * ═══ ЗДЕСЬ СТОЯЛ `markScope`, И ОН СНЯТ ЦЕЛИКОМ (r3-w2 №5) ═══════════════════════════════════
-   *
-   * ЧТО ОН ДЕЛАЛ. Пункт `+ colourway…` отвечает на «в какой столбец», а не на «в какую сторону»:
-   * столбца ещё нет. После успеха дверь ТОЙ ЖЕ плитки сужалась до нового колорвея — на лице его
-   * имя, в списке только его стороны, — и второе нажатие доканчивало жест.
-   *
-   * ПОЧЕМУ СНЯТ. Сужение снималось ТОЛЬКО постановкой или сменой карточки — выхода назад к полному
-   * списку не было вовсе. Передумал после рождения цвета — и дверь этой плитки заперта на нём;
-   * снесли этот колорвей — и на лице остаётся `#id ▸` над шестью пустыми сторонами, потому что
-   * имени по снесённому id уже не прочитать. Ради корректности оно не нужно: `onCreateColorway`
-   * резолвится ПОСЛЕ `await invalidateQueries` (`colourway-create.tsx`), то есть к моменту
-   * возврата новый столбец уже в `axis`, и полный список сам предлагает `NEW › front …`.
-   *
-   * ЧЕМ ЖЕСТ КОНЧАЕТСЯ ТЕПЕРЬ: НИЧЕМ ДОПОЛНИТЕЛЬНЫМ — он доигрывается сам (r3d). Прежняя редакция
-   * стоила одного лишнего нажатия по чисто механической причине: доокрыть Radix-селект программно
-   * нельзя, открытость держит `ui/components/select` внутри себя. Дверь стала поповером, чья
-   * открытость — обычное состояние, и продолжение снова стало бесплатным: столбец родился, панель
-   * открылась сама и сразу на его сторонах. Запертого состояния при этом НЕ вернулось, и это
-   * главное отличие от `markScope`: лицо двери по-прежнему одно (`mark ▸`), а строка-«назад»
-   * отдаёт полный список столбцов в любую секунду.
-   */
 
   /**
    * ═══ КАРТОЧКА СМЕНИЛАСЬ — ОТКРЫТОЕ ЗАКРЫВАЕТСЯ, В ТЕЛЕ РЕНДЕРА (инвариант 12) ════════════════
@@ -410,17 +292,6 @@ export function OutputsSection({
     if (editingId) setEditingId(0);
   }
 
-  /**
-   * ═══ ДВЕРЬ РАСКРЫТОЙ КОЛОДЫ БОЛЬШЕ НЕ ДЕРЖИТ СВОЕГО СОСТОЯНИЯ (F-7 → Ф4) ═════════════════════
-   *
-   * Здесь стояли `applyingRoot` / `askingRoot` / `applyFailed` — занятость, вопрос и отчёт
-   * ТРЕТЬЕГО написания глагола `set`. Теперь дверь — `ApplySplitDoor` из `./apply-split` (её
-   * единственный хозяин — эта колода: полосы входа свои двери постановки потеряли на круге r2,
-   * п.29/30); занятость, вопрос и отчёт живут в нём. Отчёт при этом
-   * по-прежнему «носит имя своей колоды»: дверь смонтирована ВНУТРИ раскрытой колоды и уходит
-   * вместе с ней — то самое правило «строка отчёта, севшая на чужую строку, не путает её, а
-   * СТИРАЕТ», только теперь оно держится монтированием, а не ключом `root`.
-   */
 
   /**
    * ═══ ДВЕРЬ «ПРИНЕСТИ СВОЮ МОДЕЛЬ» — ДВА УЗЛА В РАЗНЫХ МЕСТАХ ДОКУМЕНТА (E-13) ══════════════
@@ -436,7 +307,7 @@ export function OutputsSection({
   const bring = useBringOwnModel(techCardId);
 
   /**
-   * ═══ РЯД ЯЧЕЕК: ДЛЯ РЕНДЕРОВ — КАРТИНКА, ДЛЯ 3D — РЕЗУЛЬТАТ ═══════════════════════════════
+   * ═══ РЯД ЯЧЕЕК — РЕЗУЛЬТАТЫ 3D, А НЕ КАРТИНКИ ══════════════════════════════════════════════
    *
    * ⚠ ПРОГОН 3D ОТДАЁТ ДВЕ СТРОКИ НА ОДИН ПРЕДМЕТ, и до этой правки раздел считал их за два:
    * заголовок говорил «2 models» там, где модель одна, а вторая ячейка отдавала `.glb` в `<img>`
@@ -445,20 +316,12 @@ export function OutputsSection({
    */
   /**
    * ЧЕМ СУЖЕН ЭТОТ СПИСОК — ОДНО МЕСТО НА ВЕСЬ РАЗДЕЛ (`rows`, `pending`, горизонт шапки).
-   * Разбор — у пропа `colorwayId`: у рендеров сужения больше нет вовсе, у 3D оно осталось.
+   * Разбор — у пропа `colorwayId`.
    */
-  const scope = kind === 'threed' ? colorwayId : undefined;
+  const scope = colorwayId;
 
   const rows = useMemo<Row[]>(() => {
-    const outputs = outputsOfKind(band, kind, scope);
-    if (kind !== 'threed') {
-      return outputs.map(({ picture, run }) => ({
-        picture,
-        run,
-        src: pictureThumb(picture),
-        modelUrl: '',
-      }));
-    }
+    const outputs = outputsOfKind(band, 'threed', scope);
     return threedResults(outputs).map((result) => ({
       picture: result.markable,
       run: result.run,
@@ -480,24 +343,21 @@ export function OutputsSection({
       src: result.posterUrl || result.modelUrl,
       modelUrl: result.modelUrl,
     }));
-  }, [band, kind, scope]);
+  }, [band, scope]);
 
   /**
    * ЖИВЫЕ ПРОГОНЫ ЭТОГО ЖЕ РОДА И ЭТОГО ЖЕ КОЛОРВЕЯ — ИСТОЧНИК ПУНКТИРНЫХ ЯЧЕЕК В ГОЛОВЕ ПОЛОСЫ.
    *
    * ЧИТАЕТСЯ ЗДЕСЬ, А НЕ ПРИНИМАЕТСЯ ПРОПОМ, в отличие от полки паттернов: там список уже держал
    * ВЫЗЫВАЮЩИЙ ради собственного `pending`, и второе чтение разошлось бы с ним на одном кадре.
-   * Здесь вызывающих двое (`render-studio`, `threed-studio`), ни один из них такого списка не
-   * держит, и проп означал бы одно и то же правило, написанное в двух чужих файлах.
+   * Здесь вызывающий (`threed-studio`) такого списка не держит, и проп означал бы правило,
+   * написанное в чужом файле.
    *
    * СУЖЕНИЕ — ТО ЖЕ, ЧТО У РЯДА: род и колорвей. Прогон соседнего цвета в этой полосе был бы
    * обещанием плитки, которая сюда не встанет (раздел сужен `colorwayId`), — то есть новой ложью
    * вместо закрытой.
    */
-  const pending = useMemo(
-    () => liveRunsOfKind(band, kind, scope),
-    [band, kind, scope],
-  );
+  const pending = useMemo(() => liveRunsOfKind(band, 'threed', scope), [band, scope]);
 
   /**
    * ═══ КОЛОДА КРОПОВ И ЗДЕСЬ, ТЕМ ЖЕ ОРГАНОМ (J-23) ═══════════════════════════════════════════
@@ -542,46 +402,6 @@ export function OutputsSection({
   }, [rows]);
 
   /**
-   * ═══ ОСЬ КОЛОРВЕЕВ — ТА ЖЕ, ЧТО СТОЛБЦЫ SIDES, И ОДНИМ ОПРЕДЕЛЕНИЕМ ══════════════════════════
-   *
-   * Пункты `mark ▸` и цели `apply splitted` обязаны совпадать со столбцами таблицы над этим
-   * разделом: человек кладёт плиту «в ROSSO», глядя на столбец ROSSO. Порядок и состав считает
-   * `colourwayColumns` (`./side-row`) — второе написание правила «архивный только с плитами»
-   * разошлось бы с первым в первый же день.
-   *
-   * Целью здесь передаётся 0: ось 0 нужна ВСЕГДА (у семпл-плиты она собственная), а «цель
-   * прогона» этот раздел не знает и знать не должен — он больше не сужен ничем.
-   */
-  const axis = useMemo(() => colourwayColumns(band, colorways, 0), [band, colorways]);
-  const colourwayName = (id: number): string =>
-    id === 0 ? SAMPLE_LABEL : (axis.find((c) => c.colorwayId === id)?.label ?? `#${id}`);
-
-  /**
-   * ═══ КУСКИ РАЗРЕЗА, ПРИВЯЗАННЫЕ К СТОРОНАМ, — ВХОД `applyPlan` (F-7) ══════════════════════
-   *
-   * Берутся из `families.membersOf`, то есть из ТОГО ЖЕ списка, который экран и показывает
-   * раскрытым. Второй источник — общекарточный список листов этого рода — отвечал бы на соседний
-   * вопрос («какие листы вообще есть») и разошёлся бы с тем, что человек видит, ровно в тех
-   * случаях, ради которых дверь и нужна. Такой список в `apply-split.tsx` жил (`splitDecks`) и
-   * снесён вместе с этим доводом: читателя у него так и не появилось.
-   *
-   * Первый кусок на сторону: разрез — один на лист, а кусок без стороны силуэта (`detail`, пустой
-   * вид) в слот не встаёт и в план не входит.
-   */
-  const piecesOf = (rootId: number): SplitPiece[] => {
-    const seen = new Set<string>();
-    const out: SplitPiece[] = [];
-    for (const member of families.membersOf.get(rootId) ?? []) {
-      const view = normaliseViewKey(member.ghostView);
-      // A piece cut as a retired three-quarter (D-18) goes into no slot: the bench no longer has one.
-      if (!isActiveView(view) || seen.has(view)) continue;
-      seen.add(view);
-      out.push({ view: view as ActiveView, picture: member });
-    }
-    return out;
-  };
-
-  /**
    * ═══ ЗУМ ЧУЖОЙ КАРТОЧКИ СКЛАДЫВАЕТ ОТКРЫТУЮ КОЛОДУ (E-4) ══════════════════════════════════
    *
    * Владелец, дословно: «в RENDERS OF THIS CARD после экспанда спличеных карточек при зуме любой
@@ -612,17 +432,13 @@ export function OutputsSection({
    * модель». Дверь — ячейка полосы (`useBringOwnModel`), и весь разбор «почему не `MediaSlot`»
    * живёт у неё; здесь решается только ГДЕ она стоит и КОГДА раздел существует.
    *
-   * ⚠ ТОЛЬКО У 3D. Раздел один на два экрана, и `.glb` у рендеров — не файл этого рода: дверь
-   * там предлагала бы положить модель в список цветных плит, откуда её нечем ни открыть, ни
-   * поставить.
-   *
    * ⚠ ПРИ ВЫКЛЮЧЕННОЙ ЗАПИСИ ЯЧЕЙКИ НЕТ ВОВСЕ, и это НЕ противоречит закону «отказ обязан быть
    * виден» двумя сотнями строк ниже. Тот закон про дверь, которая СТОИТ НА КАДРЕ и молча исчезла
    * бы вместе с наведением; здесь же не рисуется ЦЕЛАЯ ЯЧЕЙКА, ровно как `+ flat` в полосе входа
    * рендера (`{!disabled && …}`): человек видит не пропавшую кнопку, а список без места для
    * добавления — то же, что на всякой другой полосе этой карточки в режиме чтения.
    */
-  const bringsOwnModel = kind === 'threed' && !writesOff;
+  const bringsOwnModel = !writesOff;
 
   /**
    * ⚠ ПУСТОЙ РАЗДЕЛ БОЛЬШЕ НЕ ИСЧЕЗАЕТ, КОГДА В НЁМ ЕСТЬ ДВЕРЬ. Здесь стояло безусловное
@@ -632,7 +448,7 @@ export function OutputsSection({
    * ничего сделать, это заголовок над пустотой.
    *
    * ⚠ И НЕ ИСЧЕЗАЕТ, КОГДА ИДЁТ ПРОГОН, — ЭТО ТРЕТИЙ ЧЛЕН И ОН ДЕНЕЖНЫЙ. Самый частый случай
-   * первого прогона на карточке: выходов ноль, двери нет (у рендеров её нет никогда), и без этого
+   * первого прогона на карточке: выходов ноль, двери нет (запись выключена), и без этого
    * члена раздел вернул бы `null` — то есть пунктирная ячейка, ради которой всё это заведено,
    * пропала бы ровно на том экране, где второе нажатие и стоит вторых денег.
    */
@@ -650,169 +466,10 @@ export function OutputsSection({
   const carries = rows.length > 0 ? serverStatesSelected(rows[0].picture) : false;
   const marked = rows.filter((r) => pictureIsSelected(r.picture)).length;
 
-  /**
-   * ═══ У РЕНДЕРОВ ПОМЕТКИ БОЛЬШЕ НЕТ (J-23) ═══════════════════════════════════════════════════
-   *
-   * Владелец, дословно: «в RENDERS OF THIS CARD … там не должно быть кнопки селект».
-   *
-   * ⚠ РОД РЕШАЕТ, И ЭТО НЕ ОСТОРОЖНОСТЬ. Раздел один на два экрана. У 3D пометка — ЕДИНСТВЕННЫЙ
-   * способ избрать модель, и снести её там значило бы отнять выбор, о котором владелец не просил
-   * (3D — предмет отдельного пакета, J-26/J-27/J-29). У рендеров же выбор давно живёт в другом
-   * месте: плита встаёт в слот верстака, и слот — это и есть «карточка идёт с этим». Пометка
-   * была вторым реестром одного избрания.
-   *
-   * ЧТО СТАНОВИТСЯ С ЧИТАТЕЛЯМИ ПОМЕТКИ. `pictureIsSelected` читают ARTIFACTS (W-14) и полоса
-   * входа 3D (Д-4); оба уже держат правило «никто не помечен → предлагаются все», и на карточке,
-   * где помечать больше нечем, они по этому правилу и работают. Старые пометки на проводе
-   * остаются и продолжают читаться — снос двери не стирает данных.
-   */
-  const selectable = kind !== 'render';
-
-  /**
-   * ═══ ПОСТАВИТЬ РЕНДЕР В СТОРОНУ — ПРЯМО ОТСЮДА (J-25) ═══════════════════════════════════════
-   *
-   * Владелец: слоты фабрик-рендера «можно заполнять в разделе RENDERS OF THIS CARD».
-   *
-   * ⚠ АДРЕСУЕТСЯ ВЕРСТАК, НАЗВАННЫЙ В САМОМ ПУНКТЕ, И ЭТО НЕ ОСТОРОЖНОСТЬ. Колорвей входит в
-   * ключ исключительности слота, а сервер сверяет колорвей ПЛИТЫ с колорвеем СЛОТА и отвергает
-   * несовпадение (`colorway_mismatch`) — В ОБЕ СТОРОНЫ, кроме одного случая: семпл-плита (0) в
-   * слот колорвея N, где сервер с флагом `bench_adopts_unattributed` УСЫНОВЛЯЕТ её, переписав
-   * `colorway_id` 0 → N в той же транзакции (B7). Поэтому пункты чужих столбцов рисуются ровно
-   * при `adopts` и ровно у семпл-плиты; у плиты цвета цель одна — её собственный столбец.
-   *
-   * ⚠ CAS-ТОКЕН БЕРЁТСЯ С ТОГО ЖЕ ВЕРСТАКА, ЧТО И АДРЕС. Полоса читается целиком
-   * (`bench_colorway_id: 0`, довод в `use-design-band.ts`), поэтому строка чужого колорвея у
-   * клиента на руках есть и второго круга запроса не нужно.
-   */
-  const markInto = (picture: common_DesignPicture, target: number, view: string) => {
-    const pictureId = picture.id ?? 0;
-    if (pictureId <= 0) return;
-    const bench = refColorwayFor('render', target);
-    const side = threedSides(band, bench).find((s) => s.view === view);
-    if (!side) return;
-    setMarking(pictureId);
-    setBenchSlot.mutate(
-      // `kind: 'render'` — КАКОЙ ВЕРСТАК, а не какой слот. Рендер-фронт и флэт-фронт — два разных
-      // слота, ОБА адресуемые `view_key: 'front'`; пустое поле читается сервером как flat, и плита
-      // уехала бы в чужой верстак, где её отвергли бы по роду кадра (`wrong_kind`).
-      {
-        /* ⚠ БЕЗ `slotId`: он в одном `oneof` с `viewKey`, и ноль там — заданное поле, от
-           которого сервер отвергал запись целиком. */
-        slot: { viewKey: view, kind: 'render', colorwayId: bench },
-        pictureId,
-        expectedSlotRev: side.slotRev,
-      },
-      { onSettled: () => setMarking(null) },
-    );
-  };
-
-  /**
-   * ═══ КУДА ЭТА ПЛИТА МОЖЕТ ВСТАТЬ — ВЕТКАМИ, А НЕ ОДНИМ ПЛОСКИМ СПИСКОМ ════════════════════════
-   *
-   * Владелец по бете, дословно: «надо спросить колорвей сначала, потом уже сторону — сейчас в
-   * пикере очень много всего и это не читается вообще». Здесь считаются РОВНО ТЕ ЖЕ цели, что и
-   * прежде; изменилась их ФОРМА: ветка на столбец, лист на сторону. Плоский список повторял имя
-   * столбца шесть раз подряд и ставил сторону — то, ради чего список открыли, — третьим словом
-   * строки; при двух колорвеях в нём стояло девятнадцать пунктов.
-   *
-   * ТРИ ПРАВИЛА СОСТАВА, И КАЖДОЕ — ЗЕРКАЛО СЕРВЕРА, А НЕ ВКУС:
-   *   · плита колорвея N предлагает ТОЛЬКО стороны N. N→M и N→0 сервер отвергает
-   *     (`colorway_mismatch`) даже с флагом B7 — предлагать их значило бы рисовать дверь, за
-   *     которой отказ. Ветка при этом одна, и шага «выбери столбец» не существует вовсе: жест
-   *     остаётся ровно таким, каким был до этой правки;
-   *   · семпл-плита (0) предлагает свои стороны ВСЕГДА, а столбцы колорвеев — ровно при `adopts`.
-   *     Молчание сервера о флаге читается как «не сказано» (доктрина `has_fabric_render`), и на
-   *     старом бинаре ветка снова остаётся одна;
-   *   · архивный столбец в усыновление не предлагается: этим цветом больше не работают. Своя
-   *     собственная ось плиты при этом остаётся всегда — иначе у плиты архивного колорвея не
-   *     осталось бы НИ ОДНОЙ ветки, и дверь вела бы в пустоту.
-   *
-   * ⚠ ЗАНЯТАЯ СТОРОНА НАЗЫВАЕТ СЕБЯ ЗАНЯТОЙ. Лист без пометки писал бы «front» и молча ВЫТЕСНЯЛ
-   * плиту, которая там стоит: запись идёт CAS-токеном ИМЕННО той строки, поэтому она проходит.
-   * Замена законна и обратима — она просто перестаёт быть немой.
-   *
-   * `2/6` У ВЕТКИ — ЭТО ОТВЕТ НА ВОПРОС ШАГА 1, А НЕ УКРАШЕНИЕ: «в какой столбец» человек решает
-   * по тому, чего в столбце не хватает. Число читается из ТОГО ЖЕ `threedSides`, из которого
-   * собраны листья, — второго счёта занятости рядом не заводится.
-   */
-  const markBranches = (picture: common_DesignPicture): PickerBranch[] => {
-    const own = colorwayOf(picture);
-    const ids =
-      own === 0 && adopts
-        ? axis.filter((c) => c.colorwayId === 0 || !c.archived).map((c) => c.colorwayId)
-        : [own];
-    return ids.map((id) => {
-      const name = colourwayName(id);
-      const sides = threedSides(band, refColorwayFor('render', id));
-      const filled = sides.filter((s) => (s.picture?.id ?? 0) > 0).length;
-      return {
-        id,
-        label: name,
-        note: `${filled}/${sides.length}`,
-        title: `${name} holds a render in ${filled} of its ${sides.length} sides`,
-        leaves: sides.map((side) => {
-          const heldId = side.picture?.id ?? 0;
-          const face = viewLabel(side.view);
-          return {
-            value: side.view,
-            label: face,
-            note: heldId > 0 ? `replaces #${heldId}` : undefined,
-            title:
-              heldId > 0
-                ? `#${heldId} stands in ${face} of ${name} — marking this render takes its place`
-                : undefined,
-          };
-        }),
-      };
-    });
-  };
-
-  /**
-   * ═══ «APPLY SPLITTED» — ВХОД РЕНДЕРА СТАНОВИТСЯ РОВНО ЭТИМ РАЗРЕЗОМ (F-7 → Ф4) ═════════════
-   *
-   * Владелец, дословно: «когда заэкспанжено кнопка set которая будет чистить текущие FABRIC
-   * RENDER SLOTS и ставить те что в сплите». Глагол при этом был ТРЕТЬИМ написанием одного
-   * жеста — `set` здесь против «apply splitted» на двух полосах входа, со своей модалкой и своим
-   * отчётом. Контракт §F: «два слова `apply splitted`/`set` (остаётся одно)». Остался общий орган:
-   * дверь, вопрос, запись и отчёт — `ApplySplitDoor` из `./apply-split`; здесь считаются только
-   * АДРЕС верстака и ДВА ОТКАЗА, которых у полос входа нет по построению.
-   *
-   * Правила записи живут там же и не повторяются: три правила плана (названную сторону ЗАНЯТЬ,
-   * неназванную занятую ОЧИСТИТЬ, неназванную пустую НЕ ТРОГАТЬ), `slot_rev` как CAS без «снять
-   * потом положить», `viewKey` без `slotId` (члены одного `oneof`), `kind` всегда спеллится, отказ
-   * одной стороны не останавливает остальные.
-   *
-   * ═══ АДРЕСУЕТСЯ ВЕРСТАК ЛИСТА, А ЕСЛИ ЦЕЛЕЙ НЕСКОЛЬКО — ТА, ЧТО ВЫБРАЛИ В САМОЙ ДВЕРИ (r3) ══
-   *
-   * Здесь стоял верстак СЕКЦИИ, потому что секция была сужена одним колорвеем. Сужения больше нет
-   * (D5), и «верстак секции» перестал существовать как факт — вместе с ним ушёл отказ «this
-   * section is not narrowed to a colourway»: он назывался ОТСУТСТВИЕМ выбора там, где выбор
-   * теперь делается в самой двери.
-   *
-   * ПРАВИЛО ЦЕЛИ, ОДНО НА ТРИ СЛУЧАЯ:
-   *   · лист колорвея N → в N, без вопроса. Он и не может встать никуда больше: сервер сверяет
-   *     колорвей плиты с колорвеем слота, и N→M отвергается даже с флагом B7;
-   *   · семпл-лист БЕЗ флага → в `sample`, молча. Единственная законная цель;
-   *   · семпл-лист ПРИ флаге → дверь становится СЕЛЕКТОМ целей (`sample | ROSSO | … |
-   *     + colourway…`), и план считается по слотам ВЫБРАННОЙ цели. Второго органа рядом с дверью
-   *     не появилось: селект — это и есть дверь, тот же глагол, тот же вопрос, тот же отчёт.
-   *
-   * ОТКАЗ ОСТАЛСЯ ОДИН СОДЕРЖАТЕЛЬНЫЙ (плюс два общих): в разрезе нет ни одной стороны силуэта.
-   * Он уезжает в `ApplySplitDoor` пропом `refusal`: дверь погашена, причина напечатана строкой, и
-   * на провод не уходит ни одной записи. Порядок — от общего к частному: карточка только читается
-   * / сервер молчит → в разрезе нет ни одной стороны силуэта (куски — детали, а у детали нет
-   * слота).
-   */
-  const applyRefusalFor = (rootId: number): string | null => {
-    if (disabled)
-      return 'this card is read-only for you — putting the split into the sides is an edit of the card';
-    if (!speaks) return 'this server does not answer the design routes';
-    const sheet = rowById.get(rootId)?.picture;
-    if (!sheet) return null;
-    if (!piecesOf(rootId).length)
-      return 'nothing in this split names a side of the silhouette — the pieces are details, and a detail has no slot to stand in. Cut the sheet again and name front, back or a side on the frames.';
-    return null;
-  };
+  /* ПОМЕТКА — ТОЛЬКО У 3D, И РАЗДЕЛ ТЕПЕРЬ ТОЛЬКО ЕГО. У рендеров её сняли раньше (J-23, владелец:
+     «там не должно быть кнопки селект» — их выбор это слот верстака), а с O-63 снят и их раздел;
+     различать род здесь больше нечем, и `selectable` ушёл вместе с ним. Старые пометки рендеров
+     на проводе остаются и читаются (ARTIFACTS, полоса входа 3D) — снос двери не стирает данных. */
 
   /**
    * ═══ КАКОЙ ИЗ ДВУХ ОТВЕТОВ НАРИСОВАН — И ПОДПИСЬ ЧИТАЕТ ИМЕННО ЕГО (H-9) ═══════════════════
@@ -828,12 +485,9 @@ export function OutputsSection({
    * секцию числом всей карточки. `null` — ничего не осталось за горизонтом, и тогда о нём молчим.
    */
   const stated = serverStatesOutputs(band);
-  // Горизонт в ШАПКЕ спрашивается только у суженной секции (сегодня — только 3D): у списка всей
-  // карточки одного числа нет вовсе, потолок сервера тратится ПОКОЛОРВЕЙНО. У рендеров он поэтому
-  // переехал на саму плитку — в подсказку её подписи, по колорвею ЭТОЙ плитки (`horizonOf`).
+  // Горизонт в ШАПКЕ спрашивается только у суженной полки: у списка всей карточки одного числа нет
+  // вовсе, потолок сервера тратится ПОКОЛОРВЕЙНО.
   const horizon = scope === undefined ? null : outputsHorizon(band, scope);
-  /** Горизонт колорвея ОДНОЙ плитки — «у него N, доехало M»; `null` — за горизонтом ничего. */
-  const horizonOf = (picture: common_DesignPicture) => outputsHorizon(band, colorwayOf(picture));
 
   /**
    * ⚠ «FRAME» И «TURNTABLE» БЫЛИ НЕПРАВДОЙ, И ЭТО ПРОВЕРЕНО ПО ЗАДЕПЛОЕННОМУ БЭКЕНДУ, А НЕ ПО
@@ -843,7 +497,7 @@ export function OutputsSection({
    * оборота не возвращается ни одного и не возвращалось с тех пор, как поворотный стол сменился
    * сборкой объёма из видов. Слово «кадр» звало человека искать ряд картинок, которого нет.
    */
-  const noun = kind === 'threed' ? 'model' : 'render';
+  const noun = 'model';
 
   /**
    * ═══ ОДНА ЯЧЕЙКА ПОЛОСЫ — ФУНКЦИЕЙ, А НЕ ТЕЛОМ MAP (J-23) ═════════════════════════════════
@@ -858,24 +512,10 @@ export function OutputsSection({
    * этом не теряется — он остаётся угловой кнопкой, как и в ленте. Раскрытой поверхность снова
    * зумит, а складывает колоду объявленная дверь ряда (F-7/F-9, разбор у ряда `action`).
    */
-  function cell(
-    { picture, run, src, modelUrl }: Row,
-    deck?: { open: boolean },
-  ): JSX.Element {
+  function cell(row: Row, deck?: { open: boolean }): JSX.Element {
+    const { picture, run, src, modelUrl } = row;
     const deckSheet = !!deck && !deck.open;
     const chosen = pictureIsSelected(picture);
-    /**
-     * ═══ ТРИ ФАКТА, РЕШАЮЩИЕ СУДЬБУ ДВЕРИ `mark ▸` (J-25) ═════════════════════════════════════
-     *
-     * Все три — ЗЕРКАЛА СЕРВЕРНЫХ ОТКАЗОВ, а не вкус экрана, и потому дверь не рисуется живой там,
-     * где сервер уже сказал бы «нет»:
-     *   · `composite` — склеенный лист: `ErrDesignCompositePlate`, «сторона это ОДИН вид»;
-     *   · `held` — плита уже занимает какой-то слот ЭТОЙ карточки: `ErrDesignPictureAlreadyInSlot`,
-     *     и граница там карточка, а не верстак (довод у `slotHolding`);
-     *   · род — дверь стоит только у рендеров: у 3D слот верстака рода `threed` не принимает
-     *     вовсе (`IsDesignBenchKind` его знает, но выходов 3D в верстак никто не кладёт), и
-     *     единственное избрание модели там — пометка `selected`, которую J-23 у рендеров снял.
-     */
     /** В кадре стоит РАСТР, а не сам `.glb`: у прогона без миниатюры это не так (E-25). */
     const posterShown = !!src && !!modelUrl && src !== modelUrl;
     /**
@@ -886,7 +526,6 @@ export function OutputsSection({
      * не спрашивается вовсе, а резать и раскрывать колоду можно у обоих.
      */
     const composite = pictureIsComposite(picture);
-    const held = kind === 'render' ? slotHolding(band, picture.id ?? 0) : null;
     /** Сколько видов объявлено в листе — число для бейджа полки 3D, оно же счёт кадров разреза. */
     const declaredViews = (picture.compositeViews ?? []).length;
     /**
@@ -895,35 +534,10 @@ export function OutputsSection({
      * разбор у самих дверей), то есть на растре. «edit model 3» назвало бы файл тем, чем он не
      * является, и повело бы человека искать `.glb`.
      */
-    const spokenNoun = kind === 'threed' ? '3d picture' : 'render';
-    /**
-     * ⚠ `run 0` — ЭТО НЕ ПРОГОН НОМЕР НОЛЬ. Со времён H-9 в списке стоят и плиты, за которыми
-     * прогона нет вовсе: загруженная руками и «плоская» правка без основы обе приходят с
-     * `run_id = 0`. Печатать им `run 0` значило бы назвать номер, которого нет.
-     *
-     * И слово тут именно «no run», а не «upload», хотя загрузка — частый случай: контракт
-     * прямо предупреждает, что `run_id 0` НЕ влечёт «пришло из партии» (`batch_id` тоже
-     * бывает нулём). Откуда плита взялась на самом деле, говорит вторая строка — она читает
-     * `source_class` и печатает `uploaded` / `drawn` / `imported SVG`. Первая строка отвечает
-     * только за прогон, и её честный ответ — что прогона нет.
-     */
+    const spokenNoun = '3d picture';
+    /** `run 0` — не прогон номер ноль, а плита без прогона: «no run» (разбор у плитки рендера). */
     const stamped = (run.id ?? 0) > 0;
-    /**
-     * ЧЕЙ ЭТОТ РЕНДЕР — читается у САМОЙ КАРТИНКИ (`picture.colorway_id`), а не у прогона: на
-     * сервере они законно расходятся (загруженная плита несёт свой колорвей при `run_colorway_id`
-     * 0), и `outputs_total_by_colorway` считает именно по картинке.
-     */
-    const ownColorway = colorwayOf(picture);
-    const ownName = colourwayName(ownColorway);
-    /** «У этого колорвея N картинок, доехало M» — на плитке, потому что горизонт поколорвейный. */
-    const seen = kind === 'render' ? horizonOf(picture) : null;
-    const view = viewLabel((picture.ghostView ?? '').trim());
-    const shape = modelUrl
-      ? '3d model'
-      : kind === 'threed'
-        ? `picture ${picture.ordinal ?? '—'}`
-        : [view, run.rrev ? `r${run.rrev}` : ''].filter(Boolean).join(' · ') ||
-          `picture ${picture.ordinal ?? '—'}`;
+    const shape = modelUrl ? '3d model' : `picture ${picture.ordinal ?? '—'}`;
     return (
       <StripCell
         key={picture.id}
@@ -932,12 +546,11 @@ export function OutputsSection({
         }
         cellPictureId={picture.id}
         /* On the 3D shelf the cell is a GRID track, not a strip cell: it takes the track's width. */
-        className={kind === 'threed' ? 'w-full' : undefined}
+        className='w-full'
         /* E-4: зум чужой карточки складывает открытую колоду; своя и её куски — нет. */
         onZoom={() => foldOnForeignZoom(picture.id ?? 0)}
-        /* Толстая рамка — «этот экран это ЧИТАЕТ». У рендеров пометка больше ничего не
-           открывает, и подсветка обещала бы вес, которого у неё нет (J-23). */
-        emphasis={selectable && chosen}
+        /* Толстая рамка — «этот экран это ЧИТАЕТ»: у 3D пометка и есть избрание модели. */
+        emphasis={chosen}
         src={src}
         alt={modelUrl ? `3d model of run ${run.id ?? ''}` : `${noun} ${picture.ordinal ?? ''}`}
         /* ⚠ ЗАГЛУШКА БОЛЬШЕ НЕ ЛОВИТ «ПРОГОН БЕЗ МИНИАТЮРЫ» — ЕГО ЛОВИТ КАДР (E-25, разбор у
@@ -959,41 +572,20 @@ export function OutputsSection({
             ? mediaFullToViewerItem(picture.media)
             : undefined
         }
-        /* ═══ РЕЗАТЬ ПРЕДЛАГАЕТСЯ ТОЛЬКО ТАМ, ГДЕ РЕЗАТЬ ЕСТЬ ЧТО (F-8, F-18) ═════════════════
-           Владелец, дословно: «на уже заспличеных картинках на ховер сплит писать не нужно так же
-           как и на не мультивью картинках» и «везде где картинка не мультивью флет или рендер там
-           не должно на ховер показываться сплит».
-
-           ЗДЕСЬ СТОЯЛО ОБРАТНОЕ ПРАВИЛО, И ОНО БЫЛО ВЫВЕДЕНО ИЗ ДРУГОЙ ПРОСЬБЫ. Круг 4: «сделай
-           везде одинаково включая кнопку сплит» — про ОДИНАКОВУЮ РАСКЛАДКУ органа (низ слева,
-           один примитив), и этот файл прочитал её как «рисовать его на каждом кадре». Отсюда
-           `split` на одиночном рендере, где он означал уже не разрез листа на виды, а произвольный
-           кроп — второй смысл у одного слова.
-
-           ДВА ЧЛЕНА ПРЕДИКАТА, И КАЖДЫЙ — СВОЙ ВОПРОС ЧЕЛОВЕКА:
-             · «есть ли в этом файле несколько видов». Нет — резать нечего, и угол обещал бы кроп,
-               которого этот экран не делает;
-             · «а не разрезан ли он уже». Разрезан — жест другой и слово другое (`expand` / `apply splitted`
-               в ряду дверей), а второй разрез того же листа завёл бы вторую колоду тех же видов.
-
-           ⚠ ОБА ВОПРОСА ЗАДАЁТ ТЕПЕРЬ `pictureOffersSplit` (`render/model.ts`), И ЭТО НЕ КОСМЕТИКА.
-           Этот файл был ЭТАЛОНОМ правила, но эталон, стоящий литералом, копируется, а копия рано
-           или поздно теряет член: плитка референса предъявляла угол по `!readOnly && url`, то есть
-           не сверялась ни с одним из двух. Здесь остались только вопросы, которые знает ТОЛЬКО
-           этот экран, — род и право писать; «мультивью и не резан» спрашивается у общего предиката.
-           У 3D угла нет по-прежнему: резать модель нечем, а её постер поглощён парой. */
+        /* Угол `split` — по общему предикату `pictureOffersSplit` (разбор F-8/F-18 — у плитки
+           рендера, `./render-tile`). У модели угла нет: резать `.glb` нечем. */
         /* ═══ ПОМЕТКА — УГОЛ КАДРА, А НЕ КНОПКА ПОД НИМ (E-25) ════════════════════════════════
            Владелец, дословно: «кнопки OPEN DOWNLOAD SELECT должны появляться на ховер на карточку
            а не кнопками снизу».
 
-           ⚠ СЮДА ПЕРЕЕХАЛА ТОЛЬКО ЖИВАЯ ДВЕРЬ, И ЭТО РЕШЕНИЕ ЭТОГО ЖЕ ФАЙЛА, ПРИНЯТОЕ РАНЬШЕ.
-           Двумя сотнями строк выше стоит разбор снесённой двери «split first ▸»: «Угол — ТИХИЙ
-           орган: он появляется по наведению, то есть отказ называл орган, которого на экране не
-           видно». Отказ, спрятанный в наведение, — это отсутствие отказа. Поэтому оба неживых
-           состояния (сервер не знает пометки; карточка только для чтения) остаются `InertDoor`
-           ПОД кадром, словами и всегда видимыми, — см. ряд `action` ниже. */
+           ⚠ СЮДА ПЕРЕЕХАЛА ТОЛЬКО ЖИВАЯ ДВЕРЬ, И ЭТО РЕШЕНИЕ ЭТОГО ЖЕ ФАЙЛА, ПРИНЯТОЕ РАНЬШЕ. У
+           плитки рендера (`./render-tile`) стоит разбор снесённой двери «split first ▸»: «Угол —
+           ТИХИЙ орган: он появляется по наведению, то есть отказ называл орган, которого на экране
+           не видно». Отказ, спрятанный в наведение, — это отсутствие отказа. Поэтому оба неживых
+           состояния (сервер не знает пометки; карточка только для чтения) остаются `InertDoor` ПОД
+           кадром, словами и всегда видимыми, — см. ряд `action` ниже. */
         onSelect={
-          selectable && carries && !writesOff
+          carries && !writesOff
             ? {
                 onClick: () => {
                   const id = picture.id ?? 0;
@@ -1040,7 +632,7 @@ export function OutputsSection({
            колорвея N остаётся кадром колорвея N и встаёт на ЭТУ ЖЕ полку. Клиент здесь не
            заявляет ни рода, ни цвета — второе мнение о них и было бы догадкой. */
         onEdit={
-          !writesOff && !modelUrl && !(kind === 'threed' && composite)
+          !writesOff && !modelUrl && !composite
             ? {
                 onClick: () => setEditingId(picture.id ?? 0),
                 ariaLabel: `edit ${spokenNoun} ${picture.ordinal ?? ''} — draw over this picture`.trim(),
@@ -1068,14 +660,7 @@ export function OutputsSection({
            кадре стоит `.glb`, и примитив уже пишет «3d model» посреди него — второй такой же
            ярлык поверх был бы одним фактом, сказанным дважды. Пометка при этом называется
            всегда: это состояние, а не тип файла. */
-        /* ═══ ПИЛЮЛЯ КАДРА — ИМЯ КОЛОРВЕЯ У РЕНДЕРА (D5) ══════════════════════════════════════
-           Список больше не сужен цветом, и «чей это рендер» обязано стоять НА САМОЙ ПЛИТКЕ:
-           иначе шесть плит трёх цветов читаются как один ряд. `sample` — такое же имя, как
-           `ROSSO`, и рисуется так же: ось 0 не «ничего не выбрано», а вечный верстак семпла.
-           У 3D пилюля занята другим (род файла, лист и пометка) — там список сужен, и имя цвета
-           стоит в шапке раздела один раз.
-
-           ═══ «4 VIEWS» — ТА ЖЕ ПИЛЮЛЯ, ЧТО У ЛИСТОВ В ЛЕНТЕ ══════════════════════════════════
+        /* ═══ «4 VIEWS» — ТА ЖЕ ПИЛЮЛЯ, ЧТО У ЛИСТОВ В ЛЕНТЕ ══════════════════════════════════
            Владелец: лист четырёх сторон «будет мультивью». Мультивью на плитке этой системы
            называется одним способом — числом видов в верхнем ярлыке (`generation-history.tsx`:
            `badge = composite ? `${views.length} views` : …`), и второе начертание того же факта
@@ -1095,310 +680,34 @@ export function OutputsSection({
               : posterShown
                 ? '3d model'
                 : undefined
-            : kind === 'threed' && composite
-              ? `${declaredViews} views${selectable && chosen ? ' · selected' : ''}`
-              : selectable && chosen
+            : composite
+              ? `${declaredViews} views${chosen ? ' · selected' : ''}`
+              : chosen
                 ? 'selected'
-                : kind === 'render'
-                  ? ownName
-                  : undefined
-        }
-        /* ═══ ВТОРАЯ СТРОКА ПОДПИСИ СНЯТА — F-13, ДОСЛОВНО «убери текст "AI · run 26 · from mixed
-           input"» ═══════════════════════════════════════════════════════════════════════════════
-           Это `stripProvenance`, и снята она ЗДЕСЬ, а не в мире: тем же вызовом живут полоса входа
-           рендера, полоса входа 3D и `what-model-gets` — там она отвечает на вопрос «а откуда
-           взялось ТО, ЧТО СЕЙЧАС ПОЙДЁТ В ПРОГОН», и молчать об этом нельзя. Здесь же список —
-           весь выход карточки, происхождение у всех строк одно и то же слово, и оно повторялось
-           столько раз, сколько плиток на экране.
-           Что при этом НЕ потеряно: номер прогона стоит первой строкой, и он же — единственный
-           член провенанса, который на этом экране различает строки. */
-        /* ⚠ ГОРИЗОНТ ЕДЕТ ПОДСКАЗКОЙ ЭТОЙ ЖЕ СТРОКИ, А НЕ ВТОРОЙ СТРОКОЙ ПОД НЕЙ. Он поколорвейный
-           («у ROSSO 74 картинки, доехало 60»), а список теперь общий — в шапке одного такого числа
-           нет вовсе. Вторая видимая строка вернула бы под каждую плитку прозу, которую владелец
-           снял (J-19); подсказка отвечает тому, кто спросил «а где остальные». */
-        lines={[
-          <span
-            key='shape'
-            data-outputs-horizon={seen ? `${seen.carried}/${seen.total}` : undefined}
-            title={
-              seen
-                ? `${ownName} has ${seen.total} generative pictures in all and the card shipped the newest ${seen.carried} of them, so the oldest are not on this list`
                 : undefined
-            }
-          >
-            {stamped ? `run ${run.id} · ${shape}` : `no run · ${shape}`}
-          </span>,
+        }
+        /* Вторая строка подписи снята (F-13) — разбор у плитки рендера (`./render-tile`). */
+        lines={[
+          <span key='shape'>{stamped ? `run ${run.id} · ${shape}` : `no run · ${shape}`}</span>,
         ]}
         /* ⚠ РЯД ПОД КАДРОМ РИСУЕТСЯ, ТОЛЬКО ЕСЛИ В НЁМ ЧТО-ТО ЕСТЬ (E-25). У здоровой ячейки 3D
            под карточкой теперь не должно быть НИЧЕГО — а пустой `<div>` это всё-таки орган:
            `StripCell` даёт ему свою отбивку, и ряд ячеек разъезжается по высоте оттого, у какой
-           из них дверь жива. Единственные жильцы ряда — двери рендера (плашка/`split`/`mark ▸`),
-           дверь колоды 3D и ОТКАЗ пометки; живая пометка уехала на кадр.
+           из них дверь жива. Единственные жильцы ряда — дверь колоды и ОТКАЗ пометки; живая
+           пометка уехала на кадр.
 
            ⚠ У 3D РЯД ПОЯВЛЯЕТСЯ РОВНО У ЛИСТА, ИЗ КОТОРОГО УЖЕ ВЫРЕЗАНЫ КУСКИ (`deck`), и ни у
            одной другой ячейки полки. Нерезаный лист свою дверь носит УГЛОМ (`split`), как и всякий
            лист этой системы; у одиночного снимка под кадром по-прежнему нет ничего. */
         action={
-          kind === 'render' || !!deck || (selectable && (!carries || writesOff)) ? (
-          /* ⚠ `flex-wrap` СНЯТ ВМЕСТЕ С ПРИЧИНОЙ ПЕРЕНОСА. Переносить было что, пока ряд мог
-             держать ДВА органа шириной 104px и 50px в колонке 132px; теперь живая дверь ровно
-             одна на ячейку (`held` ИЛИ колода ИЛИ лист ИЛИ пометка), и единственный ряд из двух
-             членов — раскрытая колода, где ширины заданы явно. Перенос при этом не «на всякий
-             случай», а вредный: он МЕНЯЕТ ВЫСОТУ ячейки от её содержимого, то есть и есть то
-             самое «кнопки скачут». Разбор метрики — у `DOOR_ROW` в шапке файла. */
+          !!deck || !carries || writesOff ? (
+          /* Метрика ряда — одна на все двери студии: `DOOR_ROW` (`./render-tile`, F-9). */
           <div data-door-row='' className={DOOR_ROW}>
-            {/* ═══ ДВЕРЬ В СЛОТ — ЗДЕСЬ, ГДЕ ЛЕЖИТ МАТЕРИАЛ (J-25) ═════════════════════════════
-                Пять состояний, и каждое отвечает на СВОЙ вопрос человека:
-                  · «в какой стороне это уже стоит» — читаемая плашка (Pill), не кнопка: сторону
-                    освобождает ✕ на самой плите в FABRIC RENDER SLOTS, и второй глагол снятия
-                    здесь был бы вторым реестром одного действия;
-                  · «этот лист уже разрезан — где куски» — `expand ▸`, а раскрытым `apply splitted` + `▾`
-                    (F-7, разбор у самой ветки);
-                  · «этот лист ещё не разрезан» — живой `split ▸`;
-                  · «почему дверь мертва» — карточка только читается либо сервер молчит;
-                  · и сама постановка одиночного кадра — двухшаговый пикер сторон.
-                ⚠ АТРИБУТ ВИСИТ НА ОБЁРТКЕ, А НЕ НА САМОМ ПИКЕРЕ: и у Radix, и у `TwoStepPicker`
-                список пропов ЗАКРЫТ, `data-*` до DOM не доезжает, и утверждение по нему было бы
-                зелёным над отсутствующим узлом. Тот же приём, что у `ColorwaySelect`. */}
-            {kind === 'render' &&
-              (deck ? (
-                /* ═══ РАЗРЕЗАННЫЙ ЛИСТ: `expand ▸` ЗАКРЫТЫМ, `apply splitted` + `▾` РАСКРЫТЫМ (F-7 → Ф4) ═══
-                   Владелец, дословно: «для уже сплитнутых … мы не должны показывать кнопку SPLIT ▸
-                   тк оно уже заслитано надо писать экспанд или что-то вроде того пока оно не
-                   открыто а когда заэкспанжено кнопка set которая будет чистить текущие FABRIC
-                   RENDER SLOTS и ставить те что в сплите».
-
-                   ЭТО ЖЕ МЕСТО ЗАБРАЛО ДВЕРЬ КОЛОДЫ. Под кадром стояла ВТОРАЯ строка — «▸ 3 CUT
-                   PIECES», собственная дверь `CropDeck`, — и владелец назвал её визуальным мусором
-                   (F-9). Мусором её делало соседство: два органа одного кадра на двух строках,
-                   причём верхний («split ▸») врал, а нижний нёс единственный работающий глагол.
-                   Теперь глагол один и стоит в ряду дверей, как у всех соседей; счёт кусков ушёл в
-                   `title`, а раскрытая колода называет его собой — куски стоят рядом.
-
-                   ⚠ СКЛАДЫВАЮЩАЯ ДВЕРЬ ОБЯЗАТЕЛЬНА, И ЭТО НЕ УКРАШЕНИЕ. `CropDeck` объявленно нем
-                   при `hostDoor` (веер `aria-hidden`, поверхность листа тоже), поэтому без `▾`
-                   раскрытую колоду нечем было бы закрыть ни с клавиатуры, ни читалкой — только
-                   раскрыв ЧУЖУЮ. */
-                deck.open ? (
-                  <>
-                    {/* ⚠ ОТКАЗ НАЗЫВАЕТ СЕБЯ СЛОВОМ, А НЕ СЕРОЙ КНОПКОЙ. Тот же закон, что у
-                        `split ▸` и `mark ▸` двумя ветками ниже: выключенная дверь без причины
-                        отправляет человека искать, что он сделал не так.
-
-                        ДВЕРЬ — ОТДЕЛЬНЫЙ ОРГАН (Ф4): `ApplySplitDoor` из `./apply-split`, и с
-                        круга r2 (п.29/30) хозяин у неё ОДИН — вот эта раскрытая колода. Полосы
-                        входа свои двери постановки потеряли целиком, поэтому «та же, что на
-                        полосах входа» больше не про что: глагол, вопрос и отчёт живут в модуле
-                        не ради второго экрана, а ради того, чтобы занятость и вопрос не были
-                        третьим написанием `set` в этом файле.
-                        Этот экран отдаёт ей АДРЕС ВЕРСТАКА ЦЕЛИ (`sidesOf(target)` — цель
-                        выбирают пунктом селекта, а не секция) и свои отказы (`refusal`, разбор у
-                        `applyRefusalFor`): при отказе дверь стоит погашенной со строкой
-                        причины — колода раскрыта, и исчезнувшая дверь читалась бы как пропажа.
-                        Пустой план (куски без стороны силуэта) — тоже отказ, а не живая кнопка,
-                        которая молчит; полосы входа на него дверь не рисуют вовсе, здесь она
-                        обязана остаться на месте и сказать почему.
-
-                        Ширина и метрика — ряда дверей (F-9): `flex-1` ячейке, `h-5 bg-bgColor`
-                        кнопке, как у соседей. */}
-                    {(() => {
-                      const rootId = picture.id ?? 0;
-                      const own = colorwayOf(picture);
-                      /* ЦЕЛИ — ТОЛЬКО У СЕМПЛ-ЛИСТА И ТОЛЬКО ПРИ ФЛАГЕ (разбор у `applyRefusalFor`).
-                         В остальных случаях цель одна и вопроса нет: дверь остаётся кнопкой. */
-                      const targets =
-                        own === 0 && adopts
-                          ? axis
-                              .filter((c) => c.colorwayId === 0 || !c.archived)
-                              .map((c) => ({ colorwayId: c.colorwayId, label: c.label }))
-                          : [{ colorwayId: own, label: colourwayName(own) }];
-                      return (
-                        <ApplySplitDoor
-                          techCardId={techCardId}
-                          sidesOf={(target) => threedSides(band, refColorwayFor('render', target))}
-                          targets={targets}
-                          pieces={piecesOf(rootId)}
-                          noun='render'
-                          refusal={applyRefusalFor(rootId)}
-                          onCreateColorway={own === 0 && adopts ? onCreateColorway : undefined}
-                          className='min-w-0 flex-1 [&>button]:h-5 [&>button]:bg-bgColor'
-                          doorClassName='h-5 bg-bgColor'
-                        />
-                      );
-                    })()}
-                    {/* ⚠ ЭТО БЫЛ СЫРОЙ `<button>` — ЕДИНСТВЕННЫЙ КОНТРОЛ РЯДА МИМО `buttonVariants`,
-                        и он один держал СВОЮ рамку, СВОЙ ховер и СВОЙ фокус, переписанные тут же
-                        строкой классов. Пока их четыре штуки совпадали с примитивом на глаз, он
-                        читался ровно; расходятся такие копии не «иногда», а при первой же правке
-                        кнопки — то есть ряд разъезжается там, где никто не смотрел.
-                        Квадрат 20×20 остаётся квадратом: `size='xs'` даёт метрику текста, а
-                        `h-5 w-5 p-0` — саму клетку, в которой стоит один глиф. */}
-                    <Button
-                      variant='secondary'
-                      size='xs'
-                      className='h-5 w-5 shrink-0 bg-bgColor p-0'
-                      aria-expanded
-                      aria-label={`fold the pieces of render ${picture.ordinal ?? ''} back behind the sheet`.trim()}
-                      data-deck-fold={picture.id || undefined}
-                      title='fold these pieces back behind the sheet'
-                      onClick={() => setOpenDeck(null)}
-                    >
-                      ▾
-                    </Button>
-                  </>
-                ) : (
-                  <Button
-                    variant='secondary'
-                    size='xs'
-                    className={DOOR}
-                    aria-expanded={false}
-                    data-deck-expand={picture.id || undefined}
-                    onClick={() => setOpenDeck(picture.id ?? 0)}
-                    title={`${(families.membersOf.get(picture.id ?? 0) ?? []).length}${(families.membersOf.get(picture.id ?? 0) ?? []).length === 1 ? ' piece was' : ' pieces were'} cut from this sheet — open them as cards in this row`}
-                  >
-                    expand ▸
-                  </Button>
-                )
-              ) : held ? (
-                <span
-                  data-mark-held={picture.id || undefined}
-                  title={
-                    `this render already stands in a slot of this card, and one plate stands in one slot: ` +
-                    `the server refuses a second placement outright. Empty that side first — the ✕ on its ` +
-                    `plate in FABRIC RENDER SLOTS.`
-                  }
-                  /* ⚠ САМЫЙ ЗАМЕТНЫЙ «СКАЧОК» РЯДА, И ОН БЫЛ У ЧИТАЕМОЙ ПЛАШКИ, А НЕ У КНОПКИ.
-                     `Pill` — `inline-flex` по содержимому и 19px высотой (`py-px` без класса
-                     высоты): в ряду, где каждый сосед занимает всю ширину ячейки и ровно 20px, она
-                     сидела короткой и прижатой влево, и это читалось как «здесь что-то не
-                     дорисовалось». Ширину даёт обёртка (`flex w-full` — сам `span` с `title` был
-                     `inline`, то есть шириной по тексту), высоту и центровку — три класса на самой
-                     плашке. Слово и тон не трогаются: это по-прежнему статус, а не дверь. */
-                  className='flex w-full'
-                >
-                  <Pill className='h-5 w-full justify-center leading-4'>
-                    in {viewLabel((held.viewKey ?? '').trim()) || 'a slot'}
-                  </Pill>
-                </span>
-              ) : composite ? (
-                /* ═══ У ЛИСТА ДВЕРЬ ЖИВАЯ, И ЭТО ПОЧИНКА, А НЕ УКРАШЕНИЕ ══════════════════════
-                   Здесь стояла ПОГАШЕННАЯ дверь «split first ▸», чья причина отправляла человека
-                   «к угловой кнопке этой плитки». Угол — ТИХИЙ орган: он появляется по наведению,
-                   то есть отказ называл орган, которого на экране не видно. Дверь, объясняющая,
-                   куда пойти, вместо того чтобы туда вести, — самый дорогой вид мёртвого контрола:
-                   она занимает то самое место, где нужный жест и ожидается.
-                   Теперь глагол один и он исполним отсюда. «Почему нельзя пометить лист» переехало
-                   в `title` — это ответ на вопрос, который человек задаёт ПОСЛЕ, а не вместо. */
-                writesOff ? (
-                  <InertDoor
-                    className={INERT_DOOR}
-                    label='split ▸'
-                    reason={
-                      disabled
-                        ? 'this card is read-only for you — cutting a sheet writes new pictures onto the card'
-                        : 'this server does not answer the design routes'
-                    }
-                  />
-                ) : (
-                  <span data-split-for={picture.id || undefined} className='flex w-full'>
-                    <Button
-                      variant='secondary'
-                      size='xs'
-                      className={DOOR}
-                      onClick={() =>
-                        split.openForPicture(picture, `render ${picture.ordinal ?? ''}`.trim())
-                      }
-                      title='one sheet with several views glued into it, and a side holds ONE view. Cut it into frames here, then put them into their sides below'
-                    >
-                      split ▸
-                    </Button>
-                  </span>
-                )
-              ) : writesOff ? (
-                <InertDoor
-                  className={INERT_DOOR}
-                  label='mark ▸'
-                  reason={
-                    disabled
-                      ? 'this card is read-only for you — putting a render into a side is an edit of the card'
-                      : 'this server does not answer the design routes'
-                  }
-                />
-              ) : (
-                /* ═══ ОДИН ОРГАН — ДВА ВОПРОСА ПО ОДНОМУ: «ЧЕЙ СТОЛБЕЦ», ПОТОМ «КАКАЯ СТОРОНА» ══
-                   Владелец по бете: «надо спросить колорвей сначала, потом уже сторону — сейчас в
-                   пикере очень много всего и это не читается вообще».
-
-                   ⚠ ЭТО ПО-ПРЕЖНЕМУ ОДНА ДВЕРЬ, И ЭТО ГЛАВНОЕ. Здесь стояла записка «второго
-                   уровня кнопок нет намеренно: два органа на один жест — ровно то, чего владелец
-                   просил не делать», и она ОСТАЁТСЯ ВЕРНОЙ: в ряду плитки как была одна кнопка
-                   `mark ▸`, так и осталась, и открывает она одну панель. Разведены не ОРГАНЫ, а
-                   ВОПРОСЫ внутри одной панели — шаг 1 показывает столбцы, шаг 2 стороны выбранного,
-                   строкой-«назад» с его именем. Ветка одна (обычный случай без флага и всякая
-                   плита именованного колорвея) — шага 1 нет вовсе, и жест не удлинился ни на одно
-                   нажатие.
-
-                   Состав целей считает `markBranches` (ниже, в теле раздела) — те же три правила
-                   зеркала сервера, что и до правки. Орган — `TwoStepPicker` из `../core`. */
-                <span data-mark-for={picture.id || undefined} className='flex w-full'>
-                  {(() => {
-                    /* ⚠ ЛИЦО У ВСЕХ ПЛИТОК ОДНО — `mark ▸`, И СУЖЕНИЯ ПОСЛЕ РОЖДЕНИЯ ЦВЕТА НЕТ
-                       (r3-w2 №5; разбор на месте снятого `markScope` выше). Теперь оно ещё и НЕ
-                       МОЖЕТ появиться: дверь не держит значения вовсе — она задаёт два вопроса и
-                       забывает оба при закрытии.
-
-                       ЧЕМ КОНЧАЕТСЯ ЖЕСТ РОЖДЕНИЯ. `+ colourway…` закрывает панель, открывает
-                       модалку рождения и передаёт ей ПРОДОЛЖЕНИЕ: как только колорвей заведён
-                       (`onCreated` резолвится после `invalidateQueries`, то есть список веток уже
-                       пересобран), панель открывается снова и сразу на сторонах нового столбца.
-                       Второго нажатия больше не нужно. */
-                    const branches = markBranches(picture);
-                    /* Рождение колорвея предлагается ровно там же, где предлагается усыновление:
-                       без флага семпл-плита в новый столбец не встанет, и строка вела бы к
-                       рождению колорвея, которым нечего было бы наполнить отсюда. */
-                    const canCreate = !!onCreateColorway && colorwayOf(picture) === 0 && adopts;
-                    /* ⚠ ПОДПИСЬ ДВЕРИ ЧИТАЕТ ТО ЖЕ ПРАВИЛО, ЧТО И САМА ПАНЕЛЬ: шаг 1 есть, когда
-                       есть из чего выбирать, а `+ colourway…` — тоже выбор. Второе написание этого
-                       условия обещало бы «сразу сторона» там, где панель спросит столбец. */
-                    const asksColourway = branches.length > 1 || canCreate;
-                    return (
-                      <TwoStepPicker
-                        face='mark ▸'
-                        title='mark into'
-                        branchNoun='colourways'
-                        leafNoun='sides'
-                        branches={branches}
-                        disabled={marking === (picture.id ?? 0)}
-                        triggerTitle={
-                          asksColourway
-                            ? 'put this render into a side — the colourway first, then the side'
-                            : `put this render into a side of ${branches[0]?.label ?? ''}`
-                        }
-                        /* ⚠ МЕТРИКА РЯДА ОТДАЁТСЯ СНАРУЖИ, КАК У ВСЕХ СОСЕДЕЙ (F-9): триггер
-                           поповера — это САМА `<button>`, и `DOOR` садится на неё тем же классом,
-                           что на `split ▸` и `expand ▸`. Прежний селект приходилось приводить к
-                           этой мере тремя чужими правилами (`min-h-0`, `py-0`, свой кегль), потому
-                           что под ним стояло поле ввода; кнопке приводить нечего. */
-                        triggerClassName={DOOR}
-                        create={
-                          /* ЧЕТВЁРТАЯ ДВЕРЬ ОДНОЙ КОМНАТЫ — тем же окном, что заголовок
-                             `+ colourway` в SIDES и цель `apply splitted`. */
-                          canCreate && onCreateColorway
-                            ? { face: '+ colourway…', open: (then) => onCreateColorway(then) }
-                            : undefined
-                        }
-                        onPick={(target, view) => markInto(picture, target, view)}
-                      />
-                    );
-                  })()}
-                </span>
-              ))}
-
             {/* ═══ КОЛОДА ЛИСТА 3D — ДВЕ ДВЕРИ И НИ ОДНОЙ ТРЕТЬЕЙ ══════════════════════════════
                 Владелец, дословно (2026-09-07): у листа `snapshot 4 sides` «будет мультивью».
                 Жест мультивью в этой системе один и тот же на всех экранах — раскрыть колоду и
                 свернуть её обратно, — и здесь он написан теми же словами и тем же классом
-                (`expand ▸` / `DOOR`), что у соседа-рендера двумя сотнями строк выше.
+                (`expand ▸` / `DOOR`), что у соседа-рендера (`./render-tile`).
 
                 ⚠ `apply splitted` ЗДЕСЬ НЕТ, И ЭТО РЕШЕНИЕ, А НЕ ПРОПУСК. Та дверь ставит куски В
                 СТОРОНЫ ВЕРСТАКА, а верстак читает только род `render`: постановка кадра 3D в
@@ -1414,8 +723,7 @@ export function OutputsSection({
                 ⚠ ОБЯЗАТЕЛЬНА ИМЕННО ОБЪЯВЛЕННАЯ КНОПКА: веер `CropDeck` объявленно нем при
                 `hostDoor` (`aria-hidden`, `tabIndex={-1}`), поэтому без этих двух дверей колода
                 была бы мышиной — ни таб-стопа, ни `aria-expanded`, ни слова читалке. */}
-            {kind === 'threed' &&
-              deck &&
+            {deck &&
               (deck.open ? (
                 <Button
                   variant='secondary'
@@ -1465,7 +773,7 @@ export function OutputsSection({
                 занимает всю ширину ячейки, и ряд ехал бы при КАЖДОЙ смене состояния той же самой
                 двери. Разведка назвала первую ветку; вторая — та же дверь, и починить одну значило
                 бы оставить скачок ровно между её состояниями. */}
-            {!selectable ? null : !carries ? (
+            {!carries ? (
             <InertDoor className={INERT_DOOR} label='select' reason={SELECT_MARK_NOT_STATED} />
           ) : writesOff ? (
             <InertDoor
@@ -1497,31 +805,13 @@ export function OutputsSection({
          ни в один слот» — это утверждение об ОТСУТСТВИИ органа, и без объявленной коробки оно
          одинаково зеленело бы и на снятой двери, и на пробе, смотрящей не туда. Класс для этого
          не годится: он переживает правку смысла. */
-      id={kind === 'threed' ? 'design-threed-outputs' : 'design-render-outputs'}
-      title={kind === 'threed' ? '3D models of this card' : 'renders of this card'}
+      id='design-threed-outputs'
+      title='3D models of this card'
       question={
-        /* ОХВАТ НАЗЫВАЕТСЯ У ОБОИХ РОДОВ, А НЕ ТОЛЬКО У РЕНДЕРОВ. До J-19 про «страницу ленты
-           против всей карточки» говорила сноска, и она стояла НАД ОБОИМИ экранами; вопрос же
-           различал охват только у рендеров, а 3D отвечал одной фразой на оба случая. Со снятием
-           сноски это стало бы потерей: на откаченном бинаре список 3D честно обходит страницу
-           ленты, и признаться в этом теперь может только вопрос. */
-        kind === 'threed'
-          ? stated
-            ? '· built here or brought'
-            : '· built here or brought · this page of the feed'
-          : stated
-            ? // ГОВОРИТ ПРО КАРТОЧКУ ЦЕЛИКОМ И ПРО ОБА ПРОИСХОЖДЕНИЯ. В списке теперь стоят и
-              // загруженные руками плиты (у них нет прогона вовсе), а «came back» — слово о
-              // прогоне, и под ним рука выглядела бы чужой строкой.
-              // ⚠ «and which are chosen» СНЯТО, И ЭТО ПОЧИНКА ЛЖИ, А НЕ ПРАВКА СЛОВА: пометки у
-              // рендеров нет с J-23 (у них выбор — слот верстака), а с r3 плитка называет СВОЙ
-              // КОЛОРВЕЙ пилюлей. Подпись обязана называть то, что на плитках и есть.
-              '— the coloured plates of this whole card, generated or brought, each under its colourway'
-            : // ОТКАЧЕННЫЙ БИНАРЬ ПРИЗНАЁТСЯ ЗДЕСЬ, И ЭТО ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ОН ЕЩЁ МОЖЕТ.
-              // Строка охвата и сноска, обе говорившие «on this page of the feed», сняты (J-24,
-              // J-19). Список на таком сервере по-прежнему обходит СТРАНИЦУ ЛЕНТЫ, и молчать об
-              // этом значило бы выдать её за все рендеры карточки.
-              '— the coloured plates on this page of the feed, each under its colourway'
+        /* ОХВАТ НАЗЫВАЕТСЯ ЗДЕСЬ (J-19). До J-19 про «страницу ленты против всей карточки»
+           говорила сноска; со снятием сноски это стало бы потерей: на откаченном бинаре список
+           3D честно обходит страницу ленты, и признаться в этом теперь может только вопрос. */
+        stated ? '· built here or brought' : '· built here or brought · this page of the feed'
       }
       /* ЧЕЙ ЭТО СПИСОК И ГДЕ ОН КОНЧАЕТСЯ — В СЧЁТЕ ШАПКИ, А НЕ ОТДЕЛЬНОЙ СТРОКОЙ (J-24, J-19).
          Владелец снял обе прозаические строки под плитками; из них уцелели ровно два ФАКТА, и оба
@@ -1535,18 +825,13 @@ export function OutputsSection({
         /* ДВА ЧЛЕНА, А НЕ ОБЁРТКА: слот `action` у `SectionHeader` сам по себе flex-ряд с gap —
            лишний span здесь был бы коробкой внутри коробки на ровном месте. */
         <>
-          {/* 3D: the mockup's counter pill (`0 MODELS`); renders: the count as before. */}
-          {kind === 'threed' && <Counter n={rows.length} noun='model' />}
+          {/* The mockup's counter pill (`0 MODELS`). */}
+          <Counter n={rows.length} noun='model' />
           <Text size='micro' variant='label' component='span' className='uppercase'>
-            {kind === 'threed' ? '' : `${rows.length} ${noun}${rows.length === 1 ? '' : 's'}`}
-            {/* ИМЯ КОЛОРВЕЯ — ТОЛЬКО ТАМ, ГДЕ СПИСОК ИМ СУЖЕН (3D). У рендеров сужения больше нет,
-                и одно имя над списком трёх цветов было бы неправдой о двух из них; чей рендер,
-                говорит пилюля на самой плитке. */}
-            {kind === 'threed' && colorwayLabel?.trim() ? ` · ${colorwayLabel.trim()}` : ''}
-            {/* СЧЁТ ПОМЕЧЕННЫХ — ТОЛЬКО ТАМ, ГДЕ ПОМЕТКУ СТАВЯТ (J-23). У рендеров двери больше
-                нет, и число «· 2 selected» над списком без единого органа читалось бы как
-                сломанная кнопка, а не как факт. */}
-            {selectable && carries ? ` · ${marked} selected` : ''}
+            {/* ИМЯ КОЛОРВЕЯ — полка им сужена (`scope`), и молчать об этом нельзя. */}
+            {colorwayLabel?.trim() ? ` · ${colorwayLabel.trim()}` : ''}
+            {/* СЧЁТ ПОМЕЧЕННЫХ — пока сервер говорит о пометке вовсе. */}
+            {carries ? ` · ${marked} selected` : ''}
           </Text>
           {horizon && (
             <Text
@@ -1563,10 +848,8 @@ export function OutputsSection({
         </>
       }
     >
-      {/* ПРИЗНАНИЕ ПРО ОТКАЧЕННЫЙ БИНАРЬ СТОИТ ТАМ, ГДЕ ЕСТЬ ДВЕРЬ. У рендеров пометки больше нет
-          (J-23), и «doors below stay shut» описывало бы двери, которых на экране не существует —
-          то есть отправляло бы человека искать несломанное. */}
-      {selectable && rows.length > 0 && !carries && (
+      {/* ПРИЗНАНИЕ ПРО ОТКАЧЕННЫЙ БИНАРЬ — над дверьми пометки, о которых оно говорит. */}
+      {rows.length > 0 && !carries && (
         <CalloutBox tone='note'>
           <Text size='micro' component='p'>
             <b>this server does not state the mark at all.</b> `DesignPicture.selected` is on this
@@ -1589,184 +872,113 @@ export function OutputsSection({
           failed — press again», полный разбор по сторонам в `title`), и уходит вместе с колодой.
           Один орган — один отчёт; второе написание здесь стояло ровно до этой фазы. */}
 
-      {kind === 'threed' ? (
-        /* ═══ THE SHELF — `.fgrid`, minmax 148px: the models built here and the ones brought, one
-           grid, told apart by their corner.
-           ⚠ ВТОРОЙ ВЕТКИ «ПУСТАЯ ПОЛКА БЕЗ ЕДИНОЙ ДВЕРИ» ЗДЕСЬ НЕТ, И ЭТО НЕ УПУЩЕНИЕ. Она стояла
-           и была НЕДОСТИЖИМА: её условие (`!rows && !pending && !bringsOwnModel`) — слово в слово
-           то, по которому раздел возвращает `null` двумя сотнями строк выше, поэтому строка «no
-           model on this card yet · GENERATE above» не рисовалась НИ РАЗУ и ни на одном сервере.
-           Хуже, чем ничего: она обещала признание в режиме чтения (где GENERATE как раз погашен),
-           и следующий читатель чинил бы её текст вместо её условия. Что видит человек на самом
-           деле: при живой записи — полка из одной ячейки «принести свою» (владелец, r2 п.32:
-           пустая полка И ЕСТЬ этот плейсхолдер), при выключенной — раздела нет вовсе, ровно как
-           у всякой другой полосы карточки в режиме чтения, а причина отказа названа словами один
-           раз, у самой кнопки GENERATE.
+      {/* ═══ THE SHELF — `.fgrid`, minmax 148px: the models built here and the ones brought, one
+         grid, told apart by their corner.
+         ⚠ ВТОРОЙ ВЕТКИ «ПУСТАЯ ПОЛКА БЕЗ ЕДИНОЙ ДВЕРИ» ЗДЕСЬ НЕТ, И ЭТО НЕ УПУЩЕНИЕ. Она стояла
+         и была НЕДОСТИЖИМА: её условие (`!rows && !pending && !bringsOwnModel`) — слово в слово
+         то, по которому раздел возвращает `null` двумя сотнями строк выше, поэтому строка «no
+         model on this card yet · GENERATE above» не рисовалась НИ РАЗУ и ни на одном сервере.
+         Хуже, чем ничего: она обещала признание в режиме чтения (где GENERATE как раз погашен),
+         и следующий читатель чинил бы её текст вместо её условия. Что видит человек на самом
+         деле: при живой записи — полка из одной ячейки «принести свою» (владелец, r2 п.32:
+         пустая полка И ЕСТЬ этот плейсхолдер), при выключенной — раздела нет вовсе, ровно как
+         у всякой другой полосы карточки в режиме чтения, а причина отказа названа словами один
+         раз, у самой кнопки GENERATE.
 
-           ═══ ⚠ ПОЛКА ОБЪЯВЛЯЕТ ЦЕЛЬ СНИМКА, ПОТОМУ ЧТО ОНА ЖЕ ЕЮ И СУЖЕНА (r3f) ═══════════════
-           Окно модели поднимает плитка, а не этот файл (`PictureTile.surfaceToModel`), и снимок
-           филуется В НЁМ. Пока цели не было, он уезжал нулём — то есть на верстак `sample`, — и на
-           полке ROSSO, откуда его только что сняли, не появлялся: `rows` сужен `scope`, и кадр
-           чужого цвета сюда не встаёт. Теперь окно берёт цель отсюда, где она и живёт (`scope` —
-           то же число, которым сужен список), и снимок ложится ровно туда, куда человек смотрит.
+         ═══ ⚠ ПОЛКА ОБЪЯВЛЯЕТ ЦЕЛЬ СНИМКА, ПОТОМУ ЧТО ОНА ЖЕ ЕЮ И СУЖЕНА (r3f) ═══════════════
+         Окно модели поднимает плитка, а не этот файл (`PictureTile.surfaceToModel`), и снимок
+         филуется В НЁМ. Пока цели не было, он уезжал нулём — то есть на верстак `sample`, — и на
+         полке ROSSO, откуда его только что сняли, не появлялся: `rows` сужен `scope`, и кадр
+         чужого цвета сюда не встаёт. Теперь окно берёт цель отсюда, где она и живёт (`scope` —
+         то же число, которым сужен список), и снимок ложится ровно туда, куда человек смотрит.
 
-           ⚠ ОБЛАСТЬ НАКРЫВАЕТ ВСЮ СЕТКУ, А НЕ ТОЛЬКО СТРОКИ ПРОГОНОВ: модель, ПРИНЕСЁННУЮ руками
-           (`bring.cell`), открывают тем же окном и снимают тем же жестом. Ячейка вне области
-           молча вернулась бы к нулю — и ровно на ней дефект был бы незаметнее всего.
-           Провайдер стоит СНАРУЖИ `Tiles`: он не рисует узла в сетке, поэтому дорожки, `span 2`
-           свёрнутой колоды и тонированный грунт группы остаются ровно теми же.
+         ⚠ ОБЛАСТЬ НАКРЫВАЕТ ВСЮ СЕТКУ, А НЕ ТОЛЬКО СТРОКИ ПРОГОНОВ: модель, ПРИНЕСЁННУЮ руками
+         (`bring.cell`), открывают тем же окном и снимают тем же жестом. Ячейка вне области
+         молча вернулась бы к нулю — и ровно на ней дефект был бы незаметнее всего.
+         Провайдер стоит СНАРУЖИ `Tiles`: он не рисует узла в сетке, поэтому дорожки, `span 2`
+         свёрнутой колоды и тонированный грунт группы остаются ровно теми же.
 
-           ⚠ ИМЯ БЕРЁТСЯ У ПРОПА, А НЕ У `colourwayName`, И ЭТО НЕ МЕЛОЧЬ. `colourwayName` читает
-           `axis` (`colourwayColumns(band, colorways, 0)`), а `colorways` этому разделу с экрана 3D
-           не передают вовсе — там список пуст, и имя выбранного цвета вышло бы запасным `#5` ровно
-           на том экране, ради которого подпись и заведена. `colorwayLabel` — то же слово, которым
-           студия подписывает свою шапку (`useColorwayChoice`), значит окно и шапка над ним не
-           могут разойтись. */
-        <ModelSnapshotScope target={{ colorwayId: scope ?? 0, label: colorwayLabel ?? '' }}>
-          <Tiles min={148}>
-            {/* ═══ «ПРИНЕСТИ СВОЮ» — ПЕРВАЯ КАРТОЧКА ПОЛКИ (r2 п.32) ═══════════════════════════
-                Владелец: «вместо отдельного поля — первой карточкой в 3D MODELS OF THIS CARD».
-                Группа `BRING YOUR OWN` со своей подписью, пилюлей `free` и счётчиком принесённых
-                снята целиком: «построить» и «принести» — две двери к ОДНОЙ полке, и вторая из них
-                стояла под полкой отдельным полем, ни на что вокруг не похожим. Ячейка стоит ПЕРВОЙ
-                и до дыры живого прогона: у неё собственный замер («один орган — одно место»), и
-                пустить дыру вперёд значило бы двигать дверь всякий раз, когда идёт прогон. */}
-            {bringsOwnModel && <Bay key='bring-your-own'>{bring.cell}</Bay>}
-            {pending.map((run) => (
-              <Bay key={`live-${run.id ?? run.startedAt ?? ''}`}>
-                <PendingCell run={run} />
-              </Bay>
-            ))}
-            {/* ═══ ЛИСТ И ЕГО ВИДЫ — ОДНОЙ КОЛОДОЙ, ТЕМ ЖЕ ОРГАНОМ, ЧТО В ЛЕНТЕ И В ПОЛОСЕ ═══════
-                Владелец (2026-09-07): лист `snapshot 4 sides` «будет мультивью». Форма мультивью на
-                СЕТКЕ уже написана один раз — в ленте генераций: свёрнутая колода занимает ДВЕ
-                дорожки (`span 2`) и веером показывает края кусков, раскрытая садится в одну дорожку,
-                а куски встают следом обычными карточками. Здесь она позвана теми же тремя
-                значениями, только пропорция кадра своя (`STRIP_FRAME_ASPECT` — кадр полки).
-
-                ⚠ РАЗМЕР ЛИСТА СЧИТАЕТСЯ ОТ СОБСТВЕННОЙ КОРОБКИ КОЛОДЫ, А НЕ В ПИКСЕЛЯХ. Дорожка
-                здесь `minmax(148px, 1fr)`, то есть шире 148px на широком экране; фиксированное число
-                рассинхронизировало бы веер с дорожкой ровно там, где сетка растянулась. `calc((100%
-                - 8px) / 2)` — две дорожки и `gap-2` между ними, дословно формула ленты.
-
-                ⚠ `span 2` ЕДЕТ НА ОТСЕК, А НЕ НА КОЛОДУ: грид-элемент здесь — `Bay` (он же держит
-                затемнённый грунт раскрытой группы), и `gridColumn` на его потомке не значит ничего. */}
-            {rows.map((row) => {
-              const rootId = row.picture.id ?? 0;
-              /* Кусок рисуется ТОЛЬКО внутри своей раскрытой колоды — иначе свёрнутая показала бы
-                 его вопреки собственной двери, а раскрытая дважды. */
-              if (families.rootOf.has(rootId)) return null;
-              const members = families.membersOf.get(rootId) ?? [];
-              const open = openDeck === rootId;
-              if (!members.length) return <Bay key={rootId}>{cell(row)}</Bay>;
-              return (
-                <Fragment key={rootId}>
-                  <Bay groupOf={open ? rootId : 0} spanTwo={!open}>
-                    <CropDeck
-                      rootId={rootId}
-                      count={members.length}
-                      peeks={members.map((member) => ({
-                        id: member.id ?? 0,
-                        url: pictureThumb(member),
-                        alt: `3d picture ${member.ordinal ?? ''}`,
-                      }))}
-                      sheetWidth='calc((100% - 8px) / 2)'
-                      frameAspect={STRIP_FRAME_ASPECT}
-                      className='w-full'
-                      open={open}
-                      onToggle={() => setOpenDeck((current) => (current === rootId ? null : rootId))}
-                      /* Дверь колоды — в ряду дверей ячейки (`expand ▸` / `fold ▾`), как у полосы
-                         рендеров: разбор у ветки `deck` в `cell`. */
-                      hostDoor
-                    >
-                      {cell(row, { open })}
-                    </CropDeck>
-                  </Bay>
-                  {open &&
-                    members.map((member) => {
-                      const memberRow = rowById.get(member.id ?? 0);
-                      /* ⚠ ГРУНТ У КАЖДОГО КУСКА СВОЙ, А НЕ ОДНОЙ КОРОБКОЙ НА ГРУППУ, И ЭТО СЕТКА, А
-                         НЕ ПОЛОСА. В полосе группа стоит подряд и её можно обвести одним отсеком;
-                         на сетке она законно ПЕРЕНОСИТСЯ на следующую строку, и коробка, натянутая
-                         поверх переноса, обвела бы полстроки чужих плиток. Тонированная дорожка
-                         читается как принадлежность и переживает перенос. */
-                      return memberRow ? (
-                        <Bay key={member.id} groupOf={rootId}>
-                          {cell(memberRow)}
-                        </Bay>
-                      ) : null;
-                    })}
-                </Fragment>
-              );
-            })}
-          </Tiles>
-        </ModelSnapshotScope>
-      ) : (
-        <Strip>
-          {/* ═══ ЖИВОЙ ПРОГОН — В ГОЛОВЕ РЯДА, И ЭТО АДРЕС ОТВЕТА, А НЕ «НОВОЕ СВЕРХУ» ═══════════
-              Сервер отдаёт выходы `ORDER BY o.id DESC`, значит вернувшаяся плита встанет строкой
-              НОЛЬ — и дыра обязана стоять ровно там, иначе плита появится не на месте своей дыры.
-
-              ПОСЛЕ ДВЕРИ «принести свою модель», А НЕ ПЕРЕД НЕЙ: у той стоит собственный замер
-              («один орган стоит в одном месте», она не переезжает между пустой и полной полосой),
-              и пустить дыру вперёд значило бы двигать дверь всякий раз, когда идёт прогон. */}
+         ⚠ ИМЯ БЕРЁТСЯ У ПРОПА: `colorwayLabel` — то же слово, которым студия подписывает свою
+         шапку (`useColorwayChoice`), значит окно и шапка над ним не могут разойтись. */}
+      <ModelSnapshotScope target={{ colorwayId: scope ?? 0, label: colorwayLabel ?? '' }}>
+        <Tiles min={148}>
+          {/* ═══ «ПРИНЕСТИ СВОЮ» — ПЕРВАЯ КАРТОЧКА ПОЛКИ (r2 п.32) ═══════════════════════════
+              Владелец: «вместо отдельного поля — первой карточкой в 3D MODELS OF THIS CARD».
+              Группа `BRING YOUR OWN` со своей подписью, пилюлей `free` и счётчиком принесённых
+              снята целиком: «построить» и «принести» — две двери к ОДНОЙ полке, и вторая из них
+              стояла под полкой отдельным полем, ни на что вокруг не похожим. Ячейка стоит ПЕРВОЙ
+              и до дыры живого прогона: у неё собственный замер («один орган — одно место»), и
+              пустить дыру вперёд значило бы двигать дверь всякий раз, когда идёт прогон. */}
+          {bringsOwnModel && <Bay key='bring-your-own'>{bring.cell}</Bay>}
           {pending.map((run) => (
             <Bay key={`live-${run.id ?? run.startedAt ?? ''}`}>
               <PendingCell run={run} />
             </Bay>
           ))}
+          {/* ═══ ЛИСТ И ЕГО ВИДЫ — ОДНОЙ КОЛОДОЙ, ТЕМ ЖЕ ОРГАНОМ, ЧТО В ЛЕНТЕ И В ПОЛОСЕ ═══════
+              Владелец (2026-09-07): лист `snapshot 4 sides` «будет мультивью». Форма мультивью на
+              СЕТКЕ уже написана один раз — в ленте генераций: свёрнутая колода занимает ДВЕ
+              дорожки (`span 2`) и веером показывает края кусков, раскрытая садится в одну дорожку,
+              а куски встают следом обычными карточками. Здесь она позвана теми же тремя
+              значениями, только пропорция кадра своя (`STRIP_FRAME_ASPECT` — кадр полки).
+
+              ⚠ РАЗМЕР ЛИСТА СЧИТАЕТСЯ ОТ СОБСТВЕННОЙ КОРОБКИ КОЛОДЫ, А НЕ В ПИКСЕЛЯХ. Дорожка
+              здесь `minmax(148px, 1fr)`, то есть шире 148px на широком экране; фиксированное число
+              рассинхронизировало бы веер с дорожкой ровно там, где сетка растянулась. `calc((100%
+              - 8px) / 2)` — две дорожки и `gap-2` между ними, дословно формула ленты.
+
+              ⚠ `span 2` ЕДЕТ НА ОТСЕК, А НЕ НА КОЛОДУ: грид-элемент здесь — `Bay` (он же держит
+              затемнённый грунт раскрытой группы), и `gridColumn` на его потомке не значит ничего. */}
           {rows.map((row) => {
             const rootId = row.picture.id ?? 0;
-            // Кусок рисуется ТОЛЬКО под своим листом — иначе закрытая колода показала бы его вопреки
-            // собственной двери, а открытая дважды.
+            /* Кусок рисуется ТОЛЬКО внутри своей раскрытой колоды — иначе свёрнутая показала бы
+               его вопреки собственной двери, а раскрытая дважды. */
             if (families.rootOf.has(rootId)) return null;
             const members = families.membersOf.get(rootId) ?? [];
             const open = openDeck === rootId;
             if (!members.length) return <Bay key={rootId}>{cell(row)}</Bay>;
             return (
-              <Bay key={rootId} groupOf={open ? rootId : 0}>
-                <CropDeck
-                  rootId={rootId}
-                  count={members.length}
-                  peeks={members.map((member) => ({
-                    id: member.id ?? 0,
-                    url: pictureThumb(member),
-                    alt: `render ${member.ordinal ?? ''}`,
-                  }))}
-                  /* ПОЛОСА — НЕ СЕТКА: ячейка здесь фиксированной ширины (`CELL_WIDTH` = 132px), и
-                     ширина колоды считается явно, а не спанится дорожками. Формула — та же, что в
-                     ленте: лист плюс по трети на каждый выглядывающий кусок. */
-                  sheetWidth={`${STRIP_CELL_PX}px`}
-                  frameAspect={STRIP_FRAME_ASPECT}
-                  className='shrink-0'
-                  style={
-                    open
-                      ? undefined
-                      : {
-                          width: `calc(${STRIP_CELL_PX}px + ${Math.min(
-                            members.length,
-                            DECK_PEEK_MAX,
-                          )} * ${STRIP_CELL_PX}px / ${DECK_PEEK_MAX})`,
-                        }
-                  }
-                  open={open}
-                  onToggle={() => setOpenDeck((current) => (current === rootId ? null : rootId))}
-                  /* Дверь колоды — в ряду дверей ячейки (`expand ▸` / `apply splitted` + `▾`), а не своей
-                     строкой под кадром: F-9, разбор у ветки `deck` в `cell`. */
-                  hostDoor
-                >
-                  {cell(row, { open })}
-                </CropDeck>
+              <Fragment key={rootId}>
+                <Bay groupOf={open ? rootId : 0} spanTwo={!open}>
+                  <CropDeck
+                    rootId={rootId}
+                    count={members.length}
+                    peeks={members.map((member) => ({
+                      id: member.id ?? 0,
+                      url: pictureThumb(member),
+                      alt: `3d picture ${member.ordinal ?? ''}`,
+                    }))}
+                    sheetWidth='calc((100% - 8px) / 2)'
+                    frameAspect={STRIP_FRAME_ASPECT}
+                    className='w-full'
+                    open={open}
+                    onToggle={() => setOpenDeck((current) => (current === rootId ? null : rootId))}
+                    /* Дверь колоды — в ряду дверей ячейки (`expand ▸` / `fold ▾`), как у плитки
+                       рендера: разбор у ветки `deck` в `cell`. */
+                    hostDoor
+                  >
+                    {cell(row, { open })}
+                  </CropDeck>
+                </Bay>
                 {open &&
                   members.map((member) => {
                     const memberRow = rowById.get(member.id ?? 0);
-                    return memberRow ? <Fragment key={member.id}>{cell(memberRow)}</Fragment> : null;
+                    /* ⚠ ГРУНТ У КАЖДОГО КУСКА СВОЙ, А НЕ ОДНОЙ КОРОБКОЙ НА ГРУППУ, И ЭТО СЕТКА, А
+                       НЕ ПОЛОСА. В полосе группа стоит подряд и её можно обвести одним отсеком;
+                       на сетке она законно ПЕРЕНОСИТСЯ на следующую строку, и коробка, натянутая
+                       поверх переноса, обвела бы полстроки чужих плиток. Тонированная дорожка
+                       читается как принадлежность и переживает перенос. */
+                    return memberRow ? (
+                      <Bay key={member.id} groupOf={rootId}>
+                        {cell(memberRow)}
+                      </Bay>
+                    ) : null;
                   })}
-              </Bay>
+              </Fragment>
             );
           })}
-        </Strip>
-      )}
+        </Tiles>
+      </ModelSnapshotScope>
 
       {/* ОДНО ОКНО РЕЗА НА ВЕСЬ РАЗДЕЛ. Оно рисуется хуком и монтируется только когда цель
           выбрана; кадры размечает человек, а `for_input: false` уезжает на провод из самого хука

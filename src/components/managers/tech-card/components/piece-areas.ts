@@ -116,7 +116,7 @@ export function pieceAreaSheetsRefusal(
     return `the sheets of this fabric are bound to a BOM line, while the fabric itself is sorted into a purpose: the server will file the measurement under scope “${only}”, and the slot will look for it in “${key}” — and won't find it. bind the sheets to a purpose as well (the “⇄” button on the sheet row)`;
   }
   if (sheets.some((sh) => !(sh.lineKey ?? '').trim())) {
-    return 'some sheets have no identifier yet — save the card and retry the measurement';
+    return 'some sheets have no identifier yet — retry the measurement once the card has saved';
   }
   return null;
 }
@@ -193,7 +193,7 @@ export function pieceAreaSizeRangeRefusal(
   if (dropped.length > 0) {
     parts.push(`on the server, removed from the form: ${dropped.map(nameOfSize).join(', ')}`);
   }
-  return `the form's size range has diverged from the saved one (${parts.join('; ')}). the measurement runs against the form's range, while the server accepts it against its own — and will reject the whole scope. save the card (the “↔ cut pieces” modal adds the drawing's range to the form by itself), or re-read the card if somebody else edited the range — and retry the measurement`;
+  return `the form's size range has diverged from the saved one (${parts.join('; ')}). the measurement runs against the form's range, while the server accepts it against its own — and will reject the whole scope. wait until the card has saved (the “↔ cut pieces” modal adds the drawing's range to the form by itself), or re-read the card if somebody else edited the range — and retry the measurement`;
 }
 
 // НИЖНЯЯ ГРАНИЦА ПЛОЩАДИ НА ПРОВОДЕ. На провод число уходит с двумя знаками, а колонка держит
@@ -250,7 +250,7 @@ export async function publishPieceAreas(args: {
   if (unaddressed.length > 0) {
     return {
       ok: false,
-      reason: `${unaddressed.length} ${unaddressed.length === 1 ? 'piece is' : 'pieces are'} not saved on the server yet — an area lands on a piece by its key, and there is no key yet. save the card and retry the measurement`,
+      reason: `${unaddressed.length} ${unaddressed.length === 1 ? 'piece is' : 'pieces are'} not saved on the server yet — an area lands on a piece by its key, and there is no key yet. retry the measurement once the card has saved`,
     };
   }
   const tooSmall = rows.filter((a) => !(a.areaCm2 >= MIN_WIRE_AREA_CM2));

@@ -4,7 +4,7 @@ import type {
   common_DesignRun,
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -19,13 +19,20 @@ import { EmptyState } from '../core';
 import { pictureHandle, runHandle } from '../handles';
 import { RecallBenchIntake, RecallDoors } from '../history-recall';
 import { useGalleryGroup } from '../picture-tile';
+import {
+  RenderDoorsHost,
+  RenderDoorsNotes,
+  broughtGroup,
+  hostPlates,
+  useRenderStep,
+} from '../render/render-tile';
 import { SplitModal } from '../split-modal';
 import { isRunArchived } from '../visibility';
 import { viewLabel } from '../views';
 import { closeSurface, openSurface, useBenchRun } from './bench-store';
 import { formatMoney } from './money';
 import { CountPill, RunPanel } from './run-panel';
-import { deckAfterZoom, deckOfRuns, runsGallery } from './run-gallery';
+import { deckAfterZoom, deckOfRuns, outputPlan, runsGallery } from './run-gallery';
 import { RunOutputs, runOutputsShown } from './run-outputs';
 import { fixSelectionOf, isRunLive, runStamp, runStateWord } from './run-state';
 import { REP_NOUN } from './run-tile';
@@ -66,6 +73,14 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  * zoom walks ONE `useGalleryGroup` over every loaded picture; RECALL is two doors and a question
  * (`RecallDoors`, `history-recall.tsx`), and the bench intake stands OUTSIDE the fold, because a
  * host that unmounts drops the selection it was about to answer.
+ *
+ * ON FABRIC RENDER (27.09, O-63, D-62) THE ROWS ARE THE WORKBENCH'S: the studio's render scope stands
+ * above this history there (`RenderStudio`), and a render run's tiles are the render tile with the
+ * doors RENDERS OF THIS CARD had — `mark ▸`, `apply splitted`, `expand ▸`, `unmark ▸` — their rules
+ * ONE hook over the plates this history shows (`RenderDoorsHost`), their refusal notes once at the
+ * top of the block — the ones the workbench above does not print already (O-63 r2: one note per
+ * reason on the step). The plates brought by hand that SIDES does not show stand here as well, as
+ * one folded group after the shelf: `· N brought ▸` in the header line (`broughtGroup`).
  *
  * WHERE THE MOCK-UP'S FORM MEETS THE PRODUCT'S DATA, THE DATA WINS AND THE FORM STAYS: the tile's
  * top-left badge names the SIDE THE PLATE STANDS IN — a fact, never `ghost_view`, a guess (F-17);
@@ -503,6 +518,42 @@ export function GenerationHistory({
    * перестраиваются от фильтра, страницы и дочитанных продолжений, а id картинки переживает всё.
    */
   const [openDeck, setOpenDeck] = useState<number | null>(null);
+  /** One open deck for the whole feed (H-10): a press on another deck's door REWRITES the address. */
+  const toggleDeck = (rootId: number) =>
+    setOpenDeck((current) => (current === rootId ? null : rootId));
+
+  /**
+   * ═══ O-63 (D-62 п.3–4) · ON FABRIC RENDER: THE RENDER DOORS, AND THE BROUGHT PLATES ═══════════
+   * The studio's render scope reaches this history on FABRIC RENDER only; there a render run's
+   * tiles draw the render doors (`RunTile` → the render tile), and the plates brought by hand that
+   * SIDES does not show form one more group, folded, after the shelf — «· N brought ▸». N counts
+   * the cards of the group: a cut sheet is one, its pieces stand behind it.
+   */
+  const renderStep = useRenderStep();
+  const rendersHere = rep === 'render' && !!renderStep;
+  /**
+   * The group as it is drawn (O-63 r3, `broughtGroup`): its pseudo-run, its cards with the decks of
+   * the pieces off SIDES — climbed through the whole family, not through the group's list alone —
+   * and each card's whole split, which `apply splitted` puts into the sides (O-63 r2, D-72 п.1).
+   */
+  const brought = useMemo(
+    () => (rendersHere && renderStep ? broughtGroup(band, renderStep) : null),
+    [rendersHere, renderStep, band],
+  );
+  const broughtCards = brought?.plan.cards.length ?? 0;
+  const [broughtShown, setBroughtShown] = useState(false);
+  /** Nothing brought left off SIDES — the group closes with its door. */
+  if (broughtShown && !brought) setBroughtShown(false);
+  /**
+   * HOW EACH ROW IS DRAWN — the group's row by the group's own plan, every other by the history's
+   * (`outputPlan` over the run's pictures): the viewer row, the deck memory and the render doors
+   * read one plan per row, so none of them can disagree with the grid about a deck (H-10, E-4).
+   */
+  const planOf = useCallback(
+    (run: common_DesignRun) =>
+      brought && run === brought.run ? brought.plan : outputPlan(run.pictures ?? []),
+    [brought],
+  );
 
   /**
    * ВКЛАДКА СМЕНИЛАСЬ — ФИЛЬТР И СВЁРТКА ВОЗВРАЩАЮТСЯ К ЕЁ СОБСТВЕННОМУ ПОЛОЖЕНИЮ. В РЕНДЕРЕ, а не
@@ -533,6 +584,7 @@ export function GenerationHistory({
     if (page !== 0) setPage(0);
     if (showAll) setShowAll(false);
     if (archShown) setArchShown(false);
+    if (broughtShown) setBroughtShown(false);
     if (splitting) setSplitting(null);
     if (openDeck !== null) setOpenDeck(null);
   }
@@ -626,12 +678,27 @@ export function GenerationHistory({
   const gallery = useMemo(
     () =>
       runsGallery(
-        [...(runsOpen ? visible : []), ...(archShown ? archivedRows : [])].filter(
-          (run) => (run.id ?? 0) !== benchRunId,
-        ),
+        [
+          ...[...(runsOpen ? visible : []), ...(archShown ? archivedRows : [])].filter(
+            (run) => (run.id ?? 0) !== benchRunId,
+          ),
+          // O-63: the brought group, while it is open — last, as it stands.
+          ...(broughtShown && brought ? [brought.run] : []),
+        ],
         openDeck,
+        planOf,
       ),
-    [runsOpen, visible, archShown, archivedRows, openDeck, benchRunId],
+    [
+      runsOpen,
+      visible,
+      archShown,
+      archivedRows,
+      openDeck,
+      benchRunId,
+      broughtShown,
+      brought,
+      planOf,
+    ],
   );
   const galleryGroup = useGalleryGroup(gallery.items);
 
@@ -639,11 +706,15 @@ export function GenerationHistory({
   const deckOf = useMemo(
     () =>
       deckOfRuns(
-        [...visible, ...(archShown ? archivedRows : [])].filter(
-          (run) => (run.id ?? 0) !== benchRunId,
-        ),
+        [
+          ...[...visible, ...(archShown ? archivedRows : [])].filter(
+            (run) => (run.id ?? 0) !== benchRunId,
+          ),
+          ...(broughtShown && brought ? [brought.run] : []),
+        ],
+        planOf,
       ),
-    [visible, archShown, archivedRows, benchRunId],
+    [visible, archShown, archivedRows, benchRunId, broughtShown, brought, planOf],
   );
 
   /**
@@ -653,6 +724,34 @@ export function GenerationHistory({
    */
   const foldOnForeignZoom = (pictureId: number) =>
     setOpenDeck((current) => deckAfterZoom(current, pictureId, deckOf));
+
+  /**
+   * O-63: WHAT THE RENDER DOORS OF THIS HISTORY READ — the rows on screen (the window's page, the
+   * shelf, the brought group; not the run on the workbench, whose tiles live there), each drawn by
+   * its own plan, so the doors and the grid never disagree about a deck.
+   */
+  const hostRuns = useMemo(
+    () =>
+      rendersHere
+        ? [
+            ...[...(runsOpen ? shown : []), ...(archShown ? archivedRows : [])].filter(
+              (run) => (run.id ?? 0) !== benchRunId,
+            ),
+            ...(broughtShown && brought ? [brought.run] : []),
+          ]
+        : [],
+    [rendersHere, runsOpen, shown, archShown, archivedRows, benchRunId, broughtShown, brought],
+  );
+  const plates = useMemo(() => hostPlates(hostRuns.map(planOf)), [hostRuns, planOf]);
+  /** A plate's run is its row's: a piece inherits the run of its sheet, a brought plate is id 0. */
+  const runOf = useMemo(() => {
+    const byId = new Map(hostRuns.map((run) => [run.id ?? 0, run] as const));
+    return (picture: common_DesignPicture) => byId.get(picture.runId ?? 0) ?? hostRuns[0];
+  }, [hostRuns]);
+  const splitHere = (picture: common_DesignPicture) => {
+    openSurface(techCardId, 'split:history', picture.runId ?? 0);
+    setSplitting({ picture, handle: pictureHandle(picture) });
+  };
 
   /** «SHOW ALL» READS THE SERVER'S PAGES TO THE END; `hasMore` goes false on its own. */
   useEffect(() => {
@@ -755,19 +854,34 @@ export function GenerationHistory({
         openDeck={openDeck}
         /* ОДИН ОТКРЫТЫЙ — ЗДЕСЬ И ЕСТЬ ЭТОТ ЗАКОН: нажатие на дверь другой колоды ПЕРЕПИСЫВАЕТ
            адрес; у состояния из одного значения второе открытое просто невыразимо. */
-        onDeck={(rootId) => setOpenDeck((current) => (current === rootId ? null : rootId))}
+        onDeck={toggleDeck}
         onZoomPicture={foldOnForeignZoom}
-        onSplit={(picture) => {
-          openSurface(techCardId, 'split:history', picture.runId ?? 0);
-          setSplitting({ picture, handle: pictureHandle(picture) });
-        }}
+        onSplit={splitHere}
       />
     ));
 
   const paged = visible.length > PAGE || more.hasMore;
 
   return (
-    <>
+    /* O-63: ON FABRIC RENDER the render doors of every row below read ONE host (`RenderDoorsHost`);
+       its notes stand at the top of the block (`RenderDoorsNotes`) — those the workbench above does
+       not print (O-63 r2). Any other step: a fragment. */
+    <RenderDoorsHost
+      off={!rendersHere}
+      notes={false}
+      band={band}
+      techCardId={techCardId}
+      disabled={disabled}
+      pictures={plates.pictures}
+      membersOf={plates.membersOf}
+      wholeDecks={brought?.wholeDecks}
+      openDeck={openDeck}
+      /* Below the workbench on the step: a reason both show is printed above the workbench's
+         tiles, and the doors here point at that note (O-63 r2, D-72 п.5). */
+      order={1}
+      onDeck={toggleDeck}
+      runOf={runOf}
+    >
       {/* ═══ ПРИЁМНИК РЕКОЛА СТОИТ СНАРУЖИ СВЁРТКИ (E-21…E-23) ═══════════════════════════════════
           Он `return null`. А внутри свёртки он стоять не может: свёрнутое тело РАЗМОНТИРУЕТСЯ, а
           этот орган объявляет себя домом жеста (`useRegisterRecallHost` для render и threed), и
@@ -842,9 +956,32 @@ export function GenerationHistory({
             >
               · {`${archShownCount}${archFloor ? '+' : ''}`} archived ▸
             </Button>
+            {/* O-63 (D-62 п.4): THE BROUGHT GROUP'S DOOR — beside the shelf's, in the same line
+                (r3b, M-3: a door never gets a row of its own), only while something brought stands
+                off SIDES. Its group opens after the shelf. */}
+            {rendersHere && broughtCards > 0 && (
+              <Button
+                variant='secondary'
+                size='xs'
+                aria-expanded={broughtShown}
+                className='whitespace-nowrap'
+                data-brought-door={broughtCards}
+                aria-label={`${broughtShown ? 'hide' : 'open'} the ${broughtCards} brought render${broughtCards === 1 ? '' : 's'} that no side of SIDES shows`}
+                title='renders uploaded by hand (no run) that stand in no side SIDES shows — mark them into a side from here'
+                onClick={() => {
+                  setBroughtShown((v) => !v);
+                  setOpenDeck(null);
+                }}
+              >
+                · {broughtCards} brought ▸
+              </Button>
+            )}
           </div>
         }
       >
+        {/* O-63: why a render door below is dark — one line per reason, above the rows (D-56′). */}
+        <RenderDoorsNotes />
+
         {!speaks && (
           <CalloutBox tone='note'>
             this server does not speak the design band yet — the rows below are read-only.
@@ -1061,6 +1198,49 @@ export function GenerationHistory({
           </div>
         )}
 
+        {/* ═══ O-63 (D-62 п.4) · THE BROUGHT PLATES — ONE GROUP, AFTER THE SHELF ══════════════════
+            Uploads that stand in no side SIDES shows — the plates RENDERS OF THIS CARD listed and no
+            run's row holds. One pseudo-row «no run» drawn by the rows' own block (`RunOutputs` →
+            the render tile), with the same doors, the same deck and the same viewer row. */}
+        {broughtShown && brought && (
+          <div data-brought-shelf={broughtCards}>
+            <GroupLabel
+              action={
+                <Button
+                  variant='secondary'
+                  size='xs'
+                  aria-expanded
+                  aria-label='hide the brought renders'
+                  onClick={() => {
+                    setBroughtShown(false);
+                    setOpenDeck(null);
+                  }}
+                >
+                  hide ▾
+                </Button>
+              }
+            >
+              brought
+            </GroupLabel>
+            <RunOutputs
+              band={band}
+              techCardId={techCardId}
+              run={brought.run}
+              plan={brought.plan}
+              rep='render'
+              cardFit={cardFit}
+              elapsed=''
+              disabled={disabled || !speaks}
+              galleryKey={galleryGroup.key}
+              galleryIndexOf={gallery.indexOf}
+              openDeck={openDeck}
+              onDeck={toggleDeck}
+              onZoomPicture={foldOnForeignZoom}
+              onSplit={splitHere}
+            />
+          </div>
+        )}
+
         {splitting && (
           <SplitModal
             techCardId={techCardId}
@@ -1075,6 +1255,6 @@ export function GenerationHistory({
           />
         )}
       </Section>
-    </>
+    </RenderDoorsHost>
   );
 }

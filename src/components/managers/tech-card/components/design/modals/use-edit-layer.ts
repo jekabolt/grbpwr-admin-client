@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import type { common_DesignEditLayer, common_MediaFull } from 'api/proto-http/admin';
+import type {
+  GetDesignBandResponse,
+  common_DesignEditLayer,
+  common_MediaFull,
+} from 'api/proto-http/admin';
 import { useCallback, useMemo } from 'react';
 
 import { designKeys } from '../use-design-band';
@@ -49,6 +53,12 @@ export function useDesignEditLayer(techCardId: number, layerId: number) {
   });
 }
 
+/**
+ * How long the answer to an overwrite waits for the band's re-read before it speaks without the
+ * slot (review r3): long enough for a slow gateway, short enough that «saved» is never withheld.
+ */
+export const REREAD_BOUND_MS = 8000;
+
 export function useEditLayerWrites(techCardId: number) {
   const qc = useQueryClient();
 
@@ -56,6 +66,43 @@ export function useEditLayerWrites(techCardId: number) {
     // The BAND, not the layer: `layer_rev` on a bench picture and the layer list both live there,
     // and the stale-plate badge on ARTIFACTS is computed from them.
     qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
+  }, [qc, techCardId]);
+
+  /**
+   * THE BAND AS IT IS NOW — re-read, and handed back once the read has landed (27.09, O-53 phase 2,
+   * D-55). For an answer that has to be told from the band and not from memory: where the edit of
+   * an overwrite stands. `invalidate` starts the same read and does not wait for it.
+   *
+   * ⚠ BOUNDED, AND ONLY A FRESH READ COUNTS (review r3). The answer to the person waits on this read,
+   * and `fetch` has no timeout of its own: past `REREAD_BOUND_MS` the wait is given up (the read
+   * itself runs on, and the next poll brings it to the workbench) and the caller gets undefined —
+   * as it does for a read that failed, or that never ran because nothing on the page watches the
+   * band. The cache is NOT an answer then: it is the band from before the write, and a slot named
+   * off it would be the lie this re-read exists to avoid.
+   */
+  const reread = useCallback(async (): Promise<GetDesignBandResponse | undefined> => {
+    const queryKey = designKeys.band(techCardId);
+    const askedAt = Date.now();
+    const bound = new AbortController();
+    const timer = setTimeout(() => bound.abort(), REREAD_BOUND_MS);
+    const gaveUp = new Promise<'gave up'>((resolve) =>
+      bound.signal.addEventListener('abort', () => resolve('gave up'), { once: true }),
+    );
+    try {
+      const outcome = await Promise.race([
+        qc.invalidateQueries({ queryKey }).then(
+          () => 'read' as const,
+          () => 'failed' as const,
+        ),
+        gaveUp,
+      ]);
+      if (outcome !== 'read') return undefined;
+    } finally {
+      clearTimeout(timer);
+    }
+    const state = qc.getQueryState<GetDesignBandResponse>(queryKey);
+    if (!state || state.status === 'error' || state.dataUpdatedAt < askedAt) return undefined;
+    return state.data;
   }, [qc, techCardId]);
 
   /**
@@ -104,26 +151,47 @@ export function useEditLayerWrites(techCardId: number) {
    * THE CLIENT RASTERISES AND THE SERVER RECORDS THE PROVENANCE — there is no vector renderer
    * anywhere in the backend and the strokes are this client's own format, so the only place that
    * can honestly turn them into pixels is the canvas that drew them.
+   *
+   * ═══ «OVERWRITE» IS THIS SAME VERB, AND EVERY PRESS CARRIES ITS KEY (27.09, O-53 phase 2) ════
+   *
+   * `replacePictureId` is the answer «overwrite» of the workbench's question (`VectorModal`,
+   * `replace`): the edit is filed as the same sibling and, in the same transaction, takes that
+   * picture's place — its bench slot moves onto the edit and it is stamped `replaced_by`. Absent is
+   * «beside», byte for byte what this verb always did: `undefined` never reaches the wire
+   * (JSON.stringify drops it), so «save as new» and every edit from the history send no such field.
+   *
+   * `clientRequestId` names the GESTURE — one per answer, minted by the caller and handed in again
+   * when the same answer over the same drawing is retried, so a lost response cannot file the edit
+   * twice (the server answers the replay with the picture the first attempt filed). The caller keeps
+   * it in the tab's ledger until a definite answer (`flatten-ledger.ts`, D-54), so the retry survives
+   * the editor. It goes on EVERY flatten now, beside or in place: the backend that reads it is live
+   * (cbf69dc), and a server older than it answers 400 to the field — this bundle must not reach a
+   * backend without it.
    */
   const flattenLayer = useMutation({
-    mutationFn: (input: { layerId: number; expectedRev: number; mediaId: number }) =>
+    mutationFn: (input: {
+      layerId: number;
+      expectedRev: number;
+      mediaId: number;
+      /** «overwrite»: the picture this edit takes the place of. Absent = beside its base. */
+      replacePictureId?: number;
+      /** The gesture's idempotency key — the same on a retry of the same answer. */
+      clientRequestId: string;
+    }) =>
       adminService.FlattenDesignEditLayer({
         techCardId,
         layerId: input.layerId,
         expectedRev: input.expectedRev,
         mediaId: input.mediaId,
-        // O-53's «overwrite» and gesture key are not sent from here: this verb files the edit
-        // BESIDE its base, as before. `undefined` never reaches the wire (JSON.stringify drops
-        // it), and that is load-bearing — a server older than these fields answers 400 to either.
-        replacePictureId: undefined,
-        clientRequestId: undefined,
+        replacePictureId: input.replacePictureId || undefined,
+        clientRequestId: input.clientRequestId,
       }),
     onSuccess: invalidate,
   });
 
   return useMemo(
-    () => ({ saveLayer, flattenLayer, invalidate }),
-    [saveLayer, flattenLayer, invalidate],
+    () => ({ saveLayer, flattenLayer, invalidate, reread }),
+    [saveLayer, flattenLayer, invalidate, reread],
   );
 }
 
@@ -168,6 +236,40 @@ export async function uploadRaster(dataUrl: string): Promise<common_MediaFull> {
 }
 
 /**
+ * WHICH REFUSAL A FLATTEN GOT, by the code the server's `designError` attaches as a
+ * `google.rpc.ErrorInfo` (its `reason`, plus `head_picture_id` on `already_replaced` — the picture
+ * standing in the named one's place now). The message is the fallback: a gateway that dropped the
+ * details still carries `design: <code>: …` in the words.
+ */
+export function flattenRefusal(error: unknown): { reason: string; headPictureId: number } {
+  const details = (error as { details?: unknown } | null)?.details;
+  if (Array.isArray(details)) {
+    for (const d of details) {
+      if (!d || typeof d !== 'object') continue;
+      const type = (d as { '@type'?: unknown })['@type'];
+      const reason = (d as { reason?: unknown }).reason;
+      if (typeof type !== 'string' || !type.endsWith('ErrorInfo') || typeof reason !== 'string')
+        continue;
+      const metadata = (d as { metadata?: Record<string, unknown> }).metadata ?? {};
+      return { reason, headPictureId: Number(metadata.head_picture_id) || 0 };
+    }
+  }
+  const raw = error instanceof Error ? error.message : '';
+  return { reason: /\bdesign: ([a-z_]+)/.exec(raw)?.[1] ?? '', headPictureId: 0 };
+}
+
+/**
+ * DID THE SERVER ANSWER AT ALL. No status is a request that never came back (`Failed to fetch`, a
+ * timeout, a dropped connection — `api.ts` rethrows those without one); a 5xx is a gateway or a
+ * server that fell over mid-way. Either way the flatten MAY have been filed, and the only honest
+ * next step is a retry of the same gesture under the same key.
+ */
+export function flattenOutcomeUnknown(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status !== 'number' || status <= 0 || status >= 500;
+}
+
+/**
  * The server's refusals for this feature, in words a person can act on.
  *
  * Read the same way the mint's are: by CODE, because the codes are the vocabulary. The absent
@@ -180,9 +282,12 @@ export function layerRefusalText(error: unknown): string {
   const raw = error instanceof Error ? error.message : '';
   const has = (code: string) => raw.includes(code);
 
+  // A 409 IS A LAYER CONFLICT ONLY WHEN IT SAYS SO, or says nothing: Aborted is a class, and a flatten
+  // that moves a slot could one day answer another member of it — its own words are then the truth.
+  const code = flattenRefusal(error).reason;
   if (status === 404 || status === 501 || has('Unimplemented'))
     return 'this server has no vector editor yet — the layer routes are not deployed. Nothing was saved; download the SVG if you need to keep this drawing.';
-  if (status === 409 || has('layer_rev_mismatch'))
+  if (code === 'layer_rev_mismatch' || has('layer_rev_mismatch') || (status === 409 && !code))
     return 'somebody saved this drawing while it was open. Nothing was written — reopen the layer to see their version, then redraw on top of it. Your strokes are still on screen until you close this.';
   if (has('strokes_too_large'))
     return 'too many strokes for one layer (the ceiling is 512 KB). Split the drawing across two layers rather than thinning it — thinning silently moves lines somebody drew on purpose.';

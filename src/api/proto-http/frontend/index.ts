@@ -196,8 +196,13 @@ export type common_Colorway = {
   status: common_ColorwayLifecycleStatus | undefined;
   styleId: number | undefined;
   lockVersion: number | undefined;
+  // The dictionary FAMILY tag (FK Dictionary.colors), T45: what the catalogue filter and aux-output
+  // assembly match on. Several colourways of one style may share it. Not the SKU segment any more.
   colorCode: string | undefined;
   publishedAt: wellKnownTimestamp | undefined;
+  // OUTPUT-ONLY. The colour segment of the SKU (T45): three characters [A-Z0-9] the server minted
+  // when the colourway was created, unique within the style and never changed afterwards.
+  skuColorToken: string | undefined;
 };
 
 export type common_ColorwayDisplay = {
@@ -237,9 +242,23 @@ export type common_ColorwayMerchandising = {
   collection: string | undefined;
   fit: string | undefined;
   minTier: number | undefined;
+  // The dictionary FAMILY tag (T45) — see ColorwayMerchandisingInsert.color_code.
   colorCode: string | undefined;
   dictionaryColor: common_Color | undefined;
   countryCode: string | undefined;
+  // The SKU colour token (T45): minted on create, immutable, unique within the style.
+  skuColorToken: string | undefined;
+  // The colourway's palette in order, the main colour first (T45). EMPTY for a legacy
+  // single-colour colourway: its colour then reads as before — the development pantone / dev_hex,
+  // else dictionary_color. Returned by GetColorwayByID; paged lists leave it empty.
+  colours: common_ColorwayColour[] | undefined;
+  // The colourway name per storefront language, keyed by Language.id (T45). A language missing
+  // here reads colour_name. Returned by GetColorwayByID; paged lists leave it empty.
+  nameI18n: { [key: string]: string } | undefined;
+  // product.color — the name legacy readers print (orders, lays, run pack, the storefront cart):
+  // the colourway's own name (development.name) once it has a palette, the family's dictionary
+  // name otherwise.
+  colourName: string | undefined;
 };
 
 // A representation of a decimal value, such as 2.5. Clients may convert values
@@ -337,14 +356,36 @@ export type common_SeasonEnum =
   | "SEASON_ENUM_FW"
   | "SEASON_ENUM_PF"
   | "SEASON_ENUM_RC";
-// Color is a controlled colour-dictionary entry. code is exactly 3 chars and unique; it feeds the
-// colour segment of the SKU and is referenced by product.color_code.
+// Color is a controlled colour-dictionary entry. code is exactly 3 chars and unique; it is the
+// FAMILY a colourway is filed under (product.color_code, catalogue filter, aux-output assembly).
+// Since T45 it no longer feeds the SKU: the SKU colour segment is the colourway's own
+// sku_color_token. A colourway created before T45 kept its dictionary code as that token, so its
+// SKU did not change.
 export type common_Color = {
   id: number | undefined;
   code: string | undefined;
   name: string | undefined;
   hex: string | undefined;
   archived: boolean | undefined;
+};
+
+// ColorwayColour is one colour of a colourway's palette (T45, table product_colour). A palette is
+// ordered: the first colour is the MAIN one — thumbnails and single-colour readers use it, and the
+// server mirrors it into the colourway's development pantone / pantone_system / dev_hex.
+// A colour is a Pantone code OR a free label (at least one of the two); hex is only a screen
+// preview. On writes values are trimmed, hex and pantone_system upper-cased; limits are those of
+// the columns (label 64, pantone 64, pantone_system 8 characters).
+export type common_ColorwayColour = {
+  // Free words for the colour («bone white»). Required when pantone is empty.
+  label: string | undefined;
+  // Screen preview "#RRGGBB", or "" when none is known. Never authoritative — the Pantone code is.
+  hex: string | undefined;
+  // The Pantone code as typed («19-4005 TCX», «Black 6 C»), free text: the Pantone catalogue is not
+  // a dictionary here. Required when label is empty.
+  pantone: string | undefined;
+  // The Pantone book the code is from (TCX, TPG, C, …). Only together with pantone — a system
+  // without a code is refused.
+  pantoneSystem: string | undefined;
 };
 
 export type common_ColorwayInsertTranslation = {

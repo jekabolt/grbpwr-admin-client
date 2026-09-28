@@ -7,7 +7,7 @@ import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder
 import Text from 'ui/components/text';
 
 import { EMPTY_WORD } from '../core';
-import { PictureTile, type PictureTileAction } from '../picture-tile';
+import { PictureTile, type PictureTileAction, type PictureTileProps } from '../picture-tile';
 import { viewLabel } from '../views';
 
 /**
@@ -48,9 +48,9 @@ import { viewLabel } from '../views';
  * to become the picture's own ratio — and `media.thumbnail.width/height` is on the wire for it.
  */
 
-/** Ширина ячейки ЧИСЛОМ. Класс ниже собран из неё же — колода кропов (J-23) считает по ней свою
- *  ширину и шаг веера, а второе написание «132» разъехалось бы с первым молча. */
-export const STRIP_CELL_PX = 132;
+/* Здесь стояла `STRIP_CELL_PX` — ширина ячейки числом, по которой колода кропов полосы RENDERS OF
+   THIS CARD (J-23) считала свою ширину и шаг веера. Полоса снята с разделом (O-63), других
+   читателей у числа не было; класс ниже — та же мера, 132px. */
 export const CELL_WIDTH = 'w-[132px] shrink-0';
 /** 132 × 148 — та же коробка, что была задана высотой, теперь сказанная пропорцией: `PictureTile`
  *  меряет кадр отношением сторон, а ячейка стоит в колонке шириной ровно 132px. */
@@ -71,6 +71,16 @@ export function StripCell({
    * увеличение, и человек читает его как испорченный файл.
    */
   gallery,
+  /**
+   * ═══ МЕСТО КАДРА В РЯДУ ХОЗЯИНА, А НЕ СВОЙ РЯД (27.09, O-63) ═══════════════════════════════
+   * Ячейка, стоящая в строке прогона (верстак под GENERATE, история), ходит по просмотрщику
+   * вместе со всей строкой — `galleryGroup` хозяина побеждает `gallery` (разбор у `PictureTile`).
+   * Там же — рамка строки (`aspect`, у колоды та же `frameAspect`) и приглушение полки архива
+   * (`dim`, J-22). Не заданы — ячейка полосы, как была.
+   */
+  galleryGroup,
+  aspect = FRAME_ASPECT,
+  dim,
   /**
    * КАДР, КОТОРЫЙ ЭТА ЯЧЕЙКА ПРЕДЛАГАЕТ ВЗЯТЬ, — не тот, что уже стоит. Едет в разметку как
    * `data-offered` и служит якорем и пробам, и человеку в инспекторе: список кандидатов — это
@@ -104,7 +114,7 @@ export function StripCell({
    * ⚠ СЮДА ПЕРЕЕЗЖАЕТ ТОЛЬКО ЖИВАЯ ДВЕРЬ. Отказ («сервер не знает пометки», «карточка только для
    * чтения») обязан остаться ПОД кадром словами: этот файл уже платил за обратное — «Угол это
    * ТИХИЙ орган: он появляется по наведению, то есть отказ называл орган, которого на экране не
-   * видно» (`render/outputs.tsx`, разбор двери `split first ▸`).
+   * видно» (`render/render-tile.tsx`, разбор двери `split first ▸`).
    */
   onSelect,
   /* Правка кадра — тот же угол, что и у сплита (E-3). Пробрасывается, а не решается здесь:
@@ -131,6 +141,9 @@ export function StripCell({
   alt: string;
   badge?: string;
   gallery?: MediaViewerItem;
+  galleryGroup?: PictureTileProps['galleryGroup'];
+  aspect?: string;
+  dim?: boolean;
   onOpen?: () => void;
   onSplit?: PictureTileAction;
   onZoom?: () => void;
@@ -160,10 +173,12 @@ export function StripCell({
           url={src}
           alt={alt}
           badge={badge}
-          aspect={FRAME_ASPECT}
+          aspect={aspect}
           fit='contain'
           selected={emphasis}
+          dim={dim}
           gallery={gallery}
+          galleryGroup={galleryGroup}
           onOpen={onOpen}
           onZoom={onZoom}
           onSplit={onSplit}

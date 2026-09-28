@@ -496,7 +496,6 @@ export function ConstructionTab({
   active = false,
   onSave,
   saving = false,
-  draftPending = false,
   onGoTab,
 }: {
   techCard?: common_TechCard;
@@ -509,8 +508,6 @@ export function ConstructionTab({
    */
   onSave?: () => void;
   saving?: boolean;
-  /** У карточки есть невосстановленный черновик: подавляет автооткрытие фулскрина по `?fs=1`. */
-  draftPending?: boolean;
   /**
    * Переход по якорю находки аудита. ПРОКЛАДКА ДО `navTo`, ровно как `onSave` — прокладка до
    * сохранения: об идентичности вкладок (`TabId`, свёрнутые псевдонимы, какие из них вообще есть
@@ -838,7 +835,6 @@ export function ConstructionTab({
               )}
               onSave={onSave}
               saving={saving}
-              draftPending={draftPending}
               // ЭСКИЗ В ФУЛСКРИН ЕДЕТ ЭЛЕМЕНТОМ, а не вторым таким же компонентом внутри оверлея:
               // подписки на `operations`, `callouts` и `technicalMedia` остаются в этом листе, и
               // обе поверхности читают ОДИН активный пин — тот же `useCrossHighlight`, что у

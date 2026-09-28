@@ -19,11 +19,11 @@ import { STYLE_FACT_KEYS } from './tech-card-options';
  *     B-03: длина очереди не видит правку уже застейдженной панели);
  *   · перед тихой записью — ТИХАЯ проверка (ревью M-02): значения разбираются схемой, полям не
  *     публикуется ни одна ошибка; невалидная форма НЕ пишется — статус `invalid` с числом ошибок.
- *     Красным поля становятся только по явному жесту: ⌘S, щелчок по чипу, раскрытие его поповера;
+ *     Красным поля становятся только по явному жесту: ⌘S, раскрытие чипа, строка предупреждений;
  *   · один вызов в полёте; правки во время записи — ещё один цикл после неё, без второго параллельного;
  *   · «saved» — только над ТИХОЙ карточкой (ревью B-03): запись легла, а правка, набранная пока она
- *     летела, всё ещё только в браузере, — это ход вперёд (`progress`), а не конец. История и уборка
- *     черновика висят на том проходе, после которого работы не осталось;
+ *     летела, всё ещё только в браузере, — это ход вперёд (`progress`), а не конец. История висит на
+ *     том проходе, после которого работы не осталось;
  *   · `flush()` — немедленно и с ответом, и отвечает он только над тихой карточкой: проходит цикл за
  *     циклом, пока за проход не пришло ни одной правки и писать больше нечего. Платные двери
  *     стартуют только при `ok`/`nothing` (B-05). Не затихла за все проходы — `busy`, а не `error`:
@@ -39,11 +39,18 @@ import { STYLE_FACT_KEYS } from './tech-card-options';
  *   · цикл, пришедшийся на паузу (диалог перевода), взводится концом паузы (m9);
  *   · запись, которую ведёт не машина (перевод в auxiliary после диалога), сообщает ей исход
  *     `settleExternal` — статус и уборка тихой карточки кончаются там же, где запись (R-7);
- *   · ошибка → повторы через 5 / 15 / 45 с, потом `not saved · retry`;
+ *   · ошибка → повторы через 5 / 15 / 45 с, а дальше каждые 30 с, пока у карточки есть работа;
+ *     следующая правка пишет своим обычным дебаунсом, не дожидаясь шага. Двери «retry» нет: кнопки
+ *     сохранения нет вовсе, карточка сохраняет себя сама (O-60, D-59). Потолок `restaged` тоже не
+ *     конец: панель, перестейдживающая сама себя, пишется раз в 30 с, а не раз в две;
  *   · 409 → статус `conflict`, и автосейв стоит ЦЕЛИКОМ, явные записи тоже (ревью M-01: ⌘S под
  *     модалкой отправил бы ту же протухшую версию). Выходов два, и оба в модалке: «reload theirs»
  *     уходит со страницы, «keep mine» читает текущую версию и снимает паузу `resolveConflict()`.
- *     Сам автосейв НИКОГДА не выбирает «keep mine» (B-02).
+ *     Сам автосейв НИКОГДА не выбирает «keep mine» (B-02);
+ *   · ЧТО ЗНАЧИТ УПАВШАЯ ЗАПИСЬ, решает ОДНО место — `failureClassOf` (D-66′, 27.09 · T61 r5): 401/403 —
+ *     `off` до конца жизни страницы; 409 — конфликт; сеть (статуса нет), 408, 429, 5xx — лестница
+ *     повторов; любой другой 4xx — удержанный отказ: «not saved» со словами сервера, снова — только
+ *     со следующей правкой.
  *
  * Машина ниже не импортирует React и не трогает window: таймеры, часы и все чтения приходят
  * зависимостями. Это не ради красоты — проба (`scripts/techcard-autosave-probe.mjs`) гоняет её в node
@@ -54,10 +61,16 @@ import { STYLE_FACT_KEYS } from './tech-card-options';
 export const AUTOSAVE_DEBOUNCE_MS = 2000;
 export const AUTOSAVE_RETRY_MS: readonly number[] = [5000, 15000, 45000];
 /**
- * Сколько циклов подряд может кончиться `restaged`, прежде чем автосейв перестанет повторять сам.
- * Панель, которую оператор правит прямо во время её коммита, даёт один-два таких цикла; панель,
- * которая перестейдживается САМА после каждого коммита, давала бы их бесконечно — и гоняла бы
- * одну и ту же запись на сервер каждые две секунды.
+ * Шаг повторов ПОСЛЕ лестницы `AUTOSAVE_RETRY_MS` (O-60, D-59). Двери «retry» больше нет, и запись,
+ * упавшая трижды, не ждёт человека: она повторяется сама, пока у карточки есть работа, — редко, чтобы
+ * лежащий сервер не получал запрос на каждую секунду открытой вкладки.
+ */
+export const AUTOSAVE_RETRY_INTERVAL_MS = 30000;
+/**
+ * Сколько циклов подряд может кончиться `restaged`, прежде чем автосейв перестанет повторять
+ * дебаунсом. Панель, которую оператор правит прямо во время её коммита, даёт один-два таких цикла;
+ * панель, которая перестейдживается САМА после каждого коммита, давала бы их бесконечно — и гоняла
+ * бы одну и ту же запись на сервер каждые две секунды. За потолком — шаг повторов (30 с).
  */
 const RESTAGED_CAP = 4;
 /**
@@ -96,6 +109,21 @@ export type SaveResult = {
   pendingConfirm?: boolean;
   /** `invalid`: сколько полей держат запись, когда конвейер сосчитал их сам (тихий разбор). */
   errorsCount?: number;
+  /**
+   * `error`/`partial`: чем была неудача, если она НЕ транзиентна (D-66′; класс даёт одно место —
+   * `failureClassOf`). `refused` — сервер отказал этому телу (4xx, который повтор того же тела не
+   * изменит): машина держит «not saved» со словами сервера и шлёт снова только со следующей правкой, не
+   * по таймеру (D-66). `auth` — 401/403: сессии или прав больше нет, карточка перестаёт сохраняться
+   * (`off` до конца жизни страницы). Поля нет — неудача транзиентна (сеть, 408, 429, 5xx): лестница.
+   */
+  failure?: 'refused' | 'auth';
+  /**
+   * Слова сервера об этой неудаче КАК ЕСТЬ (D-66′, P2). `message` страница вправе заменить своей
+   * фразой — отказ строгого маршалера она объясняет баннером («the backend did not recognise part of
+   * this card — see the banner»), — а чип, строка наверху формы и платные двери говорят то, что сказал
+   * сервер.
+   */
+  refusalMessage?: string;
 };
 
 export type MachineState = {
@@ -103,13 +131,23 @@ export type MachineState = {
   lastSavedAt?: number;
   errorsCount?: number;
   message?: string;
-  /** При `error`: идут ли ещё автоматические повторы (`false` — исчерпаны, нужен человек). */
-  retrying?: boolean;
+  /**
+   * При `error` — ПОЧЕМУ карточка не сохранена (O-60 r4): `failed` — запись упала; `restaged` — ни одна
+   * запись не падала, а панель менялась, пока писалась, и потолок `restaged` отдал её шагу повторов.
+   * Поповер чипа не говорит «the last save failed» над картой, чьи записи все легли. `refused` — сервер
+   * отказал самому телу (D-66): повторов по таймеру нет, следующая попытка — со следующей правкой.
+   * При `off` — `auth` (D-66′): 401/403, карточка больше не сохраняется, `message` — слова сервера.
+   */
+  cause?: 'failed' | 'restaged' | 'refused' | 'auth';
+  /** При `error`/`refused`: слова сервера как есть (`SaveResult.refusalMessage`), если страница их дала. */
+  refusal?: string;
 };
 
 export type MachineDeps = {
   debounceMs: number;
   retryDelaysMs: readonly number[];
+  /** Шаг повторов после лестницы `retryDelaysMs` (D-59); без ответа — `AUTOSAVE_RETRY_INTERVAL_MS`. */
+  retryIntervalMs?: number;
   setTimer: (fn: () => void, ms: number) => unknown;
   clearTimer: (handle: unknown) => void;
   now: () => number;
@@ -123,7 +161,7 @@ export type MachineDeps = {
   save: (mode: SaveMode, reason: string) => Promise<SaveResult>;
   countErrors: () => number;
   onState: (state: MachineState) => void;
-  /** Только на ТИХОМ `complete` (B-03): сюда вешаются запись истории и уборка черновика. */
+  /** Только на ТИХОМ `complete` (B-03): сюда вешается запись истории. */
   onComplete?: (reason: string) => void;
   /**
    * Счётчик жестов оператора на странице (ввод, клавиша, нажатие, вставка). Перестейдж панели без
@@ -149,9 +187,9 @@ export type AutosaveMachine = {
   state: () => MachineState;
   /** Что-то изменилось (правка формы, движение очереди, просьба органа): взвести дебаунс. */
   notifyChange: () => void;
-  /** Сохранить сейчас и сказать, вышло ли, — над тихой карточкой. `explicit` — ⌘S / «save now»:
-   *  первый проход валидирует сам конвейер (с прыжком к полю), и только там работает диалог перевода
-   *  purpose; добирающие проходы тихие. */
+  /** Сохранить сейчас и сказать, вышло ли, — над тихой карточкой. `explicit` — ⌘S, «keep mine», двери
+   *  релиза: первый проход валидирует сам конвейер (с прыжком к полю) и открывает диалог перевода,
+   *  если смена purpose так и не подтверждена; добирающие проходы тихие. */
   flush: (reason: string, mode?: SaveMode) => Promise<FlushResult>;
   /** «keep mine» модалки конфликта: снять паузу, чтобы следующая явная запись могла пойти. */
   resolveConflict: () => void;
@@ -182,11 +220,13 @@ function sameState(a: MachineState, b: MachineState) {
     a.lastSavedAt === b.lastSavedAt &&
     a.errorsCount === b.errorsCount &&
     a.message === b.message &&
-    a.retrying === b.retrying
+    a.cause === b.cause &&
+    a.refusal === b.refusal
   );
 }
 
 export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
+  const retryInterval = deps.retryIntervalMs ?? AUTOSAVE_RETRY_INTERVAL_MS;
   let state: MachineState = { status: deps.isEnabled() ? 'idle' : 'off' };
   let timer: unknown = null;
   let retryIndex = 0;
@@ -201,6 +241,11 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
   let heardOperatorGen = deps.operatorGen?.();
   // m9: a cycle came due while the convert dialog held the page — it wrote nothing and armed nothing.
   let skippedWhilePaused = false;
+  // D-66′ (T61 r5): a 401/403 stopped this page's saving for good. The session or the rights are gone,
+  // and whatever this page sends earns the same answer — no timer, no next change, and no
+  // setEnabled(true) lifts it. (Not a held refusal: that one goes out again with the next change.)
+  let authStopped = false;
+  const enabled = () => !authStopped && deps.isEnabled();
 
   const set = (patch: Partial<MachineState>) => {
     const next = { ...state, ...patch };
@@ -236,47 +281,83 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       status: restingStatus(),
       errorsCount: undefined,
       message: undefined,
-      retrying: undefined,
     });
   };
 
   async function runCycle(mode: SaveMode, reason: string): Promise<CycleResult> {
     if (disposed && reason !== 'unmount') return 'off';
-    if (!deps.isEnabled()) {
+    if (!enabled()) {
       set({ status: 'off' });
       return 'off';
     }
+    // M-01: 409 держит ВСЕ записи, явные тоже. Выходы — только двери модалки (см. шапку файла).
+    // РАНЬШЕ паузы (O-60 r4, P1-1): диалог перевода, который ждёт записи, ушедшей до него, обязан
+    // услышать её 409 как `conflict`, а не как «пауза» — иначе он пошёл бы архивировать колорвеи над
+    // карточкой, которую уже нельзя записать.
+    if (state.status === 'conflict') return 'conflict';
     // Диалог перевода в auxiliary открыт: запись, которую он перехватил, он же и повторит. Цикл,
     // пришедшийся на паузу, запоминается — его взведёт конец паузы (m9).
     if (deps.isPaused()) {
       skippedWhilePaused = true;
       return 'needs-confirm';
     }
-    // M-01: 409 держит ВСЕ записи, явные тоже. Выходы — только двери модалки (см. шапку файла).
-    if (state.status === 'conflict') return 'conflict';
     if (!deps.hasWork()) {
       restIfNoWork();
       return 'nothing';
     }
     if (mode === 'silent') {
       const v = await deps.validate();
+      // P2-1 (O-60 r4): switched off while the check ran — nothing is written.
+      if (stoppedMeanwhile()) return goneOff();
       // ревью mn-5: a read judged while the check ran may have opened the conflict decision — it
       // stands; neither «invalid» nor «saving» is painted over it, and nothing is written.
       // (read afresh: the check above narrowed `state` for TypeScript, not for the code that ran since)
       if ((state as MachineState).status === 'conflict') return 'conflict';
       if (!v.ok) {
-        set({ status: 'invalid', errorsCount: v.errors, message: undefined, retrying: undefined });
+        set({ status: 'invalid', errorsCount: v.errors, message: undefined });
         return 'invalid';
       }
     }
-    set({ status: 'saving', message: undefined, retrying: undefined });
+    set({ status: 'saving', message: undefined });
+    // P1-3 (O-60 r4): what the machine had heard when this write left, and the operator's gestures then.
+    // A change the operator makes while it is out keeps its own debounce if the write fails (see settle).
+    const genAtStart = changeGen;
+    const gesturesAtStart = deps.operatorGen?.();
     let r: SaveResult;
     try {
       r = await deps.save(mode, reason);
     } catch (e) {
-      r = { outcome: 'error', message: errorText(e) };
+      r = { outcome: 'error', message: errorText(e), ...failureFieldsOf(e) };
     }
-    return settle(r, reason);
+    // P2-1 (O-60 r4): `off` is terminal. The card stopped saving while this write was out — released by
+    // this very write (its halt rises the moment the PUT lands, B-08), frozen, the rights gone. The
+    // write's own bookkeeping still happens, explicitly: a complete write over a quiet card records its
+    // history (the release's own write is exactly this case). Nothing else — no «saved», no «not
+    // saved», no timer.
+    if (stoppedMeanwhile()) {
+      if (r.outcome === 'complete' && !r.pendingConfirm && !deps.hasWork()) {
+        deps.onComplete?.(reason);
+      }
+      return goneOff();
+    }
+    return settle(r, reason, genAtStart, gesturesAtStart);
+  }
+
+  /** Switched off (or unmounted) while a cycle awaited — `disposed` counts only outside the unmount flush. */
+  function stoppedMeanwhile() {
+    return !enabled() || state.status === 'off';
+  }
+  function goneOff(): CycleResult {
+    clearTimer();
+    retryIndex = 0;
+    restagedStreak = 0;
+    // An auth stop keeps its words: the line at the top of the form says why the card stopped saving.
+    set({
+      status: 'off',
+      errorsCount: undefined,
+      ...(authStopped ? {} : { message: undefined, cause: undefined, refusal: undefined }),
+    });
+    return 'off';
   }
 
   /** A pass that moved the card forward but left work behind: say so, and make sure a cycle follows. */
@@ -286,13 +367,22 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       ...(at !== undefined ? { lastSavedAt: at } : {}),
       errorsCount: undefined,
       message: undefined,
-      retrying: undefined,
     });
     if (timer == null) arm(deps.debounceMs, 'debounce');
     return 'progress';
   }
 
-  function settle(r: SaveResult, reason: string): CycleResult {
+  function settle(
+    r: SaveResult,
+    reason: string,
+    genAtStart?: number,
+    gesturesAtStart?: number,
+  ): CycleResult {
+    // P2-1 (O-60 r4): nothing settles once the card stopped saving (disabled, halted by a release). A
+    // write that was out when it stopped never gets here (runCycle's stoppedMeanwhile); the page's own
+    // report does, and in the render between the halt lifting and setEnabled(true) the status still
+    // reads `off` over a card that saves again — a conflict judged on that read is heard (M-2).
+    if (!enabled()) return 'off';
     switch (r.outcome) {
       case 'complete': {
         retryIndex = 0;
@@ -304,13 +394,12 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
             lastSavedAt: at,
             errorsCount: undefined,
             message: r.message,
-            retrying: undefined,
           });
           return 'needs-confirm';
         }
         // B-03: правка, набранная, пока запись летела, или панель, застейдженная за это время, — ещё
-        // только в браузере. «saved» над ней было бы ложью, история записала бы не то, что на
-        // сервере, а черновик — единственная копия этой правки — был бы стёрт.
+        // только в браузере. «saved» над ней было бы ложью, а история записала бы не то, что на
+        // сервере.
         if (deps.hasWork()) return progress(at);
         // Тихо: всё, что есть на экране, лежит на сервере. Эхо самой записи (её сброс базы будит
         // form.watch) успело взвести дебаунс — он пустой, и его снимаем.
@@ -321,7 +410,6 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
           lastSavedAt: at,
           errorsCount: undefined,
           message: undefined,
-          retrying: undefined,
         });
         return 'ok';
       }
@@ -337,11 +425,13 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       case 'restaged': {
         restagedStreak += 1;
         if (restagedStreak >= RESTAGED_CAP) {
-          clearTimer();
+          // D-59: the cap ends the two-second loop, not the saving — nobody is left to press a retry.
+          // The panel's values stay queued and go out at the retry step.
+          arm(retryInterval, 'retry');
           set({
             status: 'error',
             message: r.message ?? 'a panel kept changing while it was being saved',
-            retrying: false,
+            cause: 'restaged',
           });
           // No write failed here either: a flush that ends on the cap hears `busy`, and its door says
           // that the card kept changing — not «the last save failed» (R-10).
@@ -358,26 +448,69 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
           status: 'invalid',
           errorsCount: r.errorsCount || deps.countErrors() || undefined,
           message: r.message,
-          retrying: undefined,
         });
         return 'invalid';
       case 'conflict':
         restagedStreak = 0;
         clearTimer();
-        set({ status: 'conflict', message: r.message, retrying: undefined });
+        set({ status: 'conflict', message: r.message });
         return 'conflict';
       case 'partial':
       case 'error':
       default: {
         restagedStreak = 0;
-        if (retryIndex < deps.retryDelaysMs.length) {
+        // P1-3: a change heard while this write was out — by the OPERATOR (a gesture since the write
+        // left stands behind the last change heard). The page's own correction inside the write — the
+        // stage put back after a failed re-read (B-07) — is no new work: it takes the ladder with the
+        // failure it belongs to. Without a gesture source (the probe's bare machine) every change counts.
+        const changedMeanwhile =
+          genAtStart !== undefined &&
+          changeGen !== genAtStart &&
+          (gesturesAtStart === undefined || heardOperatorGen !== gesturesAtStart);
+        if (r.failure === 'auth') {
+          // D-66′ (T61 r5): 401/403 — the session or the rights are gone. Not a held refusal: nothing
+          // this page sends will pass, now or with the next change. The card stops saving for the rest
+          // of this page life — `off`, with the server's words (the line at the top of the form says it).
+          authStopped = true;
+          clearTimer();
+          retryIndex = 0;
+          set({
+            status: 'off',
+            errorsCount: undefined,
+            message: r.refusalMessage || r.message,
+            refusal: undefined,
+            cause: 'auth',
+          });
+          return 'off';
+        }
+        if (r.failure === 'refused') {
+          // D-66 (27.09): the server refused THIS body — a 4xx a resend cannot change (the assembly
+          // backstop's FailedPrecondition, a validation nobody pinned on a field). On the ladder the same
+          // body earned the same refusal every few seconds for minutes. The card holds instead: «not
+          // saved» with the server's own sentence, no timer. It goes out again with the next change —
+          // notifyChange arms its debounce, and a change heard while this write was out keeps the one it
+          // armed (P1-3) — or with an explicit flush.
+          retryIndex = 0;
+          if (!changedMeanwhile) clearTimer();
+          else if (timer == null && !queued) arm(deps.debounceMs, 'debounce');
+          set({ status: 'error', message: r.message, refusal: r.refusalMessage, cause: 'refused' });
+          return 'error';
+        }
+        if (changedMeanwhile) {
+          // P1-3 (O-60 r4): a change was heard while this write was out, and it armed its own debounce
+          // (notifyChange). The failure does not trade that for a retry rung: the debounce stays — or,
+          // when it already fired, the pass it queued runs next — and the ladder starts over.
+          retryIndex = 0;
+          if (timer == null && !queued) arm(deps.debounceMs, 'debounce');
+        } else if (retryIndex < deps.retryDelaysMs.length) {
+          // D-59: the ladder, then the step — for as long as the card has work (a cycle over a quiet
+          // card rests and clears the timer, see runCycle).
           arm(deps.retryDelaysMs[retryIndex], 'retry');
           retryIndex += 1;
-          set({ status: 'error', message: r.message, retrying: true });
         } else {
-          clearTimer();
-          set({ status: 'error', message: r.message, retrying: false });
+          arm(retryInterval, 'retry');
         }
+        set({ status: 'error', message: r.message, cause: 'failed' });
         return 'error';
       }
     }
@@ -424,7 +557,7 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
     state: () => state,
 
     notifyChange: () => {
-      if (disposed || !deps.isEnabled()) return;
+      if (disposed || !enabled()) return;
       changeGen += 1;
       // R-9: a change with an operator's gesture behind it ends a run of «restaged» cycles. The streak
       // is there to stop a panel that re-stages ITSELF after every commit; a person editing a panel
@@ -448,7 +581,7 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       }
       retryIndex = 0;
       if (state.status === 'saved' || state.status === 'idle' || state.status === 'error') {
-        set({ status: 'dirty', message: undefined, retrying: undefined });
+        set({ status: 'dirty', message: undefined });
       }
       arm(deps.debounceMs, 'debounce');
     },
@@ -476,20 +609,23 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
     },
 
     settleExternal: (r, reason) => {
-      if (disposed || !deps.isEnabled()) return;
+      if (disposed || !enabled()) return;
       settle(r, reason);
     },
 
     resume: () => {
       if (disposed || !skippedWhilePaused) return;
       skippedWhilePaused = false;
-      if (!deps.isEnabled() || state.status === 'conflict' || running) return;
+      if (!enabled() || state.status === 'conflict' || running) return;
+      // D-66: a refusal holds until the next change, and the end of a pause is not one — a change made
+      // under the dialog has already turned the status to `dirty`.
+      if (state.status === 'error' && state.cause === 'refused') return;
       if (!deps.hasWork()) {
         restIfNoWork();
         return;
       }
       if (state.status === 'saved' || state.status === 'idle' || state.status === 'error') {
-        set({ status: 'dirty', message: undefined, retrying: undefined });
+        set({ status: 'dirty', message: undefined });
       }
       arm(deps.debounceMs, 'resume');
     },
@@ -499,16 +635,24 @@ export function createAutosaveMachine(deps: MachineDeps): AutosaveMachine {
       set({
         status: deps.hasWork() ? 'dirty' : restingStatus(),
         message: undefined,
-        retrying: undefined,
       });
     },
 
-    setEnabled: (enabled) => {
-      if (!enabled) {
+    setEnabled: (on) => {
+      // D-66′: an auth stop is terminal for this page life — the page's own switch neither lifts it nor
+      // wipes the words that say why.
+      if (authStopped) return;
+      if (!on) {
         clearTimer();
         retryIndex = 0;
         restagedStreak = 0;
-        set({ status: 'off', errorsCount: undefined, message: undefined, retrying: undefined });
+        set({
+          status: 'off',
+          errorsCount: undefined,
+          message: undefined,
+          cause: undefined,
+          refusal: undefined,
+        });
         return;
       }
       if (state.status !== 'off') return;
@@ -657,14 +801,75 @@ export function anyDirty(node: unknown): boolean {
 const httpStatus = (x: unknown) => (x as { status?: number } | null | undefined)?.status;
 const causeOf = (e: unknown) => (e as { cause?: unknown } | null | undefined)?.cause;
 
-/** A 409 — on the error itself, or on the one a panel wrapped into its own sentence (`cause`). */
-export function isConflictError(e: unknown): boolean {
-  return httpStatus(e) === 409 || httpStatus(causeOf(e)) === 409;
+// ─── D-66′: WHAT A FAILED WRITE MEANS — ONE PLACE (27.09 · T61 r5, Codex r4) ─────────────────────
+
+/**
+ * The class of a failed write, from the HTTP status `api.ts` keeps on the error it throws (`status` is
+ * the response's; a request that never reached the server — the network — throws with none):
+ *   auth      — 401 / 403: the session or the rights are gone. The card stops saving (`off`, for the rest
+ *               of the page life): a resend earns the same answer, now or with the next change;
+ *   conflict  — 409: someone else moved what this write read — the conflict door;
+ *   transient — no status (the network), 408, 429 (the rate limit passes), 5xx: the ladder 5 / 15 / 45 s,
+ *               then every 30 s;
+ *   refused   — every other 4xx (400, 404, 412, 422 …): the server refused THIS body. Held: «not saved»
+ *               with its words, sent again with the next change, never on a timer (D-66).
+ * Every other reading of a failure on this page goes through here.
+ */
+export type FailureClass = 'auth' | 'conflict' | 'transient' | 'refused';
+export function failureClassOf(status: number | undefined): FailureClass {
+  if (status === 401 || status === 403) return 'auth';
+  if (status === 409) return 'conflict';
+  if (status === undefined || status === 408 || status === 429 || status < 400 || status >= 500)
+    return 'transient';
+  return 'refused';
 }
 
-/** Whether the error still says what the server answered (a panel's rewrap into a sentence drops it). */
-export function hasHttpStatus(e: unknown): boolean {
-  return typeof httpStatus(e) === 'number' || typeof httpStatus(causeOf(e)) === 'number';
+/**
+ * The status a failure carries: its own, or the one a panel's sentence wraps (`cause` — the recipe, lab
+ * dip and sample panels re-throw with their own words and keep the server's error there).
+ */
+export function failureStatus(e: unknown): number | undefined {
+  const own = httpStatus(e);
+  if (typeof own === 'number') return own;
+  const wrapped = httpStatus(causeOf(e));
+  return typeof wrapped === 'number' ? wrapped : undefined;
+}
+
+/** `failureClassOf` of a thrown error. */
+export function failureClassOfError(e: unknown): FailureClass {
+  return failureClassOf(failureStatus(e));
+}
+
+/** A 409 — on the error itself, or on the one a panel wrapped into its own sentence (`cause`). */
+export function isConflictError(e: unknown): boolean {
+  return failureClassOfError(e) === 'conflict';
+}
+
+/** The server's own sentence for a failure: the message of the error that carries the status. */
+export function serverSentenceOf(e: unknown): string | undefined {
+  if (typeof httpStatus(e) === 'number') return errorText(e);
+  const wrapped = causeOf(e);
+  return typeof httpStatus(wrapped) === 'number' ? errorText(wrapped) : undefined;
+}
+
+/** What a `SaveResult` says of a failure of this class — nothing for a transient one or a conflict. */
+export function failureFields(
+  cls: FailureClass,
+  sentence: string | undefined,
+): Pick<SaveResult, 'failure' | 'refusalMessage'> {
+  return cls === 'auth' || cls === 'refused' ? { failure: cls, refusalMessage: sentence } : {};
+}
+
+/** …of a thrown error. */
+export function failureFieldsOf(e: unknown): Pick<SaveResult, 'failure' | 'refusalMessage'> {
+  return failureFields(failureClassOfError(e), serverSentenceOf(e));
+}
+
+/** D-66: the server's sentence while the machine holds a refusal (`AutosaveApi.refusal`), else nothing. */
+export function refusalOf(s: MachineState): string | undefined {
+  return s.status === 'error' && s.cause === 'refused'
+    ? s.refusal || s.message || 'the server refused the last save'
+    : undefined;
 }
 
 /**
@@ -678,14 +883,26 @@ export function hasHttpStatus(e: unknown): boolean {
  * another mutation of the page failing a second earlier is not taken for it — the window the previous
  * rule used («any failure submitted since the commit began») did take it.
  */
+export type OwnFailure = {
+  conflict: boolean;
+  /** D-66′: the status the mutation failed with — the class a rewrap without `cause` would lose. */
+  status?: number;
+  /** …and the server's words with it. */
+  message?: string;
+};
 export function watchOwnFailure(cache: MutationCache): {
-  current: () => { conflict: boolean } | null;
+  current: () => OwnFailure | null;
   stop: () => void;
 } {
-  let last: { conflict: boolean } | null = null;
+  let last: OwnFailure | null = null;
   const stop = cache.subscribe((event) => {
     if (event.type !== 'updated' || event.action.type !== 'error') return;
-    const failure = { conflict: isConflictError(event.action.error) };
+    const error = event.action.error;
+    const failure: OwnFailure = {
+      conflict: isConflictError(error),
+      status: failureStatus(error),
+      message: serverSentenceOf(error),
+    };
     last = failure;
     setTimeout(() => {
       if (last === failure) last = null;
@@ -767,36 +984,6 @@ export function bodyOnTheWire(
   return formOnTheWire(mapTechCardToForm(pinRowKeys(card)), echo, canWriteCosting);
 }
 
-/** JSON with sorted keys and no null/undefined members — two equal bodies (deepEqual) print the same. */
-function stableJson(v: unknown): string {
-  if (v == null) return 'null';
-  if (Array.isArray(v)) return `[${v.map(stableJson).join(',')}]`;
-  if (v instanceof Date) return JSON.stringify(v.toISOString());
-  if (typeof v === 'object') {
-    const o = v as Record<string, unknown>;
-    const keys = Object.keys(o)
-      .filter((k) => o[k] != null)
-      .sort();
-    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableJson(o[k])}`).join(',')}}`;
-  }
-  return JSON.stringify(v);
-}
-
-/**
- * A FINGERPRINT OF THE CARD'S BODY (ревью MJ-3) — what a draft remembers of the card it was typed on, so a
- * restore over a card whose body moved since can ask first, and one whose version moved without the body
- * (a panel, a roll-up) does not. FNV-1a over the stable JSON of the wire body; not a secret, not a lock.
- */
-export function bodyFingerprint(card: common_TechCard, canWriteCosting: boolean): string {
-  const text = stableJson(bodyOnTheWire(card, card.techCard, canWriteCosting));
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return `${text.length.toString(36)}.${(h >>> 0).toString(36)}`;
-}
-
 /**
  * DID THE CARD'S BODY MOVE BETWEEN TWO READINGS — would a body write built on `from` put back something
  * `to` has? (ревью M-3.) Both readings go through the SAME write mapper, with the same echo (`to`'s
@@ -854,7 +1041,8 @@ type ServerLists = Pick<TechCardFormData, 'signoffs' | 'patterns' | 'bomItems'>;
  * БАЗА — ПО КЛЮЧУ (ревью R-1). Нетронутый ключ получает базой СОБСТВЕННОЕ значение формы после записи
  * выше, а не `settled.values`: они равны для нашего сравнения (`undefined` = нет ключа, null = undefined),
  * но не для RHF, который считает ключи строго. Маппер отдаёт `pressSteam: undefined` ПРИСУТСТВУЮЩИМ
- * ключом у каждого профиля без пара, а черновик — это JSON, и у восстановленной формы ключа нет вовсе;
+ * ключом у каждого профиля без пара, а у формы, собранной из JSON (так восстанавливался черновик до
+ * D-63), ключа нет вовсе;
  * база с сервера делала такую форму «грязной» после каждой записи — и автосейв переписывал карточку
  * каждые две секунды, навсегда. Тронутый ключ и отложенный purpose получают базой то, что легло, —
  * они и должны остаться грязными. `keepBaseline` сохраняет прежнюю базу полям, которые пишет панель
@@ -953,14 +1141,31 @@ export function isSaveShortcut(
 }
 
 export type AutosaveController = AutosaveApi & {
-  /** Явное сохранение: ⌘S, «save now», «retry», «keep mine». */
+  /**
+   * При `error`: упала запись (`failed`), панель менялась, пока писалась (`restaged`, O-60 r4), или
+   * сервер отказал самому телу (`refused`, D-66).
+   */
+  cause?: MachineState['cause'];
+  /**
+   * D-66: `refusal` СЕЙЧАС — из машины, а не из кадра. Дверь, дождавшаяся flush, читает его после
+   * `await`: кадр с отказом ещё не отрисован, а её замыкание — из кадра до нажатия.
+   */
+  refusalNow: () => string | undefined;
+  /**
+   * D-66′ (T61 r5): сохраняет ли карточка себя СЕЙЧАС — машина жива, включена, не остановлена
+   * отказом 401/403 и не `off`. Читается после `await`, прямо перед необратимым (архив колорвеев в
+   * диалоге перевода): кадр этого ещё не знает.
+   */
+  savesNow: () => boolean;
+  /**
+   * Явное сохранение: ⌘S, неявный submit формы, «keep mine», двери релиза. Органа на экране у него нет
+   * (O-60, D-59): чип сохранения никогда не пишет.
+   */
   saveNow: (reason: string) => Promise<FlushResult>;
   /** «keep mine» модалки конфликта — единственный, кроме ухода со страницы, выход из паузы (M-01). */
   resolveConflict: () => void;
   /** Исход записи, которую вела не машина (перевод в auxiliary, R-7). */
   settleExternal: (r: SaveResult, reason: string) => void;
-  /** При `error`: идут ли ещё автоматические повторы. */
-  retrying?: boolean;
   /**
    * Жесты оператора (R-9, ревью m5) — обработчики фазы захвата для КОРНЯ страницы. React ведёт их и
    * через порталы (диалог, открытый страницей, — тоже страница), глобальная шапка приложения сюда не
@@ -1010,8 +1215,6 @@ export function useTechCardAutosaveController(opts: {
   countErrors: () => number;
   /** Только на тихом `complete` (B-03). */
   onComplete?: (reason: string) => void;
-  /** Найденный на открытии черновик ждёт ответа оператора (R-11) — отдаётся органам как есть. */
-  draftPending?: boolean;
   /**
    * Работа тела формы, которую может унести запись (M2: без фактов стиля — их пишет панель стиля, и
    * работой они становятся через её очередь). Без ответа — «форма грязна».
@@ -1019,6 +1222,7 @@ export function useTechCardAutosaveController(opts: {
   bodyWork?: () => boolean;
   debounceMs?: number;
   retryDelaysMs?: readonly number[];
+  retryIntervalMs?: number;
 }): AutosaveController {
   const optsRef = useRef(opts);
   optsRef.current = opts;
@@ -1065,6 +1269,7 @@ export function useTechCardAutosaveController(opts: {
     const m = createAutosaveMachine({
       debounceMs: optsRef.current.debounceMs ?? AUTOSAVE_DEBOUNCE_MS,
       retryDelaysMs: optsRef.current.retryDelaysMs ?? AUTOSAVE_RETRY_MS,
+      retryIntervalMs: optsRef.current.retryIntervalMs ?? AUTOSAVE_RETRY_INTERVAL_MS,
       setTimer: (fn, ms) => window.setTimeout(fn, ms),
       clearTimer: (h) => window.clearTimeout(h as number),
       now: () => Date.now(),
@@ -1089,9 +1294,10 @@ export function useTechCardAutosaveController(opts: {
     // when a person is behind that work (m7).
     setState(m.state());
     return () => {
-      // Лучшее, что можно сделать при уходе со страницы: отправить то, что есть. Гарантия на выгрузку —
-      // черновик в localStorage (useTechCardDraft), а не этот вызов (Codex M-02). Только работу, за
-      // которой стоит человек (m7).
+      // Лучшее, что можно сделать при уходе со страницы: отправить то, что есть. Гарантии на выгрузку
+      // этот вызов не даёт (Codex M-02); черновиков нет (O-64, D-63) — перед закрытием вкладки с
+      // несохранённой работой переспрашивает браузер (index.tsx). Только работу, за которой стоит
+      // человек (m7).
       if (personBehind()) void m.flush('unmount');
       m.dispose();
       if (machineRef.current === m) machineRef.current = null;
@@ -1145,6 +1351,7 @@ export function useTechCardAutosaveController(opts: {
   }, [opts.stagingRevision]);
 
   // ⌘S / Ctrl+S — «сохранить сейчас», и браузерный диалог «сохранить страницу» при этом не нужен.
+  // Невидимый (O-60, D-59): кнопки и подсказки на экране у него нет, привычка остаётся привычкой.
   useEffect(() => {
     if (!opts.enabled) return;
     const onKey = (e: KeyboardEvent) => {
@@ -1174,15 +1381,23 @@ export function useTechCardAutosaveController(opts: {
     };
   }, [opts.enabled]);
 
-  const draftPending = !!opts.draftPending;
   return useMemo<AutosaveController>(
     () => ({
       status: state.status,
       lastSavedAt: state.lastSavedAt,
       errorsCount: state.errorsCount,
       message: state.message,
-      retrying: state.retrying,
-      draftPending,
+      cause: state.cause,
+      refusal: refusalOf(state),
+      refusalNow: () => {
+        const live = machineRef.current?.state();
+        return live ? refusalOf(live) : undefined;
+      },
+      savesNow: () => {
+        const m = machineRef.current;
+        const o = optsRef.current;
+        return !!m && o.enabled && !(o.halted?.() ?? false) && m.state().status !== 'off';
+      },
       request: () => {
         if (!machineRef.current) {
           requestedEarly.current = true;
@@ -1198,6 +1413,6 @@ export function useTechCardAutosaveController(opts: {
       settleExternal: (r, reason) => machineRef.current?.settleExternal(r, reason),
       gestureProps,
     }),
-    [state, draftPending, gestureProps],
+    [state, gestureProps],
   );
 }

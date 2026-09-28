@@ -602,19 +602,29 @@ export function StudioTab({
                              on-model. Второго состояния не заводится ни на одном экране. */
                           colorways={colorway.colorways}
                           onColorwayChange={colorway.setColorwayId}
+                          /* O-57 r4: СЫРОЙ список колорвеев карточки, архивные без плит тоже, —
+                             правило столбца `sample` (D-56″: семпл только у карточки без единого
+                             колорвея) и членство плит у дверей рендера (снесённый колорвей против
+                             архивного пустого, `render/render-tile.tsx`). Берётся у того же хука,
+                             то есть у ОДНОГО чтения карточки в студии, а не вторым наблюдателем в
+                             разделе. */
+                          cardColorways={colorway.cardColorways}
                           /* STEP 3: ТЕ ЖЕ слоты, что у шага PATTERN, — из ОДНОГО `useWatch`
                              выше. По ним подача засевает ткани колорвея из привязок, а сетка
                              CLOTHS ставит надетые плитки первыми. */
                           slots={cloth.slots}
-                        />
-                        {/* J-18: the history filters to fabric renders by default; E-22: closed. */}
-                        <GenerationHistory
-                          band={band}
-                          techCardId={techCardId}
-                          disabled={readOnly}
-                          defaultRep='render'
-                          defaultOpen={false}
-                        />
+                        >
+                          {/* J-18: the history filters to fabric renders by default; E-22: closed.
+                              O-63 (D-62): it stands INSIDE the studio — the studio's render scope
+                              reaches its rows, and a render run's tiles carry the render doors. */}
+                          <GenerationHistory
+                            band={band}
+                            techCardId={techCardId}
+                            disabled={readOnly}
+                            defaultRep='render'
+                            defaultOpen={false}
+                          />
+                        </RenderStudio>
                       </>
                     )}
                     {/* ═══ STEP 5 · 3D — ONLY WHERE THE RAIL STILL DRAWS IT (C-10). On a server that

@@ -103,6 +103,12 @@ export type MediaSlotProps = {
   onSelect: (media: common_MediaFull[]) => void;
   /** Есть — на заполненном кадре появляется «remove». */
   onClear?: () => void;
+  /**
+   * Библиотека, закрываясь, возвращает фокус пустому слоту БЕЗ прокрутки к нему
+   * (`MediaSelector.returnFocusWithoutScroll`): слот, стоящий первым в ленте, иначе уводил бы ленту
+   * от картинки, которую только что показали (мудборд, O-62). У остальных — как было.
+   */
+  returnFocusWithoutScroll?: boolean;
 };
 
 /** Глиф кадра. Полосатый прямоугольник без него читается как «тут что-то сломалось». */
@@ -144,6 +150,7 @@ export function MediaSlot({
   onOpenViewer,
   onSelect,
   onClear,
+  returnFocusWithoutScroll,
 }: MediaSlotProps) {
   const slot = readSlotAspect(aspectRatio);
   const frame =
@@ -209,6 +216,7 @@ export function MediaSlot({
         allowMultiple={allowMultiple}
         showVideos={showVideos}
         saveSelectedMedia={onSelect}
+        returnFocusWithoutScroll={returnFocusWithoutScroll}
         trigger={
             <button
               {...(doorStrip ? {} : intake.regionHandlers)}

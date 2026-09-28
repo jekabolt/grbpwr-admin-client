@@ -408,8 +408,11 @@ export type common_AnnounceTranslation = {
   text: string | undefined;
 };
 
-// Color is a controlled colour-dictionary entry. code is exactly 3 chars and unique; it feeds the
-// colour segment of the SKU and is referenced by product.color_code.
+// Color is a controlled colour-dictionary entry. code is exactly 3 chars and unique; it is the
+// FAMILY a colourway is filed under (product.color_code, catalogue filter, aux-output assembly).
+// Since T45 it no longer feeds the SKU: the SKU colour segment is the colourway's own
+// sku_color_token. A colourway created before T45 kept its dictionary code as that token, so its
+// SKU did not change.
 export type common_Color = {
   id: number | undefined;
   code: string | undefined;
@@ -679,7 +682,11 @@ export type MediaUsageRef = {
 // optimistic lock.
 export type CreateColorwayRequest = {
   styleId: number | undefined;
+  // merchandising.color_code is the dictionary FAMILY (may be "" — the server then proposes it from
+  // the main colour's hex); merchandising.sku_color_token must be empty — the server mints the token.
   merchandising: common_ColorwayMerchandisingInsert | undefined;
+  // dev/lab-dip block plus, since T45, the colourway's name (name), palette (colours) and name
+  // translations (name_i18n). usages are refused here — the recipe is UpdateColorwayRecipe's.
   development: common_ColorwayDevelopmentInsert | undefined;
   thumbnailMediaId: number | undefined;
   secondaryThumbnailMediaId: number | undefined;
@@ -703,12 +710,36 @@ export type common_ColorwayMerchandisingInsert = {
   salePercentage: googletype_Decimal | undefined;
   // min_tier is the minimum loyalty tier code required to buy (0/1/2/99).
   minTier: number | undefined;
-  // REQUIRED canonical FK to Dictionary.colors; the sole color/SKU identity on writes.
+  // The dictionary FAMILY tag (FK Dictionary.colors), MANDATORY on every colourway (T45, owner's
+  // decision 4): the filter and assembly key. It is no longer the SKU identity — see sku_color_token
+  // — so two colourways of one style may share a family.
+  // CreateColorway: a dictionary code, or "" to let the server propose the family — the
+  // non-archived dictionary colour nearest to the main colour's hex (development.colours[0].hex,
+  // else development.dev_hex), in OKLab: a grey-scale colour is compared with the grey-scale
+  // families by lightness, a chromatic one with the chromatic families by hue first, then lightness
+  // and chroma (so a fabric black such as 19-4005 TCX files under BLK, not NAV). With no hex to go
+  // by, "" is refused (InvalidArgument, merchandising.color_code, family_required).
+  // UpdateColorway: a dictionary code replaces the family; "" proposes it again from the request's
+  // development.colours[0].hex when the request carries a palette, and otherwise keeps the stored
+  // family. A code must be exactly three upper-case characters present in the dictionary.
   colorCode: string | undefined;
   // OUTPUT-ONLY resolved dictionary entry. Ignored on write.
   dictionaryColor: common_Color | undefined;
   // country_code is the ISO 3166-1 alpha-2 manufacture country (R9; FK Country dict). Colourway-owned.
   countryCode: string | undefined;
+  // The SKU colour token (T45) is minted by the SERVER and immutable. On CreateColorway it must be
+  // empty (a value is refused: InvalidArgument, field merchandising.sku_color_token). On
+  // UpdateColorway it is an echo guard only: empty or the stored token pass, any other value is
+  // refused (InvalidArgument, reason immutable). Read it from ColorwayMerchandising / Colorway /
+  // AdminColorwayRef.
+  // How the server mints it: a colourway created WITH a palette (development.colours) gets a token
+  // read from its name (dev name, else the main colour's label, else the family name) —
+  // «Black» → BLK, «black and white» → BKW — that is not already a token of the style and not a
+  // dictionary code other than its own family. A colourway created WITHOUT a palette (the
+  // pre-T45 shape: a dictionary code only) takes its dictionary code as the token when the style
+  // does not hold it yet, exactly as its SKU segment used to be, and a token read from its name
+  // otherwise.
+  skuColorToken: string | undefined;
 };
 
 // ColorwayDevelopmentInsert carries the PLM / lab-dip development fields that moved onto the colourway
@@ -732,6 +763,30 @@ export type common_ColorwayDevelopmentInsert = {
   labDipRejectReason: string | undefined;
   usages: common_TechCardColorwayUsage[] | undefined;
   displayOrder: number | undefined;
+  // The colourway's palette, the main colour first (T45; owner's decisions 5 and 6): 1 to 8
+  // colours, each a Pantone code or a free label, hex for preview (see ColorwayColour).
+  // WRITE SEMANTICS — replace-all by position, sparse like the rest of UpdateColorway:
+  // - empty (and not named by update_mask) = leave the stored palette as it is — an old client
+  // that never heard of colours cannot wipe it;
+  // - non-empty = the new palette, whole. Writing it mirrors colours[0] into pantone /
+  // pantone_system / dev_hex above (values sent for those three in the same request are
+  // overwritten by the mirror);
+  // - update_mask path `development.colours` naming an EMPTY list is refused: a palette holds at
+  // least one colour.
+  // On a colourway that HAS a palette, changing pantone / pantone_system / dev_hex without sending
+  // colours is refused (they are the palette's mirror): edit colours instead.
+  // A palette edit NEVER touches the per-slot recipe (owner's decision 7); colouring slots from
+  // the palette is the explicit ApplyColorwayPaletteToSlots call.
+  // A colourway with a palette also changes what product.color (the name orders, lays and the
+  // storefront cart print) holds: the colourway's name (`name` above) instead of the family's
+  // dictionary name.
+  colours: common_ColorwayColour[] | undefined;
+  // Translations of the colourway name (`name` above) per storefront language, keyed by Language.id
+  // (T45, owner's decision 3). An UPSERT, never a replace: a non-empty value writes that language, ""
+  // deletes it (the reader then falls back to `name`), a language absent from the map is left as it
+  // is. Empty map = no change. Mask path `development.name_i18n`. At most 128 characters per name;
+  // an unknown language id is refused.
+  nameI18n: { [key: string]: string } | undefined;
 };
 
 // TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
@@ -829,6 +884,25 @@ export type common_TechCardBomSizeConsumption = {
   consumption: googletype_Decimal | undefined;
 };
 
+// ColorwayColour is one colour of a colourway's palette (T45, table product_colour). A palette is
+// ordered: the first colour is the MAIN one — thumbnails and single-colour readers use it, and the
+// server mirrors it into the colourway's development pantone / pantone_system / dev_hex.
+// A colour is a Pantone code OR a free label (at least one of the two); hex is only a screen
+// preview. On writes values are trimmed, hex and pantone_system upper-cased; limits are those of
+// the columns (label 64, pantone 64, pantone_system 8 characters).
+export type common_ColorwayColour = {
+  // Free words for the colour («bone white»). Required when pantone is empty.
+  label: string | undefined;
+  // Screen preview "#RRGGBB", or "" when none is known. Never authoritative — the Pantone code is.
+  hex: string | undefined;
+  // The Pantone code as typed («19-4005 TCX», «Black 6 C»), free text: the Pantone catalogue is not
+  // a dictionary here. Required when label is empty.
+  pantone: string | undefined;
+  // The Pantone book the code is from (TCX, TPG, C, …). Only together with pantone — a system
+  // without a code is refused.
+  pantoneSystem: string | undefined;
+};
+
 export type common_ColorwayTagInsert = {
   tag: string | undefined;
 };
@@ -856,6 +930,12 @@ export type UpdateColorwayRequest = {
   mediaIds: number[] | undefined;
   tags: common_ColorwayTagInsert[] | undefined;
   prices: common_ColorwayPriceInsert[] | undefined;
+  // Paths under `development.` select development leaves (e.g. development.lab_dip_status,
+  // development.colours, development.name_i18n; snake_case or camelCase); no mask writes every
+  // development leaf the request carries. A mask whose EVERY path is under `development` writes
+  // the development block alone: merchandising, media, tags, prices, thumbnails, cost, country and
+  // translations are then not read (merchandising may be omitted). Any other mask, or none, keeps
+  // the merchandising row a full replace, as before.
   updateMask: wellKnownFieldMask | undefined;
   thumbnailMediaId: number | undefined;
   secondaryThumbnailMediaId: number | undefined;
@@ -905,6 +985,28 @@ export type UpdateColorwayRecipeRequest = {
 
 export type UpdateColorwayRecipeResponse = {
   lockVersion: number | undefined;
+};
+
+// ColorwayPaletteSlotAssignment names ONE material slot and the palette colour it takes (T45).
+export type ColorwayPaletteSlotAssignment = {
+  // The style's BOM line (the slot) by its stable line_key, as TechCardBomItem.line_key reads.
+  bomLineKey: string | undefined;
+  // 0-based position in the colourway's SAVED palette (AdminColorwayRef.colours; 0 = the main colour).
+  colourPosition: number | undefined;
+};
+
+export type ApplyColorwayPaletteToSlotsRequest = {
+  colorwayId: number | undefined;
+  // The shared tech_card.lock_version (R4) — AdminColorwayRef.lock_version; a mismatch -> ABORTED.
+  expectedColorwayVersion: number | undefined;
+  // 1 to 64 assignments, at most one per bom_line_key.
+  assignments: ColorwayPaletteSlotAssignment[] | undefined;
+};
+
+export type ApplyColorwayPaletteToSlotsResponse = {
+  lockVersion: number | undefined;
+  rowsUpdated: number | undefined;
+  rowsCreated: number | undefined;
 };
 
 // StylePatch is the narrow set of catalogue-style facts UpdateStyle owns (R4/§14.7-8). It deliberately
@@ -1035,8 +1137,13 @@ export type common_Colorway = {
   status: common_ColorwayLifecycleStatus | undefined;
   styleId: number | undefined;
   lockVersion: number | undefined;
+  // The dictionary FAMILY tag (FK Dictionary.colors), T45: what the catalogue filter and aux-output
+  // assembly match on. Several colourways of one style may share it. Not the SKU segment any more.
   colorCode: string | undefined;
   publishedAt: wellKnownTimestamp | undefined;
+  // OUTPUT-ONLY. The colour segment of the SKU (T45): three characters [A-Z0-9] the server minted
+  // when the colourway was created, unique within the style and never changed afterwards.
+  skuColorToken: string | undefined;
 };
 
 export type common_ColorwayDisplay = {
@@ -1076,9 +1183,23 @@ export type common_ColorwayMerchandising = {
   collection: string | undefined;
   fit: string | undefined;
   minTier: number | undefined;
+  // The dictionary FAMILY tag (T45) — see ColorwayMerchandisingInsert.color_code.
   colorCode: string | undefined;
   dictionaryColor: common_Color | undefined;
   countryCode: string | undefined;
+  // The SKU colour token (T45): minted on create, immutable, unique within the style.
+  skuColorToken: string | undefined;
+  // The colourway's palette in order, the main colour first (T45). EMPTY for a legacy
+  // single-colour colourway: its colour then reads as before — the development pantone / dev_hex,
+  // else dictionary_color. Returned by GetColorwayByID; paged lists leave it empty.
+  colours: common_ColorwayColour[] | undefined;
+  // The colourway name per storefront language, keyed by Language.id (T45). A language missing
+  // here reads colour_name. Returned by GetColorwayByID; paged lists leave it empty.
+  nameI18n: { [key: string]: string } | undefined;
+  // product.color — the name legacy readers print (orders, lays, run pack, the storefront cart):
+  // the colourway's own name (development.name) once it has a palette, the family's dictionary
+  // name otherwise.
+  colourName: string | undefined;
 };
 
 // CareEntry is one resolved care symbol — the TYPED projection of the stored care code string, and
@@ -10057,6 +10178,8 @@ export type common_TechCardMediaFull = {
 export type common_AdminColorwayRef = {
   colorwayId: number | undefined;
   baseSku: string | undefined;
+  // The dictionary FAMILY tag (T45): mandatory, the catalogue-filter and assembly key; several
+  // colourways of one style may share it. The SKU colour segment is sku_color_token.
   colorCode: string | undefined;
   status: common_ColorwayLifecycleStatus | undefined;
   // usages is this colourway's material recipe (H1 fix, WS3/S2-S3): the constructor view of a
@@ -10177,6 +10300,18 @@ export type common_AdminColorwayRef = {
   // ею не засевается, чек-лист релиза её не называет, план материалов её не видит. Публикация
   // ШИРЕ множества, которое СЧИТАЕТСЯ, — и это разделение намеренное.
   shadowAreaEstimates: common_TechCardSlotAreaEstimate[] | undefined;
+  // OUTPUT-ONLY. The SKU colour token (T45): three characters [A-Z0-9], minted by the server when
+  // the colourway was created, unique within the style, never changed afterwards. The colour
+  // segment of base_sku once the colourway is published. Pre-T45 colourways carry their old
+  // dictionary code here, so their SKUs did not move.
+  skuColorToken: string | undefined;
+  // OUTPUT-ONLY. The palette, main colour first (T45) — see ColorwayDevelopmentInsert.colours.
+  // EMPTY for a legacy single-colour colourway: read its colour from pantone / dev_hex above, then
+  // from the dictionary family (color_code), exactly as before T45.
+  colours: common_ColorwayColour[] | undefined;
+  // OUTPUT-ONLY. The colourway name (dev_name) per storefront language, keyed by Language.id (T45).
+  // A language missing here reads dev_name.
+  nameI18n: { [key: string]: string } | undefined;
 };
 
 // ColorwayLabDipRound is ONE round of the lab-dip approval loop, as it actually happens: a dyehouse
@@ -10582,23 +10717,6 @@ export type UpdateTechCardRequest = {
 };
 
 export type UpdateTechCardResponse = {
-};
-
-// GenerateTechCardOperationsRequest asks the AI to draft sewing operations for a tech card from a
-// free-text description. tech_card_id supplies grounding context (the card's pieces, BOM and type
-// are loaded server-side, read-only); description is the technologist's plain-language brief.
-export type GenerateTechCardOperationsRequest = {
-  techCardId: number | undefined;
-  description: string | undefined;
-};
-
-// GenerateTechCardOperationsResponse is a PROPOSED draft: operations in the exact shape the card
-// stores (common.TechCardOperation), for the technologist to review, edit and save via
-// UpdateTechCard. This call persists nothing itself.
-export type GenerateTechCardOperationsResponse = {
-  operations: common_TechCardOperation[] | undefined;
-  model: string | undefined;
-  notes: string | undefined;
 };
 
 // GetTechCardConstructionAuditRequest — which saved card to audit. Nothing else: the machine layer
@@ -17235,21 +17353,28 @@ export type common_DesignConstructionBomLine = {
   unit: string | undefined;
 };
 
-// DesignColourwayProposal is ONE proposed colourway: what to call it, which dictionary colour it
-// is, what the swatch looks like, and which Pantone goes on which cloth slot.
-// THE SHAPE IS EXACTLY WHAT THE COLORWAYS TAB ALREADY NEEDS AND NOTHING MORE. `color_code` is what
-// CreateColorway requires (a colourway is a product and a product needs a dictionary colour);
-// name / pantone / hex are the colourway's own development row; `slots` are the recipe rows keyed
-// by the BOM line the slot's NAME folds onto. Nothing is invented for the wire that the tab does
-// not already draw.
+// DesignColourwayProposal is ONE proposed colourway: what to call it, its palette, which
+// dictionary family it is filed under, and which Pantone goes on which material slot.
+// THE SHAPE IS WHAT CreateColorway + UpdateColorwayRecipe TAKE. name / colours become the
+// colourway's development name and palette (CreateColorway development.name / development.colours);
+// `color_code` is its family (merchandising.color_code); `slots` are the recipe rows keyed by the
+// BOM line the slot's NAME folds onto. pantone / hex are the main colour, kept for clients that
+// predate the palette (T45).
 export type common_DesignColourwayProposal = {
   name: string | undefined;
-  // A code the SERVER VERIFIED against the colour dictionary, or '' when none was close.
-  // ⚠ '' IS A LEGAL ANSWER AND THE CLIENT MUST ASK FOR A CODE. A model that names a colour we do
-  // not stock produces a proposal that cannot become a product; an unverified code would produce
-  // one that fails at CreateColorway with the server's own words instead of ours.
+  // The dictionary FAMILY of the main colour (T45). Either a code the SERVER VERIFIED against the
+  // colour dictionary, or — when the answer named none the dictionary knows — the nearest
+  // non-archived dictionary colour to the main colour's hex (colours[0].hex, else hex), by the same
+  // measure CreateColorway uses (see ColorwayMerchandisingInsert.color_code). Several proposals may
+  // share a family: a family is a filter tag, not the SKU, and confirming both creates two
+  // colourways with two different SKU tokens.
+  // '' only when there was neither a verified code nor a hex to go by — the client then asks for
+  // the family, or sends CreateColorway with an empty color_code and a palette hex.
   colorCode: string | undefined;
+  // The main colour's Pantone, e.g. «19-4005 TCX», kept as typed — colours[0].pantone (T45; mirrored
+  // from the palette for clients that predate it).
   pantone: string | undefined;
+  // #RRGGBB screen approximation of the main colour — colours[0].hex — or '' when the answer was not a hex.
   hex: string | undefined;
   // One entry per material slot the answer named. BOUND BY THE SLOT'S FOLDED NAME, never by index
   // or id: the same fold the BOM/slot table dedupes on, so a colourway proposed beside its slots
@@ -17257,6 +17382,12 @@ export type common_DesignColourwayProposal = {
   // for them in one order — the main cloths, the thread, then the rest — so that the cap falls on
   // the rest rather than on the thread.
   slots: common_DesignColourwaySlotColour[] | undefined;
+  // The proposed palette (T45): 1 to 4 colours, the main one first — the colour of the main cloth.
+  // Each is a Pantone code (TCX for cloth) or, when no Pantone fits, a short label, with a hex
+  // (ColorwayColour; label ≤ 40 characters, pantone ≤ 24). Confirming the proposal sends it as
+  // CreateColorway development.colours. A proposal read back from a run recorded before T45 carries
+  // no colours: use pantone / hex above.
+  colours: common_ColorwayColour[] | undefined;
 };
 
 // DesignColourwaySlotColour is one material slot of the card wearing one colour — cloth, lining,
@@ -17562,7 +17693,9 @@ export interface AdminService {
   CreateColorway(request: CreateColorwayRequest): Promise<CreateColorwayResponse>;
   // UpdateColorway patches a colourway's own merchandising fields under an optimistic lock
   // (expected_colorway_version = the shared tech_card.lock_version). It never touches style facts,
-  // variants, stock or the size chart (R2/R4).
+  // variants, stock or the size chart (R2/R4). An update_mask whose every path is under
+  // `development` (a lab-dip decision, a palette edit, a name translation) writes ONLY the
+  // development block: merchandising may then be omitted and is not read (T45).
   UpdateColorway(request: UpdateColorwayRequest): Promise<UpdateColorwayResponse>;
   // UpdateColorwayRecipe replaces a colourway's material recipe (usages) — the write-path cut in the
   // R1 merge (R2/R4: the recipe is a colourway-owned sub-aggregate with its own concurrency).
@@ -17570,6 +17703,26 @@ export interface AdminService {
   // line by its stable line_key (S2/S3), resolved to a real bom_item_id FK. Restores the previously
   // accepted-but-never-written ColorwayDevelopmentInsert.usages (the silent no-op, A3.4).
   UpdateColorwayRecipe(request: UpdateColorwayRecipeRequest): Promise<UpdateColorwayRecipeResponse>;
+  // ApplyColorwayPaletteToSlots is the explicit «apply to slots» door (T45, owner's decision 7):
+  // it colours the named material slots of a colourway from THAT colourway's saved palette.
+  // Editing the palette (UpdateColorway development.colours) never touches the per-slot recipe —
+  // this call is the only way a palette colour reaches it, and only for the slots it names.
+  // For each assignment, every GARMENT-LEVEL recipe row of that BOM line (tech_card_colorway_usage
+  // with no cut-piece, neither by id nor by the legacy piece position) takes color := the palette
+  // colour's label and pantone := its Pantone code, with the book appended when the code does not
+  // already end with it («19-4052» + TCX -> «19-4052 TCX»). Either may become empty: a label-only
+  // colour clears the Pantone and vice versa. A slot with no garment-level row gets one that holds
+  // only the colour (manual provenance, no consumption, no pin) — the row the COLORWAYS tab creates
+  // for a coloured slot. Nothing else of the recipe moves: consumption, quantity, pins, norm stamps
+  // and per-piece rows stay as they are, so this is safe where the full-replace
+  // UpdateColorwayRecipe would need the whole recipe echoed back. Rows are matched by their BOM
+  // line id; a legacy row that names its line only by position is not recoloured.
+  // Optimistically locked on the shared tech_card.lock_version (stale -> ABORTED), refused on a
+  // released card (FailedPrecondition). InvalidArgument with a field violation for an unknown
+  // bom_line_key (assignments[i].bom_line_key), a position the palette does not have
+  // (assignments[i].colour_position) or a slot named twice; FailedPrecondition when the colourway
+  // has no palette yet.
+  ApplyColorwayPaletteToSlots(request: ApplyColorwayPaletteToSlotsRequest): Promise<ApplyColorwayPaletteToSlotsResponse>;
   // Gets a colourway by its id.
   GetColorwayByID(request: GetColorwayByIDRequest): Promise<GetColorwayByIDResponse>;
   // Retrieves a paginated list of colourways. NOTE on ordering: grpc-gateway's mux prepends
@@ -18114,8 +18267,9 @@ export interface AdminService {
   // precisely why this RPC is legitimately absent from the list of points where
   // the predicate stands. Adding file_id «for the logs» would create an RPC that
   // takes a file id past the predicate.
-  // Classified as a WRITE (files:write) although it stores nothing — precedent
-  // GenerateTechCardOperations: AI-assisted authoring is authoring.
+  // Classified as a WRITE (files:write) although it stores nothing — the rule
+  // EnhanceText and AnalyzeTechCardConstruction follow too: AI-assisted
+  // authoring is authoring.
   FormatLibraryNoteMarkdown(request: FormatLibraryNoteMarkdownRequest): Promise<FormatLibraryNoteMarkdownResponse>;
   // EnhanceText rewrites ONE free-text field of a tech card — improve (fix errors,
   // clearer), expand (more detail), shorten, or prompt (the text as an
@@ -18130,9 +18284,9 @@ export interface AdminService {
   // completion ≤ 1200 tokens) and fenced (4 in flight, 30 calls per admin per
   // hour → ResourceExhausted).
   // Classified as a WRITE on tech_cards although it stores nothing — precedent
-  // GenerateTechCardOperations / AnalyzeTechCardConstruction: a press spends the
-  // AI key, and a grant to spend is an authoring grant. The route sits under
-  // /api/admin/ai/, not /tech-card/, so it cannot be shadowed by /tech-card/{id}.
+  // AnalyzeTechCardConstruction: a press spends the AI key, and a grant to spend
+  // is an authoring grant. The route sits under /api/admin/ai/, not /tech-card/,
+  // so it cannot be shadowed by /tech-card/{id}.
   EnhanceText(request: EnhanceTextRequest): Promise<EnhanceTextResponse>;
   // SuggestPrompts — the `Ideas ▾` door of a PLAYGROUND prompt field: 3–5 short starting phrases for one field of one
   // workflow, from the field's purpose, the card facts the client attaches, the text so far and at most two pictures
@@ -18224,11 +18378,6 @@ export interface AdminService {
   // first-match-wins mux reason as ListTechCards.
   GetTechCardReadiness(request: GetTechCardReadinessRequest): Promise<GetTechCardReadinessResponse>;
   GetStylePipeline(request: GetStylePipelineRequest): Promise<GetStylePipelineResponse>;
-  // GenerateTechCardOperations drafts structured sewing operations from a plain-language
-  // description via OpenRouter, grounded in the card's pieces + BOM + type. It only PROPOSES a
-  // draft for a technologist to review, edit and save through UpdateTechCard — it persists nothing.
-  // Requires OPENROUTER_API_KEY; unconfigured it returns FailedPrecondition (degrades gracefully).
-  GenerateTechCardOperations(request: GenerateTechCardOperationsRequest): Promise<GenerateTechCardOperationsResponse>;
   // GetTechCardConstructionAudit — THE MACHINE LAYER of the CONSTRUCTION review: a deterministic
   // audit of the SAVED card (route dictionaries, BOM chains, prices, release readiness) plus the
   // recomputed ground truth of its assembly graph. No AI, no key, no rate limit, no money — the
@@ -18250,10 +18399,10 @@ export interface AdminService {
   // are deliberately not repeated here.
   // AN AI FAILURE IS NOT AN RPC FAILURE. Every way this can go wrong — no key, a retired model
   // slug, a timeout, output that is not usable — arrives as `ai_status` with HTTP 200 and an empty
-  // findings list. That is the deliberate INVERSE of GenerateTechCardOperations, which answers
-  // FailedPrecondition without a key because without the model it has nothing at all to return.
-  // Here the deterministic half of the review is already rendered, so a status the panel can name
-  // beats an error that blanks the tab.
+  // findings list. That is the deliberate INVERSE of the AI RPCs that are nothing but the model
+  // (EnhanceText, FormatLibraryNoteMarkdown), which answer FailedPrecondition without a key because
+  // without the model they have nothing at all to return. Here the deterministic half of the review
+  // is already rendered, so a status the panel can name beats an error that blanks the tab.
   // IT SPENDS MONEY ON EVERY PRESS, which is why it is classified wr(tech_cards) while its machine
   // sibling is rd, and why three limits stand in front of the call: one run per admin per card at a
   // time, a minimum interval between runs of the same card, and a per-admin hourly ceiling.
@@ -18463,7 +18612,7 @@ export interface AdminService {
   // and its verdict is RE-COMPUTED SERVER-SIDE inside CreateProductionRun.
   // Read-only: writes nothing. POST rather than GET because the input carries a GRID
   // (colourway × size × quantity), a repeating structure a query string has no honest
-  // representation of. The read-only-POST precedent in this service is GenerateTechCardOperations.
+  // representation of. The other read-only POST of this kind is GetTechCardConstructionAudit.
   // THE RESPONSE ALWAYS LISTS EVERY CHECK, INCLUDING THE ONES THAT PASSED. A list of refusals alone
   // never tells the operator WHAT the gate checks — and without that, the day blocking mode is
   // switched on (Ф6.9) reads as a breakage rather than as a policy taking effect.
@@ -19428,6 +19577,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "UpdateColorwayRecipe",
       }) as Promise<UpdateColorwayRecipeResponse>;
+    },
+    ApplyColorwayPaletteToSlots(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}/palette/apply`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ApplyColorwayPaletteToSlots",
+      }) as Promise<ApplyColorwayPaletteToSlotsResponse>;
     },
     GetColorwayByID(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
@@ -23560,23 +23729,6 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetStylePipeline",
       }) as Promise<GetStylePipelineResponse>;
-    },
-    GenerateTechCardOperations(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
-      const path = `api/admin/tech-card/operations/generate`; // eslint-disable-line quotes
-      const body = JSON.stringify(request);
-      const queryParams: string[] = [];
-      let uri = path;
-      if (queryParams.length > 0) {
-        uri += `?${queryParams.join("&")}`
-      }
-      return handler({
-        path: uri,
-        method: "POST",
-        body,
-      }, {
-        service: "AdminService",
-        method: "GenerateTechCardOperations",
-      }) as Promise<GenerateTechCardOperationsResponse>;
     },
     GetTechCardConstructionAudit(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/construction/audit`; // eslint-disable-line quotes

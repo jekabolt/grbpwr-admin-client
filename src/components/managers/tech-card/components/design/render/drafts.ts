@@ -4,13 +4,21 @@ import type {
   common_DesignColourRecipe,
   common_DesignFabricUse,
 } from 'api/proto-http/admin';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, type UseFormReturn } from 'react-hook-form';
 
 import type { TechCardFormData } from '../../schema';
 import { assetById, fabricUseOf } from '../assets/model';
+import { useTechCardAutosave } from '../autosave-contract';
 import { COLORWAY_NONE } from '../bench-kinds';
 import { bindingsOf, type ClothSlot } from '../pattern/slot-fabrics';
+import {
+  dropScreenWords,
+  pickScreenWords,
+  settleScreenWords,
+  useCardWords,
+  useScreenWordsDropped,
+} from '../words-seed';
 import {
   EMPTY_CLOTH,
   EMPTY_RECIPE,
@@ -90,7 +98,8 @@ export function useCardFit(): string {
  *             ничто производное его не перебивает. Пишет ровно три скаляра и запоминает, что они
  *             отныне «свои».
  *   `echo`  — ПРОИЗВОДНОЕ: ассет, запись колорвея, прошлый рецепт. Ложится ТОЛЬКО в поля, которых
- *             человек не набирал, и получает не готовые скаляры, а ИСТОЧНИК.
+ *             человек не набирал, и получает не готовые скаляры, а ИСТОЧНИК. Слова — строже
+ *             (O-61 r3): только поверх пустого поля или заметки ткани (`WordsFrom`).
  *
  * ⚠ ПОЧЕМУ `echo` ПРИНИМАЕТ ИСТОЧНИК, А НЕ МЕШОК ЗНАЧЕНИЙ — В ЭТОМ ВСЯ ЗАЩИТА. Дверь, берущая
  * `{code, hex, words}`, отличается от старого `patch` только именем: следующий писатель передаст в
@@ -117,6 +126,27 @@ export type TypedColour = Partial<Record<ColourScalar, string>>;
 /** По одному флагу на скаляр: «это значение принадлежит человеку, эхо его не трогает». */
 export type OperatorOwned = Record<ColourScalar, boolean>;
 const NOTHING_OWNED: OperatorOwned = { code: false, hex: false, words: false };
+
+/**
+ * ОТКУДА СЛОВА В IN WORDS (O-61 r3). От этого зависит одно — заменит ли их заметка ткани:
+ *   · `person`  — набраны руками или приняты из `ai ✦`;
+ *   · `default` — слова карточки (WORDS флэта): показаны, пока свои пусты, или отданы подаче, когда
+ *                 GENERATE завёл прогон (r4: не раньше ответа сервера);
+ *   · `run`     — слова прошлого прогона, засеянные из его рецепта;
+ *   · `cloth`   — заметка первой ткани (CLOTH 1), положенная выбором ткани;
+ *   · `none`    — в поле ничего нет.
+ * Заметка ткани — не слова человека: её меняет каждая новая CLOTH 1, кто бы ни менял список, — выбор
+ * ткани или засев привязками (r4, `clothWords` в `useColourDraft`). Выбор ткани пишет слова поверх
+ * `none` и `cloth`, засев привязками — только поверх `cloth`.
+ */
+type WordsFrom = 'person' | 'default' | 'run' | 'cloth' | 'none';
+
+/**
+ * IN WORDS В МИГ НАЖАТИЯ GENERATE (O-61 r4) — засев карточки на экране и сессия карточки, при которой
+ * он показан. Квитанция для `materializeWords`: по ней черновик узнаёт, что после ответа сервера поле
+ * показывает всё тот же засев.
+ */
+export type WordsAtPress = { session: number; words: string };
 
 /**
  * ОТКУДА ПРИШЛО ЭХО. Ровно три источника, потому что их ровно три и есть; четвёртый обязан
@@ -349,6 +379,13 @@ function boundSeedOf(
 }
 
 export type ColourDraft = {
+  /**
+   * ЧТО УЕДЕТ — рецепт, который читают поле, ворота, опись «what the model gets» и тело прогона.
+   * ⚠ ЕГО `words` — СЛОВА НА ЭКРАНЕ (O-61, D-60): собственные слова черновика, а пока они пусты и
+   * засев рендера не снят — слова карточки на экране FLAT. В собственное состояние засев не пишется,
+   * пока человек не подействовал (`typed`, `materializeWords`), но читатель рецепта получает ровно
+   * то, что показано в поле: поле и провод не могут разойтись. Разбор — у засева в `useColourDraft`.
+   */
   recipe: common_DesignColourRecipe;
   /**
    * ЧТО СКАЗАНО ПРО САМУ ТКАНЬ ЭТОГО ПРОГОНА (H-13) — прозрачность и граммаж.
@@ -411,6 +448,26 @@ export type ColourDraft = {
    * значило бы допустить состояние «ссылка от одного цвета, hex от другого».
    */
   setColour: (pantone: string, hex: string) => void;
+  /**
+   * GENERATE (O-61 r4): что показывает IN WORDS в миг нажатия — квитанция для `materializeWords`,
+   * или `null`, когда в поле собственные слова черновика и отдавать нечего.
+   */
+  wordsAtPress: () => WordsAtPress | null;
+  /**
+   * GENERATE (O-61, D-60): слова карточки, показанные в пустом IN WORDS, отдаются в рецепт — как
+   * флэт отдаёт свой засев в форму перед `flush` (`materializeWords`, `words-seed.ts`). Тело
+   * прогона несёт их и без этого (`recipe` отдаёт показанное, провод — `wire`); вызов делает их
+   * СВОИМИ черновику: дальше они правятся независимо, и слова флэта, изменившись, их не заменят.
+   *
+   * ⚠ ТОЛЬКО КОГДА ПРОГОН ЗАВЕДЁН (r4, D-71; ревью Codex FIX FIRST, Major 2). Вызов стоял перед
+   * `run.start`, а старт — пустой вызов с ответом позже: отказ, 409 или обрыв оставляли засев
+   * приколотым и черновик тронутым, и новые слова флэта до поля уже не доходили, хотя прогона не
+   * было. Теперь его зовёт ответ «прогон есть» (`useStartDesignRun`, `onStarted`), и то лишь пока поле
+   * показывает ТОТ ЖЕ засев той же сессии карточки (`at`): правка, CLEAR, стёртое, смена карточки и
+   * новые слова флэта случились позже нажатия и стоят — откатывать их не за что. Провал старта не
+   * трогает ничего: слова остаются живым засевом.
+   */
+  materializeWords: (at: WordsAtPress) => void;
 };
 
 /**
@@ -507,7 +564,104 @@ export function useColourDraft(
    * ЛИШНЯЯ. Читается и пишется она только в обработчиках, где рефы точны.
    */
   const owned = useRef<OperatorOwned>({ ...NOTHING_OWNED });
+  /**
+   * ОТКУДА СОБСТВЕННЫЕ СЛОВА ЧЕРНОВИКА (`recipe.words`) — разбор у `WordsFrom`. Реф по доводу `owned`:
+   * ничего не рисует. Пишут его все, кто пишет слова: `typed`, `clear`, засев прошлым рецептом, смена
+   * карточки, `materializeWords` и все писатели списка тканей — `echo`, смена цели и пересев
+   * привязками (через `clothWords`, r4); читает — тот же `clothWords`.
+   */
+  const wordsFrom = useRef<WordsFrom>('none');
+  /**
+   * СЕССИЯ КАРТОЧКИ (O-61 r4): растёт при каждой смене карточки — черновик опустошается, и квитанция
+   * нажатия (`WordsAtPress`), выписанная прежней сессии, ничего больше не решает, даже если человек
+   * вернулся на ту же карточку раньше, чем пришёл ответ. Реф: ничего не рисует.
+   */
+  const wordsSession = useRef(0);
   const { cloth, patchCloth, seedCloth } = useClothStatement(touched);
+
+  /**
+   * ═══ СЛОВА ПО УМОЛЧАНИЮ — СЛОВА КАРТОЧКИ НА ЭКРАНЕ FLAT (27.09, O-61, D-60) ═══════════════════
+   *
+   * Владелец: «в FABRIC RENDER в IN WORDS по дефолту должно быть то же самое, что и в WORDS во флете
+   * … с возможностью редактирования». Пока `recipe.words` пуст и засев рендера не снят, черновик
+   * отдаёт наружу ТЕ слова, что показывает WORDS флэта (`useCardWords` — тот же `pickShownWords`:
+   * значение формы, а при пустом — засев фактами). В собственное состояние они не пишутся: первое
+   * действие человека (правка, ответ `ai ✦`, прогон, заведённый GENERATE, — `materializeWords`)
+   * отдаёт показанное в `recipe.words` через `typed`, и дальше слова правятся независимо от флэта.
+   * CLEAR и стёртое руками снимают засев РЕНДЕРА (`words-seed.ts`, замок «карточка + экран»); флэт
+   * при этом не тронут.
+   *
+   * ⚠ ПОЧЕМУ ЗДЕСЬ, А НЕ В ПОЛЕ. Рецепт черновика читают четверо — поле, ворота, опись и тело прогона
+   * (`render-studio.tsx`, одна точка композиции `sent`). Засев, живущий только в поле, показывал бы
+   * одно, а покупал другое: ворота запирали бы прогон при полном поле, опись говорила бы «none», а
+   * провод уносил бы пустые слова.
+   *
+   * ⚠ ЭХО ТКАНИ УМОЛЧАНИЯ НЕ ПЕРЕБИВАЕТ (O-61 r2, r3, r4). Заметка первой ткани (`echoOf`, ветка
+   * `cloths`) ложится в слова, только когда в поле нет ничего или там заметка ткани (`WordsFrom`);
+   * слова карточки, набранные и прошлого прогона стоят, а заметка едет на своём месте, в
+   * `fabrics[].words` (разбор — у `clothWords` ниже).
+   *
+   * `live` — ТО ЖЕ, ЧТО У ФЛЭТА: там это «карточку можно писать, и она сохраняется» (`!readOnly &&
+   * autosave !== 'off'`). Проп `disabled` сюда не доходит и не нужен: автосейв страницы включён ТОЛЬКО
+   * на карточке, которую можно писать и которая не заморожена (`autosaveEnabled`, `index.tsx`), то есть
+   * `autosave !== 'off'` уже несёт обе половины. Без провайдера (стенд, печать) — `off`, и рендер, как
+   * и флэт, засева не показывает.
+   */
+  const wordsCard = techCardId ?? 0;
+  const wordsLive = useTechCardAutosave().status !== 'off';
+  const cardWords = useCardWords(wordsCard, wordsLive);
+  const wordsDropped = useScreenWordsDropped(wordsCard, 'render');
+  const shownWords = pickScreenWords(recipe.words, wordsDropped, cardWords);
+  /** На экране слова карточки, а не собственные: их и отдаёт в рецепт первое действие. */
+  const wordsSeeded = shownWords !== (recipe.words ?? '');
+  const shown = useMemo(
+    () => (wordsSeeded ? { ...recipe, words: shownWords } : recipe),
+    [recipe, wordsSeeded, shownWords],
+  );
+  /**
+   * ЧТО ПОЛЕ ПОКАЗЫВАЕТ СЕЙЧАС — для ответа GENERATE (O-61 r4). Ответ приходит позже нажатия, и
+   * сверять ему надо последний КОММИТ, а не рендер, в котором нажали: по нему `materializeWords`
+   * проверяет квитанцию нажатия. Пишется после коммита; рисовать ему нечего — реф.
+   */
+  const liveWords = useRef({ session: 0, seeded: false, shown: '' });
+  useLayoutEffect(() => {
+    liveWords.current = { session: wordsSession.current, seeded: wordsSeeded, shown: shownWords };
+  });
+
+  /**
+   * ═══ O-61 r4 · ОДИН ШАГ ПРОИСХОЖДЕНИЯ НА ВСЕХ ПИСАТЕЛЕЙ СПИСКА ТКАНЕЙ (ревью Codex, Major 1) ═══
+   *
+   * Заметка первой ткани — не слова человека (r3), и это правило СПИСКА, а не жеста. Список меняет не
+   * только рука (`echo`, тычок в плитку CLOTHS), но и засев привязками — на смене цели и под открытым
+   * черновиком (правила 2, 2а, 2б и 3 шапки ниже). r3 провёл через происхождение одну руку: смена цели
+   * заменяла `fabrics` и не трогала ни слов, ни `wordsFrom`, — заметка снятой ткани оставалась
+   * словами новой CLOTH 1 и уезжала в платный прогон. Теперь решение одно, и зовут его все трое:
+   *   · в поле заметка ткани (`cloth`) — её заменяет заметка новой CLOTH 1; у той заметки нет или
+   *     список опустел — слова пустеют, и поле возвращается к словам карточки, а без них пустеет;
+   *   · поле пусто (`none`) — заметку кладёт только рука (`byHand`): засев привязками берёт у эха
+   *     структурную половину и слов не пишет (правило 1 шапки);
+   *   · набранное, слова карточки и слова прошлого прогона стоят.
+   * `note` — заметка CLOTH 1 нового списка (`echoOf`, ветка `cloths`; `undefined` — список пуст).
+   * Возвращает слова, которые пишущий кладёт в рецепт ОДНОЙ записью со своим списком, или `undefined`
+   * — «слова не трогать»; происхождение переводит сам. Показанное читается ЭТОГО рендера. Засев
+   * прошлым рецептом сюда не ходит: он пишет слова целиком сам (`run`), и заметке ткани после него
+   * держаться не на чем.
+   */
+  const clothWords = (note: string | undefined, byHand: boolean): string | undefined => {
+    const from: WordsFrom = wordsSeeded
+      ? 'default'
+      : (recipe.words ?? '').trim() === ''
+        ? 'none'
+        : wordsFrom.current;
+    let words: string | undefined;
+    if (note !== undefined) {
+      if (from === 'cloth' || (from === 'none' && byHand)) words = note;
+    } else if (from === 'cloth') {
+      words = '';
+    }
+    if (words !== undefined) wordsFrom.current = words.trim() !== '' ? 'cloth' : 'none';
+    return words;
+  };
 
   /**
    * ═══ ВЫБОР КОЛОРВЕЯ ЗАСЕВАЕТ ПОДАЧУ — ЭТО И ЕСТЬ ПРОБРОС ПАТТЕРНА В РЕНДЕР (G-15) ═══════════
@@ -782,6 +936,8 @@ export function useColourDraft(
     seeded.current = false;
     touched.current = false;
     owned.current = { ...NOTHING_OWNED };
+    wordsFrom.current = 'none';
+    wordsSession.current += 1;
     setRecipe(EMPTY_RECIPE);
     seedCloth(EMPTY_CLOTH);
     setPantone('');
@@ -839,11 +995,19 @@ export function useColourDraft(
         };
       }
     }
+    /* O-61 r4: слова едут ОДНОЙ записью со списком и тем же шагом происхождения, что у руки
+       (`clothWords`): CLOTH 1, которую сменили привязки или снятие их свотчей, уносит свою заметку, а
+       новая кладёт свою. Список не менялся — слова не трогаются. */
+    const words =
+      fabricHalf.fabrics === undefined
+        ? undefined
+        : clothWords(echoOf({ from: 'cloths', fabrics: fabricHalf.fabrics }).words, false);
     setRecipe((prev) => ({
       ...prev,
       code: next ? next.code : '',
       hex: next ? next.hex : prev.hex ?? '',
       ...fabricHalf,
+      ...(words === undefined ? {} : { words }),
     }));
     /* ССЫЛКА ЕДЕТ ВМЕСТЕ СО СВОИМ ЦВЕТОМ, А НЕ ОТДЕЛЬНО. У цели N ссылка — та, что записана у
        колорвея; у прогона своей ссылки нет (поля в рецепте нет — B8), поэтому ставится пусто, и
@@ -860,7 +1024,18 @@ export function useColourDraft(
     if (cloths && !touched.current) {
       seededBound.current = assetIdsOf(cloths.values.fabrics);
       listTouched.current = false;
-      setRecipe((prev) => ({ ...prev, ...cloths.values }));
+      /* O-61 r4: тот же шаг происхождения, что у смены цели. Нетронутый черновик заметки ткани не
+         держит (её кладёт только рука, а рука поднимает `touched`), так что сегодня слова здесь не
+         меняются, — но и список не уйдёт мимо слов, если это когда-нибудь перестанет быть правдой. */
+      const words = clothWords(
+        echoOf({ from: 'cloths', fabrics: cloths.values.fabrics ?? [] }).words,
+        false,
+      );
+      setRecipe((prev) => ({
+        ...prev,
+        ...cloths.values,
+        ...(words === undefined ? {} : { words }),
+      }));
     }
   }
 
@@ -901,6 +1076,8 @@ export function useColourDraft(
       ...(bound?.values ?? {}),
       words: restored.words,
     });
+    /* O-61 r3: слова прошлого прогона — не заметка ткани; выбор ткани их не заменит. */
+    wordsFrom.current = restored.words.trim() !== '' ? 'run' : 'none';
     seedCloth(restored.cloth);
     /* Ссылка засевается ровно там, где она есть на самом деле: у КОЛОРВЕЯ. Рецепт прогона её не
        несёт (B8), и выдумывать её из hex здесь нельзя — это делает экран и говорит об этом сам.
@@ -908,8 +1085,8 @@ export function useColourDraft(
     if (seed && colorwayId > 0 && !ofColorway) setPantone((colorway?.pantone ?? '').trim());
   }, [seed, bound, seedCloth, colorwayId, colorway, ofColorway]);
 
-  return {
-    recipe,
+  const draft: ColourDraft = {
+    recipe: shown,
     cloth,
     pantone,
     setColour: (nextPantone, hex) => {
@@ -944,6 +1121,12 @@ export function useColourDraft(
         owned.current[key] = value.trim() !== '';
       }
       setRecipe((prev) => ({ ...prev, ...clean }));
+      if (clean.words !== undefined) {
+        // O-61: слова, стёртые руками, остаются пустыми — засев рендера снят и под пальцами не вернётся.
+        settleScreenWords(wordsCard, 'render', clean.words);
+        // O-61 r3: набранное — слова человека, заметка ткани их не заменит; стёртое — «ничего».
+        wordsFrom.current = clean.words.trim() !== '' ? 'person' : 'none';
+      }
     },
     echo: (source) => {
       touched.current = true;
@@ -958,7 +1141,19 @@ export function useColourDraft(
         }
         listTouched.current = true;
       }
-      setRecipe((prev) => mergeEcho(prev, values, owned.current));
+      /* ═══ O-61 r3 · ЗАМЕТКА ТКАНИ И СЛОВА НА ЭКРАНЕ ═══════════════════════════════════════════
+         Выбор ткани — рука: заметка новой CLOTH 1 заполняет пустое поле и заменяет заметку ткани, а
+         снятая последней ткань уносит свою (без заметки — поле возвращается к словам карточки, а без
+         них пустеет). Набранное, слова карточки и слова прошлого прогона стоят; заметка при этом едет
+         на своём месте — `fabrics[].words` этой ткани. Добавленная вторая ткань слов не меняет:
+         первой осталась прежняя, а скаляры промпта говорят о CLOTH 1. Решает `clothWords` — один шаг
+         с засевом привязками (r4). */
+      const words = clothWords(values.words, true);
+      /* Ранг слов решён выше, по происхождению, а не флагом `owned.words`: слова прошлого прогона и
+         слова карточки не набраны, но стоят так же, как набранные. */
+      setRecipe((prev) =>
+        mergeEcho(prev, { ...values, words }, { ...owned.current, words: false }),
+      );
     },
     patchCloth,
     /**
@@ -980,9 +1175,24 @@ export function useColourDraft(
         return;
       }
       owned.current.words = false;
+      wordsFrom.current = 'none';
       setRecipe((prev) => ({ ...prev, words: '' }));
+      // O-61: CLEAR снимает засев РЕНДЕРА до перезагрузки страницы — WORDS флэта свои и остаются.
+      dropScreenWords(wordsCard, 'render');
+    },
+    wordsAtPress: () => (wordsSeeded ? { session: wordsSession.current, words: shownWords } : null),
+    materializeWords: (at) => {
+      /* O-61 r4: ответ «прогон есть» пришёл позже нажатия — сверяется последний коммит, а не рендер
+         нажатия. Другая сессия карточки, собственные слова в поле или другой засев — отдавать
+         нечего: всё это случилось после нажатия и стоит. */
+      const now = liveWords.current;
+      if (now.session !== at.session || !now.seeded || now.shown !== at.words) return;
+      draft.typed({ words: at.words });
+      // Отданы подаче, но по происхождению это слова карточки, а не набранные (O-61 r3).
+      wordsFrom.current = 'default';
     },
   };
+  return draft;
 }
 
 /* ─────────────────────────── the 3D draft ─────────────────────────── */

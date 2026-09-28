@@ -103,9 +103,9 @@ export type BomItemIdOption = { value: string | number; label: string; disabled?
 // never been saved has no identity this reference can address yet.
 //
 // Such rows are listed DISABLED rather than hidden: «the line is right there and I still cannot
-// pick it» is the question hiding them would leave unanswered. The hint is one click from being
-// resolved — a body save re-seeds BOM ids from the server by line_key (withServerAssignedValues),
-// so the row becomes pickable without a reload.
+// pick it» is the question hiding them would leave unanswered. The hint resolves itself: the card
+// saves itself (O-60), and a body save re-seeds BOM ids from the server by line_key
+// (withServerAssignedValues), so the row becomes pickable without a reload.
 //
 // `currentId` is the value the field holds now: an id matching no current line (deleted by another
 // editor, or written against another card) is kept as its own visible option and reported back as
@@ -127,7 +127,7 @@ export function useBomItemIdOptions(currentId: number): {
         : {
             // Never selectable, so the value only has to be unique among the options.
             value: `unsaved-${b.lineKey || i}`,
-            label: `${bomLineLabel(b, i)} · save the card first`,
+            label: `${bomLineLabel(b, i)} · not saved yet`,
             disabled: true,
           },
     );

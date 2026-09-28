@@ -1,10 +1,12 @@
-              {/* «concept & construction description» ПЕРЕЕХАЛ В STUDIO ЦЕЛИКОМ.
+{
+  /* «concept & construction description» ПЕРЕЕХАЛ В STUDIO ЦЕЛИКОМ.
                   Он ушёл туда не ради симметрии с прототипом, а потому что там из выносок карточки
                   выводятся строки описания — то есть там единственное место, где пометка на эскизе
                   превращается в текст для фабрики. Держать здесь второй набор тех же полей значило
                   бы два `register` на одно имя формы: значение одно, а на экране два поля, из
                   которых одно молча отстаёт. Редактор аспектов уехал вместе с ними и передаётся
-                  в студию узлом — печатный порядок concept → aspects → notes сохранён. */}
+                  в студию узлом — печатный порядок concept → aspects → notes сохранён. */
+}
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
@@ -103,18 +105,13 @@ import { SizeChartField } from './size-chart-field';
 import { StyleFactsField } from './style-facts-field';
 import { STYLE_FACT_KEYS } from './tech-card-options';
 import { TechCardFittings } from './tech-card-fittings';
-import { fingerprintOf, useTechCardDraft, type DraftStamp } from './useTechCardDraft';
 import {
   auditOperationPresence,
   contradictsScreen,
   hasPresenceLoss,
   type PresenceAudit,
 } from './operations-presence';
-import {
-  PresenceLossBanner,
-  VersionSkewBanner,
-  type VersionSkew,
-} from './save-audit-banners';
+import { PresenceLossBanner, VersionSkewBanner, type VersionSkew } from './save-audit-banners';
 import { useTechCardStagingRequired, type CommitOutcome } from './useTechCardStaging';
 import {
   AutosaveContext,
@@ -122,22 +119,26 @@ import {
   type AutosaveApi,
 } from './design/autosave-contract';
 import {
-  bodyFingerprint,
   bodyMoved,
   bodyOnTheWire,
   bodyWorkOf,
   deepEqual,
+  failureClassOf,
+  failureFields,
+  failureFieldsOf,
+  failureStatus,
   formOnTheWire,
-  hasHttpStatus,
-  isConflictError,
+  serverSentenceOf,
   settleFormAfterSave,
   useTechCardAutosaveController,
   watchOwnFailure,
   type GestureProps,
+  type OwnFailure,
   type SaveMode,
   type SaveOutcome,
   type SaveResult,
 } from './useTechCardAutosave';
+import { CONVERT_WAIT_MS, convertVerdict, waitForTheWrite, type ConvertWait } from './convert-wait';
 import {
   restoreTextSections,
   textSnapshotOf,
@@ -145,6 +146,7 @@ import {
   useSaveHistory,
   type HistoryEntry,
 } from './save-history';
+import { SaveFailureLine } from './save-failure-line';
 import { formatSavedAt, SaveStatusChip } from './save-status-chip';
 import { decideAutoStage, StageProgress, stageLabel, type FormErrorRow } from './stage-progress';
 
@@ -346,7 +348,12 @@ const AUTO_STAGE = true;
 const AUTO_STAGE_MAX_STEPS = 5;
 
 /** What one write of the card did (see writeTechCard). */
-type WriteResult = { bodySaved: boolean; ok: boolean; outcome: SaveOutcome; message?: string };
+type WriteResult = {
+  bodySaved: boolean;
+  ok: boolean;
+  outcome: SaveOutcome;
+  message?: string;
+} & Pick<SaveResult, 'failure' | 'refusalMessage'>; // D-66′: what a failure was, and the server's words
 
 /**
  * What a read of the card means for this page (M-3): `same` — nothing newer than the card it stands on;
@@ -366,6 +373,29 @@ function cloneFormValues(v: TechCardFormData): TechCardFormData | null {
     return structuredClone(v);
   } catch {
     return null;
+  }
+}
+
+/**
+ * D-63 (27.09, O-64): the card keeps no local drafts. What the draft journal of earlier builds left in
+ * this browser — every key under its prefix: the v2 slots with their «beside», «session» and «earlier»
+ * slots, and the pre-v2 ones — goes on the first open of a card, without a word. (The CONSTRUCTION
+ * DRAFT's own keys, `plm.techcard.drafted.*` / `…dismissed.*`, are another thing and stay.)
+ */
+const LOCAL_DRAFT_PREFIX = 'plm.techcard.draft.';
+let localDraftsForgotten = false;
+function forgetLocalDrafts() {
+  if (localDraftsForgotten) return;
+  localDraftsForgotten = true;
+  try {
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(LOCAL_DRAFT_PREFIX)) stale.push(key);
+    }
+    stale.forEach((key) => localStorage.removeItem(key));
+  } catch {
+    /* a private window or blocked storage — nothing to forget, nothing to break */
   }
 }
 
@@ -497,9 +527,7 @@ export function TechCardForm({
     // Читается через ту же форму записи, что и `mapTechCardToForm`: на проводе оба списка живут
     // на `TechCardInsert`, а прочитанная карточка отдаётся той же формой. Каст здесь — тот же
     // приём, которым `splitSketchMedia` достаёт легаси-список.
-    const tc = techCard?.techCard as
-      | (common_TechCardInsert & { moodNote?: string })
-      | undefined;
+    const tc = techCard?.techCard as (common_TechCardInsert & { moodNote?: string }) | undefined;
     if (!tc) return false;
     if ((tc.moodNote ?? '').trim()) return true;
     const media = [...(tc.moodboardMedia ?? []), ...(tc.technicalMedia ?? [])];
@@ -615,12 +643,6 @@ export function TechCardForm({
     );
   };
   const [conflict, setConflict] = useState(false);
-  // ревью MJ-3: a restore over a card that moved since the draft waits for this answer.
-  const [restoreAsk, setRestoreAsk] = useState<{
-    id: string | undefined;
-    from: number | null;
-    to: number;
-  } | null>(null);
   // ревью mn-5: the conflict decision is PENDING from the moment it opens until «keep mine» answers it
   // (the modal's own close only hides it; the chip shows it again). While it is pending nothing is
   // written — a write that was already on its way to the wire (the check before it awaited) included.
@@ -629,14 +651,31 @@ export function TechCardForm({
     conflictOpen.current = true;
     setConflict(true);
   };
-  // A sellable→auxiliary save held back until the operator answers for the live colourways it has to
-  // retire first (NF-07 purpose lock). Carries the validated payload so «archive & switch» re-runs
-  // exactly the save that was intercepted, not whatever the form holds a few seconds later.
+  // THE SELLABLE→AUXILIARY SWITCH, CONFIRMED IN ITS DIALOG (NF-07 purpose lock; O-60 / D-59). The dialog
+  // opens at the gesture — the purpose field changing — and not at a save: there is no save button to
+  // wait for. It answers for the live colourways the switch has to retire first, and cancelling it puts
+  // `previousPurpose` back into the form. `data` is the validated payload when an explicit save opened
+  // it (⌘S over a switch nobody confirmed yet): «archive & switch» then re-runs exactly the save that
+  // was intercepted. Opened at the gesture there is no payload yet — the form is checked on confirm.
   const [convert, setConvert] = useState<{
-    data: TechCardFormData;
+    data?: TechCardFormData;
     colorways: common_AdminColorwayRef[];
+    previousPurpose?: string;
   } | null>(null);
   const [converting, setConverting] = useState(false);
+  // O-60 r4 (P1-2): THE WAIT before the switch — for a write that was already on the wire when «archive
+  // & switch» was pressed. Nothing irreversible has happened yet, so it is cancelable (✕, Esc and «keep
+  // sellable» abort it and put the purpose back) and bounded (CONVERT_WAIT_MS). Only the archive loop and
+  // the write after it (`converting`) hold the dialog shut.
+  const [convertWaiting, setConvertWaiting] = useState(false);
+  const convertWait = useRef<AbortController | null>(null);
+  // D-66′ (T61 r5): the page leaving ends the wait — the confirm hears `aborted` and archives nothing.
+  useEffect(() => {
+    const wait = convertWait;
+    return () => wait.current?.abort();
+  }, []);
+  // Said inside the dialog when the wait ran out; the confirm is live again and nothing was archived.
+  const [convertRefusal, setConvertRefusal] = useState<string | null>(null);
   // What a half-finished convert left behind. Like stagingError this is a fact about a write that
   // already partly happened, so it stays on screen instead of passing through a toast.
   const [convertReport, setConvertReport] = useState<string | null>(null);
@@ -838,33 +877,30 @@ export function TechCardForm({
   // retired is back to needing the single output material before anything can be planned.
   const liveVariants = activeVariantCount(outputVariants);
 
-  // Autosave the working draft to localStorage (Q9b): leaving the route (to /materials, /fitting,
-  // the product manager) or a hard refresh no longer loses unsaved edits — restore on return.
-  const draftKey = isEditMode ? `edit.${numId ?? id ?? '0'}` : 'new';
-  // Only the two staging functions, pinned: `staging` itself is a fresh object every render (it
-  // carries the live `changes` array), and handing that straight to the hook restarted its debounced
-  // autosave timer on every render — a card being edited could keep re-arming the timer and never
-  // actually persist the staged snapshots the restore banner then promises.
-  const stagingIO = useMemo(
-    () => ({ serialize: staging.serialize, hydrate: staging.hydrate }),
-    [staging.serialize, staging.hydrate],
-  );
-  const draft = useTechCardDraft(
-    form,
-    draftKey,
-    canWrite(SECTION.techCards) && !frozen,
-    staging.changes.length > 0,
-    stagingIO,
-    // Every movement of the staged queue re-writes the draft, not only the first (B-04).
-    staging.revision,
-    {
-      // mn-3: on a saved card the work worth a draft is the body's (and the queue's); a new card's
-      // create writes the style facts too, so all of its dirt counts.
-      formWork: isEditMode ? () => bodyWorkOf(form) : undefined,
-      // MJ-3: the card under the work — its version and body fingerprint (computed once per card).
-      stamp: isEditMode && numId ? () => draftStamp() : undefined,
-    },
-  );
+  // ═══ NO LOCAL DRAFTS (27.09 · O-64, D-63) ═══════════════════════════════════════════════════════
+  // The owner: «оно просто должно автосохранять все и все если сохранение не прошло просто на этом
+  // месте должна быть ошибка». The card keeps no draft journal — no localStorage copy, no «unsaved work
+  // was found» banner, no restore / discard. The autosave saves; a write that did not pass is said at
+  // the top of the form (SaveFailureLine). What earlier builds left in this browser goes, silently.
+  useEffect(() => forgetLocalDrafts(), []);
+  // THE ONE GUARD LEFT in place of the drafts: the browser asks before a tab with unsaved work is closed
+  // or reloaded. Asked at the moment of leaving (mn-3: dirt nobody can write is no reason to hold the
+  // page); a new card's create writes the style facts too, so all of its dirt counts.
+  const canWriteCard = canWrite(SECTION.techCards) && !frozen;
+  const unsavedWork = form.formState.isDirty || staging.changes.length > 0;
+  useEffect(() => {
+    if (!canWriteCard || !unsavedWork) return;
+    const guard = (e: BeforeUnloadEvent) => {
+      const work = isEditMode ? bodyWorkOf(form) : !!form.control._formState.isDirty;
+      if (!work && staging.peek().length === 0) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', guard);
+    return () => window.removeEventListener('beforeunload', guard);
+    // `form` and `staging` are read live, at the moment of leaving.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canWriteCard, unsavedWork, isEditMode]);
 
   // Section-completion progress (Q9): a visible "how filled is this card" signal, per tab + overall.
   const len = (v: unknown) => (Array.isArray(v) ? v.length : 0);
@@ -879,7 +915,6 @@ export function TechCardForm({
   const labelsW = useWatch({ control: form.control, name: 'labels' });
   // Which tabs count toward "the card's core spec is filled", and whether each currently has content.
   const sectionFilled: Partial<Record<TabId, boolean>> = {
-
     // STUDIO holds both grids now, so it is ticked by either: a card with a moodboard and no flat
     // has started the work this tab is for. ARTIFACTS is deliberately left UNSET rather than
     // `false` — nothing is minted yet in this wave, and claiming an outstanding section that
@@ -1038,27 +1073,6 @@ export function TechCardForm({
     card: techCard ?? null,
   });
   const claimVersion = () => lockOverride.current ?? base.current.version;
-  // ревью MJ-3: the card a draft is typed on — its version, and when this page holds the card the
-  // fingerprint of what a restore would put back over it (once per card: every draft write asks): the
-  // body, and the style facts — a style write moves only the version and the facts, and a restore over
-  // it would bring the draft's stale facts back (a season put back re-mints the colourway SKUs).
-  const stampCache = useRef<{ card: common_TechCard | null; body?: string }>({ card: null });
-  function draftStamp(): DraftStamp {
-    const cur = base.current;
-    if (cur.card && stampCache.current.card !== cur.card) {
-      const facts = mapTechCardToForm(cur.card) as unknown as Record<string, unknown>;
-      const style = fingerprintOf(JSON.stringify(STYLE_FACT_KEYS.map((k) => facts[k] ?? null)));
-      stampCache.current = {
-        card: cur.card,
-        body: `${bodyFingerprint(cur.card, canWriteCosting)}~${style}`,
-      };
-    }
-    return {
-      version: cur.version,
-      body: cur.card ? stampCache.current.body : undefined,
-      updatedAt: (cur.card ?? techCard)?.updatedAt,
-    };
-  }
   const adopt = (card: common_TechCard) => {
     base.current = { version: card.lockVersion ?? 0, card };
   };
@@ -1248,11 +1262,9 @@ export function TechCardForm({
       : null,
   );
   const history = useSaveHistory(isEditMode ? numId : undefined, openedText);
-  // The QUIET complete (B-03 / B-04): everything on screen is on the server. History records the text
-  // that is there now; the draft, the unload copy of unsaved work, has nothing left to guard — THIS
-  // session's copy. A draft found on open and not yet answered is not touched (R-11).
+  // The QUIET complete (B-03 / B-04): everything on screen is on the server — history records the text
+  // that is there now.
   function afterQuiescentSave() {
-    draft.clearOwn();
     if (numId) history.push(textSnapshotOf(form.getValues()), base.current.version);
   }
 
@@ -1390,7 +1402,7 @@ export function TechCardForm({
     // than refused (mapEquipmentDefaultsOut — a half-added row must not block a save carrying nine
     // other tabs' work), and a row with no key gets one minted. Reset to what was SENT, such a row
     // comes back as a pristine, clean row of a card that does not contain it: no unsaved-changes
-    // guard, no draft, and it disappears at the next navigation without anything having said so.
+    // guard, and it disappears at the next navigation without anything having said so.
     // The section carries nothing else the form owns and the server does not round-trip, so taking
     // the server's copy costs nothing and makes «saved» mean saved.
     // assemblyCleared — НАМЕРЕНИЕ ОДНОГО СОХРАНЕНИЯ, а не свойство карточки, и после успешной
@@ -1643,7 +1655,7 @@ export function TechCardForm({
         // carries its HTTP status speaks for itself.
         const ownFailure = watchOwnFailure(queryClient.getMutationCache());
         let outcome: CommitOutcome;
-        let failedOwn: { conflict: boolean } | null = null;
+        let failedOwn: OwnFailure | null = null;
         try {
           outcome = await staging.commitAll();
           failedOwn = ownFailure.current();
@@ -1679,8 +1691,11 @@ export function TechCardForm({
         }
         if (outcome.failed) {
           const { change, error } = outcome.failed;
-          const own = hasHttpStatus(error) ? null : failedOwn;
-          if (isConflictError(error) || !!own?.conflict) {
+          // D-66′: what the panel's failure was — its own status, the one its sentence wraps (`cause`),
+          // or, for a rewrap that kept neither, the one its mutation failed with in this very task.
+          const own = failureStatus(error) === undefined ? failedOwn : null;
+          const failure = failureClassOf(failureStatus(error) ?? own?.status);
+          if (failure === 'conflict') {
             const message = `«${change.label}» was changed by someone else meanwhile`;
             leaveFullscreen();
             openConflict();
@@ -1695,7 +1710,14 @@ export function TechCardForm({
           if (!silent) showMessage(`«${change.label}» failed — the rest is still staged`, 'error');
           // Баннер «сохранено 2 из 4» стоит на странице, то есть под оверлеем фулскрина.
           leaveFullscreen();
-          return { bodySaved, ok: false, outcome: 'partial', message: `«${change.label}»: ${why}` };
+          return {
+            bodySaved,
+            ok: false,
+            outcome: 'partial',
+            message: `«${change.label}»: ${why}`,
+            // D-66′: the panel's own write refused — held, not laddered; a 401/403 stops the card saving.
+            ...failureFields(failure, serverSentenceOf(error) ?? own?.message),
+          };
         }
         if (reread === 'error') {
           return {
@@ -1713,8 +1735,7 @@ export function TechCardForm({
         // A panel edited WHILE its own commit was in flight wrote the older values and kept the newer
         // ones staged (see commitAll); a panel staged for the first time meanwhile is queued too. With
         // the autosave on, the next cycle carries both without a word from anyone; the banner that
-        // says «Press Save again» stays only where no autosave runs. The draft stays too: it is the
-        // only copy of that work until it is written.
+        // says «Press Save again» stays only where no autosave runs.
         const stillStaged = [...(outcome.restaged ?? []), ...(outcome.pending ?? [])];
         if (stillStaged.length > 0 && !autosaveEnabled) {
           setStagingError(
@@ -1725,12 +1746,9 @@ export function TechCardForm({
         // outcome the autosave counts toward its cap. New work staged meanwhile is ordinary work: the
         // write is `complete`, and the autosave's own «work left» check (B-03) carries it next cycle.
         if (outcome.restaged?.length) return { bodySaved, ok: true, outcome: 'restaged' };
-        // B-03 / B-04: history and the draft cleanup belong to a QUIET card, and the autosave decides
-        // that — its onComplete runs only when nothing is left to write (an edit typed while this
-        // write was on the wire is still only in the draft). The one edit-mode write WITHOUT the
-        // autosave is a frozen card's «re-open to draft», and it clears nothing: a draft present then
-        // was left by edits typed while the card was being released, and the banner offers it once
-        // the card is open again.
+        // B-03 / B-04: history belongs to a QUIET card, and the autosave decides that — its onComplete
+        // runs only when nothing is left to write (an edit typed while this write was on the wire is
+        // not on the server yet).
         return { bodySaved, ok: true, outcome: 'complete' };
       }
 
@@ -1781,9 +1799,7 @@ export function TechCardForm({
           // once, by name). Nothing here is theirs to look at any more — no banner, no params, no
           // navigation — and nothing is «still staged»: the queue went with the page. One sentence
           // says what is missing — the refused panel and every one queued after it — and where to put
-          // it back. This session's copy of the create form goes too: the card exists, and «restore»
-          // on the next new card would «add» it a second time (a draft found on open and not answered
-          // is not this session's, and stays — R-11).
+          // it back.
           const queued = staging.peek();
           const missing = queued.length > 0 ? queued : [outcome.failed.change];
           showMessage(
@@ -1792,7 +1808,6 @@ export function TechCardForm({
               : `created without «${missing.map((c) => c.label).join('», «')}» — open the card to retry`,
             'error',
           );
-          draft.clearOwn();
           return { bodySaved: true, ok: false, outcome: 'partial' };
         }
         if (outcome.failed) {
@@ -1809,8 +1824,6 @@ export function TechCardForm({
         }
       }
       showMessage('tech card created', 'success');
-      // This session's copy only: a found «new» draft nobody answered is the operator's earlier work (R-11).
-      draft.clearOwn();
       // R-13: landed after the operator left — they are somewhere else now, and stay there.
       if (!pageMounted.current) return { bodySaved: true, ok: true, outcome: 'complete' };
       // If they were working on labels & pkg, land on the saved card's labels tab so the
@@ -1873,11 +1886,16 @@ export function TechCardForm({
         // отвечает на тот же вопрос, что аудит присутствия.
         contradicts: contradictsScreen((path) => form.getValues(path as never)),
       });
-      // An autosave never yanks the operator to another tab: the chip says «N errors» and its click
-      // is the walk to the field.
+      // An autosave never yanks the operator to another tab: the chip says «N errors», and the first
+      // line of its popover is the walk to the field.
       if (applied.length > 0 && !silent) {
         const root = applied[0].split('.')[0];
         setActiveTab(errorTabFor(root));
+        // …and the walk itself, the one `onInvalid` takes for a client-side error (D-57). The
+        // `shouldFocus` of `setError` above runs BEFORE this switch and reaches only a registered
+        // input already on screen: a field of another tab, or one with no input at all — a plate of
+        // the technical sheet (`technicalMedia.i.mediaId`) — was left for the operator to find.
+        setFocusTarget((prev) => ({ path: applied[0], nonce: (prev?.nonce ?? 0) + 1 }));
       }
       if (transport || contradictions.length > 0) {
         if (silent) leaveFullscreen();
@@ -1893,10 +1911,15 @@ export function TechCardForm({
       // отказ, который никуда не встал — ни на контрол, ни в баннер, ни в тост, — и есть та
       // самая невидимая потеря, ради которой затевалась фаза. (У автосейва тоста нет — то же
       // предложение уезжает в поповер чипа через `message`.)
+      // D-63′: over a 409 the decision is the conflict modal's (opened above), and this sentence is what
+      // the chip's popover and the line at the top of the form print — not the list's «Reload to get
+      // the latest version» (techCardErrorMessage), which names a door this page does not have.
       const base =
         transport || contradictions.length > 0
           ? 'the backend did not recognise part of this card — see the banner on the card'
-          : techCardErrorMessage(error, 'Failed to submit tech card');
+          : status === 409
+            ? 'another editor saved this card meanwhile'
+            : techCardErrorMessage(error, 'Failed to submit tech card');
       const message = unmapped.length
         ? `${base} — ${unmapped.map((u) => u.description).join('; ')}`
         : base;
@@ -1904,7 +1927,17 @@ export function TechCardForm({
       console.error('Failed to submit tech card', error);
       const outcome: SaveOutcome =
         status === 409 ? 'conflict' : applied.length > 0 ? 'invalid' : 'error';
-      return { bodySaved, ok: false, outcome, message };
+      // D-66 / D-66′: a 4xx the same body would earn again (the assembly backstop's FailedPrecondition, a
+      // strict marshaller's 400) is held until the next change instead of re-sent on the retry ladder,
+      // and a 401/403 stops the card saving — the class and the server's own words, as it said them
+      // (the banner above keeps its friendlier sentence in `message`).
+      return {
+        bodySaved,
+        ok: false,
+        outcome,
+        message,
+        ...(outcome === 'error' ? failureFieldsOf(error) : {}),
+      };
     }
   }
 
@@ -1982,17 +2015,80 @@ export function TechCardForm({
     () => [...new Set([...seedCodes.current, ...colourCodesOf(convert?.colorways ?? [])])],
     [convert],
   );
+  // Whether the switch has live colourways to retire first. Without any it is a plain confirmation
+  // (D-59: every switch to auxiliary is confirmed in the dialog, not only one that archives).
+  const convertArchives = (convert?.colorways.length ?? 0) > 0;
+
+  // THE ONE OPENER OF THE SWITCH DIALOG (D-59): the purpose field's gesture, the chip's «confirm the
+  // switch ›», an explicit save over a switch nobody confirmed. Never a write by itself.
+  const openConvert = (opts: { data?: TechCardFormData; previousPurpose?: string } = {}) => {
+    if (converting) return;
+    setConvertReport(null);
+    setConvertRefusal(null);
+    setConvert({ colorways: liveColorways, ...opts });
+  };
+
+  // THE GESTURE (D-59): the purpose field turning auxiliary on a card that saves itself opens the dialog
+  // at once — the switch is confirmed where it is made, not at a save nobody presses any more. Only a
+  // person's change counts: RHF tags a field's own onChange `change`, while a programmatic write (the
+  // quiet save putting a held switch back) carries no type and lands in the safety
+  // state instead (`needs-confirm`: the chip opens this same dialog).
+  const onPurposeGesture = useRef<(prev: unknown, next: unknown) => void>(() => {});
+  onPurposeGesture.current = (prev, next) => {
+    if (!autosaveEnabled || convert || converting) return;
+    const aux = 'TECH_CARD_PURPOSE_AUXILIARY';
+    if (toPurposeEnum(next as string | undefined) !== aux) return;
+    if (toPurposeEnum(prev as string | undefined) === aux) return;
+    if (toPurposeEnum(storedCard()?.techCard?.purpose) === aux) return;
+    openConvert({ previousPurpose: prev as string | undefined });
+  };
+  useEffect(() => {
+    // The value before each change: the watch hands over the values AFTER it.
+    let seen: unknown = form.getValues('purpose');
+    const sub = form.watch((values, { name, type }) => {
+      const now: unknown = (values as Partial<TechCardFormData>).purpose;
+      const prev = seen;
+      seen = now;
+      if (name === 'purpose' && type === 'change' && now !== prev) {
+        onPurposeGesture.current(prev, now);
+      }
+    });
+    return () => sub.unsubscribe();
+  }, [form]);
+
+  // Cancelled (✕, Esc, «keep sellable»): the switch does not happen. The purpose goes back to what it was
+  // before the gesture — or to the saved one when the dialog was opened later — and the auxiliary type
+  // with it: the quiet save treats the two as one change (`withoutFlip`).
+  function dismissConvert() {
+    // Cancelled during the wait (O-60 r4): the confirm stops waiting and archives nothing.
+    convertWait.current?.abort();
+    setConvertRefusal(null);
+    const stored = form.control._defaultValues as Partial<TechCardFormData>;
+    const back = convert?.previousPurpose ?? stored.purpose ?? 'TECH_CARD_PURPOSE_SELLABLE';
+    setConvert(null);
+    if (toPurposeEnum(form.getValues('purpose')) !== 'TECH_CARD_PURPOSE_AUXILIARY') return;
+    form.setValue('purpose', back, { shouldDirty: true });
+    if (!deepEqual(form.getValues('auxSubtype'), stored.auxSubtype)) {
+      form.setValue('auxSubtype', stored.auxSubtype, { shouldDirty: true });
+    }
+  }
 
   async function doSubmit(data: TechCardFormData): Promise<SaveResult> {
     // handleSubmit validated the whole form: whatever the quiet check listed is answered.
     setSilentIssues([]);
-    if (flipsToAuxiliary(data) && liveColorways.length > 0) {
-      setConvertReport(null);
-      setConvert({ data, colorways: liveColorways });
+    // D-59: a switch to auxiliary is confirmed in its dialog, with colourways to retire or without. An
+    // explicit save (⌘S, a release's pre-flush) over a switch nobody confirmed opens it, and writes nothing.
+    if (flipsToAuxiliary(data)) {
+      openConvert({ data });
       return { outcome: 'needs-confirm' };
     }
     const r = await writeTechCard(data, { mode: 'explicit' });
-    return { outcome: r.outcome, message: r.message };
+    return {
+      outcome: r.outcome,
+      message: r.message,
+      failure: r.failure,
+      refusalMessage: r.refusalMessage,
+    };
   }
 
   // «archive & switch»: retire every live colourway, then run the same save again. Client-guided and
@@ -2001,18 +2097,59 @@ export function TechCardForm({
   // save that follows still claims the version this page loaded; a genuine 409 here is a real
   // concurrent edit and falls through to the existing conflict modal.
   async function confirmConvert() {
-    if (!convert || converting) return;
+    if (!convert || converting || convertWaiting || convertWait.current) return;
     const queue = convert.colorways;
-    const data = convert.data;
     const archived: string[] = [];
-    // Banked BEFORE anything can fail: whatever this attempt archives stops being a live colourway,
-    // so a later retry would never see these codes again.
-    for (const code of colourCodesOf(queue)) seedCodes.current.add(code);
-    // Held across the archive loop AND the save that follows: this path bypasses form.handleSubmit,
-    // so `isSubmitting` never rises and the header's Save button would otherwise stay live while the
-    // flip PUT is in flight. `converting` is what disables it (see the Save button).
+    // D-59: opened at the gesture, a quiet write of the edits before it may still be on the wire — the
+    // switch goes out after it, never beside it. The flush writes nothing itself (the dialog holds the
+    // autosave: its cycle answers `needs-confirm`); it only waits for the one in flight.
+    // O-60 r4 (P1-2): the wait is cancelable and bounded — nothing has happened yet.
+    setConvertRefusal(null);
+    const wait = new AbortController();
+    convertWait.current = wait;
+    setConvertWaiting(true);
+    let waited: ConvertWait;
+    try {
+      waited = await waitForTheWrite(autosave.flush('convert'), wait.signal, CONVERT_WAIT_MS);
+    } finally {
+      if (convertWait.current === wait) convertWait.current = null;
+      setConvertWaiting(false);
+    }
+    // What the wait ended in, and the page as it stands NOW — read right here, immediately before the
+    // irreversible part (D-66′, T61 r5): one table decides (convert-wait.ts). A cancel or a page that left
+    // says nothing; a wait that ran out says so in the dialog, its confirm live again; a conflict, a
+    // refused last write, a card that stopped saving (401/403, a release elsewhere) or an answer nobody
+    // expected close the dialog with why — and archive nothing.
+    const verdict = convertVerdict(waited, {
+      mounted: pageMounted.current,
+      saves: autosave.savesNow(),
+      conflict: conflictOpen.current,
+      refusal: autosave.refusalNow(),
+    });
+    if (!verdict.go) {
+      if (verdict.keep) setConvertRefusal(verdict.say ?? null);
+      else if (verdict.say) {
+        setConvert(null);
+        showMessage(verdict.say, 'error');
+      }
+      return;
+    }
+    // Held across the check, the archive loop AND the save that follows: this path bypasses
+    // form.handleSubmit, so `isSubmitting` never rises, and the dialog's own button, the history's
+    // restore and the fullscreen's doors read `converting` to stay shut while the flip PUT is in flight.
     setConverting(true);
     try {
+      // …and there is no payload yet: the form is checked now, with the walk to the first field when it
+      // does not validate. The switch stays in the form; once the field is fixed, the quiet save holds it
+      // and the chip's «confirm the switch ›» brings this dialog back.
+      const data = convert.data ?? (await validatedValues());
+      if (!data) {
+        setConvert(null);
+        return;
+      }
+      // Banked BEFORE anything can fail: whatever this attempt archives stops being a live colourway,
+      // so a later retry would never see these codes again.
+      for (const code of colourCodesOf(queue)) seedCodes.current.add(code);
       try {
         for (const c of queue) {
           // expectedVersion is echoed per the RPC contract; the server enforces the transition on the
@@ -2037,7 +2174,8 @@ export function TechCardForm({
             error instanceof Error ? error.message : 'unknown error'
           }. ` +
             'The card is STILL SELLABLE and nothing was flipped — restore each archived colourway ' +
-            'from its own page while it stays sellable, or press save again to retry the rest.',
+            'from its own page while it stays sellable, or confirm the switch again (the chip in the ' +
+            'header) to retry the rest.',
         );
         // Тот же неуспех и тот же довод: отчёт о наполовину состоявшемся переводе — баннер на
         // странице, и под оверлеем его никто не прочтёт.
@@ -2050,11 +2188,12 @@ export function TechCardForm({
       // query, and archivedIds already covers the gap).
       if (numId) queryClient.invalidateQueries({ queryKey: techCardKeys.detail(numId) });
       setConvert(null);
-      const { bodySaved, ok, outcome, message } = await writeTechCard(data);
+      const { bodySaved, ok, outcome, message, failure, refusalMessage } =
+        await writeTechCard(data);
       // R-7: the autosave handed this write to the dialog and does not run it, so it hears the outcome
-      // here — its status ends where the write did (no «unsaved · save now» over a card that is saved),
-      // and a quiet card gets the same bookkeeping as after its own cycle (draft, history).
-      autosave.settleExternal({ outcome, message }, 'convert');
+      // here — its status ends where the write did (no «unsaved · confirm the switch ›» over a card
+      // that is saved), and a quiet card gets the same bookkeeping as after its own cycle (history).
+      autosave.settleExternal({ outcome, message, failure, refusalMessage }, 'convert');
       if (ok) {
         // Only now: the card has to BE auxiliary before a colour variant is allowed on it (the
         // server refuses one on a sellable card), so seeding is a follow-up to the flip, not part
@@ -2103,8 +2242,9 @@ export function TechCardForm({
         bodySaved
           ? `archived ${archived.length} colourway(s) (${archived.join(', ')}) and the switch to ` +
               'AUXILIARY DID save — but a staged panel did not (see the banner above; what failed is ' +
-              'still staged, press Save again). The archived colourways can no longer be restored: ' +
-              'the card is auxiliary now and un-archiving is refused for an auxiliary style.'
+              'still staged, and the card retries it on its own). The archived colourways can ' +
+              'no longer be restored: the card is auxiliary now and un-archiving is refused ' +
+              'for an auxiliary style.'
           : `archived ${archived.length} colourway(s) (${archived.join(', ')}) but the switch to ` +
               'auxiliary did NOT save — see the error above. The card is still SELLABLE, so every one ' +
               'of them can still be restored from its own page; after a successful flip that stops ' +
@@ -2147,8 +2287,9 @@ export function TechCardForm({
   };
   // THE EXPLICIT SAVE as one promise with a verdict: validation with the walk to the first error,
   // the convert dialog for a sellable→auxiliary flip, the success toast. On a saved card it runs
-  // through the autosave's queue (⌘S, «save now», «retry», «keep mine»), so there is never a second
-  // write in flight beside an autosave cycle.
+  // through the autosave's queue (⌘S, the form's implicit submit, «keep mine», the release doors) —
+  // never from a button: the card has none (O-60) — so there is never a second write in flight beside
+  // an autosave cycle.
   const explicitSave = () =>
     new Promise<SaveResult>((resolve) => {
       form
@@ -2163,6 +2304,20 @@ export function TechCardForm({
           resolve({ outcome: 'error', message: techCardErrorMessage(error, 'save failed') }),
         );
     });
+  // The same check without the write: the validated values, or null after the walk to the first error.
+  // The switch dialog opened at the gesture uses it on confirm (D-59).
+  const validatedValues = () =>
+    new Promise<TechCardFormData | null>((resolve) => {
+      form
+        .handleSubmit(
+          (data) => resolve(data as TechCardFormData),
+          (errors) => {
+            onInvalid(errors);
+            resolve(null);
+          },
+        )()
+        .catch(() => resolve(null));
+    });
   // Every «save» door of the page. A new card has no autosave: `add` IS the save.
   const save = () => (autosaveEnabled ? autosave.saveNow('button') : explicitSave());
 
@@ -2170,9 +2325,11 @@ export function TechCardForm({
   // own parse, nothing published onto the fields — Codex M-02); here the values are parsed exactly as
   // handleSubmit would hand them to doSubmit (zod OUTPUT, defaults and all).
   //
-  // M-03: a sellable→auxiliary flip never opens its dialog on its own. The write carries the STORED
-  // purpose so every other edit still lands, the flip goes back into the form afterwards, and the
-  // status says `needs-confirm` until an explicit save (⌘S / «save now») runs the dialog.
+  // M-03 → D-59: a sellable→auxiliary flip is confirmed at its gesture — the purpose field opens its
+  // dialog. A flip that still reaches a quiet write unconfirmed (a confirm that could not write the
+  // card) is HELD: the write carries the STORED purpose so every other edit still lands,
+  // the flip goes back into the form afterwards, and the status says `needs-confirm` — the safety
+  // state, whose chip opens the dialog, never a write.
   async function silentSave(): Promise<SaveResult> {
     const parsed = await techCardSchema.safeParseAsync(form.getValues());
     if (!parsed.success) {
@@ -2207,6 +2364,8 @@ export function TechCardForm({
       outcome: r.outcome,
       message: r.message,
       pendingConfirm: keepPurpose !== undefined && r.outcome === 'complete',
+      failure: r.failure,
+      refusalMessage: r.refusalMessage,
     };
   }
 
@@ -2246,7 +2405,11 @@ export function TechCardForm({
       queryClient.setQueryData(techCardKeys.detail(numId), res.techCard);
     } catch (error) {
       showMessage(
-        techCardErrorMessage(error, 'could not read the server’s version — try saving again'),
+        techCardErrorMessage(
+          error,
+          'could not read the server’s version, nothing was written — try «keep mine & overwrite» ' +
+            'again from the chip',
+        ),
         'error',
       );
       return;
@@ -2286,7 +2449,7 @@ export function TechCardForm({
         const why =
           before === 'off'
             ? 'this card is not saving right now — reload it'
-            : flushRefusalSentence(before, autosave.errorsCount);
+            : flushRefusalSentence(before, autosave.errorsCount, autosave.refusalNow());
         showMessage(
           `${next === RELEASED ? 'not released' : 'not moved back to draft'}: ${why}`,
           'error',
@@ -2314,11 +2477,11 @@ export function TechCardForm({
         form.setValue('approvalState', standing, { shouldDirty: true });
       }
     }
-    // Typed while the release was on the wire: the card is frozen now and saves nothing more. The
-    // draft keeps it (it is cleared only by a quiet save) for the next «re-open to draft».
+    // Typed while the release was on the wire: the card is frozen now and saves nothing more — and no
+    // draft keeps it (O-64, D-63), so it is said plainly.
     if (landed && next === RELEASED && (bodyWorkOf(form) || staging.peek().length > 0)) {
       showMessage(
-        'released. Edits made while it was being released were not saved; they wait in the draft for the next re-open',
+        'released. Edits made while it was being released were not saved — the card is frozen',
         'error',
       );
     }
@@ -2326,7 +2489,7 @@ export function TechCardForm({
 
   // M-02: the autosave's check — the schema's own parse over the live values, nothing published onto
   // the fields. What it finds is counted on the chip and listed in the warnings organ; a field turns
-  // red when the operator asks: ⌘S, the chip, its popover, a warnings row.
+  // red when the operator asks: ⌘S, opening the chip, a warnings row.
   const quietValidate = async () => {
     const parsed = await techCardSchema.safeParseAsync(form.getValues());
     const issues = parsed.success ? [] : quietIssues(parsed.error);
@@ -2347,28 +2510,9 @@ export function TechCardForm({
     // LIVE errors (the published ones: an explicit save, a server violation), before any re-render.
     countErrors: () => flattenFieldErrors(form.control._formState.errors as FieldErrors).length,
     onComplete: afterQuiescentSave,
-    // R-11: organs read it off the contract (the WORDS seed waits while it is true).
-    draftPending: !!draft.pending,
     // M2: a style fact is work only through the style panel's queue — the body never writes it.
     bodyWork: () => bodyWorkOf(form),
   });
-
-  // THE DRAFT BANNER'S DOORS. A restore over a card whose body moved since the draft asks first (ревью
-  // MJ-3); restored work is unsaved work — the autosave hears it at once (B-1).
-  function doRestore(id: string | undefined) {
-    setRestoreAsk(null);
-    draft.restore(id);
-    autosave.request('restore');
-  }
-  function askRestore(id: string | undefined) {
-    const moved = draft.movedSince(id);
-    if (moved) setRestoreAsk({ id, ...moved });
-    else doRestore(id);
-  }
-  function discardDrafts() {
-    setRestoreAsk(null);
-    draft.clear();
-  }
 
   const saving = form.formState.isSubmitting || autosave.status === 'saving';
   // A card at rest has nothing to answer for: the quiet check's list goes with the work it was about
@@ -2385,12 +2529,8 @@ export function TechCardForm({
   // nothing staged — so a 409 on this write can be answered with a quiet re-read, M-01), at most five
   // steps per page life, each step its own save and its own «stage → …».
   const savedStage = techCard?.techCard?.stage;
-  const draftPending = !!draft.pending;
   useEffect(() => {
     if (!AUTO_STAGE || !autosaveEnabled || autoStageInFlight.current) return;
-    // R-11: a found draft still waiting for its answer holds the stage too — the raise would dirty the
-    // form and go out with a quiet save before the operator has said what to do with that work.
-    if (draftPending) return;
     if (autosave.status !== 'idle' && autosave.status !== 'saved') return;
     if (bodyWorkOf(form) || staging.peek().length > 0) return;
     if (autoStageSteps.current >= AUTO_STAGE_MAX_STEPS) return;
@@ -2416,7 +2556,7 @@ export function TechCardForm({
     // `form` and `staging` are read live inside; the triggers are the readiness answer, the saved
     // stage, the form's stage and the autosave settling.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readiness, savedStage, stage, autosave.status, autosaveEnabled, isAux, draftPending]);
+  }, [readiness, savedStage, stage, autosave.status, autosaveEnabled, isAux]);
 
   // ROLLBACK (D-17'): text sections only, everything else stays as it is now; then save.
   const restoreHistory = (entry: HistoryEntry) => {
@@ -2430,10 +2570,13 @@ export function TechCardForm({
     void autosave.flush('history');
   };
 
-  // A form error named in the warnings organ walks to its field — the same walk onInvalid takes.
+  // A form error named in the warnings organ (or on the chip's first line) walks to its field — the same
+  // walk onInvalid takes.
   const revealError = (path: string) => {
-    // M-02: the quiet check publishes nothing; walking to a field is the moment its error shows.
-    void form.trigger(path as never);
+    // M-02: the quiet check publishes nothing; walking to a field is the moment its error shows. An
+    // error already on the field (a server refusal) is not checked again: the client schema does not
+    // know the server's reason, and the check would take the refusal off as the walk lands on it.
+    if (!form.getFieldState(path as never).error) void form.trigger(path as never);
     leaveFullscreen();
     setActiveTab(errorTabFor(errorRootKey(path)));
     setFocusTarget((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
@@ -2441,13 +2584,17 @@ export function TechCardForm({
   // Published errors (an explicit save, a server violation) first, then what the quiet check found
   // and nobody has asked to see yet — the warnings organ counts both (M-02).
   const publishedPaths = new Set(flatErrors.map((e) => e.path));
-  const formErrorRows: FormErrorRow[] = [
-    ...flatErrors,
-    ...silentIssues.filter((i) => !publishedPaths.has(i.path)),
-  ].map((e) => {
+  const unpublished = silentIssues.filter((i) => !publishedPaths.has(i.path));
+  const formErrorRows: FormErrorRow[] = [...flatErrors, ...unpublished].map((e) => {
     const tab = errorTabFor(errorRootKey(e.path));
     return { path: e.path, message: e.message, tab: TABS.find((t) => t.id === tab)?.label ?? tab };
   });
+  // The chip opened over `invalid`: the operator is looking — what the quiet check found goes onto its
+  // fields (M-02). Only those paths: a whole-form check would also take a server refusal off its field.
+  const publishQuietIssues = () => {
+    if (autosave.status !== 'invalid' || unpublished.length === 0) return;
+    void form.trigger(unpublished.map((i) => i.path) as never);
+  };
 
   /**
    * ЭКСПОРТ АРХИВА КАРТОЧКИ. Сервер кладёт zip в бакет и отдаёт presigned-ссылку; скачивает её
@@ -2510,7 +2657,7 @@ export function TechCardForm({
   // collection / season / targetGender and stays mounted unconditionally below.
   const cardDetails = (
     <>
-    {/* ═══ ONE BLOCK, NOT FOUR (studio v3, step 0 «как в референсе») ════════════════════════════
+      {/* ═══ ONE BLOCK, NOT FOUR (studio v3, step 0 «как в референсе») ════════════════════════════
         The prototype's `cardBlock()`: a single CARD DETAILS block with a `N of 10 fields` counter
         in its rule and the groups as rules inside it — IDENTIFICATION, CLASSIFICATION, BASE MODEL
         & SAMPLE SIZE, then RESPONSIBLE ROLES | LINKED PRODUCTS side by side. The composition lives
@@ -2520,81 +2667,79 @@ export function TechCardForm({
         write, and the one door out (`navTo('colorways')` — the address has ONE writer).
         `StyleFactsField` does NOT ride along: it is the one writer of brand / collection / season /
         targetGender and stays mounted unconditionally below. */}
-    <CardDetails
-      techCardId={isEditMode ? numId : undefined}
-      isIdea={isIdea}
-      isAux={isAux}
-      canEdit={canWrite(SECTION.techCards) && !frozen}
-      outputMaterialId={outputMaterialId}
-      roleAssignments={techCard?.roleAssignments}
-      colorways={techCard?.colorways}
-      /* K-19 · the consequence of changing the season, spoken on «pick» — the field's one writer.
+      <CardDetails
+        techCardId={isEditMode ? numId : undefined}
+        isIdea={isIdea}
+        isAux={isAux}
+        canEdit={canWrite(SECTION.techCards) && !frozen}
+        outputMaterialId={outputMaterialId}
+        roleAssignments={techCard?.roleAssignments}
+        colorways={techCard?.colorways}
+        /* K-19 · the consequence of changing the season, spoken on «pick» — the field's one writer.
          Undefined on a new card: there is nothing to re-issue yet, and the sentence would be a
          lie about colourways that do not exist. */
-      seasonPickHint={
-        isEditMode
-          ? 'changing the season re-issues the SKU of every colourway — the save is rejected if one of them is already frozen (orders placed, or labels printed)'
-          : undefined
-      }
-      onGoColourways={() => navTo('colorways')}
-    />
+        seasonPickHint={
+          isEditMode
+            ? 'changing the season re-issues the SKU of every colourway — the save is rejected if one of them is already frozen (orders placed, or labels printed)'
+            : undefined
+        }
+        onGoColourways={() => navTo('colorways')}
+      />
 
-    {isAux && (
-      <Section title='output material'>
-        {/* 0252: once a colour is registered the card produces one bucket PER COLOUR, and
+      {isAux && (
+        <Section title='output material'>
+          {/* 0252: once a colour is registered the card produces one bucket PER COLOUR, and
             the single picker below stops being the answer — showing both would offer two
             contradictory places to say where the goods land. The variants are their own
             immediate RPC writes, so this branch needs a SAVED card; an unsaved one has no
             id to write against and only ever sees the legacy picker. */}
-        {isEditMode && numId && outputVariants.length > 0 ? (
-          <OutputVariantsPanel
-            techCardId={numId}
-            variants={outputVariants}
-            canEdit={canWrite(SECTION.techCards)}
-          />
-        ) : (
-          <>
-            <Text variant='inactive' size='small'>
-              runs of this card receipt into material stock, not product stock. Pick the
-              packaging material this card produces (required before its first run).
-            </Text>
-            <div className='max-w-md'>
-              <MaterialPicker
-                value={outputMaterialId}
-                onChange={(mid) =>
-                  form.setValue('outputMaterialId', mid, { shouldDirty: true })
-                }
-                section='TECH_CARD_BOM_SECTION_PACKAGING'
-                disabled={!canWrite(SECTION.techCards)}
-                placeholder='search packaging material'
-              />
-            </div>
-            {canWrite(SECTION.techCards) && (
-              <Button
-                type='button'
-                variant='secondary'
-                size='lg'
-                className='uppercase'
-                onClick={() => setMaterialModalOpen(true)}
-              >
-                + create material
-              </Button>
-            )}
-            {/* The way INTO per-colour mode without stranding the balance already on the
+          {isEditMode && numId && outputVariants.length > 0 ? (
+            <OutputVariantsPanel
+              techCardId={numId}
+              variants={outputVariants}
+              canEdit={canWrite(SECTION.techCards)}
+            />
+          ) : (
+            <>
+              <Text variant='inactive' size='small'>
+                runs of this card receipt into material stock, not product stock. Pick the packaging
+                material this card produces (required before its first run).
+              </Text>
+              <div className='max-w-md'>
+                <MaterialPicker
+                  value={outputMaterialId}
+                  onChange={(mid) => form.setValue('outputMaterialId', mid, { shouldDirty: true })}
+                  section='TECH_CARD_BOM_SECTION_PACKAGING'
+                  disabled={!canWrite(SECTION.techCards)}
+                  placeholder='search packaging material'
+                />
+              </div>
+              {canWrite(SECTION.techCards) && (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='lg'
+                  className='uppercase'
+                  onClick={() => setMaterialModalOpen(true)}
+                >
+                  + create material
+                </Button>
+              )}
+              {/* The way INTO per-colour mode without stranding the balance already on the
                 books: adopt this very material as the first colour rather than minting a
                 second bucket beside it. Hidden until there is something to adopt, and
                 until the card exists to hang it on. */}
-            {isEditMode && numId ? (
-              <AdoptLegacyOutputButton
-                techCardId={numId}
-                materialId={outputMaterialId}
-                canEdit={canWrite(SECTION.techCards)}
-              />
-            ) : null}
-          </>
-        )}
-      </Section>
-    )}
+              {isEditMode && numId ? (
+                <AdoptLegacyOutputButton
+                  techCardId={numId}
+                  materialId={outputMaterialId}
+                  canEdit={canWrite(SECTION.techCards)}
+                />
+              ) : null}
+            </>
+          )}
+        </Section>
+      )}
     </>
   );
 
@@ -2642,29 +2787,29 @@ export function TechCardForm({
                 lastSavedAt={autosave.lastSavedAt}
                 errorsCount={autosave.errorsCount}
                 message={autosave.message}
-                retrying={autosave.retrying}
+                cause={autosave.cause}
+                refusal={autosave.refusal}
                 // mn-3: dirt nobody can write is not «waiting» (read after the subscription).
                 bodyDirty={form.formState.isDirty && bodyWorkOf(form)}
                 staged={staging.changes}
                 history={history.entries}
                 currentText={textSnapshotOf(form.getValues())}
                 canRestore={!saving && !converting}
-                // M-02: the explicit save is what publishes the errors and walks to the first one.
-                onJumpToError={() => void autosave.saveNow('chip')}
-                onOpenDetails={() => {
-                  if (autosave.status === 'invalid') void form.trigger();
-                }}
-                onSaveNow={() => void autosave.saveNow('chip')}
+                // O-60 / D-59: the chip never saves. Opening it over `invalid` is the «show me»: what the
+                // quiet check found goes onto its fields (M-02), and the popover's first line is the walk
+                // to the first of them.
+                firstError={formErrorRows[0]}
+                onRevealError={revealError}
+                onOpenDetails={publishQuietIssues}
+                onConfirmSwitch={() => openConvert()}
                 onOpenConflict={() => setConflict(true)}
                 onRestore={restoreHistory}
               />
             ) : null}
             {isEditMode && numId && (
               <>
-                <Button asChild variant='underline' size='sm'>
-                  <Link to={`/tech-cards/${numId}/print`} target='_blank' rel='noopener'>
-                    pdf
-                  </Link>
+                <Button asChild variant='secondary' size='sm'>
+                  <Link to={`/tech-cards/${numId}/print`}>pdf</Link>
                 </Button>
                 {/* Гейт — ПРАВО ЗАПИСИ, тот же `canWrite(SECTION.techCards)`, что у соседних
                     пишущих действий шапки, а не право чтения карточки: архив уносит приватные
@@ -2814,22 +2959,47 @@ export function TechCardForm({
 
       {/* NF-07 guided convert. Intercepts the flip BEFORE the request — the 412 it would otherwise
           come back as names the obstacle but offers no way past it. closeOnConfirm=false: the
-          handler closes this itself, after the archive loop has either finished or reported. */}
+          handler closes this itself, after the archive loop has either finished or reported.
+          D-59: it opens at the gesture (the purpose field), with colourways to retire or without —
+          confirming is the one place a switch to auxiliary is decided — and dismissing it (✕, Esc,
+          «keep sellable») puts the purpose back. O-60 r4: dismissing works while it waits for a write
+          already on the wire too; only the archive loop and the write after it hold it shut. */}
       <ConfirmationModal
         open={!!convert}
-        onOpenChange={(open) => !open && !converting && setConvert(null)}
+        onOpenChange={(open) => {
+          if (!open && !converting) dismissConvert();
+        }}
         title='switch to auxiliary?'
         width='sm'
-        confirmLabel={converting ? 'archiving…' : 'archive & switch'}
-        cancelLabel='cancel'
-        confirmDisabled={converting}
+        confirmLabel={
+          converting
+            ? convertArchives
+              ? 'archiving…'
+              : 'switching…'
+            : convertWaiting
+              ? 'waiting for the save…'
+              : convertArchives
+                ? 'archive & switch'
+                : 'switch to auxiliary'
+        }
+        cancelLabel='keep sellable'
+        confirmDisabled={converting || convertWaiting}
         closeOnConfirm={false}
         onConfirm={confirmConvert}
       >
-        <Row label='live colourways' value={convert?.colorways.length ?? 0} />
-        {(convert?.colorways ?? []).map((c) => (
-          <Row key={c.colorwayId} label={colorwayLabel(c)} value='→ archive' />
-        ))}
+        {convertRefusal && (
+          <Text size='micro' variant='error' component='p' className='mb-2' data-convert-refusal=''>
+            {convertRefusal}
+          </Text>
+        )}
+        {convertArchives && (
+          <>
+            <Row label='live colourways' value={convert?.colorways.length ?? 0} />
+            {(convert?.colorways ?? []).map((c) => (
+              <Row key={c.colorwayId} label={colorwayLabel(c)} value='→ archive' />
+            ))}
+          </>
+        )}
         {/* 0252: the colours survive the flip even though the colourways do not — as warehouse
             buckets rather than sellable articles. Offered here because this is the one moment the
             card's colour range is still on screen. */}
@@ -2847,22 +3017,38 @@ export function TechCardForm({
             </Text>
           </label>
         )}
-        <Text size='micro' variant='label' className='mt-2'>
-          An auxiliary card produces a material, not products — it cannot own colourways, so all{' '}
-          {convert?.colorways.length ?? 0} are archived first, one by one, and then the card is
-          saved as auxiliary. Archiving is not deletion: the SKU stays frozen and readable and order
-          history is untouched.
-        </Text>
-        <Text size='micro' variant='label' className='mt-2'>
-          Restoring an archived colourway works while this card is still SELLABLE — after the flip
-          lands it is one-way. If a step fails, nothing is rolled back and you are told exactly
-          where it stopped.
-        </Text>
-        <Text size='micro' variant='label' className='mt-2'>
-          Live colourways are only one of the things that pin the purpose — runs, sold colourways,
-          assembly usage and anything else the card is registered in do too. Archiving clears none
-          of those; the server refuses them on its own and names what it found.
-        </Text>
+        {convertArchives ? (
+          <>
+            <Text size='micro' variant='label' className='mt-2'>
+              An auxiliary card produces a material, not products — it cannot own colourways, so all{' '}
+              {convert?.colorways.length ?? 0} are archived first, one by one, and then the card is
+              saved as auxiliary. Archiving is not deletion: the SKU stays frozen and readable and
+              order history is untouched.
+            </Text>
+            <Text size='micro' variant='label' className='mt-2'>
+              Restoring an archived colourway works while this card is still SELLABLE — after the
+              flip lands it is one-way. If a step fails, nothing is rolled back and you are told
+              exactly where it stopped.
+            </Text>
+            <Text size='micro' variant='label' className='mt-2'>
+              Live colourways are only one of the things that pin the purpose — runs, sold
+              colourways, assembly usage and anything else the card is registered in do too.
+              Archiving clears none of those; the server refuses them on its own and names what it
+              found.
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text size='micro' variant='label' className={seedableCodes.length > 0 ? 'mt-2' : ''}>
+              An auxiliary card produces a material, not products: its runs receipt into material
+              stock, and it cannot own colourways.
+            </Text>
+            <Text size='micro' variant='label' className='mt-2'>
+              Runs, sold colourways, assembly usage and anything else the card is registered in also
+              pin the purpose; the server refuses the switch on its own and names what it found.
+            </Text>
+          </>
+        )}
       </ConfirmationModal>
 
       {/* Half a convert is a fact the operator has to act on — which colourways are archived, and
@@ -2914,104 +3100,23 @@ export function TechCardForm({
         <PresenceLossBanner audit={presenceLoss} onDismiss={() => setPresenceLoss(null)} />
       )}
 
-      {/* Draft and frozen stay inline — they are context, not decisions. */}
-      {draft.pending && (
-        <CalloutBox tone='warning' className='mt-2.5 flex flex-col gap-2'>
-          {draft.drafts.length <= 1 ? (
-            <div className='flex flex-wrap items-center gap-2'>
-              <Text size='micro'>
-                an unsaved draft was found
-                {draft.pending.savedAt
-                  ? ` from ${new Date(draft.pending.savedAt).toLocaleString('en-US')}`
-                  : ''}{' '}
-                — restore it or discard it?
-              </Text>
-              <div className='ml-auto flex gap-1.5'>
-                <Button
-                  type='button'
-                  variant='main'
-                  size='sm'
-                  onClick={() => askRestore(draft.drafts[0]?.id)}
-                >
-                  restore
-                </Button>
-                <Button type='button' variant='secondary' size='sm' onClick={discardDrafts}>
-                  discard
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* MJ-2: every visit that left work beside an unanswered draft left a draft of its own —
-                  all of them are here, the newest first, until one is restored or all are discarded. */}
-              <div className='flex flex-wrap items-center gap-2'>
-                <Text size='micro'>
-                  unsaved work was found — {draft.drafts.length} drafts, the newest first: restore
-                  one (the others are discarded) or discard all?
-                </Text>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='sm'
-                  className='ml-auto'
-                  onClick={discardDrafts}
-                >
-                  discard all
-                </Button>
-              </div>
-              {draft.drafts.map((d, i) => (
-                <div key={d.id} className='flex flex-wrap items-center gap-2'>
-                  <Text size='micro'>
-                    {i === 0 ? 'the newest' : `draft ${i + 1}`}
-                    {d.savedAt ? ` · ${new Date(d.savedAt).toLocaleString('en-US')}` : ''}
-                  </Text>
-                  <Button
-                    type='button'
-                    variant={i === 0 ? 'main' : 'secondary'}
-                    size='sm'
-                    className='ml-auto'
-                    onClick={() => askRestore(d.id)}
-                  >
-                    {i === 0 ? 'restore the newest' : `restore draft ${i + 1}`}
-                  </Button>
-                </div>
-              ))}
-            </>
-          )}
-          {/* MJ-3: the draft is the WHOLE card as it was typed; over a card whose body moved since, a
-              restore puts back what the other editor changed — said before it happens. */}
-          {restoreAsk && (
-            <div className='flex flex-wrap items-center gap-2' data-draft-moved=''>
-              <Text size='micro'>
-                the card changed (
-                {restoreAsk.from !== null
-                  ? `v${restoreAsk.from} → v${restoreAsk.to}`
-                  : `now v${restoreAsk.to}`}
-                ) since this draft; restoring overwrites those changes
-              </Text>
-              <div className='ml-auto flex gap-1.5'>
-                <Button
-                  type='button'
-                  variant='main'
-                  size='sm'
-                  onClick={() => doRestore(restoreAsk.id)}
-                >
-                  restore anyway
-                </Button>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='sm'
-                  onClick={() => setRestoreAsk(null)}
-                >
-                  cancel
-                </Button>
-              </div>
-            </div>
-          )}
-        </CalloutBox>
+      {/* THE SAVE THAT DID NOT PASS (O-64, D-63): one line where the drafts' banner stood, and only
+          while a write has not passed — invalid, failed, refused, conflicted. Saving, unsaved and
+          saved are the chip's to say, in the header; this is no second chip. */}
+      {autosaveEnabled && (
+        <SaveFailureLine
+          status={autosave.status}
+          errorsCount={autosave.errorsCount}
+          message={autosave.message}
+          cause={autosave.cause}
+          refusal={autosave.refusal}
+          firstError={formErrorRows[0]}
+          onRevealError={revealError}
+          onOpenConflict={() => setConflict(true)}
+        />
       )}
 
+      {/* Frozen stays inline — it is context, not a decision. */}
       {frozen && (
         <CalloutBox tone='note' className='mt-2.5'>
           <Text size='micro'>
@@ -3333,13 +3438,16 @@ export function TechCardForm({
                 techCard={techCard}
                 active={activeTab === 'construction'}
                 // Прокладка до хрома фулскрина: его кнопка save обязана быть той же самой, что в
-                // шапке карточки, — второй путь сохранения разошёлся бы с первым.
-                onSave={() => void save()}
+                // шапке карточки, — второй путь сохранения разошёлся бы с первым. У карточки, которая
+                // сохраняет себя сама, кнопки нет и там (O-60, D-59): без прокладки хром её не рисует.
+                // Остаётся она только новой карточке, которую можно писать, — там это создание, как
+                // `add` в шапке. Не `!autosaveEnabled`: автосейв выключен и у существующей карточки без
+                // права записи, и живая кнопка там писала бы в отказ (O-60 r4, P2-2).
+                onSave={!isEditMode && canWrite(SECTION.techCards) ? () => void save() : undefined}
                 // `converting` наравне с `isSubmitting`: управляемый перевод в aux гоняет свою
                 // пере-запись МИМО handleSubmit, и без него кнопка фулскрина оставалась бы живой
                 // всё время, пока летит переворот. `saving` несёт и цикл автосейва.
                 saving={saving || converting}
-                draftPending={Boolean(draft.pending)}
                 // Якоря находок аудита («op:460», «piece:SL_INS_L») ведут по карточке. Прокладка
                 // та же, что у ленты жизненного цикла: имя вкладки приходит строкой, а `TabId`,
                 // свёрнутые псевдонимы и видимость вкладок остаются знанием этой страницы.
@@ -3484,9 +3592,9 @@ export function TechCardForm({
                   <CalloutBox tone='warning' className='mb-2.5'>
                     <Text size='micro'>
                       this style has no cost set — there is nothing to compute the margin, the
-                      payback and the economics of its colourways from, and goods sold are counted in
-                      analytics as “without a cost” and drag the shop's coverage down. add materials
-                      to the BOM or write a line item below.
+                      payback and the economics of its colourways from, and goods sold are counted
+                      in analytics as “without a cost” and drag the shop's coverage down. add
+                      materials to the BOM or write a line item below.
                     </Text>
                   </CalloutBox>
                 )}

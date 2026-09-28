@@ -8,7 +8,7 @@ import type {
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { nearestOnPolyline } from 'ui/components/annotation/geometry';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -21,7 +21,19 @@ import { FIT_INSET, FIT_MIN, fitView, revealDelta, toWorld, zoomAt, type View } 
 import { exactPalette, isMapInk, planHex } from '../colour-plan/model';
 import { pictureHandle } from '../handles';
 import { provenanceLabel, readProvenance } from '../provenance';
-import { findMediaUrlInBand, useDesignWrites } from '../use-design-band';
+import { findMediaUrlInBand, newClientRequestId, useDesignWrites } from '../use-design-band';
+import {
+  GESTURES_PER_CARD,
+  drawingFingerprint,
+  forgetGesture,
+  layerGesture,
+  type GesturePlacement,
+  ledgerFull,
+  oldestGesture,
+  rememberGesture,
+  type FlattenGesture,
+  type LayerGesture,
+} from './flatten-ledger';
 import { RASTER_FALLBACK_W, composeScene, pickSceneInk } from './rasterise-layer';
 import {
   clearImageBytes,
@@ -39,6 +51,8 @@ import {
 } from './vector-image-stroke';
 import {
   findLayerForMedia,
+  flattenOutcomeUnknown,
+  flattenRefusal,
   layerRasterUrl,
   layerRefusalText,
   uploadRaster,
@@ -957,6 +971,74 @@ function seedInitialImage(
  * входящая достраивается зеркалом» не могла выразить Alt-размыкание пары (две независимые
  * величины не восстановить из одной) и переехала туда, вырастя, — см. довод в шапке того файла. */
 
+/**
+ * What the WORKBENCH hands the editor about the picture it was opened over (27.09, O-53 phase 2):
+ * which picture an «overwrite» takes the place of, the slot that moves with it, and why overwrite
+ * is closed, when it is.
+ */
+export type VectorReplace = {
+  pictureId: number;
+  /** The bench slot holding the picture, in prose (`front`, `render · front`); null — none. */
+  slotLabel: string | null;
+  /** Why overwrite is closed, as the end of «overwrite is closed: …»; null — open. */
+  closed: string | null;
+  /**
+   * The same answer as `closed`, read NOW (D-55) — the host's own reading of its band and of the
+   * card form at the moment of the call. The editor asks it right before each write of an
+   * overwrite; `closed` is what the question was drawn with.
+   */
+  closedNow?: () => string | null;
+  /**
+   * Where a picture stands on the bench of `band`, in the same prose as `slotLabel`; null —
+   * nowhere. The editor reads it off the band re-read after an overwrite, for its toast (D-55).
+   */
+  slotOf?: (band: GetDesignBandResponse, pictureId: number) => string | null;
+};
+
+/**
+ * A flatten that was NOT sent: the card's ledger of saves without an answer is at its ceiling, and
+ * nothing unanswered is dropped to make room (`flatten-ledger.ts`, review r3). The question asks for
+ * one to be settled first.
+ */
+class LedgerAtCeiling extends Error {}
+
+/**
+ * WHAT THE RETRY RESENDS — ONE SENTENCE AND ONE NAME PER CASE (review r3, r4): the earlier overwrite
+ * of this picture or the earlier save as new, both of the drawing on screen — or an earlier save of
+ * another drawing of the layer, which the retry files instead of this one. NOT `here` (D-72′): an
+ * overwrite of ANOTHER picture of this layer — named, and sent from nowhere but that picture's
+ * editor, which is on FLAT (only the flat workbench overwrites); its `name` names no door.
+ */
+function retryWordsOf(u: LayerGesture, here: boolean): { sentence: string; name: string } {
+  if (!here)
+    return {
+      sentence:
+        'an earlier overwrite of another picture of this layer got no answer — retry it from that picture’s editor on FLAT; saving this one leaves it in place',
+      name: 'the earlier overwrite of another picture — retried from that picture’s editor',
+    };
+  if (!u.same)
+    return {
+      sentence:
+        'an earlier save of this layer got no answer — retry files that drawing once; saving this one leaves it in place',
+      name: 'retry the earlier save of this layer',
+    };
+  return u.gesture.replacePictureId
+    ? {
+        sentence: 'an earlier overwrite of this picture got no answer — retry files it once',
+        name: 'retry the earlier overwrite of this picture',
+      }
+    : {
+        sentence: 'an earlier save as new got no answer — retry files it once',
+        name: 'retry the earlier save as new',
+      };
+}
+
+/** `hh:mm` of a moment, in the viewer's time — which of the card's saves the oldest is. */
+const clockOf = (ms: number) => {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
 export function VectorModal({
   open,
   onOpenChange,
@@ -964,6 +1046,7 @@ export function VectorModal({
   band,
   base,
   slot,
+  replace,
   disabled,
   onFlattened,
   mode = 'edit',
@@ -984,6 +1067,18 @@ export function VectorModal({
    * that slot, so nothing is guessed. `slotRev` is the CAS token read with the band.
    */
   slot?: { ref: DesignBenchSlotRef; label: string; slotRev: number } | null;
+  /**
+   * ═══ «OVERWRITE OR SAVE AS NEW» — THE WORKBENCH'S QUESTION (27.09, O-53 phase 2) ═══════════════
+   *
+   * Set by the latest-generation workbench only (`run-tile.tsx`, 07-FLAT-WORKBENCH.md §3b–3d). The
+   * picture button then reads «save ›» and opens a question BEFORE anything is written — «save the
+   * edit»: «overwrite» files the edit in this picture's place (the slot that holds it moves onto
+   * the edit, the original stays in the history), «save as new» files it beside the original, ✕
+   * goes back to drawing. `closed` disables «overwrite» and says why. An earlier save of this very
+   * drawing whose answer never came puts «retry this save ›» first (D-53). Absent — every other
+   * host, the history's edits among them — the button stays «save as a new picture», always new.
+   */
+  replace?: VectorReplace | null;
   disabled?: boolean;
   /** The new picture, for a caller that wants to walk to it. */
   onFlattened?: (picture: common_DesignPicture) => void;
@@ -1048,7 +1143,15 @@ export function VectorModal({
 }) {
   const { showMessage } = useSnackBarStore();
   const { setBenchSlot } = useDesignWrites(techCardId);
-  const { saveLayer, flattenLayer } = useEditLayerWrites(techCardId);
+  const {
+    saveLayer,
+    flattenLayer,
+    invalidate: rereadBand,
+    reread: bandNow,
+  } = useEditLayerWrites(techCardId);
+  /** The host's `replace` as of the last render — for the continuations that outlive a press. */
+  const replaceRef = useRef(replace);
+  replaceRef.current = replace;
 
   /** Режим карты цветов — читается двумя десятками мест ниже, поэтому назван один раз здесь. */
   const colourMode = mode === 'colour';
@@ -1236,6 +1339,38 @@ export function VectorModal({
   const [fileMediaId, setFileMediaId] = useState(0);
   const [fileUrl, setFileUrl] = useState('');
   const [confirmExit, setConfirmExit] = useState(false);
+  /** The workbench's question is open (`replace`). Nothing is written while it stands. */
+  const [asking, setAsking] = useState(false);
+  /**
+   * A REASON THAT CLOSED OVERWRITE AFTER THE QUESTION WAS ASKED, found by the read right before a
+   * write (D-55) — the question comes back with it even when the host has not re-rendered yet.
+   * Cleared by the next «save ›», which reads the host afresh.
+   */
+  const [lateClosed, setLateClosed] = useState<string | null>(null);
+  /**
+   * THE EARLIER SAVE OF THIS LAYER WHOSE ANSWER NEVER CAME (D-53/D-54, review r4) — found in the
+   * tab's ledger when the question is asked, of any answer and any drawing; `same` — of the drawing
+   * on screen. The question's first door, «retry the earlier save ›», resends it.
+   */
+  const [unanswered, setUnanswered] = useState<LayerGesture | null>(null);
+  /**
+   * ONE PRESS AT A TIME (review r4). `busy` is render state: two presses in one task both read the
+   * render from before either of them, and both went on to save, upload and flatten — a redundant
+   * upload at best, a revision conflict at worst. This ref is set in the task of the press and let
+   * go when its work settles (`oncePerPress`); a press that finds it set does nothing.
+   */
+  const pressingRef = useRef(false);
+  /**
+   * THE CARD'S LEDGER IS AT ITS CEILING (review r3): `GESTURES_PER_CARD` saves without an answer, and
+   * nothing unanswered is dropped to make room — no new save goes out until one is settled. With no
+   * earlier save of THIS layer to retry, `settle` is the card's oldest, and the question offers it.
+   */
+  const [ledgerAtCeiling, setLedgerAtCeiling] = useState(false);
+  const [settle, setSettle] = useState<FlattenGesture | null>(null);
+  /** The question's body — where its opening looks for the door to put forward. */
+  const questionRef = useRef<HTMLDivElement | null>(null);
+  /** The retry sentence — the retry door's description (`aria-describedby`). */
+  const retrySentenceId = useId();
   const [zoomPct, setZoomPct] = useState(100);
   const [panning, setPanning] = useState(false);
   const [spaceHeld, setSpaceHeld] = useState(false);
@@ -1686,6 +1821,11 @@ export function VectorModal({
    */
   const [storedRasterId, setStoredRasterId] = useState(0);
   /**
+   * The same id, readable in the middle of a save (review r3): a gesture names the drawing it was
+   * rasterised from, pixel channel included, right after `persist` stored it — before any render.
+   */
+  const storedRasterRef = useRef(0);
+  /**
    * БАЙТЫ ХРАНИМОЙ ЖИВОПИСИ — и они приезжают ТОЛЬКО глаголом слоя.
    *
    * Полоса перечисляет слои и отдаёт `rasterMediaId`, но НЕ `rasterMedia`: пиксели слоя ей негде
@@ -1914,7 +2054,9 @@ export function VectorModal({
     setRasterDirty(false);
     rasterDirtyRef.current = false;
     dropRasterRef.current = false;
-    setStoredRasterId(loaded?.rasterMediaId ?? known?.rasterMediaId ?? 0);
+    const seededRaster = loaded?.rasterMediaId ?? known?.rasterMediaId ?? 0;
+    storedRasterRef.current = seededRaster;
+    setStoredRasterId(seededRaster);
     // БАЙТЫ И ПРОПАЖА — ТОЛЬКО ИЗ ПРОЧИТАННОГО СЛОЯ. Полоса их не несёт (см. объявление), поэтому
     // `known` здесь не участвует вовсе: подставить сюда его молчание значило бы прочитать «полоса
     // об этом не говорит» как «сервер сказал: пусто».
@@ -6009,7 +6151,9 @@ export function VectorModal({
     // на них двоих, и «пиксели ещё не сохранены» после успешной записи было бы ложью.
     seededJson.current = JSON.stringify(strokesRef.current);
     seededImages.current = JSON.stringify(imagesRef.current);
-    setStoredRasterId(stored?.rasterMediaId ?? (clearRaster ? 0 : rasterMediaId ?? storedRasterId));
+    const keptRaster = stored?.rasterMediaId ?? (clearRaster ? 0 : rasterMediaId ?? storedRasterId);
+    storedRasterRef.current = keptRaster;
+    setStoredRasterId(keptRaster);
     // Адрес идёт ЗА идентификатором, иначе пара разошлась бы: снятие обнуляет оба, загрузка
     // переставляет оба, а сохранение одних штрихов не трогает ни один.
     if (clearRaster) setStoredRasterUrl('');
@@ -6184,12 +6328,330 @@ export function VectorModal({
     }
   };
 
-  const saveAsPicture = async () => {
+  /** The layer document as a save would write it NOW — from the refs, not from the last render. */
+  const docNow = () => joinImageDoc(writeLayer(strokesRef.current, ratio), imagesRef.current);
+
+  /**
+   * «THE SAME DRAWING» as the tab's ledger names it (review r3): the document, the stored pixel
+   * channel and the layer's vector file (`drawingFingerprint`). Taken right after `persist` for a
+   * new gesture, and over the drawing on screen when an earlier one is looked for.
+   */
+  const drawingNow = (doc: string) => drawingFingerprint(doc, storedRasterRef.current, fileMediaId);
+
+  /** The card's layers as the band lists them — what lets the ledger strike a gone layer's entry. */
+  const cardLayers = () => (band.layers ?? []).map((l) => l.id ?? 0).filter((id) => id > 0);
+
+  /**
+   * ═══ THE ANSWERS THIS EDITOR MAY RESEND — AND THE DOORS FOLLOW THEM (28.09, O-63 r3, D-72′) ══════
+   *
+   * The layer is the media's (0343: one per card and base media), and one media may stand as two
+   * pictures of the card — a flat on the workbench and a render brought into SIDES, say. So the
+   * ledger's question, which stands over the LAYER (D-68: an unanswered entry of the layer is asked
+   * about in every editor of it, and never taken off by a fresh save), can find in a render editor
+   * an overwrite lost on the flat workbench. Round 2 offered it the door all the same — «retry the
+   * earlier save ›» from a render editor filing a successor to a FLAT picture. Now the RESEND door
+   * belongs to the editor whose targets cover the entry's: beside (0), or in the place of the very
+   * picture this editor is drawn over (`replace`, or the base of an editor without one — the
+   * history's over its picture, D-68 r4). Another picture's entry is named without a door, and
+   * «save as new» stays open beside it (it answers nothing of that entry). At the ceiling the settle
+   * door offers the oldest entry THIS editor may resend; with none, the text points to FLAT.
+   *
+   * ⚠ A RESEND NEVER REINTERPRETS A GESTURE THROUGH THE CURRENT EDITOR. The entry carries all the
+   * flatten needs — the layer, the rev, the raster, the target, the key — and `sendGesture` builds
+   * the body from the entry alone; the picture's kind is the server's, by the layer's base, on the
+   * wire from any editor alike. And the entry carries where the filed picture GOES (O-63 r4,
+   * D-72″): an editor opened from a slot writes the picture saved beside its base into that slot
+   * after the answer, and round 3 let `filed` read the slot of the editor doing the RESEND — a
+   * save as new lost from slot A and retried from slot B landed in B, retried from an editor
+   * without a slot it landed nowhere. Now the slot is written into the gesture when it is made
+   * (`currentPlacement`, `placement`), and the RECORDED one is replayed after EVERY answer — a
+   * fresh save's, a retry's of the drawing on screen (`filed`), and `resendEarlier`'s, of another
+   * drawing of the layer or the oldest at the ceiling (`placeAsRecorded`; round 4 left those two as
+   * filings only, Codex r4) — never this editor's: an entry without one — older than the field, or
+   * made without a slot — is a filing only.
+   */
+  const resendTargets = () => [0, replaceRef.current?.pictureId || base?.id || 0];
+  const mayResend = (gesture: FlattenGesture) => resendTargets().includes(gesture.replacePictureId);
+  /** THIS editor's slot as a gesture's placement — written into a gesture the moment it is made. */
+  const currentPlacement = (): GesturePlacement | undefined =>
+    slot ? { ref: slot.ref, slotRev: slot.slotRev, label: slot.label } : undefined;
+
+  /** Why overwrite is closed at this very moment — the host's live reading, or its last render. */
+  const closedNow = (): string | null => {
+    const host = replaceRef.current;
+    if (!host) return null;
+    return host.closedNow ? host.closedNow() : host.closed;
+  };
+
+  /**
+   * THE EARLIER SAVE OF THIS LAYER WHOSE ANSWER NEVER CAME (D-54, review r4) — any answer, any
+   * drawing — or null. It is `same` only when a save now would file exactly what it filed: the
+   * document from the refs with the stored pixels and the vector file (`drawingNow`), nothing beside
+   * them that a save would add (pixels painted since, a pending drop of the pixel channel, a paste or
+   * a picture still held in its frame), and an answer this editor gives — beside, or in the place of
+   * the picture it is drawn over. The history's editor is drawn over that same picture, so it looks
+   * for both answers too: an overwrite lost on the workbench is the history's earlier save as well.
+   * Of any other drawing of the layer the earlier save still stands first: a fresh save beside it
+   * would be a second picture if it was filed, and nothing takes it off the ledger but its answer.
+   */
+  const unansweredHere = (): LayerGesture | null => {
+    if (layerRef.current.id <= 0) return null;
+    const held = frameRef.current?.owner;
+    const pending =
+      rasterDirtyRef.current || dropRasterRef.current || held === 'paste' || held === 'image';
+    return layerGesture(
+      techCardId,
+      {
+        layerId: layerRef.current.id,
+        doc: pending ? null : drawingNow(docNow()),
+        targets: resendTargets(),
+      },
+      cardLayers(),
+    );
+  };
+
+  /**
+   * THE QUESTION, DRAWN FROM THE TAB'S LEDGER AS IT STANDS NOW (D-53/D-54, review r3, r4): an earlier
+   * save of this layer whose answer never came puts its retry first; a ledger at its ceiling lets no
+   * new save out, and with nothing of this layer to retry FROM HERE it offers the oldest of the card
+   * this editor may resend (D-72′ — none: the text points to FLAT, and no door is drawn).
+   */
+  const openQuestion = () => {
+    const layers = cardLayers();
+    const earlier = unansweredHere();
+    const atCeiling = ledgerFull(techCardId, layers);
+    setUnanswered(earlier);
+    setLedgerAtCeiling(atCeiling);
+    setSettle(
+      atCeiling && !(earlier && mayResend(earlier.gesture))
+        ? oldestGesture(techCardId, layers, mayResend)
+        : null,
+    );
+    setAsking(true);
+  };
+
+  /**
+   * OVERWRITE, JUDGED NOW (D-55). A reason the host's live reading finds closes the door before
+   * anything further is written, and the question comes back with it — «save as new» still open.
+   * True — the question was asked again.
+   */
+  const askAgainIfClosed = (): boolean => {
+    const reason = closedNow();
+    if (!reason) return false;
+    setLateClosed(reason);
+    openQuestion();
+    return true;
+  };
+
+  /**
+   * ONE FLATTEN GOES OUT — AND THIS IS THE ONLY PLACE ONE DOES (D-54). The gesture is in the tab's
+   * ledger BEFORE the request leaves: whatever happens to this editor while it is out — closed, its
+   * card switched, the tab reloaded — the key survives it. A definite answer strikes it off (the
+   * picture, or any refusal); an answer that never came leaves it there for the retry.
+   * ⚠ A LEDGER AT ITS CEILING TAKES NO NEW GESTURE, AND THEN NOTHING GOES OUT (review r3): the
+   * request is not made, `LedgerAtCeiling` is thrown, and the caller asks for one to be settled.
+   */
+  const sendGesture = async (
+    gesture: FlattenGesture,
+  ): Promise<common_DesignPicture | undefined> => {
+    if (!rememberGesture(techCardId, gesture, cardLayers()))
+      throw new LedgerAtCeiling('the card’s ledger of unanswered saves is full');
+    setBusy('filing it into the band…');
+    try {
+      const res = await flattenLayer.mutateAsync({
+        layerId: gesture.layerId,
+        expectedRev: gesture.rev,
+        mediaId: gesture.mediaId,
+        replacePictureId: gesture.replacePictureId || undefined,
+        clientRequestId: gesture.key,
+      });
+      forgetGesture(techCardId, gesture.key);
+      return res.picture;
+    } catch (error) {
+      if (!flattenOutcomeUnknown(error)) forgetGesture(techCardId, gesture.key);
+      throw error;
+    }
+  };
+
+  /**
+   * THE FLATTEN WAS FILED — close, and say where the edit stands.
+   *
+   * ⚠ «IN THE FRONT SLOT» IS READ OFF THE BAND RE-READ AFTER THE FLATTEN, NEVER REMEMBERED FROM THE
+   * QUESTION (D-55). An overwrite names no slot and echoes no slot revision: the server moves
+   * whichever slot holds the original when it files, so a slot that moved while the question stood
+   * made the remembered label a lie. A band that could not be re-read in time names no slot at all:
+   * «saved — could not re-read its slot yet».
+   *
+   * ⚠ A REPLAY CAN ANSWER WITH A PICTURE THAT NO LONGER STANDS. The server answers a key with the
+   * picture the first attempt filed IN ITS STATE NOW; if another edit has taken its place since, it
+   * comes back with `replaced_by`. Then nothing is claimed about any place — no slot is written, the
+   * band is re-read and the person is told.
+   */
+  /**
+   * ═══ THE RECORDED SLOT, WRITTEN AFTER THE ANSWER — ON EVERY WAY A GESTURE GOES OUT (O-63 r5) ═══
+   *
+   * The slot the gesture named, never this editor's (D-72″): a fresh gesture named this editor's
+   * slot as it was made; a resent one names the slot of the editor it was made in, or none. Called
+   * after every answer that filed a picture beside its base — `filed` (a fresh save, a retry of the
+   * drawing on screen) and `resendEarlier` (another drawing of the layer, the oldest at the ceiling;
+   * round 4 left those as filings only, so a save lost from slot A and retried as «another drawing»
+   * was filed and struck off with A never written — Codex r4, Moderate). Not for an overwrite (the
+   * server moves the slot itself), not for a picture another edit has since replaced.
+   * A SEPARATE CALL, AND A FAILURE HERE IS NOT A LOST DRAWING — by this point the picture EXISTS in
+   * the band; a slot CAS refusal (the recorded revision has moved) must not read as «the drawing did
+   * not go through»: it is said as «the picture is saved, but the slot was not changed». Returns the
+   * placement made, or null.
+   */
+  const placeAsRecorded = async (
+    gesture: FlattenGesture,
+    picture: common_DesignPicture | undefined,
+  ): Promise<GesturePlacement | null> => {
+    const placement = gesture.placement ?? null;
+    const superseded = (picture?.replacedBy ?? 0) > 0;
+    if (!placement || gesture.replacePictureId || superseded || !picture?.id) return null;
+    setBusy(`putting it into ${placement.label}…`);
+    try {
+      await setBenchSlot.mutateAsync({
+        slot: placement.ref,
+        pictureId: picture.id,
+        expectedSlotRev: placement.slotRev,
+      });
+      return placement;
+    } catch {
+      showMessage(
+        `the picture is saved, but the ${placement.label} slot was not changed — somebody moved it first. Put it in from the band.`,
+        'error',
+      );
+      return null;
+    }
+  };
+
+  const filed = async (gesture: FlattenGesture, picture: common_DesignPicture | undefined) => {
+    const superseded = (picture?.replacedBy ?? 0) > 0;
+    const placed = await placeAsRecorded(gesture, picture);
+    if (picture) onFlattened?.(picture);
+    onOpenChange(false);
+    if (superseded) {
+      rereadBand();
+      showMessage('saved, but another edit has already taken its place — re-read', 'error');
+    } else if (gesture.replacePictureId) {
+      /* THE SLOT IS NAMED OFF A FRESH READ, OR NOT AT ALL (review r3). The read is bounded
+         (`REREAD_BOUND_MS`): one that timed out or failed still says «saved», without a slot, and
+         the workbench catches up on its next poll — the answer to the person never waits on it. */
+      const band = await bandNow();
+      if (!band) showMessage('saved — could not re-read its slot yet', 'success');
+      else {
+        const where = picture?.id ? replaceRef.current?.slotOf?.(band, picture.id) ?? null : null;
+        showMessage(
+          `saved — the edit took the original’s place${where ? ` in the ${where} slot` : ''}`,
+          'success',
+        );
+      }
+    } else if (placed) showMessage(`saved and put into ${placed.label}`, 'success');
+    else if (replaceRef.current)
+      showMessage('saved as a new picture beside the original', 'success');
+    else if (!gesture.placement && slot)
+      /* A resend, from a slot's editor, of a gesture that named no slot (D-72″): filed, placed
+         nowhere — said so, or the person would look for it in this slot. */
+      showMessage(
+        'saved as a new picture — that save named no side, so none was changed',
+        'success',
+      );
+    else if (!slot) showMessage('saved as a new picture', 'success');
+  };
+
+  /** The flatten's own failure, in words — the save, the raster and the upload have theirs. */
+  const flattenFailed = (error: unknown, resent: boolean) => {
+    const { reason } = flattenRefusal(error);
+    if (reason === 'already_replaced') {
+      /* SOMEBODY'S EDIT TOOK THIS PICTURE'S PLACE FIRST — nothing was filed. The band is re-read
+         so the workbench shows what stands there now once this editor closes (the picture under
+         an open editor is not swapped under it, `outputPlan`'s `keep`); the drawing stays on
+         screen and saved as the layer, and «save as new» is still open. */
+      rereadBand();
+      showMessage('this picture was already replaced — re-read', 'error');
+    } else if (flattenOutcomeUnknown(error)) {
+      /* THE WAY BACK IS THE QUESTION'S FIRST DOOR (D-53, review r3): the door below opens it, and
+         «retry the earlier save ›» resends this very body — a fresh save beside it would be a
+         second gesture with a key of its own. */
+      setRefusal(
+        'no answer came back from the server, so the picture may already be filed. Save again and pick «retry the earlier save ›»: it resends this very save, and the server files it once.',
+        'picture',
+      );
+    } else if (resent && reason === 'layer_rev_mismatch') {
+      /* A RESEND REFUSED FOR ITS REVISION WAS NEVER FILED: the server answers a key it has seen
+         BEFORE it compares the rev. The drawing was saved again since, and the old gesture is over
+         — the ledger has already let it go. */
+      setRefusal(
+        'that earlier save never reached the server, and the drawing has been saved since — nothing was filed. Save it again to file the drawing as it is now.',
+        'picture',
+      );
+    } else {
+      // cut_sheet, technical_sheet, replace_mismatch, a refused slot move — the server's own words.
+      setRefusal(layerRefusalText(error));
+    }
+  };
+
+  /**
+   * A PRESS, ONCE (review r4): `work` runs only when no other press is at work, and holds the lock
+   * until it settles — the save door, the retry, the settle door and the question's doors alike.
+   */
+  const oncePerPress =
+    <A extends unknown[]>(work: (...args: A) => Promise<void>) =>
+    async (...args: A) => {
+      if (pressingRef.current) return;
+      pressingRef.current = true;
+      try {
+        await work(...args);
+      } finally {
+        pressingRef.current = false;
+      }
+    };
+
+  /**
+   * ═══ FILE THE EDIT AS A PICTURE — BESIDE ITS BASE, OR IN ITS PLACE (27.09, O-53 phase 2) ══════
+   *
+   * `answer` is what the person chose. 'new' files the edit BESIDE its base — every host, and the
+   * only thing this editor did before the workbench's question. 'overwrite' exists only under
+   * `replace` with nothing closing it: the same flatten, naming `replace.pictureId`, and the edit
+   * takes that picture's place in the latest generation (its bench slot moves onto the edit, the
+   * picture is stamped `replaced_by`; nothing is deleted — the history keeps it).
+   *
+   * EVERY PRESS HERE IS A NEW GESTURE UNDER A NEW KEY (review r3). The drawing is saved, rasterised
+   * and uploaded afresh, and the flatten carries a key minted for it (`client_request_id`), written
+   * into the tab's ledger before it is sent (`sendGesture`, D-54). An earlier save of this drawing
+   * whose answer never came is NOT resent from here — that is «retry the earlier save ›», its own
+   * door in the question (`retrySave`), which resends the stored body as is. Resent from an
+   * ordinary door, it slipped past the reasons that door has to judge (round 2 did exactly that),
+   * and in the history it filed an old raster under a drawing saved since, with a toast that said
+   * the drawing on screen was saved. Nor is it taken off the ledger by this save (review r4): it
+   * leaves by its own answer only, and the question keeps asking over the layer until it has one.
+   *
+   * ⚠ OVERWRITE IS JUDGED BEFORE ANYTHING IS WRITTEN AND AGAIN BEFORE THE FLATTEN LEAVES (D-55): the
+   * host's live reading, not the render that drew the question — a reason that landed in between (a
+   * callout pinned to the original, the original put on the technical sheet, a piece cut from it,
+   * another tab's edit) writes nothing further and asks the question again, with the reason on it.
+   *
+   * ⚠ A LEDGER AT ITS CEILING WRITES NOTHING EITHER (review r3): `GESTURES_PER_CARD` saves without an
+   * answer, and none is dropped to make room — the question comes back asking to settle one first.
+   */
+  const saveAsPicture = oncePerPress(async (answer: 'new' | 'overwrite' = 'new') => {
     if (frozen || tooLarge || !anyContent || busy) return;
+    const replacing = answer === 'overwrite' ? replaceRef.current ?? null : null;
+    // «overwrite» exists only over a named picture; a press that reaches here otherwise files nothing.
+    if (answer === 'overwrite' && !replacing?.pictureId) return;
+    const replacePictureId = replacing?.pictureId ?? 0;
     await settleFloatFirst();
     setRefusal(null);
+    if (replacing && askAgainIfClosed()) return;
+    if (ledgerFull(techCardId, cardLayers())) {
+      openQuestion();
+      return;
+    }
+    let flattening = false;
     try {
       setBusy('saving the drawing…');
+      const doc = docNow();
       const id = await persist();
 
       setBusy('rasterising…');
@@ -6198,10 +6660,11 @@ export function VectorModal({
         /* ОТКАЗ ЦЕЛИКОМ, А НЕ КАРТИНКА С ДЫРКОЙ. Слой уже сохранён выше — это правда, и она
            названа: терять человеку нечего, а сплющенная вещь без пуговицы уехала бы в верстак
            и оттуда в тех-пакет, где её никто уже не опознает как неполную. */
-        /* ⚠ И ПОЛКА БАЙТОВ ПРО ЭТИ АДРЕСА ЗАБЫВАЕТСЯ. Отказ обещает «press this again», и обещание
-           обязано быть выполнимым: без этого повтор спрашивал бы у полки тот же ответ. Полка и
-           сама не помнит провалов (см. `loadImageBytes`), но обещание не вправе опираться на то,
-           что у соседнего модуля такая политика — оно опирается на этот вызов. */
+        /* ⚠ И ПОЛКА БАЙТОВ ПРО ЭТИ АДРЕСА ЗАБЫВАЕТСЯ. Отказ обещает «press this again», и
+           обещание обязано быть выполнимым: без этого повтор спрашивал бы у полки тот же
+           ответ. Полка и сама не помнит провалов (см. `loadImageBytes`), но обещание не вправе
+           опираться на то, что у соседнего модуля такая политика — оно опирается на этот
+           вызов. */
         for (const i of flat.missing) forgetImageBytes(imagesRef.current[i]?.src ?? '');
         setRefusal(
           `${flat.missing.length === 1 ? 'one of the placed pictures' : `${flat.missing.length} of the placed pictures`} could not be fetched, so the flat would come out with a hole where it stands. The drawing itself IS saved. Remove the picture the sheet marks as gone, or wait for the media server, then press this again.`,
@@ -6219,44 +6682,141 @@ export function VectorModal({
 
       setBusy('uploading the picture…');
       const media = await uploadRaster(flat.dataUrl);
+      if (replacing && askAgainIfClosed()) return;
 
-      setBusy('filing it into the band…');
-      const res = await flattenLayer.mutateAsync({
+      const gesture: FlattenGesture = {
+        key: newClientRequestId(),
         layerId: id,
-        expectedRev: layerRef.current.rev,
+        rev: layerRef.current.rev,
+        replacePictureId,
         mediaId: media.id ?? 0,
-      });
-      const picture = res.picture;
-
-      let placed = false;
-      if (slot && picture?.id) {
-        setBusy(`putting it into ${slot.label}…`);
-        // A SEPARATE CALL, AND A FAILURE HERE IS NOT A LOST DRAWING — by this point the picture
-        // EXISTS in the band; a slot CAS refusal must not read as «the drawing did not go through».
-        try {
-          await setBenchSlot.mutateAsync({
-            slot: slot.ref,
-            pictureId: picture.id,
-            expectedSlotRev: slot.slotRev,
-          });
-          placed = true;
-        } catch {
-          showMessage(
-            `the picture is saved, but the ${slot.label} slot was not changed — somebody moved it first. Put it in from the band.`,
-            'error',
-          );
-        }
-      }
-
-      if (placed) showMessage(`saved and put into ${slot?.label}`, 'success');
-      else if (!slot) showMessage('saved as a new picture', 'success');
-      if (picture) onFlattened?.(picture);
-      onOpenChange(false);
+        doc: drawingNow(doc),
+        at: Date.now(),
+        placement: currentPlacement(),
+      };
+      flattening = true;
+      const picture = await sendGesture(gesture);
+      flattening = false;
+      await filed(gesture, picture);
     } catch (error) {
-      setRefusal(layerRefusalText(error));
+      if (error instanceof LedgerAtCeiling) openQuestion();
+      else if (flattening) flattenFailed(error, false);
+      else setRefusal(layerRefusalText(error));
     } finally {
       setBusy(null);
     }
+  });
+
+  /**
+   * «RETRY THE EARLIER SAVE ›» (D-53): the earlier gesture resent exactly as it went — its key,
+   * revision, raster and answer — with no save of the layer, no upload, and no look at what has
+   * closed overwrite since: it was made while overwrite stood open, and the server answers the key
+   * before it judges anything (with the picture it filed then, or by filing it now, once). Made of
+   * the drawing on screen (`same`), it files what is on the screen, and its answer is told the way
+   * a fresh save's is. Made of another drawing of the layer, it files THAT one: `resendEarlier`
+   * says so, and the editor stays with the drawing that is still to be saved (review r4).
+   */
+  const retrySave = oncePerPress(async () => {
+    const found = unanswered;
+    // No door for an entry this editor may not resend (D-72′) — and no resend by any other way in.
+    if (!found || !mayResend(found.gesture) || frozen || busy) return;
+    if (!found.same) {
+      await resendEarlier(found.gesture, 'layer');
+      return;
+    }
+    const gesture = found.gesture;
+    setAsking(false);
+    setRefusal(null);
+    let flattening = true;
+    try {
+      const picture = await sendGesture(gesture);
+      flattening = false;
+      await filed(gesture, picture);
+    } catch (error) {
+      if (error instanceof LedgerAtCeiling) openQuestion();
+      else if (flattening) flattenFailed(error, true);
+      else setRefusal(layerRefusalText(error));
+    } finally {
+      setBusy(null);
+    }
+  });
+
+  /**
+   * AN EARLIER SAVE RESENT AS IT WENT, WHILE THE DRAWING ON SCREEN STAYS TO BE SAVED (review r3, r4):
+   * the oldest at the ceiling this editor may resend («retry the oldest save this editor can
+   * retry ›» — of any layer of the card, D-72′), or
+   * the layer's earlier save of another drawing («retry the earlier save ›»). What it files is THAT
+   * drawing, so nothing here says the drawing on screen was saved, and the editor stays: saving it
+   * is the next press. Whatever the server says, the entry is settled — the picture it filed, or a
+   * refusal, which proves nothing was filed under that key; only a missing answer leaves it listed.
+   * Filed, the picture goes where the gesture said (`placeAsRecorded`, O-63 r5) — the slot of the
+   * editor it was made in, never this one's — and the toast names that slot.
+   */
+  const resendEarlier = async (gesture: FlattenGesture, which: 'oldest' | 'layer') => {
+    if (frozen || busy) return;
+    const what =
+      which === 'oldest'
+        ? 'the oldest save this editor can retry'
+        : 'the earlier save of this layer';
+    const next =
+      which === 'oldest' ? 'this drawing can be saved now' : 'this drawing is not filed yet';
+    setAsking(false);
+    setRefusal(null);
+    try {
+      const picture = await sendGesture(gesture);
+      const put = await placeAsRecorded(gesture, picture);
+      rereadBand();
+      showMessage(
+        `${what} is filed${put ? ` and put into ${put.label}` : ''} — ${next}`,
+        'success',
+      );
+    } catch (error) {
+      if (error instanceof LedgerAtCeiling) openQuestion();
+      else if (flattenOutcomeUnknown(error))
+        showMessage(`${what} still got no answer — it stays on the list`, 'error');
+      else {
+        rereadBand();
+        showMessage(
+          `${what} was refused, so nothing was filed under it — it is off the list; ${next}`,
+          'success',
+        );
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** «RETRY THE OLDEST SAVE THIS EDITOR CAN RETRY ›» — THE WAY OUT OF A FULL LEDGER: `resendEarlier`. */
+  const settleOldest = oncePerPress(async () => {
+    if (settle) await resendEarlier(settle, 'oldest');
+  });
+
+  /**
+   * «save ›» under `replace`: the question opens; nothing is written until it is answered. The
+   * tab's ledger is read here — an earlier save of this layer whose answer never came is the
+   * question's first door (D-53/D-54, review r4).
+   */
+  const askToSave = () => {
+    if (frozen || tooLarge || !anyContent || busy || pressingRef.current) return;
+    setLateClosed(null);
+    openQuestion();
+  };
+
+  /**
+   * «save as a new picture» where nothing asks (the history, the empty studio) saves at once —
+   * unless the tab's ledger has something to say first (review r3, r4: one behaviour for both
+   * editors). An earlier save of this layer whose answer never came — an overwrite lost on the
+   * workbench, a save as new, of this drawing or another — or a ledger at its ceiling opens the same
+   * question here: the retry first, a fresh save one press away.
+   */
+  const askOrSave = () => {
+    if (frozen || tooLarge || !anyContent || busy || pressingRef.current) return;
+    if (!unansweredHere() && !ledgerFull(techCardId, cardLayers())) {
+      void saveAsPicture('new');
+      return;
+    }
+    setLateClosed(null);
+    openQuestion();
   };
 
   const saveBlob = (blob: Blob) => {
@@ -6641,11 +7201,27 @@ export function VectorModal({
    */
   const anyCallout = unreadable || readPending || readFailed || !!refusal || tooLarge || fileOnly;
 
-  const saveNote = base
-    ? `saving writes the vector over «${pictureHandle(base)}» into a NEW picture — a sibling of the base${
-        slot ? `, taking the ${slot.label} slot` : ''
-      }. The original is never overwritten. «Save the drawing only» keeps the strokes and makes no picture.`
-    : 'no raster underneath: the vector base is the drawing itself — it lands on the upload shelf as its own single-picture batch.';
+  /**
+   * WHY «OVERWRITE» IS SHUT IN THE QUESTION: the host's reason as of this render — it re-renders
+   * with its band and with the card form it watches (D-55) — or the one a read right before a write
+   * found (`lateClosed`) when the host had not caught up yet.
+   */
+  const overwriteShut = replace ? replace.closed ?? lateClosed : null;
+  /** The earlier save named first is one THIS editor may resend — its door is drawn (D-72′). */
+  const retryHere = !!unanswered && mayResend(unanswered.gesture);
+
+  /* ON THE WORKBENCH THE NOTE SAYS WHAT THE QUESTION WILL ASK (O-53 phase 2): «never overwritten»
+     beside an «overwrite» door would read as a contradiction — the pixels are still never changed,
+     but the edit may take the original's place. */
+  const saveNote = !base
+    ? 'no raster underneath: the vector base is the drawing itself — it lands on the upload shelf as its own single-picture batch.'
+    : replace
+      ? `saving asks first: the edit takes the place of «${pictureHandle(base)}» in the latest generation${
+          replace.slotLabel ? ` and in the ${replace.slotLabel} slot` : ''
+        }, or stands beside it as a NEW picture. Either way the original stays in the history, untouched. «Save the drawing only» keeps the strokes and makes no picture.`
+      : `saving writes the vector over «${pictureHandle(base)}» into a NEW picture — a sibling of the base${
+          slot ? `, taking the ${slot.label} slot` : ''
+        }. The original is never overwritten. «Save the drawing only» keeps the strokes and makes no picture.`;
 
   /**
    * ГДЕ СТОИТ ШАБЛОН — ОДИН ОТВЕТ НА ДВА ЭЛЕМЕНТА (над растром и под ним).
@@ -6941,7 +7517,10 @@ export function VectorModal({
                 <>
                   <Pill tone='ink'>base: {pictureHandle(base)}</Pill>
                   <Text size='nano' variant='label' component='span' className='hidden lg:inline'>
-                    {provenanceLabel(readProvenance(base))} · the original is never overwritten
+                    {provenanceLabel(readProvenance(base))} ·{' '}
+                    {replace
+                      ? 'the original stays in the history'
+                      : 'the original is never overwritten'}
                   </Text>
                 </>
               ) : (
@@ -7087,9 +7666,15 @@ export function VectorModal({
                         variant='main'
                         size='sm'
                         disabled={!ready}
-                        onClick={saveAsPicture}
+                        data-save-picture={replace ? 'ask' : 'new'}
+                        onClick={replace ? askToSave : askOrSave}
+                        title={
+                          replace
+                            ? 'make a picture of this edit — you choose: overwrite the one it is drawn over, or save it beside'
+                            : undefined
+                        }
                       >
-                        {busy ?? 'save as a new picture'}
+                        {busy ?? (replace ? 'save ›' : 'save as a new picture')}
                       </Button>
                   </>
                 )}
@@ -7145,9 +7730,9 @@ export function VectorModal({
                           size='sm'
                           disabled={!ready}
                           data-refusal-door='picture'
-                          onClick={saveAsPicture}
+                          onClick={replace ? askToSave : askOrSave}
                         >
-                          {busy ?? 'save as a new picture'}
+                          {busy ?? (replace ? 'save ›' : 'save as a new picture')}
                         </Button>
                       </div>
                     )}
@@ -8381,6 +8966,167 @@ export function VectorModal({
               picture.
             </Text>
           </ConfirmationModal>
+
+          {/* ═══ «SAVE THE EDIT» — OVERWRITE OR SAVE AS NEW (27.09, O-53 phase 2) ═════════════════
+              The exit guard's grammar: a ConfirmationModal inside this Dialog.Content, focus handed
+              back to the editor on close. On the workbench (`replace`) its three ways out are three
+              different acts: «overwrite» (disabled with the reason when closed), «save as new», and
+              ✕ / Esc — back to drawing, nothing written. Esc closes ONLY the question: it is the top
+              layer.
+              An earlier save of this LAYER whose answer never came stands FIRST, with its own door
+              (D-53, review r4): «retry the earlier save ›» resends it as it went, whatever closed
+              overwrite since. Its one sentence says which save that is — an overwrite of this
+              picture or a save as new, both of the drawing on screen, or a save of another drawing
+              of the layer, which the retry files instead of this one — and so does its accessible
+              name. The doors below it make a FRESH save and leave the earlier one in place.
+              THE HISTORY ASKS TOO, BUT ONLY THEN (review r3, r4): there «save as a new picture»
+              opens this question when the ledger has an unanswered save of this layer, of any answer
+              and any drawing, or is at its ceiling — the retry first, «save as a new picture» a
+              fresh save, «keep editing» back to drawing.
+              AT THE CEILING no door here saves anew: settle one first — the retry above, or, with
+              nothing of this layer to retry, «retry the oldest save this editor can retry ›» — said
+              so in the door, its accessible name and the toast (D-72″: the oldest is chosen among
+              what this editor may resend, and an older foreign save may stand on the list).
+              THE DOOR IS THE EDITOR'S THAT MAY RESEND (28.09, O-63 r3, D-72′): an entry aimed at
+              another picture of the layer is named without a door — «retry it from that picture's
+              editor on FLAT» — and the doors below stay as they are; the settle door offers only the
+              oldest entry this editor may resend, and with none the sentence points to FLAT and no
+              door is drawn (`mayResend`, the argument above `resendTargets`).
+              THE DOOR PUT FORWARD TAKES THE FOCUS AS THE QUESTION OPENS — inside the question's own
+              focus scope (`onOpenAutoFocus`), not by a timer that could pull the focus back from
+              wherever the person had already moved it. Enter on the retry resends a key the server
+              answers once — nothing can be filed twice by it.
+              ⚠ THE WRAPPER STOPS THE KEYS AT THE QUESTION. A portal's events still bubble through
+              the React tree into this editor's key router, and there Space is taken for the hand
+              tool (preventDefault — a focused «overwrite» would not press) and ⌘Z would undo the
+              drawing behind the question. `display: contents` — the wrapper draws nothing. */}
+          <div
+            className='contents'
+            onKeyDown={(event) => event.stopPropagation()}
+            onKeyUp={(event) => event.stopPropagation()}
+          >
+            <ConfirmationModal
+              open={asking}
+              onOpenChange={setAsking}
+              onConfirm={() => void saveAsPicture(replace ? 'overwrite' : 'new')}
+              onCancel={replace ? () => void saveAsPicture('new') : undefined}
+              width='md'
+              title='save the edit'
+              confirmLabel={replace ? 'overwrite' : 'save as a new picture'}
+              cancelLabel={replace ? 'save as new' : 'keep editing'}
+              confirmDisabled={ledgerAtCeiling || (!!replace && !!overwriteShut)}
+              cancelDisabled={!!replace && ledgerAtCeiling}
+              onOpenAutoFocus={(event) => {
+                const door = questionRef.current?.querySelector<HTMLButtonElement>(
+                  '[data-retry-door], [data-settle-door]',
+                );
+                if (!door || door.disabled) return;
+                event.preventDefault();
+                door.focus();
+              }}
+              onCloseAutoFocus={(event) => {
+                event.preventDefault();
+                contentRef.current?.focus();
+              }}
+            >
+              <div
+                ref={questionRef}
+                className='space-y-1.5'
+                data-save-question={replace?.pictureId ?? 0}
+              >
+                {unanswered && (
+                  <div
+                    data-retry-save={unanswered.gesture.replacePictureId ? 'overwrite' : 'new'}
+                    data-retry-drawing={unanswered.same ? 'same' : 'other'}
+                    data-retry-from={retryHere ? 'here' : 'elsewhere'}
+                  >
+                    <CalloutBox tone='warning'>
+                      <Text size='micro' component='p' id={retrySentenceId}>
+                        {retryWordsOf(unanswered, retryHere).sentence}
+                      </Text>
+                      {retryHere && (
+                        <div className='mt-1.5'>
+                          <Button
+                            type='button'
+                            variant='main'
+                            size='sm'
+                            disabled={!!busy}
+                            data-retry-door=''
+                            aria-label={retryWordsOf(unanswered, retryHere).name}
+                            aria-describedby={retrySentenceId}
+                            onClick={() => void retrySave()}
+                            title={`resends the earlier «${unanswered.gesture.replacePictureId ? 'overwrite' : 'save as new'}» exactly as it went — the same key, revision and raster: the server files it once, or answers with the picture it already filed`}
+                          >
+                            retry the earlier save ›
+                          </Button>
+                        </div>
+                      )}
+                    </CalloutBox>
+                  </div>
+                )}
+                {ledgerAtCeiling && (
+                  <div
+                    data-ledger-ceiling={GESTURES_PER_CARD}
+                    data-settle-from={settle || retryHere ? 'here' : 'elsewhere'}
+                  >
+                    <CalloutBox tone='warning'>
+                      <Text size='micro' component='p'>
+                        {settle || retryHere
+                          ? `${GESTURES_PER_CARD} earlier saves of this card have no answer yet — settle one before saving again`
+                          : `${GESTURES_PER_CARD} earlier saves of this card have no answer yet, and none of them can be resent from here — settle one from its picture’s editor on FLAT before saving again`}
+                      </Text>
+                      {settle && (
+                        <div className='mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1'>
+                          <Button
+                            type='button'
+                            variant='main'
+                            size='sm'
+                            disabled={!!busy}
+                            data-settle-door=''
+                            aria-label={`retry the oldest save this editor can retry, ${settle.replacePictureId ? 'an overwrite' : 'a save as new'} from ${clockOf(settle.at)}`}
+                            onClick={() => void settleOldest()}
+                          >
+                            retry the oldest save this editor can retry ›
+                          </Button>
+                          <Text size='micro' variant='label' component='span'>
+                            {settle.replacePictureId ? 'an overwrite' : 'a save as new'} from{' '}
+                            {clockOf(settle.at)}
+                          </Text>
+                        </div>
+                      )}
+                    </CalloutBox>
+                  </div>
+                )}
+                {replace ? (
+                  <>
+                    <Text size='micro' component='p'>
+                      <b>overwrite</b> — the edit takes this picture&rsquo;s place in the latest
+                      generation
+                      {replace.slotLabel ? ` and in the ${replace.slotLabel} slot` : ''}. the
+                      original stays in the generation history; nothing is deleted.
+                    </Text>
+                    <Text size='micro' component='p'>
+                      <b>save as new</b> — the edit is added beside the original
+                      {replace.slotLabel
+                        ? `; the ${replace.slotLabel} slot keeps the original`
+                        : ''}
+                      .
+                    </Text>
+                  </>
+                ) : (
+                  <Text size='micro' component='p'>
+                    <b>save as a new picture</b> — the drawing as it is now is filed beside its
+                    base.
+                  </Text>
+                )}
+                {replace && overwriteShut && (
+                  <Text size='micro' variant='label' component='p' data-overwrite-closed=''>
+                    overwrite is closed: {overwriteShut}.
+                  </Text>
+                )}
+              </div>
+            </ConfirmationModal>
+          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

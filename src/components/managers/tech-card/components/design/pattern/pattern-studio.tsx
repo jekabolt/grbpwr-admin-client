@@ -251,7 +251,7 @@ export function PatternStudio({
     >
       {unsavedSlots > 0 && shown.length > 0 && (
         <Text size='micro' variant='label' component='p' data-slots-unsaved={unsavedSlots}>
-          {`save the card to make swatches for ${unsavedSlots} new slot${unsavedSlots === 1 ? '' : 's'}`}
+          {`the card is not saved yet — swatches for ${unsavedSlots} new slot${unsavedSlots === 1 ? '' : 's'} wait for it`}
         </Text>
       )}
 

@@ -93,7 +93,10 @@ export async function publishPatternSizeIndex(input: {
 
   const sheetLineKeys = sheets.map((s) => (s.lineKey ?? '').trim()).filter(Boolean);
   if (sheetLineKeys.length !== sheets.length) {
-    return { ok: false, reason: 'some sheets have no identifier — save the card' };
+    return {
+      ok: false,
+      reason: 'some sheets have no identifier yet — retry once the card has saved',
+    };
   }
 
   try {
@@ -121,7 +124,8 @@ export async function publishPatternSizeIndex(input: {
     if (stale) {
       return {
         ok: false,
-        reason: 'the server has a different set of sheets — save the card and retry the check',
+        reason:
+          'the server has a different set of sheets — retry the check once the card has saved',
       };
     }
     return { ok: false, reason: e instanceof Error ? e.message : "the server didn't accept the index" };

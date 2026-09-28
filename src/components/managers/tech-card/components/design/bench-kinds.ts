@@ -307,8 +307,12 @@ export function pictureRepresentation(
  * type checker stops on the day the contract grows, and a person decides whether the stamp should
  * carry the new fact too. The generated type already declares every field `| undefined`, so no
  * consumer is entitled to assume presence — this constant only makes that explicit at the seam.
+ *
+ * Exported for the one other stamp of the same kind: the «brought» group of FABRIC RENDER's history
+ * (`broughtRun`, `render/render-tile.tsx`), whose plates may all come from the bench rather than
+ * from this list — a hidden plate held in a column SIDES does not draw (O-63 r2, D-72 п.2).
  */
-const RUN_NOT_STATED: common_DesignRun = {
+export const RUN_NOT_STATED: common_DesignRun = {
   id: undefined,
   techCardId: undefined,
   kind: undefined,

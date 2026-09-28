@@ -8,7 +8,7 @@ import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ANNOTATION_EDITOR_H } from './annotation/editor';
 import {
   AnnotationSurface,
@@ -28,10 +28,11 @@ import { Toolbar, ToolbarSpacer } from './toolbar';
 
 // An annotate-in-place gallery. Two layouts over one set of bindings:
 //
-//   `grid`     EVERY view visible at once, each with its own pins — the tech-card sketch and
-//              moodboard AND the fitting photos. Comparing front to back is how both a tech
-//              review and a fitting conversation actually go, so nothing should have to be
-//              clicked to see both.
+//   `grid`     EVERY view on the surface itself, each with its own pins — no thumbnail to click
+//              first. Comparing front to back is how both a tech review and a fitting
+//              conversation actually go. The views stand in one row that scrolls sideways (the
+//              moodboard: a strip of equal-height frames, its only layout since O-59; the fitting
+//              photos) or wrap into rows with `railWrap` (the sketch sheet's grid).
 //   `focused`  ONE large image + a thumbnail carousel. No caller left: the fitting used to stand
 //              here, and a second grammar on one component is what let the focused frame collapse
 //              to zero width unnoticed for a whole day. Kept because it is still a legitimate
@@ -207,7 +208,7 @@ export type FocusedAnnotatorProps = {
   purpose: string;
   pickerAspectRatio?: string[];
 
-  /** `focused` = one big image + thumbs. `grid` = every view at once, each with its own pins. */
+  /** `focused` = one big image + thumbs. `grid` = every view on the surface, each with its pins. */
   layout?: 'focused' | 'grid';
   emptyLabel: string;
   /** Aspect used only when a media has no known dimensions (e.g. '4/5', '3/4'). */
@@ -342,21 +343,24 @@ export type FocusedAnnotatorProps = {
    *
    * По умолчанию порядок обратный — так стоит лист эскиза, где переключатель вида читательский и
    * жмётся редко, а виды указаний — рабочий инструмент под правой рукой. Мудборд требует
-   * обратного (U-3): strip/grid справа сверху блока, виды указаний слева на том же уровне.
+   * обратного (U-3): виды указаний слева (его переключатель strip/grid справа снят O-59).
    * Проп, а не второй компонент полосы: две полосы разошлись бы по подсказке и по стрелкам.
    */
   kindsFirst?: boolean;
   /**
-   * Только вместе с `gridRowHeight` и только без `railWrap`: филмстрип ПЕРЕНОСИТСЯ ПО СТРОКАМ
-   * вместо горизонтальной прокрутки.
-   *
-   * Это третья раскладка, а не оттенок второй, и она отвечает на вопрос, которого у листа эскиза
-   * не было: «покажи все кадры разом, но одной высоты». `railWrap` даёт «все разом» ценой РАЗНОЙ
-   * высоты (плитка меряется шириной), `gridRowHeight` даёт равную высоту ценой одной строки. На
-   * мудборде владелец требует и того и другого (U-4: высоты всегда равны, ширины могут гулять),
-   * поэтому режимы совмещены явным пропом, а не молчаливым изменением смысла `railWrap`.
+   * СЛОТ «+ ДОБАВИТЬ» — ПЕРВЫМ В ЛЕНТЕ, А НЕ ПОСЛЕДНИМ (27.09, O-62; раскладка `grid`). Порядком
+   * DOM, а не `order:` — Tab и экранный диктор идут за глазом. Номера кадров, адреса указаний и
+   * перестановка от этого не меняются: позиция 0 — по-прежнему первая КАРТИНКА, а слот в
+   * перестановке не участвует (он не плитка `registerTile`), и встать перед ним картинке некуда.
    */
-  wrapRows?: boolean;
+  addFirst?: boolean;
+  /**
+   * ПОКАЗАТЬ ДОБАВЛЕННУЮ КАРТИНКУ (27.09, O-62 r3; раскладка `grid`). Новые картинки встают в КОНЕЦ
+   * ленты, и при слоте «+» в её начале (`addFirst`) ложились за правым краем. С этим пропом лента
+   * один раз доезжает до первой из них, а библиотека, закрываясь, возвращает фокус слоту без
+   * прокрутки. Только мудборд: у примерки и листа эскиза всё как было.
+   */
+  revealAdded?: boolean;
   /**
    * Стрелки ‹ › над рельсой. По умолчанию есть (лист эскиза листает ими полосу в 480px); мудборд
    * их снимает: его лента и так короче экрана чаще всего, а прокрутка остаётся жестом и
@@ -447,7 +451,8 @@ export function FocusedAnnotator({
   railWrap = false,
   viewControls,
   kindsFirst = false,
-  wrapRows = false,
+  addFirst = false,
+  revealAdded = false,
   railArrows = true,
   editorHeight = ANNOTATION_EDITOR_H,
   pinText = 'legend',
@@ -513,16 +518,46 @@ export function FocusedAnnotator({
   /** Индекс кадра, открытого во весь экран. */
   const [zoomIndex, setZoomIndex] = useState<number | null>(null);
   const [focusedId, setFocusedId] = useState<number | null>(null);
-  // +1 for the trailing "+ add view" slot, which is part of what can overflow.
+  // +1 for the "+ add view" slot (trailing, or leading with `addFirst`), part of what can overflow.
   const rail = useRailScroll(views.length + 1);
+  /**
+   * КАДР, ТОЛЬКО ЧТО ЛЁГШИЙ НА ЛЕНТУ, ВИДЕН (27.09, O-62 r3, ревью Codex; `revealAdded`). Выбор
+   * отдаёт id добавленных (`onPickMedia`), и когда первый из них нарисован, он ОДИН раз
+   * прокручивается в ленту — к её левому краю, `inline: 'start'` (у конца ленты — сколько позволит
+   * её длина): лента щёлкает по НАЧАЛАМ плиток (`snap-start`), и остановка «правым краем к правому
+   * краю» перещёлкнулась бы к соседнему началу, пряча кадр наполовину; заодно видны и кадры,
+   * добавленные вместе с ним. По вертикали — `nearest`: страница не едет, если кадр и так виден.
+   * Виден кадр целиком — не двигается ничего. Плавно — кроме тех, кто просил систему не двигать
+   * картинку.
+   *
+   * УДЕРЖАНИЯ НЕТ. Назад ленту уводил фокус, который библиотека возвращает слоту после закрытия
+   * (Radix: `trigger.focus()` без `preventScroll`), — теперь он возвращается без прокрутки
+   * (`returnFocusWithoutScroll` у слота), и после показа ленту двигает только сам человек.
+   */
+  const [revealId, setRevealId] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (revealId == null) return;
+    const strip = rail.ref.current;
+    const tile = strip?.querySelector<HTMLElement>(`[data-rail-view="${revealId}"]`);
+    // Кадра ещё нет на ленте — он придёт со следующими `views`.
+    if (!strip || !tile) return;
+    setRevealId(null);
+    const s = strip.getBoundingClientRect();
+    const t = tile.getBoundingClientRect();
+    if (t.left >= s.left - 1 && t.right <= s.right + 1) return;
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    tile.scrollIntoView({
+      inline: 'start',
+      block: 'nearest',
+      behavior: reduced ? 'auto' : 'smooth',
+    });
+  }, [revealId, views, rail.ref]);
 
   const isGrid = layout === 'grid';
   // Перенос по строкам — режим ЧТЕНИЯ листа целиком; он старше филмстрипа, поэтому гасит его.
   const wrap = isGrid && railWrap;
   // Filmstrip mode: fixed-height, natural-width tiles, horizontal-only scroll (the moodboard).
   const rowMode = isGrid && gridRowHeight != null && !wrap;
-  // …и тот же филмстрип, разложенный по строкам: высота у кадров общая, ширина своя, прокрутки нет.
-  const rowsWrap = rowMode && wrapRows;
   /** Плитки взяты в режим выбора: накладка перекрывает кадр, и указание поставить нельзя. */
   const picking = isGrid && !!tilePick?.active;
   // Взведённый инструмент постановки гасится вместе со взводом выбора. Накладка и так не дала бы
@@ -546,7 +581,11 @@ export function FocusedAnnotator({
   // immediately annotatable.
   function handlePick(items: common_MediaFull[]) {
     const added = onPickMedia(items);
-    if (added.length && added[0] != null) setFocusedId(added[0]);
+    if (added.length && added[0] != null) {
+      setFocusedId(added[0]);
+      // На ленте мудборда — ещё и показать его (см. `revealId`).
+      if (revealAdded && isGrid) setRevealId(added[0]);
+    }
   }
 
   // ⌘V И БРОСОК ПРЯМО В ГАЛЕРЕЮ. Референс почти всегда рождается в буфере — скрин с чужого показа,
@@ -738,6 +777,28 @@ export function FocusedAnnotator({
     />
   );
 
+  /* "+ add view" — a dashed slot in the grid itself, so the empty spot IS the control that fills
+     it. Clicking opens the media library: a sketch view is nearly always an image that already
+     exists, and sending the click straight to the OS file dialog made the library the harder path
+     to reach. Dropping a file on the tile — or ⌘V — goes through the intake dialog: that gesture
+     already carries the picture, and what it needs is a look and a crop, not a silent upload.
+     Trailing by default; `addFirst` puts it before the pictures (O-62). */
+  const railAddSlot = readOnly ? null : (
+    <MediaSlot
+      aspectRatio={pickerAspectRatio ?? ['Custom']}
+      frameAspect={fallbackAspect}
+      heightPx={rowMode ? gridRowHeight : undefined}
+      label={addLabel}
+      purpose={purpose}
+      allowMultiple
+      showVideos
+      onSelect={handlePick}
+      returnFocusWithoutScroll={revealAdded}
+      sizeClassName={rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]'}
+      className='shrink-0 snap-start'
+    />
+  );
+
   return (
     <div className='space-y-2.5' {...regionHandlers}>
       {hasMedia &&
@@ -815,52 +876,41 @@ export function FocusedAnnotator({
             // кадра и сама перекидывается выше/ниже пина, чтобы не выходить за кадр — поэтому
             // обрезка её не касается. `py-1` buys back the common case.
             //
-            // …КРОМЕ РЕЖИМА «ГРИДОМ». Там та же лента переносится по строкам: пятнадцать
-            // референсов мудборда сравнивают между собой, а не листают. Отдельного компонента для
-            // этого не заводится — это один класс на той же рельсе, и стрелки ‹ › исчезают сами,
-            // потому что `rail.overflowing` при переносе становится false.
+            // …КРОМЕ ПЕРЕНОСА ПО СТРОКАМ (`railWrap`). Отдельного компонента для него не заводится —
+            // это один класс на той же рельсе, и стрелки ‹ › исчезают сами, потому что
+            // `rail.overflowing` при переносе становится false. (Сетка мудборда — филмстрип,
+            // перенесённый по строкам, — снята вместе с его режимом, O-59.)
             className={cn(
               'flex items-start gap-2 py-1',
-              wrap || rowsWrap ? 'flex-wrap' : 'snap-x snap-mandatory overflow-x-auto',
+              wrap ? 'flex-wrap' : 'snap-x snap-mandatory overflow-x-auto',
               // Filmstrip: only the horizontal axis scrolls. Ничего полезного вертикальная
               // обрезка не режет: ховер-плашка пина НЕ в портале (прежний комментарий врал), но
               // держится внутри кадра сама — см. слой маркеров в surface.tsx.
-              rowMode && !rowsWrap && 'overflow-y-hidden',
+              rowMode && 'overflow-y-hidden',
             )}
           >
+            {addFirst && railAddSlot}
             {views.map((v, i) => {
               const url = mediaUrl(v.full);
               const dim = v.full?.media?.fullSize ?? v.full?.media?.thumbnail;
               return (
                 <div
                   key={v.key}
+                  data-rail-view={v.mediaId}
                   ref={canOrder ? reorder.registerTile(i) : undefined}
                   {...(canOrder ? reorder.tileProps(i) : {})}
                   className={cn(
                     'relative shrink-0 space-y-1',
-                    !wrap && !rowsWrap && 'snap-start',
+                    !wrap && 'snap-start',
                     rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]',
-                    // K-12 · ШИРОКИЙ РЕФЕРЕНС ЛИСТАЕТСЯ В СВОЕЙ КОРОБКЕ, А НЕ ТАЩИТ СТРАНИЦУ.
-                    //
-                    // Только у ПЕРЕНОСЯЩИХСЯ веток, и это ровно то место, где дыра. У ленты
-                    // (`!wrap && !rowsWrap`) контейнер выше несёт `overflow-x-auto`, то есть
-                    // широкая плитка там уже листается внутри ленты — трогать нечего. А ветка
-                    // «гридом» получает `flex-wrap` ВМЕСТО `overflow-x-auto`, при этом плитка
-                    // остаётся `shrink-0` и `w-fit` при ФИКСИРОВАННОЙ высоте кадра
-                    // (mood-board.tsx:255 → 280px, frameStyle на :686). Ширина плитки = 280 ×
-                    // пропорция снимка, сверху ничем не ограничена, сжаться не может, и обрезать
-                    // её нечему — поэтому один панорамный референс уносил вбок ВСЮ страницу.
-                    //
-                    // ЗАМЕРЕНО (scripts/techcard-hscroll-probe.mjs, окно 1280, доступно 1066px):
-                    // 3:2 → 420px, 16:9 → 498px, 21:9 → 653px влезают; 4:1 → 1120px, то есть
-                    // плитка шире своей коробки на +54px, и документ едет вбок на +27px.
-                    //
-                    // Чинится ПРИЧИНА, а не след: `overflow-x-hidden` поверх спрятал бы часть
-                    // снимка, а `max-w-full` в одиночку — сплющил бы кадр. Здесь кадр остаётся
-                    // ровно своих пропорций (это условие корректности, а не вкус: доли выносок
-                    // считаются от кадра, и подмена пропорции увела бы каждую выноску не туда),
-                    // а плитка перестаёт быть шире контейнера и листает свой снимок сама.
-                    (wrap || rowsWrap) && 'max-w-full overflow-x-auto',
+                    // K-12 · ШИРОКИЙ РЕФЕРЕНС ЛИСТАЕТСЯ В СВОЕЙ КОРОБКЕ, А НЕ ТАЩИТ СТРАНИЦУ. У ленты
+                    // контейнер выше несёт `overflow-x-auto`, и широкая плитка листается в ней; у
+                    // переноса по строкам (`railWrap`) контейнер его не несёт, и плитка не шире
+                    // своей коробки — листает свой снимок сама. Ветки «сеткой» (филмстрип,
+                    // перенесённый по строкам, где `w-fit`-плитка при фиксированной высоте уносила
+                    // вбок страницу, K-12, и кропалась в своём скроллере, E-30) больше нет — снята
+                    // вместе с режимом мудборда (O-59).
+                    wrap && 'max-w-full overflow-x-auto',
                     // ЦЕЛЬ БРОСКА — ОБВОДКОЙ, А НЕ РАМКОЙ. Канон соседней галереи красит рамку, но
                     // там она у плитки уже есть; здесь рамку несёт сам кадр, и заведённая ради
                     // подсветки прозрачная рамка съедала бы два пикселя ширины у КАЖДОЙ плитки
@@ -878,25 +928,9 @@ export function FocusedAnnotator({
                     preferNaturalAspect={preferNaturalAspect}
                     className={rowMode ? 'w-fit' : undefined}
                     frameClassName={rowMode ? 'w-auto' : 'w-full'}
-                    // РЯД, ПЕРЕНЕСЁННЫЙ ПО СТРОКАМ, УПИРАЕТСЯ В ШИРИНУ, А НЕ В ВЫСОТУ (E-30).
-                    //
-                    // Жёсткая высота задаёт ширину («высота × пропорция»), и панорама 4:1 при
-                    // 280px просит 1120px — шире доски. Пока это была `frameStyle.height`, лишняя
-                    // ширина уходила в СОБСТВЕННЫЙ горизонтальный скроллер плитки (K-12, чтобы не
-                    // утащить страницу вбок): снимок целый, но виден не весь, и владелец назвал
-                    // это «в грид вью картинки кропаются». ЗАМЕРЕНО (`ml-dbg-grid.mjs`): доска
-                    // 1018px, кадр 1120×280 — плитка листает 102px снимка.
-                    //
-                    // `rowHeightPx` меняет, ЧТО уступает: ширина упирается в место, высоту считает
-                    // пропорция. Ряд остаётся ровным для всех кадров, которые влезают; не влезающий
-                    // становится ниже — «равные высоты» уступают «не кропать», как и сказано
-                    // словами владельца.
-                    //
-                    // ФИЛМСТРИП (одна строка) ЖИВЁТ ПО-ПРЕЖНЕМУ: там вбок листается САМ РЯД, это
-                    // его смысл, и укорачивать в нём панораму значило бы отвечать на вопрос,
-                    // которого не задавали.
-                    rowHeightPx={rowsWrap ? gridRowHeight : undefined}
-                    frameStyle={rowMode && !rowsWrap ? { height: gridRowHeight } : undefined}
+                    // ФИЛМСТРИП: высота кадра общая, ширину считает пропорция, вбок листается сам
+                    // ряд — панораму в нём не укорачивают.
+                    frameStyle={rowMode ? { height: gridRowHeight } : undefined}
                     callouts={calloutsFor(v.mediaId)}
                     frozen={readOnly}
                     tool={tool}
@@ -1011,26 +1045,7 @@ export function FocusedAnnotator({
               );
             })}
 
-            {/* "+ add view" — a dashed slot in the grid itself, so the empty spot IS the control
-                that fills it. Clicking opens the media library: a sketch view is nearly always an
-                image that already exists, and sending the click straight to the OS file dialog
-                made the library the harder path to reach. Dropping a file on the tile — or ⌘V —
-                goes through the intake dialog: that gesture already carries the picture, and what
-                it needs is a look and a crop, not a silent upload. */}
-            {!readOnly && (
-              <MediaSlot
-                aspectRatio={pickerAspectRatio ?? ['Custom']}
-                frameAspect={fallbackAspect}
-                heightPx={rowMode ? gridRowHeight : undefined}
-                label={addLabel}
-                purpose={purpose}
-                allowMultiple
-                showVideos
-                onSelect={handlePick}
-                sizeClassName={rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]'}
-                className='shrink-0 snap-start'
-              />
-            )}
+            {!addFirst && railAddSlot}
           </div>
 
           {!hasMedia && (
