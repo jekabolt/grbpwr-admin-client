@@ -27,6 +27,7 @@ import {
   drawingFingerprint,
   forgetGesture,
   layerGesture,
+  type GesturePlacement,
   ledgerFull,
   oldestGesture,
   rememberGesture,
@@ -6358,14 +6359,19 @@ export function VectorModal({
    * ⚠ A RESEND NEVER REINTERPRETS A GESTURE THROUGH THE CURRENT EDITOR. The entry carries all the
    * flatten needs — the layer, the rev, the raster, the target, the key — and `sendGesture` builds
    * the body from the entry alone; the picture's kind is the server's, by the layer's base, on the
-   * wire from any editor alike. What the entry does NOT carry is a slot: `filed` puts a picture
-   * saved beside its base into the editor's own `slot` (the flat slots' editor, the SIDES cell's)
-   * — an act of that editor after the answer, never part of the gesture, and dropped by every
-   * `resendEarlier` already. The editors this ruling is about — a render's, from the workbench or
-   * the history — have no slot, so a resend from them is the entry byte for byte and nothing more.
+   * wire from any editor alike. And the entry carries where the filed picture GOES (O-63 r4,
+   * D-72″): an editor opened from a slot writes the picture saved beside its base into that slot
+   * after the answer, and round 3 let `filed` read the slot of the editor doing the RESEND — a
+   * save as new lost from slot A and retried from slot B landed in B, retried from an editor
+   * without a slot it landed nowhere. Now the slot is written into the gesture when it is made
+   * (`currentPlacement`, `placement`), and `filed` replays the RECORDED one, never this editor's:
+   * an entry without one — older than the field, or made without a slot — is a filing only.
    */
   const resendTargets = () => [0, replaceRef.current?.pictureId || base?.id || 0];
   const mayResend = (gesture: FlattenGesture) => resendTargets().includes(gesture.replacePictureId);
+  /** THIS editor's slot as a gesture's placement — written into a gesture the moment it is made. */
+  const currentPlacement = (): GesturePlacement | undefined =>
+    slot ? { ref: slot.ref, slotRev: slot.slotRev, label: slot.label } : undefined;
 
   /** Why overwrite is closed at this very moment — the host's live reading, or its last render. */
   const closedNow = (): string | null => {
@@ -6481,20 +6487,23 @@ export function VectorModal({
   const filed = async (gesture: FlattenGesture, picture: common_DesignPicture | undefined) => {
     const superseded = (picture?.replacedBy ?? 0) > 0;
     let placed = false;
-    if (slot && !gesture.replacePictureId && !superseded && picture?.id) {
-      setBusy(`putting it into ${slot.label}…`);
+    /* THE SLOT THE GESTURE NAMED, NEVER THIS EDITOR'S (D-72″) — a fresh gesture named this editor's
+       slot as it was made; a resent one names the slot of the editor it was made in, or none. */
+    const placement = gesture.placement ?? null;
+    if (placement && !gesture.replacePictureId && !superseded && picture?.id) {
+      setBusy(`putting it into ${placement.label}…`);
       // A SEPARATE CALL, AND A FAILURE HERE IS NOT A LOST DRAWING — by this point the picture
       // EXISTS in the band; a slot CAS refusal must not read as «the drawing did not go through».
       try {
         await setBenchSlot.mutateAsync({
-          slot: slot.ref,
+          slot: placement.ref,
           pictureId: picture.id,
-          expectedSlotRev: slot.slotRev,
+          expectedSlotRev: placement.slotRev,
         });
         placed = true;
       } catch {
         showMessage(
-          `the picture is saved, but the ${slot.label} slot was not changed — somebody moved it first. Put it in from the band.`,
+          `the picture is saved, but the ${placement.label} slot was not changed — somebody moved it first. Put it in from the band.`,
           'error',
         );
       }
@@ -6517,9 +6526,16 @@ export function VectorModal({
           'success',
         );
       }
-    } else if (placed) showMessage(`saved and put into ${slot?.label}`, 'success');
+    } else if (placed) showMessage(`saved and put into ${placement?.label}`, 'success');
     else if (replaceRef.current)
       showMessage('saved as a new picture beside the original', 'success');
+    else if (!placement && slot)
+      /* A resend, from a slot's editor, of a gesture that named no slot (D-72″): filed, placed
+         nowhere — said so, or the person would look for it in this slot. */
+      showMessage(
+        'saved as a new picture — that save named no side, so none was changed',
+        'success',
+      );
     else if (!slot) showMessage('saved as a new picture', 'success');
   };
 
@@ -6655,6 +6671,7 @@ export function VectorModal({
         mediaId: media.id ?? 0,
         doc: drawingNow(doc),
         at: Date.now(),
+        placement: currentPlacement(),
       };
       flattening = true;
       const picture = await sendGesture(gesture);
@@ -6705,7 +6722,8 @@ export function VectorModal({
 
   /**
    * AN EARLIER SAVE RESENT AS IT WENT, WHILE THE DRAWING ON SCREEN STAYS TO BE SAVED (review r3, r4):
-   * the card's oldest at the ceiling («retry the oldest save ›» — it may be another picture's), or
+   * the oldest at the ceiling this editor may resend («retry the oldest save this editor can
+   * retry ›» — of any layer of the card, D-72′), or
    * the layer's earlier save of another drawing («retry the earlier save ›»). What it files is THAT
    * drawing, so nothing here says the drawing on screen was saved, and the editor stays: saving it
    * is the next press. Whatever the server says, the entry is settled — the picture it filed, or a
@@ -6714,7 +6732,9 @@ export function VectorModal({
   const resendEarlier = async (gesture: FlattenGesture, which: 'oldest' | 'layer') => {
     if (frozen || busy) return;
     const what =
-      which === 'oldest' ? 'the oldest unanswered save' : 'the earlier save of this layer';
+      which === 'oldest'
+        ? 'the oldest save this editor can retry'
+        : 'the earlier save of this layer';
     const next =
       which === 'oldest' ? 'this drawing can be saved now' : 'this drawing is not filed yet';
     setAsking(false);
@@ -6739,7 +6759,7 @@ export function VectorModal({
     }
   };
 
-  /** «RETRY THE OLDEST SAVE ›» — THE WAY OUT OF A FULL LEDGER (review r3): `resendEarlier`. */
+  /** «RETRY THE OLDEST SAVE THIS EDITOR CAN RETRY ›» — THE WAY OUT OF A FULL LEDGER: `resendEarlier`. */
   const settleOldest = oncePerPress(async () => {
     if (settle) await resendEarlier(settle, 'oldest');
   });
@@ -8937,7 +8957,9 @@ export function VectorModal({
               and any drawing, or is at its ceiling — the retry first, «save as a new picture» a
               fresh save, «keep editing» back to drawing.
               AT THE CEILING no door here saves anew: settle one first — the retry above, or, with
-              nothing of this layer to retry, «retry the oldest save ›».
+              nothing of this layer to retry, «retry the oldest save this editor can retry ›» — said
+              so in the door, its accessible name and the toast (D-72″: the oldest is chosen among
+              what this editor may resend, and an older foreign save may stand on the list).
               THE DOOR IS THE EDITOR'S THAT MAY RESEND (28.09, O-63 r3, D-72′): an entry aimed at
               another picture of the layer is named without a door — «retry it from that picture's
               editor on FLAT» — and the doors below stay as they are; the settle door offers only the
@@ -9034,10 +9056,10 @@ export function VectorModal({
                             size='sm'
                             disabled={!!busy}
                             data-settle-door=''
-                            aria-label={`retry the oldest save of this card, ${settle.replacePictureId ? 'an overwrite' : 'a save as new'} from ${clockOf(settle.at)}`}
+                            aria-label={`retry the oldest save this editor can retry, ${settle.replacePictureId ? 'an overwrite' : 'a save as new'} from ${clockOf(settle.at)}`}
                             onClick={() => void settleOldest()}
                           >
-                            retry the oldest save ›
+                            retry the oldest save this editor can retry ›
                           </Button>
                           <Text size='micro' variant='label' component='span'>
                             {settle.replacePictureId ? 'an overwrite' : 'a save as new'} from{' '}

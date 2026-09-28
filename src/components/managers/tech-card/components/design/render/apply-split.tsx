@@ -267,12 +267,15 @@ export function ApplySplitDoor({
    * `RenderTile`), as a status like «in front» — not a door. A target among several whose sides
    * already hold the split is a choice that would do nothing, and the select says so on its line
    * and lets it be read, not chosen (`disabled`, the label saying why — `SelectComponent`).
-   * `pieces` and `targets` are not empty here, so an empty plan is «done», never «nowhere».
+   * ⚠ ONLY OVER PIECES THAT CAN STAND SOMEWHERE (O-63 r4, Codex r3 Minor): a split with no usable
+   * piece — every descendant hidden, or none naming a side of the silhouette — gives an empty plan
+   * against empty sides too, and that is not «done» but the caller's refusal (`applyRefusalFor`,
+   * «nothing in this split names a side»), which the branch below keeps for it.
    */
   const exactTargets = new Set(
     targets.filter((t) => planFor(t.colorwayId).length === 0).map((t) => t.colorwayId),
   );
-  const done = targets.length > 0 && exactTargets.size === targets.length;
+  const done = pieces.length > 0 && targets.length > 0 && exactTargets.size === targets.length;
   if (done) {
     return (
       <span

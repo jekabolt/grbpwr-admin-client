@@ -1,3 +1,5 @@
+import type { DesignBenchSlotRef } from 'api/proto-http/admin';
+
 /**
  * ═══ THE FLATTENS WHOSE ANSWER NEVER CAME — A LEDGER PER TAB (27.09, O-53 phase 2, D-54) ════════
  *
@@ -24,7 +26,8 @@
  *
  * WHAT AN ENTRY IS: a layer, the rev its raster depicts, the answer (the picture the edit takes the
  * place of, or 0 — beside) and the fingerprint of the DRAWING the raster was made of
- * (`drawingFingerprint`); it carries the key and the media the flatten echoed.
+ * (`drawingFingerprint`); it carries the key and the media the flatten echoed — and, made in an
+ * editor opened from a slot, the slot the filed picture goes into (`placement`, D-72″).
  *
  * ⚠ AN UNANSWERED ENTRY LEAVES BY ITS OWN ANSWER, OR WITH ITS LAYER (review r3, r4). Two ways only:
  *   · a definite answer to its own key (`forgetGesture`) — the flatten's own, or a resend's;
@@ -36,6 +39,31 @@
  * already be filed — before the fresh save was even sent. A fresh save leaves every entry in place,
  * and the editor asks over the layer for as long as one stands (`layerGesture`).
  */
+
+/**
+ * ═══ WHERE THE PICTURE GOES ONCE IT IS FILED — PART OF THE GESTURE (28.09, O-63 r4, D-72″) ═══════
+ *
+ * An editor opened from a slot (the flat slots' cell, the SIDES cell) puts the picture it files
+ * beside its base INTO THAT SLOT — a second write after the flatten's answer, with the slot's CAS
+ * token as read when the gesture was made. Until round 4 that write read the slot of whichever
+ * editor RESENT the gesture: a save as new lost from slot A and retried from slot B (one media, two
+ * plates, one layer) landed in B, and retried from an editor without a slot landed nowhere — the
+ * resend was not the gesture (REVIEW-T64-codex-3, Moderate; D-72′: a resend never reinterprets a
+ * gesture through the current editor). So the slot is written down WITH the gesture: its address
+ * (`ref` — a view of a bench, or a minted slot id, with the bench's kind and colourway), the
+ * revision the editor held, and the label it was called by. A resend replays exactly this and never
+ * the resending editor's slot; an entry without one — made before this field, or by an editor
+ * without a slot — is resent as a filing only. A revision that has moved since is the server's
+ * refusal (`slot_rev_mismatch`), told as «the picture is saved, but the slot was not changed».
+ */
+export type GesturePlacement = {
+  /** The slot the picture goes into — the bench's kind and colourway, the view or the slot id. */
+  ref: DesignBenchSlotRef;
+  /** The slot's revision as the editor read it — echoed as `expected_slot_rev`. */
+  slotRev: number;
+  /** What the editor called the slot — for the words after the answer. */
+  label: string;
+};
 
 export type FlattenGesture = {
   /** `client_request_id` — the server's key for this gesture. */
@@ -51,9 +79,15 @@ export type FlattenGesture = {
   doc: string;
   /** When the gesture was made (ms) — the order of the list; the oldest is the first to settle. */
   at: number;
+  /**
+   * The slot the filed picture goes into (D-72″) — only for a gesture made in an editor opened from
+   * a slot. Absent: the filing is the whole gesture. Optional in the stored shape too: an entry
+   * written before this field parses as before, and a fresh entry without a slot stores no field.
+   */
+  placement?: GesturePlacement;
 };
 
-/** One key per card; `v1` is the shape of an entry. */
+/** One key per card; `v1` is the shape of an entry (its optional `placement` came in O-63 r4). */
 const PREFIX = 'plm.techcard.flatten-gesture.v1.';
 
 /** The ceiling of one card's list — a gesture whose answer never came is rare, twenty is plenty. */
@@ -94,7 +128,54 @@ function parseGesture(raw: unknown): FlattenGesture | null {
     at === null
   )
     return null;
-  return { key, layerId, rev, replacePictureId, mediaId, doc: r.doc, at };
+  const placement = parsePlacement(r.placement);
+  return {
+    key,
+    layerId,
+    rev,
+    replacePictureId,
+    mediaId,
+    doc: r.doc,
+    at,
+    ...(placement ? { placement } : {}),
+  };
+}
+
+/**
+ * The slot an entry names, taken only if it looks like one — a bench's view or a minted slot id,
+ * a whole revision, a label (the view's key stands in for a missing one). A malformed slot drops
+ * THE SLOT, not the entry: the filing still has everything it needs, and a picture filed beside its
+ * base can be put into a side by hand, while a gesture dropped whole would be saved again as a new
+ * one — a second picture.
+ */
+function parsePlacement(raw: unknown): GesturePlacement | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const p = raw as Record<string, unknown>;
+  const ref = p.ref && typeof p.ref === 'object' ? (p.ref as Record<string, unknown>) : null;
+  if (!ref) return null;
+  const viewKey = typeof ref.viewKey === 'string' ? ref.viewKey.trim() : '';
+  const slotId =
+    typeof ref.slotId === 'number' && Number.isInteger(ref.slotId) && ref.slotId > 0
+      ? ref.slotId
+      : 0;
+  if (!viewKey && !slotId) return null;
+  const slotRev =
+    typeof p.slotRev === 'number' && Number.isInteger(p.slotRev) && p.slotRev >= 0
+      ? p.slotRev
+      : null;
+  if (slotRev === null) return null;
+  const kind = typeof ref.kind === 'string' ? ref.kind : '';
+  const colorwayId =
+    typeof ref.colorwayId === 'number' && Number.isInteger(ref.colorwayId) && ref.colorwayId >= 0
+      ? ref.colorwayId
+      : 0;
+  const label =
+    typeof p.label === 'string' && p.label.trim() ? p.label : viewKey || `slot ${slotId}`;
+  return {
+    ref: { ...(viewKey ? { viewKey } : { slotId }), kind, colorwayId },
+    slotRev,
+    label,
+  };
 }
 
 function readCard(cardId: number): FlattenGesture[] {
