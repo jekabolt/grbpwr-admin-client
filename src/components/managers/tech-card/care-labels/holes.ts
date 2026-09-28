@@ -28,6 +28,7 @@ export const BLOCK_HOLE_CODES = [
   'glyph-missing',
   'artwork-missing',
   'part-no-composition',
+  'pinned-material-no-composition',
   'part-too-wide',
   'care-overflow',
   'care-too-many-symbols',
@@ -78,6 +79,8 @@ export type HoleRef = {
   fiberCode?: string;
   lang?: LabelLang;
   sizeId?: number;
+  /** Артикул каталога (пин колорвея), к которому относится дыра. */
+  materialId?: number;
 };
 
 export type Hole = {

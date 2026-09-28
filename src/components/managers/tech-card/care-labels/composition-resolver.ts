@@ -367,10 +367,22 @@ export function resolveColorwayComposition(input: ColorwayCompositionInput): Res
       const materialId =
         usage?.materialId && usage.materialId > 0 ? usage.materialId : line.materialId;
       const material = materialId ? materials.get(materialId) : undefined;
+      // Пин колорвея на ДРУГОЙ артикул: ячейка `composition` строки описывает артикул слота, и
+      // её состав на ленте другого артикула — неверная юридическая этикетка. Лучше дыра.
+      const pinned = !!materialId && materialId !== (line.materialId || 0);
 
       let raw: { code: string; percent: number }[] = [];
       if (material?.compositionEntries.length) {
         raw = material.compositionEntries.map((e) => ({ code: e.fiberCode, percent: e.percent }));
+      } else if (pinned) {
+        holes.push(
+          hole(
+            'pinned-material-no-composition',
+            `${partName}: line "${line.name}" — the colourway pins article #${materialId}, which has no fibre composition; set its fibres in materials`,
+            { part, lineKey: line.lineKey, materialId },
+          ),
+        );
+        continue;
       } else if (line.composition?.trim()) {
         raw = parseCompositionCode(line.composition);
         if (raw.length && !isStructured(line.composition)) {
@@ -530,7 +542,7 @@ export function resolveColorwayComposition(input: ColorwayCompositionInput): Res
 function dedupeHoles(holes: Hole[]): Hole[] {
   const seen = new Set<string>();
   return holes.filter((h) => {
-    const key = `${h.code}|${h.ref.part ?? ''}|${h.ref.lineKey ?? ''}|${h.ref.fiberCode ?? ''}|${h.ref.lang ?? ''}`;
+    const key = `${h.code}|${h.ref.part ?? ''}|${h.ref.lineKey ?? ''}|${h.ref.fiberCode ?? ''}|${h.ref.lang ?? ''}|${h.ref.materialId ?? ''}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
