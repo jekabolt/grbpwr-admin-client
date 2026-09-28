@@ -113,9 +113,15 @@ export type CareLabelData = {
 
 export type CareLabelSourceInput = {
   techCard: common_TechCard;
-  /** GetColorwayByID по id колорвея; нет ответа (ещё едет / отказ) — страна из ORIGIN. */
-  colorwayFull: ReadonlyMap<number, GetColorwayByIDResponse | undefined>;
-  materials: readonly common_Material[];
+  /**
+   * ПРИЕХАВШИЕ ответы GetColorwayByID по id колорвея. Нет записи — ответа нет (едет, отказ,
+   * таймаут): страна колорвея неизвестна, и это блок `colorway-unavailable`, а НЕ страна из
+   * ORIGIN-этикетки. Запись без кода страны — «загружено, пусто»: тогда законно ORIGIN.
+   */
+  colorwayFull: ReadonlyMap<number, GetColorwayByIDResponse>;
+  /** Каталог материалов; `null` — не загрузился (едет / отказ): общий блок `materials-unavailable`. */
+  materials: readonly common_Material[] | null;
+  /** `undefined` — словарь не загрузился (едет / отказ): общий блок `dictionary-unavailable`. */
   dictionary: common_Dictionary | undefined;
   runs: readonly common_ProductionRun[];
 };
@@ -296,6 +302,24 @@ export function adaptCareLabels(src: CareLabelSourceInput): CareLabelData {
   const originText = originCountryText(labels.find((l) => l.labelType === ORIGIN)?.content);
 
   const holes: Hole[] = [];
+  // Не загрузилось — блок, а не «пусто» (holes.ts): без каталога резолвер взял бы снимок состава из
+  // строки BOM, без словаря не знал бы ни волокон, ни размеров, ни стран.
+  if (!dict) {
+    holes.push(
+      hole(
+        'dictionary-unavailable',
+        'the dictionary did not load (still loading or the request failed) — fibres, sizes and countries are unknown; reload the page',
+      ),
+    );
+  }
+  if (!src.materials) {
+    holes.push(
+      hole(
+        'materials-unavailable',
+        'the materials catalogue did not load (still loading or the request failed) — the composition cannot be read from the articles; reload the page',
+      ),
+    );
+  }
 
   // Размеры — в порядке карточки; словарь даёт имя и порядковый номер SKU.
   const sizeById = new Map((dict?.sizes ?? []).map((s) => [s.id ?? 0, s]));
@@ -341,12 +365,22 @@ export function adaptCareLabels(src: CareLabelSourceInput): CareLabelData {
         );
       }
 
-      // Страна: код колорвея (merchandising) → ORIGIN-этикетка стиля.
-      const merch = src.colorwayFull.get(id)?.colorway?.colorway?.display?.merchandising;
+      // Страна: код колорвея (merchandising) → ORIGIN-этикетка стиля. Ответа колорвея нет — страна
+      // НЕИЗВЕСТНА (не «пусто»): ORIGIN стиля может быть не его страной, и лента соврала бы.
+      const full = src.colorwayFull.get(id);
+      const merch = full?.colorway?.colorway?.display?.merchandising;
       const code = (merch?.countryCode ?? '').trim().toUpperCase();
       let countryCode = '';
       let countryName = '';
-      if (code) {
+      if (!full) {
+        cwHoles.push(
+          hole(
+            'colorway-unavailable',
+            `${label}: colourway details did not load (still loading or the request failed) — its country of origin is unknown; reload the page`,
+            ref,
+          ),
+        );
+      } else if (code) {
         const name = countryByCode.get(code);
         if (name) {
           countryCode = code;
@@ -419,7 +453,7 @@ export function adaptCareLabels(src: CareLabelSourceInput): CareLabelData {
     colorways,
     sizes,
     bom: adaptBom(insert?.bomItems),
-    materials: adaptMaterials(src.materials),
+    materials: adaptMaterials(src.materials ?? []),
     fibers: adaptFibers(dict?.fibers),
     care: { codes, prose },
     runs: adaptRuns(src.runs),
@@ -461,21 +495,28 @@ export function useCareLabelSource(techCardId: number | undefined): {
   const fullLoading = full.some((q) => q.isLoading);
   const fullError = full.some((q) => q.isError);
   // Ключ пересборки: ответы колорвеев меняются по одному, `full` пересоздаётся каждый рендер.
-  const fullKey = full.map((q) => q.dataUpdatedAt).join(',');
+  const fullKey = full.map((q) => `${q.status}:${q.dataUpdatedAt}`).join(',');
+  const materialsOk = materials.isSuccess;
 
+  // В адаптер уходит только ПРИЕХАВШЕЕ: запрос, который упал, ещё едет или не успел к таймауту
+  // гейта печати (`usePrintReady` отпускает кнопку через 10 с), становится блоком-дырой, а не пустым
+  // значением с фолбэком. Гейт по таймауту такой блок не снимает — снимает только ответ.
   const data = useMemo(() => {
     if (!tc.data) return null;
-    const colorwayFull = new Map<number, GetColorwayByIDResponse | undefined>();
-    colorwayIds.forEach((id, i) => colorwayFull.set(id, full[i]?.data));
+    const colorwayFull = new Map<number, GetColorwayByIDResponse>();
+    colorwayIds.forEach((id, i) => {
+      const q = full[i];
+      if (q?.isSuccess && q.data) colorwayFull.set(id, q.data);
+    });
     return adaptCareLabels({
       techCard: tc.data,
       colorwayFull,
-      materials: materials.data?.materials ?? [],
+      materials: materialsOk ? materials.data?.materials ?? [] : null,
       dictionary: dictionary ?? undefined,
       runs: runs.data?.runs ?? [],
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tc.data, colorwayIds, fullKey, materials.data, dictionary, runs.data]);
+  }, [tc.data, colorwayIds, fullKey, materialsOk, materials.data, dictionary, runs.data]);
 
   const deps: PrintDep[] = [
     { label: 'tech card', status: depStatus(tc.isLoading, tc.isError) },

@@ -9,7 +9,12 @@
 //
 // ОБЛАСТЬ блока. Почти все блоки относятся к одному колорвею: блок в колорвее A не запрещает ZIP
 // без него (снять чекбокс). Общие (`GLOBAL_HOLE_CODES`) держат весь экспорт: сломанные шрифты,
-// QR-шаблон, пустой набор.
+// QR-шаблон, пустой набор, не загрузившиеся каталог материалов или словарь.
+//
+// «НЕ ЗАГРУЗИЛОСЬ» — НЕ «ПУСТО». Запрос, который упал, ещё едет или не успел к таймауту гейта
+// печати, — это БЛОК (`*-unavailable`), а не пустое значение с фолбэком: без ответа колорвея страна
+// взялась бы из ORIGIN-этикетки стиля, без каталога — снимок состава из строки BOM, и лента
+// напечатала бы чужую страну или устаревший состав. Блок снимает только приехавший ответ.
 import type { PrintedPart } from './label-parts';
 import type { LabelLang } from './phrases';
 
@@ -37,6 +42,9 @@ export const BLOCK_HOLE_CODES = [
   'qr-module-tiny',
   'nothing-to-export',
   'fonts-failed',
+  'colorway-unavailable',
+  'materials-unavailable',
+  'dictionary-unavailable',
 ] as const;
 
 export const WARN_HOLE_CODES = [
@@ -107,6 +115,8 @@ export const GLOBAL_HOLE_CODES: ReadonlySet<HoleCode> = new Set<HoleCode>([
   'qr-module-tiny',
   'qr-module-small',
   'nothing-to-export',
+  'materials-unavailable',
+  'dictionary-unavailable',
 ]);
 
 export const isGlobalHole = (h: Hole): boolean => GLOBAL_HOLE_CODES.has(h.code);
