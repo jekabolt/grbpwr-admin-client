@@ -1,9 +1,4 @@
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  type QueryClient,
-} from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { adminService } from 'api/api';
 import type { AiRouteCandidate, GetAiProvidersConfigResponse } from 'api/proto-http/admin';
@@ -216,8 +211,13 @@ export function useSetAiProviderKey() {
   return withFailure(m, "couldn't save the key");
 }
 
-// Both defaults go every time; "" leaves that one unchanged.
-export type SetAiDefaultsVars = { chatProviderKey: string; imageProviderKey: string };
+// Both defaults go every time; "" leaves that one unchanged. applyToRoutes (28.09): the purposes of
+// the named capability are re-pointed at the new default in the same write — the panel asks first.
+export type SetAiDefaultsVars = {
+  chatProviderKey: string;
+  imageProviderKey: string;
+  applyToRoutes?: boolean;
+};
 
 export function useSetAiDefaults() {
   const w = useAiWrite("couldn't save the defaults");
@@ -227,6 +227,7 @@ export function useSetAiDefaults() {
       adminService.SetAiDefaults({
         chatProviderKey: vars.chatProviderKey,
         imageProviderKey: vars.imageProviderKey,
+        applyToRoutes: !!vars.applyToRoutes,
         expectedVersion: expectedVersion(w.qc),
       }),
     onSuccess: (resp) => w.done(resp.config, 'defaults saved'),

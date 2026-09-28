@@ -16740,6 +16740,23 @@ export type HideDesignPictureResponse = {
   picture: common_DesignPicture | undefined;
 };
 
+export type DeleteDesignPictureRequest = {
+  pictureId: number | undefined;
+};
+
+export type DeleteDesignPictureResponse = {
+  // Every picture row that went, in the order the rows went: descendants first, the named
+  // picture last. The count minus one is «its N cut pieces».
+  deletedPictureIds: number[] | undefined;
+  // Media whose row is gone AND whose objects were removed from storage.
+  deletedMediaIds: number[] | undefined;
+  // Media that is still there: its row is held by something else (the files library, another
+  // card, a second role on this card) — or the row went but its objects could not be removed,
+  // which is logged. Distinct from deleted_media_ids; every media of a deleted picture is in
+  // exactly one of the two lists.
+  keptMediaIds: number[] | undefined;
+};
+
 export type SetDesignPictureSelectedRequest = {
   pictureId: number | undefined;
   selected: boolean | undefined;
@@ -17527,6 +17544,12 @@ export type SetAiDefaultsRequest = {
   chatProviderKey: string | undefined;
   imageProviderKey: string | undefined;
   expectedVersion: number | undefined;
+  // apply_to_routes — with the default(s) named above, every purpose of that capability is re-pointed
+  // at it IN THE SAME WRITE: its primary becomes the "default" candidate (provider "", model ""), and a
+  // fallback that would then be the primary itself (provider "" or the new default, model "") is
+  // dropped; any other fallback stays. Without it only the default moves and routes set to "default"
+  // follow, as before. The panel asks before sending it (28.09).
+  applyToRoutes: boolean | undefined;
 };
 
 export type SetAiDefaultsResponse = {
@@ -18820,6 +18843,23 @@ export interface AdminService {
   // Guards, each of which would otherwise leave a live reference pointing at something the band
   // refuses to draw — FailedPrecondition: in_slot | live_run_input | live_crop_parent.
   HideDesignPicture(request: HideDesignPictureRequest): Promise<HideDesignPictureResponse>;
+  // DeleteDesignPicture removes a DERIVED picture FOR GOOD — a crop, or an edit of a crop — with
+  // everything cut or flattened from it and with the files behind them (O-68, D-74). It is the
+  // one verb on a picture that is NOT reversible, and that is why it is narrow: only a picture
+  // with a derived_from may go. The plate a run produced or a hand upload has no such door —
+  // FailedPrecondition picture_is_root — it can be hidden, never deleted. NotFound
+  // picture_not_found for an id nobody has. A hidden picture and a picture standing in a bench
+  // slot go the same way (the slot is emptied and kept); HideDesignPicture's guards do not apply.
+  // WHAT GOES, IN ONE TRANSACTION: the picture and its descendants by derived_from, children
+  // first; the edit layer of this card whose base is one of their media (the layer cannot be
+  // opened without its base); the asset placements on those pictures. What the schema SETS NULL:
+  // the bench slot holding one of them, the vector origin of a layer drawn from one of them.
+  // THE FILES GO AFTER THE COMMIT, BEST-EFFORT, PER MEDIA, and the answer says what happened to
+  // each: deleted_media_ids — the media row went and its objects (full size, compressed,
+  // thumbnail) were removed; kept_media_ids — the row stayed because something else still holds
+  // the file (the files library, another card, a second role on this card), OR the objects could
+  // not be removed (logged). The pictures are gone either way.
+  DeleteDesignPicture(request: DeleteDesignPictureRequest): Promise<DeleteDesignPictureResponse>;
   // SetDesignPictureSelected marks a picture as CHOSEN (owner requirement W-12: «мы так же можем
   // маркать 3д рендеры как выбранные»). It is a verb of its own and deliberately NOT a flag on
   // HideDesignPicture: hidden says "do not show me this", selected says "this is the one" — the
@@ -25184,6 +25224,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "HideDesignPicture",
       }) as Promise<HideDesignPictureResponse>;
+    },
+    DeleteDesignPicture(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.pictureId) {
+        throw new Error("missing required field request.picture_id");
+      }
+      const path = `api/admin/design/picture/${request.pictureId}/delete`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteDesignPicture",
+      }) as Promise<DeleteDesignPictureResponse>;
     },
     SetDesignPictureSelected(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.pictureId) {
