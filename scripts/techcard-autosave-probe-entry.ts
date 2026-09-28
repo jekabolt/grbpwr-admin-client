@@ -7,14 +7,23 @@ export {
   formOnTheWire,
   createAutosaveMachine,
   deepEqual,
-  isRefusalError,
-  isRefusalStatus,
+  failureClassOf,
+  failureClassOfError,
+  failureFieldsOf,
+  failureStatus,
   isSaveShortcut,
   liveIsDirty,
   refusalOf,
+  serverSentenceOf,
   settleFormAfterSave,
   watchOwnFailure,
 } from '../src/components/managers/tech-card/components/useTechCardAutosave';
+// D-66′ (T61 r5): the convert dialog's bounded, cancelable wait and the verdict after it.
+export {
+  CONVERT_WAIT_MS,
+  convertVerdict,
+  waitForTheWrite,
+} from '../src/components/managers/tech-card/components/convert-wait';
 // m2: a panel's failure read off a REAL TanStack mutation cache.
 export { QueryClient } from '@tanstack/react-query';
 // R-1 / R-8: the post-save settle runs on a REAL react-hook-form (createFormControl — no React

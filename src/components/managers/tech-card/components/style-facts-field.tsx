@@ -827,10 +827,10 @@ export function StyleFactsField({
       return;
     }
     // Still queued with the same facts: nothing to tell the queue. The effect re-runs with an
-    // unchanged set when `staging` takes a new identity (a draft's hydrate) or `canEdit` returns,
-    // and a panel without a snapshot counts every stage() as an edit — so re-staging then would
-    // bump the key's generation, and mid-commit that files a written change as «changed while the
-    // save was running» and leaves it unsettled. A commit that FAILED stays queued the same way,
+    // unchanged set when `canEdit` returns (or any other dependency moves), and a panel without a
+    // snapshot counts every stage() as an edit — so re-staging then would bump the key's generation,
+    // and mid-commit that files a written change as «changed while the save was running» and leaves
+    // it unsettled. A commit that FAILED stays queued the same way,
     // under the same truthful label — its facts stay dirty, the body's save keeps their baselines
     // (keepBaseline) — until it lands or the operator puts the old value back.
     if (queued && lastStaged.current === writesKey) return;

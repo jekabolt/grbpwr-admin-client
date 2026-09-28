@@ -21,8 +21,8 @@ import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 // One chart per style, so one staging key.
 const STAGING_KEY = 'sizeChart';
 
-// What this grid needs to rebuild itself after a refresh. The Map goes over as an entry array
-// because localStorage speaks JSON and a Map serializes to `{}`.
+// What this grid holds, for the staging to compare by value (JSON — `sameSnapshot`). The Map goes
+// over as an entry array because a Map serializes to `{}`.
 type ChartSnapshot = {
   cells: Array<[number, Array<[number, string]>]>;
   touched: string[];
@@ -120,18 +120,6 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
   useEffect(() => {
     loadChart();
   }, [loadChart]);
-
-  // Claim any edits this panel had staged when the tab was refreshed. Runs after loadChart so the
-  // restored grid wins over the server's — that is the whole point — and claims exactly once,
-  // because takeSnapshot removes it. A card with no draft simply shows what the server returned.
-  useEffect(() => {
-    if (!staging || !styleId) return;
-    const snap = staging.takeSnapshot(STAGING_KEY) as ChartSnapshot | undefined;
-    if (!snap) return;
-    setCells(new Map(snap.cells.map(([sizeId, row]) => [sizeId, new Map(row)])));
-    setTouched(new Set(snap.touched));
-    setDirty(true);
-  }, [staging, styleId]);
 
   const stored = (sizeId: number, nameId: number) => cells.get(sizeId)?.get(nameId) ?? '';
 

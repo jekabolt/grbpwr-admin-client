@@ -27,9 +27,20 @@
 //       дебаунсом, а не ступенью лестницы; `off` терминален для записи в полёте — ни «saved», ни
 //       «not saved», ни таймера, а бухгалтерия лёгшей записи (история) остаётся; `error`
 //       помнит причину — упала запись или панель менялась, пока писалась;
-//  (10) D-66 (27.09): отказ сервера самому телу (4xx, кроме 408/409/429) не едет по лестнице — «not
-//       saved» со словами сервера, ни одного таймера, следующая попытка — со следующей правкой; 503 и
-//       сеть едут по лестнице, как ехали;
+//  (10) D-66 / D-66′ (27.09, T61 r5): что значит упавшая запись, решает одно место — `failureClassOf`:
+//       401/403 — `off` до конца жизни страницы (ни таймера, ни следующей правки, setEnabled(true) его
+//       не снимает), со словами сервера; 409 — конфликт; сеть, 408, 429, 5xx — лестница; любой другой
+//       4xx — удержанный отказ: «not saved» со словами сервера КАК ЕСТЬ (и там, где страница объясняет
+//       отказ своей фразой), ни одного таймера, следующая попытка — со следующей правкой; статус,
+//       завёрнутый панелью в `cause`, и статус мутации панели (watchOwnFailure) классифицируются так же;
+//  (11) диалог перевода ждёт запись в полёте (convert-wait.ts): ожидание отменяемо и ограничено
+//       (15 с, повисшая запись — `timeout`), первый ответ — ответ; приговор после ожидания архивирует
+//       только над `needs-confirm` / `ok` / `nothing`, над живой страницей и карточкой, которая
+//       сохраняет себя сама, — `off`, `error`, отказ, конфликт, ушедшая страница: ни одного архива;
+//  (12) ТОЧКА СБРОСА (10/10) истории операций под автосейвом (operations-field.tsx): settle после записи
+//       не шлёт RHF безымянного события значений — слушатель `watch` «пустое name = reset()» молчит;
+//       массивы той же длины пишутся по листьям, id строк useFieldArray живут; массив другой длины
+//       пишется целиком — и только его id перечеканиваются (настоящий RHF 7.62);
 //   (2) авто-стейдж не поднимает стейдж, если хоть одна строка готовности `unknown` (Codex B-01);
 //   (3) откат из истории меняет ТОЛЬКО текстовые секции, картинки аспектов остаются текущими (B-04).
 //
@@ -206,8 +217,8 @@ const MUTANTS = {
   externalIgnored: [
     [
       `${C}/useTechCardAutosave.ts`,
-      '      if (disposed || !deps.isEnabled()) return;\n      settle(r, reason);\n',
-      '      if (disposed || !deps.isEnabled() || reason) return;\n      settle(r, reason);\n',
+      '      if (disposed || !enabled()) return;\n      settle(r, reason);\n',
+      '      if (disposed || !enabled() || reason) return;\n      settle(r, reason);\n',
     ],
   ],
   // (2) строка `unknown` больше не держит стейдж
@@ -269,14 +280,14 @@ const MUTANTS = {
   staleOffSwallowsTheReport: [
     [
       `${C}/useTechCardAutosave.ts`,
-      "    if (!deps.isEnabled()) return 'off';\n",
-      "    if (state.status === 'off' || !deps.isEnabled()) return 'off';\n",
+      "    if (!enabled()) return 'off';\n",
+      "    if (state.status === 'off' || !enabled()) return 'off';\n",
     ],
   ],
   // (9c) ОТКАТ P2-1: исход записи, пришедший после выключения, снова рисует статус и взводит таймер
   settleOverOff: [
     [`${C}/useTechCardAutosave.ts`, '    if (stoppedMeanwhile()) {', '    if (false) {'],
-    [`${C}/useTechCardAutosave.ts`, "    if (!deps.isEnabled()) return 'off';\n", ''],
+    [`${C}/useTechCardAutosave.ts`, "    if (!enabled()) return 'off';\n", ''],
   ],
   // (9d) страж `off` проглатывает и бухгалтерию лёгшей записи: релиз не пишет историю
   offDropsBookkeeping: [
@@ -296,22 +307,96 @@ const MUTANTS = {
   ],
   // (10a) ОТКАТ D-66: отказ сервера снова едет по лестнице — 412 шлётся каждые 5 / 15 / 45 / 30 с
   refusalRidesLadder: [
-    [`${C}/useTechCardAutosave.ts`, '        if (r.refused) {', '        if (false) {'],
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "        if (r.failure === 'refused') {",
+      '        if (false) {',
+    ],
   ],
-  // (10b) машина не узнаёт отказ в брошенной ошибке (статус есть, а она его не читает)
+  // (10b) машина не узнаёт класс брошенной ошибки (статус есть, а она его не читает)
   catchNeverRefuses: [
     [
       `${C}/useTechCardAutosave.ts`,
-      "r = { outcome: 'error', message: errorText(e), refused: isRefusalError(e) };",
-      "r = { outcome: 'error', message: errorText(e), refused: false };",
+      "r = { outcome: 'error', message: errorText(e), ...failureFieldsOf(e) };",
+      "r = { outcome: 'error', message: errorText(e) };",
     ],
   ],
   // (10c) любая брошенная ошибка — отказ: 503 и сеть больше не повторяются сами
   everyThrowRefused: [
     [
       `${C}/useTechCardAutosave.ts`,
-      "r = { outcome: 'error', message: errorText(e), refused: isRefusalError(e) };",
-      "r = { outcome: 'error', message: errorText(e), refused: true };",
+      "r = { outcome: 'error', message: errorText(e), ...failureFieldsOf(e) };",
+      "r = { outcome: 'error', message: errorText(e), failure: 'refused' };",
+    ],
+  ],
+  // (10f) ОТКАТ D-66′: 401/403 снова удержанный отказ — следующая правка шлёт тело снова
+  authHeldAsRefusal: [
+    [`${C}/useTechCardAutosave.ts`, "  if (status === 401 || status === 403) return 'auth';\n", ''],
+  ],
+  // (10g) остановка по 401/403 не терминальна: следующая правка снова пишет
+  authHearsTheNextChange: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      '  const enabled = () => !authStopped && deps.isEnabled();',
+      '  const enabled = () => deps.isEnabled();',
+    ],
+  ],
+  // (10h) остановку по 401/403 снимает setEnabled(true) страницы
+  authLiftedBySetEnabled: [[`${C}/useTechCardAutosave.ts`, '      if (authStopped) return;\n', '']],
+  // (10i) ОТКАТ D-66′ P2: машина держит фразу страницы, а не слова сервера
+  refusalWordsReplaced: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      "refusal: r.refusalMessage, cause: 'refused' });",
+      "refusal: undefined, cause: 'refused' });",
+    ],
+  ],
+  // (10j) статус, завёрнутый панелью в `cause`, потерян — 412 рецепта уезжает на лестницу
+  wrappedStatusLost: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      '  const wrapped = httpStatus(causeOf(e));',
+      '  const wrapped = undefined;',
+    ],
+  ],
+  // (10k) watchOwnFailure помнит только «конфликт ли» — класс переобёрнутой без cause ошибки потерян
+  ownFailureForgetsStatus: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      '      status: failureStatus(error),',
+      '      status: undefined,',
+    ],
+  ],
+  // (11a) ожидание без предела: повисшая запись держит диалог
+  waitUnbounded: [
+    [
+      `${C}/convert-wait.ts`,
+      "    timer = timers.setTimer(() => done('timeout'), ms);",
+      '    void ms;',
+    ],
+  ],
+  // (11b) ✕ / Esc / «keep sellable» не прерывают ожидание
+  waitIgnoresCancel: [
+    [`${C}/convert-wait.ts`, "    signal.addEventListener('abort', onAbort);", '    void onAbort;'],
+  ],
+  // (11c) истёкшее ожидание закрывает диалог вместо того, чтобы оставить подтверждение живым
+  timeoutClosesDialog: [[`${C}/convert-wait.ts`, '      keep: true,', '      keep: false,']],
+  // (11d) ОТКАТ P1 Codex r4: архив над `off` / `error` / картой, которая не сохраняется
+  archiveOverOff: [[`${C}/convert-wait.ts`, '  if (!expected || !live.saves) {', '  if (false) {']],
+  // (11e) архив после ухода страницы
+  archiveAfterUnmount: [
+    [
+      `${C}/convert-wait.ts`,
+      "  if (waited === 'aborted' || !live.mounted) return { go: false };",
+      "  if (waited === 'aborted') return { go: false };",
+    ],
+  ],
+  // (12a) settle снова сбрасывает значения формы целиком — безымянное событие будит точку сброса (10/10)
+  settleResetsValues: [
+    [
+      `${C}/useTechCardAutosave.ts`,
+      '  form.reset(baseline as TechCardFormData, {\n    keepValues: true,',
+      '  form.reset(baseline as TechCardFormData, {\n    keepValues: false,',
     ],
   ],
   // (10e) конец паузы (диалог перевода закрыт) снова шлёт тело, которому сервер отказал
@@ -323,7 +408,9 @@ const MUTANTS = {
     ],
   ],
   // (10d) 429 (лимит частоты — проходит сам) принят за отказ
-  rateLimitRefused: [[`${C}/useTechCardAutosave.ts`, '    status !== 429\n', '    true\n']],
+  rateLimitRefused: [
+    [`${C}/useTechCardAutosave.ts`, ' || status === 429 || status < 400', ' || status < 400'],
+  ],
   // (7m) правка поверх упавшей записи ждёт шага повторов, а не пишет своим дебаунсом
   changeWaitsForTheStep: [
     [
@@ -1206,17 +1293,22 @@ async function promise9(mod) {
   return out;
 }
 
-// ─── (10) D-66: ОТКАЗ СЕРВЕРА НЕ ЕДЕТ ПО ЛЕСТНИЦЕ ────────────────────────────────────────────────────
+// ─── (10) D-66 / D-66′: ЧТО ЗНАЧИТ УПАВШАЯ ЗАПИСЬ — ОДНО МЕСТО ──────────────────────────────────────
 async function promise10(mod) {
   const out = {};
   // The page's save throws what api.ts throws: an Error carrying the HTTP status.
   const BACKSTOP = 'this save would erase the assembly units on this tech card';
+  const WORDS = {
+    401: 'the session has expired',
+    403: 'permission denied: tech_cards write',
+    412: BACKSTOP,
+  };
   const thrower = (status) =>
     bareRig(mod, (rig) => ({
       save: async () => {
         rig.saves += 1;
         (rig.at ??= []).push(rig.clock.now());
-        throw Object.assign(new Error(status === 412 ? BACKSTOP : 'unavailable'), { status });
+        throw Object.assign(new Error(WORDS[status] ?? 'unavailable'), { status });
       },
     }));
 
@@ -1229,7 +1321,7 @@ async function promise10(mod) {
     r.saves === 1 &&
     r.m.state().status === 'error' &&
     r.m.state().cause === 'refused' &&
-    r.m.state().message === BACKSTOP &&
+    mod.refusalOf(r.m.state()) === BACKSTOP &&
     r.clock.pending() === 0;
   await r.clock.advance(300_000);
   const quiet = r.saves === 1;
@@ -1254,28 +1346,95 @@ async function promise10(mod) {
   await r.clock.advance(5000);
   out.serverErrorKeepsTheLadder = failedAt2 && r.saves === 2 && r.at[1] === 7000;
 
-  // what a refusal is: a 4xx other than 408 / 409 / 429 — on the error or on its `cause`
-  out.whatIsARefusal =
-    [400, 401, 403, 404, 412, 422].every((s) => mod.isRefusalStatus(s)) &&
-    ![undefined, 408, 409, 429, 500, 502, 503, 504].some((s) => mod.isRefusalStatus(s)) &&
-    mod.isRefusalError(Object.assign(new Error('x'), { cause: { status: 412 } })) &&
-    !mod.isRefusalError(new Error('network down'));
+  // 429 (the rate limit passes) → the same ladder, not a held refusal
+  r = thrower(429);
+  r.m.notifyChange();
+  await r.clock.advance(2000);
+  const limitedAt2 = r.saves === 1 && r.m.state().cause === 'failed' && r.clock.pending() === 1;
+  await r.clock.advance(5000);
+  out.rateLimitKeepsTheLadder = limitedAt2 && r.saves === 2 && r.at[1] === 7000;
 
-  // the page's pipeline says it itself (SaveResult.refused): the same hold, and the controller's
-  // sentence is the server's
+  // 401 / 403 → `off` for the rest of the page life, with the server's words: no timer; five minutes,
+  // then a change, a door's flush and ⌘S (an explicit flush skips the quiet check that a status `off`
+  // alone would stop) — nothing goes out; the page's own switch (setEnabled) lifts nothing
+  const authStop = async (status) => {
+    const a = thrower(status);
+    a.m.notifyChange();
+    await a.clock.advance(2000);
+    const st = a.m.state();
+    const stopped =
+      a.saves === 1 &&
+      st.status === 'off' &&
+      st.cause === 'auth' &&
+      st.message === WORDS[status] &&
+      mod.refusalOf(st) === undefined &&
+      a.clock.pending() === 0;
+    await a.clock.advance(300_000);
+    a.m.notifyChange();
+    await a.clock.advance(60_000);
+    const flushed = await a.m.flush('door');
+    const pressed = await a.m.flush('keyboard', 'explicit');
+    a.m.setEnabled(false);
+    a.m.setEnabled(true);
+    await a.clock.advance(60_000);
+    return {
+      stopped,
+      stays:
+        a.saves === 1 &&
+        flushed === 'off' &&
+        pressed === 'off' &&
+        a.m.state().status === 'off' &&
+        a.m.state().cause === 'auth' &&
+        a.m.state().message === WORDS[status] &&
+        a.clock.pending() === 0,
+    };
+  };
+  const s403 = await authStop(403);
+  const s401 = await authStop(401);
+  out.authStopsTheCard = s403.stopped && s401.stopped;
+  out.authStopIsTerminal = s403.stays && s401.stays;
+
+  // the one table (D-66′): 401/403 auth, 409 conflict, the network / 408 / 429 / 5xx transient, every
+  // other 4xx refused — and a status a panel wrapped into its own sentence (`cause`) counts the same
+  const cls = mod.failureClassOf;
+  out.whatAFailureIs =
+    [401, 403].every((x) => cls(x) === 'auth') &&
+    cls(409) === 'conflict' &&
+    [undefined, 408, 429, 500, 502, 503, 504].every((x) => cls(x) === 'transient') &&
+    [400, 404, 412, 422].every((x) => cls(x) === 'refused');
+  const wrap = (status, words) =>
+    Object.assign(new Error(`the recipe was not saved: ${words}`), {
+      cause: Object.assign(new Error(words), { status }),
+    });
+  const w412 = mod.failureFieldsOf(wrap(412, 'the colourway moved on its lifecycle'));
+  const w503 = mod.failureFieldsOf(wrap(503, 'unavailable'));
+  const w403 = mod.failureFieldsOf(wrap(403, 'permission denied'));
+  out.wrappedPanelFailureClassified =
+    w412.failure === 'refused' &&
+    w412.refusalMessage === 'the colourway moved on its lifecycle' &&
+    w503.failure === undefined &&
+    w403.failure === 'auth' &&
+    mod.failureFieldsOf(new Error('network down')).failure === undefined;
+
+  // the page's pipeline says it itself (SaveResult.failure): the same hold — and the words the machine
+  // holds are the SERVER's (refusalMessage), not the page's own sentence for the banner (D-66′ P2)
+  const RAW = 'proto: (line 1:145): unknown field "chestPiece"';
   r = bareRig(mod, (rig) => ({
     save: async () => {
       rig.saves += 1;
-      return { outcome: 'error', message: BACKSTOP, refused: true };
+      return {
+        outcome: 'error',
+        message: 'the backend did not recognise part of this card — see the banner on the card',
+        failure: 'refused',
+        refusalMessage: RAW,
+      };
     },
   }));
   r.m.notifyChange();
   await r.clock.advance(122_000);
   out.pipelineRefusalHolds =
-    r.saves === 1 &&
-    r.m.state().cause === 'refused' &&
-    r.clock.pending() === 0 &&
-    mod.refusalOf(r.m.state()) === BACKSTOP;
+    r.saves === 1 && r.m.state().cause === 'refused' && r.clock.pending() === 0;
+  out.refusalKeepsTheServersWords = mod.refusalOf(r.m.state()) === RAW;
 
   // the convert dialog opens while the write is out (the page pauses), the write is refused, the
   // dialog's flush is skipped by the pause; the dialog closes (resume) — the refused body is not sent
@@ -1297,7 +1456,7 @@ async function promise10(mod) {
         await rig.clock.advance(2000); // out
         paused = true;
         const flushed = rig.m.flush('convert');
-        pending.shift()({ outcome: 'error', message: BACKSTOP, refused: true });
+        pending.shift()({ outcome: 'error', message: BACKSTOP, failure: 'refused' });
         await rig.clock.advance(0);
         await flushed;
         if (edit) {
@@ -1320,6 +1479,142 @@ async function promise10(mod) {
     quietDialog.rig.saves === 1 &&
     quietDialog.rig.m.state().cause === 'refused' &&
     editedDialog.rig.saves === 2;
+  return out;
+}
+
+// ─── (11) «ARCHIVE & SWITCH» ЖДЁТ ЗАПИСЬ В ПОЛЁТЕ: ОЖИДАНИЕ И ПРИГОВОР (convert-wait.ts) ─────────────
+async function promise11(mod) {
+  const out = {};
+  const clock = fakeClock();
+  const timers = { setTimer: clock.setTimer, clearTimer: clock.clearTimer };
+  const MS = mod.CONVERT_WAIT_MS;
+  const never = () => new Promise(() => {});
+  const later = () => {
+    let settle;
+    const p = new Promise((res, rej) => (settle = { res, rej }));
+    return { p, settle };
+  };
+
+  // a write that never settles: the wait answers `timeout` at 15 s — not a moment before — and leaves
+  // no timer behind
+  let signal = new AbortController();
+  let answer = null;
+  void mod.waitForTheWrite(never(), signal.signal, MS, timers).then((v) => (answer = v));
+  await clock.advance(MS - 1);
+  const notYet = answer === null;
+  await clock.advance(1);
+  out.hungWriteTimesOut = MS === 15_000 && notYet && answer === 'timeout' && clock.pending() === 0;
+
+  // ✕ / Esc / «keep sellable» (the signal) end the wait at once; the write settling later changes nothing
+  signal = new AbortController();
+  answer = null;
+  let w = later();
+  void mod.waitForTheWrite(w.p, signal.signal, MS, timers).then((v) => (answer = v));
+  await clock.advance(1000);
+  signal.abort();
+  await clock.advance(0);
+  const cancelled = answer;
+  w.settle.res('needs-confirm');
+  await clock.advance(MS);
+  out.cancelEndsTheWait = cancelled === 'aborted' && answer === 'aborted' && clock.pending() === 0;
+
+  // the flush's own answer, when it comes first; a rejected flush is `error`, not a pass
+  signal = new AbortController();
+  answer = null;
+  w = later();
+  void mod.waitForTheWrite(w.p, signal.signal, MS, timers).then((v) => (answer = v));
+  w.settle.res('needs-confirm');
+  await clock.advance(0);
+  const passed = answer;
+  answer = null;
+  w = later();
+  void mod.waitForTheWrite(w.p, new AbortController().signal, MS, timers).then((v) => (answer = v));
+  w.settle.rej(new Error('boom'));
+  await clock.advance(0);
+  out.flushAnswersFirst = passed === 'needs-confirm' && answer === 'error' && clock.pending() === 0;
+
+  // the verdict: the one table the confirm acts on
+  const v = mod.convertVerdict;
+  const live = { mounted: true, saves: true, conflict: false, refusal: undefined };
+  const go = (waited, over = {}) => v(waited, { ...live, ...over }).go === true;
+  out.archivesOnlyOverTheExpected =
+    go('needs-confirm') && go('ok') && go('nothing') && !go('invalid') && !go('busy');
+  const t = v('timeout', live);
+  out.timeoutKeepsTheDialog =
+    t.go === false &&
+    t.keep === true &&
+    t.say === 'the card is still saving — try the switch again in a moment';
+  const off = v('off', live);
+  const offLive = v('needs-confirm', { ...live, saves: false });
+  const failed = v('error', live);
+  out.nothingArchivedOverOff =
+    !off.go &&
+    !off.keep &&
+    off.say === 'nothing was archived — the card stopped saving' &&
+    !offLive.go &&
+    offLive.say === 'nothing was archived — the card stopped saving' &&
+    !failed.go &&
+    /could not be saved/.test(failed.say ?? '');
+  const gone = v('needs-confirm', { ...live, mounted: false });
+  const aborted = v('aborted', live);
+  out.nothingArchivedAfterTheLeave =
+    !gone.go && gone.say === undefined && !aborted.go && aborted.say === undefined;
+  const conflict = v('needs-confirm', { ...live, conflict: true });
+  const refused = v('needs-confirm', { ...live, refusal: 'this save would erase…' });
+  out.conflictAndRefusalArchiveNothing =
+    !conflict.go &&
+    /decide the conflict first/.test(conflict.say ?? '') &&
+    !v('conflict', live).go &&
+    !refused.go &&
+    refused.say ===
+      'nothing was archived — the server refused the last save: this save would erase…';
+  return out;
+}
+
+// ─── (12) ТОЧКА СБРОСА (10/10) ПОД АВТОСЕЙВОМ: SETTLE НЕ ШЛЁТ «reset()», ID СТРОК ЖИВУТ ─────────────
+function promise12(mod) {
+  const out = {};
+  const row = (t) => ({
+    operationType: t,
+    zone: 'TECH_CARD_GARMENT_ZONE_BODY',
+    operationNumber: 0,
+  });
+  const mapped = mod.mapTechCardToForm(PRESS_CARD);
+  const form = formFor(mod, { ...mapped, operations: [row('A'), row('B'), row('C')] });
+  // what a rendered useFieldArray does on every render (RHF 7.62, useFieldArray: `_names.array.add`)
+  form.control._names.array.add('operations');
+  const unnamed = [];
+  const arrays = [];
+  // operations-field.tsx, (10/10): `watch((_, { name }) => { if (name) return; clearFormHistory(); })`
+  const w = form.watch((_, info) => {
+    if (!info.name) unnamed.push('values');
+  });
+  // useFieldArray re-mints every id of an array its subject names (or of every array, unnamed)
+  const a = form.control._subjects.array.subscribe({ next: (p) => arrays.push(p.name ?? '*') });
+  // a) a save that lands with the server's numbers on the same three rows
+  let before = structuredClone(form.getValues());
+  let server = {
+    ...before,
+    operations: before.operations.map((o, i) => ({ ...o, operationNumber: (i + 1) * 10 })),
+  };
+  mod.settleFormAfterSave(form, before, { values: server, server });
+  out.settleSendsNoResetSignal =
+    unnamed.length === 0 && form.getValues('operations.1.operationNumber') === 20;
+  out.sameLengthRowsKeepTheirIds = arrays.length === 0;
+  // b) an untouched list whose length differs from what landed is written whole — that list alone
+  // re-mints its ids (the one case), and still no reset signal
+  form.control._names.array.add('operations');
+  unnamed.length = 0;
+  arrays.length = 0;
+  before = structuredClone(form.getValues());
+  server = { ...before, operations: before.operations.slice(0, 2) };
+  mod.settleFormAfterSave(form, before, { values: server, server });
+  out.lengthChangeRemintsThatListOnly =
+    unnamed.length === 0 &&
+    arrays.join() === 'operations' &&
+    form.getValues('operations').length === 2;
+  w.unsubscribe();
+  a.unsubscribe();
   return out;
 }
 
@@ -1380,8 +1675,29 @@ async function promise8(mod) {
   } catch {
     foreign = w.current();
   }
+  // D-66′: …and the status it failed with, for a rewrap that kept no `cause` (a 412 of the recipe)
+  const refused412 = () =>
+    Promise.reject(
+      Object.assign(new Error('the colourway moved on its lifecycle'), { status: 412 }),
+    );
+  let own412 = null;
+  try {
+    try {
+      await cache.build(qc, { mutationFn: refused412, retry: false }).execute();
+    } catch (e) {
+      throw new Error(`the recipe was not saved: ${e.message}`);
+    }
+  } catch {
+    own412 = w.current();
+  }
   w.stop();
   out.ownFailureOnlyInItsTask = own?.conflict === true && foreign === null;
+  out.ownFailureKeepsItsStatus =
+    own?.status === 409 &&
+    own412?.status === 412 &&
+    own412?.conflict === false &&
+    mod.failureClassOf(own412?.status) === 'refused' &&
+    own412?.message === 'the colourway moved on its lifecycle';
 
   // M-3 · two readings of the card: only what a body write would carry counts as a move
   const from = BODY_CARD({
@@ -1468,7 +1784,12 @@ report(
   '(9) O-60 r4: conflict before pause / edit during a failing write / off / cause',
   await promise9(real),
 );
-report('(10) D-66: a refusal holds, a 503 retries', await promise10(real));
+report(
+  '(10) D-66 / D-66′: auth stops, a refusal holds, a 503 / 429 retries',
+  await promise10(real),
+);
+report('(11) the convert wait and its verdict', await promise11(real));
+report('(12) the reset point (10/10) under the autosave', promise12(real));
 // sanity for the shortcut: ⌘S on a Russian layout gives e.key 'ы' — the physical key decides
 const kb = real.isSaveShortcut;
 report('keyboard', {
@@ -1598,19 +1919,70 @@ report('(9) mutant capBlamesAFailure', await promise9(await load('capBlamesAFail
 report('(10) mutant refusalRidesLadder', await promise10(await load('refusalRidesLadder')), [
   'refusalHoldsUntilTheNextChange',
   'pipelineRefusalHolds',
+  'refusalKeepsTheServersWords',
   'pauseEndKeepsTheRefusal',
 ]);
 report('(10) mutant catchNeverRefuses', await promise10(await load('catchNeverRefuses')), [
   'refusalHoldsUntilTheNextChange',
+  'authStopsTheCard',
+  'authStopIsTerminal',
 ]);
 report('(10) mutant everyThrowRefused', await promise10(await load('everyThrowRefused')), [
   'serverErrorKeepsTheLadder',
+  'rateLimitKeepsTheLadder',
+  'authStopsTheCard',
+  'authStopIsTerminal',
 ]);
 report('(10) mutant rateLimitRefused', await promise10(await load('rateLimitRefused')), [
-  'whatIsARefusal',
+  'rateLimitKeepsTheLadder',
+  'whatAFailureIs',
 ]);
 report('(10) mutant resumeResendsRefusal', await promise10(await load('resumeResendsRefusal')), [
   'pauseEndKeepsTheRefusal',
+]);
+report('(10) mutant authHeldAsRefusal', await promise10(await load('authHeldAsRefusal')), [
+  'authStopsTheCard',
+  'authStopIsTerminal',
+  'whatAFailureIs',
+  'wrappedPanelFailureClassified',
+]);
+report(
+  '(10) mutant authHearsTheNextChange',
+  await promise10(await load('authHearsTheNextChange')),
+  ['authStopIsTerminal'],
+);
+report(
+  '(10) mutant authLiftedBySetEnabled',
+  await promise10(await load('authLiftedBySetEnabled')),
+  ['authStopIsTerminal'],
+);
+report('(10) mutant refusalWordsReplaced', await promise10(await load('refusalWordsReplaced')), [
+  'refusalKeepsTheServersWords',
+]);
+report('(10) mutant wrappedStatusLost', await promise10(await load('wrappedStatusLost')), [
+  'wrappedPanelFailureClassified',
+]);
+report('(11) mutant waitUnbounded', await promise11(await load('waitUnbounded')), [
+  'hungWriteTimesOut',
+]);
+report('(11) mutant waitIgnoresCancel', await promise11(await load('waitIgnoresCancel')), [
+  'cancelEndsTheWait',
+]);
+report('(11) mutant timeoutClosesDialog', await promise11(await load('timeoutClosesDialog')), [
+  'timeoutKeepsTheDialog',
+]);
+report('(11) mutant archiveOverOff', await promise11(await load('archiveOverOff')), [
+  'archivesOnlyOverTheExpected',
+  'nothingArchivedOverOff',
+]);
+report('(11) mutant archiveAfterUnmount', await promise11(await load('archiveAfterUnmount')), [
+  'nothingArchivedAfterTheLeave',
+]);
+// the old post-save reset whole: the reset signal AND every list's ids re-minted — all three go red
+report('(12) mutant settleResetsValues', promise12(await load('settleResetsValues')), [
+  'settleSendsNoResetSignal',
+  'sameLengthRowsKeepTheirIds',
+  'lengthChangeRemintsThatListOnly',
 ]);
 report('(8) mutant anyDirtyArrays', await promise8(await load('anyDirtyArrays')), [
   'fullMapEmptyArrayIsClean',
@@ -1618,6 +1990,11 @@ report('(8) mutant anyDirtyArrays', await promise8(await load('anyDirtyArrays'))
 report('(8) mutant failureOutlivesItsTask', await promise8(await load('failureOutlivesItsTask')), [
   'ownFailureOnlyInItsTask',
 ]);
+report(
+  '(8) mutant ownFailureForgetsStatus',
+  await promise8(await load('ownFailureForgetsStatus')),
+  ['ownFailureKeepsItsStatus'],
+);
 report('(8) mutant bodyNeverMoves', await promise8(await load('bodyNeverMoves')), [
   'foreignConceptIsAMove',
   'costingByWhoWritesIt',

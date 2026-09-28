@@ -91,13 +91,22 @@ function describe(
   }
 }
 
-/** One sentence for the popover head: the chip is four words, this is where the reason fits. */
-function sentence(
+/**
+ * One sentence for the popover head: the chip is four words, this is where the reason fits — and THE
+ * ONE SOURCE of the words a save that did not pass is said in (D-63′, 27.09 · O-64 r2): the line at
+ * the top of the form (SaveFailureLine) prints exactly this sentence for the same machine state, so
+ * the two organs cannot drift apart. Over a held refusal (D-66) the words are the server's as it said
+ * them (`refusal`), never a paraphrase; over the `restaged` cap its own truthful sentence; over a
+ * 401/403 stop (`off` with cause `auth`, D-66′) why the card no longer saves itself — the chip is
+ * not drawn at `off`, and the line is where that is said.
+ */
+export function saveSentence(
   status: AutosaveStatus,
   message: string | undefined,
   errorsCount?: number,
   cause?: SaveCause,
-) {
+  refusal?: string,
+): string {
   switch (status) {
     case 'saving':
       return 'saving to the server…';
@@ -115,14 +124,23 @@ function sentence(
       // O-60 r4: at the `restaged` cap no write failed — every one landed, and a panel kept moving.
       if (cause === 'restaged')
         return 'the card kept changing while it was being saved — it retries on its own';
-      // D-66: the server's own sentence, as it is — it names the way out itself.
+      // D-66: the server's own sentence, as it is — it names the way out itself. D-66′: the words the
+      // server said (`refusal`), even where the page explains the refusal with a banner of its own.
       if (cause === 'refused')
         return (
-          message || 'the server refused the last save — it goes out again with your next change'
+          refusal ||
+          message ||
+          'the server refused the last save — it goes out again with your next change'
         );
       return message
         ? `the last save failed: ${message}; the card keeps retrying on its own`
         : 'the last save failed; the card keeps retrying on its own';
+    case 'off':
+      // D-66′: only a 401/403 stop has words — the chip is not drawn at `off`; the line at the top of
+      // the form prints this over a card that stopped saving itself, with the server's reason.
+      return cause === 'auth'
+        ? `the card is not saved and no longer saves itself${message ? ` — ${message}` : ''}`
+        : '';
     default:
       return 'every change is saved on its own';
   }
@@ -134,6 +152,7 @@ export function SaveStatusChip({
   errorsCount,
   message,
   cause,
+  refusal,
   bodyDirty,
   staged,
   history,
@@ -155,6 +174,8 @@ export function SaveStatusChip({
    * refusal of the body (D-66: no timer, the next change sends it again).
    */
   cause?: SaveCause;
+  /** D-66′: over a refusal, the server's words as it said them (`AutosaveApi.refusal`). */
+  refusal?: string;
   bodyDirty: boolean;
   staged: StagedChange[];
   history: HistoryEntry[];
@@ -256,7 +277,7 @@ export function SaveStatusChip({
             </button>
           )}
           <Text size='micro' variant='label' component='p'>
-            {sentence(status, message, errorsCount, cause)}
+            {saveSentence(status, message, errorsCount, cause, refusal)}
           </Text>
 
           {pendingCount > 0 && (

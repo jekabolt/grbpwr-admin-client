@@ -32,10 +32,6 @@ import {
 //
 // So: ACTIONS are identity-stable for the life of the provider and are what panels use. The
 // changing `changes` array lives in its own context that only the header subscribes to.
-//
-// ONE deliberate exception: hydrate() (the refresh-restore path) gives the actions object a new
-// identity, so a panel's mount-only claim effect re-runs and can pick up its restored snapshot. It
-// fires once per restore, never per keystroke — see StagingActions.hydratedAt.
 
 export type StagedChange = {
   /** Stable identity: 'sizeChart' | `recipe:${colorwayId}` | … Re-staging the same key replaces it. */
@@ -51,8 +47,10 @@ export type StagedChange = {
    *  NOT optional in practice: a panel that stays dirty after committing immediately re-stages
    *  itself, and the header then reports an unsaved change that is already saved. */
   settle?: () => void;
-  /** Serializable state for the refresh-restore path (19.6). Omit and the change simply does not
-   *  survive a reload — which is the honest outcome for a panel that cannot rebuild itself. */
+  /** What the panel holds, as plain serializable data. Compared BY VALUE on every re-stage to tell an
+   *  operator's edit from a re-render's echo (the snapshot contract in `stage`), and handed back by
+   *  `useStagedSnapshot` to a panel that unmounts while staged (the sample editor). Omit it and every
+   *  stage() counts as an edit. */
   snapshot?: unknown;
 };
 
@@ -91,8 +89,6 @@ export type CommitOutcome = {
   pending?: StagedChange[];
 };
 
-export type PersistedStaging = Array<{ key: string; label: string; snapshot: unknown }>;
-
 /**
  * Одинаковы ли два снимка ПО ЗНАЧЕНИЮ.
  *
@@ -101,9 +97,9 @@ export type PersistedStaging = Array<{ key: string; label: string; snapshot: unk
  * вечно отвечает «изменилось». Ровно на этом ответе строилось решение «панель уехала, пока шёл
  * коммит», и оно оказывалось ложным после каждого чужого рендера.
  *
- * Снимки — простые сериализуемые данные (их же пишет черновик в localStorage), поэтому JSON здесь
- * законный способ сравнить. `undefined` с обеих сторон — это «панель снимков не даёт»; такие
- * считаются одинаковыми, а вопрос «двигалась ли она» решается выше и не этой функцией.
+ * Снимки — простые сериализуемые данные, поэтому JSON здесь законный способ сравнить. `undefined` с
+ * обеих сторон — это «панель снимков не даёт»; такие считаются одинаковыми, а вопрос «двигалась ли
+ * она» решается выше и не этой функцией.
  */
 function sameSnapshot(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -116,20 +112,13 @@ function sameSnapshot(a: unknown, b: unknown): boolean {
 }
 
 /**
- * Identity-stable for the provider's lifetime EXCEPT across a hydrate() — safe in a useEffect dep
- * list, and deliberately not inert there (see `hydratedAt`).
+ * Identity-stable for the provider's lifetime — safe in a useEffect dep list.
  */
 type StagingActions = {
   stage: (change: StagedChange) => void;
   unstage: (key: string) => void;
   /** Commit every staged change in order, stopping at the first failure. */
   commitAll: () => Promise<CommitOutcome>;
-  /** Snapshot persisted by a previous session for this key, consumed once. */
-  takeSnapshot: (key: string) => unknown;
-  /** Everything currently staged, serialized — the draft autosave writes this alongside the form. */
-  serialize: () => PersistedStaging;
-  /** Seed the restorable snapshots from a persisted draft. */
-  hydrate: (persisted: PersistedStaging | null) => void;
   clear: () => void;
   /**
    * The queue AS IT IS RIGHT NOW, read from the ref every action writes — not the rendered `changes`
@@ -137,19 +126,6 @@ type StagingActions = {
    * from inside timers and awaited saves, where a render-time copy would be stale by construction.
    */
   peek: () => StagedChange[];
-  /**
-   * Bumped by hydrate(), and part of the identity a panel receives from useTechCardStaging().
-   *
-   * WHY IT EXISTS: every panel claims its restored snapshot from a MOUNT-ONLY effect
-   * (`takeSnapshot` in an effect keyed on [staging, styleId | colorwayId | …]). All tab bodies are
-   * mounted at page load — they are only `hidden` — so those effects have already run, against an
-   * empty snapshot map, long before the operator can press «restore» on the draft banner. Seeding
-   * the map in a ref alone was therefore invisible: the restore put the form back and silently
-   * dropped every staged size-chart cell / recipe row / lab-dip verdict. Changing the identity of
-   * the object panels depend on is what re-runs those claim effects — once, on hydrate — without
-   * every panel having to remember to depend on a nonce.
-   */
-  hydratedAt: number;
 };
 
 const ActionsContext = createContext<StagingActions | null>(null);
@@ -193,17 +169,12 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
     revisionRef.current += 1;
     setRevision(revisionRef.current);
   };
-  // Snapshots restored from localStorage, waiting for their panel to mount and claim them. A ref,
-  // not state: claiming one must not re-render every other panel. The claim is made observable by
-  // `hydratedAt` below instead (see the doc on StagingActions.hydratedAt).
-  const restorable = useRef<Map<string, unknown>>(new Map());
-  const [hydratedAt, setHydratedAt] = useState(0);
   // How many times each key has been staged. commitAll compares this across a commit to tell "the
   // panel moved on while I was writing" from "nothing happened", WITHOUT comparing closures (fresh
   // every render) or snapshots (a panel may not have one).
   const stageGen = useRef<Map<string, number>>(new Map());
 
-  const actions = useMemo<Omit<StagingActions, 'hydratedAt'>>(() => {
+  const actions = useMemo<StagingActions>(() => {
     const sortQueue = (list: StagedChange[]) =>
       [...list].sort((a, b) => a.order - b.order || a.key.localeCompare(b.key));
 
@@ -338,28 +309,8 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
         };
       },
 
-      takeSnapshot: (key) => {
-        const value = restorable.current.get(key);
-        restorable.current.delete(key);
-        return value;
-      },
-
-      serialize: () =>
-        changesRef.current
-          .filter((c) => c.snapshot !== undefined)
-          .map((c) => ({ key: c.key, label: c.label, snapshot: c.snapshot })),
-
-      hydrate: (persisted) => {
-        restorable.current = new Map((persisted ?? []).map((p) => [p.key, p.snapshot]));
-        // Publish the seeding: the bump re-runs every panel's claim effect, which is the only thing
-        // that gets a restored snapshot into an ALREADY-MOUNTED panel (all tab bodies are mounted
-        // from page load, so they claimed against an empty map before the banner was pressed).
-        setHydratedAt(Date.now());
-      },
-
       clear: () => {
         publish([]);
-        restorable.current.clear();
         stageGen.current.clear();
       },
 
@@ -370,13 +321,8 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // The value panels depend on: stable, except that a hydrate() gives it a new identity exactly
-  // once so mount-only claim effects re-run. Nothing else in here changes identity, so the
-  // render-explosion the note at the top of this file describes stays impossible.
-  const value = useMemo<StagingActions>(() => ({ ...actions, hydratedAt }), [actions, hydratedAt]);
-
   return (
-    <ActionsContext.Provider value={value}>
+    <ActionsContext.Provider value={actions}>
       <ChangesContext.Provider value={changes}>
         <RevisionContext.Provider value={revision}>{children}</RevisionContext.Provider>
       </ChangesContext.Provider>

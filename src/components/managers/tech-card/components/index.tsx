@@ -1,10 +1,12 @@
-              {/* «concept & construction description» ПЕРЕЕХАЛ В STUDIO ЦЕЛИКОМ.
+{
+  /* «concept & construction description» ПЕРЕЕХАЛ В STUDIO ЦЕЛИКОМ.
                   Он ушёл туда не ради симметрии с прототипом, а потому что там из выносок карточки
                   выводятся строки описания — то есть там единственное место, где пометка на эскизе
                   превращается в текст для фабрики. Держать здесь второй набор тех же полей значило
                   бы два `register` на одно имя формы: значение одно, а на экране два поля, из
                   которых одно молча отстаёт. Редактор аспектов уехал вместе с ними и передаётся
-                  в студию узлом — печатный порядок concept → aspects → notes сохранён. */}
+                  в студию узлом — печатный порядок concept → aspects → notes сохранён. */
+}
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
@@ -109,35 +111,34 @@ import {
   hasPresenceLoss,
   type PresenceAudit,
 } from './operations-presence';
-import {
-  PresenceLossBanner,
-  VersionSkewBanner,
-  type VersionSkew,
-} from './save-audit-banners';
+import { PresenceLossBanner, VersionSkewBanner, type VersionSkew } from './save-audit-banners';
 import { useTechCardStagingRequired, type CommitOutcome } from './useTechCardStaging';
 import {
   AutosaveContext,
   flushRefusalSentence,
   type AutosaveApi,
-  type FlushResult,
 } from './design/autosave-contract';
 import {
   bodyMoved,
   bodyOnTheWire,
   bodyWorkOf,
   deepEqual,
+  failureClassOf,
+  failureFields,
+  failureFieldsOf,
+  failureStatus,
   formOnTheWire,
-  hasHttpStatus,
-  isConflictError,
-  isRefusalError,
+  serverSentenceOf,
   settleFormAfterSave,
   useTechCardAutosaveController,
   watchOwnFailure,
   type GestureProps,
+  type OwnFailure,
   type SaveMode,
   type SaveOutcome,
   type SaveResult,
 } from './useTechCardAutosave';
+import { CONVERT_WAIT_MS, convertVerdict, waitForTheWrite, type ConvertWait } from './convert-wait';
 import {
   restoreTextSections,
   textSnapshotOf,
@@ -352,44 +353,7 @@ type WriteResult = {
   ok: boolean;
   outcome: SaveOutcome;
   message?: string;
-  /** D-66: the server refused the body itself (a 4xx a resend cannot change) — see SaveResult. */
-  refused?: boolean;
-};
-
-/**
- * How long «archive & switch» waits for a write that was already on the wire (O-60 r4, P1-2). The API has
- * no request timeout, and a hung write must not hold the dialog: past this the confirm says so and is
- * live again, nothing archived.
- */
-const CONVERT_WAIT_MS = 15_000;
-type ConvertWait = FlushResult | 'aborted' | 'timeout';
-/**
- * The flush, awaited only until the operator cancels (`signal`) or `ms` pass. Nothing underneath is
- * cancelled: the write in flight goes on and the autosave settles it as usual — only the dialog stops
- * waiting for it.
- */
-function waitForTheWrite(
-  flush: Promise<FlushResult>,
-  signal: AbortSignal,
-  ms: number,
-): Promise<ConvertWait> {
-  return new Promise((resolve) => {
-    let timer = 0;
-    const done = (v: ConvertWait) => {
-      window.clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      resolve(v);
-    };
-    const onAbort = () => done('aborted');
-    if (signal.aborted) {
-      resolve('aborted');
-      return;
-    }
-    signal.addEventListener('abort', onAbort);
-    timer = window.setTimeout(() => done('timeout'), ms);
-    flush.then(done, () => done('error'));
-  });
-}
+} & Pick<SaveResult, 'failure' | 'refusalMessage'>; // D-66′: what a failure was, and the server's words
 
 /**
  * What a read of the card means for this page (M-3): `same` — nothing newer than the card it stands on;
@@ -563,9 +527,7 @@ export function TechCardForm({
     // Читается через ту же форму записи, что и `mapTechCardToForm`: на проводе оба списка живут
     // на `TechCardInsert`, а прочитанная карточка отдаётся той же формой. Каст здесь — тот же
     // приём, которым `splitSketchMedia` достаёт легаси-список.
-    const tc = techCard?.techCard as
-      | (common_TechCardInsert & { moodNote?: string })
-      | undefined;
+    const tc = techCard?.techCard as (common_TechCardInsert & { moodNote?: string }) | undefined;
     if (!tc) return false;
     if ((tc.moodNote ?? '').trim()) return true;
     const media = [...(tc.moodboardMedia ?? []), ...(tc.technicalMedia ?? [])];
@@ -707,6 +669,11 @@ export function TechCardForm({
   // the write after it (`converting`) hold the dialog shut.
   const [convertWaiting, setConvertWaiting] = useState(false);
   const convertWait = useRef<AbortController | null>(null);
+  // D-66′ (T61 r5): the page leaving ends the wait — the confirm hears `aborted` and archives nothing.
+  useEffect(() => {
+    const wait = convertWait;
+    return () => wait.current?.abort();
+  }, []);
   // Said inside the dialog when the wait ran out; the confirm is live again and nothing was archived.
   const [convertRefusal, setConvertRefusal] = useState<string | null>(null);
   // What a half-finished convert left behind. Like stagingError this is a fact about a write that
@@ -948,7 +915,6 @@ export function TechCardForm({
   const labelsW = useWatch({ control: form.control, name: 'labels' });
   // Which tabs count toward "the card's core spec is filled", and whether each currently has content.
   const sectionFilled: Partial<Record<TabId, boolean>> = {
-
     // STUDIO holds both grids now, so it is ticked by either: a card with a moodboard and no flat
     // has started the work this tab is for. ARTIFACTS is deliberately left UNSET rather than
     // `false` — nothing is minted yet in this wave, and claiming an outstanding section that
@@ -1689,7 +1655,7 @@ export function TechCardForm({
         // carries its HTTP status speaks for itself.
         const ownFailure = watchOwnFailure(queryClient.getMutationCache());
         let outcome: CommitOutcome;
-        let failedOwn: { conflict: boolean } | null = null;
+        let failedOwn: OwnFailure | null = null;
         try {
           outcome = await staging.commitAll();
           failedOwn = ownFailure.current();
@@ -1725,8 +1691,11 @@ export function TechCardForm({
         }
         if (outcome.failed) {
           const { change, error } = outcome.failed;
-          const own = hasHttpStatus(error) ? null : failedOwn;
-          if (isConflictError(error) || !!own?.conflict) {
+          // D-66′: what the panel's failure was — its own status, the one its sentence wraps (`cause`),
+          // or, for a rewrap that kept neither, the one its mutation failed with in this very task.
+          const own = failureStatus(error) === undefined ? failedOwn : null;
+          const failure = failureClassOf(failureStatus(error) ?? own?.status);
+          if (failure === 'conflict') {
             const message = `«${change.label}» was changed by someone else meanwhile`;
             leaveFullscreen();
             openConflict();
@@ -1746,8 +1715,8 @@ export function TechCardForm({
             ok: false,
             outcome: 'partial',
             message: `«${change.label}»: ${why}`,
-            // D-66: the panel's own write refused (its status survived the rewrap) — held, not laddered.
-            refused: isRefusalError(error),
+            // D-66′: the panel's own write refused — held, not laddered; a 401/403 stops the card saving.
+            ...failureFields(failure, serverSentenceOf(error) ?? own?.message),
           };
         }
         if (reread === 'error') {
@@ -1942,10 +1911,15 @@ export function TechCardForm({
       // отказ, который никуда не встал — ни на контрол, ни в баннер, ни в тост, — и есть та
       // самая невидимая потеря, ради которой затевалась фаза. (У автосейва тоста нет — то же
       // предложение уезжает в поповер чипа через `message`.)
+      // D-63′: over a 409 the decision is the conflict modal's (opened above), and this sentence is what
+      // the chip's popover and the line at the top of the form print — not the list's «Reload to get
+      // the latest version» (techCardErrorMessage), which names a door this page does not have.
       const base =
         transport || contradictions.length > 0
           ? 'the backend did not recognise part of this card — see the banner on the card'
-          : techCardErrorMessage(error, 'Failed to submit tech card');
+          : status === 409
+            ? 'another editor saved this card meanwhile'
+            : techCardErrorMessage(error, 'Failed to submit tech card');
       const message = unmapped.length
         ? `${base} — ${unmapped.map((u) => u.description).join('; ')}`
         : base;
@@ -1953,14 +1927,16 @@ export function TechCardForm({
       console.error('Failed to submit tech card', error);
       const outcome: SaveOutcome =
         status === 409 ? 'conflict' : applied.length > 0 ? 'invalid' : 'error';
-      // D-66: a 4xx the same body would earn again (the assembly backstop's FailedPrecondition, a strict
-      // marshaller's 400) is held until the next change instead of re-sent on the retry ladder.
+      // D-66 / D-66′: a 4xx the same body would earn again (the assembly backstop's FailedPrecondition, a
+      // strict marshaller's 400) is held until the next change instead of re-sent on the retry ladder,
+      // and a 401/403 stops the card saving — the class and the server's own words, as it said them
+      // (the banner above keeps its friendlier sentence in `message`).
       return {
         bodySaved,
         ok: false,
         outcome,
         message,
-        refused: outcome === 'error' && isRefusalError(error),
+        ...(outcome === 'error' ? failureFieldsOf(error) : {}),
       };
     }
   }
@@ -2107,7 +2083,12 @@ export function TechCardForm({
       return { outcome: 'needs-confirm' };
     }
     const r = await writeTechCard(data, { mode: 'explicit' });
-    return { outcome: r.outcome, message: r.message, refused: r.refused };
+    return {
+      outcome: r.outcome,
+      message: r.message,
+      failure: r.failure,
+      refusalMessage: r.refusalMessage,
+    };
   }
 
   // «archive & switch»: retire every live colourway, then run the same save again. Client-guided and
@@ -2134,28 +2115,23 @@ export function TechCardForm({
       if (convertWait.current === wait) convertWait.current = null;
       setConvertWaiting(false);
     }
-    // Cancelled while waiting: dismissConvert has put the purpose back already.
-    if (waited === 'aborted') return;
-    if (waited === 'timeout') {
-      setConvertRefusal('the card is still saving — try the switch again in a moment');
-      return;
-    }
-    // O-60 r4 (P1-1): the write it waited for came back 409, and the conflict decision is open. Nothing is
-    // archived over a card that can no longer be written: the dialog closes and says why. The switch stays
-    // in the form — «keep mine & overwrite» brings this dialog back with the rest of the card.
-    if (waited === 'conflict' || conflictOpen.current) {
-      setConvert(null);
-      showMessage('someone else saved this card meanwhile — decide the conflict first', 'error');
-      return;
-    }
-    // D-66: the server refused the card's last write (a 4xx the same body earns again), and the switch
-    // would carry that same body. Nothing is archived before a write already answered «no»: the dialog
-    // closes with the server's words. The switch stays in the form — once a change lands, the chip's
-    // «confirm the switch ›» brings this dialog back.
-    const refusal = autosave.refusalNow();
-    if (refusal) {
-      setConvert(null);
-      showMessage(`nothing was archived — the server refused the last save: ${refusal}`, 'error');
+    // What the wait ended in, and the page as it stands NOW — read right here, immediately before the
+    // irreversible part (D-66′, T61 r5): one table decides (convert-wait.ts). A cancel or a page that left
+    // says nothing; a wait that ran out says so in the dialog, its confirm live again; a conflict, a
+    // refused last write, a card that stopped saving (401/403, a release elsewhere) or an answer nobody
+    // expected close the dialog with why — and archive nothing.
+    const verdict = convertVerdict(waited, {
+      mounted: pageMounted.current,
+      saves: autosave.savesNow(),
+      conflict: conflictOpen.current,
+      refusal: autosave.refusalNow(),
+    });
+    if (!verdict.go) {
+      if (verdict.keep) setConvertRefusal(verdict.say ?? null);
+      else if (verdict.say) {
+        setConvert(null);
+        showMessage(verdict.say, 'error');
+      }
       return;
     }
     // Held across the check, the archive loop AND the save that follows: this path bypasses
@@ -2212,11 +2188,12 @@ export function TechCardForm({
       // query, and archivedIds already covers the gap).
       if (numId) queryClient.invalidateQueries({ queryKey: techCardKeys.detail(numId) });
       setConvert(null);
-      const { bodySaved, ok, outcome, message, refused } = await writeTechCard(data);
+      const { bodySaved, ok, outcome, message, failure, refusalMessage } =
+        await writeTechCard(data);
       // R-7: the autosave handed this write to the dialog and does not run it, so it hears the outcome
       // here — its status ends where the write did (no «unsaved · confirm the switch ›» over a card
       // that is saved), and a quiet card gets the same bookkeeping as after its own cycle (history).
-      autosave.settleExternal({ outcome, message, refused }, 'convert');
+      autosave.settleExternal({ outcome, message, failure, refusalMessage }, 'convert');
       if (ok) {
         // Only now: the card has to BE auxiliary before a colour variant is allowed on it (the
         // server refuses one on a sellable card), so seeding is a follow-up to the flip, not part
@@ -2387,7 +2364,8 @@ export function TechCardForm({
       outcome: r.outcome,
       message: r.message,
       pendingConfirm: keepPurpose !== undefined && r.outcome === 'complete',
-      refused: r.refused,
+      failure: r.failure,
+      refusalMessage: r.refusalMessage,
     };
   }
 
@@ -2679,7 +2657,7 @@ export function TechCardForm({
   // collection / season / targetGender and stays mounted unconditionally below.
   const cardDetails = (
     <>
-    {/* ═══ ONE BLOCK, NOT FOUR (studio v3, step 0 «как в референсе») ════════════════════════════
+      {/* ═══ ONE BLOCK, NOT FOUR (studio v3, step 0 «как в референсе») ════════════════════════════
         The prototype's `cardBlock()`: a single CARD DETAILS block with a `N of 10 fields` counter
         in its rule and the groups as rules inside it — IDENTIFICATION, CLASSIFICATION, BASE MODEL
         & SAMPLE SIZE, then RESPONSIBLE ROLES | LINKED PRODUCTS side by side. The composition lives
@@ -2689,81 +2667,79 @@ export function TechCardForm({
         write, and the one door out (`navTo('colorways')` — the address has ONE writer).
         `StyleFactsField` does NOT ride along: it is the one writer of brand / collection / season /
         targetGender and stays mounted unconditionally below. */}
-    <CardDetails
-      techCardId={isEditMode ? numId : undefined}
-      isIdea={isIdea}
-      isAux={isAux}
-      canEdit={canWrite(SECTION.techCards) && !frozen}
-      outputMaterialId={outputMaterialId}
-      roleAssignments={techCard?.roleAssignments}
-      colorways={techCard?.colorways}
-      /* K-19 · the consequence of changing the season, spoken on «pick» — the field's one writer.
+      <CardDetails
+        techCardId={isEditMode ? numId : undefined}
+        isIdea={isIdea}
+        isAux={isAux}
+        canEdit={canWrite(SECTION.techCards) && !frozen}
+        outputMaterialId={outputMaterialId}
+        roleAssignments={techCard?.roleAssignments}
+        colorways={techCard?.colorways}
+        /* K-19 · the consequence of changing the season, spoken on «pick» — the field's one writer.
          Undefined on a new card: there is nothing to re-issue yet, and the sentence would be a
          lie about colourways that do not exist. */
-      seasonPickHint={
-        isEditMode
-          ? 'changing the season re-issues the SKU of every colourway — the save is rejected if one of them is already frozen (orders placed, or labels printed)'
-          : undefined
-      }
-      onGoColourways={() => navTo('colorways')}
-    />
+        seasonPickHint={
+          isEditMode
+            ? 'changing the season re-issues the SKU of every colourway — the save is rejected if one of them is already frozen (orders placed, or labels printed)'
+            : undefined
+        }
+        onGoColourways={() => navTo('colorways')}
+      />
 
-    {isAux && (
-      <Section title='output material'>
-        {/* 0252: once a colour is registered the card produces one bucket PER COLOUR, and
+      {isAux && (
+        <Section title='output material'>
+          {/* 0252: once a colour is registered the card produces one bucket PER COLOUR, and
             the single picker below stops being the answer — showing both would offer two
             contradictory places to say where the goods land. The variants are their own
             immediate RPC writes, so this branch needs a SAVED card; an unsaved one has no
             id to write against and only ever sees the legacy picker. */}
-        {isEditMode && numId && outputVariants.length > 0 ? (
-          <OutputVariantsPanel
-            techCardId={numId}
-            variants={outputVariants}
-            canEdit={canWrite(SECTION.techCards)}
-          />
-        ) : (
-          <>
-            <Text variant='inactive' size='small'>
-              runs of this card receipt into material stock, not product stock. Pick the
-              packaging material this card produces (required before its first run).
-            </Text>
-            <div className='max-w-md'>
-              <MaterialPicker
-                value={outputMaterialId}
-                onChange={(mid) =>
-                  form.setValue('outputMaterialId', mid, { shouldDirty: true })
-                }
-                section='TECH_CARD_BOM_SECTION_PACKAGING'
-                disabled={!canWrite(SECTION.techCards)}
-                placeholder='search packaging material'
-              />
-            </div>
-            {canWrite(SECTION.techCards) && (
-              <Button
-                type='button'
-                variant='secondary'
-                size='lg'
-                className='uppercase'
-                onClick={() => setMaterialModalOpen(true)}
-              >
-                + create material
-              </Button>
-            )}
-            {/* The way INTO per-colour mode without stranding the balance already on the
+          {isEditMode && numId && outputVariants.length > 0 ? (
+            <OutputVariantsPanel
+              techCardId={numId}
+              variants={outputVariants}
+              canEdit={canWrite(SECTION.techCards)}
+            />
+          ) : (
+            <>
+              <Text variant='inactive' size='small'>
+                runs of this card receipt into material stock, not product stock. Pick the packaging
+                material this card produces (required before its first run).
+              </Text>
+              <div className='max-w-md'>
+                <MaterialPicker
+                  value={outputMaterialId}
+                  onChange={(mid) => form.setValue('outputMaterialId', mid, { shouldDirty: true })}
+                  section='TECH_CARD_BOM_SECTION_PACKAGING'
+                  disabled={!canWrite(SECTION.techCards)}
+                  placeholder='search packaging material'
+                />
+              </div>
+              {canWrite(SECTION.techCards) && (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='lg'
+                  className='uppercase'
+                  onClick={() => setMaterialModalOpen(true)}
+                >
+                  + create material
+                </Button>
+              )}
+              {/* The way INTO per-colour mode without stranding the balance already on the
                 books: adopt this very material as the first colour rather than minting a
                 second bucket beside it. Hidden until there is something to adopt, and
                 until the card exists to hang it on. */}
-            {isEditMode && numId ? (
-              <AdoptLegacyOutputButton
-                techCardId={numId}
-                materialId={outputMaterialId}
-                canEdit={canWrite(SECTION.techCards)}
-              />
-            ) : null}
-          </>
-        )}
-      </Section>
-    )}
+              {isEditMode && numId ? (
+                <AdoptLegacyOutputButton
+                  techCardId={numId}
+                  materialId={outputMaterialId}
+                  canEdit={canWrite(SECTION.techCards)}
+                />
+              ) : null}
+            </>
+          )}
+        </Section>
+      )}
     </>
   );
 
@@ -2812,6 +2788,7 @@ export function TechCardForm({
                 errorsCount={autosave.errorsCount}
                 message={autosave.message}
                 cause={autosave.cause}
+                refusal={autosave.refusal}
                 // mn-3: dirt nobody can write is not «waiting» (read after the subscription).
                 bodyDirty={form.formState.isDirty && bodyWorkOf(form)}
                 staged={staging.changes}
@@ -3615,9 +3592,9 @@ export function TechCardForm({
                   <CalloutBox tone='warning' className='mb-2.5'>
                     <Text size='micro'>
                       this style has no cost set — there is nothing to compute the margin, the
-                      payback and the economics of its colourways from, and goods sold are counted in
-                      analytics as “without a cost” and drag the shop's coverage down. add materials
-                      to the BOM or write a line item below.
+                      payback and the economics of its colourways from, and goods sold are counted
+                      in analytics as “without a cost” and drag the shop's coverage down. add
+                      materials to the BOM or write a line item below.
                     </Text>
                   </CalloutBox>
                 )}

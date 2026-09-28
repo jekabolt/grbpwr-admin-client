@@ -163,15 +163,15 @@ import { cardHasDxf } from './nesting/card-has-dxf';
 import { type FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
 import type { PieceCloth } from './piece-cloth';
-import {
-  assemblySweep,
-  classifyAssemblyInputs,
-  type AssemblyResult,
-} from './assembly-frontier';
+import { assemblySweep, classifyAssemblyInputs, type AssemblyResult } from './assembly-frontier';
 import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
 import { drawnTailSteps, processedPieceOf } from './assembly-layout';
 import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
-import { AssemblyCreateDialog, type CreatePrefill, type CreateResult } from './assembly-create-dialog';
+import {
+  AssemblyCreateDialog,
+  type CreatePrefill,
+  type CreateResult,
+} from './assembly-create-dialog';
 import { suggestUnitCode } from './assembly-suggest';
 import {
   planUnitRename,
@@ -893,10 +893,7 @@ function RailUnnamedWord({ frozen, onRatify }: { frozen?: boolean; onRatify: () 
   // ПУСТАЯ СТРОКА — ЕДИНСТВЕННОЕ «НЕ НАЗВАНО»: `work` приходит с провода и из схемы уже строкой
   // (`(o.work ?? '').trim()`), UNKNOWN-члена у него нет вовсе — это серверный словарь, а не
   // перечисление. Считать что-то ещё значит считать не то.
-  const unnamed = operations.reduce(
-    (n, o) => n + (((o?.work ?? '') as string).trim() ? 0 : 1),
-    0,
-  );
+  const unnamed = operations.reduce((n, o) => n + (((o?.work ?? '') as string).trim() ? 0 : 1), 0);
   if (!unnamed) return null;
   return (
     <ChipRow className='mb-1.5'>
@@ -911,7 +908,12 @@ function RailUnnamedWord({ frozen, onRatify }: { frozen?: boolean; onRatify: () 
         kind — {unnamed} of {total} {total === 1 ? 'step' : 'steps'} not named yet
       </Text>
       {!frozen && (
-        <Chip dashed onClick={onRatify} data-ratify-open-panel='1' title='go through the card and confirm the names it already prints'>
+        <Chip
+          dashed
+          onClick={onRatify}
+          data-ratify-open-panel='1'
+          title='go through the card and confirm the names it already prints'
+        >
           ratify …
         </Chip>
       )}
@@ -1020,7 +1022,10 @@ function useRailGrouping(pieces: PieceRef[], smvOf: (i: number) => string): Rail
 
     const grouped = assemblyBlocks(steps, res);
     const liveUnits = res.frontier.filter((k) => res.units.has(k));
-    const headerBefore = new Map<number, { block: AssemblyBlock; smv: string; terminal: boolean }>();
+    const headerBefore = new Map<
+      number,
+      { block: AssemblyBlock; smv: string; terminal: boolean }
+    >();
 
     const sumSmv = (idx: number[]) => {
       let total = 0;
@@ -1227,7 +1232,6 @@ function TrayChip({
   );
 }
 
-
 // ── produces: что шаг собирает ───────────────────────────────────────────────────────────────
 // Узел — не поле «опишите шаг», а РЕЗУЛЬТАТ шага, на который ссылаются входы следующих шагов.
 // Именно поэтому он необязателен: пустой ключ значит «шаг ничего не собирает», это обработка, и
@@ -1291,7 +1295,9 @@ function useUnitCodeAct({
   // затронет» разошёлся бы с первым молча — и баннер обещал бы не то, что произошло.
   // Через `getValues`, а не подпиской: редактор и так перерисовывается на каждую правку операций
   // (его `useAssemblyView` подписан на весь массив), а вторая подписка ничего к этому не добавит.
-  const plan = pending ? planUnitRename((getValues('operations') ?? []) as UnitKeyRow[], outputKey) : null;
+  const plan = pending
+    ? planUnitRename((getValues('operations') ?? []) as UnitKeyRow[], outputKey)
+    : null;
   // ТОТ ЖЕ КЛЮЧ, КОТОРЫЙ ЛЯЖЕТ В ФОРМУ: вердикт нормализует набранное (подрезает), и подсказка
   // обязана называть результат, а не черновик. Хвостовой пробел невидим — подсказка, печатающая
   // «→ BODY⎵», читается как «→ BODY», то есть обещает не то, что произойдёт.
@@ -1512,7 +1518,10 @@ function ProducesBlock({
     }
     const code = suggest();
     if (byKey.has(code)) {
-      showMessage(`the key “${code}” is taken by a piece — pieces and units share one namespace`, 'error');
+      showMessage(
+        `the key “${code}” is taken by a piece — pieces and units share one namespace`,
+        'error',
+      );
       return;
     }
     setValue(`operations.${index}.outputUnitKey`, code, { shouldDirty: true });
@@ -1577,11 +1586,7 @@ function ProducesBlock({
               заменяла бы в поздних шагах ЖИВЫЕ ЗАКОННЫЕ ссылки, выбрасывая их состав. Починка,
               которая ломает — ровно то, от чего предостерегал комментарий, пока предикат был не
               тот. */}
-          <BootstrapEatenRefs
-            index={index}
-            outputKey={outputKey}
-            assembly={assembly}
-          />
+          <BootstrapEatenRefs index={index} outputKey={outputKey} assembly={assembly} />
         </>
       )}
     </>
@@ -1651,7 +1656,10 @@ function BootstrapEatenRefs({
       setValue(`operations.${i}.inputKeys`, next, { shouldDirty: true });
     });
     setValue('assemblyCleared', false, { shouldDirty: true });
-    showMessage(`references to consumed pieces replaced with unit ${outputKey} in ${affected.length} steps`, 'success');
+    showMessage(
+      `references to consumed pieces replaced with unit ${outputKey} in ${affected.length} steps`,
+      'success',
+    );
   };
 
   return (
@@ -1666,7 +1674,6 @@ function BootstrapEatenRefs({
     </ChipRow>
   );
 }
-
 
 // ClearAssemblyButton — «снять разметку узлов».
 //
@@ -1742,7 +1749,7 @@ function ClearOperationMediaButton({
         <Text size='micro'>
           {inForm > 0
             ? `photos (${inForm}) will be removed from every step, along with the callouts on them.`
-            : "there are no photos in the form any more; the button declares to the server the intent to clear them from the saved card."}{' '}
+            : 'there are no photos in the form any more; the button declares to the server the intent to clear them from the saved card.'}{' '}
           the files themselves stay in the library.
         </Text>
       </ConfirmationModal>
@@ -1867,7 +1874,6 @@ function ClearAssemblyButton({
     </>
   );
 }
-
 
 // StepNumberDrift — предупреждение о переезде номеров шагов.
 //
@@ -2398,7 +2404,8 @@ function OperationEditor({
     NONE_HOLE_PREP) as string;
   const reinforcement = (useWatch({ control, name: `operations.${index}.reinforcement` }) ??
     NONE_REINFORCEMENT) as string;
-  const foldbackMm = (useWatch({ control, name: `operations.${index}.foldbackMm` }) ?? '') as string;
+  const foldbackMm = (useWatch({ control, name: `operations.${index}.foldbackMm` }) ??
+    '') as string;
   const cycleStitchCount = (useWatch({ control, name: `operations.${index}.cycleStitchCount` }) ??
     0) as number;
   const printMethod = (useWatch({ control, name: `operations.${index}.printMethod` }) ??
@@ -2457,14 +2464,19 @@ function OperationEditor({
   // прорези законна на зигзаге ровно потому, что работа названа. Гейт, который работы не видит,
   // прячет поле, которое сервер ТРЕБУЕТ, — и владелец получает отказ на контроле, которого нет на
   // экране. Второго чтения нет и быть не может: `const` ниже по телу компилятор бы и не отдал.
-  const workValue = ((useWatch({ control, name: `operations.${index}.work` }) ?? '') as string).trim();
+  const workValue = (
+    (useWatch({ control, name: `operations.${index}.work` }) ?? '') as string
+  ).trim();
   // КАТАЛОГ ЧИТАЕТСЯ ТУТ ЖЕ, И РОВНО ПО ТОМУ ЖЕ ДОВОДУ, ЧТО СТРОКОЙ ВЫШЕ. До R8 он жил у пикера
   // (ниже по телу), но ЯРЛЫК длины прорези спрашивает не только сам токен, а и то, знаком ли он
   // каталогу: работа новее бандла — это не петля, и назвать её петлёй значит соврать. Пикер берёт
   // ту же переменную там, где стоял его собственный вызов, — второго обращения к сети нет, ключ
   // запроса один на приложение.
-  const { catalog: workCatalog, live: catalogLive, refresh: refreshCatalog } =
-    useOperationWorkCatalog();
+  const {
+    catalog: workCatalog,
+    live: catalogLive,
+    refresh: refreshCatalog,
+  } = useOperationWorkCatalog();
 
   const isMachineStep = isMachineType(opType);
   const isPressStep = isPressType(opType);
@@ -2584,7 +2596,7 @@ function OperationEditor({
   // токен новее этого бандла не превратился в пустой триггер (см. stepEnumOptions).
   const stepDiscriminator = STEP_DISCRIMINATORS[opType as common_TechCardOperationType];
   const discriminatorValue = stepDiscriminator
-    ? ((
+    ? (
         {
           attachMethod,
           printMethod,
@@ -2593,7 +2605,7 @@ function OperationEditor({
           coverageMode,
           wetProcessKind,
         } as Record<string, string>
-      )[stepDiscriminator.field] ?? '')
+      )[stepDiscriminator.field] ?? ''
     : '';
 
   // The sewing overrides, counted apart from the equipment ones: a ВТО step has no seam class and
@@ -2662,7 +2674,14 @@ function OperationEditor({
     enumState('machineType', 'machine', machineType, NONE_MACHINE, machineTypeLabel, isMachineStep),
     keyState('machineProfileKey', 'machine profile', machineProfileKey, isMachineStep),
     intState('threadCount', 'threads', threadCount, isMachineStep),
-    enumState('needleType', 'needle point', needleType, NONE_NEEDLE, needleTypeLabel, isMachineStep),
+    enumState(
+      'needleType',
+      'needle point',
+      needleType,
+      NONE_NEEDLE,
+      needleTypeLabel,
+      isMachineStep,
+    ),
     intState('needleSizeNm', 'needle size, Nm', needleSizeNm, isMachineStep),
     enumState(
       'threadTension',
@@ -2707,7 +2726,14 @@ function OperationEditor({
     // чинить нечем. Строкой ОСТАТКА четвёрка не бывает по построению — любое её заполненное
     // значение само открывает секцию (`showSewingOverrides`), — поэтому здесь она даёт только
     // catch-строки.
-    enumState('seamClass', 'seam class', seamClass, NONE_SEAM_CLASS, seamClassText, showSewingOverrides),
+    enumState(
+      'seamClass',
+      'seam class',
+      seamClass,
+      NONE_SEAM_CLASS,
+      seamClassText,
+      showSewingOverrides,
+    ),
     textState('seamAllowanceMm', 'seam allowance, mm', seamAllowanceMm, showSewingOverrides),
     textState('stitchesPerCm', 'stitches / cm', stitchesPerCm, showSewingOverrides),
     enumState(
@@ -3136,9 +3162,7 @@ function OperationEditor({
   // (`HARDWARE_SET` + `press_set`), различает их «что ставим» — то есть `kind` привязанной строки.
   const stepBomKinds = useMemo(
     () =>
-      selectedBomKeys
-        .map((k) => bomLines.find((b) => b.lineKey === k)?.kind ?? '')
-        .filter(Boolean),
+      selectedBomKeys.map((k) => bomLines.find((b) => b.lineKey === k)?.kind ?? '').filter(Boolean),
     [selectedBomKeys, bomLines],
   );
   const resolvedKind = kindOf({
@@ -3309,7 +3333,11 @@ function OperationEditor({
     // форму, позвать её не мог вовсе: ему пришлось бы завести ВТОРУЮ редакцию тех же правил, и
     // разошлись бы они молча. Ни одно правило при выносе не переписано; здесь остались ровно
     // жесты формы — что положить и в каком порядке.
-    const { writes: written, clears, links } = workApplication({
+    const {
+      writes: written,
+      clears,
+      links,
+    } = workApplication({
       item,
       kind: k,
       // СНИМОК ЧИТАЕТСЯ У ФОРМЫ ДО ПЕРВОЙ ЗАПИСИ: и машинка, и ВТО-оборудование, и обе ссылки на
@@ -3858,7 +3886,9 @@ function OperationEditor({
       if (wrote.press) {
         const eq = getValues(`operations.${index}.pressEquipment`);
         if (eq === wrote.press.equipment && base.pressEquipment !== wrote.press.equipment) {
-          setValue(`operations.${index}.pressEquipment`, NONE_PRESS_EQUIPMENT, { shouldDirty: false });
+          setValue(`operations.${index}.pressEquipment`, NONE_PRESS_EQUIPMENT, {
+            shouldDirty: false,
+          });
           if (
             wrote.press.profileKey &&
             getValues(`operations.${index}.pressProfileKey`) === wrote.press.profileKey &&
@@ -4259,7 +4289,11 @@ function OperationEditor({
             шва / метод крепления / под-глагол — из пункта, если он у работы есть. Обе оси ниже
             остаются на экране и редактируемыми: шаг, собранный руками мимо всех работ, продолжает
             открываться и сохраняться, а работа у него просто не названа. */}
-        <div className='space-y-px' data-kind-picker={index} data-step-work={workValue || undefined}>
+        <div
+          className='space-y-px'
+          data-kind-picker={index}
+          data-step-work={workValue || undefined}
+        >
           <Text size='micro' variant='label' tracking='label' className='leading-none uppercase'>
             kind of operation
           </Text>
@@ -4491,7 +4525,10 @@ function OperationEditor({
           наследования 0306), и кнопки над ними не появится. Свой, клиентский список здесь
           разошёлся бы с принимающим молча — и человек жал бы кнопку, всегда отвечающую отказом. */}
       {activeWork && rememberableDefaults.length > 0 && (
-        <div className='mb-1 flex flex-wrap items-center gap-1' data-work-defaults={activeWork.token}>
+        <div
+          className='mb-1 flex flex-wrap items-center gap-1'
+          data-work-defaults={activeWork.token}
+        >
           <Text size='micro' variant='label' component='span'>
             remember for “{activeWork.label}” ·
           </Text>
@@ -4531,9 +4568,12 @@ function OperationEditor({
           контролами выше, которые никуда не делись. */}
       {!activeKind && opType !== NONE_OP_TYPE && (
         <Text size='micro' variant='label' className='mb-1'>
-          non-standard combination — {OPERATION_TYPE_LABELS[opType as common_TechCardOperationType] ?? opType}
-          {isMachineStep && machineType !== NONE_MACHINE ? ` · ${machineTypeLabel(machineType)}` : ''} — the
-          two axes above stay editable and nothing has been changed
+          non-standard combination —{' '}
+          {OPERATION_TYPE_LABELS[opType as common_TechCardOperationType] ?? opType}
+          {isMachineStep && machineType !== NONE_MACHINE
+            ? ` · ${machineTypeLabel(machineType)}`
+            : ''}{' '}
+          — the two axes above stay editable and nothing has been changed
         </Text>
       )}
 
@@ -4569,25 +4609,25 @@ function OperationEditor({
           спрятанное число всё равно печатается на листе и всё равно двигает дайджест секции. */}
       {showTopstitch && (
         <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-        {/* Список — с оглядкой на то, что в шаге уже лежит: словарь режимов ТОТАЛЕН над
+          {/* Список — с оглядкой на то, что в шаге уже лежит: словарь режимов ТОТАЛЕН над
             контрактом, поэтому токен вне списка означает режим НОВЕЕ этого бандла (обычное
             состояние между выкаткой бэка и выкаткой клиента), а Radix рисует такое значение
             ПУСТЫМ триггером — и технолог читает «отстрочки нет» на шаге, где она есть. */}
-        <SelectField
-          name={`operations.${index}.topstitchMode`}
-          label='topstitch'
-          items={topstitchModeOptionsFor(topstitchMode)}
-          className={selectNoGrow}
-        />
-        {/* Поле отступа стоит у режимов, которые число ПРИНИМАЮТ, и больше нигде: «in the ditch»
+          <SelectField
+            name={`operations.${index}.topstitchMode`}
+            label='topstitch'
+            items={topstitchModeOptionsFor(topstitchMode)}
+            className={selectNoGrow}
+          />
+          {/* Поле отступа стоит у режимов, которые число ПРИНИМАЮТ, и больше нигде: «in the ditch»
             меряет расстояние ноль по определению, и сервер число там отвергает по имени. У «at the
             edge» оно теперь есть и НЕОБЯЗАТЕЛЬНО — пустое значит «вплотную», — и это ровно то, чего
             в списке не хватало: пункт «at width from the edge» был этим же приёмом с числом.
             Классификация — в TOPSTITCH_MODES; режим, который бандл классифицировать не может, поля
             не показывает — безобидная половина сделки (значение при этом продолжает ездить). */}
-        {showTopstitchWidth && (
-          <>
-            {/* ПОДПИСЬ НАЗЫВАЕТ ЛИНИЮ, ОТ КОТОРОЙ МЕРЯЮТ, И МЕНЯЕТСЯ ВМЕСТЕ С РЕЖИМОМ. Владелец —
+          {showTopstitchWidth && (
+            <>
+              {/* ПОДПИСЬ НАЗЫВАЕТ ЛИНИЮ, ОТ КОТОРОЙ МЕРЯЮТ, И МЕНЯЕТСЯ ВМЕСТЕ С РЕЖИМОМ. Владелец —
                 практикующий технолог — спросил «у нас есть row spacing, но нет отступа от края»,
                 глядя ровно на это поле: подпись «topstitch width, mm» называла величину и молчала
                 о том, от чего она отсчитывается. Молчать здесь нельзя вдвойне — одно и то же поле
@@ -4595,38 +4635,38 @@ function OperationEditor({
                 ШВА, и на настрочном или запошивочном шве это разные линии. Слова берутся из
                 TOPSTITCH_MODES, откуда их берёт и печатный лист: второй копии не заводится, иначе
                 технолог наберёт число под одной линией, а швея прочитает другую. */}
-            <div className='flex flex-col gap-0.5'>
-              <DecimalField
-                name={`operations.${index}.topstitchWidthMm`}
-                label={topstitchWidthLabel(topstitchMode)}
-                maxDecimals={1}
-                placeholder='6'
-              />
-              {/* ПУСТОЕ ПОЛЕ ЗДЕСЬ — ОТВЕТ, А НЕ ПРОПУСК, и сказать это обязано оно само. Пока «по
+              <div className='flex flex-col gap-0.5'>
+                <DecimalField
+                  name={`operations.${index}.topstitchWidthMm`}
+                  label={topstitchWidthLabel(topstitchMode)}
+                  maxDecimals={1}
+                  placeholder='6'
+                />
+                {/* ПУСТОЕ ПОЛЕ ЗДЕСЬ — ОТВЕТ, А НЕ ПРОПУСК, и сказать это обязано оно само. Пока «по
                   краю» и «на столько-то от края» были ДВУМЯ пунктами списка, пустоте нечего было
                   значить, и её никто не оставлял; теперь пункт один, и незаполненное числовое поле
                   само по себе читается как «забыли», а не как «вплотную». Слова — из той же карты,
                   что подпись выше: линию они называют одну. Строка снимается, как только число
                   набрано, — при заполненном поле она сообщала бы про состояние, которого нет. */}
-              {topstitchWidthMm.trim() === '' && topstitchBlankMeans(topstitchMode) && (
-                <Text size='micro' variant='label'>
-                  {topstitchBlankMeans(topstitchMode)}
-                </Text>
-              )}
-            </div>
-            {/* РЯДЫ ЧЕГО. Голое «rows» — счётчик без предмета, а предмет тут спорный: рядами в
+                {topstitchWidthMm.trim() === '' && topstitchBlankMeans(topstitchMode) && (
+                  <Text size='micro' variant='label'>
+                    {topstitchBlankMeans(topstitchMode)}
+                  </Text>
+                )}
+              </div>
+              {/* РЯДЫ ЧЕГО. Голое «rows» — счётчик без предмета, а предмет тут спорный: рядами в
                 этой же карточке зовутся и строчки отстрочки (здесь), и соседние строчки, между
                 которыми меряется «spacing between stitch rows» в игольном блоке ниже. Это те же
                 самые ряды, но живут они в двух разных блоках, и связать их обязана подпись. */}
-            <SelectField
-              name={`operations.${index}.topstitchRows`}
-              label='rows of topstitching'
-              items={TOPSTITCH_ROW_OPTIONS}
-              valueAsNumber
-              className={selectNoGrow}
-            />
-          </>
-        )}
+              <SelectField
+                name={`operations.${index}.topstitchRows`}
+                label='rows of topstitching'
+                items={TOPSTITCH_ROW_OPTIONS}
+                valueAsNumber
+                className={selectNoGrow}
+              />
+            </>
+          )}
         </div>
       )}
       {/* ЛОВУШКА САМОГО КОНТРАКТА: нулевой член `TechCardTopstitchMode` значит НЕ «не указано», а
@@ -5212,9 +5252,7 @@ function OperationEditor({
           {applied.thread && (
             <SuggestedMark
               field='thread'
-              what={
-                bomLines.find((b) => b.lineKey === applied.thread)?.name?.trim() || 'thread'
-              }
+              what={bomLines.find((b) => b.lineKey === applied.thread)?.name?.trim() || 'thread'}
               why='it is the only thread line in this BOM that fits the step'
               onDismiss={() => dropSuggested('thread')}
             />
@@ -5310,7 +5348,9 @@ function OperationEditor({
               action={
                 <div className='flex flex-wrap items-center justify-end gap-2'>
                   <Text size='micro' variant='label' component='span'>
-                    {machineProfile ? `inherits ${machineSource}` : 'no profile — blanks stay unset'}
+                    {machineProfile
+                      ? `inherits ${machineSource}`
+                      : 'no profile — blanks stay unset'}
                   </Text>
                   {/* «These are not this step's exception, they are the card's normal.» The values
                       MOVE into the park and leave the step blank — the button lives in
@@ -5575,7 +5615,6 @@ function OperationEditor({
             </div>
           </>
         )}
-
       </Accordion>
 
       {/* ONE free-text box, not two. `description` and `note` used to sit side by side with no rule
@@ -5837,6 +5876,18 @@ export function OperationsField({
    *
    * `watch(cb)` НЕ РЕНДЕРИТ — в отличие от `useWatch`. Подписка на всю форму через `useWatch`
    * означала бы ре-рендер корня поля на каждый символ в любом поле карточки.
+   *
+   * ПОД АВТОСЕЙВОМ ЭТА ТОЧКА МОЛЧИТ — И ТАК И НАДО (27.09 · T61 r5, замерено на RHF 7.62). Полного
+   * ресета после записи больше нет ни одного: `settleFormAfterSave` (useTechCardAutosave.ts) пишет
+   * значения через setValue — событием С ИМЕНЕМ — и ставит базу `reset(…, { keepValues: true })`, а
+   * такой ресет события значений не шлёт вовсе (`watch(cb)` в 7.62 слушает только payload с
+   * `values`); форма создаётся с `defaultValues`, без `values`, и сама не ресетится. Строки при этом не
+   * перечеканиваются: массив той же длины пишется по листьям, и id useFieldArray живут; массив другой
+   * длины пишется целиком — перечеканиваются только его id, и щит отмены по `fieldId` тогда отказывает,
+   * как отказывал до этой точки. Отмена через автосейв бьёт в ТОТ ЖЕ шаг и есть просто следующая
+   * правка: чип скажет «unsaved», автосейв её запишет. Тихой записи в «сохранённую» карточку, ради
+   * которой точка заводилась (Save → ⇧⌘Z), без кнопки Save не бывает; поведение не меняется. Замер —
+   * `scripts/techcard-autosave-probe.mjs`, (12), с мутантом полного ресета.
    */
   useEffect(() => {
     const sub = watch((_, { name }) => {
@@ -6307,7 +6358,9 @@ export function OperationsField({
     setPendingCreate(null);
     // Шаг создан — редактор обязан оказаться перед глазами, иначе жест кончается там же, где
     // начался, и результат приходится искать.
-    requestAnimationFrame(() => editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+    requestAnimationFrame(() =>
+      editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+    );
   };
 
   /**
@@ -6322,7 +6375,7 @@ export function OperationsField({
   const frontierForCreate =
     pendingCreate?.at === undefined
       ? grouping.res.frontier
-      : (grouping.res.frontierBefore[pendingCreate.at] ?? grouping.res.frontier);
+      : grouping.res.frontierBefore[pendingCreate.at] ?? grouping.res.frontier;
 
   /**
    * В КАКОЙ УЗЕЛ ПОПАДЁТ ШАГ С ТАКИМ СОСТАВОМ НА ЭТОЙ ПОЗИЦИИ — ОТВЕТОМ ДВИЖКА, а не пересказом.
@@ -6436,7 +6489,9 @@ export function OperationsField({
       // Читается ЗАНОВО на каждой записи: у одного шага ключ может стоять несколькими входами
       // (законной такая строка не будет, но переписать её обязаны все, а не первый), и снимок,
       // взятый один раз, потерял бы предыдущую правку.
-      const cur = [...(((getValues(`operations.${s.index}.inputKeys`) as string[]) ?? []) as string[])];
+      const cur = [
+        ...(((getValues(`operations.${s.index}.inputKeys`) as string[]) ?? []) as string[]),
+      ];
       cur[s.at] = key;
       setValue(`operations.${s.index}.inputKeys`, cur, { shouldDirty: true });
     }
@@ -6484,12 +6539,14 @@ export function OperationsField({
     const inputs: RenameInputSite[] = [];
     for (const i of plan.outputs) {
       const id = fields[i]?.id;
-      if (!id) return { ok: false, why: 'the sequence has changed — reopen the step and try again' };
+      if (!id)
+        return { ok: false, why: 'the sequence has changed — reopen the step and try again' };
       outputs.push({ index: i, fieldId: id });
     }
     for (const s of plan.inputs) {
       const id = fields[s.index]?.id;
-      if (!id) return { ok: false, why: 'the sequence has changed — reopen the step and try again' };
+      if (!id)
+        return { ok: false, why: 'the sequence has changed — reopen the step and try again' };
       for (const at of s.at) inputs.push({ index: s.index, fieldId: id, at });
     }
 
@@ -7202,28 +7259,28 @@ export function OperationsField({
                   frozen={frozen}
                 />
               ) : (
-              <div className='lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto'>
-                <SequenceRail
-                  fields={fields}
-                  grouped={grouped}
-                  headerBefore={grouping.headerBefore}
-                  selectedIndex={selectedIndex}
-                  onSelect={(index) => setSelected(index)}
-                  errorIndices={errorIndices}
-                  brokenSteps={brokenSteps}
-                  activePin={activePin}
-                  activeBom={activeBom}
-                  pieceShapes={pieceShapes}
-                  onHoverPin={(n) => onActivePinChange?.(n)}
-                  onDropPiece={addInputToOperation}
-                  // Перестановка остаётся МУТАТОРОМ ЭТОГО ФАЙЛА: гейт `frozen`, ремап
-                  // issues[].operationNumber и сброс формовой истории (3/10) стоят у него.
-                  onMoveOperation={moveOperation}
-                  readPieceDrag={readPieceDrag}
-                  // Каталог работ — ОДНОЙ подпиской на весь рельс: имя строки спрашивает работу.
-                  workCatalog={workCatalog}
-                />
-              </div>
+                <div className='lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto'>
+                  <SequenceRail
+                    fields={fields}
+                    grouped={grouped}
+                    headerBefore={grouping.headerBefore}
+                    selectedIndex={selectedIndex}
+                    onSelect={(index) => setSelected(index)}
+                    errorIndices={errorIndices}
+                    brokenSteps={brokenSteps}
+                    activePin={activePin}
+                    activeBom={activeBom}
+                    pieceShapes={pieceShapes}
+                    onHoverPin={(n) => onActivePinChange?.(n)}
+                    onDropPiece={addInputToOperation}
+                    // Перестановка остаётся МУТАТОРОМ ЭТОГО ФАЙЛА: гейт `frozen`, ремап
+                    // issues[].operationNumber и сброс формовой истории (3/10) стоят у него.
+                    onMoveOperation={moveOperation}
+                    readPieceDrag={readPieceDrag}
+                    // Каталог работ — ОДНОЙ подпиской на весь рельс: имя строки спрашивает работу.
+                    workCatalog={workCatalog}
+                  />
+                </div>
               )}
               {/* ИТОГ ЗАКРЫВАЕТ РЕЛЬС, ДВЕРЬ СТОИТ ЗА НИМ (O-48, ревью Codex T48-2). Итог — сразу
                   под последним шагом: его чернильная черта закрывает прогон шагов, а не дверь.

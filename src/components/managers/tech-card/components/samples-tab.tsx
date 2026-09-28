@@ -11,7 +11,7 @@ import { formatTechCardDate } from 'components/managers/tech-cards/components/ut
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -622,29 +622,16 @@ function SampleEditor({
   // Pick up edits this sample already had staged. Unlike every other converted panel this editor
   // UNMOUNTS while its change is still staged — go back to the board, open another sample — so on
   // the way back in it must show what is staged rather than the server's copy, which would look
-  // like the edits were dropped and would be overwritten by the next keystroke.
-  //
-  // The same claim also serves the refresh path (19.6) when the draft is restored BEFORE the sample
-  // is opened. It cannot serve the other order (already open when the banner is pressed), and a
-  // sample that was not the one in ?sample= has no editor to hand a snapshot back to — so a reload
-  // restores at most the sample you were looking at. That is the honest limit of a panel whose
-  // instances come and go, not something the count lies about: an unclaimed snapshot stages nothing.
-  // Keyed by hydratedAt, not a boolean: a restore bumps staging.hydratedAt, and an ALREADY-OPEN
-  // sample editor must re-claim the restored snapshot too — pressing the banner is an explicit
-  // "take the draft", so it may replace what is on screen.
-  const claimedFor = useRef<number | null>(null);
+  // like the edits were dropped and would be overwritten by the next keystroke. Claimed once, on the
+  // way in (the staging's identity is stable): `stagedSnapshot` is a new reader on every stage, and
+  // depending on it would re-run the claim for nothing.
   useEffect(() => {
     if (!staging || !sampleId) return;
-    if (claimedFor.current === staging.hydratedAt) return;
-    claimedFor.current = staging.hydratedAt;
-    const live = stagedSnapshot(stagingKey) as SampleSnapshot | undefined;
-    const snap = live ?? (staging.takeSnapshot(stagingKey) as SampleSnapshot | undefined);
+    const snap = stagedSnapshot(stagingKey) as SampleSnapshot | undefined;
     if (!snap) return;
     setD(snap.draft);
     setMediaById(new Map((snap.media ?? []).filter((m) => m.id).map((m) => [m.id!, m])));
     setDirty(true);
-    // stagedSnapshot is a new reader on every stage; the hydratedAt guard already makes this a
-    // once-per-hydrate claim, and depending on it would re-run the effect for nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [staging, sampleId, stagingKey]);
 
@@ -776,7 +763,8 @@ function SampleEditor({
         },
       });
     } catch (e) {
-      throw new Error(saveSampleErrorMessage(e));
+      // The server's error rides as `cause`: the card's save classifies its status (D-66′).
+      throw new Error(saveSampleErrorMessage(e), { cause: e });
     }
   }
 
