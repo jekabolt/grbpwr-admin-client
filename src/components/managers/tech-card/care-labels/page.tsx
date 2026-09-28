@@ -9,6 +9,7 @@
 import { PrintDegradedNotice } from 'components/managers/print/degraded-notice';
 import { usePrintReady } from 'components/managers/print/use-print-ready';
 import { ROUTES } from 'constants/routes';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -20,7 +21,9 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { useCareLabelSource, variantSku, type CareLabelColorway } from './adapter';
 import { isBlocking } from './holes';
+import { holeAddress, HolesPanel } from './holes-panel';
 import { QrSettings } from './qr-settings';
+import { collectReadiness } from './readiness';
 import { placeholderSide, SidesPreview, type PreviewSide, type PreviewView } from './sides-preview';
 import { useCareLabelPrefs, type PrintMode } from './use-care-label-prefs';
 
@@ -135,17 +138,22 @@ export function TechCardCareLabels() {
     [selectedCw, selectedSize, mode],
   );
 
-  // Дыры, которые экран знает уже сейчас: данные стиля и колорвеев. Состав, раскладка, QR и
-  // количества добавятся своими зонами.
-  const holes = useMemo(
-    () => [
-      ...(data?.holes ?? []),
-      ...colorways.filter((c) => included(c.id)).flatMap((c) => c.holes),
-    ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, current.excluded],
+  // Дыры со всех источников и гейт кнопки (readiness.ts): блок колорвея держит только его,
+  // общий — весь архив. Раскладка (E6) добавит свои дыры по колорвею.
+  const readiness = useMemo(
+    () =>
+      data
+        ? collectReadiness({
+            data,
+            excluded: current.excluded,
+            prefs: { qrPreset: prefs.qrPreset, qrTemplate: prefs.qrTemplate },
+          })
+        : null,
+    [data, current.excluded, prefs.qrPreset, prefs.qrTemplate],
   );
-  const blocking = holes.filter(isBlocking);
+  const blocking = readiness?.blockers ?? [];
+  const canExport = ready && !!readiness?.canExport;
+  const showMessage = useSnackBarStore((st) => st.showMessage);
 
   return (
     <div className='flex min-h-screen flex-col bg-pageBg' data-care-labels-page={key}>
@@ -174,13 +182,18 @@ export function TechCardCareLabels() {
             size='lg'
             className='uppercase'
             data-care-download=''
-            // ZIP собирается позже (S5); пока кнопка честно закрыта и говорит почему.
-            disabled
+            data-care-gate={canExport ? 'open' : 'blocked'}
+            // Гейт: данные доехали и ни один блок не держит архив. Адрес первого блока — в подсказке.
+            disabled={!canExport}
             title={
               !ready
                 ? 'waiting for the data'
-                : 'the zip export is not built yet — the preview and the settings work'
+                : blocking.length > 0
+                  ? `blocked: ${[holeAddress(blocking[0], colorways), blocking[0].message].filter(Boolean).join(' — ')}`
+                  : 'build the zip for the ticked colourways'
             }
+            // Сборка архива — S5; до неё кнопка только честно говорит, что гейт открыт.
+            onClick={() => showMessage('the zip export is not built yet', 'error')}
           >
             download zip
           </Button>
@@ -215,7 +228,9 @@ export function TechCardCareLabels() {
                   </Text>
                 ) : (
                   colorways.map((c) => {
-                    const blocks = c.holes.filter(isBlocking).length;
+                    const blocks = (
+                      readiness?.colorways.find((r) => r.colorwayId === c.id)?.holes ?? c.holes
+                    ).filter(isBlocking).length;
                     const selected = c.id === selectedCw?.id;
                     return (
                       <div
@@ -384,28 +399,13 @@ export function TechCardCareLabels() {
 
           {/* 4. ДЫРЫ */}
           <Section title='holes' question='— what blocks the zip and what goes into the README'>
-            <div className='flex flex-col' data-care-zone='holes'>
-              {holes.length === 0 ? (
-                <Text size='micro' variant='label'>
-                  nothing found so far
-                </Text>
-              ) : (
-                holes.map((h, i) => (
-                  <div
-                    key={`${h.code}-${i}`}
-                    className='flex items-center gap-2 border-b border-hairline py-1 last:border-b-0'
-                    data-hole={h.code}
-                  >
-                    <Pill
-                      tone={h.level === 'block' ? 'warn' : h.level === 'warn' ? 'attention' : 'mut'}
-                    >
-                      {h.level}
-                    </Pill>
-                    <Text size='micro'>{h.message}</Text>
-                  </div>
-                ))
-              )}
-            </div>
+            {readiness && data ? (
+              <HolesPanel
+                readiness={readiness}
+                colorways={colorways}
+                techCardId={data.techCardId || techCardId || 0}
+              />
+            ) : null}
           </Section>
         </div>
       )}
