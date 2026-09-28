@@ -87,6 +87,8 @@ export type SheetMeta = {
    * бумаге меряет ровно столько, сколько подписано. Нет или 1 — файл размером с лист.
    */
   scale?: number;
+  /** Пресет формата (A4…A0): лист вписан в страницу этого формата — подвал называет её. */
+  paper?: string;
 };
 
 /** Контур по ключу детали; `null` целиком — силуэты выключены. */
@@ -488,13 +490,18 @@ function head(
 const FOOT_RIGHT = 'SHEET 1 OF 1';
 const round1 = (v: number) => Math.round(v * 10) / 10;
 const scaled = (meta: SheetMeta) => !!meta.scale && meta.scale !== 1;
-/** `H = null` — замер до того, как высота известна: берётся самая длинная запись числа. */
+/**
+ * `H = null` — замер до того, как высота известна: берётся самая длинная запись числа (лист — целые
+ * мм до 5080, масштабированный — с десятыми), иначе набранная строка может лечь лишней строкой ниже
+ * замеренной высоты.
+ */
 const footLeft = (meta: SheetMeta, W: number, H: number | null) => {
   const k = scaled(meta) ? meta.scale! : 1;
-  const h = H == null ? (k === 1 ? '0' : '9999.9') : String(round1(H * k));
+  const h = H == null ? (k === 1 ? '9999' : '9999.9') : String(round1(H * k));
   const size = k === 1 ? `${W} × ${h}` : `${round1(W * k)} × ${h}`;
   const pct = k === 1 ? '' : ` (${round1(k * 100)} % OF THE ${W} MM SHEET)`;
-  return `${[meta.code, meta.revision].filter(Boolean).join(' · ')} · SHEET ${size} MM${pct} · PRINT AT 100 % · BLACK ONLY`;
+  const on = meta.paper ? ` ON ${meta.paper}` : '';
+  return `${[meta.code, meta.revision].filter(Boolean).join(' · ')} · SHEET ${size} MM${pct}${on} · PRINT AT 100 % · BLACK ONLY`;
 };
 /** Ширина левой строки подвала: до правой подписи, с зазором. */
 const footWidth = (W: number, margin: number) => W - 2 * margin - textW(FOOT_RIGHT, 10) - 6;

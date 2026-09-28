@@ -4,7 +4,7 @@
 // команды контура и масштабируются в миллиметры здесь. Источник рисунков тот же, что у экрана:
 // файлы `ui/icons/care/<CODE>.svg` (набор бренда, 108×108, см. README там) и путь монограммы из
 // `ui/icons/grbpwr-mark.tsx`. Карта `care-artwork.ts` отдаёт адреса картинок (для <img>), нам нужен
-// ТЕКСТ — поэтому своя карта тех же 39 файлов через `?raw`; проба artwork.mjs сверяет, что наборы
+// ТЕКСТ — поэтому своя карта тех же 40 файлов через `?raw`; проба artwork.mjs сверяет, что наборы
 // кодов совпадают.
 //
 // Разбор намеренно узкий: только абсолютные M L H V C Z (ровно то, что есть в наборе — проверено
@@ -31,6 +31,7 @@ import GDC from 'ui/icons/care/GDC.svg?raw';
 import GPWC from 'ui/icons/care/GPWC.svg?raw';
 import GW from 'ui/icons/care/GW.svg?raw';
 import HW from 'ui/icons/care/HW.svg?raw';
+import IA from 'ui/icons/care/IA.svg?raw';
 import IH from 'ui/icons/care/IH.svg?raw';
 import IL from 'ui/icons/care/IL.svg?raw';
 import IM from 'ui/icons/care/IM.svg?raw';
@@ -73,6 +74,7 @@ const CARE_SVG: Record<string, string> = {
   GPWC,
   GW,
   HW,
+  IA,
   IH,
   IL,
   IM,
