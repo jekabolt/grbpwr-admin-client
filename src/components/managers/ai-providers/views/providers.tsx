@@ -12,7 +12,14 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { ToggleSwitch } from 'ui/components/toggle-switch';
-import { adminKeyLine, faultLabel, keyLine, probeLine, type KeyLine } from '../utils/format';
+import {
+  adminKeyLine,
+  faultLabel,
+  foldedInto,
+  keyLine,
+  probeLine,
+  type KeyLine,
+} from '../utils/format';
 import { WriteError } from './write-error';
 import {
   aiWriteFailure,
@@ -33,7 +40,10 @@ export function ProvidersView({
   loading: boolean;
 }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const providers = config?.providers ?? [];
+  // A provider that is reached THROUGH another one (the server's note: recraft's vector calls go
+  // via openrouter, under openrouter's key and switch) is not a line of its own here — the owner
+  // reads one openrouter, not two (28.09). Its row would hold a key and a switch nothing reads.
+  const providers = (config?.providers ?? []).filter((p) => !foldedInto(p));
   // Without the master key the server refuses to store a key; the fields say so by being off.
   const keysLocked = config?.masterKeyPresent === false;
 
@@ -65,7 +75,7 @@ export function ProvidersView({
                 key={p.key}
                 provider={p}
                 open={openKey === p.key}
-                onOpenChange={(open) => setOpenKey(open ? (p.key ?? null) : null)}
+                onOpenChange={(open) => setOpenKey(open ? p.key ?? null : null)}
                 keysLocked={keysLocked}
               />
             ))}
@@ -151,7 +161,13 @@ function ProviderRow({
               onCheckedChange={(next) => toggle.mutate({ providerKey: key, enabled: next })}
             />
             <span className='sr-only'>use {name}</span>
-            <Text component='span' size='micro' variant='label' aria-hidden className='w-6 uppercase'>
+            <Text
+              component='span'
+              size='micro'
+              variant='label'
+              aria-hidden
+              className='w-6 uppercase'
+            >
               {enabled ? 'on' : 'off'}
             </Text>
           </label>

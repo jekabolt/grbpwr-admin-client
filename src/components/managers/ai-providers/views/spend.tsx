@@ -12,7 +12,7 @@ import { Section } from 'ui/components/section';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { ViewSwitch, type ViewSwitchOption } from 'ui/components/view-switch';
-import { formatUsd, sumUsd, usd } from '../utils/format';
+import { dayWord, formatUsd, sumUsd, usd } from '../utils/format';
 import { useAiSpend } from '../utils/hooks';
 import {
   periodLabel,
@@ -167,7 +167,7 @@ export function SpendView({ config }: { config: GetAiProvidersConfigResponse | u
               <tr>
                 <th>provider</th>
                 <th>our usd</th>
-                <th>their usd · provider days</th>
+                <th>their usd</th>
                 <th>calls</th>
                 <th>failed</th>
               </tr>
@@ -187,6 +187,14 @@ export function SpendView({ config }: { config: GetAiProvidersConfigResponse | u
                   </td>
                   <td>
                     <UsdCell value={r.theirUsd} />
+                    {/* Whose days the number is counted in (their_bucket_tz, D-17): utc for most
+                        cost APIs; local for one already diffed at the org's midnight. */}
+                    {dayWord(r.theirBucketTz) && (
+                      <Text component='span' size='micro' variant='label' data-their-days=''>
+                        {' '}
+                        · {dayWord(r.theirBucketTz)}
+                      </Text>
+                    )}
                   </td>
                   <td>{r.calls ?? 0}</td>
                   <td>{r.failed ?? 0}</td>
@@ -197,8 +205,8 @@ export function SpendView({ config }: { config: GetAiProvidersConfigResponse | u
         )}
         {report && byProvider.length > 0 && (
           <Text size='micro' variant='label' data-provider-days=''>
-            a provider counts its own days (utc for most); a local day can differ by up to 2 h at
-            each end
+            their number is counted in the days beside it: utc days are the provider's own and can
+            differ from a local day by up to 2 h at each end; local days already match ours
           </Text>
         )}
       </Section>

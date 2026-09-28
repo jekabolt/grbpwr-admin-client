@@ -17418,6 +17418,14 @@ export type AiRouteCandidate = {
   // capabilities have no default, so their candidates name a provider.
   providerKey: string | undefined;
   model: string | undefined;
+  // The slug this candidate is CALLED with today. For a chat purpose: `model` when named, else the
+  // router's default for (purpose, provider) — OpenRouter: the purpose's env slug; a direct provider:
+  // its priced default; "" = not callable (the purpose is switched off, or the provider has no
+  // default). For an image / 3D / vector purpose the router holds no default: it is the row's own
+  // `model`, and "" is the provider client's own default slug. The panel compares candidates by THIS,
+  // as the server does — and by `model` where this is "", as the server's same-as-primary check does.
+  // Set on a read (AiPurposeInfo); ignored on a write (SetAiRouteRequest).
+  effectiveModel: string | undefined;
 };
 
 // AiModelInfo is one model of a provider: curated (the pricing catalogue) or custom (an ai_model row —
@@ -17555,6 +17563,10 @@ export type AiSpendProviderRow = {
   calls: number | undefined;
   failed: number | undefined;
   unpriced: number | undefined;
+  // the zone their days are days of (ai_provider_cost_daily.bucket_tz, D-17): "UTC" for every cost
+  // API today; "" when their_usd is absent. Their days are the provider's own buckets, never shifted
+  // into ours (timezone): a provider day can differ from a local day by up to two hours at each end.
+  theirBucketTz: string | undefined;
 };
 
 // AiSpendActorRow is one actor × purpose × provider × model line of the period.

@@ -11,6 +11,7 @@ import Input from 'ui/components/input';
 import { Section } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
+import { foldedInto } from '../utils/format';
 import { useSetAiDefaults, useSetAiRoute } from '../utils/hooks';
 import { WriteError } from './write-error';
 
@@ -28,11 +29,22 @@ const GROUP_ORDER = ['chat', 'images', '3d'];
 const DEFAULT = '__default';
 const NONE = '__none';
 
-type Candidate = { providerKey: string; model: string };
+// effective — the slug the candidate is CALLED with today as the server reads it (C-08,
+// AiRouteCandidate.effective_model): `model` when named, else the router's default for the pair; ""
+// when the server has none (a write in flight, an older server). Same-ness is judged by it.
+type Candidate = { providerKey: string; model: string; effective: string };
 
 const norm = (c: AiRouteCandidate | undefined): Candidate => ({
   providerKey: c?.providerKey ?? '',
   model: c?.model ?? '',
+  effective: c?.effectiveModel ?? '',
+});
+// wire — a candidate as a write sends it: the effective slug is the server's to say (ignored on a
+// write), so it travels undefined.
+const wire = (c: Candidate): AiRouteCandidate => ({
+  providerKey: c.providerKey,
+  model: c.model,
+  effectiveModel: undefined,
 });
 // A candidate as the server holds it, in one comparable string; absent (null) is its own value.
 const signature = (c: AiRouteCandidate | null | undefined) =>
@@ -41,8 +53,18 @@ const signature = (c: AiRouteCandidate | null | undefined) =>
 const serves = (p: AiProviderInfo, capability: string) =>
   (p.capabilities ?? []).includes(capability);
 
-const labelOf = (providers: AiProviderInfo[], key: string) =>
-  providers.find((p) => p.key === key)?.label || key;
+// A provider folded into its carrier (utils/format foldedInto: recraft via openrouter) is named
+// after the carrier here — "openrouter · recraft" — since that is who is called and paid.
+const displayLabel = (p: AiProviderInfo) => {
+  const own = p.label || p.key || '';
+  const via = foldedInto(p);
+  return via ? `${via} · ${own.toLowerCase()}` : own;
+};
+
+const labelOf = (providers: AiProviderInfo[], key: string) => {
+  const p = providers.find((x) => x.key === key);
+  return p ? displayLabel(p) : key;
+};
 
 // A candidate whose provider is switched off: its calls walk past it. "" is the capability's default
 // provider, so it is that provider's switch that counts; a capability with no default names no one.
@@ -82,8 +104,12 @@ function sameCandidate(
   a: Candidate,
   b: Candidate,
 ): boolean {
+  // The server's rule (REVIEW-FIXE #2): by the EFFECTIVE slug where both are known, else by `model`
+  // — a fallback on "" and a primary naming the very slug "" resolves to are the same candidate.
+  const ma = a.effective && b.effective ? a.effective : a.model;
+  const mb = a.effective && b.effective ? b.effective : b.model;
   return (
-    a.model === b.model &&
+    ma === mb &&
     resolvedProvider(config, capability, a.providerKey) ===
       resolvedProvider(config, capability, b.providerKey)
   );
@@ -126,7 +152,7 @@ function providerItems(providers: AiProviderInfo[], capability: string) {
       value: p.key ?? '',
       // A switched-off provider stays choosable — its routes skip it until it is back on — but
       // says so, or a route would look live while every call walks past it.
-      label: p.enabled ? p.label || p.key || '' : `${p.label || p.key} · off`,
+      label: p.enabled ? displayLabel(p) : `${displayLabel(p)} · off`,
     }));
 }
 
@@ -269,7 +295,7 @@ function PurposeRow({
   const primary: Candidate | undefined = shownPrimary
     ? norm(shownPrimary)
     : defaultable
-      ? { providerKey: '', model: '' }
+      ? { providerKey: '', model: '', effective: '' }
       : undefined;
   const serverFallback = shownFallback ? norm(shownFallback) : undefined;
   // WHAT IS STAGED BELONGS TO THE ROUTE IT WAS STAGED ON. The base is the config version and this
@@ -284,7 +310,9 @@ function PurposeRow({
   const staged = stagedOn?.base === base ? stagedOn.value : null;
   const setStaged = (value: string | null) => setStagedOn(value === null ? null : { value, base });
   const fallback: Candidate | undefined =
-    staged !== null ? { providerKey: staged === DEFAULT ? '' : staged, model: '' } : serverFallback;
+    staged !== null
+      ? { providerKey: staged === DEFAULT ? '' : staged, model: '', effective: '' }
+      : serverFallback;
   // The server's sentence, said before the server has to: a pair that would be refused is not sent.
   const [sameOn, setSameOn] = useState<string | null>(null);
   const sameError = sameOn === base;
@@ -297,7 +325,11 @@ function PurposeRow({
     }
     setSameError(false);
     setStaged(null);
-    route.mutate({ purpose: key, primary: next.primary, fallback: next.fallback });
+    route.mutate({
+      purpose: key,
+      primary: wire(next.primary),
+      fallback: next.fallback ? wire(next.fallback) : undefined,
+    });
   };
   const chooseFallback = (value: string) => {
     setSameError(false);
@@ -313,7 +345,10 @@ function PurposeRow({
       setStaged(value);
       return;
     }
-    send({ primary, fallback: { providerKey: value === DEFAULT ? '' : value, model: '' } });
+    send({
+      primary,
+      fallback: { providerKey: value === DEFAULT ? '' : value, model: '', effective: '' },
+    });
   };
   const primaryOff = providerOff(config, capability, primary);
   const fallbackOff = providerOff(config, capability, serverFallback);
@@ -368,12 +403,15 @@ function PurposeRow({
             error={primaryError}
             onChoose={(v) =>
               send({
-                primary: { providerKey: v === DEFAULT ? '' : v, model: '' },
+                primary: { providerKey: v === DEFAULT ? '' : v, model: '', effective: '' },
                 fallback: serverFallback,
               })
             }
             onModel={(model) =>
-              primary && send({ primary: { ...primary, model }, fallback: serverFallback })
+              // A model typed here makes the effective slug the server's to re-read: unknown ("")
+              // until then, so same-ness falls back to the model itself.
+              primary &&
+              send({ primary: { ...primary, model, effective: '' }, fallback: serverFallback })
             }
           />
           <CandidateControls
@@ -388,8 +426,10 @@ function PurposeRow({
             error={fallbackError}
             onChoose={chooseFallback}
             onModel={(model) =>
-            primary && fallback && send({ primary, fallback: { ...fallback, model } })
-          }
+              primary &&
+              fallback &&
+              send({ primary, fallback: { ...fallback, model, effective: '' } })
+            }
           />
         </div>
         <WriteError text={rowError} id='route' />
@@ -442,7 +482,9 @@ function CandidateControls({
         ]
       : []),
     ...providerItems(providers, capability),
-  ].filter((i) => i.value === selected || choiceFate(config, capability, i.value, other) !== 'omit');
+  ].filter(
+    (i) => i.value === selected || choiceFate(config, capability, i.value, other) !== 'omit',
+  );
   // A route the server holds is shown as it is even when it no longer fits the list (a provider
   // that stopped serving the capability): an empty select would claim there is no route at all.
   if (selected && !items.some((i) => i.value === selected)) {
