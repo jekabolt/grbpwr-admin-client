@@ -91,7 +91,7 @@ export const notesService = {
 export type NoteFormatFailureKind =
   /**
    * помощника нет. Сюда ведут ТРИ разные причины, и клиент их не различает: ключа модели нет;
-   * ключ есть, а слуг модели у провайдера мёртв (`OPENROUTER_MODEL`) — оба приезжают ОДНИМ
+   * ключ есть, а слуг модели у провайдера мёртв (модель настраивается в admin → AI providers) — оба приезжают ОДНИМ
    * `FailedPrecondition`, и разделить их можно только сверкой с английской фразой сервера, что
    * тут запрещено (см. `formatNoteMarkdown`); третья — 404/405/501, помощника на этом контуре
    * не выкатывали вовсе. На бете такой отказ штатный, а не поломка. Поэтому панель называет
@@ -266,7 +266,7 @@ export async function formatNoteMarkdown(content: string, signal: AbortSignal): 
       if (errorInfoReason(body) === AI_REASON_MODEL_UNAVAILABLE) {
         throw new NoteFormatError(
           'misconfigured',
-          'misconfigured: AI_MODEL_UNAVAILABLE (the configured model is not served)',
+          'misconfigured: the configured model is not served by its provider — check the route in admin → AI providers',
         );
       }
       // Диагностика, а не текст экрана: панель у `off` пишет свои слова. Строка называет

@@ -663,8 +663,8 @@ function statusLine(
         tone: 'error',
         text:
           `the provider does not serve «${slug}». This is a configuration fault, not a busy ` +
-          `moment — waiting changes nothing. Point OPENROUTER_MODEL_ANALYSIS at a slug this key ` +
-          `can reach.`,
+          `moment — waiting changes nothing. Point the tech-card analysis route in ` +
+          `admin → AI providers at a slug this key can reach.`,
       };
     case 'failed':
       return {

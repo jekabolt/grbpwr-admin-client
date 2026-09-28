@@ -15,7 +15,7 @@ import type { Draft, SectionDef } from './registry/types';
  * WHEN THE SERVER IS ASKED. Only on a PRESS of the door (every call spends the AI key and one of the
  * 30 presses an hour the admin shares with Improve), never on mount, and only when the band says the
  * binary has an assistant: `suggest_prompts_model` (band 33) present AND non-empty. Absent = a binary
- * without the RPC; '' = the assistant is not configured or switched off (`OPENROUTER_MODEL_IDEAS=off`).
+ * without the RPC; '' = the assistant is not configured or switched off in admin → AI providers.
  * In both cases the menu is the static list, exactly as in phase 2.
  *
  * WHAT THE MENU SHOWS. The static list at once; above it a «thinking…» row while the call is out,

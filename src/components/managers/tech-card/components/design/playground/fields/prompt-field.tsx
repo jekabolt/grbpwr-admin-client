@@ -340,7 +340,7 @@ export function PromptField({
         reason === 'AI_NOT_CONFIGURED'
           ? 'AI is off on this server'
           : reason === 'AI_MODEL_UNAVAILABLE'
-            ? 'the AI model is unavailable right now'
+            ? 'the configured model is not served by its provider — check the route in admin → AI providers'
             : `could not improve: ${e instanceof Error ? e.message : String(e)}`,
         'error',
       );

@@ -737,12 +737,12 @@ type EquipmentDefaultsForm = NonNullable<TechCardFormData['construction']['equip
 type MachineProfileRow = NonNullable<EquipmentDefaultsForm['machines']>[number];
 type PressProfileRow = NonNullable<EquipmentDefaultsForm['presses']>[number];
 
-// #66: AI generation is unavailable when the backend has no OPENROUTER_API_KEY configured — the
-// RPC reports this as FailedPrecondition (grpc-gateway → HTTP 412, same convention as
-// useSamples.ts / useProductionRuns.ts). Shown verbatim so a technologist knows this is an admin
-// setup gap, not something wrong with their description.
+// #66: AI generation is unavailable when the backend has no chat provider configured in
+// admin → AI providers — the RPC reports this as FailedPrecondition (grpc-gateway → HTTP 412,
+// same convention as useSamples.ts / useProductionRuns.ts). Shown verbatim so a technologist
+// knows this is an admin setup gap, not something wrong with their description.
 const AI_NOT_CONFIGURED_MESSAGE =
-  "AI generation isn't configured yet — ask an admin to set OPENROUTER_API_KEY";
+  "AI generation isn't configured yet — ask a super admin to configure a chat provider in admin → AI providers";
 
 // Maps one AI-drafted operation (GenerateTechCardOperations, #66) into this field array's row
 // shape — the same fields the manual «+ операция» row starts from (emptyOperation). Only stages
