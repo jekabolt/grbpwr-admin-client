@@ -1,25 +1,19 @@
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { cn } from 'lib/utility';
 import { useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext, useFormState } from 'react-hook-form';
-import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Input from 'ui/components/input';
-import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../schema';
-import { findPantone, normalizePantone } from '../pantone-swatches';
-import { PantonePicker } from '../pantone-picker';
-import { createColorwayErrorMessage, useCreateColorway } from '../useColorwayRecipe';
 import {
-  createRefusal,
-  freeDictionaryColours,
-  nearestFreeDictionaryColour,
-  normalizeColourwayName,
-  pantoneSystemOf,
-} from './colourway-create-model';
+  ColourwayPaletteEditor,
+  emptyPaletteValue,
+  type PaletteValue,
+} from '../colourway-palette';
+import { nameI18nPatch, paletteRefusal, paletteToWire } from '../colourway-palette-model';
+import { createColorwayErrorMessage, useCreateColorway } from '../useColorwayRecipe';
+import { createRefusal, normalizeColourwayName } from './colourway-create-model';
 import { GROUP_SEAM, Reason } from './core';
 
 /**
@@ -45,16 +39,21 @@ import { GROUP_SEAM, Reason } from './core';
  * триггера, и одинаково служит всем четырём дверям. Имя экспорта оставлено тем, каким его ждут
  * соседние зоны.
  *
- * ЧТО ЭТОТ ОРГАН ПИШЕТ, И ЧЕГО НЕ ПИШЕТ. Ровно `CreateColorway{colorCode, development{name,
- * pantone, pantone_system, dev_hex}}` — те самые поля, что уже есть на проводе (D-факт: ничего
- * нового для «имя + пантон» заводить не нужно). Рецепт (`UpdateColorwayRecipe`) НЕ пишется: ткань —
- * свойство изделия, и назначать её здесь значило бы выдумать метраж, которого никто не считал.
+ * ЧТО ЭТОТ ОРГАН ПИШЕТ, И ЧЕГО НЕ ПИШЕТ (T45). Ровно `CreateColorway{merchandising.color_code,
+ * development{name, colours, name_i18n}}`: имя, палитру (первый цвет — главный; сервер сам
+ * зеркалит его в pantone / pantone_system / dev_hex для старых читателей), переводы имени и
+ * семейство словаря. Токен SKU НЕ отправляется — его чеканит сервер, и после создания он
+ * показывается только для чтения (плитка COLOURWAYS, шапка продукта). Рецепт
+ * (`UpdateColorwayRecipe`) НЕ пишется: ткань — свойство изделия, и назначать её здесь значило бы
+ * выдумать метраж, которого никто не считал; палитра в слоты попадает только явной дверью
+ * «apply palette to slots ›» на вкладке COLOURWAYS (решение владельца 7).
  *
- * ⚠ ТРЕТЬЯ СТРОКА — НЕ УКРАШЕНИЕ, А ЧЕСТНОСТЬ (D3). `product.color` NOT NULL заполняется по
- * СЛОВАРНОМУ коду, то есть у колорвея всегда будет буква из словаря, хочет того человек или нет.
- * Спрятать её за автоподбором значило бы записать в SKU то, чего никто не выбирал; поэтому подбор
- * ВИДЕН, назван и переназначается одной дверью «change». Снять обязательность кода — задача
- * бэкенда (B2), и до неё эта строка остаётся.
+ * ⚠ СЕМЕЙСТВО — НЕ УКРАШЕНИЕ, А ЧЕСТНОСТЬ (решение владельца 4). У каждого колорвея есть тег из
+ * словаря 17 цветов — ключ фильтра каталога и сборки, — и подбирается он по hex главного цвета
+ * той же мерой, что у сервера (`suggestFamily`). Спрятать его за автоподбором значило бы записать
+ * в продукт то, чего никто не выбирал; поэтому подсказка ВИДНА («suggested: black») и семейство
+ * переставляется в том же селекте. Все три вопроса задаёт общий редактор `ColourwayPaletteEditor`
+ * — тот же, что у предложения ИИ и у формы продукта.
  */
 export function ColourwayCreatePopover({
   techCardId,
@@ -94,18 +93,17 @@ export function ColourwayCreatePopover({
   const { showMessage } = useSnackBarStore();
   const create = useCreateColorway(techCardId);
 
-  const [name, setName] = useState('');
-  const [pantone, setPantone] = useState('');
-  /** Код словаря, выбранный РУКОЙ. Пусто = «как подобралось». */
-  const [handCode, setHandCode] = useState('');
-  const [changing, setChanging] = useState(false);
+  const [value, setValue] = useState<PaletteValue>(emptyPaletteValue);
   const [failed, setFailed] = useState<string | null>(null);
+  const touched =
+    !!value.name ||
+    value.rows.length > 0 ||
+    !!value.colorCode ||
+    Object.keys(value.nameI18n).length > 0 ||
+    !!failed;
 
   const clear = () => {
-    setName('');
-    setPantone('');
-    setHandCode('');
-    setChanging(false);
+    setValue(emptyPaletteValue());
     setFailed(null);
   };
 
@@ -127,20 +125,15 @@ export function ColourwayCreatePopover({
   const shownCard = useRef(techCardId);
   if (shownCard.current !== techCardId) {
     shownCard.current = techCardId;
-    if (name || pantone || handCode || changing || failed) clear();
+    if (touched) clear();
   }
   const wasOpen = useRef(open);
   if (wasOpen.current !== open) {
     wasOpen.current = open;
-    if (!open && (name || pantone || handCode || changing || failed)) clear();
+    if (!open && touched) clear();
   }
 
   const colorways = techCard?.colorways ?? [];
-  /** Занятые коды — по ВСЕМ колорвеям карточки: `UNIQUE(style_id, color_code)` архива не знает. */
-  const usedCodes = useMemo(
-    () => new Set(colorways.map((c) => c.colorCode ?? '').filter(Boolean)),
-    [colorways],
-  );
   /**
    * ИМЕНА, УЖЕ ЗАНЯТЫЕ НА КАРТОЧКЕ (D12). Архивные считаются: имя архивного колорвея всё ещё стоит
    * в спецификациях и в разговоре, и второй «ROSSO» рядом с ним читался бы как тот же самый.
@@ -159,31 +152,22 @@ export function ColourwayCreatePopover({
   );
 
   const colours = dictionary?.colors;
-  const free = useMemo(() => freeDictionaryColours(colours, usedCodes), [colours, usedCodes]);
-  const swatch = findPantone(pantone);
-  const auto = useMemo(
-    () => nearestFreeDictionaryColour(swatch?.hex, colours, usedCodes),
-    [swatch?.hex, colours, usedCodes],
-  );
-  /** Что реально уедет в `product.color_code`: рука старше подбора. */
-  const picked = handCode || auto?.code || '';
-  const pickedColour = free.find((c) => c.code === picked) ?? colours?.find((c) => c.code === picked);
+  const picked = value.colorCode;
+  const pickedColour = (colours ?? []).find((c) => c.code === picked);
 
-  const named = name.trim();
+  const named = value.name.trim();
   const refusal = createRefusal({
     readOnly,
     dirty,
     name: named,
     nameTaken: !!named && takenNames.has(normalizeColourwayName(named)),
-    pantone,
-    pantoneHex: swatch?.hex ?? '',
+    rowCount: value.rows.length,
+    paletteRefusal: paletteRefusal(value.rows),
     colorCode: picked,
-    usedCodes,
     dictionaryHasAny: (colours ?? []).length > 0,
     dictionaryHasColours: (colours ?? []).some((c) => !c.archived),
-    freeCount: free.length,
-    codeChoosable: !picked || free.some((c) => c.code === picked),
-    codeKnown: !picked || (colours ?? []).some((c) => c.code === picked),
+    codeChoosable: !picked || (!!pickedColour && !pickedColour.archived),
+    codeKnown: !picked || !!pickedColour,
   });
 
   async function submit() {
@@ -197,11 +181,11 @@ export function ColourwayCreatePopover({
           name: named,
           labDipStatus: undefined,
           comment: undefined,
-          pantone,
-          // Система названа только когда назван код — ровно как у соседа: «TCX» при пустом пантоне
-          // было бы утверждением о системе цвета, которого никто не делал.
-          pantoneSystem: pantone ? pantoneSystemOf(pantone) : undefined,
-          devHex: swatch?.hex ?? '',
+          // Пантон, система и hex НЕ отправляются: сервер зеркалит их из colours[0] сам, а
+          // присланные рядом значения всё равно перекрывает зеркалом (ColorwayDevelopmentInsert).
+          pantone: undefined,
+          pantoneSystem: undefined,
+          devHex: undefined,
           swatchMediaId: undefined,
           labDipRound: undefined,
           labDipSubmittedAt: undefined,
@@ -211,8 +195,9 @@ export function ColourwayCreatePopover({
           // Вложенный рецепт сервер отвергает прямым текстом — и этому окну он не нужен вовсе.
           usages: undefined,
           displayOrder: undefined,
-          colours: undefined,
-          nameI18n: undefined,
+          colours: paletteToWire(value.rows),
+          // Переводы — только названные: пустая карта значит «нет перевода», и её не шлём.
+          nameI18n: nameI18nPatch(undefined, value.nameI18n),
         },
       });
       const colorwayId = res?.colorwayId ?? 0;
@@ -259,126 +244,23 @@ export function ColourwayCreatePopover({
            читались теснее, чем один. Владелец в этом круге просит ровно обратного. */
         width='md'
       >
-        {/* ТРИ СТРОКИ ОДНОГО ВОПРОСА И НИ ОДНОЙ ЛИШНЕЙ КНОПКИ. Шов между ними — `GROUP_SEAM`
-            студии (20px): владелец в этом круге просит «дай больше спейсинга», и своё число здесь
-            развело бы окно с остальными экранами. */}
+        {/* ЧЕТЫРЕ ВОПРОСА ОДНОГО РЕДАКТОРА И НИ ОДНОЙ ЛИШНЕЙ КНОПКИ. Шов между группами — тот же
+            20px, что `GROUP_SEAM` студии: владелец просит «дай больше спейсинга», и своё число
+            здесь развело бы окно с остальными экранами. */}
         <div className={GROUP_SEAM} data-cw-create=''>
-          <label className='flex flex-col gap-0.5'>
-            <Text size='micro' variant='label' component='span' className='uppercase'>
-              name
-            </Text>
-            <Input
-              value={name}
-              maxLength={64}
-              autoFocus
-              placeholder='name this colourway'
-              data-cw-name=''
-              onChange={(e: { target: { value: string } }) => setName(e.target.value)}
-              onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                // Enter отправляет — клавиатура здесь первична (PRODUCT.md). Сравнение по имени
-                // клавиши, не по букве: буквы мертвы на кириллической раскладке.
-                if (e.key !== 'Enter') return;
-                e.preventDefault();
-                void submit();
-              }}
-            />
-          </label>
-
-          <div className='flex flex-col gap-0.5'>
-            <Text size='micro' variant='label' component='span' className='uppercase'>
-              pantone
-            </Text>
-            {/* ОДИН ОРГАН, А НЕ ПОЛЕ ПЛЮС ПИКЕР: `PantonePicker` сам печатает свотч и код на
-                триггере и сам решает, что считается ссылкой (`normalizePantone`). Написание, в
-                котором пантон уедет на провод, — ровно то, что стоит на кнопке. */}
-            <span className='flex flex-wrap items-center gap-2'>
-              <PantonePicker
-                name='colourway-create'
-                value={pantone}
-                label='pick the pantone'
-                disabled={readOnly}
-                onPick={(code) => setPantone(normalizePantone(code) || code.trim())}
-              />
-              {!!swatch && (
-                <Text size='micro' variant='label' component='span' data-cw-pantone-name=''>
-                  {swatch.name}
-                </Text>
-              )}
-            </span>
-          </div>
-
-          {/* ═══ ТРЕТЬЯ СТРОКА: ЧТО ЗАПИШЕТСЯ В SKU ═══════════════════════════════════════════
-              Мелко и словами, потому что это не выбор, а следствие: словарный код обязателен де-факто
-              (`product.color` NOT NULL), а пантон словарю неизвестен. `change` не добавляет второго
-              органа рядом — он ЗАМЕНЯЕТ строку списком, и список уходит, как только выбор сделан. */}
-          <div className='flex flex-col gap-0.5' data-cw-sku=''>
-            {changing ? (
-              <label className='flex flex-col gap-0.5'>
-                <Text size='micro' variant='label' component='span' className='uppercase'>
-                  sku colour
-                </Text>
-                <select
-                  className={cn(
-                    'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none',
-                  )}
-                  value={picked}
-                  data-cw-sku-select=''
-                  onChange={(e) => {
-                    setHandCode(e.target.value);
-                    setChanging(false);
-                  }}
-                >
-                  {/* Значение ВСЕГДА среди пунктов — правило Radix-селекта держится и здесь, и
-                      держится ПОСТРОЕНИЕМ: подобранный код свободен по определению, а выбранный
-                      рукой берётся из этого же списка. Пустой пункт стоит только пока выбирать
-                      нечего — иначе он читался бы как «без цвета», которого у продукта не бывает. */}
-                  {!picked && <option value=''>— select colour —</option>}
-                  {free.map((c) => (
-                    <option key={c.code} value={c.code}>
-                      {c.code} · {c.name}
-                      {c.code === auto?.code ? ' (nearest)' : ''}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : swatch ? (
-              <>
-                <span className='flex flex-wrap items-center gap-2'>
-                  <Text size='micro' variant='label' component='span'>
-                    sku colour:
-                  </Text>
-                  {!!pickedColour?.hex && (
-                    <span
-                      aria-hidden
-                      className='size-3 shrink-0 border border-borderColor'
-                      style={{ background: pickedColour.hex }}
-                    />
-                  )}
-                  <Text size='micro' component='span' className='uppercase' data-cw-sku-code=''>
-                    {picked || '—'}
-                  </Text>
-                  <Button
-                    type='button'
-                    variant='secondary'
-                    size='xs'
-                    data-cw-sku-change=''
-                    disabled={readOnly || free.length === 0}
-                    onClick={() => setChanging(true)}
-                  >
-                    change
-                  </Button>
-                </span>
-                <Reason>the dictionary colour the SKU is cut from</Reason>
-              </>
-            ) : (
-              /* ДО ПАНТОНА СТРОКА НИЧЕГО НЕ ЗНАЕТ — И ГОВОРИТ ИМЕННО ЭТО, одной фразой и без
-                 органов. Прочерк рядом с живой кнопкой «change» отвечал бы на вопрос, которого
-                 ещё не задавали: менять там нечего, а кнопка звала бы нажать. */
-              <Text size='micro' variant='label' component='span' data-cw-sku-later=''>
-                sku colour: picked from the pantone swatch
-              </Text>
-            )}
-          </div>
+          <ColourwayPaletteEditor
+            name='colourway-create'
+            value={value}
+            onChange={(next) => {
+              setValue(next);
+              if (failed) setFailed(null);
+            }}
+            colours={colours}
+            languages={dictionary?.languages}
+            readOnly={readOnly}
+            autoFocusName
+            onEnter={() => void submit()}
+          />
 
           {/* ОТКАЗ — ПОД ПОЛЯМИ, А НЕ В ПОДВАЛЕ: подвал этой модалки отдан подсказке о клавишах, и
               довод про место у него свой. Причина стоит там, где её чинят. */}
