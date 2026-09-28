@@ -20,9 +20,9 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { useCareLabelSource, variantSku, type CareLabelColorway } from './adapter';
 import { isBlocking } from './holes';
+import { QrSettings } from './qr-settings';
 import { placeholderSide, SidesPreview, type PreviewSide, type PreviewView } from './sides-preview';
-
-type PrintMode = 'duplex' | 'simplex';
+import { useCareLabelPrefs, type PrintMode } from './use-care-label-prefs';
 
 /**
  * Подпись входов экрана: карточка ИЗ АДРЕСА. Роутер переиспользует страницу при смене `:id`, и без
@@ -90,7 +90,10 @@ export function TechCardCareLabels() {
     excluded: number[];
   }>({ key, colorwayId: null, sizeId: null, excluded: [] });
   const current = pick.key === key ? pick : { key, colorwayId: null, sizeId: null, excluded: [] };
-  const [mode, setMode] = useState<PrintMode>('duplex');
+  // Режим, QR, запас и источник количеств — на карточку, в localStorage (`care-labels:v1:<id>`).
+  const { prefs, update: updatePrefs } = useCareLabelPrefs(techCardId);
+  const mode = prefs.mode;
+  const setMode = (m: PrintMode) => updatePrefs({ mode: m });
   const [view, setView] = useState<PreviewView>('ribbon');
   const [zoom, setZoom] = useState<1 | 2>(1);
 
@@ -107,6 +110,25 @@ export function TechCardCareLabels() {
     const title = data?.styleNumber ? `${data.styleNumber} — care labels` : 'care labels';
     document.title = title;
   }, [data?.styleNumber]);
+
+  // Живой пример ссылки QR — для варианта, выбранного в превью.
+  const qrExample = useMemo(() => {
+    if (!selectedCw || !selectedSize) return null;
+    const sku =
+      selectedCw.baseSku && selectedSize.skuOrd != null
+        ? variantSku(selectedCw.baseSku, selectedSize.skuOrd)
+        : '';
+    return {
+      label: `${sku || selectedCw.baseSku || `colourway #${selectedCw.id}`} · ${selectedSize.label}`,
+      vars: {
+        base_sku: selectedCw.baseSku,
+        sku,
+        size: selectedSize.name,
+        colorway_id: selectedCw.id,
+        style: data?.styleNumber ?? '',
+      },
+    };
+  }, [selectedCw, selectedSize, data?.styleNumber]);
 
   const sides = useMemo(
     () => previewSides(selectedCw, selectedSize, mode),
@@ -323,7 +345,12 @@ export function TechCardCareLabels() {
 
             {/* 3. НАСТРОЙКИ */}
             <Section title='settings' question='— how the zip is printed'>
-              <div className='flex flex-col' data-care-zone='settings'>
+              <div
+                className='flex flex-col'
+                data-care-zone='settings'
+                // Снимок настроек для проб экрана (back-compat записи, ключ на карточку).
+                data-care-prefs={JSON.stringify(prefs)}
+              >
                 <GroupLabel flush>print</GroupLabel>
                 <ChipRow>
                   <Chip
@@ -346,9 +373,7 @@ export function TechCardCareLabels() {
                   </Chip>
                 </ChipRow>
                 <GroupLabel>qr code</GroupLabel>
-                <Text size='micro' variant='label' data-care-zone='qr'>
-                  link settings — coming next
-                </Text>
+                <QrSettings prefs={prefs} onChange={updatePrefs} example={qrExample} />
                 <GroupLabel>quantities</GroupLabel>
                 <Text size='micro' variant='label' data-care-zone='quantities'>
                   colourway × size grid — coming next
