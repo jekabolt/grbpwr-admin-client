@@ -1,5 +1,7 @@
 import type { DesignBenchSlotRef } from 'api/proto-http/admin';
 
+import { BENCH_KINDS } from '../bench-kinds';
+
 /**
  * ═══ THE FLATTENS WHOSE ANSWER NEVER CAME — A LEDGER PER TAB (27.09, O-53 phase 2, D-54) ════════
  *
@@ -141,10 +143,22 @@ function parseGesture(raw: unknown): FlattenGesture | null {
   };
 }
 
+/** The benches a slot of the ledger may name — the client's own list, never a guess from a word. */
+const KNOWN_KINDS: ReadonlySet<string> = new Set(BENCH_KINDS);
+
+/** A whole number of at least `min`, or null — the shape of every id and revision here. */
+const wholeAtLeast = (v: unknown, min: number): number | null =>
+  typeof v === 'number' && Number.isInteger(v) && v >= min ? v : null;
+
 /**
- * The slot an entry names, taken only if it looks like one — a bench's view or a minted slot id,
- * a whole revision, a label (the view's key stands in for a missing one). A malformed slot drops
- * THE SLOT, not the entry: the filing still has everything it needs, and a picture filed beside its
+ * The slot an entry names, taken only if it is EXACTLY one — a bench's view or a minted slot id
+ * (one address member, as the wire's oneof: both or neither is no address), the bench's kind by
+ * this client's own list, a colourway that is a whole number when it is said at all (−1 is a
+ * value, the bench without a colourway axis; an absent one stays absent), a whole revision, and a
+ * label (the view's key stands in for a missing one). A present field of the wrong shape drops
+ * THE SLOT — never read as flat, never as colourway 0, never the view over the id (O-63 r5, Codex
+ * r4): a slot read otherwise than it was written is a resend into another place. And it drops the
+ * slot, not the entry: the filing still has everything it needs, and a picture filed beside its
  * base can be put into a side by hand, while a gesture dropped whole would be saved again as a new
  * one — a second picture.
  */
@@ -153,26 +167,31 @@ function parsePlacement(raw: unknown): GesturePlacement | null {
   const p = raw as Record<string, unknown>;
   const ref = p.ref && typeof p.ref === 'object' ? (p.ref as Record<string, unknown>) : null;
   if (!ref) return null;
+  const hasView = ref.viewKey !== undefined;
+  const hasSlot = ref.slotId !== undefined;
+  if (hasView === hasSlot) return null;
   const viewKey = typeof ref.viewKey === 'string' ? ref.viewKey.trim() : '';
-  const slotId =
-    typeof ref.slotId === 'number' && Number.isInteger(ref.slotId) && ref.slotId > 0
-      ? ref.slotId
-      : 0;
-  if (!viewKey && !slotId) return null;
-  const slotRev =
-    typeof p.slotRev === 'number' && Number.isInteger(p.slotRev) && p.slotRev >= 0
-      ? p.slotRev
-      : null;
+  if (hasView && !viewKey) return null;
+  const slotId = wholeAtLeast(ref.slotId, 1);
+  if (hasSlot && slotId === null) return null;
+  const kind = typeof ref.kind === 'string' && KNOWN_KINDS.has(ref.kind) ? ref.kind : null;
+  if (kind === null) return null;
+  const hasColourway = ref.colorwayId !== undefined;
+  const colorwayId = Number.isInteger(ref.colorwayId) ? (ref.colorwayId as number) : null;
+  if (hasColourway && colorwayId === null) return null;
+  const slotRev = wholeAtLeast(p.slotRev, 0);
   if (slotRev === null) return null;
-  const kind = typeof ref.kind === 'string' ? ref.kind : '';
-  const colorwayId =
-    typeof ref.colorwayId === 'number' && Number.isInteger(ref.colorwayId) && ref.colorwayId >= 0
-      ? ref.colorwayId
-      : 0;
+  if (p.label !== undefined && typeof p.label !== 'string') return null;
   const label =
     typeof p.label === 'string' && p.label.trim() ? p.label : viewKey || `slot ${slotId}`;
   return {
-    ref: { ...(viewKey ? { viewKey } : { slotId }), kind, colorwayId },
+    /* `colorwayId` is a required key of the ref's type; `undefined` keeps an absent one absent —
+       the stored JSON and the wire both leave it out — and never writes a 0 that was not said. */
+    ref: {
+      ...(hasView ? { viewKey } : { slotId: slotId ?? 0 }),
+      kind,
+      colorwayId: hasColourway ? (colorwayId as number) : undefined,
+    },
     slotRev,
     label,
   };

@@ -6364,8 +6364,11 @@ export function VectorModal({
    * after the answer, and round 3 let `filed` read the slot of the editor doing the RESEND — a
    * save as new lost from slot A and retried from slot B landed in B, retried from an editor
    * without a slot it landed nowhere. Now the slot is written into the gesture when it is made
-   * (`currentPlacement`, `placement`), and `filed` replays the RECORDED one, never this editor's:
-   * an entry without one — older than the field, or made without a slot — is a filing only.
+   * (`currentPlacement`, `placement`), and the RECORDED one is replayed after EVERY answer — a
+   * fresh save's, a retry's of the drawing on screen (`filed`), and `resendEarlier`'s, of another
+   * drawing of the layer or the oldest at the ceiling (`placeAsRecorded`; round 4 left those two as
+   * filings only, Codex r4) — never this editor's: an entry without one — older than the field, or
+   * made without a slot — is a filing only.
    */
   const resendTargets = () => [0, replaceRef.current?.pictureId || base?.id || 0];
   const mayResend = (gesture: FlattenGesture) => resendTargets().includes(gesture.replacePictureId);
@@ -6484,30 +6487,48 @@ export function VectorModal({
    * comes back with `replaced_by`. Then nothing is claimed about any place — no slot is written, the
    * band is re-read and the person is told.
    */
+  /**
+   * ═══ THE RECORDED SLOT, WRITTEN AFTER THE ANSWER — ON EVERY WAY A GESTURE GOES OUT (O-63 r5) ═══
+   *
+   * The slot the gesture named, never this editor's (D-72″): a fresh gesture named this editor's
+   * slot as it was made; a resent one names the slot of the editor it was made in, or none. Called
+   * after every answer that filed a picture beside its base — `filed` (a fresh save, a retry of the
+   * drawing on screen) and `resendEarlier` (another drawing of the layer, the oldest at the ceiling;
+   * round 4 left those as filings only, so a save lost from slot A and retried as «another drawing»
+   * was filed and struck off with A never written — Codex r4, Moderate). Not for an overwrite (the
+   * server moves the slot itself), not for a picture another edit has since replaced.
+   * A SEPARATE CALL, AND A FAILURE HERE IS NOT A LOST DRAWING — by this point the picture EXISTS in
+   * the band; a slot CAS refusal (the recorded revision has moved) must not read as «the drawing did
+   * not go through»: it is said as «the picture is saved, but the slot was not changed». Returns the
+   * placement made, or null.
+   */
+  const placeAsRecorded = async (
+    gesture: FlattenGesture,
+    picture: common_DesignPicture | undefined,
+  ): Promise<GesturePlacement | null> => {
+    const placement = gesture.placement ?? null;
+    const superseded = (picture?.replacedBy ?? 0) > 0;
+    if (!placement || gesture.replacePictureId || superseded || !picture?.id) return null;
+    setBusy(`putting it into ${placement.label}…`);
+    try {
+      await setBenchSlot.mutateAsync({
+        slot: placement.ref,
+        pictureId: picture.id,
+        expectedSlotRev: placement.slotRev,
+      });
+      return placement;
+    } catch {
+      showMessage(
+        `the picture is saved, but the ${placement.label} slot was not changed — somebody moved it first. Put it in from the band.`,
+        'error',
+      );
+      return null;
+    }
+  };
+
   const filed = async (gesture: FlattenGesture, picture: common_DesignPicture | undefined) => {
     const superseded = (picture?.replacedBy ?? 0) > 0;
-    let placed = false;
-    /* THE SLOT THE GESTURE NAMED, NEVER THIS EDITOR'S (D-72″) — a fresh gesture named this editor's
-       slot as it was made; a resent one names the slot of the editor it was made in, or none. */
-    const placement = gesture.placement ?? null;
-    if (placement && !gesture.replacePictureId && !superseded && picture?.id) {
-      setBusy(`putting it into ${placement.label}…`);
-      // A SEPARATE CALL, AND A FAILURE HERE IS NOT A LOST DRAWING — by this point the picture
-      // EXISTS in the band; a slot CAS refusal must not read as «the drawing did not go through».
-      try {
-        await setBenchSlot.mutateAsync({
-          slot: placement.ref,
-          pictureId: picture.id,
-          expectedSlotRev: placement.slotRev,
-        });
-        placed = true;
-      } catch {
-        showMessage(
-          `the picture is saved, but the ${placement.label} slot was not changed — somebody moved it first. Put it in from the band.`,
-          'error',
-        );
-      }
-    }
+    const placed = await placeAsRecorded(gesture, picture);
     if (picture) onFlattened?.(picture);
     onOpenChange(false);
     if (superseded) {
@@ -6526,10 +6547,10 @@ export function VectorModal({
           'success',
         );
       }
-    } else if (placed) showMessage(`saved and put into ${placement?.label}`, 'success');
+    } else if (placed) showMessage(`saved and put into ${placed.label}`, 'success');
     else if (replaceRef.current)
       showMessage('saved as a new picture beside the original', 'success');
-    else if (!placement && slot)
+    else if (!gesture.placement && slot)
       /* A resend, from a slot's editor, of a gesture that named no slot (D-72″): filed, placed
          nowhere — said so, or the person would look for it in this slot. */
       showMessage(
@@ -6728,6 +6749,8 @@ export function VectorModal({
    * drawing, so nothing here says the drawing on screen was saved, and the editor stays: saving it
    * is the next press. Whatever the server says, the entry is settled — the picture it filed, or a
    * refusal, which proves nothing was filed under that key; only a missing answer leaves it listed.
+   * Filed, the picture goes where the gesture said (`placeAsRecorded`, O-63 r5) — the slot of the
+   * editor it was made in, never this one's — and the toast names that slot.
    */
   const resendEarlier = async (gesture: FlattenGesture, which: 'oldest' | 'layer') => {
     if (frozen || busy) return;
@@ -6740,9 +6763,13 @@ export function VectorModal({
     setAsking(false);
     setRefusal(null);
     try {
-      await sendGesture(gesture);
+      const picture = await sendGesture(gesture);
+      const put = await placeAsRecorded(gesture, picture);
       rereadBand();
-      showMessage(`${what} is filed — ${next}`, 'success');
+      showMessage(
+        `${what} is filed${put ? ` and put into ${put.label}` : ''} — ${next}`,
+        'success',
+      );
     } catch (error) {
       if (error instanceof LedgerAtCeiling) openQuestion();
       else if (flattenOutcomeUnknown(error))
