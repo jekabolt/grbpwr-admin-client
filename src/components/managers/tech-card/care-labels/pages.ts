@@ -89,6 +89,8 @@ export type PlannedFile = {
   label: LabelName;
   size?: string;
   sizeId?: number;
+  /** SKU варианта у файла A (`RC27-99999-OFW-76`); '' — у размера нет номера SKU. У B — нет. */
+  sku?: string;
   /** Что в файле: обе стороны (duplex) или одна (simplex). */
   side: 'both' | 'face' | 'back';
   copies: number;
@@ -232,6 +234,7 @@ export function planPrint(sh: Shaper, job: PrintJob): PrintSet {
           label: 'A',
           size: s.label,
           sizeId: s.sizeId,
+          sku: s.skuOrd != null ? s.sku : '',
           copies: s.copies,
         },
         `A-main-${stem}`,

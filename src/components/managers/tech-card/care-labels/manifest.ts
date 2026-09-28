@@ -1,9 +1,12 @@
 // manifest.csv АРХИВА (план §9.6): одна строка на СТОРОНУ файла — сверка оператора «что где лежит».
 // duplex: файл несёт лицо и изнанку → две строки с одним файлом; simplex: `-face`/`-back` — по одной.
+// `variant_sku` — SKU варианта у строк A (base + номер размера: подпись размера не уникальна, SKU —
+// да), пусто у B: состав общий на колорвей.
 import type { PlannedFile, PrintSet } from './pages';
 
 export const MANIFEST_HEADER = [
   'colorway_sku',
+  'variant_sku',
   'colour',
   'size',
   'label',
@@ -33,6 +36,7 @@ export function manifestRows(
     for (const side of sides) {
       rows.push([
         cw?.baseSku ?? '',
+        f.label === 'A' ? f.sku ?? '' : '',
         cw?.colour ?? '',
         f.size ?? '',
         f.label,
