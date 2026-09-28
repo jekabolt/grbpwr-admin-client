@@ -357,12 +357,47 @@ export function resolveColorwayComposition(input: ColorwayCompositionInput): Res
   const { bom, usages, materials, fibers, colorwayId } = input;
   const holes: Hole[] = [];
   const usagesByLine = new Map<string, LabelUsage[]>();
+  const pieceRows: LabelUsage[] = [];
   for (const u of usages) {
     // Только строки уровня изделия: назначение детали не норма и не пин (см. `isPieceBoundUsage`).
-    if (isPieceBoundUsage(u)) continue;
+    if (isPieceBoundUsage(u)) {
+      pieceRows.push(u);
+      continue;
+    }
     const list = usagesByLine.get(u.bomLineKey) ?? [];
     list.push(u);
     usagesByLine.set(u.bomLineKey, list);
+  }
+
+  // Деталь, которую колорвей кроит из ДРУГОГО артикула, чем действующий материал её слота, — это,
+  // возможно, контрастная вставка из другой ткани. В состав она не идёт (назначение, не норма), но
+  // молчать о ней нельзя: предупреждение с адресом (колорвей, строка, деталь, артикул) — на экран и
+  // в README. Пин 0 — «как слот», предупреждать не о чем.
+  for (const u of pieceRows) {
+    const pin = u.materialId && u.materialId > 0 ? u.materialId : 0;
+    if (!pin) continue;
+    const line = bom.find((l) => l.lineKey === u.bomLineKey);
+    if (!line) continue;
+    const part = effectiveLabelPart(line);
+    if (part === 'NOT_ON_LABEL') continue;
+    const slot = line.materialId || 0;
+    const garment = usagesByLine.get(line.lineKey) ?? [];
+    const effective = new Set(
+      garment.length
+        ? garment.map((g) => (g.materialId && g.materialId > 0 ? g.materialId : slot))
+        : [slot],
+    );
+    if (effective.has(pin)) continue;
+    const piece =
+      (u.pieceLineKey ?? '').trim() ||
+      ((u.pieceId ?? 0) > 0 ? `#${u.pieceId}` : `[${u.pieceIndex ?? '?'}]`);
+    holes.push(
+      hole(
+        'piece-pin-differs',
+        `${LABEL_PART_NAME[part]}: line "${line.name}" — piece ${piece} is cut from article #${pin}, not the slot's #${[...effective].join('/#')}; it is NOT in the composition — check whether it is a contrast panel`,
+        { part, lineKey: line.lineKey, piece, materialId: pin },
+      ),
+    );
   }
 
   const byPart = new Map<PrintedPart, Source[]>();
@@ -566,7 +601,7 @@ export function resolveColorwayComposition(input: ColorwayCompositionInput): Res
 function dedupeHoles(holes: Hole[]): Hole[] {
   const seen = new Set<string>();
   return holes.filter((h) => {
-    const key = `${h.code}|${h.ref.part ?? ''}|${h.ref.lineKey ?? ''}|${h.ref.fiberCode ?? ''}|${h.ref.lang ?? ''}|${h.ref.materialId ?? ''}`;
+    const key = `${h.code}|${h.ref.part ?? ''}|${h.ref.lineKey ?? ''}|${h.ref.fiberCode ?? ''}|${h.ref.lang ?? ''}|${h.ref.materialId ?? ''}|${h.ref.piece ?? ''}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

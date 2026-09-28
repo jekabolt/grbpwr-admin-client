@@ -62,6 +62,7 @@ export const WARN_HOLE_CODES = [
   'run-stale',
   'colorway-excluded',
   'legacy-free-text-composition',
+  'piece-pin-differs',
 ] as const;
 
 // §5.3 п. 3 называет совпадение по имени/псевдониму INFO-предупреждением: код узнан, печать верна,
@@ -90,6 +91,8 @@ export type HoleRef = {
   sizeId?: number;
   /** Артикул каталога (пин колорвея), к которому относится дыра. */
   materialId?: number;
+  /** Деталь кроя (line_key детали, иначе `#id` / `[index]`) — у дыр строки рецепта детали. */
+  piece?: string;
 };
 
 export type Hole = {

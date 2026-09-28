@@ -183,6 +183,7 @@ const BOM: ReadonlySet<string> = new Set([
   'part-too-wide',
 ]);
 const COLORWAYS: ReadonlySet<string> = new Set([
+  'piece-pin-differs',
   'no-sku',
   'no-colour-name',
   'no-country',
