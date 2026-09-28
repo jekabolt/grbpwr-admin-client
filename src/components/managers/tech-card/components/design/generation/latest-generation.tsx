@@ -7,7 +7,7 @@ import { useEffect, useLayoutEffect, useMemo, useState, type JSX } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
-import { GroupLabel } from 'ui/components/group-label';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../../schema';
@@ -39,7 +39,7 @@ import {
 import { useElapsed, useRunById } from './use-generation';
 
 /**
- * ═══ THE LATEST GENERATION, UNDER GENERATE (26.09, O-53, phase 1) ═══════════════════════════════
+ * ═══ THE LATEST GENERATION — A BLOCK OF ITS OWN UNDER THE GENERATE BLOCK (O-53; 28.09, O-67) ═══
  *
  * Owner, verbatim: «после генерации в FLAT INPUT — REFERENCES в этом же блоке но снизу должны
  * появятся сгенерированные картинки и там мы уже можем непосредственно делать все тоже самое что и в
@@ -47,9 +47,16 @@ import { useElapsed, useRunById } from './use-generation';
  * отображаться и там же можно сделать разметку … на этом воркбенче должна отображаться последняя
  * генерация».
  *
- * WHAT IT IS. The bottom row of INPUT — REFERENCES: a `GroupLabel` «latest generation» with the
- * run's stamp on the right (state word, `author · hh:mm`; no price — O-37), then the history row's
- * own outputs block (`RunOutputs`) on the block's 190px grid. The doors are `RunTile`'s, unchanged:
+ * WHAT IT IS (28.09, O-67, D-73). A BLOCK OF ITS OWN — a `Section` «LATEST GENERATION» with the
+ * chrome of its neighbours (the same header rule and clause, the same padding, the block's own
+ * rhythm between its rows), standing IMMEDIATELY after the block whose GENERATE it answers: on
+ * FLAT after INPUT — REFERENCES (`studio-tab.tsx`), on FABRIC RENDER after that block and before
+ * SIDES (`render-studio.tsx`). Until O-67 it was the last row of that block under a `GroupLabel`;
+ * owner, verbatim: «LATEST GENERATION в флетах и фабрик рендерах должна быть отдельным блоком».
+ * In the header's action slot the run's stamp (state word, `author · hh:mm`; no price — O-37),
+ * then the history row's own outputs block (`RunOutputs`) on the workbench's 190px track — the
+ * reference grid's, one block up, so the columns line up across the gutter. The doors are
+ * `RunTile`'s, unchanged:
  * split an uncut sheet (`SplitModal forInput={false}` — a cut here lays a sheet out into views, it
  * does NOT feed the prompt, so no reference role and no `moodboardMedia` row is written), edit
  * (a NEW sibling picture in the same run, `slot={null}`, exactly as from the history — «overwrite or
@@ -61,7 +68,8 @@ import { useElapsed, useRunById } from './use-generation';
  * live or holding pictures. Newer flat runs that came back with nothing (failed, cancelled, empty)
  * are passed over and SAID, every one of them counted: one — «the newest run failed · CODE — this
  * is the one before»; more — «newest N runs finished empty · showing the last one with pictures».
- * No run of the kind on the first page → no workbench at all; the history below still has every run.
+ * No run of the kind on the first page → no block at all, not an empty header (D-73); the history
+ * below still has every run.
  * Runs, but none came back with pictures → the newest of them stands here BARE (27.09, O-63 r2,
  * D-72 п.3): its stamp, how it ended and why — see `BareOutcome`.
  *
@@ -99,7 +107,8 @@ import { useElapsed, useRunById } from './use-generation';
  * ═══ AND ON FABRIC RENDER, THE SAME ORGAN (27.09, O-63, D-62) ═══════════════════════════════════
  * Owner, verbatim: «после генерации результат показывать как во флетах те с LATEST GENERATION и
  * GENERATION HISTORY свернут по дефолту и RENDERS OF THIS CARD получается не нужен». `kind='render'`
- * mounts this row in the FABRIC RENDER block, under its GENERATE and above SIDES: the newest render
+ * mounts this block right after FABRIC RENDER (the block of its GENERATE) and above SIDES — a sibling
+ * block since O-67 (D-73), still inside `RenderStepScope`: the newest render
  * run that is not archived and is live or holds pictures — of ANY colourway, as the history is —
  * with the same pin, «newer run ready · show ›» and «the one before». Its tiles are `RunTile`s too;
  * a render run's tile draws the render doors (`mark ▸`, `apply splitted`, `expand ▸`, `unmark ▸` —
@@ -463,7 +472,13 @@ export function LatestGeneration({
 
   return (
     <div data-latest-generation={runId} ref={galleryGroup.anchorRef}>
-      <GroupLabel
+      {/* THE BLOCK (O-67, D-73): the neighbours' `Section`, the run's stamp in its header's action
+          slot, the pieces below spaced by the block's own rhythm — no hand margins. The wrapper
+          carries the anchor and the gallery group's node, and is the NEXT SIBLING of the block whose
+          GENERATE this answers (`#design-input` on FLAT, `#design-render-bench` on FABRIC RENDER). */}
+      <Section
+        title='latest generation'
+        question='— what the last run brought back'
         action={
           <Text size='nano' variant='label' component='span' data-latest-stamp=''>
             {state && (
@@ -478,73 +493,69 @@ export function LatestGeneration({
           </Text>
         }
       >
-        latest generation
-      </GroupLabel>
+        {bare && newest && <BareOutcome run={run} earlier={newest.skipped} />}
 
-      {bare && newest && <BareOutcome run={run} earlier={newest.skipped} />}
-
-      {note && newest && (
-        <Text
-          size='micro'
-          variant='label'
-          component='p'
-          className='mb-2'
-          data-latest-passed-over={newest.skipped[0]?.id ?? 0}
-          data-latest-skipped={newest.skipped.length}
-          title={note.title}
-        >
-          {note.text}
-        </Text>
-      )}
-
-      {/* O-63: ON FABRIC RENDER the tiles below draw the render doors, and their rules read this
-          row's plates (`RenderDoorsHost`); FLAT's row is drawn as it always was. The doors' notes
-          stand once above the tiles. `disabled` is the card's alone: the server's silence the
-          doors read themselves, and say so in their own words. */}
-      {bare ? null : kind === 'render' ? (
-        <RenderDoorsHost
-          band={band}
-          techCardId={techCardId}
-          disabled={disabled}
-          pictures={plates.pictures}
-          membersOf={plates.membersOf}
-          openDeck={openDeck}
-          onDeck={toggleDeck}
-          runOf={() => run}
-          notesClassName='mb-2'
-        >
-          {outputs}
-        </RenderDoorsHost>
-      ) : (
-        outputs
-      )}
-
-      {/* A NEWER RUN, WHILE THIS ONE IS KEPT — one quiet line under the tiles; the click moves the
-          workbench to the newest and lets the pin go. «started» while that run is in flight: it is
-          not ready yet. */}
-      {newer && (
-        <span className='mt-2 flex flex-wrap items-center gap-1.5' data-latest-newer={newestId}>
-          <Text size='micro' variant='label' component='span'>
-            {isRunLive(newer)
-              ? 'newer run started'
-              : newest?.bare
-                ? 'newer run came back with nothing'
-                : 'newer run ready'}{' '}
-            ·
-          </Text>
-          <Button
-            type='button'
-            variant='underline'
-            size='xs'
-            className='text-labelColor hover:text-textColor'
-            aria-label={`show ${runHandle(newestId)} here`}
-            title={`the newest ${kind} run — the one shown now stays in the history below`}
-            onClick={() => releasePin(techCardId)}
+        {note && newest && (
+          <Text
+            size='micro'
+            variant='label'
+            component='p'
+            data-latest-passed-over={newest.skipped[0]?.id ?? 0}
+            data-latest-skipped={newest.skipped.length}
+            title={note.title}
           >
-            show ›
-          </Button>
-        </span>
-      )}
+            {note.text}
+          </Text>
+        )}
+
+        {/* O-63: ON FABRIC RENDER the tiles below draw the render doors, and their rules read this
+            row's plates (`RenderDoorsHost`); FLAT's row is drawn as it always was. The doors' notes
+            stand once above the tiles, spaced by the block. `disabled` is the card's alone: the
+            server's silence the doors read themselves, and say so in their own words. */}
+        {bare ? null : kind === 'render' ? (
+          <RenderDoorsHost
+            band={band}
+            techCardId={techCardId}
+            disabled={disabled}
+            pictures={plates.pictures}
+            membersOf={plates.membersOf}
+            openDeck={openDeck}
+            onDeck={toggleDeck}
+            runOf={() => run}
+          >
+            {outputs}
+          </RenderDoorsHost>
+        ) : (
+          outputs
+        )}
+
+        {/* A NEWER RUN, WHILE THIS ONE IS KEPT — one quiet line under the tiles; the click moves the
+            workbench to the newest and lets the pin go. «started» while that run is in flight: it is
+            not ready yet. */}
+        {newer && (
+          <span className='flex flex-wrap items-center gap-1.5' data-latest-newer={newestId}>
+            <Text size='micro' variant='label' component='span'>
+              {isRunLive(newer)
+                ? 'newer run started'
+                : newest?.bare
+                  ? 'newer run came back with nothing'
+                  : 'newer run ready'}{' '}
+              ·
+            </Text>
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              className='text-labelColor hover:text-textColor'
+              aria-label={`show ${runHandle(newestId)} here`}
+              title={`the newest ${kind} run — the one shown now stays in the history below`}
+              onClick={() => releasePin(techCardId)}
+            >
+              show ›
+            </Button>
+          </span>
+        )}
+      </Section>
 
       {splitting && (
         <SplitModal
