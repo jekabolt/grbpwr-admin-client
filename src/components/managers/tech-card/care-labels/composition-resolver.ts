@@ -40,7 +40,25 @@ export type LabelUsage = {
   consumption: number | null;
   sizeConsumptions: number[];
   unit?: string;
+  /**
+   * Ссылка на деталь кроя (T8). Строка с ней — НАЗНАЧЕНИЕ материала детали («деталь X кроится из
+   * слота Y»), а не норма и не пин слота: норма и пин колорвея живут только на строке уровня
+   * изделия. Три представления одной привязки; `pieceIndex` — explicit presence, 0 — настоящая
+   * деталь.
+   */
+  pieceLineKey?: string;
+  pieceId?: number;
+  pieceIndex?: number;
 };
+
+/**
+ * Строка рецепта, привязанная к детали, — тот же предикат, что `slot-fabrics.ts`, `bom-norm.ts`,
+ * `cloth-per-unit.ts` и серверный `IsPieceMaterialAssignment`. Такая строка в составе не участвует
+ * ни весом, ни пином: посчитать её источником значит умножить вес ткани на число её деталей
+ * (две ткани 1:1, у одной четыре детали → 71/29 вместо 50/50 на юридической этикетке).
+ */
+export const isPieceBoundUsage = (u: LabelUsage): boolean =>
+  !!(u.pieceLineKey ?? '').trim() || (u.pieceId ?? 0) > 0 || u.pieceIndex != null;
 
 /** Материал каталога: типизированный состав по кодам словаря волокон. */
 export type LabelMaterial = {
@@ -65,7 +83,8 @@ export type FiberDict = ReadonlyMap<string, LabelFiber>;
 export type ColorwayCompositionInput = {
   colorwayId?: number;
   bom: readonly LabelBomLine[];
-  /** Usages ОДНОГО колорвея. Пусто — «без колорвея»: веса 1, материал слота (§5.4). */
+  /** Usages ОДНОГО колорвея (строки деталей отсеиваются здесь же). Пусто — «без колорвея»: веса 1,
+   *  материал слота (§5.4). */
   usages: readonly LabelUsage[];
   materials: ReadonlyMap<number, LabelMaterial>;
   fibers: FiberDict;
@@ -339,6 +358,8 @@ export function resolveColorwayComposition(input: ColorwayCompositionInput): Res
   const holes: Hole[] = [];
   const usagesByLine = new Map<string, LabelUsage[]>();
   for (const u of usages) {
+    // Только строки уровня изделия: назначение детали не норма и не пин (см. `isPieceBoundUsage`).
+    if (isPieceBoundUsage(u)) continue;
     const list = usagesByLine.get(u.bomLineKey) ?? [];
     list.push(u);
     usagesByLine.set(u.bomLineKey, list);

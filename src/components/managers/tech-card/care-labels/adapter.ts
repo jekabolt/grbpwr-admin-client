@@ -33,6 +33,7 @@ import { useMaterials } from 'components/managers/materials/components/useMateri
 import { depStatus, type PrintDep } from 'components/managers/print/use-print-ready';
 import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { wireInt } from 'components/managers/tech-card/components/wire-int';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
 import type {
@@ -208,6 +209,11 @@ export function adaptUsages(c: common_AdminColorwayRef): LabelUsage[] {
       sizeConsumptions: (u.sizeConsumptions ?? [])
         .map((s) => decimalNumber(s.consumption))
         .filter((n): n is number => n != null),
+      // Ссылка на деталь едет ДО резолвера целиком: по ней он отличает назначение детали от нормы.
+      // Потерять её здесь — значит сосчитать каждую деталь ещё одним источником состава.
+      pieceLineKey: (u.pieceLineKey ?? '').trim() || undefined,
+      pieceId: wireInt(u.pieceId) || undefined,
+      pieceIndex: u.pieceIndex ?? undefined,
     }));
 }
 
