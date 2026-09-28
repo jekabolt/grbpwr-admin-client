@@ -481,6 +481,7 @@ function SlotRow({
         image: undefined,
         inpaint: undefined,
         extend: undefined,
+        video: undefined,
       },
     });
   };

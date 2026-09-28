@@ -11,6 +11,7 @@ import { EXTEND_IMAGE } from './tiles/extend-image';
 import { FABRIC_TO_IMAGE } from './tiles/fabric-to-image';
 import { GHOST_MANNEQUIN } from './tiles/ghost-mannequin';
 import { IMAGE_TO_3D } from './tiles/image-to-3d';
+import { IMAGE_TO_VIDEO } from './tiles/image-to-video';
 import { REMOVE_BACKGROUND } from './tiles/remove-background';
 import { RETOUCH_ZONE } from './tiles/retouch-zone';
 import { SWAP_FABRICS } from './tiles/swap-fabrics';
@@ -18,7 +19,7 @@ import { VIRTUAL_TRY_ON } from './tiles/virtual-try-on';
 import type { WorkflowDef } from './types';
 
 /**
- * ═══ THE TWELVE, IN THE OWNER'S GRID ORDER (00-OWNER-SPEC, tiles 1–12) ═════════════════════════
+ * ═══ THE TWELVE, IN THE OWNER'S GRID ORDER (00-OWNER-SPEC, tiles 1–12), + IMAGE TO VIDEO (B-32) ══
  *
  * Titles and one-line descriptions are the owner's own words. Eleven of them run (phase 2); each is
  * live where its gate passes — on a server that lists it in `playground_workflows` (D8; Image to 3D
@@ -103,6 +104,16 @@ export const WORKFLOWS: readonly WorkflowDef[] = [
     blurb: 'Create a 3D model from your fashion design.',
     ...IMAGE_TO_3D,
   },
+  /* THE THIRTEENTH, NEXT TO THE 3D TILE (B-32, owner 28.09: «в runblob есть и видео и фото — делай
+     и то и то»): one picture of the card → a five-second clip through runblob's Kling route. Live
+     only where `playground_workflows` lists `image_to_video` (the server's key for runblob is the
+     gate; without one the door refuses `kind_not_available`, so the tile is dimmed instead). */
+  {
+    key: 'image_to_video',
+    title: 'Image to Video',
+    blurb: 'Animate a picture of your fashion design into a short clip.',
+    ...IMAGE_TO_VIDEO,
+  },
 ];
 
 export function workflowByKey(key: string | null | undefined): WorkflowDef | null {
@@ -166,4 +177,5 @@ const ROOM_WORD: Readonly<Record<RoomKey, string>> = {
   retouch_zone: 'retouch a zone',
   create_edit: 'create or edit',
   image_to_3d: 'image to 3d',
+  image_to_video: 'image to video',
 };

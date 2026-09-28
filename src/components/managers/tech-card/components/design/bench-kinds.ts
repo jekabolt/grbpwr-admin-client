@@ -161,9 +161,12 @@ export function runRepresentation(
     case 'cutout':
     case 'extend':
     case 'inpaint':
+    case 'video':
       // TWO KINDS, ONE ROOM — see the argument on `REPRESENTATIONS`. Phase 3 (C-13/C-14): the
       // outpaint and mask-fill routes are playground kinds too (one output, colourway 0, section 1
-      // of the window), so they join the same room.
+      // of the window), so they join the same room. B-32: the clip route (`video`) too — one
+      // output (an .mp4), colourway 0, the playground's own tile; its file is drawn as a clip by
+      // the picture tile, not by a room of its own.
       return 'playground';
     default:
       return null;
@@ -236,7 +239,7 @@ export function pictureRepresentation(
   /* THE FALLBACK IS REACHED ONLY OFF THE FEED PAGE, and there the picture's own kind is the last
      witness of the room it came from: the server files a playground output as `freeform`/`cutout`
      explicitly (`DesignPictureKindOfRun`), rather than letting it fall into `flat` by default. */
-  if (kind === 'freeform' || kind === 'cutout') return 'playground';
+  if (kind === 'freeform' || kind === 'cutout' || kind === 'video') return 'playground';
   return null;
 }
 

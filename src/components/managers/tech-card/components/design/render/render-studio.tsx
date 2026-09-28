@@ -383,6 +383,7 @@ export function RenderStudio({
         image: undefined,
         inpaint: undefined,
         extend: undefined,
+        video: undefined,
       },
     };
     run.start(body, pressed ? { onStarted: () => draft.materializeWords(pressed) } : undefined);

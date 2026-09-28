@@ -4535,8 +4535,8 @@ export type DesignRun = {
   id: number | undefined;
   techCardId: number | undefined;
   // Which state of the studio produced this row: flat | render | threed | vector | draft_idea |
-  // recolor | pattern | freeform | cutout | extend | inpaint. Written by the client at start;
-  // immutable afterwards.
+  // recolor | pattern | freeform | cutout | extend | inpaint | video. Written by the client at
+  // start; immutable afterwards.
   // `recolor` IS THE ON MODEL SECTION'S OWN VERB (K-17). The owner's ask — «мы можем загрузить фото
   // реальное на модели с разных сторон и нам можно будет поменять цвет вещи» — and the owner's own
   // decision on how: the colour is changed BY GENERATION, not by a filter, so the weave, the folds
@@ -4820,6 +4820,8 @@ export type DesignRunParams = {
   inpaint: DesignInpaintParams | undefined;
   // THE TARGET FORMAT OF AN EXTEND RUN (kind=extend). Refused on every other kind (`extend_forbidden`).
   extend: DesignExtendParams | undefined;
+  // THE SOURCE PICTURE OF A VIDEO RUN (kind=video, B-32). Refused on every other kind (`video_forbidden`).
+  video: DesignVideoParams | undefined;
 };
 
 // DesignColourRecipe is the colour submission of a render run, in a form that a history chip can
@@ -5188,6 +5190,20 @@ export type DesignExtendParams = {
   aspectRatio: string | undefined;
 };
 
+// DesignVideoParams is the frozen ask of a VIDEO run (kind=video, the playground's «Image to Video»,
+// B-32): a short clip animated from ONE picture of the card by runblob's Kling image-to-video route.
+// ONE PICTURE, ONE CLIP. The source travels HERE (`source_media_id`), never in extra_input_media_ids
+// (one list per fact); the words are `ask` — REQUIRED, since Kling takes a prompt of 1–2500
+// characters («words_required» when empty, InvalidArgument past 2500). The clip's length is fixed at
+// 5 seconds today (`duration` 0 or 5; any other number is «unknown_option»), and the model is the
+// route row's Kling slug (admin → AI providers → video.generate), frozen by the server when the run
+// starts; a model the client states must be a `kling_*` slug («unknown_option»).
+export type DesignVideoParams = {
+  sourceMediaId: number | undefined;
+  duration: number | undefined;
+  model: string | undefined;
+};
+
 // DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
 // IDS ARE STORED, MediaFull IS SERVED. The stored snapshot freezes media_id — freezing a URL is
 // wrong because objects move — and the read joins media and hands back a ready picture. Nothing
@@ -5347,7 +5363,10 @@ export type DesignPicture = {
   runId: number | undefined;
   batchId: number | undefined;
   ordinal: number | undefined;
-  // flat | render | threed | pattern | freeform | cutout.
+  // flat | render | threed | pattern | freeform | cutout | video.
+  // `video` is the clip a VIDEO run made (kind=video, B-32): an mp4 whose media row points every
+  // variant at the one object. Never a plate, never an input of another run (the door refuses a
+  // video as a picture), and never uploaded by hand — it exists only as the OUTPUT of a run.
   // `freeform` and `cutout` are the outputs of the PLAYGROUND (kind=freeform / kind=cutout). They
   // are named apart for the same reason `pattern` is: neither is a plate. A playground picture that
   // called itself a flat would become selectable into a bench slot, and one that called itself a

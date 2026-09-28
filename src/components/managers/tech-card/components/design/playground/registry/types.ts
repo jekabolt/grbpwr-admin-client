@@ -31,7 +31,7 @@ import type {
  * run disagree silently, and that cost a week on a neighbouring screen.
  */
 
-/** The owner's twelve, in grid order. The key is also the value of `?wf=`. */
+/** The owner's twelve, in grid order, and the thirteenth (Image to Video, B-32). The key is also the value of `?wf=`. */
 export type WorkflowKey =
   | 'virtual_try_on'
   | 'fabric_to_image'
@@ -44,7 +44,8 @@ export type WorkflowKey =
   | 'extend_image'
   | 'retouch_zone'
   | 'create_edit'
-  | 'image_to_3d';
+  | 'image_to_3d'
+  | 'image_to_video';
 
 /* ─────────────────────────── the draft ─────────────────────────── */
 

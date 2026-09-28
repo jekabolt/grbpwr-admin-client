@@ -28,6 +28,7 @@ import { newClientRequestId, useDesignWrites } from './use-design-band';
 
 import { ThreedModelModal } from './threed/model-modal';
 import { isModelUrl } from './threed/media';
+import { isVideoUrl } from './video-media';
 import { ThreedModelIndexContext, threedModelIndex, useModelBehind } from './threed/model-index';
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -867,6 +868,18 @@ export function PictureTile({
    * не кнопками» и ровно тот закон углов, ради которого этот файл написан.
    */
   const model = isModelUrl(url);
+  /**
+   * ═══ BEHIND THIS ADDRESS IS A CLIP (B-32) ══════════════════════════════════════════════════════
+   *
+   * A video run's .mp4 reaches `url` wherever the band draws a run's output — the room's results,
+   * the history, the picker — for the same reason the `.glb` does (its media row has the clip in
+   * every slot, no still). An `<img>` given an .mp4 is the broken frame that reads as «the server
+   * failed» while the clip is paid for and there. So the primitive decides HOW to draw it: the
+   * face is the clip itself, playing (`controls playsInline muted loop` — the owner's words), and
+   * the zoom surface stays OFF it, else the surface would cover the player's controls; the zoom
+   * corner still opens the viewer, which plays a video of its own.
+   */
+  const clip = !model && isVideoUrl(url);
 
   /**
    * ═══ ЗА ЭТОЙ КАРТИНКОЙ СТОИТ ФАЙЛ МОДЕЛИ (J-29) ═══════════════════════════════════════════
@@ -916,7 +929,7 @@ export function PictureTile({
    * заменяет ТОЛЬКО картинку.
    */
   const [faceFailed, setFaceFailed] = useState<string | null>(null);
-  const hearsFace = !model && !face && !!url;
+  const hearsFace = !model && !clip && !face && !!url;
   const faceBroken = hearsFace && !!faceSrc && faceFailed === faceSrc;
   const opensModel = !!modelHref;
   /**
@@ -996,6 +1009,8 @@ export function PictureTile({
       /* И ОБЪЯВЛЕННОЕ СОСТОЯНИЕ: «мой клик ведёт в модель, а не в просмотрщик картинок» (J-29).
          Флаг не заменяет пробу последствия — он даёт ей чем прицелиться. */
       data-opens-model={opensModel || undefined}
+      /* B-32: the face is a playing clip, and the zoom surface is off it (its controls are live). */
+      data-clip={clip || undefined}
       /* ═══ ГРУНТ ЖИВЁТ НА САМОЙ ПЛИТКЕ, А ПРИГЛУШЕНИЕ — НА ОБЁРТКЕ КАРТИНКИ ══════════════════
          Стояли они на ОДНОМ узле, и `opacity-40` гасила их вместе: у выключенной плитки бледнела
          не только картинка, а и подложка под ней — то есть исчезала ровно та граница предмета,
@@ -1049,6 +1064,21 @@ export function PictureTile({
               3d model
             </Text>
           </div>
+        ) : clip && url ? (
+          /* THE FACE OF A CLIP IS THE CLIP (B-32): muted and looping so it plays where it stands,
+             with the browser's own controls (the sound is the person's to switch on). `preload`
+             metadata: a grid of twenty tiles must not pull twenty files at once. */
+          <video
+            src={url}
+            controls
+            playsInline
+            muted
+            loop
+            preload='metadata'
+            aria-label={alt}
+            className='h-full w-full object-contain'
+            style={{ objectFit: fit }}
+          />
         ) : face ? (
           face
         ) : faceBroken ? (
@@ -1089,7 +1119,7 @@ export function PictureTile({
           открывать «его» нечего. Дальше — МОДЕЛЬ: если за кадром файл модели, поверхность ведёт
           туда, потому что предмет здесь модель, а картинка — только её изображение (J-29). Зум
           остаётся тем, чем был, для всего остального. */}
-      {(zoomable || onOpen || surfaceToModel) && (
+      {(onOpen || (!clip && (zoomable || surfaceToModel))) && (
         <button
           type='button'
           tabIndex={-1}

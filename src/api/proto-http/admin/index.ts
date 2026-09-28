@@ -15205,7 +15205,10 @@ export type common_DesignPicture = {
   runId: number | undefined;
   batchId: number | undefined;
   ordinal: number | undefined;
-  // flat | render | threed | pattern | freeform | cutout.
+  // flat | render | threed | pattern | freeform | cutout | video.
+  // `video` is the clip a VIDEO run made (kind=video, B-32): an mp4 whose media row points every
+  // variant at the one object. Never a plate, never an input of another run (the door refuses a
+  // video as a picture), and never uploaded by hand — it exists only as the OUTPUT of a run.
   // `freeform` and `cutout` are the outputs of the PLAYGROUND (kind=freeform / kind=cutout). They
   // are named apart for the same reason `pattern` is: neither is a plate. A playground picture that
   // called itself a flat would become selectable into a bench slot, and one that called itself a
@@ -15620,8 +15623,8 @@ export type common_DesignRun = {
   id: number | undefined;
   techCardId: number | undefined;
   // Which state of the studio produced this row: flat | render | threed | vector | draft_idea |
-  // recolor | pattern | freeform | cutout | extend | inpaint. Written by the client at start;
-  // immutable afterwards.
+  // recolor | pattern | freeform | cutout | extend | inpaint | video. Written by the client at
+  // start; immutable afterwards.
   // `recolor` IS THE ON MODEL SECTION'S OWN VERB (K-17). The owner's ask — «мы можем загрузить фото
   // реальное на модели с разных сторон и нам можно будет поменять цвет вещи» — and the owner's own
   // decision on how: the colour is changed BY GENERATION, not by a filter, so the weave, the folds
@@ -15905,6 +15908,8 @@ export type common_DesignRunParams = {
   inpaint: common_DesignInpaintParams | undefined;
   // THE TARGET FORMAT OF AN EXTEND RUN (kind=extend). Refused on every other kind (`extend_forbidden`).
   extend: common_DesignExtendParams | undefined;
+  // THE SOURCE PICTURE OF A VIDEO RUN (kind=video, B-32). Refused on every other kind (`video_forbidden`).
+  video: common_DesignVideoParams | undefined;
 };
 
 // DesignThreedParams are the parameters of a turntable run.
@@ -16130,6 +16135,20 @@ export type common_DesignInpaintParams = {
 // may be at most 18 MP (`source_too_large`).
 export type common_DesignExtendParams = {
   aspectRatio: string | undefined;
+};
+
+// DesignVideoParams is the frozen ask of a VIDEO run (kind=video, the playground's «Image to Video»,
+// B-32): a short clip animated from ONE picture of the card by runblob's Kling image-to-video route.
+// ONE PICTURE, ONE CLIP. The source travels HERE (`source_media_id`), never in extra_input_media_ids
+// (one list per fact); the words are `ask` — REQUIRED, since Kling takes a prompt of 1–2500
+// characters («words_required» when empty, InvalidArgument past 2500). The clip's length is fixed at
+// 5 seconds today (`duration` 0 or 5; any other number is «unknown_option»), and the model is the
+// route row's Kling slug (admin → AI providers → video.generate), frozen by the server when the run
+// starts; a model the client states must be a `kling_*` slug («unknown_option»).
+export type common_DesignVideoParams = {
+  sourceMediaId: number | undefined;
+  duration: number | undefined;
+  model: string | undefined;
 };
 
 // DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
@@ -16591,8 +16610,8 @@ export type StartDesignRunRequest = {
   // Client-minted UUID. A repeat returns the existing run with OK — a double click on GENERATE is
   // one payment.
   clientRequestId: string | undefined;
-  // flat | render | threed | vector | recolor | pattern | freeform | cutout | extend | inpaint.
-  // `draft_idea` is REFUSED here with
+  // flat | render | threed | vector | recolor | pattern | freeform | cutout | extend | inpaint |
+  // video. `draft_idea` is REFUSED here with
   // InvalidArgument: a text run executes inline and returns its answer, so it has its own verb
   // (DraftDesignIdea) rather than a shared one that would return a pending row nobody ever polls.
   // `vector` IS ACCEPTED HERE and has no verb of its own on purpose: machine vectorisation spends
@@ -16684,8 +16703,14 @@ export type StartDesignRunRequest = {
   // · params.image — a slug the engine table does not hold («unknown_image_model»), a tier, ratio
   // or background the chosen engine does not list («quality_not_supported»,
   // «aspect_not_supported», «background_not_supported»), or any params.image on threed | cutout
-  // | vector | extend | inpaint («image_options_forbidden»);
-  // · threed — more than 4 params.threed.reference_media_ids («too_many_pictures»).
+  // | vector | extend | inpaint | video («image_options_forbidden»);
+  // · threed — more than 4 params.threed.reference_media_ids («too_many_pictures»);
+  // · video (B-32) — no params.video.source_media_id («one_source_picture»); no words
+  // («words_required»); words past 2500 characters (InvalidArgument); a duration other than 5
+  // or a model that is not a `kling_*` slug («unknown_option»); params.video on any other kind
+  // («video_forbidden»); the source must be a picture of this card (or a fresh upload) that the
+  // provider can read — a model or a video is refused (`input_not_a_picture`). FailedPrecondition
+  // `kind_not_available` names runblob's missing key, before anything is reserved.
   kind: string | undefined;
   ask: string | undefined;
   // What is being asked for; at most 8 KB encoded. The INPUTS are not here and cannot be: the

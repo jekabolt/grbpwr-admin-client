@@ -100,6 +100,13 @@ const DRAWINGS: Record<WorkflowKey, JSX.Element> = {
       <path d='m8 15 16 9 16-9M24 24v18' />
     </>
   ),
+  image_to_video: (
+    <>
+      <rect x='6' y='10' width='36' height='28' />
+      <path d='M6 16h36M6 32h36M12 10v6M24 10v6M36 10v6M12 32v6M24 32v6M36 32v6' strokeWidth={1} />
+      <path d='m20 19 10 5-10 5Z' />
+    </>
+  ),
 };
 
 export function WorkflowGlyph({

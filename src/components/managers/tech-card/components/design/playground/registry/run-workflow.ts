@@ -21,6 +21,7 @@ import type { WorkflowKey } from './types';
  *     where STEP 5 has left the rail (`recallTargetKind`). Its models are not the room's pictures
  *     (`inPlaygroundRoom` reads representations, and a 3D run has its own), so the room's views
  *     never file one under a tile; only the recall and tile 12's own history read this answer;
+ *   · video → Image to Video (B-32): the clip route, one tile, decided by the kind alone;
  *   · extend → Extend Image; inpaint → Retouch a Zone (phase 3, C-13/C-14): the mask route is the
  *     same tile as the phase-2 window retouch — one tile, two routes, one shelf. Both are decided by
  *     the kind alone, so an off-page stub files exactly as its loaded run does.
@@ -46,6 +47,7 @@ const ROOM_KEYS: readonly RoomKey[] = [
   'retouch_zone',
   'create_edit',
   'image_to_3d',
+  'image_to_video',
 ];
 
 /** The freeform presets that have a tile of their own; every other preset is Create or edit's. */
@@ -63,6 +65,8 @@ const isRoomKey = (key: string): key is RoomKey => (ROOM_KEYS as readonly string
 export function workflowOfRun(run: Pick<common_DesignRun, 'kind' | 'params'>): RoomKey | null {
   const kind = (run.kind ?? '').trim().toLowerCase();
   if (kind === 'threed') return 'image_to_3d';
+  // B-32: the clip route is its own kind, decided by the kind alone (an off-page stub files the same).
+  if (kind === 'video') return 'image_to_video';
   if (kind === 'extend') return 'extend_image';
   if (kind === 'inpaint') return 'retouch_zone';
   if (kind !== 'freeform' && kind !== 'recolor' && kind !== 'cutout') return null;
