@@ -210,14 +210,71 @@ function groupPurposes(purposes: AiPurposeInfo[]) {
 
 // The two defaults. Both travel in every write; the one not touched goes as "" — "unchanged" —
 // so this select never re-sends the other one's value over a change made elsewhere.
+// A text action inside a micro line (the key slot's pattern): it inherits the line's size and says it
+// is clickable by its underline.
+const LINE_ACTION =
+  'cursor-pointer underline underline-offset-2 hover:opacity-70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50';
+
+type DefaultCapability = 'chat' | 'image';
+
 function DefaultsRow({ config }: { config: GetAiProvidersConfigResponse }) {
   const save = useSetAiDefaults();
   const providers = config.providers ?? [];
+  const purposes = config.purposes ?? [];
   const pending = save.isPending ? save.variables : undefined;
   const chat = pending?.chatProviderKey || config.defaultChatProviderKey || '';
   const image = pending?.imageProviderKey || config.defaultImageProviderKey || '';
   // One write carries both; the one it named is the select that failed.
   const failedOn = save.failure ? (save.variables?.chatProviderKey ? 'chat' : 'image') : null;
+  // A CHOSEN DEFAULT IS NOT SENT UNTIL THE ADMIN SAYS HOW FAR IT GOES (28.09): every purpose of that
+  // capability with it (the server re-points them in the same write), or only the default (routes set
+  // to "default" follow, the rest stay). One question at a time, under the select it belongs to; the
+  // select keeps showing the stored default until the answer.
+  const [asking, setAsking] = useState<{ capability: DefaultCapability; value: string } | null>(
+    null,
+  );
+  const answer = (applyToRoutes: boolean) => {
+    if (!asking) return;
+    const vars =
+      asking.capability === 'chat'
+        ? { chatProviderKey: asking.value, imageProviderKey: '' }
+        : { chatProviderKey: '', imageProviderKey: asking.value };
+    setAsking(null);
+    save.mutate({ ...vars, applyToRoutes });
+  };
+  const question = (capability: DefaultCapability) => {
+    if (asking?.capability !== capability) return null;
+    const n = purposes.filter((p) => p.capability === capability).length;
+    const word = capability === 'chat' ? 'chat' : 'image';
+    return (
+      <Text
+        size='micro'
+        role='group'
+        aria-label={`switch the ${word} purposes to ${labelOf(providers, asking.value)}?`}
+        data-default-confirm={capability}
+        onKeyDown={(e: React.KeyboardEvent) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            setAsking(null);
+          }
+        }}
+      >
+        switch {n === 1 ? `the ${word} purpose` : `all ${n} ${word} purposes`} to{' '}
+        {labelOf(providers, asking.value)} too? ·{' '}
+        <button type='button' onClick={() => answer(true)} className={LINE_ACTION}>
+          yes
+        </button>{' '}
+        /{' '}
+        <button type='button' onClick={() => answer(false)} className={LINE_ACTION}>
+          only the default
+        </button>{' '}
+        / {/* The safe answer holds the focus: Enter on an unread question changes nothing. */}
+        <button type='button' autoFocus onClick={() => setAsking(null)} className={LINE_ACTION}>
+          cancel
+        </button>
+      </Text>
+    );
+  };
 
   return (
     <div data-route-defaults='' className='flex flex-col gap-1'>
@@ -232,9 +289,10 @@ function DefaultsRow({ config }: { config: GetAiProvidersConfigResponse }) {
             invalid={failedOn === 'chat'}
             className='w-48'
             onValueChange={(v: string) => {
-              if (v && v !== chat) save.mutate({ chatProviderKey: v, imageProviderKey: '' });
+              if (v && v !== chat) setAsking({ capability: 'chat', value: v });
             }}
           />
+          {question('chat')}
           <WriteError text={failedOn === 'chat' ? save.failure?.text : null} id='default-chat' />
         </Labelled>
         <Labelled label='default for images'>
@@ -247,14 +305,15 @@ function DefaultsRow({ config }: { config: GetAiProvidersConfigResponse }) {
             invalid={failedOn === 'image'}
             className='w-48'
             onValueChange={(v: string) => {
-              if (v && v !== image) save.mutate({ chatProviderKey: '', imageProviderKey: v });
+              if (v && v !== image) setAsking({ capability: 'image', value: v });
             }}
           />
+          {question('image')}
           <WriteError text={failedOn === 'image' ? save.failure?.text : null} id='default-image' />
         </Labelled>
       </div>
       <Text size='micro' variant='label'>
-        a route set to “default” uses these
+        a route set to “default” uses these; choosing one asks whether the routes below follow
       </Text>
     </div>
   );

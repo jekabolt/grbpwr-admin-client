@@ -1,5 +1,6 @@
 import type { common_TechCardColorwayUsage } from 'api/proto-http/admin';
 
+import { paletteFromWire, pantoneSystemOf, type PaletteRow } from '../colourway-palette-model';
 import {
   blankDraft,
   fromRead,
@@ -68,6 +69,16 @@ export type ProposedColourway = {
   pantone: string;
   hex: string;
   slots: ProposedSlotColour[];
+  /**
+   * ПАЛИТРА ПРЕДЛОЖЕНИЯ (T45): 1…4 цвета, главный первым, — ровно то, что подтверждение шлёт в
+   * `CreateColorway development.colours`. Прогон, записанный до T45, палитры не несёт: тогда её
+   * ОДИН цвет складывается из `pantone`/`hex` выше (`proposedColourways`), чтобы колорвей и
+   * тогда родился с палитрой, а не голым семейством. Правится тем же редактором, что окно
+   * рождения, до подтверждения.
+   */
+  colours: PaletteRow[];
+  /** Переводы имени по Language.id (строкой), набранные до подтверждения; модель их не даёт. */
+  nameI18n: Record<string, string>;
 };
 
 /**
@@ -143,13 +154,30 @@ export function proposedColourways(
     let n = 2;
     while (seen.has(id)) id = `${base}:${n++}`;
     seen.add(id);
+    const pantone = normText(c.pantone);
+    const hex = normText(c.hex);
+    const wired = (c.colours ?? []).map((x) => ({
+      label: x.label ?? undefined,
+      hex: x.hex ?? undefined,
+      pantone: x.pantone ?? undefined,
+      pantoneSystem: x.pantoneSystem ?? undefined,
+    }));
+    const colours = paletteFromWire(
+      wired.length > 0
+        ? wired
+        : pantone
+          ? [{ label: '', hex, pantone, pantoneSystem: pantoneSystemOf(pantone) ?? '' }]
+          : [],
+    );
     out.push({
       id,
       name,
       colorCode: normText(c.colorCode),
-      pantone: normText(c.pantone),
-      hex: normText(c.hex),
+      pantone,
+      hex,
       slots,
+      colours,
+      nameI18n: {},
     });
   }
   return out;
@@ -257,8 +285,14 @@ export type ConfirmGateInput = {
   readOnly: boolean;
   /** Форма грязная — карточка ещё не сохранена. */
   dirty: boolean;
+  /** Имя колорвея без внешних пробелов; обязательно, когда есть палитра (T45). */
+  name: string;
+  /** Есть хотя бы один цвет палитры — тогда у колорвея своё имя (name_required_with_palette). */
+  hasPalette: boolean;
+  /** Отказ палитры словами (`paletteRefusal`); null — палитра в порядке или её нет. */
+  paletteRefusal: string | null;
+  /** Семейство словаря (T45: тег фильтра, может повторяться у колорвеев одного стиля). */
   colorCode: string;
-  usedCodes: Set<string>;
   /** Словарь несёт ХОТЬ ЧТО-ТО — включая архивное. Отличает «цветов нет» от «все сняты». */
   dictionaryHasAny: boolean;
   /** Есть цвет, который МОЖНО ВЫБРАТЬ (живой либо удержанный живым предложением). */
@@ -288,6 +322,11 @@ export type ConfirmGateInput = {
  * карточки делает CAS, — и несохранённое тело карточки после этого получило бы 409 на СВОЁМ
  * сохранении: человек нажал «confirm», а сломалось «save». Это вторая, и она хуже первой.
  *
+ * ⚠ ЗАНЯТОСТИ СЕМЕЙСТВА БОЛЬШЕ НЕТ (T45, решение владельца 4): семейство — тег фильтра, а не
+ * SKU, и два колорвея одного стиля законно сидят на одном «BLK» — различает их токен, который
+ * чеканит сервер. Прежний отказ «this colour is already on the style» снят вместе с уникальностью
+ * (миграция 0377).
+ *
  * ⚠ «СВЕРЕН СЕРВЕРОМ» — ЭТО ПРОШЕДШЕЕ ВРЕМЯ, И ДВЕ СТУПЕНИ НИЖЕ ИМЕННО ПРО НЕГО. `color_code`
  * проверен словарём В МОМЕНТ ПРОГОНА (так его и описывает `DesignColourwayProposal`), а живёт
  * предложение в сторе сколько угодно долго: цвет успевают снять в архив или удалить. Пропустить
@@ -306,10 +345,14 @@ export function confirmRefusal(i: ConfirmGateInput): string | null {
   if (!i.dictionaryHasColours)
     return 'every colour in the dictionary is archived — un-archive one under settings › colors';
   if (i.dirty) return 'the colourway binds to saved slots — the card is not saved yet';
-  if (!i.colorCode) return 'pick the dictionary colour — a colourway is a product and needs one';
-  if (!i.codeKnown) return 'that colour is gone from the dictionary — pick another';
-  if (!i.codeChoosable) return 'that colour has been archived — pick one still in the dictionary';
-  if (i.usedCodes.has(i.colorCode)) return 'this colour is already on the style';
+  // T45: колорвей с палитрой носит своё имя (сервер: name_required_with_palette) — иначе
+  // product.color молча читался бы именем семейства, и «black and white» везде звался бы «black».
+  if (i.hasPalette && !i.name)
+    return 'give it a name — a colourway with a palette carries its own name';
+  if (i.paletteRefusal) return i.paletteRefusal;
+  if (!i.colorCode) return 'pick the family — the dictionary tag the catalogue filters on';
+  if (!i.codeKnown) return 'that family is gone from the dictionary — pick another';
+  if (!i.codeChoosable) return 'that family has been archived — pick one still in the dictionary';
   if (i.cardRead === false) return 'reading the card…';
   // Два тупика, и лечатся они по-разному: слотов на сохранённой карточке нет вовсе (сохранить
   // карточку со слотами) — или слоты есть, но ни один не покрашен (выбрать цвет здесь же, в ряду).

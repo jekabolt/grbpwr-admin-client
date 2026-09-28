@@ -197,6 +197,21 @@ export const constructionDraftSchema = z.object({
             }),
           )
           .nullish(),
+        /**
+         * ПАЛИТРА ПРЕДЛОЖЕНИЯ (T45): 1…4 цвета, главный первым, — ровно `ColorwayColour`
+         * (`DesignColourwayProposal.colours`). Без `.default([])`, как и всё здесь: прогон,
+         * отвеченный до T45, ключа не несёт, и тогда цвет читается из `pantone`/`hex` выше.
+         */
+        colours: z
+          .array(
+            z.object({
+              label: wireString,
+              hex: wireString,
+              pantone: wireString,
+              pantoneSystem: wireString,
+            }),
+          )
+          .nullish(),
       }),
     )
     .nullish(),

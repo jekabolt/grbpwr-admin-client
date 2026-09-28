@@ -30,14 +30,15 @@ import { useStartDesignRun, type StartRunInput } from './use-design-run';
 import { WhatModelGetsRenderModal } from './what-model-gets';
 
 /**
- * THE FABRIC RENDER STUDIO — step 4 of the chain, THREE BLOCKS IN THE ORDER OF THE WORK:
+ * THE FABRIC RENDER STUDIO — step 4 of the chain, FOUR BLOCKS IN THE ORDER OF THE WORK:
  *
  *   FABRIC RENDER · the cloth on the flats                                          [STEP 4]
  *   ── CLOTH AND COLOUR  one grid: cloth tiles and the colour tile
  *   ── CLOTH IS ─────── weight g/m² · opaque · semi sheer · sheer, one line
  *   ── IN WORDS ─────── the free text of the recipe
  *   GENERATE · priced by the server on start · WHAT THE MODEL GETS ▸
- *   ── LATEST GENERATION  the newest render run, its tiles with the doors (O-63, `LatestGeneration`)
+ *   LATEST GENERATION ──── the newest render run, its tiles with the doors — a block of its own
+ *                         right under this one (O-63; 28.09, O-67, D-73; `LatestGeneration`)
  *   SIDES ─────────────── one row per side: what went in, what came back (`SidesSection`)
  *   GENERATION HISTORY    (the step screen's, drawn here last — `children`, O-63), folded
  *
@@ -494,15 +495,19 @@ export function RenderStudio({
             ) : null
           }
         />
-
-        {/* ═══ THE LATEST GENERATION — UNDER GENERATE, AS ON FLAT (27.09, O-63, D-62 п.1) ════════
-            Owner: «после генерации результат показывать как во флетах те с LATEST GENERATION». The
-            newest render run of any colourway, live or with pictures, its tiles carrying the doors
-            that put a render into a side; the same pin while an editor, a split or the zoom is open
-            on it, «newer run ready · show ›», «the one before». The last row of the block: what
-            GENERATE bought stands right under it, and SIDES below reads what was marked. */}
-        <LatestGeneration band={band} techCardId={techCardId} disabled={disabled} kind='render' />
       </Section>
+
+      {/* ═══ THE LATEST GENERATION — A BLOCK OF ITS OWN, RIGHT UNDER FABRIC RENDER (28.09, O-67,
+          D-73; under GENERATE since 27.09, O-63, D-62 п.1). Owner: «после генерации результат
+          показывать как во флетах те с LATEST GENERATION», then «LATEST GENERATION в флетах и фабрик
+          рендерах должна быть отдельным блоком». The newest render run of any colourway, live or
+          with pictures, its tiles carrying the doors that put a render into a side; the same pin
+          while an editor, a split or the zoom is open on it, «newer run ready · show ›», «the one
+          before». Its wrapper is the NEXT SIBLING of `#design-render-bench`: what GENERATE bought
+          stands right under it, and SIDES below reads what was marked. Still inside
+          `RenderStepScope` — its doors' host is the step's host 0, so a refusal it shares with the
+          history prints once (D-72 п.5). With no render run at all it draws nothing. */}
+      <LatestGeneration band={band} techCardId={techCardId} disabled={disabled} kind='render' />
 
       {/* ═══ SIDES — СВОЙ БЛОК, МЕЖДУ ПОСЛЕДНЕЙ ГЕНЕРАЦИЕЙ И ИСТОРИЕЙ (r2 п.29, O-63) ════════════
           Строка на сторону: слева — чертёж, который пошёл в прогон (пустой заводится прямо тут:

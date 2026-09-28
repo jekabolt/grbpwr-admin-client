@@ -255,6 +255,9 @@ export function PantonePicker({
   label = 'pick',
   name,
   suggested,
+  previewHex,
+  freeText = false,
+  fill = false,
 }: {
   value?: string;
   /** '' clears. */
@@ -269,6 +272,23 @@ export function PantonePicker({
    * the first section «from this card» while the query is empty; `label` says where each is from.
    */
   suggested?: { code: string; label: string }[];
+  /**
+   * Цвет свотча на триггере, когда `value` — не код из набора (T45: ячейка палитры «pantone
+   * или метка» — у метки «bone white» свой hex, набранный рядом). Код из набора красит свотч
+   * своим hex, как и прежде; этот — только запасной.
+   */
+  previewHex?: string;
+  /**
+   * Дверь «use “…” as a label» для набранного, которое НЕ читается как Pantone-ссылка (T45,
+   * решение владельца 6: цвет палитры — код ИЛИ свободная метка). По умолчанию выключена:
+   * в рецепте и на палитре рендера ячейка — код, и слова там живут своим полем.
+   */
+  freeText?: boolean;
+  /**
+   * Триггер занимает всю ширину своей ячейки, текст усекается. Для колонки одинаковых ячеек
+   * (ряды палитры): триггер по содержимому давал бы рваный край, и соседняя колонка hex гуляла бы.
+   */
+  fill?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -312,6 +332,8 @@ export function PantonePicker({
    * кнопке стоит «407 C», в поле уезжает «407 C».
    */
   const typedCode = normalizePantone(typed);
+  /** Набранное как МЕТКА: только с `freeText`, только когда это не ссылка. Пробелы схлопнуты. */
+  const typedLabel = freeText && typed && !typedCode ? typed.replace(/\s+/g, ' ') : '';
   const current = findPantone(value);
   /** «From this card» — только пока запрос пуст: набравший уже знает, чего ищет. */
   const showCard = !typed && fromCard.length > 0;
@@ -322,10 +344,12 @@ export function PantonePicker({
     setPage(FIRST_PAGE);
   };
 
-  const choose = (code: string) => {
+  const choose = (code: string, remember = true) => {
     const picked = code.trim();
     onPick(picked);
-    if (picked) rememberPantone(picked);
+    // Метка (`freeText`) в «recent» не пишется: это список КОДОВ, общий на всю админку, и
+    // «bone white» в нём стоял бы пунктирным квадратом среди свотчей, ничего не подсказывая.
+    if (picked && remember) rememberPantone(picked);
     reset();
     setOpen(false);
   };
@@ -376,7 +400,7 @@ export function PantonePicker({
       // The probe anchor rides on the trigger as a data attribute; Radix's prop type lists no
       // `data-*`, so it goes in through a spread rather than a literal key the checker can refuse.
       triggerProps={{
-        className: 'flex items-center',
+        className: fill ? 'flex w-full min-w-0 items-center' : 'flex items-center',
         disabled,
         ...({ 'data-pantone-picker': name } as Record<string, string>),
       }}
@@ -384,21 +408,21 @@ export function PantonePicker({
       openElement={
         <span
           className={`inline-flex min-h-[22px] items-center gap-1.5 border border-borderColor bg-bgColor px-[7px] py-[3px] text-left ${
-            disabled ? 'text-textInactiveColor' : 'hover:border-textColor'
-          }`}
+            fill ? 'w-full min-w-0' : ''
+          } ${disabled ? 'text-textInactiveColor' : 'hover:border-textColor'}`}
         >
-          {current && (
+          {(current || previewHex) && (
             <span
               aria-hidden
               className='size-3 shrink-0 border border-borderColor'
-              style={{ background: current.hex }}
+              style={{ background: current?.hex ?? previewHex }}
             />
           )}
           <Text
             component='span'
             size='micro'
             variant={value ? 'default' : 'label'}
-            className='uppercase'
+            className={fill ? 'min-w-0 flex-1 truncate uppercase' : 'uppercase'}
           >
             {value?.trim() || label}
           </Text>
@@ -430,6 +454,8 @@ export function PantonePicker({
             e.preventDefault();
             if (typedCode) choose(typedCode);
             else if (firstCode) choose(firstCode);
+            // Своих слов Enter касается последним: набравший «bone» скорее ищет «Bone White».
+            else if (typedLabel) choose(typedLabel, false);
           }}
         />
 
@@ -485,6 +511,19 @@ export function PantonePicker({
             <span aria-hidden className='size-4 shrink-0 border border-dashed border-borderColor' />
             <Text component='span' size='micro' className='uppercase'>
               use “{typedCode}” as typed
+            </Text>
+          </button>
+        )}
+        {typedLabel && (
+          <button
+            type='button'
+            data-pantone-label={name}
+            onClick={() => choose(typedLabel, false)}
+            className='flex w-full shrink-0 items-center gap-2 border border-borderColor bg-bgColor px-1.5 py-1 text-left hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+          >
+            <span aria-hidden className='size-4 shrink-0 border border-dashed border-borderColor' />
+            <Text component='span' size='micro' className='uppercase'>
+              use “{typedLabel}” as a label
             </Text>
           </button>
         )}

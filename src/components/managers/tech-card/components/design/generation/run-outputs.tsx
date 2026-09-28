@@ -45,9 +45,10 @@ import { thumbUrl } from './thumb';
 const TRACK = 148;
 
 /**
- * THE WORKBENCH'S TRACK IS THE BLOCK IT STANDS IN. It sits at the bottom of INPUT — REFERENCES,
- * whose reference grid runs on `minmax(190px, 1fr)` (`references-section.tsx`); a second grid of
- * a different width in the same block would put two columns of different size one above the other.
+ * THE WORKBENCH'S TRACK IS THE REFERENCE GRID'S. Since O-67 (D-73) the workbench is a block of its
+ * own right under INPUT — REFERENCES, of the same width and padding, and that grid runs on
+ * `minmax(190px, 1fr)` (`references-section.tsx`); a grid of a different width one gutter below
+ * would put two columns of different size one above the other.
  */
 const WORKBENCH_TRACK = 190;
 

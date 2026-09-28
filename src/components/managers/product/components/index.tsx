@@ -12,6 +12,7 @@ import { generatePath, Link, useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Section, SectionStack } from 'ui/components/section';
+import { SkuToken } from 'components/managers/tech-card/components/colourway-palette';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import { defaultData, draftProductSchema, ProductFormData, productSchema } from '../utility/schema';
@@ -24,7 +25,12 @@ import { StylePicker } from './style-picker';
 import { StyleSection } from './style-section';
 import { Tags } from './tags';
 import { Thumbnail } from './thumbnail';
-import { buildColorwayUpdateMask, buildColorwayWrite, mapProductFullToFormData } from './utils';
+import {
+  buildColorwayUpdateMask,
+  buildColorwayWrite,
+  developmentDelta,
+  mapProductFullToFormData,
+} from './utils';
 
 type Props = {
   isEditMode: boolean;
@@ -86,7 +92,8 @@ export function ProductForm({
   // translations/cost). Style facts save through <StyleSection/> (UpdateStyle) and the size chart /
   // stock / variants through <SizeMeasurements/>, each under its own optimistic lock.
   async function handleSubmit(data: ProductFormData) {
-    const common = buildColorwayWrite(data);
+    const loaded = isAddingProduct ? undefined : initialValues;
+    const common = buildColorwayWrite(data, loaded);
     try {
       if (isAddingProduct) {
         // A colourway attaches to an existing style — there is no CreateStyle RPC (a style is a tech
@@ -114,10 +121,19 @@ export function ProductForm({
         showMessage('Missing colourway id', 'error');
         return;
       }
+      // T45: a palette, once given, holds at least one colour — the server refuses an empty list
+      // under the mask, and silently keeping the stored palette would contradict the screen.
+      if (
+        (loaded?.product.development.colours.length ?? 0) > 0 &&
+        developmentDelta(data, loaded).colours.length === 0
+      ) {
+        showMessage('a palette cannot be removed — keep at least one colour', 'error');
+        return;
+      }
       await adminService.UpdateColorway({
         colorwayId,
         expectedColorwayVersion: product?.colorway?.lockVersion,
-        updateMask: buildColorwayUpdateMask(data),
+        updateMask: buildColorwayUpdateMask(data, loaded),
         ...common,
       });
       // Country of origin is entered once in Details and persisted down TWO paths: merchandising +
@@ -229,6 +245,10 @@ export function ProductForm({
               {headerTitle || 'product'}
             </Text>
             <StatusBadge status={product?.colorway?.status} />
+            {/* T45: the SKU colour token — minted by the server on create, immutable, read-only. */}
+            {!isAddingProduct && (
+              <SkuToken token={product?.colorway?.skuColorToken} data-product-token='' />
+            )}
             {!editMode && (
               <Text variant='inactive' size='small'>
                 view only

@@ -64,6 +64,11 @@ const REASON_TEXT: Record<string, string> = {
     "the structured fibre breakdown is re-derived here from the card's own fabric lines",
   wastage_claim_degraded: 'a wastage/consumption claim lost its provenance and reads as manual',
   norm_marker_lost: 'the marker stamp could not be re-sewn — the norm stands, the stamp does not',
+  // T45: перевод имени колорвея ключуется языком, которого нет в словаре языков этой базы — этот
+  // один перевод отброшен, колорвей лёг с именем и остальными переводами. Закрывается ЗДЕСЬ:
+  // завести язык, потом набрать перевод на колорвее руками (кнопка повторно созданный колорвей
+  // не навещает). Код — из `reasons.go` (ReasonLanguageUnknown).
+  language_unknown: 'that storefront language is not configured',
   style_number_taken: 'the style number already exists in the target base',
   unknown_entry: 'the archive holds a file this server does not know (newer archive)',
   archive_row_invalid: "the archive's own row is not usable — it is dropped, the rest imports",

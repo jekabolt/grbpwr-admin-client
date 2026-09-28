@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import {
+  ApplyColorwayPaletteToSlotsRequest,
   common_ColorwayDevelopmentInsert,
   common_TechCardColorwayUsage,
 } from 'api/proto-http/admin';
@@ -107,11 +108,50 @@ export function useCreateColorway(techCardId: number) {
   });
 }
 
+/**
+ * ОТКАЗ СОЗДАНИЯ — ФРАЗОЙ СЕРВЕРА (T45). Раньше 400 и 409 переписывались в «it may already exist
+ * for this colour» — и это стало ложью, как только семейство перестало быть уникальным: сервер
+ * теперь отказывает словами по делу — «exists» на дубликат токена, `name_required_with_palette`,
+ * неизвестный язык перевода (FailedPrecondition / InvalidArgument), — и его фраза уже в
+ * `e.message` (api.ts кладёт туда `message` тела google.rpc.Status). Только 409 (устаревший замок
+ * карточки) остаётся своими словами: у сервера про него «aborted», а человеку нужно «перечитай».
+ */
 export function createColorwayErrorMessage(e: unknown): string {
   const status = (e as { status?: number } | undefined)?.status;
-  if (status === 400 || status === 409)
-    return 'Could not create the colourway — it may already exist for this colour.';
-  return e instanceof Error ? e.message : 'Failed to create colourway';
+  if (status === 409) return 'the card changed since you loaded it — reload and try again';
+  return e instanceof Error && e.message ? e.message : 'failed to create the colourway';
+}
+
+// ─── ПАЛИТРА → СЛОТЫ: ЯВНАЯ ДВЕРЬ (T45, решение владельца 7) ─────────────────────────────────────
+//
+// Правка палитры (UpdateColorway development.colours) рецепт по слотам НЕ трогает никогда; цвет
+// палитры попадает в строки рецепта только этим вызовом и только для названных слотов. Сервер
+// перекрашивает строки уровня изделия названных BOM-линий (color := метка, pantone := код с книгой),
+// а слоту без такой строки заводит одну — с одним цветом, без расхода и пина. Всё остальное
+// (расход, количества, пины, штампы норм, строки деталей) стоит как стояло — поэтому эту дверь
+// можно открывать там, где полная замена UpdateColorwayRecipe потребовала бы эхо всего рецепта.
+//
+// Замок — общий tech_card.lock_version (устаревший → 409), выпущенная карточка — FailedPrecondition,
+// колорвей без палитры — FailedPrecondition; неизвестный bom_line_key, позиция вне палитры и слот,
+// названный дважды, — InvalidArgument с полем. Инвалидируем деталь карточки: строки рецепта живут в
+// colorways[].usages, и редактор пересобирает свой черновик из свежего чтения, пока не грязен.
+export function useApplyColorwayPalette(techCardId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (req: ApplyColorwayPaletteToSlotsRequest) =>
+      adminService.ApplyColorwayPaletteToSlots(req),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) }),
+        qc.invalidateQueries({ queryKey: productionRunKeys.all }),
+      ]),
+  });
+}
+
+export function applyPaletteErrorMessage(e: unknown): string {
+  const status = (e as { status?: number } | undefined)?.status;
+  if (status === 409) return 'the card changed since you loaded it — reload and apply again';
+  return e instanceof Error && e.message ? e.message : 'the palette was not applied';
 }
 
 // ─── УДАЛЕНИЕ КОЛОРВЕЯ = УДАЛЕНИЕ ПРОДУКТА ───────────────────────────────────────────────────────

@@ -136,13 +136,14 @@ function PrimView({ p }: { p: Prim }) {
   return createElement(m.tag, { ...m.attrs, style: m.style }, m.text);
 }
 
-export function PaperSvg({ doc }: { doc: PaperDoc }) {
+/** `w`/`h` — физический размер (свой размер файла); лист масштабируется целиком через viewBox. */
+export function PaperSvg({ doc, w = doc.w, h = doc.h }: { doc: PaperDoc; w?: number; h?: number }) {
   return (
     <svg
       xmlns='http://www.w3.org/2000/svg'
       className='ap-sheet'
-      width={`${doc.w}mm`}
-      height={`${doc.h}mm`}
+      width={`${w}mm`}
+      height={`${h}mm`}
       viewBox={`0 0 ${doc.w} ${doc.h}`}
       style={{ display: 'block', fontFamily: FONT, background: '#fff' }}
       role='img'

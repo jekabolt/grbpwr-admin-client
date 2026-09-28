@@ -18,6 +18,8 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
+import { ColourwayPaletteEditor, PaletteSwatches, type PaletteValue } from '../colourway-palette';
+import { nameI18nPatch, paletteRefusal, paletteToWire } from '../colourway-palette-model';
 import { PantonePicker } from '../pantone-picker';
 import {
   ensurePantoneLibrary,
@@ -115,8 +117,13 @@ function Swatch({ hex, title }: { hex?: string; title?: string }): JSX.Element {
   );
 }
 
-const cell =
-  'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none disabled:bg-bgZebra disabled:text-labelColor';
+/** Предложение → значение общего редактора палитры и обратно (одна пара, чтобы не разойтись). */
+function proposalValue(p: ProposedColourway): PaletteValue {
+  return { name: p.name, rows: p.colours, colorCode: p.colorCode, nameI18n: p.nameI18n };
+}
+function fromValue(v: PaletteValue): Partial<ProposedColourway> {
+  return { name: v.name, colours: v.rows, colorCode: v.colorCode, nameI18n: v.nameI18n };
+}
 
 /**
  * ═══ СЕТКА КОЛОРВЕЯ — ДВЕ КОЛОНКИ, ОДНИ НА ВСЕ РЯДЫ ═════════════════════════════════════════
@@ -204,6 +211,7 @@ function useConfirmColourway(techCardId: number) {
     bound: BoundSlot[],
     onCreated: (colorwayId: number) => void,
   ): Promise<ColourwayVerdict> {
+    const colours = paletteToWire(p.colours);
     const res = await create.mutateAsync({
       colorCode: p.colorCode,
       development: {
@@ -211,11 +219,13 @@ function useConfirmColourway(techCardId: number) {
         name: p.name,
         labDipStatus: undefined,
         comment: undefined,
-        pantone: p.pantone,
-        // Система названа только когда назван код: «TCX» при пустом пантоне — это утверждение о
-        // системе цвета, которого никто не делал.
-        pantoneSystem: p.pantone ? 'TCX' : undefined,
-        devHex: p.hex,
+        // С палитрой пантон, система и hex НЕ шлются: сервер зеркалит их из colours[0] сам и
+        // присланные рядом значения перекрывает зеркалом. Без палитры (прогон до T45, у которого
+        // не было ни пантона, ни метки) — прежняя пара «пантон + hex», система названа только
+        // когда назван код: «TCX» при пустом пантоне — утверждение, которого никто не делал.
+        pantone: colours.length ? undefined : p.pantone,
+        pantoneSystem: colours.length ? undefined : p.pantone ? 'TCX' : undefined,
+        devHex: colours.length ? undefined : p.hex,
         swatchMediaId: undefined,
         labDipRound: undefined,
         labDipSubmittedAt: undefined,
@@ -225,8 +235,9 @@ function useConfirmColourway(techCardId: number) {
         // Вложенный рецепт сервер отвергает прямым текстом — он пишется отдельным шагом ниже.
         usages: undefined,
         displayOrder: undefined,
-        colours: undefined,
-        nameI18n: undefined,
+        // Палитра предложения — как её показал экран (свотчи) и как её поправил человек (T45 п.6).
+        colours: colours.length ? colours : undefined,
+        nameI18n: nameI18nPatch(undefined, p.nameI18n),
       },
     });
     const colorwayId = wireInt(res?.colorwayId);
@@ -540,10 +551,6 @@ export function ColourwayProposals({
     if (!cur) return;
     patchProposal(techCardId, id, { slots: patchRow(cur.slots, card, row, patch) });
   };
-  const usedCodes = useMemo(
-    () => new Set(saved.map((c) => c.colorCode ?? '').filter(Boolean)),
-    [saved],
-  );
   /**
    * ═══ ВЫБРАННОЕ ЗНАЧЕНИЕ ОБЯЗАНО БЫТЬ СРЕДИ ПУНКТОВ — ВСЕГДА, БЕЗ ИСКЛЮЧЕНИЙ ═══════════════
    *
@@ -809,7 +816,11 @@ export function ColourwayProposals({
                       {p.name || 'unnamed'}
                     </Text>
                     <span className='flex min-w-0 items-center gap-2'>
-                      <Swatch hex={hex} title={p.pantone || p.colorCode || undefined} />
+                      {p.colours.length > 0 ? (
+                        <PaletteSwatches colours={p.colours} data-cw-created-palette='' />
+                      ) : (
+                        <Swatch hex={hex} title={p.pantone || p.colorCode || undefined} />
+                      )}
                       <Text size='micro' component='span' className='uppercase'>
                         {p.pantone || p.colorCode || '—'}
                       </Text>
@@ -844,8 +855,10 @@ export function ColourwayProposals({
               const refusal = confirmRefusal({
                 readOnly,
                 dirty,
+                name: p.name.trim(),
+                hasPalette: p.colours.length > 0,
+                paletteRefusal: paletteRefusal(p.colours),
                 colorCode: p.colorCode,
-                usedCodes,
                 // Словарь «есть» ровно тогда, когда из него есть ЧТО ВЫБРАТЬ: архивный пункт,
                 // оставленный ради видимости своего же значения, выбором не является.
                 dictionaryHasAny: colours.length > 0,
@@ -872,64 +885,15 @@ export function ColourwayProposals({
                   data-b25-cw={p.id}
                   data-drafted=''
                 >
-                  <div className='flex flex-wrap items-end gap-x-3 gap-y-2'>
-                    <label className={cn(NAME_COL, 'flex flex-col gap-0.5')}>
-                      <span className='flex items-center gap-2'>
-                        <Text size='micro' variant='label' component='span' className='uppercase'>
-                          name
-                        </Text>
-                        <DraftedPill live data-b25-drafted={p.id} />
-                      </span>
-                      <Input
-                        value={p.name}
-                        maxLength={64}
-                        disabled={readOnly}
-                        data-b25-name={p.id}
-                        onChange={(e: { target: { value: string } }) =>
-                          patchProposal(techCardId, p.id, { name: e.target.value })
-                        }
-                      />
-                    </label>
-                    <label className='flex flex-col gap-0.5'>
-                      <Text size='micro' variant='label' component='span' className='uppercase'>
-                        colour
-                      </Text>
-                      <span className='flex items-center gap-2'>
-                        <Swatch
-                          hex={colours.find((c) => c.code === p.colorCode)?.hex ?? undefined}
-                          title={p.colorCode || undefined}
-                        />
-                        <select
-                          className={cn(cell, 'w-56')}
-                          value={p.colorCode}
-                          disabled={readOnly}
-                          data-b25-code={p.id}
-                          onChange={(e) =>
-                            patchProposal(techCardId, p.id, { colorCode: e.target.value })
-                          }
-                        >
-                          <option value=''>— select colour —</option>
-                          {colours.map((c) => (
-                            <option
-                              key={c.code}
-                              value={c.code}
-                              disabled={usedCodes.has(c.code ?? '') || !!c.archived}
-                            >
-                              {c.code} · {c.name}
-                              {c.archived ? ' (archived)' : ''}
-                              {usedCodes.has(c.code ?? '') ? ' (already on this style)' : ''}
-                            </option>
-                          ))}
-                          {/* СИРОТА — СВОИМ ПУНКТОМ: без него у селекта нет пункта под своё же
-                              значение, триггер пуст, а код лежит в сторе и уезжает на сервер. */}
-                          {orphanCode && (
-                            <option value={p.colorCode} disabled>
-                              {p.colorCode} (not in the dictionary)
-                            </option>
-                          )}
-                        </select>
-                      </span>
-                    </label>
+                  {/* ═══ ШАПКА ПРЕДЛОЖЕНИЯ: пилюля черновика, палитра свотчами (T45 п.6), дверь
+                      подтверждения. Имя, ряды палитры, семейство и переводы правятся НИЖЕ общим
+                      редактором — тем же, что в окне рождения и на форме продукта, — и уезжают в
+                      `CreateColorway` ровно как показаны. */}
+                  <div className='flex flex-wrap items-center gap-x-3 gap-y-2'>
+                    <DraftedPill live data-b25-drafted={p.id} />
+                    {p.colours.length > 0 && (
+                      <PaletteSwatches colours={p.colours} size={4} data-b25-palette={p.id} />
+                    )}
                     <span className='ml-auto flex items-center gap-2'>
                       {refusal ? (
                         <InertDoor label='confirm ▸' reason={refusal} size='sm' />
@@ -976,6 +940,17 @@ export function ColourwayProposals({
                         dismiss
                       </Button>
                     </span>
+                  </div>
+                  <div className='mt-3' data-b25-editor={p.id}>
+                    <ColourwayPaletteEditor
+                      name={`proposal-${p.id}`}
+                      value={proposalValue(p)}
+                      onChange={(next) => patchProposal(techCardId, p.id, fromValue(next))}
+                      colours={colours}
+                      languages={dictionary?.languages}
+                      readOnly={readOnly}
+                      suggested={colours.find((c) => c.code === p.colorCode)}
+                    />
                   </div>
 
                   <div className={cn('mt-1', RULED)}>
