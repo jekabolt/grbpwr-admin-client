@@ -65,6 +65,8 @@ export type SheetMeta = {
    * бумаге меряет ровно столько, сколько подписано. Нет или 1 — файл размером с лист.
    */
   scale?: number;
+  /** Пресет формата (A4…A0): лист вписан в страницу этого формата — подвал называет её. */
+  paper?: string;
 };
 
 /** Контур по ключу детали; `null` целиком — силуэты выключены. */
@@ -458,7 +460,8 @@ const footLeft = (meta: SheetMeta, W: number, H: number | null) => {
   const h = H == null ? (k === 1 ? '0' : '9999.9') : String(round1(H * k));
   const size = k === 1 ? `${W} × ${h}` : `${round1(W * k)} × ${h}`;
   const pct = k === 1 ? '' : ` (${round1(k * 100)} % OF THE ${W} MM SHEET)`;
-  return `${[meta.code, meta.revision].filter(Boolean).join(' · ')} · SHEET ${size} MM${pct} · PRINT AT 100 % · BLACK ONLY`;
+  const on = meta.paper ? ` ON ${meta.paper}` : '';
+  return `${[meta.code, meta.revision].filter(Boolean).join(' · ')} · SHEET ${size} MM${pct}${on} · PRINT AT 100 % · BLACK ONLY`;
 };
 /** Ширина левой строки подвала: до правой подписи, с зазором. */
 const footWidth = (W: number, margin: number) => W - 2 * margin - textW(FOOT_RIGHT, 10) - 6;
