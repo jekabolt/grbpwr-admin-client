@@ -482,6 +482,8 @@ function buildLabDipRequest(
     labDipRejectReason: draft.labDipStatus === REJECTED ? draft.labDipRejectReason.trim() : '',
     usages: undefined, // recipe is owned by UpdateColorwayRecipe — never write it through here.
     displayOrder: undefined,
+    colours: undefined,
+    nameI18n: undefined,
   };
   return {
     colorwayId: cw.colorwayId ?? 0,

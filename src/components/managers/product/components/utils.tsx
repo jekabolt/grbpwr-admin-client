@@ -45,6 +45,7 @@ export function buildColorwayWrite(data: ProductFormData): Omit<CreateColorwayRe
     dictionaryColor: undefined, // output-only; resolved server-side from color_code
     // ISO 3166-1 alpha-2 manufacture country (the country picker yields alpha-2 codes).
     countryCode: b.countryOfOrigin,
+    skuColorToken: undefined, // output-only (T45): minted by the server on create, never sent
   };
 
   // Write-only COGS: send only when the operator entered a value, so an empty field leaves the

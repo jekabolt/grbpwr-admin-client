@@ -273,7 +273,7 @@ function ThreedOptionRows({ band, draft, onDraft, disabled }: CustomFieldProps):
 
 /** The card's 3D models, whole card: the block STEP 5 stood on (`results.view`). */
 function ThreedResults({ band, techCardId, disabled }: ResultsViewProps): JSX.Element | null {
-  return <OutputsSection band={band} techCardId={techCardId} kind='threed' disabled={disabled} />;
+  return <OutputsSection band={band} techCardId={techCardId} disabled={disabled} />;
 }
 
 /* ─────────────────────────── the run ─────────────────────────── */

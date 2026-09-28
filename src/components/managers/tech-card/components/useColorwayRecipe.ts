@@ -91,6 +91,7 @@ export function useCreateColorway(techCardId: number) {
           colorCode,
           dictionaryColor: undefined,
           countryCode: undefined,
+          skuColorToken: undefined,
         },
         development,
         thumbnailMediaId: undefined,
