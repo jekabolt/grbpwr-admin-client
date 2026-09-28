@@ -385,6 +385,13 @@ function useCareComposer(techCardId: number | undefined) {
 
 const UNAVAILABLE = new Set(['materials-unavailable', 'dictionary-unavailable']);
 
+/**
+ * Предупреждения резолвера (не блоки): состав собран, но оператору есть что проверить — деталь из
+ * другого артикула (`piece-pin-differs`, возможно контрастная вставка), сумма не 100, строка без
+ * расхода … Лента кладёт их в README; вкладка — в тост генератора и под превью, а не в «успех».
+ */
+const labelWarnings = (holes: readonly Hole[]): Hole[] => holes.filter((h) => h.level === 'warn');
+
 // A live printed-label preview, composed from the SAME react-hook-form data the checklist reads
 // (bomItems + labels), so it can never word the tag differently from the spec. Nothing here writes:
 // it recomposes on every keystroke in the BOM, the CarePicker or the origin label, which is what
@@ -406,7 +413,7 @@ function LabelPreview({ techCardId }: { techCardId?: number }) {
   // real care label) below the symbols.
   const result = compose(bomItems, labels);
   // Что мешает составу (блоки: не загрузилось, волокна нет в словаре …) — прямо под превью.
-  const shownHoles = result.holes.filter(isBlocking);
+  const shownHoles = [...result.holes.filter(isBlocking), ...labelWarnings(result.holes)];
   const composed = result.text
     .split('\n')
     .map((l) => l.trim())
@@ -596,6 +603,15 @@ export function LabelsField({
     if (block) {
       showMessage(
         `the composition is written into the “care” label, but not all of it: ${block.message}`,
+        'error',
+      );
+      return;
+    }
+    // Записано, но есть что проверить — предупреждения вместо голого «успеха».
+    const warnings = labelWarnings(holes);
+    if (warnings.length) {
+      showMessage(
+        `the composition is written into the “care” label — check ${warnings.length === 1 ? 'the warning' : `${warnings.length} warnings`}: ${warnings.map((h) => h.message).join(' · ')}`,
         'error',
       );
       return;
