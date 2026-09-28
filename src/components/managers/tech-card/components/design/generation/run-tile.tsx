@@ -34,6 +34,7 @@ import { isPictureHidden } from '../visibility';
 import { isActiveView, isLegacyView, normaliseViewKey, viewLabel } from '../views';
 import { closeSurface, openSurface } from './bench-store';
 import { compositeTail, isCutOut, readComposite, splitVerb } from './composite';
+import { DeletePictureDoor, isDerivedPicture } from './delete-picture-modal';
 import { SlotPicker } from './slot-picker';
 import { thumbUrl } from './thumb';
 
@@ -426,6 +427,15 @@ export function RunTile({
       ? undefined
       : { key: galleryKey, index: galleryIndex, mediaId: picture.media?.id ?? 0 };
 
+  /* ═══ «DELETE» — ON THE WORKBENCH, ON A DERIVED PICTURE ONLY (28.09, O-68, D-74) ═══════════════
+     A crop or an edit of one leaves the card and the storage for good; a root plate of the run has
+     no door (the server refuses it: `picture_is_root`). The history's tiles draw none of this — the
+     host gates it (`workbench`). The last door of the row, one step away from the others. */
+  const deleteDoor =
+    workbench && !disabled && pictureId > 0 && isDerivedPicture(picture) ? (
+      <DeletePictureDoor techCardId={techCardId} picture={picture} siblings={siblings} />
+    ) : null;
+
   /* ═══ A FABRIC RENDER IN A RUN ROW IS THE RENDER TILE (27.09, O-63, D-62 п.2) ═════════════════
      On FABRIC RENDER a render run's plate draws the doors RENDERS OF THIS CARD drew — `mark ▸`,
      `apply splitted`, `expand ▸`, `unmark ▸`, the states `in front` — by one set of rules
@@ -446,6 +456,7 @@ export function RunTile({
         onZoom={onZoom && pictureId ? () => onZoom(pictureId) : undefined}
         onSplit={() => onSplit(picture)}
         onEdit={openEditor}
+        trailingDoor={deleteDoor}
       >
         {editing && (
           <VectorModal
@@ -671,7 +682,19 @@ export function RunTile({
         }
       />
       {caption}
-      {footer && <div className='mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5'>{footer}</div>}
+      {/* THE DOOR ROW. With «delete» (D-74) the row is one line: the footer's door keeps the width
+          it had (`flex-1`), «delete» stands last, one step (16px) away from it — twice the gap
+          between doors — and never wraps under it. Without it, the row is what it always was. */}
+      {deleteDoor ? (
+        <div className='mt-1 flex items-center'>
+          {footer && <div className='flex min-w-0 flex-1 items-center gap-x-2'>{footer}</div>}
+          <div className={footer ? 'ml-4 shrink-0' : 'shrink-0'}>{deleteDoor}</div>
+        </div>
+      ) : (
+        footer && (
+          <div className='mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5'>{footer}</div>
+        )
+      )}
 
       {/* Редактор монтируется только раскрытым. `slot` НЕ ПЕРЕДАЁТСЯ НАРОЧНО: плитка истории — не
           слот верстака, и результат правки не обязан никуда вставать. На ВЕРСТАКЕ правка

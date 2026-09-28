@@ -924,11 +924,17 @@ export function RenderTile({
   onDeck,
   onEdit,
   onSplit,
+  trailingDoor,
 }: {
   doors: RenderDoors;
   picture: common_DesignPicture;
   /** The run the plate came out of; `id` 0 — a plate without a run (brought, «no run»). */
   run: common_DesignRun;
+  /**
+   * O-68 (D-74): the host's LAST door of the row — «delete» on the workbench's derived pictures —
+   * drawn after the tile's own door, one step away from it. The tile does not know what it is.
+   */
+  trailingDoor?: ReactNode;
   /** The raster in the frame. Empty — the frame says so in a word. */
   src: string;
   className?: string;
@@ -1496,6 +1502,9 @@ export function RenderTile({
               })()}
             </span>
           )}
+          {/* O-68 (D-74): the host's «delete», last and one step (16px) away from the tile's door —
+              the row's own gap is 2px. The tile's door keeps its width; this one never wraps. */}
+          {trailingDoor && <div className='ml-4 shrink-0'>{trailingDoor}</div>}
         </div>
       }
     />
@@ -1711,6 +1720,7 @@ export function RunRenderTile({
   onZoom,
   onSplit,
   onEdit,
+  trailingDoor,
   children,
 }: {
   host: RenderHost;
@@ -1723,6 +1733,8 @@ export function RunRenderTile({
   onZoom?: () => void;
   onSplit: () => void;
   onEdit: () => void;
+  /** O-68 (D-74): the row's «delete» on a derived picture of the workbench — the row's last door. */
+  trailingDoor?: ReactNode;
   /** The editor the run row mounts over this tile while it is open. */
   children?: ReactNode;
 }): JSX.Element {
@@ -1748,6 +1760,7 @@ export function RunRenderTile({
         onDeck={() => host.onDeck(pictureId)}
         onEdit={onEdit}
         onSplit={onSplit}
+        trailingDoor={trailingDoor}
       />
       {children}
     </div>
