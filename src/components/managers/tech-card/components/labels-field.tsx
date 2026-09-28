@@ -7,7 +7,7 @@ import { useCareVocabulary } from 'components/managers/product/components/care/u
 import { materialCompositionCode } from 'components/managers/materials/components/material-code';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { techCardLabelTypeOptions } from 'constants/filter';
-import { SECTION } from 'constants/routes';
+import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
@@ -50,6 +50,14 @@ export const emptyLabel = {
 
 // Labels carry no image, so the "thumbnail" is a typographic square badge of the label type — it
 // keeps the card scannable at a glance (which kind of label this card is).
+// The door to the care-label print screen (`/tech-cards/:id/care-labels`). It prints the SAVED card
+// in a new tab — the screen reads GetTechCard, not this form — so an unsaved card has no door at
+// all: a button that would print something other than what is on screen is worse than none
+// (the same rule as the assembly order's `print ⎙` in operations-field).
+function openCareLabels(techCardId: number) {
+  window.open(ROUTES.techCardCareLabels.replace(':id', String(techCardId)), '_blank', 'noopener');
+}
+
 const LABEL_TYPE_BADGE: Record<string, string> = {
   TECH_CARD_LABEL_TYPE_MAIN: 'main',
   TECH_CARD_LABEL_TYPE_SIZE: 'size',
@@ -64,7 +72,15 @@ const LABEL_TYPE_BADGE: Record<string, string> = {
 // One label card. A CARE label gets the care-instruction picker for its content (laundry
 // symbols); the composition text lives in its note. Other types use a free-text content. One clean
 // uniform grid — no per-row pictogram, so the fields align instead of stepping around a badge.
-function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) {
+function LabelRow({
+  index,
+  onRemove,
+  techCardId,
+}: {
+  index: number;
+  onRemove: () => void;
+  techCardId?: number;
+}) {
   const { control } = useFormContext<TechCardFormData>();
   const labelType = useWatch({ control, name: `labels.${index}.labelType` }) as string;
   const isCare = labelType === CARE;
@@ -110,7 +126,19 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
         <Text size='micro' variant='label' component='span' tracking='label' className='uppercase'>
           label {index + 1}
         </Text>
-        <span className='ml-auto'>
+        <span className='ml-auto flex items-center gap-1.5'>
+          {isCare && techCardId ? (
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              data-care-labels-door='row'
+              title='print the care labels of the SAVED card for every colourway (opens in a new tab)'
+              onClick={() => openCareLabels(techCardId)}
+            >
+              print care labels ⎙
+            </Button>
+          ) : null}
           <Button
             type='button'
             variant='secondary'
@@ -365,7 +393,14 @@ function LabelPreview() {
 // Labels / tags (Sheet «Этикетки и упаковка»). label_type is required on each. The care
 // generator builds a composition block from the BOM into the CARE label's note; the laundry
 // symbols are chosen with the CarePicker on the CARE label's content.
-export function LabelsField({ onMissingComposition }: { onMissingComposition?: () => void }) {
+export function LabelsField({
+  onMissingComposition,
+  techCardId,
+}: {
+  onMissingComposition?: () => void;
+  /** The SAVED card's id; absent on an unsaved card, which then has no print door. */
+  techCardId?: number;
+}) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'labels' });
   const { showMessage } = useSnackBarStore();
@@ -450,6 +485,18 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
           <Button type='button' variant='secondary' size='sm' onClick={generateCare}>
             generate composition / care
           </Button>
+          {techCardId ? (
+            <Button
+              type='button'
+              variant='secondary'
+              size='sm'
+              data-care-labels-door='toolbar'
+              title='print the care labels of the SAVED card for every colourway (opens in a new tab)'
+              onClick={() => openCareLabels(techCardId)}
+            >
+              print care labels ⎙
+            </Button>
+          ) : null}
           <ToolbarSpacer />
           <Button type='button' variant='main' size='sm' onClick={() => append({ ...emptyLabel })}>
             + label
@@ -468,7 +515,12 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
         ) : (
           <div className='flex flex-col gap-1.5'>
             {fields.map((f, index) => (
-              <LabelRow key={f.id} index={index} onRemove={() => remove(index)} />
+              <LabelRow
+                key={f.id}
+                index={index}
+                onRemove={() => remove(index)}
+                techCardId={techCardId}
+              />
             ))}
           </div>
         )}

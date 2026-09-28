@@ -164,6 +164,11 @@ const TechCardAssemblyPrint = lazyRoute(() =>
     default: m.TechCardAssemblyPrint,
   })),
 );
+const TechCardCareLabels = lazyRoute(() =>
+  import('components/managers/tech-card/care-labels/page').then((m) => ({
+    default: m.TechCardCareLabels,
+  })),
+);
 const OrderInvoicePrint = lazyRoute(() =>
   import('components/managers/order/invoice-page').then((m) => ({ default: m.OrderInvoicePrint })),
 );
@@ -201,9 +206,7 @@ const AiProviders = lazyRoute(() =>
 const FilesLibrary = lazyRoute(() => import('components/managers/files/page'));
 const FileTopics = lazyRoute(() => import('components/managers/files/topics/topics-page'));
 const FilesShared = lazyRoute(() => import('components/managers/files/shared/shared-page'));
-const FileProjects = lazyRoute(
-  () => import('components/managers/files/projects/projects-index'),
-);
+const FileProjects = lazyRoute(() => import('components/managers/files/projects/projects-index'));
 const FileNote = lazyRoute(() => import('components/managers/files/note/note-page'));
 
 const Tasks = lazyRoute(() =>
@@ -488,6 +491,8 @@ root.render(
                   {/* Схема сборки на одном листе (420 / 841 мм): лист сам объявляет @page,
                       поэтому тоже голый маршрут — под Layout ему нечего делать. */}
                   <Route path={ROUTES.techCardAssemblyPrint} element={<TechCardAssemblyPrint />} />
+                  {/* Составники → ZIP: превью ленты в масштабе 1:1 и настройки, без Layout. */}
+                  <Route path={ROUTES.techCardCareLabels} element={<TechCardCareLabels />} />
                   {/* Наряд на партию — бумага ПРОГОНА, не стиля: тех-пак печатает устройство
                       изделия, наряд — тираж этой партии. Отсюда отдельный печатный роут. */}
                   <Route path={ROUTES.productionRunPrint} element={<RunPackPrint />} />
