@@ -532,7 +532,7 @@ export function colourwayColumns(
  *
  * ⚠ THE ANSWER IS ABOUT ONE PICTURE — WHERE IT STANDS. A piece cut from a sheet does not stand
  * where its sheet stands, and a sheet does not stand where one of its pieces does: the «brought»
- * group of the history (`broughtRun`, `./render-tile`) asks this of each plate first and only then
+ * group of the history (`broughtGroup`, `./render-tile`) asks this of each plate first and only then
  * puts the rest into decks. Asked of a family's root instead (the first edition), a free piece of a
  * placed sheet vanished from the group, and a free sheet brought its placed piece along — drawn
  * twice, here with its ✕ and there with the doors of a free plate.

@@ -3,6 +3,7 @@ import { cn } from 'lib/utility';
 import { useMemo, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
+import { Pill } from 'ui/components/pill';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 
@@ -255,6 +256,35 @@ export function ApplySplitDoor({
   if (!pieces.length && !refusal) return null;
   if (!targets.length && !refusal) return null;
 
+  /**
+   * ═══ NOTHING TO WRITE — A STATUS, NOT A DOOR (28.09, O-63 r3, REVIEW-T64-codex-2 Minor) ═══════
+   *
+   * A target whose sides already hold exactly this split gives an EMPTY plan (`applyPlan` leaves a
+   * piece standing in its own side alone, O-63 r2, and an empty side the split does not name is
+   * not touched). Round 2 drew the live door over it — its title admitted there was nothing to
+   * write, and a press ran a loop of zero writes: a button that does nothing reads as broken.
+   * With every target exact, the cell says so the way the folded sheet does («pieces in sides»,
+   * `RenderTile`), as a status like «in front» — not a door. A target among several whose sides
+   * already hold the split is a choice that would do nothing, and the select says so on its line
+   * and lets it be read, not chosen (`disabled`, the label saying why — `SelectComponent`).
+   * `pieces` and `targets` are not empty here, so an empty plan is «done», never «nowhere».
+   */
+  const exactTargets = new Set(
+    targets.filter((t) => planFor(t.colorwayId).length === 0).map((t) => t.colorwayId),
+  );
+  const done = targets.length > 0 && exactTargets.size === targets.length;
+  if (done) {
+    return (
+      <span
+        data-apply-split-done={pieces.length}
+        title='every piece of this split already stands in its side — nothing to write'
+        className={cn('flex min-w-0', className)}
+      >
+        <Pill className='h-5 w-full justify-center leading-4'>pieces in sides</Pill>
+      </span>
+    );
+  }
+
   /* ОТКАЗ ХОЗЯИНА — дверь стоит, но мертва, и говорит почему. Ни одной записи: `run` ниже
      недостижим, потому что живой кнопки нет.
      O-57 r4 (ревью Codex r3, Medium): снова `InertDoor`, единственный орган погашенной двери
@@ -312,7 +342,11 @@ export function ApplySplitDoor({
 
   /** Начать жест целью: терять нечего — пишем; есть что — сперва вопрос, поимённо по сторонам. */
   const start = (target: number) => {
-    if (planFor(target).some((s) => s.displaces)) setAsking(target);
+    const plan = planFor(target);
+    // The sides of this target already hold exactly this split — nothing to write (O-63 r3): the
+    // single-target door is a status by now, and the select's line for such a target is disabled.
+    if (!plan.length) return;
+    if (plan.some((s) => s.displaces)) setAsking(target);
     else void run(target);
   };
 
@@ -393,10 +427,15 @@ export function ApplySplitDoor({
             )}
             items={[
               { value: APPLY_PROMPT, label: 'apply ▸' },
-              ...targets.map((t) => ({
-                value: String(t.colorwayId),
-                label: `into ${t.label}`,
-              })),
+              ...targets.map((t) =>
+                exactTargets.has(t.colorwayId)
+                  ? {
+                      value: String(t.colorwayId),
+                      label: `into ${t.label} · already there`,
+                      disabled: true,
+                    }
+                  : { value: String(t.colorwayId), label: `into ${t.label}` },
+              ),
               ...(onCreateColorway ? [{ value: APPLY_NEW_COLOURWAY, label: '+ colourway…' }] : []),
             ]}
             onValueChange={(value: string) => {

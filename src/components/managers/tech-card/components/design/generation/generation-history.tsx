@@ -4,7 +4,7 @@ import type {
   common_DesignRun,
 } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -22,8 +22,7 @@ import { useGalleryGroup } from '../picture-tile';
 import {
   RenderDoorsHost,
   RenderDoorsNotes,
-  broughtDecks,
-  broughtRun,
+  broughtGroup,
   hostPlates,
   useRenderStep,
 } from '../render/render-tile';
@@ -81,7 +80,7 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  * ONE hook over the plates this history shows (`RenderDoorsHost`), their refusal notes once at the
  * top of the block — the ones the workbench above does not print already (O-63 r2: one note per
  * reason on the step). The plates brought by hand that SIDES does not show stand here as well, as
- * one folded group after the shelf: `· N brought ▸` in the header line (`broughtRun`).
+ * one folded group after the shelf: `· N brought ▸` in the header line (`broughtGroup`).
  *
  * WHERE THE MOCK-UP'S FORM MEETS THE PRODUCT'S DATA, THE DATA WINS AND THE FORM STAYS: the tile's
  * top-left badge names the SIDE THE PLATE STANDS IN — a fact, never `ghost_view`, a guess (F-17);
@@ -511,24 +510,28 @@ export function GenerationHistory({
    */
   const renderStep = useRenderStep();
   const rendersHere = rep === 'render' && !!renderStep;
+  /**
+   * The group as it is drawn (O-63 r3, `broughtGroup`): its pseudo-run, its cards with the decks of
+   * the pieces off SIDES — climbed through the whole family, not through the group's list alone —
+   * and each card's whole split, which `apply splitted` puts into the sides (O-63 r2, D-72 п.1).
+   */
   const brought = useMemo(
-    () => (rendersHere && renderStep ? broughtRun(band, renderStep) : null),
+    () => (rendersHere && renderStep ? broughtGroup(band, renderStep) : null),
     [rendersHere, renderStep, band],
   );
-  const broughtCards = useMemo(
-    () => (brought ? outputPlan(brought.pictures ?? []).cards.length : 0),
-    [brought],
-  );
+  const broughtCards = brought?.plan.cards.length ?? 0;
   const [broughtShown, setBroughtShown] = useState(false);
   /** Nothing brought left off SIDES — the group closes with its door. */
   if (broughtShown && !brought) setBroughtShown(false);
   /**
-   * The whole split of each brought sheet (O-63 r2, D-72 п.1): the group draws a sheet with the
-   * pieces SIDES does not show, and its `apply splitted` puts the whole split into the sides.
+   * HOW EACH ROW IS DRAWN — the group's row by the group's own plan, every other by the history's
+   * (`outputPlan` over the run's pictures): the viewer row, the deck memory and the render doors
+   * read one plan per row, so none of them can disagree with the grid about a deck (H-10, E-4).
    */
-  const wholeDecks = useMemo(
-    () => (rendersHere && broughtShown ? broughtDecks(band) : undefined),
-    [rendersHere, broughtShown, band],
+  const planOf = useCallback(
+    (run: common_DesignRun) =>
+      brought && run === brought.run ? brought.plan : outputPlan(run.pictures ?? []),
+    [brought],
   );
 
   /**
@@ -647,24 +650,38 @@ export function GenerationHistory({
             (run) => (run.id ?? 0) !== benchRunId,
           ),
           // O-63: the brought group, while it is open — last, as it stands.
-          ...(broughtShown && brought ? [brought] : []),
+          ...(broughtShown && brought ? [brought.run] : []),
         ],
         openDeck,
+        planOf,
       ),
-    [runsOpen, visible, archShown, archivedRows, openDeck, benchRunId, broughtShown, brought],
+    [
+      runsOpen,
+      visible,
+      archShown,
+      archivedRows,
+      openDeck,
+      benchRunId,
+      broughtShown,
+      brought,
+      planOf,
+    ],
   );
   const galleryGroup = useGalleryGroup(gallery.items);
 
   /** ЧЕЙ КУСОК ЭТА КАРТИНКА — на всю показанную историю, без оглядки на `openDeck` (E-4). */
   const deckOf = useMemo(
     () =>
-      deckOfRuns([
-        ...[...visible, ...(archShown ? archivedRows : [])].filter(
-          (run) => (run.id ?? 0) !== benchRunId,
-        ),
-        ...(broughtShown && brought ? [brought] : []),
-      ]),
-    [visible, archShown, archivedRows, benchRunId, broughtShown, brought],
+      deckOfRuns(
+        [
+          ...[...visible, ...(archShown ? archivedRows : [])].filter(
+            (run) => (run.id ?? 0) !== benchRunId,
+          ),
+          ...(broughtShown && brought ? [brought.run] : []),
+        ],
+        planOf,
+      ),
+    [visible, archShown, archivedRows, benchRunId, broughtShown, brought, planOf],
   );
 
   /**
@@ -687,15 +704,12 @@ export function GenerationHistory({
             ...[...(runsOpen ? shown : []), ...(archShown ? archivedRows : [])].filter(
               (run) => (run.id ?? 0) !== benchRunId,
             ),
-            ...(broughtShown && brought ? [brought] : []),
+            ...(broughtShown && brought ? [brought.run] : []),
           ]
         : [],
     [rendersHere, runsOpen, shown, archShown, archivedRows, benchRunId, broughtShown, brought],
   );
-  const plates = useMemo(
-    () => hostPlates(hostRuns.map((run) => outputPlan(run.pictures ?? []))),
-    [hostRuns],
-  );
+  const plates = useMemo(() => hostPlates(hostRuns.map(planOf)), [hostRuns, planOf]);
   /** A plate's run is its row's: a piece inherits the run of its sheet, a brought plate is id 0. */
   const runOf = useMemo(() => {
     const byId = new Map(hostRuns.map((run) => [run.id ?? 0, run] as const));
@@ -827,7 +841,7 @@ export function GenerationHistory({
       disabled={disabled}
       pictures={plates.pictures}
       membersOf={plates.membersOf}
-      wholeDecks={wholeDecks}
+      wholeDecks={brought?.wholeDecks}
       openDeck={openDeck}
       /* Below the workbench on the step: a reason both show is printed above the workbench's
          tiles, and the doors here point at that note (O-63 r2, D-72 п.5). */
@@ -1180,7 +1194,8 @@ export function GenerationHistory({
             <RunOutputs
               band={band}
               techCardId={techCardId}
-              run={brought}
+              run={brought.run}
+              plan={brought.plan}
               rep='render'
               cardFit={cardFit}
               elapsed=''

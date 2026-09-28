@@ -34,7 +34,7 @@ import { serverSpeaksDesign } from '../capability';
 /* Под другим именем: у экранов студии есть свои `colorwayLabel` (подпись цели). */
 import { colorwayLabel as refLabel } from '../colorway-picker';
 import { TwoStepPicker, type PickerBranch } from '../core';
-import { cropFamilies } from '../generation/composite';
+import { cropFamilies, isCutOut } from '../generation/composite';
 import type { OutputPlan } from '../generation/run-gallery';
 import type { PictureTileProps } from '../picture-tile';
 import { useDesignWrites } from '../use-design-band';
@@ -361,7 +361,9 @@ export function useRenderDoors({
   /**
    * THE WHOLE SPLIT of a sheet whose deck this host draws only in part (O-63 r2): the «brought»
    * group leaves out the pieces SIDES shows, and `apply splitted` still puts the WHOLE split into
-   * the sides (`piecesOf`). Absent for a sheet — its deck here is its whole split.
+   * the sides (`piecesOf`). Absent for a sheet — its deck here is its whole split. Keyed by the
+   * group's CARDS (O-63 r3, `broughtGroup`): a card is not always its family's root — the root may
+   * stand on SIDES — and its whole split is every descendant of it the band carries.
    */
   wholeDecks?: ReadonlyMap<number, common_DesignPicture[]>;
   /** The host's one open deck (H-10). */
@@ -772,7 +774,7 @@ export function useRenderDoors({
   /**
    * Горизонт колорвея ОДНОЙ плитки — «у него N, доехало M»; `null` — за горизонтом ничего. Только у
    * ПРИНЕСЁННОЙ плиты (`run_id` 0): её читают из списка `outputs` карточки (группа «brought»
-   * истории, `broughtRun`), а этот список сервер режет поколорвейно. Плиты прогона приезжают со
+   * истории, `broughtGroup`), а этот список сервер режет поколорвейно. Плиты прогона приезжают со
    * своим прогоном целиком — горизонта у них нет (O-63; RENDERS OF THIS CARD и был этим списком, и
    * горизонт стоял на каждой его плитке).
    */
@@ -990,6 +992,11 @@ export function RenderTile({
    * sheet without the pieces SIDES shows, so such a sheet has no deck there — and it is not uncut:
    * `split ▸` would only hand back the same crops (the server's split is idempotent while they are
    * visible). Its row says where its pieces went instead, and no corner offers a cut.
+   * O-63 r3 · THE ANSWER IS ABOUT THE WHOLE FAMILY, NOT THIS DECK: `piecesCut` counts every piece
+   * of the sheet the band carries, wherever it stands (`wholeDecks`, `broughtGroup`), and the deck
+   * holds the ones off SIDES — climbed through the whole family, a piece cut from a piece that
+   * stands on a side included. So «no deck, pieces cut» says exactly «every piece the band carries
+   * stands on SIDES», and a sheet with one piece still free keeps its deck and its doors.
    */
   const cutAway = !deck && doors.piecesCut(pictureId) > 0;
   /**
@@ -1282,7 +1289,11 @@ export function RenderTile({
                 aria-expanded={false}
                 data-deck-expand={picture.id || undefined}
                 onClick={onDeck}
-                title={`${members.length}${members.length === 1 ? ' piece was' : ' pieces were'} cut from this sheet — open them as cards in this row`}
+                title={
+                  doors.piecesCut(pictureId) > members.length
+                    ? `${members.length} of the ${doors.piecesCut(pictureId)} pieces cut from this sheet ${members.length === 1 ? 'stands' : 'stand'} here, the rest in sides — open ${members.length === 1 ? 'it as a card' : 'them as cards'} in this row`
+                    : `${members.length}${members.length === 1 ? ' piece was' : ' pieces were'} cut from this sheet — open them as cards in this row`
+                }
               >
                 expand ▸
               </Button>
@@ -1619,7 +1630,7 @@ type RenderDoorsHostProps = {
   /** `hostPlates` of the rows it draws. */
   pictures: readonly common_DesignPicture[];
   membersOf: ReadonlyMap<number, common_DesignPicture[]>;
-  /** The whole split of a sheet the host draws only in part — the «brought» group (`broughtDecks`). */
+  /** The whole split of a sheet the host draws only in part — the «brought» group (`broughtGroup`). */
   wholeDecks?: ReadonlyMap<number, common_DesignPicture[]>;
   openDeck: number | null;
   /**
@@ -1757,25 +1768,66 @@ export function RunRenderTile({
  * ═══ PICTURE BY PICTURE, THEN DECKS (27.09, O-63 r2, D-72 п.1) ════════════════════════════════════
  * Whether a plate stands on SIDES is asked of THAT plate (`picturesOnSides` — a side of a drawn
  * column, or the legacy shelf, which is drawn for every colourway), and only the plates that do not
- * are grouped into decks — by `RunOutputs`, within this run's list, so a piece whose sheet stands on
- * SIDES is a card of its own here, and a sheet whose piece stands there keeps the rest behind it.
- * The first edition asked the family's root and let the answer ride down the family: a free piece
- * of a placed sheet was nowhere, and a placed piece of a free sheet was drawn twice.
+ * are grouped into decks, so a piece whose sheet stands on SIDES is a card of its own here, and a
+ * sheet whose piece stands there keeps the rest behind it. The first edition asked the family's
+ * root and let the answer ride down the family: a free piece of a placed sheet was nowhere, and a
+ * placed piece of a free sheet was drawn twice.
  *
- * ═══ A PLATE HELD AWAY IS HERE EVEN WHEN THE LIST LEFT IT OUT (O-63 r2, D-72 п.2) ═════════════════
- * The card's outputs list drops a hidden plate (and ships only the newest of a colourway —
- * `outputsHorizon`), and a plate standing in a slot of a column SIDES does not draw has no door but
- * `unmark ▸` on its own tile. So the group also takes, from the bench itself, every brought plate
- * held in an active side of such a column: its slot is never stranded.
+ * ═══ THE FAMILY IS CLIMBED THROUGH EVERY BROUGHT PLATE THE BAND CARRIES (28.09, O-63 r3) ══════════
+ * Round 2 left the decks to `outputPlan` over the group's own list — an ancestry climbed INSIDE
+ * that list. A family cut twice over (sheet → piece A → piece B, the shape of beta's run 7) broke
+ * there the moment A stood on a side: B's parent was not in the list, so B stood as a card of its
+ * own, the sheet had no deck, and «pieces in sides» was said of a sheet whose piece B stood right
+ * beside it, its `expand ▸` and `apply splitted` gone (REVIEW-T64-codex-2, Moderate). Now the
+ * ancestry is climbed through the POOL — every brought plate the band carries anywhere: the card's
+ * list, and the bench rows holding one (a plate on SIDES, a plate held away, a hidden plate the
+ * list dropped) — while whether a plate is IN the group stays decided plate by plate. A plate of
+ * the group hangs behind the TOPMOST plate of the group in its ancestry (one deck per family, as
+ * `cropFamilies` keys by the root: a deck inside a deck would fold with its sheet, H-10), and
+ * stands as a card when no ancestor of it is in the group. A card's WHOLE split — what
+ * `apply splitted` puts into the sides, what «pieces in sides» counts — is every descendant of it
+ * the pool carries, wherever each of them stands.
+ *
+ * Every plate of the pool is either on SIDES or in the group (the list drops hidden plates, and a
+ * bench row's plate is on a drawn side, held away, or on the legacy shelf), so a card whose deck is
+ * empty while its whole split is not has EVERY piece the band carries on SIDES — that, and nothing
+ * else, is `cutAway` (`RenderTile`). A piece the band does not carry at all (hidden and held
+ * nowhere, or beyond the list's horizon) cannot be climbed through: its children stand as cards of
+ * their own, the truthful answer for a screen that cannot see the link.
  *
  * `null` — nothing brought stands off SIDES, or this server lists no outputs and no such plate is
  * held away (the page walk of an older binary reaches runs only). The run is the stamp of the first
  * brought row, id 0: «no run».
  */
-export function broughtRun(band: GetDesignBandResponse, step: RenderStep): common_DesignRun | null {
+export type BroughtGroup = {
+  /** The group's pseudo-run — id 0, «no run»; its `pictures` are the plates the group draws. */
+  run: common_DesignRun;
+  /** The cards and their decks, as the group draws them (`RunOutputs plan`). */
+  plan: OutputPlan;
+  /** Each card's whole split — every piece of it the band carries, wherever it stands. */
+  wholeDecks: Map<number, common_DesignPicture[]>;
+};
+
+export function broughtGroup(band: GetDesignBandResponse, step: RenderStep): BroughtGroup | null {
   const axis = colourwayColumns(band, step.colorways ?? NO_COLOURWAYS, step.cardColorways);
   const onSides = picturesOnSides(band, axis);
   const rows = outputsOfKind(band, 'render').filter(({ run }) => (run.id ?? 0) <= 0);
+  /* THE POOL — every brought plate the band carries: the card's list, then the bench's. */
+  const pool: common_DesignPicture[] = [];
+  const pooled = new Map<number, common_DesignPicture>();
+  const pour = (picture: common_DesignPicture) => {
+    const id = picture.id ?? 0;
+    if (id <= 0 || pooled.has(id)) return;
+    pooled.set(id, picture);
+    pool.push(picture);
+  };
+  for (const { picture } of rows) pour(picture);
+  for (const row of band.bench ?? []) {
+    if (benchKindOf(row) !== 'render') continue;
+    const plate = row.picture;
+    if (plate && (plate.runId ?? 0) <= 0) pour(plate);
+  }
+  /* WHO IS IN THE GROUP — plate by plate (r2). */
   const pictures: common_DesignPicture[] = [];
   const taken = new Set<number>();
   const take = (picture: common_DesignPicture) => {
@@ -1796,18 +1848,56 @@ export function broughtRun(band: GetDesignBandResponse, step: RenderStep): commo
     take(plate);
   }
   if (!pictures.length) return null;
-  return { ...(rows[0]?.run ?? RUN_NOT_STATED), id: 0, kind: 'render', pictures };
-}
-
-/**
- * THE WHOLE SPLIT OF EVERY BROUGHT SHEET — its pieces wherever each of them stands (O-63 r2, D-72
- * п.1). The group draws a sheet with the pieces SIDES does not show; `apply splitted` on it puts
- * the whole split into the sides, the pieces already standing there included (`piecesOf`,
- * `useRenderDoors`). Keyed by the sheet's id; every brought plate the card's list carries.
- */
-export function broughtDecks(band: GetDesignBandResponse): Map<number, common_DesignPicture[]> {
-  const plates = outputsOfKind(band, 'render')
-    .filter(({ run }) => (run.id ?? 0) <= 0)
-    .map(({ picture }) => picture);
-  return cropFamilies(plates).membersOf;
+  /* THE ANCESTRY OF EACH POOL PLATE — its cut ancestors, nearest first, climbed through the pool
+     (the walk of `cropFamilies`: a cut climbs to its parent, an edit ends the line, `isCutOut`). */
+  const ancestorsOf = (picture: common_DesignPicture): number[] => {
+    const line: number[] = [];
+    const seen = new Set<number>([picture.id ?? 0]);
+    let node = picture;
+    while (isCutOut(node)) {
+      const parentId = node.derivedFrom ?? 0;
+      if (parentId <= 0 || seen.has(parentId)) break;
+      const parent = pooled.get(parentId);
+      if (!parent) break;
+      seen.add(parentId);
+      line.push(parentId);
+      node = parent;
+    }
+    return line;
+  };
+  const ancestry = new Map<number, number[]>();
+  for (const plate of pool) ancestry.set(plate.id ?? 0, ancestorsOf(plate));
+  /* THE CARD A PLATE OF THE GROUP STANDS ON — the topmost plate of the group in its ancestry, or
+     itself. */
+  const cardOf = (id: number): number => {
+    let card = id;
+    for (const ancestorId of ancestry.get(id) ?? []) if (taken.has(ancestorId)) card = ancestorId;
+    return card;
+  };
+  const membersOf = new Map<number, common_DesignPicture[]>();
+  const deckOf = new Map<number, number>();
+  for (const picture of pictures) {
+    const id = picture.id ?? 0;
+    const card = cardOf(id);
+    if (card === id) continue;
+    deckOf.set(id, card);
+    const members = membersOf.get(card);
+    if (members) members.push(picture);
+    else membersOf.set(card, [picture]);
+  }
+  const cards = pictures
+    .filter((picture) => !deckOf.has(picture.id ?? 0))
+    .map((picture) => ({ picture, members: membersOf.get(picture.id ?? 0) ?? [] }));
+  /* THE WHOLE SPLIT OF EACH CARD — every pool plate with the card in its ancestry, in pool order. */
+  const wholeDecks = new Map<number, common_DesignPicture[]>();
+  for (const { picture } of cards) {
+    const cardId = picture.id ?? 0;
+    const whole = pool.filter((plate) => (ancestry.get(plate.id ?? 0) ?? []).includes(cardId));
+    if (whole.length) wholeDecks.set(cardId, whole);
+  }
+  return {
+    run: { ...(rows[0]?.run ?? RUN_NOT_STATED), id: 0, kind: 'render', pictures },
+    plan: { cards, deckOf },
+    wholeDecks,
+  };
 }
