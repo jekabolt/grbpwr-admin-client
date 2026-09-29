@@ -11,7 +11,6 @@ import Input from 'ui/components/input';
 import { Section } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
-import { foldedInto } from '../utils/format';
 import { useSetAiDefaults, useSetAiRoute } from '../utils/hooks';
 import { WriteError } from './write-error';
 
@@ -53,13 +52,8 @@ const signature = (c: AiRouteCandidate | null | undefined) =>
 const serves = (p: AiProviderInfo, capability: string) =>
   (p.capabilities ?? []).includes(capability);
 
-// A provider folded into its carrier (utils/format foldedInto: recraft via openrouter) is named
-// after the carrier here — "openrouter · recraft" — since that is who is called and paid.
-const displayLabel = (p: AiProviderInfo) => {
-  const own = p.label || p.key || '';
-  const via = foldedInto(p);
-  return via ? `${via} · ${own.toLowerCase()}` : own;
-};
+// The provider's own label — since commit H no provider is reached through another one.
+const displayLabel = (p: AiProviderInfo) => p.label || p.key || '';
 
 const labelOf = (providers: AiProviderInfo[], key: string) => {
   const p = providers.find((x) => x.key === key);

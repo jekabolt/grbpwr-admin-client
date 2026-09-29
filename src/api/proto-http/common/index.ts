@@ -4562,9 +4562,10 @@ export type TechCardListItem = {
 export type DesignRun = {
   id: number | undefined;
   techCardId: number | undefined;
-  // Which state of the studio produced this row: flat | render | threed | vector | draft_idea |
-  // recolor | pattern | freeform | cutout | extend | inpaint | video. Written by the client at
-  // start; immutable afterwards.
+  // Which state of the studio produced this row: flat | render | threed | draft_idea | recolor |
+  // pattern | freeform | cutout | extend | inpaint | video. Written by the client at start;
+  // immutable afterwards. Rows written before 2026-09-29 may also say `vector` (vector generation,
+  // removed with the Recraft integration): they are read as stored, no new one can be started.
   // `recolor` IS THE ON MODEL SECTION'S OWN VERB (K-17). The owner's ask — «мы можем загрузить фото
   // реальное на модели с разных сторон и нам можно будет поменять цвет вещи» — and the owner's own
   // decision on how: the colour is changed BY GENERATION, not by a filter, so the weave, the folds
@@ -4576,13 +4577,8 @@ export type DesignRun = {
   // gpt image 2 сделать из неё повторяемый паттерн». Exactly one input (see
   // extra_input_media_ids), exactly one output, and the output is a picture of kind `pattern` —
   // neither a flat nor a render, because a tile is not a state of the garment.
-  // `vector` IS A MEMBER OF THIS VOCABULARY AND NOT AN RPC OF ITS OWN. Machine vectorisation is a
-  // paid provider call exactly like a flat or a render, so it walks through StartDesignRun — the
-  // ONE door the money goes through. A verb of its own would be a second budget check, a second
-  // reservation and a second place to forget the ledger, for no gain: the thing being asked for is
-  // still «spend the key's money and give me a picture back».
-  // ImportDesignVector is NOT that verb and does not belong to this list: it files an SVG that
-  // already exists and spends nothing.
+  // ImportDesignVector is NOT a run and does not belong to this list: it files an SVG that already
+  // exists and spends nothing.
   // `extend` EXTENDS ONE PICTURE INTO A NEW PROPORTION on fal's outpaint route (params.extend + one
   // params.extra_input_media_ids). `inpaint` REPAINTS ONE PAINTED ZONE of a picture on fal's fill
   // route (params.inpaint + ask). Both are playground kinds: one output, colourway 0, section 1 of
@@ -4720,7 +4716,7 @@ export type DesignRunParams = {
   // history column «input = slots (back)».
   // SILHOUETTE SIDES ONLY: front | back | side_l | side_r | three_quarter_l | three_quarter_r. On a
   // 3D run only the four cardinal sides (front, back, side_l, side_r) may be named — a three-quarter
-  // plate is neither a Meshy view nor a fal slot, and a run narrowed to one would be silently built
+  // plate is neither a view of the meshy family on fal nor a fal slot, and a run narrowed to one would be silently built
   // from fewer sides than were picked. A detail slot is deliberately NOT
   // targetable, because a bare view key cannot name one of several details and this field is frozen
   // into the run's history — an ambiguous target here could never be repaired afterwards. If fixing
@@ -4797,7 +4793,7 @@ export type DesignRunParams = {
   // taken off whatever cloth wore it before) — unless the run is made for a slot
   // (DesignPatternParams.bom_item_id > 0), in which case the tile becomes the fabric of the
   // (colourway, slot) pair only (DesignAssetBinding) and DesignAsset.colorway_id is left alone.
-  // REFUSED on flat / vector / draft_idea with `colorway_forbidden`: a flat is ONE markup for the
+  // REFUSED on flat / draft_idea with `colorway_forbidden`: a flat is ONE markup for the
   // whole card and has no colourway BY NATURE — not «not filled in yet». 0 = no colourway stated,
   // which on a render keeps the legacy meaning (an unattributed render, exactly what every render
   // made before this axis existed is) and on a 3D run selects ONLY the unattributed render bench —
@@ -4838,7 +4834,7 @@ export type DesignRunParams = {
   // never in extra_input_media_ids (one list per fact — a run naming a picture in both is refused).
   freeform: DesignFreeformParams | undefined;
   // THE PER-RUN ENGINE of every OpenRouter image kind: flat | render | recolor | pattern | freeform.
-  // Refused on threed | cutout | vector | extend | inpaint, whose routes are not OpenRouter images
+  // Refused on threed | cutout | extend | inpaint, whose routes are not OpenRouter images
   // (`image_options_forbidden`). Absent or empty = the deployment's dial, exactly as before the
   // field existed — which is what keeps every frozen run and every old client meaning what it meant.
   // Offered only where GetDesignBandResponse.image_models is present; a client must not send it to a
