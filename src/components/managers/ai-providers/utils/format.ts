@@ -134,16 +134,6 @@ export function sumUsd(list: (googletype_Decimal | null | undefined)[]): number 
   return known ? micros / 1_000_000 : null;
 }
 
-// The server's note for a provider whose calls go THROUGH another provider (recraft's vector calls
-// via openrouter, under openrouter's key and switch). Such a provider is folded into the one it
-// rides: no line of its own in the providers block, and named after its carrier in a route.
-const VIA_OPENROUTER = 'via openrouter';
-
-// foldedInto — the key of the provider p is reached through; null when p stands on its own.
-export function foldedInto(p: AiProviderInfo): string | null {
-  return p.note === VIA_OPENROUTER ? 'openrouter' : null;
-}
-
 // dayWord — how a provider's cost API counts its days (ai_provider_cost_daily.bucket_tz): "utc days"
 // for a UTC bucket, "local days" for one already in the org's zone (openrouter since B-30, diffed at
 // local midnight), null when there is no "their" number yet.

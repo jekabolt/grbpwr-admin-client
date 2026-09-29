@@ -12,14 +12,7 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { ToggleSwitch } from 'ui/components/toggle-switch';
-import {
-  adminKeyLine,
-  faultLabel,
-  foldedInto,
-  keyLine,
-  probeLine,
-  type KeyLine,
-} from '../utils/format';
+import { adminKeyLine, faultLabel, keyLine, probeLine, type KeyLine } from '../utils/format';
 import { WriteError } from './write-error';
 import {
   aiWriteFailure,
@@ -40,10 +33,9 @@ export function ProvidersView({
   loading: boolean;
 }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
-  // A provider that is reached THROUGH another one (the server's note: recraft's vector calls go
-  // via openrouter, under openrouter's key and switch) is not a line of its own here — the owner
-  // reads one openrouter, not two (28.09). Its row would hold a key and a switch nothing reads.
-  const providers = (config?.providers ?? []).filter((p) => !foldedInto(p));
+  // Every provider the server lists is a line: since commit H (29.09) none rides another one
+  // (recraft and meshy are gone — Recraft's models are OpenRouter's, Meshy's are fal's).
+  const providers = config?.providers ?? [];
   // Without the master key the server refuses to store a key; the fields say so by being off.
   const keysLocked = config?.masterKeyPresent === false;
 
