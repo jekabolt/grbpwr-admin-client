@@ -15032,8 +15032,8 @@ export type GetDesignBandResponse = {
   // THE CARD'S GENERATIVE OUTPUTS, WHOLE-CARD — every render, 3D frame, pattern tile and recolour
   // this card holds, NOT just the ones whose run happens to sit on the page above.
   // WHY IT EXISTS. `runs` is one page of the feed (12 rows), and the screen's «RENDERS OF THIS
-  // CARD» section was reading exactly that page. Every run of any kind — a flat re-trace, a vector
-  // redraw, a 3D try — pushes an older run off the window, so renders left the section one at a
+  // CARD» section was reading exactly that page. Every run of any kind — a flat re-trace, a
+  // recolour, a 3D try — pushes an older run off the window, so renders left the section one at a
   // time and the crops split off them left with their parent run. The section's title claims the
   // CARD; the answer had the scope of a page.
   // HOW MUCH OF IT COMES BACK, AND WHY THAT IS NOT A MONEY QUESTION. An earlier draft of this
@@ -15683,9 +15683,10 @@ export type common_DesignColourSwatch = {
 export type common_DesignRun = {
   id: number | undefined;
   techCardId: number | undefined;
-  // Which state of the studio produced this row: flat | render | threed | vector | draft_idea |
-  // recolor | pattern | freeform | cutout | extend | inpaint | video. Written by the client at
-  // start; immutable afterwards.
+  // Which state of the studio produced this row: flat | render | threed | draft_idea | recolor |
+  // pattern | freeform | cutout | extend | inpaint | video. Written by the client at start;
+  // immutable afterwards. Rows written before 2026-09-29 may also say `vector` (vector generation,
+  // removed with the Recraft integration): they are read as stored, no new one can be started.
   // `recolor` IS THE ON MODEL SECTION'S OWN VERB (K-17). The owner's ask — «мы можем загрузить фото
   // реальное на модели с разных сторон и нам можно будет поменять цвет вещи» — and the owner's own
   // decision on how: the colour is changed BY GENERATION, not by a filter, so the weave, the folds
@@ -15697,13 +15698,8 @@ export type common_DesignRun = {
   // gpt image 2 сделать из неё повторяемый паттерн». Exactly one input (see
   // extra_input_media_ids), exactly one output, and the output is a picture of kind `pattern` —
   // neither a flat nor a render, because a tile is not a state of the garment.
-  // `vector` IS A MEMBER OF THIS VOCABULARY AND NOT AN RPC OF ITS OWN. Machine vectorisation is a
-  // paid provider call exactly like a flat or a render, so it walks through StartDesignRun — the
-  // ONE door the money goes through. A verb of its own would be a second budget check, a second
-  // reservation and a second place to forget the ledger, for no gain: the thing being asked for is
-  // still «spend the key's money and give me a picture back».
-  // ImportDesignVector is NOT that verb and does not belong to this list: it files an SVG that
-  // already exists and spends nothing.
+  // ImportDesignVector is NOT a run and does not belong to this list: it files an SVG that already
+  // exists and spends nothing.
   // `extend` EXTENDS ONE PICTURE INTO A NEW PROPORTION on fal's outpaint route (params.extend + one
   // params.extra_input_media_ids). `inpaint` REPAINTS ONE PAINTED ZONE of a picture on fal's fill
   // route (params.inpaint + ask). Both are playground kinds: one output, colourway 0, section 1 of
@@ -15841,7 +15837,7 @@ export type common_DesignRunParams = {
   // history column «input = slots (back)».
   // SILHOUETTE SIDES ONLY: front | back | side_l | side_r | three_quarter_l | three_quarter_r. On a
   // 3D run only the four cardinal sides (front, back, side_l, side_r) may be named — a three-quarter
-  // plate is neither a Meshy view nor a fal slot, and a run narrowed to one would be silently built
+  // plate is neither a view of the meshy family on fal nor a fal slot, and a run narrowed to one would be silently built
   // from fewer sides than were picked. A detail slot is deliberately NOT
   // targetable, because a bare view key cannot name one of several details and this field is frozen
   // into the run's history — an ambiguous target here could never be repaired afterwards. If fixing
@@ -15918,7 +15914,7 @@ export type common_DesignRunParams = {
   // taken off whatever cloth wore it before) — unless the run is made for a slot
   // (DesignPatternParams.bom_item_id > 0), in which case the tile becomes the fabric of the
   // (colourway, slot) pair only (DesignAssetBinding) and DesignAsset.colorway_id is left alone.
-  // REFUSED on flat / vector / draft_idea with `colorway_forbidden`: a flat is ONE markup for the
+  // REFUSED on flat / draft_idea with `colorway_forbidden`: a flat is ONE markup for the
   // whole card and has no colourway BY NATURE — not «not filled in yet». 0 = no colourway stated,
   // which on a render keeps the legacy meaning (an unattributed render, exactly what every render
   // made before this axis existed is) and on a 3D run selects ONLY the unattributed render bench —
@@ -15959,7 +15955,7 @@ export type common_DesignRunParams = {
   // never in extra_input_media_ids (one list per fact — a run naming a picture in both is refused).
   freeform: common_DesignFreeformParams | undefined;
   // THE PER-RUN ENGINE of every OpenRouter image kind: flat | render | recolor | pattern | freeform.
-  // Refused on threed | cutout | vector | extend | inpaint, whose routes are not OpenRouter images
+  // Refused on threed | cutout | extend | inpaint, whose routes are not OpenRouter images
   // (`image_options_forbidden`). Absent or empty = the deployment's dial, exactly as before the
   // field existed — which is what keeps every frozen run and every old client meaning what it meant.
   // Offered only where GetDesignBandResponse.image_models is present; a client must not send it to a
@@ -16671,14 +16667,12 @@ export type StartDesignRunRequest = {
   // Client-minted UUID. A repeat returns the existing run with OK — a double click on GENERATE is
   // one payment.
   clientRequestId: string | undefined;
-  // flat | render | threed | vector | recolor | pattern | freeform | cutout | extend | inpaint |
-  // video. `draft_idea` is REFUSED here with
+  // flat | render | threed | recolor | pattern | freeform | cutout | extend | inpaint | video.
+  // `vector` (vector generation, removed 2026-09-29) is refused as an unknown kind. `draft_idea` is
+  // REFUSED here with
   // InvalidArgument: a text run executes inline and returns its answer, so it has its own verb
   // (DraftDesignIdea) rather than a shared one that would return a pending row nobody ever polls.
-  // `vector` IS ACCEPTED HERE and has no verb of its own on purpose: machine vectorisation spends
-  // the key's money like every other kind, and money has exactly one door. Filing an SVG that
-  // already exists is the other thing entirely and is ImportDesignVector.
-  // `recolor` AND `pattern` ARE HERE FOR THE SAME REASON and take the same door: both spend the
+  // `recolor` AND `pattern` ARE HERE and take the same door as every generation: both spend the
   // image key's money, both must be counted against the day, and both must show up in one history.
   // What each needs is stated on common.DesignRun.kind and on DesignRunParams; what each REFUSES
   // for free, before anything is reserved, is:
@@ -16764,7 +16758,7 @@ export type StartDesignRunRequest = {
   // · params.image — a slug the engine table does not hold («unknown_image_model»), a tier, ratio
   // or background the chosen engine does not list («quality_not_supported»,
   // «aspect_not_supported», «background_not_supported»), or any params.image on threed | cutout
-  // | vector | extend | inpaint | video («image_options_forbidden»);
+  // | extend | inpaint | video («image_options_forbidden»);
   // · threed — more than 4 params.threed.reference_media_ids («too_many_pictures»);
   // · video (B-32) — no params.video.source_media_id («one_source_picture»); no words
   // («words_required»); words past 2500 characters (InvalidArgument); a duration other than 5
@@ -17524,7 +17518,7 @@ export type AiRouteCandidate = {
   // The slug this candidate is CALLED with today. For a chat purpose: `model` when named, else the
   // router's default for (purpose, provider) — OpenRouter: the purpose's env slug; a direct provider:
   // its priced default; "" = not callable (the purpose is switched off, or the provider has no
-  // default). For an image / 3D / vector purpose the router holds no default: it is the row's own
+  // default). For an image / 3D / video purpose the router holds no default: it is the row's own
   // `model`, and "" is the provider client's own default slug. The panel compares candidates by THIS,
   // as the server does — and by `model` where this is "", as the server's same-as-primary check does.
   // Set on a read (AiPurposeInfo); ignored on a write (SetAiRouteRequest).
@@ -17547,7 +17541,7 @@ export type AiProviderInfo = {
   key: string | undefined;
   label: string | undefined;
   enabled: boolean | undefined;
-  // What a route may ask of it: chat | image | cutout | edit | threed | vector | video.
+  // What a route may ask of it: chat | image | cutout | edit | threed | video.
   capabilities: string[] | undefined;
   // none | env | db | unreadable. unreadable = a stored key that does not open with the master key;
   // the env key, if any, answers meanwhile.
@@ -17562,8 +17556,8 @@ export type AiProviderInfo = {
   // The provider badge from the last 24 h of ledger rows: key_rejected | out_of_credits |
   // model_unknown | "" (none).
   faultCode: string | undefined;
-  // One short sentence or "": "via openrouter" (recraft on the OpenRouter route), "design generation
-  // is off on this server" (image/3D providers when DESIGN_GENERATION_ENABLED is false).
+  // One short sentence or "": "design generation is off on this server" (image/3D providers when
+  // DESIGN_GENERATION_ENABLED is false).
   note: string | undefined;
   models: AiModelInfo[] | undefined;
 };
@@ -17727,8 +17721,8 @@ export interface AdminService {
   // pedantry: the object is served from our own public host, where an SVG is a DOCUMENT —
   // <script>, on* handlers, javascript: urls, <foreignObject> and declared XML entities run or
   // expand in the viewer's browser. The storage path (bucket.UploadContentNonRaster →
-  // recraft.InspectSVG) refuses active content, declared entities, not-XML, and a raster wearing a
-  // vector's name; the ceiling is recraft.MaxSVGBytes (8 MiB). A refusal is InvalidArgument, and
+  // svgcheck.InspectSVG) refuses active content, declared entities, not-XML, and a raster wearing a
+  // vector's name; the ceiling is svgcheck.MaxSVGBytes (8 MiB). A refusal is InvalidArgument, and
   // it has a named price: an SVG wrapping text in <foreignObject>, or an old export carrying
   // benign DTD entities, will not upload through this door.
   // THERE IS DELIBERATELY NO «list this card's vectors» VERB NEXT TO THIS ONE. Re-entry («при
@@ -19143,9 +19137,8 @@ export interface AdminService {
   // FlattenDesignEditLayer already draws, and for the same reason: there is no SVG parser and no
   // vector renderer anywhere in this repository, so the only honest producer of strokes is the
   // canvas that is about to draw them.
-  // IT SPENDS NOTHING, AND THAT IS THE LINE BETWEEN IT AND GENERATION. Vectorising by machine is a
-  // paid provider call and goes through StartDesignRun with kind = vector; this verb only files a
-  // file that already exists. Two doors for the money would be two budget checks.
+  // IT SPENDS NOTHING: there is no machine vectorising (vector generation was removed on
+  // 2026-09-29); this verb only files a file that already exists.
   // Idempotent by client_request_id. InvalidArgument: an unknown or foreign media_id, an unknown
   // origin, strokes_too_large (> 512 KB).
   ImportDesignVector(request: ImportDesignVectorRequest): Promise<ImportDesignVectorResponse>;
