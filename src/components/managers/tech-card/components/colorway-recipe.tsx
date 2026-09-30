@@ -106,6 +106,7 @@ import {
   useApplyColorwayPalette,
   useUpdateColorwayRecipe,
 } from './useColorwayRecipe';
+import { readColorwayVersion } from './colorway-version';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 
 // Пересчёт dxf-нормы по текущим данным (Ф2) — lazy() ровно потому же, почему dxf-apply.tsx лениво
@@ -286,21 +287,8 @@ function frontRenderUrl(sides?: readonly BenchSide[]): string | undefined {
   return front ? pictureUrl(front) || undefined : undefined;
 }
 
-// THE OPTIMISTIC LOCK, READ AT COMMIT TIME — never at render time. Both colourway writes echo the
-// ref's lockVersion, which IS the shared tech_card.lock_version. Under one staged save the card body
-// commits first (COMMIT_ORDER 0) and bumps that version, and so does every colourway write queued
-// ahead of this one. A version captured when this panel rendered is therefore already stale by the
-// time the header reaches it, and the save would 409 against its own card body. So re-read it
-// immediately before each write — the same move the size chart makes with GetStyleSizeChart.
-async function readColorwayVersion(
-  techCardId: number,
-  colorwayId: number,
-  fallback: number,
-): Promise<number> {
-  const res = await adminService.GetTechCard({ id: techCardId, vatCountryCode: undefined });
-  const ref = res.techCard?.colorways?.find((c) => c.colorwayId === colorwayId);
-  return ref?.lockVersion ?? res.techCard?.lockVersion ?? fallback;
-}
+// THE OPTIMISTIC LOCK, READ AT COMMIT TIME — `readColorwayVersion` lives in colorway-version.ts
+// (the composition label's made-in row stages the same kind of colourway write).
 
 // How many recipe rows this draft actually changes against what the server returned. The write is a
 // FULL REPLACE, but identity is the durable pair (piece_line_key || '', bom_line_key): the same slot

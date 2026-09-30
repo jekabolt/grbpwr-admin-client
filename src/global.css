@@ -510,3 +510,22 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
 .pdf-text-layer[data-main-rotation='270'] {
   transform: rotate(270deg) translateX(-100%);
 }
+
+/* Composition label (labels rework): a line's value swaps to its field, and «↺ derived»
+   appears, with a 150ms fade. Reduced motion: instant. */
+@keyframes compositionLineIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.composition-line-in {
+  animation: compositionLineIn 150ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .composition-line-in {
+    animation: none;
+  }
+}

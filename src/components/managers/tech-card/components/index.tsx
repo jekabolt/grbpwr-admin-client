@@ -102,6 +102,7 @@ import { ProductionTab } from './production-tab';
 import { SamplesTab } from './samples-tab';
 import { SizeIdsField } from './size-ids-field';
 import { SizeChartField } from './size-chart-field';
+import { CompositionLabelBlock } from './composition-label/composition-label-block';
 import { StyleFactsField } from './style-facts-field';
 import { STYLE_FACT_KEYS } from './tech-card-options';
 import { TechCardFittings } from './tech-card-fittings';
@@ -3460,6 +3461,11 @@ export function TechCardForm({
 
             {/* LABELS & PACKAGING */}
             <SectionStack hidden={activeTab !== 'labels'}>
+              <CompositionLabelBlock
+                techCard={techCard}
+                techCardId={isEditMode && numId ? numId : undefined}
+                canEdit={canWrite(SECTION.techCards) && !frozen}
+              />
               <SectionStack row>
                 <Section title='labels' className='w-full lg:w-1/2'>
                   <LabelsField
