@@ -1,6 +1,5 @@
-// ЗНАЧЕНИЕ СТРОКИ «MADE IN» (R-03). Страна есть — это факт колорвея, строка его показывает и
-// «↺ derived» не несёт (это не переопределение). Страны нет — клетка значения САМА есть выбор
-// страны из словаря; выбранное ставится в одно сохранение карточки (made-in.ts) и до него видно как
+// ЗНАЧЕНИЕ СТРОКИ «MADE IN» (R-02, R-03). Страна — факт колорвея, «↺ derived» не несёт (это не
+// переопределение). И заданная, и пустая страна правятся здесь же выбором из словаря; выбранное ставится в одно сохранение карточки (made-in.ts) и до него видно как
 // «saves with the card». Одна галочка — «also the other N without a country», второй кнопки нет.
 import { useMemo, useState } from 'react';
 import CheckboxCommon from 'ui/components/checkbox';
@@ -43,12 +42,6 @@ export function MadeInValue({
     [countries],
   );
 
-  if (countryName && !pickedCode)
-    return (
-      <Text className='uppercase' data-made-in={countryName}>
-        {countryName}
-      </Text>
-    );
   if (unavailable)
     return (
       <Text size='micro' variant='label'>
@@ -64,7 +57,9 @@ export function MadeInValue({
           name='made-in-country'
           placeholder='set country of origin'
           searchPlaceholder='country'
-          valueLabel={picked?.name ?? pickedCode ?? ''}
+          // A set country is editable too (owner: everything on the label is editable); the picker
+          // opens on the current value, a new pick is staged like a missing one.
+          valueLabel={picked?.name ?? pickedCode ?? countryName ?? ''}
           readOnly={disabled}
           filter={filter}
           onSelect={(code) => onPick(code, alsoOthers)}

@@ -486,21 +486,18 @@ export function CompositionLabelBlock({
           title: readOnly,
         };
       case 'made-in': {
-        const isSet = !!cw?.countryName && !picked;
         const unavailable = !!cw && isUnavailable(cw);
         const title = unavailable
           ? 'loading the colourway…'
-          : isSet
-            ? 'country of the colourway: change it on the colourway'
-            : !techCardId
-              ? 'save the card first'
-              : readOnly;
+          : !techCardId
+            ? 'save the card first'
+            : readOnly;
         return {
           ...base,
           label: cw?.countryName
             ? `made in ${cw.countryName}`
             : 'made in: country missing, click to set it',
-          disabled: !edit || !techCardId || isSet || unavailable,
+          disabled: !edit || !techCardId || unavailable,
           title,
           placeholder: !cw?.countryName ? (
             <span className='flex h-full items-center justify-end whitespace-nowrap px-1 text-nano uppercase leading-none text-error'>
@@ -651,7 +648,13 @@ export function CompositionLabelBlock({
           <EditorStrip
             key={key}
             {...common}
-            source={picked ? 'staged · saves with the card' : 'missing · set it here'}
+            source={
+              picked
+                ? 'staged · saves with the card'
+                : cw.countryName
+                  ? 'from the colourway · a new pick saves with the card'
+                  : 'missing · set it here'
+            }
           >
             <MadeInValue
               countryName={cw.countryName}
