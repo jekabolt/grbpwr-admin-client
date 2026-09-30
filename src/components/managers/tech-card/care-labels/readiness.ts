@@ -12,7 +12,8 @@
 import { ROUTES } from 'constants/routes';
 import type { CareLabelData } from './adapter';
 import { variantSku } from './adapter';
-import { resolveColorwayComposition, type ResolvedComposition } from './composition-resolver';
+import { labelComposition } from './composition-override';
+import type { ResolvedComposition } from './composition-resolver';
 import { hole, isBlocking, type Hole, type HoleCode } from './holes';
 import { qrPrims } from './qr';
 import { qrLink, type CareLabelPrefs } from './use-care-label-prefs';
@@ -69,12 +70,13 @@ export function collectReadiness(input: ReadinessInput): Readiness {
   const out: ColorwayReadiness[] = [];
 
   for (const cw of data.colorways) {
-    const composition = resolveColorwayComposition({
+    const composition = labelComposition({
       colorwayId: cw.id,
       bom: data.bom,
       usages: cw.usages,
       materials: data.materials,
       fibers: data.fibers,
+      override: cw.fiberOverride,
     });
     const holes = dedupe([
       ...cw.holes,
@@ -185,13 +187,15 @@ const BOM: ReadonlySet<string> = new Set([
 const COLORWAYS: ReadonlySet<string> = new Set([
   'piece-pin-differs',
   'no-sku',
-  'no-colour-name',
-  'no-country',
   'country-unknown',
-  'country-mismatch',
   'colorway-not-active',
 ]);
 const LABELS: ReadonlySet<string> = new Set([
+  'logo-svg-unsupported',
+  'logo-unavailable',
+  // Страна и имя цвета ставятся прямо на составнике (R-03, D-12).
+  'no-country',
+  'no-colour-name',
   'care-empty',
   'care-overflow',
   'care-too-many-symbols',

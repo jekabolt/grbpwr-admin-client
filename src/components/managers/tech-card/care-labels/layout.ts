@@ -18,7 +18,7 @@
 // Координаты X — от начала полезного поля: 0 при припуске справа, 10 при припуске слева
 // («зеркалить» сторону = переставить припуск, глифы не трогаются, план §4).
 import type { PaperDoc, PathCmd, Prim } from '../assembly-print/paper';
-import { careSymbolPath, hasCareArtwork, logoPath } from './artwork';
+import { careSymbolPath, hasCareArtwork, logoPrims, type Art } from './artwork';
 import type { PartComposition } from './composition-resolver';
 import { COMPOSITION_EMPTY_MESSAGE, hole, type Hole } from './holes';
 import { LABEL_PART_NAME, type PrintedPart } from './label-parts';
@@ -88,6 +88,9 @@ export const COMPANY_ADDRESS: readonly string[] = [
   '167-169 GREAT PORTLAND STREET',
   '5TH FLOOR, LONDON, W1W 5PF',
 ];
+
+/** Подпись QR на изнанке A: строка над кодом и строка под ним. Составник может её заменить. */
+export const QR_CAPTION: readonly string[] = ['SCAN QR CODE', 'TO SEE META INFO'];
 
 export type Seam = 'right' | 'left';
 /** Режим печати (тот же союз, что `PrintMode` настроек экрана). */
@@ -260,6 +263,8 @@ export type AFaceInput = {
   care: { codes: readonly string[]; prose: readonly string[] };
   /** Страна для `MADE IN …`; пусто — строки нет (дыру ставит адаптер). */
   country: string;
+  /** Своё лого составника (разобранный SVG); нет — монограмма бренда, как было. */
+  logo?: Art | null;
 };
 
 /** Фразы ухода → строки не шире `maxW`: фраза не рвётся, пока влезает целиком (как на макете). */
@@ -292,7 +297,7 @@ export function typesetAFace(sh: Shaper, input: AFaceInput, seam: Seam = 'right'
   const ox = originX(seam);
   const b = new SideBuilder(sh, 'A face');
   b.prims.push(seamDash(seam));
-  b.prims.push(...logoPath(ox + m.logoX, m.logoY, m.logo));
+  b.prims.push(...logoPrims(ox + m.logoX, m.logoY, m.logo, input.logo));
 
   const left = ox + m.x;
   const right = ox + L.RIGHT;
@@ -435,6 +440,10 @@ export function typesetAFace(sh: Shaper, input: AFaceInput, seam: Seam = 'right'
 export type ABackInput = {
   /** Ссылка QR — уже подставленный шаблон (`renderTemplate`). */
   url: string;
+  /** Подпись QR (строка над кодом, строка под ним); пусто — `QR_CAPTION`. */
+  caption?: readonly string[];
+  /** Адрес; пусто — `COMPANY_ADDRESS`. */
+  address?: readonly string[];
 };
 
 export function typesetABack(sh: Shaper, input: ABackInput, seam: Seam = 'left'): CareSide {
@@ -448,18 +457,48 @@ export function typesetABack(sh: Shaper, input: ABackInput, seam: Seam = 'left')
   b.prims.push(...q.prims);
   b.holes.push(...q.holes);
 
-  // Подписи — по центру QR.
+  // Подписи — по центру QR: первая строка над кодом, вторая под ним. Строки составника — капсом,
+  // как константы (для констант это тождество: лента по умолчанию не меняется ни на байт).
   const cx = qx + QR_SIZE_MM / 2;
-  for (const [s, base] of [
-    ['SCAN QR CODE', m.scanBase],
-    ['TO SEE META INFO', m.metaBase],
-  ] as const) {
-    const w = b.width(s, 'en', L.PT);
-    if (w !== null) b.text(s, 'en', L.PT, cx - w / 2, base);
-  }
-  COMPANY_ADDRESS.forEach((s, i) =>
-    b.text(s, 'en', L.PT, ox + m.addrX, m.addrBase + i * m.addrStep),
+  const caption = (input.caption?.length ? input.caption : QR_CAPTION).map((s) =>
+    s.trim().toUpperCase(),
   );
+  if (caption.length > 2) {
+    b.holes.push(
+      hole(
+        'care-overflow',
+        `A back: the QR caption has ${caption.length} lines — one fits above the code and one under it`,
+      ),
+    );
+  }
+  // Подпись центрована по QR и не заходит за начало поля слева.
+  const capMaxW = 2 * (m.qrX + QR_SIZE_MM / 2);
+  caption.slice(0, 2).forEach((s, i) => {
+    const w = b.width(s, 'en', L.PT);
+    if (w === null || !s) return;
+    if (w > capMaxW + 1e-9)
+      b.holes.push(hole('care-overflow', `A back: caption "${s}" is too long for the label`));
+    b.text(s, 'en', L.PT, cx - w / 2, i === 0 ? m.scanBase : m.metaBase);
+  });
+  const address = (input.address?.length ? input.address : COMPANY_ADDRESS).map((s) =>
+    s.trim().toUpperCase(),
+  );
+  const addrMaxW = L.RIGHT - m.addrX;
+  const addrLines = Math.floor((L.H - 1.2 - m.addrBase) / m.addrStep) + 1;
+  if (address.length > addrLines) {
+    b.holes.push(
+      hole(
+        'care-overflow',
+        `A back: the address has ${address.length} lines — the label holds ${addrLines}`,
+      ),
+    );
+  }
+  address.slice(0, addrLines).forEach((s, i) => {
+    const w = b.width(s, 'en', L.PT);
+    if (w !== null && w > addrMaxW + 1e-9)
+      b.holes.push(hole('care-overflow', `A back: address line "${s}" is too long for the label`));
+    b.text(s, 'en', L.PT, ox + m.addrX, m.addrBase + i * m.addrStep);
+  });
 
   return {
     doc: sideDoc('A-back', b.prims),
@@ -467,7 +506,7 @@ export function typesetABack(sh: Shaper, input: ABackInput, seam: Seam = 'left')
       kind: 'A-back',
       seam,
       pt: L.PT,
-      lines: COMPANY_ADDRESS.length,
+      lines: Math.min(address.length, addrLines),
       columns: [],
       qrVersion: q.version,
       qrModuleMm: q.moduleMm,
