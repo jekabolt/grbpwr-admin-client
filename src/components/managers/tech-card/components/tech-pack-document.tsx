@@ -97,7 +97,6 @@ import {
   techCardGenderOptions,
   techCardIssueSeverityOptions,
   techCardIssueStatusOptions,
-  techCardLabelTypeOptions,
   techCardMeasurementUnitOptions,
   techCardMediaKindOptions,
   techCardSignoffSectionOptions,
@@ -119,6 +118,8 @@ import { viewerOrigin } from 'utils/viewer-origin';
 import { PatternQR } from 'ui/components/pattern-qr';
 import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { detailKeyLabel } from './tech-card-options';
+import { TechPackLabelSheets, useTechPackCompositionLabel } from './tech-pack-labels';
+import { labelMediaOf } from '../care-labels/label-media';
 // cutSymmetryUnanswered — предикат, а не текст: он одинаков для экрана и бумаги, и дублировать
 // его в печатном слое значило бы завести второе определение «вопрос цеху не отвечен».
 import { slotNormRows, slotTakesWastage } from './bom-norm';
@@ -134,7 +135,6 @@ const unitL = mapOf(techCardMeasurementUnitOptions);
 const mediaKindL = mapOf(techCardMediaKindOptions);
 const bomSectionL = mapOf(techCardBomSectionOptions);
 const fabricDirL = mapOf(techCardFabricDirectionOptions);
-const labelTypeL = mapOf(techCardLabelTypeOptions);
 const issueSevL = mapOf(techCardIssueSeverityOptions);
 const issueStatusL = mapOf(techCardIssueStatusOptions);
 const signoffSectionL = mapOf(techCardSignoffSectionOptions);
@@ -891,6 +891,16 @@ export function TechPackDocument({
   } = useWorkshopSettings();
   const shopAllowance = dec(workshop?.settings?.defaultSeamAllowanceMm).trim();
 
+  // СОСТАВНИК КОЛОРВЕЯ ПО УМОЛЧАНИЮ (I-17): первый колорвей скоупа — тот же, что блок на вкладке
+  // показывает первым. Страна — из полного ответа колорвея, он тоже в гейте готовности ниже.
+  const labelColorwayId = wireInt(scopedColorways(printScope)[0]?.colorwayId);
+  const { summary: labelSummary, status: labelColorwayStatus } = useTechPackCompositionLabel({
+    techCard,
+    colorwayId: labelColorwayId,
+    materials: materialsData ? materialsData.materials ?? [] : null,
+    dictionary: dictionary ?? undefined,
+  });
+
   // Статусы запросов, которые документ делает сам, — наверх, в гейт печати. Ключ-строка не даёт
   // эффекту срабатывать на каждый рендер (массив пересоздаётся всегда, статусы — нет).
   // ЛИСТ, КОТОРЫЙ МОЖЕТ НАЗВАТЬ ШАГ НЕ ТЕМ СЛОВОМ, ЧТО ЭКРАН, — ЭТО ДЕГРАДАЦИЯ, И ОНА ОБЯЗАНА БЫТЬ
@@ -917,6 +927,7 @@ export function TechPackDocument({
     mediaError,
     workshopLoading,
     workshopError,
+    labelColorwayStatus,
   ].join(',');
   useEffect(() => {
     onDataStatus?.([
@@ -932,6 +943,7 @@ export function TechPackDocument({
       // называется на бумаге в `degraded` — это честное «стандарт цеха прочитать не удалось»,
       // которое читающий лист может проверить, в отличие от молчаливой пустой клетки.
       { label: 'workshop standards', status: depStatus(workshopLoading, workshopError) },
+      { label: 'composition label colourway', status: labelColorwayStatus },
     ]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depsKey]);
@@ -2992,71 +3004,25 @@ export function TechPackDocument({
         </Sheet>
       )}
 
-      {/* LABELS + PACKAGING */}
-      {has(tc.labels) && (b('sew') || b('qc')) && (
-        <Sheet title='labels'>
-          {has(tc.labels) && (
-            <table className='mb-3 w-full border-collapse text-micro'>
-              <thead>
-                <tr>
-                  <th className={TH}>type</th>
-                  <th className={TH}>content</th>
-                  <th className={TH}>placement</th>
-                  <th className={TH}>attachment</th>
-                  <th className={TH}>size</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(tc.labels ?? []).map((l, i) => {
-                  const isCare = l.labelType === 'TECH_CARD_LABEL_TYPE_CARE';
-                  const careCodes = isCare
-                    ? (l.content ?? '')
-                        .split(',')
-                        .map((s) => s.trim())
-                        .filter(Boolean)
-                    : [];
-                  return (
-                    <tr key={i} className='break-inside-avoid'>
-                      <td className={TD}>{labelTypeL[l.labelType ?? ''] ?? '—'}</td>
-                      <td className={TD}>
-                        {isCare && careCodes.length > 0 ? (
-                          <div className='flex flex-wrap items-center gap-1'>
-                            {careCodes.map((code, k) => {
-                              const m = careVocabulary.byCode[code];
-                              // Local artwork fallback: the printed tech pack must not degrade
-                              // to bare codes while the backend dictionary is empty (pre-0217).
-                              const img = m?.img ?? CARE_ARTWORK[code];
-                              return img ? (
-                                <img
-                                  key={k}
-                                  src={img}
-                                  alt={m?.name ?? code}
-                                  title={m?.name ?? code}
-                                  className='h-5 w-5'
-                                />
-                              ) : (
-                                <span key={k}>{code}</span>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          l.content || '—'
-                        )}
-                        {l.note?.trim() && <div className='text-labelColor'>{l.note}</div>}
-                      </td>
-                      <td className={TD}>
-                        {l.placement || '—'}
-                      </td>
-                      <td className={TD}>{l.attachment || '—'}</td>
-                      <td className={TD}>{l.size || '—'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </Sheet>
-      )}
+      {/* СОСТАВНИК + ЭТИКЕТКИ + ПРЕДМЕТЫ УПАКОВКИ (labels rework I-17): заменили легаси-таблицу
+          `labels`. Мокапы — из `resolvedLabelMedia` карточки (сервер разрешает каждый id), затем
+          медиатека. */}
+      <TechPackLabelSheets
+        summary={labelSummary}
+        hasColorway={labelColorwayId > 0}
+        labels={tc.garmentLabels ?? []}
+        items={tc.packagingItems ?? []}
+        urlOf={(id) => {
+          const m = labelMediaOf(id, techCard.resolvedLabelMedia, libraryMap)?.media;
+          return m?.compressed?.mediaUrl || m?.fullSize?.mediaUrl || m?.thumbnail?.mediaUrl || '';
+        }}
+        careArt={(code) => {
+          const voc = careVocabulary.byCode[code];
+          return { img: voc?.img ?? CARE_ARTWORK[code], name: voc?.name ?? code };
+        }}
+        showLabels={b('sew') || b('qc')}
+        showItems={b('qc')}
+      />
 
       {/* ASSEMBLY — ON-GARMENT ITEMS: labels/tags/hangtags attached on or into the garment
           (ListStyleAssembly). Root cause of #71 — this RPC was never fetched, so the section

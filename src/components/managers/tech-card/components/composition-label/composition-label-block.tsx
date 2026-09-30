@@ -18,14 +18,12 @@ import { Chip, ChipRow } from 'ui/components/chip';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
-import { colorwayFullKey, variantSku } from '../../care-labels/adapter';
+import { colorwayFullKey } from '../../care-labels/adapter';
 import { overrideRowsOf } from '../../care-labels/composition-override';
 import { isBlocking, type Hole } from '../../care-labels/holes';
-import { LABEL_PART_NAME } from '../../care-labels/label-parts';
 import { COMPANY_ADDRESS, QR_CAPTION } from '../../care-labels/layout';
 import { previewASides } from '../../care-labels/pages';
 import { SidesPreview, type PreviewSide } from '../../care-labels/sides-preview';
-import { qrLink } from '../../care-labels/use-care-label-prefs';
 import { setCareLabel, setCareLabelColorway } from '../form-writers';
 import type { FormCareLabel } from '../labels-schema';
 import type { TechCardFormData } from '../schema';
@@ -44,6 +42,14 @@ import {
 } from './label-lines';
 import { stageCountryWrites } from './made-in';
 import { MadeInValue } from './made-in-value';
+import {
+  addressLines,
+  captionLines,
+  compositionPartTexts,
+  labelSku,
+  LINE_META,
+  qrExample,
+} from './label-summary';
 import { useCompositionLabel } from './use-composition-label';
 
 const EMPTY_PICKS: ReadonlyMap<number, string> = new Map();
@@ -151,12 +157,7 @@ export function CompositionLabelBlock({
   };
 
   // ── превью выбранного варианта ────────────────────────────────────────────────────────────
-  const sku =
-    cw && size
-      ? size.skuOrd != null && cw.baseSku
-        ? variantSku(cw.baseSku, size.skuOrd)
-        : cw.baseSku
-      : '';
+  const sku = cw ? labelSku(cw, size) : '';
   const set = cw ? plan?.sets.get(cw.id) : undefined;
   const sides = useMemo<PreviewSide[]>(() => {
     if (!set || !size) return [];
@@ -236,16 +237,7 @@ export function CompositionLabelBlock({
     return readiness.colorways.find((r) => r.colorwayId === cw.id)?.composition.parts ?? [];
   }, [cw, readiness]);
   const qr = data?.label.qr ?? { qrPreset: 'storefront' as const, qrTemplate: '' };
-  const qrExample =
-    cw && size
-      ? qrLink(qr, {
-          base_sku: cw.baseSku,
-          sku: size.skuOrd != null && cw.baseSku ? variantSku(cw.baseSku, size.skuOrd) : '',
-          size: size.name,
-          colorway_id: cw.id,
-          style: data?.styleNumber ?? '',
-        })
-      : '';
+  const qrExampleUrl = data && cw ? qrExample(data, cw, size) : '';
   const logoCustom = wireInt(careLabel?.logoMediaId) > 0;
   const g = getValues;
   const s = setValue;
@@ -368,8 +360,8 @@ export function CompositionLabelBlock({
           <div ref={linesRef} className='flex min-w-0 flex-col'>
             <LineRow
               line='logo'
-              name='logo'
-              source='brand'
+              name={LINE_META['logo'].name}
+              source={LINE_META['logo'].source}
               overridden={logoCustom}
               resetLabel='the GRBPWR mark'
               onReset={edit ? () => setCareLabel(g, s, { logoMediaId: 0 }) : undefined}
@@ -389,8 +381,8 @@ export function CompositionLabelBlock({
 
             <LineRow
               line='product'
-              name='product line'
-              source='colourway'
+              name={LINE_META['product'].name}
+              source={LINE_META['product'].source}
               overridden={!!cw?.colourNameOverridden}
               resetLabel={cw?.colourNameDerived || 'the colourway name'}
               onReset={
@@ -427,8 +419,8 @@ export function CompositionLabelBlock({
 
             <LineRow
               line='care-symbols'
-              name='care symbols'
-              source='style care'
+              name={LINE_META['care-symbols'].name}
+              source={LINE_META['care-symbols'].source}
               highlight={focusLine === 'care-symbols'}
             >
               <CareSymbolsDoor
@@ -439,8 +431,8 @@ export function CompositionLabelBlock({
 
             <LineRow
               line='care-text'
-              name='care text'
-              source='dictionary'
+              name={LINE_META['care-text'].name}
+              source={LINE_META['care-text'].source}
               overridden={!!data?.care.proseOverridden}
               resetLabel='the dictionary prose'
               onReset={edit ? () => setCareLabel(g, s, { careProseLines: [] }) : undefined}
@@ -462,8 +454,8 @@ export function CompositionLabelBlock({
 
             <LineRow
               line='made-in'
-              name='made in'
-              source={picks.has(cw?.id ?? 0) ? 'staged' : 'colourway'}
+              name={LINE_META['made-in'].name}
+              source={picks.has(cw?.id ?? 0) ? 'staged' : LINE_META['made-in'].source}
               highlight={focusLine === 'made-in'}
             >
               {cw ? (
@@ -493,8 +485,8 @@ export function CompositionLabelBlock({
 
             <LineRow
               line='composition'
-              name='composition'
-              source='BOM'
+              name={LINE_META['composition'].name}
+              source={LINE_META['composition'].source}
               overridden={!!cw?.fiberOverride}
               resetLabel='the composition from the BOM'
               onReset={
@@ -530,19 +522,11 @@ export function CompositionLabelBlock({
                 >
                   {derivedParts.length ? (
                     <span className='flex flex-col gap-0.5 uppercase' data-composition-parts=''>
-                      {derivedParts
-                        .filter((p) => p.part !== 'NOTE')
-                        .map((p) => (
-                          <span key={p.part}>
-                            <span className='text-labelColor'>{LABEL_PART_NAME[p.part]}</span>{' '}
-                            {p.fibers
-                              .map((f) => {
-                                const fib = data?.fibers.get(f.code);
-                                return `${f.percent}% ${fib?.translations.en || fib?.name || f.code}`;
-                              })
-                              .join('  ')}
-                          </span>
-                        ))}
+                      {compositionPartTexts(derivedParts, data?.fibers ?? new Map()).map((p) => (
+                        <span key={p.part}>
+                          <span className='text-labelColor'>{p.name}</span> {p.text}
+                        </span>
+                      ))}
                     </span>
                   ) : (
                     <span className='text-labelColor'>
@@ -555,8 +539,8 @@ export function CompositionLabelBlock({
 
             <LineRow
               line='qr'
-              name='qr link'
-              source='storefront'
+              name={LINE_META['qr'].name}
+              source={LINE_META['qr'].source}
               overridden={qr.qrPreset !== 'storefront'}
               resetLabel='the storefront link'
               onReset={
@@ -567,7 +551,7 @@ export function CompositionLabelBlock({
               <QrDoor
                 preset={qr.qrPreset}
                 template={careLabel?.qrTemplate ?? ''}
-                example={qrExample}
+                example={qrExampleUrl}
                 disabled={!edit}
                 onChange={(p) => setCareLabel(g, s, p)}
               />
@@ -575,8 +559,8 @@ export function CompositionLabelBlock({
 
             <LineRow
               line='caption'
-              name='back caption'
-              source='brand'
+              name={LINE_META['caption'].name}
+              source={LINE_META['caption'].source}
               overridden={(data?.label.caption.length ?? 0) > 0}
               resetLabel={QR_CAPTION.join(' / ')}
               onReset={edit ? () => setCareLabel(g, s, { backCaptionLines: [] }) : undefined}
@@ -584,7 +568,7 @@ export function CompositionLabelBlock({
             >
               <EditableLines
                 ariaLabel='QR caption on the label back'
-                lines={data?.label.caption.length ? data.label.caption : QR_CAPTION}
+                lines={captionLines(data)}
                 disabled={!edit}
                 hint='first line above the QR code, second line under it'
                 onCommit={(t) =>
@@ -595,8 +579,8 @@ export function CompositionLabelBlock({
 
             <LineRow
               line='address'
-              name='address'
-              source='company'
+              name={LINE_META['address'].name}
+              source={LINE_META['address'].source}
               overridden={(data?.label.address.length ?? 0) > 0}
               resetLabel='the company address'
               onReset={edit ? () => setCareLabel(g, s, { addressLines: [] }) : undefined}
@@ -604,7 +588,7 @@ export function CompositionLabelBlock({
             >
               <EditableLines
                 ariaLabel='address on the label back'
-                lines={data?.label.address.length ? data.label.address : COMPANY_ADDRESS}
+                lines={addressLines(data)}
                 disabled={!edit}
                 onCommit={(t) =>
                   setCareLabel(g, s, { addressLines: linesOverride(t, COMPANY_ADDRESS) })
