@@ -69,7 +69,6 @@ import { formatBomMoney, resolveBomPrice } from './bom-price';
 import { uniOf } from './nesting/block-code';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
 
-import { LabelPlacementPictogram, resolvePlacementRegion } from './label-placement-pictogram';
 import { formatCompositionEntries } from './composition-entries';
 import { wireFabricPurpose } from './pattern-size-index';
 import {
@@ -3046,21 +3045,7 @@ export function TechPackDocument({
                         {l.note?.trim() && <div className='text-labelColor'>{l.note}</div>}
                       </td>
                       <td className={TD}>
-                        {/* Схема размещения жила только на экране. Словами «left side seam, 10 cm
-                            from hem» этикетку ставят по-разному в двух цехах; силуэт с меткой
-                            снимает разночтение быстрее, чем любая формулировка. Нераспознанное
-                            размещение силуэта НЕ печатает — пустой силуэт читался бы как «этикетка
-                            никуда не крепится». */}
-                        <div className='flex items-start gap-2'>
-                          {resolvePlacementRegion(l.placement) && (
-                            <LabelPlacementPictogram
-                              placement={l.placement}
-                              attachment={l.attachment}
-                              className='shrink-0'
-                            />
-                          )}
-                          <span>{l.placement || '—'}</span>
-                        </div>
+                        {l.placement || '—'}
                       </td>
                       <td className={TD}>{l.attachment || '—'}</td>
                       <td className={TD}>{l.size || '—'}</td>

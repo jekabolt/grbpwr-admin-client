@@ -65,7 +65,7 @@ import { CostingField } from './costing-field';
 import { DetailsEditor } from './details-editor';
 import { IssuesField } from './issues-field';
 import { AssemblyField } from './assembly-field';
-import { LabelsField } from './labels-field';
+import { LabelsBlock, PackagingBlock } from './labels-blocks';
 import { PackagingRecipeField } from './packaging-recipe-field';
 import { StyleProjects } from './style-projects';
 import { TechCardTasksPanel } from './tech-card-tasks-panel';
@@ -75,7 +75,6 @@ import {
   OutputVariantsPanel,
   seedColourVariants,
 } from './output-variants-field';
-import { PackagingField } from './packaging-field';
 import { PatternsField } from './patterns-field';
 import { MarkersSection } from './nesting/markers-section';
 import { PiecesTab } from './pieces-tab';
@@ -3458,20 +3457,15 @@ export function TechCardForm({
               />
             </SectionStack>
 
-            {/* LABELS & PACKAGING */}
+            {/* LABELS & PACKAGING — three full-width blocks, stacked with a large gap (D-13):
+                composition label → labels → packaging. The assembly bill and the packaging recipe
+                stay below, unchanged (D-07). */}
             <SectionStack hidden={activeTab !== 'labels'}>
-              <SectionStack row>
-                <Section title='labels' className='w-full lg:w-1/2'>
-                  <LabelsField
-                    onMissingComposition={goToBomComposition}
-                    // Only a SAVED card has the print door (the screen reads GetTechCard).
-                    techCardId={isEditMode && numId ? numId : undefined}
-                  />
-                </Section>
-                <Section title='packaging' className='w-full lg:w-1/2'>
-                  <PackagingField />
-                </Section>
-              </SectionStack>
+              <div className='flex flex-col gap-12' data-labels-tab=''>
+                {/* COMPOSITION LABEL block — mounted by lane K */}
+                <LabelsBlock />
+                <PackagingBlock />
+              </div>
               {/* Assembly bill + packaging recipe are per-style, managed via their own RPCs — they
                 need a saved card id. For a brand-new card, prompt to Save (which lands back here)
                 instead of silently hiding them, so the user is never left wondering. */}

@@ -35,32 +35,13 @@ export const hemFinishOptions = [
   'coverstitched',
 ];
 
-// Packaging suggestion lists.
+// How the garment itself is folded for the carton (the carton row's «garment fold»).
 export const foldingMethodOptions = [
   'on a hanger',
   'folded in half',
   'folded in three',
   'rolled',
   'flat in the box',
-];
-
-export const polybagOptions = [
-  'individual polybag',
-  'polybag with a flap',
-  'biodegradable',
-  'no polybag',
-];
-
-export const bagStickerOptions = ['size', 'barcode', 'composition/care', 'no sticker'];
-
-// inserts = loose items dropped in the box alongside the product, not part of it. Everyone
-// starts blank — hint list only, backend takes free text.
-export const insertsOptions = [
-  'tissue paper',
-  'thank-you card',
-  'care card',
-  'sticker',
-  'no inserts',
 ];
 
 // Construction-description aspects (details[]). The editor seeds these named rows; users can
@@ -89,21 +70,79 @@ export const detailAspects: Array<{ key: string; label: string }> = [
 export const detailKeyLabel = (key?: string): string =>
   detailAspects.find((a) => a.key === key)?.label || key?.trim() || 'aspect';
 
-// Label placement / attachment suggestion lists.
+// ═══ LABELS REWORK — the known kinds and the pick-or-type hints (02-DESIGN §2.3–2.5, D-11) ═══════
+//
+// Known-ness is a CLIENT constant, exactly like `detailAspects`: the server stores the key as typed
+// (no CHECK, the lesson of 0070's regex), and any other key is a custom label. Composition is not in
+// the list — it is the mandatory block above; carton is not an item — its facts are the carton row.
+
+export type LabelKind = { key: string; label: string };
+
+export const garmentLabelKinds: LabelKind[] = [
+  { key: 'brand', label: 'brand label' },
+  { key: 'size', label: 'size label' },
+  { key: 'flag', label: 'flag label' },
+  { key: 'hangtag', label: 'hangtag' },
+  { key: 'barcode', label: 'barcode / price sticker' },
+  { key: 'special', label: 'special / promo' },
+];
+
+// Spelled like the TechCardBomKind packaging kinds, so a BOM line and an item read as one word.
+export const packagingItemKinds: LabelKind[] = [
+  { key: 'polybag', label: 'polybag' },
+  { key: 'tissue', label: 'tissue paper' },
+  { key: 'sticker', label: 'sticker' },
+  { key: 'insert_card', label: 'insert card' },
+  { key: 'dust_bag', label: 'dust bag' },
+  { key: 'garment_case', label: 'garment case' },
+  { key: 'tote_bag', label: 'tote bag' },
+  { key: 'hanger', label: 'hanger' },
+  { key: 'hangtag_string', label: 'hangtag string' },
+  { key: 'spare_kit_bag', label: 'spare kit bag' },
+];
+
+/** A known key reads as its word; a custom key reads as typed. Case-blind like the writers. */
+export function kindLabel(kinds: LabelKind[], key?: string): string {
+  const k = (key ?? '').trim();
+  return kinds.find((x) => x.key.toLowerCase() === k.toLowerCase())?.label || k;
+}
+
 export const labelPlacementOptions = [
-  'neckline (centre)',
-  'side seam (left)',
-  'side seam (right)',
-  'waistband (inside)',
+  'neckline, centre back',
+  'left side seam',
+  'right side seam',
+  'waistband, inside',
   'lining',
   'pocket',
+  'hem',
+  'sleeve',
 ];
 
 export const labelAttachmentOptions = [
   'sewn into the seam',
-  'topstitched',
+  'topstitched, four sides',
+  'topstitched, top edge',
   'heat transfer',
-  'hangtag',
+  'hung on a string through the brand label',
+  'inserted in the polybag',
+];
+
+export const labelFoldingOptions = ['flat', 'end fold', 'centre fold', 'mitre fold', 'loop fold'];
+
+export const packagingUsageOptions = [
+  'one per garment',
+  'one per order',
+  'in the polybag',
+  'in the box',
+  'on the hanger',
+];
+
+export const packagingPackingOptions = [
+  'garment folded inside',
+  'on top, face up',
+  'flat',
+  'rolled',
+  'sealed with a sticker',
 ];
 
 // AGE GROUP (wave 2026-09-25, T01 / D-01'): a style fact like target gender, stored on the tech
