@@ -96,6 +96,19 @@ import {
   isWeldMachineType,
 } from './equipment-options';
 import { wireInt } from './wire-int';
+import {
+  careLabelOut,
+  careLabelSchema,
+  careLabelToForm,
+  garmentLabelSchema,
+  garmentLabelsOut,
+  garmentLabelsToForm,
+  keyedList,
+  newCareLabel,
+  packagingItemSchema,
+  packagingItemsOut,
+  packagingItemsToForm,
+} from './labels-schema';
 // ТОКЕН РАБОТЫ «ПРОРЕЗЬ» — ИЗ ОБЩЕГО МОДУЛЯ ОСИ, а не строкой здесь: то же правило проверяет
 // редактор шага, решая, ПОКАЗАТЬ ли контрол, и две копии строки разъехались бы молча — отказ
 // остался бы на поле, которого нет на экране.
@@ -2148,8 +2161,15 @@ const techCardObject = z.object({
   // осведомлённую пустоту против карточки, у которой снимки есть, — иначе отставшая вкладка
   // стирала бы десятки выносок молча. Ставит только кнопка «снять фотографии шагов».
   mediaCleared: z.boolean().default(false),
+  // LEGACY (tech_card_label): read for the old labels tab until I-11 deletes it; NEVER written —
+  // the server ignores labels=45 since 0386, and this client does not send it at all.
   labels: z.array(labelSchema).default([]),
   packaging: packagingSchema,
+  // LABELS REWORK (0386): the composition label (always present, overrides only), the garment
+  // labels and the packaging items. Written ONLY through the writers in form-writers.ts.
+  careLabel: careLabelSchema.default(newCareLabel),
+  garmentLabels: keyedList(garmentLabelSchema, 'labels'),
+  packagingItems: keyedList(packagingItemSchema, 'packaging items'),
   costing: costingSchema,
   issues: z.array(issueSchema).default([]),
   signoffs: z.array(signoffSchema).default([]),
@@ -2291,6 +2311,9 @@ export const techCardDefaultData: TechCardFormData = {
   mediaCleared: false,
   labels: [],
   packaging: { ...emptyPackaging },
+  careLabel: newCareLabel(),
+  garmentLabels: [],
+  packagingItems: [],
   costing: { ...emptyCosting },
   issues: [],
   signoffs: [],
@@ -2779,6 +2802,9 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
           notes: insert.packaging.notes || '',
         }
       : { ...emptyPackaging },
+    careLabel: careLabelToForm(insert?.careLabel),
+    garmentLabels: garmentLabelsToForm(insert?.garmentLabels),
+    packagingItems: packagingItemsToForm(insert?.packagingItems),
     costing: insert?.costing
       ? {
           cmtCost: decimalToInput(insert.costing.cmtCost),
@@ -3787,16 +3813,18 @@ export function mapFormToTechCardInsert(
         note: o.note?.trim() || '',
       };
     }),
-    labels: (data.labels ?? []).map((l) => ({
-      labelType: (l.labelType || 'TECH_CARD_LABEL_TYPE_UNKNOWN') as common_TechCardLabelType,
-      content: l.content?.trim() || '',
-      placement: l.placement?.trim() || '',
-      attachment: l.attachment?.trim() || '',
-      size: l.size?.trim() || '',
-      note: l.note?.trim() || '',
-      bomItemId: wireInt(l.bomItemId),
-    })),
+    // LEGACY labels (45) are NOT sent: the server has ignored them on write since 0386, and an
+    // explicit undefined also keeps `...original` from echoing the stored rows back.
+    labels: undefined,
     packaging: mapPackagingOut(data.packaging),
+    // LABELS REWORK (0386). `labelsAware` on EVERY save: without it the server keeps the stored
+    // garment labels / packaging items as they are (a bundle that does not know them is
+    // indistinguishable from «deleted all») and refuses LABELS / PACKAGING approval. Transport, not
+    // content — not hashed. `careLabel` is always present (null would mean «keep the stored one»).
+    careLabel: careLabelOut(data.careLabel),
+    garmentLabels: garmentLabelsOut(data.garmentLabels),
+    packagingItems: packagingItemsOut(data.packagingItems),
+    labelsAware: true,
     // Only a costing:write editor may change costing; everyone else preserves what was loaded.
     costing: canWriteCosting ? mapCostingOut(data.costing) : original?.costing,
     issues: (data.issues ?? []).map((i) => ({
