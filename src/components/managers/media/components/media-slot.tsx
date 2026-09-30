@@ -7,6 +7,9 @@ import { PLACEHOLDER_SURFACE, Placeholder, placeholderClass } from 'ui/component
 import Text from 'ui/components/text';
 import { readSlotAspect } from '../utils/calculate-aspect';
 import { useMediaIntake } from '../utils/useMediaIntake';
+import { acceptOf, refusalOf } from '../utils/usePasteFiles';
+import { isSvgMedia, isSvgUrl } from '../utils/useUploadMedia';
+import { useSnackBarStore } from 'lib/stores/store';
 import { MediaSelector } from './media-selector';
 
 // СЛОТ МЕДИА — ОДИН МОДУЛЬ НА ВСЕ ТОЧКИ ЗАГРУЗКИ.
@@ -52,6 +55,13 @@ export type MediaSlotProps = {
   limit?: number;
   /** Слот показывает и принимает видео. */
   showVideos?: boolean;
+  /** Слот принимает и SVG (через векторную дверь `UploadContentVector`). */
+  allowSvg?: boolean;
+  /**
+   * ТОЛЬКО SVG (лого составника). Фото — брошенное, вставленное, выбранное с диска или из
+   * библиотеки — не кладётся, а отказывается фразой. Кроп выключен: он растеризует.
+   */
+  vectorOnly?: boolean;
   /** Можно менять. Выключено — только показ. */
   editMode?: boolean;
   /**
@@ -141,6 +151,8 @@ export function MediaSlot({
   allowMultiple = false,
   limit,
   showVideos = true,
+  allowSvg = false,
+  vectorOnly = false,
   editMode = true,
   toolbar = true,
   compact = false,
@@ -157,17 +169,28 @@ export function MediaSlot({
     frameAspect ??
     (aspectRatio.find((r) => r.toLowerCase() !== 'custom')?.replace(':', '/') || '4/5');
   const mediaIsVideo = isVideo(mediaUrl);
+  // A vector slot never shows or takes a video.
+  const videos = showVideos && !vectorOnly;
+  const accept = acceptOf({ showVideos: videos, allowSvg, vectorOnly });
+  const { showMessage } = useSnackBarStore();
+  // The paste/drop road ends here too: whatever it uploaded, a vector-only slot keeps vectors only.
+  const onIntake = (media: common_MediaFull[]) => {
+    if (!vectorOnly) return onSelect(media);
+    const vectors = media.filter(isSvgMedia);
+    if (vectors.length < media.length) showMessage(refusalOf('vector'), 'error');
+    if (vectors.length) onSelect(vectors);
+  };
 
   const intake = useMediaIntake({
     enabled: editMode,
-    accept: showVideos ? 'media' : 'image',
+    accept,
     // Слот на одну картинку берёт из буфера РОВНО ОДНУ: остальные всё равно некуда положить, а
     // проведённые через кроп они осели бы в библиотеке файлами, которых никто не просил.
     limit: limit ?? (allowMultiple ? undefined : 1),
     aspect: slot.primary,
     lockAspect: slot.constrained,
     purpose,
-    onMedia: onSelect,
+    onMedia: onIntake,
   });
 
   const frameStyle: React.CSSProperties =
@@ -184,7 +207,13 @@ export function MediaSlot({
   // ТОЛЬКО ПРО БРОСОК. Открытая приёмная модалка — это не «загружаю»: человек ещё смотрит на
   // превью и выбирает рамку кропа, и слово «adding…» под ней обещает то, чего не произошло.
   // Ход загрузки показывает сама модалка, на своей кнопке.
-  const status = intake.dragging ? (showVideos ? 'drop to add' : 'drop the image') : null;
+  const status = intake.dragging
+    ? vectorOnly
+      ? 'drop the SVG'
+      : videos
+        ? 'drop to add'
+        : 'drop the image'
+    : null;
 
   // ------------------------------------------------------------------ пусто
   if (!mediaUrl) {
@@ -214,7 +243,9 @@ export function MediaSlot({
         purpose={purpose}
         aspectRatio={aspectRatio}
         allowMultiple={allowMultiple}
-        showVideos={showVideos}
+        showVideos={videos}
+        allowSvg={allowSvg}
+        vectorOnly={vectorOnly}
         saveSelectedMedia={onSelect}
         returnFocusWithoutScroll={returnFocusWithoutScroll}
         trigger={
@@ -323,7 +354,9 @@ export function MediaSlot({
         type={mediaIsVideo ? 'video' : 'image'}
         // Ролик ВПИСЫВАЕТСЯ, картинка ЗАПОЛНЯЕТ: у видео нет обещанных слотом пропорций, и
         // обрезка по рамке съела бы кадр, ради которого его и положили.
-        fit={mediaIsVideo ? 'contain' : 'cover'}
+        // A vector (a logo) is a drawing on a transparent ground: cropped by `cover` it loses its
+        // edges, so it is fitted whole too.
+        fit={mediaIsVideo || isSvgUrl(mediaUrl) ? 'contain' : 'cover'}
       />
 
       {onOpenViewer && (
@@ -360,7 +393,9 @@ export function MediaSlot({
             purpose={purpose}
             aspectRatio={aspectRatio}
             allowMultiple={allowMultiple}
-            showVideos={showVideos}
+            showVideos={videos}
+            allowSvg={allowSvg}
+            vectorOnly={vectorOnly}
             saveSelectedMedia={onSelect}
             triggerClassName='px-2 py-0.5 text-small cursor-pointer'
           />

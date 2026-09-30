@@ -109,7 +109,11 @@ export function MediaManager({
   // ТОЛЬКО НА САМОСТОЯТЕЛЬНОЙ СТРАНИЦЕ. Внутри диалога выбора менеджер монтируется ПОЗЖЕ самого
   // диалога и, забрав очередь себе, увёл бы вставку из слота, ради которого диалог открыт, — в
   // библиотеку, где её ещё пришлось бы искать.
-  usePasteFiles({ claims: isStandalone && canUpload, accept: 'media' }, pendingFilesHook.addFiles);
+  // SVG too: the library is the vector door's shelf as well (useUploadMedia routes it).
+  usePasteFiles(
+    { claims: isStandalone && canUpload, accept: 'media+svg' },
+    pendingFilesHook.addFiles,
+  );
 
   const handleUploadClick = () => fileInputRef.current?.click();
 
