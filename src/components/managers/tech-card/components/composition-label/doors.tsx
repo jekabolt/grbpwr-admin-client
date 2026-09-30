@@ -1,5 +1,6 @@
-// ДВЕРИ ТРЁХ СТРОК, чьё значение — не текст: лого (SVG из библиотеки), символы ухода (словарь
-// ухода стиля) и ссылка QR (пресет + шаблон). Грамматика та же: значение и есть дверь.
+// ТЕЛА ПОЛОС ПРАВКИ ДЛЯ ТРЁХ ЗНАЧЕНИЙ, чьё значение — не текст: лого (SVG из библиотеки), символы
+// ухода (словарь ухода стиля) и ссылка QR (пресет + шаблон). Дверь в каждую — само значение на
+// ленте; здесь только то, что открывается под ней.
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { CareSymbol } from 'components/managers/product/components/care/care-card';
@@ -11,9 +12,9 @@ import {
 } from 'components/managers/product/components/care/care-codes';
 import { CareInstructions } from 'components/managers/product/components/care/careInstructions';
 import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
-import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
@@ -21,64 +22,51 @@ import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { QR_PRESETS } from '../../care-labels/qr-settings';
 import { STOREFRONT_QR_TEMPLATE } from '../../care-labels/qr';
 import type { QrPreset } from '../../care-labels/use-care-label-prefs';
-import { SWAP, ValueDoor } from './editable';
 
 // ---------- лого ----------
 
 /**
- * Квадрат с лого ленты — щелчок открывает библиотеку, которая берёт ТОЛЬКО SVG (лента печатается
- * кривыми, D-01): растр отказывается фразой, а не кладётся.
+ * Лого: что сейчас печатается и одна дверь в библиотеку, которая берёт ТОЛЬКО SVG (лента
+ * печатается кривыми, D-01): растр отказывается фразой, а не кладётся.
  */
-export function LogoDoor({
+export function LogoEditor({
   url,
   custom,
   disabled,
   onPick,
 }: {
-  /** Адрес своего SVG; нет — монограмма бренда. */
   url: string;
   custom: boolean;
   disabled?: boolean;
   onPick: (media: common_MediaFull) => void;
 }) {
-  const face = (
-    <span className='flex size-16 items-center justify-center border border-borderColor bg-bgColor p-2'>
-      {custom && url ? (
-        <img src={url} alt='composition label logo' className='max-h-full max-w-full' />
-      ) : (
-        <GrbpwrMark className='size-full text-textColor' />
-      )}
-    </span>
-  );
-  if (disabled) return face;
   return (
-    <MediaSelector
-      label='composition label logo'
-      purpose='the composition label logo — SVG only, the ribbon is printed in curves'
-      vectorOnly
-      allowSvg
-      saveSelectedMedia={(m) => m[0] && onPick(m[0])}
-      trigger={
-        <button
-          type='button'
-          aria-label='change the logo (SVG)'
-          title='click to pick an SVG — the ribbon is printed in curves'
-          className={cn(
-            SWAP,
-            'group flex cursor-pointer items-center gap-4 text-left focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-          )}
-        >
-          {face}
-          <Text
-            size='micro'
-            variant='label'
-            className='uppercase tracking-label group-hover:text-textColor'
-          >
-            {custom ? 'your SVG' : 'GRBPWR mark'}
-          </Text>
-        </button>
-      }
-    />
+    <div className='flex flex-wrap items-center gap-6'>
+      <span className='flex size-16 items-center justify-center border border-borderColor bg-bgColor p-2'>
+        {custom && url ? (
+          <img src={url} alt='composition label logo' className='max-h-full max-w-full' />
+        ) : (
+          <GrbpwrMark className='size-full text-textColor' />
+        )}
+      </span>
+      <div className='flex flex-col gap-2'>
+        <Text className='uppercase'>{custom ? 'your SVG' : 'the GRBPWR mark'}</Text>
+        {disabled ? null : (
+          <MediaSelector
+            label='composition label logo'
+            purpose='the composition label logo — SVG only, the ribbon is printed in curves'
+            vectorOnly
+            allowSvg
+            saveSelectedMedia={(m) => m[0] && onPick(m[0])}
+            trigger={
+              <Button type='button' variant='secondary' size='sm' data-logo-pick=''>
+                choose an SVG
+              </Button>
+            }
+          />
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -86,9 +74,9 @@ export function LogoDoor({
 
 /**
  * Символы — уход СТИЛЯ (`careInstructions`, пишется staged UpdateStyle панели фактов стиля). Здесь
- * второго хранилища нет: щелчок открывает тот же словарный пикер, что на товаре.
+ * второго хранилища нет: кнопка открывает тот же словарный пикер, что на товаре.
  */
-export function CareSymbolsDoor({ disabled, reason }: { disabled?: boolean; reason?: string }) {
+export function CareSymbolsEditor({ disabled, reason }: { disabled?: boolean; reason?: string }) {
   const { setValue, control } = useFormContext();
   const value = (useWatch({ control, name: 'careInstructions' }) as string) || '';
   const vocabulary = useCareVocabulary();
@@ -118,46 +106,48 @@ export function CareSymbolsDoor({ disabled, reason }: { disabled?: boolean; reas
   };
 
   return (
-    <>
-      <ValueDoor
+    <div className='flex flex-wrap items-center gap-6' data-care-symbols={codes.join(',')}>
+      {codes.length ? (
+        <span className='flex flex-wrap gap-1.5'>
+          {codes.map((c) => (
+            <CareSymbol key={c} code={c} />
+          ))}
+        </span>
+      ) : (
+        <Text size='micro' variant='label'>
+          no care symbols yet
+        </Text>
+      )}
+      <Button
+        type='button'
+        variant='secondary'
+        size='sm'
         disabled={disabled}
         title={reason}
-        onOpen={() => setOpen(true)}
-        aria-label='care symbols — click to change'
-        data-care-symbols={codes.join(',')}
+        onClick={() => setOpen(true)}
       >
-        {codes.length ? (
-          <span className='flex flex-wrap gap-1.5'>
-            {codes.map((c) => (
-              <CareSymbol key={c} code={c} />
-            ))}
-          </span>
-        ) : (
-          <span className='text-labelColor'>no care symbols — pick them</span>
-        )}
-      </ValueDoor>
+        choose care symbols
+      </Button>
       <CareInstructions
         isCareTableOpen={open}
         close={() => setOpen(false)}
         onSelectCareInstruction={onSelect}
         selectedInstructions={selected}
       />
-    </>
+    </div>
   );
 }
 
 // ---------- QR ----------
 
-/**
- * Ссылка QR: в покое — пример ссылки выбранного варианта; щелчок раскрывает пресеты и шаблон.
- * Правки идут в форму сразу (шаблон — по уходу фокуса).
- */
-export function QrDoor({
+/** Ссылка QR: что напечатается у выбранного варианта, пресеты и шаблон. Правки идут в форму сразу. */
+export function QrEditor({
   preset,
   template,
   example,
   disabled,
   onChange,
+  onDone,
 }: {
   preset: QrPreset;
   template: string;
@@ -165,30 +155,14 @@ export function QrDoor({
   example: string;
   disabled?: boolean;
   onChange: (patch: { qrPreset?: string; qrTemplate?: string }) => void;
+  onDone: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(template);
-  const name = QR_PRESETS.find((p) => p.id === preset)?.label ?? preset;
-  if (!open)
-    return (
-      <ValueDoor
-        disabled={disabled}
-        onOpen={() => {
-          setDraft(template);
-          setOpen(true);
-        }}
-        aria-label='QR link — click to change'
-      >
-        <span className='flex flex-col gap-0.5'>
-          <span className='break-all' data-qr-example=''>
-            {example || '—'}
-          </span>
-          <span className='text-micro uppercase tracking-label text-labelColor'>{name}</span>
-        </span>
-      </ValueDoor>
-    );
   return (
-    <div className={cn(SWAP, 'flex flex-col gap-3')}>
+    <div className='flex max-w-[560px] flex-col gap-3'>
+      <Text className='break-all' data-qr-example=''>
+        {example || '—'}
+      </Text>
       <ChipRow>
         {QR_PRESETS.map((p) => (
           <Chip
@@ -196,6 +170,8 @@ export function QrDoor({
             pressed={preset === p.id}
             selected={preset === p.id}
             title={p.title}
+            disabled={disabled}
+            data-qr-preset={p.id}
             onClick={() => onChange({ qrPreset: p.id === 'storefront' ? '' : p.id })}
           >
             {p.label}
@@ -206,23 +182,24 @@ export function QrDoor({
         name='composition-qr-template'
         aria-label='QR link template'
         value={preset === 'storefront' ? STOREFRONT_QR_TEMPLATE : draft}
-        disabled={preset === 'storefront'}
+        disabled={disabled || preset === 'storefront'}
         placeholder={preset === 'fixed' ? 'https://…' : 'https://grbpwr.com/p/{base_sku}?s={size}'}
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDraft(e.target.value)}
         onBlur={() => onChange({ qrTemplate: draft.trim() })}
       />
       {preset === 'custom' && (
         <Text size='micro' variant='label'>
-          {'{base_sku} {sku} {size} {colorway_id} {style}'} — base SKU is lower-cased
+          {'{base_sku} {sku} {size} {colorway_id} {style}'}: base SKU is lower-cased
         </Text>
       )}
       <button
         type='button'
         onClick={() => {
           if (preset !== 'storefront') onChange({ qrTemplate: draft.trim() });
-          setOpen(false);
+          onDone();
         }}
-        className='cursor-pointer self-end text-micro uppercase tracking-label underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-textColor'
+        data-qr-done=''
+        className='cursor-pointer self-start text-micro uppercase tracking-label underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-textColor'
       >
         done
       </button>
