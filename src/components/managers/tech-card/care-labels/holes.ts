@@ -46,6 +46,9 @@ export const BLOCK_HOLE_CODES = [
   'colorway-unavailable',
   'materials-unavailable',
   'dictionary-unavailable',
+  // Составник (labels rework): своё лого не разобралось в контуры / не загрузилось.
+  'logo-svg-unsupported',
+  'logo-unavailable',
 ] as const;
 
 export const WARN_HOLE_CODES = [
@@ -56,7 +59,6 @@ export const WARN_HOLE_CODES = [
   'care-empty',
   'qr-module-small',
   'colorway-not-active',
-  'country-mismatch',
   'en-fallback-name',
   'third-label',
   'run-stale',

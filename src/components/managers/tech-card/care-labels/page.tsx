@@ -10,7 +10,7 @@ import { PrintDegradedNotice } from 'components/managers/print/degraded-notice';
 import { usePrintReady } from 'components/managers/print/use-print-ready';
 import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import CheckboxCommon from 'ui/components/checkbox';
@@ -33,6 +33,7 @@ import { SidesPreview, type PreviewSide, type PreviewView } from './sides-previe
 import { createShaper, type Shaper } from './text-outline';
 import {
   effectiveQrTemplate,
+  PREFS_DEFAULTS,
   qrLink,
   useCareLabelPrefs,
   type PrintMode,
@@ -107,7 +108,8 @@ export function TechCardCareLabels() {
   }>({ key, colorwayId: null, sizeId: null, excluded: [], manual: {} });
   const current =
     pick.key === key ? pick : { key, colorwayId: null, sizeId: null, excluded: [], manual: {} };
-  // Режим, QR, запас и источник количеств — на карточку, в localStorage (`care-labels:v1:<id>`).
+  // Режим, запас и источник количеств — настройки ПЕЧАТИ, на карточку, в localStorage
+  // (`care-labels:v1:<id>`). Ссылка QR — свойство этикетки: она на составнике карточки (D-05).
   const { prefs, update: updatePrefs } = useCareLabelPrefs(techCardId);
   const mode = prefs.mode;
   const setMode = (m: PrintMode) => updatePrefs({ mode: m });
@@ -163,13 +165,15 @@ export function TechCardCareLabels() {
     };
   }, []);
 
-  // Полный план (каждый колорвей × размер по копии): стороны превью и дыры раскладки. Шаблон QR
-  // печатается в поле посимвольно — вёрстка всех колорвеев идёт за отложенным значением.
-  const qrPrefs = useDeferredValue(
-    useMemo(
-      () => ({ qrPreset: prefs.qrPreset, qrTemplate: prefs.qrTemplate }),
-      [prefs.qrPreset, prefs.qrTemplate],
-    ),
+  // Полный план (каждый колорвей × размер по копии): стороны превью и дыры раскладки. QR — с
+  // сохранённой карточки (составник), а не из настроек этой страницы.
+  const qrPrefs = useMemo(
+    () =>
+      data?.label?.qr ?? {
+        qrPreset: PREFS_DEFAULTS.qrPreset,
+        qrTemplate: PREFS_DEFAULTS.qrTemplate,
+      },
+    [data],
   );
   const compositions = useMemo(() => (data ? compositionsOf(data) : null), [data]);
   const fullPlan = useMemo(
@@ -246,19 +250,18 @@ export function TechCardCareLabels() {
         ? collectReadiness({
             data,
             excluded: current.excluded,
-            prefs: { qrPreset: prefs.qrPreset, qrTemplate: prefs.qrTemplate },
+            prefs: qrPrefs,
             quantityHoles: quantities.holes,
             zeroColorways: quantities.zeroColorways,
             layoutHoles: fullPlan?.layoutHoles,
             fontsFailed,
           })
         : null,
-    [data, current.excluded, prefs.qrPreset, prefs.qrTemplate, quantities, fullPlan, fontsFailed],
+    [data, current.excluded, qrPrefs, quantities, fullPlan, fontsFailed],
   );
   const blocking = readiness?.blockers ?? [];
   // Архив верстается шейпером: пока шрифты едут, кнопка ждёт (упали — блок `fonts-failed`).
-  const layoutReady =
-    !!fullPlan && qrPrefs.qrTemplate === prefs.qrTemplate && qrPrefs.qrPreset === prefs.qrPreset;
+  const layoutReady = !!fullPlan;
   const canExport = ready && layoutReady && !!readiness?.canExport;
   const showMessage = useSnackBarStore((st) => st.showMessage);
   const [building, setBuilding] = useState(false);
@@ -274,7 +277,7 @@ export function TechCardCareLabels() {
         data,
         compositions,
         mode,
-        qr: prefs,
+        qr: qrPrefs,
         colorwayIds,
         copies: (cw, size) => quantities.cells[cw]?.[size] ?? 0,
       });
@@ -292,7 +295,7 @@ export function TechCardCareLabels() {
         style: data.styleNumber,
         styleName: data.styleName,
         colorways: manifestCws,
-        qrTemplate: effectiveQrTemplate(prefs),
+        qrTemplate: effectiveQrTemplate(qrPrefs),
         adminUrl: `${window.location.origin}/tech-cards/${data.techCardId || techCardId || ''}`,
         warnings: [...readiness.warnings, ...set.holes.filter((h) => h.level === 'warn')].filter(
           (h, i, all) => all.findIndex((x) => x.message === h.message) === i,
@@ -563,7 +566,11 @@ export function TechCardCareLabels() {
                   </Chip>
                 </ChipRow>
                 <GroupLabel>qr code</GroupLabel>
-                <QrSettings prefs={prefs} onChange={updatePrefs} example={qrExample} />
+                <QrSettings
+                  prefs={qrPrefs}
+                  example={qrExample}
+                  editHref={`/tech-cards/${data.techCardId || techCardId || ''}?tab=labels`}
+                />
                 <GroupLabel>quantities</GroupLabel>
                 <QuantitiesGrid
                   colorways={qtyColorways}

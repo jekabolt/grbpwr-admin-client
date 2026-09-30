@@ -8,7 +8,8 @@
 //    (`planPrint` пропускает размер без копий и колорвей без размеров).
 // Ссылка QR каждого варианта — `qrLink` (тот же `renderTemplate`, что считает дыры QR в готовности).
 import { variantSku, type CareLabelData } from './adapter';
-import { resolveColorwayComposition, type PartComposition } from './composition-resolver';
+import { labelComposition } from './composition-override';
+import type { PartComposition } from './composition-resolver';
 import { hole, isGlobalHole, type Hole } from './holes';
 import type { PrintMode } from './layout';
 import { fileSlug, planPrint, type PrintJob, type PrintSet } from './pages';
@@ -23,17 +24,20 @@ export const colorwayFolder = (baseSku: string, colour: string, colorwayId: numb
     .filter(Boolean)
     .join('-');
 
-/** Состав колорвеев — тот же вызов резолвера, что в готовности. */
+/**
+ * Состав колорвеев — тот же вызов, что в готовности: переопределение составника, иначе резолвер.
+ */
 export function compositionsOf(data: CareLabelData): Map<number, PartComposition[]> {
   return new Map(
     data.colorways.map((cw) => [
       cw.id,
-      resolveColorwayComposition({
+      labelComposition({
         colorwayId: cw.id,
         bom: data.bom,
         usages: cw.usages,
         materials: data.materials,
         fibers: data.fibers,
+        override: cw.fiberOverride,
       }).parts,
     ]),
   );
@@ -53,9 +57,15 @@ export type PrintJobInput = {
 export function buildPrintJob(input: PrintJobInput): PrintJob {
   const { data, mode, qr } = input;
   const want = new Set(input.colorwayIds);
+  // Переопределения составника уровня карточки. Пустые не кладутся вовсе: задание без них — то же,
+  // что до переделки, и лента выходит байт-в-байт прежней.
+  const { logo, caption, address } = data.label ?? {};
   return {
     mode,
-    care: data.care,
+    care: { codes: data.care.codes, prose: data.care.prose },
+    ...(logo ? { logo } : {}),
+    ...(caption?.length ? { caption } : {}),
+    ...(address?.length ? { address } : {}),
     colorways: data.colorways
       .filter((cw) => want.has(cw.id))
       .map((cw) => ({

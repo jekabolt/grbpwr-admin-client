@@ -353,8 +353,9 @@ export function StyleFactsField({
     // in words. An account still loading reads as allowed (the grants fail open), so the mirror
     // waits for the answer: nothing is adopted for an account that turns out not to hold the grant.
     if (!canStyle || grantLoading) return;
-    // No legacy care row: the header picker writes `careInstructions` itself — nothing to mirror,
-    // and mirroring '' would wipe that edit.
+    // LABELS REWORK (I-18): care symbols are edited on the composition label, straight in
+    // `careInstructions`. With no legacy CARE row there is nothing to mirror — and mirroring the
+    // empty label here would put a fresh care edit back to '' on the very next render.
     if (careIdx < 0) return;
     const held = live('careInstructions');
     const cur = factText(held).trim();

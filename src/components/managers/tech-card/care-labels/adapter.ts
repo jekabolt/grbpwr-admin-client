@@ -8,7 +8,7 @@
 //
 // Чистая часть — `adaptCareLabels` (фикстурой проверяется без сети); хук `useCareLabelSource`
 // только собирает запросы и отдаёт их статусы гейту печати.
-import { useQueries } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import type {
   common_AdminColorwayRef,
@@ -30,12 +30,16 @@ import {
 } from 'components/managers/product/components/care/care-codes';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
+import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { depStatus, type PrintDep } from 'components/managers/print/use-print-ready';
 import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { wireInt } from 'components/managers/tech-card/components/wire-int';
+import { fetchMediaBlob } from 'lib/features/media-blob';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
+import { ArtworkError, type Art } from './art-types';
+import type { OverrideFiber } from './composition-override';
 import type {
   FiberDict,
   LabelBomLine,
@@ -44,8 +48,10 @@ import type {
   LabelUsage,
 } from './composition-resolver';
 import { hole, type Hole } from './holes';
-import type { LabelPartWire } from './label-parts';
+import { labelPartFromWire, type LabelPartWire } from './label-parts';
+import { parseLogoSvg } from './logo-svg';
 import { isLabelLang, type LabelLang } from './phrases';
+import type { QrPreset } from './use-care-label-prefs';
 
 // Строки энума части в движке (`label-parts.ts`, без импорта генерата) и в генерате — один и тот же
 // набор. Разъедутся (новая часть в прото без правки движка или наоборот) — здесь красный tsc.
@@ -53,7 +59,6 @@ type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 const LABEL_PART_WIRE_MATCHES_PROTO: Same<LabelPartWire, common_TechCardBomLabelPart> = true;
 void LABEL_PART_WIRE_MATCHES_PROTO;
 
-const ORIGIN = 'TECH_CARD_LABEL_TYPE_ORIGIN';
 const CARE = 'TECH_CARD_LABEL_TYPE_CARE';
 const ACTIVE: common_ColorwayLifecycleStatus = 'COLORWAY_LIFECYCLE_STATUS_ACTIVE';
 
@@ -73,11 +78,17 @@ export type CareLabelColorway = {
   id: number;
   /** `RC27-99999-OFW`; пусто — дыра `no-sku`. */
   baseSku: string;
-  /** EN-имя цвета: `name_i18n[en]` → `dev_name`; пусто — дыра `no-colour-name`. */
+  /** Имя цвета НА ЛЕНТЕ: переопределение составника, иначе `colourNameDerived`. */
   colourName: string;
+  /** Выведенное EN-имя цвета: `name_i18n[en]` → `dev_name` (то, к чему ведёт «↺ derived»). */
+  colourNameDerived: string;
+  /** Имя цвета переопределено на составнике (D-12). */
+  colourNameOverridden: boolean;
+  /** Состав, переопределённый на составнике; null — выводится из BOM (D-03). */
+  fiberOverride: OverrideFiber[] | null;
   status: common_ColorwayLifecycleStatus | undefined;
   active: boolean;
-  /** Код страны словаря (`PL`); пусто — страну взяли из ORIGIN-этикетки или её нет. */
+  /** Код страны словаря (`PL`); пусто — страны у колорвея нет (дыра `no-country`). */
   countryCode: string;
   /** Имя страны для `MADE IN …` (натуральный регистр; капс делает раскладка). */
   countryName: string;
@@ -104,12 +115,32 @@ export type CareLabelData = {
   bom: LabelBomLine[];
   materials: Map<number, LabelMaterial>;
   fibers: FiberDict;
-  /** Уход стиля: коды в порядке словаря и EN-проза `short_prose` на каждый. */
-  care: { codes: string[]; prose: string[] };
+  /**
+   * Уход стиля: коды в порядке словаря и EN-проза. `prose` — то, что печатается (строки составника,
+   * если они заданы, иначе `short_prose` на каждый код); `derivedProse` — всегда словарная.
+   */
+  care: { codes: string[]; prose: string[]; derivedProse: string[]; proseOverridden: boolean };
+  /** Переопределения составника уровня карточки (labels rework). Пусто — константы ленты. */
+  label: CareLabelOverrides;
   runs: CareLabelRun[];
   /** Дыры уровня стиля (нет колорвеев, пустой уход, размер без номера). */
   holes: Hole[];
 };
+
+export type CareLabelOverrides = {
+  /** 0 — монограмма бренда. */
+  logoMediaId: number;
+  /** Разобранный SVG своего лого; null — монограмма (или лого не разобралось: тогда есть дыра). */
+  logo: Art | null;
+  /** Подпись QR; [] — `QR_CAPTION`. */
+  caption: string[];
+  /** Адрес; [] — `COMPANY_ADDRESS`. */
+  address: string[];
+  /** Ссылка QR — с карточки (раньше localStorage страницы печати). */
+  qr: { qrPreset: QrPreset; qrTemplate: string };
+};
+
+const QR_PRESETS: readonly QrPreset[] = ['storefront', 'custom', 'fixed'];
 
 export type CareLabelSourceInput = {
   techCard: common_TechCard;
@@ -124,6 +155,12 @@ export type CareLabelSourceInput = {
   /** `undefined` — словарь не загрузился (едет / отказ): общий блок `dictionary-unavailable`. */
   dictionary: common_Dictionary | undefined;
   runs: readonly common_ProductionRun[];
+  /**
+   * Текст SVG своего лого (`care_label.logo_media_id`). Нужен только когда лого задано: строка —
+   * приехал; `null` — не загрузился; `undefined` — ещё едет. Оба последних — блок `logo-unavailable`:
+   * лента с монограммой вместо заказанного лого — не «почти то же самое».
+   */
+  logoSvg?: string | null;
 };
 
 // ---------- мелочи ----------
@@ -142,7 +179,10 @@ export const variantSku = (baseSku: string, skuOrd: number): string =>
 const validSkuOrd = (n: number | undefined): number | null =>
   n != null && Number.isInteger(n) && n >= 1 && n <= 99 ? n : null;
 
-/** ORIGIN-этикетка — свободный текст («Made in Poland», «Poland»): вынуть страну. */
+/**
+ * ORIGIN-этикетка — свободный текст («Made in Poland», «Poland»): вынуть страну. ЛЕГАСИ: лента
+ * больше не берёт страну из ORIGIN (labels rework, D-06) — функцию читает только старый экран лейблов.
+ */
 export const originCountryText = (content: string | undefined): string =>
   (content ?? '')
     .trim()
@@ -291,15 +331,16 @@ export function adaptCareLabels(src: CareLabelSourceInput): CareLabelData {
   const enId = dict?.languages?.find((l) => norm(l.code ?? '') === 'en')?.id;
 
   const countryByCode = new Map<string, string>();
-  const countryCodeByName = new Map<string, string>();
   for (const c of dict?.countries ?? []) {
     if (!c.code) continue;
     countryByCode.set(c.code.toUpperCase(), c.name ?? c.code);
-    if (c.name) countryCodeByName.set(norm(c.name), c.code.toUpperCase());
   }
 
   const labels = insert?.labels ?? [];
-  const originText = originCountryText(labels.find((l) => l.labelType === ORIGIN)?.content);
+  const cl = insert?.careLabel;
+  const overrideByColorway = new Map(
+    (cl?.colorways ?? []).map((c) => [wireInt(c.colorwayId), c] as const),
+  );
 
   const holes: Hole[] = [];
   // Не загрузилось — блок, а не «пусто» (holes.ts): без каталога резолвер взял бы снимок состава из
@@ -348,10 +389,18 @@ export function adaptCareLabels(src: CareLabelSourceInput): CareLabelData {
       }
 
       const i18n = enId != null ? (c.nameI18n?.[String(enId)] ?? '').trim() : '';
-      const colourName = i18n || (c.devName ?? '').trim();
+      const colourNameDerived = i18n || (c.devName ?? '').trim();
+      const ov = overrideByColorway.get(id);
+      const colourNameOverride = (ov?.colourName ?? '').trim();
+      const colourName = colourNameOverride || colourNameDerived;
       if (!colourName) {
         cwHoles.push(hole('no-colour-name', `${label}: no English colour name`, ref));
       }
+      const fiberOverride: OverrideFiber[] = (ov?.fibers ?? []).flatMap((f) => {
+        const part = labelPartFromWire(f.part);
+        if (!part || part === 'NOT_ON_LABEL') return [];
+        return [{ part, fiberCode: (f.fiberCode ?? '').trim(), pct: wireInt(f.pct) }];
+      });
 
       const status = c.status;
       const active = status === ACTIVE;
@@ -365,8 +414,9 @@ export function adaptCareLabels(src: CareLabelSourceInput): CareLabelData {
         );
       }
 
-      // Страна: код колорвея (merchandising) → ORIGIN-этикетка стиля. Ответа колорвея нет — страна
-      // НЕИЗВЕСТНА (не «пусто»): ORIGIN стиля может быть не его страной, и лента соврала бы.
+      // Страна — ТОЛЬКО колорвея (merchandising.country_code). ORIGIN-этикетка стиля больше не
+      // источник (labels rework): страну без колорвея ставят на составнике, в сам колорвей. Ответа
+      // колорвея нет — страна НЕИЗВЕСТНА (блок), а не «пусто».
       const full = src.colorwayFull.get(id);
       const merch = full?.colorway?.colorway?.display?.merchandising;
       const code = (merch?.countryCode ?? '').trim().toUpperCase();
@@ -390,21 +440,13 @@ export function adaptCareLabels(src: CareLabelSourceInput): CareLabelData {
             hole('country-unknown', `${label}: country code ${code} is not in the dictionary`, ref),
           );
         }
-        if (name && originText && norm(originText) !== norm(name)) {
-          cwHoles.push(
-            hole(
-              'country-mismatch',
-              `${label}: colourway says ${name}, the ORIGIN label says ${originText}`,
-              ref,
-            ),
-          );
-        }
-      } else if (originText) {
-        countryName = originText;
-        countryCode = countryCodeByName.get(norm(originText)) ?? '';
       } else {
         cwHoles.push(
-          hole('no-country', `${label}: no country of origin (colourway or ORIGIN label)`, ref),
+          hole(
+            'no-country',
+            `${label}: no country of origin — set it on the composition label`,
+            ref,
+          ),
         );
       }
 
@@ -412,6 +454,9 @@ export function adaptCareLabels(src: CareLabelSourceInput): CareLabelData {
         id,
         baseSku,
         colourName,
+        colourNameDerived,
+        colourNameOverridden: !!colourNameOverride,
+        fiberOverride: fiberOverride.length ? fiberOverride : null,
         status,
         active,
         countryCode,
@@ -439,12 +484,42 @@ export function adaptCareLabels(src: CareLabelSourceInput): CareLabelData {
       .filter((e) => !!e.code && !!e.shortProse)
       .map((e) => [e.code!, e.shortProse!.trim()]),
   );
-  const prose = codes
+  const derivedProse = codes
     .map((c) => proseByCode.get(c) || vocabulary.byCode[c]?.shortProse?.trim() || '')
     .filter(Boolean);
+  const proseOverride = (cl?.careProseLines ?? []).map((l) => l.trim()).filter(Boolean);
+  const prose = proseOverride.length ? proseOverride : derivedProse;
   if (codes.length === 0) {
     holes.push(hole('care-empty', 'the card has no care symbols — the label prints without care'));
   }
+
+  // Лого составника: своё SVG → контуры; не приехало или не разобралось — БЛОК, не монограмма.
+  const logoMediaId = wireInt(cl?.logoMediaId);
+  let logo: Art | null = null;
+  if (logoMediaId > 0) {
+    if (typeof src.logoSvg !== 'string') {
+      holes.push(
+        hole(
+          'logo-unavailable',
+          'the composition label logo did not load — reload the page or put the brand mark back',
+        ),
+      );
+    } else {
+      try {
+        logo = parseLogoSvg(src.logoSvg);
+      } catch (e) {
+        holes.push(
+          hole(
+            'logo-svg-unsupported',
+            e instanceof ArtworkError ? e.message : `logo SVG: ${String(e)}`,
+          ),
+        );
+      }
+    }
+  }
+  const qrPreset = (QR_PRESETS as readonly string[]).includes(cl?.qrPreset ?? '')
+    ? (cl!.qrPreset as QrPreset)
+    : 'storefront';
 
   return {
     techCardId,
@@ -455,7 +530,14 @@ export function adaptCareLabels(src: CareLabelSourceInput): CareLabelData {
     bom: adaptBom(insert?.bomItems),
     materials: adaptMaterials(src.materials ?? []),
     fibers: adaptFibers(dict?.fibers),
-    care: { codes, prose },
+    care: { codes, prose, derivedProse, proseOverridden: proseOverride.length > 0 },
+    label: {
+      logoMediaId,
+      logo,
+      caption: (cl?.backCaptionLines ?? []).map((l) => l.trim()).filter(Boolean),
+      address: (cl?.addressLines ?? []).map((l) => l.trim()).filter(Boolean),
+      qr: { qrPreset, qrTemplate: (cl?.qrTemplate ?? '').trim() },
+    },
     runs: adaptRuns(src.runs),
     holes,
   };
@@ -465,6 +547,60 @@ export function adaptCareLabels(src: CareLabelSourceInput): CareLabelData {
 
 export const colorwayFullKey = (colorwayId: number) =>
   ['care-labels', 'colorway', colorwayId] as const;
+
+/**
+ * Полные колорвеи (страна) — по одному запросу на колорвей, общий ключ с составником на карточке:
+ * страна, поставленная там, видна здесь без перезагрузки (и наоборот).
+ */
+export function useColorwayFull(colorwayIds: readonly number[]) {
+  const full = useQueries({
+    queries: colorwayIds.map((id) => ({
+      queryKey: colorwayFullKey(id),
+      queryFn: () => adminService.GetColorwayByID({ colorwayId: id }),
+    })),
+  });
+  const loading = full.some((q) => q.isLoading);
+  const error = full.some((q) => q.isError);
+  // Ключ пересборки: ответы колорвеев меняются по одному, `full` пересоздаётся каждый рендер.
+  const key = full.map((q) => `${q.status}:${q.dataUpdatedAt}`).join(',');
+  const byId = useMemo(() => {
+    const m = new Map<number, GetColorwayByIDResponse>();
+    colorwayIds.forEach((id, i) => {
+      const q = full[i];
+      if (q?.isSuccess && q.data) m.set(id, q.data);
+    });
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [colorwayIds, key]);
+  return { byId, loading, error };
+}
+
+export const logoSvgKey = (mediaId: number, url: string) =>
+  ['care-labels', 'logo-svg', mediaId, url] as const;
+
+/**
+ * Текст SVG своего лого по id медиа. Адрес — из переданного `urlHint` (только что выбранное в слоте)
+ * или из библиотеки (`useMediaMap`, лучшее усилие: сервер отдаёт на составнике только id).
+ * `undefined` — едет, `null` — не загрузился (адреса нет или запрос упал).
+ */
+export function useLogoSvg(
+  mediaId: number,
+  urlHint?: string,
+): { svg: string | null | undefined; url: string } {
+  const library = useMediaMap();
+  const m = mediaId > 0 ? library.get(mediaId) : undefined;
+  const url = urlHint || m?.media?.fullSize?.mediaUrl || m?.media?.compressed?.mediaUrl || '';
+  const q = useQuery({
+    queryKey: logoSvgKey(mediaId, url),
+    queryFn: async () => (await fetchMediaBlob(url)).text(),
+    enabled: mediaId > 0 && !!url,
+    staleTime: Infinity,
+    retry: 1,
+  });
+  if (!(mediaId > 0)) return { svg: undefined, url: '' };
+  if (!url) return { svg: library.size > 0 ? null : undefined, url };
+  return { svg: q.isSuccess ? q.data : q.isError ? null : undefined, url };
+}
 
 /**
  * Все чтения экрана одной точкой. `deps` — для `usePrintReady`: кнопка ZIP ждёт, пока приедет всё,
@@ -485,17 +621,8 @@ export function useCareLabelSource(techCardId: number | undefined): {
     () => (tc.data?.colorways ?? []).map((c) => wireInt(c.colorwayId)).filter((id) => id > 0),
     [tc.data],
   );
-  const full = useQueries({
-    queries: colorwayIds.map((id) => ({
-      queryKey: colorwayFullKey(id),
-      queryFn: () => adminService.GetColorwayByID({ colorwayId: id }),
-    })),
-  });
-
-  const fullLoading = full.some((q) => q.isLoading);
-  const fullError = full.some((q) => q.isError);
-  // Ключ пересборки: ответы колорвеев меняются по одному, `full` пересоздаётся каждый рендер.
-  const fullKey = full.map((q) => `${q.status}:${q.dataUpdatedAt}`).join(',');
+  const full = useColorwayFull(colorwayIds);
+  const logo = useLogoSvg(wireInt(tc.data?.techCard?.careLabel?.logoMediaId));
   const materialsOk = materials.isSuccess;
 
   // В адаптер уходит только ПРИЕХАВШЕЕ: запрос, который упал, ещё едет или не успел к таймауту
@@ -503,27 +630,22 @@ export function useCareLabelSource(techCardId: number | undefined): {
   // значением с фолбэком. Гейт по таймауту такой блок не снимает — снимает только ответ.
   const data = useMemo(() => {
     if (!tc.data) return null;
-    const colorwayFull = new Map<number, GetColorwayByIDResponse>();
-    colorwayIds.forEach((id, i) => {
-      const q = full[i];
-      if (q?.isSuccess && q.data) colorwayFull.set(id, q.data);
-    });
     return adaptCareLabels({
       techCard: tc.data,
-      colorwayFull,
+      colorwayFull: full.byId,
       materials: materialsOk ? materials.data?.materials ?? [] : null,
       dictionary: dictionary ?? undefined,
       runs: runs.data?.runs ?? [],
+      logoSvg: logo.svg,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tc.data, colorwayIds, fullKey, materialsOk, materials.data, dictionary, runs.data]);
+  }, [tc.data, full.byId, materialsOk, materials.data, dictionary, runs.data, logo.svg]);
 
   const deps: PrintDep[] = [
     { label: 'tech card', status: depStatus(tc.isLoading, tc.isError) },
     { label: 'dictionary', status: depStatus(dictLoading, !!dictError) },
     { label: 'materials', status: depStatus(materials.isLoading, materials.isError) },
     { label: 'production runs', status: depStatus(runs.isLoading, runs.isError) },
-    { label: 'colourway countries', status: depStatus(fullLoading, fullError) },
+    { label: 'colourway countries', status: depStatus(full.loading, full.error) },
   ];
 
   return { data, deps, isLoading: tc.isLoading, isError: tc.isError };

@@ -101,6 +101,7 @@ import { ProductionTab } from './production-tab';
 import { SamplesTab } from './samples-tab';
 import { SizeIdsField } from './size-ids-field';
 import { SizeChartField } from './size-chart-field';
+import { CompositionLabelBlock } from './composition-label/composition-label-block';
 import { StyleFactsField } from './style-facts-field';
 import { STYLE_FACT_KEYS } from './tech-card-options';
 import { TechCardFittings } from './tech-card-fittings';
@@ -3462,7 +3463,11 @@ export function TechCardForm({
                 stay below, unchanged (D-07). */}
             <SectionStack hidden={activeTab !== 'labels'}>
               <div className='flex flex-col gap-12' data-labels-tab=''>
-                {/* COMPOSITION LABEL block — mounted by lane K */}
+                <CompositionLabelBlock
+                  techCard={techCard}
+                  techCardId={isEditMode && numId ? numId : undefined}
+                  canEdit={canWrite(SECTION.techCards) && !frozen}
+                />
                 <LabelsBlock />
                 <PackagingBlock />
               </div>
