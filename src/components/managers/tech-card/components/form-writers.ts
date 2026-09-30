@@ -209,6 +209,14 @@ const sameKey = (a?: string, b?: string) =>
 
 type KeyedField = 'garmentLabels' | 'packagingItems';
 
+/**
+ * `keepBare` — the patch never removes the row, even when it takes away its last fact. The label /
+ * item card passes it: there the row was born by an explicit add and goes away only by its ✕, so
+ * backspacing the one filled field must not make the card vanish from under the cursor (nor move
+ * it to the end of the list when the next keystroke re-adds it).
+ */
+export type KeyedOpts = { keepBare?: boolean };
+
 function upsertKeyed<T extends { key?: string }>(
   getValues: UseFormGetValues<TechCardFormData>,
   setValue: UseFormSetValue<TechCardFormData>,
@@ -216,6 +224,7 @@ function upsertKeyed<T extends { key?: string }>(
   blank: (key: string) => T,
   rawKey: string,
   patch: Partial<Omit<T, 'key'>>,
+  opts?: KeyedOpts,
 ): void {
   const key = rawKey.trim();
   if (!key) return;
@@ -225,7 +234,9 @@ function upsertKeyed<T extends { key?: string }>(
   // `key` is identity and is never patched: the stored spelling survives.
   const merged = { ...before, ...patch, key: before.key } as T;
   const lostLastFact =
-    hasFacts(before as Record<string, unknown>) && !hasFacts(merged as Record<string, unknown>);
+    !opts?.keepBare &&
+    hasFacts(before as Record<string, unknown>) &&
+    !hasFacts(merged as Record<string, unknown>);
   const next = lostLastFact
     ? cur.filter((_, i) => i !== k)
     : k >= 0
@@ -254,8 +265,9 @@ export function upsertGarmentLabel(
   setValue: UseFormSetValue<TechCardFormData>,
   key: string,
   patch: Partial<Omit<FormGarmentLabel, 'key'>>,
+  opts?: KeyedOpts,
 ): void {
-  upsertKeyed(getValues, setValue, 'garmentLabels', blankGarmentLabel, key, patch);
+  upsertKeyed(getValues, setValue, 'garmentLabels', blankGarmentLabel, key, patch, opts);
 }
 
 export function removeGarmentLabel(
@@ -272,8 +284,9 @@ export function upsertPackagingItem(
   setValue: UseFormSetValue<TechCardFormData>,
   key: string,
   patch: Partial<Omit<FormPackagingItem, 'key'>>,
+  opts?: KeyedOpts,
 ): void {
-  upsertKeyed(getValues, setValue, 'packagingItems', blankPackagingItem, key, patch);
+  upsertKeyed(getValues, setValue, 'packagingItems', blankPackagingItem, key, patch, opts);
 }
 
 export function removePackagingItem(
