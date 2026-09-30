@@ -36,7 +36,7 @@ import { useProductionRuns } from 'components/managers/production-runs/component
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { wireInt } from 'components/managers/tech-card/components/wire-int';
 import { fetchMediaBlob } from 'lib/features/media-blob';
-import { useDictionary } from 'lib/providers/dictionary-provider';
+import { useLabelDictionary } from './use-label-dictionary';
 import { useMemo } from 'react';
 import { ArtworkError, type Art } from './art-types';
 import type { OverrideFiber } from './composition-override';
@@ -617,7 +617,7 @@ export function useCareLabelSource(techCardId: number | undefined): {
   isError: boolean;
 } {
   const tc = useTechCard(techCardId);
-  const { dictionary, loading: dictLoading, error: dictError } = useDictionary();
+  const { dictionary, loading: dictLoading, error: dictError } = useLabelDictionary();
   const materials = useMaterials('', true);
   const runs = useProductionRuns(techCardId ?? 0, '', 0, false, !!techCardId);
 

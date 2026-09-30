@@ -20,6 +20,7 @@ import {
 } from './composition-label/label-summary';
 import { garmentLabelKinds, kindLabel, packagingItemKinds } from './tech-card-options';
 import { wireInt } from './wire-int';
+import { useLabelDictionary } from '../care-labels/use-label-dictionary';
 
 /**
  * Строки составника колорвея по умолчанию для печати. Страна живёт в самом колорвее, поэтому
@@ -40,17 +41,21 @@ export function useTechPackCompositionLabel({
 }): { summary: CompositionLabelSummary | null; status: PrintDepStatus } {
   const ids = useMemo(() => (colorwayId > 0 ? [colorwayId] : []), [colorwayId]);
   const full = useColorwayFull(ids);
+  // Countries come from ListCountries (GetDictionary never fills them); the rest of the tech pack
+  // keeps its own dictionary, so a failed country read only affects this sheet.
+  const labelDict = useLabelDictionary().dictionary;
+  const dict = labelDict ?? dictionary;
   const summary = useMemo(() => {
     if (!(colorwayId > 0)) return null;
     const data = adaptCareLabels({
       techCard,
       colorwayFull: full.byId,
       materials,
-      dictionary,
+      dictionary: dict,
       runs: [],
     });
     return compositionLabelSummary(data, colorwayId);
-  }, [techCard, colorwayId, full.byId, materials, dictionary]);
+  }, [techCard, colorwayId, full.byId, materials, dict]);
   return { summary, status: depStatus(full.loading, full.error) };
 }
 

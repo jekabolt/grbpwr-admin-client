@@ -4,7 +4,7 @@
 // у ZIP: что в блоке, то и в архиве.
 import type { common_TechCard, GetColorwayByIDResponse } from 'api/proto-http/admin';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
-import { useDictionary } from 'lib/providers/dictionary-provider';
+import { useLabelDictionary } from '../../care-labels/use-label-dictionary';
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import {
@@ -87,7 +87,7 @@ export function useCompositionLabel({
   const sizeIds = useWatch({ control, name: 'sizeIds' }) as number[] | undefined;
   const styleNumber = useWatch({ control, name: 'styleNumber' }) as string | undefined;
 
-  const { dictionary } = useDictionary();
+  const { dictionary } = useLabelDictionary();
   const materials = useMaterials('', true);
   const colorwayIds = useMemo(
     () => (techCard?.colorways ?? []).map((c) => wireInt(c.colorwayId)).filter((id) => id > 0),

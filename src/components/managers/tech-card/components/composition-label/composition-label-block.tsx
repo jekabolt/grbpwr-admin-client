@@ -8,7 +8,7 @@ import type { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { SECTION } from 'constants/routes';
-import { useDictionary } from 'lib/providers/dictionary-provider';
+import { useLabelDictionary } from '../../care-labels/use-label-dictionary';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -69,7 +69,7 @@ export function CompositionLabelBlock({
   const careLabel = useWatch({ control, name: 'careLabel' }) as FormCareLabel | undefined;
   const { canWrite } = usePermissions();
   const canStyle = canWrite(SECTION.products);
-  const { dictionary } = useDictionary();
+  const { dictionary } = useLabelDictionary();
   const qc = useQueryClient();
   const staging = useTechCardStaging();
 
@@ -91,10 +91,16 @@ export function CompositionLabelBlock({
     () =>
       (dictionary?.countries ?? [])
         .filter((c) => !!c.code)
-        .map((c) => ({ code: c.code!.toUpperCase(), name: c.name || c.code! }))
+        .map((c) => ({
+          code: c.code!.toUpperCase(),
+          name: c.name || c.code!,
+          active: c.active !== false,
+        }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     [dictionary?.countries],
   );
+  // The picker offers active countries only; a stored code still resolves to its name when inactive.
+  const pickableCountries = useMemo(() => countries.filter((c) => c.active), [countries]);
   const countryName = (code: string) => countries.find((c) => c.code === code)?.name ?? code;
   const titleOf = (id: number) => {
     const c = colorways.find((x) => x.id === id);
@@ -463,7 +469,7 @@ export function CompositionLabelBlock({
                   countryName={cw.countryName}
                   pickedCode={picks.get(cw.id)}
                   unavailable={cw.holes.some((h) => h.code === 'colorway-unavailable')}
-                  countries={countries}
+                  countries={pickableCountries}
                   othersWithout={
                     colorways.filter(
                       (c) =>
