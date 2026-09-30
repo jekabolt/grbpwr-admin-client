@@ -3468,8 +3468,8 @@ export function TechCardForm({
                   techCardId={isEditMode && numId ? numId : undefined}
                   canEdit={canWrite(SECTION.techCards) && !frozen}
                 />
-                <LabelsBlock />
-                <PackagingBlock />
+                <LabelsBlock resolvedMedia={techCard?.resolvedLabelMedia} />
+                <PackagingBlock resolvedMedia={techCard?.resolvedLabelMedia} />
               </div>
               {/* Assembly bill + packaging recipe are per-style, managed via their own RPCs — they
                 need a saved card id. For a brand-new card, prompt to Save (which lands back here)

@@ -48,6 +48,7 @@ import type {
   LabelUsage,
 } from './composition-resolver';
 import { hole, type Hole } from './holes';
+import { labelMediaFullUrl, logoSvgState, type LabelMediaSource } from './label-media';
 import { labelPartFromWire, type LabelPartWire } from './label-parts';
 import { parseLogoSvg } from './logo-svg';
 import { isLabelLang, type LabelLang } from './phrases';
@@ -579,17 +580,18 @@ export const logoSvgKey = (mediaId: number, url: string) =>
   ['care-labels', 'logo-svg', mediaId, url] as const;
 
 /**
- * Текст SVG своего лого по id медиа. Адрес — из переданного `urlHint` (только что выбранное в слоте)
- * или из библиотеки (`useMediaMap`, лучшее усилие: сервер отдаёт на составнике только id).
+ * Текст SVG своего лого по id медиа. Адрес — из переданного `urlHint` (только что выбранное в слоте),
+ * затем из `resolvedLabelMedia` карточки (сервер разрешает id лого на чтении, M-02), и лишь затем из
+ * библиотеки (`useMediaMap`, последние 500 — запасной путь для выбранного до сохранения).
  * `undefined` — едет, `null` — не загрузился (адреса нет или запрос упал).
  */
 export function useLogoSvg(
   mediaId: number,
   urlHint?: string,
+  resolved?: LabelMediaSource,
 ): { svg: string | null | undefined; url: string } {
   const library = useMediaMap();
-  const m = mediaId > 0 ? library.get(mediaId) : undefined;
-  const url = urlHint || m?.media?.fullSize?.mediaUrl || m?.media?.compressed?.mediaUrl || '';
+  const url = urlHint || (mediaId > 0 ? labelMediaFullUrl(mediaId, resolved, library) : '');
   const q = useQuery({
     queryKey: logoSvgKey(mediaId, url),
     queryFn: async () => (await fetchMediaBlob(url)).text(),
@@ -598,8 +600,10 @@ export function useLogoSvg(
     retry: 1,
   });
   if (!(mediaId > 0)) return { svg: undefined, url: '' };
-  if (!url) return { svg: library.size > 0 ? null : undefined, url };
-  return { svg: q.isSuccess ? q.data : q.isError ? null : undefined, url };
+  return {
+    svg: logoSvgState(mediaId, url, library.size > 0 || !!resolved?.length, q),
+    url,
+  };
 }
 
 /**
@@ -622,7 +626,11 @@ export function useCareLabelSource(techCardId: number | undefined): {
     [tc.data],
   );
   const full = useColorwayFull(colorwayIds);
-  const logo = useLogoSvg(wireInt(tc.data?.techCard?.careLabel?.logoMediaId));
+  const logo = useLogoSvg(
+    wireInt(tc.data?.techCard?.careLabel?.logoMediaId),
+    undefined,
+    tc.data?.resolvedLabelMedia,
+  );
   const materialsOk = materials.isSuccess;
 
   // В адаптер уходит только ПРИЕХАВШЕЕ: запрос, который упал, ещё едет или не успел к таймауту

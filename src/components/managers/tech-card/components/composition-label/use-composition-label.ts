@@ -95,7 +95,8 @@ export function useCompositionLabel({
   );
   const full = useColorwayFull(colorwayIds);
   const logoMediaId = wireInt(careLabel?.logoMediaId);
-  const logo = useLogoSvg(logoMediaId, logoUrlHint);
+  // Сервер разрешает id лого на чтении карточки (M-02); библиотека — запасной путь внутри хука.
+  const logo = useLogoSvg(logoMediaId, logoUrlHint, techCard?.resolvedLabelMedia);
 
   const colorwayFull = useMemo(() => {
     if (!countryPicks.size) return full.byId;

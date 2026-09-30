@@ -1,4 +1,4 @@
-import { common_MediaFull } from 'api/proto-http/admin';
+import { common_MediaFull, type common_TechCardMediaFull } from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -7,6 +7,7 @@ import { MediaViewer, MediaViewerItem } from 'ui/components/media-viewer';
 import { Section } from 'ui/components/section';
 import ComboField from 'ui/form/fields/combo-field';
 import InputField from 'ui/form/fields/input-field';
+import { labelMediaOf } from '../care-labels/label-media';
 import {
   removeGarmentLabel,
   removePackagingItem,
@@ -107,6 +108,7 @@ function KeyedCards({
   fields,
   mockupBlocking,
   writers,
+  resolvedMedia,
 }: {
   field: 'garmentLabels' | 'packagingItems';
   kinds: LabelKind[];
@@ -115,16 +117,19 @@ function KeyedCards({
   fields: CardField[];
   mockupBlocking: boolean;
   writers: Writers;
+  /** The card's `resolvedLabelMedia` (M-02): every saved mockup id, resolved by the server. */
+  resolvedMedia?: readonly common_TechCardMediaFull[];
 }): JSX.Element {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const rows = (useWatch({ control, name: field }) ?? []) as CardRow[];
-  // Media are ids on the wire; the library map resolves them, and a just-picked one is cached for
-  // the session so its thumbnail shows before the library query catches up (aspects rule).
+  // Media are ids on the wire. The card's resolvedLabelMedia resolves every SAVED id (M-02: the
+  // library map holds only the latest 500 files); a just-picked one is cached for the session, and
+  // the library map stays the last fallback for media picked before a save / refetch.
   const libraryMap = useMediaMap();
   const [cache, setCache] = useState<Map<number, common_MediaFull>>(new Map());
   const [viewer, setViewer] = useState<{ items: MediaViewerItem[]; index: number } | null>(null);
 
-  const mediaOf = (id: number) => cache.get(id) ?? libraryMap.get(id);
+  const mediaOf = (id: number) => cache.get(id) ?? labelMediaOf(id, resolvedMedia, libraryMap);
   const urlOf = (id: number) => {
     const m = mediaOf(id)?.media;
     return m?.thumbnail?.mediaUrl || m?.compressed?.mediaUrl || m?.fullSize?.mediaUrl || '';
@@ -203,7 +208,11 @@ function KeyedCards({
 }
 
 /** LABELS — every label on the garment but the composition one, each with its mockup (R-05..R-07). */
-export function LabelsBlock(): JSX.Element {
+export function LabelsBlock({
+  resolvedMedia,
+}: {
+  resolvedMedia?: readonly common_TechCardMediaFull[];
+}): JSX.Element {
   return (
     <Section title='labels' question='· every other label on the garment, each with its mockup'>
       <KeyedCards
@@ -214,6 +223,7 @@ export function LabelsBlock(): JSX.Element {
         fields={LABEL_FIELDS}
         mockupBlocking
         writers={{ upsert: upsertGarmentLabel, remove: removeGarmentLabel }}
+        resolvedMedia={resolvedMedia}
       />
     </Section>
   );
@@ -224,7 +234,11 @@ export function LabelsBlock(): JSX.Element {
  * then the packaging items, same grammar as labels (R-09). The deprecated polybag / bag sticker /
  * inserts text fields are not shown; the form still round-trips what it read.
  */
-export function PackagingBlock(): JSX.Element {
+export function PackagingBlock({
+  resolvedMedia,
+}: {
+  resolvedMedia?: readonly common_TechCardMediaFull[];
+}): JSX.Element {
   return (
     <Section title='packaging' question='· the carton, and every item the garment ships with'>
       <div id='packaging-spec'>
@@ -277,6 +291,7 @@ export function PackagingBlock(): JSX.Element {
           fields={ITEM_FIELDS}
           mockupBlocking={false}
           writers={{ upsert: upsertPackagingItem, remove: removePackagingItem }}
+          resolvedMedia={resolvedMedia}
         />
       </div>
     </Section>

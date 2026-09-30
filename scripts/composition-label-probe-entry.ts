@@ -22,3 +22,7 @@ export {
 export { COMMIT_ORDER } from '../src/components/managers/tech-card/components/useTechCardStaging';
 export { parseLogoSvg } from '../src/components/managers/tech-card/care-labels/logo-svg';
 export { logoPrims } from '../src/components/managers/tech-card/care-labels/artwork';
+export {
+  labelMediaFullUrl,
+  logoSvgState,
+} from '../src/components/managers/tech-card/care-labels/label-media';

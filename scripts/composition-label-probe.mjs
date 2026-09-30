@@ -14,6 +14,9 @@
 //       выбор уходит из очереди;
 //   (E) переопределения доходят до ленты: подпись QR, адрес, проза ухода, своё SVG-лого (кривые, в
 //       квадрате лого); неподдерживаемое SVG — блок logo-svg-unsupported, а не монограмма.
+//   (F) лого, которого НЕТ в библиотеке (useMediaMap держит последние 500), берётся из
+//       resolvedLabelMedia карточки (M-02): адрес есть, блока logo-unavailable нет; негативный
+//       контроль — без разрешённой записи адреса нет и блок срабатывает.
 //
 // Каждое обещание проверено и на МУТАНТЕ — копии модуля в памяти сборщика с изменённой строкой; его
 // проверка обязана покраснеть. Репозиторий не трогается.
@@ -81,6 +84,17 @@ const MUTANTS = {
       ],
     ],
     breaks: 'D',
+  },
+  // (F) разрешённое сервером медиа этикеток игнорируется — снова только библиотека
+  resolvedIgnored: {
+    edits: [
+      [
+        `${CL}/label-media.ts`,
+        '  const r = resolved?.find((x) => x.media?.id === mediaId)?.media;',
+        '  const r = undefined;',
+      ],
+    ],
+    breaks: 'F',
   },
   // (E) адрес составника не доезжает до задания печати
   addressDropped: {
@@ -674,6 +688,52 @@ async function run(M, B, sh) {
     ok(
       'E · «↺ derived» on the logo: the brand mark, no logo hole',
       aFace(fromForm()) === aFace(base) && !fromForm().holes.some((h) => h.code.startsWith('logo')),
+    );
+
+    // (F) M-02: логотип 4242 — старше 500 последних файлов, в библиотеке его нет.
+    const LOGO_URL = 'https://cdn.stub.invalid/logo-4242.svg';
+    const library = new Map([[1, { id: 1, media: { fullSize: { mediaUrl: 'https://x/1.jpg' } } }]]);
+    const resolved = [{ media: { id: 4242, media: { fullSize: { mediaUrl: LOGO_URL } } } }];
+    const logoCard = (res) => ({
+      ...card({ logoMediaId: 4242, qrPreset: 'storefront' }),
+      resolvedLabelMedia: res,
+    });
+    // Тот же путь, что у useLogoSvg: адрес → (запрос SVG) → состояние для адаптера.
+    const logoFor = (res) => {
+      const url = M.labelMediaFullUrl(4242, res, library);
+      const fetched =
+        url === LOGO_URL
+          ? { isSuccess: true, isError: false, data: svg }
+          : { isSuccess: false, isError: false };
+      return {
+        url,
+        data: M.adaptCareLabels({
+          techCard: logoCard(res),
+          colorwayFull: FULL,
+          materials: MATERIALS,
+          dictionary: DICT,
+          runs: [],
+          logoSvg: M.logoSvgState(4242, url, library.size > 0 || !!res?.length, fetched),
+        }),
+      };
+    };
+    const hit = logoFor(resolved);
+    ok(
+      'F · a logo id missing from the library resolves from resolvedLabelMedia (no logo hole)',
+      !library.has(4242) &&
+        hit.url === LOGO_URL &&
+        hit.data.label.logo !== null &&
+        !hit.data.holes.some((h) => h.code.startsWith('logo')),
+    );
+    const miss = logoFor([]);
+    ok(
+      'F · negative control: without the resolved entry the logo-unavailable hole fires',
+      miss.url === '' &&
+        miss.data.holes.some((h) => h.code === 'logo-unavailable' && h.level === 'block'),
+    );
+    ok(
+      'F · a just-picked logo still resolves from the library fallback',
+      M.labelMediaFullUrl(1, resolved, library) === 'https://x/1.jpg',
     );
   }
   return out;

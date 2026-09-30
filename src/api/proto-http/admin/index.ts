@@ -10288,6 +10288,12 @@ export type common_TechCard = {
   // URL и размеры это read-данные, и класть их во вход записи значило бы принимать от клиента то,
   // что сервер обязан знать сам.
   resolvedOperationMedia: common_TechCardMediaFull[] | undefined;
+  // OUTPUT-ONLY (M-02): the labels rework's media resolved — the composition label's logo override
+  // (care_label.logo_media_id) and every garment-label and packaging-item mockup (media_ids),
+  // distinct by media_id. The write side carries ids only; without this list the client could turn
+  // them into pictures only through its media-library page, which holds just the latest files.
+  // Ignored on write.
+  resolvedLabelMedia: common_TechCardMediaFull[] | undefined;
 };
 
 // TechCardRevision is one entry in the spec-document changelog (what changed in
