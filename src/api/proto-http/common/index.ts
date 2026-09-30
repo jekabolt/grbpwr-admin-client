@@ -3371,6 +3371,62 @@ export type TechCardPackaging = {
   notes: string | undefined;
 };
 
+// TechCardCareLabelFiber is one fibre row of a colourway's composition OVERRIDE on the composition
+// label (labels rework, 0386). The ten translations come from the fibre dictionary.
+export type TechCardCareLabelFiber = {
+  part: TechCardBomLabelPart | undefined;
+  fiberCode: string | undefined;
+  pct: number | undefined;
+};
+
+// TechCardCareLabelColorway holds the per-colourway overrides of the composition label.
+export type TechCardCareLabelColorway = {
+  colorwayId: number | undefined;
+  colourName: string | undefined;
+  fibers: TechCardCareLabelFiber[] | undefined;
+};
+
+// TechCardCareLabel — СОСТАВНИК: the overrides of the always-present composition label. Every field
+// empty = the derived value (brand mark, dictionary prose, storefront QR, default caption, company
+// address). Lines are sent one string per printed line and must not contain a newline.
+export type TechCardCareLabel = {
+  logoMediaId: number | undefined;
+  careProseLines: string[] | undefined;
+  qrPreset: string | undefined;
+  qrTemplate: string | undefined;
+  backCaptionLines: string[] | undefined;
+  addressLines: string[] | undefined;
+  colorways: TechCardCareLabelColorway[] | undefined;
+};
+
+// TechCardGarmentLabel is one label on the garment other than the composition label (labels rework,
+// 0386), shaped like a construction aspect: a known key or a custom name, a mockup, and where / how
+// it goes on. A label without a mockup is saved, but the LABELS sign-off cannot be approved (D-04).
+export type TechCardGarmentLabel = {
+  key: string | undefined;
+  placement: string | undefined;
+  attachment: string | undefined;
+  folding: string | undefined;
+  size: string | undefined;
+  qtyPerGarment: number | undefined;
+  bomItemId: number | undefined;
+  note: string | undefined;
+  mediaIds: number[] | undefined;
+};
+
+// TechCardPackagingItem is one packaging item (labels rework, 0386): the label card with two words
+// changed — `usage` instead of placement, `packing` instead of attachment + folding.
+export type TechCardPackagingItem = {
+  key: string | undefined;
+  usage: string | undefined;
+  packing: string | undefined;
+  size: string | undefined;
+  qtyPerGarment: number | undefined;
+  bomItemId: number | undefined;
+  note: string | undefined;
+  mediaIds: number[] | undefined;
+};
+
 // TechCardCostLine is one currency bucket of the materials rollup.
 export type TechCardCostLine = {
   currency: string | undefined;
@@ -3713,6 +3769,9 @@ export type TechCardInsert = {
   // production (Phase 3): construction, operations, labels, packaging, costing.
   construction: TechCardConstruction | undefined;
   operations: TechCardOperation[] | undefined;
+  // DEPRECATED (labels rework, 0386): READ-ONLY until the drop migration (I-19); IGNORED ON WRITE —
+  // the save neither clears nor inserts tech_card_label any more. The labels live in garment_labels
+  // (121) and the composition label in care_label (120). Not in any section digest.
   labels: TechCardLabel[] | undefined;
   packaging: TechCardPackaging | undefined;
   costing: TechCardCosting | undefined;
@@ -3905,6 +3964,21 @@ export type TechCardInsert = {
   // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции — которым бандлом сохранили
   // карточку, не то, от чего может зависеть подпись.
   bomQtyAware: boolean | undefined;
+  // СОСТАВНИК (labels rework, 0386) — the composition (care) label's overrides, 1:1 with the card.
+  // Presence-aware like packaging: null on write = KEEP the stored record; a present message replaces
+  // it (a present-but-empty one resets every line to derived). Null on read = nothing overridden.
+  careLabel: TechCardCareLabel | undefined;
+  // The garment labels other than the composition label (brand, size, flag, hangtag, … or a custom
+  // name). Full replace on write — but only from a client that sets labels_aware (123).
+  garmentLabels: TechCardGarmentLabel[] | undefined;
+  // The packaging items (polybag, tissue, insert card, … or a custom name). Full replace on write —
+  // but only from a client that sets labels_aware (123). The carton facts stay on `packaging` (46).
+  packagingItems: TechCardPackagingItem[] | undefined;
+  // ЩИТ СОВМЕСТИМОСТИ для garment_labels (121) и packaging_items (122): оба — полная замена, и
+  // payload бандла, который про них не знает, неотличим от «удалили все». Без флага UpdateTechCard
+  // СОХРАНЯЕТ оба списка как есть (create/clone пишут что прислано). Флаг не фильтрует разбор.
+  // ТРАНСПОРТ, НЕ СОДЕРЖАНИЕ: не входит ни в один дайджест секции.
+  labelsAware: boolean | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
