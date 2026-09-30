@@ -13,6 +13,7 @@
     "build:check": "tsc && vite build",
     "preview": "vite preview",
     "nest:probe": "node scripts/nest-probe.mjs",
+    "labels:foundation": "node scripts/labels-foundation-probe.mjs",
     "nest:chirality": "node scripts/marker-chirality-probe.mjs",
     "marker:composition": "node scripts/marker-composition-probe.mjs",
     "nest:budget": "node scripts/nest-budget-probe.mjs",
