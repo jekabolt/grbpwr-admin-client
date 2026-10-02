@@ -46,6 +46,7 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
  * ═══ THE LAYOUT IS THE MOCK-UP'S `histBlock()` (`_core.js`), THE MECHANISM IS THE PRODUCT'S ═════
  * Top to bottom (r2 п.22, п.23, п.27 — три правки владельца поверх макета):
  *   · header  `GENERATION HISTORY · nothing here is deleted`  [2 PATTERN RUNS ▾]  ← И СВЁРТКА ТОЖЕ
+ *             (FLAT, 03.10: `GENERATION HISTORY   N RUNS` — plain text, no subtitle, no doors)
  *   · row                                                          [· 0 ARCHIVED ▸]
  *   · body    rows of runs: the tiles of what came back, then the meta line
  *             (the run standing on the workbench under GENERATE: «run N · on the bench ↑» in place
@@ -1027,7 +1028,8 @@ export function GenerationHistory({
       <Section
         id='design-history'
         title='generation history'
-        question='· nothing here is deleted'
+        /* FLAT (03.10, owner 10b): «просто текстом сколько ранов было и все» — no subtitle. */
+        question={grid ? undefined : '· nothing here is deleted'}
         /* ═══ ОДИН ОРГАН СВОРАЧИВАНИЯ, И ОН СТОИТ ТАМ, ГДЕ СТОЯЛО ЧИСЛО (r2 п.23) ══════════════
            Владелец: «кнопка HIDE должна быть на месте „23 RUNS“ и выглядеть органично». Было ДВА
            органа об одном и том же: пилюля-счётчик в шапке и отдельная линейка `RUNS ─── HIDE ▾`
