@@ -114,6 +114,32 @@ try {
   );
   check('split: not once cut', !a.offersSplit({ views: ['front', 'back', 'side'], splitInto: 3 }));
 
+  // FX6 (gate 03.10): a cut sheet of a run that is NOT on the band's first page (a history page read
+  // on demand, the bench's run read by id) counts its pieces from its own row: no SPLIT again.
+  const sheet = { id: 30, compositeViews: ['front', 'back'] };
+  const row = [
+    sheet,
+    { id: 31, derivedFrom: 30, derivation: 'crop' },
+    { id: 32, derivedFrom: 30, derivation: 'crop' },
+  ];
+  const offPage = a.readComposite({ runs: [] }, sheet, row);
+  check(
+    'split: an older cut sheet counts its pieces from its row',
+    offPage.splitInto === 2,
+    String(offPage.splitInto),
+  );
+  check('split: an older cut sheet offers no SPLIT', !a.offersSplit(offPage));
+  const onPage = a.readComposite({ runs: [{ id: 3, pictures: row }] }, sheet, row);
+  check(
+    'split: on the first page the count is the same (no double count)',
+    onPage.splitInto === 2,
+    String(onPage.splitInto),
+  );
+  check(
+    'split: an uncut sheet off the page still offers SPLIT',
+    a.offersSplit(a.readComposite({ runs: [] }, sheet, [sheet])),
+  );
+
   // FX3 (gate 03.10): the FLAT history grid shows EVERY picture of a run, hidden ones included (the
   // row dims them), so hiding pictures never makes a run vanish from the history.
   const HID = '2026-10-01T10:00:00Z';

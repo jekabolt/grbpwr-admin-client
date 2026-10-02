@@ -397,7 +397,7 @@ export function RunTile({
   const replaced = (picture.replacedBy ?? 0) > 0;
   // WHAT THIS FILE DECLARES ABOUT ITSELF — see `composite.tsx`. Nothing here infers compositeness
   // from what the run ASKED for.
-  const facts = readComposite(band, picture);
+  const facts = readComposite(band, picture, siblings);
   const composite = facts.declared;
   const provenance = readProvenance(picture);
   const handle = pictureHandle(picture);

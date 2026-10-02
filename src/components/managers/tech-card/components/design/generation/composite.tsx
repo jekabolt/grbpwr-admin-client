@@ -81,21 +81,40 @@ export const NO_COMPOSITE: CompositeFacts = { declared: false, views: [], splitI
  * parent's `run_id` and therefore never leaves its parent's row. The extra reach only serves the
  * upload shelf, which has families but no deck.
  */
-function countDerivedFrom(band: GetDesignBandResponse, parentId: number): number {
+function countDerivedFrom(
+  band: GetDesignBandResponse,
+  parentId: number,
+  own: readonly common_DesignPicture[] = [],
+): number {
   if (parentId <= 0) return 0;
-  const pool: common_DesignPicture[] = [];
-  for (const run of band.runs ?? []) pool.push(...(run.pictures ?? []));
-  for (const batch of band.batches ?? []) pool.push(...(batch.pictures ?? []));
-  return (cropFamilies(pool).membersOf.get(parentId) ?? []).length;
+  const pool = new Map<number, common_DesignPicture>();
+  const add = (pictures: readonly common_DesignPicture[] | undefined) => {
+    for (const picture of pictures ?? []) {
+      const id = picture.id ?? 0;
+      if (id > 0 && !pool.has(id)) pool.set(id, picture);
+    }
+  };
+  for (const run of band.runs ?? []) add(run.pictures);
+  for (const batch of band.batches ?? []) add(batch.pictures);
+  add(own);
+  return (cropFamilies([...pool.values()]).membersOf.get(parentId) ?? []).length;
 }
 
+/**
+ * ⚠ `siblings` — THE PICTURES OF THE ROW THE TILE STANDS IN (03.10, gate FX6). A run read past the
+ * band's first page (a history page loaded on demand, or the run put on the bench and read by id)
+ * is not in `band.runs`, so a count over the band alone found none of its pieces and an already-cut
+ * sheet offered SPLIT again. A crop inherits its parent's `run_id`, so the row's own pictures always
+ * hold its pieces; they are counted together with the band.
+ */
 export function readComposite(
   band: GetDesignBandResponse,
   picture: common_DesignPicture,
+  siblings?: readonly common_DesignPicture[],
 ): CompositeFacts {
   const views = (picture.compositeViews ?? []).map((view) => normaliseViewKey(view));
   if (!views.length) return NO_COMPOSITE;
-  return { declared: true, views, splitInto: countDerivedFrom(band, picture.id ?? 0) };
+  return { declared: true, views, splitInto: countDerivedFrom(band, picture.id ?? 0, siblings) };
 }
 
 /**
