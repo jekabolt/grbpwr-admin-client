@@ -396,6 +396,12 @@ export type FocusedAnnotatorProps = {
    */
   zoomEditorReserve?: boolean;
   /**
+   * Орган `zoom` на кадре. По умолчанию есть у всех экранов; мудборд его снимает (слова владельца:
+   * «на ховер плиток картинок не надо показывать кнопку зум»). Без него увеличенного вида у экрана
+   * нет вовсе — других дверей в зум галерея не держит.
+   */
+  zoomable?: boolean;
+  /**
    * РЕЖИМ ВЫБОРА ПЛИТКИ: пока он взведён, клик по кадру НЕ ставит указание, а возвращает вид
    * вызывающему.
    *
@@ -458,6 +464,7 @@ export function FocusedAnnotator({
   pinText = 'legend',
   preferNaturalAspect = false,
   zoomEditorReserve = false,
+  zoomable = true,
   tilePick,
   selectedKey,
   onSelectedChange,
@@ -963,12 +970,14 @@ export function FocusedAnnotator({
                       <div className='flex items-center gap-1'>
                         {/* Зум — ЧИТАТЕЛЬСКИЙ жест и остаётся на выпущенной карточке: мерку и дугу
                             на плитке в 300px не разглядеть, увеличение и есть способ их прочесть. */}
-                        <FrameButton
-                          ariaLabel={`zoom · pan · edit — picture ${i + 1}`}
-                          onPress={() => setZoomIndex(i)}
-                        >
-                          zoom
-                        </FrameButton>
+                        {zoomable && (
+                          <FrameButton
+                            ariaLabel={`zoom · pan · edit — picture ${i + 1}`}
+                            onPress={() => setZoomIndex(i)}
+                          >
+                            zoom
+                          </FrameButton>
+                        )}
                         {!readOnly && (
                           <FrameButton
                             ariaLabel={`remove image ${i + 1}`}
@@ -1097,12 +1106,14 @@ export function FocusedAnnotator({
                 hoverNotes={pinText === 'hover'}
                 halo={halo}
                 cornerSlot={
-                  <FrameButton
-                    ariaLabel='zoom · pan · edit'
-                    onPress={() => setZoomIndex(focusedViewerIndex)}
-                  >
-                    zoom
-                  </FrameButton>
+                  zoomable ? (
+                    <FrameButton
+                      ariaLabel='zoom · pan · edit'
+                      onPress={() => setZoomIndex(focusedViewerIndex)}
+                    >
+                      zoom
+                    </FrameButton>
+                  ) : undefined
                 }
               />
 

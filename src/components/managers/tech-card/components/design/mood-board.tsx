@@ -1,4 +1,5 @@
 import { common_DesignPicture, common_MediaFull } from 'api/proto-http/admin';
+import { MediaRecropDialog } from 'components/managers/media/components/media-recrop-dialog';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
@@ -19,7 +20,7 @@ import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 import { create } from 'zustand';
 
 import type { TechCardFormData } from '../schema';
-import { CalloutRail, CalloutRowBody, onDoorKey, type CalloutRailRow } from './callout-rail';
+import { CalloutRail, onDoorKey, type CalloutRailRow } from './callout-rail';
 import { serverSpeaksDesign } from './capability';
 import { Counter, GROUP_SEAM } from './core';
 import { cardFactsContext } from './core/card-facts';
@@ -210,6 +211,20 @@ export function takeIntoInput(
 }
 
 /**
+ * Кроп плитки (T01): кадрированная копия встаёт НА МЕСТО оригинала в ряду доски — та же позиция,
+ * тот же вид строки и та же подпись; меняется только `media_id`. Оригинал не удаляется: он остаётся
+ * в библиотеке. Запись входа на старый `media_id` — отдельная сущность (U-5) и не трогается.
+ * Если копия уже стоит на доске, строка оригинала просто уходит — дубля в ящике не бывает.
+ */
+export function swapBoardPicture(live: BoardItem[], fromId: number, toId: number): BoardItem[] {
+  if (fromId === toId) return live;
+  const already = live.some((i) => isBoardRow(i) && i.mediaId === toId);
+  return already
+    ? live.filter((i) => !(isBoardRow(i) && i.mediaId === fromId))
+    : live.map((i) => (isBoardRow(i) && i.mediaId === fromId ? { ...i, mediaId: toId } : i));
+}
+
+/**
  * ═══ БОКОВОЕ МЕНЮ УКАЗАНИЙ ДОСКИ — ТЕПЕРЬ ТОТ ЖЕ ОРГАН, ЧТО У ЛИСТА (B-9, круг 20) ═══════════════
  *
  * Владелец, дословно: «в мудборде все управление колаутами должно было переехать в панель слева
@@ -233,12 +248,9 @@ export function takeIntoInput(
  *   · «бровь» над картинками не рисуется вовсе: `renderEditor` доске больше не передаётся, а без
  *     него полосы редактора под кадрами нет — ни правки, ни её пустого состояния (см. довод в
  *     `ui/components/focused-annotator.tsx`);
- *   · а вот В УВЕЛИЧЕННОМ ВИДЕ правка ЕСТЬ, и это не отступление от B-9, а его условие. Зум —
- *     модалка с ловушкой фокуса: меню за оверлеем недостижимо физически, и указание, поставленное
- *     в зуме (а по миллиметровой детали его ставят именно там), нельзя было бы ни назвать, ни
- *     покрасить, ни удалить, не закрыв окно. Поэтому доска задаёт `renderZoomEditor` — ТО ЖЕ ТЕЛО
- *     строки меню (`CalloutRowBody` из `./callout-rail`), а не второй редактор: орган один, мест
- *     монтажа два, достижимо одновременно ровно одно.
+ *   · увеличенного вида у доски нет (T01, 03.10: «на ховер плиток картинок не надо показывать
+ *     кнопку зум»), поэтому и `renderZoomEditor` доска больше не задаёт — правка указаний живёт
+ *     только в меню справа.
  *
  * ⚠ ПИКТОГРАММА ВИДА ТЕПЕРЬ ОБЩАЯ (`KindGlyph` реестра), И ЭТО ОБМЕН, СДЕЛАННЫЙ СОЗНАТЕЛЬНО.
  * Здесь стоял свой `CalloutGlyph` — САМА фигура, нарисованная общим `CalloutShape` в 22×14, со
@@ -494,7 +506,11 @@ export function MoodBoard({
    * меняется только место строки в ряду, потому что «рядом с тем, что правил» — единственное
    * место, где результат правки находят глазами.
    */
-  function placeEditedNextTo(originalId: number, full: common_MediaFull) {
+  function placeEditedNextTo(
+    originalId: number,
+    full: common_MediaFull,
+    done = 'the edited picture is on the board, right after the original — the original keeps its notes',
+  ) {
     const result = appendBoardPictures({
       live: (getValues('moodboardMedia') ?? []) as BoardItem[],
       inScope: isBoardRow,
@@ -512,9 +528,31 @@ export function MoodBoard({
     const at = next.findIndex((i) => isBoardRow(i) && i.mediaId === originalId);
     next.splice(at < 0 ? next.length : at + 1, 0, fresh);
     writeItems(next);
-    showMessage(
-      'the edited picture is on the board, right after the original — the original keeps its notes',
-      'success',
+    showMessage(done, 'success');
+  }
+
+  // ── кроп плитки (T01) ───────────────────────────────────────────────────────────────────────
+  //
+  // Копия встаёт на место оригинала. Исключение одно — указания: они приколоты долями ЭТОГО кадра,
+  // и после кропа легли бы не туда (тот же довод, что у `edit`). Плитка с указаниями поэтому
+  // остаётся, а копия встаёт сразу за ней.
+  const [cropping, setCropping] = useState<{ mediaId: number; full: common_MediaFull } | null>(
+    null,
+  );
+
+  function placeCropped(originalId: number, full: common_MediaFull) {
+    if (full.id == null) return;
+    if (callouts.countOn(originalId) > 0) {
+      placeEditedNextTo(
+        originalId,
+        full,
+        'the crop is on the board, right after the original — the original keeps its notes',
+      );
+      return;
+    }
+    setPicked((prev) => [...prev, full]);
+    writeItems(
+      swapBoardPicture((getValues('moodboardMedia') ?? []) as BoardItem[], originalId, full.id),
     );
   }
 
@@ -1011,6 +1049,8 @@ export function MoodBoard({
               // Кроп запрещён словами владельца: у медиа без записанных размеров кадр берёт пропорции
               // самой картинки после загрузки, а не фолбэка, — иначе `object-cover` резал бы снимок.
               preferNaturalAspect
+              // T01: зума у доски нет (слова владельца); на его месте — `crop` в нижнем ряду кадра.
+              zoomable={false}
               // Текст пина — по наведению или фокусу на маркер, не постоянной легендой (R-9).
               pinText='hover'
               /* ═══ ВЫБОР, НАВЕДЕНИЕ И ВЗВОД — СНАРУЖИ (B-9) ═════════════════════════════════════
@@ -1066,12 +1106,29 @@ export function MoodBoard({
               // единственный факт, который человеку нужен у плитки, — на непрозрачной подложке, потому
               // что под ним снимок), тихая дверь `edit` — справа, там же, где у `PictureTile`.
               // `bottom-2` = зазор колонки поверхности под кадром (4px) плюс отступ органа от края (4px).
+              // T01: нижний ряд — только глаголы (`crop` слева, `edit` справа), оба тихие; факт «во
+              // входе» поднят в верхний левый угол, под номер плитки: факты сверху, действия снизу.
+              // `top-3` = высота номера (9px кегль + 2px поля) плюс 1px зазора.
               renderFocusedFooter={(view, i) => (
                 <>
                   {inputIds.has(view.mediaId) && (
-                    <span className='pointer-events-none absolute bottom-2 left-1 z-[6] inline-block bg-bgColor'>
+                    <span className='pointer-events-none absolute left-0 top-3 z-[6] inline-block bg-bgColor'>
                       <Pill tone='ink'>in the input</Pill>
                     </span>
+                  )}
+                  {!readOnly && view.full && (
+                    <button
+                      type='button'
+                      data-mood-crop={view.mediaId}
+                      aria-label={`crop moodboard picture ${i + 1}`}
+                      onClick={() =>
+                        setCropping({ mediaId: view.mediaId, full: view.full as common_MediaFull })
+                      }
+                      onPointerDown={(e) => e.stopPropagation()}
+                      className={cn(TILE_CORNER, MOOD_QUIET, 'absolute bottom-2 left-1 z-[6]')}
+                    >
+                      crop
+                    </button>
                   )}
                   {canEdit && view.full && (
                     <button
@@ -1101,54 +1158,6 @@ export function MoodBoard({
                  Вместе с полосой ушли `editorHeight` и `zoomEditorReserve`: и то и другое резервировало
                  высоту ПОД РЕДАКТОР, а кадру, у которого редактора нет ни в одном состоянии, дёргаться
                  не от чего — 108px вертикали доска получила назад. */
-              /* ═══ А В УВЕЛИЧЕННОМ ВИДЕ ПРАВКА ЕСТЬ, И ЭТО ТО ЖЕ САМОЕ ТЕЛО ═══════════════════════
-                 Зум — Radix `Dialog`: оверлей, модальность, ловушка фокуса. Пока правка жила ТОЛЬКО в
-                 меню справа, открытый зум делал её недостижимой физически — просьба поставить курсор
-                 уезжала в textarea ЗА оверлеем, и фокус-скоуп немедленно утаскивал фокус обратно.
-                 Поставленную в зуме записку нельзя было ни назвать, ни покрасить, ни дать ей второй
-                 луч, ни удалить, не закрыв окно, — а ставят указание по миллиметровой детали именно в
-                 зуме, и этот код так и говорит про себя (`zoom · pan · edit`).
-
-                 ⚠ ЭТО НЕ ВОСКРЕШЕНИЕ «БРОВИ» И НЕ ВТОРОЙ РЕДАКТОР. Возвращается не снятый орган
-                 (`AnnotationEditor` + его пустое состояние), а РОВНО ТЕЛО СТРОКИ МЕНЮ — та же функция
-                 `CalloutRowBody`, которую рисует `CalloutRail`. Правило по-прежнему в одном месте (в
-                 том числе пара «вид + caps», которую B-9 и звал «двумя расходящимися местами»), а
-                 достижимо одновременно ровно одно из двух: пока модалка открыта, меню за ней
-                 недостижимо по построению. Пустого состояния у тела нет вовсе — без выбора поверхность
-                 слот не рисует, — так что «брови» не появляется ни в одном состоянии. */
-              renderZoomEditor={(key, { arrows: zoomArrows }) => {
-                const row = callouts.at(key);
-                if (!row) return null;
-                return (
-                  <CalloutRowBody
-                    index={row.index}
-                    c={row.value}
-                    disabled={readOnly}
-                    onRemove={
-                      readOnly
-                        ? undefined
-                        : (index) => {
-                            const k = callouts.keyOf(index);
-                            if (!k) return;
-                            callouts.removeByKey(k);
-                            // Выбор снимается ВМЕСТЕ со строкой — тот же довод, что у меню справа:
-                            // индекс под ним после удаления адресует уже соседнее указание.
-                            setSelectedKey(null);
-                            setAddingKey(null);
-                          }
-                    }
-                    /* ЛУЧИ БЕРУТСЯ У ПОВЕРХНОСТИ, А НЕ СЧИТАЮТСЯ ЗАНОВО: диалог отдаёт их слотом
-                       (`renderEditor(key, { arrows })`), посчитав ТОЙ ЖЕ `noteArrowsOf`, что и меню
-                       справа. Взвод при этом общий — `addingKey` живёт здесь, и «+ point», нажатый в
-                       зуме, ждёт клик по тому же кадру. */
-                    arrows={zoomArrows}
-                    /* НОМЕРА И ДЕТАЛИ КРОЯ У МУДБОРДНОГО УКАЗАНИЯ НЕТ — те же два пропа, что у меню
-                       справа, и по той же причине. */
-                    detailFields={false}
-                    caps
-                  />
-                );
-              }}
             />
           </div>
 
@@ -1181,6 +1190,13 @@ export function MoodBoard({
               )}
             </div>
           </ConfirmationModal>
+
+          <MediaRecropDialog
+            media={cropping?.full}
+            open={cropping != null}
+            onOpenChange={(v) => !v && setCropping(null)}
+            onCropped={(full) => cropping && placeCropped(cropping.mediaId, full)}
+          />
 
           {/* РЕДАКТОР КАРТИНКИ ДОСКИ (C-3) — тот же `VectorModal`, что открывает `edit` на плитке
               истории, на плите листа и на верстаке: один редактор, вызванный с четвёртого экрана.
