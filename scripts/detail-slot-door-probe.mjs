@@ -13,6 +13,7 @@
 // Запуск:  node scripts/detail-slot-door-probe.mjs [--mutate-instant] [--mutate-keep]
 //   --mutate-instant  `remove` сносит с первого щелчка    → вопрос обязан покраснеть
 //   --mutate-keep     `keep` ничего не делает              → принятие обязано покраснеть
+//   --mutate-settle   журнал закрывается ДО сноса (FX5)    → отказ сноса обязан покраснеть
 // Сначала `yarn build` (нужен dist/assets/index-*.css).
 
 import { build as esbuild } from 'esbuild';
@@ -27,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 const MUT = {
   instant: process.argv.includes('--mutate-instant'),
   keep: process.argv.includes('--mutate-keep'),
+  settle: process.argv.includes('--mutate-settle'),
 };
 
 function resolvePlaywright() {
@@ -75,6 +77,14 @@ const dieNotRun = (why) => {
 const pairs = [];
 if (MUT.instant) pairs.push([`onClick={() => setPhase('armed')}`, `onClick={run}`]);
 if (MUT.keep) pairs.push([`onClick={onKeep}`, `onClick={() => {}}`]);
+if (MUT.settle)
+  pairs.push([
+    `  return Promise.resolve()
+    .then(remove)`,
+    `  settle();
+  return Promise.resolve()
+    .then(remove)`,
+  ]);
 const plugins = pairs.length
   ? [
       {
@@ -250,11 +260,30 @@ ck(
   JSON.stringify(await log()),
 );
 
+head('предложенный слот — сначала снос, потом журнал (FX5)');
+await mount({ proposed: true, filled: false, journal: true, fail: true });
+await page.click('[data-detail-door-dismiss]');
+await settle();
+ck(
+  JSON.stringify(await log()) === '["remove"]',
+  'отказ сноса не закрывает запись журнала',
+  JSON.stringify(await log()),
+);
+ck((await door()) === 'proposed', 'после отказа снова `keep` / `dismiss`', await door());
+await mount({ proposed: true, filled: false, journal: true });
+await page.click('[data-detail-door-dismiss]');
+await settle();
+ck(
+  JSON.stringify(await log()) === '["remove","settle"]',
+  'удачный снос закрывает запись — после сноса',
+  JSON.stringify(await log()),
+);
+
 head('исполнение');
 ck(pageErrors.length === 0, 'страница не бросила ошибок', pageErrors.join(' | ').slice(0, 200));
 await browser.close();
 
-const mutating = MUT.instant || MUT.keep;
+const mutating = MUT.instant || MUT.keep || MUT.settle;
 console.log(`\nпровалов: ${bad}`);
 if (mutating) {
   console.log(

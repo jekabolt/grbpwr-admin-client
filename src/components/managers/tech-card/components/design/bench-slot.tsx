@@ -902,10 +902,7 @@ export function BenchSlot(props: BenchSlotProps) {
           filled={!!(url && picture)}
           busy={saving}
           onKeep={accept}
-          onRemove={() => {
-            accept();
-            return onDelete();
-          }}
+          onRemove={() => removeThenSettle(onDelete, accept)}
         />
       )}
 
@@ -1072,6 +1069,23 @@ const DOOR_QUIET =
 
 /** Взведённый сброс гаснет сам: забытое «remove?» не должно ждать случайного щелчка. */
 const DOOR_ARM_MS = 4000;
+
+/**
+ * СНАЧАЛА СНОС, ПОТОМ ЖУРНАЛ (03.10, gate FX5). Запись черновика о предложенном слоте закрывается
+ * (`drafted.acceptSlot`) только после того, как сервер снёс слот: отказ сноса оставляет слот
+ * предложенным, и дверь снова говорит `keep` / `dismiss`, а не `remove` принятого слота.
+ */
+export function removeThenSettle(
+  remove: () => Promise<unknown> | void,
+  settle: () => void,
+): Promise<unknown> {
+  return Promise.resolve()
+    .then(remove)
+    .then((result) => {
+      settle();
+      return result;
+    });
+}
 
 /**
  * ═══ ДВЕРЬ СЛОТА ДЕТАЛИ (moodboard-flats-1003, T05 + T10) ═══════════════════════════════════════

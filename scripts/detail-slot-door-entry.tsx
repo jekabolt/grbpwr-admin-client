@@ -2,9 +2,13 @@
 // Компонент НАСТОЯЩИЙ, из репозитория; обработчики пишут в журнал окна, чтобы проба читала факты.
 import { createRoot, type Root } from 'react-dom/client';
 
-import { DetailSlotDoor } from 'components/managers/tech-card/components/design/bench-slot';
+import {
+  DetailSlotDoor,
+  removeThenSettle,
+} from 'components/managers/tech-card/components/design/bench-slot';
 
-type Cfg = { proposed: boolean; filled: boolean; fail?: boolean };
+/** `journal` — the door is wired as the bench wires it: delete, then settle the drafted entry. */
+type Cfg = { proposed: boolean; filled: boolean; fail?: boolean; journal?: boolean };
 type Probe = { mount: (cfg: Cfg) => void; log: string[] };
 
 declare global {
@@ -32,8 +36,12 @@ probe.mount = (cfg) => {
         filled={cfg.filled}
         onKeep={() => probe.log.push('keep')}
         onRemove={() => {
-          probe.log.push('remove');
-          return cfg.fail ? Promise.reject(new Error('refused')) : new Promise(() => {});
+          const remove = () => {
+            probe.log.push('remove');
+            if (cfg.fail) return Promise.reject(new Error('refused'));
+            return cfg.journal ? Promise.resolve() : new Promise(() => {});
+          };
+          return cfg.journal ? removeThenSettle(remove, () => probe.log.push('settle')) : remove();
         }}
       />
     </div>,
