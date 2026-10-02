@@ -158,3 +158,42 @@ export function holdFlatInput(card: number, opts?: { words?: boolean }): () => v
     });
   };
 }
+
+/**
+ * ═══ ВИДЫ ИЛИ ДЕТАЛИ — НЕ ВМЕСТЕ (T07, слово владельца: «при генерации детали вьюс должны
+ * анпикаться и что бы мы делали только скетч детали») ═══════════════════════════════════════════
+ *
+ * Прогон флэта — либо виды целиком (front/back/side), либо детали, и сервер смешанный прогон
+ * отклоняет. Галка детали снимает все виды, галка вида снимает все детали; снятие галки соседей не
+ * трогает. Чипы не прячутся и не запираются — выбор переключается сам, без слов.
+ */
+export function tickView(
+  views: Record<string, boolean>,
+  details: Record<number, boolean>,
+  view: string,
+): { views: Record<string, boolean>; detailTicks: Record<number, boolean> } {
+  const on = !views[view];
+  return { views: { ...views, [view]: on }, detailTicks: on ? {} : details };
+}
+
+export function tickDetail(
+  views: Record<string, boolean>,
+  details: Record<number, boolean>,
+  id: number,
+): { views: Record<string, boolean>; detailTicks: Record<number, boolean> } {
+  const on = !details[id];
+  return { views: on ? {} : views, detailTicks: { ...details, [id]: on } };
+}
+
+/**
+ * Выбор, поднятый из запроса в полёте, мог быть записан до T07 смешанным. Виды выигрывают: это
+ * выбор по умолчанию, а детали ставят руками заново одним щелчком.
+ */
+export function exclusiveTicks(
+  views: Record<string, boolean>,
+  details: Record<number, boolean>,
+): { views: Record<string, boolean>; detailTicks: Record<number, boolean> } {
+  const anyView = Object.values(views).some(Boolean);
+  const anyDetail = Object.values(details).some(Boolean);
+  return { views, detailTicks: anyView && anyDetail ? {} : details };
+}

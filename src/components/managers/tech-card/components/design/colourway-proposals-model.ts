@@ -1,6 +1,11 @@
-import type { common_TechCardColorwayUsage } from 'api/proto-http/admin';
+import type { common_AdminColorwayRef, common_TechCardColorwayUsage } from 'api/proto-http/admin';
 
-import { paletteFromWire, pantoneSystemOf, type PaletteRow } from '../colourway-palette-model';
+import {
+  normalizeHex,
+  paletteFromWire,
+  pantoneSystemOf,
+  type PaletteRow,
+} from '../colourway-palette-model';
 import {
   blankDraft,
   fromRead,
@@ -9,6 +14,7 @@ import {
   toWire,
   type UsageDraft,
 } from '../colorway-usage-wire';
+import { normalizePantone } from '../pantone-swatches';
 import { wireInt } from '../wire-int';
 import { detailIdentity, normText, type ConstructionDraft } from './head/construction-draft-model';
 
@@ -181,6 +187,74 @@ export function proposedColourways(
     });
   }
   return out;
+}
+
+/* ─── УЖЕ ЕСТЬ НА КАРТОЧКЕ — НЕ ПРЕДЛАГАТЬ СНОВА (T06) ─────────────────────────────────────── */
+
+/**
+ * Владелец: «повторный CONSTRUCTION DRAFT на мудборде все равно создает колорвеи которые уже
+ * предлагал и которые я зааксептил на предыдущих ранах».
+ *
+ * Сервер получает существующие колорвеи в промпт и сам выбрасывает повторы; здесь — тот же фильтр
+ * вторым поясом, против того, что знает только вкладка: сохранённые ряды карточки и предложения,
+ * уже подтверждённые в памяти черновика. Повтор — совпадение ХОТЯ БЫ ОДНОГО: имени (свёртка
+ * `nameKey`), главного Pantone (код без книги: «19-4052 TCX» = «19-4052 TPX») или hex главного цвета.
+ *
+ * ⚠ Семейство (`colorCode`) НЕ признак повтора: два колорвея одного стиля законно сидят на одном
+ * «BLK» (T45).
+ */
+export type ColourwayIdentity = { names: string[]; pantones: string[]; hexes: string[] };
+
+function pantoneKey(code?: string | null): string {
+  const raw = normText(code);
+  if (!raw) return '';
+  const norm = normalizePantone(raw);
+  return norm ? norm.replace(/\s+[A-Z]+$/, '') : raw.toUpperCase();
+}
+
+function identity(
+  names: (string | null | undefined)[],
+  pantones: (string | null | undefined)[],
+  hexes: (string | null | undefined)[],
+): ColourwayIdentity {
+  const keep = (xs: string[]) => [...new Set(xs.filter(Boolean))];
+  return {
+    names: keep(names.map((n) => nameKey(n))),
+    pantones: keep(pantones.map(pantoneKey)),
+    hexes: keep(hexes.map((h) => normalizeHex(h ?? ''))),
+  };
+}
+
+/** Предложение: имя, главный цвет палитры (первый) и цвет верхнего уровня ответа. */
+export function proposalIdentity(p: ProposedColourway): ColourwayIdentity {
+  const main = p.colours[0];
+  return identity([p.name], [main?.pantone, p.pantone], [main?.hex, p.hex]);
+}
+
+/** Сохранённый колорвей карточки: имя разработки, главный цвет палитры и поля разработки. */
+export function savedColourwayIdentity(cw: common_AdminColorwayRef): ColourwayIdentity {
+  const main = cw.colours?.[0];
+  return identity([cw.devName], [main?.pantone, cw.pantone], [main?.hex, cw.devHex]);
+}
+
+export function sameColourway(a: ColourwayIdentity, b: ColourwayIdentity): boolean {
+  return (
+    a.names.some((x) => b.names.includes(x)) ||
+    a.pantones.some((x) => b.pantones.includes(x)) ||
+    a.hexes.some((x) => b.hexes.includes(x))
+  );
+}
+
+/** Новый список без того, что уже есть: `known` — сохранённые ряды и подтверждённые предложения. */
+export function withoutKnownColourways(
+  list: readonly ProposedColourway[],
+  known: readonly ColourwayIdentity[],
+): ProposedColourway[] {
+  if (known.length === 0) return [...list];
+  return list.filter((p) => {
+    const id = proposalIdentity(p);
+    return !known.some((k) => sameColourway(id, k));
+  });
 }
 
 /* ─── ПРИВЯЗКА СЛОТА К СОХРАНЁННОЙ СТРОКЕ ──────────────────────────────────────────────────── */

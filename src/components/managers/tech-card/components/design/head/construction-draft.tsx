@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import type { common_DesignRun, common_MediaFull } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { GENDER_ENUM_TO_SLUG } from 'constants/constants';
 import { techCardBomSectionOptions } from 'constants/filter';
@@ -30,7 +31,7 @@ import {
   type FlushResult,
 } from '../autosave-contract';
 import { readBench } from '../bench-slot';
-import { proposedColourways } from '../colourway-proposals-model';
+import { proposedColourways, savedColourwayIdentity } from '../colourway-proposals-model';
 import { draftReadGate, openGateDoor } from '../core/chain';
 import { draftInputGate, isBoardRow, moodGateSentence, type MoodGateInput } from '../core/mood-gate';
 import { useDrafted } from '../drafted-contract';
@@ -404,6 +405,8 @@ export function ConstructionDraft({
      `serverSpeaks` НЕСУЩИЙ: на бинаре без полосы верстака нет вовсе, и предлагать заводить в нём
      детали значило бы рисовать дверь, за которой отказ. */
   const { band, serverSpeaks } = useDesignBand(techCardId);
+  /** Сохранённые колорвеи карточки — новый ответ их не предлагает снова (T06). */
+  const { data: savedCard } = useTechCard(techCardId);
   const writes = useDesignWrites(techCardId);
   const queryClient = useQueryClient();
   const benchDetails = useMemo(() => readBench(band, 'flat').details, [band]);
@@ -1317,7 +1320,12 @@ export function ConstructionDraft({
     // личностей — ключ идемпотентности прогона (ревью O-44): новый прогон — новые id, и вердикт
     // прошлого ответа не прячет новое предложение; повтор того же ключа — тот же ответ и те же id.
     // Без строки прогона модель метит сам объект ответа.
-    setProposals(techCardId, proposedColourways(draft, p.run?.clientRequestId));
+    // …кроме тех, что уже стоят на карточке (T06): повтор прошлого рана не предлагается снова.
+    setProposals(
+      techCardId,
+      proposedColourways(draft, p.run?.clientRequestId),
+      (savedCard?.colorways ?? []).map(savedColourwayIdentity),
+    );
     // ПИШЕТСЯ ТОЛЬКО КАРТОЧКА, КОТОРАЯ ПИШЕТСЯ СЕЙЧАС. Утверждение, пришедшее, пока вызов летел или
     // ответ ждал органа, замораживает её; форма узнаёт об этом раньше, чем проп студии, и
     // спрашивается напрямую. Предложение при этом стоит на экране — читать его не запрещено.

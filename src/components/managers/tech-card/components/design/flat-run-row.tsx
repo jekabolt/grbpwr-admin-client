@@ -26,9 +26,12 @@ import { moodMinimumGate, openGateDoor } from './core/chain';
 import { useDrafted } from './drafted-contract';
 import { markedPlatesOf } from './fix-markup';
 import {
+  exclusiveTicks,
   flatInputBusy,
   patchFlatInput,
   readFlatInput,
+  tickDetail,
+  tickView,
   useFlatInput,
   type FlatAsk,
   type FlatLayout,
@@ -264,12 +267,20 @@ export function FlatRunRow({
   /* ЧИПЫ — С ЗАПРОСА В ПОЛЁТЕ, если он есть (ревью раунда 3, m2): ряд, вернувшийся после смены шага,
      рисует то, за что уже платят, а не выбор по умолчанию рядом со `starting…`. Пока запрос идёт,
      выбор заперт (`choiceOff`), поэтому локальное состояние с ним не расходится. */
-  const [views, setViews] = useState<Record<string, boolean>>(
-    () => readFlatInput(techCardId).ask?.views ?? { front: true, back: true },
-  );
-  const [detailTicks, setDetailTicks] = useState<Record<number, boolean>>(
-    () => readFlatInput(techCardId).ask?.detailTicks ?? {},
-  );
+  const [initialTicks] = useState(() => {
+    const ask = readFlatInput(techCardId).ask;
+    return exclusiveTicks(ask?.views ?? { front: true, back: true }, ask?.detailTicks ?? {});
+  });
+  const [views, setViews] = useState<Record<string, boolean>>(initialTicks.views);
+  const [detailTicks, setDetailTicks] = useState<Record<number, boolean>>(initialTicks.detailTicks);
+  /** Виды или детали, не вместе (T07): одна галка снимает другую сторону. */
+  const applyTicks = (next: {
+    views: Record<string, boolean>;
+    detailTicks: Record<number, boolean>;
+  }) => {
+    setViews(next.views);
+    setDetailTicks(next.detailTicks);
+  };
   /** «one picture» по умолчанию (T23, D-19): виды приходят одним листом и режутся сами (`autoSplit`). */
   const [layout, setLayout] = useState<Layout>(
     () => readFlatInput(techCardId).ask?.layout ?? 'one',
@@ -578,7 +589,7 @@ export function FlatRunRow({
                     ? 'its flat slot below is already filled'
                     : 'its flat slot below is empty'
                 }
-                onClick={() => setViews((prev) => ({ ...prev, [view]: !prev[view] }))}
+                onClick={() => applyTicks(tickView(views, detailTicks, view))}
               >
                 {viewLabel(view)}
               </Chip>
@@ -604,7 +615,7 @@ export function FlatRunRow({
                     ? `detail proposed by the construction draft, not accepted yet: ${displayDetailName(bench.details, d)} — accept it in the flat slots`
                     : `detail described in the flat slots: ${displayDetailName(bench.details, d)}`
                 }
-                onClick={() => setDetailTicks((prev) => ({ ...prev, [id]: !prev[id] }))}
+                onClick={() => applyTicks(tickDetail(views, detailTicks, id))}
               >
                 detail · {displayDetailName(bench.details, d)}
               </Chip>
