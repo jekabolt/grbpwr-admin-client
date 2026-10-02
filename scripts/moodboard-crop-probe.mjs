@@ -1,13 +1,15 @@
 // КРОП ПЛИТКИ МУДБОРДА (T01; 03.10, gate FX2): копия встаёт НА МЕСТО оригинала в ряду доски и во
 // входе (роль на сервере переезжает за ней: сначала новому, потом снять со старого); указания
-// переносятся в рамку кропа, вне её — снимаются; без рамки плитка с указаниями остаётся, копия
-// встаёт за ней, а на полной доске кроп не теряется молча (`refused`).
+// переносятся в рамку кропа, только если ВСЕ целиком в ней; иначе (или без рамки) плитка остаётся
+// со всеми указаниями, копия встаёт за ней, а на полной доске — отказ (`refused`): ни кроп, ни
+// указание не теряются молча (R1, 03.10).
 //
 //   node scripts/moodboard-crop-probe.mjs
 //   MUTATE=1      node scripts/moodboard-crop-probe.mjs   # подмена доски задевает и строку входа
 //   MUTATE=input  node scripts/moodboard-crop-probe.mjs   # вход не переезжает на кроп
 //   MUTATE=remap  node scripts/moodboard-crop-probe.mjs   # указания не переносятся в рамку
 //   MUTATE=full   node scripts/moodboard-crop-probe.mjs   # полная доска молча роняет кроп
+//   MUTATE=drop   node scripts/moodboard-crop-probe.mjs   # указание вне рамки снимается (замена)
 //   MUTATE=order  node scripts/moodboard-crop-probe.mjs   # роль снимается со старого ДО нового
 // Каждая мутация обязана ПОКРАСНЕТЬ.
 import { build as esbuild } from 'esbuild';
@@ -36,8 +38,13 @@ const MUTATIONS = {
   ],
   full: [
     /design\/mood-board\.tsx$/,
-    "return { mode: 'refused', items: live, callouts, dropped: 0, inputMoved: false };",
-    "return { mode: 'next-to', items: live, callouts, dropped: 0, inputMoved: false };",
+    "return { mode: 'refused', items: live, callouts, inputMoved: false };",
+    "return { mode: 'next-to', items: live, callouts, inputMoved: false };",
+  ],
+  drop: [
+    /design\/mood-board\.tsx$/,
+    'const carried = remapped && remapped.dropped === 0 ? remapped.next : null;',
+    'const carried = remapped ? remapped.next : null;',
   ],
   order: [
     /design\/carry-reference\.ts$/,
@@ -178,9 +185,11 @@ const callouts = [
   C(1, '0.100', '0.100'), // чужая плитка
 ];
 const frame = { x: 0.2, y: 0.2, w: 0.4, h: 0.4, rotation: 0 };
+// Все указания оригинала целиком в рамке (без вне-рамочных строк 1 и 3 фикстуры).
+const fitting = callouts.filter((_, n) => n !== 1 && n !== 3);
 const plan = m.planBoardCrop({
   live,
-  callouts,
+  callouts: fitting,
   fromId: 2,
   toId: 9,
   frame,
@@ -201,9 +210,9 @@ ck(
 ck(!plan.items.some((i) => i.mediaId === 2), 'оригинала больше нет ни на доске, ни во входе');
 const on9 = plan.callouts.filter((c) => c.mediaId === 9);
 ck(
-  on9.length === 2 && plan.dropped === 2,
-  'указания: 2 перенесены, 2 вне рамки сняты',
-  `${on9.length} / ${plan.dropped}`,
+  on9.length === 2 && !plan.callouts.some((c) => c.mediaId === 2),
+  'указания: оба перенесены на кроп',
+  `${on9.length}`,
 );
 ck(
   on9[0]?.posX === '0.250' && on9[0]?.posY === '0.250',
@@ -224,6 +233,30 @@ ck(
   'указания чужой плитки не тронуты',
 );
 ck(callouts[0].mediaId === 2 && callouts[0].posX === '0.300', 'исходные указания не мутированы');
+
+// R1: хоть одно указание вне рамки — оригинал остаётся со ВСЕМИ указаниями, кроп рядом.
+const partial = m.planBoardCrop({
+  live,
+  callouts,
+  fromId: 2,
+  toId: 9,
+  frame,
+  moveInput: true,
+  boardMax: 12,
+});
+ck(partial.mode === 'next-to', 'указание вне рамки — не замена, а рядом', partial.mode);
+ck(
+  partial.items[1].mediaId === 2 &&
+    partial.items[2].mediaId === 9 &&
+    partial.items[2].kind === MOOD,
+  'указание вне рамки: оригинал на месте, кроп сразу за ним',
+  JSON.stringify(partial.items.map((i) => i.mediaId)),
+);
+ck(
+  partial.callouts === callouts && partial.callouts.filter((c) => c.mediaId === 2).length === 4,
+  'указание вне рамки: все 4 указания остались на оригинале нетронутыми',
+  `${partial.callouts.filter((c) => c.mediaId === 2).length}`,
+);
 
 const turned = m.remapCalloutsIntoCrop([C(2, '0.100', '0.200')], 2, 9, {
   x: 0,
@@ -301,9 +334,25 @@ ck(
   'полная доска без рамки: отказ, а не молчаливая потеря',
   full.mode,
 );
-const fullFramed = m.planBoardCrop({
+const fullPartial = m.planBoardCrop({
   live: fullBoard,
   callouts,
+  fromId: 2,
+  toId: 99,
+  frame,
+  moveInput: true,
+  boardMax: 12,
+});
+ck(
+  fullPartial.mode === 'refused' &&
+    fullPartial.items === fullBoard &&
+    fullPartial.callouts === callouts,
+  'полная доска, указание вне рамки: отказ, ничего не тронуто',
+  fullPartial.mode,
+);
+const fullFramed = m.planBoardCrop({
+  live: fullBoard,
+  callouts: fitting,
   fromId: 2,
   toId: 99,
   frame,

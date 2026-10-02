@@ -249,8 +249,9 @@ const fraction = (v?: string, fallback = 0.5) => {
 
 /**
  * The callouts of `fromId` carried into its crop `toId`: every point is mapped from the source into
- * the crop's frame; a callout with any point outside the crop is dropped (it would point at
- * something the crop no longer shows); its label is kept inside the frame. Other rows untouched.
+ * the crop's frame; a callout with any point outside the crop is left out of `next` and counted in
+ * `dropped` (it would point at something the crop no longer shows) — `planBoardCrop` then keeps the
+ * original instead of losing the note; a label is kept inside the frame. Other rows untouched.
  */
 export function remapCalloutsIntoCrop(
   callouts: readonly MoodCallout[],
@@ -297,11 +298,12 @@ export function remapCalloutsIntoCrop(
  * the original is there (the person crops in order to generate from the crop), so the `in the input`
  * pill and GENERATE both follow it. The server-side role moves separately (`carryReferenceRole`).
  *
- *   · `frame` known (the recrop dialog reports where the cut fell): `replace`; the original's callouts
- *     are mapped into the crop, those outside it dropped (`remapCalloutsIntoCrop`).
- *   · `frame` unknown and the original carries callouts: they cannot be placed, so the original
- *     stays with them and the crop goes right after it (`next-to`). On a FULL board that has no
- *     room: `refused` — nothing changes and the caller says so; the crop is never dropped silently.
+ *   · `frame` known (the recrop dialog reports where the cut fell) and EVERY callout of the original
+ *     maps fully into it: `replace`; the callouts move into the crop (`remapCalloutsIntoCrop`).
+ *   · `frame` unknown, or ANY callout has a point outside the crop: the operator's notes cannot all
+ *     follow, and a note is never dropped — the original stays with all its callouts untouched and
+ *     the crop goes right after it (`next-to`). On a FULL board that has no room: `refused` —
+ *     nothing changes and the caller says so; neither the crop nor a note is lost silently.
  *   · `frame` unknown, no callouts: `replace`.
  * `moveInput` false (the input is busy with a run or a clear) leaves the input row on the original.
  */
@@ -317,22 +319,24 @@ export function planBoardCrop(input: {
   mode: 'replace' | 'next-to' | 'refused';
   items: BoardItem[];
   callouts: readonly MoodCallout[];
-  dropped: number;
   inputMoved: boolean;
 } {
   const { live, callouts, fromId, toId, frame } = input;
   const notes = callouts.filter((c) => (c?.mediaId ?? 0) === fromId && fromId > 0).length;
   const frameOk = !!frame && frame.w > 0 && frame.h > 0;
+  // Замена — только если КАЖДОЕ указание целиком переносится в рамку; иначе оригинал остаётся.
+  const remapped =
+    notes > 0 && frameOk ? remapCalloutsIntoCrop(callouts, fromId, toId, frame) : null;
+  const carried = remapped && remapped.dropped === 0 ? remapped.next : null;
   let items: BoardItem[];
   let nextCallouts = callouts;
-  let dropped = 0;
   let mode: 'replace' | 'next-to' | 'refused' = 'replace';
-  if (notes > 0 && !frameOk) {
+  if (notes > 0 && !carried) {
     const board = live.filter(isBoardRow);
     if (board.some((i) => i.mediaId === toId)) {
       items = live;
     } else if (board.length >= input.boardMax) {
-      return { mode: 'refused', items: live, callouts, dropped: 0, inputMoved: false };
+      return { mode: 'refused', items: live, callouts, inputMoved: false };
     } else {
       const at = live.findIndex((i) => isBoardRow(i) && i.mediaId === fromId);
       items = [...live];
@@ -345,11 +349,7 @@ export function planBoardCrop(input: {
     mode = 'next-to';
   } else {
     items = swapBoardPicture(live, fromId, toId);
-    if (notes > 0 && frame) {
-      const remapped = remapCalloutsIntoCrop(callouts, fromId, toId, frame);
-      nextCallouts = remapped.next;
-      dropped = remapped.dropped;
-    }
+    if (carried) nextCallouts = carried;
   }
   let inputMoved = false;
   if (input.moveInput && fromId !== toId) {
@@ -359,7 +359,7 @@ export function planBoardCrop(input: {
       inputMoved = true;
     }
   }
-  return { mode, items, callouts: nextCallouts, dropped, inputMoved };
+  return { mode, items, callouts: nextCallouts, inputMoved };
 }
 
 /**
@@ -672,7 +672,8 @@ export function MoodBoard({
   // ── кроп плитки (T01; 03.10, gate FX2) ──────────────────────────────────────────────────────
   //
   // Копия встаёт на место оригинала — на доске и во входе, роль на сервере переезжает за ней;
-  // указания переносятся в рамку кропа (что вне её — снимается). Все ветви — `planBoardCrop`.
+  // указания переносятся в рамку кропа, а если хоть одно не помещается — оригинал остаётся со
+  // всеми указаниями, кроп встаёт за ним. Все ветви — `planBoardCrop`.
   const { setReferenceRole } = useDesignWrites(techCardId);
   const [cropping, setCropping] = useState<{ mediaId: number; full: common_MediaFull } | null>(
     null,
@@ -712,11 +713,6 @@ export function MoodBoard({
     if (plan.mode === 'next-to')
       showMessage(
         'the crop is on the board, right after the original — the original keeps its notes',
-        'success',
-      );
-    if (plan.dropped > 0)
-      showMessage(
-        `${plan.dropped} note${plan.dropped === 1 ? '' : 's'} fell outside the crop and ${plan.dropped === 1 ? 'was' : 'were'} removed`,
         'success',
       );
     if (inInput && !inputFree && cardOnScreen(card))
