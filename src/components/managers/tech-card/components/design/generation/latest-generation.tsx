@@ -19,12 +19,15 @@ import { RenderDoorsHost, hostPlates } from '../render/render-tile';
 import { SplitModal } from '../split-modal';
 import { isRunArchived } from '../visibility';
 import {
+  clearBenchChoice,
   closeSurface,
+  heldRunId,
   openSurface,
   pinShown,
   publishShown,
   releasePin,
   useBench,
+  useBenchChoice,
 } from './bench-store';
 import { deckAfterZoom, deckOfRuns, outputPlan, runsGallery, type OutputPlan } from './run-gallery';
 import { RunOutputs } from './run-outputs';
@@ -299,23 +302,33 @@ export function LatestGeneration({
   const bench = useBench(techCardId);
   const viewerOpen = useGalleryViewerOpen();
   const pin = bench.pin;
+  /* THE RUN PUT ON THE BENCH FROM THE HISTORY (03.10, owner item 9; `bench-store.ts`) — FLAT only.
+     It is held exactly as a pin is: read from the band's first page, else by id. */
+  const chosen = useBenchChoice(kind === 'flat' ? techCardId : 0);
+  const heldId = heldRunId(pin, chosen, newestId);
   const pinnedLive = useMemo(
-    () => (pin ? (band.runs ?? []).find((r) => (r.id ?? 0) === pin.runId) ?? null : null),
-    [band, pin],
+    () => (heldId ? (band.runs ?? []).find((r) => (r.id ?? 0) === heldId) ?? null : null),
+    [band, heldId],
   );
-  const byId = useRunById(techCardId, pin?.runId ?? 0, !!pin && !pinnedLive);
+  const byId = useRunById(techCardId, heldId, !!heldId && !pinnedLive);
   const byIdRun = byId.data?.run;
-  /** The pinned run from a read that CONTAINS it — the band's first page, or its own by-id read. */
+  /** The held run from a read that CONTAINS it — the band's first page, or its own by-id read. */
   const pinnedFresh =
-    pinnedLive ?? (pin && byIdRun && (byIdRun.id ?? 0) === pin.runId ? byIdRun : null);
+    pinnedLive ?? (heldId && byIdRun && (byIdRun.id ?? 0) === heldId ? byIdRun : null);
   const [pinnedCopy, setPinnedCopy] = useState<common_DesignRun | null>(null);
   if (pinnedFresh && pinnedFresh !== pinnedCopy) setPinnedCopy(pinnedFresh);
-  const pinnedRun = pin
-    ? pinnedFresh ?? (pinnedCopy && (pinnedCopy.id ?? 0) === pin.runId ? pinnedCopy : null)
+  const pinnedRun = heldId
+    ? pinnedFresh ?? (pinnedCopy && (pinnedCopy.id ?? 0) === heldId ? pinnedCopy : null)
     : null;
   /** Archival OBSERVED (D-49): the archived stamp on a read that contains the run — never inferred. */
   const archivedSeen = !!pinnedFresh && isRunArchived(pinnedFresh);
-  const run = pinnedRun ?? newest?.run ?? null;
+  /** The chosen run was archived, or is not a flat run: the choice goes, the bench follows the newest. */
+  const choiceGone =
+    !pin && heldId > 0 && !!pinnedFresh && (archivedSeen || !isRunOfKind(pinnedFresh, kind));
+  useLayoutEffect(() => {
+    if (choiceGone) clearBenchChoice(techCardId);
+  }, [choiceGone, techCardId]);
+  const run = (choiceGone ? null : pinnedRun) ?? newest?.run ?? null;
   const runId = run?.id ?? 0;
   /**
    * THE RUN STANDS HERE BARE (O-63 r2, D-72 п.3): nothing of the kind came back with pictures, and
@@ -549,7 +562,10 @@ export function LatestGeneration({
               className='text-labelColor hover:text-textColor'
               aria-label={`show ${runHandle(newestId)} here`}
               title={`the newest ${kind} run — the one shown now stays in the history below`}
-              onClick={() => releasePin(techCardId)}
+              onClick={() => {
+                releasePin(techCardId);
+                if (kind === 'flat') clearBenchChoice(techCardId);
+              }}
             >
               show ›
             </Button>

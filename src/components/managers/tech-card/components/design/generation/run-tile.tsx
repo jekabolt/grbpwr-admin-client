@@ -33,7 +33,7 @@ import { useDesignWrites } from '../use-design-band';
 import { isPictureHidden } from '../visibility';
 import { isActiveView, isLegacyView, normaliseViewKey, viewLabel } from '../views';
 import { closeSurface, openSurface } from './bench-store';
-import { compositeTail, isCutOut, readComposite, splitVerb } from './composite';
+import { compositeTail, isCutOut, offersSplit, readComposite, splitVerb } from './composite';
 import { DeletePictureDoor, isDerivedPicture } from './delete-picture-modal';
 import { SlotPicker } from './slot-picker';
 import { thumbUrl } from './thumb';
@@ -647,11 +647,13 @@ export function RunTile({
            `edit` до 1.6:1. Слово «hidden» под кадром состояние держит и без заливки. */
         dim={hidden || dim}
         className='w-full'
-        /* РЕЗ ПРЕДЛАГАЕТСЯ НА ЖИВОЙ И ЕЩЁ НЕ РАЗРЕЗАННОЙ КАРТИНКЕ. Этот экран и есть то место, где
-           человек ОБЪЯВЛЯЕТ свой лист многовидовым (полосы входов показывают колоды только для
-           машинных композитов). У уже разрезанной угла нет (F-8). У файла 3D — тем более (E-32). */
+        /* SPLIT ONLY WHERE A SPLIT IS NEEDED (03.10, owner item 8: «кнопка сплит должна быть только
+           на тех карточках где мы уверенны что сплит нужен»): the file declares two or more views
+           (`composite_views`, written by the server for a one-image multi-view run) and nothing
+           has been cut out of it yet (F-8). A single-view picture no longer offers it. Never on a
+           3D file (E-32). */
         onSplit={
-          !disabled && !hidden && !replaced && !threedFile && facts.splitInto === 0
+          !disabled && !hidden && !replaced && !threedFile && offersSplit(facts)
             ? {
                 onClick: () => onSplit(picture),
                 ariaLabel: `split ${handle} into views`,
