@@ -1,4 +1,8 @@
-import { GetDesignBandResponse, common_DesignPicture, common_MediaFull } from 'api/proto-http/admin';
+import {
+  GetDesignBandResponse,
+  common_DesignPicture,
+  common_MediaFull,
+} from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -23,6 +27,7 @@ import {
   type BoardItem,
 } from './mood-board';
 import { displayDetailName, readBench } from './bench-slot';
+import { carryReferenceRole } from './carry-reference';
 import { useDrafted } from './drafted-contract';
 import { cropFamilies } from './generation/composite';
 import {
@@ -670,7 +675,10 @@ export function ReferencesSection({
     const live = (getValues('moodboardMedia') ?? []) as BoardItem[];
     const at = live.findIndex((item) => isInputRow(item) && item.mediaId === oldMediaId);
     if (at < 0) {
-      showMessage('the cropped reference is no longer in the input — nothing was replaced', 'error');
+      showMessage(
+        'the cropped reference is no longer in the input — nothing was replaced',
+        'error',
+      );
       return;
     }
     writeItems(live.map((item, i) => (i === at ? { ...item, mediaId: newMediaId } : item)));
@@ -693,13 +701,13 @@ export function ReferencesSection({
     const release = holdFlatInput(card);
     void (async () => {
       try {
-        await setReferenceRole.mutateAsync({
-          mediaId: newMediaId,
-          role: carried.role,
+        await carryReferenceRole(
+          setReferenceRole.mutateAsync,
+          carried,
+          oldMediaId,
+          newMediaId,
           ordinal,
-          note: carried.note,
-        });
-        await setReferenceRole.mutateAsync({ mediaId: oldMediaId, role: '', ordinal: 0, note: '' });
+        );
       } catch {
         // Отказ уже сказан швом записи (`onError` мутации, над карточкой на экране); вторая запись
         // после отказа первой не делается — как и прежде: картинка без роли хуже двух строк.
@@ -789,7 +797,8 @@ export function ReferencesSection({
               onRemove={() => setPendingRemove(mediaId)}
               onSplit={() => {
                 const full = mediaById.get(mediaId);
-                if (full) split.openForMedia(full, `reference ${promptNumber.get(mediaId) ?? mediaId}`);
+                if (full)
+                  split.openForMedia(full, `reference ${promptNumber.get(mediaId) ?? mediaId}`);
               }}
               /* Разрешить не удалось — «не знаю», а НЕ «нет»: разбор у самой карты
                  (`splitOffered`). Ссылка из библиотеки живёт ровно здесь. */

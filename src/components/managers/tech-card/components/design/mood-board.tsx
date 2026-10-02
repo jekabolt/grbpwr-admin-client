@@ -1,6 +1,7 @@
 import { common_DesignPicture, common_MediaFull } from 'api/proto-http/admin';
 import { MediaRecropDialog } from 'components/managers/media/components/media-recrop-dialog';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
+import type { CropFrame } from 'lib/features/getCropped';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -24,15 +25,17 @@ import { CalloutRail, onDoorKey, type CalloutRailRow } from './callout-rail';
 import { serverSpeaksDesign } from './capability';
 import { Counter, GROUP_SEAM } from './core';
 import { cardFactsContext } from './core/card-facts';
+import { carryReferenceRole } from './carry-reference';
 import { DraftedField } from './core/drafted-field';
 import { isBoardRow, isInputRow, REFERENCE_KIND } from './core/mood-gate';
 import { draftedKey, useDrafted } from './drafted-contract';
 import { useCardFacts } from './head/card-facts-form';
 import { ConstructionDraft } from './head/construction-draft';
 import { useAcceptOnEdit } from './head/drafted-provider';
+import { holdFlatInput, readFlatInput, rowsWritable } from './flat-input';
 import { DraftedPill } from './head/mood-organs';
 import { VectorModal } from './modals';
-import { useMoodCallouts } from './mood-callouts';
+import { useMoodCallouts, type MoodCallout } from './mood-callouts';
 import { TILE_CORNER } from './picture-tile';
 import {
   CALLOUTS_COLLAPSE_BELOW,
@@ -43,7 +46,7 @@ import {
   clampCalloutsWidth,
   useCalloutsPrefs,
 } from './use-callouts-prefs';
-import { useDesignBand } from './use-design-band';
+import { cardOnScreen, useDesignBand, useDesignWrites } from './use-design-band';
 
 /**
  * МУДБОРД — первый пункт процесса и единственная доска, которую человек наполняет руками.
@@ -213,7 +216,7 @@ export function takeIntoInput(
 /**
  * Кроп плитки (T01): кадрированная копия встаёт НА МЕСТО оригинала в ряду доски — та же позиция,
  * тот же вид строки и та же подпись; меняется только `media_id`. Оригинал не удаляется: он остаётся
- * в библиотеке. Запись входа на старый `media_id` — отдельная сущность (U-5) и не трогается.
+ * в библиотеке. Запись входа — отдельная строка (U-5), её переносит `planBoardCrop`, не эта функция.
  * Если копия уже стоит на доске, строка оригинала просто уходит — дубля в ящике не бывает.
  */
 export function swapBoardPicture(live: BoardItem[], fromId: number, toId: number): BoardItem[] {
@@ -222,6 +225,141 @@ export function swapBoardPicture(live: BoardItem[], fromId: number, toId: number
   return already
     ? live.filter((i) => !(isBoardRow(i) && i.mediaId === fromId))
     : live.map((i) => (isBoardRow(i) && i.mediaId === fromId ? { ...i, mediaId: toId } : i));
+}
+
+/** A point of the SOURCE (fractions) as it stands in the source turned by `rotation` (clockwise). */
+function turnPoint(x: number, y: number, rotation: number): { x: number; y: number } {
+  switch (((rotation % 360) + 360) % 360) {
+    case 90:
+      return { x: 1 - y, y: x };
+    case 180:
+      return { x: 1 - x, y: 1 - y };
+    case 270:
+      return { x: y, y: 1 - x };
+    default:
+      return { x, y };
+  }
+}
+
+const CROP_EDGE = 0.001;
+const fraction = (v?: string, fallback = 0.5) => {
+  const n = parseFloat(v ?? '');
+  return Number.isNaN(n) ? fallback : n;
+};
+
+/**
+ * The callouts of `fromId` carried into its crop `toId`: every point is mapped from the source into
+ * the crop's frame; a callout with any point outside the crop is dropped (it would point at
+ * something the crop no longer shows); its label is kept inside the frame. Other rows untouched.
+ */
+export function remapCalloutsIntoCrop(
+  callouts: readonly MoodCallout[],
+  fromId: number,
+  toId: number,
+  frame: CropFrame,
+): { next: MoodCallout[]; dropped: number } {
+  const into = (x: number, y: number) => {
+    const t = turnPoint(x, y, frame.rotation);
+    return { x: (t.x - frame.x) / frame.w, y: (t.y - frame.y) / frame.h };
+  };
+  const inside = (p: { x: number; y: number }) =>
+    p.x >= -CROP_EDGE && p.x <= 1 + CROP_EDGE && p.y >= -CROP_EDGE && p.y <= 1 + CROP_EDGE;
+  const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
+  let dropped = 0;
+  const next: MoodCallout[] = [];
+  for (const c of callouts) {
+    if ((c?.mediaId ?? 0) !== fromId || fromId <= 0) {
+      next.push(c);
+      continue;
+    }
+    const label = into(fraction(c.posX), fraction(c.posY));
+    const points = (c.points ?? []).map((pt) => into(fraction(pt.x, 0), fraction(pt.y, 0)));
+    const anchors = points.length ? points : [label];
+    if (!anchors.every(inside)) {
+      dropped++;
+      continue;
+    }
+    next.push({
+      ...c,
+      mediaId: toId,
+      posX: clamp01(label.x).toFixed(3),
+      posY: clamp01(label.y).toFixed(3),
+      points: points.map((p) => ({ x: clamp01(p.x).toFixed(4), y: clamp01(p.y).toFixed(4) })),
+    });
+  }
+  return { next, dropped };
+}
+
+/**
+ * ═══ КРОП ПЛИТКИ ДОСКИ — ЧТО ПРОИСХОДИТ СО ВСЕМ, ЧТО СТОИТ НА ОРИГИНАЛЕ (03.10, gate FX2) ═══════
+ *
+ * Owner item 1 + Q1 («заменю»): the crop REPLACES the original — on the board, AND in the input when
+ * the original is there (the person crops in order to generate from the crop), so the `in the input`
+ * pill and GENERATE both follow it. The server-side role moves separately (`carryReferenceRole`).
+ *
+ *   · `frame` known (the recrop dialog reports where the cut fell): `replace`; the original's callouts
+ *     are mapped into the crop, those outside it dropped (`remapCalloutsIntoCrop`).
+ *   · `frame` unknown and the original carries callouts: they cannot be placed, so the original
+ *     stays with them and the crop goes right after it (`next-to`). On a FULL board that has no
+ *     room: `refused` — nothing changes and the caller says so; the crop is never dropped silently.
+ *   · `frame` unknown, no callouts: `replace`.
+ * `moveInput` false (the input is busy with a run or a clear) leaves the input row on the original.
+ */
+export function planBoardCrop(input: {
+  live: BoardItem[];
+  callouts: readonly MoodCallout[];
+  fromId: number;
+  toId: number;
+  frame?: CropFrame;
+  moveInput: boolean;
+  boardMax: number;
+}): {
+  mode: 'replace' | 'next-to' | 'refused';
+  items: BoardItem[];
+  callouts: readonly MoodCallout[];
+  dropped: number;
+  inputMoved: boolean;
+} {
+  const { live, callouts, fromId, toId, frame } = input;
+  const notes = callouts.filter((c) => (c?.mediaId ?? 0) === fromId && fromId > 0).length;
+  const frameOk = !!frame && frame.w > 0 && frame.h > 0;
+  let items: BoardItem[];
+  let nextCallouts = callouts;
+  let dropped = 0;
+  let mode: 'replace' | 'next-to' | 'refused' = 'replace';
+  if (notes > 0 && !frameOk) {
+    const board = live.filter(isBoardRow);
+    if (board.some((i) => i.mediaId === toId)) {
+      items = live;
+    } else if (board.length >= input.boardMax) {
+      return { mode: 'refused', items: live, callouts, dropped: 0, inputMoved: false };
+    } else {
+      const at = live.findIndex((i) => isBoardRow(i) && i.mediaId === fromId);
+      items = [...live];
+      items.splice(at < 0 ? items.length : at + 1, 0, {
+        mediaId: toId,
+        kind: 'TECH_CARD_MEDIA_KIND_MOODBOARD',
+        caption: '',
+      });
+    }
+    mode = 'next-to';
+  } else {
+    items = swapBoardPicture(live, fromId, toId);
+    if (notes > 0 && frame) {
+      const remapped = remapCalloutsIntoCrop(callouts, fromId, toId, frame);
+      nextCallouts = remapped.next;
+      dropped = remapped.dropped;
+    }
+  }
+  let inputMoved = false;
+  if (input.moveInput && fromId !== toId) {
+    const inputAt = items.findIndex((i) => isInputRow(i) && i.mediaId === fromId);
+    if (inputAt >= 0 && !items.some((i) => isInputRow(i) && i.mediaId === toId)) {
+      items = items.map((i, n) => (n === inputAt ? { ...i, mediaId: toId } : i));
+      inputMoved = true;
+    }
+  }
+  return { mode, items, callouts: nextCallouts, dropped, inputMoved };
 }
 
 /**
@@ -531,29 +669,86 @@ export function MoodBoard({
     showMessage(done, 'success');
   }
 
-  // ── кроп плитки (T01) ───────────────────────────────────────────────────────────────────────
+  // ── кроп плитки (T01; 03.10, gate FX2) ──────────────────────────────────────────────────────
   //
-  // Копия встаёт на место оригинала. Исключение одно — указания: они приколоты долями ЭТОГО кадра,
-  // и после кропа легли бы не туда (тот же довод, что у `edit`). Плитка с указаниями поэтому
-  // остаётся, а копия встаёт сразу за ней.
+  // Копия встаёт на место оригинала — на доске и во входе, роль на сервере переезжает за ней;
+  // указания переносятся в рамку кропа (что вне её — снимается). Все ветви — `planBoardCrop`.
+  const { setReferenceRole } = useDesignWrites(techCardId);
   const [cropping, setCropping] = useState<{ mediaId: number; full: common_MediaFull } | null>(
     null,
   );
 
-  function placeCropped(originalId: number, full: common_MediaFull) {
-    if (full.id == null) return;
-    if (callouts.countOn(originalId) > 0) {
-      placeEditedNextTo(
-        originalId,
-        full,
-        'the crop is on the board, right after the original — the original keeps its notes',
+  function placeCropped(originalId: number, full: common_MediaFull, frame?: CropFrame) {
+    const toId = full.id;
+    if (toId == null) return;
+    const card = techCardId;
+    const live = (getValues('moodboardMedia') ?? []) as BoardItem[];
+    const liveCallouts = (getValues('callouts') ?? []) as MoodCallout[];
+    const inInput = live.some((i) => isInputRow(i) && i.mediaId === originalId);
+    // Посреди GENERATE или CLEAR вход не трогается: прогон уже снимает его (тот же замок, что у
+    // кропа во входе).
+    const inputFree = rowsWritable(readFlatInput(card));
+    const plan = planBoardCrop({
+      live,
+      callouts: liveCallouts,
+      fromId: originalId,
+      toId,
+      frame,
+      moveInput: inInput && inputFree,
+      boardMax: MOOD_MAX,
+    });
+    if (plan.mode === 'refused') {
+      showMessage(
+        'the board is full — the crop is in the library; the original keeps its place and notes',
+        'error',
       );
       return;
     }
     setPicked((prev) => [...prev, full]);
-    writeItems(
-      swapBoardPicture((getValues('moodboardMedia') ?? []) as BoardItem[], originalId, full.id),
+    writeItems(plan.items);
+    if (plan.callouts !== liveCallouts)
+      setValue('callouts', plan.callouts as TechCardFormData['callouts'], { shouldDirty: true });
+
+    if (plan.mode === 'next-to')
+      showMessage(
+        'the crop is on the board, right after the original — the original keeps its notes',
+        'success',
+      );
+    if (plan.dropped > 0)
+      showMessage(
+        `${plan.dropped} note${plan.dropped === 1 ? '' : 's'} fell outside the crop and ${plan.dropped === 1 ? 'was' : 'were'} removed`,
+        'success',
+      );
+    if (inInput && !inputFree && cardOnScreen(card))
+      showMessage(
+        'the input is busy — a run is being saved or started; the input keeps the original',
+        'error',
+      );
+
+    // РОЛЬ ВХОДА — ЗА СТРОКОЙ (J-8): сначала новому медиа, потом снять со старого.
+    const carried = (band.references ?? []).find(
+      (r) => r.mediaId === originalId && (r.role ?? '').trim(),
     );
+    if (!plan.inputMoved || !carried) return;
+    const ordinal = Math.max(
+      1,
+      live.filter(isInputRow).findIndex((i) => i.mediaId === originalId) + 1,
+    );
+    const release = holdFlatInput(card);
+    void carryReferenceRole(
+      setReferenceRole.mutateAsync,
+      {
+        role: (carried.role ?? '').trim(),
+        note: carried.note ?? '',
+        detailSlotId: carried.detailSlotId ?? 0,
+      },
+      originalId,
+      toId,
+      ordinal,
+    )
+      // Отказ сказан швом записи (`onError` мутации).
+      .catch(() => {})
+      .finally(release);
   }
 
   // ── взведённый выбор: плитка доски заводит запись во входе ──────────────────────────────────
@@ -1195,7 +1390,7 @@ export function MoodBoard({
             media={cropping?.full}
             open={cropping != null}
             onOpenChange={(v) => !v && setCropping(null)}
-            onCropped={(full) => cropping && placeCropped(cropping.mediaId, full)}
+            onCropped={(full, frame) => cropping && placeCropped(cropping.mediaId, full, frame)}
           />
 
           {/* РЕДАКТОР КАРТИНКИ ДОСКИ (C-3) — тот же `VectorModal`, что открывает `edit` на плитке

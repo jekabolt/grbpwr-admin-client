@@ -262,6 +262,13 @@ function dataUrlBytes(dataUrl: string): number {
 }
 
 /**
+ * WHERE THE CUT FELL IN THE SOURCE — fractions (0..1) of the source AS ROTATED by `rotation`
+ * (0/90/180/270, clockwise, the turn `getCroppedImg` applies before cutting). A screen that pins
+ * marks to the source by fractions (the moodboard's callouts) maps them into the crop with it.
+ */
+export type CropFrame = { x: number; y: number; w: number; h: number; rotation: number };
+
+/**
  * @param format Формат вывода. Задан и записываем канвасом — уважается (приёмное окно медиа знает
  * MIME файла из `File.type` и говорит его прямо). Не задан или незаписываем — выводится из
  * источника, и только когда молчит и он, остаётся прежний JPEG.
