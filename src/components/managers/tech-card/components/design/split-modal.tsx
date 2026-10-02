@@ -2,10 +2,8 @@ import type { DesignSplitFrame, common_DesignPicture } from 'api/proto-http/admi
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CalloutBox } from 'ui/components/callout-box';
-import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
 import { Row } from 'ui/components/row';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
@@ -177,8 +175,8 @@ export function SplitModal({
    * `view_key` — «a legal frame on the wire» (см. `toWireFrame` ниже), а `SplitPicture` режет из
    * оригинальных байтов независимо от вида.
    *
-   * Пресеты «2 across»/«3 across»/«+ frame» в этом режиме не рисуются: каждый из них заводит
-   * второй кадр, то есть предлагает выйти из режима нажатием на его собственную панель.
+   * `+ side` в этом режиме не рисуется: он заводит второй кадр, то есть предлагал бы выйти из
+   * режима нажатием на его собственную панель.
    */
   mode?: 'split' | 'crop';
   /** Строка, которую вызывающий обязан сказать ДО реза (цена жеста на его стороне: снятые
@@ -203,26 +201,6 @@ export function SplitModal({
     () => (picture.compositeViews ?? []).map(guessedViewKey),
     [picture.compositeViews],
   );
-
-  /**
-   * WHAT THE FILE SAYS IT HOLDS, printed rather than silently consumed.
-   *
-   * `compositeViews` above is already funnelled through `guessedViewKey`, which blanks anything
-   * outside this bundle's dictionary — right for SEEDING a picker, wrong for TELLING a person what
-   * the file declares. So the sentence is built from the raw column through `viewLabel`, which
-   * echoes an unknown key back. Otherwise a composite glued from a view a newer server knows about
-   * would read as «declares nothing» on the one screen that exists to cut it apart.
-   */
-  const declaredLine = useMemo(
-    () =>
-      (picture.compositeViews ?? [])
-        .map((view) => viewLabel(view))
-        .filter(Boolean)
-        .join(', '),
-    [picture.compositeViews],
-  );
-
-  const declaredCount = (picture.compositeViews ?? []).length;
 
   /**
    * НАЧАЛЬНАЯ РАЗМЕТКА. В режиме кропа — ОДИН кадр, вписанный в середину с полями: рамка впритык к
@@ -354,6 +332,19 @@ export function SplitModal({
     );
   };
 
+  /**
+   * ТИХИЕ ОРГАНЫ `+ side` / `reset`: текст без рамки, как подпись группы. Окно сводится к одной
+   * картинке и одному списку сторон; кнопок-пресетов нет (Q2: стороны заранее разложены по видам,
+   * которые объявляет файл), поэтому две оставшиеся правки не должны спорить с картинкой.
+   */
+  const quiet =
+    'cursor-pointer text-micro uppercase tracking-label text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
+  const resetButton = (
+    <button type='button' className={quiet} onClick={() => editFrames(() => initial)}>
+      reset
+    </button>
+  );
+
   return (
     <ConfirmationModal
       open={open}
@@ -366,55 +357,15 @@ export function SplitModal({
           ? 'crop it'
           : ready
             ? `split into ${frames.length} picture${frames.length === 1 ? '' : 's'}`
-            : 'split'
+            : viewless > 0
+              ? 'name every side'
+              : 'split'
       }
       confirmDisabled={!ready || pending}
       closeOnConfirm={false}
       width='lg'
-      footerHint={
-        <Text size='micro' variant='label' component='span'>
-          {/* THE LEDGER SENTENCE — the prototype's `1 generation → K pictures`, and it is here
-              because this is the one screen where a person multiplies pictures without spending
-              anything. A cut adds no run row and no charge: the crops are siblings under the
-              picture's own producer, so the money register still reads one generation. Without the
-              sentence the natural reading of «split into 3» is «three more of whatever that cost». */}
-          the cut happens on the server, from the original bytes — the source picture stays where it
-          is.
-          {frames.length > 0 &&
-            ` No run row is added and nothing is charged again: the register reads 1 generation → ${frames.length} picture${frames.length === 1 ? '' : 's'}.`}
-        </Text>
-      }
     >
       <div className='space-y-stack'>
-        <div className='flex flex-wrap items-baseline gap-2'>
-          <Text size='micro' variant='label' component='span'>
-            {handle ? `${handle} · ` : ''}
-            {mode === 'crop'
-              ? 'one frame in, one picture out — the original stays'
-              : declaredCount
-                ? `${declaredCount} view${declaredCount === 1 ? '' : 's'} glued into one image`
-                : 'one picture in, several out — the original stays'}
-          </Text>
-        </div>
-
-        {/* WHERE THE PRESETS GET THEIR GUESSES, said out loud. The chips below pre-name each frame
-            from `composite_views` in its declared order, and a pre-filled picker whose source is
-            invisible is exactly the kind of label a tired person confirms. When the column is empty
-            — every picture on beta today, and every sheet brought by hand — the presets still lay
-            frames out, they just name none, and the line says so rather than staying silent. */}
-        {mode === 'crop' ? (
-          <Text size='micro' variant='label' component='p'>
-            one frame, and what is inside it becomes the picture. The original stays on the card —
-            the crop is filed beside it, not over it.
-          </Text>
-        ) : (
-          <Text size='micro' variant='label' component='p'>
-            {declaredLine
-              ? `the file declares ${declaredLine}, in that order — the presets below name the frames from it, left to right, and you move them.`
-              : 'this picture declares no views, so the presets lay frames out without naming them — every frame is named here by hand.'}
-          </Text>
-        )}
-
         {/* ЦЕНА ЖЕСТА, НАЗВАННАЯ ВЫЗЫВАЮЩИМ. Окно режет пиксели и о чужих привязках не знает;
             блок референсов знает — и обязан сказать про снятые указания ДО реза, а не снекбаром
             после. */}
@@ -426,46 +377,10 @@ export function SplitModal({
           </CalloutBox>
         )}
 
-        <ChipRow>
-          {/* КАЖДЫЙ ИЗ ЭТИХ ПРЕСЕТОВ ЗАВОДИТ ВТОРОЙ КАДР, поэтому в режиме кропа их нет: панель,
-              предлагающая выйти из собственного режима, — это не выбор, а ловушка. `reset`
-              остаётся: он возвращает ОДИН кадр в исходное положение. */}
-          {mode !== 'crop' && (
-            <>
-              <Chip onClick={() => editFrames(() => acrossPreset(2, compositeViews))}>2 across</Chip>
-              <Chip onClick={() => editFrames(() => acrossPreset(3, compositeViews))}>3 across</Chip>
-              {/* A FOURTH CHIP ONLY WHEN THE FILE ASKS FOR ONE. Four ticks is an ordinary request on
-                  this card — an asymmetric garment needs both sides — and its composite would
-                  otherwise have to be reached by pressing «3 across» and then «+ frame», renaming as
-                  it goes. The chip is absent when the declared count is one the two fixed chips
-                  already cover. */}
-              {declaredCount > 3 && (
-                <Chip onClick={() => editFrames(() => acrossPreset(declaredCount, compositeViews))}>
-                  {declaredCount} across
-                </Chip>
-              )}
-              <Chip
-                dashed
-                onClick={() =>
-                  editFrames((prev) => [...prev, { x: 0.4, y: 0.2, w: 0.2, h: 0.6, viewKey: '' }])
-                }
-              >
-                + frame
-              </Chip>
-            </>
-          )}
-          <Chip onClick={() => editFrames(() => initial)}>reset</Chip>
-          <Text size='micro' variant='label' component='span'>
-            {mode === 'crop'
-              ? 'drag the frame · pull an edge to resize · anything outside it is not cut'
-              : 'drag a frame · pull an edge to resize · anything outside a frame is not cut'}
-          </Text>
-        </ChipRow>
-
         <div className='flex justify-center bg-bgSecondary p-2'>
           <div
             ref={stageRef}
-            className='relative w-full select-none overflow-hidden border border-borderColor bg-bgColor'
+            className='relative w-full select-none overflow-hidden bg-bgColor'
             style={{
               aspectRatio: ratio > 0 ? String(ratio) : '3 / 2',
               maxWidth: ratio > 0 ? `${Math.round(380 * ratio)}px` : '570px',
@@ -492,7 +407,7 @@ export function SplitModal({
                 key={i}
                 role='button'
                 tabIndex={0}
-                aria-label={`frame ${i + 1}`}
+                aria-label={`side ${i + 1}`}
                 onPointerDown={startDrag(i, 'move')}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
@@ -501,37 +416,47 @@ export function SplitModal({
                   }
                 }}
                 className={cn(
-                  'absolute cursor-move',
-                  selected === i ? 'border-2 border-textColor' : 'border border-textColor',
-                  frame.viewKey ? '' : 'border-dashed',
+                  'absolute cursor-move border border-textColor',
+                  frame.viewKey || mode === 'crop' ? '' : 'border-dashed',
                 )}
                 style={{
                   left: `${frame.x * 100}%`,
                   top: `${frame.y * 100}%`,
                   width: `${frame.w * 100}%`,
                   height: `${frame.h * 100}%`,
-                  backgroundColor: 'rgba(255,255,255,0.06)',
+                  // ЛИНИЯ ОДНА, В 1px, И ПОД НЕЙ БЛЕДНЫЙ ОРЕОЛ: чёрная волосяная линия пропадает на тёмной
+                  // ткани, белый полупрозрачный пиксель снаружи держит её видимой на любом листе.
+                  // Выбранная сторона получает такой же пиксель внутри.
+                  boxShadow:
+                    selected === i
+                      ? '0 0 0 1px rgba(255,255,255,0.6), inset 0 0 0 1px rgba(255,255,255,0.85)'
+                      : '0 0 0 1px rgba(255,255,255,0.6)',
                 }}
               >
-                <span className='pointer-events-none absolute left-0 top-0 bg-textColor px-1 text-nano uppercase text-bgColor'>
-                  {/* В РЕЖИМЕ КРОПА ЯРЛЫК НЕ ЖАЛУЕТСЯ НА ОТСУТСТВИЕ ВИДА: вида у кропа нет по
-                      устройству, и «no view» читалось бы как незакрытая ошибка. */}
-                  {frame.viewKey
-                    ? viewLabel(frame.viewKey)
-                    : mode === 'crop'
-                      ? 'crop'
-                      : `${i + 1} · no view`}
+                <span
+                  className={cn(
+                    'pointer-events-none absolute left-0 top-0 px-1 text-nano uppercase',
+                    frame.viewKey || mode === 'crop'
+                      ? 'bg-textColor text-bgColor'
+                      : 'bg-bgColor text-labelColor',
+                  )}
+                >
+                  {frame.viewKey ? viewLabel(frame.viewKey) : mode === 'crop' ? 'crop' : i + 1}
                 </span>
+                {/* КРАЙ ХВАТАЕТСЯ НЕВИДИМОЙ ПОЛОСОЙ. Видна только линия рамки в 1px; полоса 12px
+                    стоит на ней поровну внутрь и наружу, поэтому край берётся так же легко, как
+                    прежние сплошные ручки в 4px, но картинку они больше не закрашивают. */}
                 {(['l', 'r', 't', 'b'] as const).map((edge) => (
                   <span
                     key={edge}
+                    aria-hidden
                     onPointerDown={startDrag(i, edge)}
                     className={cn(
-                      'absolute bg-textColor',
-                      edge === 'l' && 'left-0 top-0 h-full w-1 cursor-ew-resize',
-                      edge === 'r' && 'right-0 top-0 h-full w-1 cursor-ew-resize',
-                      edge === 't' && 'left-0 top-0 h-1 w-full cursor-ns-resize',
-                      edge === 'b' && 'bottom-0 left-0 h-1 w-full cursor-ns-resize',
+                      'absolute',
+                      edge === 'l' && '-left-1.5 top-0 h-full w-3 cursor-ew-resize',
+                      edge === 'r' && '-right-1.5 top-0 h-full w-3 cursor-ew-resize',
+                      edge === 't' && '-top-1.5 left-0 h-3 w-full cursor-ns-resize',
+                      edge === 'b' && '-bottom-1.5 left-0 h-3 w-full cursor-ns-resize',
                     )}
                   />
                 ))}
@@ -540,96 +465,83 @@ export function SplitModal({
           </div>
         </div>
 
-        {/* СПИСОК КАДРОВ — ЭТО СПИСОК ВИДОВ. В режиме кропа кадр один и вида у него нет, поэтому
-            вся таблица говорила бы «frame 1 · — view — · not cut» о единственном предмете на
-            экране: три неправды в одной строке. Числа рамки при этом не пропадают — их видно на
-            самой рамке, которую тянут. */}
-        {mode !== 'crop' && (
-        <div>
-          <GroupLabel
-            action={
-              <Text size='micro' variant='label' component='span'>
-                {frames.length} frame{frames.length === 1 ? '' : 's'} · one picture each
-              </Text>
-            }
-          >
-            frames
-          </GroupLabel>
-          {frames.map((frame, i) => (
-            <Row
-              key={i}
-              label={`frame ${i + 1}`}
-              value={
-                <span className='flex flex-wrap items-center justify-end gap-2'>
-                  {/* NO «— view —» ITEM IN THE LIST, AND THAT IS NOT A STYLE CHOICE. Radix refuses
-                      a `Select.Item` whose value is the empty string — it THROWS during render, and
-                      with no error boundary over this tab the throw takes the whole page with it,
-                      not just the modal (measured: the body came back empty). «Nothing chosen» is
-                      spelled by the ROOT holding '' and the trigger showing its placeholder, which
-                      is the arrangement Radix does support. It also happens to be the right product
-                      answer: a frame cannot be sent without a view, so «clear the view» is not a
-                      move anyone needs — an unwanted frame leaves by its own ✕. */}
-                  <SelectComponent
-                    name={`split-frame-${i}`}
-                    value={frame.viewKey}
-                    placeholder='— view —'
-                    customWidth={140}
-                    items={DESIGN_VIEW_KEYS.map((key) => ({
-                      value: key,
-                      label: viewLabel(key),
-                    }))}
-                    onValueChange={(value) =>
-                      editFrames((prev) =>
-                        prev.map((f, j) => (j === i ? { ...f, viewKey: value } : f)),
-                      )
-                    }
-                  />
-                  <Text size='micro' variant='label' component='span'>
-                    x {(frame.x * 100).toFixed(1)}–{((frame.x + frame.w) * 100).toFixed(1)} % · y{' '}
-                    {(frame.y * 100).toFixed(1)}–{((frame.y + frame.h) * 100).toFixed(1)} %
-                  </Text>
-                  {frame.viewKey ? (
-                    <Pill tone='ink'>will be cut</Pill>
-                  ) : (
-                    <Pill tone='warn'>not cut</Pill>
-                  )}
+        {/* В режиме кропа сторона одна и вида у неё нет, поэтому списка нет: остаётся только
+            `reset`, который возвращает рамку в исходное положение. */}
+        {mode === 'crop' ? (
+          <div className='flex justify-end'>{resetButton}</div>
+        ) : (
+          <div>
+            <GroupLabel
+              flush
+              action={
+                <span className='flex items-baseline gap-3'>
                   <button
                     type='button'
-                    aria-label={`remove frame ${i + 1}`}
-                    onClick={() => {
-                      editFrames((prev) => prev.filter((_, j) => j !== i));
-                      setSelected(null);
-                    }}
-                    className='cursor-pointer px-1 text-labelColor hover:text-textColor'
+                    className={quiet}
+                    onClick={() =>
+                      editFrames((prev) => [
+                        ...prev,
+                        { x: 0.4, y: 0.2, w: 0.2, h: 0.6, viewKey: '' },
+                      ])
+                    }
                   >
-                    ✕
+                    + side
                   </button>
+                  {resetButton}
                 </span>
               }
-            />
-          ))}
-        </div>
-        )}
-
-        {mode !== 'crop' && viewless > 0 && (
-          <CalloutBox tone='warning'>
-            <b>{viewless === 1 ? 'one frame has' : `${viewless} frames have`} no view.</b> The view
-            is what says which piece of the garment a frame holds, so nothing is cut until every
-            frame names one. Give it a view, or drop the frame with its ✕.
-          </CalloutBox>
-        )}
-
-        {!frames.length && (
-          <CalloutBox tone='warning'>
-            <b>no frames.</b> A split needs at least one — use «2 across» or «+ frame».
-          </CalloutBox>
+            >
+              sides
+            </GroupLabel>
+            {frames.map((frame, i) => (
+              <Row
+                key={i}
+                label={`side ${i + 1}`}
+                value={
+                  <span className='flex items-center justify-end gap-2'>
+                    {/* NO «— view —» ITEM IN THE LIST, AND THAT IS NOT A STYLE CHOICE. Radix refuses
+                        a `Select.Item` whose value is the empty string — it THROWS during render, and
+                        with no error boundary over this tab the throw takes the whole page with it,
+                        not just the modal (measured: the body came back empty). «Nothing chosen» is
+                        spelled by the ROOT holding '' and the trigger showing its placeholder, which
+                        is the arrangement Radix does support. An unwanted side leaves by its ✕. */}
+                    <SelectComponent
+                      name={`split-frame-${i}`}
+                      value={frame.viewKey}
+                      placeholder='— view —'
+                      customWidth={140}
+                      items={DESIGN_VIEW_KEYS.map((key) => ({
+                        value: key,
+                        label: viewLabel(key),
+                      }))}
+                      onValueChange={(value) =>
+                        editFrames((prev) =>
+                          prev.map((f, j) => (j === i ? { ...f, viewKey: value } : f)),
+                        )
+                      }
+                    />
+                    <button
+                      type='button'
+                      aria-label={`remove side ${i + 1}`}
+                      onClick={() => {
+                        editFrames((prev) => prev.filter((_, j) => j !== i));
+                        setSelected(null);
+                      }}
+                      className='cursor-pointer px-1 text-labelColor hover:text-textColor'
+                    >
+                      ✕
+                    </button>
+                  </span>
+                }
+              />
+            ))}
+          </div>
         )}
 
         {/* THE SERVER'S REFUSAL, WHERE THE ACT WAS. The band's write seam also raises a snackbar,
             and a snackbar is the wrong and only home for this one: it is gone in four seconds, the
             modal is still open, and the operator is left pressing a button that keeps doing
-            nothing. Refusals that survive the lifting of `not_composite` — an empty frame list, a
-            missing request id, a composite whose bytes cannot be read — all arrive here. */}
+            nothing. */}
         {splitPicture.isError && (
           <CalloutBox tone='error'>
             <b>the cut did not go through.</b>{' '}
