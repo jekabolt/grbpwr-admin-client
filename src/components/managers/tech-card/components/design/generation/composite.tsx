@@ -98,6 +98,14 @@ export function readComposite(
   return { declared: true, views, splitInto: countDerivedFrom(band, picture.id ?? 0) };
 }
 
+/**
+ * The split corner stands only on a real composite: two or more declared views, not cut yet
+ * (03.10, owner item 8).
+ */
+export function offersSplit(facts: { views: readonly string[]; splitInto: number }): boolean {
+  return facts.views.length >= 2 && facts.splitInto === 0;
+}
+
 /* ─────────────────────────── the family a cut leaves behind (H-10) ─────────────────────────── */
 
 /**

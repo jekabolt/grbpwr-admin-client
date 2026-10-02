@@ -11,6 +11,7 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { GroupLabel } from 'ui/components/group-label';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
+import { Tile, Tiles } from 'ui/components/tiles';
 
 import type { TechCardFormData } from '../../schema';
 import { runRepresentation, type Representation } from '../bench-kinds';
@@ -18,7 +19,7 @@ import { serverSpeaksDesign } from '../capability';
 import { EmptyState } from '../core';
 import { pictureHandle, runHandle } from '../handles';
 import { RecallBenchIntake, RecallDoors } from '../history-recall';
-import { useGalleryGroup } from '../picture-tile';
+import { PictureTile, useGalleryGroup } from '../picture-tile';
 import {
   RenderDoorsHost,
   RenderDoorsNotes,
@@ -27,15 +28,16 @@ import {
   useRenderStep,
 } from '../render/render-tile';
 import { SplitModal } from '../split-modal';
-import { isRunArchived } from '../visibility';
+import { isPictureHidden, isRunArchived } from '../visibility';
 import { viewLabel } from '../views';
-import { closeSurface, openSurface, useBenchRun } from './bench-store';
+import { closeSurface, openSurface, putOnBench, useBenchRun } from './bench-store';
 import { formatMoney } from './money';
 import { CountPill, RunPanel } from './run-panel';
 import { deckAfterZoom, deckOfRuns, outputPlan, runsGallery } from './run-gallery';
 import { RunOutputs, runOutputsShown } from './run-outputs';
-import { fixSelectionOf, isRunLive, runStamp, runStateWord } from './run-state';
+import { expectedTileCount, fixSelectionOf, isRunLive, runStamp, runStateWord } from './run-state';
 import { REP_NOUN } from './run-tile';
+import { thumbUrl } from './thumb';
 import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from './use-generation';
 
 /**
@@ -90,6 +92,8 @@ import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from '
 
 /** How many run rows one page of the history holds. The owner's number (T-17). */
 const PAGE = 3;
+/** The tile track of the history's grid — the mock-up's `.fgrid`, as `run-outputs.tsx` has it. */
+const HISTORY_TRACK = 148;
 /**
  * Сколько СЕРВЕРНЫХ страниц дочитыватель окна берёт на одно положение окна. Разбор, почему
  * единица, — у `autofillBudget` в теле органа; коротко: окно короче страницы ровно на одну
@@ -194,10 +198,7 @@ function RunRow({
      line exists only when there is something. */
   const pointer = !folded && !!onBench;
   const outputsShown = !folded && !onBench && runOutputsShown(run);
-  const toBench = () =>
-    document
-      .querySelector('[data-latest-generation]')
-      ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  const toBench = scrollToBench;
 
   return (
     /* ЯКОРЯ СТРОКИ (G-1): её прогон и её представление — по ним читают строку и проба, и человек в
@@ -339,6 +340,118 @@ function RunRow({
       </div>
 
       {open && <RunPanel techCardId={techCardId} band={band} run={run} disabled={disabled} />}
+    </div>
+  );
+}
+
+/* ────────────────────────────── the flat grid row (03.10) ────────────────────────────── */
+
+/**
+ * ═══ FLAT: A RUN IS ITS PICTURES, AND ONE DOOR TO THE BENCH (03.10, owner items 9 and 10b) ═════
+ *
+ * Owner: «в GENERATION HISTORY не должно быть лишней инфы только картинки которые были сгенерены …
+ * плиткой гридом и должна быть кнопка поместить на бенч … назначать слоты можно только из бенча на
+ * клик по плитке он автоматом уходит в бенч ака LATEST GENERATION». So on FLAT a row is the grid of
+ * what the run drew (the cards of `outputPlan`: the outputs and their edits; cut pieces stay behind
+ * their sheet, as on the bench) and `put on bench`. No meta, no recall, no slot picker, no split or
+ * edit corners: all of that lives on the bench. A press on any tile does what the door does.
+ * The run that stands on the bench says `on bench` in the door's place, and its tiles take you up.
+ */
+
+/** The pictures a FLAT history row shows — what the run drew, the old hidden stamps left out. */
+export function gridPicturesOf(run: common_DesignRun): common_DesignPicture[] {
+  return outputPlan(run.pictures ?? [])
+    .cards.map((card) => card.picture)
+    .filter((picture) => (picture.id ?? 0) > 0 && !isPictureHidden(picture));
+}
+
+/** A FLAT row has something to show: a run in flight, or at least one picture. */
+const gridShows = (run: common_DesignRun): boolean =>
+  isRunLive(run) || gridPicturesOf(run).length > 0;
+
+const scrollToBench = () =>
+  document
+    .querySelector('[data-latest-generation]')
+    ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+
+function RunGridRow({
+  techCardId,
+  run,
+  onBench,
+}: {
+  techCardId: number;
+  run: common_DesignRun;
+  /** Its pictures stand on the bench now (the run the workbench shows). */
+  onBench: boolean;
+}) {
+  const runId = run.id ?? 0;
+  const live = isRunLive(run);
+  const elapsed = useElapsed(live ? run.startedAt || run.createdAt : undefined);
+  const pictures = useMemo(() => gridPicturesOf(run), [run]);
+  const handle = runHandle(runId);
+  const toBench = () => {
+    if (!onBench) putOnBench(techCardId, runId);
+    scrollToBench();
+  };
+
+  return (
+    <div
+      data-run={runId || undefined}
+      data-rep='flat'
+      className='space-y-1.5 border-b border-hairline pb-2 [&:not(:has(+[data-run]))]:border-b-0'
+    >
+      <Tiles min={HISTORY_TRACK}>
+        {live && pictures.length === 0
+          ? Array.from({ length: Math.max(1, expectedTileCount(run)) }, (_, i) => (
+              <Tile
+                key={i}
+                dashed
+                media={
+                  <div
+                    className='flex w-full items-center justify-center bg-bgSecondary'
+                    style={{ aspectRatio: '4 / 5' }}
+                  >
+                    <Text
+                      size='nano'
+                      variant='label'
+                      component='span'
+                      className='uppercase tracking-label'
+                    >
+                      {i === 0 ? elapsed || 'running' : 'reserved'}
+                    </Text>
+                  </div>
+                }
+              />
+            ))
+          : pictures.map((picture) => (
+              <div key={picture.id} className='min-w-0' data-picture={picture.id}>
+                <PictureTile
+                  url={thumbUrl(picture.media)}
+                  alt={pictureHandle(picture)}
+                  className='w-full'
+                  onOpen={toBench}
+                />
+              </div>
+            ))}
+      </Tiles>
+      <div className='flex items-center' data-run-bench-door={runId || undefined}>
+        {onBench ? (
+          <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
+            on bench
+          </Text>
+        ) : (
+          <Button
+            type='button'
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+            aria-label={`put every picture of ${handle} on the bench`}
+            onClick={toBench}
+          >
+            put on bench
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -492,10 +605,18 @@ export function GenerationHistory({
    * положение фильтра осталось выразимым только в типе, ради `repLabel`/`repWord`.
    */
   const rep: RepFilter = defaultRep;
+  /**
+   * FLAT'S HISTORY IS A GRID (03.10, owner items 9 and 10b): each run its pictures and `put on
+   * bench`, the header a plain «N runs» — no fold, no archived shelf (archived runs are not shown).
+   * Every other step keeps its rows as they were.
+   */
+  const grid = rep === 'flat' && !match;
   /** The window off: every run this card has, and the server's continuations read to the end. */
   const [showAll, setShowAll] = useState(false);
   /** Свёртка RUNS (макет: `fold('hist.'+kind, …)`). */
-  const [runsOpen, setRunsOpen] = useState(defaultOpen);
+  const [runsFolded, setRunsOpen] = useState(defaultOpen);
+  /** FLAT's grid has no fold: its runs are always on screen. */
+  const runsOpen = grid || runsFolded;
   const [splitting, setSplitting] = useState<{
     picture: common_DesignPicture;
     handle: string;
@@ -564,7 +685,7 @@ export function GenerationHistory({
   const shownScope = useRef(scopeKey);
   if (shownDefaults.current !== `${defaultRep}|${defaultOpen}` || shownScope.current !== scopeKey) {
     // Only a new step folds the list back; a new scope inside one step keeps the fold.
-    if (shownDefaults.current !== `${defaultRep}|${defaultOpen}` && runsOpen !== defaultOpen) {
+    if (shownDefaults.current !== `${defaultRep}|${defaultOpen}` && runsFolded !== defaultOpen) {
       setRunsOpen(defaultOpen);
     }
     shownDefaults.current = `${defaultRep}|${defaultOpen}`;
@@ -634,7 +755,7 @@ export function GenerationHistory({
    * ВСЁ, ЧТО НИЖЕ, ВЫВОДИТСЯ ИЗ `visible`: страницы, зажим окна, ряд просмотрщика, «show all» и
    * подпись пейджера. Поэтому фильтр стоит ЗДЕСЬ и ровно одной строкой.
    */
-  const visible = useMemo(
+  const kindRuns = useMemo(
     () =>
       match
         ? unfiltered.filter(match)
@@ -643,6 +764,8 @@ export function GenerationHistory({
           : unfiltered.filter((run) => runRepresentation(run) === rep),
     [unfiltered, rep, match],
   );
+  /** FLAT's grid draws only runs with something to show (pictures, or in flight). */
+  const visible = useMemo(() => (grid ? kindRuns.filter(gridShows) : kindRuns), [grid, kindRuns]);
   const pageCount = Math.max(1, Math.ceil(visible.length / PAGE));
   /**
    * THE WINDOW IS CLAMPED RATHER THAN TRUSTED, and the clamp is written back after the commit (the
@@ -679,7 +802,8 @@ export function GenerationHistory({
     () =>
       runsGallery(
         [
-          ...[...(runsOpen ? visible : []), ...(archShown ? archivedRows : [])].filter(
+          // FLAT's grid tiles do not zoom (a press sends the run to the bench): nothing to walk.
+          ...[...(runsOpen && !grid ? visible : []), ...(archShown ? archivedRows : [])].filter(
             (run) => (run.id ?? 0) !== benchRunId,
           ),
           // O-63: the brought group, while it is open — last, as it stands.
@@ -690,6 +814,7 @@ export function GenerationHistory({
       ),
     [
       runsOpen,
+      grid,
       visible,
       archShown,
       archivedRows,
@@ -812,7 +937,7 @@ export function GenerationHistory({
    * карточными. ⚠ `totalRuns > 0` в проверке живых — сторож против сервера, который агрегата не
    * считает вовсе: «0 − 0» тогда не должно читаться как «всё прочитано».
    */
-  const liveShown = visible.length;
+  const liveShown = kindRuns.length;
   const liveFloor =
     more.hasMore && !(totalRuns > 0 && unfiltered.length >= totalRuns - archivedRuns);
   const archShownCount = archivedRows.length;
@@ -829,7 +954,8 @@ export function GenerationHistory({
     more.loading ||
     (more.hasMore &&
       (showAll || autofillBudget > 0 || (archShown && archivedLoaded.length < archivedRuns)));
-  const allArchived = totalRuns > 0 && totalRuns === archivedRuns && unfiltered.length === 0;
+  const allArchived =
+    !grid && totalRuns > 0 && totalRuns === archivedRuns && unfiltered.length === 0;
 
   /** The door of the empty window: to the GENERATE row of this step, which stands above. */
   const goToRun = () => {
@@ -839,26 +965,35 @@ export function GenerationHistory({
   };
 
   const rowsOf = (list: common_DesignRun[], shelf: boolean) =>
-    list.map((run) => (
-      <RunRow
-        key={run.id}
-        band={band}
-        techCardId={techCardId}
-        run={run}
-        cardFit={cardFit}
-        shelf={shelf || undefined}
-        onBench={!!benchRunId && (run.id ?? 0) === benchRunId}
-        disabled={disabled || !speaks}
-        galleryKey={galleryGroup.key}
-        galleryIndexOf={gallery.indexOf}
-        openDeck={openDeck}
-        /* ОДИН ОТКРЫТЫЙ — ЗДЕСЬ И ЕСТЬ ЭТОТ ЗАКОН: нажатие на дверь другой колоды ПЕРЕПИСЫВАЕТ
+    list.map((run) =>
+      grid && !shelf ? (
+        <RunGridRow
+          key={run.id}
+          techCardId={techCardId}
+          run={run}
+          onBench={!!benchRunId && (run.id ?? 0) === benchRunId}
+        />
+      ) : (
+        <RunRow
+          key={run.id}
+          band={band}
+          techCardId={techCardId}
+          run={run}
+          cardFit={cardFit}
+          shelf={shelf || undefined}
+          onBench={!!benchRunId && (run.id ?? 0) === benchRunId}
+          disabled={disabled || !speaks}
+          galleryKey={galleryGroup.key}
+          galleryIndexOf={gallery.indexOf}
+          openDeck={openDeck}
+          /* ОДИН ОТКРЫТЫЙ — ЗДЕСЬ И ЕСТЬ ЭТОТ ЗАКОН: нажатие на дверь другой колоды ПЕРЕПИСЫВАЕТ
            адрес; у состояния из одного значения второе открытое просто невыразимо. */
-        onDeck={toggleDeck}
-        onZoomPicture={foldOnForeignZoom}
-        onSplit={splitHere}
-      />
-    ));
+          onDeck={toggleDeck}
+          onZoomPicture={foldOnForeignZoom}
+          onSplit={splitHere}
+        />
+      ),
+    );
 
   const paged = visible.length > PAGE || more.hasMore;
 
@@ -919,43 +1054,58 @@ export function GenerationHistory({
             data-rep-filter={rep}
             className='flex flex-wrap items-center gap-1.5'
           >
-            <Button
-              variant='secondary'
-              size='xs'
-              aria-expanded={runsOpen}
-              aria-controls='design-history-runs'
-              aria-label={`${runsOpen ? 'hide' : 'show'} the ${runCountWords(rep, liveShown, liveFloor)} of this card`}
-              onClick={() => setRunsOpen((v) => !v)}
-              className='whitespace-nowrap'
-              title={
-                liveFloor
-                  ? `the ${repRunNoun(rep)}s this screen has read so far — the feed has earlier pages it has not read, so the number is a floor. Card-wide: ${cardWide}.`
-                  : `every ${repRunNoun(rep)} on this card. Card-wide: ${cardWide}.`
-              }
-            >
-              {runCountWords(rep, liveShown, liveFloor)} {runsOpen ? '▾' : '▸'}
-            </Button>
-            <Button
-              variant='secondary'
-              size='xs'
-              aria-expanded={archShown}
-              className='whitespace-nowrap'
-              aria-label={`${archShown ? 'hide' : 'open'} the shelf of ${archShownCount}${archFloor ? ' or more' : ''} archived ${repRunNoun(rep)}${archShownCount === 1 && !archFloor ? '' : 's'}`}
-              title={
-                archFloor
-                  ? `the archived ${repRunNoun(rep)}s read so far — the shelf reads the rest when it opens. Card-wide: ${cardWide}.`
-                  : `every archived ${repRunNoun(rep)} on this card. Card-wide: ${cardWide}.`
-              }
-              onClick={() => {
-                setArchShown((v) => !v);
-                // Колода складывается: на полке может стоять её же строка, и «одна открытая на всю
-                // ленту» — закон над лентой целиком. ⚠ `setPage(0)` здесь НЕТ (J-22): полка не
-                // меняет длину списка под окном, и сброс страницы съедал жест.
-                setOpenDeck(null);
-              }}
-            >
-              · {`${archShownCount}${archFloor ? '+' : ''}`} archived ▸
-            </Button>
+            {grid ? (
+              <Text
+                size='nano'
+                variant='label'
+                component='span'
+                className='whitespace-nowrap uppercase tracking-label'
+                data-run-count={liveShown}
+              >
+                {liveShown}
+                {liveFloor ? '+' : ''} run{liveShown === 1 && !liveFloor ? '' : 's'}
+              </Text>
+            ) : (
+              <>
+                <Button
+                  variant='secondary'
+                  size='xs'
+                  aria-expanded={runsOpen}
+                  aria-controls='design-history-runs'
+                  aria-label={`${runsOpen ? 'hide' : 'show'} the ${runCountWords(rep, liveShown, liveFloor)} of this card`}
+                  onClick={() => setRunsOpen((v) => !v)}
+                  className='whitespace-nowrap'
+                  title={
+                    liveFloor
+                      ? `the ${repRunNoun(rep)}s this screen has read so far — the feed has earlier pages it has not read, so the number is a floor. Card-wide: ${cardWide}.`
+                      : `every ${repRunNoun(rep)} on this card. Card-wide: ${cardWide}.`
+                  }
+                >
+                  {runCountWords(rep, liveShown, liveFloor)} {runsOpen ? '▾' : '▸'}
+                </Button>
+                <Button
+                  variant='secondary'
+                  size='xs'
+                  aria-expanded={archShown}
+                  className='whitespace-nowrap'
+                  aria-label={`${archShown ? 'hide' : 'open'} the shelf of ${archShownCount}${archFloor ? ' or more' : ''} archived ${repRunNoun(rep)}${archShownCount === 1 && !archFloor ? '' : 's'}`}
+                  title={
+                    archFloor
+                      ? `the archived ${repRunNoun(rep)}s read so far — the shelf reads the rest when it opens. Card-wide: ${cardWide}.`
+                      : `every archived ${repRunNoun(rep)} on this card. Card-wide: ${cardWide}.`
+                  }
+                  onClick={() => {
+                    setArchShown((v) => !v);
+                    // Колода складывается: на полке может стоять её же строка, и «одна открытая на всю
+                    // ленту» — закон над лентой целиком. ⚠ `setPage(0)` здесь НЕТ (J-22): полка не
+                    // меняет длину списка под окном, и сброс страницы съедал жест.
+                    setOpenDeck(null);
+                  }}
+                >
+                  · {`${archShownCount}${archFloor ? '+' : ''}`} archived ▸
+                </Button>
+              </>
+            )}
             {/* O-63 (D-62 п.4): THE BROUGHT GROUP'S DOOR — beside the shelf's, in the same line
                 (r3b, M-3: a door never gets a row of its own), only while something brought stands
                 off SIDES. Its group opens after the shelf. */}

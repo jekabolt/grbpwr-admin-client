@@ -139,3 +139,90 @@ export function unstickPin(card: number) {
   if (!s.pin?.sticky) return;
   write(card, { ...s, pin: { ...s.pin, sticky: false } });
 }
+
+/* ═══ WHICH RUN THE PERSON PUT ON THE BENCH (03.10, owner item 9) ════════════════════════════════
+ *
+ * Owner: the history is a grid of each run's pictures with one «put on bench» per run, and a click on
+ * any tile sends that run to the bench (LATEST GENERATION). So the workbench no longer follows only
+ * the newest run: it shows, in this order, the PINNED run (a surface is open on it), the run the
+ * person PUT on the bench, and the newest flat run. The choice is per card and survives a reload
+ * (browser storage, every access guarded: a private window or blocked storage just forgets it).
+ * This tab's GENERATE, «show ›», archiving the chosen run, or the choice becoming the newest run
+ * anyway let it go — from then on the bench follows the newest again.
+ */
+
+const CHOICE_KEY = (card: number) => `grbpwr.design.bench.flat.${card}`;
+/** card → chosen run id; a card read once from storage is cached here (0 = no choice). */
+const choices = new Map<number, number>();
+
+function storedChoice(card: number): number {
+  try {
+    const raw = window.localStorage.getItem(CHOICE_KEY(card));
+    const id = raw ? Number(raw) : 0;
+    return Number.isInteger(id) && id > 0 ? id : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** The chosen run of a card, outside React (the store's own reads, and the probe). */
+export function readBenchChoice(card: number): number {
+  return readChoice(card);
+}
+
+function readChoice(card: number): number {
+  if (!card) return 0;
+  let id = choices.get(card);
+  if (id === undefined) {
+    id = storedChoice(card);
+    choices.set(card, id);
+  }
+  return id;
+}
+
+function writeChoice(card: number, runId: number) {
+  if (!card || readChoice(card) === runId) return;
+  choices.set(card, runId);
+  try {
+    if (runId > 0) window.localStorage.setItem(CHOICE_KEY(card), String(runId));
+    else window.localStorage.removeItem(CHOICE_KEY(card));
+  } catch {
+    // Storage refused: the choice still holds for this page.
+  }
+  listeners.forEach((listener) => listener());
+}
+
+/** The run the person put on this card's bench; 0 — none, the bench follows the newest. */
+export function useBenchChoice(card: number): number {
+  return useSyncExternalStore(
+    subscribe,
+    () => readChoice(card),
+    () => 0,
+  );
+}
+
+/**
+ * «put on bench» from the history: the workbench shows `runId` from now on. A pin some earlier work
+ * left goes — the person asked for this run — but an open surface keeps the run it works on until it
+ * closes (`openSurface` pins again on the next one).
+ */
+export function putOnBench(card: number, runId: number) {
+  if (!card || runId <= 0) return;
+  const s = read(card);
+  if (s.pin && s.surfaces.size === 0) write(card, { ...s, pin: null });
+  writeChoice(card, runId);
+}
+
+/** Forget the choice — the bench follows the newest flat run again. */
+export function clearBenchChoice(card: number) {
+  writeChoice(card, 0);
+}
+
+/**
+ * WHICH RUN THE WORKBENCH HOLDS ON TO, before the newest: the pinned run, else the chosen one; 0 —
+ * none, it shows the newest. A choice equal to the newest holds nothing it would not show anyway.
+ */
+export function heldRunId(pin: BenchPin | null, chosen: number, newestId: number): number {
+  if (pin) return pin.runId;
+  return chosen > 0 && chosen !== newestId ? chosen : 0;
+}
