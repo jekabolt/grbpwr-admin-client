@@ -241,6 +241,11 @@ function FieldLabel({ htmlFor, children }: { htmlFor?: string; children: ReactNo
 /**
  * ═══ ФАКТЫ СТИЛЯ — ЗНАЧЕНИЯ И ОДНА ИКОНКА, КОТОРАЯ ДЕЛАЕТ ИХ ЯЧЕЙКАМИ (T05 → O-29) ═══════════════
  *
+ * ⚠ 03.10 (T02): строка — первый ряд грида блока (FIT над SILHOUETTE, CATEGORY над FABRIC), и
+ * кнопки `✎/✓` больше нет: правка открывается щелчком по самому значению (`FactValue`), закрывается
+ * тихим `done` в строке подписи CATEGORY или Escape. Ниже «`✎`» читать как «значение», «`✓`» — как
+ * `done`; поведение ячеек, замков и фокуса прежнее.
+ *
  * Строка во всю ширину грида: FIT · CATEGORY, справа — одна кнопка `✎`. Печать — та же, что в T05:
  * пустой факт — `—` (DESIGN.md: пустота не рисуется нулём и не прячется); посадка печатается словом
  * словаря (`fitLabel`: `wide_leg` → «wide leg», `a_line` → «a-line»), тем же, каким её печатает CARD
@@ -322,21 +327,35 @@ function StyleFacts({
   }, [canEdit, techCardId]);
   const open = editing && canEdit;
   const row = useRef<HTMLDivElement>(null);
+  // Из какого значения открыли — туда же возвращается фокус на `done` и Escape.
+  const openedFrom = useRef<'fit' | 'meta'>('meta');
   const focusIn = (selector: string) =>
     requestAnimationFrame(() => row.current?.querySelector<HTMLElement>(selector)?.focus());
-  const editLabel = fitShown ? 'edit fit and category' : 'edit category';
+  const close = () => {
+    setEditing(false);
+    focusIn(
+      `[data-c19-field="${openedFrom.current}"] [data-c19-facts-edit], [data-c19-facts-edit]`,
+    );
+  };
+  const openAt = (cell: 'fit' | 'meta') => {
+    openedFrom.current = cell;
+    setEditing(true);
+    // Фокус — в живую ячейку того значения, по которому щёлкнули; мёртвый селект посадки (нет
+    // `products:write`) фокус не примет, и тогда его получает браузер категорий.
+    const live =
+      '[role="combobox"]:not(:disabled), button:not([data-drafted-pill]):not([data-c19-facts-edit]):not(:disabled)';
+    focusIn(`[data-c19-field="${cell}"] :is(${live}), [data-c19-field] :is(${live})`);
+  };
 
   return (
     <div
       ref={row}
-      /* Печать равняет строку по низу (значения — текст); ячейки — по верху, как грид CARD DETAILS:
-         подписи в одну линию (`[&_label]:min-h-[19px]`), контролы в одну, слова замка под селектом. */
-      className={cn(
-        'flex min-w-0 flex-wrap gap-x-8 gap-y-3 sm:col-span-2',
-        open ? 'items-start' : 'items-end',
-      )}
+      /* ТОТ ЖЕ ГРИД, ЧТО У ПОЛЕЙ НИЖЕ (T02, 03.10): FIT стоит над SILHOUETTE, CATEGORY — над FABRIC,
+         те же колонки и тот же шов 24px; подпись — та же `FieldLabel`, значение — текстом под ней.
+         Строка фактов больше не отдельная полоса с кнопкой справа, а первый ряд того же грида. */
+      className='grid min-w-0 grid-cols-1 items-start gap-x-6 gap-y-6 sm:col-span-2 sm:grid-cols-2'
       data-c19-facts={open ? 'edit' : 'read'}
-      // Принятие пилюли с клавиатуры ведёт фокус к первому полю строки, а без поля — к `✎`.
+      // Принятие пилюли с клавиатуры ведёт фокус к первому полю строки, а без поля — к значению.
       data-drafted-scope=''
       onKeyDown={(e) => {
         // Escape, которым закрывается слой Radix (список, поповер, подтверждение), сюда в норме не
@@ -348,8 +367,7 @@ function StyleFacts({
         if (!open || e.key !== 'Escape' || e.defaultPrevented) return;
         e.preventDefault();
         e.stopPropagation();
-        setEditing(false);
-        focusIn('[data-c19-facts-edit]');
+        close();
       }}
     >
       {open ? (
@@ -363,24 +381,40 @@ function StyleFacts({
               <FitCell choices={fitChoices} creating={false} locked={fitLocked} />
             </div>
           )}
-          <div className={CELL} data-c19-field='meta'>
+          <div className={cn(CELL, 'relative')} data-c19-field='meta'>
             <CategoryBrowser />
+            {/* `done` — тихое слово в строке подписи последней ячейки, грамматикой `open ›` у
+                колорвеев; сохранять нечего, автосейв уже всё унёс. */}
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              className='absolute top-0 right-0 flex h-[19px] items-center px-0 text-labelColor hover:text-textColor'
+              aria-label='done editing'
+              title='saved as you go'
+              data-c19-facts-edit='done'
+              onClick={close}
+            >
+              done
+            </Button>
           </div>
         </>
       ) : (
         <>
           {fitShown && (
-            <div className='min-w-0 space-y-1.5' data-c19-field='fit'>
+            <div className='min-w-0 space-y-1' data-c19-field='fit'>
               <FieldLabel>fit</FieldLabel>
               <div className='flex items-center gap-2'>
                 <DraftedField live={fitDrafted} pill={false} className={cn(fitDrafted && 'px-1.5')}>
-                  <Text
-                    component='span'
-                    className={cn('block', fitDrafted && 'text-warning')}
-                    data-c19-fact='fit'
+                  <FactValue
+                    editable={canEdit}
+                    label='edit fit'
+                    onEdit={() => openAt('fit')}
+                    className={cn(fitDrafted && 'text-warning')}
+                    fact='fit'
                   >
                     {fit ? fitLabel(fit) : '—'}
-                  </Text>
+                  </FactValue>
                 </DraftedField>
                 <DraftedPill
                   live={fitDrafted}
@@ -391,56 +425,75 @@ function StyleFacts({
               </div>
             </div>
           )}
-          <div className='min-w-0 space-y-1.5' data-c19-field='meta'>
+          <div className='min-w-0 space-y-1' data-c19-field='meta'>
             <FieldLabel>category</FieldLabel>
-            <Text component='span' className='block break-words' data-c19-fact='category'>
+            <FactValue
+              editable={canEdit}
+              label='edit category'
+              onEdit={() => openAt('meta')}
+              className='break-words'
+              fact='category'
+            >
               {categoryPath || '—'}
-            </Text>
+            </FactValue>
           </div>
         </>
-      )}
-      {canEdit && (
-        /* ОДНА кнопка на оба режима — тот же узел DOM, поэтому щелчок по ней не роняет фокус. При
-           открытых ячейках она стоит на линии контролов: строка подписи 19px + шов 1px, и ростом
-           с контрол (26px), а не с плотную кнопку `xs`. */
-        <div className={cn('ml-auto', open && 'mt-[20px]')}>
-          <Button
-            type='button'
-            variant='secondary'
-            size='xs'
-            className={open ? 'h-[26px]' : undefined}
-            aria-label={open ? 'done editing' : editLabel}
-            aria-expanded={open}
-            title={open ? 'done — saved as you go' : editLabel}
-            data-c19-facts-edit={open ? 'done' : 'edit'}
-            onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-              // Двойной щелчок — одно нажатие: второй `click` (`detail === 2`) закрыл бы то, что
-              // открыл первый.
-              if (e.detail > 1) return;
-              const next = !open;
-              setEditing(next);
-              if (!next) {
-                // `✓` возвращает фокус кнопке сам, как Escape: Safari по щелчку кнопку не фокусирует.
-                focusIn('[data-c19-facts-edit]');
-              } else if (e.detail === 0) {
-                // Enter/Space — щелчок без указателя: фокус идёт в первую ЖИВУЮ ячейку (мёртвый
-                // селект посадки фокус не примет, и он остался бы на кнопке).
-                focusIn(
-                  '[data-c19-field] [role="combobox"]:not(:disabled), [data-c19-field] button:not([data-drafted-pill]):not(:disabled)',
-                );
-              }
-            }}
-          >
-            {open ? '✓' : '✎'}
-          </Button>
-        </div>
       )}
     </div>
   );
 }
 
-/** Ячейка открытого режима: делит строку поровну с соседкой, на узком экране переносится. */
-const CELL = 'min-w-[200px] flex-1 [&_label]:flex [&_label]:min-h-[19px] [&_label]:items-center';
+/**
+ * ЗНАЧЕНИЕ ФАКТА — ОНО ЖЕ ДВЕРЬ В ПРАВКУ (T02, 03.10). Владелец: «нужно более органично … сейчас
+ * это очень вырожденно и как будто не оттуда» — отдельная кнопка `✎/✓` в рамке снята; правится
+ * щелчком по самому значению, грамматикой заголовка задачи (`tasks/task-detail/inline-fields.tsx`).
+ * Тихая пунктирная черта под значением видна всегда (не только на ховер) — так значение читается
+ * правимым, не превращаясь в кнопку; на ховер черта темнеет. Без права записи — просто текст.
+ */
+function FactValue({
+  editable,
+  label,
+  onEdit,
+  className,
+  fact,
+  children,
+}: {
+  editable: boolean;
+  label: string;
+  onEdit: () => void;
+  className?: string;
+  fact: 'fit' | 'category';
+  children: ReactNode;
+}): JSX.Element {
+  if (!editable) {
+    return (
+      <Text component='span' className={cn('block', className)} data-c19-fact={fact}>
+        {children}
+      </Text>
+    );
+  }
+  return (
+    <button
+      type='button'
+      aria-label={label}
+      title={label}
+      data-c19-facts-edit='edit'
+      onClick={(e) => {
+        // Двойной щелчок — одно нажатие.
+        if (e.detail > 1) return;
+        onEdit();
+      }}
+      className='block w-fit max-w-full cursor-pointer text-left underline decoration-borderColor decoration-dotted underline-offset-4 outline-none hover:decoration-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+    >
+      <Text component='span' className={cn('block', className)} data-c19-fact={fact}>
+        {children}
+      </Text>
+    </button>
+  );
+}
+
+/** Ячейка открытого режима: колонка того же грида; подписи ячеек в одну линию (19px). */
+const CELL = 'min-w-0 [&_label]:flex [&_label]:min-h-[19px] [&_label]:items-center';
 
 // One construction aspect as a plain text field. Writes the SAME `details[]` row the aspects editor
 // on STUDIO writes, with the same rule: a row with neither text nor images is dropped, not kept
