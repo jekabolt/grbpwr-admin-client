@@ -663,7 +663,18 @@ export function Bench({
                 }}
                 // СНЯТИЕ ДЕТАЛИ НИЧЕМ НЕ ЗАПЕРТО ОТСЮДА: единственный довод запрета («выпущенный
                 // лист ссылается на слот») умер вместе с версиями листа.
-                onDelete={() => writes.deleteDetailSlot.mutate(slot.id ?? 0)}
+                // ⚠ СЕРВЕР СНОСИТ ТОЛЬКО ПУСТОЙ СЛОТ (`slot_filled`), поэтому заполненный сначала
+                // пустеет (плита остаётся в истории), и лишь потом сносится. Отказ любого шага
+                // говорит шов мутации, а промис возвращает дверь в покой.
+                onDelete={async () => {
+                  if ((slot.pictureId ?? 0) > 0)
+                    await writes.setBenchSlot.mutateAsync({
+                      slot: ref,
+                      pictureId: 0,
+                      expectedSlotRev: rev,
+                    });
+                  await writes.deleteDetailSlot.mutateAsync(slotId);
+                }}
                 galleryItem={
                   picture?.media
                     ? mediaFullToViewerItem(picture.media as common_MediaFull)

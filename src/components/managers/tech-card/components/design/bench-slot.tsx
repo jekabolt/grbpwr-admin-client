@@ -70,7 +70,6 @@ import {
   colorwayOf,
 } from './bench-kinds';
 
-
 /** Total over the vocabulary: an unknown key prints itself rather than becoming a wrong side. */
 export type BenchRead = {
   /** All four active sides, in a fixed order, present-or-not. */
@@ -373,7 +372,10 @@ export function InertDoor({
     <span
       data-inert={reason}
       title={reason}
-      className={cn(reasonVisible ? 'inline-flex flex-col items-start gap-0.5' : 'inline-flex', className)}
+      className={cn(
+        reasonVisible ? 'inline-flex flex-col items-start gap-0.5' : 'inline-flex',
+        className,
+      )}
     >
       <Button variant='secondary' size={size} disabled aria-describedby={describedBy}>
         {label}
@@ -462,7 +464,8 @@ export type BenchSlotProps = {
      плиты по-прежнему можно — это `onCrop`, другая дверь с другим исходом. */
   /** Details only. */
   onRename?: (name: string) => void;
-  onDelete?: () => void;
+  /** Details only. A filled slot is emptied first: the server deletes only an empty one. */
+  onDelete?: () => Promise<unknown> | void;
   /**
    * Бледная пиктограмма изделия в ПУСТОМ кадре (techcard-ux-0925, D-22) — только у сторон, и у
    * каждой стороны СВОЯ: перед, спинка, левый и правый профиль (D-36). Деталь не сторона изделия,
@@ -690,7 +693,7 @@ function EmptyCell({
                 tone='attention'
                 data-proposed-pill=''
                 className='ml-auto leading-none'
-                title='the construction draft proposed this detail — put a picture, draw, rename or remove it to accept'
+                title='the construction draft proposed this detail'
               >
                 proposed
               </Pill>
@@ -774,8 +777,8 @@ export function BenchSlot(props: BenchSlotProps) {
   const footnote = picture ? slotFootnote(band, picture, shelfOrdinals) : '';
 
   return (
-    // `group` is load-bearing: the quiet organs of the plate (the corner buttons of `PictureTile`,
-    // the «remove slot» door) reveal on hover of the whole cell, not of the frame alone.
+    // `group` is load-bearing: the quiet organs of the plate (the corner buttons of `PictureTile`)
+    // reveal on hover of the whole cell, not of the frame alone.
     <div className='group flex h-full min-w-0 flex-col gap-1' data-bench-slot={label}>
       {url && picture ? (
         /* ═══ ЗАПОЛНЕННАЯ — рамка на ЯЧЕЙКЕ, кадр без своей (`border-0`), подвал под кадром ═══ */
@@ -889,29 +892,21 @@ export function BenchSlot(props: BenchSlotProps) {
         />
       )}
 
-      {/* ДВЕРЬ СНОСА СЛОТА ДЕТАЛИ — другой глагол, чем ✕ (крестик очищает слот, эта кнопка сносит
-          сам слот), и рядом с плитой их путать нельзя. Появление — той же формулой прозрачности,
-          что у углов плитки: коробка на месте, полоса не дёргается под курсором. */}
+      {/* ДВЕРЬ СЛОТА ДЕТАЛИ — видна всегда, тихая, под именем (moodboard-flats-1003, T05 + T10).
+          Предложенный пустой слот отвечает здесь же `keep` / `dismiss`; принятый — `remove` в два
+          шага. Другой глагол, чем ✕ плиты: крестик очищает слот, эта дверь сносит сам слот. */}
       {!disabled && detail && onDelete && (
-        <span
-          className={cn(
-            'flex flex-wrap items-center gap-1.5',
-            'opacity-0 transition-opacity duration-100 group-hover:opacity-100 focus-within:opacity-100',
-            '[@media(hover:none)]:opacity-100 motion-reduce:transition-none',
-          )}
-        >
-          <Button
-            variant='secondary'
-            size='xs'
-            title='remove this detail slot — not just its picture'
-            onClick={() => {
-              accept();
-              onDelete();
-            }}
-          >
-            remove slot
-          </Button>
-        </span>
+        <DetailSlotDoor
+          label={label}
+          proposed={proposed}
+          filled={!!(url && picture)}
+          busy={saving}
+          onKeep={accept}
+          onRemove={() => {
+            accept();
+            return onDelete();
+          }}
+        />
       )}
 
       {/* Векторный редактор монтируется у плиты, дверь — угол `edit` справа снизу. `editable`
@@ -1068,6 +1063,177 @@ function DetailNameField({
         }
       }}
     />
+  );
+}
+
+/** Тихая текстовая кнопка двери: тот же микро-капс и тот же фокус, что у соседних органов. */
+const DOOR_QUIET =
+  'cursor-pointer whitespace-nowrap text-micro uppercase leading-none tracking-label text-labelColor transition-colors hover:text-textColor disabled:cursor-default disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor motion-reduce:transition-none';
+
+/** Взведённый сброс гаснет сам: забытое «remove?» не должно ждать случайного щелчка. */
+const DOOR_ARM_MS = 4000;
+
+/**
+ * ═══ ДВЕРЬ СЛОТА ДЕТАЛИ (moodboard-flats-1003, T05 + T10) ═══════════════════════════════════════
+ *
+ * Владелец: «в FLAT SLOTS proposed DETAILS нельзя законфирмить никак» и «не понятно как удалять
+ * детейл, кнопка REMOVE SLOT появляется только на ховер». Одна строка под именем, видна ВСЕГДА:
+ *
+ *   предложенный пустой слот → `keep` (принять запись журнала, `drafted.acceptSlot`) · `dismiss`
+ *     (снести пустой слот сразу: его заводил черновик, и терять в нём нечего, кроме имени);
+ *   принятый слот → `remove`, ВТОРЫМ шагом `remove? yes · no`. Взвод гаснет по Esc, по щелчку
+ *     мимо строки и сам через `DOOR_ARM_MS`; фокус при взводе встаёт на `no`, чтобы двойной
+ *     Enter не сносил слот.
+ *
+ * ⚠ СЕРВЕР СНОСИТ ТОЛЬКО ПУСТОЙ СЛОТ (`slot_filled`). До волны кнопка на заполненном слоте
+ * упиралась в отказ. Теперь вопрос называет картинку (`remove + picture?`), а `onRemove`
+ * вызывающего сначала снимает плиту со слота (она остаётся в истории), потом сносит слот.
+ *
+ * Отказ записи говорит шов мутации; дверь лишь возвращается в покой.
+ */
+export function DetailSlotDoor({
+  label,
+  proposed,
+  filled,
+  busy,
+  onKeep,
+  onRemove,
+}: {
+  label: string;
+  proposed: boolean;
+  filled: boolean;
+  busy?: boolean;
+  onKeep: () => void;
+  onRemove: () => Promise<unknown> | void;
+}) {
+  const [phase, setPhase] = useState<'rest' | 'armed' | 'removing'>('rest');
+  const rowRef = useRef<HTMLDivElement>(null);
+  const noRef = useRef<HTMLButtonElement>(null);
+  const removeRef = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(false);
+
+  useEffect(() => {
+    if (phase === 'armed') {
+      noRef.current?.focus();
+      const t = window.setTimeout(() => setPhase('rest'), DOOR_ARM_MS);
+      // Щелчок мимо строки гасит взвод. Не `onBlur`: Safari не фокусирует кнопку по щелчку, и
+      // уход фокуса с `no` снял бы `yes` раньше, чем щелчок до него дойдёт.
+      const away = (e: PointerEvent) => {
+        if (!rowRef.current?.contains(e.target as Node)) setPhase('rest');
+      };
+      document.addEventListener('pointerdown', away, true);
+      return () => {
+        window.clearTimeout(t);
+        document.removeEventListener('pointerdown', away, true);
+      };
+    }
+    if (phase === 'rest' && refocus.current) {
+      refocus.current = false;
+      removeRef.current?.focus();
+    }
+    return undefined;
+  }, [phase]);
+
+  const disarm = (focusBack: boolean) => {
+    refocus.current = focusBack;
+    setPhase('rest');
+  };
+
+  const run = () => {
+    setPhase('removing');
+    Promise.resolve()
+      .then(onRemove)
+      .catch(() => {
+        // Отказ уже сказан мутацией; слот на месте — дверь снова в покое.
+        setPhase('rest');
+      });
+  };
+
+  return (
+    <div
+      ref={rowRef}
+      data-detail-door={phase === 'rest' ? (proposed ? 'proposed' : 'rest') : phase}
+      className='flex min-h-4 flex-wrap items-center gap-x-2 gap-y-1.5'
+      onKeyDown={(e) => {
+        if (phase === 'armed' && e.key === 'Escape') {
+          e.stopPropagation();
+          disarm(true);
+        }
+      }}
+    >
+      {phase === 'removing' ? (
+        <Text size='micro' variant='label' component='span' className='uppercase leading-none'>
+          removing…
+        </Text>
+      ) : phase === 'armed' ? (
+        <>
+          <Text
+            size='micro'
+            variant='label'
+            component='span'
+            className='uppercase leading-none tracking-label'
+          >
+            {filled ? 'remove + picture?' : 'remove?'}
+          </Text>
+          <span className='inline-flex items-center gap-2'>
+            <button
+              type='button'
+              data-detail-door-confirm=''
+              aria-label={`remove ${label}`}
+              title={filled ? 'the picture leaves the slot and stays in the history' : undefined}
+              className={cn(DOOR_QUIET, 'text-error hover:text-error hover:underline')}
+              onClick={run}
+            >
+              yes
+            </button>
+            <button
+              ref={noRef}
+              type='button'
+              data-detail-door-cancel=''
+              aria-label={`keep ${label}`}
+              className={DOOR_QUIET}
+              onClick={() => disarm(true)}
+            >
+              no
+            </button>
+          </span>
+        </>
+      ) : proposed ? (
+        <>
+          <button
+            type='button'
+            data-detail-door-keep=''
+            aria-label={`keep proposed detail ${label}`}
+            className='inline-flex shrink-0 cursor-pointer items-center whitespace-nowrap border border-warning px-[7px] py-px text-micro uppercase leading-none tracking-pill text-warning transition-colors hover:bg-warning hover:text-bgColor focus-visible:bg-warning focus-visible:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor motion-reduce:transition-none'
+            onClick={onKeep}
+          >
+            keep
+          </button>
+          <button
+            type='button'
+            data-detail-door-dismiss=''
+            aria-label={`dismiss proposed detail ${label}`}
+            disabled={busy}
+            className={DOOR_QUIET}
+            onClick={run}
+          >
+            dismiss
+          </button>
+        </>
+      ) : (
+        <button
+          ref={removeRef}
+          type='button'
+          data-detail-door-remove=''
+          aria-label={`remove detail slot ${label}`}
+          disabled={busy}
+          className={DOOR_QUIET}
+          onClick={() => setPhase('armed')}
+        >
+          remove
+        </button>
+      )}
+    </div>
   );
 }
 
