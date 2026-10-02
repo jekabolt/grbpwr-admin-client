@@ -212,12 +212,65 @@ export function cardFactsContext(f: CardFacts, max = 2000): string {
 }
 
 /**
- * Предзаполнение WORDS: те же строки, тот же порядок, БЕЗ материалов (O-35), лимит поля (2000).
- * Возвращает и число опущенных строк — вызывающий печатает «(+N sections omitted)» рядом с полем,
- * а не молчит.
+ * ═══ WORDS: ФАКТЫ СЛОВАРЯ + АНГЛИЙСКИЙ БРИФ, А НЕ СЫРОЙ ТЕКСТ МУДБОРДА (T03, 03.10) ═════════════
+ *
+ * Владелец: «если у нас в MOODBOARD - DESCRIPTION - CONCEPT & CONSTRUCTION DESCRIPTION описан на
+ * русском или на любом другом языке он не должен попадать flats INPUT — REFERENCES WORDS в том же
+ * виде… в WORDS должна быть хороший промпт для последующей генерации флетов».
+ *
+ * Строки словаря (`garment:`, `fit:`, `age group:`, `for:`) — английские по построению и стоят как
+ * были. Свободный текст (описание, силуэт, ткань, аспекты, указания доски) в WORDS больше НЕ
+ * копируется: он уходит в `EnhanceText` (PROMPT · WORDS — сервер всегда отвечает по-английски
+ * брифом для флэта, `wordsBriefSource`), и в WORDS встаёт ответ. Нет ответа (ждём, отказ, лимит) —
+ * брифа нет, и сырого текста нет тоже.
  */
-export function composeWords(f: CardFacts, max = 2000): { text: string; omitted: number } {
-  return joinWithin(cardFactLines({ ...f, materials: undefined }), max);
+function structuredLines(f: CardFacts): string[] {
+  return cardFactLines({
+    categoryPath: f.categoryPath,
+    fit: f.fit,
+    ageGroup: f.ageGroup,
+    gender: f.gender,
+  });
+}
+
+/** Предел `EnhanceText.text` и `context` (руны; сервер отказывает длиннее). */
+export const BRIEF_TEXT_MAX = 4000;
+export const BRIEF_CONTEXT_MAX = 2000;
+
+/**
+ * Что уходит на бриф: свободный текст карточки подписанными строками (`text`) и строки словаря
+ * как данные (`context`). Пустой `text` — свободного текста нет, звать модель не о чем.
+ */
+export function wordsBriefSource(f: CardFacts): { text: string; context: string } {
+  const lines: string[] = [];
+  if (clean(f.concept)) lines.push(`concept: ${clean(f.concept)}`);
+  if (clean(f.silhouette)) lines.push(`silhouette: ${clean(f.silhouette)}`);
+  if (clean(f.fabric)) lines.push(`fabric: ${clean(f.fabric)}`);
+  for (const [label, text] of f.aspects ?? []) {
+    if (clean(text)) lines.push(`${clean(label)}: ${clean(text)}`);
+  }
+  const notes = (f.callouts ?? []).map(clean).filter(Boolean);
+  if (notes.length) lines.push(`notes on the board: ${notes.join('; ')}`);
+  return {
+    text: joinWithin(lines, BRIEF_TEXT_MAX).text,
+    context: joinWithin(structuredLines(f), BRIEF_CONTEXT_MAX).text,
+  };
+}
+
+/**
+ * Предзаполнение WORDS: строки словаря, затем английский бриф (`brief`, ответ `EnhanceText`), лимит
+ * поля (2000). Материалов нет (O-35). Возвращает и число опущенных строк — вызывающий печатает
+ * «(+N sections omitted)» рядом с полем, а не молчит.
+ */
+export function composeWords(
+  f: CardFacts,
+  max = 2000,
+  brief?: string,
+): { text: string; omitted: number } {
+  const lines = structuredLines(f);
+  const b = (brief ?? '').trim();
+  if (b) lines.push(b);
+  return joinWithin(lines, max);
 }
 
 function joinWithin(lines: string[], max: number): { text: string; omitted: number } {

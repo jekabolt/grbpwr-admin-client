@@ -1,18 +1,20 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { enhanceText } from 'ui/components/ai-enhance';
 
 import type { TechCardFormData } from '../schema';
 import { useTechCardAutosave } from './autosave-contract';
 import { useMoodMinimumGate } from './chain-rail';
-import { cardFactsContext, composeWords } from './core/card-facts';
+import { cardFactsContext, composeWords, wordsBriefSource } from './core/card-facts';
 import { isBoardRow } from './core/mood-gate';
 import { useFlatInput, wordsLocked } from './flat-input';
 import { useCardFacts } from './head/card-facts-form';
 import { benchSides } from './render/model';
 import { WORDS_MAX } from './words-field';
-import { followWords, lockWords, offerWords, wordsDecided } from './words-seed';
+import { briefPlan, requestBrief, useBrief, type BriefFetcher } from './words-brief';
+import { followWords, lockWords, offerWords, useWordsSeed, wordsDecided } from './words-seed';
 
 /**
  * ═══ WORDS: ФАКТЫ КАРТОЧКИ, ОДИН РАЗ ЗА СЕССИЮ И ТОЛЬКО В ПУСТОЕ ПОЛЕ (T24, D-20'') ═════════════
@@ -37,6 +39,11 @@ import { followWords, lockWords, offerWords, wordsDecided } from './words-seed';
  * силуэт · ткань · аспекты · указания доски — в этом порядке, в потолок поля ЦЕЛЫМИ секциями;
  * сколько не влезло, говорится под полем. Материалов в WORDS нет (O-35): для рисунка флэта они
  * не нужны; в контексте `ai ✦` (`cardFactsContext`) они остаются.
+ *
+ * ⚠ T03 (03.10): описание, силуэт, ткань, аспекты и указания доски в WORDS больше не копируются —
+ * они уходят в `EnhanceText` (PROMPT · WORDS) и возвращаются английским брифом (`words-brief.ts`);
+ * строки словаря (`garment:`, посадка, возраст, для кого) стоят как были. Бриф в пути — засев ждёт;
+ * отказ — засев без брифа, но и без сырого текста.
  *
  * ⚠ «ПУСТО ПРИ ЗАГРУЗКЕ = ОТСУТСТВУЕТ» (D-20'', заменяет D-20'). Прежнее «сеять только при
  * `undefined`» было мёртвым на любой настоящей карточке: сервер отдаёт NULL как `""` (dto
@@ -84,7 +91,15 @@ export function useWordsSeeding(
 ): { wordsLive: boolean; factsContext: string } {
   const { control, getValues } = useFormContext<TechCardFormData>();
   const facts = useCardFacts(isBoardRow);
-  const composed = useMemo(() => composeWords(facts, WORDS_MAX), [facts]);
+  /* T03: свободный текст мудборда в WORDS не копируется — он уходит английским брифом
+     (`words-brief.ts`); пока текст набирается, вызова нет (дребезг `BRIEF_SETTLE_MS`). */
+  const source = useMemo(() => wordsBriefSource(facts), [facts]);
+  const settled = useSettled(source.text, BRIEF_SETTLE_MS);
+  const brief = useBrief(settled);
+  const plan = briefPlan(source.text, settled, brief);
+  const planBrief = typeof plan === 'object' ? plan.brief : undefined;
+  const planState = typeof plan === 'string' ? plan : 'ready';
+  const composed = useMemo(() => composeWords(facts, WORDS_MAX, planBrief), [facts, planBrief]);
   const factsContext = useMemo(() => cardFactsContext(facts), [facts]);
   const { loading: dictionaryLoading, dictionary } = useDictionary();
   const factsReady = !dictionaryLoading && !!dictionary;
@@ -103,6 +118,20 @@ export function useWordsSeeding(
   /* (c) Предложение видно только там, где его можно отдать: карточку можно писать, и она сохраняется
      (ревью раунда 4, MIN-4). */
   const wordsLive = !readOnly && autosave.status !== 'off';
+  const seed = useWordsSeed(techCardId);
+  /* Бриф нужен только полю, которое засев ещё может показать: WORDS пусто, предложение не снято,
+     карточку можно писать и минимум доски пройден. Набранные руками WORDS вызова не стоят. */
+  const wantsBrief =
+    techCardId > 0 &&
+    wordsLive &&
+    factsReady &&
+    wordsNow.trim() === '' &&
+    seed !== null &&
+    (moodMinimum.ok || flatDone);
+  useEffect(() => {
+    if (!wantsBrief || !settled || settled !== source.text) return;
+    requestBrief(settled, source.context, fetchWordsBrief);
+  }, [wantsBrief, settled, source]);
   useEffect(() => {
     if (techCardId <= 0) return;
     const blank = ((getValues('garmentDescription') ?? '') as string).trim() === '';
@@ -114,7 +143,11 @@ export function useWordsSeeding(
     if (!wordsLive || !factsReady || !composed.text) return;
     // Прогон, CLEAR или рекол со словами — слова сейчас не меняются; решим после.
     if (wordsBusy) return;
+    // T03: бриф в пути или текст ещё набирается — засев ждёт, без шума.
+    if (planState === 'wait') return;
     if (wordsDecided(techCardId)) {
+      // Отказ брифа: стоящее предложение остаётся каким было.
+      if (planState === 'keep') return;
       // (a) Предложение, уже стоящее на экране, ИДЁТ ЗА ФАКТАМИ (ревью раунда 4, MIN-4): новая
       // категория или описание — новый текст. Снятое (`null`) не возвращается.
       followWords(techCardId, composed.text, composed.omitted);
@@ -129,10 +162,30 @@ export function useWordsSeeding(
     wordsLive,
     factsReady,
     composed,
+    planState,
     wordsBusy,
     moodMinimum.ok,
     flatDone,
     getValues,
   ]);
   return { wordsLive, factsContext };
+}
+
+/** Тишина набора перед вызовом брифа: на каждую букву модель не зовётся. */
+const BRIEF_SETTLE_MS = 2500;
+/** Ответ брифа короче поля: строки словаря встают перед ним. */
+const BRIEF_MAX_RUNES = 1200;
+
+const fetchWordsBrief: BriefFetcher = ({ text, context }) =>
+  enhanceText({ text, context, mode: 'prompt', field: 'words', maxRunes: BRIEF_MAX_RUNES });
+
+/** Значение, простоявшее `ms` без изменений. */
+function useSettled(value: string, ms: number): string {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    if (settled === value) return;
+    const t = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(t);
+  }, [value, settled, ms]);
+  return settled;
 }
