@@ -24,11 +24,17 @@ await build({
   absWorkingDir: root,
   outfile,
   logLevel: 'silent',
+  loader: { '.svg': 'text', '.png': 'dataurl', '.woff2': 'dataurl' },
+  define: {
+    'import.meta.env.VITE_SERVER_URL': '"http://stub.invalid"',
+    'import.meta.env': '{"VITE_SERVER_URL":"http://stub.invalid","MODE":"production"}',
+  },
 });
 
 const store = new Map();
 let refuse = false;
 globalThis.window = {
+  location: { origin: 'http://stub.invalid' },
   localStorage: {
     getItem: (k) => {
       if (refuse) throw new Error('SecurityError');
@@ -107,6 +113,25 @@ try {
     !a.offersSplit({ views: [], splitInto: 0 }),
   );
   check('split: not once cut', !a.offersSplit({ views: ['front', 'back', 'side'], splitInto: 3 }));
+
+  // FX3 (gate 03.10): the FLAT history grid shows EVERY picture of a run, hidden ones included (the
+  // row dims them), so hiding pictures never makes a run vanish from the history.
+  const HID = '2026-10-01T10:00:00Z';
+  const grid = (pictures) => a.gridPicturesOf({ id: 1, pictures }).map((p) => p.id);
+  check(
+    'grid: a hidden picture keeps its place',
+    JSON.stringify(grid([{ id: 1 }, { id: 2, hiddenAt: HID }, { id: 3 }])) === '[1,2,3]',
+    JSON.stringify(grid([{ id: 1 }, { id: 2, hiddenAt: HID }, { id: 3 }])),
+  );
+  check(
+    'grid: a run whose every picture is hidden still has tiles',
+    grid([{ id: 4, hiddenAt: HID }, { id: 5, hiddenAt: HID }]).length === 2,
+  );
+  check(
+    'grid: an edit rides with its original',
+    JSON.stringify(grid([{ id: 6, replacedBy: 7 }, { id: 7, derivedFrom: 6, derivation: 'edit' }])) ===
+      '[6,7]',
+  );
 
   // Storage refused (private window, blocked site data): nothing throws, the page still works.
   refuse = true;

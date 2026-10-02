@@ -359,14 +359,18 @@ function RunRow({
  * The run that stands on the bench says `on bench` in the door's place, and its tiles take you up.
  */
 
-/** The pictures a FLAT history row shows — what the run drew, the old hidden stamps left out. */
+/**
+ * The pictures a FLAT history row shows — EVERY picture the run drew, its edits included. A hidden
+ * one stays in its place, dimmed (03.10 gate FX3): the history is the run's record, and hiding a
+ * picture must never make its run vanish from it.
+ */
 export function gridPicturesOf(run: common_DesignRun): common_DesignPicture[] {
   return outputPlan(run.pictures ?? [])
     .cards.map((card) => card.picture)
-    .filter((picture) => (picture.id ?? 0) > 0 && !isPictureHidden(picture));
+    .filter((picture) => (picture.id ?? 0) > 0);
 }
 
-/** A FLAT row has something to show: a run in flight, or at least one picture. */
+/** A FLAT row has something to show: a run in flight, or at least one picture (hidden counts). */
 const gridShows = (run: common_DesignRun): boolean =>
   isRunLive(run) || gridPicturesOf(run).length > 0;
 
@@ -430,6 +434,7 @@ function RunGridRow({
                   url={thumbUrl(picture.media)}
                   alt={pictureHandle(picture)}
                   className='w-full'
+                  dim={isPictureHidden(picture)}
                   onOpen={toBench}
                 />
               </div>
