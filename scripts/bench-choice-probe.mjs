@@ -125,12 +125,46 @@ try {
   );
   check(
     'grid: a run whose every picture is hidden still has tiles',
-    grid([{ id: 4, hiddenAt: HID }, { id: 5, hiddenAt: HID }]).length === 2,
+    grid([
+      { id: 4, hiddenAt: HID },
+      { id: 5, hiddenAt: HID },
+    ]).length === 2,
   );
   check(
     'grid: an edit rides with its original',
-    JSON.stringify(grid([{ id: 6, replacedBy: 7 }, { id: 7, derivedFrom: 6, derivation: 'edit' }])) ===
-      '[6,7]',
+    JSON.stringify(
+      grid([
+        { id: 6, replacedBy: 7 },
+        { id: 7, derivedFrom: 6, derivation: 'edit' },
+      ]),
+    ) === '[6,7]',
+  );
+
+  // FX4 (gate 03.10, owner item 9 «помещаются все картинки и эдиты генерации»): a run put on the
+  // bench from the history stands WHOLE — every picture and edit; the default newest run keeps heads.
+  check('whole: the chosen run on the bench', a.benchShowsWhole(4, 4));
+  check('whole: not the default newest run', !a.benchShowsWhole(0, 9));
+  check('whole: not a pinned run other than the chosen one', !a.benchShowsWhole(4, 7));
+  const run = [
+    { id: 10, replacedBy: 12 },
+    { id: 11 },
+    { id: 12, derivedFrom: 10, derivation: 'edit' },
+  ];
+  const ids = (plan) => JSON.stringify(plan.cards.map((c) => c.picture.id));
+  check(
+    'bench (heads): the edit stands in its original’s place',
+    ids(a.benchPlan(run, { whole: false })) === '[12,11]',
+    ids(a.benchPlan(run, { whole: false })),
+  );
+  check(
+    'bench (whole): the original AND its edit stand',
+    ids(a.benchPlan(run, { whole: true })) === '[10,11,12]',
+    ids(a.benchPlan(run, { whole: true })),
+  );
+  check(
+    'bench (whole) = the history row',
+    ids(a.benchPlan(run, { whole: true })) ===
+      JSON.stringify(a.gridPicturesOf({ id: 1, pictures: run }).map((p) => p.id)),
   );
 
   // Storage refused (private window, blocked site data): nothing throws, the page still works.
@@ -150,6 +184,7 @@ try {
   if (!threw) check('refused storage never throws', true);
 } finally {
   rmSync(outfile, { force: true });
+  rmSync(outfile.replace(/\.mjs$/, '.css'), { force: true });
 }
 
 console.log(`bench-choice: ${pass} passed, ${fail} failed`);

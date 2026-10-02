@@ -148,6 +148,18 @@ export function outputPlan(
 }
 
 /**
+ * THE WORKBENCH'S PLAN (03.10 gate FX4). By default the heads of replacement chains (`outputPlan`
+ * with `heads`, an open editor's tile kept); a run put on the bench from the history (`whole`,
+ * `benchShowsWhole`) stands with EVERY picture and edit it produced — its history row's own plan.
+ */
+export function benchPlan(
+  pictures: readonly common_DesignPicture[],
+  opts: { whole: boolean; keep?: ReadonlySet<number> },
+): OutputPlan {
+  return opts.whole ? outputPlan(pictures) : outputPlan(pictures, { heads: true, keep: opts.keep });
+}
+
+/**
  * THE PICTURES OF ONE RUN IN THE ORDER ITS ROW SHOWS THEM — every card in order, the pieces of the
  * OPEN deck right after their sheet, the pieces of closed decks nowhere (H-10). The order of the
  * viewer row IS the order of the screen (T-8), so this is the one place that order is spelled —

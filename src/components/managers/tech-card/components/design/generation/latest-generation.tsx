@@ -21,6 +21,7 @@ import { isRunArchived } from '../visibility';
 import {
   clearBenchChoice,
   closeSurface,
+  benchShowsWhole,
   heldRunId,
   openSurface,
   pinShown,
@@ -29,7 +30,7 @@ import {
   useBench,
   useBenchChoice,
 } from './bench-store';
-import { deckAfterZoom, deckOfRuns, outputPlan, runsGallery, type OutputPlan } from './run-gallery';
+import { benchPlan, deckAfterZoom, deckOfRuns, runsGallery, type OutputPlan } from './run-gallery';
 import { RunOutputs } from './run-outputs';
 import {
   isRunLive,
@@ -91,6 +92,8 @@ import { useElapsed, useRunById } from './use-generation';
  * and this row draws only the HEAD of each replacement chain, in the original's place — as a card
  * or as a piece in its deck (`outputPlan` with `heads`). A picture under an open editor is drawn as
  * itself until the editor closes (`keep`). The history keeps every link, captioned.
+ * A RUN PUT HERE FROM THE HISTORY STANDS WHOLE (03.10, owner item 9: «помещаются все картинки и
+ * эдиты генерации»): every picture and edit, its history row's plan (`benchPlan`, `benchShowsWhole`).
  *
  * ONE COPY OF THE RUN'S TILES. The history below draws the run that stands here as its header line
  * alone — «run 12 · on the bench ↑» (`generation-history.tsx`), so the viewer row, the deck and the
@@ -397,13 +400,15 @@ export function LatestGeneration({
    * Nothing else touches `openDeck` here: the person's own toggles and the E-4 fold stand until the
    * next run or the next split.
    */
-  /** THE ROW AS DRAWN — heads in their originals' places; the tiles under an open editor kept. */
+  /** THE ROW AS DRAWN — heads in their originals' places; the tiles under an open editor kept.
+   *  A run put on the bench from the history: all of it (FX4, `benchPlan`). */
   const editingKey = editedKey(bench.surfaces);
+  const whole = kind === 'flat' && benchShowsWhole(chosen, runId);
   const plan = useMemo(() => {
     if (!run) return null;
     const keep = new Set(editingKey ? editingKey.split(',').map(Number) : []);
-    return outputPlan(run.pictures ?? [], { heads: true, keep });
-  }, [run, editingKey]);
+    return benchPlan(run.pictures ?? [], { whole, keep });
+  }, [run, editingKey, whole]);
   const decks = useMemo(() => decksOf(plan), [plan]);
   const deckKey = `${techCardId}:${runId}|${decks.map((d) => `${d.root}x${d.count}`).join(',')}`;
   const [seen, setSeen] = useState<{
