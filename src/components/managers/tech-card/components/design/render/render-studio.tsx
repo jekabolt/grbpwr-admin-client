@@ -27,6 +27,7 @@ import { Palette } from './palette';
 import { RenderStepScope, type RenderStep } from './render-tile';
 import { SidesSection, useSidesTarget } from './side-row';
 import { useStartDesignRun, type StartRunInput } from './use-design-run';
+import { seedBriefInFlight, settleSeedBrief } from '../words-brief';
 import { WhatModelGetsRenderModal } from './what-model-gets';
 
 /**
@@ -334,7 +335,7 @@ export function RenderStudio({
     return { ok: true };
   }, [band, sent, wire, colourPlan.plan, colorwayArchived, colorwayLabel, target.nowhere]);
 
-  const generate = () => {
+  const launch = () => {
     /* O-61 (D-60, D-71): слова карточки, показанные в пустом IN WORDS, становятся СВОИМИ черновику —
        как флэт отдаёт свой засев в форму перед `flush`; правка WORDS флэта после прогона их уже не
        подменит. Тело ниже несёт их и без этого (`wire` — слова на экране), поэтому до ответа
@@ -387,6 +388,29 @@ export function RenderStudio({
       },
     };
     run.start(body, pressed ? { onStarted: () => draft.materializeWords(pressed) } : undefined);
+  };
+
+  /* R2: бриф WORDS в пути — IN WORDS ещё пусто, и прогон ушёл бы без брифа. GENERATE ждёт его
+     (кнопка занята), потом берёт ПОСЛЕДНЮЮ отрисовку — её слова, тело и ворота — и только на той же
+     карточке. Набранные руками слова засев не трогает. */
+  const [briefing, setBriefing] = useState(false);
+  const latest = useRef({ launch, gate, disabled });
+  latest.current = { launch, gate, disabled };
+  const generate = async () => {
+    const card = techCardId;
+    if (!seedBriefInFlight(card)) {
+      launch();
+      return;
+    }
+    setBriefing(true);
+    try {
+      if ((await settleSeedBrief(card)) === 'busy') return;
+    } finally {
+      setBriefing(false);
+    }
+    const now = latest.current;
+    if (shownCard.current !== card || !now.gate.ok || now.disabled) return;
+    now.launch();
   };
 
   /* ⚠ СТРОКА СОСТАВА СНЯТА ЦЕЛИКОМ (r3 п.27) — «made of pattern 1 — … · split into the slots
@@ -467,7 +491,7 @@ export function RenderStudio({
             `+ colourway…` — та же дверь, что и заголовок столбца в SIDES: одно окно, три двери. */}
         <GenerateRow
           gate={gate}
-          pending={run.isPending}
+          pending={run.isPending || briefing}
           disabled={disabled}
           onGenerate={generate}
           onInspect={() => setInspecting(true)}

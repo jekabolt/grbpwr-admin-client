@@ -13,7 +13,15 @@ import { useFlatInput, wordsLocked } from './flat-input';
 import { useCardFacts } from './head/card-facts-form';
 import { benchSides } from './render/model';
 import { WORDS_MAX } from './words-field';
-import { briefKey, briefPlan, requestBrief, useBrief, type BriefFetcher } from './words-brief';
+import {
+  briefAwaited,
+  briefKey,
+  briefPlan,
+  noteSeedBrief,
+  requestBrief,
+  useBrief,
+  type BriefFetcher,
+} from './words-brief';
 import { followWords, lockWords, offerWords, useWordsSeed, wordsDecided } from './words-seed';
 
 /**
@@ -135,6 +143,11 @@ export function useWordsSeeding(
     if (!wantsBrief || !key || settled !== key) return;
     requestBrief(source.text, source.context, fetchWordsBrief);
   }, [wantsBrief, settled, key, source]);
+  /* R2: какую пару ждёт засев карточки — по ней GENERATE ждёт бриф в пути (`settleSeedBrief`). */
+  useEffect(() => {
+    noteSeedBrief(techCardId, wantsBrief ? key : '');
+  }, [techCardId, wantsBrief, key]);
+  useEffect(() => () => noteSeedBrief(techCardId, ''), [techCardId]);
   useEffect(() => {
     if (techCardId <= 0) return;
     const blank = ((getValues('garmentDescription') ?? '') as string).trim() === '';
@@ -144,8 +157,9 @@ export function useWordsSeeding(
       return;
     }
     if (!wordsLive || !factsReady || !composed.text) return;
-    // Прогон, CLEAR или рекол со словами — слова сейчас не меняются; решим после.
-    if (wordsBusy) return;
+    // Прогон, CLEAR или рекол со словами — слова сейчас не меняются; решим после. Кроме GENERATE,
+    // который ещё не отдал слова и ждёт бриф (R2, `settleSeedBrief`): он ждёт именно этот засев.
+    if (wordsBusy && !briefAwaited(techCardId)) return;
     // T03: бриф в пути или текст ещё набирается — засев ждёт, без шума.
     if (planState === 'wait') return;
     if (wordsDecided(techCardId)) {

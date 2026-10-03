@@ -95,8 +95,79 @@ export function briefPlan(
   return { brief: state.text };
 }
 
+/**
+ * ═══ GENERATE ЖДЁТ БРИФ, КОТОРЫЙ УЖЕ В ПУТИ (R2, 03.10) ════════════════════════════════════════
+ *
+ * Пока бриф в пути, засев не выходит (`wait`), и WORDS на экране пусто. GENERATE, нажатый в это
+ * окно, отдал бы в форму пустое (`materializeWords`), и платный прогон ушёл бы без брифа. Поэтому
+ * каждый путь GENERATE, отдающий засев, сначала зовёт `settleSeedBrief`: если для ТЕКУЩЕЙ пары
+ * карточки (её отмечает засев, `noteSeedBrief`) ответ в пути — ждёт его, не дольше
+ * `BRIEF_WAIT_MS`, и ещё один такт, за который эффект засева успевает выставить предложение. После
+ * ожидания вызывающий сам перепроверяет карточку; набранные руками WORDS `materializeWords` не
+ * трогает и так. Пока ждём, `briefAwaited` пускает засев сквозь замок прогона флэта: прогон ещё не
+ * отдал слова, и ждёт он именно их.
+ */
+export const BRIEF_WAIT_MS = 20_000;
+
+const seedKeys = new Map<number, string>();
+const waiting = new Set<number>();
+
+/** Засев карточки ждёт бриф этой пары (`''` — не ждёт ничего). */
+export function noteSeedBrief(card: number, key: string): void {
+  if (card <= 0 || (seedKeys.get(card) ?? '') === key) return;
+  if (key) seedKeys.set(card, key);
+  else seedKeys.delete(card);
+  notify();
+}
+
+/** Бриф текущей пары карточки в пути. */
+export function seedBriefInFlight(card: number): boolean {
+  const key = seedKeys.get(card);
+  return !!key && memo.get(key)?.status === 'pending';
+}
+
+/** GENERATE этой карточки сейчас ждёт бриф. */
+export function briefAwaited(card: number): boolean {
+  return waiting.has(card);
+}
+
+/**
+ * Дождаться брифа в пути: `none` — ждать нечего, `waited` — дождались (или вышел срок), `busy` —
+ * эту карточку уже ждёт другой GENERATE (второй щелчок не заводит второго прогона).
+ */
+export async function settleSeedBrief(
+  card: number,
+  ms: number = BRIEF_WAIT_MS,
+): Promise<'none' | 'waited' | 'busy'> {
+  if (waiting.has(card)) return 'busy';
+  if (!seedBriefInFlight(card)) return 'none';
+  waiting.add(card);
+  try {
+    await new Promise<void>((resolve) => {
+      let stop = () => {};
+      const done = () => {
+        stop();
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      stop = subscribe(() => {
+        if (seedBriefInFlight(card)) return;
+        clearTimeout(timer);
+        done();
+      });
+    });
+    // Такт на эффект засева: ответ пришёл — предложение встаёт в той же очереди микрозадач.
+    await new Promise((r) => setTimeout(r, 0));
+  } finally {
+    waiting.delete(card);
+  }
+  return 'waited';
+}
+
 /** Только для пробы: память сессии с чистого листа. */
 export function resetBriefs(): void {
   memo.clear();
+  seedKeys.clear();
+  waiting.clear();
   notify();
 }

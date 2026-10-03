@@ -1,7 +1,7 @@
 import { useQueryClient, type QueryClient, type QueryFunction } from '@tanstack/react-query';
 import type { GetDesignBandResponse, common_DesignRunParams } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -44,6 +44,7 @@ import { GenerateRow, LockBar, RunRefusal } from './render/generate-row';
 import { cardOnScreen, designKeys, serverSpeaksNow, type WriteContext } from './use-design-band';
 import type { CalloutLike } from './render/what-model-gets';
 import { ACTIVE_VIEWS, DETAIL_VIEW, viewLabel } from './views';
+import { settleSeedBrief } from './words-brief';
 import { materializeWords } from './words-seed';
 
 /**
@@ -423,6 +424,10 @@ export function FlatRunRow({
             ? 'no views ticked — tick at least one'
             : null;
 
+  /** Карточка на экране СЕЙЧАС — для перепроверки после ожидания брифа (R2). */
+  const cardNow = useRef(techCardId);
+  cardNow.current = techCardId;
+
   const submit = async () => {
     const card = techCardId;
     if (gateReason || !mood.ok || card <= 0) return;
@@ -467,6 +472,11 @@ export function FlatRunRow({
     patchFlatInput(card, { run: 'saving', refused: null, serverRefusal: null, ask });
     let refusal: ServerRefusal | null = null;
     try {
+      /* R2: бриф WORDS в пути — засева ещё нет, и прогон ушёл бы с пустыми WORDS. Ждём его (кнопка
+         занята `saving`), потом перепроверяем карточку; набранные руками WORDS засев не тронет. */
+      const brief = await settleSeedBrief(card);
+      if (brief === 'busy') return;
+      if (brief === 'waited' && (cardNow.current !== card || !cardOnScreen(card))) return;
       // D-20'''': засев, показанный в пустом поле, уходит в форму «грязным» ДО flush — эта запись его
       // и понесёт, прогон прочтёт его из сохранённой карточки.
       materializeWords(card, form, wasOn && !disabled);

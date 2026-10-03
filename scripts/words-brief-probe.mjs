@@ -14,6 +14,8 @@
 //                                                     на тот же текст, краснеет
 //   node scripts/words-brief-probe.mjs --mutate-context  ключ памяти — один текст, без контекста
 //                                                     (до R3): чужие факты берут старый бриф, краснеет
+//   node scripts/words-brief-probe.mjs --mutate-wait  GENERATE не ждёт бриф в пути (до R2), краснеет
+//   node scripts/words-brief-probe.mjs --mutate-generate  флэт отдаёт засев ДО ожидания брифа, краснеет
 
 import { build as esbuild } from 'esbuild';
 import { readFileSync, rmSync } from 'node:fs';
@@ -24,6 +26,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const MUTATE_RAW = process.argv.includes('--mutate-raw');
 const MUTATE_MEMO = process.argv.includes('--mutate-memo');
 const MUTATE_CONTEXT = process.argv.includes('--mutate-context');
+const MUTATE_WAIT = process.argv.includes('--mutate-wait');
+const MUTATE_GENERATE = process.argv.includes('--mutate-generate');
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
 const DESIGN = resolve(REPO, 'src/components/managers/tech-card/components/design');
@@ -66,6 +70,15 @@ if (MUTATE_CONTEXT)
       /design\/words-brief\.ts$/,
       "  return text ? JSON.stringify([text, context]) : '';",
       '  return text;',
+    ),
+  );
+
+if (MUTATE_WAIT)
+  plugins.push(
+    swap(
+      /design\/words-brief\.ts$/,
+      "  if (!seedBriefInFlight(card)) return 'none';",
+      "  return 'none';",
     ),
   );
 
@@ -201,6 +214,44 @@ console.log('\nR3: память по тексту + контексту (факт
   );
 }
 
+console.log('\nR2: GENERATE ждёт бриф в пути');
+{
+  B.resetBriefs();
+  const card = 7;
+  const key = B.briefKey('concept: W', 'ctx');
+  let answer;
+  const fetcher = () => new Promise((r) => (answer = r));
+  B.noteSeedBrief(card, key);
+  ck((await B.settleSeedBrief(card, 50)) === 'none', 'nothing in flight → no wait');
+  B.requestBrief('concept: W', 'ctx', fetcher);
+  ck(B.seedBriefInFlight(card), 'brief of the current pair is in flight');
+  let settled = null;
+  const first = B.settleSeedBrief(card, 5000).then((r) => (settled = r));
+  ck(B.briefAwaited(card), 'GENERATE is waiting (the seed may pass the run lock)');
+  ck((await B.settleSeedBrief(card, 50)) === 'busy', 'second press while waiting → busy');
+  await new Promise((r) => setTimeout(r, 20));
+  ck(settled === null, 'still waiting while the brief is pending');
+  answer('a brief');
+  await first;
+  ck(
+    settled === 'waited' && B.readBrief('concept: W', 'ctx')?.text === 'a brief',
+    'answer arrives → the wait ends with the brief stored',
+    `${settled}`,
+  );
+  ck(!B.briefAwaited(card), 'wait released');
+
+  B.requestBrief('concept: T', 'ctx', () => new Promise(() => {}));
+  B.noteSeedBrief(card, B.briefKey('concept: T', 'ctx'));
+  const t0 = Date.now();
+  const timed = await B.settleSeedBrief(card, 40);
+  ck(timed === 'waited' && Date.now() - t0 >= 35, 'no answer → gives up after the timeout');
+  ck(B.BRIEF_WAIT_MS === 20000, 'timeout is 20 s');
+
+  const gone = B.settleSeedBrief(card, 5000);
+  B.noteSeedBrief(card, '');
+  ck((await gone) === 'waited', 'seed stops wanting the brief → the wait ends');
+}
+
 console.log('\nплан засева');
 {
   const done = { status: 'done', text: BRIEF };
@@ -214,6 +265,34 @@ console.log('\nплан засева');
 console.log('\nпровод: засев WORDS ходит через бриф');
 {
   const hook = readFileSync(resolve(DESIGN, 'use-words-seeding.ts'), 'utf8');
+  let flat = readFileSync(resolve(DESIGN, 'flat-run-row.tsx'), 'utf8');
+  if (MUTATE_GENERATE)
+    flat = flat.replace(
+      '      const brief = await settleSeedBrief(card);\n',
+      '      materializeWords(card, form, wasOn && !disabled);\n      const brief = await settleSeedBrief(card);\n',
+    );
+  const render = readFileSync(resolve(DESIGN, 'render/render-studio.tsx'), 'utf8');
+  const waitAt = flat.indexOf('await settleSeedBrief(card)');
+  const giveAt = flat.indexOf('materializeWords(card, form');
+  ck(
+    waitAt > 0 && giveAt > waitAt,
+    'flat GENERATE waits for the brief before giving WORDS to the form',
+  );
+  ck(
+    flat.includes("brief === 'waited' && (cardNow.current !== card || !cardOnScreen(card))"),
+    'flat re-checks the card after the wait',
+  );
+  ck(
+    render.includes('await settleSeedBrief(card)') &&
+      render.includes('shownCard.current !== card') &&
+      render.includes('pending={run.isPending || briefing}'),
+    'render GENERATE waits too, re-checks the card, button busy meanwhile',
+  );
+  ck(
+    hook.includes("noteSeedBrief(techCardId, wantsBrief ? key : '')") &&
+      hook.includes('if (wordsBusy && !briefAwaited(techCardId)) return;'),
+    'seed names its pair and passes the run lock only while GENERATE waits',
+  );
   ck(hook.includes('composeWords(facts, WORDS_MAX, planBrief)'), 'composeWords gets the brief');
   ck(hook.includes("if (planState === 'wait') return;"), 'seed waits while the brief is pending');
   ck(hook.includes("if (planState === 'keep') return;"), 'a failed brief keeps the shown seed');
@@ -227,6 +306,6 @@ console.log('\nпровод: засев WORDS ходит через бриф');
 }
 
 console.log(
-  `\n${total - bad} / ${total}, failures ${bad}${MUTATE_RAW ? '  (--mutate-raw)' : ''}${MUTATE_MEMO ? '  (--mutate-memo)' : ''}${MUTATE_CONTEXT ? '  (--mutate-context)' : ''}`,
+  `\n${total - bad} / ${total}, failures ${bad}${MUTATE_RAW ? '  (--mutate-raw)' : ''}${MUTATE_MEMO ? '  (--mutate-memo)' : ''}${MUTATE_CONTEXT ? '  (--mutate-context)' : ''}${MUTATE_WAIT ? '  (--mutate-wait)' : ''}${MUTATE_GENERATE ? '  (--mutate-generate)' : ''}`,
 );
 process.exit(bad ? 1 : 0);
