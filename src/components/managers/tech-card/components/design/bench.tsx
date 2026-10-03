@@ -324,7 +324,7 @@ export function Bench({
       const key = slotRefKey(ref);
       const ghostView = (ref.viewKey ?? '').trim().toLowerCase() || 'detail';
       const placement = uploadPlacement(ref, expectedSlotRev, newDetailName);
-      const minting = placement.mintName !== null;
+      const minting = placement.newDetailName !== undefined;
       if (minting) setMintingDetail(true);
       else {
         setOptimistic((prev) => ({
@@ -347,33 +347,21 @@ export function Bench({
               colorwayId: COLORWAY_NONE,
             }),
           ],
+          // ONE TRANSACTION, A NEW DETAIL INCLUDED (`bench-mint.ts`, HX6): the target is the new
+          // detail and the typed name rides on the same call.
           target: placement.target,
           expectedSlotRev: placement.expectedSlotRev,
+          newDetailName: placement.newDetailName,
         },
         {
-          // A NEW DETAIL IS MINTED BY THE SECOND WRITE (`bench-mint.ts`): the upload filed the
-          // picture, `SetDesignBenchSlot` names the slot and places it.
-          onSuccess: (res) => {
-            const pictureId = res.pictures?.[0]?.id ?? 0;
-            if (!minting || pictureId <= 0) return;
-            writes.setBenchSlot.mutate(
-              {
-                slot: mintDetailRef(),
-                pictureId,
-                expectedSlotRev: 0,
-                newDetailName: placement.mintName ?? '',
-              },
-              { onSettled: () => setMintingDetail(false) },
-            );
-          },
-          onSettled: (res, error) => {
-            if (!minting) dropOptimistic(key);
-            else if (error || !((res?.pictures?.[0]?.id ?? 0) > 0)) setMintingDetail(false);
+          onSettled: () => {
+            if (minting) setMintingDetail(false);
+            else dropOptimistic(key);
           },
         },
       );
     },
-    [writes.registerUpload, writes.setBenchSlot, dropOptimistic],
+    [writes.registerUpload, dropOptimistic],
   );
 
   /**
