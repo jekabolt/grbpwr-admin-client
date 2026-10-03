@@ -68,7 +68,8 @@ const stubNetwork = {
         window.__calls = [];
         export const adminService = new Proxy({}, { get: (_, name) => (body) => {
           window.__calls.push({ name: String(name), body: JSON.parse(JSON.stringify(body ?? {})) });
-          return Promise.resolve({});
+          const ms = (window.__delay || {})[String(name)];
+          return ms ? new Promise((r) => setTimeout(() => r({}), ms)) : Promise.resolve({});
         } });
         export const requestHandler = (req) => {
           window.__calls.push({ name: 'requestHandler', body: req });
@@ -95,14 +96,25 @@ const MUTATIONS = {
   // T23: угол есть, но зовёт не тот прогон.
   'cancel-wire': {
     file: /generation\/live-tiles\.tsx$/,
-    from: 'onClick={() => cancelRun.mutate(runId)}',
-    to: 'onClick={() => cancelRun.mutate(0)}',
+    from: 'cancelRun.mutateAsync(runId)',
+    to: 'cancelRun.mutateAsync(0)',
   },
   // T23: штамп отмены не снимает угол и не ставит флаг.
   'cancel-flag': {
     file: /generation\/live-tiles\.tsx$/,
     from: 'const cancelling = isCancelling(run) || asked;',
     to: 'const cancelling = false && (isCancelling(run) || asked);',
+  },
+  // W2: each corner keeps its own lock again — the bench's press does not lock the history's.
+  'cancel-lock': {
+    file: /generation\/live-tiles\.tsx$/,
+    edits: [
+      ['if (cancelLocks.has(runId)) return;', ''],
+      [
+        'return useSyncExternalStore(subscribeCancelLocks, read, read);',
+        'useSyncExternalStore(subscribeCancelLocks, read, read);\n  return null;',
+      ],
+    ],
   },
   // R(a): the popup seeds from `composite_views` again (empty on beta's `one` sheets).
   'popup-seed': {
@@ -136,10 +148,13 @@ function mutationPlugin(name) {
     name: `lane-t-${name}`,
     setup(b) {
       b.onLoad({ filter: m.file }, async (a) => {
-        const src = await readFile(a.path, 'utf8');
-        if (!src.includes(m.from)) throw new Error(`мутация ${name} не нашла свою строку`);
+        let src = await readFile(a.path, 'utf8');
+        for (const [from, to] of m.edits ?? [[m.from, m.to]]) {
+          if (!src.includes(from)) throw new Error(`мутация ${name} не нашла свою строку`);
+          src = src.replace(from, to);
+        }
         return {
-          contents: src.replace(m.from, m.to),
+          contents: src,
           loader: a.path.endsWith('.tsx') ? 'tsx' : 'ts',
         };
       });
@@ -337,6 +352,38 @@ try {
     'T23.15 FABRIC RENDER history: the press cancels run 57',
     (await calls('CancelDesignRun')).some((b) => b.runId === 57),
   );
+
+  // ══ W2 · ONE RUN IN LATEST AND HISTORY — ONE LOCK ══
+  await page.evaluate(() => {
+    window.__delay = { CancelDesignRun: 800 };
+  });
+  await openFold('shared-cancel');
+  const SC = P('shared-cancel');
+  const before = (await calls('CancelDesignRun')).filter((b) => b.runId === 58).length;
+  await page.hover(`${SC} [data-latest-generation] [data-live-tile]`);
+  await page.click(`${SC} [data-latest-generation] [data-run-cancel="58"]`);
+  await page.waitForTimeout(60);
+  const histCorner = await page.$(`${SC} [data-run="58"] [data-run-cancel="58"]`);
+  const histState = histCorner
+    ? await histCorner.evaluate((el) => ({ disabled: el.disabled, word: el.textContent.trim() }))
+    : null;
+  check(
+    'W2.1 the bench press locks the history corner of the same run at once',
+    !histState || (histState.disabled && histState.word === 'cancel…'),
+    JSON.stringify(histState),
+  );
+  if (histCorner) await histCorner.evaluate((el) => el.click());
+  await page.waitForTimeout(1000);
+  const sent = (await calls('CancelDesignRun')).filter((b) => b.runId === 58).length - before;
+  check('W2.2 two hosts, one CancelDesignRun for run 58', sent === 1, String(sent));
+  check(
+    'W2.3 answered: both hosts say `cancelling…`, no corner left',
+    (await page.$$(`${SC} [data-flag="cancelling…"]`)).length === 2 &&
+      !(await page.$(`${SC} [data-run-cancel]`)),
+  );
+  await page.evaluate(() => {
+    window.__delay = {};
+  });
 
   // ══ R(a) · THE HISTORY'S SPLIT POPUP SEEDS ITS FRAMES FROM THE TILE'S READING ══
   await openFold('history-popup');

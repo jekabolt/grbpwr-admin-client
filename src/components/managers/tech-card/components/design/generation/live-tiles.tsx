@@ -1,5 +1,6 @@
 import type { common_DesignRun } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
+import { useSyncExternalStore } from 'react';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
@@ -31,6 +32,37 @@ import { useGenerationWrites } from './use-generation';
  * changes nothing). This was the run panel's door (`meta ▸`, `run-panel.tsx`), unreachable since
  * FLAT's and FABRIC RENDER's histories became the grid (T09, T24).
  */
+/**
+ * ═══ ONE LOCK PER RUN, SHARED BY EVERY `cancel` CORNER (gate wave 3, W2) ═══════════════════════
+ *
+ * The same live run stands in LATEST GENERATION and in GENERATION HISTORY at once, and each host
+ * mounts its own `LiveTiles` with its own mutation. A per-instance `isPending` let the second corner
+ * fire a second `CancelDesignRun` while the first was in flight. The lock lives here, keyed by run
+ * id, so every corner of that run goes `cancel…` (disabled) on the first press and `cancelling…` once
+ * the server answered; a refusal releases it.
+ */
+type CancelLock = 'pending' | 'asked';
+const cancelLocks = new Map<number, CancelLock>();
+const cancelListeners = new Set<() => void>();
+
+function setCancelLock(runId: number, lock: CancelLock | null): void {
+  if (lock) cancelLocks.set(runId, lock);
+  else cancelLocks.delete(runId);
+  cancelListeners.forEach((l) => l());
+}
+
+function subscribeCancelLocks(listener: () => void): () => void {
+  cancelListeners.add(listener);
+  return () => {
+    cancelListeners.delete(listener);
+  };
+}
+
+function useCancelLock(runId: number): CancelLock | null {
+  const read = () => cancelLocks.get(runId) ?? null;
+  return useSyncExternalStore(subscribeCancelLocks, read, read);
+}
+
 export function LiveTiles({
   techCardId,
   run,
@@ -49,12 +81,22 @@ export function LiveTiles({
 }) {
   const { cancelRun } = useGenerationWrites(techCardId);
   const runId = run.id ?? 0;
+  const lock = useCancelLock(runId);
   /** Asked and answered, and the band has not come back with the stamp yet: say so already. */
-  const asked = cancelRun.isSuccess && cancelRun.variables === runId;
+  const asked = lock === 'asked';
   const cancelling = isCancelling(run) || asked;
   const handle = runHandle(runId);
   const canCancel = !disabled && runId > 0 && !cancelling;
-  const pending = cancelRun.isPending;
+  const pending = lock === 'pending';
+  const cancel = () => {
+    // Read the store at the press, not the render: two corners pressed in one frame ask once.
+    if (cancelLocks.has(runId)) return;
+    setCancelLock(runId, 'pending');
+    cancelRun.mutateAsync(runId).then(
+      () => setCancelLock(runId, 'asked'),
+      () => setCancelLock(runId, null),
+    );
+  };
 
   return (
     <>
@@ -101,7 +143,7 @@ export function LiveTiles({
                   }
                   aria-busy={pending || undefined}
                   disabled={pending}
-                  onClick={() => cancelRun.mutate(runId)}
+                  onClick={cancel}
                   className={cn(
                     'absolute bottom-1 right-1 z-20 py-0.5 leading-none',
                     TILE_CORNER,

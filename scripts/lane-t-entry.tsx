@@ -12,6 +12,7 @@
 // R(c) · принесённые рендеры (без прогона, ни в одной стороне) — на верстаке FABRIC RENDER:
 //   render-brought (22) — прогон 80 + принесённый 901 (свободен) и 903 (стоит во front: не в группе);
 //   render-brought-only (23) — прогонов нет, только принесённый 902
+// W2 · один прогон в LATEST и в HISTORY — одна блокировка отмены: shared-cancel (24), прогон 58
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type {
   GetDesignBandResponse,
@@ -281,6 +282,23 @@ const scenes: { probe: string; node: ReactNode }[] = [
           kind='render'
         />
       </RenderStepScope>
+    ),
+  },
+  {
+    probe: 'shared-cancel',
+    node: (
+      <>
+        <LatestGeneration
+          band={band([run(58, 'flat', { status: 'running', requestedOutputs: 1 })])}
+          techCardId={24}
+        />
+        <GenerationHistory
+          band={band([run(58, 'flat', { status: 'running', requestedOutputs: 1 })])}
+          techCardId={24}
+          defaultRep='flat'
+          defaultOpen={false}
+        />
+      </>
     ),
   },
 ];
