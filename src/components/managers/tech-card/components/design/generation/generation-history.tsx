@@ -12,7 +12,7 @@ import { GroupLabel } from 'ui/components/group-label';
 import { Section } from 'ui/components/section';
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { Tiles } from 'ui/components/tiles';
 
 import type { TechCardFormData } from '../../schema';
 import { runRepresentation, type Representation } from '../bench-kinds';
@@ -32,6 +32,7 @@ import { SplitModal } from '../split-modal';
 import { isPictureHidden, isRunArchived } from '../visibility';
 import { viewLabel } from '../views';
 import { closeSurface, openSurface, putOnBench, useBenchRun, type BenchKind } from './bench-store';
+import { LiveTiles } from './live-tiles';
 import { formatMoney } from './money';
 import { CountPill, RunPanel } from './run-panel';
 import { deckAfterZoom, deckOfRuns, outputPlan, runsGallery } from './run-gallery';
@@ -385,6 +386,7 @@ function RunGridRow({
   run,
   kind,
   onBench,
+  disabled,
 }: {
   techCardId: number;
   run: common_DesignRun;
@@ -392,6 +394,8 @@ function RunGridRow({
   kind: BenchKind;
   /** Its pictures stand on the bench now (the run the workbench shows). */
   onBench: boolean;
+  /** No write from here: the card is read-only, or the server is silent — no `cancel` corner. */
+  disabled?: boolean;
 }) {
   const runId = run.id ?? 0;
   const live = isRunLive(run);
@@ -410,39 +414,28 @@ function RunGridRow({
       className='space-y-1.5 border-b border-hairline pb-2 [&:not(:has(+[data-run]))]:border-b-0'
     >
       <Tiles min={HISTORY_TRACK}>
-        {live && pictures.length === 0
-          ? Array.from({ length: Math.max(1, expectedTileCount(run)) }, (_, i) => (
-              <Tile
-                key={i}
-                dashed
-                media={
-                  <div
-                    className='flex w-full items-center justify-center bg-bgSecondary'
-                    style={{ aspectRatio: '4 / 5' }}
-                  >
-                    <Text
-                      size='nano'
-                      variant='label'
-                      component='span'
-                      className='uppercase tracking-label'
-                    >
-                      {i === 0 ? elapsed || 'running' : 'reserved'}
-                    </Text>
-                  </div>
-                }
-              />
-            ))
-          : pictures.map((picture) => (
-              <div key={picture.id} className='min-w-0' data-picture={picture.id}>
-                <PictureTile
-                  url={thumbUrl(picture.media)}
-                  alt={pictureHandle(picture)}
-                  className='w-full'
-                  dim={isPictureHidden(picture)}
-                  onOpen={toBench}
-                />
-              </div>
-            ))}
+        {pictures.map((picture) => (
+          <div key={picture.id} className='min-w-0' data-picture={picture.id}>
+            <PictureTile
+              url={thumbUrl(picture.media)}
+              alt={pictureHandle(picture)}
+              className='w-full'
+              dim={isPictureHidden(picture)}
+              onOpen={toBench}
+            />
+          </div>
+        ))}
+        {/* A RUN IN FLIGHT: its reserved cells after whatever already came back, the first with the
+            run's `cancel` corner (owner item 23, `live-tiles.tsx`). */}
+        {live && (
+          <LiveTiles
+            techCardId={techCardId}
+            run={run}
+            count={Math.max(1, expectedTileCount(run) - pictures.length)}
+            disabled={disabled}
+            wordOf={(i) => (i === 0 && !pictures.length ? elapsed || 'running' : 'reserved')}
+          />
+        )}
       </Tiles>
       <div className='flex items-center' data-run-bench-door={runId || undefined}>
         {onBench ? (
@@ -1053,6 +1046,7 @@ export function GenerationHistory({
           run={run}
           kind={rep === 'render' ? 'render' : 'flat'}
           onBench={!!benchRunId && (run.id ?? 0) === benchRunId}
+          disabled={disabled || !speaks}
         />
       ) : (
         <RunRow

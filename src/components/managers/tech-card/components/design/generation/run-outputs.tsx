@@ -6,12 +6,13 @@ import type {
 import { Fragment, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import { Tile, Tiles } from 'ui/components/tiles';
+import { Tiles } from 'ui/components/tiles';
 
 import type { Representation } from '../bench-kinds';
 import { pictureHandle } from '../handles';
 import { useRenderHost } from '../render/render-tile';
 import { CropDeck } from './crop-deck';
+import { LiveTiles } from './live-tiles';
 import { outputPlan, type OutputPlan } from './run-gallery';
 import { GapPill } from './run-panel';
 import {
@@ -190,30 +191,19 @@ export function RunOutputs({
   }
 
   if (live) {
-    // `runOutputsShown` has already said `expected > 0` for a live run.
+    // `runOutputsShown` has already said `expected > 0` for a live run. The first cell carries the
+    // run's `cancel` corner (owner item 23, `live-tiles.tsx`).
     return (
       <Tiles min={track}>
-        {Array.from({ length: expected }, (_, i) => (
-          <Tile
-            key={i}
-            dashed
-            media={
-              <div
-                className='flex w-full items-center justify-center bg-bgSecondary'
-                style={{ aspectRatio: '4 / 5' }}
-              >
-                <Text
-                  size='nano'
-                  variant='label'
-                  component='span'
-                  className='uppercase tracking-label'
-                >
-                  {i === 0 && runStatus(run) === 'running' ? `running ${elapsed}` : 'reserved'}
-                </Text>
-              </div>
-            }
-          />
-        ))}
+        <LiveTiles
+          techCardId={techCardId}
+          run={run}
+          count={expected}
+          disabled={disabled}
+          wordOf={(i) =>
+            i === 0 && runStatus(run) === 'running' ? `running ${elapsed}` : 'reserved'
+          }
+        />
       </Tiles>
     );
   }

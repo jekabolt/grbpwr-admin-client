@@ -39,6 +39,7 @@
     "tile:menu": "node scripts/tile-menu-probe.mjs",
     "tile:anatomy": "node scripts/tile-anatomy-probe.mjs",
     "flat:inline-split": "node scripts/inline-split-probe.mjs",
+    "design:lane-t": "node scripts/lane-t-probe.mjs",
     "marker:area-field": "node scripts/area-field-probe.mjs",
     "lay:header": "node scripts/lay-header-probe.mjs",
     "view:switch": "node scripts/view-switch-probe.mjs",
