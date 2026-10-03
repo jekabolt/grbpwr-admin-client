@@ -37,6 +37,7 @@ import { MixWarn } from './mixwarn';
 import { type PickTarget, usePickMode } from './pick-mode';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
 import { uploadItem } from './upload-item';
+import { uploadPlacement } from './bench-mint';
 import { normaliseViewKey } from './views';
 
 /**
@@ -322,7 +323,8 @@ export function Bench({
       if (!mediaId) return;
       const key = slotRefKey(ref);
       const ghostView = (ref.viewKey ?? '').trim().toLowerCase() || 'detail';
-      const minting = ghostView === 'detail' && !ref.slotId;
+      const placement = uploadPlacement(ref, expectedSlotRev, newDetailName);
+      const minting = placement.mintName !== null;
       if (minting) setMintingDetail(true);
       else {
         setOptimistic((prev) => ({
@@ -345,19 +347,33 @@ export function Bench({
               colorwayId: COLORWAY_NONE,
             }),
           ],
-          target: ref,
-          expectedSlotRev,
-          newDetailName,
+          target: placement.target,
+          expectedSlotRev: placement.expectedSlotRev,
         },
         {
-          onSettled: () => {
-            if (minting) setMintingDetail(false);
-            else dropOptimistic(key);
+          // A NEW DETAIL IS MINTED BY THE SECOND WRITE (`bench-mint.ts`): the upload filed the
+          // picture, `SetDesignBenchSlot` names the slot and places it.
+          onSuccess: (res) => {
+            const pictureId = res.pictures?.[0]?.id ?? 0;
+            if (!minting || pictureId <= 0) return;
+            writes.setBenchSlot.mutate(
+              {
+                slot: mintDetailRef(),
+                pictureId,
+                expectedSlotRev: 0,
+                newDetailName: placement.mintName ?? '',
+              },
+              { onSettled: () => setMintingDetail(false) },
+            );
+          },
+          onSettled: (res, error) => {
+            if (!minting) dropOptimistic(key);
+            else if (error || !((res?.pictures?.[0]?.id ?? 0) > 0)) setMintingDetail(false);
           },
         },
       );
     },
-    [writes.registerUpload, dropOptimistic],
+    [writes.registerUpload, writes.setBenchSlot, dropOptimistic],
   );
 
   /**
