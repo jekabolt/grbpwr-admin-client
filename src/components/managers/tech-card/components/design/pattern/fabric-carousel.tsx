@@ -12,13 +12,13 @@ import Text from 'ui/components/text';
 
 import { ASSET_NAME_MAX, assetFull, assetLabel, assetThumb } from '../assets/model';
 import { useAssetBindingWrites, useAssetWrites } from '../assets/use-assets';
-import { BENCH_CELL_STYLE, InertDoor } from '../bench-slot';
+import { BENCH_CELL_STYLE } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { archivedRef, colorwayLabel } from '../colorway-picker';
-import { AskModal, EmptyState, TwoStepPicker, type PickerBranch } from '../core';
-import { PictureTile } from '../picture-tile';
+import { AskModal, EmptyState } from '../core';
+import { PictureTile, type PictureTileMenuItem } from '../picture-tile';
 import { SEAM_WORDS, patternOutputs, refusalAdvice, seamWarningOf } from './model';
-import { CornerLabel, PendingTile, TiledFace } from './organs';
+import { PendingTile, TiledFace } from './organs';
 import {
   NO_BINDINGS_REASON,
   READ_ONLY_SHELF_REASON,
@@ -41,11 +41,12 @@ import {
  * планировалась третья полоса «made for this slot». Всё это одно и то же — ткани карточки, — и
  * теперь оно стоит одной полосой: новейшие первыми, живые прогоны перед ними.
  *
- * НА ПЛИТКЕ ЧЕТЫРЕ ГЛАГОЛА И НИ ОДНОГО ЛИШНЕГО — те же, что у плиток CLOTHS рендера
- * (`render/palette.tsx`, `TextureGrid`): зум и `✕` в верхнем углу, `rename` в нижнем, и одна
- * дверь под именем — `use for ▸`. Дверь задаёт два вопроса по одному (`TwoStepPicker`: колорвей,
- * потом слот) и пишет `SetDesignAssetBinding`: этим же жестом возвращают на слот свотч, который
- * новый прогон с него сместил.
+ * НА ПЛИТКЕ ТРИ ГЛАГОЛА, И ВСЕ — В КАДРЕ (T17, 20-TILE-SPEC §3: «nothing under a tile except a
+ * cap»): `✕` в верхнем правом углу, внизу справа — выбор `use for ▾` и последним `rename`. Выбор
+ * — плоский список пар «колорвей · слот» (у одного колорвея — просто слоты): угол примитива
+ * двухшаговых списков не держит, а пар на карточке единицы. Пишет `SetDesignAssetBinding`: этим же
+ * жестом возвращают на слот свотч, который новый прогон с него сместил. Крупный вид — нажатием на
+ * саму картинку. Под кадром — только подпись: имя и строка пар.
  *
  * `✕` СПРАШИВАЕТ ТОЛЬКО ТОГДА, КОГДА ЕСТЬ ЧТО ТЕРЯТЬ: ткань, надетая на слоты, уносит привязки с
  * собой (FK ON DELETE CASCADE), и эти слоты остаются без ткани в рендере — об этом говорят словами
@@ -58,8 +59,8 @@ import {
  * «IN RENDER · R…», то есть не говорил ни того, ни другого.
  *
  * НА СЕРВЕРЕ БЕЗ ПРИВЯЗОК (`bindings = false`) КАРУСЕЛЬ ТА ЖЕ, минус то, чего там нет: `use for ▸`
- * гаснет поводом (`NO_BINDINGS_REASON`), а «in render» и строка пар не рисуются — надеть ткань на
- * слот такой сервер не умеет, и сказать «она в рендере» было бы неправдой. Зум, `rename` и `✕`
+ * не появляется (повод — в `title` плитки), а «in render» и строка пар не рисуются — надеть ткань на
+ * слот такой сервер не умеет, и сказать «она в рендере» было бы неправдой. Крупный вид, `rename` и `✕`
  * работают: полка старше привязок.
  */
 export function FabricCarousel({
@@ -335,43 +336,51 @@ function FabricTile({
      имени говорят его по-прежнему. */
   const wornEchoesName = wornLine.trim().toLowerCase() === label.trim().toLowerCase();
 
-  /* ДВЕРЬ `use for ▸`: колорвей, потом слот. У листа — что станет с парой: «making…» — для пары
-     прямо сейчас делается свотч, и его посадка сменит всё, что надето сейчас (U-6); «worn» — уже эта
-     ткань; «replaces» — у пары есть другая, и она сменится (сама она остаётся здесь, в карусели). */
-  const branches: PickerBranch[] = useMemo(
-    () =>
-      slots.length === 0
-        ? []
-        : wearable.map((c) => {
-            const cw = c.colorwayId ?? 0;
-            const cwName = colorwayLabel(c);
-            const dressed = slots.filter((s) => byPair.has(pairKey(cw, s.bomItemId))).length;
-            return {
-              id: cw,
-              label: cwName,
-              note: `${dressed}/${slots.length}`,
-              title: `${dressed} of ${slots.length} slots of ${cwName} have a fabric`,
-              leaves: slots.map((s) => {
-                const current = byPair.get(pairKey(cw, s.bomItemId));
-                const mine = (current?.id ?? 0) === id;
-                const inFlight = making.has(pairKey(cw, s.bomItemId));
-                return {
-                  value: String(s.bomItemId),
-                  label: s.name,
-                  note: inFlight ? 'making…' : mine ? 'worn' : current ? 'replaces' : '',
-                  title: inFlight
-                    ? `a swatch for ${cwName} · ${s.name} is being made — when it lands it becomes the fabric of this slot, in place of whatever is chosen now`
-                    : mine
-                      ? `${label} is already the fabric of ${cwName} · ${s.name}`
-                      : current
-                        ? `${label} becomes the fabric of ${cwName} · ${s.name} instead of ${assetLabel(current)} — that one stays here`
-                        : `${label} becomes the fabric of ${cwName} · ${s.name}`,
-                };
-              }),
-            };
-          }),
-    [slots, wearable, byPair, making, id, label],
-  );
+  /* ВЫБОР `use for ▾`: пары «колорвей · слот» одним списком. У пары — что с ней станет: «making…»
+     — для пары прямо сейчас делается свотч, и его посадка сменит всё, что надето сейчас (U-6);
+     текущая (●) — уже эта ткань; «replaces» — у пары есть другая, и она сменится (сама она
+     остаётся здесь, в карусели). Один колорвей — имя колорвея не повторяется в каждой строке. */
+  const useFor: PictureTileMenuItem[] = useMemo(() => {
+    if (slots.length === 0) return [];
+    const one = wearable.length === 1;
+    return wearable.flatMap((c) => {
+      const cw = c.colorwayId ?? 0;
+      const cwName = colorwayLabel(c);
+      return slots.map((s) => {
+        const current = byPair.get(pairKey(cw, s.bomItemId));
+        const mine = (current?.id ?? 0) === id;
+        const inFlight = making.has(pairKey(cw, s.bomItemId));
+        const note = inFlight ? 'making…' : !mine && current ? 'replaces' : '';
+        return {
+          value: `${cw}:${s.bomItemId}`,
+          label: (
+            <>
+              {one ? s.name : `${cwName} · ${s.name}`}
+              {note && <span className='text-labelColor'>{` · ${note}`}</span>}
+            </>
+          ),
+          current: mine,
+          title: inFlight
+            ? `a swatch for ${cwName} · ${s.name} is being made — when it lands it becomes the fabric of this slot, in place of whatever is chosen now`
+            : mine
+              ? `${label} is already the fabric of ${cwName} · ${s.name}`
+              : current
+                ? `${label} becomes the fabric of ${cwName} · ${s.name} instead of ${assetLabel(current)} — that one stays here`
+                : `${label} becomes the fabric of ${cwName} · ${s.name}`,
+        };
+      });
+    });
+  }, [slots, wearable, byPair, making, id, label]);
+  /** Почему выбора нет — словами; стоит в `title` плитки, угла без действия на кадре нет. */
+  const useForOff = writesOff
+    ? offReason
+    : !bindings
+      ? NO_BINDINGS_REASON
+      : useFor.length === 0
+        ? wearable.length === 0
+          ? 'no live colourway on this card yet — add one on the COLOURWAYS tab'
+          : 'no fabric slot on this card yet — state the cloths on the MOODBOARD step and save'
+        : '';
 
   /**
    * RENAME IS `UpsertDesignAsset` WITH EVERY FIELD ECHOED. Upsert REPLACES the row: a field not
@@ -422,83 +431,66 @@ function FabricTile({
   return (
     <div
       data-fabric-tile={id}
+      /* Якорь двери пар остался на плитке: выбор теперь угол её кадра (`data-menu`). */
+      data-fabric-use-for={id}
       style={BENCH_CELL_STYLE}
       className='flex snap-start flex-col gap-1'
-      title={seam ? SEAM_WORDS : undefined}
+      title={[seam ? SEAM_WORDS : '', useForOff].filter(Boolean).join(' · ') || undefined}
     >
-      {full ? (
-        <PictureTile
-          url={full}
-          alt={label}
-          aspect='1/1'
-          className='w-full'
-          face={<TiledFace url={full} alt={label} />}
-          gallery={{ src: full, thumbnail: thumb, type: 'image', alt: label }}
-          onEdit={{
-            onClick: toggleRename,
-            ariaLabel: renaming ? `save the new name of ${label}` : `rename ${label}`,
-            title: writesOff
-              ? offReason
-              : 'the render prompt cites this fabric BY NAME, so «IMG_4471» reaches the model as the name of the cloth',
-            disabled: writesOff,
-            pending: upsertAsset.isPending,
-          }}
-          editLabel={renaming ? 'done' : 'rename'}
-          onRemove={{
-            onClick: remove,
-            ariaLabel: `delete ${label}`,
-            title: writesOff ? offReason : `delete ${label}`,
-            disabled: writesOff,
-            pending: deleteAsset.isPending,
-          }}
-        >
-          {/* THE JOIN, WHERE IT IS SEEN — dashed, not red: a join that shows is a fact about the
-              picture, not a loss (the full sentence rides on the tile's title). */}
-          {seam && (
-            <CornerLabel at='tl' gap data-verdict='join visible'>
-              seam
-            </CornerLabel>
-          )}
-          {worn.length > 0 && (
-            /* Узкий ярлык: нижний правый угол занят тихим `rename`, и на наведении они бы наехали. */
-            <CornerLabel at='bl' className='max-w-[calc(100%-56px)]' data-fabric-worn={worn.length}>
-              in render
-            </CornerLabel>
-          )}
-        </PictureTile>
-      ) : (
-        /* БЕЗ КАРТИНКИ УГЛОВ НЕТ — и переименовать и удалить такую строку надо тем более (именно
-           она чаще всего и есть ошибка): обе двери стоят рядом под пустым кадром. */
-        <>
-          <Placeholder aspect='square' className='w-full' label='no image' />
-          <div className='flex items-center gap-1'>
-            {writesOff ? (
-              <InertDoor label='rename' reason={offReason} />
-            ) : (
-              <>
-                <Button
-                  variant='secondary'
-                  size='xs'
-                  loading={upsertAsset.isPending}
-                  onClick={toggleRename}
-                >
-                  {renaming ? 'done' : 'rename'}
-                </Button>
-                <Button
-                  variant='secondary'
-                  size='xs'
-                  className='ml-auto'
-                  aria-label={`delete ${label}`}
-                  title={`delete ${label}`}
-                  onClick={remove}
-                >
-                  ✕
-                </Button>
-              </>
-            )}
-          </div>
-        </>
-      )}
+      {/* ОДНА ПЛИТКА НА ОБА СЛУЧАЯ: без картинки примитив сам рисует кадр «no image», а углы —
+          те же. Переименовать и удалить такую строку надо тем более (именно она чаще всего и есть
+          ошибка), и у неё теперь те же места, что у любой другой. */}
+      <PictureTile
+        url={full}
+        alt={label}
+        aspect='1/1'
+        className='w-full'
+        face={full ? <TiledFace url={full} alt={label} /> : undefined}
+        gallery={full ? { src: full, thumbnail: thumb, type: 'image', alt: label } : undefined}
+        /* ФАКТЫ — ВЕРХ СЛЕВА. `in render` — ярлык чернилами, тем же, что `in` у плиток CLOTHS
+           рендера (`render/palette.tsx`): тот же факт на соседнем экране. Шов — флаг под ним,
+           серый, не красный: шов, который видно, — факт о картинке, а не потеря (довод — в
+           `title` плитки). Прежде шов стоял углом сверху, а `in render` — снизу слева, где на
+           наведении в него въезжал ряд `use for ▾ · rename`. */
+        badge={worn.length > 0 ? <span data-fabric-worn={worn.length}>in render</span> : undefined}
+        flag={seam ? { word: 'seam', tone: 'mut', title: SEAM_WORDS } : undefined}
+        menu={
+          useForOff
+            ? undefined
+            : {
+                label: 'use for',
+                ariaLabel: `use ${label} for a colourway’s slot`,
+                title:
+                  'make this the fabric of a colourway’s slot — it goes into FABRIC RENDER for that colourway',
+                items: useFor,
+                pending: setBinding.isPending,
+                'data-menu': `use-for:${id}`,
+                onPick: (value) => {
+                  const [colorwayId, bomItemId] = value.split(':').map(Number);
+                  if (!(colorwayId > 0) || !(bomItemId > 0)) return;
+                  if ((byPair.get(pairKey(colorwayId, bomItemId))?.id ?? 0) === id) return;
+                  setBinding.mutate({ colorwayId, bomItemId, assetId: id });
+                },
+              }
+        }
+        onEdit={{
+          onClick: toggleRename,
+          ariaLabel: renaming ? `save the new name of ${label}` : `rename ${label}`,
+          title: writesOff
+            ? offReason
+            : 'the render prompt cites this fabric BY NAME, so «IMG_4471» reaches the model as the name of the cloth',
+          disabled: writesOff,
+          pending: upsertAsset.isPending,
+        }}
+        editLabel={renaming ? 'done' : 'rename'}
+        onRemove={{
+          onClick: remove,
+          ariaLabel: `delete ${label}`,
+          title: writesOff ? offReason : `delete ${label}`,
+          disabled: writesOff,
+          pending: deleteAsset.isPending,
+        }}
+      />
 
       {renaming ? (
         <div className='flex flex-col gap-0.5'>
@@ -553,39 +545,6 @@ function FabricTile({
           {wornLine}
         </Text>
       )}
-
-      <span data-fabric-use-for={id} className='flex'>
-        {writesOff ? (
-          <InertDoor label='use for ▸' reason={offReason} />
-        ) : !bindings ? (
-          <InertDoor label='use for ▸' reason={NO_BINDINGS_REASON} />
-        ) : branches.length === 0 ? (
-          <InertDoor
-            label='use for ▸'
-            reason={
-              wearable.length === 0
-                ? 'no live colourway on this card yet — add one on the COLOURWAYS tab'
-                : 'no fabric slot on this card yet — state the cloths on the MOODBOARD step and save'
-            }
-          />
-        ) : (
-          <TwoStepPicker
-            face={setBinding.isPending ? 'setting…' : 'use for ▸'}
-            title='use for'
-            branches={branches}
-            branchNoun='colourways'
-            leafNoun='slots'
-            disabled={setBinding.isPending}
-            triggerTitle='make this the fabric of a colourway’s slot — it goes into FABRIC RENDER for that colourway'
-            onPick={(colorwayId, value) => {
-              const bomItemId = Number(value);
-              if (!(bomItemId > 0)) return;
-              if ((byPair.get(pairKey(colorwayId, bomItemId))?.id ?? 0) === id) return;
-              setBinding.mutate({ colorwayId, bomItemId, assetId: id });
-            }}
-          />
-        )}
-      </span>
 
       <AskModal
         open={asking}

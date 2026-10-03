@@ -65,7 +65,8 @@ import { MaskEditor } from './mask';
  * the tiles of the colourway pool (`COLOURWAY_POOL`): a recolour or a 3D model may be filed under a
  * colourway, so no playground window says anything true about their list.
  *
- * Corners: zoom (the gallery) and `edit ▸` (draw over it, saving a NEW picture) on every picture;
+ * A press on the picture opens the gallery (no zoom corner, T12); corners: `edit ▸` (draw over
+ * it, saving a NEW picture) on every picture;
  * `mask` (C-11: paint a zone and retouch it, a new picture comes back) on every raster of the room
  * while the server offers Retouch a Zone — the same door the viewer shows for that picture;
  * the `select` mark where the workflow says so (`ResultsDef.selectable` — recolours, as ON MODEL
@@ -280,7 +281,7 @@ export function PlaygroundResults({
               const own = resultsOfRun(run);
               const cut = !!own?.cutout;
               /* B-32: a clip plays in its tile; it has no mask and no draw-over (both are raster
-                 doors — the mask editor and the vector modal read pixels), only zoom. */
+                 doors — the mask editor and the vector modal read pixels), only the gallery. */
               const clip = isVideoUrl(pictureThumb(picture));
               const selectable = !!own?.selectable;
               const chosen = selectable && pictureIsSelected(picture);

@@ -14,6 +14,7 @@ import { GroupLabel } from 'ui/components/group-label';
 import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
+import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 
 import {
   ASSET_FABRIC,
@@ -33,7 +34,7 @@ import { InertDoor } from '../bench-slot';
 import { GROUP_GAP, GROUP_SEAM } from '../core';
 import { CornerLabel } from '../pattern/organs';
 import type { ClothSlot } from '../pattern/slot-fabrics';
-import { PictureTile, TILE_CORNER, TILE_QUIET } from '../picture-tile';
+import { PictureTile } from '../picture-tile';
 import { useWordsSeeding } from '../use-words-seeding';
 import { WordsField } from '../words-field';
 import { omittedOf, useWordsSeed } from '../words-seed';
@@ -977,7 +978,9 @@ function ColourTile({ state, disabled }: { state: ColourDraft; disabled?: boolea
             aria-label='take the colour off this run'
             title='take the colour off this run'
             onClick={() => state.clear('colour')}
-            className={`absolute right-1 top-1 z-10 ${TILE_QUIET} ${TILE_CORNER}`}
+            /* `z-20 py-0.5 leading-none` — слой и мера угла примитива (`Corner`, T17): ✕ этой
+               плитки стоит и выглядит ровно как ✕ соседних плиток CLOTHS. */
+            className={`absolute right-1 top-1 z-20 py-0.5 leading-none ${TILE_QUIET} ${TILE_CORNER}`}
           >
             ✕
           </button>
