@@ -263,7 +263,9 @@ export function useSplitCut({
       const dx = (event.clientX - drag.originX) / (drag.rect.width || 1);
       const dy = (event.clientY - drag.originY) / (drag.rect.height || 1);
       setFrames((prev) =>
-        prev.map((frame, i) => (i === drag.index ? applyDrag(drag, dx, dy) : frame)),
+        prev.map((frame, i) =>
+          i === drag.index ? applyDrag(drag.frame, drag.mode, dx, dy) : frame,
+        ),
       );
     };
     const onUp = () => setDrag(null);
@@ -294,6 +296,28 @@ export function useSplitCut({
       originY: event.clientY,
       frame: frames[index],
     });
+  };
+
+  /**
+   * THE KEYBOARD'S DRAG (gate wave 3, W3): an arrow moves the focused frame one step, Shift+arrow
+   * pulls its right / bottom edge — the same `applyDrag` the pointer uses, so the clamps and the
+   * minimum side are one rule. Alt makes the step fine.
+   */
+  const nudge = (index: number, key: string, resize: boolean, fine: boolean) => {
+    const step = fine ? 0.002 : 0.01;
+    const dx = key === 'ArrowLeft' ? -step : key === 'ArrowRight' ? step : 0;
+    const dy = key === 'ArrowUp' ? -step : key === 'ArrowDown' ? step : 0;
+    if (!dx && !dy) return;
+    setSelected(index);
+    editFrames((prev) =>
+      prev.map((f, j) =>
+        j !== index
+          ? f
+          : resize
+            ? applyDrag(applyDrag(f, 'r', dx, 0), 'b', 0, dy)
+            : applyDrag(f, 'move', dx, dy),
+      ),
+    );
   };
 
   const viewless = frames.filter((f) => !f.viewKey).length;
@@ -342,6 +366,7 @@ export function useSplitCut({
     ratio,
     setRatio,
     startDrag,
+    nudge,
     initial,
     ready,
     viewless,
@@ -444,20 +469,24 @@ export function SplitStage({
           return (
             <div
               key={i}
-              role='button'
+              role='group'
               tabIndex={0}
-              aria-label={`side ${i + 1}`}
+              aria-label={`${word === '— view —' ? 'unnamed' : word} frame`}
+              aria-description='arrows move it, shift and arrows resize it'
               data-split-frame={i}
               onPointerDown={cut.startDrag(i, 'move')}
+              onFocus={(event) => {
+                if (event.target === event.currentTarget) cut.setSelected(i);
+              }}
               onKeyDown={(event) => {
                 if (event.target !== event.currentTarget) return;
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  cut.setSelected(i);
-                }
+                if (!event.key.startsWith('Arrow')) return;
+                event.preventDefault();
+                cut.nudge(i, event.key, event.shiftKey, event.altKey);
               }}
               className={cn(
                 'group absolute cursor-move border border-textColor',
+                'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
                 named ? '' : 'border-dashed',
               )}
               style={{
@@ -743,9 +772,8 @@ export function SplitModal({
  * eating movement it did not use and the frame would lag behind the pointer for the rest of the
  * gesture.
  */
-function applyDrag(drag: DragState, dx: number, dy: number): SplitFrameDraft {
-  const f = drag.frame;
-  switch (drag.mode) {
+function applyDrag(f: SplitFrameDraft, mode: DragMode, dx: number, dy: number): SplitFrameDraft {
+  switch (mode) {
     case 'move': {
       return {
         ...f,

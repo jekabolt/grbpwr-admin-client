@@ -13,7 +13,7 @@
 //     в истории лист остаётся (`gridPicturesOf`).
 //
 //   node scripts/inline-split-probe.mjs [--shot=out.png]
-//   node scripts/inline-split-probe.mjs --mutate=inline|seed|labels|payload|pieces — каждая краснеет
+//   node scripts/inline-split-probe.mjs --mutate=inline|seed|labels|payload|pieces|role|keys — каждая краснеет
 //
 // Playwright не в зависимостях проекта — ищется в кэше npx и МОЛЧА пропускается, если не найден.
 import { createRequire } from 'node:module';
@@ -118,6 +118,18 @@ const MUTATIONS = {
     file: /split-modal\.tsx$/,
     from: "forInput: mode === 'crop' ? false : forInput,",
     to: 'forInput: true,',
+  },
+  // W3: рамка снова ARIA-кнопка (с select и ✕ внутри).
+  role: {
+    file: /split-modal\.tsx$/,
+    from: "role='group'",
+    to: "role='button'",
+  },
+  // W3: стрелки снова не двигают рамку.
+  keys: {
+    file: /split-modal\.tsx$/,
+    from: 'cut.nudge(i, event.key, event.shiftKey, event.altKey);',
+    to: '',
   },
   // после реза верстак снова держит лист (с колодой кусков).
   pieces: {
@@ -303,6 +315,49 @@ try {
     parseFloat(resized[1]) > parseFloat(moved[1]) && parseFloat(resized[0]) < parseFloat(moved[0]),
     JSON.stringify([moved, resized]),
   );
+
+  // ── W3: КЛАВИАТУРА ──
+  check(
+    'K1 a frame is a focusable group, no control nested in an ARIA button',
+    (await page.$$eval(`${U} [data-split-frame]`, (els) =>
+      els.every((el) => el.getAttribute('role') === 'group' && el.tabIndex === 0),
+    )) && (await page.$$(`${U} [role="button"] select, ${U} [role="button"] button`)).length === 0,
+  );
+  const geo = (i) =>
+    page.$eval(`${U} [data-split-frame="${i}"]`, (el) => [
+      parseFloat(el.style.left),
+      parseFloat(el.style.width),
+      parseFloat(el.style.height),
+    ]);
+  await page.focus(`${U} [data-split-frame="2"]`);
+  const k0 = await geo(2);
+  await page.keyboard.press('ArrowLeft');
+  const k1 = await geo(2);
+  check(
+    'K2 an arrow moves the focused frame, its size kept',
+    k1[0] < k0[0] && k1[1] === k0[1],
+    JSON.stringify([k0, k1]),
+  );
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.keyboard.press('Shift+ArrowLeft');
+  const k2 = await geo(2);
+  check(
+    'K3 shift + arrows resize it, its corner kept',
+    k2[0] === k1[0] && k2[1] < k1[1] && k2[2] !== k1[2],
+    JSON.stringify([k1, k2]),
+  );
+  const focusRing = await page.$eval(`${U} [data-split-frame="2"]`, (el) => ({
+    fv: el.matches(':focus-visible'),
+    outline: getComputedStyle(el).outlineStyle,
+    width: getComputedStyle(el).outlineWidth,
+  }));
+  check(
+    'K4 the focused frame shows a visible ring',
+    focusRing.fv && focusRing.outline === 'solid' && focusRing.width === '2px',
+    JSON.stringify(focusRing),
+  );
+  await page.keyboard.press('Shift+ArrowRight');
+  await page.keyboard.press('ArrowRight');
 
   // переименование через чип
   await page.selectOption(`${U} [data-split-view="1"]`, 'detail');
