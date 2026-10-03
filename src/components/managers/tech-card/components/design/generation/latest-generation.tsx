@@ -394,6 +394,7 @@ export function LatestGeneration({
   const [splitting, setSplitting] = useState<{
     picture: common_DesignPicture;
     handle: string;
+    views: readonly string[];
   } | null>(null);
   /** The split is a surface of its run (`bench-store.ts`); it goes when the modal does. */
   useEffect(() => {
@@ -520,9 +521,9 @@ export function LatestGeneration({
         pinShown(techCardId, true);
         setOpenDeck((current) => deckAfterZoom(current, pictureId, deckOf));
       }}
-      onSplit={(picture) => {
+      onSplit={(picture, views) => {
         openSurface(techCardId, 'split:bench', picture.runId ?? 0);
-        setSplitting({ picture, handle: pictureHandle(picture) });
+        setSplitting({ picture, handle: pictureHandle(picture), views });
       }}
       workbench
       plan={tilePlan ?? undefined}
@@ -638,6 +639,7 @@ export function LatestGeneration({
           techCardId={techCardId}
           picture={splitting.picture}
           handle={splitting.handle}
+          views={splitting.views}
           open
           /* The history's cut, not the input's (T-15): the pieces get their views and become
              pictures of the band; no prompt role is written for them. */

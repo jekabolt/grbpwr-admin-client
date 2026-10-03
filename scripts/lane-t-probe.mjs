@@ -104,6 +104,12 @@ const MUTATIONS = {
     from: 'const cancelling = isCancelling(run) || asked;',
     to: 'const cancelling = false && (isCancelling(run) || asked);',
   },
+  // R(a): the popup seeds from `composite_views` again (empty on beta's `one` sheets).
+  'popup-seed': {
+    file: /split-modal\.tsx$/,
+    from: '    forInput,\n    views,\n    active: open,',
+    to: '    forInput,\n    active: open,',
+  },
 };
 function mutationPlugin(name) {
   const m = MUTATIONS[name];
@@ -193,7 +199,11 @@ try {
   const calls = (name) =>
     page.evaluate((n) => window.__calls.filter((c) => c.name === n).map((c) => c.body), name);
   const openFold = async (probe) => {
-    const h = await page.$(`${P(probe)} [data-history-fold="closed"]`);
+    const h =
+      (await page.$(`${P(probe)} [data-history-fold="closed"]`)) ??
+      (await page.$(
+        `${P(probe)} button[aria-expanded="false"][aria-controls="design-history-runs"]`,
+      ));
     if (h) await h.click();
     await page.waitForTimeout(150);
   };
@@ -308,6 +318,28 @@ try {
   check(
     'T23.15 FABRIC RENDER history: the press cancels run 57',
     (await calls('CancelDesignRun')).some((b) => b.runId === 57),
+  );
+
+  // ══ R(a) · THE HISTORY'S SPLIT POPUP SEEDS ITS FRAMES FROM THE TILE'S READING ══
+  await openFold('history-popup');
+  const split = await page.$(
+    `${P('history-popup')} [data-picture="601"] button[aria-label^="split"]`,
+  );
+  check('Ra.1 the history row offers SPLIT on the uncut `one` sheet', !!split);
+  if (split) {
+    await page.hover(`${P('history-popup')} [data-picture="601"]`);
+    await split.click();
+    await page
+      .waitForSelector('[role="dialog"] [data-split-frame]', { timeout: 3000 })
+      .catch(() => {});
+  }
+  const seeded = await page.$$eval('[role="dialog"] [data-split-chip]', (els) =>
+    els.map((e) => e.innerText.trim()),
+  );
+  check(
+    'Ra.2 the popup opens with FRONT / BACK / SIDE LEFT / SIDE RIGHT frames',
+    JSON.stringify(seeded) === JSON.stringify(['FRONT', 'BACK', 'SIDE LEFT', 'SIDE RIGHT']),
+    JSON.stringify(seeded),
   );
 
   await ctx.close();

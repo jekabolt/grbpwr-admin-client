@@ -5,6 +5,8 @@
 // T23 · отмена прогона в полёте:
 //   flat-running (11) · flat-pending (12) · flat-cancelling (13) · flat-late (14) · flat-readonly (15)
 //   flat-history (16) · render-bench (17) · render-history (18)
+// R(a) · попап SPLIT из истории сеет рамки из `readSplit`, а не из пустого `composite_views`:
+//   history-popup (19) — строка истории (не сетка: `match`) с листом `one` × 4 вида без столбца
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type {
   GetDesignBandResponse,
@@ -65,6 +67,8 @@ const flatBench = ['front', 'back', 'side_l', 'side_r'].map((viewKey, i) => ({
 }));
 const band = (runs: common_DesignRun[]) =>
   ({ bench: flatBench, runs, totalRuns: runs.length }) as unknown as GetDesignBandResponse;
+
+const matchAll = () => true;
 
 const step = { colorways: [], cardColorways: [], adopts: true };
 
@@ -153,6 +157,27 @@ const scenes: { probe: string; node: ReactNode }[] = [
           defaultOpen={false}
         />
       </RenderStepScope>
+    ),
+  },
+  {
+    probe: 'history-popup',
+    node: (
+      <GenerationHistory
+        band={band([
+          run(60, 'flat', {
+            params: { layout: 'one', views: ['front', 'back', 'side_l', 'side_r'] } as never,
+            pictures: [
+              pic(601, 60, 'flat', {
+                media: media(1601, svg('#eee', 2000, 1000), 2000, 1000) as never,
+              }),
+            ],
+          }),
+        ])}
+        techCardId={19}
+        defaultRep='flat'
+        match={matchAll}
+        defaultOpen={false}
+      />
     ),
   },
 ];

@@ -394,7 +394,12 @@ export function RunTile({
   /** The frame's surface unfolds a closed deck instead of zooming (J-2); only the sheet has it. */
   onOpen?: () => void;
   onZoom?: (pictureId: number) => void;
-  onSplit: (picture: common_DesignPicture) => void;
+  /**
+   * Cut this sheet — the host's split window. `views` is the tile's own reading (`readSplit`), the
+   * one the split gate offered the cut by: the window seeds its frames from it, so a `one` sheet the
+   * writer never stamped (`composite_views` empty, beta) still opens as FRONT / BACK / … (R(a)).
+   */
+  onSplit: (picture: common_DesignPicture, views: readonly string[]) => void;
 }) {
   const pick = usePickMode();
   const { setBenchSlot } = useDesignWrites(techCardId);
@@ -492,7 +497,7 @@ export function RunTile({
         deckMemberOf={deckMemberOf}
         galleryGroup={galleryGroup}
         onZoom={onZoom && pictureId ? () => onZoom(pictureId) : undefined}
-        onSplit={() => onSplit(picture)}
+        onSplit={() => onSplit(picture, split.views)}
         onEdit={openEditor}
         split={split}
         onDelete={canDelete ? removal.ask : undefined}
@@ -689,7 +694,7 @@ export function RunTile({
         onSplit={
           splitViewsOf(band, picture, siblings, run, disabled)
             ? {
-                onClick: () => onSplit(picture),
+                onClick: () => onSplit(picture, split.views),
                 ariaLabel: `split ${handle} into views`,
                 title: `${splitVerb(split)} cut this file into pictures a slot can take`,
               }

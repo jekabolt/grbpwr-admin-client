@@ -102,7 +102,7 @@ export function RunOutputs({
   openDeck: number | null;
   onDeck: (rootId: number) => void;
   onZoomPicture?: (pictureId: number) => void;
-  onSplit: (picture: common_DesignPicture) => void;
+  onSplit: (picture: common_DesignPicture, views: readonly string[]) => void;
   /**
    * THE HOST IS THE WORKBENCH UNDER GENERATE, not a history row. It changes two things: the grid
    * runs on the block's 190px track instead of the history's 148px, and each tile's editor asks

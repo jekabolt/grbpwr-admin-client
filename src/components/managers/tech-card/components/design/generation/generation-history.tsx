@@ -147,7 +147,7 @@ function RunRow({
   openDeck: number | null;
   onDeck: (rootId: number) => void;
   onZoomPicture?: (pictureId: number) => void;
-  onSplit: (picture: common_DesignPicture) => void;
+  onSplit: (picture: common_DesignPicture, views: readonly string[]) => void;
 }) {
   const { archiveRun } = useGenerationWrites(techCardId);
   const [open, setOpen] = useState(false);
@@ -693,6 +693,7 @@ export function GenerationHistory({
   const [splitting, setSplitting] = useState<{
     picture: common_DesignPicture;
     handle: string;
+    views: readonly string[];
   } | null>(null);
   /**
    * РАЗРЕЗ В ИСТОРИИ — ТОЖЕ ПОВЕРХНОСТЬ ПРОГОНА (`bench-store.ts`, O-53 review): пока он открыт,
@@ -946,9 +947,9 @@ export function GenerationHistory({
     const byId = new Map(hostRuns.map((run) => [run.id ?? 0, run] as const));
     return (picture: common_DesignPicture) => byId.get(picture.runId ?? 0) ?? hostRuns[0];
   }, [hostRuns]);
-  const splitHere = (picture: common_DesignPicture) => {
+  const splitHere = (picture: common_DesignPicture, views: readonly string[]) => {
     openSurface(techCardId, 'split:history', picture.runId ?? 0);
-    setSplitting({ picture, handle: pictureHandle(picture) });
+    setSplitting({ picture, handle: pictureHandle(picture), views });
   };
 
   /** «SHOW ALL» READS THE SERVER'S PAGES TO THE END; `hasMore` goes false on its own. */
@@ -1471,6 +1472,7 @@ export function GenerationHistory({
             techCardId={techCardId}
             picture={splitting.picture}
             handle={splitting.handle}
+            views={splitting.views}
             open
             /* Разрез в истории — раскладка склеенного листа на виды, а НЕ пополнение промпта
                (T-15): кадры получат вид и станут картинками полосы; ролей промпта сервер им не

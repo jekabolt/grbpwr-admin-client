@@ -631,10 +631,16 @@ export function SplitModal({
   mode = 'split',
   note,
   forInput,
+  views,
   onSplit,
 }: {
   techCardId: number;
   picture: common_DesignPicture;
+  /**
+   * The views the frames are seeded from, when the caller read them (`readSplit` — the history's and
+   * the bench's tiles). Absent — the picture's own `composite_views`, as before.
+   */
+  views?: readonly string[];
   /** The spoken address of the source — `upload 3 · b`. The caller knows the shelf ordinal. */
   handle?: string;
   open: boolean;
@@ -681,6 +687,7 @@ export function SplitModal({
     picture,
     mode,
     forInput,
+    views,
     active: open,
     onCut: (pictures) => {
       onOpenChange(false);
