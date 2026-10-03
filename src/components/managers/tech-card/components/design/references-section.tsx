@@ -12,9 +12,7 @@ import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
-import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
-import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 
@@ -127,9 +125,7 @@ import { dropWords, omittedOf, pickShownWords, settleWords, useWordsSeed } from 
 /**
  * Роли промпта. Значения — проводные (`front | back | side_l | side_r | detail`, см.
  * `common.DesignReference`; снятые `three_quarter_l | three_quarter_r` провод по-прежнему несёт —
- * см. `roleItemsFor`); пустая строка это ПУНКТ СПИСКА, а не отсутствие пункта, и потому законный
- * выбор: примитив селекта пропускает пустоту только когда её кто-то предложил, иначе гасит
- * фантомную пустоту скрытого нативного `<select>`.
+ * см. `roleItemsFor`); пустая строка — пункт `not sent`, то есть законный выбор «убрать из промпта».
  */
 /**
  * Потолок `garmentDescription` — `WORDS_MAX` органа слов (`./words-field.tsx`), ЕДИНСТВЕННОЕ
@@ -147,10 +143,10 @@ import { dropWords, omittedOf, pickShownWords, settleWords, useWordsSeed } from 
 type RoleItem = { value: string; label: string; disabled?: boolean };
 
 const ROLE_ITEMS: RoleItem[] = [
-  { value: '', label: '— not sent —' },
+  { value: '', label: 'not sent' },
   // ЧЕТЫРЕ СТОРОНЫ И ДЕТАЛЬ (`views.ts`, `ACTIVE_VIEWS`): 3/4 сняты владельцем (D-18) и больше не
-  // предлагаются. Слов макета «silhouette / stitching / hardware» на проводе НЕТ — селект остаётся
-  // продуктовым.
+  // предлагаются. Слов макета «silhouette / stitching / hardware» на проводе НЕТ — список
+  // остаётся продуктовым.
   ...ACTIVE_VIEWS.map((view) => ({ value: view, label: viewLabel(view) })),
   { value: DETAIL_VIEW, label: viewLabel(DETAIL_VIEW) },
 ];
@@ -158,35 +154,22 @@ const ROLE_ITEMS: RoleItem[] = [
 /**
  * ═══ РОЛЬ, КОТОРОЙ НЕТ СРЕДИ ПУНКТОВ, ОСТАЁТСЯ ВИДНА — НЕАКТИВНЫМ ПУНКТОМ (D-18', Codex B-08) ═══
  *
- * У референсов беты и прода есть роли `three_quarter_l|r`, а пунктов таких больше нет. Без пункта
- * Radix не может поставить значение в свой скрытый нативный `<select>`, тот остаётся при пустой
- * строке и отдаёт её наружу как выбор — а этот селект ПРЕДЛАГАЕТ пустоту («— not sent —»), поэтому
- * примитив её пропускает, и `setRole(…, '')` СТИРАЕТ роль на сервере без единого жеста человека.
- * Поэтому текущая роль, которой нет в списке, добавляется последним пунктом — видимым, отмеченным
- * и НЕАКТИВНЫМ: её не выбрать заново, но и не потерять молча. Снять её — явный выбор
- * «— not sent —» или другой стороны.
+ * У референсов беты и прода есть роли `three_quarter_l|r`, а пунктов таких больше нет. Текущая
+ * роль, которой нет в списке, добавляется последним пунктом — видимым, отмеченным и НЕАКТИВНЫМ:
+ * её не выбрать заново, но и не потерять молча. Снять её — явный выбор `not sent` или другой
+ * стороны. Правило общее, а не про 3/4 поимённо: роль из словаря более нового сервера упала бы в
+ * ту же яму. Подпись — `viewLabel`, то есть «3/4 left (legacy)» для снятых.
  *
- * Правило общее, а не про 3/4 поимённо: роль из словаря более нового сервера упала бы в ту же яму.
- * Подпись — `viewLabel`, то есть «3/4 left (legacy)» для снятых и ключ как есть для незнакомого.
- *
- * ⚠ ОДНОГО ПУНКТА МАЛО, НУЖЕН ЕЩЁ КЛЮЧ СЕЛЕКТА (`selectKeyFor`), И ЭТО ЗАМЕРЕНО, А НЕ ПРЕДПОЛОЖЕНО
- * (`probe-flat.mjs`, сцена «снятая роль», студия внутри <form>, как на странице карточки). Когда
- * роль ПЕРЕХОДИТ в снятую на смонтированной ячейке (перечтение полосы после записи из старой
- * вкладки), пункт и значение приезжают одним рендером, а нативная `<option>` регистрируется
- * лейаут-эффектом пункта — ПОЗЖЕ, чем пассивный эффект скрытого `<select>` ставит новое значение.
- * В это окно опции ещё нет, и фантомное '' улетало всё равно. Смена ключа при переходе между
- * «роль из списка» и «роль сверх списка» перемонтирует селект: на первом рендере Radix значение
- * не «меняется», события нет, а опция успевает встать до следующего.
+ * ФАНТОМНОЙ ПУСТОТЫ БОЛЬШЕ НЕТ ПО УСТРОЙСТВУ (T16). Роль выбиралась формовым Radix `Select` под
+ * кадром, а у того есть скрытый нативный `<select>`: значение без пункта он отдавал наружу пустой
+ * строкой, и `setRole(…, '')` стирал роль без жеста человека (лечилось ключом перемонтирования,
+ * `selectKeyFor`). Теперь роль — меню в углу плитки (`PictureTile.menu`): значения оно не держит,
+ * `onPick` зовётся ровно на нажатие строки, и рендер записать ничего не может.
  */
 function roleItemsFor(role: string): RoleItem[] {
   const current = role.trim();
   if (!current || ROLE_ITEMS.some((item) => item.value === current)) return ROLE_ITEMS;
   return [...ROLE_ITEMS, { value: current, label: viewLabel(current) || current, disabled: true }];
-}
-
-/** Ключ селекта роли: один на все предлагаемые роли, свой — на каждую роль сверх списка. */
-function selectKeyFor(role: string): string {
-  return roleItemsFor(role) === ROLE_ITEMS ? 'offered' : `kept:${role.trim()}`;
 }
 
 const thumbUrl = (full?: common_MediaFull): string =>
@@ -1136,15 +1119,15 @@ function OneMoreCell({
 }
 
 /**
- * ОДНА ЯЧЕЙКА СЕТКИ РЕФЕРЕНСОВ (`fRefCell` макета): плитка, имя, роль — колонкой.
+ * ОДНА ЯЧЕЙКА СЕТКИ РЕФЕРЕНСОВ (`fRefCell` макета): плитка, и больше ничего под ней (T16).
  *
  * КАДР РИСУЕТ ОБЩИЙ ПРИМИТИВ `PictureTile`, И ЭТО ВЕСЬ ОТВЕТ НА T-7. Владелец: «на тамбнейлах
  * картинок на ховер кнопка сплит должна быть снизу слева я уже второй раз это прошу» — раскладка
  * углов решение примитива (ярлык слева сверху, zoom и ✕ справа сверху, split и crop СЛЕВА СНИЗУ),
  * ячейка объявляет только РОЛИ.
  *
- * ЯРЛЫК ГОВОРИТ ОДНО ИЗ ДВУХ: номер в промпте `#N` — или `not sent`, и тогда снимок приглушён
- * (`dim`) и селект стоит в «— not in prompt —»: три носителя одного состояния, как в макете.
+ * ЯРЛЫК — НОМЕР В ПРОМПТЕ `#N`; без роли ярлыка нет, снимок приглушён (`dim`), а угол роли
+ * говорит `not sent ▾`.
  * ⚠ НОМЕР — ПЛОТНЫЙ НОМЕР ПРОМПТА (И-3), а не позиция в списке, как в прототипе: это число
  * обещает, под каким номером картинку получит сервер, и второе число рядом с деньгами врало бы.
  *
@@ -1202,8 +1185,8 @@ function ReferenceCell({
    * «PROPOSED» — ДЕТАЛЬ, КОТОРУЮ ЗАВЁЛ ЧЕРНОВИК И ЧЕЛОВЕК ЕЩЁ НЕ ПРИНЯЛ (26.09, O-34). Владелец: «в
    * самом окне INPUT — REFERENCES они не помечены как PROPOSED, они так помечены только в FLAT
    * SLOTS». Источник один — журнал черновика (`slotProposed`, тот же, что читает бенч и чипы VIEWS);
-   * здесь он спрашивается по указателю строки на слот. Синяя рамка на селекте роли и слово
-   * `proposed` рядом — тот же тон, что у слота на бенче. Снимается там же, где у бенча: касание
+   * здесь он спрашивается по указателю строки на слот. Флаг `proposed` под ярлыком — тот же тон,
+   * что у слота на бенче. Снимается там же, где у бенча: касание
    * слота (картинка, перо, имя, снос) или `accept all`; своей двери принятия у строки нет.
    */
   const drafted = useDrafted();
@@ -1212,8 +1195,83 @@ function ReferenceCell({
     normaliseViewKey(role) === DETAIL_VIEW &&
     drafted.slotProposed(detailSlotId);
 
+  /**
+   * ═══ РОЛЬ — МЕНЮ В УГЛУ ПЛИТКИ, А НЕ СЕЛЕКТ ПОД НЕЙ (T16) ═══════════════════════════════════
+   * Владелец: «в INPUT — REFERENCES селектор должны быть внутри плитки по принципу как это сделано
+   * в flat slots а не отдельным блоком». Угол `not sent ▾` / `front ▾` первым в нижнем правом
+   * кластере; список — те же пункты, что были у селекта, текущий отмечен.
+   *
+   * ПОВТОРНЫЙ ВЫБОР ТЕКУЩЕГО — НИЧЕГО НЕ ДЕЛАЕТ, как у прежнего селекта (Radix не слал
+   * `onValueChange` на то же значение): иначе `detail` по уже названной детали заводил бы ВТОРОЙ
+   * слот. Исключение одно — деталь без имени: её пункт подписан `detail · name it…` и открывает
+   * то же окно называния, что открывала кнопка «name it» рядом с селектом.
+   */
+  const current = role.trim();
+  const isDetail = normaliseViewKey(role) === DETAIL_VIEW;
+  const unnamedDetail = isDetail && !detailName;
+  const detailWord = detailName
+    ? `detail · ${detailName}`
+    : detailSlotId > 0
+      ? 'detail · slot removed'
+      : 'detail · unnamed';
+  const menu = readOnly
+    ? undefined
+    : {
+        label: current ? viewLabel(current) || current : 'not sent',
+        ariaLabel: `role of ${label}`,
+        title: isDetail ? detailWord : undefined,
+        disabled: locked,
+        'data-menu': `role:${mediaId}`,
+        items: roleItemsFor(role).map((item) => {
+          const here = item.value === DETAIL_VIEW ? isDetail : !isDetail && item.value === current;
+          return {
+            value: item.value,
+            disabled: item.disabled,
+            current: here,
+            label:
+              item.value === DETAIL_VIEW && isDetail ? (
+                <span data-ref-detail={mediaId}>
+                  {unnamedDetail ? 'detail · name it…' : detailWord}
+                </span>
+              ) : (
+                item.label
+              ),
+            title:
+              item.value === DETAIL_VIEW && unnamedDetail
+                ? 'name this detail — the prompt reads an unnamed one as just “detail”'
+                : undefined,
+          };
+        }),
+        onPick: (value: string) => {
+          if (value === DETAIL_VIEW && unnamedDetail) return onNameDetail();
+          if (value === DETAIL_VIEW ? isDetail : !isDetail && value === current) return;
+          onRole(value);
+        },
+      };
+  const flag = unnamedDetail
+    ? {
+        word: 'name it',
+        tone: 'warn' as const,
+        title:
+          detailSlotId > 0
+            ? 'the detail slot this reference pointed at is gone — name the detail again'
+            : 'this detail has no name — pick “detail · name it…” in its role menu',
+      }
+    : proposed
+      ? {
+          word: 'proposed',
+          tone: 'attention' as const,
+          title:
+            'the construction draft proposed this detail — put a picture in its flat slot, draw, rename or remove it there to accept',
+        }
+      : undefined;
+
   return (
-    <div className='flex min-w-0 flex-col gap-1' data-ref-cell={mediaId}>
+    <div
+      className='group flex min-w-0 flex-col gap-1'
+      data-ref-cell={mediaId}
+      data-ref-proposed={proposed || undefined}
+    >
       {/* КАДР 1:1, КАРТИНКА ВПИСЫВАЕТСЯ ЦЕЛИКОМ (`contain`). Навязанное соотношение законно
           ровно потому, что на референсе НЕТ выносок: доля кадра здесь ничего не адресует. */}
       <PictureTile
@@ -1222,7 +1280,9 @@ function ReferenceCell({
         aspect='1/1'
         fit='contain'
         className='w-full'
-        badge={number != null ? `#${number}` : 'not sent'}
+        badge={number != null ? `#${number}` : undefined}
+        flag={flag}
+        menu={menu}
         dim={!role}
         gallery={
           url && full
@@ -1295,65 +1355,8 @@ function ReferenceCell({
         )}
       </PictureTile>
 
-      {/* ⚠ ПОДПИСИ `picture <media_id>` ПОД КАДРОМ БОЛЬШЕ НЕТ (R2 п.17), слово владельца: «picture
-          125 не показывать». Номер медиа — адрес файла в библиотеке, а не имя картинки; человек
-          на этом экране решает, каким видом она поедет в промпт, и селект вида теперь стоит СРАЗУ
-          под кадром, без промежуточной строки (R2 п.18). Сам номер жив в `aria-label` углов
-          плитки и в вопросе перед снятием — там, где он адресует, а не украшает. */}
-
-      {/* РОЛЬ, А У ДЕТАЛИ — ЕЁ ИМЯ (J-9): имя печатается на триггере, не в списке; дверь починки
-          «name it» — соседняя и появляется РОВНО в сломанном состоянии (Radix не шлёт
-          `onValueChange` на повторный выбор того же значения). `data-ref-role` — якорь пробы. */}
-      <div
-        className='flex min-w-0 items-center gap-1'
-        data-ref-role={mediaId}
-        data-ref-proposed={proposed || undefined}
-      >
-        <Select
-          key={selectKeyFor(role)}
-          name={`ref-role-${mediaId}`}
-          items={roleItemsFor(role)}
-          value={role}
-          placeholder='— not sent —'
-          readOnly={readOnly || locked}
-          onValueChange={onRole}
-          className={cn('w-full min-w-0', proposed && 'border-warning text-warning')}
-          renderValue={(value, item) =>
-            normaliseViewKey(String(value)) === DETAIL_VIEW ? (
-              <span className='min-w-0 truncate' data-ref-detail={mediaId}>
-                {detailName
-                  ? `detail · ${detailName}`
-                  : detailSlotId > 0
-                    ? 'detail · slot removed'
-                    : 'detail · unnamed'}
-              </span>
-            ) : (
-              item?.label
-            )
-          }
-        />
-        {proposed && (
-          <Pill
-            tone='attention'
-            data-proposed-pill=''
-            className='shrink-0 leading-none'
-            title='the construction draft proposed this detail — put a picture in its flat slot, draw, rename or remove it there to accept'
-          >
-            proposed
-          </Pill>
-        )}
-        {normaliseViewKey(role) === DETAIL_VIEW && !detailName && !readOnly && (
-          <Button
-            variant='secondary'
-            size='xs'
-            disabled={locked}
-            onClick={onNameDetail}
-            data-name-detail={mediaId}
-          >
-            name it
-          </Button>
-        )}
-      </div>
+      {/* ПОД КАДРОМ НИЧЕГО (T16): подписи `picture <media_id>` нет с R2 п.17, а роль, флаг
+          `proposed` и дверь «name it» переехали в саму плитку — угол меню и флаг под ярлыком. */}
     </div>
   );
 }
