@@ -16,6 +16,8 @@
 //   TF5 · под плиткой ткани одна подпись — имя (как имя слота FLAT SLOTS); пары «где в рендере» —
 //         в title плитки; `rename` открывает поле на месте подписи.
 //
+//         Так же — запись ассета (delete…) и привязки (`use for ▾`) на карусели и в CLOTHS (r2).
+//
 //   node scripts/tile-menu-probe.mjs
 //   node scripts/tile-menu-probe.mjs --mutate=<имя>   — каждая мутация краснеет (список — MUTATIONS)
 //
@@ -139,6 +141,18 @@ const MUTATIONS = {
     file: /design\/use-design-band\.ts$/,
     from: 'onSuccess: invalidateWrittenAndWait,',
     to: 'onSuccess: invalidateWritten,',
+  },
+  // Codex r2: запись ассета кончается на ответе сервера, не дождавшись полосы.
+  assetrefetch: {
+    file: /assets\/use-assets\.ts$/,
+    from: 'const invalidate = useCallback(() => qc.invalidateQueries({ queryKey: key }), [qc, key]);',
+    to: 'const invalidate = useCallback(() => { qc.invalidateQueries({ queryKey: key }); }, [qc, key]);',
+  },
+  // Codex r2: то же у привязки «ткань пары».
+  bindrefetch: {
+    file: /assets\/use-assets\.ts$/,
+    from: 'onSuccess: (card: number) => qc.invalidateQueries({ queryKey: designKeys.band(card) }),',
+    to: 'onSuccess: (card: number) => { qc.invalidateQueries({ queryKey: designKeys.band(card) }); },',
   },
 };
 function mutationPlugin(name) {
@@ -424,16 +438,27 @@ try {
   check('R6 and frees the menu', await page.$eval(RM, (m) => !m.disabled).catch(() => false));
 
   // ── TF4 · меню занято до перечитывания полосы ──
-  const holdsUntilRefetch = async (tag, tile, menu, item) => {
+  const holdsUntilRefetch = async (
+    tag,
+    tile,
+    menu,
+    item,
+    write = 'SetDesignBenchSlot',
+    confirm = null,
+  ) => {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(150);
     await rowsOf(tile, menu);
-    const writes = (await calls(/SetDesignBenchSlot/)).length;
+    const writes = (await calls(new RegExp(`^${write}$`))).length;
     await page.evaluate(() => (window.__hold.GetDesignBand = true));
     await page.click(`[data-menu-item="${item}"]`);
+    if (confirm) {
+      await page.waitForSelector(confirm);
+      await page.click(confirm);
+    }
     await page.waitForFunction(
-      (n) => window.__calls.filter((c) => c.name === 'SetDesignBenchSlot').length > n,
-      writes,
+      ([name, n]) => window.__calls.filter((c) => c.name === name).length > n,
+      [write, writes],
     );
     await page
       .waitForFunction(() => (window.__held.GetDesignBand ?? []).length > 0, null, {
@@ -467,6 +492,31 @@ try {
     'v:front',
   );
   await holdsUntilRefetch('M', `${R} [data-picture-tile]`, RM, '0␟front');
+
+  // ── Codex r2 · записи ассетов и привязок тоже держат меню до перечитывания полосы ──
+  await holdsUntilRefetch(
+    'B',
+    `${F} [data-fabric-tile="202"]`,
+    `${F} [data-menu="use-for:202"]`,
+    '11:1',
+    'SetDesignAssetBinding',
+  );
+  await holdsUntilRefetch(
+    'D',
+    `${F} [data-fabric-tile="202"]`,
+    `${F} [data-menu="use-for:202"]`,
+    '__delete',
+    'DeleteDesignAsset',
+    '[role="dialog"] button:has-text("delete the fabric")',
+  );
+  await holdsUntilRefetch(
+    'Q',
+    `${P} [data-texture="202"]`,
+    `${P} [data-menu="more:202"]`,
+    'delete',
+    'DeleteDesignAsset',
+    '[role="dialog"] button:has-text("delete")',
+  );
 
   await ctx.close();
 } finally {

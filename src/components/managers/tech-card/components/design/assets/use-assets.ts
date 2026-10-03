@@ -18,9 +18,11 @@ export function useAssetWrites(techCardId: number) {
   const { showMessage } = useSnackBarStore();
   const key = designKeys.band(techCardId);
 
-  const invalidate = useCallback(() => {
-    qc.invalidateQueries({ queryKey: key });
-  }, [qc, key]);
+  /* RETURNED, NOT FIRED AND FORGOTTEN (Codex r2 of TF2/TF4): a write's `onSuccess` hands this
+     promise back, so `isPending` lasts until the re-read band is in the cache. Settling on the RPC
+     re-armed the tile menus over a stale band: `use for ▾` could rebind, `delete…` could ask to
+     delete an asset that is already gone. */
+  const invalidate = useCallback(() => qc.invalidateQueries({ queryKey: key }), [qc, key]);
 
   const onError = useCallback(
     (error: unknown) => {
@@ -167,9 +169,8 @@ export function useAssetBindingWrites(techCardId: number) {
       });
       return card;
     },
-    onSuccess: (card: number) => {
-      qc.invalidateQueries({ queryKey: designKeys.band(card) });
-    },
+    /* Returned for the same reason as `useAssetWrites.invalidate`: pending until the band lands. */
+    onSuccess: (card: number) => qc.invalidateQueries({ queryKey: designKeys.band(card) }),
     onError: (error: unknown) => {
       showMessage((error as Error)?.message || 'the fabric was not set for that slot', 'error');
     },
