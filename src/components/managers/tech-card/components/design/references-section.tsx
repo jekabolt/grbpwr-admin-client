@@ -1248,6 +1248,17 @@ function ReferenceCell({
           onRole(value);
         },
       };
+  /**
+   * ЯРЛЫК — НОМЕР И РОЛЬ, ВИДНЫ В ПОКОЕ (N3). Меню угла тихое (`TILE_QUIET`), и роль без ярлыка
+   * читалась бы только на наведении; у FLAT SLOTS имя слота видно всегда — здесь так же:
+   * `#1 · front`, `#2 · detail · collar`. Не отправленная картинка ярлыка не носит.
+   */
+  const roleWord = isDetail
+    ? detailName
+      ? `detail · ${detailName}`
+      : 'detail'
+    : viewLabel(current) || current;
+  const badge = number != null && current ? `#${number} · ${roleWord}` : undefined;
   const flag = unnamedDetail
     ? {
         word: 'name it',
@@ -1280,7 +1291,7 @@ function ReferenceCell({
         aspect='1/1'
         fit='contain'
         className='w-full'
-        badge={number != null ? `#${number}` : undefined}
+        badge={badge}
         flag={flag}
         menu={menu}
         dim={!role}
