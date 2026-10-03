@@ -10,7 +10,7 @@ import Text from 'ui/components/text';
 import { formatBytes, stripDataUrlPrefix } from 'utils/pattern';
 
 import { InertDoor } from '../bench-slot';
-import { TILE_CORNER, TILE_QUIET } from '../picture-tile';
+import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { newClientRequestId, useDesignWrites } from '../use-design-band';
 import { STRIP_FRAME_ASPECT } from '../render/strip-cell';
 import { MODEL_FILE_ACCEPT, isGlbFile, modelFileError, modelUploadErrorMessage } from './model-file';

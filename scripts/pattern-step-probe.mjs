@@ -14,9 +14,9 @@
 //   3 full       — 2 колорвея × 3 слота, две надетые ткани, живой прогон; IMAGE TO FABRIC с каруселью
 //                  — ОТДЕЛЬНЫМ блоком под PATTERN (владелец, с беты), зазор между ними — 24px поля;
 //   4 gate       — полоса без `assetBindings` (бинарь старше привязок): PATTERN — одна строка,
-//                  IMAGE TO FABRIC работает, но `use for ▸` погашен поводом и «in render» нет;
+//                  IMAGE TO FABRIC работает, но угла `use for ▾` нет (повод — в title плитки) и «in render» нет;
 //   5 pantone    — пикер пантона открыт на ряду ROSSO × outer: полоса оттенков и «from this card»;
-//   6 use-for    — `use for ▸` карусели: шаг 1 (колорвеи), шаг 2 (слоты), и после выбора — ткань
+//   6 use-for    — угол `use for ▾` карусели (T17): плоский список пар «колорвей · слот», и после выбора — ткань
 //                  встала в ячейку пары через `SetDesignAssetBinding` и перечитывание полосы;
 //   7 generate   — (сверх постановки) `generate` у ряда OLIVE × inner: `StartDesignRun` и ячейка
 //                  переходит в «making the fabric…» после перечитывания полосы;
@@ -413,13 +413,13 @@ for (const vp of VIEWPORTS) {
       ['дверь extract fabric', '[data-image-extract]', 1],
       ['карусели', '[data-fabric-carousel]', 1],
       ['плиток карусели', '[data-fabric-tile]', 3],
-      // …но надеть ткань на слот нечем: `use for ▸` погашен поводом, «in render» нет.
+      // …но надеть ткань на слот нечем: угла `use for ▾` нет, повод — в title плитки, «in render» нет.
       [
-        'погашенных use for ▸ с поводом «нет привязок»',
-        '[data-fabric-use-for] [data-inert^="this server does not know fabric bindings"]',
+        'плиток с поводом «нет привязок» в title',
+        '[data-fabric-tile][title*="this server does not know fabric bindings"]',
         3,
       ],
-      ['живых use for ▸', '[data-fabric-use-for] button:not([disabled])', 0],
+      ['углов use for ▾', '[data-menu^="use-for:"]', 0],
       ['ярлыков «in render»', '[data-fabric-worn]', 0],
       ['нано-строк «где в рендере»', '[data-fabric-worn-by]', 0],
     ]);
@@ -467,26 +467,20 @@ for (const vp of VIEWPORTS) {
   // (6) карусель: `use for ▸`, два шага и выбор
   await withPage(vp, '6-use-for', async (page, entry) => {
     await mount(page, 'full');
-    const door = page.locator('[data-fabric-use-for="103"] button');
+    const door = page.locator('[data-menu="use-for:103"]');
     await door.evaluate((n) => n.scrollIntoView({ block: 'center' }));
+    await page.locator('[data-fabric-tile="103"]').hover();
     await door.click();
-    await page.waitForSelector('[data-picker-step="1"]', { timeout: 5000 });
+    await page.waitForSelector('[data-menu-item]', { timeout: 5000 });
     await settle(page);
-    await shoot(page, '6-use-for-step1', vp, { fullPage: false });
-    await page.locator('[data-picker-branch="11"]').click();
-    await page.waitForSelector('[data-picker-step="2"]', { timeout: 5000 });
-    await settle(page);
-    const leaves = await page.locator('[data-picker-leaf]').evaluateAll((ns) =>
-      ns.map((n) =>
-        [...n.children]
-          .map((c) => (c.textContent ?? '').trim())
-          .filter(Boolean)
-          .join(' · '),
-      ),
-    );
-    entry.notes.push(`листья шага 2 (ROSSO): ${leaves.join(' | ')}`);
-    await shoot(page, '6-use-for-step2', vp, { fullPage: false });
-    await page.locator('[data-picker-leaf="3"]').click();
+    const items = await page
+      .locator('[data-menu-item]')
+      .evaluateAll((ns) =>
+        ns.map((n) => `${n.getAttribute('data-menu-item')}=${(n.textContent ?? '').trim()}`),
+      );
+    entry.notes.push(`пары use for ▾: ${items.join(' | ')}`);
+    await shoot(page, '6-use-for-open', vp, { fullPage: false });
+    await page.locator('[data-menu-item="11:3"]').click();
     await page.waitForSelector(`${cellOf(11, 3)} [data-slot-fabric="103"]`, { timeout: 5000 });
     await settle(page);
     const writes = await page.evaluate(() =>

@@ -8,7 +8,7 @@ import { PLACEHOLDER_SURFACE, Placeholder } from 'ui/components/placeholder';
 
 import { BENCH_CELL_PX, BENCH_CELL_STYLE } from '../bench-slot';
 import { EMPTY_WORD, HALF_FACE } from '../core';
-import { TILE_CORNER, TILE_QUIET } from '../picture-tile';
+import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 
 /**
  * ═══ THE CELL IS THE FLAT SLOTS CELL — 138 × 162, PORTRAIT (owner, r2 §25) ══════════════════════

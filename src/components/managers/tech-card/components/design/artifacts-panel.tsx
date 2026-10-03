@@ -40,6 +40,7 @@ import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
+import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { ViewSwitch } from 'ui/components/view-switch';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 
@@ -70,7 +71,6 @@ import { recolorOutputs } from './recolor/model';
 // ⚠ ИЗ `./pattern/model`, А НЕ ИЗ `./pattern`. Индекс папки тянет за собой сам экран, а тот —
 // `../render` и `../generation` целиком; этой панели нужны две чистые функции без единого хука.
 import { patternOutputs, repeatOfRun } from './pattern/model';
-import { TILE_CORNER, TILE_QUIET } from './picture-tile';
 import { provenanceLabel, readProvenance } from './provenance';
 import {
   SELECT_MARK_NOT_STATED,
@@ -2864,7 +2864,8 @@ const PLATE_BADGE_CHIP = 'flex min-w-0 max-w-full items-center gap-1.5 bg-bgColo
  * отсутствие учит, что жеста не существует вовсе, а погашенный орган с причиной учит, что именно
  * стоит на пути (выпущенная карточка, плита не на документе).
  */
-function PlateGrid({
+/** Экспорт ради стенда `scripts/plate-open-probe.mjs` (мышиная дверь в крупный вид, T17). */
+export function PlateGrid({
   cells,
   layout,
   hoverIndex,
@@ -3085,22 +3086,38 @@ function PlateGrid({
               )}
             >
               <div className={PLATE_BADGE_CHIP}>
-                <Text
-                  size='nano'
-                  variant='uppercase'
-                  tracking='label'
-                  component='span'
-                  data-plate-name
-                  className='min-w-0 truncate'
+                {/* ═══ ИМЯ — МЫШИНАЯ ДВЕРЬ В КРУПНЫЙ ВИД (T17) ══════════════════════════════════
+                    На плите всегда взведён инструмент, а взведённый двойной клик ставит точки
+                    (HX1: постановка старше зума), поэтому снимок мышью в крупный вид не вёл —
+                    только клавиатурой (HX3). Кнопки `zoom` на кадре нет и не будет (T12); дверью
+                    стало имя: нажатие по нему открывает крупный вид, курсор говорит это сам.
+                    Ловит указатель ТОЛЬКО имя (`pointer-events-auto` на нём одном) — мёртвая
+                    зона в углу чертежа равна слову, а не всей шапке. Для клавиатуры дверь уже есть
+                    (`data-open-large` поверхности), поэтому вторая остановка табом не заводится. */}
+                <button
+                  type='button'
+                  tabIndex={-1}
+                  aria-hidden='true'
+                  data-plate-open={plate.mediaId}
+                  title={`open ${plate.name} large`}
+                  onClick={() => onZoom(index)}
+                  className='pointer-events-auto min-w-0 cursor-zoom-in truncate text-left hover:underline'
                 >
-                  {/* ЯРЛЫК ПИШЕТ КОРОТКОЕ ИМЯ, КОГДА РЯД ВОКРУГ УЖЕ НАЗВАЛ ОСТАЛЬНОЕ (довод у
-                      `DocumentPlate.caption`): под шапкой `ROSSO` плита говорит `FRONT`. Полное
-                      имя от этого не пропадает — оно стоит в углах кадра (`zoom · FRONT · ROSSO`,
-                      `detach …`), в увеличенном виде и в строке «где» списка указаний. `title`
-                      здесь бесполезен: ярлык прозрачен для указателя и всплывающей подсказки не
-                      даёт вовсе (довод у второй строки ярлыка ниже). */}
-                  {plate.caption || plate.name}
-                </Text>
+                  <Text
+                    size='nano'
+                    variant='uppercase'
+                    tracking='label'
+                    component='span'
+                    data-plate-name
+                    className='min-w-0 truncate'
+                  >
+                    {/* ЯРЛЫК ПИШЕТ КОРОТКОЕ ИМЯ, КОГДА РЯД ВОКРУГ УЖЕ НАЗВАЛ ОСТАЛЬНОЕ (довод у
+                        `DocumentPlate.caption`): под шапкой `ROSSO` плита говорит `FRONT`. Полное
+                        имя от этого не пропадает — оно стоит в `title` этой двери, в углах кадра
+                        (`detach …`), в увеличенном виде и в строке «где» списка указаний. */}
+                    {plate.caption || plate.name}
+                  </Text>
+                </button>
               {plate.origin === 'bench' && <Pill tone='mut'>bench</Pill>}
               {plate.origin === 'run' && <Pill tone='mut'>not on the card</Pill>}
               {marksChosen && plate.chosen && <Pill tone='ok'>chosen</Pill>}

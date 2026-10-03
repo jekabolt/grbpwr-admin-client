@@ -42,7 +42,7 @@ import { RunRefusal } from '../render/generate-row';
 import { archivedColorwayGate, type Gate } from '../render/model';
 import { useStartDesignRun } from '../render/use-design-run';
 import { refusalAdvice } from './model';
-import { CornerLabel, FABRIC_CELL_ASPECT, PendingTile, TiledFace } from './organs';
+import { FABRIC_CELL_ASPECT, PendingTile, TiledFace } from './organs';
 import {
   READ_ONLY_RUN_REASON,
   bindingsSpoken,
@@ -645,7 +645,8 @@ function SlotRow({
 
 /**
  * ЯЧЕЙКА ТКАНИ ПАРЫ — 138 × 162, три состояния одной коробки: живой прогон («making the fabric…»
- * с часами), надетая ткань (2×2 лицо, угол `in render`, зум) или пунктир «no fabric yet». Живой
+ * с часами), надетая ткань (2×2 лицо, ярлык `in render` верх слева, как у плитки карусели; крупный вид —
+ * нажатием) или пунктир «no fabric yet». Живой
  * прогон главнее надетой ткани: человек только что нажал `generate`, и ячейка обязана ответить.
  */
 function FabricCell({
@@ -677,9 +678,8 @@ function FabricCell({
           className='w-full'
           face={<TiledFace url={full} alt={label} />}
           gallery={{ src: full, thumbnail: assetThumb(asset) || full, type: 'image', alt: label }}
-        >
-          <CornerLabel at='bl'>in render</CornerLabel>
-        </PictureTile>
+          badge='in render'
+        />
       </div>
     );
   }
