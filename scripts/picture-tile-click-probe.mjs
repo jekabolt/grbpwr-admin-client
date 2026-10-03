@@ -8,6 +8,7 @@
 //   node scripts/picture-tile-click-probe.mjs
 //   node scripts/picture-tile-click-probe.mjs --mutate          вернуть прежнюю проводку (onOpen на click)
 //   node scripts/picture-tile-click-probe.mjs --mutate-window   окно 200 мс: медленный двойной (D) краснеет
+//   node scripts/picture-tile-click-probe.mjs --mutate-clip     клип с `onOpen` снова под накладкой (W краснеет)
 //
 // D/E (лейн P): двойной клик — это второй клик ВНУТРИ окна жеста, а не родной `dblclick` и не
 // `detail` от ОС. Медленный двойной (250 мс) открывает зум без `onOpen`; два клика через 600 мс —
@@ -27,6 +28,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
 const MUTATE = process.argv.includes('--mutate');
 const MUTATE_WINDOW = process.argv.includes('--mutate-window');
+const MUTATE_CLIP = process.argv.includes('--mutate-clip');
 
 function resolvePlaywright() {
   const require = createRequire(import.meta.url);
@@ -113,6 +115,21 @@ const windowMutation = {
   },
 };
 
+const CLIP_FIX = '{!clip &&\n        (onOpen || zoomable || surfaceToModel) &&';
+const clipMutation = {
+  name: 'tile-clip-mutation',
+  setup(b) {
+    b.onLoad({ filter: /design\/picture-tile\.tsx$/ }, async (a) => {
+      const src = await readFile(a.path, 'utf8');
+      if (!src.includes(CLIP_FIX)) throw new Error('мутация клипа не нашла свою строку');
+      return {
+        contents: src.replace(CLIP_FIX, '{(onOpen || (!clip && (zoomable || surfaceToModel))) &&'),
+        loader: 'tsx',
+      };
+    });
+  },
+};
+
 const outfile = resolve(tmpdir(), `picture-tile-click-${process.pid}.js`);
 await esbuild({
   entryPoints: [resolve(HERE, 'picture-tile-click-entry.tsx')],
@@ -129,7 +146,9 @@ await esbuild({
     ? [stubNetwork, mutation]
     : MUTATE_WINDOW
       ? [stubNetwork, windowMutation]
-      : [stubNetwork],
+      : MUTATE_CLIP
+        ? [stubNetwork, clipMutation]
+        : [stubNetwork],
   define: { 'process.env.NODE_ENV': '"development"', 'import.meta.env': '__STUB_ENV__' },
   banner: { js: 'var __STUB_ENV__ = {};' },
   alias: {
@@ -292,6 +311,60 @@ try {
     await page.waitForTimeout(300);
   }
   check('V6 keyboard: `open large` + Enter → viewer opens', (await dialogs()) > 0);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
+  await page.waitForTimeout(300);
+
+  // W · клип с `onOpen` (история генерации): накладки нет, контролы живы; клик по картинке —
+  // `onOpen` (через окно жеста), двойной — большой вид без `onOpen`, клик по полосе контролов —
+  // браузеру; скрытый `open large` есть и здесь.
+  const W = '[data-probe="clipopen"]';
+  check(
+    'W1 clip with onOpen: no overlay over the controls',
+    (await page.$$(`${W} [data-tile-surface]`)).length === 0,
+  );
+  const wb = await page.$eval(`${W} video`, (el) => {
+    const b = el.getBoundingClientRect();
+    return { x: b.x + b.width / 2, top: b.y + 30, bottom: b.y + b.height - 10 };
+  });
+  const clipOpens = async () => (await state()).clip;
+  const c0 = await clipOpens();
+  await page.mouse.click(wb.x, wb.top);
+  await page.waitForTimeout(550);
+  check(
+    'W2 single click on the clip → onOpen once',
+    (await clipOpens()) === c0 + 1,
+    `clip=${await clipOpens()}`,
+  );
+  check('W3 single click opens no viewer', (await dialogs()) === 0);
+  await page.mouse.click(wb.x, wb.bottom);
+  await page.waitForTimeout(550);
+  check(
+    'W4 click on the controls bar → not onOpen',
+    (await clipOpens()) === c0 + 1,
+    `clip=${await clipOpens()}`,
+  );
+  await page.mouse.dblclick(wb.x, wb.top);
+  await page.waitForTimeout(550);
+  check('W5 double click → viewer opens', (await dialogs()) > 0);
+  check(
+    'W6 double click → onOpen not called',
+    (await clipOpens()) === c0 + 1,
+    `clip=${await clipOpens()}`,
+  );
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
+  await page.waitForTimeout(300);
+  const wdoor = await page.$(`${W} [data-open-large]`);
+  if (wdoor) {
+    await wdoor.focus();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(300);
+  }
+  check(
+    'W7 keyboard: `open large` present, Enter → viewer opens',
+    !!wdoor && (await dialogs()) > 0,
+  );
   await ctx.close();
 } finally {
   await browser.close();

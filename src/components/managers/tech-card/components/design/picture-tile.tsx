@@ -972,8 +972,10 @@ export function CornerMenu({ menu }: { menu: PictureTileMenu }) {
  */
 const CLICK_WINDOW_MS = 350;
 
-/** The height of the browser's own controls bar on a clip: a double click there is not «open». */
+/** The height of the browser's own controls bar on a clip: a click there is the browser's. */
 const CLIP_CONTROLS_PX = 40;
+const onClipControls = (e: React.MouseEvent<HTMLVideoElement>) =>
+  e.clientY > e.currentTarget.getBoundingClientRect().bottom - CLIP_CONTROLS_PX;
 
 export function PictureTile({
   url,
@@ -1294,20 +1296,27 @@ export function PictureTile({
             aria-label={alt}
             className='h-full w-full object-contain'
             style={{ objectFit: fit }}
-            /* TF1 · THE CLIP'S WAY INTO THE LARGE VIEWER: a double click on the picture, never on
-               the browser's controls bar (its bottom strip seeks and switches the sound). The
-               default is prevented so a browser that reads a double click as «fullscreen» does
-               not do both. The keyboard way is the hidden `open large` below. */
-            onDoubleClick={
-              zoomable
+            /* TF1 · THE CLIP OWNS ITS GESTURES — NO OVERLAY COVERS IT (the overlay would kill the
+               browser's controls). Clicks on the controls bar (its bottom strip seeks and switches
+               the sound) belong to the browser. Elsewhere on the picture: a single click is the
+               host's `onOpen`; a double click opens the large viewer — through the same gesture
+               window as every other tile when both exist, so `onOpen` never fires on a double.
+               The default of `dblclick` is prevented so a browser that reads it as «fullscreen»
+               does not do both. The keyboard way is the hidden `open large` below. */
+            onClick={
+              onOpen
                 ? (e) => {
-                    const box = e.currentTarget.getBoundingClientRect();
-                    if (e.clientY > box.bottom - CLIP_CONTROLS_PX) return;
-                    e.preventDefault();
-                    openZoom();
+                    if (onClipControls(e)) return;
+                    if (zoomable) arbitratedClick(e);
+                    else onOpen();
                   }
                 : undefined
             }
+            onDoubleClick={(e) => {
+              if (onClipControls(e)) return;
+              e.preventDefault();
+              if (!onOpen && zoomable) openZoom();
+            }}
           />
         ) : face ? (
           face
@@ -1354,7 +1363,8 @@ export function PictureTile({
           больше не `aria-hidden`: имя, фокус и объявление читалке переехали на неё с угла — одно
           действие по-прежнему один орган. Там, где одиночный клик занят `onOpen` (раскрыть колоду,
           выбрать, отправить на верстак), зум открывает ДВОЙНОЙ клик по той же поверхности. */}
-      {(onOpen || (!clip && (zoomable || surfaceToModel))) &&
+      {!clip &&
+        (onOpen || zoomable || surfaceToModel) &&
         (() => {
           const zoomSurface = !onOpen && !surfaceToModel;
           return (
@@ -1383,7 +1393,7 @@ export function PictureTile({
           surface). The clip keeps its own controls, so it has no zoom surface: the mouse opens the
           viewer by a double click on the picture, the keyboard by this `sr-only` action, and its
           focus is drawn as the frame's own ring (`has-[…]` on the host), not as a new button. */}
-      {clip && zoomable && !onOpen && (
+      {clip && zoomable && (
         <button
           type='button'
           data-open-large=''

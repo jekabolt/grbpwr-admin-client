@@ -3,6 +3,7 @@
 //   · `plain` — `onOpen` без зума (у плитки нет ряда просмотрщика): клик срабатывает сразу.
 //   · `clip`  — лицо-видео (TF1): родные контролы живы, большой вид — двойным кликом по картинке
 //     (не по полосе контролов) и скрытым `open large` с клавиатуры.
+//   · `clipopen` — клип с `onOpen` (история генерации): без накладки; клик — `onOpen`, двойной — зум.
 // Счётчики вызовов — в `#state`. Прогоняется `scripts/picture-tile-click-probe.mjs`.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -19,10 +20,12 @@ const PIC =
   );
 
 const CLIP = 'http://probe.local/clip.mp4';
+const CLIP2 = 'http://probe.local/clip-2.mp4';
 
 function Harness() {
   const [arb, setArb] = useState(0);
   const [plain, setPlain] = useState(0);
+  const [clip, setClip] = useState(0);
   return (
     <PictureGalleryProvider>
       <div style={{ display: 'flex', gap: 16 }}>
@@ -41,9 +44,17 @@ function Harness() {
         <div data-probe='clip' style={{ width: 200, height: 250, position: 'relative' }}>
           <PictureTile url={CLIP} alt='clip' gallery={{ src: CLIP, type: 'video', alt: 'clip' }} />
         </div>
+        <div data-probe='clipopen' style={{ width: 200, height: 250, position: 'relative' }}>
+          <PictureTile
+            url={CLIP2}
+            alt='clipopen'
+            gallery={{ src: CLIP2, type: 'video', alt: 'clipopen' }}
+            onOpen={() => setClip((n) => n + 1)}
+          />
+        </div>
       </div>
       <pre id='state' style={{ position: 'fixed', left: -9999, top: 0 }}>
-        {JSON.stringify({ arb, plain })}
+        {JSON.stringify({ arb, plain, clip })}
       </pre>
     </PictureGalleryProvider>
   );
