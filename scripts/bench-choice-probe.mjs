@@ -11,7 +11,7 @@
 import { build } from 'esbuild';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
@@ -188,11 +188,11 @@ try {
   const solo1 = { id: 80, runId: 5 };
   const solo2 = { id: 81, runId: 5 };
   const multiRun = { ...oneRun, pictures: [solo1, solo2] };
-  check('split HX4: not on one of two root outputs of a one run', !S(solo1, [solo1, solo2], multiRun));
   check(
-    'split HX4: not when only the run row knows the second root',
-    !S(solo1, [solo1], multiRun),
+    'split HX4: not on one of two root outputs of a one run',
+    !S(solo1, [solo1, solo2], multiRun),
   );
+  check('split HX4: not when only the run row knows the second root', !S(solo1, [solo1], multiRun));
   const soloEdit = { id: 82, runId: 5, derivedFrom: 80, derivation: 'flatten' };
   check(
     'split HX4: not on an edit of one of two root outputs',
@@ -206,6 +206,41 @@ try {
   check(
     'split HX4: one root output plus its edit still infers',
     S(bare, [bare, bareEdit], { ...oneRun, pictures: [bare, bareEdit] }),
+  );
+
+  // HX5: a render plate's split corner reads the SAME `readSplit` facts as the FLAT tile of its
+  // row. Functionally: an edit of a declared render sheet offers the cut (compositeViews alone
+  // would not). Wiring (the tile is a component this node probe does not mount): the run row hands
+  // its `split` to RunRenderTile, RunRenderTile to RenderTile, and RenderTile's gate reads it.
+  const rSheet = { id: 90, runId: 9, kind: 'render', compositeViews: ['front', 'back'] };
+  const rEdit = { id: 91, runId: 9, kind: 'render', derivedFrom: 90, derivation: 'flatten' };
+  check(
+    'split HX5: an edit of a render sheet offers the cut',
+    S(rEdit, [rSheet, rEdit], { id: 9, params: {} }),
+  );
+  const src = (rel) =>
+    readFileSync(resolve(root, 'src/components/managers/tech-card/components/design', rel), 'utf8');
+  const runTile = src('generation/run-tile.tsx');
+  const renderTile = src('render/render-tile.tsx');
+  const runRenderCall = runTile.slice(runTile.indexOf('<RunRenderTile'));
+  check(
+    'split HX5: the run row passes its readSplit facts to RunRenderTile',
+    /const split = readSplit\(/.test(runTile) &&
+      /\bsplit=\{split\}/.test(runRenderCall.slice(0, runRenderCall.indexOf('/>'))),
+  );
+  const innerCall = renderTile.slice(renderTile.indexOf('<RenderTile'));
+  check(
+    'split HX5: RunRenderTile hands them to RenderTile',
+    /\bsplit=\{split\}/.test(innerCall.slice(0, innerCall.indexOf('/>'))),
+  );
+  const gate = renderTile.slice(
+    renderTile.indexOf('onSplit={\n'),
+    renderTile.indexOf('onSplit={\n') + 200,
+  );
+  check(
+    "split HX5: RenderTile's corner gate reads the split facts, not compositeViews alone",
+    /offersSplit\(split\)/.test(gate) && !/pictureOffersSplit/.test(gate),
+    gate.trim().split('\n')[1],
   );
 
   // FX3 (gate 03.10): the FLAT history grid shows EVERY picture of a run, hidden ones included (the

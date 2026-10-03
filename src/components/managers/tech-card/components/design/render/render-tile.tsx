@@ -34,7 +34,7 @@ import { serverSpeaksDesign } from '../capability';
 /* Под другим именем: у экранов студии есть свои `colorwayLabel` (подпись цели). */
 import { colorwayLabel as refLabel } from '../colorway-picker';
 import { TwoStepPicker, type PickerBranch } from '../core';
-import { cropFamilies, isCutOut } from '../generation/composite';
+import { cropFamilies, isCutOut, offersSplit } from '../generation/composite';
 import type { OutputPlan } from '../generation/run-gallery';
 import type { PictureTileProps } from '../picture-tile';
 import { useDesignWrites } from '../use-design-band';
@@ -45,7 +45,6 @@ import {
   outputsHorizon,
   outputsOfKind,
   pictureIsComposite,
-  pictureOffersSplit,
   threedSides,
   type BenchSide,
 } from './model';
@@ -924,12 +923,19 @@ export function RenderTile({
   onDeck,
   onEdit,
   onSplit,
+  split,
   trailingDoor,
 }: {
   doors: RenderDoors;
   picture: common_DesignPicture;
   /** The run the plate came out of; `id` 0 — a plate without a run (brought, «no run»). */
   run: common_DesignRun;
+  /**
+   * WHAT THE SPLIT CORNER READS — the host's `readSplit` (`generation/composite.tsx`), the same
+   * facts the FLAT tile of the same row reads (hotfix HX5). An edit of a sheet inherits its views
+   * up the edit chain; reading `compositeViews` alone here hid the cut on every edited sheet.
+   */
+  split: { views: readonly string[]; splitInto: number };
   /**
    * O-68 (D-74): the host's LAST door of the row — «delete» on the workbench's derived pictures —
    * drawn after the tile's own door, one step away from it. The tile does not know what it is.
@@ -1081,6 +1087,9 @@ export function RenderTile({
            · «а не разрезан ли он уже». Разрезан — жест другой и слово другое (`expand` / `apply splitted`
              в ряду дверей), а второй разрез того же листа завёл бы вторую колоду тех же видов.
 
+         ⚠ HX5 (03.10): ВИДЫ ЛИСТА ЧИТАЮТСЯ ТЕМ ЖЕ `readSplit`, ЧТО И У ПЛИТКИ FLAT В ТОМ ЖЕ РЯДУ
+         (проп `split`): у правки листа виды наследуются по цепочке правок, а `compositeViews` одной
+         картинки их не знает. Ниже — история правила до этого шага.
          ⚠ ОБА ВОПРОСА ЗАДАЁТ ТЕПЕРЬ `pictureOffersSplit` (`render/model.ts`), И ЭТО НЕ КОСМЕТИКА.
          Этот файл был ЭТАЛОНОМ правила, но эталон, стоящий литералом, копируется, а копия рано
          или поздно теряет член: плитка референса предъявляла угол по `!readOnly && url`, то есть
@@ -1100,7 +1109,7 @@ export function RenderTile({
           : undefined
       }
       onSplit={
-        !writesOff && !hidden && pictureOffersSplit(picture, !!deck || cutAway)
+        !writesOff && !hidden && !deck && !cutAway && offersSplit(split)
           ? {
               onClick: onSplit,
               ariaLabel: `split render ${picture.ordinal ?? ''} into views`,
@@ -1720,6 +1729,7 @@ export function RunRenderTile({
   onZoom,
   onSplit,
   onEdit,
+  split,
   trailingDoor,
   children,
 }: {
@@ -1733,6 +1743,8 @@ export function RunRenderTile({
   onZoom?: () => void;
   onSplit: () => void;
   onEdit: () => void;
+  /** The row's `readSplit` facts for this picture — see `RenderTile`'s `split`. */
+  split: { views: readonly string[]; splitInto: number };
   /** O-68 (D-74): the row's «delete» on a derived picture of the workbench — the row's last door. */
   trailingDoor?: ReactNode;
   /** The editor the run row mounts over this tile while it is open. */
@@ -1760,6 +1772,7 @@ export function RunRenderTile({
         onDeck={() => host.onDeck(pictureId)}
         onEdit={onEdit}
         onSplit={onSplit}
+        split={split}
         trailingDoor={trailingDoor}
       />
       {children}

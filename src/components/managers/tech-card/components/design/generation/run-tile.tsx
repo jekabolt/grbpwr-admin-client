@@ -467,6 +467,7 @@ export function RunTile({
         onZoom={onZoom && pictureId ? () => onZoom(pictureId) : undefined}
         onSplit={() => onSplit(picture)}
         onEdit={openEditor}
+        split={split}
         trailingDoor={deleteDoor}
       >
         {editing && (
