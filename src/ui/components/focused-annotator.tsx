@@ -373,9 +373,10 @@ export type FocusedAnnotatorProps = {
    */
   zoomEditorReserve?: boolean;
   /**
-   * Орган `zoom` на кадре. По умолчанию есть у всех экранов; мудборд его снимает (слова владельца:
-   * «на ховер плиток картинок не надо показывать кнопку зум»). Без него увеличенного вида у экрана
-   * нет вовсе — других дверей в зум галерея не держит.
+   * Есть ли у экрана увеличенный вид. Кнопки `zoom` на кадре нет нигде (T12, владелец: «кнопку
+   * зум на ховер нигде показывать не нужно»); дверь в зум — двойной клик по самой картинке
+   * (`onOpenLarge` у поверхности), одиночный клик уже ставит указание. Мудборд вида не держит
+   * вовсе (T01: указания правятся в боковой панели), поэтому снимает и двойной клик.
    */
   zoomable?: boolean;
   /**
@@ -936,27 +937,18 @@ export function FocusedAnnotator({
                     legend={pinText === 'legend'}
                     hoverNotes={pinText === 'hover'}
                     halo={halo}
+                    // Зум — ЧИТАТЕЛЬСКИЙ жест и остаётся на выпущенной карточке: мерку и дугу на
+                    // плитке в 300px не разглядеть. Двойным кликом по снимку (T12), без кнопки.
+                    onOpenLarge={zoomable ? () => setZoomIndex(i) : undefined}
                     cornerSlot={
-                      <div className='flex items-center gap-1'>
-                        {/* Зум — ЧИТАТЕЛЬСКИЙ жест и остаётся на выпущенной карточке: мерку и дугу
-                            на плитке в 300px не разглядеть, увеличение и есть способ их прочесть. */}
-                        {zoomable && (
-                          <FrameButton
-                            ariaLabel={`zoom · pan · edit — picture ${i + 1}`}
-                            onPress={() => setZoomIndex(i)}
-                          >
-                            zoom
-                          </FrameButton>
-                        )}
-                        {!readOnly && (
-                          <FrameButton
-                            ariaLabel={`remove image ${i + 1}`}
-                            onPress={() => handleRemoveMedia(v)}
-                          >
-                            ✕
-                          </FrameButton>
-                        )}
-                      </div>
+                      !readOnly ? (
+                        <FrameButton
+                          ariaLabel={`remove image ${i + 1}`}
+                          onPress={() => handleRemoveMedia(v)}
+                        >
+                          ✕
+                        </FrameButton>
+                      ) : undefined
                     }
                   />
                   {/* Position marker — pieces / operations / the "pinned to" select all address
@@ -1041,7 +1033,7 @@ export function FocusedAnnotator({
         </Text>
       ) : (
         <div className='space-y-2.5'>
-          {/* Focused image — annotate in place; the zoom control opens the lightbox for pan + draw */}
+          {/* Focused image — annotate in place; a double-click opens the zoomed view for pan + draw */}
           {focused && (
             <div className='mx-auto w-full max-w-[26rem] space-y-2'>
               <AnnotationSurface
@@ -1075,16 +1067,7 @@ export function FocusedAnnotator({
                 legend={pinText === 'legend'}
                 hoverNotes={pinText === 'hover'}
                 halo={halo}
-                cornerSlot={
-                  zoomable ? (
-                    <FrameButton
-                      ariaLabel='zoom · pan · edit'
-                      onPress={() => setZoomIndex(focusedViewerIndex)}
-                    >
-                      zoom
-                    </FrameButton>
-                  ) : undefined
-                }
+                onOpenLarge={zoomable ? () => setZoomIndex(focusedViewerIndex) : undefined}
               />
 
               {renderFocusedFooter?.(focused, focusedPosition)}

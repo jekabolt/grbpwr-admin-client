@@ -40,7 +40,6 @@ export function AnnotationCanvas({
   placingKind?: string | null;
   onPlaced?: () => void;
   cornerSlot?: ReactNode;
-  zoomable?: boolean;
   renderPiecePicker?: (opts: {
     selected: string[];
     onPick: (lineKey: string) => void;

@@ -10,6 +10,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
@@ -350,6 +351,14 @@ export type AnnotationSurfaceProps = {
   halo?: boolean;
   cornerSlot?: ReactNode;
   /**
+   * ДВОЙНОЙ КЛИК ПО САМОЙ КАРТИНКЕ ОТКРЫВАЕТ УВЕЛИЧЕННЫЙ ВИД (T12). Угловой кнопки `zoom` больше
+   * нет нигде («кнопку зум на ховер нигде показывать не нужно»), а одиночный клик по кадру уже
+   * занят: он ставит указание и снимает выбор. Срабатывает только по снимку или пустому кадру,
+   * не по выноске, и не во время постановки: двойной клик, начатый взведённым инструментом,
+   * — это две точки фигуры, а не просьба увеличить.
+   */
+  onOpenLarge?: () => void;
+  /**
    * НИЖНИЙ РЯД ОРГАНОВ КАДРА — симметрия к `cornerSlot`, и заведён он ровно по той же причине:
    * место органа обязана назначать ПОВЕРХНОСТЬ, потому что только она знает, где кончается кадр.
    * Без этого вызывающий писал бы свои `absolute` вокруг снимка и промахивался мимо рамки на
@@ -591,6 +600,7 @@ export function AnnotationSurface({
   hideCallouts = false,
   halo = false,
   cornerSlot,
+  onOpenLarge,
   cornerSlotBottom,
   onBackgroundView,
   maxCallouts,
@@ -1297,7 +1307,21 @@ export function AnnotationSurface({
     setPos({ x: 0, y: 0 });
   }, []);
 
+  /** Когда последнее нажатие на кадр пришлось на взведённый инструмент (см. `onOpenLarge`). */
+  const armedPressAt = useRef(-Infinity);
+  function onFrameDoubleClick(e: ReactMouseEvent) {
+    // Первый клик пары мог поставить точку и погасить инструмент, поэтому смотрится не только
+    // текущий взвод, но и то, было ли взведено на нажатии этой пары.
+    if (placing || adding !== null || e.timeStamp - armedPressAt.current < 800) return;
+    // Только снимок или пустое место кадра (он сам и его слой-обёртка), не выноска и не орган.
+    const t = e.target as Element;
+    if (t.closest('[data-frame-corner]')) return;
+    if (t !== e.currentTarget && t.parentElement !== e.currentTarget && t.tagName !== 'IMG') return;
+    onOpenLarge?.();
+  }
+
   function onFramePointerDown(e: ReactPointerEvent) {
+    if (placing || adding !== null) armedPressAt.current = e.timeStamp;
     // Эхо прошлого перетаскивания снимается ЗДЕСЬ, а не только там, где его читают: жест,
     // кончившийся мимо плашки, оставлял флаг поднятым, и следующий клик по совсем другой выноске
     // молча проглатывался.
@@ -2018,6 +2042,7 @@ export function AnnotationSurface({
             ...frameStyle,
           }}
           onPointerDown={onFramePointerDown}
+          onDoubleClick={onOpenLarge ? onFrameDoubleClick : undefined}
           onPointerMove={onFramePointerMove}
           onPointerUp={onFramePointerUp}
           onPointerCancel={releasePointer}
@@ -2542,9 +2567,16 @@ export function AnnotationSurface({
               </span>
             </div>
           )}
-          {cornerSlot && <div className='absolute right-1 top-1 z-[4] flex gap-1'>{cornerSlot}</div>}
+          {cornerSlot && (
+            <div data-frame-corner='' className='absolute right-1 top-1 z-[4] flex gap-1'>
+              {cornerSlot}
+            </div>
+          )}
           {cornerSlotBottom && (
-            <div className='pointer-events-none absolute inset-x-1 bottom-1 z-[4] flex items-end justify-between gap-1'>
+            <div
+              data-frame-corner=''
+              className='pointer-events-none absolute inset-x-1 bottom-1 z-[4] flex items-end justify-between gap-1'
+            >
               {cornerSlotBottom}
             </div>
           )}

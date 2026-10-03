@@ -240,7 +240,6 @@ export function OperationMediaStrip({
                             : { ...prev, [wireInt(current.mediaId)]: n },
                         )
                       }
-                      zoomable
                       annotations={(current.annotations ?? []) as AnnotationForm[]}
                       frozen={frozen}
                       renderPiecePicker={renderPiecePicker}

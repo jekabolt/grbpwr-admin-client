@@ -66,6 +66,10 @@ const MUTATIONS = {
   slot: { file: /focused-annotator\.tsx$/, from: '    !readOnly && hasMedia ? (', to: '    !readOnly && hasMedia && selected != null ? (' },
   // Редактор не прокидывается в увеличенный вид: правка в зуме идёт в редактор ПОЗАДИ модалки.
   zoom: { file: /focused-annotator\.tsx$/, from: '          renderEditor={renderEditor}', to: '          renderEditor={undefined}' },
+  // T12: двойной клик по снимку больше не открывает увеличенный вид — двери в зум нет вовсе.
+  dbldoor: { file: /focused-annotator\.tsx$/, from: 'onOpenLarge={zoomable ? () => setZoomIndex(i) : undefined}', to: 'onOpenLarge={undefined}' },
+  // T12: двойной клик взведённым инструментом открывает зум вместо второй точки фигуры.
+  dblarmed: { file: /annotation\/surface\.tsx$/, from: 'if (placing || adding !== null || e.timeStamp - armedPressAt.current < 800) return;', to: 'if (false) return;' },
   // Порог заворота вернулся к «упёрся в самый конец»: первая стрелка не листает.
   rail: { file: /focused-annotator\.tsx$/, from: 'el.scrollLeft >= max - by / 2', to: 'el.scrollLeft >= max' },
   // Перенос строк в сетке не включается.
@@ -294,6 +298,25 @@ const run = async (name, fn) => {
 const browser = await chromium.launch();
 
 // ── 1. Backspace удаляет ВЫБРАННОЕ, и клик не крадёт фокус ───────────────────────────────────────
+// Дверь в увеличенный вид (T12): двойной клик по самому снимку первой плитки — в точке, где под
+// указателем действительно картинка, а не выноска (иначе жест честно ничего не откроет).
+async function openZoomByPicture(page, { wait = true } = {}) {
+  const at = await page.evaluate(() => {
+    const img = document.querySelector('[data-rail-view] [data-annot-frame] img');
+    const r = img.getBoundingClientRect();
+    for (let fy = 0.92; fy > 0.05; fy -= 0.07)
+      for (let fx = 0.08; fx < 0.95; fx += 0.07) {
+        const x = r.x + r.width * fx;
+        const y = r.y + r.height * fy;
+        if (document.elementFromPoint(x, y) === img) return { x, y };
+      }
+    return null;
+  });
+  if (!at) throw new Error('на снимке нет свободной точки под двойной клик');
+  await page.mouse.dblclick(at.x, at.y);
+  if (wait) await page.waitForSelector('[role="dialog"]');
+}
+
 await run('1 backspace', async () => {
   const { ctx, page } = await fresh(browser);
   await page.click('span[title="two"]');
@@ -514,7 +537,7 @@ await run('5x ink commit by tool change', async () => {
 
 await run('5z ink commit on zoom close', async () => {
   const { ctx, page } = await fresh(browser);
-  await page.click('[aria-label="zoom · pan · edit — picture 1"]');
+  await openZoomByPicture(page);
   await page.waitForSelector('[role="dialog"]');
   await page.click('[role="dialog"] span[title*="press and drag"]');
   const img = await page.$('[role="dialog"] img');
@@ -542,6 +565,30 @@ await run('5z ink commit on zoom close', async () => {
       if (pts[i].x === pts[i - 1].x && pts[i].y === pts[i - 1].y) dups += 1;
     check('5l и разделитель на месте', dups === 1, `дублей ${dups}`);
   }
+  await ctx.close();
+});
+
+// ── 14. Дверь в зум — двойной клик по снимку, кнопки нет (T12) ─────────────────────────────────
+await run('14 zoom-door', async () => {
+  const { ctx, page } = await fresh(browser);
+  const zoomWords = await page.$$eval('[data-rail-view] *', (ns) =>
+    ns.filter((n) => n.children.length === 0 && /^\s*zoom\s*$/i.test(n.textContent || '')).length,
+  );
+  check('14a на кадрах нет ни одного органа «zoom»', zoomWords === 0, `найдено ${zoomWords}`);
+  await openZoomByPicture(page, { wait: false });
+  const opened = await page.waitForSelector('[role="dialog"]', { timeout: 1500 }).then(() => true, () => false);
+  check('14b двойной клик по снимку открывает увеличенный вид', opened);
+  if (opened) {
+    await page.click('[aria-label="close the zoomed view"]');
+    await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 3000 }).catch(() => {});
+  }
+  // Взвод инструмента — чипом следа (чип «pin» в этом стенде не кликается и до T12: 5x красна на
+  // базе), смысл тот же: двойной клик взведённым инструментом — жест фигуры, а не зума.
+  await page.click('span[title*="press and drag"]');
+  await openZoomByPicture(page, { wait: false });
+  await page.waitForTimeout(300);
+  const dialogs = await page.$$eval('[role="dialog"]', (n) => n.length);
+  check('14c двойной клик взведённым инструментом зум НЕ открывает', dialogs === 0, `диалогов ${dialogs}`);
   await ctx.close();
 });
 
@@ -577,7 +624,7 @@ await run('7 no-jump', async () => {
 // ── 8. Редактор в зуме ──────────────────────────────────────────────────────────────────────────
 await run('8 zoom-editor', async () => {
   const { ctx, page } = await fresh(browser);
-  await page.click('[aria-label="zoom · pan · edit — picture 1"]');
+  await openZoomByPicture(page);
   await page.waitForSelector('[role="dialog"]');
   await page.click('[role="dialog"] span[title="two"]');
   await page.waitForTimeout(80);
