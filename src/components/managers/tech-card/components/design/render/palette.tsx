@@ -99,15 +99,15 @@ import { hexIsPaintable, statedWords } from './model';
  *     активов, его причиной словами и второй проверкой на подтверждении модалки;
  *   · дверь `make a pattern ▸` — вторая половина K-16 («или же оно должно предлагать сделать это
  *     как паттерн»);
- *   · `✕` на кадре — снятие ткани С КАРТОЧКИ, со своим вопросом и своей ценой (у паттерна она
- *     другая: сделать его заново — платный прогон);
+ *   · удаление ткани С КАРТОЧКИ — строка `delete…` меню `more ▾` на кадре (TF2), со своим
+ *     вопросом и своей ценой (у паттерна она другая: сделать его заново — платный прогон);
  *   · имя `cloth N` для новой ткани.
  * Лента входа при этом стала тем, что написано на её заголовке: ЧЕРТЕЖИ.
  *
- * ⚠ ДВА ✕ ОДНОГО РЯДА ЗНАЧАТ РАЗНОЕ, И РАЗНИЦА НАЗВАНА У КАЖДОГО. `✕` НА КАДРЕ — «убрать ткань
- * с карточки» (запись карточки, необратимая). Снять ткань С ЭТОГО ПРОГОНА — повторное нажатие на
- * её чип, ровно как у всякого чипа полосы. Один глиф на два акта был бы худшим, что можно сделать
- * на выпущенной карточке.
+ * ⚠ УДАЛИТЬ И СНЯТЬ — ДВА РАЗНЫХ ОРГАНА. Удалить ткань с карточки (запись карточки, необратимая)
+ * — красная строка меню с вопросом; снять ткань С ЭТОГО ПРОГОНА — повторное нажатие на её чип,
+ * ровно как у всякого чипа полосы. `✕` на этой сетке не удаляет ничего (TF2): один глиф на два
+ * акта был бы худшим, что можно сделать на выпущенной карточке.
  *
  * ПРОВОД НЕ ИЗМЕНИЛСЯ НИ ОДНИМ ПОЛЕМ. `params.colour = {fabrics, fabricMediaId, code, hex, words,
  * source}` собирается там же, где собирался (`render-studio.tsx`), из того же черновика, теми же
@@ -376,7 +376,8 @@ function InMark(): JSX.Element {
  */
 const FOLD_AT = 8;
 
-function TextureGrid({
+/** Exported for `scripts/tile-menu-probe.mjs` only; the screen mounts it through `Palette`. */
+export function TextureGrid({
   band,
   techCardId,
   state,
@@ -663,19 +664,31 @@ function TextureGrid({
                       ? { src: assetFull(a) || url, thumbnail: url, type: 'image', alt: name }
                       : undefined
                   }
-                  /* ⚠ `✕` ЗДЕСЬ — «УБРАТЬ ТКАНЬ С КАРТОЧКИ», а не «снять с этого прогона». Второе
-                     делается повторным нажатием на чип. Приехало из ленты входа (E-7) вместе со
-                     своим вопросом: убрать эту дверь было бы дешевле — и оставило бы единственного
-                     писателя тканей БЕЗ отката, потому что снять ткань больше негде во всей админке. */
-                  onRemove={
+                  /* ⚠ УДАЛЕНИЕ С КАРТОЧКИ — СТРОКА МЕНЮ, А НЕ `✕` (TF2). `✕` по всей полосе значит
+                     «убрать из этого блока, ничего не теряя»; снять ткань с этого прогона — повторное
+                     нажатие на чип, а это — запись карточки без отката. Других строк у плитки нет,
+                     поэтому угол — `more ▾` с одной красной `delete…`, и она всегда спрашивает.
+                     Приехало из ленты входа (E-7): снять ткань больше негде во всей админке. */
+                  menu={
                     disabled
                       ? undefined
                       : {
-                          onClick: () => setPendingRemove(a),
-                          ariaLabel: `remove ${name} from this card`,
-                          title: pattern
-                            ? 'remove this pattern from the card'
-                            : 'remove this cloth from the card',
+                          label: 'more',
+                          ariaLabel: `more for ${name}`,
+                          items: [
+                            {
+                              value: 'delete',
+                              label: 'delete…',
+                              tone: 'danger',
+                              title: pattern
+                                ? 'delete this pattern from the card'
+                                : 'delete this cloth from the card',
+                            },
+                          ],
+                          onPick: () => setPendingRemove(a),
+                          pending:
+                            writes.deleteAsset.isPending && writes.deleteAsset.variables === id,
+                          'data-menu': `more:${id}`,
                         }
                   }
                 />
@@ -804,8 +817,8 @@ function TextureGrid({
       <ConfirmationModal
         open={!!pendingRemove}
         onOpenChange={(open) => !open && setPendingRemove(null)}
-        title={`remove ${pendingRemove ? assetLabel(pendingRemove) : 'this texture'}?`}
-        confirmLabel='remove'
+        title={`delete ${pendingRemove ? assetLabel(pendingRemove) : 'this texture'}?`}
+        confirmLabel='delete'
         onConfirm={() => {
           const id = pendingRemove?.id ?? 0;
           if (id > 0) writes.deleteAsset.mutate(id);

@@ -41,16 +41,18 @@ import {
  * планировалась третья полоса «made for this slot». Всё это одно и то же — ткани карточки, — и
  * теперь оно стоит одной полосой: новейшие первыми, живые прогоны перед ними.
  *
- * НА ПЛИТКЕ ТРИ ГЛАГОЛА, И ВСЕ — В КАДРЕ (T17, 20-TILE-SPEC §3: «nothing under a tile except a
- * cap»): `✕` в верхнем правом углу, внизу справа — выбор `use for ▾` и последним `rename`. Выбор
+ * НА ПЛИТКЕ ДВА УГЛА, И ОБА — В КАДРЕ (T17, 20-TILE-SPEC §3: «nothing under a tile except a
+ * cap»): внизу справа — выбор `use for ▾` и последним `rename`. Выбор
  * — плоский список пар «колорвей · слот» (у одного колорвея — просто слоты): угол примитива
  * двухшаговых списков не держит, а пар на карточке единицы. Пишет `SetDesignAssetBinding`: этим же
  * жестом возвращают на слот свотч, который новый прогон с него сместил. Крупный вид — нажатием на
  * саму картинку. Под кадром — только подпись: имя и строка пар.
  *
- * `✕` СПРАШИВАЕТ ТОЛЬКО ТОГДА, КОГДА ЕСТЬ ЧТО ТЕРЯТЬ: ткань, надетая на слоты, уносит привязки с
- * собой (FK ON DELETE CASCADE), и эти слоты остаются без ткани в рендере — об этом говорят словами
- * перед удалением. Ненадетая ткань удаляется сразу: её потеря — одна плитка, видимая здесь же.
+ * `✕` НА ПЛИТКЕ НЕТ (TF2): по всей полосе `✕` значит «убрать из этого блока, ничего не теряя», а
+ * снять ткань с полки — удалить её с карточки и из хранилища. Отсоединять отсюда нечего, поэтому
+ * удаление — последняя красная строка меню, `delete…` (без пар меню называется `more ▾` и держит
+ * только её), и оно ВСЕГДА спрашивает. Надетая ткань уносит привязки с собой (FK ON DELETE
+ * CASCADE), и эти слоты остаются без ткани в рендере — вопрос говорит об этом словами.
  *
  * ГДЕ ТКАНЬ В РЕНДЕРЕ — ДВУМЯ МЕРАМИ (UX-проход, U-5). Угол лица говорит только факт — `in render`;
  * КАКИЕ пары её носят, говорит серая нано-строка под именем («ROSSO · outer, OLIVE · outer»,
@@ -60,7 +62,7 @@ import {
  *
  * НА СЕРВЕРЕ БЕЗ ПРИВЯЗОК (`bindings = false`) КАРУСЕЛЬ ТА ЖЕ, минус то, чего там нет: `use for ▸`
  * не появляется (повод — в `title` плитки), а «in render» и строка пар не рисуются — надеть ткань на
- * слот такой сервер не умеет, и сказать «она в рендере» было бы неправдой. Крупный вид, `rename` и `✕`
+ * слот такой сервер не умеет, и сказать «она в рендере» было бы неправдой. Крупный вид, `rename` и `more ▾ → delete…`
  * работают: полка старше привязок.
  */
 export function FabricCarousel({
@@ -420,10 +422,22 @@ function FabricTile({
       setRenaming(true);
     }
   };
-  const remove = () => {
-    if (worn.length > 0) setAsking(true);
-    else deleteAsset.mutate(id);
-  };
+  /** TF2: delete is ALWAYS asked — one question, the worn slots named when there are any. */
+  const offerDelete = !writesOff;
+  const menuItems: PictureTileMenuItem[] = [
+    ...(useForOff ? [] : useFor),
+    ...(offerDelete
+      ? [
+          {
+            value: DELETE_ITEM,
+            label: 'delete…',
+            tone: 'danger' as const,
+            title: `delete ${label} from this card for good`,
+          },
+        ]
+      : []),
+  ];
+  const pairsOffered = !useForOff;
 
   const full = assetFull(asset);
   const thumb = assetThumb(asset) || full;
@@ -455,23 +469,27 @@ function FabricTile({
         badge={worn.length > 0 ? <span data-fabric-worn={worn.length}>in render</span> : undefined}
         flag={seam ? { word: 'seam', tone: 'mut', title: SEAM_WORDS } : undefined}
         menu={
-          useForOff
-            ? undefined
-            : {
-                label: 'use for',
-                ariaLabel: `use ${label} for a colourway’s slot`,
-                title:
-                  'make this the fabric of a colourway’s slot — it goes into FABRIC RENDER for that colourway',
-                items: useFor,
-                pending: setBinding.isPending,
-                'data-menu': `use-for:${id}`,
+          menuItems.length
+            ? {
+                label: pairsOffered ? 'use for' : 'more',
+                ariaLabel: pairsOffered
+                  ? `use ${label} for a colourway’s slot`
+                  : `more for ${label}`,
+                title: pairsOffered
+                  ? 'make this the fabric of a colourway’s slot — it goes into FABRIC RENDER for that colourway'
+                  : undefined,
+                items: menuItems,
+                pending: setBinding.isPending || deleteAsset.isPending,
+                'data-menu': pairsOffered ? `use-for:${id}` : `more:${id}`,
                 onPick: (value) => {
+                  if (value === DELETE_ITEM) return setAsking(true);
                   const [colorwayId, bomItemId] = value.split(':').map(Number);
                   if (!(colorwayId > 0) || !(bomItemId > 0)) return;
                   if ((byPair.get(pairKey(colorwayId, bomItemId))?.id ?? 0) === id) return;
                   setBinding.mutate({ colorwayId, bomItemId, assetId: id });
                 },
               }
+            : undefined
         }
         onEdit={{
           onClick: toggleRename,
@@ -483,13 +501,6 @@ function FabricTile({
           pending: upsertAsset.isPending,
         }}
         editLabel={renaming ? 'done' : 'rename'}
-        onRemove={{
-          onClick: remove,
-          ariaLabel: `delete ${label}`,
-          title: writesOff ? offReason : `delete ${label}`,
-          disabled: writesOff,
-          pending: deleteAsset.isPending,
-        }}
       />
 
       {renaming ? (
@@ -548,13 +559,17 @@ function FabricTile({
 
       <AskModal
         open={asking}
-        title='delete a fabric in use'
+        title={worn.length > 0 ? 'delete a fabric in use' : 'delete a fabric'}
         sentence={
-          <>
-            {label} is the fabric of {worn.join(', ')}. Deleting it takes it off{' '}
-            {worn.length === 1 ? 'that slot' : 'those slots'} — they stand without a fabric in
-            FABRIC RENDER until another one is made or chosen.
-          </>
+          worn.length > 0 ? (
+            <>
+              {label} is the fabric of {worn.join(', ')}. Deleting it takes it off{' '}
+              {worn.length === 1 ? 'that slot' : 'those slots'} — they stand without a fabric in
+              FABRIC RENDER until another one is made or chosen.
+            </>
+          ) : (
+            <>{label} leaves this card for good.</>
+          )
         }
         verb='delete the fabric'
         onClose={() => setAsking(false)}
@@ -566,3 +581,6 @@ function FabricTile({
     </div>
   );
 }
+
+/** The menu's delete row: no `colourway:slot` pair can be spelled this way. */
+const DELETE_ITEM = '__delete';

@@ -36,6 +36,7 @@
     "draft:shape": "node scripts/draft-shape-probe.mjs",
     "moodboard:crop": "node scripts/moodboard-crop-probe.mjs",
     "tile:click": "node scripts/picture-tile-click-probe.mjs",
+    "tile:menu": "node scripts/tile-menu-probe.mjs",
     "tile:anatomy": "node scripts/tile-anatomy-probe.mjs",
     "marker:area-field": "node scripts/area-field-probe.mjs",
     "lay:header": "node scripts/lay-header-probe.mjs",
