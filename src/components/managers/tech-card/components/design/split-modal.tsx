@@ -7,6 +7,7 @@ import { GroupLabel } from 'ui/components/group-label';
 import { Row } from 'ui/components/row';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
+import { TILE_QUIET } from 'ui/components/tile-skin';
 
 import { newClientRequestId, useDesignWrites } from './use-design-band';
 import { DESIGN_VIEW_KEYS, normaliseViewKey, viewLabel } from './views';
@@ -142,6 +143,485 @@ type DragState = {
   frame: SplitFrameDraft;
 };
 
+/**
+ * ═══ ONE FRAME EDITOR, TWO HOSTS (03.10, owner item 19, T20) ═══════════════════════════════════
+ *
+ * Owner, verbatim: «в LATEST GENERATION если мы имеем дело с не сплитнутой картинкой нам это прямо
+ * в этом же блоке надо разметить и спилтнуть и кропнуть должны видеть то что на скриншоте и снизу
+ * кнопка confirm».
+ *
+ * The frames, their drag, the idempotency key and the cut itself live here, once: `useSplitCut`
+ * is the state and the write, `SplitStage` the sheet with its frames, `SplitSides` the popup's list
+ * of sides. The popup (`SplitModal`, its other callers: the history, the input's crop) and the
+ * bench's inline editor (`generation/inline-split.tsx`) are two shells over the same three, so the
+ * RPC, its payload and the frame rules cannot drift apart.
+ */
+export function useSplitCut({
+  techCardId,
+  picture,
+  mode = 'split',
+  forInput,
+  views,
+  active,
+  onTouch,
+  onCut,
+}: {
+  techCardId: number;
+  picture: common_DesignPicture;
+  mode?: 'split' | 'crop';
+  forInput: boolean;
+  /**
+   * The views the frames are seeded from, when the host knows better than the column: the bench
+   * reads `readSplit`, which also names a `one` sheet the writer never stamped. Absent — the
+   * picture's own `composite_views`, as the popup always did.
+   */
+  views?: readonly string[];
+  /** Frames are re-seeded whenever this turns true (the popup's `open`) or the seed changes. */
+  active: boolean;
+  /** The person touched a frame or pressed the cut — the host's chance to pin what it shows. */
+  onTouch?: () => void;
+  /** The cut landed; the server's pieces. */
+  onCut?: (pictures: common_DesignPicture[]) => void;
+}) {
+  const { splitPicture } = useDesignWrites(techCardId);
+  const seed = (views ?? picture.compositeViews ?? []).join('|');
+  const compositeViews = useMemo(() => (seed ? seed.split('|').map(guessedViewKey) : []), [seed]);
+
+  /**
+   * НАЧАЛЬНАЯ РАЗМЕТКА. В режиме кропа — ОДИН кадр, вписанный в середину с полями: рамка впритык к
+   * краю не имеет наружной ручки, за которую её тянут, а кроп «как есть» — это не кроп.
+   */
+  const initial = useMemo(
+    () =>
+      mode === 'crop'
+        ? [{ x: 0.1, y: 0.1, w: 0.8, h: 0.8, viewKey: '' }]
+        : acrossPreset(Math.max(2, compositeViews.length || 2), compositeViews),
+    [compositeViews, mode],
+  );
+
+  const [frames, setFrames] = useState<SplitFrameDraft[]>(initial);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [drag, setDrag] = useState<DragState | null>(null);
+  /**
+   * THE CUT LANDED, AND THE BAND HAS NOT COME BACK YET. The inline editor stays on screen until the
+   * re-read brings the pieces; a second press in that gap would mint a NEW key (the old one is
+   * spent) and cut the sheet twice. So a landed cut holds the button until the frames change.
+   */
+  const [landed, setLanded] = useState(false);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const touchRef = useRef(onTouch);
+  touchRef.current = onTouch;
+
+  /**
+   * The idempotency key of the CURRENT frame set. Cleared whenever the frames move, because moved
+   * frames are a different request and reusing the key would hand back the previous cut.
+   */
+  const requestIdRef = useRef('');
+
+  const editFrames = useCallback((next: (prev: SplitFrameDraft[]) => SplitFrameDraft[]) => {
+    requestIdRef.current = '';
+    setLanded(false);
+    touchRef.current?.();
+    setFrames(next);
+  }, []);
+
+  // Reopening on another picture must not inherit the previous picture's frames.
+  useEffect(() => {
+    if (!active) return;
+    requestIdRef.current = '';
+    setFrames(initial);
+    setSelected(null);
+    setLanded(false);
+  }, [active, initial]);
+
+  const media = picture.media?.media;
+  const src =
+    media?.fullSize?.mediaUrl || media?.compressed?.mediaUrl || media?.thumbnail?.mediaUrl || '';
+
+  /**
+   * The picture's own shape. Taken from the wire when the bucket knows it and re-read from the
+   * decoded image otherwise, because the stage is only honest at the picture's ratio.
+   */
+  const [ratio, setRatio] = useState<number>(() => {
+    const w = media?.fullSize?.width ?? 0;
+    const h = media?.fullSize?.height ?? 0;
+    return w > 0 && h > 0 ? w / h : 0;
+  });
+
+  /* Keyed by the NUMBERS, not the media object: the bench's editor outlives every 4 s re-read of
+     the band, each of which hands a new object, and a wire without dimensions would reset the ratio
+     the decoded image already gave (its `onLoad` does not fire again for the same src). */
+  const wireW = media?.fullSize?.width ?? 0;
+  const wireH = media?.fullSize?.height ?? 0;
+  useEffect(() => {
+    if (wireW > 0 && wireH > 0) setRatio(wireW / wireH);
+  }, [wireW, wireH]);
+
+  useEffect(() => {
+    if (!drag) return;
+    const onMove = (event: PointerEvent) => {
+      const dx = (event.clientX - drag.originX) / (drag.rect.width || 1);
+      const dy = (event.clientY - drag.originY) / (drag.rect.height || 1);
+      setFrames((prev) =>
+        prev.map((frame, i) => (i === drag.index ? applyDrag(drag, dx, dy) : frame)),
+      );
+    };
+    const onUp = () => setDrag(null);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+  }, [drag]);
+
+  const startDrag = (index: number, dragMode: DragMode) => (event: React.PointerEvent) => {
+    const rect = stageRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    event.preventDefault();
+    event.stopPropagation();
+    requestIdRef.current = '';
+    setLanded(false);
+    touchRef.current?.();
+    setSelected(index);
+    setDrag({
+      index,
+      mode: dragMode,
+      rect,
+      originX: event.clientX,
+      originY: event.clientY,
+      frame: frames[index],
+    });
+  };
+
+  const viewless = frames.filter((f) => !f.viewKey).length;
+  const pending = splitPicture.isPending;
+  /**
+   * EVERY frame must name its view, and a view-less frame BLOCKS the cut rather than being dropped
+   * from it. Silently sending only the marked frames was the earlier behaviour and it is the worse
+   * one: the operator draws four frames, presses the button, and gets three pictures with no event
+   * anywhere saying which one went missing or why.
+   */
+  const ready = mode === 'crop' ? frames.length === 1 : frames.length > 0 && viewless === 0;
+
+  const submit = () => {
+    if (!ready || pending || landed) return;
+    touchRef.current?.();
+    if (!requestIdRef.current) requestIdRef.current = newClientRequestId();
+    splitPicture.mutate(
+      {
+        pictureId: picture.id ?? 0,
+        clientRequestId: requestIdRef.current,
+        frames: frames.map(toWireFrame),
+        // ⚠ КРОП НИКОГДА НЕ ПИШЕТ РОЛЕЙ. `for_input` — это слово, по которому СЕРВЕР решает,
+        // заводить ли `design_reference(role = view_key)` каждому кадру; у кропа вида нет, роль
+        // ему написалась бы пустая, а строку входа вызывающий заводит сам, ПЕРЕСТАВЛЯЯ её на
+        // место исходной. Флаг вызывающего здесь не спрашивается вовсе — иначе он был бы вторым
+        // мнением о том, чем режим кропа является.
+        forInput: mode === 'crop' ? false : forInput,
+      },
+      {
+        onSuccess: (data) => {
+          requestIdRef.current = '';
+          setLanded(true);
+          onCut?.(data.pictures ?? []);
+        },
+      },
+    );
+  };
+
+  return {
+    mode,
+    frames,
+    selected,
+    setSelected,
+    stageRef,
+    src,
+    ratio,
+    setRatio,
+    startDrag,
+    initial,
+    ready,
+    viewless,
+    pending,
+    landed,
+    error: splitPicture.isError
+      ? (splitPicture.error as Error | null)?.message || 'the server refused without saying why'
+      : null,
+    submit,
+    reset: () => editFrames(() => initial),
+    addSide: () => editFrames((prev) => [...prev, { x: 0.4, y: 0.2, w: 0.2, h: 0.6, viewKey: '' }]),
+    nameSide: (index: number, viewKey: string) =>
+      editFrames((prev) => prev.map((f, j) => (j === index ? { ...f, viewKey } : f))),
+    removeSide: (index: number) => {
+      editFrames((prev) => prev.filter((_, j) => j !== index));
+      setSelected(null);
+    },
+  };
+}
+
+export type SplitCut = ReturnType<typeof useSplitCut>;
+
+/**
+ * ТИХИЕ ОРГАНЫ `+ side` / `reset`: текст без рамки, как подпись группы. Окно сводится к одной
+ * картинке и одному списку сторон; кнопок-пресетов нет (Q2: стороны заранее разложены по видам,
+ * которые объявляет файл), поэтому две оставшиеся правки не должны спорить с картинкой.
+ */
+const QUIET =
+  'cursor-pointer text-micro uppercase tracking-label text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
+
+/** `+ side` and `reset` — `+ side` only where a second frame means something (not in crop mode). */
+export function SplitQuietActions({ cut }: { cut: SplitCut }) {
+  return (
+    <span className='flex items-baseline gap-3'>
+      {cut.mode === 'split' && (
+        <button type='button' className={QUIET} onClick={cut.addSide}>
+          + side
+        </button>
+      )}
+      <button type='button' className={QUIET} onClick={cut.reset}>
+        reset
+      </button>
+    </span>
+  );
+}
+
+/**
+ * THE SHEET AND ITS FRAMES. `maxHeight` caps the stage's height (the popup's 380px; the bench's
+ * own). `nameInFrame` — the bench's editor has no list of sides under the sheet: each frame's label
+ * chip IS its view picker (a native select laid over the chip), and `✕` sits quietly in the frame's
+ * other corner. The popup keeps its list (`SplitSides`), so its chips are plain labels.
+ */
+export function SplitStage({
+  cut,
+  maxHeight = 380,
+  nameInFrame = false,
+}: {
+  cut: SplitCut;
+  maxHeight?: number;
+  nameInFrame?: boolean;
+}) {
+  const { frames, selected, ratio, src, mode } = cut;
+  return (
+    <div className='flex justify-center bg-bgSecondary p-2'>
+      <div
+        ref={cut.stageRef}
+        data-split-stage=''
+        className='relative w-full select-none overflow-hidden bg-bgColor'
+        style={{
+          aspectRatio: ratio > 0 ? String(ratio) : '3 / 2',
+          maxWidth: ratio > 0 ? `${Math.round(maxHeight * ratio)}px` : `${maxHeight * 1.5}px`,
+        }}
+      >
+        {src ? (
+          <img
+            src={src}
+            alt=''
+            draggable={false}
+            onLoad={(event) => {
+              const img = event.currentTarget;
+              if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                cut.setRatio(img.naturalWidth / img.naturalHeight);
+              }
+            }}
+            className='absolute inset-0 block h-full w-full'
+            style={{ objectFit: 'fill' }}
+          />
+        ) : null}
+
+        {frames.map((frame, i) => {
+          const named = !!frame.viewKey || mode === 'crop';
+          const word = frame.viewKey
+            ? viewLabel(frame.viewKey)
+            : mode === 'crop'
+              ? 'crop'
+              : nameInFrame
+                ? '— view —'
+                : String(i + 1);
+          const chipTone = named ? 'bg-textColor text-bgColor' : 'bg-bgColor text-labelColor';
+          return (
+            <div
+              key={i}
+              role='button'
+              tabIndex={0}
+              aria-label={`side ${i + 1}`}
+              data-split-frame={i}
+              onPointerDown={cut.startDrag(i, 'move')}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  cut.setSelected(i);
+                }
+              }}
+              className={cn(
+                'group absolute cursor-move border border-textColor',
+                named ? '' : 'border-dashed',
+              )}
+              style={{
+                left: `${frame.x * 100}%`,
+                top: `${frame.y * 100}%`,
+                width: `${frame.w * 100}%`,
+                height: `${frame.h * 100}%`,
+                // ЛИНИЯ ОДНА, В 1px, И ПОД НЕЙ БЛЕДНЫЙ ОРЕОЛ: чёрная волосяная линия пропадает на тёмной
+                // ткани, белый полупрозрачный пиксель снаружи держит её видимой на любом листе.
+                // Выбранная сторона получает такой же пиксель внутри.
+                boxShadow:
+                  selected === i
+                    ? '0 0 0 1px rgba(255,255,255,0.6), inset 0 0 0 1px rgba(255,255,255,0.85)'
+                    : '0 0 0 1px rgba(255,255,255,0.6)',
+              }}
+            >
+              {nameInFrame && mode === 'split' ? (
+                /* THE CHIP IS THE PICKER: the word stays the chip the owner drew, and a native
+                   select lies over it, transparent — one click names the side, no list below. Its
+                   pointer-down stops here, so naming a side never starts a drag. */
+                <span
+                  data-split-chip={i}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  className={cn(
+                    'absolute left-0 top-0 z-10 inline-flex px-1.5 py-0.5 text-micro uppercase tracking-label',
+                    'has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-textColor',
+                    chipTone,
+                  )}
+                >
+                  <span data-split-word=''>{word}</span>
+                  <select
+                    aria-label={`view of side ${i + 1}`}
+                    data-split-view={i}
+                    value={frame.viewKey}
+                    onChange={(event) => cut.nameSide(i, event.target.value)}
+                    className='absolute inset-0 h-full w-full cursor-pointer opacity-0'
+                  >
+                    {!frame.viewKey && <option value=''>— view —</option>}
+                    {DESIGN_VIEW_KEYS.map((key) => (
+                      <option key={key} value={key}>
+                        {viewLabel(key)}
+                      </option>
+                    ))}
+                  </select>
+                </span>
+              ) : (
+                <span
+                  data-split-chip={i}
+                  className={cn(
+                    'pointer-events-none absolute left-0 top-0 px-1 text-nano uppercase',
+                    chipTone,
+                  )}
+                >
+                  {word}
+                </span>
+              )}
+              {nameInFrame && mode === 'split' && (
+                <button
+                  type='button'
+                  aria-label={`remove side ${i + 1}`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={() => cut.removeSide(i)}
+                  className={cn(
+                    'absolute right-0 top-0 z-10 cursor-pointer bg-bgColor px-1 text-micro text-labelColor hover:text-textColor',
+                    TILE_QUIET,
+                  )}
+                >
+                  ✕
+                </button>
+              )}
+              {/* КРАЙ ХВАТАЕТСЯ НЕВИДИМОЙ ПОЛОСОЙ. Видна только линия рамки в 1px; полоса 12px
+                  стоит на ней поровну внутрь и наружу, поэтому край берётся так же легко, как
+                  прежние сплошные ручки в 4px, но картинку они больше не закрашивают. */}
+              {(['l', 'r', 't', 'b'] as const).map((edge) => (
+                <span
+                  key={edge}
+                  aria-hidden
+                  onPointerDown={cut.startDrag(i, edge)}
+                  className={cn(
+                    'absolute',
+                    edge === 'l' && '-left-1.5 top-0 h-full w-3 cursor-ew-resize',
+                    edge === 'r' && '-right-1.5 top-0 h-full w-3 cursor-ew-resize',
+                    edge === 't' && '-top-1.5 left-0 h-3 w-full cursor-ns-resize',
+                    edge === 'b' && '-bottom-1.5 left-0 h-3 w-full cursor-ns-resize',
+                  )}
+                />
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** The popup's list of sides: a view picker and `✕` per frame, `+ side` / `reset` in the header. */
+function SplitSides({ cut }: { cut: SplitCut }) {
+  if (cut.mode === 'crop') {
+    // В режиме кропа сторона одна и вида у неё нет, поэтому списка нет: остаётся только `reset`,
+    // который возвращает рамку в исходное положение.
+    return (
+      <div className='flex justify-end'>
+        <SplitQuietActions cut={cut} />
+      </div>
+    );
+  }
+  return (
+    <div>
+      <GroupLabel flush action={<SplitQuietActions cut={cut} />}>
+        sides
+      </GroupLabel>
+      {cut.frames.map((frame, i) => (
+        <Row
+          key={i}
+          label={`side ${i + 1}`}
+          value={
+            <span className='flex items-center justify-end gap-2'>
+              {/* NO «— view —» ITEM IN THE LIST, AND THAT IS NOT A STYLE CHOICE. Radix refuses
+                  a `Select.Item` whose value is the empty string — it THROWS during render, and
+                  with no error boundary over this tab the throw takes the whole page with it,
+                  not just the modal (measured: the body came back empty). «Nothing chosen» is
+                  spelled by the ROOT holding '' and the trigger showing its placeholder, which
+                  is the arrangement Radix does support. An unwanted side leaves by its ✕. */}
+              <SelectComponent
+                name={`split-frame-${i}`}
+                value={frame.viewKey}
+                placeholder='— view —'
+                customWidth={140}
+                items={DESIGN_VIEW_KEYS.map((key) => ({
+                  value: key,
+                  label: viewLabel(key),
+                }))}
+                onValueChange={(value) => cut.nameSide(i, value)}
+              />
+              <button
+                type='button'
+                aria-label={`remove side ${i + 1}`}
+                onClick={() => cut.removeSide(i)}
+                className='cursor-pointer px-1 text-labelColor hover:text-textColor'
+              >
+                ✕
+              </button>
+            </span>
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * THE SERVER'S REFUSAL, WHERE THE ACT WAS. The band's write seam also raises a snackbar, and a
+ * snackbar is the wrong and only home for this one: it is gone in four seconds, the editor is still
+ * open, and the operator is left pressing a button that keeps doing nothing.
+ */
+export function SplitError({ cut }: { cut: SplitCut }) {
+  if (!cut.error) return null;
+  return (
+    <CalloutBox tone='error'>
+      <b>the cut did not go through.</b> {cut.error}
+    </CalloutBox>
+  );
+}
+
 export function SplitModal({
   techCardId,
   picture,
@@ -196,160 +676,26 @@ export function SplitModal({
    */
   onSplit?: (pictures: common_DesignPicture[]) => void;
 }) {
-  const { splitPicture } = useDesignWrites(techCardId);
-  const compositeViews = useMemo(
-    () => (picture.compositeViews ?? []).map(guessedViewKey),
-    [picture.compositeViews],
-  );
-
-  /**
-   * НАЧАЛЬНАЯ РАЗМЕТКА. В режиме кропа — ОДИН кадр, вписанный в середину с полями: рамка впритык к
-   * краю не имеет наружной ручки, за которую её тянут, а кроп «как есть» — это не кроп.
-   */
-  const initial = useMemo(
-    () =>
-      mode === 'crop'
-        ? [{ x: 0.1, y: 0.1, w: 0.8, h: 0.8, viewKey: '' }]
-        : acrossPreset(Math.max(2, compositeViews.length || 2), compositeViews),
-    [compositeViews, mode],
-  );
-
-  const [frames, setFrames] = useState<SplitFrameDraft[]>(initial);
-  const [selected, setSelected] = useState<number | null>(null);
-  const [drag, setDrag] = useState<DragState | null>(null);
-  const stageRef = useRef<HTMLDivElement | null>(null);
-
-  /**
-   * The idempotency key of the CURRENT frame set. Cleared whenever the frames move, because moved
-   * frames are a different request and reusing the key would hand back the previous cut.
-   */
-  const requestIdRef = useRef('');
-
-  const editFrames = useCallback((next: (prev: SplitFrameDraft[]) => SplitFrameDraft[]) => {
-    requestIdRef.current = '';
-    setFrames(next);
-  }, []);
-
-  // Reopening on another picture must not inherit the previous picture's frames.
-  useEffect(() => {
-    if (!open) return;
-    requestIdRef.current = '';
-    setFrames(initial);
-    setSelected(null);
-  }, [open, initial]);
-
-  const media = picture.media?.media;
-  const src =
-    media?.fullSize?.mediaUrl || media?.compressed?.mediaUrl || media?.thumbnail?.mediaUrl || '';
-
-  /**
-   * The picture's own shape. Taken from the wire when the bucket knows it and re-read from the
-   * decoded image otherwise, because the stage is only honest at the picture's ratio.
-   */
-  const [ratio, setRatio] = useState<number>(() => {
-    const w = media?.fullSize?.width ?? 0;
-    const h = media?.fullSize?.height ?? 0;
-    return w > 0 && h > 0 ? w / h : 0;
+  const cut = useSplitCut({
+    techCardId,
+    picture,
+    mode,
+    forInput,
+    active: open,
+    onCut: (pictures) => {
+      onOpenChange(false);
+      // ПОСЛЕ закрытия, не до: колбэк заводит строки и роли, его снекбар и возможные отказы
+      // ролей должны падать на экран, а не под ещё открытую модалку.
+      onSplit?.(pictures);
+    },
   });
-
-  useEffect(() => {
-    const w = media?.fullSize?.width ?? 0;
-    const h = media?.fullSize?.height ?? 0;
-    setRatio(w > 0 && h > 0 ? w / h : 0);
-  }, [media]);
-
-  useEffect(() => {
-    if (!drag) return;
-    const onMove = (event: PointerEvent) => {
-      const dx = (event.clientX - drag.originX) / (drag.rect.width || 1);
-      const dy = (event.clientY - drag.originY) / (drag.rect.height || 1);
-      setFrames((prev) =>
-        prev.map((frame, i) => (i === drag.index ? applyDrag(drag, dx, dy) : frame)),
-      );
-    };
-    const onUp = () => setDrag(null);
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-    };
-  }, [drag]);
-
-  const startDrag = (index: number, mode: DragMode) => (event: React.PointerEvent) => {
-    const rect = stageRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    event.preventDefault();
-    event.stopPropagation();
-    requestIdRef.current = '';
-    setSelected(index);
-    setDrag({
-      index,
-      mode,
-      rect,
-      originX: event.clientX,
-      originY: event.clientY,
-      frame: frames[index],
-    });
-  };
-
-  const viewless = frames.filter((f) => !f.viewKey).length;
-  const pending = splitPicture.isPending;
-  /**
-   * EVERY frame must name its view, and a view-less frame BLOCKS the cut rather than being dropped
-   * from it. Silently sending only the marked frames was the earlier behaviour and it is the worse
-   * one: the operator draws four frames, presses the button, and gets three pictures with no event
-   * anywhere saying which one went missing or why.
-   */
-  const ready = mode === 'crop' ? frames.length === 1 : frames.length > 0 && viewless === 0;
-
-  const submit = () => {
-    if (!ready || pending) return;
-    if (!requestIdRef.current) requestIdRef.current = newClientRequestId();
-    splitPicture.mutate(
-      {
-        pictureId: picture.id ?? 0,
-        clientRequestId: requestIdRef.current,
-        frames: frames.map(toWireFrame),
-        // ⚠ КРОП НИКОГДА НЕ ПИШЕТ РОЛЕЙ. `for_input` — это слово, по которому СЕРВЕР решает,
-        // заводить ли `design_reference(role = view_key)` каждому кадру; у кропа вида нет, роль
-        // ему написалась бы пустая, а строку входа вызывающий заводит сам, ПЕРЕСТАВЛЯЯ её на
-        // место исходной. Флаг вызывающего здесь не спрашивается вовсе — иначе он был бы вторым
-        // мнением о том, чем режим кропа является.
-        forInput: mode === 'crop' ? false : forInput,
-      },
-      {
-        onSuccess: (data) => {
-          requestIdRef.current = '';
-          onOpenChange(false);
-          // ПОСЛЕ закрытия, не до: колбэк заводит строки и роли, его снекбар и возможные отказы
-          // ролей должны падать на экран, а не под ещё открытую модалку.
-          onSplit?.(data.pictures ?? []);
-        },
-      },
-    );
-  };
-
-  /**
-   * ТИХИЕ ОРГАНЫ `+ side` / `reset`: текст без рамки, как подпись группы. Окно сводится к одной
-   * картинке и одному списку сторон; кнопок-пресетов нет (Q2: стороны заранее разложены по видам,
-   * которые объявляет файл), поэтому две оставшиеся правки не должны спорить с картинкой.
-   */
-  const quiet =
-    'cursor-pointer text-micro uppercase tracking-label text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
-  const resetButton = (
-    <button type='button' className={quiet} onClick={() => editFrames(() => initial)}>
-      reset
-    </button>
-  );
+  const { ready, viewless, frames, pending } = cut;
 
   return (
     <ConfirmationModal
       open={open}
       onOpenChange={onOpenChange}
-      onConfirm={submit}
+      onConfirm={cut.submit}
       onCancel={() => onOpenChange(false)}
       title={mode === 'crop' ? `crop ${handle || 'this picture'}` : 'split the picture into views'}
       confirmLabel={
@@ -376,179 +722,9 @@ export function SplitModal({
             </Text>
           </CalloutBox>
         )}
-
-        <div className='flex justify-center bg-bgSecondary p-2'>
-          <div
-            ref={stageRef}
-            className='relative w-full select-none overflow-hidden bg-bgColor'
-            style={{
-              aspectRatio: ratio > 0 ? String(ratio) : '3 / 2',
-              maxWidth: ratio > 0 ? `${Math.round(380 * ratio)}px` : '570px',
-            }}
-          >
-            {src ? (
-              <img
-                src={src}
-                alt=''
-                draggable={false}
-                onLoad={(event) => {
-                  const img = event.currentTarget;
-                  if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-                    setRatio(img.naturalWidth / img.naturalHeight);
-                  }
-                }}
-                className='absolute inset-0 block h-full w-full'
-                style={{ objectFit: 'fill' }}
-              />
-            ) : null}
-
-            {frames.map((frame, i) => (
-              <div
-                key={i}
-                role='button'
-                tabIndex={0}
-                aria-label={`side ${i + 1}`}
-                onPointerDown={startDrag(i, 'move')}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    setSelected(i);
-                  }
-                }}
-                className={cn(
-                  'absolute cursor-move border border-textColor',
-                  frame.viewKey || mode === 'crop' ? '' : 'border-dashed',
-                )}
-                style={{
-                  left: `${frame.x * 100}%`,
-                  top: `${frame.y * 100}%`,
-                  width: `${frame.w * 100}%`,
-                  height: `${frame.h * 100}%`,
-                  // ЛИНИЯ ОДНА, В 1px, И ПОД НЕЙ БЛЕДНЫЙ ОРЕОЛ: чёрная волосяная линия пропадает на тёмной
-                  // ткани, белый полупрозрачный пиксель снаружи держит её видимой на любом листе.
-                  // Выбранная сторона получает такой же пиксель внутри.
-                  boxShadow:
-                    selected === i
-                      ? '0 0 0 1px rgba(255,255,255,0.6), inset 0 0 0 1px rgba(255,255,255,0.85)'
-                      : '0 0 0 1px rgba(255,255,255,0.6)',
-                }}
-              >
-                <span
-                  className={cn(
-                    'pointer-events-none absolute left-0 top-0 px-1 text-nano uppercase',
-                    frame.viewKey || mode === 'crop'
-                      ? 'bg-textColor text-bgColor'
-                      : 'bg-bgColor text-labelColor',
-                  )}
-                >
-                  {frame.viewKey ? viewLabel(frame.viewKey) : mode === 'crop' ? 'crop' : i + 1}
-                </span>
-                {/* КРАЙ ХВАТАЕТСЯ НЕВИДИМОЙ ПОЛОСОЙ. Видна только линия рамки в 1px; полоса 12px
-                    стоит на ней поровну внутрь и наружу, поэтому край берётся так же легко, как
-                    прежние сплошные ручки в 4px, но картинку они больше не закрашивают. */}
-                {(['l', 'r', 't', 'b'] as const).map((edge) => (
-                  <span
-                    key={edge}
-                    aria-hidden
-                    onPointerDown={startDrag(i, edge)}
-                    className={cn(
-                      'absolute',
-                      edge === 'l' && '-left-1.5 top-0 h-full w-3 cursor-ew-resize',
-                      edge === 'r' && '-right-1.5 top-0 h-full w-3 cursor-ew-resize',
-                      edge === 't' && '-top-1.5 left-0 h-3 w-full cursor-ns-resize',
-                      edge === 'b' && '-bottom-1.5 left-0 h-3 w-full cursor-ns-resize',
-                    )}
-                  />
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* В режиме кропа сторона одна и вида у неё нет, поэтому списка нет: остаётся только
-            `reset`, который возвращает рамку в исходное положение. */}
-        {mode === 'crop' ? (
-          <div className='flex justify-end'>{resetButton}</div>
-        ) : (
-          <div>
-            <GroupLabel
-              flush
-              action={
-                <span className='flex items-baseline gap-3'>
-                  <button
-                    type='button'
-                    className={quiet}
-                    onClick={() =>
-                      editFrames((prev) => [
-                        ...prev,
-                        { x: 0.4, y: 0.2, w: 0.2, h: 0.6, viewKey: '' },
-                      ])
-                    }
-                  >
-                    + side
-                  </button>
-                  {resetButton}
-                </span>
-              }
-            >
-              sides
-            </GroupLabel>
-            {frames.map((frame, i) => (
-              <Row
-                key={i}
-                label={`side ${i + 1}`}
-                value={
-                  <span className='flex items-center justify-end gap-2'>
-                    {/* NO «— view —» ITEM IN THE LIST, AND THAT IS NOT A STYLE CHOICE. Radix refuses
-                        a `Select.Item` whose value is the empty string — it THROWS during render, and
-                        with no error boundary over this tab the throw takes the whole page with it,
-                        not just the modal (measured: the body came back empty). «Nothing chosen» is
-                        spelled by the ROOT holding '' and the trigger showing its placeholder, which
-                        is the arrangement Radix does support. An unwanted side leaves by its ✕. */}
-                    <SelectComponent
-                      name={`split-frame-${i}`}
-                      value={frame.viewKey}
-                      placeholder='— view —'
-                      customWidth={140}
-                      items={DESIGN_VIEW_KEYS.map((key) => ({
-                        value: key,
-                        label: viewLabel(key),
-                      }))}
-                      onValueChange={(value) =>
-                        editFrames((prev) =>
-                          prev.map((f, j) => (j === i ? { ...f, viewKey: value } : f)),
-                        )
-                      }
-                    />
-                    <button
-                      type='button'
-                      aria-label={`remove side ${i + 1}`}
-                      onClick={() => {
-                        editFrames((prev) => prev.filter((_, j) => j !== i));
-                        setSelected(null);
-                      }}
-                      className='cursor-pointer px-1 text-labelColor hover:text-textColor'
-                    >
-                      ✕
-                    </button>
-                  </span>
-                }
-              />
-            ))}
-          </div>
-        )}
-
-        {/* THE SERVER'S REFUSAL, WHERE THE ACT WAS. The band's write seam also raises a snackbar,
-            and a snackbar is the wrong and only home for this one: it is gone in four seconds, the
-            modal is still open, and the operator is left pressing a button that keeps doing
-            nothing. */}
-        {splitPicture.isError && (
-          <CalloutBox tone='error'>
-            <b>the cut did not go through.</b>{' '}
-            {(splitPicture.error as Error | null)?.message ||
-              'the server refused without saying why'}
-          </CalloutBox>
-        )}
+        <SplitStage cut={cut} />
+        <SplitSides cut={cut} />
+        <SplitError cut={cut} />
       </div>
     </ConfirmationModal>
   );

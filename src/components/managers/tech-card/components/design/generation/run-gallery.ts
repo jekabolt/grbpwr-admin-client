@@ -160,6 +160,25 @@ export function benchPlan(
 }
 
 /**
+ * ═══ AFTER THE CUT THE BENCH SHOWS THE PIECES, NOT THE SHEET (03.10, owner items 20 and 21) ══════
+ *
+ * Owner, verbatim: «после сплита мы должны показывать уже сплитнутые картинки» and «в окошке latest
+ * generation не будет общей картинки со всеми вью». So on the FLAT bench a sheet that has been cut
+ * leaves the row entirely: no tile, no deck, no thumbnail of it; its pieces stand in its place as
+ * ordinary cards, in the deck's order, each with the full tile anatomy (slot, edit, delete). The
+ * sheet stays where it always was, in GENERATION HISTORY, whose rows draw `outputPlan` unchanged.
+ */
+export function piecesInPlace(plan: OutputPlan): OutputPlan {
+  if (!plan.cards.some((card) => card.members.length > 0)) return plan;
+  const cards: OutputCard[] = [];
+  for (const card of plan.cards) {
+    if (!card.members.length) cards.push(card);
+    else for (const piece of card.members) cards.push({ picture: piece, members: [] });
+  }
+  return { cards, deckOf: new Map() };
+}
+
+/**
  * THE PICTURES OF ONE RUN IN THE ORDER ITS ROW SHOWS THEM — every card in order, the pieces of the
  * OPEN deck right after their sheet, the pieces of closed decks nowhere (H-10). The order of the
  * viewer row IS the order of the screen (T-8), so this is the one place that order is spelled —

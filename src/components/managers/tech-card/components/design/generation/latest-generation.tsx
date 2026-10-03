@@ -30,8 +30,17 @@ import {
   useBench,
   useBenchChoice,
 } from './bench-store';
-import { benchPlan, deckAfterZoom, deckOfRuns, runsGallery, type OutputPlan } from './run-gallery';
+import { InlineSplit } from './inline-split';
+import {
+  benchPlan,
+  deckAfterZoom,
+  deckOfRuns,
+  piecesInPlace,
+  runsGallery,
+  type OutputPlan,
+} from './run-gallery';
 import { RunOutputs } from './run-outputs';
+import { splitViewsOf } from './run-tile';
 import {
   isRunLive,
   runFailureText,
@@ -61,8 +70,10 @@ import { useElapsed, useRunById } from './use-generation';
  * then the history row's own outputs block (`RunOutputs`) on the workbench's 190px track — the
  * reference grid's, one block up, so the columns line up across the gutter. The doors are
  * `RunTile`'s, unchanged:
- * split an uncut sheet (`SplitModal forInput={false}` — a cut here lays a sheet out into views, it
- * does NOT feed the prompt, so no reference role and no `moodboardMedia` row is written), edit
+ * split an uncut sheet (on FLAT the sheet IS the inline split editor, `inline-split.tsx`, T20; on
+ * FABRIC RENDER the corner opens `SplitModal`; both `forInput={false}` — a cut here lays a sheet out
+ * into views, it does NOT feed the prompt, so no reference role and no `moodboardMedia` row is
+ * written; after the cut FLAT shows the pieces in the sheet's place, `piecesInPlace`), edit
  * (a NEW sibling picture in the same run, `slot={null}`, exactly as from the history — «overwrite or
  * save as new» is phase 2), the studio's one viewer on the surface, and the slot marks IN THE
  * FRAME (T13): `slot ▾` on a free picture, `✕` = unmark on a plate a FLAT SLOTS slot reads
@@ -101,7 +112,8 @@ import { useElapsed, useRunById } from './use-generation';
  * slot writes of these pictures exist once.
  *
  * THE DECK OF THIS RUN IS OPEN BY DEFAULT, AND A SPLIT THAT LANDS OPENS IT: the pieces are what the
- * owner asked to keep seeing «после сплита». One open deck per host (H-10), and zooming a picture
+ * owner asked to keep seeing «после сплита». (FABRIC RENDER only since 03.10: on FLAT a cut sheet
+ * leaves the bench and its pieces are ordinary cards, so there is no deck to open.) One open deck per host (H-10), and zooming a picture
  * outside it folds it (E-4) — the history's rules, through the same readers (`run-gallery.ts`).
  *
  * WHAT IT DOES NOT DO — ON PURPOSE. It polls nothing, recalls nothing and reads no further pages:
@@ -408,8 +420,35 @@ export function LatestGeneration({
   const plan = useMemo(() => {
     if (!run) return null;
     const keep = new Set(editingKey ? editingKey.split(',').map(Number) : []);
-    return benchPlan(run.pictures ?? [], { whole, keep });
-  }, [run, editingKey, whole]);
+    const drawn = benchPlan(run.pictures ?? [], { whole, keep });
+    // FLAT: a cut sheet leaves the bench, its pieces stand in its place (owner items 20, 21).
+    return kind === 'flat' ? piecesInPlace(drawn) : drawn;
+  }, [run, editingKey, whole, kind]);
+  /**
+   * THE UNCUT SHEETS, CUT HERE INLINE (owner item 19, T20) — FLAT only. Every card the tile gate
+   * would give a SPLIT corner (`splitViewsOf`, the same gate, the same `disabled`) is drawn as the
+   * inline editor instead of a tile, all of them stacked above the tiles in the row's order: a sheet
+   * on the bench is something to cut, and no sheet ever stands here as a picture. FABRIC RENDER keeps
+   * its corner and the popup (its doors read the sheet's deck, `RenderDoorsHost`).
+   */
+  const writesOff = disabled || !speaks;
+  const inlineSheets = useMemo(() => {
+    if (kind !== 'flat' || !run || !plan || isRunLive(run)) return [];
+    const pictures = run.pictures ?? [];
+    const out: { picture: common_DesignPicture; views: string[] }[] = [];
+    for (const card of plan.cards) {
+      if (card.members.length || (card.picture.id ?? 0) <= 0) continue;
+      const views = splitViewsOf(band, card.picture, pictures, run, writesOff);
+      if (views) out.push({ picture: card.picture, views });
+    }
+    return out;
+  }, [kind, run, plan, band, writesOff]);
+  /** The row's tiles: the plan without the sheets drawn as inline editors. */
+  const tilePlan = useMemo(() => {
+    if (!plan || !inlineSheets.length) return plan;
+    const inline = new Set(inlineSheets.map((s) => s.picture.id ?? 0));
+    return { ...plan, cards: plan.cards.filter((c) => !inline.has(c.picture.id ?? 0)) };
+  }, [plan, inlineSheets]);
   const decks = useMemo(() => decksOf(plan), [plan]);
   const deckKey = `${techCardId}:${runId}|${decks.map((d) => `${d.root}x${d.count}`).join(',')}`;
   const [seen, setSeen] = useState<{
@@ -441,13 +480,14 @@ export function LatestGeneration({
 
   /** The viewer row of THIS row: its pictures in the order shown, the open deck's pieces inside. */
   const gallery = useMemo(
-    () => (run && plan ? runsGallery([run], openDeck, () => plan) : runsGallery([], openDeck)),
-    [run, plan, openDeck],
+    () =>
+      run && tilePlan ? runsGallery([run], openDeck, () => tilePlan) : runsGallery([], openDeck),
+    [run, tilePlan, openDeck],
   );
   const galleryGroup = useGalleryGroup(gallery.items);
   const deckOf = useMemo(
-    () => (run && plan ? deckOfRuns([run], () => plan) : new Map<number, number>()),
-    [run, plan],
+    () => (run && tilePlan ? deckOfRuns([run], () => tilePlan) : new Map<number, number>()),
+    [run, tilePlan],
   );
   /** O-63: what the render doors of this row read — its plates and its decks (`RenderDoorsHost`). */
   const plates = useMemo(() => hostPlates(kind === 'render' && plan ? [plan] : []), [kind, plan]);
@@ -470,7 +510,7 @@ export function LatestGeneration({
       rep={runRepresentation(run)}
       cardFit={cardFit}
       elapsed={elapsed}
-      disabled={disabled || !speaks}
+      disabled={writesOff}
       galleryKey={galleryGroup.key}
       galleryIndexOf={gallery.indexOf}
       openDeck={openDeck}
@@ -485,9 +525,20 @@ export function LatestGeneration({
         setSplitting({ picture, handle: pictureHandle(picture) });
       }}
       workbench
-      plan={plan ?? undefined}
+      plan={tilePlan ?? undefined}
     />
   );
+  /** Every picture of the row went into an inline editor: no empty grid under them. */
+  const tilesLeft = isRunLive(run) || (tilePlan?.cards.length ?? 0) > 0;
+  const inline = inlineSheets.map(({ picture, views }) => (
+    <InlineSplit
+      key={picture.id}
+      techCardId={techCardId}
+      picture={picture}
+      views={views}
+      runId={runId}
+    />
+  ));
 
   return (
     <div data-latest-generation={runId} ref={galleryGroup.anchorRef}>
@@ -545,7 +596,10 @@ export function LatestGeneration({
             {outputs}
           </RenderDoorsHost>
         ) : (
-          outputs
+          <>
+            {inline}
+            {tilesLeft && outputs}
+          </>
         )}
 
         {/* A NEWER RUN, WHILE THIS ONE IS KEPT — one quiet line under the tiles; the click moves the

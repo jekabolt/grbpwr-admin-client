@@ -305,6 +305,30 @@ function WorkbenchEditor({
   );
 }
 
+/**
+ * ═══ THE ONE SPLIT GATE (03.10, owner items 8 and 19) ═══════════════════════════════════════════
+ * A tile offers the cut where a cut is NEEDED (item 8: `readSplit` + `offersSplit`) and only where
+ * the picture can be cut at all: not on a card the person cannot write, not on an old hidden stamp,
+ * not on a picture an edit replaced, never on a 3D file (E-32). The SPLIT corner here and the
+ * bench's inline editor (`latest-generation.tsx`, T20) read this one gate, so the bench never draws
+ * an editor over a sheet whose tile would not have offered the cut. Returns the views the frames
+ * are seeded from, or `null`.
+ */
+export function splitViewsOf(
+  band: GetDesignBandResponse,
+  picture: common_DesignPicture,
+  siblings: readonly common_DesignPicture[] | undefined,
+  run: common_DesignRun | undefined,
+  disabled: boolean | undefined,
+): string[] | null {
+  if (disabled || isPictureHidden(picture) || (picture.replacedBy ?? 0) > 0) return null;
+  const threed =
+    (picture.kind ?? '').trim().toLowerCase() === 'threed' || isModelUrl(thumbUrl(picture.media));
+  if (threed) return null;
+  const split = readSplit(band, picture, siblings, run);
+  return offersSplit(split) ? split.views : null;
+}
+
 /* ────────────────────────────── the tile ────────────────────────────── */
 
 /** The `delete…` row of the tile's menu — a value no slot can spell (`v:` / `d:` / `__new_detail`). */
@@ -663,7 +687,7 @@ export function RunTile({
            has been cut out of it yet (F-8). A single-view picture no longer offers it. Never on a
            3D file (E-32). */
         onSplit={
-          !disabled && !hidden && !replaced && !threedFile && offersSplit(split)
+          splitViewsOf(band, picture, siblings, run, disabled)
             ? {
                 onClick: () => onSplit(picture),
                 ariaLabel: `split ${handle} into views`,
