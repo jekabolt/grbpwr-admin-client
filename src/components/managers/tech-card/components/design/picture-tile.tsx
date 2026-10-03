@@ -800,6 +800,9 @@ function Corner({
   );
 }
 
+/** How long a single click on a tile waits for its pair before it counts as single (HX2). */
+const CLICK_ARBITER_MS = 220;
+
 export function PictureTile({
   url,
   alt,
@@ -999,6 +1002,42 @@ export function PictureTile({
     onZoomRef.current?.();
   }, [ctx, key, galleryGroup?.key, galleryGroup?.index, galleryGroup?.mediaId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* ═══ ОДИН КЛИК ИЛИ ДВА — РЕШАЕТ КОРОТКИЙ ТАЙМЕР (hotfix HX2) ═══════════════════════════════
+     Где одиночный клик занят `onOpen` (выбор, раскрытие колоды, пипетка), а двойной открывает
+     зум, двойной клик приносил ДВА `click` перед `dblclick`: переключатель щёлкал дважды (и
+     гасил сам себя), колода раскрывалась и сворачивалась. Теперь одиночный клик ждёт
+     `CLICK_ARBITER_MS`; второй клик пары таймер снимает, `dblclick` открывает зум. Клик с
+     клавиатуры (`detail === 0`) не ждёт ничего. Плитка, где одиночный клик сам открывает
+     просмотрщик, таймера не держит — там спорить не о чем. */
+  const arbitrates = !!onOpen && zoomable && !clip;
+  const onOpenRef = useRef(onOpen);
+  onOpenRef.current = onOpen;
+  const pendingClick = useRef<number | null>(null);
+  const cancelPendingClick = useCallback(() => {
+    if (pendingClick.current !== null) window.clearTimeout(pendingClick.current);
+    pendingClick.current = null;
+  }, []);
+  useEffect(() => cancelPendingClick, [cancelPendingClick]);
+  const arbitratedClick = useCallback(
+    (e: React.MouseEvent) => {
+      cancelPendingClick();
+      if (e.detail === 0) {
+        onOpenRef.current?.();
+        return;
+      }
+      if (e.detail > 1) return;
+      pendingClick.current = window.setTimeout(() => {
+        pendingClick.current = null;
+        onOpenRef.current?.();
+      }, CLICK_ARBITER_MS);
+    },
+    [cancelPendingClick],
+  );
+  const arbitratedDoubleClick = useCallback(() => {
+    cancelPendingClick();
+    openZoom();
+  }, [cancelPendingClick, openZoom]);
+
   return (
     <div
       ref={hostRef}
@@ -1132,8 +1171,12 @@ export function PictureTile({
               tabIndex={zoomSurface ? undefined : -1}
               aria-hidden={zoomSurface ? undefined : 'true'}
               aria-label={zoomSurface ? `zoom ${alt}` : undefined}
-              onClick={onOpen ?? (surfaceToModel ? () => setModelOpen(true) : openZoom)}
-              onDoubleClick={onOpen && zoomable && !clip ? openZoom : undefined}
+              onClick={
+                arbitrates
+                  ? arbitratedClick
+                  : onOpen ?? (surfaceToModel ? () => setModelOpen(true) : openZoom)
+              }
+              onDoubleClick={arbitrates ? arbitratedDoubleClick : undefined}
               className={cn(
                 'absolute inset-0 z-10',
                 zoomSurface

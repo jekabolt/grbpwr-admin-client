@@ -35,6 +35,7 @@
     "annotation:shapes": "node scripts/annotation-shape-probe.mjs",
     "draft:shape": "node scripts/draft-shape-probe.mjs",
     "moodboard:crop": "node scripts/moodboard-crop-probe.mjs",
+    "tile:click": "node scripts/picture-tile-click-probe.mjs",
     "marker:area-field": "node scripts/area-field-probe.mjs",
     "lay:header": "node scripts/lay-header-probe.mjs",
     "view:switch": "node scripts/view-switch-probe.mjs",
