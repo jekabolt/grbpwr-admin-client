@@ -38,12 +38,7 @@ import {
   readSplit,
   splitVerb,
 } from './composite';
-import {
-  DeletePictureDoor,
-  deleteTitle,
-  isDerivedPicture,
-  useDeletePicture,
-} from './delete-picture-modal';
+import { deleteTitle, isDerivedPicture, useDeletePicture } from './delete-picture-modal';
 import { useSlotMenu } from './slot-picker';
 import { thumbUrl } from './thumb';
 
@@ -448,12 +443,9 @@ export function RunTile({
   /* ═══ «DELETE» — ON THE WORKBENCH, ON A DERIVED PICTURE ONLY (28.09, O-68, D-74) ═══════════════
      A crop or an edit of one leaves the card and the storage for good; a root plate of the run has
      no door (the server refuses it: `picture_is_root`). The history's tiles draw none of this — the
-     host gates it (`workbench`). On the render tile it is still the row's last door (lane L moves
-     it); on every other tile it is the menu's last row, `delete…` (T13). */
+     host gates it (`workbench`). On every tile, the render tile included, it is the menu's last
+     row, `delete…` (T13, T17), opening the one confirmation `useDeletePicture` owns. */
   const canDelete = !!workbench && !disabled && pictureId > 0 && isDerivedPicture(picture);
-  const deleteDoor = canDelete ? (
-    <DeletePictureDoor techCardId={techCardId} picture={picture} siblings={siblings} />
-  ) : null;
   /* Hooks above the render-host branch: a tile never changes host, but React counts calls. */
   const removal = useDeletePicture(techCardId, picture, siblings);
   const slotMenu = useSlotMenu({ band, techCardId, picture, rep, disabled });
@@ -479,8 +471,9 @@ export function RunTile({
         onSplit={() => onSplit(picture)}
         onEdit={openEditor}
         split={split}
-        trailingDoor={deleteDoor}
+        onDelete={canDelete ? removal.ask : undefined}
       >
+        {removal.modal}
         {editing && (
           <VectorModal
             open

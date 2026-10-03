@@ -11,7 +11,10 @@
 //   · флаг `fit ≠ card` вместо строки под кадром.
 //
 //   node scripts/bench-tile-probe.mjs
-//   node scripts/bench-tile-probe.mjs --mutate=unmark|menu|rev   — каждая краснеет
+//   · правка рендера на верстаке (RunRenderTile): `delete…` — строка меню в кадре, та же
+//     confirmation, под кадром двери нет (лейн N1).
+//
+//   node scripts/bench-tile-probe.mjs --mutate=unmark|menu|rev|rdelete|rmodal   — каждая краснеет
 //
 // Playwright не в зависимостях проекта — ищется в кэше npx и МОЛЧА пропускается, если не найден.
 import { createRequire } from 'node:module';
@@ -111,6 +114,18 @@ const MUTATIONS = {
     from: 'expectedSlotRev: inSlot.rev',
     to: 'expectedSlotRev: 0',
   },
+  // плитка рендера снова без onDelete: `delete…` пропадает из меню (N1).
+  rdelete: {
+    file: /generation\/run-tile\.tsx$/,
+    from: 'onDelete={canDelete ? removal.ask : undefined}',
+    to: 'onDelete={undefined}',
+  },
+  // меню плитки рендера зовёт ask, но вопрос не смонтирован: confirmation не открывается.
+  rmodal: {
+    file: /generation\/run-tile\.tsx$/,
+    from: '{removal.modal}\n        {editing && (',
+    to: '{editing && (',
+  },
 };
 function mutationPlugin(name) {
   const m = MUTATIONS[name];
@@ -199,11 +214,14 @@ try {
     page.$eval(sel, (el) => !!el.closest('[data-picture-tile]')).catch(() => false);
 
   // ── НИЧЕГО ПОД КАДРОМ ──
-  const under = await page.$$eval('[data-picture]', (cells) =>
-    cells.map((c) => {
-      const tile = c.querySelector('[data-picture-tile]');
-      return [...c.children].filter((k) => k !== tile && k.textContent.trim()).length;
-    }),
+  // the render tile nests its frame one level deeper; R1 checks it by buttons instead.
+  const under = await page.$$eval(
+    '[data-probe]:not([data-probe="render"]) [data-picture]',
+    (cells) =>
+      cells.map((c) => {
+        const tile = c.querySelector('[data-picture-tile]');
+        return [...c.children].filter((k) => k !== tile && k.textContent.trim()).length;
+      }),
   );
   check(
     'U1 nothing stands under any tile',
@@ -333,6 +351,50 @@ try {
   check('D3 `delete…` opens the confirmation', !!(await page.$('[data-delete-question]')));
   check(
     'D4 the confirmation alone writes nothing',
+    !(await page.evaluate(() => window.__calls.some((c) => /Delete/.test(c.name)))),
+  );
+
+  // ── DELETE НА ПЛИТКЕ РЕНДЕРА (N1) ──
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+  const R = '[data-probe="render"]';
+  const rUnder = await page.$$eval(`${R} [data-picture]`, (cells) =>
+    cells.map((c) => {
+      const tile = c.querySelector('[data-picture-tile]');
+      return [...c.querySelectorAll('button')]
+        .filter((b) => !tile.contains(b))
+        .map((b) => b.textContent.trim());
+    }),
+  );
+  check(
+    'R1 render tile: no button stands under the frame',
+    rUnder.length === 1 && rUnder[0].length === 0,
+    JSON.stringify(rUnder),
+  );
+  check(
+    'R2 render tile: no delete door',
+    (await page.$$(`${R} [data-delete-picture]`)).length === 0,
+  );
+  const rMenu = await page.$(`${R} [data-picture-tile] [data-menu]`);
+  check('R3 render tile: a menu corner in the frame', !!rMenu);
+  let rRows = [];
+  if (rMenu) {
+    await page.hover(`${R} [data-picture-tile]`);
+    await rMenu.click();
+    await page.waitForSelector('[role="listbox"]').catch(() => {});
+    rRows = await page.$$eval('[data-menu-item]', (els) =>
+      els.map((e) => [e.getAttribute('data-menu-item'), e.textContent.trim()]),
+    );
+  }
+  const last = rRows[rRows.length - 1] ?? [];
+  check("R4 `delete…` is the menu's last row", last[1] === 'delete…', JSON.stringify(rRows));
+  if (last[0]) {
+    await page.click(`[data-menu-item="${last[0]}"]`).catch(() => {});
+    await page.waitForTimeout(200);
+  }
+  check('R5 `delete…` opens the confirmation', !!(await page.$('[data-delete-question]')));
+  check(
+    'R6 the confirmation alone writes nothing',
     !(await page.evaluate(() => window.__calls.some((c) => /Delete/.test(c.name)))),
   );
   await ctx.close();

@@ -4,12 +4,18 @@
 //   · `inslot`  — флэт в слоте BACK (rev 3): ✕ = unmark, ярлык `back`, меню нет;
 //   · `derived` — кроп (derived_from), свободен, на верстаке: меню с `delete…` последним;
 //   · `history` — тот же кроп не на верстаке: `delete…` нет.
+//   · `render`  — правка рендера на верстаке FABRIC RENDER (плитка рендера, лейн N1): `delete…` —
+//     строка меню в кадре, а не дверь под ним.
 // Вызовы `adminService` пишутся в `window.__calls` (заглушка в пробе).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http/admin';
 import { createRoot } from 'react-dom/client';
 import { PictureGalleryProvider } from 'components/managers/tech-card/components/design/picture-tile';
 import { RunTile } from 'components/managers/tech-card/components/design/generation/run-tile';
+import {
+  RenderDoorsHost,
+  RenderStepScope,
+} from 'components/managers/tech-card/components/design/render/render-tile';
 
 const PIC =
   'data:image/svg+xml;utf8,' +
@@ -31,12 +37,30 @@ const inslot = pic(12, { ghostView: 'front' });
 const derived = pic(13, { derivedFrom: 11, ghostView: 'front' });
 const siblings = [free, inslot, derived];
 
+/* A render's media in the shape the render tile reads (`media.media.full`). */
+const renderMedia = (id: number) =>
+  ({
+    id,
+    thumbnail: { mediaUrl: PIC },
+    fullSize: { mediaUrl: PIC },
+    media: { full: { mediaUrl: PIC, width: 300, height: 300 }, thumbnail: { mediaUrl: PIC } },
+  }) as never;
+const renderRoot = pic(21, { runId: 8, kind: 'render', colorwayId: 0, media: renderMedia(121) });
+const renderEdit = pic(22, {
+  runId: 8,
+  kind: 'render',
+  colorwayId: 0,
+  derivedFrom: 21,
+  media: renderMedia(122),
+});
+const renderRun = { id: 8, kind: 'render', pictures: [renderRoot, renderEdit] };
+
 const band = {
   bench: [
     { id: 1, viewKey: 'back', kind: 'flat', pictureId: 12, slotRev: 3 },
     { id: 2, viewKey: 'front', kind: 'flat', pictureId: 0, slotRev: 5 },
   ],
-  runs: [{ id: 7, kind: 'flat', pictures: siblings }],
+  runs: [{ id: 7, kind: 'flat', pictures: siblings }, renderRun],
 } as unknown as GetDesignBandResponse;
 
 const noop = () => {};
@@ -66,6 +90,29 @@ function Harness() {
         <div data-probe='history' style={cell}>
           <RunTile {...common} picture={derived} cardFit='' runFit='' />
         </div>
+        <RenderStepScope step={{ colorways: [], cardColorways: [], adopts: false }}>
+          <RenderDoorsHost
+            band={band}
+            techCardId={1}
+            pictures={[renderRoot, renderEdit]}
+            membersOf={new Map()}
+            openDeck={null}
+            onDeck={noop}
+            runOf={() => renderRun as never}
+          >
+            <div data-probe='render' style={cell}>
+              <RunTile
+                {...common}
+                rep='render'
+                picture={renderEdit}
+                siblings={[renderRoot, renderEdit]}
+                workbench
+                cardFit=''
+                runFit=''
+              />
+            </div>
+          </RenderDoorsHost>
+        </RenderStepScope>
       </div>
     </PictureGalleryProvider>
   );
