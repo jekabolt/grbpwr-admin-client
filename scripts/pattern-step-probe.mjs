@@ -392,9 +392,8 @@ for (const vp of VIEWPORTS) {
       ['строк денег (по одной в шапке каждого блока)', '[data-probe$="run-price"]', 2],
       ['плиток карусели', '[data-fabric-tile]', 3],
       ['живых generate', '[data-slot-generate="live"]', 5],
-      // Обе надетые ткани названы ровно своей парой («ROSSO · outer» на ROSSO × outer), и строка,
-      // повторяющая имя, молчит (m-D). Сама строка проверяется в (6), на «fabric 1».
-      ['нано-строк «где в рендере», повторяющих имя (U-5, m-D)', '[data-fabric-worn-by]', 0],
+      // TF5: где ткань в рендере — в title плитки, под ней одна подпись (имя). Якорь — на плитке.
+      ['надетых тканей (пары в title плитки, TF5)', '[data-fabric-worn-by]', 2],
       ['унаследованных цветов на двери (m-3/U-4)', '[data-slot-colour-inherited]', 2],
     ]);
     await blockSeam(page, entry);
@@ -421,7 +420,7 @@ for (const vp of VIEWPORTS) {
       ],
       ['углов use for ▾', '[data-menu^="use-for:"]', 0],
       ['ярлыков «in render»', '[data-fabric-worn]', 0],
-      ['нано-строк «где в рендере»', '[data-fabric-worn-by]', 0],
+      ['надетых тканей (пары в title плитки)', '[data-fabric-worn-by]', 0],
     ]);
     await blockSeam(page, entry);
     await shoot(page, '4-gate', vp);
@@ -487,16 +486,16 @@ for (const vp of VIEWPORTS) {
       window.__pattern.calls.filter((c) => c.method === 'SetDesignAssetBinding').map((c) => c.req),
     );
     entry.notes.push(`SetDesignAssetBinding: ${JSON.stringify(writes)}`);
-    // «fabric 1» надета на ROSSO × contrast — имя пары НЕ повторяет имя плитки, строка есть (U-5).
+    // «fabric 1» надета на ROSSO × contrast — пары в title плитки (TF5), не строкой под ней.
     await facts(page, entry, [
-      ['нано-строка под «fabric 1» после use for', '[data-fabric-worn-by="103"]', 1],
-      ['нано-строк всего (101/102 повторяют имя — m-D)', '[data-fabric-worn-by]', 1],
+      ['«fabric 1» надета после use for', '[data-fabric-worn-by="103"]', 1],
+      ['надетых тканей всего', '[data-fabric-worn-by]', 3],
     ]);
     const wornBy = await page
       .locator('[data-fabric-worn-by="103"]')
-      .textContent()
+      .getAttribute('title')
       .catch(() => '(нет)');
-    entry.notes.push(`нано-строка «fabric 1»: ${(wornBy ?? '').trim()}`);
+    entry.notes.push(`title «fabric 1»: ${(wornBy ?? '').trim()}`);
     await shoot(page, '6-use-for-after', vp);
   });
 
