@@ -10,6 +10,7 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { GroupLabel } from 'ui/components/group-label';
 import { Section } from 'ui/components/section';
+import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 
@@ -30,7 +31,7 @@ import {
 import { SplitModal } from '../split-modal';
 import { isPictureHidden, isRunArchived } from '../visibility';
 import { viewLabel } from '../views';
-import { closeSurface, openSurface, putOnBench, useBenchRun } from './bench-store';
+import { closeSurface, openSurface, putOnBench, useBenchRun, type BenchKind } from './bench-store';
 import { formatMoney } from './money';
 import { CountPill, RunPanel } from './run-panel';
 import { deckAfterZoom, deckOfRuns, outputPlan, runsGallery } from './run-gallery';
@@ -382,10 +383,13 @@ const scrollToBench = () =>
 function RunGridRow({
   techCardId,
   run,
+  kind,
   onBench,
 }: {
   techCardId: number;
   run: common_DesignRun;
+  /** The step whose bench a press puts the run on (FLAT, FABRIC RENDER — T24). */
+  kind: BenchKind;
   /** Its pictures stand on the bench now (the run the workbench shows). */
   onBench: boolean;
 }) {
@@ -395,14 +399,14 @@ function RunGridRow({
   const pictures = useMemo(() => gridPicturesOf(run), [run]);
   const handle = runHandle(runId);
   const toBench = () => {
-    if (!onBench) putOnBench(techCardId, runId);
+    if (!onBench) putOnBench(techCardId, runId, kind);
     scrollToBench();
   };
 
   return (
     <div
       data-run={runId || undefined}
-      data-rep='flat'
+      data-rep={kind}
       className='space-y-1.5 border-b border-hairline pb-2 [&:not(:has(+[data-run]))]:border-b-0'
     >
       <Tiles min={HISTORY_TRACK}>
@@ -551,6 +555,71 @@ function HistoryWindowAutofill({
   return null;
 }
 
+/* ────────────────────────────── the flat header fold (03.10, T22) ────────────────────────────── */
+
+/**
+ * The FLAT fold (T22). Owner, item 22: «GENERATION HISTORY по дефолту свернут во флетах». The block
+ * starts folded on every visit (not remembered). Item 10b still holds («просто текстом сколько
+ * ранов было и все»), so there is no button and no ▾: the header line itself, `GENERATION HISTORY
+ * N runs`, is the door. Mouse: the whole line; keyboard: Tab to it, Enter or Space.
+ */
+export const gridHistoryStartsOpen = false;
+
+export function HistoryFoldHeader({
+  open,
+  count,
+  floor,
+  rep,
+  anchorRef,
+  onToggle,
+}: {
+  open: boolean;
+  count: number;
+  /** The feed has unread pages: the count is a floor (`4+ runs`). */
+  floor: boolean;
+  rep: RepFilter;
+  /** The gallery group's anchor (O-54): mounted as long as the block is, folded or not. */
+  anchorRef?: React.RefObject<HTMLDivElement | null>;
+  onToggle: () => void;
+}) {
+  return (
+    <div
+      role='button'
+      tabIndex={0}
+      aria-expanded={open}
+      aria-controls='design-history-runs'
+      data-history-fold={open ? 'open' : 'closed'}
+      onClick={onToggle}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        if (!e.repeat) onToggle();
+      }}
+      className='group cursor-pointer select-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
+    >
+      <SectionHeader
+        title='generation history'
+        /* Folded, the rule is the block's last line: no margin hanging under it. */
+        className={open ? undefined : '!mb-0'}
+        action={
+          <div ref={anchorRef} data-rep-filter={rep} className='flex items-center'>
+            <Text
+              size='nano'
+              variant='label'
+              component='span'
+              className='whitespace-nowrap uppercase tracking-label group-hover:text-textColor'
+              data-run-count={count}
+            >
+              {count}
+              {floor ? '+' : ''} run{count === 1 && !floor ? '' : 's'}
+            </Text>
+          </div>
+        }
+      />
+    </div>
+  );
+}
+
 /* ────────────────────────────── the section ────────────────────────────── */
 
 export function GenerationHistory({
@@ -613,16 +682,21 @@ export function GenerationHistory({
   const rep: RepFilter = defaultRep;
   /**
    * FLAT'S HISTORY IS A GRID (03.10, owner items 9 and 10b): each run its pictures and `put on
-   * bench`, the header a plain «N runs» — no fold, no archived shelf (archived runs are not shown).
-   * Every other step keeps its rows as they were.
+   * bench`, the header a plain «N runs» — no archived shelf (archived runs are not shown).
+   * FABRIC RENDER too (T24, owner: «в фабрик рендере в GENERATION HISTORY должна быть по дизайну и
+   * смыслу такая же как во флетах»): a press puts the run on the render bench; no render doors, no
+   * brought group here — marking into a side lives on the bench. Every other step keeps its rows.
    */
-  const grid = rep === 'flat' && !match;
+  const grid = (rep === 'flat' || rep === 'render') && !match;
   /** The window off: every run this card has, and the server's continuations read to the end. */
   const [showAll, setShowAll] = useState(false);
-  /** Свёртка RUNS (макет: `fold('hist.'+kind, …)`). */
-  const [runsFolded, setRunsOpen] = useState(defaultOpen);
-  /** FLAT's grid has no fold: its runs are always on screen. */
-  const runsOpen = grid || runsFolded;
+  /**
+   * Свёртка RUNS (макет: `fold('hist.'+kind, …)`). The grid (FLAT T22, FABRIC RENDER T24): folded on every
+   * visit whatever the caller passes; its door is the header line (`HistoryFoldHeader`). Neither
+   * `put on bench` nor a tile press touches it.
+   */
+  const foldDefault = grid ? gridHistoryStartsOpen : defaultOpen;
+  const [runsOpen, setRunsOpen] = useState(foldDefault);
   const [splitting, setSplitting] = useState<{
     picture: common_DesignPicture;
     handle: string;
@@ -657,7 +731,7 @@ export function GenerationHistory({
    * the cards of the group: a cut sheet is one, its pieces stand behind it.
    */
   const renderStep = useRenderStep();
-  const rendersHere = rep === 'render' && !!renderStep;
+  const rendersHere = rep === 'render' && !!renderStep && !grid;
   /**
    * The group as it is drawn (O-63 r3, `broughtGroup`): its pseudo-run, its cards with the decks of
    * the pieces off SIDES — climbed through the whole family, not through the group's list alone —
@@ -691,8 +765,8 @@ export function GenerationHistory({
   const shownScope = useRef(scopeKey);
   if (shownDefaults.current !== `${defaultRep}|${defaultOpen}` || shownScope.current !== scopeKey) {
     // Only a new step folds the list back; a new scope inside one step keeps the fold.
-    if (shownDefaults.current !== `${defaultRep}|${defaultOpen}` && runsFolded !== defaultOpen) {
-      setRunsOpen(defaultOpen);
+    if (shownDefaults.current !== `${defaultRep}|${defaultOpen}` && runsOpen !== foldDefault) {
+      setRunsOpen(foldDefault);
     }
     shownDefaults.current = `${defaultRep}|${defaultOpen}`;
     shownScope.current = scopeKey;
@@ -977,6 +1051,7 @@ export function GenerationHistory({
           key={run.id}
           techCardId={techCardId}
           run={run}
+          kind={rep === 'render' ? 'render' : 'flat'}
           onBench={!!benchRunId && (run.id ?? 0) === benchRunId}
         />
       ) : (
@@ -1032,8 +1107,8 @@ export function GenerationHistory({
       <RecallBenchIntake techCardId={techCardId} band={band} disabled={disabled || !speaks} />
       <Section
         id='design-history'
-        title='generation history'
-        /* FLAT (03.10, owner 10b): «просто текстом сколько ранов было и все» — no subtitle. */
+        /* FLAT (T22): the header line is drawn below as the fold's door (`HistoryFoldHeader`). */
+        title={grid ? undefined : 'generation history'}
         question={grid ? undefined : '· nothing here is deleted'}
         /* ═══ ОДИН ОРГАН СВОРАЧИВАНИЯ, И ОН СТОИТ ТАМ, ГДЕ СТОЯЛО ЧИСЛО (r2 п.23) ══════════════
            Владелец: «кнопка HIDE должна быть на месте „23 RUNS“ и выглядеть органично». Было ДВА
@@ -1054,25 +1129,14 @@ export function GenerationHistory({
            первую. И `collapsible` этой секции НЕ ставить — свёрнутая коробка не рисует `action`
            вовсе, а кнопка внутри кнопки невалидна (разбор в `ui/components/section.tsx`). */
         action={
-          /* ЯКОРЬ ГРУППЫ ПРОСМОТРЩИКА — ЭТА ЛИНЕЙКА (O-54): она стоит, пока стоит блок, свёрнут он
+          grid ? undefined : (
+            /* ЯКОРЬ ГРУППЫ ПРОСМОТРЩИКА — ЭТА ЛИНЕЙКА (O-54): она стоит, пока стоит блок, свёрнут он
              или нет, и её место в полосе — место истории (разбор у `gallery`). */
-          <div
-            ref={galleryGroup.anchorRef}
-            data-rep-filter={rep}
-            className='flex flex-wrap items-center gap-1.5'
-          >
-            {grid ? (
-              <Text
-                size='nano'
-                variant='label'
-                component='span'
-                className='whitespace-nowrap uppercase tracking-label'
-                data-run-count={liveShown}
-              >
-                {liveShown}
-                {liveFloor ? '+' : ''} run{liveShown === 1 && !liveFloor ? '' : 's'}
-              </Text>
-            ) : (
+            <div
+              ref={galleryGroup.anchorRef}
+              data-rep-filter={rep}
+              className='flex flex-wrap items-center gap-1.5'
+            >
               <>
                 <Button
                   variant='secondary'
@@ -1112,30 +1176,40 @@ export function GenerationHistory({
                   · {`${archShownCount}${archFloor ? '+' : ''}`} archived ▸
                 </Button>
               </>
-            )}
-            {/* O-63 (D-62 п.4): THE BROUGHT GROUP'S DOOR — beside the shelf's, in the same line
+              {/* O-63 (D-62 п.4): THE BROUGHT GROUP'S DOOR — beside the shelf's, in the same line
                 (r3b, M-3: a door never gets a row of its own), only while something brought stands
                 off SIDES. Its group opens after the shelf. */}
-            {rendersHere && broughtCards > 0 && (
-              <Button
-                variant='secondary'
-                size='xs'
-                aria-expanded={broughtShown}
-                className='whitespace-nowrap'
-                data-brought-door={broughtCards}
-                aria-label={`${broughtShown ? 'hide' : 'open'} the ${broughtCards} brought render${broughtCards === 1 ? '' : 's'} that no side of SIDES shows`}
-                title='renders uploaded by hand (no run) that stand in no side SIDES shows — mark them into a side from here'
-                onClick={() => {
-                  setBroughtShown((v) => !v);
-                  setOpenDeck(null);
-                }}
-              >
-                · {broughtCards} brought ▸
-              </Button>
-            )}
-          </div>
+              {rendersHere && broughtCards > 0 && (
+                <Button
+                  variant='secondary'
+                  size='xs'
+                  aria-expanded={broughtShown}
+                  className='whitespace-nowrap'
+                  data-brought-door={broughtCards}
+                  aria-label={`${broughtShown ? 'hide' : 'open'} the ${broughtCards} brought render${broughtCards === 1 ? '' : 's'} that no side of SIDES shows`}
+                  title='renders uploaded by hand (no run) that stand in no side SIDES shows — mark them into a side from here'
+                  onClick={() => {
+                    setBroughtShown((v) => !v);
+                    setOpenDeck(null);
+                  }}
+                >
+                  · {broughtCards} brought ▸
+                </Button>
+              )}
+            </div>
+          )
         }
       >
+        {grid && (
+          <HistoryFoldHeader
+            open={runsOpen}
+            count={liveShown}
+            floor={liveFloor}
+            rep={rep}
+            anchorRef={galleryGroup.anchorRef}
+            onToggle={() => setRunsOpen((v) => !v)}
+          />
+        )}
         {/* O-63: why a render door below is dark — one line per reason, above the rows (D-56′). */}
         <RenderDoorsNotes />
 
