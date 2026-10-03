@@ -36,7 +36,7 @@ import { holdFlatInput, readFlatInput, rowsWritable } from './flat-input';
 import { DraftedPill } from './head/mood-organs';
 import { VectorModal } from './modals';
 import { useMoodCallouts, type MoodCallout } from './mood-callouts';
-import { TILE_CORNER } from './picture-tile';
+import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import {
   CALLOUTS_COLLAPSE_BELOW,
   CALLOUTS_KEY_STEP,
@@ -397,7 +397,7 @@ export function planBoardCrop(input: {
  * это за указание» — это и есть два словаря видов, от которых уходил весь этот файл. Победил тот,
  * что уже стоит в ARTIFACTS.
  */
-/**
+/*
  * ═══ ПРАВКА КАРТИНКИ ДОСКИ ПО НАВЕДЕНИЮ (C-3, круг 18) ═══════════════════════════════════════
  *
  * Владелец, дословно: «MOODBOARD — должна быть возможность редактировать на ховер картинки».
@@ -409,20 +409,14 @@ export function planBoardCrop(input: {
  * поверхностью с картинками без этой двери; вторая сущность здесь не выдумывается.
  *
  * ДВЕРЬ ТИХАЯ — ПОЯВЛЯЕТСЯ ПО НАВЕДЕНИЮ ИЛИ ФОКУСУ ВНУТРИ ПЛИТКИ И ВСЕГДА НА УСТРОЙСТВЕ БЕЗ
- * НАВЕДЕНИЯ — та же формула, что у угловых органов `PictureTile` (`TILE_QUIET`), и та же кожа
- * (`TILE_CORNER`). Формула переписана через `:hover > &`, потому что плитку доски рисует
- * `FocusedAnnotator`, и класса `group` на ней нет; орган ставится в её угол через
- * `renderFocusedFooter` — единственный слот, который галерея отдаёт вызывающему на плитке.
- * Правильное место этой двери — нижний ряд органов кадра (`cornerSlotBottom` поверхности), и проп
- * для него у `FocusedAnnotator` назван в отчёте волны.
+ * НАВЕДЕНИЯ — `TILE_QUIET` и `TILE_CORNER`, как у каждой плитки админки (T17). Здесь стояла своя
+ * формула через `:hover > &` и ручные `absolute bottom-2`: у плитки галереи не было `group`, а
+ * нижнего ряда органов — у её API. Теперь оба есть (`tileCorners` у `FocusedAnnotator`).
  *
  * РЕЗУЛЬТАТ ПРАВКИ ВСТАЁТ НА ДОСКУ РЯДОМ С ОРИГИНАЛОМ, А НЕ ВМЕСТО НЕГО. Указания приколоты долями
  * кадра оригинала, и подмена картинки под ними увела бы каждое не туда; оригинал остаётся со своими
  * пометками, а снять его — отдельный ✕, который называет цену.
  */
-const MOOD_QUIET =
-  'opacity-0 transition-opacity duration-100 [:hover>&]:opacity-100 [:focus-within>&]:opacity-100 ' +
-  'focus-visible:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none';
 
 /**
  * Основа редактора для картинки ДОСКИ. У доски нет картинки полосы — это медиа библиотеки, — и
@@ -1290,56 +1284,57 @@ export function MoodBoard({
               carouselLabel='moodboard'
               emptyLabel='nothing on the board yet. drop a picture, paste one with ⌘V, or browse the library — then pin notes on it'
               mediaLabel={(view, i) => `moodboard picture ${i + 1}`}
-              // ПОДВАЛА У ПЛИТКИ НЕТ — ЕСТЬ НИЖНИЙ РЯД ОРГАНОВ НА САМОМ КАДРЕ (C-3). Слот подвала
-              // галерея отдаёт вызывающему, и он единственный, где можно встать на плитку; строка ПОД
-              // кадром при этом не рисуется — оба органа стоят накладкой на нижнем крае кадра, как на
-              // плитах листа (`PLATE_BADGE_BAR`): факт «эта картинка уже и во входе» — слева (R-5,
-              // единственный факт, который человеку нужен у плитки, — на непрозрачной подложке, потому
-              // что под ним снимок), тихая дверь `edit` — справа, там же, где у `PictureTile`.
-              // `bottom-2` = зазор колонки поверхности под кадром (4px) плюс отступ органа от края (4px).
-              // T01: нижний ряд — только глаголы (`crop` слева, `edit` справа), оба тихие; факт «во
-              // входе» поднят в верхний левый угол, под номер плитки: факты сверху, действия снизу.
-              // `top-3` = высота номера (9px кегль + 2px поля) плюс 1px зазора.
-              renderFocusedFooter={(view, i) => (
-                <>
-                  {inputIds.has(view.mediaId) && (
-                    <span className='pointer-events-none absolute left-0 top-3 z-[6] inline-block bg-bgColor'>
-                      <Pill tone='ink'>in the input</Pill>
-                    </span>
-                  )}
-                  {!readOnly && view.full && (
-                    <button
-                      type='button'
-                      data-mood-crop={view.mediaId}
-                      aria-label={`crop moodboard picture ${i + 1}`}
-                      onClick={() =>
-                        setCropping({ mediaId: view.mediaId, full: view.full as common_MediaFull })
-                      }
-                      onPointerDown={(e) => e.stopPropagation()}
-                      className={cn(TILE_CORNER, MOOD_QUIET, 'absolute bottom-2 left-1 z-[6]')}
-                    >
-                      crop
-                    </button>
-                  )}
-                  {canEdit && view.full && (
-                    <button
-                      type='button'
-                      data-mood-edit={view.mediaId}
-                      aria-label={`edit moodboard picture ${i + 1}`}
-                      title='edit — open the picture editor on this picture; the result joins the board right after it'
-                      onClick={() =>
-                        setEditing({ mediaId: view.mediaId, full: view.full as common_MediaFull })
-                      }
-                      // Нажатие не доходит до кадра: иначе оно завело бы там жест панорамы или
-                      // постановки — тот же довод, что у `FrameButton` поверхности.
-                      onPointerDown={(e) => e.stopPropagation()}
-                      className={cn(TILE_CORNER, MOOD_QUIET, 'absolute bottom-2 right-1 z-[6]')}
-                    >
-                      edit
-                    </button>
-                  )}
-                </>
-              )}
+              // АНАТОМИЯ ПЛИТКИ — ТА ЖЕ, ЧТО У ВСЕХ ПЛИТОК АДМИНКИ (T17, 20-TILE-SPEC §3): номер и
+              // флаг `in the input` — факты, верх слева, видны всегда; ✕ — «с доски», верх справа;
+              // `crop` — низ слева, `edit` — низ справа. Глаголы тихие (`TILE_QUIET`), места назначает
+              // поверхность (`cornerSlotBottom`), `group` — сама плитка галереи.
+              removeLabel={(view, i) => `take moodboard picture ${i + 1} off the board`}
+              tileFlag={(view) =>
+                inputIds.has(view.mediaId) ? { word: 'in the input', tone: 'ink' } : null
+              }
+              tileCorners={(view, i) =>
+                view.full
+                  ? {
+                      left: !readOnly && (
+                        <button
+                          type='button'
+                          data-mood-crop={view.mediaId}
+                          aria-label={`crop moodboard picture ${i + 1}`}
+                          onClick={() =>
+                            setCropping({
+                              mediaId: view.mediaId,
+                              full: view.full as common_MediaFull,
+                            })
+                          }
+                          // Нажатие не доходит до кадра: иначе оно завело бы там жест панорамы или
+                          // постановки — тот же довод, что у `FrameButton` поверхности.
+                          onPointerDown={(e) => e.stopPropagation()}
+                          className={cn(TILE_CORNER, TILE_QUIET, 'py-0.5 leading-none')}
+                        >
+                          crop
+                        </button>
+                      ),
+                      right: canEdit && (
+                        <button
+                          type='button'
+                          data-mood-edit={view.mediaId}
+                          aria-label={`edit moodboard picture ${i + 1}`}
+                          title='edit — open the picture editor on this picture; the result joins the board right after it'
+                          onClick={() =>
+                            setEditing({
+                              mediaId: view.mediaId,
+                              full: view.full as common_MediaFull,
+                            })
+                          }
+                          onPointerDown={(e) => e.stopPropagation()}
+                          className={cn(TILE_CORNER, TILE_QUIET, 'py-0.5 leading-none')}
+                        >
+                          edit
+                        </button>
+                      ),
+                    }
+                  : null
+              }
               /* ⚠ `renderEditor` ДОСКЕ БОЛЬШЕ НЕ ПЕРЕДАЁТСЯ — И ЭТО B-9, А НЕ ПОТЕРЯ. Здесь стоял
                  `AnnotationEditor` в узком корпусе (R-2), полосой под кадрами; вместе с ним стояла
                  «бровь» — его пустое состояние («no callout selected — …»), которую владелец назвал
@@ -1357,8 +1352,8 @@ export function MoodBoard({
             onOpenChange={(open) => !open && setPendingRemove(null)}
             onConfirm={confirmRemove}
             onCancel={() => setPendingRemove(null)}
-            title='remove the picture'
-            confirmLabel='remove it'
+            title='off the board'
+            confirmLabel='take it off'
             width='sm'
           >
             <div className='space-y-2'>
