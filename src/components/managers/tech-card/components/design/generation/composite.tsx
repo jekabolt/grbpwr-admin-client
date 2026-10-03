@@ -1,4 +1,8 @@
-import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http/admin';
+import type {
+  GetDesignBandResponse,
+  common_DesignPicture,
+  common_DesignRun,
+} from 'api/proto-http/admin';
 
 import { normaliseViewKey, viewLabel } from '../views';
 
@@ -18,6 +22,10 @@ import { normaliseViewKey, viewLabel } from '../views';
  * separate images for a composite ask, and a hand-brought sheet of three flats is a composite
  * nobody asked for. The request is an intention; `composite_views` is an observation, and only the
  * observation is allowed to drive a rule.
+ *
+ * ⚠ ONE EXCEPTION, THE SPLIT CORNER (03.10, owner item 13): `readSplit` below offers the cut on an
+ * edit of a sheet and on a `one` sheet the writer never saw — hiding a needed cut was the worse
+ * error. The marks, the badge and the slot refusal still read the column alone.
  *
  * SO WHAT HAPPENS WHILE NOTHING WRITES IT. Today, on beta, the column is empty on every row and
  * every reader below answers «not a composite». That is the DESIGNED degradation, not a gap being
@@ -87,6 +95,15 @@ function countDerivedFrom(
   own: readonly common_DesignPicture[] = [],
 ): number {
   if (parentId <= 0) return 0;
+  const pool = bandPool(band, own);
+  return (cropFamilies([...pool.values()]).membersOf.get(parentId) ?? []).length;
+}
+
+/** Every picture of the loaded band plus the row's own, by id. */
+function bandPool(
+  band: GetDesignBandResponse,
+  own: readonly common_DesignPicture[] = [],
+): Map<number, common_DesignPicture> {
   const pool = new Map<number, common_DesignPicture>();
   const add = (pictures: readonly common_DesignPicture[] | undefined) => {
     for (const picture of pictures ?? []) {
@@ -97,7 +114,7 @@ function countDerivedFrom(
   for (const run of band.runs ?? []) add(run.pictures);
   for (const batch of band.batches ?? []) add(batch.pictures);
   add(own);
-  return (cropFamilies([...pool.values()]).membersOf.get(parentId) ?? []).length;
+  return pool;
 }
 
 /**
@@ -123,6 +140,62 @@ export function readComposite(
  */
 export function offersSplit(facts: { views: readonly string[]; splitInto: number }): boolean {
   return facts.views.length >= 2 && facts.splitInto === 0;
+}
+
+/**
+ * WHAT THE SPLIT CORNER READS (03.10, owner item 13: «у меня пропала кнопка сплит на явно
+ * сгенерированной one picture в LATEST GENERATION»). `readComposite` is the file's own word and the
+ * marks stay on it; the corner needs one more step, because two kinds of real sheet arrive with an
+ * empty `composite_views`:
+ *
+ *   · AN EDIT OF A SHEET. `FlattenEditLayer` files the edit as a sibling and does not copy the
+ *     column; with «overwrite» the edit takes the sheet's place on the bench and the original is
+ *     `replaced`, so neither tile offered SPLIT. The views are inherited up the chain of EDITS
+ *     (`derivation === 'flatten'`) to the first picture that declares them. A cut ends the walk:
+ *     a piece is one view.
+ *   · A SHEET FROM A RUN THE WRITER NEVER SAW. The server writes the column from the run's params
+ *     (`compositeViewsOf`: layout `one` over two or more views), so for an output of that run with
+ *     nothing written the same params are the same fact read one step later. Only for a genuine
+ *     output (no parent), without a named single view, of a run that is not a fix.
+ *
+ * Hidden only where we are sure of one view: a crop, a per-view layout, a single requested view, a
+ * fix, or a sheet already cut (`splitInto`).
+ */
+export function readSplit(
+  band: GetDesignBandResponse,
+  picture: common_DesignPicture,
+  siblings?: readonly common_DesignPicture[],
+  run?: common_DesignRun,
+): { views: string[]; splitInto: number } {
+  const splitInto = countDerivedFrom(band, picture.id ?? 0, siblings);
+  const pool = bandPool(band, siblings);
+  let node = picture;
+  const seen = new Set<number>([picture.id ?? 0]);
+  for (;;) {
+    const declared = node.compositeViews ?? [];
+    if (declared.length) return { views: declared.map((v) => normaliseViewKey(v)), splitInto };
+    if (node.derivation !== 'flatten') break;
+    const parentId = node.derivedFrom ?? 0;
+    const parent = pool.get(parentId);
+    if (parentId <= 0 || seen.has(parentId) || !parent) return { views: [], splitInto };
+    seen.add(parentId);
+    node = parent;
+  }
+  const params = run?.params;
+  const genuineOutput =
+    (node.derivedFrom ?? 0) <= 0 &&
+    !(node.ghostView ?? '').trim() &&
+    (node.runId ?? 0) > 0 &&
+    node.runId === run?.id;
+  const fix =
+    (params?.fixTargets ?? []).length > 0 ||
+    (params?.fixSlotIds ?? []).length > 0 ||
+    !!(params?.fixTarget ?? '').trim();
+  const asked = params?.views ?? [];
+  if (genuineOutput && !fix && (params?.layout ?? '').trim() === 'one' && asked.length >= 2) {
+    return { views: asked.map((v) => normaliseViewKey(v)), splitInto };
+  }
+  return { views: [], splitInto };
 }
 
 /* ─────────────────────────── the family a cut leaves behind (H-10) ─────────────────────────── */
@@ -307,7 +380,7 @@ export function compositeTail(facts: CompositeFacts): string {
  * happened to be a crop, and one that had been split three times still said «split into views».
  * Both readings are one field apart and neither is visible to a type checker.
  */
-export function splitVerb(facts: CompositeFacts): string {
+export function splitVerb(facts: { splitInto: number }): string {
   return facts.splitInto > 0 ? 'split again ▸' : 'split into views ▸';
 }
 

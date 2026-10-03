@@ -140,6 +140,50 @@ try {
     a.offersSplit(a.readComposite({ runs: [] }, sheet, [sheet])),
   );
 
+  // T14 (owner item 13): every real multi-view sheet offers SPLIT — an EDIT of a sheet (the bench
+  // shows the edit; `FlattenEditLayer` does not copy composite_views) and a `one` sheet the writer
+  // never saw (empty column, run params layout one over two views). Hidden only on a sure single.
+  const S = (picture, row, run) => a.offersSplit(a.readSplit({ runs: [] }, picture, row, run));
+  const oneRun = { id: 5, params: { layout: 'one', views: ['front', 'back'] } };
+  const sheet5 = { id: 50, runId: 5, compositeViews: ['front', 'back'] };
+  const edit5 = { id: 51, runId: 5, derivedFrom: 50, derivation: 'flatten' };
+  const edit5b = { id: 52, runId: 5, derivedFrom: 51, derivation: 'flatten' };
+  check('split T14: a declared sheet', S(sheet5, [sheet5], oneRun));
+  check('split T14: an edit of a sheet', S(edit5, [sheet5, edit5], oneRun));
+  check('split T14: an edit of an edit of a sheet', S(edit5b, [sheet5, edit5, edit5b], oneRun));
+  check('split T14: an edit of a sheet, run unknown', S(edit5, [sheet5, edit5], undefined));
+  const bare = { id: 60, runId: 5 };
+  check('split T14: a one sheet with an empty column', S(bare, [bare], oneRun));
+  const bareEdit = { id: 61, runId: 5, derivedFrom: 60, derivation: 'flatten' };
+  check(
+    'split T14: an edit of a one sheet with an empty column',
+    S(bareEdit, [bare, bareEdit], oneRun),
+  );
+  check(
+    'split T14: not on a per_view output',
+    !S(bare, [bare], { id: 5, params: { layout: 'per_view', views: ['front', 'back'] } }),
+  );
+  check(
+    'split T14: not when one view was asked',
+    !S(bare, [bare], { id: 5, params: { layout: 'one', views: ['front'] } }),
+  );
+  check(
+    'split T14: not on a fix',
+    !S(bare, [bare], {
+      id: 5,
+      params: { layout: 'one', views: ['front', 'back'], fixTargets: ['back'] },
+    }),
+  );
+  const piece = { id: 62, runId: 5, derivedFrom: 60, derivation: 'crop', ghostView: 'front' };
+  check('split T14: not on a cut piece', !S(piece, [bare, piece], oneRun));
+  const pieceEdit = { id: 63, runId: 5, derivedFrom: 62, derivation: 'flatten' };
+  check(
+    'split T14: not on an edit of a cut piece',
+    !S(pieceEdit, [bare, piece, pieceEdit], oneRun),
+  );
+  check('split T14: not once the one sheet is cut', !S(bare, [bare, piece], oneRun));
+  check("split T14: not on another run's picture", !S({ id: 70, runId: 4 }, [], oneRun));
+
   // FX3 (gate 03.10): the FLAT history grid shows EVERY picture of a run, hidden ones included (the
   // row dims them), so hiding pictures never makes a run vanish from the history.
   const HID = '2026-10-01T10:00:00Z';

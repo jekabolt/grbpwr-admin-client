@@ -33,7 +33,14 @@ import { useDesignWrites } from '../use-design-band';
 import { isPictureHidden } from '../visibility';
 import { isActiveView, isLegacyView, normaliseViewKey, viewLabel } from '../views';
 import { closeSurface, openSurface } from './bench-store';
-import { compositeTail, isCutOut, offersSplit, readComposite, splitVerb } from './composite';
+import {
+  compositeTail,
+  isCutOut,
+  offersSplit,
+  readComposite,
+  readSplit,
+  splitVerb,
+} from './composite';
 import { DeletePictureDoor, isDerivedPicture } from './delete-picture-modal';
 import { SlotPicker } from './slot-picker';
 import { thumbUrl } from './thumb';
@@ -321,6 +328,7 @@ export function RunTile({
   techCardId,
   picture,
   siblings,
+  run,
   workbench,
   rep,
   cardFit,
@@ -339,6 +347,8 @@ export function RunTile({
   picture: common_DesignPicture;
   /** Every picture of the run row this tile stands in — the branch `overwrite` is judged by. */
   siblings?: readonly common_DesignPicture[];
+  /** The run row the tile stands in: its params tell a one-picture sheet the writer never saw. */
+  run?: common_DesignRun;
   /**
    * The tile stands on the latest-generation WORKBENCH: its editor asks «overwrite or save as new»
    * (`VectorModal.replace`). In the history an edit is always new.
@@ -399,6 +409,7 @@ export function RunTile({
   // from what the run ASKED for.
   const facts = readComposite(band, picture, siblings);
   const composite = facts.declared;
+  const split = readSplit(band, picture, siblings, run);
   const provenance = readProvenance(picture);
   const handle = pictureHandle(picture);
   const inSlot = slotOfPicture(band, pictureId);
@@ -653,11 +664,11 @@ export function RunTile({
            has been cut out of it yet (F-8). A single-view picture no longer offers it. Never on a
            3D file (E-32). */
         onSplit={
-          !disabled && !hidden && !replaced && !threedFile && offersSplit(facts)
+          !disabled && !hidden && !replaced && !threedFile && offersSplit(split)
             ? {
                 onClick: () => onSplit(picture),
                 ariaLabel: `split ${handle} into views`,
-                title: `${splitVerb(facts)} cut this file into pictures a slot can take`,
+                title: `${splitVerb(split)} cut this file into pictures a slot can take`,
               }
             : undefined
         }
@@ -693,9 +704,7 @@ export function RunTile({
           <div className={footer ? 'ml-4 shrink-0' : 'shrink-0'}>{deleteDoor}</div>
         </div>
       ) : (
-        footer && (
-          <div className='mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5'>{footer}</div>
-        )
+        footer && <div className='mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5'>{footer}</div>
       )}
 
       {/* Редактор монтируется только раскрытым. `slot` НЕ ПЕРЕДАЁТСЯ НАРОЧНО: плитка истории — не

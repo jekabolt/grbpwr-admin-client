@@ -234,6 +234,7 @@ export function RunOutputs({
               techCardId={techCardId}
               picture={picture}
               siblings={pictures}
+              run={run}
               workbench={workbench}
               rep={rep}
               cardFit={cardFit}
@@ -279,6 +280,7 @@ export function RunOutputs({
                     techCardId={techCardId}
                     picture={member}
                     siblings={pictures}
+                    run={run}
                     workbench={workbench}
                     rep={rep}
                     cardFit={cardFit}
