@@ -257,6 +257,41 @@ try {
   await page.mouse.click(p.x, p.y);
   const early = (await state()).plain;
   check('C1 tile without zoom → onOpen immediately', early === 1, `plain=${early}`);
+
+  // V · лицо-клип (TF1): зум-угла нет, контролы видео живы, большой вид — двойным кликом по
+  // картинке (не по полосе контролов) и скрытым `open large` с клавиатуры.
+  const V = '[data-probe="clip"]';
+  check('V1 clip: a <video> with controls', !!(await page.$(`${V} video[controls]`)));
+  check(
+    'V2 clip: no zoom button, no surface over the controls',
+    (await page.$$(`${V} button[aria-label^="zoom"], ${V} [data-tile-surface]`)).length === 0,
+  );
+  const vb = await page.$eval(`${V} video`, (el) => {
+    const b = el.getBoundingClientRect();
+    return { x: b.x + b.width / 2, top: b.y + 30, bottom: b.y + b.height - 10 };
+  });
+  await page.mouse.dblclick(vb.x, vb.bottom);
+  await page.waitForTimeout(300);
+  check('V3 double click on the controls bar → no viewer', (await dialogs()) === 0);
+  await page.mouse.dblclick(vb.x, vb.top);
+  await page.waitForTimeout(300);
+  check('V4 double click on the clip → viewer opens', (await dialogs()) > 0);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
+  await page.waitForTimeout(300);
+  const door = await page.$(`${V} [data-open-large]`);
+  const doorBox = door ? await door.boundingBox() : null;
+  check(
+    'V5 `open large` is visually hidden',
+    !!door && (!doorBox || doorBox.width <= 1 || doorBox.height <= 1),
+    JSON.stringify(doorBox),
+  );
+  if (door) {
+    await door.focus();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(300);
+  }
+  check('V6 keyboard: `open large` + Enter → viewer opens', (await dialogs()) > 0);
   await ctx.close();
 } finally {
   await browser.close();

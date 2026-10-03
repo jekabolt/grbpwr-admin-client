@@ -972,6 +972,9 @@ export function CornerMenu({ menu }: { menu: PictureTileMenu }) {
  */
 const CLICK_WINDOW_MS = 350;
 
+/** The height of the browser's own controls bar on a clip: a double click there is not «open». */
+const CLIP_CONTROLS_PX = 40;
+
 export function PictureTile({
   url,
   alt,
@@ -1243,6 +1246,8 @@ export function PictureTile({
            предмета остаётся половина фона. `className` идёт следом намеренно: тон, заданный
            вызывающим, обязан перебивать грунт, а не наоборот. */
         ground === 'neutral' && fit === 'contain' && 'bg-bgSecondary',
+        clip &&
+          'has-[[data-open-large]:focus-visible]:outline has-[[data-open-large]:focus-visible]:outline-2 has-[[data-open-large]:focus-visible]:-outline-offset-2 has-[[data-open-large]:focus-visible]:outline-textColor',
         className,
       )}
       style={{ aspectRatio: aspect }}
@@ -1289,6 +1294,20 @@ export function PictureTile({
             aria-label={alt}
             className='h-full w-full object-contain'
             style={{ objectFit: fit }}
+            /* TF1 · THE CLIP'S WAY INTO THE LARGE VIEWER: a double click on the picture, never on
+               the browser's controls bar (its bottom strip seeks and switches the sound). The
+               default is prevented so a browser that reads a double click as «fullscreen» does
+               not do both. The keyboard way is the hidden `open large` below. */
+            onDoubleClick={
+              zoomable
+                ? (e) => {
+                    const box = e.currentTarget.getBoundingClientRect();
+                    if (e.clientY > box.bottom - CLIP_CONTROLS_PX) return;
+                    e.preventDefault();
+                    openZoom();
+                  }
+                : undefined
+            }
           />
         ) : face ? (
           face
@@ -1341,6 +1360,7 @@ export function PictureTile({
           return (
             <button
               type='button'
+              data-tile-surface=''
               tabIndex={zoomSurface ? undefined : -1}
               aria-hidden={zoomSurface ? undefined : 'true'}
               aria-label={zoomSurface ? `zoom ${alt}` : undefined}
@@ -1358,6 +1378,20 @@ export function PictureTile({
             />
           );
         })()}
+
+      {/* TF1 · A CLIP'S KEYBOARD DOOR TO THE LARGE VIEWER (the HX3 grammar of the annotation
+          surface). The clip keeps its own controls, so it has no zoom surface: the mouse opens the
+          viewer by a double click on the picture, the keyboard by this `sr-only` action, and its
+          focus is drawn as the frame's own ring (`has-[…]` on the host), not as a new button. */}
+      {clip && zoomable && !onOpen && (
+        <button
+          type='button'
+          data-open-large=''
+          className='sr-only'
+          aria-label={`open ${alt} large`}
+          onClick={openZoom}
+        />
+      )}
 
       {children}
 

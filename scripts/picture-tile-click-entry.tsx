@@ -1,6 +1,8 @@
 // СТЕНД ПЛИТКИ: ОДИН КЛИК ИЛИ ДВА (hotfix HX2). Монтирует НАСТОЯЩИЙ `PictureTile` дважды:
 //   · `arb`   — одиночный клик занят `onOpen` (переключатель выбора), двойной открывает зум;
 //   · `plain` — `onOpen` без зума (у плитки нет ряда просмотрщика): клик срабатывает сразу.
+//   · `clip`  — лицо-видео (TF1): родные контролы живы, большой вид — двойным кликом по картинке
+//     (не по полосе контролов) и скрытым `open large` с клавиатуры.
 // Счётчики вызовов — в `#state`. Прогоняется `scripts/picture-tile-click-probe.mjs`.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -15,6 +17,8 @@ const PIC =
   encodeURIComponent(
     "<svg xmlns='http://www.w3.org/2000/svg' width='300' height='400'><rect width='300' height='400' fill='%23ddd'/></svg>",
   );
+
+const CLIP = 'http://probe.local/clip.mp4';
 
 function Harness() {
   const [arb, setArb] = useState(0);
@@ -33,6 +37,9 @@ function Harness() {
         </div>
         <div data-probe='plain' style={{ width: 200, height: 250, position: 'relative' }}>
           <PictureTile url={PIC} alt='plain' onOpen={() => setPlain((n) => n + 1)} />
+        </div>
+        <div data-probe='clip' style={{ width: 200, height: 250, position: 'relative' }}>
+          <PictureTile url={CLIP} alt='clip' gallery={{ src: CLIP, type: 'video', alt: 'clip' }} />
         </div>
       </div>
       <pre id='state' style={{ position: 'fixed', left: -9999, top: 0 }}>
