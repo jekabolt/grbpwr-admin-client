@@ -173,8 +173,12 @@ export function benchPlan(
  * ordinary cards, in the deck's order, each with the full tile anatomy (slot, edit, delete). The
  * sheet stays where it always was, in GENERATION HISTORY, whose rows draw `outputPlan` unchanged.
  */
-export function piecesInPlace(plan: OutputPlan): OutputPlan {
-  const cut = (card: OutputCard) => card.members.length > 0;
+export function piecesInPlace(plan: OutputPlan, cutRoots?: ReadonlySet<number>): OutputPlan {
+  /* A CUT SHEET IS A CARD WITH PIECES HERE — or one the host knows was cut (`cutRoots`: the brought
+     group's `wholeDecks`) whose every piece already stands on SIDES. That one leaves the bench
+     whole: with no piece left to show it is not «uncut» (gate wave 3, W5). */
+  const cut = (card: OutputCard) =>
+    card.members.length > 0 || !!cutRoots?.has(card.picture.id ?? 0);
   if (!plan.cards.some(cut)) return plan;
   const cards: OutputCard[] = [];
   const rootOf = new Map<number, number>();

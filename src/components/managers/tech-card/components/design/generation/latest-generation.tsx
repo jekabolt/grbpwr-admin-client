@@ -478,7 +478,12 @@ export function LatestGeneration({
     () => (kind === 'render' && renderStep ? broughtGroup(band, renderStep) : null),
     [kind, renderStep, band],
   );
-  const broughtPlan = useMemo(() => (brought ? piecesInPlace(brought.plan) : null), [brought]);
+  /* W5: a brought sheet is a cut FAMILY when the band carries pieces of it (`wholeDecks`), wherever
+     they stand — one whose every piece is on SIDES leaves the group whole, not drawn as uncut. */
+  const broughtPlan = useMemo(
+    () => (brought ? piecesInPlace(brought.plan, new Set(brought.wholeDecks.keys())) : null),
+    [brought],
+  );
   const [broughtOpen, setBroughtOpen] = useState(false);
   if (broughtOpen && !brought) setBroughtOpen(false);
   const broughtRun = broughtOpen && brought && broughtPlan ? brought.run : null;

@@ -122,6 +122,12 @@ const MUTATIONS = {
     from: 'rootOf.set(piece.id ?? 0, card.picture.id ?? 0);',
     to: '',
   },
+  // W5: a brought sheet whose pieces all stand on SIDES is drawn as an uncut sheet again.
+  'brought-cut': {
+    file: /generation\/latest-generation\.tsx$/,
+    from: 'piecesInPlace(brought.plan, new Set(brought.wholeDecks.keys()))',
+    to: 'piecesInPlace(brought.plan)',
+  },
   // R(a): the popup seeds from `composite_views` again (empty on beta's `one` sheets).
   'popup-seed': {
     file: /split-modal\.tsx$/,
@@ -515,6 +521,33 @@ try {
     JSON.stringify(placed.map((b) => [b.pictureId, b.slot?.viewKey])),
   );
   check('W4.4 the sheet is still not drawn', !(await page.$(`${RC} [data-picture="711"]`)));
+
+  // ══ W5 · A BROUGHT SHEET WHOSE PIECES ALL STAND ON SIDES DOES NOT COME BACK UNCUT ══
+  const BC = P('render-brought-cut');
+  check(
+    'W5.1 every piece on SIDES: no brought line, no sheet 950 anywhere',
+    !(await page.$(`${BC} [data-latest-brought]`)) &&
+      !(await page.$(`${BC} [data-picture="950"]`)) &&
+      !(await page.$(`${BC} [data-inline-split]`)),
+  );
+  const BP = P('render-brought-part');
+  check(
+    'W5.2 one piece free: `1 brought ▸` (the free piece, not the sheet)',
+    (await page
+      .$eval(`${BP} [data-latest-brought]`, (e) => e.getAttribute('data-latest-brought'))
+      .catch(() => '')) === '1',
+  );
+  const door3 = await page.$(`${BP} [data-latest-brought-door]`);
+  if (door3) await door3.click();
+  await page.waitForTimeout(200);
+  check(
+    'W5.3 open: the free piece stands, the sheet does not',
+    !!(await page.$(`${BP} [data-picture="961"]`)) && !(await page.$(`${BP} [data-picture="960"]`)),
+  );
+  check(
+    'W5.4 …and its cut offers the bulk line',
+    !!(await page.$(`${BP} [data-put-pieces="960"]`)),
+  );
 
   // ══ R(c) · THE BROUGHT RENDERS STAY REACHABLE — ON THE RENDER BENCH ══
   const RB = P('render-brought');
