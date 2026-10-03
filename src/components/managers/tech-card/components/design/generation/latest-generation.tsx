@@ -36,7 +36,7 @@ import {
   useBench,
   useBenchChoice,
 } from './bench-store';
-import { InlineSplit } from './inline-split';
+import { InlineSplit, useKeptWhole } from './inline-split';
 import {
   benchPlan,
   deckAfterZoom,
@@ -446,17 +446,20 @@ export function LatestGeneration({
    * (`apply splitted`, owner E-6) is one quiet line under the tiles (`PutPiecesIntoSides`, W4).
    */
   const writesOff = disabled || !speaks;
+  /** W6: pictures the person kept as one picture — tiles again, the split corner on them. */
+  const keptWhole = useKeptWhole(techCardId);
   const inlineSheets = useMemo(() => {
     if (!run || !plan || isRunLive(run)) return [];
     const pictures = run.pictures ?? [];
     const out: { picture: common_DesignPicture; views: string[] }[] = [];
     for (const card of plan.cards) {
       if (card.members.length || (card.picture.id ?? 0) <= 0) continue;
+      if (keptWhole.has(card.picture.id ?? 0)) continue;
       const views = splitViewsOf(band, card.picture, pictures, run, writesOff);
       if (views) out.push({ picture: card.picture, views });
     }
     return out;
-  }, [run, plan, band, writesOff]);
+  }, [run, plan, band, writesOff, keptWhole]);
   /** The row's tiles: the plan without the sheets drawn as inline editors. */
   const tilePlan = useMemo(() => {
     if (!plan || !inlineSheets.length) return plan;

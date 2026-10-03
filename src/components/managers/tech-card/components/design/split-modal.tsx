@@ -401,21 +401,22 @@ export type SplitCut = ReturnType<typeof useSplitCut>;
  * картинке и одному списку сторон; кнопок-пресетов нет (Q2: стороны заранее разложены по видам,
  * которые объявляет файл), поэтому две оставшиеся правки не должны спорить с картинкой.
  */
-const QUIET =
+export const SPLIT_QUIET =
   'cursor-pointer text-micro uppercase tracking-label text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
 
 /** `+ side` and `reset` — `+ side` only where a second frame means something (not in crop mode). */
-export function SplitQuietActions({ cut }: { cut: SplitCut }) {
+export function SplitQuietActions({ cut, children }: { cut: SplitCut; children?: ReactNode }) {
   return (
     <span className='flex items-baseline gap-3'>
       {cut.mode === 'split' && (
-        <button type='button' className={QUIET} onClick={cut.addSide}>
+        <button type='button' className={SPLIT_QUIET} onClick={cut.addSide}>
           + side
         </button>
       )}
-      <button type='button' className={QUIET} onClick={cut.reset}>
+      <button type='button' className={SPLIT_QUIET} onClick={cut.reset}>
         reset
       </button>
+      {children}
     </span>
   );
 }

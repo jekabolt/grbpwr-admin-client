@@ -38,6 +38,10 @@ const params = { layout: 'one', views: VIEWS };
 const sheet = pic(31, 7, { media: media(131, SHEET, 2000, 1000) as never });
 const uncutRun = { id: 7, kind: 'flat', status: 'done', params, pictures: [sheet] };
 
+// W6: тот же лист `one`, его «keep as one picture» — карточка 3.
+const keptSheet = pic(32, 9, { media: media(132, SHEET, 2000, 1000) as never });
+const keptRun = { id: 9, kind: 'flat', status: 'done', params, pictures: [keptSheet] };
+
 const cutSheet = pic(41, 8, { media: media(141, SHEET_CUT, 2000, 1000) as never });
 const pieces = VIEWS.map((view, i) =>
   pic(42 + i, 8, {
@@ -69,6 +73,9 @@ function Harness() {
         <div style={{ width: 900, padding: 40 }}>
           <div data-probe='uncut'>
             <LatestGeneration band={bandOf(uncutRun)} techCardId={1} />
+          </div>
+          <div data-probe='kept'>
+            <LatestGeneration band={bandOf(keptRun)} techCardId={3} />
           </div>
           <div data-probe='cut'>
             <LatestGeneration band={bandOf(cutRun)} techCardId={2} />

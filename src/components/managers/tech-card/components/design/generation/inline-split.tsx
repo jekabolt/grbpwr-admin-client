@@ -1,10 +1,71 @@
 import type { common_DesignPicture } from 'api/proto-http/admin';
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { Button } from 'ui/components/button';
 
 import { pictureHandle } from '../handles';
-import { SplitError, SplitQuietActions, SplitStage, useSplitCut } from '../split-modal';
+import {
+  SPLIT_QUIET,
+  SplitError,
+  SplitQuietActions,
+  SplitStage,
+  useSplitCut,
+} from '../split-modal';
 import { closeSurface, openSurface } from './bench-store';
+
+/**
+ * ═══ «KEEP AS ONE PICTURE» — A PICTURE THE GATE MISREAD AS A SHEET (gate wave 3, W6) ════════════
+ *
+ * `splitViewsOf` reads a `one` run's lone output as a sheet even when the provider answered with a
+ * single drawing (the legacy `readSplit` fallback). Drawn only as the editor, such a picture had no
+ * way back to its tile. The person says so once: the picture id goes into this card's kept set
+ * (localStorage, per card, best effort) and the bench draws it as the ordinary tile again, its
+ * `split` corner still there for a change of mind. No write.
+ */
+const KEPT_KEY = (card: number) => `grbpwr.design.split.kept.${card}`;
+const keptCache = new Map<number, ReadonlySet<number>>();
+const keptListeners = new Set<() => void>();
+const NONE: ReadonlySet<number> = new Set();
+
+function readKept(card: number): ReadonlySet<number> {
+  const cached = keptCache.get(card);
+  if (cached) return cached;
+  let kept: ReadonlySet<number> = NONE;
+  try {
+    const raw = window.localStorage.getItem(KEPT_KEY(card));
+    const ids = raw ? (JSON.parse(raw) as unknown) : null;
+    if (Array.isArray(ids)) kept = new Set(ids.map(Number).filter((n) => n > 0));
+  } catch {
+    /* no storage, or a value this build did not write — nothing kept */
+  }
+  keptCache.set(card, kept);
+  return kept;
+}
+
+export function keepAsOnePicture(card: number, pictureId: number): void {
+  if (card <= 0 || pictureId <= 0) return;
+  const next = new Set(readKept(card));
+  next.add(pictureId);
+  keptCache.set(card, next);
+  try {
+    window.localStorage.setItem(KEPT_KEY(card), JSON.stringify([...next]));
+  } catch {
+    /* the session still remembers it */
+  }
+  keptListeners.forEach((l) => l());
+}
+
+function subscribeKept(listener: () => void): () => void {
+  keptListeners.add(listener);
+  return () => {
+    keptListeners.delete(listener);
+  };
+}
+
+/** The pictures of this card kept as one picture — the bench draws them as tiles, not the editor. */
+export function useKeptWhole(card: number): ReadonlySet<number> {
+  const read = () => readKept(card);
+  return useSyncExternalStore(subscribeKept, read, read);
+}
 
 /**
  * ═══ THE SPLIT, INLINE ON THE BENCH (03.10, owner item 19, T20) ═══════════════════════════════════
@@ -66,7 +127,16 @@ export function InlineSplit({
             cut · waiting for the pieces…
           </span>
         ) : (
-          <SplitQuietActions cut={cut} />
+          <SplitQuietActions cut={cut}>
+            <button
+              type='button'
+              className={SPLIT_QUIET}
+              data-split-keep={pictureId}
+              onClick={() => keepAsOnePicture(techCardId, pictureId)}
+            >
+              keep as one picture
+            </button>
+          </SplitQuietActions>
         )}
         <Button
           type='button'

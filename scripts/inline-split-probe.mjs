@@ -13,7 +13,7 @@
 //     в истории лист остаётся (`gridPicturesOf`).
 //
 //   node scripts/inline-split-probe.mjs [--shot=out.png]
-//   node scripts/inline-split-probe.mjs --mutate=inline|seed|labels|payload|pieces|role|keys|landed — каждая краснеет
+//   node scripts/inline-split-probe.mjs --mutate=inline|seed|labels|payload|pieces|role|keys|landed|keep — каждая краснеет
 //
 // Playwright не в зависимостях проекта — ищется в кэше npx и МОЛЧА пропускается, если не найден.
 import { createRequire } from 'node:module';
@@ -136,6 +136,12 @@ const MUTATIONS = {
     file: /split-modal\.tsx$/,
     from: "    if (landedRef.current) return;\n    requestIdRef.current = '';",
     to: "    setLanded(false);\n    requestIdRef.current = '';",
+  },
+  // W6: «keep as one picture» снова ничего не меняет — редактор остаётся тупиком.
+  keep: {
+    file: /generation\/latest-generation\.tsx$/,
+    from: 'if (keptWhole.has(card.picture.id ?? 0)) continue;',
+    to: '',
   },
   // после реза верстак снова держит лист (с колодой кусков).
   pieces: {
@@ -440,6 +446,37 @@ try {
     'L3 landed: confirm stays held, one cut only',
     stillHeld && cutsNow === 1,
     `${stillHeld} · ${cutsNow}`,
+  );
+
+  // ── W6: «KEEP AS ONE PICTURE» — НЕ ЛИСТ, А КАРТИНКА ──
+  const K = '[data-probe="kept"]';
+  const keepWord = await page
+    .$eval(`${K} [data-split-keep="32"]`, (b) => b.textContent.trim())
+    .catch(() => '');
+  check(
+    'W6.1 the editor offers `keep as one picture` beside `reset`',
+    keepWord === 'keep as one picture',
+    keepWord,
+  );
+  if (keepWord) await page.click(`${K} [data-split-keep="32"]`);
+  await page.waitForTimeout(200);
+  check(
+    'W6.2 kept: no editor, the picture is a tile again',
+    !(await page.$(`${K} [data-inline-split]`)) &&
+      !!(await page.$(`${K} [data-picture="32"] [data-picture-tile]`)),
+  );
+  check(
+    'W6.3 …with its split corner for a change of mind',
+    !!(await page.$(`${K} [data-picture="32"] button[aria-label^="split"]`)),
+  );
+  check(
+    'W6.4 remembered per card (localStorage)',
+    (await page.evaluate(() => window.localStorage.getItem('grbpwr.design.split.kept.3'))) ===
+      '[32]',
+  );
+  check(
+    'W6.5 no write',
+    !(await page.evaluate(() => window.__calls.some((c) => c.body?.pictureId === 32))),
   );
 
   // ── ПОСЛЕ РЕЗА: КУСКИ ВМЕСТО ЛИСТА ──
