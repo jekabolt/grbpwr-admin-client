@@ -64,8 +64,9 @@ import { useElapsed, useRunById } from './use-generation';
  * split an uncut sheet (`SplitModal forInput={false}` — a cut here lays a sheet out into views, it
  * does NOT feed the prompt, so no reference role and no `moodboardMedia` row is written), edit
  * (a NEW sibling picture in the same run, `slot={null}`, exactly as from the history — «overwrite or
- * save as new» is phase 2), zoom through the studio's one viewer, and the slot marks: `SlotPicker`
- * under a free picture, `unmark` under a plate a FLAT SLOTS slot reads («разметка», D-40 п.1).
+ * save as new» is phase 2), the studio's one viewer on the surface, and the slot marks IN THE
+ * FRAME (T13): `slot ▾` on a free picture, `✕` = unmark on a plate a FLAT SLOTS slot reads
+ * («разметка», D-40 п.1). Nothing stands under a tile.
  *
  * WHICH RUN (§3a, D-40 п.4). The newest run on the band's first page whose `kind` is `flat` (the
  * GENERATE of this block — a text draft, a vector redraw, a render never), not archived, and either

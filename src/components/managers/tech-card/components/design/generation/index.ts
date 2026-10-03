@@ -10,7 +10,7 @@ export { hasAnyPictures } from './generation-form';
 export { GenerationHistory } from './generation-history';
 export { LatestGeneration } from './latest-generation';
 export { RunPanel } from './run-panel';
-export { SlotPicker } from './slot-picker';
+export { useSlotMenu } from './slot-picker';
 export { GenerationStudio } from './studio';
 
 export { formatMoney, decimalToNumber } from './money';

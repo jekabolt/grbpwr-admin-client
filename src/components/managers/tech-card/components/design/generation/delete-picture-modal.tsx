@@ -124,20 +124,16 @@ export function refusalSentence(error: unknown): string {
 
 /* ────────────────────────────── the door ────────────────────────────── */
 
-export function DeletePictureDoor({
-  techCardId,
-  picture,
-  siblings,
-  disabled,
-  className,
-}: {
-  techCardId: number;
-  picture: common_DesignPicture;
-  /** The pictures of the row this one stands in — where its descendants are counted. */
-  siblings?: readonly common_DesignPicture[];
-  disabled?: boolean;
-  className?: string;
-}) {
+/**
+ * THE QUESTION AND THE WRITE, WITHOUT THE BUTTON (T13). The workbench tile asks from its `slot ▾`
+ * menu (`delete…`, the danger row) instead of a door under the frame, so the confirmation and the
+ * mutation live here once and both organs open the same modal.
+ */
+export function useDeletePicture(
+  techCardId: number,
+  picture: common_DesignPicture,
+  siblings?: readonly common_DesignPicture[],
+) {
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
   const [open, setOpen] = useState(false);
@@ -158,6 +154,47 @@ export function DeletePictureDoor({
     },
   });
 
+  const modal = open ? (
+    <ConfirmationModal
+      open
+      onOpenChange={setOpen}
+      title='delete this picture?'
+      confirmLabel='delete for good'
+      cancelLabel='keep'
+      width='sm'
+      onConfirm={() => remove.mutate()}
+    >
+      <Text size='small' component='p'>
+        <span data-delete-question=''>{deleteQuestion(pieces)}</span>
+      </Text>
+    </ConfirmationModal>
+  ) : null;
+
+  return { ask: () => setOpen(true), pending: remove.isPending, pieces, modal };
+}
+
+/** The sentence a delete organ carries in its `title`. */
+export function deleteTitle(pieces: number): string {
+  return `delete this picture for good — it${pieces > 0 ? ` and its ${pieces} cut ${pieces === 1 ? 'piece' : 'pieces'}` : ''} leave this card and the storage; this cannot be undone`;
+}
+
+export function DeletePictureDoor({
+  techCardId,
+  picture,
+  siblings,
+  disabled,
+  className,
+}: {
+  techCardId: number;
+  picture: common_DesignPicture;
+  /** The pictures of the row this one stands in — where its descendants are counted. */
+  siblings?: readonly common_DesignPicture[];
+  disabled?: boolean;
+  className?: string;
+}) {
+  const pictureId = picture.id ?? 0;
+  const { ask, pending, pieces, modal } = useDeletePicture(techCardId, picture, siblings);
+
   return (
     <>
       <Button
@@ -166,28 +203,14 @@ export function DeletePictureDoor({
         size='xs'
         data-delete-picture={pictureId || undefined}
         className={cn('shrink-0', className)}
-        disabled={disabled || remove.isPending}
-        onClick={() => setOpen(true)}
+        disabled={disabled || pending}
+        onClick={ask}
         aria-label={`delete picture ${pictureId} for good`}
-        title={`delete this picture for good — it${pieces > 0 ? ` and its ${pieces} cut ${pieces === 1 ? 'piece' : 'pieces'}` : ''} leave this card and the storage; this cannot be undone`}
+        title={deleteTitle(pieces)}
       >
         delete
       </Button>
-      {open && (
-        <ConfirmationModal
-          open
-          onOpenChange={setOpen}
-          title='delete this picture?'
-          confirmLabel='delete for good'
-          cancelLabel='keep'
-          width='sm'
-          onConfirm={() => remove.mutate()}
-        >
-          <Text size='small' component='p'>
-            <span data-delete-question=''>{deleteQuestion(pieces)}</span>
-          </Text>
-        </ConfirmationModal>
-      )}
+      {modal}
     </>
   );
 }

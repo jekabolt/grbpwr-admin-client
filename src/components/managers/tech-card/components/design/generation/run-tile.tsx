@@ -7,9 +7,6 @@ import type {
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
-import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../../schema';
 import { isPickablePicture } from '../band-feed';
@@ -25,7 +22,7 @@ import { pictureHandle } from '../handles';
 import { VectorModal } from '../modals';
 import type { VectorReplace } from '../modals/vector-modal';
 import { usePickMode } from '../pick-mode';
-import { PictureTile } from '../picture-tile';
+import { PictureTile, type PictureTileFlag, type PictureTileMenu } from '../picture-tile';
 import { mixedInputNote, provenanceLabel, readProvenance } from '../provenance';
 import { RunRenderTile, useRenderHost } from '../render/render-tile';
 import { isModelUrl } from '../threed/media';
@@ -41,8 +38,13 @@ import {
   readSplit,
   splitVerb,
 } from './composite';
-import { DeletePictureDoor, isDerivedPicture } from './delete-picture-modal';
-import { SlotPicker } from './slot-picker';
+import {
+  DeletePictureDoor,
+  deleteTitle,
+  isDerivedPicture,
+  useDeletePicture,
+} from './delete-picture-modal';
+import { useSlotMenu } from './slot-picker';
 import { thumbUrl } from './thumb';
 
 /**
@@ -52,8 +54,9 @@ import { thumbUrl } from './thumb';
  * (`slotOfPicture`, `kindWord`), so the history row and the latest-generation workbench under
  * GENERATE (`latest-generation.tsx`, through `run-outputs.tsx`) put the SAME tile on screen: split
  * in the corner of an uncut sheet, edit that files a NEW sibling picture (`slot={null}` — the tile
- * is not a bench slot), zoom through the host's viewer group, and the footer that marks a plate
- * into FLAT SLOTS (`SlotPicker`) or takes it out (`unmark`).
+ * is not a bench slot), the viewer through the host's gallery group, and the two placing organs —
+ * `slot ▾` (`useSlotMenu`) for a free plate, `✕` (unmark) for a plate a slot reads — IN THE FRAME
+ * since T13, like FLAT SLOTS' own cells.
  */
 
 /* ────────────────────────────── reading ────────────────────────────── */
@@ -77,8 +80,6 @@ type SlotOfPicture = {
    * же, где считается его адрес, иначе они разойдутся молча — ровно как разошлись роды верстаков.
    */
   badge: string;
-  /** The caption's word for the place: `front`, `cuff (2)`. */
-  place: string;
   rev: number;
 };
 
@@ -110,7 +111,6 @@ function slotOfPicture(band: GetDesignBandResponse, pictureId: number): SlotOfPi
         // PROSE name; the badge on the tile carries the side alone (r3 п.33).
         label: kind === 'flat' ? viewLabel(view) : `${kind} · ${viewLabel(view)}`,
         badge: viewLabel(view),
-        place: viewLabel(view),
         rev: row.slotRev ?? 0,
       };
     }
@@ -122,7 +122,6 @@ function slotOfPicture(band: GetDesignBandResponse, pictureId: number): SlotOfPi
       // Именованная деталь рода не носила никогда — её имя и есть её адрес.
       label: name,
       badge: name,
-      place: name,
       rev: row.slotRev ?? 0,
     };
   }
@@ -313,15 +312,23 @@ function WorkbenchEditor({
 
 /* ────────────────────────────── the tile ────────────────────────────── */
 
+/** The `delete…` row of the tile's menu — a value no slot can spell (`v:` / `d:` / `__new_detail`). */
+const DELETE_ITEM = '__delete';
+
 /**
  * A run's output. THE PICTURE ITSELF IS `PictureTile` AND NOTHING ELSE (T-8): the file says WHICH
  * roles the picture has (`onSplit`, `onEdit`, a place in the gallery) and the primitive decides
  * where they sit. The tile is handed its OFFSET in a row the section assembled from the whole
  * loaded history (`galleryIndex`) — that is what makes the arrow leave the page it was opened from.
  *
- * WHAT IS LOCAL IS THE CAPTION AND THE FOOTER, the mock-up's `histTile`: `flat · front` under the
- * frame, then `UNMARK` for a plate a slot reads (И-1 — neither a ✕ nor a picker), the slot picker
- * for a free picture, nothing under a sheet (its one door is the split in the corner).
+ * ═══ NOTHING STANDS UNDER THE FRAME (T13, 20-TILE-SPEC §3) ═══════════════════════════════════
+ * Владелец: «в FLAT LATEST GENERATION кнопки unmark или селектор должны быть внутри плитки по
+ * принципу как это сделано в flat slots». The caption (`flat · not standing`) and the door row
+ * (`unmark` button / `— slot —` select / `delete`) are gone: a plate a slot reads wears its side on
+ * the badge and `✕` = unmark top-right (FLAT SLOTS' verb and RPC); a free plate gets the `slot ▾`
+ * corner; `delete…` (workbench, derived only) is the menu's last, danger row behind the same
+ * modal. States the frame cannot show (`hidden`, `replaced`, `fit ≠ card`) are the flag; the
+ * address, provenance and every reason ride in the cell's `title`.
  */
 export function RunTile({
   band,
@@ -430,7 +437,7 @@ export function RunTile({
    * Прогон считается целиком: и `.glb`, и его растровая миниатюра приезжают с родом `threed`.
    */
   const threedFile = (picture.kind ?? '').trim().toLowerCase() === 'threed' || isModelUrl(url);
-  /** Плитка ткани: ни в один слот не встаёт и об этом не объясняется (r3 п.20, `footer` ниже). */
+  /** Плитка ткани: ни в один слот не встаёт и об этом не объясняется (r3 п.20, `menu` ниже). */
   const patternTile = (picture.kind ?? '').trim().toLowerCase() === 'pattern' || rep === 'pattern';
   // The frame opens by its MEDIA (`openAt`), the offset stays the fallback.
   const galleryGroup =
@@ -441,11 +448,15 @@ export function RunTile({
   /* ═══ «DELETE» — ON THE WORKBENCH, ON A DERIVED PICTURE ONLY (28.09, O-68, D-74) ═══════════════
      A crop or an edit of one leaves the card and the storage for good; a root plate of the run has
      no door (the server refuses it: `picture_is_root`). The history's tiles draw none of this — the
-     host gates it (`workbench`). The last door of the row, one step away from the others. */
-  const deleteDoor =
-    workbench && !disabled && pictureId > 0 && isDerivedPicture(picture) ? (
-      <DeletePictureDoor techCardId={techCardId} picture={picture} siblings={siblings} />
-    ) : null;
+     host gates it (`workbench`). On the render tile it is still the row's last door (lane L moves
+     it); on every other tile it is the menu's last row, `delete…` (T13). */
+  const canDelete = !!workbench && !disabled && pictureId > 0 && isDerivedPicture(picture);
+  const deleteDoor = canDelete ? (
+    <DeletePictureDoor techCardId={techCardId} picture={picture} siblings={siblings} />
+  ) : null;
+  /* Hooks above the render-host branch: a tile never changes host, but React counts calls. */
+  const removal = useDeletePicture(techCardId, picture, siblings);
+  const slotMenu = useSlotMenu({ band, techCardId, picture, rep, disabled });
 
   /* ═══ A FABRIC RENDER IN A RUN ROW IS THE RENDER TILE (27.09, O-63, D-62 п.2) ═════════════════
      On FABRIC RENDER a render run's plate draws the doors RENDERS OF THIS CARD drew — `mark ▸`,
@@ -495,51 +506,43 @@ export function RunTile({
    * picker below.
    */
   const badge = composite ? `${facts.views.length} views` : inSlot ? inSlot.badge : undefined;
-  const place = inSlot ? inSlot.place : 'not standing';
-  /**
-   * «REPLACED BY AN EDIT» TAKES THE CAPTION'S ROOM (O-53 phase 2). It is the one fact about the tile
-   * that the frame does not show, and «flat · replaced by an edit» does not fit the history's 148px
-   * track — measured: it cut at «replaced by an e…». The kind word goes (only a flat is ever replaced:
-   * the question lives on the FLAT workbench); a slot the original was put back into stays named.
-   */
-  const replacedCaption = replaced
-    ? inSlot
-      ? `${inSlot.place} · replaced by an edit`
-      : 'replaced by an edit'
-    : null;
 
-  // `flat · front` — the mock-up's `picName`. The address (`run 7 · b`), the provenance and the
-  // composite tail ride in the title: the row already says which run, and the caption is one line.
-  //
-  // ⚠ У ПЛИТКИ ТКАНИ ВТОРОЙ ПОЛОВИНЫ НЕТ (r3 п.20, вторая половина того же пункта). «pattern · not
-  // standing» — то же самое утверждение, что и снятая фраза «стоит не в слоте», сказанное мельче:
-  // паттерн НЕ СТОИТ НИГДЕ ПО УСТРОЙСТВУ, и «не стоит» под каждым кадром ленты — это не факт о
-  // работе, а повторение определения. Остаётся род, который на смешанной ленте ещё различает кадры.
-  // ⚠ У ЛИСТА ПОДПИСИ НЕТ (владелец, 2026-09-07 утро: «flat · sheet of 6 — этот текст убрать»):
-  // бейдж `N views` уже несёт единственный факт, который эта строка повторяла словами.
-  const caption = (
-    <>
-      {/* A REPLACED SHEET SAYS SO TOO: the owner took «flat · sheet of 6» off the sheet because the
-          badge already said it; «replaced by an edit» is a state no badge carries. */}
-      {(!composite || replaced) && (
-        <Text
-          size='micro'
-          component='p'
-          className='mt-1 truncate'
-          title={`${handle} · ${provenanceLabel(provenance)}${compositeTail(facts)}${mixed ? ` · ${mixed}` : ''}${replaced ? ' · replaced by an edit: the edit stands in its place in the latest generation, and this picture stays here' : ''}`}
-        >
-          {replacedCaption ?? (patternTile && !inSlot ? word : `${word} · ${place}`)}
-        </Text>
-      )}
-      {fitMismatch && (
-        // Слово, а не только цвет: система обязана читаться в монохроме, и «≠» здесь несёт смысл
-        // сама по себе. Обе величины названы — расхождение без второй половины ничего не значит.
-        <Text size='nano' component='p' className='truncate uppercase text-error'>
-          fit {runFit} ≠ card {cardFit}
-        </Text>
-      )}
-    </>
-  );
+  /**
+   * ONE FLAG — the state the frame cannot show, in this order: the old `hidden` stamp (pickers and
+   * slots skip it), «replaced by an edit» (O-53 phase 2), the run's fit against the card's. Words,
+   * not colour alone: `≠` carries the meaning in monochrome too.
+   */
+  const flag: PictureTileFlag | undefined = hidden
+    ? {
+        word: 'hidden',
+        tone: 'mut',
+        title:
+          'hidden in an earlier session, before per-picture hiding was removed — pickers and slots still skip it. Runs are archived whole now.',
+      }
+    : replaced
+      ? {
+          word: 'replaced',
+          tone: 'mut',
+          title:
+            'replaced by an edit: the edit stands in its place in the latest generation, and this picture stays here',
+        }
+      : fitMismatch
+        ? { word: 'fit ≠ card', tone: 'warn', title: `fit ${runFit} ≠ card ${cardFit}` }
+        : undefined;
+
+  /**
+   * THE CELL'S TITLE — what the caption under the frame used to say, plus its tooltip: the kind
+   * and the place, the address, the provenance, the composite tail, and the reason a picture is
+   * offered no slot (E-12, `useSlotMenu.reason`; the pattern step stays silent, r3 п.20).
+   */
+  const cellTitle = [
+    patternTile && !inSlot ? word : `${word} · ${inSlot ? inSlot.label : 'not standing'}`,
+    `${handle} · ${provenanceLabel(provenance)}${compositeTail(facts)}${mixed ? ` · ${mixed}` : ''}`,
+    fitMismatch && flag?.word !== 'fit ≠ card' ? `fit ${runFit} ≠ card ${cardFit}` : '',
+    !patternTile && !composite && !inSlot ? slotMenu.reason ?? '' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   /**
    * PICK MODE TAKES THE TILE OVER, and the picture keeps its skin while it does. The tile becomes
@@ -574,89 +577,90 @@ export function RunTile({
       >
         {/* `w-full` НЕСУЩЕЕ: обёртка здесь — <button>, а у кнопки UA-раскладка не растягивает
             детей по поперечной оси, и кадр с одним лишь `aspect-ratio` схлопнулся бы. */}
-        <PictureTile url={url} alt={handle} badge={badge} selected={pickable} className='w-full' />
-        {caption}
+        <PictureTile
+          url={url}
+          alt={handle}
+          badge={badge}
+          flag={flag}
+          selected={pickable}
+          className='w-full'
+        />
       </button>
     );
   }
 
-  let footer: React.ReactNode = null;
-  if (hidden) {
-    /**
-     * A STATE, NOT AN ORGAN. Hiding one picture is gone (T-14) and so is its undo; what is left is
-     * a stamp some earlier session wrote, which every picker still obeys.
-     */
-    footer = (
-      <Pill
-        tone='mut'
-        title='hidden in an earlier session, before per-picture hiding was removed — pickers and slots still skip it. Runs are archived whole now.'
-      >
-        hidden
-      </Pill>
-    );
-  } else if (inSlot) {
-    // И-1: a plate that a slot reads carries neither a ✕ nor a picker — both would be refused — so
-    // the one honest door is the one that undoes the placement. Full width, as the mock-up's.
-    footer = (
-      <Button
-        variant='secondary'
-        size='xs'
-        className='w-full'
-        disabled={disabled || setBenchSlot.isPending}
-        onClick={() =>
-          setBenchSlot.mutate({
-            slot: inSlot.ref,
-            // 0 is UNMARK: empty the slot without deleting it. A different act from deleting a
-            // detail slot, and it has to stay different.
-            pictureId: 0,
-            expectedSlotRev: inSlot.rev,
-          })
+  /**
+   * ✕ = UNMARK — exactly FLAT SLOTS' verb, word and RPC (`bench-slot.tsx`): out of the block is
+   * out of the slot, and the plate stays in the history. pictureId 0 EMPTIES the slot without
+   * deleting it — a different act from deleting a detail slot, and it has to stay different. A
+   * hidden plate keeps no ✕: its stamp is the one fact its tile shows (as before, И-1).
+   */
+  const onRemove =
+    inSlot && !hidden && !disabled
+      ? {
+          onClick: () =>
+            setBenchSlot.mutate({ slot: inSlot.ref, pictureId: 0, expectedSlotRev: inSlot.rev }),
+          ariaLabel: `take ${handle} off ${inSlot.label}`,
+          title:
+            `unmark — take this picture out of ${inSlot.label}; it stays here` +
+            (canDelete ? '. To delete it for good, unmark it first' : ''),
+          pending: setBenchSlot.isPending,
         }
-        aria-label={`take ${handle} off ${inSlot.label}`}
-        title={disabled ? undefined : `take this picture out of ${inSlot.label}`}
-      >
-        unmark
-      </Button>
-    );
-  } else if (!composite && !patternTile) {
-    // NO SLOT PICKER UNDER A COMPOSITE, AND THAT IS THE RULE: a slot holds one view and that file
-    // holds several, so its only door is the split in the corner. `rep` — the RUN'S kind — is
-    // load-bearing (E-12): a recolour's outputs say «render» on the wire.
-    // ⚠ И НИ ПИКЕРА, НИ ФРАЗЫ ПОД ПЛИТКОЙ ПАТТЕРНА (r3 п.20). Владелец, дословно: «в истории на
-    // PATTERN убрать текст a repeating tile stands in no slot — it is cloth, not a view». Пикер
-    // рисовал на её месте объяснение, почему двери нет, — по общему правилу волны «никогда не
-    // отсутствие, никогда мёртвый орган». Правило верно там, где человек ИЩЕТ дверь; здесь он её
-    // не ищет: шаг называется PATTERN, и ни одна плитка на нём в слот не встаёт, так что фраза
-    // повторялась под КАЖДЫМ кадром ленты, одна и та же. Объяснение живёт там, где оно ещё нужно,
-    // — у 3D-кадра и у снимка на модели, где рядом СТОЯТ плитки, у которых дверь есть.
-    // `min-h`, not `h`: one branch of the picker draws a phrase, not a control, and a fixed height
-    // painted it over the next row's meta line (measured on beta, tab ALL, 1400 wide).
-    footer = !disabled && (
-      <SlotPicker
-        band={band}
-        techCardId={techCardId}
-        picture={picture}
-        rep={rep}
-        className='min-h-[20px] w-full'
-      />
-    );
-  }
+      : undefined;
+
+  /**
+   * `slot ▾` — A FREE PLATE'S ONE PLACING ORGAN. None under a composite (a slot holds one view and
+   * a sheet several: its door is `split`), none on a pattern tile (r3 п.20: the step has no
+   * slots, the phrase repeated under every frame), none where no bench takes the kind (E-12 — the
+   * reason is the cell's title). `delete…` rides last, in the error ink, on the workbench only;
+   * a plate standing in a slot has no menu at all — unmark first, then delete.
+   */
+  const slotItems =
+    !inSlot && !hidden && !composite && !patternTile && !disabled ? slotMenu.items : [];
+  const offerDelete = canDelete && !inSlot;
+  const menu: PictureTileMenu | undefined =
+    slotItems.length || offerDelete
+      ? {
+          label: slotItems.length ? 'slot' : 'more',
+          ariaLabel: slotItems.length ? `put ${handle} into a slot` : `more for ${handle}`,
+          items: [
+            ...slotItems,
+            ...(offerDelete
+              ? [
+                  {
+                    value: DELETE_ITEM,
+                    label: 'delete…',
+                    tone: 'danger' as const,
+                    title: deleteTitle(removal.pieces),
+                  },
+                ]
+              : []),
+          ],
+          onPick: (value) => (value === DELETE_ITEM ? removal.ask() : slotMenu.place(value)),
+          pending: slotMenu.pending || removal.pending,
+          'data-menu': `slot:${pictureId}`,
+        }
+      : undefined;
 
   return (
     <div
-      className='flex h-full w-full min-w-0 flex-col'
+      className='group flex h-full w-full min-w-0 flex-col'
       data-picture={pictureId || undefined}
       data-deck-member={deckMemberOf || undefined}
+      title={cellTitle}
     >
       <PictureTile
         url={url}
         alt={handle}
         badge={badge}
+        flag={flag}
+        menu={menu}
+        onRemove={onRemove}
         onOpen={onOpen}
         onZoom={onZoom && pictureId ? () => onZoom(pictureId) : undefined}
         galleryGroup={galleryGroup}
         /* ПРИГЛУШАЕТСЯ СНИМОК, А НЕ ПЛИТКА (K-6): прозрачность на всей плитке глушила бы и дверь
-           `edit` до 1.6:1. Слово «hidden» под кадром состояние держит и без заливки. */
+           `edit` до 1.6:1. Флаг «hidden» состояние держит и без заливки. */
         dim={hidden || dim}
         className='w-full'
         /* SPLIT ONLY WHERE A SPLIT IS NEEDED (03.10, owner item 8: «кнопка сплит должна быть только
@@ -695,18 +699,8 @@ export function RunTile({
             : undefined
         }
       />
-      {caption}
-      {/* THE DOOR ROW. With «delete» (D-74) the row is one line: the footer's door keeps the width
-          it had (`flex-1`), «delete» stands last, one step (16px) away from it — twice the gap
-          between doors — and never wraps under it. Without it, the row is what it always was. */}
-      {deleteDoor ? (
-        <div className='mt-1 flex items-center'>
-          {footer && <div className='flex min-w-0 flex-1 items-center gap-x-2'>{footer}</div>}
-          <div className={footer ? 'ml-4 shrink-0' : 'shrink-0'}>{deleteDoor}</div>
-        </div>
-      ) : (
-        footer && <div className='mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5'>{footer}</div>
-      )}
+      {slotMenu.modal}
+      {removal.modal}
 
       {/* Редактор монтируется только раскрытым. `slot` НЕ ПЕРЕДАЁТСЯ НАРОЧНО: плитка истории — не
           слот верстака, и результат правки не обязан никуда вставать. На ВЕРСТАКЕ правка
