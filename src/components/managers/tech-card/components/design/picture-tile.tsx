@@ -21,8 +21,12 @@ import {
   ViewerAction,
   type MediaViewerItem,
 } from 'ui/components/media-viewer';
+import GenericPopover from 'ui/components/popover';
+import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
+import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 
+import { PICKER_BLEED, PICKER_ROW } from './core/two-step-picker';
 import { uploadRaster } from './modals/use-edit-layer';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
 
@@ -148,25 +152,9 @@ function withFallback(item: MediaViewerItem): MediaViewerItem {
  * которую можно выполнить наполовину: разойтись физически негде.
  * ───────────────────────────────────────────────────────────────────────────────────────────── */
 
-/**
- * Формула появления тихого органа: наведение ИЛИ фокус ВНУТРИ плитки, и всегда — на устройстве
- * без наведения. Слушается `group-focus-within` хозяина, а не собственный `focus-within`: у
- * клавиатуры ховера не бывает, и орган, видимый лишь пока фокус стоит на нём самом, нечем найти.
- */
-export const TILE_QUIET =
-  'opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100 ' +
-  'focus-visible:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none';
-
-/**
- * Кожа углового органа — та же, что у примитива `Button`, с видимым `focus-visible`. Семь
- * состояний: покой (тихий), наведение (чернеет), фокус (обводка 2px), нажатие (родное),
- * выключен (серый, некликабелен), занят (`pending` — своё слово и `aria-busy`), отказ
- * (снекбар вызывающего; плитка о записи ничего не знает).
- */
-export const TILE_CORNER =
-  'pointer-events-auto border border-borderColor bg-bgColor px-1 text-nano uppercase tracking-label ' +
-  'text-labelColor hover:text-textColor disabled:cursor-not-allowed disabled:text-textInactiveColor ' +
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
+/* Кожа углов живёт в `ui/components/tile-skin.ts` (её берут и примитивы `ui/`); отсюда она
+   реэкспортируется, чтобы прежние импорты из этого файла не менялись. */
+export { TILE_CORNER, TILE_QUIET };
 
 /* ── ЦЕЛЬ СНИМКА МОДЕЛИ ─────────────────────────────────────────────────────────────────────── */
 
@@ -585,7 +573,59 @@ export interface PictureTileAction {
   pending?: boolean;
 }
 
+/**
+ * ═══ МЕНЮ В УГЛУ — «КУДА / ЧЕМ ЭТА КАРТИНКА» (T17, спека §3) ═════════════════════════════════
+ *
+ * Владелец: «кнопки unmark или селектор должны быть внутри плитки по принципу как это сделано в
+ * flat slots». Все глаголы о картинке уже жили в кадре углами; не хватало одного рода органа —
+ * ВЫБОРА. Это он: тихий угол `label ▾` первым в нижнем правом кластере (перед `edit`, который
+ * поэтому не сдвигается), по нажатию — список, прикреплённый к углу.
+ *
+ * ВЫБОР И ЕСТЬ ДЕЙСТВИЕ. Это не поле формы: значения меню не держит, `onPick` зовётся ровно раз
+ * на нажатие строки и закрывает список. Текущее значение (если оно есть) несут слово на углу и
+ * отметка `current` в списке.
+ */
+export interface PictureTileMenuItem {
+  value: string;
+  label: ReactNode;
+  disabled?: boolean;
+  /** Отмечено в списке (`aria-selected`, точка). Значение, которое у картинки уже стоит. */
+  current?: boolean;
+  /** `danger` — необратимое (`delete…`), красным. */
+  tone?: 'default' | 'danger';
+  title?: string;
+}
+
+export interface PictureTileMenu {
+  /** Слово угла в покое: `slot` · `front` · `role` · `not sent`. Треугольник дорисует плитка. */
+  label: string;
+  /** Обязательна: тихий орган без имени нечем объявить читалке экрана. */
+  ariaLabel: string;
+  title?: string;
+  items: PictureTileMenuItem[];
+  onPick: (value: string) => void;
+  disabled?: boolean;
+  /** Держит угол видимым и пишет `label…`, пока идёт запись. */
+  pending?: boolean;
+  /** Якорь проб: `slot:123`, `role:456`. Ложится на триггер как `data-menu`. */
+  'data-menu'?: string;
+}
+
+/**
+ * ФЛАГ — СОСТОЯНИЕ, КОТОРОГО КАДР НЕ ПОКАЗЫВАЕТ: `proposed` · `hidden` · `in the input` ·
+ * `replaced`. Факт, а не глагол: виден всегда, прозрачен для указателя, стоит под ярлыком.
+ */
+export interface PictureTileFlag {
+  word: string;
+  tone: 'attention' | 'mut' | 'ink' | 'warn';
+  title?: string;
+}
+
 export interface PictureTileProps {
+  /** Состояние под ярлыком (верх слева). Разбор у `PictureTileFlag`. */
+  flag?: PictureTileFlag;
+  /** Угол выбора, первый в нижнем правом кластере. Разбор у `PictureTileMenu`. */
+  menu?: PictureTileMenu;
   /** Адрес картинки. Пусто — рисуется кадр-заглушка со словом, а не молчаливая дыра. */
   url?: string;
   alt: string;
@@ -625,8 +665,8 @@ export interface PictureTileProps {
   dim?: boolean;
   className?: string;
   /**
-   * Кадр для общего просмотрщика. Есть — вся поверхность открывает зум и в верхнем правом углу
-   * появляется тихая кнопка `zoom`; нет — плитка не листается и зума не обещает.
+   * Кадр для общего просмотрщика. Есть — вся поверхность открывает зум (углового `zoom` нет,
+   * T12); нет — плитка не листается и зума не обещает.
    */
   gallery?: MediaViewerItem;
   /**
@@ -800,8 +840,136 @@ function Corner({
   );
 }
 
-/** How long a single click on a tile waits for its pair before it counts as single (HX2). */
-const CLICK_ARBITER_MS = 220;
+/**
+ * УГОЛ-МЕНЮ. Оболочка — та же, что у `TwoStepPicker` (`GenericPopover`, строки `PICKER_ROW`), а
+ * триггер — кожа угла (`TILE_CORNER + TILE_QUIET`), так что в покое он неотличим от `edit` рядом.
+ * Список открывается ВВЕРХ и к правому краю (`side='top' align='end'`): угол стоит внизу кадра, и
+ * вниз панель накрыла бы соседнюю плитку. Портал — значит `overflow-hidden` ячейки его не режет.
+ */
+function CornerMenu({ menu }: { menu: PictureTileMenu }) {
+  const [open, setOpen] = useState(false);
+  const panel = useRef<HTMLDivElement | null>(null);
+  const rows = (): HTMLElement[] =>
+    Array.from(panel.current?.querySelectorAll<HTMLElement>('[data-menu-item]') ?? []).filter(
+      (n) => !n.hasAttribute('disabled'),
+    );
+  const focusAt = (index: number) => {
+    const list = rows();
+    if (!list.length) return;
+    list[((index % list.length) + list.length) % list.length]?.focus();
+  };
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const list = rows();
+    const at = list.indexOf(document.activeElement as HTMLElement);
+    const to =
+      e.key === 'ArrowDown'
+        ? at + 1
+        : e.key === 'ArrowUp'
+          ? at < 0
+            ? list.length - 1
+            : at - 1
+          : e.key === 'Home'
+            ? 0
+            : e.key === 'End'
+              ? list.length - 1
+              : null;
+    if (to === null) return;
+    e.preventDefault();
+    focusAt(to);
+  };
+  const busy = !!menu.pending;
+  return (
+    <GenericPopover
+      open={open}
+      onOpenChange={setOpen}
+      noTail
+      triggerProps={{
+        disabled: menu.disabled || busy,
+        title: menu.title,
+        'aria-label': menu.ariaLabel,
+        'aria-haspopup': 'listbox',
+        'aria-busy': busy || undefined,
+        ...(menu['data-menu'] ? { 'data-menu': menu['data-menu'] } : {}),
+        className: cn('z-20 py-0.5 leading-none', TILE_CORNER, TILE_QUIET, busy && 'opacity-100'),
+      }}
+      openElement={busy ? `${menu.label}…` : `${menu.label} ▾`}
+      className='w-auto min-w-[136px] max-w-[240px]'
+      contentProps={{
+        side: 'top',
+        align: 'end',
+        sideOffset: 4,
+        onOpenAutoFocus: (e: Event) => {
+          // Фокус — на текущее значение, иначе на первую живую строку, а не на саму панель.
+          e.preventDefault();
+          window.requestAnimationFrame(() => {
+            const list = rows();
+            (list.find((n) => n.getAttribute('aria-selected') === 'true') ?? list[0])?.focus();
+          });
+        },
+      }}
+    >
+      <div
+        ref={panel}
+        role='listbox'
+        aria-label={menu.ariaLabel}
+        className={PICKER_BLEED}
+        onKeyDown={onKeyDown}
+      >
+        {menu.items.map((item) => (
+          <button
+            key={item.value}
+            type='button'
+            role='option'
+            aria-selected={!!item.current}
+            data-menu-item={item.value}
+            data-current={item.current || undefined}
+            tabIndex={-1}
+            title={item.title}
+            disabled={item.disabled}
+            onClick={() => {
+              setOpen(false);
+              menu.onPick(item.value);
+            }}
+            className={cn(
+              PICKER_ROW,
+              'disabled:pointer-events-none disabled:opacity-30',
+              item.tone === 'danger' && 'text-error',
+            )}
+          >
+            <Text
+              size='micro'
+              variant='uppercase'
+              tracking='label'
+              component='span'
+              className={cn('min-w-0 flex-1 truncate', item.tone === 'danger' && '!text-error')}
+            >
+              {item.label}
+            </Text>
+            {item.current ? (
+              <span aria-hidden className='shrink-0 text-nano leading-none'>
+                ●
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+    </GenericPopover>
+  );
+}
+
+/**
+ * ═══ ОДНО ОКНО ЖЕСТА: ОДИН КЛИК ИЛИ ДВА (HX2, починка гонки — Codex r2) ═══════════════════════
+ *
+ * Было: одиночный клик ждал 220 мс, а зум открывал РОДНОЙ `dblclick`. Порог двойного клика у ОС
+ * свой (до 500 мс), и медленный двойной клик проходил оба пути сразу: таймер успевал позвать
+ * `onOpen` (переключатель щёлкал), а потом `dblclick` открывал зум. Два арбитра, два порога.
+ *
+ * Стало: арбитр один — это окно. Второй клик, пришедший ВНУТРИ окна, и есть двойной: таймер
+ * снимается, открывается зум. Окно кончилось без второго клика — срабатывает одиночное действие.
+ * `e.detail` и `dblclick` не читаются вовсе, поэтому настройка ОС ни на что не влияет. Клики,
+ * пришедшие ещё в окне после открытого зума (тройной клик), глотаются до его конца.
+ */
+const CLICK_WINDOW_MS = 350;
 
 export function PictureTile({
   url,
@@ -829,6 +997,8 @@ export function PictureTile({
   selectLabel = 'select',
   children,
   face,
+  flag,
+  menu,
 }: PictureTileProps) {
   const key = useId();
   const ctx = useContext(GalleryContext);
@@ -1002,41 +1172,43 @@ export function PictureTile({
     onZoomRef.current?.();
   }, [ctx, key, galleryGroup?.key, galleryGroup?.index, galleryGroup?.mediaId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ═══ ОДИН КЛИК ИЛИ ДВА — РЕШАЕТ КОРОТКИЙ ТАЙМЕР (hotfix HX2) ═══════════════════════════════
+  /* ═══ ОДИН КЛИК ИЛИ ДВА — РЕШАЕТ ОДНО ОКНО (HX2; разбор у `CLICK_WINDOW_MS`) ═══════════════
      Где одиночный клик занят `onOpen` (выбор, раскрытие колоды, пипетка), а двойной открывает
-     зум, двойной клик приносил ДВА `click` перед `dblclick`: переключатель щёлкал дважды (и
-     гасил сам себя), колода раскрывалась и сворачивалась. Теперь одиночный клик ждёт
-     `CLICK_ARBITER_MS`; второй клик пары таймер снимает, `dblclick` открывает зум. Клик с
-     клавиатуры (`detail === 0`) не ждёт ничего. Плитка, где одиночный клик сам открывает
-     просмотрщик, таймера не держит — там спорить не о чем. */
+     зум. Клик с клавиатуры (`detail === 0`) не ждёт ничего. Плитка, где одиночный клик сам
+     открывает просмотрщик, окна не держит — там спорить не о чем. */
   const arbitrates = !!onOpen && zoomable && !clip;
   const onOpenRef = useRef(onOpen);
   onOpenRef.current = onOpen;
-  const pendingClick = useRef<number | null>(null);
-  const cancelPendingClick = useCallback(() => {
-    if (pendingClick.current !== null) window.clearTimeout(pendingClick.current);
-    pendingClick.current = null;
+  /** Окно жеста: открыто первым кликом; `double` — второй клик в нём уже открыл зум. */
+  const gesture = useRef<{ timer: number; double: boolean } | null>(null);
+  const closeGesture = useCallback(() => {
+    if (gesture.current) window.clearTimeout(gesture.current.timer);
+    gesture.current = null;
   }, []);
-  useEffect(() => cancelPendingClick, [cancelPendingClick]);
+  useEffect(() => closeGesture, [closeGesture]);
   const arbitratedClick = useCallback(
     (e: React.MouseEvent) => {
-      cancelPendingClick();
       if (e.detail === 0) {
+        closeGesture();
         onOpenRef.current?.();
         return;
       }
-      if (e.detail > 1) return;
-      pendingClick.current = window.setTimeout(() => {
-        pendingClick.current = null;
-        onOpenRef.current?.();
-      }, CLICK_ARBITER_MS);
+      const open = gesture.current;
+      if (open) {
+        if (open.double) return;
+        open.double = true;
+        openZoom();
+        return;
+      }
+      const timer = window.setTimeout(() => {
+        const ended = gesture.current;
+        gesture.current = null;
+        if (ended && !ended.double) onOpenRef.current?.();
+      }, CLICK_WINDOW_MS);
+      gesture.current = { timer, double: false };
     },
-    [cancelPendingClick],
+    [closeGesture, openZoom],
   );
-  const arbitratedDoubleClick = useCallback(() => {
-    cancelPendingClick();
-    openZoom();
-  }, [cancelPendingClick, openZoom]);
 
   return (
     <div
@@ -1176,7 +1348,6 @@ export function PictureTile({
                   ? arbitratedClick
                   : onOpen ?? (surfaceToModel ? () => setModelOpen(true) : openZoom)
               }
-              onDoubleClick={arbitrates ? arbitratedDoubleClick : undefined}
               className={cn(
                 'absolute inset-0 z-10',
                 zoomSurface
@@ -1189,18 +1360,30 @@ export function PictureTile({
 
       {children}
 
-      {badge && (
-        <div className='pointer-events-none absolute left-1 top-1 z-20 max-w-[calc(100%-64px)]'>
-          <span className='inline-block bg-textColor px-1.5 py-0.5'>
-            <Text
-              size='nano'
-              variant='uppercase'
-              component='span'
-              className='!text-bgColor break-words'
-            >
-              {badge}
-            </Text>
-          </span>
+      {/* ВЕРХ СЛЕВА — ФАКТЫ, СТОЛБИКОМ: ярлык (что это), под ним флаг (в каком оно состоянии).
+          Оба видны всегда и прозрачны для указателя. Флаг стоит на непрозрачной подложке: пилюля
+          прозрачна, а под ней снимок. Без ярлыка флаг поднимается в сам угол. */}
+      {(badge || flag) && (
+        <div className='pointer-events-none absolute left-1 top-1 z-20 flex max-w-[calc(100%-64px)] flex-col items-start gap-0.5'>
+          {badge && (
+            <span className='inline-block bg-textColor px-1.5 py-0.5'>
+              <Text
+                size='nano'
+                variant='uppercase'
+                component='span'
+                className='!text-bgColor break-words'
+              >
+                {badge}
+              </Text>
+            </span>
+          )}
+          {flag && (
+            <span className='inline-block max-w-full bg-bgColor' data-flag={flag.word}>
+              <Pill tone={flag.tone} title={flag.title} className='max-w-full truncate'>
+                {flag.word}
+              </Pill>
+            </span>
+          )}
         </div>
       )}
 
@@ -1247,8 +1430,10 @@ export function PictureTile({
           3D рядом с правкой встала пометка, а два органа в одном углу — это либо наезд, либо
           кнопка под кнопкой. Ряд прижат к правому краю, поэтому `edit` остаётся ПОСЛЕДНИМ и стоит
           ровно там, где стоял всегда: плитка без пометки не сдвигается ни на пиксель. */}
-      {(onSelect || onEdit) && (
+      {/* `menu` — ПЕРВЫМ (T17): выбор «куда» встаёт левее, и `edit` по-прежнему последний. */}
+      {(menu || onSelect || onEdit) && (
         <div className='absolute bottom-1 right-1 z-20 flex items-end gap-1'>
+          {menu && <CornerMenu menu={menu} />}
           {onSelect && <Corner action={onSelect} label={selectLabel} className='' />}
           {onEdit && <Corner action={onEdit} label={editLabel} className='' />}
         </div>

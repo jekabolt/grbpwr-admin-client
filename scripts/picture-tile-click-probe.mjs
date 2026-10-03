@@ -6,7 +6,12 @@
 // Плитка без зума зовёт `onOpen` сразу. Настоящий ввод мыши (Playwright), не dispatchEvent.
 //
 //   node scripts/picture-tile-click-probe.mjs
-//   node scripts/picture-tile-click-probe.mjs --mutate   вернуть прежнюю проводку (onOpen на click)
+//   node scripts/picture-tile-click-probe.mjs --mutate          вернуть прежнюю проводку (onOpen на click)
+//   node scripts/picture-tile-click-probe.mjs --mutate-window   окно 200 мс: медленный двойной (D) краснеет
+//
+// D/E (лейн P): двойной клик — это второй клик ВНУТРИ окна жеста, а не родной `dblclick` и не
+// `detail` от ОС. Медленный двойной (250 мс) открывает зум без `onOpen`; два клика через 600 мс —
+// два одиночных, даже если ОС назвала второй «двойным» (clickCount 2).
 //
 // Playwright не в зависимостях проекта — ищется в кэше npx и МОЛЧА пропускается, если не найден.
 import { createRequire } from 'node:module';
@@ -21,6 +26,7 @@ import { build as esbuild } from 'esbuild';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
 const MUTATE = process.argv.includes('--mutate');
+const MUTATE_WINDOW = process.argv.includes('--mutate-window');
 
 function resolvePlaywright() {
   const require = createRequire(import.meta.url);
@@ -95,6 +101,18 @@ const mutation = {
   },
 };
 
+const WINDOW_FIX = 'const CLICK_WINDOW_MS = 350;';
+const windowMutation = {
+  name: 'tile-window-mutation',
+  setup(b) {
+    b.onLoad({ filter: /design\/picture-tile\.tsx$/ }, async (a) => {
+      const src = await readFile(a.path, 'utf8');
+      if (!src.includes(WINDOW_FIX)) throw new Error('мутация окна не нашла свою строку');
+      return { contents: src.replace(WINDOW_FIX, 'const CLICK_WINDOW_MS = 200;'), loader: 'tsx' };
+    });
+  },
+};
+
 const outfile = resolve(tmpdir(), `picture-tile-click-${process.pid}.js`);
 await esbuild({
   entryPoints: [resolve(HERE, 'picture-tile-click-entry.tsx')],
@@ -107,7 +125,11 @@ await esbuild({
   absWorkingDir: REPO,
   jsx: 'automatic',
   loader: { '.svg': 'dataurl', '.png': 'dataurl', '.woff2': 'dataurl', '.css': 'css' },
-  plugins: MUTATE ? [stubNetwork, mutation] : [stubNetwork],
+  plugins: MUTATE
+    ? [stubNetwork, mutation]
+    : MUTATE_WINDOW
+      ? [stubNetwork, windowMutation]
+      : [stubNetwork],
   define: { 'process.env.NODE_ENV': '"development"', 'import.meta.env': '__STUB_ENV__' },
   banner: { js: 'var __STUB_ENV__ = {};' },
   alias: {
@@ -166,12 +188,19 @@ try {
     });
     return r;
   };
+  // ВТОРОЕ нажатие пары, как его шлёт ОС: ОДНО нажатие с clickCount 2 (браузер даёт click detail=2
+  // и dblclick). `mouse.click({clickCount: 2})` не годится — Playwright шлёт им ДВА нажатия.
+  const secondPress = async (at) => {
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.down({ clickCount: 2 });
+    await page.mouse.up({ clickCount: 2 });
+  };
   const dialogs = () => page.$$eval('[role="dialog"]', (n) => n.length);
 
   // A · одиночный клик по плитке с `onOpen` и зумом: ровно один вызов, после таймера, без зума.
   const a = await centre('arb');
   await page.mouse.click(a.x, a.y);
-  await page.waitForTimeout(450);
+  await page.waitForTimeout(550);
   check(
     'A1 single click → onOpen exactly once',
     (await state()).arb === 1,
@@ -189,7 +218,39 @@ try {
     JSON.stringify(await state()),
   );
   await page.keyboard.press('Escape');
-  await page.waitForTimeout(300);
+  await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
+  await page.waitForTimeout(400);
+
+  // D · медленный двойной клик (250 мс между нажатиями — дольше прежних 220, короче окна ОС):
+  // зум открыт, `onOpen` не звался.
+  const before = (await state()).arb;
+  await page.mouse.click(a.x, a.y);
+  await page.waitForTimeout(250);
+  await secondPress(a);
+  await page.waitForTimeout(550);
+  check('D1 slow double click → viewer opens', (await dialogs()) > 0);
+  check(
+    'D2 slow double click → onOpen not called',
+    (await state()).arb === before,
+    JSON.stringify(await state()),
+  );
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
+  await page.waitForTimeout(400);
+
+  // E · два клика через 600 мс: окно кончилось — это два одиночных, хотя ОС назвала второй
+  // двойным (clickCount 2) и браузер шлёт `dblclick`. Зума нет.
+  const before2 = (await state()).arb;
+  await page.mouse.click(a.x, a.y);
+  await page.waitForTimeout(600);
+  await secondPress(a);
+  await page.waitForTimeout(550);
+  check(
+    'E1 clicks outside the window → onOpen twice',
+    (await state()).arb === before2 + 2,
+    JSON.stringify(await state()),
+  );
+  check('E2 clicks outside the window → no viewer', (await dialogs()) === 0);
 
   // C · плитка без зума: `onOpen` сразу, не по таймеру.
   const p = await centre('plain');
