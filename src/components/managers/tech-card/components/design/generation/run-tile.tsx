@@ -472,6 +472,7 @@ export function RunTile({
         onEdit={openEditor}
         split={split}
         onDelete={canDelete ? removal.ask : undefined}
+        deletePending={removal.pending}
       >
         {removal.modal}
         {editing && (

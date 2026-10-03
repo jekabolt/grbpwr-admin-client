@@ -938,6 +938,7 @@ export function RenderTile({
   split,
   trailingDoor,
   onDelete,
+  deletePending,
 }: {
   doors: RenderDoors;
   picture: common_DesignPicture;
@@ -959,6 +960,11 @@ export function RenderTile({
    * the host's own confirmation. Preferred over `trailingDoor`, which stands under the frame.
    */
   onDelete?: () => void;
+  /**
+   * TF3: the host's delete is in flight — the whole menu (a mark, a second delete) and the ✕ wait
+   * for it, so nothing can race a picture that is leaving.
+   */
+  deletePending?: boolean;
   /** The raster in the frame. Empty — the frame says so in a word. */
   src: string;
   className?: string;
@@ -1064,7 +1070,7 @@ export function RenderTile({
     [view, run.rrev ? `r${run.rrev}` : ''].filter(Boolean).join(' · ') ||
     `picture ${picture.ordinal ?? '—'}`;
   const ordinal = `${picture.ordinal ?? ''}`;
-  const busy = marking === pictureId && pictureId > 0;
+  const busy = (marking === pictureId && pictureId > 0) || !!deletePending;
   /**
    * ═══ T17 · ВСЁ, ЧТО ДЕЛАЕТСЯ С ЭТОЙ КАРТИНКОЙ, — В КАДРЕ (спека §3, лейн L) ═══════════════════
    *
@@ -1150,6 +1156,7 @@ export function RenderTile({
             label: 'delete',
             ariaLabel: `delete render ${ordinal}`.trim(),
             items: deleteItem,
+            pending: busy,
             onPick: () => onDelete?.(),
             'data-menu': `delete:${pictureId}`,
           }
@@ -1580,6 +1587,7 @@ export function RunRenderTile({
   split,
   trailingDoor,
   onDelete,
+  deletePending,
   children,
 }: {
   host: RenderHost;
@@ -1598,6 +1606,8 @@ export function RunRenderTile({
   trailingDoor?: ReactNode;
   /** T17: the row's «delete» as the tile menu's last item — see `RenderTile`'s `onDelete`. */
   onDelete?: () => void;
+  /** TF3: that delete is in flight — see `RenderTile`'s `deletePending`. */
+  deletePending?: boolean;
   /** The editor the run row mounts over this tile while it is open. */
   children?: ReactNode;
 }): JSX.Element {
@@ -1626,6 +1636,7 @@ export function RunRenderTile({
         split={split}
         trailingDoor={trailingDoor}
         onDelete={onDelete}
+        deletePending={deletePending}
       />
       {children}
     </div>

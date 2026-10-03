@@ -7,6 +7,9 @@
 //   TF2 · ✕ не удаляет: на карусели LAST FABRICS и на сетке CLOTHS ✕ нет; удаление — последняя
 //         красная строка `delete…` меню (без пар — `more ▾` с ней одной) и ВСЕГДА спрашивает.
 //
+//   TF3 · удаление рендера в полёте: меню плитки занято целиком (ни mark, ни второго delete), а
+//         вопрос открыт, занят и закрывается только ответом.
+//
 //   node scripts/tile-menu-probe.mjs
 //   node scripts/tile-menu-probe.mjs --mutate=<имя>   — каждая мутация краснеет (список — MUTATIONS)
 //
@@ -112,6 +115,18 @@ const MUTATIONS = {
     file: /render\/palette\.tsx$/,
     from: 'onPick: () => setPendingRemove(a),',
     to: 'onPick: () => writes.deleteAsset.mutate(id),',
+  },
+  // TF3: плитка рендера не знает, что её удаление летит — меню снова живо.
+  rpending: {
+    file: /generation\/run-tile\.tsx$/,
+    from: 'deletePending={removal.pending}',
+    to: 'deletePending={false}',
+  },
+  // TF3: вопрос закрывается на «ok», не дождавшись ответа.
+  rmodal: {
+    file: /generation\/delete-picture-modal\.tsx$/,
+    from: 'closeOnConfirm={false}',
+    to: 'closeOnConfirm',
   },
 };
 function mutationPlugin(name) {
@@ -308,6 +323,53 @@ try {
     (await calls(/DeleteDesignAsset/)).length === before,
   );
   await closeDialog();
+
+  // ── TF3 · удаление рендера в полёте ──
+  const R = '[data-probe="render"]';
+  const RM = `${R} [data-menu]`;
+  const rRows = await rowsOf(`${R} [data-picture-tile]`, RM).catch(() => []);
+  const rLast = rRows[rRows.length - 1] ?? [];
+  check(
+    'R1 render menu: `delete…` is the last, red row',
+    rLast[1] === 'delete…' && rLast[2] === true,
+    JSON.stringify(rRows),
+  );
+  await page.evaluate(() => (window.__hold.DeleteDesignPicture = true));
+  if (rLast[0]) await page.click(`[data-menu-item="${rLast[0]}"]`);
+  await page.waitForTimeout(200);
+  await page.click('[role="dialog"] button:has-text("delete for good")').catch(() => {});
+  await page.waitForTimeout(250);
+  const inFlight = await page.evaluate((sel) => {
+    const m = document.querySelector(sel);
+    const d = document.querySelector('[role="dialog"]');
+    const confirm =
+      d && [...d.querySelectorAll('button')].find((b) => /deleting/.test(b.textContent));
+    return {
+      menuDisabled: !!m && m.disabled,
+      menuBusy: m?.getAttribute('aria-busy') === 'true',
+      dialog: !!d,
+      confirmDisabled: !!confirm && confirm.disabled,
+      sent: window.__calls.filter((c) => c.name === 'DeleteDesignPicture').length,
+    };
+  }, RM);
+  check('R2 the delete is sent once', inFlight.sent === 1, JSON.stringify(inFlight));
+  check(
+    'R3 while it flies the whole menu is pending (no mark, no second delete)',
+    inFlight.menuDisabled && inFlight.menuBusy,
+    JSON.stringify(inFlight),
+  );
+  check(
+    'R4 the question stays open and busy until the answer',
+    inFlight.dialog && inFlight.confirmDisabled,
+    JSON.stringify(inFlight),
+  );
+  await page.evaluate(() => {
+    window.__hold.DeleteDesignPicture = false;
+    window.__release('DeleteDesignPicture');
+  });
+  await page.waitForTimeout(400);
+  check('R5 the answer closes the question', !(await dialog()));
+  check('R6 and frees the menu', await page.$eval(RM, (m) => !m.disabled).catch(() => false));
 
   await ctx.close();
 } finally {

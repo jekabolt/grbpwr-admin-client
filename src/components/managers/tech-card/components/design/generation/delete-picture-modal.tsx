@@ -140,11 +140,15 @@ export function useDeletePicture(
   const pictureId = picture.id ?? 0;
   const pieces = descendantsOf(siblings ?? [], pictureId);
 
+  /* TF3 · THE QUESTION STAYS UP, BUSY, UNTIL THE ANSWER IS IN. Closing it on «ok» re-armed the
+     tile's menu while the delete was still in flight, so a mark or a second delete could race a
+     picture that was leaving. The success path waits for the band to be read again, so the tile
+     is already gone (or the menu still busy) when the question closes. */
   const remove = useMutation({
     mutationFn: () => deleteDesignPicture(pictureId),
-    onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
+    onSuccess: async (res) => {
       showMessage(deletedSentence(res), 'success');
+      await qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
     },
     onError: (error) => {
       // Already gone: the band is stale, and a re-read takes the tile away by itself.
@@ -157,12 +161,17 @@ export function useDeletePicture(
   const modal = open ? (
     <ConfirmationModal
       open
-      onOpenChange={setOpen}
+      onOpenChange={(next) => {
+        if (!remove.isPending) setOpen(next);
+      }}
       title='delete this picture?'
-      confirmLabel='delete for good'
+      confirmLabel={remove.isPending ? 'deleting…' : 'delete for good'}
       cancelLabel='keep'
+      confirmDisabled={remove.isPending}
+      cancelDisabled={remove.isPending}
+      closeOnConfirm={false}
       width='sm'
-      onConfirm={() => remove.mutate()}
+      onConfirm={() => remove.mutate(undefined, { onSettled: () => setOpen(false) })}
     >
       <Text size='small' component='p'>
         <span data-delete-question=''>{deleteQuestion(pieces)}</span>
