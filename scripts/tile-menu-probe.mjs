@@ -10,6 +10,9 @@
 //   TF3 · удаление рендера в полёте: меню плитки занято целиком (ни mark, ни второго delete), а
 //         вопрос открыт, занят и закрывается только ответом.
 //
+//   TF4 · запись слота (`slot ▾` FLAT, `mark ▾` рендера) держит меню занятым, пока перечитанная
+//         полоса не легла в кэш: иначе быстрый повторный выбор шлёт старый `expectedSlotRev`.
+//
 //   node scripts/tile-menu-probe.mjs
 //   node scripts/tile-menu-probe.mjs --mutate=<имя>   — каждая мутация краснеет (список — MUTATIONS)
 //
@@ -127,6 +130,12 @@ const MUTATIONS = {
     file: /generation\/delete-picture-modal\.tsx$/,
     from: 'closeOnConfirm={false}',
     to: 'closeOnConfirm',
+  },
+  // TF4: запись слота кончается на ответе сервера, не дождавшись перечитывания полосы.
+  refetch: {
+    file: /design\/use-design-band\.ts$/,
+    from: 'onSuccess: invalidateWrittenAndWait,',
+    to: 'onSuccess: invalidateWritten,',
   },
 };
 function mutationPlugin(name) {
@@ -370,6 +379,51 @@ try {
   await page.waitForTimeout(400);
   check('R5 the answer closes the question', !(await dialog()));
   check('R6 and frees the menu', await page.$eval(RM, (m) => !m.disabled).catch(() => false));
+
+  // ── TF4 · меню занято до перечитывания полосы ──
+  const holdsUntilRefetch = async (tag, tile, menu, item) => {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(150);
+    await rowsOf(tile, menu);
+    const writes = (await calls(/SetDesignBenchSlot/)).length;
+    await page.evaluate(() => (window.__hold.GetDesignBand = true));
+    await page.click(`[data-menu-item="${item}"]`);
+    await page.waitForFunction(
+      (n) => window.__calls.filter((c) => c.name === 'SetDesignBenchSlot').length > n,
+      writes,
+    );
+    await page
+      .waitForFunction(() => (window.__held.GetDesignBand ?? []).length > 0, null, {
+        timeout: 3000,
+      })
+      .catch(() => {});
+    await page.waitForTimeout(200);
+    const during = await page.$eval(menu, (m) => ({
+      disabled: m.disabled,
+      busy: m.getAttribute('aria-busy') === 'true',
+    }));
+    check(
+      `${tag}1 the menu stays pending while the band is read again`,
+      during.disabled && during.busy,
+      JSON.stringify(during),
+    );
+    await page.evaluate(() => {
+      window.__hold.GetDesignBand = false;
+      window.__release('GetDesignBand');
+    });
+    await page.waitForTimeout(300);
+    check(
+      `${tag}2 the fresh band frees it`,
+      await page.$eval(menu, (m) => !m.disabled).catch(() => false),
+    );
+  };
+  await holdsUntilRefetch(
+    'S',
+    '[data-probe="flat"] [data-picture-tile]',
+    '[data-probe="flat"] [data-menu="slot:11"]',
+    'v:front',
+  );
+  await holdsUntilRefetch('M', `${R} [data-picture-tile]`, RM, '0␟front');
 
   await ctx.close();
 } finally {

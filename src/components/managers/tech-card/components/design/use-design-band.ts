@@ -340,6 +340,18 @@ export function useDesignWrites(techCardId?: number) {
     },
     [qc, techCardId],
   );
+  /**
+   * TF4 · THE SAME RE-READ, BUT THE WRITE IS NOT DONE UNTIL IT LANDS. A slot write carries the
+   * slot's CAS token (`expectedSlotRev`) read from the band on screen. Settling on the server's
+   * answer re-armed the menus while the invalidated band was still in flight, so a quick re-pick
+   * sent the OLD revision and was refused. Returning the refetch keeps `isPending` (and every
+   * `onSettled` of the caller) until the band that carries the new revision is in the cache.
+   */
+  const invalidateWrittenAndWait = useCallback(
+    (_data: unknown, _variables: unknown, context?: WriteContext) =>
+      qc.invalidateQueries({ queryKey: designKeys.band(context?.card ?? techCardId ?? 0) }),
+    [qc, techCardId],
+  );
 
   /**
    * The shared tail of every band write. Kept as a plain function rather than a hook so the
@@ -399,7 +411,7 @@ export function useDesignWrites(techCardId?: number) {
         newDetailName: input.newDetailName ?? '',
       }),
     onMutate,
-    onSuccess: invalidateWritten,
+    onSuccess: invalidateWrittenAndWait,
     onError,
   });
 
