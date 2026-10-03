@@ -70,10 +70,10 @@ import { useElapsed, useRunById } from './use-generation';
  * then the history row's own outputs block (`RunOutputs`) on the workbench's 190px track — the
  * reference grid's, one block up, so the columns line up across the gutter. The doors are
  * `RunTile`'s, unchanged:
- * split an uncut sheet (on FLAT the sheet IS the inline split editor, `inline-split.tsx`, T20; on
- * FABRIC RENDER the corner opens `SplitModal`; both `forInput={false}` — a cut here lays a sheet out
- * into views, it does NOT feed the prompt, so no reference role and no `moodboardMedia` row is
- * written; after the cut FLAT shows the pieces in the sheet's place, `piecesInPlace`), edit
+ * split an uncut sheet (the sheet IS the inline split editor, `inline-split.tsx`, T20 — on FABRIC
+ * RENDER too since 03.10, R(b); `forInput={false}` — a cut here lays a sheet out into views, it
+ * does NOT feed the prompt, so no reference role and no `moodboardMedia` row is written; after
+ * the cut the pieces stand in the sheet's place, `piecesInPlace`), edit
  * (a NEW sibling picture in the same run, `slot={null}`, exactly as from the history — «overwrite or
  * save as new» is phase 2), the studio's one viewer on the surface, and the slot marks IN THE
  * FRAME (T13): `slot ▾` on a free picture, `✕` = unmark on a plate a FLAT SLOTS slot reads
@@ -112,9 +112,10 @@ import { useElapsed, useRunById } from './use-generation';
  * slot writes of these pictures exist once.
  *
  * THE DECK OF THIS RUN IS OPEN BY DEFAULT, AND A SPLIT THAT LANDS OPENS IT: the pieces are what the
- * owner asked to keep seeing «после сплита». (FABRIC RENDER only since 03.10: on FLAT a cut sheet
- * leaves the bench and its pieces are ordinary cards, so there is no deck to open.) One open deck per host (H-10), and zooming a picture
- * outside it folds it (E-4) — the history's rules, through the same readers (`run-gallery.ts`).
+ * owner asked to keep seeing «после сплита». (Since 03.10 neither step has a deck of a run here: a
+ * cut sheet leaves the bench and its pieces are ordinary cards, so there is no deck to open.) One
+ * open deck per host (H-10), and zooming a picture outside it folds it (E-4) — the history's rules,
+ * through the same readers (`run-gallery.ts`).
  *
  * WHAT IT DOES NOT DO — ON PURPOSE. It polls nothing, recalls nothing and reads no further pages:
  * `GenerationHistory` below owns all three and stays MOUNTED while folded (O-54), so a live run is
@@ -422,19 +423,24 @@ export function LatestGeneration({
     if (!run) return null;
     const keep = new Set(editingKey ? editingKey.split(',').map(Number) : []);
     const drawn = benchPlan(run.pictures ?? [], { whole, keep });
-    // FLAT: a cut sheet leaves the bench, its pieces stand in its place (owner items 20, 21).
-    return kind === 'flat' ? piecesInPlace(drawn) : drawn;
+    // A cut sheet leaves the bench, its pieces stand in its place (owner items 20, 21) — on FABRIC
+    // RENDER too since 03.10 (owner item 24, R(b)): no deck, so no `expand ▸` / `apply splitted`.
+    return piecesInPlace(drawn);
   }, [run, editingKey, whole, kind]);
   /**
-   * THE UNCUT SHEETS, CUT HERE INLINE (owner item 19, T20) — FLAT only. Every card the tile gate
-   * would give a SPLIT corner (`splitViewsOf`, the same gate, the same `disabled`) is drawn as the
-   * inline editor instead of a tile, all of them stacked above the tiles in the row's order: a sheet
-   * on the bench is something to cut, and no sheet ever stands here as a picture. FABRIC RENDER keeps
-   * its corner and the popup (its doors read the sheet's deck, `RenderDoorsHost`).
+   * THE UNCUT SHEETS, CUT HERE INLINE (owner item 19, T20). Every card the tile gate would give a
+   * SPLIT corner (`splitViewsOf`, the same gate, the same `disabled`) is drawn as the inline editor
+   * instead of a tile, all of them stacked above the tiles in the row's order: a sheet on the bench
+   * is something to cut, and no sheet ever stands here as a picture.
+   * FABRIC RENDER the same since 03.10 (owner item 24: «по дизайну и смыслу такая же как во
+   * флетах», R(b)). Its render doors keep working on what is left: the pieces stand as cards
+   * (`piecesInPlace`), each placed into a side by its own `mark ▾`. What the deck used to give —
+   * `expand ▸` and the bulk `apply splitted` (all pieces into the sides at once) — has no place on
+   * the bench any more; that bulk verb stays reachable nowhere else either.
    */
   const writesOff = disabled || !speaks;
   const inlineSheets = useMemo(() => {
-    if (kind !== 'flat' || !run || !plan || isRunLive(run)) return [];
+    if (!run || !plan || isRunLive(run)) return [];
     const pictures = run.pictures ?? [];
     const out: { picture: common_DesignPicture; views: string[] }[] = [];
     for (const card of plan.cards) {
@@ -443,7 +449,7 @@ export function LatestGeneration({
       if (views) out.push({ picture: card.picture, views });
     }
     return out;
-  }, [kind, run, plan, band, writesOff]);
+  }, [run, plan, band, writesOff]);
   /** The row's tiles: the plan without the sheets drawn as inline editors. */
   const tilePlan = useMemo(() => {
     if (!plan || !inlineSheets.length) return plan;
@@ -491,7 +497,10 @@ export function LatestGeneration({
     [run, tilePlan],
   );
   /** O-63: what the render doors of this row read — its plates and its decks (`RenderDoorsHost`). */
-  const plates = useMemo(() => hostPlates(kind === 'render' && plan ? [plan] : []), [kind, plan]);
+  const plates = useMemo(
+    () => hostPlates(kind === 'render' && tilePlan ? [tilePlan] : []),
+    [kind, tilePlan],
+  );
   const toggleDeck = (rootId: number) =>
     setOpenDeck((current) => (current === rootId ? null : rootId));
 
@@ -594,7 +603,8 @@ export function LatestGeneration({
             onDeck={toggleDeck}
             runOf={() => run}
           >
-            {outputs}
+            {inline}
+            {tilesLeft && outputs}
           </RenderDoorsHost>
         ) : (
           <>

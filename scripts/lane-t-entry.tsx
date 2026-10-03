@@ -7,6 +7,8 @@
 //   flat-history (16) · render-bench (17) · render-history (18)
 // R(a) · попап SPLIT из истории сеет рамки из `readSplit`, а не из пустого `composite_views`:
 //   history-popup (19) — строка истории (не сетка: `match`) с листом `one` × 4 вида без столбца
+// R(b) · верстак FABRIC RENDER как у FLAT: render-uncut (20) — лист `one` × 4 = встроенный редактор;
+//   render-cut (21) — лист 711 и четыре куска: листа нет, куски — плитки с `mark ▾`
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type {
   GetDesignBandResponse,
@@ -69,6 +71,8 @@ const band = (runs: common_DesignRun[]) =>
   ({ bench: flatBench, runs, totalRuns: runs.length }) as unknown as GetDesignBandResponse;
 
 const matchAll = () => true;
+const FOUR = ['front', 'back', 'side_l', 'side_r'];
+const wide = (id: number) => media(id, svg('#eee', 2000, 1000), 2000, 1000) as never;
 
 const step = { colorways: [], cardColorways: [], adopts: true };
 
@@ -178,6 +182,49 @@ const scenes: { probe: string; node: ReactNode }[] = [
         match={matchAll}
         defaultOpen={false}
       />
+    ),
+  },
+  {
+    probe: 'render-uncut',
+    node: (
+      <RenderStepScope step={step}>
+        <LatestGeneration
+          band={band([
+            run(70, 'render', {
+              params: { layout: 'one', views: FOUR } as never,
+              pictures: [pic(701, 70, 'render', { media: wide(1701) })],
+            }),
+          ])}
+          techCardId={20}
+          kind='render'
+        />
+      </RenderStepScope>
+    ),
+  },
+  {
+    probe: 'render-cut',
+    node: (
+      <RenderStepScope step={step}>
+        <LatestGeneration
+          band={band([
+            run(71, 'render', {
+              params: { layout: 'one', views: FOUR } as never,
+              pictures: [
+                pic(711, 71, 'render', { media: wide(1711) }),
+                ...FOUR.map((view, i) =>
+                  pic(712 + i, 71, 'render', {
+                    derivation: 'crop',
+                    derivedFrom: 711,
+                    ghostView: view,
+                  }),
+                ),
+              ],
+            }),
+          ])}
+          techCardId={21}
+          kind='render'
+        />
+      </RenderStepScope>
     ),
   },
 ];

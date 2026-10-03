@@ -110,6 +110,18 @@ const MUTATIONS = {
     from: '    forInput,\n    views,\n    active: open,',
     to: '    forInput,\n    active: open,',
   },
+  // R(b): FABRIC RENDER's bench draws the uncut sheet as a tile with a SPLIT corner again.
+  'render-inline': {
+    file: /generation\/latest-generation\.tsx$/,
+    from: '    if (!run || !plan || isRunLive(run)) return [];',
+    to: "    if (kind !== 'flat' || !run || !plan || isRunLive(run)) return [];",
+  },
+  // R(b): FABRIC RENDER's bench keeps the cut sheet with its deck of pieces again.
+  'render-pieces': {
+    file: /generation\/latest-generation\.tsx$/,
+    from: '    return piecesInPlace(drawn);',
+    to: "    return kind === 'flat' ? piecesInPlace(drawn) : drawn;",
+  },
 };
 function mutationPlugin(name) {
   const m = MUTATIONS[name];
@@ -341,6 +353,77 @@ try {
     JSON.stringify(seeded) === JSON.stringify(['FRONT', 'BACK', 'SIDE LEFT', 'SIDE RIGHT']),
     JSON.stringify(seeded),
   );
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+
+  // ══ R(b) · THE FABRIC RENDER BENCH CUTS INLINE AND SHOWS ONLY THE PIECES ══
+  const RU = P('render-uncut');
+  check(
+    'Rb.1 render: the uncut sheet is the inline editor',
+    !!(await page.$(`${RU} [data-inline-split="701"]`)),
+  );
+  check('Rb.2 render: no tile of the sheet', !(await page.$(`${RU} [data-picture="701"]`)));
+  const rChips = await page.$$eval(`${RU} [data-split-word]`, (els) =>
+    els.map((e) => e.innerText.trim()),
+  );
+  check(
+    'Rb.3 render: frames FRONT / BACK / SIDE LEFT / SIDE RIGHT',
+    JSON.stringify(rChips) === JSON.stringify(['FRONT', 'BACK', 'SIDE LEFT', 'SIDE RIGHT']),
+    JSON.stringify(rChips),
+  );
+  const rConfirm = await page.$(`${RU} [data-split-confirm="701"]`);
+  if (rConfirm) await rConfirm.click();
+  await page.waitForTimeout(250);
+  const rCut = (await calls('SplitDesignPicture')).filter((b) => b.pictureId === 701);
+  check(
+    'Rb.4 render: confirm cuts 701 into 4, not for the input',
+    rCut.length === 1 && rCut[0].forInput === false && (rCut[0].frames ?? []).length === 4,
+    JSON.stringify(rCut.map((b) => [b.forInput, (b.frames ?? []).map((f) => f.viewKey)])),
+  );
+  const RC = P('render-cut');
+  check(
+    'Rb.5 render: after the cut no sheet, no deck, no `expand ▸`',
+    !(await page.$(`${RC} [data-picture="711"]`)) &&
+      !(await page.$(`${RC} [data-deck-expand]`)) &&
+      !(await page.$(`${RC} [data-inline-split]`)),
+  );
+  const rPieces = await page.$$eval(`${RC} [data-picture]`, (els) =>
+    els.map((e) => Number(e.getAttribute('data-picture'))),
+  );
+  check(
+    'Rb.6 render: the four pieces stand as tiles',
+    JSON.stringify(rPieces) === '[712,713,714,715]',
+    JSON.stringify(rPieces),
+  );
+  const marks = await page.$$eval(`${RC} [data-menu^="mark:"]`, (els) =>
+    els.map((e) => e.getAttribute('data-menu')),
+  );
+  check(
+    'Rb.7 render: each piece is markable through `mark ▾`',
+    marks.length === 4,
+    JSON.stringify(marks),
+  );
+
+  const markTrigger = await page.$(`${RC} [data-menu="mark:712"]`);
+  const markState = markTrigger
+    ? await markTrigger.evaluate((el) => ({ disabled: el.disabled, title: el.title }))
+    : null;
+  if (markTrigger && !markState.disabled) {
+    await page.hover(`${RC} [data-picture="712"]`);
+    await markTrigger.click();
+    await page.waitForTimeout(200);
+  }
+  const markItems = await page.$$eval(
+    '[role="listbox"] [role="option"], [data-picker-row], [role="menu"] button',
+    (els) => els.map((e) => e.innerText.trim()).filter(Boolean),
+  );
+  check(
+    "Rb.8 render: a piece's `mark ▾` opens with its sides",
+    !!markState && !markState.disabled && markItems.length > 0,
+    JSON.stringify({ markState, markItems }),
+  );
+  await page.keyboard.press('Escape');
 
   await ctx.close();
 } finally {
