@@ -31,7 +31,7 @@ import {
 import { SplitModal } from '../split-modal';
 import { isPictureHidden, isRunArchived } from '../visibility';
 import { viewLabel } from '../views';
-import { closeSurface, openSurface, putOnBench, useBenchRun } from './bench-store';
+import { closeSurface, openSurface, putOnBench, useBenchRun, type BenchKind } from './bench-store';
 import { formatMoney } from './money';
 import { CountPill, RunPanel } from './run-panel';
 import { deckAfterZoom, deckOfRuns, outputPlan, runsGallery } from './run-gallery';
@@ -383,10 +383,13 @@ const scrollToBench = () =>
 function RunGridRow({
   techCardId,
   run,
+  kind,
   onBench,
 }: {
   techCardId: number;
   run: common_DesignRun;
+  /** The step whose bench a press puts the run on (FLAT, FABRIC RENDER — T24). */
+  kind: BenchKind;
   /** Its pictures stand on the bench now (the run the workbench shows). */
   onBench: boolean;
 }) {
@@ -396,14 +399,14 @@ function RunGridRow({
   const pictures = useMemo(() => gridPicturesOf(run), [run]);
   const handle = runHandle(runId);
   const toBench = () => {
-    if (!onBench) putOnBench(techCardId, runId);
+    if (!onBench) putOnBench(techCardId, runId, kind);
     scrollToBench();
   };
 
   return (
     <div
       data-run={runId || undefined}
-      data-rep='flat'
+      data-rep={kind}
       className='space-y-1.5 border-b border-hairline pb-2 [&:not(:has(+[data-run]))]:border-b-0'
     >
       <Tiles min={HISTORY_TRACK}>
@@ -560,7 +563,7 @@ function HistoryWindowAutofill({
  * ранов было и все»), so there is no button and no ▾: the header line itself, `GENERATION HISTORY
  * N runs`, is the door. Mouse: the whole line; keyboard: Tab to it, Enter or Space.
  */
-export const flatHistoryStartsOpen = false;
+export const gridHistoryStartsOpen = false;
 
 export function HistoryFoldHeader({
   open,
@@ -679,18 +682,20 @@ export function GenerationHistory({
   const rep: RepFilter = defaultRep;
   /**
    * FLAT'S HISTORY IS A GRID (03.10, owner items 9 and 10b): each run its pictures and `put on
-   * bench`, the header a plain «N runs» — no fold, no archived shelf (archived runs are not shown).
-   * Every other step keeps its rows as they were.
+   * bench`, the header a plain «N runs» — no archived shelf (archived runs are not shown).
+   * FABRIC RENDER too (T24, owner: «в фабрик рендере в GENERATION HISTORY должна быть по дизайну и
+   * смыслу такая же как во флетах»): a press puts the run on the render bench; no render doors, no
+   * brought group here — marking into a side lives on the bench. Every other step keeps its rows.
    */
-  const grid = rep === 'flat' && !match;
+  const grid = (rep === 'flat' || rep === 'render') && !match;
   /** The window off: every run this card has, and the server's continuations read to the end. */
   const [showAll, setShowAll] = useState(false);
   /**
-   * Свёртка RUNS (макет: `fold('hist.'+kind, …)`). FLAT (T22, owner item 22): folded on every
+   * Свёртка RUNS (макет: `fold('hist.'+kind, …)`). The grid (FLAT T22, FABRIC RENDER T24): folded on every
    * visit whatever the caller passes; its door is the header line (`HistoryFoldHeader`). Neither
    * `put on bench` nor a tile press touches it.
    */
-  const foldDefault = grid ? flatHistoryStartsOpen : defaultOpen;
+  const foldDefault = grid ? gridHistoryStartsOpen : defaultOpen;
   const [runsOpen, setRunsOpen] = useState(foldDefault);
   const [splitting, setSplitting] = useState<{
     picture: common_DesignPicture;
@@ -726,7 +731,7 @@ export function GenerationHistory({
    * the cards of the group: a cut sheet is one, its pieces stand behind it.
    */
   const renderStep = useRenderStep();
-  const rendersHere = rep === 'render' && !!renderStep;
+  const rendersHere = rep === 'render' && !!renderStep && !grid;
   /**
    * The group as it is drawn (O-63 r3, `broughtGroup`): its pseudo-run, its cards with the decks of
    * the pieces off SIDES — climbed through the whole family, not through the group's list alone —
@@ -1046,6 +1051,7 @@ export function GenerationHistory({
           key={run.id}
           techCardId={techCardId}
           run={run}
+          kind={rep === 'render' ? 'render' : 'flat'}
           onBench={!!benchRunId && (run.id ?? 0) === benchRunId}
         />
       ) : (

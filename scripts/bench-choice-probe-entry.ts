@@ -12,7 +12,7 @@ export {
 } from '../src/components/managers/tech-card/components/design/generation/composite';
 export {
   HistoryFoldHeader,
-  flatHistoryStartsOpen,
+  gridHistoryStartsOpen,
   gridPicturesOf,
 } from '../src/components/managers/tech-card/components/design/generation/generation-history';
 export { benchPlan } from '../src/components/managers/tech-card/components/design/generation/run-gallery';

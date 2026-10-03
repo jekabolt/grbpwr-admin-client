@@ -297,13 +297,13 @@ try {
   );
 
   // T22 (owner item 22): FLAT's history starts folded on every visit; the header line is the door.
-  check('T22: flat history starts folded', a.flatHistoryStartsOpen === false);
+  check('T22: flat history starts folded', a.gridHistoryStartsOpen === false);
   {
     const hist = src('generation/generation-history.tsx');
     const body = hist.slice(hist.indexOf('export function GenerationHistory('));
     check(
       'T22: the fold state starts from the flat default on the grid',
-      /const foldDefault = grid \? flatHistoryStartsOpen : defaultOpen;/.test(body) &&
+      /const foldDefault = grid \? gridHistoryStartsOpen : defaultOpen;/.test(body) &&
         /useState\(foldDefault\)/.test(body) &&
         /setRunsOpen\(foldDefault\)/.test(body),
     );
@@ -376,6 +376,57 @@ try {
       'T22: «1 run» / «3+ runs»',
       lab(one) === '1 run' && lab(floorEl) === '3+ runs',
       `${lab(one)} / ${lab(floorEl)}`,
+    );
+  }
+
+  // T24 (owner): FABRIC RENDER's history is FLAT's grid — its own bench choice, per card.
+  a.putOnBench(31, 6);
+  a.putOnBench(31, 8, 'render');
+  check(
+    'T24: render and flat choices are kept apart',
+    a.readBenchChoice(31) === 6 && a.readBenchChoice(31, 'render') === 8,
+  );
+  check(
+    'T24: the render choice persists under its own key',
+    store.get('grbpwr.design.bench.render.31') === '8' && store.get(KEY(31)) === '6',
+  );
+  {
+    const r = await load();
+    check('T24: the render choice survives a reload', r.readBenchChoice(31, 'render') === 8);
+  }
+  a.clearBenchChoice(31, 'render');
+  check(
+    'T24: clearing the render choice leaves the flat one',
+    a.readBenchChoice(31, 'render') === 0 && a.readBenchChoice(31) === 6,
+  );
+  a.clearBenchChoice(31);
+  {
+    const hist = src('generation/generation-history.tsx');
+    const body = hist.slice(hist.indexOf('export function GenerationHistory('));
+    check(
+      'T24: the render step draws the grid',
+      /const grid = \(rep === 'flat' \|\| rep === 'render'\) && !match;/.test(body),
+    );
+    check(
+      "T24: a grid row puts its run on its own step's bench",
+      /putOnBench\(techCardId, runId, kind\)/.test(hist) &&
+        /kind=\{rep === 'render' \? 'render' : 'flat'\}/.test(body),
+    );
+    check(
+      'T24: no render doors / brought group on the grid',
+      /const rendersHere = rep === 'render' && !!renderStep && !grid;/.test(body),
+    );
+    const lg = src('generation/latest-generation.tsx');
+    check(
+      'T24: the render workbench reads its own choice',
+      /useBenchChoice\(techCardId, kind\)/.test(lg) &&
+        !/kind === 'flat' && benchShowsWhole/.test(lg) &&
+        !/if \(kind === 'flat'\) clearBenchChoice/.test(lg),
+    );
+    const udr = src('render/use-design-run.ts');
+    check(
+      'T24: render GENERATE lets the render choice go',
+      /clearBenchChoice\(input\.techCardId, 'render'\)/.test(udr),
     );
   }
 

@@ -306,9 +306,9 @@ export function LatestGeneration({
   const bench = useBench(techCardId);
   const viewerOpen = useGalleryViewerOpen();
   const pin = bench.pin;
-  /* THE RUN PUT ON THE BENCH FROM THE HISTORY (03.10, owner item 9; `bench-store.ts`) — FLAT only.
-     It is held exactly as a pin is: read from the band's first page, else by id. */
-  const chosen = useBenchChoice(kind === 'flat' ? techCardId : 0);
+  /* THE RUN PUT ON THE BENCH FROM THE HISTORY (03.10, owner items 9 and T24; `bench-store.ts`) —
+     each step its own. It is held exactly as a pin is: read from the band's first page, else by id. */
+  const chosen = useBenchChoice(techCardId, kind);
   const heldId = heldRunId(pin, chosen, newestId);
   const pinnedLive = useMemo(
     () => (heldId ? (band.runs ?? []).find((r) => (r.id ?? 0) === heldId) ?? null : null),
@@ -330,8 +330,8 @@ export function LatestGeneration({
   const choiceGone =
     !pin && heldId > 0 && !!pinnedFresh && (archivedSeen || !isRunOfKind(pinnedFresh, kind));
   useLayoutEffect(() => {
-    if (choiceGone) clearBenchChoice(techCardId);
-  }, [choiceGone, techCardId]);
+    if (choiceGone) clearBenchChoice(techCardId, kind);
+  }, [choiceGone, techCardId, kind]);
   const run = (choiceGone ? null : pinnedRun) ?? newest?.run ?? null;
   const runId = run?.id ?? 0;
   /**
@@ -404,7 +404,7 @@ export function LatestGeneration({
   /** THE ROW AS DRAWN — heads in their originals' places; the tiles under an open editor kept.
    *  A run put on the bench from the history: all of it (FX4, `benchPlan`). */
   const editingKey = editedKey(bench.surfaces);
-  const whole = kind === 'flat' && benchShowsWhole(chosen, runId);
+  const whole = benchShowsWhole(chosen, runId);
   const plan = useMemo(() => {
     if (!run) return null;
     const keep = new Set(editingKey ? editingKey.split(',').map(Number) : []);
@@ -570,7 +570,7 @@ export function LatestGeneration({
               title={`the newest ${kind} run — the one shown now stays in the history below`}
               onClick={() => {
                 releasePin(techCardId);
-                if (kind === 'flat') clearBenchChoice(techCardId);
+                clearBenchChoice(techCardId, kind);
               }}
             >
               show ›

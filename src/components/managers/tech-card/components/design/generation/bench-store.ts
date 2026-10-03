@@ -151,13 +151,20 @@ export function unstickPin(card: number) {
  * anyway let it go — from then on the bench follows the newest again.
  */
 
-const CHOICE_KEY = (card: number) => `grbpwr.design.bench.flat.${card}`;
-/** card → chosen run id; a card read once from storage is cached here (0 = no choice). */
-const choices = new Map<number, number>();
+/**
+ * THE STEP WHOSE BENCH IT IS (03.10, owner item T24): FABRIC RENDER's history is FLAT's grid too,
+ * so each of the two benches keeps its own choice — a flat run never lands on the render bench, nor
+ * the other way round. FLAT's storage key is unchanged.
+ */
+export type BenchKind = 'flat' | 'render';
 
-function storedChoice(card: number): number {
+const CHOICE_KEY = (card: number, kind: BenchKind) => `grbpwr.design.bench.${kind}.${card}`;
+/** `kind:card` → chosen run id; a card read once from storage is cached here (0 = no choice). */
+const choices = new Map<string, number>();
+
+function storedChoice(card: number, kind: BenchKind): number {
   try {
-    const raw = window.localStorage.getItem(CHOICE_KEY(card));
+    const raw = window.localStorage.getItem(CHOICE_KEY(card, kind));
     const id = raw ? Number(raw) : 0;
     return Number.isInteger(id) && id > 0 ? id : 0;
   } catch {
@@ -166,26 +173,26 @@ function storedChoice(card: number): number {
 }
 
 /** The chosen run of a card, outside React (the store's own reads, and the probe). */
-export function readBenchChoice(card: number): number {
-  return readChoice(card);
+export function readBenchChoice(card: number, kind: BenchKind = 'flat'): number {
+  return readChoice(card, kind);
 }
 
-function readChoice(card: number): number {
+function readChoice(card: number, kind: BenchKind): number {
   if (!card) return 0;
-  let id = choices.get(card);
+  let id = choices.get(`${kind}:${card}`);
   if (id === undefined) {
-    id = storedChoice(card);
-    choices.set(card, id);
+    id = storedChoice(card, kind);
+    choices.set(`${kind}:${card}`, id);
   }
   return id;
 }
 
-function writeChoice(card: number, runId: number) {
-  if (!card || readChoice(card) === runId) return;
-  choices.set(card, runId);
+function writeChoice(card: number, runId: number, kind: BenchKind) {
+  if (!card || readChoice(card, kind) === runId) return;
+  choices.set(`${kind}:${card}`, runId);
   try {
-    if (runId > 0) window.localStorage.setItem(CHOICE_KEY(card), String(runId));
-    else window.localStorage.removeItem(CHOICE_KEY(card));
+    if (runId > 0) window.localStorage.setItem(CHOICE_KEY(card, kind), String(runId));
+    else window.localStorage.removeItem(CHOICE_KEY(card, kind));
   } catch {
     // Storage refused: the choice still holds for this page.
   }
@@ -193,10 +200,10 @@ function writeChoice(card: number, runId: number) {
 }
 
 /** The run the person put on this card's bench; 0 — none, the bench follows the newest. */
-export function useBenchChoice(card: number): number {
+export function useBenchChoice(card: number, kind: BenchKind = 'flat'): number {
   return useSyncExternalStore(
     subscribe,
-    () => readChoice(card),
+    () => readChoice(card, kind),
     () => 0,
   );
 }
@@ -206,16 +213,16 @@ export function useBenchChoice(card: number): number {
  * left goes — the person asked for this run — but an open surface keeps the run it works on until it
  * closes (`openSurface` pins again on the next one).
  */
-export function putOnBench(card: number, runId: number) {
+export function putOnBench(card: number, runId: number, kind: BenchKind = 'flat') {
   if (!card || runId <= 0) return;
   const s = read(card);
   if (s.pin && s.surfaces.size === 0) write(card, { ...s, pin: null });
-  writeChoice(card, runId);
+  writeChoice(card, runId, kind);
 }
 
-/** Forget the choice — the bench follows the newest flat run again. */
-export function clearBenchChoice(card: number) {
-  writeChoice(card, 0);
+/** Forget the choice — the bench of that step follows its newest run again. */
+export function clearBenchChoice(card: number, kind: BenchKind = 'flat') {
+  writeChoice(card, 0, kind);
 }
 
 /**

@@ -4,7 +4,7 @@ import type { common_DesignRunParams } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useRef, useState } from 'react';
 
-import { unstickPin } from '../generation/bench-store';
+import { clearBenchChoice, unstickPin } from '../generation/bench-store';
 import {
   isAborted,
   isDefinitiveRefusal,
@@ -272,8 +272,12 @@ export function useStartDesignRun(
     showMessage(STARTED_BY_KIND[input.wire.kind] ?? STARTED_DEFAULT, 'success');
     // …and FABRIC RENDER's workbench goes to it, as FLAT's does (O-63; `bench-store.ts`): a pin
     // left by earlier work stops holding the run it kept. Not a release — an editor opened while
-    // this answer travelled keeps its run until it closes.
-    if (input.wire.kind === 'render') unstickPin(input.techCardId);
+    // this answer travelled keeps its run until it closes. A run put on the bench from the history
+    // lets go too (T24): the new run is what the person wants to see now.
+    if (input.wire.kind === 'render') {
+      unstickPin(input.techCardId);
+      clearBenchChoice(input.techCardId, 'render');
+    }
   };
 
   const mutation = useMutation({
