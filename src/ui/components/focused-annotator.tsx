@@ -210,6 +210,8 @@ export type FocusedAnnotatorProps = {
    * Только `layout='grid'`.
    */
   tileFlag?: (view: FocusedView, positionInViews: number) => FocusedTileFlag | null | undefined;
+  /** Факт рядом с номером в ярлыке (`1 · front`), всегда виден. Нет — ярлык только номер. */
+  tileBadge?: (view: FocusedView, positionInViews: number) => string | null | undefined;
   tileCorners?: (
     view: FocusedView,
     positionInViews: number,
@@ -446,6 +448,7 @@ export function FocusedAnnotator({
   mediaLabel,
   renderFocusedFooter,
   tileFlag,
+  tileBadge,
   tileCorners,
   removeLabel,
   carouselLabel,
@@ -900,6 +903,7 @@ export function FocusedAnnotator({
               const url = mediaUrl(v.full);
               const dim = v.full?.media?.fullSize ?? v.full?.media?.thumbnail;
               const flag = tileFlag?.(v, i);
+              const badgeNote = tileBadge?.(v, i);
               const corners = tileCorners?.(v, i);
               return (
                 <div
@@ -998,8 +1002,12 @@ export function FocusedAnnotator({
                       всегда и прозрачны для указателя; флаг — на непрозрачной подложке, под ним
                       снимок. */}
                   <div className='pointer-events-none absolute left-0 top-0 z-20 flex max-w-[calc(100%-32px)] flex-col items-start gap-0.5'>
-                    <span className='bg-textColor px-1 py-px text-nano leading-none tabular-nums text-bgColor'>
+                    <span
+                      className='bg-textColor px-1 py-px text-nano uppercase leading-none tabular-nums text-bgColor'
+                      data-tile-badge=''
+                    >
                       {i + 1}
+                      {badgeNote ? ` · ${badgeNote}` : null}
                     </span>
                     {flag && (
                       <span className='inline-block max-w-full bg-bgColor' data-flag={flag.word}>

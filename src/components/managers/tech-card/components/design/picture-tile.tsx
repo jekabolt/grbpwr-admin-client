@@ -845,8 +845,9 @@ function Corner({
  * триггер — кожа угла (`TILE_CORNER + TILE_QUIET`), так что в покое он неотличим от `edit` рядом.
  * Список открывается ВВЕРХ и к правому краю (`side='top' align='end'`): угол стоит внизу кадра, и
  * вниз панель накрыла бы соседнюю плитку. Портал — значит `overflow-hidden` ячейки его не режет.
+ * Экспортирован для плиток на своей поверхности (`FocusedAnnotator`: эскиз, `tileCorners`).
  */
-function CornerMenu({ menu }: { menu: PictureTileMenu }) {
+export function CornerMenu({ menu }: { menu: PictureTileMenu }) {
   const [open, setOpen] = useState(false);
   const panel = useRef<HTMLDivElement | null>(null);
   const rows = (): HTMLElement[] =>

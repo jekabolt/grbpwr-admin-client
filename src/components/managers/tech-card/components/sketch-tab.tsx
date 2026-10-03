@@ -12,11 +12,10 @@ import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annota
 import { GroupLabel } from 'ui/components/group-label';
 import { ViewSwitch } from 'ui/components/view-switch';
 import { SectionHeader } from 'ui/components/section-header';
-import { Pill } from 'ui/components/pill';
+import { CornerMenu } from './design/picture-tile';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import InputField from 'ui/form/fields/input-field';
-import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { cn } from 'lib/utility';
 import GenericPopover from 'ui/components/popover';
@@ -143,10 +142,10 @@ const numOf = (v?: string) => {
 // The tech-card adapter over the shared FocusedAnnotator, driven in GRID layout: every view is on
 // screen at once carrying its own pins, so front and back can be read together without clicking
 // between them. It owns the tech-card-specific data — the `{ mediaId, kind }` media rows, the
-// structured `{ part, description }` callouts, the per-image "kind" select, and "set as
-// preview" — and hands the shared component only resolved views + callbacks, so moodboard/sketch
+// structured `{ part, description }` callouts, the per-image `kind ▾` corner and the `preview`
+// flag — and hands the shared component only resolved views + callbacks, so moodboard/sketch
 // behave exactly as before while the fitting reuses the same component with its own bindings.
-function TechCardGallery({
+export function TechCardGallery({
   listName,
   mediaById,
   onPickedMedia,
@@ -180,6 +179,11 @@ function TechCardGallery({
   const railMode: RailMode = isMoodboard ? 'strip' : sketchRailMode;
   const calloutFA = useFieldArray({ control, name: 'callouts' });
   const calloutValues = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
+  // Вид каждого кадра — подписчиком корня списка: правка `.${i}.kind` из меню угла и перестановка
+  // корневой записью приходят сюда обе (`fields` поля-массива о вложенной записи не знает).
+  const listValues = (useWatch({ control, name: listName }) ?? []) as Array<{
+    kind?: common_TechCardMediaKind;
+  }>;
 
   const siblingName: MediaListName = isMoodboard ? 'technicalMedia' : 'moodboardMedia';
   const kinds = isMoodboard ? MOODBOARD_KINDS : TECHNICAL_KINDS;
@@ -639,7 +643,7 @@ function TechCardGallery({
       }
       // ПОРЯДОК КАДРОВ — КОРНЕВОЙ ЗАПИСЬЮ, А НЕ `mediaFA.move`. Тот же класс риска, что уже пойман
       // на `callouts` выше: в react-hook-form 7.62 мутаторы поля-массива не эмитят `_subjects.array`,
-      // и соседние читатели пути (здесь — `SelectField name={listName}.${index}.kind` в подвале
+      // и соседние читатели пути (здесь — `listValues` под ярлыком и меню вида
       // плитки) о перестановке не узнают, то есть показывают вид ПЕРЕЕХАВШЕГО кадра под чужим.
       onReorderMedia={
         frozen
@@ -652,28 +656,41 @@ function TechCardGallery({
       previewFirst
       mediaLabel={mediaLabel}
       carouselLabel={`${isMoodboard ? 'moodboard' : 'sketch'} images`}
-      renderFocusedFooter={(view) => {
-        const index = mediaFA.fields.findIndex((f) => f.mediaId === view.mediaId);
-        if (index < 0) return null;
-        return (
-          // wraps rather than squeezing: a 180px tile cannot hold the select and the button side
-          // by side, and a crushed select is worse than a second line.
-          <div className='flex flex-wrap items-end gap-1.5'>
-            <div className='min-w-[92px] flex-1'>
-              <SelectField name={`${listName}.${index}.kind`} label='kind' items={kindOptions} />
-            </div>
-            {/* ПЕРВЫЙ КАДР = ОБЛОЖКА КАРТОЧКИ, и бейдж остаётся: он называет инвариант, который
-                иначе живёт только в голове у того, кто складывал лист.
-                Кнопки «set as preview» больше нет. Она выражала РОВНО ОДНУ перестановку из всех
-                («сделай этот первым») и стояла под каждым кадром; ручка ⠿ и стрелки в подвале
-                плитки выражают любую и не занимают места под каждым. */}
-            {index === 0 && (
-              <div className='shrink-0'>
-                <Pill tone='mut'>preview</Pill>
-              </div>
-            )}
-          </div>
-        );
+      // АНАТОМИЯ ПЛИТКИ (T17, 20-TILE-SPEC §3) вместо ряда под кадром. Вид — ФАКТ и значение:
+      // в ярлыке рядом с номером (`1 · front`, виден всегда) и угол-меню `front ▾` внизу справа
+      // (выбор и есть запись). Первый кадр = обложка карточки: это СОСТОЯНИЕ, флаг `preview`.
+      tileBadge={(_, i) => kindLabels[listValues[i]?.kind ?? ''] ?? null}
+      tileFlag={(_, i) =>
+        i === 0
+          ? { word: 'preview', tone: 'mut', title: 'the first view is the card preview' }
+          : null
+      }
+      tileCorners={(view, i) => {
+        if (frozen) return null;
+        const kind = listValues[i]?.kind ?? '';
+        return {
+          right: (
+            // Нажатие не доходит до кадра: иначе оно завело бы там жест панорамы или постановки.
+            <span onPointerDown={(e) => e.stopPropagation()} className='flex'>
+              <CornerMenu
+                menu={{
+                  label: kindLabels[kind] ?? 'kind',
+                  ariaLabel: `kind of ${isMoodboard ? 'picture' : 'view'} ${i + 1}`,
+                  items: kindOptions.map((o) => ({
+                    value: o.value,
+                    label: o.label,
+                    current: o.value === kind,
+                  })),
+                  onPick: (value) =>
+                    setValue(`${listName}.${i}.kind`, value as common_TechCardMediaKind, {
+                      shouldDirty: true,
+                    }),
+                  'data-menu': `kind:${view.mediaId}`,
+                }}
+              />
+            </span>
+          ),
+        };
       }}
     />
   );
