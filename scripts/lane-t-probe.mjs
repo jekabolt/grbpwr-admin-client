@@ -122,6 +122,12 @@ const MUTATIONS = {
     from: '    return piecesInPlace(drawn);',
     to: "    return kind === 'flat' ? piecesInPlace(drawn) : drawn;",
   },
+  // R(c): the bench forgets the brought renders again (they are reachable nowhere).
+  'brought-gone': {
+    file: /generation\/latest-generation\.tsx$/,
+    from: "kind === 'render' && renderStep ? broughtGroup(band, renderStep) : null",
+    to: 'null',
+  },
 };
 function mutationPlugin(name) {
   const m = MUTATIONS[name];
@@ -424,6 +430,48 @@ try {
     JSON.stringify({ markState, markItems }),
   );
   await page.keyboard.press('Escape');
+
+  // ══ R(c) · THE BROUGHT RENDERS STAY REACHABLE — ON THE RENDER BENCH ══
+  const RB = P('render-brought');
+  check(
+    'Rc.1 the bench says `1 brought ▸` (the one on a side is not counted)',
+    (await page
+      .$eval(`${RB} [data-latest-brought]`, (e) => e.getAttribute('data-latest-brought'))
+      .catch(() => '')) === '1',
+  );
+  check(
+    'Rc.2 folded by default: no brought tile yet',
+    !(await page.$(`${RB} [data-picture="901"]`)),
+  );
+  const door = await page.$(`${RB} [data-latest-brought-door]`);
+  if (door) await door.click();
+  await page.waitForTimeout(200);
+  check(
+    'Rc.3 open: the brought render stands as a tile',
+    !!(await page.$(`${RB} [data-picture="901"]`)),
+  );
+  check(
+    'Rc.4 it is markable into a side (`mark ▾`)',
+    !!(await page.$(`${RB} [data-menu="mark:901"]`)),
+  );
+  check(
+    'Rc.5 the plate standing in front is not in the group',
+    !(await page.$(`${RB} [data-picture="903"]`)),
+  );
+  check("Rc.6 the run's own tile still stands", !!(await page.$(`${RB} [data-picture="801"]`)));
+  if (SHOT) await (await page.$(RB))?.screenshot({ path: SHOT.replace(/\.png$/, '-brought.png') });
+  const RO = P('render-brought-only');
+  check(
+    'Rc.7 no render run: the block stands for the brought renders alone',
+    !!(await page.$(`${RO} [data-latest-generation="0"] [data-latest-brought="1"]`)),
+  );
+  const door2 = await page.$(`${RO} [data-latest-brought-door]`);
+  if (door2) await door2.click();
+  await page.waitForTimeout(200);
+  check(
+    'Rc.8 …and opens to the tile with `mark ▾`',
+    !!(await page.$(`${RO} [data-menu="mark:902"]`)),
+  );
 
   await ctx.close();
 } finally {

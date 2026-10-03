@@ -9,6 +9,9 @@
 //   history-popup (19) — строка истории (не сетка: `match`) с листом `one` × 4 вида без столбца
 // R(b) · верстак FABRIC RENDER как у FLAT: render-uncut (20) — лист `one` × 4 = встроенный редактор;
 //   render-cut (21) — лист 711 и четыре куска: листа нет, куски — плитки с `mark ▾`
+// R(c) · принесённые рендеры (без прогона, ни в одной стороне) — на верстаке FABRIC RENDER:
+//   render-brought (22) — прогон 80 + принесённый 901 (свободен) и 903 (стоит во front: не в группе);
+//   render-brought-only (23) — прогонов нет, только принесённый 902
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type {
   GetDesignBandResponse,
@@ -222,6 +225,59 @@ const scenes: { probe: string; node: ReactNode }[] = [
             }),
           ])}
           techCardId={21}
+          kind='render'
+        />
+      </RenderStepScope>
+    ),
+  },
+  {
+    probe: 'render-brought',
+    node: (
+      <RenderStepScope step={step}>
+        <LatestGeneration
+          band={
+            {
+              bench: [
+                ...flatBench,
+                {
+                  id: 9,
+                  viewKey: 'front',
+                  kind: 'render',
+                  colorwayId: 0,
+                  pictureId: 903,
+                  slotRev: 1,
+                  picture: pic(903, 0, 'render'),
+                },
+              ],
+              runs: [run(80, 'render', { pictures: [pic(801, 80, 'render')] })],
+              totalRuns: 1,
+              outputs: [
+                { picture: pic(801, 80, 'render'), runId: 80, runKind: 'render' },
+                { picture: pic(901, 0, 'render'), runId: 0, runKind: 'render' },
+                { picture: pic(903, 0, 'render'), runId: 0, runKind: 'render' },
+              ],
+            } as unknown as GetDesignBandResponse
+          }
+          techCardId={22}
+          kind='render'
+        />
+      </RenderStepScope>
+    ),
+  },
+  {
+    probe: 'render-brought-only',
+    node: (
+      <RenderStepScope step={step}>
+        <LatestGeneration
+          band={
+            {
+              bench: flatBench,
+              runs: [],
+              totalRuns: 0,
+              outputs: [{ picture: pic(902, 0, 'render'), runId: 0, runKind: 'render' }],
+            } as unknown as GetDesignBandResponse
+          }
+          techCardId={23}
           kind='render'
         />
       </RenderStepScope>

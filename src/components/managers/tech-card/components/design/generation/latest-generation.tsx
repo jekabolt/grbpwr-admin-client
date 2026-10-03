@@ -15,7 +15,7 @@ import { runRepresentation } from '../bench-kinds';
 import { serverSpeaksDesign } from '../capability';
 import { pictureHandle, runHandle } from '../handles';
 import { useGalleryGroup, useGalleryViewerOpen } from '../picture-tile';
-import { RenderDoorsHost, hostPlates } from '../render/render-tile';
+import { RenderDoorsHost, broughtGroup, hostPlates, useRenderStep } from '../render/render-tile';
 import { SplitModal } from '../split-modal';
 import { isRunArchived } from '../visibility';
 import {
@@ -456,6 +456,27 @@ export function LatestGeneration({
     const inline = new Set(inlineSheets.map((s) => s.picture.id ?? 0));
     return { ...plan, cards: plan.cards.filter((c) => !inline.has(c.picture.id ?? 0)) };
   }, [plan, inlineSheets]);
+  /**
+   * ═══ THE RENDERS BROUGHT BY HAND THAT STAND IN NO SIDE (03.10, R(c)) ════════════════════════════
+   * An upload or a flatten with no run has no row in the history, and since T24 the render history
+   * is FLAT's grid of runs: its «· N brought ▸» group went with the render doors. Marking into a
+   * side lives on the bench, so the group lives here, FABRIC RENDER only: one quiet line under the
+   * run's tiles, `N brought ▸`, folded by default (they are rare, and the bench is the last run's).
+   * Open, the group's cards stand as tiles with the same render doors (`mark ▾`, ✕, edit, split),
+   * a cut sheet's free pieces in its place as on the run above (`piecesInPlace`; the whole split
+   * still counted by `wholeDecks`). With no render run at all the block stands for the group alone.
+   */
+  const renderStep = useRenderStep();
+  const brought = useMemo(
+    () => (kind === 'render' && renderStep ? broughtGroup(band, renderStep) : null),
+    [kind, renderStep, band],
+  );
+  const broughtPlan = useMemo(() => (brought ? piecesInPlace(brought.plan) : null), [brought]);
+  const [broughtOpen, setBroughtOpen] = useState(false);
+  if (broughtOpen && !brought) setBroughtOpen(false);
+  const broughtRun = broughtOpen && brought && broughtPlan ? brought.run : null;
+  const planOf = (r: common_DesignRun): OutputPlan =>
+    (r === broughtRun ? broughtPlan : tilePlan) ?? { cards: [], deckOf: new Map() };
   const decks = useMemo(() => decksOf(plan), [plan]);
   const deckKey = `${techCardId}:${runId}|${decks.map((d) => `${d.root}x${d.count}`).join(',')}`;
   const [seen, setSeen] = useState<{
@@ -472,6 +493,7 @@ export function LatestGeneration({
       // the SAME card never gets here while the modal is open — the split pins the run it cuts
       // (`bench-store.ts`), and the pieces land on this row.
       if (seen && seen.card !== techCardId && splitting) setSplitting(null);
+      if (seen && seen.card !== techCardId && broughtOpen) setBroughtOpen(false);
     } else {
       const grown = decks.find((d) => d.count > (seen.sizes.get(d.root) ?? 0));
       if (grown) next = grown.root;
@@ -486,25 +508,131 @@ export function LatestGeneration({
   }
 
   /** The viewer row of THIS row: its pictures in the order shown, the open deck's pieces inside. */
+  const shownRuns = useMemo(
+    () => [...(run && tilePlan ? [run] : []), ...(broughtRun ? [broughtRun] : [])],
+    [run, tilePlan, broughtRun],
+  );
   const gallery = useMemo(
-    () =>
-      run && tilePlan ? runsGallery([run], openDeck, () => tilePlan) : runsGallery([], openDeck),
-    [run, tilePlan, openDeck],
+    () => runsGallery(shownRuns, openDeck, planOf),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shownRuns, openDeck, tilePlan, broughtPlan],
   );
   const galleryGroup = useGalleryGroup(gallery.items);
   const deckOf = useMemo(
-    () => (run && tilePlan ? deckOfRuns([run], () => tilePlan) : new Map<number, number>()),
-    [run, tilePlan],
+    () => deckOfRuns(shownRuns, planOf),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shownRuns, tilePlan, broughtPlan],
   );
   /** O-63: what the render doors of this row read — its plates and its decks (`RenderDoorsHost`). */
   const plates = useMemo(
-    () => hostPlates(kind === 'render' && tilePlan ? [tilePlan] : []),
-    [kind, tilePlan],
+    () =>
+      hostPlates(
+        kind === 'render'
+          ? [
+              ...(tilePlan && !bare ? [tilePlan] : []),
+              ...(broughtRun && broughtPlan ? [broughtPlan] : []),
+            ]
+          : [],
+      ),
+    [kind, tilePlan, bare, broughtRun, broughtPlan],
   );
   const toggleDeck = (rootId: number) =>
     setOpenDeck((current) => (current === rootId ? null : rootId));
+  const onZoomPicture = (pictureId: number) => {
+    // The viewer is a surface of this run too: pinned from the click, before any re-read.
+    pinShown(techCardId, true);
+    setOpenDeck((current) => deckAfterZoom(current, pictureId, deckOf));
+  };
+  const onSplit = (picture: common_DesignPicture, views: readonly string[]) => {
+    openSurface(techCardId, 'split:bench', picture.runId ?? 0);
+    setSplitting({ picture, handle: pictureHandle(picture), views });
+  };
 
-  if (!run) return null;
+  /** R(c): the brought line and, open, its tiles — inside the render doors' host. */
+  const broughtBlock =
+    brought && broughtPlan && broughtPlan.cards.length > 0 ? (
+      <div data-latest-brought={broughtPlan.cards.length} className='space-y-2'>
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          className='text-labelColor hover:text-textColor'
+          aria-expanded={broughtOpen}
+          data-latest-brought-door=''
+          title='renders brought by hand that stand in no side — mark them into a side here'
+          onClick={() => setBroughtOpen((v) => !v)}
+        >
+          {broughtPlan.cards.length} brought {broughtOpen ? '▾' : '▸'}
+        </Button>
+        {broughtRun && (
+          <RunOutputs
+            band={band}
+            techCardId={techCardId}
+            run={broughtRun}
+            rep='render'
+            cardFit={cardFit}
+            elapsed=''
+            disabled={writesOff}
+            galleryKey={galleryGroup.key}
+            galleryIndexOf={gallery.indexOf}
+            openDeck={openDeck}
+            onDeck={toggleDeck}
+            onZoomPicture={onZoomPicture}
+            onSplit={onSplit}
+            workbench
+            plan={broughtPlan}
+          />
+        )}
+      </div>
+    ) : null;
+  const doorsHost = (children: JSX.Element | null) => (
+    <RenderDoorsHost
+      band={band}
+      techCardId={techCardId}
+      disabled={disabled}
+      pictures={plates.pictures}
+      membersOf={plates.membersOf}
+      wholeDecks={broughtRun ? brought?.wholeDecks : undefined}
+      openDeck={openDeck}
+      onDeck={toggleDeck}
+      /* A plate without a run is the brought group's; the host is mounted only when one of the
+         two exists. */
+      runOf={(picture) =>
+        ((picture.runId ?? 0) <= 0 && brought
+          ? brought.run
+          : run ?? brought?.run) as common_DesignRun
+      }
+    >
+      {children}
+    </RenderDoorsHost>
+  );
+  const splitModal = splitting && (
+    <SplitModal
+      techCardId={techCardId}
+      picture={splitting.picture}
+      handle={splitting.handle}
+      views={splitting.views}
+      open
+      /* The history's cut, not the input's (T-15): the pieces get their views and become
+         pictures of the band; no prompt role is written for them. */
+      forInput={false}
+      onOpenChange={(open) => !open && setSplitting(null)}
+    />
+  );
+
+  if (!run) {
+    // R(c): no render run at all, but renders brought by hand wait for a side — the block stands
+    // for them alone.
+    if (!broughtBlock) return null;
+    return (
+      <div data-latest-generation={0} ref={galleryGroup.anchorRef}>
+        <Section title='latest generation' question='— what the last run brought back'>
+          {doorsHost(broughtBlock)}
+        </Section>
+        {splitModal}
+      </div>
+    );
+  }
 
   const state = runStateWord(run, elapsed);
   /** Said only over the newest run with pictures — a run pinned behind a newer one says the line. */
@@ -525,15 +653,8 @@ export function LatestGeneration({
       galleryIndexOf={gallery.indexOf}
       openDeck={openDeck}
       onDeck={toggleDeck}
-      onZoomPicture={(pictureId) => {
-        // The viewer is a surface of this run too: pinned from the click, before any re-read.
-        pinShown(techCardId, true);
-        setOpenDeck((current) => deckAfterZoom(current, pictureId, deckOf));
-      }}
-      onSplit={(picture, views) => {
-        openSurface(techCardId, 'split:bench', picture.runId ?? 0);
-        setSplitting({ picture, handle: pictureHandle(picture), views });
-      }}
+      onZoomPicture={onZoomPicture}
+      onSplit={onSplit}
       workbench
       plan={tilePlan ?? undefined}
     />
@@ -592,21 +713,15 @@ export function LatestGeneration({
             row's plates (`RenderDoorsHost`); FLAT's row is drawn as it always was. The doors' notes
             stand once above the tiles, spaced by the block. `disabled` is the card's alone: the
             server's silence the doors read themselves, and say so in their own words. */}
-        {bare ? null : kind === 'render' ? (
-          <RenderDoorsHost
-            band={band}
-            techCardId={techCardId}
-            disabled={disabled}
-            pictures={plates.pictures}
-            membersOf={plates.membersOf}
-            openDeck={openDeck}
-            onDeck={toggleDeck}
-            runOf={() => run}
-          >
-            {inline}
-            {tilesLeft && outputs}
-          </RenderDoorsHost>
-        ) : (
+        {kind === 'render' ? (
+          doorsHost(
+            <>
+              {!bare && inline}
+              {!bare && tilesLeft && outputs}
+              {broughtBlock}
+            </>,
+          )
+        ) : bare ? null : (
           <>
             {inline}
             {tilesLeft && outputs}
@@ -644,19 +759,7 @@ export function LatestGeneration({
         )}
       </Section>
 
-      {splitting && (
-        <SplitModal
-          techCardId={techCardId}
-          picture={splitting.picture}
-          handle={splitting.handle}
-          views={splitting.views}
-          open
-          /* The history's cut, not the input's (T-15): the pieces get their views and become
-             pictures of the band; no prompt role is written for them. */
-          forInput={false}
-          onOpenChange={(open) => !open && setSplitting(null)}
-        />
-      )}
+      {splitModal}
     </div>
   );
 }
