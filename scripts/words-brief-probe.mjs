@@ -12,6 +12,8 @@
 //                                                     фактов (поведение до T03) — краснеет
 //   node scripts/words-brief-probe.mjs --mutate-memo  память брифа забывает текст — второй вызов
 //                                                     на тот же текст, краснеет
+//   node scripts/words-brief-probe.mjs --mutate-context  ключ памяти — один текст, без контекста
+//                                                     (до R3): чужие факты берут старый бриф, краснеет
 
 import { build as esbuild } from 'esbuild';
 import { readFileSync, rmSync } from 'node:fs';
@@ -21,6 +23,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const MUTATE_RAW = process.argv.includes('--mutate-raw');
 const MUTATE_MEMO = process.argv.includes('--mutate-memo');
+const MUTATE_CONTEXT = process.argv.includes('--mutate-context');
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
 const DESIGN = resolve(REPO, 'src/components/managers/tech-card/components/design');
@@ -54,10 +57,15 @@ if (MUTATE_RAW)
   );
 if (MUTATE_MEMO)
   plugins.push(
+    swap(/design\/words-brief\.ts$/, '  if (!key || memo.has(key)) return;', '  if (!key) return;'),
+  );
+
+if (MUTATE_CONTEXT)
+  plugins.push(
     swap(
       /design\/words-brief\.ts$/,
-      '  if (!text || memo.has(text)) return;',
-      '  if (!text) return;',
+      "  return text ? JSON.stringify([text, context]) : '';",
+      '  return text;',
     ),
   );
 
@@ -144,19 +152,52 @@ console.log('\nодин вызов на текст, отказ без повто
   };
   B.requestBrief('concept: A', 'ctx', fetcher);
   B.requestBrief('concept: A', 'ctx', fetcher);
-  ck(B.readBrief('concept: A')?.status === 'pending', 'pending while in flight');
+  ck(B.readBrief('concept: A', 'ctx')?.status === 'pending', 'pending while in flight');
   await new Promise((r) => setTimeout(r, 0));
   B.requestBrief('concept: A', 'ctx', fetcher);
   ck(calls.length === 1, 'same text → one call', `calls=${calls.length}`);
-  ck(B.readBrief('concept: A')?.text === BRIEF, 'answer stored trimmed');
+  ck(B.readBrief('concept: A', 'ctx')?.text === BRIEF, 'answer stored trimmed');
   fail = true;
   B.requestBrief('concept: B', 'ctx', fetcher);
   await new Promise((r) => setTimeout(r, 0));
   B.requestBrief('concept: B', 'ctx', fetcher);
   ck(
-    B.readBrief('concept: B')?.status === 'failed' && calls.length === 2,
+    B.readBrief('concept: B', 'ctx')?.status === 'failed' && calls.length === 2,
     'failure is remembered, not retried',
     `calls=${calls.length}`,
+  );
+}
+
+console.log('\nR3: память по тексту + контексту (факты карточки)');
+{
+  B.resetBriefs();
+  const calls = [];
+  const fetcher = async (req) => {
+    calls.push(req);
+    return `brief for ${req.context}`;
+  };
+  B.requestBrief('concept: A', 'fit: slim', fetcher);
+  await new Promise((r) => setTimeout(r, 0));
+  ck(
+    B.readBrief('concept: A', 'fit: oversized') === undefined,
+    'same text, other facts → no stale brief',
+    JSON.stringify(B.readBrief('concept: A', 'fit: oversized')),
+  );
+  B.requestBrief('concept: A', 'fit: oversized', fetcher);
+  await new Promise((r) => setTimeout(r, 0));
+  ck(
+    calls.length === 2 && calls[1].context === 'fit: oversized',
+    'other facts → a new call with them',
+    `calls=${calls.length}`,
+  );
+  ck(
+    B.readBrief('concept: A', 'fit: slim')?.text === 'brief for fit: slim' &&
+      B.readBrief('concept: A', 'fit: oversized')?.text === 'brief for fit: oversized',
+    'each pair keeps its own brief',
+  );
+  ck(
+    B.briefKey('a', 'x') !== B.briefKey('a', 'y') && B.briefKey('', 'x') === '',
+    'debounce identity = text + context; no text → empty key',
   );
 }
 
@@ -177,9 +218,15 @@ console.log('\nпровод: засев WORDS ходит через бриф');
   ck(hook.includes("if (planState === 'wait') return;"), 'seed waits while the brief is pending');
   ck(hook.includes("if (planState === 'keep') return;"), 'a failed brief keeps the shown seed');
   ck(hook.includes("mode: 'prompt', field: 'words'"), 'EnhanceText PROMPT · WORDS');
+  ck(
+    hook.includes('const key = briefKey(source.text, source.context);') &&
+      hook.includes('useSettled(key, BRIEF_SETTLE_MS)') &&
+      hook.includes('briefPlan(key, settled, brief)'),
+    'debounce settles on text + context',
+  );
 }
 
 console.log(
-  `\n${total - bad} / ${total}, failures ${bad}${MUTATE_RAW ? '  (--mutate-raw)' : ''}${MUTATE_MEMO ? '  (--mutate-memo)' : ''}`,
+  `\n${total - bad} / ${total}, failures ${bad}${MUTATE_RAW ? '  (--mutate-raw)' : ''}${MUTATE_MEMO ? '  (--mutate-memo)' : ''}${MUTATE_CONTEXT ? '  (--mutate-context)' : ''}`,
 );
 process.exit(bad ? 1 : 0);

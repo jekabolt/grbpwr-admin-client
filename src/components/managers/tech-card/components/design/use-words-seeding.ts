@@ -13,7 +13,7 @@ import { useFlatInput, wordsLocked } from './flat-input';
 import { useCardFacts } from './head/card-facts-form';
 import { benchSides } from './render/model';
 import { WORDS_MAX } from './words-field';
-import { briefPlan, requestBrief, useBrief, type BriefFetcher } from './words-brief';
+import { briefKey, briefPlan, requestBrief, useBrief, type BriefFetcher } from './words-brief';
 import { followWords, lockWords, offerWords, useWordsSeed, wordsDecided } from './words-seed';
 
 /**
@@ -94,9 +94,12 @@ export function useWordsSeeding(
   /* T03: свободный текст мудборда в WORDS не копируется — он уходит английским брифом
      (`words-brief.ts`); пока текст набирается, вызова нет (дребезг `BRIEF_SETTLE_MS`). */
   const source = useMemo(() => wordsBriefSource(facts), [facts]);
-  const settled = useSettled(source.text, BRIEF_SETTLE_MS);
-  const brief = useBrief(settled);
-  const plan = briefPlan(source.text, settled, brief);
+  /* R3: личность дребезга и памяти — текст + контекст (строки словаря): новые посадка, категория
+     или вещь при том же тексте — новый бриф, а не чужой из памяти. */
+  const key = briefKey(source.text, source.context);
+  const settled = useSettled(key, BRIEF_SETTLE_MS);
+  const brief = useBrief(source.text, source.context);
+  const plan = briefPlan(key, settled, brief);
   const planBrief = typeof plan === 'object' ? plan.brief : undefined;
   const planState = typeof plan === 'string' ? plan : 'ready';
   const composed = useMemo(() => composeWords(facts, WORDS_MAX, planBrief), [facts, planBrief]);
@@ -129,9 +132,9 @@ export function useWordsSeeding(
     seed !== null &&
     (moodMinimum.ok || flatDone);
   useEffect(() => {
-    if (!wantsBrief || !settled || settled !== source.text) return;
-    requestBrief(settled, source.context, fetchWordsBrief);
-  }, [wantsBrief, settled, source]);
+    if (!wantsBrief || !key || settled !== key) return;
+    requestBrief(source.text, source.context, fetchWordsBrief);
+  }, [wantsBrief, settled, key, source]);
   useEffect(() => {
     if (techCardId <= 0) return;
     const blank = ((getValues('garmentDescription') ?? '') as string).trim() === '';
