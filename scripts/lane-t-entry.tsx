@@ -15,6 +15,7 @@
 // W5 · принесённый лист, все куски которого стоят в SIDES, не возвращается «неразрезанным»:
 //   render-brought-cut (25) — прогон 81; лист 950 (принесён), куски 951–954 стоят во front…side_r;
 //   лист 960, кусок 961 свободен, 962 стоит во front другого… (того же sample) — группа = кусок 961
+// T22 · история FLAT монтируется свёрнутой, даже когда хозяин просит открытую: flat-history-fold (27)
 // W2 · один прогон в LATEST и в HISTORY — одна блокировка отмены: shared-cancel (24), прогон 58
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type {
@@ -355,6 +356,17 @@ const scenes: { probe: string; node: ReactNode }[] = [
           kind='render'
         />
       </RenderStepScope>
+    ),
+  },
+  {
+    probe: 'flat-history-fold',
+    node: (
+      <GenerationHistory
+        band={band([run(59, 'flat', { pictures: [pic(591, 59, 'flat')] })])}
+        techCardId={27}
+        defaultRep='flat'
+        defaultOpen
+      />
     ),
   },
   {

@@ -298,33 +298,7 @@ try {
 
   // T22 (owner item 22): FLAT's history starts folded on every visit; the header line is the door.
   check('T22: flat history starts folded', a.gridHistoryStartsOpen === false);
-  {
-    const hist = src('generation/generation-history.tsx');
-    const body = hist.slice(hist.indexOf('export function GenerationHistory('));
-    check(
-      'T22: the fold state starts from the flat default on the grid',
-      /const foldDefault = grid \? gridHistoryStartsOpen : defaultOpen;/.test(body) &&
-        /useState\(foldDefault\)/.test(body) &&
-        /setRunsOpen\(foldDefault\)/.test(body),
-    );
-    check('T22: the grid no longer forces the fold open', !/grid \|\| runsFolded/.test(body));
-    const gridRow = hist.slice(
-      hist.indexOf('function RunGridRow('),
-      hist.indexOf('export function HistoryFoldHeader('),
-    );
-    check('T22: put on bench / a tile press never touches the fold', !/setRunsOpen/.test(gridRow));
-    check(
-      'T22: the grid header is the door, mounted on the grid',
-      /\{grid && \(\s*<HistoryFoldHeader[\s\S]*?onToggle=\{\(\) => setRunsOpen\(\(v\) => !v\)\}/.test(
-        body,
-      ),
-    );
-    const header = hist.slice(
-      hist.indexOf('export function HistoryFoldHeader('),
-      hist.indexOf('/* ──', hist.indexOf('export function HistoryFoldHeader(')),
-    );
-    check('T22: no ▾/▸ glyph and no Button on the flat header', !/[▾▸]|<Button/.test(header));
-  }
+  // The mount itself is checked in the DOM (`lane-t-probe.mjs` T22.1–T22.3), not by source text.
   for (const open of [false, true]) {
     let toggles = 0;
     const el = a.HistoryFoldHeader({

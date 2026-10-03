@@ -128,6 +128,12 @@ const MUTATIONS = {
     from: 'piecesInPlace(brought.plan, new Set(brought.wholeDecks.keys()))',
     to: 'piecesInPlace(brought.plan)',
   },
+  // T22: the FLAT grid history follows the host's `defaultOpen` again instead of starting folded.
+  fold: {
+    file: /generation\/generation-history\.tsx$/,
+    from: 'const foldDefault = grid ? gridHistoryStartsOpen : defaultOpen;',
+    to: 'const foldDefault = defaultOpen;',
+  },
   // R(a): the popup seeds from `composite_views` again (empty on beta's `one` sheets).
   'popup-seed': {
     file: /split-modal\.tsx$/,
@@ -252,6 +258,29 @@ try {
     if (h) await h.click();
     await page.waitForTimeout(150);
   };
+
+  // ══ T22 · FLAT HISTORY MOUNTS FOLDED (DOM) ══
+  const HF = P('flat-history-fold');
+  check(
+    'T22.1 mounted folded although the host asks open: the header line, no run row',
+    !!(await page.$(`${HF} [data-history-fold="closed"]`)) &&
+      !(await page.$(`${HF} [data-run]`)) &&
+      !(await page.$(`${HF} [data-picture="591"]`)),
+  );
+  await page.click(`${HF} [data-history-fold]`);
+  await page.waitForTimeout(150);
+  check(
+    'T22.2 the header line opens it',
+    !!(await page.$(`${HF} [data-history-fold="open"]`)) &&
+      !!(await page.$(`${HF} [data-run="59"] [data-picture="591"]`)),
+  );
+  await page.focus(`${HF} [data-history-fold]`);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  check(
+    'T22.3 Enter folds it again',
+    !!(await page.$(`${HF} [data-history-fold="closed"]`)) && !(await page.$(`${HF} [data-run]`)),
+  );
 
   // ══ T23 · CANCEL A RUN IN FLIGHT ══
   const live = await page.$$(`${P('flat-running')} [data-live-tile]`);

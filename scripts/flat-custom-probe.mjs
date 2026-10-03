@@ -8,6 +8,7 @@
 //   node scripts/flat-custom-probe.mjs                  прогон
 //   node scripts/flat-custom-probe.mjs --mutate=default умолчание снова front+back (до T19) — красное
 //   node scripts/flat-custom-probe.mjs --mutate=open    панель рисуется и закрытой (до T18) — красное
+//   node scripts/flat-custom-probe.mjs --mutate=seed    ряд сеет старые front+back мимо умолчания (W8)
 //   node scripts/flat-custom-probe.mjs --mutate=draft   ряд не пересеивает выбор при смене карточки (W1)
 //
 // DOM-часть (W1 / W8): настоящий `FlatRunRow` в chromium (`flat-custom-dom-entry.tsx`). Playwright не в
@@ -36,6 +37,11 @@ const MUTATIONS = {
     file: /design\/flat-custom\.tsx$/,
     from: '{open && (',
     to: '{(true || open) && (',
+  },
+  seed: {
+    file: /design\/flat-run-row\.tsx$/,
+    from: 'const [initialDraft] = useState(() => flatDraftOf(techCardId));',
+    to: 'const [initialDraft] = useState(() => ({ ...flatDraftOf(techCardId), views: { front: true, back: true } }));',
   },
   draft: {
     file: /design\/flat-run-row\.tsx$/,
@@ -178,18 +184,6 @@ console.log('\nT18 · дверь custom');
   );
 }
 
-console.log('\nпровод: ряд берёт умолчание и дверь отсюда');
-{
-  const row = readFileSync(resolve(DESIGN, 'flat-run-row.tsx'), 'utf8');
-  ck(!row.includes('{ front: true, back: true }'), 'the old front+back literal is gone');
-  ck(row.includes('<FlatCustom'), 'row renders FlatCustom');
-  ck(row.includes('applyTicks(tickView(views, detailTicks, view))'), 'view chip → tickView (T07)');
-  ck(
-    row.includes('applyTicks(tickDetail(views, detailTicks, id))'),
-    'detail chip → tickDetail (T07)',
-  );
-}
-
 // ══ DOM · настоящий ряд FLAT (W1 / W8) ══
 function resolvePlaywright() {
   const require = createRequire(import.meta.url);
@@ -287,6 +281,38 @@ if (!chromium) {
     const openDoor = async () => {
       if ((await page.getAttribute(door, 'aria-expanded')) !== 'true') await page.click(door);
     };
+
+    console.log('\nW8 · нетронутый GENERATE шлёт умолчание (DOM)');
+    await page.click('[data-flat-generate] button:has-text("generate")');
+    await page
+      .waitForFunction(() => window.__calls.some((c) => c.name === 'StartDesignRun'), null, {
+        timeout: 5000,
+      })
+      .catch(() => {});
+    const starts = await page.evaluate(() =>
+      window.__calls.filter((c) => c.name === 'StartDesignRun').map((c) => c.body),
+    );
+    const p0 = starts[0]?.params ?? {};
+    ck(starts.length === 1, 'one StartDesignRun', String(starts.length));
+    ck(
+      starts[0]?.kind === 'flat' && starts[0]?.techCardId === 31,
+      'a flat run of card 31',
+      JSON.stringify([starts[0]?.kind, starts[0]?.techCardId]),
+    );
+    ck(p0.layout === 'one', 'params.layout = one', String(p0.layout));
+    ck(
+      JSON.stringify(p0.views) === JSON.stringify(['front', 'back', 'side_l', 'side_r']),
+      'params.views = front, back, side_l, side_r',
+      JSON.stringify(p0.views),
+    );
+    ck(
+      p0.autoSplit === true && (p0.detailSlotIds ?? []).length === 0,
+      'auto split on, no details',
+      JSON.stringify([p0.autoSplit, p0.detailSlotIds]),
+    );
+    await page.waitForFunction(
+      () => !document.querySelector('[data-flat-generate] [aria-busy="true"]'),
+    );
 
     console.log('\nW1 · выбор custom принадлежит карточке (DOM)');
     await openDoor();

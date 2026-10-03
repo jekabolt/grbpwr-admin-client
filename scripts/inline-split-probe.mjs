@@ -514,7 +514,11 @@ try {
     (await page.$$(`${C} [data-menu^="slot:"]`)).length === 4,
   );
   const hist = await page.evaluate(() => window.__probe.historyIds);
-  check('H1 the sheet stays in the history grid', hist.includes(41), JSON.stringify(hist));
+  check(
+    'H1 gridPicturesOf (what the history grid draws) keeps the cut sheet',
+    hist.includes(41),
+    JSON.stringify(hist),
+  );
 
   await ctx.close();
 } finally {
