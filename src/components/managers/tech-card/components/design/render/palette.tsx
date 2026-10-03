@@ -977,7 +977,7 @@ function ColourTile({ state, disabled }: { state: ColourDraft; disabled?: boolea
             aria-label='take the colour off this run'
             title='take the colour off this run'
             onClick={() => state.clear('colour')}
-            className={`absolute right-1 top-1 z-10 ${TILE_QUIET} ${TILE_CORNER}`}
+            className={`absolute right-1 top-1 z-20 ${TILE_QUIET} ${TILE_CORNER}`}
           >
             ✕
           </button>
