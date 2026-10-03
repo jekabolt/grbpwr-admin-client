@@ -27,9 +27,8 @@ import { useDrafted } from './drafted-contract';
 import { markedPlatesOf } from './fix-markup';
 import { FlatCustom } from './flat-custom';
 import {
-  DEFAULT_FLAT_LAYOUT,
-  defaultFlatViews,
-  exclusiveTicks,
+  flatChoiceSummary,
+  flatDraftOf,
   flatInputBusy,
   isDefaultFlatChoice,
   patchFlatInput,
@@ -273,12 +272,9 @@ export function FlatRunRow({
   /* ЧИПЫ — С ЗАПРОСА В ПОЛЁТЕ, если он есть (ревью раунда 3, m2): ряд, вернувшийся после смены шага,
      рисует то, за что уже платят, а не выбор по умолчанию рядом со `starting…`. Пока запрос идёт,
      выбор заперт (`choiceOff`), поэтому локальное состояние с ним не расходится. */
-  const [initialTicks] = useState(() => {
-    const ask = readFlatInput(techCardId).ask;
-    return exclusiveTicks(ask?.views ?? defaultFlatViews(), ask?.detailTicks ?? {});
-  });
-  const [views, setViews] = useState<Record<string, boolean>>(initialTicks.views);
-  const [detailTicks, setDetailTicks] = useState<Record<number, boolean>>(initialTicks.detailTicks);
+  const [initialDraft] = useState(() => flatDraftOf(techCardId));
+  const [views, setViews] = useState<Record<string, boolean>>(initialDraft.views);
+  const [detailTicks, setDetailTicks] = useState<Record<number, boolean>>(initialDraft.detailTicks);
   /** Виды или детали, не вместе (T07): одна галка снимает другую сторону. */
   const applyTicks = (next: {
     views: Record<string, boolean>;
@@ -288,11 +284,21 @@ export function FlatRunRow({
     setDetailTicks(next.detailTicks);
   };
   /** «one picture» по умолчанию (T23, D-19; T19): виды приходят одним листом и режутся сами (`autoSplit`). */
-  const [layout, setLayout] = useState<Layout>(
-    () => readFlatInput(techCardId).ask?.layout ?? DEFAULT_FLAT_LAYOUT,
-  );
+  const [layout, setLayout] = useState<Layout>(initialDraft.layout);
   /** Дверь `custom` у GENERATE (T18): закрыта при каждом монтировании — умолчание не просит решений. */
   const [customOpen, setCustomOpen] = useState(false);
+  /* ЧЕРНОВИК ПРИНАДЛЕЖИТ КАРТОЧКЕ (гейт волны 3, W1): ряд, не перемонтированный при смене
+     карточки, пересеивает выбор с новой карточки (её запрос в полёте или умолчание) прямо в
+     отрисовке — иначе `per picture` одной карточки уходил бы платным прогоном другой. */
+  const [draftCard, setDraftCard] = useState(techCardId);
+  if (draftCard !== techCardId) {
+    const seed = flatDraftOf(techCardId);
+    setDraftCard(techCardId);
+    setViews(seed.views);
+    setDetailTicks(seed.detailTicks);
+    setLayout(seed.layout);
+    setCustomOpen(false);
+  }
   const customChoice = !isDefaultFlatChoice({ views, detailTicks, layout });
   const bench = useMemo(() => readBench(band, 'flat'), [band]);
 
@@ -595,6 +601,10 @@ export function FlatRunRow({
               open={customOpen || noViews}
               onToggle={() => setCustomOpen((v) => !v)}
               modified={customChoice}
+              summary={flatChoiceSummary(
+                { views, detailTicks, layout },
+                tickedDetails.map((d) => displayDetailName(bench.details, d)),
+              )}
               after={
                 <>
                   {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — единственное место, где человек видит ПОЛНЫЙ состав запроса

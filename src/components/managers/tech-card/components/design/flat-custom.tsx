@@ -25,6 +25,7 @@ export function FlatCustom({
   open,
   onToggle,
   modified,
+  summary,
   after,
   children,
 }: {
@@ -32,6 +33,8 @@ export function FlatCustom({
   onToggle: () => void;
   /** Выбор отличается от умолчания (четыре стороны, один лист, без деталей). */
   modified: boolean;
+  /** Точный выбор словами (`flatChoiceSummary`) — `title` двери, пока выбор не умолчание (W1). */
+  summary?: string;
   /** Что стоит в ряду сразу за дверью (опись `what the model gets ▸`). */
   after?: ReactNode;
   /** Раскладка, стороны, детали — рисуются только открытыми. */
@@ -46,7 +49,7 @@ export function FlatCustom({
         data-flat-custom={modified ? 'modified' : ''}
         title={
           modified
-            ? 'not the default run: four views in one picture'
+            ? `custom: ${summary ?? 'not the default run'}`
             : 'default run: four views in one picture'
         }
         onClick={onToggle}

@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react';
 
 import type { FlushResult } from './autosave-contract';
 import type { RunRefusal } from './generation/refusal';
-import { ACTIVE_VIEWS } from './views';
+import { ACTIVE_VIEWS, viewLabel } from './views';
 
 /**
  * ═══ ВХОД ФЛЭТА ЗАНЯТ — ЭТО СОСТОЯНИЕ КАРТОЧКИ, А НЕ РЯДА (ревью раунда 2, MAJOR B) ═══════════════
@@ -69,6 +69,28 @@ export function isDefaultFlatChoice(ask: FlatAsk): boolean {
     ACTIVE_VIEWS.every((v) => !!ask.views[v]) &&
     !Object.values(ask.detailTicks).some(Boolean)
   );
+}
+
+/**
+ * Черновик ряда ДЛЯ ЭТОЙ КАРТОЧКИ (гейт волны 3, W1): выбор из запроса в полёте, если он есть,
+ * иначе умолчание. Ряд, не перемонтированный при смене карточки, обязан пересеять черновик отсюда —
+ * иначе выбор одной карточки молча уезжает платным прогоном другой.
+ */
+export function flatDraftOf(card: number): FlatAsk {
+  const ask = readFlatInput(card).ask;
+  const ticks = exclusiveTicks(ask?.views ?? defaultFlatViews(), ask?.detailTicks ?? {});
+  return { ...ticks, layout: ask?.layout ?? DEFAULT_FLAT_LAYOUT };
+}
+
+/**
+ * Точный выбор словами — `title` закрытой двери `custom •` (W1): раскладка, затем то, что уйдёт.
+ * `detailNames` — имена отмеченных деталей в порядке скамьи.
+ */
+export function flatChoiceSummary(ask: FlatAsk, detailNames: string[]): string {
+  const layout = ask.layout === 'one' ? 'one picture' : 'a picture per view';
+  const views = ACTIVE_VIEWS.filter((v) => ask.views[v]).map((v) => viewLabel(v));
+  const asked = [...views, ...detailNames.map((n) => `detail ${n}`)];
+  return [layout, asked.length ? asked.join(', ') : 'nothing ticked'].join(' · ');
 }
 
 export type FlatInputState = {
