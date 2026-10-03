@@ -69,7 +69,15 @@ const MUTATIONS = {
   // T12: двойной клик по снимку больше не открывает увеличенный вид — двери в зум нет вовсе.
   dbldoor: { file: /focused-annotator\.tsx$/, from: 'onOpenLarge={zoomable ? () => setZoomIndex(i) : undefined}', to: 'onOpenLarge={undefined}' },
   // T12: двойной клик взведённым инструментом открывает зум вместо второй точки фигуры.
-  dblarmed: { file: /annotation\/surface\.tsx$/, from: 'if (placing || adding !== null || e.timeStamp - armedPressAt.current < 800) return;', to: 'if (false) return;' },
+  dblarmed: { file: /annotation\/surface\.tsx$/, from: 'if (placing || adding !== null || lastPresses.current.some(Boolean)) return;', to: 'if (false) return;' },
+  // HX1: прежнее окно «800 мс от последнего взведённого нажатия» — глотает зум сразу после постановки.
+  dblwindow: {
+    edits: [
+      { file: /annotation\/surface\.tsx$/, from: '  const lastPresses = useRef<boolean[]>([]);', to: '  const lastPresses = useRef<boolean[]>([]);\n  const armedPressAt = useRef(-Infinity);' },
+      { file: /annotation\/surface\.tsx$/, from: 'lastPresses.current.some(Boolean)) return;', to: 'e.timeStamp - armedPressAt.current < 800) return;' },
+      { file: /annotation\/surface\.tsx$/, from: '    lastPresses.current = [...lastPresses.current, placing || adding !== null].slice(-2);\n', to: '    if (placing || adding !== null) armedPressAt.current = e.timeStamp;\n' },
+    ],
+  },
   // Порог заворота вернулся к «упёрся в самый конец»: первая стрелка не листает.
   rail: { file: /focused-annotator\.tsx$/, from: 'el.scrollLeft >= max - by / 2', to: 'el.scrollLeft >= max' },
   // Перенос строк в сетке не включается.
@@ -196,18 +204,28 @@ const stubNetwork = {
 const mutation = MUTATE_LIST.length && {
   name: `canvas-mutation-${MUTATE_LIST.join('+')}`,
   setup(b) {
+    // ПРАВКИ ОДНОГО ФАЙЛА — ОДНИМ `onLoad`. esbuild берёт ПЕРВЫЙ `onLoad`, вернувший содержимое, и
+    // остальные для того же пути молча не зовутся: мутация из трёх правок одного файла применялась
+    // на треть (HX1, `dblwindow`) и выходила «слепой» не по вине пробы.
+    const byFile = new Map();
     for (const name of MUTATE_LIST) {
       // Мутация — это либо одна правка, либо СПИСОК правок: сторож, разложенный на два звена,
       // ловится только снятием обоих сразу.
-      const edits = MUTATIONS[name].edits ?? [MUTATIONS[name]];
-      for (const m of edits) {
-        b.onLoad({ filter: m.file }, async (a) => {
-          const src = await readFile(a.path, 'utf8');
-          if (!src.includes(m.from)) throw new Error(`мутация «${name}» не нашла свою строку в ${a.path}`);
-          const contents = m.all ? src.split(m.from).join(m.to) : src.replace(m.from, m.to);
-          return { contents, loader: a.path.endsWith('.tsx') ? 'tsx' : 'ts' };
-        });
+      for (const m of MUTATIONS[name].edits ?? [MUTATIONS[name]]) {
+        const k = String(m.file);
+        if (!byFile.has(k)) byFile.set(k, { file: m.file, edits: [] });
+        byFile.get(k).edits.push({ ...m, name });
       }
+    }
+    for (const { file, edits } of byFile.values()) {
+      b.onLoad({ filter: file }, async (a) => {
+        let src = await readFile(a.path, 'utf8');
+        for (const m of edits) {
+          if (!src.includes(m.from)) throw new Error(`мутация «${m.name}» не нашла свою строку в ${a.path}`);
+          src = m.all ? src.split(m.from).join(m.to) : src.replace(m.from, m.to);
+        }
+        return { contents: src, loader: a.path.endsWith('.tsx') ? 'tsx' : 'ts' };
+      });
     }
   },
 };
@@ -589,6 +607,48 @@ await run('14 zoom-door', async () => {
   await page.waitForTimeout(300);
   const dialogs = await page.$$eval('[role="dialog"]', (n) => n.length);
   check('14c двойной клик взведённым инструментом зум НЕ открывает', dialogs === 0, `диалогов ${dialogs}`);
+  await ctx.close();
+});
+
+// ── 14d–14g. Двойной клик: без инструмента — зум и ни одной записи; со взведённым — постановка (HX1)
+await run('14d dblclick rule', async () => {
+  const { ctx, page } = await fresh(browser);
+  const count = async () => (await state(page)).callouts.length;
+  const n0 = await count();
+  await openZoomByPicture(page, { wait: false });
+  const opened = await page.waitForSelector('[role="dialog"]', { timeout: 1500 }).then(() => true, () => false);
+  check('14d без инструмента двойной клик открывает зум', opened);
+  check('14e и ничего не записал', (await count()) === n0, `было ${n0} стало ${await count()}`);
+  if (opened) {
+    await page.click('[aria-label="close the zoomed view"]');
+    await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 3000 }).catch(() => {});
+  }
+  // Две свободные точки снимка — заранее: второй двойной клик идёт СРАЗУ за первым, без замеров.
+  const spots = await page.evaluate(() => {
+    const img = document.querySelector('[data-rail-view] [data-annot-frame] img');
+    const r = img.getBoundingClientRect();
+    const out = [];
+    for (let fy = 0.92; fy > 0.05 && out.length < 2; fy -= 0.07)
+      for (let fx = 0.08; fx < 0.95 && out.length < 2; fx += 0.3) {
+        const x = r.x + r.width * fx;
+        const y = r.y + r.height * fy;
+        if (document.elementFromPoint(x, y) === img) out.push({ x, y });
+      }
+    return out;
+  });
+  if (spots.length < 2) throw new Error('на снимке нет двух свободных точек');
+  // Двухточечная линия взведена: двойной клик — это две точки фигуры, постановка старше зума.
+  // Линия записана, инструмент погас — и СРАЗУ ЖЕ двойной клик в другом месте снимка: это уже
+  // просьба увеличить (окно «800 мс после взведённого нажатия» её глотало).
+  await page.click('span[title^="two points"]');
+  await page.mouse.dblclick(spots[0].x, spots[0].y);
+  const placed = await count();
+  const d1 = await page.$$eval('[role="dialog"]', (n) => n.length);
+  await page.mouse.dblclick(spots[1].x, spots[1].y);
+  check('14f взведённая линия: двойной клик зум НЕ открывает и ставит фигуру', d1 === 0 && placed === n0 + 1, `диалогов ${d1}, выносок ${placed} (было ${n0})`);
+  const d2 = await page.waitForSelector('[role="dialog"]', { timeout: 1500 }).then(() => true, () => false);
+  check('14g сразу после постановки двойной клик без инструмента открывает зум', d2);
+  check('14h и не пишет ничего сверх линии', (await count()) === n0 + 1, `выносок ${await count()}`);
   await ctx.close();
 });
 
