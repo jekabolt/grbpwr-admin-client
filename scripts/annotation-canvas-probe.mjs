@@ -78,6 +78,10 @@ const MUTATIONS = {
       { file: /annotation\/surface\.tsx$/, from: '    lastPresses.current = [...lastPresses.current, placing || adding !== null].slice(-2);\n', to: '    if (placing || adding !== null) armedPressAt.current = e.timeStamp;\n' },
     ],
   },
+  // HX3: двери в зум с клавиатуры нет — кнопка на кадре не рисуется.
+  kbddoor: { file: /annotation\/surface\.tsx$/, from: '          {onOpenLarge && (\n            <button', to: '          {false && (\n            <button' },
+  // HX3: Enter на двери перехватывает слушатель окна — при выбранной выноске открывается её редактор.
+  kbdenter: { file: /annotation\/surface\.tsx$/, from: "      if (isEnter(e) && t?.closest?.('[data-open-large]')) return;\n", to: '' },
   // Порог заворота вернулся к «упёрся в самый конец»: первая стрелка не листает.
   rail: { file: /focused-annotator\.tsx$/, from: 'el.scrollLeft >= max - by / 2', to: 'el.scrollLeft >= max' },
   // Перенос строк в сетке не включается.
@@ -649,6 +653,36 @@ await run('14d dblclick rule', async () => {
   const d2 = await page.waitForSelector('[role="dialog"]', { timeout: 1500 }).then(() => true, () => false);
   check('14g сразу после постановки двойной клик без инструмента открывает зум', d2);
   check('14h и не пишет ничего сверх линии', (await count()) === n0 + 1, `выносок ${await count()}`);
+  await ctx.close();
+});
+
+// ── 14k–14n. Клавиатура: в зум аннотированного снимка можно попасть без мыши (HX3) ─────────────
+await run('14k keyboard door', async () => {
+  const { ctx, page } = await fresh(browser);
+  const door = '[data-rail-view] [data-open-large]';
+  const info = await page.$eval(door, (el) => ({ tab: el.tabIndex, name: el.getAttribute('aria-label'), w: el.getBoundingClientRect().width }));
+  check('14k у кадра есть фокусируемая дверь в зум с именем и без видимой кнопки', info.tab >= 0 && /^zoom /.test(info.name || '') && info.w <= 1, JSON.stringify(info));
+  const open = async (key) => {
+    await page.focus(door);
+    await page.keyboard.press(key);
+    return page.waitForSelector('[role="dialog"]', { timeout: 1500 }).then(() => true, () => false);
+  };
+  const close = async () => {
+    await page.click('[aria-label="close the zoomed view"]');
+    await page.waitForSelector('[role="dialog"]', { state: 'detached', timeout: 3000 }).catch(() => {});
+  };
+  const enter = await open('Enter');
+  check('14l Enter на двери открывает увеличенный вид', enter);
+  if (enter) await close();
+  const space = await open(' ');
+  check('14m пробел на двери открывает увеличенный вид', space);
+  if (space) await close();
+  // Выбранная выноска не отнимает Enter у двери: слушатель окна открыл бы её редактор.
+  await page.click('span[title="two"]');
+  const n0 = (await state(page)).callouts.length;
+  const sel = await open('Enter');
+  check('14n при выбранной выноске Enter на двери всё равно открывает зум', sel);
+  check('14o и выноски целы', (await state(page)).callouts.length === n0);
   await ctx.close();
 });
 

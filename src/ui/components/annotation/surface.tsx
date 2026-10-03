@@ -1650,6 +1650,9 @@ export function AnnotationSurface({
       // вкладки: без проверки Delete уносил выноску с невидимого экрана, молча.
       const visible = !!boxRef.current?.isConnected && boxRef.current.offsetParent !== null;
       if (!visible) return;
+      // Enter на двери в увеличенный вид принадлежит ЕЙ (HX3): ветки ниже открыли бы редактор
+      // выбранной выноски или дописали фигуру вместо зума.
+      if (isEnter(e) && t?.closest?.('[data-open-large]')) return;
 
       if (e.code === 'Escape') {
         // ЛЕСТНИЦА: вооружённая ручка → выбор → незавершённый жест → инструмент. Один Esc — один
@@ -2017,6 +2020,8 @@ export function AnnotationSurface({
             zoom && 'overflow-hidden',
             frameClassName,
             cursorClass,
+            onOpenLarge &&
+              'has-[[data-open-large]:focus-visible]:outline has-[[data-open-large]:focus-visible]:outline-2 has-[[data-open-large]:focus-visible]:-outline-offset-2 has-[[data-open-large]:focus-visible]:outline-textColor',
           )}
           style={{
             // Вписанный кадр держит СОБСТВЕННЫЕ пропорции картинки: тогда `object-cover` ничего не
@@ -2057,6 +2062,19 @@ export function AnnotationSurface({
           onPointerCancel={releasePointer}
           onPointerLeave={() => placing && setCursor(null)}
         >
+          {/* ДВЕРЬ В УВЕЛИЧЕННЫЙ ВИД С КЛАВИАТУРЫ (hotfix HX3). Двойной клик — жест мыши, и без
+              этого органа клавиатура в зум не попадала вовсе. Кнопка невидима (`sr-only`), а фокус
+              рисуется рамкой самого кадра (`has-[…]` ниже): новой видимой кнопки на кадре нет.
+              Стоит ПЕРВОЙ в кадре, до выносок, — их органы живут своей жизнью после неё. */}
+          {onOpenLarge && (
+            <button
+              type='button'
+              data-open-large=''
+              className='sr-only'
+              aria-label={`zoom ${alt || 'picture'}`}
+              onClick={onOpenLarge}
+            />
+          )}
           {/* ТРАНСФОРМ ОТДЕЛЬНО ОТ РАСКЛАДКИ. Раскладка решается пропорциями кадра, а не тем,
               включён ли зум: у сеточной плитки кадр задан отношением сторон и картинка его
               заполняет, у полосы и печати кадр ОБНИМАЕТ картинку её собственного размера. Свяжи их
