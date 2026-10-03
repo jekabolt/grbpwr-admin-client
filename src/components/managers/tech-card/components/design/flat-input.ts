@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 
 import type { FlushResult } from './autosave-contract';
 import type { RunRefusal } from './generation/refusal';
+import { ACTIVE_VIEWS } from './views';
 
 /**
  * ═══ ВХОД ФЛЭТА ЗАНЯТ — ЭТО СОСТОЯНИЕ КАРТОЧКИ, А НЕ РЯДА (ревью раунда 2, MAJOR B) ═══════════════
@@ -41,6 +42,34 @@ export type FlatAsk = {
   detailTicks: Record<number, boolean>;
   layout: FlatLayout;
 };
+
+/**
+ * ═══ ПРОГОН ФЛЭТА ПО УМОЛЧАНИЮ (T19, слово владельца 03.10) ═════════════════════════════════════
+ *
+ * Владелец, дословно: «теперь по дефолту мы генерируем one image и FRONT BACK SIDE LEFT SIDE RIGHT».
+ * Один лист, четыре стороны (`ACTIVE_VIEWS`, ключи провода `front · back · side_l · side_r` — их же
+ * принимает сервер, `entity.DesignSilhouetteViews`). Было `front, back`.
+ *
+ * Сохранённого выбора у ряда нет и не было: выбор живёт в состоянии ряда и, пока запрос в полёте
+ * или отказ стоит, в `ask` этого модуля (память вкладки, не хранилище). Поэтому «старое умолчание»
+ * не может пережить перезагрузку: поднятый `ask` — это выбор, за который человек уже нажал GENERATE,
+ * и он остаётся его выбором.
+ */
+export const DEFAULT_FLAT_LAYOUT: FlatLayout = 'one';
+
+/** Новая запись на каждый вызов: состояние ряда её правит, общий объект правился бы у всех. */
+export function defaultFlatViews(): Record<string, boolean> {
+  return Object.fromEntries(ACTIVE_VIEWS.map((v) => [v, true]));
+}
+
+/** Выбор — умолчание: четыре стороны, один лист, ни одной детали. Иначе дверь `custom` несёт точку. */
+export function isDefaultFlatChoice(ask: FlatAsk): boolean {
+  return (
+    ask.layout === DEFAULT_FLAT_LAYOUT &&
+    ACTIVE_VIEWS.every((v) => !!ask.views[v]) &&
+    !Object.values(ask.detailTicks).some(Boolean)
+  );
+}
 
 export type FlatInputState = {
   run: 'saving' | 'starting' | null;

@@ -25,9 +25,13 @@ import { GROUP_GAP } from './core';
 import { moodMinimumGate, openGateDoor } from './core/chain';
 import { useDrafted } from './drafted-contract';
 import { markedPlatesOf } from './fix-markup';
+import { FlatCustom } from './flat-custom';
 import {
+  DEFAULT_FLAT_LAYOUT,
+  defaultFlatViews,
   exclusiveTicks,
   flatInputBusy,
+  isDefaultFlatChoice,
   patchFlatInput,
   readFlatInput,
   tickDetail,
@@ -64,8 +68,9 @@ import { materializeWords } from './words-seed';
  * ⚠ РЯД ВИДОВ — ПРОДУКТОВЫЙ, У МАКЕТА ЕГО НЕТ. Прототипный прогон флэта возвращает «до двух
  * свободных флэтов с видом» из фикстур; продуктовый `StartDesignRun` требует `params.views[]` —
  * какие стороны рисовать — и `layout`. Спрятать выбор и слать всегда `front, back` значило бы
- * решать за человека, за что он платит. Поэтому ряд остаётся, одной строкой над рядом запуска:
- * ярлык `VIEWS`, чипы сторон и деталей, справа — раскладка ответа. Это названо в gaps.
+ * решать за человека, за что он платит. С волны 03.10 (T18/T19) выбор
+ * стоит за тихой дверью `custom` рядом с GENERATE (`flat-custom.tsx`), а умолчание — четыре
+ * стороны одним листом (`DEFAULT_FLAT_*`, `flat-input.ts`).
  *
  * ⚠ ЦЕНЫ В РЯДУ НЕТ (26.09, O-37 / D-35). Здесь стояла строка «US$… · last flat run · priced by the
  * server when the run starts» — цена ПОСЛЕДНЕГО прогона под видом цены следующего. Владелец:
@@ -270,7 +275,7 @@ export function FlatRunRow({
      выбор заперт (`choiceOff`), поэтому локальное состояние с ним не расходится. */
   const [initialTicks] = useState(() => {
     const ask = readFlatInput(techCardId).ask;
-    return exclusiveTicks(ask?.views ?? { front: true, back: true }, ask?.detailTicks ?? {});
+    return exclusiveTicks(ask?.views ?? defaultFlatViews(), ask?.detailTicks ?? {});
   });
   const [views, setViews] = useState<Record<string, boolean>>(initialTicks.views);
   const [detailTicks, setDetailTicks] = useState<Record<number, boolean>>(initialTicks.detailTicks);
@@ -282,10 +287,13 @@ export function FlatRunRow({
     setViews(next.views);
     setDetailTicks(next.detailTicks);
   };
-  /** «one picture» по умолчанию (T23, D-19): виды приходят одним листом и режутся сами (`autoSplit`). */
+  /** «one picture» по умолчанию (T23, D-19; T19): виды приходят одним листом и режутся сами (`autoSplit`). */
   const [layout, setLayout] = useState<Layout>(
-    () => readFlatInput(techCardId).ask?.layout ?? 'one',
+    () => readFlatInput(techCardId).ask?.layout ?? DEFAULT_FLAT_LAYOUT,
   );
+  /** Дверь `custom` у GENERATE (T18): закрыта при каждом монтировании — умолчание не просит решений. */
+  const [customOpen, setCustomOpen] = useState(false);
+  const customChoice = !isDefaultFlatChoice({ views, detailTicks, layout });
   const bench = useMemo(() => readBench(band, 'flat'), [band]);
 
   const tickedSides = ACTIVE_VIEWS.filter((v) => views[v]);
@@ -571,90 +579,6 @@ export function FlatRunRow({
         </CalloutBox>
       )}
 
-      {/* ═══ РЯД 1 · ВИДЫ — ярлык, чипы сторон и деталей, справа раскладка ответа ═══════════════
-          Отмеченный чип заливается чернилами — это и есть состояние; «слот заполнен / пуст»
-          живёт в title, потому что лента FLAT SLOTS стоит на той же вкладке и показывает то же
-          глазами. Раскладка имеет смысл от двух видов; при одном она ничего не меняет и молчит
-          (`title`), а не пропадает: положение переключателя — предпочтение, оно переживает галки.
-          Ярлык `views` — единственный текст ряда; рост у чипов и у полосы раскладки тот же, что у
-          кнопок двух рядов ниже (`ROW_CONTROL_STYLE`). */}
-      <div className='flex flex-wrap items-center gap-2' data-flat-views=''>
-        <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
-          views
-        </Text>
-        <ChipRow>
-          {ACTIVE_VIEWS.map((view) => {
-            const on = !!views[view];
-            const slot = bench.sides.find((s) => s.view === view)?.slot ?? null;
-            const slotFilled = (slot?.pictureId ?? 0) > 0;
-            return (
-              <Chip
-                key={view}
-                selected={on}
-                pressed={on}
-                disabled={choiceOff}
-                style={ROW_CONTROL_STYLE}
-                title={
-                  slotFilled
-                    ? 'its flat slot below is already filled'
-                    : 'its flat slot below is empty'
-                }
-                onClick={() => applyTicks(tickView(views, detailTicks, view))}
-              >
-                {viewLabel(view)}
-              </Chip>
-            );
-          })}
-          {/* ДЕТАЛИ — ПО ГАЛКЕ НА КАЖДУЮ ОПИСАННУЮ (T-5): чипы — производная от bench.details. */}
-          {bench.details.map((d) => {
-            const id = d.id ?? 0;
-            if (id <= 0) return null;
-            const on = !!detailTicks[id];
-            const proposed = drafted.slotProposed(id);
-            return (
-              <Chip
-                key={`d:${id}`}
-                selected={on}
-                pressed={on}
-                disabled={choiceOff}
-                tone={proposed ? 'attention' : undefined}
-                data-proposed={proposed || undefined}
-                style={ROW_CONTROL_STYLE}
-                title={
-                  proposed
-                    ? `detail proposed by the construction draft, not accepted yet: ${displayDetailName(bench.details, d)} — accept it in the flat slots`
-                    : `detail described in the flat slots: ${displayDetailName(bench.details, d)}`
-                }
-                onClick={() => applyTicks(tickDetail(views, detailTicks, id))}
-              >
-                detail · {displayDetailName(bench.details, d)}
-              </Chip>
-            );
-          })}
-        </ChipRow>
-        {/* ПЕРЕКЛЮЧАТЕЛЬ РАСКЛАДКИ — В КОНЦЕ ТОГО ЖЕ РЯДА (слово владельца), и рост ему задаёт
-            обёртка: у самой полосы сегменты растянуты (`items-stretch`), поэтому высоту довольно
-            назвать один раз снаружи. */}
-        <span
-          className='ml-auto flex'
-          style={ROW_CONTROL_STYLE}
-          title={
-            ticked.length <= 1
-              ? 'one view is asked — both layouts return one picture, so this changes nothing here'
-              : undefined
-          }
-        >
-          <ViewSwitch
-            label='layout'
-            value={layout}
-            options={LAYOUT_OPTIONS}
-            disabled={choiceOff}
-            onChange={setLayout}
-            className='h-full'
-          />
-        </span>
-      </div>
-
       {/* ═══ РЯД 2 · ЗАПУСК — ОБЩИЙ ОРГАН (F-1). `disabled` ряду НЕ передаётся: право на запись уже
           названо в `gateReason` и той же переменной заперт `submit`. `shape` не называется:
           хвост здесь свой — только дверь описи рядом с GENERATE (O-37: строки денег нет).
@@ -665,18 +589,101 @@ export function FlatRunRow({
           pending={busy}
           onGenerate={() => void submit()}
           trailing={
-            <>
-              {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — единственное место, где человек видит ПОЛНЫЙ состав запроса
+            <FlatCustom
+              /* Ни одной галки — GENERATE заперт словами «tick at least one», и чипы обязаны быть
+                 видны: закрытая панель здесь была бы тупиком. */
+              open={customOpen || noViews}
+              onToggle={() => setCustomOpen((v) => !v)}
+              modified={customChoice}
+              after={
+                <>
+                  {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — единственное место, где человек видит ПОЛНЫЙ состав запроса
                   до того, как заплатит (SPEC п.4: опись живёт в модалке, не на карточке).
                   ⚠ ЭТА ДВЕРЬ СТОИТ РЯДОМ С GENERATE, А НЕ У ПРАВОГО КРАЯ (R2 п.20), слово
                   владельца: «WHAT THE MODEL GETS ▸ помести рядом с GENERATE». Прежний `ml-auto`
                   разносил две двери одного решения по краям ряда, и глаз шёл через всю ширину
                   блока за ответом на вопрос «а что именно уедет». Правило макета («дверь описи у
                   правого края») остаётся у остальных четырёх рядов — они этот хвост не рисуют. */}
-              <Button variant='secondary' size='sm' onClick={() => setWmgOpen(true)}>
-                <ControlLabel>what the model gets ▸</ControlLabel>
-              </Button>
-            </>
+                  <Button variant='secondary' size='sm' onClick={() => setWmgOpen(true)}>
+                    <ControlLabel>what the model gets ▸</ControlLabel>
+                  </Button>
+                </>
+              }
+            >
+              {/* ═══ ПАНЕЛЬ `custom` (T18): раскладка, затем стороны и детали — в порядке слов
+                  владельца («one picture или per picture и так же FRONT / BACK / SIDE LEFT / SIDE
+                  RIGHT»). Ярлыка нет: чипы говорят сами. Раскладка имеет смысл от двух видов; при
+                  одном она ничего не меняет и молчит (`title`), а не пропадает. Детали — здесь же,
+                  рядом с видами: галка детали снимает виды (T07), и это видно в одном месте. */}
+              <span
+                className='flex'
+                style={ROW_CONTROL_STYLE}
+                title={
+                  ticked.length <= 1
+                    ? 'one view is asked — both layouts return one picture, so this changes nothing here'
+                    : undefined
+                }
+              >
+                <ViewSwitch
+                  label='layout'
+                  value={layout}
+                  options={LAYOUT_OPTIONS}
+                  disabled={choiceOff}
+                  onChange={setLayout}
+                  className='h-full'
+                />
+              </span>
+              <ChipRow>
+                {ACTIVE_VIEWS.map((view) => {
+                  const on = !!views[view];
+                  const slot = bench.sides.find((s) => s.view === view)?.slot ?? null;
+                  const slotFilled = (slot?.pictureId ?? 0) > 0;
+                  return (
+                    <Chip
+                      key={view}
+                      selected={on}
+                      pressed={on}
+                      disabled={choiceOff}
+                      style={ROW_CONTROL_STYLE}
+                      title={
+                        slotFilled
+                          ? 'its flat slot below is already filled'
+                          : 'its flat slot below is empty'
+                      }
+                      onClick={() => applyTicks(tickView(views, detailTicks, view))}
+                    >
+                      {viewLabel(view)}
+                    </Chip>
+                  );
+                })}
+                {/* ДЕТАЛИ — ПО ГАЛКЕ НА КАЖДУЮ ОПИСАННУЮ (T-5): чипы — производная от bench.details. */}
+                {bench.details.map((d) => {
+                  const id = d.id ?? 0;
+                  if (id <= 0) return null;
+                  const on = !!detailTicks[id];
+                  const proposed = drafted.slotProposed(id);
+                  return (
+                    <Chip
+                      key={`d:${id}`}
+                      selected={on}
+                      pressed={on}
+                      disabled={choiceOff}
+                      tone={proposed ? 'attention' : undefined}
+                      data-proposed={proposed || undefined}
+                      style={ROW_CONTROL_STYLE}
+                      title={
+                        proposed
+                          ? `detail proposed by the construction draft, not accepted yet: ${displayDetailName(bench.details, d)} — accept it in the flat slots`
+                          : `detail described in the flat slots: ${displayDetailName(bench.details, d)}`
+                      }
+                      onClick={() => applyTicks(tickDetail(views, detailTicks, id))}
+                    >
+                      detail · {displayDetailName(bench.details, d)}
+                    </Chip>
+                  );
+                })}
+              </ChipRow>
+            </FlatCustom>
           }
         />
       </div>
