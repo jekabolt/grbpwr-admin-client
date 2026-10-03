@@ -2595,14 +2595,16 @@ export function AnnotationSurface({
             </div>
           )}
           {cornerSlot && (
-            <div data-frame-corner='' className='absolute right-1 top-1 z-[4] flex gap-1'>
+            // Слой углов — z-20, как у `PictureTile` (20-TILE-SPEC §3): одна высота углов на всю
+            // админку; плашки пинов (z-[5]) и подсказка взвода (z-[6]) лежат под органами.
+            <div data-frame-corner='' className='absolute right-1 top-1 z-20 flex gap-1'>
               {cornerSlot}
             </div>
           )}
           {cornerSlotBottom && (
             <div
               data-frame-corner=''
-              className='pointer-events-none absolute inset-x-1 bottom-1 z-[4] flex items-end justify-between gap-1'
+              className='pointer-events-none absolute inset-x-1 bottom-1 z-20 flex items-end justify-between gap-1'
             >
               {cornerSlotBottom}
             </div>

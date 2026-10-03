@@ -22,8 +22,10 @@ import { AnnotationToolbar, placingHint } from './annotation/toolbar';
 import { AnnotationZoomDialog } from './annotation/zoom-dialog';
 import { Button } from './button';
 import { Chip, ChipRow } from './chip';
+import { Pill } from './pill';
 import { PLACEHOLDER_SURFACE } from './placeholder';
 import Text from './text';
+import { TILE_CORNER, TILE_QUIET } from './tile-skin';
 import { Toolbar, ToolbarSpacer } from './toolbar';
 
 // An annotate-in-place gallery. Two layouts over one set of bindings:
@@ -197,6 +199,22 @@ export type FocusedAnnotatorProps = {
   /** Caption controls under an image (kind select, "set as preview", …). In `grid` this renders
    *  under EVERY cell; in `focused` only under the focused image. */
   renderFocusedFooter?: (view: FocusedView, positionInViews: number) => ReactNode;
+  /**
+   * АНАТОМИЯ ПЛИТКИ СЕТКИ (20-TILE-SPEC §3) — те же места, что у `PictureTile`, но на своей
+   * поверхности (указания приколоты к кадру, поэтому примитив здесь не встаёт).
+   *   · `tileFlag` — слово СОСТОЯНИЯ под номером (верх слева), всегда видно, прозрачно для указателя;
+   *   · `tileCorners` — глаголы нижних углов: `left` — режут ЭТУ картинку (crop), `right` — правка
+   *     (edit). Места назначает поверхность (`cornerSlotBottom`), кожу — `TILE_CORNER + TILE_QUIET`
+   *     вызывающего; углы без `group`-хозяина не проявятся, поэтому `group` стоит на плитке здесь.
+   *   · `removeLabel` — имя ✕: «вон из ЭТОГО блока» (с доски, с эскиза), а не «удалить файл».
+   * Только `layout='grid'`.
+   */
+  tileFlag?: (view: FocusedView, positionInViews: number) => FocusedTileFlag | null | undefined;
+  tileCorners?: (
+    view: FocusedView,
+    positionInViews: number,
+  ) => { left?: ReactNode; right?: ReactNode } | null | undefined;
+  removeLabel?: (view: FocusedView, positionInViews: number) => string;
   /** Accessible label for the thumbnail carousel / the grid. */
   carouselLabel?: string;
   /**
@@ -390,6 +408,13 @@ export type FocusedAnnotatorProps = {
   tilePick?: TilePick;
 };
 
+/** Флаг плитки — та же форма, что у `PictureTile` (`PictureTileFlag`). */
+export type FocusedTileFlag = {
+  word: string;
+  tone: 'attention' | 'mut' | 'ink' | 'warn';
+  title?: string;
+};
+
 /** Взведённый выбор плитки — см. `tilePick`. */
 export type TilePick = {
   active: boolean;
@@ -420,6 +445,9 @@ export function FocusedAnnotator({
   previewFirst = false,
   mediaLabel,
   renderFocusedFooter,
+  tileFlag,
+  tileCorners,
+  removeLabel,
   carouselLabel,
   gridRowHeight,
   calloutKinds,
@@ -871,6 +899,8 @@ export function FocusedAnnotator({
             {views.map((v, i) => {
               const url = mediaUrl(v.full);
               const dim = v.full?.media?.fullSize ?? v.full?.media?.thumbnail;
+              const flag = tileFlag?.(v, i);
+              const corners = tileCorners?.(v, i);
               return (
                 <div
                   key={v.key}
@@ -878,7 +908,9 @@ export function FocusedAnnotator({
                   ref={canOrder ? reorder.registerTile(i) : undefined}
                   {...(canOrder ? reorder.tileProps(i) : {})}
                   className={cn(
-                    'relative shrink-0 space-y-1',
+                    // `group` — хозяин тихих углов (`TILE_QUIET`): ✕, crop, edit проявляются на
+                    // наведении или фокусе внутри ЭТОЙ плитки, как у каждой плитки админки.
+                    'group relative shrink-0 space-y-1',
                     !wrap && 'snap-start',
                     rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]',
                     // K-12 · ШИРОКИЙ РЕФЕРЕНС ЛИСТАЕТСЯ В СВОЕЙ КОРОБКЕ, А НЕ ТАЩИТ СТРАНИЦУ. У ленты
@@ -943,19 +975,40 @@ export function FocusedAnnotator({
                     cornerSlot={
                       !readOnly ? (
                         <FrameButton
-                          ariaLabel={`remove image ${i + 1}`}
+                          ariaLabel={removeLabel?.(v, i) ?? `remove image ${i + 1}`}
                           onPress={() => handleRemoveMedia(v)}
                         >
                           ✕
                         </FrameButton>
                       ) : undefined
                     }
+                    // НИЖНИЙ РЯД — место назначает поверхность; обе стороны передаются всегда
+                    // (пустой `<span />`), иначе единственный орган сменил бы угол молча.
+                    cornerSlotBottom={
+                      corners && (corners.left || corners.right) ? (
+                        <>
+                          <span className='flex items-end gap-1'>{corners.left}</span>
+                          <span className='flex items-end gap-1'>{corners.right}</span>
+                        </>
+                      ) : undefined
+                    }
                   />
-                  {/* Position marker — pieces / operations / the "pinned to" select all address
-                      images by this number. */}
-                  <span className='pointer-events-none absolute left-0 top-0 z-[4] bg-textColor px-1 py-px text-nano leading-none tabular-nums text-bgColor'>
-                    {i + 1}
-                  </span>
+                  {/* ВЕРХ СЛЕВА — ФАКТЫ СТОЛБИКОМ, как у `PictureTile`: номер (pieces, operations
+                      и «pinned to» адресуют картинку по нему), под ним флаг состояния. Оба видны
+                      всегда и прозрачны для указателя; флаг — на непрозрачной подложке, под ним
+                      снимок. */}
+                  <div className='pointer-events-none absolute left-0 top-0 z-20 flex max-w-[calc(100%-32px)] flex-col items-start gap-0.5'>
+                    <span className='bg-textColor px-1 py-px text-nano leading-none tabular-nums text-bgColor'>
+                      {i + 1}
+                    </span>
+                    {flag && (
+                      <span className='inline-block max-w-full bg-bgColor' data-flag={flag.word}>
+                        <Pill tone={flag.tone} title={flag.title} className='max-w-full truncate'>
+                          {flag.word}
+                        </Pill>
+                      </span>
+                    )}
+                  </div>
                   {/* ПОДВАЛ ПЛИТКИ — КАНОННЫЙ, тот же, что во всех галереях формы: ручка ⠿ мышью,
                       стрелки ← → с клавиатуры, номер позиции и форма кадра. Ховер-иконка поверх
                       картинки была бы недостижима с клавиатуры и с планшета и дралась бы за
@@ -997,7 +1050,9 @@ export function FocusedAnnotator({
                           }
                           onClick={() => tilePick?.onPick(v, i)}
                           className={cn(
-                            'absolute inset-0 z-[7] flex items-end justify-center pb-2',
+                            // Выше углов (z-20): пока выбор взведён, ✕ и crop под накладкой
+                            // недостижимы — в этом и довод накладки.
+                            'absolute inset-0 z-30 flex items-end justify-center pb-2',
                             // Стиль обводки задан ЯВНО (`outline-dashed` / `outline-solid`), а не
                             // голым `outline`: twMerge выбрасывает голый класс рядом с
                             // `outline-2` — они одной группы, — и рамка молча исчезает.
@@ -1220,7 +1275,7 @@ function EditorPanel({ focusToken, children }: { focusToken: number; children: R
 }
 
 // ---------------------------------------------------------------------------
-// A control floating on an image frame (zoom, remove). It has to swallow its own pointer
+// A control floating on an image frame (remove). It has to swallow its own pointer
 // gestures, or the press underneath reaches the Stage's add-callout / pan handler.
 // ---------------------------------------------------------------------------
 
@@ -1255,7 +1310,9 @@ function FrameButton({
         e.preventDefault();
         onPress();
       }}
-      className='cursor-pointer border border-borderColor bg-bgColor px-1.5 py-px text-nano uppercase leading-none tracking-label hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
+      // Кожа и правило появления — общие для всех плиток (`tile-skin.ts`): ✕ тихий, как у
+      // `PictureTile`, а не вечно видимый с инверсией на наведении.
+      className={cn(TILE_CORNER, TILE_QUIET, 'cursor-pointer py-0.5 leading-none')}
     >
       {children}
     </span>
