@@ -183,6 +183,30 @@ try {
   );
   check('split T14: not once the one sheet is cut', !S(bare, [bare, piece], oneRun));
   check("split T14: not on another run's picture", !S({ id: 70, runId: 4 }, [], oneRun));
+  // HX4: a `one` ask answered with SEVERAL root pictures — each is a single view, the params say
+  // nothing about any one of them. Only the column (or an edit chain up to it) may offer SPLIT.
+  const solo1 = { id: 80, runId: 5 };
+  const solo2 = { id: 81, runId: 5 };
+  const multiRun = { ...oneRun, pictures: [solo1, solo2] };
+  check('split HX4: not on one of two root outputs of a one run', !S(solo1, [solo1, solo2], multiRun));
+  check(
+    'split HX4: not when only the run row knows the second root',
+    !S(solo1, [solo1], multiRun),
+  );
+  const soloEdit = { id: 82, runId: 5, derivedFrom: 80, derivation: 'flatten' };
+  check(
+    'split HX4: not on an edit of one of two root outputs',
+    !S(soloEdit, [solo1, solo2, soloEdit], multiRun),
+  );
+  const declared2 = { id: 83, runId: 5, compositeViews: ['front', 'back'] };
+  check(
+    'split HX4: a declared sheet still offers among several roots',
+    S(declared2, [declared2, solo2], { ...oneRun, pictures: [declared2, solo2] }),
+  );
+  check(
+    'split HX4: one root output plus its edit still infers',
+    S(bare, [bare, bareEdit], { ...oneRun, pictures: [bare, bareEdit] }),
+  );
 
   // FX3 (gate 03.10): the FLAT history grid shows EVERY picture of a run, hidden ones included (the
   // row dims them), so hiding pictures never makes a run vanish from the history.

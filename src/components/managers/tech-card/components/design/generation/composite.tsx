@@ -156,7 +156,9 @@ export function offersSplit(facts: { views: readonly string[]; splitInto: number
  *   · A SHEET FROM A RUN THE WRITER NEVER SAW. The server writes the column from the run's params
  *     (`compositeViewsOf`: layout `one` over two or more views), so for an output of that run with
  *     nothing written the same params are the same fact read one step later. Only for a genuine
- *     output (no parent), without a named single view, of a run that is not a fix.
+ *     output (no parent), without a named single view, of a run that is not a fix, and only
+ *     while that output is the ONLY root output of its row (a `one` ask answered with several
+ *     pictures is several single views).
  *
  * Hidden only where we are sure of one view: a crop, a per-view layout, a single requested view, a
  * fix, or a sheet already cut (`splitInto`).
@@ -192,7 +194,24 @@ export function readSplit(
     (params?.fixSlotIds ?? []).length > 0 ||
     !!(params?.fixTarget ?? '').trim();
   const asked = params?.views ?? [];
-  if (genuineOutput && !fix && (params?.layout ?? '').trim() === 'one' && asked.length >= 2) {
+  // ⚠ ONLY WHEN THE ROW HOLDS EXACTLY ONE GENUINE OUTPUT (hotfix HX4). A provider may answer a
+  // `one` ask with several separate pictures, and then the params say nothing about any of them —
+  // each is a single view, and offering SPLIT on it invites a cut of a file that has nothing to
+  // cut. One root output is the only shape where «the run asked for one sheet» still describes
+  // THIS file. Since 143b5aa the server copies the column onto edits, so this is a legacy path.
+  const isRoot = (p: common_DesignPicture) =>
+    (p.derivedFrom ?? 0) <= 0 && !(p.ghostView ?? '').trim() && (p.runId ?? 0) === run?.id;
+  const roots = new Set<number>();
+  for (const p of [...(run?.pictures ?? []), ...(siblings ?? []), node]) {
+    if (isRoot(p) && (p.id ?? 0) > 0) roots.add(p.id ?? 0);
+  }
+  if (
+    genuineOutput &&
+    !fix &&
+    roots.size === 1 &&
+    (params?.layout ?? '').trim() === 'one' &&
+    asked.length >= 2
+  ) {
     return { views: asked.map((v) => normaliseViewKey(v)), splitInto };
   }
   return { views: [], splitInto };
