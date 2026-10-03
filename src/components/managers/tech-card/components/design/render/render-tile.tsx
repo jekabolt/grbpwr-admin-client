@@ -936,7 +936,6 @@ export function RenderTile({
   onEdit,
   onSplit,
   split,
-  trailingDoor,
   onDelete,
   deletePending,
 }: {
@@ -951,13 +950,8 @@ export function RenderTile({
    */
   split: { views: readonly string[]; splitInto: number };
   /**
-   * O-68 (D-74): the host's LAST door of the row — «delete» on the workbench's derived pictures —
-   * drawn after the tile's own door, one step away from it. The tile does not know what it is.
-   */
-  trailingDoor?: ReactNode;
-  /**
    * T17: the host's «delete» as an ACT — the last, red row of the tile's menu (`delete…`), opening
-   * the host's own confirmation. Preferred over `trailingDoor`, which stands under the frame.
+   * the host's own confirmation. Nothing of this picture stands under the frame.
    */
   onDelete?: () => void;
   /**
@@ -1293,7 +1287,7 @@ export function RenderTile({
          как один ряд. `sample` — такое же имя, как `ROSSO`. */
       badge={ownName}
       action={
-        deck || trailingDoor ? (
+        deck ? (
           /* ═══ РЯД КОЛОДЫ — ЕДИНСТВЕННЫЙ РЯД ПОД КАДРОМ (T17) ══════════════════════════════
              Владелец (F-7): «для уже сплитнутых … надо писать экспанд … а когда заэкспанжено
              кнопка set которая будет чистить текущие FABRIC RENDER SLOTS и ставить те что в
@@ -1360,9 +1354,6 @@ export function RenderTile({
                   expand ▸
                 </Button>
               ))}
-            {/* O-68 (D-74): a host that still hands its «delete» as a node (not `onDelete`) gets it
-                here, last and one step away from the deck's doors. */}
-            {trailingDoor && <div className='ml-auto shrink-0'>{trailingDoor}</div>}
           </div>
         ) : undefined
       }
@@ -1585,7 +1576,6 @@ export function RunRenderTile({
   onSplit,
   onEdit,
   split,
-  trailingDoor,
   onDelete,
   deletePending,
   children,
@@ -1602,8 +1592,6 @@ export function RunRenderTile({
   onEdit: () => void;
   /** The row's `readSplit` facts for this picture — see `RenderTile`'s `split`. */
   split: { views: readonly string[]; splitInto: number };
-  /** O-68 (D-74): the row's «delete» on a derived picture of the workbench — the row's last door. */
-  trailingDoor?: ReactNode;
   /** T17: the row's «delete» as the tile menu's last item — see `RenderTile`'s `onDelete`. */
   onDelete?: () => void;
   /** TF3: that delete is in flight — see `RenderTile`'s `deletePending`. */
@@ -1634,7 +1622,6 @@ export function RunRenderTile({
         onEdit={onEdit}
         onSplit={onSplit}
         split={split}
-        trailingDoor={trailingDoor}
         onDelete={onDelete}
         deletePending={deletePending}
       />

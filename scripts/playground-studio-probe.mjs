@@ -1776,7 +1776,8 @@ try {
     await active(),
   );
   // m-4 · the viewer's Mask (the viewer closes first, its button is gone): focus on the corner.
-  await page.locator('[data-pg-output="800"] button[aria-label^="zoom"]').click();
+  // The zoom corner is gone (T12): the viewer opens from the picture's own surface.
+  await page.locator('[data-pg-output="800"] [data-tile-surface]').click();
   const viewerMask = page.locator('[role="dialog"] button', { hasText: /^mask$/ });
   await viewerMask.waitFor();
   await viewerMask.click();

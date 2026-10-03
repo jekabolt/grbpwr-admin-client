@@ -47,7 +47,8 @@ import { Toolbar, ToolbarSpacer } from './toolbar';
 //
 // Everything form- or domain-specific is injected: the resolved media (`views`), the callouts for
 // an image (`calloutsFor` + the add/move/remove/render callbacks), how a picked image is committed
-// (`onPickMedia`), and any per-image caption controls (`renderFocusedFooter`). That keeps the same
+// (`onPickMedia`), and the grid tile's own facts and corners (`tileFlag` / `tileBadge` /
+// `tileCorners`). That keeps the same
 // gallery driving the tech-card moodboard + technical sketch AND the fitting photos, each binding
 // its own React Hook Form fields, without this component knowing which form it sits in.
 
@@ -196,9 +197,6 @@ export type FocusedAnnotatorProps = {
   previewFirst?: boolean;
   /** Accessible name for an image + lightbox (per image). */
   mediaLabel?: (view: FocusedView, positionInViews: number) => string;
-  /** Caption controls under an image (kind select, "set as preview", …). In `grid` this renders
-   *  under EVERY cell; in `focused` only under the focused image. */
-  renderFocusedFooter?: (view: FocusedView, positionInViews: number) => ReactNode;
   /**
    * АНАТОМИЯ ПЛИТКИ СЕТКИ (20-TILE-SPEC §3) — те же места, что у `PictureTile`, но на своей
    * поверхности (указания приколоты к кадру, поэтому примитив здесь не встаёт).
@@ -446,7 +444,6 @@ export function FocusedAnnotator({
   fallbackAspect = '4/5',
   previewFirst = false,
   mediaLabel,
-  renderFocusedFooter,
   tileFlag,
   tileBadge,
   tileCorners,
@@ -1034,7 +1031,6 @@ export function FocusedAnnotator({
                       unit='view'
                     />
                   )}
-                  {renderFocusedFooter?.(v, i)}
                   {/* НАКЛАДКА ВЫБОРА. Перекрывает плитку ЦЕЛИКОМ, и в этом весь довод: пока режим
                       взведён, ни пин, ни ✕, ни ручка перестановки под ней не достижимы, поэтому
                       «один клик — два факта» не выражается вовсе. Рисуется только во взведённом
@@ -1132,8 +1128,6 @@ export function FocusedAnnotator({
                 halo={halo}
                 onOpenLarge={zoomable ? () => setZoomIndex(focusedViewerIndex) : undefined}
               />
-
-              {renderFocusedFooter?.(focused, focusedPosition)}
             </div>
           )}
 

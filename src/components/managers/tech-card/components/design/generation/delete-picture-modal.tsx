@@ -1,10 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService, requestHandler } from 'api/api';
 import type { common_DesignPicture } from 'api/proto-http/admin';
-import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
-import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 
@@ -185,41 +183,4 @@ export function useDeletePicture(
 /** The sentence a delete organ carries in its `title`. */
 export function deleteTitle(pieces: number): string {
   return `delete this picture for good — it${pieces > 0 ? ` and its ${pieces} cut ${pieces === 1 ? 'piece' : 'pieces'}` : ''} leave this card and the storage; this cannot be undone`;
-}
-
-export function DeletePictureDoor({
-  techCardId,
-  picture,
-  siblings,
-  disabled,
-  className,
-}: {
-  techCardId: number;
-  picture: common_DesignPicture;
-  /** The pictures of the row this one stands in — where its descendants are counted. */
-  siblings?: readonly common_DesignPicture[];
-  disabled?: boolean;
-  className?: string;
-}) {
-  const pictureId = picture.id ?? 0;
-  const { ask, pending, pieces, modal } = useDeletePicture(techCardId, picture, siblings);
-
-  return (
-    <>
-      <Button
-        type='button'
-        variant='underline'
-        size='xs'
-        data-delete-picture={pictureId || undefined}
-        className={cn('shrink-0', className)}
-        disabled={disabled || pending}
-        onClick={ask}
-        aria-label={`delete picture ${pictureId} for good`}
-        title={deleteTitle(pieces)}
-      >
-        delete
-      </Button>
-      {modal}
-    </>
-  );
 }

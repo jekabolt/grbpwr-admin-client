@@ -760,7 +760,7 @@ await run('9 reorder', async () => {
   await page.waitForTimeout(150);
   let s = await state(page);
   check('9d бросок плитки применяется', s.order.join(',') === '33,11,22', `order=${s.order}`);
-  const firstKind = await page.$eval('[aria-label="probe images"] > div [data-footer-kind]', (el) => el.dataset.footerKind);
+  const firstKind = await page.$eval('[aria-label="probe images"] > div [data-flag]', (el) => el.dataset.flag);
   check('9e подвал первой плитки показывает вид ПЕРЕЕХАВШЕГО кадра', firstKind === 'detail', `kind=${firstKind}`);
   await ctx.close();
 });
@@ -842,7 +842,7 @@ await run('9k reorder by keyboard', async () => {
   await page.waitForTimeout(80);
   const s = await state(page);
   check('9k стрелка ← переставляет с клавиатуры', s.order.join(',') === '11,33,22', `order=${s.order}`);
-  const firstKind = await page.$$eval('[aria-label="probe images"] > div [data-footer-kind]', (e) => e.map((x) => x.dataset.footerKind));
+  const firstKind = await page.$$eval('[aria-label="probe images"] > div [data-flag]', (e) => e.map((x) => x.dataset.flag));
   check('9l подвалы плиток поехали вместе с кадрами', firstKind.join(',') === 'front,detail,back', firstKind.join(','));
   await ctx.close();
 });

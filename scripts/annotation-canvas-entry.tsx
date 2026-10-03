@@ -260,11 +260,9 @@ function Harness() {
         previewFirst
         mediaLabel={(v: FocusedView) => `picture ${order.indexOf(v.mediaId) + 1}`}
         carouselLabel='probe images'
-        renderFocusedFooter={(v: FocusedView) => (
-          <div data-footer-kind={kinds[v.mediaId]} className='text-nano'>
-            kind: {kinds[v.mediaId]}
-          </div>
-        )}
+        /* The per-tile fact rides the tile's flag (the footer slot is gone, TF6): it must travel
+           with its picture when the order changes. */
+        tileFlag={(v: FocusedView) => ({ word: kinds[v.mediaId], tone: 'mut' })}
       />
       {/* SAVE КАРТОЧКИ — вне галереи, как настоящая кнопка в шапке. Ни сменой инструмента, ни
           размонтированием поверхности он не является: именно поэтому он и интересен. */}
