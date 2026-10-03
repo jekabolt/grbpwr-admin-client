@@ -52,9 +52,22 @@ export function InlineSplit({
   const handle = pictureHandle(picture);
   return (
     <div data-inline-split={pictureId} className='space-y-2'>
-      <SplitStage cut={cut} nameInFrame maxHeight={560} />
+      <div className={cut.landed ? 'pointer-events-none' : undefined}>
+        <SplitStage cut={cut} nameInFrame maxHeight={560} />
+      </div>
       <div className='flex items-center justify-between gap-3'>
-        <SplitQuietActions cut={cut} />
+        {/* A LANDED CUT IS TERMINAL (W7): the edits go, and the line says what it waits for until
+            the band re-read brings the pieces and the bench draws them instead of this editor. */}
+        {cut.landed ? (
+          <span
+            data-split-waiting={pictureId}
+            className='text-micro uppercase tracking-label text-labelColor'
+          >
+            cut · waiting for the pieces…
+          </span>
+        ) : (
+          <SplitQuietActions cut={cut} />
+        )}
         <Button
           type='button'
           variant='main'

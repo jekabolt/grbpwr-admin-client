@@ -13,7 +13,7 @@
 //     в истории лист остаётся (`gridPicturesOf`).
 //
 //   node scripts/inline-split-probe.mjs [--shot=out.png]
-//   node scripts/inline-split-probe.mjs --mutate=inline|seed|labels|payload|pieces|role|keys — каждая краснеет
+//   node scripts/inline-split-probe.mjs --mutate=inline|seed|labels|payload|pieces|role|keys|landed — каждая краснеет
 //
 // Playwright не в зависимостях проекта — ищется в кэше npx и МОЛЧА пропускается, если не найден.
 import { createRequire } from 'node:module';
@@ -130,6 +130,12 @@ const MUTATIONS = {
     file: /split-modal\.tsx$/,
     from: 'cut.nudge(i, event.key, event.shiftKey, event.altKey);',
     to: '',
+  },
+  // W7: правка рамок после реза снова взводит confirm (новый ключ — второй рез).
+  landed: {
+    file: /split-modal\.tsx$/,
+    from: "    if (landedRef.current) return;\n    requestIdRef.current = '';",
+    to: "    setLanded(false);\n    requestIdRef.current = '';",
   },
   // после реза верстак снова держит лист (с колодой кусков).
   pieces: {
@@ -397,6 +403,43 @@ try {
   check(
     'C6 a landed cut holds the button (no second key)',
     await page.$eval(`${U} [data-split-confirm="31"]`, (b) => b.disabled).catch(() => false),
+  );
+
+  // ── W7: РЕЗ ПРИЗЕМЛИЛСЯ — РЕДАКТОР ЖДЁТ КУСКИ, НИЧЕГО НЕ ВЗВОДИТ ──
+  check(
+    'L1 landed: `cut · waiting for the pieces…` in place of `+ side · reset`',
+    (await page
+      .$eval(`${U} [data-split-waiting="31"]`, (e) => e.textContent.trim())
+      .catch(() => '')) === 'cut · waiting for the pieces…' &&
+      !(await page.$$eval(`${U} button`, (bs) =>
+        bs.some((b) => ['reset', '+ side'].includes(b.textContent.trim())),
+      )),
+  );
+  const g0 = await geo(0);
+  await page.focus(`${U} [data-split-frame="0"]`);
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Shift+ArrowRight');
+  const fb = await (await page.$(`${U} [data-split-frame="0"]`)).boundingBox();
+  await page.mouse.move(fb.x + fb.width / 2, fb.y + fb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(fb.x + fb.width / 2 + 30, fb.y + fb.height / 2, { steps: 3 });
+  await page.mouse.up();
+  const g1 = await geo(0);
+  check(
+    'L2 landed: keys and drag leave the frames as cut',
+    JSON.stringify(g0) === JSON.stringify(g1),
+    JSON.stringify([g0, g1]),
+  );
+  const stillHeld = await page.$eval(`${U} [data-split-confirm="31"]`, (b) => b.disabled);
+  if (!stillHeld) await page.click(`${U} [data-split-confirm="31"]`);
+  await page.waitForTimeout(200);
+  const cutsNow = await page.evaluate(
+    () => window.__calls.filter((c) => c.name === 'SplitDesignPicture').length,
+  );
+  check(
+    'L3 landed: confirm stays held, one cut only',
+    stillHeld && cutsNow === 1,
+    `${stillHeld} · ${cutsNow}`,
   );
 
   // ── ПОСЛЕ РЕЗА: КУСКИ ВМЕСТО ЛИСТА ──

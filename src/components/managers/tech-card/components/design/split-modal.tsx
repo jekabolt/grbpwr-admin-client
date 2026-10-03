@@ -205,9 +205,16 @@ export function useSplitCut({
   /**
    * THE CUT LANDED, AND THE BAND HAS NOT COME BACK YET. The inline editor stays on screen until the
    * re-read brings the pieces; a second press in that gap would mint a NEW key (the old one is
-   * spent) and cut the sheet twice. So a landed cut holds the button until the frames change.
+   * spent) and cut the sheet twice. So a landed cut is TERMINAL for this picture (gate wave 3, W7):
+   * no edit, drag or key re-arms it — only a new seed or picture, or the editor unmounting (the
+   * popup unmounts on close). The ref answers the handlers between a landing and its re-render.
    */
-  const [landed, setLanded] = useState(false);
+  const [landed, setLandedState] = useState(false);
+  const landedRef = useRef(false);
+  const setLanded = useCallback((v: boolean) => {
+    landedRef.current = v;
+    setLandedState(v);
+  }, []);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const touchRef = useRef(onTouch);
   touchRef.current = onTouch;
@@ -219,20 +226,21 @@ export function useSplitCut({
   const requestIdRef = useRef('');
 
   const editFrames = useCallback((next: (prev: SplitFrameDraft[]) => SplitFrameDraft[]) => {
+    if (landedRef.current) return;
     requestIdRef.current = '';
-    setLanded(false);
     touchRef.current?.();
     setFrames(next);
   }, []);
 
   // Reopening on another picture must not inherit the previous picture's frames.
+  const pictureId = picture.id ?? 0;
   useEffect(() => {
     if (!active) return;
     requestIdRef.current = '';
     setFrames(initial);
     setSelected(null);
     setLanded(false);
-  }, [active, initial]);
+  }, [active, initial, pictureId, setLanded]);
 
   const media = picture.media?.media;
   const src =
@@ -281,11 +289,10 @@ export function useSplitCut({
 
   const startDrag = (index: number, dragMode: DragMode) => (event: React.PointerEvent) => {
     const rect = stageRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    if (!rect || landedRef.current) return;
     event.preventDefault();
     event.stopPropagation();
     requestIdRef.current = '';
-    setLanded(false);
     touchRef.current?.();
     setSelected(index);
     setDrag({
@@ -331,7 +338,7 @@ export function useSplitCut({
   const ready = mode === 'crop' ? frames.length === 1 : frames.length > 0 && viewless === 0;
 
   const submit = () => {
-    if (!ready || pending || landed) return;
+    if (!ready || pending || landedRef.current) return;
     touchRef.current?.();
     if (!requestIdRef.current) requestIdRef.current = newClientRequestId();
     splitPicture.mutate(
