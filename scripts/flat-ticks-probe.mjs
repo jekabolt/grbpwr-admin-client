@@ -107,7 +107,21 @@ console.log('\nпровод: чипы ряда ходят в эти функци
   const row = readFileSync(resolve(DESIGN, 'flat-run-row.tsx'), 'utf8');
   ck(row.includes('applyTicks(tickView(views, detailTicks, view))'), 'view chip → tickView');
   ck(row.includes('applyTicks(tickDetail(views, detailTicks, id))'), 'detail chip → tickDetail');
-  ck(row.includes('exclusiveTicks('), 'restored ask goes through exclusiveTicks');
+  ck(row.includes('flatDraftOf(techCardId)'), 'row seeds its draft from flatDraftOf');
+}
+{
+  // The restored ask goes through exclusiveTicks — asked of the real `flatDraftOf` (W1 moved the
+  // seeding there from the row).
+  M.patchFlatInput(77, {
+    ask: { views: { front: true }, detailTicks: { 5: true }, layout: 'per_view' },
+  });
+  const d = M.flatDraftOf(77);
+  ck(
+    !!d.views.front && Object.keys(d.detailTicks).length === 0 && d.layout === 'per_view',
+    'restored mixed ask: views win, details dropped (exclusiveTicks)',
+    JSON.stringify(d),
+  );
+  M.patchFlatInput(77, { ask: null });
 }
 
 console.log(`\n${total - bad} / ${total}, failures ${bad}${MUTATE ? '  (--mutate)' : ''}`);
