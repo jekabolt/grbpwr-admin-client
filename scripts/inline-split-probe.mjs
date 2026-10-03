@@ -140,8 +140,8 @@ const MUTATIONS = {
   // после реза верстак снова держит лист (с колодой кусков).
   pieces: {
     file: /generation\/latest-generation\.tsx$/,
-    from: 'return piecesInPlace(drawn);',
-    to: 'return drawn;',
+    from: '(drawnPlan ? piecesInPlace(drawnPlan) : null)',
+    to: '(drawnPlan ?? null)',
   },
 };
 function mutationPlugin(name) {

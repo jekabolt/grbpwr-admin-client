@@ -12,6 +12,9 @@
 // R(c) · принесённые рендеры (без прогона, ни в одной стороне) — на верстаке FABRIC RENDER:
 //   render-brought (22) — прогон 80 + принесённый 901 (свободен) и 903 (стоит во front: не в группе);
 //   render-brought-only (23) — прогонов нет, только принесённый 902
+// W5 · принесённый лист, все куски которого стоят в SIDES, не возвращается «неразрезанным»:
+//   render-brought-cut (25) — прогон 81; лист 950 (принесён), куски 951–954 стоят во front…side_r;
+//   лист 960, кусок 961 свободен, 962 стоит во front другого… (того же sample) — группа = кусок 961
 // W2 · один прогон в LATEST и в HISTORY — одна блокировка отмены: shared-cancel (24), прогон 58
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type {
@@ -79,6 +82,24 @@ const FOUR = ['front', 'back', 'side_l', 'side_r'];
 const wide = (id: number) => media(id, svg('#eee', 2000, 1000), 2000, 1000) as never;
 
 const step = { colorways: [], cardColorways: [], adopts: true };
+
+const brot = (id: number, extra: Partial<common_DesignPicture> = {}) => pic(id, 0, 'render', extra);
+const piece = (id: number, of: number, view: string) =>
+  brot(id, { derivation: 'crop', derivedFrom: of, ghostView: view });
+const sideRow = (id: number, viewKey: string, picture: common_DesignPicture) => ({
+  id,
+  viewKey,
+  kind: 'render',
+  colorwayId: 0,
+  pictureId: picture.id,
+  slotRev: 1,
+  picture,
+});
+const W5_SHEET = brot(950, { media: wide(1950) });
+const W5_PIECES = FOUR.map((v, i) => piece(951 + i, 950, v));
+const W5_SHEET2 = brot(960, { media: wide(1960) });
+const W5_FREE = piece(961, 960, 'back');
+const W5_HELD = piece(962, 960, 'front');
 
 const scenes: { probe: string; node: ReactNode }[] = [
   {
@@ -279,6 +300,58 @@ const scenes: { probe: string; node: ReactNode }[] = [
             } as unknown as GetDesignBandResponse
           }
           techCardId={23}
+          kind='render'
+        />
+      </RenderStepScope>
+    ),
+  },
+  {
+    probe: 'render-brought-cut',
+    node: (
+      <RenderStepScope step={step}>
+        <LatestGeneration
+          band={
+            {
+              bench: [...flatBench, ...W5_PIECES.map((p, i) => sideRow(40 + i, FOUR[i], p))],
+              runs: [run(81, 'render', { pictures: [pic(811, 81, 'render')] })],
+              totalRuns: 1,
+              outputs: [
+                { picture: pic(811, 81, 'render'), runId: 81, runKind: 'render' },
+                ...[W5_SHEET, ...W5_PIECES].map((picture) => ({
+                  picture,
+                  runId: 0,
+                  runKind: 'render',
+                })),
+              ],
+            } as unknown as GetDesignBandResponse
+          }
+          techCardId={25}
+          kind='render'
+        />
+      </RenderStepScope>
+    ),
+  },
+  {
+    probe: 'render-brought-part',
+    node: (
+      <RenderStepScope step={step}>
+        <LatestGeneration
+          band={
+            {
+              bench: [...flatBench, sideRow(50, 'front', W5_HELD)],
+              runs: [run(82, 'render', { pictures: [pic(821, 82, 'render')] })],
+              totalRuns: 1,
+              outputs: [
+                { picture: pic(821, 82, 'render'), runId: 82, runKind: 'render' },
+                ...[W5_SHEET2, W5_FREE, W5_HELD].map((picture) => ({
+                  picture,
+                  runId: 0,
+                  runKind: 'render',
+                })),
+              ],
+            } as unknown as GetDesignBandResponse
+          }
+          techCardId={26}
           kind='render'
         />
       </RenderStepScope>

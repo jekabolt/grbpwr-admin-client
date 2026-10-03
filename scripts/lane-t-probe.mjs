@@ -116,6 +116,12 @@ const MUTATIONS = {
       ],
     ],
   },
+  // W4: the bench forgets the cut's bulk placement again.
+  'put-line': {
+    file: /generation\/run-gallery\.ts$/,
+    from: 'rootOf.set(piece.id ?? 0, card.picture.id ?? 0);',
+    to: '',
+  },
   // R(a): the popup seeds from `composite_views` again (empty on beta's `one` sheets).
   'popup-seed': {
     file: /split-modal\.tsx$/,
@@ -131,8 +137,8 @@ const MUTATIONS = {
   // R(b): FABRIC RENDER's bench keeps the cut sheet with its deck of pieces again.
   'render-pieces': {
     file: /generation\/latest-generation\.tsx$/,
-    from: '    return piecesInPlace(drawn);',
-    to: "    return kind === 'flat' ? piecesInPlace(drawn) : drawn;",
+    from: '(drawnPlan ? piecesInPlace(drawnPlan) : null)',
+    to: "(drawnPlan ? (kind === 'flat' ? piecesInPlace(drawnPlan) : drawnPlan) : null)",
   },
   // R(c): the bench forgets the brought renders again (they are reachable nowhere).
   'brought-gone': {
@@ -477,6 +483,38 @@ try {
     JSON.stringify({ markState, markItems }),
   );
   await page.keyboard.press('Escape');
+
+  // ══ W4 · THE CUT'S BULK PLACEMENT — ONE QUIET LINE PER CUT ══
+  const line = await page.$(`${RC} [data-put-pieces="711"]`);
+  const lineWord = line ? (await line.innerText()).trim() : '';
+  check(
+    'W4.1 render bench: `put the 4 pieces into sides ▸` under the pieces',
+    /^put the 4 pieces into sides ▸$/i.test(lineWord),
+    lineWord,
+  );
+  check(
+    'W4.2 the line is quiet text, not a door-row button',
+    !!line &&
+      (await line.$eval('button', (b) => getComputedStyle(b).backgroundColor)) ===
+        'rgba(0, 0, 0, 0)',
+  );
+  if (SHOT) await (await page.$(RC))?.screenshot({ path: SHOT.replace(/\.png$/, '-cut.png') });
+  const slotsBefore = (await calls('SetDesignBenchSlot')).length;
+  if (line) await (await line.$('button')).click();
+  await page.waitForTimeout(400);
+  const placed = (await calls('SetDesignBenchSlot')).slice(slotsBefore);
+  check(
+    'W4.3 the press puts the four pieces into the four sides (ApplySplit)',
+    JSON.stringify(placed.map((b) => [b.pictureId, b.slot?.viewKey, b.slot?.kind])) ===
+      JSON.stringify([
+        [712, 'front', 'render'],
+        [713, 'back', 'render'],
+        [714, 'side_l', 'render'],
+        [715, 'side_r', 'render'],
+      ]),
+    JSON.stringify(placed.map((b) => [b.pictureId, b.slot?.viewKey])),
+  );
+  check('W4.4 the sheet is still not drawn', !(await page.$(`${RC} [data-picture="711"]`)));
 
   // ══ R(c) · THE BROUGHT RENDERS STAY REACHABLE — ON THE RENDER BENCH ══
   const RB = P('render-brought');

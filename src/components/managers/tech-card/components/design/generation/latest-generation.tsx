@@ -15,7 +15,13 @@ import { runRepresentation } from '../bench-kinds';
 import { serverSpeaksDesign } from '../capability';
 import { pictureHandle, runHandle } from '../handles';
 import { useGalleryGroup, useGalleryViewerOpen } from '../picture-tile';
-import { RenderDoorsHost, broughtGroup, hostPlates, useRenderStep } from '../render/render-tile';
+import {
+  PutPiecesIntoSides,
+  RenderDoorsHost,
+  broughtGroup,
+  hostPlates,
+  useRenderStep,
+} from '../render/render-tile';
 import { SplitModal } from '../split-modal';
 import { isRunArchived } from '../visibility';
 import {
@@ -419,14 +425,16 @@ export function LatestGeneration({
    *  A run put on the bench from the history: all of it (FX4, `benchPlan`). */
   const editingKey = editedKey(bench.surfaces);
   const whole = benchShowsWhole(chosen, runId);
-  const plan = useMemo(() => {
+  /** The row with its decks — what the render doors read (`piecesOf`, W4); never drawn as such. */
+  const drawnPlan = useMemo(() => {
     if (!run) return null;
     const keep = new Set(editingKey ? editingKey.split(',').map(Number) : []);
-    const drawn = benchPlan(run.pictures ?? [], { whole, keep });
-    // A cut sheet leaves the bench, its pieces stand in its place (owner items 20, 21) — on FABRIC
-    // RENDER too since 03.10 (owner item 24, R(b)): no deck, so no `expand ▸` / `apply splitted`.
-    return piecesInPlace(drawn);
-  }, [run, editingKey, whole, kind]);
+    return benchPlan(run.pictures ?? [], { whole, keep });
+  }, [run, editingKey, whole]);
+  // A cut sheet leaves the bench, its pieces stand in its place (owner items 20, 21) — on FABRIC
+  // RENDER too since 03.10 (owner item 24, R(b)): no deck, so no `expand ▸`; the bulk placement is
+  // a line under the tiles (`PutPiecesIntoSides`, W4).
+  const plan = useMemo(() => (drawnPlan ? piecesInPlace(drawnPlan) : null), [drawnPlan]);
   /**
    * THE UNCUT SHEETS, CUT HERE INLINE (owner item 19, T20). Every card the tile gate would give a
    * SPLIT corner (`splitViewsOf`, the same gate, the same `disabled`) is drawn as the inline editor
@@ -434,9 +442,8 @@ export function LatestGeneration({
    * is something to cut, and no sheet ever stands here as a picture.
    * FABRIC RENDER the same since 03.10 (owner item 24: «по дизайну и смыслу такая же как во
    * флетах», R(b)). Its render doors keep working on what is left: the pieces stand as cards
-   * (`piecesInPlace`), each placed into a side by its own `mark ▾`. What the deck used to give —
-   * `expand ▸` and the bulk `apply splitted` (all pieces into the sides at once) — has no place on
-   * the bench any more; that bulk verb stays reachable nowhere else either.
+   * (`piecesInPlace`), each placed into a side by its own `mark ▾`, and every cut's bulk placement
+   * (`apply splitted`, owner E-6) is one quiet line under the tiles (`PutPiecesIntoSides`, W4).
    */
   const writesOff = disabled || !speaks;
   const inlineSheets = useMemo(() => {
@@ -523,19 +530,42 @@ export function LatestGeneration({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [shownRuns, tilePlan, broughtPlan],
   );
-  /** O-63: what the render doors of this row read — its plates and its decks (`RenderDoorsHost`). */
+  /**
+   * O-63: what the render doors of this row read — its plates and its decks (`RenderDoorsHost`).
+   * The plans WITH their decks (W4): the bench draws pieces in place, but `piecesOf(root)` and
+   * `applyRefusalFor(root)` still read each cut through `membersOf`. The inline sheets stay out, as
+   * they stay off the tiles.
+   */
+  const deckPlan = useMemo(() => {
+    if (!drawnPlan || !inlineSheets.length) return drawnPlan;
+    const inline = new Set(inlineSheets.map((s) => s.picture.id ?? 0));
+    return { ...drawnPlan, cards: drawnPlan.cards.filter((c) => !inline.has(c.picture.id ?? 0)) };
+  }, [drawnPlan, inlineSheets]);
   const plates = useMemo(
     () =>
       hostPlates(
         kind === 'render'
           ? [
-              ...(tilePlan && !bare ? [tilePlan] : []),
-              ...(broughtRun && broughtPlan ? [broughtPlan] : []),
+              ...(deckPlan && !bare ? [deckPlan] : []),
+              ...(broughtRun && brought ? [brought.plan] : []),
             ]
           : [],
       ),
-    [kind, tilePlan, bare, broughtRun, broughtPlan],
+    [kind, deckPlan, bare, broughtRun, brought],
   );
+  /**
+   * W4: the cuts each host shows — one `put the N pieces into sides ▸` line per sheet whose pieces
+   * stand on the bench in its place (`rootOf` of the drawn plan), the sheet read off the decked plan.
+   */
+  const cutSheets = (
+    drawn: OutputPlan | null | undefined,
+    decked: OutputPlan | null | undefined,
+  ) => {
+    const roots = new Set(drawn?.rootOf?.values() ?? []);
+    return (decked?.cards ?? []).filter((c) => roots.has(c.picture.id ?? 0)).map((c) => c.picture);
+  };
+  const runCuts = kind === 'render' && !bare ? cutSheets(tilePlan, deckPlan) : [];
+  const broughtCuts = broughtRun && brought ? cutSheets(broughtPlan, brought.plan) : [];
   const toggleDeck = (rootId: number) =>
     setOpenDeck((current) => (current === rootId ? null : rootId));
   const onZoomPicture = (pictureId: number) => {
@@ -583,6 +613,9 @@ export function LatestGeneration({
             plan={broughtPlan}
           />
         )}
+        {broughtCuts.map((sheet) => (
+          <PutPiecesIntoSides key={sheet.id} sheet={sheet} />
+        ))}
       </div>
     ) : null;
   const doorsHost = (children: JSX.Element | null) => (
@@ -718,6 +751,9 @@ export function LatestGeneration({
             <>
               {!bare && inline}
               {!bare && tilesLeft && outputs}
+              {runCuts.map((sheet) => (
+                <PutPiecesIntoSides key={sheet.id} sheet={sheet} />
+              ))}
               {broughtBlock}
             </>,
           )

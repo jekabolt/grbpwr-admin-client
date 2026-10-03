@@ -28,6 +28,11 @@ export type OutputPlan = {
   cards: OutputCard[];
   /** piece id → the id of the card whose deck holds it (E-4: a zoom outside a deck folds it). */
   deckOf: Map<number, number>;
+  /**
+   * After `piecesInPlace` only: piece id → the sheet it was cut from. No deck is drawn any more, but
+   * the bench still names each cut (`put the N pieces into sides ▸`, gate wave 3, W4).
+   */
+  rootOf?: Map<number, number>;
 };
 
 /**
@@ -169,13 +174,21 @@ export function benchPlan(
  * sheet stays where it always was, in GENERATION HISTORY, whose rows draw `outputPlan` unchanged.
  */
 export function piecesInPlace(plan: OutputPlan): OutputPlan {
-  if (!plan.cards.some((card) => card.members.length > 0)) return plan;
+  const cut = (card: OutputCard) => card.members.length > 0;
+  if (!plan.cards.some(cut)) return plan;
   const cards: OutputCard[] = [];
+  const rootOf = new Map<number, number>();
   for (const card of plan.cards) {
-    if (!card.members.length) cards.push(card);
-    else for (const piece of card.members) cards.push({ picture: piece, members: [] });
+    if (!cut(card)) {
+      cards.push(card);
+      continue;
+    }
+    for (const piece of card.members) {
+      cards.push({ picture: piece, members: [] });
+      rootOf.set(piece.id ?? 0, card.picture.id ?? 0);
+    }
   }
-  return { cards, deckOf: new Map() };
+  return { cards, deckOf: new Map(), rootOf };
 }
 
 /**

@@ -1550,6 +1550,58 @@ function RenderDoorsHostOn({
 }
 
 /**
+ * ═══ PUT A CUT'S PIECES INTO THE SIDES — ONE QUIET LINE PER CUT ON THE BENCH (gate wave 3, W4) ════
+ *
+ * The bench draws a cut sheet's pieces in its place (`piecesInPlace`, owner items 20/21), so the
+ * deck — and its `apply splitted` (owner E-6: «кнопка аплай сплитед и они уходят в инпут после
+ * нажатия … предварительно очищая предыдущий импут») — has no tile to stand on. The verb stays, off
+ * the deck: one line per cut under the run's tiles, the same `ApplySplitDoor` with the host's
+ * `piecesOf` (the whole split, `wholeDecks` for a brought sheet), its targets from `destinationsOf`
+ * and its refusal from `applyRefusalFor`. The sheet itself is never drawn again.
+ */
+export function PutPiecesIntoSides({ sheet }: { sheet: common_DesignPicture }): JSX.Element | null {
+  const host = useContext(RenderHostContext);
+  if (!host || isPictureHidden(sheet)) return null;
+  const {
+    techCardId,
+    band,
+    adopts,
+    onCreateColorway,
+    piecesOf,
+    piecesCut,
+    destinationsOf,
+    colourwayName,
+    applyRefusalFor,
+    noteIdOf,
+  } = host.doors;
+  const rootId = sheet.id ?? 0;
+  const pieces = piecesOf(rootId);
+  const own = colorwayOf(sheet);
+  const targets = destinationsOf(own).ids.map((id) => ({
+    colorwayId: id,
+    label: colourwayName(id),
+  }));
+  const refusal = applyRefusalFor(rootId);
+  const n = pieces.length || piecesCut(rootId);
+  return (
+    <div data-put-pieces={rootId} className='flex'>
+      <ApplySplitDoor
+        techCardId={techCardId}
+        sidesOf={(target) => threedSides(band, refColorwayFor('render', target))}
+        targets={targets}
+        pieces={pieces}
+        noun='render'
+        refusal={refusal}
+        refusalDescribedBy={noteIdOf(refusal)}
+        onCreateColorway={own === 0 && adopts ? onCreateColorway : undefined}
+        label={`put the ${n} ${n === 1 ? 'piece' : 'pieces'} into sides ▸`}
+        quiet
+      />
+    </div>
+  );
+}
+
+/**
  * THE FRAME OF A RUN ROW — `PictureTile`'s own 4/5, the frame `RunTile` draws and `RunOutputs` hands
  * its decks (`frameAspect='4/5'`): the fan behind a sheet lines up with the sheet only on one frame.
  */
