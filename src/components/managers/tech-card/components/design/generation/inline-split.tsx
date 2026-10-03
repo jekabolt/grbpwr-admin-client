@@ -113,7 +113,7 @@ export function InlineSplit({
   const handle = pictureHandle(picture);
   return (
     <div data-inline-split={pictureId} className='space-y-2'>
-      <div className={cut.landed ? 'pointer-events-none' : undefined}>
+      <div inert={cut.landed || undefined} className={cut.landed ? 'pointer-events-none' : undefined}>
         <SplitStage cut={cut} nameInFrame maxHeight={560} />
       </div>
       <div className='flex items-center justify-between gap-3'>
@@ -121,6 +121,7 @@ export function InlineSplit({
             the band re-read brings the pieces and the bench draws them instead of this editor. */}
         {cut.landed ? (
           <span
+            role='status'
             data-split-waiting={pictureId}
             className='text-micro uppercase tracking-label text-labelColor'
           >
