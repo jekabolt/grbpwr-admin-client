@@ -296,6 +296,89 @@ try {
       JSON.stringify(a.gridPicturesOf({ id: 1, pictures: run }).map((p) => p.id)),
   );
 
+  // T22 (owner item 22): FLAT's history starts folded on every visit; the header line is the door.
+  check('T22: flat history starts folded', a.flatHistoryStartsOpen === false);
+  {
+    const hist = src('generation/generation-history.tsx');
+    const body = hist.slice(hist.indexOf('export function GenerationHistory('));
+    check(
+      'T22: the fold state starts from the flat default on the grid',
+      /const foldDefault = grid \? flatHistoryStartsOpen : defaultOpen;/.test(body) &&
+        /useState\(foldDefault\)/.test(body) &&
+        /setRunsOpen\(foldDefault\)/.test(body),
+    );
+    check('T22: the grid no longer forces the fold open', !/grid \|\| runsFolded/.test(body));
+    const gridRow = hist.slice(
+      hist.indexOf('function RunGridRow('),
+      hist.indexOf('export function HistoryFoldHeader('),
+    );
+    check('T22: put on bench / a tile press never touches the fold', !/setRunsOpen/.test(gridRow));
+    check(
+      'T22: the grid header is the door, mounted on the grid',
+      /\{grid && \(\s*<HistoryFoldHeader[\s\S]*?onToggle=\{\(\) => setRunsOpen\(\(v\) => !v\)\}/.test(
+        body,
+      ),
+    );
+    const header = hist.slice(
+      hist.indexOf('export function HistoryFoldHeader('),
+      hist.indexOf('/* ──', hist.indexOf('export function HistoryFoldHeader(')),
+    );
+    check('T22: no ▾/▸ glyph and no Button on the flat header', !/[▾▸]|<Button/.test(header));
+  }
+  for (const open of [false, true]) {
+    let toggles = 0;
+    const el = a.HistoryFoldHeader({
+      open,
+      count: 4,
+      floor: false,
+      rep: 'flat',
+      onToggle: () => toggles++,
+    });
+    const p = el.props;
+    check(
+      `T22: header (${open ? 'open' : 'folded'}) is a keyboard button`,
+      p.role === 'button' && p.tabIndex === 0,
+    );
+    check(`T22: aria-expanded mirrors the fold (${open})`, p['aria-expanded'] === open);
+    let prevented = 0;
+    const key = (k, repeat = false) =>
+      p.onKeyDown({ key: k, repeat, preventDefault: () => prevented++ });
+    p.onClick();
+    check('T22: a click toggles', toggles === 1);
+    key('Enter');
+    check('T22: Enter toggles', toggles === 2);
+    key(' ');
+    check('T22: Space toggles (and does not scroll)', toggles === 3 && prevented === 2);
+    key('a');
+    key('Enter', true);
+    check('T22: other keys and key repeat do not toggle', toggles === 3);
+    const action = el.props.children.props.action;
+    const label = action.props.children.props.children.join('');
+    check('T22: the header says «4 runs»', label === '4 runs', label);
+  }
+  {
+    const one = a.HistoryFoldHeader({
+      open: false,
+      count: 1,
+      floor: false,
+      rep: 'flat',
+      onToggle() {},
+    });
+    const floorEl = a.HistoryFoldHeader({
+      open: false,
+      count: 3,
+      floor: true,
+      rep: 'flat',
+      onToggle() {},
+    });
+    const lab = (el) => el.props.children.props.action.props.children.props.children.join('');
+    check(
+      'T22: «1 run» / «3+ runs»',
+      lab(one) === '1 run' && lab(floorEl) === '3+ runs',
+      `${lab(one)} / ${lab(floorEl)}`,
+    );
+  }
+
   // Storage refused (private window, blocked site data): nothing throws, the page still works.
   refuse = true;
   const d = await load();
