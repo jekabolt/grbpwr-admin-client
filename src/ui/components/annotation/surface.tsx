@@ -20,7 +20,6 @@ import {
   arcPath,
   bracketPath,
   constrainTo45,
-  fitQuadToAspect,
   inkPath,
   leaderTarget,
   midpoint,
@@ -40,6 +39,7 @@ import {
   type AnnotationCapsKey,
 } from './kinds';
 import { boundsOf, purposeTool, specSummary, toolGeometry, type Spec } from './purpose';
+import { setFrameAspect } from './frame-aspect';
 import { ArtworkImage, DetailInset, SectionInset, SectionLetters } from './insets';
 import { StitchPictogram } from './stitch-pictogram';
 import { AnnotationDefs, CalloutShape, CALLOUT_COLOR_HEX, PlacingShape } from './shapes';
@@ -362,6 +362,8 @@ export type AnnotationSurfaceProps = {
    * линия на пёстром снимке тонет. На штриховом эскизе выключена — подложка перекрыла бы чертёж.
    */
   halo?: boolean;
+  /** Id картинки кадра: под ним замер кадра уходит в `frame-aspect` (подгонка зоны артворка). */
+  frameId?: number;
   cornerSlot?: ReactNode;
   /**
    * ДВОЙНОЙ КЛИК ПО САМОЙ КАРТИНКЕ ОТКРЫВАЕТ УВЕЛИЧЕННЫЙ ВИД (T12). Угловой кнопки `zoom` больше
@@ -612,6 +614,7 @@ export function AnnotationSurface({
   zoom = false,
   hideCallouts = false,
   halo = false,
+  frameId,
   cornerSlot,
   onOpenLarge,
   cornerSlotBottom,
@@ -867,39 +870,11 @@ export function AnnotationSurface({
 
   const byKey = useMemo(() => new Map(callouts.map((c) => [c.key, c])), [callouts]);
 
-  /**
-   * КАРТИНКА АРТВОРКА РОЖДАЕТСЯ В СВОИХ ПРОПОРЦИЯХ (R20). Зону рисуют раньше, чем выбирают картинку,
-   * и варп на четыре ручки растянул бы её под ту рамку, что была. Поэтому В МОМЕНТ ПРИКРЕПЛЕНИЯ
-   * (адрес картинки появился или сменился у выноски, которую поверхность уже видела) зона один раз
-   * подгоняется под пропорции картинки вокруг своего центра. Открытие листа с уже прикреплённой
-   * картинкой — не прикрепление: зону, которую человек потом сам перекосил, никто не трогает.
-   */
-  const artworkUrls = useRef<Map<string, string> | null>(null);
+  // ЗАМЕР КАДРА — В РЕЕСТР ПО ID КАРТИНКИ: им пользуется подгонка зоны артворка при прикреплении
+  // картинки (`callout-purpose-fields`), которая живёт в строке указания, а не здесь.
   useEffect(() => {
-    const seen = artworkUrls.current;
-    const next = new Map<string, string>();
-    for (const c of callouts) if (c.spec?.t === 'artwork') next.set(c.key, c.spec.url ?? '');
-    artworkUrls.current = next;
-    if (!seen || !editable || size.w < 1 || size.h < 1) return;
-    const { w, h } = size;
-    // Без отмены в очистке: `callouts` меняется на каждый рендер формы, и отмена убила бы загрузку
-    // раньше, чем она кончится. Устаревшее отсекает сверка адреса в момент загрузки.
-    for (const [key, url] of next) {
-      if (!url || !seen.has(key) || seen.get(key) === url) continue;
-      const img = new Image();
-      img.onload = () => {
-        if (!live.current.editable || !img.naturalWidth || !img.naturalHeight) return;
-        const c = live.current.callouts.find((x) => x.key === key);
-        if (!c || c.points.length !== 4 || c.spec?.t !== 'artwork' || c.spec.url !== url) return;
-        const fitted = fitQuadToAspect(
-          c.points.map((p) => ({ x: p.x * w, y: p.y * h })),
-          img.naturalWidth / img.naturalHeight,
-        ).map((p) => ({ x: clamp01(p.x / w), y: clamp01(p.y / h) }));
-        mutate(() => live.current.onEditPoints?.(key, fitted));
-      };
-      img.src = url;
-    }
-  }, [callouts, editable, size, mutate]);
+    if (frameId && size.w > 0 && size.h > 0) setFrameAspect(frameId, size.w / size.h);
+  }, [frameId, size.w, size.h]);
 
   // Заявка на правку: идентичность стабильна на всю жизнь поверхности, функции читают свежие
   // сеттеры — реестр хранит ОДИН объект и не пересобирается на каждый рендер.

@@ -3239,6 +3239,7 @@ export function PlateGrid({
             <div data-field={sheet ? plate.door : undefined}>
               <AnnotationSurface
                 {...bindings}
+                frameId={plate.mediaId}
                 src={sources[0] ?? ''}
                 srcFallbacks={sources.slice(1)}
                 alt={plate.name}

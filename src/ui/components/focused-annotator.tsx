@@ -933,6 +933,7 @@ export function FocusedAnnotator({
                 >
                   <AnnotationSurface
                     hoveredKey={hoveredKey}
+                    frameId={v.mediaId}
                     src={url}
                     alt={mediaLabel ? mediaLabel(v, i) : ''}
                     media={isVideo(url) ? 'video' : 'image'}
@@ -1099,6 +1100,7 @@ export function FocusedAnnotator({
             <div className='mx-auto w-full max-w-[26rem] space-y-2'>
               <AnnotationSurface
                 hoveredKey={hoveredKey}
+                frameId={focused.mediaId}
                 src={focusedUrl}
                 alt={focusedAlt}
                 media={isVideo(focusedUrl) ? 'video' : 'image'}

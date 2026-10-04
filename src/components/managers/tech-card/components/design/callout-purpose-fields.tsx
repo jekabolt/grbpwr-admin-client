@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import {
   ARTWORK_SUBS,
+  artworkAttachFit,
   DETAIL_SCALES,
   parseSpec,
   seamShort,
@@ -11,6 +12,7 @@ import {
   writeSpec,
   type Spec,
 } from 'ui/components/annotation/purpose';
+import { frameAspectOf } from 'ui/components/annotation/frame-aspect';
 import { StitchPictogram, stitchBrushOf } from 'ui/components/annotation/stitch-pictogram';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Input from 'ui/components/input';
@@ -152,7 +154,10 @@ export function CalloutPurposeFields({
               label='image'
               title='the artwork itself — a PNG keeps its transparency over the flat'
               clearTitle='remove the artwork image'
-              onPick={(mediaId, url) => put({ ...spec, mediaId, url })}
+              onPick={(mediaId, url) => {
+                put({ ...spec, mediaId, url });
+                fitZoneOnAttach(form, index, url);
+              }}
               onClear={() => put({ ...spec, mediaId: undefined, url: undefined })}
             />
           </ChipRow>
@@ -393,6 +398,42 @@ function OwnPicture({
       }
     />
   );
+}
+
+/**
+ * ЗОНА ПОД ПРОПОРЦИИ КАРТИНКИ — ОДИН РАЗ, В МОМЕНТ ПРИКРЕПЛЕНИЯ (R20). Варп на четыре ручки растянул
+ * бы картинку под рамку, нарисованную до неё. Цель записи ищется заново, когда картинка загрузилась
+ * (`artworkAttachFit`): индекс строки к этому моменту мог уехать на соседа.
+ */
+function fitZoneOnAttach(
+  form: ReturnType<typeof useFormContext<TechCardFormData>>,
+  index: number,
+  url: string,
+) {
+  const row = form.getValues(`callouts.${index}`);
+  if (!row) return;
+  const at = {
+    index,
+    clientRef: row.clientRef,
+    url,
+    points: JSON.stringify(row.points ?? []),
+  };
+  const frame = frameAspectOf(row.mediaId);
+  const img = new Image();
+  img.onload = () => {
+    if (!img.naturalWidth || !img.naturalHeight) return;
+    const fit = artworkAttachFit(
+      form.getValues('callouts') ?? [],
+      at,
+      img.naturalWidth / img.naturalHeight,
+      frame,
+    );
+    if (fit)
+      form.setValue(`callouts.${fit.index}.points` as never, fit.points as never, {
+        shouldDirty: true,
+      });
+  };
+  img.src = url;
 }
 
 function RuleSep() {
