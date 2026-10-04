@@ -607,10 +607,11 @@ function MaterialBench({
   };
 
   // One library dialog for every `replace…`: the menu clicks its hidden trigger.
-  const replaceTarget = useRef<MaterialSlot | null>(null);
+  const replaceTarget = useRef<{ slot: MaterialSlot; cw: number } | null>(null);
   const replaceTrigger = useRef<HTMLButtonElement>(null);
   const replace = (slot: MaterialSlot) => {
-    replaceTarget.current = slot;
+    // Pin the colourway too: a switch while the dialog is open must not land the picture there.
+    replaceTarget.current = { slot, cw: cwId };
     replaceTrigger.current?.click();
   };
 
@@ -954,9 +955,14 @@ function MaterialBench({
         allowMultiple={false}
         showVideos={false}
         saveSelectedMedia={(media) => {
-          const slot = replaceTarget.current;
+          const target = replaceTarget.current;
           const first = media[0];
-          if (slot && first?.id) void place(slot, first);
+          if (!target || !first?.id) return;
+          if (target.cw !== cwId) {
+            showMessage('the colourway changed while the library was open · pick again', 'error');
+            return;
+          }
+          void place(target.slot, first);
         }}
         trigger={<button ref={replaceTrigger} type='button' hidden aria-hidden tabIndex={-1} />}
       />
