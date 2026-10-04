@@ -1,12 +1,13 @@
 import { common_SkuSeason, common_TechCardListItem } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { Tile } from 'ui/components/tiles';
 import { AuxBadge } from './aux-badge';
+import { TechCardHoverInfo } from './tech-card-hover-info';
 import { approvalStateLabel, formatTechCardDate, stageLabel } from './utils';
 
 // The one tech-card card. Shared by the list grid (6.1) and the pipeline swimlanes (6.2) so a
@@ -110,6 +111,22 @@ export function TechCardTile({
     .filter(Boolean)
     .join(' · ');
 
+  // Ховер-сводка (ткань + колорвеи) только у плитки списка. Задержка — чтобы курсор, проезжающий
+  // через грид, не дёргал карточку за карточкой; раз дочитанная, она остаётся в кеше.
+  const [hovered, setHovered] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const onEnter = () => {
+    setHovered(true);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setArmed(true), 200);
+  };
+  const onLeave = () => {
+    setHovered(false);
+    clearTimeout(timer.current);
+  };
+
   // previewUrl is resolved server-side on the list item (moodboard image for an idea, PREVIEW
   // sketch otherwise) — no per-card request. Empty for a card with no media at all.
   const media = card.previewUrl ? (
@@ -129,9 +146,22 @@ export function TechCardTile({
   );
 
   return (
-    <div className={`relative ${className ?? ''}`}>
+    <div
+      className={`relative ${className ?? ''}`}
+      onMouseEnter={compact ? undefined : onEnter}
+      onMouseLeave={compact ? undefined : onLeave}
+    >
       <Tile
-        media={media}
+        media={
+          compact ? (
+            media
+          ) : (
+            <div className='relative'>
+              {media}
+              {armed && <TechCardHoverInfo id={id} enabled={armed} visible={hovered} />}
+            </div>
+          )
+        }
         name={title}
         // Имя однострочно и режется дорожкой сетки — hover обязан дочитывать его целиком.
         title={title}
