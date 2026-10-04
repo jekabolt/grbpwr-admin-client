@@ -25,6 +25,12 @@ export type FlatRegions = {
   count: number;
 };
 
+/**
+ * The cutter's revision: the numbers of the regions (and so a cached auto-parts answer) hold only
+ * for the same algorithm on the same flat. Bump on ANY change to how `analyseFlat` numbers regions.
+ */
+export const REGIONS_ALGO_REV = 'regions.v1';
+
 const INF = 1e20;
 
 /** Radius on this sheet for a radius measured on a 1024 sheet. */
