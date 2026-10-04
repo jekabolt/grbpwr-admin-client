@@ -49,6 +49,7 @@ import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
+import { HeaderNote, HeaderNoteTone } from 'ui/components/section-header';
 import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
 import { parseDecimalNumber } from 'utils/decimal';
@@ -98,6 +99,32 @@ import {
 import type { TechCardFormData } from './schema';
 
 // ── recipe-side apply ───────────────────────────────────────────────────────────────────
+
+/**
+ * A fact about the number: a pill in the row, plain text when the hint stands in a group header
+ * (`compact`: the fabric card's toolbar; owner, item 38: a header frames no words).
+ */
+function Mark({
+  quiet,
+  tone,
+  title,
+  children,
+}: {
+  quiet: boolean;
+  tone: HeaderNoteTone;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return quiet ? (
+    <HeaderNote tone={tone} title={title}>
+      {children}
+    </HeaderNote>
+  ) : (
+    <Pill tone={tone} title={title}>
+      {children}
+    </Pill>
+  );
+}
 
 export function MarkerApplyHint({
   markers,
@@ -543,53 +570,69 @@ export function MarkerApplyHint({
       {/* «Норма» — ПОДПИСЬ, а не порядок. Раньше назначенную раскладку можно было опознать только
           по тому, что её предложили первой, — то есть не отличить от «просто самой свежей». */}
       {chosen.isNorm === true && (
-        <Pill tone='ink' title='the marker set as the norm of this fabric on the card'>
+        <Mark
+          quiet={compact}
+          tone='ink'
+          title='the marker set as the norm of this fabric on the card'
+        >
           norm
-        </Pill>
+        </Mark>
       )}
       {pieceSetChanged(chosen) && (
-        <Pill
+        <Mark
+          quiet={compact}
           tone='attention'
           title="the card's piece set changed after this marker was captured — the length is measured on the previous set"
         >
           piece set changed
-        </Pill>
+        </Mark>
       )}
       {isLegacyNorm(chosen) && (
-        <Pill
+        <Mark
+          quiet={compact}
           tone='mut'
           title='the capture conditions (seam allowance, layers, flipping) are not recorded — this marker was captured before they started being recorded'
         >
           legacy norm
-        </Pill>
+        </Mark>
       )}
       {/* Норма назначена, а предлагается не она — на строке это видно только здесь: диалог с
           объяснением ещё надо открыть, а прочитать число можно и не открывая. */}
       {notTheNorm && normRefusal && (
-        <Pill tone='warn' title={normRefusal}>
+        <Mark quiet={compact} tone='warn' title={normRefusal}>
           the norm gives no consumption
-        </Pill>
+        </Mark>
       )}
       {chosenRefusal && (
-        <Pill tone='warn' title={chosenRefusal}>
+        <Mark quiet={compact} tone='warn' title={chosenRefusal}>
           {refusalWord(chosen)}
-        </Pill>
+        </Mark>
       )}
       {/* Кг-слот (Ф3): основа веса называется ПРЯМО НА СТРОКЕ. Успех — какой шириной и
           плотностью посчитано (ширина полная, с кромкой); отказ — чего именно не хватает,
           потому что лечится он заполнением артикула, а не сменой единицы. */}
       {unitKind === 'kg' && fabric && conv && (
-        <Pill tone='mut' title={weightBasisNote(fabric)}>
+        <Mark quiet={compact} tone='mut' title={weightBasisNote(fabric)}>
           weight: {weightBasisLabel(fabric)}
-        </Pill>
+        </Mark>
       )}
       {unitKind === 'kg' && !weightBasis.ok && (
-        <Pill tone='warn' title={weightRefusalText(weightBasis.missing, weightBasis.pinned)}>
+        <Mark
+          quiet={compact}
+          tone='warn'
+          title={weightRefusalText(weightBasis.missing, weightBasis.pinned)}
+        >
           {weightMissingShort(weightBasis.missing)}
-        </Pill>
+        </Mark>
       )}
       {canEdit && (
-        <Button type='button' variant='secondary' size='xs' onClick={() => setOpen(true)}>
+        <Button
+          type='button'
+          variant={compact ? 'underline' : 'secondary'}
+          size='xs'
+          className={compact ? 'text-labelColor hover:text-textColor' : undefined}
+          onClick={() => setOpen(true)}
+        >
           apply…
         </Button>
       )}

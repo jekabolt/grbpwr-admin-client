@@ -405,6 +405,7 @@ export default function DxfApplyDialog({
               flush
               action={
                 <BreakdownSizeChips
+                  quiet
                   sizeIds={shownSizeIds}
                   sizeId={shownSize}
                   sizeNameById={sizeNameById}

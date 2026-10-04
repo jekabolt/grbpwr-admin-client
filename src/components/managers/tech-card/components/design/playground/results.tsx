@@ -9,6 +9,7 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
+import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 
@@ -21,7 +22,7 @@ import {
 } from '../bench-kinds';
 import { serverSpeaksDesign } from '../capability';
 import { colorwayLabel } from '../colorway-picker';
-import { Counter, EmptyState } from '../core';
+import { EmptyState } from '../core';
 import { isRunLive, runOutcomeNote } from '../generation/run-state';
 import { clockStamp, runHandle } from '../handles';
 import { VectorModal } from '../modals';
@@ -247,7 +248,7 @@ export function PlaygroundResults({
           ? '· every playground picture of this card'
           : `· ${def.title.toLowerCase()}`
       }
-      action={<Counter n={rows.length} noun='picture' />}
+      action={<HeaderCount n={rows.length} noun='picture' />}
     >
       <div className='flex flex-col gap-4'>
         {pinned.map(({ run, elsewhere }) => {

@@ -13,6 +13,7 @@ import { GroupLabel } from 'ui/components/group-label';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
+import { HeaderNote } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
 import { COLORWAY_NONE, refColorwayFor } from '../bench-kinds';
@@ -1295,12 +1296,12 @@ export function RendersByViewGroup({
              картинок, а не про то, сколько их. */
           <span className='flex flex-wrap items-center gap-1.5'>
             {revisions.length > 1 && (
-              <Pill
+              <HeaderNote
                 tone='attention'
                 title={`the sides on this bench come from different runs (${revisions.map((r) => `r${r}`).join(', ')}); a model stitched out of them may not match in colour`}
               >
                 {revisions.length === 2 ? 'two' : revisions.length} revisions
-              </Pill>
+              </HeaderNote>
             )}
             {toRender ? (
               <Button

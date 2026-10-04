@@ -2,7 +2,7 @@ import { type JSX, type ReactNode } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
+import { HeaderNote } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
 import { useCardMemory } from './use-draft-fills';
@@ -47,9 +47,9 @@ export function BoardMovedPill({ techCardId }: { techCardId: number }): JSX.Elem
   const { boardMoved } = useCardMemory(techCardId);
   if (!boardMoved) return null;
   return (
-    <Pill tone='attention' data-mb-moved=''>
+    <HeaderNote tone='attention' data-mb-moved=''>
       moodboard moved on
-    </Pill>
+    </HeaderNote>
   );
 }
 

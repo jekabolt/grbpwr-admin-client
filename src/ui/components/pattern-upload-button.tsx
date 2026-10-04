@@ -265,6 +265,8 @@ type Props = {
   // dead end, but a fitting sheet is a document a human reads and PDF stays legitimate for it.
   // Hard-coding the restriction in this shared control would have broken that call site.
   dxfOnly?: boolean;
+  // In a block or group header (owner, item 38): an underlined word, never a framed button.
+  quiet?: boolean;
 };
 
 // Shared выкройка upload control (§1): pick (multi-select, ≤40 MB each, PDF/DXF or DXF-only per
@@ -279,6 +281,7 @@ export function PatternUploadButton({
   fabricScopes,
   defaultScopeKey,
   dxfOnly,
+  quiet,
 }: Props) {
   const { showMessage } = useSnackBarStore();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -319,8 +322,9 @@ export function PatternUploadButton({
       />
       <Button
         type='button'
-        variant='secondary'
-        className='uppercase'
+        variant={quiet ? 'underline' : 'secondary'}
+        size={quiet ? 'xs' : undefined}
+        className={quiet ? 'text-labelColor hover:text-textColor' : 'uppercase'}
         disabled={disabled}
         onClick={() => inputRef.current?.click()}
       >

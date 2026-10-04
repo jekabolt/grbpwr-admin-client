@@ -10,10 +10,10 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { mediaFullToViewerItem, mediaFullViewerSrc } from 'ui/components/media-viewer';
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
+import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 
-import { Counter } from '../core';
 import { serverSpeaksDesign } from '../capability';
 import { cropFamilies } from '../generation/composite';
 import { CropDeck } from '../generation/crop-deck';
@@ -793,7 +793,7 @@ export function OutputsSection({
            лишний span здесь был бы коробкой внутри коробки на ровном месте. */
         <>
           {/* The mockup's counter pill (`0 MODELS`). */}
-          <Counter n={rows.length} noun='model' />
+          <HeaderCount n={rows.length} noun='model' />
           <Text size='micro' variant='label' component='span' className='uppercase'>
             {/* ИМЯ КОЛОРВЕЯ — полка им сужена (`scope`), и молчать об этом нельзя. */}
             {colorwayLabel?.trim() ? ` · ${colorwayLabel.trim()}` : ''}

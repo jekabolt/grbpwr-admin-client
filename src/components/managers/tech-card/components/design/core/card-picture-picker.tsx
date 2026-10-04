@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
+import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
 import type { Representation } from '../bench-kinds';
@@ -356,7 +357,7 @@ export function CardPicturePicker({
                 <GroupLabel
                   flush
                   className={GROUP_GAP}
-                  action={<Counter n={countTiles(group.tiles)} noun='picture' />}
+                  action={<HeaderCount n={countTiles(group.tiles)} noun='picture' />}
                 >
                   {group.label}
                 </GroupLabel>

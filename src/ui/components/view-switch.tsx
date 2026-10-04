@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 
 import { cn } from 'lib/utility';
+import { HEADER_TEXT } from 'ui/components/section-header';
 
 export type ViewSwitchOption<T extends string> = {
   value: T;
@@ -35,6 +36,7 @@ export function ViewSwitch<T extends string>({
   label,
   className,
   disabled,
+  quiet,
 }: {
   value: T;
   options: readonly ViewSwitchOption<T>[];
@@ -43,6 +45,11 @@ export function ViewSwitch<T extends string>({
   label: string;
   className?: string;
   disabled?: boolean;
+  /**
+   * IN A BLOCK OR GROUP HEADER (owner, item 38): no framed segments. The current view is plain
+   * ink text, the others are underlined words — the header door's own metric.
+   */
+  quiet?: boolean;
 }) {
   const refs = useRef<(HTMLSpanElement | null)[]>([]);
   // Клавиатурный вход в группу — ровно один сегмент, и он обязан существовать всегда. Если
@@ -106,7 +113,12 @@ export function ViewSwitch<T extends string>({
             onClick={disabled ? undefined : () => onChange(o.value)}
             onKeyDown={(e) => onKeyDown(e, i)}
             className={cn(
-              '-ml-px inline-flex select-none items-center border px-2 py-px text-micro uppercase tracking-label transition-colors first:ml-0',
+              quiet
+                ? cn(
+                    'inline-flex select-none items-center px-1.5 py-px transition-colors',
+                    HEADER_TEXT,
+                  )
+                : '-ml-px inline-flex select-none items-center border px-2 py-px text-micro uppercase tracking-label transition-colors first:ml-0',
               'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor',
               disabled ? 'cursor-not-allowed' : 'cursor-pointer',
               // `relative` НА ВЫБРАННОМ — не украшение. Сегменты склеены `-ml-px`, то есть их
@@ -114,12 +126,16 @@ export function ViewSwitch<T extends string>({
               // чернилами сегмента своей серой рамкой: чёрный блок получал светлую кромку с одной
               // стороны и не с другой. Позиционированный элемент рисуется поверх статичных в том
               // же контексте, поэтому хватает `relative` — z-index заводить не нужно.
-              on
-                ? 'relative border-textColor bg-textColor text-bgColor'
-                : cn(
-                    'border-borderColor bg-bgColor text-labelColor',
-                    !disabled && 'hover:text-textColor',
-                  ),
+              quiet
+                ? on
+                  ? 'text-textColor'
+                  : cn('text-labelColor underline', !disabled && 'hover:text-textColor')
+                : on
+                  ? 'relative border-textColor bg-textColor text-bgColor'
+                  : cn(
+                      'border-borderColor bg-bgColor text-labelColor',
+                      !disabled && 'hover:text-textColor',
+                    ),
             )}
           >
             {o.label}
