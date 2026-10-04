@@ -86,7 +86,17 @@ const HORN = svg(
     `<circle cx='300' cy='300' r='200' fill='#1d1a17'/><circle cx='300' cy='300' r='160' fill='#2e2924'/>` +
     `<circle cx='270' cy='300' r='16' fill='#e8e4dc'/><circle cx='330' cy='300' r='16' fill='#e8e4dc'/>`,
 );
-(window as unknown as { __library: unknown }).__library = [media(901, HORN)];
+/* A brand logo artwork: the label slot's `+ logo` picks it (second in the library). */
+const LOGO = svg(
+  `<rect width='600' height='600' fill='#ffffff'/>` +
+    `<text x='300' y='330' font-family='Helvetica, Arial' font-size='96' font-weight='700' ` +
+    `text-anchor='middle' fill='#111'>GRBPWR</text>`,
+);
+(window as unknown as { __library: unknown }).__library = [media(901, HORN), media(902, LOGO)];
+/* Card LABELS row of BRAND LABEL (BOM line 5): placement, fold, size seed its words. */
+const LABEL_SEEDS = new Map([
+  [5, { placement: 'neckline, centre back', folding: 'flat', size: '50 × 20 mm' }],
+]);
 
 const cw = (
   colorwayId: number,
@@ -165,6 +175,7 @@ function Harness() {
           colorwayId={colorwayId}
           onColorwayChange={setColorwayId}
           slots={SLOTS}
+          labelSeeds={LABEL_SEEDS}
           onGoStep={() => {}}
         />
       </div>

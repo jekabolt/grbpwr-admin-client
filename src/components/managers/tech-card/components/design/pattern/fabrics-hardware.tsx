@@ -60,17 +60,22 @@ import {
   NO_BINDINGS_REASON,
   PANTONE_LOADING_REASON,
   READ_ONLY_RUN_REASON,
+  LABEL_LOOKS,
+  LABEL_PLACES,
   SILENT_SERVER_REASON,
   SLOT_WORDS_MAX,
   bindingsSpoken,
   boundAssetsByPair,
   colourIsStated,
+  isLabelSlot,
   mintSlotName,
   pairKey,
   pairOfRun,
+  placementChip,
   shelfCeiling,
   swatchColour,
   withOwnHex,
+  type LabelSeed,
   type MaterialSlot,
   type SwatchColour,
 } from './slot-fabrics';
@@ -93,9 +98,13 @@ export type FabricsHardwareProps = {
   colorwayId: number;
   onColorwayChange: (id: number) => void;
   slots: MaterialSlot[];
+  /** Card LABELS rows by BOM line: a label slot seeds placement · fold · size from its row. */
+  labelSeeds?: ReadonlyMap<number, LabelSeed>;
   onGoStep: (step: StepId) => void;
   loading?: boolean;
 };
+
+const NO_LABEL_SEEDS: ReadonlyMap<number, LabelSeed> = new Map();
 
 const REFS_MAX = 4;
 /** One scope for the bench's presses: «starting…» and per-press outcomes are read from the cache. */
@@ -115,6 +124,7 @@ export function FabricsHardware({
   colorwayId,
   onColorwayChange,
   slots,
+  labelSeeds = NO_LABEL_SEEDS,
   onGoStep,
   loading,
 }: FabricsHardwareProps): JSX.Element {
@@ -143,6 +153,7 @@ export function FabricsHardware({
         disabled={disabled}
         colorway={colorways.find((c) => (c.colorwayId ?? 0) === colorwayId && colorwayId > 0)}
         slots={slots}
+        labelSeeds={labelSeeds}
         onGoStep={onGoStep}
       />
     </>
@@ -155,6 +166,7 @@ function MaterialBench({
   disabled,
   colorway,
   slots,
+  labelSeeds,
   onGoStep,
 }: {
   band: GetDesignBandResponse;
@@ -162,6 +174,7 @@ function MaterialBench({
   disabled?: boolean;
   colorway?: common_AdminColorwayRef;
   slots: MaterialSlot[];
+  labelSeeds: ReadonlyMap<number, LabelSeed>;
   onGoStep: (step: StepId) => void;
 }): JSX.Element {
   const { showMessage } = useSnackBarStore();
@@ -225,6 +238,24 @@ function MaterialBench({
       };
     }
     if (fabric) return { colourCode: ownPantone, words: slot.detail, pictures: [] };
+    if (isLabelSlot(slot)) {
+      // Label: BOM detail · card row placement (as a chip word) · fold (unless flat) · size.
+      const row = labelSeeds.get(slot.bomItemId);
+      const folding = row?.folding ?? '';
+      return {
+        colourCode: '',
+        words: [
+          ...slot.detail.split(' · '),
+          placementChip(row?.placement ?? ''),
+          sameWord(folding, 'flat') ? '' : folding,
+          row?.size ?? '',
+        ]
+          .map((w) => w.trim())
+          .filter(Boolean)
+          .join(', '),
+        pictures: [],
+      };
+    }
     const kind = kindLabel(slot.kind) ?? '';
     return {
       colourCode: '',
@@ -444,11 +475,18 @@ function MaterialBench({
   /* ─── runs ─── */
   const runInput = (slot: MaterialSlot, spec: Spec): StartRunInput => {
     const hardware = slot.family === 'hardware';
+    const label = isLabelSlot(slot);
     const c = colourOf(slot, spec);
     const pictureIds = spec.pictures.map((m) => m.id ?? 0).filter((id) => id > 0);
-    const words = hardware
-      ? uniqueWords([c?.words ?? '', spec.words, slot.name, kindLabel(slot.kind) ?? ''])
-      : [c?.words ?? '', spec.words.trim() || slot.words].filter(Boolean).join(' · ');
+    // Label: placement chips ride as «sewn at …» context, the rest is the label itself.
+    const said = wordList(spec.words);
+    const place = said.filter((w) => LABEL_PLACES.some((p) => sameWord(p, w))).join(', ');
+    const rest = said.filter((w) => !LABEL_PLACES.some((p) => sameWord(p, w))).join(', ');
+    const words = label
+      ? uniqueWords([c?.words ?? '', rest, place ? `sewn at ${place}` : '', slot.name, 'label'])
+      : hardware
+        ? uniqueWords([c?.words ?? '', spec.words, slot.name, kindLabel(slot.kind) ?? ''])
+        : [c?.words ?? '', spec.words.trim() || slot.words].filter(Boolean).join(' · ');
     return {
       kind: 'pattern',
       // Lands as the asset's note (what it is made of).
@@ -468,8 +506,8 @@ function MaterialBench({
         },
         threed: undefined,
         fixTarget: '',
-        // Fabric: one texture picture at most; hardware: up to four references.
-        extraInputMediaIds: pictureIds.slice(0, hardware ? REFS_MAX : 1),
+        // Fabric: one texture picture; label: its logo; hardware: up to four references.
+        extraInputMediaIds: pictureIds.slice(0, hardware && !label ? REFS_MAX : 1),
         fixTargets: [],
         fixSlotIds: [],
         autoSplit: false,
@@ -478,7 +516,7 @@ function MaterialBench({
           repeatMm: 0,
           name: mintSlotName(band, cwName, slot.name),
           sourceAssetId: 0,
-          mode: hardware ? 'hardware' : 'swatch',
+          mode: label ? 'label' : hardware ? 'hardware' : 'swatch',
           bomItemId: slot.bomItemId,
         },
         freeform: undefined,
@@ -798,7 +836,7 @@ function MaterialBench({
               <GroupLabel
                 action={
                   <Text size='micro' variant='label' component='span'>
-                    {selected.family}
+                    {isLabelSlot(selected) ? 'label' : selected.family}
                   </Text>
                 }
               >
@@ -1034,7 +1072,8 @@ function SpecPanel({
 }): JSX.Element {
   const { showMessage } = useSnackBarStore();
   const hardware = slot.family === 'hardware';
-  const max = hardware ? REFS_MAX : 1;
+  const label = isLabelSlot(slot);
+  const max = hardware && !label ? REFS_MAX : 1;
   const pictures = spec.pictures;
   const room = Math.max(0, max - pictures.length);
   const add = (incoming: common_MediaFull[]) => {
@@ -1071,7 +1110,7 @@ function SpecPanel({
           <div key={media.id ?? index} className={INPUT_CELL} data-fh-look={index + 1}>
             <PictureSlotFilled
               media={media}
-              alt={`${slot.name} picture ${index + 1}`}
+              alt={label ? `${slot.name} logo` : `${slot.name} picture ${index + 1}`}
               disabled={disabled}
               onRemove={() =>
                 onChange({ ...spec, pictures: pictures.filter((_, at) => at !== index) })
@@ -1083,7 +1122,8 @@ function SpecPanel({
         {room > 0 && (
           <div className={INPUT_CELL} data-fh-look-door=''>
             <PictureSlotEmpty
-              purpose={`design · ${slot.name}`}
+              purpose={label ? `design · ${slot.name} · logo` : `design · ${slot.name}`}
+              label={label ? '+ logo' : undefined}
               multiple={room > 1}
               limit={room}
               disabled={disabled}
@@ -1104,7 +1144,7 @@ function SpecPanel({
           htmlFor={`fh-words-${slot.bomItemId}`}
           className='text-labelColor'
         >
-          {hardware ? 'material' : 'cloth'}
+          {label ? 'label' : hardware ? 'material' : 'cloth'}
         </Text>
         <Textarea
           id={`fh-words-${slot.bomItemId}`}
@@ -1114,7 +1154,13 @@ function SpecPanel({
           disabled={disabled}
           rows={2}
           autoGrow={false}
-          placeholder={hardware ? 'horn, black' : '100% cotton twill, 300 gsm'}
+          placeholder={
+            label
+              ? 'woven, centre back neck'
+              : hardware
+                ? 'horn, black'
+                : '100% cotton twill, 300 gsm'
+          }
           onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
             onChange({ ...spec, words: e.target.value })
           }
@@ -1123,22 +1169,70 @@ function SpecPanel({
           data-fh-words=''
         />
       </div>
-      {hardware && (
-        <ChipRow className='max-w-xl'>
-          {MATERIAL_WORDS.map((word) => (
-            <Chip
-              key={word}
-              selected={hasWord(spec.words, word)}
-              pressed={hasWord(spec.words, word)}
-              disabled={disabled}
-              onClick={() => onChange({ ...spec, words: toggleWord(spec.words, word) })}
-              data-fh-chip={word}
-            >
-              {word}
-            </Chip>
-          ))}
-        </ChipRow>
+      {label ? (
+        <>
+          <WordChips
+            lead='look'
+            words={LABEL_LOOKS}
+            spec={spec}
+            disabled={disabled}
+            onChange={onChange}
+          />
+          <WordChips
+            lead='sewn at'
+            words={LABEL_PLACES}
+            spec={spec}
+            disabled={disabled}
+            onChange={onChange}
+          />
+        </>
+      ) : (
+        hardware && (
+          <WordChips words={MATERIAL_WORDS} spec={spec} disabled={disabled} onChange={onChange} />
+        )
       )}
+    </div>
+  );
+}
+
+/** A chip row toggling words in the spec's `, `-list; `lead` names the row on its left. */
+function WordChips({
+  lead,
+  words,
+  spec,
+  disabled,
+  onChange,
+}: {
+  lead?: string;
+  words: readonly string[];
+  spec: Spec;
+  disabled?: boolean;
+  onChange: (spec: Spec) => void;
+}): JSX.Element {
+  const chips = (
+    <ChipRow className={lead ? 'min-w-0 flex-1' : 'max-w-xl'}>
+      {words.map((word) => (
+        <Chip
+          key={word}
+          selected={hasWord(spec.words, word)}
+          pressed={hasWord(spec.words, word)}
+          disabled={disabled}
+          onClick={() => onChange({ ...spec, words: toggleWord(spec.words, word) })}
+          data-fh-chip={word}
+        >
+          {word}
+        </Chip>
+      ))}
+    </ChipRow>
+  );
+  if (!lead) return chips;
+  // The lead sits beside the row, so a wrapped chip line stays indented under the chips.
+  return (
+    <div className='flex max-w-xl items-start gap-1'>
+      <Text size='micro' variant='label' component='span' className='w-16 shrink-0 pt-1'>
+        {lead}
+      </Text>
+      {chips}
     </div>
   );
 }

@@ -258,6 +258,44 @@ try {
     });
     await settle();
     await shoot(page, 'r4-hardware-selected-1440.png');
+
+    // Round 5: BRAND LABEL selected — seeded from its card row, `woven` look, a logo picture.
+    await page.click('[data-fh-cell="5"]');
+    await page.waitForSelector('[data-fh-for="5"]');
+    const seeded = await page.inputValue('[data-fh-words]');
+    if (seeded !== 'centre back neck, 50 × 20 mm')
+      errors.push(`[1440] ASSERT: label seed is «${seeded}»`);
+    else console.log('assert ok: label seeds placement chip word and size, flat dropped');
+    await page.click('[data-fh-chip="woven"]');
+    await page.click('[data-fh-look-door] button');
+    await page.waitForSelector('[role="dialog"]');
+    await page.waitForTimeout(500);
+    // Single-picture slot: a click picks and closes the library.
+    await page.locator('[role="dialog"] img').nth(1).click();
+    await page.waitForSelector('[data-fh-look="1"]', { timeout: 5000 }).catch(() => {
+      errors.push('[1440] the logo did not land in the label spec');
+    });
+    if ((await page.locator('[data-fh-look-door]').count()) !== 0)
+      errors.push('[1440] ASSERT: label takes more than one picture');
+    await settle();
+    await shoot(page, 'r5-label-selected-1440.png');
+    // The run body: mode `label`, the logo as the one picture, placement as «sewn at».
+    const before = await page.evaluate(() => window.__calls.length);
+    await page.click('[data-fh-generate="live"] button:has-text("GENERATE")');
+    await page.waitForTimeout(500);
+    const sent = await page.evaluate(
+      (n) => window.__calls.slice(n).find((c) => c.body?.params?.pattern)?.body,
+      before,
+    );
+    const p = sent?.params;
+    if (
+      p?.pattern?.mode !== 'label' ||
+      JSON.stringify(p.extraInputMediaIds) !== '[902]' ||
+      !String(p.colour?.words).includes('sewn at centre back neck') ||
+      sent.ask !== 'centre back neck, 50 × 20 mm, woven'
+    )
+      errors.push(`[1440] ASSERT: label run body ${JSON.stringify(sent)?.slice(0, 400)}`);
+    else console.log(`assert ok: label run · words «${p.colour.words}»`);
     await ctx.close();
   }
   {
@@ -276,6 +314,12 @@ try {
   {
     const { ctx, page } = await open(390, 844);
     await shoot(page, 'r4-390.png');
+    await page.click('[data-fh-cell="5"]');
+    await page.waitForSelector('[data-fh-for="5"]');
+    await page.click('[data-fh-chip="woven"]');
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(300);
+    await shoot(page, 'r5-label-selected-390.png');
     await ctx.close();
   }
 } finally {
