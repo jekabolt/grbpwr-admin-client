@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// СНИМКИ ШАГА MATERIALS — визуальный стенд, не тест (`materials-entry.tsx`). Round 3 (one slot
-// selected): 1440 px with MAIN FABRIC selected, 1440 px with FRONT BUTTON selected (words
-// «horn, black», one library picture), 390 px with the default selection.
+// СНИМКИ ШАГА MATERIALS — визуальный стенд, не тест (`materials-entry.tsx`). Round 4 (a cell is a
+// selector only): asserts an empty-cell click selects without a dialog; shots: hover over an
+// unselected empty cell, MAIN FABRIC selected, FRONT BUTTON selected (words «horn, black», one
+// library picture), 390 px with the default selection.
 // Сеть — прокси: `SetDesignAssetBinding` правит `window.__band`, остальные вызовы отвечают `{}`;
 // `fetch` заглушён. Пишет консольные ошибки страницы.
 //
@@ -146,7 +147,7 @@ const errors = [];
 const browser = await chromium.launch();
 const shots = [];
 try {
-  const open = async (width, height) => {
+  const open = async (width, height, hash = '') => {
     const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
     const page = await ctx.newPage();
     page.on('pageerror', (e) => {
@@ -165,7 +166,7 @@ try {
       const file = resolve(cssDir, new URL(route.request().url()).pathname.split('/').pop());
       return existsSync(file) ? route.fulfill({ path: file }) : route.fulfill({ status: 404 });
     });
-    await page.goto('http://probe.local/');
+    await page.goto(`http://probe.local/${hash}`);
     await page.addStyleTag({ content: CSS });
     await page.addStyleTag({ content: 'body{background:var(--bgColor,#fff)}' });
     await page.addScriptTag({ content: bundle });
@@ -187,36 +188,94 @@ try {
 
   {
     const { ctx, page } = await open(1440, 1000);
+    const settle = async () => {
+      await page.mouse.move(5, 5);
+      await page.evaluate(() => document.activeElement?.blur());
+      await page.waitForTimeout(400);
+    };
+
+    // Round 4: an empty cell is a selector — a click selects it and opens NO dialog.
+    await page.click('[data-fh-cell="4"]');
+    await page.waitForTimeout(500);
+    if ((await page.locator('[role="dialog"]').count()) > 0) {
+      errors.push('[1440] ASSERT: clicking an empty cell opened a dialog');
+      await page.keyboard.press('Escape');
+    }
+    if ((await page.locator('[data-fh-for="4"]').count()) !== 1) {
+      errors.push('[1440] ASSERT: clicking an empty cell did not select it');
+    } else console.log('assert ok: empty cell click selects, no dialog');
+    // Keyboard: Enter on a focused cell selects it.
+    await page.focus('[data-fh-cell="6"]');
+    await page.keyboard.press('Enter');
+    if ((await page.locator('[data-fh-for="6"]').count()) !== 1)
+      errors.push('[1440] ASSERT: Enter on a cell did not select it');
+
+    // `all empty slots · N` asks first: one click turns it into `yes · no`; `no` reverts.
+    await page.click('[data-fh-all-empty]');
+    if ((await page.locator('[data-fh-all-confirm]').count()) !== 1)
+      errors.push('[1440] ASSERT: all empty slots fired without asking');
+    if ((await page.locator('[data-fh-pending]').count()) > 0)
+      errors.push('[1440] ASSERT: all empty slots started runs on the first click');
+    await page.click('[data-fh-all-no]');
+    if ((await page.locator('[data-fh-all-empty]').count()) !== 1)
+      errors.push('[1440] ASSERT: `no` did not revert the door');
+    else console.log('assert ok: all empty slots asks first, no reverts');
+
+    // Hover over an unselected empty cell (BRAND LABEL), with ZIP... SNAP selected.
+    await settle();
+    await page.hover('[data-fh-cell="5"]');
+    await page.waitForTimeout(300);
+    await shoot(page, 'r4-hover-1440.png');
+
     // Selected fabric: MAIN FABRIC (bound) — the panel is its spec.
-    await page.click('[data-fh-slot="1"] [data-picture-tile]');
+    await page.click('[data-fh-cell="1"] [data-picture-tile]');
     await page.waitForSelector('[data-fh-for="1"]');
-    await page.mouse.move(5, 5);
-    await page.evaluate(() => document.activeElement?.blur());
-    await page.waitForTimeout(400);
-    await shoot(page, 'r3-fabric-selected-1440.png');
+    await settle();
+    await shoot(page, 'r4-fabric-selected-1440.png');
+
+    // `use own picture` opens the library dialog for the selected slot.
+    await page.click('[data-fh-cell="2"]');
+    await page.waitForSelector('[data-fh-for="2"]');
+    await page.click('[data-fh-own-picture]');
+    await page
+      .waitForSelector('[role="dialog"]', { timeout: 5000 })
+      .then(() => console.log('assert ok: use own picture opens the library'))
+      .catch(() => errors.push('[1440] ASSERT: use own picture did not open the library'));
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
 
     // Selected hardware: FRONT BUTTON, words «horn, black», one picture from the library.
-    await page.click('[data-fh-slot="3"] [data-picture-tile]');
+    await page.click('[data-fh-cell="3"] [data-picture-tile]');
     await page.waitForSelector('[data-fh-for="3"]');
     await page.fill('[data-fh-words]', 'horn, black');
     await page.click('[data-fh-look-door] button');
     await page.waitForSelector('[role="dialog"]');
     await page.waitForTimeout(500);
-    if (process.env.DEBUG_SHOT) await shoot(page, 'r3-debug-dialog.png');
     await page.locator('[role="dialog"] img').first().click();
     await page.getByRole('button', { name: /add all/i }).click();
     await page.waitForSelector('[data-fh-look="1"]', { timeout: 5000 }).catch(() => {
       errors.push('[1440] the picture did not land in the hardware spec');
     });
+    await settle();
+    await shoot(page, 'r4-hardware-selected-1440.png');
+    await ctx.close();
+  }
+  {
+    // Two live runs on this colourway: making cells carry the cancel corner; `cancel all` shows.
+    const { ctx, page } = await open(1440, 1000, '#making');
+    await page.waitForSelector('[data-fh-pending] [data-run-cancel]');
+    if ((await page.locator('[data-fh-cancel-all]').count()) !== 1)
+      errors.push('[1440] ASSERT: no `cancel all` with two live runs');
+    await page.click('[data-fh-cell="2"]');
+    await page.waitForSelector('[data-fh-for="2"]');
     await page.mouse.move(5, 5);
-    await page.evaluate(() => document.activeElement?.blur());
     await page.waitForTimeout(400);
-    await shoot(page, 'r3-hardware-selected-1440.png');
+    await shoot(page, 'r4-making-cancel-1440.png');
     await ctx.close();
   }
   {
     const { ctx, page } = await open(390, 844);
-    await shoot(page, 'r3-390.png');
+    await shoot(page, 'r4-390.png');
     await ctx.close();
   }
 } finally {

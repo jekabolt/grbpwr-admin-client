@@ -68,6 +68,17 @@ const BAND = {
   bench: [],
   runs: [],
 } as unknown as GetDesignBandResponse;
+/* `#making`: LINING and ZIP have live pattern runs (the cancel corner and `cancel all`). */
+if (location.hash === '#making') {
+  const live = (id: number, bomItemId: number) => ({
+    id,
+    kind: 'pattern',
+    status: 'running',
+    startedAt: new Date(Date.now() - 12_000).toISOString(),
+    params: { colorwayId: 11, pattern: { bomItemId } },
+  });
+  (BAND as unknown as { runs: unknown[] }).runs = [live(701, 2), live(702, 4)];
+}
 (window as unknown as { __band: unknown }).__band = BAND;
 /* The library the picture slot opens: one horn button reference. */
 const HORN = svg(

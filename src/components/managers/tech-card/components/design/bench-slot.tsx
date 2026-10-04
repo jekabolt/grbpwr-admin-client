@@ -597,6 +597,7 @@ export function SlotCap({
   title,
   trailing,
   strong,
+  quiet,
 }: {
   label: string;
   required?: boolean;
@@ -605,6 +606,8 @@ export function SlotCap({
   trailing?: React.ReactNode;
   /** Bold name: the selected cell of a selectable row (MATERIALS). */
   strong?: boolean;
+  /** Grey name that goes ink on the hover of an enclosing `group` (selectable rows). */
+  quiet?: boolean;
 }) {
   return (
     <div
@@ -617,7 +620,11 @@ export function SlotCap({
         variant='uppercase'
         tracking='label'
         component='span'
-        className={strong ? 'min-w-0 truncate font-bold' : 'min-w-0 truncate'}
+        className={cn(
+          'min-w-0 truncate',
+          strong && 'font-bold',
+          quiet && !strong && 'text-labelColor group-hover:text-textColor',
+        )}
       >
         {label}
       </Text>

@@ -20,10 +20,10 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } 
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import { Chip, ChipRow } from 'ui/components/chip';
-import Input from 'ui/components/input';
 import { Section } from 'ui/components/section';
 import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
+import Textarea from 'ui/components/text-area';
 
 import { kindLabel } from '../../bom-kind';
 import { wireInt } from '../../wire-int';
@@ -36,14 +36,15 @@ import {
   assetThumb,
 } from '../assets/model';
 import { useAssetBindingWrites, useAssetWrites } from '../assets/use-assets';
-import { BENCH_CELL_STYLE, BENCH_FRAME_ASPECT, SlotCap } from '../bench-slot';
+import { BENCH_CELL_STYLE, BENCH_FRAME_ASPECT, InertDoor, SlotCap } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { archivedRef, colorwayLabel } from '../colorway-picker';
 import { ColourwayStrip } from '../colourway-strip';
 import { EmptyState, Money, PlaceOrDrawCell } from '../core';
 import { openStepOf, type StepId } from '../core/chain';
 import { useElapsed, useRunPolling } from '../generation';
-import { isRunLive } from '../generation/run-state';
+import { RunCancelCorner, useCancelRun } from '../generation/live-tiles';
+import { isCancelling, isRunLive } from '../generation/run-state';
 import { PictureSlotEmpty, PictureSlotFilled } from '../playground/fields/image-slots';
 import { PictureTile, useGalleryGroup, useOpenGalleryGroup } from '../picture-tile';
 import { GenerateRow, RunRefusal } from '../render/generate-row';
@@ -633,23 +634,40 @@ function MaterialBench({
     !!selSeed &&
     (selSpec.words.trim() !== selSeed.words.trim() ||
       selSpec.colourCode.trim() !== selSeed.colourCode.trim());
-  const pictureCount = selSpec?.pictures.length ?? 0;
-  const summary = !selected
-    ? ''
-    : !selGate.ok
-      ? selGate.reason
-      : [
-          `${selAsset ? 'remakes' : 'makes'} ${selected.name}`,
-          selColour?.code ||
-            selColour?.hex ||
-            (selected.family === 'hardware' ? 'as material' : ''),
-          selSpec?.words.trim() ?? '',
-          pictureCount > 0 ? `${pictureCount} picture${pictureCount === 1 ? '' : 's'}` : '',
-          wordsChanged ? 'words changed' : '',
-        ]
-          .filter(Boolean)
-          .join(' · ');
+  // `use own picture`: the library dialog for the SELECTED slot; placed with its spec.
+  const ownGate: Gate = !selected
+    ? { ok: false, reason: 'no slot' }
+    : !writable
+      ? !baseGate.ok
+        ? baseGate
+        : { ok: false, reason: READ_ONLY_RUN_REASON }
+      : liveByPair.has(selKey) || launching.has(selKey) || saving.has(selKey)
+        ? { ok: false, reason: 'being made — it lands in the cell by itself' }
+        : !hasRoom
+          ? { ok: false, reason: roomReason }
+          : { ok: true };
+  const selName = selected ? selected.name.toUpperCase() : '';
+  const verbName = selName.length > 24 ? `${selName.slice(0, 23)}…` : selName;
   const emptyN = emptyRunnable.length;
+
+  /* ─── cancel: a making cell's corner, and `cancel all` while ≥2 runs of this colourway live ─── */
+  const cancelRun = useCancelRun(techCardId);
+  const liveHere =
+    cwId > 0
+      ? slots
+          .map((s) => liveByPair.get(pairKey(cwId, s.bomItemId)))
+          .filter((r): r is common_DesignRun => !!r && !isCancelling(r))
+      : [];
+
+  /* ─── `all empty slots · N` never fires on one click: the door turns into `yes · no` ─── */
+  const [confirmAll, setConfirmAll] = useState(false);
+  const yesRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!confirmAll) return;
+    yesRef.current?.focus();
+    const t = setTimeout(() => setConfirmAll(false), 5_000);
+    return () => clearTimeout(t);
+  }, [confirmAll]);
 
   const group = (title: string, list: MaterialSlot[]) =>
     list.length === 0 ? null : (
@@ -683,13 +701,15 @@ function MaterialBench({
                 data-fh-slot={slot.bomItemId}
                 data-fh-selected={isSelected ? '' : undefined}
               >
-                {/* Button-like cell: click (captured) or Enter/Space selects the slot. */}
+                {/* The cell is a SELECTOR only: click (captured) or Enter/Space selects the slot.
+                    It never opens the library — `use own picture` in the panel does that. */}
                 <div
                   role='button'
                   tabIndex={0}
                   aria-pressed={isSelected}
                   aria-label={`select ${slot.name}`}
-                  className='w-full min-w-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                  data-fh-cell={slot.bomItemId}
+                  className='group w-full min-w-0 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                   onClickCapture={() => pick(slot)}
                   onKeyDown={(e) => {
                     if (e.target !== e.currentTarget) return;
@@ -710,7 +730,15 @@ function MaterialBench({
                     fullReason={roomReason}
                     generateGate={gate}
                     onPick={() => pick(slot)}
-                    onPlace={(m) => void place(slot, m)}
+                    liveCorner={
+                      cwId > 0 && liveByPair.get(key) ? (
+                        <RunCancelCorner
+                          techCardId={techCardId}
+                          run={liveByPair.get(key) as common_DesignRun}
+                          disabled={disabled || !speaks}
+                        />
+                      ) : null
+                    }
                     onReplace={() => replace(slot)}
                     onGenerate={() => {
                       pick(slot);
@@ -769,11 +797,14 @@ function MaterialBench({
               <GroupLabel
                 action={
                   <Text size='micro' variant='label' component='span'>
-                    {selected.name} · {selected.family}
+                    {selected.family}
                   </Text>
                 }
               >
-                generate
+                generate ·{' '}
+                <span className='text-textColor' data-fh-subject=''>
+                  {selected.name}
+                </span>
               </GroupLabel>
               <SpecPanel
                 key={selKey}
@@ -786,21 +817,37 @@ function MaterialBench({
                 ownPantone={ownPantone}
                 onChange={(next) => setSpec(selected, next)}
               />
-              <Text
-                size='micro'
-                variant='label'
-                component='p'
-                className='mt-2 normal-case'
-                data-fh-generate-summary=''
-              >
-                {summary}
-              </Text>
+              {!selGate.ok && (
+                <Text
+                  size='micro'
+                  variant='label'
+                  component='p'
+                  className='mt-2 normal-case'
+                  data-fh-generate-reason=''
+                >
+                  {selGate.reason}
+                </Text>
+              )}
               <GenerateRow
                 gate={selGate}
                 pending={run.isPending}
+                label={`GENERATE ${verbName}`}
                 onGenerate={() => generate([selected])}
                 trailing={
                   <span className='flex flex-wrap items-center gap-2'>
+                    {ownGate.ok ? (
+                      <Button
+                        variant='secondary'
+                        size='sm'
+                        title='pick or upload a picture for this slot — it takes these words and colour'
+                        onClick={() => replace(selected)}
+                        data-fh-own-picture=''
+                      >
+                        use own picture
+                      </Button>
+                    ) : (
+                      <InertDoor label='use own picture' reason={ownGate.reason} size='sm' />
+                    )}
                     <Money data-probe='run-price' />
                     {wordsChanged && selAsset && writable && (
                       <Button
@@ -814,7 +861,48 @@ function MaterialBench({
                         save words
                       </Button>
                     )}
-                    {emptyBatch.length > 0 && (
+                    {emptyBatch.length > 0 && confirmAll && (
+                      <span
+                        className='flex items-center gap-1.5'
+                        data-fh-all-confirm={emptyBatch.length}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') setConfirmAll(false);
+                        }}
+                        onBlur={(e) => {
+                          if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+                            setConfirmAll(false);
+                        }}
+                      >
+                        <Text size='micro' component='span' className='uppercase'>
+                          make {emptyBatch.length} picture{emptyBatch.length === 1 ? '' : 's'}?
+                        </Text>
+                        <Button
+                          ref={yesRef}
+                          variant='underline'
+                          size='xs'
+                          disabled={!emptyGate.ok}
+                          onClick={() => {
+                            setConfirmAll(false);
+                            generate(emptyBatch);
+                          }}
+                          data-fh-all-yes=''
+                        >
+                          yes
+                        </Button>
+                        <Text size='micro' variant='label' component='span'>
+                          ·
+                        </Text>
+                        <Button
+                          variant='underline'
+                          size='xs'
+                          onClick={() => setConfirmAll(false)}
+                          data-fh-all-no=''
+                        >
+                          no
+                        </Button>
+                      </span>
+                    )}
+                    {emptyBatch.length > 0 && !confirmAll && (
                       <Button
                         variant='underline'
                         size='xs'
@@ -824,12 +912,23 @@ function MaterialBench({
                             ? emptyGate.reason
                             : emptyBatch.length < emptyN
                               ? `shelf room for ${emptyBatch.length} of ${emptyN}`
-                              : 'makes every empty slot from its own words — fabrics in their colour, hardware as material'
+                              : 'makes every empty slot from its own words — fabrics in their colour, hardware without one'
                         }
-                        onClick={() => generate(emptyBatch)}
+                        onClick={() => setConfirmAll(true)}
                         data-fh-all-empty={emptyBatch.length}
                       >
                         all empty slots · {emptyBatch.length}
+                      </Button>
+                    )}
+                    {liveHere.length >= 2 && (
+                      <Button
+                        variant='underline'
+                        size='xs'
+                        title='stop every run of this colourway — calls already sent cannot be recalled; answers that still arrive are recorded and paid for'
+                        onClick={() => liveHere.forEach((r) => cancelRun(r.id ?? 0))}
+                        data-fh-cancel-all={liveHere.length}
+                      >
+                        cancel all
                       </Button>
                     )}
                   </span>
@@ -952,7 +1051,7 @@ function SpecPanel({
           <PantonePicker
             name={`fh-colour-${colorwayId}-${slot.bomItemId}`}
             value={spec.colourCode}
-            label={colour?.code || colour?.hex || (hardware ? 'as material' : '+ colour')}
+            label={colour?.code || colour?.hex || (hardware ? 'no colour' : '+ colour')}
             swatchHex={colour?.hex}
             suggested={
               ownPantone ? [{ code: ownPantone, label: `${colorwayName} · colourway` }] : []
@@ -989,24 +1088,37 @@ function SpecPanel({
         )}
       </div>
 
-      <div className='flex items-center gap-2'>
-        <Text size='micro' variant='label' component='span' className='w-16 shrink-0'>
+      {/* Words: label above, a real (vertical-resize) textarea capped in width, chips under it. */}
+      <div className='flex max-w-xl flex-col gap-1'>
+        <Text
+          size='micro'
+          variant='uppercase'
+          tracking='label'
+          component='label'
+          htmlFor={`fh-words-${slot.bomItemId}`}
+          className='text-labelColor'
+        >
           {hardware ? 'material' : 'cloth'}
         </Text>
-        <Input
+        <Textarea
+          id={`fh-words-${slot.bomItemId}`}
           name={`fh-words-${slot.bomItemId}`}
           value={spec.words}
           maxLength={SLOT_WORDS_MAX}
           disabled={disabled}
+          rows={2}
+          autoGrow={false}
           placeholder={hardware ? 'horn, black' : '100% cotton twill, 300 gsm'}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
             onChange({ ...spec, words: e.target.value })
           }
+          style={{ minHeight: 44 }}
+          className='resize-y'
           data-fh-words=''
         />
       </div>
       {hardware && (
-        <ChipRow className='pl-[72px]'>
+        <ChipRow className='max-w-xl'>
           {MATERIAL_WORDS.map((word) => (
             <Chip
               key={word}
@@ -1054,7 +1166,7 @@ function SlotCell({
   fullReason,
   generateGate,
   onPick,
-  onPlace,
+  liveCorner,
   onReplace,
   onGenerate,
   onClear,
@@ -1070,7 +1182,8 @@ function SlotCell({
   fullReason: string;
   generateGate: Gate;
   onPick: () => void;
-  onPlace: (media: common_MediaFull) => void;
+  /** The live run's cancel corner (the studio's own, `RunCancelCorner`). */
+  liveCorner?: React.ReactNode;
   onReplace: () => void;
   onGenerate: () => void;
   onClear: () => void;
@@ -1080,6 +1193,7 @@ function SlotCell({
       label={slot.name}
       title={[slot.name, slot.purposeLabel, slot.detail].filter(Boolean).join(' · ')}
       strong={selected}
+      quiet
       trailing={
         slot.purposeLabel ? (
           <Text size='nano' variant='label' component='span' className='ml-auto min-w-0 truncate'>
@@ -1097,7 +1211,9 @@ function SlotCell({
         aspect={BENCH_FRAME_ASPECT}
         purpose=''
         selected={selected}
-        onPick={onPick}
+        className={HOVER_INK}
+        // The backdrop slot makes the frame `relative`: the cancel corner sits in it.
+        backdrop={liveRun ? liveCorner : undefined}
         instead={
           liveRun ? (
             <LiveWord startedAt={liveRun.startedAt ?? liveRun.createdAt ?? ''} word='making…' />
@@ -1132,31 +1248,24 @@ function SlotCell({
     );
   }
 
+  // Empty face = the pictogram only: the cell is a selector, not an upload button.
   return (
     <PlaceOrDrawCell
       label={slot.name}
       aspect={BENCH_FRAME_ASPECT}
-      mediaLabel='+ add'
-      purpose={`design · ${slot.name}`}
-      onSelect={onPlace}
+      purpose=''
       selected={selected}
-      onPick={onPick}
-      instead={
-        !writable || full ? (
-          <span title={full ? fullReason : undefined}>
-            <Text size='micro' variant='uppercase' tracking='label' component='span'>
-              empty
-            </Text>
-          </span>
-        ) : undefined
-      }
+      className={HOVER_INK}
+      instead={<span />}
       backdrop={<TrimPictogramBackdrop slot={slot} />}
-      quietDoor
       cap={cap}
       data-fh-empty={slot.bomItemId}
     />
   );
 }
+
+/** Hover of the enclosing selector (`group`): the 1px frame goes solid ink. */
+const HOVER_INK = 'cursor-pointer group-hover:border-solid group-hover:border-textColor';
 
 /** A dressed cell: surface click selects (double click zooms); `zoom` also lives in the menu. */
 function FilledCell({
