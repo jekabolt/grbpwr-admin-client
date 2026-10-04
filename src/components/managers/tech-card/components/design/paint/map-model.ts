@@ -18,7 +18,8 @@ import { isMapInk, planHex, type PlanSwatch } from '../colour-plan/model';
 export const PAINT_SIDE_MAX = 1600;
 
 export const packHex = (hex: string): number => parseInt(hex.slice(1), 16) & 0xffffff;
-export const hexOf = (packed: number): string => `#${(packed & 0xffffff).toString(16).padStart(6, '0')}`;
+export const hexOf = (packed: number): string =>
+  `#${(packed & 0xffffff).toString(16).padStart(6, '0')}`;
 
 function hslHex(h: number, s: number, l: number): string {
   const a = s * Math.min(l, 1 - l);
@@ -36,7 +37,11 @@ const GOLDEN = 137.508;
 
 /** The label of one slot, before collisions. */
 export const slotHex = (bomItemId: number, step = 0): string =>
-  hslHex((((bomItemId * GOLDEN) % 360) + 360) % 360, 0.62, Math.max(0.2, Math.min(0.8, 0.52 + step * 0.07 * (step % 2 ? 1 : -1))));
+  hslHex(
+    (((bomItemId * GOLDEN) % 360) + 360) % 360,
+    0.62,
+    Math.max(0.2, Math.min(0.8, 0.52 + step * 0.07 * (step % 2 ? 1 : -1))),
+  );
 
 /** Labels of every slot of the card, collisions stepped apart in id order. */
 export function slotLabels(bomItemIds: readonly number[]): Map<number, string> {
@@ -168,7 +173,11 @@ export function componentAt(
 }
 
 /** Paint `idx` with `value`; null when nothing would change. */
-export function paintIndices(labels: Uint32Array, idx: Int32Array, value: number): PaintDiff | null {
+export function paintIndices(
+  labels: Uint32Array,
+  idx: Int32Array,
+  value: number,
+): PaintDiff | null {
   const keep: number[] = [];
   for (let k = 0; k < idx.length; k += 1) if (labels[idx[k]] !== value) keep.push(idx[k]);
   if (keep.length === 0) return null;
@@ -283,7 +292,12 @@ export function labelsFromMap(
   h: number,
   palette: readonly string[],
 ): Uint32Array {
-  const known = new Set(palette.map((x) => planHex(x)).filter(isMapInk).map(packHex));
+  const known = new Set(
+    palette
+      .map((x) => planHex(x))
+      .filter(isMapInk)
+      .map(packHex),
+  );
   const out = new Uint32Array(w * h);
   for (let y = 0; y < h; y += 1) {
     const sy = Math.min(mh - 1, Math.floor(((y + 0.5) * mh) / h));
