@@ -8300,9 +8300,13 @@ export type common_TechCardCallout = {
   // Наконечники линии — см. TechCardAnnotationCaps. Тот же примитив, что у выноски снимка шага:
   // выноску переносят со снимка на эскиз и обратно, и линия обязана остаться той же линией.
   caps: common_TechCardAnnotationCaps | undefined;
-  // PURPOSE (field 16): JSON object string; "{}" = plain, "" / absent = not sent (server carries).
-  // Hand-added ahead of the regen (callout kinds wave).
-  spec?: string;
+  // НАЗНАЧЕНИЕ ВЫНОСКИ и её структурное содержимое — JSON-объект строкой (0388): заметка, узел
+  // крупно, нанесение, строчка/шов, материал, разрез. Ось, ортогональная виду (как caps): вид
+  // говорит, ЧТО нарисовано, spec — ЗАЧЕМ. Форму держит клиент; сервер проверяет только «объект,
+  // не длиннее 16 КБ» и канонизирует (ключи по алфавиту), чтобы подпись DESIGN была стабильной.
+  // Пусто = обычная выноска, как до 0388. Входит в атомарную группу геометрии: без `kind` хранимый
+  // spec переносится вместе с якорями.
+  spec: string | undefined;
 };
 
 // TechCardBomItem is one bill-of-materials line — a catalog article (Sheet «Спецификация»).
@@ -17492,56 +17496,6 @@ export type DraftDesignIdeaResponse = {
   construction: common_DesignConstructionDraft | undefined;
 };
 
-export type GenerateDesignQuizRequest = {
-  techCardId: number | undefined;
-};
-
-export type DesignQuizQuestion = {
-  id: string | undefined;
-  category: string | undefined;
-  part: string | undefined;
-  family: string | undefined;
-  view: string | undefined;
-  kind: string | undefined;
-  question: string | undefined;
-  options: string[] | undefined;
-  contradicts: boolean[] | undefined;
-  visualEvidence: string | undefined;
-  clarifyQuestion: string | undefined;
-  clarifyOptions: string[] | undefined;
-};
-
-export type GenerateDesignQuizResponse = {
-  questions: DesignQuizQuestion[] | undefined;
-  family: string | undefined;
-  model: string | undefined;
-};
-
-export type DesignQuizAnswer = {
-  question: DesignQuizQuestion | undefined;
-  selected: string[] | undefined;
-  freeText: string | undefined;
-  skipped: boolean | undefined;
-  answeredAt: wellKnownTimestamp | undefined;
-};
-
-export type GetDesignQuizAnswersRequest = {
-  techCardId: number | undefined;
-};
-
-export type GetDesignQuizAnswersResponse = {
-  answers: DesignQuizAnswer[] | undefined;
-};
-
-export type SaveDesignQuizAnswersRequest = {
-  techCardId: number | undefined;
-  answers: DesignQuizAnswer[] | undefined;
-};
-
-export type SaveDesignQuizAnswersResponse = {
-  answers: DesignQuizAnswer[] | undefined;
-};
-
 // DesignConstructionDraft is what `draft the construction` answers: ONE proposal covering the four
 // groups the CONSTRUCTION tab draws, read off the moodboard pictures, the designer's concept and
 // the notes pinned on the images.
@@ -17700,6 +17654,58 @@ export type common_DesignColourwaySlotColour = {
 export type common_DesignFlatDetail = {
   name: string | undefined;
   note: string | undefined;
+};
+
+// DesignQuizQuestion is one question of the moodboard quiz, as asked and as stored.
+export type DesignQuizQuestion = {
+  id: string | undefined;
+  category: string | undefined;
+  part: string | undefined;
+  family: string | undefined;
+  view: string | undefined;
+  kind: string | undefined;
+  question: string | undefined;
+  options: string[] | undefined;
+  contradicts: boolean[] | undefined;
+  visualEvidence: string | undefined;
+  clarifyQuestion: string | undefined;
+  clarifyOptions: string[] | undefined;
+};
+
+export type GenerateDesignQuizRequest = {
+  techCardId: number | undefined;
+};
+
+export type GenerateDesignQuizResponse = {
+  questions: DesignQuizQuestion[] | undefined;
+  family: string | undefined;
+  model: string | undefined;
+};
+
+export type DesignQuizAnswer = {
+  question: DesignQuizQuestion | undefined;
+  selected: string[] | undefined;
+  freeText: string | undefined;
+  skipped: boolean | undefined;
+  answeredAt: wellKnownTimestamp | undefined;
+};
+
+export type GetDesignQuizAnswersRequest = {
+  techCardId: number | undefined;
+};
+
+export type GetDesignQuizAnswersResponse = {
+  answers: DesignQuizAnswer[] | undefined;
+};
+
+// SaveDesignQuizAnswersRequest carries the FULL list; the stored list is replaced by it.
+export type SaveDesignQuizAnswersRequest = {
+  techCardId: number | undefined;
+  answers: DesignQuizAnswer[] | undefined;
+};
+
+export type SaveDesignQuizAnswersResponse = {
+  answers: DesignQuizAnswer[] | undefined;
 };
 
 // AiRouteCandidate is one (provider, model) a purpose's call may go to.
@@ -19385,8 +19391,16 @@ export interface AdminService {
   // FailedPrecondition: no_moodboard. (`budget_exceeded` was listed here until 0358 removed the
   // generation ceiling as a concept — no verb refuses for money any more.)
   DraftDesignIdea(request: DraftDesignIdeaRequest): Promise<DraftDesignIdeaResponse>;
+  // GenerateDesignQuiz (moodboard quiz) — one sync vision+JSON call: the model reads the board
+  // pictures, the board words and the card facts, and asks 0..15 questions about what is still
+  // unclear or non-standard. Nothing is stored; ai_usage_event books the call. Questions already
+  // answered on the card (GetDesignQuizAnswers) are never returned again.
+  // FailedPrecondition: nothing to ask about (no attached picture and no concept).
   GenerateDesignQuiz(request: GenerateDesignQuizRequest): Promise<GenerateDesignQuizResponse>;
+  // GetDesignQuizAnswers — every quiz answer stored on the card, in display order.
   GetDesignQuizAnswers(request: GetDesignQuizAnswersRequest): Promise<GetDesignQuizAnswersResponse>;
+  // SaveDesignQuizAnswers REPLACES the card's whole answer list with the one sent (single writer:
+  // the client always sends the full list). Returns the stored list.
   SaveDesignQuizAnswers(request: SaveDesignQuizAnswersRequest): Promise<SaveDesignQuizAnswersResponse>;
   // GetWorkshopSettings returns «дом настроек цеха» (Ф2.5, 0272): the shop-floor constants that
   // belong to the ЦЕХ itself and not to any one card or раскладка. Первый жилец is the cutting
