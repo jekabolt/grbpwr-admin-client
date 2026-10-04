@@ -40,18 +40,32 @@ function subscribe(listener: () => void): () => void {
  * Ключ памяти и личность дребезга — пара текст + контекст: равная пара = равный ключ. Без текста
  * звать некого — ключ пуст.
  */
-export function briefKey(text: string, context: string): string {
-  return text ? JSON.stringify([text, context]) : '';
+export function briefKey(text: string, context: string, field: BriefField = 'words'): string {
+  if (!text) return '';
+  // T56: бриф рендера — другой ответ на ту же пару; ключ флэта не меняется.
+  return JSON.stringify(field === 'words' ? [text, context] : [text, context, field]);
 }
 
-export function readBrief(text: string, context: string): BriefState | undefined {
-  const key = briefKey(text, context);
+/** Чей бриф: WORDS флэта или IN WORDS рендера (T56). */
+export type BriefField = 'words' | 'render-words';
+
+export function readBrief(
+  text: string,
+  context: string,
+  field: BriefField = 'words',
+): BriefState | undefined {
+  const key = briefKey(text, context, field);
   return key ? memo.get(key) : undefined;
 }
 
 /** Попросить бриф для пары — ровно один раз за сессию; повтор той же пары ничего не шлёт. */
-export function requestBrief(text: string, context: string, fetcher: BriefFetcher): void {
-  const key = briefKey(text, context);
+export function requestBrief(
+  text: string,
+  context: string,
+  fetcher: BriefFetcher,
+  field: BriefField = 'words',
+): void {
+  const key = briefKey(text, context, field);
   if (!key || memo.has(key)) return;
   memo.set(key, { status: 'pending' });
   notify();
@@ -68,8 +82,12 @@ export function requestBrief(text: string, context: string, fetcher: BriefFetche
   );
 }
 
-export function useBrief(text: string, context: string): BriefState | undefined {
-  const read = () => readBrief(text, context);
+export function useBrief(
+  text: string,
+  context: string,
+  field: BriefField = 'words',
+): BriefState | undefined {
+  const read = () => readBrief(text, context, field);
   return useSyncExternalStore(subscribe, read, read);
 }
 

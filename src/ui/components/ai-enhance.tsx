@@ -86,7 +86,14 @@ export type EnhanceMode =
   | 'steer';
 
 /** Что за поле — закрытый список (сервер держит такой же enum; свободный текст в промпт не идёт). */
-export type EnhanceField = 'description' | 'note' | 'words' | 'silhouette' | 'fabric' | 'other';
+export type EnhanceField =
+  | 'description'
+  | 'note'
+  | 'words'
+  | 'render-words'
+  | 'silhouette'
+  | 'fabric'
+  | 'other';
 
 export const ENHANCE_MODES: ReadonlyArray<{ mode: EnhanceMode; label: string; hint: string }> = [
   { mode: 'improve', label: 'improve', hint: 'fix errors, make it clearer' },
@@ -133,6 +140,7 @@ const FIELD_WIRE: Record<EnhanceField, EnhanceTextField> = {
   description: 'ENHANCE_TEXT_FIELD_DESCRIPTION',
   note: 'ENHANCE_TEXT_FIELD_NOTE',
   words: 'ENHANCE_TEXT_FIELD_WORDS',
+  'render-words': 'ENHANCE_TEXT_FIELD_RENDER_WORDS',
   silhouette: 'ENHANCE_TEXT_FIELD_SILHOUETTE',
   fabric: 'ENHANCE_TEXT_FIELD_FABRIC',
   other: 'ENHANCE_TEXT_FIELD_OTHER',

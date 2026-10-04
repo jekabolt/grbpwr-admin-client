@@ -16,6 +16,8 @@
 //                                                     (до R3): чужие факты берут старый бриф, краснеет
 //   node scripts/words-brief-probe.mjs --mutate-wait  GENERATE не ждёт бриф в пути (до R2), краснеет
 //   node scripts/words-brief-probe.mjs --mutate-generate  флэт отдаёт засев ДО ожидания брифа, краснеет
+//   node scripts/words-brief-probe.mjs --mutate-follow  T56: правленые руками слова переписываются
+//                                                     сами (без ссылки), краснеет
 
 import { build as esbuild } from 'esbuild';
 import { readFileSync, rmSync } from 'node:fs';
@@ -28,6 +30,7 @@ const MUTATE_MEMO = process.argv.includes('--mutate-memo');
 const MUTATE_CONTEXT = process.argv.includes('--mutate-context');
 const MUTATE_WAIT = process.argv.includes('--mutate-wait');
 const MUTATE_GENERATE = process.argv.includes('--mutate-generate');
+const MUTATE_FOLLOW = process.argv.includes('--mutate-follow');
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
 const DESIGN = resolve(REPO, 'src/components/managers/tech-card/components/design');
@@ -68,7 +71,7 @@ if (MUTATE_CONTEXT)
   plugins.push(
     swap(
       /design\/words-brief\.ts$/,
-      "  return text ? JSON.stringify([text, context]) : '';",
+      "  return JSON.stringify(field === 'words' ? [text, context] : [text, context, field]);",
       '  return text;',
     ),
   );
@@ -79,6 +82,15 @@ if (MUTATE_WAIT)
       /design\/words-brief\.ts$/,
       "  if (!seedBriefInFlight(card)) return 'none';",
       "  return 'none';",
+    ),
+  );
+
+if (MUTATE_FOLLOW)
+  plugins.push(
+    swap(
+      /design\/words-follow\.ts$/,
+      "  return own.trim() === rec.text.trim() ? 'auto' : 'offer';",
+      "  return 'auto';",
     ),
   );
 
@@ -101,6 +113,7 @@ const bundle = async (entry, tag) => {
 };
 const F = await bundle(resolve(DESIGN, 'core/card-facts.ts'), 'facts');
 const B = await bundle(resolve(DESIGN, 'words-brief.ts'), 'brief');
+const W = await bundle(resolve(DESIGN, 'words-follow.ts'), 'follow');
 
 const RU = 'Объёмная куртка с асимметричной застёжкой, настроение — северный лес';
 const facts = {
@@ -305,7 +318,33 @@ console.log('\nпровод: засев WORDS ходит через бриф');
   );
 }
 
+console.log('\nT56: WORDS и IN WORDS догоняют мудборд');
+{
+  const rec = { source: 'k1', text: 'auto words' };
+  ck(W.followPlan('', rec, 'k2', 'k2') === 'none', 'empty words → seed decides, not follow');
+  ck(W.followPlan('auto words', rec, 'k2', 'k1') === 'none', 'source still settling → wait');
+  ck(W.followPlan('auto words', rec, 'k1', 'k1') === 'none', 'same source → nothing');
+  ck(W.followPlan('typed', null, 'k1', 'k1') === 'baseline', 'no record → baseline');
+  ck(W.followPlan('auto words', rec, 'k2', 'k2') === 'auto', 'untouched auto text → rewrite itself');
+  ck(W.followPlan('hand edit', rec, 'k2', 'k2') === 'offer', 'hand-edited → offer the link');
+  ck(
+    W.followPlan('typed', { source: 'k1', text: '' }, 'k2', 'k2') === 'offer',
+    'baseline record never auto-rewrites',
+  );
+  ck(
+    B.briefKey('t', 'c') === JSON.stringify(['t', 'c']) &&
+      B.briefKey('t', 'c', 'render-words') !== B.briefKey('t', 'c'),
+    'render brief has its own memo key; flat key unchanged',
+  );
+  const hook = readFileSync(resolve(DESIGN, 'use-words-seeding.ts'), 'utf8');
+  ck(
+    hook.includes("mode: 'prompt', field: 'render-words'") &&
+      hook.includes("setValue('garmentDescription', composed.text, { shouldDirty: true })"),
+    'render asks RENDER_WORDS; flat rewrite is a dirty form change',
+  );
+}
+
 console.log(
-  `\n${total - bad} / ${total}, failures ${bad}${MUTATE_RAW ? '  (--mutate-raw)' : ''}${MUTATE_MEMO ? '  (--mutate-memo)' : ''}${MUTATE_CONTEXT ? '  (--mutate-context)' : ''}${MUTATE_WAIT ? '  (--mutate-wait)' : ''}${MUTATE_GENERATE ? '  (--mutate-generate)' : ''}`,
+  `\n${total - bad} / ${total}, failures ${bad}${MUTATE_FOLLOW ? '  (--mutate-follow)' : ''}${MUTATE_RAW ? '  (--mutate-raw)' : ''}${MUTATE_MEMO ? '  (--mutate-memo)' : ''}${MUTATE_CONTEXT ? '  (--mutate-context)' : ''}${MUTATE_WAIT ? '  (--mutate-wait)' : ''}${MUTATE_GENERATE ? '  (--mutate-generate)' : ''}`,
 );
 process.exit(bad ? 1 : 0);

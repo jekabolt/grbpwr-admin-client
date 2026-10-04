@@ -1,6 +1,6 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { enhanceText } from 'ui/components/ai-enhance';
 
@@ -22,6 +22,7 @@ import {
   useBrief,
   type BriefFetcher,
 } from './words-brief';
+import { followPlan, setRenderSeed, useWordsRecord, writeWordsRecord } from './words-follow';
 import { followWords, lockWords, offerWords, useWordsSeed, wordsDecided } from './words-seed';
 
 /**
@@ -96,8 +97,8 @@ export function useWordsSeeding(
   techCardId: number,
   band: GetDesignBandResponse,
   readOnly: boolean,
-): { wordsLive: boolean; factsContext: string } {
-  const { control, getValues } = useFormContext<TechCardFormData>();
+): WordsSeeding {
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const facts = useCardFacts(isBoardRow);
   /* T03: свободный текст мудборда в WORDS не копируется — он уходит английским брифом
      (`words-brief.ts`); пока текст набирается, вызова нет (дребезг `BRIEF_SETTLE_MS`). */
@@ -139,10 +140,32 @@ export function useWordsSeeding(
     wordsNow.trim() === '' &&
     seed !== null &&
     (moodMinimum.ok || flatDone);
+  /* T56: отданные WORDS идут за мудбордом (`words-follow.ts`): не правленые руками переписываются
+     сами, правленые — по ссылке `rewrite ✦` (`asked` — ключ источника, для которого её нажали). */
+  const record = useWordsRecord(techCardId, 'flat');
+  const [asked, setAsked] = useState('');
+  const follow =
+    techCardId > 0 && wordsLive && factsReady && !wordsBusy
+      ? followPlan(wordsNow, record, key, settled)
+      : 'none';
+  const followWants = follow === 'auto' || (follow === 'offer' && asked === key);
   useEffect(() => {
-    if (!wantsBrief || !key || settled !== key) return;
+    if ((!wantsBrief && !followWants) || !key || settled !== key) return;
     requestBrief(source.text, source.context, fetchWordsBrief);
-  }, [wantsBrief, settled, key, source]);
+  }, [wantsBrief, followWants, settled, key, source]);
+  useEffect(() => {
+    if (follow === 'baseline') {
+      writeWordsRecord(techCardId, 'flat', { source: key, text: '' });
+      return;
+    }
+    if (!followWants || planState !== 'ready' || !composed.text) return;
+    // Настоящая правка формы: грязная, её сохранит автосейв.
+    if (composed.text !== wordsNow) {
+      setValue('garmentDescription', composed.text, { shouldDirty: true });
+    }
+    writeWordsRecord(techCardId, 'flat', { source: key, text: composed.text });
+    setAsked('');
+  }, [follow, followWants, planState, composed, key, techCardId, wordsNow, setValue]);
   /* R2: какую пару ждёт засев карточки — по ней GENERATE ждёт бриф в пути (`settleSeedBrief`). */
   useEffect(() => {
     noteSeedBrief(techCardId, wantsBrief ? key : '');
@@ -168,12 +191,17 @@ export function useWordsSeeding(
       // (a) Предложение, уже стоящее на экране, ИДЁТ ЗА ФАКТАМИ (ревью раунда 4, MIN-4): новая
       // категория или описание — новый текст. Снятое (`null`) не возвращается.
       followWords(techCardId, composed.text, composed.omitted);
+      if (planState === 'ready')
+        writeWordsRecord(techCardId, 'flat', { source: key, text: composed.text });
       return;
     }
     if (!moodMinimum.ok && !flatDone) return;
     // D-20'''': засев — ПРЕДЛОЖЕНИЕ НА ЭКРАНЕ, в значения формы он не пишется (см. `words-seed.ts`).
     offerWords(techCardId, composed.text, composed.omitted);
+    if (planState === 'ready')
+      writeWordsRecord(techCardId, 'flat', { source: key, text: composed.text });
   }, [
+    key,
     techCardId,
     wordsNow,
     wordsLive,
@@ -185,7 +213,86 @@ export function useWordsSeeding(
     flatDone,
     getValues,
   ]);
-  return { wordsLive, factsContext };
+  const rewriting = follow === 'offer' && asked === key;
+  const rewrite = follow === 'offer' && !readOnly ? () => setAsked(key) : null;
+  return { wordsLive, factsContext, rewrite, rewriting };
+}
+
+export type WordsSeeding = {
+  wordsLive: boolean;
+  factsContext: string;
+  /** T56: мудборд сменился, а WORDS правлены руками — переписать по щелчку; `null` — нечего. */
+  rewrite: (() => void) | null;
+  /** Бриф для переписи в пути. */
+  rewriting: boolean;
+};
+
+/**
+ * ═══ IN WORDS РЕНДЕРА — СВОЙ БРИФ И ТО ЖЕ ПРАВИЛО ДОГОНЯНИЯ (T56) ════════════════════════════════
+ *
+ * Тот же источник, что у WORDS флэта (`wordsBriefSource`), но бриф другой — EnhanceText ·
+ * RENDER_WORDS: ткань, цвет, драпировка, поверхность, без указаний для линейного рисунка. Пока
+ * собственные слова рендера пусты (и засев экрана не снят), ответ — умолчание поля
+ * (`setRenderSeed`, читает `render/drafts.ts`); первое действие отдаёт его в рецепт, как и прежде.
+ * Стоящие слова догоняют мудборд по правилу `words-follow.ts`: авто-текст переписывается сам
+ * (`write` — дверь черновика), правленое — по ссылке. Без свободного текста мудборда брифа нет, и
+ * умолчание — слова флэта, как было.
+ */
+export function useRenderWordsFollow(
+  techCardId: number,
+  readOnly: boolean,
+  own: string,
+  dropped: boolean,
+  write: (text: string) => void,
+): { rewrite: (() => void) | null; rewriting: boolean } {
+  const facts = useCardFacts(isBoardRow);
+  const source = useMemo(() => wordsBriefSource(facts), [facts]);
+  const key = briefKey(source.text, source.context, 'render-words');
+  const settled = useSettled(key, BRIEF_SETTLE_MS);
+  const brief = useBrief(source.text, source.context, 'render-words');
+  const plan = briefPlan(key, settled, brief);
+  const planBrief = typeof plan === 'object' ? plan.brief : undefined;
+  const composed = useMemo(() => composeWords(facts, WORDS_MAX, planBrief), [facts, planBrief]);
+  const { loading: dictionaryLoading, dictionary } = useDictionary();
+  const factsReady = !dictionaryLoading && !!dictionary;
+  const autosave = useTechCardAutosave();
+  const live = !readOnly && autosave.status !== 'off';
+  const record = useWordsRecord(techCardId, 'render');
+  const [asked, setAsked] = useState('');
+  const ok = techCardId > 0 && live && factsReady && !!source.text;
+  const ownBlank = own.trim() === '';
+  const wantsSeed = ok && ownBlank && !dropped;
+  const follow = ok ? followPlan(own, record, key, settled) : 'none';
+  const followWants = follow === 'auto' || (follow === 'offer' && asked === key);
+  const writeRef = useRef(write);
+  writeRef.current = write;
+  useEffect(() => {
+    if ((!wantsSeed && !followWants) || !key || settled !== key) return;
+    requestBrief(source.text, source.context, fetchRenderBrief, 'render-words');
+  }, [wantsSeed, followWants, settled, key, source]);
+  useEffect(() => {
+    // Нет текста мудборда — умолчание рендера снова слова флэта.
+    if (techCardId > 0 && factsReady && !source.text) setRenderSeed(techCardId, null);
+    if (!ok || !planBrief || !composed.text) return;
+    if (ownBlank) {
+      setRenderSeed(techCardId, composed.text);
+      writeWordsRecord(techCardId, 'render', { source: key, text: composed.text });
+    }
+  }, [techCardId, factsReady, source.text, ok, planBrief, composed, ownBlank, key]);
+  useEffect(() => {
+    if (follow === 'baseline') {
+      writeWordsRecord(techCardId, 'render', { source: key, text: '' });
+      return;
+    }
+    if (!followWants || !planBrief || !composed.text) return;
+    if (composed.text !== own) writeRef.current(composed.text);
+    setRenderSeed(techCardId, composed.text);
+    writeWordsRecord(techCardId, 'render', { source: key, text: composed.text });
+    setAsked('');
+  }, [follow, followWants, planBrief, composed, key, techCardId, own]);
+  const rewriting = follow === 'offer' && asked === key;
+  const rewrite = follow === 'offer' && !readOnly ? () => setAsked(key) : null;
+  return { rewrite, rewriting };
 }
 
 /** Тишина набора перед вызовом брифа: на каждую букву модель не зовётся. */
@@ -195,6 +302,9 @@ const BRIEF_MAX_RUNES = 1200;
 
 const fetchWordsBrief: BriefFetcher = ({ text, context }) =>
   enhanceText({ text, context, mode: 'prompt', field: 'words', maxRunes: BRIEF_MAX_RUNES });
+
+const fetchRenderBrief: BriefFetcher = ({ text, context }) =>
+  enhanceText({ text, context, mode: 'prompt', field: 'render-words', maxRunes: BRIEF_MAX_RUNES });
 
 /** Значение, простоявшее `ms` без изменений. */
 function useSettled(value: string, ms: number): string {

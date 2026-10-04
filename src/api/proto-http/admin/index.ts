@@ -147,7 +147,8 @@ export type EnhanceTextField =
   | "ENHANCE_TEXT_FIELD_WORDS"
   | "ENHANCE_TEXT_FIELD_SILHOUETTE"
   | "ENHANCE_TEXT_FIELD_FABRIC"
-  | "ENHANCE_TEXT_FIELD_OTHER";
+  | "ENHANCE_TEXT_FIELD_OTHER"
+  | "ENHANCE_TEXT_FIELD_RENDER_WORDS";
 // StyleCostPriceSource is the Q4 price-ladder level a material line resolved to.
 export type StyleCostPriceSource =
   | "STYLE_COST_PRICE_SOURCE_UNKNOWN"

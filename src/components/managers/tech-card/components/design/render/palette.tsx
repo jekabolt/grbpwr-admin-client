@@ -33,9 +33,9 @@ import { GROUP_GAP } from '../core';
 import { CornerLabel } from '../pattern/organs';
 import type { ClothSlot } from '../pattern/slot-fabrics';
 import { PictureTile } from '../picture-tile';
-import { useWordsSeeding } from '../use-words-seeding';
+import { useRenderWordsFollow, useWordsSeeding } from '../use-words-seeding';
 import { WordsField } from '../words-field';
-import { omittedOf, useWordsSeed } from '../words-seed';
+import { omittedOf, useScreenWordsDropped, useWordsSeed } from '../words-seed';
 import { boundClothsOf, type BoundCloth, type ColourDraft } from './drafts';
 import { hexIsPaintable, statedWords } from './model';
 
@@ -951,24 +951,51 @@ export function InWords({
   const words = state.recipe.words ?? '';
   /* Строка «+N omitted» — по засеву флэта: рендер показывает его слова, и правда о них та же. */
   const seed = useWordsSeed(techCardId);
+  /* T56: IN WORDS догоняет мудборд своим брифом (ткань, цвет, драпировка); правленое — по ссылке. */
+  const dropped = useScreenWordsDropped(techCardId, 'render');
+  const follow = useRenderWordsFollow(
+    techCardId,
+    !!disabled,
+    state.ownWords ?? words,
+    dropped,
+    (text) => state.typed({ words: text }),
+  );
+  const clear = disabled ? undefined : (
+    <Button
+      variant='underline'
+      size='xs'
+      className='text-labelColor hover:text-textColor'
+      data-words-clear=''
+      disabled={words.trim() === ''}
+      title='takes the words off this run — WORDS on the flat stay'
+      onClick={() => state.clear('words')}
+    >
+      clear
+    </Button>
+  );
   return (
     <div>
       <GroupLabel
         flush
         className={GROUP_GAP}
         action={
-          disabled ? undefined : (
-            <Button
-              variant='underline'
-              size='xs'
-              className='text-labelColor hover:text-textColor'
-              data-words-clear=''
-              disabled={words.trim() === ''}
-              title='takes the words off this run — WORDS on the flat stay'
-              onClick={() => state.clear('words')}
-            >
-              clear
-            </Button>
+          follow.rewrite ? (
+            <span className='flex items-baseline gap-3'>
+              <Button
+                variant='underline'
+                size='xs'
+                className='text-labelColor hover:text-textColor'
+                data-words-rewrite=''
+                disabled={follow.rewriting}
+                title='the moodboard changed since these words were written — rewrite them for the render'
+                onClick={follow.rewrite}
+              >
+                {follow.rewriting ? 'rewriting…' : 'moodboard changed · rewrite ✦'}
+              </Button>
+              {clear}
+            </span>
+          ) : (
+            clear
           )
         }
       >
