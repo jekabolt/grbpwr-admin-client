@@ -5,10 +5,8 @@ import { GroupLabel } from 'ui/components/group-label';
 import { Section } from 'ui/components/section';
 import { HeaderNote } from 'ui/components/section-header';
 
-import { colourPlanGate, planRecipe } from '../colour-plan/model';
 import { ColourwayCreatePopover } from '../colourway-create';
 import { ColourwayStrip } from '../colourway-strip';
-import { useColourPlan } from '../colour-plan/use-colour-plan';
 import { GROUP_SEAM } from '../core';
 import { openStepOf } from '../core/chain';
 import { Workbench } from '../generation/studio';
@@ -188,12 +186,6 @@ export function RenderStudio({
      Без него на карточке B стояли бы ткани карточки A — `design_asset.id` ЧУЖОЙ полки, — и
      GENERATE покупал бы лист по чужому рецепту. Довод целиком — в шапке `useColourDraft`. */
   const draft = useColourDraft(band, colorwayId, colorwayRef, techCardId, slots);
-  /**
-   * ⚠ THE PLAN LIVES HERE, NOT IN THE PALETTE, for the reason the draft does: the gate and the run
-   * body read it together with the parts row; two hooks would be two documents of different
-   * revisions — saving under one, refusing by the other.
-   */
-  const colourPlan = useColourPlan(techCardId, band);
   const cardFit = useCardFit();
   const run = useStartDesignRun(techCardId);
   /** The prompt inventory. A modal is its own surface, so it is mounted beside the block. */
@@ -272,7 +264,9 @@ export function RenderStudio({
     return {
       ...draft.recipe,
       ...pack,
-      words: statedWords(draft),
+      /* ⚠ ONLY THE VISIBLE IN WORDS TEXT TRAVELS: the retired CLOTH IS opacity / GSM may still sit
+         seeded in the hidden `draft.cloth`, and nothing unseen may be composed into a paid run. */
+      words: statedWords({ recipe: draft.recipe, cloth: null }),
       /**
        * ⚠ THE COLOUR INVARIANT IS HELD BY THIS DOOR, NOT BY THE FIELD: no hex the screen calls
        * «not stated» travels. The client's predicate (`hexIsPaintable`) and the server's («any
@@ -296,13 +290,15 @@ export function RenderStudio({
        */
       code: hex ? clampColourName(colorwayId > 0 ? colorwayLabel.trim() : '') : '',
     };
-  }, [draft.recipe, draft.cloth, pack, colorwayId, colorwayLabel]);
+  }, [draft.recipe, pack, colorwayId, colorwayLabel]);
 
-  /** What will actually travel — the recipe SUBSTITUTED BY THE PLAN when colour maps ride along. */
-  const wire = useMemo(
-    () => planRecipe(band, colourPlan.plan, sent),
-    [band, colourPlan.plan, sent],
-  );
+  /**
+   * What will actually travel. ⚠ NO COLOUR MAPS ON THIS SCREEN: a saved colour plan would swap the
+   * bound pack's fabrics for its own, so the run could buy cloth A while MATERIALS shows B — and the
+   * palette, the only surface that repairs a plan, is not mounted. Fabrics come strictly from the
+   * bound pack (`packOf`).
+   */
+  const wire = useMemo(() => ({ ...sent, colourMaps: [] }), [sent]);
 
   const gate: Gate = useMemo(() => {
     /* O-57 · D-56″: NO COLUMN AT ALL — the card has colourways, every one archived and without a
@@ -314,15 +310,8 @@ export function RenderStudio({
        and back must hold a drawing» sends a person to draw what will not be bought anyway. */
     const base = renderGate(band, colorwayArchived, colorwayLabel);
     if (!base.ok) return base;
-    /* ⚠ THE PAINT GATE STANDS BEFORE THE RECIPE GATE: a painted colour without a cloth is a
-       person's statement left unanswered, not an empty recipe. Three of its four refusals mirror
-       the server's doors. */
-    const painted = colourPlanGate(band, colourPlan.plan);
-    if (!painted.ok) return painted;
-    /* ⚠ UNDER PAINT THE STATEMENT ABOUT THE CLOTH LIVES PER PART, NOT IN THE SCALARS; a non-empty
-       `colour_maps` already means «everything is stated», because the gate above refused every
-       painted colour nothing was said about. */
-    if ((wire.colourMaps ?? []).length === 0 && !recipeIsStated(wire)) {
+    /* No paint gate here: colour maps do not travel from this screen (see `wire`). */
+    if (!recipeIsStated(wire)) {
       return {
         ok: false,
         reason:
@@ -330,7 +319,7 @@ export function RenderStudio({
       };
     }
     return { ok: true };
-  }, [band, sent, wire, colourPlan.plan, colorwayArchived, colorwayLabel, target.nowhere]);
+  }, [band, wire, colorwayArchived, colorwayLabel, target.nowhere]);
 
   const launch = () => {
     /* O-61 (D-60, D-71): слова карточки, показанные в пустом IN WORDS, становятся СВОИМИ черновику —

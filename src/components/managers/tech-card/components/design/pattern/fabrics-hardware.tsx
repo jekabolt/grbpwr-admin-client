@@ -814,20 +814,22 @@ function MaterialBench({
                         save words
                       </Button>
                     )}
-                    {emptyN > 0 && (
+                    {emptyBatch.length > 0 && (
                       <Button
                         variant='underline'
                         size='xs'
                         disabled={!emptyGate.ok}
                         title={
-                          emptyGate.ok
-                            ? 'makes every empty slot from its own words — fabrics in their colour, hardware as material'
-                            : emptyGate.reason
+                          !emptyGate.ok
+                            ? emptyGate.reason
+                            : emptyBatch.length < emptyN
+                              ? `shelf room for ${emptyBatch.length} of ${emptyN}`
+                              : 'makes every empty slot from its own words — fabrics in their colour, hardware as material'
                         }
                         onClick={() => generate(emptyBatch)}
-                        data-fh-all-empty={emptyN}
+                        data-fh-all-empty={emptyBatch.length}
                       >
-                        all empty slots · {emptyN}
+                        all empty slots · {emptyBatch.length}
                       </Button>
                     )}
                   </span>
