@@ -314,8 +314,7 @@ function ClothIntake({
               {
                 label: 'pattern ▸',
                 onClick: onMakePattern,
-                title:
-                  'go to STUDIO → PATTERN: one picture in, a seamless repeating tile out. It comes back into this grid once it is named',
+                title: 'go to STUDIO → FABRICS AND HARDWARE: a fabric per slot of each colourway',
               },
             ]
           : undefined

@@ -2347,7 +2347,7 @@ export function ArtifactsPanel({
                          прозой была бы второй дверью в ту же комнату. */
                       'no renders marked yet — mark them in STUDIO › FABRIC RENDER › SIDES'
                     : kind === 'pattern'
-                      ? 'no tile of this card yet. A repeating tile is made on STUDIO → PATTERN, out of one picture; the ones you mark as chosen there are listed here — or put your own file into the slot below.'
+                      ? 'no tile of this card yet. Fabrics are made on STUDIO → FABRICS AND HARDWARE; they are listed here — or put your own file into the slot below.'
                       : kind === 'onmodel'
                         ? 'no on-model picture of this card yet. STUDIO → ON MODEL re-dresses a photograph of a person in this garment; the ones you mark as chosen there are listed here.'
                         : 'no 3D of this card yet. A model is built on STUDIO from the renders standing in the sides — or put your own file into the slot below.'}

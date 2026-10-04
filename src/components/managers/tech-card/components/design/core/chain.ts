@@ -100,7 +100,7 @@ export const STEPS: readonly Step[] = [
   { id: 'card', n: '0', label: 'card details' },
   { id: 'mood', n: '1', label: 'moodboard' },
   { id: 'flat', n: '2', label: 'flat', kind: 'flat' },
-  { id: 'pattern', n: '3', label: 'pattern', optional: true, kind: 'pattern' },
+  { id: 'pattern', n: '3', label: 'fabrics and hardware', optional: true, kind: 'pattern' },
   { id: 'render', n: '4', label: 'fabric render', kind: 'render' },
 ];
 

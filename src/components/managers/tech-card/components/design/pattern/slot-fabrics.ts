@@ -8,6 +8,7 @@ import type {
 } from 'api/proto-http/admin';
 import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 
+import { kindLabel } from '../../bom-kind';
 import { sectionShort } from '../../bom-line-picker';
 import {
   UNSET_PURPOSE,
@@ -108,6 +109,7 @@ export type BomLineLike = {
   name?: string | null;
   composition?: string | null;
   spec?: string | null;
+  kind?: string | null;
 };
 
 /** Обрезка по кодовым точкам, с многоточием: промпт и имя не рвут букву пополам. */
@@ -174,6 +176,71 @@ export function clothSlots(
   });
   rows.sort((a, b) => a.order - b.order || a.at - b.at);
   return { slots: rows.map((r) => r.slot), unsavedCount };
+}
+
+/** A bench slot of FABRICS AND HARDWARE: a cloth slot plus its family. */
+export type MaterialSlot = ClothSlot & { family: 'fabric' | 'hardware' };
+
+export type MaterialSlots = { slots: MaterialSlot[]; unsavedCount: number };
+
+const THREAD_SECTION = 'TECH_CARD_BOM_SECTION_THREAD';
+
+/** `label`, unless it only repeats `name`. */
+const distinct = (label: string, name: string): string =>
+  label && label.trim().toLowerCase() !== name.trim().toLowerCase() ? label : '';
+
+/**
+ * Every saved BOM line except threads (a thread is a colour, not a picture): roll goods are
+ * `fabric`, everything else `hardware`. Fabrics keep `clothSlots` order; hardware follows BOM order.
+ */
+export function materialSlots(
+  lines: readonly (BomLineLike | null | undefined)[] | null | undefined,
+): MaterialSlots {
+  const cloth = clothSlots(lines);
+  const hardware: MaterialSlot[] = [];
+  let unsavedCount = cloth.unsavedCount;
+  for (const line of lines ?? []) {
+    const section = (line?.section ?? '').trim();
+    if (!line || isRollGoodsSection(section) || section === THREAD_SECTION) continue;
+    const bomItemId = wireInt(line.id);
+    if (bomItemId <= 0) {
+      unsavedCount += 1;
+      continue;
+    }
+    const label = kindLabel(line.kind ?? undefined) || sectionShort(section);
+    const name = (line.name ?? '').trim() || label || `slot ${bomItemId}`;
+    const detail = [formatCompositionCell(line.composition ?? ''), (line.spec ?? '').trim()]
+      .filter(Boolean)
+      .join(' · ');
+    hardware.push({
+      bomItemId,
+      lineKey: (line.lineKey ?? '').trim(),
+      name,
+      purpose: '',
+      purposeLabel: distinct(label, name),
+      section,
+      detail,
+      words: clip(
+        [name, distinct(label, name), detail].filter(Boolean).join(' · '),
+        SLOT_WORDS_MAX,
+      ),
+      family: 'hardware',
+    });
+  }
+  return {
+    slots: [
+      ...cloth.slots.map((s) => ({
+        ...s,
+        words: clip(
+          [s.name, distinct(s.purposeLabel, s.name), s.detail].filter(Boolean).join(' · '),
+          SLOT_WORDS_MAX,
+        ),
+        family: 'fabric' as const,
+      })),
+      ...hardware,
+    ],
+    unsavedCount,
+  };
 }
 
 /* ─────────────────────────── рецепт колорвея для слота ─────────────────────────── */

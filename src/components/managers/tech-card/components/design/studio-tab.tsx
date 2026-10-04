@@ -42,7 +42,7 @@ import {
   useLegacyStepRewrite,
   useStepAddress,
 } from './playground';
-import { ImageToFabricSection, PatternStudio, clothSlots } from './pattern';
+import { FabricsHardware, clothSlots, materialSlots } from './pattern';
 import { DraftedProvider } from './head/drafted-provider';
 import { useStudioKindSwitch } from './history-recall';
 import { PictureGalleryProvider } from './picture-tile';
@@ -186,6 +186,12 @@ export function StudioTab({
      расхода или строки ниток. Форма здесь только ЧИТАЕТСЯ: писатель `bomItems` — корневой
      `setValue`, и `useFieldArray` над ним один (вкладка BOM). */
   const cloth = useWatch({ control, name: 'bomItems', compute: (lines) => clothSlots(lines) });
+  // STEP 3 · FABRICS AND HARDWARE: every saved BOM line except threads.
+  const materials = useWatch({
+    control,
+    name: 'bomItems',
+    compute: (lines) => materialSlots(lines),
+  });
   const { canWrite } = usePermissions();
   const canWriteCard = canWrite(SECTION.techCards);
 
@@ -543,40 +549,20 @@ export function StudioTab({
                         />
                       </>
                     )}
-                    {/* ═══ STEP 3 · PATTERN — TWO SIBLING BLOCKS (owner, 2026-09-26; and from beta:
-                        «IMAGE TO FABRIC должно быть отдельным блоком»): PATTERN, a fabric swatch
-                        for every colourway and slot, then IMAGE TO FABRIC with the step's one
-                        history, the LAST FABRICS carousel. Two `Section`s side by side in the
-                        stack, parted by its 24px gutter — never one inside the other. The SHARED
-                        run history is NOT mounted here any more (review B5), and the one thing it
-                        did for this step — `useRunPolling`, so «making the fabric…» ever ends — is
-                        mounted ONCE, by `PatternStudio`; the second block does not poll again.
-                        Both take the same raw props from here (band, the colourway list, the slots
-                        of the one `useWatch`) and derive the rest with one function
-                        (`usePatternStepView`). They draw EVERY colourway at once, so they take the
-                        list and not the selected one; the axis stays this file's
-                        (`useColorwayChoice`). `onGoTab` is withheld on an auxiliary card: it has no
-                        colourways tab, and a door there would bounce straight back. */}
+                    {/* ═══ STEP 3 · FABRICS AND HARDWARE — colourways chip row (the studio's one
+                        colourway axis) + the material bench. Polls its own runs. */}
                     {step === 'pattern' && (
-                      <>
-                        <PatternStudio
-                          band={band}
-                          techCardId={techCardId}
-                          disabled={readOnly}
-                          colorways={colorway.colorways}
-                          slots={cloth.slots}
-                          unsavedSlots={cloth.unsavedCount}
-                          onGoTab={isAux ? undefined : (tab) => navTo(tab)}
-                          onGoStep={goStep}
-                        />
-                        <ImageToFabricSection
-                          band={band}
-                          techCardId={techCardId}
-                          disabled={readOnly}
-                          colorways={colorway.colorways}
-                          slots={cloth.slots}
-                        />
-                      </>
+                      <FabricsHardware
+                        band={band}
+                        techCardId={techCardId}
+                        disabled={readOnly || !canWriteCard}
+                        colorways={colorway.colorways}
+                        colorwayId={colorway.colorwayId}
+                        onColorwayChange={colorway.setColorwayId}
+                        slots={materials.slots}
+                        onGoTab={isAux ? undefined : (tab) => navTo(tab)}
+                        onGoStep={goStep}
+                      />
                     )}
                     {/* ═══ STEP 4 · FABRIC RENDER.
 

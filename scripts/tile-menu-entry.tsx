@@ -11,14 +11,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type {
   GetDesignBandResponse,
-  common_AdminColorwayRef,
   common_DesignAsset,
   common_DesignPicture,
 } from 'api/proto-http/admin';
 import { createRoot } from 'react-dom/client';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
-import { FabricCarousel } from 'components/managers/tech-card/components/design/pattern/fabric-carousel';
-import type { ClothSlot } from 'components/managers/tech-card/components/design/pattern/slot-fabrics';
 import { PictureGalleryProvider } from 'components/managers/tech-card/components/design/picture-tile';
 import { TextureGrid } from 'components/managers/tech-card/components/design/render/palette';
 import { RunTile } from 'components/managers/tech-card/components/design/generation/run-tile';
@@ -78,11 +75,6 @@ const BAND = {
 } as unknown as GetDesignBandResponse;
 (window as unknown as { __band: unknown }).__band = BAND;
 
-const colorways = [{ colorwayId: 11, devName: 'ROSSO' }] as common_AdminColorwayRef[];
-const slots = [
-  { bomItemId: 1, lineKey: 'a', name: 'outer', purpose: '', purposeLabel: '' },
-] as unknown as ClothSlot[];
-const none = new Set<string>();
 const draft = { recipe: { fabrics: [] }, echo: () => {} } as never;
 const cell = { width: 420, position: 'relative' as const };
 const tile = { width: 190, position: 'relative' as const };
@@ -95,30 +87,6 @@ function Harness() {
   return (
     <PictureGalleryProvider>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: 40 }}>
-        <div data-probe='fabric' style={cell}>
-          <FabricCarousel
-            band={live}
-            techCardId={1}
-            bindings
-            colorways={colorways}
-            slots={slots}
-            live={[]}
-            making={none}
-            failed={null}
-          />
-        </div>
-        <div data-probe='nobind' style={cell}>
-          <FabricCarousel
-            band={live}
-            techCardId={1}
-            bindings={false}
-            colorways={colorways}
-            slots={slots}
-            live={[]}
-            making={none}
-            failed={null}
-          />
-        </div>
         <div data-probe='palette' style={cell}>
           <TextureGrid band={live} techCardId={1} state={draft} />
         </div>
