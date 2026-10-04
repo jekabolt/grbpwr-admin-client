@@ -493,6 +493,50 @@ try {
     if (!(run2.fabrics || []).some((f) => /sleeve/.test(f.parts)))
       errors.push('[f2] ASSERT: no part names in the run');
 
+    // T13: the cloth mockup of every outgoing map — each cloth at its true repeat (twill 20 mm,
+    // check 60 mm, denim unstated → 1/8 of the flat), lines on top; the plan's maps carry none.
+    if ((run2.colourMaps || []).some((m) => (m.mockupMediaId ?? 0) > 0))
+      errors.push('[f6] ASSERT: the plan carried a mockup');
+    const mock = await page.evaluate(async () => {
+      const run = window.__run();
+      const ids = await window.__paint.mockups(run.colourMaps, run.fabrics);
+      return {
+        uses: run.fabrics.map((f) => `${f.name || f.colourHex}:${f.repeatMm}mm`),
+        maps: [...ids].map(([view, id]) => ({ view, id, png: window.__uploads.get(id) })),
+      };
+    });
+    console.log(
+      `f6 mockups: ${mock.maps.map((x) => `${x.view}→${x.id}`).join(', ')} · ${mock.uses.join(' | ')}`,
+    );
+    if (mock.maps.length !== (run2.colourMaps || []).length)
+      errors.push(
+        `[f6] ASSERT: ${mock.maps.length} mockups for ${(run2.colourMaps || []).length} maps`,
+      );
+    {
+      const { writeFileSync } = await import('node:fs');
+      const { decode, encode } = await import('fast-png');
+      const pics = mock.maps.map((x) => decode(Buffer.from(x.png.split(',')[1], 'base64')));
+      // One sheet: the sides left to right, 16 px apart, on white.
+      const gap = 16;
+      const W = pics.reduce((a, p) => a + p.width, 0) + gap * (pics.length - 1);
+      const H = Math.max(...pics.map((p) => p.height));
+      const out = new Uint8Array(W * H * 4).fill(255);
+      let ox = 0;
+      for (const p of pics) {
+        const ch = p.channels;
+        for (let y = 0; y < p.height; y += 1)
+          for (let x = 0; x < p.width; x += 1)
+            for (let c = 0; c < 4; c += 1)
+              out[(y * W + ox + x) * 4 + c] = c < ch ? p.data[(y * p.width + x) * ch + c] : 255;
+        ox += p.width + gap;
+      }
+      writeFileSync(
+        resolve(OUT, 'f6-mockup.png'),
+        encode({ width: W, height: H, data: out, channels: 4 }),
+      );
+      shots.push(resolve(OUT, 'f6-mockup.png'));
+    }
+
     // R13: `clear` at the right of the PARTS header wipes every side in one gesture; ⌘Z restores.
     const before = await painted();
     await page.click('[data-paint-clear]');

@@ -11,12 +11,16 @@
  * fresh document, once; a second conflict stops at `unsaved` — nothing is overwritten silently.
  */
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
-import type { GetDesignBandResponse } from 'api/proto-http/admin';
+import type {
+  GetDesignBandResponse,
+  common_DesignColourMap,
+  common_DesignFabricUse,
+} from 'api/proto-http/admin';
 import { adminService } from 'api/api';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 
-import { assetThumb } from '../assets/model';
+import { assetFull, assetThumb } from '../assets/model';
 import {
   PLAN_BYTES_MAX,
   PLAN_CLOTHS_MAX,
@@ -64,6 +68,7 @@ import {
   type Gesture,
   type ViewParts,
 } from './parts-model';
+import { mockupPixels, mockupTilePx, type MockupSkin } from './mockup';
 import { analyseFlat, REGIONS_ALGO_REV, type FlatRegions } from './regions';
 
 /** `artwork` (R7): the armed artwork is placed on the flats as a box; the paint stays as is. */
@@ -155,6 +160,23 @@ function marksPng(flat: FlatRegions, seeds: Int32Array): string {
     ctx.fillText(String(r), x, y);
   }
   return canvas.toDataURL('image/png');
+}
+
+/** A cloth's picture for the mockup: its own pixels, the long side capped at 1024. */
+async function clothPixels(url: string): Promise<ImageData> {
+  const blob = await fetchMediaBlob(url);
+  const bmp = await createImageBitmap(blob);
+  const s = Math.min(1, 1024 / Math.max(1, bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * s));
+  const h = Math.max(1, Math.round(bmp.height * s));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('no 2d context');
+  ctx.drawImage(bmp, 0, 0, w, h);
+  bmp.close();
+  return ctx.getImageData(0, 0, w, h);
 }
 
 async function tileOf(url: string): Promise<ImageData> {
@@ -928,6 +950,67 @@ export class PaintSession {
       this.again = false;
       return ok;
     });
+  }
+
+  /* ─────────────────────────── the cloth mockups (T13) ─────────────────────────── */
+
+  /**
+   * At GENERATE, after the save settled: one cloth mockup per outgoing map (`mockup.ts`), each
+   * label filled with the cloth its fabric use names (the asset's picture at its true repeat, or
+   * the free colour), uploaded. View → media id. Throws when any side cannot be drawn exactly as
+   * its map (unsaved, another flat, another map) or any upload fails — the caller then launches
+   * WITHOUT mockups; a mockup never blocks the run.
+   */
+  async mockups(
+    maps: readonly common_DesignColourMap[],
+    uses: readonly common_DesignFabricUse[],
+  ): Promise<Map<string, number>> {
+    const band = this.band;
+    if (!band) throw new Error('no band');
+    const assets = new Map((band.assets ?? []).map((a) => [a.id ?? 0, a]));
+    const pictures = new Map<string, Promise<ImageData>>();
+    const out = new Map<string, number>();
+    for (const m of maps) {
+      const view = m.view ?? '';
+      const v = this.views.get(view);
+      if (!v || v.status !== 'ready' || v.dirty || !v.labels || !v.flat || !v.pixels)
+        throw new Error(`${view} is not drawn as saved`);
+      if (v.baseMediaId !== (m.baseMediaId ?? 0) || v.mapBase !== (m.mediaId ?? 0))
+        throw new Error(`${view} stands on another map`);
+      const { flat, labels, pixels } = v;
+      const skins = new Map<number, MockupSkin>();
+      for (const sw of m.palette ?? []) {
+        const hex = (sw.hex ?? '').toLowerCase();
+        const use = uses.find((u) => (u.mapHex ?? '').toLowerCase() === hex);
+        if (!use) continue;
+        const asset = (use.assetId ?? 0) > 0 ? assets.get(use.assetId ?? 0) : undefined;
+        const url = asset ? assetFull(asset) : '';
+        if (url) {
+          let pic = pictures.get(url);
+          if (!pic) {
+            pic = clothPixels(url);
+            pictures.set(url, pic);
+          }
+          const img = await pic;
+          skins.set(packHex(hex), {
+            kind: 'tile',
+            rgba: img.data,
+            w: img.width,
+            h: img.height,
+            tilePx: mockupTilePx(use.repeatMm || asset?.repeatMm || 0, flat.w),
+          });
+        } else {
+          const c = (use.colourHex ?? '').trim();
+          if (c) skins.set(packHex(hex), { kind: 'colour', hex: c });
+        }
+      }
+      const rgba = mockupPixels(flat, labels, pixels.data, skins);
+      const media = await uploadRaster(pngOf(rgba, flat.w, flat.h));
+      const id = media.id ?? 0;
+      if (id <= 0) throw new Error('the mockup did not upload');
+      out.set(view, id);
+    }
+    return out;
   }
 
   /** Dirty views whose saved map was replaced by somebody else since our pixels were based on it. */

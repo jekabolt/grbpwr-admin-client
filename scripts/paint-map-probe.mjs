@@ -512,5 +512,56 @@ ck(
   );
 }
 
+// T13 · the cloth mockup: the tile at its TRUE repeat (repeatMm / 600 mm × flat width px).
+{
+  ck(
+    m.mockupTilePx(30, 200) === 10 && m.mockupTilePx(60, 1000) === 100,
+    'tile px = repeatMm / 600 × flat px',
+  );
+  ck(m.mockupTilePx(0, 800) === 100, 'no repeat → flat width / 8');
+  const W = 200,
+    H = 40;
+  const flat = {
+    w: W,
+    h: H,
+    labels: new Int32Array(W * H).fill(1),
+    silhouette: new Uint8Array(W * H).fill(1),
+  };
+  const lab = new Uint32Array(W * H).fill(A);
+  const white = new Uint8ClampedArray(W * H * 4).fill(255);
+  // A 2-px tile: black | white — one dark run per repeat.
+  const tile = new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255]);
+  const runs = (repeatMm) => {
+    const px = m.mockupPixels(
+      flat,
+      lab,
+      white,
+      new Map([[A, { kind: 'tile', rgba: tile, w: 2, h: 1, tilePx: m.mockupTilePx(repeatMm, W) }]]),
+    );
+    let n = 0;
+    for (let x = 0; x < W; x += 1)
+      if (px[(10 * W + x) * 4] === 0 && (x === 0 || px[(10 * W + x - 1) * 4] !== 0)) n += 1;
+    return n;
+  };
+  ck(
+    runs(30) === 20 && runs(60) === 10 && runs(0) === 8,
+    'mockup repeats scale with repeatMm',
+    `${runs(30)}/${runs(60)}/${runs(0)} repeats`,
+  );
+  // Ink multiplies on top; paper outside the paint; a free colour fills flat.
+  const ink = white.slice();
+  ink.set([0, 0, 0, 255], (5 * W + 5) * 4);
+  const lab2 = lab.slice();
+  lab2.fill(0, 0, W * 20);
+  const px = m.mockupPixels(flat, lab2, ink, new Map([[A, { kind: 'colour', hex: '#336699' }]]));
+  ck(
+    px[(5 * W + 5) * 4] === 0 &&
+      px[(5 * W + 6) * 4] === 255 &&
+      px[30 * W * 4] === 0x33 &&
+      px[30 * W * 4 + 2] === 0x99,
+    'lines multiplied on top, paper unpainted, a free colour flat',
+  );
+}
+
 console.log(bad ? `\n${bad} FAIL` : '\nall ok');
 process.exit(bad ? 1 : 0);

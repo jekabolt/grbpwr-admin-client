@@ -369,7 +369,9 @@ export function RenderStudio({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [band, wire, colorwayArchived, colorwayLabel, target.nowhere, painted, paint, paintVersion]);
 
-  const launch = () => {
+  /* T13 · the cloth mockups are drawn and uploaded at the press; the button stays busy meanwhile. */
+  const [mocking, setMocking] = useState(false);
+  const launch = async () => {
     /* O-61 (D-60, D-71): слова карточки, показанные в пустом IN WORDS, становятся СВОИМИ черновику —
        как флэт отдаёт свой засев в форму перед `flush`; правка WORDS флэта после прогона их уже не
        подменит. Тело ниже несёт их и без этого (`wire` — слова на экране), поэтому до ответа
@@ -378,6 +380,23 @@ export function RenderStudio({
        или обрыв не трогают ничего — слова остаются живым засевом. Свои слова уже стоят — квитанции
        нет. */
     const pressed = draft.wordsAtPress();
+    /* T13 · each outgoing map takes its cloth mockup (the cloth at its true repeat on that flat),
+       on the run's recipe only — the plan never stores one. Any side that cannot be drawn or
+       uploaded → the run goes WITHOUT mockups: a mockup never blocks GENERATE. */
+    let colourMaps = wire.colourMaps ?? [];
+    if (colourMaps.length > 0) {
+      const card = techCardId;
+      setMocking(true);
+      try {
+        const ids = await paint.mockups(colourMaps, wire.fabrics ?? []);
+        colourMaps = colourMaps.map((m) => ({ ...m, mockupMediaId: ids.get(m.view ?? '') ?? 0 }));
+      } catch {
+        colourMaps = colourMaps.map((m) => ({ ...m, mockupMediaId: 0 }));
+      } finally {
+        setMocking(false);
+      }
+      if (shownCard.current !== card) return;
+    }
     const body: StartRunInput = {
       kind: 'render',
       ask: '',
@@ -395,6 +414,7 @@ export function RenderStudio({
         layout: 'one',
         colour: {
           ...wire,
+          colourMaps,
           // DERIVED AT THE DOOR, NOT HELD BY A CONTROL: `source` predates combination and never
           // decides what travels — the populated fields do.
           source: wireColourSource(wire),
@@ -433,7 +453,7 @@ export function RenderStudio({
   const generate = async () => {
     const card = techCardId;
     if (!seedBriefInFlight(card)) {
-      launch();
+      void launch();
       return;
     }
     setBriefing(true);
@@ -444,7 +464,7 @@ export function RenderStudio({
     }
     const now = latest.current;
     if (shownCard.current !== card || !now.gate.ok || now.disabled) return;
-    now.launch();
+    void now.launch();
   };
 
   /* ⚠ СТРОКА СОСТАВА СНЯТА ЦЕЛИКОМ (r3 п.27) — «made of pattern 1 — … · split into the slots
@@ -536,7 +556,7 @@ export function RenderStudio({
         <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
         <GenerateRow
           gate={gate}
-          pending={run.isPending || briefing}
+          pending={run.isPending || briefing || mocking}
           disabled={disabled}
           onGenerate={generate}
           onInspect={() => setInspecting(true)}
@@ -585,6 +605,7 @@ export function RenderStudio({
         kind='render'
         /* THE MODAL KNOWS NOTHING OF CHIPS: it is handed the SAME sentence that travels. */
         recipe={wire}
+        mockupsAtGenerate
         cardFit={cardFit}
         artworks={artworkLines}
       />

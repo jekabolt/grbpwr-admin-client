@@ -61,8 +61,9 @@ const TWILL = texture('#b3262b', '#7d1519', 'twill');
 const CHECK = texture('#efe9dc', '#2a2a2a', 'check');
 const DENIM = texture('#2d4a7a', '#c9d3e6', 'denim');
 
-const asset = (id: number, name: string, url: string, colourHex: string) => ({
+const asset = (id: number, name: string, url: string, colourHex: string, repeatMm = 0) => ({
   id,
+  repeatMm,
   kind: 'fabric',
   name,
   mediaId: 500 + id,
@@ -190,8 +191,8 @@ const card = (view: string, parts: [string, string, number[]][]) => ({
 
 const BAND = {
   assets: [
-    asset(201, 'rosso twill', TWILL, '#b3262b'),
-    asset(202, 'ecru check', CHECK, '#efe9dc'),
+    asset(201, 'rosso twill', TWILL, '#b3262b', 20),
+    asset(202, 'ecru check', CHECK, '#efe9dc', 60),
     asset(203, 'indigo denim', DENIM, '#2d4a7a'),
   ],
   assetBindings: [
