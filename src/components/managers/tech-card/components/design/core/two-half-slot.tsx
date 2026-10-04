@@ -195,6 +195,8 @@ export function PlaceOrDrawCell({
   backdrop,
   quietDoor,
   topAligned,
+  onPick,
+  selected,
   role,
   ariaLabel,
   className,
@@ -243,6 +245,10 @@ export function PlaceOrDrawCell({
   quietDoor?: boolean;
   /** Не растягивать коробку по строке грида: её рост задаёт пропорция, а не сосед. */
   topAligned?: boolean;
+  /** Any click inside the frame selects the cell first; the click still reaches its door. */
+  onPick?: () => void;
+  /** Selected cell: solid 2px ink frame (ColourwayStrip's selection). */
+  selected?: boolean;
   role?: string;
   ariaLabel?: string;
   className?: string;
@@ -261,8 +267,12 @@ export function PlaceOrDrawCell({
         ...(heightPx != null ? { height: heightPx } : null),
         ...(topAligned ? { alignSelf: 'start' } : null),
       }}
+      onClickCapture={onPick}
       className={cn(
         'flex w-full min-w-0 flex-col overflow-hidden border border-dashed border-borderColor',
+        // Outline over the 1px border: a 2px frame without shifting the cell's size.
+        selected &&
+          'border-solid border-textColor outline outline-2 -outline-offset-2 outline-textColor',
         className,
       )}
     >

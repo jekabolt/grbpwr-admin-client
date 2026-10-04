@@ -15,15 +15,17 @@ import {
 } from 'components/managers/tech-card/components/pantone-swatches';
 import { useMutationState } from '@tanstack/react-query';
 import { useSnackBarStore } from 'lib/stores/store';
+import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
-import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
-import GenericPopover from 'ui/components/popover';
+import { Chip, ChipRow } from 'ui/components/chip';
+import Input from 'ui/components/input';
 import { Section } from 'ui/components/section';
 import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
+import { kindLabel } from '../../bom-kind';
 import { wireInt } from '../../wire-int';
 import {
   ASSETS_PER_CARD_MAX,
@@ -37,16 +39,15 @@ import { useAssetBindingWrites, useAssetWrites } from '../assets/use-assets';
 import { BENCH_CELL_STYLE, BENCH_FRAME_ASPECT, SlotCap } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { archivedRef, colorwayLabel } from '../colorway-picker';
-import { ColourwayCreatePopover } from '../colourway-create';
 import { ColourwayStrip } from '../colourway-strip';
 import { EmptyState, Money, PlaceOrDrawCell } from '../core';
-import type { StepId } from '../core/chain';
+import { openStepOf, type StepId } from '../core/chain';
 import { useElapsed, useRunPolling } from '../generation';
 import { isRunLive } from '../generation/run-state';
-import { ReuseDoor } from '../playground/fields/reuse';
-import { PictureTile } from '../picture-tile';
+import { PictureSlotEmpty, PictureSlotFilled } from '../playground/fields/image-slots';
+import { PictureTile, useGalleryGroup, useOpenGalleryGroup } from '../picture-tile';
 import { GenerateRow, RunRefusal } from '../render/generate-row';
-import { archivedColorwayGate, mediaThumb, type Gate } from '../render/model';
+import { archivedColorwayGate, type Gate } from '../render/model';
 import {
   startRunKey,
   useStartDesignRun,
@@ -59,14 +60,15 @@ import {
   PANTONE_LOADING_REASON,
   READ_ONLY_RUN_REASON,
   SILENT_SERVER_REASON,
+  SLOT_WORDS_MAX,
   bindingsSpoken,
   boundAssetsByPair,
   colourIsStated,
   mintSlotName,
   pairKey,
   pairOfRun,
-  rowColour,
   shelfCeiling,
+  swatchColour,
   withOwnHex,
   type MaterialSlot,
   type SwatchColour,
@@ -76,10 +78,11 @@ import { TrimPictogramBackdrop } from './trim-pictograms';
 /**
  * STEP 3 · MATERIALS — two blocks:
  *   · `colourways` — large swatch tiles on the studio's one colourway axis;
- *   · `materials` — one cell per material slot, then the equal-size generate inputs and action.
- * GENERATE fires one run per slot; a cell takes an own picture too.
+ *   · `materials` — one cell per material slot; ONE slot is selected, and the GENERATE panel
+ *     under the cells is that slot's spec (colour · pictures · words). GENERATE makes that slot;
+ *     `all empty slots · N` makes every empty slot from its own spec.
  * A run lands server-side and binds itself to (colourway, slot); an own picture is
- * UpsertDesignAsset → SetDesignAssetBinding.
+ * UpsertDesignAsset → SetDesignAssetBinding. Both carry the spec (`note` = words, colour code).
  */
 export type FabricsHardwareProps = {
   band: GetDesignBandResponse;
@@ -118,16 +121,16 @@ export function FabricsHardware({
   useRunPolling(techCardId, band);
 
   const shown = colorways.filter((colorway) => (colorway.colorwayId ?? 0) > 0);
-  const [creating, setCreating] = useState(false);
 
   return (
     <>
       <Section id='design-colourways' title='colourways' question='· material packs'>
+        {/* V6: `+ new` deep-links to the moodboard's colourways block. */}
         <ColourwayStrip
           colorways={shown}
           selectedId={colorwayId}
           onSelect={onColorwayChange}
-          onCreate={() => setCreating(true)}
+          onCreate={() => openStepOf('colorways')}
           disabled={disabled}
           loading={loading}
         />
@@ -140,14 +143,6 @@ export function FabricsHardware({
         colorway={colorways.find((c) => (c.colorwayId ?? 0) === colorwayId && colorwayId > 0)}
         slots={slots}
         onGoStep={onGoStep}
-      />
-
-      <ColourwayCreatePopover
-        techCardId={techCardId}
-        open={creating}
-        onOpenChange={setCreating}
-        readOnly={disabled}
-        onCreated={onColorwayChange}
       />
     </>
   );
@@ -187,31 +182,23 @@ function MaterialBench({
   const libraryState = pantoneLibraryState();
   const pantonePending = libraryState === 'idle' || libraryState === 'loading';
 
-  // Local drafts keyed by card (+ colourway for the colour): a switch drops them without an effect.
-  const benchKey = `${techCardId}:${cwId}`;
-  const [picked, setPicked] = useState<{ key: string; code: string } | null>(null);
-  const pickCode = picked?.key === benchKey ? picked.code : undefined;
-  const [refsDraft, setRefsDraft] = useState<{ card: number; list: common_MediaFull[] }>({
-    card: techCardId,
-    list: [],
-  });
-  const refs = refsDraft.card === techCardId ? refsDraft.list : [];
-
   const ownPantone = (colorway?.pantone ?? '').trim();
   const ownHex = (colorway?.devHex ?? '').trim();
-  // The colourway's own code shows (and sends) the colourway's own hex, not the library one.
-  const colour = withOwnHex(
-    rowColour(pickCode, {
-      pantone: ownPantone,
-      color: ownHex,
-      colorSource: ownHex ? 'colourway' : '',
-      recipePantone: '',
-    }),
-    ownPantone,
-    ownHex,
-  );
-  const pickerValue = pickCode ?? ownPantone;
-  const inherited = !pickerValue.trim() && !!colour;
+
+  /* ─── slot specs: card-scoped drafts keyed by (colourway, slot) ─── */
+  const [specState, setSpecState] = useState<{ card: number; map: ReadonlyMap<string, Spec> }>({
+    card: techCardId,
+    map: new Map(),
+  });
+  const drafts = specState.card === techCardId ? specState.map : new Map<string, Spec>();
+  const setSpec = (slot: MaterialSlot, spec: Spec) =>
+    setSpecState((prev) => ({
+      card: techCardId,
+      map: new Map(prev.card === techCardId ? prev.map : []).set(
+        pairKey(cwId, slot.bomItemId),
+        spec,
+      ),
+    }));
 
   const byPair = useMemo(() => boundAssetsByPair(band), [band]);
   const ceiling = useMemo(() => shelfCeiling(band), [band]);
@@ -223,6 +210,41 @@ function MaterialBench({
     }
     return out;
   }, [band]);
+
+  // Seed when a pair has no draft: bound asset → defaults (BOM words, colourway pantone).
+  const seedOf = (slot: MaterialSlot): Spec => {
+    const fabric = slot.family === 'fabric';
+    const asset = cwId > 0 ? byPair.get(pairKey(cwId, slot.bomItemId)) : undefined;
+    if (asset) {
+      const code = (asset.colourCode ?? '').trim();
+      return {
+        colourCode: code || (fabric ? ownPantone : ''),
+        words: (asset.note ?? '').trim(),
+        pictures: [],
+      };
+    }
+    if (fabric) return { colourCode: ownPantone, words: slot.detail, pictures: [] };
+    const kind = kindLabel(slot.kind) ?? '';
+    return {
+      colourCode: '',
+      words: [kind && !sameWord(kind, slot.name) ? kind : '', slot.detail]
+        .filter(Boolean)
+        .join(' · '),
+      pictures: [],
+    };
+  };
+  const specOf = (slot: MaterialSlot): Spec =>
+    drafts.get(pairKey(cwId, slot.bomItemId)) ?? seedOf(slot);
+  // The colour a spec sends: the colourway's own code shows its own hex. An untouched fabric of a
+  // colourway without a Pantone falls back to the colourway's screen hex.
+  const colourOf = (slot: MaterialSlot, spec: Spec): SwatchColour | null => {
+    const picked = withOwnHex(swatchColour(spec.colourCode), ownPantone, ownHex);
+    if (picked) return picked;
+    const drafted = drafts.has(pairKey(cwId, slot.bomItemId));
+    return slot.family === 'fabric' && !drafted && ownHex
+      ? { code: '', hex: ownHex, words: '' }
+      : null;
+  };
 
   /* ─── presses in flight (one hook instance tracks only its last mutation) ─── */
   const [launching, setLaunching] = useState<ReadonlyMap<string, Launch>>(new Map());
@@ -365,9 +387,7 @@ function MaterialBench({
             ? archivedGate
             : ceiling.full
               ? { ok: false, reason: ceiling.reason }
-              : pantonePending && colour?.code.trim() && !colour.hex.trim()
-                ? { ok: false, reason: PANTONE_LOADING_REASON }
-                : { ok: true };
+              : { ok: true };
 
   const slotGate = (slot: MaterialSlot): Gate => {
     if (!baseGate.ok) return baseGate;
@@ -375,8 +395,12 @@ function MaterialBench({
     if (liveByPair.has(k) || launching.has(k)) {
       return { ok: false, reason: 'being made — it lands in the cell by itself' };
     }
+    const colour = colourOf(slot, specOf(slot));
     if (slot.family === 'fabric' && !colourIsStated(colour)) {
       return { ok: false, reason: 'a fabric is dyed from a colour · pick one' };
+    }
+    if (pantonePending && colour?.code.trim() && !colour.hex.trim()) {
+      return { ok: false, reason: PANTONE_LOADING_REASON };
     }
     return { ok: true };
   };
@@ -391,43 +415,43 @@ function MaterialBench({
     return !g.ok ? g : room <= 0 ? { ok: false, reason: ROOM_REASON } : g;
   };
 
-  const runnable = slots.filter((s) => slotGate(s).ok);
-  // Empty slots first: with any empty, GENERATE fills only those; all dressed → regenerate all.
-  const emptyRunnable = runnable.filter((s) => !byPair.has(pairKey(cwId, s.bomItemId)));
-  const pool = (emptyRunnable.length > 0 ? emptyRunnable : runnable)
-    .slice()
+  /* ─── selection: one slot; fallback = first empty slot of the colourway, else the first ─── */
+  const [selectedState, setSelectedState] = useState<{ card: number; bomItemId: number }>({
+    card: techCardId,
+    bomItemId: 0,
+  });
+  const pickedId = selectedState.card === techCardId ? selectedState.bomItemId : 0;
+  const selected =
+    slots.find((s) => s.bomItemId === pickedId) ??
+    slots.find((s) => !byPair.has(pairKey(cwId, s.bomItemId))) ??
+    slots[0];
+  const pick = (slot: MaterialSlot) =>
+    setSelectedState({ card: techCardId, bomItemId: slot.bomItemId });
+
+  // Every empty slot that can run now, fabrics first, capped by shelf room.
+  const emptyRunnable = slots
+    .filter((s) => !byPair.has(pairKey(cwId, s.bomItemId)) && slotGate(s).ok)
     .sort((a, b) => (a.family === b.family ? 0 : a.family === 'fabric' ? -1 : 1));
-  const batch = pool.slice(0, Math.max(0, room));
-  const capped = batch.length < pool.length;
-  const skippedFabrics = baseGate.ok
-    ? slots.filter(
-        (s) =>
-          s.family === 'fabric' &&
-          !colourIsStated(colour) &&
-          !liveByPair.has(pairKey(cwId, s.bomItemId)),
-      ).length
-    : 0;
-  const allGate: Gate = !baseGate.ok
-    ? baseGate
-    : slots.length === 0
-      ? { ok: false, reason: 'no material slots on this card' }
-      : runnable.length === 0
-        ? skippedFabrics > 0
-          ? { ok: false, reason: 'a fabric is dyed from a colour · pick one' }
-          : { ok: false, reason: 'every slot is being made' }
-        : launching.size > 0
-          ? { ok: false, reason: 'starting — wait for the runs already sent' }
-          : batch.length === 0
-            ? { ok: false, reason: ROOM_REASON }
-            : { ok: true };
+  const emptyBatch = emptyRunnable.slice(0, Math.max(0, room));
+  const emptyGate: Gate =
+    launching.size > 0
+      ? { ok: false, reason: 'starting — wait for the runs already sent' }
+      : emptyBatch.length === 0
+        ? { ok: false, reason: roomReason }
+        : { ok: true };
 
   /* ─── runs ─── */
-  const runInput = (slot: MaterialSlot, c: SwatchColour | null): StartRunInput => {
+  const runInput = (slot: MaterialSlot, spec: Spec): StartRunInput => {
     const hardware = slot.family === 'hardware';
-    const refIds = refs.map((m) => m.id ?? 0).filter((id) => id > 0);
+    const c = colourOf(slot, spec);
+    const pictureIds = spec.pictures.map((m) => m.id ?? 0).filter((id) => id > 0);
+    const words = hardware
+      ? uniqueWords([c?.words ?? '', spec.words, slot.name, kindLabel(slot.kind) ?? ''])
+      : [c?.words ?? '', spec.words.trim() || slot.words].filter(Boolean).join(' · ');
     return {
       kind: 'pattern',
-      ask: '',
+      // Lands as the asset's note (what it is made of).
+      ask: spec.words.trim(),
       params: {
         views: [],
         colorwayId: cwId,
@@ -436,15 +460,15 @@ function MaterialBench({
           source: '',
           code: c?.code ?? '',
           hex: c?.hex ?? '',
-          words: [c?.words ?? '', slot.words].filter(Boolean).join(' · '),
+          words,
           fabricMediaId: 0,
           fabrics: [],
           colourMaps: [],
         },
         threed: undefined,
         fixTarget: '',
-        // Fabric: one texture picture at most; hardware: every reference.
-        extraInputMediaIds: hardware ? refIds.slice(0, REFS_MAX) : refIds.slice(0, 1),
+        // Fabric: one texture picture at most; hardware: up to four references.
+        extraInputMediaIds: pictureIds.slice(0, hardware ? REFS_MAX : 1),
         fixTargets: [],
         fixSlotIds: [],
         autoSplit: false,
@@ -467,12 +491,13 @@ function MaterialBench({
     };
   };
 
+  // Each slot runs from its own spec (draft → asset → defaults).
   const generate = (list: MaterialSlot[]) => {
     for (const slot of list) {
       if (!slotGate(slot).ok) continue;
       const key = pairKey(cwId, slot.bomItemId);
       let id = '';
-      run.start(runInput(slot, colourIsStated(colour) ? colour : null), {
+      run.start(runInput(slot, specOf(slot)), {
         beforeSend: (clientRequestId) => {
           id = clientRequestId;
           return true;
@@ -497,6 +522,9 @@ function MaterialBench({
       showMessage(ceiling.full ? ceiling.reason : ROOM_REASON, 'error');
       return;
     }
+    // The picture carries THIS slot's spec (not necessarily the selected one's).
+    const spec = specOf(slot);
+    const colour = colourOf(slot, spec);
     mark(key, true);
     try {
       const res = await writes.upsertAsset.mutateAsync({
@@ -504,6 +532,9 @@ function MaterialBench({
         kind: slot.family === 'hardware' ? ASSET_HARDWARE : ASSET_FABRIC,
         name: mintSlotName(band, cwName, slot.name),
         mediaId,
+        note: spec.words.trim(),
+        colourCode: colour?.code ?? '',
+        colourHex: colour?.hex ?? '',
       });
       const assetId = wireInt(res.asset?.id);
       if (assetId > 0) {
@@ -520,6 +551,30 @@ function MaterialBench({
     } finally {
       mark(key, false);
     }
+  };
+
+  // An own picture gets its words/colour without a run: rewrite the asset with the new spec.
+  const saveWords = (slot: MaterialSlot, asset: common_DesignAsset) => {
+    const key = pairKey(cwId, slot.bomItemId);
+    const spec = specOf(slot);
+    const colour = colourOf(slot, spec);
+    mark(key, true);
+    writes.upsertAsset
+      .mutateAsync({
+        assetId: wireInt(asset.id),
+        kind: asset.kind ?? '',
+        name: asset.name ?? '',
+        mediaId: wireInt(asset.mediaId),
+        derivedFromAssetId: wireInt(asset.derivedFromAssetId),
+        repeatMm: wireInt(asset.repeatMm),
+        rotationDeg: wireInt(asset.rotationDeg),
+        ordinal: wireInt(asset.ordinal),
+        note: spec.words.trim(),
+        colourCode: colour?.code ?? '',
+        colourHex: colour?.hex ?? '',
+      })
+      .catch(() => {})
+      .finally(() => mark(key, false));
   };
 
   const clear = (slot: MaterialSlot) => {
@@ -564,33 +619,37 @@ function MaterialBench({
   const dressed = (list: MaterialSlot[]) =>
     list.filter((s) => byPair.has(pairKey(cwId, s.bomItemId))).length;
 
-  const fabricN = batch.filter((slot) => slot.family === 'fabric').length;
-  const hardwareN = batch.length - fabricN;
-  const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-  const breakdown = [
-    fabricN > 0 ? count(fabricN, 'fabric') : '',
-    hardwareN > 0 ? count(hardwareN, 'hardware', 'hardware') : '',
-  ]
-    .filter(Boolean)
-    .join(' · ');
-  const colourWord = colourIsStated(colour) ? colour.code || colour.hex : '';
-  const generateSummary =
-    batch.length === 0
-      ? skippedFabrics > 0
-        ? 'fabrics need a colour'
-        : allGate.ok
-          ? 'nothing to make'
-          : allGate.reason
+  /* ─── the panel: the selected slot's spec ─── */
+  const selKey = selected ? pairKey(cwId, selected.bomItemId) : '';
+  const selAsset = selected && cwId > 0 ? byPair.get(selKey) : undefined;
+  const selSpec = selected ? specOf(selected) : null;
+  const selColour = selected && selSpec ? colourOf(selected, selSpec) : null;
+  const selGate: Gate = selected ? cellGate(selected) : { ok: false, reason: 'no slot' };
+  const selSeed = selected ? seedOf(selected) : null;
+  // `save words` only when the filled slot's spec moved away from what the asset says.
+  const wordsChanged =
+    !!selAsset &&
+    !!selSpec &&
+    !!selSeed &&
+    (selSpec.words.trim() !== selSeed.words.trim() ||
+      selSpec.colourCode.trim() !== selSeed.colourCode.trim());
+  const pictureCount = selSpec?.pictures.length ?? 0;
+  const summary = !selected
+    ? ''
+    : !selGate.ok
+      ? selGate.reason
       : [
-          emptyRunnable.length > 0
-            ? `makes ${count(batch.length, 'picture')}${breakdown ? `: ${breakdown}` : ''}`
-            : `remakes all ${batch.length}`,
-          fabricN > 0 && colourWord ? `in ${colourWord}` : '',
-          skippedFabrics > 0 ? 'fabrics need a colour' : '',
-          capped ? 'shelf limit' : '',
+          `${selAsset ? 'remakes' : 'makes'} ${selected.name}`,
+          selColour?.code ||
+            selColour?.hex ||
+            (selected.family === 'hardware' ? 'as material' : ''),
+          selSpec?.words.trim() ?? '',
+          pictureCount > 0 ? `${pictureCount} picture${pictureCount === 1 ? '' : 's'}` : '',
+          wordsChanged ? 'words changed' : '',
         ]
           .filter(Boolean)
           .join(' · ');
+  const emptyN = emptyRunnable.length;
 
   const group = (title: string, list: MaterialSlot[]) =>
     list.length === 0 ? null : (
@@ -615,28 +674,51 @@ function MaterialBench({
             const current = cwId > 0 ? byPair.get(key) : undefined;
             const undoEntry = undos.get(key);
             const canUndo = !!undoEntry && undoLive(key, undoEntry);
+            const isSelected = selected?.bomItemId === slot.bomItemId;
             return (
               <div
                 key={slot.bomItemId}
                 style={BENCH_CELL_STYLE}
                 className='flex min-w-0 flex-col items-start gap-1'
                 data-fh-slot={slot.bomItemId}
+                data-fh-selected={isSelected ? '' : undefined}
               >
-                <SlotCell
-                  slot={slot}
-                  asset={current}
-                  liveRun={cwId > 0 ? liveByPair.get(key) : undefined}
-                  saving={saving.has(key)}
-                  launching={launching.has(key)}
-                  writable={writable}
-                  full={!hasRoom}
-                  fullReason={roomReason}
-                  generateGate={gate}
-                  onPlace={(m) => void place(slot, m)}
-                  onReplace={() => replace(slot)}
-                  onGenerate={() => generate([slot])}
-                  onClear={() => clear(slot)}
-                />
+                {/* Button-like cell: click (captured) or Enter/Space selects the slot. */}
+                <div
+                  role='button'
+                  tabIndex={0}
+                  aria-pressed={isSelected}
+                  aria-label={`select ${slot.name}`}
+                  className='w-full min-w-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                  onClickCapture={() => pick(slot)}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    e.preventDefault();
+                    pick(slot);
+                  }}
+                >
+                  <SlotCell
+                    slot={slot}
+                    asset={current}
+                    selected={isSelected}
+                    liveRun={cwId > 0 ? liveByPair.get(key) : undefined}
+                    saving={saving.has(key)}
+                    launching={launching.has(key)}
+                    writable={writable}
+                    full={!hasRoom}
+                    fullReason={roomReason}
+                    generateGate={gate}
+                    onPick={() => pick(slot)}
+                    onPlace={(m) => void place(slot, m)}
+                    onReplace={() => replace(slot)}
+                    onGenerate={() => {
+                      pick(slot);
+                      generate([slot]);
+                    }}
+                    onClear={() => clear(slot)}
+                  />
+                </div>
                 {canUndo && (
                   <Button
                     variant='underline'
@@ -682,38 +764,79 @@ function MaterialBench({
           {group('fabrics', fabrics)}
           {group('hardware', hardware)}
 
-          <div data-fh-generate={allGate.ok ? 'live' : 'inert'}>
-            <GroupLabel>generate</GroupLabel>
-            <GenerateInputs
-              band={band}
-              techCardId={techCardId}
-              disabled={disabled}
-              colorwayId={cwId}
-              colorwayName={cwName}
-              ownPantone={ownPantone}
-              pickerValue={pickerValue}
-              colour={colour}
-              inherited={inherited}
-              refs={refs}
-              onPickColour={(code) => setPicked({ key: benchKey, code: code.trim() })}
-              onRefsChange={(list) => setRefsDraft({ card: techCardId, list })}
-            />
-            <Text
-              size='micro'
-              variant='label'
-              component='p'
-              className='mt-2 normal-case'
-              data-fh-generate-summary=''
-            >
-              {generateSummary}
-            </Text>
-            <GenerateRow
-              gate={allGate}
-              pending={run.isPending}
-              onGenerate={() => generate(batch)}
-              trailing={<Money data-probe='run-price' />}
-            />
-          </div>
+          {selected && selSpec && (
+            <div data-fh-generate={selGate.ok ? 'live' : 'inert'} data-fh-for={selected.bomItemId}>
+              <GroupLabel
+                action={
+                  <Text size='micro' variant='label' component='span'>
+                    {selected.name} · {selected.family}
+                  </Text>
+                }
+              >
+                generate
+              </GroupLabel>
+              <SpecPanel
+                key={selKey}
+                slot={selected}
+                spec={selSpec}
+                colour={selColour}
+                disabled={!writable}
+                colorwayId={cwId}
+                colorwayName={cwName}
+                ownPantone={ownPantone}
+                onChange={(next) => setSpec(selected, next)}
+              />
+              <Text
+                size='micro'
+                variant='label'
+                component='p'
+                className='mt-2 normal-case'
+                data-fh-generate-summary=''
+              >
+                {summary}
+              </Text>
+              <GenerateRow
+                gate={selGate}
+                pending={run.isPending}
+                onGenerate={() => generate([selected])}
+                trailing={
+                  <span className='flex flex-wrap items-center gap-2'>
+                    <Money data-probe='run-price' />
+                    {wordsChanged && selAsset && writable && (
+                      <Button
+                        variant='underline'
+                        size='xs'
+                        disabled={saving.has(selKey)}
+                        title='writes these words and colour onto the picture in the cell'
+                        onClick={() => saveWords(selected, selAsset)}
+                        data-fh-save-words=''
+                      >
+                        save words
+                      </Button>
+                    )}
+                    {emptyBatch.length > 0 && (
+                      <Button
+                        variant='underline'
+                        size='xs'
+                        disabled={!emptyGate.ok}
+                        title={
+                          !emptyGate.ok
+                            ? emptyGate.reason
+                            : emptyBatch.length < emptyN
+                              ? `shelf room for ${emptyBatch.length} of ${emptyN}`
+                              : 'makes every empty slot from its own words — fabrics in their colour, hardware as material'
+                        }
+                        onClick={() => generate(emptyBatch)}
+                        data-fh-all-empty={emptyBatch.length}
+                      >
+                        all empty slots · {emptyBatch.length}
+                      </Button>
+                    )}
+                  </span>
+                }
+              />
+            </div>
+          )}
 
           <RunRefusal
             refusal={refusal}
@@ -744,155 +867,160 @@ function MaterialBench({
 
 type UndoEntry = { prevId: number; setTo: number };
 
+/** A slot's spec: colour (Pantone code, '' = none), what it is made of, its input pictures. */
+type Spec = { colourCode: string; words: string; pictures: common_MediaFull[] };
+
+const sameWord = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** Non-empty parts joined by ` · `, each said once. */
+function uniqueWords(parts: string[]): string {
+  const out: string[] = [];
+  for (const p of parts.map((x) => x.trim()).filter(Boolean)) {
+    if (!out.some((o) => sameWord(o, p))) out.push(p);
+  }
+  return out.join(' · ');
+}
+
+/** Hardware material words: a chip toggles its word in the `, `-separated list. */
+const MATERIAL_WORDS = ['horn', 'metal', 'brass', 'resin', 'plastic', 'corozo', 'wood', 'woven'];
+const wordList = (words: string) =>
+  words
+    .split(',')
+    .map((w) => w.trim())
+    .filter(Boolean);
+const hasWord = (words: string, word: string) => wordList(words).some((w) => sameWord(w, word));
+const toggleWord = (words: string, word: string): string =>
+  hasWord(words, word)
+    ? wordList(words)
+        .filter((w) => !sameWord(w, word))
+        .join(', ')
+    : [...wordList(words), word].join(', ');
+
 const INPUT_CELL = 'w-24 shrink-0';
 
-function InputCaption({ children }: { children?: string }): JSX.Element {
+/** Empty caption line under a picture: keeps it the colour tile's height. */
+function InputCaption(): JSX.Element {
   return (
     <Text size='micro' variant='label' component='span' className='block h-4 w-full truncate'>
-      {children || '\u00a0'}
+      {' '}
     </Text>
   );
 }
 
-/** Equal-size visual inputs for the one batch action: colour plus up to four shape/texture looks. */
-function GenerateInputs({
-  band,
-  techCardId,
+/** The selected slot's spec: colour · pictures in one row, then its words. */
+function SpecPanel({
+  slot,
+  spec,
+  colour,
   disabled,
   colorwayId,
   colorwayName,
   ownPantone,
-  pickerValue,
-  colour,
-  inherited,
-  refs,
-  onPickColour,
-  onRefsChange,
+  onChange,
 }: {
-  band: GetDesignBandResponse;
-  techCardId: number;
+  slot: MaterialSlot;
+  spec: Spec;
+  colour: SwatchColour | null;
   disabled?: boolean;
   colorwayId: number;
   colorwayName: string;
   ownPantone: string;
-  pickerValue: string;
-  colour: SwatchColour | null;
-  inherited: boolean;
-  refs: common_MediaFull[];
-  onPickColour: (code: string) => void;
-  onRefsChange: (list: common_MediaFull[]) => void;
+  onChange: (spec: Spec) => void;
 }): JSX.Element {
   const { showMessage } = useSnackBarStore();
-  const room = Math.max(0, REFS_MAX - refs.length);
-  const taken = refs.map((media) => media.id ?? 0).filter((id) => id > 0);
+  const hardware = slot.family === 'hardware';
+  const max = hardware ? REFS_MAX : 1;
+  const pictures = spec.pictures;
+  const room = Math.max(0, max - pictures.length);
   const add = (incoming: common_MediaFull[]) => {
-    const have = new Set(taken);
-    const fresh = incoming.filter((media) => (media.id ?? 0) > 0 && !have.has(media.id ?? 0));
+    const have = new Set(pictures.map((m) => m.id ?? 0));
+    const fresh = incoming.filter((m) => (m.id ?? 0) > 0 && !have.has(m.id ?? 0));
     const kept = fresh.slice(0, room);
     if (fresh.length > kept.length) {
       showMessage(
-        `took ${kept.length} of ${fresh.length}: looks hold ${REFS_MAX} at most`,
+        `took ${kept.length} of ${fresh.length}: this slot holds ${max} at most`,
         'error',
       );
     }
-    if (kept.length > 0) onRefsChange([...refs, ...kept]);
+    if (kept.length > 0) onChange({ ...spec, pictures: [...pictures, ...kept] });
   };
 
   return (
-    <div className='flex flex-wrap items-start gap-2.5 pt-1.5' data-fh-inputs=''>
-      <div
-        className={INPUT_CELL}
-        data-fh-colour={colour?.code || colour?.hex || 'none'}
-        title={inherited ? 'colourway colour' : undefined}
-      >
-        <PantonePicker
-          name={`fh-colour-${colorwayId}`}
-          value={pickerValue}
-          label={colour?.code || colour?.hex || '+ colour'}
-          swatchHex={colour?.hex}
-          suggested={ownPantone ? [{ code: ownPantone, label: `${colorwayName} · colourway` }] : []}
-          disabled={disabled}
-          tile
-          onPick={onPickColour}
-        />
-      </div>
-
-      <div className='contents' data-fh-looks={refs.length}>
-        {refs.map((media, index) => (
+    <div className='flex flex-col gap-2 pt-1.5' data-fh-inputs=''>
+      <div className='flex flex-wrap items-start gap-2.5'>
+        <div className={INPUT_CELL} data-fh-colour={colour?.code || colour?.hex || 'none'}>
+          <PantonePicker
+            name={`fh-colour-${colorwayId}-${slot.bomItemId}`}
+            value={spec.colourCode}
+            label={colour?.code || colour?.hex || (hardware ? 'as material' : '+ colour')}
+            swatchHex={colour?.hex}
+            suggested={
+              ownPantone ? [{ code: ownPantone, label: `${colorwayName} · colourway` }] : []
+            }
+            disabled={disabled}
+            tile
+            onPick={(code) => onChange({ ...spec, colourCode: code.trim() })}
+          />
+        </div>
+        {pictures.map((media, index) => (
           <div key={media.id ?? index} className={INPUT_CELL} data-fh-look={index + 1}>
-            <PictureTile
-              url={mediaThumb(media)}
-              alt={`look ${index + 1}`}
-              aspect='1/1'
-              fit='cover'
-              className='w-full bg-bgColor'
-              onRemove={
-                disabled
-                  ? undefined
-                  : {
-                      onClick: () => onRefsChange(refs.filter((_, at) => at !== index)),
-                      ariaLabel: `remove look ${index + 1}`,
-                      title: 'remove picture',
-                    }
+            <PictureSlotFilled
+              media={media}
+              alt={`${slot.name} picture ${index + 1}`}
+              disabled={disabled}
+              onRemove={() =>
+                onChange({ ...spec, pictures: pictures.filter((_, at) => at !== index) })
               }
             />
-            <InputCaption>{index === 0 ? 'shape & texture' : undefined}</InputCaption>
+            <InputCaption />
           </div>
         ))}
-
         {room > 0 && (
           <div className={INPUT_CELL} data-fh-look-door=''>
-            <GenericPopover
-              title='add look'
-              noTail
-              className='w-40'
-              contentProps={{ align: 'start', side: 'bottom', sideOffset: 4 }}
-              triggerProps={{
-                disabled,
-                'aria-label': 'add a shape and texture picture',
-                className:
-                  'flex w-full items-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-              }}
-              openElement={
-                <span
-                  style={PLACEHOLDER_SURFACE}
-                  className='flex aspect-square w-full items-center justify-center border border-dashed border-borderColor text-labelColor hover:border-textColor hover:text-textColor'
-                >
-                  <Text size='micro' variant='uppercase' tracking='label' component='span'>
-                    + picture
-                  </Text>
-                </span>
-              }
-            >
-              <div className='flex flex-col gap-1.5'>
-                <MediaSelector
-                  label='picture library'
-                  purpose='design · shape and texture look'
-                  aspectRatio={['Custom']}
-                  allowMultiple
-                  showVideos={false}
-                  saveSelectedMedia={add}
-                  trigger={
-                    <Button variant='secondary' size='sm' className='w-full'>
-                      picture library
-                    </Button>
-                  }
-                />
-                <ReuseDoor
-                  band={band}
-                  techCardId={techCardId}
-                  room={room}
-                  taken={taken}
-                  label='reuse picture'
-                  disabled={disabled}
-                  onPick={add}
-                />
-              </div>
-            </GenericPopover>
-            <InputCaption>{refs.length === 0 ? 'shape & texture' : undefined}</InputCaption>
+            <PictureSlotEmpty
+              purpose={`design · ${slot.name}`}
+              multiple={room > 1}
+              limit={room}
+              disabled={disabled}
+              onSelect={add}
+            />
+            <InputCaption />
           </div>
         )}
       </div>
+
+      <div className='flex items-center gap-2'>
+        <Text size='micro' variant='label' component='span' className='w-16 shrink-0'>
+          {hardware ? 'material' : 'cloth'}
+        </Text>
+        <Input
+          name={`fh-words-${slot.bomItemId}`}
+          value={spec.words}
+          maxLength={SLOT_WORDS_MAX}
+          disabled={disabled}
+          placeholder={hardware ? 'horn, black' : '100% cotton twill, 300 gsm'}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+            onChange({ ...spec, words: e.target.value })
+          }
+          data-fh-words=''
+        />
+      </div>
+      {hardware && (
+        <ChipRow className='pl-[72px]'>
+          {MATERIAL_WORDS.map((word) => (
+            <Chip
+              key={word}
+              selected={hasWord(spec.words, word)}
+              pressed={hasWord(spec.words, word)}
+              disabled={disabled}
+              onClick={() => onChange({ ...spec, words: toggleWord(spec.words, word) })}
+              data-fh-chip={word}
+            >
+              {word}
+            </Chip>
+          ))}
+        </ChipRow>
+      )}
     </div>
   );
 }
@@ -917,6 +1045,7 @@ function LiveWord({ startedAt, word }: { startedAt?: string; word: string }): JS
 function SlotCell({
   slot,
   asset,
+  selected,
   liveRun,
   saving,
   launching,
@@ -924,6 +1053,7 @@ function SlotCell({
   full,
   fullReason,
   generateGate,
+  onPick,
   onPlace,
   onReplace,
   onGenerate,
@@ -931,6 +1061,7 @@ function SlotCell({
 }: {
   slot: MaterialSlot;
   asset?: common_DesignAsset;
+  selected: boolean;
   liveRun?: common_DesignRun;
   saving: boolean;
   launching: boolean;
@@ -938,6 +1069,7 @@ function SlotCell({
   full: boolean;
   fullReason: string;
   generateGate: Gate;
+  onPick: () => void;
   onPlace: (media: common_MediaFull) => void;
   onReplace: () => void;
   onGenerate: () => void;
@@ -947,6 +1079,7 @@ function SlotCell({
     <SlotCap
       label={slot.name}
       title={[slot.name, slot.purposeLabel, slot.detail].filter(Boolean).join(' · ')}
+      strong={selected}
       trailing={
         slot.purposeLabel ? (
           <Text size='nano' variant='label' component='span' className='ml-auto min-w-0 truncate'>
@@ -963,6 +1096,8 @@ function SlotCell({
         label={slot.name}
         aspect={BENCH_FRAME_ASPECT}
         purpose=''
+        selected={selected}
+        onPick={onPick}
         instead={
           liveRun ? (
             <LiveWord startedAt={liveRun.startedAt ?? liveRun.createdAt ?? ''} word='making…' />
@@ -978,53 +1113,22 @@ function SlotCell({
     );
   }
 
-  const url = asset ? assetFull(asset) : '';
   if (asset) {
-    const label = assetLabel(asset);
-    const hardware = slot.family === 'hardware';
     return (
-      <div className='group flex w-full min-w-0 flex-col overflow-hidden border border-textColor'>
-        <PictureTile
-          url={url}
-          alt={label}
-          aspect={BENCH_FRAME_ASPECT}
-          fit={hardware ? 'contain' : 'cover'}
-          ground={hardware ? 'neutral' : undefined}
-          className='w-full border-0'
-          gallery={
-            url
-              ? { src: url, thumbnail: assetThumb(asset) || url, type: 'image', alt: label }
-              : undefined
-          }
-          menu={
-            writable
-              ? {
-                  label: 'more',
-                  ariaLabel: `more for ${slot.name}`,
-                  items: [
-                    {
-                      value: 'replace',
-                      label: 'replace…',
-                      disabled: full,
-                      title: full ? fullReason : undefined,
-                    },
-                    {
-                      value: 'generate',
-                      label: 'generate',
-                      disabled: !generateGate.ok,
-                      title: generateGate.ok ? undefined : generateGate.reason,
-                    },
-                    { value: 'clear', label: 'clear' },
-                  ],
-                  onPick: (v) =>
-                    v === 'replace' ? onReplace() : v === 'generate' ? onGenerate() : onClear(),
-                  'data-menu': `fh:${slot.bomItemId}`,
-                }
-              : undefined
-          }
-        />
-        {cap}
-      </div>
+      <FilledCell
+        slot={slot}
+        asset={asset}
+        selected={selected}
+        cap={cap}
+        writable={writable}
+        full={full}
+        fullReason={fullReason}
+        generateGate={generateGate}
+        onPick={onPick}
+        onReplace={onReplace}
+        onGenerate={onGenerate}
+        onClear={onClear}
+      />
     );
   }
 
@@ -1035,6 +1139,8 @@ function SlotCell({
       mediaLabel='+ add'
       purpose={`design · ${slot.name}`}
       onSelect={onPlace}
+      selected={selected}
+      onPick={onPick}
       instead={
         !writable || full ? (
           <span title={full ? fullReason : undefined}>
@@ -1049,5 +1155,101 @@ function SlotCell({
       cap={cap}
       data-fh-empty={slot.bomItemId}
     />
+  );
+}
+
+/** A dressed cell: surface click selects (double click zooms); `zoom` also lives in the menu. */
+function FilledCell({
+  slot,
+  asset,
+  selected,
+  cap,
+  writable,
+  full,
+  fullReason,
+  generateGate,
+  onPick,
+  onReplace,
+  onGenerate,
+  onClear,
+}: {
+  slot: MaterialSlot;
+  asset: common_DesignAsset;
+  selected: boolean;
+  cap: React.ReactNode;
+  writable: boolean;
+  full: boolean;
+  fullReason: string;
+  generateGate: Gate;
+  onPick: () => void;
+  onReplace: () => void;
+  onGenerate: () => void;
+  onClear: () => void;
+}): JSX.Element {
+  const url = assetFull(asset);
+  const label = assetLabel(asset);
+  const hardware = slot.family === 'hardware';
+  const items = useMemo(
+    () =>
+      url
+        ? [{ src: url, thumbnail: assetThumb(asset) || url, type: 'image' as const, alt: label }]
+        : [],
+    [url, asset, label],
+  );
+  const zoomGroup = useGalleryGroup(items);
+  const openGroup = useOpenGalleryGroup();
+  return (
+    <div
+      ref={zoomGroup.anchorRef}
+      className={cn(
+        'group flex w-full min-w-0 flex-col overflow-hidden border border-textColor',
+        selected && 'outline outline-2 -outline-offset-2 outline-textColor',
+      )}
+    >
+      <PictureTile
+        url={url}
+        alt={label}
+        aspect={BENCH_FRAME_ASPECT}
+        fit={hardware ? 'contain' : 'cover'}
+        ground={hardware ? 'neutral' : undefined}
+        className='w-full border-0'
+        galleryGroup={url ? { key: zoomGroup.key, index: 0 } : undefined}
+        onOpen={onPick}
+        menu={{
+          label: 'more',
+          ariaLabel: `more for ${slot.name}`,
+          items: [
+            { value: 'zoom', label: 'zoom', disabled: !url },
+            ...(writable
+              ? [
+                  {
+                    value: 'replace',
+                    label: 'replace…',
+                    disabled: full,
+                    title: full ? fullReason : undefined,
+                  },
+                  {
+                    value: 'generate',
+                    label: 'generate',
+                    disabled: !generateGate.ok,
+                    title: generateGate.ok ? undefined : generateGate.reason,
+                  },
+                  { value: 'clear', label: 'clear' },
+                ]
+              : []),
+          ],
+          onPick: (v) =>
+            v === 'zoom'
+              ? openGroup(zoomGroup.key, 0)
+              : v === 'replace'
+                ? onReplace()
+                : v === 'generate'
+                  ? onGenerate()
+                  : onClear(),
+          'data-menu': `fh:${slot.bomItemId}`,
+        }}
+      />
+      {cap}
+    </div>
   );
 }

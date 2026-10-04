@@ -561,6 +561,15 @@ export function useGalleryGroup(items: MediaViewerItem[]): {
   return { key, anchorRef };
 }
 
+/** Opens a registered gallery group from outside its tiles (a menu's `zoom`). */
+export function useOpenGalleryGroup(): (key: string, offset?: number, mediaId?: number) => void {
+  const ctx = useContext(GalleryContext);
+  return useCallback(
+    (key: string, offset?: number, mediaId?: number) => ctx?.openAt(key, offset, mediaId),
+    [ctx],
+  );
+}
+
 /* ── ПЛИТКА ─────────────────────────────────────────────────────────────────────────────────── */
 
 export interface PictureTileAction {

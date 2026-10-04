@@ -82,11 +82,13 @@ export function ColourwayStrip({
                       : undefined,
                   }}
                 />
+                {/* V4: uppercase, never bold — selection is the frame alone. */}
                 <Text
                   size='micro'
                   variant={disabled ? 'inactive' : 'default'}
+                  tracking='label'
                   component='span'
-                  className={cn('w-full truncate', selected && 'font-bold')}
+                  className='w-full truncate uppercase'
                 >
                   {name}
                 </Text>
@@ -101,7 +103,7 @@ export function ColourwayStrip({
           onClick={onCreate}
           data-colourway-create=''
           aria-label='new colourway'
-          title='new colourway'
+          title={disabled ? 'read-only' : 'new colourway'}
           className='group flex w-[72px] shrink-0 flex-col gap-1 text-left disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
         >
           <span
@@ -119,8 +121,9 @@ export function ColourwayStrip({
           <Text
             size='micro'
             variant={disabled || !onCreate ? 'inactive' : 'label'}
+            tracking='label'
             component='span'
-            className='w-full truncate'
+            className='w-full truncate uppercase'
           >
             new
           </Text>
