@@ -35,7 +35,12 @@ import { readBench } from '../bench-slot';
 import { proposedColourways, savedColourwayIdentity } from '../colourway-proposals-model';
 import { ControlLabel } from '../core';
 import { draftReadGate, openGateDoor } from '../core/chain';
-import { draftInputGate, isBoardRow, moodGateSentence, type MoodGateInput } from '../core/mood-gate';
+import {
+  draftInputGate,
+  isBoardRow,
+  moodGateSentence,
+  type MoodGateInput,
+} from '../core/mood-gate';
 import { useDrafted } from '../drafted-contract';
 import {
   EmptyState,
@@ -53,7 +58,14 @@ import { runOutputText } from '../generation/run-state';
 import { GenerateRow } from '../render/generate-row';
 import type { Gate } from '../render/model';
 import { calloutWords, type CalloutLike } from '../render/what-model-gets';
-import { designKeys, newClientRequestId, useDesignBand, useDesignWrites } from '../use-design-band';
+import { decisionLines } from '../quiz-model';
+import {
+  designKeys,
+  newClientRequestId,
+  useDesignBand,
+  useDesignQuizAnswers,
+  useDesignWrites,
+} from '../use-design-band';
 import { useFitKeys } from './card-facts-form';
 import {
   appendedText,
@@ -415,6 +427,8 @@ export function ConstructionDraft({
      `serverSpeaks` НЕСУЩИЙ: на бинаре без полосы верстака нет вовсе, и предлагать заводить в нём
      детали значило бы рисовать дверь, за которой отказ. */
   const { band, serverSpeaks } = useDesignBand(techCardId);
+  const { answers: quizAnswers } = useDesignQuizAnswers(techCardId);
+  const decided = useMemo(() => decisionLines(quizAnswers), [quizAnswers]);
   /** Сохранённые колорвеи карточки — новый ответ их не предлагает снова (T06). */
   const { data: savedCard } = useTechCard(techCardId);
   const writes = useDesignWrites(techCardId);
@@ -1874,6 +1888,7 @@ export function ConstructionDraft({
           sizeRun={sizeRun}
           aspects={details}
           bomItems={bomItems}
+          decided={decided}
           boardDirty={boardDirty}
         />
 
@@ -2750,6 +2765,7 @@ function DraftInventoryModal({
   sizeRun,
   aspects,
   bomItems,
+  decided,
   boardDirty,
 }: {
   open: boolean;
@@ -2768,6 +2784,8 @@ function DraftInventoryModal({
   sizeRun: readonly string[];
   aspects: readonly { key?: string; text?: string }[];
   bomItems: readonly { name?: string; section?: string; composition?: string }[];
+  /** W-C9: решения квиза — те же строки, что сервер шлёт под «decided with the designer». */
+  decided: readonly string[];
   boardDirty: boolean;
 }): JSX.Element {
   const mediaById = useMediaMap();
@@ -2977,6 +2995,19 @@ function DraftInventoryModal({
           </>
         )}
       </WmgGroup>
+
+      {decided.length > 0 && (
+        <WmgGroup
+          label='decided in the quiz'
+          aside={`${decided.length} read`}
+          data-wmg-decided={decided.length}
+        >
+          {decided.map((line, i) => {
+            const [subject, ...rest] = line.split(' — ');
+            return <InventoryLine key={i} name={subject} origin='linked' text={rest.join(' — ')} />;
+          })}
+        </WmgGroup>
+      )}
 
       <NotSent
         items={[
