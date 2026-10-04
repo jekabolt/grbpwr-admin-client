@@ -8,6 +8,7 @@ import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
 import { PartsCanvas } from 'components/managers/tech-card/components/design/paint/parts-canvas';
+import { REGIONS_ALGO_REV } from 'components/managers/tech-card/components/design/paint/regions';
 import { paintRun } from 'components/managers/tech-card/components/design/paint/plan-run';
 import { usePaint } from 'components/managers/tech-card/components/design/paint/use-paint';
 import type { ClothSlot } from 'components/managers/tech-card/components/design/pattern/slot-fabrics';
@@ -77,6 +78,58 @@ const bench = (id: number, view: string, file: string, w: number, h: number) => 
   picture: { id, media: media(100 + id, `http://probe.local/flats/${file}`, w, h) },
 });
 
+/*
+ * Ф2 stand (`window.__stand === 'f2'`): the shirt flats c49-p111 (front) / c49-p112 (back) with
+ * auto parts. The groups are Sonnet's from f0/out/c49-p11x/som-claude-sonnet-5.5.json, renumbered to the
+ * TS cutter (its first-seen order differs from the probe's) and named by the wearer's left, as the
+ * server prompt asks. FRONT comes with the band; BACK is asked through SuggestDesignParts (stub).
+ */
+const F2 = ((window as unknown as { __stand?: string }).__stand ?? '').startsWith('f2');
+const FAKE_PARTS: Record<string, unknown> = {
+  front: {
+    view: 'front',
+    baseMediaId: 101,
+    algoRev: REGIONS_ALGO_REV,
+    parts: [
+      { label: 'collar stand', regions: [1, 5] },
+      { label: 'collar', regions: [2, 3] },
+      { label: 'yoke', regions: [4, 6, 11] },
+      { label: 'right front', regions: [8, 10, 18] },
+      { label: 'left front', regions: [7, 19] },
+      { label: 'placket', regions: [9, 21] },
+      { label: 'right sleeve', regions: [12] },
+      { label: 'left sleeve', regions: [13] },
+      { label: 'pocket flap', regions: [14] },
+      { label: 'pocket', regions: [15] },
+      { label: 'right cuff', regions: [16] },
+      { label: 'left cuff', regions: [17] },
+      { label: 'hem band', regions: [20] },
+    ],
+    splitNeeded: [{ region: 20, why: 'hem band and front share it' }],
+    model: 'anthropic/claude-sonnet-5.5',
+  },
+  back: {
+    view: 'back',
+    baseMediaId: 102,
+    algoRev: REGIONS_ALGO_REV,
+    parts: [
+      { label: 'collar', regions: [1] },
+      { label: 'yoke', regions: [2] },
+      { label: 'back body', regions: [3] },
+      { label: 'left sleeve', regions: [4] },
+      { label: 'right sleeve', regions: [5] },
+      { label: 'left sleeve placket', regions: [6] },
+      { label: 'right sleeve placket', regions: [7] },
+      { label: 'left cuff', regions: [8, 10] },
+      { label: 'right cuff', regions: [9, 11] },
+      { label: 'hem band', regions: [12, 13] },
+    ],
+    splitNeeded: [],
+    model: 'anthropic/claude-sonnet-5.5',
+  },
+};
+(window as unknown as { __fakeParts: unknown }).__fakeParts = FAKE_PARTS;
+
 const BAND = {
   assets: [
     asset(201, 'rosso twill', TWILL, '#b3262b'),
@@ -88,11 +141,14 @@ const BAND = {
     { colorwayId: 11, bomItemId: 2, assetId: 202 },
     { colorwayId: 11, bomItemId: 3, assetId: 203 },
   ],
-  bench: [
-    bench(1, 'front', 'c49-p122.png', 555, 852),
-    bench(2, 'back', 'c49-p123.png', 556, 851),
-    bench(3, 'side_l', 'c49-p124-side.png', 328, 851),
-  ],
+  bench: F2
+    ? [bench(1, 'front', 'c49-p111.png', 807, 851), bench(2, 'back', 'c49-p112.png', 807, 851)]
+    : [
+        bench(1, 'front', 'c49-p122.png', 555, 852),
+        bench(2, 'back', 'c49-p123.png', 556, 851),
+        bench(3, 'side_l', 'c49-p124-side.png', 328, 851),
+      ],
+  partsSuggestions: F2 ? [FAKE_PARTS.front] : [],
   runs: [],
   colourPlan: { techCardId: 1, rev: 0, maps: [], cloths: [] },
 } as unknown as GetDesignBandResponse;

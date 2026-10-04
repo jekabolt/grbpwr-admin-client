@@ -88,6 +88,13 @@ const stubNetwork = {
             };
             return { plan: clone(band.colourPlan) };
           }
+          if (name === 'SuggestDesignParts') {
+            if (window.__stand === 'f2fail') throw new Error('design: the assistant is not answering');
+            const suggestion = window.__fakeParts[body.view];
+            if (!suggestion) throw new Error('no fake parts for ' + body.view);
+            window.__band.partsSuggestions = [...(window.__band.partsSuggestions || []), suggestion];
+            return { suggestion: clone(suggestion), cached: false };
+          }
           return {};
         };
         const call = (name) => (body) => {
@@ -155,10 +162,14 @@ const browser = await chromium.launch();
 const shots = [];
 try {
   let saved = null;
-  const open = async (width, height) => {
+  const open = async (width, height, stand = 'f1') => {
     const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
     const page = await ctx.newPage();
-    if (saved)
+    if (stand !== 'f1')
+      await page.addInitScript((x) => {
+        window.__stand = x;
+      }, stand);
+    if (saved && stand === 'f1')
       await page.addInitScript((p) => {
         window.__seedPlan = p;
       }, saved);
@@ -185,8 +196,8 @@ try {
     await page.addScriptTag({ content: bundle });
     await page
       .waitForFunction(
-        () => document.querySelectorAll('[data-paint-status="ready"]').length === 3,
-        null,
+        (n) => document.querySelectorAll('[data-paint-status="ready"]').length === n,
+        stand === 'f1' ? 3 : 2,
         { timeout: 15_000 },
       )
       .catch(async (e) => {
@@ -316,6 +327,137 @@ try {
     const again = await page.evaluate(() => window.__run());
     console.log(`reload run ${again.kind}: ${(again.fabrics || []).length} uses`);
     if (again.kind !== 'maps') errors.push('[390] ASSERT: reload lost the maps');
+    await ctx.close();
+  }
+  {
+    // Ф2: auto parts over the shirt (front from the band, back asked through the stub).
+    const { ctx, page } = await open(1440, 1000, 'f2');
+    await page
+      .waitForFunction(() => window.__paint.views.get('back')?.parts, null, { timeout: 8000 })
+      .catch(() => errors.push('[f2] ASSERT: back never got its parts'));
+    const asked = await page.evaluate(() => {
+      const c = window.__calls.find((x) => x.name === 'SuggestDesignParts');
+      return c ? { ...c.body, marks: window.__uploads.get(c.body.marksMediaId) } : null;
+    });
+    if (!asked || asked.view !== 'back') errors.push(`[f2] ASSERT: asked ${asked?.view}`);
+    else {
+      console.log(
+        `asked back: regions ${asked.regionCount} algo ${asked.algoRev} base ${asked.baseMediaId}`,
+      );
+      const { writeFileSync } = await import('node:fs');
+      writeFileSync(
+        resolve(OUT, 'f2-marks-back.png'),
+        Buffer.from(asked.marks.split(',')[1], 'base64'),
+      );
+      shots.push(resolve(OUT, 'f2-marks-back.png'));
+    }
+    if (
+      await page.evaluate(() =>
+        window.__calls.some((x) => x.name === 'SuggestDesignParts' && x.body.view === 'front'),
+      )
+    )
+      errors.push('[f2] ASSERT: front was asked although the band had its parts');
+    /** Screen point of a region's seed. */
+    const reg = async (view, r) => {
+      const f = await page.evaluate(
+        ([v, r]) => {
+          const pv = window.__paint.views.get(v);
+          const s = pv.parts.seeds[r];
+          return {
+            fx: ((s % pv.flat.w) + 0.5) / pv.flat.w,
+            fy: (Math.floor(s / pv.flat.w) + 0.5) / pv.flat.h,
+          };
+        },
+        [view, r],
+      );
+      return at(page, view, f.fx, f.fy);
+    };
+    const painted = () =>
+      page.evaluate(() =>
+        Object.fromEntries(
+          [...window.__paint.views.values()].map((v) => [v.view, v.labels.filter((x) => x).length]),
+        ),
+      );
+    const caption = (view) =>
+      page.locator(`[data-paint-side="${view}"] > div:last-child`).innerText();
+
+    // Hover the wearer's left sleeve on the front (viewer's right): the whole part, its name.
+    let p = await reg('front', 13);
+    await page.mouse.move(p.x, p.y);
+    await page.waitForTimeout(200);
+    const cap = await caption('front');
+    console.log(`hover caption: ${cap.replace(/\n/g, ' ')}`);
+    if (!/left sleeve/i.test(cap)) errors.push(`[f2] ASSERT: hover caption ${cap}`);
+    await shoot(page, 'f2-hover-part-1440.png');
+
+    // Click: front left sleeve + back left sleeve (same name) in one gesture.
+    await page.mouse.click(p.x, p.y);
+    await page.waitForTimeout(80);
+    await shoot(page, 'f2-transfer-flash-1440.png');
+    const one = await painted();
+    console.log(`after sleeve click: ${JSON.stringify(one)}`);
+    if (!(one.front > 0 && one.back > 0)) errors.push('[f2] ASSERT: sleeve did not travel to back');
+    await page.keyboard.press('Meta+z');
+    const none = await painted();
+    if (none.front !== 0 || none.back !== 0)
+      errors.push(`[f2] ASSERT: one undo left ${JSON.stringify(none)}`);
+    await page.keyboard.press('Meta+Shift+z');
+    const again = await painted();
+    if (again.front !== one.front || again.back !== one.back)
+      errors.push(`[f2] ASSERT: redo ${JSON.stringify(again)}`);
+
+    // Group: the front's right front [8,10,18] in one click.
+    p = await reg('front', 8);
+    await page.mouse.click(p.x, p.y);
+    p = await reg('front', 7);
+    await page.mouse.click(p.x, p.y);
+    p = await reg('back', 3);
+    await page.mouse.click(p.x, p.y);
+    p = await reg('front', 12);
+    await page.mouse.click(p.x, p.y);
+    await arm(page, 2);
+    for (const r of [2, 1, 4, 16, 17, 20]) {
+      p = await reg('front', r);
+      await page.mouse.click(p.x, p.y);
+    }
+    await arm(page, 3);
+    for (const r of [15, 9]) {
+      p = await reg('front', r);
+      await page.mouse.click(p.x, p.y);
+    }
+    // ⌥-click: only the pocket flap's own region, in denim — a cut part.
+    await arm(page, 2);
+    p = await reg('front', 14);
+    await page.keyboard.down('Alt');
+    await page.mouse.click(p.x, p.y);
+    await page.keyboard.up('Alt');
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(900);
+    await shoot(page, 'f2-painted-1440.png');
+    console.log(`painted: ${JSON.stringify(await painted())}`);
+
+    // A region the model says spans two parts: the hint on hover.
+    p = await reg('front', 20);
+    await page.mouse.move(p.x, p.y);
+    await page.waitForTimeout(200);
+    const cap2 = await caption('front');
+    console.log(`split caption: ${cap2.replace(/\n/g, ' ')}`);
+    if (!/no seam/i.test(cap2)) errors.push(`[f2] ASSERT: split caption ${cap2}`);
+    await shoot(page, 'f2-split-hover-1440.png');
+    await ctx.close();
+  }
+  {
+    // Ф2: a refused SuggestDesignParts shows `parts · retry`.
+    const { ctx, page } = await open(1440, 1000, 'f2fail');
+    await page
+      .waitForSelector('[data-paint-parts-retry]', { timeout: 8000 })
+      .catch(() => errors.push('[f2fail] ASSERT: no parts · retry'));
+    const box = await page.locator('[data-paint-side="back"]').boundingBox();
+    await page.screenshot({
+      path: resolve(OUT, 'f2-retry-1440.png'),
+      clip: { x: box.x - 8, y: box.y + box.height - 60, width: box.width + 16, height: 68 },
+    });
+    shots.push(resolve(OUT, 'f2-retry-1440.png'));
     await ctx.close();
   }
 } finally {

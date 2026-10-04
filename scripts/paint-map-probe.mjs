@@ -157,5 +157,115 @@ for (let i = 0; i < w * h; i++) {
   else diff++;
 }
 ck(diff === 0, 'decode of the exported map gives the labels back (off ink)', `${diff} differ`);
+
+// ─── Ф2 auto parts: seeds, the answer over the regions, a part click, one gesture on two sides ───
+const flatOf = (name) => {
+  const p = m.decodePng(
+    readFileSync(resolve(REPO, `../tmp/plans/paint-parts/f0/flats/${name}.png`)),
+  );
+  const px = new Uint8ClampedArray(p.width * p.height * 4);
+  for (let i = 0; i < p.width * p.height; i++) {
+    const g = (c) => p.data[i * p.channels + c];
+    px.set(
+      p.channels >= 3 ? [g(0), g(1), g(2), p.channels === 4 ? g(3) : 255] : [g(0), g(0), g(0), 255],
+      i * 4,
+    );
+  }
+  return m.analyseFlat(px, p.width, p.height);
+};
+const front = flatOf('c49-p111');
+const backF = flatOf('c49-p112');
+console.log(`  shirt: front ${front.count} regions, back ${backF.count}`);
+const fs = m.markPoints(front);
+ck(
+  [...fs].slice(1).every((s, r) => s >= 0 && front.labels[s] === r + 1),
+  'every region has its mark point inside itself',
+);
+const tint = m.marksTint(front);
+const inkAt = front.ink.indexOf(1);
+ck(tint[inkAt * 4] === 0 && tint[inkAt * 4 + 3] === 255, 'marks: the drawing is black on top');
+// The Ф0 Sonnet groups, renumbered to the TS cutter (see scripts/paint-entry.tsx).
+const FRONT = {
+  parts: [
+    { label: 'Right  Front', regions: [8, 10, 18, 8, 99, '0'] },
+    { label: 'left sleeve', regions: [13, 10] },
+    { label: 'collar', regions: [2, 3] },
+    { label: 'unnamed', regions: [20] },
+  ],
+  splitNeeded: [
+    { region: 20, why: 'x' },
+    { region: 77, why: 'y' },
+  ],
+};
+const BACK = {
+  parts: [
+    { label: 'collar', regions: [1] },
+    { label: 'left sleeve', regions: [4] },
+    { label: 'unnamed', regions: [12] },
+  ],
+};
+const fp = m.partsOf(FRONT, front, fs);
+const bp = m.partsOf(BACK, backF);
+ck(fp.groups[0].label === 'right front', 'part names normalised', fp.groups[0].label);
+ck(
+  JSON.stringify(fp.groups[0].regions) === '[8,10,18]',
+  'out-of-range and repeated regions dropped',
+  JSON.stringify(fp.groups[0].regions),
+);
+ck(JSON.stringify(fp.groups[1].regions) === '[13]', 'a region belongs to the first part naming it');
+ck(fp.split.size === 1 && fp.split.has(20), 'split_needed kept only inside the flat');
+ck(m.partsOf({ parts: [{ label: 'x', regions: [999] }] }, front) === null, 'nothing usable → null');
+ck(
+  JSON.stringify(m.groupsNamed(bp, 'LEFT sleeve')) === '[1]' &&
+    m.groupsNamed(bp, 'unnamed').length === 0,
+  'same-name parts found on the other side; "unnamed" never travels',
+);
+const fl = new Uint32Array(front.w * front.h);
+const bl = new Uint32Array(backF.w * backF.h);
+const fsize = new Int32Array(front.count + 1);
+for (const r of front.labels) fsize[r]++;
+const grp = m.partIndices(fl, front, fp, 0);
+const want = fsize[8] + fsize[10] + fsize[18];
+ck(
+  grp.length >= want * 0.97,
+  'part click fills every region of the part',
+  `${grp.length} vs ${want}`,
+);
+const sleeveAt = { x: fs[13] % front.w, y: Math.floor(fs[13] / front.w) };
+const sl = m.partIndices(fl, front, fp, 1, sleeveAt);
+const g1 = m.paintGesture(
+  [
+    { view: 'front', labels: fl, idx: sl },
+    ...m
+      .groupsNamed(bp, 'left sleeve')
+      .map((g) => ({ view: 'back', labels: bl, idx: m.partIndices(bl, backF, bp, g) })),
+  ],
+  A,
+);
+ck(g1.length === 2 && fl.some((v) => v) && bl.some((v) => v), 'one gesture paints both sides');
+const g2 = m.paintGesture([{ view: 'front', labels: fl, idx: grp }], B);
+// Undo the last gesture, then the two-side one, in reverse step order.
+const views = { front: fl, back: bl };
+const undoG = (g) => [...g].reverse().forEach((s) => m.undoDiff(views[s.view], s.diff));
+const redoG = (g) => g.forEach((s) => m.redoDiff(views[s.view], s.diff));
+const afterG2 = [fl.slice(), bl.slice()];
+undoG(g2);
+ck(
+  fl.every((v, i) => (grp.includes(i) ? v === 0 : true)),
+  'undo of a part click clears the part',
+);
+undoG(g1);
+ck(fl.every((v) => v === 0) && bl.every((v) => v === 0), 'one undo clears both sides of a gesture');
+redoG(g1);
+redoG(g2);
+ck(
+  fl.every((v, i) => v === afterG2[0][i]) && bl.every((v, i) => v === afterG2[1][i]),
+  'redo restores both sides exactly',
+);
+ck(
+  m.paintGesture([{ view: 'front', labels: fl, idx: sl }], A).length === 0,
+  'repainting a painted part is no gesture',
+);
+
 console.log(bad ? `\n${bad} FAIL` : '\nall ok');
 process.exit(bad ? 1 : 0);
