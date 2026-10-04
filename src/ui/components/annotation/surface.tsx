@@ -38,7 +38,7 @@ import {
   pointsFloor,
   type AnnotationCapsKey,
 } from './kinds';
-import { boundsOf, purposeTool, specSummary, toolGeometry, type Spec } from './purpose';
+import { artworkQuad, boundsOf, purposeTool, specSummary, toolGeometry, type Spec } from './purpose';
 import { setFrameAspect } from './frame-aspect';
 import { ArtworkImage, DetailInset, SectionInset, SectionLetters } from './insets';
 import { StitchPictogram } from './stitch-pictogram';
@@ -594,7 +594,7 @@ export function AnnotationSurface({
   frameClassName,
   frameStyle,
   className,
-  callouts,
+  callouts: rawCallouts,
   onAdd,
   onEditPoints,
   onMoveLabel,
@@ -630,6 +630,17 @@ export function AnnotationSurface({
   hoverNotes = false,
   hoveredKey,
 }: AnnotationSurfaceProps) {
+  // Зона нанесения читается ровно четырьмя углами (`artworkQuad`): ручки, перетаскивание и
+  // натяжка картинки видят квадрат, и первая же правка записывает его в карточку.
+  const callouts = useMemo(
+    () =>
+      rawCallouts.map((c) =>
+        c.spec?.t === 'artwork' && c.points.length !== 4 && c.points.length > 0
+          ? { ...c, points: artworkQuad(c.points) }
+          : c,
+      ),
+    [rawCallouts],
+  );
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
@@ -1789,7 +1800,7 @@ export function AnnotationSurface({
         // ПОЛ — ПО `pointsFloor`, А НЕ ПО МИНИМУМУ ПОСТАНОВКИ. У записки с двумя лучами минимум
         // постановки равен двум (она хранится как `multi`), но записка с ОДНИМ лучом законна —
         // это `label`. Пока пол читался из `points[0]`, добавленный луч снять было нечем.
-        if (c.points.length <= pointsFloor(c.kind)) return;
+        if (c.points.length <= pointsFloor(c.kind) || c.spec?.t === 'artwork') return;
         e.preventDefault();
         const next = c.points.filter((_, i) => i !== armed.index);
         setArmed(null);
@@ -3381,7 +3392,7 @@ function Handles({
   const rhombusAt = d.key === 'arc' ? 1 : -1;
   const closed = d.key === 'polygon';
   const ghosts =
-    closed && pts.length < d.points[1]
+    closed && pts.length < d.points[1] && callout.spec?.t !== 'artwork'
       ? pts.map((p, i) => {
           const q = pts[(i + 1) % pts.length];
           return { index: i, at: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 } };

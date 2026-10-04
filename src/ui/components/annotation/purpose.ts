@@ -364,6 +364,23 @@ export function rectCorners(
 }
 
 /** Прямоугольник, охватывающий точки (доли кадра) — регион вставки детали. */
+/**
+ * ЗОНА НАНЕСЕНИЯ — ВСЕГДА ЧЕТЫРЕ УГЛА (владелец, 04.10: «принт криво работает» — зона обросла
+ * вершинами через ручки сторон, и картинку стало не на что натянуть). Четыре точки отдаются как
+ * есть; любое другое число — прямоугольником охвата в порядке TL, TR, BR, BL (как ставит постановка).
+ */
+export function artworkQuad<P extends { x: number; y: number }>(pts: readonly P[]): { x: number; y: number }[] {
+  if (pts.length === 4) return pts.slice();
+  const b = boundsOf(pts);
+  if (!b) return [];
+  return [
+    { x: b.x, y: b.y },
+    { x: b.x + b.w, y: b.y },
+    { x: b.x + b.w, y: b.y + b.h },
+    { x: b.x, y: b.y + b.h },
+  ];
+}
+
 export function boundsOf(pts: readonly { x: number; y: number }[]) {
   if (pts.length === 0) return null;
   const xs = pts.map((p) => p.x);
