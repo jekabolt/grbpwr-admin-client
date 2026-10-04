@@ -428,7 +428,9 @@ function QuestionView({
   return (
     <div className='grid grid-cols-[64px_minmax(0,1fr)] items-start gap-4 py-1' data-quiz=''>
       <div className='h-24 w-16 text-textColor'>
-        <PartPictogram family={family} part={question.part || 'whole'} className='h-24 w-16' />
+        <PartPictogram family={family} part={question.part || 'whole'}
+          category={question.category}
+          className='h-24 w-16' />
       </div>
       <div className='min-w-0 space-y-2'>
         <Text size='micro' variant='label' tracking='label' component='p' className='uppercase'>

@@ -10,6 +10,7 @@ import {
 import {
   GARMENT_PARTS,
   PART_LABEL,
+  partViewBox,
   type PartKey,
 } from '../src/components/managers/tech-card/components/design/garment-parts';
 
@@ -101,20 +102,24 @@ function viewCell(family: GarmentFamily, view: PictogramView, x: number, y: numb
 function partCell(family: GarmentFamily, part: PartKey, x: number, y: number): string {
   const detail = GARMENT_PARTS[family][part];
   if (!detail) return '';
+  const label = `<text x="${x + CELL_WIDTH / 2}" y="${y + 111}" text-anchor="middle">`;
+  if (part === 'whole') {
+    // whole → the plain garment, full ink, no highlight (same rule as PartPictogram)
+    return `<svg x="${x + 10}" y="${y + 3}" width="64" height="96" viewBox="0 0 64 96">${basePictogram(
+      family,
+      detail.view,
+    )}</svg>${label}${escapeText(PART_LABEL[part])}</text>`;
+  }
+  const { viewBox, zoom } = partViewBox(detail.d);
+  const [vx, vy, vw, vh] = viewBox.split(' ');
   const highlight = detail.d
-    .map((d) =>
-      path(
-        d,
-        `fill="${detail.zone ? 'currentColor' : 'none'}" fill-opacity="${detail.zone ? '.12' : '0'}"`,
-      ),
-    )
+    .map((d) => path(d, `fill="currentColor" fill-opacity="${detail.zone ? '.12' : '.14'}"`))
     .join('');
-  return `<g transform="translate(${x + 10} ${y + 3})">
-    <g opacity=".3">${basePictogram(family, detail.view)}</g>
+  return `<svg x="${x + 10}" y="${y + 3}" width="64" height="96" viewBox="${viewBox}" overflow="hidden">
+    <rect x="${vx}" y="${vy}" width="${vw}" height="${vh}" fill="#fff" stroke="#ddd"/>
+    <g opacity=".35">${basePictogram(family, detail.view)}</g>
     <g stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">${highlight}</g>
-  </g><text x="${x + CELL_WIDTH / 2}" y="${y + 111}" text-anchor="middle">${escapeText(
-    PART_LABEL[part],
-  )}</text>`;
+  </svg>${label}${escapeText(PART_LABEL[part])}${zoom > 1 ? ` ×${zoom.toFixed(1)}` : ''}</text>`;
 }
 
 const rows: string[] = [];

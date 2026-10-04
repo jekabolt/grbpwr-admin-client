@@ -205,6 +205,12 @@ try {
       document.querySelector('[data-quiz]')?.textContent?.includes('3 / 7'),
     );
     check(true, 'key 1 answers single question');
+    // part = collar → close-up crop of the family drawing, not the outlined garment
+    const zoom = Number(
+      await page.getAttribute('[data-quiz] [role="img"][data-zoom]', 'data-zoom').catch(() => '0'),
+    );
+    check(zoom >= 1.3, `collar pictogram is a close-up (data-zoom ${zoom})`);
+    await shoot(page, 'quiz-1440-collar.png');
     await btn(page, 'stiff stand, 3 cm').click();
     await page.waitForFunction(() =>
       document.querySelector('[data-quiz]')?.textContent?.includes('4 / 7'),
@@ -222,6 +228,11 @@ try {
     await btn(page, 'skip').click();
     await page.waitForFunction(() =>
       document.querySelector('[data-quiz]')?.textContent?.includes('6 / 7'),
+    );
+    // part = whole + category = use → the slot stays empty
+    check(
+      (await page.locator('[data-quiz] [role="img"]').count()) === 0,
+      'use · whole question has no pictogram',
     );
     await btn(page, 'summer').click();
     await page.waitForFunction(() =>

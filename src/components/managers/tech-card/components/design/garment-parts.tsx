@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import {
   GARMENT_FAMILIES,
   GARMENT_SHAPES,
@@ -271,7 +273,7 @@ export const GARMENT_PARTS: Record<GarmentFamily, Partial<Record<PartKey, PartMa
     chest: mark('front', 'M19 38 Q32 34 45 38'),
     pocket: mark('front', GARMENT_SHAPES.jacket.front[4], GARMENT_SHAPES.jacket.front[5]),
     shoulder: mark('front', 'M14 17 L26 13', 'M38 13 L50 17'),
-    sleeve: mark('side_l', GARMENT_SHAPES.jacket.side[5]),
+    sleeve: mark('front', 'M14 17 L5 76 L12 78 L18 36', 'M50 17 L59 76 L52 78 L46 36'),
     cuff: mark('front', GARMENT_SHAPES.jacket.front[6], GARMENT_SHAPES.jacket.front[7]),
     hem: mark('front', 'M18 86 L46 86'),
     yoke: mark('back', GARMENT_SHAPES.jacket.back[1]),
@@ -293,7 +295,7 @@ export const GARMENT_PARTS: Record<GarmentFamily, Partial<Record<PartKey, PartMa
     pocket: mark('front', GARMENT_SHAPES.coat.front[7], GARMENT_SHAPES.coat.front[8]),
     belt: mark('front', GARMENT_SHAPES.coat.front[6], 'M28 52 L36 52 L36 58 L28 58 Z'),
     shoulder: mark('front', 'M14 15 L26 10', 'M38 10 L50 15'),
-    sleeve: mark('side_l', GARMENT_SHAPES.coat.side[4]),
+    sleeve: mark('front', 'M14 15 L5 72 L12 75 L18 34', 'M50 15 L59 72 L52 75 L46 34'),
     cuff: mark('front', GARMENT_SHAPES.coat.front[9], GARMENT_SHAPES.coat.front[10]),
     hem: mark('front', 'M15 91 L49 91'),
     yoke: mark('back', GARMENT_SHAPES.coat.back[1]),
@@ -614,26 +616,93 @@ function isGarmentFamily(value: string): value is GarmentFamily {
   return FAMILY_SET.has(value);
 }
 
-/** A garment silhouette with the question's precise construction area picked out. */
+function bbox(ds: string[]): { x0: number; y0: number; x1: number; y1: number } {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  const add = (x: number, y: number) => {
+    x0 = Math.min(x0, x);
+    y0 = Math.min(y0, y);
+    x1 = Math.max(x1, x);
+    y1 = Math.max(y1, y);
+  };
+  for (const d of ds) {
+    const tokens = d.match(/[MLQCAZmlqcaz]|-?\d*\.?\d+/g) ?? [];
+    let cmd = 'M';
+    let i = 0;
+    while (i < tokens.length) {
+      const t = tokens[i];
+      if (/[A-Za-z]/.test(t)) {
+        cmd = t.toUpperCase();
+        i++;
+        continue;
+      }
+      const nums: number[] = [];
+      while (i < tokens.length && !/[A-Za-z]/.test(tokens[i])) nums.push(Number(tokens[i++]));
+      if (cmd === 'A') {
+        for (let k = 0; k + 6 < nums.length; k += 7) add(nums[k + 5], nums[k + 6]);
+      } else {
+        for (let k = 0; k + 1 < nums.length; k += 2) add(nums[k], nums[k + 1]);
+      }
+    }
+  }
+  return { x0, y0, x1, y1 };
+}
+
+const MAX_ZOOM = 2.5;
+const MIN_ZOOM = 1.35;
+const PAD_RATIO = 0.22;
+const PAD_MIN = 5;
+const FULL_FRAME = '0 0 64 96';
+
+/**
+ * Close-up onto a part: the mark's bbox padded, kept at 64:96 and inside the frame. A part too
+ * big to gain MIN_ZOOM (sleeve, back, leg, body) keeps the full frame. Pool paths are absolute.
+ */
+export function partViewBox(d: string[]): { viewBox: string; zoom: number } {
+  const b = bbox(d);
+  if (!Number.isFinite(b.x0)) return { viewBox: FULL_FRAME, zoom: 1 };
+  const bw = b.x1 - b.x0;
+  const bh = b.y1 - b.y0;
+  const pad = Math.max(PAD_MIN, PAD_RATIO * Math.max(bw, bh));
+  let w = bw + pad * 2;
+  const h0 = bh + pad * 2;
+  if (w / h0 <= 64 / 96) w = (h0 * 64) / 96;
+  w = Math.max(w, 64 / MAX_ZOOM);
+  const h = (w * 96) / 64;
+  const zoom = 64 / w;
+  if (zoom < MIN_ZOOM) return { viewBox: FULL_FRAME, zoom: 1 };
+  const x = Math.max(0, Math.min(64 - w, (b.x0 + b.x1) / 2 - w / 2));
+  const y = Math.max(0, Math.min(96 - h, (b.y0 + b.y1) / 2 - h / 2));
+  const r = (n: number) => Math.round(n * 100) / 100;
+  return { viewBox: `${r(x)} ${r(y)} ${r(w)} ${r(h)}`, zoom };
+}
+
+/**
+ * The slot shows the PART, not the garment: a close-up crop with the part filled. `whole` is the
+ * plain garment (nothing for a `use` question); an unknown part is treated as `whole`.
+ */
 export function PartPictogram({
   family,
   part,
+  category,
   className,
 }: {
   family: string;
   part: string;
+  category?: string;
   className?: string;
 }): JSX.Element | null {
   if (!family || !isGarmentFamily(family)) return null;
 
-  const detail = GARMENT_PARTS[family][part as PartKey];
-  const view = detail?.view ?? 'front';
-  const label = PART_LABEL[part as PartKey] ?? (part.trim() || 'garment');
-
-  return (
+  const known = part !== 'whole' ? GARMENT_PARTS[family][part as PartKey] : undefined;
+  const label = known ? PART_LABEL[part as PartKey] : 'whole';
+  const wrap = (zoom: number, children: ReactNode) => (
     <span
       role='img'
       aria-label={`${label} on ${family}`}
+      data-zoom={zoom.toFixed(1)}
       className={className}
       style={{
         position: 'relative',
@@ -642,28 +711,48 @@ export function PartPictogram({
         ...(className ? {} : { width: 64, height: 96 }),
       }}
     >
+      {children}
+    </span>
+  );
+
+  if (!known) {
+    if (category === 'use') return null;
+    const whole = GARMENT_PARTS[family].whole;
+    return wrap(
+      1,
       <GarmentPictogram
         family={family}
-        view={view}
-        style={{ display: 'block', width: '100%', height: '100%', opacity: 0.3 }}
+        view={whole?.view ?? 'front'}
+        style={{ display: 'block', width: '100%', height: '100%', opacity: 1 }}
+      />,
+    );
+  }
+
+  const { viewBox, zoom } = partViewBox(known.d);
+  return wrap(
+    zoom,
+    <>
+      <GarmentPictogram
+        family={family}
+        view={known.view}
+        viewBox={viewBox}
+        style={{ display: 'block', width: '100%', height: '100%', opacity: 0.35 }}
       />
-      {detail ? (
-        <svg
-          aria-hidden
-          viewBox='0 0 64 96'
-          fill={detail.zone ? 'currentColor' : 'none'}
-          fillOpacity={detail.zone ? 0.12 : undefined}
-          stroke='currentColor'
-          strokeWidth={2}
-          strokeLinejoin='round'
-          strokeLinecap='round'
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
-        >
-          {detail.d.map((d, index) => (
-            <path key={`${index}:${d}`} d={d} vectorEffect='non-scaling-stroke' />
-          ))}
-        </svg>
-      ) : null}
-    </span>
+      <svg
+        aria-hidden
+        viewBox={viewBox}
+        fill='currentColor'
+        fillOpacity={known.zone ? 0.12 : 0.14}
+        stroke='currentColor'
+        strokeWidth={2}
+        strokeLinejoin='round'
+        strokeLinecap='round'
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+      >
+        {known.d.map((d, index) => (
+          <path key={`${index}:${d}`} d={d} vectorEffect='non-scaling-stroke' />
+        ))}
+      </svg>
+    </>,
   );
 }

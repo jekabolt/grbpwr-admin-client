@@ -1011,18 +1011,20 @@ export function GarmentPictogram({
   view,
   className,
   style,
+  viewBox = '0 0 64 96',
 }: {
   family: GarmentFamily;
   view: PictogramView;
   className?: string;
   style?: CSSProperties;
+  viewBox?: string;
 }): JSX.Element {
   const paths = pictogramPaths(family, view);
   return (
     <svg
       aria-hidden
       data-pictogram={view}
-      viewBox='0 0 64 96'
+      viewBox={viewBox}
       fill='none'
       stroke='currentColor'
       strokeWidth={1.25}
