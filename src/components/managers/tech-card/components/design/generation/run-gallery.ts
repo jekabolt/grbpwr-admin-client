@@ -6,6 +6,7 @@ import {
 } from 'ui/components/media-viewer';
 
 import { cropFamilies, isCutOut } from './composite';
+import { isUndoneEdit } from './edit-chain';
 import { isRunLive } from './run-state';
 
 /**
@@ -53,6 +54,11 @@ export type OutputPlan = {
  *   · a picture in `keep` is drawn as itself — an editor is open over it, and swapping the tile
  *     would unmount that editor mid-drawing; its head waits until the editor closes.
  * The history keeps showing every link (captioned «replaced by an edit», `run-tile.tsx`).
+ *
+ * AN UNDONE EDIT IS NOT A HEAD (04.10, T28, `edit-chain.ts`): the walk stops before a hidden link —
+ * the version undo went back to stands in the chain's place — and an undone edit is drawn nowhere
+ * here, neither as a head nor as a card of its own (after a new edit over it, it is linked from
+ * nothing). The history draws it, dimmed.
  *
  * The walk is bounded like `cropFamilies`' (the server cannot mint a cycle; a malformed page must
  * not hang the tab): every chain and every deck is walked with a `seen` set.
@@ -105,7 +111,7 @@ export function outputPlan(
     const seen = new Set<number>([picture.id ?? 0]);
     while (!keep.has(head.id ?? 0)) {
       const next = byId.get(head.replacedBy ?? 0);
-      if (!next || seen.has(next.id ?? 0)) break;
+      if (!next || seen.has(next.id ?? 0) || isUndoneEdit(next)) break;
       seen.add(next.id ?? 0);
       head = next;
     }
@@ -138,7 +144,7 @@ export function outputPlan(
   for (const picture of pictures) {
     const id = picture.id ?? 0;
     // A piece stands in its sheet's deck; an edit that took a place stands in that place.
-    if (families.rootOf.has(id) || replacements.has(id)) continue;
+    if (families.rootOf.has(id) || replacements.has(id) || isUndoneEdit(picture)) continue;
     const head = headOf(picture);
     const headId = head.id ?? 0;
     if (headId > 0) {
@@ -153,15 +159,16 @@ export function outputPlan(
 }
 
 /**
- * THE WORKBENCH'S PLAN (03.10 gate FX4). By default the heads of replacement chains (`outputPlan`
- * with `heads`, an open editor's tile kept); a run put on the bench from the history (`whole`,
- * `benchShowsWhole`) stands with EVERY picture and edit it produced — its history row's own plan.
+ * THE WORKBENCH'S PLAN: the heads of replacement chains (`outputPlan` with `heads`, an open editor's
+ * tile kept) — for every run on the bench, the one put there from the history too. 04.10, owner
+ * item 28 («не должно показываться две картинки новая и старая а только новая») supersedes the
+ * 03.10 gate FX4 for edit chains: an edit stands in its original's place, never beside it.
  */
 export function benchPlan(
   pictures: readonly common_DesignPicture[],
-  opts: { whole: boolean; keep?: ReadonlySet<number> },
+  opts: { keep?: ReadonlySet<number> } = {},
 ): OutputPlan {
-  return opts.whole ? outputPlan(pictures) : outputPlan(pictures, { heads: true, keep: opts.keep });
+  return outputPlan(pictures, { heads: true, keep: opts.keep });
 }
 
 /**

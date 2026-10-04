@@ -1,5 +1,4 @@
 export {
-  benchShowsWhole,
   clearBenchChoice,
   heldRunId,
   putOnBench,

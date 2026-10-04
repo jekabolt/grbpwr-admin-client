@@ -226,15 +226,6 @@ export function clearBenchChoice(card: number, kind: BenchKind = 'flat') {
 }
 
 /**
- * THE BENCH SHOWS THIS RUN WHOLE (03.10 gate FX4): it is the run the person put there from the
- * history — owner item 9, «помещаются все картинки и эдиты генерации». Every picture and every edit
- * then stands on the bench, as in its history row; the newest run shown by default keeps the heads.
- */
-export function benchShowsWhole(chosen: number, runId: number): boolean {
-  return chosen > 0 && chosen === runId;
-}
-
-/**
  * WHICH RUN THE WORKBENCH HOLDS ON TO, before the newest: the pinned run, else the chosen one; 0 —
  * none, it shows the newest. A choice equal to the newest holds nothing it would not show anyway.
  */

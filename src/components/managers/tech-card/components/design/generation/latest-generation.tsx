@@ -27,7 +27,6 @@ import { isRunArchived } from '../visibility';
 import {
   clearBenchChoice,
   closeSurface,
-  benchShowsWhole,
   heldRunId,
   openSurface,
   pinShown,
@@ -110,8 +109,8 @@ import { useElapsed, useRunById } from './use-generation';
  * and this row draws only the HEAD of each replacement chain, in the original's place — as a card
  * or as a piece in its deck (`outputPlan` with `heads`). A picture under an open editor is drawn as
  * itself until the editor closes (`keep`). The history keeps every link, captioned.
- * A RUN PUT HERE FROM THE HISTORY STANDS WHOLE (03.10, owner item 9: «помещаются все картинки и
- * эдиты генерации»): every picture and edit, its history row's plan (`benchPlan`, `benchShowsWhole`).
+ * A RUN PUT HERE FROM THE HISTORY STANDS THE SAME WAY (04.10, owner item 28, T28 — supersedes the
+ * FX4 «whole» for edit chains): every picture, each edit chain as its current version.
  *
  * ONE COPY OF THE RUN'S TILES. The history below draws the run that stands here as its header line
  * alone — «run 12 · on the bench ↑» (`generation-history.tsx`), so the viewer row, the deck and the
@@ -422,15 +421,14 @@ export function LatestGeneration({
    * next run or the next split.
    */
   /** THE ROW AS DRAWN — heads in their originals' places; the tiles under an open editor kept.
-   *  A run put on the bench from the history: all of it (FX4, `benchPlan`). */
+   *  A run put on the bench from the history too (T28 supersedes FX4 for edit chains). */
   const editingKey = editedKey(bench.surfaces);
-  const whole = benchShowsWhole(chosen, runId);
   /** The row with its decks — what the render doors read (`piecesOf`, W4); never drawn as such. */
   const drawnPlan = useMemo(() => {
     if (!run) return null;
     const keep = new Set(editingKey ? editingKey.split(',').map(Number) : []);
-    return benchPlan(run.pictures ?? [], { whole, keep });
-  }, [run, editingKey, whole]);
+    return benchPlan(run.pictures ?? [], { keep });
+  }, [run, editingKey]);
   // A cut sheet leaves the bench, its pieces stand in its place (owner items 20, 21) — on FABRIC
   // RENDER too since 03.10 (owner item 24, R(b)): no deck, so no `expand ▸`; the bulk placement is
   // a line under the tiles (`PutPiecesIntoSides`, W4).
