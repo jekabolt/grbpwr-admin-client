@@ -77,9 +77,12 @@ import {
  * стороны в 3D-прогоне (`sides.filter(s => s.picture)`), отдельной галочки нет.
  *
  * ОДНА ГРАММАТИКА ЯЧЕЙКИ на таблицу и на ленту: занятая — плита (`PictureTile`: зум в общий ряд
- * студии, тихие углы `edit` / `✕`, когда вызывающий их даёт) с подписью происхождения (`run r7` /
- * `by hand`); пустая — коробка ТОГО ЖЕ РОСТА, пунктиром. Рост один (`CELL_PX`), потому что «пустой
- * плейсхолдер больше самой плитки» — жалоба владельца, а не мелочь.
+ * студии, тихие углы `edit` / `✕`, когда вызывающий их даёт), в ленте 3D — с подписью
+ * происхождения (`run r7` / `by hand`); пустая — коробка ТОГО ЖЕ РОСТА, пунктиром. Рост один на
+ * ленту, потому что «пустой плейсхолдер больше самой плитки» — жалоба владельца, а не мелочь.
+ * ⚠ В ТАБЛИЦЕ SIDES ПОДВАЛА НЕТ (п. 45): «не нужно показывать с тамбнейлом RUN 52 или RUN R1».
+ * Происхождение там ничего не решает — сторону называет строка, колорвей столбец, — поэтому плита
+ * там ростом `CELL_PX`, и пустые коробки таблицы того же роста, а не `EMPTY_PX`.
  */
 
 /** ОДНА МЕРА НА ТАБЛИЦУ И НА ЛЕНТУ (138px, мера макета): ширина ячейки и кадр плиты. */
@@ -143,7 +146,8 @@ function Plate({
    *  второе имя было бы тем же фактом, сказанным дважды. В ленте 3D — печатается. */
   label = '',
   required,
-  origin,
+  /** Пилюля подвала справа. Нет её и нет `label` — подвала нет вовсе (таблица SIDES, п. 45). */
+  origin = '',
   alt,
   onRemove,
   onEdit,
@@ -153,7 +157,7 @@ function Plate({
   name: string;
   label?: string;
   required?: boolean;
-  origin: string;
+  origin?: string;
   alt: string;
   onRemove?: () => void;
   onEdit?: () => void;
@@ -190,26 +194,28 @@ function Plate({
             : undefined
         }
       />
-      <div
-        className={cn(
-          'flex items-center gap-1 border-t border-hairline px-1.5 py-0.5',
-          label ? 'justify-between' : 'justify-end',
-        )}
-      >
-        {label ? (
-          <Text
-            size='nano'
-            variant='uppercase'
-            tracking='label'
-            component='span'
-            className='min-w-0 truncate'
-          >
-            {label}
-            {required ? ' *' : ''}
-          </Text>
-        ) : null}
-        <Pill className='shrink-0'>{saving ? 'saving…' : origin}</Pill>
-      </div>
+      {label || origin ? (
+        <div
+          className={cn(
+            'flex items-center gap-1 border-t border-hairline px-1.5 py-0.5',
+            label ? 'justify-between' : 'justify-end',
+          )}
+        >
+          {label ? (
+            <Text
+              size='nano'
+              variant='uppercase'
+              tracking='label'
+              component='span'
+              className='min-w-0 truncate'
+            >
+              {label}
+              {required ? ' *' : ''}
+            </Text>
+          ) : null}
+          {origin ? <Pill className='shrink-0'>{saving ? 'saving…' : origin}</Pill> : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -224,12 +230,15 @@ function EmptyBox({
   hint,
   onOpen,
   title,
+  heightPx = EMPTY_PX,
 }: {
   label?: string;
   required?: boolean;
   hint: string;
   onOpen?: () => void;
   title?: string;
+  /** Рост в плиту ЭТОЙ ленты: с подвалом (`EMPTY_PX`) или без него (`CELL_PX`, таблица SIDES). */
+  heightPx?: number;
 }): JSX.Element {
   const body = (
     <>
@@ -249,7 +258,7 @@ function EmptyBox({
      давал разный рост в таблице и в ленте. Число живёт в `CELL_PX` один раз. */
   const box =
     'flex w-full flex-col items-center justify-center gap-0.5 border border-dashed border-borderColor bg-bgColor px-2 text-center';
-  const style = { height: EMPTY_PX };
+  const style = { height: heightPx };
   if (onOpen) {
     return (
       <button
@@ -812,13 +821,15 @@ export function SidesSection({
     const label = viewLabel(side.view);
     if (side.picture) {
       return (
-        <Plate picture={side.picture} name={label} origin={originWord(band, side)} alt={`flat · ${label}`} />
+        <Plate picture={side.picture} name={label} alt={`flat · ${label}`} />
       );
     }
     if (!canWrite) {
       /* СЛОВО СОСТОЯНИЯ — СТУДИИНО (`EMPTY_WORD`), а не своё: «nothing marked» рядом с «empty»
          соседних лент читалось как ДРУГОЕ состояние. Дверь называет `title`, не слово. */
-      return <EmptyBox hint={EMPTY_WORD} title={`no drawing is marked for ${label}.`} />;
+      return (
+        <EmptyBox heightPx={CELL_PX} hint={EMPTY_WORD} title={`no drawing is marked for ${label}.`} />
+      );
     }
     return (
       <>
@@ -829,7 +840,7 @@ export function SidesSection({
             имя уезжает в речь обеих половин (`draw — front`, а не `draw — + front`). */}
         <PlaceOrDrawCell
           label={label}
-          heightPx={EMPTY_PX}
+          heightPx={CELL_PX}
           purpose={`design · flat for the ${label} slot`}
           onSelect={(media) => placeFlat(media, side.view, side.slotRev)}
           onDraw={() => setEditor({ mode: 'draw', view: side.view })}
@@ -858,7 +869,6 @@ export function SidesSection({
         <Plate
           picture={side.picture}
           name={`${label} · ${col.label}`}
-          origin={saving ? 'saving…' : originWord(band, side)}
           alt={`render · ${label} · ${col.label}`}
           saving={saving}
           onRemove={canWrite ? () => unmark(side.view, col.colorwayId, side.slotRev) : undefined}
@@ -884,14 +894,20 @@ export function SidesSection({
      */
     if (col.archived) return null;
     if (!canWrite) {
-      return <EmptyBox hint={EMPTY_RENDER_SIDE} title={`no render stands in ${label} of ${col.label}.`} />;
+      return (
+        <EmptyBox
+          heightPx={CELL_PX}
+          hint={EMPTY_RENDER_SIDE}
+          title={`no render stands in ${label} of ${col.label}.`}
+        />
+      );
     }
     return (
       <>
         <PlaceOrDrawCell
           label={label}
           mediaLabel='+ media'
-          heightPx={EMPTY_PX}
+          heightPx={CELL_PX}
           purpose={`design · render for the ${label} slot of ${col.label}`}
           onSelect={(media) => placeRender(media, side.view, col.colorwayId, side.slotRev)}
           data-side-render-door={`${col.colorwayId}:${side.view}`}
