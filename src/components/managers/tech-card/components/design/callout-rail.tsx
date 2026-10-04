@@ -97,7 +97,7 @@ const PURPOSE_GLYPH: Record<Purpose, React.ReactNode> = {
   ),
   artwork: (
     <>
-      <rect x='1.5' y='1.5' width='9' height='9' strokeDasharray='2 1.5' />
+      <rect x='1.5' y='1.5' width='9' height='9' strokeDasharray='2 1.5' strokeLinecap='butt' />
       <path d='M4 8 6 4.5 8 8z' />
     </>
   ),

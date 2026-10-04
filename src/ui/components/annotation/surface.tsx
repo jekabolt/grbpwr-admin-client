@@ -20,6 +20,8 @@ import {
   arcPath,
   bracketPath,
   constrainTo45,
+  fitQuadToAspect,
+  inkPath,
   leaderTarget,
   midpoint,
   polygonPath,
@@ -864,6 +866,40 @@ export function AnnotationSurface({
   }, []);
 
   const byKey = useMemo(() => new Map(callouts.map((c) => [c.key, c])), [callouts]);
+
+  /**
+   * КАРТИНКА АРТВОРКА РОЖДАЕТСЯ В СВОИХ ПРОПОРЦИЯХ (R20). Зону рисуют раньше, чем выбирают картинку,
+   * и варп на четыре ручки растянул бы её под ту рамку, что была. Поэтому В МОМЕНТ ПРИКРЕПЛЕНИЯ
+   * (адрес картинки появился или сменился у выноски, которую поверхность уже видела) зона один раз
+   * подгоняется под пропорции картинки вокруг своего центра. Открытие листа с уже прикреплённой
+   * картинкой — не прикрепление: зону, которую человек потом сам перекосил, никто не трогает.
+   */
+  const artworkUrls = useRef<Map<string, string> | null>(null);
+  useEffect(() => {
+    const seen = artworkUrls.current;
+    const next = new Map<string, string>();
+    for (const c of callouts) if (c.spec?.t === 'artwork') next.set(c.key, c.spec.url ?? '');
+    artworkUrls.current = next;
+    if (!seen || !editable || size.w < 1 || size.h < 1) return;
+    const { w, h } = size;
+    // Без отмены в очистке: `callouts` меняется на каждый рендер формы, и отмена убила бы загрузку
+    // раньше, чем она кончится. Устаревшее отсекает сверка адреса в момент загрузки.
+    for (const [key, url] of next) {
+      if (!url || !seen.has(key) || seen.get(key) === url) continue;
+      const img = new Image();
+      img.onload = () => {
+        if (!live.current.editable || !img.naturalWidth || !img.naturalHeight) return;
+        const c = live.current.callouts.find((x) => x.key === key);
+        if (!c || c.points.length !== 4 || c.spec?.t !== 'artwork' || c.spec.url !== url) return;
+        const fitted = fitQuadToAspect(
+          c.points.map((p) => ({ x: p.x * w, y: p.y * h })),
+          img.naturalWidth / img.naturalHeight,
+        ).map((p) => ({ x: clamp01(p.x / w), y: clamp01(p.y / h) }));
+        mutate(() => live.current.onEditPoints?.(key, fitted));
+      };
+      img.src = url;
+    }
+  }, [callouts, editable, size, mutate]);
 
   // Заявка на правку: идентичность стабильна на всю жизнь поверхности, функции читают свежие
   // сеттеры — реестр хранит ОДИН объект и не пересобирается на каждый рендер.
@@ -1928,35 +1964,27 @@ export function AnnotationSurface({
     kindDef(selectedCallout.kind).handles;
 
   /**
-   * МАРКИЗА ВЫБРАННОЙ ФИГУРЫ — штриховая рамка по её габаритам.
+   * СЛЕД ВЫБОРА — ТОЛЬКО ТАМ, ГДЕ НЕТ РУЧЕК (R18, владелец: «внешний контур выделения не должен
+   * показываться»).
    *
-   * У фигуры на холсте не было состояния «выбрана»: 2 пикселя штриха против 1.5 — это не
-   * состояние, а у следа с `handles: false` не было и ручек, то есть выбранный штрих не отличался
-   * от соседнего НИЧЕМ. Подсветить цветом нельзя (система монохромная, и цвет здесь уже занят —
-   * им красят саму линию), утолщить нельзя (штрих в 4 пикселя перекрывает чертёж, ради которого
-   * его и рисовали). Остаётся геометрия: рамка вокруг того, что выбрано, — тот же приём, каким
-   * выбор показывает любой векторный редактор.
-   *
-   * ПОЛЕ И ОБВОДКА — ЭКРАННЫЕ, А НЕ КАДРОВЫЕ: `inv` компенсирует зум, `non-scaling-stroke` держит
-   * толщину. Иначе на ×6 рамка отступала бы от фигуры на треть кадра и была бы толщиной в палец.
+   * Внешней рамки по габаритам больше нет: у фигуры с ручками выбор показывают сами ручки. Но у
+   * следа (`handles: false`) и на поверхности только для чтения ручек нет, и тогда выбранная фигура
+   * не отличалась бы от соседней ничем, кроме полупикселя штриха. Для них — мягкая широкая полоса
+   * ПО САМОЙ ЛИНИИ, под ней (тот же путь, по которому фигуру ловит мышь), а не прямоугольник вокруг.
    */
-  const marquee = (() => {
-    if (hideCallouts || !selectedCallout || dim(selectedCallout.key)) return null;
+  const selectionTrace = (() => {
+    if (hideCallouts || !selectedCallout || dim(selectedCallout.key) || handlesVisible) return null;
     const pts = pointsOf(selectedCallout).map(px);
-    // Пин и одноточечная подпись показывают выбор собой (инверсия маркера, обводка плашки) —
-    // рамка вокруг одной точки была бы рамкой вокруг ничего.
+    // Пин и одноточечная подпись показывают выбор собой (инверсия маркера, обводка плашки).
     if (pts.length < 2) return null;
-    const xs = pts.map((p) => p.x);
-    const ys = pts.map((p) => p.y);
-    const pad = 6 * inv;
-    const x0 = Math.min(...xs) - pad;
-    const y0 = Math.min(...ys) - pad;
-    return {
-      x: x0,
-      y: y0,
-      width: Math.max(...xs) - Math.min(...xs) + pad * 2,
-      height: Math.max(...ys) - Math.min(...ys) + pad * 2,
-    };
+    // След рисуется сглаженным — и полоса выбора идёт по той же кривой, а не по ломаной хита.
+    if (kindDef(selectedCallout.kind).key === 'ink') return inkPath(pts) || null;
+    return hitPath(
+      selectedCallout.kind,
+      pts,
+      px(labelOf(selectedCallout)),
+      effectiveCaps(selectedCallout.kind, selectedCallout.caps),
+    );
   })();
 
   const cursorClass =
@@ -2243,16 +2271,14 @@ export function AnnotationSurface({
               !hideCallouts &&
               callouts.map((c) => {
                 if (c.spec?.t !== 'artwork' || !c.spec.url || dim(c.key)) return null;
-                const b = boundsOf(pointsOf(c));
+                // Точки — живые (`pointsOf` уже учитывает тянущуюся ручку): картинка варпится
+                // вместе с ручкой во время жеста, а не после отпускания.
                 return (
                   <ArtworkImage
                     key={`art:${c.key}`}
                     src={c.spec.url}
-                    region={
-                      b
-                        ? { x: b.x * size.w, y: b.y * size.h, w: b.w * size.w, h: b.h * size.h }
-                        : null
-                    }
+                    quad={pointsOf(c).map(px)}
+                    box={size}
                   />
                 );
               })}
@@ -2266,6 +2292,20 @@ export function AnnotationSurface({
                 <defs>
                   <AnnotationDefs />
                 </defs>
+                {selectionTrace && (
+                  <path
+                    data-selection-trace=''
+                    d={selectionTrace}
+                    fill='none'
+                    stroke='var(--color-textColor)'
+                    strokeOpacity={0.18}
+                    strokeWidth={8}
+                    strokeLinecap='round'
+                    strokeLinejoin='round'
+                    vectorEffect='non-scaling-stroke'
+                    pointerEvents='none'
+                  />
+                )}
                 {callouts.map((c) =>
                   dim(c.key) ? null : (
                     <CalloutShape
@@ -2281,28 +2321,6 @@ export function AnnotationSurface({
                       strokeWidth={selected === c.key ? 2 : 1.5}
                     />
                   ),
-                )}
-                {/* МАРКИЗА — ДВА ПРЯМОУГОЛЬНИКА, А НЕ ОДИН. Белый сплошной снизу, чернильный
-                    штриховой поверх: на тёмном снимке чернильная рамка невидима ровно так же, как
-                    чернильная линия, и лечится тем же, чем лечится она, — подложкой. */}
-                {marquee && (
-                  <g data-marquee='true' pointerEvents='none'>
-                    <rect
-                      {...marquee}
-                      fill='none'
-                      stroke='var(--color-bgColor)'
-                      strokeWidth={3}
-                      vectorEffect='non-scaling-stroke'
-                    />
-                    <rect
-                      {...marquee}
-                      fill='none'
-                      stroke='var(--color-textColor)'
-                      strokeWidth={1}
-                      strokeDasharray='3 3'
-                      vectorEffect='non-scaling-stroke'
-                    />
-                  </g>
                 )}
                 {/* ХИТ-ПУТИ — невидимые толстые копии штрихов: попасть мышью в волосяную линию
                     нельзя, а выбирать фигуру надо именно по ней. Живут, пока правка возможна и

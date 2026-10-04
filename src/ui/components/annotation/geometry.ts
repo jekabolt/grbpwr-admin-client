@@ -24,12 +24,7 @@ export function arcControlPoint(p0: ShapePoint, p1: ShapePoint, p2: ShapePoint):
 }
 
 /** Точка квадратичной кривой Безье при параметре t — используется пробой и ничем больше. */
-export function quadraticAt(
-  p0: ShapePoint,
-  c: ShapePoint,
-  p2: ShapePoint,
-  t: number,
-): ShapePoint {
+export function quadraticAt(p0: ShapePoint, c: ShapePoint, p2: ShapePoint, t: number): ShapePoint {
   const u = 1 - t;
   return {
     x: u * u * p0.x + 2 * u * t * c.x + t * t * p2.x,
@@ -329,10 +324,7 @@ function strokePath(pts: ShapePoint[]): string {
  * штрих, и `strokePath` отработает как прежний `inkPath`.
  */
 export function inkPath(pts: ShapePoint[]): string {
-  return splitInkStrokes(pts)
-    .map(strokePath)
-    .filter(Boolean)
-    .join(' ');
+  return splitInkStrokes(pts).map(strokePath).filter(Boolean).join(' ');
 }
 
 /** Расстояние от точки до ОТРЕЗКА (не до прямой) плюс параметр проекции на нём. */
@@ -428,4 +420,194 @@ export function simplifyToLimit(pts: ShapePoint[], limit: number, start = 0.002)
   const out: ShapePoint[] = [];
   for (let i = 0; i < limit; i++) out.push(pts[Math.round(i * step)]);
   return out;
+}
+
+// ── ВАРП КАРТИНКИ АРТВОРКА НА ЧЕТЫРЕ РУЧКИ (R20) ────────────────────────────────────────────────
+//
+// Владелец: «картинка когда добавляется в принт она должна помещатся внутрь подвижных штук и
+// варпаться вместе с ними». Зона артворка — четыре точки в порядке `rectCorners` (TL, TR, BR, BL);
+// углы картинки садятся РОВНО на них, середина — по проективному преобразованию.
+//
+// Почему не CSS `matrix3d`: на печати 3D-трансформы браузеры рисуют по-разному (а то и плоско), а
+// лист печатается. SVG-аффин печатается везде одинаково, поэтому проекция приближается сеткой
+// треугольников, каждый из которых — та же картинка с аффинным `transform` и клипом своего
+// треугольника. На сетке 10×10 ошибка аффинного приближения меньше пикселя на любой разумной зоне.
+
+/** Коэффициенты проекции единичного квадрата на четырёхугольник: x=(a·u+b·v+c)/w, w=g·u+h·v+1. */
+export type Homography = {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  e: number;
+  f: number;
+  g: number;
+  h: number;
+};
+
+/**
+ * Проекция единичного квадрата (0,0)→q0, (1,0)→q1, (1,1)→q2, (0,1)→q3 (Heckbert). У параллелограмма
+ * g = h = 0 — это обычный аффин. `null` — вырожденный четырёхугольник (три точки на прямой).
+ */
+export function squareToQuad(q: ShapePoint[]): Homography | null {
+  if (q.length !== 4) return null;
+  const [p0, p1, p2, p3] = q;
+  const dx1 = p1.x - p2.x;
+  const dx2 = p3.x - p2.x;
+  const dx3 = p0.x - p1.x + p2.x - p3.x;
+  const dy1 = p1.y - p2.y;
+  const dy2 = p3.y - p2.y;
+  const dy3 = p0.y - p1.y + p2.y - p3.y;
+  let g = 0;
+  let h = 0;
+  if (Math.abs(dx3) > 1e-12 || Math.abs(dy3) > 1e-12) {
+    const den = dx1 * dy2 - dx2 * dy1;
+    if (Math.abs(den) < 1e-12) return null;
+    g = (dx3 * dy2 - dx2 * dy3) / den;
+    h = (dx1 * dy3 - dx3 * dy1) / den;
+  }
+  const H = {
+    a: p1.x - p0.x + g * p1.x,
+    b: p3.x - p0.x + h * p3.x,
+    c: p0.x,
+    d: p1.y - p0.y + g * p1.y,
+    e: p3.y - p0.y + h * p3.y,
+    f: p0.y,
+    g,
+    h,
+  };
+  // Аффинная часть обязана быть обратимой, иначе квадрат сплющен в линию.
+  if (Math.abs(H.a * H.e - H.b * H.d) < 1e-12 && g === 0 && h === 0) return null;
+  return H;
+}
+
+/** Точка квадрата (u, v) ∈ [0,1]² на четырёхугольнике. `null` — за линией горизонта (w ≤ 0). */
+export function applyHomography(H: Homography, u: number, v: number): ShapePoint | null {
+  const w = H.g * u + H.h * v + 1;
+  if (w <= 1e-9) return null;
+  return { x: (H.a * u + H.b * v + H.c) / w, y: (H.d * u + H.e * v + H.f) / w };
+}
+
+/** SVG `matrix(a b c d e f)`, переводящий треугольник `s` в треугольник `t`. `null` — вырожден. */
+export function triangleAffine(
+  s: [ShapePoint, ShapePoint, ShapePoint],
+  t: [ShapePoint, ShapePoint, ShapePoint],
+): [number, number, number, number, number, number] | null {
+  const s1x = s[1].x - s[0].x;
+  const s1y = s[1].y - s[0].y;
+  const s2x = s[2].x - s[0].x;
+  const s2y = s[2].y - s[0].y;
+  const det = s1x * s2y - s2x * s1y;
+  if (Math.abs(det) < 1e-12) return null;
+  const t1x = t[1].x - t[0].x;
+  const t1y = t[1].y - t[0].y;
+  const t2x = t[2].x - t[0].x;
+  const t2y = t[2].y - t[0].y;
+  // M = T · S⁻¹, S⁻¹ = [s2y −s2x; −s1y s1x] / det.
+  const a = (t1x * s2y - t2x * s1y) / det;
+  const c = (-t1x * s2x + t2x * s1x) / det;
+  const b = (t1y * s2y - t2y * s1y) / det;
+  const d = (-t1y * s2x + t2y * s1x) / det;
+  const e = t[0].x - a * s[0].x - c * s[0].y;
+  const f = t[0].y - b * s[0].x - d * s[0].y;
+  return [a, b, c, d, e, f];
+}
+
+export type WarpTriangle = {
+  /** Аффин картинки, положенной в единичный квадрат (`<image width=1 height=1>`), — в кадр. */
+  m: [number, number, number, number, number, number];
+  /** Клип: треугольник назначения, раздутый на `bleed` пикселей, чтобы между соседями не было щели. */
+  clip: [ShapePoint, ShapePoint, ShapePoint];
+};
+
+/**
+ * Сетка n×n по единичному квадрату → 2n² треугольников на четырёхугольнике `q` (TL, TR, BR, BL).
+ * Треугольники, у которых хоть одна вершина ушла за горизонт проекции (вывернутая зона), пропущены.
+ */
+export function warpTriangles(q: ShapePoint[], n = 10, bleed = 0.5): WarpTriangle[] {
+  const H = squareToQuad(q);
+  if (!H) return [];
+  const grid: (ShapePoint | null)[][] = [];
+  for (let j = 0; j <= n; j++) {
+    const row: (ShapePoint | null)[] = [];
+    for (let i = 0; i <= n; i++) row.push(applyHomography(H, i / n, j / n));
+    grid.push(row);
+  }
+  const out: WarpTriangle[] = [];
+  const push = (s: [ShapePoint, ShapePoint, ShapePoint], t: (ShapePoint | null)[]) => {
+    if (t.some((p) => !p)) return;
+    const tt = t as [ShapePoint, ShapePoint, ShapePoint];
+    const m = triangleAffine(s, tt);
+    if (!m) return;
+    const cx = (tt[0].x + tt[1].x + tt[2].x) / 3;
+    const cy = (tt[0].y + tt[1].y + tt[2].y) / 3;
+    const clip = tt.map((p) => {
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      const len = Math.hypot(dx, dy) || 1;
+      return { x: p.x + (dx / len) * bleed, y: p.y + (dy / len) * bleed };
+    }) as [ShapePoint, ShapePoint, ShapePoint];
+    out.push({ m, clip });
+  };
+  for (let j = 0; j < n; j++)
+    for (let i = 0; i < n; i++) {
+      const u0 = i / n;
+      const u1 = (i + 1) / n;
+      const v0 = j / n;
+      const v1 = (j + 1) / n;
+      const a = grid[j][i];
+      const b = grid[j][i + 1];
+      const c = grid[j + 1][i + 1];
+      const d = grid[j + 1][i];
+      push(
+        [
+          { x: u0, y: v0 },
+          { x: u1, y: v0 },
+          { x: u1, y: v1 },
+        ],
+        [a, b, c],
+      );
+      push(
+        [
+          { x: u0, y: v0 },
+          { x: u1, y: v1 },
+          { x: u0, y: v1 },
+        ],
+        [a, c, d],
+      );
+    }
+  return out;
+}
+
+/**
+ * Зона под пропорции картинки — один раз, при первом прикреплении: иначе картинка рождается
+ * растянутой под ту рамку, которую нарисовали до неё. Центр и поворот зоны сохраняются (ось — средняя
+ * из верхнего и нижнего рёбер), картинка ВПИСЫВАЕТСЯ в прежнюю зону (одна сторона укорачивается).
+ * Порядок вершин тот же: TL, TR, BR, BL. Координаты — пиксели кадра; `aspect` = ширина/высота.
+ */
+export function fitQuadToAspect(q: ShapePoint[], aspect: number): ShapePoint[] {
+  if (q.length !== 4 || !(aspect > 0) || !Number.isFinite(aspect)) return q;
+  const [p0, p1, p2, p3] = q;
+  const cx = (p0.x + p1.x + p2.x + p3.x) / 4;
+  const cy = (p0.y + p1.y + p2.y + p3.y) / 4;
+  const ux = (p1.x - p0.x + p2.x - p3.x) / 2;
+  const uy = (p1.y - p0.y + p2.y - p3.y) / 2;
+  const vx = (p3.x - p0.x + p2.x - p1.x) / 2;
+  const vy = (p3.y - p0.y + p2.y - p1.y) / 2;
+  const W = Math.hypot(ux, uy);
+  const Hh = Math.hypot(vx, vy);
+  if (W < 1e-9 || Hh < 1e-9) return q;
+  const ex = ux / W;
+  const ey = uy / W;
+  // Нормаль к оси — в ту же сторону, куда смотрело боковое ребро: зона не выворачивается.
+  const side = ex * vy - ey * vx >= 0 ? 1 : -1;
+  const nx = -ey * side;
+  const ny = ex * side;
+  const w = W / Hh > aspect ? Hh * aspect : W;
+  const h = W / Hh > aspect ? Hh : W / aspect;
+  const at = (su: number, sv: number) => ({
+    x: cx + (ex * (su * w)) / 2 + (nx * (sv * h)) / 2,
+    y: cy + (ey * (su * w)) / 2 + (ny * (sv * h)) / 2,
+  });
+  return [at(-1, -1), at(1, -1), at(1, 1), at(-1, 1)];
 }
