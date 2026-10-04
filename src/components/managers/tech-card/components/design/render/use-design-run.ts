@@ -104,6 +104,12 @@ export type StartRunCallbacks = {
    */
   beforeSend?: (clientRequestId: string, stored: boolean) => boolean;
   /**
+   * A DETERMINISTIC key fixed by the caller (≤ 36 chars, the column's width). For a press no human
+   * makes — the automatic cut-out — the page-local ledger cannot stop a second tab or a remount from
+   * buying the same run twice; a key derived from WHAT is asked lets the server collapse them.
+   */
+  clientRequestId?: string;
+  /**
    * `onStarted` — WHAT THE SCREEN DOES ONCE THE RUN EXISTS, AND ONLY THEN (O-61 r4, D-71).
    *
    * A press can have a consequence on the screen that pressed it which must not outlive a press that
@@ -345,7 +351,13 @@ export function useStartDesignRun(
       const fingerprint = requestFingerprint(wire);
       // The operator is taken ONCE, here: the answer settles the namespace this key was sent in.
       const operator = operatorKey();
-      const { id: clientRequestId, stored } = ledgerSend(techCardId, scope, fingerprint, operator);
+      const { id: clientRequestId, stored } = ledgerSend(
+        techCardId,
+        scope,
+        fingerprint,
+        operator,
+        opts?.clientRequestId,
+      );
       if (opts?.beforeSend && !opts.beforeSend(clientRequestId, stored)) return;
       const sent: SentRun = {
         wire,

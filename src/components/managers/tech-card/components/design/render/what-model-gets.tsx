@@ -25,6 +25,7 @@ import {
 } from '../core';
 import { openDoor, openDoorAcrossKind } from '../doors';
 import { viewLabel } from '../views';
+import { MAX_RENDER_ARTWORKS } from '../paint/artworks';
 import type { ThreedDraft } from './drafts';
 import { Swatch } from './field-row';
 import {
@@ -537,8 +538,17 @@ function RenderBody({
             origin='recipe'
             text={
               <>
-                <b>{artworks.length}</b> · {artworks.join(' · ')} — each travels as its own image,
-                inside the box drawn on that flat
+                <b>
+                  {artworks.length} of {MAX_RENDER_ARTWORKS}
+                </b>{' '}
+                · {artworks.join(' · ')} — each travels as its own image, inside the box drawn on
+                that flat
+                {artworks.length > MAX_RENDER_ARTWORKS && (
+                  <span className='text-error'>
+                    {' '}
+                    · at most {MAX_RENDER_ARTWORKS} artworks per render — remove one on PARTS
+                  </span>
+                )}
               </>
             }
           />
@@ -1085,7 +1095,7 @@ function plainText({
           .map((m) => `${viewLabel((m.view ?? '').trim())} media ${m.mediaId ?? 0}`)
           .join(', ') || '—'
       }`,
-      `artworks: ${artworks.length > 0 ? `${artworks.length} · ${artworks.join(', ')}` : '—'}`,
+      `artworks: ${artworks.length > 0 ? `${artworks.length} of ${MAX_RENDER_ARTWORKS} · ${artworks.join(', ')}` : '—'}`,
       `fabric photo: ${(recipe?.fabricMediaId ?? 0) > 0 ? `media ${recipe?.fabricMediaId}` : '—'}`,
       `picked colour: ${colourLabel(recipe, resolved.colors)}`,
       `fabric in words: ${(recipe?.words ?? '').trim() || '—'}`,

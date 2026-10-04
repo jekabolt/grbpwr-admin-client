@@ -1,4 +1,5 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
+import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import {
   useCallback,
@@ -39,6 +40,7 @@ import {
   flatPictureIds,
   growQuad,
   insideQuad,
+  MAX_RENDER_ARTWORKS,
   moveQuad,
   quadOfPlacement,
   rotateQuad,
@@ -151,7 +153,12 @@ type SideArtwork = {
   selectedKey: string;
   onSelect: (key: string) => void;
   onCommit: (item: Omit<Placed, 'key'> & { key?: string }) => void;
+  /** The colourway already carries `MAX_RENDER_ARTWORKS` placements: a new one is refused. */
+  full: boolean;
+  onFull: () => void;
 };
+
+const FULL_REASON = `at most ${MAX_RENDER_ARTWORKS} artworks per render`;
 
 const HANDLE = 8;
 const ROT_OFF = 22;
@@ -193,7 +200,9 @@ function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
   const px = (q: Quad) => scaleQuad(q, w, h);
   const frac = (q: Quad) => scaleQuad(clampQuad(q, w, h), 1 / w, 1 / h);
   const quadOf = (it: Placed) => (live?.key === it.key ? live.quad : px(it.quad));
-  const selected = art.items.find((it) => it.key === art.selectedKey) ?? null;
+  // A NEW placement has no id until its create returns: shown pending, never moved or selected —
+  // a drag then would send a second create (a duplicate).
+  const selected = art.items.find((it) => it.key === art.selectedKey && it.placementId > 0) ?? null;
 
   const pos = (e: PointerEvent<HTMLDivElement>): Pt => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -224,6 +233,7 @@ function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
     const p = pos(e);
     const hit = hitAt(p);
     const item = hit ? art.items.find((it) => it.key === hit.key) ?? null : null;
+    if (item && item.placementId <= 0) return;
     if (hit && item) {
       const base = px(item.quad);
       art.onSelect(item.key);
@@ -240,6 +250,10 @@ function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
       };
     } else if (art.armed > 0) {
       art.onSelect('');
+      if (art.full) {
+        art.onFull();
+        return;
+      }
       drag.current = {
         mode: 'new',
         key: 'draft',
@@ -346,9 +360,13 @@ function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
           return (
             <div
               key={it.key}
-              className='pointer-events-none absolute inset-0'
+              className={cn(
+                'pointer-events-none absolute inset-0',
+                it.placementId <= 0 && 'opacity-50',
+              )}
               style={{ mixBlendMode: a.cut ? 'normal' : 'multiply' }}
               data-artwork-placed={it.placementId}
+              data-artwork-pending={it.placementId <= 0 ? '' : undefined}
               data-artwork-asset={it.assetId}
             >
               <ArtworkImage quad={quadOf(it)} box={size} src={a.url} />
@@ -945,6 +963,7 @@ export function PartsCanvas({
 
   /* ─── R7 · artwork placements: the band's marks + an optimistic copy until the band re-reads ─── */
   const writes = useAssetWrites(session.techCardId);
+  const { showMessage } = useSnackBarStore();
   const pictures = useMemo(() => (band ? flatPictureIds(band) : new Map<string, number>()), [band]);
   const arts = useMemo(() => new Map((artworks ?? []).map((a) => [a.assetId, a])), [artworks]);
   const [pending, setPending] = useState<Map<string, Pending>>(() => new Map());
@@ -989,28 +1008,68 @@ export function PartsCanvas({
       return n;
     });
 
-  const commit = (item: Omit<Placed, 'key'> & { key?: string }) => {
-    seq.current += 1;
-    const token = seq.current;
-    const key = item.placementId > 0 ? `p${item.placementId}` : `n${token}`;
-    setPending((m) => new Map(m).set(key, { ...item, key, token, gone: false }));
-    if (item.placementId === 0) setSelectedKey(key);
+  const placedCount = [...pictures.keys()].reduce((n, view) => n + placedOf(view).length, 0);
+  const full = placedCount >= MAX_RENDER_ARTWORKS;
+  const refuseFull = () => showMessage(FULL_REASON, 'error');
+
+  /* One request in flight per placement; a move made meanwhile waits, and only the LATEST geometry
+     goes once the request settles (no out-of-order writes). */
+  const inFlight = useRef(new Set<number>());
+  const queued = useRef(new Map<number, { item: Omit<Placed, 'key'>; token: number }>());
+
+  const send = (item: Omit<Placed, 'key'>, key: string, token: number) => {
+    const id = item.placementId;
+    if (id > 0) inFlight.current.add(id);
     writes.setPlacement
       .mutateAsync({
-        placementId: item.placementId,
+        placementId: id,
         assetId: item.assetId,
         pictureId: item.pictureId,
         annotation: annotationOfQuad(item.quad),
         note: arts.get(item.assetId)?.technique ?? '',
       })
       .then((res) => {
-        const id = res.placement?.id ?? 0;
-        if (item.placementId === 0 && id > 0) setSelectedKey((k) => (k === key ? `p${id}` : k));
+        const got = res.placement?.id ?? 0;
+        if (id === 0 && got > 0) setSelectedKey((k) => (k === key ? `p${got}` : k));
       })
       .catch(() => {
-        if (item.placementId === 0) setSelectedKey((k) => (k === key ? '' : k));
+        if (id === 0) setSelectedKey((k) => (k === key ? '' : k));
       })
-      .finally(() => settle(key, token));
+      .finally(() => {
+        if (id > 0) {
+          inFlight.current.delete(id);
+          const next = queued.current.get(id);
+          if (next) {
+            queued.current.delete(id);
+            send(next.item, key, next.token);
+            return;
+          }
+        }
+        settle(key, token);
+      });
+  };
+
+  const commit = (item: Omit<Placed, 'key'> & { key?: string }) => {
+    if (item.placementId === 0 && full) {
+      refuseFull();
+      return;
+    }
+    seq.current += 1;
+    const token = seq.current;
+    const key = item.placementId > 0 ? `p${item.placementId}` : `n${token}`;
+    const clean: Omit<Placed, 'key'> = {
+      placementId: item.placementId,
+      assetId: item.assetId,
+      pictureId: item.pictureId,
+      quad: item.quad,
+    };
+    setPending((m) => new Map(m).set(key, { ...clean, key, token, gone: false }));
+    if (item.placementId === 0) setSelectedKey(key);
+    if (item.placementId > 0 && inFlight.current.has(item.placementId)) {
+      queued.current.set(item.placementId, { item: clean, token });
+      return;
+    }
+    send(clean, key, token);
   };
 
   const removeSelected = () => {
@@ -1023,6 +1082,8 @@ export function PartsCanvas({
     const token = seq.current;
     const key = `p${id}`;
     setPending((m) => new Map(m).set(key, { ...item, key, token, gone: true }));
+    // A delete outranks a queued move: the move must not re-create what is being deleted.
+    queued.current.delete(id);
     writes.deletePlacement
       .mutateAsync(id)
       .catch(() => {})
@@ -1050,6 +1111,8 @@ export function PartsCanvas({
       selectedKey,
       onSelect: setSelectedKey,
       onCommit: commit,
+      full,
+      onFull: refuseFull,
     };
   };
 

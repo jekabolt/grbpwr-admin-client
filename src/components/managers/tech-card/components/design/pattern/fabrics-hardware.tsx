@@ -14,7 +14,7 @@ import {
   pantoneVersion,
   subscribePantone,
 } from 'components/managers/tech-card/components/pantone-swatches';
-import { useMutationState } from '@tanstack/react-query';
+import { useMutationState, useQueryClient } from '@tanstack/react-query';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
@@ -60,6 +60,7 @@ import {
   type StartRunInput,
   type StartRunState,
 } from '../render/use-design-run';
+import { designKeys } from '../use-design-band';
 import { selectVisiblePictures } from '../visibility';
 import { patternRuns } from './model';
 import {
@@ -356,6 +357,15 @@ function MaterialBench({
     launching.size;
 
   const [saving, setSaving] = useState<ReadonlySet<string>>(new Set());
+  // Asset ids whose `save words` is in flight: the cut-out swap waits for them (one writer per asset).
+  const [wordsSaving, setWordsSaving] = useState<ReadonlySet<number>>(new Set());
+  const markWords = (assetId: number, on: boolean) =>
+    setWordsSaving((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(assetId);
+      else next.delete(assetId);
+      return next;
+    });
   const mark = (key: string, on: boolean) =>
     setSaving((prev) => {
       const next = new Set(prev);
@@ -648,9 +658,13 @@ function MaterialBench({
   // An own picture gets its words/colour without a run: rewrite the asset with the new spec.
   const saveWords = (slot: MaterialSlot, asset: common_DesignAsset) => {
     const key = pairKey(cwId, slot.bomItemId);
+    const assetId = wireInt(asset.id);
+    // Serialised with the cut-out swap (both rewrite the whole asset): never while it is cutting.
+    if (cutting.has(assetId)) return;
     const spec = specOf(slot);
     const colour = colourOf(slot, spec);
     mark(key, true);
+    markWords(assetId, true);
     writes.upsertAsset
       .mutateAsync({
         assetId: wireInt(asset.id),
@@ -666,7 +680,10 @@ function MaterialBench({
         colourHex: colour?.hex ?? '',
       })
       .catch(() => {})
-      .finally(() => mark(key, false));
+      .finally(() => {
+        mark(key, false);
+        markWords(assetId, false);
+      });
   };
 
   const clear = (slot: MaterialSlot) => {
@@ -717,6 +734,7 @@ function MaterialBench({
     band,
     artworks.map((s) => s.bomItemId).join(','),
     ARTWORK_CLIENT_CUTOUT && !disabled && speaks && capable,
+    wordsSaving,
   );
 
   /* ─── `+ artwork`: an inline born row → a DECORATION BOM line; selected once it is saved ─── */
@@ -1209,8 +1227,12 @@ function MaterialBench({
                         <Button
                           variant='underline'
                           size='xs'
-                          disabled={saving.has(selKey)}
-                          title='writes these words and colour onto the picture in the cell'
+                          disabled={saving.has(selKey) || cutting.has(wireInt(selAsset.id))}
+                          title={
+                            cutting.has(wireInt(selAsset.id))
+                              ? 'cutting…'
+                              : 'writes these words and colour onto the picture in the cell'
+                          }
                           onClick={() => saveWords(selected, selAsset)}
                           data-fh-save-words=''
                         >
@@ -2178,7 +2200,9 @@ function useArtworkCutout(
   band: GetDesignBandResponse,
   bomKey: string,
   enabled: boolean,
+  wordsSaving: ReadonlySet<number>,
 ): ReadonlySet<number> {
+  const qc = useQueryClient();
   const writes = useAssetWrites(techCardId);
   const run = useStartDesignRun(techCardId, { scope: CUTOUT_SCOPE });
   const fired = useRef(new Set<string>());
@@ -2205,35 +2229,55 @@ function useArtworkCutout(
       const key = `start:${wireInt(asset.id)}:${wireInt(asset.mediaId)}`;
       if (fired.current.has(key)) continue;
       fired.current.add(key);
-      runRef.current.start({
-        kind: 'cutout',
-        ask: '',
-        params: {
-          views: [],
-          colorwayId: 0,
-          layout: '',
-          colour: undefined,
-          threed: undefined,
-          fixTarget: '',
-          extraInputMediaIds: [wireInt(asset.mediaId)],
-          fixTargets: [],
-          fixSlotIds: [],
-          autoSplit: false,
-          detailSlotIds: [],
-          pattern: undefined,
-          freeform: undefined,
-          useFlatSlots: false,
-          flatSlotIds: [],
-          image: undefined,
-          inpaint: undefined,
-          extend: undefined,
-          video: undefined,
+      // DETERMINISTIC key: a second tab or a remount asks for the same cut-out under the same key,
+      // and the server hands back the run it already booked instead of paying for a second one.
+      const clientRequestId = cutoutRequestId(
+        techCardId,
+        wireInt(asset.id),
+        wireInt(asset.mediaId),
+      );
+      runRef.current.start(
+        {
+          kind: 'cutout',
+          ask: '',
+          params: {
+            views: [],
+            colorwayId: 0,
+            layout: '',
+            colour: undefined,
+            threed: undefined,
+            fixTarget: '',
+            extraInputMediaIds: [wireInt(asset.mediaId)],
+            fixTargets: [],
+            fixSlotIds: [],
+            autoSplit: false,
+            detailSlotIds: [],
+            pattern: undefined,
+            freeform: undefined,
+            useFlatSlots: false,
+            flatSlotIds: [],
+            image: undefined,
+            inpaint: undefined,
+            extend: undefined,
+            video: undefined,
+          },
         },
-      });
+        { clientRequestId },
+      );
     }
-    for (const { asset, mediaId } of plan.swap) {
-      const key = `swap:${wireInt(asset.id)}:${mediaId}`;
+    for (const { asset: planned, mediaId } of plan.swap) {
+      const key = `swap:${wireInt(planned.id)}:${mediaId}`;
       if (fired.current.has(key)) continue;
+      // One writer per asset: a `save words` in flight goes first; its re-read band re-plans this.
+      if (wordsSaving.has(wireInt(planned.id))) continue;
+      // Re-read the LATEST asset right before the full upsert: keep its current words and colour,
+      // change only the media and the cut marker.
+      const latest = qc
+        .getQueryData<GetDesignBandResponse>(designKeys.band(techCardId))
+        ?.assets?.find((a) => wireInt(a.id) === wireInt(planned.id));
+      const asset = latest ?? planned;
+      // Already cut, or its picture was replaced meanwhile: nothing of this swap is still true.
+      if (isCut(asset) || wireInt(asset.mediaId) !== wireInt(planned.mediaId)) continue;
       fired.current.add(key);
       upsertRef.current
         .mutateAsync({
@@ -2253,6 +2297,11 @@ function useArtworkCutout(
           // Said by the write hook; a later band re-read may retry on a fresh page.
         });
     }
-  }, [plan, enabled]);
+  }, [plan, enabled, wordsSaving, qc, techCardId]);
   return plan.cutting;
+}
+
+/** The cut-out run's key, derived from what it cuts (fits the 36-char column). */
+function cutoutRequestId(techCardId: number, assetId: number, mediaId: number): string {
+  return `cutout-${techCardId.toString(36)}-${assetId.toString(36)}-${mediaId.toString(36)}`;
 }

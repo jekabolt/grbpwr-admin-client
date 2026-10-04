@@ -23,6 +23,9 @@ import { boundAssetsByPair, pairKey, type ClothSlot } from '../pattern/slot-fabr
 import { benchSides } from '../render/model';
 import { viewLabel } from '../views';
 
+/** The server refuses a render with more placed artworks than this (`too_many_artworks`). */
+export const MAX_RENDER_ARTWORKS = 4;
+
 /** The BOM section an artwork slot is (mirrors `isLabelSlot`; MATERIALS reads the same rule). */
 export const ARTWORK_SECTION = 'TECH_CARD_BOM_SECTION_DECORATION';
 
