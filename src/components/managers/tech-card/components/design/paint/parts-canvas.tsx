@@ -14,6 +14,7 @@ import Text from 'ui/components/text';
 
 import { GROUP_GAP } from '../core';
 import { viewLabel } from '../views';
+import { inkField, LiveWire, magnetic, onInk, snapToInk, type InkField, type Pt } from './livewire';
 import { componentAt, polygonIndices } from './map-model';
 import { partIndices } from './parts-model';
 import { dilate } from './regions';
@@ -27,7 +28,9 @@ import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint'
  *   click  fills the part under the pointer: the model's named part when the side has auto parts
  *          (and the same-named part on the other sides, R9), else the region between the lines;
  *          ⌥-click fills one region only (cuts a part)
- *   pen    a polygon of the armed material, clipped to the garment — closes open outlines
+ *   pen    a polygon of the armed material, clipped to the garment — closes open outlines; it is
+ *          magnetic: a vertex lands on a line within reach, and between two vertices on lines the
+ *          edge follows the drawing (straight across a gap and over paper); ⇧ = a straight edge
  *   erase  click back to paper
  * Keys: V / P / E, ⌘Z / ⇧⌘Z, Enter closes the pen, Esc drops it.
  */
@@ -40,6 +43,8 @@ const TOOLS: PaintTool[] = ['click', 'pen', 'erase'];
 const HOVER_ALPHA = 0.45;
 
 const mod = (n: number, m: number) => ((n % m) + m) % m;
+/** Pixels the live preview may settle per frame (≈ 6 ms at 1600 px, see `yarn paint:pen`). */
+const WIRE_SLICE = 40_000;
 
 /** Texture scale: a tile shows ≈ 1/6 of the side's height. */
 function sampler(skin: PaintSkin | undefined, h: number) {
@@ -96,8 +101,16 @@ function PaintSide({
     region: 0,
   });
   const [partName, setPartName] = useState('');
-  const [pen, setPen] = useState<{ x: number; y: number }[]>([]);
-  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+  /** The pen's vertices and the edge drawn through them so far (starts at the first vertex). */
+  const [pen, setPenState] = useState<{ anchors: Pt[]; ring: Pt[] }>({ anchors: [], ring: [] });
+  /** The edge from the last vertex to the cursor. */
+  const [preview, setPreview] = useState<Pt[]>([]);
+  const wire = useRef<{
+    live: LiveWire | null;
+    spare: LiveWire | null;
+    target: Pt | null;
+    frame: number;
+  }>({ live: null, spare: null, target: null, frame: 0 });
   const { flat, labels, pixels } = view;
   const w = flat?.w ?? 0;
   const h = flat?.h ?? 0;
@@ -274,17 +287,102 @@ function PaintSide({
     ctx.putImageData(out, x0, y0);
   };
 
-  const closePen = (pts = pen) => {
-    if (flat && pts.length >= 3)
+  /** The flat's ink cost field (cached per flat). */
+  const fieldOf = (): InkField | null => (flat ? inkField(flat) : null);
+
+  const resetPen = () => {
+    const st = wire.current;
+    cancelAnimationFrame(st.frame);
+    st.frame = 0;
+    st.target = null;
+    if (st.live) st.spare = st.live;
+    st.live = null;
+    setPenState({ anchors: [], ring: [] });
+    setPreview([]);
+  };
+
+  /** The edge from `a` to `b`: along the ink when both sit on lines, else straight. */
+  const edge = (a: Pt, b: Pt, straight: boolean): Pt[] => {
+    const f = fieldOf();
+    const live = wire.current.live;
+    if (straight || !f || !live || !magnetic(f, a, b)) return [a, b];
+    live.expand(b);
+    const path = live.pathTo(b);
+    return path.length >= 2 ? path : [a, b];
+  };
+
+  /** The vertex a click at `p` makes: on the line within reach, unless ⇧. */
+  const vertexAt = (p: Pt, straight: boolean): Pt => {
+    const f = fieldOf();
+    return straight || !f ? p : snapToInk(f, p);
+  };
+
+  const closePen = (straight = false) => {
+    const { anchors, ring } = pen;
+    if (flat && anchors.length >= 3) {
+      const last = anchors[anchors.length - 1];
+      const pts = [...ring, ...edge(last, anchors[0], straight).slice(1, -1)];
       session.apply(view.view, polygonIndices(pts, flat.silhouette, w, h));
-    setPen([]);
+    }
+    resetPen();
+  };
+
+  const addVertex = (raw: Pt, straight: boolean) => {
+    const st = wire.current;
+    const v = vertexAt(raw, straight);
+    const last = pen.anchors[pen.anchors.length - 1];
+    const seg = last ? edge(last, v, straight) : [v];
+    const f = fieldOf();
+    cancelAnimationFrame(st.frame);
+    st.frame = 0;
+    const reuse = st.live ?? st.spare ?? undefined;
+    st.live = f && onInk(f, v) ? new LiveWire(f, v, reuse) : null;
+    if (!st.live && reuse) st.spare = reuse;
+    setPenState({
+      anchors: [...pen.anchors, v],
+      ring: [...pen.ring, ...(last ? seg.slice(1) : seg)],
+    });
+    setPreview([]);
+  };
+
+  /** The preview edge to the cursor; a long first reach is grown over a few frames. */
+  const trackCursor = (raw: Pt, straight: boolean) => {
+    const st = wire.current;
+    const last = pen.anchors[pen.anchors.length - 1];
+    if (!last) return;
+    const f = fieldOf();
+    const target = vertexAt(raw, straight);
+    const live = st.live;
+    if (straight || !f || !live || !magnetic(f, last, target)) {
+      cancelAnimationFrame(st.frame);
+      st.frame = 0;
+      setPreview([last, target]);
+      return;
+    }
+    st.target = target;
+    if (live.expand(target, WIRE_SLICE)) {
+      cancelAnimationFrame(st.frame);
+      st.frame = 0;
+      setPreview(live.pathTo(target));
+      return;
+    }
+    setPreview([last, target]);
+    if (st.frame) return;
+    const step = () => {
+      st.frame = 0;
+      const t = st.target;
+      if (!t || st.live !== live) return;
+      if (live.expand(t, WIRE_SLICE)) setPreview(live.pathTo(t));
+      else st.frame = requestAnimationFrame(step);
+    };
+    st.frame = requestAnimationFrame(step);
   };
 
   const onMove = (e: PointerEvent<HTMLDivElement>) => {
     if (!ready) return;
     const { x, y } = toRaster(e);
     if (tool === 'pen') {
-      setCursor({ x, y });
+      trackCursor({ x, y }, e.shiftKey);
       return;
     }
     showHover(x, y, e.altKey);
@@ -297,18 +395,19 @@ function PaintSide({
     });
     const { x, y, scale } = toRaster(e);
     if (tool === 'pen') {
-      if (pen.length >= 3) {
-        const first = pen[0];
+      const n = pen.anchors.length;
+      if (n >= 3) {
+        const first = pen.anchors[0];
         if (Math.hypot(first.x - x, first.y - y) <= 8 * scale) {
-          closePen();
+          closePen(e.shiftKey);
           return;
         }
       }
-      if (e.detail >= 2 && pen.length >= 3) {
-        closePen();
+      if (e.detail >= 2 && n >= 3) {
+        closePen(e.shiftKey);
         return;
       }
-      setPen((p) => [...p, { x, y }]);
+      addVertex({ x, y }, e.shiftKey);
       return;
     }
     if (!labels || !flat) return;
@@ -336,19 +435,28 @@ function PaintSide({
     const onKey = (ev: Event) => {
       const k = (ev as CustomEvent<string>).detail;
       if (k === 'close') closePen();
-      if (k === 'cancel') setPen([]);
+      if (k === 'cancel') resetPen();
     };
     el.addEventListener('paint-pen', onKey);
     return () => el.removeEventListener('paint-pen', onKey);
   });
 
   useEffect(() => {
-    if (tool !== 'pen') setPen([]);
-  }, [tool]);
+    if (tool !== 'pen' || wire.current.live?.field !== fieldOf()) {
+      resetPen();
+      if (tool !== 'pen') return;
+    }
+    // The ink field once per flat, before the first click needs it.
+    if (ready) fieldOf();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, ready, flat]);
+
+  useEffect(() => () => cancelAnimationFrame(wire.current.frame), []);
 
   const width = Math.round(height * (view.aspect || 0.6));
   const stroke = Math.max(1, h / height) * 1.5;
-  const tail = pen.length > 0 && cursor ? [...pen, cursor] : pen;
+  const tail = preview.length > 1 ? [...pen.ring, ...preview.slice(1)] : pen.ring;
+  const outline = tail.map((p) => `${p.x},${p.y}`).join(' ');
 
   return (
     <div
@@ -368,7 +476,7 @@ function PaintSide({
         onPointerDown={onDown}
         onPointerLeave={() => {
           clearHover();
-          setCursor(null);
+          setPreview([]);
         }}
       >
         <canvas ref={mock} className='absolute inset-0 size-full' />
@@ -379,17 +487,24 @@ function PaintSide({
             className='pointer-events-none absolute inset-0 size-full'
             viewBox={`0 0 ${w} ${h}`}
             preserveAspectRatio='none'
-            data-paint-pen={pen.length}
+            data-paint-pen={pen.anchors.length}
           >
+            {/* White under the dashes: an edge riding on a black line stays readable. */}
             <polygon
-              points={tail.map((p) => `${p.x},${p.y}`).join(' ')}
+              points={outline}
               fill={session.skins.get(session.armed)?.hex ?? '#000'}
               fillOpacity={0.3}
+              stroke='#fff'
+              strokeWidth={stroke}
+            />
+            <polygon
+              points={outline}
+              fill='none'
               stroke='#000'
               strokeWidth={stroke}
               strokeDasharray={`${stroke * 3} ${stroke * 2}`}
             />
-            {pen.map((p, i) => (
+            {pen.anchors.map((p, i) => (
               <rect
                 key={i}
                 x={p.x - stroke * 2}

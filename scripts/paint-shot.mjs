@@ -447,6 +447,61 @@ try {
     await ctx.close();
   }
   {
+    // Ф3: the magnetic pen on the shirt back — the yoke traced with four clicks (orig px of the
+    // 807×851 flat): the preview runs along the armhole and shoulder lines, the click on the
+    // first vertex closes it.
+    const { ctx, page } = await open(1440, 1000, 'f2');
+    const yoke = [
+      [194, 178],
+      [622, 181],
+      [520, 71],
+      [330, 70],
+    ].map(([x, y]) => [x / 807, y / 851]);
+    await arm(page, 2);
+    await page.click('[data-paint-tool="pen"]');
+    const side = page.locator('[data-paint-side="back"]');
+    const clip = async () => {
+      const b = await side.boundingBox();
+      return { x: b.x - 4, y: b.y - 4, width: b.width + 8, height: b.height * 0.5 };
+    };
+    for (const [fx, fy] of yoke.slice(0, 2)) await click(page, 'back', fx, fy);
+    // Sweep the cursor up to the right neck point, as a hand would.
+    for (let k = 1; k <= 6; k++) {
+      const p = await at(
+        page,
+        'back',
+        yoke[1][0] + ((yoke[2][0] - yoke[1][0]) * k) / 6,
+        yoke[1][1] + ((yoke[2][1] - yoke[1][1]) * k) / 6,
+      );
+      await page.mouse.move(p.x, p.y);
+      await page.waitForTimeout(30);
+    }
+    await page.waitForTimeout(200);
+    const pts = await page.evaluate(
+      () =>
+        document
+          .querySelector('[data-paint-side="back"] polygon')
+          ?.getAttribute('points')
+          ?.split(' ').length ?? 0,
+    );
+    console.log(`f3 preview: ${pts} points in the pen outline`);
+    if (pts < 20) errors.push(`[f3] ASSERT: the preview did not follow the lines (${pts} pts)`);
+    await page.screenshot({ path: resolve(OUT, 'f3-pen-preview-1440.png'), clip: await clip() });
+    shots.push(resolve(OUT, 'f3-pen-preview-1440.png'));
+    for (const [fx, fy] of yoke.slice(2)) await click(page, 'back', fx, fy);
+    await click(page, 'back', yoke[0][0], yoke[0][1]);
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(300);
+    const yokePx = await page.evaluate(
+      () => window.__paint.views.get('back').labels.filter((x) => x).length,
+    );
+    console.log(`f3 yoke painted: ${yokePx} px`);
+    if (yokePx < 1000) errors.push(`[f3] ASSERT: the yoke was not painted (${yokePx} px)`);
+    await page.screenshot({ path: resolve(OUT, 'f3-yoke-painted-1440.png'), clip: await clip() });
+    shots.push(resolve(OUT, 'f3-yoke-painted-1440.png'));
+    await ctx.close();
+  }
+  {
     // Ф2: a refused SuggestDesignParts shows `parts · retry`.
     const { ctx, page } = await open(1440, 1000, 'f2fail');
     await page
