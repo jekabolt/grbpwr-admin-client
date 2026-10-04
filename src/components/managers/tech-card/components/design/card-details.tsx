@@ -813,9 +813,9 @@ export function CardDetails({
                   {techCardId ? (
                     <Button
                       type='button'
-                      variant='secondary'
+                      variant='underline'
                       size='xs'
-                      className='whitespace-nowrap'
+                      className='text-labelColor hover:text-textColor whitespace-nowrap'
                       onClick={onGoColourways}
                     >
                       go to colourways ›

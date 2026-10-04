@@ -288,9 +288,9 @@ export function TechCardImport() {
               action={
                 <Button
                   type='button'
-                  variant='main'
-                  size='lg'
-                  className='uppercase'
+                  variant='underline'
+                  size='xs'
+                  className='text-labelColor hover:text-textColor'
                   loading={commit.isPending}
                   // `loading` в этом примитиве — ТОЛЬКО содержимое кнопки: ни `disabled`, ни
                   // `pointer-events-none` он не ставит (см. `ui/components/button.tsx`), и второй

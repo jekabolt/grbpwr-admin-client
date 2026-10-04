@@ -15,7 +15,7 @@ import { isPictureHidden } from '../visibility';
  *
  * Owner, verbatim: «в LATEST GENERATION в хедере если у нас засплитанная картинка сделай как CLEAR
  * THE INPUT ✕ только apply flat slots». The header action of FLAT's LATEST GENERATION, styled as
- * INPUT — REFERENCES' `clear the input ✕` (`secondary`/`xs`).
+ * INPUT — REFERENCES' `clear the input ✕`: an underlined word (`underline`/`xs`, item 32).
  *
  * The plan is the render bench's (`applyPlan`, W4 / E-6), read over the FLAT bench, PLACES ONLY: a
  * side the cut does not name is left as it is (the owner asked to put pieces in, not to empty the

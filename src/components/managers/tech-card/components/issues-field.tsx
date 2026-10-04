@@ -386,8 +386,8 @@ export function IssuesField() {
         action={
           <Button
             type='button'
-            variant='main'
-            size='sm'
+            variant='underline'
+            size='xs' className='text-labelColor hover:text-textColor'
             onClick={() => {
               append({ ...emptyIssue });
               setPendingAdd(true);

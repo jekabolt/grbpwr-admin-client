@@ -1695,8 +1695,8 @@ export function ConstructionDraft({
     drafted.count > 0 ? (
       <Button
         type='button'
-        variant='main'
-        size='sm'
+        variant='underline'
+        size='xs' className='text-labelColor hover:text-textColor'
         disabled={busy || readOnly}
         onClick={() => drafted.acceptAll()}
         data-c19-accept-all={drafted.count}

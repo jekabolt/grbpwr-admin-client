@@ -1018,7 +1018,8 @@ export function BatchMarkerQueue({
             <Button
               type='button'
               size='xs'
-              variant='secondary'
+              className='text-labelColor hover:text-textColor'
+              variant='underline'
               disabled={phase === 'preparing' || !!blocked}
               onClick={prepare}
             >
@@ -1026,10 +1027,22 @@ export function BatchMarkerQueue({
             </Button>
           ) : running ? (
             <div className='flex gap-2'>
-              <Button type='button' size='xs' variant='secondary' onClick={skipCurrent}>
+              <Button
+                type='button'
+                size='xs'
+                className='text-labelColor hover:text-textColor'
+                variant='underline'
+                onClick={skipCurrent}
+              >
                 skip
               </Button>
-              <Button type='button' size='xs' variant='secondary' onClick={stopAll}>
+              <Button
+                type='button'
+                size='xs'
+                className='text-labelColor hover:text-textColor'
+                variant='underline'
+                onClick={stopAll}
+              >
                 stop
               </Button>
             </div>
@@ -1049,13 +1062,20 @@ export function BatchMarkerQueue({
               {/* ПЕРЕПОДГОТОВКА — ЯВНОЕ ДЕЙСТВИЕ, а не автоматика. Пересобрать план сам по себе
                   экран не имеет права: разбор стоит скачивания всех DXF карточки, и делать это на
                   каждое нажатие клавиши в BOM соседней вкладки нельзя. */}
-              <Button type='button' size='xs' variant='secondary' onClick={prepare}>
+              <Button
+                type='button'
+                size='xs'
+                className='text-labelColor hover:text-textColor'
+                variant='underline'
+                onClick={prepare}
+              >
                 {stale ? 'prepare again' : 're-prepare'}
               </Button>
               <Button
                 type='button'
                 size='xs'
-                variant='secondary'
+                className='text-labelColor hover:text-textColor'
+                variant='underline'
                 disabled={selectedJobs.length === 0 || !!blocked || stale || laysLoading}
                 title={
                   stale
