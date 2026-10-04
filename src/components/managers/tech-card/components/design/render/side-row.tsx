@@ -926,6 +926,10 @@ export function SidesSection({
       id='design-render-sides'
       title='sides'
       question='· what went in, what came back'
+      /* ВОЗДУХ ПОД ШАПКОЙ (п. 46): «сделай чуть больше отступ контента от хедера». 20px — тот же
+         шов шапка → содержимое, что у FABRIC RENDER над этим блоком (`GROUP_SEAM`, mt-5); `!`,
+         потому что у `SectionHeader` свой `mb-2.5` в той же строке классов, без слияния. */
+      headerClassName='!mb-5'
       action={
         <span className='flex flex-wrap items-center gap-2'>
           {/* ⚠ НИ СЧЁТЧИКА, НИ ИМЕНИ КОЛОРВЕЯ. Счёта здесь нет намеренно: «2 of 6 sides» не

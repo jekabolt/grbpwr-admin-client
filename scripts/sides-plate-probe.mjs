@@ -4,10 +4,13 @@
 //   · п. 45, владелец: «в FABRIC RENDER в SIDES не нужно показывать с тамбнейлом RUN 52 или RUN R1» —
 //     ни в одной плите таблицы нет текста /run\s*\w+/i, а плиты при этом есть (флэты и рендеры);
 //   · без подвала плита и пустая коробка рядом остаются ОДНОГО роста (жалоба «плейсхолдеры больше
-//     самих блоков тамбнейлов»).
+//     самих блоков тамбнейлов»);
+//   · п. 46: «сделай чуть больше отступ контента от хедера» — шов шапка → таблица 20px, как у
+//     FABRIC RENDER (`GROUP_SEAM`), а не прежние 10.
 //
 //   node scripts/sides-plate-probe.mjs                  (нужен `yarn build` — CSS из dist)
 //   node scripts/sides-plate-probe.mjs --mutate=origin  происхождение снова под флэтом → N1 краснеет
+//   node scripts/sides-plate-probe.mjs --mutate=air     шов шапки снова 10px            → N3 краснеет
 //   node scripts/sides-plate-probe.mjs --mutate=height  пустые коробки ростом с подвалом → N2 краснеет
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
@@ -84,6 +87,11 @@ const MUTATIONS = {
     file: /design\/render\/side-row\.tsx$/,
     from: '<Plate picture={side.picture} name={label} alt={`flat · ${label}`} />',
     to: '<Plate picture={side.picture} name={label} origin={originWord(band, side)} alt={`flat · ${label}`} />',
+  },
+  air: {
+    file: /design\/render\/side-row\.tsx$/,
+    from: "      headerClassName='!mb-5'\n",
+    to: '',
   },
   height: {
     file: /design\/render\/side-row\.tsx$/,
@@ -206,6 +214,13 @@ try {
     empties.length > 0 && plates.every((p) => p.h === plateH) && empties.every((h) => h === plateH),
     JSON.stringify({ plates: plates.map((p) => p.h), empties }),
   );
+  // T46 · шов от черты шапки до первой строки таблицы.
+  const seam = await page.$eval('#design-render-sides', (el) => {
+    const head = el.firstElementChild.getBoundingClientRect();
+    const body = el.firstElementChild.nextElementSibling.getBoundingClientRect();
+    return Math.round(body.top - head.bottom);
+  });
+  check('N3 SIDES: 20px between the header rule and the table', seam === 20, `seam ${seam}px`);
   await ctx.close();
 } finally {
   await browser.close();
