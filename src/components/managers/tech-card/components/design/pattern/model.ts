@@ -170,7 +170,7 @@ export const REFUSAL_ADVICE: Record<string, string> = {
     'it stands now.',
   /* ─── семейство строки BOM: сервер не кладёт фурнитуру на ткань и свотч на фурнитуру ─── */
   hardware_on_cloth_line: 'this line is cloth — use a fabric',
-  swatch_on_trim_line: 'this line is a trim — generate hardware',
+  cloth_on_trim_line: 'this line is a trim — generate hardware',
   /* ─── полка полна: отказ двери ДО денег и посадка `done` с этим кодом ПОСЛЕ (след ряда) ─── */
   library_full:
     'the card holds as many assets as it may, so there is no place on it for a new fabric. Delete ' +
