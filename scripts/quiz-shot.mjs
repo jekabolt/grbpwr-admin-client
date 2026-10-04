@@ -66,20 +66,43 @@ const stubNetwork = {
         window.__calls = [];
         window.fetch = () => Promise.resolve(new Response('{}', { status: 200 }));
         const clone = (v) => JSON.parse(JSON.stringify(v ?? {}));
+        // W-B1: Save обновляет по question.id; пустая не-skipped строка — удалить id.
+        const isForget = (a) => !a.skipped && !(a.selected ?? []).length && !(a.freeText ?? '').trim();
         const answer = (name, body) => {
-          if (name === 'GetDesignQuizAnswers') return { answers: clone(window.__answers) };
+          if (name === 'GetDesignQuizAnswers') {
+            if (window.__preset?.fail) throw new Error('network down');
+            return { answers: clone(window.__answers) };
+          }
           if (name === 'GenerateDesignQuiz') return clone(window.__quiz);
+          if (name === 'EnhanceText') return { text: 'Line drawing brief.' };
           if (name === 'SaveDesignQuizAnswers') {
-            window.__answers = clone(body.answers);
-            return { answers: clone(body.answers) };
+            let list = clone(window.__answers);
+            for (const row of clone(body.answers)) {
+              const id = row.question?.id;
+              const at = list.findIndex((a) => a.question?.id === id);
+              if (isForget(row)) list = list.filter((a) => a.question?.id !== id);
+              else if (at >= 0) list[at] = row;
+              else list.push(row);
+            }
+            window.__answers = list;
+            return { answers: clone(list) };
           }
           if (name === 'DraftDesignIdea')
             return { run: { status: 'done', outputText: 'Unlined summer jacket with a stiff 3 cm stand collar, welt chest pocket and two patch hip pockets.' } };
           return {};
         };
+        const delays = () => window.__preset?.delays ?? {};
         const call = (name) => (body) => {
           window.__calls.push({ name, body: clone(body) });
-          return new Promise((r) => setTimeout(() => r(answer(name, body)), 60));
+          return new Promise((r, j) =>
+            setTimeout(() => {
+              try {
+                r(answer(name, body));
+              } catch (e) {
+                j(e);
+              }
+            }, delays()[name] ?? 60),
+          );
         };
         const nope = () => Promise.resolve({});
         export const adminService = new Proxy({}, { get: (_, name) => call(String(name)) });
@@ -151,23 +174,32 @@ try {
 }
 const shots = [];
 try {
-  const open = async (width, height) => {
-    const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
-    const page = await ctx.newPage();
-    page.on('pageerror', (e) => errors.push(`[${width}] pageerror: ${e.message}`));
-    page.on('console', (m) => {
-      if (m.type() === 'error' || m.type() === 'warning')
-        errors.push(`[${width}] console.${m.type()}: ${m.text()}`);
-    });
-    await ctx.route('http://probe.local/**', (route) =>
-      route.fulfill({ status: 200, contentType: 'text/html', body: '<div id="root"></div>' }),
-    );
-    // Шрифты из собранной CSS (`/assets/*.ttf`) — отдаём из dist, иначе снимок в запасном шрифте.
-    await ctx.route('http://probe.local/assets/**', (route) => {
-      const file = resolve(cssDir, new URL(route.request().url()).pathname.split('/').pop());
-      return existsSync(file) ? route.fulfill({ path: file }) : route.fulfill({ status: 404 });
-    });
+  // `preset` — до бандла: сохранённые ответы, задержки по имени вызова, отказ чтения ответов.
+  // `reuse` — та же вкладка (sessionStorage живёт): «перезагрузка» для W-C3.
+  const open = async (width, height, preset = {}, reuse = null) => {
+    const ctx =
+      reuse?.ctx ??
+      (await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 }));
+    const page = reuse?.page ?? (await ctx.newPage());
+    if (!reuse) {
+      page.on('pageerror', (e) => errors.push(`[${width}] pageerror: ${e.message}`));
+      page.on('console', (m) => {
+        if (m.type() === 'error' || m.type() === 'warning')
+          errors.push(`[${width}] console.${m.type()}: ${m.text()}`);
+      });
+      await ctx.route('http://probe.local/**', (route) =>
+        route.fulfill({ status: 200, contentType: 'text/html', body: '<div id="root"></div>' }),
+      );
+      // Шрифты из собранной CSS (`/assets/*.ttf`) — отдаём из dist, иначе снимок в запасном шрифте.
+      await ctx.route('http://probe.local/assets/**', (route) => {
+        const file = resolve(cssDir, new URL(route.request().url()).pathname.split('/').pop());
+        return existsSync(file) ? route.fulfill({ path: file }) : route.fulfill({ status: 404 });
+      });
+    }
     await page.goto('http://probe.local/');
+    await page.evaluate((p) => {
+      window.__preset = p;
+    }, preset);
     await page.addStyleTag({ content: CSS });
     await page.addStyleTag({ content: 'body{background:var(--bgColor,#fff)}' });
     await page.addScriptTag({ content: bundle });
@@ -300,6 +332,43 @@ try {
       saved.some((a) => a.question.id === 'clarify_insulation'),
       'clarify answer stored',
     );
+    // W-C1/W-B1: каждый ответ шлёт только свою строку (и, может быть, забытое уточнение).
+    const saves = (await page.evaluate(() => window.__calls)).filter(
+      (c) => c.name === 'SaveDesignQuizAnswers',
+    );
+    check(
+      saves.every((c) => c.body.answers.length <= 2),
+      `saves carry only their own rows (max ${Math.max(...saves.map((c) => c.body.answers.length))})`,
+    );
+    // W-C2: 9 ответов → брифов WORDS не больше одного, и он после прогона.
+    await page.waitForTimeout(700);
+    const briefs = (await page.evaluate(() => window.__calls)).filter(
+      (c) => c.name === 'EnhanceText',
+    ).length;
+    check(briefs <= 1 && briefs >= 1, `9 answers → ${briefs} EnhanceText call (≤ 1)`);
+    // W-C6: пропуск в списке — `later`.
+    check(
+      (await page.textContent(quiz)).includes('later'),
+      'skipped answer shows as later in the list',
+    );
+    // W-C8: строки решений — как у сервера.
+    const lines = await page.evaluate(() => {
+      const extra = ['lbl_brand', 'lbl_hang_tag'].map((part) => ({
+        question: { id: part, category: 'finish', part, question: 'Where?' },
+        selected: ['neck'],
+        freeText: '',
+        skipped: false,
+      }));
+      return window.__model.decisionLines([...window.__answers, ...extra]);
+    });
+    check(
+      lines.includes('collar — How does the collar stand? → stiff stand, 3 cm') &&
+        lines.includes('button — How many buttons does it use? → four') &&
+        lines.includes('brand label — Where? → neck') &&
+        lines.includes('hang tag — Where? → neck') &&
+        lines.some((l) => l.endsWith('own words: "pen slot in the left one"')),
+      `decision lines are question-qualified, hw_/lbl_ humanised (${lines.join(' | ')})`,
+    );
     // правка из списка: открыть «collar», выбрать другой вариант
     await btn(page, 'How does the collar stand?').click();
     await page.waitForSelector('[data-quiz]');
@@ -322,7 +391,236 @@ try {
       'concept written through the drafted journal with before',
     );
     await shoot(page, 'quiz-1440-applied.png');
+    // W-C11: правка родителя ушла от противоречия — его уточнение забыто.
+    await btn(page, 'Is the jacket insulated').click();
+    await page.waitForSelector('[data-quiz]');
+    await btn(page, 'unlined, summer weight').click();
+    await page.waitForFunction(() => !document.querySelector('[data-quiz]'));
+    await page.waitForTimeout(150);
+    check(
+      !(await page.evaluate(() => window.__answers)).some(
+        (a) => a.question.id === 'clarify_insulation',
+      ),
+      'editing a parent away from the contradiction forgets its clarify answer',
+    );
+    // …и правка в противоречие спрашивает уточнение прямо в правке.
+    await btn(page, 'Is the jacket insulated').click();
+    await page.waitForSelector('[data-quiz]');
+    await btn(page, 'quilted down, 120 g').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('thin shell'),
+    );
+    check(true, 'edit to a contradicting option asks its clarification');
+    await page.keyboard.press('1');
+    await page.waitForFunction(() => !document.querySelector('[data-quiz]'));
+    await page.waitForTimeout(150);
+    check(
+      (await page.evaluate(() => window.__answers)).some(
+        (a) => a.question.id === 'clarify_insulation',
+      ),
+      'clarify answered from edit is stored',
+    );
+    // W-C7: forget у строки — пустая строка id, сервер удаляет.
+    const before = (await page.evaluate(() => window.__answers)).length;
+    const row = page.locator(`${quiz} li`, { hasText: 'Which season is it for?' });
+    await row.hover();
+    await shoot(page, 'quiz-1440-forget-hover.png');
+    await row.locator('button', { hasText: 'forget' }).click();
+    await page.waitForTimeout(250);
+    const after = await page.evaluate(() => window.__answers);
+    const lastSave = (await page.evaluate(() => window.__calls))
+      .filter((c) => c.name === 'SaveDesignQuizAnswers')
+      .pop();
+    check(
+      after.length === before - 1 &&
+        !after.some((a) => a.question.id === 'season') &&
+        lastSave.body.answers.length === 1 &&
+        lastSave.body.answers[0].selected.length === 0 &&
+        lastSave.body.answers[0].skipped === false,
+      'forget sends one empty row and the answer is gone',
+    );
+    check(
+      !(await page.textContent(quiz)).includes('Which season is it for?'),
+      'forgotten line left the list (optimistic)',
+    );
+    // W-C11: при 15/15 уточнение заменяет последний неотвеченный базовый вопрос.
+    const cap = await page.evaluate(() => {
+      const m = window.__model;
+      const base = (i) => ({
+        id: `q${i}`,
+        category: 'design',
+        part: 'whole',
+        kind: 'single',
+        question: `q${i}?`,
+        options: ['a', 'b'],
+        contradicts: [i === 0, false],
+        clarifyQuestion: i === 0 ? 'which?' : '',
+        clarifyOptions: i === 0 ? ['x', 'y'] : [],
+      });
+      const queue = Array.from({ length: 15 }, (_, i) => base(i));
+      const next = m.insertClarify(queue, 0, m.clarifyOf(queue[0], ['a']));
+      return { n: next.length, second: next[1].id, last: next[14].id };
+    });
+    check(
+      cap.n === 15 && cap.second === 'clarify_q0' && cap.last === 'q13',
+      `clarify at 15/15 replaces the last unanswered base question (${JSON.stringify(cap)})`,
+    );
     await ctx.close();
+  }
+  {
+    // W-C1: пока сохранённые ответы не прочитаны — ASK ME мёртв, вызова нет.
+    const seeded = [
+      {
+        question: {
+          id: 'collar',
+          category: 'details',
+          part: 'collar',
+          question: 'How does the collar stand?',
+          options: ['soft, folds flat', 'stiff stand, 3 cm'],
+        },
+        selected: ['soft, folds flat'],
+        freeText: '',
+        skipped: false,
+      },
+    ];
+    const { ctx, page } = await open(1440, 900, {
+      answers: seeded,
+      delays: { GetDesignQuizAnswers: 1500 },
+    });
+    check(
+      (await page.locator(`${quiz} [data-inert]`, { hasText: 'ASK ME' }).count()) === 1,
+      'ASK ME inert before the answers load',
+    );
+    await shoot(page, 'quiz-1440-loading.png');
+    await page.locator(`${quiz} [data-inert]`, { hasText: 'ASK ME' }).click({ force: true });
+    await page.waitForTimeout(100);
+    check(
+      !(await page.evaluate(() => window.__calls)).some((c) => c.name === 'GenerateDesignQuiz'),
+      'no GenerateDesignQuiz before the answers load',
+    );
+    await page.waitForFunction(
+      () => document.querySelector('[data-probe="quiz"] [data-inert]') === null,
+    );
+    check(true, 'ASK ME live once the answers loaded');
+    await ctx.close();
+  }
+  {
+    // W-C1: чтение упало — тихий `retry`, двери записи нет.
+    const { ctx, page } = await open(1440, 900, { fail: true });
+    await btn(page, 'retry').waitFor({ timeout: 5000 });
+    check(
+      (await page.locator(`${quiz} [data-inert]`, { hasText: 'ASK ME' }).count()) === 1,
+      'answers GET error → ASK ME inert + retry',
+    );
+    await shoot(page, 'quiz-1440-load-error.png');
+    await page.evaluate(() => {
+      window.__preset.fail = false;
+    });
+    await btn(page, 'retry').click();
+    await page.waitForFunction(
+      () => document.querySelector('[data-probe="quiz"] [data-inert]') === null,
+    );
+    check(true, 'retry loads the answers and opens ASK ME');
+    await ctx.close();
+  }
+  {
+    // W-C10 секунды · W-C4 back · W-C5 чип-потом-слова · W-C3 later/resume без второго вызова.
+    const tab = await open(1440, 900, { delays: { GenerateDesignQuiz: 2300 } });
+    const { page } = tab;
+    await btn(page, 'ASK ME').click();
+    await page.waitForTimeout(1400);
+    const pending = await page.textContent(quiz);
+    check(/reading the board… [12] s/.test(pending), 'pending label shows elapsed seconds');
+    await shoot(page, 'quiz-1440-pending-seconds.png');
+    await page.waitForSelector('[data-quiz]');
+    await btn(page, 'unlined, summer weight').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('2 / 8'),
+    );
+    await btn(page, 'soft, folds flat').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('3 / 8'),
+    );
+    await btn(page, 'back').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('2 / 8'),
+    );
+    const prior = await btn(page, 'soft, folds flat').getAttribute('class');
+    check(
+      prior.includes('bg-textColor'),
+      'back shows the previous question with its answer selected',
+    );
+    await shoot(page, 'quiz-1440-back.png');
+    await btn(page, 'stiff stand, 3 cm').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('3 / 8'),
+    );
+    const afterBack = await page.evaluate(() => window.__answers);
+    check(
+      afterBack.length === 2 &&
+        afterBack.find((a) => a.question.id === 'collar')?.selected[0] === 'stiff stand, 3 cm',
+      're-answer after back replaces in place',
+    );
+    await btn(page, 'inside zip pocket').click();
+    await page.click('[data-quiz] button:has-text("next ›")');
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('4 / 8'),
+    );
+    // W-C5: поле в фокусе → чип не продвигает, `next ›` стоит.
+    await page.focus('[data-quiz] textarea');
+    await btn(page, 'mid thigh').click();
+    await page.waitForTimeout(400);
+    check(
+      (await page.textContent('[data-quiz]')).includes('4 / 8') &&
+        (await page.locator('[data-quiz] button', { hasText: 'next ›' }).count()) === 1,
+      'chip with the own-answer field focused does not advance; next › shows',
+    );
+    await page.fill('[data-quiz] textarea', 'with side splits');
+    await shoot(page, 'quiz-1440-chip-then-words.png');
+    await page.click('[data-quiz] button:has-text("next ›")');
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('5 / 8'),
+    );
+    const len = (await page.evaluate(() => window.__answers)).find(
+      (a) => a.question.id === 'length',
+    );
+    check(
+      len?.selected[0] === 'mid thigh' && len?.freeText === 'with side splits',
+      'chip + own words saved together',
+    );
+    // W-C3: later → resume N; «перезагрузка» → resume без GenerateDesignQuiz.
+    await btn(page, 'later').click();
+    await page.waitForFunction(() => !document.querySelector('[data-quiz]'));
+    check(
+      (await btn(page, 'resume').textContent()).trim() === 'resume 4',
+      'later keeps the queue: resume 4',
+    );
+    await shoot(page, 'quiz-1440-later.png');
+    const kept = await page.evaluate(() => window.__answers);
+    await open(1440, 900, { answers: kept }, tab);
+    await btn(page, 'resume 4').waitFor({ timeout: 5000 });
+    check(true, 'after reload the row offers resume 4');
+    await shoot(page, 'quiz-1440-resume.png');
+    await btn(page, 'resume 4').click();
+    await page.waitForSelector('[data-quiz]');
+    const resumed = await page.textContent('[data-quiz]');
+    check(
+      resumed.includes('1 / 4') && resumed.includes('Which season is it for?'),
+      'resume opens the first unanswered question',
+    );
+    check(
+      !(await page.evaluate(() => window.__calls)).some((c) => c.name === 'GenerateDesignQuiz'),
+      'resume makes no GenerateDesignQuiz call',
+    );
+    await btn(page, 'later').click();
+    await btn(page, 'discard').click();
+    await page.waitForTimeout(100);
+    check(
+      (await page.locator(`${quiz} button`, { hasText: 'resume' }).count()) === 0 &&
+        (await page.evaluate(() => sessionStorage.getItem('quiz:1'))) === null,
+      'discard drops the saved queue',
+    );
+    await tab.ctx.close();
   }
   {
     const { ctx, page } = await open(390, 844);
@@ -333,6 +631,7 @@ try {
   }
 } finally {
   await browser.close();
+  if (errors.length) for (const e of errors) console.log('  ' + e);
 }
 
 for (const s of shots) console.log(s);

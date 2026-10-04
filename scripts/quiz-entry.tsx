@@ -2,11 +2,28 @@
 // блоке, как под лентой MOODBOARD. Сеть — прокси в `quiz-shot.mjs`: `GenerateDesignQuiz` отдаёт
 // фикстуру из шести вопросов (один с противоречащим вариантом и уточнением, один multi),
 // `SaveDesignQuizAnswers` кладёт список в `window.__answers`, `DraftDesignIdea` — прозу.
+//
+// W-C2: `BriefProbe` — настоящие `useCardFacts` → `wordsBriefSource` → `requestBrief` с дребезгом,
+// как у `useWordsSeeding` (короче: 120 мс), и `EnhanceText` через настоящий `enhanceText`. Счёт
+// вызовов `EnhanceText` в `window.__calls` — сколько брифов стоил прогон квиза.
+// `window.__preset` (ставит `quiz-shot.mjs` до бандла): сохранённые ответы, задержка/отказ чтения.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
 import { createRoot } from 'react-dom/client';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
+import { wordsBriefSource } from 'components/managers/tech-card/components/design/core/card-facts';
+import { useCardFacts } from 'components/managers/tech-card/components/design/head/card-facts-form';
 import { MoodQuiz } from 'components/managers/tech-card/components/design/mood-quiz';
+import {
+  clarifyOf,
+  decisionLines,
+  insertClarify,
+} from 'components/managers/tech-card/components/design/quiz-model';
+import { requestBrief } from 'components/managers/tech-card/components/design/words-brief';
+import { DictionaryProvider } from 'lib/providers/dictionary-provider';
+import { enhanceText } from 'ui/components/ai-enhance';
 import { Section } from 'ui/components/section';
 
 const q = (
@@ -89,7 +106,30 @@ const q = (
     ]),
   ],
 };
-(window as unknown as { __answers: unknown[] }).__answers = [];
+type Preset = { answers?: unknown[] };
+const w = window as unknown as { __answers: unknown[]; __preset?: Preset; __model: unknown };
+w.__answers = w.__preset?.answers ?? [];
+w.__model = { clarifyOf, decisionLines, insertClarify };
+
+const always = () => true;
+function BriefProbe() {
+  const facts = useCardFacts(always);
+  const source = useMemo(() => wordsBriefSource(facts), [facts]);
+  const key = JSON.stringify([source.text, source.context]);
+  const [settled, setSettled] = useState(key);
+  useEffect(() => {
+    if (settled === key) return;
+    const t = setTimeout(() => setSettled(key), 120);
+    return () => clearTimeout(t);
+  }, [key, settled]);
+  useEffect(() => {
+    if (settled !== key || !source.text) return;
+    requestBrief(source.text, source.context, (r) =>
+      enhanceText({ text: r.text, context: r.context, mode: 'prompt', field: 'words' }),
+    );
+  }, [settled, key, source]);
+  return null;
+}
 
 function Concept() {
   const v = useWatch({ name: 'concept' }) as string;
@@ -109,23 +149,42 @@ const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 createRoot(document.getElementById('root') as HTMLElement).render(
   <QueryClientProvider client={qc}>
     <DesignCapabilityProvider value>
-      <Form>
-        <div data-probe='quiz' style={{ padding: 24, maxWidth: 1000 }}>
-          <Section id='mb-board' title='moodboard'>
-            <div className='space-y-stack'>
-              <div
-                style={{
-                  height: 120,
-                  background: 'repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0/24px 24px',
-                }}
-                aria-label='board strip stand-in'
-              />
-              <MoodQuiz techCardId={1} readOnly={false} pictures={3} concept='' conceptMax={2000} />
-            </div>
-          </Section>
-          <Concept />
-        </div>
-      </Form>
+      <DictionaryProvider>
+        <MemoryRouter initialEntries={['/tech-cards/1']}>
+          <Routes>
+            <Route
+              path='/tech-cards/:id'
+              element={
+                <Form>
+                  <BriefProbe />
+                  <div data-probe='quiz' style={{ padding: 24, maxWidth: 1000 }}>
+                    <Section id='mb-board' title='moodboard'>
+                      <div className='space-y-stack'>
+                        <div
+                          style={{
+                            height: 120,
+                            background:
+                              'repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0/24px 24px',
+                          }}
+                          aria-label='board strip stand-in'
+                        />
+                        <MoodQuiz
+                          techCardId={1}
+                          readOnly={false}
+                          pictures={3}
+                          concept=''
+                          conceptMax={2000}
+                        />
+                      </div>
+                    </Section>
+                    <Concept />
+                  </div>
+                </Form>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </DictionaryProvider>
     </DesignCapabilityProvider>
   </QueryClientProvider>,
 );
