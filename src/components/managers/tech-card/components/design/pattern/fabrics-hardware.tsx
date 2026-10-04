@@ -733,8 +733,12 @@ function MaterialBench({
           .filter((r): r is common_DesignRun => !!r && !isCancelling(r))
       : [];
 
-  /* ─── `all empty slots · N` never fires on one click: the door turns into `yes · no` ─── */
+  /* ─── batch fill (round 6 · X4): a block-level action in the MATERIALS header aside. The door
+     `fill N empty` never fires on one click — it turns into `make N pictures · yes · no`; hover
+     or focus on it (and the asking itself) marks exactly the cells it will make. ─── */
   const [confirmAll, setConfirmAll] = useState(false);
+  const [fillHover, setFillHover] = useState(false);
+  const fillMarks = new Set(fillHover || confirmAll ? emptyBatch.map((s) => s.bomItemId) : []);
   const yesRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!confirmAll) return;
@@ -742,6 +746,120 @@ function MaterialBench({
     const t = setTimeout(() => setConfirmAll(false), 5_000);
     return () => clearTimeout(t);
   }, [confirmAll]);
+
+  const fillLabel =
+    emptyBatch.length < emptyN
+      ? `fill ${emptyBatch.length} of ${emptyN} empty`
+      : `fill ${emptyN} empty`;
+  const dot = (
+    <Text size='micro' variant='label' component='span'>
+      ·
+    </Text>
+  );
+  const batchAside = (
+    <span className='flex flex-wrap items-center justify-end gap-1.5' data-fh-batch=''>
+      <Text size='micro' variant='label' component='span' data-fh-filled=''>
+        {dressed(slots)} of {slots.length} filled
+      </Text>
+      {liveHere.length > 0 && (
+        <>
+          {dot}
+          <Text
+            size='micro'
+            component='span'
+            className='uppercase'
+            data-fh-making={liveHere.length}
+          >
+            making {liveHere.length}
+          </Text>
+          {liveHere.length >= 2 && (
+            <>
+              {dot}
+              <Button
+                variant='underline'
+                size='xs'
+                title='stop every run of this colourway — calls already sent cannot be recalled; answers that still arrive are recorded and paid for'
+                onClick={() => liveHere.forEach((r) => cancelRun(r.id ?? 0))}
+                data-fh-cancel-all={liveHere.length}
+              >
+                cancel all
+              </Button>
+            </>
+          )}
+        </>
+      )}
+      {emptyN > 0 && confirmAll && (
+        <span
+          className='flex items-center gap-1.5'
+          data-fh-all-confirm={emptyBatch.length}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setConfirmAll(false);
+          }}
+          onBlur={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setConfirmAll(false);
+          }}
+        >
+          {dot}
+          <Text size='micro' component='span' className='uppercase'>
+            make {emptyBatch.length} picture{emptyBatch.length === 1 ? '' : 's'}
+          </Text>
+          {dot}
+          <Button
+            ref={yesRef}
+            variant='underline'
+            size='xs'
+            disabled={!emptyGate.ok}
+            onClick={() => {
+              setConfirmAll(false);
+              setFillHover(false);
+              generate(emptyBatch);
+            }}
+            data-fh-all-yes=''
+          >
+            yes
+          </Button>
+          {dot}
+          <Button
+            variant='underline'
+            size='xs'
+            onClick={() => setConfirmAll(false)}
+            data-fh-all-no=''
+          >
+            no
+          </Button>
+        </span>
+      )}
+      {emptyN > 0 && !confirmAll && (
+        <>
+          {dot}
+          <Button
+            variant='underline'
+            size='xs'
+            disabled={!emptyGate.ok}
+            title={
+              !emptyGate.ok
+                ? emptyGate.reason
+                : emptyBatch.length < emptyN
+                  ? `shelf room for ${emptyBatch.length} of ${emptyN}`
+                  : 'makes every empty slot from its own words — fabrics in their colour, hardware without one'
+            }
+            onPointerEnter={() => setFillHover(true)}
+            onPointerLeave={() => setFillHover(false)}
+            onFocus={() => setFillHover(true)}
+            onBlur={() => setFillHover(false)}
+            onClick={() => {
+              // The marks stay on through `confirmAll`; the door itself unmounts.
+              setFillHover(false);
+              setConfirmAll(true);
+            }}
+            data-fh-all-empty={emptyBatch.length}
+          >
+            {fillLabel}
+          </Button>
+        </>
+      )}
+    </span>
+  );
 
   const group = (title: string, list: MaterialSlot[]) =>
     list.length === 0 ? null : (
@@ -778,6 +896,7 @@ function MaterialBench({
                 {/* The cell is a SELECTOR only: click (captured) or Enter/Space selects the slot.
                     It never opens the library — `use own picture` in the panel does that. */}
                 <IntakeCell
+                  marked={fillMarks.has(slot.bomItemId)}
                   enabled={writable && !saving.has(key)}
                   purpose={`design · ${slot.name}`}
                   onArrive={() => pick(slot)}
@@ -853,6 +972,7 @@ function MaterialBench({
       id='design-pattern'
       title='materials'
       question={cwName ? `· ${cwName}` : '· pick a colourway'}
+      action={slots.length > 0 && cwId > 0 ? batchAside : undefined}
     >
       {slots.length === 0 ? (
         <EmptyState
@@ -939,15 +1059,18 @@ function MaterialBench({
                       ) : (
                         <>
                           <InertDoor label='use own picture' reason={ownGate.reason} size='sm' />
-                          <Text
-                            size='micro'
-                            variant='label'
-                            component='span'
-                            className='normal-case'
-                            data-fh-own-reason=''
-                          >
-                            {ownGate.reason}
-                          </Text>
+                          {/* Said once: the GENERATE reason line above already says the same. */}
+                          {(selGate.ok || selGate.reason !== ownGate.reason) && (
+                            <Text
+                              size='micro'
+                              variant='label'
+                              component='span'
+                              className='normal-case'
+                              data-fh-own-reason=''
+                            >
+                              {ownGate.reason}
+                            </Text>
+                          )}
                         </>
                       )}
                       <Money data-probe='run-price' />
@@ -961,76 +1084,6 @@ function MaterialBench({
                           data-fh-save-words=''
                         >
                           save words
-                        </Button>
-                      )}
-                      {emptyBatch.length > 0 && confirmAll && (
-                        <span
-                          className='flex items-center gap-1.5'
-                          data-fh-all-confirm={emptyBatch.length}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') setConfirmAll(false);
-                          }}
-                          onBlur={(e) => {
-                            if (!e.currentTarget.contains(e.relatedTarget as Node | null))
-                              setConfirmAll(false);
-                          }}
-                        >
-                          <Text size='micro' component='span' className='uppercase'>
-                            make {emptyBatch.length} picture{emptyBatch.length === 1 ? '' : 's'}?
-                          </Text>
-                          <Button
-                            ref={yesRef}
-                            variant='underline'
-                            size='xs'
-                            disabled={!emptyGate.ok}
-                            onClick={() => {
-                              setConfirmAll(false);
-                              generate(emptyBatch);
-                            }}
-                            data-fh-all-yes=''
-                          >
-                            yes
-                          </Button>
-                          <Text size='micro' variant='label' component='span'>
-                            ·
-                          </Text>
-                          <Button
-                            variant='underline'
-                            size='xs'
-                            onClick={() => setConfirmAll(false)}
-                            data-fh-all-no=''
-                          >
-                            no
-                          </Button>
-                        </span>
-                      )}
-                      {emptyBatch.length > 0 && !confirmAll && (
-                        <Button
-                          variant='underline'
-                          size='xs'
-                          disabled={!emptyGate.ok}
-                          title={
-                            !emptyGate.ok
-                              ? emptyGate.reason
-                              : emptyBatch.length < emptyN
-                                ? `shelf room for ${emptyBatch.length} of ${emptyN}`
-                                : 'makes every empty slot from its own words — fabrics in their colour, hardware without one'
-                          }
-                          onClick={() => setConfirmAll(true)}
-                          data-fh-all-empty={emptyBatch.length}
-                        >
-                          all empty slots · {emptyBatch.length}
-                        </Button>
-                      )}
-                      {liveHere.length >= 2 && (
-                        <Button
-                          variant='underline'
-                          size='xs'
-                          title='stop every run of this colourway — calls already sent cannot be recalled; answers that still arrive are recorded and paid for'
-                          onClick={() => liveHere.forEach((r) => cancelRun(r.id ?? 0))}
-                          data-fh-cancel-all={liveHere.length}
-                        >
-                          cancel all
                         </Button>
                       )}
                     </span>
@@ -1547,10 +1600,13 @@ function IntakeCell({
   purpose,
   onMedia,
   onArrive,
+  marked,
   className,
   children,
   ...rest
 }: {
+  /** Batch-fill preview: this cell is one the `fill N empty` door will make. */
+  marked?: boolean;
   enabled: boolean;
   purpose: string;
   onMedia: (media: common_MediaFull) => void;
@@ -1596,8 +1652,11 @@ function IntakeCell({
           intake.regionHandlers.onDrop(e);
         }}
         data-fh-dragging={intake.dragging ? '' : undefined}
+        data-fh-fill-mark={marked ? '' : undefined}
         className={cn(
           className,
+          marked &&
+            'outline-1 outline-offset-2 outline-textColor outline-dashed [&_[data-bench-cap]_span]:text-textColor',
           intake.dragging && 'outline outline-2 outline-offset-2 outline-textColor',
         )}
       >

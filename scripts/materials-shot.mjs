@@ -272,8 +272,30 @@ try {
       await page.waitForTimeout(300);
     }
 
-    // `all empty slots · N` asks first: one click turns it into `yes · no`; `no` reverts.
+    // Round 6 · X4: batch fill lives in the MATERIALS header aside (`N of M filled · fill K empty`),
+    // not in the GENERATE row. Hover marks exactly the cells it will make; asking keeps the marks.
+    if ((await page.locator('[data-fh-batch] [data-fh-all-empty]').count()) !== 1)
+      errors.push('[1440] ASSERT: `fill N empty` is not in the header aside');
+    if ((await page.locator('[data-fh-generate] [data-fh-all-empty]').count()) !== 0)
+      errors.push('[1440] ASSERT: batch fill still in the GENERATE row');
+    await page.mouse.move(5, 5);
+    await page.hover('[data-fh-all-empty]');
+    await page.waitForTimeout(200);
+    const fillN = Number(await page.getAttribute('[data-fh-all-empty]', 'data-fh-all-empty'));
+    const marks = await page.locator('[data-fh-fill-mark]').count();
+    if (marks !== fillN || fillN < 1)
+      errors.push(`[1440] ASSERT: fill preview marks ${marks} cells for ${fillN}`);
+    else console.log(`assert ok: fill preview marks exactly ${marks} cells`);
+    await shoot(page, 'r6-fill-hover-1440.png');
+    // One click asks `make N pictures · yes · no` in place; the marks stay; `no` reverts.
     await page.click('[data-fh-all-empty]');
+    if ((await page.locator('[data-fh-batch] [data-fh-all-confirm]').count()) !== 1)
+      errors.push('[1440] ASSERT: confirm is not in the header aside');
+    if ((await page.locator('[data-fh-fill-mark]').count()) !== fillN)
+      errors.push('[1440] ASSERT: preview marks dropped while asking');
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(200);
+    await shoot(page, 'r6-fill-confirm-1440.png');
     if ((await page.locator('[data-fh-all-confirm]').count()) !== 1)
       errors.push('[1440] ASSERT: all empty slots fired without asking');
     if ((await page.locator('[data-fh-pending]').count()) > 0)
@@ -407,8 +429,12 @@ try {
     // Two live runs on this colourway: making cells carry the cancel corner; `cancel all` shows.
     const { ctx, page } = await open(1440, 1000, '#making');
     await page.waitForSelector('[data-fh-pending] [data-run-cancel]');
-    if ((await page.locator('[data-fh-cancel-all]').count()) !== 1)
-      errors.push('[1440] ASSERT: no `cancel all` with two live runs');
+    if ((await page.locator('[data-fh-batch] [data-fh-cancel-all]').count()) !== 1)
+      errors.push('[1440] ASSERT: no `cancel all` in the header aside with two live runs');
+    if ((await page.locator('[data-fh-batch] [data-fh-making="2"]').count()) !== 1)
+      errors.push('[1440] ASSERT: header aside does not say `making 2`');
+    if ((await page.locator('[data-fh-generate] [data-fh-cancel-all]').count()) !== 0)
+      errors.push('[1440] ASSERT: `cancel all` still in the GENERATE row');
     await page.click('[data-fh-cell="2"]');
     await page.waitForSelector('[data-fh-for="2"]');
     await page.mouse.move(5, 5);
