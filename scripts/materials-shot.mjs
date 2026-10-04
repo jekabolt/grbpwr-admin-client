@@ -435,7 +435,7 @@ try {
     await ctx.close();
   }
   {
-    // Round 7 · ARTWORK: group after HARDWARE, `+ artwork` → inline born row → BOM line → selected.
+    // Round 7 · ARTWORK: group after HARDWARE; `+ artwork` → BOM line born AND selected in one click.
     const { ctx, page } = await open(1440, 1000);
     const settle = async () => {
       await page.mouse.move(5, 5);
@@ -450,27 +450,113 @@ try {
       errors.push('[1440] ASSERT: the filled artwork cell has no checkerboard');
     if ((await page.locator('[data-fh-slot="8"] [data-trim-backdrop="artwork"]').count()) !== 1)
       errors.push('[1440] ASSERT: the empty artwork cell has no artwork pictogram');
+    // r7b · ONE click on `+ artwork` births the line AND selects it at once — before any id.
+    const lines = () => page.evaluate(() => window.__form.getValues('bomItems'));
+    const panel = async () => ({
+      for_: await page.getAttribute('[data-fh-generate]', 'data-fh-for'),
+      state: await page.getAttribute('[data-fh-generate]', 'data-fh-generate'),
+      subj: (await page.textContent('[data-fh-subject]'))?.trim(),
+    });
     await page.click('[data-fh-new-artwork="live"]');
-    await page.waitForSelector('[data-fh-born="open"]');
-    if (
-      (await page.inputValue('[data-fh-born-name]')) !== '' ||
-      (await page.getAttribute('[data-fh-born-name]', 'placeholder')) !== 'embroidery'
-    )
-      errors.push('[1440] ASSERT: born row does not start from embroidery');
-    await page.fill('[data-fh-born-name]', 'chest embroidery');
-    await settle();
-    await shoot(page, 'r7-artwork-born-1440.png');
-    await page.click('[data-fh-born-add]');
-    await page
-      .waitForSelector('[data-fh-for="800"]', { timeout: 5000 })
-      .then(() =>
-        console.log('assert ok: + artwork adds a DECORATION line and selects it once saved'),
+    {
+      const p = await panel();
+      if (p.for_ !== 'saving' || p.state !== 'inert' || p.subj !== 'artwork 1')
+        errors.push(
+          `[1440] ASSERT r7b: first click did not select ARTWORK 1 at once ${JSON.stringify(p)}`,
+        );
+      const reason = (await page.textContent('[data-fh-generate-reason]'))?.trim();
+      if (reason !== 'saving…') errors.push(`[1440] ASSERT r7b: pending reason «${reason}»`);
+      if ((await page.locator('[data-fh-own-picture]').count()) !== 0)
+        errors.push('[1440] ASSERT r7b: use own picture is live before the id landed');
+      if (
+        (await page
+          .locator(
+            '[data-fh-group="artwork"] [data-fh-born-line][data-fh-selected] [data-trim-backdrop="artwork"]',
+          )
+          .count()) !== 1
       )
-      .catch(() => errors.push('[1440] ASSERT: the born artwork was not selected after save'));
-    if ((await page.locator('[data-fh-born]').count()) !== 0)
-      errors.push('[1440] ASSERT: born row still open after save');
+        errors.push('[1440] ASSERT r7b: the pending artwork cell is not a selected pictogram cell');
+      if ((await page.locator('[data-fh-born]').count()) !== 0)
+        errors.push('[1440] ASSERT r7b: an inline born row is still drawn');
+      const l = (await lines()).at(-1);
+      if (
+        l?.section !== 'TECH_CARD_BOM_SECTION_DECORATION' ||
+        l?.name !== 'artwork 1' ||
+        l?.spec !== 'embroidery' ||
+        l?.kind !== 'TECH_CARD_BOM_KIND_EMBROIDERY'
+      )
+        errors.push(`[1440] ASSERT r7b: born line ${JSON.stringify(l)}`);
+      else
+        console.log('assert ok: one click on + artwork → line born, GENERATE · ARTWORK 1 at once');
+    }
+    await page
+      .waitForSelector('[data-fh-generate="live"][data-fh-for="800"]', { timeout: 5000 })
+      .then(() => console.log('assert ok: GENERATE goes live once the autosave stub gives id 800'))
+      .catch(() => errors.push('[1440] ASSERT r7b: GENERATE not live after the id landed'));
+    if ((await page.locator('[data-fh-own-picture]').count()) !== 1)
+      errors.push('[1440] ASSERT r7b: use own picture still inert after the id landed');
+    // Second click: ARTWORK 2, selected at once; the first stays its own cell.
+    await page.click('[data-fh-new-artwork="live"]');
+    {
+      const p2 = await panel();
+      if (p2.for_ !== 'saving' || p2.subj !== 'artwork 2')
+        errors.push(
+          `[1440] ASSERT r7b: second click did not select ARTWORK 2 ${JSON.stringify(p2)}`,
+        );
+    }
+    await settle();
+    await shoot(page, 'r7b-artwork-oneclick-1440.png');
+    await page
+      .waitForSelector('[data-fh-generate="live"][data-fh-for="801"]', { timeout: 5000 })
+      .then(() => console.log('assert ok: second + artwork → ARTWORK 2 selected, live at id 801'))
+      .catch(() => errors.push('[1440] ASSERT r7b: ARTWORK 2 not live after its id landed'));
+    if ((await page.locator('[data-fh-group="artwork"] [data-fh-slot]').count()) !== 4)
+      errors.push('[1440] ASSERT r7b: ARTWORK does not hold 2 + 2 born cells');
+    await page.click('[data-fh-cell="800"]');
+    await page.waitForTimeout(450);
+    if ((await panel()).for_ !== '800')
+      errors.push('[1440] ASSERT r7b: the first born artwork is not selectable after the second');
     const seed = await page.inputValue('[data-fh-words]');
     if (seed !== 'embroidery') errors.push(`[1440] ASSERT: artwork seed is «${seed}»`);
+    if ((await page.getAttribute('[data-fh-technique="embroidery"]', 'aria-pressed')) !== 'true')
+      errors.push('[1440] ASSERT r7b: technique chip embroidery not lit');
+    // Rename (Enter / blur writes the line name).
+    await page.fill('[data-fh-artwork-name]', 'chest embroidery');
+    await page.press('[data-fh-artwork-name]', 'Enter');
+    await page.waitForTimeout(200);
+    {
+      const subj = (await page.textContent('[data-fh-subject]'))?.trim();
+      const l = (await lines()).find((x) => x.id === 800);
+      if (subj !== 'chest embroidery' || l?.name !== 'chest embroidery')
+        errors.push(`[1440] ASSERT r7b: rename · subject «${subj}» line «${l?.name}»`);
+      else console.log('assert ok: rename writes the BOM line name');
+    }
+    // Technique chips: shown directly, single-select, write spec + kind, seed the words.
+    if ((await page.locator('[data-flat-custom]').count()) !== 0)
+      errors.push('[1440] ASSERT r7b: artwork still has a custom ▸ door');
+    await page.click('[data-fh-technique="patch"]');
+    await page.waitForTimeout(150);
+    {
+      const l = (await lines()).find((x) => x.id === 800);
+      const w = await page.inputValue('[data-fh-words]');
+      const lit = await page.locator('[data-fh-technique][aria-pressed="true"]').count();
+      if (
+        l?.spec !== 'patch' ||
+        l?.kind !== 'TECH_CARD_BOM_KIND_PATCH' ||
+        w !== 'patch' ||
+        lit !== 1
+      )
+        errors.push(
+          `[1440] ASSERT r7b: technique · ${JSON.stringify({ spec: l?.spec, kind: l?.kind, w, lit })}`,
+        );
+      else console.log('assert ok: technique chip writes spec + kind and seeds the words');
+    }
+    await page.click('[data-fh-technique="embroidery"]');
+    await page.waitForTimeout(150);
+    if ((await page.inputValue('[data-fh-words]')) !== 'embroidery')
+      errors.push(
+        `[1440] ASSERT: technique chips not single-select · «${await page.inputValue('[data-fh-words]')}»`,
+      );
     // `+ photo` (picture 1) — the GRBPWR logo of the library.
     await page.click('[data-fh-look-door] button');
     await page.waitForSelector('[role="dialog"]');
@@ -479,14 +565,6 @@ try {
     await page.waitForSelector('[data-fh-look="1"]', { timeout: 5000 }).catch(() => {
       errors.push('[1440] the photo did not land in the artwork spec');
     });
-    await page.click('[data-flat-custom]');
-    // Technique chips are single-select.
-    await page.click('[data-fh-chip="patch"]');
-    await page.click('[data-fh-chip="embroidery"]');
-    if ((await page.inputValue('[data-fh-words]')) !== 'embroidery')
-      errors.push(
-        `[1440] ASSERT: technique chips not single-select · «${await page.inputValue('[data-fh-words]')}»`,
-      );
     await settle();
     await shoot(page, 'r7-artwork-selected-1440.png');
     const before = await page.evaluate(() => window.__calls.length);
@@ -558,11 +636,13 @@ try {
     const born = [];
     for (const name of ['one', 'two', 'three']) {
       await page.click('[data-fh-new-artwork="live"]');
-      await page.fill('[data-fh-born-name]', name);
-      await page.click('[data-fh-born-add]');
+      await page.fill('[data-fh-artwork-name]', name);
+      await page.press('[data-fh-artwork-name]', 'Enter');
       await page
         .waitForFunction(
-          (name) => document.querySelector('[data-fh-subject]')?.textContent?.trim() === name,
+          (name) =>
+            document.querySelector('[data-fh-subject]')?.textContent?.trim() === name &&
+            document.querySelector('[data-fh-generate]')?.getAttribute('data-fh-for') !== 'saving',
           name,
           { timeout: 5000 },
         )

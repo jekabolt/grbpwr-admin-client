@@ -175,6 +175,8 @@ const SLOTS: MaterialSlot[] = [
 /* `ColourwayCreatePopover` reads the tech-card form; the closed popover needs only a context. */
 function Form({ children }: { children: React.ReactNode }) {
   const form = useForm({ defaultValues: { colorways: [], bomItems: [] } as never });
+  // The shot reads the born lines (name · spec · kind) straight from the form.
+  (window as unknown as { __form: typeof form }).__form = form;
   return <FormProvider {...form}>{children}</FormProvider>;
 }
 
