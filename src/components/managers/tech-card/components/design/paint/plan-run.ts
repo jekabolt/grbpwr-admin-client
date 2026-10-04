@@ -7,8 +7,9 @@
  *   each pack cloth in place — painted slots as `mapHex` uses (`parts` = the named parts painted
  *   with that label on the saved maps, else the slot name); the first
  *   cloth with no painted slot is the REMAINDER (`parts: ''`, no mapHex: white on the map); other
- *   unpainted cloths keep their parts; free colours `{assetId 0, colourHex, mapHex}` last (their
- *   `parts` = the named parts painted with them, else '').
+ *   unpainted cloths DO NOT TRAVEL (QW3 — named only by their slot's words, the model would place
+ *   them anywhere); free colours `{assetId 0, colourHex, mapHex}` last (their `parts` = the named
+ *   parts painted with them, else '').
  * Maps travel only when that list has ≥ 2 uses and at least one `mapHex`; otherwise the run is
  * exactly the pack as before.
  *
@@ -118,7 +119,7 @@ export function paintRun({
 
   // PACK ORDER (CLOTH 1 = the first pack cloth, as before maps): each pack cloth in place — its
   // painted slots as `mapHex` uses; the first cloth with no painted slot is the REMAINDER
-  // (`parts: ''`, no mapHex); other unpainted cloths keep their parts. Free colours go last.
+  // (`parts: ''`, no mapHex); other unpainted cloths stay home (QW3). Free colours go last.
   const byAsset = new Map<number, ClothSlot[]>();
   for (const { slot, asset } of bindingsOf(band, colorwayId, list)) {
     const id = asset.id ?? 0;
@@ -143,7 +144,7 @@ export function paintRun({
     } else if (!remainder) {
       remainder = true;
       fabrics.push(fabricUseOf(band, c.assetId, { parts: '' }));
-    } else fabrics.push(fabricUseOf(band, c.assetId, { parts: c.parts }));
+    }
   }
   fabrics.push(...colourUses);
 
@@ -155,3 +156,4 @@ export function paintRun({
     colourMaps: maps.map(writeMap),
   };
 }
+
