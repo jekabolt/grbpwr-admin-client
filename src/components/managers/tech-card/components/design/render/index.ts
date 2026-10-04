@@ -35,7 +35,6 @@
  */
 export { ClothIsRow } from './cloth-is';
 export { OutputsSection } from './outputs';
-export { Palette } from './palette';
 export { RenderStudio } from './render-studio';
 export { RendersByViewGroup, SidesSection } from './side-row';
 export { ThreedStudio } from './threed-studio';
