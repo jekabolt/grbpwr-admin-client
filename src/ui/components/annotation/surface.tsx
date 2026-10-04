@@ -20,6 +20,7 @@ import {
   arcPath,
   bracketPath,
   constrainTo45,
+  inkPath,
   leaderTarget,
   midpoint,
   polygonPath,
@@ -37,7 +38,8 @@ import {
   pointsFloor,
   type AnnotationCapsKey,
 } from './kinds';
-import { boundsOf, purposeTool, specSummary, toolGeometry, type Spec } from './purpose';
+import { artworkQuad, boundsOf, purposeTool, specSummary, toolGeometry, type Spec } from './purpose';
+import { setFrameAspect } from './frame-aspect';
 import { ArtworkImage, DetailInset, SectionInset, SectionLetters } from './insets';
 import { StitchPictogram } from './stitch-pictogram';
 import { AnnotationDefs, CalloutShape, CALLOUT_COLOR_HEX, PlacingShape } from './shapes';
@@ -360,6 +362,8 @@ export type AnnotationSurfaceProps = {
    * линия на пёстром снимке тонет. На штриховом эскизе выключена — подложка перекрыла бы чертёж.
    */
   halo?: boolean;
+  /** Id картинки кадра: под ним замер кадра уходит в `frame-aspect` (подгонка зоны артворка). */
+  frameId?: number;
   cornerSlot?: ReactNode;
   /**
    * ДВОЙНОЙ КЛИК ПО САМОЙ КАРТИНКЕ ОТКРЫВАЕТ УВЕЛИЧЕННЫЙ ВИД (T12). Угловой кнопки `zoom` больше
@@ -590,7 +594,7 @@ export function AnnotationSurface({
   frameClassName,
   frameStyle,
   className,
-  callouts,
+  callouts: rawCallouts,
   onAdd,
   onEditPoints,
   onMoveLabel,
@@ -610,6 +614,7 @@ export function AnnotationSurface({
   zoom = false,
   hideCallouts = false,
   halo = false,
+  frameId,
   cornerSlot,
   onOpenLarge,
   cornerSlotBottom,
@@ -625,6 +630,17 @@ export function AnnotationSurface({
   hoverNotes = false,
   hoveredKey,
 }: AnnotationSurfaceProps) {
+  // Зона нанесения читается ровно четырьмя углами (`artworkQuad`): ручки, перетаскивание и
+  // натяжка картинки видят квадрат, и первая же правка записывает его в карточку.
+  const callouts = useMemo(
+    () =>
+      rawCallouts.map((c) =>
+        c.spec?.t === 'artwork' && c.points.length !== 4 && c.points.length > 0
+          ? { ...c, points: artworkQuad(c.points) }
+          : c,
+      ),
+    [rawCallouts],
+  );
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
@@ -864,6 +880,12 @@ export function AnnotationSurface({
   }, []);
 
   const byKey = useMemo(() => new Map(callouts.map((c) => [c.key, c])), [callouts]);
+
+  // ЗАМЕР КАДРА — В РЕЕСТР ПО ID КАРТИНКИ: им пользуется подгонка зоны артворка при прикреплении
+  // картинки (`callout-purpose-fields`), которая живёт в строке указания, а не здесь.
+  useEffect(() => {
+    if (frameId && size.w > 0 && size.h > 0) setFrameAspect(frameId, size.w / size.h);
+  }, [frameId, size.w, size.h]);
 
   // Заявка на правку: идентичность стабильна на всю жизнь поверхности, функции читают свежие
   // сеттеры — реестр хранит ОДИН объект и не пересобирается на каждый рендер.
@@ -1713,7 +1735,7 @@ export function AnnotationSurface({
         // Esc что-то СОХРАНЯЕТ. У прочих видов «незавершённый жест» — это набранные, но ещё ничем
         // не ставшие точки, и выбросить их не жалко. У следа незавершённый жест — это штрих под
         // зажатой кнопкой, и обрывает его pointercancel; всё, что лежит в сессии, уже нарисовано
-        // рукой. Выброс есть, он явный — чип «cancel».
+        // рукой. Выброс есть, он явный — повторное нажатие взведённого чипа.
         else if (inkSession.length > 0) endInkSession();
         else if (points.length > 0) setPoints([]);
         else if (tool) cancelPlacing();
@@ -1778,7 +1800,7 @@ export function AnnotationSurface({
         // ПОЛ — ПО `pointsFloor`, А НЕ ПО МИНИМУМУ ПОСТАНОВКИ. У записки с двумя лучами минимум
         // постановки равен двум (она хранится как `multi`), но записка с ОДНИМ лучом законна —
         // это `label`. Пока пол читался из `points[0]`, добавленный луч снять было нечем.
-        if (c.points.length <= pointsFloor(c.kind)) return;
+        if (c.points.length <= pointsFloor(c.kind) || c.spec?.t === 'artwork') return;
         e.preventDefault();
         const next = c.points.filter((_, i) => i !== armed.index);
         setArmed(null);
@@ -1928,35 +1950,27 @@ export function AnnotationSurface({
     kindDef(selectedCallout.kind).handles;
 
   /**
-   * МАРКИЗА ВЫБРАННОЙ ФИГУРЫ — штриховая рамка по её габаритам.
+   * СЛЕД ВЫБОРА — ТОЛЬКО ТАМ, ГДЕ НЕТ РУЧЕК (R18, владелец: «внешний контур выделения не должен
+   * показываться»).
    *
-   * У фигуры на холсте не было состояния «выбрана»: 2 пикселя штриха против 1.5 — это не
-   * состояние, а у следа с `handles: false` не было и ручек, то есть выбранный штрих не отличался
-   * от соседнего НИЧЕМ. Подсветить цветом нельзя (система монохромная, и цвет здесь уже занят —
-   * им красят саму линию), утолщить нельзя (штрих в 4 пикселя перекрывает чертёж, ради которого
-   * его и рисовали). Остаётся геометрия: рамка вокруг того, что выбрано, — тот же приём, каким
-   * выбор показывает любой векторный редактор.
-   *
-   * ПОЛЕ И ОБВОДКА — ЭКРАННЫЕ, А НЕ КАДРОВЫЕ: `inv` компенсирует зум, `non-scaling-stroke` держит
-   * толщину. Иначе на ×6 рамка отступала бы от фигуры на треть кадра и была бы толщиной в палец.
+   * Внешней рамки по габаритам больше нет: у фигуры с ручками выбор показывают сами ручки. Но у
+   * следа (`handles: false`) и на поверхности только для чтения ручек нет, и тогда выбранная фигура
+   * не отличалась бы от соседней ничем, кроме полупикселя штриха. Для них — мягкая широкая полоса
+   * ПО САМОЙ ЛИНИИ, под ней (тот же путь, по которому фигуру ловит мышь), а не прямоугольник вокруг.
    */
-  const marquee = (() => {
-    if (hideCallouts || !selectedCallout || dim(selectedCallout.key)) return null;
+  const selectionTrace = (() => {
+    if (hideCallouts || !selectedCallout || dim(selectedCallout.key) || handlesVisible) return null;
     const pts = pointsOf(selectedCallout).map(px);
-    // Пин и одноточечная подпись показывают выбор собой (инверсия маркера, обводка плашки) —
-    // рамка вокруг одной точки была бы рамкой вокруг ничего.
+    // Пин и одноточечная подпись показывают выбор собой (инверсия маркера, обводка плашки).
     if (pts.length < 2) return null;
-    const xs = pts.map((p) => p.x);
-    const ys = pts.map((p) => p.y);
-    const pad = 6 * inv;
-    const x0 = Math.min(...xs) - pad;
-    const y0 = Math.min(...ys) - pad;
-    return {
-      x: x0,
-      y: y0,
-      width: Math.max(...xs) - Math.min(...xs) + pad * 2,
-      height: Math.max(...ys) - Math.min(...ys) + pad * 2,
-    };
+    // След рисуется сглаженным — и полоса выбора идёт по той же кривой, а не по ломаной хита.
+    if (kindDef(selectedCallout.kind).key === 'ink') return inkPath(pts) || null;
+    return hitPath(
+      selectedCallout.kind,
+      pts,
+      px(labelOf(selectedCallout)),
+      effectiveCaps(selectedCallout.kind, selectedCallout.caps),
+    );
   })();
 
   const cursorClass =
@@ -2243,16 +2257,14 @@ export function AnnotationSurface({
               !hideCallouts &&
               callouts.map((c) => {
                 if (c.spec?.t !== 'artwork' || !c.spec.url || dim(c.key)) return null;
-                const b = boundsOf(pointsOf(c));
+                // Точки — живые (`pointsOf` уже учитывает тянущуюся ручку): картинка варпится
+                // вместе с ручкой во время жеста, а не после отпускания.
                 return (
                   <ArtworkImage
                     key={`art:${c.key}`}
                     src={c.spec.url}
-                    region={
-                      b
-                        ? { x: b.x * size.w, y: b.y * size.h, w: b.w * size.w, h: b.h * size.h }
-                        : null
-                    }
+                    quad={pointsOf(c).map(px)}
+                    box={size}
                   />
                 );
               })}
@@ -2266,6 +2278,20 @@ export function AnnotationSurface({
                 <defs>
                   <AnnotationDefs />
                 </defs>
+                {selectionTrace && (
+                  <path
+                    data-selection-trace=''
+                    d={selectionTrace}
+                    fill='none'
+                    stroke='var(--color-textColor)'
+                    strokeOpacity={0.18}
+                    strokeWidth={8}
+                    strokeLinecap='round'
+                    strokeLinejoin='round'
+                    vectorEffect='non-scaling-stroke'
+                    pointerEvents='none'
+                  />
+                )}
                 {callouts.map((c) =>
                   dim(c.key) ? null : (
                     <CalloutShape
@@ -2281,28 +2307,6 @@ export function AnnotationSurface({
                       strokeWidth={selected === c.key ? 2 : 1.5}
                     />
                   ),
-                )}
-                {/* МАРКИЗА — ДВА ПРЯМОУГОЛЬНИКА, А НЕ ОДИН. Белый сплошной снизу, чернильный
-                    штриховой поверх: на тёмном снимке чернильная рамка невидима ровно так же, как
-                    чернильная линия, и лечится тем же, чем лечится она, — подложкой. */}
-                {marquee && (
-                  <g data-marquee='true' pointerEvents='none'>
-                    <rect
-                      {...marquee}
-                      fill='none'
-                      stroke='var(--color-bgColor)'
-                      strokeWidth={3}
-                      vectorEffect='non-scaling-stroke'
-                    />
-                    <rect
-                      {...marquee}
-                      fill='none'
-                      stroke='var(--color-textColor)'
-                      strokeWidth={1}
-                      strokeDasharray='3 3'
-                      vectorEffect='non-scaling-stroke'
-                    />
-                  </g>
                 )}
                 {/* ХИТ-ПУТИ — невидимые толстые копии штрихов: попасть мышью в волосяную линию
                     нельзя, а выбирать фигуру надо именно по ней. Живут, пока правка возможна и
@@ -2324,7 +2328,12 @@ export function AnnotationSurface({
                     if (!d) return null;
                     // Заштрихованная зона ловится ПО ПЛОЩАДИ: когда область закрашена, целятся в неё,
                     // а не в двухпиксельный контур по краю.
-                    const byArea = kindDef(c.kind).key === 'polygon' && !!c.filled;
+                    // ЗОНА НАНЕСЕНИЯ (artwork) — ТОЖЕ ПО ПЛОЩАДИ, И ДАЖЕ ПОД ВЗВЕДЁННЫМ ВИДОМ
+                    // (владелец, 04.10: «при нажатии на любую точку колаута артворк он должен
+                    // автоматически выделяться»). Цена: начать новую фигуру внутри зоны нанесения
+                    // одним кликом нельзя — сначала Esc.
+                    const artwork = c.spec?.t === 'artwork';
+                    const byArea = (kindDef(c.kind).key === 'polygon' && !!c.filled) || artwork;
                     return (
                       <path
                         key={`hit:${c.key}`}
@@ -2387,7 +2396,11 @@ export function AnnotationSurface({
                          */
                         style={{
                           pointerEvents:
-                            placing && selected !== c.key ? 'none' : byArea ? 'all' : 'stroke',
+                            placing && selected !== c.key && !artwork
+                              ? 'none'
+                              : byArea
+                                ? 'all'
+                                : 'stroke',
                           cursor: 'pointer',
                         }}
                         onPointerEnter={() => setHovered(c.key)}
@@ -2402,6 +2415,9 @@ export function AnnotationSurface({
                             startShapeDrag(c, e);
                             return;
                           }
+                          // Зона нанесения под взведённым видом забирает нажатие себе: иначе кадр
+                          // принял бы его за постановку, и клик и выбрал бы, и поставил.
+                          if (artwork && placing) e.stopPropagation();
                           // ГЛУШИТЬ НАЖАТИЕ ПОД ВЗВЕДЁННЫМ ВИДОМ БОЛЬШЕ НЕЧЕГО, И ЭТО НЕ ОТКАТ.
                           // Стояло `if (placing …) e.stopPropagation()` — им и лечили «клик и
                           // выбирает, и ставит»: `click` приходит ПОСЛЕ `pointerup`, то есть
@@ -2423,7 +2439,7 @@ export function AnnotationSurface({
                           // фона на этом листе нет. Сюда доходит только НАЖАТИЕ БЕЗ СДВИГА:
                           // сдвинутое ушло в перетаскивание и погасло на `justDragged` строкой
                           // выше, то есть тащить выбранную зону это не мешает.
-                          if (placing && selected === c.key) {
+                          if (placing && selected === c.key && !artwork) {
                             select(null);
                             return;
                           }
@@ -3237,11 +3253,9 @@ function Plate({
         // где плашка стоит.
         'absolute block w-max max-w-[45%] cursor-pointer whitespace-pre-wrap border bg-bgColor px-1 py-px text-left text-nano leading-tight text-textColor',
         box && 'min-w-12 px-1.5 py-1 text-micro',
-        // Смена цвета рамки с серой на чернильную — разница в один пиксель на пёстром снимке,
-        // то есть подсветки не было. Кольцо со сдвигом читается и на фотографии, и на чертеже.
-        selected
-          ? 'border-textColor outline outline-1 outline-offset-1 outline-textColor'
-          : 'border-borderColor',
+        // БЕЗ КОЛЬЦА ВЫБОРА (владелец, 04.10: «такого выделения быть не должно»). Выбор фигуры
+        // показывают её ручки; плашка лишь берёт чернильную рамку вместо серой.
+        selected ? 'border-textColor' : 'border-borderColor',
         dimmed && 'invisible',
         !interactive && 'pointer-events-none',
       )}
@@ -3378,7 +3392,7 @@ function Handles({
   const rhombusAt = d.key === 'arc' ? 1 : -1;
   const closed = d.key === 'polygon';
   const ghosts =
-    closed && pts.length < d.points[1]
+    closed && pts.length < d.points[1] && callout.spec?.t !== 'artwork'
       ? pts.map((p, i) => {
           const q = pts[(i + 1) % pts.length];
           return { index: i, at: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 } };

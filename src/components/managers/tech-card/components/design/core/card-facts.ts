@@ -39,6 +39,11 @@ export type CardFacts = {
   callouts?: string[];
   /** Слоты материалов: «section · name · composition». */
   materials?: string[];
+  /**
+   * Решено с дизайнером в квизе доски (ASK ME, 04.10): `collar: stiff stand, 3 cm`
+   * (`decisionLines` в `../quiz-model.ts`). Идут и в контекст `ai ✦`, и в бриф WORDS → флэты.
+   */
+  decisions?: string[];
 };
 
 const clean = (s?: string | null) => (s ?? '').replace(/\s+/g, ' ').trim();
@@ -194,6 +199,7 @@ export function cardFactLines(f: CardFacts): string[] {
   for (const [label, text] of f.aspects ?? []) {
     if (clean(text)) out.push(`${clean(label)}: ${clean(text)}`);
   }
+  for (const d of f.decisions ?? []) if (clean(d)) out.push(`decided · ${clean(d)}`);
   const notes = (f.callouts ?? []).map(clean).filter(Boolean);
   if (notes.length) out.push(`notes on the board: ${notes.join('; ')}`);
   const mats = (f.materials ?? []).map(clean).filter(Boolean);
@@ -249,6 +255,7 @@ export function wordsBriefSource(f: CardFacts): { text: string; context: string 
   for (const [label, text] of f.aspects ?? []) {
     if (clean(text)) lines.push(`${clean(label)}: ${clean(text)}`);
   }
+  for (const d of f.decisions ?? []) if (clean(d)) lines.push(`decided · ${clean(d)}`);
   const notes = (f.callouts ?? []).map(clean).filter(Boolean);
   if (notes.length) lines.push(`notes on the board: ${notes.join('; ')}`);
   return {

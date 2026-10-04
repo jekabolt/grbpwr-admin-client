@@ -42,7 +42,7 @@ import {
   useLegacyStepRewrite,
   useStepAddress,
 } from './playground';
-import { FabricsHardware, clothSlots, materialSlots } from './pattern';
+import { FabricsHardware, clothSlots, labelSeedsOf, materialSlots } from './pattern';
 import { DraftedProvider } from './head/drafted-provider';
 import { useStudioKindSwitch } from './history-recall';
 import { PictureGalleryProvider } from './picture-tile';
@@ -191,6 +191,12 @@ export function StudioTab({
     control,
     name: 'bomItems',
     compute: (lines) => materialSlots(lines),
+  });
+  // A label slot seeds placement · fold · size from its card LABELS row (read, never written).
+  const labelSeeds = useWatch({
+    control,
+    name: 'garmentLabels',
+    compute: (rows) => labelSeedsOf(rows),
   });
   const { canWrite } = usePermissions();
   const canWriteCard = canWrite(SECTION.techCards);
@@ -557,6 +563,7 @@ export function StudioTab({
                         colorwayId={colorway.colorwayId}
                         onColorwayChange={colorway.setColorwayId}
                         slots={materials.slots}
+                        labelSeeds={labelSeeds}
                         onGoStep={goStep}
                         loading={colorway.loading}
                       />

@@ -3,11 +3,14 @@ import { formatCompositionCell } from 'components/managers/materials/components/
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { useParams } from 'react-router-dom';
 
 import type { TechCardFormData } from '../../schema';
 import { detailKeyLabel } from '../../tech-card-options';
 import type { CardFacts } from '../core/card-facts';
 import { categoryChain, fitLabel, fitsForTopCategory, topCategoryName } from '../fit-vocabulary';
+import { decisionLines } from '../quiz-model';
+import { useDesignQuizAnswers } from '../use-design-band';
 
 /**
  * ═══ ФАКТЫ КАРТОЧКИ ИЗ ФОРМЫ — ОДИН ЧИТАТЕЛЬ ДЛЯ ВСЕХ КНОПОК `ai ✦` (волна 25.09, DEEP-03) ═══════
@@ -93,6 +96,14 @@ export function useCardFacts(isBoard: (row: BoardRowLike) => boolean): CardFacts
   const board = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as BoardRowLike[];
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as CalloutLike[];
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as BomLike[];
+  // Решения квиза доски — своя таблица на сервере, не поле формы (автосейв их не трогает). Карточка —
+  // из адреса (`/tech-cards/:id`), как у GENERAL INFORMATION: в форме id карточки нет.
+  const { id: routeId } = useParams<{ id?: string }>();
+  const cardId = routeId ? parseInt(routeId, 10) : 0;
+  const { answers } = useDesignQuizAnswers(
+    Number.isFinite(cardId) && cardId > 0 ? cardId : undefined,
+  );
+  const decisions = useMemo(() => decisionLines(answers), [answers]);
 
   return useMemo(() => {
     const text = (key: string) => (details.find((d) => d.key === key)?.text ?? '').trim();
@@ -124,8 +135,10 @@ export function useCardFacts(isBoard: (row: BoardRowLike) => boolean): CardFacts
             .join(' · '),
         )
         .filter(Boolean),
+      decisions,
     };
   }, [
+    decisions,
     dictionary?.categories,
     categoryId,
     fit,

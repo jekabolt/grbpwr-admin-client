@@ -1,3 +1,5 @@
+import { fitQuadToAspect } from './geometry';
+
 // НАЗНАЧЕНИЕ УКАЗАНИЯ — ВТОРАЯ ОСЬ, А НЕ НОВЫЕ ВИДЫ (волна callout kinds, 04.10).
 //
 // Владелец: «нам нужно добавить новые виды колаутов: note, detail, artwork, stitch, material,
@@ -362,6 +364,23 @@ export function rectCorners(
 }
 
 /** Прямоугольник, охватывающий точки (доли кадра) — регион вставки детали. */
+/**
+ * ЗОНА НАНЕСЕНИЯ — ВСЕГДА ЧЕТЫРЕ УГЛА (владелец, 04.10: «принт криво работает» — зона обросла
+ * вершинами через ручки сторон, и картинку стало не на что натянуть). Четыре точки отдаются как
+ * есть; любое другое число — прямоугольником охвата в порядке TL, TR, BR, BL (как ставит постановка).
+ */
+export function artworkQuad<P extends { x: number; y: number }>(pts: readonly P[]): { x: number; y: number }[] {
+  if (pts.length === 4) return pts.slice();
+  const b = boundsOf(pts);
+  if (!b) return [];
+  return [
+    { x: b.x, y: b.y },
+    { x: b.x + b.w, y: b.y },
+    { x: b.x + b.w, y: b.y + b.h },
+    { x: b.x, y: b.y + b.h },
+  ];
+}
+
 export function boundsOf(pts: readonly { x: number; y: number }[]) {
   if (pts.length === 0) return null;
   const xs = pts.map((p) => p.x);
@@ -425,4 +444,49 @@ export function sectionLettersOf<T>(rows: readonly T[], specOf: (r: T) => string
   for (const r of rows)
     if (parseSpec(specOf(r))?.t === 'section') out.set(r, sectionLetter(out.size));
   return out;
+}
+
+/**
+ * ЗОНА АРТВОРКА ПОД ПРОПОРЦИИ ПРИКРЕПЛЁННОЙ КАРТИНКИ — ИЗ ДЕЙСТВИЯ ПРИКРЕПЛЕНИЯ, А НЕ ИЗ НАБЛЮДЕНИЯ
+ * (R20). Картинка грузится асинхронно, а строки адресуются индексом массива, который сдвигается
+ * при удалении соседа. Поэтому цель ищется В МОМЕНТ ЗАПИСИ: по `clientRef`, если он есть, иначе —
+ * строка на том же индексе, у которой ВСЁ ЕЩЁ тот же адрес картинки и те же точки, что были при
+ * прикреплении. Не нашлась (удалили, сдвинули, перекосили руками, сменили картинку) — записи нет.
+ *
+ * `aspect` — ширина/высота КАРТИНКИ, `frameAspect` — ширина/высота КАДРА: подгонка идёт в пикселях
+ * кадра, доли анизотропны. Возвращает индекс и новые точки (строки, как в форме) или `null`.
+ */
+export function artworkAttachFit<
+  T extends {
+    clientRef?: string | null;
+    spec?: string | null;
+    points?: { x?: string; y?: string }[] | null;
+  },
+>(
+  list: readonly T[],
+  at: { index: number; clientRef?: string | null; url: string; points: string },
+  aspect: number,
+  frameAspect: number | null,
+): { index: number; points: { x: string; y: string }[] } | null {
+  if (!(aspect > 0) || !frameAspect || !(frameAspect > 0)) return null;
+  const index = at.clientRef ? list.findIndex((c) => c.clientRef === at.clientRef) : at.index;
+  const c = index >= 0 ? list[index] : undefined;
+  if (!c) return null;
+  const spec = parseSpec(c.spec);
+  if (spec?.t !== 'artwork' || spec.url !== at.url) return null;
+  if (JSON.stringify(c.points ?? []) !== at.points) return null;
+  const pts = (c.points ?? []).map((p) => ({ x: Number(p.x) || 0, y: Number(p.y) || 0 }));
+  if (pts.length !== 4) return null;
+  const fitted = fitQuadToAspect(
+    pts.map((p) => ({ x: p.x * frameAspect, y: p.y })),
+    aspect,
+  );
+  const clamp = (n: number) => Math.min(1, Math.max(0, n));
+  return {
+    index,
+    points: fitted.map((p) => ({
+      x: clamp(p.x / frameAspect).toFixed(4),
+      y: clamp(p.y).toFixed(4),
+    })),
+  };
 }

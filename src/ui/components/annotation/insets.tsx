@@ -1,7 +1,14 @@
 import { cn } from 'lib/utility';
-import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 
-import type { ShapePoint } from './geometry';
+import { warpTriangles, type ShapePoint } from './geometry';
+import { artworkQuad, boundsOf } from './purpose';
 
 // ВСТАВКИ НАЗНАЧЕНИЯ — ОДИН РЕНДЕР НА ЭКРАН И НА БУМАГУ (волна callout kinds, T07).
 //
@@ -51,7 +58,6 @@ const glassFrame = (g: GlassProps | undefined) =>
   cn(
     'absolute block border border-textColor bg-bgColor text-left text-textColor',
     g ? 'cursor-pointer' : 'pointer-events-none',
-    g?.selected && 'outline outline-1 outline-offset-1 outline-textColor',
     g?.dimmed && 'invisible',
     g && !g.interactive && 'pointer-events-none',
   );
@@ -260,28 +266,78 @@ export function SectionLetters({
 
 /**
  * КАРТИНКА АРТВОРКА (владелец: «добавить картинку с поддержкой пнг картинок с прозрачностью и что
- * бы мы могли этот артворк туда поместить»). Рисуется ВНУТРИ зоны размещения, вписанной (meet, по
- * центру), БЕЗ подложки и без белого паспарту: прозрачный PNG показывает флэт сквозь себя. Это
- * картинка, а не подпись: едет с кадром при зуме. Неинтерактивна — выбор и ручки остаются у зоны.
- * Слой стоит ПОД слоем геометрии, чтобы пунктир зоны не закрывался непрозрачным краем.
+ * бы мы могли этот артворк туда поместить»). Рисуется ВНУТРИ зоны размещения, БЕЗ подложки и без
+ * белого паспарту: прозрачный PNG показывает флэт сквозь себя. Это картинка, а не подпись: едет с
+ * кадром при зуме. Неинтерактивна — выбор и ручки остаются у зоны. Слой стоит ПОД слоем геометрии,
+ * чтобы пунктир зоны не закрывался непрозрачным краем.
+ *
+ * ВАРП НА ЧЕТЫРЕ РУЧКИ (R20, владелец: «она должна помещатся внутрь подвижных штук и варпаться
+ * вместе с ними»): углы картинки = точки зоны в их порядке (TL, TR, BR, BL), середина — по проекции,
+ * приближённой сеткой аффинных треугольников (`warpTriangles`): SVG-аффин печатается во всех
+ * браузерах одинаково, а CSS `matrix3d` — нет. Зона не из четырёх точек (вставили вершину) —
+ * картинка вписана в её габарит, как прежде.
+ *
+ * `box` — размер кадра в пикселях: холст в той же системе, что слой геометрии.
  */
 export function ArtworkImage({
-  region,
+  quad,
+  box,
   src,
 }: {
-  region: { x: number; y: number; w: number; h: number } | null;
+  /** Точки зоны в пикселях кадра. */
+  quad: ShapePoint[];
+  box: { w: number; h: number };
   src: string;
 }) {
-  if (!region || !src || region.w < 1 || region.h < 1) return null;
+  const id = useId().replace(/:/g, '');
+  // 200 треугольников — арифметика на микросекунды; мемо по массиву, который каждый рендер новый, ничего бы не дало.
+  // Печать и любые старые зоны с другим числом вершин натягиваются на квадрат охвата.
+  const corners = artworkQuad(quad);
+  const tris = corners.length === 4 ? warpTriangles(corners, 10) : [];
+  if (!src || quad.length < 2 || box.w < 1 || box.h < 1) return null;
+  const b = boundsOf(quad);
+  if (!b || b.w < 1 || b.h < 1) return null;
   return (
-    <img
-      src={src}
-      alt=''
+    <svg
       aria-hidden
-      draggable={false}
       data-callout-artwork=''
-      className='pointer-events-none absolute block max-w-none object-contain'
-      style={{ left: region.x, top: region.y, width: region.w, height: region.h }}
-    />
+      className='pointer-events-none absolute inset-0 block h-full w-full overflow-visible'
+      viewBox={`0 0 ${box.w} ${box.h}`}
+      preserveAspectRatio='none'
+    >
+      {tris.length > 0 ? (
+        <>
+          <defs>
+            {tris.map((t, i) => (
+              <clipPath key={i} id={`${id}-${i}`}>
+                <polygon points={t.clip.map((p) => `${p.x},${p.y}`).join(' ')} />
+              </clipPath>
+            ))}
+          </defs>
+          {tris.map((t, i) => (
+            <g key={i} clipPath={`url(#${id}-${i})`}>
+              <image
+                href={src}
+                x={0}
+                y={0}
+                width={1}
+                height={1}
+                preserveAspectRatio='none'
+                transform={`matrix(${t.m.join(' ')})`}
+              />
+            </g>
+          ))}
+        </>
+      ) : (
+        <image
+          href={src}
+          x={b.x}
+          y={b.y}
+          width={b.w}
+          height={b.h}
+          preserveAspectRatio='xMidYMid meet'
+        />
+      )}
+    </svg>
   );
 }

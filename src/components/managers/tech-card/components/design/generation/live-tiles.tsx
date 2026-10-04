@@ -63,6 +63,97 @@ function useCancelLock(runId: number): CancelLock | null {
   return useSyncExternalStore(subscribeCancelLocks, read, read);
 }
 
+/**
+ * The locked cancel of one run: every caller (corner, `cancel all`) goes through the same lock, so
+ * a run is asked to stop once however many doors point at it.
+ */
+export function useCancelRun(techCardId: number): (runId: number) => void {
+  const { cancelRun } = useGenerationWrites(techCardId);
+  return (runId: number) => {
+    // Read the store at the press, not the render: two corners pressed in one frame ask once.
+    if (runId <= 0 || cancelLocks.has(runId)) return;
+    setCancelLock(runId, 'pending');
+    cancelRun.mutateAsync(runId).then(
+      () => setCancelLock(runId, 'asked'),
+      () => setCancelLock(runId, null),
+    );
+  };
+}
+
+/** Whether a run is stopping already (stamped by the server, or asked and answered here). */
+export function useRunCancelling(run: common_DesignRun | undefined): boolean {
+  const lock = useCancelLock(run?.id ?? 0);
+  return !!run && (isCancelling(run) || lock === 'asked');
+}
+
+/**
+ * The run's `cancelling…` flag (top-left) and quiet `cancel` corner (bottom-right). Absolutely
+ * placed: the host is a `relative` box (a live tile, a materials slot cell).
+ */
+export function RunCancelCorner({
+  techCardId,
+  run,
+  disabled,
+}: {
+  techCardId: number;
+  run: common_DesignRun;
+  disabled?: boolean;
+}) {
+  const cancel = useCancelRun(techCardId);
+  const runId = run.id ?? 0;
+  const lock = useCancelLock(runId);
+  /** Asked and answered, and the band has not come back with the stamp yet: say so already. */
+  const asked = lock === 'asked';
+  const cancelling = isCancelling(run) || asked;
+  const handle = runHandle(runId);
+  const canCancel = !disabled && runId > 0 && !cancelling;
+  const pending = lock === 'pending';
+
+  return (
+    <>
+      {cancelling && (
+        <span
+          className='pointer-events-none absolute left-1 top-1 inline-block bg-bgColor'
+          data-flag='cancelling…'
+        >
+          <Pill
+            tone='mut'
+            title='asked to stop — an answer that still arrives is recorded and paid for'
+          >
+            cancelling…
+          </Pill>
+        </span>
+      )}
+      {canCancel && (
+        <button
+          type='button'
+          data-run-cancel={runId}
+          aria-label={`cancel ${handle}`}
+          title={
+            runStatus(run) === 'running'
+              ? 'stop this run — the call already sent cannot be recalled; an answer that still arrives is recorded and paid for'
+              : 'stop this run before it starts'
+          }
+          aria-busy={pending || undefined}
+          disabled={pending}
+          onClick={(e) => {
+            e.stopPropagation();
+            cancel(runId);
+          }}
+          className={cn(
+            'absolute bottom-1 right-1 z-20 py-0.5 leading-none',
+            TILE_CORNER,
+            TILE_QUIET,
+            pending && 'opacity-100',
+          )}
+        >
+          {pending ? 'cancel…' : 'cancel'}
+        </button>
+      )}
+    </>
+  );
+}
+
 export function LiveTiles({
   techCardId,
   run,
@@ -79,25 +170,7 @@ export function LiveTiles({
   /** The card is read-only here, or the server does not answer the design routes: no corner. */
   disabled?: boolean;
 }) {
-  const { cancelRun } = useGenerationWrites(techCardId);
   const runId = run.id ?? 0;
-  const lock = useCancelLock(runId);
-  /** Asked and answered, and the band has not come back with the stamp yet: say so already. */
-  const asked = lock === 'asked';
-  const cancelling = isCancelling(run) || asked;
-  const handle = runHandle(runId);
-  const canCancel = !disabled && runId > 0 && !cancelling;
-  const pending = lock === 'pending';
-  const cancel = () => {
-    // Read the store at the press, not the render: two corners pressed in one frame ask once.
-    if (cancelLocks.has(runId)) return;
-    setCancelLock(runId, 'pending');
-    cancelRun.mutateAsync(runId).then(
-      () => setCancelLock(runId, 'asked'),
-      () => setCancelLock(runId, null),
-    );
-  };
-
   return (
     <>
       {Array.from({ length: count }, (_, i) => (
@@ -118,42 +191,7 @@ export function LiveTiles({
               >
                 {wordOf(i)}
               </Text>
-              {i === 0 && cancelling && (
-                <span
-                  className='pointer-events-none absolute left-1 top-1 inline-block bg-bgColor'
-                  data-flag='cancelling…'
-                >
-                  <Pill
-                    tone='mut'
-                    title='asked to stop — an answer that still arrives is recorded and paid for'
-                  >
-                    cancelling…
-                  </Pill>
-                </span>
-              )}
-              {i === 0 && canCancel && (
-                <button
-                  type='button'
-                  data-run-cancel={runId}
-                  aria-label={`cancel ${handle}`}
-                  title={
-                    runStatus(run) === 'running'
-                      ? 'stop this run — the call already sent cannot be recalled; an answer that still arrives is recorded and paid for'
-                      : 'stop this run before it starts'
-                  }
-                  aria-busy={pending || undefined}
-                  disabled={pending}
-                  onClick={cancel}
-                  className={cn(
-                    'absolute bottom-1 right-1 z-20 py-0.5 leading-none',
-                    TILE_CORNER,
-                    TILE_QUIET,
-                    pending && 'opacity-100',
-                  )}
-                >
-                  {pending ? 'cancel…' : 'cancel'}
-                </button>
-              )}
+              {i === 0 && <RunCancelCorner techCardId={techCardId} run={run} disabled={disabled} />}
             </div>
           }
         />

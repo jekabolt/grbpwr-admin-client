@@ -17,6 +17,7 @@ import { pictureHandle, runHandle } from '../handles';
 import { useGalleryGroup, useGalleryViewerOpen } from '../picture-tile';
 import {
   PutPiecesIntoSides,
+  RenderDoorsNotes,
   RenderDoorsHost,
   broughtGroup,
   hostPlates,
@@ -592,6 +593,11 @@ export function LatestGeneration({
     return (decked?.cards ?? []).filter((c) => roots.has(c.picture.id ?? 0)).map((c) => c.picture);
   };
   const runCuts = kind === 'render' && !bare ? cutSheets(tilePlan, deckPlan) : [];
+  /** Owner 04.10: «PUT THE 4 PIECES INTO SIDES ▸ это должна быть кнопка в хедере» — the latest cut
+   *  on the bench (the last in the row's order) puts its pieces from the header, as FLAT's
+   *  `apply flat slots` does; one cut per press, since the render apply also clears the sides the
+   *  cut does not name. */
+  const headerCut = runCuts.length > 0 ? runCuts[runCuts.length - 1] : null;
   /** Item 27: FLAT's cut pieces standing on the bench, in the row's order — `apply flat slots`. */
   const flatPieces = useMemo(() => {
     const rootOf = tilePlan?.rootOf;
@@ -652,8 +658,9 @@ export function LatestGeneration({
         ))}
       </div>
     ) : null;
-  const doorsHost = (children: JSX.Element | null) => (
+  const doorsHost = (children: JSX.Element | null, notes = true) => (
     <RenderDoorsHost
+      notes={notes}
       band={band}
       techCardId={techCardId}
       disabled={disabled}
@@ -707,6 +714,8 @@ export function LatestGeneration({
     );
   }
 
+  const hostIfRender = (block: JSX.Element) =>
+    kind === 'render' ? doorsHost(block, false) : block;
   const state = runStateWord(run, elapsed);
   /** Said only over the newest run with pictures — a run pinned behind a newer one says the line. */
   const note = skippedNote(newest && newestId === runId && !bare ? newest.skipped : []);
@@ -755,105 +764,106 @@ export function LatestGeneration({
           slot, the pieces below spaced by the block's own rhythm — no hand margins. The wrapper
           carries the anchor and the gallery group's node, and is the NEXT SIBLING of the block whose
           GENERATE this answers (`#design-input` on FLAT, `#design-render-bench` on FABRIC RENDER). */}
-      <Section
-        title='workbench'
-        className={HISTORY_AIR}
-        action={
-          <>
-            <Text size='nano' variant='label' component='span' data-latest-stamp=''>
-              {state && (
-                <>
-                  <span className='text-textColor' title={state.note}>
-                    {state.word}
-                  </span>
-                  {' · '}
-                </>
-              )}
-              {runStamp(run)}
-            </Text>
-            {/* Item 27: the cut pieces into their FLAT SLOTS sides — the header action, styled as
+      {/* FABRIC RENDER: the render doors' host spans the whole block, its header too (the header's
+          `put the N pieces into sides ▸` is a door of the host); its notes stand atop the body. */}
+      {hostIfRender(
+        <Section
+          title='workbench'
+          className={HISTORY_AIR}
+          action={
+            <>
+              <Text size='nano' variant='label' component='span' data-latest-stamp=''>
+                {state && (
+                  <>
+                    <span className='text-textColor' title={state.note}>
+                      {state.word}
+                    </span>
+                    {' · '}
+                  </>
+                )}
+                {runStamp(run)}
+              </Text>
+              {/* Item 27: the cut pieces into their FLAT SLOTS sides — the header action, styled as
                 INPUT — REFERENCES' `clear the input ✕`; absent when nothing would be written. */}
-            {flatPieces.length > 0 && !isRunLive(run) && (
-              <ApplyFlatSlots
-                band={band}
-                techCardId={techCardId}
-                pieces={flatPieces}
-                disabled={writesOff}
-              />
-            )}
-          </>
-        }
-      >
-        {bare && newest && <BareOutcome run={run} earlier={newest.skipped} />}
+              {flatPieces.length > 0 && !isRunLive(run) && (
+                <ApplyFlatSlots
+                  band={band}
+                  techCardId={techCardId}
+                  pieces={flatPieces}
+                  disabled={writesOff}
+                />
+              )}
+              {headerCut && !isRunLive(run) && <PutPiecesIntoSides sheet={headerCut} />}
+            </>
+          }
+        >
+          {bare && newest && <BareOutcome run={run} earlier={newest.skipped} />}
 
-        {note && newest && (
-          <Text
-            size='micro'
-            variant='label'
-            component='p'
-            data-latest-passed-over={newest.skipped[0]?.id ?? 0}
-            data-latest-skipped={newest.skipped.length}
-            title={note.title}
-          >
-            {note.text}
-          </Text>
-        )}
+          {note && newest && (
+            <Text
+              size='micro'
+              variant='label'
+              component='p'
+              data-latest-passed-over={newest.skipped[0]?.id ?? 0}
+              data-latest-skipped={newest.skipped.length}
+              title={note.title}
+            >
+              {note.text}
+            </Text>
+          )}
 
-        {/* O-63: ON FABRIC RENDER the tiles below draw the render doors, and their rules read this
+          {/* O-63: ON FABRIC RENDER the tiles below draw the render doors, and their rules read this
             row's plates (`RenderDoorsHost`); FLAT's row is drawn as it always was. The doors' notes
             stand once above the tiles, spaced by the block. `disabled` is the card's alone: the
             server's silence the doors read themselves, and say so in their own words. */}
-        {kind === 'render' ? (
-          doorsHost(
+          {kind === 'render' ? (
             <>
+              <RenderDoorsNotes />
               {!bare && inline}
               {!bare && tilesLeft && outputs}
-              {runCuts.map((sheet) => (
-                <PutPiecesIntoSides key={sheet.id} sheet={sheet} />
-              ))}
               {broughtBlock}
-            </>,
-          )
-        ) : bare ? null : (
-          <>
-            {inline}
-            {tilesLeft && outputs}
-          </>
-        )}
+            </>
+          ) : bare ? null : (
+            <>
+              {inline}
+              {tilesLeft && outputs}
+            </>
+          )}
 
-        {/* A NEWER RUN, WHILE THIS ONE IS KEPT — one quiet line under the tiles; the click moves the
+          {/* A NEWER RUN, WHILE THIS ONE IS KEPT — one quiet line under the tiles; the click moves the
             workbench to the newest and lets the pin go. «started» while that run is in flight: it is
             not ready yet. */}
-        {newer && (
-          <span className='flex flex-wrap items-center gap-1.5' data-latest-newer={newestId}>
-            <Text size='micro' variant='label' component='span'>
-              {isRunLive(newer)
-                ? 'newer run started'
-                : newest?.bare
-                  ? 'newer run came back with nothing'
-                  : 'newer run ready'}{' '}
-              ·
-            </Text>
-            <Button
-              type='button'
-              variant='underline'
-              size='xs'
-              className='text-labelColor hover:text-textColor'
-              aria-label={`show ${runHandle(newestId)} here`}
-              title={`the newest ${kind} run — the one shown now stays in the history`}
-              onClick={() => {
-                releasePin(techCardId);
-                clearBenchChoice(techCardId, kind);
-              }}
-            >
-              show ›
-            </Button>
-          </span>
-        )}
+          {newer && (
+            <span className='flex flex-wrap items-center gap-1.5' data-latest-newer={newestId}>
+              <Text size='micro' variant='label' component='span'>
+                {isRunLive(newer)
+                  ? 'newer run started'
+                  : newest?.bare
+                    ? 'newer run came back with nothing'
+                    : 'newer run ready'}{' '}
+                ·
+              </Text>
+              <Button
+                type='button'
+                variant='underline'
+                size='xs'
+                className='text-labelColor hover:text-textColor'
+                aria-label={`show ${runHandle(newestId)} here`}
+                title={`the newest ${kind} run — the one shown now stays in the history`}
+                onClick={() => {
+                  releasePin(techCardId);
+                  clearBenchChoice(techCardId, kind);
+                }}
+              >
+                show ›
+              </Button>
+            </span>
+          )}
 
-        {/* T30: the history, collapsed, as the block's last part. */}
-        {history}
-      </Section>
+          {/* T30: the history, collapsed, as the block's last part. */}
+          {history}
+        </Section>,
+      )}
 
       {splitModal}
     </div>

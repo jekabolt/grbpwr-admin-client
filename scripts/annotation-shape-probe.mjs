@@ -140,7 +140,17 @@ check('без гало подложки нет', !plain.includes('stroke="#fff"'
 
 // --- пунктир и штриховка только там, где имеют смысл -------------------------------------------
 const dashedDim = render({ kind: 'dim', pts: [P(10, 20), P(90, 20)], label, dashed: true });
-check('пунктирная мерка пунктирна', dashedDim.includes('stroke-dasharray="6 4"'), dashedDim);
+check('пунктирная мерка пунктирна', dashedDim.includes('stroke-dasharray="7 3"'), dashedDim);
+// R19: штрихи пунктира ПРЯМОУГОЛЬНЫЕ — ни один пунктирный путь не скруглён (и подложка тоже).
+const dashedPaths = (svg) => [...svg.matchAll(/<path[^>]*stroke-dasharray="7 3"[^>]*>/g)].map((m) => m[0]);
+const dashedHalo = render({ kind: 'polygon', pts: [P(10, 10), P(90, 10), P(90, 90)], label, dashed: true, halo: true });
+check(
+  'пунктир: концы butt, углы miter (и у подложки)',
+  dashedPaths(dashedHalo).length === 2 &&
+    dashedPaths(dashedHalo).every((t) => t.includes('stroke-linecap="butt"') && t.includes('stroke-linejoin="miter"')),
+  dashedHalo,
+);
+check('сплошная линия по-прежнему скруглена', plain.includes('stroke-linecap="round"'), plain);
 check(
   'пунктир фигуры отличим от пунктира лидера',
   dashedDim.includes('stroke-dasharray="2 2"'),
@@ -149,7 +159,7 @@ check(
 const dashedLabel = render({ kind: 'label', pts: [P(10, 20)], label, dashed: true });
 check(
   'подпись не пунктирится: её единственная линия — лидер',
-  !dashedLabel.includes('stroke-dasharray="6 4"'),
+  !dashedLabel.includes('stroke-dasharray="7 3"'),
   dashedLabel,
 );
 const filledPoly = render({ kind: 'polygon', pts: [P(10, 10), P(90, 10), P(90, 90)], label, filled: true });

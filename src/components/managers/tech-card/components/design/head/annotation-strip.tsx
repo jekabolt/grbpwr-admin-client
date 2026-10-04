@@ -1,7 +1,7 @@
 import { cn } from 'lib/utility';
 import type { JSX, ReactNode } from 'react';
 import { ANNOTATION_EDITOR_H } from 'ui/components/annotation/editor';
-import { AnnotationToolbar, placingHint } from 'ui/components/annotation/toolbar';
+import { AnnotationToolbar } from 'ui/components/annotation/toolbar';
 import Text from 'ui/components/text';
 
 /**
@@ -42,7 +42,6 @@ export function AnnotationStrip({
   tool,
   onTool,
   kinds,
-  placed = 0,
   remaining,
   editor,
   emptyHint,
@@ -54,8 +53,6 @@ export function AnnotationStrip({
   onTool: (kind: string | null) => void;
   /** Виды, доступные на этой поверхности. Не задано — весь реестр. */
   kinds?: string[];
-  /** Сколько якорей уже набрано в НЕЗАВЕРШЁННОЙ фигуре — из этого строится подсказка постановки. */
-  placed?: number;
   /** Сколько указаний ещё влезет на кадр; 0 — панель уступает место объяснению. */
   remaining?: number;
   /** Редактор выбранного указания. Не задан — в корпусе стоит подсказка, но корпус остаётся. */
@@ -80,19 +77,7 @@ export function AnnotationStrip({
             </Text>
           </span>
         ) : (
-          <AnnotationToolbar
-            tool={tool}
-            onTool={onTool}
-            kinds={kinds}
-            remaining={remaining}
-            hint={
-              tool
-                ? placed > 0
-                  ? placingHint(tool, placed)
-                  : 'click on the picture you need'
-                : undefined
-            }
-          />
+          <AnnotationToolbar tool={tool} onTool={onTool} kinds={kinds} remaining={remaining} />
         )}
       </div>
 

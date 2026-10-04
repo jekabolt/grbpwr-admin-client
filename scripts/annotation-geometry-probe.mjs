@@ -31,6 +31,11 @@ const {
   nearestOnPolyline,
   simplifyPath,
   simplifyToLimit,
+  squareToQuad,
+  applyHomography,
+  triangleAffine,
+  warpTriangles,
+  fitQuadToAspect,
 } = await import(pathToFileURL(outfile).href);
 
 let pass = 0;
@@ -176,6 +181,86 @@ const noise = Array.from({ length: 500 }, (_, i) => ({ x: i, y: i % 2 ? 1e6 : -1
 const forced = simplifyToLimit(noise, 40);
 check('патологический след всё равно влезает', forced.length <= 40, `осталось ${forced.length}`);
 check('и не теряет концы', forced[0].x === 0 && forced[forced.length - 1].x === 499);
+
+// ── R20: ВАРП КАРТИНКИ АРТВОРКА НА ЧЕТЫРЕ РУЧКИ ─────────────────────────────────────────────────
+// Углы картинки садятся РОВНО на ручки (TL, TR, BR, BL — порядок `rectCorners`), а середина — по
+// проекции. Если формула однажды съедет (перепутаны g/h, порядок вершин), картинка перестанет
+// сидеть в своих углах — на глаз это видно не сразу, а проба ловит сразу.
+const NEAR = 1e-6;
+const nearP = (p, q) => p && Math.abs(p.x - q.x) < NEAR && Math.abs(p.y - q.y) < NEAR;
+const quads = [
+  { n: 'прямоугольник', q: [{ x: 10, y: 20 }, { x: 110, y: 20 }, { x: 110, y: 80 }, { x: 10, y: 80 }] },
+  { n: 'параллелограмм', q: [{ x: 20, y: 10 }, { x: 120, y: 30 }, { x: 100, y: 90 }, { x: 0, y: 70 }] },
+  { n: 'трапеция-перспектива', q: [{ x: 40, y: 10 }, { x: 80, y: 10 }, { x: 120, y: 100 }, { x: 0, y: 100 }] },
+  { n: 'косой (как у владельца)', q: [{ x: 80, y: 58 }, { x: 342, y: 43 }, { x: 290, y: 204 }, { x: 50, y: 204 }] },
+];
+for (const { n, q } of quads) {
+  const H = squareToQuad(q);
+  check(`${n}: гомография есть`, !!H);
+  const corners = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([u, v]) => applyHomography(H, u, v));
+  check(`${n}: углы картинки ровно на ручках TL,TR,BR,BL`, corners.every((p, i) => nearP(p, q[i])), JSON.stringify(corners));
+  // Середина квадрата — точка пересечения диагоналей четырёхугольника (проекция сохраняет прямые).
+  const [a, b, c, d] = q;
+  const den = (a.x - c.x) * (b.y - d.y) - (a.y - c.y) * (b.x - d.x);
+  const t = ((a.x - b.x) * (b.y - d.y) - (a.y - b.y) * (b.x - d.x)) / den;
+  const X = { x: a.x + t * (c.x - a.x), y: a.y + t * (c.y - a.y) };
+  check(`${n}: центр картинки — пересечение диагоналей`, nearP(applyHomography(H, 0.5, 0.5), X), JSON.stringify([applyHomography(H, 0.5, 0.5), X]));
+}
+const par = quads[1].q;
+const Hp = squareToQuad(par);
+check('у параллелограмма проекция аффинна (g=h=0)', Hp.g === 0 && Hp.h === 0);
+check(
+  'центр параллелограмма — среднее вершин',
+  nearP(applyHomography(Hp, 0.5, 0.5), { x: par.reduce((s, p) => s + p.x, 0) / 4, y: par.reduce((s, p) => s + p.y, 0) / 4 }),
+);
+check('вырожденная зона (три точки на прямой) не варпится', squareToQuad([{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 100, y: 0 }, { x: 0, y: 0 }]) === null);
+check('не четыре точки — не варпится', squareToQuad(par.slice(0, 3)) === null);
+
+// Аффин треугольника: три вершины источника уходят ровно в три вершины назначения.
+const S = [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }];
+const T = [{ x: 5, y: 7 }, { x: 40, y: 12 }, { x: 33, y: 50 }];
+const M = triangleAffine(S, T);
+const ap = (m, p) => ({ x: m[0] * p.x + m[2] * p.y + m[4], y: m[1] * p.x + m[3] * p.y + m[5] });
+check('аффин треугольника: вершины на местах', S.every((p, i) => nearP(ap(M, p), T[i])), JSON.stringify(M));
+
+// Сетка: 2·n² треугольников, каждый аффин сажает свои углы сетки на точки проекции.
+const persp = quads[2].q;
+const tris = warpTriangles(persp, 10, 0);
+check('сетка 10×10 → 200 треугольников', tris.length === 200, `${tris.length}`);
+const Hq = squareToQuad(persp);
+check(
+  'первый треугольник: угол (0,0) картинки — в TL зоны',
+  nearP(ap(tris[0].m, { x: 0, y: 0 }), persp[0]),
+);
+check(
+  'последний треугольник: угол (1,1) картинки — в BR зоны',
+  nearP(ap(tris[tris.length - 1].m, { x: 1, y: 1 }), persp[2]),
+);
+check(
+  'каждый аффин совпадает с проекцией в своём углу (0.5,0.5)',
+  tris.some((t) => nearP(ap(t.m, { x: 0.5, y: 0.5 }), applyHomography(Hq, 0.5, 0.5))),
+);
+const bled = warpTriangles(persp, 10, 0.5);
+const area = (t) => Math.abs((t[1].x - t[0].x) * (t[2].y - t[0].y) - (t[2].x - t[0].x) * (t[1].y - t[0].y)) / 2;
+check('клип раздут на полпикселя (шов не виден)', bled.every((t, i) => area(t.clip) > area(tris[i].clip)));
+
+// Зона под пропорции картинки при первом прикреплении.
+const wide = fitQuadToAspect([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }], 2);
+check(
+  'квадратная зона под картинку 2:1 → 100×50 по центру, порядок TL,TR,BR,BL',
+  nearP(wide[0], { x: 0, y: 25 }) && nearP(wide[1], { x: 100, y: 25 }) && nearP(wide[2], { x: 100, y: 75 }) && nearP(wide[3], { x: 0, y: 75 }),
+  JSON.stringify(wide),
+);
+const rot = [{ x: 50, y: 0 }, { x: 100, y: 50 }, { x: 50, y: 100 }, { x: 0, y: 50 }]; // ромб под 45°
+const fitted = fitQuadToAspect(rot, 0.5);
+const len = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+check(
+  'повёрнутая зона сохраняет поворот и центр, стороны 1:2',
+  Math.abs(len(fitted[0], fitted[1]) / len(fitted[1], fitted[2]) - 0.5) < 1e-9 &&
+    nearP({ x: fitted.reduce((s, p) => s + p.x, 0) / 4, y: fitted.reduce((s, p) => s + p.y, 0) / 4 }, { x: 50, y: 50 }) &&
+    Math.abs((fitted[1].y - fitted[0].y) / (fitted[1].x - fitted[0].x) - 1) < 1e-9,
+  JSON.stringify(fitted),
+);
 
 console.log(`${pass} из ${pass + fail} проверок прошло`);
 process.exit(fail === 0 ? 0 : 1);

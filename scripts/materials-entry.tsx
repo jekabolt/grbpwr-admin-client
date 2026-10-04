@@ -68,6 +68,17 @@ const BAND = {
   bench: [],
   runs: [],
 } as unknown as GetDesignBandResponse;
+/* `#making`: LINING and ZIP have live pattern runs (the cancel corner and `cancel all`). */
+if (location.hash === '#making') {
+  const live = (id: number, bomItemId: number) => ({
+    id,
+    kind: 'pattern',
+    status: 'running',
+    startedAt: new Date(Date.now() - 12_000).toISOString(),
+    params: { colorwayId: 11, pattern: { bomItemId } },
+  });
+  (BAND as unknown as { runs: unknown[] }).runs = [live(701, 2), live(702, 4)];
+}
 (window as unknown as { __band: unknown }).__band = BAND;
 /* The library the picture slot opens: one horn button reference. */
 const HORN = svg(
@@ -75,7 +86,17 @@ const HORN = svg(
     `<circle cx='300' cy='300' r='200' fill='#1d1a17'/><circle cx='300' cy='300' r='160' fill='#2e2924'/>` +
     `<circle cx='270' cy='300' r='16' fill='#e8e4dc'/><circle cx='330' cy='300' r='16' fill='#e8e4dc'/>`,
 );
-(window as unknown as { __library: unknown }).__library = [media(901, HORN)];
+/* A brand logo artwork: the label slot's `+ logo` picks it (second in the library). */
+const LOGO = svg(
+  `<rect width='600' height='600' fill='#ffffff'/>` +
+    `<text x='300' y='330' font-family='Helvetica, Arial' font-size='96' font-weight='700' ` +
+    `text-anchor='middle' fill='#111'>GRBPWR</text>`,
+);
+(window as unknown as { __library: unknown }).__library = [media(901, HORN), media(902, LOGO)];
+/* Card LABELS row of BRAND LABEL (BOM line 5): placement, fold, size seed its words. */
+const LABEL_SEEDS = new Map([
+  [5, { placement: 'neckline, centre back', folding: 'flat', size: '50 × 20 mm' }],
+]);
 
 const cw = (
   colorwayId: number,
@@ -128,10 +149,10 @@ const SLOTS: MaterialSlot[] = [
     '100% wool twill 320 gsm',
   ),
   slot(2, 'fabric', 'fabric', 'LINING', 'lining', 'TECH_CARD_BOM_SECTION_LINING', '100% cupro'),
-  slot(3, 'hardware', 'button', 'FRONT BUTTON', '', 'TECH_CARD_BOM_SECTION_TRIMS'),
-  slot(4, 'hardware', 'zipper', 'ZIP', '', 'TECH_CARD_BOM_SECTION_TRIMS'),
-  slot(5, 'hardware', 'label', 'BRAND LABEL', '', 'TECH_CARD_BOM_SECTION_LABELS'),
-  slot(6, 'hardware', 'snap', 'SNAP', '', 'TECH_CARD_BOM_SECTION_TRIMS'),
+  slot(3, 'hardware', 'button', 'FRONT BUTTON', '', 'TECH_CARD_BOM_SECTION_TRIM'),
+  slot(4, 'hardware', 'zipper', 'ZIP', '', 'TECH_CARD_BOM_SECTION_TRIM'),
+  slot(5, 'hardware', 'label', 'BRAND LABEL', '', 'TECH_CARD_BOM_SECTION_LABEL'),
+  slot(6, 'hardware', 'snap', 'SNAP', '', 'TECH_CARD_BOM_SECTION_TRIM'),
 ];
 
 /* `ColourwayCreatePopover` reads the tech-card form; the closed popover needs only a context. */
@@ -154,6 +175,7 @@ function Harness() {
           colorwayId={colorwayId}
           onColorwayChange={setColorwayId}
           slots={SLOTS}
+          labelSeeds={LABEL_SEEDS}
           onGoStep={() => {}}
         />
       </div>

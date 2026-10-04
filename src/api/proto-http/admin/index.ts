@@ -8300,9 +8300,13 @@ export type common_TechCardCallout = {
   // Наконечники линии — см. TechCardAnnotationCaps. Тот же примитив, что у выноски снимка шага:
   // выноску переносят со снимка на эскиз и обратно, и линия обязана остаться той же линией.
   caps: common_TechCardAnnotationCaps | undefined;
-  // PURPOSE (field 16): JSON object string; "{}" = plain, "" / absent = not sent (server carries).
-  // Hand-added ahead of the regen (callout kinds wave).
-  spec?: string;
+  // НАЗНАЧЕНИЕ ВЫНОСКИ и её структурное содержимое — JSON-объект строкой (0388): заметка, узел
+  // крупно, нанесение, строчка/шов, материал, разрез. Ось, ортогональная виду (как caps): вид
+  // говорит, ЧТО нарисовано, spec — ЗАЧЕМ. Форму держит клиент; сервер проверяет только «объект,
+  // не длиннее 16 КБ» и канонизирует (ключи по алфавиту), чтобы подпись DESIGN была стабильной.
+  // Пусто = обычная выноска, как до 0388. Входит в атомарную группу геометрии: без `kind` хранимый
+  // spec переносится вместе с якорями.
+  spec: string | undefined;
 };
 
 // TechCardBomItem is one bill-of-materials line — a catalog article (Sheet «Спецификация»).
@@ -15253,6 +15257,9 @@ export type GetDesignBandResponse = {
   // THE MODEL SuggestPrompts ANSWERS WITH ('' = the assistant is not configured: draw the static Ideas list only).
   // ABSENT = a binary without SuggestPrompts.
   suggestPromptsModel: string | undefined;
+  // AUTO PARTS of the flat each side holds NOW (base_media_id = the media in that side's flat slot),
+  // every algo_rev. A row of a flat that left its slot is not sent.
+  partsSuggestions: DesignPartsSuggestion[] | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The six
@@ -16722,6 +16729,28 @@ export type DesignImageModel = {
   backgrounds: string[] | undefined;
 };
 
+export type DesignPartsSuggestion = {
+  view: string | undefined;
+  baseMediaId: number | undefined;
+  algoRev: string | undefined;
+  parts: DesignPartGroup[] | undefined;
+  splitNeeded: DesignPartSplit[] | undefined;
+  model: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// DesignPartGroup is one garment part: its name and its region numbers (1-based).
+export type DesignPartGroup = {
+  label: string | undefined;
+  regions: number[] | undefined;
+};
+
+// DesignPartSplit is a region that spans two parts with no seam line drawn.
+export type DesignPartSplit = {
+  region: number | undefined;
+  why: string | undefined;
+};
+
 export type ListDesignRunsRequest = {
   techCardId: number | undefined;
   // Max 24, default 12 when 0. The history shows about 4 rows per screen; three screens of slack is
@@ -17650,6 +17679,73 @@ export type common_DesignColourwaySlotColour = {
 export type common_DesignFlatDetail = {
   name: string | undefined;
   note: string | undefined;
+};
+
+// DesignQuizQuestion is one question of the moodboard quiz, as asked and as stored.
+export type DesignQuizQuestion = {
+  id: string | undefined;
+  category: string | undefined;
+  part: string | undefined;
+  family: string | undefined;
+  view: string | undefined;
+  kind: string | undefined;
+  question: string | undefined;
+  options: string[] | undefined;
+  contradicts: boolean[] | undefined;
+  visualEvidence: string | undefined;
+  clarifyQuestion: string | undefined;
+  clarifyOptions: string[] | undefined;
+};
+
+export type GenerateDesignQuizRequest = {
+  techCardId: number | undefined;
+};
+
+export type GenerateDesignQuizResponse = {
+  questions: DesignQuizQuestion[] | undefined;
+  family: string | undefined;
+  model: string | undefined;
+};
+
+export type DesignQuizAnswer = {
+  question: DesignQuizQuestion | undefined;
+  selected: string[] | undefined;
+  freeText: string | undefined;
+  skipped: boolean | undefined;
+  answeredAt: wellKnownTimestamp | undefined;
+};
+
+export type GetDesignQuizAnswersRequest = {
+  techCardId: number | undefined;
+};
+
+export type GetDesignQuizAnswersResponse = {
+  answers: DesignQuizAnswer[] | undefined;
+};
+
+// SaveDesignQuizAnswersRequest carries the FULL list; the stored list is replaced by it.
+export type SaveDesignQuizAnswersRequest = {
+  techCardId: number | undefined;
+  answers: DesignQuizAnswer[] | undefined;
+};
+
+export type SaveDesignQuizAnswersResponse = {
+  answers: DesignQuizAnswer[] | undefined;
+};
+
+export type SuggestDesignPartsRequest = {
+  techCardId: number | undefined;
+  view: string | undefined;
+  baseMediaId: number | undefined;
+  marksMediaId: number | undefined;
+  regionCount: number | undefined;
+  algoRev: string | undefined;
+  force: boolean | undefined;
+};
+
+export type SuggestDesignPartsResponse = {
+  suggestion: DesignPartsSuggestion | undefined;
+  cached: boolean | undefined;
 };
 
 // AiRouteCandidate is one (provider, model) a purpose's call may go to.
@@ -19335,6 +19431,24 @@ export interface AdminService {
   // FailedPrecondition: no_moodboard. (`budget_exceeded` was listed here until 0358 removed the
   // generation ceiling as a concept — no verb refuses for money any more.)
   DraftDesignIdea(request: DraftDesignIdeaRequest): Promise<DraftDesignIdeaResponse>;
+  // GenerateDesignQuiz (moodboard quiz) — one sync vision+JSON call: the model reads the board
+  // pictures, the board words and the card facts, and asks 0..15 questions about what is still
+  // unclear or non-standard. Nothing is stored; ai_usage_event books the call. Questions already
+  // answered on the card (GetDesignQuizAnswers) are never returned again.
+  // FailedPrecondition: nothing to ask about (no attached picture and no concept).
+  GenerateDesignQuiz(request: GenerateDesignQuizRequest): Promise<GenerateDesignQuizResponse>;
+  // SuggestDesignParts (auto parts) — one sync vision+JSON call: the model reads the side's flat cut
+  // into numbered regions (marks_media_id, drawn by the client) and groups the numbers into named
+  // garment parts. Cached per (card, view, base_media_id, algo_rev): a cached answer is returned
+  // without a call unless force.
+  // FailedPrecondition: the flat changed (base_media_id is not the side's flat), the region count is
+  // outside 2..60.
+  SuggestDesignParts(request: SuggestDesignPartsRequest): Promise<SuggestDesignPartsResponse>;
+  // GetDesignQuizAnswers — every quiz answer stored on the card, in display order.
+  GetDesignQuizAnswers(request: GetDesignQuizAnswersRequest): Promise<GetDesignQuizAnswersResponse>;
+  // SaveDesignQuizAnswers REPLACES the card's whole answer list with the one sent (single writer:
+  // the client always sends the full list). Returns the stored list.
+  SaveDesignQuizAnswers(request: SaveDesignQuizAnswersRequest): Promise<SaveDesignQuizAnswersResponse>;
   // GetWorkshopSettings returns «дом настроек цеха» (Ф2.5, 0272): the shop-floor constants that
   // belong to the ЦЕХ itself and not to any one card or раскладка. Первый жилец is the cutting
   // table length, which the nesting modal used to make the operator retype on every раскладка.
@@ -25921,6 +26035,86 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DraftDesignIdea",
       }) as Promise<DraftDesignIdeaResponse>;
+    },
+    GenerateDesignQuiz(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/quiz`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GenerateDesignQuiz",
+      }) as Promise<GenerateDesignQuizResponse>;
+    },
+    SuggestDesignParts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/parts:suggest`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestDesignParts",
+      }) as Promise<SuggestDesignPartsResponse>;
+    },
+    GetDesignQuizAnswers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/quiz-answers`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetDesignQuizAnswers",
+      }) as Promise<GetDesignQuizAnswersResponse>;
+    },
+    SaveDesignQuizAnswers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/quiz-answers`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveDesignQuizAnswers",
+      }) as Promise<SaveDesignQuizAnswersResponse>;
     },
     GetWorkshopSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/workshop/settings`; // eslint-disable-line quotes

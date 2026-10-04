@@ -47,8 +47,7 @@ export const CALLOUT_COLOR_HEX: Record<string, string> = {
   white: '#ffffff',
 };
 
-export const calloutInk = (color?: string) =>
-  (color && CALLOUT_COLOR_HEX[color]) || 'currentColor';
+export const calloutInk = (color?: string) => (color && CALLOUT_COLOR_HEX[color]) || 'currentColor';
 
 /** Толщина линий и размеры фигур в пикселях кадра — не масштабируются вместе с картинкой. */
 /**
@@ -58,8 +57,14 @@ export const calloutInk = (color?: string) =>
 const BULLET_R = 3.5;
 /** След маркера тяжелее чертёжных фигур: он и должен читаться фломастером, а не волосяной линией. */
 const INK_WIDTH = 2;
-/** Пунктир ФИГУРЫ заведомо крупнее пунктира ЛИДЕРА (`2 2`) — иначе их не различить. */
-const DASH_SHAPE = '6 4';
+/**
+ * Пунктир ФИГУРЫ заведомо крупнее пунктира ЛИДЕРА (`2 2`) — иначе их не различить.
+ *
+ * ШТРИХИ ПРЯМОУГОЛЬНЫЕ (R19, владелец: «что бы сами дэши были не закругленные а прямоугольные»):
+ * у пунктира концы `butt`, углы `miter`. Круглый конец удлинял каждый штрих на толщину линии —
+ * прежние `6 4` читались как 7.5/2.5, поэтому длины подобраны под тот же ритм без скруглений.
+ */
+const DASH_SHAPE = '7 3';
 const DASH_LEADER = '2 2';
 
 // ── ОБЩИЕ ОПРЕДЕЛЕНИЯ SVG ───────────────────────────────────────────────────────────────────────
@@ -169,6 +174,8 @@ type StrokeProps = {
 function Stroke({ d, color, width, dashed, halo, markerEnd, markerStart }: StrokeProps) {
   const ink = calloutInk(color);
   const dash = dashed ? DASH_SHAPE : undefined;
+  const cap = dashed ? 'butt' : 'round';
+  const join = dashed ? 'miter' : 'round';
   const white = color === 'white';
   // Подложка у белого — ЧЕРНИЛЬНАЯ и безусловная; у прочих — белая и только на фото.
   const under = white ? 'currentColor' : '#fff';
@@ -182,8 +189,8 @@ function Stroke({ d, color, width, dashed, halo, markerEnd, markerStart }: Strok
           stroke={under}
           strokeWidth={width + 2}
           strokeDasharray={dash}
-          strokeLinecap='round'
-          strokeLinejoin='round'
+          strokeLinecap={cap}
+          strokeLinejoin={join}
           opacity={white ? 1 : 0.9}
         />
       )}
@@ -193,8 +200,8 @@ function Stroke({ d, color, width, dashed, halo, markerEnd, markerStart }: Strok
         stroke={ink}
         strokeWidth={width}
         strokeDasharray={dash}
-        strokeLinecap='round'
-        strokeLinejoin='round'
+        strokeLinecap={cap}
+        strokeLinejoin={join}
         markerEnd={markerEnd}
         markerStart={markerStart}
       />

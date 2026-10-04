@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { adminService } from 'api/api';
 import {
   DesignBenchSlotRef,
+  DesignQuizAnswer,
   DesignSplitFrame,
   DesignUploadItem,
   GetDesignBandResponse,
@@ -25,6 +26,8 @@ export const designKeys = {
   all: ['design'] as const,
   band: (techCardId: number) => [...designKeys.all, 'band', techCardId] as const,
   layer: (layerId: number) => [...designKeys.all, 'layer', layerId] as const,
+  /** Ответы квиза доски (ASK ME) — своя таблица на сервере, своя запись в кэше. */
+  quiz: (techCardId: number) => [...designKeys.all, 'quiz', techCardId] as const,
 };
 
 /**
@@ -129,6 +132,8 @@ export const EMPTY_BAND: GetDesignBandResponse = {
   // Поля 32/33 (фаза 3) — то же правило отсутствия: бинарь без них рисует формы второй фазы.
   runKinds: undefined,
   suggestPromptsModel: undefined,
+  // AUTO PARTS (paint the parts Ф2): none yet — the canvas asks for a side it opens.
+  partsSuggestions: [],
 };
 
 export type DesignBandState = {
@@ -648,4 +653,71 @@ export function findMediaUrlInBand(band: GetDesignBandResponse, mediaId: number)
     }
   }
   return '';
+}
+
+/**
+ * ═══ КВИЗ ДОСКИ — ASK ME (волна 04.10, 20-DESIGN §7) ══════════════════════════════════════════
+ *
+ * Ответы живут в своей таблице (`tech_card_design_quiz_answer`), а не в `details[]` формы: автосейв
+ * заменяет детали целиком каждые 2 с и стёр бы их. Поэтому чтение и запись здесь — мимо формы.
+ *
+ * ЗАПИСЬ ВСЕГДА ПОЛНЫМ СПИСКОМ (`SaveDesignQuizAnswers` = replace): писатель один (этот экран),
+ * слияния нет. Кэш ставится сразу (оптимистично) и откатывается на отказ; ответ сервера ложится,
+ * только если после него не ушла более новая запись — иначе старый ответ затёр бы новый ответ.
+ */
+const NO_ANSWERS: DesignQuizAnswer[] = [];
+
+export function useDesignQuizAnswers(techCardId?: number) {
+  const id = techCardId ?? 0;
+  const query = useQuery({
+    queryKey: designKeys.quiz(id),
+    queryFn: async () =>
+      (await adminService.GetDesignQuizAnswers({ techCardId: id })).answers ?? [],
+    enabled: id > 0,
+    retry: (failureCount, error) => !isUnimplemented(error) && failureCount < 1,
+    staleTime: 60_000,
+  });
+  return {
+    answers: query.data ?? NO_ANSWERS,
+    /** Сервер маршрута не знает (старый бинарь) — двери квиза нет вовсе. */
+    unimplemented: isUnimplemented(query.error),
+    isLoading: id > 0 && query.isLoading,
+  };
+}
+
+export function useDesignQuizWrites(techCardId?: number) {
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  const id = techCardId ?? 0;
+  useCardOnScreen(id);
+
+  const generate = useMutation({
+    mutationFn: () => adminService.GenerateDesignQuiz({ techCardId: id }),
+  });
+
+  const save = useMutation({
+    mutationFn: (answers: DesignQuizAnswer[]) =>
+      adminService.SaveDesignQuizAnswers({ techCardId: id, answers }),
+    onMutate: async (answers: DesignQuizAnswer[]) => {
+      const key = designKeys.quiz(id);
+      await qc.cancelQueries({ queryKey: key });
+      const previous = qc.getQueryData<DesignQuizAnswer[]>(key);
+      qc.setQueryData(key, answers);
+      return { previous, card: id, sent: answers };
+    },
+    onError: (error, _answers, context) => {
+      const card = context?.card ?? id;
+      const key = designKeys.quiz(card);
+      // Откат — только если на экране всё ещё наш оптимистичный список.
+      if (context && qc.getQueryData(key) === context.sent) qc.setQueryData(key, context.previous);
+      if (!cardOnScreen(card)) return;
+      showMessage((error as Error)?.message || 'the answer was not saved', 'error');
+    },
+    onSuccess: (res, _answers, context) => {
+      const key = designKeys.quiz(context?.card ?? id);
+      if (context && qc.getQueryData(key) === context.sent) qc.setQueryData(key, res.answers ?? []);
+    },
+  });
+
+  return { generate, save };
 }

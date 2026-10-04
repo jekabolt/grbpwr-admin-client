@@ -38,6 +38,7 @@ import { holdFlatInput, readFlatInput, rowsWritable } from './flat-input';
 import { DraftedPill } from './head/mood-organs';
 import { VectorModal } from './modals';
 import { useMoodCallouts, type MoodCallout } from './mood-callouts';
+import { MoodQuiz } from './mood-quiz';
 import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { CalloutsPanel, useCalloutsPanel } from './callouts-panel';
 import {
@@ -1102,6 +1103,14 @@ export function MoodBoard({
                  высоту ПОД РЕДАКТОР, а кадру, у которого редактора нет ни в одном состоянии, дёргаться
                  не от чего — 108px вертикали доска получила назад. */
             />
+            {/* ASK ME (квиз доски, 04.10): ряд под лентой, складывается вместе с доской. */}
+            <MoodQuiz
+              techCardId={techCardId}
+              readOnly={readOnly}
+              pictures={items.length}
+              concept={conceptValue}
+              conceptMax={CONCEPT_MAX}
+            />
           </div>
 
           <ConfirmationModal
@@ -1169,7 +1178,6 @@ export function MoodBoard({
           panel={calloutsShell}
           hidden={!open}
           tag='mb'
-          question='— pinned on the board, not numbered'
           where='on the board'
           note={
             /* Счётчик — только когда считать есть что (фиксап N2, O-20 «не должно быть

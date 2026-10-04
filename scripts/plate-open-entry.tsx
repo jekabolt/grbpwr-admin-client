@@ -48,7 +48,6 @@ function Harness() {
         canPlaceOn={() => true}
         tool='label'
         onToolDone={noop}
-        onPlacedCountChange={noop}
         onAddCallout={() => setAdded((n) => n + 1)}
         bindings={{}}
         onZoom={(i) => setZooms((z) => [...z, i])}

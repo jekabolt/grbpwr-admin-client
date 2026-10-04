@@ -33,6 +33,7 @@ export {
   boundAsset,
   boundAssetsByPair,
   clothSlots,
+  labelSeedsOf,
   materialSlots,
   clothTwin,
   colourIsStated,
