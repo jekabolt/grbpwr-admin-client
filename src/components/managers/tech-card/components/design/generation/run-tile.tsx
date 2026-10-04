@@ -275,7 +275,7 @@ export function RunTile({
    * «replaced by an edit», and no cut is offered (the server refuses one: `already_replaced`).
    */
   const replaced = successorStands(picture, siblings ?? [picture]);
-  /** An edit the person undid (T28): hidden, its place given back to the version before it. */
+  /** An edit the person undid (T28 v2, `undone_at`): its place given back to the version before it. */
   const undone = isUndoneEdit(picture);
   // WHAT THIS FILE DECLARES ABOUT ITSELF — see `composite.tsx`. Nothing here infers compositeness
   // from what the run ASKED for.
@@ -319,13 +319,12 @@ export function RunTile({
   /* Hooks above the render-host branch: a tile never changes host, but React counts calls. */
   const removal = useDeletePicture(techCardId, picture, siblings);
   const slotMenu = useSlotMenu({ band, techCardId, picture, rep, disabled });
-  /* UNDO / REDO (T28): on the FLAT workbench only — where an edit takes its original's place. The
-     history shows every link and walks none; a render's edit is always new. */
+  /* UNDO / REDO (T28 v2): on the FLAT workbench only — where an edit takes its original's place. The
+     history shows every link and walks none; a render's edit is always new. The server moves the
+     slot holding the version itself. */
   const chainDoors = useEditChainDoors({
     techCardId,
     picture,
-    row: siblings ?? [picture],
-    slot: inSlot ? { ref: inSlot.ref, rev: inSlot.rev } : null,
     handle,
     disabled: !workbench || !!renderHost || !!disabled || threedFile,
   });

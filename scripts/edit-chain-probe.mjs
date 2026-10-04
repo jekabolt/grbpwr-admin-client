@@ -1,19 +1,21 @@
 #!/usr/bin/env node
-// EDIT CHAIN: THE EDIT PROPAGATES, UNDO AND REDO (04.10, owner item 28, T28;
+// EDIT CHAIN: THE EDIT PROPAGATES, UNDO AND REDO (04.10, owner item 28, T28 v2;
 // generation/edit-chain.ts, edit-chain-doors.ts, run-gallery.ts, propagating-editor.tsx).
 //
 // Owner: «если в LATEST GENERATION или в FLAT SLOTS мы делаем эдит то картинка после эдита должна
 // пропагейтится … в LATEST GENERATION не должно показываться две картинки новая и старая а только
 // новая но на ховер должна быть кнопка undo redo».
 //
-// Pure half (node): the bench draws each chain as its CURRENT version (a hidden link = an undone
-// edit), an undone edit stands nowhere on the bench, undo/redo steps, overwrite over an undone
-// successor is open. DOM half (playwright, skipped when absent): the real workbench `RunTile` shows
-// `undo` / `redo` in the frame, before `edit`, none in the history, and the writes go in the order
-// the server's guards need (slot first then hide; show first then slot).
+// Pure half (node): the bench draws each chain as its CURRENT version (stop before an UNDONE link,
+// `undone_at` — a hidden link is not undone), an undone edit stands nowhere on the bench, the corners
+// are the server's `can_undo` / `can_redo`, overwrite over an undone successor is open (over a
+// merely hidden one it is not). DOM half (playwright, skipped when absent): the real workbench
+// `RunTile` shows `undo` / `redo` in the frame, before `edit`, none in the history, and each step is
+// ONE write — `UndoDesignEdit` / `RedoDesignEdit` with the CAS on the version pressed.
 //
 //   node scripts/edit-chain-probe.mjs
-//   node scripts/edit-chain-probe.mjs --mutate=headstop|cardskip|redocut|closed|order   — each goes red
+//   node scripts/edit-chain-probe.mjs --mutate=headstop|cardskip|hiddenundone|canredo|closed|corners|cas
+//   — each goes red
 
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
@@ -43,11 +45,17 @@ const MUTATIONS = {
     from: ' || replacements.has(id) || isUndoneEdit(picture)) continue;',
     to: ' || replacements.has(id)) continue;',
   },
-  // redo is offered over pieces cut since the undo
-  redocut: {
+  // v1's rule back: a hidden link counts as undone
+  hiddenundone: {
     file: /generation\/edit-chain\.ts$/,
-    from: '!grownVisible(true)',
-    to: 'true',
+    from: 'return !!picture.undoneAt;',
+    to: 'return !!picture.undoneAt || !!picture.hiddenAt;',
+  },
+  // the server's can_redo is ignored: a paged-out undone successor still closes the overwrite
+  canredo: {
+    file: /generation\/edit-chain\.ts$/,
+    from: '  if (picture.canRedo) return false;\n',
+    to: '',
   },
   // overwrite stays closed over an undone successor: an edit after undo cannot propagate
   closed: {
@@ -55,11 +63,17 @@ const MUTATIONS = {
     from: 'if (successorStands(picture, siblings))',
     to: 'if ((picture.replacedBy ?? 0) > 0)',
   },
-  // undo hides before the slot moved: the server refuses (`in_slot`)
-  order: {
+  // the corners stop reading the server: no redo after an undo
+  corners: {
+    file: /generation\/edit-chain\.ts$/,
+    from: 'redo: !!picture.canRedo',
+    to: 'redo: false',
+  },
+  // the step carries no CAS: a stale screen would step a chain it no longer sees
+  cas: {
     file: /generation\/edit-chain-doors\.ts$/,
-    from: 'const undo = async (to: common_DesignPicture) => {\n    if (slot) {',
-    to: 'const undo = async (to: common_DesignPicture) => {\n    if (false) {',
+    from: 'expectedCurrentId: id,',
+    to: 'expectedCurrentId: 0,',
   },
 };
 function mutationPlugin(name) {
@@ -128,11 +142,12 @@ const check = (name, ok, detail = '') => {
   const p = (id, extra = {}) => ({ id, replacedBy: 0, ...extra });
   const edit = (id, from, extra = {}) =>
     p(id, { derivedFrom: from, derivation: 'flatten', ...extra });
+  const steps = (pic) => JSON.stringify(a.chainSteps(pic));
 
-  // v1 → v2 → v3, and x beside
+  // v1 → v2 → v3, and x beside; the server marks v3 current with can_undo
   const v1 = p(1, { replacedBy: 2 });
   const v2 = edit(2, 1, { replacedBy: 3 });
-  const v3 = edit(3, 2);
+  const v3 = edit(3, 2, { canUndo: true });
   const x = p(9);
   const row = [v1, v2, v3, x];
   check(
@@ -141,54 +156,67 @@ const check = (name, ok, detail = '') => {
     ids(a.benchPlan(row)),
   );
   check('P2 history keeps every link', ids(a.outputPlan(row)) === '[1,2,3,9]');
-  let s = a.chainSteps(v3, row);
-  check('P3 head: undo goes to v2, no redo', s.undoTo?.id === 2 && s.redoTo === null);
+  check(
+    'P3 corners are the server’s: v3 undo only',
+    steps(v3) === '{"undo":true,"redo":false}',
+    steps(v3),
+  );
+  check(
+    'P3b no corners on a link the server did not mark',
+    steps(v2) === '{"undo":false,"redo":false}',
+  );
 
-  // undo once: v3 hidden
-  const u1 = [v1, v2, { ...v3, hiddenAt: H }, x];
+  // undo once: v3 undone, v2 current (can_undo, can_redo)
+  const u1 = [
+    v1,
+    { ...v2, canUndo: true, canRedo: true },
+    { ...v3, canUndo: false, undoneAt: H },
+    x,
+  ];
   check(
     'P4 after undo: the bench shows v2',
     ids(a.benchPlan(u1)) === '[2,9]',
     ids(a.benchPlan(u1)),
   );
-  s = a.chainSteps(u1[1], u1);
-  check(
-    'P5 after undo: v2 can undo to v1 and redo to v3',
-    s.undoTo?.id === 1 && s.redoTo?.id === 3,
-  );
+  check('P5 after undo: v2 has undo and redo', steps(u1[1]) === '{"undo":true,"redo":true}');
   check('P6 the undone edit is not a standing successor', !a.successorStands(u1[1], u1));
-  check('P7 a visible successor stands', a.successorStands(v2, row));
+  check('P7 a live successor stands', a.successorStands(v2, row));
   check(
     'P8 a successor off the page is taken as standing',
     a.successorStands(p(5, { replacedBy: 77 }), []),
   );
+  check(
+    'P8b …unless the server says it is undone (can_redo)',
+    !a.successorStands(p(5, { replacedBy: 77, canRedo: true }), []),
+  );
   check('P9 the undone link: isUndoneEdit', a.isUndoneEdit(u1[2]) && !a.isUndoneEdit(v3));
 
-  // undo twice: v2, v3 hidden
-  const u2 = [v1, { ...v2, hiddenAt: H }, { ...v3, hiddenAt: H }, x];
+  // HIDDEN IS NOT UNDONE (v2): a hidden v3 is still the head, still stands, still closes overwrite
+  const hid = [v1, v2, { ...v3, hiddenAt: H }, x];
+  check('P10 a hidden link is not undone', !a.isUndoneEdit(hid[2]));
   check(
-    'P10 after two undos: the bench shows v1',
+    'P11 a hidden head still heads its chain',
+    ids(a.benchPlan(hid)) === '[3,9]',
+    ids(a.benchPlan(hid)),
+  );
+  check('P12 a hidden successor still stands', a.successorStands(v2, hid));
+  check('P13 overwrite closed over a hidden successor', !!a.overwriteClosed(v2, hid, null));
+
+  // undo twice: v2, v3 undone
+  const u2 = [{ ...v1, canRedo: true }, { ...v2, undoneAt: H }, { ...v3, undoneAt: H }, x];
+  check(
+    'P14 after two undos: the bench shows v1',
     ids(a.benchPlan(u2)) === '[1,9]',
     ids(a.benchPlan(u2)),
   );
-  s = a.chainSteps(v1, u2);
-  check('P11 v1: no undo, redo to v2', s.undoTo === null && s.redoTo?.id === 2);
 
-  // an edit after the undo: v2.replaced_by = v4, v3 stays hidden and linked from nothing
-  const e = [v1, { ...v2, replacedBy: 4 }, { ...v3, hiddenAt: H }, edit(4, 2), x];
+  // an edit after the undo: v2.replaced_by = v4, v3 stays undone and linked from nothing
+  const e = [v1, { ...v2, replacedBy: 4 }, { ...v3, undoneAt: H }, edit(4, 2), x];
   check(
-    'P12 edit after undo: the bench shows v4 only',
+    'P15 edit after undo: the bench shows v4 only',
     ids(a.benchPlan(e)) === '[4,9]',
     ids(a.benchPlan(e)),
   );
-  s = a.chainSteps(e[3], e);
-  check('P13 v4: undo to v2, no redo', s.undoTo?.id === 2 && s.redoTo === null);
-
-  // a piece cut out of v2 after the undo: no redo (the piece would stay cut from v2), no undo
-  const cut = [...u1, p(20, { derivedFrom: 2, derivation: 'crop' })];
-  s = a.chainSteps(cut[1], cut);
-  check('P14 pieces cut since the undo: no redo', s.redoTo === null);
-  check('P15 a visible child: no undo (server: live_crop_parent)', s.undoTo === null);
 
   // a piece's chain: sheet S, piece P (crop), E replaced P; E undone → P stands in S's deck
   const S = p(50);
@@ -198,16 +226,22 @@ const check = (name, ok, detail = '') => {
   check('P16 piece edit: E stands in the deck', deck(a.benchPlan([S, P, E])) === '[52]');
   check(
     'P17 piece edit undone: P is back in the deck',
-    deck(a.benchPlan([S, P, { ...E, hiddenAt: H }])) === '[51]',
+    deck(a.benchPlan([S, P, { ...E, undoneAt: H }])) === '[51]',
   );
 
-  // overwrite over an undone successor is open; over a standing one it is closed
+  // overwrite over an undone successor is open; over a standing one closed; an undone picture closed
   check(
     'P18 overwrite open over an undone successor',
     a.overwriteClosed(u1[1], u1, null) === null,
     String(a.overwriteClosed(u1[1], u1, null)),
   );
+  check(
+    'P18b …also when the undone successor is paged out (can_redo)',
+    a.overwriteClosed({ ...v2, canRedo: true }, [{ ...v2, canRedo: true }], null) === null,
+    String(a.overwriteClosed({ ...v2, canRedo: true }, [{ ...v2, canRedo: true }], null)),
+  );
   check('P19 overwrite closed over a standing successor', !!a.overwriteClosed(v2, row, null));
+  check('P20 overwrite closed over an undone picture', !!a.overwriteClosed(u1[2], u1, null));
 }
 
 /* ═══ DOM ═══ */
@@ -307,8 +341,10 @@ if (!chromium || !CSS) {
       );
     const writes = () =>
       page.evaluate(() =>
-        window.__calls.filter(
-          (c) => c.name === 'SetDesignBenchSlot' || c.name === 'HideDesignPicture',
+        window.__calls.filter((c) =>
+          ['SetDesignBenchSlot', 'HideDesignPicture', 'UndoDesignEdit', 'RedoDesignEdit'].includes(
+            c.name,
+          ),
         ),
       );
 
@@ -336,15 +372,13 @@ if (!chromium || !CSS) {
     await page.waitForTimeout(300);
     let w = await writes();
     check(
-      'D4 undo: the slot takes v2 (rev 3) FIRST, then v3 is hidden',
-      w.length === 2 &&
-        w[0].name === 'SetDesignBenchSlot' &&
-        w[0].body.pictureId === 32 &&
-        w[0].body.expectedSlotRev === 3 &&
-        w[0].body.slot?.viewKey === 'front' &&
-        w[1].name === 'HideDesignPicture' &&
-        w[1].body.pictureId === 33 &&
-        w[1].body.hidden === true,
+      'D4 undo: ONE write, UndoDesignEdit with the CAS on v3 and a key',
+      w.length === 1 &&
+        w[0].name === 'UndoDesignEdit' &&
+        w[0].body.pictureId === 33 &&
+        w[0].body.expectedCurrentId === 33 &&
+        typeof w[0].body.idempotencyKey === 'string' &&
+        w[0].body.idempotencyKey.length > 0,
       JSON.stringify(w),
     );
 
@@ -354,15 +388,11 @@ if (!chromium || !CSS) {
     await page.waitForTimeout(300);
     w = (await writes()).slice(before);
     check(
-      'D5 redo: w3 is shown FIRST, then the slot takes it (rev 4)',
-      w.length === 2 &&
-        w[0].name === 'HideDesignPicture' &&
-        w[0].body.pictureId === 43 &&
-        w[0].body.hidden === false &&
-        w[1].name === 'SetDesignBenchSlot' &&
-        w[1].body.pictureId === 43 &&
-        w[1].body.expectedSlotRev === 4 &&
-        w[1].body.slot?.viewKey === 'back',
+      'D5 redo: ONE write, RedoDesignEdit with the CAS on w2',
+      w.length === 1 &&
+        w[0].name === 'RedoDesignEdit' &&
+        w[0].body.pictureId === 42 &&
+        w[0].body.expectedCurrentId === 42,
       JSON.stringify(w),
     );
     const flag = await page

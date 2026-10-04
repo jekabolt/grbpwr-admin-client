@@ -15444,7 +15444,8 @@ export type common_DesignPicture = {
   displayOnly: boolean | undefined;
   // THE EDIT THAT TOOK THIS PICTURE'S PLACE (O-53) — the id of the flatten filed by
   // FlattenDesignEditLayer with replace_picture_id = this picture. 0 = not replaced. OUTPUT-ONLY:
-  // no request carries it, and no verb clears it (there is no «un-replace» in v1).
+  // no request carries it, and no verb clears it. An overwrite over an UNDONE successor (undone_at)
+  // rewrites it to the new edit; the undone branch keeps its rows, cut off.
   // A REPLACED PICTURE IS NOT HIDDEN AND NOT CHANGED. Its pixels, run row, crops, reference roles
   // and hidden_at are exactly what they were; what moved is the bench slot that held it, which now
   // holds the edit. The history keeps showing it — captioned «replaced by an edit» — and it can be
@@ -15458,7 +15459,23 @@ export type common_DesignPicture = {
   // ErrorInfo metadata names the head of its chain as head_picture_id.
   // ⚠ ABSENT — not 0 — on a server older than the field, and that absence is how a client knows
   // the server cannot replace a picture yet (FlattenDesignEditLayerRequest.replace_picture_id).
+  // UNDO / REDO (T28 v2, undone_at below). The CURRENT VERSION of a chain is reached by walking
+  // replaced_by from the root and stopping BEFORE the first link with undone_at set. The head named
+  // in already_replaced is that current version.
   replacedBy: number | undefined;
+  // THIS EDIT WAS UNDONE (T28 v2) — UndoDesignEdit set it on the current version of its chain,
+  // RedoDesignEdit clears it. It is NOT hidden_at: undo and redo never touch visibility, and a hidden
+  // picture keeps every rule of hidden_at. An undone link and every link after it stand nowhere on
+  // the bench and in no slot; the history keeps them. A chain whose ROOT is undone is a branch cut off
+  // by a newer edit (an overwrite over an undone successor detaches it) and has no current version.
+  // Unset = not undone.
+  undoneAt: wellKnownTimestamp | undefined;
+  // The server's answer from the WHOLE chain (not from the page the client holds), so a plate in a
+  // slot whose run row is paged out keeps its corners. Set only on the CURRENT version of a chain:
+  // can_undo — the chain has a link before this one;
+  // can_redo — the link after this one is undone.
+  canUndo: boolean | undefined;
+  canRedo: boolean | undefined;
 };
 
 // DesignBudget is the band's money bar: `today $0.41 of $2.00`.
@@ -16898,6 +16915,37 @@ export type HideDesignPictureRequest = {
 
 export type HideDesignPictureResponse = {
   picture: common_DesignPicture | undefined;
+};
+
+export type UndoDesignEditRequest = {
+  pictureId: number | undefined;
+  // CAS: the current version the client saw (the picture whose undo corner was pressed).
+  expectedCurrentId: number | undefined;
+  idempotencyKey: string | undefined;
+};
+
+// The chain after the step — the band rows the step touched.
+export type DesignEditChainState = {
+  // The current version now.
+  currentPictureId: number | undefined;
+  // Every link of the chain, root first, with undone_at, can_undo and can_redo as stored now.
+  pictures: common_DesignPicture[] | undefined;
+  // The bench slots that hold the current version now (the ones this step moved), slot_rev bumped.
+  slots: common_DesignBenchSlot[] | undefined;
+};
+
+export type UndoDesignEditResponse = {
+  chain: DesignEditChainState | undefined;
+};
+
+export type RedoDesignEditRequest = {
+  pictureId: number | undefined;
+  expectedCurrentId: number | undefined;
+  idempotencyKey: string | undefined;
+};
+
+export type RedoDesignEditResponse = {
+  chain: DesignEditChainState | undefined;
 };
 
 export type DeleteDesignPictureRequest = {
@@ -19007,6 +19055,22 @@ export interface AdminService {
   // Guards, each of which would otherwise leave a live reference pointing at something the band
   // refuses to draw — FailedPrecondition: in_slot | live_run_input | live_crop_parent.
   HideDesignPicture(request: HideDesignPictureRequest): Promise<HideDesignPictureResponse>;
+  // UndoDesignEdit takes back the CURRENT VERSION of an edit chain (replaced_by, T28 v2): undone_at is
+  // set on it and every bench slot that held it moves to the link before it (slot_rev + 1). ONE
+  // transaction: the chain rows are locked, then a compare-and-set on expected_current_id.
+  // picture_id names the chain (any link of it). IDEMPOTENT BY OUTCOME: a repeat that finds the
+  // undo already in place (expected_current_id undone, the link before it current) answers OK and
+  // writes nothing; idempotency_key is required and logged.
+  // InvalidArgument: a missing id or key. FailedPrecondition: stale_chain (the current version is
+  // not expected_current_id — re-read the band), nothing_to_undo (the current version is the
+  // original), live_crop_parent (it is cut into visible pieces), and every refusal of a slot
+  // placement (hidden_plate, picture_already_in_slot, …). NotFound: no such picture.
+  UndoDesignEdit(request: UndoDesignEditRequest): Promise<UndoDesignEditResponse>;
+  // RedoDesignEdit brings back the undone link right after the current version (T28 v2): undone_at
+  // is cleared on it and every bench slot that held the current version moves onto it. Same
+  // transaction, lock, compare-and-set and idempotency as UndoDesignEdit.
+  // FailedPrecondition: stale_chain, nothing_to_redo, and every refusal of a slot placement.
+  RedoDesignEdit(request: RedoDesignEditRequest): Promise<RedoDesignEditResponse>;
   // DeleteDesignPicture removes a DERIVED picture FOR GOOD — a crop, or an edit of a crop — with
   // everything cut or flattened from it and with the files behind them (O-68, D-74). It is the
   // one verb on a picture that is NOT reversible, and that is why it is narrow: only a picture
@@ -25407,6 +25471,46 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "HideDesignPicture",
       }) as Promise<HideDesignPictureResponse>;
+    },
+    UndoDesignEdit(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.pictureId) {
+        throw new Error("missing required field request.picture_id");
+      }
+      const path = `api/admin/design/picture/${request.pictureId}/undo`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UndoDesignEdit",
+      }) as Promise<UndoDesignEditResponse>;
+    },
+    RedoDesignEdit(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.pictureId) {
+        throw new Error("missing required field request.picture_id");
+      }
+      const path = `api/admin/design/picture/${request.pictureId}/redo`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RedoDesignEdit",
+      }) as Promise<RedoDesignEditResponse>;
     },
     DeleteDesignPicture(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.pictureId) {

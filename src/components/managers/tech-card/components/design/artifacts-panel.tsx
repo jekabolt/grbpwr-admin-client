@@ -2612,6 +2612,10 @@ function plateAsPicture(plate: DocumentPlate): common_DesignPicture {
     // ЗАМЕНА (O-53) — ТОЖЕ МОЛЧАНИЕ: `0` на проводе значит «голова цепочки замен», то есть
     // утверждение о картинке, а эта подделка о заменах не знает ничего.
     replacedBy: undefined,
+    // T28 v2: undo/redo — this stand-in is in no edit chain.
+    undoneAt: undefined,
+    canUndo: undefined,
+    canRedo: undefined,
   };
 }
 

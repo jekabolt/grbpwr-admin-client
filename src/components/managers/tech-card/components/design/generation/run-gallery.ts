@@ -55,7 +55,8 @@ export type OutputPlan = {
  *     would unmount that editor mid-drawing; its head waits until the editor closes.
  * The history keeps showing every link (captioned «replaced by an edit», `run-tile.tsx`).
  *
- * AN UNDONE EDIT IS NOT A HEAD (04.10, T28, `edit-chain.ts`): the walk stops before a hidden link —
+ * AN UNDONE EDIT IS NOT A HEAD (04.10, T28 v2, `edit-chain.ts`): the walk stops before an undone
+ * link (`undone_at`, not `hidden_at`) —
  * the version undo went back to stands in the chain's place — and an undone edit is drawn nowhere
  * here, neither as a head nor as a card of its own (after a new edit over it, it is linked from
  * nothing). The history draws it, dimmed.

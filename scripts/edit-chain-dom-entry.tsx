@@ -1,6 +1,7 @@
 // DOM half of the edit-chain probe (T28): the REAL `RunTile` on the FLAT workbench over a fake band.
 //   · `cur`     — v3, the head of v1 → v2 → v3, standing in FRONT (rev 3): `undo` in the frame;
-//   · `back`    — w2 after an undo (w2.replaced_by = w3, hidden), standing in BACK (rev 4): `redo`;
+//   · `back`    — w2 after an undo (w2.replaced_by = w3, undone), standing in BACK (rev 4): `redo`;
+// The corners are the server's `canUndo` / `canRedo` (T28 v2).
 //   · `history` — v3 in the history: no undo, no redo.
 // `adminService` calls land in `window.__calls` (stub in the probe).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -14,7 +15,7 @@ const PIC =
   encodeURIComponent(
     "<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><rect width='300' height='300' fill='#ddd'/></svg>",
   );
-const HIDDEN = '2026-10-04T10:00:00Z';
+const UNDONE = '2026-10-04T10:00:00Z';
 const pic = (id: number, extra: Partial<common_DesignPicture> = {}): common_DesignPicture =>
   ({
     id,
@@ -27,10 +28,16 @@ const pic = (id: number, extra: Partial<common_DesignPicture> = {}): common_Desi
 
 const v1 = pic(31, { replacedBy: 32 });
 const v2 = pic(32, { derivedFrom: 31, derivation: 'flatten', replacedBy: 33 });
-const v3 = pic(33, { derivedFrom: 32, derivation: 'flatten' });
+const v3 = pic(33, { derivedFrom: 32, derivation: 'flatten', canUndo: true });
 const w1 = pic(41, { replacedBy: 42 });
-const w2 = pic(42, { derivedFrom: 41, derivation: 'flatten', replacedBy: 43 });
-const w3 = pic(43, { derivedFrom: 42, derivation: 'flatten', hiddenAt: HIDDEN });
+const w2 = pic(42, {
+  derivedFrom: 41,
+  derivation: 'flatten',
+  replacedBy: 43,
+  canUndo: true,
+  canRedo: true,
+});
+const w3 = pic(43, { derivedFrom: 42, derivation: 'flatten', undoneAt: UNDONE });
 const siblings = [v1, v2, v3, w1, w2, w3];
 
 const band = {

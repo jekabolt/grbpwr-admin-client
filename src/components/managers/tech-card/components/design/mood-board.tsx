@@ -447,6 +447,10 @@ function pictureOfMedia(full: common_MediaFull): common_DesignPicture {
     colorwayId: undefined,
     displayOnly: undefined,
     replacedBy: undefined,
+    // T28 v2: undo/redo — this stand-in is in no edit chain.
+    undoneAt: undefined,
+    canUndo: undefined,
+    canRedo: undefined,
   };
 }
 

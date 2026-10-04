@@ -11,7 +11,7 @@ import { VectorModal } from '../modals';
 import type { VectorReplace } from '../modals/vector-modal';
 import { isPictureHidden } from '../visibility';
 import { isCutOut } from './composite';
-import { successorStands } from './edit-chain';
+import { isUndoneEdit, successorStands } from './edit-chain';
 
 /**
  * ═══ THE EDITOR WHOSE SAVE TAKES THE PICTURE'S PLACE — TWO HOSTS (04.10, owner item 28, T28) ════
@@ -90,9 +90,11 @@ export function overwriteClosed(
   form: { technicalMedia?: { mediaId?: number }[]; callouts?: { mediaId?: number }[] } | null,
 ): string | null {
   if (picture.replacedBy === undefined) return 'this server cannot replace a picture yet';
-  // An undone (hidden) successor frees the place again (T28): the edit goes over the undone branch.
+  // An UNDONE successor frees the place again (T28 v2, `undone_at`): the edit goes over the undone
+  // branch. A merely hidden one still holds it, as the server says (`already_replaced`).
   if (successorStands(picture, siblings))
     return 'an edit has already taken this picture’s place — edit that one instead';
+  if (isUndoneEdit(picture)) return 'this edit was undone — redo it first, or save the edit as new';
   if (isPictureHidden(picture))
     return 'this picture is hidden — an old stamp nothing here can lift, so save the edit as new';
   const pieces = standingPieces(siblings, picture.id ?? 0);

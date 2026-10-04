@@ -431,6 +431,36 @@ export function useDesignWrites(techCardId?: number) {
   });
 
   /**
+   * UNDO / REDO OF AN EDIT CHAIN (T28 v2) — ONE server write each (`UndoDesignEdit` /
+   * `RedoDesignEdit`): the server locks the chain, checks that `expectedCurrentId` is still its
+   * current version (`stale_chain` otherwise), marks or clears `undone_at` and moves the slot that
+   * held the old current version, in one transaction. The key is minted per gesture by the caller.
+   * Settles only once the re-read band is in (the slot revision moved), success or refusal alike:
+   * a `stale_chain` refusal means the screen is behind, and the re-read is the fix.
+   */
+  const stepEditChain = useMutation({
+    mutationFn: (input: {
+      step: 'undo' | 'redo';
+      pictureId: number;
+      expectedCurrentId: number;
+      idempotencyKey: string;
+    }) => {
+      const req = {
+        pictureId: input.pictureId,
+        expectedCurrentId: input.expectedCurrentId,
+        idempotencyKey: input.idempotencyKey,
+      };
+      return input.step === 'undo'
+        ? adminService.UndoDesignEdit(req)
+        : adminService.RedoDesignEdit(req);
+    },
+    onMutate,
+    onError,
+    onSettled: (_data: unknown, _error: unknown, _variables: unknown, context?: WriteContext) =>
+      qc.invalidateQueries({ queryKey: designKeys.band(context?.card ?? techCardId ?? 0) }),
+  });
+
+  /**
    * THE MARK «CHOSEN» ON A PICTURE — W-12. `selected: false` takes the mark off; the server keeps
    * the two picture flags INDEPENDENT and so does this seam: choosing is not un-hiding, hiding is
    * not un-choosing, and nothing is exclusive — the owner speaks in the plural, so many pictures
@@ -533,6 +563,7 @@ export function useDesignWrites(techCardId?: number) {
       setBenchSlot,
       deleteDetailSlot,
       hidePicture,
+      stepEditChain,
       setPictureSelected,
       splitPicture,
       setReferenceRole,
@@ -543,6 +574,7 @@ export function useDesignWrites(techCardId?: number) {
       setBenchSlot,
       deleteDetailSlot,
       hidePicture,
+      stepEditChain,
       setPictureSelected,
       splitPicture,
       setReferenceRole,

@@ -243,8 +243,12 @@ export function pickableFlats(band: GetDesignBandResponse): common_DesignPicture
      задумано: догадка «флэт» для рода, о котором сборка не слышала, — это дефект L-1 под новым
      именем, а `pictureBenchKind` остаётся при своём вопросе (КАКОЙ ВЕРСТАК берёт плиту) и при
      своих читателях. */
+  // An undone edit (T28 v2) stands in no slot — the server refuses it (`undone_picture`).
   return selectPickablePictures(all).filter(
-    (p) => (p.compositeViews ?? []).length === 0 && pictureRepresentation(band, p) === 'flat',
+    (p) =>
+      !p.undoneAt &&
+      (p.compositeViews ?? []).length === 0 &&
+      pictureRepresentation(band, p) === 'flat',
   );
 }
 
@@ -793,14 +797,13 @@ export function BenchSlot(props: BenchSlotProps) {
 
   /* THE EDIT PROPAGATES, AND WALKS BACK (04.10, owner item 28, T28): the editor over a filled slot
      overwrites its picture (the server moves this slot onto the edit, and the bench above draws the
-     edit in the original's place), and `undo` / `redo` move this slot along the chain. The chain is
-     filed in the picture's own row (`edit-chain.ts`). */
+     edit in the original's place), and `undo` / `redo` step the chain in one server write that
+     moves this slot too (`edit-chain.ts`). The editor reads the overwrite's limits off the row the
+     picture is filed in. */
   const chainRow = picture ? rowOfPicture(band, picture) : [];
   const chainDoors = useEditChainDoors({
     techCardId,
     picture,
-    row: chainRow,
-    slot: slotId > 0 ? { ref: slotRef, rev: slotRev } : null,
     handle: label,
     disabled: !!disabled || !editable || saving,
   });
