@@ -10,9 +10,10 @@ import { ColourwayCreatePopover } from '../colourway-create';
 import { ColourwayStrip } from '../colourway-strip';
 import { useColourPlan } from '../colour-plan/use-colour-plan';
 import { GROUP_SEAM } from '../core';
+import { openStepOf } from '../core/chain';
 import { Workbench } from '../generation/studio';
 import type { ClothSlot } from '../pattern/slot-fabrics';
-import { useCardFit, useColourDraft } from './drafts';
+import { packOf, useCardFit, useColourDraft } from './drafts';
 import { GenerateRow, LockBar, RunRefusal } from './generate-row';
 import {
   clampColourName,
@@ -24,7 +25,8 @@ import {
   wireColourSource,
   type Gate,
 } from './model';
-import { Palette } from './palette';
+import { MaterialsPack } from './materials-pack';
+import { InWords } from './palette';
 import { RenderStepScope, type RenderStep } from './render-tile';
 import { SidesSection, useSidesTarget } from './side-row';
 import { useStartDesignRun, type StartRunInput } from './use-design-run';
@@ -35,8 +37,7 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * THE FABRIC RENDER STUDIO — step 4 of the chain, FOUR BLOCKS IN THE ORDER OF THE WORK:
  *
  *   FABRIC RENDER · the cloth on the flats                                          [STEP 4]
- *   ── CLOTH AND COLOUR  one grid: cloth tiles and the colour tile
- *   ── CLOTH IS ─────── weight g/m² · opaque · semi sheer · sheer, one line
+ *   ── MATERIALS ────── the colourway's pack from MATERIALS, read-only (V5: the pack is the recipe)
  *   ── IN WORDS ─────── the free text of the recipe
  *   GENERATE · priced by the server on start · WHAT THE MODEL GETS ▸
  *   WORKBENCH ─────────── the newest render run, its tiles with the doors, and under them the
@@ -264,10 +265,13 @@ export function RenderStudio({
    * ⚠ THE GATE READS THIS, NOT `draft.recipe`: a run stated only by opacity and weight is a legal
    * statement about the cloth (H-13).
    */
+  // V5: the cloths that travel are the colourway's pack, whatever the draft held before.
+  const pack = useMemo(() => packOf(band, colorwayId, slots), [band, colorwayId, slots]);
   const sent = useMemo(() => {
     const hex = hexIsPaintable(draft.recipe.hex) ? (draft.recipe.hex ?? '').trim() : '';
     return {
       ...draft.recipe,
+      ...pack,
       words: statedWords(draft),
       /**
        * ⚠ THE COLOUR INVARIANT IS HELD BY THIS DOOR, NOT BY THE FIELD: no hex the screen calls
@@ -292,7 +296,7 @@ export function RenderStudio({
        */
       code: hex ? clampColourName(colorwayId > 0 ? colorwayLabel.trim() : '') : '',
     };
-  }, [draft.recipe, draft.cloth, colorwayId, colorwayLabel]);
+  }, [draft.recipe, draft.cloth, pack, colorwayId, colorwayLabel]);
 
   /** What will actually travel — the recipe SUBSTITUTED BY THE PLAN when colour maps ride along. */
   const wire = useMemo(
@@ -322,7 +326,7 @@ export function RenderStudio({
       return {
         ok: false,
         reason:
-          'no fabric is stated · pick a cloth, a colour, say what it is, or describe it. Any one is enough',
+          'no cloth is marked for this colourway · mark one in MATERIALS, or describe it in words',
       };
     }
     return { ok: true };
@@ -460,7 +464,7 @@ export function RenderStudio({
                 colorways={colorways.filter((c) => target.drawn.includes(c.colorwayId ?? 0))}
                 selectedId={colorwayId}
                 onSelect={onColorwayChange}
-                onCreate={() => openCreate()}
+                onCreate={() => openStepOf('colorways')}
                 disabled={disabled}
                 loading={cardColorways === undefined && colorways.length === 0}
               />
@@ -468,27 +472,17 @@ export function RenderStudio({
           </div>
         )}
 
-        {/* ═══ CLOTH AND COLOUR · CLOTH IS · IN WORDS — the recipe, three group rows. The palette
-            owns them because they write one draft (`useColourDraft`) and the gate above reads
-            the same one. ⚠ THE ANCHOR `#design-fabric-menu` STAYS ON THE GRID: E-7 («no cloth
-            placeholder in the input») and E-16 («no colourway picker in the menu») are asserted
-            against it. */}
-        <div id='design-fabric-menu'>
-          <Palette
+        {/* V5 · MATERIALS (the pack, read-only) · IN WORDS. The anchor `#design-fabric-menu` moved
+            onto the pack; the paint plan keeps its code but has no door this round. */}
+        <div id='design-fabric-menu' className={GROUP_SEAM}>
+          <MaterialsPack
             band={band}
-            techCardId={techCardId}
-            disabled={disabled}
-            draft={draft}
-            colourPlan={colourPlan}
-            /* STEP 3: whose bindings rank and label the CLOTHS grid — the same target and the
-               same slots the draft was seeded from, so the tile marked «outer» is the cloth
-               the seed put first. */
             colorwayId={colorwayId}
+            colorwayLabel={colorwayLabel}
             slots={slots}
-            /* K-16: the second door of the cloth shelf. Without `onGoToKind` it does not exist —
-               a button with nowhere to lead is worse than none. */
-            onMakePattern={onGoToKind && (() => onGoToKind('pattern'))}
+            onEdit={onGoToKind && (() => onGoToKind('pattern'))}
           />
+          <InWords state={draft} band={band} techCardId={techCardId} disabled={disabled} />
         </div>
 
         {/* ═══ THE RUN DOORS — the prototype's `runDoors`: the LOCKED bar when the gate refuses,

@@ -268,6 +268,8 @@ const FIELD_STEP: Record<string, StepId> = {
   callouts: 'mood',
   details: 'mood',
   bomItems: 'mood',
+  // the colourways block of the moodboard step (`colourway-proposals.tsx`, `data-field='colorways'`)
+  colorways: 'mood',
   // the flat step: the prompt's words, and the bench doors (`design.bench.*`, `doors.ts`)
   garmentDescription: 'flat',
 };

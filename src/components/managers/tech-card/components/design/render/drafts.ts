@@ -378,6 +378,15 @@ function boundSeedOf(
   };
 }
 
+/** V5 · the colourway's pack as recipe cloths: bound fabrics in slot order (empty when none). */
+export function packOf(
+  band: GetDesignBandResponse,
+  colorwayId: number,
+  slots: readonly ClothSlot[] | null | undefined,
+): Pick<EchoValues, 'fabrics' | 'fabricMediaId'> {
+  return boundSeedOf(band, colorwayId, slots)?.values ?? { fabrics: [], fabricMediaId: 0 };
+}
+
 export type ColourDraft = {
   /**
    * ЧТО УЕДЕТ — рецепт, который читают поле, ворота, опись «what the model gets» и тело прогона.

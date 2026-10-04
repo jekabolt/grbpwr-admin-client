@@ -596,12 +596,15 @@ export function SlotCap({
   requiredNote,
   title,
   trailing,
+  strong,
 }: {
   label: string;
   required?: boolean;
   requiredNote?: string;
   title?: string;
   trailing?: React.ReactNode;
+  /** Bold name: the selected cell of a selectable row (MATERIALS). */
+  strong?: boolean;
 }) {
   return (
     <div
@@ -614,7 +617,7 @@ export function SlotCap({
         variant='uppercase'
         tracking='label'
         component='span'
-        className='min-w-0 truncate'
+        className={strong ? 'min-w-0 truncate font-bold' : 'min-w-0 truncate'}
       >
         {label}
       </Text>

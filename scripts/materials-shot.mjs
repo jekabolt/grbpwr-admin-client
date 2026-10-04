@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// СНИМКИ ШАГА MATERIALS — визуальный стенд, не тест (`materials-entry.tsx`). Снимает 1440 px
-// (полная страница), 390 px (мобильный) и 1440 px после `clear` на привязанной ячейке (дверь undo).
+// СНИМКИ ШАГА MATERIALS — визуальный стенд, не тест (`materials-entry.tsx`). Round 3 (one slot
+// selected): 1440 px with MAIN FABRIC selected, 1440 px with FRONT BUTTON selected (words
+// «horn, black», one library picture), 390 px with the default selection.
 // Сеть — прокси: `SetDesignAssetBinding` правит `window.__band`, остальные вызовы отвечают `{}`;
 // `fetch` заглушён. Пишет консольные ошибки страницы.
 //
@@ -69,6 +70,7 @@ const stubNetwork = {
         const clone = (v) => JSON.parse(JSON.stringify(v ?? {}));
         const answer = (name, body) => {
           if (name === 'GetDesignBand') return clone(window.__band);
+          if (name === 'ListObjectsPaged') return clone({ list: window.__library || [] });
           if (name === 'SetDesignAssetBinding') {
             const band = window.__band;
             const rest = (band.assetBindings || []).filter(
@@ -147,7 +149,10 @@ try {
   const open = async (width, height) => {
     const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
     const page = await ctx.newPage();
-    page.on('pageerror', (e) => errors.push(`[${width}] pageerror: ${e.message}`));
+    page.on('pageerror', (e) => {
+      errors.push(`[${width}] pageerror: ${e.message}`);
+      if (process.env.DEBUG_SHOT) console.log('pageerror', e.message, e.stack?.slice(0, 600));
+    });
     page.on('console', (m) => {
       if (m.type() === 'error' || m.type() === 'warning')
         errors.push(`[${width}] console.${m.type()}: ${m.text()}`);
@@ -182,26 +187,36 @@ try {
 
   {
     const { ctx, page } = await open(1440, 1000);
-    await shoot(page, 'materials-1440.png');
+    // Selected fabric: MAIN FABRIC (bound) — the panel is its spec.
+    await page.click('[data-fh-slot="1"] [data-picture-tile]');
+    await page.waitForSelector('[data-fh-for="1"]');
+    await page.mouse.move(5, 5);
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.waitForTimeout(400);
+    await shoot(page, 'r3-fabric-selected-1440.png');
 
-    // clear на привязанной ткани MAIN FABRIC (bomItemId 1) → дверь undo.
-    const menu = '[data-probe="materials"] [data-menu="fh:1"]';
-    await page.hover('[data-fh-slot="1"]');
-    await page.click(menu);
-    await page.waitForSelector('[data-menu-item="clear"]');
-    await shoot(page, 'materials-1440-menu.png');
-    await page.click('[data-menu-item="clear"]');
-    await page.waitForSelector('[data-fh-undo="1"]', { timeout: 5000 }).catch(() => {
-      errors.push('[1440] undo door [data-fh-undo="1"] did not appear after clear');
+    // Selected hardware: FRONT BUTTON, words «horn, black», one picture from the library.
+    await page.click('[data-fh-slot="3"] [data-picture-tile]');
+    await page.waitForSelector('[data-fh-for="3"]');
+    await page.fill('[data-fh-words]', 'horn, black');
+    await page.click('[data-fh-look-door] button');
+    await page.waitForSelector('[role="dialog"]');
+    await page.waitForTimeout(500);
+    if (process.env.DEBUG_SHOT) await shoot(page, 'r3-debug-dialog.png');
+    await page.locator('[role="dialog"] img').first().click();
+    await page.getByRole('button', { name: /add all/i }).click();
+    await page.waitForSelector('[data-fh-look="1"]', { timeout: 5000 }).catch(() => {
+      errors.push('[1440] the picture did not land in the hardware spec');
     });
     await page.mouse.move(5, 5);
+    await page.evaluate(() => document.activeElement?.blur());
     await page.waitForTimeout(400);
-    await shoot(page, 'materials-1440-after-clear.png');
+    await shoot(page, 'r3-hardware-selected-1440.png');
     await ctx.close();
   }
   {
     const { ctx, page } = await open(390, 844);
-    await shoot(page, 'materials-390.png');
+    await shoot(page, 'r3-390.png');
     await ctx.close();
   }
 } finally {

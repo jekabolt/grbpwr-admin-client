@@ -94,18 +94,22 @@ export function slotMediaIds(
 /** One slot's frame: 128px square, so two slots and their labels sit side by side in a panel. */
 const CELL = 'w-32 shrink-0';
 
-function Filled({
+/** The filled face of the studio's picture slot: the picture and its ✕. */
+export function PictureSlotFilled({
   media,
   alt,
   disabled,
   onRemove,
+  className,
 }: {
   media: common_MediaFull;
   alt: string;
   disabled?: boolean;
   onRemove: () => void;
+  /** Cell width, when the caller composes the row itself. */
+  className?: string;
 }): JSX.Element {
-  return (
+  const tile = (
     <PictureTile
       url={mediaThumb(media)}
       alt={alt}
@@ -119,22 +123,27 @@ function Filled({
       }
     />
   );
+  return className ? <div className={className}>{tile}</div> : tile;
 }
 
-function Empty({
+/** The empty face of the studio's picture slot: library/upload on click, ⌘V, drop. */
+export function PictureSlotEmpty({
   purpose,
   multiple,
   limit,
   disabled,
   onSelect,
+  className,
 }: {
   purpose: string;
   multiple?: boolean;
   limit?: number;
   disabled?: boolean;
   onSelect: (media: common_MediaFull[]) => void;
+  /** Cell width, when the caller composes the row itself. */
+  className?: string;
 }): JSX.Element {
-  return (
+  const slot = (
     <MediaSlot
       label='+ add'
       hint={null}
@@ -148,6 +157,7 @@ function Empty({
       onSelect={onSelect}
     />
   );
+  return className ? <div className={className}>{slot}</div> : slot;
 }
 
 export function ImageSlots(props: ImageSlotsProps): JSX.Element {
@@ -180,7 +190,7 @@ export function ImageSlots(props: ImageSlotsProps): JSX.Element {
                 </Text>
               )}
               {media ? (
-                <Filled
+                <PictureSlotFilled
                   media={media}
                   alt={name}
                   disabled={disabled}
@@ -188,7 +198,7 @@ export function ImageSlots(props: ImageSlotsProps): JSX.Element {
                 />
               ) : (
                 <>
-                  <Empty
+                  <PictureSlotEmpty
                     purpose={slot.label ? `${purpose} · ${slot.label}` : purpose}
                     disabled={disabled}
                     onSelect={(list) => list[0] && put(slot.key, list[0])}
@@ -231,7 +241,7 @@ export function ImageSlots(props: ImageSlotsProps): JSX.Element {
       <div className='flex flex-wrap items-start gap-2.5'>
         {value.map((media, i) => (
           <div key={media.id ?? i} className={CELL} data-image-slot={media.id ?? 0}>
-            <Filled
+            <PictureSlotFilled
               media={media}
               alt={`picture ${i + 1}`}
               disabled={disabled}
@@ -241,7 +251,7 @@ export function ImageSlots(props: ImageSlotsProps): JSX.Element {
         ))}
         {room > 0 && (
           <div className={CELL}>
-            <Empty
+            <PictureSlotEmpty
               purpose={purpose}
               multiple={room > 1}
               limit={room}

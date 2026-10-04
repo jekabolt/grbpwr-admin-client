@@ -11,6 +11,7 @@ import type {
 import { useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { createRoot } from 'react-dom/client';
+import { MemoryRouter } from 'react-router-dom';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
 import { PictureGalleryProvider } from 'components/managers/tech-card/components/design/picture-tile';
 import { FabricsHardware } from 'components/managers/tech-card/components/design/pattern/fabrics-hardware';
@@ -68,6 +69,13 @@ const BAND = {
   runs: [],
 } as unknown as GetDesignBandResponse;
 (window as unknown as { __band: unknown }).__band = BAND;
+/* The library the picture slot opens: one horn button reference. */
+const HORN = svg(
+  `<rect width='600' height='600' fill='#e8e4dc'/>` +
+    `<circle cx='300' cy='300' r='200' fill='#1d1a17'/><circle cx='300' cy='300' r='160' fill='#2e2924'/>` +
+    `<circle cx='270' cy='300' r='16' fill='#e8e4dc'/><circle cx='330' cy='300' r='16' fill='#e8e4dc'/>`,
+);
+(window as unknown as { __library: unknown }).__library = [media(901, HORN)];
 
 const cw = (
   colorwayId: number,
@@ -156,12 +164,15 @@ function Harness() {
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 createRoot(document.getElementById('root') as HTMLElement).render(
   <QueryClientProvider client={qc}>
-    <DesignCapabilityProvider value>
-      <DictionaryProvider>
-        <Form>
-          <Harness />
-        </Form>
-      </DictionaryProvider>
-    </DesignCapabilityProvider>
+    {/* The library dialog navigates; it needs a router. */}
+    <MemoryRouter>
+      <DesignCapabilityProvider value>
+        <DictionaryProvider>
+          <Form>
+            <Harness />
+          </Form>
+        </DictionaryProvider>
+      </DesignCapabilityProvider>
+    </MemoryRouter>
   </QueryClientProvider>,
 );

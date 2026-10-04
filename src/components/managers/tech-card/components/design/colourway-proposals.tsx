@@ -761,7 +761,7 @@ export function ColourwayProposals({
          а не пишется здесь второй раз. */
       className={GROUP_SEAM}
     >
-      <div data-b25-colourways=''>
+      <div data-b25-colourways='' data-field='colorways'>
         {listed && (
           /* Шов между колорвеями — 20px, число `GROUP_SEAM`: колорвей в этом блоке и есть группа. */
           <div className='flex flex-col gap-5' data-cw-list=''>
