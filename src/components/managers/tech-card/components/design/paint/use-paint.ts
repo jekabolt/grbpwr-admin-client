@@ -64,6 +64,8 @@ export type PaintView = {
   aspect: number;
   labels: Uint32Array | null;
   dirty: boolean;
+  /** The saved map our pixels stand on (0 = none). Another map there now = someone else's work. */
+  mapBase: number;
   /** Bumped on every pixel change — the canvas redraws off it. */
   rev: number;
 };
@@ -340,10 +342,12 @@ export class PaintSession {
       aspect,
       labels: null,
       dirty: false,
+      mapBase: 0,
       rev: 0,
     };
     this.views.set(view, v);
     const saved = plan?.maps.find((m) => m.view === view);
+    v.mapBase = saved?.mediaId ?? 0;
     void (async () => {
       try {
         const img = await pixelsOf(url);
@@ -422,7 +426,6 @@ export class PaintSession {
     );
     this.skins.set(label, { tile: null, hex: colourHex });
     for (const v of this.views.values()) {
-      if (v.labels && this.labelsIn(v.labels).has(label)) v.dirty = true;
       v.rev += 1;
     }
     this.schedule();
@@ -589,8 +592,22 @@ export class PaintSession {
     });
   }
 
+  /** Dirty views whose saved map was replaced by somebody else since our pixels were based on it. */
+  private drifted(plan: ColourPlanDoc, dirty: PaintView[]): PaintView[] {
+    return dirty.filter(
+      (v) => (plan.maps.find((m) => m.view === v.view)?.mediaId ?? 0) !== v.mapBase,
+    );
+  }
+
   private async write(dirty: PaintView[]): Promise<boolean> {
     const card = this.techCardId;
+    const before = this.plan();
+    const moved = before ? this.drifted(before, dirty) : [];
+    if (moved.length > 0)
+      return this.fail(
+        'unsaved',
+        `somebody repainted ${moved.map((v) => v.view).join(', ')} — reload the card to see it`,
+      );
     const ownColours = new Map(
       this.colours.filter((c) => this.dirtyColours.has(c.label)).map((c) => [c.label, c.colourHex]),
     );
@@ -699,7 +716,7 @@ export class PaintSession {
         if (band) this.band = band;
         const sig = (d: ColourPlanDoc) =>
           JSON.stringify([...d.cloths].sort((a, b) => (a.hex < b.hex ? -1 : 1)).map(writeCloth));
-        if (sig(freshPlan) !== sig(base)) {
+        if (sig(freshPlan) !== sig(base) || this.drifted(freshPlan, dirty).length > 0) {
           for (const v of dirty) v.dirty = true;
           return this.fail(
             'unsaved',
@@ -726,6 +743,10 @@ export class PaintSession {
     for (const [label, hex] of ownColours)
       if (this.colours.find((c) => c.label === label)?.colourHex === hex)
         this.dirtyColours.delete(label);
+    for (const f of fresh) {
+      const v = this.views.get(f.view);
+      if (v) v.mapBase = f.map?.mediaId ?? 0;
+    }
     void this.qc.invalidateQueries({ queryKey: designKeys.band(card) });
     const left = [...this.views.values()].some((v) => v.dirty);
     this.save = left || this.timer ? 'pending' : 'idle';
