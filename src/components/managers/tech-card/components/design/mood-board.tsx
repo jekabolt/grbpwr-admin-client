@@ -7,7 +7,6 @@ import { cn } from 'lib/utility';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 import { AiEnhance } from 'ui/components/ai-enhance';
-import { Button } from 'ui/components/button';
 import { noteArrowsOf } from 'ui/components/annotation/surface';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -1162,6 +1161,8 @@ export function MoodBoard({
   const { draftIdea: describeRun } = useGenerationWrites(techCardId);
   const autosave = useTechCardAutosave();
   const [describing, setDescribing] = useState(false);
+  // T48: ссылка в плейсхолдере — только у пустого поля, при картинках на доске и не в чтении.
+  const canDescribe = !readOnly && !conceptValue.trim() && items.length > 0;
   const describeFromBoard = async () => {
     const card = techCardId;
     if (readOnly || describing || !(card && card > 0)) return;
@@ -1720,7 +1721,7 @@ export function MoodBoard({
                 value={conceptValue}
                 rows={4}
                 maxLength={CONCEPT_MAX}
-                placeholder='what this thing is — the idea, the reference, the purpose'
+                placeholder={canDescribe ? undefined : 'describe the thing'}
                 className={cn('resize-none pb-7', conceptDrafted && 'border-0 bg-transparent')}
                 onFocus={conceptSettle.onFocus}
                 onBlur={() => {
@@ -1736,18 +1737,30 @@ export function MoodBoard({
                 data-mb-concept-drafted=''
                 className='absolute -top-2 right-2 bg-bgColor'
               />
-              {!readOnly && !conceptValue.trim() && items.length > 0 && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  disabled={describing}
-                  onClick={describeFromBoard}
-                  data-mb-describe-from-board=''
-                  className='absolute bottom-1.5 left-1.5 bg-bgColor text-labelColor hover:text-textColor'
+              {/* T48: ссылка живёт В ПЛЕЙСХОЛДЕРЕ пустого поля (вариант владельца). Родной
+                  placeholder ссылку не держит, поэтому рисуем слой поверх: тот же бокс, что у
+                  textarea (рамка 1px прозрачная, px-[7px] py-[3px], тот же кегль и интерлиньяж) —
+                  строка ложится ровно туда, где стоял бы плейсхолдер. Слой прозрачен для мыши,
+                  кроме самой ссылки: клик мимо неё фокусирует поле. */}
+              {canDescribe && (
+                <div
+                  data-mb-describe-placeholder=''
+                  className={cn(
+                    'pointer-events-none absolute inset-0 select-none border border-transparent px-[7px] py-[3px] text-textBaseSize text-textInactiveColor',
+                    conceptDrafted && 'border-0',
+                  )}
                 >
-                  {describing ? 'writing …' : 'write from the board ✦'}
-                </Button>
+                  describe the thing — or{' '}
+                  <button
+                    type='button'
+                    disabled={describing}
+                    onClick={describeFromBoard}
+                    data-mb-describe-from-board=''
+                    className='pointer-events-auto underline decoration-1 underline-offset-2 hover:text-textColor focus-visible:text-textColor focus-visible:outline-none disabled:cursor-default disabled:hover:text-textInactiveColor'
+                  >
+                    {describing ? 'writing…' : 'write from the board ✦'}
+                  </button>
+                </div>
               )}
               <AiEnhance
                 key={techCardId}
