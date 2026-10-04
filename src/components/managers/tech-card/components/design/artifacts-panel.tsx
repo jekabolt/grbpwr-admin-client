@@ -2355,11 +2355,7 @@ export function ArtifactsPanel({
               такой дизайн»): виды и назначения одним рядом, без слова-заголовка. */}
           {drawableHere && (
             <Toolbar className={GROUP_GAP}>
-              <AnnotationToolbar
-                purposes
-                tool={tool}
-                onTool={setTool}
-              />
+              <AnnotationToolbar purposes tool={tool} onTool={setTool} />
             </Toolbar>
           )}
 
@@ -2437,7 +2433,6 @@ export function ArtifactsPanel({
         <CalloutsPanel
           panel={calloutsShell}
           tag='sheet'
-          question='— a number is minted once and never reused'
           where={`on ${ARTIFACT_KINDS.find((k) => k.value === kind)?.label ?? kind}`}
           note={
             /* ЧИСЛО = СПИСОК. Считается ровно то, что панель ниже рисует (`sheetRows`): выноски на

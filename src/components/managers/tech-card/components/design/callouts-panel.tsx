@@ -370,7 +370,6 @@ export function CalloutsPanel({
   panel,
   hidden,
   tag,
-  question,
   note,
   where,
   className,
@@ -381,7 +380,6 @@ export function CalloutsPanel({
   hidden?: boolean;
   /** Префикс data-атрибутов: `data-<tag>-callouts…` (мудборд — `mb`). */
   tag: string;
-  question: string;
   /** Счётчик в шапке, слева от шеврона. */
   note?: ReactNode;
   /** Хвост подписи полоски для чтеца: `expand the callouts panel · N <where>`. */
@@ -554,7 +552,6 @@ export function CalloutsPanel({
         <div hidden={collapsed} className='contents'>
           <Section
             title='callouts'
-            question={question}
             action={
               <span className='flex items-center gap-2'>
                 {note}

@@ -74,6 +74,7 @@
     "annotation:ink": "node scripts/annotation-ink-probe.mjs",
     "annotation:purpose": "node scripts/annotation-purpose-probe.mjs",
     "annotation:stitch-pictogram": "node scripts/annotation-stitch-pictogram-probe.mjs",
+    "annotation:row": "node scripts/callout-row-probe.mjs",
     "reader:find": "node scripts/reader-find-probe.mjs",
     "upload:queue": "node scripts/upload-queue-probe.mjs",
     "note:assistant-reason": "node scripts/note-assistant-reason-probe.mjs",

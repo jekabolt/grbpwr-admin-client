@@ -5,16 +5,13 @@ import {
   ARTWORK_SUBS,
   DETAIL_SCALES,
   parseSpec,
-  purposesFor,
-  purposeTool,
   seamShort,
   SECTION_PRESETS,
   spiOf,
   writeSpec,
-  type Purpose,
   type Spec,
 } from 'ui/components/annotation/purpose';
-import { StitchPictogram } from 'ui/components/annotation/stitch-pictogram';
+import { StitchPictogram, stitchBrushOf } from 'ui/components/annotation/stitch-pictogram';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Input from 'ui/components/input';
 import Select from 'ui/components/select';
@@ -36,7 +33,7 @@ import type { RailCallout } from './callout-rail';
  */
 
 const ISO_ITEMS = [
-  { value: '', label: 'ISO 4915' },
+  { value: '', label: 'stitch · ISO 4915' },
   ...STITCHES.filter((s) => /^\d/.test(s.iso)).map((s) => ({
     value: s.iso,
     label: (
@@ -48,8 +45,29 @@ const ISO_ITEMS = [
   })),
 ];
 
+/**
+ * ПОДПИСЬ ВЫБРАННОГО СТЕЖКА — ИЗ НОМЕРА, А НЕ ИЗ ПУНКТА СПИСКА (R29, владелец: «при выбранном стиче
+ * показывает только исо но без пиктограмки»). Номер в указании бывает и не из списка (401, 602 —
+ * приходят из шага или старой записи), и подпись пункта тогда не находилась: оставались голые
+ * цифры. Пиктограмма и имя берутся по самому номеру (алиасы — у `stitchBrushOf`).
+ */
+function StitchValue({ iso }: { iso: string }) {
+  const brush = stitchBrushOf(iso);
+  const name =
+    STITCHES.find((s) => s.iso === iso)?.name ?? STITCHES.find((s) => s.key === brush)?.name ?? '';
+  return (
+    <span className='inline-flex min-w-0 items-center gap-1.5' data-stitch-value={iso}>
+      <StitchPictogram iso={iso} />
+      <span className='truncate'>{[iso, name].filter(Boolean).join(' ')}</span>
+    </span>
+  );
+}
+
+// ВТОРОЙ ВЫБОР — ШОВ (ISO 4916), И ОН ОБЯЗАН ЧИТАТЬСЯ ШВОМ (R28, владелец: «в пикере почему-то два
+// пикера стича зачем?»): пустой — «seam», выбранный — «seam · LS lapped», а не голый номер стандарта
+// рядом с номером стандарта стежков.
 const SEAM_ITEMS = [
-  { value: '', label: 'ISO 4916' },
+  { value: '', label: 'seam' },
   ...seamClassOptions
     .filter((o) => o.value !== 'TECH_CARD_SEAM_CLASS_UNKNOWN')
     .map((o) => ({ value: o.value as string, label: o.label })),
@@ -57,46 +75,9 @@ const SEAM_ITEMS = [
 
 const PRINT_METHODS = Object.values(PRINT_METHOD_LABELS).filter(Boolean);
 
-export function CalloutPurposeType({
-  index,
-  c,
-  disabled,
-}: {
-  index: number;
-  c: RailCallout;
-  disabled?: boolean;
-}) {
-  const form = useFormContext<TechCardFormData>();
-  const spec = parseSpec(c.spec);
-  const options = purposesFor(c.kind);
-  if (options.length < 2 && !spec) return null;
-  const current: Purpose | '' = spec?.t ?? '';
-  const choose = (p: Purpose | '') => {
-    if (p === current) return;
-    const next = p ? purposeTool(p)?.defaults() ?? null : null;
-    form.setValue(`callouts.${index}.spec` as never, (next ? writeSpec(next) : '') as never, {
-      shouldDirty: true,
-    });
-  };
-  return (
-    <ChipRow data-callout-purpose-type=''>
-      {[...options, ...(spec && !options.includes(spec.t) ? [spec.t] : [])].map((p) => (
-        <Chip
-          key={p || 'plain'}
-          data-purpose={p || 'plain'}
-          dashed={current !== p}
-          selected={current === p}
-          pressed={current === p}
-          disabled={disabled}
-          onClick={() => choose(p)}
-          title={p ? purposeTool(p)?.hint : 'an ordinary callout'}
-        >
-          {p ? purposeTool(p)?.label ?? p : 'plain'}
-        </Chip>
-      ))}
-    </ChipRow>
-  );
-}
+// ЧИПОВ ТИПА (PLAIN / DETAIL / ARTWORK …) В СТРОКЕ НЕТ (R23, владелец: «если мы уже создали
+// колаут определенного типа мы не должны его тип менять в эдиторе»). Тип задаётся чипом панели
+// при постановке и дальше не меняется.
 
 export function CalloutPurposeFields({
   index,
@@ -244,22 +225,22 @@ export function CalloutPurposeFields({
           <div className='grid grid-cols-2 gap-1'>
             <Select
               name={name('iso')}
-              placeholder='ISO 4915'
+              placeholder='stitch · ISO 4915'
               items={ISO_ITEMS}
               value={spec.iso ?? ''}
-              renderValue={(v: string | number, item?: { label: React.ReactNode }) =>
-                v ? <Compact>{item?.label ?? v}</Compact> : undefined
+              renderValue={(v: string | number) =>
+                v ? <StitchValue iso={String(v)} /> : undefined
               }
               disabled={disabled}
               onValueChange={(v: string) => put({ ...spec, iso: v })}
             />
             <Select
               name={name('seam')}
-              placeholder='ISO 4916'
+              placeholder='seam'
               items={SEAM_ITEMS}
               value={spec.seam ?? ''}
               renderValue={(v: string | number) =>
-                v ? <Compact>{seamShort(String(v))}</Compact> : undefined
+                v ? <Compact>{`seam · ${seamShort(String(v))}`}</Compact> : undefined
               }
               disabled={disabled}
               onValueChange={(v: string) => put({ ...spec, seam: v })}

@@ -978,6 +978,17 @@ await run('13 armed toolbar quiet', async () => {
   await ctx.close();
 });
 
+// ── 14. R24: кнопки delete в строке нет — удаляет Delete по выбранной фигуре ────────────────────
+await run('14 delete key', async () => {
+  const { ctx, page } = await fresh(browser);
+  await page.click('span[title="four"]');
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(60);
+  const s = await state(page);
+  check('14a Delete удаляет выбранное', s.calls.remove === 1 && !s.callouts.some((c) => c.text === 'four'), JSON.stringify(s.calls));
+  await ctx.close();
+});
+
 await browser.close();
 
 console.log(results.join('\n'));
