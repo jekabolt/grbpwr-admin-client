@@ -16744,6 +16744,10 @@ export type DesignPartsSuggestion = {
 export type DesignPartGroup = {
   label: string | undefined;
   regions: number[] | undefined;
+  // part_key — the part's identity across the sides of one SuggestDesignPartsCard answer (slug of
+  // the label, unique within the answer: "left-sleeve", "collar-2"; "unnamed-<view>" for what the
+  // model left out). Empty on answers of the per-side SuggestDesignParts.
+  partKey: string | undefined;
 };
 
 // DesignPartSplit is a region that spans two parts with no seam line drawn.
@@ -17746,6 +17750,26 @@ export type SuggestDesignPartsRequest = {
 
 export type SuggestDesignPartsResponse = {
   suggestion: DesignPartsSuggestion | undefined;
+  cached: boolean | undefined;
+};
+
+// DesignPartsViewInput is one side of a SuggestDesignPartsCard request.
+export type DesignPartsViewInput = {
+  view: string | undefined;
+  baseMediaId: number | undefined;
+  marksMediaId: number | undefined;
+  regionCount: number | undefined;
+};
+
+export type SuggestDesignPartsCardRequest = {
+  techCardId: number | undefined;
+  algoRev: string | undefined;
+  force: boolean | undefined;
+  views: DesignPartsViewInput[] | undefined;
+};
+
+export type SuggestDesignPartsCardResponse = {
+  suggestions: DesignPartsSuggestion[] | undefined;
   cached: boolean | undefined;
 };
 
@@ -19445,6 +19469,15 @@ export interface AdminService {
   // FailedPrecondition: the flat changed (base_media_id is not the side's flat), the region count is
   // outside 2..60.
   SuggestDesignParts(request: SuggestDesignPartsRequest): Promise<SuggestDesignPartsResponse>;
+  // SuggestDesignPartsCard (auto parts, topology) — ONE sync vision+JSON call over every requested
+  // side at once: the model sees the marks pictures in view order and lists the garment's PHYSICAL
+  // parts, each with its region numbers on every side it is visible on, so one part (the collar)
+  // is one part across front, back and the sides. The answer is stored per side in the same cache
+  // as SuggestDesignParts (card, view, base_media_id, algo_rev); every group carries a part_key
+  // shared across the sides. A cached answer is returned without a call when EVERY requested side
+  // has one from this call shape and !force.
+  // FailedPrecondition: a side's flat changed, a side's region count is outside 2..60.
+  SuggestDesignPartsCard(request: SuggestDesignPartsCardRequest): Promise<SuggestDesignPartsCardResponse>;
   // GetDesignQuizAnswers — every quiz answer stored on the card, in display order.
   GetDesignQuizAnswers(request: GetDesignQuizAnswersRequest): Promise<GetDesignQuizAnswersResponse>;
   // SaveDesignQuizAnswers REPLACES the card's whole answer list with the one sent (single writer:
@@ -26076,6 +26109,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SuggestDesignParts",
       }) as Promise<SuggestDesignPartsResponse>;
+    },
+    SuggestDesignPartsCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/parts:suggest-card`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestDesignPartsCard",
+      }) as Promise<SuggestDesignPartsCardResponse>;
     },
     GetDesignQuizAnswers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
