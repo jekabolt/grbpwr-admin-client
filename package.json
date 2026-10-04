@@ -16,6 +16,7 @@
     "flat:detail-door": "node scripts/detail-slot-door-probe.mjs",
     "flat:custom": "node scripts/flat-custom-probe.mjs",
     "mood:description": "node scripts/mood-description-probe.mjs",
+    "mood:describe": "node scripts/mood-describe-probe.mjs",
     "ai:enhance": "node scripts/ai-enhance-probe.mjs",
     "labels:foundation": "node scripts/labels-foundation-probe.mjs",
     "labels:blocks": "node scripts/labels-blocks-probe.mjs",

@@ -7,6 +7,7 @@ import { cn } from 'lib/utility';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useController, useFormContext, useWatch } from 'react-hook-form';
 import { AiEnhance } from 'ui/components/ai-enhance';
+import { Button } from 'ui/components/button';
 import { noteArrowsOf } from 'ui/components/annotation/surface';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -25,8 +26,10 @@ import { CalloutRail, onDoorKey, type CalloutRailRow } from './callout-rail';
 import { serverSpeaksDesign } from './capability';
 import { GROUP_SEAM } from './core';
 import { cardFactsContext } from './core/card-facts';
+import { flushAllowsRun, flushRefusalSentence, useTechCardAutosave } from './autosave-contract';
 import { carryReferenceRole } from './carry-reference';
 import { DraftedField } from './core/drafted-field';
+import { useGenerationWrites } from './generation/use-generation';
 import { isBoardRow, isInputRow, REFERENCE_KIND } from './core/mood-gate';
 import { draftedKey, useDrafted } from './drafted-contract';
 import { useCardFacts } from './head/card-facts-form';
@@ -46,7 +49,12 @@ import {
   clampCalloutsWidth,
   useCalloutsPrefs,
 } from './use-callouts-prefs';
-import { cardOnScreen, useDesignBand, useDesignWrites } from './use-design-band';
+import {
+  cardOnScreen,
+  newClientRequestId,
+  useDesignBand,
+  useDesignWrites,
+} from './use-design-band';
 
 /**
  * МУДБОРД — первый пункт процесса и единственная доска, которую человек наполняет руками.
@@ -1147,6 +1155,39 @@ export function MoodBoard({
   // (`key`), а запись сверяет карточку на экране с той, чей рендер отдал колбэк.
   const shownCard = useRef(techCardId);
   shownCard.current = techCardId;
+  // T39 (item 39): ПУСТОЕ ОПИСАНИЕ + КАРТИНКИ НА ДОСКЕ → `write from the board ✦`. Тот же текстовый
+  // прогон `DraftDesignIdea` с `construction: false` (сервер отдаёт только описание). Сервер читает
+  // СОХРАНЁННУЮ карточку — поэтому сперва `flush`. Ответ ложится в поле, ТОЛЬКО если оно всё ещё
+  // пустое: набранное за время прогона не перетирается. Отказ говорит `onError` мутации (снэкбар).
+  const { draftIdea: describeRun } = useGenerationWrites(techCardId);
+  const autosave = useTechCardAutosave();
+  const [describing, setDescribing] = useState(false);
+  const describeFromBoard = async () => {
+    const card = techCardId;
+    if (readOnly || describing || !(card && card > 0)) return;
+    setDescribing(true);
+    try {
+      let flushed: Awaited<ReturnType<typeof autosave.flush>>;
+      try {
+        flushed = await autosave.flush('describe');
+      } catch {
+        flushed = 'error';
+      }
+      if (!flushAllowsRun(flushed)) {
+        showMessage(flushRefusalSentence(flushed, autosave.errorsCount, autosave.refusal), 'error');
+        return;
+      }
+      const res = await describeRun.mutateAsync(newClientRequestId());
+      const text = (res.run?.outputText ?? '').trim();
+      if (!text || shownCard.current !== card) return;
+      if (((getValues('concept') as string | null | undefined) ?? '').trim()) return;
+      setValue('concept', text.slice(0, CONCEPT_MAX), { shouldDirty: true, shouldValidate: true });
+    } catch {
+      // Отказ уже сказан снэкбаром (`onError` в `useGenerationWrites`).
+    } finally {
+      setDescribing(false);
+    }
+  };
 
   /* ═══ ПОРЯДОК ЭКРАНА — МАКЕТА, БЛОК ЗА БЛОКОМ (`_step-mood.js`, RENDER['step-mood']) ═══════════
      Здесь был ОДИН блок доски, внутри которого лежали лента, описание и черновик, а справа —
@@ -1695,6 +1736,19 @@ export function MoodBoard({
                 data-mb-concept-drafted=''
                 className='absolute -top-2 right-2 bg-bgColor'
               />
+              {!readOnly && !conceptValue.trim() && items.length > 0 && (
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  disabled={describing}
+                  onClick={describeFromBoard}
+                  data-mb-describe-from-board=''
+                  className='absolute bottom-1.5 left-1.5 bg-bgColor text-labelColor hover:text-textColor'
+                >
+                  {describing ? 'writing …' : 'write from the board ✦'}
+                </Button>
+              )}
               <AiEnhance
                 key={techCardId}
                 field='description'
