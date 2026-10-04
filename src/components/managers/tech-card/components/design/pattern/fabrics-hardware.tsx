@@ -479,7 +479,9 @@ function MaterialBench({
         : { ok: true };
 
   /* ─── runs ─── */
-  const runInput = (slot: MaterialSlot, spec: Spec): StartRunInput => {
+  const runInput = (slot: MaterialSlot, spec0: Spec): StartRunInput => {
+    // `logo = picture 1` is reserved for the logo tile: never let typed words carry it.
+    const spec = { ...spec0, words: spec0.words.replace(/logo\s*=\s*picture\s*1/gi, '').trim() };
     const hardware = slot.family === 'hardware';
     const label = isLabelSlot(slot);
     const c = colourOf(slot, spec);
@@ -569,6 +571,7 @@ function MaterialBench({
   };
 
   /* ─── own pictures ─── */
+  const arrivedCw = useRef(new Map<number, number>());
   const place = async (slot: MaterialSlot, media: common_MediaFull) => {
     const mediaId = media.id ?? 0;
     if (mediaId <= 0 || cwId <= 0) return;
@@ -899,8 +902,18 @@ function MaterialBench({
                   marked={fillMarks.has(slot.bomItemId)}
                   enabled={writable && !saving.has(key)}
                   purpose={`design · ${slot.name}`}
-                  onArrive={() => pick(slot)}
+                  onArrive={() => {
+                    pick(slot);
+                    arrivedCw.current.set(slot.bomItemId, cwId);
+                  }}
                   onMedia={(media) => {
+                    // The upload may finish after a colourway switch: bind only to the one it arrived on.
+                    const at = arrivedCw.current.get(slot.bomItemId);
+                    arrivedCw.current.delete(slot.bomItemId);
+                    if (at !== undefined && at !== cwId) {
+                      showMessage('the colourway changed while the picture uploaded · drop it again', 'error');
+                      return;
+                    }
                     pick(slot);
                     void place(slot, media);
                   }}
