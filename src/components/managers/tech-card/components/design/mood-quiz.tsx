@@ -26,13 +26,19 @@ import {
 import { fillIdOf } from './head/draft-fills';
 import { LockedBar } from './head/mood-organs';
 import { useDraftMemory } from './head/use-draft-fills';
+import { setQuizLive } from './quiz-live';
 import {
   answerText,
   clarifyOf,
+  clearQuizSession,
+  forgetRow,
   insertClarify,
   partWords,
   QUIZ_MAX,
-  withAnswer,
+  readQuizSession,
+  remainingOf,
+  writeQuizSession,
+  type QuizSession,
 } from './quiz-model';
 import { GenerateRow } from './render/generate-row';
 import type { Gate } from './render/model';
@@ -51,8 +57,10 @@ import { newClientRequestId, useDesignQuizAnswers, useDesignQuizWrites } from '.
  *     варианты чипами, своё слово, `skip`. Один вопрос за раз; одиночный выбор продвигает сам.
  *   · ОТВЕТЫ — сложенный список под рядом; строка открывает свой вопрос заново.
  *
- * Не дописанный до конца прогон не хранится: уйти посреди — потерять оставшиеся вопросы; повтор
- * спросит только неотвеченное (сервер выкидывает отвеченные id). Принято для прототипа.
+ * ПРОГОН ПЕРЕЖИВАЕТ УХОД (W-C3): очередь лежит в `sessionStorage` вкладки, ряд предлагает
+ * `resume N` / `discard`, второго платного вызова нет; `later` закрывает вопрос, очередь стоит.
+ * Пишет квиз только после того, как сохранённые ответы прочитаны (W-C1): запись — свои строки
+ * (W-B1), чужие на сервере не трогаются; `forget` у строки списка — пустая строка этого id.
  */
 
 type Live = {
@@ -89,7 +97,13 @@ export function MoodQuiz({
   conceptMax: number;
 }): JSX.Element | null {
   const card = techCardId && techCardId > 0 ? techCardId : 0;
-  const { answers, unimplemented } = useDesignQuizAnswers(card || undefined);
+  const {
+    answers,
+    unimplemented,
+    isSuccess: ready,
+    isError: answersFailed,
+    refetch,
+  } = useDesignQuizAnswers(card || undefined);
   const { generate, save } = useDesignQuizWrites(card || undefined);
   const { draftIdea } = useGenerationWrites(card || undefined);
   const autosave = useTechCardAutosave();
@@ -104,16 +118,72 @@ export function MoodQuiz({
   const [refusal, setRefusal] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [session, setSession] = useState<QuizSession | null>(() => readQuizSession(card));
   const shownCard = useRef(card);
   shownCard.current = card;
+
+  // Другая карточка — своя сохранённая очередь (или никакой).
+  useEffect(() => {
+    setSession(readQuizSession(card));
+    setLive(null);
+  }, [card]);
+
+  // W-C2: пока вопрос на экране, бриф WORDS не догоняет каждый ответ.
+  const isLive = live !== null;
+  useEffect(() => {
+    setQuizLive(card, isLive);
+    return () => setQuizLive(card, false);
+  }, [card, isLive]);
+
+  // W-C10: секунды ожидания на двери.
+  useEffect(() => {
+    if (!asking) return;
+    const start = Date.now();
+    setElapsed(0);
+    const t = window.setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => window.clearInterval(t);
+  }, [asking]);
+
+  const remaining = ready ? remainingOf(session, answers) : [];
+  // Всё из сохранённой очереди уже отвечено — продолжать нечего.
+  useEffect(() => {
+    if (ready && session && !live && remaining.length === 0) {
+      clearQuizSession(card);
+      setSession(null);
+    }
+  }, [ready, session, live, remaining.length, card]);
+
+  const persist = (queue: DesignQuizQuestion[], at: number, fam: string, generatedAt?: number) => {
+    const next: QuizSession = {
+      cardId: card,
+      family: fam,
+      queue,
+      at,
+      generatedAt: generatedAt ?? session?.generatedAt ?? Date.now(),
+    };
+    writeQuizSession(next);
+    setSession(next);
+  };
+  const dropSession = () => {
+    clearQuizSession(card);
+    setSession(null);
+  };
 
   // Минимум сервера (O8): картинка на доске ИЛИ слова описания. Категория не нужна — без неё просто
   // нет пиктограммы.
   const minimum = moodboardGate({ boardPictures: pictures, concept, categoryId: 1 });
-  const gate: Gate = minimum.ok ? { ok: true } : { ok: false, reason: moodGateSentence(minimum) };
+  const gate: Gate = !ready
+    ? {
+        ok: false,
+        reason: answersFailed ? 'the saved answers did not load' : 'reading the saved answers',
+      }
+    : minimum.ok
+      ? { ok: true }
+      : { ok: false, reason: moodGateSentence(minimum) };
 
   const ask = async () => {
-    if (readOnly || asking || !card) return;
+    if (readOnly || asking || !card || !ready) return;
     setRefusal(null);
     setNothingLeft(false);
     setAsking(true);
@@ -135,10 +205,12 @@ export function MoodQuiz({
       setFamily(res.family ?? '');
       if (!questions.length) {
         setNothingLeft(true);
+        dropSession();
         return;
       }
       setListOpen(false);
       setLive({ queue: questions, at: 0, mode: 'run' });
+      persist(questions, 0, res.family ?? '', Date.now());
     } catch (e) {
       if (shownCard.current === card) setRefusal(errorWords(e, 'the quiz could not be made'));
     } finally {
@@ -153,7 +225,7 @@ export function MoodQuiz({
     freeText: string,
     skipped: boolean,
   ) => {
-    if (!live) return;
+    if (!live || !ready) return;
     const answer: DesignQuizAnswer = {
       question: q,
       selected: skipped ? [] : selected,
@@ -161,30 +233,80 @@ export function MoodQuiz({
       skipped,
       answeredAt: undefined,
     };
+    // W-C11: уточнение — и в правке; родитель ушёл от противоречия (или пропущен) — его прежнее
+    // уточнение забывается и снимается с очереди.
+    const clarify = skipped ? null : clarifyOf(q, selected);
+    const childId = `clarify_${q.id ?? ''}`.slice(0, 64);
+    const rows = [answer];
+    const staleChild = !clarify ? answers.find((a) => a.question?.id === childId) : undefined;
+    if (staleChild?.question) rows.push(forgetRow(staleChild.question));
     try {
-      await save.mutateAsync(withAnswer(answers, answer));
+      await save.mutateAsync(rows);
     } catch {
       return;
     }
     if (shownCard.current !== card) return;
+    const queue = clarify
+      ? insertClarify(live.queue, live.at, clarify)
+      : live.queue.filter((x, i) => i <= live.at || x.id !== childId);
+    const next = live.at + 1;
     if (live.mode === 'edit') {
+      if (clarify && queue[next]?.id === clarify.id) {
+        setLive({ queue, at: next, mode: 'edit' });
+        return;
+      }
       setLive(null);
       setListOpen(true);
       return;
     }
-    const queue = skipped ? live.queue : insertClarify(live.queue, live.at, clarifyOf(q, selected));
-    const next = live.at + 1;
     if (next >= queue.length) {
       setLive(null);
+      dropSession();
       setListOpen(true);
       return;
     }
     setLive({ queue, at: next, mode: 'run' });
+    persist(queue, next, family);
   };
 
   const reopen = (a: DesignQuizAnswer) => {
-    if (readOnly || !a.question) return;
+    if (readOnly || !ready || !a.question) return;
     setLive({ queue: [a.question], at: 0, mode: 'edit' });
+  };
+
+  /** W-C4: прошлый вопрос с его сохранённым ответом. */
+  const back = () => {
+    if (!live || live.mode !== 'run' || live.at === 0) return;
+    setLive({ ...live, at: live.at - 1 });
+    persist(live.queue, live.at - 1, family);
+  };
+
+  /** `later`: вопрос закрывается, очередь стоит в сессии — ряд предложит `resume N`. */
+  const later = () => {
+    if (!live) return;
+    if (live.mode === 'run') persist(live.queue, live.at, family);
+    setLive(null);
+  };
+
+  const resume = () => {
+    if (!session || !remaining.length || readOnly) return;
+    setFamily(session.family);
+    setListOpen(false);
+    setLive({ queue: remaining, at: 0, mode: 'run' });
+    persist(remaining, 0, session.family);
+  };
+
+  /** W-C7: забыть ответ (и его уточнение) — пустая строка id, сервер удаляет. */
+  const forget = async (a: DesignQuizAnswer) => {
+    if (readOnly || !ready || !a.question) return;
+    const rows = [forgetRow(a.question)];
+    const child = answers.find((x) => x.question?.id === `clarify_${a.question?.id ?? ''}`);
+    if (child?.question) rows.push(forgetRow(child.question));
+    try {
+      await save.mutateAsync(rows);
+    } catch {
+      /* отказ сказан снэкбаром, строка вернулась */
+    }
   };
 
   /**
@@ -240,7 +362,7 @@ export function MoodQuiz({
 
   const q = live ? live.queue[live.at] : undefined;
   if (live && q) {
-    const prior = live.mode === 'edit' ? answers.find((a) => a.question?.id === q.id) : undefined;
+    const prior = answers.find((a) => a.question?.id === q.id);
     return (
       <QuestionView
         key={`${live.mode}:${q.id}`}
@@ -248,9 +370,11 @@ export function MoodQuiz({
         family={q.family || family}
         position={live.mode === 'edit' ? null : { n: live.at + 1, of: live.queue.length }}
         prior={prior}
-        busy={save.isPending}
+        busy={save.isPending || !ready}
         onCommit={(selected, text) => commit(q, selected, text, false)}
         onSkip={() => commit(q, [], '', true)}
+        onBack={live.mode === 'run' && live.at > 0 ? back : null}
+        onLater={live.mode === 'run' ? later : null}
       />
     );
   }
@@ -281,9 +405,34 @@ export function MoodQuiz({
         disabled={readOnly}
         onGenerate={ask}
         label='ASK ME'
-        pendingLabel='reading the board…'
+        pendingLabel={elapsed > 0 ? `reading the board… ${elapsed} s` : 'reading the board…'}
         trailing={
           <>
+            {answersFailed && (
+              <Button
+                variant='underline'
+                size='xs'
+                className='text-labelColor hover:text-textColor'
+                onClick={() => void refetch()}
+              >
+                retry
+              </Button>
+            )}
+            {!asking && !readOnly && remaining.length > 0 && (
+              <>
+                <Button variant='underline' size='xs' data-quiz-resume='' onClick={resume}>
+                  resume {remaining.length}
+                </Button>
+                <Button
+                  variant='underline'
+                  size='xs'
+                  className='text-labelColor hover:text-textColor'
+                  onClick={dropSession}
+                >
+                  discard
+                </Button>
+              </>
+            )}
             {nothingLeft && (
               <Text size='micro' variant='label' component='span'>
                 nothing left to ask
@@ -320,8 +469,22 @@ export function MoodQuiz({
       {listOpen && answers.length > 0 && (
         <ul className='mt-1 border-t border-hairline'>
           {answers.map((a) => (
-            <li key={a.question?.id} className='border-b border-hairline'>
+            <li
+              key={a.question?.id}
+              className='group grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-3 border-b border-hairline'
+            >
               <AnswerLine answer={a} readOnly={readOnly} onOpen={() => reopen(a)} />
+              {!readOnly && (
+                <Button
+                  variant='underline'
+                  size='xs'
+                  className='text-labelColor opacity-0 hover:text-textColor focus-visible:opacity-100 group-hover:opacity-100'
+                  disabled={save.isPending || !ready}
+                  onClick={() => void forget(a)}
+                >
+                  forget
+                </Button>
+              )}
             </li>
           ))}
         </ul>
@@ -361,7 +524,7 @@ function AnswerLine({
         className={cn('truncate', !text && 'text-labelColor')}
         title={text || undefined}
       >
-        {text || 'skipped'}
+        {text || 'later'}
       </Text>
     </button>
   );
@@ -375,6 +538,8 @@ function QuestionView({
   busy,
   onCommit,
   onSkip,
+  onBack,
+  onLater,
 }: {
   question: DesignQuizQuestion;
   family: string;
@@ -384,6 +549,10 @@ function QuestionView({
   busy: boolean;
   onCommit: (selected: string[], text: string) => void;
   onSkip: () => void;
+  /** W-C4: прошлый вопрос прогона; `null` — первый вопрос или правка из списка. */
+  onBack: (() => void) | null;
+  /** W-C3: закрыть вопрос, очередь остаётся; `null` — правка из списка. */
+  onLater: (() => void) | null;
 }): JSX.Element {
   const options = question.options ?? [];
   const optionCloseups = options.map((option): OptionCloseup | null => {
@@ -403,6 +572,10 @@ function QuestionView({
   );
   const [text, setText] = useState(() => (prior && !prior.skipped ? prior.freeText ?? '' : ''));
   const advance = useRef<number | null>(null);
+  // W-C5: чип нажат, пока своё слово в фокусе (фокус уходит ДО клика — снимается на pointerdown).
+  const ownFocused = useRef(false);
+  const [held, setHeld] = useState(false);
+  const ownName = `quiz-own-${question.id}`;
   useEffect(
     () => () => {
       if (advance.current) window.clearTimeout(advance.current);
@@ -418,8 +591,14 @@ function QuestionView({
         return;
       }
       setSelected([option]);
-      // Одиночный выбор продвигает сам — через 150 мс, чтобы выбор успел стать видимым.
       if (advance.current) window.clearTimeout(advance.current);
+      // W-C5: человек пишет своё слово (поле в фокусе или не пусто) — выбор не продвигает, `next ›`.
+      if (ownFocused.current || text.trim() !== '') {
+        ownFocused.current = false;
+        setHeld(true);
+        return;
+      }
+      // Одиночный выбор продвигает сам — через 150 мс, чтобы выбор успел стать видимым.
       advance.current = window.setTimeout(() => onCommit([option], text), 150);
     },
     [busy, multi, onCommit, text],
@@ -464,33 +643,39 @@ function QuestionView({
         <Text component='p' className='text-pretty'>
           {question.question}
         </Text>
-        <ChipRow>
-          {options.map((o, index) => {
-            const closeup = optionCloseups[index];
-            return (
-              <Chip
-                key={o}
-                selected={selected.includes(o)}
-                pressed={multi ? selected.includes(o) : undefined}
-                disabled={busy}
-                onClick={() => pick(o)}
-                className='whitespace-normal text-left'
-              >
-                {showOptionCloseups && closeup ? (
-                  closeup.type === 'hardware' ? (
-                    <HardwareIcon kind={closeup.kind} size={14} className='shrink-0' />
-                  ) : (
-                    <LabelIcon kind={closeup.kind} size={14} className='shrink-0' />
-                  )
-                ) : null}
-                {o}
-              </Chip>
-            );
-          })}
-        </ChipRow>
+        <div
+          onPointerDownCapture={() => {
+            ownFocused.current = document.activeElement?.id === ownName;
+          }}
+        >
+          <ChipRow>
+            {options.map((o, index) => {
+              const closeup = optionCloseups[index];
+              return (
+                <Chip
+                  key={o}
+                  selected={selected.includes(o)}
+                  pressed={multi ? selected.includes(o) : undefined}
+                  disabled={busy}
+                  onClick={() => pick(o)}
+                  className='whitespace-normal text-left'
+                >
+                  {showOptionCloseups && closeup ? (
+                    closeup.type === 'hardware' ? (
+                      <HardwareIcon kind={closeup.kind} size={14} className='shrink-0' />
+                    ) : (
+                      <LabelIcon kind={closeup.kind} size={14} className='shrink-0' />
+                    )
+                  ) : null}
+                  {o}
+                </Chip>
+              );
+            })}
+          </ChipRow>
+        </div>
         <div className='flex items-start gap-2'>
           <Textarea
-            name={`quiz-own-${question.id}`}
+            name={ownName}
             aria-label='own answer'
             placeholder='own answer'
             autoGrow={false}
@@ -506,9 +691,20 @@ function QuestionView({
             }}
             className='max-h-40 min-h-0 flex-1 resize-none [field-sizing:content]'
           />
-          {(multi || text.trim() !== '') && canSend && (
+          {(multi || held || text.trim() !== '') && canSend && (
             <Button variant='underline' size='xs' className='mt-1' disabled={busy} onClick={send}>
               next ›
+            </Button>
+          )}
+          {onBack && (
+            <Button
+              variant='underline'
+              size='xs'
+              className='mt-1 text-labelColor hover:text-textColor'
+              disabled={busy}
+              onClick={onBack}
+            >
+              back
             </Button>
           )}
           <Button
@@ -520,6 +716,16 @@ function QuestionView({
           >
             skip
           </Button>
+          {onLater && (
+            <Button
+              variant='underline'
+              size='xs'
+              className='mt-1 text-labelColor hover:text-textColor'
+              onClick={onLater}
+            >
+              later
+            </Button>
+          )}
         </div>
       </div>
     </div>

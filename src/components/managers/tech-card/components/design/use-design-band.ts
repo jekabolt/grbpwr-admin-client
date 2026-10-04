@@ -10,6 +10,8 @@ import {
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo } from 'react';
 
+import { applyRows } from './quiz-model';
+
 /**
  * THE BAND'S DATA SEAM. Every organ of the DESIGN band reads through here and writes through here;
  * none of them calls `adminService` directly. That is not tidiness — the organs are built by
@@ -661,9 +663,11 @@ export function findMediaUrlInBand(band: GetDesignBandResponse, mediaId: number)
  * Ответы живут в своей таблице (`tech_card_design_quiz_answer`), а не в `details[]` формы: автосейв
  * заменяет детали целиком каждые 2 с и стёр бы их. Поэтому чтение и запись здесь — мимо формы.
  *
- * ЗАПИСЬ ВСЕГДА ПОЛНЫМ СПИСКОМ (`SaveDesignQuizAnswers` = replace): писатель один (этот экран),
- * слияния нет. Кэш ставится сразу (оптимистично) и откатывается на отказ; ответ сервера ложится,
- * только если после него не ушла более новая запись — иначе старый ответ затёр бы новый ответ.
+ * ЗАПИСЬ — ТОЛЬКО ИЗМЕНЁННЫЕ СТРОКИ (W-B1): сервер обновляет по `question.id`, остальные строки
+ * стоят; пустая не-`skipped` строка — «забыть» id. Кэш ставится сразу тем же правилом (`applyRows`)
+ * и откатывается на отказ; ответ сервера ложится, только если после него не ушла более новая
+ * запись — иначе старый ответ затёр бы новый ответ. Писать можно лишь после того, как список
+ * прочитан (`isSuccess`, W-C1): экран держит двери закрытыми до тех пор.
  */
 const NO_ANSWERS: DesignQuizAnswer[] = [];
 
@@ -682,6 +686,10 @@ export function useDesignQuizAnswers(techCardId?: number) {
     /** Сервер маршрута не знает (старый бинарь) — двери квиза нет вовсе. */
     unimplemented: isUnimplemented(query.error),
     isLoading: id > 0 && query.isLoading,
+    /** Список прочитан — только тогда квиз может писать (W-C1). */
+    isSuccess: query.isSuccess,
+    isError: query.isError && !isUnimplemented(query.error),
+    refetch: query.refetch,
   };
 }
 
@@ -696,14 +704,15 @@ export function useDesignQuizWrites(techCardId?: number) {
   });
 
   const save = useMutation({
-    mutationFn: (answers: DesignQuizAnswer[]) =>
-      adminService.SaveDesignQuizAnswers({ techCardId: id, answers }),
-    onMutate: async (answers: DesignQuizAnswer[]) => {
+    mutationFn: (rows: DesignQuizAnswer[]) =>
+      adminService.SaveDesignQuizAnswers({ techCardId: id, answers: rows }),
+    onMutate: async (rows: DesignQuizAnswer[]) => {
       const key = designKeys.quiz(id);
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<DesignQuizAnswer[]>(key);
-      qc.setQueryData(key, answers);
-      return { previous, card: id, sent: answers };
+      const sent = applyRows(previous ?? [], rows);
+      qc.setQueryData(key, sent);
+      return { previous, card: id, sent };
     },
     onError: (error, _answers, context) => {
       const card = context?.card ?? id;

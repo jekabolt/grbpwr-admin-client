@@ -26,17 +26,36 @@ export function answerText(a: DesignQuizAnswer): string {
 }
 
 /**
- * Строки решений для каждой следующей генерации: `collar: stiff stand, 3 cm`. Предмет — деталь,
- * у вопроса про вещь целиком (`whole`) — категория. Пропущенные не печатаются.
+ * Деталь словами для строк решений — как сервер (`designQuizPartLabel`): `hw_`/`lbl_` сняты, вид
+ * бирки назван биркой (`lbl_brand` → `brand label`, `lbl_hang_tag` → `hang tag`).
+ */
+export function partLabel(part?: string | null): string {
+  const p = clean(part);
+  if (p.startsWith('lbl_')) {
+    const k = p.slice(4).replace(/_/g, ' ');
+    return k === 'hang tag' || k === 'patch' ? k : `${k} label`;
+  }
+  return partWords(p.replace(/^hw_/, ''));
+}
+
+/**
+ * Строки решений для каждой следующей генерации — та же форма, что у сервера
+ * (`designQuizDecisionLines`, W-C8): `hem — Where does the hem sit? → mid-thigh`. Предмет — деталь,
+ * у вопроса про вещь целиком (`whole`) — категория. Свои слова — `own words: "…"`. Пропущенные не
+ * печатаются.
  */
 export function decisionLines(answers: readonly DesignQuizAnswer[]): string[] {
   const out: string[] = [];
   for (const a of answers) {
-    const text = answerText(a);
-    if (!text) continue;
+    if (a.skipped) continue;
+    const chosen = (a.selected ?? []).map(clean).filter(Boolean);
+    const own = clean(a.freeText);
+    if (own) chosen.push(`own words: "${own}"`);
+    if (!chosen.length) continue;
     const part = clean(a.question?.part);
-    const subject = part && part !== 'whole' ? partWords(part) : clean(a.question?.category);
-    out.push(`${subject || 'decided'}: ${text}`);
+    const label = part && part !== 'whole' ? partLabel(part) : '';
+    const subject = label || clean(a.question?.category) || 'decided';
+    out.push(`${subject} — ${clean(a.question?.question)} → ${chosen.join('; ')}`);
   }
   return out;
 }
@@ -90,13 +109,107 @@ export function clarifyOf(
   };
 }
 
-/** Вставка уточнения после `at`, если потолок прогона ещё не выбран и такого id в очереди нет. */
+/**
+ * Вставка уточнения после `at`, если такого id в очереди нет. Потолок прогона выбран (W-C11) —
+ * уточнение важнее последнего неотвеченного базового вопроса: он уходит, счёт остаётся 15.
+ */
 export function insertClarify(
   queue: readonly DesignQuizQuestion[],
   at: number,
   clarify: DesignQuizQuestion | null,
 ): DesignQuizQuestion[] {
-  if (!clarify || queue.length >= QUIZ_MAX) return queue.slice();
+  if (!clarify) return queue.slice();
   if (queue.some((q) => q.id === clarify.id)) return queue.slice();
-  return [...queue.slice(0, at + 1), clarify, ...queue.slice(at + 1)];
+  let rest = queue.slice(at + 1);
+  if (queue.length >= QUIZ_MAX) {
+    let drop = -1;
+    for (let i = rest.length - 1; i >= 0; i--) {
+      if (!(rest[i].id ?? '').startsWith('clarify_')) {
+        drop = i;
+        break;
+      }
+    }
+    if (drop < 0) return queue.slice();
+    rest = rest.filter((_, i) => i !== drop);
+  }
+  return [...queue.slice(0, at + 1), clarify, ...rest];
+}
+
+/**
+ * ЗАПИСЬ — ТОЛЬКО СВОИ СТРОКИ (W-B1): сервер обновляет по `question.id`, чужие строки стоят. Строка
+ * без выбора, без своих слов и не `skipped` — «забыть» этот id. Оптимистичный кэш повторяет то же.
+ */
+export const isForget = (a: DesignQuizAnswer) =>
+  !a.skipped && !(a.selected ?? []).length && !clean(a.freeText);
+
+export function forgetRow(q: DesignQuizQuestion): DesignQuizAnswer {
+  return { question: q, selected: [], freeText: '', skipped: false, answeredAt: undefined };
+}
+
+export function applyRows(
+  list: readonly DesignQuizAnswer[],
+  rows: readonly DesignQuizAnswer[],
+): DesignQuizAnswer[] {
+  let next = list.slice();
+  for (const r of rows) {
+    const id = r.question?.id;
+    next = isForget(r) ? next.filter((a) => a.question?.id !== id) : withAnswer(next, r);
+  }
+  return next;
+}
+
+/**
+ * ═══ ПРОДОЛЖИТЬ ПРОГОН (W-C3) ═══════════════════════════════════════════════════════════════════
+ *
+ * Очередь платного прогона живёт в `sessionStorage` вкладки (`quiz:<cardId>`): после генерации и
+ * каждого ответа. Перезагрузка или уход — ряд предлагает `resume N`, без второго вызова модели.
+ * Хранилище недоступно — молча нет продолжения.
+ */
+export type QuizSession = {
+  cardId: number;
+  family: string;
+  queue: DesignQuizQuestion[];
+  at: number;
+  generatedAt: number;
+};
+
+const sessionKey = (cardId: number) => `quiz:${cardId}`;
+
+export function readQuizSession(cardId: number): QuizSession | null {
+  if (cardId <= 0) return null;
+  try {
+    const raw = window.sessionStorage.getItem(sessionKey(cardId));
+    if (!raw) return null;
+    const s = JSON.parse(raw) as QuizSession;
+    if (s?.cardId !== cardId || !Array.isArray(s.queue)) return null;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+export function writeQuizSession(s: QuizSession): void {
+  try {
+    window.sessionStorage.setItem(sessionKey(s.cardId), JSON.stringify(s));
+  } catch {
+    /* хранилище закрыто — продолжения не будет */
+  }
+}
+
+export function clearQuizSession(cardId: number): void {
+  try {
+    window.sessionStorage.removeItem(sessionKey(cardId));
+  } catch {
+    /* нечего чистить */
+  }
+}
+
+/** Что осталось спросить: вопросы очереди, у которых ещё нет сохранённой строки (ответ или skip). */
+export function remainingOf(
+  s: QuizSession | null,
+  answers: readonly DesignQuizAnswer[],
+): DesignQuizQuestion[] {
+  if (!s) return [];
+  const saved = new Set(answers.map((a) => a.question?.id));
+  return s.queue.filter((q) => !saved.has(q.id));
 }
