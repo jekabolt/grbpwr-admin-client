@@ -346,7 +346,8 @@ function SketchGeometryLayer({
             <ArtworkImage
               key={`a${i}`}
               src={spec.url}
-              region={boundsOf((c.points ?? []).map((p) => at(p.x, p.y)))}
+              quad={(c.points ?? []).map((p) => at(p.x, p.y))}
+              box={box}
             />
           );
         })}

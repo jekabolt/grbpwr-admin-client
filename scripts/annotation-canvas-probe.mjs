@@ -50,8 +50,8 @@ const MUTATIONS = {
     from: "      if (e.key === 'Enter' && !typing && !placing && selected !== null && byKey.has(selected)) {",
     to: '      if (false) {',
   },
-  // Маркиза выбранной фигуры не рисуется.
-  marquee: { file: /annotation\/surface\.tsx$/, from: '  const marquee = (() => {', to: '  const marquee = (() => { if (1) return null;' },
+  // R18: след выбора рисуется и у фигуры С РУЧКАМИ — второй сигнал выбора поверх ручек.
+  trace: { file: /annotation\/surface\.tsx$/, from: 'dim(selectedCallout.key) || handlesVisible) return null;', to: 'dim(selectedCallout.key)) return null;' },
   // ⌘Z снова сравнивается по НАПЕЧАТАННОЙ букве: на кириллице и греческом откат умирает.
   keyz: { file: /annotation\/surface\.tsx$/, from: "e.code === 'KeyZ'", to: "e.key === 'z'" },
   // Штрих снова копится в буфере вместо записи в форму: Save отправляет карточку без нарисованного.
@@ -437,17 +437,18 @@ await run('3 enter-edit', async () => {
 // ── 4. Выбранное видно ──────────────────────────────────────────────────────────────────────────
 await run('4 highlight', async () => {
   const { ctx, page } = await fresh(browser);
-  check('4a до выбора маркизы нет', (await page.$$('[data-marquee]')).length === 0);
+  // R18 (владелец: «внешний контур выделения не должен показываться»): рамки по габаритам нет НИКОГДА;
+  // выбор фигуры с якорями показывают ручки, а не рамка и не второй след.
+  check('4a до выбора ни рамки, ни следа', (await page.$$('[data-marquee], [data-selection-trace]')).length === 0);
   await page.click('span[title="four"]'); // dim, два якоря
-  const marq = await page.$$('[data-marquee]');
-  check('4b у выбранной фигуры с якорями есть маркиза', marq.length === 1, `найдено ${marq.length}`);
-  const box = await page.$eval('[data-marquee] rect', (r) => r.getBoundingClientRect().width);
-  check('4c маркиза имеет ненулевую ширину', box > 10, `width=${box}`);
+  check('4b у выбранной фигуры с якорями внешней рамки нет', (await page.$$('[data-marquee]')).length === 0);
+  const handles = await page.$$('span[title^="drag — move the point"]');
+  check('4c выбор показан ручками (2 на мерке), без следа', handles.length === 2 && (await page.$$('[data-selection-trace]')).length === 0, `ручек ${handles.length}`);
   await page.click('span[title="one"]'); // пин
   check(
-    '4d выбранный пин помечен и маркизы у него нет',
+    '4d выбранный пин помечен, и ни рамки, ни следа у него нет',
     (await page.$$('[data-callout-selected="true"]')).length === 1 &&
-      (await page.$$('[data-marquee]')).length === 0,
+      (await page.$$('[data-marquee], [data-selection-trace]')).length === 0,
   );
   const ring = await page.$eval('[data-callout-selected="true"]', (el) => getComputedStyle(el).outlineWidth);
   check('4e кольцо выбора реально нарисовано', ring !== '0px' && ring !== '', `outline-width=${ring}`);
@@ -942,6 +943,49 @@ await run('12 keyz', async () => {
   await page.waitForTimeout(80);
   const s = await state(page);
   check('12b ⌘Z сработал на греческой раскладке (key=ω, code=KeyZ)', s.calls.undo === 1 && s.callouts.length === 4, `undo=${s.calls.undo}, выносок ${s.callouts.length}`);
+  await ctx.close();
+});
+
+// ── 13. T20: взведённая панель молчит — ни подсказки постановки, ни «cancel» ────────────────────
+// Владелец: «"click on the picture you need / CANCEL / click a point on the picture" этот текст не
+// должен появлятся». Взвод снимается повторным нажатием чипа и Esc.
+await run('13 armed toolbar quiet', async () => {
+  const { ctx, page } = await fresh(browser);
+  const row = async () =>
+    page.$eval('[data-tool="dim"]', (el) => {
+      const r = el.parentElement;
+      return { text: r.textContent, kids: r.children.length, cancel: [...r.querySelectorAll('*')].some((n) => n.textContent.trim().toLowerCase() === 'cancel') };
+    });
+  const idle = await row();
+  await page.click('[data-tool="dim"]');
+  const armed = await row();
+  check('13a взведено: в ряду ни подсказки, ни «cancel», ни лишнего узла', armed.text === idle.text && armed.kids === idle.kids && !armed.cancel, JSON.stringify({ idle, armed }));
+  // Одна точка мерки — набранный жест: раньше здесь появлялось «… 1 placed».
+  const frame = await page.$('[aria-label="probe images"] [data-annot-frame]');
+  const r = await frame.boundingBox();
+  await page.mouse.click(r.x + r.width * 0.15, r.y + r.height * 0.85);
+  await page.waitForTimeout(60);
+  const mid = await row();
+  const body = await page.evaluate(() => document.body.innerText);
+  check('13b с набранной точкой подсказки тоже нет', mid.text === idle.text && !/placed|Shift holds|click a point|click on the picture/i.test(body), body.match(/.*(placed|Shift holds|click a point|click on the picture).*/i)?.[0] ?? mid.text);
+  await page.keyboard.press('Escape'); // точки
+  await page.keyboard.press('Escape'); // инструмент
+  await page.waitForTimeout(60);
+  check('13c Esc снимает взвод', (await page.getAttribute('[data-tool="dim"]', 'aria-pressed')) !== 'true');
+  await page.click('[data-tool="dim"]');
+  await page.click('[data-tool="dim"]');
+  check('13d повторное нажатие чипа снимает взвод', (await page.getAttribute('[data-tool="dim"]', 'aria-pressed')) !== 'true');
+  await ctx.close();
+});
+
+// ── 14. R24: кнопки delete в строке нет — удаляет Delete по выбранной фигуре ────────────────────
+await run('14 delete key', async () => {
+  const { ctx, page } = await fresh(browser);
+  await page.click('span[title="four"]');
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(60);
+  const s = await state(page);
+  check('14a Delete удаляет выбранное', s.calls.remove === 1 && !s.callouts.some((c) => c.text === 'four'), JSON.stringify(s.calls));
   await ctx.close();
 });
 

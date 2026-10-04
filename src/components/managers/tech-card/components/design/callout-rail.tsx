@@ -18,7 +18,7 @@ import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 
 import type { AnnotationCaps, AnnotationKind, TechCardFormData } from '../schema';
-import { CalloutPurposeFields, CalloutPurposeType } from './callout-purpose-fields';
+import { CalloutPurposeFields } from './callout-purpose-fields';
 
 /**
  * ═══ БОКОВОЕ МЕНЮ УКАЗАНИЙ — ОДИН ОРГАН НА ЛИСТ И НА ДОСКУ ══════════════════════════════════════
@@ -97,7 +97,7 @@ const PURPOSE_GLYPH: Record<Purpose, React.ReactNode> = {
   ),
   artwork: (
     <>
-      <rect x='1.5' y='1.5' width='9' height='9' strokeDasharray='2 1.5' />
+      <rect x='1.5' y='1.5' width='9' height='9' strokeDasharray='2 1.5' strokeLinecap='butt' />
       <path d='M4 8 6 4.5 8 8z' />
     </>
   ),
@@ -351,7 +351,6 @@ export function CalloutRail({
                   index={index}
                   c={c}
                   disabled={disabled}
-                  onRemove={onRemove}
                   arrows={arrows}
                   detailFields={detailFields}
                   caps={caps}
@@ -406,7 +405,6 @@ export function CalloutRowBody({
   index,
   c,
   disabled,
-  onRemove,
   arrows,
   detailFields = true,
   caps = false,
@@ -416,7 +414,6 @@ export function CalloutRowBody({
   index: number;
   c: RailCallout;
   disabled?: boolean;
-  onRemove?: (index: number) => void;
   arrows?: NoteArrows;
   detailFields?: boolean;
   caps?: boolean;
@@ -438,7 +435,6 @@ export function CalloutRowBody({
 
   return (
     <>
-      {purposes && <CalloutPurposeType index={index} c={c} disabled={disabled} />}
       {spec && <CalloutPurposeFields index={index} c={c} disabled={disabled} />}
       {/* CONTROLLED, NOT DEFAULT-VALUED, and the difference is a bug that would only
           show up after a successful save. The page resets the form to what the SERVER
@@ -527,51 +523,45 @@ export function CalloutRowBody({
           }
         />
       )}
-      <div className='flex flex-wrap items-center gap-1.5'>
-        {onRemove && (
-          <Button
-            variant='secondary'
-            size='xs'
-            onClick={() => onRemove(index)}
-            title='delete this callout — its number is never handed to another one'
-          >
-            delete
-          </Button>
-        )}
-        {/* НА МЕСТЕ «MAKE IT A PIN» — «+ POINT», И ЭТО ОБМЕН, А НЕ ДВЕ ПРАВКИ.
+      {/* КНОПКИ DELETE В СТРОКЕ НЕТ (R24, владелец: «кнопка делит не нужна у нас уже есть
+          крестик»): удаляют ✕ по наведению на строку и Delete/Backspace по выбранной фигуре.
+          Ряд ниже рисуется только у записки — у прочих он был бы пустой отбивкой. */}
+      {arrows && (
+        <div className='flex flex-wrap items-center gap-1.5'>
+          {/* НА МЕСТЕ «MAKE IT A PIN» — «+ POINT», И ЭТО ОБМЕН, А НЕ ДВЕ ПРАВКИ.
             Убрана она вместе с «make it a point» редактора (E-27): жест один, имён было
             два, и оставленная здесь кнопка вернула бы на соседний экран ровно то, что
             владелец убрал. Смысла у неё тоже не осталось — пин ушёл из палитры (E-29).
             Пришедшая на её место кнопка добавляет записке ещё один луч и заменяет собой
             весь бывший «мультилидер». */}
-        {arrows &&
-          (arrows.arming ? (
-            <Button
-              variant='secondary'
-              size='xs'
-              data-arrows='cancel'
-              onClick={arrows.cancel}
-              title='stop waiting for the click'
-            >
-              cancel
-            </Button>
-          ) : (
-            <Button
-              variant='secondary'
-              size='xs'
-              data-arrows='add'
-              disabled={arrows.full}
-              onClick={arrows.arm}
-              title={
-                arrows.full
-                  ? `a note points at ${arrows.max} places at most`
-                  : 'point this note at one more place — then click it on the picture'
-              }
-            >
-              + point
-            </Button>
-          ))}
-        {/* ⚠ СТРОКИ ПРО ПЕРЕТАСКИВАНИЕ ЗДЕСЬ БОЛЬШЕ НЕТ — снята владельцем (круг 20,
+          {arrows &&
+            (arrows.arming ? (
+              <Button
+                variant='secondary'
+                size='xs'
+                data-arrows='cancel'
+                onClick={arrows.cancel}
+                title='stop waiting for the click'
+              >
+                cancel
+              </Button>
+            ) : (
+              <Button
+                variant='secondary'
+                size='xs'
+                data-arrows='add'
+                disabled={arrows.full}
+                onClick={arrows.arm}
+                title={
+                  arrows.full
+                    ? `a note points at ${arrows.max} places at most`
+                    : 'point this note at one more place — then click it on the picture'
+                }
+              >
+                + point
+              </Button>
+            ))}
+          {/* ⚠ СТРОКИ ПРО ПЕРЕТАСКИВАНИЕ ЗДЕСЬ БОЛЬШЕ НЕТ — снята владельцем (круг 20,
             B-6), дословно: «убрать текст "shape and position
             are dragged on the plate itself"». Счёт лучей при этом НЕ потерян: он уехал
             в пилюлю рядом, потому что это ФАКТ о выбранной записке («сколько мест она
@@ -579,8 +569,9 @@ export function CalloutRowBody({
             плашки — живёт на кадре и объявляется курсором, ручками и подсказками самой
             поверхности; повторять его словом в панели значило бы держать инструкцию
             там, где инструмента нет. */}
-        {arrows && arrows.count > 1 && <Pill tone='mut'>{arrows.count} points</Pill>}
-      </div>
+          {arrows && arrows.count > 1 && <Pill tone='mut'>{arrows.count} points</Pill>}
+        </div>
+      )}
     </>
   );
 }

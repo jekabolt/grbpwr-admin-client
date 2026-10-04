@@ -2,16 +2,13 @@ import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 
 import { kindDef, PALETTE_KINDS, placingHint, type KindDef } from './kinds';
-import { PURPOSE_TOOLS, purposeTool, toolGeometry } from './purpose';
+import { PURPOSE_TOOLS } from './purpose';
 
 export { placingHint };
 
-/** Подсказка постановки для вида ИЛИ назначения: назначение ставится жестом своей фигуры. */
-export function toolHint(tool: string, placed: number): string {
-  return purposeTool(tool)?.rect
-    ? `click two opposite corners — ${placed} placed`
-    : placingHint(toolGeometry(tool) ?? tool, placed);
-}
+// ПОДСКАЗОК ПОСТАНОВКИ И «CANCEL» В ПАНЕЛИ НЕТ (T20, владелец: «"click on the picture you need /
+// CANCEL / click a point on the picture" этот текст не должен появлятся»). Взвод снимается тем же
+// чипом, которым взведён (повторное нажатие), и Esc на кадре (`surface.tsx`, лестница Esc).
 
 // ПАНЕЛЬ ИНСТРУМЕНТОВ — ТОЛЬКО ВИДЫ, пять чипов в одну строку.
 //
@@ -60,18 +57,14 @@ export function AnnotationToolbar({
   kinds,
   /** Сколько указаний ещё влезет; 0 — панель уступает место объяснению. */
   remaining,
-  /** Подсказка постановки: что делать следующим кликом. Приходит от активного кадра. */
-  hint,
   className,
   quiet,
   purposes,
-  cancelable = true,
 }: {
   tool: string | null;
   onTool: (kind: string | null) => void;
   kinds?: string[];
   remaining?: number;
-  hint?: string;
   className?: string;
   /** In a block or group header (owner, item 38): tools as underlined words, never framed chips. */
   quiet?: boolean;
@@ -81,11 +74,6 @@ export function AnnotationToolbar({
    * поверхность сводит назначение к его фигуре сама (`toolGeometry`).
    */
   purposes?: boolean;
-  /**
-   * Показывать «cancel». Лист ARTIFACTS держит вид взведённым всегда (D-18), и «cancel» рядом с
-   * умолчанием — лишняя кнопка, переносящая ряд; снять взвод там можно повторным нажатием чипа.
-   */
-  cancelable?: boolean;
 }) {
   const palette = kinds ? toolsOf(kinds) : PALETTE_KINDS;
   if (remaining != null && remaining <= 0) {
@@ -131,26 +119,6 @@ export function AnnotationToolbar({
             {p.label}
           </Chip>
         ))}
-      {tool && (
-        <>
-          {hint && (
-            <Text size='micro' variant='label' component='span'>
-              {hint}
-            </Text>
-          )}
-          {cancelable && (
-            <Chip
-              nonForm
-              dashed
-              quiet={quiet}
-              onClick={() => onTool(null)}
-              title='leave the placing mode'
-            >
-              cancel
-            </Chip>
-          )}
-        </>
-      )}
     </ChipRow>
   );
 }

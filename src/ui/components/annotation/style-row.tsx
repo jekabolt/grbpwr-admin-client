@@ -1,5 +1,5 @@
+import { useState } from 'react';
 import { Chip, ChipRow } from 'ui/components/chip';
-import Text from 'ui/components/text';
 
 import {
   ANNOTATION_COLOR_KEYS,
@@ -17,6 +17,12 @@ import { CALLOUT_COLOR_HEX } from './shapes';
 
 // ЦВЕТ · НАКОНЕЧНИКИ · ПУНКТИР · ШТРИХОВКА — ряд оформления указания.
 //
+// СВЁРНУТ ПО УМОЛЧАНИЮ (R25–R27, владелец: «цвет оставь только черный и рядом кнопка на которую
+// нажимаешь выезжают остальные цвета», «dashed и hatched по дефолту тоже не нужно показывать»,
+// «настройки стрелочек тоже как-то скрыть»): видны свотч текущего цвета и дверь «···»; дверь
+// раскрывает остальные цвета, наконечники, пунктир и штриховку одной строкой. Цвета и наконечники
+// — без слов, глифом/свотчем (имя в title и aria-label): иначе строка не влезает в одну.
+//
 // Общий для редактора плашки (снимок шага) и записки эскиза: указание красят одинаково, где бы оно
 // ни стояло, и второй ряд свотчей разошёлся бы с первым первой же добавленной краской.
 //
@@ -31,9 +37,8 @@ import { CALLOUT_COLOR_HEX } from './shapes';
 // Группа отделена от цветов и пунктира ВОЛОСЯНОЙ ЛИНИЕЙ, а не отступом: ступени внутри блока в
 // этой системе рисуются линиями (DESIGN.md, «лестница линий»).
 //
-// КАЖДЫЙ ЧИП НЕСЁТ ГЛИФ И СЛОВО. Глиф — потому что наконечник это форма, и «bracket» словом
-// узнают медленнее, чем ⌐¬ рисунком; слово — потому что состояние никогда не несут одной формой
-// (читалка, печать, монохром).
+// ГЛИФ НА ЧИПЕ, СЛОВО — В ИМЕНИ. Наконечник это форма, и «bracket» словом узнают медленнее, чем ⌐¬
+// рисунком; слово живёт в `aria-label` и `title` (читалка, наведение), а выбранность — заливкой.
 
 /** Глиф наконечника — восемнадцать на восемь пикселей, тем же цветом, что текст чипа. */
 function CapGlyph({ caps }: { caps: AnnotationCapsKey }) {
@@ -108,85 +113,102 @@ export function AnnotationStyleRow({
    * что «скоба» в хранении выглядит как `bracket` без caps, и помнить `''` значило бы забыть выбор.
    * Отсутствует — чипов наконечников нет вовсе (владелец их не хранит).
    */
-  onCaps?: (next: { kind: AnnotationKindKey; caps: AnnotationCapsKey }, chosen: AnnotationCapsKey) => void;
+  onCaps?: (
+    next: { kind: AnnotationKindKey; caps: AnnotationCapsKey },
+    chosen: AnnotationCapsKey,
+  ) => void;
 }) {
   const d = kindDef(kind);
   const choices = d.capped && onCaps ? capsChoices(kind) : [];
   const current = effectiveCaps(kind, caps);
+  // СВЁРНУТ ПРИ КАЖДОМ ОТКРЫТИИ СТРОКИ: состояние живёт в самом ряду, а ряд монтируется вместе с
+  // раскрытой строкой — «запомнить раскрытым» значило бы вернуть мусор, который владелец снял.
+  const [open, setOpen] = useState(false);
+  const swatch = (c: string) => (
+    // Свотч в рамке: белый на белом редакторе иначе не виден вовсе.
+    <span
+      aria-hidden
+      className='inline-block size-2 border border-borderColor'
+      style={{ background: c ? CALLOUT_COLOR_HEX[c] : 'var(--color-textColor)' }}
+    />
+  );
   return (
     <ChipRow>
-      {ANNOTATION_COLOR_KEYS.map((c) => (
-        <Chip
-          key={c || 'ink'}
-          dashed={color !== c}
-          selected={color === c}
-          onClick={() => onColor(c)}
-          title={
-            c === 'white'
-              ? 'white reads on dark fabric; on paper it prints as a hollow line'
-              : c
-                ? 'colour tells overlapping callouts apart'
-                : 'ink — the same as everything else on the sheet'
-          }
-        >
-          {/* Свотч в рамке: белый на белом редакторе иначе не виден вовсе. */}
-          <span
-            aria-hidden
-            className='inline-block size-2 border border-borderColor'
-            style={{ background: c ? CALLOUT_COLOR_HEX[c] : 'currentColor' }}
-          />
-          {COLOR_LABEL[c]}
-        </Chip>
-      ))}
-      {choices.length > 0 && (
+      {/* ТЕКУЩИЙ ЦВЕТ — ЗНАЧЕНИЕ, А НЕ ВЫБОР: сплошная рамка, без пунктира. */}
+      <Chip data-color={color || 'ink'} title={COLOR_LABEL[color] ?? COLOR_LABEL['']}>
+        {swatch(color)}
+      </Chip>
+      <Chip
+        data-style-door=''
+        // Раскрытая дверь — сплошная рамка, а не заливка: заливка в этом ряду значит «выбрано».
+        dashed={!open}
+        aria-expanded={open}
+        aria-label={open ? 'fewer style options' : 'more style options'}
+        title={open ? 'fewer style options' : 'colour, line ends, dashed, hatching'}
+        onClick={() => setOpen((v) => !v)}
+      >
+        ···
+      </Chip>
+      {open && (
         <>
-          <RuleSep />
-          {choices.map((k) => {
-            const on = current === k;
-            return (
-              <Chip
-                key={`caps:${k || 'plain'}`}
-                data-caps={k || 'plain'}
-                dashed={!on}
-                selected={on}
-                pressed={on}
-                onClick={() => onCaps?.(capsStorage(kind, k), k)}
-                title={CAPS_HINT[k]}
-              >
-                <CapGlyph caps={k} />
-                {CAPS_LABEL[k]}
-              </Chip>
-            );
-          })}
+          {ANNOTATION_COLOR_KEYS.filter((c) => c !== color).map((c) => (
+            <Chip
+              key={c || 'ink'}
+              data-color={c || 'ink'}
+              dashed
+              onClick={() => onColor(c)}
+              title={COLOR_LABEL[c]}
+              aria-label={COLOR_LABEL[c]}
+            >
+              {swatch(c)}
+            </Chip>
+          ))}
+          {choices.length > 0 && (
+            <>
+              <RuleSep />
+              {choices.map((k) => {
+                const on = current === k;
+                return (
+                  <Chip
+                    key={`caps:${k || 'plain'}`}
+                    data-caps={k || 'plain'}
+                    dashed={!on}
+                    selected={on}
+                    pressed={on}
+                    onClick={() => onCaps?.(capsStorage(kind, k), k)}
+                    title={`${CAPS_LABEL[k]} — ${CAPS_HINT[k]}`}
+                    aria-label={CAPS_LABEL[k]}
+                  >
+                    <CapGlyph caps={k} />
+                  </Chip>
+                );
+              })}
+            </>
+          )}
           {(d.dashable || d.fillable) && <RuleSep />}
+          {d.dashable && (
+            <Chip
+              dashed={!dashed}
+              selected={dashed}
+              pressed={dashed}
+              onClick={() => onDashed(!dashed)}
+              title='dashed — a construction line, a seam allowance, a line under a layer; solid — what is actually done'
+            >
+              dashed
+            </Chip>
+          )}
+          {d.fillable && (
+            <Chip
+              dashed={!filled}
+              selected={filled}
+              pressed={filled}
+              onClick={() => onFilled(!filled)}
+              title='hatching says “this area”; a bare contour says “this border”'
+            >
+              hatching
+            </Chip>
+          )}
         </>
-      )}
-      {d.dashable && (
-        <Chip
-          dashed={!dashed}
-          selected={dashed}
-          onClick={() => onDashed(!dashed)}
-          title='dashed — a construction line, a seam allowance, a line under a layer; solid — what is actually done'
-        >
-          dashed
-        </Chip>
-      )}
-      {d.fillable && (
-        <Chip
-          dashed={!filled}
-          selected={filled}
-          onClick={() => onFilled(!filled)}
-          title='hatching says “this area”; a bare contour says “this border”'
-        >
-          hatching
-        </Chip>
-      )}
-      {!d.dashable && !d.fillable && (
-        <Text size='nano' variant='label' component='span'>
-          {d.key === 'pin' || d.key === 'label' || d.key === 'multi'
-            ? 'a leader has one style only: an arrow'
-            : ''}
-        </Text>
       )}
     </ChipRow>
   );

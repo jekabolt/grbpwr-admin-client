@@ -1178,7 +1178,6 @@ export function MoodBoard({
           panel={calloutsShell}
           hidden={!open}
           tag='mb'
-          question='— pinned on the board, not numbered'
           where='on the board'
           note={
             /* Счётчик — только когда считать есть что (фиксап N2, O-20 «не должно быть
