@@ -102,8 +102,8 @@ const MUTATIONS = {
   // T37/T40: стрелка не поворачивается — открытая история выглядит закрытой.
   'fold-caret': {
     file: /generation\/generation-history\.tsx$/,
-    from: "              <FoldCaret open={open} />\n            </span>",
-    to: "              <FoldCaret open={false} />\n            </span>",
+    from: '              <FoldCaret open={open} />\n            </span>',
+    to: '              <FoldCaret open={false} />\n            </span>',
   },
   // T36: последний ✕ снова просто снимает рамку — пустой редактор остаётся на верстаке.
   emptied: {
@@ -352,7 +352,8 @@ try {
   check(
     'T37.3 open: the FoldCaret has turned up (180°)',
     opened.caret === 'open' &&
-      (/^180deg\|/.test(opened.turn) || /\|matrix\(-1, (0|[-\d.e]+), (0|[-\d.e]+), -1, /.test(opened.turn)),
+      (/^180deg\|/.test(opened.turn) ||
+        /\|matrix\(-1, (0|[-\d.e]+), (0|[-\d.e]+), -1, /.test(opened.turn)),
     `${opened.caret} ${opened.turn}`,
   );
   check(
@@ -627,7 +628,7 @@ try {
   const line = await page.$(`${RC} [data-put-pieces="711"]`);
   const lineWord = line ? (await line.innerText()).trim() : '';
   check(
-    'W4.1 render bench: `put the 4 pieces into sides ▸` under the pieces',
+    'W4.1 render bench: `put the 4 pieces into sides ▸` on the bench',
     /^put the 4 pieces into sides ▸$/i.test(lineWord),
     lineWord,
   );
@@ -636,6 +637,16 @@ try {
     !!line &&
       (await line.$eval('button', (b) => getComputedStyle(b).backgroundColor)) ===
         'rgba(0, 0, 0, 0)',
+  );
+  // Owner 04.10: «это должна быть кнопка в хедере» — in WORKBENCH's header, once, not in the body.
+  check(
+    'W4.2b the door stands in the WORKBENCH header (next to the stamp), once',
+    !!line &&
+      (await line.evaluate((el) => {
+        const head = el.closest('[data-workbench]')?.querySelector('h3')?.parentElement;
+        return !!head && head.contains(el);
+      })) &&
+      (await page.$$(`${RC} [data-put-pieces]`)).length === 1,
   );
   if (SHOT) await (await page.$(RC))?.screenshot({ path: SHOT.replace(/\.png$/, '-cut.png') });
   const slotsBefore = (await calls('SetDesignBenchSlot')).length;
