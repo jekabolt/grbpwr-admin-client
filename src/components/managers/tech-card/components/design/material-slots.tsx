@@ -331,22 +331,37 @@ export function MaterialSlots({
              больше гэп»), и она не про вкус: в строке теперь три составных органа (имя+пилюля,
              состав, число+единица), и на четырёх пикселях они читались одной кашей. Волосяная
              линия остаётся — разделяет по-прежнему она, воздух её только даёт разглядеть. */
-          <DataTable className='[&_td]:py-2.5'>
+          /* ⚠ ОДНА СЕТКА НА ВСЕ СТРОКИ (п. 50 владельца: «все блоки разного размера постоянно … кривая
+             таблица»). `table-fixed` + `colgroup`: ширины колонок задаёт таблица, а не содержимое
+             ячеек, поэтому ни длина имени, ни пилюля семейства, ни выбранное назначение не двигают
+             соседние колонки. Ширина колонки оси — по самому длинному известному ярлыку
+             («mesh / second layer»), остальное режется многоточием с полным текстом в `title`.
+             `min-w` — чтобы фиксированная раскладка не сжимала строку в кашу на узком окне
+             (DataTable прокручивается по горизонтали сам). */
+          <DataTable className='min-w-[920px] table-fixed [&_td]:py-2.5'>
+            <colgroup>
+              <col />
+              <col className='w-[230px]' />
+              <col className='w-[24%]' />
+              <col className='w-[150px]' />
+              <col className='w-[90px]' />
+              <col className='w-[110px]' />
+            </colgroup>
             <thead>
               <tr>
                 <th data-align='left'>component</th>
                 {/* ОДНА КОЛОНКА НА ДВЕ ВЗАИМОИСКЛЮЧАЮЩИЕ ОСИ: назначение бывает только у
                     рулонного товара, вид — только вне его (и не у лейблов), поэтому в ячейке
                     всегда ровно один контрол или прочерк, и двух тут не бывает по построению. */}
-                <th data-align='left' className='w-[150px]'>
+                <th data-align='left'>
                   purpose / kind
                 </th>
                 <th data-align='left'>composition</th>
-                <th className='w-[150px]'>est usage</th>
-                <th data-align='left' className='w-[90px]'>
+                <th>est usage</th>
+                <th data-align='left'>
                   from
                 </th>
-                <th className='w-[110px]'>
+                <th>
                   <span className='sr-only'>row actions</span>
                 </th>
               </tr>
@@ -449,6 +464,12 @@ function SlotRow({
   // Совещательно, никогда не блокирует: две строки на одну роль законны (полочка и капюшон), но
   // роль печатается без квалификатора секции всюду, где её читают, поэтому дубль стоит назвать.
   const duplicate = roleCollision(lines, line.name, index) >= 0;
+  /* Полный текст оси для `title` ячейки: ярлык в ней режется многоточием, а не переносится. */
+  const axisTitle = rollGoods
+    ? bomPurposeLabel(line.purpose)
+    : kindEligible
+      ? kindLabel(line.kind) ?? sectionShort(section) ?? undefined
+      : undefined;
 
   const rawFiber = (line.composition ?? '').trim();
   /**
@@ -534,9 +555,10 @@ function SlotRow({
        * же линии (она read-only и по типу — `Pill`, а не `Chip`, то есть нажать её нельзя по
        * построению), ось назначения/вида уехала в СВОЮ колонку. Зазор в строке ровно один.
        */}
-      <td data-align='left' className='min-w-[200px] align-top'>
-        <div className='flex flex-wrap items-center gap-1.5'>
-          <div className='min-w-[110px] flex-1'>
+      <td data-align='left' className='align-top'>
+        {/* ОДНА ЛИНИЯ, БЕЗ ПЕРЕНОСА: пилюля под полем делала строку выше соседей (п. 50). */}
+        <div className='flex items-center gap-1.5'>
+          <div className='min-w-0 flex-1'>
             {readOnly ? (
               <Text component='span' className='font-bold' data-b16-name={index}>
                 {line.name?.trim() || 'unnamed'}
@@ -553,12 +575,18 @@ function SlotRow({
           </div>
           {/* СЕМЕЙСТВО — ПИЛЮЛЕЙ (макет: `CLOTH` ink, `THREAD`/`HARDWARE` обычная), вместо
               заголовков семейств над группами строк. */}
-          <Pill tone={family === 'cloth' ? 'ink' : 'mut'} data-b16-kind={family}>
+          {/* ОДНА ШИРИНА НА ВСЕ ТРИ СЕМЕЙСТВА (п. 50: «CLOTH THREAD HARDWARE всегда разной
+              длинны») — по самому длинному, HARDWARE; короткие стоят по центру той же коробки. */}
+          <Pill
+            tone={family === 'cloth' ? 'ink' : 'mut'}
+            data-b16-kind={family}
+            className='w-[76px] shrink-0 justify-center'
+          >
             {FAMILY_TITLE[family]}
           </Pill>
           {/* Совещательное предупреждение живёт на той же линии, а не четвёртым этажом. */}
           {duplicate && (
-            <Pill tone='mut' data-b16-dup={index}>
+            <Pill tone='mut' data-b16-dup={index} className='shrink-0'>
               same role
             </Pill>
           )}
@@ -568,10 +596,17 @@ function SlotRow({
           рулонной строке, вид — только вне рулонных и вне лейблов; сервер отвергает пару вроде
           «hardware + purpose=main» напрямую, поэтому контрол, которому здесь не место, не
           рисуется вовсе, а не рисуется отключённым, — и у лейбла ячейка честно пуста. */}
-      <td data-align='left' className='w-[150px] align-top' data-b16-axis-cell={index}>
+      {/* ОДНА СТРОКА ВСЕГДА (п. 50: «canvas interfacing вообще занимают две строчки»): значение
+          триггера и ярлык чтения не переносятся, лишнее — многоточием, полный текст — в `title`. */}
+      <td
+        data-align='left'
+        className='align-top [&_button>span:first-child]:min-w-0 [&_button>span:first-child]:truncate [&_button]:whitespace-nowrap'
+        data-b16-axis-cell={index}
+        title={axisTitle}
+      >
         {rollGoods &&
           (readOnly ? (
-            <Text size='micro' variant='label' component='p' data-b16-axis={index}>
+            <Text size='micro' variant='label' component='p' className='truncate' data-b16-axis={index}>
               {bomPurposeLabel(line.purpose)}
             </Text>
           ) : (
@@ -600,7 +635,7 @@ function SlotRow({
           ))}
         {kindEligible &&
           (readOnly ? (
-            <Text size='micro' variant='label' component='p' data-b16-axis={index}>
+            <Text size='micro' variant='label' component='p' className='truncate' data-b16-axis={index}>
               {kindLabel(line.kind) ?? sectionShort(section)}
             </Text>
           ) : (
@@ -630,7 +665,7 @@ function SlotRow({
           ))}
         {!rollGoods && !kindEligible && <EmptyCell />}
       </td>
-      <td data-align='left' className='min-w-[180px] align-top' data-b16-fiber-cell={index}>
+      <td data-align='left' className='align-top' data-b16-fiber-cell={index}>
         {noFibre ? (
           <EmptyCell />
         ) : readOnly || linked ? (
@@ -653,7 +688,7 @@ function SlotRow({
           </Text>
         )}
       </td>
-      <td className='w-[150px] align-top' data-b16-est-cell={index}>
+      <td className='align-top' data-b16-est-cell={index}>
         {readOnly ? (
           est ? (
             <Text component='span' data-b16-est={index}>
@@ -717,7 +752,7 @@ function SlotRow({
           </div>
         )}
       </td>
-      <td data-align='left' className='w-[90px] align-top' data-b16-from={index}>
+      <td data-align='left' className='align-top' data-b16-from={index}>
         {/* ОТКУДА СТРОКА — синяя `drafted`, пока строка черновика не просмотрена; пусто иначе.
             Пилюля — и есть «принять» этой строки (фиксап M3). */}
         <DraftedPill
@@ -727,7 +762,7 @@ function SlotRow({
           data-provenance='drafted'
         />
       </td>
-      <td className='w-[110px] align-top'>
+      <td className='align-top'>
         <div className='flex items-start justify-end gap-1'>
           {onGo && (
             <Button
