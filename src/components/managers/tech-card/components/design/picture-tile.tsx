@@ -1454,6 +1454,8 @@ export function PictureTile({
               </Text>
             </span>
           )}
+          {/* T53 (04.10): «in front размер шрифта должен быть таким же как название колорвея» — в
+              строку флаг набран `nano`, как ярлык рядом. */}
           {flag && (
             <span
               className={cn('inline-block max-w-full bg-bgColor', flagInline && 'flex shrink-0')}
@@ -1462,7 +1464,7 @@ export function PictureTile({
               <Pill
                 tone={flag.tone}
                 title={flag.title}
-                className={cn('max-w-full truncate', flagInline && '!px-1')}
+                className={cn('max-w-full truncate', flagInline && '!px-1 !text-nano')}
               >
                 {flag.word}
               </Pill>
