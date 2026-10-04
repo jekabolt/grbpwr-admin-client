@@ -36,14 +36,14 @@ export type PaintRun =
       colourMaps: common_DesignColourMap[];
     };
 
-const colourUse = (label: string, colourHex: string): common_DesignFabricUse => ({
+const colourUse = (label: string, colourHex: string, words = ''): common_DesignFabricUse => ({
   mapHex: label,
   assetId: 0,
   name: '',
   mediaId: 0,
   colourCode: '',
   colourHex,
-  words: '',
+  words,
   parts: '',
   kind: '',
   repeatMm: 0,
@@ -100,7 +100,7 @@ export function paintRun({
     }
     const row = plan.cloths.find((c) => c.hex === hex);
     if (row && row.assetId === 0 && row.colourHex) {
-      colourUses.push(colourUse(hex, row.colourHex));
+      colourUses.push(colourUse(hex, row.colourHex, row.words));
       continue;
     }
     return { kind: 'refuse', reason: 'a painted part lost its material · repaint it' };

@@ -162,6 +162,8 @@ export class PaintSession {
   colours: { label: string; colourHex: string }[] = [];
   /** Colour labels created or changed here since the last successful save — the only rows we own. */
   private dirtyColours = new Set<string>();
+  private lastSlots: readonly ClothSlot[] | undefined;
+  private lastColorway = 0;
   armed = '';
   tool: PaintTool = 'click';
   save: PaintSaveState = 'idle';
@@ -214,6 +216,8 @@ export class PaintSession {
 
   sync(band: GetDesignBandResponse, slots: readonly ClothSlot[] | undefined, colorwayId: number) {
     this.band = band;
+    this.lastSlots = slots;
+    this.lastColorway = colorwayId;
     let changed = false;
     const list = (slots ?? []).filter((s) => s.bomItemId > 0);
     this.slotLabel = slotLabels(list.map((s) => s.bomItemId));
@@ -221,13 +225,16 @@ export class PaintSession {
     // Free colours: the plan's colour rows, plus colours added here and not yet painted.
     const plan = this.plan();
     for (const c of plan?.cloths ?? []) {
-      if (
-        c.assetId === 0 &&
-        c.colourHex &&
-        !c.words &&
-        !this.colours.some((x) => x.label === c.hex)
-      ) {
+      if (c.assetId !== 0 || !c.colourHex) continue;
+      const have = this.colours.find((x) => x.label === c.hex);
+      if (!have) {
         this.colours.push({ label: c.hex, colourHex: c.colourHex });
+        changed = true;
+      } else if (!this.dirtyColours.has(c.hex) && have.colourHex !== c.colourHex) {
+        // Not ours to keep: the canvas shows what GENERATE will send.
+        have.colourHex = c.colourHex;
+        this.skins.set(c.hex, { tile: null, hex: c.colourHex });
+        for (const v of this.views.values()) v.rev += 1;
         changed = true;
       }
     }
@@ -493,7 +500,65 @@ export class PaintSession {
   }
 
   /** `unsaved` / `error` → try again on the person's word. */
-  retry() {
+  /**
+   * `unsaved · retry`: re-read the plan, take everybody else's colours, move OUR dirty colours off
+   * any label the fresh plan now uses (pixels remapped), then save on top of the fresh plan.
+   */
+  async retry() {
+    const key = designKeys.band(this.techCardId);
+    try {
+      await this.qc.refetchQueries({ queryKey: key, exact: true });
+    } catch {
+      /* the save below reports */
+    }
+    const band = this.qc.getQueryData<GetDesignBandResponse>(key);
+    if (band) {
+      const fresh = readColourPlan(band);
+      if (fresh && (!this.echo || fresh.rev >= this.echo.rev)) this.echo = null;
+      const taken = new Set((fresh?.cloths ?? []).map((c) => c.hex));
+      const remap = new Map<number, number>();
+      for (const c of this.colours) {
+        if (!this.dirtyColours.has(c.label) || !taken.has(c.label)) continue;
+        const all = [
+          ...this.slotLabel.values(),
+          ...this.colours.map((x) => x.label),
+          ...taken,
+          ...[...remap.values()].map(hexOf),
+        ];
+        const next = freeColourLabel(all);
+        if (!next) continue;
+        remap.set(packHex(c.label), packHex(next));
+        this.dirtyColours.delete(c.label);
+        this.dirtyColours.add(next);
+        this.skins.set(next, { tile: null, hex: c.colourHex });
+        if (this.armed === c.label) this.armed = next;
+        c.label = next;
+      }
+      if (remap.size > 0) {
+        for (const v of this.views.values()) {
+          if (!v.labels) continue;
+          let hit = false;
+          for (let i = 0; i < v.labels.length; i += 1) {
+            const to = remap.get(v.labels[i]);
+            if (to !== undefined) {
+              v.labels[i] = to;
+              hit = true;
+            }
+          }
+          if (hit) {
+            v.dirty = true;
+            v.rev += 1;
+          }
+        }
+        // Old diffs name the old labels.
+        this.undoStack = [];
+        this.redoStack = [];
+        this.materials = [];
+      }
+      // Colours of ours that the fresh plan rewrote but we never touched follow the plan.
+      this.sync(band, this.lastSlots, this.lastColorway);
+    }
+    this.save = 'pending';
     void this.flush();
   }
 
@@ -624,13 +689,23 @@ export class PaintSession {
         await attempt(base);
       } catch (e) {
         if (!isRevMismatch(e)) throw e;
-        // Somebody saved in between: re-read, lay ONLY our views over theirs, once.
+        // Somebody saved in between: re-read; lay ONLY our views over theirs, once, and only when
+        // their cloth rows are exactly the ones we stood on — otherwise stop at `unsaved`.
         const key = designKeys.band(card);
         await this.qc.refetchQueries({ queryKey: key, exact: true });
         const band = this.qc.getQueryData<GetDesignBandResponse>(key);
         const freshPlan = band ? readColourPlan(band) : undefined;
         if (!freshPlan) throw e;
         if (band) this.band = band;
+        const sig = (d: ColourPlanDoc) =>
+          JSON.stringify([...d.cloths].sort((a, b) => (a.hex < b.hex ? -1 : 1)).map(writeCloth));
+        if (sig(freshPlan) !== sig(base)) {
+          for (const v of dirty) v.dirty = true;
+          return this.fail(
+            'unsaved',
+            'somebody changed this card’s materials — retry to lay yours over',
+          );
+        }
         try {
           await attempt(freshPlan);
         } catch (e2) {
