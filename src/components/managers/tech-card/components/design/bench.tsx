@@ -591,15 +591,8 @@ export function Bench({
           которые лист цитирует по имени и которые заводит роль `detail` референса. Та же лента,
           те же ячейки; линейка группы — единственная в блоке, потому что это вторая ось, а не
           вторая половина той же. */}
-      <GroupLabel
-        action={
-          <Text size='micro' variant='label' component='span'>
-            {bench.details.length} · the sheet cites a detail by its own name
-          </Text>
-        }
-      >
-        details
-      </GroupLabel>
+      {/* Item 43: no explanatory line beside the label. */}
+      <GroupLabel>details</GroupLabel>
 
       <div data-flat-details='' className='flex items-stretch gap-2 overflow-x-auto pb-1'>
         {bench.details.map((slot, index) => {
