@@ -325,7 +325,10 @@ console.log('\nT56: WORDS и IN WORDS догоняют мудборд');
   ck(W.followPlan('auto words', rec, 'k2', 'k1') === 'none', 'source still settling → wait');
   ck(W.followPlan('auto words', rec, 'k1', 'k1') === 'none', 'same source → nothing');
   ck(W.followPlan('typed', null, 'k1', 'k1') === 'baseline', 'no record → baseline');
-  ck(W.followPlan('auto words', rec, 'k2', 'k2') === 'auto', 'untouched auto text → rewrite itself');
+  ck(
+    W.followPlan('auto words', rec, 'k2', 'k2') === 'auto',
+    'untouched auto text → rewrite itself',
+  );
   ck(W.followPlan('hand edit', rec, 'k2', 'k2') === 'offer', 'hand-edited → offer the link');
   ck(
     W.followPlan('typed', { source: 'k1', text: '' }, 'k2', 'k2') === 'offer',
