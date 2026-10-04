@@ -24,9 +24,10 @@ import { isPictureHidden } from '../visibility';
  *   · nothing to place (no piece names a side, or every piece already stands in its side) → no door;
  *   · a side holding another picture → asked once, by name, before any write;
  *   · in flight → the door is locked and pending until the last write's band re-read has landed
- *     (TF4: `setBenchSlot` settles on the refetch), so a second press never echoes a stale rev.
- * Each side is its own write and a refused side does not stop the others (the server has no batch
- * verb); the write's own error toast names the refusal. The flat bench carries no colourway, so the
+ *     (TF4: `setBenchSlot` settles on the refetch), so a second press never echoes a stale rev;
+ *   · a side whose occupant changed after the person approved → the gesture stops and asks again;
+ *   · a refused write → the gesture stops, and stays pending until the band is read again.
+ * Each side is its own write (the server has no batch verb); the write's own toast names a refusal. The flat bench carries no colourway, so the
  * write spells `kind: 'flat'` with colourway 0 (invariant 4).
  */
 export function flatPiecesOf(pieces: readonly common_DesignPicture[]): SplitPiece[] {
@@ -70,16 +71,27 @@ export function ApplyFlatSlots({
   // Hidden while nothing would be written — but never mid-gesture, so the pending state stays seen.
   if (!steps.length && !busy) return null;
 
-  const run = async () => {
+  /**
+   * `approved` — WHAT THE PERSON AGREED TO LOSE, per side: the occupant's id (0 = an empty side) as
+   * the screen showed it when they pressed or confirmed. Each write re-plans on the band the last
+   * write re-read (TF4), and a side whose occupant is no longer the approved one (another operator
+   * filled or changed it meanwhile) stops the gesture and asks again: nothing is replaced unseen.
+   * A refused write stops it too, and the door stays pending until the band is read again — the
+   * next press must echo the side's new rev, not the one that was just refused.
+   */
+  const run = async (approved: ReadonlyMap<ActiveView, number>) => {
     if (busy) return;
     setBusy(true);
+    let reask = false;
     try {
-      for (const view of steps.map((s) => s.view)) {
-        // Each step re-plans on the band the previous write re-read (TF4): a side's rev can move
-        // when the server moves a picture out of it, and an echoed stale rev is refused.
+      for (const [view, occupant] of approved) {
         const fresh = qc.getQueryData<GetDesignBandResponse>(designKeys.band(techCardId)) ?? band;
         const step = flatSlotSteps(fresh, usable).find((s) => s.view === view);
         if (!step) continue;
+        if ((step.displaces?.id ?? 0) !== occupant) {
+          reask = true;
+          break;
+        }
         try {
           await setBenchSlot.mutateAsync({
             slot: { viewKey: step.view, kind: 'flat', colorwayId: 0 },
@@ -87,13 +99,17 @@ export function ApplyFlatSlots({
             expectedSlotRev: step.slotRev,
           });
         } catch {
-          // The write's own `onError` says why; the other sides still go (see the head).
+          // The write's own `onError` says why. Stop, and hold until the re-read has landed.
+          await qc.invalidateQueries({ queryKey: designKeys.band(techCardId) });
+          break;
         }
       }
     } finally {
       setBusy(false);
     }
+    if (reask) setAsking(true);
   };
+  const approve = () => new Map(steps.map((s) => [s.view, s.displaces?.id ?? 0] as const));
 
   const losing = steps.filter((s) => s.displaces);
   const words = (list: typeof steps) => list.map((s) => viewLabel(s.view)).join(', ');
@@ -112,7 +128,7 @@ export function ApplyFlatSlots({
             ? `${words(steps)} take the pieces; ${words(losing)} ${losing.length === 1 ? 'holds' : 'hold'} another flat — you are asked first`
             : `${words(steps)} take the pieces`
         }
-        onClick={() => (losing.length ? setAsking(true) : void run())}
+        onClick={() => (losing.length ? setAsking(true) : void run(approve()))}
       >
         apply flat slots
       </Button>
@@ -124,14 +140,19 @@ export function ApplyFlatSlots({
         note={null}
         onDo={() => {
           setAsking(false);
-          void run();
+          void run(approve());
         }}
         sentence={
           <span className='block normal-case'>
-            <b>{words(steps)}</b> take the pieces. <b>{words(losing)}</b>{' '}
-            {losing.length === 1 ? 'holds another flat' : 'hold other flats'} now, and{' '}
-            {losing.length === 1 ? 'it leaves its slot' : 'they leave their slots'}. Nothing is
-            deleted.
+            <b>{words(steps)}</b> take the pieces.{' '}
+            {losing.length > 0 && (
+              <>
+                <b>{words(losing)}</b>{' '}
+                {losing.length === 1 ? 'holds another flat' : 'hold other flats'} now, and{' '}
+                {losing.length === 1 ? 'it leaves its slot' : 'they leave their slots'}.{' '}
+              </>
+            )}
+            Nothing is deleted.
           </span>
         }
       />
