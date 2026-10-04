@@ -1878,6 +1878,10 @@ export type TechCardCallout = {
   // Наконечники линии — см. TechCardAnnotationCaps. Тот же примитив, что у выноски снимка шага:
   // выноску переносят со снимка на эскиз и обратно, и линия обязана остаться той же линией.
   caps: TechCardAnnotationCaps | undefined;
+  // PURPOSE (field 16): a JSON object as a string — {"t":"note"|"detail"|"artwork"|"stitch"|
+  // "material"|"section", …}. "{}" = plain callout; "" / absent = not sent, the server carries the
+  // stored spec. Hand-added ahead of the regen (callout kinds wave).
+  spec?: string;
 };
 
 // Точка выноски в НОРМАЛИЗОВАННЫХ координатах кадра (0..1) — та же система, что у pos_x/pos_y

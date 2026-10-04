@@ -2,6 +2,7 @@ import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 
 import { kindDef, PALETTE_KINDS, placingHint, type KindDef } from './kinds';
+import { PURPOSE_TOOLS } from './purpose';
 
 export { placingHint };
 
@@ -56,6 +57,7 @@ export function AnnotationToolbar({
   hint,
   className,
   quiet,
+  purposes,
 }: {
   tool: string | null;
   onTool: (kind: string | null) => void;
@@ -65,6 +67,12 @@ export function AnnotationToolbar({
   className?: string;
   /** In a block or group header (owner, item 38): tools as underlined words, never framed chips. */
   quiet?: boolean;
+  /**
+   * НАЗНАЧЕНИЯ (волна callout kinds) — второй ряд слов в той же строке, отделённый только
+   * воздухом. Ключ назначения и есть инструмент: ключи видов и назначений не пересекаются, и
+   * поверхность сводит назначение к его фигуре сама (`toolGeometry`).
+   */
+  purposes?: boolean;
 }) {
   const palette = kinds ? toolsOf(kinds) : PALETTE_KINDS;
   if (remaining != null && remaining <= 0) {
@@ -93,6 +101,23 @@ export function AnnotationToolbar({
           {d.label}
         </Chip>
       ))}
+      {purposes &&
+        PURPOSE_TOOLS.map((p, i) => (
+          <Chip
+            key={p.key}
+            data-tool={p.key}
+            nonForm
+            quiet={quiet}
+            className={i === 0 ? 'ml-3' : undefined}
+            dashed={tool !== p.key}
+            selected={tool === p.key}
+            pressed={tool === p.key}
+            onClick={() => onTool(tool === p.key ? null : p.key)}
+            title={p.hint}
+          >
+            {p.label}
+          </Chip>
+        ))}
       {tool && (
         <>
           {hint && (

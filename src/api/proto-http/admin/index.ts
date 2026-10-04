@@ -8300,6 +8300,9 @@ export type common_TechCardCallout = {
   // Наконечники линии — см. TechCardAnnotationCaps. Тот же примитив, что у выноски снимка шага:
   // выноску переносят со снимка на эскиз и обратно, и линия обязана остаться той же линией.
   caps: common_TechCardAnnotationCaps | undefined;
+  // PURPOSE (field 16): JSON object string; "{}" = plain, "" / absent = not sent (server carries).
+  // Hand-added ahead of the regen (callout kinds wave).
+  spec?: string;
 };
 
 // TechCardBomItem is one bill-of-materials line — a catalog article (Sheet «Спецификация»).

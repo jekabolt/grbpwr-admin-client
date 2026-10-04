@@ -2,6 +2,12 @@ import { cn } from 'lib/utility';
 import { useEffect, useRef } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { kindDef } from 'ui/components/annotation/kinds';
+import {
+  parseSpec,
+  purposeTool,
+  specSummary,
+  type Purpose,
+} from 'ui/components/annotation/purpose';
 import { AiEnhance } from 'ui/components/ai-enhance';
 import { AnnotationStyleRow } from 'ui/components/annotation/style-row';
 import { rememberPen, type NoteArrows } from 'ui/components/annotation/surface';
@@ -12,6 +18,7 @@ import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 
 import type { AnnotationCaps, AnnotationKind, TechCardFormData } from '../schema';
+import { CalloutPurposeFields, CalloutPurposeType } from './callout-purpose-fields';
 
 /**
  * ═══ БОКОВОЕ МЕНЮ УКАЗАНИЙ — ОДИН ОРГАН НА ЛИСТ И НА ДОСКУ ══════════════════════════════════════
@@ -74,9 +81,45 @@ export type CalloutRailRow = {
  * «curve») — переименуется и здесь, без правки этого файла. Незнакомый вид рисуется словом, а не
  * пустотой: реестр отвечает пином на всё неизвестное, и глиф пина у него есть.
  */
-export function KindGlyph({ kind }: { kind: string }) {
+/** Глиф назначения — тот же штрих 12×12, что у видов. */
+const PURPOSE_GLYPH: Record<Purpose, React.ReactNode> = {
+  note: (
+    <>
+      <rect x='1.5' y='2.5' width='9' height='7' />
+      <path d='M3.5 5h5M3.5 7h3' />
+    </>
+  ),
+  detail: (
+    <>
+      <circle cx='5' cy='5' r='3.25' />
+      <path d='M7.5 7.5 10.5 10.5M3.75 5h2.5M5 3.75v2.5' />
+    </>
+  ),
+  artwork: (
+    <>
+      <rect x='1.5' y='1.5' width='9' height='9' strokeDasharray='2 1.5' />
+      <path d='M4 8 6 4.5 8 8z' />
+    </>
+  ),
+  stitch: <path d='M1 6h1.75M4.25 6H6M7.5 6h1.75M10.75 6H11M2 3.5v5M10 3.5v5' />,
+  material: (
+    <>
+      <path d='M2 3.5h8v5H2z' />
+      <path d='M2 3.5 4 1.5h8' />
+    </>
+  ),
+  section: (
+    <>
+      <path d='M1.5 3.5h9M1.5 6h9M1.5 8.5h9' />
+      <path d='M1.5 1.5v9' />
+    </>
+  ),
+};
+
+export function KindGlyph({ kind, spec }: { kind: string; spec?: string }) {
   const def = kindDef(kind);
   const tool = def.tool;
+  const purpose = purposeTool(parseSpec(spec)?.t);
   const common = {
     viewBox: '0 0 12 12',
     'aria-hidden': true as const,
@@ -87,39 +130,41 @@ export function KindGlyph({ kind }: { kind: string }) {
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
   };
-  const glyph =
-    tool === 'label' ? (
-      <svg {...common}>
-        <path d='M1.5 10.5 6 6' />
-        <rect x='5.5' y='1.5' width='5' height='4' />
-      </svg>
-    ) : tool === 'dim' ? (
-      <svg {...common}>
-        <path d='M1.5 6h9M1.5 3.5v5M10.5 3.5v5' />
-      </svg>
-    ) : tool === 'arc' ? (
-      <svg {...common}>
-        <path d='M1.5 9.5C3 2 9 2 10.5 9.5' />
-      </svg>
-    ) : tool === 'polygon' ? (
-      <svg {...common}>
-        <path d='M2 3.5 8 1.5l2.5 5.5L6 10.5 1.5 8z' />
-      </svg>
-    ) : tool === 'ink' ? (
-      <svg {...common}>
-        <path d='M1.5 8C3 2 5 10 7 5s3 4 3.5-2' />
-      </svg>
-    ) : tool === 'pin' ? (
-      <svg {...common}>
-        <circle cx='6' cy='6' r='3.5' />
-        <circle cx='6' cy='6' r='1' fill='currentColor' />
-      </svg>
-    ) : null;
+  const glyph = purpose ? (
+    <svg {...common}>{PURPOSE_GLYPH[purpose.key]}</svg>
+  ) : tool === 'label' ? (
+    <svg {...common}>
+      <path d='M1.5 10.5 6 6' />
+      <rect x='5.5' y='1.5' width='5' height='4' />
+    </svg>
+  ) : tool === 'dim' ? (
+    <svg {...common}>
+      <path d='M1.5 6h9M1.5 3.5v5M10.5 3.5v5' />
+    </svg>
+  ) : tool === 'arc' ? (
+    <svg {...common}>
+      <path d='M1.5 9.5C3 2 9 2 10.5 9.5' />
+    </svg>
+  ) : tool === 'polygon' ? (
+    <svg {...common}>
+      <path d='M2 3.5 8 1.5l2.5 5.5L6 10.5 1.5 8z' />
+    </svg>
+  ) : tool === 'ink' ? (
+    <svg {...common}>
+      <path d='M1.5 8C3 2 5 10 7 5s3 4 3.5-2' />
+    </svg>
+  ) : tool === 'pin' ? (
+    <svg {...common}>
+      <circle cx='6' cy='6' r='3.5' />
+      <circle cx='6' cy='6' r='1' fill='currentColor' />
+    </svg>
+  ) : null;
   return (
     <span
       data-callout-kind={tool}
-      title={`${def.label} — ${def.hint}`}
-      aria-label={def.label}
+      data-callout-purpose-glyph={purpose?.key}
+      title={purpose ? `${purpose.label} — ${purpose.hint}` : `${def.label} — ${def.hint}`}
+      aria-label={purpose?.label ?? def.label}
       className='inline-flex h-4 w-4 shrink-0 items-center justify-center text-labelColor'
     >
       {glyph ?? (
@@ -168,6 +213,7 @@ export function CalloutRail({
   numbered = true,
   detailFields = true,
   caps = false,
+  purposes = false,
   emptyLabel,
 }: {
   rows: CalloutRailRow[];
@@ -214,6 +260,8 @@ export function CalloutRail({
    * нарисованные стрелки в засечки.
    */
   caps?: boolean;
+  /** Назначения (волна callout kinds): переключатель и поля назначения в раскрытой строке. */
+  purposes?: boolean;
   /**
    * Что стоит вместо списка, когда указаний нет. Своё у каждого экрана: жест постановки разный.
    *
@@ -261,7 +309,7 @@ export function CalloutRail({
                   {c.number || '—'}
                 </Text>
               )}
-              <KindGlyph kind={c.kind ?? 'pin'} />
+              <KindGlyph kind={c.kind ?? 'pin'} spec={c.spec} />
               {/* РАЗВОРОТ СТРОКИ — дверь без формы (см. `onDoorKey`): на выпущенной карте указание
                   раскрывают, чтобы прочесть его целиком, а поля внутри гасит fieldset. */}
               <span
@@ -274,7 +322,10 @@ export function CalloutRail({
                 className='min-w-0 flex-1 cursor-pointer text-left'
               >
                 <Text size='micro' component='span' className='block truncate'>
-                  {(c.description ?? '').trim() || (c.part ?? '').trim() || 'no text'}
+                  {(c.description ?? '').trim() ||
+                    specSummary(parseSpec(c.spec)) ||
+                    (c.part ?? '').trim() ||
+                    'no text'}
                 </Text>
               </span>
               {place ? <Pill tone='mut'>{place}</Pill> : null}
@@ -290,6 +341,7 @@ export function CalloutRail({
                   arrows={arrows}
                   detailFields={detailFields}
                   caps={caps}
+                  purposes={purposes}
                 />
               </CalloutEditRow>
             )}
@@ -344,6 +396,7 @@ export function CalloutRowBody({
   arrows,
   detailFields = true,
   caps = false,
+  purposes = false,
 }: {
   /** Индекс строки В МАССИВЕ ФОРМЫ — им идёт запись. Не позиция в видимом списке. */
   index: number;
@@ -353,8 +406,12 @@ export function CalloutRowBody({
   arrows?: NoteArrows;
   detailFields?: boolean;
   caps?: boolean;
+  purposes?: boolean;
 }) {
   const form = useFormContext<TechCardFormData>();
+  // НАЗНАЧЕНИЕ ЗАМЕНЯЕТ «part / dimensions»: его поля и есть то, что указание говорит; у записки
+  // стиля нет вовсе — это прямоугольник с текстом.
+  const spec = purposes ? parseSpec(c.spec) : null;
 
   // ОДНА leaf-запись на все поля строки, включая оформление: путь `callouts.N.field` не трогает
   // идентичность массива, поэтому соседние читатели пути не рассинхронизируются.
@@ -367,6 +424,8 @@ export function CalloutRowBody({
 
   return (
     <>
+      {purposes && <CalloutPurposeType index={index} c={c} disabled={disabled} />}
+      {spec && <CalloutPurposeFields index={index} c={c} disabled={disabled} />}
       {/* CONTROLLED, NOT DEFAULT-VALUED, and the difference is a bug that would only
           show up after a successful save. The page resets the form to what the SERVER
           returned (`form.reset(settled.values)` — and the mint does the same), and an
@@ -393,7 +452,7 @@ export function CalloutRowBody({
           disabled={disabled}
         />
       </div>
-      {detailFields && (
+      {detailFields && !spec && (
         <div className='flex gap-1'>
           <Input
             name={`callout-${index}-part`}
@@ -418,7 +477,7 @@ export function CalloutRowBody({
           запоминается ПЕРОМ, поэтому следующее указание родится тем же цветом — у
           человека одна рука, и серия штрихов одним цветом не должна перекрашиваться
           поштучно. */}
-      {!disabled && (
+      {!disabled && spec?.t !== 'note' && (
         <AnnotationStyleRow
           kind={c.kind ?? 'pin'}
           color={c.color ?? ''}

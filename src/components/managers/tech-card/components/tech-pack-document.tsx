@@ -79,6 +79,7 @@ import {
   type AnnotationForm,
 } from './schema';
 import { kindDef } from 'ui/components/annotation/kinds';
+import { parseSpec, purposeLabel, specSummary } from 'ui/components/annotation/purpose';
 import { annotationCapsFromWire } from 'ui/components/annotation/wire';
 import { AnnotationCanvas } from './annotation-canvas';
 import { skuToSeasonLabel } from './season-util';
@@ -357,7 +358,10 @@ function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] 
  * списка и первым же новым видом отстал бы — на бумаге появилась бы пустая клетка вида там, где
  * на экране стоит зона.
  */
-function calloutKindLabel(kind?: string): string {
+function calloutKindLabel(kind?: string, spec?: string): string {
+  // НАЗНАЧЕНИЕ СТАРШЕ ФИГУРЫ (волна callout kinds): «stitch» говорит цеху больше, чем «leader».
+  const purpose = purposeLabel(parseSpec(spec));
+  if (purpose) return purpose;
   const k = annotationKindFromWire(kind);
   return k === 'pin' ? '' : kindDef(k).label;
 }
@@ -1957,6 +1961,18 @@ export function TechPackDocument({
                       // и в джойне деталей. Локальный индекс внутри картинки (j) расходился бы с
                       // ними, как только эскизов больше одного: пин сказал бы «2», строка — «5».
                       const pinNumber = wireInt(c.number) || (tc.callouts ?? []).indexOf(c) + 1;
+                      // ЗАПИСКА — ПРЯМОУГОЛЬНИК С ТЕКСТОМ и на бумаге: без номера и без кружка.
+                      if (parseSpec(c.spec)?.t === 'note') {
+                        return (
+                          <span
+                            key={j}
+                            className='absolute max-w-[45%] -translate-x-1/2 -translate-y-1/2 whitespace-pre-wrap border border-black bg-white px-1 py-0.5 text-[8px] leading-tight text-black'
+                            style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
+                          >
+                            {c.description || '—'}
+                          </span>
+                        );
+                      }
                       return (
                         <span
                           key={j}
@@ -2012,8 +2028,10 @@ export function TechPackDocument({
                             сокращённый до «и ещё две», на листе швеи означает две потерянные
                             детали. Указание законно называет несколько — узел собирает их вместе. */}
                         {(c.parts?.length ? c.parts : c.part ? [c.part] : []).join(', ') || '—'}
-                        {calloutKindLabel(c.kind) && (
-                          <span className='ml-1 text-labelColor'>· {calloutKindLabel(c.kind)}</span>
+                        {calloutKindLabel(c.kind, c.spec) && (
+                          <span className='ml-1 text-labelColor'>
+                            · {calloutKindLabel(c.kind, c.spec)}
+                          </span>
                         )}
                       </td>
                       <td className={TD}>
@@ -2021,7 +2039,14 @@ export function TechPackDocument({
                           ? '—'
                           : pieces.map((p) => p.name || '(unnamed)').join(', ')}
                       </td>
-                      <td className={TD}>{c.description || '—'}</td>
+                      <td className={TD}>
+                        {specSummary(parseSpec(c.spec)) && (
+                          <span className='block font-semibold'>
+                            {specSummary(parseSpec(c.spec))}
+                          </span>
+                        )}
+                        {c.description || (specSummary(parseSpec(c.spec)) ? '' : '—')}
+                      </td>
                     </tr>
                   );
                 })}

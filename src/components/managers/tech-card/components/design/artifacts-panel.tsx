@@ -32,6 +32,14 @@ import {
   type SurfaceCallout,
 } from 'ui/components/annotation/surface';
 import { PALETTE_KINDS } from 'ui/components/annotation/kinds';
+import {
+  parseSpec,
+  purposeTool,
+  rectCorners,
+  sectionLetter,
+  toolGeometry,
+  writeSpec,
+} from 'ui/components/annotation/purpose';
 import { AnnotationToolbar, placingHint } from 'ui/components/annotation/toolbar';
 import { AnnotationZoomDialog } from 'ui/components/annotation/zoom-dialog';
 import { Button } from 'ui/components/button';
@@ -45,7 +53,7 @@ import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { ViewSwitch } from 'ui/components/view-switch';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 
-import type { AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
+import type { AnnotationCaps, AnnotationColor, AnnotationKind, TechCardFormData } from '../schema';
 import {
   COLORWAY_NONE,
   benchKindOf,
@@ -1634,6 +1642,13 @@ export function ArtifactsPanel({
    * Цена индекса — сдвиг после удаления соседа; она оплачена тем, что удаление и откат снимают
    * выбор явно (ниже), а не оставляют его висеть на съехавшей строке.
    */
+  /** Буквы разрезов — по порядку на карточке: A–A, B–B… (одна буква на номер не тратится). */
+  const sectionLetters = new Map<number, string>();
+  callouts.forEach((c, i) => {
+    if (parseSpec(c.spec)?.t === 'section')
+      sectionLetters.set(i, sectionLetter(sectionLetters.size));
+  });
+
   const calloutsOfPlate = (mediaId: number): SurfaceCallout[] =>
     callouts
       .map((c, index) => ({ c, index }))
@@ -1661,6 +1676,8 @@ export function ArtifactsPanel({
              указание на листе и указание в окне это ОДНА строка формы, и два разных наконечника у
              неё означают, что один из двух экранов врёт о том, что сохранено. */
           caps: c.caps ?? '',
+          spec: parseSpec(c.spec),
+          letter: sectionLetters.get(index),
         };
       });
 
@@ -1697,6 +1714,16 @@ export function ArtifactsPanel({
    */
   function addCalloutOn(mediaId: number, shape: string, pts: ShapePoint[], pen: PenStyle) {
     if (pts.length === 0) return;
+    /* НАЗНАЧЕНИЕ ВЗВЕДЕНО ЧИПОМ (волна callout kinds): поверхность поставила его фигуру, здесь
+       пишется `spec` с умолчаниями. Деталь и арт — два угла → зона-прямоугольник; разрез — линия
+       со стрелками; арт — пунктиром. */
+    const purpose = purposeTool(tool);
+    if (purpose?.rect && pts.length === 2) {
+      shape = 'polygon';
+      pts = rectCorners(pts[0], pts[1]);
+    }
+    if (purpose?.key === 'section') shape = 'dim';
+    if (purpose?.key === 'artwork') pen = { ...pen, dashed: true };
     /* ПЕРВОЕ УКАЗАНИЕ БЕРЁТ ПЛИТУ НА КАРТОЧКУ (D-18, довод у `canPlaceOn`). Плита ищется по
        СЕГМЕНТУ на экране: род, под которым она ляжет в медиа, — это род вкладки. */
     const plate = onScreen.find((p) => p.mediaId === mediaId);
@@ -1704,9 +1731,15 @@ export function ArtifactsPanel({
     const pin = shape === 'pin';
     const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
     const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    // ВСТАВКА ДЕТАЛИ — СБОКУ ОТ РЕГИОНА, к свободной половине кадра: над регионом она закрыла бы
+    // соседей (и сам регион, если он у верхнего края).
+    const sideX =
+      cx < 0.5 ? Math.max(...pts.map((p) => p.x)) + 0.2 : Math.min(...pts.map((p) => p.x)) - 0.2;
     const marker = pin
       ? pts[0]
-      : { x: Math.min(0.96, Math.max(0.04, cx)), y: Math.min(0.96, Math.max(0.06, cy - 0.08)) };
+      : purpose?.key === 'detail'
+        ? { x: Math.min(0.9, Math.max(0.1, sideX)), y: Math.min(0.9, Math.max(0.1, cy)) }
+        : { x: Math.min(0.96, Math.max(0.04, cx)), y: Math.min(0.96, Math.max(0.06, cy - 0.08)) };
     const rows = (form.getValues('callouts') ?? []) as SheetCallout[];
     form.setValue(
       'callouts',
@@ -1725,7 +1758,9 @@ export function ArtifactsPanel({
           points: pin ? [] : pts.map((p) => ({ x: p.x.toFixed(4), y: p.y.toFixed(4) })),
           color: pen.color as AnnotationColor,
           dashed: pen.dashed,
-          filled: pen.filled,
+          filled: purpose?.rect ? false : pen.filled,
+          ...(purpose?.key === 'section' ? { caps: 'arrow' as AnnotationCaps } : {}),
+          spec: purpose ? writeSpec(purpose.defaults()) : '',
         },
       ],
       { shouldDirty: true },
@@ -2308,11 +2343,14 @@ export function ArtifactsPanel({
               lead={
                 <AnnotationToolbar
                   quiet
+                  purposes
                   tool={tool}
                   onTool={setTool}
                   hint={
                     tool && (placed > 0 || tool !== DEFAULT_TOOL)
-                      ? placingHint(tool, placed)
+                      ? purposeTool(tool)?.rect
+                        ? `click two opposite corners — ${placed} placed`
+                        : placingHint(toolGeometry(tool) ?? tool, placed)
                       : undefined
                   }
                 />
@@ -2436,6 +2474,7 @@ export function ArtifactsPanel({
             }
             focusToken={focusEditor}
             caps
+            purposes
             emptyLabel='none on this tab yet. A callout is placed on the picture itself — click a plate; the row appears here the moment it exists, and this is where its text is written.'
           />
         </Section>
