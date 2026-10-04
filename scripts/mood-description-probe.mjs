@@ -15,6 +15,7 @@
 //   node scripts/mood-description-probe.mjs --mutate=apart  → черновик снова своим блоком: КРАСНЫЙ
 //   node scripts/mood-description-probe.mjs --mutate=boxed  → `accept all` снова кнопкой: КРАСНЫЙ
 //   node scripts/mood-description-probe.mjs --mutate=edge   → дверь описи снова у края: КРАСНЫЙ
+//   node scripts/mood-description-probe.mjs --mutate=chatty → подзаголовки снова в шапках (item 35): КРАСНЫЙ
 //   SHOT=<path.png> — снимок блока.
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
@@ -34,7 +35,7 @@ const MUTATIONS = {
   apart: [
     {
       file: /design\/head\/construction-draft\.tsx$/,
-      from: "      title='description'\n      question='— what this thing is'\n",
+      from: "      title='description'\n",
       to: "      title='construction draft'\n      question='— what the model proposes'\n",
     },
     {
@@ -64,6 +65,29 @@ const MUTATIONS = {
       file: /design\/head\/construction-draft\.tsx$/,
       from: '              </Button>\n              {runState}',
       to: '              </Button>}\n              {runState}',
+    },
+  ],
+  // item 35: подзаголовок и счёт снова в шапке доски, подзаголовок — у DESCRIPTION
+  chatty: [
+    {
+      file: /design\/mood-board\.tsx$/,
+      from: "          title='moodboard'\n",
+      to: "          title='moodboard'\n          question='— the mood, not the prompt'\n",
+    },
+    {
+      file: /design\/mood-board\.tsx$/,
+      from: "import { GROUP_SEAM } from './core';",
+      to: "import { Counter, GROUP_SEAM } from './core';",
+    },
+    {
+      file: /design\/mood-board\.tsx$/,
+      from: '          action={\n            <>\n',
+      to: "          action={\n            <>\n              <Counter n={items.length} noun='picture' total={MOOD_MAX} />\n",
+    },
+    {
+      file: /design\/head\/construction-draft\.tsx$/,
+      from: "      title='description'\n",
+      to: "      title='description'\n      question='— what this thing is'\n",
     },
   ],
   // `accept all` снова кнопкой в рамке
@@ -257,6 +281,28 @@ try {
   ck(l.genInBlock && l.genAfterField, 'GENERATE stands in the same block, under the field');
   ck(l.draftHeads === 0, 'no «construction draft» header anywhere', String(l.draftHeads));
   ck(l.descHeads === 1, 'exactly one «description» block', String(l.descHeads));
+
+  console.log('\nitem 35 · шапки без подзаголовков и счёта');
+  const heads = await page.evaluate(() =>
+    ['#mb-board', '#mb-draft'].map((id) =>
+      (document.querySelector(id)?.firstElementChild?.innerText ?? '').toLowerCase(),
+    ),
+  );
+  ck(
+    !/the mood, not the prompt/.test(heads[0]) && !/\bof 12\b|pictures?/.test(heads[0]),
+    'moodboard header: no «— the mood, not the prompt», no «N of 12 pictures»',
+    JSON.stringify(heads[0]),
+  );
+  ck(
+    !/what this thing is/.test(heads[1]),
+    'description header: no «— what this thing is»',
+    JSON.stringify(heads[1]),
+  );
+  ck(
+    /^moodboard/.test(heads[0]) && /^description/.test(heads[1]),
+    'both headers keep their titles',
+    JSON.stringify(heads),
+  );
 
   console.log('\nT33 · ряд прогона как у флэта');
   const row = await page.evaluate(() => {

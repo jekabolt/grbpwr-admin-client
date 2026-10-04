@@ -23,7 +23,7 @@ import { create } from 'zustand';
 import type { TechCardFormData } from '../schema';
 import { CalloutRail, onDoorKey, type CalloutRailRow } from './callout-rail';
 import { serverSpeaksDesign } from './capability';
-import { Counter, GROUP_SEAM } from './core';
+import { GROUP_SEAM } from './core';
 import { cardFactsContext } from './core/card-facts';
 import { carryReferenceRole } from './carry-reference';
 import { DraftedField } from './core/drafted-field';
@@ -97,7 +97,7 @@ export const CONCEPT_MAX = 2000;
  */
 
 /**
- * Потолок доски. Счётчик «N / 12» обещает рост, поэтому дверь добавления существует ВСЕГДА и при
+ * Потолок доски (счёта в шапке нет с item 35). Дверь добавления существует ВСЕГДА и при
  * полной доске честно отказывает словами, а не исчезает (Д19): исчезнувшая дверь читается как
  * «добавлять сюда нельзя вообще», и человек идёт искать её в другом месте.
  */
@@ -1153,7 +1153,7 @@ export function MoodBoard({
      указания. Владелец, увидев бету: «не как в референсе». Макет держит ПЯТЬ отдельных блоков:
 
        [ MOODBOARD ……………………………………… ] [ CALLOUTS 340px ]   ← ряд: лента и панель к ней
-       [ DESCRIPTION · what this thing is ………………………………… ]   ← слова человека, под ними
+       [ DESCRIPTION …………………………………………………………………… ]   ← слова человека, под ними
                                                             ряд прогона и ответ машины
                                                             (`head/construction-draft`)
 
@@ -1174,7 +1174,6 @@ export function MoodBoard({
         <Section
           id='mb-board'
           title='moodboard'
-          question='— the mood, not the prompt'
           /* ШОВ ОДИН НА ВЕСЬ ШАГ (r3b, M-1) — `GROUP_SEAM` из `./core`, 20px. До него блоки доски,
              указаний, описания, общих сведений и слотов держали штатные `space-y-stack` (10px), а
              соседние CONSTRUCTION DRAFT и CONSTRUCTION — 20px: один и тот же стык читался двумя
@@ -1182,10 +1181,9 @@ export function MoodBoard({
           className={cn('min-w-0 flex-1', GROUP_SEAM)}
           action={
             <>
-              {/* СЧЁТ — ПИЛЮЛЕЙ В ШАПКЕ (`7 of 12 pictures`), как в макете; ноль — тон «не хватает». */}
-              <span className='contents' data-mb-count=''>
-                <Counter n={items.length} noun='picture' total={MOOD_MAX} />
-              </span>
+              {/* СЧЁТА В ШАПКЕ НЕТ (item 35, 04.10): «в мудборд не должно быть текста в хедере
+                  3 OF 12 PICTURES и "— the mood, not the prompt"». Потолок `MOOD_MAX` по-прежнему
+                  держит дверь добавления: тринадцатая картинка получает отказ словами. */}
               <button
                 type='button'
                 onClick={() => setOpen(!open)}

@@ -1749,7 +1749,7 @@ export function ConstructionDraft({
     <Section
       id='mb-draft'
       title='description'
-      question='— what this thing is'
+      /* Подзаголовка нет (item 35): «в DESCRIPTION "— what this thing is" тоже убрать». */
       action={
         status || acceptAll ? (
           <span className='flex items-center gap-2'>
