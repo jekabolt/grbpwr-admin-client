@@ -100,8 +100,21 @@ export function paintRun({
       continue;
     }
     const row = plan.cloths.find((c) => c.hex === hex);
-    if (row && row.assetId === 0 && row.colourHex) {
+    if (row && row.assetId === 0 && row.colourHex && !row.words) {
       paintedUses.push(colourUse(hex, row.colourHex));
+      continue;
+    }
+    // A plan saved by the old brush: its row still says what the colour is.
+    if (row && (row.assetId > 0 || row.colourHex || row.words)) {
+      paintedUses.push(
+        fabricUseOf(band, row.assetId, {
+          ...(row.colourHex ? { colourHex: row.colourHex } : {}),
+          ...(row.words ? { words: row.words } : {}),
+          parts: row.parts,
+          mapHex: hex,
+        }),
+      );
+      if (row.assetId > 0) paintedAssets.add(row.assetId);
       continue;
     }
     return { kind: 'refuse', reason: 'a painted part lost its material · repaint it' };
