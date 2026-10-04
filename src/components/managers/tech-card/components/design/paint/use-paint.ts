@@ -68,7 +68,7 @@ import {
   type Gesture,
   type ViewParts,
 } from './parts-model';
-import { mockupPixels, mockupTilePx, type MockupSkin } from './mockup';
+import { MOCKUP_REV, mockupPixels, mockupTilePx, type MockupSkin } from './mockup';
 import { analyseFlat, REGIONS_ALGO_REV, type FlatRegions } from './regions';
 
 /** `artwork` (R7): the armed artwork is placed on the flats as a box; the paint stays as is. */
@@ -250,6 +250,14 @@ export class PaintSession {
   private asked = new Set<string>();
   /** The card-level auto parts asked and refused: one `parts · retry` for the block. */
   partsFailed = '';
+  /**
+   * GENERATE is preparing (flush → mockups → launch): no gesture, no colour change, no undo — the
+   * maps and the plan the run is built from must not move underneath it.
+   */
+  frozen = false;
+  /** The cloth mockups of one exact set of outgoing maps → their media (or none), reused on a
+   *  retry so the same press keeps the same recipe and idempotency key. */
+  private mockCache = new Map<string, Map<string, number>>();
   /** The part under the pointer (R17): the same part is tinted on every side. */
   hovered: { view: string; group: number } | null = null;
   /** `paintedPartNames` per side, keyed by what it was read from. */
@@ -673,6 +681,7 @@ export class PaintSession {
 
   /** A new free colour; armed at once. */
   addColour(colourHex: string): string {
+    if (this.frozen) return '';
     const taken = [...this.slotLabel.values(), ...this.colours.map((c) => c.label)];
     for (const v of this.views.values())
       if (v.labels) for (const hex of this.labelsIn(v.labels)) taken.push(hex);
@@ -693,6 +702,7 @@ export class PaintSession {
 
   /** Change a free colour (its label stays; the plan row follows on the next save). */
   setColour(label: string, colourHex: string) {
+    if (this.frozen) return;
     const c = this.colours.find((x) => x.label === label);
     if (!c || c.colourHex === colourHex) return;
     c.colourHex = colourHex;
@@ -778,6 +788,7 @@ export class PaintSession {
 
   /** One gesture over several sides. Returns the sides it changed. */
   private applyMany(targets: { view: string; idx: Int32Array }[], paint?: number): string[] {
+    if (this.frozen) return [];
     const value = paint ?? (this.tool === 'erase' ? 0 : this.armed ? packHex(this.armed) : 0);
     if (paint === undefined && this.tool !== 'erase' && !value) return [];
     const ready = targets.flatMap((t) => {
@@ -827,6 +838,7 @@ export class PaintSession {
   }
 
   undo() {
+    if (this.frozen) return;
     let g = this.undoStack.pop();
     while (g && !this.live(g)) g = this.undoStack.pop();
     if (!g) return this.bump();
@@ -835,6 +847,7 @@ export class PaintSession {
   }
 
   redo() {
+    if (this.frozen) return;
     let g = this.redoStack.pop();
     while (g && !this.live(g)) g = this.redoStack.pop();
     if (!g) return this.bump();
@@ -954,62 +967,123 @@ export class PaintSession {
 
   /* ─────────────────────────── the cloth mockups (T13) ─────────────────────────── */
 
+  /** Freeze / unfreeze painting while GENERATE prepares. */
+  setFrozen(on: boolean) {
+    if (this.frozen === on) return;
+    this.frozen = on;
+    this.bump();
+  }
+
   /**
-   * At GENERATE, after the save settled: one cloth mockup per outgoing map (`mockup.ts`), each
-   * label filled with the cloth its fabric use names (the asset's picture at its true repeat, or
-   * the free colour), uploaded. View → media id. Throws when any side cannot be drawn exactly as
-   * its map (unsaved, another flat, another map) or any upload fails — the caller then launches
-   * WITHOUT mockups; a mockup never blocks the run.
+   * The outgoing maps still stand exactly as the session holds them: the plan at `rev`, every map
+   * the saved one of its side, over the same flat, nothing painted since.
+   */
+  sendsAsSaved(maps: readonly common_DesignColourMap[], rev: number | undefined): boolean {
+    const plan = this.plan();
+    if (!plan || plan.rev !== rev) return false;
+    return maps.every((m) => {
+      const v = this.views.get(m.view ?? '');
+      const saved = plan.maps.find((x) => x.view === m.view);
+      return (
+        !!v &&
+        v.status === 'ready' &&
+        !v.dirty &&
+        v.mapBase === (m.mediaId ?? 0) &&
+        v.baseMediaId === (m.baseMediaId ?? 0) &&
+        saved?.mediaId === (m.mediaId ?? 0)
+      );
+    });
+  }
+
+  /**
+   * At GENERATE (frozen, after the save settled): one cloth mockup per outgoing map
+   * (`mockup.ts`), each label filled with the cloth its fabric use names (the asset's picture at
+   * its true repeat, or the free colour), uploaded. View → media id; EMPTY when any side cannot be
+   * drawn exactly as its map or any upload fails — the run then goes WITHOUT mockups. The answer
+   * is kept per canonical signature (map media, flats, per-label cloth + repeat, algo): the same
+   * press again reuses it — the same ids, the same recipe, the same idempotency key.
    */
   async mockups(
     maps: readonly common_DesignColourMap[],
     uses: readonly common_DesignFabricUse[],
   ): Promise<Map<string, number>> {
     const band = this.band;
-    if (!band) throw new Error('no band');
+    if (!band) return new Map();
     const assets = new Map((band.assets ?? []).map((a) => [a.id ?? 0, a]));
-    const pictures = new Map<string, Promise<ImageData>>();
+    const useOf = (hex: string) => uses.find((u) => (u.mapHex ?? '').toLowerCase() === hex);
+    const sig = JSON.stringify([
+      MOCKUP_REV,
+      REGIONS_ALGO_REV,
+      maps.map((m) => [
+        m.view,
+        m.mediaId,
+        m.baseMediaId,
+        (m.palette ?? []).map((sw) => {
+          const hex = (sw.hex ?? '').toLowerCase();
+          const u = useOf(hex);
+          const a = (u?.assetId ?? 0) > 0 ? assets.get(u?.assetId ?? 0) : undefined;
+          return [
+            hex,
+            u?.assetId ?? 0,
+            a?.mediaId ?? 0,
+            u?.colourHex ?? '',
+            u?.repeatMm || a?.repeatMm || 0,
+          ];
+        }),
+      ]),
+    ]);
+    const hit = this.mockCache.get(sig);
+    if (hit) return hit;
     const out = new Map<string, number>();
-    for (const m of maps) {
-      const view = m.view ?? '';
-      const v = this.views.get(view);
-      if (!v || v.status !== 'ready' || v.dirty || !v.labels || !v.flat || !v.pixels)
-        throw new Error(`${view} is not drawn as saved`);
-      if (v.baseMediaId !== (m.baseMediaId ?? 0) || v.mapBase !== (m.mediaId ?? 0))
-        throw new Error(`${view} stands on another map`);
-      const { flat, labels, pixels } = v;
-      const skins = new Map<number, MockupSkin>();
-      for (const sw of m.palette ?? []) {
-        const hex = (sw.hex ?? '').toLowerCase();
-        const use = uses.find((u) => (u.mapHex ?? '').toLowerCase() === hex);
-        if (!use) continue;
-        const asset = (use.assetId ?? 0) > 0 ? assets.get(use.assetId ?? 0) : undefined;
-        const url = asset ? assetFull(asset) : '';
-        if (url) {
-          let pic = pictures.get(url);
-          if (!pic) {
-            pic = clothPixels(url);
-            pictures.set(url, pic);
+    try {
+      const pictures = new Map<string, Promise<ImageData>>();
+      for (const m of maps) {
+        const view = m.view ?? '';
+        const v = this.views.get(view);
+        if (!v || v.status !== 'ready' || v.dirty || !v.labels || !v.flat || !v.pixels)
+          throw new Error(`${view} is not drawn as saved`);
+        if (v.baseMediaId !== (m.baseMediaId ?? 0) || v.mapBase !== (m.mediaId ?? 0))
+          throw new Error(`${view} stands on another map`);
+        // A copy: the drawing below spans awaits, and nothing it reads may move under it.
+        const flat = v.flat;
+        const labels = v.labels.slice();
+        const pixels = v.pixels.data.slice();
+        const skins = new Map<number, MockupSkin>();
+        for (const sw of m.palette ?? []) {
+          const hex = (sw.hex ?? '').toLowerCase();
+          const use = useOf(hex);
+          if (!use) continue;
+          const asset = (use.assetId ?? 0) > 0 ? assets.get(use.assetId ?? 0) : undefined;
+          const url = asset ? assetFull(asset) : '';
+          if (url) {
+            let pic = pictures.get(url);
+            if (!pic) {
+              pic = clothPixels(url);
+              pictures.set(url, pic);
+            }
+            const img = await pic;
+            skins.set(packHex(hex), {
+              kind: 'tile',
+              rgba: img.data,
+              w: img.width,
+              h: img.height,
+              tilePx: mockupTilePx(use.repeatMm || asset?.repeatMm || 0, flat.w),
+            });
+          } else {
+            const c = (use.colourHex ?? '').trim();
+            if (c) skins.set(packHex(hex), { kind: 'colour', hex: c });
           }
-          const img = await pic;
-          skins.set(packHex(hex), {
-            kind: 'tile',
-            rgba: img.data,
-            w: img.width,
-            h: img.height,
-            tilePx: mockupTilePx(use.repeatMm || asset?.repeatMm || 0, flat.w),
-          });
-        } else {
-          const c = (use.colourHex ?? '').trim();
-          if (c) skins.set(packHex(hex), { kind: 'colour', hex: c });
         }
+        const rgba = mockupPixels(flat, labels, pixels, skins);
+        const media = await uploadRaster(pngOf(rgba, flat.w, flat.h));
+        const id = media.id ?? 0;
+        if (id <= 0) throw new Error('the mockup did not upload');
+        out.set(view, id);
       }
-      const rgba = mockupPixels(flat, labels, pixels.data, skins);
-      const media = await uploadRaster(pngOf(rgba, flat.w, flat.h));
-      const id = media.id ?? 0;
-      if (id <= 0) throw new Error('the mockup did not upload');
-      out.set(view, id);
+    } catch {
+      out.clear();
     }
+    this.mockCache.set(sig, out);
     return out;
   }
 

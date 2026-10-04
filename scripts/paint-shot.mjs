@@ -508,6 +508,34 @@ try {
     console.log(
       `f6 mockups: ${mock.maps.map((x) => `${x.view}→${x.id}`).join(', ')} · ${mock.uses.join(' | ')}`,
     );
+    // Review crit 1: the same maps again → the cached mockups (same ids → same fingerprint).
+    // Crit 2: frozen → no gesture, no undo; maps still as saved; a paint after → not as saved.
+    const guard = await page.evaluate(async () => {
+      const p = window.__paint;
+      const run = window.__run();
+      const again = await p.mockups(run.colourMaps, run.fabrics);
+      const rev = p.plan()?.rev;
+      const asSaved = p.sendsAsSaved(run.colourMaps, rev);
+      p.setFrozen(true);
+      const before = [...p.views.values()].map((v) => v.rev).join(',');
+      p.apply('front', Int32Array.from([0, 1, 2]));
+      p.undo();
+      p.clear();
+      const after = [...p.views.values()].map((v) => v.rev).join(',');
+      const disabled = !!document.querySelector('[data-paint-parts] .pointer-events-none');
+      p.setFrozen(false);
+      return {
+        ids: [...again.values()].join(','),
+        asSaved,
+        frozenHeld: before === after,
+        disabled,
+      };
+    });
+    console.log(`f6 guard: ${JSON.stringify(guard)}`);
+    if (guard.ids !== mock.maps.map((x) => x.id).join(','))
+      errors.push(`[f6] ASSERT: a second press minted new mockups ${guard.ids}`);
+    if (!guard.asSaved) errors.push('[f6] ASSERT: saved maps not seen as saved');
+    if (!guard.frozenHeld || !guard.disabled) errors.push('[f6] ASSERT: frozen painting moved');
     if (mock.maps.length !== (run2.colourMaps || []).length)
       errors.push(
         `[f6] ASSERT: ${mock.maps.length} mockups for ${(run2.colourMaps || []).length} maps`,

@@ -968,7 +968,7 @@ type Pending = Placed & { token: number; gone: boolean };
 
 export function PartsCanvas({
   session,
-  disabled,
+  disabled: disabledProp,
   band,
   artworks,
 }: {
@@ -979,6 +979,8 @@ export function PartsCanvas({
   /** R7 · the artworks bound to the current colourway (`artworksOf`). */
   artworks?: readonly CanvasArtwork[];
 }): JSX.Element | null {
+  /* GENERATE is preparing its run off these maps: nothing paints until it has left. */
+  const disabled = disabledProp || session.frozen;
   const views = [...session.views.values()];
 
   /* ─── R7 · artwork placements: the band's marks + an optimistic copy until the band re-reads ─── */

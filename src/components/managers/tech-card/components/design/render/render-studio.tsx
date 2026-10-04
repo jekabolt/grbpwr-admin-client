@@ -369,8 +369,12 @@ export function RenderStudio({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [band, wire, colorwayArchived, colorwayLabel, target.nowhere, painted, paint, paintVersion]);
 
-  /* T13 · the cloth mockups are drawn and uploaded at the press; the button stays busy meanwhile. */
+  /* T13 · the cloth mockups are drawn and uploaded at the press; the button stays busy meanwhile.
+     ONE PRESS AT A TIME, SYNCHRONOUSLY: the ref is set before the first await, so a second press
+     while preparing is a no-op (a second upload would mint new mockup ids → a new fingerprint →
+     a second paid run). */
   const [mocking, setMocking] = useState(false);
+  const preparing = useRef(false);
   const launch = async () => {
     /* O-61 (D-60, D-71): слова карточки, показанные в пустом IN WORDS, становятся СВОИМИ черновику —
        как флэт отдаёт свой засев в форму перед `flush`; правка WORDS флэта после прогона их уже не
@@ -386,16 +390,24 @@ export function RenderStudio({
     let colourMaps = wire.colourMaps ?? [];
     if (colourMaps.length > 0) {
       const card = techCardId;
+      const rev = paint.plan()?.rev;
+      // Painting stands still from here to the launch: the maps sent are the maps drawn.
+      paint.setFrozen(true);
       setMocking(true);
       try {
+        if (!(await paint.flush()) || !paint.sendsAsSaved(colourMaps, rev)) return;
         const ids = await paint.mockups(colourMaps, wire.fabrics ?? []);
-        colourMaps = colourMaps.map((m) => ({ ...m, mockupMediaId: ids.get(m.view ?? '') ?? 0 }));
-      } catch {
-        colourMaps = colourMaps.map((m) => ({ ...m, mockupMediaId: 0 }));
+        // Anything moved meanwhile (another tab saved, the card changed): no run, quietly.
+        if (shownCard.current !== card || !paint.sendsAsSaved(colourMaps, rev)) return;
+        const all = colourMaps.every((m) => (ids.get(m.view ?? '') ?? 0) > 0);
+        colourMaps = colourMaps.map((m) => ({
+          ...m,
+          mockupMediaId: all ? ids.get(m.view ?? '') ?? 0 : 0,
+        }));
       } finally {
+        paint.setFrozen(false);
         setMocking(false);
       }
-      if (shownCard.current !== card) return;
     }
     const body: StartRunInput = {
       kind: 'render',
@@ -451,20 +463,26 @@ export function RenderStudio({
   const latest = useRef({ launch, gate, disabled });
   latest.current = { launch, gate, disabled };
   const generate = async () => {
-    const card = techCardId;
-    if (!seedBriefInFlight(card)) {
-      void launch();
-      return;
-    }
-    setBriefing(true);
+    if (preparing.current || run.isPending) return;
+    preparing.current = true;
     try {
-      if ((await settleSeedBrief(card)) === 'busy') return;
+      const card = techCardId;
+      if (!seedBriefInFlight(card)) {
+        await launch();
+        return;
+      }
+      setBriefing(true);
+      try {
+        if ((await settleSeedBrief(card)) === 'busy') return;
+      } finally {
+        setBriefing(false);
+      }
+      const now = latest.current;
+      if (shownCard.current !== card || !now.gate.ok || now.disabled) return;
+      await now.launch();
     } finally {
-      setBriefing(false);
+      preparing.current = false;
     }
-    const now = latest.current;
-    if (shownCard.current !== card || !now.gate.ok || now.disabled) return;
-    void now.launch();
   };
 
   /* ⚠ СТРОКА СОСТАВА СНЯТА ЦЕЛИКОМ (r3 п.27) — «made of pattern 1 — … · split into the slots

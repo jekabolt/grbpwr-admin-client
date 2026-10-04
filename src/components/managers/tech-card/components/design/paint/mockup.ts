@@ -17,6 +17,9 @@ import type { FlatRegions } from './regions';
  */
 export const GARMENT_WIDTH_MM = 600;
 
+/** Bumped whenever the mockup's drawing changes: a cached mockup of an older drawing is not reused. */
+export const MOCKUP_REV = 'mockup.v1';
+
 /** A cloth with no stated repeat shows 8 repeats across the flat. */
 export const UNSTATED_REPEATS = 8;
 
