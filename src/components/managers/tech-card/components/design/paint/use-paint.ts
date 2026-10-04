@@ -160,6 +160,8 @@ export class PaintSession {
   materials: PaintMaterial[] = [];
   skins = new Map<string, PaintSkin>();
   colours: { label: string; colourHex: string }[] = [];
+  /** Colour labels created or changed here since the last successful save — the only rows we own. */
+  private dirtyColours = new Set<string>();
   armed = '';
   tool: PaintTool = 'click';
   save: PaintSaveState = 'idle';
@@ -390,6 +392,7 @@ export class PaintSession {
     const label = freeColourLabel(taken);
     if (!label) return '';
     this.colours.push({ label, colourHex });
+    this.dirtyColours.add(label);
     this.materials = [
       ...this.materials,
       { label, kind: 'colour', name: colourHex, bomItemId: 0, url: '', colourHex },
@@ -406,6 +409,7 @@ export class PaintSession {
     const c = this.colours.find((x) => x.label === label);
     if (!c || c.colourHex === colourHex) return;
     c.colourHex = colourHex;
+    this.dirtyColours.add(label);
     this.materials = this.materials.map((m) =>
       m.label === label ? { ...m, colourHex, name: colourHex } : m,
     );
@@ -499,7 +503,7 @@ export class PaintSession {
       return this.inflight.then(() => this.saveNow());
     }
     const dirty = [...this.views.values()].filter((v) => v.dirty && v.status === 'ready');
-    const colourDirty = this.colourRowsChanged();
+    const colourDirty = this.dirtyColours.size > 0;
     if (dirty.length === 0 && !colourDirty) {
       if (this.save !== 'unsaved' && this.save !== 'error') this.save = 'idle';
       this.bump();
@@ -520,17 +524,11 @@ export class PaintSession {
     });
   }
 
-  private colourRowsChanged(): boolean {
-    const plan = this.plan();
-    if (!plan) return false;
-    return this.colours.some((c) => {
-      const row = plan.cloths.find((r) => r.hex === c.label);
-      return !!row && row.colourHex !== c.colourHex;
-    });
-  }
-
   private async write(dirty: PaintView[]): Promise<boolean> {
     const card = this.techCardId;
+    const ownColours = new Map(
+      this.colours.filter((c) => this.dirtyColours.has(c.label)).map((c) => [c.label, c.colourHex]),
+    );
     // Snapshot and clear: a gesture during the upload marks its view dirty again.
     const fresh: { view: string; map: PlanMap | null }[] = [];
     try {
@@ -569,12 +567,30 @@ export class PaintSession {
         ...fresh.flatMap((f) => (f.map ? [f.map] : [])),
       ];
       const painted = new Set(maps.flatMap((m) => m.palette.map((s) => s.hex)));
-      const cloths: PlanCloth[] = base.cloths.filter(
-        (c) => painted.has(c.hex) && !this.colours.some((x) => x.label === c.hex),
-      );
+      // Every row of `base` stays as it is (the server only refuses rows no map paints); ONLY our
+      // dirty colour rows overlay it, and a colour of ours painted but rowless gets its row.
+      const cloths: PlanCloth[] = base.cloths
+        .filter((c) => painted.has(c.hex))
+        .map((c) =>
+          ownColours.has(c.hex)
+            ? {
+                hex: c.hex,
+                assetId: 0,
+                colourHex: ownColours.get(c.hex) ?? '',
+                words: '',
+                parts: '',
+              }
+            : c,
+        );
       for (const c of this.colours)
-        if (painted.has(c.label))
-          cloths.push({ hex: c.label, assetId: 0, colourHex: c.colourHex, words: '', parts: '' });
+        if (painted.has(c.label) && !cloths.some((r) => r.hex === c.label))
+          cloths.push({
+            hex: c.label,
+            assetId: 0,
+            colourHex: ownColours.get(c.label) ?? c.colourHex,
+            words: '',
+            parts: '',
+          });
       return { maps, cloths };
     };
 
@@ -632,6 +648,9 @@ export class PaintSession {
       for (const v of dirty) v.dirty = true;
       return this.fail('error', refusalText(e));
     }
+    for (const [label, hex] of ownColours)
+      if (this.colours.find((c) => c.label === label)?.colourHex === hex)
+        this.dirtyColours.delete(label);
     void this.qc.invalidateQueries({ queryKey: designKeys.band(card) });
     const left = [...this.views.values()].some((v) => v.dirty);
     this.save = left || this.timer ? 'pending' : 'idle';
