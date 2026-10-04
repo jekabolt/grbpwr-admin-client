@@ -209,7 +209,13 @@ try {
   // ── R · ПОД КАДРОМ НИЧЕГО, КРОМЕ РЯДА КОЛОДЫ ──
   for (const k of ['free', 'single', 'held', 'sheet', 'refused'])
     check(`R1 ${k}: nothing under the frame`, (await under(k)) === null, `«${await under(k)}»`);
-  check('R2 deck: its own row stays — expand ▸', (await under('deck')) === 'expand ▸');
+  check(
+    'R2 deck: its own row stays — expand + a folded FoldCaret',
+    (await under('deck')) === 'expand' &&
+      (await page.$eval(P('deck'), (el) =>
+        el.querySelector('[data-cell-doors] [data-fold-caret]')?.getAttribute('data-fold-caret'),
+      )) === 'folded',
+  );
   check(
     'R3 no «mark ▸» / «unmark ▸» / «split ▸» door anywhere',
     !(await page.$$eval('button', (bs) =>

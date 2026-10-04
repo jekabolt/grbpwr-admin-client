@@ -165,7 +165,10 @@ console.log('\nT18 · дверь custom');
   ck(/aria-expanded="false"/.test(closed), 'closed: the door says it is collapsed');
   ck(!closed.includes('data-flat-views'), 'closed: no layout / view panel in the markup');
   ck(!closed.includes('data-panel-body'), 'closed: the panel body is not rendered');
-  ck(closed.includes('custom ▸') && !closed.includes('•'), 'closed default: «custom ▸», no dot');
+  ck(
+    /custom<svg[^>]*data-fold-caret="folded"/.test(closed) && !closed.includes('•'),
+    'closed default: «custom» + a folded FoldCaret, no dot',
+  );
   ck(
     closed.indexOf('custom') < closed.indexOf('data-after'),
     'the door stands before the inventory door',

@@ -39,6 +39,7 @@ import {
 } from './model';
 import { DOOR, DOOR_ROW } from './render-tile';
 import { CELL_WIDTH, STRIP_FRAME_ASPECT, StripCell } from './strip-cell';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /* ЗДЕСЬ ЖИЛ `EMPTY_FAMILIES` — пустая карта родства «для рода, который колодой не группируется».
    Такого рода на этом экране больше нет: колоду группируют ОБА (разбор у самого `families`), и
@@ -743,7 +744,8 @@ export function OutputsSection({
                   title='fold these views back behind the sheet'
                   onClick={() => setOpenDeck(null)}
                 >
-                  fold ▾
+                  fold
+                  <FoldCaret open />
                 </Button>
               ) : (
                 <Button
@@ -755,7 +757,8 @@ export function OutputsSection({
                   onClick={() => setOpenDeck(picture.id ?? 0)}
                   title={`${(families.membersOf.get(picture.id ?? 0) ?? []).length}${(families.membersOf.get(picture.id ?? 0) ?? []).length === 1 ? ' view was' : ' views were'} cut from this sheet — open them as cards on the shelf`}
                 >
-                  expand ▸
+                  expand
+                  <FoldCaret open={false} />
                 </Button>
               ))}
           </div>

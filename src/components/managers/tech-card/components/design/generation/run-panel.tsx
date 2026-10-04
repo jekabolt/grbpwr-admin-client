@@ -24,6 +24,7 @@ import {
 } from './run-state';
 import { Thumb, thumbUrl } from './thumb';
 import { useGenerationWrites } from './use-generation';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * THE RUN PANEL — what went into a run, unfolded under its row by `META ▸` (the mock-up's
@@ -377,7 +378,8 @@ export function RunPanel({
               aria-label={`${textOpen ? 'hide' : 'show'} the prompt of run ${run.id ?? ''}`}
               title='the base instruction the worker composed and stored at dispatch, before the first paid attempt. A per-view run appends its own view line to each call and a 3D run is cut to the texture ceiling, so on those two routes this is the base and not a transcript.'
             >
-              {textOpen ? 'hide ▾' : 'show ▸'}
+              {textOpen ? 'hide' : 'show'}
+              <FoldCaret open={textOpen} />
             </Button>
             <CountPill n={sent.length} noun='character' />
           </>

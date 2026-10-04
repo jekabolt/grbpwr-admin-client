@@ -54,6 +54,7 @@ import {
 } from './model';
 import { SAMPLE_LABEL, colourwayColumns, picturesOnSides } from './side-row';
 import { StripCell } from './strip-cell';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ ONE FABRIC RENDER, WITH THE DOORS THAT PUT IT INTO A SIDE (27.09, O-63 step 1, D-62) ═══════
@@ -1336,7 +1337,7 @@ export function RenderTile({
                     title='fold these pieces back behind the sheet'
                     onClick={onDeck}
                   >
-                    ▾
+                    <FoldCaret open className='ml-0' />
                   </Button>
                 </>
               ) : (
@@ -1353,7 +1354,8 @@ export function RenderTile({
                       : `${members.length}${members.length === 1 ? ' piece was' : ' pieces were'} cut from this sheet — open them as cards in this row`
                   }
                 >
-                  expand ▸
+                  expand
+                  <FoldCaret open={false} />
                 </Button>
               ))}
           </div>

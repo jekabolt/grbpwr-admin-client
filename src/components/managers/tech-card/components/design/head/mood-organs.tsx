@@ -6,6 +6,7 @@ import { HeaderNote } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
 import { useCardMemory } from './use-draft-fills';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ ОРГАНЫ ШАГА MOODBOARD, ОБЩИЕ ДЛЯ ЕГО ШЕСТИ БЛОКОВ ═══════════════════════════════════════════
@@ -152,7 +153,8 @@ export function Fold({
               onClick={onToggle}
               data-fold-toggle=''
             >
-              {open ? 'hide ▾' : 'show ▸'}
+              {open ? 'hide' : 'show'}
+              <FoldCaret open={open} />
             </Button>
           </span>
         }

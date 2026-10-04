@@ -24,6 +24,7 @@ import { laysProvenancePhrase } from './bom-wastage-suggestion';
 import { LineProblems, noFx, NO_PRICE, PriceOrigin, TIER_ESTIMATE } from './costing-vocab';
 import { wireInt } from './schema';
 import { styleReadViewKeys } from './useStyleReadViews';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 const num = (s?: string) => {
   const n = parseDecimalNumber(s);
@@ -720,7 +721,7 @@ function RowDisclosure({
       className='inline-flex cursor-pointer items-center gap-1 whitespace-nowrap border border-borderColor px-[7px] py-px text-micro uppercase tracking-pill text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
     >
       breakdown
-      <span aria-hidden>{open ? '▾' : '▸'}</span>
+      <FoldCaret open={open} className='ml-0' />
     </span>
   );
 }

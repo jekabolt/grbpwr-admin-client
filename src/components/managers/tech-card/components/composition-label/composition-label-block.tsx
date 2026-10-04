@@ -60,6 +60,7 @@ import {
 } from './regions';
 import { Ribbon, type RegionView, type RibbonSide } from './ribbon';
 import { useCompositionLabel, useShaper } from './use-composition-label';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 const EMPTY_PICKS: ReadonlyMap<number, string> = new Map();
 
@@ -960,8 +961,8 @@ export function CompositionLabelBlock({
                       nWarn ? `${nWarn} ${nWarn === 1 ? 'warning' : 'warnings'}` : '',
                     ]
                       .filter(Boolean)
-                      .join(' · ')}{' '}
-                    {holesOpen ? '▴' : '▾'}
+                      .join(' · ')}
+                    <FoldCaret open={holesOpen} />
                   </button>
                 )}
               </div>

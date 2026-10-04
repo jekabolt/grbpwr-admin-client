@@ -99,11 +99,11 @@ const MUTATIONS = {
     from: "<span data-history-runs='' className='underline underline-offset-2'>",
     to: "<span data-history-runs=''>",
   },
-  // T37: стрелка не поворачивается — открытая история выглядит закрытой.
+  // T37/T40: стрелка не поворачивается — открытая история выглядит закрытой.
   'fold-caret': {
     file: /generation\/generation-history\.tsx$/,
-    from: "open && 'rotate-90',",
-    to: '',
+    from: "              <FoldCaret open={open} />\n            </span>",
+    to: "              <FoldCaret open={false} />\n            </span>",
   },
   // T36: последний ✕ снова просто снимает рамку — пустой редактор остаётся на верстаке.
   emptied: {
@@ -307,15 +307,15 @@ try {
       !(await page.$(`${HF} [data-run]`)) &&
       !(await page.$(`${HF} [data-picture="591"]`)),
   );
-  // ══ T37 · THE FOLD SAYS IT OPENS: an underlined count, a ▸ that turns ▾, ink on hover ══
+  // ══ T37/T40 · THE FOLD SAYS IT OPENS: an underlined count, the shared FoldCaret (down → up), ink on hover ══
   const foldLook = () =>
     page.$eval(`${HF} [data-history-fold]`, (el) => {
       const runs = el.querySelector('[data-history-runs]');
-      const caret = el.querySelector('[data-history-caret]');
+      const caret = el.querySelector('[data-history-caret] [data-fold-caret]');
       return {
         runs: runs?.textContent.trim() ?? '',
         underline: runs ? getComputedStyle(runs).textDecorationLine : '',
-        caret: caret?.textContent.trim() ?? '',
+        caret: caret?.getAttribute('data-fold-caret') ?? '',
         hidden: caret?.getAttribute('aria-hidden') === 'true',
         // Tailwind 4 turns with the `rotate` property, 3 with `transform`: either counts.
         turn: caret
@@ -328,10 +328,10 @@ try {
     });
   const shut = await foldLook();
   check(
-    'T37.1 folded: `history · N runs` with the count underlined and a quiet ▸, no frame',
+    'T37.1 folded: `history · N runs` with the count underlined and a FoldCaret pointing down, no frame',
     shut.runs === '1 run' &&
       shut.underline === 'underline' &&
-      shut.caret === '▸' &&
+      shut.caret === 'folded' &&
       shut.hidden &&
       /^(none|0deg)\|none$/.test(shut.turn) &&
       shut.cursor === 'pointer' &&
@@ -350,9 +350,10 @@ try {
   await page.waitForTimeout(250);
   const opened = await foldLook();
   check(
-    'T37.3 open: the ▸ has turned to ▾',
-    /^90deg\|/.test(opened.turn) || /\|matrix\((0|6\.\d+e-17), 1, -1, /.test(opened.turn),
-    opened.turn,
+    'T37.3 open: the FoldCaret has turned up (180°)',
+    opened.caret === 'open' &&
+      (/^180deg\|/.test(opened.turn) || /\|matrix\(-1, (0|[-\d.e]+), (0|[-\d.e]+), -1, /.test(opened.turn)),
+    `${opened.caret} ${opened.turn}`,
   );
   check(
     'T22.2 the header line opens it',

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Button } from 'ui/components/button';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ `custom` РЯДОМ С GENERATE (T18 / T19, слово владельца 03.10) ══════════════════════════════
@@ -55,7 +56,8 @@ export function FlatCustom({
         onClick={onToggle}
       >
         <span className='text-micro'>
-          {modified ? 'custom •' : 'custom'} {open ? '▾' : '▸'}
+          {modified ? 'custom •' : 'custom'}
+          <FoldCaret open={open} />
         </span>
       </Button>
       {after}
