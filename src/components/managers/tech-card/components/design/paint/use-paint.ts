@@ -23,6 +23,7 @@ import {
   PLAN_MAPS_MAX,
   PLAN_PALETTE_MAX,
   readColourPlan,
+  sendableMaps,
   writeCloth,
   writeMap,
   type ColourPlanDoc,
@@ -31,7 +32,7 @@ import {
 } from '../colour-plan/model';
 import { uploadRaster } from '../modals/use-edit-layer';
 import { bindingsOf, type ClothSlot } from '../pattern/slot-fabrics';
-import { benchSides } from '../render/model';
+import { benchSides, renderSheetViews } from '../render/model';
 import { designKeys } from '../use-design-band';
 import {
   anyPainted,
@@ -52,7 +53,9 @@ import {
   markPoints,
   marksTint,
   paintGesture,
+  paintedPartNames,
   partIndices,
+  partNamesByLabel,
   partsOf,
   PARTS_REGIONS_MAX,
   PARTS_REGIONS_MIN,
@@ -220,6 +223,8 @@ export class PaintSession {
   private redoStack: Gesture[] = [];
   /** Auto parts asked once per (view, flat, cutter) in this session. */
   private asked = new Set<string>();
+  /** `paintedPartNames` per side, keyed by what it was read from. */
+  private namesCache = new Map<string, { key: string; names: Map<number, string[]> }>();
   /** Sides a part click just painted by name (R9) — lit for a moment. */
   flash = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -244,6 +249,34 @@ export class PaintSession {
   private bump() {
     this.version += 1;
     for (const fn of this.listeners) fn();
+  }
+
+  /**
+   * Label hex → the part names painted with it, read from the SAVED maps the run sends: a side
+   * counts only while its pixels are exactly that map (not dirty, standing on that map's media,
+   * over that flat) and it has named parts. Sides in sheet order (front → back → sides).
+   */
+  partNames(): Map<string, string> {
+    const plan = this.plan();
+    if (!plan || !this.band) return new Map();
+    const order = renderSheetViews(this.band);
+    const maps = [...sendableMaps(this.band, plan)].sort(
+      (a, b) => order.indexOf(a.view) - order.indexOf(b.view),
+    );
+    const sides: Map<number, string[]>[] = [];
+    for (const m of maps) {
+      const v = this.views.get(m.view);
+      if (!v || v.status !== 'ready' || v.dirty || !v.labels || !v.flat || !v.parts) continue;
+      if (v.mapBase !== m.mediaId || v.baseMediaId !== m.baseMediaId) continue;
+      const key = `${v.baseMediaId}|${m.mediaId}|${v.rev}|${v.partsSig}`;
+      let hit = this.namesCache.get(v.view);
+      if (hit?.key !== key) {
+        hit = { key, names: paintedPartNames({ labels: v.labels, flat: v.flat, parts: v.parts }) };
+        this.namesCache.set(v.view, hit);
+      }
+      sides.push(hit.names);
+    }
+    return partNamesByLabel(sides);
   }
 
   /** The plan the screen stands on (saved). */
@@ -411,7 +444,14 @@ export class PaintSession {
         });
         if (this.views.get(v.view) !== v) return;
         const s = res.suggestion;
-        v.parts = s ? partsOf(s, flat, seeds) : null;
+        // Numbers mean something only for the cut that drew them: a suggestion for another side,
+        // flat or algo rev would paint unrelated regions.
+        const fits =
+          !!s &&
+          s.view === v.view &&
+          (s.baseMediaId ?? 0) === v.baseMediaId &&
+          s.algoRev === REGIONS_ALGO_REV;
+        v.parts = fits ? partsOf(s, flat, seeds) : null;
         if (!v.parts) throw new Error('the assistant answered nothing usable');
         v.partsSig = JSON.stringify([s?.parts, s?.splitNeeded]);
         v.partsFailed = '';
@@ -602,10 +642,38 @@ export class PaintSession {
     this.bump();
   }
 
+  private paintedAt = new Map<string, { rev: number; any: boolean }>();
+
+  /** Is anything painted on any side (cached per side's rev). */
+  anyPaint(): boolean {
+    for (const v of this.views.values()) {
+      if (v.status !== 'ready' || !v.labels) continue;
+      let hit = this.paintedAt.get(v.view);
+      if (hit?.rev !== v.rev) {
+        hit = { rev: v.rev, any: anyPainted(v.labels) };
+        this.paintedAt.set(v.view, hit);
+      }
+      if (hit.any) return true;
+    }
+    return false;
+  }
+
+  /** `clear`: every side back to paper, one gesture (one ⌘Z brings it all back). */
+  clear() {
+    const targets: { view: string; idx: Int32Array }[] = [];
+    for (const v of this.views.values()) {
+      if (v.status !== 'ready' || !v.labels) continue;
+      const idx: number[] = [];
+      for (let i = 0; i < v.labels.length; i += 1) if (v.labels[i]) idx.push(i);
+      if (idx.length > 0) targets.push({ view: v.view, idx: Int32Array.from(idx) });
+    }
+    this.applyMany(targets, 0);
+  }
+
   /** One gesture over several sides. Returns the sides it changed. */
-  private applyMany(targets: { view: string; idx: Int32Array }[]): string[] {
-    const value = this.tool === 'erase' ? 0 : this.armed ? packHex(this.armed) : 0;
-    if (this.tool !== 'erase' && !value) return [];
+  private applyMany(targets: { view: string; idx: Int32Array }[], paint?: number): string[] {
+    const value = paint ?? (this.tool === 'erase' ? 0 : this.armed ? packHex(this.armed) : 0);
+    if (paint === undefined && this.tool !== 'erase' && !value) return [];
     const ready = targets.flatMap((t) => {
       const v = this.views.get(t.view);
       return v && v.status === 'ready' && v.labels && t.idx.length > 0

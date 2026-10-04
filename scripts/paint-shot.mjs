@@ -435,6 +435,44 @@ try {
     await page.waitForTimeout(900);
     await shoot(page, 'f2-painted-1440.png');
     console.log(`painted: ${JSON.stringify(await painted())}`);
+    // T18: the run's `parts` are the named parts painted with each label (saved maps).
+    await page.waitForFunction(
+      () => !document.querySelector('[data-paint-tools]')?.textContent?.includes('saving'),
+      null,
+      { timeout: 8000 },
+    );
+    await page.waitForTimeout(1500);
+    const run2 = await page.evaluate(() => window.__run());
+    console.log(
+      `f2 run ${run2.kind}: ${(run2.fabrics || []).map((f) => `${f.name || f.colourHex}{${f.mapHex}: ${f.parts}}`).join(' | ')}`,
+    );
+    if (!(run2.fabrics || []).some((f) => /sleeve/.test(f.parts)))
+      errors.push('[f2] ASSERT: no part names in the run');
+
+    // R13: `clear` at the right of the PARTS header wipes every side in one gesture; ⌘Z restores.
+    const before = await painted();
+    await page.click('[data-paint-clear]');
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(300);
+    const cleared = await painted();
+    const head = await page.locator('[data-paint-tools]').boundingBox();
+    const row = await page.locator('[data-paint-side="back"]').boundingBox();
+    await page.screenshot({
+      path: resolve(OUT, 'f3-parts-clear.png'),
+      clip: { x: 24, y: head.y - 12, width: 1392, height: row.y + row.height * 0.6 - head.y + 12 },
+    });
+    shots.push(resolve(OUT, 'f3-parts-clear.png'));
+    const disabledNow = await page.locator('[data-paint-clear]').isDisabled();
+    await page.keyboard.press('Meta+z');
+    await page.waitForTimeout(200);
+    const restored = await painted();
+    console.log(
+      `clear: ${JSON.stringify(before)} → ${JSON.stringify(cleared)} → undo ${JSON.stringify(restored)}; disabled after clear ${disabledNow}`,
+    );
+    if (cleared.front || cleared.back) errors.push('[f2] ASSERT: clear left paint');
+    if (!disabledNow) errors.push('[f2] ASSERT: clear enabled with nothing painted');
+    if (restored.front !== before.front || restored.back !== before.back)
+      errors.push('[f2] ASSERT: one undo did not restore the clear');
 
     // A region the model says spans two parts: the hint on hover.
     p = await reg('front', 20);
@@ -444,6 +482,126 @@ try {
     console.log(`split caption: ${cap2.replace(/\n/g, ' ')}`);
     if (!/no seam/i.test(cap2)) errors.push(`[f2] ASSERT: split caption ${cap2}`);
     await shoot(page, 'f2-split-hover-1440.png');
+    await ctx.close();
+  }
+  {
+    // Ф4 (R14/R15): a shirt painted all over in dark cloth — no white bands along the seams, the
+    // lines readable on the dark. `--edges=<suffix>` names the shot (before/after).
+    const { ctx, page } = await open(1440, 1000, 'f2');
+    await page
+      .waitForFunction(() => window.__paint.views.get('back')?.parts, null, { timeout: 8000 })
+      .catch(() => {});
+    await page.click('[data-paint-add-colour]');
+    await page.waitForSelector('[data-colour-square]');
+    const sq = await page.locator('[data-colour-square]').boundingBox();
+    await page.mouse.click(sq.x + sq.width * 0.9, sq.y + sq.height * 0.88);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    const every = async (view) => {
+      const pts = await page.evaluate((v) => {
+        const pv = window.__paint.views.get(v);
+        const out = [];
+        for (let r = 1; r < pv.parts.seeds.length; r++) {
+          const s = pv.parts.seeds[r];
+          if (s >= 0)
+            out.push({
+              fx: ((s % pv.flat.w) + 0.5) / pv.flat.w,
+              fy: (Math.floor(s / pv.flat.w) + 0.5) / pv.flat.h,
+            });
+        }
+        return out;
+      }, view);
+      await page.keyboard.down('Alt');
+      for (const { fx, fy } of pts) {
+        const p = await at(page, view, fx, fy);
+        await page.mouse.click(p.x, p.y);
+      }
+      await page.keyboard.up('Alt');
+    };
+    // The dark colour on every region, then denim on the bodies (click = whole named part).
+    await every('front');
+    await every('back');
+    await arm(page, 3);
+    for (const [v, fx, fy] of [
+      ['front', 0.3, 0.55],
+      ['front', 0.7, 0.75],
+      ['back', 0.5, 0.55],
+    ]) {
+      const p = await at(page, v, fx, fy);
+      await page.mouse.click(p.x, p.y);
+    }
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(600);
+    const suffix =
+      (process.argv.find((a) => a.startsWith('--edges=')) ?? '').slice('--edges='.length) ||
+      'after';
+    const box = await page.locator('[data-paint-side="front"]').boundingBox();
+    const name = `f4-edges-${suffix}.png`;
+    await page.screenshot({
+      path: resolve(OUT, name),
+      clip: {
+        x: box.x + box.width * 0.15,
+        y: box.y,
+        width: box.width * 0.7,
+        height: box.height * 0.55,
+      },
+    });
+    shots.push(resolve(OUT, name));
+    await ctx.close();
+  }
+  {
+    // Ф3: the magnetic pen on the shirt back — the yoke traced with four clicks (orig px of the
+    // 807×851 flat): the preview runs along the armhole and shoulder lines, the click on the
+    // first vertex closes it.
+    const { ctx, page } = await open(1440, 1000, 'f2');
+    const yoke = [
+      [194, 178],
+      [622, 181],
+      [520, 71],
+      [330, 70],
+    ].map(([x, y]) => [x / 807, y / 851]);
+    await arm(page, 2);
+    await page.click('[data-paint-tool="pen"]');
+    const side = page.locator('[data-paint-side="back"]');
+    const clip = async () => {
+      const b = await side.boundingBox();
+      return { x: b.x - 4, y: b.y - 4, width: b.width + 8, height: b.height * 0.5 };
+    };
+    for (const [fx, fy] of yoke.slice(0, 2)) await click(page, 'back', fx, fy);
+    // Sweep the cursor up to the right neck point, as a hand would.
+    for (let k = 1; k <= 6; k++) {
+      const p = await at(
+        page,
+        'back',
+        yoke[1][0] + ((yoke[2][0] - yoke[1][0]) * k) / 6,
+        yoke[1][1] + ((yoke[2][1] - yoke[1][1]) * k) / 6,
+      );
+      await page.mouse.move(p.x, p.y);
+      await page.waitForTimeout(30);
+    }
+    await page.waitForTimeout(200);
+    const pts = await page.evaluate(
+      () =>
+        document
+          .querySelector('[data-paint-side="back"] polygon')
+          ?.getAttribute('points')
+          ?.split(' ').length ?? 0,
+    );
+    console.log(`f3 preview: ${pts} points in the pen outline`);
+    if (pts < 20) errors.push(`[f3] ASSERT: the preview did not follow the lines (${pts} pts)`);
+    await page.screenshot({ path: resolve(OUT, 'f3-pen-preview-1440.png'), clip: await clip() });
+    shots.push(resolve(OUT, 'f3-pen-preview-1440.png'));
+    for (const [fx, fy] of yoke.slice(2)) await click(page, 'back', fx, fy);
+    await click(page, 'back', yoke[0][0], yoke[0][1]);
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(300);
+    const yokePx = await page.evaluate(
+      () => window.__paint.views.get('back').labels.filter((x) => x).length,
+    );
+    console.log(`f3 yoke painted: ${yokePx} px`);
+    if (yokePx < 1000) errors.push(`[f3] ASSERT: the yoke was not painted (${yokePx} px)`);
+    await page.screenshot({ path: resolve(OUT, 'f3-yoke-painted-1440.png'), clip: await clip() });
+    shots.push(resolve(OUT, 'f3-yoke-painted-1440.png'));
     await ctx.close();
   }
   {

@@ -286,5 +286,63 @@ ck(
   m.gestureLive(g2, (v) => (v === 'back' ? undefined : sides[v])),
   'a front-only gesture survives the back going',
 );
+// T18: part names into the run — a named part counts for a label at ≥ 60 % of its pixels.
+{
+  const hexA = m.hexOf(A),
+    hexB = m.hexOf(B);
+  const fn = m.paintedPartNames({ labels: fl, flat: front, parts: fp });
+  const bn = m.paintedPartNames({ labels: bl, flat: backF, parts: bp });
+  ck(
+    JSON.stringify(fn.get(A)) === '["left sleeve"]' &&
+      JSON.stringify(fn.get(B)) === '["right front"]',
+    'front: each label names the part painted with it',
+    JSON.stringify([...fn]),
+  );
+  const names = m.partNamesByLabel([fn, bn]);
+  ck(
+    names.get(hexA) === 'left sleeve' && names.get(hexB) === 'right front',
+    'same name on two sides once',
+    JSON.stringify([...names]),
+  );
+  // Half of the back's collar with a third label: under 60 % → not named; whole → named.
+  const C = m.packHex('#2a7fd0');
+  const collar = m.partIndices(bl, backF, bp, 0);
+  const half = collar.slice(0, Math.floor(collar.length / 2));
+  const dh = m.paintIndices(bl, half, C);
+  ck(
+    !m.paintedPartNames({ labels: bl, flat: backF, parts: bp }).has(C),
+    'half a part painted: not named',
+  );
+  m.undoDiff(bl, dh);
+  const dc = m.paintIndices(bl, collar, C);
+  ck(
+    m
+      .partNamesByLabel([fn, m.paintedPartNames({ labels: bl, flat: backF, parts: bp })])
+      .get('#2a7fd0') === 'collar',
+    'a whole part painted with a free colour: named',
+  );
+  m.undoDiff(bl, dc);
+  // "unnamed" never names; pen-only paint (no part ≥ 60 %) leaves the label absent → slot name.
+  const un = m.partIndices(bl, backF, bp, 2);
+  const du = m.paintIndices(bl, un, C);
+  ck(
+    !m.paintedPartNames({ labels: bl, flat: backF, parts: bp }).has(C),
+    '"unnamed" is never a name',
+  );
+  m.undoDiff(bl, du);
+  // Order front → back, cap at whole names under 200 chars.
+  const long = Array.from({ length: 30 }, (_, i) => `part number ${i}`);
+  const capped = m
+    .partNamesByLabel([new Map([[A, long.slice(0, 15)]]), new Map([[A, long.slice(15)]])])
+    .get(hexA);
+  ck(
+    capped.length <= 200 &&
+      capped.startsWith('part number 0, part number 1') &&
+      !capped.endsWith(','),
+    'names keep side order and stop at 200 chars',
+    `${capped.length} chars`,
+  );
+}
+
 console.log(bad ? `\n${bad} FAIL` : '\nall ok');
 process.exit(bad ? 1 : 0);

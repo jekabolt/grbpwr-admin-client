@@ -15,6 +15,7 @@
     "nest:probe": "node scripts/nest-probe.mjs",
     "paint:regions": "node scripts/paint-regions-probe.mjs",
     "paint:map": "node scripts/paint-map-probe.mjs",
+    "paint:pen": "node scripts/paint-pen-probe.mjs",
     "flat:detail-door": "node scripts/detail-slot-door-probe.mjs",
     "flat:custom": "node scripts/flat-custom-probe.mjs",
     "mood:description": "node scripts/mood-description-probe.mjs",

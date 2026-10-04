@@ -4,9 +4,11 @@
  * The pack (MATERIALS) stays the source of the cloths; the saved, non-stale maps only add WHERE
  * each cloth goes. Outgoing `fabrics`, in this order (agreed with the prompt on the server):
  *   PACK ORDER, so CLOTH 1 (which takes the colourway's echo scalars) is the main cloth as ever:
- *   each pack cloth in place — painted slots as `mapHex` uses (`parts` = slot name); the first
+ *   each pack cloth in place — painted slots as `mapHex` uses (`parts` = the named parts painted
+ *   with that label on the saved maps, else the slot name); the first
  *   cloth with no painted slot is the REMAINDER (`parts: ''`, no mapHex: white on the map); other
- *   unpainted cloths keep their parts; free colours `{assetId 0, colourHex, mapHex}` last.
+ *   unpainted cloths keep their parts; free colours `{assetId 0, colourHex, mapHex}` last (their
+ *   `parts` = the named parts painted with them, else '').
  * Maps travel only when that list has ≥ 2 uses and at least one `mapHex`; otherwise the run is
  * exactly the pack as before.
  *
@@ -36,7 +38,12 @@ export type PaintRun =
       colourMaps: common_DesignColourMap[];
     };
 
-const colourUse = (label: string, colourHex: string, words = ''): common_DesignFabricUse => ({
+const colourUse = (
+  label: string,
+  colourHex: string,
+  words = '',
+  parts = '',
+): common_DesignFabricUse => ({
   mapHex: label,
   assetId: 0,
   name: '',
@@ -44,7 +51,7 @@ const colourUse = (label: string, colourHex: string, words = ''): common_DesignF
   colourCode: '',
   colourHex,
   words,
-  parts: '',
+  parts,
   kind: '',
   repeatMm: 0,
 });
@@ -55,12 +62,15 @@ export function paintRun({
   slots,
   colorwayId,
   colorwayLabel,
+  partNames,
 }: {
   band: GetDesignBandResponse;
   plan: ColourPlanDoc | undefined;
   slots: readonly ClothSlot[] | undefined;
   colorwayId: number;
   colorwayLabel: string;
+  /** Label hex → part names painted with it on the saved maps (`PaintSession.partNames`). */
+  partNames?: ReadonlyMap<string, string>;
 }): PaintRun {
   if (!plan) return { kind: 'none' };
   const maps = sendableMaps(band, plan);
@@ -100,7 +110,7 @@ export function paintRun({
     }
     const row = plan.cloths.find((c) => c.hex === hex);
     if (row && row.assetId === 0 && row.colourHex) {
-      colourUses.push(colourUse(hex, row.colourHex, row.words));
+      colourUses.push(colourUse(hex, row.colourHex, row.words, partNames?.get(hex) ?? ''));
       continue;
     }
     return { kind: 'refuse', reason: 'a painted part lost its material · repaint it' };
@@ -125,7 +135,10 @@ export function paintRun({
     if (paintedSlots.length > 0) {
       for (const sl of paintedSlots)
         fabrics.push(
-          fabricUseOf(band, c.assetId, { parts: sl.name, mapHex: labelOf.get(sl.bomItemId) ?? '' }),
+          fabricUseOf(band, c.assetId, {
+            parts: partNames?.get(labelOf.get(sl.bomItemId) ?? '') || sl.name,
+            mapHex: labelOf.get(sl.bomItemId) ?? '',
+          }),
         );
     } else if (!remainder) {
       remainder = true;

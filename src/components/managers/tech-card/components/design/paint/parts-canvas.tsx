@@ -14,9 +14,17 @@ import Text from 'ui/components/text';
 
 import { GROUP_GAP } from '../core';
 import { viewLabel } from '../views';
-import { componentAt, polygonIndices } from './map-model';
+import {
+  inkField,
+  LiveWire,
+  magnetic,
+  releaseInk,
+  snapToInk,
+  type InkField,
+  type Pt,
+} from './livewire';
+import { componentAt, displayLabels, polygonIndices, underLines } from './map-model';
 import { partIndices } from './parts-model';
-import { dilate } from './regions';
 import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint';
 
 /**
@@ -27,7 +35,9 @@ import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint'
  *   click  fills the part under the pointer: the model's named part when the side has auto parts
  *          (and the same-named part on the other sides, R9), else the region between the lines;
  *          ⌥-click fills one region only (cuts a part)
- *   pen    a polygon of the armed material, clipped to the garment — closes open outlines
+ *   pen    a polygon of the armed material, clipped to the garment — closes open outlines; it is
+ *          magnetic: a vertex lands on a line within reach, and between two vertices on lines the
+ *          edge follows the drawing (straight across a gap and over paper); ⇧ = a straight edge
  *   erase  click back to paper
  * Keys: V / P / E, ⌘Z / ⇧⌘Z, Enter closes the pen, Esc drops it.
  */
@@ -40,6 +50,31 @@ const TOOLS: PaintTool[] = ['click', 'pen', 'erase'];
 const HOVER_ALPHA = 0.45;
 
 const mod = (n: number, m: number) => ((n % m) + m) % m;
+/** Under this cloth luminance the drawing turns light; the light line's grey. */
+const LINE_FLIP = 0.35;
+const LINE_LIGHT = 236;
+
+/** A material's mean luminance 0..1 (its tile, else its colour). */
+function luminance(skin: PaintSkin | undefined): number {
+  const tile = skin?.tile;
+  if (tile) {
+    let sum = 0;
+    const n = tile.width * tile.height;
+    for (let q = 0; q < n * 4; q += 4)
+      sum += 0.299 * tile.data[q] + 0.587 * tile.data[q + 1] + 0.114 * tile.data[q + 2];
+    return sum / n / 255;
+  }
+  const hex = skin?.hex || '#dddddd';
+  return (
+    (0.299 * parseInt(hex.slice(1, 3), 16) +
+      0.587 * parseInt(hex.slice(3, 5), 16) +
+      0.114 * parseInt(hex.slice(5, 7), 16)) /
+    255
+  );
+}
+/** The live preview's search time per frame, and the most a click may wait for its edge. */
+const WIRE_FRAME_MS = 6;
+const WIRE_COMMIT_MS = 30;
 
 /** Texture scale: a tile shows ≈ 1/6 of the side's height. */
 function sampler(skin: PaintSkin | undefined, h: number) {
@@ -77,7 +112,6 @@ function PaintSide({
   height: number;
 }): JSX.Element {
   const mock = useRef<HTMLCanvasElement>(null);
-  const ink = useRef<HTMLCanvasElement>(null);
   const hover = useRef<HTMLCanvasElement>(null);
   const hoverState = useRef<{
     idx: Int32Array | null;
@@ -96,68 +130,77 @@ function PaintSide({
     region: 0,
   });
   const [partName, setPartName] = useState('');
-  const [pen, setPen] = useState<{ x: number; y: number }[]>([]);
-  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+  /** The pen's vertices and the edge drawn through them so far (starts at the first vertex). */
+  const [pen, setPenState] = useState<{ anchors: Pt[]; ring: Pt[] }>({ anchors: [], ring: [] });
+  /** The edge from the last vertex to the cursor. */
+  const [preview, setPreview] = useState<Pt[]>([]);
+  /** Mirrors `pen` for the frame loop and key handlers (no stale closures). */
+  const penRef = useRef(pen);
+  const wire = useRef<{
+    live: LiveWire | null;
+    /** The cursor the frame loop chases. */
+    want: { raw: Pt; straight: boolean; scale: number } | null;
+    /** The preview on show, exactly as a click would commit it. */
+    shown: { from: Pt; target: Pt; path: Pt[] } | null;
+    frame: number;
+  }>({ live: null, want: null, shown: null, frame: 0 });
   const { flat, labels, pixels } = view;
   const w = flat?.w ?? 0;
   const h = flat?.h ?? 0;
   const ready = view.status === 'ready' && !!flat && !!labels && !!pixels;
   const tool = session.tool;
 
-  // The paper and the paint.
+  // The paper, the paint under the lines, and the drawing itself on top: multiplied over light
+  // cloth, drawn light over dark cloth — one line, no halo (R14). Display only: the map sent to
+  // the model keeps its labels and black ink.
   useEffect(() => {
     const c = mock.current;
-    if (!ready || !c || !labels || !pixels) return;
+    if (!ready || !c || !labels || !pixels || !flat) return;
     c.width = w;
     c.height = h;
     const ctx = c.getContext('2d');
     if (!ctx) return;
+    const shown = displayLabels(labels, underLines(flat));
     const out = new ImageData(new Uint8ClampedArray(pixels.data), w, h);
-    const samplers = new Map<number, ReturnType<typeof sampler>>();
-    for (let i = 0, p = 0; i < labels.length; i += 1, p += 4) {
-      const v = labels[i];
+    const d = out.data;
+    const looks = new Map<number, { s: ReturnType<typeof sampler>; dark: boolean }>();
+    const tmp = new Uint8ClampedArray(4);
+    for (let i = 0, p = 0; i < shown.length; i += 1, p += 4) {
+      // The flat's own pixel over white paper.
+      const a = d[p + 3] / 255;
+      const fr = d[p] * a + 255 * (1 - a);
+      const fg = d[p + 1] * a + 255 * (1 - a);
+      const fb = d[p + 2] * a + 255 * (1 - a);
+      d[p + 3] = 255;
+      const v = shown[i];
       if (!v) {
-        // Transparent paper is white paper.
-        const a = out.data[p + 3] / 255;
-        out.data[p] = out.data[p] * a + 255 * (1 - a);
-        out.data[p + 1] = out.data[p + 1] * a + 255 * (1 - a);
-        out.data[p + 2] = out.data[p + 2] * a + 255 * (1 - a);
-        out.data[p + 3] = 255;
+        d[p] = fr;
+        d[p + 1] = fg;
+        d[p + 2] = fb;
         continue;
       }
-      let s = samplers.get(v);
-      if (!s) {
-        s = sampler(session.skins.get(`#${v.toString(16).padStart(6, '0')}`), h);
-        samplers.set(v, s);
+      let look = looks.get(v);
+      if (!look) {
+        const skin = session.skins.get(`#${v.toString(16).padStart(6, '0')}`);
+        look = { s: sampler(skin, h), dark: luminance(skin) < LINE_FLIP };
+        looks.set(v, look);
       }
-      s(i % w, (i / w) | 0, out.data, p);
-      out.data[p + 3] = 255;
+      look.s(i % w, (i / w) | 0, tmp, 0);
+      if (look.dark) {
+        // How much line is in this pixel, drawn toward a light line.
+        const k = 1 - Math.min(fr, fg, fb) / 255;
+        d[p] = tmp[0] + (LINE_LIGHT - tmp[0]) * k;
+        d[p + 1] = tmp[1] + (LINE_LIGHT - tmp[1]) * k;
+        d[p + 2] = tmp[2] + (LINE_LIGHT - tmp[2]) * k;
+      } else {
+        d[p] = (tmp[0] * fr) / 255;
+        d[p + 1] = (tmp[1] * fg) / 255;
+        d[p + 2] = (tmp[2] * fb) / 255;
+      }
     }
     ctx.putImageData(out, 0, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, view.rev, w, h]);
-
-  // The drawing on top: black lines, white halo.
-  useEffect(() => {
-    const c = ink.current;
-    if (!ready || !c || !flat) return;
-    c.width = w;
-    c.height = h;
-    const ctx = c.getContext('2d');
-    if (!ctx) return;
-    const halo = dilate(flat.ink, w, h, Math.max(1, Math.round(h / SIDE_MIN)));
-    const out = ctx.createImageData(w, h);
-    for (let i = 0, p = 0; i < flat.ink.length; i += 1, p += 4) {
-      if (flat.ink[i]) out.data[p + 3] = 255;
-      else if (halo[i]) {
-        out.data[p] = 255;
-        out.data[p + 1] = 255;
-        out.data[p + 2] = 255;
-        out.data[p + 3] = 255;
-      }
-    }
-    ctx.putImageData(out, 0, 0);
-  }, [ready, flat, w, h]);
+  }, [ready, view.rev, w, h, flat]);
 
   const clearHover = () => {
     const c = hover.current;
@@ -274,17 +317,122 @@ function PaintSide({
     ctx.putImageData(out, x0, y0);
   };
 
-  const closePen = (pts = pen) => {
-    if (flat && pts.length >= 3)
+  /** The flat's ink cost field — built on first use, only for the side being drawn on. */
+  const fieldOf = (): InkField | null => (flat ? inkField(flat) : null);
+
+  /** The search from the last vertex toward `t` (re-made when another side took the workspace
+   *  or `t` left its corridor). */
+  const liveFrom = (f: InkField, last: Pt, t: Pt): LiveWire => {
+    const st = wire.current;
+    const live = st.live;
+    if (!live?.alive() || live.field !== f || live.from !== last || !live.covers(t))
+      st.live = new LiveWire(f, last, t);
+    return st.live!;
+  };
+
+  /** Stop the preview: no frame, no target, nothing shown. */
+  const stopPreview = () => {
+    const st = wire.current;
+    cancelAnimationFrame(st.frame);
+    st.frame = 0;
+    st.want = null;
+    st.shown = null;
+    setPreview([]);
+  };
+
+  const resetPen = () => {
+    stopPreview();
+    wire.current.live = null;
+    penRef.current = { anchors: [], ring: [] };
+    setPenState(penRef.current);
+  };
+
+  /** The vertex a click at `p` makes: on the line within reach, unless ⇧. */
+  const vertexAt = (p: Pt, straight: boolean): Pt => {
+    const f = straight ? null : fieldOf();
+    return f ? snapToInk(f, p) : p;
+  };
+
+  /**
+   * The edge a click commits from the last vertex to `b`: exactly the preview on show when it
+   * ends at `b`; else settled within WIRE_COMMIT_MS; else straight.
+   */
+  const commitEdge = (a: Pt, b: Pt, straight: boolean): Pt[] => {
+    const shown = wire.current.shown;
+    if (shown && shown.from === a && shown.target.x === b.x && shown.target.y === b.y)
+      return shown.path;
+    const f = straight ? null : fieldOf();
+    if (!f || !magnetic(f, a, b)) return [a, b];
+    const live = liveFrom(f, a, b);
+    if (!live.expand(b, performance.now() + WIRE_COMMIT_MS)) return [a, b];
+    const path = live.pathTo(b);
+    return path.length >= 2 ? path : [a, b];
+  };
+
+  const closePen = (straight = false) => {
+    const { anchors, ring } = penRef.current;
+    if (flat && anchors.length >= 3) {
+      const last = anchors[anchors.length - 1];
+      const pts = [...ring, ...commitEdge(last, anchors[0], straight).slice(1, -1)];
       session.apply(view.view, polygonIndices(pts, flat.silhouette, w, h));
-    setPen([]);
+    }
+    resetPen();
+  };
+
+  const addVertex = (raw: Pt, straight: boolean) => {
+    const { anchors, ring } = penRef.current;
+    const v = vertexAt(raw, straight);
+    const last = anchors[anchors.length - 1];
+    const seg = last ? commitEdge(last, v, straight).slice(1) : [v];
+    stopPreview();
+    wire.current.live = null;
+    penRef.current = { anchors: [...anchors, v], ring: [...ring, ...seg] };
+    setPenState(penRef.current);
+  };
+
+  /** ONE frame loop owns the search: each frame grows it for at most WIRE_FRAME_MS. */
+  const pump = () => {
+    const st = wire.current;
+    st.frame = 0;
+    const want = st.want;
+    const { anchors } = penRef.current;
+    const last = anchors[anchors.length - 1];
+    if (!want || !last) return;
+    const first = anchors[0];
+    // Near the first vertex the preview IS the closing edge.
+    const closing =
+      anchors.length >= 3 &&
+      Math.hypot(first.x - want.raw.x, first.y - want.raw.y) <= 8 * want.scale;
+    const target = closing ? first : vertexAt(want.raw, want.straight);
+    const f = want.straight ? null : fieldOf();
+    let path: Pt[] | null = null;
+    if (!f || !magnetic(f, last, target)) path = [last, target];
+    else {
+      const live = liveFrom(f, last, target);
+      if (live.expand(target, performance.now() + WIRE_FRAME_MS)) {
+        const p = live.pathTo(target);
+        path = p.length >= 2 ? p : [last, target];
+      }
+    }
+    if (path) {
+      st.shown = { from: last, target, path };
+      setPreview(path);
+      return;
+    }
+    // Not reached yet: straight meanwhile, keep growing next frame.
+    st.shown = null;
+    setPreview([last, target]);
+    st.frame = requestAnimationFrame(pump);
   };
 
   const onMove = (e: PointerEvent<HTMLDivElement>) => {
     if (!ready) return;
     const { x, y } = toRaster(e);
     if (tool === 'pen') {
-      setCursor({ x, y });
+      // Only the target moves here; the frame loop does the work.
+      const st = wire.current;
+      st.want = { raw: { x, y }, straight: e.shiftKey, scale: toRaster(e).scale };
+      if (penRef.current.anchors.length > 0 && !st.frame) st.frame = requestAnimationFrame(pump);
       return;
     }
     showHover(x, y, e.altKey);
@@ -297,18 +445,19 @@ function PaintSide({
     });
     const { x, y, scale } = toRaster(e);
     if (tool === 'pen') {
-      if (pen.length >= 3) {
-        const first = pen[0];
+      const n = penRef.current.anchors.length;
+      if (n >= 3) {
+        const first = penRef.current.anchors[0];
         if (Math.hypot(first.x - x, first.y - y) <= 8 * scale) {
-          closePen();
+          closePen(e.shiftKey);
           return;
         }
       }
-      if (e.detail >= 2 && pen.length >= 3) {
-        closePen();
+      if (e.detail >= 2 && n >= 3) {
+        closePen(e.shiftKey);
         return;
       }
-      setPen((p) => [...p, { x, y }]);
+      addVertex({ x, y }, e.shiftKey);
       return;
     }
     if (!labels || !flat) return;
@@ -336,19 +485,31 @@ function PaintSide({
     const onKey = (ev: Event) => {
       const k = (ev as CustomEvent<string>).detail;
       if (k === 'close') closePen();
-      if (k === 'cancel') setPen([]);
+      if (k === 'cancel') resetPen();
     };
     el.addEventListener('paint-pen', onKey);
     return () => el.removeEventListener('paint-pen', onKey);
   });
 
+  // Pen put away or the side's flat changed: drop the pen, its search and the ink field.
   useEffect(() => {
-    if (tool !== 'pen') setPen([]);
-  }, [tool]);
+    resetPen();
+    releaseInk();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, flat]);
+
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(wire.current.frame);
+      releaseInk();
+    },
+    [],
+  );
 
   const width = Math.round(height * (view.aspect || 0.6));
   const stroke = Math.max(1, h / height) * 1.5;
-  const tail = pen.length > 0 && cursor ? [...pen, cursor] : pen;
+  const tail = preview.length > 1 ? [...pen.ring, ...preview.slice(1)] : pen.ring;
+  const outline = tail.map((p) => `${p.x},${p.y}`).join(' ');
 
   return (
     <div
@@ -368,28 +529,34 @@ function PaintSide({
         onPointerDown={onDown}
         onPointerLeave={() => {
           clearHover();
-          setCursor(null);
+          stopPreview();
         }}
       >
         <canvas ref={mock} className='absolute inset-0 size-full' />
         <canvas ref={hover} className='pointer-events-none absolute inset-0 size-full' />
-        <canvas ref={ink} className='pointer-events-none absolute inset-0 size-full' />
         {tail.length > 0 && w > 0 && (
           <svg
             className='pointer-events-none absolute inset-0 size-full'
             viewBox={`0 0 ${w} ${h}`}
             preserveAspectRatio='none'
-            data-paint-pen={pen.length}
+            data-paint-pen={pen.anchors.length}
           >
+            {/* White under the dashes: an edge riding on a black line stays readable. */}
             <polygon
-              points={tail.map((p) => `${p.x},${p.y}`).join(' ')}
+              points={outline}
               fill={session.skins.get(session.armed)?.hex ?? '#000'}
               fillOpacity={0.3}
+              stroke='#fff'
+              strokeWidth={stroke}
+            />
+            <polygon
+              points={outline}
+              fill='none'
               stroke='#000'
               strokeWidth={stroke}
               strokeDasharray={`${stroke * 3} ${stroke * 2}`}
             />
-            {pen.map((p, i) => (
+            {pen.anchors.map((p, i) => (
               <rect
                 key={i}
                 x={p.x - stroke * 2}
@@ -439,6 +606,7 @@ export function PartsCanvas({
 }): JSX.Element | null {
   const views = [...session.views.values()];
   const row = useRef<HTMLDivElement>(null);
+  const block = useRef<HTMLDivElement>(null);
   const [rowWidth, setRowWidth] = useState(0);
   useEffect(() => {
     const el = row.current;
@@ -513,11 +681,23 @@ export function PartsCanvas({
       >
         undo
       </Chip>
+      <Chip
+        onClick={() => {
+          // The chip disables itself: keep ⌘Z on the block.
+          block.current?.focus({ preventScroll: true });
+          session.clear();
+        }}
+        disabled={disabled || !session.anyPaint()}
+        title='clear every side'
+        data-paint-clear=''
+      >
+        clear
+      </Chip>
     </span>
   );
 
   return (
-    <div data-paint-parts='' tabIndex={-1} onKeyDown={onKey} className='outline-none'>
+    <div ref={block} data-paint-parts='' tabIndex={-1} onKeyDown={onKey} className='outline-none'>
       <GroupLabel flush className={GROUP_GAP} action={tools}>
         parts
       </GroupLabel>

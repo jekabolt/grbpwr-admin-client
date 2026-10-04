@@ -14,6 +14,7 @@
  * Gestures return a DIFF (indices + what stood there) so undo is exact and cheap.
  */
 import { isMapInk, planHex, type PlanSwatch } from '../colour-plan/model';
+import { distanceTransform, type FlatRegions } from './regions';
 
 export const PAINT_SIDE_MAX = 1600;
 
@@ -316,4 +317,52 @@ export function labelsFromMap(
 export function paintSize(w: number, h: number): { w: number; h: number } {
   const s = Math.min(1, PAINT_SIDE_MAX / Math.max(1, w, h));
   return { w: Math.max(1, Math.round(w * s)), h: Math.max(1, Math.round(h * s)) };
+}
+
+/* ─────────────────────────── the canvas look (display only) ─────────────────────────── */
+
+/**
+ * The pixels UNDER the drawing: inside the silhouette and in no region (the ink, its edges,
+ * specks), each with the nearest pixel that is in a region or outside — so a painted part's
+ * colour runs under its own lines and stops at the line's middle (cached per flat).
+ */
+const UNDER = new WeakMap<Int32Array, { idx: Int32Array; near: Int32Array }>();
+export function underLines(flat: Pick<FlatRegions, 'labels' | 'silhouette' | 'w' | 'h'>): {
+  idx: Int32Array;
+  near: Int32Array;
+} {
+  const hit = UNDER.get(flat.labels);
+  if (hit) return hit;
+  const n = flat.w * flat.h;
+  const seed = new Uint8Array(n);
+  let count = 0;
+  for (let i = 0; i < n; i += 1) {
+    if (flat.silhouette[i] && !flat.labels[i]) count += 1;
+    else seed[i] = 1;
+  }
+  const { nearest } = distanceTransform(seed, flat.w, flat.h);
+  const idx = new Int32Array(count);
+  const near = new Int32Array(count);
+  for (let i = 0, k = 0; i < n; i += 1)
+    if (!seed[i]) {
+      idx[k] = i;
+      near[k] = nearest[i] < 0 ? i : nearest[i];
+      k += 1;
+    }
+  const out = { idx, near };
+  UNDER.set(flat.labels, out);
+  return out;
+}
+
+/** The labels as the canvas shows them: every unpainted pixel under a line takes its neighbour's. */
+export function displayLabels(
+  labels: Uint32Array,
+  under: { idx: Int32Array; near: Int32Array },
+): Uint32Array {
+  const out = labels.slice();
+  for (let k = 0; k < under.idx.length; k += 1) {
+    const i = under.idx[k];
+    if (!out[i]) out[i] = labels[under.near[k]];
+  }
+  return out;
 }

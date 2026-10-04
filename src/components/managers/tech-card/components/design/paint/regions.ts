@@ -7,7 +7,10 @@
  *   silhouette everything the outside flood cannot reach through the ink dilated by `rs`.
  *   regions    the free space between lines after closing gaps of radius `r`; the background
  *              (touching the sheet edge) and specks under 0.05 % of the sheet are dropped; then
- *              every free pixel inside the silhouette is given back to its nearest region.
+ *              every free pixel inside the silhouette is given back to its nearest region; then a
+ *              CHANNEL (long, max inscribed radius ≤ 6 px on a 1024 sheet — the strip between a
+ *              seam and its topstitching) joins the neighbour it shares the longest border with,
+ *              across the line (v2).
  *
  * Radii are measured on a 1024 sheet (Ф0: r = 3 closes gaps without eating thin parts) and scale
  * with the long side, never below 3.
@@ -29,7 +32,7 @@ export type FlatRegions = {
  * The cutter's revision: the numbers of the regions (and so a cached auto-parts answer) hold only
  * for the same algorithm on the same flat. Bump on ANY change to how `analyseFlat` numbers regions.
  */
-export const REGIONS_ALGO_REV = 'regions.v1';
+export const REGIONS_ALGO_REV = 'regions.v2';
 
 const INF = 1e20;
 
@@ -240,6 +243,130 @@ function components(free: Uint8Array, w: number, h: number): { lab: Int32Array; 
   return { lab, n };
 }
 
+/**
+ * A CHANNEL, not a part: no wider than twice this (1024 sheet, measured after the strip the
+ * closing ate is given back) and long — area ≥ ELONGATED × radius² (a button, a round, is π r²).
+ */
+const THIN_AT_1024 = 6;
+const ELONGATED = 24;
+
+/**
+ * Merge every thin region (max inscribed radius ≤ `thin`) into the region it borders most —
+ * looking across the line up to `reach` px in the four directions from each of its pixels.
+ * Iterates until stable; a region with no neighbour stays (never merged into the background).
+ */
+function mergeThin(
+  lab: Int32Array,
+  w: number,
+  h: number,
+  total: number,
+  thin: number,
+  reach: number,
+): void {
+  const n = w * h;
+  for (let round = 0; round < 4; round += 1) {
+    // Distance to the nearest pixel that is not of the same region (an edge or a line).
+    const edge = new Uint8Array(n);
+    for (let i = 0; i < n; i += 1) {
+      const id = lab[i];
+      if (!id) {
+        edge[i] = 1;
+        continue;
+      }
+      const x = i % w;
+      if (
+        (x > 0 && lab[i - 1] !== id) ||
+        (x < w - 1 && lab[i + 1] !== id) ||
+        (i >= w && lab[i - w] !== id) ||
+        (i + w < n && lab[i + w] !== id)
+      )
+        edge[i] = 1;
+    }
+    const { d2 } = distanceTransform(edge, w, h);
+    const radius = new Float64Array(total + 1);
+    const area = new Int32Array(total + 1);
+    for (let i = 0; i < n; i += 1) {
+      const id = lab[i];
+      if (!id) continue;
+      area[id] += 1;
+      // An edge pixel is itself at 0: its own radius counts ½ px.
+      const d = Math.sqrt(d2[i]) + 0.5;
+      if (d > radius[id]) radius[id] = d;
+    }
+    const isThin = new Uint8Array(total + 1);
+    let any = false;
+    for (let id = 1; id <= total; id += 1)
+      if (area[id] > 0 && radius[id] <= thin && area[id] >= ELONGATED * radius[id] * radius[id]) {
+        isThin[id] = 1;
+        any = true;
+      }
+    if (!any) return;
+    // Votes: from each thin pixel, the first other region met in each direction within reach.
+    const votes = new Map<number, Map<number, number>>();
+    const DX = [1, -1, 0, 0];
+    const DY = [0, 0, 1, -1];
+    for (let i = 0; i < n; i += 1) {
+      const id = lab[i];
+      if (!id || !isThin[id]) continue;
+      const x = i % w;
+      const y = (i - x) / w;
+      for (let k = 0; k < 4; k += 1) {
+        for (let s = 1; s <= reach; s += 1) {
+          const xx = x + DX[k] * s;
+          const yy = y + DY[k] * s;
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h) break;
+          const o = lab[yy * w + xx];
+          if (o === id) break;
+          if (!o) continue;
+          let m = votes.get(id);
+          if (!m) votes.set(id, (m = new Map()));
+          m.set(o, (m.get(o) ?? 0) + 1);
+          break;
+        }
+      }
+    }
+    // Each thin region into its strongest neighbour; prefer a neighbour that is not thin itself.
+    const into = new Int32Array(total + 1);
+    let merged = false;
+    for (const [id, m] of votes) {
+      let best = 0;
+      let score = -1;
+      for (const [o, c] of m) {
+        const sc = c * (isThin[o] ? 1 : 4);
+        if (sc > score || (sc === score && o < best)) {
+          score = sc;
+          best = o;
+        }
+      }
+      if (best) {
+        into[id] = best;
+        merged = true;
+      }
+    }
+    if (!merged) return;
+    // Resolve chains (a → b → c), never a cycle back to itself.
+    const root = (id: number): number => {
+      let r = id;
+      for (let k = 0; k < total && into[r]; k += 1) {
+        if (into[r] === id) return id;
+        r = into[r];
+      }
+      return r;
+    };
+    const to = new Int32Array(total + 1);
+    for (let id = 1; id <= total; id += 1) to[id] = into[id] ? root(id) : id;
+    let changed = false;
+    for (let i = 0; i < n; i += 1) {
+      const id = lab[i];
+      if (id && to[id] !== id) {
+        lab[i] = to[id];
+        changed = true;
+      }
+    }
+    if (!changed) return;
+  }
+}
+
 /** Regions between the lines after closing gaps of radius r. */
 export function regionsOf(
   ink: Uint8Array,
@@ -289,6 +416,8 @@ export function regionsOf(
       }
     }
   }
+
+  mergeThin(lab, w, h, total, (THIN_AT_1024 * Math.max(w, h)) / 1024, 2 * r + 2);
 
   // Compact ids in first-seen order.
   const map = new Int32Array(total + 1);
