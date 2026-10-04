@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
+import { PLACEHOLDER_SURFACE } from 'ui/components/placeholder';
 import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
 import {
@@ -258,6 +259,7 @@ export function PantonePicker({
   previewHex,
   freeText = false,
   fill = false,
+  tile = false,
 }: {
   value?: string;
   /** '' clears. */
@@ -289,6 +291,8 @@ export function PantonePicker({
    * (ряды палитры): триггер по содержимому давал бы рваный край, и соседняя колонка hex гуляла бы.
    */
   fill?: boolean;
+  /** Large square swatch with its code below, for equal-size visual input strips. */
+  tile?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -400,36 +404,66 @@ export function PantonePicker({
       // The probe anchor rides on the trigger as a data attribute; Radix's prop type lists no
       // `data-*`, so it goes in through a spread rather than a literal key the checker can refuse.
       triggerProps={{
-        className: fill ? 'flex w-full min-w-0 items-center' : 'flex items-center',
+        className: fill || tile ? 'flex w-full min-w-0 items-center' : 'flex items-center',
         disabled,
         ...({ 'data-pantone-picker': name } as Record<string, string>),
       }}
       className='w-[420px] max-w-[calc(100vw-1.5rem)]'
       openElement={
-        <span
-          className={`inline-flex min-h-[22px] items-center gap-1.5 border border-borderColor bg-bgColor px-[7px] py-[3px] text-left ${
-            fill ? 'w-full min-w-0' : ''
-          } ${disabled ? 'text-textInactiveColor' : 'hover:border-textColor'}`}
-        >
-          {(current || previewHex) && (
+        tile ? (
+          <span className='flex w-full min-w-0 flex-col gap-1 text-left'>
             <span
               aria-hidden
-              className='size-3 shrink-0 border border-borderColor'
-              style={{ background: current?.hex ?? previewHex }}
-            />
-          )}
-          <Text
-            component='span'
-            size='micro'
-            variant={value ? 'default' : 'label'}
-            className={fill ? 'min-w-0 flex-1 truncate uppercase' : 'uppercase'}
+              className={`flex aspect-square w-full items-center justify-center border border-borderColor ${
+                disabled ? 'opacity-50' : 'hover:border-textColor'
+              }`}
+              style={
+                current?.hex || previewHex
+                  ? { background: current?.hex ?? previewHex }
+                  : PLACEHOLDER_SURFACE
+              }
+            >
+              {!current?.hex && !previewHex && (
+                <Text size='micro' variant='label' component='span' className='uppercase'>
+                  + colour
+                </Text>
+              )}
+            </span>
+            <Text
+              component='span'
+              size='micro'
+              variant={disabled ? 'inactive' : value ? 'default' : 'label'}
+              className='w-full truncate uppercase'
+            >
+              {value?.trim() || label}
+            </Text>
+          </span>
+        ) : (
+          <span
+            className={`inline-flex min-h-[22px] items-center gap-1.5 border border-borderColor bg-bgColor px-[7px] py-[3px] text-left ${
+              fill ? 'w-full min-w-0' : ''
+            } ${disabled ? 'text-textInactiveColor' : 'hover:border-textColor'}`}
           >
-            {value?.trim() || label}
-          </Text>
-          <Text size='micro' variant='label' component='span' aria-hidden>
-            ▾
-          </Text>
-        </span>
+            {(current || previewHex) && (
+              <span
+                aria-hidden
+                className='size-3 shrink-0 border border-borderColor'
+                style={{ background: current?.hex ?? previewHex }}
+              />
+            )}
+            <Text
+              component='span'
+              size='micro'
+              variant={value ? 'default' : 'label'}
+              className={fill ? 'min-w-0 flex-1 truncate uppercase' : 'uppercase'}
+            >
+              {value?.trim() || label}
+            </Text>
+            <Text size='micro' variant='label' component='span' aria-hidden>
+              ▾
+            </Text>
+          </span>
+        )
       }
     >
       {/* ПОТОЛОК БЕРЁТСЯ У ПОПОВЕРА, А НЕ НАЗНАЧАЕТСЯ ЗАНОВО. `--popover-body-max` — то самое

@@ -315,7 +315,7 @@ function ClothIntake({
               {
                 label: 'pattern ▸',
                 onClick: onMakePattern,
-                title: 'go to STUDIO → FABRICS AND HARDWARE: a fabric per slot of each colourway',
+                title: 'go to STUDIO → MATERIALS: a fabric per slot of each colourway',
               },
             ]
           : undefined

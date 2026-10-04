@@ -1,12 +1,13 @@
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
 import { useCallback, useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
+import { GroupLabel } from 'ui/components/group-label';
 import { Section } from 'ui/components/section';
 import { HeaderNote } from 'ui/components/section-header';
 
 import { colourPlanGate, planRecipe } from '../colour-plan/model';
-import { ColorwaySelect } from '../colorway-picker';
 import { ColourwayCreatePopover } from '../colourway-create';
+import { ColourwayStrip } from '../colourway-strip';
 import { useColourPlan } from '../colour-plan/use-colour-plan';
 import { GROUP_SEAM } from '../core';
 import { Workbench } from '../generation/studio';
@@ -73,14 +74,13 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * «what the model gets»: the inventory must name EVERYTHING that travels.
  *
  * ═══ THE COLOURWAY IS ONE NUMBER FOR THE WHOLE STUDIO, AND IT IS CHOSEN HERE (D2, G2-3) ════════
- * ОДНО СОСТОЯНИЕ (`useColorwayChoice` у композитора) — но ОРГАН его стоит на этом экране, в ряду
- * GENERATE: `for: [sample ▾]`. Круг раньше он стоял на рельсе шагов, и довод был про место; он не
- * учёл того, что этот выбор РЕШАЕТ: `colorway_id` прогона неизменяем, значит цель — часть покупки.
+ * ОДНО СОСТОЯНИЕ (`useColorwayChoice` у композитора), показанное общей плиточной полосой над
+ * рецептом. Выбор РЕШАЕТ: `colorway_id` прогона неизменяем, значит цель — часть покупки.
  * Верстак рендеров ПИШЕТ этот экран (SIDES снимает, `mark ▸` кладёт), ЧИТАЕТ 3D, СОБИРАЕТ сервер
  * (`designSelectBench`) — второй владелец числа заставил бы 3D смотреть в один верстак, пока
  * рендер наполняет другой.
  *
- * ⚠ `for:` ПРЕДЛАГАЕТ РОВНО СТОЛБЦЫ SIDES (O-57). Таблица рисует столбец `sample`, только пока у
+ * ⚠ РАБОЧАЯ ЦЕЛЬ СОВПАДАЕТ СО СТОЛБЦАМИ SIDES (O-57). Таблица рисует столбец `sample`, пока у
  * карточки нет ни одного колорвея (архивные тоже считаются, D-56″), и экран работает там, где
  * столбец виден: сохранённая цель без столбца (`sample` у карточки с колорвеями, списанный пустой
  * колорвей) читается ПЕРВЫМ столбцом. Столбца нет ни одного (одни архивные без плит) — цели нет,
@@ -89,9 +89,9 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  * `./side-row`).
  *
  * ⚠ РЕМОУНТА ПО `key={colorwayId}` БОЛЬШЕ НЕТ, И ОН БЫЛ БЫ ТЕПЕРЬ ПРЯМЫМ ДЕФЕКТОМ: экран,
- * ремоунтящий сам себя на смене цели, закрывал бы собственный список прямо под пальцем. Пересев
- * цветной половины рецепта переехал внутрь `useColourDraft` — ткань и слова там остаются, потому
- * что ткань есть свойство изделия, а цвет — колорвея (D6).
+ * ремоунтящий сам себя на смене цели, закрывал бы собственную полосу прямо под пальцем. Пересев
+ * цвета и привязанных тканей живёт внутри `useColourDraft`; ручные ткани сохраняются по его
+ * правилам происхождения.
  */
 export function RenderStudio({
   band,
@@ -116,7 +116,7 @@ export function RenderStudio({
    * Список колорвеев карточки и ТОТ ЖЕ САМЫЙ сеттер, которым пользуются чипы on-model. Второго
    * состояния не заводится: верстак рендеров ПИШЕТ этот экран, ЧИТАЕТ 3D, а СЕРВЕР по нему
    * собирает — заведи второго владельца, и полоса входа 3D показывала бы ROSSO, пока прогон
-   * уезжает за OLIVE. Не задан `onColorwayChange` — селекта нет вовсе (композитор без оси).
+   * уезжает за OLIVE. Не задан `onColorwayChange` — полосы нет вовсе (композитор без оси).
    */
   colorways?: common_AdminColorwayRef[];
   onColorwayChange?: (id: number) => void;
@@ -201,7 +201,7 @@ export function RenderStudio({
   /**
    * ═══ РОЖДЕНИЕ КОЛОРВЕЯ — ОДНО ОКНО НА ЭКРАН, СКОЛЬКО БЫ ДВЕРЕЙ К НЕМУ НИ ВЕЛО (G2-4) ═════════
    *
-   * Дверей три: пункт `+ colourway…` в селекте цели, заголовок-плейсхолдер столбца в SIDES и цель
+   * Дверей три: плитка `new colourway`, заголовок-плейсхолдер столбца в SIDES и цель
    * `mark ▸` / `apply splitted` в блоке рендеров. Окно одно — иначе три копии формы разошлись бы в
    * проверке имени и в подборе словарного цвета, и разошлись бы молча.
    *
@@ -438,8 +438,8 @@ export function RenderStudio({
   return (
     <RenderStepScope step={renderStep}>
       <Section
-        /* THE ANCHOR OF THE STEP'S ONE BLOCK: statements of absence («no colourway picker in this
-           block», E-16) and of belonging («the cloth grid lives HERE», E-7) are made about it. */
+        /* THE ANCHOR OF THE STEP'S ONE BLOCK: the shared colourway strip and cloth grid both live
+           here; the recipe menu below does not grow a second colourway control. */
         id='design-render-bench'
         title='fabric render'
         question='· the cloth on the flats'
@@ -450,6 +450,22 @@ export function RenderStudio({
            держит `GROUP_GAP` на самих линейках (`./palette`). */
         className={GROUP_SEAM}
       >
+        {onColorwayChange && (
+          <div data-render-colourways=''>
+            <GroupLabel flush>colourway</GroupLabel>
+            <div className='pt-1.5'>
+              <ColourwayStrip
+                colorways={cardColorways ?? colorways}
+                selectedId={storedColorwayId}
+                onSelect={onColorwayChange}
+                onCreate={() => openCreate()}
+                disabled={disabled}
+                loading={cardColorways === undefined && colorways.length === 0}
+              />
+            </div>
+          </div>
+        )}
+
         {/* ═══ CLOTH AND COLOUR · CLOTH IS · IN WORDS — the recipe, three group rows. The palette
             owns them because they write one draft (`useColourDraft`) and the gate above reads
             the same one. ⚠ THE ANCHOR `#design-fabric-menu` STAYS ON THE GRID: E-7 («no cloth
@@ -477,41 +493,12 @@ export function RenderStudio({
             the last refusal of the server verbatim, then GENERATE · WHAT THE MODEL GETS ▸ · money. */}
         {!gate.ok && <LockBar reason={`locked · ${gate.reason}`}>{lockDoors}</LockBar>}
         <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
-        {/* ═══ ДЛЯ КОГО ЭТОТ ПРОГОН — В ОДНОМ РЯДУ С ДЕНЬГАМИ (D2, G2-3) ═══════════════════════
-            `colorway_id` прогона НЕИЗМЕНЯЕМ: лист, купленный не под тем именем, останется в
-            истории чужим навсегда. Поэтому цель называется у самой кнопки, а не на рельсе шагов,
-            где она стояла кругом раньше (`chain-rail.tsx` слота `action` больше не имеет). Пункт
-            `+ colourway…` — та же дверь, что и заголовок столбца в SIDES: одно окно, три двери. */}
         <GenerateRow
           gate={gate}
           pending={run.isPending || briefing}
           disabled={disabled}
           onGenerate={generate}
           onInspect={() => setInspecting(true)}
-          trailing={
-            onColorwayChange ? (
-              <ColorwaySelect
-                band={band}
-                label='for'
-                probe='design-render-target'
-                disabled={disabled}
-                onCreate={() => openCreate()}
-                /* O-57: пункты — РОВНО столбцы SIDES, и цель экрана всегда среди них. D-56″: столбца
-                   нет ни одного — на лице слово об этом, а пункт один, `+ colourway…`. */
-                only={target.drawn}
-                unmatched={target.nowhere ? 'no live colourway' : undefined}
-                choice={{
-                  colorwayId,
-                  setColorwayId: onColorwayChange,
-                  colorways,
-                  current: colorwayRef,
-                  label: colorwayLabel,
-                  archived: colorwayArchived,
-                  loading: false,
-                }}
-              />
-            ) : null
-          }
         />
       </Section>
 
@@ -561,7 +548,7 @@ export function RenderStudio({
       />
 
       {/* ОДНО ОКНО РОЖДЕНИЯ НА ВЕСЬ ЭКРАН. Оно не носит `anchor`: двери держат `open` сами —
-          пункт селекта, заголовок столбца, цель разреза. После успеха цель прогона переключается
+          плитка полосы, заголовок столбца, цель разреза. После успеха цель прогона переключается
           на новый колорвей, и продолжение жеста (если оно было) доигрывается уже в его столбце. */}
       <ColourwayCreatePopover
         techCardId={techCardId}

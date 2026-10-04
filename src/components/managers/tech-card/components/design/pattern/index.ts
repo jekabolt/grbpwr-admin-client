@@ -1,5 +1,5 @@
 /**
- * STEP 3 · FABRICS AND HARDWARE (`fabrics-hardware.tsx`) and the slot / binding model it shares
+ * STEP 3 · MATERIALS (`fabrics-hardware.tsx`) and the slot / binding model it shares
  * with FABRIC RENDER (`slot-fabrics.ts`). `patternOutputs` and friends stay exported for ARTIFACTS.
  */
 export { FabricsHardware, type FabricsHardwareProps } from './fabrics-hardware';

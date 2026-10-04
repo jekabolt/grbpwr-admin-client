@@ -186,7 +186,7 @@ export function StudioTab({
      расхода или строки ниток. Форма здесь только ЧИТАЕТСЯ: писатель `bomItems` — корневой
      `setValue`, и `useFieldArray` над ним один (вкладка BOM). */
   const cloth = useWatch({ control, name: 'bomItems', compute: (lines) => clothSlots(lines) });
-  // STEP 3 · FABRICS AND HARDWARE: every saved BOM line except threads.
+  // STEP 3 · MATERIALS: every saved BOM line except threads.
   const materials = useWatch({
     control,
     name: 'bomItems',
@@ -397,12 +397,9 @@ export function StudioTab({
      Drawn before the band is read and before the card exists: while the band loads every
      band-derived state is «unknown» (`bandless`), never «locked», and the cells still navigate.
 
-     ⚠ СЕЛЕКТА КОЛОРВЕЯ ЗДЕСЬ БОЛЬШЕ НЕТ (G2-2). Он стоял в слоте `action` — «чей это рендер», —
-     и уехал ТУДА, ГДЕ ЭТОТ ВЫБОР ТРАТИТ ДЕНЬГИ: `for:` в ряду GENERATE — и фабрик-рендера, и 3D,
-     — чипы PAINT на on-model. Довод целиком — в шапке `ChainRail` и у самого
-     `ColorwaySelect`; коротко: `colorway_id` прогона неизменяем, и цель обязана называться у
-     кнопки, которая её замораживает, а не в ряду «где я нахожусь». Состояние по-прежнему ОДНО
-     (`useColorwayChoice` выше) и раздаётся вниз пропами. */
+     ⚠ СЕЛЕКТА КОЛОРВЕЯ ЗДЕСЬ БОЛЬШЕ НЕТ (G2-2). Ось показывают общие плиточные полосы MATERIALS
+     и FABRIC RENDER, селект в ряду GENERATE у 3D и чипы PAINT on-model. Состояние по-прежнему
+     ОДНО (`useColorwayChoice` выше) и раздаётся вниз пропами. */
   const rail = <ChainRail ctx={ctx} onStepChange={goStep} />;
 
   /* ═══ ONE RETURN, ONE STACK: `SectionStack > [rail, screen]` ═══════════════════════════════════
@@ -549,31 +546,30 @@ export function StudioTab({
                         />
                       </>
                     )}
-                    {/* ═══ STEP 3 · FABRICS AND HARDWARE — colourways chip row (the studio's one
-                        colourway axis) + the material bench. Polls its own runs. */}
+                    {/* ═══ STEP 3 · MATERIALS — the studio's shared colourway strip, then the
+                        material cells and their generate panel. Polls its own runs. */}
                     {step === 'pattern' && (
                       <FabricsHardware
                         band={band}
                         techCardId={techCardId}
                         disabled={readOnly || !canWriteCard}
-                        colorways={colorway.colorways}
+                        colorways={colorway.cardColorways ?? colorway.colorways}
                         colorwayId={colorway.colorwayId}
                         onColorwayChange={colorway.setColorwayId}
                         slots={materials.slots}
-                        onGoTab={isAux ? undefined : (tab) => navTo(tab)}
                         onGoStep={goStep}
+                        loading={colorway.loading}
                       />
                     )}
                     {/* ═══ STEP 4 · FABRIC RENDER.
 
                         ⚠ `key={colorway.colorwayId}` СНЯТ (G2-3), И ЭТО ОБЯЗАТЕЛЬНО, А НЕ УБОРКА.
                         Ремоунт стоял ради одного: `useColourDraft` засевает рецепт ОДИН РАЗ ЗА
-                        МОНТИРОВАНИЕ, и «однажды» ≠ «заново на смене цвета». Теперь селект цели
+                        МОНТИРОВАНИЕ, и «однажды» ≠ «заново на смене цвета». Теперь полоса цели
                         живёт ВНУТРИ этого экрана — компонент не может ремоунтить сам себя, не
-                        уничтожив состояние собственного органа выбора (список закрылся бы прямо
-                        под пальцем). Второе правило переехало туда, где ему место: `useColourDraft`
-                        на смене цели переселяет ТОЛЬКО цветную половину (hex/code), а ткань и слова
-                        остаются — ткань есть свойство изделия, цвет есть свойство колорвея.
+                        уничтожив состояние собственного органа выбора. Второе правило живёт у
+                        `useColourDraft`: на смене цели он переселяет цвет и ткани из привязок
+                        новой цели, не теряя ручной выбор по правилам происхождения.
                         `colorwayArchived` — ЕДИНСТВЕННЫЙ предикат архива студии
                         (`useColorwayChoice`), поэтому подсказка и отказ не могут разойтись. */}
                     {step === 'render' && (
@@ -588,8 +584,8 @@ export function StudioTab({
                           colorwayLabel={colorway.label}
                           colorwayArchived={colorway.archived}
                           /* ЦЕЛЬ ВЫБИРАЮТ ЗДЕСЬ, НО ВЛАДЕЕТ ЕЮ КОМПОЗИТОР: вниз едет список
-                             колорвеев карточки и ТОТ ЖЕ САМЫЙ сеттер, которым пользуются чипы
-                             on-model. Второго состояния не заводится ни на одном экране. */
+                             колорвеев карточки и ТОТ ЖЕ САМЫЙ сеттер, которым пользуется полоса
+                             MATERIALS. Второго состояния не заводится ни на одном экране. */
                           colorways={colorway.colorways}
                           onColorwayChange={colorway.setColorwayId}
                           /* O-57 r4: СЫРОЙ список колорвеев карточки, архивные без плит тоже, —

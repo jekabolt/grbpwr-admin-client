@@ -778,7 +778,7 @@ export function renderGroups(
 ): RenderGroup[] {
   const byColorway = new Map<number, DocumentPlate[]>();
   for (const plate of plates) {
-    const id = plate.benchKind === 'render' ? (plate.colorwayId ?? 0) : RENDER_GROUP_LOOSE;
+    const id = plate.benchKind === 'render' ? plate.colorwayId ?? 0 : RENDER_GROUP_LOOSE;
     const list = byColorway.get(id);
     if (list) list.push(plate);
     else byColorway.set(id, [plate]);
@@ -874,7 +874,8 @@ export function sideCells(
   };
   for (const side of sides) {
     const inSlot = side.picture?.media?.id ?? 0;
-    const bySlot = inSlot > 0 ? plates.find((p) => p.mediaId === inSlot && !used.has(p.mediaId)) : undefined;
+    const bySlot =
+      inSlot > 0 ? plates.find((p) => p.mediaId === inSlot && !used.has(p.mediaId)) : undefined;
     const byCard =
       bySlot ??
       plates.find(
@@ -1225,7 +1226,13 @@ export function ArtifactsPanel({
     // сохранено», и без неё новая плита рождалась бы пустой, как рождалась взятая.
     for (const item of picked) if (item.id != null) map.set(item.id, item);
     return map;
-  }, [card?.resolvedTechnicalMedia, techCard?.resolvedTechnicalMedia, band.runs, band.bench, picked]);
+  }, [
+    card?.resolvedTechnicalMedia,
+    techCard?.resolvedTechnicalMedia,
+    band.runs,
+    band.bench,
+    picked,
+  ]);
 
   const plates = useMemo(
     () => documentPlates(technicalMedia, resolved, bench),
@@ -1411,9 +1418,7 @@ export function ArtifactsPanel({
     let renderAt = 0;
     const renderGrouped = renderGroups(renderAll, colourways, dictionary?.colors).map((group) => ({
       ...group,
-      cells: group.plates.map(
-        (plate): SheetCell => ({ type: 'plate', plate, index: renderAt++ }),
-      ),
+      cells: group.plates.map((plate): SheetCell => ({ type: 'plate', plate, index: renderAt++ })),
     }));
     const renderPlates = renderGrouped.flatMap((group) => group.plates);
 
@@ -1929,7 +1934,7 @@ export function ArtifactsPanel({
     // Витринный флэт (`run` в сегменте флэтов) — DETAIL: рендером он не является.
     const mediaKind: common_TechCardMediaKind =
       plate.origin === 'bench' && plate.benchKind !== 'render'
-        ? (BENCH_VIEW_MEDIA_KIND[(plate.viewKey ?? '').trim()] ?? 'TECH_CARD_MEDIA_KIND_DETAIL')
+        ? BENCH_VIEW_MEDIA_KIND[(plate.viewKey ?? '').trim()] ?? 'TECH_CARD_MEDIA_KIND_DETAIL'
         : kind === 'flat'
           ? 'TECH_CARD_MEDIA_KIND_DETAIL'
           : 'TECH_CARD_MEDIA_KIND_RENDER';
@@ -2370,7 +2375,7 @@ export function ArtifactsPanel({
                          прозой была бы второй дверью в ту же комнату. */
                       'no renders marked yet — mark them in STUDIO › FABRIC RENDER › SIDES'
                     : kind === 'pattern'
-                      ? 'no tile of this card yet. Fabrics are made on STUDIO → FABRICS AND HARDWARE; they are listed here — or put your own file into the slot below.'
+                      ? 'no tile of this card yet. Fabrics are made on STUDIO → MATERIALS; they are listed here — or put your own file into the slot below.'
                       : kind === 'onmodel'
                         ? 'no on-model picture of this card yet. STUDIO → ON MODEL re-dresses a photograph of a person in this garment; the ones you mark as chosen there are listed here.'
                         : 'no 3D of this card yet. A model is built on STUDIO from the renders standing in the sides — or put your own file into the slot below.'}
@@ -2583,8 +2588,8 @@ export function ArtifactsPanel({
               own picture.
             </Text>
             <Text size='micro' component='p'>
-              They are removed with it. Nothing is kept as an «unpinned» line beside the sheet:
-              a number without a picture cannot be read back onto a garment, and a list of such
+              They are removed with it. Nothing is kept as an «unpinned» line beside the sheet: a
+              number without a picture cannot be read back onto a garment, and a list of such
               numbers grows until nobody trusts any of it.
             </Text>
           </div>
@@ -3103,7 +3108,7 @@ export function PlateGrid({
                целиком. Остальные плиты несут дверь верстака, как несли; карточная плита
                рендер-верстака свою дверь не теряет — та переезжает на обёртку кадра ниже. */
             data-field={sheet?.path ?? plate.door}
-/* ЯКОРЬ ДЛЯ ПРОБ, ПАРНЫЙ К `data-annot-frame`: тот метит КАДР, этот — ПЛИТКУ целиком
+            /* ЯКОРЬ ДЛЯ ПРОБ, ПАРНЫЙ К `data-annot-frame`: тот метит КАДР, этот — ПЛИТКУ целиком
                (рамка, шапка, кадр, подпись, подвал дверей). Пробы геометрии меряют вписанность
                кадра в плитку, и опознавать плитку по классам оказалось нельзя — «p-1» ушёл вместе
                с волной медиа, и проба стала находить `null`, то есть молча перестала мерить. */
@@ -3120,12 +3125,7 @@ export function PlateGrid({
                 нужно, а лишняя стояла бы между поверхностью и её собственными углами.
                 `pointer-events-none` НЕСУЩИЙ: под ярлыком лежит поверхность постановки указаний, и
                 проглоченный им `pointerdown` означал бы мёртвую зону в углу каждого чертежа. */}
-            <div
-              className={cn(
-                PLATE_BADGE_BAR,
-                !!plate.model && PLATE_BADGE_BAR_WIDE_RESERVE,
-              )}
-            >
+            <div className={cn(PLATE_BADGE_BAR, !!plate.model && PLATE_BADGE_BAR_WIDE_RESERVE)}>
               <div className={PLATE_BADGE_CHIP}>
                 {/* ═══ ИМЯ — МЫШИНАЯ ДВЕРЬ В КРУПНЫЙ ВИД (T17) ══════════════════════════════════
                     На плите всегда взведён инструмент, а взведённый двойной клик ставит точки
@@ -3159,20 +3159,20 @@ export function PlateGrid({
                     {plate.caption || plate.name}
                   </Text>
                 </button>
-              {plate.origin === 'bench' && <Pill tone='mut'>bench</Pill>}
-              {plate.origin === 'run' && <Pill tone='mut'>not on the card</Pill>}
-              {marksChosen && plate.chosen && <Pill tone='ok'>chosen</Pill>}
-              {/* КАДР ТОЛЬКО ДЛЯ ПОКАЗА ГОВОРИТ ЭТО САМ (D-24): голубая пилюля — «нужен человек»,
+                {plate.origin === 'bench' && <Pill tone='mut'>bench</Pill>}
+                {plate.origin === 'run' && <Pill tone='mut'>not on the card</Pill>}
+                {marksChosen && plate.chosen && <Pill tone='ok'>chosen</Pill>}
+                {/* КАДР ТОЛЬКО ДЛЯ ПОКАЗА ГОВОРИТ ЭТО САМ (D-24): голубая пилюля — «нужен человек»,
                   и здесь это верно буквально: в промпт этот кадр не уедет ни при каком жесте. */}
-              {plate.displayOnly && (
-                <Pill
-                  tone='attention'
-                  title='filed for display only — it goes into no slot and is never sent to a prompt'
-                >
-                  display only
-                </Pill>
-              )}
-              {/* THE PLATE SAYS IT ITSELF, not only the box above the grid. The warning is read
+                {plate.displayOnly && (
+                  <Pill
+                    tone='attention'
+                    title='filed for display only — it goes into no slot and is never sent to a prompt'
+                  >
+                    display only
+                  </Pill>
+                )}
+                {/* THE PLATE SAYS IT ITSELF, not only the box above the grid. The warning is read
                   once, on arrival; the badge is on screen for as long as the picture is, and it is
                   what a person sees when they come back to this tab an hour later.
                   ЗДЕСЬ ВИСЕЛО «not on the sheet» — прямая неправда: плита, лежащая в медиа
@@ -3180,14 +3180,14 @@ export function PlateGrid({
                   (`tech-pack-document.tsx`, без единого условия по роду). Пилюля называет теперь
                   ровно это, и только там, где оно удивляет: у флэта попадание на бумагу и так
                   никого не удивляет, а у плиты, которой в медиа карточки ещё нет, своя пилюля. */}
-              {sayPrints && plate.origin === 'card' && (
-                <Pill
-                  tone='attention'
-                  title='this picture is in the card’s media, so the tech pack prints it on the technical sketch page, with the callouts standing on it'
-                >
-                  on paper
-                </Pill>
-              )}
+                {sayPrints && plate.origin === 'card' && (
+                  <Pill
+                    tone='attention'
+                    title='this picture is in the card’s media, so the tech pack prints it on the technical sketch page, with the callouts standing on it'
+                  >
+                    on paper
+                  </Pill>
+                )}
                 {/* Число выносок ЭТОЙ плиты. Стояло `ml-auto` у правого края строки-шапки; строки
                     больше нет, а правый верхний угол кадра занят рядом `zoom · ✕`. Здесь оно
                     читается вместе с именем, которому принадлежит, и рисуется только когда есть
@@ -3625,7 +3625,12 @@ function ModelPlateTile({
         </div>
         {plate.note ? (
           <span className={cn(PLATE_BADGE_CHIP, TILE_QUIET)}>
-            <Text size='nano' variant='label' component='span' className='line-clamp-2 min-w-0 break-words'>
+            <Text
+              size='nano'
+              variant='label'
+              component='span'
+              className='line-clamp-2 min-w-0 break-words'
+            >
               {plate.note}
             </Text>
           </span>

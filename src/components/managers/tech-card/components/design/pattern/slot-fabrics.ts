@@ -179,8 +179,11 @@ export function clothSlots(
   return { slots: rows.map((r) => r.slot), unsavedCount };
 }
 
-/** A bench slot of FABRICS AND HARDWARE: a cloth slot plus its family. */
-export type MaterialSlot = ClothSlot & { family: 'fabric' | 'hardware' };
+/** A MATERIALS bench slot: a cloth/BOM slot plus the family and kind used by its pictogram. */
+export type MaterialSlot = ClothSlot & {
+  family: 'fabric' | 'hardware';
+  kind: string;
+};
 
 export type MaterialSlots = { slots: MaterialSlot[]; unsavedCount: number };
 
@@ -217,6 +220,7 @@ export function materialSlots(
       bomItemId,
       lineKey: (line.lineKey ?? '').trim(),
       name,
+      kind: (line.kind ?? '').trim(),
       purpose: '',
       purposeLabel: distinct(label, name),
       section,
@@ -232,6 +236,7 @@ export function materialSlots(
     slots: [
       ...cloth.slots.map((s) => ({
         ...s,
+        kind: '',
         words: clip(
           [s.name, distinct(s.purposeLabel, s.name), s.detail].filter(Boolean).join(' · '),
           SLOT_WORDS_MAX,
