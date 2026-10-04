@@ -15,6 +15,7 @@ import Text from 'ui/components/text';
 import { GROUP_GAP } from '../core';
 import { viewLabel } from '../views';
 import { componentAt, polygonIndices } from './map-model';
+import { partIndices } from './parts-model';
 import { dilate } from './regions';
 import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint';
 
@@ -23,7 +24,9 @@ import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint'
  * same height; the paper is the flat, the paint is the material's texture, the drawing's lines sit
  * on top black with a white halo — always readable over any cloth (R3).
  *
- *   click  fills the part under the pointer (the region between the drawing's lines)
+ *   click  fills the part under the pointer: the model's named part when the side has auto parts
+ *          (and the same-named part on the other sides, R9), else the region between the lines;
+ *          ⌥-click fills one region only (cuts a part)
  *   pen    a polygon of the armed material, clipped to the garment — closes open outlines
  *   erase  click back to paper
  * Keys: V / P / E, ⌘Z / ⇧⌘Z, Enter closes the pen, Esc drops it.
@@ -81,12 +84,18 @@ function PaintSide({
     mask: Uint8Array | null;
     rev: number;
     armed: string;
+    /** -1 = one region (Ф1 rule), else the part's group. */
+    group: number;
+    region: number;
   }>({
     idx: null,
     mask: null,
     rev: -1,
     armed: '',
+    group: -1,
+    region: 0,
   });
+  const [partName, setPartName] = useState('');
   const [pen, setPen] = useState<{ x: number; y: number }[]>([]);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const { flat, labels, pixels } = view;
@@ -155,13 +164,24 @@ function PaintSide({
     const st = hoverState.current;
     st.idx = null;
     st.mask = null;
+    st.group = -1;
+    st.region = 0;
+    setPartName('');
     if (c) c.getContext('2d')?.clearRect(0, 0, c.width, c.height);
+  };
+
+  /** The part's group under (x, y): -1 = no parts here, or ⌥ asks for one region. */
+  const groupAt = (px: number, py: number, alt: boolean): number => {
+    const parts = view.parts;
+    if (alt || !parts || !flat || tool === 'pen') return -1;
+    const region = flat.labels[py * w + px];
+    return region ? parts.regionGroup[region] : -1;
   };
 
   // Labels or the armed material changed under a held hover: drop it.
   useEffect(() => {
     clearHover();
-  }, [view.rev, session.armed, tool]);
+  }, [view.rev, session.armed, tool, view.parts]);
 
   const toRaster = (e: PointerEvent<HTMLElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -172,14 +192,33 @@ function PaintSide({
     };
   };
 
-  const showHover = (x: number, y: number) => {
+  const showHover = (x: number, y: number, alt: boolean) => {
     if (!ready || !flat || !labels) return;
     const px = Math.floor(x);
     const py = Math.floor(y);
+    if (px < 0 || py < 0 || px >= w || py >= h) return;
     const st = hoverState.current;
     const at = py * w + px;
-    if (st.mask && st.mask[at] && st.rev === view.rev && st.armed === session.armed) return;
-    const idx = componentAt(labels, flat.labels, w, h, px, py);
+    const group = groupAt(px, py, alt);
+    const region = flat.labels[at];
+    if (
+      st.mask &&
+      st.mask[at] &&
+      st.rev === view.rev &&
+      st.armed === session.armed &&
+      st.group === group &&
+      st.region === region
+    )
+      return;
+    const parts = view.parts;
+    const idx =
+      parts && group >= 0
+        ? partIndices(labels, flat, parts, group, { x: px, y: py })
+        : componentAt(labels, flat.labels, w, h, px, py);
+    st.group = group;
+    st.region = region;
+    const label = parts && group >= 0 ? parts.groups[group].label : '';
+    setPartName(label && parts?.split.has(region) ? `${label} · no seam, use the pen` : label);
     const c = hover.current;
     if (!c) return;
     if (c.width !== w || c.height !== h) {
@@ -248,7 +287,7 @@ function PaintSide({
       setCursor({ x, y });
       return;
     }
-    showHover(x, y);
+    showHover(x, y, e.altKey);
   };
 
   const onDown = (e: PointerEvent<HTMLDivElement>) => {
@@ -273,12 +312,20 @@ function PaintSide({
       return;
     }
     if (!labels || !flat) return;
+    const px = Math.floor(x);
+    const py = Math.floor(y);
+    if (px < 0 || py < 0 || px >= w || py >= h) return;
+    const group = groupAt(px, py, e.altKey);
+    if (group >= 0) {
+      session.paintPart(view.view, group, { x: px, y: py });
+      return;
+    }
     const st = hoverState.current;
-    const at = Math.floor(y) * w + Math.floor(x);
+    const at = py * w + px;
     const idx =
-      st.mask && st.mask[at] && st.rev === view.rev
+      st.mask && st.mask[at] && st.rev === view.rev && st.group === -1
         ? st.idx
-        : componentAt(labels, flat.labels, w, h, Math.floor(x), Math.floor(y));
+        : componentAt(labels, flat.labels, w, h, px, py);
     session.apply(view.view, idx);
   };
 
@@ -312,7 +359,8 @@ function PaintSide({
     >
       <div
         className={cn(
-          'relative w-full touch-none select-none border border-borderColor bg-bgColor',
+          'relative w-full touch-none select-none border bg-bgColor transition-colors duration-200',
+          session.flash.has(view.view) ? 'border-textColor' : 'border-borderColor',
           ready ? (tool === 'pen' ? 'cursor-crosshair' : 'cursor-pointer') : 'cursor-wait',
         )}
         style={{ aspectRatio: `${view.aspect || 0.6}` }}
@@ -356,12 +404,27 @@ function PaintSide({
           </svg>
         )}
       </div>
-      <div className='flex items-center gap-1'>
+      <div className='flex min-w-0 items-center gap-2'>
         <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
           {viewLabel(view.view)}
         </Text>
+        {partName && (
+          <Text size='micro' tracking='label' component='span' className='truncate uppercase'>
+            {partName}
+          </Text>
+        )}
         {view.stale && <Pill tone='attention'>stale</Pill>}
         {view.status === 'error' && <Pill tone='warn'>not loaded</Pill>}
+        {view.partsFailed && (
+          <button
+            type='button'
+            onClick={() => session.retryParts(view.view)}
+            title={view.partsFailed}
+            data-paint-parts-retry=''
+          >
+            <Pill tone='warn'>parts · retry</Pill>
+          </button>
+        )}
       </div>
     </div>
   );

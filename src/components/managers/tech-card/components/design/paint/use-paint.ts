@@ -40,14 +40,25 @@ import {
   labelsFromMap,
   mapPixels,
   packHex,
-  paintIndices,
   paintSize,
   redoDiff,
   slotLabels,
   undoDiff,
-  type PaintDiff,
 } from './map-model';
-import { analyseFlat, type FlatRegions } from './regions';
+import {
+  groupsNamed,
+  markFontPx,
+  markPoints,
+  marksTint,
+  paintGesture,
+  partIndices,
+  partsOf,
+  PARTS_REGIONS_MAX,
+  PARTS_REGIONS_MIN,
+  type Gesture,
+  type ViewParts,
+} from './parts-model';
+import { analyseFlat, REGIONS_ALGO_REV, type FlatRegions } from './regions';
 
 export type PaintTool = 'click' | 'pen' | 'erase';
 
@@ -68,6 +79,12 @@ export type PaintView = {
   mapBase: number;
   /** Bumped on every pixel change — the canvas redraws off it. */
   rev: number;
+  /** The model's parts over this flat's regions (auto parts); null = regions only (Ф1). */
+  parts: ViewParts | null;
+  /** The suggestion row `parts` came from (re-read only when it changes). */
+  partsSig: string;
+  /** Auto parts asked and refused: `parts · retry` by the side's caption. */
+  partsFailed: string;
 };
 
 /** One thing to paint with: a slot's bound cloth or a free colour. */
@@ -106,6 +123,33 @@ async function pixelsOf(url: string, w?: number, h?: number): Promise<ImageData>
   ctx.drawImage(bmp, 0, 0, size.w, size.h);
   bmp.close();
   return ctx.getImageData(0, 0, size.w, size.h);
+}
+
+/** The marks picture the model reads (as `f0/som.py marks()`), as a PNG data URL. */
+function marksPng(flat: FlatRegions, seeds: Int32Array): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = flat.w;
+  canvas.height = flat.h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('no 2d context');
+  ctx.putImageData(new ImageData(marksTint(flat), flat.w, flat.h), 0, 0);
+  const px = markFontPx(flat.w, flat.h);
+  ctx.font = `${px}px Menlo, Monaco, 'Courier New', monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = Math.max(4, Math.round(px / 3.5));
+  ctx.strokeStyle = '#ffffff';
+  ctx.fillStyle = 'rgb(220,0,0)';
+  for (let r = 1; r < seeds.length; r += 1) {
+    const s = seeds[r];
+    if (s < 0) continue;
+    const x = (s % flat.w) + 0.5;
+    const y = ((s / flat.w) | 0) + 0.5;
+    ctx.strokeText(String(r), x, y);
+    ctx.fillText(String(r), x, y);
+  }
+  return canvas.toDataURL('image/png');
 }
 
 async function tileOf(url: string): Promise<ImageData> {
@@ -171,8 +215,12 @@ export class PaintSession {
   save: PaintSaveState = 'idle';
   saveError = '';
 
-  private undoStack: { view: string; diff: PaintDiff }[] = [];
-  private redoStack: { view: string; diff: PaintDiff }[] = [];
+  private undoStack: Gesture[] = [];
+  private redoStack: Gesture[] = [];
+  /** Auto parts asked once per (view, flat, cutter) in this session. */
+  private asked = new Set<string>();
+  /** Sides a part click just painted by name (R9) — lit for a moment. */
+  flash = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inflight: Promise<boolean> | null = null;
   private again = false;
@@ -301,7 +349,76 @@ export class PaintSession {
         this.views.delete(view);
         changed = true;
       }
+    for (const v of this.views.values()) if (this.takeParts(v)) changed = true;
     if (changed) this.bump();
+    for (const v of this.views.values()) this.suggestParts(v);
+  }
+
+  /* ─────────────────────────── auto parts ─────────────────────────── */
+
+  private partsKey = (v: PaintView) => `${v.view}|${v.baseMediaId}|${REGIONS_ALGO_REV}`;
+
+  /** Lay the band's suggestion for this flat over its regions. True when it changed. */
+  private takeParts(v: PaintView): boolean {
+    if (v.status !== 'ready' || !v.flat) return false;
+    const row = (this.band?.partsSuggestions ?? []).find(
+      (s) =>
+        s.view === v.view &&
+        (s.baseMediaId ?? 0) === v.baseMediaId &&
+        (s.algoRev ?? '') === REGIONS_ALGO_REV,
+    );
+    if (!row) return false;
+    const sig = JSON.stringify([row.parts, row.splitNeeded]);
+    if (sig === v.partsSig) return false;
+    v.partsSig = sig;
+    v.parts = partsOf(row, v.flat, v.parts?.seeds ?? markPoints(v.flat));
+    v.partsFailed = '';
+    return true;
+  }
+
+  /** A side ready, cut into 2..60 regions and without parts: ask the model, once. */
+  private suggestParts(v: PaintView, again = false) {
+    if (v.status !== 'ready' || !v.flat || v.parts || !this.band) return;
+    if (v.flat.count < PARTS_REGIONS_MIN || v.flat.count > PARTS_REGIONS_MAX) return;
+    const key = this.partsKey(v);
+    if (this.asked.has(key) && !again) return;
+    this.asked.add(key);
+    const flat = v.flat;
+    void (async () => {
+      try {
+        const seeds = markPoints(flat);
+        const media = await uploadRaster(marksPng(flat, seeds));
+        const res = await adminService.SuggestDesignParts({
+          techCardId: this.techCardId,
+          view: v.view,
+          baseMediaId: v.baseMediaId,
+          marksMediaId: media.id ?? 0,
+          regionCount: flat.count,
+          algoRev: REGIONS_ALGO_REV,
+          force: false,
+        });
+        if (this.views.get(v.view) !== v) return;
+        const s = res.suggestion;
+        v.parts = s ? partsOf(s, flat, seeds) : null;
+        if (!v.parts) throw new Error('the assistant answered nothing usable');
+        v.partsSig = JSON.stringify([s?.parts, s?.splitNeeded]);
+        v.partsFailed = '';
+        void this.qc.invalidateQueries({ queryKey: designKeys.band(this.techCardId) });
+      } catch (e) {
+        if (this.views.get(v.view) !== v) return;
+        v.partsFailed = (e instanceof Error && e.message) || 'the parts were not named';
+      }
+      this.bump();
+    })();
+  }
+
+  /** `parts · retry`. */
+  retryParts(view: string) {
+    const v = this.views.get(view);
+    if (!v?.partsFailed) return;
+    v.partsFailed = '';
+    this.bump();
+    this.suggestParts(v, true);
   }
 
   private loadSkin(m: PaintMaterial) {
@@ -344,6 +461,9 @@ export class PaintSession {
       dirty: false,
       mapBase: 0,
       rev: 0,
+      parts: null,
+      partsSig: '',
+      partsFailed: '',
     };
     this.views.set(view, v);
     const saved = plan?.maps.find((m) => m.view === view);
@@ -372,6 +492,8 @@ export class PaintSession {
         v.labels = labels;
         v.status = 'ready';
         v.rev += 1;
+        this.takeParts(v);
+        this.suggestParts(v);
       } catch {
         // A view whose saved painting could not be read is NOT paintable: painting over it would
         // save a blank over somebody's work.
@@ -440,46 +562,88 @@ export class PaintSession {
 
   /** Paint pixels of a view with the armed material (or erase). */
   apply(view: string, idx: Int32Array | null) {
+    if (idx && idx.length > 0) this.applyMany([{ view, idx }]);
+  }
+
+  /**
+   * A part click: the part under the pointer, and — by its name (R9) — the same part on every
+   * other side that has parts, one gesture (one undo). The other sides painted light up a moment.
+   */
+  paintPart(view: string, group: number, at: { x: number; y: number }) {
     const v = this.views.get(view);
-    if (!v || v.status !== 'ready' || !v.labels || !idx || idx.length === 0) return;
+    if (!v?.parts || !v.flat || !v.labels) return;
+    const targets = [{ view, idx: partIndices(v.labels, v.flat, v.parts, group, at) }];
+    const label = v.parts.groups[group]?.label ?? '';
+    for (const o of this.views.values()) {
+      if (o === v || o.status !== 'ready' || !o.parts || !o.flat || !o.labels) continue;
+      for (const g of groupsNamed(o.parts, label))
+        targets.push({ view: o.view, idx: partIndices(o.labels, o.flat, o.parts, g) });
+    }
+    const touched = this.applyMany(targets);
+    const others = touched.filter((x) => x !== view);
+    if (others.length === 0) return;
+    for (const x of others) this.flash.add(x);
+    setTimeout(() => {
+      for (const x of others) this.flash.delete(x);
+      this.bump();
+    }, 700);
+    this.bump();
+  }
+
+  /** One gesture over several sides. Returns the sides it changed. */
+  private applyMany(targets: { view: string; idx: Int32Array }[]): string[] {
     const value = this.tool === 'erase' ? 0 : this.armed ? packHex(this.armed) : 0;
-    if (this.tool !== 'erase' && !value) return;
-    const diff = paintIndices(v.labels, idx, value);
-    if (!diff) return;
-    this.undoStack.push({ view, diff });
+    if (this.tool !== 'erase' && !value) return [];
+    const ready = targets.flatMap((t) => {
+      const v = this.views.get(t.view);
+      return v && v.status === 'ready' && v.labels && t.idx.length > 0
+        ? [{ view: t.view, labels: v.labels, idx: t.idx }]
+        : [];
+    });
+    const gesture = paintGesture(ready, value);
+    if (gesture.length === 0) return [];
+    this.undoStack.push(gesture);
     if (this.undoStack.length > 200) this.undoStack.shift();
     this.redoStack = [];
-    v.stale = false;
-    v.dirty = true;
-    v.rev += 1;
+    const touched = [...new Set(gesture.map((s) => s.view))];
+    for (const view of touched) {
+      const v = this.views.get(view);
+      if (!v) continue;
+      v.stale = false;
+      v.dirty = true;
+      v.rev += 1;
+    }
+    this.schedule();
+    this.bump();
+    return touched;
+  }
+
+  private replay(g: Gesture, back: boolean) {
+    const steps = back ? [...g].reverse() : g;
+    for (const s of steps) {
+      const v = this.views.get(s.view);
+      if (!v?.labels) continue;
+      if (back) undoDiff(v.labels, s.diff);
+      else redoDiff(v.labels, s.diff);
+      v.dirty = true;
+      v.rev += 1;
+    }
     this.schedule();
     this.bump();
   }
 
   undo() {
-    const e = this.undoStack.pop();
-    if (!e) return;
-    const v = this.views.get(e.view);
-    if (!v?.labels) return;
-    undoDiff(v.labels, e.diff);
-    this.redoStack.push(e);
-    v.dirty = true;
-    v.rev += 1;
-    this.schedule();
-    this.bump();
+    const g = this.undoStack.pop();
+    if (!g) return;
+    this.replay(g, true);
+    this.redoStack.push(g);
   }
 
   redo() {
-    const e = this.redoStack.pop();
-    if (!e) return;
-    const v = this.views.get(e.view);
-    if (!v?.labels) return;
-    redoDiff(v.labels, e.diff);
-    this.undoStack.push(e);
-    v.dirty = true;
-    v.rev += 1;
-    this.schedule();
-    this.bump();
+    const g = this.redoStack.pop();
+    if (!g) return;
+    this.replay(g, false);
+    this.undoStack.push(g);
   }
 
   /* ─────────────────────────── save ─────────────────────────── */
