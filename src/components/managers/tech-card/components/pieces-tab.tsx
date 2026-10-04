@@ -707,8 +707,8 @@ export function PiecesTab({
             {!hasDxf && (
               <Button
                 type='button'
-                variant='main'
-                size='sm'
+                variant='underline'
+                size='xs' className='text-labelColor hover:text-textColor'
                 data-field='pieces.add'
                 onClick={addPiece}
               >
@@ -915,8 +915,8 @@ export function PiecesTab({
             ) : (
               <Button
                 type='button'
-                variant='secondary'
-                size='xs'
+                variant='underline'
+                size='xs' className='text-labelColor hover:text-textColor'
                 aria-label='remove piece'
                 title={
                   selRecipeHold

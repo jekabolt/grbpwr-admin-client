@@ -707,8 +707,8 @@ export function ReleasesField({
           gate ? (
             <Button
               type='button'
-              variant='main'
-              size='sm'
+              variant='underline'
+              size='xs' className='text-labelColor hover:text-textColor'
               disabled={gate.saving}
               loading={gate.saving}
               onClick={onCreate}

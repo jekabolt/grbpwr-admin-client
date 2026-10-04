@@ -1,6 +1,7 @@
 import {
   GetDesignBandResponse,
   common_DesignPicture,
+  common_DesignRun,
   common_MediaFull,
 } from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
@@ -43,6 +44,7 @@ import { EmptyState, GROUP_GAP, PlaceOrDrawCell } from './core';
 import { VectorModal } from './modals';
 import { PictureTile } from './picture-tile';
 import { pictureOffersSplit } from './render/model';
+import { offersSplit, readSplit } from './generation/composite';
 import { useSplitToInput } from './split-to-input';
 import { ACTIVE_VIEWS, DETAIL_VIEW, normaliseViewKey, viewLabel } from './views';
 import { cardOnScreen, useDesignWrites } from './use-design-band';
@@ -96,11 +98,10 @@ import { dropWords, omittedOf, pickShownWords, settleWords, useWordsSeed } from 
  * запрос. Записки у картинок больше нет (SPEC п.10): один общий текст — garment description.
  *
  * ═══ ПОРЯДОК БЛОКА — ЭКРАН МАКЕТА (`_step-flat.js`, `fInputBlock`), РЯДАМИ, БЕЗ ЛИНЕЕК ГРУПП ═══
- *   заголовок  INPUT — REFERENCES · what this run is given (дверей в шапке нет — D-21)
+ *   заголовок  INPUT — REFERENCES · what this run is given · справа `clear the input ✕` (item 26)
  *   1.1  сетка плиток референсов (кадр 1:1, `#N` в углу, селект вида СРАЗУ под кадром) +
  *        последняя ячейка — плитка на две половины: слот медиа сверху, «draw a reference» снизу;
  *        пусто → та же плитка одна в сетке (второй пары кнопок больше нет);
- *        под сеткой справа — тихая дверь `clear the input ✕` (D-21, волна 25.09);
  *   1.2  WORDS — textarea во всю ширину (`garmentDescription`), засеянная фактами карточки, когда
  *        она пуста (D-20''/D-20'''), раз за сессию и только на экране — на сервер засев уезжает с
  *        первой правкой или с GENERATE; в правом нижнем углу счётчик `N / 2000` и `ai ✦`;
@@ -189,10 +190,9 @@ type CalloutRow = NonNullable<TechCardFormData['callouts']>[number];
  *   · `unknown`  — за медиа чертежа полосы нет вовсе (обычная ссылка из библиотеки). Система не
  *                  знает и знать не может.
  *
- * ⚠ С r3 ЭТО БОЛЬШЕ НЕ ВОРОТА ДВЕРИ, А ТОЛЬКО ЕЁ СЛОВА. Владелец: «на референсах должна быть
- * возможность маркать мультивью» — мультивью объявляет ЧЕЛОВЕК, и `no` (файл ничего не заявил)
- * не значит «резать нечего». Дверь стоит на всех трёх значениях; различаются подсказки, и на
- * двух из трёх подсказка честно говорит «only you can tell» (разбор у самой двери, ниже).
+ * ⚠ С item 25 (04.10) ЭТО СНОВА ВОРОТА ДВЕРИ: угол стоит только на `declared`, `no` и
+ * `unknown` его не получают (владелец: «только для тех картинок где мы знаем что нужен сплит»).
+ * `declared` включает лист, известный по цепочке правок или по параметрам `one`-прогона.
  */
 type SplitOffer = 'declared' | 'no' | 'unknown';
 
@@ -233,7 +233,11 @@ export function ReferencesSection({
   }, [libraryMap, picked, band.batches, band.runs]);
 
   /**
-   * ═══ ЧТО ПОДСКАЗКА РЕЗА ЗНАЕТ ОБ ЭТОЙ СТРОКЕ ВХОДА (F-8, F-18 → r3 п.4) ═════════════════════
+   * ═══ ЧТО ПОДСКАЗКА РЕЗА ЗНАЕТ ОБ ЭТОЙ СТРОКЕ ВХОДА (F-8, F-18 → r3 п.4 → item 25) ═══════════
+   *
+   * ⚠ ITEM 25 (04.10) SUPERSEDES r3 п.4 BELOW. Owner: «только для тех картинок где мы знаем что
+   * нужен сплит». The corner now stands ONLY on `declared` (this map); `no` and `unknown` draw no
+   * corner, and a sheet brought by hand is cut with `crop`. The history below is kept as history.
    *
    * Владелец, круг F: «везде где картинка не мультивью флет или рендер там не должно на ховер
    * показываться сплит» и «на уже заспличеных картинках на ховер сплит писать не нужно».
@@ -286,10 +290,20 @@ export function ReferencesSection({
       if (!seen || (picture.id ?? 0) > (seen.id ?? 0)) newestOf.set(mediaId, picture);
     }
 
+    // The run each picture came from: a generated `one` sheet may carry an empty column, and the
+    // bench's own rule (`readSplit`: edit chain → run params) is what knows it is a sheet (item 25).
+    const runOf = new Map<number, common_DesignRun>();
+    for (const run of band.runs ?? [])
+      for (const p of run.pictures ?? []) runOf.set(p.id ?? 0, run);
+
     const offers = new Map<number, SplitOffer>();
     for (const [mediaId, picture] of newestOf) {
       const cut = (families.membersOf.get(picture.id ?? 0) ?? []).length > 0;
-      offers.set(mediaId, pictureOffersSplit(picture, cut) ? 'declared' : 'no');
+      const run = runOf.get(picture.id ?? 0);
+      const sheet =
+        pictureOffersSplit(picture, cut) ||
+        (!cut && offersSplit(readSplit(band, picture, run?.pictures, run)));
+      offers.set(mediaId, sheet ? 'declared' : 'no');
     }
     return offers;
   }, [band.runs, band.batches]);
@@ -740,10 +754,29 @@ export function ReferencesSection({
     <Section
       title='input — references'
       question='— what this run is given'
-      /* ═══ В ШАПКЕ БОЛЬШЕ НЕТ НИ ОДНОЙ ДВЕРИ (D-21, волна 25.09) ══════════════════════════════
-         R2 п.19 поставил сюда CLEAR на место двух плашок; владелец в этой волне: «кнопка CLEAR не
-         в хедере блока, а уместнее». Уместнее — там, где лежит то, что она чистит: под сеткой
-         референсов, тихой текстовой дверью `clear the input ✕` (ниже). */
+      /* ═══ CLEAR — В ШАПКЕ, ТИХИМ ДЕЙСТВИЕМ ЗАГОЛОВКА (item 26, 04.10; снимает D-21) ═══════════
+         Владелец: «INPUT — REFERENCES в хедер перенеси CLEAR THE INPUT ✕». Вид — подчёркнутое
+         слово, как у каждого действия шапки техкарты (item 32: «если кнопка то она всегда
+         подчеркиванием везде в техкарте»), а не кнопка в рамке. Поведение прежнее: вопрос с объёмом
+         числами, роли уходят с сервера, слова — пустой строкой в форме, картинки остаются.
+         Нечего чистить — дверь погашена, а не спрятана: пустое место не объясняет, куда она
+         делась. */
+      action={
+        !readOnly && (
+          <Button
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+            data-clear-prompt=''
+            loading={clearing}
+            disabled={inputBusy || nothingToClear}
+            onClick={() => setClearAsk(true)}
+            title='clears the words and the reference roles — the pictures stay'
+          >
+            clear the input ✕
+          </Button>
+        )
+      }
       /* Больше воздуха между рядами блока (16px вместо 10px): владелец — «дай больше спейсинга,
          чтобы проще было воспринимать». Ряды здесь разнородные — сетка, текст, двери, прогон. */
       className='space-y-block'
@@ -783,8 +816,7 @@ export function ReferencesSection({
                 if (full)
                   split.openForMedia(full, `reference ${promptNumber.get(mediaId) ?? mediaId}`);
               }}
-              /* Разрешить не удалось — «не знаю», а НЕ «нет»: разбор у самой карты
-                 (`splitOffered`). Ссылка из библиотеки живёт ровно здесь. */
+              /* Не разрешилось — `unknown`: угла нет (item 25), разбор у карты `splitOffered`. */
               splitOffer={splitOffered.get(mediaId) ?? 'unknown'}
               /* КРОП ЭТОЙ ЖЕ СТРОКИ (J-8): та же дверь режет, что и `split`; разный ИСХОД — сплит
                  дописывает несколько картинок, кроп рождает одну и ЗАМЕЩАЕТ ею эту строку.
@@ -825,26 +857,6 @@ export function ReferencesSection({
         <Text size='micro' variant='label'>
           the input holds {INPUT_MAX} pictures — the moodboard counts separately.
         </Text>
-      )}
-
-      {/* ═══ CLEAR — ПОД СЕТКОЙ, СПРАВА, ТИХОЙ ТЕКСТОВОЙ ДВЕРЬЮ (D-21) ══════════════════════════
-          Поведение прежнее: вопрос с объёмом числами, роли уходят с сервера, слова — пустой
-          строкой в форме, картинки остаются. Нечего чистить — дверь погашена, а не спрятана:
-          пустое место не объясняет, куда она делась. */}
-      {!readOnly && (
-        <div className='flex justify-end'>
-          <Button
-            variant='underline'
-            size='sm'
-            data-clear-prompt=''
-            loading={clearing}
-            disabled={inputBusy || nothingToClear}
-            onClick={() => setClearAsk(true)}
-            title='clears the words and the reference roles — the pictures stay'
-          >
-            clear the input ✕
-          </Button>
-        </div>
       )}
 
       {/* ═══ 1.2 WORDS — один текст на весь промпт (SPEC п.10): записок у картинок нет. Поле
@@ -1301,34 +1313,19 @@ function ReferenceCell({
               { ...mediaFullToViewerItem(full), thumbnail: url, alt: label }
             : undefined
         }
-        /* ═══ РЕЗ ПРЕДЛАГАЕТСЯ ЛЮБОЙ КАРТИНКЕ ВХОДА (r3 п.4) ═════════════════════════════════
-           Владелец: «на референсах должна быть возможность маркать мультивью». До r3 угол
-           стоял только на кадре, который САМ объявил себя склейкой (`composite_views`), и на
-           том, про который не удалось узнать; на всём остальном его не было вовсе. Но
-           «мультивью» — это утверждение ЧЕЛОВЕКА о снимке, а не свойство файла: лукбук на
-           четыре вида, снятый на телефон и брошенный во вход, никаких видов не объявляет и
-           объявить не может. Отказывать ему значило отказывать ровно тому случаю, ради
-           которого дверь и заведена — модалка режет кадрами, размеченными руками, и умеет это
-           на картинке без объявленных видов («every frame is named here by hand»).
-
-           ⚠ РАЗЛИЧАТЬ СЛУЧАИ ПРОДОЛЖАЕТ `title`, И ЭТО НЕ УКРАШЕНИЕ: дверь ПРЕДЛАГАЕТ действие
-           и ничего не утверждает о файле — та же формула, что на полосе флэтов. `declared` —
-           это факт полосы («held several views at once»), всё остальное — «only you can
-           tell». Пропасть дверь не может: тихий орган остаётся тихим не отсутствием, а тем,
-           что не врёт. */
+        /* ═══ РЕЗ — ТОЛЬКО НА ИЗВЕСТНОМ ЛИСТЕ (item 25, снимает r3 п.4) ═════════════════════════
+           `declared` — полоса знает, что это лист: объявленные виды, цепочка правок к ним или
+           параметры `one`-прогона (`readSplit`). Остальным кадрам угла нет; кроп стоит на всех. */
         onSplit={
-          !readOnly && url
+          !readOnly && url && splitOffer === 'declared'
             ? {
                 onClick: onSplit,
                 pending: splitPending,
                 disabled: locked,
                 ariaLabel: `cut ${label} into views`,
                 title:
-                  splitOffer === 'declared'
-                    ? 'split — this picture holds several views at once; cut them out into ' +
-                      'pictures of their own'
-                    : 'split — cut this into views if it holds several at once. Nothing on ' +
-                      'record says it does, so only you can tell',
+                  'split — this picture holds several views at once; cut them out into ' +
+                  'pictures of their own',
               }
             : undefined
         }

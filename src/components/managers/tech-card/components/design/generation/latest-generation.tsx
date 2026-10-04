@@ -35,6 +35,7 @@ import {
   useBench,
   useBenchChoice,
 } from './bench-store';
+import { ApplyFlatSlots } from './apply-flat-slots';
 import { InlineSplit, useKeptWhole } from './inline-split';
 import {
   benchPlan,
@@ -571,6 +572,12 @@ export function LatestGeneration({
     return (decked?.cards ?? []).filter((c) => roots.has(c.picture.id ?? 0)).map((c) => c.picture);
   };
   const runCuts = kind === 'render' && !bare ? cutSheets(tilePlan, deckPlan) : [];
+  /** Item 27: FLAT's cut pieces standing on the bench, in the row's order — `apply flat slots`. */
+  const flatPieces = useMemo(() => {
+    const rootOf = tilePlan?.rootOf;
+    if (kind !== 'flat' || bare || !rootOf?.size) return [];
+    return (tilePlan?.cards ?? []).map((c) => c.picture).filter((p) => rootOf.has(p.id ?? 0));
+  }, [kind, bare, tilePlan]);
   const broughtCuts = broughtRun && brought ? cutSheets(broughtPlan, brought.plan) : [];
   const toggleDeck = (rootId: number) =>
     setOpenDeck((current) => (current === rootId ? null : rootId));
@@ -720,17 +727,29 @@ export function LatestGeneration({
         title='latest generation'
         question='— what the last run brought back'
         action={
-          <Text size='nano' variant='label' component='span' data-latest-stamp=''>
-            {state && (
-              <>
-                <span className='text-textColor' title={state.note}>
-                  {state.word}
-                </span>
-                {' · '}
-              </>
+          <>
+            <Text size='nano' variant='label' component='span' data-latest-stamp=''>
+              {state && (
+                <>
+                  <span className='text-textColor' title={state.note}>
+                    {state.word}
+                  </span>
+                  {' · '}
+                </>
+              )}
+              {runStamp(run)}
+            </Text>
+            {/* Item 27: the cut pieces into their FLAT SLOTS sides — the header action, styled as
+                INPUT — REFERENCES' `clear the input ✕`; absent when nothing would be written. */}
+            {flatPieces.length > 0 && !isRunLive(run) && (
+              <ApplyFlatSlots
+                band={band}
+                techCardId={techCardId}
+                pieces={flatPieces}
+                disabled={writesOff}
+              />
             )}
-            {runStamp(run)}
-          </Text>
+          </>
         }
       >
         {bare && newest && <BareOutcome run={run} earlier={newest.skipped} />}

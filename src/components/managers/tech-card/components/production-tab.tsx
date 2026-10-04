@@ -248,7 +248,12 @@ export function ProductionTab({
           // create modal. Withheld without production:write — that modal refuses to open for such
           // an account, so the button would go nowhere.
           canPlanRuns ? (
-            <Button asChild variant='secondary' size='sm' className='uppercase'>
+            <Button
+              asChild
+              variant='underline'
+              size='xs'
+              className='text-labelColor hover:text-textColor'
+            >
               <Link to={`${ROUTES.productionRuns}?techCardId=${techCardId}&new=1`}>
                 create a run
               </Link>
