@@ -46,6 +46,7 @@ import {
   undoDiff,
 } from './map-model';
 import {
+  gestureLive,
   groupsNamed,
   markFontPx,
   markPoints,
@@ -349,6 +350,7 @@ export class PaintSession {
         this.views.delete(view);
         changed = true;
       }
+    if (changed) this.prune();
     for (const v of this.views.values()) if (this.takeParts(v)) changed = true;
     if (changed) this.bump();
     for (const v of this.views.values()) this.suggestParts(v);
@@ -358,15 +360,20 @@ export class PaintSession {
 
   private partsKey = (v: PaintView) => `${v.view}|${v.baseMediaId}|${REGIONS_ALGO_REV}`;
 
-  /** Lay the band's suggestion for this flat over its regions. True when it changed. */
-  private takeParts(v: PaintView): boolean {
-    if (v.status !== 'ready' || !v.flat) return false;
-    const row = (this.band?.partsSuggestions ?? []).find(
+  /** The band's suggestion row for this side's flat and this cutter. */
+  private bandParts(v: PaintView) {
+    return (this.band?.partsSuggestions ?? []).find(
       (s) =>
         s.view === v.view &&
         (s.baseMediaId ?? 0) === v.baseMediaId &&
         (s.algoRev ?? '') === REGIONS_ALGO_REV,
     );
+  }
+
+  /** Lay the band's suggestion for this flat over its regions. True when it changed. */
+  private takeParts(v: PaintView): boolean {
+    if (v.status !== 'ready' || !v.flat) return false;
+    const row = this.bandParts(v);
     if (!row) return false;
     const sig = JSON.stringify([row.parts, row.splitNeeded]);
     if (sig === v.partsSig) return false;
@@ -388,6 +395,11 @@ export class PaintSession {
       try {
         const seeds = markPoints(flat);
         const media = await uploadRaster(marksPng(flat, seeds));
+        // The upload took a while: the side may have changed or its parts arrived meanwhile.
+        if (this.views.get(v.view) !== v || v.parts || this.bandParts(v)) {
+          if (this.views.get(v.view) === v && !v.parts && this.takeParts(v)) this.bump();
+          return;
+        }
         const res = await adminService.SuggestDesignParts({
           techCardId: this.techCardId,
           view: v.view,
@@ -597,7 +609,7 @@ export class PaintSession {
     const ready = targets.flatMap((t) => {
       const v = this.views.get(t.view);
       return v && v.status === 'ready' && v.labels && t.idx.length > 0
-        ? [{ view: t.view, labels: v.labels, idx: t.idx }]
+        ? [{ view: t.view, base: v.baseMediaId, labels: v.labels, idx: t.idx }]
         : [];
     });
     const gesture = paintGesture(ready, value);
@@ -618,6 +630,14 @@ export class PaintSession {
     return touched;
   }
 
+  private live = (g: Gesture) => gestureLive(g, (view) => this.views.get(view));
+
+  /** Drop every gesture that stands on a side replaced or gone since (whole gestures only). */
+  private prune() {
+    this.undoStack = this.undoStack.filter(this.live);
+    this.redoStack = this.redoStack.filter(this.live);
+  }
+
   private replay(g: Gesture, back: boolean) {
     const steps = back ? [...g].reverse() : g;
     for (const s of steps) {
@@ -633,15 +653,17 @@ export class PaintSession {
   }
 
   undo() {
-    const g = this.undoStack.pop();
-    if (!g) return;
+    let g = this.undoStack.pop();
+    while (g && !this.live(g)) g = this.undoStack.pop();
+    if (!g) return this.bump();
     this.replay(g, true);
     this.redoStack.push(g);
   }
 
   redo() {
-    const g = this.redoStack.pop();
-    if (!g) return;
+    let g = this.redoStack.pop();
+    while (g && !this.live(g)) g = this.redoStack.pop();
+    if (!g) return this.bump();
     this.replay(g, false);
     this.undoStack.push(g);
   }

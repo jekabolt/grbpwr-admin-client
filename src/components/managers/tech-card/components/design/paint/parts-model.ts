@@ -233,18 +233,39 @@ export const groupsNamed = (parts: ViewParts, label: string): number[] => {
 
 /* ─────────────────────────── one gesture over several sides ─────────────────────────── */
 
-export type GestureStep = { view: string; diff: PaintDiff };
+/**
+ * One side's share of a gesture, bound to the flat it was painted on (`base`) and to that side's
+ * label raster (`labels`, by identity): its pixel indices mean nothing on any other flat.
+ */
+export type GestureStep = { view: string; base: number; labels: Uint32Array; diff: PaintDiff };
 export type Gesture = GestureStep[];
 
 /** Paint every target with `value`; the steps that changed something (empty = no gesture). */
 export function paintGesture(
-  targets: readonly { view: string; labels: Uint32Array; idx: Int32Array }[],
+  targets: readonly { view: string; base: number; labels: Uint32Array; idx: Int32Array }[],
   value: number,
 ): Gesture {
   const out: Gesture = [];
   for (const t of targets) {
     const diff = paintIndices(t.labels, t.idx, value);
-    if (diff) out.push({ view: t.view, diff });
+    if (diff) out.push({ view: t.view, base: t.base, labels: t.labels, diff });
   }
   return out;
 }
+
+/** The side a step stands on, as the session holds it now. */
+export type GestureSide = { baseMediaId: number; labels: Uint32Array | null };
+
+/**
+ * A gesture replays only whole: every step's side still holds the same flat and the same raster.
+ * One side replaced or gone → the whole gesture is dead (never half-undone, never replayed into
+ * another flat's pixels).
+ */
+export const gestureLive = (
+  g: Gesture,
+  sideOf: (view: string) => GestureSide | undefined,
+): boolean =>
+  g.every((s) => {
+    const side = sideOf(s.view);
+    return !!side && side.baseMediaId === s.base && side.labels === s.labels;
+  });

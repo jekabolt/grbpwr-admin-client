@@ -235,15 +235,15 @@ const sleeveAt = { x: fs[13] % front.w, y: Math.floor(fs[13] / front.w) };
 const sl = m.partIndices(fl, front, fp, 1, sleeveAt);
 const g1 = m.paintGesture(
   [
-    { view: 'front', labels: fl, idx: sl },
+    { view: 'front', base: 101, labels: fl, idx: sl },
     ...m
       .groupsNamed(bp, 'left sleeve')
-      .map((g) => ({ view: 'back', labels: bl, idx: m.partIndices(bl, backF, bp, g) })),
+      .map((g) => ({ view: 'back', base: 102, labels: bl, idx: m.partIndices(bl, backF, bp, g) })),
   ],
   A,
 );
 ck(g1.length === 2 && fl.some((v) => v) && bl.some((v) => v), 'one gesture paints both sides');
-const g2 = m.paintGesture([{ view: 'front', labels: fl, idx: grp }], B);
+const g2 = m.paintGesture([{ view: 'front', base: 101, labels: fl, idx: grp }], B);
 // Undo the last gesture, then the two-side one, in reverse step order.
 const views = { front: fl, back: bl };
 const undoG = (g) => [...g].reverse().forEach((s) => m.undoDiff(views[s.view], s.diff));
@@ -263,9 +263,28 @@ ck(
   'redo restores both sides exactly',
 );
 ck(
-  m.paintGesture([{ view: 'front', labels: fl, idx: sl }], A).length === 0,
+  m.paintGesture([{ view: 'front', base: 101, labels: fl, idx: sl }], A).length === 0,
   'repainting a painted part is no gesture',
 );
 
+// A side replaced after a two-side gesture: the whole gesture is dead, never half-replayed.
+const sides = { front: { baseMediaId: 101, labels: fl }, back: { baseMediaId: 102, labels: bl } };
+ck(
+  m.gestureLive(g1, (v) => sides[v]),
+  'a gesture on unchanged sides is live',
+);
+ck(
+  !m.gestureLive(g1, (v) => (v === 'back' ? { baseMediaId: 103, labels: bl } : sides[v])),
+  'back flat replaced → the two-side gesture is dead',
+);
+ck(
+  !m.gestureLive(g1, (v) => (v === 'back' ? { baseMediaId: 102, labels: bl.slice() } : sides[v])),
+  'same flat reopened (new raster) → dead',
+);
+ck(!m.gestureLive(g1, (v) => (v === 'back' ? undefined : sides[v])), 'back gone → dead');
+ck(
+  m.gestureLive(g2, (v) => (v === 'back' ? undefined : sides[v])),
+  'a front-only gesture survives the back going',
+);
 console.log(bad ? `\n${bad} FAIL` : '\nall ok');
 process.exit(bad ? 1 : 0);
