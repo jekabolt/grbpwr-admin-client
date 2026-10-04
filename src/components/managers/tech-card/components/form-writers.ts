@@ -151,6 +151,27 @@ export function bornBomLine(
   return { ...emptyBomItem, ...(values ?? {}), lineKey: ulid() };
 }
 
+/**
+ * Patch ONE BOM line, found by its `lineKey`, in the LIVE form (`getValues`, not a render snapshot).
+ * The row keeps every field the patch does not name — `id` and `lineKey` included, so a line still
+ * waiting for its id is patched in place and the autosave's id echo (matched on `lineKey`) still
+ * finds it. Returns false when no line carries that key.
+ */
+export function patchBomLine(
+  getValues: UseFormGetValues<TechCardFormData>,
+  setValue: UseFormSetValue<TechCardFormData>,
+  lineKey: string,
+  patch: Partial<Omit<typeof emptyBomItem, 'id' | 'lineKey'>>,
+): boolean {
+  const key = lineKey.trim();
+  if (!key) return false;
+  const cur = (getValues('bomItems') ?? []) as NonNullable<TechCardFormData['bomItems']>;
+  const k = cur.findIndex((b) => (b.lineKey ?? '').trim() === key);
+  if (k < 0) return false;
+  setValue(`bomItems.${k}`, { ...cur[k], ...patch } as never, { shouldDirty: true });
+  return true;
+}
+
 // ═══ LABELS REWORK (0386) — composition label, garment labels, packaging items ═══════════════════
 //
 // Same discipline as `upsertDetail`: every writer reads the LIVE form (`getValues`, not a render

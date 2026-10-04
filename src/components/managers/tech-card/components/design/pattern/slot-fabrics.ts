@@ -282,6 +282,40 @@ export const ARTWORK_TECHNIQUES = [
   'puff print',
 ];
 
+/**
+ * The BOM kind a technique writes onto its line — every one is homed in DECORATION (bom-kind.ts
+ * `KIND_HOME_SECTION`), so the line passes the schema's kind↔section parity and the autosave runs.
+ */
+const ARTWORK_TECHNIQUE_KIND: Record<string, string> = {
+  embroidery: 'TECH_CARD_BOM_KIND_EMBROIDERY',
+  'screen print': 'TECH_CARD_BOM_KIND_PRINT',
+  dtg: 'TECH_CARD_BOM_KIND_PRINT',
+  patch: 'TECH_CARD_BOM_KIND_PATCH',
+  appliqué: 'TECH_CARD_BOM_KIND_APPLIQUE',
+  'rubber print': 'TECH_CARD_BOM_KIND_PRINT',
+  'heat transfer': 'TECH_CARD_BOM_KIND_HEAT_TRANSFER',
+  'puff print': 'TECH_CARD_BOM_KIND_PRINT',
+};
+
+/** The line kind of an artwork technique ('' for a word outside `ARTWORK_TECHNIQUES`). */
+export function artworkKindOf(technique: string): string {
+  return ARTWORK_TECHNIQUE_KIND[technique.trim().toLowerCase()] ?? '';
+}
+
+/** The technique an artwork line was born with: the last ` · ` part of its detail, if a chip word. */
+export function artworkTechniqueOf(detail: string): string {
+  const last = detail.split(' · ').pop()?.trim().toLowerCase() ?? '';
+  return ARTWORK_TECHNIQUES.find((t) => t.toLowerCase() === last) ?? '';
+}
+
+/** `artwork N` with the smallest N ≥ 1 no name in `taken` already says (case-insensitive). */
+export function nextArtworkName(taken: readonly string[]): string {
+  const used = new Set(taken.map((n) => n.trim().toLowerCase()));
+  let n = 1;
+  while (used.has(`artwork ${n}`)) n += 1;
+  return `artwork ${n}`;
+}
+
 /** The artwork slots of a bench, in bench order. */
 export function artworkSlotsOf<T extends Pick<MaterialSlot, 'section'>>(slots: readonly T[]): T[] {
   return slots.filter(isArtworkSlot);

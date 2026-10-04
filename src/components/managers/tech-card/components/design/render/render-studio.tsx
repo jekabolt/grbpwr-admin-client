@@ -369,7 +369,13 @@ export function RenderStudio({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [band, wire, colorwayArchived, colorwayLabel, target.nowhere, painted, paint, paintVersion]);
 
-  const launch = () => {
+  /* T13 · the cloth mockups are drawn and uploaded at the press; the button stays busy meanwhile.
+     ONE PRESS AT A TIME, SYNCHRONOUSLY: the ref is set before the first await, so a second press
+     while preparing is a no-op (a second upload would mint new mockup ids → a new fingerprint →
+     a second paid run). */
+  const [mocking, setMocking] = useState(false);
+  const preparing = useRef(false);
+  const launch = async () => {
     /* O-61 (D-60, D-71): слова карточки, показанные в пустом IN WORDS, становятся СВОИМИ черновику —
        как флэт отдаёт свой засев в форму перед `flush`; правка WORDS флэта после прогона их уже не
        подменит. Тело ниже несёт их и без этого (`wire` — слова на экране), поэтому до ответа
@@ -378,6 +384,31 @@ export function RenderStudio({
        или обрыв не трогают ничего — слова остаются живым засевом. Свои слова уже стоят — квитанции
        нет. */
     const pressed = draft.wordsAtPress();
+    /* T13 · each outgoing map takes its cloth mockup (the cloth at its true repeat on that flat),
+       on the run's recipe only — the plan never stores one. Any side that cannot be drawn or
+       uploaded → the run goes WITHOUT mockups: a mockup never blocks GENERATE. */
+    let colourMaps = wire.colourMaps ?? [];
+    if (colourMaps.length > 0) {
+      const card = techCardId;
+      const rev = paint.plan()?.rev;
+      // Painting stands still from here to the launch: the maps sent are the maps drawn.
+      paint.setFrozen(true);
+      setMocking(true);
+      try {
+        if (!(await paint.flush()) || !paint.sendsAsSaved(colourMaps, rev)) return;
+        const ids = await paint.mockups(colourMaps, wire.fabrics ?? []);
+        // Anything moved meanwhile (another tab saved, the card changed): no run, quietly.
+        if (shownCard.current !== card || !paint.sendsAsSaved(colourMaps, rev)) return;
+        const all = colourMaps.every((m) => (ids.get(m.view ?? '') ?? 0) > 0);
+        colourMaps = colourMaps.map((m) => ({
+          ...m,
+          mockupMediaId: all ? ids.get(m.view ?? '') ?? 0 : 0,
+        }));
+      } finally {
+        paint.setFrozen(false);
+        setMocking(false);
+      }
+    }
     const body: StartRunInput = {
       kind: 'render',
       ask: '',
@@ -395,6 +426,7 @@ export function RenderStudio({
         layout: 'one',
         colour: {
           ...wire,
+          colourMaps,
           // DERIVED AT THE DOOR, NOT HELD BY A CONTROL: `source` predates combination and never
           // decides what travels — the populated fields do.
           source: wireColourSource(wire),
@@ -431,20 +463,26 @@ export function RenderStudio({
   const latest = useRef({ launch, gate, disabled });
   latest.current = { launch, gate, disabled };
   const generate = async () => {
-    const card = techCardId;
-    if (!seedBriefInFlight(card)) {
-      launch();
-      return;
-    }
-    setBriefing(true);
+    if (preparing.current || run.isPending) return;
+    preparing.current = true;
     try {
-      if ((await settleSeedBrief(card)) === 'busy') return;
+      const card = techCardId;
+      if (!seedBriefInFlight(card)) {
+        await launch();
+        return;
+      }
+      setBriefing(true);
+      try {
+        if ((await settleSeedBrief(card)) === 'busy') return;
+      } finally {
+        setBriefing(false);
+      }
+      const now = latest.current;
+      if (shownCard.current !== card || !now.gate.ok || now.disabled) return;
+      await now.launch();
     } finally {
-      setBriefing(false);
+      preparing.current = false;
     }
-    const now = latest.current;
-    if (shownCard.current !== card || !now.gate.ok || now.disabled) return;
-    now.launch();
   };
 
   /* ⚠ СТРОКА СОСТАВА СНЯТА ЦЕЛИКОМ (r3 п.27) — «made of pattern 1 — … · split into the slots
@@ -536,7 +574,7 @@ export function RenderStudio({
         <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
         <GenerateRow
           gate={gate}
-          pending={run.isPending || briefing}
+          pending={run.isPending || briefing || mocking}
           disabled={disabled}
           onGenerate={generate}
           onInspect={() => setInspecting(true)}
@@ -585,6 +623,7 @@ export function RenderStudio({
         kind='render'
         /* THE MODAL KNOWS NOTHING OF CHIPS: it is handed the SAME sentence that travels. */
         recipe={wire}
+        mockupsAtGenerate
         cardFit={cardFit}
         artworks={artworkLines}
       />

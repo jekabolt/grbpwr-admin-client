@@ -50,7 +50,7 @@ import {
   type CanvasArtwork,
   type Quad,
 } from './artworks';
-import { partIndices } from './parts-model';
+import { concatIndices, partIndices } from './parts-model';
 import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint';
 
 /**
@@ -544,6 +544,9 @@ function PaintSide({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, view.rev, w, h, flat]);
 
+  /** The hover canvas shows another side's part (R17), not one under this side's pointer. */
+  const echoShown = useRef(false);
+
   const clearHover = () => {
     const c = hover.current;
     const st = hoverState.current;
@@ -551,6 +554,7 @@ function PaintSide({
     st.mask = null;
     st.group = -1;
     st.region = 0;
+    echoShown.current = false;
     setPartName('');
     if (c) c.getContext('2d')?.clearRect(0, 0, c.width, c.height);
   };
@@ -567,6 +571,78 @@ function PaintSide({
   useEffect(() => {
     clearHover();
   }, [view.rev, session.armed, tool, view.parts]);
+
+  // R17: the part hovered on another side is tinted here too, with its name by the caption.
+  const echo = tool === 'pen' || tool === 'artwork' ? null : session.echoOf(view.view);
+  const echoKey = echo
+    ? `${echo.groups.join(',')}|${view.rev}|${view.partsSig}|${session.armed}|${tool}`
+    : '';
+  useEffect(() => {
+    if (!echo) {
+      if (echoShown.current) clearHover();
+      return;
+    }
+    if (!ready || !flat || !labels || !view.parts) return;
+    const parts = view.parts;
+    tint(concatIndices(echo.groups.map((g) => partIndices(labels, flat, parts, g))));
+    hoverState.current.mask = null;
+    echoShown.current = true;
+    setPartName(echo.label);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [echoKey, ready]);
+
+  /** Draw `idx` on the hover canvas in the armed material (white for erase). */
+  const tint = (idx: Int32Array | null) => {
+    const c = hover.current;
+    if (!c) return;
+    if (c.width !== w || c.height !== h) {
+      c.width = w;
+      c.height = h;
+    }
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+    if (!idx || idx.length === 0) return null;
+    const mask = new Uint8Array(w * h);
+    let x0 = w;
+    let y0 = h;
+    let x1 = 0;
+    let y1 = 0;
+    for (const i of idx) {
+      mask[i] = 1;
+      const ix = i % w;
+      const iy = (i / w) | 0;
+      if (ix < x0) x0 = ix;
+      if (ix > x1) x1 = ix;
+      if (iy < y0) y0 = iy;
+      if (iy > y1) y1 = iy;
+    }
+    const bw = x1 - x0 + 1;
+    const bh = y1 - y0 + 1;
+    const out = ctx.createImageData(bw, bh);
+    const erase = tool === 'erase';
+    const s = sampler(session.skins.get(session.armed), h);
+    const tmp = new Uint8ClampedArray(4);
+    for (const i of idx) {
+      const ix = i % w;
+      const iy = (i / w) | 0;
+      const p = ((iy - y0) * bw + (ix - x0)) * 4;
+      if (erase) {
+        out.data[p] = 255;
+        out.data[p + 1] = 255;
+        out.data[p + 2] = 255;
+        out.data[p + 3] = 200;
+      } else {
+        s(ix, iy, tmp, 0);
+        out.data[p] = tmp[0];
+        out.data[p + 1] = tmp[1];
+        out.data[p + 2] = tmp[2];
+        out.data[p + 3] = Math.round(255 * HOVER_ALPHA);
+      }
+    }
+    ctx.putImageData(out, x0, y0);
+    return mask;
+  };
 
   const toRaster = (e: PointerEvent<HTMLElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -604,59 +680,12 @@ function PaintSide({
     st.region = region;
     const label = parts && group >= 0 ? parts.groups[group].label : '';
     setPartName(label && parts?.split.has(region) ? `${label} · no seam, use the pen` : label);
-    const c = hover.current;
-    if (!c) return;
-    if (c.width !== w || c.height !== h) {
-      c.width = w;
-      c.height = h;
-    }
-    const ctx = c.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, w, h);
+    session.setHover(view.view, group);
+    echoShown.current = false;
     st.idx = idx;
     st.rev = view.rev;
     st.armed = session.armed;
-    st.mask = null;
-    if (!idx || idx.length === 0) return;
-    const mask = new Uint8Array(w * h);
-    let x0 = w;
-    let y0 = h;
-    let x1 = 0;
-    let y1 = 0;
-    for (const i of idx) {
-      mask[i] = 1;
-      const ix = i % w;
-      const iy = (i / w) | 0;
-      if (ix < x0) x0 = ix;
-      if (ix > x1) x1 = ix;
-      if (iy < y0) y0 = iy;
-      if (iy > y1) y1 = iy;
-    }
-    st.mask = mask;
-    const bw = x1 - x0 + 1;
-    const bh = y1 - y0 + 1;
-    const out = ctx.createImageData(bw, bh);
-    const erase = tool === 'erase';
-    const s = sampler(session.skins.get(session.armed), h);
-    const tmp = new Uint8ClampedArray(4);
-    for (const i of idx) {
-      const ix = i % w;
-      const iy = (i / w) | 0;
-      const p = ((iy - y0) * bw + (ix - x0)) * 4;
-      if (erase) {
-        out.data[p] = 255;
-        out.data[p + 1] = 255;
-        out.data[p + 2] = 255;
-        out.data[p + 3] = 200;
-      } else {
-        s(ix, iy, tmp, 0);
-        out.data[p] = tmp[0];
-        out.data[p + 1] = tmp[1];
-        out.data[p + 2] = tmp[2];
-        out.data[p + 3] = Math.round(255 * HOVER_ALPHA);
-      }
-    }
-    ctx.putImageData(out, x0, y0);
+    st.mask = tint(idx) ?? null;
   };
 
   /** The flat's ink cost field — built on first use, only for the side being drawn on. */
@@ -876,6 +905,7 @@ function PaintSide({
         onPointerLeave={() => {
           clearHover();
           stopPreview();
+          if (session.hovered?.view === view.view) session.setHover(null);
         }}
       >
         <canvas ref={mock} className='absolute inset-0 size-full' />
@@ -929,16 +959,6 @@ function PaintSide({
         )}
         {view.stale && <Pill tone='attention'>stale</Pill>}
         {view.status === 'error' && <Pill tone='warn'>not loaded</Pill>}
-        {view.partsFailed && (
-          <button
-            type='button'
-            onClick={() => session.retryParts(view.view)}
-            title={view.partsFailed}
-            data-paint-parts-retry=''
-          >
-            <Pill tone='warn'>parts · retry</Pill>
-          </button>
-        )}
       </div>
     </div>
   );
@@ -948,7 +968,7 @@ type Pending = Placed & { token: number; gone: boolean };
 
 export function PartsCanvas({
   session,
-  disabled,
+  disabled: disabledProp,
   band,
   artworks,
 }: {
@@ -959,6 +979,8 @@ export function PartsCanvas({
   /** R7 · the artworks bound to the current colourway (`artworksOf`). */
   artworks?: readonly CanvasArtwork[];
 }): JSX.Element | null {
+  /* GENERATE is preparing its run off these maps: nothing paints until it has left. */
+  const disabled = disabledProp || session.frozen;
   const views = [...session.views.values()];
 
   /* ─── R7 · artwork placements: the band's marks + an optimistic copy until the band re-reads ─── */
@@ -1188,6 +1210,16 @@ export function PartsCanvas({
           <Pill tone={save === 'unsaved' ? 'attention' : 'warn'}>unsaved · retry</Pill>
         </button>
       ) : null}
+      {session.partsFailed && (
+        <button
+          type='button'
+          onClick={() => session.retryParts()}
+          title={session.partsFailed}
+          data-paint-parts-retry=''
+        >
+          <Pill tone='warn'>parts · retry</Pill>
+        </button>
+      )}
       {TOOLS.map((t) => (
         <Chip
           key={t}

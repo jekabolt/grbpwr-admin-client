@@ -11,12 +11,16 @@
  * fresh document, once; a second conflict stops at `unsaved` — nothing is overwritten silently.
  */
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
-import type { GetDesignBandResponse } from 'api/proto-http/admin';
+import type {
+  GetDesignBandResponse,
+  common_DesignColourMap,
+  common_DesignFabricUse,
+} from 'api/proto-http/admin';
 import { adminService } from 'api/api';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 
-import { assetThumb } from '../assets/model';
+import { assetFull, assetThumb } from '../assets/model';
 import {
   PLAN_BYTES_MAX,
   PLAN_CLOTHS_MAX,
@@ -47,14 +51,16 @@ import {
   undoDiff,
 } from './map-model';
 import {
+  concatIndices,
   gestureLive,
-  groupsNamed,
+  keyedSuggestion,
   markFontPx,
   markPoints,
   marksTint,
   paintGesture,
   paintedPartNames,
   partIndices,
+  partAcross,
   partNamesByLabel,
   partsOf,
   PARTS_REGIONS_MAX,
@@ -62,6 +68,7 @@ import {
   type Gesture,
   type ViewParts,
 } from './parts-model';
+import { MOCKUP_REV, mockupPixels, mockupTilePx, type MockupSkin } from './mockup';
 import { analyseFlat, REGIONS_ALGO_REV, type FlatRegions } from './regions';
 
 /** `artwork` (R7): the armed artwork is placed on the flats as a box; the paint stays as is. */
@@ -88,8 +95,6 @@ export type PaintView = {
   parts: ViewParts | null;
   /** The suggestion row `parts` came from (re-read only when it changes). */
   partsSig: string;
-  /** Auto parts asked and refused: `parts · retry` by the side's caption. */
-  partsFailed: string;
 };
 
 /** One thing to paint with: a slot's bound cloth or a free colour. */
@@ -155,6 +160,23 @@ function marksPng(flat: FlatRegions, seeds: Int32Array): string {
     ctx.fillText(String(r), x, y);
   }
   return canvas.toDataURL('image/png');
+}
+
+/** A cloth's picture for the mockup: its own pixels, the long side capped at 1024. */
+async function clothPixels(url: string): Promise<ImageData> {
+  const blob = await fetchMediaBlob(url);
+  const bmp = await createImageBitmap(blob);
+  const s = Math.min(1, 1024 / Math.max(1, bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * s));
+  const h = Math.max(1, Math.round(bmp.height * s));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('no 2d context');
+  ctx.drawImage(bmp, 0, 0, w, h);
+  bmp.close();
+  return ctx.getImageData(0, 0, w, h);
 }
 
 async function tileOf(url: string): Promise<ImageData> {
@@ -224,8 +246,20 @@ export class PaintSession {
 
   private undoStack: Gesture[] = [];
   private redoStack: Gesture[] = [];
-  /** Auto parts asked once per (view, flat, cutter) in this session. */
+  /** Auto parts asked once per (the sides' flats, cutter) in this session. */
   private asked = new Set<string>();
+  /** The card-level auto parts asked and refused: one `parts · retry` for the block. */
+  partsFailed = '';
+  /**
+   * GENERATE is preparing (flush → mockups → launch): no gesture, no colour change, no undo — the
+   * maps and the plan the run is built from must not move underneath it.
+   */
+  frozen = false;
+  /** The cloth mockups of one exact set of outgoing maps → their media (or none), reused on a
+   *  retry so the same press keeps the same recipe and idempotency key. */
+  private mockCache = new Map<string, Map<string, number>>();
+  /** The part under the pointer (R17): the same part is tinted on every side. */
+  hovered: { view: string; group: number } | null = null;
   /** `paintedPartNames` per side, keyed by what it was read from. */
   private namesCache = new Map<string, { key: string; names: Map<number, string[]> }>();
   /** Sides a part click just painted by name (R9) — lit for a moment. */
@@ -388,13 +422,15 @@ export class PaintSession {
       }
     if (changed) this.prune();
     for (const v of this.views.values()) if (this.takeParts(v)) changed = true;
+    if (this.hovered && !this.views.get(this.hovered.view)?.parts) {
+      this.hovered = null;
+      changed = true;
+    }
     if (changed) this.bump();
-    for (const v of this.views.values()) this.suggestParts(v);
+    this.suggestCard();
   }
 
   /* ─────────────────────────── auto parts ─────────────────────────── */
-
-  private partsKey = (v: PaintView) => `${v.view}|${v.baseMediaId}|${REGIONS_ALGO_REV}`;
 
   /** The band's suggestion row for this side's flat and this cutter. */
   private bandParts(v: PaintView) {
@@ -406,74 +442,139 @@ export class PaintSession {
     );
   }
 
-  /** Lay the band's suggestion for this flat over its regions. True when it changed. */
+  /** The side has the card-level answer (Ф2.1 topology); an older side-by-side one is stale. */
+  private partsFresh(v: PaintView): boolean {
+    const row = this.bandParts(v);
+    return (!!row && keyedSuggestion(row)) || !!v.parts?.keyed;
+  }
+
+  /**
+   * Lay the band's suggestion for this flat over its regions. True when it changed. A stale row
+   * (no `part_key`) still names the parts until the card-level answer comes, never over it.
+   */
   private takeParts(v: PaintView): boolean {
     if (v.status !== 'ready' || !v.flat) return false;
     const row = this.bandParts(v);
     if (!row) return false;
+    if (v.parts?.keyed && !keyedSuggestion(row)) return false;
     const sig = JSON.stringify([row.parts, row.splitNeeded]);
     if (sig === v.partsSig) return false;
     v.partsSig = sig;
-    v.parts = partsOf(row, v.flat, v.parts?.seeds ?? markPoints(v.flat));
-    v.partsFailed = '';
+    v.parts = partsOf(row, v.flat, v.parts?.seeds ?? markPoints(v.flat), v.view);
     return true;
   }
 
-  /** A side ready, cut into 2..60 regions and without parts: ask the model, once. */
-  private suggestParts(v: PaintView, again = false) {
-    if (v.status !== 'ready' || !v.flat || v.parts || !this.band) return;
-    if (v.flat.count < PARTS_REGIONS_MIN || v.flat.count > PARTS_REGIONS_MAX) return;
-    const key = this.partsKey(v);
+  /**
+   * Ф2.1: once every side holding a flat is cut (or failed to load), ONE call names the parts of
+   * all of them together — one part, one key, across the sides. Sides cut into fewer than 2 or more
+   * than 60 regions are not sent. Asked once per set of flats in this session.
+   */
+  private suggestCard(again = false) {
+    if (!this.band) return;
+    const all = [...this.views.values()];
+    if (all.some((v) => v.status === 'loading')) return;
+    const sides = all.filter(
+      (v): v is PaintView & { flat: FlatRegions } =>
+        v.status === 'ready' &&
+        !!v.flat &&
+        v.flat.count >= PARTS_REGIONS_MIN &&
+        v.flat.count <= PARTS_REGIONS_MAX,
+    );
+    if (sides.length === 0 || sides.every((v) => this.partsFresh(v))) return;
+    const key = `${sides
+      .map((v) => `${v.view}:${v.baseMediaId}`)
+      .sort()
+      .join('|')}|${REGIONS_ALGO_REV}`;
     if (this.asked.has(key) && !again) return;
     this.asked.add(key);
-    const flat = v.flat;
+    this.partsFailed = '';
+    const current = () => sides.every((v) => this.views.get(v.view) === v);
     void (async () => {
       try {
-        const seeds = markPoints(flat);
-        const media = await uploadRaster(marksPng(flat, seeds));
-        // The upload took a while: the side may have changed or its parts arrived meanwhile.
-        if (this.views.get(v.view) !== v || v.parts || this.bandParts(v)) {
-          if (this.views.get(v.view) === v && !v.parts && this.takeParts(v)) this.bump();
+        const seeds = sides.map((v) => v.parts?.seeds ?? markPoints(v.flat));
+        const media = await Promise.all(
+          sides.map((v, i) => uploadRaster(marksPng(v.flat, seeds[i]))),
+        );
+        // The uploads took a while: a side changed (its own sync asks anew) or the answer came.
+        if (!current()) return;
+        if (sides.every((v) => this.partsFresh(v))) {
+          for (const v of sides) this.takeParts(v);
           return;
         }
-        const res = await adminService.SuggestDesignParts({
+        const res = await adminService.SuggestDesignPartsCard({
           techCardId: this.techCardId,
-          view: v.view,
-          baseMediaId: v.baseMediaId,
-          marksMediaId: media.id ?? 0,
-          regionCount: flat.count,
           algoRev: REGIONS_ALGO_REV,
           force: false,
+          views: sides.map((v, i) => ({
+            view: v.view,
+            baseMediaId: v.baseMediaId,
+            marksMediaId: media[i].id ?? 0,
+            regionCount: v.flat.count,
+          })),
         });
-        if (this.views.get(v.view) !== v) return;
-        const s = res.suggestion;
-        // Numbers mean something only for the cut that drew them: a suggestion for another side,
-        // flat or algo rev would paint unrelated regions.
-        const fits =
-          !!s &&
-          s.view === v.view &&
-          (s.baseMediaId ?? 0) === v.baseMediaId &&
-          s.algoRev === REGIONS_ALGO_REV;
-        v.parts = fits ? partsOf(s, flat, seeds) : null;
-        if (!v.parts) throw new Error('the assistant answered nothing usable');
-        v.partsSig = JSON.stringify([s?.parts, s?.splitNeeded]);
-        v.partsFailed = '';
+        let got = 0;
+        for (const s of res.suggestions ?? []) {
+          const i = sides.findIndex((v) => v.view === s.view);
+          const v = sides[i];
+          // Numbers mean something only for the cut that drew them: a suggestion for another
+          // flat or algo rev would paint unrelated regions.
+          if (!v || this.views.get(v.view) !== v) continue;
+          if ((s.baseMediaId ?? 0) !== v.baseMediaId || s.algoRev !== REGIONS_ALGO_REV) continue;
+          const parts = partsOf(s, v.flat, seeds[i], v.view);
+          if (!parts) continue;
+          v.parts = parts;
+          v.partsSig = JSON.stringify([s.parts, s.splitNeeded]);
+          got += 1;
+        }
+        if (got === 0) {
+          if (!current()) return;
+          throw new Error('the assistant answered nothing usable');
+        }
         void this.qc.invalidateQueries({ queryKey: designKeys.band(this.techCardId) });
       } catch (e) {
-        if (this.views.get(v.view) !== v) return;
-        v.partsFailed = (e instanceof Error && e.message) || 'the parts were not named';
+        if (!current()) return;
+        this.partsFailed = (e instanceof Error && e.message) || 'the parts were not named';
+      } finally {
+        this.bump();
       }
-      this.bump();
     })();
   }
 
-  /** `parts · retry`. */
-  retryParts(view: string) {
-    const v = this.views.get(view);
-    if (!v?.partsFailed) return;
-    v.partsFailed = '';
+  /** `parts · retry` (one for the block). */
+  retryParts() {
+    if (!this.partsFailed) return;
+    this.partsFailed = '';
     this.bump();
-    this.suggestParts(v, true);
+    this.suggestCard(true);
+  }
+
+  /**
+   * The part under the pointer moved (R17); -1 / null = none. Other sides tint the same part.
+   */
+  setHover(view: string | null, group = -1) {
+    const next = view && group >= 0 ? { view, group } : null;
+    const was = this.hovered;
+    if (was?.view === next?.view && was?.group === next?.group) return;
+    this.hovered = next;
+    this.bump();
+  }
+
+  /** The same part on every side with parts (R17), the given group first. */
+  private across(view: string, group: number) {
+    const sides = [...this.views.values()]
+      .filter((v) => v.status === 'ready' && !!v.flat && !!v.labels)
+      .map((v) => ({ view: v.view, parts: v.parts }));
+    return partAcross(sides, view, group);
+  }
+
+  /** The groups on `view` that are the part hovered on ANOTHER side, and its name. */
+  echoOf(view: string): { groups: number[]; label: string } | null {
+    const h = this.hovered;
+    if (!h || h.view === view) return null;
+    const hit = this.across(h.view, h.group).find((x) => x.view === view);
+    const v = this.views.get(view);
+    if (!hit || !v?.parts) return null;
+    return { groups: hit.groups, label: v.parts.groups[hit.groups[0]]?.label ?? '' };
   }
 
   private loadSkin(m: PaintMaterial) {
@@ -518,7 +619,6 @@ export class PaintSession {
       rev: 0,
       parts: null,
       partsSig: '',
-      partsFailed: '',
     };
     this.views.set(view, v);
     const saved = plan?.maps.find((m) => m.view === view);
@@ -548,13 +648,13 @@ export class PaintSession {
         v.status = 'ready';
         v.rev += 1;
         this.takeParts(v);
-        this.suggestParts(v);
       } catch {
         // A view whose saved painting could not be read is NOT paintable: painting over it would
         // save a blank over somebody's work.
         if (this.views.get(view) === v) v.status = 'error';
       }
       this.bump();
+      if (this.views.get(view) === v) this.suggestCard();
     })();
   }
 
@@ -581,6 +681,7 @@ export class PaintSession {
 
   /** A new free colour; armed at once. */
   addColour(colourHex: string): string {
+    if (this.frozen) return '';
     const taken = [...this.slotLabel.values(), ...this.colours.map((c) => c.label)];
     for (const v of this.views.values())
       if (v.labels) for (const hex of this.labelsIn(v.labels)) taken.push(hex);
@@ -601,6 +702,7 @@ export class PaintSession {
 
   /** Change a free colour (its label stays; the plan row follows on the next save). */
   setColour(label: string, colourHex: string) {
+    if (this.frozen) return;
     const c = this.colours.find((x) => x.label === label);
     if (!c || c.colourHex === colourHex) return;
     c.colourHex = colourHex;
@@ -628,18 +730,22 @@ export class PaintSession {
   }
 
   /**
-   * A part click: the part under the pointer, and — by its name (R9) — the same part on every
-   * other side that has parts, one gesture (one undo). The other sides painted light up a moment.
+   * A part click (R17): the part under the pointer and the same part — by its `part_key`, or by
+   * name on older answers — on every other side that has parts, one gesture (one undo). The other
+   * sides painted light up a moment.
    */
   paintPart(view: string, group: number, at: { x: number; y: number }) {
     const v = this.views.get(view);
     if (!v?.parts || !v.flat || !v.labels) return;
-    const targets = [{ view, idx: partIndices(v.labels, v.flat, v.parts, group, at) }];
-    const label = v.parts.groups[group]?.label ?? '';
-    for (const o of this.views.values()) {
-      if (o === v || o.status !== 'ready' || !o.parts || !o.flat || !o.labels) continue;
-      for (const g of groupsNamed(o.parts, label))
-        targets.push({ view: o.view, idx: partIndices(o.labels, o.flat, o.parts, g) });
+    const targets: { view: string; idx: Int32Array }[] = [];
+    for (const hit of this.across(view, group)) {
+      const o = this.views.get(hit.view);
+      if (!o?.parts || !o.flat || !o.labels) continue;
+      const { flat, labels, parts } = o;
+      const chunks = hit.groups.map((g, i) =>
+        partIndices(labels, flat, parts, g, o === v && i === 0 ? at : undefined),
+      );
+      targets.push({ view: hit.view, idx: concatIndices(chunks) });
     }
     const touched = this.applyMany(targets);
     const others = touched.filter((x) => x !== view);
@@ -682,6 +788,7 @@ export class PaintSession {
 
   /** One gesture over several sides. Returns the sides it changed. */
   private applyMany(targets: { view: string; idx: Int32Array }[], paint?: number): string[] {
+    if (this.frozen) return [];
     const value = paint ?? (this.tool === 'erase' ? 0 : this.armed ? packHex(this.armed) : 0);
     if (paint === undefined && this.tool !== 'erase' && !value) return [];
     const ready = targets.flatMap((t) => {
@@ -731,6 +838,7 @@ export class PaintSession {
   }
 
   undo() {
+    if (this.frozen) return;
     let g = this.undoStack.pop();
     while (g && !this.live(g)) g = this.undoStack.pop();
     if (!g) return this.bump();
@@ -739,6 +847,7 @@ export class PaintSession {
   }
 
   redo() {
+    if (this.frozen) return;
     let g = this.redoStack.pop();
     while (g && !this.live(g)) g = this.redoStack.pop();
     if (!g) return this.bump();
@@ -854,6 +963,128 @@ export class PaintSession {
       this.again = false;
       return ok;
     });
+  }
+
+  /* ─────────────────────────── the cloth mockups (T13) ─────────────────────────── */
+
+  /** Freeze / unfreeze painting while GENERATE prepares. */
+  setFrozen(on: boolean) {
+    if (this.frozen === on) return;
+    this.frozen = on;
+    this.bump();
+  }
+
+  /**
+   * The outgoing maps still stand exactly as the session holds them: the plan at `rev`, every map
+   * the saved one of its side, over the same flat, nothing painted since.
+   */
+  sendsAsSaved(maps: readonly common_DesignColourMap[], rev: number | undefined): boolean {
+    const plan = this.plan();
+    if (!plan || plan.rev !== rev) return false;
+    return maps.every((m) => {
+      const v = this.views.get(m.view ?? '');
+      const saved = plan.maps.find((x) => x.view === m.view);
+      return (
+        !!v &&
+        v.status === 'ready' &&
+        !v.dirty &&
+        v.mapBase === (m.mediaId ?? 0) &&
+        v.baseMediaId === (m.baseMediaId ?? 0) &&
+        saved?.mediaId === (m.mediaId ?? 0)
+      );
+    });
+  }
+
+  /**
+   * At GENERATE (frozen, after the save settled): one cloth mockup per outgoing map
+   * (`mockup.ts`), each label filled with the cloth its fabric use names (the asset's picture at
+   * its true repeat, or the free colour), uploaded. View → media id; EMPTY when any side cannot be
+   * drawn exactly as its map or any upload fails — the run then goes WITHOUT mockups. The answer
+   * is kept per canonical signature (map media, flats, per-label cloth + repeat, algo): the same
+   * press again reuses it — the same ids, the same recipe, the same idempotency key.
+   */
+  async mockups(
+    maps: readonly common_DesignColourMap[],
+    uses: readonly common_DesignFabricUse[],
+  ): Promise<Map<string, number>> {
+    const band = this.band;
+    if (!band) return new Map();
+    const assets = new Map((band.assets ?? []).map((a) => [a.id ?? 0, a]));
+    const useOf = (hex: string) => uses.find((u) => (u.mapHex ?? '').toLowerCase() === hex);
+    const sig = JSON.stringify([
+      MOCKUP_REV,
+      REGIONS_ALGO_REV,
+      maps.map((m) => [
+        m.view,
+        m.mediaId,
+        m.baseMediaId,
+        (m.palette ?? []).map((sw) => {
+          const hex = (sw.hex ?? '').toLowerCase();
+          const u = useOf(hex);
+          const a = (u?.assetId ?? 0) > 0 ? assets.get(u?.assetId ?? 0) : undefined;
+          return [
+            hex,
+            u?.assetId ?? 0,
+            a?.mediaId ?? 0,
+            u?.colourHex ?? '',
+            u?.repeatMm || a?.repeatMm || 0,
+          ];
+        }),
+      ]),
+    ]);
+    const hit = this.mockCache.get(sig);
+    if (hit) return hit;
+    const out = new Map<string, number>();
+    try {
+      const pictures = new Map<string, Promise<ImageData>>();
+      for (const m of maps) {
+        const view = m.view ?? '';
+        const v = this.views.get(view);
+        if (!v || v.status !== 'ready' || v.dirty || !v.labels || !v.flat || !v.pixels)
+          throw new Error(`${view} is not drawn as saved`);
+        if (v.baseMediaId !== (m.baseMediaId ?? 0) || v.mapBase !== (m.mediaId ?? 0))
+          throw new Error(`${view} stands on another map`);
+        // A copy: the drawing below spans awaits, and nothing it reads may move under it.
+        const flat = v.flat;
+        const labels = v.labels.slice();
+        const pixels = v.pixels.data.slice();
+        const skins = new Map<number, MockupSkin>();
+        for (const sw of m.palette ?? []) {
+          const hex = (sw.hex ?? '').toLowerCase();
+          const use = useOf(hex);
+          if (!use) continue;
+          const asset = (use.assetId ?? 0) > 0 ? assets.get(use.assetId ?? 0) : undefined;
+          const url = asset ? assetFull(asset) : '';
+          if (url) {
+            let pic = pictures.get(url);
+            if (!pic) {
+              pic = clothPixels(url);
+              pictures.set(url, pic);
+            }
+            const img = await pic;
+            skins.set(packHex(hex), {
+              kind: 'tile',
+              rgba: img.data,
+              w: img.width,
+              h: img.height,
+              tilePx: mockupTilePx(use.repeatMm || asset?.repeatMm || 0, flat.w),
+            });
+          } else {
+            const c = (use.colourHex ?? '').trim();
+            if (c) skins.set(packHex(hex), { kind: 'colour', hex: c });
+          }
+        }
+        const rgba = mockupPixels(flat, labels, pixels, skins);
+        const media = await uploadRaster(pngOf(rgba, flat.w, flat.h));
+        const id = media.id ?? 0;
+        if (id <= 0) throw new Error('the mockup did not upload');
+        out.set(view, id);
+      }
+    } catch {
+      out.clear();
+    }
+    this.mockCache.set(sig, out);
+    return out;
   }
 
   /** Dirty views whose saved map was replaced by somebody else since our pixels were based on it. */

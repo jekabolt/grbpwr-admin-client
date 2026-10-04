@@ -15776,6 +15776,18 @@ export type common_DesignColourMap = {
   // a claim that the file is gone. The distinction is DesignEditLayer.raster_deleted's, verbatim:
   // a failed lookup must not report a deletion that may not have happened.
   deleted: boolean | undefined;
+  // FK media(id), OPTIONAL (0 = none): THE CLOTH MOCKUP OF THIS MAP — the same flat of the same
+  // `view` over the same base, each labelled part filled flat with its cloth's tile at the cloth's
+  // TRUE repeat. Read on the frozen recipe (DesignColourRecipe.colour_maps) only; the colour plan
+  // does not store it.
+  // ⚠ IT SHOWS WHERE AND HOW BIG, NEVER HOW IT LOOKS. Measured (paint-parts T13 A/B): handed a
+  // mockup, the image model copies the motif's SCALE and colours from it — so its scale must be
+  // the cloth's real repeat — while placement was already right from the map alone. It is attached
+  // right after its map with a caption that forbids its flat, unlit look.
+  // It belongs to its map, so it travels HERE rather than as an extra input; the run door holds it
+  // to the same rules as the map: card-owned media, never also a map, a plate, a reference or a
+  // cloth of the same run.
+  mockupMediaId: number | undefined;
 };
 
 // DesignColourSwatch is ONE label of a colour map: a colour somebody deliberately chose, and how
@@ -16744,6 +16756,10 @@ export type DesignPartsSuggestion = {
 export type DesignPartGroup = {
   label: string | undefined;
   regions: number[] | undefined;
+  // part_key — the part's identity across the sides of one SuggestDesignPartsCard answer (slug of
+  // the label, unique within the answer: "left-sleeve", "collar-2"; "unnamed-<view>" for what the
+  // model left out). Empty on answers of the per-side SuggestDesignParts.
+  partKey: string | undefined;
 };
 
 // DesignPartSplit is a region that spans two parts with no seam line drawn.
@@ -17746,6 +17762,26 @@ export type SuggestDesignPartsRequest = {
 
 export type SuggestDesignPartsResponse = {
   suggestion: DesignPartsSuggestion | undefined;
+  cached: boolean | undefined;
+};
+
+// DesignPartsViewInput is one side of a SuggestDesignPartsCard request.
+export type DesignPartsViewInput = {
+  view: string | undefined;
+  baseMediaId: number | undefined;
+  marksMediaId: number | undefined;
+  regionCount: number | undefined;
+};
+
+export type SuggestDesignPartsCardRequest = {
+  techCardId: number | undefined;
+  algoRev: string | undefined;
+  force: boolean | undefined;
+  views: DesignPartsViewInput[] | undefined;
+};
+
+export type SuggestDesignPartsCardResponse = {
+  suggestions: DesignPartsSuggestion[] | undefined;
   cached: boolean | undefined;
 };
 
@@ -19445,6 +19481,15 @@ export interface AdminService {
   // FailedPrecondition: the flat changed (base_media_id is not the side's flat), the region count is
   // outside 2..60.
   SuggestDesignParts(request: SuggestDesignPartsRequest): Promise<SuggestDesignPartsResponse>;
+  // SuggestDesignPartsCard (auto parts, topology) — ONE sync vision+JSON call over every requested
+  // side at once: the model sees the marks pictures in view order and lists the garment's PHYSICAL
+  // parts, each with its region numbers on every side it is visible on, so one part (the collar)
+  // is one part across front, back and the sides. The answer is stored per side in the same cache
+  // as SuggestDesignParts (card, view, base_media_id, algo_rev); every group carries a part_key
+  // shared across the sides. A cached answer is returned without a call when EVERY requested side
+  // has one from this call shape and !force.
+  // FailedPrecondition: a side's flat changed, a side's region count is outside 2..60.
+  SuggestDesignPartsCard(request: SuggestDesignPartsCardRequest): Promise<SuggestDesignPartsCardResponse>;
   // GetDesignQuizAnswers — every quiz answer stored on the card, in display order.
   GetDesignQuizAnswers(request: GetDesignQuizAnswersRequest): Promise<GetDesignQuizAnswersResponse>;
   // SaveDesignQuizAnswers REPLACES the card's whole answer list with the one sent (single writer:
@@ -26076,6 +26121,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SuggestDesignParts",
       }) as Promise<SuggestDesignPartsResponse>;
+    },
+    SuggestDesignPartsCard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/parts:suggest-card`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestDesignPartsCard",
+      }) as Promise<SuggestDesignPartsCardResponse>;
     },
     GetDesignQuizAnswers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {

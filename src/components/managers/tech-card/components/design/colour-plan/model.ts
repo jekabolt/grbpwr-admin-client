@@ -211,7 +211,8 @@ export function exactPalette(
     counts[slot] += 1;
   }
   const out: PlanSwatch[] = [];
-  for (let i = 0; i < order.length; i += 1) if (counts[i] > 0) out.push({ hex: order[i], px: counts[i] });
+  for (let i = 0; i < order.length; i += 1)
+    if (counts[i] > 0) out.push({ hex: order[i], px: counts[i] });
   return out;
 }
 
@@ -292,6 +293,9 @@ export const writeMap = (m: PlanMap): common_DesignColourMap => ({
      клиенту способ объявить карту живой. Номер картинки — единственное, что здесь наше. */
   media: undefined,
   deleted: false,
+  /* The cloth mockup lives on the run's frozen recipe only (T13): the plan never stores one, and
+     GENERATE fills it per map right before the run starts (`PaintSession.mockups`). */
+  mockupMediaId: 0,
 });
 
 export const writeCloth = (c: PlanCloth): common_DesignColourCloth => ({
@@ -480,7 +484,8 @@ export function runPictureIds(
   }
   for (const f of fabrics) {
     const id = f.mediaId ?? 0;
-    if (id > 0 && !roles.has(id)) roles.set(id, `the swatch of ${(f.name ?? '').trim() || 'a cloth'}`);
+    if (id > 0 && !roles.has(id))
+      roles.set(id, `the swatch of ${(f.name ?? '').trim() || 'a cloth'}`);
   }
   return roles;
 }

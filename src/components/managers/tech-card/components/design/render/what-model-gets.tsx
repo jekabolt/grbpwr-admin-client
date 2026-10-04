@@ -1,6 +1,7 @@
 import type {
   GetDesignBandResponse,
   common_Color,
+  common_DesignColourMap,
   common_DesignColourRecipe,
   common_MediaFull,
   common_Model,
@@ -185,6 +186,7 @@ export function WhatModelGetsRenderModal({
   colorwayId,
   colorwayLabel,
   artworks,
+  mockupsAtGenerate,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -212,6 +214,11 @@ export function WhatModelGetsRenderModal({
    * front`), read client-side from the same placements the server freezes at launch. Render arm.
    */
   artworks?: readonly string[];
+  /**
+   * T13 · the live GENERATE row: every map of `recipe` will take its cloth mockup at the press
+   * (drawn then, so it has no media yet). A frozen recipe names its own `mockupMediaId`.
+   */
+  mockupsAtGenerate?: boolean;
 }): JSX.Element {
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
@@ -243,6 +250,7 @@ export function WhatModelGetsRenderModal({
         garment={garment}
         resolved={resolved}
         artworks={artworks ?? []}
+        mockupsAtGenerate={!!mockupsAtGenerate}
       />
     ) : kind === 'recolor' ? (
       <RecolorBody
@@ -279,6 +287,7 @@ export function WhatModelGetsRenderModal({
         colorwayId: colorwayId ?? 0,
         colorwayLabel: colorwayLabel ?? '',
         artworks: artworks ?? [],
+        mockupsAtGenerate,
       }),
     // `resolved` is rebuilt each render by design (it is three references, not state); the text is
     // recomputed from the same inputs the panel draws from, so the dictionaries are named here.
@@ -296,6 +305,7 @@ export function WhatModelGetsRenderModal({
       colorwayId,
       colorwayLabel,
       artworks,
+      mockupsAtGenerate,
     ],
   );
 
@@ -384,12 +394,14 @@ function RenderBody({
   garment,
   resolved,
   artworks,
+  mockupsAtGenerate,
 }: {
   band: GetDesignBandResponse;
   recipe?: common_DesignColourRecipe;
   garment: string;
   resolved: Resolved;
   artworks: readonly string[];
+  mockupsAtGenerate: boolean;
 }): JSX.Element {
   const sides = useMemo(() => benchSides(band), [band]);
   const filled = sides.filter((side) => !!side.picture);
@@ -561,9 +573,16 @@ function RenderBody({
             text={
               <>
                 {(recipe?.colourMaps ?? [])
-                  .map((m) => `${viewLabel((m.view ?? '').trim())} · media ${m.mediaId ?? 0}`)
+                  .map((m) => colourMapLine(m, mockupsAtGenerate, ' · '))
                   .join(' · ')}{' '}
                 — <b>each travels as its own image</b>, and the prompt says which flat it labels
+                {((recipe?.colourMaps ?? []).some((m) => (m.mockupMediaId ?? 0) > 0) ||
+                  mockupsAtGenerate) && (
+                  <>
+                    ; each <b>mockup</b> follows its map — the cloth on that flat at its true
+                    repeat, read for WHERE and HOW BIG, never for its flat, unlit look
+                  </>
+                )}
               </>
             }
           />
@@ -1018,6 +1037,14 @@ function bodyLine(models: readonly common_Model[] | undefined, threed?: ThreedDr
  * the rendered nodes would silently change whenever a label was reworded, and would carry «missing
  * — blocks 3D» into a brief as if it were an instruction.
  */
+/** One map of the inventory with its cloth mockup (T13): its media, or «drawn at GENERATE». */
+function colourMapLine(m: common_DesignColourMap, atGenerate: boolean, sep: string): string {
+  const head = `${viewLabel((m.view ?? '').trim())}${sep}media ${m.mediaId ?? 0}`;
+  const mock = m.mockupMediaId ?? 0;
+  if (mock > 0) return `${head} + mockup media ${mock}`;
+  return atGenerate ? `${head} + cloth mockup (drawn at GENERATE)` : head;
+}
+
 function plainText({
   kind,
   band,
@@ -1030,6 +1057,7 @@ function plainText({
   colorwayId,
   colorwayLabel,
   artworks,
+  mockupsAtGenerate,
 }: {
   kind: WhatModelGetsKind;
   band: GetDesignBandResponse;
@@ -1042,6 +1070,7 @@ function plainText({
   colorwayId: number;
   colorwayLabel: string;
   artworks: readonly string[];
+  mockupsAtGenerate?: boolean;
 }): string {
   const lines: string[] = [
     `what the model gets — ${kindLabel(kind)}`,
@@ -1092,7 +1121,7 @@ function plainText({
       }`,
       `colour maps: ${
         (recipe?.colourMaps ?? [])
-          .map((m) => `${viewLabel((m.view ?? '').trim())} media ${m.mediaId ?? 0}`)
+          .map((m) => colourMapLine(m, !!mockupsAtGenerate, ' '))
           .join(', ') || '—'
       }`,
       `artworks: ${artworks.length > 0 ? `${artworks.length} of ${MAX_RENDER_ARTWORKS} · ${artworks.join(', ')}` : '—'}`,

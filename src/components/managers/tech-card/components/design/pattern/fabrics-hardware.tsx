@@ -28,8 +28,9 @@ import Text from 'ui/components/text';
 import Input from 'ui/components/input';
 import Textarea from 'ui/components/text-area';
 
-import { UNSET_KIND, kindLabel } from '../../bom-kind';
-import { bornBomLine } from '../../form-writers';
+import { kindLabel } from '../../bom-kind';
+import { bornBomLine, patchBomLine } from '../../form-writers';
+import type { TechCardFormData } from '../../schema';
 import { wireInt } from '../../wire-int';
 import {
   ASSETS_PER_CARD_MAX,
@@ -42,6 +43,7 @@ import {
 import { useAssetBindingWrites, useAssetWrites } from '../assets/use-assets';
 import { BENCH_CELL_STYLE, BENCH_FRAME_ASPECT, InertDoor, SlotCap } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
+import { flushRefusalSentence, useTechCardAutosave } from '../autosave-contract';
 import { archivedRef, colorwayLabel } from '../colorway-picker';
 import { ColourwayStrip } from '../colourway-strip';
 import { EmptyState, Money, PlaceOrDrawCell } from '../core';
@@ -66,7 +68,10 @@ import { patternRuns } from './model';
 import {
   ARTWORK_SECTION,
   ARTWORK_TECHNIQUES,
+  artworkKindOf,
   artworkSlotsOf,
+  artworkTechniqueOf,
+  nextArtworkName,
   isArtworkSlot,
   NO_BINDINGS_REASON,
   PANTONE_LOADING_REASON,
@@ -196,9 +201,10 @@ function MaterialBench({
   const writes = useAssetWrites(techCardId);
   const binds = useAssetBindingWrites(techCardId);
   // The card form (null outside one): `+ artwork` writes a DECORATION line into `bomItems`.
-  const form = useFormContext<{ bomItems: unknown[] }>() as ReturnType<
-    typeof useFormContext<{ bomItems: unknown[] }>
+  const form = useFormContext<TechCardFormData>() as ReturnType<
+    typeof useFormContext<TechCardFormData>
   > | null;
+  const autosave = useTechCardAutosave();
 
   const cwId = colorway?.colorwayId ?? 0;
   const cwName = colorway ? colorwayLabel(colorway) : '';
@@ -432,6 +438,42 @@ function MaterialBench({
       return { card: techCardId, pairs: next };
     });
 
+  /* ─── born artworks (owner 04.10): a `+ artwork` line is a cell and selectable at once, before
+     the autosave gives it an id. Until then it is a PENDING slot (negative id, never sent): its
+     cell, GENERATE and `use own picture` are inert with the reason below. ─── */
+  const [bornState, setBornState] = useState<{ card: number; rows: BornLine[] }>({
+    card: techCardId,
+    rows: [],
+  });
+  const bornSeq = useRef(0);
+  const bornRows = bornState.card === techCardId ? bornState.rows : [];
+  const landedKeys = new Set(slots.filter((s) => s.bomItemId > 0).map((s) => s.lineKey));
+  const formKeys = form
+    ? new Set((form.getValues('bomItems') ?? []).map((b) => (b.lineKey ?? '').trim()))
+    : null;
+  const pendingSlots: MaterialSlot[] = bornRows
+    .filter((r) => !landedKeys.has(r.lineKey) && (!formKeys || formKeys.has(r.lineKey)))
+    .map((r) => ({
+      bomItemId: r.seq,
+      lineKey: r.lineKey,
+      name: r.name,
+      kind: artworkKindOf(r.technique),
+      purpose: '',
+      purposeLabel: kindLabel(artworkKindOf(r.technique)) ?? '',
+      section: ARTWORK_SECTION,
+      detail: r.technique,
+      words: [r.name, r.technique].filter(Boolean).join(' · '),
+      family: 'hardware',
+    }));
+  const artworkCells = [...artworkSlotsOf(slots), ...pendingSlots];
+  const bornReason =
+    autosave.status === 'invalid' ||
+    autosave.status === 'error' ||
+    autosave.status === 'conflict' ||
+    autosave.status === 'needs-confirm'
+      ? `not saved yet — ${flushRefusalSentence(autosave.status, autosave.errorsCount, autosave.refusal)}`
+      : 'saving…';
+
   /* ─── gates ─── */
   const archivedGate = archivedColorwayGate(archived, cwName, 'materials');
   const baseGate: Gate = disabled
@@ -449,6 +491,7 @@ function MaterialBench({
               : { ok: true };
 
   const slotGate = (slot: MaterialSlot): Gate => {
+    if (slot.bomItemId <= 0) return { ok: false, reason: bornReason };
     if (!baseGate.ok) return baseGate;
     const k = pairKey(cwId, slot.bomItemId);
     if (liveByPair.has(k) || launching.has(k)) {
@@ -479,17 +522,32 @@ function MaterialBench({
   };
 
   /* ─── selection: one slot; fallback = first empty slot of the colourway, else the first ─── */
-  const [selectedState, setSelectedState] = useState<{ card: number; bomItemId: number }>({
+  // `lineKey`: a born artwork picked before its id landed — it resolves to the saved slot once
+  // it has one, so the selection rides through the autosave without an effect.
+  const [selectedState, setSelectedState] = useState<{
+    card: number;
+    bomItemId: number;
+    lineKey?: string;
+  }>({
     card: techCardId,
     bomItemId: 0,
   });
   const pickedId = selectedState.card === techCardId ? selectedState.bomItemId : 0;
+  const pickedLine = selectedState.card === techCardId ? selectedState.lineKey ?? '' : '';
   const selected =
+    (pickedLine
+      ? slots.find((s) => s.bomItemId > 0 && s.lineKey === pickedLine) ??
+        pendingSlots.find((s) => s.lineKey === pickedLine)
+      : undefined) ??
     slots.find((s) => s.bomItemId === pickedId) ??
     slots.find((s) => !byPair.has(pairKey(cwId, s.bomItemId))) ??
     slots[0];
   const pick = (slot: MaterialSlot) =>
-    setSelectedState({ card: techCardId, bomItemId: slot.bomItemId });
+    setSelectedState(
+      slot.bomItemId > 0
+        ? { card: techCardId, bomItemId: slot.bomItemId }
+        : { card: techCardId, bomItemId: 0, lineKey: slot.lineKey },
+    );
 
   // Every empty slot that can run now, fabrics first, capped by shelf room.
   const emptyRunnable = slots
@@ -614,7 +672,7 @@ function MaterialBench({
   const arrivedCw = useRef(new Map<number, number>());
   const place = async (slot: MaterialSlot, media: common_MediaFull) => {
     const mediaId = media.id ?? 0;
-    if (mediaId <= 0 || cwId <= 0) return;
+    if (mediaId <= 0 || cwId <= 0 || slot.bomItemId <= 0) return;
     const key = pairKey(cwId, slot.bomItemId);
     const prev = byPair.get(key);
     const prevId = wireInt(prev?.id);
@@ -718,6 +776,7 @@ function MaterialBench({
   const replaceTarget = useRef<{ slot: MaterialSlot; cw: number } | null>(null);
   const replaceTrigger = useRef<HTMLButtonElement>(null);
   const replace = (slot: MaterialSlot) => {
+    if (slot.bomItemId <= 0) return;
     // Pin the colourway too: a switch while the dialog is open must not land the picture there.
     replaceTarget.current = { slot, cw: cwId };
     replaceTrigger.current?.click();
@@ -737,21 +796,7 @@ function MaterialBench({
     wordsSaving,
   );
 
-  /* ─── `+ artwork`: an inline born row → a DECORATION BOM line; selected once it is saved ─── */
-  const [bornState, setBornState] = useState<{ card: number; row: BornRow | null }>({
-    card: techCardId,
-    row: null,
-  });
-  const born = bornState.card === techCardId ? bornState.row : null;
-  const setBorn = (row: BornRow | null) => setBornState({ card: techCardId, row });
-  useEffect(() => {
-    const key = born?.savingKey;
-    if (!key) return;
-    const landed = slots.find((s) => s.lineKey === key && s.bomItemId > 0);
-    if (!landed) return;
-    setSelectedState({ card: techCardId, bomItemId: landed.bomItemId });
-    setBornState({ card: techCardId, row: null });
-  }, [born?.savingKey, slots, techCardId]);
+  /* ─── `+ artwork` (owner 04.10): ONE click births the DECORATION line and selects it ─── */
   const addGate: Gate = !form
     ? { ok: false, reason: 'the card form is not on this screen' }
     : disabled
@@ -761,14 +806,65 @@ function MaterialBench({
         : !archivedGate.ok
           ? archivedGate
           : { ok: true };
-  const addArtwork = (row: BornRow) => {
+  const addArtwork = () => {
     if (!form || !addGate.ok) return;
-    const technique = row.technique.trim();
-    const name = row.name.trim() || technique || 'artwork';
-    const line = bornBomLine({ section: ARTWORK_SECTION, name, spec: technique, kind: UNSET_KIND });
-    const cur = (form.getValues('bomItems') ?? []) as unknown[];
+    const technique = ARTWORK_TECHNIQUES[0];
+    const name = nextArtworkName(artworkCells.map((s) => s.name));
+    const line = bornBomLine({
+      section: ARTWORK_SECTION,
+      name,
+      spec: technique,
+      kind: artworkKindOf(technique),
+    });
+    const lineKey = line.lineKey as string;
+    const cur = form.getValues('bomItems') ?? [];
     form.setValue('bomItems', [...cur, line] as never, { shouldDirty: true });
-    setBorn({ ...row, savingKey: line.lineKey as string });
+    bornSeq.current += 1;
+    const seq = -bornSeq.current;
+    setBornState((prev) => ({
+      card: techCardId,
+      rows: [...(prev.card === techCardId ? prev.rows : []), { lineKey, seq, name, technique }],
+    }));
+    // Selected NOW, by its line key: the panel follows the line through its id landing.
+    setSelectedState({ card: techCardId, bomItemId: 0, lineKey });
+    autosave.request('materials · + artwork');
+  };
+  // Name · technique of an artwork line, written into the card form by line key (pending or saved).
+  const lineWritable = !!form && !disabled;
+  const writeArtwork = (slot: MaterialSlot, patch: { name?: string; technique?: string }) => {
+    if (!form || !lineWritable) return;
+    const name = patch.name?.trim() ?? '';
+    const technique = patch.technique ?? '';
+    const linePatch: { name?: string; spec?: string; kind?: string } = {};
+    // A line without a name does not validate: a cleared name keeps the old one.
+    if (name && name !== slot.name) linePatch.name = name;
+    if (technique) {
+      linePatch.spec = technique;
+      linePatch.kind = artworkKindOf(technique) || slot.kind;
+    }
+    if (Object.keys(linePatch).length === 0) return;
+    if (!patchBomLine(form.getValues, form.setValue, slot.lineKey, linePatch)) return;
+    setBornState((prev) =>
+      prev.card !== techCardId
+        ? prev
+        : {
+            card: techCardId,
+            rows: prev.rows.map((r) =>
+              r.lineKey === slot.lineKey
+                ? { ...r, name: linePatch.name ?? r.name, technique: technique || r.technique }
+                : r,
+            ),
+          },
+    );
+    // The technique seeds the words: the other technique words leave, this one leads.
+    if (technique && slot.bomItemId > 0) {
+      const spec = specOf(slot);
+      const rest = wordList(spec.words).filter(
+        (w) => !ARTWORK_TECHNIQUES.some((t) => sameWord(t, w)),
+      );
+      setSpec(slot, { ...spec, words: [technique, ...rest].join(', ') });
+    }
+    autosave.request('materials · artwork line');
   };
   const dressed = (list: MaterialSlot[]) =>
     list.filter((s) => byPair.has(pairKey(cwId, s.bomItemId))).length;
@@ -790,15 +886,17 @@ function MaterialBench({
   // `use own picture`: the library dialog for the SELECTED slot; placed with its spec.
   const ownGate: Gate = !selected
     ? { ok: false, reason: 'no slot' }
-    : !writable
-      ? !baseGate.ok
-        ? baseGate
-        : { ok: false, reason: READ_ONLY_RUN_REASON }
-      : liveByPair.has(selKey) || launching.has(selKey) || saving.has(selKey)
-        ? { ok: false, reason: 'being made — it lands in the cell by itself' }
-        : !shelfRoom
-          ? { ok: false, reason: SHELF_REASON }
-          : { ok: true };
+    : selected.bomItemId <= 0
+      ? { ok: false, reason: bornReason }
+      : !writable
+        ? !baseGate.ok
+          ? baseGate
+          : { ok: false, reason: READ_ONLY_RUN_REASON }
+        : liveByPair.has(selKey) || launching.has(selKey) || saving.has(selKey)
+          ? { ok: false, reason: 'being made — it lands in the cell by itself' }
+          : !shelfRoom
+            ? { ok: false, reason: SHELF_REASON }
+            : { ok: true };
   const selName = selected ? selected.name.toUpperCase() : '';
   const verbName = selName.length > 24 ? `${selName.slice(0, 23)}…` : selName;
   const emptyN = emptyRunnable.length;
@@ -989,19 +1087,22 @@ function MaterialBench({
             const undoEntry = undos.get(key);
             const canUndo = !!undoEntry && undoLive(key, undoEntry);
             const isSelected = selected?.bomItemId === slot.bomItemId;
+            // A born artwork still waiting for its id: selectable, nothing else.
+            const born = slot.bomItemId <= 0;
             return (
               <div
-                key={slot.bomItemId}
+                key={born ? slot.lineKey : slot.bomItemId}
                 style={BENCH_CELL_STYLE}
                 className='flex min-w-0 flex-col items-start gap-1'
-                data-fh-slot={slot.bomItemId}
+                data-fh-slot={born ? 'saving' : slot.bomItemId}
+                data-fh-born-line={born ? slot.lineKey : undefined}
                 data-fh-selected={isSelected ? '' : undefined}
               >
                 {/* The cell is a SELECTOR only: click (captured) or Enter/Space selects the slot.
                     It never opens the library — `use own picture` in the panel does that. */}
                 <IntakeCell
                   marked={fillMarks.has(slot.bomItemId)}
-                  enabled={writable && !saving.has(key)}
+                  enabled={writable && !born && !saving.has(key)}
                   purpose={`design · ${slot.name}`}
                   onArrive={() => {
                     pick(slot);
@@ -1025,7 +1126,7 @@ function MaterialBench({
                   tabIndex={0}
                   aria-pressed={isSelected}
                   aria-label={`select ${slot.name}`}
-                  data-fh-cell={slot.bomItemId}
+                  data-fh-cell={born ? 'saving' : slot.bomItemId}
                   className='group w-full min-w-0 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                   onClickCapture={() => pick(slot)}
                   onKeyDown={(e) => {
@@ -1043,7 +1144,7 @@ function MaterialBench({
                     saving={saving.has(key)}
                     launching={launching.has(key)}
                     cutting={!!current && cutting.has(wireInt(current.id))}
-                    writable={writable}
+                    writable={writable && !born}
                     full={!shelfRoom}
                     fullReason={SHELF_REASON}
                     onUpload={() => replace(slot)}
@@ -1113,27 +1214,15 @@ function MaterialBench({
         <>
           {group('fabrics', fabrics)}
           {group('hardware', hardware)}
-          {group('artwork', artworks, {
-            tail: (
-              <NewArtworkTile
-                gate={addGate}
-                open={!!born}
-                onOpen={() => setBorn(born ?? { name: '', technique: ARTWORK_TECHNIQUES[0] })}
-              />
-            ),
-            below: born ? (
-              <BornArtworkRow
-                row={born}
-                gate={addGate}
-                onChange={setBorn}
-                onAdd={() => addArtwork(born)}
-                onCancel={() => setBorn(null)}
-              />
-            ) : null,
+          {group('artwork', artworkCells, {
+            tail: <NewArtworkTile gate={addGate} onAdd={addArtwork} />,
           })}
 
           {selected && selSpec && (
-            <div data-fh-generate={selGate.ok ? 'live' : 'inert'} data-fh-for={selected.bomItemId}>
+            <div
+              data-fh-generate={selGate.ok ? 'live' : 'inert'}
+              data-fh-for={selected.bomItemId > 0 ? selected.bomItemId : 'saving'}
+            >
               <GroupLabel
                 action={
                   <Text size='micro' variant='label' component='span'>
@@ -1155,11 +1244,22 @@ function MaterialBench({
                 slot={selected}
                 spec={selSpec}
                 colour={selColour}
-                disabled={!writable}
+                disabled={!writable || selected.bomItemId <= 0}
                 colorwayId={cwId}
                 colorwayName={cwName}
                 ownPantone={ownPantone}
                 onChange={(next) => setSpec(selected, next)}
+                head={
+                  isArtworkSlot(selected) ? (
+                    <ArtworkLineHead
+                      key={selected.lineKey}
+                      slot={selected}
+                      disabled={!lineWritable}
+                      onName={(name) => writeArtwork(selected, { name })}
+                      onTechnique={(technique) => writeArtwork(selected, { technique })}
+                    />
+                  ) : null
+                }
               />
               {!selGate.ok && (
                 <Text
@@ -1339,6 +1439,7 @@ function SpecPanel({
   colorwayName,
   ownPantone,
   onChange,
+  head,
 }: {
   slot: MaterialSlot;
   spec: Spec;
@@ -1348,6 +1449,8 @@ function SpecPanel({
   colorwayName: string;
   ownPantone: string;
   onChange: (spec: Spec) => void;
+  /** Drawn right above the words (artwork: its line name · technique). */
+  head?: React.ReactNode;
 }): JSX.Element {
   const { showMessage } = useSnackBarStore();
   const hardware = slot.family === 'hardware';
@@ -1466,6 +1569,7 @@ function SpecPanel({
         )}
       </div>
 
+      {head}
       {/* Words: label above, a real (vertical-resize) textarea capped in width, chips under it. */}
       <div className='flex max-w-xl flex-col gap-1'>
         <Text
@@ -1512,7 +1616,8 @@ type ChipRowSpec = { lead?: string; words: readonly string[]; single?: boolean }
 
 /** The chip rows a slot family offers; fabric has none (→ no `custom ▸` door). */
 function chipRowsOf(family: string): ChipRowSpec[] | null {
-  if (family === 'artwork') return [{ words: ARTWORK_TECHNIQUES, single: true }];
+  // Artwork: its technique is the primary choice — chips stand in the panel itself, not behind ▸.
+  if (family === 'artwork') return null;
   if (family === 'label')
     return [
       { lead: 'look', words: LABEL_LOOKS },
@@ -1736,7 +1841,6 @@ function SlotCell({
         full={full}
         fullReason={fullReason}
         generateGate={generateGate}
-        onPick={onPick}
         onReplace={onReplace}
         onGenerate={onGenerate}
         onClear={onClear}
@@ -1858,6 +1962,9 @@ function IntakeCell({
 /** Hover of the enclosing selector (`group`): the 1px frame goes solid ink. */
 const HOVER_INK = 'cursor-pointer group-hover:border-solid group-hover:border-textColor';
 
+/** The tile's single-click action on a dressed cell: none — the enclosing cell selects. */
+const selectedByCell = () => {};
+
 /** A dressed cell: surface click selects (double click zooms); `zoom` also lives in the menu. */
 function FilledCell({
   slot,
@@ -1868,7 +1975,6 @@ function FilledCell({
   full,
   fullReason,
   generateGate,
-  onPick,
   onReplace,
   onGenerate,
   onClear,
@@ -1881,7 +1987,6 @@ function FilledCell({
   full: boolean;
   fullReason: string;
   generateGate: Gate;
-  onPick: () => void;
   onReplace: () => void;
   onGenerate: () => void;
   onClear: () => void;
@@ -1917,7 +2022,10 @@ function FilledCell({
         // An artwork is a cut-out PNG: its transparency reads on a checkerboard.
         className={cn('w-full border-0', artwork && CHECKERBOARD)}
         galleryGroup={url ? { key: zoomGroup.key, index: 0 } : undefined}
-        onOpen={onPick}
+        // The cell's capture click has ALREADY selected this slot. `onOpen` is here only so the
+        // tile arbitrates one click (nothing) against two (zoom); re-selecting from its delayed
+        // single fired AFTER a quick click on another cell and took the selection back (T22).
+        onOpen={selectedByCell}
         menu={{
           label: 'more',
           ariaLabel: `more for ${slot.name}`,
@@ -1963,28 +2071,22 @@ function FilledCell({
 const CHECKERBOARD =
   '[background:repeating-conic-gradient(#e6e6e6_0_25%,#ffffff_0_50%)_0_0/12px_12px]';
 
-/** The `+ artwork` born row: name · technique; `savingKey` once added (waits for the line's id). */
-type BornRow = { name: string; technique: string; savingKey?: string };
+/** A `+ artwork` line born on this screen: `seq` is its pending (negative) slot id until saved. */
+type BornLine = { lineKey: string; seq: number; name: string; technique: string };
 
-/** The dashed `new` tile of ColourwayStrip, at the bench cell's width, word `+ artwork`. */
-function NewArtworkTile({
-  gate,
-  open,
-  onOpen,
-}: {
-  gate: Gate;
-  open: boolean;
-  onOpen: () => void;
-}): JSX.Element {
+/**
+ * The dashed `new` tile of ColourwayStrip, at the bench cell's width, word `+ artwork`. ONE click
+ * births the line and selects it — no row to fill in first.
+ */
+function NewArtworkTile({ gate, onAdd }: { gate: Gate; onAdd: () => void }): JSX.Element {
   const off = !gate.ok;
   return (
     <div style={BENCH_CELL_STYLE} className='flex min-w-0 flex-col items-start gap-1'>
       <button
         type='button'
         disabled={off}
-        onClick={onOpen}
+        onClick={onAdd}
         title={off ? gate.reason : 'a new artwork — a DECORATION line of the BOM'}
-        aria-expanded={open}
         data-fh-new-artwork={off ? 'inert' : 'live'}
         className='group flex w-full flex-col gap-1 text-left disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
       >
@@ -1992,10 +2094,7 @@ function NewArtworkTile({
           aria-hidden
           style={{ aspectRatio: BENCH_FRAME_ASPECT }}
           className={cn(
-            'flex w-full items-center justify-center border border-dashed bg-bgColor',
-            open
-              ? 'border-textColor text-textColor'
-              : 'border-borderColor text-labelColor group-hover:border-textColor group-hover:text-textColor',
+            'flex w-full items-center justify-center border border-dashed border-borderColor bg-bgColor text-labelColor group-hover:border-textColor group-hover:text-textColor',
             off && 'text-textInactiveColor group-hover:border-borderColor',
           )}
         >
@@ -2018,101 +2117,95 @@ function NewArtworkTile({
 }
 
 /**
- * The inline row under ARTWORK: name (prefilled with the technique until the person types) ·
- * technique chips (single-select) · `add` · `cancel`. Nothing modal. After `add` the row says
- * `saving…` until the line has its server id; the bench then selects it.
+ * The selected artwork's own line, above its words: NAME (written to the BOM line on blur / Enter;
+ * a cleared name keeps the old one) and TECHNIQUE chips, single-select, shown directly — the
+ * technique is an artwork's primary choice. Both write the card form by line key.
  */
-function BornArtworkRow({
-  row,
-  gate,
-  onChange,
-  onAdd,
-  onCancel,
+function ArtworkLineHead({
+  slot,
+  disabled,
+  onName,
+  onTechnique,
 }: {
-  row: BornRow;
-  gate: Gate;
-  onChange: (row: BornRow) => void;
-  onAdd: () => void;
-  onCancel: () => void;
+  slot: MaterialSlot;
+  disabled?: boolean;
+  onName: (name: string) => void;
+  onTechnique: (technique: string) => void;
 }): JSX.Element {
-  const saving = !!row.savingKey;
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [draft, setDraft] = useState(slot.name);
+  // The line renamed elsewhere (or the write landed): the input follows unless it is being typed in.
+  const typing = useRef(false);
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    if (!typing.current) setDraft(slot.name);
+  }, [slot.name]);
+  const technique = artworkTechniqueOf(slot.detail);
+  const commit = () => {
+    typing.current = false;
+    if (!draft.trim()) {
+      setDraft(slot.name);
+      return;
+    }
+    onName(draft);
+  };
   return (
-    <div
-      className='flex flex-wrap items-center gap-2 pt-2'
-      data-fh-born={saving ? 'saving' : 'open'}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') onCancel();
-      }}
-    >
-      <div className='w-56 shrink-0'>
-        <Input
-          ref={inputRef}
-          name='fh-born-artwork'
-          value={row.name}
-          placeholder={row.technique || 'artwork'}
-          disabled={saving}
-          aria-label='artwork name'
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-            onChange({ ...row, name: e.target.value })
-          }
-          onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-            if (e.key === 'Enter' && gate.ok && !saving) {
-              e.preventDefault();
-              onAdd();
-            }
-          }}
-          data-fh-born-name=''
-        />
-      </div>
-      <ChipRow className='min-w-0'>
-        {ARTWORK_TECHNIQUES.map((t) => (
-          <Chip
-            key={t}
-            selected={sameWord(t, row.technique)}
-            pressed={sameWord(t, row.technique)}
-            disabled={saving}
-            onClick={() =>
-              onChange({
-                ...row,
-                technique: t,
-                // The name follows the technique until the person has typed one of their own.
-                name: !row.name.trim() || sameWord(row.name, row.technique) ? t : row.name,
-              })
-            }
-            data-fh-born-chip={t}
-          >
-            {t}
-          </Chip>
-        ))}
-      </ChipRow>
-      {saving ? (
-        <Text size='micro' variant='label' component='span' data-fh-born-saving=''>
-          saving…
+    <div className='flex max-w-xl flex-col gap-2' data-fh-artwork-line=''>
+      <div className='flex flex-col gap-1'>
+        <Text
+          size='micro'
+          variant='uppercase'
+          tracking='label'
+          component='label'
+          htmlFor={`fh-artwork-name-${slot.lineKey}`}
+          className='text-labelColor'
+        >
+          name
         </Text>
-      ) : (
-        <span className='flex items-center gap-1.5'>
-          <Button
-            variant='underline'
-            size='xs'
-            disabled={!gate.ok}
-            title={gate.ok ? 'adds the line to the BOM' : gate.reason}
-            onClick={onAdd}
-            data-fh-born-add=''
-          >
-            add
-          </Button>
-          <Text size='micro' variant='label' component='span'>
-            ·
-          </Text>
-          <Button variant='underline' size='xs' onClick={onCancel} data-fh-born-cancel=''>
-            cancel
-          </Button>
-        </span>
-      )}
+        <div className='w-56'>
+          <Input
+            id={`fh-artwork-name-${slot.lineKey}`}
+            name={`fh-artwork-name-${slot.lineKey}`}
+            value={draft}
+            disabled={disabled}
+            aria-label='artwork name'
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+              typing.current = true;
+              setDraft(e.target.value);
+            }}
+            onBlur={commit}
+            onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.currentTarget.blur();
+              } else if (e.key === 'Escape') {
+                typing.current = false;
+                setDraft(slot.name);
+              }
+            }}
+            data-fh-artwork-name=''
+          />
+        </div>
+      </div>
+      <div className='flex flex-col gap-1'>
+        <Text size='micro' variant='uppercase' tracking='label' className='text-labelColor'>
+          technique
+        </Text>
+        <ChipRow className='max-w-xl'>
+          {ARTWORK_TECHNIQUES.map((t) => (
+            <Chip
+              key={t}
+              selected={sameWord(t, technique)}
+              pressed={sameWord(t, technique)}
+              disabled={disabled}
+              onClick={() => {
+                if (!sameWord(t, technique)) onTechnique(t);
+              }}
+              data-fh-technique={t}
+            >
+              {t}
+            </Chip>
+          ))}
+        </ChipRow>
+      </div>
     </div>
   );
 }

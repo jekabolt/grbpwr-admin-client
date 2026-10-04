@@ -75,6 +75,15 @@ const stubNetwork = {
           // An own upload (drop / ⌘V on a cell) lands as media 903.
           if (name === 'UploadContentImage')
             return { media: { ...clone((window.__library || [])[0]), id: 903 } };
+          // An own picture lands on the shelf with a fresh id, so its binding follows (as in life).
+          if (name === 'UpsertDesignAsset') {
+            const band = window.__band;
+            const id = body.assetId > 0 ? body.assetId : 600 + (band.assets || []).length;
+            const lib = (window.__library || []).find((m) => m.id === body.mediaId);
+            const asset = { ...clone(body), id, media: clone(lib || (window.__library || [])[0]) };
+            band.assets = [...(band.assets || []).filter((a) => a.id !== id), asset];
+            return { asset };
+          }
           if (name === 'SetDesignAssetBinding') {
             const band = window.__band;
             const rest = (band.assetBindings || []).filter(
@@ -426,7 +435,7 @@ try {
     await ctx.close();
   }
   {
-    // Round 7 · ARTWORK: group after HARDWARE, `+ artwork` → inline born row → BOM line → selected.
+    // Round 7 · ARTWORK: group after HARDWARE; `+ artwork` → BOM line born AND selected in one click.
     const { ctx, page } = await open(1440, 1000);
     const settle = async () => {
       await page.mouse.move(5, 5);
@@ -441,27 +450,113 @@ try {
       errors.push('[1440] ASSERT: the filled artwork cell has no checkerboard');
     if ((await page.locator('[data-fh-slot="8"] [data-trim-backdrop="artwork"]').count()) !== 1)
       errors.push('[1440] ASSERT: the empty artwork cell has no artwork pictogram');
+    // r7b · ONE click on `+ artwork` births the line AND selects it at once — before any id.
+    const lines = () => page.evaluate(() => window.__form.getValues('bomItems'));
+    const panel = async () => ({
+      for_: await page.getAttribute('[data-fh-generate]', 'data-fh-for'),
+      state: await page.getAttribute('[data-fh-generate]', 'data-fh-generate'),
+      subj: (await page.textContent('[data-fh-subject]'))?.trim(),
+    });
     await page.click('[data-fh-new-artwork="live"]');
-    await page.waitForSelector('[data-fh-born="open"]');
-    if (
-      (await page.inputValue('[data-fh-born-name]')) !== '' ||
-      (await page.getAttribute('[data-fh-born-name]', 'placeholder')) !== 'embroidery'
-    )
-      errors.push('[1440] ASSERT: born row does not start from embroidery');
-    await page.fill('[data-fh-born-name]', 'chest embroidery');
-    await settle();
-    await shoot(page, 'r7-artwork-born-1440.png');
-    await page.click('[data-fh-born-add]');
-    await page
-      .waitForSelector('[data-fh-for="800"]', { timeout: 5000 })
-      .then(() =>
-        console.log('assert ok: + artwork adds a DECORATION line and selects it once saved'),
+    {
+      const p = await panel();
+      if (p.for_ !== 'saving' || p.state !== 'inert' || p.subj !== 'artwork 1')
+        errors.push(
+          `[1440] ASSERT r7b: first click did not select ARTWORK 1 at once ${JSON.stringify(p)}`,
+        );
+      const reason = (await page.textContent('[data-fh-generate-reason]'))?.trim();
+      if (reason !== 'saving…') errors.push(`[1440] ASSERT r7b: pending reason «${reason}»`);
+      if ((await page.locator('[data-fh-own-picture]').count()) !== 0)
+        errors.push('[1440] ASSERT r7b: use own picture is live before the id landed');
+      if (
+        (await page
+          .locator(
+            '[data-fh-group="artwork"] [data-fh-born-line][data-fh-selected] [data-trim-backdrop="artwork"]',
+          )
+          .count()) !== 1
       )
-      .catch(() => errors.push('[1440] ASSERT: the born artwork was not selected after save'));
-    if ((await page.locator('[data-fh-born]').count()) !== 0)
-      errors.push('[1440] ASSERT: born row still open after save');
+        errors.push('[1440] ASSERT r7b: the pending artwork cell is not a selected pictogram cell');
+      if ((await page.locator('[data-fh-born]').count()) !== 0)
+        errors.push('[1440] ASSERT r7b: an inline born row is still drawn');
+      const l = (await lines()).at(-1);
+      if (
+        l?.section !== 'TECH_CARD_BOM_SECTION_DECORATION' ||
+        l?.name !== 'artwork 1' ||
+        l?.spec !== 'embroidery' ||
+        l?.kind !== 'TECH_CARD_BOM_KIND_EMBROIDERY'
+      )
+        errors.push(`[1440] ASSERT r7b: born line ${JSON.stringify(l)}`);
+      else
+        console.log('assert ok: one click on + artwork → line born, GENERATE · ARTWORK 1 at once');
+    }
+    await page
+      .waitForSelector('[data-fh-generate="live"][data-fh-for="800"]', { timeout: 5000 })
+      .then(() => console.log('assert ok: GENERATE goes live once the autosave stub gives id 800'))
+      .catch(() => errors.push('[1440] ASSERT r7b: GENERATE not live after the id landed'));
+    if ((await page.locator('[data-fh-own-picture]').count()) !== 1)
+      errors.push('[1440] ASSERT r7b: use own picture still inert after the id landed');
+    // Second click: ARTWORK 2, selected at once; the first stays its own cell.
+    await page.click('[data-fh-new-artwork="live"]');
+    {
+      const p2 = await panel();
+      if (p2.for_ !== 'saving' || p2.subj !== 'artwork 2')
+        errors.push(
+          `[1440] ASSERT r7b: second click did not select ARTWORK 2 ${JSON.stringify(p2)}`,
+        );
+    }
+    await settle();
+    await shoot(page, 'r7b-artwork-oneclick-1440.png');
+    await page
+      .waitForSelector('[data-fh-generate="live"][data-fh-for="801"]', { timeout: 5000 })
+      .then(() => console.log('assert ok: second + artwork → ARTWORK 2 selected, live at id 801'))
+      .catch(() => errors.push('[1440] ASSERT r7b: ARTWORK 2 not live after its id landed'));
+    if ((await page.locator('[data-fh-group="artwork"] [data-fh-slot]').count()) !== 4)
+      errors.push('[1440] ASSERT r7b: ARTWORK does not hold 2 + 2 born cells');
+    await page.click('[data-fh-cell="800"]');
+    await page.waitForTimeout(450);
+    if ((await panel()).for_ !== '800')
+      errors.push('[1440] ASSERT r7b: the first born artwork is not selectable after the second');
     const seed = await page.inputValue('[data-fh-words]');
     if (seed !== 'embroidery') errors.push(`[1440] ASSERT: artwork seed is «${seed}»`);
+    if ((await page.getAttribute('[data-fh-technique="embroidery"]', 'aria-pressed')) !== 'true')
+      errors.push('[1440] ASSERT r7b: technique chip embroidery not lit');
+    // Rename (Enter / blur writes the line name).
+    await page.fill('[data-fh-artwork-name]', 'chest embroidery');
+    await page.press('[data-fh-artwork-name]', 'Enter');
+    await page.waitForTimeout(200);
+    {
+      const subj = (await page.textContent('[data-fh-subject]'))?.trim();
+      const l = (await lines()).find((x) => x.id === 800);
+      if (subj !== 'chest embroidery' || l?.name !== 'chest embroidery')
+        errors.push(`[1440] ASSERT r7b: rename · subject «${subj}» line «${l?.name}»`);
+      else console.log('assert ok: rename writes the BOM line name');
+    }
+    // Technique chips: shown directly, single-select, write spec + kind, seed the words.
+    if ((await page.locator('[data-flat-custom]').count()) !== 0)
+      errors.push('[1440] ASSERT r7b: artwork still has a custom ▸ door');
+    await page.click('[data-fh-technique="patch"]');
+    await page.waitForTimeout(150);
+    {
+      const l = (await lines()).find((x) => x.id === 800);
+      const w = await page.inputValue('[data-fh-words]');
+      const lit = await page.locator('[data-fh-technique][aria-pressed="true"]').count();
+      if (
+        l?.spec !== 'patch' ||
+        l?.kind !== 'TECH_CARD_BOM_KIND_PATCH' ||
+        w !== 'patch' ||
+        lit !== 1
+      )
+        errors.push(
+          `[1440] ASSERT r7b: technique · ${JSON.stringify({ spec: l?.spec, kind: l?.kind, w, lit })}`,
+        );
+      else console.log('assert ok: technique chip writes spec + kind and seeds the words');
+    }
+    await page.click('[data-fh-technique="embroidery"]');
+    await page.waitForTimeout(150);
+    if ((await page.inputValue('[data-fh-words]')) !== 'embroidery')
+      errors.push(
+        `[1440] ASSERT: technique chips not single-select · «${await page.inputValue('[data-fh-words]')}»`,
+      );
     // `+ photo` (picture 1) — the GRBPWR logo of the library.
     await page.click('[data-fh-look-door] button');
     await page.waitForSelector('[role="dialog"]');
@@ -470,14 +565,6 @@ try {
     await page.waitForSelector('[data-fh-look="1"]', { timeout: 5000 }).catch(() => {
       errors.push('[1440] the photo did not land in the artwork spec');
     });
-    await page.click('[data-flat-custom]');
-    // Technique chips are single-select.
-    await page.click('[data-fh-chip="patch"]');
-    await page.click('[data-fh-chip="embroidery"]');
-    if ((await page.inputValue('[data-fh-words]')) !== 'embroidery')
-      errors.push(
-        `[1440] ASSERT: technique chips not single-select · «${await page.inputValue('[data-fh-words]')}»`,
-      );
     await settle();
     await shoot(page, 'r7-artwork-selected-1440.png');
     const before = await page.evaluate(() => window.__calls.length);
@@ -498,6 +585,148 @@ try {
     )
       errors.push(`[1440] ASSERT: artwork run body ${JSON.stringify(sent)?.slice(0, 400)}`);
     else console.log(`assert ok: artwork run · words «${p.colour.words}»`);
+    await ctx.close();
+  }
+  {
+    // T22 · several ARTWORK slots, driven by real clicks: each selects like a FABRICS/HARDWARE cell
+    // (GENERATE · NAME, mode artwork), specs stay per slot, and every picture door lands.
+    const { ctx, page } = await open(1440, 1000);
+    const subject = async () => [
+      await page.getAttribute('[data-fh-generate]', 'data-fh-for'),
+      (await page.textContent('[data-fh-subject]'))?.trim(),
+    ];
+    const selects = async (id, name, how = 'click') => {
+      if (how === 'enter') {
+        await page.focus(`[data-fh-cell="${id}"]`);
+        await page.keyboard.press('Enter');
+      } else await page.click(`[data-fh-cell="${id}"]`);
+      // Past the tile's one-or-two-clicks window: a late single must not take the selection back.
+      await page.waitForTimeout(450);
+      const [for_, subj] = await subject();
+      if (for_ !== String(id) || subj !== name)
+        errors.push(`[1440] ASSERT T22: ${how} on artwork ${id} selected ${for_} «${subj}»`);
+    };
+    // Existing artworks (filled CHEST LOGO, empty BACK PRINT), crossing groups both ways.
+    await selects(7, 'CHEST LOGO');
+    await selects(8, 'BACK PRINT');
+    await selects(3, 'FRONT BUTTON');
+    await selects(7, 'CHEST LOGO', 'enter');
+    // A quick second click: filled CHEST LOGO, then BACK PRINT inside the double-click window.
+    await page.click('[data-fh-cell="7"]');
+    await page.waitForTimeout(120);
+    await page.click('[data-fh-cell="8"]');
+    await page.waitForTimeout(500);
+    if ((await subject())[0] !== '8')
+      errors.push('[1440] ASSERT T22: a filled cell took the selection back after a quick click');
+    // GENERATE · CHEST LOGO runs in mode artwork for line 7.
+    await selects(7, 'CHEST LOGO');
+    {
+      const n = await page.evaluate(() => window.__calls.length);
+      await page.click('[data-fh-generate="live"] button:has-text("GENERATE")');
+      await page.waitForTimeout(500);
+      const p = await page.evaluate(
+        (n) => window.__calls.slice(n).find((c) => c.body?.params?.pattern)?.body?.params,
+        n,
+      );
+      if (p?.pattern?.mode !== 'artwork' || p?.pattern?.bomItemId !== 7)
+        errors.push(`[1440] ASSERT T22: GENERATE · CHEST LOGO sent ${JSON.stringify(p?.pattern)}`);
+      else console.log('assert ok: artwork cell selects, GENERATE · CHEST LOGO runs mode artwork');
+    }
+    // Three born artworks: each lands as its own slot and is selected once saved.
+    const born = [];
+    for (const name of ['one', 'two', 'three']) {
+      await page.click('[data-fh-new-artwork="live"]');
+      await page.fill('[data-fh-artwork-name]', name);
+      await page.press('[data-fh-artwork-name]', 'Enter');
+      await page
+        .waitForFunction(
+          (name) =>
+            document.querySelector('[data-fh-subject]')?.textContent?.trim() === name &&
+            document.querySelector('[data-fh-generate]')?.getAttribute('data-fh-for') !== 'saving',
+          name,
+          { timeout: 5000 },
+        )
+        .catch(() => errors.push(`[1440] ASSERT T22: born artwork «${name}» not selected`));
+      born.push(Number((await subject())[0]));
+    }
+    const ids = await page
+      .locator('[data-fh-group="artwork"] [data-fh-slot]')
+      .evaluateAll((es) => es.map((e) => Number(e.getAttribute('data-fh-slot'))));
+    if (new Set(born).size !== 3 || born.some((id) => !ids.includes(id)))
+      errors.push(`[1440] ASSERT T22: born artworks ${born} not all in ARTWORK ${ids}`);
+    for (const [i, id] of born.entries()) await selects(id, ['one', 'two', 'three'][i]);
+    // `fill N empty` counts each empty artwork on its own: BACK PRINT + three born.
+    const fillN = Number(await page.getAttribute('[data-fh-all-empty]', 'data-fh-all-empty'));
+    await page.hover('[data-fh-all-empty]');
+    await page.waitForTimeout(200);
+    const artMarks = await page.locator('[data-fh-group="artwork"] [data-fh-fill-mark]').count();
+    if (artMarks !== Math.min(4, fillN))
+      errors.push(`[1440] ASSERT T22: fill marks ${artMarks} artwork cells of ${fillN}`);
+    await page.mouse.move(5, 5);
+
+    const pickIn = async (door, nth) => {
+      await page.click(door);
+      await page.waitForSelector('[role="dialog"]');
+      await page.waitForTimeout(400);
+      await page.locator('[role="dialog"] img').nth(nth).click();
+      const addAll = page.getByRole('button', { name: /add all/i });
+      if (await addAll.count()) await addAll.click();
+      await page.waitForTimeout(500);
+    };
+    // (1) `+ photo` and (2) `+ ref` on an existing empty artwork (BACK PRINT) and a born one.
+    for (const [id, name] of [
+      [8, 'BACK PRINT'],
+      [born[1], 'two'],
+    ]) {
+      await selects(id, name);
+      await pickIn(`[data-fh-for="${id}"] [data-fh-look-door] button`, 1);
+      if ((await page.locator(`[data-fh-for="${id}"] [data-fh-look="1"]`).count()) !== 1)
+        errors.push(`[1440] ASSERT T22: + photo did not land on artwork ${id}`);
+      await pickIn(`[data-fh-for="${id}"] [data-fh-ref-door] button`, 0);
+      if ((await page.locator(`[data-fh-for="${id}"] [data-fh-ref="1"]`).count()) !== 1)
+        errors.push(`[1440] ASSERT T22: + ref did not land on artwork ${id}`);
+    }
+    // Specs do not bleed: born «one» and «three» carry no photo of their neighbours.
+    for (const [id, name] of [
+      [born[0], 'one'],
+      [born[2], 'three'],
+    ]) {
+      await selects(id, name);
+      if ((await page.locator('[data-fh-look]').count()) !== 0)
+        errors.push(`[1440] ASSERT T22: artwork ${id} shows a photo picked for another artwork`);
+    }
+    await selects(8, 'BACK PRINT');
+    if ((await page.locator('[data-fh-for="8"] [data-fh-look="1"]').count()) !== 1)
+      errors.push('[1440] ASSERT T22: BACK PRINT lost its photo after switching slots');
+    else console.log('assert ok: + photo / + ref land per artwork, specs stay per slot');
+    // (3) `use own picture` binds the picked picture to the selected artwork's cell.
+    const bindsTo = async (id, act) => {
+      const n = await page.evaluate(() => window.__calls.length);
+      await act();
+      await page.waitForTimeout(800);
+      const b = await page.evaluate(
+        (n) => window.__calls.slice(n).find((c) => c.name === 'SetDesignAssetBinding')?.body,
+        n,
+      );
+      return b?.bomItemId === id && b?.assetId > 0;
+    };
+    if (
+      !(await bindsTo(born[0], async () => {
+        await selects(born[0], 'one');
+        await pickIn('[data-fh-own-picture]', 1);
+      }))
+    )
+      errors.push('[1440] ASSERT T22: use own picture did not bind on the artwork');
+    if ((await page.locator(`[data-fh-slot="${born[0]}"] [data-fh-checker]`).count()) !== 1)
+      errors.push('[1440] ASSERT T22: own picture not shown in the artwork cell');
+    // (4) the `upload` word on an empty artwork cell.
+    await page.hover(`[data-fh-cell="${born[2]}"]`);
+    if (!(await bindsTo(born[2], () => pickIn(`[data-fh-upload="${born[2]}"]`, 1))))
+      errors.push('[1440] ASSERT T22: `upload` on an empty artwork cell did not bind');
+    else console.log('assert ok: use own picture and `upload` bind on artwork cells');
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(300);
+    await shoot(page, 't22-artworks-1440.png');
     await ctx.close();
   }
   {
