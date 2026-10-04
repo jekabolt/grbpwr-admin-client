@@ -449,6 +449,31 @@ try {
     if (!(run2.fabrics || []).some((f) => /sleeve/.test(f.parts)))
       errors.push('[f2] ASSERT: no part names in the run');
 
+    // R13: `clear` at the right of the PARTS header wipes every side in one gesture; ⌘Z restores.
+    const before = await painted();
+    await page.click('[data-paint-clear]');
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(300);
+    const cleared = await painted();
+    const head = await page.locator('[data-paint-tools]').boundingBox();
+    const row = await page.locator('[data-paint-side="back"]').boundingBox();
+    await page.screenshot({
+      path: resolve(OUT, 'f3-parts-clear.png'),
+      clip: { x: 24, y: head.y - 12, width: 1392, height: row.y + row.height * 0.6 - head.y + 12 },
+    });
+    shots.push(resolve(OUT, 'f3-parts-clear.png'));
+    const disabledNow = await page.locator('[data-paint-clear]').isDisabled();
+    await page.keyboard.press('Meta+z');
+    await page.waitForTimeout(200);
+    const restored = await painted();
+    console.log(
+      `clear: ${JSON.stringify(before)} → ${JSON.stringify(cleared)} → undo ${JSON.stringify(restored)}; disabled after clear ${disabledNow}`,
+    );
+    if (cleared.front || cleared.back) errors.push('[f2] ASSERT: clear left paint');
+    if (!disabledNow) errors.push('[f2] ASSERT: clear enabled with nothing painted');
+    if (restored.front !== before.front || restored.back !== before.back)
+      errors.push('[f2] ASSERT: one undo did not restore the clear');
+
     // A region the model says spans two parts: the hint on hover.
     p = await reg('front', 20);
     await page.mouse.move(p.x, p.y);

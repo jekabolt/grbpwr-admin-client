@@ -635,10 +635,38 @@ export class PaintSession {
     this.bump();
   }
 
+  private paintedAt = new Map<string, { rev: number; any: boolean }>();
+
+  /** Is anything painted on any side (cached per side's rev). */
+  anyPaint(): boolean {
+    for (const v of this.views.values()) {
+      if (v.status !== 'ready' || !v.labels) continue;
+      let hit = this.paintedAt.get(v.view);
+      if (hit?.rev !== v.rev) {
+        hit = { rev: v.rev, any: anyPainted(v.labels) };
+        this.paintedAt.set(v.view, hit);
+      }
+      if (hit.any) return true;
+    }
+    return false;
+  }
+
+  /** `clear`: every side back to paper, one gesture (one ⌘Z brings it all back). */
+  clear() {
+    const targets: { view: string; idx: Int32Array }[] = [];
+    for (const v of this.views.values()) {
+      if (v.status !== 'ready' || !v.labels) continue;
+      const idx: number[] = [];
+      for (let i = 0; i < v.labels.length; i += 1) if (v.labels[i]) idx.push(i);
+      if (idx.length > 0) targets.push({ view: v.view, idx: Int32Array.from(idx) });
+    }
+    this.applyMany(targets, 0);
+  }
+
   /** One gesture over several sides. Returns the sides it changed. */
-  private applyMany(targets: { view: string; idx: Int32Array }[]): string[] {
-    const value = this.tool === 'erase' ? 0 : this.armed ? packHex(this.armed) : 0;
-    if (this.tool !== 'erase' && !value) return [];
+  private applyMany(targets: { view: string; idx: Int32Array }[], paint?: number): string[] {
+    const value = paint ?? (this.tool === 'erase' ? 0 : this.armed ? packHex(this.armed) : 0);
+    if (paint === undefined && this.tool !== 'erase' && !value) return [];
     const ready = targets.flatMap((t) => {
       const v = this.views.get(t.view);
       return v && v.status === 'ready' && v.labels && t.idx.length > 0

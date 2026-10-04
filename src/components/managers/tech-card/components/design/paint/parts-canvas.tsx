@@ -590,6 +590,7 @@ export function PartsCanvas({
 }): JSX.Element | null {
   const views = [...session.views.values()];
   const row = useRef<HTMLDivElement>(null);
+  const block = useRef<HTMLDivElement>(null);
   const [rowWidth, setRowWidth] = useState(0);
   useEffect(() => {
     const el = row.current;
@@ -664,11 +665,23 @@ export function PartsCanvas({
       >
         undo
       </Chip>
+      <Chip
+        onClick={() => {
+          // The chip disables itself: keep ⌘Z on the block.
+          block.current?.focus({ preventScroll: true });
+          session.clear();
+        }}
+        disabled={disabled || !session.anyPaint()}
+        title='clear every side'
+        data-paint-clear=''
+      >
+        clear
+      </Chip>
     </span>
   );
 
   return (
-    <div data-paint-parts='' tabIndex={-1} onKeyDown={onKey} className='outline-none'>
+    <div ref={block} data-paint-parts='' tabIndex={-1} onKeyDown={onKey} className='outline-none'>
       <GroupLabel flush className={GROUP_GAP} action={tools}>
         parts
       </GroupLabel>
