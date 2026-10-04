@@ -1,13 +1,7 @@
 import { cn } from 'lib/utility';
-import {
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-} from 'react';
+import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
-import { warpTriangles, type ShapePoint } from './geometry';
+import { quadPerspectiveParts, type ShapePoint } from './geometry';
 import { artworkQuad, boundsOf } from './purpose';
 
 // ВСТАВКИ НАЗНАЧЕНИЯ — ОДИН РЕНДЕР НА ЭКРАН И НА БУМАГУ (волна callout kinds, T07).
@@ -272,12 +266,15 @@ export function SectionLetters({
  * чтобы пунктир зоны не закрывался непрозрачным краем.
  *
  * ВАРП НА ЧЕТЫРЕ РУЧКИ (R20, владелец: «она должна помещатся внутрь подвижных штук и варпаться
- * вместе с ними»): углы картинки = точки зоны в их порядке (TL, TR, BR, BL), середина — по проекции,
- * приближённой сеткой аффинных треугольников (`warpTriangles`): SVG-аффин печатается во всех
- * браузерах одинаково, а CSS `matrix3d` — нет. Зона не из четырёх точек (вставили вершину) —
- * картинка вписана в её габарит, как прежде.
+ * вместе с ними»): углы картинки = точки зоны в их порядке (TL, TR, BR, BL), середина — по проекции.
+ * Проекция — ОДНА <img> с CSS `matrix3d` (`quadMatrix3d`, T27/R35): прежняя сетка из 200 треугольников
+ * с клипами перерисовывалась на каждое движение ручки и тормозила жест. Зона не из четырёх точек
+ * или вывернутая (старая запись) — картинка натягивается на её габарит (`artworkQuad`), без лучей.
  *
- * `box` — размер кадра в пикселях: холст в той же системе, что слой геометрии.
+ * Слой — в пикселях замера кадра (`box`), в той же системе, что слой геометрии: картинка едет с
+ * кадром при зуме, потому что лежит внутри его трансформа. А при ПЕЧАТИ кадр меняет ширину после
+ * замера (ResizeObserver молчит) — поэтому все длины здесь в единицах контейнера (cqw/cqh): слой —
+ * контейнер размера кадра, и картинка растёт с ним, как пунктир с viewBox (`quadPerspectiveParts`).
  */
 export function ArtworkImage({
   quad,
@@ -289,55 +286,38 @@ export function ArtworkImage({
   box: { w: number; h: number };
   src: string;
 }) {
-  const id = useId().replace(/:/g, '');
-  // 200 треугольников — арифметика на микросекунды; мемо по массиву, который каждый рендер новый, ничего бы не дало.
-  // Печать и любые старые зоны с другим числом вершин натягиваются на квадрат охвата.
-  const corners = artworkQuad(quad);
-  const tris = corners.length === 4 ? warpTriangles(corners, 10) : [];
   if (!src || quad.length < 2 || box.w < 1 || box.h < 1) return null;
-  const b = boundsOf(quad);
+  const corners = artworkQuad(quad);
+  const b = boundsOf(corners);
   if (!b || b.w < 1 || b.h < 1) return null;
+  const cw = (px: number) => `${(px / box.w) * 100}cqw`;
+  const ch = (px: number) => `${(px / box.h) * 100}cqh`;
+  // Своя коробка картинки — габарит зоны: масштаб матрицы около единицы, растр не мылится.
+  const t = quadPerspectiveParts(corners, b.w, b.h);
   return (
-    <svg
+    <div
       aria-hidden
       data-callout-artwork=''
-      className='pointer-events-none absolute inset-0 block h-full w-full overflow-visible'
-      viewBox={`0 0 ${box.w} ${box.h}`}
-      preserveAspectRatio='none'
+      className='pointer-events-none absolute inset-0 block overflow-visible'
+      style={{ containerType: 'size' }}
     >
-      {tris.length > 0 ? (
-        <>
-          <defs>
-            {tris.map((t, i) => (
-              <clipPath key={i} id={`${id}-${i}`}>
-                <polygon points={t.clip.map((p) => `${p.x},${p.y}`).join(' ')} />
-              </clipPath>
-            ))}
-          </defs>
-          {tris.map((t, i) => (
-            <g key={i} clipPath={`url(#${id}-${i})`}>
-              <image
-                href={src}
-                x={0}
-                y={0}
-                width={1}
-                height={1}
-                preserveAspectRatio='none'
-                transform={`matrix(${t.m.join(' ')})`}
-              />
-            </g>
-          ))}
-        </>
-      ) : (
-        <image
-          href={src}
-          x={b.x}
-          y={b.y}
-          width={b.w}
-          height={b.h}
-          preserveAspectRatio='xMidYMid meet'
-        />
-      )}
-    </svg>
+      <img
+        src={src}
+        alt=''
+        draggable={false}
+        className='absolute left-0 top-0 block max-w-none'
+        style={
+          t
+            ? {
+                width: cw(b.w),
+                height: ch(b.h),
+                transformOrigin: '0 0',
+                transform: `translate(${cw(t.tx)}, ${ch(t.ty)}) perspective(${cw(t.d)}) matrix3d(${t.m.join(',')})`,
+              }
+            : // Вырожденный габарит (три точки на прямой) — вписать, как до варпа.
+              { left: cw(b.x), top: ch(b.y), width: cw(b.w), height: ch(b.h), objectFit: 'contain' }
+        }
+      />
+    </div>
   );
 }

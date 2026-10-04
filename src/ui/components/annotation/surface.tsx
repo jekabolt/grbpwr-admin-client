@@ -19,11 +19,13 @@ import {
 import {
   arcPath,
   bracketPath,
+  clampQuadCorner,
   constrainTo45,
   inkPath,
   leaderTarget,
   midpoint,
   polygonPath,
+  quadIsSound,
   simplifyPath,
   simplifyToLimit,
   splitInkStrokes,
@@ -509,6 +511,28 @@ const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
 /**
+ * УГОЛ ЗОНЫ АРТВОРКА УПИРАЕТСЯ В ГРАНИЦУ ВЫПУКЛОСТИ (T27, R34; владелец: «так быть не должно» —
+ * угол утянули внутрь, и картинка разлетелась лучами за кадр). Доли кадра, проверка — в пикселях:
+ * углы альбомного кадра в долях искажены. Пол площади — 16 px²: зона не схлопывается в точку.
+ */
+function artworkCornerAt(
+  q: readonly ShapePoint[],
+  index: number,
+  target: ShapePoint,
+  size: { w: number; h: number },
+): ShapePoint {
+  const w = size.w || 1;
+  const h = size.h || 1;
+  const p = clampQuadCorner(
+    q.map((x) => ({ x: x.x * w, y: x.y * h })),
+    index,
+    { x: target.x * w, y: target.y * h },
+    (qq) => quadIsSound(qq, 16),
+  );
+  return { x: clamp01(p.x / w), y: clamp01(p.y / h) };
+}
+
+/**
  * ENTER — ДВЕ ФИЗИЧЕСКИЕ КЛАВИШИ, И СПРАШИВАЮТСЯ ОБЕ. Разбор клавиатуры на этой поверхности
  * ведётся по `e.code` — по ФИЗИЧЕСКОЙ клавише, одинаковой во всех раскладках (довод целиком стоит
  * у ⌘Z ниже: `e.key` — это НАПЕЧАТАННАЯ буква, и на кириллице сравнение с латинской буквой мертво).
@@ -630,19 +654,22 @@ export function AnnotationSurface({
   hoverNotes = false,
   hoveredKey,
 }: AnnotationSurfaceProps) {
-  // Зона нанесения читается ровно четырьмя углами (`artworkQuad`): ручки, перетаскивание и
-  // натяжка картинки видят квадрат, и первая же правка записывает его в карточку.
-  const callouts = useMemo(
-    () =>
-      rawCallouts.map((c) =>
-        c.spec?.t === 'artwork' && c.points.length !== 4 && c.points.length > 0
-          ? { ...c, points: artworkQuad(c.points) }
-          : c,
-      ),
-    [rawCallouts],
-  );
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  // Зона нанесения читается ровно четырьмя углами (`artworkQuad`): ручки, перетаскивание и
+  // натяжка картинки видят квадрат, и первая же правка записывает его в карточку. Вывернутая
+  // старая четвёрка (T27, R34) — тоже габаритом; годность меряется в пикселях кадра.
+  const callouts = useMemo(() => {
+    const box = size.w > 0 && size.h > 0 ? size : { w: 1, h: 1 };
+    return rawCallouts.map((c) => {
+      if (c.spec?.t !== 'artwork' || c.points.length === 0) return c;
+      const q = artworkQuad(c.points, box);
+      const same =
+        q.length === c.points.length &&
+        q.every((p, i) => p.x === c.points[i].x && p.y === c.points[i].y);
+      return same ? c : { ...c, points: q };
+    });
+  }, [rawCallouts, size]);
 
   /* ═══ ЛЕСТНИЦА АДРЕСОВ ОДНОЙ КАРТИНКИ ══════════════════════════════════════════════════════
      Довод целиком — у пропа `srcFallbacks`. Здесь только механика, и в ней две ловушки.
@@ -1621,8 +1648,8 @@ export function AnnotationSurface({
         // SHIFT ДЕРЖИТ УГОЛ И ПРИ ПРАВКЕ ЯКОРЯ (D-17) — от того, что назовёт `handleAnchor`.
         // Пиксели, не доли — см. `constrainTo45`; `size` здесь свежий: он в зависимостях эффекта.
         let held = p;
+        const c = live.current.callouts.find((x) => x.key === d.key);
         if (e.shiftKey) {
-          const c = live.current.callouts.find((x) => x.key === d.key);
           const anchor = c ? handleAnchor(c.kind, c.points, d.index, c.label) : null;
           if (anchor) {
             const w = size.w || 1;
@@ -1634,12 +1661,29 @@ export function AnnotationSurface({
             held = { x: clamp01(r.x / w), y: clamp01(r.y / h) };
           }
         }
+        // Зона артворка — только выпуклая: от последнего годного места угол скользит до границы.
+        if (c?.spec?.t === 'artwork' && c.points.length === 4)
+          held = artworkCornerAt(
+            c.points.map((x, i) => (i === d.index ? d.at : x)),
+            d.index,
+            held,
+            size,
+          );
         setDragBoth({ ...d, moved: true, at: held });
         return;
       }
-      const dx = p.x - d.from.x;
-      const dy = p.y - d.from.y;
+      let dx = p.x - d.from.x;
+      let dy = p.y - d.from.y;
       if (!d.moved && Math.hypot(dx * size.w, dy * size.h) <= CLICK_MOVE_THRESHOLD) return;
+      // Зона артворка едет ЦЕЛИКОМ и упирается в край кадра: поточечный `clamp01` сплющил бы её о
+      // край, и картинку пришлось бы натягивать на вырожденную четвёрку (R34).
+      if (live.current.callouts.find((x) => x.key === d.key)?.spec?.t === 'artwork') {
+        const b = boundsOf(d.base);
+        if (b) {
+          dx = clamp(dx, -b.x, Math.max(-b.x, 1 - b.x - b.w));
+          dy = clamp(dy, -b.y, Math.max(-b.y, 1 - b.y - b.h));
+        }
+      }
       // Смещение — ПЕРЕД состоянием: его читает отрисовка во время рендера, и обратный порядок
       // держался бы только на том, что React рендерит после обработчика.
       lastShapeDelta.current = { x: dx, y: dy };

@@ -428,10 +428,16 @@ export function simplifyToLimit(pts: ShapePoint[], limit: number, start = 0.002)
 // варпаться вместе с ними». Зона артворка — четыре точки в порядке `rectCorners` (TL, TR, BR, BL);
 // углы картинки садятся РОВНО на них, середина — по проективному преобразованию.
 //
-// Почему не CSS `matrix3d`: на печати 3D-трансформы браузеры рисуют по-разному (а то и плоско), а
-// лист печатается. SVG-аффин печатается везде одинаково, поэтому проекция приближается сеткой
-// треугольников, каждый из которых — та же картинка с аффинным `transform` и клипом своего
-// треугольника. На сетке 10×10 ошибка аффинного приближения меньше пикселя на любой разумной зоне.
+// ОДИН ЭЛЕМЕНТ, CSS `matrix3d` (T27, R35; владелец: «оно очень лагает»). Прежде проекция
+// приближалась сеткой 10×10 аффинных треугольников — 200 <clipPath> и 200 <image> на каждое
+// движение ручки. Теперь это одна <img> с проективной матрицей: Chrome рисует её точно, в том числе
+// на печати (Skia умеет перспективу и без композитора — проверено снимком PDF, shots/27-print*).
+//
+// ТОЛЬКО ВЫПУКЛАЯ ЗОНА (R34; владелец: «так быть не должно» — угол утянули внутрь, и проекция
+// выбросила лучи далеко за кадр). У выпуклого четырёхугольника знаменатель проекции на всём
+// квадрате положителен, и картинка лежит строго внутри зоны; у вогнутого или перекрученного он
+// проходит через ноль. Поэтому зона обязана быть `quadIsSound`, а ручка, которая её вывернула бы,
+// упирается (`clampQuadCorner`).
 
 /** Коэффициенты проекции единичного квадрата на четырёхугольник: x=(a·u+b·v+c)/w, w=g·u+h·v+1. */
 export type Homography = {
@@ -488,95 +494,131 @@ export function applyHomography(H: Homography, u: number, v: number): ShapePoint
   return { x: (H.a * u + H.b * v + H.c) / w, y: (H.d * u + H.e * v + H.f) / w };
 }
 
-/** SVG `matrix(a b c d e f)`, переводящий треугольник `s` в треугольник `t`. `null` — вырожден. */
-export function triangleAffine(
-  s: [ShapePoint, ShapePoint, ShapePoint],
-  t: [ShapePoint, ShapePoint, ShapePoint],
-): [number, number, number, number, number, number] | null {
-  const s1x = s[1].x - s[0].x;
-  const s1y = s[1].y - s[0].y;
-  const s2x = s[2].x - s[0].x;
-  const s2y = s[2].y - s[0].y;
-  const det = s1x * s2y - s2x * s1y;
-  if (Math.abs(det) < 1e-12) return null;
-  const t1x = t[1].x - t[0].x;
-  const t1y = t[1].y - t[0].y;
-  const t2x = t[2].x - t[0].x;
-  const t2y = t[2].y - t[0].y;
-  // M = T · S⁻¹, S⁻¹ = [s2y −s2x; −s1y s1x] / det.
-  const a = (t1x * s2y - t2x * s1y) / det;
-  const c = (-t1x * s2x + t2x * s1x) / det;
-  const b = (t1y * s2y - t2y * s1y) / det;
-  const d = (-t1y * s2x + t2y * s1x) / det;
-  const e = t[0].x - a * s[0].x - c * s[0].y;
-  const f = t[0].y - b * s[0].x - d * s[0].y;
-  return [a, b, c, d, e, f];
+/**
+ * CSS `matrix3d(...)` (16 чисел, по столбцам) для элемента размером `w`×`h` с `transform-origin: 0 0`,
+ * положенного в (0, 0) слоя кадра: его углы (0,0), (w,0), (w,h), (0,h) садятся ровно на точки `q`
+ * (TL, TR, BR, BL) в пикселях того же слоя. `null` — зона не выпуклая или вырождена: проекция на ней
+ * не определена внутри квадрата.
+ */
+export function quadMatrix3d(q: ShapePoint[], w: number, h: number): number[] | null {
+  // Только строгая выпуклость: пороги угла и площади — забота ручки, а не отрисовки.
+  if (!(w > 0) || !(h > 0) || !quadIsSound(q, 0, 180)) return null;
+  const H = squareToQuad(q);
+  if (!H) return null;
+  // (u, v) = (x/w, y/h): x' = (a·u + b·v + c)/W, y' = (d·u + e·v + f)/W, W = g·u + h·v + 1.
+  return [H.a / w, H.d / w, 0, H.g / w, H.b / h, H.e / h, 0, H.h / h, 0, 0, 1, 0, H.c, H.f, 0, 1];
 }
 
-export type WarpTriangle = {
-  /** Аффин картинки, положенной в единичный квадрат (`<image width=1 height=1>`), — в кадр. */
-  m: [number, number, number, number, number, number];
-  /** Клип: треугольник назначения, раздутый на `bleed` пикселей, чтобы между соседями не было щели. */
-  clip: [ShapePoint, ShapePoint, ShapePoint];
-};
+/**
+ * ТА ЖЕ ПРОЕКЦИЯ, РАЗЛОЖЕННАЯ ТАК, ЧТОБЫ ЕХАТЬ С КАДРОМ ПРИ ПЕЧАТИ: `translate(tx, ty)
+ * perspective(d) matrix3d(m)`. Печать меняет ширину кадра ПОСЛЕ замера, и ResizeObserver на это не
+ * стреляет; у `matrix3d` в пикселях замера картинка осталась бы прежнего размера (снимок
+ * shots/27-print-pdf до правки). Кадр масштабируется равномерно (пропорции = пропорции картинки),
+ * а при равномерном масштабе k у проекции меняются только величины с размерностью: сдвиг (×k) и
+ * перспектива (÷k). Здесь они вынесены в `tx`, `ty`, `d` — длины в пикселях замера, которые
+ * разметка пишет в единицах контейнера (cqw/cqh) и которые потому растут вместе с кадром; `m` —
+ * безразмерная, от масштаба не зависит.
+ *
+ * Как сходится: Z·(x, y) = ((A−C·G)x + (B−C·H)y, (D−F·G)x + (E−F·H)y, −d·(G·x + H·y), 1); перспектива
+ * делает w = 1 + G·x + H·y; сдвиг на (C, F)·w возвращает числитель A·x + B·y + C. То же, что `quadMatrix3d`.
+ */
+export function quadPerspectiveParts(
+  q: ShapePoint[],
+  w: number,
+  h: number,
+): { tx: number; ty: number; d: number; m: number[] } | null {
+  const M = quadMatrix3d(q, w, h);
+  if (!M) return null;
+  const [A, D0, , G, B, E, , Hh, , , , , C, F] = M;
+  // Любая положительная длина; порядок размера зоны держит числа в m около единицы.
+  const d = Math.max(w, h, 1);
+  return {
+    tx: C,
+    ty: F,
+    d,
+    m: [
+      A - C * G,
+      D0 - F * G,
+      -d * G,
+      0,
+      B - C * Hh,
+      E - F * Hh,
+      -d * Hh,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+    ],
+  };
+}
 
 /**
- * Сетка n×n по единичному квадрату → 2n² треугольников на четырёхугольнике `q` (TL, TR, BR, BL).
- * Треугольники, у которых хоть одна вершина ушла за горизонт проекции (вывернутая зона), пропущены.
+ * ЗОНА ГОДИТСЯ ПОД КАРТИНКУ: четыре точки, строго выпуклый обход (ни вогнутости, ни перекрёста), ни
+ * один внутренний угол не тупее `maxAngle`° (почти прямой угол сплющивает картинку в нитку) и
+ * площадь больше `minArea` (в квадратных единицах координат `q`). Углы считаются в тех же единицах,
+ * что и точки: зовите с пикселями кадра, а не с долями, иначе альбомный кадр исказит углы.
  */
-export function warpTriangles(q: ShapePoint[], n = 10, bleed = 0.5): WarpTriangle[] {
-  const H = squareToQuad(q);
-  if (!H) return [];
-  const grid: (ShapePoint | null)[][] = [];
-  for (let j = 0; j <= n; j++) {
-    const row: (ShapePoint | null)[] = [];
-    for (let i = 0; i <= n; i++) row.push(applyHomography(H, i / n, j / n));
-    grid.push(row);
+export function quadIsSound(q: readonly ShapePoint[], minArea = 0, maxAngle = 175): boolean {
+  if (q.length !== 4 || q.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return false;
+  let sign = 0;
+  let area2 = 0;
+  // Внешний поворот в вершине не меньше 180° − maxAngle: синус этого поворота — нижняя граница.
+  const minTurn = Math.sin(((180 - maxAngle) * Math.PI) / 180);
+  for (let i = 0; i < 4; i++) {
+    const a = q[i];
+    const b = q[(i + 1) % 4];
+    const c = q[(i + 2) % 4];
+    const ux = b.x - a.x;
+    const uy = b.y - a.y;
+    const vx = c.x - b.x;
+    const vy = c.y - b.y;
+    const lu = Math.hypot(ux, uy);
+    const lv = Math.hypot(vx, vy);
+    if (lu < 1e-12 || lv < 1e-12) return false;
+    const cross = ux * vy - uy * vx;
+    const s = Math.sign(cross);
+    if (s === 0 || (sign !== 0 && s !== sign)) return false;
+    sign = s;
+    // Поворот почти 0° (угол почти 180°) или почти 180° назад (шпилька) — оба отбиваются: у шпильки
+    // скалярное произведение отрицательно, и тогда это не «тупой угол», а разворот.
+    if (Math.abs(cross) / (lu * lv) < minTurn && ux * vx + uy * vy > 0) return false;
+    area2 += a.x * b.y - b.x * a.y;
   }
-  const out: WarpTriangle[] = [];
-  const push = (s: [ShapePoint, ShapePoint, ShapePoint], t: (ShapePoint | null)[]) => {
-    if (t.some((p) => !p)) return;
-    const tt = t as [ShapePoint, ShapePoint, ShapePoint];
-    const m = triangleAffine(s, tt);
-    if (!m) return;
-    const cx = (tt[0].x + tt[1].x + tt[2].x) / 3;
-    const cy = (tt[0].y + tt[1].y + tt[2].y) / 3;
-    const clip = tt.map((p) => {
-      const dx = p.x - cx;
-      const dy = p.y - cy;
-      const len = Math.hypot(dx, dy) || 1;
-      return { x: p.x + (dx / len) * bleed, y: p.y + (dy / len) * bleed };
-    }) as [ShapePoint, ShapePoint, ShapePoint];
-    out.push({ m, clip });
-  };
-  for (let j = 0; j < n; j++)
-    for (let i = 0; i < n; i++) {
-      const u0 = i / n;
-      const u1 = (i + 1) / n;
-      const v0 = j / n;
-      const v1 = (j + 1) / n;
-      const a = grid[j][i];
-      const b = grid[j][i + 1];
-      const c = grid[j + 1][i + 1];
-      const d = grid[j + 1][i];
-      push(
-        [
-          { x: u0, y: v0 },
-          { x: u1, y: v0 },
-          { x: u1, y: v1 },
-        ],
-        [a, b, c],
-      );
-      push(
-        [
-          { x: u0, y: v0 },
-          { x: u1, y: v1 },
-          { x: u0, y: v1 },
-        ],
-        [a, c, d],
-      );
-    }
-  return out;
+  // Четыре одинаковых поворота у четырёх вершин — это один оборот (сумма внешних углов < 4·180°),
+  // то есть простой выпуклый контур: перекрученный «бантик» всегда меняет знак поворота.
+  return Math.abs(area2) / 2 > minArea;
+}
+
+/**
+ * РУЧКА ЗОНЫ УПИРАЕТСЯ, А НЕ ПРЫГАЕТ (R34): угол `index` тянут в `target`. Если там зона годна —
+ * туда; если нет — самая дальняя годная точка на отрезке от прежнего места к `target` (зона
+ * «прилипает» к границе выпуклости и скользит дальше, когда рука вернётся). Прежнее место само
+ * негодно (старая запись) — `target` как есть: не запирать ручку там, откуда её не выпустить.
+ */
+export function clampQuadCorner(
+  q: readonly ShapePoint[],
+  index: number,
+  target: ShapePoint,
+  ok: (q: ShapePoint[]) => boolean,
+): ShapePoint {
+  const at = (p: ShapePoint) => q.map((x, i) => (i === index ? p : x));
+  if (ok(at(target))) return target;
+  const from = q[index];
+  if (!from || !ok(at(from))) return target;
+  let lo = 0;
+  let hi = 1;
+  for (let k = 0; k < 24; k++) {
+    const t = (lo + hi) / 2;
+    if (ok(at({ x: from.x + (target.x - from.x) * t, y: from.y + (target.y - from.y) * t })))
+      lo = t;
+    else hi = t;
+  }
+  return { x: from.x + (target.x - from.x) * lo, y: from.y + (target.y - from.y) * lo };
 }
 
 /**

@@ -87,6 +87,7 @@ import {
 } from 'ui/components/annotation/insets';
 import { StitchPictogram, stitchIsoOf } from 'ui/components/annotation/stitch-pictogram';
 import {
+  artworkQuad,
   boundsOf,
   parseSpec,
   purposeLabel,
@@ -366,10 +367,15 @@ function SketchGeometryLayer({
             <CalloutShape
               key={i}
               kind={annotationKindFromWire(c.kind)}
-              pts={(c.points ?? []).map((p) => ({
-                x: num(dec(p.x)) * box.w,
-                y: num(dec(p.y)) * box.h,
-              }))}
+              pts={(() => {
+                const pts = (c.points ?? []).map((p) => ({
+                  x: num(dec(p.x)) * box.w,
+                  y: num(dec(p.y)) * box.h,
+                }));
+                // Пунктир зоны артворка — там же, где картинка: вывернутая старая зона рисуется
+                // габаритом и на бумаге (`artworkQuad`, T27).
+                return parseSpec(c.spec)?.t === 'artwork' ? artworkQuad(pts) : pts;
+              })()}
               // Подпись фигуры — сам нумерованный маркер: лидер тянется к нему, и на бумаге он
               // единственное, что можно прочесть глазами.
               label={{ x: num(dec(c.posX)) * box.w, y: num(dec(c.posY)) * box.h }}

@@ -33,8 +33,10 @@ const {
   simplifyToLimit,
   squareToQuad,
   applyHomography,
-  triangleAffine,
-  warpTriangles,
+  quadMatrix3d,
+  quadPerspectiveParts,
+  quadIsSound,
+  clampQuadCorner,
   fitQuadToAspect,
 } = await import(pathToFileURL(outfile).href);
 
@@ -216,33 +218,78 @@ check(
 check('вырожденная зона (три точки на прямой) не варпится', squareToQuad([{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 100, y: 0 }, { x: 0, y: 0 }]) === null);
 check('не четыре точки — не варпится', squareToQuad(par.slice(0, 3)) === null);
 
-// Аффин треугольника: три вершины источника уходят ровно в три вершины назначения.
-const S = [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }];
-const T = [{ x: 5, y: 7 }, { x: 40, y: 12 }, { x: 33, y: 50 }];
-const M = triangleAffine(S, T);
-const ap = (m, p) => ({ x: m[0] * p.x + m[2] * p.y + m[4], y: m[1] * p.x + m[3] * p.y + m[5] });
-check('аффин треугольника: вершины на местах', S.every((p, i) => nearP(ap(M, p), T[i])), JSON.stringify(M));
+// CSS matrix3d (T27, R35): углы элемента w×h с transform-origin 0 0 садятся ровно на ручки, центр —
+// на пересечение диагоналей. Умножение — как у браузера: столбцы, затем деление на w.
+const m3 = (m, x, y) => {
+  const X = m[0] * x + m[4] * y + m[12];
+  const Y = m[1] * x + m[5] * y + m[13];
+  const W = m[3] * x + m[7] * y + m[15];
+  return { x: X / W, y: Y / W, w: W };
+};
+for (const { n, q } of quads) {
+  const w = 137;
+  const h = 59;
+  const M3 = quadMatrix3d(q, w, h);
+  check(`${n}: matrix3d есть, 16 чисел`, Array.isArray(M3) && M3.length === 16);
+  const cs = [[0, 0], [w, 0], [w, h], [0, h]].map(([x, y]) => m3(M3, x, y));
+  check(`${n}: matrix3d — углы элемента ровно на ручках`, cs.every((p, i) => nearP(p, q[i])), JSON.stringify(cs));
+  check(`${n}: matrix3d — центр как у проекции`, nearP(m3(M3, w / 2, h / 2), applyHomography(squareToQuad(q), 0.5, 0.5)));
+  // Выпуклая зона: знаменатель положителен по всему элементу — картинка не уходит за горизонт.
+  let minW = Infinity;
+  for (let i = 0; i <= 20; i++) for (let j = 0; j <= 20; j++) minW = Math.min(minW, m3(M3, (w * i) / 20, (h * j) / 20).w);
+  check(`${n}: matrix3d — w > 0 по всей картинке`, minW > 0, `${minW}`);
+  // Разложение для печати: translate(tx,ty)·perspective(d)·matrix3d(m) — та же проекция, и при
+  // равномерном масштабе кадра k (длины tx, ty, d и размер элемента ×k) — та же проекция ×k.
+  const P = quadPerspectiveParts(q, w, h);
+  const viaParts = (k, x, y) => {
+    const m = P.m;
+    const X = m[0] * x + m[4] * y;
+    const Y = m[1] * x + m[5] * y;
+    const Z = m[2] * x + m[6] * y;
+    const W = 1 - Z / (P.d * k);
+    return { x: (X + P.tx * k * W) / W, y: (Y + P.ty * k * W) / W };
+  };
+  for (const k of [1, 0.62, 1.7]) {
+    const cs2 = [[0, 0], [w, 0], [w, h], [0, h]].map(([x, y]) => viaParts(k, x * k, y * k));
+    check(`${n}: разложение ×${k} — углы на ручках ×${k}`, cs2.every((p, i) => nearP(p, { x: q[i].x * k, y: q[i].y * k })), JSON.stringify(cs2));
+  }
+  const c1 = viaParts(1, w * 0.3, h * 0.8);
+  check(`${n}: разложение = matrix3d внутри картинки`, nearP(c1, m3(M3, w * 0.3, h * 0.8)));
+}
 
-// Сетка: 2·n² треугольников, каждый аффин сажает свои углы сетки на точки проекции.
-const persp = quads[2].q;
-const tris = warpTriangles(persp, 10, 0);
-check('сетка 10×10 → 200 треугольников', tris.length === 200, `${tris.length}`);
-const Hq = squareToQuad(persp);
-check(
-  'первый треугольник: угол (0,0) картинки — в TL зоны',
-  nearP(ap(tris[0].m, { x: 0, y: 0 }), persp[0]),
-);
-check(
-  'последний треугольник: угол (1,1) картинки — в BR зоны',
-  nearP(ap(tris[tris.length - 1].m, { x: 1, y: 1 }), persp[2]),
-);
-check(
-  'каждый аффин совпадает с проекцией в своём углу (0.5,0.5)',
-  tris.some((t) => nearP(ap(t.m, { x: 0.5, y: 0.5 }), applyHomography(Hq, 0.5, 0.5))),
-);
-const bled = warpTriangles(persp, 10, 0.5);
-const area = (t) => Math.abs((t[1].x - t[0].x) * (t[2].y - t[0].y) - (t[2].x - t[0].x) * (t[1].y - t[0].y)) / 2;
-check('клип раздут на полпикселя (шов не виден)', bled.every((t, i) => area(t.clip) > area(tris[i].clip)));
+// Годность зоны (R34): выпуклая — да; вогнутая (угол утянут внутрь, как у владельца), перекрученная
+// («бантик»), три точки на прямой, почти прямой угол (> 175°), крошечная — нет.
+const sq = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
+const owner = [{ x: 340, y: 548 }, { x: 547, y: 344 }, { x: 547, y: 548 }, { x: 505, y: 505 }]; // shots/owner-ref-warp-explode.png, переставлено в TL,TR,BR,BL обхода
+const concave = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 40, y: 40 }, { x: 0, y: 100 }];
+const bowtie = [{ x: 0, y: 0 }, { x: 100, y: 100 }, { x: 100, y: 0 }, { x: 0, y: 100 }];
+const collinear = [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 100, y: 0 }, { x: 0, y: 100 }];
+const flat = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 52, y: 52 }, { x: 0, y: 100 }]; // угол в TR/BL ≈ 177°
+const tiny = [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }];
+check('квадрат годен', quadIsSound(sq, 16));
+check('квадрат годен и в обратном обходе', quadIsSound(sq.slice().reverse(), 16));
+check('косой (как у владельца) годен', quadIsSound(quads[3].q, 16));
+check('вогнутая — нет', !quadIsSound(concave));
+check('вогнутая (как на снимке владельца) — нет', !quadIsSound(owner));
+check('перекрученная — нет', !quadIsSound(bowtie));
+check('три точки на прямой — нет', !quadIsSound(collinear));
+check('почти прямой угол (177°) — нет при 175°', !quadIsSound(flat, 0, 175));
+check('почти прямой угол (177°) — да при 179° (отрисовка мягче ручки)', quadIsSound(flat, 0, 179));
+check('крошечная (4 px²) — нет при полу 16 px²', !quadIsSound(tiny, 16));
+check('не четыре точки — нет', !quadIsSound(sq.slice(0, 3)));
+check('matrix3d у вогнутой — null', quadMatrix3d(concave, 10, 10) === null);
+check('matrix3d у перекрученной — null', quadMatrix3d(bowtie, 10, 10) === null);
+
+// Ручка упирается: угол BR тянут за диагональ — он встаёт на границу (годная, у самой границы),
+// а не остаётся на старте и не перепрыгивает.
+const okQ = (q) => quadIsSound(q, 16);
+const clamped = clampQuadCorner(sq, 2, { x: -20, y: -20 }, okQ);
+const withC = sq.map((p, i) => (i === 2 ? clamped : p));
+check('упор: зона годна', okQ(withC), JSON.stringify(clamped));
+check('упор: угол сдвинулся к руке', clamped.x < 100 - 30, JSON.stringify(clamped));
+check('упор: угол у границы (шаг дальше — негодно)', !okQ(sq.map((p, i) => (i === 2 ? { x: clamped.x - 1, y: clamped.y - 1 } : p))), JSON.stringify(clamped));
+check('годная цель — ровно туда', (() => { const t = clampQuadCorner(sq, 2, { x: 80, y: 120 }, okQ); return t.x === 80 && t.y === 120; })());
+check('старт негоден (старая запись) — цель как есть', (() => { const t = clampQuadCorner(concave, 2, { x: 30, y: 30 }, okQ); return t.x === 30 && t.y === 30; })());
 
 // Зона под пропорции картинки при первом прикреплении.
 const wide = fitQuadToAspect([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }], 2);

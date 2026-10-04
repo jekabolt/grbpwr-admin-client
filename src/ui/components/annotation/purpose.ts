@@ -1,4 +1,4 @@
-import { fitQuadToAspect } from './geometry';
+import { fitQuadToAspect, quadIsSound } from './geometry';
 
 // НАЗНАЧЕНИЕ УКАЗАНИЯ — ВТОРАЯ ОСЬ, А НЕ НОВЫЕ ВИДЫ (волна callout kinds, 04.10).
 //
@@ -368,9 +368,19 @@ export function rectCorners(
  * ЗОНА НАНЕСЕНИЯ — ВСЕГДА ЧЕТЫРЕ УГЛА (владелец, 04.10: «принт криво работает» — зона обросла
  * вершинами через ручки сторон, и картинку стало не на что натянуть). Четыре точки отдаются как
  * есть; любое другое число — прямоугольником охвата в порядке TL, TR, BR, BL (как ставит постановка).
+ *
+ * ВЫВЕРНУТАЯ ЗОНА — ТОЖЕ ГАБАРИТОМ (T27, R34): вогнутую или перекрученную четвёрку записали до того,
+ * как ручки стали упираться; натянутая на неё картинка разлетается лучами за кадр. `box` — размер
+ * кадра, если точки в долях: углы годности меряются в пикселях (`quadIsSound`).
  */
-export function artworkQuad<P extends { x: number; y: number }>(pts: readonly P[]): { x: number; y: number }[] {
-  if (pts.length === 4) return pts.slice();
+export function artworkQuad<P extends { x: number; y: number }>(
+  pts: readonly P[],
+  box: { w: number; h: number } = { w: 1, h: 1 },
+): { x: number; y: number }[] {
+  // Порог мягче, чем у ручки (179° против 175°): округление долей при записи не должно превращать
+  // зону, на которой ручка упёрлась, в габарит при следующей отрисовке.
+  const px = pts.map((p) => ({ x: p.x * box.w, y: p.y * box.h }));
+  if (pts.length === 4 && quadIsSound(px, 0, 179)) return pts.slice();
   const b = boundsOf(pts);
   if (!b) return [];
   return [
