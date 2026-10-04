@@ -183,6 +183,7 @@ export function WhatModelGetsRenderModal({
   sizeName,
   colorwayId,
   colorwayLabel,
+  artworks,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -205,6 +206,11 @@ export function WhatModelGetsRenderModal({
    */
   colorwayId?: number;
   colorwayLabel?: string;
+  /**
+   * R7 · one line per artwork of this colourway placed on the bench flats (`chest embroidery on
+   * front`), read client-side from the same placements the server freezes at launch. Render arm.
+   */
+  artworks?: readonly string[];
 }): JSX.Element {
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
@@ -230,7 +236,13 @@ export function WhatModelGetsRenderModal({
 
   const body =
     kind === 'render' ? (
-      <RenderBody band={band} recipe={recipe} garment={garment} resolved={resolved} />
+      <RenderBody
+        band={band}
+        recipe={recipe}
+        garment={garment}
+        resolved={resolved}
+        artworks={artworks ?? []}
+      />
     ) : kind === 'recolor' ? (
       <RecolorBody
         band={band}
@@ -265,6 +277,7 @@ export function WhatModelGetsRenderModal({
         resolved,
         colorwayId: colorwayId ?? 0,
         colorwayLabel: colorwayLabel ?? '',
+        artworks: artworks ?? [],
       }),
     // `resolved` is rebuilt each render by design (it is three references, not state); the text is
     // recomputed from the same inputs the panel draws from, so the dictionaries are named here.
@@ -281,6 +294,7 @@ export function WhatModelGetsRenderModal({
       models,
       colorwayId,
       colorwayLabel,
+      artworks,
     ],
   );
 
@@ -304,11 +318,11 @@ export function WhatModelGetsRenderModal({
            door was dead; it is true, and it belongs beside the inventory instead of in place of
            it — a person reading this list must know it is the PAYLOAD and not the whole prompt. */
         <>
-          <b>this is what this CARD contributes.</b> The prompt itself is assembled server-side
-          from a prompt PROFILE — server configuration, not a card field — and the profile's name
-          and version reach this screen only as the stamp on a run that has already happened. So
-          the wording around these facts is not shown here, because it is not knowable here. The
-          facts are, and they are the part you are paying for.
+          <b>this is what this CARD contributes.</b> The prompt itself is assembled server-side from
+          a prompt PROFILE — server configuration, not a card field — and the profile's name and
+          version reach this screen only as the stamp on a run that has already happened. So the
+          wording around these facts is not shown here, because it is not knowable here. The facts
+          are, and they are the part you are paying for.
         </>
       }
     >
@@ -368,11 +382,13 @@ function RenderBody({
   recipe,
   garment,
   resolved,
+  artworks,
 }: {
   band: GetDesignBandResponse;
   recipe?: common_DesignColourRecipe;
   garment: string;
   resolved: Resolved;
+  artworks: readonly string[];
 }): JSX.Element {
   const sides = useMemo(() => benchSides(band), [band]);
   const filled = sides.filter((side) => !!side.picture);
@@ -513,6 +529,20 @@ function RenderBody({
             covers which part»); прочитанная под общей подписью референса, она была бы чертежом
             вещи в неправдоподобных цветах. Строка рисуется только когда карты есть: пустая
             говорила бы про прогон то, чего в нём нет. */}
+        {/* R7 · ARTWORKS PLACED ON THE FLATS — each travels as its own image with its box. */}
+        {artworks.length > 0 && (
+          <InventoryLine
+            data-sent-artworks={artworks.length}
+            name='artworks'
+            origin='recipe'
+            text={
+              <>
+                <b>{artworks.length}</b> · {artworks.join(' · ')} — each travels as its own image,
+                inside the box drawn on that flat
+              </>
+            }
+          />
+        )}
         {(recipe?.colourMaps ?? []).length > 0 && (
           <InventoryLine
             data-sent-colour-maps={(recipe?.colourMaps ?? []).length}
@@ -723,9 +753,7 @@ function RecolorBody({
         <InventoryLine
           name='garment'
           origin='linked'
-          text={
-            garment || <span className='text-labelColor'>the card states no description</span>
-          }
+          text={garment || <span className='text-labelColor'>the card states no description</span>}
         />
         <InventoryLine
           name='fit'
@@ -757,7 +785,10 @@ function RecolorBody({
             reason:
               'each shot is its own paid call and the model sees only that one — what keeps them the same shade is the colour you named, not that they went together',
           },
-          { label: 'references', reason: 'reference photographs belong to FLAT and never reach this run' },
+          {
+            label: 'references',
+            reason: 'reference photographs belong to FLAT and never reach this run',
+          },
           { label: 'moodboard', reason: 'mood is for the human — it is never instruction' },
         ]}
       />
@@ -909,8 +940,8 @@ function ThreedBody({
           text={
             (threed?.fitOverride ?? '').trim() ? (
               <>
-                <b>{threed?.fitOverride}</b> — an override; what it produces carries the badge,
-                and the card still says {cardFit || '—'}
+                <b>{threed?.fitOverride}</b> — an override; what it produces carries the badge, and
+                the card still says {cardFit || '—'}
               </>
             ) : (
               `${cardFit || '—'} (from the card)`
@@ -920,9 +951,7 @@ function ThreedBody({
         <InventoryLine
           name='garment'
           origin='linked'
-          text={
-            garment || <span className='text-labelColor'>the card states no description</span>
-          }
+          text={garment || <span className='text-labelColor'>the card states no description</span>}
         />
       </WmgGroup>
 
@@ -939,7 +968,10 @@ function ThreedBody({
             label: 'the flats',
             reason: '3D is built from the renders, not from the drawings underneath them',
           },
-          { label: 'notes', reason: 'notes are internal and reach neither the factory nor a model' },
+          {
+            label: 'notes',
+            reason: 'notes are internal and reach neither the factory nor a model',
+          },
         ]}
       />
     </>
@@ -948,10 +980,7 @@ function ThreedBody({
 
 /* ─────────────────────────── the shared shapes live in core/wmg.tsx ─────────────────────────── */
 
-function modelCaptionOf(
-  models: readonly common_Model[] | undefined,
-  modelId?: number,
-): string {
+function modelCaptionOf(models: readonly common_Model[] | undefined, modelId?: number): string {
   if (!modelId) return '';
   const model = (models ?? []).find((m) => m.id === modelId);
   return (model?.model?.name ?? '').trim() || `model ${modelId}`;
@@ -963,10 +992,7 @@ function modelCaptionOf(
  * ОДИН ВОПРОС, ДВА РЕГИСТРА ОТВЕТА (V-15), поэтому и строка одна: панель повторяет то, что человек
  * только что сказал на экране, а два отдельных поля здесь читались бы как два независимых решения.
  */
-function bodyLine(
-  models: readonly common_Model[] | undefined,
-  threed?: ThreedDraft,
-): string {
+function bodyLine(models: readonly common_Model[] | undefined, threed?: ThreedDraft): string {
   const who = modelCaptionOf(models, threed?.modelId);
   const build = (threed?.bodyType ?? '').trim();
   if (who && build) return `${who}, a ${build} build`;
@@ -993,6 +1019,7 @@ function plainText({
   resolved,
   colorwayId,
   colorwayLabel,
+  artworks,
 }: {
   kind: WhatModelGetsKind;
   band: GetDesignBandResponse;
@@ -1004,6 +1031,7 @@ function plainText({
   resolved: Resolved;
   colorwayId: number;
   colorwayLabel: string;
+  artworks: readonly string[];
 }): string {
   const lines: string[] = [
     `what the model gets — ${kindLabel(kind)}`,
@@ -1057,6 +1085,7 @@ function plainText({
           .map((m) => `${viewLabel((m.view ?? '').trim())} media ${m.mediaId ?? 0}`)
           .join(', ') || '—'
       }`,
+      `artworks: ${artworks.length > 0 ? `${artworks.length} · ${artworks.join(', ')}` : '—'}`,
       `fabric photo: ${(recipe?.fabricMediaId ?? 0) > 0 ? `media ${recipe?.fabricMediaId}` : '—'}`,
       `picked colour: ${colourLabel(recipe, resolved.colors)}`,
       `fabric in words: ${(recipe?.words ?? '').trim() || '—'}`,

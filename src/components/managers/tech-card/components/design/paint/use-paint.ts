@@ -64,7 +64,8 @@ import {
 } from './parts-model';
 import { analyseFlat, REGIONS_ALGO_REV, type FlatRegions } from './regions';
 
-export type PaintTool = 'click' | 'pen' | 'erase';
+/** `artwork` (R7): the armed artwork is placed on the flats as a box; the paint stays as is. */
+export type PaintTool = 'click' | 'pen' | 'erase' | 'artwork';
 
 export type PaintView = {
   view: string;
@@ -216,6 +217,8 @@ export class PaintSession {
   private lastColorway = 0;
   armed = '';
   tool: PaintTool = 'click';
+  /** R7 · the artwork asset a drag on a side places (0 = none armed). */
+  armedArtwork = 0;
   save: PaintSaveState = 'idle';
   saveError = '';
 
@@ -565,7 +568,14 @@ export class PaintSession {
 
   arm(label: string) {
     this.armed = label;
-    if (this.tool === 'erase') this.tool = 'click';
+    if (this.tool === 'erase' || this.tool === 'artwork') this.tool = 'click';
+    this.bump();
+  }
+
+  /** R7 · arms an artwork tile: the `artwork` tool takes over the sides. 0 disarms. */
+  armArtwork(assetId: number) {
+    this.armedArtwork = Math.max(0, assetId);
+    this.tool = assetId > 0 ? 'artwork' : this.tool === 'artwork' ? 'click' : this.tool;
     this.bump();
   }
 
@@ -584,7 +594,7 @@ export class PaintSession {
     ];
     this.skins.set(label, { tile: null, hex: colourHex });
     this.armed = label;
-    if (this.tool === 'erase') this.tool = 'click';
+    if (this.tool === 'erase' || this.tool === 'artwork') this.tool = 'click';
     this.bump();
     return label;
   }

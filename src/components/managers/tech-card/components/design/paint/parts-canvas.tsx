@@ -1,17 +1,24 @@
+import type { GetDesignBandResponse } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import {
+  useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type JSX,
   type KeyboardEvent,
   type PointerEvent,
 } from 'react';
+import { ArtworkImage } from 'ui/components/annotation/insets';
+import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
+import { placementsOnPicture } from '../assets/model';
+import { useAssetWrites } from '../assets/use-assets';
 import { GROUP_GAP } from '../core';
 import { viewLabel } from '../views';
 import {
@@ -24,6 +31,23 @@ import {
   type Pt,
 } from './livewire';
 import { componentAt, displayLabels, polygonIndices, underLines } from './map-model';
+import {
+  annotationOfQuad,
+  boxQuad,
+  centreOf,
+  clampQuad,
+  flatPictureIds,
+  growQuad,
+  insideQuad,
+  moveQuad,
+  quadOfPlacement,
+  rotateQuad,
+  rotationHandle,
+  scaleQuad,
+  withCorner,
+  type CanvasArtwork,
+  type Quad,
+} from './artworks';
 import { partIndices } from './parts-model';
 import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint';
 
@@ -39,7 +63,11 @@ import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint'
  *          magnetic: a vertex lands on a line within reach, and between two vertices on lines the
  *          edge follows the drawing (straight across a gap and over paper); ⇧ = a straight edge
  *   erase  click back to paper
- * Keys: V / P / E, ⌘Z / ⇧⌘Z, Enter closes the pen, Esc drops it.
+ *   artwork (R7) the armed artwork tile: drag on a side = a new box; a selected box moves (drag
+ *          inside), its 4 corners move alone (free perspective; ⇧ = uniform scale), the handle
+ *          above the top edge turns it; every drop = one SetDesignAssetPlacement (4-point POLYGON)
+ * Keys: V / P / E / A, ⌘Z / ⇧⌘Z, Enter closes the pen, Esc drops it (or the artwork selection),
+ * ⌫ deletes the selected artwork placement.
  */
 
 /** Sides share one height that fills the row, within these bounds. */
@@ -102,14 +130,310 @@ function sampler(skin: PaintSkin | undefined, h: number) {
   };
 }
 
+/* ─────────────────────────── R7 · artwork placements ─────────────────────────── */
+
+/** One artwork mark on one side; `quad` in fractions of the flat. */
+type Placed = {
+  key: string;
+  placementId: number;
+  assetId: number;
+  pictureId: number;
+  quad: Quad;
+};
+
+type SideArtwork = {
+  pictureId: number;
+  items: Placed[];
+  arts: Map<number, CanvasArtwork>;
+  /** Asset a drag places (0 = none). */
+  armed: number;
+  active: boolean;
+  selectedKey: string;
+  onSelect: (key: string) => void;
+  onCommit: (item: Omit<Placed, 'key'> & { key?: string }) => void;
+};
+
+const HANDLE = 8;
+const ROT_OFF = 22;
+const NEW_MIN = 12;
+
+type Drag = {
+  mode: 'new' | 'move' | 'corner' | 'rotate';
+  key: string;
+  start: Pt;
+  /** Pixels of the layer. */
+  base: Quad;
+  corner: number;
+  item: Placed | null;
+};
+
+type HoverPart = { key: string; part: 'body' | 'corner' | 'rotate' };
+
+/**
+ * The artworks of one side: the PNG warped into its quad (the callout's `ArtworkImage` — four
+ * points, TL TR BR BL), multiply-blended unless cut out; frames and handles on top. Pointer events
+ * only while the `artwork` tool is on — the paint tools never meet a box.
+ */
+function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  const drag = useRef<Drag | null>(null);
+  const [live, setLive] = useState<{ key: string; quad: Quad } | null>(null);
+  const [hover, setHover] = useState<HoverPart | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) =>
+      setSize({ w: e.contentRect.width, h: e.contentRect.height }),
+    );
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const { w, h } = size;
+  const px = (q: Quad) => scaleQuad(q, w, h);
+  const frac = (q: Quad) => scaleQuad(clampQuad(q, w, h), 1 / w, 1 / h);
+  const quadOf = (it: Placed) => (live?.key === it.key ? live.quad : px(it.quad));
+  const selected = art.items.find((it) => it.key === art.selectedKey) ?? null;
+
+  const pos = (e: PointerEvent<HTMLDivElement>): Pt => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return {
+      x: Math.min(w, Math.max(0, e.clientX - r.left)),
+      y: Math.min(h, Math.max(0, e.clientY - r.top)),
+    };
+  };
+
+  const hitAt = (p: Pt): HoverPart | null => {
+    if (selected) {
+      const q = px(selected.quad);
+      const c = q.findIndex((v) => Math.hypot(v.x - p.x, v.y - p.y) <= HANDLE);
+      if (c >= 0) return { key: selected.key, part: 'corner' };
+      const r = rotationHandle(q, ROT_OFF).at;
+      if (Math.hypot(r.x - p.x, r.y - p.y) <= HANDLE) return { key: selected.key, part: 'rotate' };
+    }
+    const hit = [...art.items].reverse().find((it) => insideQuad(p, px(it.quad)));
+    return hit ? { key: hit.key, part: 'body' } : null;
+  };
+
+  const onDown = (e: PointerEvent<HTMLDivElement>) => {
+    if (!art.active || e.button !== 0 || w < 1 || h < 1) return;
+    e.stopPropagation();
+    (e.currentTarget.closest('[data-paint-parts]') as HTMLElement | null)?.focus({
+      preventScroll: true,
+    });
+    const p = pos(e);
+    const hit = hitAt(p);
+    const item = hit ? art.items.find((it) => it.key === hit.key) ?? null : null;
+    if (hit && item) {
+      const base = px(item.quad);
+      art.onSelect(item.key);
+      drag.current = {
+        mode: hit.part === 'body' ? 'move' : hit.part,
+        key: item.key,
+        start: p,
+        base,
+        corner:
+          hit.part === 'corner'
+            ? base.findIndex((v) => Math.hypot(v.x - p.x, v.y - p.y) <= HANDLE)
+            : -1,
+        item,
+      };
+    } else if (art.armed > 0) {
+      art.onSelect('');
+      drag.current = {
+        mode: 'new',
+        key: 'draft',
+        start: p,
+        base: boxQuad(p, p),
+        corner: -1,
+        item: null,
+      };
+      setLive({ key: 'draft', quad: boxQuad(p, p) });
+    } else {
+      art.onSelect('');
+      return;
+    }
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onMove = (e: PointerEvent<HTMLDivElement>) => {
+    if (!art.active) return;
+    e.stopPropagation();
+    const p = pos(e);
+    const d = drag.current;
+    if (!d) {
+      setHover(hitAt(p));
+      return;
+    }
+    let q: Quad = d.base;
+    if (d.mode === 'new') q = boxQuad(d.start, p);
+    else if (d.mode === 'move') q = moveQuad(d.base, p.x - d.start.x, p.y - d.start.y, w, h);
+    else if (d.mode === 'corner' && d.corner >= 0) {
+      if (e.shiftKey) {
+        const c = centreOf(d.base);
+        const from = Math.hypot(d.base[d.corner].x - c.x, d.base[d.corner].y - c.y) || 1;
+        q = growQuad(d.base, Math.max(0.05, Math.hypot(p.x - c.x, p.y - c.y) / from));
+      } else q = withCorner(d.base, d.corner, p);
+    } else if (d.mode === 'rotate') {
+      const c = centreOf(d.base);
+      const a0 = Math.atan2(d.start.y - c.y, d.start.x - c.x);
+      const a1 = Math.atan2(p.y - c.y, p.x - c.x);
+      q = rotateQuad(d.base, a1 - a0);
+    }
+    setLive({ key: d.key, quad: q });
+  };
+
+  const onUp = (e: PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    drag.current = null;
+    const l = live;
+    setLive(null);
+    if (!d || !l) return;
+    e.stopPropagation();
+    if (d.mode === 'new') {
+      const xs = l.quad.map((v) => v.x);
+      const ys = l.quad.map((v) => v.y);
+      if (
+        Math.max(...xs) - Math.min(...xs) < NEW_MIN ||
+        Math.max(...ys) - Math.min(...ys) < NEW_MIN
+      )
+        return;
+      art.onCommit({
+        placementId: 0,
+        assetId: art.armed,
+        pictureId: art.pictureId,
+        quad: frac(l.quad),
+      });
+      return;
+    }
+    if (!d.item) return;
+    const moved = l.quad.some((v, i) => Math.hypot(v.x - d.base[i].x, v.y - d.base[i].y) >= 1);
+    if (!moved) return;
+    art.onCommit({ ...d.item, quad: frac(l.quad) });
+  };
+
+  const cursor = !art.active
+    ? ''
+    : hover?.part === 'corner'
+      ? 'cursor-nwse-resize'
+      : hover?.part === 'rotate'
+        ? 'cursor-grab'
+        : hover?.part === 'body'
+          ? 'cursor-move'
+          : art.armed > 0
+            ? 'cursor-crosshair'
+            : 'cursor-default';
+
+  const stroke = 'var(--color-textColor)';
+  return (
+    <div
+      ref={ref}
+      data-artwork-layer={art.items.length}
+      className={cn('absolute inset-0', art.active ? cursor : 'pointer-events-none')}
+      onPointerDown={onDown}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+      onPointerCancel={() => {
+        drag.current = null;
+        setLive(null);
+      }}
+      onPointerLeave={() => setHover(null)}
+    >
+      {w > 0 &&
+        art.items.map((it) => {
+          const a = art.arts.get(it.assetId);
+          if (!a?.url) return null;
+          return (
+            <div
+              key={it.key}
+              className='pointer-events-none absolute inset-0'
+              style={{ mixBlendMode: a.cut ? 'normal' : 'multiply' }}
+              data-artwork-placed={it.placementId}
+              data-artwork-asset={it.assetId}
+            >
+              <ArtworkImage quad={quadOf(it)} box={size} src={a.url} />
+            </div>
+          );
+        })}
+      {w > 0 && (
+        <svg
+          aria-hidden
+          className='pointer-events-none absolute inset-0 size-full overflow-visible'
+          viewBox={`0 0 ${w} ${h}`}
+          preserveAspectRatio='none'
+        >
+          {art.items.map((it) => {
+            const sel = it.key === art.selectedKey;
+            const hov = art.active && hover?.key === it.key;
+            if (!sel && !hov) return null;
+            const q = quadOf(it);
+            return (
+              <polygon
+                key={it.key}
+                points={q.map((v) => `${v.x},${v.y}`).join(' ')}
+                fill='none'
+                stroke={stroke}
+                strokeWidth={sel ? 2 : 1}
+                strokeDasharray={sel ? undefined : '4 3'}
+              />
+            );
+          })}
+          {selected &&
+            (() => {
+              const q = quadOf(selected);
+              const r = rotationHandle(q, ROT_OFF);
+              return (
+                <g data-artwork-handles=''>
+                  <line x1={r.from.x} y1={r.from.y} x2={r.at.x} y2={r.at.y} stroke={stroke} />
+                  <circle
+                    cx={r.at.x}
+                    cy={r.at.y}
+                    r={4.5}
+                    fill='#fff'
+                    stroke={stroke}
+                    strokeWidth={1.5}
+                  />
+                  {q.map((v, i) => (
+                    <rect
+                      key={i}
+                      x={v.x - 4}
+                      y={v.y - 4}
+                      width={8}
+                      height={8}
+                      fill='#fff'
+                      stroke={stroke}
+                      strokeWidth={1.5}
+                    />
+                  ))}
+                </g>
+              );
+            })()}
+          {live?.key === 'draft' && (
+            <polygon
+              data-artwork-draft=''
+              points={live.quad.map((v) => `${v.x},${v.y}`).join(' ')}
+              fill='none'
+              stroke={stroke}
+              strokeWidth={1}
+              strokeDasharray='4 3'
+            />
+          )}
+        </svg>
+      )}
+    </div>
+  );
+}
+
 function PaintSide({
   session,
   view,
   height,
+  artwork,
 }: {
   session: PaintSession;
   view: PaintView;
   height: number;
+  artwork?: SideArtwork;
 }): JSX.Element {
   const mock = useRef<HTMLCanvasElement>(null);
   const hover = useRef<HTMLCanvasElement>(null);
@@ -426,7 +750,7 @@ function PaintSide({
   };
 
   const onMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (!ready) return;
+    if (!ready || tool === 'artwork') return;
     const { x, y } = toRaster(e);
     if (tool === 'pen') {
       // Only the target moves here; the frame loop does the work.
@@ -439,7 +763,7 @@ function PaintSide({
   };
 
   const onDown = (e: PointerEvent<HTMLDivElement>) => {
-    if (!ready || e.button !== 0) return;
+    if (!ready || e.button !== 0 || tool === 'artwork') return;
     (e.currentTarget.closest('[data-paint-parts]') as HTMLElement | null)?.focus({
       preventScroll: true,
     });
@@ -522,7 +846,11 @@ function PaintSide({
         className={cn(
           'relative w-full touch-none select-none border bg-bgColor transition-colors duration-200',
           session.flash.has(view.view) ? 'border-textColor' : 'border-borderColor',
-          ready ? (tool === 'pen' ? 'cursor-crosshair' : 'cursor-pointer') : 'cursor-wait',
+          ready
+            ? tool === 'pen' || tool === 'artwork'
+              ? 'cursor-crosshair'
+              : 'cursor-pointer'
+            : 'cursor-wait',
         )}
         style={{ aspectRatio: `${view.aspect || 0.6}` }}
         onPointerMove={onMove}
@@ -534,6 +862,7 @@ function PaintSide({
       >
         <canvas ref={mock} className='absolute inset-0 size-full' />
         <canvas ref={hover} className='pointer-events-none absolute inset-0 size-full' />
+        {artwork && ready && <ArtworkLayer art={artwork} />}
         {tail.length > 0 && w > 0 && (
           <svg
             className='pointer-events-none absolute inset-0 size-full'
@@ -597,14 +926,133 @@ function PaintSide({
   );
 }
 
+type Pending = Placed & { token: number; gone: boolean };
+
 export function PartsCanvas({
   session,
   disabled,
+  band,
+  artworks,
 }: {
   session: PaintSession;
   disabled?: boolean;
+  /** R7 · the band whose `assetPlacements` the artwork tool reads (absent = no artwork tool). */
+  band?: GetDesignBandResponse;
+  /** R7 · the artworks bound to the current colourway (`artworksOf`). */
+  artworks?: readonly CanvasArtwork[];
 }): JSX.Element | null {
   const views = [...session.views.values()];
+
+  /* ─── R7 · artwork placements: the band's marks + an optimistic copy until the band re-reads ─── */
+  const writes = useAssetWrites(session.techCardId);
+  const pictures = useMemo(() => (band ? flatPictureIds(band) : new Map<string, number>()), [band]);
+  const arts = useMemo(() => new Map((artworks ?? []).map((a) => [a.assetId, a])), [artworks]);
+  const [pending, setPending] = useState<Map<string, Pending>>(() => new Map());
+  const [selectedKey, setSelectedKey] = useState('');
+  const seq = useRef(0);
+  const armedArt = arts.has(session.armedArtwork) ? session.armedArtwork : 0;
+  const artworkOn = session.tool === 'artwork';
+  const canPlace = !!band && arts.size > 0 && pictures.size > 0;
+
+  useEffect(() => {
+    if (!artworkOn) setSelectedKey('');
+  }, [artworkOn]);
+
+  const placedOf = useCallback(
+    (view: string): Placed[] => {
+      const pictureId = pictures.get(view) ?? 0;
+      if (!band || pictureId <= 0 || arts.size === 0) return [];
+      const out: Placed[] = [];
+      for (const p of placementsOnPicture(band, pictureId, [...arts.keys()])) {
+        const id = p.id ?? 0;
+        const o = pending.get(`p${id}`);
+        if (o) {
+          if (!o.gone) out.push(o);
+          continue;
+        }
+        const quad = quadOfPlacement(p);
+        if (quad)
+          out.push({ key: `p${id}`, placementId: id, assetId: p.assetId ?? 0, pictureId, quad });
+      }
+      for (const o of pending.values())
+        if (o.placementId === 0 && o.pictureId === pictureId && !o.gone) out.push(o);
+      return out;
+    },
+    [band, pictures, arts, pending],
+  );
+
+  const settle = (key: string, token: number) =>
+    setPending((m) => {
+      if (m.get(key)?.token !== token) return m;
+      const n = new Map(m);
+      n.delete(key);
+      return n;
+    });
+
+  const commit = (item: Omit<Placed, 'key'> & { key?: string }) => {
+    seq.current += 1;
+    const token = seq.current;
+    const key = item.placementId > 0 ? `p${item.placementId}` : `n${token}`;
+    setPending((m) => new Map(m).set(key, { ...item, key, token, gone: false }));
+    if (item.placementId === 0) setSelectedKey(key);
+    writes.setPlacement
+      .mutateAsync({
+        placementId: item.placementId,
+        assetId: item.assetId,
+        pictureId: item.pictureId,
+        annotation: annotationOfQuad(item.quad),
+        note: arts.get(item.assetId)?.technique ?? '',
+      })
+      .then((res) => {
+        const id = res.placement?.id ?? 0;
+        if (item.placementId === 0 && id > 0) setSelectedKey((k) => (k === key ? `p${id}` : k));
+      })
+      .catch(() => {
+        if (item.placementId === 0) setSelectedKey((k) => (k === key ? '' : k));
+      })
+      .finally(() => settle(key, token));
+  };
+
+  const removeSelected = () => {
+    const id = selectedKey.startsWith('p') ? Number(selectedKey.slice(1)) : 0;
+    setSelectedKey('');
+    if (id <= 0) return;
+    const item = [...pictures.keys()].flatMap(placedOf).find((it) => it.placementId === id);
+    if (!item) return;
+    seq.current += 1;
+    const token = seq.current;
+    const key = `p${id}`;
+    setPending((m) => new Map(m).set(key, { ...item, key, token, gone: true }));
+    writes.deletePlacement
+      .mutateAsync(id)
+      .catch(() => {})
+      .finally(() => settle(key, token));
+  };
+
+  const selectedInfo = (() => {
+    if (!selectedKey) return null;
+    for (const view of pictures.keys()) {
+      const it = placedOf(view).find((x) => x.key === selectedKey);
+      if (it) return { view, item: it, art: arts.get(it.assetId) };
+    }
+    return null;
+  })();
+
+  const sideArtwork = (view: string): SideArtwork | undefined => {
+    const pictureId = pictures.get(view) ?? 0;
+    if (!canPlace || pictureId <= 0) return undefined;
+    return {
+      pictureId,
+      items: placedOf(view),
+      arts,
+      armed: armedArt,
+      active: artworkOn && !disabled,
+      selectedKey,
+      onSelect: setSelectedKey,
+      onCommit: commit,
+    };
+  };
+
   const row = useRef<HTMLDivElement>(null);
   const block = useRef<HTMLDivElement>(null);
   const [rowWidth, setRowWidth] = useState(0);
@@ -634,6 +1082,21 @@ export function PartsCanvas({
       return;
     }
     if (cmd || e.altKey) return;
+    if (selectedKey && (e.key === 'Backspace' || e.key === 'Delete')) {
+      e.preventDefault();
+      removeSelected();
+      return;
+    }
+    if (selectedKey && e.key === 'Escape') {
+      e.preventDefault();
+      setSelectedKey('');
+      return;
+    }
+    if (e.code === 'KeyA' && canPlace) {
+      e.preventDefault();
+      session.armArtwork(armedArt || (artworks ?? [])[0]?.assetId || 0);
+      return;
+    }
     const tool = ({ KeyV: 'click', KeyP: 'pen', KeyE: 'erase' } as const)[e.code as 'KeyV'];
     if (tool) {
       e.preventDefault();
@@ -674,6 +1137,22 @@ export function PartsCanvas({
           {t}
         </Chip>
       ))}
+      {canPlace && (
+        <>
+          <Text size='micro' variant='label' component='span' aria-hidden>
+            │
+          </Text>
+          <Chip
+            selected={artworkOn}
+            onClick={() => session.armArtwork(armedArt || (artworks ?? [])[0]?.assetId || 0)}
+            disabled={disabled}
+            title='artwork · A — drag on a side to place the armed artwork'
+            data-paint-tool='artwork'
+          >
+            artwork
+          </Chip>
+        </>
+      )}
       <Chip
         onClick={() => session.undo()}
         disabled={disabled || !session.canUndo()}
@@ -714,9 +1193,36 @@ export function PartsCanvas({
             session={session}
             view={v}
             height={height}
+            artwork={sideArtwork(v.view)}
           />
         ))}
       </div>
+      {selectedInfo && (
+        <div className='flex min-w-0 items-center gap-2 pt-2' data-artwork-selected={selectedKey}>
+          <Text size='micro' tracking='label' component='span' className='truncate uppercase'>
+            {selectedInfo.art?.name ?? 'artwork'}
+          </Text>
+          <Text
+            size='micro'
+            variant='label'
+            tracking='label'
+            component='span'
+            className='uppercase'
+          >
+            · {viewLabel(selectedInfo.view)}
+          </Text>
+          <Button
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+            onClick={removeSelected}
+            disabled={disabled || selectedInfo.item.placementId <= 0}
+            data-artwork-delete=''
+          >
+            delete
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

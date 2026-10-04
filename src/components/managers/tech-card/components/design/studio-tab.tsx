@@ -606,6 +606,8 @@ export function StudioTab({
                              выше. По ним подача засевает ткани колорвея из привязок, а сетка
                              CLOTHS ставит надетые плитки первыми. */
                           slots={cloth.slots}
+                          /* R7 · artworks = the DECORATION lines of the same MATERIALS read. */
+                          artworkSlots={materials.slots}
                           /* T30: the history is mounted by the studio, inside its workbench block. */
                         />
                       </>

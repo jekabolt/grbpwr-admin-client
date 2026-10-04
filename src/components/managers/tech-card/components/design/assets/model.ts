@@ -1,6 +1,7 @@
 import type {
   GetDesignBandResponse,
   common_DesignAsset,
+  common_DesignAssetPlacement,
   common_DesignFabricUse,
   common_DesignPicture,
 } from 'api/proto-http/admin';
@@ -189,6 +190,25 @@ export function assetById(band: GetDesignBandResponse): Map<number, common_Desig
  * миграции этот круг не пишет. Замороженные `parts` внутри параметров СТАРЫХ прогонов тоже живы:
  * перезапуск замороженного прогона обязан повторить те же слова, а история — это улика.
  */
+
+/**
+ * R7 · ARTWORK ON THE PARTS — the table comes back as DATA under a new UI (the PARTS canvas of
+ * FABRIC RENDER, `paint/artworks.ts`), not the J-21 fitting screen. One reader: the marks standing
+ * on ONE flat picture, narrowed to the given assets (the artworks bound to the current colourway),
+ * in the server's order. `assetIds` empty = no narrowing is wanted by nobody, so it returns [].
+ */
+export function placementsOnPicture(
+  band: GetDesignBandResponse,
+  pictureId: number,
+  assetIds: ReadonlySet<number> | readonly number[],
+): common_DesignAssetPlacement[] {
+  if (pictureId <= 0) return [];
+  const ids = assetIds instanceof Set ? assetIds : new Set(assetIds as readonly number[]);
+  if (ids.size === 0) return [];
+  return (band.assetPlacements ?? []).filter(
+    (p) => (p.pictureId ?? 0) === pictureId && ids.has(p.assetId ?? 0),
+  );
+}
 
 /**
  * ТКАНИ ПРОГОНА — то, что уезжает в `params.colour.fabrics` (V-4, V-8).

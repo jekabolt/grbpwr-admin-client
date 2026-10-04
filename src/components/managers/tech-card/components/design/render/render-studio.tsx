@@ -10,6 +10,7 @@ import { ColourwayStrip } from '../colourway-strip';
 import { GROUP_SEAM } from '../core';
 import { openStepOf } from '../core/chain';
 import { Workbench } from '../generation/studio';
+import { artworkModelLines, artworksOf } from '../paint/artworks';
 import { PartsCanvas } from '../paint/parts-canvas';
 import { paintRun } from '../paint/plan-run';
 import { usePaint } from '../paint/use-paint';
@@ -108,6 +109,7 @@ export function RenderStudio({
   onColorwayChange,
   cardColorways,
   slots,
+  artworkSlots,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -160,6 +162,12 @@ export function RenderStudio({
    */
   slots?: readonly ClothSlot[];
   /**
+   * R7 · ARTWORK — the card's MATERIALS slots (the composer's same `materialSlots` read); only the
+   * DECORATION lines are taken (`artworksOf`). Their colourway pictures arm the `artwork` tool of
+   * PARTS and are listed by «what the model gets». Absent = no artworks on this screen.
+   */
+  artworkSlots?: readonly ClothSlot[];
+  /**
    * Go to another step of the studio. The step lives in ONE place (`StudioTab`); a screen that kept
    * its own would desynchronise the rail from its own content.
    */
@@ -193,6 +201,12 @@ export function RenderStudio({
   const run = useStartDesignRun(techCardId);
   /* PAINT THE PARTS: the card's painting session (maps are the card's, cloths the colourway's). */
   const paint = usePaint(techCardId, band, slots, colorwayId);
+  /* R7 · the artworks of this colourway, and where they stand on the flats (for the inventory). */
+  const artworks = useMemo(
+    () => artworksOf(band, colorwayId, artworkSlots),
+    [band, colorwayId, artworkSlots],
+  );
+  const artworkLines = useMemo(() => artworkModelLines(band, artworks), [band, artworks]);
   const paintVersion = paint.getVersion();
   /** The prompt inventory. A modal is its own surface, so it is mounted beside the block. */
   const [inspecting, setInspecting] = useState(false);
@@ -510,8 +524,9 @@ export function RenderStudio({
             onEdit={onGoToKind && (() => onGoToKind('pattern'))}
             paint={paint}
             disabled={disabled}
+            artworks={artworks}
           />
-          <PartsCanvas session={paint} disabled={disabled} />
+          <PartsCanvas session={paint} disabled={disabled} band={band} artworks={artworks} />
           <InWords state={draft} band={band} techCardId={techCardId} disabled={disabled} />
         </div>
 
@@ -571,6 +586,7 @@ export function RenderStudio({
         /* THE MODAL KNOWS NOTHING OF CHIPS: it is handed the SAME sentence that travels. */
         recipe={wire}
         cardFit={cardFit}
+        artworks={artworkLines}
       />
 
       {/* ОДНО ОКНО РОЖДЕНИЯ НА ВЕСЬ ЭКРАН. Оно не носит `anchor`: двери держат `open` сами —

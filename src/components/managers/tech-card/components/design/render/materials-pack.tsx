@@ -8,6 +8,7 @@ import Text from 'ui/components/text';
 import { GROUP_GAP } from '../core';
 import { ColourPicker } from '../assets/colour-picker';
 import { assetLabel, assetThumb } from '../assets/model';
+import type { CanvasArtwork } from '../paint/artworks';
 import type { PaintSession } from '../paint/use-paint';
 import type { ClothSlot } from '../pattern/slot-fabrics';
 import { PictureTile } from '../picture-tile';
@@ -25,6 +26,7 @@ export function MaterialsPack({
   onEdit,
   paint,
   disabled,
+  artworks = [],
 }: {
   band: GetDesignBandResponse;
   colorwayId: number;
@@ -37,6 +39,11 @@ export function MaterialsPack({
    */
   paint?: PaintSession;
   disabled?: boolean;
+  /**
+   * R7 · the artworks bound to this colourway (DECORATION slots, `artworksOf`). With flats on the
+   * bench a tile ARMS the `artwork` tool of PARTS (2px ink frame while armed); without, it is shown.
+   */
+  artworks?: readonly CanvasArtwork[];
 }): JSX.Element {
   const cloths = useMemo(() => {
     const byId = new Map((band.assets ?? []).map((a) => [a.id ?? 0, a]));
@@ -59,7 +66,7 @@ export function MaterialsPack({
   ) : undefined;
 
   if (paint && paint.views.size > 0) {
-    return <PaintPalette paint={paint} door={door} disabled={disabled} />;
+    return <PaintPalette paint={paint} door={door} disabled={disabled} artworks={artworks} />;
   }
 
   return (
@@ -67,7 +74,7 @@ export function MaterialsPack({
       <GroupLabel flush className={GROUP_GAP} action={cloths.length > 0 ? door : undefined}>
         materials
       </GroupLabel>
-      {cloths.length === 0 ? (
+      {cloths.length === 0 && artworks.length === 0 ? (
         <div className='flex flex-wrap items-center gap-2'>
           <Text size='micro' variant='label' component='span' className='normal-case'>
             no cloth marked for {colorwayLabel || 'this colourway'}
@@ -99,9 +106,76 @@ export function MaterialsPack({
               </Text>
             </div>
           ))}
+          {artworks.length > 0 && cloths.length > 0 && <PackSeam />}
+          {artworks.map((a) => (
+            <ArtworkTile key={a.assetId} art={a} />
+          ))}
         </div>
       )}
     </div>
+  );
+}
+
+/** The seam between the cloths and the artworks of the pack. */
+function PackSeam(): JSX.Element {
+  return <span aria-hidden className='h-[72px] w-px shrink-0 self-start bg-borderColor' />;
+}
+
+/** One artwork of the colourway — its picture on the paper, its slot name under it. */
+function ArtworkTile({
+  art,
+  armed = false,
+  onArm,
+  disabled,
+}: {
+  art: CanvasArtwork;
+  armed?: boolean;
+  onArm?: () => void;
+  disabled?: boolean;
+}): JSX.Element {
+  const face = (
+    <>
+      <PictureTile
+        url={art.url}
+        alt={art.name}
+        aspect='1/1'
+        fit='contain'
+        selected={armed}
+        className='pointer-events-none w-full'
+      />
+      <Text
+        size='micro'
+        variant={armed ? 'default' : 'label'}
+        tracking='label'
+        component='span'
+        className='w-full truncate uppercase'
+      >
+        {art.name}
+      </Text>
+    </>
+  );
+  if (!onArm)
+    return (
+      <div
+        className='flex w-[72px] shrink-0 flex-col gap-1'
+        data-pack-artwork={art.assetId}
+        title={[art.name, art.technique].filter(Boolean).join(' · ')}
+      >
+        {face}
+      </div>
+    );
+  return (
+    <button
+      type='button'
+      aria-pressed={armed}
+      disabled={disabled}
+      onClick={onArm}
+      data-pack-artwork={art.assetId}
+      title={[art.name, art.technique, 'drag on a side to place it'].filter(Boolean).join(' · ')}
+      className={TILE_BTN}
+    >
+      {face}
+    </button>
   );
 }
 
@@ -113,10 +187,12 @@ function PaintPalette({
   paint,
   door,
   disabled,
+  artworks,
 }: {
   paint: PaintSession;
   door: React.ReactNode;
   disabled?: boolean;
+  artworks: readonly CanvasArtwork[];
 }): JSX.Element {
   /* `+`: the first pick of an open picker makes the colour, the next picks change it. */
   const adding = useRef('');
@@ -128,7 +204,8 @@ function PaintPalette({
       </GroupLabel>
       <div className='flex flex-wrap items-start gap-2'>
         {paint.materials.map((m) => {
-          const armed = paint.armed === m.label && paint.tool !== 'erase';
+          const armed =
+            paint.armed === m.label && paint.tool !== 'erase' && paint.tool !== 'artwork';
           return (
             <button
               key={m.label}
@@ -209,6 +286,19 @@ function PaintPalette({
             }
           />
         </div>
+        {artworks.length > 0 && <PackSeam />}
+        {artworks.map((a) => {
+          const armed = paint.tool === 'artwork' && paint.armedArtwork === a.assetId;
+          return (
+            <ArtworkTile
+              key={a.assetId}
+              art={a}
+              armed={armed}
+              disabled={disabled}
+              onArm={() => paint.armArtwork(armed ? 0 : a.assetId)}
+            />
+          );
+        })}
       </div>
     </div>
   );
