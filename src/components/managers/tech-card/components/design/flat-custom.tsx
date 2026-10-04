@@ -27,6 +27,7 @@ export function FlatCustom({
   onToggle,
   modified,
   summary,
+  closedTitle = 'default run: four views in one picture',
   after,
   children,
 }: {
@@ -36,6 +37,8 @@ export function FlatCustom({
   modified: boolean;
   /** Точный выбор словами (`flatChoiceSummary`) — `title` двери, пока выбор не умолчание (W1). */
   summary?: string;
+  /** `title` закрытой немодифицированной двери; умолчание — флэтовое. */
+  closedTitle?: string;
   /** Что стоит в ряду сразу за дверью (опись `what the model gets ▸`). */
   after?: ReactNode;
   /** Раскладка, стороны, детали — рисуются только открытыми. */
@@ -48,11 +51,7 @@ export function FlatCustom({
         size='sm'
         aria-expanded={open}
         data-flat-custom={modified ? 'modified' : ''}
-        title={
-          modified
-            ? `custom: ${summary ?? 'not the default run'}`
-            : 'default run: four views in one picture'
-        }
+        title={modified ? `custom: ${summary ?? 'not the default run'}` : closedTitle}
         onClick={onToggle}
       >
         <span className='text-micro'>
