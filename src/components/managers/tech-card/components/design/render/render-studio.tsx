@@ -376,6 +376,11 @@ export function RenderStudio({
     if (paint.save === 'unsaved' || paint.save === 'error')
       return { ok: false, reason: `parts not saved · ${paint.saveError || 'retry'}` };
     if (painted.kind === 'refuse') return { ok: false, reason: painted.reason };
+    /* A run with maps takes mockups drawn at the card's scale and the parts' names: neither may
+       still be arriving. A failed chart read falls back to the 600 mm estimate. */
+    if (painted.kind === 'maps' && chart.isLoading)
+      return { ok: false, reason: 'reading the size chart…' };
+    if (painted.kind === 'maps' && paint.naming) return { ok: false, reason: 'naming the parts…' };
     if (!recipeIsStated(wire)) {
       return {
         ok: false,
@@ -385,7 +390,17 @@ export function RenderStudio({
     }
     return { ok: true };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [band, wire, colorwayArchived, colorwayLabel, target.nowhere, painted, paint, paintVersion]);
+  }, [
+    band,
+    wire,
+    colorwayArchived,
+    colorwayLabel,
+    target.nowhere,
+    painted,
+    paint,
+    paintVersion,
+    chart.isLoading,
+  ]);
 
   /* T13 · the cloth mockups are drawn and uploaded at the press; the button stays busy meanwhile.
      ONE PRESS AT A TIME, SYNCHRONOUSLY: the ref is set before the first await, so a second press
@@ -410,15 +425,19 @@ export function RenderStudio({
        on the run's recipe only — the plan never stores one. QW4: any side that cannot be drawn or
        uploaded → NO run, `mockup failed · retry` in the lock bar (never a quiet run without). */
     let colourMaps = wire.colourMaps ?? [];
+    /* The parts' topology the run's names were read from: changed before the launch → no run. */
+    const topology = paint.partsGen;
     if (colourMaps.length > 0) {
       const card = techCardId;
       const rev = paint.plan()?.rev;
+      // Every side's scale, once: the mockups are signed and drawn off this snapshot.
+      const scales = paint.scaleSnapshot(colourMaps);
       // Painting stands still from here to the launch: the maps sent are the maps drawn.
       paint.setFrozen(true);
       setMocking(true);
       try {
         if (!(await paint.flush()) || !paint.sendsAsSaved(colourMaps, rev)) return;
-        const { ids, error } = await paint.mockups(colourMaps, wire.fabrics ?? []);
+        const { ids, error } = await paint.mockups(colourMaps, wire.fabrics ?? [], scales);
         // Anything moved meanwhile (another tab saved, the card changed): no run, quietly.
         if (shownCard.current !== card || !paint.sendsAsSaved(colourMaps, rev)) return;
         if (error || colourMaps.some((m) => !((ids.get(m.view ?? '') ?? 0) > 0))) {
@@ -432,6 +451,7 @@ export function RenderStudio({
         setMocking(false);
       }
     }
+    if ((wire.colourMaps ?? []).length > 0 && (paint.partsGen !== topology || paint.naming)) return;
     const body: StartRunInput = {
       kind: 'render',
       ask: '',

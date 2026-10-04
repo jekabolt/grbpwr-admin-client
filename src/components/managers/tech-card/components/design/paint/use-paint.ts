@@ -262,6 +262,8 @@ export class PaintSession {
   partsFailed = '';
   /** QW5 · the card-level auto parts are being asked right now (`naming…`). */
   naming = false;
+  /** Bumped whenever any side's parts change: GENERATE re-checks it before it launches. */
+  partsGen = 0;
   /** QW2 · what the card's size chart says of the garment (the scale of every side). */
   garment: Garment = NO_GARMENT;
   private scales = new Map<string, { key: string; scale: ViewScale }>();
@@ -486,6 +488,7 @@ export class PaintSession {
     if (sig === v.partsSig) return false;
     v.partsSig = sig;
     v.parts = partsOf(row, v.flat, v.parts?.seeds ?? markPoints(v.flat), v.view);
+    this.partsGen += 1;
     return true;
   }
 
@@ -547,6 +550,7 @@ export class PaintSession {
           if (!parts) continue;
           v.parts = parts;
           v.partsSig = JSON.stringify([s.parts, s.splitNeeded]);
+          this.partsGen += 1;
           got += 1;
         }
         if (got === 0) {
@@ -1103,10 +1107,21 @@ export class PaintSession {
     });
   }
 
+  /** mm per px of every side of `maps`, read once — a press draws and signs off this snapshot. */
+  scaleSnapshot(maps: readonly common_DesignColourMap[]): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const m of maps) {
+      const v = this.views.get(m.view ?? '');
+      out.set(m.view ?? '', (v && this.scaleOf(v)?.mmPerPx) || 1);
+    }
+    return out;
+  }
+
   /** The signature of the mockups of these maps with these uses (cloths, repeats, scales). */
   private mockSig(
     maps: readonly common_DesignColourMap[],
     uses: readonly common_DesignFabricUse[],
+    scales: ReadonlyMap<string, number>,
   ): string {
     const assets = new Map((this.band?.assets ?? []).map((a) => [a.id ?? 0, a]));
     const look = (u: common_DesignFabricUse | undefined) => {
@@ -1124,12 +1139,11 @@ export class PaintSession {
       REGIONS_ALGO_REV,
       look(uses.find((u) => !(u.mapHex ?? '').trim() && (u.assetId ?? 0) > 0)),
       maps.map((m) => {
-        const v = this.views.get(m.view ?? '');
         return [
           m.view,
           m.mediaId,
           m.baseMediaId,
-          v ? this.scaleOf(v)?.mmPerPx ?? 0 : 0,
+          scales.get(m.view ?? '') ?? 0,
           (m.palette ?? []).map((sw) => {
             const hex = (sw.hex ?? '').toLowerCase();
             return [hex, ...look(useOf(hex))];
@@ -1149,6 +1163,7 @@ export class PaintSession {
   private drawMockups(
     maps: readonly common_DesignColourMap[],
     uses: readonly common_DesignFabricUse[],
+    scales: ReadonlyMap<string, number>,
     sig: string,
   ): Promise<Map<string, string>> {
     const hit = this.mockDrawn.get(sig);
@@ -1192,7 +1207,7 @@ export class PaintSession {
         const flat = v.flat;
         const labels = v.labels.slice();
         const pixels = v.pixels.data.slice();
-        const mmPerPx = this.scaleOf(v)?.mmPerPx ?? 1;
+        const mmPerPx = scales.get(view) ?? 1;
         const skins = new Map<number, MockupSkin>();
         for (const sw of m.palette ?? []) {
           const hex = (sw.hex ?? '').toLowerCase();
@@ -1220,7 +1235,8 @@ export class PaintSession {
     uses: readonly common_DesignFabricUse[],
   ): Promise<Map<string, string>> {
     try {
-      return await this.drawMockups(maps, uses, this.mockSig(maps, uses));
+      const scales = this.scaleSnapshot(maps);
+      return await this.drawMockups(maps, uses, scales, this.mockSig(maps, uses, scales));
     } catch {
       return new Map();
     }
@@ -1236,12 +1252,13 @@ export class PaintSession {
   async mockups(
     maps: readonly common_DesignColourMap[],
     uses: readonly common_DesignFabricUse[],
+    scales: ReadonlyMap<string, number> = this.scaleSnapshot(maps),
   ): Promise<{ ids: Map<string, number>; error: string }> {
-    const sig = this.mockSig(maps, uses);
+    const sig = this.mockSig(maps, uses, scales);
     const hit = this.mockCache.get(sig);
     if (hit) return { ids: hit, error: '' };
     try {
-      const drawn = await this.drawMockups(maps, uses, sig);
+      const drawn = await this.drawMockups(maps, uses, scales, sig);
       const ids = new Map<string, number>();
       for (const m of maps) {
         const view = m.view ?? '';
