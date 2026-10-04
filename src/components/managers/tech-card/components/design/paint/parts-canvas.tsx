@@ -31,7 +31,7 @@ import {
   type InkField,
   type Pt,
 } from './livewire';
-import { componentAt, displayLabels, polygonIndices, underLines } from './map-model';
+import { clothMask, componentAt, displayLabels, polygonIndices, underLines } from './map-model';
 import {
   annotationOfQuad,
   boxQuad,
@@ -50,6 +50,7 @@ import {
   type CanvasArtwork,
   type Quad,
 } from './artworks';
+import { tileSampler } from './mockup';
 import { concatIndices, partIndices } from './parts-model';
 import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint';
 
@@ -60,7 +61,9 @@ import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint'
  *
  *   click  fills the part under the pointer: the model's named part when the side has auto parts
  *          (and the same-named part on the other sides, R9), else the region between the lines;
- *          ⌥-click fills one region only (cuts a part)
+ *          ⇧-click this side only (QW6); ⌥-click fills one region only (cuts a part). A side the
+ *          model cannot name (cut into fewer than 2 or more than 60 regions — a sketch, a photo)
+ *          is `pen only`: CLICK draws the pen there (QW5)
  *   pen    a polygon of the armed material, clipped to the garment — closes open outlines; it is
  *          magnetic: a vertex lands on a line within reach, and between two vertices on lines the
  *          edge follows the drawing (straight across a gap and over paper); ⇧ = a straight edge
@@ -79,7 +82,6 @@ const GAP = 8;
 const TOOLS: PaintTool[] = ['click', 'pen', 'erase'];
 const HOVER_ALPHA = 0.45;
 
-const mod = (n: number, m: number) => ((n % m) + m) % m;
 /** Under this cloth luminance the drawing turns light; the light line's grey. */
 const LINE_FLIP = 0.35;
 const LINE_LIGHT = 236;
@@ -106,29 +108,29 @@ function luminance(skin: PaintSkin | undefined): number {
 const WIRE_FRAME_MS = 6;
 const WIRE_COMMIT_MS = 30;
 
-/** Texture scale: a tile shows ≈ 1/6 of the side's height. */
-function sampler(skin: PaintSkin | undefined, h: number) {
+/** QW1 · the REMAINDER on the canvas: its cloth at this share over the paper. */
+const REMAINDER_SHARE = 0.6;
+/** QW9 · a region spanning two parts: a 1 px diagonal every HATCH px, at this ink share. */
+const HATCH = 7;
+const HATCH_SHARE = 0.3;
+
+/**
+ * A material's pixel on a side: its picture laid `tilePx` wide (QW2 — the mockup's own rule,
+ * `tileSampler`), or its colour.
+ */
+function sampler(skin: PaintSkin | undefined, tilePx: number) {
+  const tile = skin?.tile ?? null;
+  if (tile) return tileSampler(tile.data, tile.width, tile.height, tilePx);
   const hex = skin?.hex || '#dddddd';
   const solid = [
     parseInt(hex.slice(1, 3), 16),
     parseInt(hex.slice(3, 5), 16),
     parseInt(hex.slice(5, 7), 16),
   ];
-  const tile = skin?.tile ?? null;
-  const k = tile ? tile.width / Math.max(8, h / 6) : 1;
-  return (x: number, y: number, out: Uint8ClampedArray, p: number) => {
-    if (!tile) {
-      out[p] = solid[0];
-      out[p + 1] = solid[1];
-      out[p + 2] = solid[2];
-      return;
-    }
-    const tx = mod(Math.floor(x * k), tile.width);
-    const ty = mod(Math.floor(y * k), tile.height);
-    const q = (ty * tile.width + tx) * 4;
-    out[p] = tile.data[q];
-    out[p + 1] = tile.data[q + 1];
-    out[p + 2] = tile.data[q + 2];
+  return (_x: number, _y: number, out: Uint8ClampedArray, p: number) => {
+    out[p] = solid[0];
+    out[p + 1] = solid[1];
+    out[p + 2] = solid[2];
   };
 }
 
@@ -447,11 +449,14 @@ function PaintSide({
   view,
   height,
   artwork,
+  onFocus,
 }: {
   session: PaintSession;
   view: PaintView;
   height: number;
   artwork?: SideArtwork;
+  /** QW8 · a double click on the caption or the paper around the garment: this side alone. */
+  onFocus: () => void;
 }): JSX.Element {
   const mock = useRef<HTMLCanvasElement>(null);
   const hover = useRef<HTMLCanvasElement>(null);
@@ -490,7 +495,11 @@ function PaintSide({
   const w = flat?.w ?? 0;
   const h = flat?.h ?? 0;
   const ready = view.status === 'ready' && !!flat && !!labels && !!pixels;
-  const tool = session.tool;
+  /* QW5 · a side the model cannot name is the pen's: CLICK draws the pen over it. */
+  const penOnly = ready && !session.namable(view);
+  const tool = penOnly && session.tool === 'click' ? 'pen' : session.tool;
+  const remainder = session.remainder();
+  const split = view.parts?.split;
 
   // The paper, the paint under the lines, and the drawing itself on top: multiplied over light
   // cloth, drawn light over dark cloth — one line, no halo (R14). Display only: the map sent to
@@ -506,16 +515,39 @@ function PaintSide({
     const out = new ImageData(new Uint8ClampedArray(pixels.data), w, h);
     const d = out.data;
     const looks = new Map<number, { s: ReturnType<typeof sampler>; dark: boolean }>();
+    const lookOf = (label: string) => {
+      const skin = session.skins.get(label);
+      return { s: sampler(skin, session.tilePx(label, view)), dark: luminance(skin) < LINE_FLIP };
+    };
+    // QW1 · the unpainted garment is the REMAINDER the run lays there — muted, so paint reads.
+    const rest = remainder ? lookOf(remainder).s : null;
+    const cloth = rest ? clothMask(flat) : null;
     const tmp = new Uint8ClampedArray(4);
     for (let i = 0, p = 0; i < shown.length; i += 1, p += 4) {
       // The flat's own pixel over white paper.
       const a = d[p + 3] / 255;
-      const fr = d[p] * a + 255 * (1 - a);
-      const fg = d[p + 1] * a + 255 * (1 - a);
-      const fb = d[p + 2] * a + 255 * (1 - a);
+      let fr = d[p] * a + 255 * (1 - a);
+      let fg = d[p + 1] * a + 255 * (1 - a);
+      let fb = d[p + 2] * a + 255 * (1 - a);
       d[p + 3] = 255;
       const v = shown[i];
+      const x = i % w;
+      const y = (i / w) | 0;
       if (!v) {
+        // QW9 · a region the model could not split: a thin hatch over the unpainted.
+        if (split?.size && split.has(flat.labels[i]) && (x + y) % HATCH === 0) {
+          fr *= 1 - HATCH_SHARE;
+          fg *= 1 - HATCH_SHARE;
+          fb *= 1 - HATCH_SHARE;
+        }
+        if (rest && cloth?.[i]) {
+          rest(x, y, tmp, 0);
+          const k = REMAINDER_SHARE;
+          d[p] = ((255 * (1 - k) + tmp[0] * k) * fr) / 255;
+          d[p + 1] = ((255 * (1 - k) + tmp[1] * k) * fg) / 255;
+          d[p + 2] = ((255 * (1 - k) + tmp[2] * k) * fb) / 255;
+          continue;
+        }
         d[p] = fr;
         d[p + 1] = fg;
         d[p + 2] = fb;
@@ -523,11 +555,10 @@ function PaintSide({
       }
       let look = looks.get(v);
       if (!look) {
-        const skin = session.skins.get(`#${v.toString(16).padStart(6, '0')}`);
-        look = { s: sampler(skin, h), dark: luminance(skin) < LINE_FLIP };
+        look = lookOf(`#${v.toString(16).padStart(6, '0')}`);
         looks.set(v, look);
       }
-      look.s(i % w, (i / w) | 0, tmp, 0);
+      look.s(x, y, tmp, 0);
       if (look.dark) {
         // How much line is in this pixel, drawn toward a light line.
         const k = 1 - Math.min(fr, fg, fb) / 255;
@@ -542,7 +573,7 @@ function PaintSide({
     }
     ctx.putImageData(out, 0, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, view.rev, w, h, flat]);
+  }, [ready, view.rev, w, h, flat, remainder, split]);
 
   /** The hover canvas shows another side's part (R17), not one under this side's pointer. */
   const echoShown = useRef(false);
@@ -621,7 +652,7 @@ function PaintSide({
     const bh = y1 - y0 + 1;
     const out = ctx.createImageData(bw, bh);
     const erase = tool === 'erase';
-    const s = sampler(session.skins.get(session.armed), h);
+    const s = sampler(session.skins.get(session.armed), session.tilePx(session.armed, view));
     const tmp = new Uint8ClampedArray(4);
     for (const i of idx) {
       const ix = i % w;
@@ -644,7 +675,7 @@ function PaintSide({
     return mask;
   };
 
-  const toRaster = (e: PointerEvent<HTMLElement>) => {
+  const toRaster = (e: { currentTarget: HTMLElement; clientX: number; clientY: number }) => {
     const r = e.currentTarget.getBoundingClientRect();
     return {
       x: ((e.clientX - r.left) * w) / r.width,
@@ -653,7 +684,7 @@ function PaintSide({
     };
   };
 
-  const showHover = (x: number, y: number, alt: boolean) => {
+  const showHover = (x: number, y: number, alt: boolean, only: boolean) => {
     if (!ready || !flat || !labels) return;
     const px = Math.floor(x);
     const py = Math.floor(y);
@@ -668,7 +699,8 @@ function PaintSide({
       st.rev === view.rev &&
       st.armed === session.armed &&
       st.group === group &&
-      st.region === region
+      st.region === region &&
+      session.hovered?.only === only
     )
       return;
     const parts = view.parts;
@@ -680,7 +712,7 @@ function PaintSide({
     st.region = region;
     const label = parts && group >= 0 ? parts.groups[group].label : '';
     setPartName(label && parts?.split.has(region) ? `${label} · no seam, use the pen` : label);
-    session.setHover(view.view, group);
+    session.setHover(view.view, group, only);
     echoShown.current = false;
     st.idx = idx;
     st.rev = view.rev;
@@ -806,7 +838,7 @@ function PaintSide({
       if (penRef.current.anchors.length > 0 && !st.frame) st.frame = requestAnimationFrame(pump);
       return;
     }
-    showHover(x, y, e.altKey);
+    showHover(x, y, e.altKey, e.shiftKey);
   };
 
   const onDown = (e: PointerEvent<HTMLDivElement>) => {
@@ -835,9 +867,11 @@ function PaintSide({
     const px = Math.floor(x);
     const py = Math.floor(y);
     if (px < 0 || py < 0 || px >= w || py >= h) return;
+    // QW8 · the paper around the garment is not paint: its double click focuses the side.
+    if (!flat.silhouette[py * w + px]) return;
     const group = groupAt(px, py, e.altKey);
     if (group >= 0) {
-      session.paintPart(view.view, group, { x: px, y: py });
+      session.paintPart(view.view, group, { x: px, y: py }, e.shiftKey);
       return;
     }
     const st = hoverState.current;
@@ -902,6 +936,12 @@ function PaintSide({
         style={{ aspectRatio: `${view.aspect || 0.6}` }}
         onPointerMove={onMove}
         onPointerDown={onDown}
+        onDoubleClick={(e) => {
+          if (!flat || tool === 'pen' || tool === 'artwork') return;
+          const { x, y } = toRaster(e);
+          const at = Math.floor(y) * w + Math.floor(x);
+          if (at >= 0 && at < w * h && !flat.silhouette[at]) onFocus();
+        }}
         onPointerLeave={() => {
           clearHover();
           stopPreview();
@@ -948,10 +988,23 @@ function PaintSide({
           </svg>
         )}
       </div>
-      <div className='flex min-w-0 items-center gap-2'>
+      <div
+        className='flex min-w-0 cursor-default select-none items-center gap-2'
+        onDoubleClick={onFocus}
+        data-paint-caption={view.view}
+      >
         <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
           {viewLabel(view.view)}
         </Text>
+        {split && split.size > 0 && (
+          <span
+            title={[...split.values()].filter(Boolean).join(' · ') || 'no seam, use the pen'}
+            data-paint-split={split.size}
+          >
+            <Pill tone='attention'>!</Pill>
+          </span>
+        )}
+        {penOnly && <Pill tone='mut'>pen only</Pill>}
         {partName && (
           <Text size='micro' tracking='label' component='span' className='truncate uppercase'>
             {partName}
@@ -1141,6 +1194,13 @@ export function PartsCanvas({
   const row = useRef<HTMLDivElement>(null);
   const block = useRef<HTMLDivElement>(null);
   const [rowWidth, setRowWidth] = useState(0);
+  /** QW8 · the side shown alone, the block's whole width ('' = every side in a row). */
+  const [focused, setFocused] = useState('');
+  const focusView = views.find((v) => v.view === focused);
+  const toggleFocus = (view: string) => {
+    setFocused((f) => (f === view ? '' : view));
+    block.current?.focus({ preventScroll: true });
+  };
   useEffect(() => {
     const el = row.current;
     if (!el) return;
@@ -1149,10 +1209,17 @@ export function PartsCanvas({
     return () => ro.disconnect();
   }, [views.length > 0]);
   if (views.length === 0) return null;
-  const sumAspect = views.reduce((a, v) => a + (v.aspect || 0.6), 0);
+  const shownViews = focusView ? [focusView] : views;
+  const sumAspect = shownViews.reduce((a, v) => a + (v.aspect || 0.6), 0);
   const fit =
-    rowWidth > 0 ? (rowWidth - GAP * (views.length - 1) - 2 * views.length) / sumAspect : SIDE_MIN;
-  const height = Math.round(Math.max(SIDE_MIN, Math.min(SIDE_MAX, fit)));
+    rowWidth > 0
+      ? (rowWidth - GAP * (shownViews.length - 1) - 2 * shownViews.length) / sumAspect
+      : SIDE_MIN;
+  // A focused side takes the block's width, up to one and a half windows tall (a narrow side
+  // view then stands centred: its full width would be metres of scroll).
+  const focusMax =
+    typeof window === 'undefined' ? SIDE_MAX : Math.max(SIDE_MAX, window.innerHeight * 1.5);
+  const height = Math.round(Math.max(SIDE_MIN, Math.min(focusView ? focusMax : SIDE_MAX, fit)));
   const save = session.save;
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -1188,6 +1255,12 @@ export function PartsCanvas({
       session.setTool(tool);
       return;
     }
+    // Esc drops a pen under way first; with none, it leaves the focused side (QW8).
+    if (e.key === 'Escape' && focused && !e.currentTarget.querySelector('[data-paint-pen]')) {
+      e.preventDefault();
+      setFocused('');
+      return;
+    }
     if (e.key === 'Enter' || e.key === 'Escape') {
       e.preventDefault();
       e.currentTarget.dispatchEvent(
@@ -1210,7 +1283,13 @@ export function PartsCanvas({
           <Pill tone={save === 'unsaved' ? 'attention' : 'warn'}>unsaved · retry</Pill>
         </button>
       ) : null}
-      {session.partsFailed && (
+      {/* ONE place for the model's naming: `naming…` while asked (QW5), `parts · retry` when
+          refused, `rename parts` once answered (QW7 — asks every side again, past the cache). */}
+      {session.naming ? (
+        <span data-paint-naming=''>
+          <Pill tone='mut'>naming…</Pill>
+        </span>
+      ) : session.partsFailed ? (
         <button
           type='button'
           onClick={() => session.retryParts()}
@@ -1219,7 +1298,17 @@ export function PartsCanvas({
         >
           <Pill tone='warn'>parts · retry</Pill>
         </button>
-      )}
+      ) : session.canRename() ? (
+        <button
+          type='button'
+          onClick={() => session.renameParts()}
+          disabled={disabled}
+          title='ask the model to name the parts of every side again'
+          data-paint-parts-rename=''
+        >
+          <Pill tone='mut'>rename parts</Pill>
+        </button>
+      ) : null}
       {TOOLS.map((t) => (
         <Chip
           key={t}
@@ -1271,7 +1360,14 @@ export function PartsCanvas({
   );
 
   return (
-    <div ref={block} data-paint-parts='' tabIndex={-1} onKeyDown={onKey} className='outline-none'>
+    <div
+      ref={block}
+      data-paint-parts=''
+      data-paint-focused={focused || undefined}
+      tabIndex={-1}
+      onKeyDown={onKey}
+      className='outline-none'
+    >
       <GroupLabel flush className={GROUP_GAP} action={tools}>
         parts
       </GroupLabel>
@@ -1279,16 +1375,18 @@ export function PartsCanvas({
         ref={row}
         className={cn(
           'flex flex-wrap items-start gap-2',
+          focusView && 'justify-center',
           disabled && 'pointer-events-none opacity-60',
         )}
       >
-        {views.map((v) => (
+        {shownViews.map((v) => (
           <PaintSide
             key={`${v.view}:${v.baseMediaId}`}
             session={session}
             view={v}
             height={height}
             artwork={sideArtwork(v.view)}
+            onFocus={() => toggleFocus(v.view)}
           />
         ))}
       </div>
