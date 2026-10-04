@@ -41,6 +41,7 @@ import type {
   PictureTileMenuItem,
   PictureTileProps,
 } from '../picture-tile';
+import { useRemovalUndo } from '../bench-slot';
 import { useDesignWrites } from '../use-design-band';
 import { isPictureHidden } from '../visibility';
 import { isActiveView, normaliseViewKey, viewLabel, type ActiveView } from '../views';
@@ -377,6 +378,8 @@ export function useRenderDoors({
 }): RenderDoors {
   const speaks = serverSpeaksDesign();
   const { setBenchSlot } = useDesignWrites(techCardId);
+  /* T49 · a render taken off a side keeps an `undo` on that SIDES cell until the page reloads. */
+  const removals = useRemovalUndo(techCardId);
   /** Для какой плитки идёт запись слота. Общий `isPending` сказал бы «saving» на всех сразу. */
   const [marking, setMarking] = useState<number | null>(null);
   /**
@@ -628,18 +631,18 @@ export function useRenderDoors({
     const pictureId = picture.id ?? 0;
     if (pictureId <= 0) return;
     setMarking(pictureId);
+    /* ⚠ БЕЗ `slotId` — он в одном `oneof` с `viewKey`, как у всех писателей верстака. */
+    const slot = {
+      viewKey: side.view,
+      kind: 'render',
+      colorwayId: refColorwayFor('render', colorwayId),
+    };
     setBenchSlot.mutate(
+      { slot, pictureId: 0, expectedSlotRev: side.slotRev },
       {
-        /* ⚠ БЕЗ `slotId` — он в одном `oneof` с `viewKey`, как у всех писателей верстака. */
-        slot: {
-          viewKey: side.view,
-          kind: 'render',
-          colorwayId: refColorwayFor('render', colorwayId),
-        },
-        pictureId: 0,
-        expectedSlotRev: side.slotRev,
+        onSettled: () => setMarking(null),
+        onSuccess: () => removals.remember(slot, 'render', side.view, pictureId),
       },
-      { onSettled: () => setMarking(null) },
     );
   };
 

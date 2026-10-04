@@ -23,6 +23,8 @@ import { PictureTile } from './picture-tile';
 import { useEditChainDoors } from './generation/edit-chain-doors';
 import { WorkbenchEditor } from './generation/propagating-editor';
 import { selectPickablePictures } from './visibility';
+import { forgetRemoval, rememberRemoval, useRemovals, type Removal } from './removal-undo';
+import { useDesignWrites } from './use-design-band';
 
 /**
  * ONE BENCH SLOT — and the vocabulary of «what a slot is», which the three other organs of the
@@ -486,6 +488,8 @@ export type BenchSlotProps = {
      Единственные два вызывающих (`bench.tsx`) сняты тем же движением; оставленный проп был бы
      API, которого никто не вызывает, и приглашением вернуть орган обратно. Вырезать деталь из
      плиты по-прежнему можно — это `onCrop`, другая дверь с другим исходом. */
+  /** T49 · a picture was taken off this slot in this session: put it back (empty slot only). */
+  undo?: { onClick: () => void; pending?: boolean };
   /** Details only. */
   onRename?: (name: string) => void;
   /** Details only. A filled slot is emptied first: the server deletes only an empty one. */
@@ -625,6 +629,92 @@ export function SlotCap({
 }
 
 /**
+ * T49 · THE QUIET `undo` OF A REMOVAL (owner item 49): one underlined word on an empty slot whose
+ * picture was taken off in this session. The write is the menu's own (`SetDesignBenchSlot` with
+ * the remembered picture, at the slot's current revision) — see `useRemovalUndo`.
+ */
+export function UndoRemoval({
+  label,
+  pending,
+  onClick,
+  className,
+}: {
+  label: string;
+  pending?: boolean;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type='button'
+      data-undo-removal={label}
+      aria-label={`undo — put the removed picture back into ${label}`}
+      title='undo — put the removed picture back'
+      disabled={pending}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className={cn(
+        'cursor-pointer bg-bgColor text-nano uppercase tracking-label text-labelColor underline hover:text-textColor disabled:cursor-wait focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+        className,
+      )}
+    >
+      {pending ? 'undo…' : 'undo'}
+    </button>
+  );
+}
+
+/**
+ * T49 · REMEMBER A REMOVAL, AND PUT IT BACK. `remember` is called by the ✕ writers on success;
+ * `undoFor(ref)` answers the slot's undo (or null), and its click re-places the same picture with
+ * `SetDesignBenchSlot` at `currentRev`. Success or refusal, the undo is spent: a refusal (the slot
+ * was filled meanwhile, the picture was deleted…) is said by the write seam's snackbar.
+ */
+export function useRemovalUndo(techCardId: number) {
+  const writes = useDesignWrites(techCardId);
+  const removalAt = useRemovals();
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const remember = (
+    ref: DesignBenchSlotRef,
+    kind: Removal['kind'],
+    side: string,
+    pictureId: number,
+  ) =>
+    rememberRemoval({
+      card: techCardId,
+      key: slotRefKey(ref),
+      kind,
+      ref,
+      side,
+      colorwayId: ref.colorwayId ?? 0,
+      pictureId,
+    });
+  const undoFor = (ref: DesignBenchSlotRef, currentRev: number) => {
+    const key = slotRefKey(ref);
+    const removal = removalAt(techCardId, key);
+    if (!removal) return undefined;
+    return {
+      pending: pendingKey === key,
+      onClick: () => {
+        if (pendingKey) return;
+        setPendingKey(key);
+        writes.setBenchSlot.mutate(
+          { slot: removal.ref, pictureId: removal.pictureId, expectedSlotRev: currentRev },
+          {
+            onSettled: () => {
+              forgetRemoval(techCardId, key);
+              setPendingKey(null);
+            },
+          },
+        );
+      },
+    };
+  };
+  return { remember, undoFor };
+}
+
+/**
  * ПУСТАЯ ЯЧЕЙКА — коробка, две двери, подвал. Макетный `slotCell` в пустом состоянии.
  *
  * ⚠ САМА ПЛИТКА БОЛЬШЕ НЕ НАЧЕРЧЕНА ЗДЕСЬ. До r3 этот файл рисовал две половины СВОЕЙ разметкой,
@@ -646,11 +736,14 @@ function EmptyCell({
   mediaLabel = 'from media',
   onPlaceMedia,
   onDraw,
+  undo,
 }: {
   label: string;
   required?: boolean;
   requiredNote?: string;
   purpose: string;
+  /** T49 · the quiet `undo` of the last removal from this slot, on the cap's right. */
+  undo?: React.ReactNode;
   disabled?: boolean;
   picking?: boolean;
   /**
@@ -712,15 +805,20 @@ function EmptyCell({
           required={required}
           requiredNote={requiredNote}
           trailing={
-            proposed ? (
-              <Pill
-                tone='attention'
-                data-proposed-pill=''
-                className='ml-auto leading-none'
-                title='the construction draft proposed this detail'
-              >
-                proposed
-              </Pill>
+            proposed || undo ? (
+              <span className='ml-auto flex items-baseline gap-1'>
+                {proposed ? (
+                  <Pill
+                    tone='attention'
+                    data-proposed-pill=''
+                    className='leading-none'
+                    title='the construction draft proposed this detail'
+                  >
+                    proposed
+                  </Pill>
+                ) : null}
+                {undo}
+              </span>
             ) : undefined
           }
         />
@@ -767,6 +865,7 @@ export function BenchSlot(props: BenchSlotProps) {
     onRename,
     onDelete,
     backdrop,
+    undo,
   } = props;
 
   const provenance = picture ? slotProvenance({ picture }) : null;
@@ -897,6 +996,11 @@ export function BenchSlot(props: BenchSlotProps) {
           picking={picking}
           proposed={proposed}
           backdrop={backdrop}
+          undo={
+            undo && !disabled ? (
+              <UndoRemoval label={label} pending={undo.pending} onClick={undo.onClick} />
+            ) : undefined
+          }
           onPlaceMedia={(media) => {
             accept();
             onPlaceMedia(media);

@@ -17,7 +17,7 @@ import { HeaderNote } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
 import { COLORWAY_NONE, refColorwayFor } from '../bench-kinds';
-import { InertDoor, pictureUrl } from '../bench-slot';
+import { InertDoor, UndoRemoval, pictureUrl, useRemovalUndo } from '../bench-slot';
 import { archivedRef, colorwayLabel } from '../colorway-picker';
 import { PlaceOrDrawCell, EMPTY_WORD } from '../core';
 import { VectorModal } from '../modals';
@@ -37,7 +37,6 @@ import {
   threedSides,
   type BenchSide,
 } from './model';
-
 
 /**
  * ═══ THE SIDES OF A CARD — ONE TABLE ON FABRIC RENDER, ONE STRIP ON 3D ═══════════════════════
@@ -457,7 +456,9 @@ export function renderUploadWrite(v: {
 }) {
   const bench = refColorwayFor('render', v.colorwayId);
   return {
-    items: [uploadItem({ mediaId: v.mediaId, ghostView: v.view, kind: 'render', colorwayId: bench })],
+    items: [
+      uploadItem({ mediaId: v.mediaId, ghostView: v.view, kind: 'render', colorwayId: bench }),
+    ],
     target: { viewKey: v.view, kind: 'render', colorwayId: bench } as DesignBenchSlotRef,
     expectedSlotRev: v.slotRev,
   };
@@ -743,7 +744,11 @@ export function SidesSection({
   /* ⚠ NO `slotId` — a `oneof` with `viewKey`; a zero is a SET field in proto-JSON and the server
      refuses the whole write. The kind is always spelled: empty reads as flat. Флэт-ось колорвея не
      имеет по существу — она читается и пишется под нулём всегда. */
-  const flatRef = (view: string): DesignBenchSlotRef => ({ viewKey: view, kind: 'flat', colorwayId: 0 });
+  const flatRef = (view: string): DesignBenchSlotRef => ({
+    viewKey: view,
+    kind: 'flat',
+    colorwayId: 0,
+  });
   /**
    * Ссылка на РЕНДЕР-СЛОТ СТОЛБЦА, а не столбца-цели: колорвей входит в ключ исключительности
    * слота, и `expectedSlotRev` обязан приехать из строки ТОГО ЖЕ столбца (ловушка 1 разбора).
@@ -755,12 +760,21 @@ export function SidesSection({
     colorwayId: refColorwayFor('render', colorwayId),
   });
 
+  /* T49 · a render taken off a side keeps an `undo` on that cell until the page reloads. */
+  const removals = useRemovalUndo(techCardId);
+
   /** Снять плиту со стороны рендера. `picture_id = 0` — освободить, ничего не удаляя. */
-  const unmark = (view: string, colorwayId: number, slotRev: number) => {
+  const unmark = (view: string, colorwayId: number, slotRev: number, pictureId = 0) => {
     setBusy(busyKey('render', colorwayId, view));
+    const ref = renderRef(view, colorwayId);
     writes.setBenchSlot.mutate(
-      { slot: renderRef(view, colorwayId), pictureId: 0, expectedSlotRev: slotRev },
-      { onSettled: () => setBusy(null) },
+      { slot: ref, pictureId: 0, expectedSlotRev: slotRev },
+      {
+        onSettled: () => setBusy(null),
+        onSuccess: () => {
+          if (pictureId > 0) removals.remember(ref, 'render', view, pictureId);
+        },
+      },
     );
   };
 
@@ -792,7 +806,12 @@ export function SidesSection({
    * `expectedSlotRev` — CAS строки ЦЕЛИ: строка соседнего столбца того же вида живёт своей
    * ревизией, и токен от неё сервер отвергнет («slot is at rev N, M was echoed»).
    */
-  const placeRender = (media: common_MediaFull, view: string, colorwayId: number, expectedSlotRev: number) => {
+  const placeRender = (
+    media: common_MediaFull,
+    view: string,
+    colorwayId: number,
+    expectedSlotRev: number,
+  ) => {
     const mediaId = media.id ?? 0;
     if (!mediaId) return;
     setBusy(busyKey('render', colorwayId, view));
@@ -808,27 +827,29 @@ export function SidesSection({
   /** Правится плита ЛЮБОГО столбца — редактор один на блок, адрес у него по номеру картинки. */
   const editing =
     editor?.mode === 'edit'
-      ? columns
-          .flatMap((c) => c.sides)
-          .find((s) => (s.picture?.id ?? 0) === editor.pictureId)?.picture ?? null
+      ? columns.flatMap((c) => c.sides).find((s) => (s.picture?.id ?? 0) === editor.pictureId)
+          ?.picture ?? null
       : null;
   /** Сторона, в которую сейчас рисуют, — ЖИВАЯ строка верстака, вместе со своим `slotRev`. */
-  const drawing = editor?.mode === 'draw' ? flats.find((s) => s.view === editor.view) ?? null : null;
+  const drawing =
+    editor?.mode === 'draw' ? flats.find((s) => s.view === editor.view) ?? null : null;
 
   /* ─────────────────────────────── the two cells of a row ─────────────────────────────── */
 
   const flatCell = (side: BenchSide): JSX.Element => {
     const label = viewLabel(side.view);
     if (side.picture) {
-      return (
-        <Plate picture={side.picture} name={label} alt={`flat · ${label}`} />
-      );
+      return <Plate picture={side.picture} name={label} alt={`flat · ${label}`} />;
     }
     if (!canWrite) {
       /* СЛОВО СОСТОЯНИЯ — СТУДИИНО (`EMPTY_WORD`), а не своё: «nothing marked» рядом с «empty»
          соседних лент читалось как ДРУГОЕ состояние. Дверь называет `title`, не слово. */
       return (
-        <EmptyBox heightPx={CELL_PX} hint={EMPTY_WORD} title={`no drawing is marked for ${label}.`} />
+        <EmptyBox
+          heightPx={CELL_PX}
+          hint={EMPTY_WORD}
+          title={`no drawing is marked for ${label}.`}
+        />
       );
     }
     return (
@@ -871,7 +892,11 @@ export function SidesSection({
           name={`${label} · ${col.label}`}
           alt={`render · ${label} · ${col.label}`}
           saving={saving}
-          onRemove={canWrite ? () => unmark(side.view, col.colorwayId, side.slotRev) : undefined}
+          onRemove={
+            canWrite
+              ? () => unmark(side.view, col.colorwayId, side.slotRev, side.picture?.id ?? 0)
+              : undefined
+          }
           onEdit={
             canWrite && (side.picture.id ?? 0) > 0
               ? () => setEditor({ mode: 'edit', pictureId: side.picture?.id ?? 0 })
@@ -902,8 +927,9 @@ export function SidesSection({
         />
       );
     }
+    const undo = removals.undoFor(renderRef(side.view, col.colorwayId), side.slotRev);
     return (
-      <>
+      <div className='relative'>
         <PlaceOrDrawCell
           label={label}
           mediaLabel='+ media'
@@ -912,8 +938,16 @@ export function SidesSection({
           onSelect={(media) => placeRender(media, side.view, col.colorwayId, side.slotRev)}
           data-side-render-door={`${col.colorwayId}:${side.view}`}
         />
+        {undo ? (
+          <UndoRemoval
+            label={`${label} · ${col.label}`}
+            pending={undo.pending}
+            onClick={undo.onClick}
+            className='absolute bottom-1 right-1 z-10 px-1'
+          />
+        ) : null}
         {saving ? <Caption>saving…</Caption> : null}
-      </>
+      </div>
     );
   };
 
@@ -1244,7 +1278,10 @@ export function SidesSection({
                     alt={`render · ${label} · ${colourway}`}
                     saving={busy === busyKey('render', side.colorwayId, side.view)}
                     onRemove={
-                      canWrite ? () => unmark(side.view, side.colorwayId, side.slotRev) : undefined
+                      canWrite
+                        ? () =>
+                            unmark(side.view, side.colorwayId, side.slotRev, side.picture.id ?? 0)
+                        : undefined
                     }
                   />
                 </div>

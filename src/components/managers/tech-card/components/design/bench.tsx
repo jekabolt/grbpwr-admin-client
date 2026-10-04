@@ -26,6 +26,7 @@ import {
   readBench,
   slotFootnote,
   slotRefKey,
+  useRemovalUndo,
   viewLabel,
 } from './bench-slot';
 import { COLORWAY_NONE, type BenchKind } from './bench-kinds';
@@ -394,8 +395,13 @@ export function Bench({
     [writes.setBenchSlot],
   );
 
+  /* T49 · a picture taken off a slot keeps an `undo` until the page reloads (`removal-undo.ts`). */
+  const removals = useRemovalUndo(techCardId);
+  const rememberRef = useRef(removals.remember);
+  rememberRef.current = removals.remember;
+
   const unmark = useCallback(
-    (ref: DesignBenchSlotRef, expectedSlotRev: number) => {
+    (ref: DesignBenchSlotRef, expectedSlotRev: number, pictureId = 0, side = '') => {
       const key = slotRefKey(ref);
       setOptimistic((prev) => ({
         ...prev,
@@ -405,7 +411,12 @@ export function Bench({
       }));
       writes.setBenchSlot.mutate(
         { slot: ref, pictureId: 0, expectedSlotRev },
-        { onError: () => dropOptimistic(key) },
+        {
+          onError: () => dropOptimistic(key),
+          onSuccess: () => {
+            if (pictureId > 0) rememberRef.current(ref, 'flat', side, pictureId);
+          },
+        },
       );
     },
     [writes.setBenchSlot, dropOptimistic],
@@ -565,7 +576,8 @@ export function Bench({
                 backdrop={family ? <PictogramBackdrop family={family} view={view} /> : undefined}
                 onPlaceMedia={(media) => placeMedia(media, ref, rev)}
                 onCancelPick={pick.cancel}
-                onUnmark={() => unmark(ref, rev)}
+                onUnmark={() => unmark(ref, rev, picture?.id ?? 0, viewLabel(view))}
+                undo={picture ? undefined : removals.undoFor(ref, rev)}
                 galleryItem={
                   picture?.media
                     ? mediaFullToViewerItem(picture.media as common_MediaFull)
@@ -638,7 +650,8 @@ export function Bench({
                 shelfOrdinals={shelfOrdinals}
                 onPlaceMedia={(media) => placeMedia(media, ref, rev)}
                 onCancelPick={pick.cancel}
-                onUnmark={() => unmark(ref, rev)}
+                onUnmark={() => unmark(ref, rev, picture?.id ?? 0, name)}
+                undo={picture ? undefined : removals.undoFor(ref, rev)}
                 onRename={(next) => {
                   /* ИМЯ ДЕТАЛИ ЕДЕТ В ПРОМПТ ФЛЭТА (ревью раунда 4, MIN-2): посреди GENERATE или
                      CLEAR оно не меняется, а пока переименование пишется, вход удержан — GENERATE
