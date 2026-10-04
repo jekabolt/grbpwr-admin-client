@@ -557,7 +557,9 @@ function SlotRow({
        */}
       <td data-align='left' className='align-top'>
         {/* ОДНА ЛИНИЯ, БЕЗ ПЕРЕНОСА: пилюля под полем делала строку выше соседей (п. 50). */}
-        <div className='flex items-center gap-1.5'>
+        {/* ПИЛЮЛЯ РОСТОМ С ПОЛЕ (п. 51: «чипс … такой же по высоте как текстбокс рядом»):
+            линия тянет детей по высоте (`items-stretch`), пилюля берёт рост поля имени. */}
+        <div className='flex items-stretch gap-1.5'>
           <div className='min-w-0 flex-1'>
             {readOnly ? (
               <Text component='span' className='font-bold' data-b16-name={index}>
@@ -580,13 +582,13 @@ function SlotRow({
           <Pill
             tone={family === 'cloth' ? 'ink' : 'mut'}
             data-b16-kind={family}
-            className='w-[76px] shrink-0 justify-center'
+            className='w-[76px] shrink-0 justify-center self-stretch'
           >
             {FAMILY_TITLE[family]}
           </Pill>
           {/* Совещательное предупреждение живёт на той же линии, а не четвёртым этажом. */}
           {duplicate && (
-            <Pill tone='mut' data-b16-dup={index} className='shrink-0'>
+            <Pill tone='mut' data-b16-dup={index} className='shrink-0 self-center'>
               same role
             </Pill>
           )}
@@ -665,12 +667,25 @@ function SlotRow({
           ))}
         {!rollGoods && !kindEligible && <EmptyCell />}
       </td>
-      <td data-align='left' className='align-top' data-b16-fiber-cell={index}>
+      {/* ОДНА СТРОКА ВСЕГДА (п. 51: пояснение под составом делало строку выше соседей).
+          Причина отказа связанной строки — «чей это состав и где его меняют» — живёт в `title`
+          ячейки вместе с полным текстом состава; сам состав в одну линию, лишнее — многоточием. */}
+      <td
+        data-align='left'
+        className='align-top'
+        data-b16-fiber-cell={index}
+        title={
+          linked && !readOnly && !noFibre
+            ? `${readableFiber || rawFiber || 'not stated'}\nfrom the linked article — change it on the BOM tab`
+            : undefined
+        }
+      >
         {noFibre ? (
           <EmptyCell />
         ) : readOnly || linked ? (
           <Text
-            component='span'
+            component='p'
+            className='truncate leading-[24px] lg:leading-[24px]'
             data-b16-fiber={index}
             data-b16-fiber-locked={linked ? '' : undefined}
           >
@@ -678,14 +693,6 @@ function SlotRow({
           </Text>
         ) : (
           <FibreField index={index} raw={rawFiber} readable={readableFiber} />
-        )}
-        {linked && !readOnly && !noFibre && (
-          /* ПРИЧИНА ОТКАЗА СТОИТ РЯДОМ С ОТКАЗОМ, А НЕ В ДОКУМЕНТАЦИИ. Ячейка, которая просто не
-             принимает набор, читается как поломка; она обязана назвать, ЧЕЙ это состав и где его
-             меняют. Дверь туда уже стоит в этой же строке — `›`. */
-          <Text size='micro' variant='label' component='p' data-b16-fiber-why={index}>
-            from the linked article — change it on the BOM tab
-          </Text>
         )}
       </td>
       <td className='align-top' data-b16-est-cell={index}>
@@ -711,9 +718,11 @@ function SlotRow({
            * поле, оставаясь двумя настоящими контролами формы (число — десятичное, единица —
            * открытый список: закрытый Radix стёр бы чужое написание, довод выше).
            */
+          /* РОСТ КОРОБКИ ЗАДАН, А НЕ «НЕ МЕНЬШЕ» (п. 51): `datalist` единицы добавлял строке
+             лишний пиксель против связанной строки, где единица — простой текст. */
           <div
             data-b16-est-box={index}
-            className='flex min-h-[26px] items-stretch border border-borderColor bg-bgColor focus-within:border-textColor'
+            className='flex h-[26px] items-stretch border border-borderColor bg-bgColor focus-within:border-textColor'
           >
             <div className='min-w-0 flex-1'>
               <DecimalField
