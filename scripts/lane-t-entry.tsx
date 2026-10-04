@@ -8,6 +8,7 @@
 // R(a) · попап SPLIT из истории сеет рамки из `readSplit`, а не из пустого `composite_views`:
 //   history-popup (19) — строка истории (не сетка: `match`) с листом `one` × 4 вида без столбца
 // R(b) · верстак FABRIC RENDER как у FLAT: render-uncut (20) — лист `one` × 4 = встроенный редактор;
+//   render-emptied (28) — T36: сняты все рамки, лист 721 стоит плиткой;
 //   render-cut (21) — лист 711 и четыре куска: листа нет, куски — плитки с `mark ▾`
 // R(c) · принесённые рендеры (без прогона, ни в одной стороне) — на верстаке FABRIC RENDER:
 //   render-brought (22) — прогон 80 + принесённый 901 (свободен) и 903 (стоит во front: не в группе);
@@ -222,6 +223,24 @@ const scenes: { probe: string; node: ReactNode }[] = [
             }),
           ])}
           techCardId={20}
+          kind='render'
+        />
+      </RenderStepScope>
+    ),
+  },
+  {
+    // T36 · у листа FABRIC RENDER снимают все рамки: редактор закрыт, лист — плитка (карточка 28).
+    probe: 'render-emptied',
+    node: (
+      <RenderStepScope step={step}>
+        <LatestGeneration
+          band={band([
+            run(72, 'render', {
+              params: { layout: 'one', views: FOUR } as never,
+              pictures: [pic(721, 72, 'render', { media: wide(1721) })],
+            }),
+          ])}
+          techCardId={28}
           kind='render'
         />
       </RenderStepScope>

@@ -42,6 +42,10 @@ const uncutRun = { id: 7, kind: 'flat', status: 'done', params, pictures: [sheet
 const keptSheet = pic(32, 9, { media: media(132, SHEET, 2000, 1000) as never });
 const keptRun = { id: 9, kind: 'flat', status: 'done', params, pictures: [keptSheet] };
 
+// T36: тот же лист `one`; у него снимают все рамки — карточка 4.
+const emptiedSheet = pic(33, 10, { media: media(133, SHEET, 2000, 1000) as never });
+const emptiedRun = { id: 10, kind: 'flat', status: 'done', params, pictures: [emptiedSheet] };
+
 const cutSheet = pic(41, 8, { media: media(141, SHEET_CUT, 2000, 1000) as never });
 const pieces = VIEWS.map((view, i) =>
   pic(42 + i, 8, {
@@ -76,6 +80,9 @@ function Harness() {
           </div>
           <div data-probe='kept'>
             <LatestGeneration band={bandOf(keptRun)} techCardId={3} />
+          </div>
+          <div data-probe='emptied'>
+            <LatestGeneration band={bandOf(emptiedRun)} techCardId={4} />
           </div>
           <div data-probe='cut'>
             <LatestGeneration band={bandOf(cutRun)} techCardId={2} />

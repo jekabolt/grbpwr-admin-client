@@ -13,7 +13,7 @@
 //     в истории лист остаётся (`gridPicturesOf`).
 //
 //   node scripts/inline-split-probe.mjs [--shot=out.png]
-//   node scripts/inline-split-probe.mjs --mutate=inline|seed|labels|payload|pieces|role|keys|landed|keep — каждая краснеет
+//   node scripts/inline-split-probe.mjs --mutate=inline|seed|labels|payload|pieces|role|keys|landed|keep|emptied — каждая краснеет
 //
 // Playwright не в зависимостях проекта — ищется в кэше npx и МОЛЧА пропускается, если не найден.
 import { createRequire } from 'node:module';
@@ -142,6 +142,12 @@ const MUTATIONS = {
     file: /generation\/latest-generation\.tsx$/,
     from: 'if (keptWhole.has(card.picture.id ?? 0)) continue;',
     to: '',
+  },
+  // T36: последний ✕ снова просто снимает рамку — пустой редактор остаётся на верстаке.
+  emptied: {
+    file: /generation\/inline-split\.tsx$/,
+    from: 'if (cut.frames.length <= 1) keepAsOnePicture(techCardId, pictureId);\n    else cut.removeSide(index);',
+    to: 'cut.removeSide(index);',
   },
   // после реза верстак снова держит лист (с колодой кусков).
   pieces: {
@@ -478,6 +484,62 @@ try {
     'W6.5 no write',
     !(await page.evaluate(() => window.__calls.some((c) => c.body?.pictureId === 32))),
   );
+
+  // ── T36: СНЯТЫ ВСЕ РАМКИ — РЕДАКТОР ЗАКРЫТ, КАРТИНКА СТОИТ ПЛИТКОЙ ──
+  const E = '[data-probe="emptied"]';
+  const frameCount = () => page.$$eval(`${E} [data-split-frame]`, (els) => els.length);
+  const removeOne = async () => {
+    const x = await page.$(`${E} [data-split-frame] button[aria-label^="remove side"]`);
+    if (x) await x.click();
+    await page.waitForTimeout(80);
+    return !!x;
+  };
+  await removeOne();
+  const afterOne = await frameCount();
+  const resetBtn = await page.$(`${E} button:text-is("reset")`);
+  if (resetBtn) await resetBtn.click();
+  await page.waitForTimeout(80);
+  check(
+    'E1 one ✕ takes one frame, `reset` brings all four back',
+    afterOne === 3 && (await frameCount()) === 4,
+    `${afterOne} · ${await frameCount()}`,
+  );
+  for (let i = 0; i < 4; i++) await removeOne();
+  await page.waitForTimeout(150);
+  check(
+    'E2 the last ✕ closes the editor: no [data-inline-split]',
+    !(await page.$(`${E} [data-inline-split]`)),
+  );
+  check(
+    'E3 …and the picture stands as a tile, its split corner on it',
+    !!(await page.$(`${E} [data-picture="33"] [data-picture-tile]`)) &&
+      !!(await page.$(`${E} [data-picture="33"] button[aria-label^="split"]`)),
+  );
+  check(
+    'E4 kept per card, like `keep as one picture`; no write',
+    (await page.evaluate(() => window.localStorage.getItem('grbpwr.design.split.kept.4'))) ===
+      '[33]' && !(await page.evaluate(() => window.__calls.some((c) => c.body?.pictureId === 33))),
+  );
+  // the popup keeps its own rule: emptying it leaves it open with nothing to cut.
+  const corner = await page.$(`${E} [data-picture="33"] button[aria-label^="split"]`);
+  if (corner) await corner.click();
+  await page.waitForTimeout(250);
+  const D = '[role="dialog"]';
+  const popupFrames = await page.$$eval(`${D} [data-split-frame]`, (els) => els.length);
+  for (let i = 0; i < popupFrames; i++) {
+    const x = await page.$(`${D} button[aria-label^="remove side"]`);
+    if (x) await x.click();
+    await page.waitForTimeout(60);
+  }
+  check(
+    'E5 the popup opens seeded and, emptied, stays open with its cut held',
+    popupFrames === 4 &&
+      !!(await page.$(D)) &&
+      (await page.$$eval(`${D} [data-split-frame]`, (els) => els.length)) === 0,
+    String(popupFrames),
+  );
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
 
   // ── ПОСЛЕ РЕЗА: КУСКИ ВМЕСТО ЛИСТА ──
   check('P1 no inline editor over a cut sheet', !(await page.$(`${C} [data-inline-split]`)));

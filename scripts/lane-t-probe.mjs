@@ -87,6 +87,12 @@ const stubNetwork = {
 
 // Мутации в памяти сборщика: каждая возвращает одно снятое поведение обратно.
 const MUTATIONS = {
+  // T36: последний ✕ снова просто снимает рамку — пустой редактор остаётся на верстаке.
+  emptied: {
+    file: /generation\/inline-split\.tsx$/,
+    from: 'if (cut.frames.length <= 1) keepAsOnePicture(techCardId, pictureId);\n    else cut.removeSide(index);',
+    to: 'cut.removeSide(index);',
+  },
   // T23: у ячейки прогона в полёте снова нет угла `cancel`.
   'cancel-corner': {
     file: /generation\/live-tiles\.tsx$/,
@@ -497,6 +503,24 @@ try {
     'Rb.7 render: each piece is markable through `mark ▾`',
     marks.length === 4,
     JSON.stringify(marks),
+  );
+
+  // ══ T36 · FABRIC RENDER: ALL FRAMES REMOVED → THE EDITOR CLOSES, THE SHEET IS A TILE ══
+  const RE = P('render-emptied');
+  for (let i = 0; i < 4; i++) {
+    const x = await page.$(`${RE} [data-split-frame] button[aria-label^="remove side"]`);
+    if (x) await x.click();
+    await page.waitForTimeout(80);
+  }
+  await page.waitForTimeout(150);
+  check(
+    'Rb.E1 render: the last ✕ closes the editor, the sheet stands as a tile',
+    !(await page.$(`${RE} [data-inline-split]`)) &&
+      !!(await page.$(`${RE} [data-picture="721"] [data-picture-tile]`)),
+  );
+  check(
+    'Rb.E2 render: no write for it',
+    !(await calls('SplitDesignPicture')).some((b) => b.pictureId === 721),
   );
 
   const markTrigger = await page.$(`${RC} [data-menu="mark:712"]`);

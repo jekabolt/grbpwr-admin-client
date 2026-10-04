@@ -109,12 +109,28 @@ export function InlineSplit({
     onTouch: () => openSurface(techCardId, surface, runId),
   });
   useEffect(() => () => closeSurface(techCardId, surface), [techCardId, surface]);
+  /**
+   * THE LAST FRAME OUT IS «KEEP AS ONE PICTURE» (03.10, owner item 36: «если мы находимся в
+   * состоянии сплита и мы удалили все рамки то картинка без сплита остается в воркбенче и вью
+   * кропа закрывается»). An editor with no frame has nothing to cut, so its last `✕` closes it the
+   * way W6 does: the picture joins this card's kept set and stands as the ordinary tile, its
+   * `split` corner there for a change of mind (the popup seeds its frames afresh). Every other `✕`
+   * is the shared one, and `reset` still brings the frames back. The popup keeps its own rule.
+   */
+  const removeSide = (index: number) => {
+    if (cut.frames.length <= 1) keepAsOnePicture(techCardId, pictureId);
+    else cut.removeSide(index);
+  };
+  const stageCut = { ...cut, removeSide };
 
   const handle = pictureHandle(picture);
   return (
     <div data-inline-split={pictureId} className='space-y-2'>
-      <div inert={cut.landed || undefined} className={cut.landed ? 'pointer-events-none' : undefined}>
-        <SplitStage cut={cut} nameInFrame maxHeight={560} />
+      <div
+        inert={cut.landed || undefined}
+        className={cut.landed ? 'pointer-events-none' : undefined}
+      >
+        <SplitStage cut={stageCut} nameInFrame maxHeight={560} />
       </div>
       <div className='flex items-center justify-between gap-3'>
         {/* A LANDED CUT IS TERMINAL (W7): the edits go, and the line says what it waits for until
