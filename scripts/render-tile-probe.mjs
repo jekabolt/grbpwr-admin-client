@@ -16,6 +16,7 @@
 //   node scripts/render-tile-probe.mjs --mutate=group  строки без имени колорвея  → G краснеет
 //   node scripts/render-tile-probe.mjs --mutate=x      ✕ только у столбца вне SIDES → U краснеет
 //   node scripts/render-tile-probe.mjs --mutate=split  гейт сплита снят           → S краснеет
+//   node scripts/render-tile-probe.mjs --mutate=stack  флаг снова под колорвеем     → U5 краснеет
 //   node scripts/render-tile-probe.mjs --mutate=row    старый ряд дверей под кадром → R краснеет
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
@@ -102,6 +103,11 @@ const MUTATIONS = {
     file: /design\/render\/render-tile\.tsx$/,
     from: '!writesOff && !hidden && !deck && !cutAway && offersSplit(split)',
     to: '!writesOff && !hidden && !deck && !cutAway',
+  },
+  stack: {
+    file: /design\/render\/render-tile\.tsx$/,
+    from: '      flagInline\n',
+    to: '',
   },
   row: {
     file: /design\/render\/render-tile\.tsx$/,
@@ -285,6 +291,35 @@ try {
   // ── U · СТОЯЩАЯ ПЛИТА: ФЛАГ + ✕ ──
   check('U1 held: flag «in front»', await has(`${P('held')} [data-flag="in front"]`));
   check('U2 held: no menu', !(await has(`${P('held')} [data-menu]`)));
+  // T44 · владелец (п. 44): «In front in back и тд показывать в одной строчке с колорвеем».
+  const line = await page.$eval(P('held'), (el) => {
+    const f = el.querySelector('[data-flag]');
+    const b = f?.parentElement?.firstElementChild;
+    if (!f || !b || b === f) return null;
+    const rb = b.getBoundingClientRect();
+    const rf = f.getBoundingClientRect();
+    const pill = f.firstElementChild;
+    return {
+      whole: pill.scrollWidth <= pill.clientWidth,
+      b: b.textContent.trim(),
+      bt: rb.top,
+      bb: rb.bottom,
+      br: rb.right,
+      ft: rf.top,
+      fb: rf.bottom,
+      fl: rf.left,
+    };
+  });
+  check(
+    'U5 held: flag on ONE line with the colourway badge',
+    !!line &&
+      line.whole &&
+      line.b.length > 0 &&
+      Math.abs(line.ft - line.bt) <= 1 &&
+      Math.abs(line.fb - line.bb) <= 1 &&
+      line.fl >= line.br,
+    JSON.stringify(line),
+  );
   const X = `${P('held')} button[aria-label^="unmark render 13"]`;
   check('U3 held: ✕ in the frame', (await has(X)) && (await text(X)) === '✕');
   if (await has(X)) {

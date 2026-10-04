@@ -133,6 +133,7 @@ export function StripCell({
   onRemove,
   menu,
   flag,
+  flagInline,
   /**
    * ПРИЧИНЫ И ФАКТЫ, КОТОРЫМ НЕ МЕСТО ПОД КАДРОМ (T17, правило 5): подпись «вид · rN», горизонт
    * колорвея, «почему здесь нечего нажать». Живут в подсказке ячейки, а не строкой прозы.
@@ -172,6 +173,8 @@ export function StripCell({
   onRemove?: PictureTileAction;
   menu?: PictureTileMenu;
   flag?: PictureTileFlag;
+  /** Флаг в строку с ярлыком (п. 44, плита рендера), а не под ним. */
+  flagInline?: boolean;
   title?: string;
   anchors?: Record<`data-${string}`, string | number | undefined>;
   selectLabel?: string;
@@ -214,6 +217,7 @@ export function StripCell({
           onRemove={onRemove}
           menu={menu}
           flag={flag}
+          flagInline={flagInline}
           selectLabel={selectLabel}
           className='w-full bg-bgColor'
         />

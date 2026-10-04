@@ -13,6 +13,8 @@
 //
 //   node scripts/tile-anatomy-probe.mjs
 //   node scripts/tile-anatomy-probe.mjs --mutate=order   меню ПОСЛЕ edit — место edit краснеет
+//   node scripts/tile-anatomy-probe.mjs --mutate=inline  флаг в строку с ярлыком по умолчанию —
+//                                                         плитка FLAT теряет столбик, P2 краснеет
 //   node scripts/tile-anatomy-probe.mjs --mutate=open    без `data-[state=open]` в TILE_QUIET —
 //                                                         открытое меню прячет свой угол
 //
@@ -92,6 +94,11 @@ const MUTATIONS = {
     file: /design\/picture-tile\.tsx$/,
     from: "          {menu && <CornerMenu menu={menu} />}\n          {onSelect && <Corner action={onSelect} label={selectLabel} className='' />}\n          {onEdit && <Corner action={onEdit} label={editLabel} className='' />}",
     to: "          {onSelect && <Corner action={onSelect} label={selectLabel} className='' />}\n          {onEdit && <Corner action={onEdit} label={editLabel} className='' />}\n          {menu && <CornerMenu menu={menu} />}",
+  },
+  inline: {
+    file: /design\/picture-tile\.tsx$/,
+    from: '  flagInline,\n  menu,\n}: PictureTileProps',
+    to: '  flagInline = true,\n  menu,\n}: PictureTileProps',
   },
   open: {
     file: /ui\/components\/tile-skin\.ts$/,

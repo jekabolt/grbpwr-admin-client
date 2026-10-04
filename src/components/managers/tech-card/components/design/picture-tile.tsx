@@ -624,6 +624,12 @@ export interface PictureTileFlag {
 export interface PictureTileProps {
   /** Состояние под ярлыком (верх слева). Разбор у `PictureTileFlag`. */
   flag?: PictureTileFlag;
+  /**
+   * ФЛАГ В СТРОКУ С ЯРЛЫКОМ, а не под ним. Владелец (п. 44): «In front in back и тд показывать в
+   * одной строчке с колорвеем» — у плиты рендера ярлык короткий (имя колорвея), и столбик из двух
+   * фактов съедал верх кадра. По умолчанию выключено: у FLAT и прочих плиток флаг стоит под ярлыком.
+   */
+  flagInline?: boolean;
   /** Угол выбора, первый в нижнем правом кластере. Разбор у `PictureTileMenu`. */
   menu?: PictureTileMenu;
   /** Адрес картинки. Пусто — рисуется кадр-заглушка со словом, а не молчаливая дыра. */
@@ -1013,6 +1019,7 @@ export function PictureTile({
   children,
   face,
   flag,
+  flagInline,
   menu,
 }: PictureTileProps) {
   const key = useId();
@@ -1418,22 +1425,45 @@ export function PictureTile({
           Оба видны всегда и прозрачны для указателя. Флаг стоит на непрозрачной подложке: пилюля
           прозрачна, а под ней снимок. Без ярлыка флаг поднимается в сам угол. */}
       {(badge || flag) && (
-        <div className='pointer-events-none absolute left-1 top-1 z-20 flex max-w-[calc(100%-64px)] flex-col items-start gap-0.5'>
+        <div
+          className={cn(
+            'pointer-events-none absolute left-1 top-1 z-20 flex gap-0.5',
+            /* В СТРОКУ (п. 44): ряд держит место только под ✕ (17px + зазор) — у плиты рендера
+               `open 3d` нет, а 64px резерва столбика оставляли флагу «in» вместо «in front». Ярлык
+               и пилюля тянутся на одну высоту; уступает ИМЯ (многоточием, полное — в `title`
+               ячейки), а не слово состояния: обрубок «in» ничего не говорит. */
+            flagInline
+              ? 'max-w-[calc(100%-27px)] flex-row items-stretch'
+              : 'max-w-[calc(100%-64px)] flex-col items-start',
+          )}
+        >
           {badge && (
-            <span className='inline-block bg-textColor px-1.5 py-0.5'>
+            <span
+              className={cn(
+                'inline-block bg-textColor py-0.5',
+                flagInline ? 'flex min-w-0 items-center px-1' : 'px-1.5',
+              )}
+            >
               <Text
                 size='nano'
                 variant='uppercase'
                 component='span'
-                className='!text-bgColor break-words'
+                className={cn('!text-bgColor', flagInline ? 'truncate' : 'break-words')}
               >
                 {badge}
               </Text>
             </span>
           )}
           {flag && (
-            <span className='inline-block max-w-full bg-bgColor' data-flag={flag.word}>
-              <Pill tone={flag.tone} title={flag.title} className='max-w-full truncate'>
+            <span
+              className={cn('inline-block max-w-full bg-bgColor', flagInline && 'flex shrink-0')}
+              data-flag={flag.word}
+            >
+              <Pill
+                tone={flag.tone}
+                title={flag.title}
+                className={cn('max-w-full truncate', flagInline && '!px-1')}
+              >
                 {flag.word}
               </Pill>
             </span>
