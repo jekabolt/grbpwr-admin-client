@@ -1,7 +1,7 @@
 import type { common_Category } from 'api/proto-http/admin';
 import { formatCompositionCell } from 'components/managers/materials/components/material-code';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
 
@@ -9,6 +9,7 @@ import type { TechCardFormData } from '../../schema';
 import { detailKeyLabel } from '../../tech-card-options';
 import type { CardFacts } from '../core/card-facts';
 import { categoryChain, fitLabel, fitsForTopCategory, topCategoryName } from '../fit-vocabulary';
+import { useQuizLive } from '../quiz-live';
 import { decisionLines } from '../quiz-model';
 import { useDesignQuizAnswers } from '../use-design-band';
 
@@ -103,7 +104,13 @@ export function useCardFacts(isBoard: (row: BoardRowLike) => boolean): CardFacts
   const { answers } = useDesignQuizAnswers(
     Number.isFinite(cardId) && cardId > 0 ? cardId : undefined,
   );
-  const decisions = useMemo(() => decisionLines(answers), [answers]);
+  const fresh = useMemo(() => decisionLines(answers), [answers]);
+  // W-C2: пока прогон квиза открыт, решения стоят как в его начале — бриф WORDS не зовётся на
+  // каждый ответ; закрылся — догоняют разом.
+  const quizLive = useQuizLive(Number.isFinite(cardId) ? cardId : 0);
+  const held = useRef(fresh);
+  if (!quizLive) held.current = fresh;
+  const decisions = quizLive ? held.current : fresh;
 
   return useMemo(() => {
     const text = (key: string) => (details.find((d) => d.key === key)?.text ?? '').trim();
