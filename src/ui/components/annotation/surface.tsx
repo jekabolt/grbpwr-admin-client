@@ -3045,6 +3045,26 @@ function FrameButton({
   );
 }
 
+/**
+ * ФОКУС ОТ МЫШИ НЕ РИСУЕТ РАМКУ (владелец, 04.10: «осталось это квадратное выделение у
+ * текстблока» … «его надо убрать»).
+ *
+ * ЧТО ЭТО БЫЛО. Плашка, ручки и пин — `role=button` с `tabIndex`, и клик мышью ставит на них фокус.
+ * Кольца сразу нет, но Chrome делает такой фокус «видимым» на ПЕРВОЙ ЖЕ КЛАВИШЕ (⌘Z, стрелка,
+ * Shift) — и рисует умолчательное кольцо: два пикселя тёмного с белой каймой, да ещё умноженное
+ * на `scale(inv)`. У ручки это квадрат HANDLE_HIT × inv поверх плашки — ровно то, что на снимке.
+ * Замерено стендом `scripts/plate-focus-probe.mjs`.
+ *
+ * ПОЭТОМУ: умолчательное кольцо снято, а своё тонкое чернильное — только у фокуса, пришедшего с
+ * клавиатуры (Tab). Нажатие мыши метит элемент, метка живёт до потери фокуса.
+ */
+const QUIET_FOCUS =
+  'outline-none [&:focus-visible:not([data-pointer-focus])]:outline-solid [&:focus-visible:not([data-pointer-focus])]:outline-1 [&:focus-visible:not([data-pointer-focus])]:outline-textColor';
+const markPointerFocus = (e: ReactPointerEvent<HTMLElement>) =>
+  e.currentTarget.setAttribute('data-pointer-focus', '');
+const clearPointerFocus = (e: React.FocusEvent<HTMLElement>) =>
+  e.currentTarget.removeAttribute('data-pointer-focus');
+
 /** Радиус кружка пина в экранных пикселях. */
 const R_PIN = 9;
 
@@ -3115,7 +3135,11 @@ function PinMarker({
             }
           : undefined
       }
-      onBlur={hoverNotes ? () => onHover(false) : undefined}
+      onBlur={(e) => {
+        clearPointerFocus(e);
+        if (hoverNotes) onHover(false);
+      }}
+      onPointerDownCapture={markPointerFocus}
       // Нажатие не доходит до кадра: иначе оно завело бы там жест панорамы, а его отпускание —
       // снятие выбора, которое тут же отменяло бы выбор, сделанный кликом по этому же маркеру.
       onPointerDown={(e) => {
@@ -3133,6 +3157,7 @@ function PinMarker({
       }}
       className={cn(
         'absolute flex items-center justify-center rounded-full border text-nano tabular-nums',
+        QUIET_FOCUS,
         filled ? 'bg-textColor text-bgColor' : 'bg-bgColor text-textColor',
         onDragStart ? 'cursor-move' : 'cursor-pointer',
         // ВЫБОР ПОКАЗАН КОЛЬЦОМ, А НЕ ИНВЕРСИЕЙ ЗАЛИВКИ, и это не смягчение правила «selected
@@ -3233,6 +3258,8 @@ function Plate({
       data-callout-note={box ? '' : undefined}
       onPointerEnter={() => onHover(true)}
       onPointerLeave={() => onHover(false)}
+      onPointerDownCapture={markPointerFocus}
+      onBlur={clearPointerFocus}
       onPointerDown={onPointerDown}
       onClick={(e) => {
         e.stopPropagation();
@@ -3253,6 +3280,7 @@ function Plate({
         // где плашка стоит.
         'absolute block w-max max-w-[45%] cursor-pointer whitespace-pre-wrap border bg-bgColor px-1 py-px text-left text-nano leading-tight text-textColor',
         box && 'min-w-12 px-1.5 py-1 text-micro',
+        QUIET_FOCUS,
         // БЕЗ КОЛЬЦА ВЫБОРА (владелец, 04.10: «такого выделения быть не должно»). Выбор фигуры
         // показывают её ручки; плашка лишь берёт чернильную рамку вместо серой.
         selected ? 'border-textColor' : 'border-borderColor',
@@ -3413,7 +3441,9 @@ function Handles({
               e.stopPropagation();
               onInsert(g.index, g.at);
             }}
-            className='absolute cursor-copy'
+            onPointerDownCapture={markPointerFocus}
+            onBlur={clearPointerFocus}
+            className={cn('absolute cursor-copy', QUIET_FOCUS)}
             style={{
               left: `${at.x}px`,
               top: `${at.y}px`,
@@ -3453,7 +3483,9 @@ function Handles({
               if (justDragged()) return;
               onArm(i);
             }}
-            className='absolute cursor-move'
+            onPointerDownCapture={markPointerFocus}
+            onBlur={clearPointerFocus}
+            className={cn('absolute cursor-move', QUIET_FOCUS)}
             style={{
               left: `${at.x}px`,
               top: `${at.y}px`,
