@@ -149,12 +149,14 @@ function IssueEditor({
         label='description *'
         rows={2}
         maxLength={2000}
+        enhance='description'
       />
       <TextareaField
         name={`issues.${index}.resolutionNote`}
         label='resolution note'
         rows={2}
         maxLength={2000}
+        enhance='note'
       />
     </div>
   );

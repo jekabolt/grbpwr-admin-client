@@ -14,6 +14,7 @@ import { ViewSwitch } from 'ui/components/view-switch';
 import { SectionHeader } from 'ui/components/section-header';
 import { CornerMenu } from './design/picture-tile';
 import Text from 'ui/components/text';
+import { AiEnhance } from 'ui/components/ai-enhance';
 import Textarea from 'ui/components/text-area';
 import InputField from 'ui/form/fields/input-field';
 import TextareaField from 'ui/form/fields/textarea-field';
@@ -787,7 +788,7 @@ export function TechCardGallery({
 // card-level prose field), so overall direction notes round-trip with the rest of the card; the
 // per-image caption sprawl that used to sit under each thumbnail is gone.
 function MoodboardComments() {
-  const { control } = useFormContext<TechCardFormData>();
+  const { control, setValue } = useFormContext<TechCardFormData>();
   const { field } = useController({ control, name: 'notes' });
   const id = useId();
   return (
@@ -796,15 +797,26 @@ function MoodboardComments() {
       <label htmlFor={id} className='sr-only'>
         general comments
       </label>
-      <Textarea
-        {...field}
-        id={id}
-        value={field.value ?? ''}
-        rows={3}
-        maxLength={2000}
-        placeholder='overall notes on the moodboard, references, direction…'
-        className='resize-none'
-      />
+      {/* `ai ✦` на активном поле (item 41, «везде»): ключ `note`. */}
+      <div className='relative'>
+        <Textarea
+          {...field}
+          id={id}
+          value={field.value ?? ''}
+          rows={3}
+          maxLength={2000}
+          placeholder='overall notes on the moodboard, references, direction…'
+          className='resize-none pb-7'
+        />
+        <AiEnhance
+          field='note'
+          value={field.value ?? ''}
+          onApply={(text) =>
+            setValue('notes', text, { shouldDirty: true, shouldValidate: true })
+          }
+          maxRunes={2000}
+        />
+      </div>
       <Text size='micro' variant='label' className='mt-px'>
         shared with the card’s notes field
       </Text>

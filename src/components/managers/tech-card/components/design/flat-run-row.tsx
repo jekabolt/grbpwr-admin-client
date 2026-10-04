@@ -21,7 +21,7 @@ import {
 import { displayDetailName, readBench } from './bench-slot';
 import { serverSpeaksDesign } from './capability';
 import { useMoodMinimumGate } from './chain-rail';
-import { GROUP_GAP } from './core';
+import { ControlLabel, GROUP_GAP } from './core';
 import { moodMinimumGate, openGateDoor } from './core/chain';
 import { useDrafted } from './drafted-contract';
 import { markedPlatesOf } from './fix-markup';
@@ -96,26 +96,6 @@ import { materializeWords } from './words-seed';
  */
 export const ROW_CONTROL_PX = 26;
 export const ROW_CONTROL_STYLE: React.CSSProperties = { height: ROW_CONTROL_PX };
-
-/**
- * ═══ ПОДПИСЬ ВТОРОСТЕПЕННОЙ КНОПКИ — РАЗМЕРОМ КОНТРОЛА, А НЕ ТЕЛА ТЕКСТА (r3 п.5) ══════════════
- *
- * Владелец просил ещё и ОДИН РАЗМЕР ШРИФТА в этих рядах. Замерено: чипы и сегменты раскладки
- * печатают 10px, а `Button size='sm'` — 12px, хотя DESIGN.md на второстепенную кнопку говорит
- * ровно «10px label type uppercase». Разница не в вызове: `buttonVariants` кладёт на одну кнопку
- * И `text-textBaseSize` (от `variant`), И `text-micro` (от `size`), а `cva` их не мирит — спор
- * решает порядок утилит в собранном CSS, и `text-textBaseSize` там ПОЗЖЕ. То есть `text-micro`
- * размера `sm` мёртв во всей админке, и класс с места вызова умрёт так же.
- *
- * ПОЭТОМУ РАЗМЕР НАЗЫВАЕТ ПОДПИСЬ, А НЕ КНОПКА: у вложенного `span` конкурента нет. Это не обход
- * системы, а её же значение — 10px, `text-micro`, — возвращённое туда, где примитив его теряет.
- * ⚠ ПОЧИНКА ПО СУЩЕСТВУ ЖИВЁТ В `ui/components/button.tsx` (снять `text-textBaseSize` с вариантов
- * или помирить классы через `twMerge`); она за пределами этой зоны и названа в отчёте. Главную
- * кнопку (`GENERATE`) это не касается: 12px у неё — по системе.
- */
-export function ControlLabel({ children }: { children: ReactNode }): JSX.Element {
-  return <span className='text-micro'>{children}</span>;
-}
 
 const LAYOUT_OPTIONS = [
   { value: 'one' as const, label: 'one picture', hint: 'all the ticked views drawn into one file' },

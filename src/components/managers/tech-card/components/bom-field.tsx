@@ -592,6 +592,7 @@ function ThisStyleFields({
           label='comment'
           rows={2}
           maxLength={1000}
+          enhance='note'
         />
       </div>
     </div>

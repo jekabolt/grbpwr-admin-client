@@ -5620,7 +5620,13 @@ function OperationEditor({
       {/* ONE free-text box, not two. `description` and `note` used to sit side by side with no rule
           saying which was which, so two cards filled them the opposite way round. */}
       <div className='mt-2'>
-        <TextareaField name={`operations.${index}.note`} label='note' rows={2} maxLength={1000} />
+        <TextareaField
+          name={`operations.${index}.note`}
+          label='note'
+          rows={2}
+          maxLength={1000}
+          enhance='note'
+        />
       </div>
     </div>
   );

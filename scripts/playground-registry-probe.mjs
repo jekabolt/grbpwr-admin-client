@@ -3335,7 +3335,7 @@ const THREED = (over) => ({
   ck(t3().validate(fresh3([media(42)]), { band: b }) === null, 'с картинкой — отказа нет');
 
   // Shape and price words: NO FIGURE — the server may reserve more than any static number (G-02
-  // Codex 3); the row adds «priced by the server when the run starts» itself.
+  // Codex 3). The row prints no shape or price line at all (item 34).
   ck(
     t3().shape(fresh3([media(42)]), plain) === '1 model' &&
       t3().shape(fresh3([media(41)]), full) === '1 model',
@@ -3769,11 +3769,12 @@ head(
     'плитка 10: слова владельца (12.png) и честная строка, без «credit»',
   );
   ck(
-    M.RETOUCH_PRICE === '1 new picture per retouch · priced by the server when the run starts' &&
-      p10.includes('data-retouch-price') &&
+    M.RETOUCH_PRICE === undefined &&
+      !p10.includes('data-retouch-price') &&
+      !p10.includes('priced by the server') &&
       !p10.includes('$'),
-    'плитка 10: строка цены — сервер ценит при старте, суммы нет (полоса цен не даёт) (m-3)',
-    M.RETOUCH_PRICE,
+    'плитка 10: строки «N picture · priced by the server» нет (item 34), суммы нет',
+    p10.slice(0, 200),
   );
   ck(
     (p10.match(/data-retouch-source=/g) ?? []).length === 1 &&
@@ -4535,11 +4536,10 @@ await (async () => {
     'маска предложена, но размер 0×0 → окно для ЭТОЙ картинки',
   );
   ck(
-    M.retouchPriceLine(NEW, bare) ===
-      'this picture states no size; the rectangle path is used · 1 picture · priced by the server when the run starts' &&
-      M.retouchPriceLine(NEW, pic) === '1 picture · priced by the server when the run starts' &&
-      M.retouchPriceLine(OLD, bare) === '1 picture · priced by the server when the run starts',
-    'строка цены: «states no size» только где маска предложена, а картинка без размера',
+    M.retouchPriceLine(NEW, bare) === 'this picture states no size; the rectangle path is used' &&
+      M.retouchPriceLine(NEW, pic) === '' &&
+      M.retouchPriceLine(OLD, bare) === '',
+    'строка ряда: только «states no size» там, где маска предложена, а картинка без размера; цены нет (item 34)',
     M.retouchPriceLine(NEW, bare),
   );
 
@@ -4732,7 +4732,6 @@ await (async () => {
   });
   const NEW = band({ runKinds: ['freeform', 'inpaint'], playgroundWorkflows: ['retouch_zone'] });
   const OLD = band({ playgroundWorkflows: ['retouch_zone'] });
-  const base = '1 picture · priced by the server when the run starts';
 
   // M-1 · the budget
   ck(
@@ -4750,7 +4749,7 @@ await (async () => {
   ck(
     M.retouchRoute(NEW, big) === 'window' &&
       M.retouchWindowReason(NEW, big) === M.RETOUCH_TOO_LARGE &&
-      M.retouchPriceLine(NEW, big) === `${M.RETOUCH_TOO_LARGE} · ${base}` &&
+      M.retouchPriceLine(NEW, big) === M.RETOUCH_TOO_LARGE &&
       M.retouchCaveat(NEW, big) === M.RETOUCH_CAVEAT,
     '24 МП на сервере с маской: окно, строка цены «cannot draw a mask this size», строка про прямоугольник',
     M.retouchPriceLine(NEW, big),
@@ -4761,13 +4760,13 @@ await (async () => {
   );
   ck(
     M.retouchRoute(NEW, ok, false) === 'window' &&
-      M.retouchPriceLine(NEW, ok, false) === `${M.RETOUCH_TOO_LARGE} · ${base}` &&
+      M.retouchPriceLine(NEW, ok, false) === M.RETOUCH_TOO_LARGE &&
       M.retouchRoute(NEW, ok) === 'mask' &&
       M.retouchWindowReason(NEW, ok) === null,
     'холст отказал при нажатии (canDraw=false) → та же картинка идёт окном и говорит почему',
   );
   ck(
-    M.retouchWindowReason(OLD, big) === null && M.retouchPriceLine(OLD, big) === base,
+    M.retouchWindowReason(OLD, big) === null && M.retouchPriceLine(OLD, big) === '',
     'старый сервер: причины отката нет (маски и не предлагали)',
   );
 

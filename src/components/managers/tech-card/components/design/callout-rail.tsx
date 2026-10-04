@@ -2,6 +2,7 @@ import { cn } from 'lib/utility';
 import { useEffect, useRef } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { kindDef } from 'ui/components/annotation/kinds';
+import { AiEnhance } from 'ui/components/ai-enhance';
 import { AnnotationStyleRow } from 'ui/components/annotation/style-row';
 import { rememberPen, type NoteArrows } from 'ui/components/annotation/surface';
 import { Button } from 'ui/components/button';
@@ -373,14 +374,25 @@ export function CalloutRowBody({
           showing a note the card no longer holds, with nothing saying so. The value is
           read back through the same `useWatch` that feeds this list, so a draft restore
           and an undo land here too. */}
-      <Textarea
-        name={`callout-${index}-description`}
-        value={c.description ?? ''}
-        disabled={disabled}
-        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-          write('description', e.target.value)
-        }
-      />
+      {/* `ai ✦` на активном поле указания (item 41, «везде»): ключ `note`. */}
+      <div className='relative'>
+        <Textarea
+          name={`callout-${index}-description`}
+          value={c.description ?? ''}
+          disabled={disabled}
+          className='pb-7'
+          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+            write('description', e.target.value)
+          }
+        />
+        <AiEnhance
+          field='note'
+          value={c.description ?? ''}
+          onApply={(text) => write('description', text)}
+          maxRunes={2000}
+          disabled={disabled}
+        />
+      </div>
       {detailFields && (
         <div className='flex gap-1'>
           <Input

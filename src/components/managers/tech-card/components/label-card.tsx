@@ -10,6 +10,7 @@ import Media from 'ui/components/media';
 import { Pill } from 'ui/components/pill';
 import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
+import { AiEnhance } from 'ui/components/ai-enhance';
 import Textarea from 'ui/components/text-area';
 import { useBomItemIdOptions } from './bom-line-picker';
 import { LABEL_MEDIA_MAX } from './labels-schema';
@@ -346,18 +347,28 @@ function CardFieldView({
       return (
         <div className='md:col-span-2'>
           {label}
-          <Textarea
-            name={id}
-            id={id}
-            rows={2}
-            maxLength={field.max}
-            placeholder={field.hint}
-            value={str(row[field.name])}
-            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-              onPatch({ [field.name]: e.target.value })
-            }
-            {...data}
-          />
+          {/* `ai ✦` на активном поле (item 41, «везде»): ключ `note`. */}
+          <div className='relative'>
+            <Textarea
+              name={id}
+              id={id}
+              rows={2}
+              maxLength={field.max}
+              placeholder={field.hint}
+              value={str(row[field.name])}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                onPatch({ [field.name]: e.target.value })
+              }
+              className='pb-7'
+              {...data}
+            />
+            <AiEnhance
+              field='note'
+              value={str(row[field.name])}
+              onApply={(text) => onPatch({ [field.name]: text })}
+              maxRunes={field.max}
+            />
+          </div>
         </div>
       );
   }

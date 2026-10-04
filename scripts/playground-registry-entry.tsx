@@ -129,7 +129,6 @@ export { workflowOutputsHorizon } from 'components/managers/tech-card/components
 export { recallEngineNote } from 'components/managers/tech-card/components/design/playground/registry/common';
 export { retouchSourceId } from 'components/managers/tech-card/components/design/playground/registry/run-workflow';
 export {
-  RETOUCH_PRICE,
   RETOUCH_MASKING_KEY,
   RETOUCH_SOURCE_KEY,
 } from 'components/managers/tech-card/components/design/playground/registry/tiles/retouch-zone';

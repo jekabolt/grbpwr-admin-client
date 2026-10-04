@@ -229,6 +229,8 @@ export function MaskEditor({
   const [queued, setQueued] = useState(false);
 
   const route = retouchRoute(band, media, canDraw);
+  /** Why this picture takes the rectangle, or '' (no count, no price line: owner item 34). */
+  const maskRowNote = retouchPriceLine(band, media, canDraw);
   const zone = useMemo(() => (aspect ? zoneOfStrokes(strokes, aspect) : null), [strokes, aspect]);
   const input = {
     media,
@@ -723,15 +725,17 @@ export function MaskEditor({
                   disabled={disabled}
                   onGenerate={() => void generate()}
                   trailing={
-                    <Text
-                      size='micro'
-                      variant='label'
-                      component='span'
-                      className='min-w-0'
-                      data-mask-price=''
-                    >
-                      {retouchPriceLine(band, media, canDraw)}
-                    </Text>
+                    maskRowNote ? (
+                      <Text
+                        size='micro'
+                        variant='label'
+                        component='span'
+                        className='min-w-0'
+                        data-mask-price=''
+                      >
+                        {maskRowNote}
+                      </Text>
+                    ) : null
                   }
                 />
               </div>

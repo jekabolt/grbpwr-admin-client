@@ -1,4 +1,5 @@
 import type { googletype_Decimal } from 'api/proto-http/admin';
+import type { ReactNode } from 'react';
 import { cn } from 'lib/utility';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
@@ -96,21 +97,16 @@ export function EmptyState({
  *
  * THE RULE OF THAT FILE HOLDS HERE: an absent decimal is «not stated», never zero, and this organ
  * NEVER prints `$0.00` for it. When the amount is stated, the amount is printed and `note` is
- * dropped — a price and «priced later» cannot both be true.
+ * dropped.
  *
- * WHEN THE AMOUNT IS NOT STATED the organ prints `note` instead — by default the band's own
- * pre-run sentence, `priced by the server when the run starts`, which already stands verbatim on
- * the generate row, the construction draft and the pattern studio. That default is for the
- * POSITION BEFORE A RUN, where no price can exist yet. A reader of a FINISHED row — where an absent
- * price means «this account may not see it» (costing-shaped fields are stripped without
- * `costing:read`) — passes `note={null}` and the organ renders nothing at all, as money.ts asks.
+ * WHEN THE AMOUNT IS NOT STATED the organ prints `note` if one is given, and by default nothing at
+ * all. The old default — the pre-run sentence `priced by the server when the run starts` — is gone
+ * with every run row that printed it (owner item 34, 04.10: «этот текст не нужен»).
  */
-export const PRICED_LATER = 'priced by the server when the run starts';
-
 export function Money({
   value,
   currency,
-  note = PRICED_LATER,
+  note = null,
   className,
   ...rest
 }: {
@@ -177,3 +173,23 @@ export const GROUP_GAP = 'mb-3';
  * месте.
  */
 export const GROUP_SEAM = '[&>*+*]:mt-5 [&>*]:mb-0';
+
+/**
+ * ═══ ПОДПИСЬ ВТОРОСТЕПЕННОЙ КНОПКИ — РАЗМЕРОМ КОНТРОЛА, А НЕ ТЕЛА ТЕКСТА (r3 п.5) ══════════════
+ *
+ * Владелец просил ещё и ОДИН РАЗМЕР ШРИФТА в этих рядах. Замерено: чипы и сегменты раскладки
+ * печатают 10px, а `Button size='sm'` — 12px, хотя DESIGN.md на второстепенную кнопку говорит
+ * ровно «10px label type uppercase». Разница не в вызове: `buttonVariants` кладёт на одну кнопку
+ * И `text-textBaseSize` (от `variant`), И `text-micro` (от `size`), а `cva` их не мирит — спор
+ * решает порядок утилит в собранном CSS, и `text-textBaseSize` там ПОЗЖЕ. То есть `text-micro`
+ * размера `sm` мёртв во всей админке, и класс с места вызова умрёт так же.
+ *
+ * ПОЭТОМУ РАЗМЕР НАЗЫВАЕТ ПОДПИСЬ, А НЕ КНОПКА: у вложенного `span` конкурента нет. Это не обход
+ * системы, а её же значение — 10px, `text-micro`, — возвращённое туда, где примитив его теряет.
+ * ⚠ ПОЧИНКА ПО СУЩЕСТВУ ЖИВЁТ В `ui/components/button.tsx` (снять `text-textBaseSize` с вариантов
+ * или помирить классы через `twMerge`); она за пределами этой зоны и названа в отчёте. Главную
+ * кнопку (`GENERATE`) это не касается: 12px у неё — по системе.
+ */
+export function ControlLabel({ children }: { children: ReactNode }): JSX.Element {
+  return <span className='text-micro'>{children}</span>;
+}

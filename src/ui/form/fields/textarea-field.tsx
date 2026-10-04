@@ -2,7 +2,9 @@ import { useFormContext } from 'react-hook-form';
 
 import Textarea, { TextareaProps } from 'ui/components/text-area';
 
+import { AiEnhance, type EnhanceField } from 'ui/components/ai-enhance';
 import { Button } from 'ui/components/button';
+import { cn } from 'lib/utility';
 import { FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '..';
 
 type Props = TextareaProps & {
@@ -13,6 +15,14 @@ type Props = TextareaProps & {
   maxLength?: number;
   showCharCount?: boolean;
   upsertButton?: boolean;
+  /**
+   * `ai ✦` в углу поля (item 41: «везде», каждое свободное текстовое поле техкарты). Ключ поля —
+   * закрытый список `EnhanceField`. Без него поле прежнее. Кнопка видна, пока фокус в поле и в нём
+   * есть текст (правило `AiEnhance`), ответ пишется `setValue` с `shouldDirty`.
+   */
+  enhance?: EnhanceField;
+  /** Факты карточки для `ai ✦` (`cardFactsContext`); необязательны. */
+  enhanceContext?: string;
 };
 
 export default function TextareaField({
@@ -25,9 +35,11 @@ export default function TextareaField({
   showCharCount = false,
   upsertButton = false,
   onUpsert,
+  enhance,
+  enhanceContext,
   ...props
 }: Props) {
-  const { control, trigger, watch } = useFormContext();
+  const { control, trigger, watch, setValue } = useFormContext();
   const value = watch(name) || '';
 
   function onBlur() {
@@ -53,9 +65,22 @@ export default function TextareaField({
                 value={field.value || ''}
                 maxLength={maxLength}
                 {...props}
+                className={cn(props.className, enhance && 'pb-7')}
                 onBlur={onBlur}
                 onChange={field.onChange}
               />
+              {enhance && (
+                <AiEnhance
+                  field={enhance}
+                  value={field.value || ''}
+                  onApply={(text) =>
+                    setValue(name, text, { shouldDirty: true, shouldValidate: true })
+                  }
+                  context={enhanceContext}
+                  maxRunes={maxLength}
+                  disabled={loading || !!props.disabled || !!props.readOnly}
+                />
+              )}
               {upsertButton && (
                 <Button
                   variant='main'

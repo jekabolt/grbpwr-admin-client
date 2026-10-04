@@ -100,7 +100,6 @@ export function WorkflowPanel({
   const ctx = useMemo(() => ({ band }), [band]);
   const refusal = useMemo(() => flow.validate(draft, ctx), [flow, draft, ctx]);
   const request = useMemo(() => flow.wire(draft, ctx), [flow, draft, ctx]);
-  const shape = flow.shape(draft, request);
 
   const generate = () => {
     if (refusal) return;
@@ -148,7 +147,6 @@ export function WorkflowPanel({
           {refusal && !disabled && <LockBar reason={refusal.reason} />}
           <GenerateRow
             gate={refusal ? { ok: false, reason: refusal.reason } : { ok: true }}
-            shape={shape}
             pending={run.isPending}
             disabled={disabled}
             onGenerate={generate}
