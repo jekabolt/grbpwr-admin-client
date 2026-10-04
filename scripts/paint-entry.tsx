@@ -175,7 +175,14 @@ function Harness() {
   const paint = usePaint(1, band, SLOTS, 11);
   (window as unknown as { __paint: unknown }).__paint = paint;
   (window as unknown as { __run: unknown }).__run = () =>
-    paintRun({ band, plan: paint.plan(), slots: SLOTS, colorwayId: 11, colorwayLabel: 'ROSSO' });
+    paintRun({
+      band,
+      plan: paint.plan(),
+      slots: SLOTS,
+      colorwayId: 11,
+      colorwayLabel: 'ROSSO',
+      partNames: paint.partNames(),
+    });
   if (isLoading) return null;
   return (
     <PictureGalleryProvider techCardId={1} band={band}>

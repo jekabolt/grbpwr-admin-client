@@ -304,7 +304,15 @@ export function RenderStudio({
    * the rest). No maps, or fewer than two uses — exactly the pack, `colourMaps: []`.
    */
   const painted = useMemo(
-    () => paintRun({ band, plan: paint.plan(), slots, colorwayId, colorwayLabel }),
+    () =>
+      paintRun({
+        band,
+        plan: paint.plan(),
+        slots,
+        colorwayId,
+        colorwayLabel,
+        partNames: paint.partNames(),
+      }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [band, paint, paintVersion, slots, colorwayId, colorwayLabel],
   );

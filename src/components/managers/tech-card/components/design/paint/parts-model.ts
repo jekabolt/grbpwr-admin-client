@@ -269,3 +269,71 @@ export const gestureLive = (
     const side = sideOf(s.view);
     return !!side && side.baseMediaId === s.base && side.labels === s.labels;
   });
+
+/* ─────────────────────────── part names into the run (R8) ─────────────────────────── */
+
+/** A named part counts as painted with a label when this share of its pixels carries it. */
+export const PART_PAINTED_SHARE = 0.6;
+/** `parts` of one fabric use stays a phrase, not a list of the whole garment. */
+export const PART_NAMES_MAX = 200;
+
+/** One side as the run sees it: the SAVED map's labels over its flat and its named parts. */
+export type NamedSide = {
+  labels: Uint32Array;
+  flat: Pick<FlatRegions, 'labels'>;
+  parts: ViewParts;
+};
+
+/** Label (packed #rrggbb) → names of the parts painted with it on this side, in part order. */
+export function paintedPartNames(side: NamedSide): Map<number, string[]> {
+  const { labels, flat, parts } = side;
+  const n = parts.groups.length;
+  const total = new Int32Array(n);
+  const byLabel: Map<number, number>[] = Array.from({ length: n }, () => new Map());
+  for (let i = 0; i < labels.length; i += 1) {
+    const r = flat.labels[i];
+    if (!r) continue; // ink or outside
+    const g = parts.regionGroup[r] ?? -1;
+    if (g < 0) continue;
+    total[g] += 1;
+    const v = labels[i];
+    if (v) byLabel[g].set(v, (byLabel[g].get(v) ?? 0) + 1);
+  }
+  const out = new Map<number, string[]>();
+  for (let g = 0; g < n; g += 1) {
+    const name = parts.groups[g].label.trim().replace(/\s+/g, ' ');
+    if (!transferable(name) || total[g] === 0) continue;
+    for (const [v, c] of byLabel[g])
+      if (c / total[g] >= PART_PAINTED_SHARE) out.set(v, [...(out.get(v) ?? []), name]);
+  }
+  return out;
+}
+
+/**
+ * Label hex → the human part names painted with it across sides (`paintedPartNames` of each
+ * side, in the given order,
+ * names deduped by their words, joined with ", ", capped at whole names). A label with no named
+ * part painted is absent: the caller keeps its own fallback.
+ */
+export function partNamesByLabel(
+  sides: readonly ReadonlyMap<number, readonly string[]>[],
+): Map<string, string> {
+  const names = new Map<number, string[]>();
+  for (const side of sides)
+    for (const [v, list] of side) {
+      const have = names.get(v) ?? [];
+      for (const name of list) if (!have.some((x) => partKey(x) === partKey(name))) have.push(name);
+      names.set(v, have);
+    }
+  const out = new Map<string, string>();
+  for (const [v, list] of names) {
+    let s = '';
+    for (const name of list) {
+      const next = s ? `${s}, ${name}` : name;
+      if (next.length > PART_NAMES_MAX) break;
+      s = next;
+    }
+    if (s) out.set(`#${(v & 0xffffff).toString(16).padStart(6, '0')}`, s);
+  }
+  return out;
+}

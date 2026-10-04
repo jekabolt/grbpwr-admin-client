@@ -435,6 +435,19 @@ try {
     await page.waitForTimeout(900);
     await shoot(page, 'f2-painted-1440.png');
     console.log(`painted: ${JSON.stringify(await painted())}`);
+    // T18: the run's `parts` are the named parts painted with each label (saved maps).
+    await page.waitForFunction(
+      () => !document.querySelector('[data-paint-tools]')?.textContent?.includes('saving'),
+      null,
+      { timeout: 8000 },
+    );
+    await page.waitForTimeout(1500);
+    const run2 = await page.evaluate(() => window.__run());
+    console.log(
+      `f2 run ${run2.kind}: ${(run2.fabrics || []).map((f) => `${f.name || f.colourHex}{${f.mapHex}: ${f.parts}}`).join(' | ')}`,
+    );
+    if (!(run2.fabrics || []).some((f) => /sleeve/.test(f.parts)))
+      errors.push('[f2] ASSERT: no part names in the run');
 
     // A region the model says spans two parts: the hint on hover.
     p = await reg('front', 20);
