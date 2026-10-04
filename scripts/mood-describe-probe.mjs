@@ -140,7 +140,7 @@ try {
   }, W);
   ck(
     !!w0 && w0.t === 'write from the board ✦',
-    'shown: empty description + a picture on the board',
+    'shown inside the placeholder: empty description + a picture on the board',
     JSON.stringify(w0),
   );
   ck(
@@ -148,6 +148,80 @@ try {
     'a quiet underlined word, no frame',
     JSON.stringify(w0),
   );
+  const ov = await page.evaluate(
+    ([W, ta]) => {
+      const o = document.querySelector('[data-mb-describe-placeholder]');
+      const t = document.querySelector(ta);
+      const b = document.querySelector(W);
+      if (!o || !t || !b) return null;
+      const os = getComputedStyle(o);
+      const ts = getComputedStyle(t);
+      const or = o.getBoundingClientRect();
+      const tr = t.getBoundingClientRect();
+      return {
+        text: o.textContent?.replace(/\s+/g, ' ').trim(),
+        nativePh: t.getAttribute('placeholder'),
+        pe: os.pointerEvents,
+        linkPe: getComputedStyle(b).pointerEvents,
+        sameType:
+          os.fontSize === ts.fontSize &&
+          os.lineHeight === ts.lineHeight &&
+          os.fontFamily === ts.fontFamily,
+        sameColor: os.color === getComputedStyle(b).color,
+        origin: [
+          or.left +
+            parseFloat(os.borderLeftWidth) +
+            parseFloat(os.paddingLeft) -
+            (tr.left + parseFloat(ts.borderLeftWidth) + parseFloat(ts.paddingLeft)),
+          or.top +
+            parseFloat(os.borderTopWidth) +
+            parseFloat(os.paddingTop) -
+            (tr.top + parseFloat(ts.borderTopWidth) + parseFloat(ts.paddingTop)),
+        ],
+      };
+    },
+    [W, ta],
+  );
+  ck(
+    !!ov && ov.text === 'describe the thing — or write from the board ✦' && !ov.nativePh,
+    'placeholder reads «describe the thing — or write from the board ✦», no native placeholder',
+    JSON.stringify(ov),
+  );
+  ck(
+    !!ov && ov.pe === 'none' && ov.linkPe === 'auto',
+    'overlay lets clicks through, only the link catches them',
+  );
+  ck(
+    !!ov && ov.sameType && ov.sameColor && ov.origin.every((d) => Math.abs(d) < 0.5),
+    'same font, size, line height, grey, at the padding origin',
+    JSON.stringify(ov),
+  );
+  await page.mouse.click(
+    ...(await page.evaluate((ta) => {
+      const r = document.querySelector(ta).getBoundingClientRect();
+      return [r.left + r.width - 40, r.top + r.height / 2];
+    }, ta)),
+  );
+  ck(
+    await page.evaluate((ta) => document.activeElement === document.querySelector(ta), ta),
+    'a click elsewhere in the empty field focuses it',
+  );
+  const shotDir = process.env.SHOT_DIR;
+  if (shotDir) {
+    await page.mouse.move(0, 0);
+    await page.evaluate(() => document.activeElement?.blur());
+    const box = await page.evaluate(() => {
+      const r = document.querySelector('[data-field="concept"]').getBoundingClientRect();
+      return {
+        x: Math.max(0, r.left - 16),
+        y: Math.max(0, r.top - 16),
+        width: r.width + 32,
+        height: r.height + 32,
+      };
+    });
+    await page.screenshot({ path: `${shotDir}/ah-placeholder.png`, clip: box });
+    await page.mouse.move(0, 0);
+  }
   await page.evaluate(() => {
     window.__api.DraftDesignIdea = (body) => {
       window.__draftBody = body;
@@ -169,7 +243,7 @@ try {
   });
   await page.click(W);
   const pend = await page.evaluate((W) => document.querySelector(W)?.textContent?.trim(), W);
-  ck(pend === 'writing …', 'pending state while the run is out', String(pend));
+  ck(pend === 'writing…', 'pending state while the run is out', String(pend));
   await page
     .waitForFunction((ta) => document.querySelector(ta)?.value, ta, { timeout: 8000 })
     .catch(() => {});
