@@ -160,7 +160,9 @@ export function splitViewsOf(
   run: common_DesignRun | undefined,
   disabled: boolean | undefined,
 ): string[] | null {
-  if (disabled || isPictureHidden(picture) || (picture.replacedBy ?? 0) > 0) return null;
+  // A restored original (its successor undone, T28 v2) is the current version and is cut as any.
+  if (disabled || isPictureHidden(picture) || successorStands(picture, siblings ?? [picture]))
+    return null;
   const threed =
     (picture.kind ?? '').trim().toLowerCase() === 'threed' || isModelUrl(thumbUrl(picture.media));
   if (threed) return null;

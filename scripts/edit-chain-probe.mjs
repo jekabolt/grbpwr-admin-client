@@ -14,7 +14,7 @@
 // ONE write — `UndoDesignEdit` / `RedoDesignEdit` with the CAS on the version pressed.
 //
 //   node scripts/edit-chain-probe.mjs
-//   node scripts/edit-chain-probe.mjs --mutate=headstop|cardskip|hiddenundone|canredo|closed|corners|cas
+//   node scripts/edit-chain-probe.mjs --mutate=headstop|cardskip|hiddenundone|canredo|closed|corners|cas|splitgate
 //   — each goes red
 
 import { createRequire } from 'node:module';
@@ -68,6 +68,12 @@ const MUTATIONS = {
     file: /generation\/edit-chain\.ts$/,
     from: 'redo: !!picture.canRedo',
     to: 'redo: false',
+  },
+  // a restored original is not cut: the split gate reads replaced_by, not the current version (M1)
+  splitgate: {
+    file: /generation\/run-tile\.tsx$/,
+    from: 'successorStands(picture, siblings ?? [picture]))\n    return null;',
+    to: '(picture.replacedBy ?? 0) > 0)\n    return null;',
   },
   // the step carries no CAS: a stale screen would step a chain it no longer sees
   cas: {
@@ -242,6 +248,27 @@ const check = (name, ok, detail = '') => {
   );
   check('P19 overwrite closed over a standing successor', !!a.overwriteClosed(v2, row, null));
   check('P20 overwrite closed over an undone picture', !!a.overwriteClosed(u1[2], u1, null));
+
+  // M1: after an undo the original is the current version — the split gate offers the cut
+  const sheetA = p(70, { compositeViews: ['front', 'back'], replacedBy: 71, canRedo: true });
+  const editB = edit(71, 70, { compositeViews: ['front', 'back'], undoneAt: H });
+  const bandAB = { runs: [], batches: [] };
+  check(
+    'P21 a restored original is cut (successor undone)',
+    JSON.stringify(a.splitViewsOf(bandAB, sheetA, [sheetA, editB], undefined, false)) ===
+      '["front","back"]',
+    JSON.stringify(a.splitViewsOf(bandAB, sheetA, [sheetA, editB], undefined, false)),
+  );
+  check(
+    'P22 …while a live successor still closes the cut',
+    a.splitViewsOf(
+      bandAB,
+      { ...sheetA, canRedo: false },
+      [sheetA, { ...editB, undoneAt: undefined }],
+      undefined,
+      false,
+    ) === null,
+  );
 }
 
 /* ═══ DOM ═══ */

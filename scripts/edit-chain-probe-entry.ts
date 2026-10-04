@@ -9,3 +9,4 @@ export {
   outputPlan,
 } from '../src/components/managers/tech-card/components/design/generation/run-gallery';
 export { overwriteClosed } from '../src/components/managers/tech-card/components/design/generation/propagating-editor';
+export { splitViewsOf } from '../src/components/managers/tech-card/components/design/generation/run-tile';
