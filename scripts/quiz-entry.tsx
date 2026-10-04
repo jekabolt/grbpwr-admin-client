@@ -72,10 +72,10 @@ const q = (
       'summer',
       'winter',
     ]),
-    q('label', 'finish', 'back', 'single', 'Where does the brand label go?', [
-      'neck tape inside',
-      'woven patch at the back hem',
-      'none, printed only',
+    q('label', 'finish', 'label', 'single', 'Which label does it use?', [
+      'woven brand label',
+      'care label',
+      'size tab',
     ]),
     q('button_count', 'details', 'hw_button', 'single', 'How many buttons does it use?', [
       'four',

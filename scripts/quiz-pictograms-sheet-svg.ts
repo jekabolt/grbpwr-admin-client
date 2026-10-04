@@ -13,6 +13,7 @@ import {
 import {
   GARMENT_PARTS,
   PART_LABEL,
+  PartPictogram,
   partViewBox,
   type PartKey,
 } from '../src/components/managers/tech-card/components/design/garment-parts';
@@ -20,8 +21,13 @@ import {
   HARDWARE_KINDS,
   HARDWARE_LABEL,
   HardwareIcon,
+  LABEL_KINDS,
+  LABEL_LABEL,
+  LabelIcon,
   hardwareOf,
+  labelOf,
   type HardwareKind,
+  type LabelKind,
 } from '../src/components/managers/tech-card/components/design/hardware-icons';
 
 const familyCases: Array<[FamilyInput, GarmentFamily | '']> = [
@@ -78,6 +84,36 @@ for (const [label, expected] of hardwareCases) {
   }
 }
 
+const labelCases: Array<[string, LabelKind | null]> = [
+  ['brand label', 'lbl_brand'],
+  ['care label', 'lbl_care'],
+  ['size tab', 'lbl_size'],
+  ['side label', 'lbl_flag'],
+  ['rubber patch', 'lbl_patch'],
+  ['swing tag', 'lbl_hang_tag'],
+  ['label', 'lbl_brand'],
+  ['labelling', null],
+];
+for (const [label, expected] of labelCases) {
+  const actual = labelOf(label);
+  if (actual !== expected) {
+    throw new Error(`labelOf(${JSON.stringify(label)}) returned ${actual}, expected ${expected}`);
+  }
+}
+
+const genericLabel = renderToStaticMarkup(
+  createElement(PartPictogram, { family: '', part: 'label' }),
+);
+const careLabel = renderToStaticMarkup(
+  createElement(PartPictogram, { family: '', part: 'lbl_care' }),
+);
+if (!genericLabel.includes('data-label-kind="lbl_brand"')) {
+  throw new Error('PartPictogram label did not render lbl_brand without a family');
+}
+if (!careLabel.includes('data-label-kind="lbl_care"')) {
+  throw new Error('PartPictogram lbl_care did not render without a family');
+}
+
 const CELL_WIDTH = 84;
 const LABEL_WIDTH = 92;
 const VIEW_ROW_HEIGHT = 82;
@@ -92,6 +128,7 @@ const familyPartCount = GARMENT_FAMILIES.reduce(
 const maxParts = Math.max(
   ...GARMENT_FAMILIES.map((family) => Object.keys(GARMENT_PARTS[family]).length),
 );
+const closeupCount = HARDWARE_KINDS.length + LABEL_KINDS.length;
 const viewCode = { front: 'f', back: 'b', side_l: 's' } as const;
 const partTable = GARMENT_FAMILIES.map((family) => {
   const parts = Object.entries(GARMENT_PARTS[family]).map(
@@ -99,7 +136,7 @@ const partTable = GARMENT_FAMILIES.map((family) => {
   );
   return `${family} ${parts.join(' ')}`;
 }).join('\n');
-const width = LABEL_WIDTH + Math.max(maxParts, HARDWARE_KINDS.length, 4) * CELL_WIDTH;
+const width = LABEL_WIDTH + Math.max(maxParts, closeupCount, 4) * CELL_WIDTH;
 const viewHeight = GARMENT_FAMILIES.length * VIEW_ROW_HEIGHT;
 const partsTop = HEADER_HEIGHT + viewHeight + GAP_HEIGHT;
 const hardwareTop = partsTop + GARMENT_FAMILIES.length * PART_ROW_HEIGHT;
@@ -157,6 +194,12 @@ function hardwareCell(kind: HardwareKind, x: number, y: number): string {
     <text x="${x + CELL_WIDTH / 2}" y="${y + 111}" text-anchor="middle">${escapeText(HARDWARE_LABEL[kind])}</text>`;
 }
 
+function labelCell(kind: LabelKind, x: number, y: number): string {
+  const icon = renderToStaticMarkup(createElement(LabelIcon, { kind, size: 64 }));
+  return `<g transform="translate(${x + 10} ${y + 19})">${icon}</g>
+    <text x="${x + CELL_WIDTH / 2}" y="${y + 111}" text-anchor="middle">${escapeText(LABEL_LABEL[kind])}</text>`;
+}
+
 const rows: string[] = [];
 GARMENT_FAMILIES.forEach((family, familyIndex) => {
   const y = HEADER_HEIGHT + familyIndex * VIEW_ROW_HEIGHT;
@@ -183,21 +226,24 @@ GARMENT_FAMILIES.forEach((family, familyIndex) => {
 
 rows.push(
   `<rect x="0" y="${hardwareTop}" width="${width}" height="${HARDWARE_ROW_HEIGHT}" fill="#fff" stroke="#ccc"/>`,
-  `<text class="family" x="8" y="${hardwareTop + 61}">hardware</text>`,
+  `<text class="family" x="8" y="${hardwareTop + 61}">hardware · labels</text>`,
   ...HARDWARE_KINDS.map((kind, index) =>
     hardwareCell(kind, LABEL_WIDTH + index * CELL_WIDTH, hardwareTop),
+  ),
+  ...LABEL_KINDS.map((kind, index) =>
+    labelCell(kind, LABEL_WIDTH + (HARDWARE_KINDS.length + index) * CELL_WIDTH, hardwareTop),
   ),
 );
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" color="#000">
-  <metadata data-families="${GARMENT_FAMILIES.length}" data-parts="${familyPartCount}" data-shapes="${Object.keys(GARMENT_SHAPES).length}" data-hardware="${HARDWARE_KINDS.length}"/>
+  <metadata data-families="${GARMENT_FAMILIES.length}" data-parts="${familyPartCount}" data-shapes="${Object.keys(GARMENT_SHAPES).length}" data-hardware="${HARDWARE_KINDS.length}" data-labels="${LABEL_KINDS.length}"/>
   <!-- O6\n${partTable}\n-->
   <style>
     text { fill: #333; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .family { fill: #000; font-weight: 700; }
   </style>
   <rect width="100%" height="100%" fill="#f2f2f2"/>
-  <text class="family" x="0" y="18">GARMENT PICTOGRAMS · ${GARMENT_FAMILIES.length} FAMILIES · ${familyPartCount} PART MARKS · ${HARDWARE_KINDS.length} HARDWARE</text>
+  <text class="family" x="0" y="18">GARMENT PICTOGRAMS · ${GARMENT_FAMILIES.length} FAMILIES · ${familyPartCount} PART MARKS · ${HARDWARE_KINDS.length} HARDWARE · ${LABEL_KINDS.length} LABELS</text>
   ${rows.join('\n')}
 </svg>`;
 

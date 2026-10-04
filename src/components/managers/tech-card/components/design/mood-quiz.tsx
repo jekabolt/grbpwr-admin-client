@@ -15,7 +15,14 @@ import { Counter } from './core';
 import { moodboardGate, moodGateSentence } from './core/mood-gate';
 import { PartPictogram } from './garment-parts';
 import { useGenerationWrites } from './generation/use-generation';
-import { HardwareIcon, hardwareOf, type HardwareKind } from './hardware-icons';
+import {
+  HardwareIcon,
+  LabelIcon,
+  hardwareOf,
+  labelOf,
+  type HardwareKind,
+  type LabelKind,
+} from './hardware-icons';
 import { fillIdOf } from './head/draft-fills';
 import { LockedBar } from './head/mood-organs';
 import { useDraftMemory } from './head/use-draft-fills';
@@ -54,6 +61,8 @@ type Live = {
   /** `edit` — один вопрос, открытый из списка ответов; после ответа экран возвращается к списку. */
   mode: 'run' | 'edit';
 };
+
+type OptionCloseup = { type: 'hardware'; kind: HardwareKind } | { type: 'label'; kind: LabelKind };
 
 const hhmm = () =>
   new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(
@@ -377,11 +386,17 @@ function QuestionView({
   onSkip: () => void;
 }): JSX.Element {
   const options = question.options ?? [];
-  const optionHardware = options.map(hardwareOf);
-  const hardwareKinds = new Set(
-    optionHardware.filter((kind): kind is HardwareKind => kind !== null),
-  );
-  const showHardwareOptions = hardwareKinds.size >= 2;
+  const optionCloseups = options.map((option): OptionCloseup | null => {
+    const hardware = hardwareOf(option);
+    if (hardware) return { type: 'hardware', kind: hardware };
+    const label = labelOf(option);
+    return label ? { type: 'label', kind: label } : null;
+  });
+  const comparedKinds = new Set<string>();
+  for (const closeup of optionCloseups) {
+    if (closeup) comparedKinds.add(`${closeup.type}:${closeup.kind}`);
+  }
+  const showOptionCloseups = comparedKinds.size >= 2;
   const multi = question.kind === 'multi';
   const [selected, setSelected] = useState<string[]>(() =>
     prior && !prior.skipped ? (prior.selected ?? []).filter((s) => options.includes(s)) : [],
@@ -451,7 +466,7 @@ function QuestionView({
         </Text>
         <ChipRow>
           {options.map((o, index) => {
-            const hardware = optionHardware[index];
+            const closeup = optionCloseups[index];
             return (
               <Chip
                 key={o}
@@ -461,8 +476,12 @@ function QuestionView({
                 onClick={() => pick(o)}
                 className='whitespace-normal text-left'
               >
-                {showHardwareOptions && hardware ? (
-                  <HardwareIcon kind={hardware} size={14} className='shrink-0' />
+                {showOptionCloseups && closeup ? (
+                  closeup.type === 'hardware' ? (
+                    <HardwareIcon kind={closeup.kind} size={14} className='shrink-0' />
+                  ) : (
+                    <LabelIcon kind={closeup.kind} size={14} className='shrink-0' />
+                  )
                 ) : null}
                 {o}
               </Chip>

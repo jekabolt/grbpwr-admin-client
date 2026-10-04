@@ -49,8 +49,33 @@ export const HARDWARE_LABEL: Record<HardwareKind, string> = {
   hw_lace_hook: 'lace hook',
 };
 
+/** Label part keys shared with the design-quiz resolver (40-HARDWARE, Labels). */
+export const LABEL_KINDS = [
+  'lbl_brand',
+  'lbl_care',
+  'lbl_size',
+  'lbl_flag',
+  'lbl_patch',
+  'lbl_hang_tag',
+] as const;
+
+export type LabelKind = (typeof LABEL_KINDS)[number];
+
+export const LABEL_LABEL: Record<LabelKind, string> = {
+  lbl_brand: 'woven brand label',
+  lbl_care: 'care label',
+  lbl_size: 'size tab',
+  lbl_flag: 'flag label',
+  lbl_patch: 'patch',
+  lbl_hang_tag: 'hang tag',
+};
+
 export function isHardwareKind(value: string): value is HardwareKind {
   return (HARDWARE_KINDS as readonly string[]).includes(value);
+}
+
+export function isLabelKind(value: string): value is LabelKind {
+  return (LABEL_KINDS as readonly string[]).includes(value);
 }
 
 const HARDWARE_ALIASES: ReadonlyArray<readonly [HardwareKind, readonly string[]]> = [
@@ -79,6 +104,55 @@ const HARDWARE_ALIASES: ReadonlyArray<readonly [HardwareKind, readonly string[]]
   ['hw_toggle', ['toggle', 'toggles']],
 ];
 
+const LABEL_ALIASES: ReadonlyArray<readonly [LabelKind, readonly string[]]> = [
+  [
+    'lbl_brand',
+    [
+      'brand label',
+      'brand labels',
+      'main label',
+      'main labels',
+      'neck label',
+      'neck labels',
+      'logo label',
+      'logo labels',
+      'woven label',
+      'woven labels',
+    ],
+  ],
+  [
+    'lbl_care',
+    [
+      'care label',
+      'care labels',
+      'composition label',
+      'composition labels',
+      'wash label',
+      'wash labels',
+    ],
+  ],
+  ['lbl_size', ['size label', 'size labels', 'size tab', 'size tabs']],
+  [
+    'lbl_flag',
+    ['flag label', 'flag labels', 'side label', 'side labels', 'seam label', 'seam labels'],
+  ],
+  ['lbl_hang_tag', ['hang tag', 'hang tags', 'swing tag', 'swing tags', 'price tag', 'price tags']],
+  [
+    'lbl_patch',
+    [
+      'leather patch',
+      'leather patches',
+      'rubber patch',
+      'rubber patches',
+      'patch',
+      'patches',
+      'badge',
+      'badges',
+    ],
+  ],
+  ['lbl_brand', ['label', 'labels']],
+];
+
 const words = (value: string) =>
   ` ${value
     .trim()
@@ -92,6 +166,15 @@ const words = (value: string) =>
 export function hardwareOf(label: string): HardwareKind | null {
   const haystack = words(label);
   for (const [kind, aliases] of HARDWARE_ALIASES) {
+    if (aliases.some((alias) => haystack.includes(words(alias)))) return kind;
+  }
+  return null;
+}
+
+/** Resolve complete label words/phrases, with bare `label` meaning the main brand label. */
+export function labelOf(label: string): LabelKind | null {
+  const haystack = words(label);
+  for (const [kind, aliases] of LABEL_ALIASES) {
     if (aliases.some((alias) => haystack.includes(words(alias)))) return kind;
   }
   return null;
@@ -343,6 +426,74 @@ function HardwareGlyph({ kind }: { kind: HardwareKind }): JSX.Element {
   }
 }
 
+function LabelGlyph({ kind }: { kind: LabelKind }): JSX.Element {
+  switch (kind) {
+    case 'lbl_brand':
+      return (
+        <>
+          <rect {...accent} x='7' y='16' width='50' height='32' />
+          <rect {...stroke} x='11' y='20' width='42' height='24' strokeDasharray='2 2' />
+          <path {...stroke} d='M17 28 H47 M19 33 Q25 25 31 33 Q37 41 45 31 M20 39 H44' />
+          <path
+            {...stroke}
+            d='M7 20 H11 M7 28 H11 M7 36 H11 M7 44 H11 M53 20 H57 M53 28 H57 M53 36 H57 M53 44 H57'
+          />
+        </>
+      );
+    case 'lbl_care':
+      return (
+        <>
+          <path {...accent} d='M17 6 H47 V58 H17 Z' />
+          <path {...stroke} strokeDasharray='2 2' d='M20 11 H44' />
+          <path {...stroke} d='M21 21 L23 31 H31 L33 21 Q27 25 21 21 Z' />
+          <path {...stroke} d='M35 31 L40 21 L45 31 Z' />
+          <circle {...stroke} cx='27' cy='39' r='4' />
+          <rect {...stroke} x='36' y='35' width='9' height='8' />
+          <path {...stroke} d='M22 49 H42 M22 53 H38' />
+        </>
+      );
+    case 'lbl_size':
+      return (
+        <>
+          <path {...accent} d='M19 12 H45 V52 H19 Z' />
+          <path {...stroke} strokeDasharray='2 2' d='M22 17 H42 M22 47 H42' />
+          <path {...stroke} d='M25 40 V25 L32 34 L39 25 V40' />
+        </>
+      );
+    case 'lbl_flag':
+      return (
+        <>
+          <path {...stroke} d='M13 7 V57 M18 7 V57' />
+          <path {...stroke} strokeDasharray='2 2' d='M15.5 9 V55' />
+          <path {...accent} d='M18 20 H49 L54 32 L49 44 H18 Z' />
+          <path {...stroke} d='M36 20 L42 32 L36 44 M23 27 H36 M23 32 H39 M23 37 H36' />
+        </>
+      );
+    case 'lbl_patch':
+      return (
+        <>
+          <path {...accent} d='M10 14 H51 L56 19 V45 L51 50 H10 L6 46 V18 Z' />
+          <path
+            {...stroke}
+            strokeDasharray='2 2'
+            d='M13 19 H49 L51 22 V42 L48 45 H13 L11 43 V21 Z'
+          />
+          <path {...stroke} d='M18 37 L25 26 L31 34 L37 23 L46 37 Z M19 41 H45' />
+        </>
+      );
+    case 'lbl_hang_tag':
+      return (
+        <>
+          <path {...stroke} d='M32 18 C32 8 21 11 21 4 C21 0 27 1 27 5' />
+          <path {...accent} d='M25 12 H39 L48 23 V57 H16 V23 Z' />
+          <circle {...stroke} cx='32' cy='21' r='4' />
+          <circle {...stroke} cx='32' cy='21' r='1.5' />
+          <path {...stroke} d='M22 36 H42 M22 41 H38 M22 47 H40' />
+        </>
+      );
+  }
+}
+
 /** Close-up line drawing for one hardware object. */
 export function HardwareIcon({
   kind,
@@ -369,6 +520,36 @@ export function HardwareIcon({
       className={className}
     >
       <HardwareGlyph kind={kind} />
+    </svg>
+  );
+}
+
+/** Close-up line drawing for one garment label or tag. */
+export function LabelIcon({
+  kind,
+  className,
+  size = 64,
+}: {
+  kind: LabelKind;
+  className?: string;
+  size?: number;
+}): JSX.Element {
+  return (
+    <svg
+      aria-hidden
+      focusable='false'
+      data-label-kind={kind}
+      viewBox='0 0 64 64'
+      width={size}
+      height={size}
+      fill='none'
+      stroke='currentColor'
+      strokeWidth={1.25}
+      strokeLinecap='round'
+      strokeLinejoin='round'
+      className={className}
+    >
+      <LabelGlyph kind={kind} />
     </svg>
   );
 }

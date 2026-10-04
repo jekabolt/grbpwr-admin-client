@@ -248,7 +248,18 @@ try {
     await page.waitForFunction(() =>
       document.querySelector('[data-quiz]')?.textContent?.includes('7 / 9'),
     );
-    await btn(page, 'neck tape inside').click();
+    check(
+      (await page.locator('[data-quiz] [role="img"] [data-label-kind="lbl_brand"]').count()) === 1,
+      'part label shows the woven brand label icon',
+    );
+    const chipLabels = await page
+      .locator('[data-quiz] button [data-label-kind]')
+      .evaluateAll((icons) => icons.map((icon) => icon.getAttribute('data-label-kind')));
+    check(
+      chipLabels.join(',') === 'lbl_brand,lbl_care,lbl_size',
+      `woven / care / size label chips show distinct icons (${chipLabels.join(',')})`,
+    );
+    await btn(page, 'woven brand label').click();
     await page.waitForFunction(() =>
       document.querySelector('[data-quiz]')?.textContent?.includes('8 / 9'),
     );
