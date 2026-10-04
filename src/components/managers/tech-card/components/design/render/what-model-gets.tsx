@@ -27,6 +27,7 @@ import {
 import { openDoor, openDoorAcrossKind } from '../doors';
 import { viewLabel } from '../views';
 import { MAX_RENDER_ARTWORKS } from '../paint/artworks';
+import { PictureTile } from '../picture-tile';
 import type { ThreedDraft } from './drafts';
 import { Swatch } from './field-row';
 import {
@@ -187,6 +188,7 @@ export function WhatModelGetsRenderModal({
   colorwayLabel,
   artworks,
   mockupsAtGenerate,
+  mapLooks,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -219,6 +221,8 @@ export function WhatModelGetsRenderModal({
    * (drawn then, so it has no media yet). A frozen recipe names its own `mockupMediaId`.
    */
   mockupsAtGenerate?: boolean;
+  /** QW10 · per view: the map's picture, its mockup's (drawn or uploaded), the scale if guessed. */
+  mapLooks?: ReadonlyMap<string, MapLook>;
 }): JSX.Element {
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
@@ -251,6 +255,7 @@ export function WhatModelGetsRenderModal({
         resolved={resolved}
         artworks={artworks ?? []}
         mockupsAtGenerate={!!mockupsAtGenerate}
+        mapLooks={mapLooks}
       />
     ) : kind === 'recolor' ? (
       <RecolorBody
@@ -288,6 +293,7 @@ export function WhatModelGetsRenderModal({
         colorwayLabel: colorwayLabel ?? '',
         artworks: artworks ?? [],
         mockupsAtGenerate,
+        mapLooks,
       }),
     // `resolved` is rebuilt each render by design (it is three references, not state); the text is
     // recomputed from the same inputs the panel draws from, so the dictionaries are named here.
@@ -306,6 +312,7 @@ export function WhatModelGetsRenderModal({
       colorwayLabel,
       artworks,
       mockupsAtGenerate,
+      mapLooks,
     ],
   );
 
@@ -395,6 +402,7 @@ function RenderBody({
   resolved,
   artworks,
   mockupsAtGenerate,
+  mapLooks,
 }: {
   band: GetDesignBandResponse;
   recipe?: common_DesignColourRecipe;
@@ -402,6 +410,7 @@ function RenderBody({
   resolved: Resolved;
   artworks: readonly string[];
   mockupsAtGenerate: boolean;
+  mapLooks?: ReadonlyMap<string, MapLook>;
 }): JSX.Element {
   const sides = useMemo(() => benchSides(band), [band]);
   const filled = sides.filter((side) => !!side.picture);
@@ -570,10 +579,41 @@ function RenderBody({
             data-sent-colour-maps={(recipe?.colourMaps ?? []).length}
             name='colour maps'
             origin='recipe'
+            lead={
+              mapLooks && mapLooks.size > 0 ? (
+                <span className='flex flex-wrap items-center gap-2'>
+                  {(recipe?.colourMaps ?? []).map((m) => {
+                    const view = m.view ?? '';
+                    const look = mapLooks.get(view);
+                    const pics = [
+                      { url: look?.map ?? '', alt: `${viewLabel(view)} colour map` },
+                      { url: look?.mockup ?? '', alt: `${viewLabel(view)} cloth mockup` },
+                    ].filter((x) => x.url);
+                    if (pics.length === 0) return null;
+                    return (
+                      <span key={view} className='flex gap-0.5' data-map-thumbs={view}>
+                        {pics.map((x) => (
+                          <PictureTile
+                            key={x.alt}
+                            url={x.url}
+                            alt={x.alt}
+                            aspect='4/5'
+                            fit='contain'
+                            className='w-10 shrink-0'
+                          />
+                        ))}
+                      </span>
+                    );
+                  })}
+                </span>
+              ) : undefined
+            }
             text={
               <>
                 {(recipe?.colourMaps ?? [])
-                  .map((m) => colourMapLine(m, mockupsAtGenerate, ' · '))
+                  .map((m) =>
+                    colourMapLine(m, mockupsAtGenerate, ' · ', mapLooks?.get(m.view ?? '')?.scale),
+                  )
                   .join(' · ')}{' '}
                 — <b>each travels as its own image</b>, and the prompt says which flat it labels
                 {((recipe?.colourMaps ?? []).some((m) => (m.mockupMediaId ?? 0) > 0) ||
@@ -1037,12 +1077,21 @@ function bodyLine(models: readonly common_Model[] | undefined, threed?: ThreedDr
  * the rendered nodes would silently change whenever a label was reworded, and would carry «missing
  * — blocks 3D» into a brief as if it were an instruction.
  */
+/** QW10 · what one outgoing map looks like: its picture, its mockup's, the scale when guessed. */
+export type MapLook = { map: string; mockup: string; scale: string };
+
 /** One map of the inventory with its cloth mockup (T13): its media, or «drawn at GENERATE». */
-function colourMapLine(m: common_DesignColourMap, atGenerate: boolean, sep: string): string {
+function colourMapLine(
+  m: common_DesignColourMap,
+  atGenerate: boolean,
+  sep: string,
+  scale = '',
+): string {
   const head = `${viewLabel((m.view ?? '').trim())}${sep}media ${m.mediaId ?? 0}`;
   const mock = m.mockupMediaId ?? 0;
-  if (mock > 0) return `${head} + mockup media ${mock}`;
-  return atGenerate ? `${head} + cloth mockup (drawn at GENERATE)` : head;
+  const tail = scale ? `${sep}${scale}` : '';
+  if (mock > 0) return `${head} + mockup media ${mock}${tail}`;
+  return atGenerate ? `${head} + cloth mockup (drawn at GENERATE)${tail}` : head;
 }
 
 function plainText({
@@ -1058,6 +1107,7 @@ function plainText({
   colorwayLabel,
   artworks,
   mockupsAtGenerate,
+  mapLooks,
 }: {
   kind: WhatModelGetsKind;
   band: GetDesignBandResponse;
@@ -1071,6 +1121,7 @@ function plainText({
   colorwayLabel: string;
   artworks: readonly string[];
   mockupsAtGenerate?: boolean;
+  mapLooks?: ReadonlyMap<string, MapLook>;
 }): string {
   const lines: string[] = [
     `what the model gets — ${kindLabel(kind)}`,
@@ -1121,7 +1172,9 @@ function plainText({
       }`,
       `colour maps: ${
         (recipe?.colourMaps ?? [])
-          .map((m) => colourMapLine(m, !!mockupsAtGenerate, ' '))
+          .map((m) =>
+            colourMapLine(m, !!mockupsAtGenerate, ' ', mapLooks?.get(m.view ?? '')?.scale),
+          )
           .join(', ') || '—'
       }`,
       `artworks: ${artworks.length > 0 ? `${artworks.length} of ${MAX_RENDER_ARTWORKS} · ${artworks.join(', ')}` : '—'}`,

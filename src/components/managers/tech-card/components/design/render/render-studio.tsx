@@ -17,7 +17,7 @@ import { artworkModelLines, artworksOf } from '../paint/artworks';
 import { garmentOfChart } from '../paint/mockup';
 import { PartsCanvas } from '../paint/parts-canvas';
 import { paintRun } from '../paint/plan-run';
-import { usePaint } from '../paint/use-paint';
+import { useMapLooks, usePaint } from '../paint/use-paint';
 import type { ClothSlot } from '../pattern/slot-fabrics';
 import { packOf, useCardFit, useColourDraft } from './drafts';
 import { GenerateRow, LockBar, RunRefusal } from './generate-row';
@@ -526,6 +526,9 @@ export function RenderStudio({
      ровно тот проп, которым экран объявляет «мой состав называю стандартными словами». Дверь описи
      при этом осталась — она висит на `onInspect`, а не на `shape` (разбор там же). */
 
+  /* QW10 · WHAT THE MODEL GETS shows each outgoing map and the mockup it would take. */
+  const mapLooks = useMapLooks(paint, wire.colourMaps, wire.fabrics, inspecting);
+
   /* THE DOOR OF A REFUSAL: where it is fixed, when that is another step. Missing flats → the flat
      bench; the archived colourway → `for:` IN THIS VERY ROW (the rail has no select any more —
      G2-2/G2-3, so no door is drawn for it: the organ is already on screen); everything else is
@@ -649,6 +652,7 @@ export function RenderStudio({
       />
 
       <WhatModelGetsRenderModal
+        mapLooks={mapLooks}
         open={inspecting}
         onOpenChange={setInspecting}
         band={band}
