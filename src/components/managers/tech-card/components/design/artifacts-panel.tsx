@@ -59,6 +59,7 @@ import {
 } from './bench-kinds';
 import { readBench, type BenchRead } from './bench-slot';
 import { CalloutRail } from './callout-rail';
+import { CalloutsPanel, useCalloutsPanel } from './callouts-panel';
 // ОДИН СЛОВАРЬ ИМЁН НА СТУДИЮ И НА ЛИСТ. `colorwayLabel` — та же лестница `devName → colorCode →
 // baseSku`, которой колорвей зовут в пикере и в столбцах SIDES; `archivedRef` — тот же предикат
 // архива. Второе написание разошлось бы с первым в день, когда у цвета появится четвёртое имя.
@@ -92,6 +93,7 @@ import { Swatch } from './render/field-row';
 import { pictureIsModel, threedResults } from './threed/media';
 import { ThreedModelModal } from './threed/model-modal';
 import { pictureIsDisplayOnly, type WireUploadItem } from './threed/wire';
+import { SHEET_CALLOUTS_PREFS_KEY } from './use-callouts-prefs';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
 import { ACTIVE_VIEWS, LEGACY_VIEWS, SHEET_MIN_VIEWS, normaliseViewKey, viewLabel } from './views';
 import { isPictureHidden } from './visibility';
@@ -1832,7 +1834,11 @@ export function ArtifactsPanel({
       setSelected(key == null ? null : Number(key));
       // Взвод принадлежит ОДНОЙ записке: перевыбор — уже другая строка.
       setAddingCallout(null);
-      if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
+      if (key != null && opts?.focus) {
+        // Текст выноски пишется только в панели — свёрнутая, она раскрывается на сеанс (как у доски).
+        if (calloutsShell.collapsed) calloutsShell.hold();
+        setFocusEditor((n) => n + 1);
+      }
     },
     onBeforeMutate: calloutHistory?.record,
     // ОТКАТ СНИМАЕТ ВЫБОР по тому же доводу, что и удаление: ⌘Z возвращает МАССИВ целиком, и
@@ -2151,6 +2157,18 @@ export function ArtifactsPanel({
       .filter(({ c }) => onTab.has(c.mediaId ?? 0));
   }, [callouts, onScreen]);
 
+  /* ═══ CALLOUTS СВОРАЧИВАЕТСЯ, КАК У МУДБОРДА (T14) ═════════════════════════════════════════════
+     Владелец, 04.10: «в artefacts the sheet сделать так что бы колаут блок тоже мог колапсится как в
+     мудборде». Не копия, а тот же орган (`./callouts-panel`): полоска, шеврон, разделитель ширины,
+     пустой лист без предпочтения — свёрнут. Предпочтение своё (`SHEET_CALLOUTS_PREFS_KEY`). */
+  const calloutsPanel = useRef<HTMLDivElement>(null);
+  const calloutsShell = useCalloutsPanel({
+    count: sheetRows.length,
+    holdKey: techCardId,
+    panelRef: calloutsPanel,
+    prefsBase: SHEET_CALLOUTS_PREFS_KEY,
+  });
+
   /** Read once, so the question and the act cannot disagree about how many are at stake. */
   const detachCount = detaching ? calloutsOn(detaching.mediaId) : 0;
 
@@ -2421,10 +2439,12 @@ export function ArtifactsPanel({
           </>
         </Section>
 
-        <Section
-          title='callouts'
+        <CalloutsPanel
+          panel={calloutsShell}
+          tag='sheet'
           question='— a number is minted once and never reused'
-          action={
+          where={`on ${ARTIFACT_KINDS.find((k) => k.value === kind)?.label ?? kind}`}
+          note={
             /* ЧИСЛО = СПИСОК. Считается ровно то, что панель ниже рисует (`sheetRows`): выноски на
                плитах документа. Открученные и мудбордные не показываются — значит и не считаются;
                пилюли «unpinned» больше нет по слову владельца (R-14), а не по забывчивости. */
@@ -2432,7 +2452,6 @@ export function ArtifactsPanel({
               {sheetRows.length} on {ARTIFACT_KINDS.find((k) => k.value === kind)?.label ?? kind}
             </HeaderNote>
           }
-          className='lg:w-[340px] lg:shrink-0'
         >
           {/* ⚠ ТОТ ЖЕ ОРГАН, ЧТО У МУДБОРДА (B-9). Тело переехало отсюда в `./callout-rail`
               целиком — со списком, правкой, наведением и пиктограммой вида, — потому что владелец
@@ -2467,7 +2486,7 @@ export function ArtifactsPanel({
             purposes
             emptyLabel='none on this tab yet. A callout is placed on the picture itself — click a plate; the row appears here the moment it exists, and this is where its text is written.'
           />
-        </Section>
+        </CalloutsPanel>
       </SectionStack>
 
       {/* ═══ УВЕЛИЧЕННЫЙ ВИД — ТА ЖЕ ПОВЕРХНОСТЬ, ЧТО НА ПЛИТЕ ═══════════════════════════════════

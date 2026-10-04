@@ -42,10 +42,19 @@ export type CalloutsPrefs = {
 /** Основа ключа; сам ключ — на учётную запись (`calloutsPrefsKey`). Ни карточки, ни колорвея. */
 export const CALLOUTS_PREFS_KEY = 'plm.techcard.moodboard.callouts';
 
+/**
+ * Основа ключа панели указаний листа ARTIFACTS (T14): та же оболочка, что у доски
+ * (`callouts-panel.tsx`), но своё предпочтение — свернуть одну не значит свернуть другую.
+ */
+export const SHEET_CALLOUTS_PREFS_KEY = 'plm.techcard.sheet.callouts';
+
 /** Ключ предпочтений этой учётной записи; `null`, пока она не известна. */
-export function calloutsPrefsKey(owner: string | null | undefined): string | null {
+export function calloutsPrefsKey(
+  owner: string | null | undefined,
+  base: string = CALLOUTS_PREFS_KEY,
+): string | null {
   const who = (owner ?? '').trim().toLowerCase();
-  return who ? `${CALLOUTS_PREFS_KEY}.${who}` : null;
+  return who ? `${base}.${who}` : null;
 }
 
 /** Дебаунс записи — разделитель рождает поток движений, а localStorage синхронный. */
@@ -103,7 +112,8 @@ export function readCalloutsPrefs(key: string | null): CalloutsPrefs {
   if (!key) return {};
   try {
     let raw = localStorage.getItem(key);
-    if (!raw) {
+    // Безымянный ключ был только у доски — у листа переезжать нечему.
+    if (!raw && key.startsWith(`${CALLOUTS_PREFS_KEY}.`)) {
       const legacy = localStorage.getItem(CALLOUTS_PREFS_KEY);
       if (legacy) {
         localStorage.setItem(key, legacy);
@@ -124,9 +134,9 @@ export function readCalloutsPrefs(key: string | null): CalloutsPrefs {
  * патч уходит через 400 мс тишины, а на `pagehide` и размонтировании — немедленно (быстрый F5 в
  * окне дебаунса иначе терял бы ровно то, что человек только что сделал).
  */
-export function useCalloutsPrefs() {
+export function useCalloutsPrefs(base: string = CALLOUTS_PREFS_KEY) {
   const { data } = useCurrentAccount();
-  const key = calloutsPrefsKey(data?.account?.username);
+  const key = calloutsPrefsKey(data?.account?.username, base);
 
   // Предпочтения ТЕКУЩЕГО ключа. Ключ сменился (учётная запись пришла или сменилась) — читаются
   // заново в том же рендере, без кадра чужой раскладки.
