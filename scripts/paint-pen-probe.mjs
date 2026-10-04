@@ -69,10 +69,18 @@ function sample(path) {
   out.push(path[path.length - 1]);
   return out;
 }
+/** Exact Euclidean distance to ink (the checks' ruler, not the pen's). */
+const DIST = new Map();
+const distOf = (f) => {
+  if (!DIST.has(f.ink))
+    DIST.set(f.ink, Float32Array.from(m.distanceTransform(f.ink, f.w, f.h).d2, Math.sqrt));
+  return DIST.get(f.ink);
+};
 const onInkShare = (f, path, tol = 2) => {
   const pts = sample(path);
   let on = 0;
-  for (const p of pts) if (f.d[Math.floor(p.y) * f.w + Math.floor(p.x)] <= tol) on++;
+  const d = distOf(f);
+  for (const p of pts) if (d[Math.floor(p.y) * f.w + Math.floor(p.x)] <= tol) on++;
   return on / pts.length;
 };
 const timed = (fn) => {
@@ -103,8 +111,8 @@ const inkInRow = (y0, x0, x1) => {
   return null;
 };
 
-const seg = (f, a, b, prev) => {
-  const lw = new m.LiveWire(f, a, prev);
+const seg = (f, a, b) => {
+  const lw = new m.LiveWire(m.inkField(f), a, b);
   const [ok, t] = timed(() => lw.expand(b));
   return { lw, ok, t, path: ok ? lw.pathTo(b) : [] };
 };
@@ -115,7 +123,7 @@ const times = [];
   const a = m.snapToInk(field, { x: inkIn(300, 150, 220).x, y: inkIn(300, 150, 220).y + 4 });
   const b = m.snapToInk(field, inkIn(500, 150, 220));
   ck(
-    field.d[Math.floor(a.y) * w + Math.floor(a.x)] === 0,
+    field.ink[Math.floor(a.y) * w + Math.floor(a.x)] === 1,
     'a vertex 4 px off the seam snaps onto it',
     JSON.stringify(a),
   );
@@ -205,7 +213,7 @@ const times = [];
   for (let k = 0; k < clicks.length; k++) {
     const a = clicks[k],
       b = clicks[(k + 1) % clicks.length];
-    const r = seg(field, a, b, prev);
+    const r = seg(field, a, b);
     prev = r.lw;
     seg4.push(r.t);
     times.push(r.t);
@@ -213,30 +221,59 @@ const times = [];
       `  yoke segment ${k + 1}: ${r.t.toFixed(1)} ms, ${r.lw.settledCount} px, ${r.path.length} pts, on ink ${(onInkShare(field, r.path) * 100).toFixed(0)} %`,
     );
   }
-  const lw = new m.LiveWire(field, clicks[1], prev);
+  // The preview loop's cost per cursor move: sweep along the seam from the first vertex, the
+  // search restarting in a wider corridor whenever the cursor leaves it (6 ms frame deadline).
+  let lw = null;
+  let restarts = 0;
   const moves = [];
   for (let x = 262; x <= 560; x += 6 / s) {
     const p = m.snapToInk(field, inkIn(x, 150, 220) ?? { x: x * s, y: 171 * s });
-    const [, t] = timed(() => {
-      lw.expand(p);
-      lw.pathTo(p);
-    });
-    moves.push(t);
+    const t0 = performance.now();
+    if (!lw || !lw.alive() || !lw.covers(p)) {
+      lw = new m.LiveWire(m.inkField(field), clicks[1], p);
+      restarts++;
+    }
+    let done = lw.expand(p, t0 + 6);
+    moves.push(performance.now() - t0);
+    while (!done) {
+      const t1 = performance.now();
+      done = lw.expand(p, t1 + 6);
+      moves.push(performance.now() - t1);
+    }
+    lw.pathTo(p);
   }
+  console.log(`  sweep restarts ${restarts}`);
   moves.sort((a, b) => a - b);
   const p95 = moves[Math.floor(moves.length * 0.95)];
   console.log(
-    `  cursor sweep: ${moves.length} moves, median ${moves[moves.length >> 1].toFixed(2)} ms, p95 ${p95.toFixed(2)} ms, max ${moves[moves.length - 1].toFixed(1)} ms`,
+    `  cursor sweep (per frame): ${moves.length} frames, median ${moves[moves.length >> 1].toFixed(2)} ms, p95 ${p95.toFixed(2)} ms, max ${moves[moves.length - 1].toFixed(1)} ms`,
   );
-  // The worst: a cold segment across the whole sheet (corner to corner of the garment).
-  const far = seg(
-    field,
-    m.snapToInk(field, inkInRow(150, 0, 400)),
-    m.snapToInk(field, inkInRow(780, 600, 807)),
-    prev,
+  // The worst: shoulder → opposite hem, cold, under a 6 ms frame deadline (the preview's loop).
+  const fa = m.snapToInk(field, inkInRow(150, 0, 400));
+  const fb = m.snapToInk(field, inkInRow(780, 600, 807));
+  const edgeT = fb;
+  const cold = new m.LiveWire(m.inkField(field), fa, fb);
+  let frames = 0,
+    worstFrame = 0,
+    done = false;
+  while (!done && frames < 400) {
+    const t0 = performance.now();
+    done = cold.expand(fb, t0 + 6);
+    worstFrame = Math.max(worstFrame, performance.now() - t0);
+    frames++;
+  }
+  ck(
+    worstFrame < 9,
+    'a 6 ms frame deadline holds on the worst search (shoulder → opposite hem)',
+    `${frames} frames, worst frame ${worstFrame.toFixed(1)} ms, ${cold.settledCount} px, path ${cold.pathTo(fb).length ? 'followed' : 'refused → straight'}`,
   );
-  console.log(
-    `  worst cold segment (shoulder → opposite hem): ${far.t.toFixed(1)} ms, ${far.lw.settledCount} px settled`,
+  // A click's bounded settle: at most 30 ms, else straight.
+  const click = new m.LiveWire(m.inkField(field), fa, edgeT);
+  const [okClick, tClick] = timed(() => click.expand(edgeT, performance.now() + 30));
+  ck(
+    tClick < 34,
+    'a click waits at most 30 ms for its edge',
+    `${tClick.toFixed(1)} ms, ${okClick ? 'settled' : 'straight'}`,
   );
   times.sort((a, b) => a - b);
   console.log(
@@ -248,6 +285,10 @@ const times = [];
     const r = seg(field, clicks[k], clicks[(k + 1) % clicks.length]);
     ring.push(...r.path.slice(k ? 1 : 0));
   }
+  const D0 = distOf(field);
+  console.log(
+    `  pen memory, active side only: ${(m.penBytes() / 2 ** 20).toFixed(1)} MiB (field ${((w * h) / 2 ** 20).toFixed(1)} MiB + one search workspace); other sides 0`,
+  );
   // Coverage of the yoke region away from the lines (the ink and its white halo hide the rest).
   const idx = m.polygonIndices(ring, flat.silhouette, w, h);
   const yoke = flat.labels[Math.round(120 * s) * w + Math.round(400 * s)];
@@ -257,15 +298,10 @@ const times = [];
     got = 0,
     spill = 0;
   for (let i = 0; i < w * h; i++) {
-    if (flat.labels[i] === yoke && field.d[i] > 3 * field.unit) {
+    if (flat.labels[i] === yoke && D0[i] > 3 * field.unit) {
       body++;
       if (inPoly[i]) got++;
-    } else if (
-      inPoly[i] &&
-      flat.labels[i] &&
-      flat.labels[i] !== yoke &&
-      field.d[i] > 3 * field.unit
-    )
+    } else if (inPoly[i] && flat.labels[i] && flat.labels[i] !== yoke && D0[i] > 3 * field.unit)
       spill++;
   }
   ck(

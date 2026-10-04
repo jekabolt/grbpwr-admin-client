@@ -14,7 +14,15 @@ import Text from 'ui/components/text';
 
 import { GROUP_GAP } from '../core';
 import { viewLabel } from '../views';
-import { inkField, LiveWire, magnetic, onInk, snapToInk, type InkField, type Pt } from './livewire';
+import {
+  inkField,
+  LiveWire,
+  magnetic,
+  releaseInk,
+  snapToInk,
+  type InkField,
+  type Pt,
+} from './livewire';
 import { componentAt, polygonIndices } from './map-model';
 import { partIndices } from './parts-model';
 import { dilate } from './regions';
@@ -43,8 +51,9 @@ const TOOLS: PaintTool[] = ['click', 'pen', 'erase'];
 const HOVER_ALPHA = 0.45;
 
 const mod = (n: number, m: number) => ((n % m) + m) % m;
-/** Pixels the live preview may settle per frame (≈ 6 ms at 1600 px, see `yarn paint:pen`). */
-const WIRE_SLICE = 40_000;
+/** The live preview's search time per frame, and the most a click may wait for its edge. */
+const WIRE_FRAME_MS = 6;
+const WIRE_COMMIT_MS = 30;
 
 /** Texture scale: a tile shows ≈ 1/6 of the side's height. */
 function sampler(skin: PaintSkin | undefined, h: number) {
@@ -105,12 +114,16 @@ function PaintSide({
   const [pen, setPenState] = useState<{ anchors: Pt[]; ring: Pt[] }>({ anchors: [], ring: [] });
   /** The edge from the last vertex to the cursor. */
   const [preview, setPreview] = useState<Pt[]>([]);
+  /** Mirrors `pen` for the frame loop and key handlers (no stale closures). */
+  const penRef = useRef(pen);
   const wire = useRef<{
     live: LiveWire | null;
-    spare: LiveWire | null;
-    target: Pt | null;
+    /** The cursor the frame loop chases. */
+    want: { raw: Pt; straight: boolean; scale: number } | null;
+    /** The preview on show, exactly as a click would commit it. */
+    shown: { from: Pt; target: Pt; path: Pt[] } | null;
     frame: number;
-  }>({ live: null, spare: null, target: null, frame: 0 });
+  }>({ live: null, want: null, shown: null, frame: 0 });
   const { flat, labels, pixels } = view;
   const w = flat?.w ?? 0;
   const h = flat?.h ?? 0;
@@ -287,102 +300,122 @@ function PaintSide({
     ctx.putImageData(out, x0, y0);
   };
 
-  /** The flat's ink cost field (cached per flat). */
+  /** The flat's ink cost field — built on first use, only for the side being drawn on. */
   const fieldOf = (): InkField | null => (flat ? inkField(flat) : null);
 
-  const resetPen = () => {
+  /** The search from the last vertex toward `t` (re-made when another side took the workspace
+   *  or `t` left its corridor). */
+  const liveFrom = (f: InkField, last: Pt, t: Pt): LiveWire => {
+    const st = wire.current;
+    const live = st.live;
+    if (!live?.alive() || live.field !== f || live.from !== last || !live.covers(t))
+      st.live = new LiveWire(f, last, t);
+    return st.live!;
+  };
+
+  /** Stop the preview: no frame, no target, nothing shown. */
+  const stopPreview = () => {
     const st = wire.current;
     cancelAnimationFrame(st.frame);
     st.frame = 0;
-    st.target = null;
-    if (st.live) st.spare = st.live;
-    st.live = null;
-    setPenState({ anchors: [], ring: [] });
+    st.want = null;
+    st.shown = null;
     setPreview([]);
   };
 
-  /** The edge from `a` to `b`: along the ink when both sit on lines, else straight. */
-  const edge = (a: Pt, b: Pt, straight: boolean): Pt[] => {
-    const f = fieldOf();
-    const live = wire.current.live;
-    if (straight || !f || !live || !magnetic(f, a, b)) return [a, b];
-    live.expand(b);
-    const path = live.pathTo(b);
-    return path.length >= 2 ? path : [a, b];
+  const resetPen = () => {
+    stopPreview();
+    wire.current.live = null;
+    penRef.current = { anchors: [], ring: [] };
+    setPenState(penRef.current);
   };
 
   /** The vertex a click at `p` makes: on the line within reach, unless ⇧. */
   const vertexAt = (p: Pt, straight: boolean): Pt => {
-    const f = fieldOf();
-    return straight || !f ? p : snapToInk(f, p);
+    const f = straight ? null : fieldOf();
+    return f ? snapToInk(f, p) : p;
+  };
+
+  /**
+   * The edge a click commits from the last vertex to `b`: exactly the preview on show when it
+   * ends at `b`; else settled within WIRE_COMMIT_MS; else straight.
+   */
+  const commitEdge = (a: Pt, b: Pt, straight: boolean): Pt[] => {
+    const shown = wire.current.shown;
+    if (shown && shown.from === a && shown.target.x === b.x && shown.target.y === b.y)
+      return shown.path;
+    const f = straight ? null : fieldOf();
+    if (!f || !magnetic(f, a, b)) return [a, b];
+    const live = liveFrom(f, a, b);
+    if (!live.expand(b, performance.now() + WIRE_COMMIT_MS)) return [a, b];
+    const path = live.pathTo(b);
+    return path.length >= 2 ? path : [a, b];
   };
 
   const closePen = (straight = false) => {
-    const { anchors, ring } = pen;
+    const { anchors, ring } = penRef.current;
     if (flat && anchors.length >= 3) {
       const last = anchors[anchors.length - 1];
-      const pts = [...ring, ...edge(last, anchors[0], straight).slice(1, -1)];
+      const pts = [...ring, ...commitEdge(last, anchors[0], straight).slice(1, -1)];
       session.apply(view.view, polygonIndices(pts, flat.silhouette, w, h));
     }
     resetPen();
   };
 
   const addVertex = (raw: Pt, straight: boolean) => {
-    const st = wire.current;
+    const { anchors, ring } = penRef.current;
     const v = vertexAt(raw, straight);
-    const last = pen.anchors[pen.anchors.length - 1];
-    const seg = last ? edge(last, v, straight) : [v];
-    const f = fieldOf();
-    cancelAnimationFrame(st.frame);
-    st.frame = 0;
-    const reuse = st.live ?? st.spare ?? undefined;
-    st.live = f && onInk(f, v) ? new LiveWire(f, v, reuse) : null;
-    if (!st.live && reuse) st.spare = reuse;
-    setPenState({
-      anchors: [...pen.anchors, v],
-      ring: [...pen.ring, ...(last ? seg.slice(1) : seg)],
-    });
-    setPreview([]);
+    const last = anchors[anchors.length - 1];
+    const seg = last ? commitEdge(last, v, straight).slice(1) : [v];
+    stopPreview();
+    wire.current.live = null;
+    penRef.current = { anchors: [...anchors, v], ring: [...ring, ...seg] };
+    setPenState(penRef.current);
   };
 
-  /** The preview edge to the cursor; a long first reach is grown over a few frames. */
-  const trackCursor = (raw: Pt, straight: boolean) => {
+  /** ONE frame loop owns the search: each frame grows it for at most WIRE_FRAME_MS. */
+  const pump = () => {
     const st = wire.current;
-    const last = pen.anchors[pen.anchors.length - 1];
-    if (!last) return;
-    const f = fieldOf();
-    const target = vertexAt(raw, straight);
-    const live = st.live;
-    if (straight || !f || !live || !magnetic(f, last, target)) {
-      cancelAnimationFrame(st.frame);
-      st.frame = 0;
-      setPreview([last, target]);
+    st.frame = 0;
+    const want = st.want;
+    const { anchors } = penRef.current;
+    const last = anchors[anchors.length - 1];
+    if (!want || !last) return;
+    const first = anchors[0];
+    // Near the first vertex the preview IS the closing edge.
+    const closing =
+      anchors.length >= 3 &&
+      Math.hypot(first.x - want.raw.x, first.y - want.raw.y) <= 8 * want.scale;
+    const target = closing ? first : vertexAt(want.raw, want.straight);
+    const f = want.straight ? null : fieldOf();
+    let path: Pt[] | null = null;
+    if (!f || !magnetic(f, last, target)) path = [last, target];
+    else {
+      const live = liveFrom(f, last, target);
+      if (live.expand(target, performance.now() + WIRE_FRAME_MS)) {
+        const p = live.pathTo(target);
+        path = p.length >= 2 ? p : [last, target];
+      }
+    }
+    if (path) {
+      st.shown = { from: last, target, path };
+      setPreview(path);
       return;
     }
-    st.target = target;
-    if (live.expand(target, WIRE_SLICE)) {
-      cancelAnimationFrame(st.frame);
-      st.frame = 0;
-      setPreview(live.pathTo(target));
-      return;
-    }
+    // Not reached yet: straight meanwhile, keep growing next frame.
+    st.shown = null;
     setPreview([last, target]);
-    if (st.frame) return;
-    const step = () => {
-      st.frame = 0;
-      const t = st.target;
-      if (!t || st.live !== live) return;
-      if (live.expand(t, WIRE_SLICE)) setPreview(live.pathTo(t));
-      else st.frame = requestAnimationFrame(step);
-    };
-    st.frame = requestAnimationFrame(step);
+    st.frame = requestAnimationFrame(pump);
   };
 
   const onMove = (e: PointerEvent<HTMLDivElement>) => {
     if (!ready) return;
     const { x, y } = toRaster(e);
     if (tool === 'pen') {
-      trackCursor({ x, y }, e.shiftKey);
+      // Only the target moves here; the frame loop does the work.
+      const st = wire.current;
+      st.want = { raw: { x, y }, straight: e.shiftKey, scale: toRaster(e).scale };
+      if (penRef.current.anchors.length > 0 && !st.frame) st.frame = requestAnimationFrame(pump);
       return;
     }
     showHover(x, y, e.altKey);
@@ -395,9 +428,9 @@ function PaintSide({
     });
     const { x, y, scale } = toRaster(e);
     if (tool === 'pen') {
-      const n = pen.anchors.length;
+      const n = penRef.current.anchors.length;
       if (n >= 3) {
-        const first = pen.anchors[0];
+        const first = penRef.current.anchors[0];
         if (Math.hypot(first.x - x, first.y - y) <= 8 * scale) {
           closePen(e.shiftKey);
           return;
@@ -441,17 +474,20 @@ function PaintSide({
     return () => el.removeEventListener('paint-pen', onKey);
   });
 
+  // Pen put away or the side's flat changed: drop the pen, its search and the ink field.
   useEffect(() => {
-    if (tool !== 'pen' || wire.current.live?.field !== fieldOf()) {
-      resetPen();
-      if (tool !== 'pen') return;
-    }
-    // The ink field once per flat, before the first click needs it.
-    if (ready) fieldOf();
+    resetPen();
+    releaseInk();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tool, ready, flat]);
+  }, [tool, flat]);
 
-  useEffect(() => () => cancelAnimationFrame(wire.current.frame), []);
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(wire.current.frame);
+      releaseInk();
+    },
+    [],
+  );
 
   const width = Math.round(height * (view.aspect || 0.6));
   const stroke = Math.max(1, h / height) * 1.5;
@@ -476,7 +512,7 @@ function PaintSide({
         onPointerDown={onDown}
         onPointerLeave={() => {
           clearHover();
-          setPreview([]);
+          stopPreview();
         }}
       >
         <canvas ref={mock} className='absolute inset-0 size-full' />
