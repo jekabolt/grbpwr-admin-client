@@ -10,6 +10,9 @@ import { ColourwayStrip } from '../colourway-strip';
 import { GROUP_SEAM } from '../core';
 import { openStepOf } from '../core/chain';
 import { Workbench } from '../generation/studio';
+import { PartsCanvas } from '../paint/parts-canvas';
+import { paintRun } from '../paint/plan-run';
+import { usePaint } from '../paint/use-paint';
 import type { ClothSlot } from '../pattern/slot-fabrics';
 import { packOf, useCardFit, useColourDraft } from './drafts';
 import { GenerateRow, LockBar, RunRefusal } from './generate-row';
@@ -188,6 +191,9 @@ export function RenderStudio({
   const draft = useColourDraft(band, colorwayId, colorwayRef, techCardId, slots);
   const cardFit = useCardFit();
   const run = useStartDesignRun(techCardId);
+  /* PAINT THE PARTS: the card's painting session (maps are the card's, cloths the colourway's). */
+  const paint = usePaint(techCardId, band, slots, colorwayId);
+  const paintVersion = paint.getVersion();
   /** The prompt inventory. A modal is its own surface, so it is mounted beside the block. */
   const [inspecting, setInspecting] = useState(false);
 
@@ -293,12 +299,27 @@ export function RenderStudio({
   }, [draft.recipe, pack, colorwayId, colorwayLabel]);
 
   /**
-   * What will actually travel. ⚠ NO COLOUR MAPS ON THIS SCREEN: a saved colour plan would swap the
-   * bound pack's fabrics for its own, so the run could buy cloth A while MATERIALS shows B — and the
-   * palette, the only surface that repairs a plan, is not mounted. Fabrics come strictly from the
-   * bound pack (`packOf`).
+   * What will actually travel. PAINT THE PARTS (Ф1): the pack stays the source of the cloths; the
+   * saved, non-stale colour maps only say WHERE each goes (`paintRun`: remainder, painted labels,
+   * the rest). No maps, or fewer than two uses — exactly the pack, `colourMaps: []`.
    */
-  const wire = useMemo(() => ({ ...sent, colourMaps: [] }), [sent]);
+  const painted = useMemo(
+    () => paintRun({ band, plan: paint.plan(), slots, colorwayId, colorwayLabel }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [band, paint, paintVersion, slots, colorwayId, colorwayLabel],
+  );
+  const wire = useMemo(
+    () =>
+      painted.kind === 'maps'
+        ? {
+            ...sent,
+            fabrics: painted.fabrics,
+            fabricMediaId: painted.fabricMediaId,
+            colourMaps: painted.colourMaps,
+          }
+        : { ...sent, colourMaps: [] },
+    [sent, painted],
+  );
 
   const gate: Gate = useMemo(() => {
     /* O-57 · D-56″: NO COLUMN AT ALL — the card has colourways, every one archived and without a
@@ -310,7 +331,11 @@ export function RenderStudio({
        and back must hold a drawing» sends a person to draw what will not be bought anyway. */
     const base = renderGate(band, colorwayArchived, colorwayLabel);
     if (!base.ok) return base;
-    /* No paint gate here: colour maps do not travel from this screen (see `wire`). */
+    /* PAINT THE PARTS: the run never races the autosave, and every painted label must be claimed. */
+    if (paint.busy()) return { ok: false, reason: 'saving the parts…' };
+    if (paint.save === 'unsaved' || paint.save === 'error')
+      return { ok: false, reason: `parts not saved · ${paint.saveError || 'retry'}` };
+    if (painted.kind === 'refuse') return { ok: false, reason: painted.reason };
     if (!recipeIsStated(wire)) {
       return {
         ok: false,
@@ -319,7 +344,8 @@ export function RenderStudio({
       };
     }
     return { ok: true };
-  }, [band, wire, colorwayArchived, colorwayLabel, target.nowhere]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [band, wire, colorwayArchived, colorwayLabel, target.nowhere, painted, paint, paintVersion]);
 
   const launch = () => {
     /* O-61 (D-60, D-71): слова карточки, показанные в пустом IN WORDS, становятся СВОИМИ черновику —
@@ -426,6 +452,10 @@ export function RenderStudio({
       <Button variant='secondary' size='xs' onClick={() => onGoToKind('flat')}>
         the flat bench ›
       </Button>
+    ) : !gate.ok && painted.kind === 'refuse' && painted.next === 'materials' && onGoToKind ? (
+      <Button variant='secondary' size='xs' onClick={() => onGoToKind('pattern')}>
+        materials ›
+      </Button>
     ) : null;
 
   return (
@@ -461,8 +491,8 @@ export function RenderStudio({
           </div>
         )}
 
-        {/* V5 · MATERIALS (the pack, read-only) · IN WORDS. The anchor `#design-fabric-menu` moved
-            onto the pack; the paint plan keeps its code but has no door this round. */}
+        {/* V5 · MATERIALS (the pack; with flats on the bench — the palette) · PARTS (paint the
+            parts inline, `../paint`) · IN WORDS. */}
         <div id='design-fabric-menu' className={GROUP_SEAM}>
           <MaterialsPack
             band={band}
@@ -470,7 +500,10 @@ export function RenderStudio({
             colorwayLabel={colorwayLabel}
             slots={slots}
             onEdit={onGoToKind && (() => onGoToKind('pattern'))}
+            paint={paint}
+            disabled={disabled}
           />
+          <PartsCanvas session={paint} disabled={disabled} />
           <InWords state={draft} band={band} techCardId={techCardId} disabled={disabled} />
         </div>
 
