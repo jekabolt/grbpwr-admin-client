@@ -67,6 +67,7 @@ import {
   pairOfRun,
   rowColour,
   shelfCeiling,
+  withOwnHex,
   type MaterialSlot,
   type SwatchColour,
 } from './slot-fabrics';
@@ -198,12 +199,17 @@ function MaterialBench({
 
   const ownPantone = (colorway?.pantone ?? '').trim();
   const ownHex = (colorway?.devHex ?? '').trim();
-  const colour = rowColour(pickCode, {
-    pantone: ownPantone,
-    color: ownHex,
-    colorSource: ownHex ? 'colourway' : '',
-    recipePantone: '',
-  });
+  // The colourway's own code shows (and sends) the colourway's own hex, not the library one.
+  const colour = withOwnHex(
+    rowColour(pickCode, {
+      pantone: ownPantone,
+      color: ownHex,
+      colorSource: ownHex ? 'colourway' : '',
+      recipePantone: '',
+    }),
+    ownPantone,
+    ownHex,
+  );
   const pickerValue = pickCode ?? ownPantone;
   const inherited = !pickerValue.trim() && !!colour;
 
@@ -286,19 +292,55 @@ function MaterialBench({
       else next.delete(key);
       return next;
     });
+  /*
+   * UNDO = (previous asset, what our clear/replace set). It is offered only while the pair's
+   * binding is still exactly what we set and the previous asset is still on the shelf — so an
+   * undo never overwrites a later binding (another tab, a landed run, a second replace).
+   */
   const [undoState, setUndoState] = useState<{
     card: number;
-    pairs: ReadonlyMap<string, number>;
+    pairs: ReadonlyMap<string, UndoEntry>;
   }>({ card: techCardId, pairs: new Map() });
   if (undoState.card !== techCardId) {
     setUndoState({ card: techCardId, pairs: new Map() });
   }
-  const undos = undoState.card === techCardId ? undoState.pairs : new Map<string, number>();
-  const rememberUndo = (key: string, assetId: number) => {
-    if (assetId <= 0) return;
+  const undos = undoState.card === techCardId ? undoState.pairs : new Map<string, UndoEntry>();
+  const rawBound = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const b of band.assetBindings ?? []) {
+      out.set(pairKey(wireInt(b.colorwayId), wireInt(b.bomItemId)), wireInt(b.assetId));
+    }
+    return out;
+  }, [band]);
+  const shelfIds = useMemo(
+    () => new Set((band.assets ?? []).map((a) => wireInt(a.id)).filter((id) => id > 0)),
+    [band],
+  );
+  const undoLive = (key: string, e: UndoEntry) =>
+    (rawBound.get(key) ?? 0) === e.setTo && shelfIds.has(e.prevId);
+  // Drop entries the band has moved past: the pair now holds neither what we set nor what we
+  // replaced (the latter is the window before the re-read lands), or the previous asset is gone.
+  useEffect(() => {
+    let stale = false;
+    for (const [key, e] of undos) {
+      const now = rawBound.get(key) ?? 0;
+      if (!shelfIds.has(e.prevId) || (now !== e.setTo && now !== e.prevId)) stale = true;
+    }
+    if (!stale) return;
+    setUndoState((prev) => {
+      const next = new Map(prev.pairs);
+      for (const [key, e] of prev.pairs) {
+        const now = rawBound.get(key) ?? 0;
+        if (!shelfIds.has(e.prevId) || (now !== e.setTo && now !== e.prevId)) next.delete(key);
+      }
+      return { card: prev.card, pairs: next };
+    });
+  }, [undos, rawBound, shelfIds]);
+  const rememberUndo = (key: string, prevId: number, setTo: number) => {
+    if (prevId <= 0) return;
     setUndoState((prev) => ({
       card: techCardId,
-      pairs: new Map(prev.card === techCardId ? prev.pairs : []).set(key, assetId),
+      pairs: new Map(prev.card === techCardId ? prev.pairs : []).set(key, { prevId, setTo }),
     }));
   };
   const forgetUndo = (key: string) =>
@@ -470,7 +512,7 @@ function MaterialBench({
           bomItemId: slot.bomItemId,
           assetId,
         });
-        if (prevId !== assetId) rememberUndo(key, prevId);
+        if (prevId !== assetId) rememberUndo(key, prevId, assetId);
       }
     } catch {
       // The write hooks already said what went wrong. A picture made for a failed binding stays on
@@ -488,16 +530,21 @@ function MaterialBench({
     mark(key, true);
     binds.setBinding
       .mutateAsync({ colorwayId, bomItemId: slot.bomItemId, assetId: 0 })
-      .then(() => rememberUndo(key, prevId))
+      .then(() => rememberUndo(key, prevId, 0))
       .catch(() => {})
       .finally(() => mark(key, false));
   };
 
-  const undo = (slot: MaterialSlot, assetId: number) => {
+  const undo = (slot: MaterialSlot) => {
     const key = pairKey(cwId, slot.bomItemId);
+    const entry = undos.get(key);
+    if (!entry || !undoLive(key, entry)) {
+      forgetUndo(key);
+      return;
+    }
     mark(key, true);
     binds.setBinding
-      .mutateAsync({ colorwayId: cwId, bomItemId: slot.bomItemId, assetId })
+      .mutateAsync({ colorwayId: cwId, bomItemId: slot.bomItemId, assetId: entry.prevId })
       .then(() => forgetUndo(key))
       .catch(() => {})
       .finally(() => mark(key, false));
@@ -566,7 +613,8 @@ function MaterialBench({
             const key = pairKey(cwId, slot.bomItemId);
             const gate = cellGate(slot);
             const current = cwId > 0 ? byPair.get(key) : undefined;
-            const undoAssetId = undos.get(key) ?? 0;
+            const undoEntry = undos.get(key);
+            const canUndo = !!undoEntry && undoLive(key, undoEntry);
             return (
               <div
                 key={slot.bomItemId}
@@ -589,13 +637,13 @@ function MaterialBench({
                   onGenerate={() => generate([slot])}
                   onClear={() => clear(slot)}
                 />
-                {undoAssetId > 0 && (
+                {canUndo && (
                   <Button
                     variant='underline'
                     size='xs'
                     disabled={saving.has(key)}
                     title='restore the previous picture'
-                    onClick={() => undo(slot, undoAssetId)}
+                    onClick={() => undo(slot)}
                     data-fh-undo={slot.bomItemId}
                   >
                     undo
@@ -694,6 +742,8 @@ function MaterialBench({
   );
 }
 
+type UndoEntry = { prevId: number; setTo: number };
+
 const INPUT_CELL = 'w-24 shrink-0';
 
 function InputCaption({ children }: { children?: string }): JSX.Element {
@@ -759,7 +809,7 @@ function GenerateInputs({
           name={`fh-colour-${colorwayId}`}
           value={pickerValue}
           label={colour?.code || colour?.hex || '+ colour'}
-          previewHex={colour?.hex}
+          swatchHex={colour?.hex}
           suggested={ownPantone ? [{ code: ownPantone, label: `${colorwayName} · colourway` }] : []}
           disabled={disabled}
           tile
@@ -933,14 +983,14 @@ function SlotCell({
     const label = assetLabel(asset);
     const hardware = slot.family === 'hardware';
     return (
-      <div className='group flex min-w-0 flex-col overflow-hidden border border-textColor'>
+      <div className='group flex w-full min-w-0 flex-col overflow-hidden border border-textColor'>
         <PictureTile
           url={url}
           alt={label}
           aspect={BENCH_FRAME_ASPECT}
           fit={hardware ? 'contain' : 'cover'}
           ground={hardware ? 'neutral' : undefined}
-          className='border-0'
+          className='w-full border-0'
           gallery={
             url
               ? { src: url, thumbnail: assetThumb(asset) || url, type: 'image', alt: label }
@@ -995,6 +1045,7 @@ function SlotCell({
         ) : undefined
       }
       backdrop={<TrimPictogramBackdrop slot={slot} />}
+      quietDoor
       cap={cap}
       data-fh-empty={slot.bomItemId}
     />

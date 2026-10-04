@@ -193,6 +193,7 @@ export function PlaceOrDrawCell({
   cap,
   instead,
   backdrop,
+  quietDoor,
   topAligned,
   role,
   ariaLabel,
@@ -235,6 +236,11 @@ export function PlaceOrDrawCell({
    * кадр при этом становится `position: relative`, и больше ничего в плитке не меняется.
    */
   backdrop?: React.ReactNode;
+  /**
+   * Door face without the photo glyph, its word at the bottom of the frame — for a backdrop
+   * pictogram that would otherwise collide with the glyph in the centre (MATERIALS slots).
+   */
+  quietDoor?: boolean;
   /** Не растягивать коробку по строке грида: её рост задаёт пропорция, а не сосед. */
   topAligned?: boolean;
   role?: string;
@@ -251,7 +257,10 @@ export function PlaceOrDrawCell({
       aria-label={ariaLabel}
       /* Рост — ИНЛАЙНОМ: стенд читает CSS готовой сборки, где произвольного класса, которого не
          было в дереве на момент сборки, нет вовсе (замерено на `h-[calc(50%+1px)]`). */
-      style={{ ...(heightPx != null ? { height: heightPx } : null), ...(topAligned ? { alignSelf: 'start' } : null) }}
+      style={{
+        ...(heightPx != null ? { height: heightPx } : null),
+        ...(topAligned ? { alignSelf: 'start' } : null),
+      }}
       className={cn(
         'flex w-full min-w-0 flex-col overflow-hidden border border-dashed border-borderColor',
         className,
@@ -305,7 +314,8 @@ export function PlaceOrDrawCell({
                   if (first?.id) onSelect?.(first);
                 }}
                 sizeClassName='h-full w-full'
-                className='border-0'
+                compact={quietDoor}
+                className={quietDoor ? 'justify-end border-0 pb-2' : 'border-0'}
               />
             </div>
             {onDraw && (

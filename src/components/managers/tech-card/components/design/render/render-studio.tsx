@@ -454,9 +454,11 @@ export function RenderStudio({
           <div data-render-colourways=''>
             <GroupLabel flush>colourway</GroupLabel>
             <div className='pt-1.5'>
+              {/* Only colourways the render can draw for (the SIDES columns), and the highlighted
+                  tile is the EFFECTIVE target — the colourway the paid render actually buys for. */}
               <ColourwayStrip
-                colorways={cardColorways ?? colorways}
-                selectedId={storedColorwayId}
+                colorways={colorways.filter((c) => target.drawn.includes(c.colorwayId ?? 0))}
+                selectedId={colorwayId}
                 onSelect={onColorwayChange}
                 onCreate={() => openCreate()}
                 disabled={disabled}

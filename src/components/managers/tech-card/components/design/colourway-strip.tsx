@@ -100,6 +100,8 @@ export function ColourwayStrip({
           disabled={disabled || !onCreate}
           onClick={onCreate}
           data-colourway-create=''
+          aria-label='new colourway'
+          title='new colourway'
           className='group flex w-[72px] shrink-0 flex-col gap-1 text-left disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
         >
           <span
@@ -120,7 +122,7 @@ export function ColourwayStrip({
             component='span'
             className='w-full truncate'
           >
-            new colourway
+            new
           </Text>
         </button>
       )}

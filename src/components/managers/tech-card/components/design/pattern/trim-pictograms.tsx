@@ -186,7 +186,18 @@ export function TrimPictogramBackdrop({ slot }: { slot: PictogramSlot }): JSX.El
   return (
     <span
       aria-hidden
-      className='pointer-events-none absolute inset-0 flex items-center justify-center p-3 text-labelColor opacity-25'
+      data-trim-backdrop={kind}
+      className='text-textColor'
+      style={{
+        position: 'absolute',
+        inset: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 6,
+        opacity: 0.18,
+        pointerEvents: 'none',
+      }}
     >
       <TrimPictogram kind={kind} className='h-full w-full' />
     </span>

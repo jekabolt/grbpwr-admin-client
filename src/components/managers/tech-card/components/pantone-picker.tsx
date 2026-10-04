@@ -257,6 +257,7 @@ export function PantonePicker({
   name,
   suggested,
   previewHex,
+  swatchHex,
   freeText = false,
   fill = false,
   tile = false,
@@ -280,6 +281,8 @@ export function PantonePicker({
    * своим hex, как и прежде; этот — только запасной.
    */
   previewHex?: string;
+  /** Overrides the code's library hex on the trigger swatch (a colourway's own screen hex). */
+  swatchHex?: string;
   /**
    * Дверь «use “…” as a label» для набранного, которое НЕ читается как Pantone-ссылка (T45,
    * решение владельца 6: цвет палитры — код ИЛИ свободная метка). По умолчанию выключена:
@@ -339,6 +342,7 @@ export function PantonePicker({
   /** Набранное как МЕТКА: только с `freeText`, только когда это не ссылка. Пробелы схлопнуты. */
   const typedLabel = freeText && typed && !typedCode ? typed.replace(/\s+/g, ' ') : '';
   const current = findPantone(value);
+  const shownHex = swatchHex || current?.hex || previewHex;
   /** «From this card» — только пока запрос пуст: набравший уже знает, чего ищет. */
   const showCard = !typed && fromCard.length > 0;
 
@@ -417,13 +421,9 @@ export function PantonePicker({
               className={`flex aspect-square w-full items-center justify-center border border-borderColor ${
                 disabled ? 'opacity-50' : 'hover:border-textColor'
               }`}
-              style={
-                current?.hex || previewHex
-                  ? { background: current?.hex ?? previewHex }
-                  : PLACEHOLDER_SURFACE
-              }
+              style={shownHex ? { background: shownHex } : PLACEHOLDER_SURFACE}
             >
-              {!current?.hex && !previewHex && (
+              {!shownHex && (
                 <Text size='micro' variant='label' component='span' className='uppercase'>
                   + colour
                 </Text>
@@ -444,11 +444,11 @@ export function PantonePicker({
               fill ? 'w-full min-w-0' : ''
             } ${disabled ? 'text-textInactiveColor' : 'hover:border-textColor'}`}
           >
-            {(current || previewHex) && (
+            {(current || shownHex) && (
               <span
                 aria-hidden
                 className='size-3 shrink-0 border border-borderColor'
-                style={{ background: current?.hex ?? previewHex }}
+                style={{ background: shownHex }}
               />
             )}
             <Text

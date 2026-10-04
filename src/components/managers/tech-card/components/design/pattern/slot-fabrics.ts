@@ -332,7 +332,7 @@ export function slotSuggestions(
 export type SwatchColour = { code: string; hex: string; words: string };
 
 /** Код без хвоста системы: `18-1664 TCX` и `18-1664` — один цвет, `185 C` и `185` — тоже. */
-function codeStem(code: string): string {
+export function codeStem(code: string): string {
   return code
     .trim()
     .toLowerCase()
@@ -362,6 +362,20 @@ function codeStem(code: string): string {
  * старые строки записаны до него. С приставкой поиск промахивался (hex не ехал вовсе), а слова
  * выходили «Pantone PANTONE 18-1664 TCX»; код без неё — тот же цвет, и едет он без неё.
  */
+/** Picked code equals the colourway's own code → its own screen hex, not the library one. */
+export function withOwnHex(
+  colour: SwatchColour | null,
+  ownPantone: string,
+  ownHex: string,
+): SwatchColour | null {
+  const own = normaliseHex(ownHex);
+  if (!colour || !own || !colour.code.trim() || !ownPantone.trim()) return colour;
+  const strip = (c: string) => c.trim().replace(/^pantone\s+/i, '');
+  return codeStem(strip(colour.code)) === codeStem(strip(ownPantone))
+    ? { ...colour, hex: own }
+    : colour;
+}
+
 export function swatchColour(code: string | null | undefined): SwatchColour | null {
   const c = (code ?? '')
     .trim()
