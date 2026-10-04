@@ -1153,12 +1153,13 @@ export function MoodBoard({
      указания. Владелец, увидев бету: «не как в референсе». Макет держит ПЯТЬ отдельных блоков:
 
        [ MOODBOARD ……………………………………… ] [ CALLOUTS 340px ]   ← ряд: лента и панель к ней
-       [ DESCRIPTION · what this thing is ………………………………… ]   ← слова человека
-       [ CONSTRUCTION DRAFT · what the model proposes ……… ]   ← ответ машины (`head/construction-draft`)
+       [ DESCRIPTION · what this thing is ………………………………… ]   ← слова человека, под ними
+                                                            ряд прогона и ответ машины
+                                                            (`head/construction-draft`)
 
-     Между блоками грунт — сильнейший разделитель системы; ни одна линейка внутри рамки такого не
-     делает. Описание и черновик — ДВА блока, а не один: слова человека и ответ машины разные вещи,
-     и держать их в одной рамке значит объявить их одним.
+     Между блоками грунт — сильнейший разделитель системы. Описание и черновик — ОДИН блок с T33
+     (владелец 04.10: «CONSTRUCTION DRAFT объедини с DESCRIPTION на мудборде»): слова, под ними
+     GENERATE, как слова и GENERATE во флэтовом INPUT — REFERENCES.
 
      СВОРАЧИВАНИЕ ДОСКИ уносит с собой CALLOUTS, DESCRIPTION и CONSTRUCTION DRAFT; GENERAL
      INFORMATION / CONSTRUCTION / MATERIAL SLOTS (соседи в стопке STUDIO) остаются. Описание и
@@ -1634,7 +1635,14 @@ export function MoodBoard({
             печатается в тех-паке и входит в подпись DESIGN. Это по-прежнему НЕ описание изделия для
             генерации: то — `garment description` блока референсов, уходит в каждый прогон; этот
             текст генерация не видит (W-15), его читают человек, бумага и черновик ниже. */}
-        <Section title='description' question='— what this thing is' className={GROUP_SEAM}>
+        {/* ОДИН БЛОК С ЧЕРНОВИКОМ (T33): `Section` теперь рисует `ConstructionDraft`, поля описания
+            идут в неё первыми детьми, ряд прогона и очередь разбора — следом. */}
+        <ConstructionDraft
+          techCardId={techCardId}
+          disabled={readOnly}
+          conceptMax={CONCEPT_MAX}
+          boardPictures={items.length}
+        >
           {/* `data-field` — ЯКОРЬ ДВЕРИ, А НЕ УКРАШЕНИЕ. `revealField` (`utils/field-errors.ts:226`)
               ищет поле по `[data-field="<путь>"]`, и этот штамп ставит `FormItem` из `ui/form`. Здесь
               стоит ГОЛАЯ `Textarea`, потому что поле переехало из формы на доску (V-16) — вместе с
@@ -1751,21 +1759,7 @@ export function MoodBoard({
               </Text>
             </CalloutBox>
           )}
-        </Section>
-
-        {/* ЧЕРНОВИК CONSTRUCTION — СВОИМ БЛОКОМ, ПОСЛЕДНИМ ИЗ ТРЁХ (макет `mbDraftBlock`).
-            Здесь стоял черновик, собиравшийся В БРАУЗЕРЕ; потом `MoodDraft` (проза в одно поле);
-            теперь `ConstructionDraft` (фича 9, слово владельца: «вместо кнопки DRAFT THE IDEA мы
-            генерируем ВЕСЬ construction info»): один платный прогон, ответ структурный и
-            раскладывается предложением на группы, которые рисуют блоки ниже. Ни одна строка не
-            попадает в форму сама — см. подпись органа. Секцию орган держит САМ: её шапка несёт
-            статус прогона, который знает только он. */}
-        <ConstructionDraft
-          techCardId={techCardId}
-          disabled={readOnly}
-          conceptMax={CONCEPT_MAX}
-          boardPictures={items.length}
-        />
+        </ConstructionDraft>
       </div>
     </>
   );

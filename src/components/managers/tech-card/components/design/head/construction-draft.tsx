@@ -8,7 +8,7 @@ import { techCardBomSectionOptions } from 'constants/filter';
 import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -32,6 +32,7 @@ import {
 } from '../autosave-contract';
 import { readBench } from '../bench-slot';
 import { proposedColourways, savedColourwayIdentity } from '../colourway-proposals-model';
+import { ControlLabel } from '../core';
 import { draftReadGate, openGateDoor } from '../core/chain';
 import { draftInputGate, isBoardRow, moodGateSentence, type MoodGateInput } from '../core/mood-gate';
 import { useDrafted } from '../drafted-contract';
@@ -148,17 +149,18 @@ import { draftIdeaRefusal, refusalReason, useDraftDesignIdea } from './use-draft
  * спрашивает, `diffProposal` их не рождает, ветки записи здесь нет. Ключ `callouts` жив в схеме
  * ответа — сохранённый прогон обязан разбираться на повторе, — но разобрать не значит показать.
  *
- * ═══ ЭТО СВОЙ БЛОК — `CONSTRUCTION DRAFT · what the model proposes` (макет `_step-mood.js`) ═════
+ * ═══ ОДИН БЛОК С DESCRIPTION (T33, слово владельца 04.10) ═════════════════════════════════════
  *
- * Здесь стояло «ЭТО НЕ БЛОК: орган стоит ВНУТРИ блока мудборда». Владелец, увидев бету: «не как в
- * референсе»; макет держит черновик ОТДЕЛЬНЫМ блоком под DESCRIPTION — слова человека и ответ
- * машины разные вещи, и держать их в одной рамке значит объявить их одним. Поэтому `Section` теперь
- * СВОЯ (шапка несёт статус прогона, который знает только этот орган), а `mood-board.tsx` монтирует
- * орган соседом, не ребёнком. Внутри блока: ряд прогона (общий `GenerateRow`, состояние вшито в
- * его хвост), под самой тяжёлой линейкой — очередь разбора: `TO DECIDE` с отметкой `take` и одной
- * записью `write N taken ▸`, история (`written · dismissed · hints`) под одним раскрытием.
- * Предложенные колорвеи (B-25) по-прежнему своим блоком под таблицей слотов; связывает их с
- * прогоном модульный стор.
+ * Владелец: «CONSTRUCTION DRAFT объедини с DESCRIPTION на мудборде кнопки сделай по дизайну как
+ * INPUT — REFERENCES во флетах». Прежнее решение («свой блок под DESCRIPTION, макет
+ * `_step-mood.js`») снято: `Section` органа теперь и есть DESCRIPTION. Сверху — поля описания
+ * (`children`, их держит доска), под ними — ряд прогона, как ряд GENERATE под словами во флэте,
+ * ниже — очередь разбора. Грамматика кнопок — флэтовая: в шапке только подчёркнутые слова
+ * (`accept all N ▸`, как `clear the input ✕`), в ряду одна главная `GENERATE` и тихая дверь
+ * `what the model gets ▸` рядом (`secondary sm` + `ControlLabel`, как у флэта), действия очереди
+ * (`write N taken ▸`, `add N detail slots ▸`, `undo all N ▸`) — подчёркнутые слова. Предложенные
+ * колорвеи (B-25) — по-прежнему продуктовый блок под таблицей слотов: там же стоят и сохранённые
+ * колорвеи, и связывает их с прогоном модульный стор.
  */
 
 const hhmm = () =>
@@ -339,9 +341,16 @@ export function ConstructionDraft({
   disabled,
   conceptMax,
   boardPictures,
+  children,
 }: {
   techCardId: number;
   disabled?: boolean;
+  /**
+   * ПОЛЯ DESCRIPTION — первыми в том же блоке (T33). Их рисует и держит доска (`mood-board.tsx`):
+   * поле `concept`, его `ai ✦` и легаси-записка. Орган отдаёт им верх своей `Section`, сам встаёт
+   * следом. Без них (отдельный стенд пробы) блок — один черновик.
+   */
+  children?: ReactNode;
   /**
    * Картинок НА ДОСКЕ (`isBoardRow`), для двери черновика (`draftReadGate`, D-10 / фиксап B1).
    * Пропом, а не импортом `isBoardRow`, по тому же доводу, что `conceptMax` ниже: доска монтирует
@@ -487,7 +496,6 @@ export function ConstructionDraft({
     () => boardReadOf({ moodboardMedia: items, callouts, concept }),
     [items, callouts, concept],
   );
-  const boardNotes = board.notes;
   const stampOf = (conceptText: string) => boardStamp(board.ids, conceptText, board.notes);
   const fingerprint = board.fingerprint;
 
@@ -1696,7 +1704,8 @@ export function ConstructionDraft({
       <Button
         type='button'
         variant='underline'
-        size='xs' className='text-labelColor hover:text-textColor'
+        size='xs'
+        className='text-labelColor hover:text-textColor'
         disabled={busy || readOnly}
         onClick={() => drafted.acceptAll()}
         data-c19-accept-all={drafted.count}
@@ -1734,13 +1743,13 @@ export function ConstructionDraft({
     ) : null;
 
   return (
-    /* СВОЙ БЛОК, А НЕ ПОДСТРУКТУРА ДОСКИ. Слова человека (DESCRIPTION) и ответ машины — разные
-       вещи, и держать их в одной рамке значит объявить их одним; между блоками грунт, и это самый
-       сильный разделитель системы. `#mb-draft` — адрес черновика для дверей соседей. */
+    /* ОДИН БЛОК: DESCRIPTION И ЧЕРНОВИК (T33). Шапка одна — `description`; поля описания идут
+       первыми (`children`), ряд прогона и очередь разбора — следом, швом `GROUP_SEAM`.
+       `#mb-draft` — по-прежнему адрес черновика для дверей соседей: теперь он ведёт на блок. */
     <Section
       id='mb-draft'
-      title='construction draft'
-      question='— what the model proposes'
+      title='description'
+      question='— what this thing is'
       action={
         status || acceptAll ? (
           <span className='flex items-center gap-2'>
@@ -1757,6 +1766,7 @@ export function ConstructionDraft({
          поэтому схлопываться больше нечему. Своего размера здесь нет ни одного. */
       className={GROUP_SEAM}
     >
+      {children}
       <div data-c19-draft=''>
         {/* ВОРОТА — ВИДИМОЙ ПОЛОСОЙ, а не только `title` погашенной двери: причина никогда не живёт
             в подсказке по наведению. Дверь `+ picture ›` — только у пустой доски: у «сохрани
@@ -1779,13 +1789,13 @@ export function ConstructionDraft({
                       key={d.field}
                       type='button'
                       variant='secondary'
-                      size='xs'
+                      size='sm'
                       onClick={() => openGateDoor(d)}
                       data-c19-draft-door={d.field}
                       data-c19-draft-to-card={d.field === 'category' ? '' : undefined}
                       data-c19-draft-to-board={d.field === 'board' ? '' : undefined}
                     >
-                      {d.label}
+                      <ControlLabel>{d.label}</ControlLabel>
                     </Button>
                   ))
             }
@@ -1809,11 +1819,13 @@ export function ConstructionDraft({
                 <Button
                   type='button'
                   variant='secondary'
-                  size='xs'
+                  size='sm'
                   onClick={() => void openSaveDoor()}
                   data-c19-draft-save-door={refused ?? ''}
                 >
-                  {refused === 'invalid' ? 'first error ›' : 'saving ›'}
+                  <ControlLabel>
+                    {refused === 'invalid' ? 'first error ›' : 'saving ›'}
+                  </ControlLabel>
                 </Button>
               )
             }
@@ -1831,8 +1843,22 @@ export function ConstructionDraft({
           pending={run.phase !== null}
           disabled={readOnly}
           onGenerate={() => void askForDraft()}
-          onInspect={() => setInspecting(true)}
-          trailing={runState}
+          /* ДВЕРЬ ОПИСИ — РЯДОМ С GENERATE, КАК У ФЛЭТА (T33): `secondary sm` + `ControlLabel`,
+             не `xs` у правого края. Состояние прогона — следом. */
+          trailing={
+            <>
+              <Button
+                type='button'
+                variant='secondary'
+                size='sm'
+                onClick={() => setInspecting(true)}
+                data-c19-draft-inspect=''
+              >
+                <ControlLabel>what the model gets ▸</ControlLabel>
+              </Button>
+              {runState}
+            </>
+          }
         />
         <DraftInventoryModal
           open={inspecting}
@@ -1911,8 +1937,9 @@ export function ConstructionDraft({
                 <div className='mb-3 mt-2 flex justify-end'>
                   <Button
                     type='button'
-                    variant='main'
-                    size='sm'
+                    variant='underline'
+                    size='xs'
+                    className='text-labelColor hover:text-textColor'
                     disabled={takenRows.length === 0 || readOnly}
                     onClick={writeTaken}
                     data-c19-draft-write={takenRows.length}
@@ -2002,8 +2029,9 @@ export function ConstructionDraft({
                     <div className='mb-3 mt-2.5 flex justify-end'>
                       <Button
                         type='button'
-                        variant='main'
-                        size='sm'
+                        variant='underline'
+                        size='xs'
+                        className='text-labelColor hover:text-textColor'
                         disabled={readOnly || minting > 0 || wantedDetailCount === 0}
                         onClick={addDetailSlots}
                         data-c19-draft-add-details={wantedDetailCount}
@@ -2104,8 +2132,9 @@ export function ConstructionDraft({
                       <div className='mt-1.5 flex flex-wrap justify-end gap-1.5'>
                         <Button
                           type='button'
-                          variant='secondary'
+                          variant='underline'
                           size='xs'
+                          className='text-labelColor hover:text-textColor'
                           data-c19-undo-all=''
                           disabled={busy}
                           onClick={() => {

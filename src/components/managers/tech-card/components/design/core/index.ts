@@ -2,7 +2,15 @@
  * THE STUDIO CORE — the organs every band screen shares. One import surface, no state, no wire.
  */
 export { AskModal } from './ask';
-export { Counter, EMPTY_WORD, EmptyState, GROUP_GAP, GROUP_SEAM, Money } from './organs';
+export {
+  ControlLabel,
+  Counter,
+  EMPTY_WORD,
+  EmptyState,
+  GROUP_GAP,
+  GROUP_SEAM,
+  Money,
+} from './organs';
 export { Reason } from './reason';
 /* ЭТА ПОВЕРХНОСТЬ ОТДАЁТ ТО, ЧТО ЧИТАЮТ СНАРУЖИ, И НИЧЕГО СВЕРХ (r3c). `DrawHalf`, `SLOT_HALVES`,
    `PenGlyph` и `drawTitle` отсюда сняты: за пределами `two-half-slot.tsx` их не читает никто —
