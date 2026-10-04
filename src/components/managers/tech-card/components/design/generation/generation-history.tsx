@@ -574,10 +574,22 @@ function HistoryWindowAutofill({
 /**
  * The FLAT fold (T22). Owner, item 22: «GENERATION HISTORY по дефолту свернут во флетах». The block
  * starts folded on every visit (not remembered). Item 10b still holds («просто текстом сколько
- * ранов было и все»), so there is no button and no ▾: the header line itself, `history · N runs`
+ * ранов было и все»), so there is no framed button: the header line itself, `history · N runs`
  * (T30: a sub-part of the workbench block), is the door. Mouse: the whole line; keyboard: Tab to it, Enter or Space.
+ *
+ * THE DOOR SAYS IT IS ONE (04.10, owner item 37: «в WORKBENCH не очевидно что хистори может
+ * расколапсится надо сделать это понятным»). The two words every operator already reads as «this
+ * opens», and nothing more: the count is an underlined word, as every action in the tech card is
+ * (item 32), and a quiet `▸` after it turns to `▾` while open (the same glyph as `meta ▸`). The whole
+ * line inks on hover. No peek of thumbnails while folded: the fold is folded so the bench stays
+ * the only picture in the block.
  */
 export const gridHistoryStartsOpen = false;
+
+/** `4 runs` / `1 run` / `3+ runs` — the door's word. */
+export function historyRunsWord(count: number, floor: boolean): string {
+  return `${count}${floor ? '+' : ''} run${count === 1 && !floor ? '' : 's'}`;
+}
 
 export function HistoryFoldHeader({
   open,
@@ -625,8 +637,21 @@ export function HistoryFoldHeader({
               className='whitespace-nowrap uppercase tracking-label group-hover:text-textColor'
               data-run-count={count}
             >
-              {`· ${count}${floor ? '+' : ''} run${count === 1 && !floor ? '' : 's'}`}
+              {'· '}
+              <span data-history-runs='' className='underline underline-offset-2'>
+                {historyRunsWord(count, floor)}
+              </span>
             </Text>
+            <span
+              aria-hidden
+              data-history-caret=''
+              className={cn(
+                'ml-1 inline-block text-micro leading-none text-labelColor transition-transform duration-150 ease-out group-hover:text-textColor motion-reduce:transition-none',
+                open && 'rotate-90',
+              )}
+            >
+              ▸
+            </span>
           </div>
         }
       >

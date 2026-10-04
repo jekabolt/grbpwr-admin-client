@@ -87,6 +87,18 @@ const stubNetwork = {
 
 // Мутации в памяти сборщика: каждая возвращает одно снятое поведение обратно.
 const MUTATIONS = {
+  // T37: счёт прогонов снова не подчёркнут — дверь читается как подпись.
+  'fold-underline': {
+    file: /generation\/generation-history\.tsx$/,
+    from: "<span data-history-runs='' className='underline underline-offset-2'>",
+    to: "<span data-history-runs=''>",
+  },
+  // T37: стрелка не поворачивается — открытая история выглядит закрытой.
+  'fold-caret': {
+    file: /generation\/generation-history\.tsx$/,
+    from: "open && 'rotate-90',",
+    to: '',
+  },
   // T36: последний ✕ снова просто снимает рамку — пустой редактор остаётся на верстаке.
   emptied: {
     file: /generation\/inline-split\.tsx$/,
@@ -273,8 +285,57 @@ try {
       !(await page.$(`${HF} [data-run]`)) &&
       !(await page.$(`${HF} [data-picture="591"]`)),
   );
+  // ══ T37 · THE FOLD SAYS IT OPENS: an underlined count, a ▸ that turns ▾, ink on hover ══
+  const foldLook = () =>
+    page.$eval(`${HF} [data-history-fold]`, (el) => {
+      const runs = el.querySelector('[data-history-runs]');
+      const caret = el.querySelector('[data-history-caret]');
+      return {
+        runs: runs?.textContent.trim() ?? '',
+        underline: runs ? getComputedStyle(runs).textDecorationLine : '',
+        caret: caret?.textContent.trim() ?? '',
+        hidden: caret?.getAttribute('aria-hidden') === 'true',
+        // Tailwind 4 turns with the `rotate` property, 3 with `transform`: either counts.
+        turn: caret
+          ? [getComputedStyle(caret).rotate, getComputedStyle(caret).transform].join('|')
+          : '',
+        cursor: getComputedStyle(el).cursor,
+        border: getComputedStyle(el).borderTopWidth,
+        ink: caret ? getComputedStyle(caret).color : '',
+      };
+    });
+  const shut = await foldLook();
+  check(
+    'T37.1 folded: `history · N runs` with the count underlined and a quiet ▸, no frame',
+    shut.runs === '1 run' &&
+      shut.underline === 'underline' &&
+      shut.caret === '▸' &&
+      shut.hidden &&
+      /^(none|0deg)\|none$/.test(shut.turn) &&
+      shut.cursor === 'pointer' &&
+      shut.border === '0px',
+    JSON.stringify(shut),
+  );
+  const FOLD_SHOT = (process.argv.find((a) => a.startsWith('--fold-shot=')) ?? '').slice(
+    '--fold-shot='.length,
+  );
+  if (FOLD_SHOT) await (await page.$(HF))?.screenshot({ path: FOLD_SHOT });
+  await page.hover(`${HF} [data-history-fold]`);
+  await page.waitForTimeout(200);
+  const foldHover = await foldLook();
+  check(
+    'T37.2 hover inks the door',
+    foldHover.ink !== shut.ink,
+    `${shut.ink} → ${foldHover.ink}`,
+  );
   await page.click(`${HF} [data-history-fold]`);
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(250);
+  const opened = await foldLook();
+  check(
+    'T37.3 open: the ▸ has turned to ▾',
+    /^90deg\|/.test(opened.turn) || /\|matrix\((0|6\.\d+e-17), 1, -1, /.test(opened.turn),
+    opened.turn,
+  );
   check(
     'T22.2 the header line opens it',
     !!(await page.$(`${HF} [data-history-fold="open"]`)) &&
