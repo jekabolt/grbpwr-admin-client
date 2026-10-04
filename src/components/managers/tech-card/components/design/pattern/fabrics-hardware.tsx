@@ -14,6 +14,7 @@ import {
   subscribePantone,
 } from 'components/managers/tech-card/components/pantone-swatches';
 import { useMutationState } from '@tanstack/react-query';
+import { adminService } from 'api/api';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { Button } from 'ui/components/button';
@@ -353,6 +354,10 @@ function MaterialBench({
 
   const ROOM_REASON =
     'the shelf has no room for another run until the ones being made land — or delete a fabric';
+  /** Room for an own picture on this slot: add needs a free place; replacing hardware does not. */
+  const hasRoomFor = (current: common_DesignAsset | undefined): boolean =>
+    room > 0 || (!!current && current.kind === ASSET_HARDWARE);
+  const roomReason = ceiling.full ? ceiling.reason : ROOM_REASON;
   const cellGate = (slot: MaterialSlot): Gate => {
     const g = slotGate(slot);
     return !g.ok ? g : room <= 0 ? { ok: false, reason: ROOM_REASON } : g;
@@ -469,19 +474,27 @@ function MaterialBench({
     if (band.assetPlacements === undefined) return;
     if (band.assetPlacements.some((p) => wireInt(p.assetId) === assetId)) return;
     if ((band.assets ?? []).some((a) => wireInt(a.derivedFromAssetId) === assetId)) return;
-    writes.deleteAsset.mutateAsync(assetId).catch(() => {});
+    // Straight to the API, not `writes.deleteAsset`: the hook's onError shows a snackbar, and a
+    // failed orphan sweep is nobody's business on this screen. Success re-reads the band as the hook does.
+    adminService
+      .DeleteDesignAsset({ techCardId, assetId })
+      .then(() => writes.invalidate())
+      .catch(() => {});
   };
 
   /* ─── own pictures ─── */
   const place = async (slot: MaterialSlot, media: common_MediaFull) => {
     const mediaId = media.id ?? 0;
     if (mediaId <= 0 || cwId <= 0) return;
-    if ((band.assets ?? []).length >= ASSETS_PER_CARD_MAX) {
-      showMessage(ceiling.reason, 'error');
+    const key = pairKey(cwId, slot.bomItemId);
+    const prev = byPair.get(key);
+    const prevId = wireInt(prev?.id);
+    // Same room GENERATE counts (live runs + presses in flight). Replacing a hardware picture is
+    // room-neutral: the server collects the superseded hardware asset.
+    if (!hasRoomFor(prev)) {
+      showMessage(ceiling.full ? ceiling.reason : ROOM_REASON, 'error');
       return;
     }
-    const key = pairKey(cwId, slot.bomItemId);
-    const prevId = wireInt(byPair.get(key)?.id);
     mark(key, true);
     try {
       const res = await writes.upsertAsset.mutateAsync({
@@ -564,17 +577,18 @@ function MaterialBench({
           {list.map((slot) => {
             const key = pairKey(cwId, slot.bomItemId);
             const gate = cellGate(slot);
+            const current = cwId > 0 ? byPair.get(key) : undefined;
             return (
               <div key={slot.bomItemId} style={BENCH_CELL_STYLE} data-fh-slot={slot.bomItemId}>
                 <SlotCell
                   slot={slot}
-                  asset={cwId > 0 ? byPair.get(key) : undefined}
+                  asset={current}
                   liveRun={cwId > 0 ? liveByPair.get(key) : undefined}
                   saving={saving.has(key)}
                   launching={launching.has(key)}
                   writable={writable}
-                  full={ceiling.full}
-                  fullReason={ceiling.reason}
+                  full={!hasRoomFor(current)}
+                  fullReason={roomReason}
                   generateGate={gate}
                   onPlace={(m) => void place(slot, m)}
                   onReplace={() => replace(slot)}
