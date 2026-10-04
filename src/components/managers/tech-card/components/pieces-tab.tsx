@@ -11,6 +11,7 @@ import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
+import { HeaderNote } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 import { ulid } from 'utils/ulid';
@@ -684,12 +685,12 @@ export function PiecesTab({
         action={
           <div className='flex flex-wrap items-center gap-2'>
             {duplicateRows.size > 0 && (
-              <Pill
+              <HeaderNote
                 tone='warn'
                 title='two or more pieces have been given the same name. the name is what a piece is called in operations, in the recipe and on the factory sheet; the server refuses a save with a duplicate — the name must be unique.'
               >
                 duplicate name: {duplicateRows.size}
-              </Pill>
+              </HeaderNote>
             )}
             {geometry.isFetching && (
               <Text

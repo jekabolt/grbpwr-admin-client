@@ -47,7 +47,7 @@ import { Placeholder } from 'ui/components/placeholder';
 import GenericPopover from 'ui/components/popover';
 import { Row, RowTotal } from 'ui/components/row';
 import { Section, SectionStack } from 'ui/components/section';
-import { SectionHeader } from 'ui/components/section-header';
+import { HeaderNote, SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { carriesGarmentComposition } from 'utils/care-label';
@@ -2503,7 +2503,13 @@ function FabricRecipeCard({
           />
         )}
         {normEditable && (
-          <Button type='button' variant='secondary' size='xs' onClick={() => setEditing((v) => !v)}>
+          <Button
+            type='button'
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+            onClick={() => setEditing((v) => !v)}
+          >
             {editing ? 'done' : 'edit'}
           </Button>
         )}
@@ -2513,8 +2519,9 @@ function FabricRecipeCard({
         {canEdit && garment && (
           <Button
             type='button'
-            variant='secondary'
+            variant='underline'
             size='xs'
+            className='text-labelColor hover:text-textColor'
             onClick={() => {
               setEditing(false);
               onRemoveRow(garment.index);
@@ -2594,7 +2601,11 @@ function FabricRecipeCard({
                   className='w-[280px]'
                   triggerProps={{
                     'aria-label': 'colourway article',
-                    className: buttonVariants({ variant: 'secondary', size: 'xs' }),
+                    className: buttonVariants({
+                      variant: 'underline',
+                      size: 'xs',
+                      className: 'text-labelColor hover:text-textColor',
+                    }),
                   }}
                   openElement={draft.materialId > 0 ? 'pin ✎' : 'another article…'}
                 >
@@ -4061,7 +4072,7 @@ function ColorwayRecipeEditor({
           .join(' · ')}
         action={
           <span className='flex items-center gap-2'>
-            {staged && <Pill tone='attention'>staged</Pill>}
+            {staged && <HeaderNote tone='attention'>staged</HeaderNote>}
             {/* ═══ ДВЕРЬ «APPLY PALETTE TO SLOTS ›» — ЯВНАЯ, ОДНА, И ТОЛЬКО ПРИ ПАЛИТРЕ (T45, решение
                 владельца 7). Правка палитры рецепт не трогает никогда; сюда цвет попадает лишь этим
                 жестом и только для названных слотов. Без палитры двери нет вовсе — она обещала бы

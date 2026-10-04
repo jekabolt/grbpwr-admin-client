@@ -5,8 +5,8 @@ import { useMemo, useState, type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
+import { HeaderNote } from 'ui/components/section-header';
 import SelectComponent from 'ui/components/select';
 import { ViewSwitch } from 'ui/components/view-switch';
 
@@ -350,7 +350,7 @@ export function ThreedStudio({
         id='design-threed-generation'
         title='3d'
         question='· one model of this card'
-        action={<Pill tone='ink'>step 5</Pill>}
+        action={<HeaderNote tone='ink'>step 5</HeaderNote>}
         /* ГЭПЫ КАК В CARD DETAILS (r3 п.38) — ТОТ ЖЕ ТОКЕН, ЧТО НА CARD DETAILS И FABRIC RENDER.
            `GROUP_SEAM` разводит группы блока (вход · генерация · ряд прогона) швом в 20px,
            `GROUP_GAP` на самих линейках держит зазор «подпись → содержимое» в 12px. Обе группы
@@ -377,9 +377,9 @@ export function ThreedStudio({
             flush
             className={GROUP_GAP}
             action={
-              <Pill tone='ink' data-threed-shape=''>
+              <HeaderNote tone='ink' data-threed-shape=''>
                 {shape}
-              </Pill>
+              </HeaderNote>
             }
           >
             generation

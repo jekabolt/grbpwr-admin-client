@@ -27,6 +27,7 @@ import { cn } from 'lib/utility';
 import { useMemo } from 'react';
 import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
+import { HEADER_TEXT } from 'ui/components/section-header';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { PieceSilhouette } from '../piece-silhouette';
@@ -102,6 +103,10 @@ const sizeChip =
   'inline-flex cursor-pointer items-center border px-[7px] py-px text-micro uppercase tracking-pill transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
 const sizeChipOn = 'border-textColor bg-textColor text-bgColor';
 const sizeChipOff = 'border-borderColor bg-bgColor text-labelColor hover:text-textColor';
+const sizeQuiet = cn(
+  'inline-flex cursor-pointer items-center px-1.5 py-px transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+  HEADER_TEXT,
+);
 
 /**
  * Ряд чипов «по какому размеру разобрано».
@@ -129,12 +134,18 @@ export function BreakdownSizeChips({
   sizeNameById,
   onChange,
   label = 'broken down by size',
+  quiet,
 }: {
   sizeIds: readonly number[];
   sizeId: number;
   sizeNameById: Map<number, string>;
   onChange: (sizeId: number) => void;
   label?: string;
+  /**
+   * In a group header (owner, item 38): no framed chips — the shown size is plain ink text, the
+   * others are underlined words, the header door's own metric.
+   */
+  quiet?: boolean;
 }) {
   if (sizeIds.length < 2) return null;
   return (
@@ -162,7 +173,11 @@ export function BreakdownSizeChips({
               // возить фокус стрелками, а без этого он просто отнимает у клавиатуры доступ к
               // невыбранным размерам. Четыре чипа в Tab-порядке дешевле и работают.
               tabIndex={0}
-              className={cn(sizeChip, on ? sizeChipOn : sizeChipOff)}
+              className={
+                quiet
+                  ? cn(sizeQuiet, on ? 'text-textColor' : 'text-labelColor underline hover:text-textColor')
+                  : cn(sizeChip, on ? sizeChipOn : sizeChipOff)
+              }
               onClick={() => onChange(id)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {

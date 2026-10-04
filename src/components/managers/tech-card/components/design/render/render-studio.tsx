@@ -1,8 +1,8 @@
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
 import { useCallback, useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
-import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
+import { HeaderNote } from 'ui/components/section-header';
 
 import { colourPlanGate, planRecipe } from '../colour-plan/model';
 import { ColorwaySelect } from '../colorway-picker';
@@ -443,7 +443,7 @@ export function RenderStudio({
         id='design-render-bench'
         title='fabric render'
         question='· the cloth on the flats'
-        action={<Pill tone='ink'>step 4</Pill>}
+        action={<HeaderNote tone='ink'>step 4</HeaderNote>}
         /* ГЭПЫ КАК В CARD DETAILS (r3 п.34) — ОДИН ТОКЕН НА ВСЮ ПОЛОСУ. `GROUP_SEAM` разводит
            прямых детей блока (рецепт · полоса замка · отказ · ряд GENERATE) одним швом в 20px
            вместо `space-y-stack` в 10px; зазор «линейка группы → содержимое» внутри рецепта

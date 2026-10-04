@@ -1146,6 +1146,7 @@ export function ConstructionAudit({
                 lead={
                   run && modelFindings.length > 0 ? (
                     <ViewSwitch
+                      quiet
                       value={grouping}
                       options={GROUPINGS}
                       onChange={setGrouping}

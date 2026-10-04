@@ -1,6 +1,7 @@
 import { cva, VariantProps } from 'class-variance-authority';
 
 import { cn } from 'lib/utility';
+import { HEADER_TEXT } from 'ui/components/section-header';
 
 /**
  * Interactive counterpart of `Pill` — filters, toggles, removable selections.
@@ -53,6 +54,12 @@ interface Props extends VariantProps<typeof chipVariants> {
    * writes must stay a real button so the fieldset can stop it.
    */
   nonForm?: boolean;
+  /**
+   * IN A BLOCK OR GROUP HEADER (owner, item 38): no frame — the chip is an underlined word, the
+   * same metric as `Button variant='underline' size='xs'`; a `selected` one is plain ink text
+   * (it is where you are, not a door). `dashed` means nothing without a border and is ignored.
+   */
+  quiet?: boolean;
   /** Anything else (draggable, onDragStart, onKeyDown, data-*, role, tabIndex…). */
   [k: string]: unknown;
 }
@@ -68,6 +75,7 @@ export function Chip({
   disabled,
   pressed,
   nonForm,
+  quiet,
   ...props
 }: Props) {
   const interactive = !!onClick || !!onRemove;
@@ -105,7 +113,21 @@ export function Chip({
       aria-pressed={pressed}
       /* twMerge over the WHOLE string: a tone's colour must beat the `selected` branch's
          (`text-labelColor` → `text-warning`), and the compiled CSS order is not a contract. */
-      className={cn(chipVariants({ selected, tone, dashed }), spanRole.className, className)}
+      className={cn(
+        quiet
+          ? cn(
+              'inline-flex items-center gap-1 px-1.5 py-px transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+              HEADER_TEXT,
+              selected ? 'text-textColor' : 'text-labelColor underline hover:text-textColor',
+              tone === 'error' && 'text-error',
+              tone === 'attention' && 'text-warning',
+              'disabled:cursor-not-allowed disabled:text-textInactiveColor',
+              nonForm && disabled && 'text-textInactiveColor',
+            )
+          : chipVariants({ selected, tone, dashed }),
+        spanRole.className,
+        className,
+      )}
     >
       {children}
       {/* Задизейбленный чип не удаляется. Настоящей `<button disabled>` это давал браузер; в

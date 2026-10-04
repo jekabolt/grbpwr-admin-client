@@ -5,6 +5,7 @@ import { type JSX } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Section } from 'ui/components/section';
+import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
 
@@ -90,20 +91,12 @@ function StatePill({ state, inverted }: { state: StepState; inverted: boolean })
   return <span className={cn(PILL_BASE, tone)}>{state}</span>;
 }
 
-/** `3 of 5 steps` — the header counter; a dashed pill at zero, never a red one. */
+/**
+ * `3 of 5 steps` — the header counter, PLAIN TEXT (owner, item 38: «в THE CHAIN у нас есть 5 OF 5
+ * STEPS в хедере справа … только обычный текст»). It was a pill; a header frames no words.
+ */
 function StepsCounter({ n, total }: { n: number; total: number }) {
-  return (
-    <span
-      className={cn(
-        PILL_BASE,
-        n === 0
-          ? 'border-dashed border-borderColor text-labelColor'
-          : 'border-borderColor text-labelColor',
-      )}
-    >
-      {n} of {total} {total === 1 ? 'step' : 'steps'}
-    </span>
-  );
+  return <HeaderCount n={n} noun='step' total={total} data-chain-steps='' />;
 }
 
 function StepCell({

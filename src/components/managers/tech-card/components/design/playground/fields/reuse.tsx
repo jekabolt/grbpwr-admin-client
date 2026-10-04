@@ -8,6 +8,7 @@ import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import GenericPopover from 'ui/components/popover';
+import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
 import { assetLabel, clothShelf } from '../../assets/model';
@@ -241,7 +242,7 @@ function GalleryPicker({
                 <GroupLabel
                   flush
                   className={GROUP_GAP}
-                  action={<Counter n={g.media.length} noun='picture' />}
+                  action={<HeaderCount n={g.media.length} noun='picture' />}
                 >
                   {g.label}
                 </GroupLabel>

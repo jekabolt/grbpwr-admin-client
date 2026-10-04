@@ -27,13 +27,14 @@ import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
+import { HeaderCount, HeaderNote } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
 import { assetFull, assetLabel, assetThumb } from '../assets/model';
 import { BENCH_CELL_STYLE, InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { archivedRef, colorwayLabel } from '../colorway-picker';
-import { Counter, EmptyState, GROUP_GAP, GROUP_SEAM, Reason } from '../core';
+import { EmptyState, GROUP_GAP, GROUP_SEAM, Reason } from '../core';
 import { stepById, type StepId } from '../core/chain';
 import { Thumb, useRunPolling } from '../generation';
 import { PictureTile } from '../picture-tile';
@@ -210,9 +211,9 @@ export function PatternStudio({
   );
 
   const stepPill = (
-    <Pill tone='ink' data-step-pill=''>
+    <HeaderNote tone='ink' data-step-pill=''>
       {`step ${step.n}`}
-    </Pill>
+    </HeaderNote>
   );
 
   if (!capable) {
@@ -233,17 +234,17 @@ export function PatternStudio({
       question={QUESTION}
       className={GROUP_SEAM}
       action={
-        <>
+        <span className='flex flex-wrap items-center gap-3'>
           {stepPill}
           {total > 0 && (
-            <Counter
+            <HeaderCount
               n={dressedPairs}
               total={total}
               noun='fabric'
               title='pairs of colourway and slot that have a fabric in FABRIC RENDER'
             />
           )}
-        </>
+        </span>
       }
     >
       {unsavedSlots > 0 && shown.length > 0 && (
@@ -293,7 +294,7 @@ export function PatternStudio({
               <GroupLabel
                 flush
                 className={GROUP_GAP}
-                action={<Counter n={dressed} total={slots.length} noun='fabric' />}
+                action={<HeaderCount n={dressed} total={slots.length} noun='fabric' />}
               >
                 {/* Свотч — `self-center`, чтобы ряд линейки остался выровнен по базовой линии
                     ТЕКСТА: пустой квадрат своей базовой линии не имеет и опустил бы подпись. */}

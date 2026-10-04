@@ -122,7 +122,13 @@ export function DxfApplyHint({
 
   return (
     <div className='flex flex-wrap items-center gap-1.5'>
-      <Button type='button' variant='secondary' size='xs' onClick={() => setOpen(true)}>
+      <Button
+        type='button'
+        variant={compact ? 'underline' : 'secondary'}
+        size='xs'
+        className={compact ? 'text-labelColor hover:text-textColor' : undefined}
+        onClick={() => setOpen(true)}
+      >
         from the patterns…
       </Button>
       {!compact && (

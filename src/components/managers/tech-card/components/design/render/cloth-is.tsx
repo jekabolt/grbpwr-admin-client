@@ -2,7 +2,7 @@ import { useEffect, useState, type JSX } from 'react';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
+import { HeaderNote } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
 import { GROUP_GAP } from '../core';
@@ -78,12 +78,12 @@ export function ClothIsRow({
         className={GROUP_GAP}
         action={
           light ? (
-            <Pill
+            <HeaderNote
               tone='attention'
               title={`the weight is settled to ${CLOTH_GSM_MIN}…${CLOTH_GSM_MAX} g/m² when the run starts`}
             >
               {CLOTH_GSM_MIN} to {CLOTH_GSM_MAX} g/m²
-            </Pill>
+            </HeaderNote>
           ) : undefined
         }
       >

@@ -39,6 +39,7 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Section, SectionStack } from 'ui/components/section';
+import { HeaderNote } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { ViewSwitch } from 'ui/components/view-switch';
@@ -2247,12 +2248,14 @@ export function ArtifactsPanel({
             lead={
               <div className='flex flex-wrap items-center gap-x-4 gap-y-1'>
                 <ViewSwitch<ArtifactKind>
+                  quiet
                   label='representation'
                   value={kind}
                   options={ARTIFACT_KINDS}
                   onChange={setKind}
                 />
                 <ViewSwitch<PlateLayout>
+                  quiet
                   label='layout'
                   value={layout}
                   options={PLATE_LAYOUTS}
@@ -2304,6 +2307,7 @@ export function ArtifactsPanel({
               className={GROUP_GAP}
               lead={
                 <AnnotationToolbar
+                  quiet
                   tool={tool}
                   onTool={setTool}
                   hint={
@@ -2396,9 +2400,9 @@ export function ArtifactsPanel({
             /* ЧИСЛО = СПИСОК. Считается ровно то, что панель ниже рисует (`sheetRows`): выноски на
                плитах документа. Открученные и мудбордные не показываются — значит и не считаются;
                пилюли «unpinned» больше нет по слову владельца (R-14), а не по забывчивости. */
-            <Pill tone='mut' data-callouts-count=''>
+            <HeaderNote tone='mut' data-callouts-count=''>
               {sheetRows.length} on {ARTIFACT_KINDS.find((k) => k.value === kind)?.label ?? kind}
-            </Pill>
+            </HeaderNote>
           }
           className='lg:w-[340px] lg:shrink-0'
         >

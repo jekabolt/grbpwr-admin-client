@@ -21,6 +21,7 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { RowTotal } from 'ui/components/row';
+import { HeaderNote } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import Input from 'ui/components/input';
 import Select from 'ui/components/select';
@@ -1939,6 +1940,7 @@ function SequenceViewSwitch({
 }) {
   return (
     <ViewSwitch<SchematicMode>
+      quiet
       label='sequence view'
       value={mode}
       onChange={onMode}
@@ -4472,7 +4474,7 @@ function OperationEditor({
       <GroupLabel
         action={
           kindFactCount > 0 ? (
-            <Pill tone='attention'>{kindFactCount}</Pill>
+            <HeaderNote tone='attention'>{kindFactCount}</HeaderNote>
           ) : kindHasControls ? (
             <Text size='micro' variant='label' component='span'>
               nothing stated yet
@@ -7170,7 +7172,7 @@ export function OperationsField({
                 <Chip
                   ref={fsChipRef}
                   nonForm
-                  dashed
+                  quiet
                   onClick={() => setFullscreen(true)}
                   title='open the assembly on a full-screen canvas'
                 >
@@ -7182,7 +7184,7 @@ export function OperationsField({
                 {techCardId ? (
                   <Chip
                     nonForm
-                    dashed
+                    quiet
                     onClick={() =>
                       window.open(
                         ROUTES.techCardAssemblyPrint.replace(':id', String(techCardId)),

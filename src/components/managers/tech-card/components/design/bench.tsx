@@ -11,6 +11,7 @@ import { GroupLabel } from 'ui/components/group-label';
 import { mediaFullToViewerItem } from 'ui/components/media-viewer';
 import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
+import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Button } from 'ui/components/button';
 import {
@@ -29,7 +30,6 @@ import {
 } from './bench-slot';
 import { COLORWAY_NONE, type BenchKind } from './bench-kinds';
 import { PictogramBackdrop, useCardGarmentFamily } from './garment-pictograms';
-import { Counter } from './core';
 import { holdFlatInput, readFlatInput, rowsWritable } from './flat-input';
 import { LockBar } from './render/generate-row';
 import { shelfBatchOrdinals } from './handles';
@@ -527,7 +527,7 @@ export function Bench({
               adding a detail…
             </Text>
           )}
-          <Counter n={filledSides} noun='side' total={bench.sides.length} />
+          <HeaderCount n={filledSides} noun='side' total={bench.sides.length} />
         </>
       }
     >

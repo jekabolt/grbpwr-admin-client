@@ -55,6 +55,7 @@ export function AnnotationToolbar({
   /** Подсказка постановки: что делать следующим кликом. Приходит от активного кадра. */
   hint,
   className,
+  quiet,
 }: {
   tool: string | null;
   onTool: (kind: string | null) => void;
@@ -62,6 +63,8 @@ export function AnnotationToolbar({
   remaining?: number;
   hint?: string;
   className?: string;
+  /** In a block or group header (owner, item 38): tools as underlined words, never framed chips. */
+  quiet?: boolean;
 }) {
   const palette = kinds ? toolsOf(kinds) : PALETTE_KINDS;
   if (remaining != null && remaining <= 0) {
@@ -80,6 +83,7 @@ export function AnnotationToolbar({
           // чипа, иначе проба ярлыка красила бы и все пробы жеста.
           data-tool={d.key}
           nonForm
+          quiet={quiet}
           dashed={tool !== d.key}
           selected={tool === d.key}
           pressed={tool === d.key}
@@ -96,7 +100,13 @@ export function AnnotationToolbar({
               {hint}
             </Text>
           )}
-          <Chip nonForm dashed onClick={() => onTool(null)} title='leave the placing mode'>
+          <Chip
+            nonForm
+            dashed
+            quiet={quiet}
+            onClick={() => onTool(null)}
+            title='leave the placing mode'
+          >
             cancel
           </Chip>
         </>

@@ -23,6 +23,7 @@ import Input from 'ui/components/input';
 import Media from 'ui/components/media';
 import { Placeholder } from 'ui/components/placeholder';
 import { Section } from 'ui/components/section';
+import { HeaderCount } from 'ui/components/section-header';
 import Select from 'ui/components/select';
 import Textarea from 'ui/components/text-area';
 import Text from 'ui/components/text';
@@ -45,7 +46,7 @@ import {
   isAgeGroupSet,
 } from '../tech-card-options';
 import { useRoleAssignments } from '../useRoles';
-import { Counter, EmptyState, GROUP_GAP, GROUP_SEAM } from './core';
+import { EmptyState, GROUP_GAP, GROUP_SEAM } from './core';
 import { cardFactsContext } from './core/card-facts';
 import { categoryChain, fitChoicesFor, fitLabel } from './fit-vocabulary';
 import { LockBar } from './render/generate-row';
@@ -632,7 +633,7 @@ export function CardDetails({
     <Section
       title='card details'
       question='— who and what this card is'
-      action={<Counter n={filled} noun='field' total={counted.length} />}
+      action={<HeaderCount n={filled} noun='field' total={counted.length} />}
       id='card-details'
       className={cn('min-w-0', GROUP_SEAM)}
     >
@@ -809,7 +810,7 @@ export function CardDetails({
                 /* two organs on one line: the count, then the one door out — `Button` is a block,
                    so without the row the door would drop under the pill */
                 <div className='flex flex-wrap items-center gap-1.5'>
-                  <Counter n={colorwayIds(ways).length} noun='colourway' />
+                  <HeaderCount n={colorwayIds(ways).length} noun='colourway' />
                   {techCardId ? (
                     <Button
                       type='button'
