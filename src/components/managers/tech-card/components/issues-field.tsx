@@ -13,6 +13,7 @@ import { TechCardFormData } from './schema';
 import { operationHeading } from './operation-options';
 import { useOperationWorkCatalog } from './useOperationWorkCatalog';
 import { useFormPieces } from './piece-picker';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 const OPEN = 'TECH_CARD_ISSUE_STATUS_OPEN';
 const RESOLVED = 'TECH_CARD_ISSUE_STATUS_RESOLVED';
@@ -480,7 +481,7 @@ export function IssuesField() {
                               toggle(key);
                             }}
                           >
-                            {isOpen ? '▾' : '▸'}
+                            <FoldCaret open={isOpen} className='ml-0' />
                           </Button>
                           <Button
                             type='button'

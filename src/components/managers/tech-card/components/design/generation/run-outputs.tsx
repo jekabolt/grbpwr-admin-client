@@ -25,6 +25,7 @@ import {
 } from './run-state';
 import { RunTile } from './run-tile';
 import { thumbUrl } from './thumb';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ WHAT A RUN BROUGHT BACK — ONE BLOCK, TWO HOSTS (26.09, O-53) ═══════════════════════════════
@@ -167,7 +168,8 @@ export function RunOutputs({
               onClick={() => setTextOpen((v) => !v)}
               aria-expanded={textOpen}
             >
-              {textOpen ? 'hide the draft ▾' : 'read the draft ▸'} · {outputText.length} characters
+              {textOpen ? 'hide the draft' : 'read the draft'}
+              <FoldCaret open={textOpen} /> · {outputText.length} characters
             </Button>
             {textOpen && (
               /* ПРОЗА МЕРИТСЯ СТРОКОЙ, А НЕ БЛОКОМ: `max-w-[75ch]` + `break-words` держат любой

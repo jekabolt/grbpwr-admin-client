@@ -15,6 +15,7 @@ import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
+import { HeaderCount, HeaderNote } from 'ui/components/section-header';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 import { flattenFieldErrors, revealField } from 'utils/field-errors';
@@ -37,7 +38,6 @@ import { draftReadGate, openGateDoor } from '../core/chain';
 import { draftInputGate, isBoardRow, moodGateSentence, type MoodGateInput } from '../core/mood-gate';
 import { useDrafted } from '../drafted-contract';
 import {
-  Counter,
   EmptyState,
   GROUP_GAP,
   GROUP_SEAM,
@@ -97,6 +97,7 @@ import {
   type ParkedDraft,
 } from './use-draft-fills';
 import { draftIdeaRefusal, refusalReason, useDraftDesignIdea } from './use-draft-idea';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * «DRAFT THE CONSTRUCTION» — ОДНА КНОПКА, ОДИН ПЛАТНЫЙ ПРОГОН, ОДИН ОТВЕТ НА ЧЕТЫРЕ ГРУППЫ.
@@ -1684,13 +1685,13 @@ export function ConstructionDraft({
      стоит словами в ряду (`read N pictures · …`). */
   const status =
     run.phase !== null ? (
-      <Pill tone='attention' data-c19-draft-status='flight'>
+      <HeaderNote tone='attention' data-c19-draft-status='flight'>
         starting…
-      </Pill>
+      </HeaderNote>
     ) : minting > 0 ? (
-      <Pill tone='attention' data-c19-draft-status='minting'>
+      <HeaderNote tone='attention' data-c19-draft-status='minting'>
         adding detail slots…
-      </Pill>
+      </HeaderNote>
     ) : null;
 
   /* ═══ `accept all N ▸` — ЕДИНСТВЕННАЯ НОВАЯ КНОПКА ВОЛНЫ В ЭТОМ БЛОКЕ (D-07, Q-03) ═════════════
@@ -1889,7 +1890,7 @@ export function ConstructionDraft({
             <GroupLabel
               flush
               className={GROUP_GAP}
-              action={<Counter n={open.length} noun='line' />}
+              action={<HeaderCount n={open.length} noun='line' />}
             >
               to decide
             </GroupLabel>
@@ -1983,7 +1984,7 @@ export function ConstructionDraft({
                 <GroupLabel
                   flush
                   className={GROUP_GAP}
-                  action={<Counter n={openDetails.length} noun='detail' />}
+                  action={<HeaderCount n={openDetails.length} noun='detail' />}
                 >
                   details for flat
                 </GroupLabel>
@@ -2093,9 +2094,7 @@ export function ConstructionDraft({
               >
                 written {writtenCount} · dismissed {dismissed.length} · hints {missing.length}
               </Text>
-              <Text size='micro' variant='label' component='span' aria-hidden='true'>
-                {logOpen ? '▾' : '▸'}
-              </Text>
+              <FoldCaret open={logOpen} className='ml-0 text-labelColor' />
             </button>
             {logOpen && (
               <div id='mb-draft-log'>
@@ -2365,7 +2364,8 @@ function DecideRow({
           onClick={onShow}
           data-c19-draft-show={row.id}
         >
-          {shown ? 'hide ▾' : 'show ▸'}
+          {shown ? 'hide' : 'show'}
+          <FoldCaret open={shown} />
         </Button>
       </div>
       {barred && (

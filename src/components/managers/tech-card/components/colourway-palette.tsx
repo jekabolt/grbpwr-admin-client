@@ -18,6 +18,7 @@ import {
   type PaletteRow,
 } from './colourway-palette-model';
 import { PantonePicker } from './pantone-picker';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ ОДИН РЕДАКТОР ПАЛИТРЫ НА ТРИ ЭКРАНА (T45) ═════════════════════════════════════════════════
@@ -456,9 +457,7 @@ export function ColourwayPaletteEditor({
               · {filled}
             </Text>
           )}
-          <Text size='micro' variant='label' component='span' aria-hidden>
-            {i18nOpen ? '▾' : '▸'}
-          </Text>
+          <FoldCaret open={i18nOpen} className='ml-0 text-labelColor' />
         </button>
         {i18nOpen &&
           (langs.length === 0 ? (

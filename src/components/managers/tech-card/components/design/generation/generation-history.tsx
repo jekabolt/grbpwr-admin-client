@@ -10,6 +10,7 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { GroupLabel } from 'ui/components/group-label';
 import { Section } from 'ui/components/section';
+import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
 import type { TechCardFormData } from '../../schema';
@@ -32,13 +33,14 @@ import { viewLabel } from '../views';
 import { closeSurface, openSurface, putOnBench, useBenchRun, type BenchKind } from './bench-store';
 import { LiveTiles } from './live-tiles';
 import { formatMoney } from './money';
-import { CountPill, RunPanel } from './run-panel';
+import { RunPanel } from './run-panel';
 import { deckAfterZoom, deckOfRuns, outputPlan, runsGallery } from './run-gallery';
 import { RunOutputs, runOutputsShown } from './run-outputs';
 import { expectedTileCount, fixSelectionOf, isRunLive, runStamp, runStateWord } from './run-state';
 import { REP_NOUN } from './run-tile';
 import { thumbUrl } from './thumb';
 import { useElapsed, useGenerationWrites, useMoreHistory, useRunPolling } from './use-generation';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * THE GENERATION HISTORY — runs, and only runs. ONE organ on five steps.
@@ -321,7 +323,8 @@ function RunRow({
             aria-label={`${open ? 'hide' : 'show'} what went into ${handle || 'this run'}`}
             title='what this run was given, what it sent and what it cost — launch-time copies'
           >
-            {open ? 'meta ▾' : 'meta ▸'}
+            meta
+            <FoldCaret open={open} />
           </Button>
 
           {/* ARCHIVE IS THE ONE COLLAPSE VERB LEFT, AND IT TAKES THE WHOLE GENERATION (T-14). It is
@@ -642,15 +645,8 @@ export function HistoryFoldHeader({
                 {historyRunsWord(count, floor)}
               </span>
             </Text>
-            <span
-              aria-hidden
-              data-history-caret=''
-              className={cn(
-                'ml-1 inline-block text-micro leading-none text-labelColor transition-transform duration-150 ease-out group-hover:text-textColor motion-reduce:transition-none',
-                open && 'rotate-90',
-              )}
-            >
-              ▸
+            <span data-history-caret='' className='text-labelColor group-hover:text-textColor'>
+              <FoldCaret open={open} />
             </span>
           </div>
         }
@@ -1232,7 +1228,8 @@ export function GenerationHistory({
                       : `every ${repRunNoun(rep)} on this card. Card-wide: ${cardWide}.`
                   }
                 >
-                  {runCountWords(rep, liveShown, liveFloor)} {runsOpen ? '▾' : '▸'}
+                  {runCountWords(rep, liveShown, liveFloor)}
+                  <FoldCaret open={runsOpen} />
                 </Button>
                 <Button
                   variant='underline'
@@ -1253,7 +1250,8 @@ export function GenerationHistory({
                     setOpenDeck(null);
                   }}
                 >
-                  · {`${archShownCount}${archFloor ? '+' : ''}`} archived ▸
+                  · {`${archShownCount}${archFloor ? '+' : ''}`} archived
+                  <FoldCaret open={archShown} />
                 </Button>
               </>
               {/* O-63 (D-62 п.4): THE BROUGHT GROUP'S DOOR — beside the shelf's, in the same line
@@ -1273,7 +1271,8 @@ export function GenerationHistory({
                     setOpenDeck(null);
                   }}
                 >
-                  · {broughtCards} brought ▸
+                  · {broughtCards} brought
+                  <FoldCaret open={broughtShown} />
                 </Button>
               )}
             </div>
@@ -1388,7 +1387,7 @@ export function GenerationHistory({
                         {visible.length} runs
                       </Text>
                     ) : (
-                      <CountPill n={visible.length} noun='run' />
+                      <HeaderCount n={visible.length} noun='run' />
                     )}
                     <span className='ml-auto'>
                       <Button
@@ -1473,7 +1472,7 @@ export function GenerationHistory({
             <GroupLabel
               action={
                 <span className='flex flex-wrap items-center gap-1.5'>
-                  <CountPill
+                  <HeaderCount
                     n={archShownCount}
                     noun={repRunNoun(rep)}
                     atLeast={archFloor}
@@ -1494,7 +1493,8 @@ export function GenerationHistory({
                       setOpenDeck(null);
                     }}
                   >
-                    hide ▾
+                    hide
+                    <FoldCaret open />
                   </Button>
                 </span>
               }
@@ -1542,7 +1542,8 @@ export function GenerationHistory({
                     setOpenDeck(null);
                   }}
                 >
-                  hide ▾
+                  hide
+                  <FoldCaret open />
                 </Button>
               }
             >

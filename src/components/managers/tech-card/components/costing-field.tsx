@@ -29,6 +29,7 @@ import { Tile, Tiles } from 'ui/components/tiles';
 import CurrencySelect from 'ui/form/fields/currency-select';
 import DecimalField from 'ui/form/fields/decimal-field';
 import TextareaField from 'ui/form/fields/textarea-field';
+import { FoldCaret } from 'ui/components/fold-caret';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { BatchComposition } from './batch-composition';
 import { bomPurposeLabel } from './bom-purpose';
@@ -1319,8 +1320,7 @@ export function CostingField({
                 </Text>
               )}
               <Text size='micro' variant='label' component='span' className='ml-auto' aria-hidden>
-                <span className='group-open:hidden'>▸</span>
-                <span className='hidden group-open:inline'>▾</span>
+                <FoldCaret open='details' />
               </Text>
             </summary>
             <div className='flex flex-col border border-t-0 border-borderColor'>
@@ -1549,8 +1549,7 @@ export function CostingField({
             </Pill>
             {costing.notes ? <Pill tone='mut'>has a note</Pill> : null}
             <Text size='micro' variant='label' component='span' className='ml-auto' aria-hidden>
-              <span className='group-open:hidden'>▸</span>
-              <span className='hidden group-open:inline'>▾</span>
+              <FoldCaret open='details' />
             </Text>
           </summary>
           <div className='flex flex-col gap-3 pt-2'>
@@ -1755,8 +1754,7 @@ export function CostingField({
               markers · totals by currency · rates
             </Text>
             <Text size='micro' variant='label' component='span' className='ml-auto' aria-hidden>
-              <span className='group-open:hidden'>▸</span>
-              <span className='hidden group-open:inline'>▾</span>
+              <FoldCaret open='details' />
             </Text>
           </summary>
           <div className='flex flex-col gap-2 pt-2'>

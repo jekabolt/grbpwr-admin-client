@@ -56,6 +56,7 @@ import {
   runStatus,
 } from './run-state';
 import { useElapsed, useRunById } from './use-generation';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * ═══ THE LATEST GENERATION — A BLOCK OF ITS OWN UNDER THE GENERATE BLOCK (O-53; 28.09, O-67) ═══
@@ -624,7 +625,8 @@ export function LatestGeneration({
           title='renders brought by hand that stand in no side — mark them into a side here'
           onClick={() => setBroughtOpen((v) => !v)}
         >
-          {broughtPlan.cards.length} brought {broughtOpen ? '▾' : '▸'}
+          {broughtPlan.cards.length} brought
+          <FoldCaret open={broughtOpen} />
         </Button>
         {broughtRun && (
           <RunOutputs

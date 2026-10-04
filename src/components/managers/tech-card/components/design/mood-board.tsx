@@ -12,10 +12,11 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
-import { Pill } from 'ui/components/pill';
 import { Section, SectionStack } from 'ui/components/section';
+import { HeaderNote } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
+import { FoldCaret } from 'ui/components/fold-caret';
 import { Arrow } from 'ui/icons/arrow';
 import { FIELD_REVEAL_EVENT, type FieldRevealDetail } from 'utils/field-errors';
 import { create } from 'zustand';
@@ -1192,16 +1193,13 @@ export function MoodBoard({
                 aria-label={open ? 'collapse the moodboard' : 'expand the moodboard'}
                 className='group cursor-pointer px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
               >
-                {/* THE SAME SIGN EVERY FOLD IN THE ADMIN WEARS — `Section`'s arrow, turned 180°
-                    when closed. The board keeps its own toggle because FOUR blocks fold together
+                {/* THE SAME SIGN EVERY FOLD IN THE ADMIN WEARS — `FoldCaret` (T40), down while
+                    folded, up while open. The board keeps its own toggle because FOUR blocks fold together
                     (this one, the callouts beside it, the description and the draft under it),
                     which one `Section` cannot do. */}
-                <Arrow
-                  aria-hidden
-                  className={cn(
-                    'shrink-0 text-labelColor group-hover:text-textColor',
-                    !open && 'rotate-180',
-                  )}
+                <FoldCaret
+                  open={open}
+                  className='ml-0 text-labelColor group-hover:text-textColor'
                 />
               </button>
             </>
@@ -1560,9 +1558,7 @@ export function MoodBoard({
                       0 ON THE BOARD»). Ноль не рисуется ни красным, ни пунктиром: пустую панель и так
                       видно, а свёрнутая полоска и без него говорит `callouts · 0`. */}
                   {calloutCount > 0 && (
-                    <Pill tone='mut' data-mb-callout-count=''>
-                      {calloutCount} on the board
-                    </Pill>
+                    <HeaderNote data-mb-callout-count=''>{calloutCount} on the board</HeaderNote>
                   )}
                   <span
                     ref={collapseDoor}

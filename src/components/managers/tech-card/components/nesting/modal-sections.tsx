@@ -9,6 +9,7 @@
 // • предупреждения) плюс перечисление причин в title. Цвет сам по себе состояние не несёт
 // (DESIGN.md: state is never carried by colour alone).
 import { Pill } from 'ui/components/pill';
+import { FoldCaret } from 'ui/components/fold-caret';
 import Text from 'ui/components/text';
 
 export type RailSectionStatus = {
@@ -82,6 +83,7 @@ export function ModalRailSection({
         <Pill tone={tone} title={reasons} className='shrink-0'>
           {tone === 'ok' ? '✓' : tone === 'warn' ? '!' : '•'}
         </Pill>
+        <FoldCaret open={open} className='ml-0 text-labelColor' />
       </button>
       {open && (
         <div className='space-y-2.5 pt-1.5' onFocusCapture={onPin} onPointerDownCapture={onPin}>

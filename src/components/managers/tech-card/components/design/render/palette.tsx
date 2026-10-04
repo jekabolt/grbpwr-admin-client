@@ -8,6 +8,7 @@ import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useId, useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
+import { FoldCaret } from 'ui/components/fold-caret';
 import { Chip } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
@@ -779,6 +780,7 @@ export function TextureGrid({
             }
           >
             {folded ? `show all ${shelf.length}` : 'show fewer'}
+            <FoldCaret open={!folded} />
           </Button>
         </div>
       )}

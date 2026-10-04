@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { cn } from 'lib/utility';
+import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
  * The reference's `.acc`: a bordered block whose header is a zebra-tinted strip.
@@ -71,7 +72,7 @@ export function Accordion({
         <span className='min-w-0 truncate'>{title}</span>
         <span className='ml-auto flex shrink-0 items-center gap-2 text-labelColor'>
           {meta}
-          <span aria-hidden>{isOpen ? '▾' : '▸'}</span>
+          <FoldCaret open={isOpen} className='ml-0' />
         </span>
       </span>
       {isOpen && <div className='p-2'>{children}</div>}
