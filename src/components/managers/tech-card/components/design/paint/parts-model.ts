@@ -136,7 +136,12 @@ export const markFontPx = (w: number, h: number): number =>
 
 /* ─────────────────────────── the answer over this flat ─────────────────────────── */
 
-export type PartGroup = { label: string; regions: number[] };
+/**
+ * One part over this flat. `key` is the part's identity across the sides of one card-level answer
+ * (`part_key`, Ф2.1 topology); '' on an answer made side by side, where only the name (`words`)
+ * can tell the same part on another side.
+ */
+export type PartGroup = { label: string; regions: number[]; key: string; words: string };
 
 export type ViewParts = {
   groups: PartGroup[];
@@ -146,10 +151,16 @@ export type ViewParts = {
   split: Map<number, string>;
   /** Region → its seed pixel (`markPoints`). */
   seeds: Int32Array;
+  /** Every group carries a `part_key` (the card-level answer), not the side-by-side one. */
+  keyed: boolean;
 };
 
 /** Names compare by their words: case, spaces. */
 export const partKey = (label: string): string => label.trim().toLowerCase().replace(/\s+/g, ' ');
+
+/** A name as a set of words ("front right" = "right front"). */
+export const nameWords = (label: string): string =>
+  [...new Set(partKey(label).split(' ').filter(Boolean))].sort().join(' ');
 
 /** A part a name can travel by (R9): a real name, not the model's leftovers. */
 export const transferable = (label: string): boolean => {
@@ -157,11 +168,27 @@ export const transferable = (label: string): boolean => {
   return k !== '' && k !== 'unnamed';
 };
 
+/** The wearer's side a side view shows (R16: the left side view shows the left parts). */
+const SIDE_OF: Record<string, string> = { side_l: 'left', side_r: 'right' };
+
+/**
+ * R16 fallback for answers without `part_key`: on a side view a name that says no side gets the
+ * side the view shows ("front body" on SIDE LEFT → "left front body").
+ */
+export const sideName = (label: string, view: string): string => {
+  const k = partKey(label);
+  const side = SIDE_OF[view];
+  if (!side || !transferable(k)) return k;
+  const words = k.split(' ');
+  return words.includes('left') || words.includes('right') ? k : `${side} ${k}`;
+};
+
 /** The suggestion laid over this flat's regions; null when it names nothing usable. */
 export function partsOf(
   s: Pick<DesignPartsSuggestion, 'parts' | 'splitNeeded'>,
   flat: Pick<FlatRegions, 'labels' | 'count' | 'w' | 'h'>,
   seeds: Int32Array = markPoints(flat),
+  view = '',
 ): ViewParts | null {
   const regionGroup = new Int32Array(flat.count + 1).fill(-1);
   const groups: PartGroup[] = [];
@@ -173,7 +200,11 @@ export function partsOf(
       regionGroup[id] = groups.length;
       regions.push(id);
     }
-    if (regions.length > 0) groups.push({ label: partKey(g.label ?? ''), regions });
+    if (regions.length === 0) continue;
+    const key = (g.partKey ?? '').trim();
+    // With a key the name is the card's own (one name across the sides); without, the side fills in.
+    const label = key ? partKey(g.label ?? '') : sideName(g.label ?? '', view);
+    groups.push({ label, regions, key, words: nameWords(label) });
   }
   if (groups.length === 0) return null;
   const split = new Map<number, string>();
@@ -181,8 +212,22 @@ export function partsOf(
     const id = Number(x.region);
     if (Number.isInteger(id) && id >= 1 && id <= flat.count) split.set(id, (x.why ?? '').trim());
   }
-  return { groups, regionGroup, split, seeds };
+  return { groups, regionGroup, split, seeds, keyed: groups.every((g) => g.key !== '') };
 }
+
+/** A suggestion row from the card-level call (its groups carry `part_key`). */
+export const keyedSuggestion = (s: Pick<DesignPartsSuggestion, 'parts'>): boolean =>
+  (s.parts ?? []).length > 0 && (s.parts ?? []).every((g) => !!(g.partKey ?? '').trim());
+
+/**
+ * The same physical part (R17): by `part_key` when both carry one; else (old answers) by the
+ * name's words, only across sides and never for the model's leftovers.
+ */
+export const samePart = (a: PartGroup, aView: string, b: PartGroup, bView: string): boolean => {
+  if (a.key && b.key) return a.key === b.key;
+  if (aView === bView) return false;
+  return transferable(a.label) && transferable(b.label) && a.words === b.words;
+};
 
 /**
  * The pixels a part click fills: under the pointer the Ф1 rule (the same-label piece + its
@@ -209,6 +254,10 @@ export function partIndices(
     }
     if (idx && idx.length) chunks.push(idx);
   }
+  return concatIndices(chunks);
+}
+
+export function concatIndices(chunks: readonly Int32Array[]): Int32Array {
   let total = 0;
   for (const c of chunks) total += c.length;
   const out = new Int32Array(total);
@@ -223,13 +272,41 @@ export function partIndices(
 /** The groups of `parts` named like `label` (R9: the same part seen from another side). */
 export const groupsNamed = (parts: ViewParts, label: string): number[] => {
   if (!transferable(label)) return [];
-  const k = partKey(label);
+  const k = nameWords(label);
   const out: number[] = [];
   parts.groups.forEach((g, i) => {
-    if (g.label === k) out.push(i);
+    if (g.words === k) out.push(i);
   });
   return out;
 };
+
+/**
+ * Every group of every side that is the same part as `group` on `view` (R17), the clicked group
+ * itself first. Sides without parts are skipped.
+ */
+export function partAcross(
+  sides: readonly { view: string; parts: ViewParts | null }[],
+  view: string,
+  group: number,
+): { view: string; groups: number[] }[] {
+  const home = sides.find((s) => s.view === view)?.parts;
+  const g = home?.groups[group];
+  if (!g) return [];
+  const out = [{ view, groups: [group] }];
+  for (const s of sides) {
+    if (!s.parts) continue;
+    const groups: number[] = [];
+    s.parts.groups.forEach((o, i) => {
+      if (s.view === view && i === group) return;
+      if (samePart(g, view, o, s.view)) groups.push(i);
+    });
+    if (groups.length === 0) continue;
+    const at = out.find((x) => x.view === s.view);
+    if (at) at.groups.push(...groups);
+    else out.push({ view: s.view, groups });
+  }
+  return out;
+}
 
 /* ─────────────────────────── one gesture over several sides ─────────────────────────── */
 

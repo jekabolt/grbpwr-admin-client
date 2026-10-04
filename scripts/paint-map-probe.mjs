@@ -344,5 +344,173 @@ ck(
   );
 }
 
+// T21 · topology (R16/R17): one part = one part_key across the sides; one click, one undo.
+{
+  const KF = {
+    parts: [
+      { label: 'Right Front', regions: [8, 10, 18], partKey: 'right-front' },
+      { label: 'left sleeve', regions: [13], partKey: 'left-sleeve' },
+      { label: 'collar', regions: [2, 3], partKey: 'collar' },
+      { label: 'unnamed', regions: [20], partKey: 'unnamed-front' },
+    ],
+  };
+  // The back names its collar differently: the key, not the name, makes it the same part.
+  const KB = {
+    parts: [
+      { label: 'back collar', regions: [1], partKey: 'collar' },
+      { label: 'left sleeve', regions: [4], partKey: 'left-sleeve' },
+      { label: 'unnamed', regions: [12], partKey: 'unnamed-back' },
+    ],
+  };
+  // A side view (the back flat stands in): collar keyed; the stale twin names "sleeve" sideless.
+  const KS = {
+    parts: [
+      { label: 'collar', regions: [1], partKey: 'collar' },
+      { label: 'sleeve', regions: [4], partKey: 'left-sleeve' },
+    ],
+  };
+  const fk = m.partsOf(KF, front, fs, 'front');
+  const bk = m.partsOf(KB, backF, undefined, 'back');
+  const sk = m.partsOf(KS, backF, undefined, 'side_l');
+  ck(
+    fk.keyed && bk.keyed && fk.groups[2].key === 'collar' && m.keyedSuggestion(KF),
+    'part_key kept; a card-level answer is keyed',
+  );
+  ck(
+    !m.keyedSuggestion(BACK) && !m.partsOf(BACK, backF).keyed,
+    'an answer without part_key is stale',
+  );
+  ck(sk.groups[1].label === 'sleeve', 'a keyed name is never side-filled', sk.groups[1].label);
+  const ss = m.partsOf(
+    {
+      parts: [
+        { label: 'Front Body', regions: [3] },
+        { label: 'right cuff', regions: [5] },
+        { label: 'unnamed', regions: [6] },
+      ],
+    },
+    backF,
+    undefined,
+    'side_l',
+  );
+  ck(
+    ss.groups[0].label === 'left front body' &&
+      ss.groups[1].label === 'right cuff' &&
+      ss.groups[2].label === 'unnamed',
+    'no part_key: side_l fills "left" into names without a side',
+    ss.groups.map((g) => g.label).join(' / '),
+  );
+  ck(
+    m.partsOf({ parts: [{ label: 'front body', regions: [3] }] }, backF, undefined, 'side_r')
+      .groups[0].label === 'right front body',
+    'side_r fills "right"',
+  );
+  const fb = m.partsOf(
+    { parts: [{ label: 'body front left', regions: [3] }] },
+    backF,
+    undefined,
+    'front',
+  );
+  ck(
+    m.samePart(ss.groups[0], 'side_l', fb.groups[0], 'front'),
+    'no part_key: names compare by word set',
+  );
+  ck(
+    !m.samePart(fk.groups[1], 'front', { ...fk.groups[1], key: 'right-sleeve' }, 'back'),
+    'two keys differ → different parts even with one name',
+  );
+  ck(
+    m.samePart(fk.groups[2], 'front', bk.groups[0], 'back'),
+    'same key → same part even with two names',
+  );
+  ck(
+    m.partAcross(
+      [
+        { view: 'front', parts: fk },
+        { view: 'back', parts: bk },
+      ],
+      'front',
+      3,
+    ).length === 1,
+    'unnamed-<view> never travels',
+  );
+  const sides3 = [
+    { view: 'front', parts: fk },
+    { view: 'back', parts: bk },
+    { view: 'side_l', parts: sk },
+    { view: 'side_r', parts: null },
+  ];
+  const acr = m.partAcross(sides3, 'back', 0);
+  ck(
+    JSON.stringify(acr) ===
+      JSON.stringify([
+        { view: 'back', groups: [0] },
+        { view: 'front', groups: [2] },
+        { view: 'side_l', groups: [0] },
+      ]),
+    'collar clicked on BACK: the collar on every side with parts, clicked side first',
+    JSON.stringify(acr),
+  );
+  // Paint it in one gesture, undo in one.
+  const L = {
+    front: new Uint32Array(front.w * front.h),
+    back: new Uint32Array(backF.w * backF.h),
+    side_l: new Uint32Array(backF.w * backF.h),
+  };
+  const F = { front, back: backF, side_l: backF };
+  const P = { front: fk, back: bk, side_l: sk };
+  const g = m.paintGesture(
+    acr.map((x, k) => ({
+      view: x.view,
+      base: 200 + k,
+      labels: L[x.view],
+      idx: m.concatIndices(
+        x.groups.map((gi) => m.partIndices(L[x.view], F[x.view], P[x.view], gi)),
+      ),
+    })),
+    A,
+  );
+  const col = (v, gi) => m.partIndices(new Uint32Array(L[v].length), F[v], P[v], gi);
+  const frontCollar = col('front', 2);
+  ck(
+    g.length === 3 &&
+      frontCollar.length > 0 &&
+      [...frontCollar].every((i) => L.front[i] === A) &&
+      [...col('back', 0)].every((i) => L.back[i] === A) &&
+      [...col('side_l', 0)].every((i) => L.side_l[i] === A) &&
+      L.front.filter((v) => v).length === frontCollar.length,
+    'one click paints the collar on all three sides and nothing else',
+  );
+  [...g].reverse().forEach((st) => m.undoDiff(L[st.view], st.diff));
+  ck(
+    Object.values(L).every((a) => a.every((v) => v === 0)),
+    'one undo clears the collar on every side',
+  );
+  // Mixed: a keyed side and a stale side still meet by name.
+  const stale = m.partsOf(
+    { parts: [{ label: 'sleeve left', regions: [4] }] },
+    backF,
+    undefined,
+    'back',
+  );
+  ck(
+    JSON.stringify(
+      m.partAcross(
+        [
+          { view: 'front', parts: fk },
+          { view: 'back', parts: stale },
+        ],
+        'front',
+        1,
+      ),
+    ) ===
+      JSON.stringify([
+        { view: 'front', groups: [1] },
+        { view: 'back', groups: [0] },
+      ]),
+    'keyed ↔ stale side: falls back to the name',
+  );
+}
+
 console.log(bad ? `\n${bad} FAIL` : '\nall ok');
 process.exit(bad ? 1 : 0);
