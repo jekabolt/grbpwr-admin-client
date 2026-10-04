@@ -96,21 +96,16 @@ export function EmptyState({
  *
  * THE RULE OF THAT FILE HOLDS HERE: an absent decimal is «not stated», never zero, and this organ
  * NEVER prints `$0.00` for it. When the amount is stated, the amount is printed and `note` is
- * dropped — a price and «priced later» cannot both be true.
+ * dropped.
  *
- * WHEN THE AMOUNT IS NOT STATED the organ prints `note` instead — by default the band's own
- * pre-run sentence, `priced by the server when the run starts`, which already stands verbatim on
- * the generate row, the construction draft and the pattern studio. That default is for the
- * POSITION BEFORE A RUN, where no price can exist yet. A reader of a FINISHED row — where an absent
- * price means «this account may not see it» (costing-shaped fields are stripped without
- * `costing:read`) — passes `note={null}` and the organ renders nothing at all, as money.ts asks.
+ * WHEN THE AMOUNT IS NOT STATED the organ prints `note` if one is given, and by default nothing at
+ * all. The old default — the pre-run sentence `priced by the server when the run starts` — is gone
+ * with every run row that printed it (owner item 34, 04.10: «этот текст не нужен»).
  */
-export const PRICED_LATER = 'priced by the server when the run starts';
-
 export function Money({
   value,
   currency,
-  note = PRICED_LATER,
+  note = null,
   className,
   ...rest
 }: {

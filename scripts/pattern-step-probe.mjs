@@ -389,7 +389,7 @@ for (const vp of VIEWPORTS) {
       ['IMAGE TO FABRIC внутри PATTERN', '#design-pattern #design-image-to-fabric', 0],
       ['карусель в блоке IMAGE TO FABRIC', '#design-image-to-fabric [data-fabric-carousel]', 1],
       ['карусель внутри PATTERN', '#design-pattern [data-fabric-carousel]', 0],
-      ['строк денег (по одной в шапке каждого блока)', '[data-probe$="run-price"]', 2],
+      ['строк «priced by the server» в шапках (item 34: сняты)', '[data-probe$="run-price"]', 0],
       ['плиток карусели', '[data-fabric-tile]', 3],
       ['живых generate', '[data-slot-generate="live"]', 5],
       // TF5: где ткань в рендере — в title плитки, под ней одна подпись (имя). Якорь — на плитке.

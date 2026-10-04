@@ -70,29 +70,15 @@ import type { Gate } from './model';
  * следующую строку и прижимается к её правому краю, но за экран не выходит. Флэт (`flat-run-row`)
  * держит тот же порядок своим `trailing` — деньги, потом дверь с `ml-auto`.
  *
- * Цены ДО прогона на проводе нет, и строка её не выдумывает: `{shape} · priced by the server when
- * the run starts` — ровно то, что известно.
+ * ═══ СТРОКИ СОСТАВА И ДЕНЕГ БОЛЬШЕ НЕТ (item 34, 04.10) ═══════════════════════════════════════
+ *
+ * Владелец: «"4 pictures · 0 notes · priced by the server when the run starts" этот текст не
+ * нужен». Строка `{shape} · priced by the server when the run starts` снята со ВСЕХ рядов вместе
+ * с параметром `shape`; ничего на её место не встало. Цена прогона — по факту, на строке прогона
+ * в истории. Всё, что выше говорит о «строке про деньги», описывает её прежнее место.
  */
 export function GenerateRow({
   gate,
-  /**
-   * What is about to be asked for, in the shape the human can check: «3 pictures · one per side».
-   *
-   * НЕОБЯЗАТЕЛЕН, И ЭТО НЕ ПОСЛАБЛЕНИЕ. Он включает СТРОКУ ПРО СОСТАВ И ДЕНЬГИ. Экран, который
-   * называет свой состав сам — через `trailing`, — молчит здесь нарочно: две строки про один и тот
-   * же запрос в шести пикселях друг от друга это ровно то, от чего уходит весь круг.
-   *
-   * ⚠ ОН БОЛЬШЕ НЕ ВКЛЮЧАЕТ ДВЕРЬ ОПИСИ, И ЭТО ПОЧИНКА ЛОЖНОЙ СВЯЗКИ, А НЕ ПОСЛАБЛЕНИЕ (r3 п.27).
-   * Раньше строка и дверь стояли под ОДНИМ условием `shape === undefined`, доводом «это один
-   * хвост». Довод был верен ровно до того дня, когда экран захотел ДВЕРЬ БЕЗ СТРОКИ: владелец снял
-   * строку состава с FABRIC RENDER и с 3D («убрать», «цена — по факту в истории»), а описи там
-   * место — это единственная поверхность, на которой видно, что именно уедет за деньги. Под старой
-   * связкой снятие строки унесло бы с собой и дверь, молча. Теперь каждое из двух условий
-   * спрашивает про СВОЙ орган: строка — про `shape`, дверь — про `onInspect`. Плитка и флэт, у
-   * которых нет ни того ни другого, рисуют ровно то же, что рисовали: свой `trailing` и ничего
-   * больше.
-   */
-  shape,
   pending,
   disabled,
   onGenerate,
@@ -102,9 +88,8 @@ export function GenerateRow({
    */
   onInspect,
   /**
-   * Хвост ряда, когда экран называет состав запроса сам. Стоит ПОСЛЕ стандартного хвоста, а не
-   * вместо него: экран волен и назвать `shape`, и дописать своё — порядок при этом остаётся один
-   * и тот же на всех пяти рядах.
+   * Хвост ряда: что экран ставит сразу за кнопкой (свои двери, состояние прогона). Стоит перед
+   * дверью описи — порядок один и тот же на всех рядах.
    */
   trailing,
   /**
@@ -126,7 +111,6 @@ export function GenerateRow({
   pendingLabel = 'starting…',
 }: {
   gate: Gate;
-  shape?: string;
   pending?: boolean;
   disabled?: boolean;
   onGenerate: () => void;
@@ -167,27 +151,6 @@ export function GenerateRow({
         <InertDoor label={label} reason={gate.reason} size='sm' />
       )}
 
-      {/* ═══ СТРОКА СОСТАВА И ДЕНЕГ — ТОЛЬКО ТОМУ, КТО НАЗВАЛ `shape` ═════════════════════════
-          Экран либо говорит о запросе стандартными словами, либо своими (`trailing`), либо не
-          говорит вовсе — на FABRIC RENDER и 3D владелец снял её, и состав читают в описи.
-
-          ПОРЯДОК — МАКЕТА (разбор в шапке файла): деньги сразу за кнопкой, дверь описи — у
-          правого края ряда, ПОСЛЕ `trailing` экрана. */}
-      {shape === undefined ? null : (
-        /* ОДНА СТРОКА ПРО ДЕНЬГИ. Справа от неё стояла фраза про исчерпанный день; дня-потолка
-           больше нет, и `data-probe` держится на самой строке, чтобы проба спрашивала орган,
-           который экран действительно рисует, а не тот, которого не стало. */
-        <Text
-          size='micro'
-          variant='label'
-          component='span'
-          data-probe='run-price'
-          className='min-w-0'
-        >
-          {shape} · priced by the server when the run starts
-        </Text>
-      )}
-
       {trailing}
 
       {/* THE PROMPT INVENTORY DOOR, AND IT IS LIVE ON BOTH GENERATIVE SCREENS.
@@ -203,16 +166,10 @@ export function GenerateRow({
           уходит на свою строку и прижимается к её правому краю, а не вылезает за него.
           (The comment stands above the expression: inside the ternary, prettier 3.2 moved it
           between runs and never settled.) */}
-      {shape === undefined && !onInspect ? null : onInspect ? (
+      {onInspect && (
         <Button variant='secondary' size='xs' className='ml-auto' onClick={onInspect}>
           what the model gets ▸
         </Button>
-      ) : (
-        <InertDoor
-          label='what the model gets ▸'
-          reason='this screen was mounted without the inventory panel — it lists what the card contributes to the run, and the composer did not hand it in'
-          className='ml-auto'
-        />
       )}
     </div>
   );

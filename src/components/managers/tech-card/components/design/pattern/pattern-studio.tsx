@@ -33,7 +33,7 @@ import { assetFull, assetLabel, assetThumb } from '../assets/model';
 import { BENCH_CELL_STYLE, InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { archivedRef, colorwayLabel } from '../colorway-picker';
-import { Counter, EmptyState, GROUP_GAP, GROUP_SEAM, Money, Reason } from '../core';
+import { Counter, EmptyState, GROUP_GAP, GROUP_SEAM, Reason } from '../core';
 import { stepById, type StepId } from '../core/chain';
 import { Thumb, useRunPolling } from '../generation';
 import { PictureTile } from '../picture-tile';
@@ -243,9 +243,6 @@ export function PatternStudio({
               title='pairs of colourway and slot that have a fabric in FABRIC RENDER'
             />
           )}
-          {/* THE ONE MONEY LINE OF THE BLOCK: no price exists on the wire before a run is asked
-              for, so it says so once here instead of ten times beside ten doors. */}
-          <Money data-probe='run-price' />
         </>
       }
     >

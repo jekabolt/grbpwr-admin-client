@@ -1831,9 +1831,6 @@ export function ConstructionDraft({
           pending={run.phase !== null}
           disabled={readOnly}
           onGenerate={() => void askForDraft()}
-          shape={`${pictureCount} picture${pictureCount === 1 ? '' : 's'} · ${boardNotes.length} note${
-            boardNotes.length === 1 ? '' : 's'
-          }`}
           onInspect={() => setInspecting(true)}
           trailing={runState}
         />

@@ -11,7 +11,7 @@ import { ASSET_PATTERN } from '../assets/model';
 import { useAssetWrites } from '../assets/use-assets';
 import { InertDoor } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
-import { Money, Reason } from '../core';
+import { Reason } from '../core';
 import { RunRefusal } from '../render/generate-row';
 import { useStartDesignRun } from '../render/use-design-run';
 import { FabricCarousel } from './fabric-carousel';
@@ -184,12 +184,7 @@ export function ImageToFabricSection({
     });
 
   return (
-    <Section
-      id='design-image-to-fabric'
-      title='image to fabric'
-      question={QUESTION}
-      action={<Money data-probe='image-run-price' />}
-    >
+    <Section id='design-image-to-fabric' title='image to fabric' question={QUESTION}>
       <div data-image-to-fabric='' className='flex items-start gap-6'>
         <PatternInput
           source={source}
