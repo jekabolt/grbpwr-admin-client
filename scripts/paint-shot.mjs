@@ -88,6 +88,27 @@ const stubNetwork = {
             };
             return { plan: clone(band.colourPlan) };
           }
+          if (name === 'SuggestDesignPartsCard') {
+            if (window.__stand === 'f2fail') throw new Error('design: the assistant is not answering');
+            const slug = (l) => l.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+            const out = body.views.map((v) => {
+              const f = (window.__fakeCard || {})[v.view] || (window.__fakeParts || {})[v.view];
+              if (!f) throw new Error('no fake parts for ' + v.view);
+              return {
+                ...f,
+                view: v.view,
+                baseMediaId: v.baseMediaId,
+                algoRev: body.algoRev,
+                parts: f.parts.map((g) => ({ ...g, partKey: g.partKey || slug(g.label) })),
+              };
+            });
+            const asked = new Set(out.map((x) => x.view));
+            window.__band.partsSuggestions = [
+              ...(window.__band.partsSuggestions || []).filter((x) => !asked.has(x.view)),
+              ...out,
+            ];
+            return { suggestions: clone(out), cached: false };
+          }
           if (name === 'SuggestDesignParts') {
             if (window.__stand === 'f2fail') throw new Error('design: the assistant is not answering');
             const suggestion = window.__fakeParts[body.view];
@@ -157,6 +178,21 @@ if (!CSS) {
 
 mkdirSync(OUT, { recursive: true });
 const FLATS = resolve(REPO, '../tmp/plans/paint-parts/f0/flats');
+// Ф2.1 stand: the right side is the left side's flat mirrored (no right-side flat in Ф0).
+const MIRROR = resolve(tmpdir(), `paint-shot-mirror-${process.pid}.png`);
+{
+  const { decode, encode } = await import('fast-png');
+  const src = decode(readFileSync(resolve(FLATS, 'c49-p124-side.png')));
+  const ch = src.channels;
+  const out = new Uint8Array(src.data.length);
+  for (let y = 0; y < src.height; y += 1)
+    for (let x = 0; x < src.width; x += 1)
+      for (let c = 0; c < ch; c += 1)
+        out[(y * src.width + x) * ch + c] =
+          src.data[(y * src.width + (src.width - 1 - x)) * ch + c];
+  const { writeFileSync } = await import('node:fs');
+  writeFileSync(MIRROR, encode({ ...src, data: out }));
+}
 const errors = [];
 const browser = await chromium.launch();
 const shots = [];
@@ -183,7 +219,10 @@ try {
     );
     await ctx.route('http://probe.local/flats/**', (route) =>
       route.fulfill({
-        path: resolve(FLATS, new URL(route.request().url()).pathname.split('/').pop()),
+        path: (() => {
+          const name = new URL(route.request().url()).pathname.split('/').pop();
+          return name === 'c49-p124-side-mirror.png' ? MIRROR : resolve(FLATS, name);
+        })(),
       }),
     );
     await ctx.route('http://probe.local/assets/**', (route) => {
@@ -197,7 +236,7 @@ try {
     await page
       .waitForFunction(
         (n) => document.querySelectorAll('[data-paint-status="ready"]').length === n,
-        stand === 'f1' ? 3 : 2,
+        stand === 'f1' ? 3 : stand.startsWith('f5') ? 4 : 2,
         { timeout: 15_000 },
       )
       .catch(async (e) => {
@@ -336,8 +375,11 @@ try {
       .waitForFunction(() => window.__paint.views.get('back')?.parts, null, { timeout: 8000 })
       .catch(() => errors.push('[f2] ASSERT: back never got its parts'));
     const asked = await page.evaluate(() => {
-      const c = window.__calls.find((x) => x.name === 'SuggestDesignParts');
-      return c ? { ...c.body, marks: window.__uploads.get(c.body.marksMediaId) } : null;
+      const c = window.__calls.find((x) => x.name === 'SuggestDesignPartsCard');
+      const b = c?.body.views.find((v) => v.view === 'back');
+      return b
+        ? { ...b, algoRev: c.body.algoRev, marks: window.__uploads.get(b.marksMediaId) }
+        : null;
     });
     if (!asked || asked.view !== 'back') errors.push(`[f2] ASSERT: asked ${asked?.view}`);
     else {
@@ -351,12 +393,14 @@ try {
       );
       shots.push(resolve(OUT, 'f2-marks-back.png'));
     }
-    if (
-      await page.evaluate(() =>
-        window.__calls.some((x) => x.name === 'SuggestDesignParts' && x.body.view === 'front'),
-      )
-    )
-      errors.push('[f2] ASSERT: front was asked although the band had its parts');
+    // The band's front row has no part_key (side by side, stale): ONE card call asks both sides.
+    const cardCalls = await page.evaluate(() =>
+      window.__calls
+        .filter((x) => x.name === 'SuggestDesignPartsCard' || x.name === 'SuggestDesignParts')
+        .map((x) => `${x.name}:${(x.body.views || [x.body]).map((v) => v.view).join('+')}`),
+    );
+    if (JSON.stringify(cardCalls) !== JSON.stringify(['SuggestDesignPartsCard:front+back']))
+      errors.push(`[f2] ASSERT: parts calls ${JSON.stringify(cardCalls)}`);
     /** Screen point of a region's seed. */
     const reg = async (view, r) => {
       const f = await page.evaluate(
@@ -605,15 +649,138 @@ try {
     await ctx.close();
   }
   {
+    // Ф2.1 topology: four sides, a stale front row → ONE card call; hover the collar on FRONT
+    // tints the collar on every side; a click paints it everywhere, one ⌘Z takes it all back.
+    const { ctx, page } = await open(1440, 1000, 'f5');
+    await page
+      .waitForFunction(
+        () => [...window.__paint.views.values()].every((v) => v.parts?.keyed),
+        null,
+        { timeout: 8000 },
+      )
+      .catch(() => errors.push('[f5] ASSERT: not every side got keyed parts'));
+    const card = await page.evaluate(() =>
+      window.__calls
+        .filter((x) => x.name === 'SuggestDesignPartsCard' || x.name === 'SuggestDesignParts')
+        .map((x) => ({
+          name: x.name,
+          views: (x.body.views || []).map((v) => ({
+            view: v.view,
+            count: v.regionCount,
+            marks: window.__uploads.get(v.marksMediaId),
+          })),
+        })),
+    );
+    const { writeFileSync } = await import('node:fs');
+    for (const v of card[0]?.views ?? []) {
+      writeFileSync(
+        resolve(OUT, `f5-marks-${v.view}.png`),
+        Buffer.from(v.marks.split(',')[1], 'base64'),
+      );
+      console.log(`f5 marks ${v.view}: ${v.count} regions`);
+    }
+    if (
+      card.length !== 1 ||
+      card[0].name !== 'SuggestDesignPartsCard' ||
+      card[0].views.length !== 4
+    )
+      errors.push(
+        `[f5] ASSERT: parts calls ${JSON.stringify(card.map((c) => [c.name, c.views.map((v) => v.view)]))}`,
+      );
+    const seedAt = async (view, r) => {
+      const f = await page.evaluate(
+        ([v, r]) => {
+          const pv = window.__paint.views.get(v);
+          const s = pv.parts.seeds[r];
+          return {
+            fx: ((s % pv.flat.w) + 0.5) / pv.flat.w,
+            fy: (Math.floor(s / pv.flat.w) + 0.5) / pv.flat.h,
+          };
+        },
+        [view, r],
+      );
+      return at(page, view, f.fx, f.fy);
+    };
+    const collarRegion = (view) =>
+      page.evaluate((v) => {
+        const p = window.__paint.views.get(v).parts;
+        return p.groups.find((g) => g.key === 'collar')?.regions[0] ?? 0;
+      }, view);
+    const hoverPx = (view) =>
+      page.evaluate((v) => {
+        const c = document.querySelector(`[data-paint-side="${v}"] canvas:nth-of-type(2)`);
+        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        let n = 0;
+        for (let i = 3; i < d.length; i += 4) if (d[i]) n += 1;
+        return n;
+      }, view);
+    const caption = (view) =>
+      page.locator(`[data-paint-side="${view}"] > div:last-child`).innerText();
+    const r = await collarRegion('front');
+    if (!r) errors.push('[f5] ASSERT: no collar on front');
+    const p = await seedAt('front', r);
+    await page.mouse.move(p.x, p.y);
+    await page.waitForTimeout(250);
+    const VIEWS = ['front', 'back', 'side_l', 'side_r'];
+    const lit = {};
+    for (const v of VIEWS) lit[v] = await hoverPx(v);
+    const caps = {};
+    for (const v of VIEWS) caps[v] = (await caption(v)).replace(/\n/g, ' ');
+    console.log(
+      `f5 hover collar: tinted px ${JSON.stringify(lit)} captions ${JSON.stringify(caps)}`,
+    );
+    for (const v of VIEWS) {
+      if (!(lit[v] > 0)) errors.push(`[f5] ASSERT: hover did not tint the collar on ${v}`);
+      if (!/collar/i.test(caps[v])) errors.push(`[f5] ASSERT: caption on ${v}: ${caps[v]}`);
+    }
+    await shoot(page, 'f5-topology-hover-collar-1440.png');
+    await page.mouse.click(p.x, p.y);
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(250);
+    const painted = () =>
+      page.evaluate(() =>
+        Object.fromEntries(
+          [...window.__paint.views.values()].map((v) => [v.view, v.labels.filter((x) => x).length]),
+        ),
+      );
+    const one = await painted();
+    console.log(`f5 after collar click: ${JSON.stringify(one)}`);
+    for (const v of VIEWS)
+      if (!(one[v] > 0)) errors.push(`[f5] ASSERT: collar not painted on ${v}`);
+    await shoot(page, 'f5-topology-collar-painted-1440.png');
+    await page.keyboard.press('Meta+z');
+    const none = await painted();
+    if (VIEWS.some((v) => none[v] !== 0))
+      errors.push(`[f5] ASSERT: one undo left ${JSON.stringify(none)}`);
+    await page.keyboard.press('Meta+Shift+z');
+    const again = await painted();
+    if (VIEWS.some((v) => again[v] !== one[v]))
+      errors.push(`[f5] ASSERT: redo ${JSON.stringify(again)}`);
+    // ⌥-click stays one region on one side.
+    await page.keyboard.press('Meta+z');
+    const sl = await seedAt('back', await collarRegion('back'));
+    await page.keyboard.down('Alt');
+    await page.mouse.click(sl.x, sl.y);
+    await page.keyboard.up('Alt');
+    const alt = await painted();
+    console.log(`f5 alt-click back collar: ${JSON.stringify(alt)}`);
+    if (!(alt.back > 0) || alt.front || alt.side_l || alt.side_r)
+      errors.push(`[f5] ASSERT: ⌥-click spread ${JSON.stringify(alt)}`);
+    await ctx.close();
+  }
+  {
     // Ф2: a refused SuggestDesignParts shows `parts · retry`.
     const { ctx, page } = await open(1440, 1000, 'f2fail');
     await page
       .waitForSelector('[data-paint-parts-retry]', { timeout: 8000 })
       .catch(() => errors.push('[f2fail] ASSERT: no parts · retry'));
-    const box = await page.locator('[data-paint-side="back"]').boundingBox();
+    // One `parts · retry` for the block, in the PARTS header (not one per side).
+    const n = await page.locator('[data-paint-parts-retry]').count();
+    if (n !== 1) errors.push(`[f2fail] ASSERT: ${n} retry pills`);
+    const box = await page.locator('[data-paint-parts] > div').first().boundingBox();
     await page.screenshot({
       path: resolve(OUT, 'f2-retry-1440.png'),
-      clip: { x: box.x - 8, y: box.y + box.height - 60, width: box.width + 16, height: 68 },
+      clip: { x: box.x - 8, y: box.y - 8, width: box.width + 16, height: box.height + 16 },
     });
     shots.push(resolve(OUT, 'f2-retry-1440.png'));
     await ctx.close();
