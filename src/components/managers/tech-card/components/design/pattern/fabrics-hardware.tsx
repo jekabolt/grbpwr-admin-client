@@ -1736,7 +1736,6 @@ function SlotCell({
         full={full}
         fullReason={fullReason}
         generateGate={generateGate}
-        onPick={onPick}
         onReplace={onReplace}
         onGenerate={onGenerate}
         onClear={onClear}
@@ -1858,6 +1857,9 @@ function IntakeCell({
 /** Hover of the enclosing selector (`group`): the 1px frame goes solid ink. */
 const HOVER_INK = 'cursor-pointer group-hover:border-solid group-hover:border-textColor';
 
+/** The tile's single-click action on a dressed cell: none — the enclosing cell selects. */
+const selectedByCell = () => {};
+
 /** A dressed cell: surface click selects (double click zooms); `zoom` also lives in the menu. */
 function FilledCell({
   slot,
@@ -1868,7 +1870,6 @@ function FilledCell({
   full,
   fullReason,
   generateGate,
-  onPick,
   onReplace,
   onGenerate,
   onClear,
@@ -1881,7 +1882,6 @@ function FilledCell({
   full: boolean;
   fullReason: string;
   generateGate: Gate;
-  onPick: () => void;
   onReplace: () => void;
   onGenerate: () => void;
   onClear: () => void;
@@ -1917,7 +1917,10 @@ function FilledCell({
         // An artwork is a cut-out PNG: its transparency reads on a checkerboard.
         className={cn('w-full border-0', artwork && CHECKERBOARD)}
         galleryGroup={url ? { key: zoomGroup.key, index: 0 } : undefined}
-        onOpen={onPick}
+        // The cell's capture click has ALREADY selected this slot. `onOpen` is here only so the
+        // tile arbitrates one click (nothing) against two (zoom); re-selecting from its delayed
+        // single fired AFTER a quick click on another cell and took the selection back (T22).
+        onOpen={selectedByCell}
         menu={{
           label: 'more',
           ariaLabel: `more for ${slot.name}`,
