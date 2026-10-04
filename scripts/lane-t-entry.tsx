@@ -17,6 +17,7 @@
 //   render-brought-cut (25) — прогон 81; лист 950 (принесён), куски 951–954 стоят во front…side_r;
 //   лист 960, кусок 961 свободен, 962 стоит во front другого… (того же sample) — группа = кусок 961
 // T22 · история FLAT монтируется свёрнутой, даже когда хозяин просит открытую: flat-history-fold (27)
+// T47 · шов от картинок верстака до `history · N runs` — 32px: workbench-air (29)
 // W2 · один прогон в LATEST и в HISTORY — одна блокировка отмены: shared-cancel (24), прогон 58
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type {
@@ -385,6 +386,26 @@ const scenes: { probe: string; node: ReactNode }[] = [
         techCardId={27}
         defaultRep='flat'
         defaultOpen
+      />
+    ),
+  },
+  {
+    // T47 · картинки верстака и строка истории под ними — шов 32px, а не ритм блока.
+    probe: 'workbench-air',
+    node: (
+      <LatestGeneration
+        band={band([run(60, 'flat', { pictures: [pic(601, 60, 'flat'), pic(602, 60, 'flat')] })])}
+        techCardId={29}
+        history={
+          <GenerationHistory
+            band={band([
+              run(60, 'flat', { pictures: [pic(601, 60, 'flat'), pic(602, 60, 'flat')] }),
+            ])}
+            techCardId={29}
+            defaultRep='flat'
+            defaultOpen={false}
+          />
+        }
       />
     ),
   },

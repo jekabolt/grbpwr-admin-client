@@ -286,6 +286,15 @@ function decksOf(plan: OutputPlan | null): { root: number; count: number }[] {
 }
 
 /**
+ * ВОЗДУХ МЕЖДУ КАРТИНКАМИ ВЕРСТАКА И СТРОКОЙ ИСТОРИИ (п. 47): «в WORKBENCH сделай гэп от картинок
+ * до хистори больше». Ритм блока (`space-y-stack`, 10px) ставил `history · N runs` вплотную под
+ * плитки, и строка читалась подписью к ним, а не своей частью блока. 32px — шире шва группы
+ * (`GROUP_SEAM`, 20px): история — другой вопрос, чем этот прогон. Ставится только там, где над
+ * историей есть картинки: без них она стоит под шапкой своим обычным шагом.
+ */
+const HISTORY_AIR = '[&>[data-workbench-history]]:!mt-8';
+
+/**
  * Pictures an editor is open over, anywhere on the step (`RunTile`'s `edit:<id>` surfaces), as a
  * sorted key — the store hands a new map on every write of any surface, the key changes only when
  * this set does.
@@ -687,7 +696,7 @@ export function LatestGeneration({
         ref={galleryGroup.anchorRef}
         className='scroll-mt-20'
       >
-        <Section title='workbench'>
+        <Section title='workbench' className={broughtBlock ? HISTORY_AIR : undefined}>
           {broughtBlock && doorsHost(broughtBlock)}
           {history}
         </Section>
@@ -746,6 +755,7 @@ export function LatestGeneration({
           GENERATE this answers (`#design-input` on FLAT, `#design-render-bench` on FABRIC RENDER). */}
       <Section
         title='workbench'
+        className={HISTORY_AIR}
         action={
           <>
             <Text size='nano' variant='label' component='span' data-latest-stamp=''>

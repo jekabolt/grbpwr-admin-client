@@ -87,6 +87,12 @@ const stubNetwork = {
 
 // Мутации в памяти сборщика: каждая возвращает одно снятое поведение обратно.
 const MUTATIONS = {
+  // T47: шов картинки → история снова ритм блока (10px).
+  'history-air': {
+    file: /generation\/latest-generation\.tsx$/,
+    from: "        title='workbench'\n        className={HISTORY_AIR}\n",
+    to: "        title='workbench'\n",
+  },
   // T37: счёт прогонов снова не подчёркнут — дверь читается как подпись.
   'fold-underline': {
     file: /generation\/generation-history\.tsx$/,
@@ -277,6 +283,22 @@ try {
     await page.waitForTimeout(150);
   };
 
+  // ══ T47 · WORKBENCH: 32px between the pictures and `history · N runs` ══
+  const air = await page.$eval(`${P('workbench-air')} [data-workbench-history]`, (h) => {
+    const prev = h.previousElementSibling;
+    return {
+      pictures: !!prev?.querySelector('[data-picture]'),
+      gap: prev
+        ? Math.round(h.getBoundingClientRect().top - prev.getBoundingClientRect().bottom)
+        : -1,
+    };
+  });
+  check(
+    'T47.1 workbench: 32px from the pictures to the history line',
+    air.pictures && air.gap === 32,
+    JSON.stringify(air),
+  );
+
   // ══ T22 · FLAT HISTORY MOUNTS FOLDED (DOM) ══
   const HF = P('flat-history-fold');
   check(
@@ -323,11 +345,7 @@ try {
   await page.hover(`${HF} [data-history-fold]`);
   await page.waitForTimeout(200);
   const foldHover = await foldLook();
-  check(
-    'T37.2 hover inks the door',
-    foldHover.ink !== shut.ink,
-    `${shut.ink} → ${foldHover.ink}`,
-  );
+  check('T37.2 hover inks the door', foldHover.ink !== shut.ink, `${shut.ink} → ${foldHover.ink}`);
   await page.click(`${HF} [data-history-fold]`);
   await page.waitForTimeout(250);
   const opened = await foldLook();
