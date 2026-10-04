@@ -334,6 +334,7 @@ export function InertDoor({
   label,
   reason,
   size = 'xs',
+  variant = 'secondary',
   className,
   reasonVisible = false,
   describedBy,
@@ -353,6 +354,11 @@ export function InertDoor({
    * с `xs`-кнопками, и менять их размер значило бы чинить одну строку и сломать тридцать шесть.
    */
   size?: 'xs' | 'sm';
+  /**
+   * `underline` — the dead twin of a header action (item 32: a door in a block's header is an
+   * underlined word, never a framed button). It ignores `size`: header words are all `xs`.
+   */
+  variant?: 'secondary' | 'underline';
   className?: string;
   /**
    * Print the reason UNDER the door as well as in `title`. Off by default — the sixteen existing
@@ -377,9 +383,21 @@ export function InertDoor({
         className,
       )}
     >
-      <Button variant='secondary' size={size} disabled aria-describedby={describedBy}>
-        {label}
-      </Button>
+      {variant === 'underline' ? (
+        <Button
+          variant='underline'
+          size='xs'
+          className='text-labelColor hover:text-textColor'
+          disabled
+          aria-describedby={describedBy}
+        >
+          {label}
+        </Button>
+      ) : (
+        <Button variant='secondary' size={size} disabled aria-describedby={describedBy}>
+          {label}
+        </Button>
+      )}
       {reasonVisible && <Reason>{reason}</Reason>}
     </span>
   );

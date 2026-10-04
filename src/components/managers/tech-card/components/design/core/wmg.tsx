@@ -361,7 +361,12 @@ export function CopyWords({
     <div>
       <GroupLabel
         action={
-          <Button variant='secondary' size='xs' onClick={() => copyText(words, say)}>
+          <Button
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+            onClick={() => copyText(words, say)}
+          >
             copy as text
           </Button>
         }

@@ -145,8 +145,9 @@ export function Fold({
             {action}
             <Button
               type='button'
-              variant='secondary'
+              variant='underline'
               size='xs'
+              className='text-labelColor hover:text-textColor'
               aria-expanded={open}
               onClick={onToggle}
               data-fold-toggle=''

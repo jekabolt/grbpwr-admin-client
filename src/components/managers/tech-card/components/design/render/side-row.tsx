@@ -918,13 +918,19 @@ export function SidesSection({
           {/* ОДНА ДВЕРЬ НА ШАПКУ, а не по кнопке в каждой ячейке: чертежи заводят здесь, но
               размечают и перебирают на своём шаге. */}
           {onGoToKind ? (
-            <Button variant='secondary' size='xs' onClick={() => onGoToKind('flat')}>
+            <Button
+              variant='underline'
+              size='xs'
+              className='text-labelColor hover:text-textColor'
+              onClick={() => onGoToKind('flat')}
+            >
               the flat bench ›
             </Button>
           ) : (
             <InertDoor
               label='the flat bench ›'
               reason='the flat bench is on the FLAT step of the rail above'
+              variant='underline'
             />
           )}
         </span>
@@ -1297,11 +1303,20 @@ export function RendersByViewGroup({
               </Pill>
             )}
             {toRender ? (
-              <Button variant='secondary' size='xs' onClick={toRender}>
+              <Button
+                variant='underline'
+                size='xs'
+                className='text-labelColor hover:text-textColor'
+                onClick={toRender}
+              >
                 fabric render ›
               </Button>
             ) : (
-              <InertDoor label='fabric render ›' reason='FABRIC RENDER is the previous cell of the rail above' />
+              <InertDoor
+                label='fabric render ›'
+                reason='FABRIC RENDER is the previous cell of the rail above'
+                variant='underline'
+              />
             )}
           </span>
         }

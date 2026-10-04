@@ -755,16 +755,18 @@ export function ReferencesSection({
       title='input — references'
       question='— what this run is given'
       /* ═══ CLEAR — В ШАПКЕ, ТИХИМ ДЕЙСТВИЕМ ЗАГОЛОВКА (item 26, 04.10; снимает D-21) ═══════════
-         Владелец: «INPUT — REFERENCES в хедер перенеси CLEAR THE INPUT ✕». Вид — тот же, что у
-         прочих действий шапок студии (`secondary`/`xs`). Поведение прежнее: вопрос с объёмом
+         Владелец: «INPUT — REFERENCES в хедер перенеси CLEAR THE INPUT ✕». Вид — подчёркнутое
+         слово, как у каждого действия шапки техкарты (item 32: «если кнопка то она всегда
+         подчеркиванием везде в техкарте»), а не кнопка в рамке. Поведение прежнее: вопрос с объёмом
          числами, роли уходят с сервера, слова — пустой строкой в форме, картинки остаются.
          Нечего чистить — дверь погашена, а не спрятана: пустое место не объясняет, куда она
          делась. */
       action={
         !readOnly && (
           <Button
-            variant='secondary'
+            variant='underline'
             size='xs'
+            className='text-labelColor hover:text-textColor'
             data-clear-prompt=''
             loading={clearing}
             disabled={inputBusy || nothingToClear}

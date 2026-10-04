@@ -1302,8 +1302,8 @@ export function PatternsField({
               {has && (
                 <Button
                   type='button'
-                  variant='secondary'
-                  size='xs'
+                  variant='underline'
+                  size='xs' className='text-labelColor hover:text-textColor'
                   title={`automatic marker of “${label}” pieces on a strip`}
                   onClick={() =>
                     setNesting({
@@ -1360,8 +1360,8 @@ export function PatternsField({
               {has && canEdit && (
                 <Button
                   type='button'
-                  variant='secondary'
-                  size='xs'
+                  variant='underline'
+                  size='xs' className='text-labelColor hover:text-textColor'
                   data-field='patterns.match'
                   title={`match the DXF pieces to the cut pieces of “${label}”`}
                   onClick={() =>
@@ -1388,8 +1388,8 @@ export function PatternsField({
               {has && canEdit && !!techCardId && (
                 <Button
                   type='button'
-                  variant='secondary'
-                  size='xs'
+                  variant='underline'
+                  size='xs' className='text-labelColor hover:text-textColor'
                   title={`measure the piece areas of “${label}” from the DXF — costing computes a lower-bound estimate from them when there is no “per garment” norm`}
                   onClick={() =>
                     setMeasuring({

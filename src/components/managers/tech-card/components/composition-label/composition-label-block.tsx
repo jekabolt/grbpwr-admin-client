@@ -792,7 +792,7 @@ export function CompositionLabelBlock({
   };
 
   const printDoor = techCardId ? (
-    <Button asChild variant='secondary' size='sm'>
+    <Button asChild variant='underline' size='xs' className='text-labelColor hover:text-textColor'>
       <Link
         to={`/tech-cards/${techCardId}/care-labels`}
         target='_blank'
@@ -806,8 +806,9 @@ export function CompositionLabelBlock({
   ) : (
     <Button
       type='button'
-      variant='secondary'
-      size='sm'
+      variant='underline'
+      size='xs'
+      className='text-labelColor hover:text-textColor'
       disabled
       data-composition-print=''
       title='save the card first: the print page reads the saved card'

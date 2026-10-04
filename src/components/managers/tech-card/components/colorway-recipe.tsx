@@ -4070,12 +4070,17 @@ function ColorwayRecipeEditor({
                 свежего чтения молча. */}
             {(colorway.colours?.length ?? 0) > 0 &&
               (applyRefusal ? (
-                <InertDoor label='apply palette to slots ›' reason={applyRefusal} size='sm' />
+                <InertDoor
+                  label='apply palette to slots ›'
+                  reason={applyRefusal}
+                  variant='underline'
+                />
               ) : (
                 <Button
                   type='button'
-                  variant='secondary'
-                  size='sm'
+                  variant='underline'
+                  size='xs'
+                  className='text-labelColor hover:text-textColor'
                   data-cw-apply-door=''
                   onClick={() => setApplying(true)}
                 >
@@ -4303,8 +4308,9 @@ function ColorwayRecipeEditor({
           action={
             <Button
               type='button'
-              variant='secondary'
-              size='sm'
+              variant='underline'
+              size='xs'
+              className='text-labelColor hover:text-textColor'
               onClick={() => onOpenStudio(colorwayId)}
             >
               open in studio ›

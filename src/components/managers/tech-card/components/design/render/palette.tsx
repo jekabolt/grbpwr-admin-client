@@ -257,7 +257,7 @@ function ClothIntake({
     /* ТИХАЯ ДВЕРЬ ЗАГОЛОВКА. `MediaSelector` принимает свой триггер (`asChild`), поэтому это
        ОДНА вторичная кнопка ряда заголовка, а не второй квадрат рядом с первым. ⌘V и бросок
        файла у неё нет — их носит рамка, а рамки здесь нет; библиотека остаётся. */
-    if (full) return <InertDoor label='+ cloth' reason={reason} />;
+    if (full) return <InertDoor label='+ cloth' reason={reason} variant='underline' />;
     return (
       <MediaSelector
         label='+ cloth'
@@ -267,7 +267,12 @@ function ClothIntake({
         showVideos={false}
         saveSelectedMedia={take}
         trigger={
-          <Button variant='secondary' size='xs' data-cloth-add-door>
+          <Button
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+            data-cloth-add-door
+          >
             + cloth
           </Button>
         }
@@ -1113,8 +1118,9 @@ function InWords({
         action={
           disabled ? undefined : (
             <Button
-              variant='secondary'
+              variant='underline'
               size='xs'
+              className='text-labelColor hover:text-textColor'
               data-words-clear=''
               disabled={words.trim() === ''}
               title='takes the words off this run — WORDS on the flat stay'
@@ -1272,8 +1278,9 @@ export function Palette({
               )}
               {!disabled && plan.plan && firstSide && !painted ? (
                 <Button
-                  variant='secondary'
+                  variant='underline'
                   size='xs'
+                  className='text-labelColor hover:text-textColor'
                   data-paint-parts=''
                   onClick={() => setPainting(firstSide)}
                   title='flood the drawing part by part in flat colours; each colour then picks its own cloth below'

@@ -150,7 +150,12 @@ export function TechCardFittings({ techCardId }: { techCardId: number }) {
         title='fittings on this style'
         question='— each has a verdict, photos and change requests that may still be unresolved'
         action={
-          <Button asChild variant='main' size='sm'>
+          <Button
+            asChild
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+          >
             <Link to={`${ROUTES.addFitting}?techCardId=${techCardId}`}>+ add fitting</Link>
           </Button>
         }

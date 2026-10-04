@@ -208,7 +208,13 @@ export function SamplesTab({
           title='new sample'
           question='— one short form; the material write-off is optional and can be done later'
           action={
-            <Button type='button' variant='secondary' size='sm' onClick={() => setExpanded('')}>
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              className='text-labelColor hover:text-textColor'
+              onClick={() => setExpanded('')}
+            >
               ← samples ({samples.length})
             </Button>
           }
@@ -252,7 +258,13 @@ export function SamplesTab({
         question='— every physical sample made; each one consumed real material and carries a cost'
         action={
           canEdit ? (
-            <Button type='button' variant='main' size='sm' onClick={() => setExpanded('new')}>
+            <Button
+              type='button'
+              variant='underline'
+              size='xs'
+              className='text-labelColor hover:text-textColor'
+              onClick={() => setExpanded('new')}
+            >
               + sample
             </Button>
           ) : undefined
@@ -836,7 +848,13 @@ function SampleEditor({
       <div className='mb-1.5 flex flex-wrap items-center gap-2 border-b-2 border-textColor pb-1'>
         {/* Going back to the board no longer risks anything: the edits are staged and counted in
             the header, and the tile they belong to says so. */}
-        <Button type='button' variant='secondary' size='sm' onClick={onClose}>
+        <Button
+          type='button'
+          variant='underline'
+          size='xs'
+          className='text-labelColor hover:text-textColor'
+          onClick={onClose}
+        >
           ← samples ({sampleCount})
         </Button>
         <Text component='h3' variant='uppercase' tracking='section' className='font-bold'>
