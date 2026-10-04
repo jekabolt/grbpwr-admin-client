@@ -98,11 +98,10 @@ import { dropWords, omittedOf, pickShownWords, settleWords, useWordsSeed } from 
  * запрос. Записки у картинок больше нет (SPEC п.10): один общий текст — garment description.
  *
  * ═══ ПОРЯДОК БЛОКА — ЭКРАН МАКЕТА (`_step-flat.js`, `fInputBlock`), РЯДАМИ, БЕЗ ЛИНЕЕК ГРУПП ═══
- *   заголовок  INPUT — REFERENCES · what this run is given (дверей в шапке нет — D-21)
+ *   заголовок  INPUT — REFERENCES · what this run is given · справа `clear the input ✕` (item 26)
  *   1.1  сетка плиток референсов (кадр 1:1, `#N` в углу, селект вида СРАЗУ под кадром) +
  *        последняя ячейка — плитка на две половины: слот медиа сверху, «draw a reference» снизу;
  *        пусто → та же плитка одна в сетке (второй пары кнопок больше нет);
- *        под сеткой справа — тихая дверь `clear the input ✕` (D-21, волна 25.09);
  *   1.2  WORDS — textarea во всю ширину (`garmentDescription`), засеянная фактами карточки, когда
  *        она пуста (D-20''/D-20'''), раз за сессию и только на экране — на сервер засев уезжает с
  *        первой правкой или с GENERATE; в правом нижнем углу счётчик `N / 2000` и `ai ✦`;
@@ -755,10 +754,27 @@ export function ReferencesSection({
     <Section
       title='input — references'
       question='— what this run is given'
-      /* ═══ В ШАПКЕ БОЛЬШЕ НЕТ НИ ОДНОЙ ДВЕРИ (D-21, волна 25.09) ══════════════════════════════
-         R2 п.19 поставил сюда CLEAR на место двух плашок; владелец в этой волне: «кнопка CLEAR не
-         в хедере блока, а уместнее». Уместнее — там, где лежит то, что она чистит: под сеткой
-         референсов, тихой текстовой дверью `clear the input ✕` (ниже). */
+      /* ═══ CLEAR — В ШАПКЕ, ТИХИМ ДЕЙСТВИЕМ ЗАГОЛОВКА (item 26, 04.10; снимает D-21) ═══════════
+         Владелец: «INPUT — REFERENCES в хедер перенеси CLEAR THE INPUT ✕». Вид — тот же, что у
+         прочих действий шапок студии (`secondary`/`xs`). Поведение прежнее: вопрос с объёмом
+         числами, роли уходят с сервера, слова — пустой строкой в форме, картинки остаются.
+         Нечего чистить — дверь погашена, а не спрятана: пустое место не объясняет, куда она
+         делась. */
+      action={
+        !readOnly && (
+          <Button
+            variant='secondary'
+            size='xs'
+            data-clear-prompt=''
+            loading={clearing}
+            disabled={inputBusy || nothingToClear}
+            onClick={() => setClearAsk(true)}
+            title='clears the words and the reference roles — the pictures stay'
+          >
+            clear the input ✕
+          </Button>
+        )
+      }
       /* Больше воздуха между рядами блока (16px вместо 10px): владелец — «дай больше спейсинга,
          чтобы проще было воспринимать». Ряды здесь разнородные — сетка, текст, двери, прогон. */
       className='space-y-block'
@@ -839,26 +855,6 @@ export function ReferencesSection({
         <Text size='micro' variant='label'>
           the input holds {INPUT_MAX} pictures — the moodboard counts separately.
         </Text>
-      )}
-
-      {/* ═══ CLEAR — ПОД СЕТКОЙ, СПРАВА, ТИХОЙ ТЕКСТОВОЙ ДВЕРЬЮ (D-21) ══════════════════════════
-          Поведение прежнее: вопрос с объёмом числами, роли уходят с сервера, слова — пустой
-          строкой в форме, картинки остаются. Нечего чистить — дверь погашена, а не спрятана:
-          пустое место не объясняет, куда она делась. */}
-      {!readOnly && (
-        <div className='flex justify-end'>
-          <Button
-            variant='underline'
-            size='sm'
-            data-clear-prompt=''
-            loading={clearing}
-            disabled={inputBusy || nothingToClear}
-            onClick={() => setClearAsk(true)}
-            title='clears the words and the reference roles — the pictures stay'
-          >
-            clear the input ✕
-          </Button>
-        </div>
       )}
 
       {/* ═══ 1.2 WORDS — один текст на весь промпт (SPEC п.10): записок у картинок нет. Поле
