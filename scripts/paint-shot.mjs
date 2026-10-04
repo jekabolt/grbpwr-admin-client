@@ -90,6 +90,10 @@ const stubNetwork = {
           }
           if (name === 'SuggestDesignPartsCard') {
             if (window.__stand === 'f2fail') throw new Error('design: the assistant is not answering');
+            if (window.__stand === 'f7' && !window.__named) {
+              window.__named = true;
+              return new Promise((ok) => setTimeout(() => ok(answer(name, body)), 1500));
+            }
             const slug = (l) => l.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
             const out = body.views.map((v) => {
               const f = (window.__fakeCard || {})[v.view] || (window.__fakeParts || {})[v.view];
@@ -193,6 +197,28 @@ const MIRROR = resolve(tmpdir(), `paint-shot-mirror-${process.pid}.png`);
   const { writeFileSync } = await import('node:fs');
   writeFileSync(MIRROR, encode({ ...src, data: out }));
 }
+// T23 stand: a bare outline (one region — no parts can be named on it, QW5 «pen only»).
+const OUTLINE = resolve(tmpdir(), `paint-shot-outline-${process.pid}.png`);
+{
+  const { encode } = await import('fast-png');
+  const W = 328,
+    H = 851;
+  const data = new Uint8Array(W * H * 4).fill(255);
+  for (let t = 0; t < 4000; t += 1) {
+    const a = (t / 4000) * Math.PI * 2;
+    const cx = W / 2 + Math.cos(a) * (W * 0.38);
+    const cy = H / 2 + Math.sin(a) * (H * 0.42);
+    for (let dy = -2; dy <= 2; dy += 1)
+      for (let dx = -2; dx <= 2; dx += 1) {
+        const x = Math.round(cx + dx);
+        const y = Math.round(cy + dy);
+        if (x < 0 || y < 0 || x >= W || y >= H) continue;
+        data.fill(0, (y * W + x) * 4, (y * W + x) * 4 + 3);
+      }
+  }
+  const { writeFileSync } = await import('node:fs');
+  writeFileSync(OUTLINE, encode({ width: W, height: H, data, channels: 4 }));
+}
 const errors = [];
 const browser = await chromium.launch();
 const shots = [];
@@ -221,6 +247,7 @@ try {
       route.fulfill({
         path: (() => {
           const name = new URL(route.request().url()).pathname.split('/').pop();
+          if (name === 'outline.png') return OUTLINE;
           return name === 'c49-p124-side-mirror.png' ? MIRROR : resolve(FLATS, name);
         })(),
       }),
@@ -236,7 +263,7 @@ try {
     await page
       .waitForFunction(
         (n) => document.querySelectorAll('[data-paint-status="ready"]').length === n,
-        stand === 'f1' ? 3 : stand.startsWith('f5') ? 4 : 2,
+        stand === 'f1' ? 3 : stand.startsWith('f5') || stand.startsWith('f7') ? 4 : 2,
         { timeout: 15_000 },
       )
       .catch(async (e) => {
@@ -499,7 +526,7 @@ try {
       errors.push('[f6] ASSERT: the plan carried a mockup');
     const mock = await page.evaluate(async () => {
       const run = window.__run();
-      const ids = await window.__paint.mockups(run.colourMaps, run.fabrics);
+      const { ids } = await window.__paint.mockups(run.colourMaps, run.fabrics);
       return {
         uses: run.fabrics.map((f) => `${f.name || f.colourHex}:${f.repeatMm}mm`),
         maps: [...ids].map(([view, id]) => ({ view, id, png: window.__uploads.get(id) })),
@@ -513,7 +540,7 @@ try {
     const guard = await page.evaluate(async () => {
       const p = window.__paint;
       const run = window.__run();
-      const again = await p.mockups(run.colourMaps, run.fabrics);
+      const { ids: again } = await p.mockups(run.colourMaps, run.fabrics);
       const rev = p.plan()?.rev;
       const asSaved = p.sendsAsSaved(run.colourMaps, rev);
       p.setFrozen(true);
@@ -838,6 +865,177 @@ try {
     console.log(`f5 alt-click back collar: ${JSON.stringify(alt)}`);
     if (!(alt.back > 0) || alt.front || alt.side_l || alt.side_r)
       errors.push(`[f5] ASSERT: ⌥-click spread ${JSON.stringify(alt)}`);
+    await ctx.close();
+  }
+  {
+    // T23 quick wins: QW5 naming… / pen only, QW1 remainder, QW9 hatch, QW8 focus, QW10 thumbnails.
+    const { ctx, page } = await open(1440, 1000, 'f7');
+    const header = async (name) => {
+      const box = await page.locator('[data-paint-parts]').boundingBox();
+      await page.screenshot({
+        path: resolve(OUT, name),
+        clip: { x: box.x - 8, y: box.y - 8, width: box.width + 16, height: box.height + 16 },
+      });
+      shots.push(resolve(OUT, name));
+    };
+    const naming = await page.locator('[data-paint-naming]').count();
+    console.log(`f7 naming pill while asked: ${naming}`);
+    if (naming !== 1) errors.push('[f7] ASSERT: no naming… while the parts are asked');
+    await header('f7-qw5-naming.png');
+    await page
+      .waitForFunction(() => window.__paint.views.get('front')?.parts?.keyed, null, {
+        timeout: 8000,
+      })
+      .catch(() => errors.push('[f7] ASSERT: front never named'));
+    await page.waitForTimeout(300);
+    const after = await page.evaluate(() => ({
+      naming: !!document.querySelector('[data-paint-naming]'),
+      rename: !!document.querySelector('[data-paint-parts-rename]'),
+      penOnly: document.querySelector('[data-paint-caption="side_r"]')?.textContent ?? '',
+      split: document.querySelector('[data-paint-caption="front"] [data-paint-split]') ? 1 : 0,
+      sent: window.__calls
+        .filter((c) => c.name === 'SuggestDesignPartsCard')
+        .map((c) => c.body.views.map((v) => v.view).join('+')),
+    }));
+    console.log(`f7 after naming: ${JSON.stringify(after)}`);
+    if (after.naming || !after.rename) errors.push('[f7] ASSERT: rename parts not in place');
+    if (!/pen only/.test(after.penOnly)) errors.push('[f7] ASSERT: side_r not pen only');
+    if (!after.split) errors.push('[f7] ASSERT: no ! by FRONT');
+    if (after.sent.some((x) => x.includes('side_r'))) errors.push('[f7] ASSERT: side_r was sent');
+    // QW5: CLICK over the pen-only side draws the pen (a vertex), not a fill.
+    const sr = await page.locator('[data-paint-side="side_r"] canvas').first().boundingBox();
+    await page.mouse.click(sr.x + sr.width * 0.5, sr.y + sr.height * 0.3);
+    await page.mouse.move(sr.x + sr.width * 0.7, sr.y + sr.height * 0.5);
+    await page.waitForTimeout(200);
+    const pen = await page.locator('[data-paint-side="side_r"] [data-paint-pen]').count();
+    const filled = await page.evaluate(
+      () => window.__paint.views.get('side_r').labels.filter((x) => x).length,
+    );
+    if (pen !== 1 || filled) errors.push(`[f7] ASSERT: pen-only click pen=${pen} filled=${filled}`);
+    await header('f7-qw5-pen-only.png');
+    await page.keyboard.press('Escape');
+    // QW1: paint the collar in CONTRAST (check) — the rest of the garment shows the REMAINDER
+    // (MAIN, rosso twill) muted; the mockup full.
+    await page.evaluate(() => {
+      const p = window.__paint;
+      p.arm([...p.materials][1].label);
+    });
+    const seed = async (view, key) => {
+      const f = await page.evaluate(
+        ([v, k]) => {
+          const pv = window.__paint.views.get(v);
+          const r = pv.parts.groups.find((g) => g.key === k).regions[0];
+          const s = pv.parts.seeds[r];
+          return {
+            fx: ((s % pv.flat.w) + 0.5) / pv.flat.w,
+            fy: (Math.floor(s / pv.flat.w) + 0.5) / pv.flat.h,
+          };
+        },
+        [view, key],
+      );
+      const box = await page.locator(`[data-paint-side="${view}"] canvas`).first().boundingBox();
+      return { x: box.x + box.width * f.fx, y: box.y + box.height * f.fy };
+    };
+    let pt = await seed('front', 'collar');
+    await page.mouse.click(pt.x, pt.y);
+    // QW6: ⇧-click the back body in DENIM → back only.
+    await page.evaluate(() => {
+      const p = window.__paint;
+      p.arm([...p.materials][2].label);
+    });
+    pt = await seed('back', 'back-body');
+    await page.keyboard.down('Shift');
+    await page.mouse.click(pt.x, pt.y);
+    await page.keyboard.up('Shift');
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(400);
+    const look = await page.evaluate(() => {
+      const p = window.__paint;
+      const v = p.views.get('front');
+      const c = document.querySelector('[data-paint-side="front"] canvas');
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      // An unpainted pixel inside the silhouette, in a region, off the lines.
+      let tinted = 0,
+        n = 0;
+      for (let i = 0; i < v.labels.length; i += 97)
+        if (!v.labels[i] && v.flat.silhouette[i] && v.flat.labels[i]) {
+          n += 1;
+          if (!(d[i * 4] > 245 && d[i * 4 + 1] > 245 && d[i * 4 + 2] > 245)) tinted += 1;
+        }
+      const sideL = p.views.get('side_l').labels.filter((x) => x).length;
+      const back = p.views.get('back').labels.filter((x) => x).length;
+      return { remainder: p.remainder(), tinted, n, sideL, back };
+    });
+    console.log(`f7 remainder: ${JSON.stringify(look)}`);
+    if (!look.remainder || look.tinted < look.n * 0.9)
+      errors.push(
+        `[f7] ASSERT: the unpainted garment is not the remainder ${JSON.stringify(look)}`,
+      );
+    await header('f7-qw1-remainder.png');
+    // QW9: the split region hatched (zoomed).
+    {
+      const box = await page.locator('[data-paint-side="front"]').boundingBox();
+      await page.screenshot({
+        path: resolve(OUT, 'f7-qw9-hatch.png'),
+        clip: {
+          x: box.x,
+          y: box.y + box.height * 0.3,
+          width: box.width,
+          height: box.height * 0.45,
+        },
+      });
+      shots.push(resolve(OUT, 'f7-qw9-hatch.png'));
+    }
+    // QW8: double-click the BACK caption → BACK alone at the block's width; Esc → back.
+    await page.dblclick('[data-paint-caption="back"]');
+    await page.waitForTimeout(300);
+    const focus = await page.evaluate(() => ({
+      sides: document.querySelectorAll('[data-paint-side]').length,
+      w: document.querySelector('[data-paint-side="back"]').getBoundingClientRect().width,
+    }));
+    console.log(`f7 focus: ${JSON.stringify(focus)}`);
+    if (focus.sides !== 1) errors.push(`[f7] ASSERT: focus shows ${focus.sides} sides`);
+    {
+      const box = await page.locator('[data-paint-parts]').boundingBox();
+      await page.setViewportSize({ width: 1440, height: Math.ceil(box.y + box.height + 40) });
+      await header('f7-qw8-focus.png');
+      await page.setViewportSize({ width: 1440, height: 1000 });
+    }
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    const unfocus = await page.locator('[data-paint-side]').count();
+    if (unfocus !== 4) errors.push(`[f7] ASSERT: Esc left ${unfocus} sides`);
+    // QW10: WHAT THE MODEL GETS — the maps and their mockups as thumbnails.
+    await page.waitForFunction(
+      () => !document.querySelector('[data-paint-tools]')?.textContent?.includes('saving'),
+      null,
+      { timeout: 8000 },
+    );
+    await page.waitForTimeout(1500);
+    await page.evaluate(() => window.__inspect(true));
+    await page
+      .waitForFunction(() => document.querySelectorAll('[data-map-thumbs] img').length >= 4, null, {
+        timeout: 8000,
+      })
+      .catch(() => errors.push('[f7] ASSERT: no map/mockup thumbnails'));
+    await page.waitForTimeout(400);
+    const line = await page.locator('[data-sent-colour-maps]').boundingBox();
+    if (line) {
+      const dlg = await page.locator('[role="dialog"]').first().boundingBox();
+      await page.screenshot({
+        path: resolve(OUT, 'f7-qw10-wmg.png'),
+        clip: {
+          x: dlg.x,
+          y: Math.max(dlg.y, line.y - 160),
+          width: dlg.width,
+          height: Math.min(420, line.height + 320),
+        },
+      });
+      shots.push(resolve(OUT, 'f7-qw10-wmg.png'));
+      console.log(
+        `f7 wmg line: ${(await page.locator('[data-sent-colour-maps]').innerText()).replace(/\n/g, ' ')}`,
+      );
+    }
     await ctx.close();
   }
   {

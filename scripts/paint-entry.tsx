@@ -4,13 +4,18 @@
 // data-URL обратно, SetDesignColourPlan пишет план в `window.__band` с проверкой ревизии.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
 import { PartsCanvas } from 'components/managers/tech-card/components/design/paint/parts-canvas';
 import { REGIONS_ALGO_REV } from 'components/managers/tech-card/components/design/paint/regions';
 import { paintRun } from 'components/managers/tech-card/components/design/paint/plan-run';
-import { usePaint } from 'components/managers/tech-card/components/design/paint/use-paint';
+import {
+  useMapLooks,
+  usePaint,
+} from 'components/managers/tech-card/components/design/paint/use-paint';
+import { WhatModelGetsRenderModal } from 'components/managers/tech-card/components/design/render/what-model-gets';
 import type { ClothSlot } from 'components/managers/tech-card/components/design/pattern/slot-fabrics';
 import { PictureGalleryProvider } from 'components/managers/tech-card/components/design/picture-tile';
 import { MaterialsPack } from 'components/managers/tech-card/components/design/render/materials-pack';
@@ -93,7 +98,10 @@ const F2 = STAND.startsWith('f2');
  * it names the front meanwhile and asks the card-level call, which answers every side with keys
  * (`__fakeCard`, authored over the TS cutter's marks — see `paint-shot.mjs`).
  */
-const F5 = STAND.startsWith('f5');
+const F5 = STAND.startsWith('f5') || STAND.startsWith('f7');
+/* T23 stand (`__stand === 'f7'`): the f5 sides, but SIDE R is a bare outline (one region — the
+   pen's only, QW5) and FRONT's left front body is flagged split_needed (QW9). */
+const F7 = STAND.startsWith('f7');
 const FAKE_PARTS: Record<string, unknown> = {
   front: {
     view: 'front',
@@ -144,7 +152,8 @@ const card = (view: string, parts: [string, string, number[]][]) => ({
   view,
   algoRev: REGIONS_ALGO_REV,
   parts: parts.map(([partKey, label, regions]) => ({ label, regions, partKey })),
-  splitNeeded: [],
+  splitNeeded:
+    F7 && view === 'front' ? [{ region: 5, why: 'left front body and pocket share it' }] : [],
   model: 'anthropic/claude-sonnet-5.5',
 });
 (window as unknown as { __fakeCard: unknown }).__fakeCard = F5
@@ -205,7 +214,7 @@ const BAND = {
         bench(1, 'front', 'c49-p122.png', 555, 852),
         bench(2, 'back', 'c49-p123.png', 556, 851),
         bench(3, 'side_l', 'c49-p124-side.png', 328, 851),
-        bench(4, 'side_r', 'c49-p124-side-mirror.png', 328, 851),
+        bench(4, 'side_r', F7 ? 'outline.png' : 'c49-p124-side-mirror.png', 328, 851),
       ]
     : F2
       ? [bench(1, 'front', 'c49-p111.png', 807, 851), bench(2, 'back', 'c49-p112.png', 807, 851)]
@@ -251,6 +260,21 @@ const SLOTS = [slot(1, 'MAIN FABRIC'), slot(2, 'CONTRAST'), slot(3, 'POCKET')];
 function Harness() {
   const { band, isLoading } = useDesignBand(1);
   const paint = usePaint(1, band, SLOTS, 11);
+  const [inspecting, setInspecting] = useState(false);
+  (window as unknown as { __inspect: unknown }).__inspect = setInspecting;
+  const run = paintRun({
+    band,
+    plan: paint.plan(),
+    slots: SLOTS,
+    colorwayId: 11,
+    colorwayLabel: 'ROSSO',
+    partNames: paint.partNames(),
+  });
+  const recipe =
+    run.kind === 'maps'
+      ? { fabrics: run.fabrics, fabricMediaId: run.fabricMediaId, colourMaps: run.colourMaps }
+      : undefined;
+  const looks = useMapLooks(paint, recipe?.colourMaps, recipe?.fabrics, inspecting);
   (window as unknown as { __paint: unknown }).__paint = paint;
   (window as unknown as { __run: unknown }).__run = () =>
     paintRun({
@@ -280,6 +304,18 @@ function Harness() {
           />
           <PartsCanvas session={paint} />
         </Section>
+        {F7 && (
+          <WhatModelGetsRenderModal
+            open={inspecting}
+            onOpenChange={setInspecting}
+            band={band}
+            kind='render'
+            recipe={recipe as never}
+            mockupsAtGenerate
+            cardFit=''
+            mapLooks={looks}
+          />
+        )}
       </div>
     </PictureGalleryProvider>
   );
