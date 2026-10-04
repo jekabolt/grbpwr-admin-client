@@ -2317,7 +2317,12 @@ export function AnnotationSurface({
                     if (!d) return null;
                     // Заштрихованная зона ловится ПО ПЛОЩАДИ: когда область закрашена, целятся в неё,
                     // а не в двухпиксельный контур по краю.
-                    const byArea = kindDef(c.kind).key === 'polygon' && !!c.filled;
+                    // ЗОНА НАНЕСЕНИЯ (artwork) — ТОЖЕ ПО ПЛОЩАДИ, И ДАЖЕ ПОД ВЗВЕДЁННЫМ ВИДОМ
+                    // (владелец, 04.10: «при нажатии на любую точку колаута артворк он должен
+                    // автоматически выделяться»). Цена: начать новую фигуру внутри зоны нанесения
+                    // одним кликом нельзя — сначала Esc.
+                    const artwork = c.spec?.t === 'artwork';
+                    const byArea = (kindDef(c.kind).key === 'polygon' && !!c.filled) || artwork;
                     return (
                       <path
                         key={`hit:${c.key}`}
@@ -2380,7 +2385,11 @@ export function AnnotationSurface({
                          */
                         style={{
                           pointerEvents:
-                            placing && selected !== c.key ? 'none' : byArea ? 'all' : 'stroke',
+                            placing && selected !== c.key && !artwork
+                              ? 'none'
+                              : byArea
+                                ? 'all'
+                                : 'stroke',
                           cursor: 'pointer',
                         }}
                         onPointerEnter={() => setHovered(c.key)}
@@ -2395,6 +2404,9 @@ export function AnnotationSurface({
                             startShapeDrag(c, e);
                             return;
                           }
+                          // Зона нанесения под взведённым видом забирает нажатие себе: иначе кадр
+                          // принял бы его за постановку, и клик и выбрал бы, и поставил.
+                          if (artwork && placing) e.stopPropagation();
                           // ГЛУШИТЬ НАЖАТИЕ ПОД ВЗВЕДЁННЫМ ВИДОМ БОЛЬШЕ НЕЧЕГО, И ЭТО НЕ ОТКАТ.
                           // Стояло `if (placing …) e.stopPropagation()` — им и лечили «клик и
                           // выбирает, и ставит»: `click` приходит ПОСЛЕ `pointerup`, то есть
@@ -2416,7 +2428,7 @@ export function AnnotationSurface({
                           // фона на этом листе нет. Сюда доходит только НАЖАТИЕ БЕЗ СДВИГА:
                           // сдвинутое ушло в перетаскивание и погасло на `justDragged` строкой
                           // выше, то есть тащить выбранную зону это не мешает.
-                          if (placing && selected === c.key) {
+                          if (placing && selected === c.key && !artwork) {
                             select(null);
                             return;
                           }
@@ -3230,11 +3242,9 @@ function Plate({
         // где плашка стоит.
         'absolute block w-max max-w-[45%] cursor-pointer whitespace-pre-wrap border bg-bgColor px-1 py-px text-left text-nano leading-tight text-textColor',
         box && 'min-w-12 px-1.5 py-1 text-micro',
-        // Смена цвета рамки с серой на чернильную — разница в один пиксель на пёстром снимке,
-        // то есть подсветки не было. Кольцо со сдвигом читается и на фотографии, и на чертеже.
-        selected
-          ? 'border-textColor outline outline-1 outline-offset-1 outline-textColor'
-          : 'border-borderColor',
+        // БЕЗ КОЛЬЦА ВЫБОРА (владелец, 04.10: «такого выделения быть не должно»). Выбор фигуры
+        // показывают её ручки; плашка лишь берёт чернильную рамку вместо серой.
+        selected ? 'border-textColor' : 'border-borderColor',
         dimmed && 'invisible',
         !interactive && 'pointer-events-none',
       )}

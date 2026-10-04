@@ -58,7 +58,6 @@ const glassFrame = (g: GlassProps | undefined) =>
   cn(
     'absolute block border border-textColor bg-bgColor text-left text-textColor',
     g ? 'cursor-pointer' : 'pointer-events-none',
-    g?.selected && 'outline outline-1 outline-offset-1 outline-textColor',
     g?.dimmed && 'invisible',
     g && !g.interactive && 'pointer-events-none',
   );
