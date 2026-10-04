@@ -20,6 +20,7 @@ import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
 import { Section } from 'ui/components/section';
+import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 
 import { wireInt } from '../../wire-int';
@@ -32,7 +33,7 @@ import {
   assetThumb,
 } from '../assets/model';
 import { useAssetBindingWrites, useAssetWrites } from '../assets/use-assets';
-import { BENCH_CELL_STYLE, BENCH_FRAME_ASPECT, InertDoor, SlotCap } from '../bench-slot';
+import { BENCH_CELL_STYLE, BENCH_FRAME_ASPECT, SlotCap } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { archivedRef, colorwayLabel } from '../colorway-picker';
 import { EmptyState, Money, PlaceOrDrawCell } from '../core';
@@ -42,7 +43,7 @@ import { isRunLive } from '../generation/run-state';
 import { ImageSlots } from '../playground/fields/image-slots';
 import { PictureTile } from '../picture-tile';
 import { Swatch } from '../render/field-row';
-import { RunRefusal } from '../render/generate-row';
+import { GenerateRow, RunRefusal } from '../render/generate-row';
 import { archivedColorwayGate, type Gate } from '../render/model';
 import {
   startRunKey,
@@ -126,9 +127,9 @@ export function FabricsHardware({
             action={
               onGoTab ? (
                 <Button
-                  variant='secondary'
+                  variant='underline'
                   size='xs'
-                  className='border-dashed'
+                  className='text-labelColor hover:text-textColor'
                   onClick={() => onGoTab('colorways')}
                 >
                   + colourway
@@ -546,7 +547,19 @@ function MaterialBench({
   const group = (title: string, list: MaterialSlot[]) =>
     list.length === 0 ? null : (
       <div className='min-w-0' data-fh-group={title}>
-        <GroupLabel flush>{`${title} · ${dressed(list)} of ${list.length}`}</GroupLabel>
+        <GroupLabel
+          flush
+          action={
+            <HeaderCount
+              n={dressed(list)}
+              total={list.length}
+              noun={title === 'fabrics' ? 'fabric' : title}
+              plural={title}
+            />
+          }
+        >
+          {title}
+        </GroupLabel>
         <div className='flex flex-wrap items-start gap-2.5 pt-1.5'>
           {list.map((slot) => {
             const key = pairKey(cwId, slot.bomItemId);
@@ -576,34 +589,16 @@ function MaterialBench({
     );
 
   return (
-    <Section
-      id='design-pattern'
-      title='bench'
-      question={cwName ? `· ${cwName}` : '· no colourway'}
-      action={
-        <>
-          <Money data-probe='run-price' />
-          {allGate.ok ? (
-            <Button
-              variant='main'
-              size='sm'
-              disabled={run.isPending}
-              title={generateTitle}
-              onClick={() => generate(batch)}
-              data-fh-generate='live'
-            >
-              {run.isPending ? 'starting…' : 'generate'}
-            </Button>
-          ) : (
-            <InertDoor label='generate' reason={allGate.reason} size='sm' />
-          )}
-        </>
-      }
-    >
+    <Section id='design-pattern' title='bench' question={cwName ? `· ${cwName}` : '· no colourway'}>
       {slots.length === 0 ? (
         <EmptyState
           action={
-            <Button variant='secondary' size='xs' onClick={() => onGoStep('mood')}>
+            <Button
+              variant='underline'
+              size='xs'
+              className='text-labelColor hover:text-textColor'
+              onClick={() => onGoStep('mood')}
+            >
               moodboard ›
             </Button>
           }
@@ -643,6 +638,19 @@ function MaterialBench({
                 onChange={(list) => setRefsDraft({ card: techCardId, list })}
               />
             </div>
+          </div>
+
+          {/* The studio's one generate row, in the body: a header frames no words (owner, item 38). */}
+          <div
+            title={allGate.ok ? generateTitle : undefined}
+            data-fh-generate={allGate.ok ? 'live' : 'inert'}
+          >
+            <GenerateRow
+              gate={allGate}
+              pending={run.isPending}
+              onGenerate={() => generate(batch)}
+              trailing={<Money data-probe='run-price' />}
+            />
           </div>
 
           {group('fabrics', fabrics)}
