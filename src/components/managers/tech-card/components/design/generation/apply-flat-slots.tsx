@@ -116,10 +116,13 @@ export function ApplyFlatSlots({
 
   return (
     <>
+      {/* Item 29: «APPLY FLAT SLOTS сделай не кнопкой а текст с подчеркиванием» — the underline
+          variant, the same quiet word as the render bench's `put the N pieces into sides ▸`. */}
       <Button
         type='button'
-        variant='secondary'
+        variant='underline'
         size='xs'
+        className='text-labelColor hover:text-textColor'
         data-apply-flat-slots={steps.length}
         loading={busy}
         disabled={disabled || busy}
