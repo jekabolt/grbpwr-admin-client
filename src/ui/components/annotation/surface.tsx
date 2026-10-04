@@ -4,6 +4,7 @@ import { cn } from 'lib/utility';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -36,6 +37,7 @@ import {
   pointsFloor,
   type AnnotationCapsKey,
 } from './kinds';
+import { boundsOf, purposeTool, specSummary, toolGeometry, type Spec } from './purpose';
 import { AnnotationDefs, CalloutShape, CALLOUT_COLOR_HEX, PlacingShape } from './shapes';
 
 // ПОВЕРХНОСТЬ УКАЗАНИЙ — картинка и всё, что на ней нарисовано и правится.
@@ -105,6 +107,10 @@ export type SurfaceCallout = {
   caps?: string;
   /** Детали кроя, о которых указание. */
   pieceLineKeys?: string[];
+  /** Назначение (`purpose.ts`); нет — обычное указание. */
+  spec?: Spec | null;
+  /** Буква разреза (A, B…) — у назначения `section`. */
+  letter?: string;
 };
 
 /**
@@ -793,7 +799,10 @@ export function AnnotationSurface({
   };
 
   const editable = !frozen && !!(onAdd || onEditPoints || onMoveLabel || onRemove);
-  const def = kindDef(tool);
+  // ИНСТРУМЕНТ МОЖЕТ БЫТЬ НАЗНАЧЕНИЕМ (`purpose.ts`): фигуру ставит его вид, а «деталь» и «арт»
+  // ставятся двумя углами прямоугольника — превью рисует прямоугольник, а не диагональ.
+  const def = kindDef(toolGeometry(tool));
+  const rectTool = !!purposeTool(tool)?.rect;
   const placing = editable && !!tool;
   /**
    * ═══ ВЗВЕДЁННЫЙ ИНСТРУМЕНТ И НАЧАТЫЙ ЖЕСТ — ДВА РАЗНЫХ СОСТОЯНИЯ (B-8a) ═══════════════════════
@@ -2402,7 +2411,25 @@ export function AnnotationSurface({
                     <circle cx={px(cursor).x} cy={px(cursor).y} r={3} fill='var(--color-textColor)' />
                   </g>
                 )}
-                {placing && points.length > 0 && (
+                {placing && rectTool && points.length === 1 && cursor && (
+                  <rect
+                    data-placing-rect=''
+                    x={Math.min(px(points[0]).x, px(cursor).x)}
+                    y={Math.min(px(points[0]).y, px(cursor).y)}
+                    width={Math.abs(px(cursor).x - px(points[0]).x)}
+                    height={Math.abs(px(cursor).y - px(points[0]).y)}
+                    fill='none'
+                    stroke={
+                      pen.color
+                        ? CALLOUT_COLOR_HEX[pen.color] ?? 'var(--color-textColor)'
+                        : 'var(--color-textColor)'
+                    }
+                    strokeWidth={1.5}
+                    strokeDasharray='4 3'
+                    opacity={0.75}
+                  />
+                )}
+                {placing && !rectTool && points.length > 0 && (
                   <PlacingShape
                     kind={def.key}
                     pts={points.map(px)}
@@ -2424,6 +2451,104 @@ export function AnnotationSurface({
                   .map((k) => pieceLabel?.(k) ?? (pieceLabel ? 'piece deleted' : undefined))
                   .filter(Boolean) as string[];
                 const text = (c.text ?? '').trim();
+                // ═══ НАЗНАЧЕНИЕ (волна callout kinds) — та же плашка, другие слова; у детали и
+                // разреза вместо плашки вставка. Перетаскивание, выбор, наведение — те же.
+                const spec = c.spec ?? null;
+                const glass = {
+                  dimmed: dim(c.key),
+                  selected: selected === c.key,
+                  interactive: !drawing,
+                  editable,
+                  onHover: (on: boolean) => setHovered(on ? c.key : null),
+                  onPointerDown: (e: ReactPointerEvent) => startLabelDrag(c, e),
+                  onPress: () => {
+                    if (justDragged.current) {
+                      justDragged.current = false;
+                      return;
+                    }
+                    if (editable) select(c.key);
+                  },
+                };
+                if (spec?.t === 'note') {
+                  // ЗАПИСКА — ПРОСТО ПРЯМОУГОЛЬНИК С ТЕКСТОМ (владелец): без номера и без лидера.
+                  return (
+                    <Plate
+                      key={`note:${c.key}`}
+                      box
+                      at={px(labelOf(c))}
+                      inv={inv}
+                      text={text}
+                      names={names}
+                      {...glass}
+                    />
+                  );
+                }
+                if (spec?.t === 'detail') {
+                  const b = boundsOf(c.points);
+                  return (
+                    <DetailInset
+                      key={`detail:${c.key}`}
+                      at={px(labelOf(c))}
+                      region={
+                        b
+                          ? { x: b.x * size.w, y: b.y * size.h, w: b.w * size.w, h: b.h * size.h }
+                          : null
+                      }
+                      frame={size}
+                      src={spec.url || shownSrc || ''}
+                      own={!!spec.url}
+                      scale={spec.scale}
+                      number={c.number}
+                      text={text}
+                      {...glass}
+                    />
+                  );
+                }
+                if (spec?.t === 'section') {
+                  const letter = c.letter || 'A';
+                  const [a, z] = c.points.map(px);
+                  return (
+                    <Fragment key={`section:${c.key}`}>
+                      {a &&
+                        z &&
+                        !glass.dimmed &&
+                        [
+                          [a, z],
+                          [z, a],
+                        ].map(([end, other], i) => {
+                          const dx = end.x - other.x;
+                          const dy = end.y - other.y;
+                          const len = Math.hypot(dx, dy) || 1;
+                          const off = 11 * inv;
+                          return (
+                            <span
+                              key={i}
+                              aria-hidden
+                              data-section-letter={letter}
+                              className='pointer-events-none absolute text-micro font-bold leading-none text-textColor [text-shadow:0_0_2px_var(--color-bgColor),0_0_2px_var(--color-bgColor)]'
+                              style={{
+                                left: end.x + (dx / len) * off,
+                                top: end.y + (dy / len) * off,
+                                transform: `translate(-50%, -50%) scale(${inv})`,
+                              }}
+                            >
+                              {letter}
+                            </span>
+                          );
+                        })}
+                      <SectionInset
+                        at={px(labelOf(c))}
+                        inv={inv}
+                        letter={letter}
+                        number={c.number}
+                        layers={spec.layers.map((l) => l.name)}
+                        text={text}
+                        {...glass}
+                      />
+                    </Fragment>
+                  );
+                }
+                const head = specSummary(spec);
                 if (d.key === 'pin') {
                   // ГДЕ СТОИТ НУМЕРОВАННЫЙ КРУЖОК, РЕШАЕТ ВЛАДЕЛЕЦ, а не этот файл.
                   //
@@ -2472,13 +2597,14 @@ export function AnnotationSurface({
                 }
                 // Пустая плашка у зоны и следа — прямоугольник «—» посреди снимка: контур уже сказал
                 // «вот здесь», и добавлять к этому нечего, пока текста нет.
-                if (!d.plateWhenEmpty && !text && names.length === 0) return null;
+                if (!d.plateWhenEmpty && !text && !head && names.length === 0) return null;
                 return (
                   <Plate
                     key={`plate:${c.key}`}
                     at={px(labelOf(c))}
                     inv={inv}
                     number={c.number}
+                    head={head}
                     text={text}
                     names={names}
                     dimmed={dim(c.key)}
@@ -2513,7 +2639,7 @@ export function AnnotationSurface({
               hovered !== null &&
               (() => {
                 const c = byKey.get(hovered);
-                if (!c || kindDef(c.kind).key !== 'pin') return null;
+                if (!c || kindDef(c.kind).key !== 'pin' || c.spec?.t === 'note') return null;
                 const names = (c.pieceLineKeys ?? [])
                   .map((k) => pieceLabel?.(k) ?? (pieceLabel ? 'piece deleted' : undefined))
                   .filter(Boolean) as string[];
@@ -3001,6 +3127,8 @@ function Plate({
   at,
   inv,
   number,
+  head,
+  box,
   text,
   names,
   dimmed,
@@ -3015,6 +3143,10 @@ function Plate({
   inv: number;
   /** Номер, которым выноску адресуют снаружи. Отсутствует — на плашке его нет. */
   number?: number;
+  /** Строка назначения (`specSummary`): первой строкой, чернилами. */
+  head?: string;
+  /** Записка-прямоугольник: крупнее текст, просторнее поля — это и есть само указание. */
+  box?: boolean;
   text: string;
   names: string[];
   dimmed: boolean;
@@ -3032,8 +3164,9 @@ function Plate({
     <span
       role='button'
       tabIndex={0}
-      title={[text, ...names].filter(Boolean).join(' · ') || 'callout'}
+      title={[head, text, ...names].filter(Boolean).join(' · ') || 'callout'}
       data-callout-selected={selected ? 'true' : undefined}
+      data-callout-note={box ? '' : undefined}
       onPointerEnter={() => onHover(true)}
       onPointerLeave={() => onHover(false)}
       onPointerDown={onPointerDown}
@@ -3055,6 +3188,7 @@ function Plate({
         // С `w-max` ширину задаёт содержимое, а упор ставит `max-w`, и оба независимы от того,
         // где плашка стоит.
         'absolute block w-max max-w-[45%] cursor-pointer whitespace-pre-wrap border bg-bgColor px-1 py-px text-left text-nano leading-tight text-textColor',
+        box && 'min-w-12 px-1.5 py-1 text-micro',
         // Смена цвета рамки с серой на чернильную — разница в один пиксель на пёстром снимке,
         // то есть подсветки не было. Кольцо со сдвигом читается и на фотографии, и на чертеже.
         selected
@@ -3089,14 +3223,15 @@ function Plate({
           столб в 668 пикселей закрывает собой предмет разговора. Поэтому обрезка живёт ровно в
           экранной ветке, а печать берёт тот же текст без потолка.
           Многоточие ВИДИМОЕ: молча укоротить — это соврать про длину записки. */}
+      {head && <span className={cn(text && 'block')}>{head}</span>}
       {text ? (
         <>
-          <span className='print:hidden'>
+          <span className={cn('print:hidden', head && 'block text-labelColor')}>
             {text.length > PLATE_TEXT_MAX ? `${text.slice(0, PLATE_TEXT_MAX).trimEnd()}…` : text}
           </span>
           <span className='hidden print:inline'>{text}</span>
         </>
-      ) : tail ? (
+      ) : tail || head ? (
         ''
       ) : (
         '—'
@@ -3104,6 +3239,194 @@ function Plate({
       {tail && (
         <span className='block uppercase tracking-label text-labelColor'>{tail}</span>
       )}
+    </span>
+  );
+}
+
+type GlassProps = {
+  dimmed: boolean;
+  selected: boolean;
+  interactive: boolean;
+  editable: boolean;
+  onHover: (on: boolean) => void;
+  onPointerDown: (e: ReactPointerEvent) => void;
+  onPress: () => void;
+};
+
+/** Общая оболочка вставок назначения: та же дверь, что у плашки (выбор, Enter, перетаскивание). */
+function glassDoor(
+  g: GlassProps,
+  title: string,
+): React.HTMLAttributes<HTMLSpanElement> & { 'data-callout-selected'?: string } {
+  return {
+    role: 'button',
+    tabIndex: 0,
+    title,
+    'data-callout-selected': g.selected ? 'true' : undefined,
+    onPointerEnter: () => g.onHover(true),
+    onPointerLeave: () => g.onHover(false),
+    onPointerDown: g.onPointerDown,
+    onClick: (e) => {
+      e.stopPropagation();
+      g.onPress();
+    },
+    onKeyDown: (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      g.onPress();
+    },
+  };
+}
+
+const glassFrame = (g: GlassProps) =>
+  cn(
+    'absolute block cursor-pointer border bg-bgColor text-left text-textColor',
+    g.selected
+      ? 'border-textColor outline outline-1 outline-offset-1 outline-textColor'
+      : 'border-textColor',
+    g.dimmed && 'invisible',
+    !g.interactive && 'pointer-events-none',
+  );
+
+const NUMBER_TAG = 'bg-textColor px-[3px] text-nano leading-tight text-bgColor tabular-nums';
+
+/**
+ * ВСТАВКА ДЕТАЛИ (владелец: «увеличенная выноска отдельного участка … с возможностью показать
+ * зазумленный кусок или своё фото из галереи»). Регион — зона на кадре; вставка стоит на месте
+ * плашки и показывает тот же снимок, увеличенный ×scale, или своё фото. Лидер от региона к вставке
+ * рисует сама зона (`CalloutShape`). Едет с картинкой при зуме: это картинка, а не подпись.
+ */
+function DetailInset({
+  at,
+  region,
+  frame,
+  src,
+  own,
+  scale,
+  number,
+  text,
+  ...g
+}: GlassProps & {
+  at: ShapePoint;
+  region: { x: number; y: number; w: number; h: number } | null;
+  frame: { w: number; h: number };
+  src: string;
+  own: boolean;
+  scale: number;
+  number?: number;
+  text: string;
+}) {
+  const rw = Math.max(region?.w ?? 0, 4);
+  const rh = Math.max(region?.h ?? 0, 4);
+  // Потолок — чтобы вставка не закрыла собой плиту: длинная сторона не больше 60 % высоты кадра.
+  const cap = Math.max(72, Math.min(220, frame.h * 0.6));
+  const k = Math.min(1, cap / Math.max(rw * scale, rh * scale));
+  const eff = scale * k;
+  const w = Math.max(32, rw * eff);
+  const h = Math.max(32, rh * eff);
+  // ВСТАВКА НЕ ВЫХОДИТ ЗА КАДР: на краю плиты она легла бы на соседнюю или на панель видов.
+  const cx = clamp(at.x, w / 2, Math.max(w / 2, frame.w - w / 2));
+  const cy = clamp(at.y, h / 2, Math.max(h / 2, frame.h - h / 2));
+  return (
+    <span
+      {...glassDoor(g, [`detail ×${scale}`, text].filter(Boolean).join(' · '))}
+      data-callout-detail=''
+      className={cn(glassFrame(g), 'overflow-visible')}
+      style={{
+        touchAction: g.editable ? 'none' : undefined,
+        left: `${cx}px`,
+        top: `${cy}px`,
+        width: w,
+        height: h,
+        transform: 'translate(-50%, -50%)',
+      }}
+    >
+      <span className='absolute inset-0 block overflow-hidden'>
+        {src &&
+          (own ? (
+            <img src={src} alt='' draggable={false} className='h-full w-full object-cover' />
+          ) : (
+            <img
+              src={src}
+              alt=''
+              draggable={false}
+              className='absolute max-w-none object-cover'
+              style={{
+                width: frame.w * eff,
+                height: frame.h * eff,
+                left: -(region?.x ?? 0) * eff,
+                top: -(region?.y ?? 0) * eff,
+              }}
+            />
+          ))}
+      </span>
+      {number != null && <span className={cn('absolute left-0 top-0', NUMBER_TAG)}>{number}</span>}
+      <span className='absolute bottom-0 right-0 bg-bgColor px-[3px] text-nano leading-tight'>
+        ×{scale}
+      </span>
+      {text && (
+        <span className='absolute left-0 top-full mt-0.5 block max-w-full truncate bg-bgColor px-[3px] text-nano leading-tight'>
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * ВСТАВКА РАЗРЕЗА (владелец: «когда важно, как уложены слои: прокладка, подкладка, бейка, шов,
+ * отстрочка»). Слои — полосами сверху вниз, имя на каждой; шапка — буквы разреза. Подпись, а не
+ * картинка: держит экранный размер при зуме, как плашка.
+ */
+function SectionInset({
+  at,
+  inv,
+  letter,
+  number,
+  layers,
+  text,
+  ...g
+}: GlassProps & {
+  at: ShapePoint;
+  inv: number;
+  letter: string;
+  number?: number;
+  layers: string[];
+  text: string;
+}) {
+  return (
+    <span
+      {...glassDoor(
+        g,
+        [`${letter}–${letter}`, layers.join(' / '), text].filter(Boolean).join(' · '),
+      )}
+      data-callout-section=''
+      className={cn(glassFrame(g), 'w-max min-w-20 max-w-[45%] text-nano leading-tight')}
+      style={{
+        touchAction: g.editable ? 'none' : undefined,
+        left: `${at.x}px`,
+        top: `${at.y}px`,
+        transform: `translate(-50%, -50%) scale(${inv})`,
+      }}
+    >
+      <span className='flex items-center gap-1 px-1 py-px'>
+        {number != null && <span className={NUMBER_TAG}>{number}</span>}
+        <span className='font-bold'>
+          {letter}–{letter}
+        </span>
+        {text && <span className='truncate text-labelColor'>{text}</span>}
+      </span>
+      {layers.map((name, i) => (
+        <span
+          key={i}
+          className={cn(
+            'block truncate border-t border-textColor px-1 py-[2px]',
+            i % 2 === 1 && 'bg-bgSecondary',
+          )}
+        >
+          {name}
+        </span>
+      ))}
     </span>
   );
 }
@@ -3126,6 +3449,7 @@ function PinLegend({
   const pins = callouts.filter(
     (c) =>
       kindDef(c.kind).key === 'pin' &&
+      c.spec?.t !== 'note' &&
       ((c.text ?? '').trim() || ((c.pieceLineKeys ?? []).length > 0 && !!pieceLabel)),
   );
   if (pins.length === 0) return null;

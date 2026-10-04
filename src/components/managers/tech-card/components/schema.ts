@@ -130,6 +130,7 @@ import {
   annotationKindToWire,
   readAnnotationCaps,
 } from 'ui/components/annotation/wire';
+import { parseSpec, specWire } from 'ui/components/annotation/purpose';
 
 // TechCardInsert.purpose is the proto ENUM (TECH_CARD_PURPOSE_*), while ListTechCards.purpose is
 // the bare entity word. The generated client types both as `string`, so swapping them compiles
@@ -1136,6 +1137,9 @@ const calloutSchema = z.object({
   //     «у этой выноски ключа нет» и на полном перезаписывающем сейве стёрло бы хранимый.
   //     Отсутствие обязано оставаться отсутствием до самого провода.
   clientRef: z.string().nullish(),
+  // НАЗНАЧЕНИЕ (волна callout kinds): JSON-объект строкой, '' = обычное указание. На провод уходит
+  // ВСЕГДА объектом (`specWire`): пустая строка там значит «не прислано».
+  spec: z.string().optional().default(''),
 });
 
 // K-3 · ПОЛНОСТЬЮ ПУСТАЯ ВЫНОСКА НЕ СОХРАНЯЕТСЯ.
@@ -2579,6 +2583,8 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // записанная до контракта, ключа не несёт, и придуманное здесь `''` означало бы «ключа нет»
       // вместо «я про ключ ничего не знаю».
       clientRef: c.clientRef ?? undefined,
+      // '' и '{}' — одно «обычное»; форма держит пустое, чтобы прочитанное без правки не было грязным.
+      spec: parseSpec(c.spec) ? (c.spec ?? '') : '',
     })),
     pieces: (insert?.pieces ?? []).map((p) => ({
       // Same rule as the BOM above — cut pieces are reconciled by line_key too, and migration 0168
@@ -3263,6 +3269,8 @@ export function mapFormToTechCardInsert(
       // `part` шлётся ПЕРВЫМ ЭЛЕМЕНТОМ СПИСКА, а не тем, что лежит в поле: сервер хранит именно
       // так, и разойтись им нельзя — на `part` стоит связь «деталь ↔ выноска» и им печатают.
       parts: calloutPartsOut(c),
+      // ВСЕГДА ОБЪЕКТ, вместе с видом: '{}' — «обычное», '' сервер прочёл бы как «не прислано».
+      spec: specWire(c.spec),
     })),
     // NF-05 cut-pieces + fabric map. bomItemIndex / fusingBomItemIndex use explicit presence
     // (>= 0 real, undefined = unset), mirroring usages.bomItemIndex.
