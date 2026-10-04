@@ -38,7 +38,7 @@ import {
   pointsFloor,
   type AnnotationCapsKey,
 } from './kinds';
-import { boundsOf, purposeTool, specSummary, toolGeometry, type Spec } from './purpose';
+import { artworkQuad, boundsOf, purposeTool, specSummary, toolGeometry, type Spec } from './purpose';
 import { setFrameAspect } from './frame-aspect';
 import { ArtworkImage, DetailInset, SectionInset, SectionLetters } from './insets';
 import { StitchPictogram } from './stitch-pictogram';
@@ -594,7 +594,7 @@ export function AnnotationSurface({
   frameClassName,
   frameStyle,
   className,
-  callouts,
+  callouts: rawCallouts,
   onAdd,
   onEditPoints,
   onMoveLabel,
@@ -630,6 +630,17 @@ export function AnnotationSurface({
   hoverNotes = false,
   hoveredKey,
 }: AnnotationSurfaceProps) {
+  // Зона нанесения читается ровно четырьмя углами (`artworkQuad`): ручки, перетаскивание и
+  // натяжка картинки видят квадрат, и первая же правка записывает его в карточку.
+  const callouts = useMemo(
+    () =>
+      rawCallouts.map((c) =>
+        c.spec?.t === 'artwork' && c.points.length !== 4 && c.points.length > 0
+          ? { ...c, points: artworkQuad(c.points) }
+          : c,
+      ),
+    [rawCallouts],
+  );
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
@@ -1789,7 +1800,7 @@ export function AnnotationSurface({
         // ПОЛ — ПО `pointsFloor`, А НЕ ПО МИНИМУМУ ПОСТАНОВКИ. У записки с двумя лучами минимум
         // постановки равен двум (она хранится как `multi`), но записка с ОДНИМ лучом законна —
         // это `label`. Пока пол читался из `points[0]`, добавленный луч снять было нечем.
-        if (c.points.length <= pointsFloor(c.kind)) return;
+        if (c.points.length <= pointsFloor(c.kind) || c.spec?.t === 'artwork') return;
         e.preventDefault();
         const next = c.points.filter((_, i) => i !== armed.index);
         setArmed(null);
@@ -2317,7 +2328,12 @@ export function AnnotationSurface({
                     if (!d) return null;
                     // Заштрихованная зона ловится ПО ПЛОЩАДИ: когда область закрашена, целятся в неё,
                     // а не в двухпиксельный контур по краю.
-                    const byArea = kindDef(c.kind).key === 'polygon' && !!c.filled;
+                    // ЗОНА НАНЕСЕНИЯ (artwork) — ТОЖЕ ПО ПЛОЩАДИ, И ДАЖЕ ПОД ВЗВЕДЁННЫМ ВИДОМ
+                    // (владелец, 04.10: «при нажатии на любую точку колаута артворк он должен
+                    // автоматически выделяться»). Цена: начать новую фигуру внутри зоны нанесения
+                    // одним кликом нельзя — сначала Esc.
+                    const artwork = c.spec?.t === 'artwork';
+                    const byArea = (kindDef(c.kind).key === 'polygon' && !!c.filled) || artwork;
                     return (
                       <path
                         key={`hit:${c.key}`}
@@ -2380,7 +2396,11 @@ export function AnnotationSurface({
                          */
                         style={{
                           pointerEvents:
-                            placing && selected !== c.key ? 'none' : byArea ? 'all' : 'stroke',
+                            placing && selected !== c.key && !artwork
+                              ? 'none'
+                              : byArea
+                                ? 'all'
+                                : 'stroke',
                           cursor: 'pointer',
                         }}
                         onPointerEnter={() => setHovered(c.key)}
@@ -2395,6 +2415,9 @@ export function AnnotationSurface({
                             startShapeDrag(c, e);
                             return;
                           }
+                          // Зона нанесения под взведённым видом забирает нажатие себе: иначе кадр
+                          // принял бы его за постановку, и клик и выбрал бы, и поставил.
+                          if (artwork && placing) e.stopPropagation();
                           // ГЛУШИТЬ НАЖАТИЕ ПОД ВЗВЕДЁННЫМ ВИДОМ БОЛЬШЕ НЕЧЕГО, И ЭТО НЕ ОТКАТ.
                           // Стояло `if (placing …) e.stopPropagation()` — им и лечили «клик и
                           // выбирает, и ставит»: `click` приходит ПОСЛЕ `pointerup`, то есть
@@ -2416,7 +2439,7 @@ export function AnnotationSurface({
                           // фона на этом листе нет. Сюда доходит только НАЖАТИЕ БЕЗ СДВИГА:
                           // сдвинутое ушло в перетаскивание и погасло на `justDragged` строкой
                           // выше, то есть тащить выбранную зону это не мешает.
-                          if (placing && selected === c.key) {
+                          if (placing && selected === c.key && !artwork) {
                             select(null);
                             return;
                           }
@@ -3022,6 +3045,26 @@ function FrameButton({
   );
 }
 
+/**
+ * ФОКУС ОТ МЫШИ НЕ РИСУЕТ РАМКУ (владелец, 04.10: «осталось это квадратное выделение у
+ * текстблока» … «его надо убрать»).
+ *
+ * ЧТО ЭТО БЫЛО. Плашка, ручки и пин — `role=button` с `tabIndex`, и клик мышью ставит на них фокус.
+ * Кольца сразу нет, но Chrome делает такой фокус «видимым» на ПЕРВОЙ ЖЕ КЛАВИШЕ (⌘Z, стрелка,
+ * Shift) — и рисует умолчательное кольцо: два пикселя тёмного с белой каймой, да ещё умноженное
+ * на `scale(inv)`. У ручки это квадрат HANDLE_HIT × inv поверх плашки — ровно то, что на снимке.
+ * Замерено стендом `scripts/plate-focus-probe.mjs`.
+ *
+ * ПОЭТОМУ: умолчательное кольцо снято, а своё тонкое чернильное — только у фокуса, пришедшего с
+ * клавиатуры (Tab). Нажатие мыши метит элемент, метка живёт до потери фокуса.
+ */
+const QUIET_FOCUS =
+  'outline-none [&:focus-visible:not([data-pointer-focus])]:outline-solid [&:focus-visible:not([data-pointer-focus])]:outline-1 [&:focus-visible:not([data-pointer-focus])]:outline-textColor';
+const markPointerFocus = (e: ReactPointerEvent<HTMLElement>) =>
+  e.currentTarget.setAttribute('data-pointer-focus', '');
+const clearPointerFocus = (e: React.FocusEvent<HTMLElement>) =>
+  e.currentTarget.removeAttribute('data-pointer-focus');
+
 /** Радиус кружка пина в экранных пикселях. */
 const R_PIN = 9;
 
@@ -3092,7 +3135,11 @@ function PinMarker({
             }
           : undefined
       }
-      onBlur={hoverNotes ? () => onHover(false) : undefined}
+      onBlur={(e) => {
+        clearPointerFocus(e);
+        if (hoverNotes) onHover(false);
+      }}
+      onPointerDownCapture={markPointerFocus}
       // Нажатие не доходит до кадра: иначе оно завело бы там жест панорамы, а его отпускание —
       // снятие выбора, которое тут же отменяло бы выбор, сделанный кликом по этому же маркеру.
       onPointerDown={(e) => {
@@ -3110,6 +3157,7 @@ function PinMarker({
       }}
       className={cn(
         'absolute flex items-center justify-center rounded-full border text-nano tabular-nums',
+        QUIET_FOCUS,
         filled ? 'bg-textColor text-bgColor' : 'bg-bgColor text-textColor',
         onDragStart ? 'cursor-move' : 'cursor-pointer',
         // ВЫБОР ПОКАЗАН КОЛЬЦОМ, А НЕ ИНВЕРСИЕЙ ЗАЛИВКИ, и это не смягчение правила «selected
@@ -3210,6 +3258,8 @@ function Plate({
       data-callout-note={box ? '' : undefined}
       onPointerEnter={() => onHover(true)}
       onPointerLeave={() => onHover(false)}
+      onPointerDownCapture={markPointerFocus}
+      onBlur={clearPointerFocus}
       onPointerDown={onPointerDown}
       onClick={(e) => {
         e.stopPropagation();
@@ -3230,11 +3280,10 @@ function Plate({
         // где плашка стоит.
         'absolute block w-max max-w-[45%] cursor-pointer whitespace-pre-wrap border bg-bgColor px-1 py-px text-left text-nano leading-tight text-textColor',
         box && 'min-w-12 px-1.5 py-1 text-micro',
-        // Смена цвета рамки с серой на чернильную — разница в один пиксель на пёстром снимке,
-        // то есть подсветки не было. Кольцо со сдвигом читается и на фотографии, и на чертеже.
-        selected
-          ? 'border-textColor outline outline-1 outline-offset-1 outline-textColor'
-          : 'border-borderColor',
+        QUIET_FOCUS,
+        // БЕЗ КОЛЬЦА ВЫБОРА (владелец, 04.10: «такого выделения быть не должно»). Выбор фигуры
+        // показывают её ручки; плашка лишь берёт чернильную рамку вместо серой.
+        selected ? 'border-textColor' : 'border-borderColor',
         dimmed && 'invisible',
         !interactive && 'pointer-events-none',
       )}
@@ -3371,7 +3420,7 @@ function Handles({
   const rhombusAt = d.key === 'arc' ? 1 : -1;
   const closed = d.key === 'polygon';
   const ghosts =
-    closed && pts.length < d.points[1]
+    closed && pts.length < d.points[1] && callout.spec?.t !== 'artwork'
       ? pts.map((p, i) => {
           const q = pts[(i + 1) % pts.length];
           return { index: i, at: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 } };
@@ -3392,7 +3441,9 @@ function Handles({
               e.stopPropagation();
               onInsert(g.index, g.at);
             }}
-            className='absolute cursor-copy'
+            onPointerDownCapture={markPointerFocus}
+            onBlur={clearPointerFocus}
+            className={cn('absolute cursor-copy', QUIET_FOCUS)}
             style={{
               left: `${at.x}px`,
               top: `${at.y}px`,
@@ -3432,7 +3483,9 @@ function Handles({
               if (justDragged()) return;
               onArm(i);
             }}
-            className='absolute cursor-move'
+            onPointerDownCapture={markPointerFocus}
+            onBlur={clearPointerFocus}
+            className={cn('absolute cursor-move', QUIET_FOCUS)}
             style={{
               left: `${at.x}px`,
               top: `${at.y}px`,

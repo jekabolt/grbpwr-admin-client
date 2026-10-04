@@ -134,6 +134,7 @@ export function PictureSlotEmpty({
   disabled,
   onSelect,
   className,
+  label = '+ add',
 }: {
   purpose: string;
   multiple?: boolean;
@@ -142,10 +143,12 @@ export function PictureSlotEmpty({
   onSelect: (media: common_MediaFull[]) => void;
   /** Cell width, when the caller composes the row itself. */
   className?: string;
+  /** The empty tile's word. */
+  label?: string;
 }): JSX.Element {
   const slot = (
     <MediaSlot
-      label='+ add'
+      label={label}
       hint={null}
       purpose={purpose}
       aspectRatio={['Custom']}

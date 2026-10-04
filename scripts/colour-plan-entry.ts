@@ -47,7 +47,13 @@ export const baseRecipe = (): common_DesignColourRecipe => ({
 });
 
 export type Side = { view: string; pictureId: number; mediaId: number; w?: number; h?: number };
-export type Asset = { id: number; name: string; mediaId: number; colourHex?: string; note?: string };
+export type Asset = {
+  id: number;
+  name: string;
+  mediaId: number;
+  colourHex?: string;
+  note?: string;
+};
 
 /**
  * ПОЛОСА-ФИКСТУРА. Ровно те поля, которые читают `benchSides`, `renderSheetViews`, `assetById` и
@@ -145,6 +151,7 @@ export function makeBand(input: {
     outputsTotalByWorkflow: undefined,
     runKinds: undefined,
     suggestPromptsModel: undefined,
+    partsSuggestions: [],
   };
 }
 

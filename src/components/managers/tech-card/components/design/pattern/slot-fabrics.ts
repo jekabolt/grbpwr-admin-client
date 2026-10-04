@@ -33,6 +33,7 @@ import { isRunLive, runOutcomeNote, runStatus } from '../generation/run-state';
 import type { Gate } from '../render/model';
 import { isRunArchived, selectVisiblePictures, stampIsSet } from '../visibility';
 import { patternRuns } from './model';
+import { trimPictogramKind } from './trim-pictograms';
 
 /**
  * ═══ STEP 3 · PATTERN — THE FABRIC OF EVERY (COLOURWAY, SLOT), AS A PURE MODEL ════════════════
@@ -247,6 +248,67 @@ export function materialSlots(
     ],
     unsavedCount,
   };
+}
+
+/* ─────────────────────────── label slots ─────────────────────────── */
+
+/** A label slot stays `hardware`; recognised by its BOM section only (stickers / hang tags are packaging). */
+export function isLabelSlot(slot: MaterialSlot): boolean {
+  return slot.section === 'TECH_CARD_BOM_SECTION_LABEL';
+}
+
+/** How a label looks — chip words (comma-free: the words list splits on `,`). */
+export const LABEL_LOOKS = ['woven', 'printed', 'satin', 'leather patch', 'rubber', 'embroidered'];
+
+/** Where a label is sewn — chip words (comma-free). */
+export const LABEL_PLACES = [
+  'centre back neck',
+  'left side seam',
+  'right side seam',
+  'inside waistband',
+  'lining',
+  'pocket',
+  'hem',
+  'sleeve',
+];
+
+/** Card LABELS placement options whose wording carries a comma, mapped to their chip word. */
+const PLACEMENT_CHIP: Record<string, string> = {
+  'neckline, centre back': 'centre back neck',
+  'waistband, inside': 'inside waistband',
+};
+
+/** A card placement as a chip word; anything else verbatim. */
+export function placementChip(placement: string): string {
+  const p = placement.trim();
+  return PLACEMENT_CHIP[p.toLowerCase()] ?? p;
+}
+
+/** What a card LABELS row tells the bench about its BOM line. */
+export type LabelSeed = { placement: string; folding: string; size: string };
+
+type GarmentLabelLike = {
+  bomItemId?: unknown;
+  placement?: string | null;
+  folding?: string | null;
+  size?: string | null;
+};
+
+/** Card label rows by their BOM line (`bomItemId > 0`); the first row of a line wins. */
+export function labelSeedsOf(
+  rows: readonly (GarmentLabelLike | null | undefined)[] | null | undefined,
+): Map<number, LabelSeed> {
+  const out = new Map<number, LabelSeed>();
+  for (const row of rows ?? []) {
+    const id = row ? wireInt(row.bomItemId) : 0;
+    if (!row || id <= 0 || out.has(id)) continue;
+    out.set(id, {
+      placement: (row.placement ?? '').trim(),
+      folding: (row.folding ?? '').trim(),
+      size: (row.size ?? '').trim(),
+    });
+  }
+  return out;
 }
 
 /* ─────────────────────────── рецепт колорвея для слота ─────────────────────────── */

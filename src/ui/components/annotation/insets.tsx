@@ -8,7 +8,7 @@ import {
 } from 'react';
 
 import { warpTriangles, type ShapePoint } from './geometry';
-import { boundsOf } from './purpose';
+import { artworkQuad, boundsOf } from './purpose';
 
 // ВСТАВКИ НАЗНАЧЕНИЯ — ОДИН РЕНДЕР НА ЭКРАН И НА БУМАГУ (волна callout kinds, T07).
 //
@@ -58,7 +58,6 @@ const glassFrame = (g: GlassProps | undefined) =>
   cn(
     'absolute block border border-textColor bg-bgColor text-left text-textColor',
     g ? 'cursor-pointer' : 'pointer-events-none',
-    g?.selected && 'outline outline-1 outline-offset-1 outline-textColor',
     g?.dimmed && 'invisible',
     g && !g.interactive && 'pointer-events-none',
   );
@@ -292,7 +291,9 @@ export function ArtworkImage({
 }) {
   const id = useId().replace(/:/g, '');
   // 200 треугольников — арифметика на микросекунды; мемо по массиву, который каждый рендер новый, ничего бы не дало.
-  const tris = quad.length === 4 ? warpTriangles(quad, 10) : [];
+  // Печать и любые старые зоны с другим числом вершин натягиваются на квадрат охвата.
+  const corners = artworkQuad(quad);
+  const tris = corners.length === 4 ? warpTriangles(corners, 10) : [];
   if (!src || quad.length < 2 || box.w < 1 || box.h < 1) return null;
   const b = boundsOf(quad);
   if (!b || b.w < 1 || b.h < 1) return null;

@@ -1,11 +1,14 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
-import { useMemo, type JSX } from 'react';
+import { cn } from 'lib/utility';
+import { useRef, useMemo, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 
 import { GROUP_GAP } from '../core';
+import { ColourPicker } from '../assets/colour-picker';
 import { assetLabel, assetThumb } from '../assets/model';
+import type { PaintSession } from '../paint/use-paint';
 import type { ClothSlot } from '../pattern/slot-fabrics';
 import { PictureTile } from '../picture-tile';
 import { boundClothsOf } from './drafts';
@@ -20,12 +23,20 @@ export function MaterialsPack({
   colorwayLabel,
   slots,
   onEdit,
+  paint,
+  disabled,
 }: {
   band: GetDesignBandResponse;
   colorwayId: number;
   colorwayLabel: string;
   slots?: readonly ClothSlot[];
   onEdit?: () => void;
+  /**
+   * PAINT THE PARTS: with flats on the bench the pack IS the palette — one tile per slot, a click
+   * arms it, `+` adds a free colour.
+   */
+  paint?: PaintSession;
+  disabled?: boolean;
 }): JSX.Element {
   const cloths = useMemo(() => {
     const byId = new Map((band.assets ?? []).map((a) => [a.id ?? 0, a]));
@@ -46,6 +57,10 @@ export function MaterialsPack({
       {cloths.length > 0 ? 'edit in materials ›' : 'materials ›'}
     </Button>
   ) : undefined;
+
+  if (paint && paint.views.size > 0) {
+    return <PaintPalette paint={paint} door={door} disabled={disabled} />;
+  }
 
   return (
     <div data-materials-pack={cloths.length}>
@@ -86,6 +101,115 @@ export function MaterialsPack({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+const TILE_BTN =
+  'group flex w-[72px] shrink-0 flex-col gap-1 text-left disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
+
+/** MATERIALS as the palette of PARTS: the armed tile wears the ink frame (as a chosen colourway). */
+function PaintPalette({
+  paint,
+  door,
+  disabled,
+}: {
+  paint: PaintSession;
+  door: React.ReactNode;
+  disabled?: boolean;
+}): JSX.Element {
+  /* `+`: the first pick of an open picker makes the colour, the next picks change it. */
+  const adding = useRef('');
+  const addingHex = paint.colours.find((c) => c.label === adding.current)?.colourHex ?? '';
+  return (
+    <div data-materials-pack={paint.materials.length} data-paint-palette=''>
+      <GroupLabel flush className={GROUP_GAP} action={door}>
+        materials
+      </GroupLabel>
+      <div className='flex flex-wrap items-start gap-2'>
+        {paint.materials.map((m) => {
+          const armed = paint.armed === m.label && paint.tool !== 'erase';
+          return (
+            <button
+              key={m.label}
+              type='button'
+              aria-pressed={armed}
+              disabled={disabled}
+              onClick={() => paint.arm(m.label)}
+              data-paint-material={m.kind === 'slot' ? m.bomItemId : m.colourHex}
+              title={m.name}
+              className={TILE_BTN}
+            >
+              {m.kind === 'slot' ? (
+                <PictureTile
+                  url={m.url}
+                  alt={m.name}
+                  aspect='1/1'
+                  fit='cover'
+                  selected={armed}
+                  className='pointer-events-none w-full'
+                />
+              ) : (
+                <span
+                  aria-hidden
+                  className={cn(
+                    'size-[72px] border border-borderColor group-hover:border-textColor',
+                    armed && 'border-2 border-textColor',
+                  )}
+                  style={{ background: m.colourHex }}
+                />
+              )}
+              <Text
+                size='micro'
+                variant={armed ? 'default' : 'label'}
+                tracking='label'
+                component='span'
+                className='w-full truncate uppercase'
+              >
+                {m.name}
+              </Text>
+            </button>
+          );
+        })}
+        <div
+          className='w-[72px] shrink-0'
+          onPointerDownCapture={() => {
+            adding.current = '';
+          }}
+        >
+          <ColourPicker
+            hex={addingHex}
+            disabled={disabled}
+            label='add a colour'
+            onPick={(hex) => {
+              if (!hex) return;
+              if (adding.current) paint.setColour(adding.current, hex);
+              else adding.current = paint.addColour(hex);
+            }}
+            face={
+              <span className={TILE_BTN} data-paint-add-colour=''>
+                <span
+                  aria-hidden
+                  className='flex size-[72px] items-center justify-center border border-dashed border-borderColor bg-bgColor text-labelColor group-hover:border-textColor group-hover:text-textColor'
+                >
+                  <Text component='span' size='control' className='font-bold'>
+                    +
+                  </Text>
+                </span>
+                <Text
+                  size='micro'
+                  variant='label'
+                  tracking='label'
+                  component='span'
+                  className='w-full truncate uppercase'
+                >
+                  colour
+                </Text>
+              </span>
+            }
+          />
+        </div>
+      </div>
     </div>
   );
 }

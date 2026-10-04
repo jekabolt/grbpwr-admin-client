@@ -19,6 +19,7 @@ import {
   useCardWords,
   useScreenWordsDropped,
 } from '../words-seed';
+import { useRenderSeed } from '../words-follow';
 import {
   EMPTY_CLOTH,
   EMPTY_RECIPE,
@@ -396,6 +397,8 @@ export type ColourDraft = {
    * то, что показано в поле: поле и провод не могут разойтись. Разбор — у засева в `useColourDraft`.
    */
   recipe: common_DesignColourRecipe;
+  /** T56: собственные слова черновика (`recipe.words` без засева) — по ним IN WORDS догоняет мудборд. */
+  ownWords?: string;
   /**
    * ЧТО СКАЗАНО ПРО САМУ ТКАНЬ ЭТОГО ПРОГОНА (H-13) — прозрачность и граммаж.
    *
@@ -619,8 +622,11 @@ export function useColourDraft(
   const wordsCard = techCardId ?? 0;
   const wordsLive = useTechCardAutosave().status !== 'off';
   const cardWords = useCardWords(wordsCard, wordsLive);
+  /* T56: у рендера свой бриф мудборда (`words-follow.ts`); пока его нет — слова флэта, как было. */
+  const renderSeed = useRenderSeed(wordsCard);
+  const defaultWords = wordsLive && renderSeed ? renderSeed : cardWords;
   const wordsDropped = useScreenWordsDropped(wordsCard, 'render');
-  const shownWords = pickScreenWords(recipe.words, wordsDropped, cardWords);
+  const shownWords = pickScreenWords(recipe.words, wordsDropped, defaultWords);
   /** На экране слова карточки, а не собственные: их и отдаёт в рецепт первое действие. */
   const wordsSeeded = shownWords !== (recipe.words ?? '');
   const shown = useMemo(
@@ -1096,6 +1102,7 @@ export function useColourDraft(
 
   const draft: ColourDraft = {
     recipe: shown,
+    ownWords: recipe.words ?? '',
     cloth,
     pantone,
     setColour: (nextPantone, hex) => {

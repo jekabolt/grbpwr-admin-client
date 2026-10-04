@@ -132,6 +132,8 @@ export const EMPTY_BAND: GetDesignBandResponse = {
   // Поля 32/33 (фаза 3) — то же правило отсутствия: бинарь без них рисует формы второй фазы.
   runKinds: undefined,
   suggestPromptsModel: undefined,
+  // AUTO PARTS (paint the parts Ф2): none yet — the canvas asks for a side it opens.
+  partsSuggestions: [],
 };
 
 export type DesignBandState = {

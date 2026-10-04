@@ -641,12 +641,16 @@ export function HistoryFoldHeader({
               data-run-count={count}
             >
               {'· '}
-              <span data-history-runs='' className='underline underline-offset-2'>
+              <span data-history-runs=''>
                 {historyRunsWord(count, floor)}
               </span>
             </Text>
-            <span data-history-caret='' className='text-labelColor group-hover:text-textColor'>
-              <FoldCaret open={open} />
+            {/* T55 (04.10): без подчёркивания, галочка под кегль `micro` (7px) и по центру строки. */}
+            <span
+              data-history-caret=''
+              className='ml-1 flex items-center text-labelColor group-hover:text-textColor'
+            >
+              <FoldCaret open={open} className='ml-0 h-[7px] w-[7px]' />
             </span>
           </div>
         }

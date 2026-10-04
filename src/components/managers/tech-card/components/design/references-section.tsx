@@ -608,7 +608,11 @@ export function ReferencesSection({
   /* Засев — общий хук флэта и FABRIC RENDER › IN WORDS (`use-words-seeding.ts`, O-61 r2): тот же
      эффект, те же входы, перенесён как есть; правила засева расписаны там. Здесь — только то, что
      нужно полю: видно ли предложение (`wordsLive`, (c)) и контекст `ai ✦` из фактов карточки. */
-  const { wordsLive, factsContext } = useWordsSeeding(techCardId, band, readOnly);
+  const { wordsLive, factsContext, rewrite, rewriting } = useWordsSeeding(
+    techCardId,
+    band,
+    readOnly,
+  );
 
   // ── сплит референса → строки входа с ролями (R-17) ──────────────────────────────────────────
   // `addToInput` СКАЗАН ЯВНО и только здесь: кадры разреза становятся референсами лишь тогда,
@@ -867,14 +871,34 @@ export function ReferencesSection({
         {/* ЗАЗОР «ПОДПИСЬ → ПОЛЕ» — ОДИН ТОКЕН НА ВСЮ СТУДИЮ (`GROUP_GAP`, r3 п.3/5). Здесь стоял
             свой `mb-0.5` (2px): подпись липла к полю, и владелец назвал это на четырёх экранах
             разом («больше спейсинга от хедеров к контенту, как в CARD DETAILS»). */}
-        <Text
-          size='nano'
-          variant='label'
-          component='span'
-          className={cn('block uppercase tracking-label', GROUP_GAP)}
-        >
-          words
-        </Text>
+        {/* T56: мудборд сменился, а WORDS правлены руками — тихая ссылка переписать. */}
+        {rewrite ? (
+          <div className={cn('flex items-baseline justify-between gap-2', GROUP_GAP)}>
+            <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
+              words
+            </Text>
+            <Button
+              variant='underline'
+              size='xs'
+              className='text-labelColor hover:text-textColor'
+              data-words-rewrite=''
+              disabled={rewriting}
+              title='the moodboard changed since these words were written — rewrite them from it'
+              onClick={rewrite}
+            >
+              {rewriting ? 'rewriting…' : 'moodboard changed · rewrite ✦'}
+            </Button>
+          </div>
+        ) : (
+          <Text
+            size='nano'
+            variant='label'
+            component='span'
+            className={cn('block uppercase tracking-label', GROUP_GAP)}
+          >
+            words
+          </Text>
+        )}
         {/* ═══ ОРГАН ПОЛЯ — ОБЩИЙ С IN WORDS РЕНДЕРА (27.09, O-61, D-60): `./words-field.tsx` ═══════
             Поле, счётчик `N / 2000` и `ai ✦` в правом нижнем углу, строка «+N omitted» — один орган
             на оба экрана, вынесенный отсюда без изменения поведения: те же пропы, тот же DOM. Здесь
