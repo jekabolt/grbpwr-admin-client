@@ -17492,6 +17492,56 @@ export type DraftDesignIdeaResponse = {
   construction: common_DesignConstructionDraft | undefined;
 };
 
+export type GenerateDesignQuizRequest = {
+  techCardId: number | undefined;
+};
+
+export type DesignQuizQuestion = {
+  id: string | undefined;
+  category: string | undefined;
+  part: string | undefined;
+  family: string | undefined;
+  view: string | undefined;
+  kind: string | undefined;
+  question: string | undefined;
+  options: string[] | undefined;
+  contradicts: boolean[] | undefined;
+  visualEvidence: string | undefined;
+  clarifyQuestion: string | undefined;
+  clarifyOptions: string[] | undefined;
+};
+
+export type GenerateDesignQuizResponse = {
+  questions: DesignQuizQuestion[] | undefined;
+  family: string | undefined;
+  model: string | undefined;
+};
+
+export type DesignQuizAnswer = {
+  question: DesignQuizQuestion | undefined;
+  selected: string[] | undefined;
+  freeText: string | undefined;
+  skipped: boolean | undefined;
+  answeredAt: wellKnownTimestamp | undefined;
+};
+
+export type GetDesignQuizAnswersRequest = {
+  techCardId: number | undefined;
+};
+
+export type GetDesignQuizAnswersResponse = {
+  answers: DesignQuizAnswer[] | undefined;
+};
+
+export type SaveDesignQuizAnswersRequest = {
+  techCardId: number | undefined;
+  answers: DesignQuizAnswer[] | undefined;
+};
+
+export type SaveDesignQuizAnswersResponse = {
+  answers: DesignQuizAnswer[] | undefined;
+};
+
 // DesignConstructionDraft is what `draft the construction` answers: ONE proposal covering the four
 // groups the CONSTRUCTION tab draws, read off the moodboard pictures, the designer's concept and
 // the notes pinned on the images.
@@ -19335,6 +19385,9 @@ export interface AdminService {
   // FailedPrecondition: no_moodboard. (`budget_exceeded` was listed here until 0358 removed the
   // generation ceiling as a concept — no verb refuses for money any more.)
   DraftDesignIdea(request: DraftDesignIdeaRequest): Promise<DraftDesignIdeaResponse>;
+  GenerateDesignQuiz(request: GenerateDesignQuizRequest): Promise<GenerateDesignQuizResponse>;
+  GetDesignQuizAnswers(request: GetDesignQuizAnswersRequest): Promise<GetDesignQuizAnswersResponse>;
+  SaveDesignQuizAnswers(request: SaveDesignQuizAnswersRequest): Promise<SaveDesignQuizAnswersResponse>;
   // GetWorkshopSettings returns «дом настроек цеха» (Ф2.5, 0272): the shop-floor constants that
   // belong to the ЦЕХ itself and not to any one card or раскладка. Первый жилец is the cutting
   // table length, which the nesting modal used to make the operator retype on every раскладка.
@@ -25921,6 +25974,66 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DraftDesignIdea",
       }) as Promise<DraftDesignIdeaResponse>;
+    },
+    GenerateDesignQuiz(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/quiz`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GenerateDesignQuiz",
+      }) as Promise<GenerateDesignQuizResponse>;
+    },
+    GetDesignQuizAnswers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/quiz-answers`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetDesignQuizAnswers",
+      }) as Promise<GetDesignQuizAnswersResponse>;
+    },
+    SaveDesignQuizAnswers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/quiz-answers`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PUT",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveDesignQuizAnswers",
+      }) as Promise<SaveDesignQuizAnswersResponse>;
     },
     GetWorkshopSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/workshop/settings`; // eslint-disable-line quotes

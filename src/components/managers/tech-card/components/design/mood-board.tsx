@@ -39,6 +39,7 @@ import { holdFlatInput, readFlatInput, rowsWritable } from './flat-input';
 import { DraftedPill } from './head/mood-organs';
 import { VectorModal } from './modals';
 import { useMoodCallouts, type MoodCallout } from './mood-callouts';
+import { MoodQuiz } from './mood-quiz';
 import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import {
   CALLOUTS_COLLAPSE_BELOW,
@@ -1391,6 +1392,14 @@ export function MoodBoard({
                  Вместе с полосой ушли `editorHeight` и `zoomEditorReserve`: и то и другое резервировало
                  высоту ПОД РЕДАКТОР, а кадру, у которого редактора нет ни в одном состоянии, дёргаться
                  не от чего — 108px вертикали доска получила назад. */
+            />
+            {/* ASK ME (квиз доски, 04.10): ряд под лентой, складывается вместе с доской. */}
+            <MoodQuiz
+              techCardId={techCardId}
+              readOnly={readOnly}
+              pictures={items.length}
+              concept={conceptValue}
+              conceptMax={CONCEPT_MAX}
             />
           </div>
 
