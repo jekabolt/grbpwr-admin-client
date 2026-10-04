@@ -92,7 +92,16 @@ for (const key of P.PURPOSE_KEYS) {
 // 3. КРУГЛЫЙ РЕЙС И КАНОН
 const samples = [
   { t: 'detail', scale: 3, mediaId: 12, url: 'https://x/y.webp' },
-  { t: 'artwork', sub: 'embroidery', w: '80', h: '40', from: '8 cm below neck', method: 'satin' },
+  {
+    t: 'artwork',
+    sub: 'embroidery',
+    w: '80',
+    h: '40',
+    from: '8 cm below neck',
+    method: 'satin',
+    mediaId: 7,
+    url: 'https://x/logo-compressed.webp',
+  },
   {
     t: 'stitch',
     iso: '301',
@@ -117,6 +126,17 @@ for (const s of samples) {
   check(`${s.t}: keys sorted`, keys.join() === [...keys].sort().join(), keys.join());
 }
 check('detail scale out of range → 2', P.parseSpec('{"t":"detail","scale":9}').scale === 2);
+// АРТВОРК НЕСЁТ СВОЮ КАРТИНКУ (T16): адрес и id переживают провод, мусорный id отбрасывается.
+{
+  const a = P.parseSpec(P.writeSpec(samples[1]));
+  check(
+    'artwork keeps url + mediaId',
+    a.url === samples[1].url && a.mediaId === 7,
+    JSON.stringify(a),
+  );
+  const j = P.parseSpec('{"t":"artwork","sub":"print","mediaId":"x","url":""}');
+  check('artwork junk image dropped', !('mediaId' in j) && !('url' in j), JSON.stringify(j));
+}
 check('artwork unknown sub → print', P.parseSpec('{"t":"artwork","sub":"x"}').sub === 'print');
 check(
   'section drops blank layers',

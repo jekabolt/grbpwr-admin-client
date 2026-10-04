@@ -32,6 +32,9 @@ export type Spec =
       h?: string;
       from?: string;
       method?: string;
+      /** Своя картинка артворка (PNG с прозрачностью) — рисуется ВНУТРИ зоны, поверх флэта. */
+      mediaId?: number;
+      url?: string;
     }
   | {
       t: 'stitch';
@@ -179,6 +182,7 @@ export function parseSpec(raw: string | null | undefined): Spec | null {
       const sub = (ARTWORK_SUBS as readonly string[]).includes(r.sub as string)
         ? (r.sub as ArtworkSub)
         : 'print';
+      const mediaId = Number(r.mediaId);
       return compact({
         t: 'artwork' as const,
         sub,
@@ -186,6 +190,8 @@ export function parseSpec(raw: string | null | undefined): Spec | null {
         h: str(r.h),
         from: str(r.from),
         method: str(r.method),
+        mediaId: Number.isFinite(mediaId) && mediaId > 0 ? mediaId : undefined,
+        url: str(r.url),
       });
     }
     case 'stitch':

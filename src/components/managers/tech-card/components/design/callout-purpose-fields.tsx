@@ -128,45 +128,16 @@ export function CalloutPurposeFields({
             </Chip>
           ))}
           <RuleSep />
-          {spec.url ? (
-            <>
-              <img
-                src={spec.url}
-                alt=''
-                className='h-[18px] w-[18px] border border-borderColor object-cover'
-              />
-              <Chip
-                disabled={disabled}
-                onClick={() => put({ t: 'detail', scale: spec.scale })}
-                title='show the enlarged region again instead of the photo'
-              >
-                × photo
-              </Chip>
-            </>
-          ) : (
-            !disabled && (
-              <MediaSelector
-                label='+ photo'
-                purpose='detail callout'
-                aspectRatio={['Custom']}
-                allowMultiple={false}
-                showVideos={false}
-                saveSelectedMedia={(media) => {
-                  const m = media[0];
-                  const url =
-                    m?.media?.compressed?.mediaUrl ||
-                    m?.media?.thumbnail?.mediaUrl ||
-                    m?.media?.fullSize?.mediaUrl;
-                  if (m && url) put({ ...spec, mediaId: m.id ?? undefined, url });
-                }}
-                trigger={
-                  <Chip dashed title='a photo of your own instead of the enlarged region'>
-                    + photo
-                  </Chip>
-                }
-              />
-            )
-          )}
+          <OwnPicture
+            url={spec.url}
+            disabled={disabled}
+            purpose='detail callout'
+            label='photo'
+            title='a photo of your own instead of the enlarged region'
+            clearTitle='show the enlarged region again instead of the photo'
+            onPick={(mediaId, url) => put({ ...spec, mediaId, url })}
+            onClear={() => put({ t: 'detail', scale: spec.scale })}
+          />
         </ChipRow>
       );
 
@@ -186,6 +157,17 @@ export function CalloutPurposeFields({
                 {k}
               </Chip>
             ))}
+            <RuleSep />
+            <OwnPicture
+              url={spec.url}
+              disabled={disabled}
+              purpose='artwork callout'
+              label='image'
+              title='the artwork itself — a PNG keeps its transparency over the flat'
+              clearTitle='remove the artwork image'
+              onPick={(mediaId, url) => put({ ...spec, mediaId, url })}
+              onClear={() => put({ ...spec, mediaId: undefined, url: undefined })}
+            />
           </ChipRow>
           <div className='grid grid-cols-[4.5rem_4.5rem_1fr] gap-1'>
             <Unit unit='mm'>
@@ -359,6 +341,70 @@ function Unit({ unit, children }: { unit: string; children: React.ReactNode }) {
         {unit}
       </span>
     </span>
+  );
+}
+
+/**
+ * СВОЯ КАРТИНКА В СТРОКЕ — одна дверь на деталь (своё фото) и на артворк (сам принт, PNG с
+ * прозрачностью). Миниатюра без подложки: прозрачный артворк виден прозрачным уже здесь.
+ * Адрес — compressed → thumbnail → fullSize: все три — WebP с альфой
+ * (bucket/alpha_png_upload_test.go), так что первый найденный прозрачность не теряет.
+ */
+function OwnPicture({
+  url,
+  disabled,
+  purpose,
+  label,
+  title,
+  clearTitle,
+  onPick,
+  onClear,
+}: {
+  url?: string;
+  disabled?: boolean;
+  purpose: string;
+  label: string;
+  title: string;
+  clearTitle: string;
+  onPick: (mediaId: number | undefined, url: string) => void;
+  onClear: () => void;
+}) {
+  if (url)
+    return (
+      // Миниатюра и «×» — одним куском: при переносе строки чипов они не расходятся.
+      <span className='inline-flex items-center gap-1'>
+        <img
+          src={url}
+          alt=''
+          className='h-[18px] w-[18px] border border-borderColor object-contain'
+        />
+        <Chip disabled={disabled} onClick={onClear} title={clearTitle}>
+          × {label}
+        </Chip>
+      </span>
+    );
+  if (disabled) return null;
+  return (
+    <MediaSelector
+      label={`+ ${label}`}
+      purpose={purpose}
+      aspectRatio={['Custom']}
+      allowMultiple={false}
+      showVideos={false}
+      saveSelectedMedia={(media) => {
+        const m = media[0];
+        const u =
+          m?.media?.compressed?.mediaUrl ||
+          m?.media?.thumbnail?.mediaUrl ||
+          m?.media?.fullSize?.mediaUrl;
+        if (m && u) onPick(m.id ?? undefined, u);
+      }}
+      trigger={
+        <Chip dashed title={title}>
+          + {label}
+        </Chip>
+      }
+    />
   );
 }
 
