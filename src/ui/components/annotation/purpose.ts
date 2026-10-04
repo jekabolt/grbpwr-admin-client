@@ -364,3 +364,59 @@ export function boundsOf(pts: readonly { x: number; y: number }[]) {
   const y0 = Math.min(...ys);
   return { x: x0, y: y0, w: Math.max(...xs) - x0, h: Math.max(...ys) - y0 };
 }
+
+/**
+ * ПОСТАНОВКА НАЗНАЧЕНИЯ — ОДНО ПРАВИЛО НА ЛИСТ ARTIFACTS И НА МУДБОРД. Поверхность поставила фигуру
+ * вида; здесь она становится фигурой назначения: деталь и арт — два угла → зона-прямоугольник,
+ * разрез — линия со стрелками, арт — пунктиром; маркер детали — сбоку от региона, к свободной
+ * половине кадра. `spec` — всегда объект (`writeSpec`); без назначения — `''` (обычное).
+ */
+export function placePurpose(
+  tool: string | null | undefined,
+  shape: string,
+  pts: { x: number; y: number }[],
+): {
+  shape: string;
+  pts: { x: number; y: number }[];
+  /** Где встанет маркер/плашка; `null` — по правилу владельца (над центром). */
+  marker: { x: number; y: number } | null;
+  dashed?: boolean;
+  filled?: boolean;
+  caps?: 'arrow';
+  spec: string;
+} {
+  const p = purposeTool(tool);
+  if (!p || pts.length === 0) return { shape, pts, marker: null, spec: '' };
+  let outShape = shape;
+  let outPts = pts;
+  if (p.rect && pts.length === 2) {
+    outShape = 'polygon';
+    outPts = rectCorners(pts[0], pts[1]);
+  }
+  if (p.key === 'section') outShape = 'dim';
+  let marker: { x: number; y: number } | null = null;
+  if (p.key === 'detail') {
+    const xs = outPts.map((q) => q.x);
+    const cx = xs.reduce((s, x) => s + x, 0) / xs.length;
+    const cy = outPts.reduce((s, q) => s + q.y, 0) / outPts.length;
+    const sideX = cx < 0.5 ? Math.max(...xs) + 0.2 : Math.min(...xs) - 0.2;
+    marker = { x: Math.min(0.9, Math.max(0.1, sideX)), y: Math.min(0.9, Math.max(0.1, cy)) };
+  }
+  return {
+    shape: outShape,
+    pts: outPts,
+    marker,
+    ...(p.key === 'artwork' ? { dashed: true } : {}),
+    ...(p.rect ? { filled: false } : {}),
+    ...(p.key === 'section' ? { caps: 'arrow' as const } : {}),
+    spec: writeSpec(p.defaults()),
+  };
+}
+
+/** Буквы разрезов по порядку списка: A, B… — один счёт на экран и бумагу. */
+export function sectionLettersOf<T>(rows: readonly T[], specOf: (r: T) => string | undefined) {
+  const out = new Map<T, string>();
+  for (const r of rows)
+    if (parseSpec(specOf(r))?.t === 'section') out.set(r, sectionLetter(out.size));
+  return out;
+}

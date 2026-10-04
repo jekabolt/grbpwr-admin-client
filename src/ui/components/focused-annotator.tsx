@@ -18,7 +18,7 @@ import {
   type ShapePoint,
   type SurfaceCallout,
 } from './annotation/surface';
-import { AnnotationToolbar, placingHint } from './annotation/toolbar';
+import { AnnotationToolbar, toolHint } from './annotation/toolbar';
 import { AnnotationZoomDialog } from './annotation/zoom-dialog';
 import { Button } from './button';
 import { Chip, ChipRow } from './chip';
@@ -155,7 +155,14 @@ export type FocusedAnnotatorProps = {
    * якорях значило бы завести два места для одной координаты. Владелец кладёт `points[0]` в
    * posX/posY и оставляет якоря пустыми.
    */
-  onAddCallout: (mediaId: number, kind: string, points: ShapePoint[], pen: PenStyle) => void;
+  onAddCallout: (
+    mediaId: number,
+    kind: string,
+    points: ShapePoint[],
+    pen: PenStyle,
+    /** Чем ставили — вид или назначение (`purpose.ts`), если включены `calloutPurposes`. */
+    armed?: string | null,
+  ) => void;
   onMoveCallout: (key: string, xNorm: number, yNorm: number) => void;
   onRemoveCallout: (key: string) => void;
   /**
@@ -226,6 +233,8 @@ export type FocusedAnnotatorProps = {
    * и жеста, и держать его в доменном слое значило бы держать его в двух местах.
    */
   calloutKinds?: string[];
+  /** Чипы назначений (note, detail, …) — те же, что в панели листа ARTIFACTS. */
+  calloutPurposes?: boolean;
   /**
    * Белая подложка под линиями указаний. Включать на ФОТОГРАФИЯХ (мудборд, примерка): чернильная
    * линия на пёстром снимке тонет, и указание перестаёт быть видно ровно там, где его поставили.
@@ -451,6 +460,7 @@ export function FocusedAnnotator({
   carouselLabel,
   gridRowHeight,
   calloutKinds,
+  calloutPurposes,
   onEditPoints,
   onBeforeMutate,
   onUndo,
@@ -657,10 +667,11 @@ export function FocusedAnnotator({
           tool={tool}
           onTool={setTool}
           kinds={calloutKinds}
+          purposes={calloutPurposes}
           hint={
             tool
               ? placed > 0
-                ? placingHint(tool, placed)
+                ? toolHint(tool, placed)
                 : 'click on the picture you need'
               : undefined
           }
@@ -756,7 +767,7 @@ export function FocusedAnnotator({
     : intake.dragging
       ? 'drop the file — the crop will open'
       : tool
-        ? placingHint(tool, placed)
+        ? toolHint(tool, placed)
         : pinText === 'hover'
           ? ''
           : 'the callout text is read in the legend under the frame · ⌘V pastes a picture';
@@ -950,7 +961,9 @@ export function FocusedAnnotator({
                     // The full 240px note now fits over a 300px tile, so it no longer needs trimming.
                     // каждый приходится перекрашивать поштучно в списке выносок — то есть панель
                     // без цвета оправдана памятью пера, которой бы не было.
-                    onAdd={(kind, points, pen) => onAddCallout(v.mediaId, kind, points, pen)}
+                    onAdd={(kind, points, pen, armed) =>
+                      onAddCallout(v.mediaId, kind, points, pen, armed)
+                    }
                     onEditPoints={onEditPoints}
                     onBeforeMutate={onBeforeMutate}
                     onUndo={onUndo}
@@ -1107,7 +1120,9 @@ export function FocusedAnnotator({
                 tool={tool}
                 onToolDone={() => setTool(null)}
                 onPlacedCountChange={setPlaced}
-                onAdd={(kind, points, pen) => onAddCallout(focused.mediaId, kind, points, pen)}
+                onAdd={(kind, points, pen, armed) =>
+                  onAddCallout(focused.mediaId, kind, points, pen, armed)
+                }
                 onEditPoints={onEditPoints}
                 onBeforeMutate={onBeforeMutate}
                 onUndo={onUndo}
@@ -1215,8 +1230,11 @@ export function FocusedAnnotator({
           callouts={calloutsFor(views[zoomIndex].mediaId)}
           frozen={readOnly}
           toolKinds={calloutKinds}
+          purposes={calloutPurposes}
           halo={halo}
-          onAdd={(kind, points, pen) => onAddCallout(views[zoomIndex].mediaId, kind, points, pen)}
+          onAdd={(kind, points, pen, armed) =>
+            onAddCallout(views[zoomIndex].mediaId, kind, points, pen, armed)
+          }
           onEditPoints={onEditPoints}
           onBeforeMutate={onBeforeMutate}
           onUndo={onUndo}

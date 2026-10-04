@@ -65,6 +65,7 @@ export function AnnotationToolbar({
   className,
   quiet,
   purposes,
+  cancelable = true,
 }: {
   tool: string | null;
   onTool: (kind: string | null) => void;
@@ -80,6 +81,11 @@ export function AnnotationToolbar({
    * поверхность сводит назначение к его фигуре сама (`toolGeometry`).
    */
   purposes?: boolean;
+  /**
+   * Показывать «cancel». Лист ARTIFACTS держит вид взведённым всегда (D-18), и «cancel» рядом с
+   * умолчанием — лишняя кнопка, переносящая ряд; снять взвод там можно повторным нажатием чипа.
+   */
+  cancelable?: boolean;
 }) {
   const palette = kinds ? toolsOf(kinds) : PALETTE_KINDS;
   if (remaining != null && remaining <= 0) {
@@ -132,15 +138,17 @@ export function AnnotationToolbar({
               {hint}
             </Text>
           )}
-          <Chip
-            nonForm
-            dashed
-            quiet={quiet}
-            onClick={() => onTool(null)}
-            title='leave the placing mode'
-          >
-            cancel
-          </Chip>
+          {cancelable && (
+            <Chip
+              nonForm
+              dashed
+              quiet={quiet}
+              onClick={() => onTool(null)}
+              title='leave the placing mode'
+            >
+              cancel
+            </Chip>
+          )}
         </>
       )}
     </ChipRow>

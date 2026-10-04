@@ -1317,6 +1317,9 @@ export function MoodBoard({
               halo
               calloutsFor={callouts.calloutsFor}
               onAddCallout={callouts.add}
+              // НАЗНАЧЕНИЯ — ТЕ ЖЕ ШЕСТЬ, ЧТО НА ЛИСТЕ ARTIFACTS (владелец, 04.10: «на мудборде тоже
+              // должны быть эти колауты»).
+              calloutPurposes
               onEditPoints={callouts.editPoints}
               onMoveCallout={callouts.moveLabel}
               onRemoveCallout={callouts.removeByKey}
@@ -1657,6 +1660,7 @@ export function MoodBoard({
                 numbered={false}
                 detailFields={false}
                 caps
+                purposes
                 /* ПУСТОГО ТЕКСТА НЕТ (D-12): здесь стоял абзац «none yet. A note is put on the
                    picture itself…». Пустая раскрытая панель — одна шапка со счётчиком; как ставится
                    указание, объясняет сама доска (ряд видов над кадрами). */

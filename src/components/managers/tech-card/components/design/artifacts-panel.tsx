@@ -32,18 +32,13 @@ import {
   type SurfaceCallout,
 } from 'ui/components/annotation/surface';
 import { PALETTE_KINDS } from 'ui/components/annotation/kinds';
-import {
-  parseSpec,
-  purposeTool,
-  rectCorners,
-  sectionLetter,
-  writeSpec,
-} from 'ui/components/annotation/purpose';
+import { parseSpec, placePurpose, sectionLetter } from 'ui/components/annotation/purpose';
 import { AnnotationToolbar, toolHint } from 'ui/components/annotation/toolbar';
 import { AnnotationZoomDialog } from 'ui/components/annotation/zoom-dialog';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
+import { Toolbar } from 'ui/components/toolbar';
 import { Pill } from 'ui/components/pill';
 import { Section, SectionStack } from 'ui/components/section';
 import { HeaderNote } from 'ui/components/section-header';
@@ -1720,16 +1715,10 @@ export function ArtifactsPanel({
     armed?: string | null,
   ) {
     if (pts.length === 0) return;
-    /* НАЗНАЧЕНИЕ ВЗВЕДЕНО ЧИПОМ (волна callout kinds): поверхность поставила его фигуру, здесь
-       пишется `spec` с умолчаниями. Деталь и арт — два угла → зона-прямоугольник; разрез — линия
-       со стрелками; арт — пунктиром. */
-    const purpose = purposeTool(armed === undefined ? tool : armed);
-    if (purpose?.rect && pts.length === 2) {
-      shape = 'polygon';
-      pts = rectCorners(pts[0], pts[1]);
-    }
-    if (purpose?.key === 'section') shape = 'dim';
-    if (purpose?.key === 'artwork') pen = { ...pen, dashed: true };
+    // НАЗНАЧЕНИЕ ВЗВЕДЕНО ЧИПОМ: фигура и `spec` — общим правилом (`placePurpose`, оно же у мудборда).
+    const placed = placePurpose(armed === undefined ? tool : armed, shape, pts);
+    shape = placed.shape;
+    pts = placed.pts;
     /* ПЕРВОЕ УКАЗАНИЕ БЕРЁТ ПЛИТУ НА КАРТОЧКУ (D-18, довод у `canPlaceOn`). Плита ищется по
        СЕГМЕНТУ на экране: род, под которым она ляжет в медиа, — это род вкладки. */
     const plate = onScreen.find((p) => p.mediaId === mediaId);
@@ -1737,15 +1726,12 @@ export function ArtifactsPanel({
     const pin = shape === 'pin';
     const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
     const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
-    // ВСТАВКА ДЕТАЛИ — СБОКУ ОТ РЕГИОНА, к свободной половине кадра: над регионом она закрыла бы
-    // соседей (и сам регион, если он у верхнего края).
-    const sideX =
-      cx < 0.5 ? Math.max(...pts.map((p) => p.x)) + 0.2 : Math.min(...pts.map((p) => p.x)) - 0.2;
     const marker = pin
       ? pts[0]
-      : purpose?.key === 'detail'
-        ? { x: Math.min(0.9, Math.max(0.1, sideX)), y: Math.min(0.9, Math.max(0.1, cy)) }
-        : { x: Math.min(0.96, Math.max(0.04, cx)), y: Math.min(0.96, Math.max(0.06, cy - 0.08)) };
+      : (placed.marker ?? {
+          x: Math.min(0.96, Math.max(0.04, cx)),
+          y: Math.min(0.96, Math.max(0.06, cy - 0.08)),
+        });
     const rows = (form.getValues('callouts') ?? []) as SheetCallout[];
     form.setValue(
       'callouts',
@@ -1763,10 +1749,10 @@ export function ArtifactsPanel({
           kind: shape as AnnotationKind,
           points: pin ? [] : pts.map((p) => ({ x: p.x.toFixed(4), y: p.y.toFixed(4) })),
           color: pen.color as AnnotationColor,
-          dashed: pen.dashed,
-          filled: purpose?.rect ? false : pen.filled,
-          ...(purpose?.key === 'section' ? { caps: 'arrow' as AnnotationCaps } : {}),
-          spec: purpose ? writeSpec(purpose.defaults()) : '',
+          dashed: placed.dashed ?? pen.dashed,
+          filled: placed.filled ?? pen.filled,
+          ...(placed.caps ? { caps: placed.caps as AnnotationCaps } : {}),
+          spec: placed.spec,
         },
       ],
       { shouldDirty: true },
@@ -2343,23 +2329,20 @@ export function ArtifactsPanel({
               но только когда она сообщает ход жеста — набранные точки многоточечного вида; у
               взведённой по умолчанию записки без единой точки ей нечего сказать, кроме тех же
               снятых слов. */}
+          {/* ПАНЕЛЬ ВИДОВ — ТА ЖЕ РАМКА С ЧИПАМИ, ЧТО НА МУДБОРДЕ (владелец, 04.10: «там должен быть
+              такой дизайн»): виды и назначения одним рядом, без слова-заголовка. */}
           {drawableHere && (
-            <GroupLabel
-              className={GROUP_GAP}
-              lead={
-                <AnnotationToolbar
-                  quiet
-                  purposes
-                  tool={tool}
-                  onTool={setTool}
-                  hint={
-                    tool && (placed > 0 || tool !== DEFAULT_TOOL) ? toolHint(tool, placed) : undefined
-                  }
-                />
-              }
-            >
-              draw
-            </GroupLabel>
+            <Toolbar className={GROUP_GAP}>
+              <AnnotationToolbar
+                purposes
+                cancelable={tool !== DEFAULT_TOOL}
+                tool={tool}
+                onTool={setTool}
+                hint={
+                  tool && (placed > 0 || tool !== DEFAULT_TOOL) ? toolHint(tool, placed) : undefined
+                }
+              />
+            </Toolbar>
           )}
 
           {/* `EmptyDocument` СНЯТ ВМЕСТЕ С ЕГО ЧЕТЫРЬМЯ КНОПКАМИ «front slot ✗» (D-15): стороны
