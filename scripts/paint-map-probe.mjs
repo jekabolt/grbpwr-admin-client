@@ -752,5 +752,51 @@ ck(
   );
 }
 
+// T24 · the engine's picture ceiling: mockups give way side_r → side_l → back → front; maps stay.
+{
+  const views = ['front', 'back', 'side_l', 'side_r'];
+  const maps = views.map((view, i) => ({ view, mediaId: 300 + i }));
+  // Beta run 72: 4 plates + 3 references + 2 cloths (one named twice, a zero) = 9 inputs.
+  const inputs = [100, 101, 102, 103, 200, 201, 202, 400, 401, 401, 0];
+  const at16 = m.fitMockups(inputs, maps, 16);
+  ck(
+    at16.total === 16 &&
+      !at16.over &&
+      JSON.stringify(at16.dropped) === '["side_r"]' &&
+      [...at16.keep].sort().join() === 'back,front,side_l',
+    'T24 17 → 16: side_r mockup dropped, maps all stay',
+    JSON.stringify({ total: at16.total, dropped: at16.dropped }),
+  );
+  const at14 = m.fitMockups(inputs, maps, 14);
+  ck(
+    JSON.stringify(at14.dropped) === '["side_r","side_l","back"]' &&
+      at14.total === 14 &&
+      [...at14.keep].join() === 'front' &&
+      !at14.over,
+    'T24 order: side_r, side_l, back before front',
+    JSON.stringify(at14.dropped),
+  );
+  const at12 = m.fitMockups(inputs, maps, 12);
+  ck(
+    at12.over &&
+      at12.keep.size === 0 &&
+      at12.total === 13 &&
+      /would send 13 pictures and GPT Image 2 takes at most 12/.test(
+        m.overCeilingSentence(at12, 'GPT Image 2'),
+      ),
+    "T24 still over with no mockup → the gate refuses in the server's words",
+  );
+  const roomy = m.fitMockups(inputs, maps, 0);
+  ck(
+    roomy.keep.size === 4 && !roomy.over && roomy.dropped.length === 0,
+    'T24 no ceiling known → nothing trimmed',
+  );
+  const two = m.fitMockups(inputs, [maps[0], maps[3]], 12);
+  ck(
+    JSON.stringify(two.dropped) === '["side_r"]' && two.keep.has('front'),
+    'T24 only the outgoing maps are trimmed, side_r first',
+  );
+}
+
 console.log(bad ? `\n${bad} FAIL` : '\nall ok');
 process.exit(bad ? 1 : 0);

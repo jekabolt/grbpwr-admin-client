@@ -14,6 +14,12 @@ import { GROUP_SEAM } from '../core';
 import { openStepOf } from '../core/chain';
 import { Workbench } from '../generation/studio';
 import { artworkModelLines, artworksOf } from '../paint/artworks';
+import {
+  fitMockups,
+  overCeilingSentence,
+  renderEngine,
+  renderInputMediaIds,
+} from '../paint/ceiling';
 import { garmentOfChart } from '../paint/mockup';
 import { PartsCanvas } from '../paint/parts-canvas';
 import { paintRun } from '../paint/plan-run';
@@ -361,6 +367,22 @@ export function RenderStudio({
     [sent, painted],
   );
 
+  /**
+   * T24 · THE ENGINE'S PICTURE CEILING. Counted as the server counts the call (plates, references,
+   * cloths, placed artworks — each once — then maps and their mockups); over the default engine's
+   * `maxReferences`, mockups give way side_r → side_l → back → front. Still over → the gate below
+   * refuses with the server's sentence. WHAT THE MODEL GETS reads `mockupFit.keep`.
+   */
+  const mockupFit = useMemo(() => {
+    const engine = renderEngine(band);
+    const fit = fitMockups(
+      renderInputMediaIds(band, colorwayId, wire, artworks),
+      wire.colourMaps ?? [],
+      engine?.maxReferences ?? 0,
+    );
+    return { ...fit, label: (engine?.label ?? '').trim() || (engine?.slug ?? '') };
+  }, [band, colorwayId, wire, artworks]);
+
   const gate: Gate = useMemo(() => {
     /* O-57 · D-56″: NO COLUMN AT ALL — the card has colourways, every one archived and without a
        plate, so the sample column is hidden and nothing is drawn in its place. There is no bench
@@ -388,11 +410,14 @@ export function RenderStudio({
           'no cloth is marked for this colourway · mark one in MATERIALS, or describe it in words',
       };
     }
+    if (mockupFit.over)
+      return { ok: false, reason: overCeilingSentence(mockupFit, mockupFit.label) };
     return { ok: true };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     band,
     wire,
+    mockupFit,
     colorwayArchived,
     colorwayLabel,
     target.nowhere,
@@ -437,15 +462,24 @@ export function RenderStudio({
       setMocking(true);
       try {
         if (!(await paint.flush()) || !paint.sendsAsSaved(colourMaps, rev)) return;
-        const { ids, error } = await paint.mockups(colourMaps, wire.fabrics ?? [], scales);
+        /* T24 · only the maps whose mockup fits the engine's ceiling take one (`mockupFit`). */
+        const keep = mockupFit.keep;
+        const mocked = colourMaps.filter((m) => keep.has(m.view ?? ''));
+        const { ids, error } =
+          mocked.length > 0
+            ? await paint.mockups(mocked, wire.fabrics ?? [], scales)
+            : { ids: new Map<string, number>(), error: '' };
         // Anything moved meanwhile (another tab saved, the card changed): no run, quietly.
         if (shownCard.current !== card || !paint.sendsAsSaved(colourMaps, rev)) return;
-        if (error || colourMaps.some((m) => !((ids.get(m.view ?? '') ?? 0) > 0))) {
+        if (error || mocked.some((m) => !((ids.get(m.view ?? '') ?? 0) > 0))) {
           setMockFailed(error || 'mockup failed');
           return;
         }
         setMockFailed('');
-        colourMaps = colourMaps.map((m) => ({ ...m, mockupMediaId: ids.get(m.view ?? '') ?? 0 }));
+        colourMaps = colourMaps.map((m) => ({
+          ...m,
+          mockupMediaId: keep.has(m.view ?? '') ? ids.get(m.view ?? '') ?? 0 : 0,
+        }));
       } finally {
         paint.setFrozen(false);
         setMocking(false);
@@ -679,7 +713,7 @@ export function RenderStudio({
         kind='render'
         /* THE MODAL KNOWS NOTHING OF CHIPS: it is handed the SAME sentence that travels. */
         recipe={wire}
-        mockupsAtGenerate
+        mockupsAtGenerate={mockupFit.dropped.length > 0 ? mockupFit.keep : true}
         cardFit={cardFit}
         artworks={artworkLines}
       />

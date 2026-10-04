@@ -8,3 +8,4 @@ export {
   paintRun,
   remainderCloth,
 } from 'components/managers/tech-card/components/design/paint/plan-run';
+export * from 'components/managers/tech-card/components/design/paint/ceiling';
