@@ -37,10 +37,9 @@ import {
   purposeTool,
   rectCorners,
   sectionLetter,
-  toolGeometry,
   writeSpec,
 } from 'ui/components/annotation/purpose';
-import { AnnotationToolbar, placingHint } from 'ui/components/annotation/toolbar';
+import { AnnotationToolbar, toolHint } from 'ui/components/annotation/toolbar';
 import { AnnotationZoomDialog } from 'ui/components/annotation/zoom-dialog';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -1712,12 +1711,19 @@ export function ArtifactsPanel({
    * номер не сел на саму линию. Стиль наследуется от ПАМЯТИ ПЕРА: у человека одна рука, и выбрав
    * красный пунктир, он рисует им дальше.
    */
-  function addCalloutOn(mediaId: number, shape: string, pts: ShapePoint[], pen: PenStyle) {
+  function addCalloutOn(
+    mediaId: number,
+    shape: string,
+    pts: ShapePoint[],
+    pen: PenStyle,
+    /** Чем ставили — приходит от поверхности; увеличенный вид держит свой инструмент (T08). */
+    armed?: string | null,
+  ) {
     if (pts.length === 0) return;
     /* НАЗНАЧЕНИЕ ВЗВЕДЕНО ЧИПОМ (волна callout kinds): поверхность поставила его фигуру, здесь
        пишется `spec` с умолчаниями. Деталь и арт — два угла → зона-прямоугольник; разрез — линия
        со стрелками; арт — пунктиром. */
-    const purpose = purposeTool(tool);
+    const purpose = purposeTool(armed === undefined ? tool : armed);
     if (purpose?.rect && pts.length === 2) {
       shape = 'polygon';
       pts = rectCorners(pts[0], pts[1]);
@@ -2347,11 +2353,7 @@ export function ArtifactsPanel({
                   tool={tool}
                   onTool={setTool}
                   hint={
-                    tool && (placed > 0 || tool !== DEFAULT_TOOL)
-                      ? purposeTool(tool)?.rect
-                        ? `click two opposite corners — ${placed} placed`
-                        : placingHint(toolGeometry(tool) ?? tool, placed)
-                      : undefined
+                    tool && (placed > 0 || tool !== DEFAULT_TOOL) ? toolHint(tool, placed) : undefined
                   }
                 />
               }
@@ -2497,9 +2499,11 @@ export function ArtifactsPanel({
           srcFallbacks={plateSources(onScreen[zoomAt], true).slice(1)}
           callouts={calloutsOfPlate(onScreen[zoomAt].mediaId)}
           frozen={!canPlaceOn(onScreen[zoomAt])}
+          purposes
           onAdd={
             canPlaceOn(onScreen[zoomAt])
-              ? (shape, points, pen) => addCalloutOn(onScreen[zoomAt].mediaId, shape, points, pen)
+              ? (shape, points, pen, armed) =>
+                  addCalloutOn(onScreen[zoomAt].mediaId, shape, points, pen, armed)
               : undefined
           }
           selectedKey={selected == null ? null : String(selected)}
@@ -2966,7 +2970,13 @@ export function PlateGrid({
   tool: string | null;
   onToolDone: () => void;
   onPlacedCountChange: (n: number) => void;
-  onAddCallout: (mediaId: number, kind: string, points: ShapePoint[], pen: PenStyle) => void;
+  onAddCallout: (
+    mediaId: number,
+    kind: string,
+    points: ShapePoint[],
+    pen: PenStyle,
+    armed?: string | null,
+  ) => void;
   /** Общая обвязка поверхности: перенос, правка якорей, удаление, выбор, откат. */
   bindings: Omit<AnnotationSurfaceProps, 'src' | 'callouts'>;
   /** Открыть плиту во весь экран — по её месту в ряду, чтобы листалось по всему ряду. */
@@ -3255,7 +3265,8 @@ export function PlateGrid({
                 onPlacedCountChange={drawable ? onPlacedCountChange : undefined}
                 onAdd={
                   drawable
-                    ? (shape, points, pen) => onAddCallout(plate.mediaId, shape, points, pen)
+                    ? (shape, points, pen, armed) =>
+                        onAddCallout(plate.mediaId, shape, points, pen, armed)
                     : undefined
                 }
                 legend

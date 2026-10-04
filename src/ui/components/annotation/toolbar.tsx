@@ -2,9 +2,16 @@ import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 
 import { kindDef, PALETTE_KINDS, placingHint, type KindDef } from './kinds';
-import { PURPOSE_TOOLS } from './purpose';
+import { PURPOSE_TOOLS, purposeTool, toolGeometry } from './purpose';
 
 export { placingHint };
+
+/** Подсказка постановки для вида ИЛИ назначения: назначение ставится жестом своей фигуры. */
+export function toolHint(tool: string, placed: number): string {
+  return purposeTool(tool)?.rect
+    ? `click two opposite corners — ${placed} placed`
+    : placingHint(toolGeometry(tool) ?? tool, placed);
+}
 
 // ПАНЕЛЬ ИНСТРУМЕНТОВ — ТОЛЬКО ВИДЫ, пять чипов в одну строку.
 //

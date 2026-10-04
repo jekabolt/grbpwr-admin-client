@@ -79,7 +79,14 @@ import {
   type AnnotationForm,
 } from './schema';
 import { kindDef } from 'ui/components/annotation/kinds';
-import { parseSpec, purposeLabel, specSummary } from 'ui/components/annotation/purpose';
+import { DetailInset, SectionInset, SectionLetters } from 'ui/components/annotation/insets';
+import {
+  boundsOf,
+  parseSpec,
+  purposeLabel,
+  sectionLetter,
+  specSummary,
+} from 'ui/components/annotation/purpose';
 import { annotationCapsFromWire } from 'ui/components/annotation/wire';
 import { AnnotationCanvas } from './annotation-canvas';
 import { skuToSeasonLabel } from './season-util';
@@ -294,7 +301,17 @@ const wireStepFacts = (o: common_TechCardOperation): StepFacts => ({
 // на альбомном эскизе стали бы косыми, а окружность — эллипсом. Печать меняет ширину коробки
 // ПОСЛЕ замера, и ResizeObserver на это не стреляет, — с viewBox холст масштабируется вместе с
 // коробкой, пропорции которой равны пропорциям картинки, и указание остаётся на своём узле.
-function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] }) {
+function SketchGeometryLayer({
+  callouts,
+  src,
+  letterOf,
+}: {
+  callouts: common_TechCardCallout[];
+  /** Картинка листа — её увеличенный кусок печатает вставка детали. */
+  src: string;
+  /** Буква разреза по порядку на карточке — та же, что на экране. */
+  letterOf: (c: common_TechCardCallout) => string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   useEffect(() => {
@@ -307,6 +324,10 @@ function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] 
     return () => ro.disconnect();
   }, []);
   const drawn = callouts.filter((c) => (c.points?.length ?? 0) > 0);
+  const at = (x?: googletype_Decimal, y?: googletype_Decimal) => ({
+    x: num(dec(x)) * box.w,
+    y: num(dec(y)) * box.h,
+  });
   return (
     <div ref={ref} className='pointer-events-none absolute inset-0'>
       {box.w > 0 && drawn.length > 0 && (
@@ -347,6 +368,49 @@ function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] 
           ))}
         </svg>
       )}
+      {/* ВСТАВКИ ДЕТАЛИ И РАЗРЕЗА — ТОТ ЖЕ РЕНДЕР, ЧТО НА ЛИСТЕ ARTIFACTS (`annotation/insets`):
+          бумага, на которой вместо увеличенного узла стоит один номер, отдаёт в цех половину
+          указания. Без `glass` вставка неинтерактивна и печатается чернилами по белому. */}
+      {box.w > 0 &&
+        drawn.map((c, i) => {
+          const spec = parseSpec(c.spec);
+          const pts = (c.points ?? []).map((p) => at(p.x, p.y));
+          const label = at(c.posX, c.posY);
+          const n = wireInt(c.number) || undefined;
+          if (spec?.t === 'detail') {
+            const b = boundsOf(pts);
+            return (
+              <DetailInset
+                key={`d${i}`}
+                at={label}
+                region={b}
+                frame={box}
+                src={spec.url || src}
+                own={!!spec.url}
+                scale={spec.scale}
+                number={n}
+                text={c.description ?? ''}
+              />
+            );
+          }
+          if (spec?.t === 'section' && pts.length >= 2) {
+            const letter = letterOf(c);
+            return (
+              <Fragment key={`s${i}`}>
+                <SectionLetters a={pts[0]} z={pts[1]} letter={letter} />
+                <SectionInset
+                  at={label}
+                  frame={box}
+                  letter={letter}
+                  number={n}
+                  layers={spec.layers.map((l) => l.name)}
+                  text={c.description ?? ''}
+                />
+              </Fragment>
+            );
+          }
+          return null;
+        })}
     </div>
   );
 }
@@ -798,6 +862,13 @@ export function TechPackDocument({
     () => new Set((tc?.technicalMedia ?? []).map((m) => wireInt(m.mediaId))),
     [tc?.technicalMedia],
   );
+  // Буквы разрезов — по порядку на карточке, тем же счётом, что лист ARTIFACTS.
+  const sectionLetters = new Map<common_TechCardCallout, string>();
+  for (const c of tc?.callouts ?? [])
+    if (parseSpec(c.spec)?.t === 'section')
+      sectionLetters.set(c, sectionLetter(sectionLetters.size));
+  const sectionLetterOf = (c: common_TechCardCallout) => sectionLetters.get(c) ?? 'A';
+
   const printedOnSketch = (c: common_TechCardCallout) => {
     const mid = wireInt(c.mediaId);
     return mid === 0 || sketchMediaIds.has(mid);
@@ -1952,7 +2023,7 @@ export function TechPackDocument({
                     {/* ГЕОМЕТРИЯ УКАЗАНИЙ — на бумаге тоже. Мерка «6 мм» между двумя точками и
                         скобка над участком это инструкция швее; напечатать только номер, оставив
                         фигуру на экране, значило бы выдать в цех половину указания. */}
-                    <SketchGeometryLayer callouts={pins} />
+                    <SketchGeometryLayer callouts={pins} src={url} letterOf={sectionLetterOf} />
                     {pins.map((c, j) => {
                       const x = num(dec(c.posX));
                       const y = num(dec(c.posY));
@@ -1961,8 +2032,13 @@ export function TechPackDocument({
                       // и в джойне деталей. Локальный индекс внутри картинки (j) расходился бы с
                       // ними, как только эскизов больше одного: пин сказал бы «2», строка — «5».
                       const pinNumber = wireInt(c.number) || (tc.callouts ?? []).indexOf(c) + 1;
+                      // У ДЕТАЛИ И РАЗРЕЗА НОМЕР СТОИТ НА САМОЙ ВСТАВКЕ — второй кружок поверх неё
+                      // закрыл бы увеличенный узел.
+                      const pt = parseSpec(c.spec)?.t;
+                      if ((pt === 'detail' || pt === 'section') && (c.points?.length ?? 0) > 0)
+                        return null;
                       // ЗАПИСКА — ПРЯМОУГОЛЬНИК С ТЕКСТОМ и на бумаге: без номера и без кружка.
-                      if (parseSpec(c.spec)?.t === 'note') {
+                      if (pt === 'note') {
                         return (
                           <span
                             key={j}

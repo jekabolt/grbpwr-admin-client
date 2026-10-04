@@ -5,7 +5,7 @@ import { ViewerAction } from 'ui/components/media-viewer';
 import Text from 'ui/components/text';
 
 import { AnnotationSurface, type AnnotationSurfaceProps } from './surface';
-import { AnnotationToolbar, placingHint } from './toolbar';
+import { AnnotationToolbar, toolHint } from './toolbar';
 
 // УВЕЛИЧЕННЫЙ ВИД — ТА ЖЕ ПОВЕРХНОСТЬ, А НЕ СМОТРЕЛКА.
 //
@@ -37,6 +37,7 @@ export function AnnotationZoomDialog({
   onOpenChange,
   title,
   toolKinds,
+  purposes,
   maxCallouts,
   onPrev,
   onNext,
@@ -48,6 +49,8 @@ export function AnnotationZoomDialog({
   onOpenChange: (v: boolean) => void;
   title: string;
   toolKinds?: string[];
+  /** Чипы назначений — те же, что в панели листа (`AnnotationToolbar purposes`). */
+  purposes?: boolean;
   /**
    * Строка на месте панели видов, когда рисовать здесь нельзя. ЗАДАЁТ ВЛАДЕЛЕЦ, потому что
    * причина у каждого своя: у выпущенной тех-карты правки нет вовсе, а у карточки задачи она есть
@@ -245,8 +248,9 @@ export function AnnotationZoomDialog({
                 tool={tool}
                 onTool={setTool}
                 kinds={toolKinds}
+                purposes={purposes}
                 remaining={maxCallouts != null ? maxCallouts - surface.callouts.length : undefined}
-                hint={tool ? placingHint(tool, placed) : undefined}
+                hint={tool ? toolHint(tool, placed) : undefined}
               />
             )}
             {!editable && readOnlyNote && (
