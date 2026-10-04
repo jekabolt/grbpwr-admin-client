@@ -28,13 +28,14 @@ const pic = (id: number, extra: Partial<common_DesignPicture> = {}): common_Desi
 
 const v1 = pic(31, { replacedBy: 32 });
 const v2 = pic(32, { derivedFrom: 31, derivation: 'flatten', replacedBy: 33 });
-const v3 = pic(33, { derivedFrom: 32, derivation: 'flatten', canUndo: true });
+const v3 = pic(33, { derivedFrom: 32, derivation: 'flatten', canUndo: true, undoToId: 32 });
 const w1 = pic(41, { replacedBy: 42 });
 const w2 = pic(42, {
   derivedFrom: 41,
   derivation: 'flatten',
   replacedBy: 43,
   canUndo: true,
+  undoToId: 41,
   canRedo: true,
 });
 const w3 = pic(43, { derivedFrom: 42, derivation: 'flatten', undoneAt: UNDONE });

@@ -2616,6 +2616,7 @@ function plateAsPicture(plate: DocumentPlate): common_DesignPicture {
     undoneAt: undefined,
     canUndo: undefined,
     canRedo: undefined,
+    undoToId: undefined,
   };
 }
 

@@ -8,7 +8,8 @@ import { chainSteps } from './edit-chain';
 /**
  * ═══ THE `undo` / `redo` CORNERS OF A PICTURE IN AN EDIT CHAIN (04.10, owner item 28, T28 v2) ═══
  *
- * ONE write per step — `UndoDesignEdit` / `RedoDesignEdit` (`stepEditChain`). The server moves the
+ * ONE write per step — `UndoDesignEdit` / `RedoDesignEdit` (`stepEditChain`), naming the version it
+ * leaves (`expectedCurrentId`) and the one it makes current (`expectedTargetId`). The server moves the
  * slot holding this version itself, in the same transaction, so the bench and FLAT SLOTS cannot
  * end up half-stepped. `expectedCurrentId` is this picture: a step pressed on a stale screen is
  * refused `stale_chain`, and the write re-reads the band either way. The corners are drawn from
@@ -42,6 +43,7 @@ export function useEditChainDoors({
         step,
         pictureId: id,
         expectedCurrentId: id,
+        expectedTargetId: step === 'undo' ? steps.undoTo : steps.redoTo,
         idempotencyKey: newClientRequestId(),
       })
       .catch(() => undefined)

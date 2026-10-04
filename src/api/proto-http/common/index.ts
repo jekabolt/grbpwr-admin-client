@@ -5597,6 +5597,10 @@ export type DesignPicture = {
   // can_redo — the link after this one is undone.
   canUndo: boolean | undefined;
   canRedo: boolean | undefined;
+  // The version undo makes current — the link before this one; 0 when can_undo is false. Sent back
+  // as UndoDesignEditRequest.expected_target_id (the link may sit in a run row that is paged out).
+  // Redo's target is replaced_by.
+  undoToId: number | undefined;
 };
 
 // DesignColourPlan is the DURABLE colour plan of a card — the pre-launch state, one document per

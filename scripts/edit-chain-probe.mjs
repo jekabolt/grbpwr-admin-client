@@ -14,7 +14,7 @@
 // ONE write — `UndoDesignEdit` / `RedoDesignEdit` with the CAS on the version pressed.
 //
 //   node scripts/edit-chain-probe.mjs
-//   node scripts/edit-chain-probe.mjs --mutate=headstop|cardskip|hiddenundone|canredo|closed|corners|cas|splitgate
+//   node scripts/edit-chain-probe.mjs --mutate=headstop|cardskip|hiddenundone|canredo|closed|corners|cas|splitgate|target
 //   — each goes red
 
 import { createRequire } from 'node:module';
@@ -74,6 +74,12 @@ const MUTATIONS = {
     file: /generation\/run-tile\.tsx$/,
     from: 'successorStands(picture, siblings ?? [picture]))\n    return null;',
     to: '(picture.replacedBy ?? 0) > 0)\n    return null;',
+  },
+  // the step names no target: a repeat after another tab's new edit would read as success (C1)
+  target: {
+    file: /generation\/edit-chain-doors\.ts$/,
+    from: "expectedTargetId: step === 'undo' ? steps.undoTo : steps.redoTo,",
+    to: 'expectedTargetId: 0,',
   },
   // the step carries no CAS: a stale screen would step a chain it no longer sees
   cas: {
@@ -153,7 +159,7 @@ const check = (name, ok, detail = '') => {
   // v1 → v2 → v3, and x beside; the server marks v3 current with can_undo
   const v1 = p(1, { replacedBy: 2 });
   const v2 = edit(2, 1, { replacedBy: 3 });
-  const v3 = edit(3, 2, { canUndo: true });
+  const v3 = edit(3, 2, { canUndo: true, undoToId: 2 });
   const x = p(9);
   const row = [v1, v2, v3, x];
   check(
@@ -164,18 +170,18 @@ const check = (name, ok, detail = '') => {
   check('P2 history keeps every link', ids(a.outputPlan(row)) === '[1,2,3,9]');
   check(
     'P3 corners are the server’s: v3 undo only',
-    steps(v3) === '{"undo":true,"redo":false}',
+    steps(v3) === '{"undo":true,"redo":false,"undoTo":2,"redoTo":0}',
     steps(v3),
   );
   check(
     'P3b no corners on a link the server did not mark',
-    steps(v2) === '{"undo":false,"redo":false}',
+    steps(v2) === '{"undo":false,"redo":false,"undoTo":0,"redoTo":3}',
   );
 
   // undo once: v3 undone, v2 current (can_undo, can_redo)
   const u1 = [
     v1,
-    { ...v2, canUndo: true, canRedo: true },
+    { ...v2, canUndo: true, canRedo: true, undoToId: 1 },
     { ...v3, canUndo: false, undoneAt: H },
     x,
   ];
@@ -184,7 +190,10 @@ const check = (name, ok, detail = '') => {
     ids(a.benchPlan(u1)) === '[2,9]',
     ids(a.benchPlan(u1)),
   );
-  check('P5 after undo: v2 has undo and redo', steps(u1[1]) === '{"undo":true,"redo":true}');
+  check(
+    'P5 after undo: v2 has undo and redo',
+    steps(u1[1]) === '{"undo":true,"redo":true,"undoTo":1,"redoTo":3}',
+  );
   check('P6 the undone edit is not a standing successor', !a.successorStands(u1[1], u1));
   check('P7 a live successor stands', a.successorStands(v2, row));
   check(
@@ -404,6 +413,7 @@ if (!chromium || !CSS) {
         w[0].name === 'UndoDesignEdit' &&
         w[0].body.pictureId === 33 &&
         w[0].body.expectedCurrentId === 33 &&
+        w[0].body.expectedTargetId === 32 &&
         typeof w[0].body.idempotencyKey === 'string' &&
         w[0].body.idempotencyKey.length > 0,
       JSON.stringify(w),
@@ -419,7 +429,8 @@ if (!chromium || !CSS) {
       w.length === 1 &&
         w[0].name === 'RedoDesignEdit' &&
         w[0].body.pictureId === 42 &&
-        w[0].body.expectedCurrentId === 42,
+        w[0].body.expectedCurrentId === 42 &&
+        w[0].body.expectedTargetId === 43,
       JSON.stringify(w),
     );
     const flag = await page

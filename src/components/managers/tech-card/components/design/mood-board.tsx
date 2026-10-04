@@ -451,6 +451,7 @@ function pictureOfMedia(full: common_MediaFull): common_DesignPicture {
     undoneAt: undefined,
     canUndo: undefined,
     canRedo: undefined,
+    undoToId: undefined,
   };
 }
 

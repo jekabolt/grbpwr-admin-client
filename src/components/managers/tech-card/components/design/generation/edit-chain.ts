@@ -47,10 +47,22 @@ export function successorStands(
   return !successor || !isUndoneEdit(successor);
 }
 
-export type ChainSteps = { undo: boolean; redo: boolean };
+/**
+ * WHICH CORNERS THE PICTURE SHOWS — the server's word, nothing recomputed from the page — and the
+ * version each step makes current (`expected_target_id`, T28 v2 C1): undo's is `undo_to_id`, redo's
+ * is `replaced_by`. A step whose target the server did not name is not offered.
+ */
+export type ChainSteps = { undo: boolean; redo: boolean; undoTo: number; redoTo: number };
 
-/** WHICH CORNERS THE PICTURE SHOWS — the server's word, nothing recomputed from the page. */
 export function chainSteps(picture: common_DesignPicture | null): ChainSteps {
-  if (!picture || (picture.id ?? 0) <= 0) return { undo: false, redo: false };
-  return { undo: !!picture.canUndo, redo: !!picture.canRedo };
+  const none = { undo: false, redo: false, undoTo: 0, redoTo: 0 };
+  if (!picture || (picture.id ?? 0) <= 0) return none;
+  const undoTo = picture.undoToId ?? 0;
+  const redoTo = picture.replacedBy ?? 0;
+  return {
+    undo: !!picture.canUndo && undoTo > 0,
+    redo: !!picture.canRedo && redoTo > 0,
+    undoTo,
+    redoTo,
+  };
 }

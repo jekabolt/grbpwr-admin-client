@@ -443,11 +443,13 @@ export function useDesignWrites(techCardId?: number) {
       step: 'undo' | 'redo';
       pictureId: number;
       expectedCurrentId: number;
+      expectedTargetId: number;
       idempotencyKey: string;
     }) => {
       const req = {
         pictureId: input.pictureId,
         expectedCurrentId: input.expectedCurrentId,
+        expectedTargetId: input.expectedTargetId,
         idempotencyKey: input.idempotencyKey,
       };
       return input.step === 'undo'

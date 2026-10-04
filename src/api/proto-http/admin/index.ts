@@ -15476,6 +15476,10 @@ export type common_DesignPicture = {
   // can_redo — the link after this one is undone.
   canUndo: boolean | undefined;
   canRedo: boolean | undefined;
+  // The version undo makes current — the link before this one; 0 when can_undo is false. Sent back
+  // as UndoDesignEditRequest.expected_target_id (the link may sit in a run row that is paged out).
+  // Redo's target is replaced_by.
+  undoToId: number | undefined;
 };
 
 // DesignBudget is the band's money bar: `today $0.41 of $2.00`.
@@ -16922,6 +16926,10 @@ export type UndoDesignEditRequest = {
   // CAS: the current version the client saw (the picture whose undo corner was pressed).
   expectedCurrentId: number | undefined;
   idempotencyKey: string | undefined;
+  // The version that should become current: the link before expected_current_id
+  // (common.DesignPicture.undo_to_id). Required. A repeat is answered OK only when THIS is current
+  // and expected_current_id stands undone right after it; anything else not matching is stale_chain.
+  expectedTargetId: number | undefined;
 };
 
 // The chain after the step — the band rows the step touched.
@@ -16942,6 +16950,11 @@ export type RedoDesignEditRequest = {
   pictureId: number | undefined;
   expectedCurrentId: number | undefined;
   idempotencyKey: string | undefined;
+  // The version that should become current: the undone link right after expected_current_id (its
+  // replaced_by). Required. A repeat is answered OK only when THIS is current and
+  // expected_current_id stands right before it — a newer edit over expected_current_id made in
+  // another tab is stale_chain, not a repeat.
+  expectedTargetId: number | undefined;
 };
 
 export type RedoDesignEditResponse = {
@@ -19059,8 +19072,8 @@ export interface AdminService {
   // set on it and every bench slot that held it moves to the link before it (slot_rev + 1). ONE
   // transaction: the chain rows are locked, then a compare-and-set on expected_current_id.
   // picture_id names the chain (any link of it). IDEMPOTENT BY OUTCOME: a repeat that finds the
-  // undo already in place (expected_current_id undone, the link before it current) answers OK and
-  // writes nothing; idempotency_key is required and logged.
+  // undo already in place (expected_target_id current, expected_current_id undone right after it)
+  // answers OK and writes nothing; idempotency_key is required and logged.
   // InvalidArgument: a missing id or key. FailedPrecondition: stale_chain (the current version is
   // not expected_current_id — re-read the band), nothing_to_undo (the current version is the
   // original), live_crop_parent (it is cut into visible pieces), and every refusal of a slot
@@ -19120,7 +19133,9 @@ export interface AdminService {
   // IDEMPOTENT BY DERIVATION, NOT YET BY client_request_id: while the crops of an earlier cut of
   // this picture are visible, a repeat returns THEM and cuts nothing. The key is required but not
   // stored yet (backlog) — a retry that lands after those crops were hidden cuts again.
-  // A REPLACED PICTURE IS NOT CUT (O-53): FailedPrecondition already_replaced, whose ErrorInfo
+  // A REPLACED PICTURE IS NOT CUT (O-53) — one whose place ANOTHER picture holds (the head of its
+  // chain is not itself; a restored original whose successor is undone is current and is cut, T28
+  // v2): FailedPrecondition already_replaced, whose ErrorInfo
   // metadata carries head_picture_id — the head of its replacement chain, the picture a stale tab
   // should cut instead. A HIDDEN PICTURE IS NOT CUT EITHER: FailedPrecondition hidden_picture. Its
   // crops would be born visible under a parent nobody can see — the state HideDesignPicture refuses
