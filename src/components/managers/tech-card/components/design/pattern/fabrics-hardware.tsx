@@ -95,7 +95,10 @@ const REFS_MAX = 4;
 const RUN_SCOPE = 'fabrics-hardware';
 
 /** A press on its way: added before `start`, gone once its run is live, refused or re-read. */
-type Launch = { id: string; done: boolean; bandAt?: GetDesignBandResponse };
+type Launch = { id: string; done: boolean; at: number; bandAt?: GetDesignBandResponse };
+
+/** A press that has not landed a run by now is dropped, so GENERATE is never blocked for good. */
+const LAUNCH_EXPIRY_MS = 30_000;
 
 export function FabricsHardware({
   band,
@@ -250,6 +253,19 @@ function MaterialBench({
 
   /* ─── presses in flight (one hook instance tracks only its last mutation) ─── */
   const [launching, setLaunching] = useState<ReadonlyMap<string, Launch>>(new Map());
+  // A card switch drops every press in flight (render-body reset, like the drafts above).
+  const [launchCard, setLaunchCard] = useState(techCardId);
+  if (launchCard !== techCardId) {
+    setLaunchCard(techCardId);
+    setLaunching(new Map());
+  }
+  // A tick while anything is in flight, so an entry past its expiry is dropped without a band change.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (launching.size === 0) return;
+    const t = setInterval(() => setNow(Date.now()), 5_000);
+    return () => clearInterval(t);
+  }, [launching.size]);
   const pressStates = useMutationState({
     filters: { mutationKey: startRunKey(techCardId, RUN_SCOPE) },
     select: (m) => ({
@@ -264,7 +280,7 @@ function MaterialBench({
     for (const [key, l] of launching) {
       const states = pressStates.filter((p) => p.id === l.id);
       const last = states[states.length - 1];
-      if (liveByPair.has(key) || last?.status === 'error') {
+      if (liveByPair.has(key) || last?.status === 'error' || now - l.at > LAUNCH_EXPIRY_MS) {
         next.delete(key);
         changed = true;
       } else if (l.done && l.bandAt !== band) {
@@ -276,7 +292,7 @@ function MaterialBench({
       }
     }
     if (changed) setLaunching(next);
-  }, [launching, pressStates, liveByPair, band]);
+  }, [launching, pressStates, liveByPair, band, now]);
 
   // The hook clears its refusal on the next accepted press; the bench keeps it until dismissed.
   const [shownRefusal, setShownRefusal] = useState<{
@@ -430,18 +446,29 @@ function MaterialBench({
       });
       // `beforeSend` runs synchronously inside `start`; no id means nothing was sent.
       if (id) {
-        setLaunching((prev) => new Map(prev).set(key, { id, done: false }));
+        setLaunching((prev) => new Map(prev).set(key, { id, done: false, at: Date.now() }));
       }
     }
   };
 
-  /** Drop a picture nobody wears any more (its own pair excepted). Errors are not ours to show. */
+  /**
+   * Drop a picture nobody references any more (its own pair excepted). DeleteAsset cascades
+   * placements and bindings with no guard of its own, so every reference the band carries must be
+   * absent: another binding, a legacy colourway, a placement, a derived asset. A band that does not
+   * carry placements cannot prove the last one — then nothing is deleted. Errors are not ours to show.
+   */
   const dropIfOrphan = (assetId: number, colorwayId: number, bomItemId: number) => {
     if (assetId <= 0) return;
     const others = pairsOfAsset(band, assetId).filter(
       (p) => p.colorwayId !== colorwayId || p.bomItemId !== bomItemId,
     );
-    if (others.length === 0) writes.deleteAsset.mutateAsync(assetId).catch(() => {});
+    if (others.length > 0) return;
+    const asset = (band.assets ?? []).find((a) => wireInt(a.id) === assetId);
+    if (!asset || wireInt(asset.colorwayId) !== 0) return;
+    if (band.assetPlacements === undefined) return;
+    if (band.assetPlacements.some((p) => wireInt(p.assetId) === assetId)) return;
+    if ((band.assets ?? []).some((a) => wireInt(a.derivedFromAssetId) === assetId)) return;
+    writes.deleteAsset.mutateAsync(assetId).catch(() => {});
   };
 
   /* ─── own pictures ─── */
@@ -455,7 +482,6 @@ function MaterialBench({
     const key = pairKey(cwId, slot.bomItemId);
     const prevId = wireInt(byPair.get(key)?.id);
     mark(key, true);
-    let freshId = 0;
     try {
       const res = await writes.upsertAsset.mutateAsync({
         assetId: 0,
@@ -465,18 +491,16 @@ function MaterialBench({
       });
       const assetId = wireInt(res.asset?.id);
       if (assetId > 0) {
-        freshId = assetId;
         await binds.setBinding.mutateAsync({
           colorwayId: cwId,
           bomItemId: slot.bomItemId,
           assetId,
         });
-        freshId = 0;
         if (prevId !== assetId) dropIfOrphan(prevId, cwId, slot.bomItemId);
       }
     } catch {
-      // The write hooks already said what went wrong; a picture made for a failed binding goes.
-      if (freshId > 0) writes.deleteAsset.mutateAsync(freshId).catch(() => {});
+      // The write hooks already said what went wrong. A picture made for a failed binding stays on
+      // the shelf: a lost response may still have committed the binding.
     } finally {
       mark(key, false);
     }
