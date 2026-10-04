@@ -93,12 +93,6 @@ const MUTATIONS = {
     from: "        title='workbench'\n        className={HISTORY_AIR}\n",
     to: "        title='workbench'\n",
   },
-  // T37: счёт прогонов снова не подчёркнут — дверь читается как подпись.
-  'fold-underline': {
-    file: /generation\/generation-history\.tsx$/,
-    from: "<span data-history-runs='' className='underline underline-offset-2'>",
-    to: "<span data-history-runs=''>",
-  },
   // T37/T40: стрелка не поворачивается — открытая история выглядит закрытой.
   'fold-caret': {
     file: /generation\/generation-history\.tsx$/,
@@ -315,6 +309,14 @@ try {
       return {
         runs: runs?.textContent.trim() ?? '',
         underline: runs ? getComputedStyle(runs).textDecorationLine : '',
+        // T55: галочка 7px и по центру строки «· N runs» (±1px).
+        size: caret ? Math.round(caret.getBoundingClientRect().width) : 0,
+        offset: (() => {
+          if (!runs || !caret) return 99;
+          const r = runs.getBoundingClientRect();
+          const c = caret.getBoundingClientRect();
+          return Math.round((c.top + c.height / 2 - (r.top + r.height / 2)) * 10) / 10;
+        })(),
         caret: caret?.getAttribute('data-fold-caret') ?? '',
         hidden: caret?.getAttribute('aria-hidden') === 'true',
         // Tailwind 4 turns with the `rotate` property, 3 with `transform`: either counts.
@@ -328,9 +330,11 @@ try {
     });
   const shut = await foldLook();
   check(
-    'T37.1 folded: `history · N runs` with the count underlined and a FoldCaret pointing down, no frame',
+    'T37.1/T55 folded: `history · N runs`, count NOT underlined, a 7px FoldCaret pointing down centred on the line, no frame',
     shut.runs === '1 run' &&
-      shut.underline === 'underline' &&
+      shut.underline === 'none' &&
+      shut.size === 7 &&
+      Math.abs(shut.offset) <= 1 &&
       shut.caret === 'folded' &&
       shut.hidden &&
       /^(none|0deg)\|none$/.test(shut.turn) &&
