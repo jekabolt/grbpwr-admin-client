@@ -485,6 +485,71 @@ try {
     await ctx.close();
   }
   {
+    // Ф4 (R14/R15): a shirt painted all over in dark cloth — no white bands along the seams, the
+    // lines readable on the dark. `--edges=<suffix>` names the shot (before/after).
+    const { ctx, page } = await open(1440, 1000, 'f2');
+    await page
+      .waitForFunction(() => window.__paint.views.get('back')?.parts, null, { timeout: 8000 })
+      .catch(() => {});
+    await page.click('[data-paint-add-colour]');
+    await page.waitForSelector('[data-colour-square]');
+    const sq = await page.locator('[data-colour-square]').boundingBox();
+    await page.mouse.click(sq.x + sq.width * 0.9, sq.y + sq.height * 0.88);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    const every = async (view) => {
+      const pts = await page.evaluate((v) => {
+        const pv = window.__paint.views.get(v);
+        const out = [];
+        for (let r = 1; r < pv.parts.seeds.length; r++) {
+          const s = pv.parts.seeds[r];
+          if (s >= 0)
+            out.push({
+              fx: ((s % pv.flat.w) + 0.5) / pv.flat.w,
+              fy: (Math.floor(s / pv.flat.w) + 0.5) / pv.flat.h,
+            });
+        }
+        return out;
+      }, view);
+      await page.keyboard.down('Alt');
+      for (const { fx, fy } of pts) {
+        const p = await at(page, view, fx, fy);
+        await page.mouse.click(p.x, p.y);
+      }
+      await page.keyboard.up('Alt');
+    };
+    // The dark colour on every region, then denim on the bodies (click = whole named part).
+    await every('front');
+    await every('back');
+    await arm(page, 3);
+    for (const [v, fx, fy] of [
+      ['front', 0.3, 0.55],
+      ['front', 0.7, 0.75],
+      ['back', 0.5, 0.55],
+    ]) {
+      const p = await at(page, v, fx, fy);
+      await page.mouse.click(p.x, p.y);
+    }
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(600);
+    const suffix =
+      (process.argv.find((a) => a.startsWith('--edges=')) ?? '').slice('--edges='.length) ||
+      'after';
+    const box = await page.locator('[data-paint-side="front"]').boundingBox();
+    const name = `f4-edges-${suffix}.png`;
+    await page.screenshot({
+      path: resolve(OUT, name),
+      clip: {
+        x: box.x + box.width * 0.15,
+        y: box.y,
+        width: box.width * 0.7,
+        height: box.height * 0.55,
+      },
+    });
+    shots.push(resolve(OUT, name));
+    await ctx.close();
+  }
+  {
     // Ф3: the magnetic pen on the shirt back — the yoke traced with four clicks (orig px of the
     // 807×851 flat): the preview runs along the armhole and shoulder lines, the click on the
     // first vertex closes it.

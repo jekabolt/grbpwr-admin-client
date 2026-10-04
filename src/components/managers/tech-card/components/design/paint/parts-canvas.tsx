@@ -23,9 +23,8 @@ import {
   type InkField,
   type Pt,
 } from './livewire';
-import { componentAt, polygonIndices } from './map-model';
+import { componentAt, displayLabels, polygonIndices, underLines } from './map-model';
 import { partIndices } from './parts-model';
-import { dilate } from './regions';
 import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint';
 
 /**
@@ -51,6 +50,28 @@ const TOOLS: PaintTool[] = ['click', 'pen', 'erase'];
 const HOVER_ALPHA = 0.45;
 
 const mod = (n: number, m: number) => ((n % m) + m) % m;
+/** Under this cloth luminance the drawing turns light; the light line's grey. */
+const LINE_FLIP = 0.35;
+const LINE_LIGHT = 236;
+
+/** A material's mean luminance 0..1 (its tile, else its colour). */
+function luminance(skin: PaintSkin | undefined): number {
+  const tile = skin?.tile;
+  if (tile) {
+    let sum = 0;
+    const n = tile.width * tile.height;
+    for (let q = 0; q < n * 4; q += 4)
+      sum += 0.299 * tile.data[q] + 0.587 * tile.data[q + 1] + 0.114 * tile.data[q + 2];
+    return sum / n / 255;
+  }
+  const hex = skin?.hex || '#dddddd';
+  return (
+    (0.299 * parseInt(hex.slice(1, 3), 16) +
+      0.587 * parseInt(hex.slice(3, 5), 16) +
+      0.114 * parseInt(hex.slice(5, 7), 16)) /
+    255
+  );
+}
 /** The live preview's search time per frame, and the most a click may wait for its edge. */
 const WIRE_FRAME_MS = 6;
 const WIRE_COMMIT_MS = 30;
@@ -91,7 +112,6 @@ function PaintSide({
   height: number;
 }): JSX.Element {
   const mock = useRef<HTMLCanvasElement>(null);
-  const ink = useRef<HTMLCanvasElement>(null);
   const hover = useRef<HTMLCanvasElement>(null);
   const hoverState = useRef<{
     idx: Int32Array | null;
@@ -130,60 +150,57 @@ function PaintSide({
   const ready = view.status === 'ready' && !!flat && !!labels && !!pixels;
   const tool = session.tool;
 
-  // The paper and the paint.
+  // The paper, the paint under the lines, and the drawing itself on top: multiplied over light
+  // cloth, drawn light over dark cloth — one line, no halo (R14). Display only: the map sent to
+  // the model keeps its labels and black ink.
   useEffect(() => {
     const c = mock.current;
-    if (!ready || !c || !labels || !pixels) return;
+    if (!ready || !c || !labels || !pixels || !flat) return;
     c.width = w;
     c.height = h;
     const ctx = c.getContext('2d');
     if (!ctx) return;
+    const shown = displayLabels(labels, underLines(flat));
     const out = new ImageData(new Uint8ClampedArray(pixels.data), w, h);
-    const samplers = new Map<number, ReturnType<typeof sampler>>();
-    for (let i = 0, p = 0; i < labels.length; i += 1, p += 4) {
-      const v = labels[i];
+    const d = out.data;
+    const looks = new Map<number, { s: ReturnType<typeof sampler>; dark: boolean }>();
+    const tmp = new Uint8ClampedArray(4);
+    for (let i = 0, p = 0; i < shown.length; i += 1, p += 4) {
+      // The flat's own pixel over white paper.
+      const a = d[p + 3] / 255;
+      const fr = d[p] * a + 255 * (1 - a);
+      const fg = d[p + 1] * a + 255 * (1 - a);
+      const fb = d[p + 2] * a + 255 * (1 - a);
+      d[p + 3] = 255;
+      const v = shown[i];
       if (!v) {
-        // Transparent paper is white paper.
-        const a = out.data[p + 3] / 255;
-        out.data[p] = out.data[p] * a + 255 * (1 - a);
-        out.data[p + 1] = out.data[p + 1] * a + 255 * (1 - a);
-        out.data[p + 2] = out.data[p + 2] * a + 255 * (1 - a);
-        out.data[p + 3] = 255;
+        d[p] = fr;
+        d[p + 1] = fg;
+        d[p + 2] = fb;
         continue;
       }
-      let s = samplers.get(v);
-      if (!s) {
-        s = sampler(session.skins.get(`#${v.toString(16).padStart(6, '0')}`), h);
-        samplers.set(v, s);
+      let look = looks.get(v);
+      if (!look) {
+        const skin = session.skins.get(`#${v.toString(16).padStart(6, '0')}`);
+        look = { s: sampler(skin, h), dark: luminance(skin) < LINE_FLIP };
+        looks.set(v, look);
       }
-      s(i % w, (i / w) | 0, out.data, p);
-      out.data[p + 3] = 255;
+      look.s(i % w, (i / w) | 0, tmp, 0);
+      if (look.dark) {
+        // How much line is in this pixel, drawn toward a light line.
+        const k = 1 - Math.min(fr, fg, fb) / 255;
+        d[p] = tmp[0] + (LINE_LIGHT - tmp[0]) * k;
+        d[p + 1] = tmp[1] + (LINE_LIGHT - tmp[1]) * k;
+        d[p + 2] = tmp[2] + (LINE_LIGHT - tmp[2]) * k;
+      } else {
+        d[p] = (tmp[0] * fr) / 255;
+        d[p + 1] = (tmp[1] * fg) / 255;
+        d[p + 2] = (tmp[2] * fb) / 255;
+      }
     }
     ctx.putImageData(out, 0, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, view.rev, w, h]);
-
-  // The drawing on top: black lines, white halo.
-  useEffect(() => {
-    const c = ink.current;
-    if (!ready || !c || !flat) return;
-    c.width = w;
-    c.height = h;
-    const ctx = c.getContext('2d');
-    if (!ctx) return;
-    const halo = dilate(flat.ink, w, h, Math.max(1, Math.round(h / SIDE_MIN)));
-    const out = ctx.createImageData(w, h);
-    for (let i = 0, p = 0; i < flat.ink.length; i += 1, p += 4) {
-      if (flat.ink[i]) out.data[p + 3] = 255;
-      else if (halo[i]) {
-        out.data[p] = 255;
-        out.data[p + 1] = 255;
-        out.data[p + 2] = 255;
-        out.data[p + 3] = 255;
-      }
-    }
-    ctx.putImageData(out, 0, 0);
-  }, [ready, flat, w, h]);
+  }, [ready, view.rev, w, h, flat]);
 
   const clearHover = () => {
     const c = hover.current;
@@ -517,7 +534,6 @@ function PaintSide({
       >
         <canvas ref={mock} className='absolute inset-0 size-full' />
         <canvas ref={hover} className='pointer-events-none absolute inset-0 size-full' />
-        <canvas ref={ink} className='pointer-events-none absolute inset-0 size-full' />
         {tail.length > 0 && w > 0 && (
           <svg
             className='pointer-events-none absolute inset-0 size-full'
