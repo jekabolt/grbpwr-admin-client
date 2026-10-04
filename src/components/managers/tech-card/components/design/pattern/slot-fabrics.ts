@@ -252,9 +252,9 @@ export function materialSlots(
 
 /* ─────────────────────────── label slots ─────────────────────────── */
 
-/** A label slot stays `hardware`; recognised by its BOM section or by the bench's label pictogram. */
+/** A label slot stays `hardware`; recognised by its BOM section only (stickers / hang tags are packaging). */
 export function isLabelSlot(slot: MaterialSlot): boolean {
-  return slot.section === 'TECH_CARD_BOM_SECTION_LABEL' || trimPictogramKind(slot) === 'label';
+  return slot.section === 'TECH_CARD_BOM_SECTION_LABEL';
 }
 
 /** How a label looks — chip words (comma-free: the words list splits on `,`). */

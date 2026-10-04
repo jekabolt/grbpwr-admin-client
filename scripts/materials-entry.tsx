@@ -149,10 +149,10 @@ const SLOTS: MaterialSlot[] = [
     '100% wool twill 320 gsm',
   ),
   slot(2, 'fabric', 'fabric', 'LINING', 'lining', 'TECH_CARD_BOM_SECTION_LINING', '100% cupro'),
-  slot(3, 'hardware', 'button', 'FRONT BUTTON', '', 'TECH_CARD_BOM_SECTION_TRIMS'),
-  slot(4, 'hardware', 'zipper', 'ZIP', '', 'TECH_CARD_BOM_SECTION_TRIMS'),
-  slot(5, 'hardware', 'label', 'BRAND LABEL', '', 'TECH_CARD_BOM_SECTION_LABELS'),
-  slot(6, 'hardware', 'snap', 'SNAP', '', 'TECH_CARD_BOM_SECTION_TRIMS'),
+  slot(3, 'hardware', 'button', 'FRONT BUTTON', '', 'TECH_CARD_BOM_SECTION_TRIM'),
+  slot(4, 'hardware', 'zipper', 'ZIP', '', 'TECH_CARD_BOM_SECTION_TRIM'),
+  slot(5, 'hardware', 'label', 'BRAND LABEL', '', 'TECH_CARD_BOM_SECTION_LABEL'),
+  slot(6, 'hardware', 'snap', 'SNAP', '', 'TECH_CARD_BOM_SECTION_TRIM'),
 ];
 
 /* `ColourwayCreatePopover` reads the tech-card form; the closed popover needs only a context. */
