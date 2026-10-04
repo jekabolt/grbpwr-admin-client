@@ -8,14 +8,18 @@ import type {
   common_AdminColorwayRef,
   common_DesignAsset,
 } from 'api/proto-http/admin';
-import { useState } from 'react';
-import { FormProvider, useForm } from 'react-hook-form';
+import { useEffect, useState } from 'react';
+import { FormProvider, useForm, useFormContext, useWatch } from 'react-hook-form';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
 import { PictureGalleryProvider } from 'components/managers/tech-card/components/design/picture-tile';
 import { FabricsHardware } from 'components/managers/tech-card/components/design/pattern/fabrics-hardware';
-import type { MaterialSlot } from 'components/managers/tech-card/components/design/pattern/slot-fabrics';
+import {
+  materialSlots,
+  type BomLineLike,
+  type MaterialSlot,
+} from 'components/managers/tech-card/components/design/pattern/slot-fabrics';
 import { useDesignBand } from 'components/managers/tech-card/components/design/use-design-band';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 
@@ -56,14 +60,25 @@ const asset = (id: number, kind: string, name: string, url: string): common_Desi
     media: media(500 + id, url),
   }) as unknown as common_DesignAsset;
 
+/* Round 7: a cut-out chest embroidery — a transparent PNG-like picture (no ground), on the cell's
+   checkerboard. Its note carries the `· cut` marker, so no cutout run is chained for it. */
+const CHEST = svg(
+  `<g transform='translate(300 300)'><circle r='170' fill='none' stroke='#b3262b' stroke-width='34'/>` +
+    `<text y='34' font-family='Helvetica, Arial' font-size='108' font-weight='700' text-anchor='middle' fill='#111'>GB</text></g>`,
+);
+const chest = asset(401, 'hardware', 'rosso · chest logo', CHEST);
+(chest as unknown as { note: string }).note = 'embroidery · cut';
+
 const BAND = {
   assets: [
     asset(201, 'fabric', 'rosso · main fabric', TWILL),
     asset(301, 'hardware', 'rosso · front button', BUTTON),
+    chest,
   ],
   assetBindings: [
     { colorwayId: 11, bomItemId: 1, assetId: 201 },
     { colorwayId: 11, bomItemId: 3, assetId: 301 },
+    { colorwayId: 11, bomItemId: 7, assetId: 401 },
   ],
   bench: [],
   runs: [],
@@ -153,17 +168,38 @@ const SLOTS: MaterialSlot[] = [
   slot(4, 'hardware', 'zipper', 'ZIP', '', 'TECH_CARD_BOM_SECTION_TRIM'),
   slot(5, 'hardware', 'label', 'BRAND LABEL', '', 'TECH_CARD_BOM_SECTION_LABEL'),
   slot(6, 'hardware', 'snap', 'SNAP', '', 'TECH_CARD_BOM_SECTION_TRIM'),
+  slot(7, 'hardware', '', 'CHEST LOGO', '', 'TECH_CARD_BOM_SECTION_DECORATION', 'embroidery'),
+  slot(8, 'hardware', '', 'BACK PRINT', '', 'TECH_CARD_BOM_SECTION_DECORATION', 'screen print'),
 ];
 
 /* `ColourwayCreatePopover` reads the tech-card form; the closed popover needs only a context. */
 function Form({ children }: { children: React.ReactNode }) {
-  const form = useForm({ defaultValues: { colorways: [] } as never });
+  const form = useForm({ defaultValues: { colorways: [], bomItems: [] } as never });
   return <FormProvider {...form}>{children}</FormProvider>;
+}
+
+/* Autosave stand-in: a line born from `+ artwork` gets a server id 700 ms later. */
+function useBornSlots(): MaterialSlot[] {
+  const { setValue, getValues } = useFormContext();
+  const lines = (useWatch({ name: 'bomItems' }) ?? []) as (BomLineLike & { id?: number })[];
+  useEffect(() => {
+    if (!lines.some((l) => !l.id)) return;
+    const t = setTimeout(() => {
+      const cur = (getValues('bomItems') ?? []) as (BomLineLike & { id?: number })[];
+      setValue(
+        'bomItems',
+        cur.map((l, i) => (l.id ? l : { ...l, id: 800 + i })),
+      );
+    }, 700);
+    return () => clearTimeout(t);
+  }, [lines, getValues, setValue]);
+  return materialSlots(lines).slots;
 }
 
 function Harness() {
   const { band: live, isLoading } = useDesignBand(1);
   const [colorwayId, setColorwayId] = useState(11);
+  const born = useBornSlots();
   if (isLoading || !live) return null;
   return (
     <PictureGalleryProvider techCardId={1} band={live}>
@@ -174,7 +210,7 @@ function Harness() {
           colorways={COLORWAYS}
           colorwayId={colorwayId}
           onColorwayChange={setColorwayId}
-          slots={SLOTS}
+          slots={[...SLOTS, ...born]}
           labelSeeds={LABEL_SEEDS}
           onGoStep={() => {}}
         />

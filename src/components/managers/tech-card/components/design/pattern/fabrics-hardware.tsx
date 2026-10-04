@@ -18,15 +18,18 @@ import { useMutationState } from '@tanstack/react-query';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
+import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { Section } from 'ui/components/section';
 import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
+import Input from 'ui/components/input';
 import Textarea from 'ui/components/text-area';
 
-import { kindLabel } from '../../bom-kind';
+import { UNSET_KIND, kindLabel } from '../../bom-kind';
+import { bornBomLine } from '../../form-writers';
 import { wireInt } from '../../wire-int';
 import {
   ASSETS_PER_CARD_MAX,
@@ -46,7 +49,7 @@ import { FlatCustom } from '../flat-custom';
 import { openStepOf, type StepId } from '../core/chain';
 import { useElapsed, useRunPolling } from '../generation';
 import { RunCancelCorner, useCancelRun } from '../generation/live-tiles';
-import { isCancelling, isRunLive } from '../generation/run-state';
+import { isCancelling, isRunLive, runStatus } from '../generation/run-state';
 import { PictureSlotEmpty, PictureSlotFilled } from '../playground/fields/image-slots';
 import { PictureTile, useGalleryGroup, useOpenGalleryGroup } from '../picture-tile';
 import { GenerateRow, RunRefusal } from '../render/generate-row';
@@ -57,11 +60,17 @@ import {
   type StartRunInput,
   type StartRunState,
 } from '../render/use-design-run';
+import { selectVisiblePictures } from '../visibility';
 import { patternRuns } from './model';
 import {
+  ARTWORK_SECTION,
+  ARTWORK_TECHNIQUES,
+  artworkSlotsOf,
+  isArtworkSlot,
   NO_BINDINGS_REASON,
   PANTONE_LOADING_REASON,
   READ_ONLY_RUN_REASON,
+  READ_ONLY_SHELF_REASON,
   LABEL_LOOKS,
   LABEL_PLACES,
   SILENT_SERVER_REASON,
@@ -185,6 +194,10 @@ function MaterialBench({
   const run = useStartDesignRun(techCardId, { scope: RUN_SCOPE });
   const writes = useAssetWrites(techCardId);
   const binds = useAssetBindingWrites(techCardId);
+  // The card form (null outside one): `+ artwork` writes a DECORATION line into `bomItems`.
+  const form = useFormContext<{ bomItems: unknown[] }>() as ReturnType<
+    typeof useFormContext<{ bomItems: unknown[] }>
+  > | null;
 
   const cwId = colorway?.colorwayId ?? 0;
   const cwName = colorway ? colorwayLabel(colorway) : '';
@@ -235,11 +248,13 @@ function MaterialBench({
       const code = (asset.colourCode ?? '').trim();
       return {
         colourCode: code || (fabric ? ownPantone : ''),
-        words: (asset.note ?? '').trim(),
+        words: noteWords(asset),
         pictures: [],
       };
     }
     if (fabric) return { colourCode: ownPantone, words: slot.detail, pictures: [] };
+    // Artwork: the technique the line was born with (its BOM spec); no width words (round 7).
+    if (isArtworkSlot(slot)) return { colourCode: '', words: slot.detail, pictures: [] };
     if (isLabelSlot(slot)) {
       // Label: BOM detail · card row placement (as a chip word) · fold (unless flat) · size.
       const row = labelSeeds.get(slot.bomItemId);
@@ -480,34 +495,49 @@ function MaterialBench({
 
   /* ─── runs ─── */
   const runInput = (slot: MaterialSlot, spec0: Spec): StartRunInput => {
-    // `logo = picture 1` is reserved for the logo tile: never let typed words carry it.
-    const spec = { ...spec0, words: spec0.words.replace(/logo\s*=\s*picture\s*1/gi, '').trim() };
+    // `logo = picture 1` / `artwork = picture 1` are reserved for the picture tiles: never let
+    // typed words carry them.
+    const spec = {
+      ...spec0,
+      words: spec0.words.replace(/(logo|artwork)\s*=\s*picture\s*1/gi, '').trim(),
+    };
     const hardware = slot.family === 'hardware';
+    const artwork = isArtworkSlot(slot);
     const label = isLabelSlot(slot);
     const c = colourOf(slot, spec);
     const idsOf = (list: common_MediaFull[] | undefined) =>
       (list ?? []).map((m) => m.id ?? 0).filter((id) => id > 0);
-    const logoIds = label ? idsOf(spec.pictures).slice(0, 1) : [];
-    // Label: [logo (if any), ...references]; the marker tells the model which picture is the logo.
-    const pictureIds = label
-      ? [...logoIds, ...idsOf(spec.refs).slice(0, LABEL_REFS_MAX)]
-      : idsOf(spec.pictures);
+    const logoIds = label || artwork ? idsOf(spec.pictures).slice(0, 1) : [];
+    // Label: [logo (if any), ...references]; artwork: [source photo (if any), ...references]. The
+    // marker tells the model which picture is the logo / the source.
+    const pictureIds =
+      label || artwork
+        ? [...logoIds, ...idsOf(spec.refs).slice(0, LABEL_REFS_MAX)]
+        : idsOf(spec.pictures);
     // Label: placement chips ride as «sewn at …» context, the rest is the label itself.
     const said = wordList(spec.words);
     const place = said.filter((w) => LABEL_PLACES.some((p) => sameWord(p, w))).join(', ');
     const rest = said.filter((w) => !LABEL_PLACES.some((p) => sameWord(p, w))).join(', ');
-    const words = label
+    const words = artwork
       ? uniqueWords([
           c?.words ?? '',
-          rest,
-          place ? `sewn at ${place}` : '',
+          spec.words,
           slot.name,
-          'label',
-          logoIds.length > 0 ? 'logo = picture 1' : '',
+          'artwork',
+          logoIds.length > 0 ? 'artwork = picture 1' : '',
         ])
-      : hardware
-        ? uniqueWords([c?.words ?? '', spec.words, slot.name, kindLabel(slot.kind) ?? ''])
-        : [c?.words ?? '', spec.words.trim() || slot.words].filter(Boolean).join(' · ');
+      : label
+        ? uniqueWords([
+            c?.words ?? '',
+            rest,
+            place ? `sewn at ${place}` : '',
+            slot.name,
+            'label',
+            logoIds.length > 0 ? 'logo = picture 1' : '',
+          ])
+        : hardware
+          ? uniqueWords([c?.words ?? '', spec.words, slot.name, kindLabel(slot.kind) ?? ''])
+          : [c?.words ?? '', spec.words.trim() || slot.words].filter(Boolean).join(' · ');
     return {
       kind: 'pattern',
       // Lands as the asset's note (what it is made of).
@@ -537,7 +567,7 @@ function MaterialBench({
           repeatMm: 0,
           name: mintSlotName(band, cwName, slot.name),
           sourceAssetId: 0,
-          mode: label ? 'label' : hardware ? 'hardware' : 'swatch',
+          mode: artwork ? 'artwork' : label ? 'label' : hardware ? 'hardware' : 'swatch',
           bomItemId: slot.bomItemId,
         },
         freeform: undefined,
@@ -631,7 +661,7 @@ function MaterialBench({
         repeatMm: wireInt(asset.repeatMm),
         rotationDeg: wireInt(asset.rotationDeg),
         ordinal: wireInt(asset.ordinal),
-        note: spec.words.trim(),
+        note: isCut(asset) ? markCut(spec.words) : spec.words.trim(),
         colourCode: colour?.code ?? '',
         colourHex: colour?.hex ?? '',
       })
@@ -678,7 +708,50 @@ function MaterialBench({
 
   const writable = !disabled && capable && cwId > 0 && !archived;
   const fabrics = slots.filter((s) => s.family === 'fabric');
-  const hardware = slots.filter((s) => s.family === 'hardware');
+  const hardware = slots.filter((s) => s.family === 'hardware' && !isArtworkSlot(s));
+  const artworks = artworkSlotsOf(slots);
+
+  /* ─── auto cut-out (round 7, override 2): client fallback, one switch ─── */
+  const cutting = useArtworkCutout(
+    techCardId,
+    band,
+    artworks.map((s) => s.bomItemId).join(','),
+    ARTWORK_CLIENT_CUTOUT && !disabled && speaks && capable,
+  );
+
+  /* ─── `+ artwork`: an inline born row → a DECORATION BOM line; selected once it is saved ─── */
+  const [bornState, setBornState] = useState<{ card: number; row: BornRow | null }>({
+    card: techCardId,
+    row: null,
+  });
+  const born = bornState.card === techCardId ? bornState.row : null;
+  const setBorn = (row: BornRow | null) => setBornState({ card: techCardId, row });
+  useEffect(() => {
+    const key = born?.savingKey;
+    if (!key) return;
+    const landed = slots.find((s) => s.lineKey === key && s.bomItemId > 0);
+    if (!landed) return;
+    setSelectedState({ card: techCardId, bomItemId: landed.bomItemId });
+    setBornState({ card: techCardId, row: null });
+  }, [born?.savingKey, slots, techCardId]);
+  const addGate: Gate = !form
+    ? { ok: false, reason: 'the card form is not on this screen' }
+    : disabled
+      ? { ok: false, reason: READ_ONLY_SHELF_REASON }
+      : cwId <= 0
+        ? { ok: false, reason: 'pick a colourway above' }
+        : !archivedGate.ok
+          ? archivedGate
+          : { ok: true };
+  const addArtwork = (row: BornRow) => {
+    if (!form || !addGate.ok) return;
+    const technique = row.technique.trim();
+    const name = row.name.trim() || technique || 'artwork';
+    const line = bornBomLine({ section: ARTWORK_SECTION, name, spec: technique, kind: UNSET_KIND });
+    const cur = (form.getValues('bomItems') ?? []) as unknown[];
+    form.setValue('bomItems', [...cur, line] as never, { shouldDirty: true });
+    setBorn({ ...row, savingKey: line.lineKey as string });
+  };
   const dressed = (list: MaterialSlot[]) =>
     list.filter((s) => byPair.has(pairKey(cwId, s.bomItemId))).length;
 
@@ -715,7 +788,13 @@ function MaterialBench({
   /* ─── `custom ▸`: the chip rows fold behind FLAT's door (owner 04.10: «это все скрывается как в
      flat custom»). Closed by default; open state resets when the selected slot changes family
      (label · hardware · fabric — fabric has no chips, so no door). ─── */
-  const chipFamily = !selected ? '' : isLabelSlot(selected) ? 'label' : selected.family;
+  const chipFamily = !selected
+    ? ''
+    : isArtworkSlot(selected)
+      ? 'artwork'
+      : isLabelSlot(selected)
+        ? 'label'
+        : selected.family;
   const chipRows = chipRowsOf(chipFamily);
   const [customState, setCustomState] = useState<{ family: string; open: boolean }>({
     family: chipFamily,
@@ -864,8 +943,12 @@ function MaterialBench({
     </span>
   );
 
-  const group = (title: string, list: MaterialSlot[]) =>
-    list.length === 0 ? null : (
+  const group = (
+    title: string,
+    list: MaterialSlot[],
+    extra?: { tail?: React.ReactNode; below?: React.ReactNode },
+  ) =>
+    list.length === 0 && !extra ? null : (
       <div className='min-w-0' data-fh-group={title}>
         <GroupLabel
           flush
@@ -911,7 +994,10 @@ function MaterialBench({
                     const at = arrivedCw.current.get(slot.bomItemId);
                     arrivedCw.current.delete(slot.bomItemId);
                     if (at !== undefined && at !== cwId) {
-                      showMessage('the colourway changed while the picture uploaded · drop it again', 'error');
+                      showMessage(
+                        'the colourway changed while the picture uploaded · drop it again',
+                        'error',
+                      );
                       return;
                     }
                     pick(slot);
@@ -938,6 +1024,7 @@ function MaterialBench({
                     liveRun={cwId > 0 ? liveByPair.get(key) : undefined}
                     saving={saving.has(key)}
                     launching={launching.has(key)}
+                    cutting={!!current && cutting.has(wireInt(current.id))}
                     writable={writable}
                     full={!shelfRoom}
                     fullReason={SHELF_REASON}
@@ -976,7 +1063,9 @@ function MaterialBench({
               </div>
             );
           })}
+          {extra?.tail}
         </div>
+        {extra?.below}
       </div>
     );
 
@@ -1006,13 +1095,35 @@ function MaterialBench({
         <>
           {group('fabrics', fabrics)}
           {group('hardware', hardware)}
+          {group('artwork', artworks, {
+            tail: (
+              <NewArtworkTile
+                gate={addGate}
+                open={!!born}
+                onOpen={() => setBorn(born ?? { name: '', technique: ARTWORK_TECHNIQUES[0] })}
+              />
+            ),
+            below: born ? (
+              <BornArtworkRow
+                row={born}
+                gate={addGate}
+                onChange={setBorn}
+                onAdd={() => addArtwork(born)}
+                onCancel={() => setBorn(null)}
+              />
+            ) : null,
+          })}
 
           {selected && selSpec && (
             <div data-fh-generate={selGate.ok ? 'live' : 'inert'} data-fh-for={selected.bomItemId}>
               <GroupLabel
                 action={
                   <Text size='micro' variant='label' component='span'>
-                    {isLabelSlot(selected) ? 'label' : selected.family}
+                    {isArtworkSlot(selected)
+                      ? 'artwork'
+                      : isLabelSlot(selected)
+                        ? 'label'
+                        : selected.family}
                   </Text>
                 }
               >
@@ -1086,7 +1197,14 @@ function MaterialBench({
                           )}
                         </>
                       )}
-                      <Money data-probe='run-price' />
+                      <Money
+                        data-probe='run-price'
+                        note={
+                          isArtworkSlot(selected) && ARTWORK_CLIENT_CUTOUT
+                            ? 'artwork + cut-out · two runs'
+                            : null
+                        }
+                      />
                       {wordsChanged && selAsset && writable && (
                         <Button
                           variant='underline'
@@ -1212,7 +1330,10 @@ function SpecPanel({
   const { showMessage } = useSnackBarStore();
   const hardware = slot.family === 'hardware';
   const label = isLabelSlot(slot);
-  const max = hardware && !label ? REFS_MAX : 1;
+  const artwork = isArtworkSlot(slot);
+  // Label: one logo; artwork: one source photo; other hardware: up to four references.
+  const max = hardware && !label && !artwork ? REFS_MAX : 1;
+  const withRefs = label || artwork;
   const pictures = spec.pictures;
   const room = Math.max(0, max - pictures.length);
   const add = (incoming: common_MediaFull[]) => {
@@ -1227,15 +1348,15 @@ function SpecPanel({
     }
     if (kept.length > 0) onChange({ ...spec, pictures: [...pictures, ...kept] });
   };
-  const refs = label ? spec.refs ?? [] : [];
-  const refRoom = label ? Math.max(0, LABEL_REFS_MAX - refs.length) : 0;
+  const refs = withRefs ? spec.refs ?? [] : [];
+  const refRoom = withRefs ? Math.max(0, LABEL_REFS_MAX - refs.length) : 0;
   const addRefs = (incoming: common_MediaFull[]) => {
     const have = new Set(refs.map((m) => m.id ?? 0));
     const fresh = incoming.filter((m) => (m.id ?? 0) > 0 && !have.has(m.id ?? 0));
     const kept = fresh.slice(0, refRoom);
     if (fresh.length > kept.length) {
       showMessage(
-        `took ${kept.length} of ${fresh.length}: a label holds ${LABEL_REFS_MAX} references at most`,
+        `took ${kept.length} of ${fresh.length}: ${artwork ? 'an artwork' : 'a label'} holds ${LABEL_REFS_MAX} references at most`,
         'error',
       );
     }
@@ -1263,7 +1384,13 @@ function SpecPanel({
           <div key={media.id ?? index} className={INPUT_CELL} data-fh-look={index + 1}>
             <PictureSlotFilled
               media={media}
-              alt={label ? `${slot.name} logo` : `${slot.name} picture ${index + 1}`}
+              alt={
+                label
+                  ? `${slot.name} logo`
+                  : artwork
+                    ? `${slot.name} photo`
+                    : `${slot.name} picture ${index + 1}`
+              }
               disabled={disabled}
               onRemove={() =>
                 onChange({ ...spec, pictures: pictures.filter((_, at) => at !== index) })
@@ -1275,8 +1402,14 @@ function SpecPanel({
         {room > 0 && (
           <div className={INPUT_CELL} data-fh-look-door=''>
             <PictureSlotEmpty
-              purpose={label ? `design · ${slot.name} · logo` : `design · ${slot.name}`}
-              label={label ? '+ logo' : undefined}
+              purpose={
+                label
+                  ? `design · ${slot.name} · logo`
+                  : artwork
+                    ? `design · ${slot.name} · photo`
+                    : `design · ${slot.name}`
+              }
+              label={label ? '+ logo' : artwork ? '+ photo' : undefined}
               multiple={room > 1}
               limit={room}
               disabled={disabled}
@@ -1300,7 +1433,7 @@ function SpecPanel({
           <div className={INPUT_CELL} data-fh-ref-door=''>
             <PictureSlotEmpty
               purpose={`design · ${slot.name} · reference`}
-              label='+ reference'
+              label={artwork ? '+ ref' : '+ reference'}
               multiple={refRoom > 1}
               limit={refRoom}
               disabled={disabled}
@@ -1321,7 +1454,7 @@ function SpecPanel({
           htmlFor={`fh-words-${slot.bomItemId}`}
           className='text-labelColor'
         >
-          {label ? 'label' : hardware ? 'material' : 'cloth'}
+          {artwork ? 'artwork' : label ? 'label' : hardware ? 'material' : 'cloth'}
         </Text>
         <Textarea
           id={`fh-words-${slot.bomItemId}`}
@@ -1332,11 +1465,13 @@ function SpecPanel({
           rows={2}
           autoGrow={false}
           placeholder={
-            label
-              ? 'woven, centre back neck'
-              : hardware
-                ? 'horn, black'
-                : '100% cotton twill, 300 gsm'
+            artwork
+              ? 'embroidery'
+              : label
+                ? 'woven, centre back neck'
+                : hardware
+                  ? 'horn, black'
+                  : '100% cotton twill, 300 gsm'
           }
           onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
             onChange({ ...spec, words: e.target.value })
@@ -1350,10 +1485,12 @@ function SpecPanel({
   );
 }
 
-type ChipRowSpec = { lead?: string; words: readonly string[] };
+/** `single`: picking a word drops the row's other words (technique — one at a time). */
+type ChipRowSpec = { lead?: string; words: readonly string[]; single?: boolean };
 
 /** The chip rows a slot family offers; fabric has none (→ no `custom ▸` door). */
 function chipRowsOf(family: string): ChipRowSpec[] | null {
+  if (family === 'artwork') return [{ words: ARTWORK_TECHNIQUES, single: true }];
   if (family === 'label')
     return [
       { lead: 'look', words: LABEL_LOOKS },
@@ -1403,6 +1540,7 @@ function MaybeCustom({
             key={r.lead ?? 'words'}
             lead={r.lead}
             words={r.words}
+            single={r.single}
             spec={spec}
             disabled={disabled}
             onChange={onChange}
@@ -1417,12 +1555,14 @@ function MaybeCustom({
 function WordChips({
   lead,
   words,
+  single,
   spec,
   disabled,
   onChange,
 }: {
   lead?: string;
   words: readonly string[];
+  single?: boolean;
   spec: Spec;
   disabled?: boolean;
   onChange: (spec: Spec) => void;
@@ -1435,7 +1575,15 @@ function WordChips({
           selected={hasWord(spec.words, word)}
           pressed={hasWord(spec.words, word)}
           disabled={disabled}
-          onClick={() => onChange({ ...spec, words: toggleWord(spec.words, word) })}
+          onClick={() => {
+            // Single-select: the row's other words leave first, then the word toggles.
+            const base = single
+              ? wordList(spec.words)
+                  .filter((w) => sameWord(w, word) || !words.some((x) => sameWord(x, w)))
+                  .join(', ')
+              : spec.words;
+            onChange({ ...spec, words: toggleWord(base, word) });
+          }}
           data-fh-chip={word}
         >
           {word}
@@ -1479,6 +1627,7 @@ function SlotCell({
   liveRun,
   saving,
   launching,
+  cutting,
   writable,
   full,
   fullReason,
@@ -1496,6 +1645,8 @@ function SlotCell({
   liveRun?: common_DesignRun;
   saving: boolean;
   launching: boolean;
+  /** Artwork: its auto cut-out run is live (the asset's media is swapped when it lands). */
+  cutting?: boolean;
   writable: boolean;
   full: boolean;
   fullReason: string;
@@ -1525,7 +1676,7 @@ function SlotCell({
     />
   );
 
-  if (liveRun || saving || launching) {
+  if (liveRun || saving || launching || cutting) {
     return (
       <PlaceOrDrawCell
         label={slot.name}
@@ -1540,6 +1691,8 @@ function SlotCell({
             <LiveWord startedAt={liveRun.startedAt ?? liveRun.createdAt ?? ''} word='making…' />
           ) : launching ? (
             <LiveWord word='making…' />
+          ) : cutting ? (
+            <LiveWord word='cutting…' />
           ) : (
             <LiveWord word='saving…' />
           )
@@ -1714,6 +1867,7 @@ function FilledCell({
   const url = assetFull(asset);
   const label = assetLabel(asset);
   const hardware = slot.family === 'hardware';
+  const artwork = isArtworkSlot(slot);
   const items = useMemo(
     () =>
       url
@@ -1726,6 +1880,7 @@ function FilledCell({
   return (
     <div
       ref={zoomGroup.anchorRef}
+      data-fh-checker={artwork ? '' : undefined}
       className={cn(
         'group flex w-full min-w-0 flex-col overflow-hidden border border-textColor',
         selected && 'outline outline-2 -outline-offset-2 outline-textColor',
@@ -1736,8 +1891,9 @@ function FilledCell({
         alt={label}
         aspect={BENCH_FRAME_ASPECT}
         fit={hardware ? 'contain' : 'cover'}
-        ground={hardware ? 'neutral' : undefined}
-        className='w-full border-0'
+        ground={hardware && !artwork ? 'neutral' : undefined}
+        // An artwork is a cut-out PNG: its transparency reads on a checkerboard.
+        className={cn('w-full border-0', artwork && CHECKERBOARD)}
         galleryGroup={url ? { key: zoomGroup.key, index: 0 } : undefined}
         onOpen={onPick}
         menu={{
@@ -1777,4 +1933,326 @@ function FilledCell({
       {cap}
     </div>
   );
+}
+
+/* ═══ ROUND 7 · ARTWORK ═══════════════════════════════════════════════════════════════════════ */
+
+/** Transparent PNGs read on a light checkerboard (object-contain), in cells only. */
+const CHECKERBOARD =
+  '[background:repeating-conic-gradient(#e6e6e6_0_25%,#ffffff_0_50%)_0_0/12px_12px]';
+
+/** The `+ artwork` born row: name · technique; `savingKey` once added (waits for the line's id). */
+type BornRow = { name: string; technique: string; savingKey?: string };
+
+/** The dashed `new` tile of ColourwayStrip, at the bench cell's width, word `+ artwork`. */
+function NewArtworkTile({
+  gate,
+  open,
+  onOpen,
+}: {
+  gate: Gate;
+  open: boolean;
+  onOpen: () => void;
+}): JSX.Element {
+  const off = !gate.ok;
+  return (
+    <div style={BENCH_CELL_STYLE} className='flex min-w-0 flex-col items-start gap-1'>
+      <button
+        type='button'
+        disabled={off}
+        onClick={onOpen}
+        title={off ? gate.reason : 'a new artwork — a DECORATION line of the BOM'}
+        aria-expanded={open}
+        data-fh-new-artwork={off ? 'inert' : 'live'}
+        className='group flex w-full flex-col gap-1 text-left disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+      >
+        <span
+          aria-hidden
+          style={{ aspectRatio: BENCH_FRAME_ASPECT }}
+          className={cn(
+            'flex w-full items-center justify-center border border-dashed bg-bgColor',
+            open
+              ? 'border-textColor text-textColor'
+              : 'border-borderColor text-labelColor group-hover:border-textColor group-hover:text-textColor',
+            off && 'text-textInactiveColor group-hover:border-borderColor',
+          )}
+        >
+          <Text component='span' size='control' className='font-bold'>
+            +
+          </Text>
+        </span>
+        <Text
+          size='micro'
+          variant={off ? 'inactive' : 'label'}
+          tracking='label'
+          component='span'
+          className='w-full truncate uppercase'
+        >
+          + artwork
+        </Text>
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The inline row under ARTWORK: name (prefilled with the technique until the person types) ·
+ * technique chips (single-select) · `add` · `cancel`. Nothing modal. After `add` the row says
+ * `saving…` until the line has its server id; the bench then selects it.
+ */
+function BornArtworkRow({
+  row,
+  gate,
+  onChange,
+  onAdd,
+  onCancel,
+}: {
+  row: BornRow;
+  gate: Gate;
+  onChange: (row: BornRow) => void;
+  onAdd: () => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const saving = !!row.savingKey;
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+  return (
+    <div
+      className='flex flex-wrap items-center gap-2 pt-2'
+      data-fh-born={saving ? 'saving' : 'open'}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') onCancel();
+      }}
+    >
+      <div className='w-56 shrink-0'>
+        <Input
+          ref={inputRef}
+          name='fh-born-artwork'
+          value={row.name}
+          placeholder={row.technique || 'artwork'}
+          disabled={saving}
+          aria-label='artwork name'
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+            onChange({ ...row, name: e.target.value })
+          }
+          onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+            if (e.key === 'Enter' && gate.ok && !saving) {
+              e.preventDefault();
+              onAdd();
+            }
+          }}
+          data-fh-born-name=''
+        />
+      </div>
+      <ChipRow className='min-w-0'>
+        {ARTWORK_TECHNIQUES.map((t) => (
+          <Chip
+            key={t}
+            selected={sameWord(t, row.technique)}
+            pressed={sameWord(t, row.technique)}
+            disabled={saving}
+            onClick={() =>
+              onChange({
+                ...row,
+                technique: t,
+                // The name follows the technique until the person has typed one of their own.
+                name: !row.name.trim() || sameWord(row.name, row.technique) ? t : row.name,
+              })
+            }
+            data-fh-born-chip={t}
+          >
+            {t}
+          </Chip>
+        ))}
+      </ChipRow>
+      {saving ? (
+        <Text size='micro' variant='label' component='span' data-fh-born-saving=''>
+          saving…
+        </Text>
+      ) : (
+        <span className='flex items-center gap-1.5'>
+          <Button
+            variant='underline'
+            size='xs'
+            disabled={!gate.ok}
+            title={gate.ok ? 'adds the line to the BOM' : gate.reason}
+            onClick={onAdd}
+            data-fh-born-add=''
+          >
+            add
+          </Button>
+          <Text size='micro' variant='label' component='span'>
+            ·
+          </Text>
+          <Button variant='underline' size='xs' onClick={onCancel} data-fh-born-cancel=''>
+            cancel
+          </Button>
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ═══ AUTO CUT-OUT — CLIENT FALLBACK (round 7, spec override 2) ═══════════════════════════════
+ *
+ * Every artwork-mode run, once it lands, is followed by a `cutout` run (background removal →
+ * alpha PNG) and the artwork asset's media is swapped to the cut-out. Until the backend chains
+ * this server-side, the bench does it: flip `ARTWORK_CLIENT_CUTOUT` to `false` to switch it off.
+ *
+ * MARKER «already cut» = the asset note ends with ` · cut` (`markCut`). `derivedFromAssetId` was
+ * not usable: the server keeps it for `pattern` assets only and refuses a self-reference. The
+ * seed strips the marker (`noteWords`), so the words never show it; `save words` keeps it.
+ *
+ * Which assets: those bound to an ARTWORK slot whose media is a picture of a landed `artwork`
+ * pattern run (an own upload is never cut — it costs a run). Per asset, the newest `cutout` run
+ * whose one input is that media decides: none → start one; live → the cell says `cutting…`;
+ * done with a picture → swap media + mark; failed / no alpha → keep the white-ground asset (no
+ * retry: a finished cutout run for that media exists).
+ */
+export const ARTWORK_CLIENT_CUTOUT = true;
+
+const CUT_MARK = ' · cut';
+const isCut = (asset: common_DesignAsset): boolean =>
+  (asset.note ?? '').trimEnd().endsWith('· cut');
+const markCut = (words: string): string => `${words.trim()}${CUT_MARK}`.trim();
+/** The asset note as words, without the cut-out marker. */
+function noteWords(asset: common_DesignAsset): string {
+  const note = (asset.note ?? '').trim();
+  return isCut(asset) ? note.replace(/\s*·\s*cut$/, '').trim() : note;
+}
+
+type CutoutPlan = {
+  start: common_DesignAsset[];
+  swap: { asset: common_DesignAsset; mediaId: number }[];
+  cutting: Set<number>;
+};
+
+function cutoutPlan(band: GetDesignBandResponse, bomIds: ReadonlySet<number>): CutoutPlan {
+  const plan: CutoutPlan = { start: [], swap: [], cutting: new Set() };
+  if (bomIds.size === 0) return plan;
+  const runs = band.runs ?? [];
+  const landedArtwork = new Set<number>();
+  for (const r of runs) {
+    if ((r.kind ?? '').trim().toLowerCase() !== 'pattern') continue;
+    if ((r.params?.pattern?.mode ?? '').trim().toLowerCase() !== 'artwork') continue;
+    for (const p of r.pictures ?? []) {
+      const id = wireInt(p.media?.id);
+      if (id > 0) landedArtwork.add(id);
+    }
+  }
+  const cutouts = runs
+    .filter((r) => (r.kind ?? '').trim().toLowerCase() === 'cutout')
+    .sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
+  const byId = new Map((band.assets ?? []).map((a) => [wireInt(a.id), a]));
+  const seen = new Set<number>();
+  for (const b of band.assetBindings ?? []) {
+    if (!bomIds.has(wireInt(b.bomItemId))) continue;
+    const assetId = wireInt(b.assetId);
+    const asset = byId.get(assetId);
+    if (!asset || seen.has(assetId)) continue;
+    seen.add(assetId);
+    const mediaId = wireInt(asset.mediaId);
+    if (mediaId <= 0 || isCut(asset) || !landedArtwork.has(mediaId)) continue;
+    const latest = cutouts.find((r) => wireInt(r.params?.extraInputMediaIds?.[0]) === mediaId);
+    if (!latest) plan.start.push(asset);
+    else if (isRunLive(latest)) plan.cutting.add(assetId);
+    else if (runStatus(latest) === 'done') {
+      const pic = wireInt(selectVisiblePictures(latest.pictures ?? [])[0]?.media?.id);
+      if (pic > 0 && pic !== mediaId) {
+        plan.swap.push({ asset, mediaId: pic });
+        plan.cutting.add(assetId);
+      }
+    }
+  }
+  return plan;
+}
+
+const CUTOUT_SCOPE = 'fabrics-hardware:cutout';
+
+/** Runs the plan (each start / swap once per page life); returns asset ids being cut. */
+function useArtworkCutout(
+  techCardId: number,
+  band: GetDesignBandResponse,
+  bomKey: string,
+  enabled: boolean,
+): ReadonlySet<number> {
+  const writes = useAssetWrites(techCardId);
+  const run = useStartDesignRun(techCardId, { scope: CUTOUT_SCOPE });
+  const fired = useRef(new Set<string>());
+  const plan = useMemo(
+    () =>
+      cutoutPlan(
+        band,
+        new Set(
+          bomKey
+            .split(',')
+            .map(Number)
+            .filter((n) => n > 0),
+        ),
+      ),
+    [band, bomKey],
+  );
+  const runRef = useRef(run);
+  runRef.current = run;
+  const upsertRef = useRef(writes.upsertAsset);
+  upsertRef.current = writes.upsertAsset;
+  useEffect(() => {
+    if (!enabled) return;
+    for (const asset of plan.start) {
+      const key = `start:${wireInt(asset.id)}:${wireInt(asset.mediaId)}`;
+      if (fired.current.has(key)) continue;
+      fired.current.add(key);
+      runRef.current.start({
+        kind: 'cutout',
+        ask: '',
+        params: {
+          views: [],
+          colorwayId: 0,
+          layout: '',
+          colour: undefined,
+          threed: undefined,
+          fixTarget: '',
+          extraInputMediaIds: [wireInt(asset.mediaId)],
+          fixTargets: [],
+          fixSlotIds: [],
+          autoSplit: false,
+          detailSlotIds: [],
+          pattern: undefined,
+          freeform: undefined,
+          useFlatSlots: false,
+          flatSlotIds: [],
+          image: undefined,
+          inpaint: undefined,
+          extend: undefined,
+          video: undefined,
+        },
+      });
+    }
+    for (const { asset, mediaId } of plan.swap) {
+      const key = `swap:${wireInt(asset.id)}:${mediaId}`;
+      if (fired.current.has(key)) continue;
+      fired.current.add(key);
+      upsertRef.current
+        .mutateAsync({
+          assetId: wireInt(asset.id),
+          kind: asset.kind ?? '',
+          name: asset.name ?? '',
+          mediaId,
+          derivedFromAssetId: wireInt(asset.derivedFromAssetId),
+          repeatMm: wireInt(asset.repeatMm),
+          rotationDeg: wireInt(asset.rotationDeg),
+          ordinal: wireInt(asset.ordinal),
+          note: markCut(noteWords(asset)),
+          colourCode: asset.colourCode ?? '',
+          colourHex: asset.colourHex ?? '',
+        })
+        .catch(() => {
+          // Said by the write hook; a later band re-read may retry on a fresh page.
+        });
+    }
+  }, [plan, enabled]);
+  return plan.cutting;
 }

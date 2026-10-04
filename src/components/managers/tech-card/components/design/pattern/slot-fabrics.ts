@@ -257,6 +257,36 @@ export function isLabelSlot(slot: MaterialSlot): boolean {
   return slot.section === 'TECH_CARD_BOM_SECTION_LABEL';
 }
 
+/* ─────────────────────────── artwork slots (round 7) ─────────────────────────── */
+
+/** The BOM section an artwork (print, embroidery, patch…) lives in. */
+export const ARTWORK_SECTION = 'TECH_CARD_BOM_SECTION_DECORATION';
+
+/**
+ * An artwork slot stays `hardware` (same cells, same binding); it is recognised by its BOM section
+ * only — mirrors `isLabelSlot`. It leaves the HARDWARE group for its own ARTWORK group.
+ */
+export function isArtworkSlot(slot: Pick<MaterialSlot, 'section'>): boolean {
+  return slot.section === ARTWORK_SECTION;
+}
+
+/** How an artwork is made — chip words (comma-free: the words list splits on `,`). */
+export const ARTWORK_TECHNIQUES = [
+  'embroidery',
+  'screen print',
+  'DTG',
+  'patch',
+  'appliqué',
+  'rubber print',
+  'heat transfer',
+  'puff print',
+];
+
+/** The artwork slots of a bench, in bench order. */
+export function artworkSlotsOf<T extends Pick<MaterialSlot, 'section'>>(slots: readonly T[]): T[] {
+  return slots.filter(isArtworkSlot);
+}
+
 /** How a label looks — chip words (comma-free: the words list splits on `,`). */
 export const LABEL_LOOKS = ['woven', 'printed', 'satin', 'leather patch', 'rubber', 'embroidered'];
 

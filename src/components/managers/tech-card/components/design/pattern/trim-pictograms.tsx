@@ -20,6 +20,7 @@ export type TrimPictogramKind =
   | 'velcro'
   | 'rivet'
   | 'packaging'
+  | 'artwork'
   | 'generic';
 
 const has = (words: string, pattern: RegExp): boolean => pattern.test(words);
@@ -27,6 +28,8 @@ const has = (words: string, pattern: RegExp): boolean => pattern.test(words);
 /** BOM vocabulary first, human-entered name second, with a generic trim as the honest fallback. */
 export function trimPictogramKind(slot: PictogramSlot): TrimPictogramKind {
   if (slot.family === 'fabric') return 'fabric';
+  // Artwork (round 7) is keyed by its BOM section, as the slot itself is (`isArtworkSlot`).
+  if (slot.section === 'TECH_CARD_BOM_SECTION_DECORATION') return 'artwork';
   const words = `${slot.kind} ${slot.section} ${slot.name}`.toLowerCase();
   if (has(words, /zipper[_\s-]*(slider|pull)|zip[_\s-]*pull/)) return 'zipper-pull';
   if (has(words, /zipper|\bzip\b/)) return 'zipper';
@@ -143,6 +146,14 @@ function Picture({ kind }: { kind: TrimPictogramKind }): JSX.Element {
           <path d='M12 22l20-10 20 10-20 10z' />
           <path d='M12 22v24l20 9 20-9V22M32 32v23' />
           <path d='M22 17l20 10' />
+        </>
+      );
+    case 'artwork':
+      // The callout `artwork` glyph (dashed square + triangle), at the bench's 64 grid.
+      return (
+        <>
+          <rect x='11' y='11' width='42' height='42' strokeDasharray='6 4' strokeLinecap='butt' />
+          <path d='M22 42l10-18 10 18z' />
         </>
       );
     default:

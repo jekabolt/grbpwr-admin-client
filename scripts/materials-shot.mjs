@@ -426,6 +426,81 @@ try {
     await ctx.close();
   }
   {
+    // Round 7 · ARTWORK: group after HARDWARE, `+ artwork` → inline born row → BOM line → selected.
+    const { ctx, page } = await open(1440, 1000);
+    const settle = async () => {
+      await page.mouse.move(5, 5);
+      await page.evaluate(() => document.activeElement?.blur());
+      await page.waitForTimeout(400);
+    };
+    if ((await page.locator('[data-fh-group="artwork"] [data-fh-slot]').count()) !== 2)
+      errors.push('[1440] ASSERT: ARTWORK group does not hold the two DECORATION lines');
+    if ((await page.locator('[data-fh-group="hardware"] [data-fh-slot="7"]').count()) !== 0)
+      errors.push('[1440] ASSERT: an artwork slot is still in HARDWARE');
+    if ((await page.locator('[data-fh-slot="7"] [data-fh-checker]').count()) !== 1)
+      errors.push('[1440] ASSERT: the filled artwork cell has no checkerboard');
+    if ((await page.locator('[data-fh-slot="8"] [data-trim-backdrop="artwork"]').count()) !== 1)
+      errors.push('[1440] ASSERT: the empty artwork cell has no artwork pictogram');
+    await page.click('[data-fh-new-artwork="live"]');
+    await page.waitForSelector('[data-fh-born="open"]');
+    if (
+      (await page.inputValue('[data-fh-born-name]')) !== '' ||
+      (await page.getAttribute('[data-fh-born-name]', 'placeholder')) !== 'embroidery'
+    )
+      errors.push('[1440] ASSERT: born row does not start from embroidery');
+    await page.fill('[data-fh-born-name]', 'chest embroidery');
+    await settle();
+    await shoot(page, 'r7-artwork-born-1440.png');
+    await page.click('[data-fh-born-add]');
+    await page
+      .waitForSelector('[data-fh-for="800"]', { timeout: 5000 })
+      .then(() =>
+        console.log('assert ok: + artwork adds a DECORATION line and selects it once saved'),
+      )
+      .catch(() => errors.push('[1440] ASSERT: the born artwork was not selected after save'));
+    if ((await page.locator('[data-fh-born]').count()) !== 0)
+      errors.push('[1440] ASSERT: born row still open after save');
+    const seed = await page.inputValue('[data-fh-words]');
+    if (seed !== 'embroidery') errors.push(`[1440] ASSERT: artwork seed is «${seed}»`);
+    // `+ photo` (picture 1) — the GRBPWR logo of the library.
+    await page.click('[data-fh-look-door] button');
+    await page.waitForSelector('[role="dialog"]');
+    await page.waitForTimeout(500);
+    await page.locator('[role="dialog"] img').nth(1).click();
+    await page.waitForSelector('[data-fh-look="1"]', { timeout: 5000 }).catch(() => {
+      errors.push('[1440] the photo did not land in the artwork spec');
+    });
+    await page.click('[data-flat-custom]');
+    // Technique chips are single-select.
+    await page.click('[data-fh-chip="patch"]');
+    await page.click('[data-fh-chip="embroidery"]');
+    if ((await page.inputValue('[data-fh-words]')) !== 'embroidery')
+      errors.push(
+        `[1440] ASSERT: technique chips not single-select · «${await page.inputValue('[data-fh-words]')}»`,
+      );
+    await settle();
+    await shoot(page, 'r7-artwork-selected-1440.png');
+    const before = await page.evaluate(() => window.__calls.length);
+    await page.click('[data-fh-generate="live"] button:has-text("GENERATE")');
+    await page.waitForTimeout(500);
+    const sent = await page.evaluate(
+      (n) => window.__calls.slice(n).find((c) => c.body?.params?.pattern)?.body,
+      before,
+    );
+    const p = sent?.params;
+    if (
+      p?.pattern?.mode !== 'artwork' ||
+      p?.pattern?.bomItemId !== 800 ||
+      JSON.stringify(p.extraInputMediaIds) !== '[902]' ||
+      !String(p.colour?.words).includes('artwork = picture 1') ||
+      /cm wide/.test(String(p.colour?.words)) ||
+      sent.ask !== 'embroidery'
+    )
+      errors.push(`[1440] ASSERT: artwork run body ${JSON.stringify(sent)?.slice(0, 400)}`);
+    else console.log(`assert ok: artwork run · words «${p.colour.words}»`);
+    await ctx.close();
+  }
+  {
     // Two live runs on this colourway: making cells carry the cancel corner; `cancel all` shows.
     const { ctx, page } = await open(1440, 1000, '#making');
     await page.waitForSelector('[data-fh-pending] [data-run-cancel]');
