@@ -1594,7 +1594,13 @@ export function CostingField({
               </div>
             )}
             <fieldset disabled={!canWriteCosting} className='m-0 border-0 p-0'>
-              <TextareaField name='costing.notes' label='notes' rows={2} maxLength={2000} />
+              <TextareaField
+                name='costing.notes'
+                label='notes'
+                rows={2}
+                maxLength={2000}
+                enhance='note'
+              />
             </fieldset>
           </div>
         </details>
