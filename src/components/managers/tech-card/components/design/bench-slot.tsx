@@ -24,7 +24,7 @@ import { useEditChainDoors } from './generation/edit-chain-doors';
 import { WorkbenchEditor } from './generation/propagating-editor';
 import { selectPickablePictures } from './visibility';
 import { forgetRemoval, rememberRemoval, useRemovals, type Removal } from './removal-undo';
-import { useDesignWrites } from './use-design-band';
+import { useDesignBand, useDesignWrites } from './use-design-band';
 
 /**
  * ONE BENCH SLOT — and the vocabulary of «what a slot is», which the three other organs of the
@@ -596,12 +596,15 @@ export function SlotCap({
   requiredNote,
   title,
   trailing,
+  strong,
 }: {
   label: string;
   required?: boolean;
   requiredNote?: string;
   title?: string;
   trailing?: React.ReactNode;
+  /** Bold name: the selected cell of a selectable row (MATERIALS). */
+  strong?: boolean;
 }) {
   return (
     <div
@@ -614,7 +617,7 @@ export function SlotCap({
         variant='uppercase'
         tracking='label'
         component='span'
-        className='min-w-0 truncate'
+        className={strong ? 'min-w-0 truncate font-bold' : 'min-w-0 truncate'}
       >
         {label}
       </Text>
@@ -673,6 +676,7 @@ export function UndoRemoval({
  */
 export function useRemovalUndo(techCardId: number) {
   const writes = useDesignWrites(techCardId);
+  const { band } = useDesignBand(techCardId);
   const removalAt = useRemovals();
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const remember = (
@@ -694,6 +698,11 @@ export function useRemovalUndo(techCardId: number) {
     const key = slotRefKey(ref);
     const removal = removalAt(techCardId, key);
     if (!removal) return undefined;
+    /* The picture already stands in another slot per the band (marked from the workbench, moved
+       by an edit-chain undo): putting it back here is refused `picture_already_in_slot`. */
+    if ((band.bench ?? []).some((row) => (row.pictureId ?? 0) === removal.pictureId)) {
+      return undefined;
+    }
     return {
       pending: pendingKey === key,
       onClick: () => {

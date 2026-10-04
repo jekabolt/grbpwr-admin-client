@@ -1096,7 +1096,7 @@ function renderWordsContext(state: ColourDraft): string {
  * ⚠ ОБЁРТКА ОРГАНА — ОДИН `<div>`: соседом линейки группы должен быть блок, от которого меряется
  * зазор `GROUP_GAP` (r3 п.34), а орган — фрагмент (подпись для читалки, поле, строка «omitted»).
  */
-function InWords({
+export function InWords({
   state,
   band,
   techCardId,

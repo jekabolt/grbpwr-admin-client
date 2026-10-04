@@ -373,6 +373,21 @@ export function useDesignWrites(techCardId?: number) {
     },
     [showMessage, qc, techCardId],
   );
+  /**
+   * ОТКАЗ ЗАПИСИ СЛОТА ПЕРЕЧИТЫВАЕТ ПОЛОСУ ВСЕГДА, не только на 409. `picture_already_in_slot`,
+   * `slot_occupied` и прочие FailedPrecondition значат то же, что и 409: экран отстал от сервера
+   * (undo цепочки уже переставил плиту, слот заняли из другой двери). Без перечитывания следующий
+   * жест повторял бы тот же отказ до перезагрузки.
+   */
+  const onSlotError = useCallback(
+    (error: unknown, variables?: unknown, context?: WriteContext) => {
+      if (!isAborted(error)) {
+        qc.invalidateQueries({ queryKey: designKeys.band(context?.card ?? techCardId ?? 0) });
+      }
+      onError(error, variables, context);
+    },
+    [onError, qc, techCardId],
+  );
 
   const registerUpload = useMutation({
     mutationFn: (
@@ -394,7 +409,7 @@ export function useDesignWrites(techCardId?: number) {
       }),
     onMutate,
     onSuccess: invalidateWritten,
-    onError,
+    onError: onSlotError,
   });
 
   const setBenchSlot = useMutation({
@@ -415,7 +430,7 @@ export function useDesignWrites(techCardId?: number) {
       }),
     onMutate,
     onSuccess: invalidateWrittenAndWait,
-    onError,
+    onError: onSlotError,
   });
 
   const deleteDetailSlot = useMutation({
