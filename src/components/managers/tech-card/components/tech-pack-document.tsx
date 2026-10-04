@@ -79,7 +79,13 @@ import {
   type AnnotationForm,
 } from './schema';
 import { kindDef } from 'ui/components/annotation/kinds';
-import { DetailInset, SectionInset, SectionLetters } from 'ui/components/annotation/insets';
+import {
+  ArtworkImage,
+  DetailInset,
+  SectionInset,
+  SectionLetters,
+} from 'ui/components/annotation/insets';
+import { StitchPictogram, stitchIsoOf } from 'ui/components/annotation/stitch-pictogram';
 import {
   boundsOf,
   parseSpec,
@@ -330,9 +336,24 @@ function SketchGeometryLayer({
   });
   return (
     <div ref={ref} className='pointer-events-none absolute inset-0'>
+      {/* АРТВОРК НА БУМАГЕ — та же картинка в той же зоне, что на экране (`ArtworkImage`), под
+          пунктиром: цех видит, ЧТО ставится, а не только где. */}
+      {box.w > 0 &&
+        drawn.map((c, i) => {
+          const spec = parseSpec(c.spec);
+          if (spec?.t !== 'artwork' || !spec.url) return null;
+          return (
+            <ArtworkImage
+              key={`a${i}`}
+              src={spec.url}
+              region={boundsOf((c.points ?? []).map((p) => at(p.x, p.y)))}
+            />
+          );
+        })}
       {box.w > 0 && drawn.length > 0 && (
         <svg
-          className='h-full w-full'
+          // `absolute` — чтобы картинка артворка (позиционированная) не легла ПОВЕРХ пунктира.
+          className='absolute inset-0 h-full w-full'
           viewBox={`0 0 ${box.w} ${box.h}`}
           preserveAspectRatio='none'
           aria-hidden
@@ -429,7 +450,6 @@ function calloutKindLabel(kind?: string, spec?: string): string {
   const k = annotationKindFromWire(kind);
   return k === 'pin' ? '' : kindDef(k).label;
 }
-
 
 // The printed sheet renders dictionary TOKENS, so it needs the same labels the editor shows. They
 // come from the one options module rather than a second table here — the tech pack and the screen
@@ -676,8 +696,11 @@ export function TechPackDocument({
   const { dictionary } = useDictionary();
   // КАТАЛОГ РАБОТ — ИМЕНА ШАГОВ НА БУМАГЕ (R8). Один ключ на приложение: тот же справочник уже
   // прочитан редактором, и второго обращения к сети здесь не будет.
-  const { catalog: workCatalog, live: workCatalogLive, loading: workCatalogLoading } =
-    useOperationWorkCatalog();
+  const {
+    catalog: workCatalog,
+    live: workCatalogLive,
+    loading: workCatalogLoading,
+  } = useOperationWorkCatalog();
 
   // ВСЕ ХУКИ ОБЪЯВЛЕНЫ ДО раннего `if (!tc) return null` ниже. Иначе карта, приехавшая сначала
   // обёрткой без вложенного insert, а потом целиком (кэш → рефетч), меняла бы число вызовов
@@ -702,7 +725,7 @@ export function TechPackDocument({
     const steps = ops.map((o) => ({
       inputs: classifyAssemblyInputs(
         pieceKeys,
-        o.inputKeys?.length ? o.inputKeys : (o.pieceLineKeys ?? []),
+        o.inputKeys?.length ? o.inputKeys : o.pieceLineKeys ?? [],
       ),
       outputUnitKey: (o.outputUnitKey ?? '').trim(),
       outputUnitName: (o.outputUnitName ?? '').trim(),
@@ -1488,7 +1511,7 @@ export function TechPackDocument({
     // старой проекции `piece_line_keys` узлов не бывает — там ненайденный ключ есть деталь,
     // которую не нашли. Дефект был здесь и до Ф6; печать по нему выдавала деталь за узел.
     const legacy = !o.inputKeys?.length;
-    const keys = legacy ? (o.pieceLineKeys ?? []) : (o.inputKeys ?? []);
+    const keys = legacy ? o.pieceLineKeys ?? [] : o.inputKeys ?? [];
     return keys
       .map((k) => {
         if (!k) return '';
@@ -2118,6 +2141,11 @@ export function TechPackDocument({
                       <td className={TD}>
                         {specSummary(parseSpec(c.spec)) && (
                           <span className='block font-semibold'>
+                            {/* Вид шва рядом с номером ISO — тот же рисунок, что на плашке. */}
+                            <StitchPictogram
+                              iso={stitchIsoOf(c.spec)}
+                              className='mr-1 inline-block align-middle'
+                            />
                             {specSummary(parseSpec(c.spec))}
                           </span>
                         )}

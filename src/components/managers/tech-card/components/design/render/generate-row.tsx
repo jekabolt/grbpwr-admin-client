@@ -166,9 +166,12 @@ export function GenerateRow({
           уходит на свою строку и прижимается к её правому краю, а не вылезает за него.
           (The comment stands above the expression: inside the ternary, prettier 3.2 moved it
           between runs and never settled.) */}
+      {/* T52 (04.10): «в FABRIC RENDER кнопка генерейт и вот модел гетс должна выглядеть так же
+          как во флетах» — дверь описи теперь флэтовая: `secondary`/`sm` с подписью `text-micro`,
+          сразу за GENERATE (без `ml-auto`), на всех рядах, которые её рисуют. */}
       {onInspect && (
-        <Button variant='secondary' size='xs' className='ml-auto' onClick={onInspect}>
-          what the model gets ▸
+        <Button variant='secondary' size='sm' onClick={onInspect}>
+          <span className='text-micro'>what the model gets ▸</span>
         </Button>
       )}
     </div>

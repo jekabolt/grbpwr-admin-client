@@ -293,7 +293,7 @@ export function CalloutRail({
             /* СТРОКА ПОД КУРСОРОМ ЗАЛИВАЕТСЯ ПАНЕЛЬЮ (`bgSecondary` — «a fill, not a container»),
                а картинка в тот же миг подсвечивает указание: два конца одного жеста. */
             className={cn(
-              'border-b border-hairline py-1 px-1 -mx-1 last:border-b-0',
+              'group border-b border-hairline py-1 px-1 -mx-1 last:border-b-0',
               hot && 'bg-bgSecondary',
             )}
             onPointerEnter={() => onHover(index)}
@@ -329,6 +329,20 @@ export function CalloutRail({
                 </Text>
               </span>
               {place ? <Pill tone='mut'>{place}</Pill> : null}
+              {/* УДАЛИТЬ С НАВЕДЕНИЯ — без разворота строки. Настоящая кнопка: она ПИШЕТ, и fieldset
+                  выпущенной карты обязан её гасить; без `onRemove` двери нет вовсе. */}
+              {onRemove && !disabled && (
+                <button
+                  type='button'
+                  aria-label={`delete callout ${c.number || ''}`.trim()}
+                  title='delete'
+                  data-callout-remove={index}
+                  onClick={() => onRemove(index)}
+                  className='flex h-5 w-5 shrink-0 items-center justify-center text-micro text-textInactiveColor opacity-0 transition-opacity hover:text-textColor focus-visible:opacity-100 group-hover:opacity-100 motion-reduce:transition-none'
+                >
+                  <span aria-hidden>✕</span>
+                </button>
+              )}
             </div>
 
             {open && (

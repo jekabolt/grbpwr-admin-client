@@ -257,3 +257,31 @@ export function SectionLetters({
     </>
   );
 }
+
+/**
+ * КАРТИНКА АРТВОРКА (владелец: «добавить картинку с поддержкой пнг картинок с прозрачностью и что
+ * бы мы могли этот артворк туда поместить»). Рисуется ВНУТРИ зоны размещения, вписанной (meet, по
+ * центру), БЕЗ подложки и без белого паспарту: прозрачный PNG показывает флэт сквозь себя. Это
+ * картинка, а не подпись: едет с кадром при зуме. Неинтерактивна — выбор и ручки остаются у зоны.
+ * Слой стоит ПОД слоем геометрии, чтобы пунктир зоны не закрывался непрозрачным краем.
+ */
+export function ArtworkImage({
+  region,
+  src,
+}: {
+  region: { x: number; y: number; w: number; h: number } | null;
+  src: string;
+}) {
+  if (!region || !src || region.w < 1 || region.h < 1) return null;
+  return (
+    <img
+      src={src}
+      alt=''
+      aria-hidden
+      draggable={false}
+      data-callout-artwork=''
+      className='pointer-events-none absolute block max-w-none object-contain'
+      style={{ left: region.x, top: region.y, width: region.w, height: region.h }}
+    />
+  );
+}
