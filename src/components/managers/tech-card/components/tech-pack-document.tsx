@@ -85,6 +85,7 @@ import {
   SectionInset,
   SectionLetters,
 } from 'ui/components/annotation/insets';
+import { StitchPictogram, stitchIsoOf } from 'ui/components/annotation/stitch-pictogram';
 import {
   boundsOf,
   parseSpec,
@@ -2140,6 +2141,11 @@ export function TechPackDocument({
                       <td className={TD}>
                         {specSummary(parseSpec(c.spec)) && (
                           <span className='block font-semibold'>
+                            {/* Вид шва рядом с номером ISO — тот же рисунок, что на плашке. */}
+                            <StitchPictogram
+                              iso={stitchIsoOf(c.spec)}
+                              className='mr-1 inline-block align-middle'
+                            />
                             {specSummary(parseSpec(c.spec))}
                           </span>
                         )}

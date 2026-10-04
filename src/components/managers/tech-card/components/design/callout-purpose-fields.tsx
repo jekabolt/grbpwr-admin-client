@@ -14,6 +14,7 @@ import {
   type Purpose,
   type Spec,
 } from 'ui/components/annotation/purpose';
+import { StitchPictogram } from 'ui/components/annotation/stitch-pictogram';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Input from 'ui/components/input';
 import Select from 'ui/components/select';
@@ -38,7 +39,12 @@ const ISO_ITEMS = [
   { value: '', label: 'ISO 4915' },
   ...STITCHES.filter((s) => /^\d/.test(s.iso)).map((s) => ({
     value: s.iso,
-    label: `${s.iso} ${s.name}`,
+    label: (
+      <span className='inline-flex min-w-0 items-center gap-1.5'>
+        <StitchPictogram iso={s.iso} />
+        <span className='truncate'>{`${s.iso} ${s.name}`}</span>
+      </span>
+    ),
   })),
 ];
 

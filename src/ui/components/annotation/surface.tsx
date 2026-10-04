@@ -39,6 +39,7 @@ import {
 } from './kinds';
 import { boundsOf, purposeTool, specSummary, toolGeometry, type Spec } from './purpose';
 import { ArtworkImage, DetailInset, SectionInset, SectionLetters } from './insets';
+import { StitchPictogram } from './stitch-pictogram';
 import { AnnotationDefs, CalloutShape, CALLOUT_COLOR_HEX, PlacingShape } from './shapes';
 
 // ПОВЕРХНОСТЬ УКАЗАНИЙ — картинка и всё, что на ней нарисовано и правится.
@@ -2647,6 +2648,7 @@ export function AnnotationSurface({
                     inv={inv}
                     number={c.number}
                     head={head}
+                    headIcon={spec?.t === 'stitch' ? <StitchPictogram iso={spec.iso} /> : undefined}
                     text={text}
                     names={names}
                     dimmed={dim(c.key)}
@@ -3170,6 +3172,7 @@ function Plate({
   inv,
   number,
   head,
+  headIcon,
   box,
   text,
   names,
@@ -3187,6 +3190,8 @@ function Plate({
   number?: number;
   /** Строка назначения (`specSummary`): первой строкой, чернилами. */
   head?: string;
+  /** Рисунок перед строкой назначения — вид шва у указания-шва (`StitchPictogram`). */
+  headIcon?: React.ReactNode;
   /** Записка-прямоугольник: крупнее текст, просторнее поля — это и есть само указание. */
   box?: boolean;
   text: string;
@@ -3266,7 +3271,12 @@ function Plate({
           столб в 668 пикселей закрывает собой предмет разговора. Поэтому обрезка живёт ровно в
           экранной ветке, а печать берёт тот же текст без потолка.
           Многоточие ВИДИМОЕ: молча укоротить — это соврать про длину записки. */}
-      {head && <span className={cn(text && 'block')}>{head}</span>}
+      {head && (
+        <span className={cn(text && 'block')}>
+          {headIcon && <span className='mr-1 inline-block align-middle'>{headIcon}</span>}
+          {head}
+        </span>
+      )}
       {text ? (
         <>
           <span className={cn('print:hidden', head && 'block text-labelColor')}>
