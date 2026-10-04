@@ -1,3 +1,6 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+
 import {
   GARMENT_FAMILIES,
   GARMENT_SHAPES,
@@ -13,6 +16,13 @@ import {
   partViewBox,
   type PartKey,
 } from '../src/components/managers/tech-card/components/design/garment-parts';
+import {
+  HARDWARE_KINDS,
+  HARDWARE_LABEL,
+  HardwareIcon,
+  hardwareOf,
+  type HardwareKind,
+} from '../src/components/managers/tech-card/components/design/hardware-icons';
 
 const familyCases: Array<[FamilyInput, GarmentFamily | '']> = [
   [{ top: 'outerwear', sub: 'coats' }, 'coat'],
@@ -51,10 +61,28 @@ for (const [input, expected] of familyCases) {
   }
 }
 
+const hardwareCases: Array<[string, HardwareKind | null]> = [
+  ['buttons', 'hw_button'],
+  ['zip', 'hw_zip'],
+  ['snaps', 'hw_snap'],
+  ['magnetic snap', 'hw_magnet'],
+  ['corduroy', null],
+  ['snapshot', null],
+];
+for (const [label, expected] of hardwareCases) {
+  const actual = hardwareOf(label);
+  if (actual !== expected) {
+    throw new Error(
+      `hardwareOf(${JSON.stringify(label)}) returned ${actual}, expected ${expected}`,
+    );
+  }
+}
+
 const CELL_WIDTH = 84;
 const LABEL_WIDTH = 92;
 const VIEW_ROW_HEIGHT = 82;
 const PART_ROW_HEIGHT = 122;
+const HARDWARE_ROW_HEIGHT = 122;
 const HEADER_HEIGHT = 34;
 const GAP_HEIGHT = 18;
 const familyPartCount = GARMENT_FAMILIES.reduce(
@@ -71,10 +99,11 @@ const partTable = GARMENT_FAMILIES.map((family) => {
   );
   return `${family} ${parts.join(' ')}`;
 }).join('\n');
-const width = LABEL_WIDTH + Math.max(maxParts, 4) * CELL_WIDTH;
+const width = LABEL_WIDTH + Math.max(maxParts, HARDWARE_KINDS.length, 4) * CELL_WIDTH;
 const viewHeight = GARMENT_FAMILIES.length * VIEW_ROW_HEIGHT;
 const partsTop = HEADER_HEIGHT + viewHeight + GAP_HEIGHT;
-const height = partsTop + GARMENT_FAMILIES.length * PART_ROW_HEIGHT;
+const hardwareTop = partsTop + GARMENT_FAMILIES.length * PART_ROW_HEIGHT;
+const height = hardwareTop + HARDWARE_ROW_HEIGHT;
 const views: PictogramView[] = ['front', 'back', 'side_l', 'side_r'];
 
 const escapeText = (text: string): string =>
@@ -122,6 +151,12 @@ function partCell(family: GarmentFamily, part: PartKey, x: number, y: number): s
   </svg>${label}${escapeText(PART_LABEL[part])}${zoom > 1 ? ` ×${zoom.toFixed(1)}` : ''}</text>`;
 }
 
+function hardwareCell(kind: HardwareKind, x: number, y: number): string {
+  const icon = renderToStaticMarkup(createElement(HardwareIcon, { kind, size: 64 }));
+  return `<g transform="translate(${x + 10} ${y + 19})">${icon}</g>
+    <text x="${x + CELL_WIDTH / 2}" y="${y + 111}" text-anchor="middle">${escapeText(HARDWARE_LABEL[kind])}</text>`;
+}
+
 const rows: string[] = [];
 GARMENT_FAMILIES.forEach((family, familyIndex) => {
   const y = HEADER_HEIGHT + familyIndex * VIEW_ROW_HEIGHT;
@@ -146,15 +181,23 @@ GARMENT_FAMILIES.forEach((family, familyIndex) => {
   );
 });
 
+rows.push(
+  `<rect x="0" y="${hardwareTop}" width="${width}" height="${HARDWARE_ROW_HEIGHT}" fill="#fff" stroke="#ccc"/>`,
+  `<text class="family" x="8" y="${hardwareTop + 61}">hardware</text>`,
+  ...HARDWARE_KINDS.map((kind, index) =>
+    hardwareCell(kind, LABEL_WIDTH + index * CELL_WIDTH, hardwareTop),
+  ),
+);
+
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" color="#000">
-  <metadata data-families="${GARMENT_FAMILIES.length}" data-parts="${familyPartCount}" data-shapes="${Object.keys(GARMENT_SHAPES).length}"/>
+  <metadata data-families="${GARMENT_FAMILIES.length}" data-parts="${familyPartCount}" data-shapes="${Object.keys(GARMENT_SHAPES).length}" data-hardware="${HARDWARE_KINDS.length}"/>
   <!-- O6\n${partTable}\n-->
   <style>
     text { fill: #333; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .family { fill: #000; font-weight: 700; }
   </style>
   <rect width="100%" height="100%" fill="#f2f2f2"/>
-  <text class="family" x="0" y="18">GARMENT PICTOGRAMS · ${GARMENT_FAMILIES.length} FAMILIES · ${familyPartCount} PART MARKS</text>
+  <text class="family" x="0" y="18">GARMENT PICTOGRAMS · ${GARMENT_FAMILIES.length} FAMILIES · ${familyPartCount} PART MARKS · ${HARDWARE_KINDS.length} HARDWARE</text>
   ${rows.join('\n')}
 </svg>`;
 

@@ -138,7 +138,17 @@ if (!CSS) {
 
 mkdirSync(OUT, { recursive: true });
 const errors = [];
-const browser = await chromium.launch();
+let browser;
+try {
+  browser = await chromium.launch();
+} catch (error) {
+  const message = String(error);
+  if (message.includes('MachPortRendezvous') || message.includes('bootstrap_check_in')) {
+    console.log('chromium заблокирован sandbox macOS — снимки пропущены');
+    process.exit(0);
+  }
+  throw error;
+}
 const shots = [];
 try {
   const open = async (width, height) => {
@@ -189,11 +199,11 @@ try {
     await btn(page, 'ASK ME').click();
     await page.waitForSelector('[data-quiz]');
     await shoot(page, 'quiz-1440-q1.png');
-    check((await page.textContent('[data-quiz]')).includes('1 / 6'), 'counter 1 / 6');
-    // противоречащий вариант → уточнение вставлено следующим, N растёт до 7
+    check((await page.textContent('[data-quiz]')).includes('1 / 8'), 'counter 1 / 8');
+    // противоречащий вариант → уточнение вставлено следующим, N растёт до 9
     await btn(page, 'quilted down, 120 g').click();
     await page.waitForFunction(() =>
-      document.querySelector('[data-quiz]')?.textContent?.includes('2 / 7'),
+      document.querySelector('[data-quiz]')?.textContent?.includes('2 / 9'),
     );
     check(
       (await page.textContent('[data-quiz]')).includes('The pictures read as a thin shell'),
@@ -202,7 +212,7 @@ try {
     await shoot(page, 'quiz-1440-clarify.png');
     await page.keyboard.press('1');
     await page.waitForFunction(() =>
-      document.querySelector('[data-quiz]')?.textContent?.includes('3 / 7'),
+      document.querySelector('[data-quiz]')?.textContent?.includes('3 / 9'),
     );
     check(true, 'key 1 answers single question');
     // part = collar → close-up crop of the family drawing, not the outlined garment
@@ -213,7 +223,7 @@ try {
     await shoot(page, 'quiz-1440-collar.png');
     await btn(page, 'stiff stand, 3 cm').click();
     await page.waitForFunction(() =>
-      document.querySelector('[data-quiz]')?.textContent?.includes('4 / 7'),
+      document.querySelector('[data-quiz]')?.textContent?.includes('4 / 9'),
     );
     // multi: два чипа + своё слово + Enter
     await btn(page, 'welt chest pocket').click();
@@ -223,11 +233,11 @@ try {
     await shoot(page, 'quiz-1440-multi.png');
     await page.press('[data-quiz] textarea', 'Enter');
     await page.waitForFunction(() =>
-      document.querySelector('[data-quiz]')?.textContent?.includes('5 / 7'),
+      document.querySelector('[data-quiz]')?.textContent?.includes('5 / 9'),
     );
     await btn(page, 'skip').click();
     await page.waitForFunction(() =>
-      document.querySelector('[data-quiz]')?.textContent?.includes('6 / 7'),
+      document.querySelector('[data-quiz]')?.textContent?.includes('6 / 9'),
     );
     // part = whole + category = use → the slot stays empty
     check(
@@ -236,14 +246,36 @@ try {
     );
     await btn(page, 'summer').click();
     await page.waitForFunction(() =>
-      document.querySelector('[data-quiz]')?.textContent?.includes('7 / 7'),
+      document.querySelector('[data-quiz]')?.textContent?.includes('7 / 9'),
     );
     await btn(page, 'neck tape inside').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('8 / 9'),
+    );
+    check(
+      (await page.locator('[data-quiz] [role="img"] [data-hardware-kind="hw_button"]').count()) ===
+        1,
+      'hw_button question shows the button icon',
+    );
+    await shoot(page, 'quiz-1440-hardware-part.png');
+    await btn(page, 'four').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('9 / 9'),
+    );
+    const chipHardware = await page
+      .locator('[data-quiz] button [data-hardware-kind]')
+      .evaluateAll((icons) => icons.map((icon) => icon.getAttribute('data-hardware-kind')));
+    check(
+      chipHardware.join(',') === 'hw_button,hw_zip,hw_snap',
+      `buttons / zip / snaps chips show distinct icons (${chipHardware.join(',')})`,
+    );
+    await shoot(page, 'quiz-1440-hardware-options.png');
+    await btn(page, 'zip').click();
     await page.waitForFunction(() => !document.querySelector('[data-quiz]'));
     await page.waitForTimeout(200);
     await shoot(page, 'quiz-1440-done.png');
     const saved = await page.evaluate(() => window.__answers);
-    check(saved.length === 7, `7 answers saved (got ${saved.length})`);
+    check(saved.length === 9, `9 answers saved (got ${saved.length})`);
     const pockets = saved.find((a) => a.question.id === 'pockets');
     check(
       pockets && pockets.selected.length === 2 && pockets.freeText === 'pen slot in the left one',

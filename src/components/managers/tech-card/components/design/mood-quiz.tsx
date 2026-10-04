@@ -15,6 +15,7 @@ import { Counter } from './core';
 import { moodboardGate, moodGateSentence } from './core/mood-gate';
 import { PartPictogram } from './garment-parts';
 import { useGenerationWrites } from './generation/use-generation';
+import { HardwareIcon, hardwareOf, type HardwareKind } from './hardware-icons';
 import { fillIdOf } from './head/draft-fills';
 import { LockedBar } from './head/mood-organs';
 import { useDraftMemory } from './head/use-draft-fills';
@@ -376,6 +377,11 @@ function QuestionView({
   onSkip: () => void;
 }): JSX.Element {
   const options = question.options ?? [];
+  const optionHardware = options.map(hardwareOf);
+  const hardwareKinds = new Set(
+    optionHardware.filter((kind): kind is HardwareKind => kind !== null),
+  );
+  const showHardwareOptions = hardwareKinds.size >= 2;
   const multi = question.kind === 'multi';
   const [selected, setSelected] = useState<string[]>(() =>
     prior && !prior.skipped ? (prior.selected ?? []).filter((s) => options.includes(s)) : [],
@@ -428,9 +434,12 @@ function QuestionView({
   return (
     <div className='grid grid-cols-[64px_minmax(0,1fr)] items-start gap-4 py-1' data-quiz=''>
       <div className='h-24 w-16 text-textColor'>
-        <PartPictogram family={family} part={question.part || 'whole'}
+        <PartPictogram
+          family={family}
+          part={question.part || 'whole'}
           category={question.category}
-          className='h-24 w-16' />
+          className='h-24 w-16'
+        />
       </div>
       <div className='min-w-0 space-y-2'>
         <Text size='micro' variant='label' tracking='label' component='p' className='uppercase'>
@@ -441,18 +450,24 @@ function QuestionView({
           {question.question}
         </Text>
         <ChipRow>
-          {options.map((o) => (
-            <Chip
-              key={o}
-              selected={selected.includes(o)}
-              pressed={multi ? selected.includes(o) : undefined}
-              disabled={busy}
-              onClick={() => pick(o)}
-              className='whitespace-normal text-left'
-            >
-              {o}
-            </Chip>
-          ))}
+          {options.map((o, index) => {
+            const hardware = optionHardware[index];
+            return (
+              <Chip
+                key={o}
+                selected={selected.includes(o)}
+                pressed={multi ? selected.includes(o) : undefined}
+                disabled={busy}
+                onClick={() => pick(o)}
+                className='whitespace-normal text-left'
+              >
+                {showHardwareOptions && hardware ? (
+                  <HardwareIcon kind={hardware} size={14} className='shrink-0' />
+                ) : null}
+                {o}
+              </Chip>
+            );
+          })}
         </ChipRow>
         <div className='flex items-start gap-2'>
           <Textarea

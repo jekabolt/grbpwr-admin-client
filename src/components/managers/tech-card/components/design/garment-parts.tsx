@@ -6,6 +6,7 @@ import {
   GarmentPictogram,
   type GarmentFamily,
 } from './garment-pictograms';
+import { HARDWARE_LABEL, HardwareIcon, isHardwareKind } from './hardware-icons';
 
 /** Every part name the quiz model may return (20-DESIGN O6). */
 export type PartKey =
@@ -694,6 +695,26 @@ export function PartPictogram({
   category?: string;
   className?: string;
 }): JSX.Element | null {
+  if (part.startsWith('hw_')) {
+    if (!isHardwareKind(part)) return null;
+    return (
+      <span
+        role='img'
+        aria-label={HARDWARE_LABEL[part]}
+        data-zoom='1.0'
+        className={className}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          aspectRatio: '64 / 96',
+          ...(className ? {} : { width: 64, height: 96 }),
+        }}
+      >
+        <HardwareIcon kind={part} size={64} />
+      </span>
+    );
+  }
   if (!family || !isGarmentFamily(family)) return null;
 
   const known = part !== 'whole' ? GARMENT_PARTS[family][part as PartKey] : undefined;

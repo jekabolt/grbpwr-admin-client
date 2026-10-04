@@ -77,6 +77,16 @@ const q = (
       'woven patch at the back hem',
       'none, printed only',
     ]),
+    q('button_count', 'details', 'hw_button', 'single', 'How many buttons does it use?', [
+      'four',
+      'five',
+      'six',
+    ]),
+    q('closure_type', 'details', 'closure', 'single', 'Which closure does it use?', [
+      'buttons',
+      'zip',
+      'snaps',
+    ]),
   ],
 };
 (window as unknown as { __answers: unknown[] }).__answers = [];
