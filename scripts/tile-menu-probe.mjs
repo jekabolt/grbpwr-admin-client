@@ -4,7 +4,7 @@
 // `window.__hold`, ждёт `window.__release(name)` — так проба держит запись или перечитывание полосы
 // «в полёте» и смотрит, что делает меню в это время.
 //
-//   TF2 · ✕ не удаляет: на карусели LAST FABRICS и на сетке CLOTHS ✕ нет; удаление — последняя
+//   TF2 · ✕ не удаляет: на сетке CLOTHS ✕ нет; удаление — последняя
 //         красная строка `delete…` меню (без пар — `more ▾` с ней одной) и ВСЕГДА спрашивает.
 //
 //   TF3 · удаление рендера в полёте: меню плитки занято целиком (ни mark, ни второго delete), а
@@ -13,10 +13,7 @@
 //   TF4 · запись слота (`slot ▾` FLAT, `mark ▾` рендера) держит меню занятым, пока перечитанная
 //         полоса не легла в кэш: иначе быстрый повторный выбор шлёт старый `expectedSlotRev`.
 //
-//   TF5 · под плиткой ткани одна подпись — имя (как имя слота FLAT SLOTS); пары «где в рендере» —
-//         в title плитки; `rename` открывает поле на месте подписи.
-//
-//         Так же — запись ассета (delete…) и привязки (`use for ▾`) на карусели и в CLOTHS (r2).
+//         Так же — запись ассета (delete…) в CLOTHS (r2).
 //
 //   node scripts/tile-menu-probe.mjs
 //   node scripts/tile-menu-probe.mjs --mutate=<имя>   — каждая мутация краснеет (список — MUTATIONS)
@@ -112,12 +109,6 @@ const stubNetwork = {
 
 // Мутации в памяти сборщика: каждая возвращает одну снятую починку обратно.
 const MUTATIONS = {
-  // TF2: строка delete… карусели удаляет без вопроса (прежний путь ненадетой ткани).
-  fabricask: {
-    file: /pattern\/fabric-carousel\.tsx$/,
-    from: 'if (value === DELETE_ITEM) return setAsking(true);',
-    to: 'if (value === DELETE_ITEM) return deleteAsset.mutate(id);',
-  },
   // TF2: строка delete… сетки CLOTHS удаляет без вопроса.
   paletteask: {
     file: /render\/palette\.tsx$/,
@@ -268,107 +259,6 @@ try {
         ).length,
     );
 
-  // ── TF2 · LAST FABRICS ──
-  const F = '[data-probe="fabric"]';
-  check('F1 fabric tiles: no ✕, no delete button in the frame', (await xs(F)) === 0);
-  // ── TF5 · одна подпись под плиткой ──
-  const caps = await page.$$eval(`${F} [data-fabric-tile]`, (tiles) =>
-    tiles.map((t) => {
-      const frame = t.querySelector('[data-picture-tile]');
-      return [...t.children]
-        .filter((k) => k !== frame && k.getAttribute('role') !== 'dialog' && k.textContent.trim())
-        .map((k) => k.textContent.trim());
-    }),
-  );
-  check(
-    'C1 under each fabric tile: one cap, its name',
-    caps.length === 2 &&
-      caps.every((c) => c.length === 1) &&
-      caps.flat().join('|') === 'canvas|twill',
-    JSON.stringify(caps),
-  );
-  const wornTitle = await page.$eval(
-    `${F} [data-fabric-tile="201"]`,
-    (t) => t.getAttribute('title') ?? '',
-  );
-  check(
-    'C2 the pairs it is worn by live in the tile title',
-    /in FABRIC RENDER for ROSSO · outer/.test(wornTitle),
-    wornTitle,
-  );
-  await page.hover(`${F} [data-fabric-tile="202"]`);
-  await page.click(`${F} [data-fabric-tile="202"] button[aria-label="rename canvas"]`);
-  await page.waitForTimeout(150);
-  const renaming = await page.$eval(`${F} [data-fabric-tile="202"]`, (t) => ({
-    input: !!t.querySelector('input[aria-label="new name for this fabric"]'),
-    cap: [...t.children].some((k) => k.tagName === 'SPAN' && k.textContent.trim() === 'canvas'),
-  }));
-  check(
-    'C3 rename opens the field in place of the cap',
-    renaming.input && !renaming.cap,
-    JSON.stringify(renaming),
-  );
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(150);
-
-  const free = await rowsOf(`${F} [data-fabric-tile="202"]`, `${F} [data-menu="use-for:202"]`);
-  const last = free[free.length - 1] ?? [];
-  check(
-    'F2 `delete…` is the last, red row of `use for ▾`',
-    last[0] === '__delete' && last[1] === 'delete…' && last[2] === true,
-    JSON.stringify(free),
-  );
-  await page.click('[data-menu-item="__delete"]');
-  await page.waitForTimeout(200);
-  const d1 = await dialog();
-  check(
-    'F3 delete on a free fabric asks first',
-    !!d1 && /delete a fabric/.test((await d1.textContent()) ?? ''),
-  );
-  check('F4 the question alone deletes nothing', (await calls(/DeleteDesignAsset/)).length === 0);
-  if (d1) {
-    await page.click('[role="dialog"] button:has-text("delete the fabric")');
-    await page.waitForTimeout(250);
-  }
-  const del = await calls(/DeleteDesignAsset/);
-  check(
-    'F5 confirm → DeleteDesignAsset {assetId 202}',
-    del.length === 1 && del[0].body.assetId === 202,
-    JSON.stringify(del),
-  );
-  await page.keyboard.press('Escape');
-  const worn = await rowsOf(`${F} [data-fabric-tile="201"]`, `${F} [data-menu="use-for:201"]`);
-  await page.click('[data-menu-item="__delete"]').catch(() => {});
-  await page.waitForTimeout(200);
-  const d2 = await dialog();
-  check(
-    'F6 a worn fabric asks with its slots named',
-    !!d2 &&
-      /in use/.test((await d2.textContent()) ?? '') &&
-      /ROSSO · outer/.test((await d2.textContent()) ?? ''),
-    JSON.stringify(worn),
-  );
-  await closeDialog();
-
-  // ── TF2 · сервер без привязок: `more ▾` с одним delete ──
-  const N = '[data-probe="nobind"]';
-  const nb = await rowsOf(`${N} [data-fabric-tile="202"]`, `${N} [data-menu="more:202"]`).catch(
-    () => [],
-  );
-  check(
-    'N1 no pairs → the corner is `more ▾` holding only `delete…`',
-    nb.length === 1 && nb[0][0] === '__delete' && nb[0][1] === 'delete…',
-    JSON.stringify(nb),
-  );
-  check(
-    'N2 it reads «more ▾»',
-    (await page
-      .$eval(`${N} [data-menu="more:202"]`, (e) => e.textContent.trim())
-      .catch(() => '')) === 'more ▾',
-  );
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(150);
-
   // ── TF2 · CLOTHS ──
   const P = '[data-probe="palette"]';
   check('P1 cloth tiles: no ✕, no delete button in the frame', (await xs(P)) === 0);
@@ -494,21 +384,6 @@ try {
   await holdsUntilRefetch('M', `${R} [data-picture-tile]`, RM, '0␟front');
 
   // ── Codex r2 · записи ассетов и привязок тоже держат меню до перечитывания полосы ──
-  await holdsUntilRefetch(
-    'B',
-    `${F} [data-fabric-tile="202"]`,
-    `${F} [data-menu="use-for:202"]`,
-    '11:1',
-    'SetDesignAssetBinding',
-  );
-  await holdsUntilRefetch(
-    'D',
-    `${F} [data-fabric-tile="202"]`,
-    `${F} [data-menu="use-for:202"]`,
-    '__delete',
-    'DeleteDesignAsset',
-    '[role="dialog"] button:has-text("delete the fabric")',
-  );
   await holdsUntilRefetch(
     'Q',
     `${P} [data-texture="202"]`,

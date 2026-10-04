@@ -13,6 +13,7 @@ import {
   pantoneVersion,
   subscribePantone,
 } from 'components/managers/tech-card/components/pantone-swatches';
+import { useMutationState } from '@tanstack/react-query';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from 'react';
 import { Button } from 'ui/components/button';
@@ -43,7 +44,12 @@ import { PictureTile } from '../picture-tile';
 import { Swatch } from '../render/field-row';
 import { RunRefusal } from '../render/generate-row';
 import { archivedColorwayGate, type Gate } from '../render/model';
-import { useStartDesignRun, type StartRunInput } from '../render/use-design-run';
+import {
+  startRunKey,
+  useStartDesignRun,
+  type StartRunInput,
+  type StartRunState,
+} from '../render/use-design-run';
 import { patternRuns } from './model';
 import {
   NO_BINDINGS_REASON,
@@ -56,6 +62,7 @@ import {
   mintSlotName,
   pairKey,
   pairOfRun,
+  pairsOfAsset,
   rowColour,
   shelfCeiling,
   type MaterialSlot,
@@ -84,6 +91,11 @@ export type FabricsHardwareProps = {
 };
 
 const REFS_MAX = 4;
+/** One scope for the bench's presses: «starting…» and per-press outcomes are read from the cache. */
+const RUN_SCOPE = 'fabrics-hardware';
+
+/** A press on its way: added before `start`, gone once its run is live, refused or re-read. */
+type Launch = { id: string; done: boolean; bandAt?: GetDesignBandResponse };
 
 export function FabricsHardware({
   band,
@@ -188,7 +200,7 @@ function MaterialBench({
   const { showMessage } = useSnackBarStore();
   const speaks = serverSpeaksDesign();
   const capable = bindingsSpoken(band);
-  const run = useStartDesignRun(techCardId);
+  const run = useStartDesignRun(techCardId, { scope: RUN_SCOPE });
   const writes = useAssetWrites(techCardId);
   const binds = useAssetBindingWrites(techCardId);
 
@@ -236,6 +248,53 @@ function MaterialBench({
     return out;
   }, [band]);
 
+  /* ─── presses in flight (one hook instance tracks only its last mutation) ─── */
+  const [launching, setLaunching] = useState<ReadonlyMap<string, Launch>>(new Map());
+  const pressStates = useMutationState({
+    filters: { mutationKey: startRunKey(techCardId, RUN_SCOPE) },
+    select: (m) => ({
+      id: (m.state.variables as { clientRequestId?: string } | undefined)?.clientRequestId ?? '',
+      status: m.state.status,
+    }),
+  });
+  useEffect(() => {
+    if (launching.size === 0) return;
+    let changed = false;
+    const next = new Map(launching);
+    for (const [key, l] of launching) {
+      const states = pressStates.filter((p) => p.id === l.id);
+      const last = states[states.length - 1];
+      if (liveByPair.has(key) || last?.status === 'error') {
+        next.delete(key);
+        changed = true;
+      } else if (l.done && l.bandAt !== band) {
+        next.delete(key);
+        changed = true;
+      } else if (!l.done && last?.status === 'success') {
+        next.set(key, { ...l, done: true, bandAt: band });
+        changed = true;
+      }
+    }
+    if (changed) setLaunching(next);
+  }, [launching, pressStates, liveByPair, band]);
+
+  // The hook clears its refusal on the next accepted press; the bench keeps it until dismissed.
+  const [shownRefusal, setShownRefusal] = useState<{
+    card: number;
+    refusal: NonNullable<StartRunState['refusal']>;
+  } | null>(null);
+  useEffect(() => {
+    if (run.refusal) setShownRefusal({ card: techCardId, refusal: run.refusal });
+  }, [run.refusal, techCardId]);
+  const refusal = shownRefusal?.card === techCardId ? shownRefusal.refusal : null;
+
+  // Free room on the shelf: every live pattern run and every press in flight lands one asset.
+  const room =
+    ASSETS_PER_CARD_MAX -
+    (band.assets ?? []).length -
+    patternRuns(band).filter(isRunLive).length -
+    launching.size;
+
   const [saving, setSaving] = useState<ReadonlySet<string>>(new Set());
   const mark = (key: string, on: boolean) =>
     setSaving((prev) => {
@@ -265,7 +324,8 @@ function MaterialBench({
 
   const slotGate = (slot: MaterialSlot): Gate => {
     if (!baseGate.ok) return baseGate;
-    if (liveByPair.has(pairKey(cwId, slot.bomItemId))) {
+    const k = pairKey(cwId, slot.bomItemId);
+    if (liveByPair.has(k) || launching.has(k)) {
       return { ok: false, reason: 'being made — it lands in the cell by itself' };
     }
     if (slot.family === 'fabric' && !colourIsStated(colour)) {
@@ -274,7 +334,21 @@ function MaterialBench({
     return { ok: true };
   };
 
+  const ROOM_REASON =
+    'the shelf has no room for another run until the ones being made land — or delete a fabric';
+  const cellGate = (slot: MaterialSlot): Gate => {
+    const g = slotGate(slot);
+    return !g.ok ? g : room <= 0 ? { ok: false, reason: ROOM_REASON } : g;
+  };
+
   const runnable = slots.filter((s) => slotGate(s).ok);
+  // Empty slots first: with any empty, GENERATE fills only those; all dressed → regenerate all.
+  const emptyRunnable = runnable.filter((s) => !byPair.has(pairKey(cwId, s.bomItemId)));
+  const pool = (emptyRunnable.length > 0 ? emptyRunnable : runnable)
+    .slice()
+    .sort((a, b) => (a.family === b.family ? 0 : a.family === 'fabric' ? -1 : 1));
+  const batch = pool.slice(0, Math.max(0, room));
+  const capped = batch.length < pool.length;
   const skippedFabrics = baseGate.ok
     ? slots.filter(
         (s) =>
@@ -291,7 +365,11 @@ function MaterialBench({
         ? skippedFabrics > 0
           ? { ok: false, reason: 'a fabric is dyed from a colour · pick one' }
           : { ok: false, reason: 'every slot is being made' }
-        : { ok: true };
+        : launching.size > 0
+          ? { ok: false, reason: 'starting — wait for the runs already sent' }
+          : batch.length === 0
+            ? { ok: false, reason: ROOM_REASON }
+            : { ok: true };
 
   /* ─── runs ─── */
   const runInput = (slot: MaterialSlot, c: SwatchColour | null): StartRunInput => {
@@ -341,8 +419,29 @@ function MaterialBench({
 
   const generate = (list: MaterialSlot[]) => {
     for (const slot of list) {
-      if (slotGate(slot).ok) run.start(runInput(slot, colourIsStated(colour) ? colour : null));
+      if (!slotGate(slot).ok) continue;
+      const key = pairKey(cwId, slot.bomItemId);
+      let id = '';
+      run.start(runInput(slot, colourIsStated(colour) ? colour : null), {
+        beforeSend: (clientRequestId) => {
+          id = clientRequestId;
+          return true;
+        },
+      });
+      // `beforeSend` runs synchronously inside `start`; no id means nothing was sent.
+      if (id) {
+        setLaunching((prev) => new Map(prev).set(key, { id, done: false }));
+      }
     }
+  };
+
+  /** Drop a picture nobody wears any more (its own pair excepted). Errors are not ours to show. */
+  const dropIfOrphan = (assetId: number, colorwayId: number, bomItemId: number) => {
+    if (assetId <= 0) return;
+    const others = pairsOfAsset(band, assetId).filter(
+      (p) => p.colorwayId !== colorwayId || p.bomItemId !== bomItemId,
+    );
+    if (others.length === 0) writes.deleteAsset.mutateAsync(assetId).catch(() => {});
   };
 
   /* ─── own pictures ─── */
@@ -354,7 +453,9 @@ function MaterialBench({
       return;
     }
     const key = pairKey(cwId, slot.bomItemId);
+    const prevId = wireInt(byPair.get(key)?.id);
     mark(key, true);
+    let freshId = 0;
     try {
       const res = await writes.upsertAsset.mutateAsync({
         assetId: 0,
@@ -364,14 +465,18 @@ function MaterialBench({
       });
       const assetId = wireInt(res.asset?.id);
       if (assetId > 0) {
+        freshId = assetId;
         await binds.setBinding.mutateAsync({
           colorwayId: cwId,
           bomItemId: slot.bomItemId,
           assetId,
         });
+        freshId = 0;
+        if (prevId !== assetId) dropIfOrphan(prevId, cwId, slot.bomItemId);
       }
     } catch {
-      // The write hooks already said what went wrong.
+      // The write hooks already said what went wrong; a picture made for a failed binding goes.
+      if (freshId > 0) writes.deleteAsset.mutateAsync(freshId).catch(() => {});
     } finally {
       mark(key, false);
     }
@@ -379,11 +484,14 @@ function MaterialBench({
 
   const clear = (slot: MaterialSlot) => {
     const key = pairKey(cwId, slot.bomItemId);
+    const prevId = wireInt(byPair.get(key)?.id);
+    const colorwayId = cwId;
     mark(key, true);
-    binds.setBinding.mutate(
-      { colorwayId: cwId, bomItemId: slot.bomItemId, assetId: 0 },
-      { onSettled: () => mark(key, false) },
-    );
+    binds.setBinding
+      .mutateAsync({ colorwayId, bomItemId: slot.bomItemId, assetId: 0 })
+      .then(() => dropIfOrphan(prevId, colorwayId, slot.bomItemId))
+      .catch(() => {})
+      .finally(() => mark(key, false));
   };
 
   // One library dialog for every `replace…`: the menu clicks its hidden trigger.
@@ -400,10 +508,16 @@ function MaterialBench({
   const dressed = (list: MaterialSlot[]) =>
     list.filter((s) => byPair.has(pairKey(cwId, s.bomItemId))).length;
 
-  const generateTitle =
-    allGate.ok && skippedFabrics > 0
-      ? `no colour — ${skippedFabrics} fabric slot${skippedFabrics === 1 ? '' : 's'} skipped`
-      : `one run per slot · ${runnable.length} slot${runnable.length === 1 ? '' : 's'}`;
+  const plural = (n: number) => `${n} slot${n === 1 ? '' : 's'}`;
+  const generateTitle = [
+    emptyRunnable.length > 0
+      ? `fills the empty ones · ${plural(batch.length)}`
+      : `regenerates every slot · ${plural(batch.length)}`,
+    capped ? `the shelf has room for ${plural(batch.length)} only — fabrics first` : '',
+    skippedFabrics > 0 ? `no colour — ${plural(skippedFabrics)} of fabric skipped` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   const group = (title: string, list: MaterialSlot[]) =>
     list.length === 0 ? null : (
@@ -412,7 +526,7 @@ function MaterialBench({
         <div className='flex flex-wrap items-start gap-2.5 pt-1.5'>
           {list.map((slot) => {
             const key = pairKey(cwId, slot.bomItemId);
-            const gate = slotGate(slot);
+            const gate = cellGate(slot);
             return (
               <div key={slot.bomItemId} style={BENCH_CELL_STYLE} data-fh-slot={slot.bomItemId}>
                 <SlotCell
@@ -420,6 +534,7 @@ function MaterialBench({
                   asset={cwId > 0 ? byPair.get(key) : undefined}
                   liveRun={cwId > 0 ? liveByPair.get(key) : undefined}
                   saving={saving.has(key)}
+                  launching={launching.has(key)}
                   writable={writable}
                   full={ceiling.full}
                   fullReason={ceiling.reason}
@@ -450,7 +565,7 @@ function MaterialBench({
               size='sm'
               disabled={run.isPending}
               title={generateTitle}
-              onClick={() => generate(slots)}
+              onClick={() => generate(batch)}
               data-fh-generate='live'
             >
               {run.isPending ? 'starting…' : 'generate'}
@@ -509,7 +624,13 @@ function MaterialBench({
           {group('fabrics', fabrics)}
           {group('hardware', hardware)}
 
-          <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
+          <RunRefusal
+            refusal={refusal}
+            onDismiss={() => {
+              setShownRefusal(null);
+              run.dismissRefusal();
+            }}
+          />
         </>
       )}
 
@@ -552,6 +673,7 @@ function SlotCell({
   asset,
   liveRun,
   saving,
+  launching,
   writable,
   full,
   fullReason,
@@ -565,6 +687,7 @@ function SlotCell({
   asset?: common_DesignAsset;
   liveRun?: common_DesignRun;
   saving: boolean;
+  launching: boolean;
   writable: boolean;
   full: boolean;
   fullReason: string;
@@ -588,7 +711,7 @@ function SlotCell({
     />
   );
 
-  if (liveRun || saving) {
+  if (liveRun || saving || launching) {
     return (
       <PlaceOrDrawCell
         label={slot.name}
@@ -597,6 +720,8 @@ function SlotCell({
         instead={
           liveRun ? (
             <LiveWord startedAt={liveRun.startedAt ?? liveRun.createdAt ?? ''} word='making…' />
+          ) : launching ? (
+            <LiveWord word='making…' />
           ) : (
             <LiveWord word='saving…' />
           )

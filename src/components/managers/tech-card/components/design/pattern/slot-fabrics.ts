@@ -21,6 +21,7 @@ import { findPantone } from '../../pantone-swatches';
 import { wireInt } from '../../wire-int';
 import {
   ASSETS_PER_CARD_MAX,
+  ASSET_HARDWARE,
   ASSET_NAME_MAX,
   assetById,
   assetLabel,
@@ -572,7 +573,8 @@ export function bindingsOf(
   const out: { slot: ClothSlot; asset: common_DesignAsset }[] = [];
   for (const slot of slots) {
     const asset = byPair.get(pairKey(colorwayId, slot.bomItemId));
-    if (asset) out.push({ slot, asset });
+    // A hardware picture bound to a slot is not a cloth: it never seeds FABRIC RENDER.
+    if (asset && asset.kind !== ASSET_HARDWARE) out.push({ slot, asset });
   }
   return out;
 }
