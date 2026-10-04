@@ -547,7 +547,7 @@ export function RunTile({
           word: 'replaced',
           tone: 'mut',
           title:
-            'replaced by an edit: the edit stands in its place in the latest generation, and this picture stays here',
+            'replaced by an edit: the edit stands in its place on the workbench, and this picture stays here',
         }
       : fitMismatch
         ? { word: 'fit ≠ card', tone: 'warn', title: `fit ${runFit} ≠ card ${cardFit}` }
@@ -710,7 +710,7 @@ export function RunTile({
                 ariaLabel: `edit ${handle} — draw over this picture`,
                 title:
                   (workbench
-                    ? 'draw over this picture — saving asks whether the edit takes this picture’s place in the latest generation or stands beside it; the original stays in the history either way'
+                    ? 'draw over this picture — saving asks whether the edit takes this picture’s place on the workbench or stands beside it; the original stays in the history either way'
                     : 'draw over this picture — saving makes a NEW picture in this same run row; the original is never overwritten') +
                   (composite
                     ? '. This file holds several views at once, so the edit keeps them together — cut it into views first if you want them apart'

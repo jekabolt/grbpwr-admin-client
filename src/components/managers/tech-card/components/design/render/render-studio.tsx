@@ -1,5 +1,5 @@
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
-import { useCallback, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
@@ -9,7 +9,7 @@ import { ColorwaySelect } from '../colorway-picker';
 import { ColourwayCreatePopover } from '../colourway-create';
 import { useColourPlan } from '../colour-plan/use-colour-plan';
 import { GROUP_SEAM } from '../core';
-import { LatestGeneration } from '../generation/latest-generation';
+import { Workbench } from '../generation/studio';
 import type { ClothSlot } from '../pattern/slot-fabrics';
 import { useCardFit, useColourDraft } from './drafts';
 import { GenerateRow, LockBar, RunRefusal } from './generate-row';
@@ -38,10 +38,9 @@ import { WhatModelGetsRenderModal } from './what-model-gets';
  *   ── CLOTH IS ─────── weight g/m² · opaque · semi sheer · sheer, one line
  *   ── IN WORDS ─────── the free text of the recipe
  *   GENERATE · priced by the server on start · WHAT THE MODEL GETS ▸
- *   LATEST GENERATION ──── the newest render run, its tiles with the doors — a block of its own
- *                         right under this one (O-63; 28.09, O-67, D-73; `LatestGeneration`)
+ *   WORKBENCH ─────────── the newest render run, its tiles with the doors, and under them the
+ *                         GENERATION HISTORY folded — ONE block (T30; `Workbench`, O-63, O-67)
  *   SIDES ─────────────── one row per side: what went in, what came back (`SidesSection`)
- *   GENERATION HISTORY    (the step screen's, drawn here last — `children`, O-63), folded
  *
  * The rows INSIDE the first block are separated by group rules (`GroupLabel`), never by nested
  * boxes: a block never contains another block (DESIGN.md).
@@ -107,7 +106,6 @@ export function RenderStudio({
   onColorwayChange,
   cardColorways,
   slots,
-  children,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -164,11 +162,6 @@ export function RenderStudio({
    * its own would desynchronise the rail from its own content.
    */
   onGoToKind?: (kind: 'flat' | 'pattern' | 'render' | 'threed' | 'onmodel') => void;
-  /**
-   * THE STEP'S GENERATION HISTORY, handed in by the composer (`studio-tab.tsx`) and drawn last, under
-   * this studio's render scope (O-63, D-62): its rows carry the render doors, which read the step.
-   */
-  children?: ReactNode;
 }): JSX.Element {
   /* ═══ O-57 · ЦЕЛЬ, ПОД КОТОРОЙ РАБОТАЕТ ЭКРАН, — ПЕРВЫМ ДЕЛОМ, ДО ВСЕХ ЕЁ ЧИТАТЕЛЕЙ ═════════════
      У сохранённой цели нет столбца в SIDES — экран работает под первым столбцом, и читают это
@@ -532,7 +525,9 @@ export function RenderStudio({
           stands right under it, and SIDES below reads what was marked. Still inside
           `RenderStepScope` — its doors' host is the step's host 0, so a refusal it shares with the
           history prints once (D-72 п.5). With no render run at all it draws nothing. */}
-      <LatestGeneration band={band} techCardId={techCardId} disabled={disabled} kind='render' />
+      {/* T30: the WORKBENCH — the latest generation and, folded as its last part, this step's
+          GENERATION HISTORY: one block (`generation/studio.tsx`). SIDES stands under it. */}
+      <Workbench band={band} techCardId={techCardId} disabled={disabled} kind='render' />
 
       {/* ═══ SIDES — СВОЙ БЛОК, МЕЖДУ ПОСЛЕДНЕЙ ГЕНЕРАЦИЕЙ И ИСТОРИЕЙ (r2 п.29, O-63) ════════════
           Строка на сторону: слева — чертёж, который пошёл в прогон (пустой заводится прямо тут:
@@ -554,9 +549,6 @@ export function RenderStudio({
         onCreateColorway={() => openCreate()}
         onGoToKind={onGoToKind}
       />
-
-      {/* THE HISTORY — last, inside the scope: its render rows read the same doors (O-63). */}
-      {children}
 
       <WhatModelGetsRenderModal
         open={inspecting}

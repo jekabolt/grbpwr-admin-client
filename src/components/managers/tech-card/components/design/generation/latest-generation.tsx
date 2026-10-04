@@ -3,7 +3,7 @@ import type {
   common_DesignPicture,
   common_DesignRun,
 } from 'api/proto-http/admin';
-import { useEffect, useLayoutEffect, useMemo, useState, type JSX } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, type JSX, type ReactNode } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -60,6 +60,9 @@ import { useElapsed, useRunById } from './use-generation';
 
 /**
  * ═══ THE LATEST GENERATION — A BLOCK OF ITS OWN UNDER THE GENERATE BLOCK (O-53; 28.09, O-67) ═══
+ *
+ * T30 (04.10, owner item 30): the block is called `workbench`, and the step's GENERATION HISTORY
+ * is its last part (`history`, collapsed) — one block, not two (`Workbench`, `studio.tsx`).
  *
  * Owner, verbatim: «после генерации в FLAT INPUT — REFERENCES в этом же блоке но снизу должны
  * появятся сгенерированные картинки и там мы уже можем непосредственно делать все тоже самое что и в
@@ -303,12 +306,19 @@ export function LatestGeneration({
   techCardId,
   disabled,
   kind = 'flat',
+  history,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
   /** The step whose GENERATE this row answers — FLAT's by default, FABRIC RENDER's (O-63). */
   kind?: WorkbenchKind;
+  /**
+   * THE STEP'S GENERATION HISTORY, AS THE LAST PART OF THIS BLOCK (T30, owner item 30: «generation
+   * history и workbench должны быть одим блоком»). Given, the block always stands — even with no
+   * run to show — because the history holds the run poll and must stay mounted (`studio.tsx`).
+   */
+  history?: ReactNode;
 }) {
   const speaks = serverSpeaksDesign();
   const form = useFormContext<TechCardFormData>();
@@ -671,11 +681,17 @@ export function LatestGeneration({
   if (!run) {
     // R(c): no render run at all, but renders brought by hand wait for a side — the block stands
     // for them alone.
-    if (!broughtBlock) return null;
+    if (!broughtBlock && !history) return null;
     return (
-      <div data-latest-generation={0} ref={galleryGroup.anchorRef}>
-        <Section title='latest generation' question='— what the last run brought back'>
-          {doorsHost(broughtBlock)}
+      <div
+        data-workbench=''
+        data-latest-generation={broughtBlock ? 0 : undefined}
+        ref={galleryGroup.anchorRef}
+        className='scroll-mt-20'
+      >
+        <Section title='workbench'>
+          {broughtBlock && doorsHost(broughtBlock)}
+          {history}
         </Section>
         {splitModal}
       </div>
@@ -720,14 +736,18 @@ export function LatestGeneration({
   ));
 
   return (
-    <div data-latest-generation={runId} ref={galleryGroup.anchorRef}>
+    <div
+      data-workbench=''
+      data-latest-generation={runId}
+      ref={galleryGroup.anchorRef}
+      className='scroll-mt-20'
+    >
       {/* THE BLOCK (O-67, D-73): the neighbours' `Section`, the run's stamp in its header's action
           slot, the pieces below spaced by the block's own rhythm — no hand margins. The wrapper
           carries the anchor and the gallery group's node, and is the NEXT SIBLING of the block whose
           GENERATE this answers (`#design-input` on FLAT, `#design-render-bench` on FABRIC RENDER). */}
       <Section
-        title='latest generation'
-        question='— what the last run brought back'
+        title='workbench'
         action={
           <>
             <Text size='nano' variant='label' component='span' data-latest-stamp=''>
@@ -810,7 +830,7 @@ export function LatestGeneration({
               size='xs'
               className='text-labelColor hover:text-textColor'
               aria-label={`show ${runHandle(newestId)} here`}
-              title={`the newest ${kind} run — the one shown now stays in the history below`}
+              title={`the newest ${kind} run — the one shown now stays in the history`}
               onClick={() => {
                 releasePin(techCardId);
                 clearBenchChoice(techCardId, kind);
@@ -820,6 +840,9 @@ export function LatestGeneration({
             </Button>
           </span>
         )}
+
+        {/* T30: the history, collapsed, as the block's last part. */}
+        {history}
       </Section>
 
       {splitModal}

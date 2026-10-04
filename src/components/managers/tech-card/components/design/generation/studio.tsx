@@ -1,10 +1,18 @@
 import type { GetDesignBandResponse } from 'api/proto-http/admin';
 
 import { GenerationHistory } from './generation-history';
+import { LatestGeneration, type WorkbenchKind } from './latest-generation';
 
 /**
- * THE GENERATIVE HALF OF THE FLAT STEP, COMPOSED — and since the studio redesign it composes ONE
- * organ: the generation history.
+ * ═══ THE WORKBENCH — ONE BLOCK: THE LAST RUN ON TOP, THE GENERATION HISTORY UNDER IT (T30) ═══
+ * Owner, item 30, verbatim: «LATEST GENERATION должно называться workbench и generation history и
+ * workbench должны быть одим блоком где history все равно заколапшена по дефолту». FLAT and FABRIC
+ * RENDER mount this and nothing else for the two: `LatestGeneration` draws the block (`workbench`)
+ * and takes the history as its last part, folded on every visit (T22). The block stands even with
+ * no run, for the reason below: the history must stay mounted.
+ *
+ * WHAT STOOD HERE BEFORE T30 — the generative half of the flat step, composing ONE organ: the
+ * generation history.
  *
  * WHAT STOOD HERE. The prototype's old assembly rule (`proto.html:3873`, `briefContent`) chose
  * between the history and an EMPTY STUDIO block («pictures on this card · nothing here yet») by
@@ -35,22 +43,33 @@ import { GenerationHistory } from './generation-history';
  * is not remembered, as on the other four steps, and a live run does not unfold it. Folded, the
  * organ stays MOUNTED — the poll and the recall intake above live in it.
  */
-export function GenerationStudio({
+export function Workbench({
   band,
   techCardId,
   disabled,
+  kind = 'flat',
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /** FLAT, or FABRIC RENDER (T24: the same grid history; T30: the same one block). */
+  kind?: WorkbenchKind;
 }) {
   return (
-    <GenerationHistory
+    <LatestGeneration
       band={band}
       techCardId={techCardId}
       disabled={disabled}
-      defaultRep='flat'
-      defaultOpen={false}
+      kind={kind}
+      history={
+        <GenerationHistory
+          band={band}
+          techCardId={techCardId}
+          disabled={disabled}
+          defaultRep={kind}
+          defaultOpen={false}
+        />
+      }
     />
   );
 }

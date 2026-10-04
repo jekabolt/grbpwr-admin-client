@@ -14,7 +14,7 @@ import { ArtifactsPanel, type SheetCallout } from './artifacts-panel';
 import { Bench } from './bench';
 import { useColorwayChoice } from './colorway-picker';
 import { ColourwayProposals } from './colourway-proposals';
-import { GenerationStudio } from './generation';
+import { Workbench } from './generation';
 import type { DesignKind } from './bench-kinds';
 import { ChainRail, useChainCtx } from './chain-rail';
 import {
@@ -29,7 +29,7 @@ import {
   type StepId,
 } from './core/chain';
 import { RenderStudio, ThreedStudio } from './render';
-import { GenerationHistory, LatestGeneration } from './generation';
+import { GenerationHistory } from './generation';
 import { DesignCapabilityProvider } from './capability';
 import { MaterialSlots } from './material-slots';
 import { MoodBoard } from './mood-board';
@@ -532,17 +532,11 @@ export function StudioTab({
                             disabled={readOnly || !canWriteCard}
                           />
                         </div>
-                        {/* ═══ LATEST GENERATION — A BLOCK OF ITS OWN, RIGHT UNDER INPUT — REFERENCES
-                            (28.09, O-67, D-73). What this step's GENERATE brought back, with the
-                            history's doors; until O-67 the last row of the input block. Its
-                            `[data-latest-generation]` wrapper is the next sibling of `#design-input`,
-                            and with no flat run at all it draws nothing — no empty header. */}
-                        <LatestGeneration
-                          band={band}
-                          techCardId={techCardId}
-                          disabled={readOnly || !canWriteCard}
-                        />
-                        <GenerationStudio
+                        {/* ═══ WORKBENCH — ONE BLOCK, RIGHT UNDER INPUT — REFERENCES (T30): what this
+                            step's GENERATE brought back, then the GENERATION HISTORY folded as its
+                            last part (`generation/studio.tsx`). Its `[data-workbench]` wrapper is
+                            the next sibling of `#design-input`. */}
+                        <Workbench
                           band={band}
                           techCardId={techCardId}
                           disabled={readOnly || !canWriteCard}
@@ -623,18 +617,8 @@ export function StudioTab({
                              выше. По ним подача засевает ткани колорвея из привязок, а сетка
                              CLOTHS ставит надетые плитки первыми. */
                           slots={cloth.slots}
-                        >
-                          {/* J-18: the history filters to fabric renders by default; E-22: closed.
-                              O-63 (D-62): it stands INSIDE the studio — the studio's render scope
-                              reaches its rows, and a render run's tiles carry the render doors. */}
-                          <GenerationHistory
-                            band={band}
-                            techCardId={techCardId}
-                            disabled={readOnly}
-                            defaultRep='render'
-                            defaultOpen={false}
-                          />
-                        </RenderStudio>
+                          /* T30: the history is mounted by the studio, inside its workbench block. */
+                        />
                       </>
                     )}
                     {/* ═══ STEP 5 · 3D — ONLY WHERE THE RAIL STILL DRAWS IT (C-10). On a server that

@@ -14,7 +14,7 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Button } from 'ui/components/button';
 import {
-  BENCH_CELL_STYLE,
+  BENCH_CELL_PX,
   BenchSlot,
   LegacySlotCell,
   NewDetailCell,
@@ -96,8 +96,14 @@ const FLAT_BENCH: BenchKind = 'flat';
  * прокручивается внутри блока. Число и стиль ПЕРЕЕХАЛИ в `bench-slot.tsx` (`BENCH_CELL_STYLE`),
  * где живут два других слагаемых коробки — кадр и подвал: с r2 п.25 той же коробкой стоит ячейка
  * SOURCE PICTURE на шаге PATTERN, и «138» в двух файлах разъехалось бы молча. Разбор — там же.
+ *
+ * T31 (04.10, owner item 31: «FLAT SLOTS блок сделай немного крупнее»): THIS strip's cells are 20%
+ * wider than the shared box — 166px, frame and cap kept, so every cell of the block (sides,
+ * details, the mint cell, the legacy row) grows together and keeps its proportions. The box itself
+ * (`BENCH_CELL_PX`) stays for the other steps that borrow it.
  */
-const CELL_STYLE = BENCH_CELL_STYLE;
+const CELL_PX = Math.round(BENCH_CELL_PX * 1.2);
+const CELL_STYLE: React.CSSProperties = { width: CELL_PX, flex: `0 0 ${CELL_PX}px` };
 
 /**
  * ═══ И КОЛОРВЕЯ У ЭТОГО ВЕРСТАКА НЕТ — L-4, И ЭТО ГРАНИЦА, А НЕ ПРОБЕЛ ════════════════════════
@@ -609,7 +615,7 @@ export function Bench({
                   placeholderClass({ dashed: true, tone: 'error' }),
                   'px-2 text-center',
                 )}
-                style={{ ...PLACEHOLDER_SURFACE, ...CELL_STYLE, minHeight: 138 }}
+                style={{ ...PLACEHOLDER_SURFACE, ...CELL_STYLE, minHeight: CELL_PX }}
                 title='the server sent this detail row without a slot id, so nothing on it can be addressed — reload the card, and report it if it comes back'
               >
                 <Text size='micro' variant='errorLabel' component='span'>

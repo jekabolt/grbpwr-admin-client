@@ -7216,7 +7216,7 @@ export function VectorModal({
   const saveNote = !base
     ? 'no raster underneath: the vector base is the drawing itself — it lands on the upload shelf as its own single-picture batch.'
     : replace
-      ? `saving asks first: the edit takes the place of «${pictureHandle(base)}» in the latest generation${
+      ? `saving asks first: the edit takes the place of «${pictureHandle(base)}» on the workbench${
           replace.slotLabel ? ` and in the ${replace.slotLabel} slot` : ''
         }, or stands beside it as a NEW picture. Either way the original stays in the history, untouched. «Save the drawing only» keeps the strokes and makes no picture.`
       : `saving writes the vector over «${pictureHandle(base)}» into a NEW picture — a sibling of the base${
