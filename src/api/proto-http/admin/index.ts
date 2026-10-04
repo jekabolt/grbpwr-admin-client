@@ -15257,6 +15257,9 @@ export type GetDesignBandResponse = {
   // THE MODEL SuggestPrompts ANSWERS WITH ('' = the assistant is not configured: draw the static Ideas list only).
   // ABSENT = a binary without SuggestPrompts.
   suggestPromptsModel: string | undefined;
+  // AUTO PARTS of the flat each side holds NOW (base_media_id = the media in that side's flat slot),
+  // every algo_rev. A row of a flat that left its slot is not sent.
+  partsSuggestions: DesignPartsSuggestion[] | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The six
@@ -16726,6 +16729,28 @@ export type DesignImageModel = {
   backgrounds: string[] | undefined;
 };
 
+export type DesignPartsSuggestion = {
+  view: string | undefined;
+  baseMediaId: number | undefined;
+  algoRev: string | undefined;
+  parts: DesignPartGroup[] | undefined;
+  splitNeeded: DesignPartSplit[] | undefined;
+  model: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// DesignPartGroup is one garment part: its name and its region numbers (1-based).
+export type DesignPartGroup = {
+  label: string | undefined;
+  regions: number[] | undefined;
+};
+
+// DesignPartSplit is a region that spans two parts with no seam line drawn.
+export type DesignPartSplit = {
+  region: number | undefined;
+  why: string | undefined;
+};
+
 export type ListDesignRunsRequest = {
   techCardId: number | undefined;
   // Max 24, default 12 when 0. The history shows about 4 rows per screen; three screens of slack is
@@ -17706,6 +17731,21 @@ export type SaveDesignQuizAnswersRequest = {
 
 export type SaveDesignQuizAnswersResponse = {
   answers: DesignQuizAnswer[] | undefined;
+};
+
+export type SuggestDesignPartsRequest = {
+  techCardId: number | undefined;
+  view: string | undefined;
+  baseMediaId: number | undefined;
+  marksMediaId: number | undefined;
+  regionCount: number | undefined;
+  algoRev: string | undefined;
+  force: boolean | undefined;
+};
+
+export type SuggestDesignPartsResponse = {
+  suggestion: DesignPartsSuggestion | undefined;
+  cached: boolean | undefined;
 };
 
 // AiRouteCandidate is one (provider, model) a purpose's call may go to.
@@ -19397,6 +19437,13 @@ export interface AdminService {
   // answered on the card (GetDesignQuizAnswers) are never returned again.
   // FailedPrecondition: nothing to ask about (no attached picture and no concept).
   GenerateDesignQuiz(request: GenerateDesignQuizRequest): Promise<GenerateDesignQuizResponse>;
+  // SuggestDesignParts (auto parts) — one sync vision+JSON call: the model reads the side's flat cut
+  // into numbered regions (marks_media_id, drawn by the client) and groups the numbers into named
+  // garment parts. Cached per (card, view, base_media_id, algo_rev): a cached answer is returned
+  // without a call unless force.
+  // FailedPrecondition: the flat changed (base_media_id is not the side's flat), the region count is
+  // outside 2..60.
+  SuggestDesignParts(request: SuggestDesignPartsRequest): Promise<SuggestDesignPartsResponse>;
   // GetDesignQuizAnswers — every quiz answer stored on the card, in display order.
   GetDesignQuizAnswers(request: GetDesignQuizAnswersRequest): Promise<GetDesignQuizAnswersResponse>;
   // SaveDesignQuizAnswers REPLACES the card's whole answer list with the one sent (single writer:
@@ -26008,6 +26055,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GenerateDesignQuiz",
       }) as Promise<GenerateDesignQuizResponse>;
+    },
+    SuggestDesignParts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/parts:suggest`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestDesignParts",
+      }) as Promise<SuggestDesignPartsResponse>;
     },
     GetDesignQuizAnswers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
