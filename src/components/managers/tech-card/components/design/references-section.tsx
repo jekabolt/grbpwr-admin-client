@@ -1,6 +1,7 @@
 import {
   GetDesignBandResponse,
   common_DesignPicture,
+  common_DesignRun,
   common_MediaFull,
 } from 'api/proto-http/admin';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
@@ -43,6 +44,7 @@ import { EmptyState, GROUP_GAP, PlaceOrDrawCell } from './core';
 import { VectorModal } from './modals';
 import { PictureTile } from './picture-tile';
 import { pictureOffersSplit } from './render/model';
+import { offersSplit, readSplit } from './generation/composite';
 import { useSplitToInput } from './split-to-input';
 import { ACTIVE_VIEWS, DETAIL_VIEW, normaliseViewKey, viewLabel } from './views';
 import { cardOnScreen, useDesignWrites } from './use-design-band';
@@ -286,10 +288,20 @@ export function ReferencesSection({
       if (!seen || (picture.id ?? 0) > (seen.id ?? 0)) newestOf.set(mediaId, picture);
     }
 
+    // The run each picture came from: a generated `one` sheet may carry an empty column, and the
+    // bench's own rule (`readSplit`: edit chain → run params) is what knows it is a sheet (item 25).
+    const runOf = new Map<number, common_DesignRun>();
+    for (const run of band.runs ?? [])
+      for (const p of run.pictures ?? []) runOf.set(p.id ?? 0, run);
+
     const offers = new Map<number, SplitOffer>();
     for (const [mediaId, picture] of newestOf) {
       const cut = (families.membersOf.get(picture.id ?? 0) ?? []).length > 0;
-      offers.set(mediaId, pictureOffersSplit(picture, cut) ? 'declared' : 'no');
+      const run = runOf.get(picture.id ?? 0);
+      const sheet =
+        pictureOffersSplit(picture, cut) ||
+        (!cut && offersSplit(readSplit(band, picture, run?.pictures, run)));
+      offers.set(mediaId, sheet ? 'declared' : 'no');
     }
     return offers;
   }, [band.runs, band.batches]);
@@ -1317,18 +1329,16 @@ function ReferenceCell({
            tell». Пропасть дверь не может: тихий орган остаётся тихим не отсутствием, а тем,
            что не врёт. */
         onSplit={
-          !readOnly && url
+          /* Item 25: the split corner stands ONLY where the band knows the file is a sheet. */
+          !readOnly && url && splitOffer === 'declared'
             ? {
                 onClick: onSplit,
                 pending: splitPending,
                 disabled: locked,
                 ariaLabel: `cut ${label} into views`,
                 title:
-                  splitOffer === 'declared'
-                    ? 'split — this picture holds several views at once; cut them out into ' +
-                      'pictures of their own'
-                    : 'split — cut this into views if it holds several at once. Nothing on ' +
-                      'record says it does, so only you can tell',
+                  'split — this picture holds several views at once; cut them out into ' +
+                  'pictures of their own',
               }
             : undefined
         }
