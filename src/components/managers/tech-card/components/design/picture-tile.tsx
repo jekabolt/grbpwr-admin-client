@@ -782,6 +782,13 @@ export interface PictureTileProps {
    * ряд прижат к правому краю, и единственный ребёнок стоит там же, где стоял одиночный угол.
    */
   onSelect?: PictureTileAction;
+  /**
+   * UNDO / REDO OF AN EDIT (04.10, owner item 28, T28): walk this picture's edit chain one version
+   * back or forward (`generation/edit-chain.ts`). Bottom-right, after the menu and before `edit`,
+   * which stays last. Drawn only when the step exists; quiet like every verb.
+   */
+  onUndo?: PictureTileAction;
+  onRedo?: PictureTileAction;
   onRemove?: PictureTileAction;
   /** Слово нижней левой роли. По умолчанию `split` — иных значений почти не бывает. */
   splitLabel?: string;
@@ -996,6 +1003,8 @@ export function PictureTile({
   onEdit,
   onMask,
   onSelect,
+  onUndo,
+  onRedo,
   onRemove,
   splitLabel = 'split',
   cropLabel = 'crop',
@@ -1476,10 +1485,12 @@ export function PictureTile({
           кнопка под кнопкой. Ряд прижат к правому краю, поэтому `edit` остаётся ПОСЛЕДНИМ и стоит
           ровно там, где стоял всегда: плитка без пометки не сдвигается ни на пиксель. */}
       {/* `menu` — ПЕРВЫМ (T17): выбор «куда» встаёт левее, и `edit` по-прежнему последний. */}
-      {(menu || onSelect || onEdit) && (
+      {(menu || onSelect || onUndo || onRedo || onEdit) && (
         <div className='absolute bottom-1 right-1 z-20 flex items-end gap-1'>
           {menu && <CornerMenu menu={menu} />}
           {onSelect && <Corner action={onSelect} label={selectLabel} className='' />}
+          {onUndo && <Corner action={onUndo} label='undo' className='' />}
+          {onRedo && <Corner action={onRedo} label='redo' className='' />}
           {onEdit && <Corner action={onEdit} label={editLabel} className='' />}
         </div>
       )}

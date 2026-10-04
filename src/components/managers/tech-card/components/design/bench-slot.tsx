@@ -20,6 +20,8 @@ import { batchCaption, pictureHandle } from './handles';
 import { mixedInputNote, provenanceLabel, readProvenance, slotProvenance } from './provenance';
 import type { MediaViewerItem } from 'ui/components/media-viewer';
 import { PictureTile } from './picture-tile';
+import { useEditChainDoors } from './generation/edit-chain-doors';
+import { WorkbenchEditor } from './generation/propagating-editor';
 import { selectPickablePictures } from './visibility';
 
 /**
@@ -705,6 +707,19 @@ function EmptyCell({
   );
 }
 
+/** The run or batch row a picture is filed in — where its edit chain lives (T28); itself alone. */
+function rowOfPicture(
+  band: GetDesignBandResponse,
+  picture: common_DesignPicture,
+): readonly common_DesignPicture[] {
+  const id = picture.id ?? 0;
+  for (const row of [...(band.runs ?? []), ...(band.batches ?? [])]) {
+    const pictures = row.pictures ?? [];
+    if (pictures.some((p) => (p.id ?? 0) === id)) return pictures;
+  }
+  return [picture];
+}
+
 export function BenchSlot(props: BenchSlotProps) {
   const [vectorOpen, setVectorOpen] = useState(false);
   const {
@@ -776,6 +791,20 @@ export function BenchSlot(props: BenchSlotProps) {
   const mixedNote = provenance ? mixedInputNote(provenance) : null;
   const footnote = picture ? slotFootnote(band, picture, shelfOrdinals) : '';
 
+  /* THE EDIT PROPAGATES, AND WALKS BACK (04.10, owner item 28, T28): the editor over a filled slot
+     overwrites its picture (the server moves this slot onto the edit, and the bench above draws the
+     edit in the original's place), and `undo` / `redo` move this slot along the chain. The chain is
+     filed in the picture's own row (`edit-chain.ts`). */
+  const chainRow = picture ? rowOfPicture(band, picture) : [];
+  const chainDoors = useEditChainDoors({
+    techCardId,
+    picture,
+    row: chainRow,
+    slot: slotId > 0 ? { ref: slotRef, rev: slotRev } : null,
+    handle: label,
+    disabled: !!disabled || !editable || saving,
+  });
+
   return (
     // `group` is load-bearing: the quiet organs of the plate (the corner buttons of `PictureTile`)
     // reveal on hover of the whole cell, not of the frame alone.
@@ -817,6 +846,8 @@ export function BenchSlot(props: BenchSlotProps) {
                   }
                 : undefined
             }
+            onUndo={chainDoors.onUndo}
+            onRedo={chainDoors.onRedo}
           />
           {/* ПОДВАЛ — имя стороны и звёздочка; происхождение плиты (`AI · run 5 · a`) уехало в
               `title`: макет его не печатает, а факт остаётся в одном наведении. Тот же орган, что
@@ -912,16 +943,32 @@ export function BenchSlot(props: BenchSlotProps) {
           «рисунок с нуля» (слой с `base_media_id = 0`), а `slot` тот же, поэтому сплющенная
           картинка встаёт РОВНО В ЭТУ ячейку. Держать его смонтированным под закрытой дверью
           значило бы отбирать оконные клавиши у страницы. */}
-      {!disabled && editable && (picture || vectorOpen) && (
-        <VectorModal
-          open={vectorOpen}
-          onOpenChange={setVectorOpen}
-          techCardId={techCardId}
+      {!disabled && editable && picture && (picture.id ?? 0) > 0 && vectorOpen ? (
+        <WorkbenchEditor
           band={band}
-          base={picture ?? null}
+          techCardId={techCardId}
+          picture={picture}
+          siblings={chainRow}
           slot={{ ref: slotRef, label, slotRev }}
+          slotLabel={label}
+          slotOf={() => label}
           disabled={disabled}
+          onOpenChange={setVectorOpen}
         />
+      ) : (
+        !disabled &&
+        editable &&
+        (picture || vectorOpen) && (
+          <VectorModal
+            open={vectorOpen}
+            onOpenChange={setVectorOpen}
+            techCardId={techCardId}
+            band={band}
+            base={picture ?? null}
+            slot={{ ref: slotRef, label, slotRev }}
+            disabled={disabled}
+          />
+        )
       )}
 
       {/* Оговорки — только когда они есть: в покое под ячейкой ничего не стоит (макет). */}
