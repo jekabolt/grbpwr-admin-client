@@ -444,7 +444,14 @@ export class PaintSession {
         });
         if (this.views.get(v.view) !== v) return;
         const s = res.suggestion;
-        v.parts = s ? partsOf(s, flat, seeds) : null;
+        // Numbers mean something only for the cut that drew them: a suggestion for another side,
+        // flat or algo rev would paint unrelated regions.
+        const fits =
+          !!s &&
+          s.view === v.view &&
+          (s.baseMediaId ?? 0) === v.baseMediaId &&
+          s.algoRev === REGIONS_ALGO_REV;
+        v.parts = fits ? partsOf(s, flat, seeds) : null;
         if (!v.parts) throw new Error('the assistant answered nothing usable');
         v.partsSig = JSON.stringify([s?.parts, s?.splitNeeded]);
         v.partsFailed = '';
