@@ -6621,7 +6621,7 @@ export function VectorModal({
    * `answer` is what the person chose. 'new' files the edit BESIDE its base — every host, and the
    * only thing this editor did before the workbench's question. 'overwrite' exists only under
    * `replace` with nothing closing it: the same flatten, naming `replace.pictureId`, and the edit
-   * takes that picture's place in the latest generation (its bench slot moves onto the edit, the
+   * takes that picture's place on the workbench (its bench slot moves onto the edit, the
    * picture is stamped `replaced_by`; nothing is deleted — the history keeps it).
    *
    * EVERY PRESS HERE IS A NEW GESTURE UNDER A NEW KEY (review r3). The drawing is saved, rasterised
@@ -7241,7 +7241,7 @@ export function VectorModal({
           replace.slotLabel ? ` and in the ${replace.slotLabel} slot` : ''
         }; undo on the tile brings it back, and the history keeps both. «Save the drawing only» keeps the strokes and makes no picture.`
       : replace
-        ? `saving asks first: the edit takes the place of «${pictureHandle(base)}» in the latest generation${
+        ? `saving asks first: the edit takes the place of «${pictureHandle(base)}» on the workbench${
             replace.slotLabel ? ` and in the ${replace.slotLabel} slot` : ''
           }, or stands beside it as a NEW picture. Either way the original stays in the history, untouched. «Save the drawing only» keeps the strokes and makes no picture.`
         : `saving writes the vector over «${pictureHandle(base)}» into a NEW picture — a sibling of the base${

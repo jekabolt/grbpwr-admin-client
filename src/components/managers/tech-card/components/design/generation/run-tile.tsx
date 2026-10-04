@@ -405,7 +405,7 @@ export function RunTile({
             word: 'replaced',
             tone: 'mut',
             title:
-              'replaced by an edit: the edit stands in its place in the latest generation, and this picture stays here',
+              'replaced by an edit: the edit stands in its place on the workbench, and this picture stays here',
           }
         : fitMismatch
           ? { word: 'fit ≠ card', tone: 'warn', title: `fit ${runFit} ≠ card ${cardFit}` }

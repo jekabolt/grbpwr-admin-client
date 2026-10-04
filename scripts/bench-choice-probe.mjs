@@ -317,9 +317,11 @@ try {
     key('a');
     key('Enter', true);
     check('T22: other keys and key repeat do not toggle', toggles === 3);
-    const action = el.props.children.props.action;
-    const label = action.props.children.props.children.join('');
-    check('T22: the header says «4 runs»', label === '4 runs', label);
+    // T30: the header is the workbench's sub-group line `history · 4 runs` (a GroupLabel).
+    const line = el.props.children;
+    const label = line.props.lead.props.children.props.children;
+    const word = line.props.children.props.children;
+    check('T30: the header says «history · 4 runs»', word === 'history' && label === '· 4 runs', `${word} ${label}`);
   }
   {
     const one = a.HistoryFoldHeader({
@@ -336,10 +338,10 @@ try {
       rep: 'flat',
       onToggle() {},
     });
-    const lab = (el) => el.props.children.props.action.props.children.props.children.join('');
+    const lab = (el) => el.props.children.props.lead.props.children.props.children;
     check(
       'T22: «1 run» / «3+ runs»',
-      lab(one) === '1 run' && lab(floorEl) === '3+ runs',
+      lab(one) === '· 1 run' && lab(floorEl) === '· 3+ runs',
       `${lab(one)} / ${lab(floorEl)}`,
     );
   }

@@ -1352,7 +1352,7 @@ export function RendersByViewGroup({
                      `mark ▸` на самой картинке, а картинки FABRIC RENDER стоят с O-63 в LATEST
                      GENERATION и в GENERATION HISTORY. Подсказка «or from a file» обещала дверь,
                      которой на том экране нет вовсе, и посылала искать её. */
-                  title={`fill ${label} on FABRIC RENDER — «mark» on a render in LATEST GENERATION or GENERATION HISTORY`}
+                  title={`fill ${label} on FABRIC RENDER — «mark» on a render on the WORKBENCH`}
                 />
               )}
               {/* The 3D word stands under a FILLED plate only: an empty side is in no run, and
