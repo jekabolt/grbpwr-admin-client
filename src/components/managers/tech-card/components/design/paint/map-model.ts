@@ -366,3 +366,51 @@ export function displayLabels(
   }
   return out;
 }
+
+/**
+ * QW1 · the garment's cloth, as the canvas and the mockup fill it with the REMAINDER: every pixel
+ * of a region, and every pixel under a line whose nearest neighbour is in a region — minus the
+ * outline's outer fringe (the light pixels between the outer line and the paper, reached from
+ * outside within a few px without crossing ink), so the outline stands on paper (cached per flat).
+ */
+const CLOTH = new WeakMap<Int32Array, Uint8Array>();
+export function clothMask(
+  flat: Pick<FlatRegions, 'labels' | 'silhouette' | 'w' | 'h'> & { ink?: Uint8Array },
+): Uint8Array {
+  const hit = CLOTH.get(flat.labels);
+  if (hit) return hit;
+  const { w, h, silhouette, ink } = flat;
+  const n = w * h;
+  const out = new Uint8Array(n);
+  for (let i = 0; i < n; i += 1) if (flat.labels[i]) out[i] = 1;
+  const { idx, near } = underLines(flat);
+  for (let k = 0; k < idx.length; k += 1) if (flat.labels[near[k]]) out[idx[k]] = 1;
+  if (ink) {
+    const reach = Math.max(2, Math.round((3 * Math.max(w, h)) / 1024));
+    const step = new Int16Array(n).fill(-1);
+    let front: number[] = [];
+    for (let i = 0; i < n; i += 1) if (!silhouette[i]) step[i] = 0;
+    for (let i = 0; i < n; i += 1) {
+      if (step[i] !== 0) continue;
+      const x = i % w;
+      if ((x > 0 && step[i - 1] < 0) || (x < w - 1 && step[i + 1] < 0)) front.push(i);
+      else if ((i >= w && step[i - w] < 0) || (i + w < n && step[i + w] < 0)) front.push(i);
+    }
+    for (let d = 1; d <= reach && front.length > 0; d += 1) {
+      const next: number[] = [];
+      for (const i of front) {
+        const x = i % w;
+        const nb = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w];
+        for (const j of nb) {
+          if (j < 0 || j >= n || step[j] >= 0 || ink[j]) continue;
+          step[j] = d;
+          out[j] = 0;
+          next.push(j);
+        }
+      }
+      front = next;
+    }
+  }
+  CLOTH.set(flat.labels, out);
+  return out;
+}

@@ -512,13 +512,76 @@ ck(
   );
 }
 
-// T13 · the cloth mockup: the tile at its TRUE repeat (repeatMm / 600 mm × flat width px).
+// T13 + QW2 · the cloth mockup: the tile at its TRUE repeat on the side's scale (mm per px).
 {
   ck(
-    m.mockupTilePx(30, 200) === 10 && m.mockupTilePx(60, 1000) === 100,
-    'tile px = repeatMm / 600 × flat px',
+    m.clothTilePx(30, 3) === 10 && m.clothTilePx(60, 0.6) === 100,
+    'QW2 tile px = repeatMm / (mm per px)',
   );
-  ck(m.mockupTilePx(0, 800) === 100, 'no repeat → flat width / 8');
+  ck(
+    m.clothTilePx(0, 3) === Math.round(m.SWATCH_MM / 3) &&
+      m.clothTilePx(0, 6) === Math.round(m.SWATCH_MM / 6),
+    'QW2 no repeat → a swatch (SWATCH_MM across) on the side’s scale, not flat/8',
+    `${m.clothTilePx(0, 3)} px at 3 mm/px`,
+  );
+  // Scale: the chart's chest across the body on FRONT; length down the side; else 600 est.
+  const SW = 300,
+    SH = 400;
+  const sil = new Uint8Array(SW * SH);
+  // A body 100 px wide (x 100..199) from y 0..399, sleeves apart at x 20..59 down to y 300.
+  for (let y = 0; y < SH; y += 1)
+    for (let x = 0; x < SW; x += 1)
+      if ((x >= 100 && x < 200) || (y < 300 && ((x >= 20 && x < 60) || (x >= 240 && x < 280))))
+        sil[y * SW + x] = 1;
+  const sflat = { w: SW, h: SH, silhouette: sil };
+  const est = m.viewScale('front', sflat, m.NO_GARMENT);
+  ck(
+    est.estimated &&
+      Math.abs(est.mmPerPx - m.GARMENT_WIDTH_MM / 260) < 1e-9 &&
+      est.acrossMm === 600,
+    'QW2 no chart → 600 mm across the silhouette, estimated',
+    JSON.stringify(est),
+  );
+  const chest = m.viewScale('front', sflat, { chestMm: 550, lengthMm: 0 });
+  ck(
+    !chest.estimated && Math.abs(chest.mmPerPx - 5.5) < 1e-9,
+    'QW2 chest 550 mm over the 100 px body (sleeves apart) → 5.5 mm/px',
+    JSON.stringify(chest),
+  );
+  const side = m.viewScale('side_l', sflat, { chestMm: 550, lengthMm: 800 });
+  ck(
+    !side.estimated && Math.abs(side.mmPerPx - 2) < 1e-9,
+    'QW2 side: chest does not apply, length 800 mm down 400 px → 2 mm/px',
+  );
+  const names = [
+    { id: 7, name: 'Chest' },
+    { id: 9, name: 'length' },
+  ];
+  const cell = (sizeId, measurementNameId, value) => ({
+    sizeId,
+    measurementNameId,
+    value: { value: String(value) },
+  });
+  const g1 = m.garmentOfChart(
+    { cells: [cell(1, 7, 52), cell(2, 7, 55), cell(3, 7, 58), cell(2, 9, 72)], gradeBaseSizeId: 0 },
+    names,
+  );
+  ck(
+    g1.chestMm === 550 && g1.lengthMm === 720,
+    'QW2 chart in cm → mm, middle size',
+    JSON.stringify(g1),
+  );
+  const g2 = m.garmentOfChart(
+    { cells: [cell(1, 7, 1040), cell(3, 7, 1120)], gradeBaseSizeId: 3 },
+    names,
+  );
+  ck(
+    g2.chestMm === 560 && g2.lengthMm === 0,
+    'QW2 girth halved, base size wins',
+    JSON.stringify(g2),
+  );
+  ck(m.garmentOfChart(undefined, names).chestMm === 0, 'QW2 no chart → nothing said');
+
   const W = 200,
     H = 40;
   const flat = {
@@ -529,14 +592,14 @@ ck(
   };
   const lab = new Uint32Array(W * H).fill(A);
   const white = new Uint8ClampedArray(W * H * 4).fill(255);
-  // A 2-px tile: black | white — one dark run per repeat.
+  // A 2-px tile: black | white — one dark run per repeat. 600 mm across 200 px = 3 mm/px.
   const tile = new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255]);
   const runs = (repeatMm) => {
     const px = m.mockupPixels(
       flat,
       lab,
       white,
-      new Map([[A, { kind: 'tile', rgba: tile, w: 2, h: 1, tilePx: m.mockupTilePx(repeatMm, W) }]]),
+      new Map([[A, { kind: 'tile', rgba: tile, w: 2, h: 1, tilePx: m.clothTilePx(repeatMm, 3) }]]),
     );
     let n = 0;
     for (let x = 0; x < W; x += 1)
@@ -544,22 +607,148 @@ ck(
     return n;
   };
   ck(
-    runs(30) === 20 && runs(60) === 10 && runs(0) === 8,
-    'mockup repeats scale with repeatMm',
+    runs(30) === 20 && runs(60) === 10 && runs(0) === Math.ceil(W / Math.round(m.SWATCH_MM / 3)),
+    'mockup repeats scale with repeatMm (unstated = a 100 mm swatch)',
     `${runs(30)}/${runs(60)}/${runs(0)} repeats`,
   );
-  // Ink multiplies on top; paper outside the paint; a free colour fills flat.
+  // Ink multiplies on top; a free colour fills flat; unpainted = paper without a remainder.
   const ink = white.slice();
   ink.set([0, 0, 0, 255], (5 * W + 5) * 4);
   const lab2 = lab.slice();
   lab2.fill(0, 0, W * 20);
-  const px = m.mockupPixels(flat, lab2, ink, new Map([[A, { kind: 'colour', hex: '#336699' }]]));
+  const colour = new Map([[A, { kind: 'colour', hex: '#336699' }]]);
+  const px = m.mockupPixels(flat, lab2, ink, colour);
   ck(
     px[(5 * W + 5) * 4] === 0 &&
       px[(5 * W + 6) * 4] === 255 &&
       px[30 * W * 4] === 0x33 &&
       px[30 * W * 4 + 2] === 0x99,
     'lines multiplied on top, paper unpainted, a free colour flat',
+  );
+  // QW1 · the REMAINDER fills the unpainted garment on the mockup; outside the silhouette stays white.
+  const flatR = {
+    ...flat,
+    labels: flat.labels.slice().fill(0, 0, W * 2),
+    silhouette: flat.silhouette.slice().fill(0, 0, W * 2),
+  };
+  const pr = m.mockupPixels(flatR, lab2, ink, colour, { kind: 'colour', hex: '#aa5500' });
+  ck(
+    pr[(5 * W + 6) * 4] === 0xaa &&
+      pr[(5 * W + 6) * 4 + 1] === 0x55 &&
+      pr[(5 * W + 5) * 4] === 0 &&
+      pr[0] === 255 &&
+      pr[30 * W * 4] === 0x33,
+    'QW1 mockup: remainder under the unpainted garment, lines on top, paper outside, paint kept',
+  );
+}
+
+// QW3 · a run with maps carries the REMAINDER + the painted cloths only; QW1 the same remainder.
+{
+  const media = (id) => ({ id, media: { fullSize: { mediaUrl: `m${id}` } } });
+  const asset = (id) => ({ id, kind: 'fabric', name: `cloth ${id}`, mediaId: 500 + id });
+  const band = {
+    assets: [asset(201), asset(202), asset(203)],
+    assetBindings: [
+      { colorwayId: 11, bomItemId: 1, assetId: 201 },
+      { colorwayId: 11, bomItemId: 2, assetId: 202 },
+      { colorwayId: 11, bomItemId: 3, assetId: 203 },
+    ],
+    bench: [
+      {
+        id: 1,
+        viewKey: 'front',
+        kind: 'flat',
+        pictureId: 1,
+        slotRev: 1,
+        picture: { id: 1, media: media(101) },
+      },
+      {
+        id: 2,
+        viewKey: 'back',
+        kind: 'flat',
+        pictureId: 2,
+        slotRev: 1,
+        picture: { id: 2, media: media(102) },
+      },
+    ],
+    runs: [],
+  };
+  const slot = (bomItemId, name) => ({
+    bomItemId,
+    lineKey: `l${bomItemId}`,
+    name,
+    purpose: '',
+    purposeLabel: name.toLowerCase(),
+    section: 'TECH_CARD_BOM_SECTION_FABRIC',
+    detail: '',
+    words: name,
+  });
+  const slots = [slot(1, 'MAIN'), slot(2, 'CONTRAST'), slot(3, 'LINING')];
+  const lab = m.slotLabels([1, 2, 3]);
+  const plan = {
+    rev: 1,
+    maps: [
+      {
+        mediaId: 900,
+        view: 'front',
+        baseMediaId: 101,
+        palette: [{ hex: lab.get(2), px: 10 }],
+        url: '',
+        gone: false,
+      },
+    ],
+    cloths: [],
+  };
+  const run = m.paintRun({ band, plan, slots, colorwayId: 11, colorwayLabel: 'ROSSO' });
+  const ids = (run.fabrics || []).map((f) => `${f.assetId}${f.mapHex ? '@' : ''}`);
+  ck(
+    run.kind === 'maps' && ids.join(',') === '201,202@',
+    'QW3 maps run: remainder + painted only — the unpainted LINING stays home',
+    `${run.kind} ${ids.join(',')}`,
+  );
+  const rest = m.remainderCloth({ band, slots, colorwayId: 11, painted: new Set([lab.get(2)]) });
+  ck(
+    rest?.assetId === 201 && rest.label === lab.get(1),
+    'QW1 canvas remainder = the run’s remainder',
+  );
+  ck(
+    m.remainderCloth({ band, slots, colorwayId: 11, painted: new Set() }) === null &&
+      m.remainderCloth({
+        band,
+        slots,
+        colorwayId: 11,
+        painted: new Set([lab.get(1), lab.get(2), lab.get(3)]),
+      }) === null,
+    'QW1 no remainder when nothing or everything is painted',
+  );
+  const first = m.remainderCloth({ band, slots, colorwayId: 11, painted: new Set([lab.get(1)]) });
+  ck(first?.assetId === 202, 'QW1 main painted → the next unpainted cloth is the remainder');
+}
+
+// QW6 · ⇧-click paints this side only; a plain click the same part on every side.
+{
+  const flat = { w: 4, h: 1, labels: Int32Array.from([1, 2, 3, 4]), count: 4 };
+  const f = m.partsOf(
+    { parts: [{ label: 'collar', regions: [1], partKey: 'collar' }] },
+    flat,
+    undefined,
+    'front',
+  );
+  const b = m.partsOf(
+    { parts: [{ label: 'collar', regions: [2], partKey: 'collar' }] },
+    flat,
+    undefined,
+    'back',
+  );
+  const sides = [
+    { view: 'front', parts: f },
+    { view: 'back', parts: b },
+  ];
+  ck(
+    m.partAcross(sides, 'front', 0).length === 2 &&
+      JSON.stringify(m.partAcross(sides, 'front', 0, true)) ===
+        JSON.stringify([{ view: 'front', groups: [0] }]),
+    'QW6 ⇧ = this side only; click = the part on every side',
   );
 }
 

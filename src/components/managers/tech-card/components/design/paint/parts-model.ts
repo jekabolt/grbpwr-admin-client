@@ -288,11 +288,14 @@ export function partAcross(
   sides: readonly { view: string; parts: ViewParts | null }[],
   view: string,
   group: number,
+  /** QW6 · ⇧: this side only. */
+  only = false,
 ): { view: string; groups: number[] }[] {
   const home = sides.find((s) => s.view === view)?.parts;
   const g = home?.groups[group];
   if (!g) return [];
   const out = [{ view, groups: [group] }];
+  if (only) return out;
   for (const s of sides) {
     if (!s.parts) continue;
     const groups: number[] = [];

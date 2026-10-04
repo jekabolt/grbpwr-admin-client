@@ -1,5 +1,8 @@
+import { useQuery } from '@tanstack/react-query';
+import { adminService } from 'api/api';
 import type { GetDesignBandResponse, common_AdminColorwayRef } from 'api/proto-http/admin';
-import { useCallback, useMemo, useRef, useState, type JSX } from 'react';
+import { useDictionary } from 'lib/providers/dictionary-provider';
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import { Section } from 'ui/components/section';
@@ -11,6 +14,7 @@ import { GROUP_SEAM } from '../core';
 import { openStepOf } from '../core/chain';
 import { Workbench } from '../generation/studio';
 import { artworkModelLines, artworksOf } from '../paint/artworks';
+import { garmentOfChart } from '../paint/mockup';
 import { PartsCanvas } from '../paint/parts-canvas';
 import { paintRun } from '../paint/plan-run';
 import { usePaint } from '../paint/use-paint';
@@ -208,6 +212,20 @@ export function RenderStudio({
   );
   const artworkLines = useMemo(() => artworkModelLines(band, artworks), [band, artworks]);
   const paintVersion = paint.getVersion();
+  /* QW2 · the card's size chart (the query the tech pack reads) sets the cloth's scale on the
+     flats: canvas and mockup alike. No chart, or no chest / length — 600 mm across, estimated. */
+  const { dictionary } = useDictionary();
+  const chart = useQuery({
+    queryKey: ['styleSizeChart', techCardId],
+    queryFn: () => adminService.GetStyleSizeChart({ styleId: techCardId }),
+    enabled: techCardId > 0,
+    retry: false,
+  });
+  const garment = useMemo(
+    () => garmentOfChart(chart.data?.chart, dictionary?.measurements),
+    [chart.data, dictionary?.measurements],
+  );
+  useEffect(() => paint.setGarment(garment), [paint, garment]);
   /** The prompt inventory. A modal is its own surface, so it is mounted beside the block. */
   const [inspecting, setInspecting] = useState(false);
 
@@ -374,7 +392,11 @@ export function RenderStudio({
      while preparing is a no-op (a second upload would mint new mockup ids → a new fingerprint →
      a second paid run). */
   const [mocking, setMocking] = useState(false);
+  /* QW4 · the mockups failed at the press: the run did not start, and the bar says so. */
+  const [mockFailed, setMockFailed] = useState('');
   const preparing = useRef(false);
+  const mapsSig = (wire.colourMaps ?? []).map((m) => `${m.view}:${m.mediaId}`).join('|');
+  useEffect(() => setMockFailed(''), [mapsSig, techCardId]);
   const launch = async () => {
     /* O-61 (D-60, D-71): слова карточки, показанные в пустом IN WORDS, становятся СВОИМИ черновику —
        как флэт отдаёт свой засев в форму перед `flush`; правка WORDS флэта после прогона их уже не
@@ -385,8 +407,8 @@ export function RenderStudio({
        нет. */
     const pressed = draft.wordsAtPress();
     /* T13 · each outgoing map takes its cloth mockup (the cloth at its true repeat on that flat),
-       on the run's recipe only — the plan never stores one. Any side that cannot be drawn or
-       uploaded → the run goes WITHOUT mockups: a mockup never blocks GENERATE. */
+       on the run's recipe only — the plan never stores one. QW4: any side that cannot be drawn or
+       uploaded → NO run, `mockup failed · retry` in the lock bar (never a quiet run without). */
     let colourMaps = wire.colourMaps ?? [];
     if (colourMaps.length > 0) {
       const card = techCardId;
@@ -396,14 +418,15 @@ export function RenderStudio({
       setMocking(true);
       try {
         if (!(await paint.flush()) || !paint.sendsAsSaved(colourMaps, rev)) return;
-        const ids = await paint.mockups(colourMaps, wire.fabrics ?? []);
+        const { ids, error } = await paint.mockups(colourMaps, wire.fabrics ?? []);
         // Anything moved meanwhile (another tab saved, the card changed): no run, quietly.
         if (shownCard.current !== card || !paint.sendsAsSaved(colourMaps, rev)) return;
-        const all = colourMaps.every((m) => (ids.get(m.view ?? '') ?? 0) > 0);
-        colourMaps = colourMaps.map((m) => ({
-          ...m,
-          mockupMediaId: all ? ids.get(m.view ?? '') ?? 0 : 0,
-        }));
+        if (error || colourMaps.some((m) => !((ids.get(m.view ?? '') ?? 0) > 0))) {
+          setMockFailed(error || 'mockup failed');
+          return;
+        }
+        setMockFailed('');
+        colourMaps = colourMaps.map((m) => ({ ...m, mockupMediaId: ids.get(m.view ?? '') ?? 0 }));
       } finally {
         paint.setFrozen(false);
         setMocking(false);
@@ -571,6 +594,15 @@ export function RenderStudio({
         {/* ═══ THE RUN DOORS — the prototype's `runDoors`: the LOCKED bar when the gate refuses,
             the last refusal of the server verbatim, then GENERATE · WHAT THE MODEL GETS ▸ · money. */}
         {!gate.ok && <LockBar reason={`locked · ${gate.reason}`}>{lockDoors}</LockBar>}
+        {gate.ok && mockFailed && (
+          <div title={mockFailed} data-mockup-failed=''>
+            <LockBar reason='mockup failed'>
+              <Button variant='secondary' size='xs' onClick={generate} disabled={disabled}>
+                retry
+              </Button>
+            </LockBar>
+          </div>
+        )}
         <RunRefusal refusal={run.refusal} onDismiss={run.dismissRefusal} />
         <GenerateRow
           gate={gate}

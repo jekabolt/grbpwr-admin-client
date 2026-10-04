@@ -157,3 +157,34 @@ export function paintRun({
   };
 }
 
+/**
+ * QW1 · the REMAINDER as the run will lay it (`paintRun`'s rule): the first pack cloth none of
+ * whose slots is painted — its asset and the label of its first slot (the canvas's skin of it).
+ * `painted` = the labels on the sides now. Nothing painted, or every cloth painted: null.
+ */
+export function remainderCloth({
+  band,
+  slots,
+  colorwayId,
+  painted,
+}: {
+  band: GetDesignBandResponse;
+  slots: readonly ClothSlot[] | undefined;
+  colorwayId: number;
+  painted: ReadonlySet<string>;
+}): { assetId: number; label: string } | null {
+  if (painted.size === 0) return null;
+  const list = (slots ?? []).filter((s) => s.bomItemId > 0);
+  const labelOf = slotLabels(list.map((s) => s.bomItemId));
+  const byAsset = new Map<number, ClothSlot[]>();
+  for (const { slot, asset } of bindingsOf(band, colorwayId, list)) {
+    const id = asset.id ?? 0;
+    if (id > 0) byAsset.set(id, [...(byAsset.get(id) ?? []), slot]);
+  }
+  for (const c of boundClothsOf(band, colorwayId, list)) {
+    const own = byAsset.get(c.assetId) ?? [];
+    if (own.some((sl) => painted.has(labelOf.get(sl.bomItemId) ?? ''))) continue;
+    return { assetId: c.assetId, label: labelOf.get(own[0]?.bomItemId ?? 0) ?? '' };
+  }
+  return null;
+}

@@ -18,7 +18,7 @@ import type {
 } from 'api/proto-http/admin';
 import { adminService } from 'api/api';
 import { fetchMediaBlob } from 'lib/features/media-blob';
-import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
 import { assetFull, assetThumb } from '../assets/model';
 import {
@@ -68,7 +68,17 @@ import {
   type Gesture,
   type ViewParts,
 } from './parts-model';
-import { MOCKUP_REV, mockupPixels, mockupTilePx, type MockupSkin } from './mockup';
+import {
+  clothTilePx,
+  MOCKUP_REV,
+  mockupPixels,
+  NO_GARMENT,
+  viewScale,
+  type Garment,
+  type MockupSkin,
+  type ViewScale,
+} from './mockup';
+import { remainderCloth } from './plan-run';
 import { analyseFlat, REGIONS_ALGO_REV, type FlatRegions } from './regions';
 
 /** `artwork` (R7): the armed artwork is placed on the flats as a box; the paint stays as is. */
@@ -107,15 +117,18 @@ export type PaintMaterial = {
   url: string;
   /** The colour (colour label) or ''. */
   colourHex: string;
+  /** The cloth's repeat in mm (0 = a swatch picture). */
+  repeatMm: number;
 };
 
 export type PaintSaveState = 'idle' | 'pending' | 'saving' | 'unsaved' | 'error';
 
-/** A material's look on the canvas: a small RGBA tile, or a flat colour. */
-export type PaintSkin = { tile: ImageData | null; hex: string };
+/** A material's look on the canvas: its picture (aspect kept) laid at its repeat, or a colour. */
+export type PaintSkin = { tile: ImageData | null; hex: string; repeatMm?: number };
 
 const DEBOUNCE_MS = 1200;
-const TILE = 128;
+/** The canvas's copy of a cloth picture: its long side, px (the mockup reads it at 1024). */
+const TILE = 256;
 
 async function pixelsOf(url: string, w?: number, h?: number): Promise<ImageData> {
   const blob = await fetchMediaBlob(url);
@@ -179,24 +192,21 @@ async function clothPixels(url: string): Promise<ImageData> {
   return ctx.getImageData(0, 0, w, h);
 }
 
+/** The whole picture, as the mockup lays it (aspect kept, not cropped), long side ≤ TILE. */
 async function tileOf(url: string): Promise<ImageData> {
   const blob = await fetchMediaBlob(url);
   const bmp = await createImageBitmap(blob);
+  const s = Math.min(1, TILE / Math.max(1, bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * s));
+  const h = Math.max(1, Math.round(bmp.height * s));
   const canvas = document.createElement('canvas');
-  canvas.width = TILE;
-  canvas.height = TILE;
+  canvas.width = w;
+  canvas.height = h;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('no 2d context');
-  const s = Math.max(TILE / bmp.width, TILE / bmp.height);
-  ctx.drawImage(
-    bmp,
-    (TILE - bmp.width * s) / 2,
-    (TILE - bmp.height * s) / 2,
-    bmp.width * s,
-    bmp.height * s,
-  );
+  ctx.drawImage(bmp, 0, 0, w, h);
   bmp.close();
-  return ctx.getImageData(0, 0, TILE, TILE);
+  return ctx.getImageData(0, 0, w, h);
 }
 
 function pngOf(rgba: Uint8ClampedArray, w: number, h: number): string {
@@ -250,16 +260,28 @@ export class PaintSession {
   private asked = new Set<string>();
   /** The card-level auto parts asked and refused: one `parts · retry` for the block. */
   partsFailed = '';
+  /** QW5 · the card-level auto parts are being asked right now (`naming…`). */
+  naming = false;
+  /** QW2 · what the card's size chart says of the garment (the scale of every side). */
+  garment: Garment = NO_GARMENT;
+  private scales = new Map<string, { key: string; scale: ViewScale }>();
+  private remainderAt = { key: '', label: '' };
+  private labelSets = new Map<string, { rev: number; set: Set<string> }>();
   /**
    * GENERATE is preparing (flush → mockups → launch): no gesture, no colour change, no undo — the
    * maps and the plan the run is built from must not move underneath it.
    */
   frozen = false;
-  /** The cloth mockups of one exact set of outgoing maps → their media (or none), reused on a
-   *  retry so the same press keeps the same recipe and idempotency key. */
+  /** The cloth mockups of one exact set of outgoing maps → their media, reused on a retry so
+   *  the same press keeps the same recipe and idempotency key. Only a full set is kept. */
   private mockCache = new Map<string, Map<string, number>>();
-  /** The part under the pointer (R17): the same part is tinted on every side. */
-  hovered: { view: string; group: number } | null = null;
+  /** The drawn mockups (PNG data URLs by view) of one signature — the press and the preview. */
+  private mockDrawn = new Map<string, Promise<Map<string, string>>>();
+  /** Uploaded mockups' pictures by media id (WHAT THE MODEL GETS thumbnails). */
+  mockUrls = new Map<number, string>();
+  /** The part under the pointer (R17): the same part is tinted on every side; `only` (⇧, QW6)
+   *  keeps it on this side. */
+  hovered: { view: string; group: number; only: boolean } | null = null;
   /** `paintedPartNames` per side, keyed by what it was read from. */
   private namesCache = new Map<string, { key: string; names: Map<number, string[]> }>();
   /** Sides a part click just painted by name (R9) — lit for a moment. */
@@ -371,6 +393,7 @@ export class PaintSession {
         bomItemId: slot.bomItemId,
         url: assetThumb(asset),
         colourHex: (asset.colourHex ?? '').trim(),
+        repeatMm: asset.repeatMm ?? 0,
       });
     }
     for (const c of this.colours)
@@ -381,8 +404,10 @@ export class PaintSession {
         bomItemId: 0,
         url: '',
         colourHex: c.colourHex,
+        repeatMm: 0,
       });
-    const sig = (m: PaintMaterial[]) => m.map((x) => `${x.label}${x.url}${x.colourHex}`).join('|');
+    const sig = (m: PaintMaterial[]) =>
+      m.map((x) => `${x.label}${x.url}${x.colourHex}${x.repeatMm}`).join('|');
     if (sig(materials) !== sig(this.materials)) {
       this.materials = materials;
       changed = true;
@@ -469,18 +494,14 @@ export class PaintSession {
    * all of them together — one part, one key, across the sides. Sides cut into fewer than 2 or more
    * than 60 regions are not sent. Asked once per set of flats in this session.
    */
-  private suggestCard(again = false) {
-    if (!this.band) return;
+  private suggestCard(again = false, force = false) {
+    if (!this.band || this.naming) return;
     const all = [...this.views.values()];
     if (all.some((v) => v.status === 'loading')) return;
     const sides = all.filter(
-      (v): v is PaintView & { flat: FlatRegions } =>
-        v.status === 'ready' &&
-        !!v.flat &&
-        v.flat.count >= PARTS_REGIONS_MIN &&
-        v.flat.count <= PARTS_REGIONS_MAX,
+      (v): v is PaintView & { flat: FlatRegions } => v.status === 'ready' && this.namable(v),
     );
-    if (sides.length === 0 || sides.every((v) => this.partsFresh(v))) return;
+    if (sides.length === 0 || (!force && sides.every((v) => this.partsFresh(v)))) return;
     const key = `${sides
       .map((v) => `${v.view}:${v.baseMediaId}`)
       .sort()
@@ -488,6 +509,8 @@ export class PaintSession {
     if (this.asked.has(key) && !again) return;
     this.asked.add(key);
     this.partsFailed = '';
+    this.naming = true;
+    this.bump();
     const current = () => sides.every((v) => this.views.get(v.view) === v);
     void (async () => {
       try {
@@ -497,14 +520,14 @@ export class PaintSession {
         );
         // The uploads took a while: a side changed (its own sync asks anew) or the answer came.
         if (!current()) return;
-        if (sides.every((v) => this.partsFresh(v))) {
+        if (!force && sides.every((v) => this.partsFresh(v))) {
           for (const v of sides) this.takeParts(v);
           return;
         }
         const res = await adminService.SuggestDesignPartsCard({
           techCardId: this.techCardId,
           algoRev: REGIONS_ALGO_REV,
-          force: false,
+          force,
           views: sides.map((v, i) => ({
             view: v.view,
             baseMediaId: v.baseMediaId,
@@ -535,9 +558,15 @@ export class PaintSession {
         if (!current()) return;
         this.partsFailed = (e instanceof Error && e.message) || 'the parts were not named';
       } finally {
+        this.naming = false;
         this.bump();
       }
     })();
+  }
+
+  /** QW5 · a side the model can name: cut into 2..60 regions. Others are the pen's only. */
+  namable(v: PaintView): boolean {
+    return !!v.flat && v.flat.count >= PARTS_REGIONS_MIN && v.flat.count <= PARTS_REGIONS_MAX;
   }
 
   /** `parts · retry` (one for the block). */
@@ -548,29 +577,104 @@ export class PaintSession {
     this.suggestCard(true);
   }
 
+  /** QW7 · `rename parts`: the model is asked again for every side, past its cache. */
+  canRename(): boolean {
+    return (
+      !this.naming &&
+      !this.partsFailed &&
+      [...this.views.values()].some((v) => v.status === 'ready' && this.namable(v) && !!v.parts)
+    );
+  }
+  renameParts() {
+    if (!this.canRename()) return;
+    this.suggestCard(true, true);
+  }
+
   /**
-   * The part under the pointer moved (R17); -1 / null = none. Other sides tint the same part.
+   * The part under the pointer moved (R17); -1 / null = none. Other sides tint the same part,
+   * unless `only` (⇧, QW6).
    */
-  setHover(view: string | null, group = -1) {
-    const next = view && group >= 0 ? { view, group } : null;
+  setHover(view: string | null, group = -1, only = false) {
+    const next = view && group >= 0 ? { view, group, only } : null;
     const was = this.hovered;
-    if (was?.view === next?.view && was?.group === next?.group) return;
+    if (was?.view === next?.view && was?.group === next?.group && was?.only === next?.only) return;
     this.hovered = next;
     this.bump();
   }
 
+  /* ─────────────────────────── QW1 · QW2 · the cloth as the run lays it ─────────────────────────── */
+
+  /** The card's size chart read (QW2): every side's scale follows it. */
+  setGarment(g: Garment) {
+    if (g.chestMm === this.garment.chestMm && g.lengthMm === this.garment.lengthMm) return;
+    this.garment = g;
+    for (const v of this.views.values()) v.rev += 1;
+    this.bump();
+  }
+
+  /** mm per px of one side (cached per flat and garment). */
+  scaleOf(v: PaintView): ViewScale | null {
+    if (!v.flat) return null;
+    const key = `${v.baseMediaId}|${this.garment.chestMm}|${this.garment.lengthMm}`;
+    const hit = this.scales.get(v.view);
+    if (hit?.key === key) return hit.scale;
+    const scale = viewScale(v.view, v.flat, this.garment);
+    this.scales.set(v.view, { key, scale });
+    return scale;
+  }
+
+  /** A material's tile width on a side, px (the mockup's own rule). */
+  tilePx(label: string, v: PaintView): number {
+    const scale = this.scaleOf(v);
+    return clothTilePx(this.skins.get(label)?.repeatMm ?? 0, scale?.mmPerPx ?? 1);
+  }
+
+  private labelsOn(v: PaintView): Set<string> {
+    if (!v.labels) return new Set();
+    const hit = this.labelSets.get(v.view);
+    if (hit?.rev === v.rev) return hit.set;
+    const set = this.labelsIn(v.labels);
+    this.labelSets.set(v.view, { rev: v.rev, set });
+    return set;
+  }
+
+  /**
+   * QW1 · the label whose cloth fills the unpainted garment — the REMAINDER the run sends — or
+   * '' (nothing painted, or every cloth painted).
+   */
+  remainder(): string {
+    if (!this.band) return '';
+    const painted = new Set<string>();
+    const revs: string[] = [];
+    for (const v of this.views.values()) {
+      if (v.status !== 'ready') continue;
+      revs.push(`${v.view}:${v.rev}`);
+      for (const hex of this.labelsOn(v)) painted.add(hex);
+    }
+    const key = `${revs.join(',')}|${this.lastColorway}|${this.materials.map((m) => m.label).join(',')}`;
+    if (this.remainderAt.key === key) return this.remainderAt.label;
+    const r = remainderCloth({
+      band: this.band,
+      slots: this.lastSlots,
+      colorwayId: this.lastColorway,
+      painted,
+    });
+    this.remainderAt = { key, label: r?.label ?? '' };
+    return this.remainderAt.label;
+  }
+
   /** The same part on every side with parts (R17), the given group first. */
-  private across(view: string, group: number) {
+  private across(view: string, group: number, only = false) {
     const sides = [...this.views.values()]
       .filter((v) => v.status === 'ready' && !!v.flat && !!v.labels)
       .map((v) => ({ view: v.view, parts: v.parts }));
-    return partAcross(sides, view, group);
+    return partAcross(sides, view, group, only);
   }
 
   /** The groups on `view` that are the part hovered on ANOTHER side, and its name. */
   echoOf(view: string): { groups: number[]; label: string } | null {
     const h = this.hovered;
-    if (!h || h.view === view) return null;
+    if (!h || h.view === view || h.only) return null;
     const hit = this.across(h.view, h.group).find((x) => x.view === view);
     const v = this.views.get(view);
     if (!hit || !v?.parts) return null;
@@ -578,18 +682,22 @@ export class PaintSession {
   }
 
   private loadSkin(m: PaintMaterial) {
-    const key = `${m.label}|${m.url}|${m.colourHex}`;
+    const key = `${m.label}|${m.url}|${m.colourHex}|${m.repeatMm}`;
     if (m.kind === 'colour' || !m.url) {
       this.skins.set(m.label, { tile: null, hex: m.colourHex || m.label });
       return;
     }
     if (this.skinLoading.has(key)) return;
     this.skinLoading.add(key);
-    if (!this.skins.has(m.label))
-      this.skins.set(m.label, { tile: null, hex: m.colourHex || '#dddddd' });
+    const had = this.skins.get(m.label);
+    this.skins.set(m.label, {
+      tile: had?.tile ?? null,
+      hex: m.colourHex || '#dddddd',
+      repeatMm: m.repeatMm,
+    });
     tileOf(m.url)
       .then((tile) => {
-        this.skins.set(m.label, { tile, hex: m.colourHex || '#dddddd' });
+        this.skins.set(m.label, { tile, hex: m.colourHex || '#dddddd', repeatMm: m.repeatMm });
         for (const v of this.views.values()) v.rev += 1;
         this.bump();
       })
@@ -691,7 +799,7 @@ export class PaintSession {
     this.dirtyColours.add(label);
     this.materials = [
       ...this.materials,
-      { label, kind: 'colour', name: colourHex, bomItemId: 0, url: '', colourHex },
+      { label, kind: 'colour', name: colourHex, bomItemId: 0, url: '', colourHex, repeatMm: 0 },
     ];
     this.skins.set(label, { tile: null, hex: colourHex });
     this.armed = label;
@@ -734,11 +842,11 @@ export class PaintSession {
    * name on older answers — on every other side that has parts, one gesture (one undo). The other
    * sides painted light up a moment.
    */
-  paintPart(view: string, group: number, at: { x: number; y: number }) {
+  paintPart(view: string, group: number, at: { x: number; y: number }, only = false) {
     const v = this.views.get(view);
     if (!v?.parts || !v.flat || !v.labels) return;
     const targets: { view: string; idx: Int32Array }[] = [];
-    for (const hit of this.across(view, group)) {
+    for (const hit of this.across(view, group, only)) {
       const o = this.views.get(hit.view);
       if (!o?.parts || !o.flat || !o.labels) continue;
       const { flat, labels, parts } = o;
@@ -995,48 +1103,84 @@ export class PaintSession {
     });
   }
 
-  /**
-   * At GENERATE (frozen, after the save settled): one cloth mockup per outgoing map
-   * (`mockup.ts`), each label filled with the cloth its fabric use names (the asset's picture at
-   * its true repeat, or the free colour), uploaded. View → media id; EMPTY when any side cannot be
-   * drawn exactly as its map or any upload fails — the run then goes WITHOUT mockups. The answer
-   * is kept per canonical signature (map media, flats, per-label cloth + repeat, algo): the same
-   * press again reuses it — the same ids, the same recipe, the same idempotency key.
-   */
-  async mockups(
+  /** The signature of the mockups of these maps with these uses (cloths, repeats, scales). */
+  private mockSig(
     maps: readonly common_DesignColourMap[],
     uses: readonly common_DesignFabricUse[],
-  ): Promise<Map<string, number>> {
-    const band = this.band;
-    if (!band) return new Map();
-    const assets = new Map((band.assets ?? []).map((a) => [a.id ?? 0, a]));
+  ): string {
+    const assets = new Map((this.band?.assets ?? []).map((a) => [a.id ?? 0, a]));
+    const look = (u: common_DesignFabricUse | undefined) => {
+      const a = (u?.assetId ?? 0) > 0 ? assets.get(u?.assetId ?? 0) : undefined;
+      return [
+        u?.assetId ?? 0,
+        a?.mediaId ?? 0,
+        u?.colourHex ?? '',
+        u?.repeatMm || a?.repeatMm || 0,
+      ];
+    };
     const useOf = (hex: string) => uses.find((u) => (u.mapHex ?? '').toLowerCase() === hex);
-    const sig = JSON.stringify([
+    return JSON.stringify([
       MOCKUP_REV,
       REGIONS_ALGO_REV,
-      maps.map((m) => [
-        m.view,
-        m.mediaId,
-        m.baseMediaId,
-        (m.palette ?? []).map((sw) => {
-          const hex = (sw.hex ?? '').toLowerCase();
-          const u = useOf(hex);
-          const a = (u?.assetId ?? 0) > 0 ? assets.get(u?.assetId ?? 0) : undefined;
-          return [
-            hex,
-            u?.assetId ?? 0,
-            a?.mediaId ?? 0,
-            u?.colourHex ?? '',
-            u?.repeatMm || a?.repeatMm || 0,
-          ];
-        }),
-      ]),
+      look(uses.find((u) => !(u.mapHex ?? '').trim() && (u.assetId ?? 0) > 0)),
+      maps.map((m) => {
+        const v = this.views.get(m.view ?? '');
+        return [
+          m.view,
+          m.mediaId,
+          m.baseMediaId,
+          v ? this.scaleOf(v)?.mmPerPx ?? 0 : 0,
+          (m.palette ?? []).map((sw) => {
+            const hex = (sw.hex ?? '').toLowerCase();
+            return [hex, ...look(useOf(hex))];
+          }),
+        ];
+      }),
     ]);
-    const hit = this.mockCache.get(sig);
+  }
+
+  /**
+   * Draw one cloth mockup per map (`mockup.ts`): each label filled with the cloth its fabric use
+   * names (the asset's picture at its true repeat on that side's scale, or the free colour), the
+   * unpainted garment with the REMAINDER (the use without a mapHex, QW1). PNG data URLs by view;
+   * rejects when a side is not drawn exactly as its map. Kept per signature (the press and the
+   * WHAT THE MODEL GETS preview share one drawing).
+   */
+  private drawMockups(
+    maps: readonly common_DesignColourMap[],
+    uses: readonly common_DesignFabricUse[],
+    sig: string,
+  ): Promise<Map<string, string>> {
+    const hit = this.mockDrawn.get(sig);
     if (hit) return hit;
-    const out = new Map<string, number>();
-    try {
-      const pictures = new Map<string, Promise<ImageData>>();
+    const band = this.band;
+    const assets = new Map((band?.assets ?? []).map((a) => [a.id ?? 0, a]));
+    const pictures = new Map<string, Promise<ImageData>>();
+    const skinOf = async (use: common_DesignFabricUse, mmPerPx: number) => {
+      const asset = (use.assetId ?? 0) > 0 ? assets.get(use.assetId ?? 0) : undefined;
+      const url = asset ? assetFull(asset) : '';
+      if (url) {
+        let pic = pictures.get(url);
+        if (!pic) {
+          pic = clothPixels(url);
+          pictures.set(url, pic);
+        }
+        const img = await pic;
+        return {
+          kind: 'tile',
+          rgba: img.data,
+          w: img.width,
+          h: img.height,
+          tilePx: clothTilePx(use.repeatMm || asset?.repeatMm || 0, mmPerPx),
+        } as MockupSkin;
+      }
+      const c = (use.colourHex ?? '').trim();
+      return c ? ({ kind: 'colour', hex: c } as MockupSkin) : null;
+    };
+    const rest = uses.find((u) => !(u.mapHex ?? '').trim() && (u.assetId ?? 0) > 0);
+    const job = (async () => {
+      if (!band) throw new Error('no band');
+      const out = new Map<string, string>();
       for (const m of maps) {
         const view = m.view ?? '';
         const v = this.views.get(view);
@@ -1048,43 +1192,73 @@ export class PaintSession {
         const flat = v.flat;
         const labels = v.labels.slice();
         const pixels = v.pixels.data.slice();
+        const mmPerPx = this.scaleOf(v)?.mmPerPx ?? 1;
         const skins = new Map<number, MockupSkin>();
         for (const sw of m.palette ?? []) {
           const hex = (sw.hex ?? '').toLowerCase();
-          const use = useOf(hex);
-          if (!use) continue;
-          const asset = (use.assetId ?? 0) > 0 ? assets.get(use.assetId ?? 0) : undefined;
-          const url = asset ? assetFull(asset) : '';
-          if (url) {
-            let pic = pictures.get(url);
-            if (!pic) {
-              pic = clothPixels(url);
-              pictures.set(url, pic);
-            }
-            const img = await pic;
-            skins.set(packHex(hex), {
-              kind: 'tile',
-              rgba: img.data,
-              w: img.width,
-              h: img.height,
-              tilePx: mockupTilePx(use.repeatMm || asset?.repeatMm || 0, flat.w),
-            });
-          } else {
-            const c = (use.colourHex ?? '').trim();
-            if (c) skins.set(packHex(hex), { kind: 'colour', hex: c });
-          }
+          const use = uses.find((u) => (u.mapHex ?? '').toLowerCase() === hex);
+          const skin = use ? await skinOf(use, mmPerPx) : null;
+          if (skin) skins.set(packHex(hex), skin);
         }
-        const rgba = mockupPixels(flat, labels, pixels, skins);
-        const media = await uploadRaster(pngOf(rgba, flat.w, flat.h));
+        const remainder = rest ? await skinOf(rest, mmPerPx) : null;
+        const rgba = mockupPixels(flat, labels, pixels, skins, remainder);
+        out.set(view, pngOf(rgba, flat.w, flat.h));
+      }
+      return out;
+    })();
+    this.mockDrawn.set(sig, job);
+    // A failed drawing is not kept: the next press draws again.
+    job.catch(() => {
+      if (this.mockDrawn.get(sig) === job) this.mockDrawn.delete(sig);
+    });
+    return job;
+  }
+
+  /** QW10 · the mockups these maps would take, drawn (not uploaded) — view → PNG data URL. */
+  async mockupPreviews(
+    maps: readonly common_DesignColourMap[],
+    uses: readonly common_DesignFabricUse[],
+  ): Promise<Map<string, string>> {
+    try {
+      return await this.drawMockups(maps, uses, this.mockSig(maps, uses));
+    } catch {
+      return new Map();
+    }
+  }
+
+  /**
+   * At GENERATE (frozen, after the save settled): one cloth mockup per outgoing map, drawn and
+   * uploaded. View → media id, all of them, or `error` (QW4: the run then does not start — no
+   * quiet run without mockups). A full answer is kept per canonical signature (map media, flats,
+   * scales, per-label cloth + repeat, the remainder, algo): the same press again reuses it — the
+   * same ids, the same recipe, the same idempotency key. A failure is never kept.
+   */
+  async mockups(
+    maps: readonly common_DesignColourMap[],
+    uses: readonly common_DesignFabricUse[],
+  ): Promise<{ ids: Map<string, number>; error: string }> {
+    const sig = this.mockSig(maps, uses);
+    const hit = this.mockCache.get(sig);
+    if (hit) return { ids: hit, error: '' };
+    try {
+      const drawn = await this.drawMockups(maps, uses, sig);
+      const ids = new Map<string, number>();
+      for (const m of maps) {
+        const view = m.view ?? '';
+        const png = drawn.get(view);
+        if (!png) throw new Error(`${view} has no mockup`);
+        const media = await uploadRaster(png);
         const id = media.id ?? 0;
         if (id <= 0) throw new Error('the mockup did not upload');
-        out.set(view, id);
+        ids.set(view, id);
+        const url = media.media?.thumbnail?.mediaUrl || media.media?.fullSize?.mediaUrl || png;
+        this.mockUrls.set(id, url);
       }
-    } catch {
-      out.clear();
+      this.mockCache.set(sig, ids);
+      return { ids, error: '' };
+    } catch (e) {
+      return { ids: new Map(), error: (e instanceof Error && e.message) || 'mockup failed' };
     }
-    this.mockCache.set(sig, out);
-    return out;
   }
 
   /** Dirty views whose saved map was replaced by somebody else since our pixels were based on it. */
@@ -1278,4 +1452,44 @@ export function usePaint(
   }, [session, band, slots, colorwayId]);
   useSyncExternalStore(session.subscribe, session.getVersion, session.getVersion);
   return session;
+}
+
+/**
+ * QW10 · per outgoing map: its picture, the mockup it takes (uploaded, else drawn here — the very
+ * drawing the press uploads; only while `open`), and the scale when it is a guess.
+ */
+export function useMapLooks(
+  session: PaintSession,
+  maps: readonly common_DesignColourMap[] | undefined,
+  uses: readonly common_DesignFabricUse[] | undefined,
+  open: boolean,
+): Map<string, { map: string; mockup: string; scale: string }> {
+  const [drawn, setDrawn] = useState<Map<string, string>>(() => new Map());
+  useEffect(() => {
+    if (!open || !maps || maps.length === 0) return;
+    let live = true;
+    void session.mockupPreviews(maps, uses ?? []).then((m) => {
+      if (live) setDrawn(m);
+    });
+    return () => {
+      live = false;
+    };
+  }, [open, maps, uses, session]);
+  const version = session.getVersion();
+  return useMemo(() => {
+    const out = new Map<string, { map: string; mockup: string; scale: string }>();
+    const plan = session.plan();
+    for (const m of maps ?? []) {
+      const view = m.view ?? '';
+      const v = session.views.get(view);
+      const scale = v ? session.scaleOf(v) : null;
+      out.set(view, {
+        map: plan?.maps.find((x) => x.mediaId === m.mediaId)?.url ?? '',
+        mockup: session.mockUrls.get(m.mockupMediaId ?? 0) ?? drawn.get(view) ?? '',
+        scale: scale?.estimated ? `scale ≈ ${scale.acrossMm} mm (est.)` : '',
+      });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, maps, version, drawn]);
 }

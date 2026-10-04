@@ -4,3 +4,7 @@ export { analyseFlat } from 'components/managers/tech-card/components/design/pai
 export { decode as decodePng } from 'fast-png';
 export * from 'components/managers/tech-card/components/design/paint/parts-model';
 export * from 'components/managers/tech-card/components/design/paint/mockup';
+export {
+  paintRun,
+  remainderCloth,
+} from 'components/managers/tech-card/components/design/paint/plan-run';
