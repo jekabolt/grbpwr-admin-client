@@ -18,7 +18,7 @@ import {
   type ShapePoint,
   type SurfaceCallout,
 } from './annotation/surface';
-import { AnnotationToolbar, toolHint } from './annotation/toolbar';
+import { AnnotationToolbar } from './annotation/toolbar';
 import { AnnotationZoomDialog } from './annotation/zoom-dialog';
 import { Button } from './button';
 import { Chip, ChipRow } from './chip';
@@ -536,7 +536,6 @@ export function FocusedAnnotator({
     onAddingChange?.(key);
   };
   const [focusEditor, setFocusEditor] = useState(0);
-  const [placed, setPlaced] = useState(0);
   /** Индекс кадра, открытого во весь экран. */
   const [zoomIndex, setZoomIndex] = useState<number | null>(null);
   const [focusedId, setFocusedId] = useState<number | null>(null);
@@ -668,13 +667,6 @@ export function FocusedAnnotator({
           onTool={setTool}
           kinds={calloutKinds}
           purposes={calloutPurposes}
-          hint={
-            tool
-              ? placed > 0
-                ? toolHint(tool, placed)
-                : 'click on the picture you need'
-              : undefined
-          }
         />
       )}
     </ChipRow>
@@ -766,11 +758,9 @@ export function FocusedAnnotator({
     ? 'taking the picture from the clipboard…'
     : intake.dragging
       ? 'drop the file — the crop will open'
-      : tool
-        ? toolHint(tool, placed)
-        : pinText === 'hover'
-          ? ''
-          : 'the callout text is read in the legend under the frame · ⌘V pastes a picture';
+      : pinText === 'hover'
+        ? ''
+        : 'the callout text is read in the legend under the frame · ⌘V pastes a picture';
 
   // The focused layout's add-media control. Rendered OUTSIDE the hasMedia branch (below), because
   // with zero views it is the ONLY way to get a first image and its callers (the fitting form) have
@@ -957,7 +947,6 @@ export function FocusedAnnotator({
                     frozen={readOnly}
                     tool={tool}
                     onToolDone={() => setTool(null)}
-                    onPlacedCountChange={setPlaced}
                     // The full 240px note now fits over a 300px tile, so it no longer needs trimming.
                     // каждый приходится перекрашивать поштучно в списке выносок — то есть панель
                     // без цвета оправдана памятью пера, которой бы не было.
@@ -1119,7 +1108,6 @@ export function FocusedAnnotator({
                 frozen={readOnly}
                 tool={tool}
                 onToolDone={() => setTool(null)}
-                onPlacedCountChange={setPlaced}
                 onAdd={(kind, points, pen, armed) =>
                   onAddCallout(focused.mediaId, kind, points, pen, armed)
                 }

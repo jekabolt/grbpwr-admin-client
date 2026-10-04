@@ -4,7 +4,7 @@ import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { cn } from 'lib/utility';
 import { useState, type ReactNode } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { AnnotationToolbar, placingHint } from 'ui/components/annotation/toolbar';
+import { AnnotationToolbar } from 'ui/components/annotation/toolbar';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
@@ -94,14 +94,6 @@ export function OperationMediaStrip({
   // Вид, выбранный на ВСЮ полосу. Сбрасывается, как только фигура поставлена: постановка — жест с
   // концом, а залипший режим ставит вторую мерку следующим кликом по снимку, которого не просили.
   const [placingKind, setPlacingKind] = useState<string | null>(null);
-  // Сколько якорей набрано на ТОМ кадре, где идёт жест. Подсказку рисует общая панель — она одна,
-  // а кадров десять, и повторить её под каждым значило бы превратить полосу в столбик одинаковых
-  // строк. Кадры, где жеста нет, шлют ноль, поэтому максимум и есть «сколько набрано».
-  //
-  // КЛЮЧ — САМА ФОТОГРАФИЯ, а не позиция в полосе. По позиции запись переживала бы и удаление
-  // кадра (оставаясь навсегда), и перестановку стрелками — и тогда подсказка показывала бы
-  // «поставлено 2» от жеста, которого на этом снимке никто не начинал.
-  const [placedByMedia, setPlacedByMedia] = useState<Record<number, number>>({});
 
   // `wireInt` ВНУТРИ, а не на совести вызывающего. Оба словаря ключуются нормализованным id, а
   // тип поля обещает `number` — сырое значение с провода (int64 приезжает СТРОКОЙ) тайпчекается и
@@ -154,8 +146,6 @@ export function OperationMediaStrip({
 
   const list = (watched ?? []) as OperationMediaForm[];
   const full = fields.length >= MAX_MEDIA_PER_STEP;
-  // Считается ТОЛЬКО по живым кадрам: запись снятого снимка иначе жила бы в словаре вечно.
-  const placed = list.reduce((m, f) => Math.max(m, placedByMedia[wireInt(f.mediaId)] ?? 0), 0);
 
   const setAnnotations = (index: number, next: AnnotationForm[]) => {
     setValue(`${name}.${index}.annotations`, next, { shouldDirty: true });
@@ -174,13 +164,6 @@ export function OperationMediaStrip({
           <AnnotationToolbar
             tool={placingKind}
             onTool={setPlacingKind}
-            hint={
-              placingKind
-                ? placed > 0
-                  ? placingHint(placingKind, placed)
-                  : 'click the shot you need'
-                : undefined
-            }
           />
         )}
         {(intake.busy || intake.dragging) && (
@@ -233,13 +216,6 @@ export function OperationMediaStrip({
                       heightPx={STRIP_HEIGHT}
                       placingKind={placingKind}
                       onPlaced={() => setPlacingKind(null)}
-                      onPlacedCountChange={(n) =>
-                        setPlacedByMedia((prev) =>
-                          prev[wireInt(current.mediaId)] === n
-                            ? prev
-                            : { ...prev, [wireInt(current.mediaId)]: n },
-                        )
-                      }
                       annotations={(current.annotations ?? []) as AnnotationForm[]}
                       frozen={frozen}
                       renderPiecePicker={renderPiecePicker}

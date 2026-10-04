@@ -33,7 +33,7 @@ import {
 } from 'ui/components/annotation/surface';
 import { PALETTE_KINDS } from 'ui/components/annotation/kinds';
 import { parseSpec, placePurpose, sectionLetter } from 'ui/components/annotation/purpose';
-import { AnnotationToolbar, toolHint } from 'ui/components/annotation/toolbar';
+import { AnnotationToolbar } from 'ui/components/annotation/toolbar';
 import { AnnotationZoomDialog } from 'ui/components/annotation/zoom-dialog';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -1503,8 +1503,6 @@ export function ArtifactsPanel({
    * внутри поверхности: мерка, начатая на переде и достроенная на спинке, — не мерка.
    */
   const [tool, setTool] = useState<string | null>(DEFAULT_TOOL);
-  /** Сколько якорей набрано в незавершённом жесте — подсказку рисует панель, а она снаружи. */
-  const [placed, setPlaced] = useState(0);
   /**
    * ВЫНОСКА ПОД КУРСОРОМ В СПИСКЕ CALLOUTS (C-2) — индекс строки формы, как и `selected`. Плита
    * подсвечивает её накладкой; хранится здесь, потому что список и плита — соседи, и общий у них
@@ -2212,7 +2210,6 @@ export function ArtifactsPanel({
          взведённым видом, и «поставил линию — рука пуста» вернуло бы снятый порядок
          «сначала взведи». */
       onToolDone={() => setTool(DEFAULT_TOOL)}
-      onPlacedCountChange={setPlaced}
       onAddCallout={addCalloutOn}
       bindings={surfaceBindings}
       onZoom={setZoomAt}
@@ -2360,12 +2357,8 @@ export function ArtifactsPanel({
             <Toolbar className={GROUP_GAP}>
               <AnnotationToolbar
                 purposes
-                cancelable={tool !== DEFAULT_TOOL}
                 tool={tool}
                 onTool={setTool}
-                hint={
-                  tool && (placed > 0 || tool !== DEFAULT_TOOL) ? toolHint(tool, placed) : undefined
-                }
               />
             </Toolbar>
           )}
@@ -2937,7 +2930,6 @@ export function PlateGrid({
   canPlaceOn,
   tool,
   onToolDone,
-  onPlacedCountChange,
   onAddCallout,
   bindings,
   onZoom,
@@ -2978,7 +2970,6 @@ export function PlateGrid({
   canPlaceOn: (plate: DocumentPlate) => boolean;
   tool: string | null;
   onToolDone: () => void;
-  onPlacedCountChange: (n: number) => void;
   onAddCallout: (
     mediaId: number,
     kind: string,
@@ -3266,7 +3257,6 @@ export function PlateGrid({
                 frozen={!drawable}
                 tool={drawable ? tool : null}
                 onToolDone={onToolDone}
-                onPlacedCountChange={drawable ? onPlacedCountChange : undefined}
                 onAdd={
                   drawable
                     ? (shape, points, pen, armed) =>

@@ -5,7 +5,7 @@ import { ViewerAction } from 'ui/components/media-viewer';
 import Text from 'ui/components/text';
 
 import { AnnotationSurface, type AnnotationSurfaceProps } from './surface';
-import { AnnotationToolbar, toolHint } from './toolbar';
+import { AnnotationToolbar } from './toolbar';
 
 // УВЕЛИЧЕННЫЙ ВИД — ТА ЖЕ ПОВЕРХНОСТЬ, А НЕ СМОТРЕЛКА.
 //
@@ -72,7 +72,6 @@ export function AnnotationZoomDialog({
   // работать. Смотреть сам снимок, не разбирая линий поверх него, нужно ровно тогда, когда
   // карточка уже подписана и правки нет.
   const [showCallouts, setShowCallouts] = useState(true);
-  const [placed, setPlaced] = useState(0);
   const editable = !surface.frozen && !!surface.onAdd;
   const navigable = !!onPrev || !!onNext;
 
@@ -92,7 +91,6 @@ export function AnnotationZoomDialog({
     if (shownSrc.current === surface.src) return;
     shownSrc.current = surface.src;
     setTool(null);
-    setPlaced(0);
     // Выбор бывает и у владельца (лист эскиза): собственный сбрасывается пересозданием
     // поверхности ниже, чужой — только так.
     onSelect?.(null);
@@ -214,7 +212,6 @@ export function AnnotationZoomDialog({
               onToolDone={() => setTool(null)}
               hideCallouts={!showCallouts}
               maxCallouts={maxCallouts}
-              onPlacedCountChange={setPlaced}
               // КАРТИНКА ЗАНИМАЕТ ВСЁ МЕСТО, какое есть, и упирается в ту сторону, которая
               // кончится раньше: рамки и потолка высоты у неё здесь нет. Кадр берёт СОБСТВЕННЫЕ
               // пропорции снимка, поэтому совпадает с ним пиксель в пиксель — а он и есть система
@@ -250,7 +247,6 @@ export function AnnotationZoomDialog({
                 kinds={toolKinds}
                 purposes={purposes}
                 remaining={maxCallouts != null ? maxCallouts - surface.callouts.length : undefined}
-                hint={tool ? toolHint(tool, placed) : undefined}
               />
             )}
             {!editable && readOnlyNote && (

@@ -946,6 +946,38 @@ await run('12 keyz', async () => {
   await ctx.close();
 });
 
+// ── 13. T20: взведённая панель молчит — ни подсказки постановки, ни «cancel» ────────────────────
+// Владелец: «"click on the picture you need / CANCEL / click a point on the picture" этот текст не
+// должен появлятся». Взвод снимается повторным нажатием чипа и Esc.
+await run('13 armed toolbar quiet', async () => {
+  const { ctx, page } = await fresh(browser);
+  const row = async () =>
+    page.$eval('[data-tool="dim"]', (el) => {
+      const r = el.parentElement;
+      return { text: r.textContent, kids: r.children.length, cancel: [...r.querySelectorAll('*')].some((n) => n.textContent.trim().toLowerCase() === 'cancel') };
+    });
+  const idle = await row();
+  await page.click('[data-tool="dim"]');
+  const armed = await row();
+  check('13a взведено: в ряду ни подсказки, ни «cancel», ни лишнего узла', armed.text === idle.text && armed.kids === idle.kids && !armed.cancel, JSON.stringify({ idle, armed }));
+  // Одна точка мерки — набранный жест: раньше здесь появлялось «… 1 placed».
+  const frame = await page.$('[aria-label="probe images"] [data-annot-frame]');
+  const r = await frame.boundingBox();
+  await page.mouse.click(r.x + r.width * 0.15, r.y + r.height * 0.85);
+  await page.waitForTimeout(60);
+  const mid = await row();
+  const body = await page.evaluate(() => document.body.innerText);
+  check('13b с набранной точкой подсказки тоже нет', mid.text === idle.text && !/placed|Shift holds|click a point|click on the picture/i.test(body), body.match(/.*(placed|Shift holds|click a point|click on the picture).*/i)?.[0] ?? mid.text);
+  await page.keyboard.press('Escape'); // точки
+  await page.keyboard.press('Escape'); // инструмент
+  await page.waitForTimeout(60);
+  check('13c Esc снимает взвод', (await page.getAttribute('[data-tool="dim"]', 'aria-pressed')) !== 'true');
+  await page.click('[data-tool="dim"]');
+  await page.click('[data-tool="dim"]');
+  check('13d повторное нажатие чипа снимает взвод', (await page.getAttribute('[data-tool="dim"]', 'aria-pressed')) !== 'true');
+  await ctx.close();
+});
+
 await browser.close();
 
 console.log(results.join('\n'));
