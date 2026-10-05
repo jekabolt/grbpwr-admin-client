@@ -36,6 +36,10 @@ function glassDoor(g: GlassProps | undefined, title: string) {
     onPointerEnter: () => g.onHover(true),
     onPointerLeave: () => g.onHover(false),
     onPointerDown: g.onPointerDown,
+    // Фокус мышью не рисует умолчательное кольцо Chrome (тот же приём, что у плашки: R33/T26).
+    onPointerDownCapture: (e: ReactPointerEvent<HTMLElement>) =>
+      e.currentTarget.setAttribute('data-pointer-focus', ''),
+    onBlur: (e: React.FocusEvent<HTMLElement>) => e.currentTarget.removeAttribute('data-pointer-focus'),
     onClick: (e: React.MouseEvent) => {
       e.stopPropagation();
       g.onPress();
@@ -51,6 +55,7 @@ function glassDoor(g: GlassProps | undefined, title: string) {
 const glassFrame = (g: GlassProps | undefined) =>
   cn(
     'absolute block border border-textColor bg-bgColor text-left text-textColor',
+    'outline-none [&:focus-visible:not([data-pointer-focus])]:outline-solid [&:focus-visible:not([data-pointer-focus])]:outline-1 [&:focus-visible:not([data-pointer-focus])]:outline-textColor',
     g ? 'cursor-pointer' : 'pointer-events-none',
     // R43: выбранная вставка дышит ореолом (::after), рамка та же.
     g?.selected && 'callout-breathe-box',
