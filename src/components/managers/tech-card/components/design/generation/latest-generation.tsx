@@ -548,9 +548,10 @@ export function LatestGeneration({
      candidates stand side by side, each with `pick`. */
   const benchDrawn = useMemo(() => {
     if (!drawnPlan || !candidates?.picked) return drawnPlan;
+    const family = new Set(candidates.family);
     return {
       ...drawnPlan,
-      cards: drawnPlan.cards.filter((c) => (c.picture.id ?? 0) === candidates.picked),
+      cards: drawnPlan.cards.filter((c) => family.has(c.picture.id ?? 0)),
     };
   }, [drawnPlan, candidates]);
   const plan = useMemo(() => (benchDrawn ? piecesInPlace(benchDrawn) : null), [benchDrawn]);

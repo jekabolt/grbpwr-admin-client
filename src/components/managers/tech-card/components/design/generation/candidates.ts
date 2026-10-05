@@ -22,7 +22,35 @@ export type FlatCandidates = {
   picked: number;
   /** The pick is a cut sheet (server truth): it cannot be changed here. */
   cut: boolean;
+  /** The bench cards of the picked candidate's family (its edits, its «save as new» siblings) —
+   *  what stays on the bench once a pick is made. Empty when nothing is picked. */
+  family: number[];
 };
+
+/**
+ * THE CANDIDATE A PICTURE GREW FROM: back along `replacedBy` (an edit that took its place) and
+ * `derivedFrom` (a «save as new» of it) while the parent is in the same run. Bounded by `seen`.
+ */
+function originsOf(pictures: readonly common_DesignPicture[]): (id: number) => number {
+  const byId = new Map<number, common_DesignPicture>();
+  for (const p of pictures) if ((p.id ?? 0) > 0 && !byId.has(p.id ?? 0)) byId.set(p.id ?? 0, p);
+  const prevOf = new Map<number, number>();
+  for (const p of pictures) {
+    const next = p.replacedBy ?? 0;
+    if (next > 0 && next !== p.id && byId.has(next) && !prevOf.has(next))
+      prevOf.set(next, p.id ?? 0);
+  }
+  return (id: number) => {
+    let cur = id;
+    const seen = new Set<number>([cur]);
+    for (;;) {
+      const back = prevOf.get(cur) ?? byId.get(cur)?.derivedFrom ?? 0;
+      if (back <= 0 || back === cur || !byId.has(back) || seen.has(back)) return cur;
+      seen.add(back);
+      cur = back;
+    }
+  };
+}
 
 export function isCandidateRun(run: common_DesignRun | null | undefined): boolean {
   if (!run) return false;
@@ -91,10 +119,18 @@ export function candidatesOf(
   if (ids.length < 2) return null;
   // SERVER TRUTH FIRST: a candidate already cut (it has pieces on the server) IS the pick, whatever
   // this browser remembers — and then no other candidate is offered or cut automatically.
+  const origin = originsOf(run?.pictures ?? []);
+  const familyOf = (picked: number) => ids.filter((id) => origin(id) === origin(picked));
   const cut = drawn.cards.find((c) => c.members.length > 0)?.picture.id ?? 0;
-  if (cut > 0) return { ids, picked: cut, cut: true };
+  if (cut > 0) return { ids, picked: cut, cut: true, family: familyOf(cut) };
+  // The stored pick may since have been edited (a head now stands in its place) or got a «save as
+  // new» sibling: it is resolved through its family, never lost.
   const stored = picks[String(run?.id ?? 0)] ?? 0;
-  return { ids, picked: ids.includes(stored) ? stored : 0, cut: false };
+  if (stored <= 0) return { ids, picked: 0, cut: false, family: [] };
+  const picked = ids.includes(stored)
+    ? stored
+    : ids.find((id) => origin(id) === origin(stored)) ?? 0;
+  return { ids, picked, cut: false, family: picked ? familyOf(picked) : [] };
 }
 
 export function isGrey(picture: common_DesignPicture): boolean {
