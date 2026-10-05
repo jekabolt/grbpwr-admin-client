@@ -52,6 +52,8 @@ const glassFrame = (g: GlassProps | undefined) =>
   cn(
     'absolute block border border-textColor bg-bgColor text-left text-textColor',
     g ? 'cursor-pointer' : 'pointer-events-none',
+    // R43: выбранная вставка дышит ореолом (::after), рамка та же.
+    g?.selected && 'callout-breathe-box',
     g?.dimmed && 'invisible',
     g && !g.interactive && 'pointer-events-none',
   );

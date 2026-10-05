@@ -2022,19 +2022,20 @@ export function AnnotationSurface({
     kindDef(selectedCallout.kind).handles;
 
   /**
-   * СЛЕД ВЫБОРА — ТОЛЬКО ТАМ, ГДЕ НЕТ РУЧЕК (R18, владелец: «внешний контур выделения не должен
-   * показываться»).
+   * СЛЕД ВЫБОРА — ДЫХАНИЕ, А НЕ ТОЛСТЫЙ ШТРИХ (R43, владелец: «любой селект колаута это этот
+   * толстый квадратик его быть не должно можно сделать некое дыхание обводки»).
    *
-   * Внешней рамки по габаритам больше нет: у фигуры с ручками выбор показывают сами ручки. Но у
-   * следа (`handles: false`) и на поверхности только для чтения ручек нет, и тогда выбранная фигура
-   * не отличалась бы от соседней ничем, кроме полупикселя штриха. Для них — мягкая широкая полоса
-   * ПО САМОЙ ЛИНИИ, под ней (тот же путь, по которому фигуру ловит мышь), а не прямоугольник вокруг.
+   * Выбранная фигура рисуется тем же штрихом, что соседи; выбор говорит мягкая полоса ПО САМОЙ
+   * ЛИНИИ, под ней (тот же путь, по которому фигуру ловит мышь), и она медленно дышит
+   * (`.callout-breathe`, global.css). Полоса двойная — белая сердцевина в чернильной кайме — чтобы
+   * читаться и на фото, и на штриховом флэте. Ручки остаются, где они есть: это рукояти правки, а
+   * не след выбора. Внешней рамки по габаритам нет (R18).
    */
   const selectionTrace = (() => {
-    if (hideCallouts || !selectedCallout || dim(selectedCallout.key) || handlesVisible) return null;
+    if (hideCallouts || !selectedCallout || dim(selectedCallout.key)) return null;
     const pts = pointsOf(selectedCallout).map(px);
-    // Пин и одноточечная подпись показывают выбор собой (инверсия маркера, обводка плашки).
-    if (pts.length < 2) return null;
+    // Пин дышит собой (`.callout-breathe-box` у маркера); у подписи — и лидер, и плашка.
+    if (pts.length === 0 || kindDef(selectedCallout.kind).key === 'pin') return null;
     // След рисуется сглаженным — и полоса выбора идёт по той же кривой, а не по ломаной хита.
     if (kindDef(selectedCallout.kind).key === 'ink') return inkPath(pts) || null;
     return hitPath(
@@ -2044,6 +2045,38 @@ export function AnnotationSurface({
       effectiveCaps(selectedCallout.kind, selectedCallout.caps),
     );
   })();
+
+  /**
+   * РУЧКИ ДЕТАЛИ — ПОД ЕЁ ВСТАВКОЙ (R43). Вставка детали — непрозрачная картинка, и когда она стоит
+   * поверх своего же региона (маркер предложения лёг в его центр, или вставку туда утащили), ручки
+   * верхнего слоя проступали сквозь увеличенный узел толстым чёрным квадратом посередине: четыре
+   * угла маленького региона сливались в одну рамку. Под вставкой ручки видны там, где вставка их
+   * не закрывает; закрытые достаются, если отодвинуть вставку.
+   */
+  const handlesUnderInsets = selectedCallout?.spec?.t === 'detail';
+  const handlesEl =
+    size.w > 0 && handlesVisible && selectedCallout ? (
+      <Handles
+        callout={selectedCallout}
+        pts={pointsOf(selectedCallout)}
+        px={px}
+        inv={inv}
+        armed={armed}
+        justDragged={() => {
+          const v = justDragged.current;
+          justDragged.current = false;
+          return v;
+        }}
+        onArm={(index) => setArmed({ key: selectedCallout.key, index })}
+        onDrag={(index, from, e) => startHandleDrag(selectedCallout.key, index, from, e)}
+        onInsert={(index, p) => {
+          const next = [...selectedCallout.points];
+          next.splice(index + 1, 0, p);
+          if (next.length <= kindDef(selectedCallout.kind).points[1])
+            mutate(() => live.current.onEditPoints?.(selectedCallout.key, next));
+        }}
+      />
+    ) : null;
 
   const cursorClass =
     placing || adding !== null
@@ -2351,18 +2384,28 @@ export function AnnotationSurface({
                   <AnnotationDefs />
                 </defs>
                 {selectionTrace && (
-                  <path
-                    data-selection-trace=''
-                    d={selectionTrace}
-                    fill='none'
-                    stroke='var(--color-textColor)'
-                    strokeOpacity={0.18}
-                    strokeWidth={8}
-                    strokeLinecap='round'
-                    strokeLinejoin='round'
-                    vectorEffect='non-scaling-stroke'
-                    pointerEvents='none'
-                  />
+                  <g data-selection-trace='' className='callout-breathe' pointerEvents='none'>
+                    <path
+                      d={selectionTrace}
+                      fill='none'
+                      stroke='var(--color-textColor)'
+                      strokeOpacity={0.18}
+                      strokeWidth={7}
+                      strokeLinecap='round'
+                      strokeLinejoin='round'
+                      vectorEffect='non-scaling-stroke'
+                    />
+                    <path
+                      d={selectionTrace}
+                      fill='none'
+                      stroke='var(--color-bgColor)'
+                      strokeOpacity={0.9}
+                      strokeWidth={4}
+                      strokeLinecap='round'
+                      strokeLinejoin='round'
+                      vectorEffect='non-scaling-stroke'
+                    />
+                  </g>
                 )}
                 {callouts.map((c) =>
                   dim(c.key) ? null : (
@@ -2376,7 +2419,6 @@ export function AnnotationSurface({
                       filled={c.filled}
                       caps={c.caps}
                       halo={halo}
-                      strokeWidth={selected === c.key ? 2 : 1.5}
                     />
                   ),
                 )}
@@ -2610,6 +2652,8 @@ export function AnnotationSurface({
                 )}
               </svg>
             )}
+
+            {handlesUnderInsets && handlesEl}
 
             {/* ПОДПИСНОЙ СЛОЙ. Плашки и маркеры — HTML поверх SVG, а не `<text>`: перенос строки,
                 обрезка и выделение мышью в SVG приходится изобретать заново. */}
@@ -2845,28 +2889,7 @@ export function AnnotationSurface({
             {/* РУЧКИ — HTML-слоем и последними: они обязаны лежать поверх подписей, иначе якорь под
                 плашкой не схватить. Экранно-постоянные: ручка, растущая с зумом, перекрыла бы саму
                 фигуру ровно тогда, когда её приблизили, чтобы поправить точнее. */}
-            {size.w > 0 && handlesVisible && selectedCallout && (
-              <Handles
-                callout={selectedCallout}
-                pts={pointsOf(selectedCallout)}
-                px={px}
-                inv={inv}
-                armed={armed}
-                justDragged={() => {
-                  const v = justDragged.current;
-                  justDragged.current = false;
-                  return v;
-                }}
-                onArm={(index) => setArmed({ key: selectedCallout.key, index })}
-                onDrag={(index, from, e) => startHandleDrag(selectedCallout.key, index, from, e)}
-                onInsert={(index, p) => {
-                  const next = [...selectedCallout.points];
-                  next.splice(index + 1, 0, p);
-                  if (next.length <= kindDef(selectedCallout.kind).points[1])
-                    mutate(() => live.current.onEditPoints?.(selectedCallout.key, next));
-                }}
-              />
-            )}
+            {!handlesUnderInsets && handlesEl}
           </div>
 
           {zoom && scale > 1 && (
@@ -3272,14 +3295,16 @@ function PinMarker({
         QUIET_FOCUS,
         filled ? 'bg-textColor text-bgColor' : 'bg-bgColor text-textColor',
         onDragStart ? 'cursor-move' : 'cursor-pointer',
-        // ВЫБОР ПОКАЗАН КОЛЬЦОМ, А НЕ ИНВЕРСИЕЙ ЗАЛИВКИ, и это не смягчение правила «selected
+        // ВЫБОР ПОКАЗАН ОРЕОЛОМ, А НЕ ИНВЕРСИЕЙ ЗАЛИВКИ, и это не смягчение правила «selected
         // fills solid with ink», а следствие того, что заливка у пина УЖЕ занята: залитый кружок
         // означает «текст есть», полый — «текста ещё нет», и на листе из пятнадцати пинов это
         // единственное состояние, которое видно, не открывая выноску. Инвертировав выбранный, мы
         // сделали бы пустой пин неотличимым от подписанного — то есть починили бы одно состояние,
         // сломав другое. Кольцо со сдвигом — тот же приём, которым в этом файле уже показана
         // активная миниатюра ленты, и работает он при любой заливке.
-        selected && 'outline outline-1 outline-offset-1 outline-textColor',
+        // R43: кольцо выбора сменилось дыханием — ореол на ::after, собственный контур и тень
+        // маркера остаются фокусу и белому пину.
+        selected && 'callout-breathe-box',
         selected ? 'border-textColor' : 'border-borderColor',
         dimmed && 'invisible',
         !interactive && 'pointer-events-none',
@@ -3404,6 +3429,8 @@ function Plate({
         // БЕЗ КОЛЬЦА ВЫБОРА (владелец, 04.10: «такого выделения быть не должно»). Выбор фигуры
         // показывают её ручки; плашка лишь берёт чернильную рамку вместо серой.
         selected ? 'border-textColor' : 'border-borderColor',
+        // R43: выбранная плашка дышит ореолом на ::after; рамка и фокус-контур не меняются.
+        selected && !ghost && 'callout-breathe-box',
         // Призрак — ОДНА СТРОКА (R38): подпись ≤32 знаков, лишнее — многоточием, не переносом.
         ghost && 'overflow-hidden text-ellipsis whitespace-nowrap border-dashed text-labelColor',
         ghost && !selected && 'border-labelColor opacity-80',

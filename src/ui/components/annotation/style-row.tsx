@@ -86,7 +86,7 @@ function RuleSep() {
 }
 
 /** Клетка текущего цвета и двери «···» — одной ширины. */
-const DOOR_CELL = 'w-8 justify-center';
+const DOOR_CELL = 'w-6 justify-center px-0';
 
 export function AnnotationStyleRow({
   kind,
