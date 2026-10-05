@@ -37,6 +37,7 @@ import {
   useBenchChoice,
 } from './bench-store';
 import { ApplyFlatSlots } from './apply-flat-slots';
+import { candidatesOf, pickCandidate, usePicks } from './candidates';
 import { InlineSplit, useKeptWhole } from './inline-split';
 import {
   benchPlan,
@@ -52,11 +53,12 @@ import {
   isRunLive,
   runFailureText,
   runOutcomeNote,
+  runShortFailure,
   runStamp,
   runStateWord,
   runStatus,
 } from './run-state';
-import { useElapsed, useRunById } from './use-generation';
+import { useElapsed, useRunById, useStartRun } from './use-generation';
 import { FoldCaret } from 'ui/components/fold-caret';
 
 /**
@@ -222,6 +224,64 @@ function skippedNote(skipped: readonly common_DesignRun[]): { text: string; titl
  * gives them (`run-panel.tsx`), cut to four lines with the whole text in the title (up to 4 000
  * characters, D-4). The code stands in the header's state word already.
  */
+/**
+ * A FAILED FLAT RUN IN ONE LINE, AND THE SAME PRESS AGAIN (owner 05.10: «ошибку показывать если не
+ * получилось»): `timed out · retry`, `failed · <reason> · retry`. Retry repeats the run from its own
+ * frozen inputs (`rerun_of`), so what failed is what is asked again.
+ */
+function RetryLine({
+  techCardId,
+  run,
+  disabled,
+}: {
+  techCardId: number;
+  run: common_DesignRun;
+  disabled?: boolean;
+}): JSX.Element | null {
+  const start = useStartRun(techCardId);
+  const [busy, setBusy] = useState(false);
+  if (runStatus(run) !== 'failed' || (run.kind ?? '').trim().toLowerCase() !== 'flat') return null;
+  const params = run.params;
+  return (
+    <span className='flex flex-wrap items-center gap-1.5' data-latest-failed={run.id ?? 0}>
+      <Text size='micro' variant='errorLabel' component='span' title={runOutcomeNote(run)}>
+        {runShortFailure(run)}
+      </Text>
+      {!disabled && params && (
+        <>
+          <Text size='micro' variant='label' component='span'>
+            ·
+          </Text>
+          <Button
+            type='button'
+            variant='underline'
+            size='xs'
+            className='text-labelColor hover:text-textColor'
+            data-latest-retry={run.id ?? 0}
+            disabled={busy}
+            title='run it again from the same inputs'
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await start.start({
+                  kind: 'flat',
+                  ask: run.ask ?? '',
+                  params,
+                  rerunOfRunId: run.id ?? 0,
+                });
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? 'retrying…' : 'retry'}
+          </Button>
+        </>
+      )}
+    </span>
+  );
+}
+
 function BareOutcome({
   run,
   earlier,
@@ -468,6 +528,13 @@ export function LatestGeneration({
   const writesOff = disabled || !speaks;
   /** W6: pictures the person kept as one picture — tiles again, the split corner on them. */
   const keptWhole = useKeptWhole(techCardId);
+  /* FLAT CANDIDATES (flat route, 05.10, `candidates.ts`): a sheet run that bought several candidates
+     is cut only once the designer picked one — and only that one, never the other sheets. */
+  const picks = usePicks(techCardId);
+  const candidates = useMemo(
+    () => (kind === 'flat' && run && !isRunLive(run) ? candidatesOf(run, drawnPlan, picks) : null),
+    [kind, run, drawnPlan, picks],
+  );
   const inlineSheets = useMemo(() => {
     if (!run || !plan || isRunLive(run)) return [];
     const pictures = run.pictures ?? [];
@@ -475,11 +542,12 @@ export function LatestGeneration({
     for (const card of plan.cards) {
       if (card.members.length || (card.picture.id ?? 0) <= 0) continue;
       if (keptWhole.has(card.picture.id ?? 0)) continue;
+      if (candidates && card.picture.id !== candidates.picked) continue;
       const views = splitViewsOf(band, card.picture, pictures, run, writesOff);
       if (views) out.push({ picture: card.picture, views });
     }
     return out;
-  }, [run, plan, band, writesOff, keptWhole]);
+  }, [run, plan, band, writesOff, keptWhole, candidates]);
   /** The row's tiles: the plan without the sheets drawn as inline editors. */
   const tilePlan = useMemo(() => {
     if (!plan || !inlineSheets.length) return plan;
@@ -602,8 +670,11 @@ export function LatestGeneration({
   const flatPieces = useMemo(() => {
     const rootOf = tilePlan?.rootOf;
     if (kind !== 'flat' || bare || !rootOf?.size) return [];
-    return (tilePlan?.cards ?? []).map((c) => c.picture).filter((p) => rootOf.has(p.id ?? 0));
-  }, [kind, bare, tilePlan]);
+    return (tilePlan?.cards ?? [])
+      .map((c) => c.picture)
+      .filter((p) => rootOf.has(p.id ?? 0))
+      .filter((p) => !candidates?.picked || rootOf.get(p.id ?? 0) === candidates.picked);
+  }, [kind, bare, tilePlan, candidates]);
   const broughtCuts = broughtRun && brought ? cutSheets(broughtPlan, brought.plan) : [];
   const toggleDeck = (rootId: number) =>
     setOpenDeck((current) => (current === rootId ? null : rootId));
@@ -739,6 +810,14 @@ export function LatestGeneration({
       onSplit={onSplit}
       workbench
       plan={tilePlan ?? undefined}
+      candidates={
+        candidates && !writesOff
+          ? {
+              ...candidates,
+              onPick: (pictureId: number) => pickCandidate(techCardId, runId, pictureId),
+            }
+          : undefined
+      }
     />
   );
   /** Every picture of the row went into an inline editor: no empty grid under them. */
@@ -799,6 +878,13 @@ export function LatestGeneration({
           }
         >
           {bare && newest && <BareOutcome run={run} earlier={newest.skipped} />}
+          {kind === 'flat' && newest && (bare || newest.skipped.length > 0) && (
+            <RetryLine
+              techCardId={techCardId}
+              run={bare ? run : newest.skipped[0]}
+              disabled={writesOff}
+            />
+          )}
 
           {note && newest && (
             <Text

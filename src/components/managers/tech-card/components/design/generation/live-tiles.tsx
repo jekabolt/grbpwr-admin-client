@@ -7,7 +7,7 @@ import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
 import { Tile } from 'ui/components/tiles';
 
 import { runHandle } from '../handles';
-import { isCancelling, runStatus } from './run-state';
+import { isCancelling, overdueWord, runStatus } from './run-state';
 import { useGenerationWrites } from './use-generation';
 
 /**
@@ -108,6 +108,8 @@ export function RunCancelCorner({
   const handle = runHandle(runId);
   const canCancel = !disabled && runId > 0 && !cancelling;
   const pending = lock === 'pending';
+  /* Past the cap the door stands in plain sight, not on hover (owner 05.10). */
+  const late = !!overdueWord(run);
 
   return (
     <>
@@ -144,7 +146,7 @@ export function RunCancelCorner({
             'absolute bottom-1 right-1 z-20 py-0.5 leading-none',
             TILE_CORNER,
             TILE_QUIET,
-            pending && 'opacity-100',
+            (pending || late) && 'opacity-100',
           )}
         >
           {pending ? 'cancel…' : 'cancel'}

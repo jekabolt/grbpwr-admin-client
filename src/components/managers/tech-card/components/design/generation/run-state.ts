@@ -57,9 +57,7 @@ export function isRunLive(run: Pick<common_DesignRun, 'status'>): boolean {
  * that a result landing after this stamp is recorded rather than dropped, so the pill says
  * `cancelling…` and never `cancelled` — the ledger decides which of the two it becomes.
  */
-export function isCancelling(
-  run: Pick<common_DesignRun, 'status' | 'cancelRequestedAt'>,
-): boolean {
+export function isCancelling(run: Pick<common_DesignRun, 'status' | 'cancelRequestedAt'>): boolean {
   return isRunLive(run) && stampIsSet(run.cancelRequestedAt);
 }
 
@@ -122,6 +120,9 @@ export const RUN_CODE_WORDS: Readonly<Record<string, string>> = {
      is not a failure — the worker comes back to it — so the words say what it is waiting for. */
   submit_settling: 'waiting for the provider to confirm the earlier request',
   paid_collect_waiting: 'already paid, waiting to collect the result',
+  /* The server's cap on an image run (05.10): past it the run is closed `failed`. */
+  timed_out: 'timed out',
+  landing_failed: 'the result could not be saved',
   source_too_large:
     'the picture is too large to edit here (over 18 MP); downscale it and try again',
 };
@@ -224,6 +225,44 @@ export function runOutcomeChip(run: common_DesignRun): string {
 }
 
 /**
+ * ═══ A RUN THAT TAKES TOO LONG (owner 05.10: «пользователь не ждал бесконечно») ════════════════
+ *
+ * The server closes an image run past its cap (`RUN_CAP_MS`, `timed_out`). Past the cap the live
+ * row says `taking too long` and offers `cancel` in plain sight; past the cap + 2 min the band is
+ * read as a stale row (`stuck`) — the client never waits forever on it.
+ */
+export const RUN_CAP_MS = 6 * 60_000;
+export const RUN_STUCK_MS = RUN_CAP_MS + 2 * 60_000;
+
+export function runOverdue(
+  run: Pick<common_DesignRun, 'status' | 'startedAt' | 'createdAt'>,
+  now = Date.now(),
+): 'late' | 'stuck' | null {
+  if (!isRunLive(run)) return null;
+  const since = new Date(run.startedAt || run.createdAt || '').getTime();
+  if (!Number.isFinite(since)) return null;
+  const age = now - since;
+  return age > RUN_STUCK_MS ? 'stuck' : age > RUN_CAP_MS ? 'late' : null;
+}
+
+/** The live tile's word past the cap; `''` while the run is within it. */
+export function overdueWord(run: common_DesignRun): string {
+  const late = runOverdue(run);
+  return late === 'stuck' ? 'stuck' : late === 'late' ? 'taking too long' : '';
+}
+
+/** A failed / cancelled run in one short line: `timed out` · `failed · <reason>` · `cancelled`. */
+export function runShortFailure(run: common_DesignRun): string {
+  const status = runStatus(run);
+  const code = (run.errorCode ?? '').trim();
+  if (code === 'timed_out') return 'timed out';
+  const why = (runCodeWords(code) || (run.lastError ?? '').trim()).replace(/\s+/g, ' ');
+  const short = why.length > 60 ? `${why.slice(0, 60).trimEnd()}…` : why;
+  const head = status === 'cancelled' ? 'cancelled' : 'failed';
+  return short ? `${head} · ${short}` : head;
+}
+
+/**
  * СОСТОЯНИЕ ПРОГОНА — СЛОВОМ, И ТОЛЬКО ПОКА О НЁМ ЕСТЬ ЧТО СКАЗАТЬ (r2 п.22).
  *
  * Владелец о ряде пилюль на строке: «RUN 30 · FLAT · DONE — эти все иконки надо убрать». Пилюли
@@ -249,10 +288,12 @@ export function runStateWord(
     const failedOnce = !!((run.errorCode ?? '').trim() || (run.lastError ?? '').trim());
     const word = isCancelling(run)
       ? 'cancelling…'
-      : status === 'pending' && !failedOnce
-        ? 'reserved'
-        : chip;
-    const clock = status === 'running' || failedOnce ? elapsed : '';
+      : overdueWord(run)
+        ? overdueWord(run)
+        : status === 'pending' && !failedOnce
+          ? 'reserved'
+          : chip;
+    const clock = status === 'running' || failedOnce || overdueWord(run) ? elapsed : '';
     return {
       word: clock ? `${word} ${clock}` : word,
       note: isCancelling(run) ? undefined : note,

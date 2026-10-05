@@ -19,11 +19,12 @@ import {
   expectedTileCount,
   isRunLive,
   isTextRun,
+  overdueWord,
   runOutcomeNote,
   runOutputText,
   runStatus,
 } from './run-state';
-import { RunTile } from './run-tile';
+import { RunTile, type RunTileCandidates } from './run-tile';
 import { thumbUrl } from './thumb';
 import { FoldCaret } from 'ui/components/fold-caret';
 
@@ -84,6 +85,7 @@ export function RunOutputs({
   onSplit,
   workbench,
   plan: planProp,
+  candidates,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -117,6 +119,8 @@ export function RunOutputs({
    * absent, the history's plan of every picture the run produced.
    */
   plan?: OutputPlan;
+  /** Flat candidates of a sheet run (`candidates.ts`): the `pick` door on each candidate tile. */
+  candidates?: RunTileCandidates;
 }) {
   /**
    * Развёрнут ли ОТВЕТ текстового прогона (D-2). Отдельно от `meta ▸` строки: та дверь показывает,
@@ -203,7 +207,11 @@ export function RunOutputs({
           count={expected}
           disabled={disabled}
           wordOf={(i) =>
-            i === 0 && runStatus(run) === 'running' ? `running ${elapsed}` : 'reserved'
+            i === 0 && overdueWord(run)
+              ? `${overdueWord(run)} · ${elapsed}`
+              : i === 0 && runStatus(run) === 'running'
+                ? `running ${elapsed}`
+                : 'reserved'
           }
         />
       </Tiles>
@@ -240,6 +248,7 @@ export function RunOutputs({
               onOpen={members.length && !deckOpen ? () => onDeck(pictureId) : undefined}
               onZoom={onZoomPicture}
               onSplit={onSplit}
+              candidates={candidates}
             />
           );
           if (!members.length) return <Fragment key={pictureId}>{tile}</Fragment>;

@@ -19,6 +19,7 @@ import { isModelUrl } from '../threed/media';
 import { useDesignWrites } from '../use-design-band';
 import { isPictureHidden } from '../visibility';
 import { closeSurface, openSurface } from './bench-store';
+import { isGrey } from './candidates';
 import { compositeTail, offersSplit, readComposite, readSplit, splitVerb } from './composite';
 import { deleteTitle, isDerivedPicture, useDeletePicture } from './delete-picture-modal';
 import { isUndoneEdit, successorStands } from './edit-chain';
@@ -96,6 +97,13 @@ export function splitViewsOf(
 /** The `delete…` row of the tile's menu — a value no slot can spell (`v:` / `d:` / `__new_detail`). */
 const DELETE_ITEM = '__delete';
 
+/** Flat candidates of a sheet run (`candidates.ts`): which tiles are candidates, which is picked. */
+export type RunTileCandidates = {
+  ids: number[];
+  picked: number;
+  onPick: (pictureId: number) => void;
+};
+
 /**
  * A run's output. THE PICTURE ITSELF IS `PictureTile` AND NOTHING ELSE (T-8): the file says WHICH
  * roles the picture has (`onSplit`, `onEdit`, a place in the gallery) and the primitive decides
@@ -129,6 +137,7 @@ export function RunTile({
   onOpen,
   onZoom,
   onSplit,
+  candidates,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
@@ -162,6 +171,7 @@ export function RunTile({
    * writer never stamped (`composite_views` empty, beta) still opens as FRONT / BACK / … (R(a)).
    */
   onSplit: (picture: common_DesignPicture, views: readonly string[]) => void;
+  candidates?: RunTileCandidates;
 }) {
   const pick = usePickMode();
   const { setBenchSlot } = useDesignWrites(techCardId);
@@ -341,7 +351,17 @@ export function RunTile({
           }
         : fitMismatch
           ? { word: 'fit ≠ card', tone: 'warn', title: `fit ${runFit} ≠ card ${cardFit}` }
-          : undefined;
+          : isGrey(picture)
+            ? {
+                word: 'grey',
+                tone: 'mut',
+                title:
+                  'a grey fill or tint inside the drawing — the flat style is white inside black lines',
+              }
+            : undefined;
+  /* FLAT CANDIDATES: `pick` on each candidate sheet until one is picked; the picked one is cut. */
+  const candidate = !!candidates && candidates.ids.includes(pictureId);
+  const picked = candidate && candidates?.picked === pictureId;
 
   /**
    * THE CELL'S TITLE — what the caption under the frame used to say, plus its tooltip: the kind
@@ -474,6 +494,17 @@ export function RunTile({
         galleryGroup={galleryGroup}
         onUndo={chainDoors.onUndo}
         onRedo={chainDoors.onRedo}
+        selected={picked || undefined}
+        onSelect={
+          candidate && !picked
+            ? {
+                onClick: () => candidates?.onPick(pictureId),
+                ariaLabel: `pick ${handle}`,
+                title: 'pick this candidate — it is the one cut into views',
+              }
+            : undefined
+        }
+        selectLabel='pick'
         /* ПРИГЛУШАЕТСЯ СНИМОК, А НЕ ПЛИТКА (K-6): прозрачность на всей плитке глушила бы и дверь
            `edit` до 1.6:1. Флаг «hidden» состояние держит и без заливки. */
         dim={hidden || dim}
