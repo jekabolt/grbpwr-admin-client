@@ -536,7 +536,24 @@ export function LatestGeneration({
   // A cut sheet leaves the bench, its pieces stand in its place (owner items 20, 21) — on FABRIC
   // RENDER too since 03.10 (owner item 24, R(b)): no deck, so no `expand ▸`; the bulk placement is
   // a line under the tiles (`PutPiecesIntoSides`, W4).
-  const plan = useMemo(() => (drawnPlan ? piecesInPlace(drawnPlan) : null), [drawnPlan]);
+  /* FLAT CANDIDATES (flat route, 05.10, `candidates.ts`): a sheet run that bought several candidates
+     is cut only once the designer picked one — and only that one, never the other sheets. */
+  const picks = usePicks(techCardId);
+  const candidates = useMemo(
+    () => (kind === 'flat' && run && !isRunLive(run) ? candidatesOf(run, drawnPlan, picks) : null),
+    [kind, run, drawnPlan, picks],
+  );
+  /* ONLY THE FINAL RESULT ON THE BENCH (owner 05.10): once a candidate is picked (or cut on the
+     server) the other sheets leave the workbench — they stay in the run's history. Until then the
+     candidates stand side by side, each with `pick`. */
+  const benchDrawn = useMemo(() => {
+    if (!drawnPlan || !candidates?.picked) return drawnPlan;
+    return {
+      ...drawnPlan,
+      cards: drawnPlan.cards.filter((c) => (c.picture.id ?? 0) === candidates.picked),
+    };
+  }, [drawnPlan, candidates]);
+  const plan = useMemo(() => (benchDrawn ? piecesInPlace(benchDrawn) : null), [benchDrawn]);
   /**
    * THE UNCUT SHEETS, CUT HERE INLINE (owner item 19, T20). Every card the tile gate would give a
    * SPLIT corner (`splitViewsOf`, the same gate, the same `disabled`) is drawn as the inline editor
@@ -550,13 +567,6 @@ export function LatestGeneration({
   const writesOff = disabled || !speaks;
   /** W6: pictures the person kept as one picture — tiles again, the split corner on them. */
   const keptWhole = useKeptWhole(techCardId);
-  /* FLAT CANDIDATES (flat route, 05.10, `candidates.ts`): a sheet run that bought several candidates
-     is cut only once the designer picked one — and only that one, never the other sheets. */
-  const picks = usePicks(techCardId);
-  const candidates = useMemo(
-    () => (kind === 'flat' && run && !isRunLive(run) ? candidatesOf(run, drawnPlan, picks) : null),
-    [kind, run, drawnPlan, picks],
-  );
   const inlineSheets = useMemo(() => {
     if (!run || !plan || isRunLive(run)) return [];
     const pictures = run.pictures ?? [];
@@ -655,10 +665,10 @@ export function LatestGeneration({
    * they stay off the tiles.
    */
   const deckPlan = useMemo(() => {
-    if (!drawnPlan || !inlineSheets.length) return drawnPlan;
+    if (!benchDrawn || !inlineSheets.length) return benchDrawn;
     const inline = new Set(inlineSheets.map((s) => s.picture.id ?? 0));
-    return { ...drawnPlan, cards: drawnPlan.cards.filter((c) => !inline.has(c.picture.id ?? 0)) };
-  }, [drawnPlan, inlineSheets]);
+    return { ...benchDrawn, cards: benchDrawn.cards.filter((c) => !inline.has(c.picture.id ?? 0)) };
+  }, [benchDrawn, inlineSheets]);
   const plates = useMemo(
     () =>
       hostPlates(
@@ -833,7 +843,7 @@ export function LatestGeneration({
       workbench
       plan={tilePlan ?? undefined}
       candidates={
-        candidates && !writesOff
+        candidates && !candidates.picked && !writesOff
           ? {
               ...candidates,
               onPick: (pictureId: number) => pickCandidate(techCardId, runId, pictureId),
