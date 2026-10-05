@@ -679,6 +679,7 @@ function MaterialBench({
         inpaint: undefined,
         extend: undefined,
         video: undefined,
+        flat: undefined,
       },
     };
   };
@@ -2568,6 +2569,7 @@ function useArtworkCutout(
             inpaint: undefined,
             extend: undefined,
             video: undefined,
+            flat: undefined,
           },
         },
         { clientRequestId },

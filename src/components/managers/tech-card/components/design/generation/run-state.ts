@@ -4,6 +4,7 @@ import type {
   common_DesignRunParams,
 } from 'api/proto-http/admin';
 
+import { FLAT_MODE_WORD, flatModeOf } from '../flat-mode';
 import { clockStamp } from '../handles';
 import { stampIsSet } from '../visibility';
 import { normaliseViewKey, viewLabel } from '../views';
@@ -387,7 +388,9 @@ export function viewsLine(params?: common_DesignRunParams | null): string {
   const layoutText =
     layout === 'one' ? 'one picture' : layout === 'per_view' ? 'a picture per view' : layout;
   const left = views.length ? views.join(', ') : '—';
-  return layoutText ? `${left} · ${layoutText}` : left;
+  const mode = flatModeOf(params);
+  const tail = [layoutText, mode === 'photos' ? '' : FLAT_MODE_WORD[mode]].filter(Boolean);
+  return tail.length ? `${left} · ${tail.join(' · ')}` : left;
 }
 
 /**

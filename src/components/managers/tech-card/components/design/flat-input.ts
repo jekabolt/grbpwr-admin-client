@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
 import type { FlushResult } from './autosave-contract';
+import { DEFAULT_FLAT_MODE, FLAT_MODE_WORD, type FlatMode, type StructurePick } from './flat-mode';
 import type { RunRefusal } from './generation/refusal';
 import { ACTIVE_VIEWS, viewLabel } from './views';
 
@@ -41,6 +42,10 @@ export type FlatAsk = {
   views: Record<string, boolean>;
   detailTicks: Record<number, boolean>;
   layout: FlatLayout;
+  /** The flat mode (`flat-mode.ts`); photos is the default. */
+  mode: FlatMode;
+  /** «from my flat»: which technical flat is the front, which the back. Empty on other modes. */
+  structure: StructurePick[];
 };
 
 /**
@@ -66,6 +71,7 @@ export function defaultFlatViews(): Record<string, boolean> {
 export function isDefaultFlatChoice(ask: FlatAsk): boolean {
   return (
     ask.layout === DEFAULT_FLAT_LAYOUT &&
+    (ask.mode ?? DEFAULT_FLAT_MODE) === DEFAULT_FLAT_MODE &&
     ACTIVE_VIEWS.every((v) => !!ask.views[v]) &&
     !Object.values(ask.detailTicks).some(Boolean)
   );
@@ -79,7 +85,12 @@ export function isDefaultFlatChoice(ask: FlatAsk): boolean {
 export function flatDraftOf(card: number): FlatAsk {
   const ask = readFlatInput(card).ask;
   const ticks = exclusiveTicks(ask?.views ?? defaultFlatViews(), ask?.detailTicks ?? {});
-  return { ...ticks, layout: ask?.layout ?? DEFAULT_FLAT_LAYOUT };
+  return {
+    ...ticks,
+    layout: ask?.layout ?? DEFAULT_FLAT_LAYOUT,
+    mode: ask?.mode ?? DEFAULT_FLAT_MODE,
+    structure: ask?.structure ?? [],
+  };
 }
 
 /**
@@ -90,7 +101,37 @@ export function flatChoiceSummary(ask: FlatAsk, detailNames: string[]): string {
   const layout = ask.layout === 'one' ? 'one picture' : 'a picture per view';
   const views = ACTIVE_VIEWS.filter((v) => ask.views[v]).map((v) => viewLabel(v));
   const asked = [...views, ...detailNames.map((n) => `detail ${n}`)];
-  return [layout, asked.length ? asked.join(', ') : 'nothing ticked'].join(' · ');
+  const mode = ask.mode ?? DEFAULT_FLAT_MODE;
+  const head = mode === DEFAULT_FLAT_MODE ? [] : [FLAT_MODE_WORD[mode]];
+  return [...head, layout, asked.length ? asked.join(', ') : 'nothing ticked'].join(' · ');
+}
+
+/**
+ * THE MODE ON SCREEN, PER CARD — the run row picks it, the JOINS group reads it (the `confirm joins`
+ * door stands only while «straps & openings» is chosen). Tab memory, like the rest of this module.
+ */
+const modeDraft = new Map<number, FlatMode>();
+const modeListeners = new Set<() => void>();
+
+export function setFlatModeDraft(card: number, mode: FlatMode): void {
+  if ((modeDraft.get(card) ?? DEFAULT_FLAT_MODE) === mode) return;
+  if (mode === DEFAULT_FLAT_MODE) modeDraft.delete(card);
+  else modeDraft.set(card, mode);
+  modeListeners.forEach((l) => l());
+}
+
+export function useFlatModeDraft(card: number): FlatMode {
+  const read = () => modeDraft.get(card) ?? DEFAULT_FLAT_MODE;
+  return useSyncExternalStore(
+    (l) => {
+      modeListeners.add(l);
+      return () => {
+        modeListeners.delete(l);
+      };
+    },
+    read,
+    read,
+  );
 }
 
 export type FlatInputState = {

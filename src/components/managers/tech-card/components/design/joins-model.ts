@@ -177,6 +177,32 @@ export function parseJoinLine(line: string): ParsedLine {
   return { kind: 'item', patch };
 }
 
+/**
+ * NECK SHAPES — the closed vocabulary of a neck item's `type` (the server turns it into the CHECK
+ * sentence «the FRONT neckline is a HIGH CREW neck … NOT a V …»). '' = not said.
+ */
+export const NECK_TYPES = [
+  'crew',
+  'v',
+  'scoop',
+  'halter',
+  'boat',
+  'square',
+  'mock',
+  'turtle',
+] as const;
+
+const NECK_POINTS = new Set(['CFN', 'CBN', 'CFN_LOW', 'CBN_LOW', 'NP_L', 'NP_R']);
+const NECK_KINDS = new Set(['edge', 'binding', 'band', 'collar', 'stand']);
+
+/** The item that draws the neckline: named so, or an edge/band/collar along the neck points. */
+export function isNeckItem(it: common_DesignJoinItem): boolean {
+  if (/neck/i.test(it.id ?? '')) return true;
+  if (!NECK_KINDS.has((it.kind ?? '').trim())) return false;
+  const path = pathOf(it).map((p) => p.split('..')[0]);
+  return path.some((p) => p === 'CFN' || p === 'CBN') && path.every((p) => NECK_POINTS.has(p));
+}
+
 export const VISIBILITY = ['visible', 'through', 'hidden'] as const;
 export type Visibility = (typeof VISIBILITY)[number];
 export const VISIBILITY_GLYPH: Record<Visibility, string> = {
@@ -210,6 +236,8 @@ export const EMPTY_JOINS: common_DesignJoins = {
   editedAt: undefined,
   layers: [],
   uncertain: [],
+  fit: undefined,
+  confirmed: false,
 };
 
 const items = (j: common_DesignJoins) => j.items ?? [];
@@ -248,6 +276,8 @@ export const addItem =
         caughtInto: [],
         freeEdge: false,
         sharp: [],
+        size: 0,
+        edited: undefined,
         ...patch,
       },
     ],

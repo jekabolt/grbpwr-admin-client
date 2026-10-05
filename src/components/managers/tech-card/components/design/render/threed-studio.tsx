@@ -281,6 +281,7 @@ export function ThreedStudio({
         inpaint: undefined,
         extend: undefined,
         video: undefined,
+        flat: undefined,
       },
     });
   };

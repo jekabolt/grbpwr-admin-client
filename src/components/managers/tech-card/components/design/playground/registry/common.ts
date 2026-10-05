@@ -143,6 +143,7 @@ export function emptyParams(): common_DesignRunParams {
     inpaint: undefined,
     extend: undefined,
     video: undefined,
+    flat: undefined,
   };
 }
 

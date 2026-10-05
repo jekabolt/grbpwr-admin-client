@@ -7,9 +7,20 @@
 //                пока не выбран; `pick` → режется только выбранный;
 //   · failed    (карточка 51) — `timed_out`, без картинок: `timed out · retry`;
 //   · late      (карточка 52) — живой прогон 7 минут: `taking too long`, `cancel` на виду.
+//   · modes     (карточка 60) — настоящие `FlatJoins` + `FlatRunRow` над формой: три режима флэта,
+//                технические флэты, `confirm joins`, отказы сервера, подсказка `straps & openings?`;
+//   · rerun     (карточка 62) — упавший прогон `hand_flat`: `retry` несёт `params.flat` родителя.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { GetDesignBandResponse, common_DesignPicture } from 'api/proto-http/admin';
 import { createRoot } from 'react-dom/client';
+import { FormProvider, useForm } from 'react-hook-form';
+import { BrowserRouter } from 'react-router-dom';
+import { TooltipProvider } from 'ui/components/tooltip';
+import { FlatRunRow } from 'components/managers/tech-card/components/design/flat-run-row';
+import {
+  flatParamsFor,
+  flatParamsForFix,
+} from 'components/managers/tech-card/components/design/flat-mode';
 import { Section, SectionStack } from 'ui/components/section';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
 import { PictureGalleryProvider } from 'components/managers/tech-card/components/design/picture-tile';
@@ -162,6 +173,73 @@ win.__bands[52] = {
   ],
 } as unknown as GetDesignBandResponse;
 
+// card 62: a failed «from my flat» run — its retry must carry the parent's params.flat
+win.__bands[62] = {
+  ...CAP,
+  bench: [],
+  runs: [
+    {
+      id: 95,
+      kind: 'flat',
+      status: 'failed',
+      errorCode: 'timed_out',
+      lastError: 'the image run passed its 6 min cap',
+      requestedOutputs: 2,
+      params: {
+        layout: 'one',
+        views: VIEWS,
+        flat: {
+          mode: 'hand_flat',
+          structureRefs: [
+            { mediaId: 801, role: 'front_flat' },
+            { mediaId: 802, role: 'back_flat' },
+          ],
+        },
+      },
+      createdAt: minutesAgo(8),
+      pictures: [],
+    },
+  ],
+} as unknown as GetDesignBandResponse;
+
+(window as unknown as { __flatMode: unknown }).__flatMode = { flatParamsFor, flatParamsForFix };
+
+function ModesRow() {
+  const card = 60;
+  const { band } = useDesignBand(card);
+  const form = useForm({
+    defaultValues: {
+      concept: 'a strappy top',
+      categoryId: 1,
+      moodboardMedia: [],
+      technicalMedia: [801, 802, 803].map((mediaId) => ({
+        mediaId,
+        kind: '',
+        caption: '',
+        role: '',
+      })),
+    },
+  });
+  (window as unknown as { __modesForm: unknown }).__modesForm = form;
+  if (!band.references) return null;
+  return (
+    <FormProvider {...form}>
+      <Section title='input — references' question='— what this run is given'>
+        <FlatJoins
+          techCardId={card}
+          band={band}
+          thumbOf={(id) => win.__sheets[id % win.__sheets.length]?.url ?? ''}
+        />
+        <FlatRunRow
+          band={band}
+          techCardId={card}
+          thumbOf={(id) => win.__sheets[id % win.__sheets.length]?.url ?? ''}
+        />
+      </Section>
+    </FormProvider>
+  );
+}
+
 function Joins({ card }: { card: number }) {
   const { band } = useDesignBand(card);
   if (!band.references) return null;
@@ -185,24 +263,31 @@ function Bench({ card }: { card: number }) {
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 createRoot(document.getElementById('root') as HTMLElement).render(
   <QueryClientProvider client={qc}>
-    <DesignCapabilityProvider value>
-      <div style={{ width: 1100, padding: 24, background: '#f2f2f2' }}>
-        <SectionStack>
-          <div data-probe='joins'>
-            <Joins card={38} />
+    <BrowserRouter>
+      <TooltipProvider>
+        <DesignCapabilityProvider value>
+          <div style={{ width: 1100, padding: 24, background: '#f2f2f2' }}>
+            <SectionStack>
+              <div data-probe='joins'>
+                <Joins card={38} />
+              </div>
+              <div data-probe='auto'>
+                <Joins card={49} />
+              </div>
+              <div data-probe='modes'>
+                <ModesRow />
+              </div>
+              {[50, 53, 51, 52, 62].map((card) => (
+                <div key={card} data-probe={`bench-${card}`}>
+                  <PictureGalleryProvider techCardId={card} band={win.__bands[card]}>
+                    <Bench card={card} />
+                  </PictureGalleryProvider>
+                </div>
+              ))}
+            </SectionStack>
           </div>
-          <div data-probe='auto'>
-            <Joins card={49} />
-          </div>
-          {[50, 53, 51, 52].map((card) => (
-            <div key={card} data-probe={`bench-${card}`}>
-              <PictureGalleryProvider techCardId={card} band={win.__bands[card]}>
-                <Bench card={card} />
-              </PictureGalleryProvider>
-            </div>
-          ))}
-        </SectionStack>
-      </div>
-    </DesignCapabilityProvider>
+        </DesignCapabilityProvider>
+      </TooltipProvider>
+    </BrowserRouter>
   </QueryClientProvider>,
 );

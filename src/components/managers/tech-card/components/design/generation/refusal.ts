@@ -26,6 +26,8 @@ export type RunRefusal = {
   status: number | null;
   /** The `client_request_id` the refused press carried; the same intent replays the same id. */
   clientRequestId: string;
+  /** `ErrorInfo.reason` when the refusal carries one — the machine word a screen may translate. */
+  reason?: string;
 };
 
 /** grpc-gateway maps `codes.Aborted` onto HTTP 409 — somebody else moved first. */
@@ -57,7 +59,8 @@ function statusOf(error: unknown): number | null {
 export function refusalFromError(error: unknown, clientRequestId: string): RunRefusal | null {
   if (isAborted(error)) return null;
   const words = (error as Error | null | undefined)?.message?.trim() || 'the run did not start';
-  return { words, status: statusOf(error), clientRequestId };
+  const reason = errorInfoReason(error);
+  return { words, status: statusOf(error), clientRequestId, ...(reason ? { reason } : {}) };
 }
 
 /**

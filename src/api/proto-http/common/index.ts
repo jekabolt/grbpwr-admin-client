@@ -4937,6 +4937,10 @@ export type DesignRunParams = {
   extend: DesignExtendParams | undefined;
   // THE SOURCE PICTURE OF A VIDEO RUN (kind=video, B-32). Refused on every other kind (`video_forbidden`).
   video: DesignVideoParams | undefined;
+  // THE FLAT GENERATION MODE (kind=flat, flat-consistency 81-FINAL-MODES). Refused on every other kind
+  // (`flat_forbidden`). Absent = the photos route. A rerun inherits its parent's block (a different one
+  // is `mode_not_for_this_run`).
+  flat: DesignFlatParams | undefined;
 };
 
 // DesignColourRecipe is the colour submission of a render run, in a form that a history chip can
@@ -5329,6 +5333,31 @@ export type DesignVideoParams = {
   sourceMediaId: number | undefined;
   duration: number | undefined;
   model: string | undefined;
+};
+
+// DesignFlatParams — how ONE flat press draws its sheet (81-FINAL-MODES).
+// - "" (or "photos"): the card's kept reference photos with roles and notes + the join list in words
+// when the card has one; TWO candidate sheets. The default.
+// - hand_flat: the card's own hand-drawn technical flats (structure_refs) are redrawn cleanly, the
+// missing views derived; the kept photos travel for fit only; no join list. TWO candidates.
+// - straps: the photos route with the designer-CONFIRMED join list (DesignJoins.confirmed at the
+// card's current rev); FOUR candidates.
+// Door refusals (all free, before any money): `unknown_flat_mode`, `structure_required` (hand_flat
+// without refs), `structure_forbidden` (refs on another mode), `structure_malformed` (a role that is not
+// front_flat | back_flat, a role or media twice), `structure_not_on_card` (not a TECHNICAL media of this
+// card), `joins_unconfirmed` (straps on a card whose list is missing or not confirmed at its current rev;
+// FailedPrecondition, metadata `joins_rev`), `mode_not_for_this_run` (a detail-only or per_view run, or
+// a rerun that changes its parent's mode, flats or views). The structure flats travel in the input
+// snapshot as the first references, with their roles.
+export type DesignFlatParams = {
+  mode: string | undefined;
+  structureRefs: DesignFlatStructureRef[] | undefined;
+};
+
+// DesignFlatStructureRef — one hand-drawn technical flat of the card and what it shows.
+export type DesignFlatStructureRef = {
+  mediaId: number | undefined;
+  role: string | undefined;
 };
 
 // DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
@@ -6316,6 +6345,11 @@ export type DesignJoinItem = {
   caughtInto: string[] | undefined;
   freeEdge: boolean | undefined;
   sharp: string[] | undefined;
+  size: number | undefined;
+  // READ-ONLY, server-computed: a designer added or changed this item (SetDesignJoins diff against the
+  // stored list; it stays set until the model rewrites the list). Its text is said to the flat model as a
+  // «designer:» check line.
+  edited: boolean | undefined;
 };
 
 // DesignJoinsConsistencyGroup — photos that show one and the same garment.
@@ -6344,6 +6378,16 @@ export type DesignJoins = {
   editedAt: wellKnownTimestamp | undefined;
   layers: DesignJoinLayer[] | undefined;
   uncertain: string[] | undefined;
+  fit: DesignJoinsFit | undefined;
+  // A designer confirmed THIS rev (SetDesignJoins with confirm = true); any later save — the model's or
+  // an edit without confirm — clears it. The straps mode needs it.
+  confirmed: boolean | undefined;
+};
+
+// DesignJoinsFit — the garment's ease and waist, closed vocabularies (anything else is cleaned to "").
+export type DesignJoinsFit = {
+  ease: string | undefined;
+  waist: string | undefined;
 };
 
 export type OrderFactor =

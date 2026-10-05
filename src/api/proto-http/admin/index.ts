@@ -6455,13 +6455,19 @@ export type SuggestCalloutsResponse = {
   model: string | undefined;
 };
 
+// CalloutSuggestion — one ghost callout. Geometry follows TechCardCallout: LABEL 1 point (stitch, material), DIM 2
+// (section), POLYGON 4 (detail, artwork — a rectangle TL, TR, BR, BL), PIN 0.
 export type CalloutSuggestion = {
   id: string | undefined;
+  // stable: "bom:<lineKey>", "op:<operation number, or (index+1)*10 when unset>", "label:<garment label key>",
+  // "section:card", "detail:<aspect key>", "quiz:<question id>", "pic:<n>" (model-own)
   sourceId: string | undefined;
   sourceLabel: string | undefined;
   mediaId: number | undefined;
   kind: common_TechCardAnnotationKind | undefined;
   points: common_TechCardAnnotationPoint[] | undefined;
+  // label / marker position 0..1: a fallback beside the anchor only — the model gives no plate
+  // position, the client lays the plates out in the margins (R38)
   posX: googletype_Decimal | undefined;
   posY: googletype_Decimal | undefined;
   spec: string | undefined;
@@ -6469,7 +6475,10 @@ export type CalloutSuggestion = {
   parts: string[] | undefined;
   missing: string[] | undefined;
   fromData: boolean | undefined;
-  label?: string;
+  // the ghost plate's text: one line, ≤ 32 chars (R38). Data-backed: rendered from the row (material: the
+  // BOM name; stitch: "301 · side seam"; label: "main label"; section: "A–A layers"; detail: the aspect
+  // words "collar"); model-own: the model's text cut to 32. description stays the full text (used on ✓)
+  label: string | undefined;
 };
 
 export type UpdateTaskRequest = {
@@ -16135,6 +16144,10 @@ export type common_DesignRunParams = {
   extend: common_DesignExtendParams | undefined;
   // THE SOURCE PICTURE OF A VIDEO RUN (kind=video, B-32). Refused on every other kind (`video_forbidden`).
   video: common_DesignVideoParams | undefined;
+  // THE FLAT GENERATION MODE (kind=flat, flat-consistency 81-FINAL-MODES). Refused on every other kind
+  // (`flat_forbidden`). Absent = the photos route. A rerun inherits its parent's block (a different one
+  // is `mode_not_for_this_run`).
+  flat: common_DesignFlatParams | undefined;
 };
 
 // DesignThreedParams are the parameters of a turntable run.
@@ -16374,6 +16387,31 @@ export type common_DesignVideoParams = {
   sourceMediaId: number | undefined;
   duration: number | undefined;
   model: string | undefined;
+};
+
+// DesignFlatParams — how ONE flat press draws its sheet (81-FINAL-MODES).
+// - "" (or "photos"): the card's kept reference photos with roles and notes + the join list in words
+// when the card has one; TWO candidate sheets. The default.
+// - hand_flat: the card's own hand-drawn technical flats (structure_refs) are redrawn cleanly, the
+// missing views derived; the kept photos travel for fit only; no join list. TWO candidates.
+// - straps: the photos route with the designer-CONFIRMED join list (DesignJoins.confirmed at the
+// card's current rev); FOUR candidates.
+// Door refusals (all free, before any money): `unknown_flat_mode`, `structure_required` (hand_flat
+// without refs), `structure_forbidden` (refs on another mode), `structure_malformed` (a role that is not
+// front_flat | back_flat, a role or media twice), `structure_not_on_card` (not a TECHNICAL media of this
+// card), `joins_unconfirmed` (straps on a card whose list is missing or not confirmed at its current rev;
+// FailedPrecondition, metadata `joins_rev`), `mode_not_for_this_run` (a detail-only or per_view run, or
+// a rerun that changes its parent's mode, flats or views). The structure flats travel in the input
+// snapshot as the first references, with their roles.
+export type common_DesignFlatParams = {
+  mode: string | undefined;
+  structureRefs: common_DesignFlatStructureRef[] | undefined;
+};
+
+// DesignFlatStructureRef — one hand-drawn technical flat of the card and what it shows.
+export type common_DesignFlatStructureRef = {
+  mediaId: number | undefined;
+  role: string | undefined;
 };
 
 // DesignInputSnapshot is what the inputs WERE when the run started. Assembled by the SERVER only.
@@ -16828,6 +16866,10 @@ export type common_DesignJoins = {
   editedAt: wellKnownTimestamp | undefined;
   layers: common_DesignJoinLayer[] | undefined;
   uncertain: string[] | undefined;
+  fit: common_DesignJoinsFit | undefined;
+  // A designer confirmed THIS rev (SetDesignJoins with confirm = true); any later save — the model's or
+  // an edit without confirm — clears it. The straps mode needs it.
+  confirmed: boolean | undefined;
 };
 
 // DesignJoinItem — one edge, seam, band, closure, pocket or opening of the garment.
@@ -16853,6 +16895,11 @@ export type common_DesignJoinItem = {
   caughtInto: string[] | undefined;
   freeEdge: boolean | undefined;
   sharp: string[] | undefined;
+  size: number | undefined;
+  // READ-ONLY, server-computed: a designer added or changed this item (SetDesignJoins diff against the
+  // stored list; it stays set until the model rewrites the list). Its text is said to the flat model as a
+  // «designer:» check line.
+  edited: boolean | undefined;
 };
 
 // DesignJoinsConsistency — do the reference photos show ONE garment?
@@ -16878,6 +16925,12 @@ export type common_DesignJoinLayer = {
   // front | back | both | "" — the face this depth level is on. A layer is a DEPTH level per face,
   // not a panel: 0 = everything outermost, 1 = the cloth directly behind layer 0.
   face: string | undefined;
+};
+
+// DesignJoinsFit — the garment's ease and waist, closed vocabularies (anything else is cleaned to "").
+export type common_DesignJoinsFit = {
+  ease: string | undefined;
+  waist: string | undefined;
 };
 
 export type ListDesignRunsRequest = {
@@ -17925,6 +17978,9 @@ export type SetDesignJoinsRequest = {
   techCardId: number | undefined;
   joins: common_DesignJoins | undefined;
   expectedRev: number | undefined;
+  // The designer confirms the list as saved: the new rev is marked DesignJoins.confirmed (the straps
+  // flat mode needs it). A save without confirm clears the mark.
+  confirm: boolean | undefined;
 };
 
 export type SetDesignJoinsResponse = {
@@ -18838,9 +18894,14 @@ export interface AdminService {
   // refusals; 4 in flight and 30 calls per admin per hour SHARED with EnhanceText → ResourceExhausted.
   // Classified as a WRITE on tech_cards, like EnhanceText (a press spends the AI key).
   SuggestPrompts(request: SuggestPromptsRequest): Promise<SuggestPromptsResponse>;
-  // SuggestCallouts — the `suggest ✦` door of the ARTIFACTS sheet: callouts the SAVED card's own data implies
-  // (BOM, operations, pieces, labels, details, STUDIO quiz) placed on its flats by the model, plus at most a few
-  // the model sees on the picture (from_data=false). Nothing is stored; accepting one is the client's ordinary write.
+  // SuggestCallouts — the `suggest ✦` chip of the ARTIFACTS sheet (R36, T28): the callouts the SAVED card's own data
+  // implies (BOM lines, operations, garment labels, layered pieces, details aspects, STUDIO quiz decisions) and the sheet
+  // does not have yet, placed on the given flats by a vision model, plus up to 4 per flat the model sees on the picture
+  // itself (from_data = false). Spec, description and parts of a data-backed suggestion are rendered by the SERVER from
+  // its source row, never from model text. Nothing is stored; an identical request is answered from memory for ten
+  // minutes. Limits: no key → FailedPrecondition AI_NOT_CONFIGURED; no flat, > 4 flats, a flat that is not a technical
+  // picture of this card → InvalidArgument; 4 in flight and 30 calls per admin per hour SHARED with EnhanceText →
+  // ResourceExhausted. Classified as a WRITE on tech_cards, like SuggestPrompts (a press spends the AI key).
   SuggestCallouts(request: SuggestCalloutsRequest): Promise<SuggestCalloutsResponse>;
   // GetFulfillmentBoard returns the three columns of cards (compact order +
   // annotation summary), oldest order first within each column.

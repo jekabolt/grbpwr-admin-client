@@ -334,8 +334,9 @@ if (!chromium) {
     const b = await doorState();
     ck(b.mod === '', 'card 32 on the same row: the door is back to the default', JSON.stringify(b));
     await openDoor();
-    const layoutNow = await page.$eval('[role="radio"][aria-checked="true"]', (e) =>
-      e.textContent.trim(),
+    const layoutNow = await page.$eval(
+      '[role="radiogroup"][aria-label="layout"] [role="radio"][aria-checked="true"]',
+      (e) => e.textContent.trim(),
     );
     const sides = await page.$$eval('[data-flat-views] button[aria-pressed="true"]', (els) =>
       els.map((e) => e.textContent.trim()),

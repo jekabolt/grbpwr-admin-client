@@ -17,8 +17,11 @@ import Text from 'ui/components/text';
 
 import { serverSpeaksDesign } from './capability';
 import { GROUP_GAP } from './core';
+import { useFlatModeDraft } from './flat-input';
+import { joinsConfirmed } from './flat-mode';
 import {
   EMPTY_JOINS,
+  NECK_TYPES,
   VISIBILITY,
   VISIBILITY_GLYPH,
   addAbsence,
@@ -29,6 +32,7 @@ import {
   editAbsence,
   editItem,
   editLayer,
+  isNeckItem,
   joinLine,
   joinStructure,
   keepPhotos,
@@ -80,6 +84,7 @@ const messageOf = (e: unknown) => (e instanceof Error && e.message) || 'the join
 const READ_TIMEOUT_MS = 120_000;
 const SAVE_TIMEOUT_MS = 20_000;
 class TimedOut extends Error {}
+class ChangedElsewhere extends Error {}
 function timed<T>(ms: number, call: () => Promise<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = window.setTimeout(() => reject(new TimedOut('timed out')), ms);
@@ -158,6 +163,8 @@ export function FlatJoins({
   const [picking, setPicking] = useState<Set<number> | null>(null);
   const [askRejoin, setAskRejoin] = useState(false);
   const [questionsOpen, setQuestionsOpen] = useState(false);
+  /** «straps & openings» is chosen in the run row: the list must be confirmed before it runs. */
+  const strapsMode = useFlatModeDraft(card) === 'straps';
 
   /** The photos the read is given: references that carry a prompt role. */
   const photos = useMemo(
@@ -180,8 +187,12 @@ export function FlatJoins({
 
   if (unsupported.has(card)) return null;
 
-  /** One edit, written under CAS; a stale rev re-reads the band and applies the SAME edit once more. */
-  const apply = async (edit: JoinsEdit, quiet = false): Promise<string | null> => {
+  /**
+   * One edit, written under CAS; a stale rev re-reads the band and applies the SAME edit once more.
+   * `confirm` (the `confirm joins` door) marks the saved rev confirmed — and is NEVER retried on a
+   * stale rev: the fresh list is one the designer has not looked at, so it is not theirs to confirm.
+   */
+  const apply = async (edit: JoinsEdit, quiet = false, confirm = false): Promise<string | null> => {
     const base = band.joins ?? EMPTY_JOINS;
     const next = edit(base);
     setDraft(next);
@@ -195,11 +206,13 @@ export function FlatJoins({
               techCardId: card,
               joins: next,
               expectedRev: base.rev ?? 0,
+              confirm,
             }),
           )
         ).joins;
       } catch (e) {
         if (!isStale(e)) throw e;
+        if (confirm) throw new ChangedElsewhere('the list changed — look at it again');
         const fresh = (await rereadBandNow(qc, card)).joins ?? EMPTY_JOINS;
         const again = edit(fresh);
         setDraft(again);
@@ -209,6 +222,7 @@ export function FlatJoins({
               techCardId: card,
               joins: again,
               expectedRev: fresh.rev ?? 0,
+              confirm: false,
             }),
           )
         ).joins;
@@ -221,9 +235,11 @@ export function FlatJoins({
       const why =
         e instanceof TimedOut
           ? 'not saved — the save took too long'
-          : isStale(e)
-            ? 'not saved — the list changed elsewhere twice'
-            : `not saved — ${messageOf(e)}`;
+          : e instanceof ChangedElsewhere
+            ? `not confirmed — ${e.message}`
+            : isStale(e)
+              ? 'not saved — the list changed elsewhere twice'
+              : `not saved — ${messageOf(e)}`;
       if (!quiet && cardOnScreen(card)) showMessage(why, 'error');
       return why;
     } finally {
@@ -308,7 +324,12 @@ export function FlatJoins({
     body: ReactNode,
     value: string,
     onDrop: (() => void) | null,
-    opts: { lead?: ReactNode; item?: common_DesignJoinItem; question?: boolean } = {},
+    opts: {
+      lead?: ReactNode;
+      item?: common_DesignJoinItem;
+      question?: boolean;
+      trail?: ReactNode;
+    } = {},
   ) => (
     <div key={key} data-join-row={key} className='flex min-w-0 items-baseline gap-2 py-1'>
       {opts.lead}
@@ -330,6 +351,7 @@ export function FlatJoins({
           {body}
         </span>
       )}
+      {editing?.key !== key && opts.trail}
       {onDrop && !writesOff && editing?.key !== key && (
         <button
           type='button'
@@ -361,6 +383,27 @@ export function FlatJoins({
       () => void apply(dropItem(id)),
       {
         item: it,
+        trail: isNeckItem(it) ? (
+          /* THE NECK SHAPE — the server's CHECK sentence names it («a HIGH CREW neck, NOT a V»). */
+          <select
+            data-join-neck={id}
+            aria-label='neck shape'
+            title='neck shape'
+            value={
+              NECK_TYPES.includes((it.type ?? '') as (typeof NECK_TYPES)[number]) ? it.type : ''
+            }
+            disabled={locked}
+            onChange={(e) => void apply(editItem(id, { type: e.target.value }))}
+            className='shrink-0 cursor-pointer appearance-none border-0 bg-transparent px-0 text-micro uppercase tracking-label text-labelColor underline hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor disabled:cursor-default disabled:no-underline'
+          >
+            <option value=''>shape ▾</option>
+            {NECK_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        ) : undefined,
         lead: layered ? (
           <button
             type='button'
@@ -574,6 +617,28 @@ export function FlatJoins({
           </Pill>
         </button>
       )}
+      {/* STRAPS & OPENINGS RUNS ONLY ON A CONFIRMED LIST — the door saves it as is, confirmed. */}
+      {strapsMode &&
+        !!joins &&
+        !isReading &&
+        (joinsConfirmed(joins) ? (
+          <span data-joins-confirmed=''>
+            <Pill tone='ok'>confirmed</Pill>
+          </span>
+        ) : (
+          !writesOff &&
+          items.length + absences.length > 0 && (
+            <button
+              type='button'
+              data-joins-confirm=''
+              disabled={locked}
+              title='the list is right — straps & openings may run on it'
+              onClick={() => void apply((j) => j, false, true)}
+            >
+              <Pill tone='attention'>confirm joins</Pill>
+            </button>
+          )
+        ))}
       {!writesOff && !isReading && (photos.length > 0 || !!joins) && (
         <button
           type='button'

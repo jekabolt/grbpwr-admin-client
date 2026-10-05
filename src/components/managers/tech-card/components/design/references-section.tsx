@@ -946,7 +946,12 @@ export function ReferencesSection({
         disabled={disabled}
         thumbOf={(id) => thumbUrl(mediaById.get(id))}
       />
-      <FlatRunRow band={band} techCardId={techCardId} disabled={disabled} />
+      <FlatRunRow
+        band={band}
+        techCardId={techCardId}
+        disabled={disabled}
+        thumbOf={(id) => thumbUrl(mediaById.get(id))}
+      />
 
       {/* ПРИЁМНИК РЕКОЛА (T-10). Видимого органа у него нет — он рисует только вопрос про описание
           изделия, и только когда описание уже непустое. Внутри блока, не сворачивать. */}

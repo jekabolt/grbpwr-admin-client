@@ -1,11 +1,14 @@
 import { useQueryClient, type QueryClient, type QueryFunction } from '@tanstack/react-query';
 import type { GetDesignBandResponse, common_DesignRunParams } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
+import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useFormContext } from 'react-hook-form';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
+import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { ViewSwitch } from 'ui/components/view-switch';
 import { flattenFieldErrors, revealField } from 'utils/field-errors';
@@ -33,12 +36,27 @@ import {
   isDefaultFlatChoice,
   patchFlatInput,
   readFlatInput,
+  setFlatModeDraft,
   tickDetail,
   tickView,
   useFlatInput,
   type FlatAsk,
   type FlatLayout,
 } from './flat-input';
+import {
+  DEFAULT_FLAT_MODE,
+  FLAT_MODE_WORD,
+  autoStructure,
+  flatParamsFor,
+  flatRefusalWords,
+  joinsConfirmed,
+  liveStructure,
+  pickStructure,
+  suggestsStraps,
+  type FlatMode,
+  type StructurePick,
+  type StructureRole,
+} from './flat-mode';
 import type { RunRefusal as ServerRefusal } from './generation/refusal';
 import { useStartRun } from './generation/use-generation';
 import { WhatModelGetsModal } from './modals';
@@ -107,6 +125,19 @@ const LAYOUT_OPTIONS = [
 ];
 type Layout = FlatLayout;
 
+const STRUCTURE_ROLES: { role: StructureRole; label: string }[] = [
+  { role: 'front_flat', label: 'front' },
+  { role: 'back_flat', label: 'back' },
+];
+
+/** A local stop that reads like the server's refusal of the same thing (nothing was sent). */
+const localRefusal = (reason: string): ServerRefusal => ({
+  words: reason,
+  status: 0,
+  clientRequestId: '',
+  reason,
+});
+
 /** Утверждение карточки замораживает её (`index.tsx`, `frozen`); строка — проводная. */
 const RELEASED = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 
@@ -158,6 +189,8 @@ function flatSnapshot(
     refs,
     callouts,
     details,
+    // The join list the run freezes (its rev, and whether that rev is confirmed — straps needs it).
+    joins: [band?.joins?.rev ?? 0, !!band?.joins?.confirmed],
   };
 }
 
@@ -239,10 +272,13 @@ export function FlatRunRow({
   band,
   techCardId,
   disabled,
+  thumbOf,
 }: {
   band: GetDesignBandResponse;
   techCardId: number;
   disabled?: boolean;
+  /** The picture of a media id as the input already resolves it (library + band). */
+  thumbOf?: (mediaId: number) => string;
 }): JSX.Element {
   const [wmgOpen, setWmgOpen] = useState(false);
   const speaks = serverSpeaksDesign();
@@ -265,6 +301,10 @@ export function FlatRunRow({
   };
   /** «one picture» по умолчанию (T23, D-19; T19): виды приходят одним листом и режутся сами (`autoSplit`). */
   const [layout, setLayout] = useState<Layout>(initialDraft.layout);
+  /** The flat mode (`flat-mode.ts`): photos by default; the others behind `custom`. */
+  const [mode, setMode] = useState<FlatMode>(initialDraft.mode);
+  /** «from my flat»: which technical flat is the front, which the back. */
+  const [structure, setStructure] = useState<StructurePick[]>(initialDraft.structure);
   /** Дверь `custom` у GENERATE (T18): закрыта при каждом монтировании — умолчание не просит решений. */
   const [customOpen, setCustomOpen] = useState(false);
   /* ЧЕРНОВИК ПРИНАДЛЕЖИТ КАРТОЧКЕ (гейт волны 3, W1): ряд, не перемонтированный при смене
@@ -277,9 +317,16 @@ export function FlatRunRow({
     setViews(seed.views);
     setDetailTicks(seed.detailTicks);
     setLayout(seed.layout);
+    setMode(seed.mode);
+    setStructure(seed.structure);
     setCustomOpen(false);
   }
-  const customChoice = !isDefaultFlatChoice({ views, detailTicks, layout });
+  /* The JOINS group reads the mode (its `confirm joins` door stands only for straps & openings). */
+  useEffect(() => {
+    setFlatModeDraft(techCardId, mode);
+  }, [techCardId, mode]);
+  useEffect(() => () => setFlatModeDraft(techCardId, DEFAULT_FLAT_MODE), [techCardId]);
+  const customChoice = !isDefaultFlatChoice({ views, detailTicks, layout, mode, structure });
   const bench = useMemo(() => readBench(band, 'flat'), [band]);
 
   const tickedSides = ACTIVE_VIEWS.filter((v) => views[v]);
@@ -379,6 +426,37 @@ export function FlatRunRow({
    * перевод в auxiliary, решить конфликт — ведёт слово чипа рядом с `▾`.
    */
   const form = useFormContext<TechCardFormData>();
+
+  /* ═══ THE CARD'S TECHNICAL FLATS — what «from my flat» redraws (the server accepts only these). The
+     form is what the next save writes, and GENERATE saves first, so the run sees this same list. */
+  const techRows = useWatch({ control: form.control, name: 'technicalMedia' });
+  const techIds = useMemo(
+    () =>
+      [...new Set(((techRows ?? []) as { mediaId?: number }[]).map((r) => r?.mediaId ?? 0))].filter(
+        (id) => id > 0,
+      ),
+    [techRows],
+  );
+  const { data: techCard } = useTechCard(techCardId > 0 ? techCardId : undefined);
+  const techThumb = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const rm of techCard?.resolvedTechnicalMedia ?? []) {
+      const id = rm.media?.id ?? 0;
+      const url = rm.media?.media?.thumbnail?.mediaUrl || rm.media?.media?.fullSize?.mediaUrl || '';
+      if (id > 0 && url) m.set(id, url);
+    }
+    return m;
+  }, [techCard?.resolvedTechnicalMedia]);
+  const structureNow = mode === 'hand_flat' ? liveStructure(structure, techIds) : [];
+  const chooseMode = (next: FlatMode) => {
+    setMode(next);
+    // The two modes draw all the views on ONE picture; a detail sketch runs photos.
+    if (next !== 'photos') setLayout('one');
+    if (next === 'hand_flat' && liveStructure(structure, techIds).length === 0) {
+      setStructure(autoStructure(techIds));
+    }
+  };
+
   const openSaveDoor = async () => {
     if (refused === 'invalid') {
       await form.trigger();
@@ -404,6 +482,27 @@ export function FlatRunRow({
      снимает роли — промпт в этот момент наполовину старый. */
   const choiceOff = writesOff || busy || input.clearing;
   const noViews = ticked.length === 0;
+  const joinsOk = joinsConfirmed(band.joins);
+  const modeGate =
+    mode === 'photos'
+      ? null
+      : tickedDetails.length > 0
+        ? 'this mode draws views, not details'
+        : layout === 'per_view'
+          ? 'this mode draws one picture'
+          : mode === 'hand_flat'
+            ? techIds.length === 0
+              ? 'no technical flat on this card'
+              : structureNow.length === 0
+                ? 'pick a front or back flat'
+                : null
+            : !band.joins
+              ? 'no join list yet'
+              : !joinsOk
+                ? 'confirm the joins first'
+                : null;
+  const strapsSuggested =
+    mode !== 'straps' && !choiceOff && tickedDetails.length === 0 && suggestsStraps(band.joins);
   /* Ряд (`GenerateRow`) сам спрашивает `serverSpeaksDesign()` ПЕРВЫМ и печатает свою формулировку;
      ветка ниже остаётся ЗАМКОМ ПРОВОДА: `submit` заперт этой же переменной. */
   const gateReason = !speaks
@@ -416,7 +515,7 @@ export function FlatRunRow({
           ? moodReason
           : noViews
             ? 'no views ticked — tick at least one'
-            : null;
+            : modeGate;
 
   /** Карточка на экране СЕЙЧАС — для перепроверки после ожидания брифа (R2). */
   const cardNow = useRef(techCardId);
@@ -435,7 +534,13 @@ export function FlatRunRow({
     const wasOn = autosave.status !== 'off';
     // Запрос — то, что на экране В МОМЕНТ щелчка; на время ожидания выбор заперт (`choiceOff`), а
     // сам выбор лежит в хранилище карточки: ряд, вернувшийся после смены шага, рисует его (m2).
-    const ask: FlatAsk = { views: { ...views }, detailTicks: { ...detailTicks }, layout };
+    const ask: FlatAsk = {
+      views: { ...views },
+      detailTicks: { ...detailTicks },
+      layout,
+      mode,
+      structure: [...structureNow],
+    };
     const params: common_DesignRunParams = {
       views: [...ticked],
       detailSlotIds: [...tickedDetailIds],
@@ -462,6 +567,8 @@ export function FlatRunRow({
       inpaint: undefined,
       extend: undefined,
       video: undefined,
+      // THE MODE (81-FINAL-MODES). Photos sends nothing: an absent block is photos.
+      flat: flatParamsFor(mode, structureNow),
     };
     patchFlatInput(card, { run: 'saving', refused: null, serverRefusal: null, ask });
     let refusal: ServerRefusal | null = null;
@@ -532,6 +639,24 @@ export function FlatRunRow({
         }
         return;
       }
+      /* THE MODE'S OWN PRECONDITIONS, ON THE SAVED CARD AND THE FRESH BAND — refused here for free
+         rather than sent to be refused: a flat removed from the card while it saved, a list edited
+         (and so unconfirmed) in another tab. */
+      if (mode === 'hand_flat') {
+        const onCard = new Set(
+          ((form.getValues('technicalMedia') ?? []) as { mediaId?: number }[]).map(
+            (r) => r?.mediaId ?? 0,
+          ),
+        );
+        if ((params.flat?.structureRefs ?? []).some((r) => !onCard.has(r.mediaId ?? 0))) {
+          refusal = localRefusal('structure_gone');
+          return;
+        }
+      }
+      if (mode === 'straps' && !joinsConfirmed(freshBand.joins)) {
+        refusal = localRefusal('joins_unconfirmed');
+        return;
+      }
       patchFlatInput(card, { run: 'starting' });
       // Ответ ждётся здесь, а не в наблюдателе ряда: «run started», сброс леджера, отказ сервера и
       // снятие занятости случаются и тогда, когда ряда уже нет (`useStartRun`).
@@ -541,6 +666,10 @@ export function FlatRunRow({
         params,
         snapshot: flatSnapshot(freshBand, now, params.detailSlotIds ?? []),
       });
+      // The list may have moved (edited elsewhere): the band is re-read so the door shows it.
+      if (refusal?.reason === 'joins_unconfirmed') {
+        void qc.invalidateQueries({ queryKey: designKeys.band(card) });
+      }
     } finally {
       // Отказ сервера — в хранилище карточки, до прочтения или следующего GENERATE; с ним остаются
       // чипы отказанного запроса. Без отказа запрос отпущен.
@@ -578,15 +707,36 @@ export function FlatRunRow({
             <FlatCustom
               /* Ни одной галки — GENERATE заперт словами «tick at least one», и чипы обязаны быть
                  видны: закрытая панель здесь была бы тупиком. */
-              open={customOpen || noViews}
+              open={customOpen || noViews || (mode === 'hand_flat' && structureNow.length === 0)}
               onToggle={() => setCustomOpen((v) => !v)}
               modified={customChoice}
               summary={flatChoiceSummary(
-                { views, detailTicks, layout },
+                { views, detailTicks, layout, mode, structure: structureNow },
                 tickedDetails.map((d) => displayDetailName(bench.details, d)),
               )}
               after={
                 <>
+                  {/* STRAPS & OPENINGS WAITS FOR THE CONFIRMED LIST — one quiet word; the door
+                      is in the JOINS header right above. */}
+                  {mode === 'straps' && !joinsOk && (
+                    <span data-flat-unconfirmed='' title='confirm the joins first'>
+                      <Pill tone='mut'>unconfirmed</Pill>
+                    </span>
+                  )}
+                  {/* THE LIST HAS A STRAP OR AN OPENING THAT RUNS ON — the mode is suggested. */}
+                  {strapsSuggested && (
+                    <button
+                      type='button'
+                      data-flat-suggest='straps'
+                      title='a strap or an opening runs on into another part — draw it with the confirmed joins'
+                      onClick={() => {
+                        chooseMode('straps');
+                        setCustomOpen(true);
+                      }}
+                    >
+                      <Pill tone='attention'>straps & openings?</Pill>
+                    </button>
+                  )}
                   {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — единственное место, где человек видит ПОЛНЫЙ состав запроса
                   до того, как заплатит (SPEC п.4: опись живёт в модалке, не на карточке).
                   ⚠ ЭТА ДВЕРЬ СТОИТ РЯДОМ С GENERATE, А НЕ У ПРАВОГО КРАЯ (R2 п.20), слово
@@ -605,6 +755,39 @@ export function FlatRunRow({
                   RIGHT»). Ярлыка нет: чипы говорят сами. Раскладка имеет смысл от двух видов; при
                   одном она ничего не меняет и молчит (`title`), а не пропадает. Детали — здесь же,
                   рядом с видами: галка детали снимает виды (T07), и это видно в одном месте. */}
+              {/* THE MODE — first in the panel: what the sheet is drawn from. */}
+              <span className='flex' style={ROW_CONTROL_STYLE} data-flat-mode={mode}>
+                <ViewSwitch
+                  label='mode'
+                  value={mode}
+                  disabled={choiceOff}
+                  onChange={chooseMode}
+                  className='h-full'
+                  options={[
+                    { value: 'photos', label: FLAT_MODE_WORD.photos, hint: 'the reference photos' },
+                    {
+                      value: 'hand_flat',
+                      label: FLAT_MODE_WORD.hand_flat,
+                      hint:
+                        techIds.length === 0
+                          ? 'no technical flat on this card'
+                          : tickedDetails.length > 0
+                            ? 'a detail sketch runs from photos'
+                            : 'your technical flats, redrawn clean',
+                      disabled: techIds.length === 0 || tickedDetails.length > 0,
+                    },
+                    {
+                      value: 'straps',
+                      label: FLAT_MODE_WORD.straps,
+                      hint:
+                        tickedDetails.length > 0
+                          ? 'a detail sketch runs from photos'
+                          : 'the photos and the confirmed joins',
+                      disabled: tickedDetails.length > 0,
+                    },
+                  ]}
+                />
+              </span>
               <span
                 className='flex'
                 style={ROW_CONTROL_STYLE}
@@ -617,7 +800,15 @@ export function FlatRunRow({
                 <ViewSwitch
                   label='layout'
                   value={layout}
-                  options={LAYOUT_OPTIONS}
+                  options={
+                    mode === 'photos'
+                      ? LAYOUT_OPTIONS
+                      : LAYOUT_OPTIONS.map((o) =>
+                          o.value === 'per_view'
+                            ? { ...o, disabled: true, hint: 'this mode draws one picture' }
+                            : o,
+                        )
+                  }
                   disabled={choiceOff}
                   onChange={setLayout}
                   className='h-full'
@@ -657,7 +848,7 @@ export function FlatRunRow({
                       key={`d:${id}`}
                       selected={on}
                       pressed={on}
-                      disabled={choiceOff}
+                      disabled={choiceOff || mode !== 'photos'}
                       tone={proposed ? 'attention' : undefined}
                       data-proposed={proposed || undefined}
                       style={ROW_CONTROL_STYLE}
@@ -673,6 +864,61 @@ export function FlatRunRow({
                   );
                 })}
               </ChipRow>
+              {/* «FROM MY FLAT»: the card's technical flats, each one front or back (one per side). */}
+              {mode === 'hand_flat' && techIds.length > 0 && (
+                <div data-flat-structure='' className='flex basis-full flex-wrap items-start gap-3'>
+                  {techIds.map((id) => {
+                    const role = structureNow.find((p) => p.mediaId === id)?.role ?? '';
+                    const url = techThumb.get(id) || thumbOf?.(id) || '';
+                    return (
+                      <div
+                        key={id}
+                        data-flat-structure-tile={id}
+                        data-structure-role={role}
+                        className='flex flex-col items-center gap-1'
+                      >
+                        <div
+                          className={cn(
+                            'flex size-16 items-center justify-center border bg-bgColor',
+                            role ? 'border-textColor' : 'border-borderColor',
+                          )}
+                        >
+                          {url ? (
+                            <img src={url} alt='' className='size-full object-contain' />
+                          ) : (
+                            <Text size='micro' variant='label' component='span'>
+                              #{id}
+                            </Text>
+                          )}
+                        </div>
+                        <span className='flex gap-2'>
+                          {STRUCTURE_ROLES.map(({ role: r, label }) => (
+                            <button
+                              key={r}
+                              type='button'
+                              data-structure-pick={r}
+                              aria-pressed={role === r}
+                              disabled={choiceOff}
+                              title={
+                                role === r ? `the ${label} · click: neither` : `use as the ${label}`
+                              }
+                              onClick={() => setStructure(pickStructure(structureNow, id, r))}
+                              className={cn(
+                                'text-nano uppercase tracking-label',
+                                role === r
+                                  ? 'text-textColor'
+                                  : 'text-labelColor underline hover:text-textColor',
+                              )}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </FlatCustom>
           }
         />
@@ -729,17 +975,40 @@ export function FlatRunRow({
       )}
       {/* ОТКАЗ ЗАПУСКА — СТОЙКАЯ ПОЛОСА, НЕ СНЕКБАР (CONTRACT §E), тот же орган, что у FABRIC RENDER
           и 3D: слова сервера дословно, «nothing was charged» только когда сервер ОТВЕТИЛ. */}
-      <RunRefusal
-        refusal={input.serverRefusal}
-        onDismiss={() =>
+      {(() => {
+        const dismiss = () =>
           patchFlatInput(
             techCardId,
             readFlatInput(techCardId).run === null
               ? { serverRefusal: null, ask: null }
               : { serverRefusal: null },
-          )
-        }
-      />
+          );
+        /* A MODE REFUSAL IS ONE PLAIN LINE in short words — all of them are free (nothing booked). */
+        const short = flatRefusalWords(input.serverRefusal?.reason);
+        return short ? (
+          <CalloutBox tone='error'>
+            <div
+              data-flat-refusal={input.serverRefusal?.reason}
+              className='flex items-center gap-2'
+            >
+              <Text size='micro' component='span' className='min-w-0 flex-1 normal-case'>
+                <b>not started</b> · {short}
+              </Text>
+              <button
+                type='button'
+                onClick={dismiss}
+                className='shrink-0 text-labelColor hover:text-textColor focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+              >
+                <Text size='nano' variant='uppercase' tracking='label' component='span'>
+                  dismiss
+                </Text>
+              </button>
+            </div>
+          </CalloutBox>
+        ) : (
+          <RunRefusal refusal={input.serverRefusal} onDismiss={dismiss} />
+        );
+      })()}
       <WhatModelGetsModal
         open={wmgOpen}
         onOpenChange={setWmgOpen}
