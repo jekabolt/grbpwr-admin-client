@@ -17511,11 +17511,11 @@ export type DeleteDesignAssetPlacementResponse = {
 export type DraftDesignIdeaRequest = {
   techCardId: number | undefined;
   clientRequestId: string | undefined;
-  // ASK FOR THE STRUCTURED ANSWER instead of the three-section prose.
-  // ABSENT (false) IS THE OLD BEHAVIOUR, BYTE FOR BYTE: the same system prompt, the same user
-  // prompt, no json mode, no token ceiling, and `output_text` still holds the prose the client
-  // splits by its three titles. A client that predates this field keeps working unchanged, which
-  // is the entire reason this is a flag on the existing verb and not a second verb.
+  // ASK FOR THE STRUCTURED ANSWER instead of the prose description.
+  // ABSENT (false): no json mode, no token ceiling; `output_text` holds the concept & construction
+  // description itself (T39), written from the board pictures, the card facts and the moodboard quiz
+  // decisions. It needs ≥ 1 attached board picture OR ≥ 1 non-skipped quiz answer (a quiz-only card
+  // is drafted text-only, 62-DEEP-FIXES D3); otherwise FailedPrecondition board_has_no_pictures.
   // WHY NOT A NEW `kind`. Run kinds are a vocabulary every client maps — the bench, the history,
   // the artifacts panel each hold their own table of them — so a new member would ripple through
   // all of them to say something none of them act on: this is still one text run on the moodboard,
@@ -17730,6 +17730,9 @@ export type DesignQuizAnswer = {
   freeText: string | undefined;
   skipped: boolean | undefined;
   answeredAt: wellKnownTimestamp | undefined;
+  // stale — OUTPUT ONLY, ignored on save (62-DEEP-FIXES D1): the card's structured facts (category,
+  // fit, gender, details, BOM names/compositions, base-size measurements) changed since this answer
+  // was saved. Downstream prompts treat it as unconfirmed; re-saving the same answer makes it fresh.
   stale: boolean | undefined;
 };
 
@@ -17741,7 +17744,7 @@ export type GetDesignQuizAnswersResponse = {
   answers: DesignQuizAnswer[] | undefined;
 };
 
-// SaveDesignQuizAnswersRequest carries the FULL list; the stored list is replaced by it.
+// SaveDesignQuizAnswersRequest carries the rows to upsert (or forget, when sent empty); see the rpc.
 export type SaveDesignQuizAnswersRequest = {
   techCardId: number | undefined;
   answers: DesignQuizAnswer[] | undefined;
@@ -19493,8 +19496,10 @@ export interface AdminService {
   SuggestDesignPartsCard(request: SuggestDesignPartsCardRequest): Promise<SuggestDesignPartsCardResponse>;
   // GetDesignQuizAnswers — every quiz answer stored on the card, in display order.
   GetDesignQuizAnswers(request: GetDesignQuizAnswersRequest): Promise<GetDesignQuizAnswersResponse>;
-  // SaveDesignQuizAnswers REPLACES the card's whole answer list with the one sent (single writer:
-  // the client always sends the full list). Returns the stored list.
+  // SaveDesignQuizAnswers MERGES the sent answers into the card's stored list by question id: a sent
+  // row is upserted (stamped with the card's current fingerprint, so it reads fresh), a row sent EMPTY
+  // (no selection, no free text, not skipped) forgets that id, every stored row not sent stays.
+  // `stale` on a sent row is ignored. Returns the stored list.
   SaveDesignQuizAnswers(request: SaveDesignQuizAnswersRequest): Promise<SaveDesignQuizAnswersResponse>;
   // GetWorkshopSettings returns «дом настроек цеха» (Ф2.5, 0272): the shop-floor constants that
   // belong to the ЦЕХ itself and not to any one card or раскладка. Первый жилец is the cutting
