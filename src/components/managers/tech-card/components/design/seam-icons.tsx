@@ -255,14 +255,14 @@ export function isPaletteKey(part: string): boolean {
 const plyStyle = {
   fill: 'none',
   stroke: 'currentColor',
-  strokeWidth: 4,
+  strokeWidth: 7,
   strokeLinecap: 'round' as const,
   strokeLinejoin: 'round' as const,
 };
 const threadStyle = {
   fill: 'none',
   stroke: 'currentColor',
-  strokeWidth: 1.6,
+  strokeWidth: 3,
   strokeLinecap: 'round' as const,
   strokeLinejoin: 'round' as const,
 };
@@ -271,7 +271,7 @@ const sleeveStyle = {
   fill: 'currentColor',
   fillOpacity: 0.25,
   stroke: 'currentColor',
-  strokeWidth: 2,
+  strokeWidth: 3,
   strokeLinecap: 'round' as const,
   strokeLinejoin: 'round' as const,
 };
@@ -281,7 +281,7 @@ function Ply1({ d }: { d: string }): JSX.Element {
 }
 
 function Ply2({ d }: { d: string }): JSX.Element {
-  return <path {...plyStyle} d={d} strokeOpacity={0.42} />;
+  return <path {...plyStyle} d={d} strokeOpacity={0.65} />;
 }
 
 function NeedleV({ x, y1, y2 }: { x: number; y1: number; y2: number }): JSX.Element {
@@ -366,7 +366,7 @@ function Bar({
   x,
   y,
   width,
-  height = 7,
+  height = 8,
 }: {
   x: number;
   y: number;
@@ -493,7 +493,7 @@ function SeamGlyph({ kind }: { kind: SeamKind }): JSX.Element {
         <>
           <Ply1 d='M4 20 H70' />
           <Ply2 d='M116 20 H44' />
-          <Bar x={44} y={26} width={26} height={4} />
+          <Bar x={44} y={26} width={26} />
         </>
       );
     case 'sm_flatlock':

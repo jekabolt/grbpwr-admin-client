@@ -728,8 +728,8 @@ export function SeamPartPictogram({
   size?: number;
 }): JSX.Element {
   const stitches = SEAM_STITCH_CLASSES[kind];
-  const sectionY = stitches.length ? 46 : 28;
-  const firstStripY = stitches.length > 1 ? 22 : 31;
+  const sectionY = stitches.length > 1 ? 48 : stitches.length ? 45 : 28;
+  const firstStripY = stitches.length > 1 ? 5 : 16;
   return (
     <svg
       aria-hidden
@@ -742,7 +742,7 @@ export function SeamPartPictogram({
       overflow='visible'
     >
       {stitches.map((iso, index) => (
-        <StitchPictogram key={iso} iso={iso} x={3} y={firstStripY + index * 11} height={7} />
+        <StitchPictogram key={iso} iso={iso} x={4} y={firstStripY + index * 19} width={56} />
       ))}
       <g transform={`translate(0 ${sectionY})`}>
         <SeamIcon kind={kind} size={64} band />
