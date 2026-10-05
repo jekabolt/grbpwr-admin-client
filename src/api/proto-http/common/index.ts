@@ -5776,6 +5776,10 @@ export type DesignAssetPlacement = {
   note: string | undefined;
   setBy: string | undefined;
   setAt: wellKnownTimestamp | undefined;
+  // The picture it sits on, so a client can carry a placement whose picture left the band (old
+  // flats drop out of the paged runs/batches lists). Filled by GetDesignBand with media resolved;
+  // unset on the Set response and when the picture row is gone.
+  picture: DesignPicture | undefined;
 };
 
 // DesignAssetBinding — THE FABRIC OF ONE (COLOURWAY, SLOT): which asset colourway N wears on BOM

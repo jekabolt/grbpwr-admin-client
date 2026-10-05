@@ -268,5 +268,55 @@ if (existsSync(FLAT)) {
   }
 } else console.log(`  skip real flat (${FLAT} not here)`);
 
+// T29b · a mark on an OLD flat that left the band's paged lists: the picture rides with the mark.
+// Live case (beta card 49): mark 1 on picture 112 (old back flat, in no band row); the sides hold
+// 160..163, all cropped from sheet 121; the maps were already carried (no base-media match).
+{
+  const flatPic = (id, view, from, media) => ({
+    id,
+    kind: 'flat',
+    ghostView: view,
+    derivedFrom: from,
+    replacedBy: 0,
+    media: { id: media },
+  });
+  const cur = [
+    ['front', 160],
+    ['back', 161],
+    ['side_l', 162],
+    ['side_r', 163],
+  ];
+  const mk = (old) => ({
+    bench: cur.map(([view, id]) => ({
+      viewKey: view,
+      pictureId: id,
+      picture: flatPic(id, view, 121, 1000 + id),
+    })),
+    runs: [{ pictures: [flatPic(121, '', 0, 1121)] }],
+    batches: [],
+    outputs: [],
+    assetPlacements: [
+      { id: 1, assetId: 27, pictureId: 112, annotation: { points: [] }, picture: old },
+    ],
+  });
+  const sides = cur.map(([view, id]) => ({ view, pictureId: id, mapBaseMediaId: 1000 + id }));
+  const viewsOf = (band) => [...m.strayMarks(band, sides).keys()].join(',');
+  ck(
+    viewsOf(mk(flatPic(112, 'back', 0, 1112))) === 'back',
+    'stray mark off the band: ghost view → back',
+    viewsOf(mk(flatPic(112, 'back', 0, 1112))),
+  );
+  // 112 is the sheet's ancestor (121 derived from it): every side claims it strongly → ghost narrows.
+  const anc = mk(flatPic(112, 'back', 0, 1112));
+  anc.runs[0].pictures[0].derivedFrom = 112;
+  ck(
+    viewsOf(anc) === 'back',
+    'stray mark claimed by every side: ghost view narrows to back',
+    viewsOf(anc),
+  );
+  const none = mk(undefined);
+  ck(viewsOf(none) === '', 'stray mark without its picture is left alone', viewsOf(none));
+}
+
 console.log(bad ? `\n${bad} FAILED` : '\nall ok');
 process.exit(bad ? 1 : 0);

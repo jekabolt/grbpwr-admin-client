@@ -110,10 +110,12 @@ export function flatPictureIds(band: GetDesignBandResponse): Map<string, number>
  *
  *   stray   its picture stands in no bench row at all (any kind, any colourway) — a picture still
  *           standing somewhere is that slot's own mark and is never moved;
- *   known   its picture is in the band (bench, runs, batches, outputs) — its pixels are needed;
+ *   known   its picture is in the band (bench, runs, batches, outputs) or rides with the mark
+ *           (`placement.picture`, T29b) — its pixels are needed;
  *   mine    the side's saved colour map was painted on that picture (`mapBaseMediaId` = its media),
  *           or the side's flat is an edit / crop of it (replaced_by, derived_from), or — the
- *           weakest — its ghost view is this side. A picture claimed by several sides is nobody's.
+ *           weakest — its ghost view is this side. Several strong claims are narrowed by the ghost
+ *           view; a picture still claimed by several sides is nobody's.
  */
 export type StrayMark = { placement: common_DesignAssetPlacement; picture: common_DesignPicture };
 
@@ -139,6 +141,9 @@ export function strayMarks(
   (band.runs ?? []).forEach((r) => (r.pictures ?? []).forEach(add));
   (band.batches ?? []).forEach((b) => (b.pictures ?? []).forEach(add));
   (band.outputs ?? []).forEach((o) => add(o.picture));
+  // T29b · the picture each mark sits on rides WITH the mark (GetDesignBand fills it), so a mark on an
+  // old flat that left the paged runs/batches lists is still known. Added LAST: a band row wins.
+  marks.forEach((m) => add(m.picture));
 
   /** `old` is an ancestor of `cur` through edits (replaced_by) or crops/flattens (derived_from). */
   const leadsTo = (old: common_DesignPicture, cur: number): boolean => {
@@ -162,8 +167,8 @@ export function strayMarks(
   for (const placement of marks) {
     const pid = placement.pictureId ?? 0;
     if (pid <= 0 || standing.has(pid)) continue;
-    const picture = pics.get(pid);
-    if (!picture) continue;
+    const picture = pics.get(pid) ?? placement.picture;
+    if (!picture || (picture.id ?? 0) <= 0) continue;
     const media = picture.media?.id ?? 0;
     const strong = sides.filter(
       (s) =>
@@ -171,8 +176,11 @@ export function strayMarks(
         ((media > 0 && s.mapBaseMediaId === media) || leadsTo(picture, s.pictureId)),
     );
     const ghost = normaliseViewKey(picture.ghostView);
+    const byGhost = (list: typeof sides) => list.filter((s) => s.pictureId > 0 && s.view === ghost);
+    // Several strong claims (e.g. the old flat is an ancestor of ONE sheet every side was cropped
+    // from) are narrowed by the ghost view before giving up; none falls back to the ghost view.
     const claim =
-      strong.length > 0 ? strong : sides.filter((s) => s.pictureId > 0 && s.view === ghost);
+      strong.length === 1 ? strong : strong.length > 1 ? byGhost(strong) : byGhost(sides);
     if (claim.length !== 1) continue;
     const view = claim[0].view;
     const list = out.get(view) ?? [];

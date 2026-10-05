@@ -11,3 +11,4 @@ export {
   packHex,
 } from 'components/managers/tech-card/components/design/paint/map-model';
 export { decode as decodePng } from 'fast-png';
+export { strayMarks } from 'components/managers/tech-card/components/design/paint/artworks';
