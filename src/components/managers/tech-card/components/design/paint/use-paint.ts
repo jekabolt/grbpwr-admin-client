@@ -787,7 +787,7 @@ export class PaintSession {
               moved = true;
             }
           } catch {
-            /* the old paint is unreadable: the side starts unpainted, its old map is dropped */
+            /* unreadable now (maybe only for now): the saved map stays, the side opens unpainted */
           }
         }
         if (this.views.get(view) !== v) return;
@@ -797,9 +797,11 @@ export class PaintSession {
         v.labels = labels;
         v.status = 'ready';
         v.rev += 1;
-        // The carried paint (or the drop of the old map) saves like any gesture — once.
+        // The carried paint saves like any gesture — once. Nothing carried: the saved map is kept
+        // (a passing read failure must not delete somebody's paint) unless it is confirmed gone;
+        // the side's next own gesture replaces it.
         if (carry) {
-          v.dirty = true;
+          if (moved || saved?.gone) v.dirty = true;
           const key = `${view}:${saved?.mediaId ?? 0}:${saved?.baseMediaId ?? 0}>${baseMediaId}`;
           if (!this.carried.has(key)) {
             this.carried.add(key);
