@@ -232,17 +232,49 @@ export function runOutcomeChip(run: common_DesignRun): string {
  * read as a stale row (`stuck`) — the client never waits forever on it.
  */
 export const RUN_CAP_MS = 6 * 60_000;
-export const RUN_STUCK_MS = RUN_CAP_MS + 2 * 60_000;
+/** How long past the cap a row still reading `running` is taken for a stale one (`stuck`). */
+export const RUN_STUCK_AFTER_MS = 2 * 60_000;
+
+/**
+ * THE SERVER'S CAP, as the band says it (`image_run_cap_seconds`, `capped_run_kinds`, 05.10). Set
+ * by the band read (`useDesignBand`); a server that does not say it leaves the default for every kind.
+ */
+let capMs = RUN_CAP_MS;
+let cappedKinds: ReadonlySet<string> | null = null;
+export function configureRunCap(
+  band: Pick<GetDesignBandResponse, 'imageRunCapSeconds' | 'cappedRunKinds'> | undefined,
+): void {
+  const seconds = band?.imageRunCapSeconds ?? 0;
+  capMs = seconds > 0 ? seconds * 1000 : RUN_CAP_MS;
+  const kinds = (band?.cappedRunKinds ?? []).map((k) => k.trim().toLowerCase()).filter(Boolean);
+  cappedKinds = kinds.length ? new Set(kinds) : null;
+}
+
+/** The cap of this run, ms; 0 = its kind is not capped. */
+export function runCapMs(run: Pick<common_DesignRun, 'kind'>): number {
+  const kind = (run.kind ?? '').trim().toLowerCase();
+  return !cappedKinds || cappedKinds.has(kind) ? capMs : 0;
+}
+
+/** `/ 6:00` beside a live capped run's clock; '' otherwise. */
+export function capClock(run: common_DesignRun): string {
+  const cap = runCapMs(run);
+  if (!cap || !isRunLive(run)) return '';
+  const s = Math.round(cap / 1000);
+  return `/ ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
 
 export function runOverdue(
-  run: Pick<common_DesignRun, 'status' | 'startedAt' | 'createdAt'>,
+  run: Pick<common_DesignRun, 'status' | 'startedAt' | 'createdAt' | 'kind'>,
   now = Date.now(),
 ): 'late' | 'stuck' | null {
   if (!isRunLive(run)) return null;
+  const cap = runCapMs(run);
+  if (!cap) return null;
   const since = new Date(run.startedAt || run.createdAt || '').getTime();
   if (!Number.isFinite(since)) return null;
   const age = now - since;
-  return age > RUN_STUCK_MS ? 'stuck' : age > RUN_CAP_MS ? 'late' : null;
+  return age > cap + RUN_STUCK_AFTER_MS ? 'stuck' : age > cap ? 'late' : null;
 }
 
 /** The live tile's word past the cap; `''` while the run is within it. */
@@ -293,7 +325,8 @@ export function runStateWord(
         : status === 'pending' && !failedOnce
           ? 'reserved'
           : chip;
-    const clock = status === 'running' || failedOnce || overdueWord(run) ? elapsed : '';
+    const tick = status === 'running' || failedOnce || overdueWord(run) ? elapsed : '';
+    const clock = tick && capClock(run) && !overdueWord(run) ? `${tick} ${capClock(run)}` : tick;
     return {
       word: clock ? `${word} ${clock}` : word,
       note: isCancelling(run) ? undefined : note,

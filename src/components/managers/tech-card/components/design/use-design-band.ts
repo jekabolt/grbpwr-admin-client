@@ -11,6 +11,7 @@ import {
 import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo } from 'react';
 
+import { configureRunCap } from './generation/run-state';
 import { applyRows } from './quiz-model';
 
 /**
@@ -139,6 +140,9 @@ export const EMPTY_BAND: GetDesignBandResponse = {
   partsSuggestions: [],
   // THE JOIN LIST (flat route, 0397): absent = none yet; the FLAT step asks for it.
   joins: undefined,
+  // The image-run cap (05.10): absent = the client's default (`run-state.ts`).
+  imageRunCapSeconds: undefined,
+  cappedRunKinds: undefined,
 };
 
 export type DesignBandState = {
@@ -207,6 +211,8 @@ export function useDesignBand(techCardId?: number): DesignBandState {
   });
 
   const unimplemented = isUnimplemented(query.error);
+  // The image-run cap the live rows are measured against (`run-state.ts`).
+  if (query.data) configureRunCap(query.data);
 
   return {
     band: query.data ?? EMPTY_BAND,

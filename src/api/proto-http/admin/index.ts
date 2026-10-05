@@ -15295,6 +15295,12 @@ export type GetDesignBandResponse = {
   partsSuggestions: DesignPartsSuggestion[] | undefined;
   // joins — the card's current join list (flat route, 0397); absent = none yet.
   joins: common_DesignJoins | undefined;
+  // The WALL-CLOCK CAP of an image run (owner 05.10): a run of a kind in capped_run_kinds that is not
+  // done image_run_cap_seconds after its started_at is closed failed `timed_out` ("took longer than N
+  // min — try again"). The client shows elapsed / limit from started_at; a failed run carries
+  // error_code (timed_out | landing_failed | …) and a human last_error.
+  imageRunCapSeconds: number | undefined;
+  cappedRunKinds: string[] | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The six

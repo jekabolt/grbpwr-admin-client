@@ -153,6 +153,8 @@ export function makeBand(input: {
     suggestPromptsModel: undefined,
     partsSuggestions: [],
     joins: undefined,
+    imageRunCapSeconds: undefined,
+    cappedRunKinds: undefined,
   };
 }
 

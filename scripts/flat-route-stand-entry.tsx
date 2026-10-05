@@ -38,7 +38,9 @@ const VIEWS = ['front', 'back', 'side_l', 'side_r'];
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
 
 // card 50: four candidate sheets
+const CAP = { imageRunCapSeconds: 360, cappedRunKinds: ['flat', 'render'] };
 win.__bands[50] = {
+  ...CAP,
   bench: VIEWS.map((viewKey, i) => ({
     id: i + 1,
     viewKey,
@@ -72,6 +74,7 @@ win.__bands[50] = {
 
 // card 51: the newest run timed out
 win.__bands[51] = {
+  ...CAP,
   bench: [],
   runs: [
     {
@@ -90,6 +93,7 @@ win.__bands[51] = {
 
 // card 52: a run running for 7 minutes
 win.__bands[52] = {
+  ...CAP,
   bench: [],
   runs: [
     {

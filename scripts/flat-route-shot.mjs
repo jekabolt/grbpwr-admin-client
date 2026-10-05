@@ -220,9 +220,10 @@ const refs = [1, 2, 3].map((id, i) => ({
   role: ['front', 'back', 'side_r'][i],
   ordinal: i + 1,
 }));
+const CAP = { imageRunCapSeconds: 360, cappedRunKinds: ['flat', 'render'] };
 const BANDS = {
-  38: { bench: [], runs: [], references: refs, joins: joinsA },
-  49: { bench: [], runs: [], references: refs.slice(0, 2) },
+  38: { ...CAP, bench: [], runs: [], references: refs, joins: joinsA },
+  49: { ...CAP, bench: [], runs: [], references: refs.slice(0, 2) },
 };
 const AUTO = {
   ...wireJoins({ ...A, layers: [] }, 1),
@@ -421,6 +422,10 @@ try {
   const L = '[data-probe="bench-52"]';
   await page.waitForSelector(`${L} [data-live-tile]`, { timeout: 10000 });
   check('L1 taking too long', (await page.locator(L).textContent()).includes('taking too long'));
+  check(
+    'L3 the clock is measured against the band cap',
+    !(await page.locator(L).textContent()).includes('stuck'),
+  );
   const cancel = page.locator(`${L} [data-run-cancel]`);
   check(
     'L2 cancel in plain sight',

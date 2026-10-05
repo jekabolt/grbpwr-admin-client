@@ -20,6 +20,7 @@ import {
   isRunLive,
   isTextRun,
   overdueWord,
+  capClock,
   runOutcomeNote,
   runOutputText,
   runStatus,
@@ -210,7 +211,7 @@ export function RunOutputs({
             i === 0 && overdueWord(run)
               ? `${overdueWord(run)} · ${elapsed}`
               : i === 0 && runStatus(run) === 'running'
-                ? `running ${elapsed}`
+                ? `running ${elapsed}${capClock(run) ? ` ${capClock(run)}` : ''}`
                 : 'reserved'
           }
         />
