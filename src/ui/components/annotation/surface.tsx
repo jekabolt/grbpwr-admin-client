@@ -273,6 +273,11 @@ export type AnnotationSurfaceProps = {
    */
   ghosts?: SurfaceCallout[];
   ghostHot?: string | null;
+  /**
+   * Размер кадра в пикселях — тому, кто раскладывает призраков по полям (`marginLayout`):
+   * плашка держит экранный размер, и раскладка без него не знает, сколько места у плашки.
+   */
+  onFrameSize?: (size: { w: number; h: number }) => void;
 
   // ЗАПИСЬ — ГРАНУЛЯРНЫМИ КОЛБЭКАМИ, а не «отдай весь массив». У эскиза массив живёт в RHF под
   // двумя useFieldArray, и валовая запись повторила бы гонку, из-за которой пин появлялся на
@@ -637,6 +642,7 @@ export function AnnotationSurface({
   callouts: rawCallouts,
   ghosts,
   ghostHot,
+  onFrameSize,
   onAdd,
   onEditPoints,
   onMoveLabel,
@@ -674,6 +680,10 @@ export function AnnotationSurface({
 }: AnnotationSurfaceProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    if (size.w > 0 && size.h > 0) onFrameSize?.(size);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- сообщается замер, не колбэк
+  }, [size.w, size.h]);
   // Зона нанесения читается ровно четырьмя углами (`artworkQuad`): ручки, перетаскивание и
   // натяжка картинки видят квадрат, и первая же правка записывает его в карточку. Вывернутая
   // старая четвёрка (T27, R34) — тоже габаритом; годность меряется в пикселях кадра.
@@ -2385,7 +2395,7 @@ export function AnnotationSurface({
                       dashed
                       caps={g.caps}
                       halo={halo}
-                      strokeWidth={ghostHot === g.key ? 1.5 : 1}
+                      strokeWidth={ghostHot === g.key ? 1.25 : 0.75}
                     />
                   </g>
                 ))}
@@ -2775,7 +2785,6 @@ export function AnnotationSurface({
                   ghost={g.key}
                   at={px(g.label)}
                   inv={inv}
-                  head={specSummary(g.spec ?? null)}
                   text={(g.text ?? '').trim()}
                   names={[]}
                   dimmed={false}
@@ -3395,7 +3404,8 @@ function Plate({
         // БЕЗ КОЛЬЦА ВЫБОРА (владелец, 04.10: «такого выделения быть не должно»). Выбор фигуры
         // показывают её ручки; плашка лишь берёт чернильную рамку вместо серой.
         selected ? 'border-textColor' : 'border-borderColor',
-        ghost && 'border-dashed text-labelColor',
+        // Призрак — ОДНА СТРОКА (R38): подпись ≤32 знаков, лишнее — многоточием, не переносом.
+        ghost && 'overflow-hidden text-ellipsis whitespace-nowrap border-dashed text-labelColor',
         ghost && !selected && 'border-labelColor opacity-80',
         dimmed && 'invisible',
         !interactive && 'pointer-events-none',

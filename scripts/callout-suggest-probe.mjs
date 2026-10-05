@@ -30,6 +30,20 @@ const MUTATIONS = {
   consumed: { file: /design\/artifacts-panel\.tsx$/, from: "!suggestConsumed.current.has(x.id ?? '') &&", to: '' },
   // Снятый флэт не чистит предложения.
   live: { file: /design\/artifacts-panel\.tsx$/, from: 'list.every((x) => live.has(x.mediaId ?? 0))', to: 'true' },
+  // T29 (R38/R39). Лидеры колонны не разводятся.
+  uncross: { file: /annotation\/margin-layout\.ts$/, from: 'if (!segmentsCross(leader(a), leader(b))) continue;', to: 'continue;' },
+  // Плашки колонны без зазора — стоят на якорях друг на друге.
+  gap: { file: /annotation\/margin-layout\.ts$/, from: 'ys[i] = Math.max(ys[i], ys[i - 1] + step);', to: 'ys[i] = ys[i];' },
+  // Колонны не держатся внутри кадра.
+  frame: { file: /annotation\/margin-layout\.ts$/, from: "? Math.max(EDGE + x.w, Math.min(W - EDGE, l - OFFSET))", to: '? l - OFFSET - 150' },
+  // ✓ пишет позицию с провода, а не ту, что видели.
+  seed: { file: /design\/artifacts-panel\.tsx$/, from: "seedOf(x, ghostLayout[x.id ?? ''])", to: 'seedOf(x)' },
+  // Плашка призрака печатает описание.
+  label: { file: /design\/callout-suggest\.ts$/, from: 'text: suggestionLabel(s),', to: "text: s.description ?? ''," },
+  // Призраки всех флэтов — на первом.
+  // Раскладка пересчитывается по оставшимся — соседний призрак едет на принятое указание.
+  basis: { file: /design\/artifacts-panel\.tsx$/, from: 'suggestBasis.filter((x) => (x.mediaId ?? 0) === mediaId),', to: 'suggestions.filter((x) => (x.mediaId ?? 0) === mediaId),', and: ['}, [suggestBasis, ghostFrames]);', '}, [suggestions, ghostFrames]);'] },
+  flats: { file: /design\/artifacts-panel\.tsx$/, from: '.filter((x) => (x.mediaId ?? 0) === mediaId)\n          .map((x) => {', to: '.filter((x) => mediaId === 11)\n          .map((x) => {' },
 };
 const mutation = MUTATE && {
   name: 'mutation',
@@ -39,6 +53,10 @@ const mutation = MUTATE && {
       let src = await readFile(a.path, 'utf8');
       if (!src.includes(m.from)) throw new Error(`мутация «${MUTATE}» не нашла строку`);
       src = src.replace(m.from, m.to);
+      if (m.and) {
+        if (!src.includes(m.and[0])) throw new Error(`мутация «${MUTATE}» не нашла вторую строку`);
+        src = src.replace(m.and[0], m.and[1]);
+      }
       return { contents: src, loader: 'tsx' };
     });
   },
@@ -54,6 +72,47 @@ await build({
   banner: { js: 'var __STUB_ENV__ = {};' },
   alias: { components: r('components'), lib: r('lib'), api: r('api'), utils: r('utils'), ui: r('ui'), constants: r('constants'), store: r('store'), hooks: r('hooks'), types: r('types'), context: r('context'), styles: r('styles') },
 });
+
+// ── РАСКЛАДКА ПО ПОЛЯМ — ЧИСТАЯ ФУНКЦИЯ, В NODE (T29, R38) ────────────────────────────────────
+// 300 случайных плотных флэтов по 12 якорей (сид фиксирован): плашки не налезают, внутри кадра,
+// лидеры не пересекаются; тот же вход — тот же выход.
+const layoutOut = resolve(tmpdir(), `margin-layout-${process.pid}.mjs`);
+await build({
+  entryPoints: [r('ui/components/annotation/margin-layout.ts')],
+  bundle: true, platform: 'node', format: 'esm', outfile: layoutOut, logLevel: 'error',
+  plugins: mutation ? [mutation] : [],
+});
+const ML = await import(layoutOut);
+{
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const words = ['301 · side seam', 'main label', 'YKK zip #5', 'collar · raw edge', 'chest pocket', 'back neck print · 80×40 mm', 'horn button 18L', 'cuff'];
+  let overlap = 0, outside = 0, crossed = 0, unstable = 0;
+  for (let n = 0; n < 300; n++) {
+    const frame = { w: 360 + Math.floor(rnd() * 400), h: 420 + Math.floor(rnd() * 400) };
+    const items = Array.from({ length: 12 }, (_, i) => ({
+      key: `k${String(i).padStart(2, '0')}`,
+      anchor: { x: 0.18 + rnd() * 0.64, y: 0.08 + rnd() * 0.84 },
+      text: words[Math.floor(rnd() * words.length)],
+    }));
+    const at = ML.marginLayout(items, frame);
+    if (JSON.stringify(ML.marginLayout([...items].reverse(), frame)) !== JSON.stringify(at)) unstable++;
+    const boxes = items.map((it) => {
+      const w = ML.plateWidth(it.text, frame.w), h = ML.MARGIN_PLATE_H, p = at[it.key];
+      return { l: p.x * frame.w - w / 2, r: p.x * frame.w + w / 2, t: p.y * frame.h - h / 2, b: p.y * frame.h + h / 2 };
+    });
+    for (const b of boxes) if (b.l < -0.01 || b.t < -0.01 || b.r > frame.w + 0.01 || b.b > frame.h + 0.01) outside++;
+    for (let i = 0; i < 12; i++)
+      for (let j = i + 1; j < 12; j++) {
+        const a = boxes[i], b = boxes[j];
+        if (a.l < b.r - 0.01 && b.l < a.r - 0.01 && a.t < b.b - 0.01 && b.t < a.b - 0.01) overlap++;
+        if (ML.segmentsCross(ML.marginLeader(items[i], at[items[i].key], frame), ML.marginLeader(items[j], at[items[j].key], frame))) crossed++;
+      }
+  }
+  console.log(`  раскладка: 300 флэтов × 12 — налезаний ${overlap}, вне кадра ${outside}, пересечений ${crossed}, нестабильных ${unstable}`);
+  if (overlap || outside || crossed || unstable) process.exitCode = 1;
+  globalThis.__layoutFail = overlap + outside + crossed + unstable;
+}
 
 function resolvePlaywright() {
   const require = createRequire(import.meta.url);
@@ -74,6 +133,7 @@ const CSS = existsSync(cssDir)
 
 let pass = 0;
 let fail = 0;
+if (globalThis.__layoutFail) { fail++; console.log('  FAIL раскладка по полям (чистая функция)'); } else pass++;
 const check = (name, ok, detail = '') => {
   if (ok) pass++;
   else fail++;
@@ -103,6 +163,30 @@ const FIXTURE = [
     description: 'back neck print', parts: [], missing: ['size'], fromData: false,
   },
 ];
+
+/** Центры плашек-призраков в долях кадра, прямоугольники в пикселях страницы — по флэту. */
+const ghostGeometry = (media) =>
+  page.evaluate((media) => {
+    const tile = document.querySelector(`[data-plate-media="${media}"]`);
+    const frame = tile?.querySelector('[data-annot-frame]');
+    if (!frame) return null;
+    const fr = frame.getBoundingClientRect();
+    const ox = fr.left + frame.clientLeft;
+    const oy = fr.top + frame.clientTop;
+    const W = frame.clientWidth;
+    const H = frame.clientHeight;
+    const plates = [...tile.querySelectorAll('[data-callout-ghost]')].map((el) => {
+      const r = el.getBoundingClientRect();
+      return {
+        key: el.getAttribute('data-callout-ghost'),
+        text: (el.innerText ?? '').trim(),
+        l: r.left - ox, t: r.top - oy, r: r.right - ox, b: r.bottom - oy,
+        cx: (r.left + r.width / 2 - ox) / W, cy: (r.top + r.height / 2 - oy) / H,
+        oneLine: el.scrollHeight <= r.height + 1 && r.height < 22,
+      };
+    });
+    return { W, H, plates };
+  }, media);
 
 const browser = await chromium.launch();
 const page = await (await browser.newContext({ viewport: { width: 1480, height: 980 }, deviceScaleFactor: 2 })).newPage();
@@ -181,7 +265,8 @@ check('чип вернулся к suggest ✦', (await chipText()) === 'suggest 
 await page.hover('[data-callout-suggestion="s1"]');
 await shot('28-ghosts');
 
-// 2. ✓ по шву из операции 10.
+// 2. ✓ по шву из операции 10 — плашка ложится туда, где стоял призрак (раскладка по полям).
+const g2 = (await ghostGeometry(11))?.plates.find((p) => p.key === 's1');
 await page.click('[data-callout-accept="s1"]');
 await page.waitForTimeout(150);
 let f = await form();
@@ -189,7 +274,8 @@ const c1 = f.callouts?.[0];
 const sp1 = c1 ? JSON.parse(c1.spec || '{}') : {};
 check('✓ → настоящее указание', f.callouts?.length === 1 && c1.number === 1 && c1.kind === 'label' && c1.mediaId === 11, JSON.stringify(c1));
 check('✓ → spec, текст и детали из предложения', sp1.t === 'stitch' && sp1.iso === '301' && sp1.stcm === '4' && c1.description === 'side seam' && JSON.stringify(c1.parts) === '["front","back"]', JSON.stringify(c1));
-check('✓ → точки и позиция плашки', c1.points?.length === 1 && c1.points[0].x === '0.2700' && c1.posX === '0.120', JSON.stringify(c1));
+check('✓ → точки и позиция плашки = место призрака', c1.points?.length === 1 && c1.points[0].x === '0.2700' && !!g2 && Math.abs(Number(c1.posX) - g2.cx) < 0.003 && Math.abs(Number(c1.posY) - g2.cy) < 0.003, JSON.stringify([c1.posX, c1.posY, g2?.cx, g2?.cy]));
+check('✓ → позиция не та, что пришла с провода', c1.posX !== '0.120');
 check('✓ → операция 10 ссылается на номер', f.operations?.[0]?.calloutNumber === 1 && f.operations?.[1]?.calloutNumber === 0, JSON.stringify(f.operations));
 check('✓ → призраков 2, строк 2', (await count('[data-callout-ghost-shape]')) === 2 && (await count('[data-callout-suggestion]')) === 2);
 check('✓ → плашка-призрак принятого ушла', (await count('[data-callout-ghost]')) === 2);
@@ -288,6 +374,123 @@ check('отмена во время сейва → сразу suggest ✦', (awa
 await page.evaluate(() => { window.__flushGate = undefined; window.__openGate(); });
 await page.waitForTimeout(400);
 check('отменённый прогон после сейва не спрашивает и не трогает чип', asked.length === asked9 && (await chipText()) === 'suggest ✦', String(asked.length - asked9));
+
+
+// 10. ПЛОТНЫЙ ПЕРЕД + СПИНА (R38/R39): 12 предложений на одном флэте и 4 на другом.
+const LONG = 'Collar on a stand, interlined to hold shape; collar and stand edges left raw/frayed as a design detail rather than finished with a binding or topstitch.';
+const sug = (id, media, kind, points, extra = {}) => ({
+  id, sourceId: `pic:${id}`, sourceLabel: 'from picture', mediaId: media, kind: `TECH_CARD_ANNOTATION_KIND_${kind}`,
+  points: points.map(([x, y]) => pt(x, y)), posX: dec(0.5), posY: dec(0.5), spec: '{}', description: LONG,
+  parts: [], missing: [], fromData: false, ...extra,
+});
+const L = 'LABEL';
+const zone = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+// Спина вернулась на лист (её сняли в шаге 8); указания прошлых шагов сняты — чистый лист.
+await page.evaluate(() => {
+  const f = window.__form;
+  f.setValue('callouts', [], { shouldDirty: true });
+  f.setValue('technicalMedia', [...f.getValues('technicalMedia'), { mediaId: 12, kind: 'TECH_CARD_MEDIA_KIND_BACK' }], { shouldDirty: true });
+});
+await page.waitForTimeout(300);
+override = [
+  sug('f01', 11, L, [[0.5, 0.13]], { label: 'collar · raw edge', spec: JSON.stringify({ t: 'detail', scale: 2 }) }),
+  sug('f02', 11, L, [[0.47, 0.17]], { label: 'main label', sourceLabel: 'label · main', fromData: true }),
+  sug('f03', 11, L, [[0.34, 0.19]], { label: '301 · shoulder seam', spec: JSON.stringify({ t: 'stitch', iso: '301' }), fromData: true, sourceLabel: 'op 20 · shoulder' }),
+  sug('f04', 11, L, [[0.66, 0.2]], { label: '301 · shoulder seam' }),
+  sug('f05', 11, L, [[0.49, 0.36]], { label: 'front placket button', spec: JSON.stringify({ t: 'material', lineKey: 'B1', name: 'front placket button' }), fromData: true, sourceLabel: 'BOM · horn button 18L', missing: ['size'] }),
+  sug('f06', 11, 'POLYGON', zone(0.6, 0.3, 0.72, 0.42), { label: 'chest pocket' }),
+  sug('f07', 11, L, [[0.42, 0.52]], { label: 'main fabric · oxford 140 g/m²' }),
+  sug('f08', 11, L, [[0.27, 0.6]], { label: '401 · side seam' }),
+  sug('f09', 11, L, [[0.73, 0.61]], { label: '401 · side seam' }),
+  sug('f10', 11, L, [[0.17, 0.8]], { label: 'button cuff · vent' }),
+  sug('f11', 11, L, [[0.83, 0.81]], { label: 'button cuff · vent' }),
+  sug('f12', 11, 'DIM', [[0.3, 0.9], [0.7, 0.9]], { spec: JSON.stringify({ t: 'stitch', iso: '301', stcm: '4' }) }),
+  sug('b01', 12, L, [[0.5, 0.15]], { label: 'back yoke' }),
+  sug('b02', 12, 'POLYGON', zone(0.42, 0.25, 0.58, 0.35), { label: 'back neck print', spec: JSON.stringify({ t: 'artwork', sub: 'print' }) }),
+  sug('b03', 12, L, [[0.5, 0.5]], { label: 'box pleat' }),
+  sug('b04', 12, L, [[0.3, 0.88]], { label: 'raw hem · 1 cm' }),
+];
+await page.click('[data-callout-suggest]');
+await page.waitForFunction(() => document.querySelector('[data-callout-suggest]')?.textContent?.trim() === 'suggest ✦');
+await page.waitForTimeout(300);
+const front = await ghostGeometry(11);
+const back = await ghostGeometry(12);
+check('перед: 12 плашек-призраков', front?.plates.length === 12, String(front?.plates.length));
+check('спина: свои 4 призрака (R39)', back?.plates.length === 4, String(back?.plates.length));
+const overlaps = (ps) => {
+  const bad = [];
+  for (let i = 0; i < ps.length; i++)
+    for (let j = i + 1; j < ps.length; j++) {
+      const a = ps[i], b = ps[j];
+      if (a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b) bad.push(`${a.key}×${b.key}`);
+    }
+  return bad;
+};
+for (const [name, g] of [['перед', front], ['спина', back]]) {
+  const ov = overlaps(g.plates);
+  check(`${name}: плашки не налезают друг на друга`, ov.length === 0, ov.join(' '));
+  const out = g.plates.filter((p) => p.l < -0.5 || p.t < -0.5 || p.r > g.W + 0.5 || p.b > g.H + 0.5).map((p) => p.key);
+  check(`${name}: все плашки внутри кадра`, out.length === 0, out.join(' '));
+  check(`${name}: каждая плашка — одна строка`, g.plates.every((p) => p.oneLine), g.plates.filter((p) => !p.oneLine).map((p) => p.key).join(' '));
+}
+check('плашки не печатают описание', front.plates.every((p) => !p.text.includes('interlined') && p.text.length <= 32), JSON.stringify(front.plates.map((p) => p.text)));
+check('без label — короткая сводка назначения', front.plates.find((p) => p.key === 'f12')?.text === '301 · 4 st/cm (10 spi)', front.plates.find((p) => p.key === 'f12')?.text);
+// Лидеры: от внутреннего края плашки к якорю (якорь — точка, середина линии, среднее зоны).
+const anchorOf = (s) => {
+  const ps = s.points.map((q) => ({ x: Number(q.x.value), y: Number(q.y.value) }));
+  if (s.kind.endsWith('LABEL')) return ps[0];
+  return { x: ps.reduce((a, q) => a + q.x, 0) / ps.length, y: ps.reduce((a, q) => a + q.y, 0) / ps.length };
+};
+const leaders = (g, media) =>
+  g.plates.map((p) => {
+    const s = override.find((x) => x.id === p.key) ?? { kind: 'LABEL', points: [pt(0.5, 0.5)] };
+    const an = anchorOf(s);
+    const ax = an.x * g.W, ay = an.y * g.H;
+    const left = (p.l + p.r) / 2 < ax;
+    return { key: p.key, a: { x: left ? p.r : p.l, y: (p.t + p.b) / 2 }, b: { x: ax, y: ay } };
+  });
+const orient = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+const cross = (s, t) => orient(t.a, t.b, s.a) * orient(t.a, t.b, s.b) < 0 && orient(s.a, s.b, t.a) * orient(s.a, s.b, t.b) < 0;
+for (const [name, g, media] of [['перед', front, 11], ['спина', back, 12]]) {
+  const ls = leaders(g, media);
+  const bad = [];
+  for (let i = 0; i < ls.length; i++) for (let j = i + 1; j < ls.length; j++) if (cross(ls[i], ls[j])) bad.push(`${ls[i].key}×${ls[j].key}`);
+  check(`${name}: лидеры не пересекаются`, bad.length === 0, bad.join(' '));
+}
+const flatsOrder = await page.$$eval('[data-callout-suggested-flat]', (els) => els.map((el) => `${el.getAttribute('data-callout-suggested-flat')}:${el.querySelectorAll('[data-callout-suggestion]').length}`));
+check('группа suggested — по флэтам: перед 12, спина 4', JSON.stringify(flatsOrder) === '["11:12","12:4"]', JSON.stringify(flatsOrder));
+check('строки группы — одна строка', await page.$$eval('[data-callout-suggestion]', (els) => els.every((el) => el.getBoundingClientRect().height < 30)));
+await page.hover('[data-callout-suggestion="f05"]');
+await page.waitForTimeout(100);
+await shot('29-dense-front-back');
+const tileShot = async (media, name) => {
+  if (!SHOTS) return;
+  await (await page.$(`[data-plate-media="${media}"]`)).screenshot({ path: `${SHOTS}/${name}.png` });
+};
+await tileShot(11, '29-front');
+await tileShot(12, '29-back');
+if (SHOTS) await (await page.$('[data-callout-suggested]')).screenshot({ path: `${SHOTS}/29-suggested-group.png` });
+// ✓ одного: остальные призраки стоят где стояли, принятое — на месте своего призрака.
+await page.click('[data-callout-accept="f02"]');
+await page.waitForTimeout(200);
+const front2 = await ghostGeometry(11);
+const moved = front2.plates.filter((p) => {
+  const q = front.plates.find((x) => x.key === p.key);
+  return !q || Math.abs(q.cx - p.cx) > 0.001 || Math.abs(q.cy - p.cy) > 0.001;
+}).map((p) => p.key);
+check('✓ одного — остальные призраки не сдвинулись', front2.plates.length === 11 && moved.length === 0, moved.join(' '));
+const before10 = (await form()).callouts.length;
+await page.click('[data-callout-accept-all]');
+await page.waitForTimeout(250);
+f = await form();
+const added = f.callouts.slice(before10);
+const posOk = added.length === 15 && added.every((c) => {
+  const g = (c.mediaId === 11 ? front : back).plates.find((p) => p.text && c.description === LONG && Math.abs(Number(c.posX) - p.cx) < 0.003 && Math.abs(Number(c.posY) - p.cy) < 0.003);
+  return !!g;
+});
+check('accept all → 15 указаний на местах призраков, текст — полное описание', posOk, JSON.stringify(added.map((c) => [c.mediaId, c.posX, c.posY])));
+await shot('29-accepted-all');
+override = null;
 
 check('ни одного запроса мимо заглушки', realBackend === 0, String(realBackend));
 await browser.close();

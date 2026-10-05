@@ -1,7 +1,14 @@
 import type { CalloutSuggestion } from 'api/proto-http/admin';
-import { parseSpec, writeSpec } from 'ui/components/annotation/purpose';
+import { parseSpec, specSummary, writeSpec } from 'ui/components/annotation/purpose';
 import type { SurfaceCallout } from 'ui/components/annotation/surface';
+import { leaderTarget } from 'ui/components/annotation/geometry';
 import { kindDef } from 'ui/components/annotation/kinds';
+import {
+  marginLayout,
+  oneLine,
+  type MarginItem,
+  type MarginPlacement,
+} from 'ui/components/annotation/margin-layout';
 import { annotationKindFromWire, annotationKindToWire } from 'ui/components/annotation/wire';
 import { decimalToInput } from 'utils/decimal';
 
@@ -103,12 +110,52 @@ export function normalizeSuggestions(
       sourceLabel: typeof s.sourceLabel === 'string' ? s.sourceLabel : '',
       description: typeof s.description === 'string' ? s.description : '',
       spec: typeof s.spec === 'string' ? s.spec : '',
+      label: typeof s.label === 'string' ? s.label : '',
     });
   }
   return out;
 }
 
-/** Призрак на плите: ключ — id предложения (уникален в ответе). */
+/**
+ * ПОДПИСЬ ПРЕДЛОЖЕНИЯ — ОДНА СТРОКА (R38). Сервер пишет `label` (≤32, из строки данных); старый
+ * ответ без него — короткая сводка назначения, затем начало описания. Описание целиком на плиту
+ * не выходит никогда: оно едет в указание только по ✓.
+ */
+export function suggestionLabel(s: CalloutSuggestion): string {
+  const own = typeof s.label === 'string' ? s.label : '';
+  return oneLine(own || specSummary(parseSpec(s.spec)) || s.description || 'callout');
+}
+
+/** Куда приходит лидер призрака — тем же правилом, что рисует фигура (`leaderTarget`). */
+function anchorOf(s: CalloutSuggestion) {
+  const key = kindDef(annotationKindFromWire(s.kind)).key;
+  const pts = pointsOf(s);
+  if (key === 'pin' || pts.length === 0) return null;
+  if (key === 'label' || key === 'multi') return pts[0];
+  return leaderTarget(key, pts, '') ?? pts[0];
+}
+
+/** Номинальный кадр — когда плиты на экране нет и замера тоже. */
+export const NOMINAL_FRAME = { w: 600, h: 750 };
+
+/**
+ * ПЛАШКИ ПРИЗРАКОВ ОДНОГО ФЛЭТА — ПО ПОЛЯМ (`marginLayout`). Позиция модели не читается: пин
+ * (якоря нет — плашка и есть точка) остаётся где был, остальное ложится в колонны за изделием.
+ */
+export function layoutSuggestions(
+  list: readonly CalloutSuggestion[],
+  frame: { w: number; h: number },
+): Record<string, MarginPlacement> {
+  const items: MarginItem[] = [];
+  for (const s of list) {
+    const anchor = anchorOf(s);
+    if (!anchor || !s.id) continue;
+    items.push({ key: s.id, anchor, extent: pointsOf(s), text: suggestionLabel(s) });
+  }
+  return marginLayout(items, frame);
+}
+
+/** Призрак на плите: ключ — id предложения (уникален в ответе). Подпись — одна строка. */
 export function ghostOf(s: CalloutSuggestion): SurfaceCallout {
   const spec = parseSpec(s.spec);
   return {
@@ -116,7 +163,7 @@ export function ghostOf(s: CalloutSuggestion): SurfaceCallout {
     kind: annotationKindFromWire(s.kind),
     points: pointsOf(s),
     label: { x: frac(s.posX), y: frac(s.posY) },
-    text: s.description ?? '',
+    text: suggestionLabel(s),
     spec,
     caps: spec?.t === 'section' ? 'arrow' : undefined,
   };
@@ -140,14 +187,15 @@ export type CalloutSeed = {
   caps?: 'arrow';
 };
 
-export function seedOf(s: CalloutSuggestion): CalloutSeed {
+/** `at` — место плашки из раскладки по полям (то, что было видно); нет — позиция с провода. */
+export function seedOf(s: CalloutSuggestion, at?: { x: number; y: number } | null): CalloutSeed {
   const spec = parseSpec(s.spec);
   const kind = annotationKindFromWire(s.kind);
   return {
     mediaId: s.mediaId ?? 0,
     kind,
     points: kind === 'pin' ? [] : pointsOf(s),
-    marker: { x: frac(s.posX), y: frac(s.posY) },
+    marker: at && kind !== 'pin' ? { x: at.x, y: at.y } : { x: frac(s.posX), y: frac(s.posY) },
     spec: writeSpec(spec),
     description: (s.description ?? '').trim(),
     parts: (s.parts ?? []).filter(Boolean),

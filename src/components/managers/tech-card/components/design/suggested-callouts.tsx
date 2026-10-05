@@ -1,13 +1,12 @@
 import type { CalloutSuggestion } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { parseSpec, specSummary } from 'ui/components/annotation/purpose';
 import { annotationKindFromWire } from 'ui/components/annotation/wire';
 import { Button } from 'ui/components/button';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
 import { KindGlyph, onDoorKey } from './callout-rail';
-import { missingLabel } from './callout-suggest';
+import { missingLabel, suggestionLabel } from './callout-suggest';
 
 /**
  * ═══ `suggested · N` — ГРУППА ПОД НАСТОЯЩИМИ СТРОКАМИ CALLOUTS (T28) ═══════════════════════════
@@ -19,6 +18,7 @@ import { missingLabel } from './callout-suggest';
  */
 export function SuggestedCallouts({
   rows,
+  flats,
   open,
   onOpen,
   hot,
@@ -29,6 +29,8 @@ export function SuggestedCallouts({
   disabled,
 }: {
   rows: CalloutSuggestion[];
+  /** Флэты листа по порядку ряда: строки идут группами по флэту (R39 — у каждого вида свои). */
+  flats: { mediaId: number; name: string }[];
   open: boolean;
   onOpen: (open: boolean) => void;
   hot: string | null;
@@ -71,76 +73,97 @@ export function SuggestedCallouts({
       </div>
       {open && (
         <div data-callout-suggested-rows=''>
-          {rows.map((s) => {
-            const id = s.id ?? '';
-            const spec = s.spec ?? '';
-            const text = (s.description ?? '').trim() || specSummary(parseSpec(spec)) || 'callout';
-            const missing = (s.missing ?? []).filter(Boolean);
-            return (
-              <div
-                key={id}
-                data-callout-suggestion={id}
-                data-callout-suggestion-source={s.sourceId ?? ''}
-                className={cn(
-                  'group flex items-center gap-2 border-b border-dashed border-hairline px-1 -mx-1 py-1 last:border-b-0',
-                  hot === id && 'bg-bgSecondary',
-                )}
-                onPointerEnter={() => onHover(id)}
-                onPointerLeave={() => onHover(null)}
+          {groupsOf(rows, flats).map((g) => (
+            <div key={g.mediaId} data-callout-suggested-flat={g.mediaId}>
+              <Text
+                size='nano'
+                variant='label'
+                component='p'
+                className='pt-2 uppercase tracking-label'
               >
-                <span className='opacity-70'>
-                  <KindGlyph kind={annotationKindFromWire(s.kind)} spec={spec} />
-                </span>
-                <span className='flex min-w-0 flex-1 flex-col'>
-                  <Text size='micro' component='span' className='block truncate text-labelColor'>
-                    {text}
-                  </Text>
-                  <span className='flex min-w-0 flex-wrap items-center gap-1'>
+                {g.name} · {g.rows.length}
+              </Text>
+              {g.rows.map((s) => {
+                const id = s.id ?? '';
+                const missing = (s.missing ?? []).filter(Boolean);
+                const source = s.fromData === false ? 'from picture' : (s.sourceLabel ?? '').trim();
+                return (
+                  <div
+                    key={id}
+                    data-callout-suggestion={id}
+                    data-callout-suggestion-source={s.sourceId ?? ''}
+                    title={(s.description ?? '').trim() || undefined}
+                    className={cn(
+                      'group flex min-w-0 items-center gap-2 border-b border-dashed border-hairline px-1 -mx-1 py-0.5 last:border-b-0',
+                      hot === id && 'bg-bgSecondary',
+                    )}
+                    onPointerEnter={() => onHover(id)}
+                    onPointerLeave={() => onHover(null)}
+                  >
+                    <span className='shrink-0 opacity-70'>
+                      <KindGlyph kind={annotationKindFromWire(s.kind)} spec={s.spec ?? ''} />
+                    </span>
+                    <Text size='micro' component='span' className='shrink truncate text-textColor'>
+                      {suggestionLabel(s)}
+                    </Text>
                     <Text
                       size='nano'
                       variant='label'
                       component='span'
-                      className='truncate'
+                      className='min-w-0 flex-1 truncate'
                       data-callout-suggestion-label=''
                     >
-                      {s.fromData === false ? 'from picture' : (s.sourceLabel ?? '').trim()}
+                      {source}
                     </Text>
                     {missing.map((m) => (
-                      <Pill key={m} tone='gap' className='px-1 text-nano'>
+                      <Pill key={m} tone='gap' className='shrink-0 px-1 text-nano'>
                         {missingLabel(m)}
                       </Pill>
                     ))}
-                  </span>
-                </span>
-                {!disabled && (
-                  <>
-                    <button
-                      type='button'
-                      aria-label='accept'
-                      title='accept'
-                      data-callout-accept={id}
-                      onClick={() => onAccept(id)}
-                      className='flex h-5 w-5 shrink-0 items-center justify-center text-micro text-labelColor hover:text-textColor'
-                    >
-                      <span aria-hidden>✓</span>
-                    </button>
-                    <button
-                      type='button'
-                      aria-label='dismiss'
-                      title='dismiss'
-                      data-callout-dismiss={id}
-                      onClick={() => onDismiss(id)}
-                      className='flex h-5 w-5 shrink-0 items-center justify-center text-micro text-textInactiveColor hover:text-textColor'
-                    >
-                      <span aria-hidden>✕</span>
-                    </button>
-                  </>
-                )}
-              </div>
-            );
-          })}
+                    {!disabled && (
+                      <>
+                        <button
+                          type='button'
+                          aria-label='accept'
+                          title='accept'
+                          data-callout-accept={id}
+                          onClick={() => onAccept(id)}
+                          className='flex h-5 w-5 shrink-0 items-center justify-center text-micro text-labelColor hover:text-textColor'
+                        >
+                          <span aria-hidden>✓</span>
+                        </button>
+                        <button
+                          type='button'
+                          aria-label='dismiss'
+                          title='dismiss'
+                          data-callout-dismiss={id}
+                          onClick={() => onDismiss(id)}
+                          className='flex h-5 w-5 shrink-0 items-center justify-center text-micro text-textInactiveColor hover:text-textColor'
+                        >
+                          <span aria-hidden>✕</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
     </div>
   );
+}
+
+/** Группы по флэту в порядке ряда; флэт, которого в ряду нет, — в конце, без имени не теряется. */
+function groupsOf(rows: CalloutSuggestion[], flats: { mediaId: number; name: string }[]) {
+  const order = [...flats.map((f) => f.mediaId)];
+  for (const r of rows) if (!order.includes(r.mediaId ?? 0)) order.push(r.mediaId ?? 0);
+  return order
+    .map((mediaId) => ({
+      mediaId,
+      name: flats.find((f) => f.mediaId === mediaId)?.name || 'flat',
+      rows: rows.filter((r) => (r.mediaId ?? 0) === mediaId),
+    }))
+    .filter((g) => g.rows.length > 0);
 }
