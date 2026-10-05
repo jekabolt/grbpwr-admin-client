@@ -6,7 +6,8 @@
 // W-C2: `BriefProbe` — настоящие `useCardFacts` → `wordsBriefSource` → `requestBrief` с дребезгом,
 // как у `useWordsSeeding` (короче: 120 мс), и `EnhanceText` через настоящий `enhanceText`. Счёт
 // вызовов `EnhanceText` в `window.__calls` — сколько брифов стоил прогон квиза.
-// `window.__preset` (ставит `quiz-shot.mjs` до бандла): сохранённые ответы, задержка/отказ чтения.
+// `window.__preset` (ставит `quiz-shot.mjs` до бандла): сохранённые ответы, открытый прогон
+// сервера (`session`, E2), задержка/отказ чтения.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
@@ -47,6 +48,7 @@ const q = (
   visualEvidence: '',
   clarifyQuestion: '',
   clarifyOptions: [],
+  decisionKey: `${id}_key`,
   ...extra,
 });
 
@@ -106,9 +108,16 @@ const q = (
     ]),
   ],
 };
-type Preset = { answers?: unknown[]; pictures?: number };
-const w = window as unknown as { __answers: unknown[]; __preset?: Preset; __model: unknown };
+type Preset = { answers?: unknown[]; pictures?: number; session?: unknown };
+const w = window as unknown as {
+  __answers: unknown[];
+  __session: unknown;
+  __preset?: Preset;
+  __model: unknown;
+};
 w.__answers = w.__preset?.answers ?? [];
+// E2: открытый прогон на «сервере» — `{ questions, family }` или null.
+w.__session = w.__preset?.session ?? null;
 w.__model = { clarifyOf, decisionLines, insertClarify };
 
 const always = () => true;

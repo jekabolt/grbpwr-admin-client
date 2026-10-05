@@ -71,20 +71,35 @@ const stubNetwork = {
         const answer = (name, body) => {
           if (name === 'GetDesignQuizAnswers') {
             if (window.__preset?.fail) throw new Error('network down');
-            return { answers: clone(window.__answers) };
+            // E2: pending = вопросы открытого прогона без сохранённой строки, порядок модели.
+            const saved = new Set(window.__answers.map((a) => a.question?.id));
+            const s = window.__session;
+            return {
+              answers: clone(window.__answers),
+              pending: s ? clone(s.questions.filter((q) => !saved.has(q.id))) : [],
+              pendingFamily: s ? s.family : '',
+            };
           }
-          if (name === 'GenerateDesignQuiz') return clone(window.__quiz);
+          if (name === 'GenerateDesignQuiz') {
+            window.__session = clone({ questions: window.__quiz.questions, family: window.__quiz.family });
+            return clone(window.__quiz);
+          }
           if (name === 'EnhanceText') return { text: 'Line drawing brief.' };
           if (name === 'SaveDesignQuizAnswers') {
             let list = clone(window.__answers);
             for (const row of clone(body.answers)) {
               const id = row.question?.id;
+              // E1: тот же decisionKey под другим id — прежняя строка забывается.
+              const key = row.question?.decisionKey ?? '';
+              if (key && !isForget(row))
+                list = list.filter((a) => a.question?.id === id || a.question?.decisionKey !== key);
               const at = list.findIndex((a) => a.question?.id === id);
               if (isForget(row)) list = list.filter((a) => a.question?.id !== id);
               else if (at >= 0) list[at] = row;
               else list.push(row);
             }
             window.__answers = list;
+            if (body.closeSession) window.__session = null;
             return { answers: clone(list) };
           }
           if (name === 'DraftDesignIdea')
@@ -319,6 +334,27 @@ try {
     await shoot(page, 'quiz-1440-done.png');
     const saved = await page.evaluate(() => window.__answers);
     check(saved.length === 9, `9 answers saved (got ${saved.length})`);
+    // E1: ключ решения едет с вопросом до сервера и обратно; у уточнения — пустой.
+    check(
+      saved.every((a) =>
+        a.question.id.startsWith('clarify_')
+          ? a.question.decisionKey === ''
+          : a.question.decisionKey === `${a.question.id}_key`,
+      ),
+      'decisionKey round-trips through save (clarify carries none)',
+    );
+    // E2: только ответ на последний вопрос закрывает прогон на сервере.
+    {
+      const runSaves = (await page.evaluate(() => window.__calls)).filter(
+        (c) => c.name === 'SaveDesignQuizAnswers',
+      );
+      check(
+        runSaves.at(-1)?.body.closeSession === true &&
+          runSaves.slice(0, -1).every((c) => !c.body.closeSession) &&
+          (await page.evaluate(() => window.__session)) === null,
+        'the last answer sends closeSession and the server run closes',
+      );
+    }
     const pockets = saved.find((a) => a.question.id === 'pockets');
     check(
       pockets && pockets.selected.length === 2 && pockets.freeText === 'pen slot in the left one',
@@ -596,8 +632,11 @@ try {
       'later keeps the queue: resume 4',
     );
     await shoot(page, 'quiz-1440-later.png');
-    const kept = await page.evaluate(() => window.__answers);
-    await open(1440, 900, { answers: kept }, tab);
+    const kept = await page.evaluate(() => ({
+      answers: window.__answers,
+      session: window.__session,
+    }));
+    await open(1440, 900, kept, tab);
     await btn(page, 'resume 4').waitFor({ timeout: 5000 });
     check(true, 'after reload the row offers resume 4');
     await shoot(page, 'quiz-1440-resume.png');
@@ -613,12 +652,39 @@ try {
       'resume makes no GenerateDesignQuiz call',
     );
     await btn(page, 'later').click();
+    // E2: свежая вкладка (пустой sessionStorage) — `resume N` из `pending` сервера.
+    const fresh = await open(1440, 900, kept);
+    check(
+      (await fresh.page.evaluate(() => sessionStorage.getItem('quiz:1'))) === null,
+      'fresh tab starts with empty sessionStorage',
+    );
+    await btn(fresh.page, 'resume 4').waitFor({ timeout: 5000 });
+    await btn(fresh.page, 'resume 4').click();
+    await fresh.page.waitForSelector('[data-quiz]');
+    check(
+      (await fresh.page.textContent('[data-quiz]')).includes('1 / 4') &&
+        (await fresh.page.textContent('[data-quiz]')).includes('Which season is it for?') &&
+        !(await fresh.page.evaluate(() => window.__calls)).some(
+          (c) => c.name === 'GenerateDesignQuiz',
+        ),
+      'fresh tab resumes from server pending without GenerateDesignQuiz',
+    );
+    await fresh.ctx.close();
     await btn(page, 'discard').click();
-    await page.waitForTimeout(100);
+    await page.waitForTimeout(200);
+    const discardSave = (await page.evaluate(() => window.__calls))
+      .filter((c) => c.name === 'SaveDesignQuizAnswers')
+      .at(-1);
     check(
       (await page.locator(`${quiz} button`, { hasText: 'resume' }).count()) === 0 &&
         (await page.evaluate(() => sessionStorage.getItem('quiz:1'))) === null,
       'discard drops the saved queue',
+    );
+    check(
+      discardSave?.body.closeSession === true &&
+        (discardSave?.body.answers ?? []).length === 0 &&
+        (await page.evaluate(() => window.__session)) === null,
+      'discard sends closeSession with no answers; the server run closes',
     );
     await tab.ctx.close();
   }
@@ -626,7 +692,15 @@ try {
     // D1 + D3: устаревший ответ → `stale` + `confirm` (пересохраняет тот же ответ, строка свежая);
     // `apply to description ✦` и без картинок доски.
     const row = (id, part, question, selected, stale) => ({
-      question: { id, category: 'details', part, family: 'jacket', kind: 'single', question, options: selected },
+      question: {
+        id,
+        category: 'details',
+        part,
+        family: 'jacket',
+        kind: 'single',
+        question,
+        options: selected,
+      },
       selected,
       freeText: '',
       skipped: false,
@@ -637,7 +711,10 @@ try {
       row('hem_length', 'hem', 'Where does the hem sit?', ['mid-thigh'], false),
     ];
     const { ctx, page } = await open(1440, 900, { answers, pictures: 0 });
-    check((await btn(page, 'apply to description').count()) === 1, 'apply visible with zero pictures');
+    check(
+      (await btn(page, 'apply to description').count()) === 1,
+      'apply visible with zero pictures',
+    );
     check(
       (await page.locator(`${quiz} [data-quiz-stale-count]`).textContent()).trim() === '1 stale',
       'done row shows 1 stale',
@@ -646,7 +723,8 @@ try {
     check(
       lines.length === 3 &&
         lines[0].startsWith('hem') &&
-        lines[1] === 'earlier quiz answers — the card changed since; unconfirmed, current card facts win' &&
+        lines[1] ===
+          'earlier quiz answers — the card changed since; unconfirmed, current card facts win' &&
         lines[2].startsWith('collar'),
       'decisionLines put the stale answer under the unconfirmed heading',
     );

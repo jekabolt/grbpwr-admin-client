@@ -3,6 +3,7 @@ import { adminService } from 'api/api';
 import {
   DesignBenchSlotRef,
   DesignQuizAnswer,
+  DesignQuizQuestion,
   DesignSplitFrame,
   DesignUploadItem,
   GetDesignBandResponse,
@@ -678,19 +679,39 @@ export function findMediaUrlInBand(band: GetDesignBandResponse, mediaId: number)
  * прочитан (`isSuccess`, W-C1): экран держит двери закрытыми до тех пор.
  */
 const NO_ANSWERS: DesignQuizAnswer[] = [];
+const NO_PENDING: DesignQuizQuestion[] = [];
+
+/**
+ * СЕССИЯ ПРОГОНА НА СЕРВЕРЕ (E2): чтение несёт и `pending` — вопросы открытого прогона без
+ * сохранённой строки, в порядке модели. Это источник `resume N` с любой вкладки и устройства;
+ * `sessionStorage` остаётся лишь курсором. Запись с `closeSession` закрывает прогон (`discard`,
+ * ответ на последний вопрос) — кэш снимает `pending` сразу.
+ */
+type QuizCache = { answers: DesignQuizAnswer[]; pending: DesignQuizQuestion[]; family: string };
+
+export type QuizSave = { rows: DesignQuizAnswer[]; closeSession?: boolean };
 
 export function useDesignQuizAnswers(techCardId?: number) {
   const id = techCardId ?? 0;
   const query = useQuery({
     queryKey: designKeys.quiz(id),
-    queryFn: async () =>
-      (await adminService.GetDesignQuizAnswers({ techCardId: id })).answers ?? [],
+    queryFn: async (): Promise<QuizCache> => {
+      const res = await adminService.GetDesignQuizAnswers({ techCardId: id });
+      return {
+        answers: res.answers ?? [],
+        pending: res.pending ?? [],
+        family: res.pendingFamily ?? '',
+      };
+    },
     enabled: id > 0,
     retry: (failureCount, error) => !isUnimplemented(error) && failureCount < 1,
     staleTime: 60_000,
   });
   return {
-    answers: query.data ?? NO_ANSWERS,
+    answers: query.data?.answers ?? NO_ANSWERS,
+    /** Открытый прогон на сервере: что ещё не спрошено (без сохранённой строки). */
+    pending: query.data?.pending ?? NO_PENDING,
+    pendingFamily: query.data?.family ?? '',
     /** Сервер маршрута не знает (старый бинарь) — двери квиза нет вовсе. */
     unimplemented: isUnimplemented(query.error),
     isLoading: id > 0 && query.isLoading,
@@ -709,16 +730,36 @@ export function useDesignQuizWrites(techCardId?: number) {
 
   const generate = useMutation({
     mutationFn: () => adminService.GenerateDesignQuiz({ techCardId: id }),
+    // Сервер открыл новый прогон с этими вопросами (прежний закрыт).
+    onSuccess: (res) => {
+      const key = designKeys.quiz(id);
+      const prev = qc.getQueryData<QuizCache>(key);
+      if (!prev) return;
+      qc.setQueryData<QuizCache>(key, {
+        ...prev,
+        pending: res.questions ?? [],
+        family: res.family ?? '',
+      });
+    },
   });
 
   const save = useMutation({
-    mutationFn: (rows: DesignQuizAnswer[]) =>
-      adminService.SaveDesignQuizAnswers({ techCardId: id, answers: rows }),
-    onMutate: async (rows: DesignQuizAnswer[]) => {
+    mutationFn: ({ rows, closeSession }: QuizSave) =>
+      adminService.SaveDesignQuizAnswers({
+        techCardId: id,
+        answers: rows,
+        closeSession: closeSession || undefined,
+      }),
+    onMutate: async ({ rows, closeSession }: QuizSave) => {
       const key = designKeys.quiz(id);
       await qc.cancelQueries({ queryKey: key });
-      const previous = qc.getQueryData<DesignQuizAnswer[]>(key);
-      const sent = applyRows(previous ?? [], rows);
+      const previous = qc.getQueryData<QuizCache>(key);
+      const base = previous ?? { answers: [], pending: [], family: '' };
+      const sent: QuizCache = {
+        answers: applyRows(base.answers, rows),
+        pending: closeSession ? [] : base.pending,
+        family: closeSession ? '' : base.family,
+      };
       qc.setQueryData(key, sent);
       return { previous, card: id, sent };
     },
@@ -732,7 +773,8 @@ export function useDesignQuizWrites(techCardId?: number) {
     },
     onSuccess: (res, _answers, context) => {
       const key = designKeys.quiz(context?.card ?? id);
-      if (context && qc.getQueryData(key) === context.sent) qc.setQueryData(key, res.answers ?? []);
+      if (context && qc.getQueryData(key) === context.sent)
+        qc.setQueryData<QuizCache>(key, { ...context.sent, answers: res.answers ?? [] });
     },
   });
 

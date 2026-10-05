@@ -17712,6 +17712,7 @@ export type DesignQuizQuestion = {
   visualEvidence: string | undefined;
   clarifyQuestion: string | undefined;
   clarifyOptions: string[] | undefined;
+  decisionKey: string | undefined;
 };
 
 export type GenerateDesignQuizRequest = {
@@ -17742,12 +17743,15 @@ export type GetDesignQuizAnswersRequest = {
 
 export type GetDesignQuizAnswersResponse = {
   answers: DesignQuizAnswer[] | undefined;
+  pending: DesignQuizQuestion[] | undefined;
+  pendingFamily: string | undefined;
 };
 
 // SaveDesignQuizAnswersRequest carries the rows to upsert (or forget, when sent empty); see the rpc.
 export type SaveDesignQuizAnswersRequest = {
   techCardId: number | undefined;
   answers: DesignQuizAnswer[] | undefined;
+  closeSession: boolean | undefined;
 };
 
 export type SaveDesignQuizAnswersResponse = {

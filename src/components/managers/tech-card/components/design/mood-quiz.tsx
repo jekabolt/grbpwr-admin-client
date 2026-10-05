@@ -57,8 +57,9 @@ import { newClientRequestId, useDesignQuizAnswers, useDesignQuizWrites } from '.
  *     варианты чипами, своё слово, `skip`. Один вопрос за раз; одиночный выбор продвигает сам.
  *   · ОТВЕТЫ — сложенный список под рядом; строка открывает свой вопрос заново.
  *
- * ПРОГОН ПЕРЕЖИВАЕТ УХОД (W-C3): очередь лежит в `sessionStorage` вкладки, ряд предлагает
- * `resume N` / `discard`, второго платного вызова нет; `later` закрывает вопрос, очередь стоит.
+ * ПРОГОН ПЕРЕЖИВАЕТ УХОД (W-C3, E2): прогон держит сервер (`pending`), вкладка — лишь курсор; ряд
+ * предлагает `resume N` / `discard` с любой вкладки, второго платного вызова нет; `later` закрывает
+ * вопрос, очередь стоит. `discard` и ответ на последний вопрос закрывают прогон на сервере.
  * Пишет квиз только после того, как сохранённые ответы прочитаны (W-C1): запись — свои строки
  * (W-B1), чужие на сервере не трогаются; `forget` у строки списка — пустая строка этого id.
  */
@@ -99,6 +100,8 @@ export function MoodQuiz({
   const card = techCardId && techCardId > 0 ? techCardId : 0;
   const {
     answers,
+    pending,
+    pendingFamily,
     unimplemented,
     isSuccess: ready,
     isError: answersFailed,
@@ -145,8 +148,8 @@ export function MoodQuiz({
     return () => window.clearInterval(t);
   }, [asking]);
 
-  const remaining = ready ? remainingOf(session, answers) : [];
-  // Всё из сохранённой очереди уже отвечено — продолжать нечего.
+  const remaining = ready ? remainingOf(pending, session, answers) : [];
+  // Сервер прогона не держит (или всё отвечено) — кэш вкладки не нужен.
   useEffect(() => {
     if (ready && session && !live && remaining.length === 0) {
       clearQuizSession(card);
@@ -168,6 +171,16 @@ export function MoodQuiz({
   const dropSession = () => {
     clearQuizSession(card);
     setSession(null);
+  };
+  /** `discard`: прогон закрывается и на сервере — пустая запись с `closeSession`. */
+  const discard = async () => {
+    if (readOnly || !ready) return;
+    dropSession();
+    try {
+      await save.mutateAsync({ rows: [], closeSession: true });
+    } catch {
+      /* отказ сказан снэкбаром, `resume N` вернулся */
+    }
   };
 
   // Минимум сервера (O8): картинка на доске ИЛИ слова описания. Категория не нужна — без неё просто
@@ -241,16 +254,18 @@ export function MoodQuiz({
     const rows = [answer];
     const staleChild = !clarify ? answers.find((a) => a.question?.id === childId) : undefined;
     if (staleChild?.question) rows.push(forgetRow(staleChild.question));
-    try {
-      await save.mutateAsync(rows);
-    } catch {
-      return;
-    }
-    if (shownCard.current !== card) return;
     const queue = clarify
       ? insertClarify(live.queue, live.at, clarify)
       : live.queue.filter((x, i) => i <= live.at || x.id !== childId);
     const next = live.at + 1;
+    // E2: ответ на последний вопрос прогона закрывает его на сервере той же записью.
+    const closeSession = live.mode === 'run' && next >= queue.length;
+    try {
+      await save.mutateAsync({ rows, closeSession });
+    } catch {
+      return;
+    }
+    if (shownCard.current !== card) return;
     if (live.mode === 'edit') {
       if (clarify && queue[next]?.id === clarify.id) {
         setLive({ queue, at: next, mode: 'edit' });
@@ -290,11 +305,12 @@ export function MoodQuiz({
   };
 
   const resume = () => {
-    if (!session || !remaining.length || readOnly) return;
-    setFamily(session.family);
+    if (!remaining.length || readOnly) return;
+    const fam = pendingFamily || session?.family || '';
+    setFamily(fam);
     setListOpen(false);
     setLive({ queue: remaining, at: 0, mode: 'run' });
-    persist(remaining, 0, session.family);
+    persist(remaining, 0, fam);
   };
 
   /** W-C7: забыть ответ (и его уточнение) — пустая строка id, сервер удаляет. */
@@ -304,7 +320,7 @@ export function MoodQuiz({
     const child = answers.find((x) => x.question?.id === `clarify_${a.question?.id ?? ''}`);
     if (child?.question) rows.push(forgetRow(child.question));
     try {
-      await save.mutateAsync(rows);
+      await save.mutateAsync({ rows });
     } catch {
       /* отказ сказан снэкбаром, строка вернулась */
     }
@@ -314,7 +330,7 @@ export function MoodQuiz({
   const confirm = async (a: DesignQuizAnswer) => {
     if (readOnly || !ready || !a.question) return;
     try {
-      await save.mutateAsync([{ ...a, answeredAt: undefined, stale: undefined }]);
+      await save.mutateAsync({ rows: [{ ...a, answeredAt: undefined, stale: undefined }] });
     } catch {
       /* отказ сказан снэкбаром */
     }
@@ -440,7 +456,8 @@ export function MoodQuiz({
                   variant='underline'
                   size='xs'
                   className='text-labelColor hover:text-textColor'
-                  onClick={dropSession}
+                  data-quiz-discard=''
+                  onClick={() => void discard()}
                 >
                   discard
                 </Button>

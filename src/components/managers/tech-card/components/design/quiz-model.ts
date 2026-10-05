@@ -120,6 +120,8 @@ export function clarifyOf(
     visualEvidence: '',
     clarifyQuestion: '',
     clarifyOptions: [],
+    // Уточнение — не своё решение: ключа нет, оно никого не вытесняет (E1).
+    decisionKey: '',
   };
 }
 
@@ -174,7 +176,15 @@ export function applyRows(
   let next = list.slice();
   for (const r of rows) {
     const id = r.question?.id;
-    next = isForget(r) ? next.filter((a) => a.question?.id !== id) : withAnswer(next, r);
+    if (isForget(r)) {
+      next = next.filter((a) => a.question?.id !== id);
+      continue;
+    }
+    // E1: тот же `decisionKey` под другим id — прежняя строка забывается (последний ответ решает),
+    // как сервер делает в той же транзакции.
+    const key = r.question?.decisionKey ?? '';
+    if (key) next = next.filter((a) => a.question?.id === id || a.question?.decisionKey !== key);
+    next = withAnswer(next, r);
   }
   return next;
 }
@@ -182,9 +192,9 @@ export function applyRows(
 /**
  * ═══ ПРОДОЛЖИТЬ ПРОГОН (W-C3) ═══════════════════════════════════════════════════════════════════
  *
- * Очередь платного прогона живёт в `sessionStorage` вкладки (`quiz:<cardId>`): после генерации и
- * каждого ответа. Перезагрузка или уход — ряд предлагает `resume N`, без второго вызова модели.
- * Хранилище недоступно — молча нет продолжения.
+ * Прогон живёт на сервере (E2, `pending` чтения ответов). Очередь вкладки в `sessionStorage`
+ * (`quiz:<cardId>`) — лишь кэш курсора и вставленных уточнений: после генерации и каждого ответа.
+ * Перезагрузка, другая вкладка или устройство — ряд предлагает `resume N`, без второго вызова модели.
  */
 export type QuizSession = {
   cardId: number;
@@ -225,12 +235,25 @@ export function clearQuizSession(cardId: number): void {
   }
 }
 
-/** Что осталось спросить: вопросы очереди, у которых ещё нет сохранённой строки (ответ или skip). */
+/**
+ * Что осталось спросить (E2): ИСТОЧНИК — `pending` сервера (открытый прогон без сохранённых строк),
+ * так `resume N` видит и другая вкладка, и другое устройство. Вкладочная очередь — только кэш
+ * порядка: её неотвеченные уточнения (их нет на сервере) встают на свои места, пока сервер держит
+ * прогон открытым. Сервер прогона не держит — продолжать нечего, что бы ни лежало во вкладке.
+ */
 export function remainingOf(
+  pending: readonly DesignQuizQuestion[],
   s: QuizSession | null,
   answers: readonly DesignQuizAnswer[],
 ): DesignQuizQuestion[] {
-  if (!s) return [];
   const saved = new Set(answers.map((a) => a.question?.id));
-  return s.queue.filter((q) => !saved.has(q.id));
+  const open = pending.filter((q) => !saved.has(q.id));
+  if (!open.length) return [];
+  if (!s) return open;
+  const onServer = new Set(open.map((q) => q.id));
+  const local = s.queue.filter(
+    (q) => !saved.has(q.id) && (onServer.has(q.id) || (q.id ?? '').startsWith('clarify_')),
+  );
+  const inLocal = new Set(local.map((q) => q.id));
+  return [...local, ...open.filter((q) => !inLocal.has(q.id))];
 }
