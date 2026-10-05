@@ -5,6 +5,7 @@ import type {
   common_DesignRun,
   common_MediaFull,
 } from 'api/proto-http/admin';
+import { adminService } from 'api/api';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { PantonePicker } from 'components/managers/tech-card/components/pantone-picker';
@@ -117,6 +118,8 @@ export type FabricsHardwareProps = {
   slots: MaterialSlot[];
   /** Card LABELS rows by BOM line: a label slot seeds placement · fold · size from its row. */
   labelSeeds?: ReadonlyMap<number, LabelSeed>;
+  /** The composition label's logo (care label override): a label slot seeds it as its logo. */
+  labelLogo?: common_MediaFull;
   onGoStep: (step: StepId) => void;
   loading?: boolean;
 };
@@ -142,6 +145,7 @@ export function FabricsHardware({
   onColorwayChange,
   slots,
   labelSeeds = NO_LABEL_SEEDS,
+  labelLogo,
   onGoStep,
   loading,
 }: FabricsHardwareProps): JSX.Element {
@@ -171,6 +175,7 @@ export function FabricsHardware({
         colorway={colorways.find((c) => (c.colorwayId ?? 0) === colorwayId && colorwayId > 0)}
         slots={slots}
         labelSeeds={labelSeeds}
+        labelLogo={labelLogo}
         onGoStep={onGoStep}
       />
     </>
@@ -184,6 +189,7 @@ function MaterialBench({
   colorway,
   slots,
   labelSeeds,
+  labelLogo,
   onGoStep,
 }: {
   band: GetDesignBandResponse;
@@ -192,6 +198,7 @@ function MaterialBench({
   colorway?: common_AdminColorwayRef;
   slots: MaterialSlot[];
   labelSeeds: ReadonlyMap<number, LabelSeed>;
+  labelLogo?: common_MediaFull;
   onGoStep: (step: StepId) => void;
 }): JSX.Element {
   const { showMessage } = useSnackBarStore();
@@ -250,13 +257,15 @@ function MaterialBench({
   // Seed when a pair has no draft: bound asset → defaults (BOM words, colourway pantone).
   const seedOf = (slot: MaterialSlot): Spec => {
     const fabric = slot.family === 'fabric';
+    // A label's logo: the composition label's own, when it has one.
+    const logo = labelLogo && (labelLogo.id ?? 0) > 0 && isLabelSlot(slot) ? [labelLogo] : [];
     const asset = cwId > 0 ? byPair.get(pairKey(cwId, slot.bomItemId)) : undefined;
     if (asset) {
       const code = (asset.colourCode ?? '').trim();
       return {
         colourCode: code || (fabric ? ownPantone : ''),
         words: noteWords(asset),
-        pictures: [],
+        pictures: logo,
       };
     }
     if (fabric) return { colourCode: ownPantone, words: slot.detail, pictures: [] };
@@ -277,7 +286,7 @@ function MaterialBench({
           .map((w) => w.trim())
           .filter(Boolean)
           .join(', '),
-        pictures: [],
+        pictures: logo,
       };
     }
     const kind = kindLabel(slot.kind) ?? '';
@@ -796,6 +805,59 @@ function MaterialBench({
     wordsSaving,
   );
 
+  /* ─── `clean unused` (round 8 · C-m3): pictures a manual replace left on the shelf. Strict — the
+     server cascades a delete: hardware only, bound to no pair, placed on no flat, parent of no
+     asset, worn by no colourway, not the previous picture of a live undo, not being cut. A band
+     without placements answers nothing, so the door is not drawn. ─── */
+  const shelfCount = (band.assets ?? []).length;
+  const unusedIds = useMemo(() => {
+    if (band.assetPlacements === undefined || band.assetBindings === undefined) return [];
+    const bound = new Set(band.assetBindings.map((b) => wireInt(b.assetId)));
+    const placed = new Set(band.assetPlacements.map((p) => wireInt(p.assetId)));
+    const parents = new Set((band.assets ?? []).map((a) => wireInt(a.derivedFromAssetId)));
+    const held = new Set([...undos.values()].map((e) => e.prevId));
+    return (band.assets ?? [])
+      .filter((a) => {
+        const id = wireInt(a.id);
+        return (
+          id > 0 &&
+          (a.kind ?? '') === ASSET_HARDWARE &&
+          wireInt(a.colorwayId) === 0 &&
+          !bound.has(id) &&
+          !placed.has(id) &&
+          !parents.has(id) &&
+          !held.has(id) &&
+          !cutting.has(id)
+        );
+      })
+      .map((a) => wireInt(a.id));
+  }, [band, undos, cutting]);
+  const cleanable = !disabled && capable && speaks && unusedIds.length > 0;
+  const [confirmClean, setConfirmClean] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
+  const cleanYesRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!confirmClean) return;
+    cleanYesRef.current?.focus();
+    const t = setTimeout(() => setConfirmClean(false), 5_000);
+    return () => clearTimeout(t);
+  }, [confirmClean]);
+  const cleanUnused = async () => {
+    const ids = unusedIds;
+    setConfirmClean(false);
+    setCleaning(true);
+    try {
+      for (const assetId of ids) {
+        await adminService.DeleteDesignAsset({ techCardId, assetId });
+      }
+    } catch (error) {
+      showMessage((error as Error)?.message || 'the change did not go through', 'error');
+    } finally {
+      await writes.invalidate();
+      setCleaning(false);
+    }
+  };
+
   /* ─── `+ artwork` (owner 04.10): ONE click births the DECORATION line and selects it ─── */
   const addGate: Gate = !form
     ? { ok: false, reason: 'the card form is not on this screen' }
@@ -959,6 +1021,70 @@ function MaterialBench({
       <Text size='micro' variant='label' component='span' data-fh-filled=''>
         {dressed(slots)} of {slots.length} filled
       </Text>
+      {shelfCount >= SHELF_SHOWN_AT && (
+        <>
+          {dot}
+          <Text size='micro' variant='label' component='span' data-fh-shelf={shelfCount}>
+            {shelfCount} / {ASSETS_PER_CARD_MAX}
+          </Text>
+          {cleaning ? (
+            <>
+              {dot}
+              <Text size='micro' variant='label' component='span' data-fh-cleaning=''>
+                deleting…
+              </Text>
+            </>
+          ) : cleanable && confirmClean ? (
+            <span
+              className='flex items-center gap-1.5'
+              data-fh-clean-confirm={unusedIds.length}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setConfirmClean(false);
+              }}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+                  setConfirmClean(false);
+              }}
+            >
+              {dot}
+              <Text size='micro' component='span' className='uppercase'>
+                delete {unusedIds.length} unused picture{unusedIds.length === 1 ? '' : 's'}?
+              </Text>
+              <Button
+                ref={cleanYesRef}
+                variant='underline'
+                size='xs'
+                onClick={() => void cleanUnused()}
+                data-fh-clean-yes=''
+              >
+                yes
+              </Button>
+              {dot}
+              <Button
+                variant='underline'
+                size='xs'
+                onClick={() => setConfirmClean(false)}
+                data-fh-clean-no=''
+              >
+                no
+              </Button>
+            </span>
+          ) : cleanable ? (
+            <>
+              {dot}
+              <Button
+                variant='underline'
+                size='xs'
+                title='hardware pictures in no cell, on no flat'
+                onClick={() => setConfirmClean(true)}
+                data-fh-clean={unusedIds.length}
+              >
+                clean unused · {unusedIds.length}
+              </Button>
+            </>
+          ) : null}
+        </>
+      )}
       {liveHere.length > 0 && (
         <>
           {dot}
@@ -1165,20 +1291,25 @@ function MaterialBench({
                       generate([slot]);
                     }}
                     onClear={() => clear(slot)}
+                    undo={
+                      canUndo ? (
+                        <button
+                          type='button'
+                          disabled={saving.has(key)}
+                          title='restore the previous picture'
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            undo(slot);
+                          }}
+                          data-fh-undo={slot.bomItemId}
+                          className='ml-auto shrink-0 cursor-pointer text-nano uppercase tracking-label text-labelColor underline hover:text-textColor disabled:cursor-wait focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                        >
+                          undo
+                        </button>
+                      ) : null
+                    }
                   />
                 </IntakeCell>
-                {canUndo && (
-                  <Button
-                    variant='underline'
-                    size='xs'
-                    disabled={saving.has(key)}
-                    title='restore the previous picture'
-                    onClick={() => undo(slot)}
-                    data-fh-undo={slot.bomItemId}
-                  >
-                    undo
-                  </Button>
-                )}
               </div>
             );
           })}
@@ -1380,6 +1511,9 @@ function MaterialBench({
 
 type UndoEntry = { prevId: number; setTo: number };
 
+/** The shelf count shows in the MATERIALS header from here on (of `ASSETS_PER_CARD_MAX`). */
+const SHELF_SHOWN_AT = 100;
+
 /** A slot's spec: colour (Pantone code, '' = none), what it is made of, its input pictures. */
 type Spec = {
   colourCode: string;
@@ -1420,11 +1554,11 @@ const toggleWord = (words: string, word: string): string =>
 
 const INPUT_CELL = 'w-24 shrink-0';
 
-/** Empty caption line under a picture: keeps it the colour tile's height. */
-function InputCaption(): JSX.Element {
+/** Caption line under a picture (empty by default): keeps it the colour tile's height. */
+function InputCaption({ text }: { text?: string }): JSX.Element {
   return (
     <Text size='micro' variant='label' component='span' className='block h-4 w-full truncate'>
-      {' '}
+      {text || ' '}
     </Text>
   );
 }
@@ -1521,7 +1655,7 @@ function SpecPanel({
                 onChange({ ...spec, pictures: pictures.filter((_, at) => at !== index) })
               }
             />
-            <InputCaption />
+            <InputCaption text={label ? 'logo' : undefined} />
           </div>
         ))}
         {room > 0 && (
@@ -1765,6 +1899,7 @@ function SlotCell({
   onGenerate,
   onClear,
   onUpload,
+  undo,
 }: {
   slot: MaterialSlot;
   asset?: common_DesignAsset;
@@ -1786,6 +1921,8 @@ function SlotCell({
   onClear: () => void;
   /** Opens the library dialog for THIS cell (empty face's `upload` word). */
   onUpload: () => void;
+  /** The pair's `undo` word: inside the frame, at the cap's right end. */
+  undo?: React.ReactNode;
 }): JSX.Element {
   const cap = (
     <SlotCap
@@ -1793,13 +1930,8 @@ function SlotCell({
       title={[slot.name, slot.purposeLabel, slot.detail].filter(Boolean).join(' · ')}
       strong={selected}
       quiet
-      trailing={
-        slot.purposeLabel ? (
-          <Text size='nano' variant='label' component='span' className='ml-auto min-w-0 truncate'>
-            {slot.purposeLabel}
-          </Text>
-        ) : null
-      }
+      wrap
+      trailing={undo ?? null}
     />
   );
 

@@ -84,6 +84,10 @@ const stubNetwork = {
             band.assets = [...(band.assets || []).filter((a) => a.id !== id), asset];
             return { asset };
           }
+          if (name === 'DeleteDesignAsset') {
+            const band = window.__band;
+            band.assets = (band.assets || []).filter((a) => a.id !== body.assetId);
+          }
           if (name === 'SetDesignAssetBinding') {
             const band = window.__band;
             const rest = (band.assetBindings || []).filter(
@@ -745,6 +749,150 @@ try {
     await page.waitForTimeout(400);
     await shoot(page, 'r4-making-cancel-1440.png');
     await ctx.close();
+  }
+  {
+    // Round 8 minors (C-m1…C-m4) on `#r8`: a long slot name, the undo word, the shelf, the logo.
+    const { ctx, page } = await open(1440, 1000, '#r8');
+    // C-m1: the whole name on ≤ 2 lines, no purpose word in the cap, purpose in the title.
+    {
+      const cap = await page
+        .locator('[data-fh-slot="1"] [data-bench-cap]')
+        .first()
+        .evaluate((el) => {
+          const t = el.querySelector('span');
+          const lh = parseFloat(getComputedStyle(t).lineHeight) || 12;
+          return {
+            text: el.textContent.trim(),
+            title: el.getAttribute('title') ?? '',
+            lines: Math.round(t.getBoundingClientRect().height / lh),
+            cut: t.scrollHeight > t.clientHeight + 1,
+          };
+        });
+      if (
+        cap.text !== 'MAIN FABRIC OUTER SHELL' ||
+        cap.cut ||
+        cap.lines > 2 ||
+        !cap.title.includes('main material')
+      )
+        errors.push(`[1440] ASSERT C-m1: cap ${JSON.stringify(cap)}`);
+      else console.log(`assert ok C-m1: full name on ${cap.lines} lines, purpose in the title`);
+    }
+    // C-m2: `clear` on FRONT BUTTON → `undo` inside the cell frame; the cell keeps its height.
+    {
+      const h = () =>
+        page.locator('[data-fh-slot="3"]').evaluate((el) => el.getBoundingClientRect().height);
+      const h0 = await h();
+      await page.click('[data-fh-cell="3"] [data-picture-tile]');
+      await page.waitForTimeout(450);
+      await page.hover('[data-fh-cell="3"]');
+      await page.click('[data-menu="fh:3"]');
+      await page.click('[data-menu-item="clear"]');
+      await page
+        .waitForSelector('[data-fh-undo="3"]', { timeout: 5000 })
+        .catch(() => errors.push('[1440] ASSERT C-m2: no undo after clear'));
+      const inside = await page
+        .locator('[data-fh-cell="3"] [data-bench-cap] [data-fh-undo="3"]')
+        .count();
+      const h1 = await h();
+      if (inside !== 1 || Math.abs(h1 - h0) > 0.5)
+        errors.push(`[1440] ASSERT C-m2: undo inside ${inside}, height ${h0} → ${h1}`);
+      else console.log(`assert ok C-m2: undo inside the frame, cell height ${h1} unchanged`);
+      await page.mouse.move(5, 5);
+      await page.waitForTimeout(300);
+      await shoot(page, 'r8-undo-1440.png');
+      await page.click('[data-fh-undo="3"]');
+      await page
+        .waitForSelector('[data-fh-cell="3"] [data-picture-tile]', { timeout: 5000 })
+        .then(() => console.log('assert ok C-m2: undo restores the picture'))
+        .catch(() => errors.push('[1440] ASSERT C-m2: undo did not restore the picture'));
+    }
+    // C-m4: BRAND LABEL seeds the composition label's logo, captioned `logo`; it rides the run.
+    {
+      await page.click('[data-fh-cell="5"]');
+      await page.waitForSelector('[data-fh-for="5"]');
+      const look = await page.locator('[data-fh-for="5"] [data-fh-look="1"]').count();
+      const caption = await page
+        .locator('[data-fh-look="1"]')
+        .evaluate((el) => el.lastElementChild?.textContent?.trim())
+        .catch(() => '');
+      if (look !== 1 || caption !== 'logo')
+        errors.push(`[1440] ASSERT C-m4: seeded logo ${look}, caption «${caption}»`);
+      await page.mouse.move(5, 5);
+      await page.waitForTimeout(300);
+      await shoot(page, 'r8-label-logo-1440.png');
+      const n = await page.evaluate(() => window.__calls.length);
+      await page.click('[data-fh-generate="live"] button:has-text("GENERATE")');
+      await page.waitForTimeout(500);
+      const p = await page.evaluate(
+        (n) => window.__calls.slice(n).find((c) => c.body?.params?.pattern)?.body?.params,
+        n,
+      );
+      if (
+        JSON.stringify(p?.extraInputMediaIds) !== '[902]' ||
+        !String(p?.colour?.words).includes('logo = picture 1')
+      )
+        errors.push(`[1440] ASSERT C-m4: label run ${JSON.stringify(p)?.slice(0, 300)}`);
+      else console.log('assert ok C-m4: label logo seeded, captioned, sent as picture 1');
+    }
+    // C-m3: `103 / 120 · clean unused · 95` → `delete 95 unused pictures? yes · no` → yes deletes
+    // exactly the 95, never the placed / parent / worn / pattern / fabric ones.
+    {
+      const shelf = await page.getAttribute('[data-fh-batch] [data-fh-shelf]', 'data-fh-shelf');
+      const door = await page.getAttribute('[data-fh-batch] [data-fh-clean]', 'data-fh-clean');
+      if (shelf !== '103' || door !== '95')
+        errors.push(`[1440] ASSERT C-m3: shelf ${shelf}, clean door ${door}`);
+      await page.click('[data-fh-clean]');
+      const ask = (await page.textContent('[data-fh-clean-confirm]'))?.replace(/\s+/g, ' ').trim();
+      if (!ask?.includes('delete 95 unused pictures?'))
+        errors.push(`[1440] ASSERT C-m3: confirm reads «${ask}»`);
+      if (
+        (await page.evaluate(
+          () => window.__calls.filter((c) => c.name === 'DeleteDesignAsset').length,
+        )) > 0
+      )
+        errors.push('[1440] ASSERT C-m3: deleted on the first click');
+      await page.mouse.move(5, 5);
+      await page.waitForTimeout(200);
+      await shoot(page, 'r8-clean-confirm-1440.png');
+      await page.click('[data-fh-clean-no]');
+      if ((await page.locator('[data-fh-clean]').count()) !== 1)
+        errors.push('[1440] ASSERT C-m3: `no` did not revert the door');
+      await page.click('[data-fh-clean]');
+      await page.click('[data-fh-clean-yes]');
+      await page
+        .waitForFunction(() => !document.querySelector('[data-fh-shelf]'), null, { timeout: 8000 })
+        .catch(() => errors.push('[1440] ASSERT C-m3: the shelf count did not leave below 100'));
+      const gone = await page.evaluate(() =>
+        window.__calls.filter((c) => c.name === 'DeleteDesignAsset').map((c) => c.body.assetId),
+      );
+      const want = Array.from({ length: 95 }, (_, i) => 1000 + i);
+      if (JSON.stringify([...gone].sort((a, b) => a - b)) !== JSON.stringify(want))
+        errors.push(
+          `[1440] ASSERT C-m3: deleted ${gone.length} · ${gone.filter((id) => id >= 1095)}`,
+        );
+      else
+        console.log('assert ok C-m3: clean unused deletes exactly the 95 unused hardware pictures');
+      await page.mouse.move(5, 5);
+      await page.waitForTimeout(300);
+      await shoot(page, 'r8-clean-done-1440.png');
+    }
+    await ctx.close();
+  }
+  {
+    // C-m3: a band without placements draws the shelf count but never the door; the default stand
+    // (3 assets) draws neither.
+    const { ctx, page } = await open(1440, 1000, '#r8-noplace');
+    if (
+      (await page.locator('[data-fh-shelf="103"]').count()) !== 1 ||
+      (await page.locator('[data-fh-clean]').count()) !== 0
+    )
+      errors.push('[1440] ASSERT C-m3: clean door drawn on a band without placements');
+    else console.log('assert ok C-m3: no placements said → no clean door');
+    await ctx.close();
+    const d = await open(1440, 1000);
+    if ((await d.page.locator('[data-fh-shelf]').count()) !== 0)
+      errors.push('[1440] ASSERT C-m3: shelf count drawn under 100');
+    await d.ctx.close();
   }
   {
     const { ctx, page } = await open(390, 844);

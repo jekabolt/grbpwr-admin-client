@@ -106,9 +106,12 @@ export function StudioTab({
   cardDetails,
   constructionAspects,
   navTo,
+  labelMedia,
 }: {
   techCardId?: number;
   disabled?: boolean;
+  /** The card's resolved label media (`resolvedLabelMedia`): the composition label's logo. */
+  labelMedia?: common_TechCard['resolvedLabelMedia'];
   /**
    * ПЕРЕХОД НА СОСЕДНЮЮ ВКЛАДКУ — ЧУЖОЙ ПИСАТЕЛЬ, А НЕ СВОЙ.
    *
@@ -198,6 +201,11 @@ export function StudioTab({
     name: 'garmentLabels',
     compute: (rows) => labelSeedsOf(rows),
   });
+  // A label slot seeds its logo from the composition label's (resolved by the card read).
+  const logoMediaId = useWatch({ control, name: 'careLabel.logoMediaId' }) as number | undefined;
+  const labelLogo = (labelMedia ?? []).find(
+    (m) => (m.media?.id ?? 0) > 0 && m.media?.id === (logoMediaId ?? 0),
+  )?.media;
   const { canWrite } = usePermissions();
   const canWriteCard = canWrite(SECTION.techCards);
 
@@ -564,6 +572,7 @@ export function StudioTab({
                         onColorwayChange={colorway.setColorwayId}
                         slots={materials.slots}
                         labelSeeds={labelSeeds}
+                        labelLogo={labelLogo}
                         onGoStep={goStep}
                         loading={colorway.loading}
                       />

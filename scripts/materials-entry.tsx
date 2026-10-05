@@ -94,6 +94,28 @@ if (location.hash === '#making') {
   });
   (BAND as unknown as { runs: unknown[] }).runs = [live(701, 2), live(702, 4)];
 }
+/* `#r8` (round 8 minors): a shelf of 103 — 95 unused hardware pictures a manual replace left, and
+   five that must survive `clean unused` (placed, a parent, worn by a colourway, its pattern child,
+   an unbound fabric). `#r8-noplace`: the same shelf on a band that does not say placements. */
+const R8 = location.hash.startsWith('#r8');
+if (R8) {
+  const b = BAND as unknown as {
+    assets: common_DesignAsset[];
+    assetPlacements?: unknown[];
+  };
+  const extra = (id: number, kind: string, more: Record<string, unknown> = {}) =>
+    ({ ...asset(id, kind, `rosso · old ${id}`, BUTTON), ...more }) as unknown as common_DesignAsset;
+  for (let i = 0; i < 95; i += 1) b.assets.push(extra(1000 + i, 'hardware'));
+  b.assets.push(
+    extra(1100, 'hardware'),
+    extra(1101, 'hardware'),
+    extra(1102, 'pattern', { derivedFromAssetId: 1101 }),
+    extra(1103, 'hardware', { colorwayId: 12 }),
+    extra(1104, 'fabric'),
+  );
+  if (location.hash !== '#r8-noplace')
+    b.assetPlacements = [{ id: 1, assetId: 1100, pictureId: 1, note: '' }];
+}
 (window as unknown as { __band: unknown }).__band = BAND;
 /* The library the picture slot opens: one horn button reference. */
 const HORN = svg(
@@ -158,7 +180,7 @@ const SLOTS: MaterialSlot[] = [
     1,
     'fabric',
     'fabric',
-    'MAIN FABRIC',
+    R8 ? 'MAIN FABRIC OUTER SHELL' : 'MAIN FABRIC',
     'main material',
     'TECH_CARD_BOM_SECTION_FABRIC',
     '100% wool twill 320 gsm',
@@ -214,6 +236,7 @@ function Harness() {
           onColorwayChange={setColorwayId}
           slots={[...SLOTS, ...born]}
           labelSeeds={LABEL_SEEDS}
+          labelLogo={R8 ? media(902, LOGO) : undefined}
           onGoStep={() => {}}
         />
       </div>

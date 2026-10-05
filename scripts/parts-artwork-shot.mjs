@@ -268,6 +268,55 @@ try {
   await page.mouse.move(5, 5);
   await page.waitForTimeout(300);
   await shoot(page, 'r7-parts-placed-1440.png');
+  // C-m5: a box at the top edge of the flat — its rotation handle stands BELOW the box, inside the
+  // flat, and turns it.
+  {
+    const before = await page.evaluate(
+      () => window.__calls.filter((c) => c.name === 'SetDesignAssetPlacement').length,
+    );
+    await dragTo(page, await at(page, 'front', 0.36, 0.002), await at(page, 'front', 0.5, 0.08));
+    await page.waitForFunction(
+      (n) => window.__calls.filter((c) => c.name === 'SetDesignAssetPlacement').length > n,
+      before,
+      { timeout: 5000 },
+    );
+    await page.waitForTimeout(500);
+    const geo = await page.evaluate(() => {
+      const g = document.querySelector('[data-paint-side="front"] [data-artwork-handles]');
+      const c = g?.querySelector('circle');
+      const svg = g?.ownerSVGElement;
+      if (!c || !svg) return null;
+      const box = svg.getBoundingClientRect();
+      const rects = [...g.querySelectorAll('rect')].map((r) => Number(r.getAttribute('y')) + 4);
+      return {
+        x: box.x + Number(c.getAttribute('cx')),
+        y: box.y + Number(c.getAttribute('cy')),
+        cy: Number(c.getAttribute('cy')),
+        h: box.height,
+        bottom: Math.max(...rects),
+      };
+    });
+    if (!geo || geo.cy <= geo.bottom || geo.cy > geo.h)
+      errors.push(`ASSERT C-m5: top-edge rotation handle ${JSON.stringify(geo)}`);
+    else {
+      const n0 = await page.evaluate(
+        () => window.__calls.filter((c) => c.name === 'SetDesignAssetPlacement').length,
+      );
+      await dragTo(page, { x: geo.x, y: geo.y }, { x: geo.x + 30, y: geo.y - 4 });
+      await page.waitForTimeout(400);
+      const n1 = await page.evaluate(
+        () => window.__calls.filter((c) => c.name === 'SetDesignAssetPlacement').length,
+      );
+      if (n1 <= n0) errors.push('ASSERT C-m5: the handle below the box did not turn it');
+      else
+        console.log(
+          `assert ok C-m5: top-edge box → handle below (${geo.cy} > ${geo.bottom}), turns it`,
+        );
+    }
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(300);
+    await shoot(page, 'r8-parts-top-handle-1440.png');
+  }
   console.log(
     `band placements: ${JSON.stringify(await page.evaluate(() => window.__band.assetPlacements.map((p) => [p.id, p.assetId, p.pictureId, p.annotation.points.map((q) => [q.x.value, q.y.value])])))}`,
   );

@@ -598,6 +598,7 @@ export function SlotCap({
   trailing,
   strong,
   quiet,
+  wrap,
 }: {
   label: string;
   required?: boolean;
@@ -608,6 +609,8 @@ export function SlotCap({
   strong?: boolean;
   /** Grey name that goes ink on the hover of an enclosing `group` (selectable rows). */
   quiet?: boolean;
+  /** The whole name on up to two lines instead of one truncated line (MATERIALS). */
+  wrap?: boolean;
 }) {
   return (
     <div
@@ -621,7 +624,7 @@ export function SlotCap({
         tracking='label'
         component='span'
         className={cn(
-          'min-w-0 truncate',
+          wrap ? 'line-clamp-2 min-w-0 flex-1 break-words' : 'min-w-0 truncate',
           strong && 'font-bold',
           quiet && !strong && 'text-labelColor group-hover:text-textColor',
         )}
