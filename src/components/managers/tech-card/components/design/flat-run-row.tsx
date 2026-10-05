@@ -29,6 +29,7 @@ import { moodMinimumGate, openGateDoor } from './core/chain';
 import { useDrafted } from './drafted-contract';
 import { markedPlatesOf } from './fix-markup';
 import { FlatCustom } from './flat-custom';
+import { joinsSavesSettled } from './flat-joins';
 import {
   flatChoiceSummary,
   flatDraftOf,
@@ -162,6 +163,7 @@ function flatSnapshot(
   band: GetDesignBandResponse | undefined,
   now: TechCardFormData,
   detailSlotIds: readonly number[],
+  mode: FlatMode,
 ): unknown {
   const refs = (band?.references ?? [])
     .filter((r) => (r.mediaId ?? 0) > 0 && !!(r.role ?? '').trim())
@@ -190,7 +192,8 @@ function flatSnapshot(
     callouts,
     details,
     // The join list the run freezes (its rev, and whether that rev is confirmed — straps needs it).
-    joins: [band?.joins?.rev ?? 0, !!band?.joins?.confirmed],
+    // «from my flat» reads no list: a background read moving the rev is not a new intent there.
+    joins: mode === 'hand_flat' ? null : [band?.joins?.rev ?? 0, !!band?.joins?.confirmed],
   };
 }
 
@@ -624,7 +627,10 @@ export function FlatRunRow({
          после потерянного ответа повтор (кэш уже свежий) получил бы другой id — второй платный
          прогон за то же. Поэтому: дождаться записей полосы этой карточки, перечитать полосу и брать
          роли из этого чтения. */
-      if (!(await bandWritesSettled(qc, card, BAND_WRITES_WAIT_MS))) {
+      if (
+        !(await bandWritesSettled(qc, card, BAND_WRITES_WAIT_MS)) ||
+        !(await joinsSavesSettled(card, BAND_WRITES_WAIT_MS))
+      ) {
         if (cardOnScreen(card)) {
           showMessage('the input is still being saved — try again; nothing was started', 'error');
         }
@@ -664,7 +670,7 @@ export function FlatRunRow({
         kind: 'flat',
         ask: '',
         params,
-        snapshot: flatSnapshot(freshBand, now, params.detailSlotIds ?? []),
+        snapshot: flatSnapshot(freshBand, now, params.detailSlotIds ?? [], mode),
       });
       // The list may have moved (edited elsewhere): the band is re-read so the door shows it.
       if (refusal?.reason === 'joins_unconfirmed') {

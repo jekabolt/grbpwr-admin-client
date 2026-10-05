@@ -78,6 +78,29 @@ const subscribe = (l: () => void) => {
   };
 };
 
+/* ─── saves in flight, per card: GENERATE waits for them (the run freezes the SAVED list) ─── */
+const savingCount = new Map<number, number>();
+const markSaving = (card: number, delta: number) => {
+  const n = Math.max(0, (savingCount.get(card) ?? 0) + delta);
+  if (n) savingCount.set(card, n);
+  else savingCount.delete(card);
+  bump();
+};
+
+/** Every joins save of this card has answered (or `ms` passed: false). */
+export function joinsSavesSettled(card: number, ms: number): Promise<boolean> {
+  if (!savingCount.get(card)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const tick = () => {
+      if (!savingCount.get(card)) return resolve(true);
+      if (Date.now() - started > ms) return resolve(false);
+      window.setTimeout(tick, 100);
+    };
+    tick();
+  });
+}
+
 const statusOf = (e: unknown) => (e as { status?: number } | null)?.status ?? 0;
 const messageOf = (e: unknown) => (e instanceof Error && e.message) || 'the join list did not load';
 /** The read takes ~50 s; past these the wait ends and says so (the request may still land). */
@@ -197,6 +220,7 @@ export function FlatJoins({
     const next = edit(base);
     setDraft(next);
     setSaving(true);
+    markSaving(card, 1);
     try {
       let saved: common_DesignJoins | undefined;
       try {
@@ -243,6 +267,7 @@ export function FlatJoins({
       if (!quiet && cardOnScreen(card)) showMessage(why, 'error');
       return why;
     } finally {
+      markSaving(card, -1);
       setDraft(null);
       setSaving(false);
     }
@@ -631,7 +656,8 @@ export function FlatJoins({
             <button
               type='button'
               data-joins-confirm=''
-              disabled={locked}
+              /* An open editor holds an unsaved line: the list on screen is not the one stored. */
+              disabled={locked || editing !== null}
               title='the list is right — straps & openings may run on it'
               onClick={() => void apply((j) => j, false, true)}
             >
