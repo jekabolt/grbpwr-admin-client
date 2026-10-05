@@ -61,6 +61,32 @@ const glassFrame = (g: GlassProps | undefined) =>
 const NUMBER_TAG = 'bg-textColor px-[3px] text-nano leading-tight text-bgColor tabular-nums';
 
 /**
+ * КОРОБКА ВСТАВКИ ДЕТАЛИ в пикселях кадра: размер и центр, уже прижатый внутрь кадра. Одна
+ * функция на рисунок и на хранение (T34, R43): поверхность прижимает ей же положение подписи, и
+ * записанная точка совпадает с нарисованной — иначе под прижатой вставкой жила бы «настоящая»
+ * точка, к которой тянулись лидер и всё, что рисуют по подписи.
+ */
+export function detailInsetBox(
+  at: ShapePoint,
+  region: { w: number; h: number } | null,
+  frame: { w: number; h: number },
+  scale: number,
+) {
+  const rw = Math.max(region?.w ?? 0, 4);
+  const rh = Math.max(region?.h ?? 0, 4);
+  // Потолок — чтобы вставка не закрыла собой плиту: длинная сторона не больше 60 % высоты кадра.
+  const cap = Math.max(72, Math.min(220, frame.h * 0.6));
+  const k = Math.min(1, cap / Math.max(rw * scale, rh * scale));
+  const eff = scale * k;
+  const w = Math.max(32, rw * eff);
+  const h = Math.max(32, rh * eff);
+  // ВСТАВКА НЕ ВЫХОДИТ ЗА КАДР: на краю плиты она легла бы на соседнюю или за край листа.
+  const x = clamp(at.x, w / 2, Math.max(w / 2, frame.w - w / 2));
+  const y = clamp(at.y, h / 2, Math.max(h / 2, frame.h - h / 2));
+  return { eff, w, h, x, y };
+}
+
+/**
  * ВСТАВКА ДЕТАЛИ (владелец: «увеличенная выноска отдельного участка … с возможностью показать
  * зазумленный кусок или своё фото из галереи»). Регион — зона на кадре; вставка стоит на месте
  * плашки и показывает тот же снимок, увеличенный ×scale, или своё фото. Лидер от региона к вставке
@@ -87,17 +113,7 @@ export function DetailInset({
   text: string;
   glass?: GlassProps;
 }) {
-  const rw = Math.max(region?.w ?? 0, 4);
-  const rh = Math.max(region?.h ?? 0, 4);
-  // Потолок — чтобы вставка не закрыла собой плиту: длинная сторона не больше 60 % высоты кадра.
-  const cap = Math.max(72, Math.min(220, frame.h * 0.6));
-  const k = Math.min(1, cap / Math.max(rw * scale, rh * scale));
-  const eff = scale * k;
-  const w = Math.max(32, rw * eff);
-  const h = Math.max(32, rh * eff);
-  // ВСТАВКА НЕ ВЫХОДИТ ЗА КАДР: на краю плиты она легла бы на соседнюю или за край листа.
-  const cx = clamp(at.x, w / 2, Math.max(w / 2, frame.w - w / 2));
-  const cy = clamp(at.y, h / 2, Math.max(h / 2, frame.h - h / 2));
+  const { eff, w, h, x: cx, y: cy } = detailInsetBox(at, region, frame, scale);
   return (
     <span
       {...glassDoor(glass, [`detail ×${scale}`, text].filter(Boolean).join(' · '))}

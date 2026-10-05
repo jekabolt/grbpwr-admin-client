@@ -73,6 +73,7 @@ const stubNetwork = {
       contents: `
         const nope = () => Promise.resolve({});
         export const adminService = new Proxy({}, { get: () => nope });
+        export const abortableAdminService = adminService;
         export const authService = new Proxy({}, { get: () => nope });
         export const frontendService = new Proxy({}, { get: () => nope });
         export const requestHandler = () => Promise.resolve({});
@@ -218,6 +219,35 @@ try {
     ns.filter((n) => /^\s*zoom\s*$/i.test(n.textContent ?? '')).length,
   );
   check('кнопки со словом zoom на плите нет', zoomWord === 0, String(zoomWord));
+
+  // ── ВЫБРАННАЯ И НАВЕДЁННАЯ ИЗ СПИСКА ВЫНОСКА (T34, R43/R18) ──
+  await page.evaluate(() => window.__hot(true));
+  await page.waitForTimeout(250);
+  const extra = await page.evaluate(() => {
+    const tile = document.querySelector('[data-plate-tile]');
+    const frame = tile.querySelector('[data-annot-frame]').getBoundingClientRect();
+    const plate = tile.querySelector('[data-callout-selected]');
+    if (!plate) return { plate: false };
+    const pr = plate.getBoundingClientRect();
+    const x = pr.left + pr.width / 2;
+    const y = pr.top + pr.height / 2;
+    // Всё с рамкой, что лежит на точке подписи или обводит линию, кроме самой плашки и ручек.
+    const boxed = [...tile.querySelectorAll('*')].filter((el) => {
+      if (el === plate || plate.contains(el) || el.closest('[role="button"][title^="drag"]')) return false;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || cs.display === 'none') return false;
+      if (!(parseFloat(cs.borderTopWidth) > 0) || cs.borderTopStyle === 'none') return false;
+      const r = el.getBoundingClientRect();
+      if (r.width >= frame.width - 2 && r.height >= frame.height - 2) return false; // сам кадр/плитка
+      const atLabel = x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      const aroundLine = r.left <= frame.left + frame.width * 0.12 && r.right >= frame.left + frame.width * 0.58 && r.top <= frame.top + frame.height * 0.5 && r.bottom >= frame.top + frame.height * 0.52;
+      return atLabel || aroundLine;
+    });
+    return { plate: true, boxed: boxed.map((e) => `${e.tagName}.${(e.getAttribute('class') || '').slice(0, 50)}`) };
+  });
+  const SHOT = (process.argv.find((a) => a.startsWith('--shot=')) ?? '').split('=')[1];
+  if (SHOT) await (await page.$('[data-plate-tile]')).screenshot({ path: SHOT, animations: 'disabled' });
+  check('выбранная+наведённая: квадрата у подписи и рамки вокруг линии нет', extra.plate && extra.boxed.length === 0, JSON.stringify(extra));
 } finally {
   await browser.close();
 }

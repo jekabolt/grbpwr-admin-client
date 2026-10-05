@@ -3,7 +3,7 @@
 // его быть не должно можно сделать некое дыхание обводки». Квадрат был ручками региона детали,
 // проступавшими сквозь её вставку, когда вставка стоит на регионе.
 //
-//   node scripts/callout-selection-probe.mjs [--mutate=handles|stroke] [--shots=<dir>] [--prefix=33]
+//   node scripts/callout-selection-probe.mjs [--mutate=handles|stroke|region|fit] [--shots=<dir>] [--prefix=33]
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -20,6 +20,10 @@ const MUTATIONS = {
   // Ручки детали снова поверх её вставки.
   handles: { file: /annotation\/surface\.tsx$/, from: "const handlesUnderInsets = selectedCallout?.spec?.t === 'detail';", to: 'const handlesUnderInsets = false;' },
   // Выбранная фигура снова толще соседей.
+  // Зона детали снова не ловится по площади под взведённым видом (R44).
+  region: { file: /annotation\/surface\.tsx$/, from: "const artwork = c.spec?.t === 'artwork' || c.spec?.t === 'detail';", to: "const artwork = c.spec?.t === 'artwork';" },
+  // Записанная подпись детали снова расходится с прижатой вставкой.
+  fit: { file: /annotation\/surface\.tsx$/, from: '? fitDetailLabel(\n              dc,', to: '? ((_c: unknown, l: { x: number; y: number }) => l)(\n              dc,' },
   stroke: { file: /annotation\/surface\.tsx$/, from: 'halo={halo}\n                    />', to: 'halo={halo}\n                      strokeWidth={selected === c.key ? 2 : 1.5}\n                    />' },
 };
 const mutation = MUTATE && {
@@ -115,6 +119,7 @@ const breathing = () => page.evaluate(() => {
 });
 
 await shot('none');
+const START_CS = await page.evaluate(() => window.__cs());
 const base = await strokes();
 // 1. ДЕТАЛЬ, вставка на своём регионе: ни одна ручка не лежит поверх вставки.
 await select('det');
@@ -143,6 +148,71 @@ for (const [k, name, trace] of [['art', 'artwork', true], ['lead', 'leader', tru
   check(`${name}: плашка/маркер дышит, своя тень не тронута`, b.box === 'calloutBreathe' && (k === 'pin' || b.boxShadow === 'none'), JSON.stringify(b));
   await shot(name);
 }
+// 2б. ДЕТАЛЬ С ПРИЖАТОЙ ВСТАВКОЙ (T34, R43): регион справа, вставку утащили в левый верхний угол
+// за край кадра. Внутри вставки — только её картинка, номер и ×N.
+const FAR = [
+  { key: 'far', kind: 'polygon', number: 1, points: [{ x: 0.7, y: 0.6 }, { x: 0.8, y: 0.6 }, { x: 0.8, y: 0.7 }, { x: 0.7, y: 0.7 }], label: { x: 0.01, y: 0.01 }, text: 'pocket — all edges clean, turned under', filled: false, spec: { t: 'detail', scale: 6 } },
+  { key: 'line', kind: 'dim', number: 2, points: [{ x: 0.1, y: 0.85 }, { x: 0.4, y: 0.87 }], label: { x: 0.25, y: 0.75 }, text: 'test', color: 'blue' },
+];
+await page.evaluate((cs) => { window.__set(cs); window.__tool('label'); }, FAR);
+await select('far');
+await page.evaluate(() => window.__hot('far'));
+await page.waitForTimeout(150);
+const inside = await page.evaluate(() => {
+  const ins = document.querySelector('[data-callout-detail]');
+  const r = ins.getBoundingClientRect();
+  const foreign = new Set();
+  for (let gx = 0.08; gx < 1; gx += 0.07)
+    for (let gy = 0.08; gy < 1; gy += 0.07) {
+      const top = document.elementFromPoint(r.left + r.width * gx, r.top + r.height * gy);
+      if (top && top !== ins && !ins.contains(top)) foreign.add(`${top.tagName}.${(top.getAttribute('class') || '').slice(0, 40)}`);
+    }
+  const own = [...ins.querySelectorAll('*')].filter((e) => !(e.tagName === 'IMG' || /^×\d|^\d+$/.test(e.textContent.trim()) || e.querySelector('img'))).map((e) => e.textContent.trim().slice(0, 20));
+  return { foreign: [...foreign], own };
+});
+check('прижатая вставка: поверх неё ничего чужого', inside.foreign.length === 0, JSON.stringify(inside));
+check('прижатая вставка: внутри только картинка, номер, ×N (подпись — под ней)', inside.own.every((t) => t.startsWith('pocket')), JSON.stringify(inside.own));
+await page.evaluate(() => window.__hot(null));
+await shot('clamped-inset');
+// R44: курсор-рука над зоной детали, клик внутри неё выбирает её, а не ставит новую выноску — даже
+// под взведённым видом; повторный клик оставляет выбранной.
+await select(null);
+const zone = await page.evaluate(() => {
+  const f = document.querySelector('[data-bench="sheet"] img').getBoundingClientRect();
+  return { x: f.left + f.width * 0.75, y: f.top + f.height * 0.65 };
+});
+await page.mouse.move(zone.x, zone.y);
+const cur = await page.evaluate(({ x, y }) => getComputedStyle(document.elementFromPoint(x, y)).cursor, zone);
+check('R44 над зоной детали — курсор pointer', cur === 'pointer', cur);
+const addsBefore = await page.evaluate(() => window.__adds());
+await page.mouse.click(zone.x, zone.y);
+await page.waitForTimeout(150);
+const after1 = await page.evaluate(() => ({ sel: document.querySelector('[data-bench="sel"]').textContent, adds: window.__adds() }));
+check('R44 клик по зоне детали под взведённым видом выбирает её', after1.sel === 'far' && after1.adds === addsBefore, JSON.stringify(after1));
+await page.mouse.click(zone.x, zone.y);
+await page.waitForTimeout(150);
+const after2 = await page.evaluate(() => ({ sel: document.querySelector('[data-bench="sel"]').textContent, adds: window.__adds() }));
+check('R44 повторный клик — остаётся выбранной, новой выноски нет', after2.sel === 'far' && after2.adds === addsBefore, JSON.stringify(after2));
+// Перетащить вставку дальше в угол: записанная подпись = центр нарисованной вставки.
+const ib = await page.$eval('[data-callout-detail]', (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+await page.mouse.move(ib.x, ib.y);
+await page.mouse.down();
+await page.mouse.move(ib.x + 40, ib.y + 40, { steps: 4 });
+await page.mouse.move(ib.x - 200, ib.y - 200, { steps: 6 });
+await page.mouse.up();
+await page.waitForTimeout(150);
+const fitted = await page.evaluate(() => {
+  const img = document.querySelector('[data-bench="sheet"] [data-annot-frame] img, [data-bench="sheet"] img');
+  const f = img.getBoundingClientRect();
+  const r = document.querySelector('[data-callout-detail]').getBoundingClientRect();
+  const l = window.__cs().find((c) => c.key === 'far').label;
+  return { stored: { x: +(f.left + l.x * f.width).toFixed(1), y: +(f.top + l.y * f.height).toFixed(1) }, drawn: { x: +(r.left + r.width / 2).toFixed(1), y: +(r.top + r.height / 2).toFixed(1) } };
+});
+check('перетащенная к краю вставка: записанная точка = нарисованный центр', Math.abs(fitted.stored.x - fitted.drawn.x) <= 1.5 && Math.abs(fitted.stored.y - fitted.drawn.y) <= 1.5, JSON.stringify(fitted));
+await page.mouse.move(1, 1);
+await page.evaluate((cs) => { window.__tool(null); window.__set(cs); }, START_CS);
+await select('det');
+
 // 3. reduced motion: ореол есть, пульса нет.
 await page.emulateMedia({ reducedMotion: 'reduce' });
 await select('det');

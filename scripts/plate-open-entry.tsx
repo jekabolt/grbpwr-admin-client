@@ -4,6 +4,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import type { SurfaceCallout } from 'ui/components/annotation/surface';
 import {
   PlateGrid,
   type DocumentPlate,
@@ -36,15 +37,31 @@ const noop = () => {};
 function Harness() {
   const [zooms, setZooms] = useState<number[]>([]);
   const [added, setAdded] = useState(0);
+  // T34 (R43/R18): строка CALLOUTS под курсором и выбрана — на плите ни квадрата у подписи, ни
+  // пунктирной рамки по якорям.
+  const [hot, setHot] = useState(false);
+  (window as unknown as { __hot: (on: boolean) => void }).__hot = setHot;
+  const line: SurfaceCallout = {
+    key: '0',
+    kind: 'dim',
+    number: 5,
+    points: [
+      { x: 0.1, y: 0.5 },
+      { x: 0.6, y: 0.52 },
+    ],
+    label: { x: 0.3, y: 0.2 },
+    text: 'test',
+    color: 'blue',
+  };
   return (
     <div style={{ padding: 40 }}>
       <PlateGrid
         cells={[{ type: 'plate', plate, index: 0 }]}
         layout='strip'
-        hoverIndex={null}
+        hoverIndex={hot ? 0 : null}
         onView3d={noop}
-        calloutsOf={() => []}
-        selected={null}
+        calloutsOf={() => (hot ? [line] : [])}
+        selected={hot ? 0 : null}
         canPlaceOn={() => true}
         tool='label'
         onToolDone={noop}

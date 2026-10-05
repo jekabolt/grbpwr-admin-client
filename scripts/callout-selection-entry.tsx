@@ -1,6 +1,6 @@
 // СТЕНД ВЫБОРА ВЫНОСКИ (T33, R43). Настоящий AnnotationSurface: деталь, артворк, лидер, разрез,
 // пин, плашка — на штриховом флэте; выбор задаёт проба через `window.__select`.
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AnnotationSurface, type SurfaceCallout } from 'ui/components/annotation/surface';
 
@@ -87,20 +87,39 @@ const START: SurfaceCallout[] = [
 function Bench() {
   const [sel, setSel] = useState<string | null>(null);
   const [cs, setCs] = useState(START);
-  (window as unknown as { __select: (k: string | null) => void }).__select = setSel;
+  const [tool, setTool] = useState<string | null>(null);
+  const adds = useRef(0);
+  const [hot, setHot] = useState<string | null>(null);
+  const w = window as unknown as {
+    __select: (k: string | null) => void;
+    __set: (cs: SurfaceCallout[]) => void;
+    __tool: (t: string | null) => void;
+    __hot: (k: string | null) => void;
+  };
+  w.__tool = setTool;
+  (window as unknown as { __cs: () => SurfaceCallout[] }).__cs = () => cs;
+  (window as unknown as { __adds: () => number }).__adds = () => adds.current;
+  w.__hot = setHot;
+  w.__select = setSel;
+  w.__set = setCs;
   return (
     <div style={{ width: 420, padding: 20, background: '#fff' }} data-bench='sheet'>
       <AnnotationSurface
         src={FLAT}
         callouts={cs}
         selectedKey={sel}
+        tool={tool}
+        hoveredKey={hot}
+        legend
         onSelect={(k) => setSel(k)}
         onEditPoints={(k, points) =>
           setCs((p) => p.map((c) => (c.key === k ? { ...c, points } : c)))
         }
         onMoveLabel={(k, label) => setCs((p) => p.map((c) => (c.key === k ? { ...c, label } : c)))}
         onRemove={() => {}}
-        onAdd={() => {}}
+        onAdd={() => {
+          adds.current += 1;
+        }}
       />
       <div data-bench='sel'>{sel ?? ''}</div>
     </div>

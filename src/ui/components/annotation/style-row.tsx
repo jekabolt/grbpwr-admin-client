@@ -85,8 +85,14 @@ function RuleSep() {
   return <span aria-hidden className='mx-0.5 inline-block h-3 w-px bg-borderColor' />;
 }
 
-/** Клетка текущего цвета и двери «···» — одной ширины. */
-const DOOR_CELL = 'w-6 justify-center px-0';
+/**
+ * ОДНА КЛЕТКА НА ВСЁ, ЧТО В РЯДУ НЕ СЛОВО (R42, владелец: «тут вообще 3 разных размера блоков так
+ * не должно быть»): текущий цвет, «···» и остальные цвета — один квадрат одной рамки, свотч внутри
+ * один. Размер задан явно, а не содержимым: span со свотчем, кнопка со свотчем и кнопка с точками
+ * считали высоту каждая по-своему (16 / 12 / 19 px). Текстовые чипы — той же высоты (`ROW_H`).
+ */
+const ROW_H = 'h-5';
+const CELL = 'size-5 shrink-0 justify-center p-0 leading-none';
 
 export function AnnotationStyleRow({
   kind,
@@ -131,24 +137,20 @@ export function AnnotationStyleRow({
     // Свотч в рамке: белый на белом редакторе иначе не виден вовсе.
     <span
       aria-hidden
-      className='inline-block size-2 border border-borderColor'
+      className='block size-3 border border-borderColor'
       style={{ background: c ? CALLOUT_COLOR_HEX[c] : 'var(--color-textColor)' }}
     />
   );
   return (
     <ChipRow>
       {/* ТЕКУЩИЙ ЦВЕТ — ЗНАЧЕНИЕ, А НЕ ВЫБОР: сплошная рамка, без пунктира. */}
-      {/* ОДИН РАЗМЕР С ДВЕРЬЮ «···» (владелец, 05.10): обе — квадратные клетки одной ширины. */}
+      {/* ОДНА КЛЕТКА С ДВЕРЬЮ «···» И ЦВЕТАМИ (`CELL`). */}
       <Chip
         data-color={color || 'ink'}
         title={COLOR_LABEL[color] ?? COLOR_LABEL['']}
-        className={DOOR_CELL}
+        className={CELL}
       >
-        <span
-          aria-hidden
-          className='inline-block size-3 border border-borderColor'
-          style={{ background: color ? CALLOUT_COLOR_HEX[color] : 'var(--color-textColor)' }}
-        />
+        {swatch(color)}
       </Chip>
       <Chip
         data-style-door=''
@@ -158,7 +160,7 @@ export function AnnotationStyleRow({
         aria-label={open ? 'fewer style options' : 'more style options'}
         title={open ? 'fewer style options' : 'colour, line ends, dashed, hatching'}
         onClick={() => setOpen((v) => !v)}
-        className={DOOR_CELL}
+        className={CELL}
       >
         ···
       </Chip>
@@ -172,6 +174,7 @@ export function AnnotationStyleRow({
               onClick={() => onColor(c)}
               title={COLOR_LABEL[c]}
               aria-label={COLOR_LABEL[c]}
+              className={CELL}
             >
               {swatch(c)}
             </Chip>
@@ -191,6 +194,7 @@ export function AnnotationStyleRow({
                     onClick={() => onCaps?.(capsStorage(kind, k), k)}
                     title={`${CAPS_LABEL[k]} — ${CAPS_HINT[k]}`}
                     aria-label={CAPS_LABEL[k]}
+                    className={ROW_H}
                   >
                     <CapGlyph caps={k} />
                   </Chip>
@@ -205,6 +209,7 @@ export function AnnotationStyleRow({
               selected={dashed}
               pressed={dashed}
               onClick={() => onDashed(!dashed)}
+              className={ROW_H}
               title='dashed — a construction line, a seam allowance, a line under a layer; solid — what is actually done'
             >
               dashed
@@ -216,6 +221,7 @@ export function AnnotationStyleRow({
               selected={filled}
               pressed={filled}
               onClick={() => onFilled(!filled)}
+              className={ROW_H}
               title='hatching says “this area”; a bare contour says “this border”'
             >
               hatching

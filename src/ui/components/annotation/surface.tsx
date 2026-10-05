@@ -49,7 +49,7 @@ import {
   type Spec,
 } from './purpose';
 import { setFrameAspect } from './frame-aspect';
-import { ArtworkImage, DetailInset, SectionInset, SectionLetters } from './insets';
+import { ArtworkImage, DetailInset, detailInsetBox, SectionInset, SectionLetters } from './insets';
 import { StitchPictogram } from './stitch-pictogram';
 import { AnnotationDefs, CalloutShape, CALLOUT_COLOR_HEX, PlacingShape } from './shapes';
 
@@ -1657,8 +1657,19 @@ export function AnnotationSurface({
       const p = point(e);
       if (!p) return;
       if (d.what === 'label') {
-        const nx = clamp01(p.x - d.offX);
-        const ny = clamp01(p.y - d.offY);
+        // Деталь пишет ту точку, где вставка нарисована: прижатая к краю вставка не уводит
+        // записанную подпись за собой в пустоту (T34, R43).
+        const dc = live.current.callouts.find((x) => x.key === d.key);
+        const fit = dc
+          ? fitDetailLabel(
+              dc,
+              { x: clamp01(p.x - d.offX), y: clamp01(p.y - d.offY) },
+              dc.points,
+              size,
+            )
+          : { x: clamp01(p.x - d.offX), y: clamp01(p.y - d.offY) };
+        const nx = fit.x;
+        const ny = fit.y;
         if (
           !d.moved &&
           Math.hypot((nx - d.at.x) * size.w, (ny - d.at.y) * size.h) <= CLICK_MOVE_THRESHOLD
@@ -1966,7 +1977,7 @@ export function AnnotationSurface({
     }
     return c.points;
   };
-  const labelOf = (c: SurfaceCallout): ShapePoint => {
+  const rawLabelOf = (c: SurfaceCallout): ShapePoint => {
     const d = drag;
     if (!d || d.key !== c.key || !d.moved) return c.label;
     if (d.what === 'label') return d.at;
@@ -1976,18 +1987,23 @@ export function AnnotationSurface({
     }
     return c.label;
   };
+  // У детали подпись — центр вставки, прижатой внутрь кадра: лидер и всё прочее идут к нарисованной
+  // вставке, а не к точке под ней (T34, R43).
+  const labelOf = (c: SurfaceCallout): ShapePoint =>
+    fitDetailLabel(c, rawLabelOf(c), pointsOf(c), size);
 
   const startLabelDrag = (c: SurfaceCallout, e: ReactPointerEvent) => {
     if (!editable || dragRef.current) return;
     e.stopPropagation();
     justDragged.current = false;
     const p = at(e.clientX, e.clientY);
+    const from = labelOf(c);
     setDragBoth({
       what: 'label',
       key: c.key,
-      offX: p.x - c.label.x,
-      offY: p.y - c.label.y,
-      at: c.label,
+      offX: p.x - from.x,
+      offY: p.y - from.y,
+      at: from,
       moved: false,
     });
   };
@@ -2465,7 +2481,10 @@ export function AnnotationSurface({
                     // (владелец, 04.10: «при нажатии на любую точку колаута артворк он должен
                     // автоматически выделяться»). Цена: начать новую фигуру внутри зоны нанесения
                     // одним кликом нельзя — сначала Esc.
-                    const artwork = c.spec?.t === 'artwork';
+                    // ЗОНА ДЕТАЛИ — ТАК ЖЕ (R44, владелец: «если я ховерю эту область то курсор
+                    // должен менятся и если я кликну то мы перейдем в эдит этого блока а не создадим
+                    // новый колаут»).
+                    const artwork = c.spec?.t === 'artwork' || c.spec?.t === 'detail';
                     const byArea = (kindDef(c.kind).key === 'polygon' && !!c.filled) || artwork;
                     return (
                       <path
@@ -3076,6 +3095,27 @@ function EditorSlot({
       {children}
     </div>
   );
+}
+
+/**
+ * ПОДПИСЬ ДЕТАЛИ = ЦЕНТР ЕЁ ВСТАВКИ, прижатой внутрь кадра (`detailInsetBox`, та же функция, что
+ * рисует вставку). Остальные выноски — как есть. Доли кадра на входе и выходе.
+ */
+function fitDetailLabel(
+  c: SurfaceCallout,
+  l: ShapePoint,
+  pts: ShapePoint[],
+  size: { w: number; h: number },
+): ShapePoint {
+  if (c.spec?.t !== 'detail' || size.w <= 0 || size.h <= 0) return l;
+  const b = boundsOf(pts);
+  const box = detailInsetBox(
+    { x: l.x * size.w, y: l.y * size.h },
+    b ? { w: b.w * size.w, h: b.h * size.h } : null,
+    size,
+    c.spec.scale,
+  );
+  return { x: box.x / size.w, y: box.y / size.h };
 }
 
 /**
