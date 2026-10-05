@@ -15,6 +15,7 @@ import { openStepOf } from '../core/chain';
 import { Workbench } from '../generation/studio';
 import { artworkModelLines, artworksOf } from '../paint/artworks';
 import {
+  artworkGuideCount,
   fitMockups,
   overCeilingSentence,
   renderEngine,
@@ -379,6 +380,7 @@ export function RenderStudio({
       renderInputMediaIds(band, colorwayId, wire, artworks),
       wire.colourMaps ?? [],
       engine?.maxReferences ?? 0,
+      artworkGuideCount(band, artworks),
     );
     return { ...fit, label: (engine?.label ?? '').trim() || (engine?.slug ?? '') };
   }, [band, colorwayId, wire, artworks]);
