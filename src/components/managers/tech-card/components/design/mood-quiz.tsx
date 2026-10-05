@@ -32,6 +32,7 @@ import {
   answerText,
   clarifyOf,
   clearQuizSession,
+  followUpId,
   forgetRow,
   insertClarify,
   partWords,
@@ -277,7 +278,7 @@ export function MoodQuiz({
     // W-C11: уточнение — и в правке; родитель ушёл от противоречия (или пропущен) — его прежнее
     // уточнение забывается и снимается с очереди.
     const clarify = skipped ? null : clarifyOf(q, selected);
-    const childId = `clarify_${q.id ?? ''}`.slice(0, 64);
+    const childId = followUpId(q);
     const rows = [answer];
     const staleChild = !clarify ? answers.find((a) => a.question?.id === childId) : undefined;
     if (staleChild?.question) rows.push(forgetRow(staleChild.question));
@@ -345,7 +346,7 @@ export function MoodQuiz({
   const forget = async (a: DesignQuizAnswer) => {
     if (readOnly || !ready || !a.question) return;
     const rows = [forgetRow(a.question)];
-    const child = answers.find((x) => x.question?.id === `clarify_${a.question?.id ?? ''}`);
+    const child = answers.find((x) => x.question?.id === followUpId(a.question));
     if (child?.question) rows.push(forgetRow(child.question));
     try {
       await save.mutateAsync({ rows });

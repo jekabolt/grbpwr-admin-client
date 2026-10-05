@@ -933,6 +933,95 @@ try {
     );
     await ctx.close();
   }
+  // 91-EDGE-KEYS K2: ответ на edge_finish_main ВСЕГДА вставляет «какие края иначе» (edge_exceptions,
+  // multi, + «none — all the same»); «none» — исключений нет; два исключения сохраняются оба.
+  for (const path of ['two', 'none']) {
+    const eq = (id, kind, question, options, decisionKey, extra = {}) => ({
+      id,
+      category: 'details',
+      part: 'whole',
+      family: 'jacket',
+      view: 'front',
+      kind,
+      question,
+      options,
+      contradicts: options.map(() => false),
+      visualEvidence: '',
+      clarifyQuestion: '',
+      clarifyOptions: [],
+      decisionKey,
+      ...extra,
+    });
+    const { ctx, page } = await open(1440, 900, {
+      quiz: {
+        family: 'jacket',
+        model: 'stub',
+        questions: [
+          eq(
+            'edges',
+            'single',
+            'Main finish of the front edge, hem, sleeve openings and pocket openings?',
+            ['hem turned twice, 301', 'faced edge', 'bound edge (binding)', 'raw edge'],
+            'edge_finish_main',
+            {
+              clarifyQuestion: 'Which edges are finished differently?',
+              clarifyOptions: [
+                'neckline: rib band',
+                'pocket openings: piped edge (piping)',
+                'hood edge: bound edge (binding)',
+              ],
+            },
+          ),
+          eq('season', 'single', 'Season?', ['summer', 'winter'], 'season'),
+        ],
+      },
+    });
+    await btn(page, 'ASK ME').click();
+    await page.waitForSelector('[data-quiz]');
+    check((await page.textContent('[data-quiz]')).includes('1 / 2'), `[${path}] edges counter 1 / 2`);
+    await btn(page, 'faced edge').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('2 / 3'),
+    );
+    const follow = await page.textContent('[data-quiz]');
+    check(
+      follow.includes('Which edges are finished differently?') &&
+        follow.includes('none — all the same') &&
+        follow.includes('hood edge: bound edge (binding)'),
+      `[${path}] edge_finish_main answer inserts the edge exceptions follow-up with «none»`,
+    );
+    if (path === 'two') {
+      await shoot(page, 'quiz-1440-edge-exceptions.png');
+      await btn(page, 'neckline: rib band').click();
+      await btn(page, 'pocket openings: piped edge (piping)').click();
+    } else await btn(page, 'none — all the same').click();
+    await btn(page, 'next ›').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('3 / 3'),
+    );
+    await btn(page, 'summer').click();
+    await page.waitForFunction(() => !document.querySelector('[data-quiz]'));
+    const saved = await page.evaluate(() => window.__answers);
+    const exc = saved.find((a) => a.question.id === 'edge_exceptions_edges');
+    const lines = await page.evaluate((list) => window.__model.decisionLines(list), saved);
+    if (path === 'two')
+      check(
+        exc?.question.decisionKey === 'edge_exceptions' &&
+          exc.question.kind === 'multi' &&
+          exc.selected.join('|') === 'neckline: rib band|pocket openings: piped edge (piping)' &&
+          lines.includes('edge exceptions: neckline: rib band; pocket openings: piped edge (piping)'),
+        `two exceptions save edge_exceptions with both (${lines.join(' | ')})`,
+      );
+    else
+      check(
+        exc?.question.decisionKey === 'edge_exceptions' &&
+          exc.selected.join('|') === 'none — all the same' &&
+          lines.includes('edge exceptions: none'),
+        `«none» path saves no exceptions (${lines.join(' | ')})`,
+      );
+    check(saved.length === 3, `[${path}] 3 answers saved (got ${saved.length})`);
+    await ctx.close();
+  }
   {
     const { ctx, page } = await open(390, 844);
     await btn(page, 'ASK ME').click();

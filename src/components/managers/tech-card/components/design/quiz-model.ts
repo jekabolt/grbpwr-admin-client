@@ -54,8 +54,35 @@ export function partLabel(part?: string | null): string {
 export const STALE_DECISIONS_HEADING =
   'earlier quiz answers — the card changed since; unconfirmed, current card facts win';
 
+/**
+ * 91-EDGE-KEYS K2: на «основную отделку краёв» (`edge_finish_main`) ВСЕГДА следом встаёт вопрос
+ * «какие края иначе» — решение `edge_exceptions`, multi, с вариантом «none — all the same».
+ */
+export const EDGE_MAIN_KEY = 'edge_finish_main';
+export const EDGE_EXCEPTIONS_KEY = 'edge_exceptions';
+export const EDGE_NONE = 'none — all the same';
+
+/** Вставной вопрос-продолжение (уточнение O2 или исключения краёв): не базовый, сервер его не знает. */
+export const isFollowUpId = (id?: string | null) =>
+  (id ?? '').startsWith('clarify_') || (id ?? '').startsWith('edge_exceptions_');
+
+/** id продолжения вопроса: `edge_exceptions_<id>` у основной отделки краёв, иначе `clarify_<id>`. */
+export const followUpId = (q?: DesignQuizQuestion | null) =>
+  `${q?.decisionKey === EDGE_MAIN_KEY ? 'edge_exceptions_' : 'clarify_'}${q?.id ?? ''}`.slice(0, 64);
+
+/** `edge exceptions: neckline: rib band; pocket openings: piping`; только «none» — `edge exceptions: none`. */
+function edgeExceptionsLine(a: DesignQuizAnswer): string | null {
+  const picked = (a.selected ?? []).map(clean).filter(Boolean);
+  const items = picked.filter((s) => !/^none\b/i.test(s));
+  const own = clean(a.freeText);
+  if (own) items.push(own);
+  if (items.length) return `edge exceptions: ${items.join('; ')}`;
+  return picked.length ? 'edge exceptions: none' : null;
+}
+
 function decisionLine(a: DesignQuizAnswer): string | null {
   if (a.skipped) return null;
+  if (a.question?.decisionKey === EDGE_EXCEPTIONS_KEY) return edgeExceptionsLine(a);
   const chosen = (a.selected ?? []).map(clean).filter(Boolean);
   const own = clean(a.freeText);
   if (own) chosen.push(`own words: "${own}"`);
@@ -104,10 +131,11 @@ export function clarifyOf(
   q: DesignQuizQuestion,
   selected: readonly string[],
 ): DesignQuizQuestion | null {
+  if (isFollowUpId(q.id)) return null;
+  if (q.decisionKey === EDGE_MAIN_KEY) return edgeExceptionsOf(q);
   const question = clean(q.clarifyQuestion);
   const options = (q.clarifyOptions ?? []).map(clean).filter(Boolean);
   if (!question || options.length < 2) return null;
-  if ((q.id ?? '').startsWith('clarify_')) return null;
   const opts = q.options ?? [];
   const flags = q.contradicts ?? [];
   const hit = selected.some((s) => {
@@ -134,6 +162,31 @@ export function clarifyOf(
 }
 
 /**
+ * 91-EDGE-KEYS K2: исключения краёв — после ЛЮБОГО ответа на `edge_finish_main`. Варианты — пары
+ * «край: отделка» от сервера (2–6, сервер гарантирует) + `none — all the same`; свои слова как обычно.
+ */
+function edgeExceptionsOf(q: DesignQuizQuestion): DesignQuizQuestion {
+  const pairs = [...new Set((q.clarifyOptions ?? []).map(clean).filter(Boolean))]
+    .filter((o) => o.toLowerCase() !== EDGE_NONE)
+    .slice(0, 6);
+  return {
+    id: followUpId(q),
+    category: q.category,
+    part: 'whole',
+    family: q.family,
+    view: q.view,
+    kind: 'multi',
+    question: clean(q.clarifyQuestion) || 'Which edges are finished differently?',
+    options: [...(pairs.length ? pairs : ['other edges: different finish']), EDGE_NONE],
+    contradicts: [],
+    visualEvidence: '',
+    clarifyQuestion: '',
+    clarifyOptions: [],
+    decisionKey: EDGE_EXCEPTIONS_KEY,
+  };
+}
+
+/**
  * Вставка уточнения после `at`, если такого id в очереди нет. Потолок прогона выбран (W-C11) —
  * уточнение важнее последнего неотвеченного базового вопроса: он уходит, счёт остаётся QUIZ_MAX.
  */
@@ -148,7 +201,7 @@ export function insertClarify(
   if (queue.length >= QUIZ_MAX) {
     let drop = -1;
     for (let i = rest.length - 1; i >= 0; i--) {
-      if (!(rest[i].id ?? '').startsWith('clarify_')) {
+      if (!isFollowUpId(rest[i].id)) {
         drop = i;
         break;
       }
@@ -260,7 +313,7 @@ export function remainingOf(
   if (!s) return open;
   const onServer = new Set(open.map((q) => q.id));
   const local = s.queue.filter(
-    (q) => !saved.has(q.id) && (onServer.has(q.id) || (q.id ?? '').startsWith('clarify_')),
+    (q) => !saved.has(q.id) && (onServer.has(q.id) || isFollowUpId(q.id)),
   );
   const inLocal = new Set(local.map((q) => q.id));
   return [...local, ...open.filter((q) => !inLocal.has(q.id))];
