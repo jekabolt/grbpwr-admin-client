@@ -825,31 +825,7 @@ export function FocusedAnnotator({
             {/* ПЕРЕКЛЮЧАТЕЛЬ ВИДА — ЧИТАТЕЛЬСКИЙ ОРГАН, поэтому стоит до режимов постановки и живёт
                 на выпущенной карточке тоже. */}
             {viewControls}
-            {/* Only once the rail actually runs off the edge — arrows that can't move anything are
-                noise. They live in the bar rather than floating over the pictures, where they would
-                sit on top of the pins they exist to help you reach. */}
-            {railArrows && rail.overflowing && (
-              <div className='flex items-center gap-1'>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='xs'
-                  aria-label='previous view'
-                  onClick={() => rail.step(-1)}
-                >
-                  ‹
-                </Button>
-                <Button
-                  type='button'
-                  variant='secondary'
-                  size='xs'
-                  aria-label='next view'
-                  onClick={() => rail.step(1)}
-                >
-                  ›
-                </Button>
-              </div>
-            )}
+            {/* T68 (05.10): стрелки ‹ › сняты по слову владельца — ряд листается прокруткой/свайпом. */}
             {!kindsFirst && modeToggles}
           </Toolbar>
         ) : (

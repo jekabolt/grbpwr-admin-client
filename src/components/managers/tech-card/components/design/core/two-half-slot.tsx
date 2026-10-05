@@ -109,10 +109,16 @@ function DrawHalf({
   onClick,
   anchor,
   ariaLabel,
+  glyph,
+  title,
   className,
   ...rest
 }: {
   label: string;
+  /** Знак половины вместо пера (MATERIALS: `generate ✦` — своя дверь, не рисование). */
+  glyph?: React.ReactNode;
+  /** `title` вместо фразы `drawTitle` — для половины, которая не рисует. */
+  title?: string;
   /**
    * КУДА встанет нарисованное — существительным, а не целой фразой: предложение пишет
    * `drawTitle` один раз на всю студию (разбор у него).
@@ -132,12 +138,12 @@ function DrawHalf({
       data-draw-half={anchor ?? ''}
       {...rest}
       aria-label={ariaLabel}
-      title={drawTitle(into)}
+      title={title ?? drawTitle(into)}
       onClick={onClick}
       style={{ minHeight: 0 }}
       className={cn(HALF_FACE, 'border-t border-dashed border-borderColor', className)}
     >
-      <PenGlyph />
+      {glyph ?? <PenGlyph />}
       <span className='leading-tight'>{label}</span>
     </button>
   );
@@ -188,6 +194,8 @@ export function PlaceOrDrawCell({
   onDraw,
   drawLabel = 'draw',
   drawAriaLabel,
+  drawGlyph,
+  drawTitle: drawTitleOverride,
   /** Адрес нарисованного — существительным; предложение пишет `drawTitle`. */
   into,
   cap,
@@ -227,6 +235,10 @@ export function PlaceOrDrawCell({
   drawLabel?: string;
   /** Шесть половин с надписью «draw» в одной ленте неразличимы на слух — здесь их различают. */
   drawAriaLabel?: string;
+  /** Знак нижней половины вместо пера — когда она не рисует (MATERIALS: `generate`). */
+  drawGlyph?: React.ReactNode;
+  /** `title` нижней половины вместо фразы о рисовании. */
+  drawTitle?: string;
   into?: string;
   /** Подвал под кадром — имя слота и звёздочка обязательной (верстак флэтов). */
   cap?: React.ReactNode;
@@ -335,6 +347,8 @@ export function PlaceOrDrawCell({
                 label={drawLabel}
                 ariaLabel={drawAriaLabel ?? `${drawLabel} — ${label}`}
                 into={into}
+                glyph={drawGlyph}
+                title={drawTitleOverride}
                 onClick={onDraw}
               />
             )}

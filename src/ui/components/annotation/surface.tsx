@@ -40,7 +40,14 @@ import {
   pointsFloor,
   type AnnotationCapsKey,
 } from './kinds';
-import { artworkQuad, boundsOf, purposeTool, specSummary, toolGeometry, type Spec } from './purpose';
+import {
+  artworkQuad,
+  boundsOf,
+  purposeTool,
+  specSummary,
+  toolGeometry,
+  type Spec,
+} from './purpose';
 import { setFrameAspect } from './frame-aspect';
 import { ArtworkImage, DetailInset, SectionInset, SectionLetters } from './insets';
 import { StitchPictogram } from './stitch-pictogram';
@@ -257,6 +264,15 @@ export type AnnotationSurfaceProps = {
   className?: string;
 
   callouts: SurfaceCallout[];
+
+  /**
+   * ПРИЗРАКИ (T28, `suggest ✦`) — предложенные указания, ещё не принятые. Рисуются ТЕМ ЖЕ
+   * `CalloutShape` и той же плашкой, но серым пунктиром, без номера и без единой ручки: их нельзя
+   * ни выбрать, ни потащить — принимают и отклоняют их строкой в CALLOUTS. `ghostHot` — призрак,
+   * чья строка под курсором: он берёт чернила, остальные остаются бледными.
+   */
+  ghosts?: SurfaceCallout[];
+  ghostHot?: string | null;
 
   // ЗАПИСЬ — ГРАНУЛЯРНЫМИ КОЛБЭКАМИ, а не «отдай весь массив». У эскиза массив живёт в RHF под
   // двумя useFieldArray, и валовая запись повторила бы гонку, из-за которой пин появлялся на
@@ -619,6 +635,8 @@ export function AnnotationSurface({
   frameStyle,
   className,
   callouts: rawCallouts,
+  ghosts,
+  ghostHot,
   onAdd,
   onEditPoints,
   onMoveLabel,
@@ -2352,6 +2370,25 @@ export function AnnotationSurface({
                     />
                   ),
                 )}
+                {/* ПРИЗРАКИ — та же фигура, серым пунктиром, без хит-путей и ручек (довод у `ghosts`). */}
+                {(ghosts ?? []).map((g) => (
+                  <g
+                    key={`ghost:${g.key}`}
+                    data-callout-ghost-shape={g.key}
+                    style={{ color: 'var(--color-labelColor)' }}
+                    opacity={ghostHot === g.key ? 1 : 0.7}
+                  >
+                    <CalloutShape
+                      kind={g.kind}
+                      pts={g.points.map(px)}
+                      label={px(g.label)}
+                      dashed
+                      caps={g.caps}
+                      halo={halo}
+                      strokeWidth={ghostHot === g.key ? 1.5 : 1}
+                    />
+                  </g>
+                ))}
                 {/* ХИТ-ПУТИ — невидимые толстые копии штрихов: попасть мышью в волосяную линию
                     нельзя, а выбирать фигуру надо именно по ней. Живут, пока правка возможна и
                     ЖЕСТ НЕ НАЧАТ: с первой поставленной точки слой обязан стать прозрачным для
@@ -2728,6 +2765,28 @@ export function AnnotationSurface({
                   />
                 );
               })}
+
+            {/* ПЛАШКИ ПРИЗРАКОВ — та же `Plate`, без номера и мёртвая для мыши: призрак не выбирают. */}
+            {size.w > 0 &&
+              !hideCallouts &&
+              (ghosts ?? []).map((g) => (
+                <Plate
+                  key={`ghost-plate:${g.key}`}
+                  ghost={g.key}
+                  at={px(g.label)}
+                  inv={inv}
+                  head={specSummary(g.spec ?? null)}
+                  text={(g.text ?? '').trim()}
+                  names={[]}
+                  dimmed={false}
+                  selected={ghostHot === g.key}
+                  interactive={false}
+                  editable={false}
+                  onHover={() => {}}
+                  onPointerDown={() => {}}
+                  onPress={() => {}}
+                />
+              ))}
 
             {/* ПЛАШКА ТЕКСТА ПИНА ПО НАВЕДЕНИЮ ИЛИ ФОКУСУ — только в режиме `hoverNotes`.
                 НЕ ПОРТАЛ, и это принципиально: портал рендерится в `document.body`, вне
@@ -3253,13 +3312,14 @@ function PinMarker({
 const PLATE_TEXT_MAX = 220;
 
 function Plate({
+  ghost,
   at,
   inv,
   number,
   head,
   headIcon,
   box,
-  text,
+  text: rawText,
   names,
   dimmed,
   selected,
@@ -3269,6 +3329,8 @@ function Plate({
   onPointerDown,
   onPress,
 }: {
+  /** Ключ призрака (`ghosts`): серая пунктирная плашка, вне фокуса и вне чтеца. */
+  ghost?: string;
   at: ShapePoint;
   inv: number;
   /** Номер, которым выноску адресуют снаружи. Отсутствует — на плашке его нет. */
@@ -3289,16 +3351,21 @@ function Plate({
   onPointerDown: (e: ReactPointerEvent) => void;
   onPress: () => void;
 }) {
+  // Текст, повторяющий строку назначения слово в слово (материал: имя строки BOM и есть текст),
+  // вторым рядом не печатается — плашка говорила бы одно и то же дважды.
+  const text = head && rawText.trim() === head.trim() ? '' : rawText;
   // Одно-два имени — инлайном; дальше счётчик: узкая плашка не резиновая, и счётчик честнее
   // трёх обрезанных имён. Полный список — в подсказке, в легенде и на бумаге.
   const tail =
     names.length === 0 ? '' : names.length <= 2 ? names.join(', ') : `${names.length} pieces`;
   return (
     <span
-      role='button'
-      tabIndex={0}
+      role={ghost ? undefined : 'button'}
+      tabIndex={ghost ? undefined : 0}
+      aria-hidden={ghost ? true : undefined}
+      data-callout-ghost={ghost}
       title={[head, text, ...names].filter(Boolean).join(' · ') || 'callout'}
-      data-callout-selected={selected ? 'true' : undefined}
+      data-callout-selected={selected && !ghost ? 'true' : undefined}
       data-callout-note={box ? '' : undefined}
       onPointerEnter={() => onHover(true)}
       onPointerLeave={() => onHover(false)}
@@ -3328,6 +3395,8 @@ function Plate({
         // БЕЗ КОЛЬЦА ВЫБОРА (владелец, 04.10: «такого выделения быть не должно»). Выбор фигуры
         // показывают её ручки; плашка лишь берёт чернильную рамку вместо серой.
         selected ? 'border-textColor' : 'border-borderColor',
+        ghost && 'border-dashed text-labelColor',
+        ghost && !selected && 'border-labelColor opacity-80',
         dimmed && 'invisible',
         !interactive && 'pointer-events-none',
       )}

@@ -1334,35 +1334,10 @@ export function PartsCanvas({
     }
   };
 
-  const arrows = !focusView && rail.overflowing && (
-    <>
-      <Button
-        type='button'
-        variant='secondary'
-        size='xs'
-        aria-label='previous side'
-        onClick={() => rail.step(-1)}
-      >
-        ‹
-      </Button>
-      <Button
-        type='button'
-        variant='secondary'
-        size='xs'
-        aria-label='next side'
-        onClick={() => rail.step(1)}
-      >
-        ›
-      </Button>
-      <Text size='micro' variant='label' component='span' aria-hidden>
-        │
-      </Text>
-    </>
-  );
-
+  /* T67 (05.10): «тут не должно быть стрелочек для скролла» — ‹ › сняты; ряд сторон листается
+     прокруткой/свайпом (снап по стороне остаётся). */
   const tools = (
     <span className='flex items-center gap-1' data-paint-tools=''>
-      {arrows}
       {save === 'saving' || save === 'pending' ? (
         <Pill tone='mut'>saving</Pill>
       ) : save === 'unsaved' || save === 'error' ? (

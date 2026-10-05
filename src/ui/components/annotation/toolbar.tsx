@@ -60,6 +60,7 @@ export function AnnotationToolbar({
   className,
   quiet,
   purposes,
+  trailing,
 }: {
   tool: string | null;
   onTool: (kind: string | null) => void;
@@ -74,6 +75,8 @@ export function AnnotationToolbar({
    * поверхность сводит назначение к его фигуре сама (`toolGeometry`).
    */
   purposes?: boolean;
+  /** Last in the same row, after the purposes (the sheet's `suggest ✦`): one door, not a second bar. */
+  trailing?: React.ReactNode;
 }) {
   const palette = kinds ? toolsOf(kinds) : PALETTE_KINDS;
   if (remaining != null && remaining <= 0) {
@@ -119,6 +122,7 @@ export function AnnotationToolbar({
             {p.label}
           </Chip>
         ))}
+      {trailing}
     </ChipRow>
   );
 }
