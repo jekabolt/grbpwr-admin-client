@@ -101,6 +101,8 @@ const DELETE_ITEM = '__delete';
 export type RunTileCandidates = {
   ids: number[];
   picked: number;
+  /** The pick is a cut sheet: no `pick` door on the others. */
+  cut: boolean;
   onPick: (pictureId: number) => void;
 };
 
@@ -496,7 +498,7 @@ export function RunTile({
         onRedo={chainDoors.onRedo}
         selected={picked || undefined}
         onSelect={
-          candidate && !picked
+          candidate && !picked && !candidates?.cut
             ? {
                 onClick: () => candidates?.onPick(pictureId),
                 ariaLabel: `pick ${handle}`,

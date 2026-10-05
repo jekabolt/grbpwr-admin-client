@@ -76,6 +76,12 @@ const stubNetwork = {
           }
           if (name === 'SetDesignJoins') {
             const band = window.__bands[card];
+            if (window.__failNextSet) {
+              window.__failNextSet = false;
+              const e = new Error('Internal: the store is down');
+              e.status = 500;
+              throw e;
+            }
             window.__sets = (window.__sets ?? 0) + 1;
             if (window.__sets === 1) {
               // somebody else saved a second ago
@@ -312,6 +318,36 @@ try {
     before,
   );
 
+  // a failed save keeps the editor and the typed text, with the reason under it
+  await first.dblclick();
+  await input.waitFor();
+  const typed = (await input.inputValue()).replace(/ — .*/, '') + ' — kept on failure';
+  await input.fill(typed);
+  await page.evaluate(() => {
+    window.__failNextSet = true;
+  });
+  await input.press('Enter');
+  await page.waitForTimeout(600);
+  check(
+    'E4 a failed save keeps the editor with the typed text and the reason',
+    (await input.count()) === 1 &&
+      (await input.inputValue()) === typed &&
+      (await page.locator(`${J} .text-error`).textContent()).includes('not saved'),
+  );
+  // a blur keeps the typed text too
+  await page.locator(`${J} [data-flat-joins]`).click({ position: { x: 2, y: 2 } });
+  await page.waitForTimeout(200);
+  check(
+    'E5 a blur keeps the typed text',
+    (await input.count()) === 1 && (await input.inputValue()) === typed,
+  );
+  await input.press('Enter');
+  await page.waitForTimeout(600);
+  check(
+    'E6 Enter again saves it',
+    (await input.count()) === 0 && (await first.textContent()).includes('kept on failure'),
+  );
+
   // add an absence through + join; a refused line says why
   await page.click(`${J} [data-joins-add]`);
   const add = page.locator(`${J} input[aria-label="new join"]`);
@@ -354,9 +390,13 @@ try {
     was,
   );
 
-  // photos: pick group 1 only → keep_media_ids, the third reference loses its role
+  // photos: pick group 1 only → keep_media_ids; no role is touched
   await page.click(`${J} [data-joins-disagree]`);
   await page.waitForSelector(`${J} [data-joins-pick]`);
+  check(
+    'P0 the left-out photo is dimmed in the picker',
+    (await page.locator(`${J} [data-joins-pick] button[aria-pressed="false"]`).count()) >= 1,
+  );
   await page
     .locator(`${J} [data-flat-joins]`)
     .screenshot({ path: resolve(SHOTS, 'route-joins-pick.png') });
@@ -365,10 +405,17 @@ try {
   const keep = (await calls(page, 'SetDesignJoins')).at(-1).body.joins.consistency.keepMediaIds;
   const roles = await calls(page, 'SetDesignReferenceRole');
   check('P1 kept photos stored', JSON.stringify(keep) === '[1,2]', JSON.stringify(keep));
+  check('P2 no reference role is touched', roles.length === 0, String(roles.length));
+  // un-pick restores: open again, keep all three
+  await page.click(`${J} [data-joins-disagree]`);
+  await page.locator(`${J} [data-joins-pick] button[aria-pressed="false"]`).first().click();
+  await page.click(`${J} [data-joins-keep]`);
+  await page.waitForTimeout(800);
+  const keep2 = (await calls(page, 'SetDesignJoins')).at(-1).body.joins.consistency.keepMediaIds;
   check(
-    'P2 the left-out photo leaves the input',
-    roles.length === 1 && roles[0].body.mediaId === 3 && roles[0].body.role === '',
-    JSON.stringify(roles.map((r) => r.body)),
+    'P3 un-picking brings a photo back',
+    JSON.stringify([...keep2].sort()) === '[1,2,3]',
+    JSON.stringify(keep2),
   );
   await page
     .locator(`${J} [data-flat-joins]`)
@@ -403,6 +450,18 @@ try {
   );
   await page.locator(C).screenshot({ path: resolve(SHOTS, 'route-candidates-picked.png') });
 
+  // a candidate cut on the server is the pick; the local pick is ignored, nothing else is cut
+  const K = '[data-probe="bench-53"]';
+  await page.waitForSelector(`${K} [data-picture="320"]`, { timeout: 20000 });
+  await page.waitForTimeout(2500);
+  check(
+    'K1 server-cut candidate wins: no editor, no pick door, no cut of another',
+    !(await page.$(`${K} [data-inline-split]`)) &&
+      (await page.locator(`${K} button`, { hasText: /^pick$/ }).count()) === 0 &&
+      (await calls(page, 'SplitDesignPicture')).every((s) => s.body.pictureId === 302),
+  );
+  await page.locator(K).screenshot({ path: resolve(SHOTS, 'route-candidates-servercut.png') });
+
   // ── FAILED / LATE ──
   const F = '[data-probe="bench-51"]';
   await page.waitForSelector(`${F} [data-latest-failed]`, { timeout: 10000 });
@@ -411,10 +470,11 @@ try {
     (await page.locator(`${F} [data-latest-failed]`).textContent()).includes('timed out'),
   );
   await page.click(`${F} [data-latest-retry]`);
+  await page.click(`${F} [data-latest-retry]`, { force: true }).catch(() => {});
   await page.waitForTimeout(500);
   const starts = await calls(page, 'StartDesignRun');
   check(
-    'F2 retry repeats the run',
+    'F2 retry repeats the run, once on a double press',
     starts.length === 1 && starts[0].body.rerunOfRunId === 91,
     JSON.stringify(starts.map((s) => s.body.rerunOfRunId)),
   );

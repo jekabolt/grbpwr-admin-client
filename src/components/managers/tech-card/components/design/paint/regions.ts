@@ -13,11 +13,10 @@
  *              across the line (v2).
  *   dashes     (v3, `tmp/plans/flat-consistency/l5.py`) a faint DASHED line — the edge of a layer
  *              seen through sheer cloth — falls into the ink only as dots, so it never closed a
- *              region. Light ink (grey < 215) in small pieces (≤ 40 px on a 1024 sheet) counts as
- *              dashes; each is bridged by a 1-px line to its 2 nearest dashes and to the nearest big
- *              stroke within 1.4 % of the long side. Light ink and bridges are walls for the
- *              regions only, never `ink` (paint still covers them). A washed sketch (> 4 % of the
- *              sheet light but not ink) is not bridged.
+ *              region. A light-ink piece (grey < 215, ≤ 40 px on a 1024 sheet) with two such pieces
+ *              within 1.4 % of the long side is a dash; the dashes and 1-px bridges (to their 2
+ *              nearest pieces and to the nearest big stroke) become walls — nothing else does. No
+ *              dash (or a washed sketch) = the v2 cut, byte for byte (`yarn paint:regions`).
  *
  * Radii are measured on a 1024 sheet (Ф0: r = 3 closes gaps without eating thin parts) and scale
  * with the long side, never below 3.
@@ -33,6 +32,8 @@ export type FlatRegions = {
   /** Region id per pixel, 1..count; 0 = ink or outside. */
   labels: Int32Array;
   count: number;
+  /** v3: the dashes bridged on this flat (0 = cut exactly as v2). */
+  dashes?: number;
 };
 
 /**
@@ -458,12 +459,13 @@ export function analyseFlat(
 ): FlatRegions {
   const grey = greyOf(rgba, w, h);
   const ink = inkOfGrey(grey);
-  const walls = opts.dashes === false ? ink : bridgeDashes(grey, ink, w, h);
+  const bridged = opts.dashes === false ? { walls: ink, dashes: 0 } : bridgeDashes(grey, ink, w, h);
+  const walls = bridged.walls;
   const rs = scaledRadius(w, h, 3);
   const silhouette = silhouetteOf(walls, w, h, rs);
   const r = opts.r ?? scaledRadius(w, h, 3);
   const { labels, count } = regionsOf(ink, w, h, r, silhouette, walls);
-  return { w, h, ink, silhouette, labels, count };
+  return { w, h, ink, silhouette, labels, count, dashes: bridged.dashes };
 }
 
 /** Light ink: a faint dash is grey ~80–150, under Otsu only as dots. */
@@ -476,11 +478,17 @@ const DASH_GAP_SHARE = 0.014;
 const DASH_WASH_SHARE = 0.04;
 
 /**
- * The ink plus the light ink plus 1-px bridges along every dashed line (l5.py `bridge_dashes`):
+ * The ink plus the dashes plus 1-px bridges along every dashed line (l5.py `bridge_dashes`):
  * each dash to its two nearest dashes and to the nearest big stroke, all within the gap. A sheet
  * drawn light on dark (the ink inverted) or washed with tone is left as it is.
  */
-export function bridgeDashes(grey: Uint8Array, ink: Uint8Array, w: number, h: number): Uint8Array {
+export function bridgeDashes(
+  grey: Uint8Array,
+  ink: Uint8Array,
+  w: number,
+  h: number,
+): { walls: Uint8Array; dashes: number } {
+  const none = { walls: ink, dashes: 0 };
   const n = w * h;
   let inkSum = 0;
   let inkN = 0;
@@ -489,18 +497,16 @@ export function bridgeDashes(grey: Uint8Array, ink: Uint8Array, w: number, h: nu
       inkSum += grey[i];
       inkN += 1;
     }
-  if (inkN === 0 || inkSum / inkN > 128) return ink;
+  if (inkN === 0 || inkSum / inkN > 128) return none;
 
-  const out = new Uint8Array(n);
   const light = new Uint8Array(n);
   let wash = 0;
   for (let i = 0; i < n; i += 1) {
     light[i] = grey[i] < DASH_LIGHT ? 1 : 0;
     if (light[i] && !ink[i]) wash += 1;
-    out[i] = ink[i] | light[i];
   }
   // A washed sketch (watercolour, a tinted fill) is light ink everywhere — no dashes to read there.
-  if (wash > n * DASH_WASH_SHARE) return ink;
+  if (wash > n * DASH_WASH_SHARE) return none;
 
   // 8-connected pieces of light ink: area and centroid.
   const lab = new Int32Array(n);
@@ -547,9 +553,63 @@ export function bridgeDashes(grey: Uint8Array, ink: Uint8Array, w: number, h: nu
   const long = Math.max(w, h);
   const small = (DASH_AREA_AT_1024 * long * long) / (1024 * 1024);
   const gap = Math.max(6, DASH_GAP_SHARE * long);
+  const pieces: number[] = [];
+  for (let id = 1; id <= count; id += 1) if (area[id] <= small) pieces.push(id);
+  if (!pieces.length) return none;
+
+  // The small pieces near each other (a grid of gap-sized cells): each piece's 2 nearest within gap.
+  const cols = Math.max(1, Math.ceil(w / gap));
+  const cells = new Map<number, number[]>();
+  for (const id of pieces) {
+    const key = Math.floor(sy[id] / gap) * cols + Math.floor(sx[id] / gap);
+    const list = cells.get(key);
+    if (list) list.push(id);
+    else cells.set(key, [id]);
+  }
+  const near = new Map<number, number[]>();
+  for (const id of pieces) {
+    const cx = Math.floor(sx[id] / gap);
+    const cy = Math.floor(sy[id] / gap);
+    let b1 = 0;
+    let d1 = Infinity;
+    let b2 = 0;
+    let d2 = Infinity;
+    for (let gy = cy - 1; gy <= cy + 1; gy += 1)
+      for (let gx = cx - 1; gx <= cx + 1; gx += 1) {
+        if (gx < 0 || gx >= cols) continue;
+        for (const o of cells.get(gy * cols + gx) ?? []) {
+          if (o === id) continue;
+          const d = Math.hypot(sx[o] - sx[id], sy[o] - sy[id]);
+          if (d < d1) {
+            b2 = b1;
+            d2 = d1;
+            b1 = o;
+            d1 = d;
+          } else if (d < d2) {
+            b2 = o;
+            d2 = d;
+          }
+        }
+      }
+    const list: number[] = [];
+    if (b1 && d1 <= gap) list.push(b1);
+    if (b2 && d2 <= gap) list.push(b2);
+    near.set(id, list);
+  }
+  // A DASH is a small piece in a line of them — two neighbours within the gap. A lone speck or a
+  // pair is not a dashed line: nothing of it becomes a wall, so a flat without dashes is cut
+  // exactly as v2 cut it.
+  const isDash = new Uint8Array(count + 1);
   const dashes: number[] = [];
-  for (let id = 1; id <= count; id += 1) if (area[id] <= small) dashes.push(id);
-  if (!dashes.length) return out;
+  for (const id of pieces)
+    if ((near.get(id) ?? []).length >= 2) {
+      isDash[id] = 1;
+      dashes.push(id);
+    }
+  if (!dashes.length) return none;
+
+  const out = ink.slice();
+  for (let i = 0; i < n; i += 1) if (lab[i] && isDash[lab[i]]) out[i] = 1;
 
   const line = (x0: number, y0: number, x1: number, y1: number) => {
     let x = x0;
@@ -576,42 +636,8 @@ export function bridgeDashes(grey: Uint8Array, ink: Uint8Array, w: number, h: nu
   const px = (id: number) => Math.floor(sx[id]);
   const py = (id: number) => Math.floor(sy[id]);
 
-  // Dash → its 2 nearest dashes within the gap (a grid of gap-sized cells).
-  const cols = Math.max(1, Math.ceil(w / gap));
-  const cells = new Map<number, number[]>();
-  for (const id of dashes) {
-    const key = Math.floor(sy[id] / gap) * cols + Math.floor(sx[id] / gap);
-    const list = cells.get(key);
-    if (list) list.push(id);
-    else cells.set(key, [id]);
-  }
-  for (const id of dashes) {
-    const cx = Math.floor(sx[id] / gap);
-    const cy = Math.floor(sy[id] / gap);
-    let b1 = 0;
-    let d1 = Infinity;
-    let b2 = 0;
-    let d2 = Infinity;
-    for (let gy = cy - 1; gy <= cy + 1; gy += 1)
-      for (let gx = cx - 1; gx <= cx + 1; gx += 1) {
-        if (gx < 0 || gx >= cols) continue;
-        for (const o of cells.get(gy * cols + gx) ?? []) {
-          if (o === id) continue;
-          const d = Math.hypot(sx[o] - sx[id], sy[o] - sy[id]);
-          if (d < d1) {
-            b2 = b1;
-            d2 = d1;
-            b1 = o;
-            d1 = d;
-          } else if (d < d2) {
-            b2 = o;
-            d2 = d;
-          }
-        }
-      }
-    if (b1 && d1 <= gap) line(px(id), py(id), px(b1), py(b1));
-    if (b2 && d2 <= gap) line(px(id), py(id), px(b2), py(b2));
-  }
+  // Dash → its 2 nearest small pieces within the gap.
+  for (const id of dashes) for (const o of near.get(id) ?? []) line(px(id), py(id), px(o), py(o));
 
   // Dash → the nearest pixel of a big stroke within the gap: a dashed line attaches to the seam or
   // band it ends at.
@@ -634,5 +660,5 @@ export function bridgeDashes(grey: Uint8Array, ink: Uint8Array, w: number, h: nu
       line(x, y, j % w, (j - (j % w)) / w);
     }
   }
-  return out;
+  return { walls: out, dashes: dashes.length };
 }

@@ -16,7 +16,6 @@ import Text from 'ui/components/text';
 
 import { serverSpeaksDesign } from './capability';
 import { GROUP_GAP } from './core';
-import { holdFlatInput, readFlatInput, rowsWritable } from './flat-input';
 import {
   EMPTY_JOINS,
   VISIBILITY,
@@ -37,7 +36,7 @@ import {
   visibilityOf,
   type JoinsEdit,
 } from './joins-model';
-import { cardOnScreen, designKeys, rereadBandNow, useDesignWrites } from './use-design-band';
+import { cardOnScreen, designKeys, rereadBandNow } from './use-design-band';
 
 /**
  * ═══ JOINS — THE CONSTRUCTION THE FLAT IS CHECKED AGAINST (flat route, 05.10) ═══════════════════
@@ -51,14 +50,14 @@ import { cardOnScreen, designKeys, rereadBandNow, useDesignWrites } from './use-
  *
  * The list is READ from the photos once per card per session on the first visit with photos and no
  * list (`reading…`); `rejoin` reads it again. Photos of two garments → `photos disagree · pick`:
- * the kept ones are stored with the list and the others leave the flat's input (their prompt role
- * is taken off; the picture stays and its role can be given back).
+ * the kept ones are stored with the list (`keep_media_ids`) and the server sends only those into the
+ * flat run; the others stay in the input, dimmed in the picker, one click from coming back.
  */
 
 /* ─── the read: per card, outliving the step (a read takes ~50 s) ─── */
 const asked = new Set<number>();
 const reading = new Set<number>();
-const failed = new Map<number, string>();
+const failed = new Map<number, { why: string; force: boolean }>();
 const unsupported = new Set<number>();
 const listeners = new Set<() => void>();
 let version = 0;
@@ -75,6 +74,25 @@ const subscribe = (l: () => void) => {
 
 const statusOf = (e: unknown) => (e as { status?: number } | null)?.status ?? 0;
 const messageOf = (e: unknown) => (e instanceof Error && e.message) || 'the join list did not load';
+/** The read takes ~50 s; past these the wait ends and says so (the request may still land). */
+const READ_TIMEOUT_MS = 120_000;
+const SAVE_TIMEOUT_MS = 20_000;
+class TimedOut extends Error {}
+function timed<T>(ms: number, call: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new TimedOut('timed out')), ms);
+    call().then(
+      (v) => {
+        window.clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        window.clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
 const isStale = (e: unknown) =>
   statusOf(e) === 409 || (e instanceof Error && e.message.includes('joins_rev_mismatch'));
 
@@ -91,19 +109,26 @@ async function readJoins(qc: QueryClient, card: number, force: boolean): Promise
   failed.delete(card);
   bump();
   try {
-    const r = await adminService.GenerateDesignJoins({ techCardId: card, force });
+    const r = await timed(READ_TIMEOUT_MS, () =>
+      adminService.GenerateDesignJoins({ techCardId: card, force }),
+    );
     putJoins(qc, card, r.joins);
   } catch (e) {
     const s = statusOf(e);
     if (s === 404 || s === 501) unsupported.add(card);
-    else failed.set(card, messageOf(e));
+    else if (e instanceof TimedOut) {
+      failed.set(card, { why: 'the read took too long', force });
+      // It may still land: the next band read shows it.
+      void qc.invalidateQueries({ queryKey: designKeys.band(card) });
+    } else failed.set(card, { why: messageOf(e), force });
   } finally {
     reading.delete(card);
     bump();
   }
 }
 
-type Editing = { key: string; value: string; why?: string } | null;
+/** `was` — the text the editor opened with: a blur closes it only when nothing was typed. */
+type Editing = { key: string; value: string; was: string; why?: string } | null;
 
 export function FlatJoins({
   techCardId,
@@ -120,11 +145,10 @@ export function FlatJoins({
   const qc = useQueryClient();
   const speaks = serverSpeaksDesign();
   const { showMessage } = useSnackBarStore();
-  const { setReferenceRole } = useDesignWrites(techCardId);
   useSyncExternalStore(subscribe, () => version);
   const card = techCardId;
   const isReading = reading.has(card);
-  const failure = failed.get(card) ?? '';
+  const failure = failed.get(card);
 
   const [draft, setDraft] = useState<common_DesignJoins | null>(null);
   const [saving, setSaving] = useState(false);
@@ -154,7 +178,7 @@ export function FlatJoins({
   if (unsupported.has(card)) return null;
 
   /** One edit, written under CAS; a stale rev re-reads the band and applies the SAME edit once more. */
-  const apply = async (edit: JoinsEdit): Promise<boolean> => {
+  const apply = async (edit: JoinsEdit, quiet = false): Promise<string | null> => {
     const base = band.joins ?? EMPTY_JOINS;
     const next = edit(base);
     setDraft(next);
@@ -163,11 +187,13 @@ export function FlatJoins({
       let saved: common_DesignJoins | undefined;
       try {
         saved = (
-          await adminService.SetDesignJoins({
-            techCardId: card,
-            joins: next,
-            expectedRev: base.rev ?? 0,
-          })
+          await timed(SAVE_TIMEOUT_MS, () =>
+            adminService.SetDesignJoins({
+              techCardId: card,
+              joins: next,
+              expectedRev: base.rev ?? 0,
+            }),
+          )
         ).joins;
       } catch (e) {
         if (!isStale(e)) throw e;
@@ -175,26 +201,28 @@ export function FlatJoins({
         const again = edit(fresh);
         setDraft(again);
         saved = (
-          await adminService.SetDesignJoins({
-            techCardId: card,
-            joins: again,
-            expectedRev: fresh.rev ?? 0,
-          })
+          await timed(SAVE_TIMEOUT_MS, () =>
+            adminService.SetDesignJoins({
+              techCardId: card,
+              joins: again,
+              expectedRev: fresh.rev ?? 0,
+            }),
+          )
         ).joins;
       }
       putJoins(qc, card, saved);
       void qc.invalidateQueries({ queryKey: designKeys.band(card) });
-      return true;
+      return null;
     } catch (e) {
       void qc.invalidateQueries({ queryKey: designKeys.band(card) });
-      if (cardOnScreen(card))
-        showMessage(
-          isStale(e)
-            ? 'the join list changed elsewhere twice — read it again'
-            : messageOf(e) || 'the join list did not save',
-          'error',
-        );
-      return false;
+      const why =
+        e instanceof TimedOut
+          ? 'not saved — the save took too long'
+          : isStale(e)
+            ? 'not saved — the list changed elsewhere twice'
+            : `not saved — ${messageOf(e)}`;
+      if (!quiet && cardOnScreen(card)) showMessage(why, 'error');
+      return why;
     } finally {
       setDraft(null);
       setSaving(false);
@@ -203,39 +231,35 @@ export function FlatJoins({
 
   const commit = (key: string, value: string, item?: common_DesignJoinItem) => {
     const text = value.trim();
-    const done = () => setEditing(null);
+    const was = editing?.was ?? '';
+    /* A failed save keeps the editor open with what was typed and the reason under it. */
+    const save = (edit: JoinsEdit) =>
+      void apply(edit, true).then((why) => setEditing(why ? { key, value, was, why } : null));
+    const refuse = (why: string) => setEditing({ key, value, was, why });
     if (key.startsWith('abs:')) {
-      const was = key.slice(4);
-      if (!text) return void apply(dropAbsence(was)).then(done);
+      const old = key.slice(4);
+      if (!text) return save(dropAbsence(old));
       if (!/^(no|not|none|nothing|without|never|zero)\b/i.test(text))
-        return setEditing({ key, value, why: 'an absence starts with “no”' });
-      return void apply(editAbsence(was, text)).then(done);
+        return refuse('an absence starts with “no”');
+      return save(editAbsence(old, text));
     }
-    if (key.startsWith('layer:')) {
-      return void apply(editLayer(Number(key.slice(6)), { name: text })).then(done);
-    }
+    if (key.startsWith('layer:')) return save(editLayer(Number(key.slice(6)), { name: text }));
     if (item) {
       // The structure left as it was: only the note changed (also how an opening is edited).
       const head = joinStructure(item);
       if (text === head || text.startsWith(`${head} — `)) {
         const note = text === head ? '' : text.slice(head.length + 3).trim();
-        return void apply(editItem(item.id ?? '', { text: note })).then(done);
+        return save(editItem(item.id ?? '', { text: note }));
       }
       const parsed = parseJoinLine(text);
       if (parsed.kind !== 'item')
-        return setEditing({
-          key,
-          value,
-          why: parsed.kind === 'refused' ? parsed.why : 'a join is not an absence',
-        });
-      return void apply(editItem(item.id ?? '', parsed.patch)).then(done);
+        return refuse(parsed.kind === 'refused' ? parsed.why : 'a join is not an absence');
+      return save(editItem(item.id ?? '', parsed.patch));
     }
     // `+ join`
     const parsed = parseJoinLine(text);
-    if (parsed.kind === 'refused') return setEditing({ key, value, why: parsed.why });
-    return void apply(
-      parsed.kind === 'absence' ? addAbsence(parsed.text) : addItem(parsed.patch),
-    ).then(done);
+    if (parsed.kind === 'refused') return refuse(parsed.why);
+    return save(parsed.kind === 'absence' ? addAbsence(parsed.text) : addItem(parsed.patch));
   };
 
   const editor = (key: string, item?: common_DesignJoinItem) =>
@@ -251,7 +275,7 @@ export function FlatJoins({
           disabled={saving}
           className='min-h-[22px] py-0.5'
           onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-            setEditing({ key, value: e.target.value })
+            setEditing({ key, value: e.target.value, was: editing.was })
           }
           onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
             if (e.key === 'Enter') {
@@ -262,7 +286,8 @@ export function FlatJoins({
               setEditing(null);
             }
           }}
-          onBlur={() => !saving && setEditing(null)}
+          /* A blur closes an untouched editor only — typed text is never dropped silently. */
+          onBlur={() => !saving && editing.value === editing.was && setEditing(null)}
         />
         {editing.why && (
           <Text size='micro' component='span' className='mt-0.5 block text-error'>
@@ -272,7 +297,8 @@ export function FlatJoins({
       </span>
     ) : null;
 
-  const startEdit = (key: string, value: string) => !locked && setEditing({ key, value });
+  const startEdit = (key: string, value: string) =>
+    !locked && setEditing({ key, value, was: value });
 
   const row = (
     key: string,
@@ -419,31 +445,15 @@ export function FlatJoins({
   const cons = joins?.consistency;
   const disagree = !!joins && !!cons && cons.consistent === false && (cons.groups ?? []).length > 1;
   const kept = cons?.keepMediaIds ?? [];
-  const settled = disagree && kept.length > 0 && photos.every((id) => kept.includes(id));
+  /** The designer has picked (the model's own `keep` is only its suggestion). */
+  const settled = disagree && kept.length > 0 && !!joins?.edited;
 
+  /* The pick is stored with the list (keep_media_ids) and nothing else: the server reads only the
+     kept photos into the flat run. No role is touched — un-picking brings a photo straight back. */
   const savePick = async (ids: Set<number>) => {
     const keep = [...ids];
     if (!keep.length) return;
-    if (!rowsWritable(readFlatInput(card))) {
-      showMessage('the input is busy — try again once the run has started', 'error');
-      return;
-    }
-    const release = holdFlatInput(card);
-    try {
-      if (!(await apply(keepPhotos(keep)))) return;
-      setPicking(null);
-      // The others leave the flat's input: their prompt role goes, the picture stays.
-      for (const mediaId of photos) {
-        if (ids.has(mediaId)) continue;
-        try {
-          await setReferenceRole.mutateAsync({ mediaId, role: '', ordinal: 0 });
-        } catch {
-          /* the shared tail said it */
-        }
-      }
-    } finally {
-      release();
-    }
+    if (!(await apply(keepPhotos(keep)))) setPicking(null);
   };
 
   const picker = picking && cons && (
@@ -533,12 +543,12 @@ export function FlatJoins({
         </span>
       ) : saving ? (
         <Pill tone='mut'>saving</Pill>
-      ) : failure && !joins ? (
+      ) : failure ? (
         <button
           type='button'
-          title={failure}
+          title={failure.why}
           disabled={writesOff}
-          onClick={() => void readJoins(qc, card, false)}
+          onClick={() => void readJoins(qc, card, failure.force)}
           data-joins-retry=''
         >
           <Pill tone='warn'>joins · retry</Pill>
@@ -551,6 +561,7 @@ export function FlatJoins({
           title={cons?.note || 'the photos show more than one garment'}
           disabled={writesOff}
           onClick={() => setPicking(picking ? null : new Set(kept.length ? kept : photos))}
+          aria-expanded={!!picking}
         >
           <Pill tone={settled ? 'mut' : 'attention'}>
             {settled ? `${kept.length} photos kept · pick` : 'photos disagree · pick'}
@@ -610,7 +621,7 @@ export function FlatJoins({
             type='button'
             data-joins-add=''
             disabled={locked}
-            onClick={() => setEditing({ key: 'new', value: '' })}
+            onClick={() => setEditing({ key: 'new', value: '', was: '' })}
             className={cn(
               'flex w-full items-center border border-dashed border-borderColor bg-bgColor px-2 py-1.5 text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor disabled:hover:border-borderColor disabled:hover:text-labelColor',
               anyRows && 'mt-4',

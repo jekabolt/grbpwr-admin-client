@@ -171,7 +171,9 @@ const flatOf = (name) => {
       i * 4,
     );
   }
-  return m.analyseFlat(px, p.width, p.height);
+  // The fixtures below name regions by their v2 numbers; the topstitching on this shirt is dashed,
+  // which v3 bridges (and renumbers) — the mapping is tested on the v2 cut.
+  return m.analyseFlat(px, p.width, p.height, { dashes: false });
 };
 const front = flatOf('c49-p111');
 const backF = flatOf('c49-p112');

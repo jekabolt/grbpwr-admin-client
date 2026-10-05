@@ -12,7 +12,7 @@ import type { OutputPlan } from './run-gallery';
  * others. A legacy one-output run has no candidates and is cut as before.
  *
  * The pick is the designer's per run, kept in this browser (localStorage, best effort): it writes
- * nothing, and a sheet that was already cut counts as picked without it.
+ * nothing. A sheet already cut on the server is the pick, always — the local one is then ignored.
  */
 
 export type FlatCandidates = {
@@ -20,6 +20,8 @@ export type FlatCandidates = {
   ids: number[];
   /** The picked one; 0 = none yet. */
   picked: number;
+  /** The pick is a cut sheet (server truth): it cannot be changed here. */
+  cut: boolean;
 };
 
 export function isCandidateRun(run: common_DesignRun | null | undefined): boolean {
@@ -87,10 +89,12 @@ export function candidatesOf(
   if (!isCandidateRun(run) || !drawn) return null;
   const ids = drawn.cards.map((c) => c.picture.id ?? 0).filter((id) => id > 0);
   if (ids.length < 2) return null;
-  const stored = picks[String(run?.id ?? 0)] ?? 0;
+  // SERVER TRUTH FIRST: a candidate already cut (it has pieces on the server) IS the pick, whatever
+  // this browser remembers — and then no other candidate is offered or cut automatically.
   const cut = drawn.cards.find((c) => c.members.length > 0)?.picture.id ?? 0;
-  const picked = ids.includes(stored) ? stored : cut;
-  return { ids, picked };
+  if (cut > 0) return { ids, picked: cut, cut: true };
+  const stored = picks[String(run?.id ?? 0)] ?? 0;
+  return { ids, picked: ids.includes(stored) ? stored : 0, cut: false };
 }
 
 export function isGrey(picture: common_DesignPicture): boolean {

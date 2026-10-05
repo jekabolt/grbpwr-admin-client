@@ -229,21 +229,40 @@ function skippedNote(skipped: readonly common_DesignRun[]): { text: string; titl
  * получилось»): `timed out · retry`, `failed · <reason> · retry`. Retry repeats the run from its own
  * frozen inputs (`rerun_of`), so what failed is what is asked again.
  */
+/**
+ * ONE RETRY PER FAILED RUN UNTIL THE BAND ANSWERS (Codex, 05.10): a second press would buy a second
+ * run. The press is held — across remounts — until the band shows a run repeating this one (or this
+ * row is no longer the one shown), with a fallback release after `RETRY_HOLD_MS`.
+ */
+const RETRY_HOLD_MS = 90_000;
+const retryHeld = new Map<number, number>();
+
 function RetryLine({
   techCardId,
+  band,
   run,
   disabled,
 }: {
   techCardId: number;
+  band: GetDesignBandResponse;
   run: common_DesignRun;
   disabled?: boolean;
 }): JSX.Element | null {
   const start = useStartRun(techCardId);
-  const [busy, setBusy] = useState(false);
+  const [, setTick] = useState(0);
+  const runId = run.id ?? 0;
+  const answered = (band.runs ?? []).some((r) => (r.rerunOf ?? 0) === runId);
+  const until = retryHeld.get(runId) ?? 0;
+  const held = !answered && until > Date.now();
+  useEffect(() => {
+    if (!held) return;
+    const t = window.setTimeout(() => setTick((n) => n + 1), until - Date.now() + 50);
+    return () => window.clearTimeout(t);
+  }, [held, until]);
   if (runStatus(run) !== 'failed' || (run.kind ?? '').trim().toLowerCase() !== 'flat') return null;
   const params = run.params;
   return (
-    <span className='flex flex-wrap items-center gap-1.5' data-latest-failed={run.id ?? 0}>
+    <span className='flex flex-wrap items-center gap-1.5' data-latest-failed={runId}>
       <Text size='micro' variant='errorLabel' component='span' title={runOutcomeNote(run)}>
         {runShortFailure(run)}
       </Text>
@@ -257,24 +276,27 @@ function RetryLine({
             variant='underline'
             size='xs'
             className='text-labelColor hover:text-textColor'
-            data-latest-retry={run.id ?? 0}
-            disabled={busy}
+            data-latest-retry={runId}
+            disabled={held}
             title='run it again from the same inputs'
             onClick={async () => {
-              setBusy(true);
-              try {
-                await start.start({
-                  kind: 'flat',
-                  ask: run.ask ?? '',
-                  params,
-                  rerunOfRunId: run.id ?? 0,
-                });
-              } finally {
-                setBusy(false);
+              if ((retryHeld.get(runId) ?? 0) > Date.now()) return;
+              retryHeld.set(runId, Date.now() + RETRY_HOLD_MS);
+              setTick((n) => n + 1);
+              const refusal = await start.start({
+                kind: 'flat',
+                ask: run.ask ?? '',
+                params,
+                rerunOfRunId: runId,
+              });
+              // Refused before anything was bought: the press is free again (same idempotency key).
+              if (refusal) {
+                retryHeld.delete(runId);
+                setTick((n) => n + 1);
               }
             }}
           >
-            {busy ? 'retrying…' : 'retry'}
+            {held ? 'retrying…' : 'retry'}
           </Button>
         </>
       )}
@@ -881,6 +903,7 @@ export function LatestGeneration({
           {kind === 'flat' && newest && (bare || newest.skipped.length > 0) && (
             <RetryLine
               techCardId={techCardId}
+              band={band}
               run={bare ? run : newest.skipped[0]}
               disabled={writesOff}
             />

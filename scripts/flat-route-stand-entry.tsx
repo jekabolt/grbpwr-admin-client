@@ -72,6 +72,59 @@ win.__bands[50] = {
   ],
 } as unknown as GetDesignBandResponse;
 
+// card 53: the same four candidates, the SECOND already cut on the server (two pieces), while this
+// browser remembers the THIRD as picked — the cut one is the pick, nothing else is cut.
+try {
+  window.localStorage.setItem('grbpwr.design.flat.pick.53', JSON.stringify({ '93': 302 }));
+} catch {
+  /* no storage */
+}
+win.__bands[53] = {
+  ...CAP,
+  bench: VIEWS.map((viewKey, i) => ({
+    id: i + 1,
+    viewKey,
+    kind: 'flat',
+    pictureId: 0,
+    slotRev: 1,
+  })),
+  runs: [
+    {
+      id: 93,
+      kind: 'flat',
+      status: 'done',
+      requestedOutputs: 4,
+      params: { layout: 'one', views: VIEWS },
+      createdAt: minutesAgo(3),
+      pictures: [
+        ...win.__sheets.map(
+          (s, i) =>
+            ({
+              id: 300 + i,
+              runId: 93,
+              kind: 'flat',
+              ordinal: i,
+              compositeViews: VIEWS,
+              media: media(700 + i, s.url, s.w, s.h),
+            }) as unknown as common_DesignPicture,
+        ),
+        ...['front', 'back'].map(
+          (v, k) =>
+            ({
+              id: 320 + k,
+              runId: 93,
+              kind: 'flat',
+              derivation: 'crop',
+              derivedFrom: 301,
+              ghostView: v,
+              media: media(720 + k, win.__sheets[1].url, 400, 400),
+            }) as unknown as common_DesignPicture,
+        ),
+      ],
+    },
+  ],
+} as unknown as GetDesignBandResponse;
+
 // card 51: the newest run timed out
 win.__bands[51] = {
   ...CAP,
@@ -141,7 +194,7 @@ createRoot(document.getElementById('root') as HTMLElement).render(
           <div data-probe='auto'>
             <Joins card={49} />
           </div>
-          {[50, 51, 52].map((card) => (
+          {[50, 53, 51, 52].map((card) => (
             <div key={card} data-probe={`bench-${card}`}>
               <PictureGalleryProvider techCardId={card} band={win.__bands[card]}>
                 <Bench card={card} />
