@@ -72,6 +72,10 @@ import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint'
  *   artwork (R7) the armed artwork tile: drag on a side = a new box; a selected box moves (drag
  *          inside), its 4 corners move alone (free perspective; ⇧ = uniform scale), the handle
  *          above the top edge turns it; every drop = one SetDesignAssetPlacement (4-point POLYGON)
+ * T66 · a PLACED artwork is ALWAYS selectable and removable, whatever tool is on: a click on its
+ * box selects it (and a drag moves it), ✕ at the box's top-right corner or ⌫ / Delete takes it off
+ * the side (DeleteDesignAssetPlacement — the placement goes, the artwork asset stays). Only a NEW
+ * box needs the `artwork` tool; a click beside every box still paints.
  * Keys: V / P / E / A, ⌘Z / ⇧⌘Z, Enter closes the pen, Esc drops it (or the artwork selection),
  * ⌫ deletes the selected artwork placement.
  */
@@ -151,9 +155,14 @@ type SideArtwork = {
   arts: Map<number, CanvasArtwork>;
   /** Asset a drag places (0 = none). */
   armed: number;
+  /** The `artwork` tool is on: a drag beside every box draws a new one. */
   active: boolean;
+  /** T66 · not read-only: placed boxes take the pointer (select / move / ✕) under ANY tool. */
+  interactive: boolean;
   selectedKey: string;
   onSelect: (key: string) => void;
+  /** T66 · takes the selected placement off the side (✕). */
+  onRemove: () => void;
   onCommit: (item: Omit<Placed, 'key'> & { key?: string }) => void;
   /** The colourway already carries `MAX_RENDER_ARTWORKS` placements: a new one is refused. */
   full: boolean;
@@ -165,6 +174,8 @@ const FULL_REASON = `at most ${MAX_RENDER_ARTWORKS} artworks per render`;
 const HANDLE = 8;
 const ROT_OFF = 22;
 const NEW_MIN = 12;
+/** T66 · the ✕ of the selected box, the tile corner's 16px. */
+const REMOVE_SIZE = 16;
 
 type Drag = {
   mode: 'new' | 'move' | 'corner' | 'rotate';
@@ -180,8 +191,9 @@ type HoverPart = { key: string; part: 'body' | 'corner' | 'rotate' };
 
 /**
  * The artworks of one side: the PNG warped into its quad (the callout's `ArtworkImage` — four
- * points, TL TR BR BL), multiply-blended unless cut out; frames and handles on top. Pointer events
- * only while the `artwork` tool is on — the paint tools never meet a box.
+ * points, TL TR BR BL), multiply-blended unless cut out; frames and handles on top. T66 · a placed
+ * box takes the pointer under every tool (select, move, ✕); with a paint tool a press beside every
+ * box — or any press while a pen is under way — falls through to the paint below.
  */
 function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
@@ -226,15 +238,24 @@ function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
     return hit ? { key: hit.key, part: 'body' } : null;
   };
 
+  /** A pen under way on this side owns every press (its vertices may land on a box). */
+  const penBusy = (e: PointerEvent<HTMLDivElement>) =>
+    !!e.currentTarget.closest('[data-paint-side]')?.querySelector('[data-paint-pen]');
+
   const onDown = (e: PointerEvent<HTMLDivElement>) => {
-    if (!art.active || e.button !== 0 || w < 1 || h < 1) return;
+    if (!art.interactive || e.button !== 0 || w < 1 || h < 1) return;
+    const p = pos(e);
+    const hit = !art.active && penBusy(e) ? null : hitAt(p);
+    const item = hit ? art.items.find((it) => it.key === hit.key) ?? null : null;
+    if (!art.active && (!item || item.placementId <= 0)) {
+      // A paint tool beside every box: the press is paint's (bubbles to the side), the selection goes.
+      if (art.selectedKey) art.onSelect('');
+      return;
+    }
     e.stopPropagation();
     (e.currentTarget.closest('[data-paint-parts]') as HTMLElement | null)?.focus({
       preventScroll: true,
     });
-    const p = pos(e);
-    const hit = hitAt(p);
-    const item = hit ? art.items.find((it) => it.key === hit.key) ?? null : null;
     if (item && item.placementId <= 0) return;
     if (hit && item) {
       const base = px(item.quad);
@@ -273,14 +294,17 @@ function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
   };
 
   const onMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (!art.active) return;
-    e.stopPropagation();
+    if (!art.interactive) return;
     const p = pos(e);
     const d = drag.current;
     if (!d) {
-      setHover(hitAt(p));
+      const over = !art.active && penBusy(e) ? null : hitAt(p);
+      setHover(over);
+      // With a paint tool only a box keeps the pointer; paper and parts still show paint's hover.
+      if (art.active || over) e.stopPropagation();
       return;
     }
+    e.stopPropagation();
     let q: Quad = d.base;
     if (d.mode === 'new') q = boxQuad(d.start, p);
     else if (d.mode === 'move') q = moveQuad(d.base, p.x - d.start.x, p.y - d.start.y, w, h);
@@ -328,7 +352,7 @@ function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
     art.onCommit({ ...d.item, quad: frac(l.quad) });
   };
 
-  const cursor = !art.active
+  const cursor = !art.interactive
     ? ''
     : hover?.part === 'corner'
       ? 'cursor-nwse-resize'
@@ -336,16 +360,18 @@ function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
         ? 'cursor-grab'
         : hover?.part === 'body'
           ? 'cursor-move'
-          : art.armed > 0
+          : art.active && art.armed > 0
             ? 'cursor-crosshair'
-            : 'cursor-default';
+            : art.active
+              ? 'cursor-default'
+              : '';
 
   const stroke = 'var(--color-textColor)';
   return (
     <div
       ref={ref}
       data-artwork-layer={art.items.length}
-      className={cn('absolute inset-0', art.active ? cursor : 'pointer-events-none')}
+      className={cn('absolute inset-0', art.interactive ? cursor : 'pointer-events-none')}
       onPointerDown={onDown}
       onPointerMove={onMove}
       onPointerUp={onUp}
@@ -384,7 +410,7 @@ function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
         >
           {art.items.map((it) => {
             const sel = it.key === art.selectedKey;
-            const hov = art.active && hover?.key === it.key;
+            const hov = art.interactive && hover?.key === it.key;
             if (!sel && !hov) return null;
             const q = quadOf(it);
             return (
@@ -440,6 +466,36 @@ function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
           )}
         </svg>
       )}
+      {/* T66 · the tile's top-right ✕ on the selected box: off this side, the artwork asset stays. */}
+      {w > 0 &&
+        selected &&
+        art.interactive &&
+        !live &&
+        (() => {
+          const q = quadOf(selected);
+          const x = Math.min(w - REMOVE_SIZE, Math.max(0, Math.max(...q.map((v) => v.x)) + 6));
+          const y = Math.min(
+            h - REMOVE_SIZE,
+            Math.max(0, Math.min(...q.map((v) => v.y)) - REMOVE_SIZE - 6),
+          );
+          return (
+            <button
+              type='button'
+              aria-label='take the artwork off this side'
+              title='take off this side · ⌫'
+              data-artwork-remove={selected.placementId}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                art.onRemove();
+              }}
+              className='absolute flex items-center justify-center border border-borderColor bg-bgColor text-nano leading-none hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+              style={{ left: x, top: y, width: REMOVE_SIZE, height: REMOVE_SIZE }}
+            >
+              ✕
+            </button>
+          );
+        })()}
     </div>
   );
 }
@@ -1047,10 +1103,6 @@ export function PartsCanvas({
   const artworkOn = session.tool === 'artwork';
   const canPlace = !!band && arts.size > 0 && pictures.size > 0;
 
-  useEffect(() => {
-    if (!artworkOn) setSelectedKey('');
-  }, [artworkOn]);
-
   const placedOf = useCallback(
     (view: string): Placed[] => {
       const pictureId = pictures.get(view) ?? 0;
@@ -1182,8 +1234,14 @@ export function PartsCanvas({
       arts,
       armed: armedArt,
       active: artworkOn && !disabled,
+      interactive: !disabled,
       selectedKey,
       onSelect: setSelectedKey,
+      onRemove: () => {
+        removeSelected();
+        // The ✕ leaves with its box: ⌘Z / the tool keys stay on the block.
+        block.current?.focus({ preventScroll: true });
+      },
       onCommit: commit,
       full,
       onFull: refuseFull,
@@ -1445,9 +1503,10 @@ export function PartsCanvas({
             className='text-labelColor hover:text-textColor'
             onClick={removeSelected}
             disabled={disabled || selectedInfo.item.placementId <= 0}
+            title='take off this side · ⌫ — the artwork itself stays'
             data-artwork-delete=''
           >
-            delete
+            remove
           </Button>
         </div>
       )}
