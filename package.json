@@ -17,6 +17,7 @@
     "paint:map": "node scripts/paint-map-probe.mjs",
     "paint:pen": "node scripts/paint-pen-probe.mjs",
     "paint:transfer": "node scripts/paint-transfer-probe.mjs",
+    "paint:sides": "node scripts/paint-sides-probe.mjs",
     "autosplit": "node scripts/autosplit-probe.mjs",
     "flat:detail-door": "node scripts/detail-slot-door-probe.mjs",
     "flat:custom": "node scripts/flat-custom-probe.mjs",

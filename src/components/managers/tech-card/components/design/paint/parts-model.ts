@@ -11,7 +11,7 @@
 import type { DesignPartsSuggestion } from 'api/proto-http/admin';
 
 import { componentAt, paintIndices, type PaintDiff } from './map-model';
-import { distanceTransform, type FlatRegions } from './regions';
+import { distanceTransform, REGIONS_ALGO_REV, type FlatRegions } from './regions';
 
 /** The probe's palette (`probe.py PAL`), tinted 75 % over white. */
 const PAL: [number, number, number][] = [
@@ -36,6 +36,14 @@ const PAL: [number, number, number][] = [
   [0, 0, 128],
   [128, 128, 128],
 ];
+
+/**
+ * The revision a card-level parts answer is cached under: the cutter's (region numbers) + the
+ * labeller's prompt. Bump the second half on ANY change to the labeller's rules (backend
+ * `designPartsCardSystemPrompt`): rows of the old rules are then neither applied nor reused.
+ * Ф1 (`parts.f1`): openings / seen-through inside / no invented pieces / flank from the drawing.
+ */
+export const PARTS_ALGO_REV = `${REGIONS_ALGO_REV}+parts.f1`;
 
 /** Regions the model is asked to name: fewer is nothing to group, more is unreadable. */
 export const PARTS_REGIONS_MIN = 2;
@@ -162,11 +170,43 @@ export const partKey = (label: string): string => label.trim().toLowerCase().rep
 export const nameWords = (label: string): string =>
   [...new Set(partKey(label).split(' ').filter(Boolean))].sort().join(' ');
 
+/** Ф1 · the regions with no cloth of their own (backend `opening`): never painted, never hovered. */
+export const OPENING = 'opening';
+export const isOpening = (g: Pick<PartGroup, 'key' | 'label'>): boolean =>
+  g.key === OPENING || partKey(g.label) === OPENING;
+
+/** Ф1 · the inside of a part seen through an opening: "front body · inside" (same `part_key`). */
+export const INSIDE_SUFFIX = ' · inside';
+
 /** A part a name can travel by (R9): a real name, not the model's leftovers. */
 export const transferable = (label: string): boolean => {
   const k = partKey(label);
-  return k !== '' && k !== 'unnamed';
+  return k !== '' && k !== 'unnamed' && k !== OPENING;
 };
+
+/** Is `region` (1..count) an opening on this side. */
+export const openingRegion = (parts: ViewParts | null | undefined, region: number): boolean => {
+  if (!parts || region <= 0) return false;
+  const g = parts.groups[parts.regionGroup[region] ?? -1];
+  return !!g && isOpening(g);
+};
+
+/** `idx` without the pixels of the side's openings (the pen and a click never paint them). */
+export function dropOpenings(
+  idx: Int32Array,
+  flat: Pick<FlatRegions, 'labels'>,
+  parts: ViewParts | null | undefined,
+): Int32Array {
+  if (!parts || !parts.groups.some(isOpening)) return idx;
+  let keep = 0;
+  for (let i = 0; i < idx.length; i += 1) if (!openingRegion(parts, flat.labels[idx[i]])) keep += 1;
+  if (keep === idx.length) return idx;
+  const out = new Int32Array(keep);
+  let o = 0;
+  for (let i = 0; i < idx.length; i += 1)
+    if (!openingRegion(parts, flat.labels[idx[i]])) out[o++] = idx[i];
+  return out;
+}
 
 /** The wearer's side a side view shows (R16: the left side view shows the left parts). */
 const SIDE_OF: Record<string, string> = { side_l: 'left', side_r: 'right' };
@@ -213,6 +253,152 @@ export function partsOf(
     if (Number.isInteger(id) && id >= 1 && id <= flat.count) split.set(id, (x.why ?? '').trim());
   }
   return { groups, regionGroup, split, seeds, keyed: groups.every((g) => g.key !== '') };
+}
+
+/* ─────────────────────────── Ф1 · the wearer's left and right, checked on the drawing ─────────────────────────── */
+
+const LEFT = /\bleft\b/;
+const RIGHT = /\bright\b/;
+
+/** 'L' / 'R' / '' — the wearer's side a name says. */
+export const sideOf = (label: string): 'L' | 'R' | '' => {
+  const k = partKey(label);
+  const l = LEFT.test(k);
+  const r = RIGHT.test(k);
+  return l === r ? '' : l ? 'L' : 'R';
+};
+
+/** The same name on the wearer's other side ("left front body" → "right front body"). */
+export const twinName = (label: string): string =>
+  partKey(label).replace(/\b(left|right)\b/g, (w) => (w === 'left' ? 'right' : 'left'));
+
+/** label → part_key over every group of the card-level answer (the first key a name carries). */
+export function labelKeys(
+  rows: readonly Pick<DesignPartsSuggestion, 'parts'>[],
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const r of rows)
+    for (const g of r.parts ?? []) {
+      const key = (g.partKey ?? '').trim();
+      const label = partKey(g.label ?? '');
+      if (key && label && !out.has(label)) out.set(label, key);
+    }
+  return out;
+}
+
+/** Below this share of the garment's width a centroid says nothing about its side. */
+const LR_DEAD = 0.04;
+/** A side view's front and back must stand this share of the width apart to read its facing. */
+const FLANK_GAP = 0.12;
+
+/**
+ * Per group the x of its pixels' centroid (NaN = no pixel) and its pixel count, and the garment's horizontal centre
+ * and width (the regions' bounding box).
+ */
+function groupXs(flat: Pick<FlatRegions, 'labels' | 'count' | 'w'>, parts: ViewParts) {
+  const { labels, count, w } = flat;
+  const sum = new Float64Array(count + 1);
+  const n = new Float64Array(count + 1);
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  for (let i = 0; i < labels.length; i += 1) {
+    const r = labels[i];
+    if (r <= 0 || r > count) continue;
+    const x = i % w;
+    sum[r] += x;
+    n[r] += 1;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+  }
+  const px = parts.groups.map((g) => g.regions.reduce((c, r) => c + n[r], 0));
+  const xs = parts.groups.map((g, i) =>
+    px[i] > 0 ? g.regions.reduce((a, r) => a + sum[r], 0) / px[i] : NaN,
+  );
+  return { xs, px, mid: (x0 + x1) / 2, width: Math.max(1, x1 - x0) };
+}
+
+const relabel = (g: PartGroup, label: string, key: string): PartGroup => ({
+  ...g,
+  label,
+  key,
+  words: nameWords(label),
+});
+
+/**
+ * Ф1 · the L/R check of one side after the answer came (B1 `guard`), on the regions' centroids:
+ *   front  a wearer-LEFT part sits RIGHT of the garment's centre; back — LEFT of it. A left/right
+ *          pair (same name but the side word) that BOTH sit on the wrong side swaps names and keys.
+ *   side_* the flank is read from the drawing — the front faces where the "front" parts stand
+ *          against the "back" ones (front toward picture-left = the wearer's LEFT flank). Only when
+ *          that reads clearly and most sided parts say the other flank, each of those takes its
+ *          twin's name and key (`keys`: the card's label → part_key); a twin with no key stays.
+ * Openings and the inside of a part (seen through an opening, it may be the far side) are never
+ * moved. Returns the same object when nothing changes.
+ */
+export function fixSides(
+  view: string,
+  parts: ViewParts,
+  flat: Pick<FlatRegions, 'labels' | 'count' | 'w'>,
+  keys: ReadonlyMap<string, string>,
+): ViewParts {
+  const movable = (g: PartGroup) => !isOpening(g) && !g.label.endsWith(INSIDE_SUFFIX);
+  const { xs, px, mid, width } = groupXs(flat, parts);
+  const groups = parts.groups.slice();
+  let changed = false;
+
+  if (view === 'front' || view === 'back') {
+    // Picture side (+1 right, -1 left, 0 too near the centre) a wearer-LEFT part must have.
+    const leftAt = view === 'front' ? 1 : -1;
+    const at = (i: number) => {
+      const d = xs[i] - mid;
+      return Number.isNaN(d) || Math.abs(d) < width * LR_DEAD ? 0 : Math.sign(d);
+    };
+    const done = new Set<number>();
+    parts.groups.forEach((g, i) => {
+      if (done.has(i) || isOpening(g) || sideOf(g.label) !== 'L') return;
+      const twin = twinName(g.label);
+      const j = parts.groups.findIndex((o, k) => !done.has(k) && k !== i && o.label === twin);
+      if (j < 0) return;
+      done.add(i);
+      done.add(j);
+      if (at(i) === -leftAt && at(j) === leftAt) {
+        groups[i] = relabel(parts.groups[i], parts.groups[j].label, parts.groups[j].key);
+        groups[j] = relabel(parts.groups[j], parts.groups[i].label, parts.groups[i].key);
+        changed = true;
+      }
+    });
+  } else if (view === 'side_l' || view === 'side_r') {
+    const face = (word: RegExp) => {
+      let s = 0;
+      let c = 0;
+      parts.groups.forEach((g, i) => {
+        const k = partKey(g.label);
+        if (!movable(g) || Number.isNaN(xs[i]) || !word.test(k)) return;
+        if (/\bfront\b/.test(k) && /\bback\b/.test(k)) return;
+        s += xs[i] * px[i];
+        c += px[i];
+      });
+      return c > 0 ? s / c : NaN;
+    };
+    const fx = face(/\bfront\b/);
+    const bx = face(/\bback\b/);
+    if (!Number.isNaN(fx) && !Number.isNaN(bx) && Math.abs(fx - bx) >= width * FLANK_GAP) {
+      const flank = fx < bx ? 'L' : 'R';
+      const sided = parts.groups.flatMap((g, i) =>
+        movable(g) && sideOf(g.label) ? [{ g, i, ok: sideOf(g.label) === flank }] : [],
+      );
+      const bad = sided.filter((x) => !x.ok);
+      if (bad.length > sided.length - bad.length)
+        for (const { g, i } of bad) {
+          const twin = twinName(g.label);
+          const key = g.key ? keys.get(twin) : '';
+          if (g.key && !key) continue;
+          groups[i] = relabel(g, twin, key ?? '');
+          changed = true;
+        }
+    }
+  }
+  return changed ? { ...parts, groups } : parts;
 }
 
 /** A suggestion row from the card-level call (its groups carry `part_key`). */
@@ -293,7 +479,7 @@ export function partAcross(
 ): { view: string; groups: number[] }[] {
   const home = sides.find((s) => s.view === view)?.parts;
   const g = home?.groups[group];
-  if (!g) return [];
+  if (!g || isOpening(g)) return [];
   const out = [{ view, groups: [group] }];
   if (only) return out;
   for (const s of sides) {
@@ -301,7 +487,7 @@ export function partAcross(
     const groups: number[] = [];
     s.parts.groups.forEach((o, i) => {
       if (s.view === view && i === group) return;
-      if (samePart(g, view, o, s.view)) groups.push(i);
+      if (!isOpening(o) && samePart(g, view, o, s.view)) groups.push(i);
     });
     if (groups.length === 0) continue;
     const at = out.find((x) => x.view === s.view);
@@ -382,7 +568,8 @@ export function paintedPartNames(side: NamedSide): Map<number, string[]> {
   const out = new Map<number, string[]>();
   for (let g = 0; g < n; g += 1) {
     const name = parts.groups[g].label.trim().replace(/\s+/g, ' ');
-    if (!transferable(name) || total[g] === 0) continue;
+    // The inside of a part is that part: its name travels once, by the part's own group.
+    if (!transferable(name) || total[g] === 0 || name.endsWith(INSIDE_SUFFIX)) continue;
     for (const [v, c] of byLabel[g])
       if (c / total[g] >= PART_PAINTED_SHARE) out.set(v, [...(out.get(v) ?? []), name]);
   }
