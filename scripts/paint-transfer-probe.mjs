@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// PAINT THE PARTS · T28 — a saved map's paint carried onto a replaced flat (re-scaled, shifted,
+// PAINT THE PARTS · T28/T29 — a saved map's paint (T29: and artwork marks) carried onto a replaced flat (re-scaled, shifted,
 // a square with margins): every painted part lands on its own region of the new flat.
 //   node scripts/paint-transfer-probe.mjs
 import { build as esbuild } from 'esbuild';
@@ -111,6 +111,78 @@ const C = m.packHex('#27ae60');
     for (let i = 0; i < got.labels.length; i++) if (got.labels[i] && flat.ink[i]) onInk++;
     ck(onInk === 0, `${tag}: nothing painted on the ink`);
   }
+
+  // T29 · an artwork mark (fractions of the old picture) lands on the same garment place of the
+  // new flat: old frame box = the old MAP's ink (black) box (and, without a map, the old flat's ink box
+  // — the two agree), new = the new flat's ink box.
+  const mapBox = m.mapDrawBox({ rgba, w: O.W, h: O.H });
+  const oldInk = m.inkBox(oldFlat);
+  const near = (a, b, tol) => Math.abs(a - b) <= tol;
+  ck(
+    !!mapBox &&
+      !!oldInk &&
+      ['x0', 'y0', 'x1', 'y1'].every((k) => near(mapBox[k], oldInk[k], 1 / O.W)),
+    'old map ink box = old flat ink box',
+    JSON.stringify({ mapBox, oldInk }),
+  );
+  // A chest quad and a single pin, in design units.
+  const quadUV = [
+    [230, 60],
+    [360, 60],
+    [360, 120],
+    [230, 120],
+  ];
+  const frac = (F, [u, v]) => ({ x: (F.ox + u * F.k) / F.W, y: (F.oy + v * F.k) / F.H });
+  const oldPts = quadUV.map((p) => ({ ...frac(O, p), tag: 'kept' }));
+  for (const N of [
+    { W: 1200, H: 1200, ox: 280, oy: 150, k: 1.8 },
+    { W: 1400, H: 1000, ox: 700, oy: 60, k: 1.7 },
+  ]) {
+    const flat = m.analyseFlat(drawing(N.W, N.H, N.ox, N.oy, N.k), N.W, N.H);
+    const tag = `${N.W}x${N.H} ×${N.k}`;
+    for (const [name, box] of [
+      ['map box', mapBox],
+      ['ink box', oldInk],
+    ]) {
+      const got = m.transferPoints(box, m.inkBox(flat), oldPts);
+      const want = quadUV.map((p) => frac(N, p));
+      // Within 4 px of the new flat (the drawn line is ~5 px thick on both sides).
+      const ok =
+        !!got &&
+        got.length === 4 &&
+        got.every(
+          (q, i) =>
+            near(q.x, want[i].x, 4 / N.W) && near(q.y, want[i].y, 4 / N.H) && q.tag === 'kept',
+        );
+      ck(
+        ok,
+        `artwork quad lands (${name}) ${tag}`,
+        got
+          ? got.map((q) => `${(q.x * N.W).toFixed(0)},${(q.y * N.H).toFixed(0)}`).join(' ')
+          : 'null',
+      );
+    }
+  }
+  // Pure function edges.
+  const unit = { x0: 0, y0: 0, x1: 1, y1: 1 };
+  const half = { x0: 0.25, y0: 0.25, x1: 0.75, y1: 0.75 };
+  const id = m.transferPoints(unit, unit, [{ x: 0.3, y: 0.7 }]);
+  ck(!!id && id[0].x === 0.3 && id[0].y === 0.7, 'same box → same points');
+  const sh = m.transferPoints(unit, half, [
+    { x: 0, y: 0 },
+    { x: 1, y: 0.5 },
+  ]);
+  ck(
+    !!sh && sh[0].x === 0.25 && sh[0].y === 0.25 && sh[1].x === 0.75 && sh[1].y === 0.5,
+    'whole frame → half box',
+  );
+  const out = m.transferPoints(half, unit, [{ x: 0, y: 1 }]);
+  ck(!!out && out[0].x === 0 && out[0].y === 1, 'a point outside the old box is clamped to 0..1');
+  ck(m.transferPoints(null, unit, [{ x: 0.5, y: 0.5 }]) === null, 'no old box → null (mark stays)');
+  ck(
+    m.transferPoints(unit, { x0: 0.5, y0: 0.2, x1: 0.5, y1: 0.8 }, [{ x: 0.5, y: 0.5 }]) === null,
+    'degenerate box → null',
+  );
 
   // Empty old map / blank new flat → nothing to carry.
   const blank = m.mapPixels(new Uint32Array(O.W * O.H), oldFlat.ink, O.W, O.H);
