@@ -562,6 +562,28 @@ function MaterialBench({
         : { card: techCardId, bomItemId: 0, lineKey: slot.lineKey },
     );
 
+  /* T63 (05.10): «при клике на какой то из материалов … анкорить в раздел generate и на секундочку
+     его как-то блинкать». Только по выбору самой ячейки (щелчок мимо её дверей, Enter/Space) —
+     загрузка, меню и ✕ внутри ячейки страницу не уводят. */
+  const generateRef = useRef<HTMLDivElement | null>(null);
+  const anchorGenerate = () =>
+    requestAnimationFrame(() => {
+      const el = generateRef.current;
+      if (!el) return;
+      const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      el.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' });
+      el.animate?.(
+        [
+          { outlineColor: 'transparent' },
+          { outlineColor: 'var(--color-textColor, #000)' },
+          { outlineColor: 'transparent' },
+          { outlineColor: 'var(--color-textColor, #000)' },
+          { outlineColor: 'transparent' },
+        ],
+        { duration: 1100, easing: 'ease-in-out', delay: still ? 0 : 250 },
+      );
+    });
+
   // Every empty slot that can run now, fabrics first, capped by shelf room.
   const emptyRunnable = slots
     .filter((s) => !byPair.has(pairKey(cwId, s.bomItemId)) && slotGate(s).ok)
@@ -1271,11 +1293,19 @@ function MaterialBench({
                   data-fh-cell={born ? 'saving' : slot.bomItemId}
                   className='group w-full min-w-0 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                   onClickCapture={() => pick(slot)}
+                  onClick={(e) => {
+                    const door = (e.target as HTMLElement).closest(
+                      'button, a, input, label, [role="menu"], [role="menuitem"]',
+                    );
+                    if (door && e.currentTarget.contains(door)) return;
+                    anchorGenerate();
+                  }}
                   onKeyDown={(e) => {
                     if (e.target !== e.currentTarget) return;
                     if (e.key !== 'Enter' && e.key !== ' ') return;
                     e.preventDefault();
                     pick(slot);
+                    anchorGenerate();
                   }}
                 >
                   <SlotCell
@@ -1367,6 +1397,8 @@ function MaterialBench({
 
           {selected && selSpec && (
             <div
+              ref={generateRef}
+              className='scroll-mt-24 outline outline-2 outline-offset-4 outline-transparent'
               data-fh-generate={selGate.ok ? 'live' : 'inert'}
               data-fh-for={selected.bomItemId > 0 ? selected.bomItemId : 'saving'}
             >
@@ -1382,12 +1414,8 @@ function MaterialBench({
                 }
               >
                 generate ·{' '}
-                {/* T61: the target wears the chosen cell's own inverted cap, ✦ included — the
-                    panel visibly continues the tile that was clicked. */}
-                <span className='inline-flex items-baseline gap-1 bg-textColor px-1 text-bgColor'>
-                  <span data-fh-subject=''>{selected.name}</span>
-                  <span aria-hidden>✦</span>
-                </span>
+                {/* T62: «BRAND LABEL ✦ это ту мач» — имя цели тем же стилем, что `generate ·`. */}
+                <span data-fh-subject=''>{selected.name}</span>
               </GroupLabel>
               <SpecPanel
                 key={selKey}
