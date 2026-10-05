@@ -208,10 +208,36 @@ const supportsColour = (colour: string): boolean => {
 };
 
 /** Return a browser colour for a colour-option label, or null when the label has no colour. */
+/**
+ * Fashion colour words whose CSS keyword means something else (CSS `indigo` is violet; in clothing it
+ * is denim blue) or that CSS lacks. Checked before CSS.
+ */
+const FASHION_COLOUR: Record<string, string> = {
+  indigo: '#2e3b5e',
+  denim: '#4a6285',
+  ecru: '#e8dfc8',
+  stone: '#b8ad9a',
+  sand: '#c9b48f',
+  camel: '#b8895a',
+  oatmeal: '#d8ccb4',
+  charcoal: '#3a3a3a',
+  bone: '#e3dccb',
+  cream: '#f1e8d2',
+  rust: '#a5512b',
+  sage: '#9caf88',
+  mustard: '#c79a2b',
+  burgundy: '#6d1f2c',
+  taupe: '#8b7d6b',
+};
+
 export function swatchOf(label: string): string | null {
   const clean = label.trim().toLowerCase();
   if (!clean) return null;
   const parts = clean.split(/\s+/);
+  for (const word of [...parts].reverse()) {
+    const fashion = FASHION_COLOUR[word.replace(/[^a-z]/g, '')];
+    if (fashion) return fashion;
+  }
   const candidates = [clean, parts.at(-1) ?? '', parts.slice(-2).join('')];
   for (const candidate of candidates) {
     if (candidate && supportsColour(candidate)) return candidate;

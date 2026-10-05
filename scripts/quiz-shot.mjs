@@ -855,7 +855,7 @@ try {
       .locator('[data-quiz] button [data-swatch]')
       .evaluateAll((dots) => dots.map((dot) => dot.getAttribute('data-swatch')));
     check(
-      swatches.join(',') === 'black,olivedrab,indigo',
+      swatches.join(',') === 'black,#e3dccb,olivedrab,#2e3b5e',
       `colourway chips show colour dots (${swatches.join(',')})`,
     );
     await shoot(page, 'quiz-1440-colourways.png');
