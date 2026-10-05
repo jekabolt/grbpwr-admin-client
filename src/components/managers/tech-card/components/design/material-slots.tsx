@@ -277,7 +277,7 @@ export function MaterialSlots({
   return (
     <Section
       title='material slots'
-      question='— what this is made of'
+      /* T58 (05.10): подзаголовок «— what this is made of» снят по слову владельца. */
       /* ⚠ ШАПКА ПУСТА, КРОМЕ ПРЕДУПРЕЖДЕНИЯ, И ЭТО РЕШЕНИЕ ВЛАДЕЛЬЦА (п. 12): «FROM THE MOODBOARD
          · 4 OF 6 DRAFTED SLOTS — не нужно, убрать». Пилюля происхождения и счётчик черновика
          ушли; провенанс отдельной строки по-прежнему стоит в её собственной колонке `from`, где
