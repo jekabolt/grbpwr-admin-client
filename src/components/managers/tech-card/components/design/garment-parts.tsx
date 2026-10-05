@@ -3,11 +3,29 @@ import type { ReactNode } from 'react';
 import { StitchPictogram } from 'ui/components/annotation/stitch-pictogram';
 
 import {
+  GARMENT_MANIFEST,
+  baseOf,
+  isGarmentFamily,
+  partsOf,
+  type PartKey,
+} from './garment-manifest';
+import {
   GARMENT_FAMILIES,
   GARMENT_SHAPES,
   GarmentPictogram,
+  UNDRAWN_FAMILIES,
   type GarmentFamily,
 } from './garment-pictograms';
+import { PARTS as B1 } from './garment-shapes/b1';
+import { PARTS as B2 } from './garment-shapes/b2';
+import { PARTS as B3 } from './garment-shapes/b3';
+import { PARTS as B4 } from './garment-shapes/b4';
+import { PARTS as B5 } from './garment-shapes/b5';
+import { PARTS as B6 } from './garment-shapes/b6';
+import { PARTS as B7 } from './garment-shapes/b7';
+import { PARTS as B8 } from './garment-shapes/b8';
+import { PARTS as B9 } from './garment-shapes/b9';
+import { mark, zone, type PartMark } from './garment-shapes/kit';
 import {
   HARDWARE_LABEL,
   HardwareIcon,
@@ -25,198 +43,11 @@ import {
   type SeamKind,
 } from './seam-icons';
 
-/** Every part name the quiz model may return (20-DESIGN O6). */
-export type PartKey =
-  | 'whole'
-  | 'neckline'
-  | 'shoulder'
-  | 'chest'
-  | 'sleeve'
-  | 'cuff'
-  | 'pocket'
-  | 'hem'
-  | 'back'
-  | 'side_seam'
-  | 'label'
-  | 'collar'
-  | 'placket'
-  | 'closure'
-  | 'yoke'
-  | 'hood'
-  | 'drawcord'
-  | 'zip'
-  | 'lapel'
-  | 'lining'
-  | 'belt'
-  | 'strap'
-  | 'bodice'
-  | 'waist'
-  | 'panel'
-  | 'slit'
-  | 'leg'
-  | 'knee'
-  | 'waistband'
-  | 'fly'
-  | 'rise'
-  | 'back_pocket'
-  | 'seat'
-  | 'hip'
-  | 'thigh'
-  | 'inseam'
-  | 'pleat'
-  | 'front'
-  | 'leg_opening'
-  | 'gusset'
-  | 'cup'
-  | 'underband'
-  | 'crown'
-  | 'brim'
-  | 'band'
-  | 'vent'
-  | 'palm'
-  | 'fingers'
-  | 'thumb'
-  | 'foot'
-  | 'heel'
-  | 'toe'
-  | 'edge'
-  | 'end'
-  | 'fringe'
-  | 'tip'
-  | 'knot'
-  | 'blade'
-  | 'keeper'
-  | 'frame'
-  | 'lens'
-  | 'bridge'
-  | 'temple'
-  | 'hinge'
-  | 'card_slot'
-  | 'coin_pocket'
-  | 'ring'
-  | 'charm'
-  | 'clasp'
-  | 'chain'
-  | 'pendant'
-  | 'upper'
-  | 'throat'
-  | 'laces'
-  | 'tongue'
-  | 'quarter'
-  | 'sole'
-  | 'shaft'
-  | 'pull_tab'
-  | 'footbed'
-  | 'buckle'
-  | 'body'
-  | 'handle'
-  | 'flap'
-  | 'hardware'
-  | 'base'
-  | 'lid'
-  | 'front_panel'
-  | 'side';
+/** Every part name the quiz model may return (20-DESIGN O6) — the manifest's `part_labels`. */
+export type { PartKey, PartMark };
 
-export const PART_LABEL: Record<PartKey, string> = {
-  whole: 'whole',
-  neckline: 'neckline',
-  shoulder: 'shoulder',
-  chest: 'chest',
-  sleeve: 'sleeve',
-  cuff: 'cuff',
-  pocket: 'pocket',
-  hem: 'hem',
-  back: 'back',
-  side_seam: 'side seam',
-  label: 'label',
-  collar: 'collar',
-  placket: 'placket',
-  closure: 'closure',
-  yoke: 'yoke',
-  hood: 'hood',
-  drawcord: 'drawcord',
-  zip: 'zip',
-  lapel: 'lapel',
-  lining: 'lining',
-  belt: 'belt',
-  strap: 'strap',
-  bodice: 'bodice',
-  waist: 'waist',
-  panel: 'panel',
-  slit: 'slit',
-  leg: 'leg',
-  knee: 'knee',
-  waistband: 'waistband',
-  fly: 'fly',
-  rise: 'rise',
-  back_pocket: 'back pocket',
-  seat: 'seat',
-  hip: 'hip',
-  thigh: 'thigh',
-  inseam: 'inseam',
-  pleat: 'pleat',
-  front: 'front',
-  leg_opening: 'leg opening',
-  gusset: 'gusset',
-  cup: 'cup',
-  underband: 'underband',
-  crown: 'crown',
-  brim: 'brim',
-  band: 'band',
-  vent: 'vent',
-  palm: 'palm',
-  fingers: 'fingers',
-  thumb: 'thumb',
-  foot: 'foot',
-  heel: 'heel',
-  toe: 'toe',
-  edge: 'edge',
-  end: 'end',
-  fringe: 'fringe',
-  tip: 'tip',
-  knot: 'knot',
-  blade: 'blade',
-  keeper: 'keeper',
-  frame: 'frame',
-  lens: 'lens',
-  bridge: 'bridge',
-  temple: 'temple',
-  hinge: 'hinge',
-  card_slot: 'card slot',
-  coin_pocket: 'coin pocket',
-  ring: 'ring',
-  charm: 'charm',
-  clasp: 'clasp',
-  chain: 'chain',
-  pendant: 'pendant',
-  upper: 'upper',
-  throat: 'throat',
-  laces: 'laces',
-  tongue: 'tongue',
-  quarter: 'quarter',
-  sole: 'sole',
-  shaft: 'shaft',
-  pull_tab: 'pull tab',
-  footbed: 'footbed',
-  buckle: 'buckle',
-  body: 'body',
-  handle: 'handle',
-  flap: 'flap',
-  hardware: 'hardware',
-  base: 'base',
-  lid: 'lid',
-  front_panel: 'front panel',
-  side: 'side',
-};
+export const PART_LABEL: Record<PartKey, string> = GARMENT_MANIFEST.part_labels;
 
-type PartMark = {
-  view: 'front' | 'back' | 'side_l';
-  d: string[];
-  zone?: boolean;
-};
-
-const mark = (view: PartMark['view'], ...d: string[]): PartMark => ({ view, d });
-const zone = (view: PartMark['view'], ...d: string[]): PartMark => ({ view, d, zone: true });
 const wholeFront = (family: GarmentFamily): PartMark => mark('front', GARMENT_SHAPES[family].body);
 const wholeSide = (family: GarmentFamily, ...indexes: number[]): PartMark =>
   mark('side_l', ...indexes.map((index) => GARMENT_SHAPES[family].side[index]));
@@ -225,7 +56,7 @@ const wholeSide = (family: GarmentFamily, ...indexes: number[]): PartMark =>
  * Canonical family/part allow-list and highlight geometry (20-DESIGN O6).
  * Coordinates share the 64×96 garment frame, so a mark always lands on its base drawing.
  */
-export const GARMENT_PARTS: Record<GarmentFamily, Partial<Record<PartKey, PartMark>>> = {
+const BASE_PARTS = {
   tee: {
     whole: wholeFront('tee'),
     neckline: mark('front', GARMENT_SHAPES.tee.front[0]),
@@ -626,13 +457,49 @@ export const GARMENT_PARTS: Record<GarmentFamily, Partial<Record<PartKey, PartMa
     base: mark('side_l', 'M22 82 Q22 86 25 86 L39 86 Q42 86 42 82'),
     label: mark('front', GARMENT_SHAPES.object.front[1], GARMENT_SHAPES.object.front[2]),
   },
+} satisfies Partial<Record<GarmentFamily, Partial<Record<PartKey, PartMark>>>>;
+
+/** Marks of the wave-95 drawings, one file per batch (garment-shapes/b1..b9). */
+const BATCH_PARTS: Partial<Record<GarmentFamily, Partial<Record<PartKey, PartMark>>>> = {
+  ...B1,
+  ...B2,
+  ...B3,
+  ...B4,
+  ...B5,
+  ...B6,
+  ...B7,
+  ...B8,
+  ...B9,
 };
+const OWN_PARTS: Partial<Record<GarmentFamily, Partial<Record<PartKey, PartMark>>>> = {
+  ...BATCH_PARTS,
+  ...BASE_PARTS,
+};
+const UNDRAWN: ReadonlySet<GarmentFamily> = new Set(UNDRAWN_FAMILIES);
 
-const FAMILY_SET: ReadonlySet<string> = new Set(GARMENT_FAMILIES);
-
-function isGarmentFamily(value: string): value is GarmentFamily {
-  return FAMILY_SET.has(value);
-}
+/**
+ * Marks of every family. A drawn family uses its own marks (`whole` defaults to the front body).
+ * An undrawn one is drawn as its manifest `base`, so it borrows the base's marks — only for the
+ * parts its manifest table lists; the other parts fall back to `whole` until the batch lands.
+ */
+export const GARMENT_PARTS: Record<
+  GarmentFamily,
+  Partial<Record<PartKey, PartMark>>
+> = Object.fromEntries(
+  GARMENT_FAMILIES.map((family) => {
+    const base = baseOf(family);
+    if (!UNDRAWN.has(family) || !base) {
+      return [family, { whole: wholeFront(family), ...OWN_PARTS[family] }];
+    }
+    const borrowed = OWN_PARTS[base] ?? {};
+    const parts: Partial<Record<PartKey, PartMark>> = {};
+    for (const { key } of partsOf(family)) {
+      const m = borrowed[key];
+      if (m) parts[key] = m;
+    }
+    return [family, { whole: borrowed.whole ?? wholeFront(family), ...parts }];
+  }),
+) as Record<GarmentFamily, Partial<Record<PartKey, PartMark>>>;
 
 function bbox(ds: string[]): { x0: number; y0: number; x1: number; y1: number } {
   let x0 = Infinity;

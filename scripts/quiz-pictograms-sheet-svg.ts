@@ -2,8 +2,13 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import {
+  GARMENT_MANIFEST,
+  type CardDetail,
+} from '../src/components/managers/tech-card/components/design/garment-manifest';
+import {
   GARMENT_FAMILIES,
   GARMENT_SHAPES,
+  UNDRAWN_FAMILIES,
   familyFor,
   pictogramPaths,
   type FamilyInput,
@@ -44,40 +49,27 @@ import {
 } from '../src/components/managers/tech-card/components/design/seam-icons';
 import { partLabel } from '../src/components/managers/tech-card/components/design/quiz-model';
 
-const familyCases: Array<[FamilyInput, GarmentFamily | '']> = [
-  [{ top: 'outerwear', sub: 'coats' }, 'coat'],
-  [{ top: 'outerwear', sub: 'vests' }, 'vest'],
-  [{ top: 'outerwear', sub: 'jackets' }, 'jacket'],
-  [{ top: 'tops', sub: 'shirts' }, 'shirt'],
-  [{ top: 'tops', sub: 'blouses' }, 'shirt'],
-  [{ top: 'tops', sub: 'polos' }, 'shirt'],
-  [{ top: 'tops', sub: 'sweaters_knits' }, 'knit'],
-  [{ top: 'tops', sub: 'hoodies_sweatshirts' }, 'hoodie'],
-  [{ top: 'tops', sub: 'tshirts' }, 'tee'],
-  [{ top: 'bottoms', sub: 'jumpsuits' }, 'jumpsuit'],
-  [{ top: 'bottoms', sub: 'shorts' }, 'shorts'],
-  [{ top: 'bottoms', sub: 'skirts' }, 'skirt'],
-  [{ top: 'bottoms', sub: 'leggings' }, 'trousers'],
-  [{ top: 'dresses' }, 'dress'],
-  [{ top: 'loungewear_sleepwear', sub: 'swimwear_m' }, 'briefs'],
-  [{ top: 'loungewear_sleepwear', sub: 'swimwear_w' }, 'bra'],
-  [{ top: 'loungewear_sleepwear', sub: 'robes' }, 'coat'],
-  [{ top: 'loungewear_sleepwear', sub: 'sets' }, 'tee'],
-  [{ top: 'accessories', sub: 'hats', type: 'caps' }, 'cap'],
-  [{ top: 'accessories', sub: 'hats', type: 'beanies' }, 'hat'],
-  [{ top: 'accessories', sub: 'jewelry' }, 'necklace'],
-  [{ top: 'shoes', sub: 'boots' }, 'boot'],
-  [{ top: 'shoes', sub: 'sandals' }, 'sandal'],
-  [{ top: 'shoes', sub: 'mules_clogs' }, 'sandal'],
-  [{ top: 'shoes', sub: 'sneakers' }, 'shoe'],
-  [{ top: 'bags' }, 'bag'],
-  [{ top: 'objects' }, 'object'],
-  [{ top: 'new_server_category' }, ''],
+// The manifest's shared vectors (the backend runs the same rows) + the owner's card (95 §1.3).
+const familyCases: Array<[FamilyInput, GarmentFamily | '', CardDetail[]?]> = [
+  ...GARMENT_MANIFEST.vectors.map((v): [FamilyInput, GarmentFamily | '', CardDetail[]] => [
+    { top: v.top, sub: v.sub, type: v.type },
+    v.family as GarmentFamily | '',
+    Object.entries(('details' in v ? v.details : undefined) ?? {}).map(([key, text]) => ({
+      key,
+      text: String(text),
+    })),
+  ]),
+  [{ top: 'tops', sub: 'blouses' }, 'cami', [{ key: 'silhouette', text: 'sleeveless, strappy' }]],
+  [{ top: 'tops', sub: 'tanks' }, 'tank', [{ key: 'collar', text: 'strappy' }]],
+  [{ top: 'tops', sub: 'crop' }, 'tank', [{ key: 'sleeveCuff', text: 'Sleeveless' }]],
+  [{ top: 'tops', sub: 'blouses' }, 'blouse', [{ key: 'fabric', text: 'sleeveless' }]],
 ];
-for (const [input, expected] of familyCases) {
-  const actual = familyFor(input);
+for (const [input, expected, details] of familyCases) {
+  const actual = familyFor(input, details);
   if (actual !== expected) {
-    throw new Error(`familyFor(${JSON.stringify(input)}) returned ${actual}, expected ${expected}`);
+    throw new Error(
+      `familyFor(${JSON.stringify(input)}, ${JSON.stringify(details)}) returned ${actual}, expected ${expected}`,
+    );
   }
 }
 
@@ -333,6 +325,11 @@ GARMENT_FAMILIES.forEach((family, familyIndex) => {
   rows.push(
     `<rect x="0" y="${y}" width="${width}" height="${VIEW_ROW_HEIGHT}" fill="#fff" stroke="#ccc"/>`,
     `<text class="family" x="8" y="${y + 43}">${family}</text>`,
+    ...(UNDRAWN_FAMILIES.includes(family)
+      ? [
+          `<text class="detail" x="8" y="${y + 56}">base: ${GARMENT_MANIFEST.families[family].base}</text>`,
+        ]
+      : []),
     ...views.map((view, viewIndex) =>
       viewCell(family, view, LABEL_WIDTH + viewIndex * CELL_WIDTH, y),
     ),
@@ -369,7 +366,7 @@ const outputWidth = seamsOnly ? seamGridWidth : width;
 const outputHeight = seamsOnly ? seamGridHeight : height;
 const outputRows = seamsOnly ? seamGrid() : rows;
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${outputWidth}" height="${outputHeight}" viewBox="0 0 ${outputWidth} ${outputHeight}" color="#000">
-  <metadata data-families="${GARMENT_FAMILIES.length}" data-parts="${familyPartCount}" data-shapes="${Object.keys(GARMENT_SHAPES).length}" data-hardware="${HARDWARE_KINDS.length}" data-labels="${LABEL_KINDS.length}" data-seams="${SEAM_KINDS.length}" data-palettes="1"/>
+  <metadata data-families="${GARMENT_FAMILIES.length}" data-parts="${familyPartCount}" data-shapes="${Object.keys(GARMENT_SHAPES).length}" data-manifest="${Object.keys(GARMENT_MANIFEST.families).length}" data-undrawn="${UNDRAWN_FAMILIES.length}" data-hardware="${HARDWARE_KINDS.length}" data-labels="${LABEL_KINDS.length}" data-seams="${SEAM_KINDS.length}" data-palettes="1"/>
   <!-- O6\n${partTable}\n-->
   <style>
     text { fill: #333; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }

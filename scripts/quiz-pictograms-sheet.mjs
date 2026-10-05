@@ -49,13 +49,18 @@ try {
 }
 
 const metadata = svg.match(
-  /data-families="(\d+)" data-parts="(\d+)" data-shapes="(\d+)" data-hardware="(\d+)" data-labels="(\d+)" data-seams="(\d+)" data-palettes="(\d+)"/,
+  /data-families="(\d+)" data-parts="(\d+)" data-shapes="(\d+)" data-manifest="(\d+)" data-undrawn="(\d+)" data-hardware="(\d+)" data-labels="(\d+)" data-seams="(\d+)" data-palettes="(\d+)"/,
 );
 if (!metadata) throw new Error('contact-sheet metadata is missing');
-const [, families, parts, shapes, hardware, labels, seams, palettes] = metadata;
-if (families !== '30' || shapes !== '30') {
-  throw new Error(`expected 30 families and shapes, got ${families} and ${shapes}`);
+const [, families, parts, shapes, manifestFamilies, undrawn, hardware, labels, seams, palettes] =
+  metadata;
+// the family count comes from the manifest, not a literal (95 §3.3)
+if (families !== manifestFamilies || shapes !== manifestFamilies) {
+  throw new Error(
+    `expected ${manifestFamilies} families and shapes (manifest), got ${families} and ${shapes}`,
+  );
 }
+if (undrawn !== '0') console.warn(`warn ${undrawn} families drawn as their manifest base`);
 if (hardware !== '20') throw new Error(`expected 20 hardware icons, got ${hardware}`);
 if (labels !== '6') throw new Error(`expected 6 label icons, got ${labels}`);
 if (seams !== '26') throw new Error(`expected 26 seam and edge icons, got ${seams}`);

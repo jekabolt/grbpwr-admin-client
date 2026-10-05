@@ -5,6 +5,24 @@ import { useFormContext, useWatch } from 'react-hook-form';
 
 import type { TechCardFormData } from '../schema';
 import { categoryChain } from './fit-vocabulary';
+import {
+  FAMILIES,
+  baseOf,
+  familyFor,
+  isGarmentFamily,
+  type FamilyInput,
+  type GarmentFamily,
+} from './garment-manifest';
+import { SHAPES as B1 } from './garment-shapes/b1';
+import { SHAPES as B2 } from './garment-shapes/b2';
+import { SHAPES as B3 } from './garment-shapes/b3';
+import { SHAPES as B4 } from './garment-shapes/b4';
+import { SHAPES as B5 } from './garment-shapes/b5';
+import { SHAPES as B6 } from './garment-shapes/b6';
+import { SHAPES as B7 } from './garment-shapes/b7';
+import { SHAPES as B8 } from './garment-shapes/b8';
+import { SHAPES as B9 } from './garment-shapes/b9';
+import type { GarmentShape } from './garment-shapes/kit';
 import { isActiveView, normaliseViewKey, type ActiveView } from './views';
 
 /**
@@ -40,7 +58,7 @@ import { isActiveView, normaliseViewKey, type ActiveView } from './views';
  * бок смотрит влево. У плоской вещи (сумка, ремень, шарф, галстук, бумажник, брелок, цепочка,
  * флакон) бок — УЗКИЙ контур предмета ребром, как велит D-36; у объёмной (обувь, кепка, очки,
  * перчатка, носок) — её узнаваемый силуэт сбоку. Представители: сумки — тоут, обувь — кроссовка,
- * предметы — флакон с плоским телом. Аксессуары — ПО ПОДКАТЕГОРИИ (`ACCESSORY_FAMILIES`): у
+ * предметы — флакон с плоским телом. Аксессуары — ПО ПОДКАТЕГОРИИ (манифест, `categories`): у
  * перчатки, очков и галстука нет общего контура, и одна картинка на всех соврала бы почти каждой
  * карточке.
  *
@@ -54,115 +72,14 @@ import { isActiveView, normaliseViewKey, type ActiveView } from './views';
  * категории или верхняя категория, которой этот клиент не знает (новый сервер), — пиктограммы нет:
  * неверная подсказка хуже никакой.
  */
-/** Все силуэты квиза и фоновых подсказок FLAT SLOTS (O5). */
-export const GARMENT_FAMILIES = [
-  'tee',
-  'shirt',
-  'knit',
-  'hoodie',
-  'jacket',
-  'coat',
-  'vest',
-  'dress',
-  'jumpsuit',
-  'trousers',
-  'shorts',
-  'skirt',
-  'briefs',
-  'bra',
-  'cap',
-  'hat',
-  'glove',
-  'sock',
-  'belt',
-  'scarf',
-  'tie',
-  'glasses',
-  'wallet',
-  'keyring',
-  'necklace',
-  'shoe',
-  'boot',
-  'sandal',
-  'bag',
-  'object',
-] as const;
-
-export type GarmentFamily = (typeof GARMENT_FAMILIES)[number];
-
-/** Имена уровней категории, как их называет словарь (`common_Category.name`). */
-export type FamilyInput = {
-  top?: string | null;
-  sub?: string | null;
-  type?: string | null;
-};
-
 /**
- * Подкатегория аксессуара → свой силуэт (D-51): по представителю на подкатегорию — шляпы рисует
- * бейсболка, украшения — кулон на цепочке, брелоки — брелок на кольце. Без подкатегории или с
- * подкатегорией, которой этот клиент не знает, — бейсболка: представитель верхней категории.
- * Имена — те же ключи словаря, что у `familyFor` (0001 и 0367 бэка).
+ * Все силуэты квиза и фоновых подсказок FLAT SLOTS (O5) — из манифеста (95-GARMENT-TAXONOMY §3):
+ * 124 семейства, категория → семейство и уточнение словами деталей карточки живут там же, где их
+ * читает бэк. Здесь только геометрия.
  */
-const ACCESSORY_FAMILIES: ReadonlyMap<string, GarmentFamily> = new Map<string, GarmentFamily>([
-  ['gloves', 'glove'],
-  ['socks', 'sock'],
-  ['belts', 'belt'],
-  ['scarves', 'scarf'],
-  ['ties', 'tie'],
-  ['eyewear', 'glasses'],
-  ['wallets', 'wallet'],
-  ['keychains', 'keyring'],
-  ['jewelry', 'necklace'],
-]);
-
-/**
- * Категория → семейство силуэта (D-22, D-51). Порядок проверок — от частного к общему:
- * подкатегория, у которой свой силуэт (худи, шорты, юбки, трусы, любой аксессуар), выигрывает у
- * своей верхней категории. Все девять верхних категорий таксономии имеют семейство; `''` —
- * только у карточки без категории и у верхней категории, которой этот клиент не знает.
- */
-export function familyFor(c: FamilyInput): GarmentFamily | '' {
-  const top = (c.top ?? '').trim().toLowerCase();
-  const sub = (c.sub ?? '').trim().toLowerCase();
-  const type = (c.type ?? '').trim().toLowerCase();
-  switch (top) {
-    case 'outerwear':
-      if (sub === 'coats') return 'coat';
-      if (sub === 'vests') return 'vest';
-      return 'jacket';
-    case 'tops':
-      if (sub === 'shirts' || sub === 'blouses' || sub === 'polos') return 'shirt';
-      if (sub === 'sweaters_knits') return 'knit';
-      if (sub === 'hoodies_sweatshirts') return 'hoodie';
-      return 'tee';
-    case 'bottoms':
-      if (sub === 'jumpsuits') return 'jumpsuit';
-      if (sub === 'shorts') return 'shorts';
-      if (sub === 'skirts') return 'skirt';
-      return 'trousers';
-    case 'dresses':
-      return 'dress';
-    case 'loungewear_sleepwear':
-      if (sub === 'boxers' || sub === 'briefs' || sub === 'swimwear_m') return 'briefs';
-      if (sub === 'bralettes' || sub === 'swimwear_w') return 'bra';
-      if (sub === 'robes') return 'coat';
-      return 'tee';
-    case 'accessories':
-      if (sub === 'hats') return type === 'caps' ? 'cap' : 'hat';
-      return ACCESSORY_FAMILIES.get(sub) ?? 'cap';
-    case 'shoes':
-      if (sub === 'boots') return 'boot';
-      if (sub === 'sandals' || sub === 'mules_clogs') return 'sandal';
-      return 'shoe';
-    case 'bags':
-      return 'bag';
-    case 'objects':
-      return 'object';
-    default:
-      // нет категории · верхняя категория нового сервера
-      return '';
-  }
-}
+export const GARMENT_FAMILIES: readonly GarmentFamily[] = FAMILIES;
+export { familyFor, isGarmentFamily };
+export type { FamilyInput, GarmentFamily, GarmentShape };
 
 /**
  * Лист категории → имена её уровней. Уровни сопоставляются ЯВНО по `level`, не по глубине:
@@ -190,11 +107,13 @@ export function resolveCategory(
 export function useCardGarmentFamily(): GarmentFamily | '' {
   const { control } = useFormContext<TechCardFormData>();
   const categoryId = (useWatch({ control, name: 'categoryId' }) as number | undefined) ?? 0;
+  // §3.4: «sleeveless / strappy» в деталях карточки уводит блузку в cami, футболку в tank
+  const details = useWatch({ control, name: 'details' }) as TechCardFormData['details'] | undefined;
   const { dictionary } = useDictionary();
   const categories = dictionary?.categories;
   return useMemo(
-    () => familyFor(resolveCategory(categories, categoryId)),
-    [categories, categoryId],
+    () => familyFor(resolveCategory(categories, categoryId), details),
+    [categories, categoryId, details],
   );
 }
 
@@ -208,10 +127,7 @@ export function useCardGarmentFamily(): GarmentFamily | '' {
  * сто двадцать клеток (30 семейств × 4 стороны) проверены глазами на листе-контактке при
  * 136px и при 0.12 поверх полос.
  */
-export const GARMENT_SHAPES: Record<
-  GarmentFamily,
-  { body: string; front: string[]; back: string[]; side: string[] }
-> = {
+const BASE_SHAPES = {
   tee: {
     body: 'M26 14 L15 18 L5 33 L13 38 L18 32 L18 86 L46 86 L46 32 L51 38 L59 33 L49 18 L38 14',
     front: ['M26 14 Q32 23 38 14', 'M28 14 Q32 20.5 36 14'],
@@ -981,7 +897,41 @@ export const GARMENT_SHAPES: Record<
       'M32 36 L32 86',
     ],
   },
+} satisfies Partial<Record<GarmentFamily, GarmentShape>>;
+
+/** Рисунки волны 95 §4.2 — по файлу на партию, каждый правится отдельно (garment-shapes/b1..b9). */
+const BATCH_SHAPES: Partial<Record<GarmentFamily, GarmentShape>> = {
+  ...B1,
+  ...B2,
+  ...B3,
+  ...B4,
+  ...B5,
+  ...B6,
+  ...B7,
+  ...B8,
+  ...B9,
 };
+
+const OWN_SHAPES: Partial<Record<GarmentFamily, GarmentShape>> = {
+  ...BATCH_SHAPES,
+  ...BASE_SHAPES,
+};
+
+/** Семейства, у которых ещё нет своего рисунка: рисуют `base` манифеста (проба — предупреждением). */
+export const UNDRAWN_FAMILIES: readonly GarmentFamily[] = FAMILIES.filter((f) => !OWN_SHAPES[f]);
+
+/**
+ * Рисунок каждого из 124 семейств: свой (30 прежних + партии), иначе — `base` манифеста, чтобы
+ * посреди волны ни одна ячейка не стала пустой.
+ */
+export const GARMENT_SHAPES: Record<GarmentFamily, GarmentShape> = Object.fromEntries(
+  FAMILIES.map((f) => {
+    const base = baseOf(f);
+    const shape = OWN_SHAPES[f] ?? (base ? OWN_SHAPES[base] : undefined);
+    if (!shape) throw new Error(`garment pictogram: ${f} has neither a drawing nor a drawn base`);
+    return [f, shape];
+  }),
+) as Record<GarmentFamily, GarmentShape>;
 
 /** Сторона рисунка: одна из четырёх активных сторон ленты (`views.ts`). */
 export type PictogramView = ActiveView;
