@@ -623,6 +623,57 @@ try {
     await tab.ctx.close();
   }
   {
+    // D1 + D3: устаревший ответ → `stale` + `confirm` (пересохраняет тот же ответ, строка свежая);
+    // `apply to description ✦` и без картинок доски.
+    const row = (id, part, question, selected, stale) => ({
+      question: { id, category: 'details', part, family: 'jacket', kind: 'single', question, options: selected },
+      selected,
+      freeText: '',
+      skipped: false,
+      stale,
+    });
+    const answers = [
+      row('collar_type', 'collar', 'Which collar does it have?', ['stiff stand, 3 cm'], true),
+      row('hem_length', 'hem', 'Where does the hem sit?', ['mid-thigh'], false),
+    ];
+    const { ctx, page } = await open(1440, 900, { answers, pictures: 0 });
+    check((await btn(page, 'apply to description').count()) === 1, 'apply visible with zero pictures');
+    check(
+      (await page.locator(`${quiz} [data-quiz-stale-count]`).textContent()).trim() === '1 stale',
+      'done row shows 1 stale',
+    );
+    const lines = await page.evaluate(() => window.__model.decisionLines(window.__answers));
+    check(
+      lines.length === 3 &&
+        lines[0].startsWith('hem') &&
+        lines[1] === 'earlier quiz answers — the card changed since; unconfirmed, current card facts win' &&
+        lines[2].startsWith('collar'),
+      'decisionLines put the stale answer under the unconfirmed heading',
+    );
+    await btn(page, 'answers ▾').click();
+    check((await page.locator(`${quiz} [data-quiz-stale]`).count()) === 1, 'stale row shows stale');
+    await shoot(page, 'quiz-1440-stale.png');
+    await btn(page, 'confirm').click();
+    await page.waitForFunction(() => !document.querySelector('[data-quiz-stale]'));
+    const sent = (await page.evaluate(() => window.__calls)).filter(
+      (c) => c.name === 'SaveDesignQuizAnswers',
+    );
+    check(
+      sent.length === 1 &&
+        sent[0].body.answers.length === 1 &&
+        sent[0].body.answers[0].question.id === 'collar_type' &&
+        sent[0].body.answers[0].selected[0] === 'stiff stand, 3 cm' &&
+        !sent[0].body.answers[0].stale,
+      'confirm re-saves the same answer without stale',
+    );
+    check(
+      (await page.locator(`${quiz} [data-quiz-stale-count]`).count()) === 0,
+      'confirm clears the stale counter',
+    );
+    await shoot(page, 'quiz-1440-stale-confirmed.png');
+    await ctx.close();
+  }
+  {
     const { ctx, page } = await open(390, 844);
     await btn(page, 'ASK ME').click();
     await page.waitForSelector('[data-quiz]');

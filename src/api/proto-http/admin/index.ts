@@ -17730,6 +17730,7 @@ export type DesignQuizAnswer = {
   freeText: string | undefined;
   skipped: boolean | undefined;
   answeredAt: wellKnownTimestamp | undefined;
+  stale: boolean | undefined;
 };
 
 export type GetDesignQuizAnswersRequest = {

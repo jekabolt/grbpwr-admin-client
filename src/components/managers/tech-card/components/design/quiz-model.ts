@@ -39,25 +39,39 @@ export function partLabel(part?: string | null): string {
 }
 
 /**
+ * D1 (62-DEEP-FIXES): карточка изменилась после ответа — сервер помечает строку `stale`. Такие ответы
+ * идут ПОСЛЕ свежих, под этим заголовком (слово в слово как у сервера); `confirm` в списке ответов
+ * пересохраняет тот же ответ — он снова свежий.
+ */
+export const STALE_DECISIONS_HEADING =
+  'earlier quiz answers — the card changed since; unconfirmed, current card facts win';
+
+function decisionLine(a: DesignQuizAnswer): string | null {
+  if (a.skipped) return null;
+  const chosen = (a.selected ?? []).map(clean).filter(Boolean);
+  const own = clean(a.freeText);
+  if (own) chosen.push(`own words: "${own}"`);
+  if (!chosen.length) return null;
+  const part = clean(a.question?.part);
+  const label = part && part !== 'whole' ? partLabel(part) : '';
+  const subject = label || clean(a.question?.category) || 'decided';
+  return `${subject} — ${clean(a.question?.question)} → ${chosen.join('; ')}`;
+}
+
+/**
  * Строки решений для каждой следующей генерации — та же форма, что у сервера
  * (`designQuizDecisionLines`, W-C8): `hem — Where does the hem sit? → mid-thigh`. Предмет — деталь,
  * у вопроса про вещь целиком (`whole`) — категория. Свои слова — `own words: "…"`. Пропущенные не
- * печатаются.
+ * печатаются. Устаревшие (D1) — после свежих, за строкой `STALE_DECISIONS_HEADING`.
  */
 export function decisionLines(answers: readonly DesignQuizAnswer[]): string[] {
-  const out: string[] = [];
+  const fresh: string[] = [];
+  const stale: string[] = [];
   for (const a of answers) {
-    if (a.skipped) continue;
-    const chosen = (a.selected ?? []).map(clean).filter(Boolean);
-    const own = clean(a.freeText);
-    if (own) chosen.push(`own words: "${own}"`);
-    if (!chosen.length) continue;
-    const part = clean(a.question?.part);
-    const label = part && part !== 'whole' ? partLabel(part) : '';
-    const subject = label || clean(a.question?.category) || 'decided';
-    out.push(`${subject} — ${clean(a.question?.question)} → ${chosen.join('; ')}`);
+    const line = decisionLine(a);
+    if (line) (a.stale ? stale : fresh).push(line);
   }
-  return out;
+  return stale.length ? [...fresh, STALE_DECISIONS_HEADING, ...stale] : fresh;
 }
 
 /** Ответ на вопрос — заменяет прежний на ТОМ ЖЕ месте списка, новый встаёт в конец. */
@@ -143,7 +157,14 @@ export const isForget = (a: DesignQuizAnswer) =>
   !a.skipped && !(a.selected ?? []).length && !clean(a.freeText);
 
 export function forgetRow(q: DesignQuizQuestion): DesignQuizAnswer {
-  return { question: q, selected: [], freeText: '', skipped: false, answeredAt: undefined };
+  return {
+    question: q,
+    selected: [],
+    freeText: '',
+    skipped: false,
+    answeredAt: undefined,
+    stale: undefined,
+  };
 }
 
 export function applyRows(

@@ -58,7 +58,7 @@ import { runOutputText } from '../generation/run-state';
 import { GenerateRow } from '../render/generate-row';
 import type { Gate } from '../render/model';
 import { calloutWords, type CalloutLike } from '../render/what-model-gets';
-import { decisionLines } from '../quiz-model';
+import { decisionLines, STALE_DECISIONS_HEADING } from '../quiz-model';
 import {
   designKeys,
   newClientRequestId,
@@ -2999,10 +2999,20 @@ function DraftInventoryModal({
       {decided.length > 0 && (
         <WmgGroup
           label='decided in the quiz'
-          aside={`${decided.length} read`}
+          aside={`${decided.filter((l) => l !== STALE_DECISIONS_HEADING).length} read`}
           data-wmg-decided={decided.length}
         >
           {decided.map((line, i) => {
+            if (line === STALE_DECISIONS_HEADING) {
+              return (
+                <InventoryLine
+                  key={i}
+                  name='unconfirmed'
+                  origin='linked'
+                  text='the card changed since these answers'
+                />
+              );
+            }
             const [subject, ...rest] = line.split(' — ');
             return <InventoryLine key={i} name={subject} origin='linked' text={rest.join(' — ')} />;
           })}

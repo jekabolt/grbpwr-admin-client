@@ -106,7 +106,7 @@ const q = (
     ]),
   ],
 };
-type Preset = { answers?: unknown[] };
+type Preset = { answers?: unknown[]; pictures?: number };
 const w = window as unknown as { __answers: unknown[]; __preset?: Preset; __model: unknown };
 w.__answers = w.__preset?.answers ?? [];
 w.__model = { clarifyOf, decisionLines, insertClarify };
@@ -171,7 +171,7 @@ createRoot(document.getElementById('root') as HTMLElement).render(
                         <MoodQuiz
                           techCardId={1}
                           readOnly={false}
-                          pictures={3}
+                          pictures={w.__preset?.pictures ?? 3}
                           concept=''
                           conceptMax={2000}
                         />

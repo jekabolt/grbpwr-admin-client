@@ -232,6 +232,7 @@ export function MoodQuiz({
       freeText: skipped ? '' : freeText.trim(),
       skipped,
       answeredAt: undefined,
+      stale: undefined,
     };
     // W-C11: уточнение — и в правке; родитель ушёл от противоречия (или пропущен) — его прежнее
     // уточнение забывается и снимается с очереди.
@@ -309,6 +310,16 @@ export function MoodQuiz({
     }
   };
 
+  /** D1: карточка изменилась после ответа — `confirm` пересохраняет тот же ответ, он снова свежий. */
+  const confirm = async (a: DesignQuizAnswer) => {
+    if (readOnly || !ready || !a.question) return;
+    try {
+      await save.mutateAsync([{ ...a, answeredAt: undefined, stale: undefined }]);
+    } catch {
+      /* отказ сказан снэкбаром */
+    }
+  };
+
   /**
    * `apply to description ✦` (§5): тот же текстовый прогон, что `write from the board ✦`
    * (`DraftDesignIdea`, проза), — сервер уже кладёт решения квиза в факты карточки. Ответ ложится
@@ -380,7 +391,9 @@ export function MoodQuiz({
   }
 
   const answered = answers.filter((a) => !a.skipped).length;
-  const canApply = !readOnly && answered > 0 && pictures > 0;
+  const staleCount = answers.filter((a) => a.stale && !a.skipped).length;
+  // D3: описание пишется и без картинок доски — достаточно одного ответа.
+  const canApply = !readOnly && answered > 0;
 
   return (
     <div>
@@ -441,6 +454,16 @@ export function MoodQuiz({
             {answers.length > 0 && (
               <>
                 <Counter n={answered} noun='answer' />
+                {staleCount > 0 && (
+                  <Text
+                    size='micro'
+                    component='span'
+                    className='text-warning'
+                    data-quiz-stale-count={staleCount}
+                  >
+                    {staleCount} stale
+                  </Text>
+                )}
                 <Button
                   variant='underline'
                   size='xs'
@@ -467,24 +490,44 @@ export function MoodQuiz({
         }
       />
       {listOpen && answers.length > 0 && (
-        <ul className='mt-1 border-t border-hairline'>
+        <ul className='mt-1 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 border-t border-hairline'>
           {answers.map((a) => (
             <li
               key={a.question?.id}
-              className='group grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-3 border-b border-hairline'
+              className='group col-span-2 grid grid-cols-subgrid items-baseline border-b border-hairline'
             >
               <AnswerLine answer={a} readOnly={readOnly} onOpen={() => reopen(a)} />
-              {!readOnly && (
-                <Button
-                  variant='underline'
-                  size='xs'
-                  className='text-labelColor opacity-0 hover:text-textColor focus-visible:opacity-100 group-hover:opacity-100'
-                  disabled={save.isPending || !ready}
-                  onClick={() => void forget(a)}
-                >
-                  forget
-                </Button>
-              )}
+              <span className='flex items-baseline justify-end gap-3'>
+                {a.stale && !a.skipped && (
+                  <>
+                    <Text size='micro' component='span' className='text-warning' data-quiz-stale=''>
+                      stale
+                    </Text>
+                    {!readOnly && (
+                      <Button
+                        variant='underline'
+                        size='xs'
+                        data-quiz-confirm=''
+                        disabled={save.isPending || !ready}
+                        onClick={() => void confirm(a)}
+                      >
+                        confirm
+                      </Button>
+                    )}
+                  </>
+                )}
+                {!readOnly && (
+                  <Button
+                    variant='underline'
+                    size='xs'
+                    className='text-labelColor opacity-0 hover:text-textColor focus-visible:opacity-100 group-hover:opacity-100'
+                    disabled={save.isPending || !ready}
+                    onClick={() => void forget(a)}
+                  >
+                    forget
+                  </Button>
+                )}
+              </span>
             </li>
           ))}
         </ul>

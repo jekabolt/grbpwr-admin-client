@@ -1,3 +1,5 @@
+import { STALE_DECISIONS_HEADING } from '../quiz-model';
+
 /**
  * ═══ ФАКТЫ КАРТОЧКИ ДЛЯ МОДЕЛИ — ОДИН КОМПОЗЕР НА AI ENHANCE И WORDS ═══════════════════════════
  *
@@ -185,6 +187,26 @@ export function garmentNameOf(categoryPath?: string | null): string {
   return `${leaf} ${noun}`;
 }
 
+/**
+ * Решения квиза строками фактов: свежие — `decided · …`; после заголовка устаревших (D1) он стоит
+ * как есть, а строки под ним — `unconfirmed · …`.
+ */
+function decisionFactLines(decisions?: readonly string[]): string[] {
+  const out: string[] = [];
+  let stale = false;
+  for (const d of decisions ?? []) {
+    const line = clean(d);
+    if (!line) continue;
+    if (line === STALE_DECISIONS_HEADING) {
+      stale = true;
+      out.push(`${line}:`);
+      continue;
+    }
+    out.push(`${stale ? 'unconfirmed' : 'decided'} · ${line}`);
+  }
+  return out;
+}
+
 /** Строки в фиксированном порядке; пустые факты пропускаются. */
 export function cardFactLines(f: CardFacts): string[] {
   const out: string[] = [];
@@ -199,7 +221,7 @@ export function cardFactLines(f: CardFacts): string[] {
   for (const [label, text] of f.aspects ?? []) {
     if (clean(text)) out.push(`${clean(label)}: ${clean(text)}`);
   }
-  for (const d of f.decisions ?? []) if (clean(d)) out.push(`decided · ${clean(d)}`);
+  out.push(...decisionFactLines(f.decisions));
   const notes = (f.callouts ?? []).map(clean).filter(Boolean);
   if (notes.length) out.push(`notes on the board: ${notes.join('; ')}`);
   const mats = (f.materials ?? []).map(clean).filter(Boolean);
@@ -255,7 +277,7 @@ export function wordsBriefSource(f: CardFacts): { text: string; context: string 
   for (const [label, text] of f.aspects ?? []) {
     if (clean(text)) lines.push(`${clean(label)}: ${clean(text)}`);
   }
-  for (const d of f.decisions ?? []) if (clean(d)) lines.push(`decided · ${clean(d)}`);
+  lines.push(...decisionFactLines(f.decisions));
   const notes = (f.callouts ?? []).map(clean).filter(Boolean);
   if (notes.length) lines.push(`notes on the board: ${notes.join('; ')}`);
   return {
