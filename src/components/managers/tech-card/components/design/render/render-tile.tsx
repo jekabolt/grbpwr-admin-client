@@ -32,6 +32,7 @@ import { serverSpeaksDesign } from '../capability';
 /* Под другим именем: у экранов студии есть свои `colorwayLabel` (подпись цели). */
 import { colorwayLabel as refLabel } from '../colorway-picker';
 import type { PickerBranch } from '../core';
+import { standsOnBench } from '../generation/edit-chain';
 import { cropFamilies, isCutOut, offersSplit } from '../generation/composite';
 import type { OutputPlan } from '../generation/run-gallery';
 import type {
@@ -1768,6 +1769,8 @@ export function broughtGroup(band: GetDesignBandResponse, step: RenderStep): Bro
   const take = (picture: common_DesignPicture) => {
     const id = picture.id ?? 0;
     if (id <= 0 || taken.has(id) || onSides.has(id)) return;
+    // T59: an original an edit replaced is not brought again — the edit stands for it.
+    if (!standsOnBench(picture)) return;
     taken.add(id);
     pictures.push(picture);
   };

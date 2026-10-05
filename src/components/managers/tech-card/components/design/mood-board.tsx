@@ -455,6 +455,9 @@ function pictureOfMedia(full: common_MediaFull): common_DesignPicture {
   };
 }
 
+/** The edit is drawn over the whole picture: its frame in the original is the original (T59). */
+const WHOLE_FRAME: CropFrame = { x: 0, y: 0, w: 1, h: 1, rotation: 0 };
+
 export function MoodBoard({
   techCardId,
   disabled,
@@ -563,37 +566,6 @@ export function MoodBoard({
     setPicked((prev) => [...prev, ...result.accepted]);
     writeItems(result.next);
     return result.accepted.map((it) => it.id as number);
-  }
-
-  /**
-   * Отредактированная картинка встаёт на доску СРАЗУ ЗА ОРИГИНАЛОМ (C-3). Приём — тот же
-   * `appendBoardPictures`, что у двери «+ picture»: те же потолок, дедупликация и слова отказа;
-   * меняется только место строки в ряду, потому что «рядом с тем, что правил» — единственное
-   * место, где результат правки находят глазами.
-   */
-  function placeEditedNextTo(
-    originalId: number,
-    full: common_MediaFull,
-    done = 'the edited picture is on the board, right after the original — the original keeps its notes',
-  ) {
-    const result = appendBoardPictures({
-      live: (getValues('moodboardMedia') ?? []) as BoardItem[],
-      inScope: isBoardRow,
-      otherListIds: ((getValues('technicalMedia') ?? []) as BoardItem[]).map((i) => i.mediaId),
-      added: [full],
-      kind: 'TECH_CARD_MEDIA_KIND_MOODBOARD',
-      max: MOOD_MAX,
-      scopeLabel: 'board',
-    });
-    if (result.refusal) showMessage(result.refusal, 'error');
-    if (!result.accepted.length) return;
-    setPicked((prev) => [...prev, ...result.accepted]);
-    const next = [...result.next];
-    const fresh = next.pop() as BoardItem;
-    const at = next.findIndex((i) => isBoardRow(i) && i.mediaId === originalId);
-    next.splice(at < 0 ? next.length : at + 1, 0, fresh);
-    writeItems(next);
-    showMessage(done, 'success');
   }
 
   // ── кроп плитки (T01; 03.10, gate FX2) ──────────────────────────────────────────────────────
@@ -1153,8 +1125,8 @@ export function MoodBoard({
           {/* РЕДАКТОР КАРТИНКИ ДОСКИ (C-3) — тот же `VectorModal`, что открывает `edit` на плитке
               истории, на плите листа и на верстаке: один редактор, вызванный с четвёртого экрана.
               Монтируется только раскрытым: у модалки свои оконные слушатели клавиш. `slot` не
-              передаётся — доске некуда «поставить» результат, он входит строкой доски через
-              `placeEditedNextTo`. */}
+              передаётся — доске некуда «поставить» результат: с T59 он занимает строку оригинала
+              (`placeCropped` с рамкой во весь кадр). */}
           {editing && (
             <VectorModal
               open
@@ -1168,7 +1140,14 @@ export function MoodBoard({
                 // Медиа берётся ИЗ ОТВЕТА СЕРВЕРА, а не из того, что клиент только что загрузил:
                 // строку доски заводит `appendBoardPictures` по `common_MediaFull`.
                 const full = picture.media;
-                if (full) placeEditedNextTo(editing.mediaId, full);
+                /* T59 (owner: the edit replaces the picture everywhere it stood): the edit takes
+                   the original's row on the board — and in the input, with its role — the way a
+                   crop does (`placeCropped`). The edit covers the whole frame, so every callout
+                   moves onto it unchanged. The original stays in the library. */
+                if (full) {
+                  placeCropped(editing.mediaId, full, WHOLE_FRAME);
+                  showMessage('the edit took the original’s place on the board', 'success');
+                }
               }}
             />
           )}

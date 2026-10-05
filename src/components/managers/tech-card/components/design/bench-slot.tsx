@@ -20,7 +20,9 @@ import { batchCaption, pictureHandle } from './handles';
 import { mixedInputNote, provenanceLabel, readProvenance, slotProvenance } from './provenance';
 import type { MediaViewerItem } from 'ui/components/media-viewer';
 import { PictureTile } from './picture-tile';
+import { successorStands } from './generation/edit-chain';
 import { useEditChainDoors } from './generation/edit-chain-doors';
+import { rowOfPicture } from './generation/picture-slot';
 import { WorkbenchEditor } from './generation/propagating-editor';
 import { selectPickablePictures } from './visibility';
 import { forgetRemoval, rememberRemoval, useRemovals, type Removal } from './removal-undo';
@@ -249,6 +251,7 @@ export function pickableFlats(band: GetDesignBandResponse): common_DesignPicture
   return selectPickablePictures(all).filter(
     (p) =>
       !p.undoneAt &&
+      !successorStands(p, all) &&
       (p.compositeViews ?? []).length === 0 &&
       pictureRepresentation(band, p) === 'flat',
   );
@@ -841,19 +844,6 @@ function EmptyCell({
       }
     />
   );
-}
-
-/** The run or batch row a picture is filed in — where its edit chain lives (T28); itself alone. */
-function rowOfPicture(
-  band: GetDesignBandResponse,
-  picture: common_DesignPicture,
-): readonly common_DesignPicture[] {
-  const id = picture.id ?? 0;
-  for (const row of [...(band.runs ?? []), ...(band.batches ?? [])]) {
-    const pictures = row.pictures ?? [];
-    if (pictures.some((p) => (p.id ?? 0) === id)) return pictures;
-  }
-  return [picture];
 }
 
 export function BenchSlot(props: BenchSlotProps) {

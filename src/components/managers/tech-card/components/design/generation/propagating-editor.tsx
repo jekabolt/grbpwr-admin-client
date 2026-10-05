@@ -4,7 +4,8 @@ import type {
   common_DesignPicture,
 } from 'api/proto-http/admin';
 import { useCallback, useRef } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
+import { useSnackBarStore } from 'lib/stores/store';
+import { useFormContext, useWatch, type UseFormReturn } from 'react-hook-form';
 
 import type { TechCardFormData } from '../../schema';
 import { VectorModal } from '../modals';
@@ -12,6 +13,7 @@ import type { VectorReplace } from '../modals/vector-modal';
 import { isPictureHidden } from '../visibility';
 import { isCutOut } from './composite';
 import { isUndoneEdit, successorStands } from './edit-chain';
+import { rowOfPicture, slotLabelOf, slotOfPicture } from './picture-slot';
 
 /**
  * ═══ THE EDITOR WHOSE SAVE TAKES THE PICTURE'S PLACE — TWO HOSTS (04.10, owner item 28, T28) ════
@@ -127,17 +129,7 @@ const SHEET_FIELDS = ['technicalMedia', 'callouts'] as const;
  * `closedNow` is the same reading made at the moment of the call — the editor asks it right before
  * it writes an overwrite, long after the render that drew the question (`VectorReplace.closedNow`).
  */
-export function WorkbenchEditor({
-  band,
-  techCardId,
-  picture,
-  siblings,
-  slot = null,
-  slotLabel,
-  slotOf,
-  disabled,
-  onOpenChange,
-}: {
+type WorkbenchEditorProps = {
   band: GetDesignBandResponse;
   techCardId: number;
   picture: common_DesignPicture;
@@ -152,9 +144,79 @@ export function WorkbenchEditor({
   slotOf?: (band: GetDesignBandResponse, pictureId: number) => string | null;
   disabled?: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Called with the filed edit, after this editor has done its own carrying (T59). */
+  onFlattened?: (picture: common_DesignPicture) => void;
+};
+
+type SheetForm = UseFormReturn<TechCardFormData>;
+
+/**
+ * ═══ THE TECHNICAL SHEET FOLLOWS THE EDIT TOO (T59, 05.10) ══════════════════════════════════════
+ *
+ * Owner: «…должна обновлятся в воркбенче и на всех размеченных слотах где она была старая картинка».
+ * The server cannot move the sheet (it refuses the overwrite, `technical_sheet`: the sheet is the
+ * card form's, saved with the card), so the edit is filed beside — and HERE the card form's sheet
+ * row and every callout pinned to the original move onto the edit's media. The edit is drawn over
+ * the whole plate, so the callouts' fractions stand where they stood. Saved with the card, like
+ * every other sheet change. Returns whether anything moved.
+ */
+function carryOntoSheet(
+  form: SheetForm | null,
+  original: common_DesignPicture,
+  edit: common_DesignPicture,
+): boolean {
+  const from = original.media?.id ?? 0;
+  const to = edit.media?.id ?? 0;
+  if (!form || from <= 0 || to <= 0 || from === to || (edit.replacedBy ?? 0) > 0) return false;
+  const media = form.getValues('technicalMedia') ?? [];
+  if (!media.some((m) => (m.mediaId ?? 0) === from)) return false;
+  const present = media.some((m) => (m.mediaId ?? 0) === to);
+  form.setValue(
+    'technicalMedia',
+    present
+      ? media.filter((m) => (m.mediaId ?? 0) !== from)
+      : media.map((m) => ((m.mediaId ?? 0) === from ? { ...m, mediaId: to } : m)),
+    { shouldDirty: true },
+  );
+  const callouts = form.getValues('callouts') ?? [];
+  if (callouts.some((c) => (c.mediaId ?? 0) === from))
+    form.setValue(
+      'callouts',
+      callouts.map((c) => ((c.mediaId ?? 0) === from ? { ...c, mediaId: to } : c)),
+      { shouldDirty: true },
+    );
+  return true;
+}
+
+export function WorkbenchEditor(props: WorkbenchEditorProps) {
+  // A host outside the card form (none today) still edits — it just has no sheet to read or carry.
+  const form = useFormContext<TechCardFormData>() as SheetForm | null;
+  return form ? <WatchedEditor {...props} form={form} /> : <EditorOver {...props} form={null} />;
+}
+
+function WatchedEditor(props: WorkbenchEditorProps & { form: SheetForm }) {
+  const [technicalMedia, callouts] = useWatch({ control: props.form.control, name: SHEET_FIELDS });
+  return <EditorOver {...props} sheet={{ technicalMedia, callouts }} />;
+}
+
+function EditorOver({
+  band,
+  techCardId,
+  picture,
+  siblings,
+  slot = null,
+  slotLabel,
+  slotOf,
+  disabled,
+  onOpenChange,
+  onFlattened,
+  form,
+  sheet = null,
+}: WorkbenchEditorProps & {
+  form: SheetForm | null;
+  sheet?: Parameters<typeof overwriteClosed>[2];
 }) {
-  const form = useFormContext<TechCardFormData>();
-  const [technicalMedia, callouts] = useWatch({ control: form.control, name: SHEET_FIELDS });
+  const { showMessage } = useSnackBarStore();
   /** The picture and its row as of the last render — what `closedNow` judges. */
   const latest = useRef({ picture, siblings });
   latest.current = { picture, siblings };
@@ -163,7 +225,7 @@ export function WorkbenchEditor({
     return overwriteClosed(
       p,
       row ?? [p],
-      form.getValues() as Parameters<typeof overwriteClosed>[2],
+      (form?.getValues() ?? null) as Parameters<typeof overwriteClosed>[2],
     );
   }, [form]);
   return (
@@ -178,13 +240,54 @@ export function WorkbenchEditor({
         {
           pictureId: picture.id ?? 0,
           slotLabel,
-          closed: overwriteClosed(picture, siblings ?? [picture], { technicalMedia, callouts }),
+          closed: overwriteClosed(picture, siblings ?? [picture], sheet),
           closedNow,
           slotOf,
           direct: true,
         } satisfies VectorReplace
       }
       disabled={disabled}
+      onFlattened={(edit) => {
+        if (carryOntoSheet(form, latest.current.picture, edit))
+          showMessage(
+            'the edit took the original’s place on the technical sheet, callouts included — save the card to keep it',
+            'success',
+          );
+        onFlattened?.(edit);
+      }}
+    />
+  );
+}
+
+/**
+ * ═══ THE EDIT TAKES THE PICTURE'S PLACE FROM ANY TILE (T59, 05.10) ══════════════════════════════
+ *
+ * Owner, verbatim: «если мы ховерим картинку и жмем эдит то она должна обновлятся в воркбенче и на
+ * всех размеченных слотах где она была старая картинка до изменений остается только в медиа
+ * селекторе на бенче ее быть не должно». Every tile that offers `edit` over a band picture opens
+ * THIS editor: «save» overwrites (the server moves every slot holding the picture onto the edit and
+ * stamps it `replaced_by`), and where overwrite is closed the edit goes into the slot the picture
+ * stood in (and onto the sheet, `carryOntoSheet`). The row and the slot are read off the band.
+ */
+export function ReplacingEditor({
+  band,
+  picture,
+  siblings,
+  ...rest
+}: Omit<WorkbenchEditorProps, 'slot' | 'slotLabel' | 'slotOf'> & {
+  /** The slot's prose name when the host knows it better than the band does. */
+  slotLabel?: string | null;
+}) {
+  const at = slotOfPicture(band, picture.id ?? 0);
+  return (
+    <WorkbenchEditor
+      {...rest}
+      band={band}
+      picture={picture}
+      siblings={siblings ?? rowOfPicture(band, picture)}
+      slot={at ? { ref: at.ref, label: at.label, slotRev: at.rev } : null}
+      slotLabel={rest.slotLabel ?? at?.label ?? null}
+      slotOf={slotLabelOf}
     />
   );
 }

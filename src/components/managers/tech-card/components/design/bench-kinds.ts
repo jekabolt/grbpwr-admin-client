@@ -6,6 +6,7 @@ import type {
   common_DesignRun,
 } from 'api/proto-http/admin';
 
+import { standsOnBench } from './generation/edit-chain';
 import { isPictureHidden } from './visibility';
 
 /**
@@ -424,6 +425,9 @@ export function cardOutputRows(
     const pictureId = picture.id ?? 0;
     if (pictureId <= 0) continue;
     if (isPictureHidden(picture)) continue;
+    // T59: an original an edit replaced (and an undone edit) is not offered again by any list —
+    // the edit stands in its place; the old picture stays only in the media library.
+    if (!standsOnBench(picture)) continue;
 
     const runKind = (output.runKind ?? '').trim().toLowerCase();
     const mine = runKind
