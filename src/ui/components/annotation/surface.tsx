@@ -1963,7 +1963,8 @@ export function AnnotationSurface({
    * считается всегда. Ветка «жест идёт» не тронута: во время постановки не изолирует ничто.
    */
   const isolatedKey = drawing ? null : placing ? hoveredKey ?? null : hovered ?? hoveredKey ?? null;
-  const dim = (key: string) => isolatedKey !== null && isolatedKey !== key;
+  // Выбранная выноска не гаснет от наведения на чужую строку: её правят прямо сейчас.
+  const dim = (key: string) => isolatedKey !== null && isolatedKey !== key && key !== selected;
   const inv = 1 / (zoom ? scale || 1 : 1);
 
   /** Транзиентная геометрия фигуры во время перетаскивания — иначе линия «отстаёт» от руки. */

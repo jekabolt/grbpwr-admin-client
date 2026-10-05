@@ -80,7 +80,7 @@ export function detailInsetBox(
   const rw = Math.max(region?.w ?? 0, 4);
   const rh = Math.max(region?.h ?? 0, 4);
   // Потолок — чтобы вставка не закрыла собой плиту: длинная сторона не больше 60 % высоты кадра.
-  const cap = Math.max(72, Math.min(220, frame.h * 0.6));
+  const cap = Math.max(72, Math.min(220, frame.h * 0.6, frame.w * 0.6));
   const k = Math.min(1, cap / Math.max(rw * scale, rh * scale));
   const eff = scale * k;
   const w = Math.max(32, rw * eff);
