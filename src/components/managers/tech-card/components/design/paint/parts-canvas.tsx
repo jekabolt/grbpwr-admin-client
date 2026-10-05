@@ -14,6 +14,7 @@ import {
 import { ArtworkImage } from 'ui/components/annotation/insets';
 import { Button } from 'ui/components/button';
 import { Chip } from 'ui/components/chip';
+import { useRailScroll } from 'ui/components/focused-annotator';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
@@ -78,7 +79,6 @@ import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint'
 /** Sides share one height that fills the row, within these bounds. */
 const SIDE_MIN = 320;
 const SIDE_MAX = 640;
-const GAP = 8;
 const TOOLS: PaintTool[] = ['click', 'pen', 'erase'];
 const HOVER_ALPHA = 0.45;
 
@@ -918,7 +918,7 @@ function PaintSide({
 
   return (
     <div
-      className='flex shrink-0 flex-col gap-1'
+      className='flex shrink-0 snap-start flex-col gap-1'
       data-paint-side={view.view}
       data-paint-status={view.status}
       style={{ width: `min(100%, ${width}px)` }}
@@ -1190,7 +1190,10 @@ export function PartsCanvas({
     };
   };
 
-  const row = useRef<HTMLDivElement>(null);
+  // Владелец 05.10: стороны — циклическая карусель, не сетка. Одна лента (как рельса мудборда:
+  // снап по стороне, ‹ › в шапке заворачивают на обоих концах), рост сторон — от высоты, не от ширины.
+  const rail = useRailScroll(views.length);
+  const row = rail.ref;
   const block = useRef<HTMLDivElement>(null);
   const [rowWidth, setRowWidth] = useState(0);
   /** QW8 · the side shown alone, the block's whole width ('' = every side in a row). */
@@ -1209,11 +1212,11 @@ export function PartsCanvas({
   }, [views.length > 0]);
   if (views.length === 0) return null;
   const shownViews = focusView ? [focusView] : views;
-  const sumAspect = shownViews.reduce((a, v) => a + (v.aspect || 0.6), 0);
+  // In the carousel a side is as tall as SIDE_MAX allows while its widest one still fits the
+  // block; focused, the one side fills the width.
+  const widest = Math.max(...shownViews.map((v) => v.aspect || 0.6));
   const fit =
-    rowWidth > 0
-      ? (rowWidth - GAP * (shownViews.length - 1) - 2 * shownViews.length) / sumAspect
-      : SIDE_MIN;
+    rowWidth > 0 ? (rowWidth - 2) / (focusView ? sumAspectOf(shownViews) : widest) : SIDE_MIN;
   // A focused side takes the block's width, up to one and a half windows tall (a narrow side
   // view then stands centred: its full width would be metres of scroll).
   const focusMax =
@@ -1248,6 +1251,11 @@ export function PartsCanvas({
       session.armArtwork(armedArt || (artworks ?? [])[0]?.assetId || 0);
       return;
     }
+    if (!focusView && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      e.preventDefault();
+      rail.step(e.key === 'ArrowRight' ? 1 : -1);
+      return;
+    }
     const tool = ({ KeyV: 'click', KeyP: 'pen', KeyE: 'erase' } as const)[e.code as 'KeyV'];
     if (tool) {
       e.preventDefault();
@@ -1268,8 +1276,35 @@ export function PartsCanvas({
     }
   };
 
+  const arrows = !focusView && rail.overflowing && (
+    <>
+      <Button
+        type='button'
+        variant='secondary'
+        size='xs'
+        aria-label='previous side'
+        onClick={() => rail.step(-1)}
+      >
+        ‹
+      </Button>
+      <Button
+        type='button'
+        variant='secondary'
+        size='xs'
+        aria-label='next side'
+        onClick={() => rail.step(1)}
+      >
+        ›
+      </Button>
+      <Text size='micro' variant='label' component='span' aria-hidden>
+        │
+      </Text>
+    </>
+  );
+
   const tools = (
     <span className='flex items-center gap-1' data-paint-tools=''>
+      {arrows}
       {save === 'saving' || save === 'pending' ? (
         <Pill tone='mut'>saving</Pill>
       ) : save === 'unsaved' || save === 'error' ? (
@@ -1372,9 +1407,10 @@ export function PartsCanvas({
       </GroupLabel>
       <div
         ref={row}
+        aria-label='sides'
         className={cn(
-          'flex flex-wrap items-start gap-2',
-          focusView && 'justify-center',
+          'flex items-start gap-2',
+          focusView ? 'justify-center' : 'snap-x snap-mandatory overflow-x-auto overflow-y-hidden',
           disabled && 'pointer-events-none opacity-60',
         )}
       >
@@ -1417,4 +1453,9 @@ export function PartsCanvas({
       )}
     </div>
   );
+}
+
+/** The width the given sides take at height 1, side by side. */
+function sumAspectOf(views: PaintView[]): number {
+  return views.reduce((a, v) => a + (v.aspect || 0.6), 0);
 }

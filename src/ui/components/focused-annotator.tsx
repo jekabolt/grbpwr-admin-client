@@ -93,7 +93,7 @@ const RAIL_GAP = 8;
 // exist when they do anything) and steps by exactly one card, wrapping at both ends. The wrap is
 // what makes it read as a loop; cloning the views to get a truly seamless one would duplicate
 // media ids, and every pin, piece and "pinned to" select addresses an image BY id.
-function useRailScroll(itemCount: number) {
+export function useRailScroll(itemCount: number) {
   const ref = useRef<HTMLDivElement>(null);
   const [overflowing, setOverflowing] = useState(false);
 
