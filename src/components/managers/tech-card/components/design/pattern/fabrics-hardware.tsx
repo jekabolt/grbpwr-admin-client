@@ -5,6 +5,7 @@ import type {
   common_DesignRun,
   common_MediaFull,
 } from 'api/proto-http/admin';
+import { adminService } from 'api/api';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { PantonePicker } from 'components/managers/tech-card/components/pantone-picker';
@@ -117,6 +118,8 @@ export type FabricsHardwareProps = {
   slots: MaterialSlot[];
   /** Card LABELS rows by BOM line: a label slot seeds placement · fold · size from its row. */
   labelSeeds?: ReadonlyMap<number, LabelSeed>;
+  /** The composition label's logo (care label override): a label slot seeds it as its logo. */
+  labelLogo?: common_MediaFull;
   onGoStep: (step: StepId) => void;
   loading?: boolean;
 };
@@ -142,6 +145,7 @@ export function FabricsHardware({
   onColorwayChange,
   slots,
   labelSeeds = NO_LABEL_SEEDS,
+  labelLogo,
   onGoStep,
   loading,
 }: FabricsHardwareProps): JSX.Element {
@@ -171,6 +175,7 @@ export function FabricsHardware({
         colorway={colorways.find((c) => (c.colorwayId ?? 0) === colorwayId && colorwayId > 0)}
         slots={slots}
         labelSeeds={labelSeeds}
+        labelLogo={labelLogo}
         onGoStep={onGoStep}
       />
     </>
@@ -184,6 +189,7 @@ function MaterialBench({
   colorway,
   slots,
   labelSeeds,
+  labelLogo,
   onGoStep,
 }: {
   band: GetDesignBandResponse;
@@ -192,6 +198,7 @@ function MaterialBench({
   colorway?: common_AdminColorwayRef;
   slots: MaterialSlot[];
   labelSeeds: ReadonlyMap<number, LabelSeed>;
+  labelLogo?: common_MediaFull;
   onGoStep: (step: StepId) => void;
 }): JSX.Element {
   const { showMessage } = useSnackBarStore();
@@ -250,13 +257,19 @@ function MaterialBench({
   // Seed when a pair has no draft: bound asset → defaults (BOM words, colourway pantone).
   const seedOf = (slot: MaterialSlot): Spec => {
     const fabric = slot.family === 'fabric';
+    // A label's logo: the composition label's own, when it has one and it is a raster picture
+    // (an SVG/PDF cannot be sent to the image model; a raster logo can still be added by hand).
+    const logo =
+      labelLogo && (labelLogo.id ?? 0) > 0 && isLabelSlot(slot) && isRasterPicture(labelLogo)
+        ? [labelLogo]
+        : [];
     const asset = cwId > 0 ? byPair.get(pairKey(cwId, slot.bomItemId)) : undefined;
     if (asset) {
       const code = (asset.colourCode ?? '').trim();
       return {
         colourCode: code || (fabric ? ownPantone : ''),
         words: noteWords(asset),
-        pictures: [],
+        pictures: logo,
       };
     }
     if (fabric) return { colourCode: ownPantone, words: slot.detail, pictures: [] };
@@ -277,7 +290,7 @@ function MaterialBench({
           .map((w) => w.trim())
           .filter(Boolean)
           .join(', '),
-        pictures: [],
+        pictures: logo,
       };
     }
     const kind = kindLabel(slot.kind) ?? '';
@@ -796,6 +809,53 @@ function MaterialBench({
     wordsSaving,
   );
 
+  /* ─── `clean unused` (round 8 · C-m3): pictures a manual replace left on the shelf. Strict — the
+     server cascades a delete: hardware only, bound to no pair, placed on no flat, parent of no
+     asset, worn by no colourway, not the previous picture of a live undo, not being cut. A band
+     without placements answers nothing, so the door is not drawn. ─── */
+  const shelfCount = (band.assets ?? []).length;
+  const held = useMemo(() => new Set([...undos.values()].map((e) => e.prevId)), [undos]);
+  const unusedIds = useMemo(
+    () => unusedHardwareIds(band, held, cutting, Date.now()),
+    [band, held, cutting],
+  );
+  // A run in flight may land on (or derive from) a shelf picture: the door waits for it.
+  const cardBusy = (band.runs ?? []).some(isRunLive) || launching.size > 0;
+  const cleanable = !disabled && capable && speaks && unusedIds.length > 0;
+  const cleanLive = cleanable && !cardBusy;
+  const [confirmClean, setConfirmClean] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
+  const cleanYesRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!confirmClean) return;
+    cleanYesRef.current?.focus();
+    const t = setTimeout(() => setConfirmClean(false), 5_000);
+    return () => clearTimeout(t);
+  }, [confirmClean]);
+  const cleanUnused = async () => {
+    setConfirmClean(false);
+    if (cardBusy) return;
+    setCleaning(true);
+    try {
+      // The band on screen may be stale and a delete cascades: re-read the card from the server
+      // and recompute the strict predicate on that copy; a live run there stops the clean.
+      const fresh = await adminService.GetDesignBand({ techCardId, benchColorwayId: 0 });
+      if ((fresh.runs ?? []).some(isRunLive)) {
+        showMessage('generating — clean after it lands', 'error');
+        return;
+      }
+      const ids = unusedHardwareIds(fresh, held, cutting, Date.now());
+      for (const assetId of ids) {
+        await adminService.DeleteDesignAsset({ techCardId, assetId });
+      }
+    } catch (error) {
+      showMessage((error as Error)?.message || 'the change did not go through', 'error');
+    } finally {
+      await writes.invalidate();
+      setCleaning(false);
+    }
+  };
+
   /* ─── `+ artwork` (owner 04.10): ONE click births the DECORATION line and selects it ─── */
   const addGate: Gate = !form
     ? { ok: false, reason: 'the card form is not on this screen' }
@@ -959,6 +1019,81 @@ function MaterialBench({
       <Text size='micro' variant='label' component='span' data-fh-filled=''>
         {dressed(slots)} of {slots.length} filled
       </Text>
+      {shelfCount >= SHELF_SHOWN_AT && (
+        <>
+          {dot}
+          <Text size='micro' variant='label' component='span' data-fh-shelf={shelfCount}>
+            {shelfCount} / {ASSETS_PER_CARD_MAX}
+          </Text>
+          {cleaning ? (
+            <>
+              {dot}
+              <Text size='micro' variant='label' component='span' data-fh-cleaning=''>
+                deleting…
+              </Text>
+            </>
+          ) : cleanLive && confirmClean ? (
+            <span
+              className='flex items-center gap-1.5'
+              data-fh-clean-confirm={unusedIds.length}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setConfirmClean(false);
+              }}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+                  setConfirmClean(false);
+              }}
+            >
+              {dot}
+              <Text size='micro' component='span' className='uppercase'>
+                delete {unusedIds.length} unused picture{unusedIds.length === 1 ? '' : 's'}?
+              </Text>
+              <Button
+                ref={cleanYesRef}
+                variant='underline'
+                size='xs'
+                onClick={() => void cleanUnused()}
+                data-fh-clean-yes=''
+              >
+                yes
+              </Button>
+              {dot}
+              <Button
+                variant='underline'
+                size='xs'
+                onClick={() => setConfirmClean(false)}
+                data-fh-clean-no=''
+              >
+                no
+              </Button>
+            </span>
+          ) : cleanable && cardBusy ? (
+            <>
+              {dot}
+              <span data-fh-clean-inert={unusedIds.length}>
+                <InertDoor
+                  label={`clean unused · ${unusedIds.length}`}
+                  reason={CLEAN_BUSY_REASON}
+                  variant='underline'
+                />
+              </span>
+            </>
+          ) : cleanable ? (
+            <>
+              {dot}
+              <Button
+                variant='underline'
+                size='xs'
+                title='hardware pictures in no cell, on no flat'
+                onClick={() => setConfirmClean(true)}
+                data-fh-clean={unusedIds.length}
+              >
+                clean unused · {unusedIds.length}
+              </Button>
+            </>
+          ) : null}
+        </>
+      )}
       {liveHere.length > 0 && (
         <>
           {dot}
@@ -1165,20 +1300,25 @@ function MaterialBench({
                       generate([slot]);
                     }}
                     onClear={() => clear(slot)}
+                    undo={
+                      canUndo ? (
+                        <button
+                          type='button'
+                          disabled={saving.has(key)}
+                          title='restore the previous picture'
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            undo(slot);
+                          }}
+                          data-fh-undo={slot.bomItemId}
+                          className='ml-auto shrink-0 cursor-pointer text-nano uppercase tracking-label text-labelColor underline hover:text-textColor disabled:cursor-wait focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+                        >
+                          undo
+                        </button>
+                      ) : null
+                    }
                   />
                 </IntakeCell>
-                {canUndo && (
-                  <Button
-                    variant='underline'
-                    size='xs'
-                    disabled={saving.has(key)}
-                    title='restore the previous picture'
-                    onClick={() => undo(slot)}
-                    data-fh-undo={slot.bomItemId}
-                  >
-                    undo
-                  </Button>
-                )}
               </div>
             );
           })}
@@ -1380,6 +1520,9 @@ function MaterialBench({
 
 type UndoEntry = { prevId: number; setTo: number };
 
+/** The shelf count shows in the MATERIALS header from here on (of `ASSETS_PER_CARD_MAX`). */
+const SHELF_SHOWN_AT = 100;
+
 /** A slot's spec: colour (Pantone code, '' = none), what it is made of, its input pictures. */
 type Spec = {
   colourCode: string;
@@ -1420,11 +1563,11 @@ const toggleWord = (words: string, word: string): string =>
 
 const INPUT_CELL = 'w-24 shrink-0';
 
-/** Empty caption line under a picture: keeps it the colour tile's height. */
-function InputCaption(): JSX.Element {
+/** Caption line under a picture (empty by default): keeps it the colour tile's height. */
+function InputCaption({ text }: { text?: string }): JSX.Element {
   return (
     <Text size='micro' variant='label' component='span' className='block h-4 w-full truncate'>
-      {' '}
+      {text || ' '}
     </Text>
   );
 }
@@ -1461,7 +1604,15 @@ function SpecPanel({
   const withRefs = label || artwork;
   const pictures = spec.pictures;
   const room = Math.max(0, max - pictures.length);
-  const add = (incoming: common_MediaFull[]) => {
+  const add = (picked: common_MediaFull[]) => {
+    // Label logo / artwork photo: raster only — the image model is sent this picture.
+    const incoming = label || artwork ? picked.filter(isRasterPicture) : picked;
+    if (incoming.length < picked.length) {
+      showMessage(
+        label ? NOT_RASTER_MESSAGE : NOT_RASTER_MESSAGE.replace('the logo', 'the photo'),
+        'error',
+      );
+    }
     const have = new Set(pictures.map((m) => m.id ?? 0));
     const fresh = incoming.filter((m) => (m.id ?? 0) > 0 && !have.has(m.id ?? 0));
     const kept = fresh.slice(0, room);
@@ -1521,7 +1672,7 @@ function SpecPanel({
                 onChange({ ...spec, pictures: pictures.filter((_, at) => at !== index) })
               }
             />
-            <InputCaption />
+            <InputCaption text={label ? 'logo' : undefined} />
           </div>
         ))}
         {room > 0 && (
@@ -1765,6 +1916,7 @@ function SlotCell({
   onGenerate,
   onClear,
   onUpload,
+  undo,
 }: {
   slot: MaterialSlot;
   asset?: common_DesignAsset;
@@ -1786,6 +1938,8 @@ function SlotCell({
   onClear: () => void;
   /** Opens the library dialog for THIS cell (empty face's `upload` word). */
   onUpload: () => void;
+  /** The pair's `undo` word: inside the frame, at the cap's right end. */
+  undo?: React.ReactNode;
 }): JSX.Element {
   const cap = (
     <SlotCap
@@ -1793,13 +1947,8 @@ function SlotCell({
       title={[slot.name, slot.purposeLabel, slot.detail].filter(Boolean).join(' · ')}
       strong={selected}
       quiet
-      trailing={
-        slot.purposeLabel ? (
-          <Text size='nano' variant='label' component='span' className='ml-auto min-w-0 truncate'>
-            {slot.purposeLabel}
-          </Text>
-        ) : null
-      }
+      wrap
+      trailing={undo ?? null}
     />
   );
 
@@ -2398,3 +2547,73 @@ function useArtworkCutout(
 function cutoutRequestId(techCardId: number, assetId: number, mediaId: number): string {
   return `cutout-${techCardId.toString(36)}-${assetId.toString(36)}-${mediaId.toString(36)}`;
 }
+
+/** `clean unused` waits while a run of the card is live or on its way. */
+const CLEAN_BUSY_REASON = 'generating — clean after it lands';
+/** A picture this young may still be someone's undo or a run's landing: `clean unused` keeps it. */
+const CLEAN_KEEP_RECENT_MS = 30 * 60_000;
+
+const stampMs = (t: string | undefined): number => {
+  const ms = t ? Date.parse(t) : NaN;
+  return Number.isFinite(ms) ? ms : 0;
+};
+
+/**
+ * `clean unused` (round 8 · C-m3): pictures a manual replace left on the shelf. Strict — the
+ * server cascades a delete: hardware only, bound to no pair, placed on no flat, parent of no
+ * asset, worn by no colourway, not the previous picture of a live undo, not being cut, and not
+ * created or updated in the last 30 minutes. A band without placements answers nothing.
+ */
+function unusedHardwareIds(
+  band: GetDesignBandResponse,
+  held: ReadonlySet<number>,
+  cutting: ReadonlySet<number>,
+  now: number,
+): number[] {
+  if (band.assetPlacements === undefined || band.assetBindings === undefined) return [];
+  const bound = new Set(band.assetBindings.map((b) => wireInt(b.assetId)));
+  const placed = new Set(band.assetPlacements.map((p) => wireInt(p.assetId)));
+  const parents = new Set((band.assets ?? []).map((a) => wireInt(a.derivedFromAssetId)));
+  return (band.assets ?? [])
+    .filter((a) => {
+      const id = wireInt(a.id);
+      const touched = Math.max(stampMs(a.createdAt), stampMs(a.updatedAt));
+      return (
+        id > 0 &&
+        (a.kind ?? '') === ASSET_HARDWARE &&
+        wireInt(a.colorwayId) === 0 &&
+        !bound.has(id) &&
+        !placed.has(id) &&
+        !parents.has(id) &&
+        !held.has(id) &&
+        !cutting.has(id) &&
+        now - touched >= CLEAN_KEEP_RECENT_MS
+      );
+    })
+    .map((a) => wireInt(a.id));
+}
+
+/**
+ * The image model takes raster pictures only: PNG, JPG/JPEG, WEBP — read off the full-size URL
+ * (a `data:` mime or the path's extension). SVG, PDF and anything unknown are not raster.
+ */
+export function isRasterPicture(m: common_MediaFull | undefined): boolean {
+  const url = (
+    m?.media?.fullSize?.mediaUrl ||
+    m?.media?.compressed?.mediaUrl ||
+    m?.media?.thumbnail?.mediaUrl ||
+    ''
+  ).trim();
+  if (!url) return false;
+  const data = /^data:([^;,]+)/i.exec(url);
+  if (data) return /^image\/(png|jpe?g|webp)$/i.test(data[1]);
+  let path = url;
+  try {
+    path = new URL(url, 'http://x').pathname;
+  } catch {
+    path = url.split(/[?#]/)[0];
+  }
+  return /\.(png|jpe?g|webp)$/i.test(path);
+}
+
+const NOT_RASTER_MESSAGE = 'the logo must be PNG/JPG/WEBP — SVG cannot be sent to the image model';

@@ -3288,6 +3288,7 @@ export function TechCardForm({
               <StudioTab
                 techCardId={numId}
                 disabled={frozen}
+                labelMedia={techCard?.resolvedLabelMedia}
                 cardDetails={cardDetails}
                 constructionAspects={<DetailsEditor techCard={techCard} />}
                 /* ОДИН ПИСАТЕЛЬ АДРЕСА НА ВСЮ СТРАНИЦУ. Студия держала СВОЮ копию этой записи

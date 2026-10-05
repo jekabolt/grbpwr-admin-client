@@ -211,11 +211,24 @@ export function insideQuad(p: Pt, q: Quad): boolean {
   return hit;
 }
 
-/** The rotation handle: `off` px outward from the middle of the top edge (TL→TR). */
-export function rotationHandle(q: Quad, off: number): { from: Pt; at: Pt } {
-  const from = { x: (q[0].x + q[1].x) / 2, y: (q[0].y + q[1].y) / 2 };
-  const ex = q[1].x - q[0].x;
-  const ey = q[1].y - q[0].y;
+/**
+ * The rotation handle: `off` px outward from the middle of the top edge (TL→TR). Given the frame
+ * (`w` × `h`), a handle that would leave it (a box at the top of the flat) moves below the box,
+ * outward from the bottom edge (BR→BL) — the pointer is held inside the frame, so it must be too.
+ */
+export function rotationHandle(q: Quad, off: number, w?: number, h?: number): { from: Pt; at: Pt } {
+  const top = handleOff(q, q[0], q[1], off);
+  if (w === undefined || h === undefined) return top;
+  const inFrame = (p: Pt) => p.x >= 0 && p.x <= w && p.y >= 0 && p.y <= h;
+  if (inFrame(top.at)) return top;
+  const bottom = handleOff(q, q[2], q[3], off);
+  return inFrame(bottom.at) ? bottom : top;
+}
+
+function handleOff(q: Quad, a: Pt, b: Pt, off: number): { from: Pt; at: Pt } {
+  const from = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const ex = b.x - a.x;
+  const ey = b.y - a.y;
   const len = Math.hypot(ex, ey) || 1;
   let nx = ey / len;
   let ny = -ex / len;
