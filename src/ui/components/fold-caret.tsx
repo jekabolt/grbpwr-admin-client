@@ -7,7 +7,10 @@ import { cn } from 'lib/utility';
  * одинаковая». Every toggle that folds or unfolds something carries this caret and nothing else:
  * pointing DOWN while the thing is folded (there is more below), turned 180° to point UP while it
  * is open (fold it back). The chevron is the one `ui/icons/arrow` draws for a folding `Section`
- * (8×4, 1.33 stroke, round ends), here in a tight 10px box so it sits inside a micro word. One size,
+ * (8×4, 1.33 stroke, round ends), here in a tight 10px box so it sits inside a micro word.
+ * T60 (05.10, «кривая стрелочка»): drawn at 7px, the glyph centred in its box, and seated on the
+ * baseline — a 7px box on the baseline centres on the CAPS of a micro word (cap ≈ 0.7em); in a flex
+ * row the row's `items-center` does it. One size,
  * one stroke, a 150ms turn, no turn under reduced motion. The
  * stroke is `currentColor`, so the caret takes the word of its door (grey door, grey caret; hover
  * darkens both together).
@@ -34,20 +37,20 @@ export function FoldCaret({
       aria-hidden
       focusable='false'
       viewBox='0 0 10 10'
-      width={10}
-      height={10}
+      width={7}
+      height={7}
       data-fold-caret={open === 'details' ? 'details' : open ? 'open' : 'folded'}
       className={cn(
-        'ml-1 inline-block shrink-0 align-middle transition-transform duration-150 ease-out motion-reduce:transition-none',
+        'ml-1 inline-block shrink-0 align-baseline transition-transform duration-150 ease-out motion-reduce:transition-none',
         open === 'details' ? 'group-open:rotate-180' : open && 'rotate-180',
         className,
       )}
     >
       <path
-        d='M1 3.5 5 7.5 9 3.5'
+        d='M1 3 5 7 9 3'
         fill='none'
         stroke='currentColor'
-        strokeWidth='1.33333'
+        strokeWidth='1.6'
         strokeLinecap='round'
         strokeLinejoin='round'
       />
