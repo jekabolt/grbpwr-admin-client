@@ -1,5 +1,5 @@
 import type { DesignQuizAnswer, DesignQuizQuestion } from 'api/proto-http/admin';
-import { isPaletteKey, isSeamKind, SEAM_LABEL } from './seam-icons';
+import { isEdgeKind, isPaletteKey, isSeamKind, SEAM_LABEL } from './seam-icons';
 
 /**
  * ═══ КВИЗ ДОСКИ — ЧИСТАЯ МОДЕЛЬ (волна 04.10, 20-DESIGN §1.5, §6, O2) ═════════════════════════
@@ -32,12 +32,13 @@ export function answerText(a: DesignQuizAnswer): string {
 /**
  * Деталь словами для строк решений — как сервер (`designQuizPartLabel`): `hw_`/`lbl_` сняты, вид
  * бирки назван биркой (`lbl_brand` → `brand label`, `lbl_hang_tag` → `hang tag`), шов — `seam: <name>`
- * (`sm_french` → `seam: French seam`), `col_palette` → `colourways` (70-SEAMS).
+ * (`sm_french` → `seam: French seam`), открытый край — `edge: <name>` (90-EDGES),
+ * `col_palette` → `colourways` (70-SEAMS).
  */
 export function partLabel(part?: string | null): string {
   const p = clean(part);
   if (isPaletteKey(p)) return 'colourways';
-  if (isSeamKind(p)) return `seam: ${SEAM_LABEL[p]}`;
+  if (isSeamKind(p)) return `${isEdgeKind(p) ? 'edge' : 'seam'}: ${SEAM_LABEL[p]}`;
   if (p.startsWith('lbl_')) {
     const k = p.slice(4).replace(/_/g, ' ');
     return k === 'hang tag' || k === 'patch' ? k : `${k} label`;

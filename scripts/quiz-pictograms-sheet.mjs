@@ -58,7 +58,7 @@ if (families !== '30' || shapes !== '30') {
 }
 if (hardware !== '20') throw new Error(`expected 20 hardware icons, got ${hardware}`);
 if (labels !== '6') throw new Error(`expected 6 label icons, got ${labels}`);
-if (seams !== '18') throw new Error(`expected 18 seam icons, got ${seams}`);
+if (seams !== '26') throw new Error(`expected 26 seam and edge icons, got ${seams}`);
 if (palettes !== '1') throw new Error(`expected 1 palette icon, got ${palettes}`);
 
 writeFileSync(svgPath, svg);

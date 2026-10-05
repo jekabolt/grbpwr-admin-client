@@ -2,7 +2,21 @@ import type { JSX } from 'react';
 import type { common_TechCardSeamClass } from 'api/proto-http/admin';
 import { findPantone } from 'components/managers/tech-card/components/pantone-swatches';
 
-/** Seam and edge-finish part keys shared with the design-quiz resolver (70-SEAMS). */
+/** Open-edge finish keys added by 90-EDGES; their decision lines use `edge:` instead of `seam:`. */
+export const EDGE_KINDS = [
+  'sm_hem_rolled',
+  'sm_piping',
+  'sm_rib_band',
+  'sm_self_band',
+  'sm_casing_elastic',
+  'sm_casing_drawcord',
+  'sm_edge_overlocked',
+  'sm_hem_lettuce',
+] as const;
+
+export type EdgeKind = (typeof EDGE_KINDS)[number];
+
+/** Seam and edge-finish part keys shared with the design-quiz resolver (70-SEAMS, 90-EDGES). */
 export const SEAM_KINDS = [
   'sm_plain_open',
   'sm_plain_overlock',
@@ -22,6 +36,7 @@ export const SEAM_KINDS = [
   'sm_hem_raw',
   'sm_hem_bound',
   'sm_hem_faced',
+  ...EDGE_KINDS,
 ] as const;
 
 export type SeamKind = (typeof SEAM_KINDS)[number];
@@ -45,10 +60,22 @@ export const SEAM_LABEL: Record<SeamKind, string> = {
   sm_hem_raw: 'raw edge',
   sm_hem_bound: 'bound edge (binding)',
   sm_hem_faced: 'faced edge',
+  sm_hem_rolled: 'rolled hem (baby hem)',
+  sm_piping: 'piped edge (piping)',
+  sm_rib_band: 'rib band',
+  sm_self_band: 'self-fabric band',
+  sm_casing_elastic: 'elastic casing',
+  sm_casing_drawcord: 'drawcord casing',
+  sm_edge_overlocked: 'overlocked edge',
+  sm_hem_lettuce: 'lettuce edge',
 };
 
 export function isSeamKind(value: string): value is SeamKind {
   return (SEAM_KINDS as readonly string[]).includes(value);
+}
+
+export function isEdgeKind(value: string): value is EdgeKind {
+  return (EDGE_KINDS as readonly string[]).includes(value);
 }
 
 /** Backend `designQuizSingular`: "edges" → "edge", "patches" → "patch"; short or non-s words stay. */
@@ -104,6 +131,17 @@ const SEAM_ALIASES: ReadonlyArray<readonly [SeamKind, readonly string[]]> = [
     ],
   ],
   ['sm_hem_faced', ['faced', 'facing', 'understitched']],
+  ['sm_hem_rolled', ['rolled hem', 'baby hem', 'narrow hem', 'pin hem', 'rolled edge']],
+  ['sm_piping', ['piping', 'piped', 'piped edge', 'cord piping']],
+  ['sm_rib_band', ['rib', 'rib band', 'ribbed band', 'rib trim', 'rib cuff', 'ribbing']],
+  ['sm_self_band', ['self band', 'self-fabric band', 'neckband', 'fabric band', 'band finish']],
+  ['sm_casing_elastic', ['elastic casing', 'elasticated', 'elastic channel', 'elastic waist']],
+  ['sm_casing_drawcord', ['drawcord casing', 'drawstring channel', 'drawcord channel', 'tunnel']],
+  [
+    'sm_edge_overlocked',
+    ['overlocked edge', 'serged edge', 'merrow edge', 'overlock edge', 'overlocked hem'],
+  ],
+  ['sm_hem_lettuce', ['lettuce', 'lettuce edge', 'lettuce hem']],
 ];
 
 /** Backend `designQuizSeamAliases`: the "seam allowance" blocker, then longest first by WORD count. */
@@ -149,6 +187,14 @@ const SEAM_CLASS: Record<SeamKind, common_TechCardSeamClass> = {
   sm_hem_raw: 'TECH_CARD_SEAM_CLASS_EF_HEM_RAW',
   sm_hem_bound: 'TECH_CARD_SEAM_CLASS_BS_BOUND',
   sm_hem_faced: 'TECH_CARD_SEAM_CLASS_EF_FACED',
+  sm_hem_rolled: 'TECH_CARD_SEAM_CLASS_EF_HEM_TURNED',
+  sm_piping: 'TECH_CARD_SEAM_CLASS_BS_BOUND',
+  sm_rib_band: 'TECH_CARD_SEAM_CLASS_BS_BOUND',
+  sm_self_band: 'TECH_CARD_SEAM_CLASS_BS_BOUND',
+  sm_casing_elastic: 'TECH_CARD_SEAM_CLASS_EF_HEM_TURNED',
+  sm_casing_drawcord: 'TECH_CARD_SEAM_CLASS_EF_HEM_TURNED',
+  sm_edge_overlocked: 'TECH_CARD_SEAM_CLASS_EF_HEM_RAW',
+  sm_hem_lettuce: 'TECH_CARD_SEAM_CLASS_EF_HEM_RAW',
 };
 
 export function seamClassOf(kind: SeamKind): common_TechCardSeamClass {
@@ -376,6 +422,20 @@ function Bar({
   return <rect x={x} y={y} width={width} height={height} rx={1} fill='currentColor' />;
 }
 
+function Cord({ x, y, radius = 7 }: { x: number; y: number; radius?: number }): JSX.Element {
+  return (
+    <circle
+      cx={x}
+      cy={y}
+      r={radius}
+      fill='currentColor'
+      fillOpacity={0.25}
+      stroke='currentColor'
+      strokeWidth={3}
+    />
+  );
+}
+
 function Thread({ d }: { d: string }): JSX.Element {
   return <path {...threadStyle} d={d} />;
 }
@@ -551,6 +611,70 @@ function SeamGlyph({ kind }: { kind: SeamKind }): JSX.Element {
           <Ply1 d='M4 18 H90 Q96 18 96 24 Q96 30 90 30 H52' />
           <Ply2 d='M52 30 H38' />
           <NeedleV x={80} y1={24} y2={36} />
+        </>
+      );
+    case 'sm_hem_rolled':
+      return (
+        <>
+          <Ply1 d='M4 18 H88 Q98 18 98 28 Q98 38 88 38 H76 Q68 38 68 30 Q68 22 76 22 H86 Q92 22 92 28 Q92 34 86 34 H78' />
+          <NeedleV x={80} y1={10} y2={46} />
+        </>
+      );
+    case 'sm_piping':
+      return (
+        <>
+          <Ply1 d='M4 18 H84 Q98 18 98 30 Q98 42 84 42 H52' />
+          <Ply2 d='M52 36 H82 Q90 36 90 30 Q90 24 82 24 H70' />
+          <Cord x={90} y={30} radius={6} />
+          <NeedleV x={70} y1={10} y2={50} />
+        </>
+      );
+    case 'sm_rib_band':
+      return (
+        <>
+          <Ply1 d='M4 20 H56 Q60 20 60 24 V54' />
+          <Ply2 d='M74 54 V22 Q74 14 82 14 H108 Q116 14 116 22 Q116 30 108 30 H86 Q78 30 78 38 V54' />
+          <NeedleH y={38} x1={52} x2={84} />
+          <Overlock x={69} y={54} dir='up' amp={7} step={6} teeth={2} />
+        </>
+      );
+    case 'sm_self_band':
+      return (
+        <>
+          <Ply1 d='M4 18 H56 Q62 18 62 24 V36 Q62 42 56 42 H30' />
+          <Ply2 d='M116 14 H78 Q70 14 70 22 V38 Q70 46 78 46 H104' />
+          <NeedleH y={30} x1={54} x2={78} />
+          <NeedleV x={88} y1={8} y2={52} />
+        </>
+      );
+    case 'sm_casing_elastic':
+      return (
+        <>
+          <Ply1 d='M4 16 H92 Q100 16 100 24 V40 Q100 48 92 48 H42' />
+          <Bar x={60} y={27} width={28} height={10} />
+          <NeedleV x={50} y1={8} y2={54} />
+        </>
+      );
+    case 'sm_casing_drawcord':
+      return (
+        <>
+          <Ply1 d='M4 16 H92 Q100 16 100 24 V40 Q100 48 92 48 H42' />
+          <Cord x={76} y={32} />
+          <NeedleV x={50} y1={8} y2={54} />
+        </>
+      );
+    case 'sm_edge_overlocked':
+      return (
+        <>
+          <Ply1 d='M4 20 H88' />
+          <Overlock x={88} y={20} dir='left' amp={8} step={7} teeth={3} />
+        </>
+      );
+    case 'sm_hem_lettuce':
+      return (
+        <>
+          <Ply1 d='M4 20 H68 Q74 8 80 20 Q86 32 92 20 Q98 8 106 20' />
+          <Overlock x={106} y={20} dir='left' amp={6} step={5} teeth={2} />
         </>
       );
   }

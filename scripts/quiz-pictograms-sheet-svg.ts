@@ -31,6 +31,7 @@ import {
   type LabelKind,
 } from '../src/components/managers/tech-card/components/design/hardware-icons';
 import {
+  EDGE_KINDS,
   PaletteIcon,
   SEAM_KINDS,
   SEAM_LABEL,
@@ -41,6 +42,7 @@ import {
   swatchOf,
   type SeamKind,
 } from '../src/components/managers/tech-card/components/design/seam-icons';
+import { partLabel } from '../src/components/managers/tech-card/components/design/quiz-model';
 
 const familyCases: Array<[FamilyInput, GarmentFamily | '']> = [
   [{ top: 'outerwear', sub: 'coats' }, 'coat'],
@@ -117,6 +119,14 @@ const seamCases: Array<[string, SeamKind | null]> = [
   ['Hong Kong finish (bias-bound edges)', 'sm_hong_kong'],
   ['plain seam overlocked together', 'sm_plain_overlock'],
   ['bound neckline', 'sm_hem_bound'],
+  ['rolled edge', 'sm_hem_rolled'],
+  ['cord piping', 'sm_piping'],
+  ['ribbing', 'sm_rib_band'],
+  ['band finish', 'sm_self_band'],
+  ['elastic waist', 'sm_casing_elastic'],
+  ['tunnel', 'sm_casing_drawcord'],
+  ['merrow edge', 'sm_edge_overlocked'],
+  ['lettuce hem', 'sm_hem_lettuce'],
   ['seam allowance 1 cm', null],
   ['corduroy', null],
 ];
@@ -131,6 +141,11 @@ if (seamClassOf('sm_french') !== 'TECH_CARD_SEAM_CLASS_SS_FRENCH') {
 }
 if (seamClassOf('sm_bonded') !== 'TECH_CARD_SEAM_CLASS_OTHER') {
   throw new Error('seamClassOf(sm_bonded) did not return OTHER');
+}
+for (const kind of EDGE_KINDS) {
+  if (partLabel(kind) !== `edge: ${SEAM_LABEL[kind]}`) {
+    throw new Error(`partLabel(${kind}) did not use the edge prefix`);
+  }
 }
 if (!isPaletteKey('col_palette') || isPaletteKey('palette')) {
   throw new Error('isPaletteKey did not accept only col_palette');
@@ -291,16 +306,17 @@ function seamRow(y: number, rowWidth: number): string[] {
 }
 
 const SEAM_GRID_COLUMNS = 6;
+const seamGridRows = Math.ceil(SEAM_KINDS.length / SEAM_GRID_COLUMNS);
 const seamGridWidth = LABEL_WIDTH + SEAM_GRID_COLUMNS * SEAM_CELL_WIDTH;
-const seamGridHeight = Math.ceil(SEAM_KINDS.length / SEAM_GRID_COLUMNS) * SEAM_ROW_HEIGHT;
+const seamGridHeight = seamGridRows * SEAM_ROW_HEIGHT;
 
 function seamGrid(): string[] {
   const grid: string[] = [];
-  for (let row = 0; row < Math.ceil(SEAM_KINDS.length / SEAM_GRID_COLUMNS); row++) {
+  for (let row = 0; row < seamGridRows; row++) {
     const y = row * SEAM_ROW_HEIGHT;
     grid.push(
       `<rect x="0" y="${y}" width="${seamGridWidth}" height="${SEAM_ROW_HEIGHT}" fill="#fff" stroke="#ccc"/>`,
-      `<text class="family" x="8" y="${y + 82}">seams ${row + 1}/3</text>`,
+      `<text class="family" x="8" y="${y + 82}">seams/edges ${row + 1}/${seamGridRows}</text>`,
     );
   }
   SEAM_KINDS.forEach((kind, index) => {

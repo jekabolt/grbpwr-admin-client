@@ -717,6 +717,14 @@ const SEAM_STITCH_CLASSES: Record<SeamKind, readonly string[]> = {
   sm_hem_raw: [],
   sm_hem_bound: ['301'],
   sm_hem_faced: ['301'],
+  sm_hem_rolled: ['301'],
+  sm_piping: ['301'],
+  sm_rib_band: ['514', '406'],
+  sm_self_band: ['514'],
+  sm_casing_elastic: ['301'],
+  sm_casing_drawcord: ['301'],
+  sm_edge_overlocked: ['504'],
+  sm_hem_lettuce: ['504'],
 };
 
 /** Style B for the 64×96 part slot: existing ISO 4915 strip(s), then the Style A section. */
