@@ -257,8 +257,12 @@ function MaterialBench({
   // Seed when a pair has no draft: bound asset → defaults (BOM words, colourway pantone).
   const seedOf = (slot: MaterialSlot): Spec => {
     const fabric = slot.family === 'fabric';
-    // A label's logo: the composition label's own, when it has one.
-    const logo = labelLogo && (labelLogo.id ?? 0) > 0 && isLabelSlot(slot) ? [labelLogo] : [];
+    // A label's logo: the composition label's own, when it has one and it is a raster picture
+    // (an SVG/PDF cannot be sent to the image model; a raster logo can still be added by hand).
+    const logo =
+      labelLogo && (labelLogo.id ?? 0) > 0 && isLabelSlot(slot) && isRasterPicture(labelLogo)
+        ? [labelLogo]
+        : [];
     const asset = cwId > 0 ? byPair.get(pairKey(cwId, slot.bomItemId)) : undefined;
     if (asset) {
       const code = (asset.colourCode ?? '').trim();
@@ -810,29 +814,15 @@ function MaterialBench({
      asset, worn by no colourway, not the previous picture of a live undo, not being cut. A band
      without placements answers nothing, so the door is not drawn. ─── */
   const shelfCount = (band.assets ?? []).length;
-  const unusedIds = useMemo(() => {
-    if (band.assetPlacements === undefined || band.assetBindings === undefined) return [];
-    const bound = new Set(band.assetBindings.map((b) => wireInt(b.assetId)));
-    const placed = new Set(band.assetPlacements.map((p) => wireInt(p.assetId)));
-    const parents = new Set((band.assets ?? []).map((a) => wireInt(a.derivedFromAssetId)));
-    const held = new Set([...undos.values()].map((e) => e.prevId));
-    return (band.assets ?? [])
-      .filter((a) => {
-        const id = wireInt(a.id);
-        return (
-          id > 0 &&
-          (a.kind ?? '') === ASSET_HARDWARE &&
-          wireInt(a.colorwayId) === 0 &&
-          !bound.has(id) &&
-          !placed.has(id) &&
-          !parents.has(id) &&
-          !held.has(id) &&
-          !cutting.has(id)
-        );
-      })
-      .map((a) => wireInt(a.id));
-  }, [band, undos, cutting]);
+  const held = useMemo(() => new Set([...undos.values()].map((e) => e.prevId)), [undos]);
+  const unusedIds = useMemo(
+    () => unusedHardwareIds(band, held, cutting, Date.now()),
+    [band, held, cutting],
+  );
+  // A run in flight may land on (or derive from) a shelf picture: the door waits for it.
+  const cardBusy = (band.runs ?? []).some(isRunLive) || launching.size > 0;
   const cleanable = !disabled && capable && speaks && unusedIds.length > 0;
+  const cleanLive = cleanable && !cardBusy;
   const [confirmClean, setConfirmClean] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const cleanYesRef = useRef<HTMLButtonElement>(null);
@@ -843,10 +833,18 @@ function MaterialBench({
     return () => clearTimeout(t);
   }, [confirmClean]);
   const cleanUnused = async () => {
-    const ids = unusedIds;
     setConfirmClean(false);
+    if (cardBusy) return;
     setCleaning(true);
     try {
+      // The band on screen may be stale and a delete cascades: re-read the card from the server
+      // and recompute the strict predicate on that copy; a live run there stops the clean.
+      const fresh = await adminService.GetDesignBand({ techCardId, benchColorwayId: 0 });
+      if ((fresh.runs ?? []).some(isRunLive)) {
+        showMessage('generating — clean after it lands', 'error');
+        return;
+      }
+      const ids = unusedHardwareIds(fresh, held, cutting, Date.now());
       for (const assetId of ids) {
         await adminService.DeleteDesignAsset({ techCardId, assetId });
       }
@@ -1034,7 +1032,7 @@ function MaterialBench({
                 deleting…
               </Text>
             </>
-          ) : cleanable && confirmClean ? (
+          ) : cleanLive && confirmClean ? (
             <span
               className='flex items-center gap-1.5'
               data-fh-clean-confirm={unusedIds.length}
@@ -1069,6 +1067,17 @@ function MaterialBench({
                 no
               </Button>
             </span>
+          ) : cleanable && cardBusy ? (
+            <>
+              {dot}
+              <span data-fh-clean-inert={unusedIds.length}>
+                <InertDoor
+                  label={`clean unused · ${unusedIds.length}`}
+                  reason={CLEAN_BUSY_REASON}
+                  variant='underline'
+                />
+              </span>
+            </>
           ) : cleanable ? (
             <>
               {dot}
@@ -1595,7 +1604,15 @@ function SpecPanel({
   const withRefs = label || artwork;
   const pictures = spec.pictures;
   const room = Math.max(0, max - pictures.length);
-  const add = (incoming: common_MediaFull[]) => {
+  const add = (picked: common_MediaFull[]) => {
+    // Label logo / artwork photo: raster only — the image model is sent this picture.
+    const incoming = label || artwork ? picked.filter(isRasterPicture) : picked;
+    if (incoming.length < picked.length) {
+      showMessage(
+        label ? NOT_RASTER_MESSAGE : NOT_RASTER_MESSAGE.replace('the logo', 'the photo'),
+        'error',
+      );
+    }
     const have = new Set(pictures.map((m) => m.id ?? 0));
     const fresh = incoming.filter((m) => (m.id ?? 0) > 0 && !have.has(m.id ?? 0));
     const kept = fresh.slice(0, room);
@@ -2530,3 +2547,73 @@ function useArtworkCutout(
 function cutoutRequestId(techCardId: number, assetId: number, mediaId: number): string {
   return `cutout-${techCardId.toString(36)}-${assetId.toString(36)}-${mediaId.toString(36)}`;
 }
+
+/** `clean unused` waits while a run of the card is live or on its way. */
+const CLEAN_BUSY_REASON = 'generating — clean after it lands';
+/** A picture this young may still be someone's undo or a run's landing: `clean unused` keeps it. */
+const CLEAN_KEEP_RECENT_MS = 30 * 60_000;
+
+const stampMs = (t: string | undefined): number => {
+  const ms = t ? Date.parse(t) : NaN;
+  return Number.isFinite(ms) ? ms : 0;
+};
+
+/**
+ * `clean unused` (round 8 · C-m3): pictures a manual replace left on the shelf. Strict — the
+ * server cascades a delete: hardware only, bound to no pair, placed on no flat, parent of no
+ * asset, worn by no colourway, not the previous picture of a live undo, not being cut, and not
+ * created or updated in the last 30 minutes. A band without placements answers nothing.
+ */
+function unusedHardwareIds(
+  band: GetDesignBandResponse,
+  held: ReadonlySet<number>,
+  cutting: ReadonlySet<number>,
+  now: number,
+): number[] {
+  if (band.assetPlacements === undefined || band.assetBindings === undefined) return [];
+  const bound = new Set(band.assetBindings.map((b) => wireInt(b.assetId)));
+  const placed = new Set(band.assetPlacements.map((p) => wireInt(p.assetId)));
+  const parents = new Set((band.assets ?? []).map((a) => wireInt(a.derivedFromAssetId)));
+  return (band.assets ?? [])
+    .filter((a) => {
+      const id = wireInt(a.id);
+      const touched = Math.max(stampMs(a.createdAt), stampMs(a.updatedAt));
+      return (
+        id > 0 &&
+        (a.kind ?? '') === ASSET_HARDWARE &&
+        wireInt(a.colorwayId) === 0 &&
+        !bound.has(id) &&
+        !placed.has(id) &&
+        !parents.has(id) &&
+        !held.has(id) &&
+        !cutting.has(id) &&
+        now - touched >= CLEAN_KEEP_RECENT_MS
+      );
+    })
+    .map((a) => wireInt(a.id));
+}
+
+/**
+ * The image model takes raster pictures only: PNG, JPG/JPEG, WEBP — read off the full-size URL
+ * (a `data:` mime or the path's extension). SVG, PDF and anything unknown are not raster.
+ */
+export function isRasterPicture(m: common_MediaFull | undefined): boolean {
+  const url = (
+    m?.media?.fullSize?.mediaUrl ||
+    m?.media?.compressed?.mediaUrl ||
+    m?.media?.thumbnail?.mediaUrl ||
+    ''
+  ).trim();
+  if (!url) return false;
+  const data = /^data:([^;,]+)/i.exec(url);
+  if (data) return /^image\/(png|jpe?g|webp)$/i.test(data[1]);
+  let path = url;
+  try {
+    path = new URL(url, 'http://x').pathname;
+  } catch {
+    path = url.split(/[?#]/)[0];
+  }
+  return /\.(png|jpe?g|webp)$/i.test(path);
+}
+
+const NOT_RASTER_MESSAGE = 'the logo must be PNG/JPG/WEBP — SVG cannot be sent to the image model';

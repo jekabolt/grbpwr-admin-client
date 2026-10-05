@@ -834,12 +834,13 @@ try {
         errors.push(`[1440] ASSERT C-m4: label run ${JSON.stringify(p)?.slice(0, 300)}`);
       else console.log('assert ok C-m4: label logo seeded, captioned, sent as picture 1');
     }
-    // C-m3: `103 / 120 · clean unused · 95` → `delete 95 unused pictures? yes · no` → yes deletes
-    // exactly the 95, never the placed / parent / worn / pattern / fabric ones.
+    // C-m3: `104 / 120 · clean unused · 95` → `delete 95 unused pictures? yes · no` → yes re-reads
+    // the band and deletes exactly the unused ones of THAT read (1000 is bound meanwhile, so 94),
+    // never the placed / parent / worn / pattern / fabric / recent ones.
     {
       const shelf = await page.getAttribute('[data-fh-batch] [data-fh-shelf]', 'data-fh-shelf');
       const door = await page.getAttribute('[data-fh-batch] [data-fh-clean]', 'data-fh-clean');
-      if (shelf !== '103' || door !== '95')
+      if (shelf !== '104' || door !== '95')
         errors.push(`[1440] ASSERT C-m3: shelf ${shelf}, clean door ${door}`);
       await page.click('[data-fh-clean]');
       const ask = (await page.textContent('[data-fh-clean-confirm]'))?.replace(/\s+/g, ' ').trim();
@@ -858,6 +859,13 @@ try {
       if ((await page.locator('[data-fh-clean]').count()) !== 1)
         errors.push('[1440] ASSERT C-m3: `no` did not revert the door');
       await page.click('[data-fh-clean]');
+      // Another tab binds 1000 after this screen read the band: only the fresh read knows it.
+      await page.evaluate(() => {
+        window.__band.assetBindings = [
+          ...window.__band.assetBindings,
+          { colorwayId: 12, bomItemId: 3, assetId: 1000 },
+        ];
+      });
       await page.click('[data-fh-clean-yes]');
       await page
         .waitForFunction(() => !document.querySelector('[data-fh-shelf]'), null, { timeout: 8000 })
@@ -865,13 +873,15 @@ try {
       const gone = await page.evaluate(() =>
         window.__calls.filter((c) => c.name === 'DeleteDesignAsset').map((c) => c.body.assetId),
       );
-      const want = Array.from({ length: 95 }, (_, i) => 1000 + i);
+      const want = Array.from({ length: 94 }, (_, i) => 1001 + i);
       if (JSON.stringify([...gone].sort((a, b) => a - b)) !== JSON.stringify(want))
         errors.push(
           `[1440] ASSERT C-m3: deleted ${gone.length} · ${gone.filter((id) => id >= 1095)}`,
         );
       else
-        console.log('assert ok C-m3: clean unused deletes exactly the 95 unused hardware pictures');
+        console.log(
+          'assert ok C-m3: clean unused re-reads the band, deletes exactly its 94 unused pictures',
+        );
       await page.mouse.move(5, 5);
       await page.waitForTimeout(300);
       await shoot(page, 'r8-clean-done-1440.png');
@@ -883,7 +893,7 @@ try {
     // (3 assets) draws neither.
     const { ctx, page } = await open(1440, 1000, '#r8-noplace');
     if (
-      (await page.locator('[data-fh-shelf="103"]').count()) !== 1 ||
+      (await page.locator('[data-fh-shelf="104"]').count()) !== 1 ||
       (await page.locator('[data-fh-clean]').count()) !== 0
     )
       errors.push('[1440] ASSERT C-m3: clean door drawn on a band without placements');
@@ -893,6 +903,49 @@ try {
     if ((await d.page.locator('[data-fh-shelf]').count()) !== 0)
       errors.push('[1440] ASSERT C-m3: shelf count drawn under 100');
     await d.ctx.close();
+  }
+  {
+    // C-m3: a live run on the card makes the door inert (`generating — clean after it lands`).
+    const { ctx, page } = await open(1440, 1000, '#r8-busy');
+    await page.waitForSelector('[data-fh-batch]');
+    const inert = await page
+      .locator('[data-fh-clean-inert] [data-inert]')
+      .getAttribute('data-inert')
+      .catch(() => null);
+    if (
+      inert !== 'generating — clean after it lands' ||
+      (await page.locator('[data-fh-clean]').count()) !== 0
+    )
+      errors.push(`[1440] ASSERT C-m3: busy door «${inert}»`);
+    else console.log('assert ok C-m3: a live run makes clean unused inert');
+    await ctx.close();
+  }
+  {
+    // C-m4: an SVG composition-label logo is not seeded; an SVG picked by hand is refused, for the
+    // label logo and the artwork photo alike.
+    const { ctx, page } = await open(1440, 1000, '#r8-svglogo');
+    await page.click('[data-fh-cell="5"]');
+    await page.waitForSelector('[data-fh-for="5"]');
+    if ((await page.locator('[data-fh-for="5"] [data-fh-look="1"]').count()) !== 0)
+      errors.push('[1440] ASSERT C-m4: an SVG label logo was seeded');
+    else console.log('assert ok C-m4: an SVG label logo is not seeded');
+    const pickSvg = async (what) => {
+      await page.click('[data-fh-look-door] button');
+      await page.waitForSelector('[role="dialog"]');
+      await page.waitForTimeout(500);
+      await page.locator('[role="dialog"] img').nth(2).click();
+      await page.waitForTimeout(400);
+      if ((await page.locator('[data-fh-look="1"]').count()) !== 0)
+        errors.push(`[1440] ASSERT C-m4: an SVG landed as the ${what}`);
+      else console.log(`assert ok C-m4: an SVG ${what} is refused`);
+      if ((await page.locator('[role="dialog"]').count()) !== 0)
+        await page.keyboard.press('Escape');
+    };
+    await pickSvg('label logo');
+    await page.click('[data-fh-cell="7"]');
+    await page.waitForSelector('[data-fh-for="7"]');
+    await pickSvg('artwork photo');
+    await ctx.close();
   }
   {
     const { ctx, page } = await open(390, 844);
