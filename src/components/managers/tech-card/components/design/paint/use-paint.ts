@@ -18,6 +18,7 @@ import type {
 } from 'api/proto-http/admin';
 import { adminService } from 'api/api';
 import { fetchMediaBlob } from 'lib/features/media-blob';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
 import { assetFull, assetThumb } from '../assets/model';
@@ -80,6 +81,8 @@ import {
 } from './mockup';
 import { remainderCloth } from './plan-run';
 import { analyseFlat, REGIONS_ALGO_REV, type FlatRegions } from './regions';
+import { transferMap } from './transfer';
+import { viewLabel } from '../views';
 
 /** `artwork` (R7): the armed artwork is placed on the flats as a box; the paint stays as is. */
 export type PaintTool = 'click' | 'pen' | 'erase' | 'artwork';
@@ -88,8 +91,6 @@ export type PaintView = {
   view: string;
   baseMediaId: number;
   status: 'loading' | 'ready' | 'error';
-  /** A saved map stands for a flat that is no longer in this slot; the first gesture starts anew. */
-  stale: boolean;
   flat: FlatRegions | null;
   /** The flat's own pixels at canvas size — the paper under the paint. */
   pixels: ImageData | null;
@@ -296,6 +297,15 @@ export class PaintSession {
   private band: GetDesignBandResponse | null = null;
   private slotLabel = new Map<number, string>();
   private skinLoading = new Set<string>();
+  /**
+   * T28 · sides whose saved map stands on a replaced flat, while its paint is carried onto the new
+   * one (`transfer.ts`). Such a side stays `loading` — not paintable — until the paint lands.
+   */
+  private moving = new Set<PaintView>();
+  /** The carries of this round, for ONE line once the last one lands: view → paint moved. */
+  private moved = new Map<string, boolean>();
+  /** `view:map:old>new` carried in this session — told once, never twice. */
+  private carried = new Set<string>();
 
   constructor(techCardId: number, qc: QueryClient) {
     this.techCardId = techCardId;
@@ -355,7 +365,11 @@ export class PaintSession {
 
   canUndo = () => this.undoStack.length > 0;
   canRedo = () => this.redoStack.length > 0;
-  busy = () => this.save === 'pending' || this.save === 'saving' || this.timer !== null;
+  busy = () =>
+    this.save === 'pending' ||
+    this.save === 'saving' ||
+    this.timer !== null ||
+    this.moving.size > 0;
 
   /* ─────────────────────────── sync with the band ─────────────────────────── */
 
@@ -721,7 +735,6 @@ export class PaintSession {
       view,
       baseMediaId,
       status: 'loading',
-      stale: false,
       flat: null,
       pixels: null,
       aspect,
@@ -735,12 +748,15 @@ export class PaintSession {
     this.views.set(view, v);
     const saved = plan?.maps.find((m) => m.view === view);
     v.mapBase = saved?.mediaId ?? 0;
+    // T28 · the side holds another flat than the one its map was painted on: the paint moves.
+    const carry = !!saved && saved.baseMediaId !== baseMediaId;
+    if (carry) this.moving.add(v);
     void (async () => {
       try {
         const img = await pixelsOf(url);
         const flat = analyseFlat(img.data, img.width, img.height);
         let labels = new Uint32Array(img.width * img.height);
-        if (saved && saved.baseMediaId === baseMediaId && !saved.gone) {
+        if (saved && !carry && !saved.gone) {
           if (!saved.url) throw new Error('the saved map has no picture');
           const map = await pixelsOf(saved.url);
           labels = labelsFromMap(
@@ -751,7 +767,29 @@ export class PaintSession {
             img.height,
             saved.palette.map((s) => s.hex),
           );
-        } else if (saved) v.stale = true;
+        }
+        let moved = false;
+        if (saved && carry) {
+          try {
+            if (saved.gone || !saved.url) throw new Error('the old map has no picture');
+            const map = await pixelsOf(saved.url);
+            const got = transferMap(
+              {
+                rgba: map.data,
+                w: map.width,
+                h: map.height,
+                palette: saved.palette.map((s) => s.hex),
+              },
+              flat,
+            );
+            if (got && got.painted > 0) {
+              labels = got.labels;
+              moved = true;
+            }
+          } catch {
+            /* unreadable now (maybe only for now): the saved map stays, the side opens unpainted */
+          }
+        }
         if (this.views.get(view) !== v) return;
         v.flat = flat;
         v.pixels = img;
@@ -759,15 +797,49 @@ export class PaintSession {
         v.labels = labels;
         v.status = 'ready';
         v.rev += 1;
+        // The carried paint saves like any gesture — once. Nothing carried: the saved map is kept
+        // (a passing read failure must not delete somebody's paint) unless it is confirmed gone;
+        // the side's next own gesture replaces it.
+        if (carry) {
+          if (moved || saved?.gone) v.dirty = true;
+          const key = `${view}:${saved?.mediaId ?? 0}:${saved?.baseMediaId ?? 0}>${baseMediaId}`;
+          if (!this.carried.has(key)) {
+            this.carried.add(key);
+            this.moved.set(view, moved);
+          }
+        }
         this.takeParts(v);
       } catch {
         // A view whose saved painting could not be read is NOT paintable: painting over it would
         // save a blank over somebody's work.
         if (this.views.get(view) === v) v.status = 'error';
+      } finally {
+        if (carry) this.landed(v);
       }
       this.bump();
       if (this.views.get(view) === v) this.suggestCard();
     })();
+  }
+
+  /**
+   * T28 · one carry landed (or was abandoned). When it was the last: ONE save for every carried
+   * side (the session's own path: CAS, one re-read on a conflict) and ONE line for the round.
+   */
+  private landed(v: PaintView) {
+    this.moving.delete(v);
+    if (this.moving.size > 0) return;
+    const told = [...this.moved];
+    this.moved.clear();
+    if ([...this.views.values()].some((x) => x.dirty)) void this.flush();
+    if (told.length === 0) return;
+    const line = (ok: boolean) => {
+      const views = told.filter(([, m]) => m === ok).map(([view]) => viewLabel(view));
+      if (views.length === 0) return '';
+      const flats = views.length === 1 ? 'flat' : 'flats';
+      return `${views.join(', ')}: ${flats} changed · ${ok ? 'paint moved' : 'repaint'}`;
+    };
+    const text = [line(true), line(false)].filter(Boolean).join(' · ');
+    useSnackBarStore.getState().showMessage(text, 'success');
   }
 
   /* ─────────────────────────── gestures ─────────────────────────── */
@@ -918,7 +990,6 @@ export class PaintSession {
     for (const view of touched) {
       const v = this.views.get(view);
       if (!v) continue;
-      v.stale = false;
       v.dirty = true;
       v.rev += 1;
     }
