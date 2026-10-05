@@ -21,6 +21,7 @@ import {
   clarifyOf,
   decisionLines,
   insertClarify,
+  QUIZ_MAX,
 } from 'components/managers/tech-card/components/design/quiz-model';
 import { requestBrief } from 'components/managers/tech-card/components/design/words-brief';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
@@ -118,7 +119,7 @@ const w = window as unknown as {
 w.__answers = w.__preset?.answers ?? [];
 // E2: открытый прогон на «сервере» — `{ questions, family }` или null.
 w.__session = w.__preset?.session ?? null;
-w.__model = { clarifyOf, decisionLines, insertClarify };
+w.__model = { clarifyOf, decisionLines, insertClarify, QUIZ_MAX };
 
 const always = () => true;
 function BriefProbe() {

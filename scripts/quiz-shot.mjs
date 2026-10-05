@@ -479,7 +479,7 @@ try {
       !(await page.textContent(quiz)).includes('Which season is it for?'),
       'forgotten line left the list (optimistic)',
     );
-    // W-C11: при 15/15 уточнение заменяет последний неотвеченный базовый вопрос.
+    // W-C11: при QUIZ_MAX/QUIZ_MAX (30) уточнение заменяет последний неотвеченный базовый вопрос.
     const cap = await page.evaluate(() => {
       const m = window.__model;
       const base = (i) => ({
@@ -493,13 +493,13 @@ try {
         clarifyQuestion: i === 0 ? 'which?' : '',
         clarifyOptions: i === 0 ? ['x', 'y'] : [],
       });
-      const queue = Array.from({ length: 15 }, (_, i) => base(i));
+      const queue = Array.from({ length: m.QUIZ_MAX }, (_, i) => base(i));
       const next = m.insertClarify(queue, 0, m.clarifyOf(queue[0], ['a']));
-      return { n: next.length, second: next[1].id, last: next[14].id };
+      return { max: m.QUIZ_MAX, n: next.length, second: next[1].id, last: next[m.QUIZ_MAX - 1].id };
     });
     check(
-      cap.n === 15 && cap.second === 'clarify_q0' && cap.last === 'q13',
-      `clarify at 15/15 replaces the last unanswered base question (${JSON.stringify(cap)})`,
+      cap.max === 30 && cap.n === 30 && cap.second === 'clarify_q0' && cap.last === 'q28',
+      `clarify at 30/30 replaces the last unanswered base question (${JSON.stringify(cap)})`,
     );
     await ctx.close();
   }
