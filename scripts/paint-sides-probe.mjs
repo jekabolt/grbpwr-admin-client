@@ -52,7 +52,7 @@ const keys = new Map([
 const names = (p) => p.groups.map((x) => `${x.label}[${x.key}]:${x.regions.join(',')}`).join(' | ');
 
 ck(
-  m.PARTS_ALGO_REV.length <= 32 && m.PARTS_ALGO_REV.startsWith('regions.v3+'),
+  m.PARTS_ALGO_REV.length <= 32 && m.PARTS_ALGO_REV.startsWith('regions.v4+'),
   'parts rev fits the server cap',
   m.PARTS_ALGO_REV,
 );

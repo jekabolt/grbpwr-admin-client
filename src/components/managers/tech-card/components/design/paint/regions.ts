@@ -18,6 +18,9 @@
  *              nearest pieces and to the nearest big stroke) become walls — nothing else does. No
  *              dash (or a washed sketch) = the v2 cut, byte for byte (`yarn paint:regions`).
  *
+ *   v4         the strip the closing ate goes back along the drawing (never through a line), and
+ *              the end of a dashed line bridges one wider gap along its own direction.
+ *
  * Radii are measured on a 1024 sheet (Ф0: r = 3 closes gaps without eating thin parts) and scale
  * with the long side, never below 3.
  */
@@ -40,7 +43,7 @@ export type FlatRegions = {
  * The cutter's revision: the numbers of the regions (and so a cached auto-parts answer) hold only
  * for the same algorithm on the same flat. Bump on ANY change to how `analyseFlat` numbers regions.
  */
-export const REGIONS_ALGO_REV = 'regions.v3';
+export const REGIONS_ALGO_REV = 'regions.v4';
 
 const INF = 1e20;
 
@@ -384,6 +387,65 @@ function mergeThin(
   }
 }
 
+/**
+ * v4 · every labelled region grows (breadth-first, 4-connected) into the unlabelled pixels of the
+ * silhouette that are no wall and not on the RIM — the band outside the outermost line, which the
+ * sheet's edge reaches without crossing a wall. A 1-px bridge between dashes stops it.
+ */
+export function growInside(
+  lab: Int32Array,
+  w: number,
+  h: number,
+  sil: Uint8Array,
+  walls: Uint8Array,
+): void {
+  const n = w * h;
+  const queue = new Int32Array(n);
+  // The rim: flood from the sheet's edge through everything that is no wall.
+  const rim = new Uint8Array(n);
+  let top = 0;
+  const push = (i: number) => {
+    if (!rim[i] && !walls[i]) {
+      rim[i] = 1;
+      queue[top++] = i;
+    }
+  };
+  for (let x = 0; x < w; x += 1) {
+    push(x);
+    push((h - 1) * w + x);
+  }
+  for (let y = 0; y < h; y += 1) {
+    push(y * w);
+    push(y * w + w - 1);
+  }
+  while (top > 0) {
+    const i = queue[--top];
+    const x = i % w;
+    if (x > 0) push(i - 1);
+    if (x < w - 1) push(i + 1);
+    if (i >= w) push(i - w);
+    if (i + w < n) push(i + w);
+  }
+  let head = 0;
+  let tail = 0;
+  for (let i = 0; i < n; i += 1) if (lab[i] > 0) queue[tail++] = i;
+  while (head < tail) {
+    const i = queue[head++];
+    const x = i % w;
+    const v = lab[i];
+    const grow = (j: number) => {
+      if (lab[j] === 0 && sil[j] && !walls[j] && !rim[j]) {
+        lab[j] = v;
+        queue[tail++] = j;
+      }
+    };
+    if (x > 0) grow(i - 1);
+    if (x < w - 1) grow(i + 1);
+    if (i >= w) grow(i - w);
+    if (i + w < n) grow(i + w);
+  }
+}
+
 /** Regions between the lines after closing gaps of radius r. */
 export function regionsOf(
   ink: Uint8Array,
@@ -418,17 +480,18 @@ export function regionsOf(
   drop[0] = 1;
   for (let i = 0; i < n; i += 1) if (drop[lab[i]]) lab[i] = 0;
 
-  // Give back the strip the dilation ate: every free pixel inside the silhouette to its nearest region.
+  // Give back the strip the dilation ate (v4): first every region grows into it WITHOUT crossing a
+  // wall — a strip between two close lines (a placket, a binding) is reached along itself, never
+  // through the line beside it (v3 took the nearest region as the crow flies, so a pocket sewn on
+  // a placket swallowed the placket's strip beside it). The rim outside the outermost line is not
+  // grown into (one region would run all round the garment along it). What no region reaches that
+  // way — the rim, the bridges, a strip shut on every side — goes to its nearest region, as before.
   if (r > 0) {
     const sil = silhouette ?? silhouetteOf(ink, w, h, 3);
-    const seed = new Uint8Array(n);
-    let any = false;
-    for (let i = 0; i < n; i += 1)
-      if (lab[i] > 0) {
-        seed[i] = 1;
-        any = true;
-      }
-    if (any) {
+    if (lab.some((v) => v > 0)) {
+      growInside(lab, w, h, sil, walls);
+      const seed = new Uint8Array(n);
+      for (let i = 0; i < n; i += 1) if (lab[i] > 0) seed[i] = 1;
       const { nearest } = distanceTransform(seed, w, h);
       for (let i = 0; i < n; i += 1) {
         if (lab[i] === 0 && sil[i] && !ink[i] && nearest[i] >= 0) lab[i] = lab[nearest[i]];
@@ -638,6 +701,57 @@ export function bridgeDashes(
 
   // Dash → its 2 nearest small pieces within the gap.
   for (const id of dashes) for (const o of near.get(id) ?? []) line(px(id), py(id), px(o), py(o));
+
+  // v4 · a dashed line broken by one gap a little wider than the rest: the END of a line (a piece
+  // whose only neighbour within the gap is a dash) bridges to another END up to two gaps away
+  // when each lies within 30° of the other's direction and the two face each other — a mutual
+  // continuation, never into the side of another line (card 38's front: the V's right arm broke
+  // at 11.9 px against an 11.5 px gap, and the V was no region).
+  const reach = 2 * gap;
+  const cone = Math.cos(Math.PI / 6);
+  const dirX = new Float64Array(count + 1);
+  const dirY = new Float64Array(count + 1);
+  const ends: number[] = [];
+  for (const id of pieces) {
+    const nb = near.get(id) ?? [];
+    if (nb.length !== 1 || !isDash[nb[0]]) continue;
+    const q = nb[0];
+    const len = Math.hypot(sx[id] - sx[q], sy[id] - sy[q]);
+    if (len < 1e-6) continue;
+    dirX[id] = (sx[id] - sx[q]) / len;
+    dirY[id] = (sy[id] - sy[q]) / len;
+    ends.push(id);
+  }
+  const endCells = new Map<number, number[]>();
+  for (const id of ends) {
+    const key = Math.floor(sy[id] / gap) * cols + Math.floor(sx[id] / gap);
+    const list = endCells.get(key);
+    if (list) list.push(id);
+    else endCells.set(key, [id]);
+  }
+  for (const id of ends) {
+    const cx = Math.floor(sx[id] / gap);
+    const cy = Math.floor(sy[id] / gap);
+    let best = 0;
+    let bestD = Infinity;
+    for (let gy = cy - 2; gy <= cy + 2; gy += 1)
+      for (let gx = cx - 2; gx <= cx + 2; gx += 1) {
+        if (gx < 0 || gx >= cols) continue;
+        for (const o of endCells.get(gy * cols + gx) ?? []) {
+          if (o === id) continue;
+          const ox = sx[o] - sx[id];
+          const oy = sy[o] - sy[id];
+          const d = Math.hypot(ox, oy);
+          if (d > reach || d >= bestD) continue;
+          // o ahead of id along id's line, id ahead of o along o's line.
+          if (ox * dirX[id] + oy * dirY[id] < cone * d) continue;
+          if (-ox * dirX[o] - oy * dirY[o] < cone * d) continue;
+          best = o;
+          bestD = d;
+        }
+      }
+    if (best) line(px(id), py(id), px(best), py(best));
+  }
 
   // Dash → the nearest pixel of a big stroke within the gap: a dashed line attaches to the seam or
   // band it ends at.

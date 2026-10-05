@@ -164,5 +164,73 @@ for (const file of readdirSync(FLATS).sort()) {
     );
   }
 }
+// v4 · beta card QA (06.10, tmp/plans/flat-consistency/shots/paint-qa): the cut of real sides.
+{
+  const QA = resolve(REPO, '../tmp/plans/flat-consistency/in/paint-qa');
+  const cut = (name) => {
+    const file = resolve(QA, `${name}.png`);
+    if (!existsSync(file)) return null;
+    const img = rgbaOf(m.decodePng(readFileSync(file)));
+    return { ...m.analyseFlat(img.data, img.w, img.h), W: img.w };
+  };
+  // A pocket sewn over the placket: the strips between the placket's lines stay with the placket
+  // (v3 gave them to the pocket as the crow flies, across the line).
+  for (const [name, at, beyond] of [
+    ['c49-side_r-518', [330, 290], (x) => x < 300],
+    ['c49-side_l-517', [455, 290], (x) => x > 490],
+  ]) {
+    const r = cut(name);
+    if (!r) {
+      console.log(`  skip  ${name}`);
+      continue;
+    }
+    const pocket = r.labels[at[1] * r.W + at[0]];
+    let all = 0;
+    let out = 0;
+    for (let i = 0; i < r.labels.length; i += 1)
+      if (r.labels[i] === pocket) {
+        all += 1;
+        if (beyond(i % r.W)) out += 1;
+      }
+    const ok = pocket > 0 && out / all < 0.01;
+    if (!ok) bad += 1;
+    console.log(
+      `${ok ? '  ok  ' : '  FAIL'} ${name} pocket stays inside its line  — ${((100 * out) / Math.max(1, all)).toFixed(1)} % past the placket line`,
+    );
+  }
+  // A dashed V whose arm breaks once by a gap a little wider than the rest (11.9 px vs 11.5 px):
+  // the two ends bridge, the V is a region (centred, upper half, 8–25 % of the silhouette).
+  {
+    const r = cut('c38-front-537');
+    if (!r) console.log('  skip  c38-front-537');
+    else {
+      let sil = 0;
+      for (let i = 0; i < r.silhouette.length; i += 1) sil += r.silhouette[i];
+      const H = r.labels.length / r.W;
+      const size = new Array(r.count + 1).fill(0);
+      const cx = new Array(r.count + 1).fill(0);
+      const cy = new Array(r.count + 1).fill(0);
+      for (let i = 0; i < r.labels.length; i += 1) {
+        const id = r.labels[i];
+        if (!id) continue;
+        size[id] += 1;
+        cx[id] += i % r.W;
+        cy[id] += Math.floor(i / r.W);
+      }
+      const v = size.findIndex(
+        (s, id) =>
+          id > 0 &&
+          s / sil >= 0.08 &&
+          s / sil <= 0.25 &&
+          Math.abs(cx[id] / s / r.W - 0.5) < 0.1 &&
+          cy[id] / s / H < 0.5,
+      );
+      if (v < 0) bad += 1;
+      console.log(
+        `${v > 0 ? '  ok  ' : '  FAIL'} c38-front-537 the broken dashed V is a region  — ${r.count} regions${v > 0 ? `, V ${Math.round((100 * size[v]) / sil)} %` : ''}`,
+      );
+    }
+  }
+}
 console.log(bad ? `\n${bad} FAIL` : '\nall ok');
 process.exit(bad ? 1 : 0);
