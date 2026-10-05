@@ -750,6 +750,7 @@ export function LatestGeneration({
       picture={picture}
       views={views}
       runId={runId}
+      auto
     />
   ));
 

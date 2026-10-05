@@ -1,5 +1,5 @@
 import type { common_DesignPicture } from 'api/proto-http/admin';
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Button } from 'ui/components/button';
 
 import { pictureHandle } from '../handles';
@@ -68,6 +68,40 @@ export function useKeptWhole(card: number): ReadonlySet<number> {
 }
 
 /**
+ * ═══ THE SHEETS THE BENCH ALREADY TRIED TO CUT ITSELF (T26) ══════════════════════════════════════
+ * One automatic attempt per picture per session (module + sessionStorage, best effort): a failed
+ * or refused auto-cut leaves the sheet to the person, and a sheet whose pieces were later removed
+ * is not cut again behind their back on the next re-read or reload.
+ */
+const AUTO_KEY = 'grbpwr.design.split.auto';
+let autoTried: Set<number> | null = null;
+
+function autoTriedSet(): Set<number> {
+  if (autoTried) return autoTried;
+  autoTried = new Set();
+  try {
+    const ids = JSON.parse(window.sessionStorage.getItem(AUTO_KEY) || '[]') as unknown;
+    if (Array.isArray(ids)) ids.map(Number).forEach((n) => n > 0 && autoTried?.add(n));
+  } catch {
+    /* no storage — the module still remembers */
+  }
+  return autoTried;
+}
+
+/** Claims the one automatic attempt for `pictureId`; `false` when it was already spent. */
+function claimAutoCut(pictureId: number): boolean {
+  const tried = autoTriedSet();
+  if (pictureId <= 0 || tried.has(pictureId)) return false;
+  tried.add(pictureId);
+  try {
+    window.sessionStorage.setItem(AUTO_KEY, JSON.stringify([...tried].slice(-500)));
+  } catch {
+    /* the module still remembers */
+  }
+  return true;
+}
+
+/**
  * ═══ THE SPLIT, INLINE ON THE BENCH (03.10, owner item 19, T20) ═══════════════════════════════════
  *
  * Owner, verbatim: «в LATEST GENERATION если мы имеем дело с не сплитнутой картинкой нам это прямо
@@ -91,12 +125,23 @@ export function InlineSplit({
   picture,
   views,
   runId,
+  auto = false,
 }: {
   techCardId: number;
   picture: common_DesignPicture;
   /** The views the frames are seeded from — the tile gate's own reading (`splitViewsOf`). */
   views: readonly string[];
   runId: number;
+  /**
+   * ═══ THE SHEET CUTS ITSELF (05.10, owner item 11, R19, T26) ════════════════════════════════════
+   * Owner: «на воркбенче когда нам надо сделать сплит автоматически его делать». When the detector
+   * is CONFIDENT (exactly N−1 clear gaps, `detect-split.ts`) and nobody touched a frame, the editor
+   * presses its own `confirm` once: the same `SplitDesignPicture` with the detected frames, the
+   * views in `composite_views` order, `for_input` false. Silent — a refusal stays in the editor's
+   * own callout, no snackbar — and the sheet is then the person's to cut, as before. Unsure: the
+   * frames are only seeded. `put the N pieces into sides ▸` stays a button.
+   */
+  auto?: boolean;
 }) {
   const pictureId = picture.id ?? 0;
   const surface = `split:inline:${pictureId}`;
@@ -109,6 +154,16 @@ export function InlineSplit({
     onTouch: () => openSurface(techCardId, surface, runId),
   });
   useEffect(() => () => closeSurface(techCardId, surface), [techCardId, surface]);
+  const [autoCutting, setAutoCutting] = useState(false);
+  const confident = !!cut.detection?.confident;
+  useEffect(() => {
+    if (!auto || !confident || !cut.ready || cut.pending || cut.landed) return;
+    if (!cut.untouched() || !claimAutoCut(pictureId)) return;
+    setAutoCutting(true);
+    cut.autoSubmit();
+  });
+  if (autoCutting && !cut.pending && !cut.landed) setAutoCutting(false);
+  const locked = cut.landed || autoCutting;
   /**
    * THE LAST FRAME OUT IS «KEEP AS ONE PICTURE» (03.10, owner item 36: «если мы находимся в
    * состоянии сплита и мы удалили все рамки то картинка без сплита остается в воркбенче и вью
@@ -127,15 +182,24 @@ export function InlineSplit({
   return (
     <div data-inline-split={pictureId} className='space-y-2'>
       <div
-        inert={cut.landed || undefined}
-        className={cut.landed ? 'pointer-events-none' : undefined}
+        data-split-auto={confident ? 'confident' : cut.detection ? 'unsure' : undefined}
+        inert={locked || undefined}
+        className={locked ? 'pointer-events-none' : undefined}
       >
         <SplitStage cut={stageCut} nameInFrame maxHeight={560} />
       </div>
       <div className='flex items-center justify-between gap-3'>
         {/* A LANDED CUT IS TERMINAL (W7): the edits go, and the line says what it waits for until
             the band re-read brings the pieces and the bench draws them instead of this editor. */}
-        {cut.landed ? (
+        {autoCutting ? (
+          <span
+            role='status'
+            data-split-autocut={pictureId}
+            className='text-micro uppercase tracking-label text-labelColor'
+          >
+            cutting into {cut.frames.length} pictures…
+          </span>
+        ) : cut.landed ? (
           <span
             role='status'
             data-split-waiting={pictureId}
@@ -162,7 +226,7 @@ export function InlineSplit({
           data-split-confirm={pictureId}
           aria-label={`cut ${handle} into ${cut.frames.length} pictures`}
           title={cut.viewless > 0 ? 'name every side' : undefined}
-          disabled={!cut.ready || cut.pending || cut.landed}
+          disabled={!cut.ready || cut.pending || locked}
           onClick={cut.submit}
         >
           confirm
