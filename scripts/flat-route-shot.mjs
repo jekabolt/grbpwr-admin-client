@@ -274,9 +274,38 @@ try {
   );
   check('J2 layers group the rows', (await page.$$(`${J} [data-join-layer]`)).length === 3);
   check('J3 photos disagree pill', !!(await page.$(`${J} [data-joins-disagree]`)));
+  check(
+    'J4 notes are tooltips, not text',
+    !(await page.locator(`${J} [data-join-row^="item:"]`).first().textContent()).includes(
+      'High crew',
+    ),
+  );
+  const chips = await page.locator(`${J} [data-joins-absence]`).allTextContents();
+  check(
+    'J5 absences: one row of chips, deduped',
+    (await page.$$(`${J} [data-joins-absences]`)).length === 1 &&
+      chips.filter((c) => /^no sleeves/i.test(c)).length === 1 &&
+      chips.filter((c) => /^no back neckline✕?$/i.test(c)).length === 1,
+    chips.join(' | '),
+  );
+  check(
+    'J6 doubts folded behind ? N',
+    !(await page.$(`${J} [data-joins-questions]`)) &&
+      !!(await page.$(`${J} [data-joins-doubts="6"]`)),
+  );
   await page
     .locator(`${J} [data-flat-joins]`)
     .screenshot({ path: resolve(SHOTS, 'route-joins.png') });
+  await page.click(`${J} [data-joins-doubts]`);
+  check(
+    'J7 ? N opens the questions',
+    (await page.locator(`${J} [data-joins-questions] [data-join-row]`).count()) === 6,
+  );
+  await page
+    .locator(`${J} [data-flat-joins]`)
+    .screenshot({ path: resolve(SHOTS, 'route-joins-questions.png') });
+  await page.click(`${J} [data-joins-doubts]`);
+  check('J8 and closes them', !(await page.$(`${J} [data-joins-questions]`)));
 
   // AUTO read: reading… then rows
   const U = '[data-probe="auto"]';
@@ -314,7 +343,7 @@ try {
   );
   check(
     'E3 the row shows it',
-    (await first.textContent()).includes('front only, stand-up'),
+    (await first.getAttribute('title')).includes('front only, stand-up'),
     before,
   );
 
@@ -345,7 +374,7 @@ try {
   await page.waitForTimeout(600);
   check(
     'E6 Enter again saves it',
-    (await input.count()) === 0 && (await first.textContent()).includes('kept on failure'),
+    (await input.count()) === 0 && (await first.getAttribute('title')).includes('kept on failure'),
   );
 
   // add an absence through + join; a refused line says why

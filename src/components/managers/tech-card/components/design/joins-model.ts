@@ -254,17 +254,41 @@ export const addItem =
   });
 
 /** Absences and doubts are addressed by their text: the server dedupes absences by it. */
+/** Absences compare without case and spacing: «No sleeves» and «no  sleeves» are one absence. */
+export const absenceKey = (a: string) => a.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/** The absences once each, first spelling kept, in order. */
+export function uniqueAbsences(list: readonly string[] | undefined): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const a of list ?? []) {
+    const k = absenceKey(a);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(a.trim());
+  }
+  return out;
+}
+
 export const editAbsence =
   (was: string, next: string): JoinsEdit =>
-  (j) => ({ ...j, absences: (j.absences ?? []).map((a) => (a === was ? next : a)) });
+  (j) => ({
+    ...j,
+    absences: uniqueAbsences(
+      (j.absences ?? []).map((a) => (absenceKey(a) === absenceKey(was) ? next : a)),
+    ),
+  });
 
 export const dropAbsence =
   (was: string): JoinsEdit =>
-  (j) => ({ ...j, absences: (j.absences ?? []).filter((a) => a !== was) });
+  (j) => ({
+    ...j,
+    absences: uniqueAbsences((j.absences ?? []).filter((a) => absenceKey(a) !== absenceKey(was))),
+  });
 
 export const addAbsence =
   (text: string): JoinsEdit =>
-  (j) => ({ ...j, absences: [...(j.absences ?? []), text] });
+  (j) => ({ ...j, absences: uniqueAbsences([...(j.absences ?? []), text]) });
 
 export const dropUncertain =
   (was: string): JoinsEdit =>

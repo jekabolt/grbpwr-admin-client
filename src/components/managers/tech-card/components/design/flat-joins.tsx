@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } fr
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
+import { Chip } from 'ui/components/chip';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
@@ -35,6 +36,7 @@ import {
   parseJoinLine,
   visibilityOf,
   type JoinsEdit,
+  uniqueAbsences,
 } from './joins-model';
 import { cardOnScreen, designKeys, rereadBandNow } from './use-design-band';
 
@@ -43,8 +45,8 @@ import { cardOnScreen, designKeys, rereadBandNow } from './use-design-band';
  *
  * A group of the INPUT — REFERENCES block, right above the flat's GENERATE: the run freezes this
  * list into its prompt. One compact row per join (`binding NARROW · NP_R → CFN → NP_L · front`, the
- * model's note after it in grey), the absences (`no back neckline`), the model's doubts as grey
- * questions. Double-click edits a row (Enter saves, Esc cancels), ✕ drops it, `+ join` adds one.
+ * model's note in its tooltip), the absences as one row of chips, the model's doubts folded behind
+ * `? N` in the header. Double-click edits a row (Enter saves, Esc cancels), ✕ drops it, `+ join` adds one.
  * A garment with several layers groups its rows under one line per layer (name, sheer) and gives
  * each row a visibility glyph: — visible · ╌ seen through · ○ hidden.
  *
@@ -155,6 +157,7 @@ export function FlatJoins({
   const [editing, setEditing] = useState<Editing>(null);
   const [picking, setPicking] = useState<Set<number> | null>(null);
   const [askRejoin, setAskRejoin] = useState(false);
+  const [questionsOpen, setQuestionsOpen] = useState(false);
 
   /** The photos the read is given: references that carry a prompt role. */
   const photos = useMemo(
@@ -348,20 +351,12 @@ export function FlatJoins({
 
   const itemRow = (it: common_DesignJoinItem) => {
     const id = it.id ?? '';
-    const note = (it.text ?? '').trim();
     const vis = visibilityOf(it);
     const nextVis = VISIBILITY[(VISIBILITY.indexOf(vis) + 1) % VISIBILITY.length];
     return row(
       `item:${id}`,
-      <>
-        {joinStructure(it)}
-        {note && (
-          <Text size='micro' variant='label' component='span'>
-            {' '}
-            {note}
-          </Text>
-        )}
-      </>,
+      /* The note is the row's tooltip and part of its edit line — never printed under it. */
+      joinStructure(it),
       joinLine(it),
       () => void apply(dropItem(id)),
       {
@@ -437,9 +432,9 @@ export function FlatJoins({
     );
   }
 
-  const absences = joins?.absences ?? [];
+  const absences = uniqueAbsences(joins?.absences);
   const uncertain = joins?.uncertain ?? [];
-  const anyRows = items.length + absences.length + uncertain.length > 0;
+  const anyRows = items.length + absences.length + (questionsOpen ? uncertain.length : 0) > 0;
 
   /* ─── photos disagree · pick ─── */
   const cons = joins?.consistency;
@@ -554,6 +549,17 @@ export function FlatJoins({
           <Pill tone='warn'>joins · retry</Pill>
         </button>
       ) : null}
+      {uncertain.length > 0 && (
+        <button
+          type='button'
+          data-joins-doubts={uncertain.length}
+          aria-expanded={questionsOpen}
+          title={questionsOpen ? 'hide the open questions' : 'what the photos could not tell'}
+          onClick={() => setQuestionsOpen((v) => !v)}
+        >
+          <Pill tone='mut'>? {uncertain.length}</Pill>
+        </button>
+      )}
       {disagree && !isReading && (
         <button
           type='button'
@@ -590,13 +596,34 @@ export function FlatJoins({
       {picker}
       <div className='divide-y divide-hairline'>
         {groups}
+        {/* ABSENCES — one wrapping row of chips: ✕ drops, double-click edits. */}
         {absences.length > 0 && (
-          <div className='divide-y divide-hairline'>
-            {absences.map((a) => row(`abs:${a}`, a, a, () => void apply(dropAbsence(a))))}
+          <div data-joins-absences='' className='flex flex-wrap items-center gap-1 py-1.5'>
+            {absences.map((a) => {
+              const key = `abs:${a}`;
+              return editing?.key === key ? (
+                <span key={key} className='w-64'>
+                  {editor(key)}
+                </span>
+              ) : (
+                <Chip
+                  key={key}
+                  data-joins-absence={a}
+                  title={locked ? a : `${a} · double-click to edit`}
+                  onDoubleClick={() => startEdit(key, a)}
+                  onRemove={writesOff ? undefined : () => void apply(dropAbsence(a))}
+                  disabled={locked}
+                  className='normal-case'
+                >
+                  {a}
+                </Chip>
+              );
+            })}
           </div>
         )}
-        {uncertain.length > 0 && (
-          <div className='divide-y divide-hairline text-labelColor'>
+        {/* DOUBTS — folded behind `? N` in the header. */}
+        {questionsOpen && uncertain.length > 0 && (
+          <div data-joins-questions='' className='divide-y divide-hairline text-labelColor'>
             {uncertain.map((u) =>
               row(
                 `q:${u}`,
