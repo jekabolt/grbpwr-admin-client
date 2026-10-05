@@ -5624,6 +5624,10 @@ export type DesignPicture = {
   // as UndoDesignEditRequest.expected_target_id (the link may sit in a run row that is paged out).
   // Redo's target is replaced_by.
   undoToId: number | undefined;
+  // QUALITY FLAGS of a generated picture (0397, flat route): labels the worker read off the pixels,
+  // never a refusal. "grey" = a flat candidate whose drawing carries a mid-grey fill or tint inside
+  // its silhouette (the owner's style is white inside black lines). Empty = nothing noticed.
+  flags: string[] | undefined;
 };
 
 // DesignColourPlan is the DURABLE colour plan of a card — the pre-launch state, one document per
@@ -6276,6 +6280,70 @@ export type DesignColourwaySlotColour = {
 export type DesignFlatDetail = {
   name: string | undefined;
   note: string | undefined;
+};
+
+// DesignJoinLayer — one layer of a multi-layer garment. 0 = outermost.
+export type DesignJoinLayer = {
+  index: number | undefined;
+  name: string | undefined;
+  sheer: boolean | undefined;
+  note: string | undefined;
+  // front | back | both | "" — the face this depth level is on. A layer is a DEPTH level per face,
+  // not a panel: 0 = everything outermost, 1 = the cloth directly behind layer 0.
+  face: string | undefined;
+};
+
+// DesignJoinItem — one edge, seam, band, closure, pocket or opening of the garment.
+export type DesignJoinItem = {
+  // edge | seam | binding | band | strap | collar | stand | placket | cuff | waistband | sleeve |
+  // closure | pocket | opening
+  kind: string | undefined;
+  from: string | undefined;
+  to: string | undefined;
+  view: string | undefined;
+  side: string | undefined;
+  text: string | undefined;
+  id: string | undefined;
+  via: string[] | undefined;
+  width: string | undefined;
+  closed: boolean | undefined;
+  type: string | undefined;
+  count: number | undefined;
+  boundedBy: string[] | undefined;
+  continuesInto: string[] | undefined;
+  layer: number | undefined;
+  visibility: string | undefined;
+  caughtInto: string[] | undefined;
+  freeEdge: boolean | undefined;
+  sharp: string[] | undefined;
+};
+
+// DesignJoinsConsistencyGroup — photos that show one and the same garment.
+export type DesignJoinsConsistencyGroup = {
+  mediaIds: number[] | undefined;
+  what: string | undefined;
+};
+
+// DesignJoinsConsistency — do the reference photos show ONE garment?
+export type DesignJoinsConsistency = {
+  consistent: boolean | undefined;
+  note: string | undefined;
+  keepMediaIds: number[] | undefined;
+  groups: DesignJoinsConsistencyGroup[] | undefined;
+};
+
+// DesignJoins — the card's current join list (one row per card, rev for CAS).
+export type DesignJoins = {
+  rev: number | undefined;
+  items: DesignJoinItem[] | undefined;
+  absences: string[] | undefined;
+  consistency: DesignJoinsConsistency | undefined;
+  model: string | undefined;
+  edited: boolean | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  editedAt: wellKnownTimestamp | undefined;
+  layers: DesignJoinLayer[] | undefined;
+  uncertain: string[] | undefined;
 };
 
 export type OrderFactor =

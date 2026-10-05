@@ -15293,6 +15293,8 @@ export type GetDesignBandResponse = {
   // AUTO PARTS of the flat each side holds NOW (base_media_id = the media in that side's flat slot),
   // every algo_rev. A row of a flat that left its slot is not sent.
   partsSuggestions: DesignPartsSuggestion[] | undefined;
+  // joins — the card's current join list (flat route, 0397); absent = none yet.
+  joins: common_DesignJoins | undefined;
 };
 
 // DesignBenchSlot is one exclusive place on the bench: a view holds at most one plate. The six
@@ -15523,6 +15525,10 @@ export type common_DesignPicture = {
   // as UndoDesignEditRequest.expected_target_id (the link may sit in a run row that is paged out).
   // Redo's target is replaced_by.
   undoToId: number | undefined;
+  // QUALITY FLAGS of a generated picture (0397, flat route): labels the worker read off the pixels,
+  // never a refusal. "grey" = a flat candidate whose drawing carries a mid-grey fill or tint inside
+  // its silhouette (the owner's style is white inside black lines). Empty = nothing noticed.
+  flags: string[] | undefined;
 };
 
 // DesignBudget is the band's money bar: `today $0.41 of $2.00`.
@@ -16804,6 +16810,70 @@ export type DesignPartSplit = {
   why: string | undefined;
 };
 
+// DesignJoins — the card's current join list (one row per card, rev for CAS).
+export type common_DesignJoins = {
+  rev: number | undefined;
+  items: common_DesignJoinItem[] | undefined;
+  absences: string[] | undefined;
+  consistency: common_DesignJoinsConsistency | undefined;
+  model: string | undefined;
+  edited: boolean | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  editedAt: wellKnownTimestamp | undefined;
+  layers: common_DesignJoinLayer[] | undefined;
+  uncertain: string[] | undefined;
+};
+
+// DesignJoinItem — one edge, seam, band, closure, pocket or opening of the garment.
+export type common_DesignJoinItem = {
+  // edge | seam | binding | band | strap | collar | stand | placket | cuff | waistband | sleeve |
+  // closure | pocket | opening
+  kind: string | undefined;
+  from: string | undefined;
+  to: string | undefined;
+  view: string | undefined;
+  side: string | undefined;
+  text: string | undefined;
+  id: string | undefined;
+  via: string[] | undefined;
+  width: string | undefined;
+  closed: boolean | undefined;
+  type: string | undefined;
+  count: number | undefined;
+  boundedBy: string[] | undefined;
+  continuesInto: string[] | undefined;
+  layer: number | undefined;
+  visibility: string | undefined;
+  caughtInto: string[] | undefined;
+  freeEdge: boolean | undefined;
+  sharp: string[] | undefined;
+};
+
+// DesignJoinsConsistency — do the reference photos show ONE garment?
+export type common_DesignJoinsConsistency = {
+  consistent: boolean | undefined;
+  note: string | undefined;
+  keepMediaIds: number[] | undefined;
+  groups: common_DesignJoinsConsistencyGroup[] | undefined;
+};
+
+// DesignJoinsConsistencyGroup — photos that show one and the same garment.
+export type common_DesignJoinsConsistencyGroup = {
+  mediaIds: number[] | undefined;
+  what: string | undefined;
+};
+
+// DesignJoinLayer — one layer of a multi-layer garment. 0 = outermost.
+export type common_DesignJoinLayer = {
+  index: number | undefined;
+  name: string | undefined;
+  sheer: boolean | undefined;
+  note: string | undefined;
+  // front | back | both | "" — the face this depth level is on. A layer is a DEPTH level per face,
+  // not a panel: 0 = everything outermost, 1 = the cloth directly behind layer 0.
+  face: string | undefined;
+};
+
 export type ListDesignRunsRequest = {
   techCardId: number | undefined;
   // Max 24, default 12 when 0. The history shows about 4 rows per screen; three screens of slack is
@@ -17833,6 +17903,26 @@ export type SuggestDesignPartsCardRequest = {
 export type SuggestDesignPartsCardResponse = {
   suggestions: DesignPartsSuggestion[] | undefined;
   cached: boolean | undefined;
+};
+
+export type GenerateDesignJoinsRequest = {
+  techCardId: number | undefined;
+  force: boolean | undefined;
+};
+
+export type GenerateDesignJoinsResponse = {
+  joins: common_DesignJoins | undefined;
+  cached: boolean | undefined;
+};
+
+export type SetDesignJoinsRequest = {
+  techCardId: number | undefined;
+  joins: common_DesignJoins | undefined;
+  expectedRev: number | undefined;
+};
+
+export type SetDesignJoinsResponse = {
+  joins: common_DesignJoins | undefined;
 };
 
 // AiRouteCandidate is one (provider, model) a purpose's call may go to.
@@ -19546,6 +19636,18 @@ export interface AdminService {
   // has one from this call shape and !force.
   // FailedPrecondition: a side's flat changed, a side's region count is outside 2..60.
   SuggestDesignPartsCard(request: SuggestDesignPartsCardRequest): Promise<SuggestDesignPartsCardResponse>;
+  // GenerateDesignJoins (flat route) — one sync vision+JSON call (chat.design_joins): the model reads
+  // the card's reference photos (with their roles) and the garment note and writes the JOIN LIST on
+  // the fixed landmark ruler, the layers, the absences and a verdict on whether the photos show one
+  // garment. Stored as the card's current list (rev + 1). A stored list is returned without a call
+  // (cached) when !force and it was written from the same photos and note, or a designer edited it.
+  // FailedPrecondition: nothing to read (no reference photo and no garment note).
+  GenerateDesignJoins(request: GenerateDesignJoinsRequest): Promise<GenerateDesignJoinsResponse>;
+  // SetDesignJoins saves the designer's join list (CAS: expected_rev must be the stored rev; 0 = no
+  // list yet). The server cleans it as it cleans the model's: unknown kinds and landmarks dropped,
+  // absences kept only when they are negations, counts and lengths capped. Aborted
+  // (joins_rev_mismatch) on a stale rev.
+  SetDesignJoins(request: SetDesignJoinsRequest): Promise<SetDesignJoinsResponse>;
   // GetDesignQuizAnswers — every quiz answer stored on the card, in display order, plus the open
   // session's questions not yet saved (pending).
   GetDesignQuizAnswers(request: GetDesignQuizAnswersRequest): Promise<GetDesignQuizAnswersResponse>;
@@ -26219,6 +26321,46 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SuggestDesignPartsCard",
       }) as Promise<SuggestDesignPartsCardResponse>;
+    },
+    GenerateDesignJoins(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/joins:generate`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GenerateDesignJoins",
+      }) as Promise<GenerateDesignJoinsResponse>;
+    },
+    SetDesignJoins(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/design/joins`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetDesignJoins",
+      }) as Promise<SetDesignJoinsResponse>;
     },
     GetDesignQuizAnswers(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
