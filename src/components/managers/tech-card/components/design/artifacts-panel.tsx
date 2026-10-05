@@ -2293,7 +2293,8 @@ export function ArtifactsPanel({
       const opNumber = opNumberOf(x.sourceId);
       if (number > 0 && opNumber != null) {
         const ops = form.getValues('operations') ?? [];
-        const at = ops.findIndex((o) => (o.operationNumber ?? 0) === opNumber);
+        // Шаг без номера сервер называет так, как его показывает карточка: (i+1)·10.
+        const at = ops.findIndex((o, i) => (o.operationNumber || (i + 1) * 10) === opNumber);
         if (at >= 0) form.setValue(`operations.${at}.calloutNumber`, number, { shouldDirty: true });
       }
     }
