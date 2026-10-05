@@ -40,6 +40,7 @@ import { VectorModal } from './modals';
 import { useMoodCallouts, type MoodCallout } from './mood-callouts';
 import { MoodQuiz } from './mood-quiz';
 import { TILE_CORNER, TILE_QUIET } from 'ui/components/tile-skin';
+import { CornerMenu } from './picture-tile';
 import { CalloutsPanel, useCalloutsPanel } from './callouts-panel';
 import {
   cardOnScreen,
@@ -455,6 +456,19 @@ function pictureOfMedia(full: common_MediaFull): common_DesignPicture {
   };
 }
 
+/**
+ * РОЛЬ КАРТИНКИ ДОСКИ (E3, 64-DEFERRED). Что эта картинка значит для модели: `target` — вещь,
+ * которую шьём; `detail` — референс детали; `material` — ткань, цвет, фактура; `mood` — только
+ * атмосфера. '' — не назначена (промпты читают как mood, на плитке ничего). Ставится из угла-меню
+ * плитки, видна словом в ярлыке рядом с номером (`2 · target`) — тот же приём, что вид на эскизе.
+ */
+export const MOOD_ROLES = ['target', 'detail', 'material', 'mood'] as const;
+
+/** Пишет роль в строку ДОСКИ этого медиа; строку входа с тем же id не трогает. */
+export function setBoardRole(live: BoardItem[], mediaId: number, role: string): BoardItem[] {
+  return live.map((i) => (isBoardRow(i) && i.mediaId === mediaId ? { ...i, role } : i));
+}
+
 export function MoodBoard({
   techCardId,
   disabled,
@@ -468,6 +482,7 @@ export function MoodBoard({
   const all = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as BoardItem[];
   const items = useMemo(() => all.filter(isBoardRow), [all]);
   const inputIds = useMemo(() => new Set(all.filter(isInputRow).map((i) => i.mediaId)), [all]);
+  const roleOf = useMemo(() => new Map(items.map((i) => [i.mediaId, i.role ?? ''])), [items]);
   // V-16 · ЗАПИСКА ДОСКИ — ЭТО `concept`, И НИКАКОЕ ДРУГОЕ ПОЛЕ. Владелец дословно: «CONCEPT &
   // CONSTRUCTION DESCRIPTION это и есть SHARED NOTE в MOODBOARD». По коду это были ДВА поля —
   // `moodNote` (не печатается, вне подписи DESIGN, читал только черновик) и `concept` (печатается
@@ -1050,6 +1065,7 @@ export function MoodBoard({
               tileFlag={(view) =>
                 inputIds.has(view.mediaId) ? { word: 'in the input', tone: 'ink' } : null
               }
+              tileBadge={(view) => roleOf.get(view.mediaId) || null}
               tileCorners={(view, i) =>
                 view.full
                   ? {
@@ -1072,23 +1088,56 @@ export function MoodBoard({
                           crop
                         </button>
                       ),
-                      right: canEdit && (
-                        <button
-                          type='button'
-                          data-mood-edit={view.mediaId}
-                          aria-label={`edit moodboard picture ${i + 1}`}
-                          title='edit — open the picture editor on this picture; the result joins the board right after it'
-                          onClick={() =>
-                            setEditing({
-                              mediaId: view.mediaId,
-                              full: view.full as common_MediaFull,
-                            })
-                          }
-                          onPointerDown={(e) => e.stopPropagation()}
-                          className={cn(TILE_CORNER, TILE_QUIET, 'py-0.5 leading-none')}
-                        >
-                          edit
-                        </button>
+                      right: (!readOnly || canEdit) && (
+                        <>
+                          {!readOnly && (
+                            <span onPointerDown={(e) => e.stopPropagation()} className='flex'>
+                              <CornerMenu
+                                menu={{
+                                  label: roleOf.get(view.mediaId) || 'role',
+                                  ariaLabel: `role of moodboard picture ${i + 1}`,
+                                  items: [
+                                    ...MOOD_ROLES.map((r) => ({
+                                      value: r,
+                                      label: r,
+                                      current: roleOf.get(view.mediaId) === r,
+                                    })),
+                                    ...(roleOf.get(view.mediaId)
+                                      ? [{ value: '', label: 'none' }]
+                                      : []),
+                                  ],
+                                  onPick: (role) =>
+                                    writeItems(
+                                      setBoardRole(
+                                        (getValues('moodboardMedia') ?? []) as BoardItem[],
+                                        view.mediaId,
+                                        role,
+                                      ),
+                                    ),
+                                  'data-menu': `role:${view.mediaId}`,
+                                }}
+                              />
+                            </span>
+                          )}
+                          {canEdit && (
+                            <button
+                              type='button'
+                              data-mood-edit={view.mediaId}
+                              aria-label={`edit moodboard picture ${i + 1}`}
+                              title='edit — open the picture editor on this picture; the result joins the board right after it'
+                              onClick={() =>
+                                setEditing({
+                                  mediaId: view.mediaId,
+                                  full: view.full as common_MediaFull,
+                                })
+                              }
+                              onPointerDown={(e) => e.stopPropagation()}
+                              className={cn(TILE_CORNER, TILE_QUIET, 'py-0.5 leading-none')}
+                            >
+                              edit
+                            </button>
+                          )}
+                        </>
                       ),
                     }
                   : null

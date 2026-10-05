@@ -258,6 +258,8 @@ const mediaItemSchema = z.object({
   mediaId: z.number(),
   kind: z.string().optional().default(DEFAULT_MEDIA_KIND),
   caption: z.string().optional().default(''), // carried (v2; no UI yet)
+  // E3: moodboard picture role — 'target' | 'detail' | 'material' | 'mood'; '' = unassigned.
+  role: z.string().optional().default(''),
 });
 
 // `calloutSchema` живёт НИЖЕ, сразу за словарём видов выносок: с 0309 карточное указание несёт вид,
@@ -2345,6 +2347,7 @@ function mapMediaItemToForm(
     mediaId: m.mediaId || 0,
     kind: m.kind && m.kind !== 'TECH_CARD_MEDIA_KIND_UNKNOWN' ? m.kind : fallbackKind,
     caption: m.caption || '',
+    role: m.role || '',
   };
 }
 function mapMediaItemOut(m: FormMediaItem): common_TechCardMediaItem {
@@ -2352,6 +2355,7 @@ function mapMediaItemOut(m: FormMediaItem): common_TechCardMediaItem {
     mediaId: m.mediaId,
     kind: (m.kind || 'TECH_CARD_MEDIA_KIND_UNKNOWN') as common_TechCardMediaKind,
     caption: m.caption?.trim() || '',
+    role: m.role || '',
   };
 }
 

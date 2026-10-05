@@ -8199,6 +8199,10 @@ export type common_TechCardMediaItem = {
   mediaId: number | undefined;
   kind: common_TechCardMediaKind | undefined;
   caption: string | undefined;
+  // Role of a moodboard picture for the models: "target" (the garment we make), "detail" (a detail
+  // reference), "material" (fabric / colour / texture), "mood" (atmosphere only). "" = unassigned
+  // (read as mood). Technical media leave it empty.
+  role?: string | undefined;
 };
 
 // TechCardMediaKind classifies a tech-card sketch image.
