@@ -928,8 +928,10 @@ function PaintSide({
     if (px < 0 || py < 0 || px >= w || py >= h) return;
     // QW8 · the paper around the garment is not paint: its double click focuses the side.
     if (!flat.silhouette[py * w + px]) return;
-    if (tool !== 'erase' && openingRegion(view.parts, flat.labels[py * w + px])) return;
-    const group = groupAt(px, py, e.altKey);
+    const inOpening = openingRegion(view.parts, flat.labels[py * w + px]);
+    if (tool !== 'erase' && inOpening) return;
+    // An opening is no part: the eraser takes the paint under the cursor as a plain region.
+    const group = inOpening ? -1 : groupAt(px, py, e.altKey);
     if (group >= 0) {
       session.paintPart(view.view, group, { x: px, y: py }, e.shiftKey);
       return;

@@ -355,9 +355,13 @@ export function fixSides(
     };
     const done = new Set<number>();
     parts.groups.forEach((g, i) => {
-      if (done.has(i) || isOpening(g) || sideOf(g.label) !== 'L') return;
+      // «· inside» groups sit where the far side shows through an opening: their picture side is
+      // the far side's, so they never vote here (nor do openings).
+      if (done.has(i) || !movable(g) || sideOf(g.label) !== 'L') return;
       const twin = twinName(g.label);
-      const j = parts.groups.findIndex((o, k) => !done.has(k) && k !== i && o.label === twin);
+      const j = parts.groups.findIndex(
+        (o, k) => !done.has(k) && k !== i && movable(o) && o.label === twin,
+      );
       if (j < 0) return;
       done.add(i);
       done.add(j);
