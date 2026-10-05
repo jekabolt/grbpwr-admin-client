@@ -17,7 +17,7 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import type { EditHistory } from 'ui/components/annotation/history';
 // ПЛИТА АРТЕФАКТА — ТА ЖЕ ПОВЕРХНОСТЬ, ЧТО ЛИСТ ЭСКИЗА И СНИМОК ШАГА СБОРКИ, а не третья
@@ -67,6 +67,8 @@ import { CalloutRail } from './callout-rail';
 import {
   addDismissed,
   ghostOf,
+  layoutSuggestions,
+  NOMINAL_FRAME,
   normalizeSuggestions,
   opNumberOf,
   readDismissed,
@@ -2212,6 +2214,12 @@ export function ArtifactsPanel({
      Новый прогон заменяет непринятые призраки; поставленные рукой указания не трогаются. */
   const autosave = useTechCardAutosave();
   const [suggestions, setSuggestions] = useState<CalloutSuggestion[]>([]);
+  /**
+   * Набор прогона целиком — основа раскладки по полям. ✓ и ✕ убирают строку, но НЕ место: принятое
+   * указание стоит там, где стоял его призрак, и пересчёт по оставшимся сдвинул бы соседний
+   * призрак прямо на него.
+   */
+  const [suggestBasis, setSuggestBasis] = useState<CalloutSuggestion[]>([]);
   const [suggestOpen, setSuggestOpen] = useState(true);
   const [suggestHot, setSuggestHot] = useState<string | null>(null);
   const [suggesting, setSuggesting] = useState(false);
@@ -2237,6 +2245,7 @@ export function ArtifactsPanel({
     suggestAbort.current = null;
     setSuggesting(false);
     setSuggestions([]);
+    setSuggestBasis([]);
   }, [techCardId]);
   /** Карточные флэты листа — то, что сервер может прочесть и на что ляжет указание. */
   const suggestMediaIds = useMemo(
@@ -2290,6 +2299,7 @@ export function ArtifactsPanel({
       const next = normalizeSuggestions(res.suggestions, liveFlats.current);
       suggestConsumed.current = new Set();
       setSuggestions(next);
+      setSuggestBasis(next);
       setSuggestHot(null);
       if (next.length === 0) {
         showMessage('nothing to suggest', 'success');
@@ -2306,8 +2316,38 @@ export function ArtifactsPanel({
       }
     }
   };
+  /**
+   * ПЛАШКИ ПРИЗРАКОВ — ПО ПОЛЯМ КАЖДОГО ФЛЭТА (R38). Раскладка одна на экран и на ✓: что видно,
+   * то и ляжет в `posX/posY`. Кадр — замер плиты; плиты ещё нет на экране — номинальный.
+   */
+  const [ghostFrames, setGhostFrames] = useState<Record<number, { w: number; h: number }>>({});
+  const noteGhostFrame = useCallback((mediaId: number, sz: { w: number; h: number }) => {
+    setGhostFrames((m) =>
+      m[mediaId]?.w === sz.w && m[mediaId]?.h === sz.h ? m : { ...m, [mediaId]: sz },
+    );
+  }, []);
+  const ghostLayout = useMemo(() => {
+    const out: Record<string, { x: number; y: number }> = {};
+    for (const mediaId of new Set(suggestBasis.map((x) => x.mediaId ?? 0)))
+      Object.assign(
+        out,
+        layoutSuggestions(
+          suggestBasis.filter((x) => (x.mediaId ?? 0) === mediaId),
+          ghostFrames[mediaId] ?? NOMINAL_FRAME,
+        ),
+      );
+    return out;
+  }, [suggestBasis, ghostFrames]);
   const suggestionsOf = (mediaId: number): SurfaceCallout[] =>
-    kind === 'flat' ? suggestions.filter((x) => (x.mediaId ?? 0) === mediaId).map(ghostOf) : [];
+    kind === 'flat'
+      ? suggestions
+          .filter((x) => (x.mediaId ?? 0) === mediaId)
+          .map((x) => {
+            const g = ghostOf(x);
+            const at = ghostLayout[g.key];
+            return at ? { ...g, label: { x: at.x, y: at.y } } : g;
+          })
+      : [];
   /** ✓ — настоящее указание тем же путём, что у руки; источник-операция получает его номер. */
   const acceptSuggestions = (ids: string[]) => {
     const live = new Set(liveFlats.current);
@@ -2326,7 +2366,7 @@ export function ArtifactsPanel({
     if (picked.length === 0) return;
     calloutHistory?.record();
     for (const x of picked) {
-      const seed = seedOf(x);
+      const seed = seedOf(x, ghostLayout[x.id ?? '']);
       const number = addCalloutOn(
         seed.mediaId,
         seed.kind,
@@ -2389,6 +2429,7 @@ export function ArtifactsPanel({
       calloutsOf={calloutsOfPlate}
       ghostsOf={suggestionsOf}
       ghostHot={suggestHot}
+      onGhostFrame={noteGhostFrame}
       selected={selected}
       canPlaceOn={canPlaceOn}
       tool={tool}
@@ -2689,6 +2730,9 @@ export function ArtifactsPanel({
           {kind === 'flat' && (
             <SuggestedCallouts
               rows={suggestions}
+              flats={segments.flat.plates
+                .filter((p) => suggestMediaIds.includes(p.mediaId))
+                .map((p) => ({ mediaId: p.mediaId, name: p.caption || p.name }))}
               open={suggestOpen}
               onOpen={setSuggestOpen}
               hot={suggestHot}
@@ -3163,6 +3207,7 @@ export function PlateGrid({
   calloutsOf,
   ghostsOf,
   ghostHot,
+  onGhostFrame,
   selected,
   canPlaceOn,
   tool,
@@ -3205,6 +3250,8 @@ export function PlateGrid({
   /** Непринятые предложения `suggest ✦` на этой плите — призраки (T28). */
   ghostsOf?: (mediaId: number) => SurfaceCallout[];
   ghostHot?: string | null;
+  /** Замер кадра плиты — раскладке призраков по полям (`layoutSuggestions`). */
+  onGhostFrame?: (mediaId: number, size: { w: number; h: number }) => void;
   selected: number | null;
   /** Принимает ли эта плита указание — и, значит, заморожена её поверхность или нет. */
   canPlaceOn: (plate: DocumentPlate) => boolean;
@@ -3496,6 +3543,7 @@ export function PlateGrid({
                 callouts={mine}
                 ghosts={ghostsOf?.(plate.mediaId)}
                 ghostHot={ghostHot}
+                onFrameSize={onGhostFrame ? (sz) => onGhostFrame(plate.mediaId, sz) : undefined}
                 selectedKey={selected == null ? null : String(selected)}
                 frozen={!drawable}
                 tool={drawable ? tool : null}

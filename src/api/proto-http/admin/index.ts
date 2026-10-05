@@ -6469,6 +6469,7 @@ export type CalloutSuggestion = {
   parts: string[] | undefined;
   missing: string[] | undefined;
   fromData: boolean | undefined;
+  label?: string;
 };
 
 export type UpdateTaskRequest = {
