@@ -124,7 +124,9 @@ export function detectSplit(
   }
   runs.sort((a, b) => b[0] - a[0] || b[1] - a[1] || b[2] - a[2]);
   const gaps = runs.slice(0, n - 1).sort((a, b) => a[1] - b[1]);
-  const confident = gaps.length === n - 1 && gaps.every((g) => g[0] >= w * GAP_SHARE);
+  // Every clear gap counts BEFORE the cut to N−1: a sheet with more clear gaps than views asked
+  // (three drawings declared as two) is not a confident reading of two.
+  const clear = runs.filter((g) => g[0] >= w * GAP_SHARE).length;
 
   let cuts: number[];
   if (gaps.length === n - 1) {
@@ -185,6 +187,7 @@ export function detectSplit(
     const y1 = Math.min(h, box.y1 + 1);
     frames.push({ x: box.x0 / w, y: box.y0 / h, w: (x1 - box.x0) / w, h: (y1 - box.y0) / h });
   }
+  const confident = clear === n - 1 && boxes.every((b) => b !== null);
   return { confident, gaps: gaps.map((g) => g[0]), boxes, frames };
 }
 

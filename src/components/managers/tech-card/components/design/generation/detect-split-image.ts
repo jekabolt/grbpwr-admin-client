@@ -9,6 +9,8 @@ import { DETECT_SIDE, detectSplit, type SplitDetection } from './detect-split';
  * session: the bench's editor and the popup over the same sheet share it.
  */
 const cache = new Map<string, Promise<SplitDetection | null>>();
+/** One reading at a time: a bench of several sheets decodes them in turn, not all at once. */
+let queue: Promise<unknown> = Promise.resolve();
 
 async function read(src: string, n: number): Promise<SplitDetection | null> {
   const blob = await fetchMediaBlob(src);
@@ -40,7 +42,8 @@ export function detectSplitOf(
   const key = `${n}|${src}`;
   let p = cache.get(key);
   if (!p) {
-    p = read(src, n);
+    p = queue.then(() => read(src, n));
+    queue = p.catch(() => undefined);
     cache.set(key, p);
     // A failed read is not remembered: the next look tries again.
     p.catch(() => cache.delete(key));

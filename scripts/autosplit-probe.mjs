@@ -137,5 +137,17 @@ ck(
 );
 const d2 = m.detectSplit(two, 400, 200, 2);
 ck(!!d2 && d2.confident, 'two blocks asked as 2 → confident');
+// Three well-separated blobs asked as two: every clear gap counts → not confident (seed only).
+const three = new Uint8Array(600 * 200 * 4).fill(255);
+for (let y = 40; y < 160; y++)
+  for (const [a, b] of [
+    [20, 160],
+    [230, 370],
+    [440, 580],
+  ])
+    for (let x = a; x < b; x++) three.fill(0, (y * 600 + x) * 4, (y * 600 + x) * 4 + 3);
+const d32 = m.detectSplit(three, 600, 200, 2);
+ck(!!d32 && !d32.confident && d32.frames.length === 2, 'three blobs asked as 2 → not confident');
+ck(m.detectSplit(three, 600, 200, 3)?.confident === true, 'three blobs asked as 3 → confident');
 console.log(bad ? `\n${bad} FAILED` : '\nall ok');
 process.exit(bad ? 1 : 0);

@@ -264,12 +264,18 @@ export function useSplitCut({
   const src =
     media?.fullSize?.mediaUrl || media?.compressed?.mediaUrl || media?.thumbnail?.mediaUrl || '';
 
+  /* The detector reads a SMALLER rendition, never the full size: the frames are normalised, so the
+     rendition does not move them, and a bench of sheets does not decode originals. */
+  const thumbW = media?.thumbnail?.width ?? 0;
+  const detectSrc =
+    media?.compressed?.mediaUrl || (thumbW >= 1000 ? media?.thumbnail?.mediaUrl : '') || '';
   const viewCount = compositeViews.length;
-  const detectKey = mode === 'split' && src && viewCount >= 2 ? `${pictureId}|${src}|${seed}` : '';
+  const detectKey =
+    mode === 'split' && detectSrc && viewCount >= 2 ? `${pictureId}|${detectSrc}|${seed}` : '';
   useEffect(() => {
     if (!active || !detectKey) return;
     const ac = new AbortController();
-    detectSplitOf(src, viewCount, ac.signal)
+    detectSplitOf(detectSrc, viewCount, ac.signal)
       .then((found) => {
         if (ac.signal.aborted || !found) return;
         const seeded = found.frames.map((f, i) => ({
@@ -287,7 +293,7 @@ export function useSplitCut({
     return () => ac.abort();
     // `compositeViews` and `viewCount` are spelled by `seed`, which `detectKey` carries.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, detectKey, src]);
+  }, [active, detectKey, detectSrc]);
   const detection = detected && detected.key === detectKey ? detected : null;
 
   /**

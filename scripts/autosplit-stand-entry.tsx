@@ -32,7 +32,11 @@ const media = (id: number, url: string, w: number, h: number) => ({
   id,
   thumbnail: { mediaUrl: url },
   fullSize: { mediaUrl: url },
-  media: { fullSize: { mediaUrl: url, width: w, height: h }, thumbnail: { mediaUrl: url } },
+  media: {
+    fullSize: { mediaUrl: url, width: w, height: h },
+    compressed: { mediaUrl: url, width: w, height: h },
+    thumbnail: { mediaUrl: url },
+  },
 });
 const pic = (id: number, runId: number, extra: Partial<common_DesignPicture>) =>
   ({ id, runId, kind: 'flat', ...extra }) as common_DesignPicture;
