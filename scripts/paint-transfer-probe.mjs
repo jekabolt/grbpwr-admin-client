@@ -314,6 +314,10 @@ if (existsSync(FLAT)) {
     'stray mark claimed by every side: ghost view narrows to back',
     viewsOf(anc),
   );
+  // Live case 2: the artwork was placed again by hand on the new back flat (mark 4) → mark 1 stays.
+  const again = mk(flatPic(112, 'back', 0, 1112));
+  again.assetPlacements.push({ id: 4, assetId: 27, pictureId: 161, annotation: { points: [] } });
+  ck(viewsOf(again) === '', 'stray mark whose artwork is already on the target flat stays', viewsOf(again));
   const none = mk(undefined);
   ck(viewsOf(none) === '', 'stray mark without its picture is left alone', viewsOf(none));
 }

@@ -182,6 +182,11 @@ export function strayMarks(
     const claim =
       strong.length === 1 ? strong : strong.length > 1 ? byGhost(strong) : byGhost(sides);
     if (claim.length !== 1) continue;
+    // The same artwork already placed on the side's flat now (somebody placed it again by hand
+    // while the old mark was out of sight) — moving the old one would stitch it twice.
+    const target = claim[0].pictureId;
+    if (marks.some((m) => m.assetId === placement.assetId && (m.pictureId ?? 0) === target))
+      continue;
     const view = claim[0].view;
     const list = out.get(view) ?? [];
     list.push({ placement, picture });
