@@ -252,220 +252,313 @@ export function isPaletteKey(part: string): boolean {
   return part === 'col_palette';
 }
 
-const stroke = { vectorEffect: 'non-scaling-stroke' as const };
-const accent = { ...stroke, fill: 'currentColor', fillOpacity: 0.14 };
-const stitchDot = { ...stroke, fill: 'currentColor', stroke: 'none' };
+const plyStyle = {
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 4,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+};
+const threadStyle = {
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.6,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+};
+const threadDot = { fill: 'currentColor', stroke: 'none' };
+const sleeveStyle = {
+  fill: 'currentColor',
+  fillOpacity: 0.25,
+  stroke: 'currentColor',
+  strokeWidth: 2,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+};
 
-function Stitch({ x, y1, y2 }: { x: number; y1: number; y2: number }): JSX.Element {
+function Ply1({ d }: { d: string }): JSX.Element {
+  return <path {...plyStyle} d={d} />;
+}
+
+function Ply2({ d }: { d: string }): JSX.Element {
+  return <path {...plyStyle} d={d} strokeOpacity={0.42} />;
+}
+
+function NeedleV({ x, y1, y2 }: { x: number; y1: number; y2: number }): JSX.Element {
   return (
     <>
-      <path {...stroke} d={`M${x} ${y1} V${y2}`} />
-      <circle {...stitchDot} cx={x} cy={y1} r='.9' />
-      <circle {...stitchDot} cx={x} cy={y2} r='.9' />
+      <path {...threadStyle} d={`M${x} ${y1} V${y2}`} />
+      <circle {...threadDot} cx={x} cy={y1} r={2} />
+      <circle {...threadDot} cx={x} cy={y2} r={2} />
     </>
   );
 }
 
+function NeedleH({ y, x1, x2 }: { y: number; x1: number; x2: number }): JSX.Element {
+  return (
+    <>
+      <path {...threadStyle} d={`M${x1} ${y} H${x2}`} />
+      <circle {...threadDot} cx={x1} cy={y} r={2} />
+      <circle {...threadDot} cx={x2} cy={y} r={2} />
+    </>
+  );
+}
+
+function Overlock({
+  x,
+  y,
+  dir,
+  amp = 6,
+  step = 6,
+  teeth = 3,
+}: {
+  x: number;
+  y: number;
+  dir: 'left' | 'right' | 'up';
+  amp?: number;
+  step?: number;
+  teeth?: number;
+}): JSX.Element {
+  let d = '';
+  if (dir === 'up') {
+    d = `M${x - amp} ${y - teeth * step}`;
+    for (let i = teeth; i > 0; i--) {
+      d += ` L${x + amp} ${y - i * step + step / 2} L${x - amp} ${y - (i - 1) * step}`;
+    }
+    d += ` Q${x - amp} ${y + 5} ${x} ${y + 5} Q${x + amp} ${y + 5} ${x + amp} ${y}`;
+  } else {
+    const sign = dir === 'right' ? 1 : -1;
+    d = `M${x + sign * teeth * step} ${y - amp}`;
+    for (let i = teeth; i > 0; i--) {
+      d += ` L${x + sign * (i * step - step / 2)} ${y + amp} L${x + sign * (i - 1) * step} ${y - amp}`;
+    }
+    d += ` Q${x - sign * 5} ${y - amp} ${x - sign * 5} ${y} Q${x - sign * 5} ${y + amp} ${x} ${y + amp}`;
+  }
+  return <path {...threadStyle} d={d} />;
+}
+
+function Sleeve({
+  x,
+  y,
+  dir,
+  width = 14,
+  height = 12,
+  d,
+}: {
+  x?: number;
+  y?: number;
+  dir?: 'left' | 'right';
+  width?: number;
+  height?: number;
+  d?: string;
+}): JSX.Element {
+  if (d) return <path {...sleeveStyle} d={d} />;
+  const edgeX = x ?? 0;
+  const edgeY = y ?? 0;
+  const sign = dir === 'right' ? 1 : -1;
+  const turnX = edgeX - sign * 5;
+  const openX = edgeX + sign * width;
+  const path = `M${openX} ${edgeY - height / 2} H${turnX + sign * 4} Q${turnX} ${edgeY - height / 2} ${turnX} ${edgeY} Q${turnX} ${edgeY + height / 2} ${turnX + sign * 4} ${edgeY + height / 2} H${openX}`;
+  return <path {...sleeveStyle} d={path} />;
+}
+
+function Bar({
+  x,
+  y,
+  width,
+  height = 7,
+}: {
+  x: number;
+  y: number;
+  width: number;
+  height?: number;
+}) {
+  return <rect x={x} y={y} width={width} height={height} rx={1} fill='currentColor' />;
+}
+
+function Thread({ d }: { d: string }): JSX.Element {
+  return <path {...threadStyle} d={d} />;
+}
+
 function SeamGlyph({ kind }: { kind: SeamKind }): JSX.Element {
+  const plainOpen = (
+    <>
+      <Ply1 d='M4 16 H55 Q58 16 58 19 V39 Q58 42 55 42 H26' />
+      <Ply2 d='M116 16 H65 Q62 16 62 19 V39 Q62 42 65 42 H94' />
+    </>
+  );
+  const plainStanding = (
+    <>
+      <Ply1 d='M4 18 H54 Q58 18 58 22 V58' />
+      <Ply2 d='M116 18 H66 Q62 18 62 22 V58' />
+    </>
+  );
+
   switch (kind) {
     case 'sm_plain_open':
       return (
         <>
-          <path
-            {...accent}
-            d='M5 24 H29 Q32 24 32 28 Q32 24 35 24 H59 V30 H35 L34 34 H59 V40 H33 L32 31 L31 40 H5 V34 H30 L29 30 H5 Z'
-          />
-          <Stitch x={32} y1={22} y2={33} />
-          <path {...stroke} d='M5 33 Q1 37 5 41 M59 33 Q63 37 59 41' />
+          {plainOpen}
+          <Overlock x={26} y={42} dir='right' amp={4} step={4} teeth={2} />
+          <Overlock x={94} y={42} dir='left' amp={4} step={4} teeth={2} />
+          <NeedleH y={28} x1={50} x2={70} />
         </>
       );
     case 'sm_plain_overlock':
       return (
         <>
-          <path
-            {...accent}
-            d='M5 22 H29 Q32 22 32 27 Q32 22 35 22 H59 V28 H35 L34 33 H53 V45 H30 L31 28 H5 Z'
-          />
-          <path {...accent} d='M31 35 H53 V41 H31 Z' />
-          <Stitch x={32} y1={20} y2={34} />
-          <path {...stroke} d='M48 32 Q58 32 58 39 Q58 46 48 46 M50 32 Q55 39 50 46' />
+          {plainStanding}
+          <NeedleH y={32} x1={48} x2={72} />
+          <Overlock x={60} y={58} dir='up' amp={7} step={6} teeth={3} />
         </>
       );
     case 'sm_safety':
       return (
         <>
-          <path
-            {...accent}
-            d='M5 21 H29 Q32 21 32 26 Q32 21 35 21 H59 V27 H35 L34 32 H54 V45 H29 L31 27 H5 Z'
-          />
-          <path {...accent} d='M30 35 H54 V41 H30 Z' />
-          <Stitch x={32} y1={19} y2={34} />
-          <Stitch x={43} y1={30} y2={44} />
-          <path {...stroke} d='M49 31 Q59 32 59 38 Q59 45 49 46 M50 31 Q56 38 50 46' />
+          {plainStanding}
+          <NeedleH y={32} x1={48} x2={72} />
+          <NeedleH y={44} x1={50} x2={70} />
+          <Overlock x={60} y={58} dir='up' amp={7} step={6} teeth={3} />
         </>
       );
     case 'sm_french':
       return (
         <>
-          <path
-            {...accent}
-            d='M5 21 H29 Q32 21 32 26 Q32 21 35 21 H59 V27 H36 Q36 34 43 34 H49 V47 H39 Q26 47 27 34 L29 27 H5 Z'
-          />
-          <path {...accent} d='M33 29 Q31 40 40 41 H45 V35 H41 Q35 35 35 29 Z' />
-          <Stitch x={32} y1={19} y2={30} />
-          <Stitch x={42} y1={32} y2={44} />
+          <Ply1 d='M4 18 H48 Q52 18 52 22 V56 Q52 62 57 60 V42' />
+          <Ply2 d='M116 18 H72 Q68 18 68 22 V56 Q68 62 63 60 V42' />
+          <NeedleH y={30} x1={44} x2={76} />
+          <NeedleH y={54} x1={46} x2={74} />
         </>
       );
     case 'sm_flat_felled':
       return (
         <>
-          <path {...accent} d='M5 23 H43 V29 H28 V35 H5 Z' />
-          <path {...accent} d='M59 35 H21 V29 H36 V23 H59 Z' />
-          <path {...stroke} d='M21 35 V29 H28 M43 23 V29 H36' />
-          <Stitch x={26} y1={21} y2={37} />
-          <Stitch x={39} y1={21} y2={37} />
+          <Ply1 d='M4 20 H64 Q69 20 69 26 Q69 32 64 32 H46' />
+          <Ply2 d='M116 20 H74 Q69 20 69 26 V38 Q69 44 63 44 H42 Q36 44 36 38 Q36 26 42 26 H58' />
+          <NeedleV x={50} y1={12} y2={50} />
+          <NeedleV x={62} y1={12} y2={50} />
         </>
       );
     case 'sm_mock_felled':
       return (
         <>
-          <path
-            {...accent}
-            d='M5 20 H29 Q32 20 32 25 Q32 20 35 20 H59 V26 H35 L34 31 H53 V43 H29 L31 26 H5 Z'
-          />
-          <path {...accent} d='M30 33 H53 V39 H30 Z' />
-          <Stitch x={32} y1={18} y2={32} />
-          <Stitch x={41} y1={18} y2={42} />
-          <path {...stroke} d='M48 30 Q58 31 58 37 Q58 43 48 44 M50 30 Q55 37 50 44' />
+          <Ply1 d='M4 18 H54 Q58 18 58 22 V34 Q58 38 62 38 H90' />
+          <Ply2 d='M116 18 H66 Q62 18 62 22 V38 Q62 42 66 42 H90' />
+          <NeedleH y={28} x1={50} x2={70} />
+          <NeedleV x={78} y1={12} y2={46} />
+          <Overlock x={90} y={40} dir='left' amp={5} step={5} teeth={2} />
         </>
       );
     case 'sm_lapped':
       return (
         <>
-          <path {...accent} d='M6 23 H40 V30 H58 V38 H24 V31 H6 Z' />
-          <path {...stroke} d='M40 23 V30 M24 31 V38' />
-          <Stitch x={31} y1={21} y2={40} />
-          <Stitch x={37} y1={21} y2={40} />
+          <Ply1 d='M4 20 H70' />
+          <Ply2 d='M116 18 H44' />
+          <NeedleV x={52} y1={10} y2={30} />
+          <NeedleV x={64} y1={10} y2={30} />
         </>
       );
     case 'sm_hong_kong':
       return (
         <>
-          <path
-            {...accent}
-            d='M5 20 H29 Q32 20 32 25 Q32 20 35 20 H59 V26 H35 L34 31 H55 V37 H33 L32 28 L31 37 H9 V31 H30 L29 26 H5 Z'
-          />
-          <path {...accent} d='M4 28 H13 V40 H4 Q1 34 4 28 Z M51 28 H60 Q63 34 60 40 H51 Z' />
-          <Stitch x={32} y1={18} y2={30} />
-          <Stitch x={9} y1={27} y2={41} />
-          <Stitch x={55} y1={27} y2={41} />
+          {plainOpen}
+          <Sleeve x={26} y={42} dir='right' width={14} height={12} />
+          <Sleeve x={94} y={42} dir='left' width={14} height={12} />
+          <NeedleV x={34} y1={32} y2={52} />
+          <NeedleV x={86} y1={32} y2={52} />
+          <NeedleH y={28} x1={50} x2={70} />
         </>
       );
     case 'sm_bound':
       return (
         <>
-          <path
-            {...accent}
-            d='M5 19 H29 Q32 19 32 24 Q32 19 35 19 H59 V25 H35 L34 30 H50 V42 H29 L31 25 H5 Z'
-          />
-          <path {...accent} d='M30 32 H50 V38 H30 Z' />
-          <path
-            {...accent}
-            d='M46 27 H55 Q62 27 62 35 Q62 43 55 47 H46 V41 H53 Q56 38 56 35 Q56 32 53 33 H46 Z'
-          />
-          <Stitch x={32} y1={17} y2={31} />
-          <Stitch x={50} y1={26} y2={46} />
+          <Ply1 d='M4 18 H54 Q58 18 58 22 V50' />
+          <Ply2 d='M116 18 H66 Q62 18 62 22 V50' />
+          <NeedleH y={32} x1={48} x2={72} />
+          <Sleeve d='M48 40 V56 Q48 62 60 62 Q72 62 72 56 V40' />
+          <NeedleH y={50} x1={44} x2={76} />
         </>
       );
     case 'sm_taped':
       return (
         <>
-          <path
-            {...accent}
-            d='M5 28 H29 Q32 28 32 33 Q32 28 35 28 H59 V34 H35 L34 40 H47 V46 H30 L31 34 H5 Z'
-          />
-          <path {...accent} d='M16 18 H48 V27 H16 Z' />
-          <path {...stroke} strokeDasharray='2 2' d='M19 22.5 H45' />
-          <Stitch x={32} y1={26} y2={41} />
+          <Ply1 d='M4 16 H55 Q58 16 58 19 V35 Q58 38 62 38 H94' />
+          <Ply2 d='M116 16 H65 Q62 16 62 19 V40 Q62 44 66 44 H94' />
+          <NeedleH y={28} x1={50} x2={70} />
+          <Bar x={34} y={49} width={68} />
         </>
       );
     case 'sm_bonded':
       return (
         <>
-          <path {...accent} d='M6 21 H43 V28 H58 V35 H21 V28 H6 Z' />
-          <path {...accent} d='M21 28 H43 V35 H21 Z' />
-          <path {...stroke} d='M22 34 L28 28 M28 35 L35 28 M35 35 L42 28' />
+          <Ply1 d='M4 20 H70' />
+          <Ply2 d='M116 20 H44' />
+          <Bar x={44} y={26} width={26} height={4} />
         </>
       );
     case 'sm_flatlock':
       return (
         <>
-          <path {...accent} d='M5 27 H29 V35 H5 Z M35 27 H59 V35 H35 Z' />
-          <path
-            {...stroke}
-            d='M25 24 Q32 30 39 24 M25 38 Q32 32 39 38 M27 24 L37 38 M37 24 L27 38'
-          />
-          <Stitch x={28} y1={25} y2={37} />
-          <Stitch x={36} y1={25} y2={37} />
+          <Ply1 d='M4 20 H58' />
+          <Ply2 d='M116 20 H62' />
+          <NeedleV x={54} y1={12} y2={30} />
+          <NeedleV x={66} y1={12} y2={30} />
+          <Thread d='M48 20 L54 15 L60 25 L66 15 L72 20' />
         </>
       );
     case 'sm_hem_turned':
       return (
         <>
-          <path {...accent} d='M7 18 H56 V24 H51 V31 H27 V37 H49 V43 H21 V30 H45 V24 H7 Z' />
-          <path {...stroke} d='M56 18 Q59 21 56 24 M51 24 V31 M27 31 V37' />
-          <Stitch x={43} y1={16} y2={45} />
+          <Ply1 d='M4 18 H90 Q94 18 94 22 V30 Q94 34 90 34 H40 Q36 34 36 30 V28 Q36 26 40 26 H84' />
+          <NeedleV x={46} y1={10} y2={40} />
         </>
       );
     case 'sm_hem_blind':
       return (
         <>
-          <path {...accent} d='M7 17 H57 V23 H53 V37 H23 V43 H17 V31 H47 V23 H7 Z' />
-          <path {...stroke} d='M57 17 Q60 20 57 23 M23 37 V43' />
-          <path {...stroke} d='M22 35 Q28 29 34 35 Q40 41 46 35 L50 31' />
-          <path {...stroke} d='M34 35 L34 23' />
-          <circle {...stitchDot} cx='34' cy='23' r='.9' />
+          <Ply1 d='M4 18 H90 Q94 18 94 22 V30 Q94 34 90 34 H40' />
+          <Thread d='M46 34 L52 24 L58 34 L64 24' />
+          <circle {...threadDot} cx={52} cy={18} r={2} />
         </>
       );
     case 'sm_hem_cover':
       return (
         <>
-          <path {...accent} d='M7 19 H57 V25 H53 V38 H22 V44 H16 V32 H47 V25 H7 Z' />
-          <path {...stroke} d='M57 19 Q60 22 57 25 M22 38 V44' />
-          <Stitch x={34} y1={17} y2={40} />
-          <Stitch x={43} y1={17} y2={40} />
-          <path {...stroke} d='M30 40 Q34 35 38 40 Q43 45 47 39' />
+          <Ply1 d='M4 18 H90 Q94 18 94 22 V30 Q94 34 90 34 H40' />
+          <NeedleV x={48} y1={10} y2={40} />
+          <NeedleV x={58} y1={10} y2={40} />
+          <Thread d='M44 40 L53 46 L62 40' />
         </>
       );
     case 'sm_hem_raw':
       return (
         <>
-          <path {...accent} d='M7 27 H49 L54 23 L58 27 L54 31 L58 35 L53 39 L49 35 H7 Z' />
-          <path {...stroke} d='M49 27 L54 23 L58 27 L54 31 L58 35 L53 39 L49 35' />
+          <Ply1 d='M4 20 H84' />
+          <Ply1 d='M84 16 L88 20 L84 24' />
         </>
       );
     case 'sm_hem_bound':
       return (
         <>
-          <path {...accent} d='M6 28 H48 V36 H6 Z' />
-          <path
-            {...accent}
-            d='M43 21 H52 Q59 21 59 28 V36 Q59 43 52 43 H43 V37 H50 Q53 37 53 34 V30 Q53 27 50 27 H43 Z'
-          />
-          <Stitch x={47} y1={20} y2={44} />
+          <Ply1 d='M4 20 H84' />
+          <Sleeve x={84} y={20} dir='left' width={16} height={14} />
+          <NeedleV x={76} y1={10} y2={30} />
         </>
       );
     case 'sm_hem_faced':
       return (
         <>
-          <path {...accent} d='M7 19 H52 Q58 19 58 25 Q58 31 52 34 H28 V28 H49 Q52 27 52 25 H7 Z' />
-          <path {...accent} d='M48 34 H24 V41 H53 Q59 37 58 29 Q57 34 48 34 Z' />
-          <path {...stroke} d='M52 19 Q58 19 58 25 Q58 31 52 34 M28 28 V34 M24 34 V41' />
-          <Stitch x={45} y1={26} y2={42} />
+          <Ply1 d='M4 18 H90 Q96 18 96 24 Q96 30 90 30 H52' />
+          <Ply2 d='M52 30 H38' />
+          <NeedleV x={80} y1={24} y2={36} />
         </>
       );
   }
 }
+
+const stroke = { vectorEffect: 'non-scaling-stroke' as const };
+const accent = { ...stroke, fill: 'currentColor', fillOpacity: 0.14 };
+const stitchDot = { ...stroke, fill: 'currentColor', stroke: 'none' };
 
 export function SeamIcon({
   kind,
@@ -495,7 +588,9 @@ export function SeamIcon({
       strokeLinejoin='round'
       className={className}
     >
-      <SeamGlyph kind={kind} />
+      <g transform='translate(0 12) scale(.5333333333)'>
+        <SeamGlyph kind={kind} />
+      </g>
     </svg>
   );
 }

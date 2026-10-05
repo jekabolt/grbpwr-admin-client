@@ -71,15 +71,22 @@ const SHOW_H = 12;
 export function StitchPictogram({
   iso,
   className,
+  x,
+  y,
+  height = SHOW_H,
 }: {
   iso: string | null | undefined;
   className?: string;
+  /** Optional SVG placement and scale for reuse inside larger pictograms. */
+  x?: number;
+  y?: number;
+  height?: number;
 }) {
   const brush = stitchBrushOf(iso);
   if (!brush) return null;
   const a = strokeAcross(brush, GAUGE);
   const fig = a.up + a.down + GAUGE;
-  const y = (BOX_H - fig) / 2 + a.up + GAUGE / 2;
+  const strokeY = (BOX_H - fig) / 2 + a.up + GAUGE / 2;
   const g = strokeGeometry(
     {
       tool: 'line',
@@ -89,8 +96,8 @@ export function StitchPictogram({
       step: STEP,
       dashed: false,
       pts: [
-        [0.04, y / BOX_H],
-        [0.96, y / BOX_H],
+        [0.04, strokeY / BOX_H],
+        [0.96, strokeY / BOX_H],
       ],
     },
     LEN,
@@ -100,8 +107,10 @@ export function StitchPictogram({
   );
   return (
     <svg
-      width={Math.round((SHOW_H * LEN) / BOX_H)}
-      height={SHOW_H}
+      x={x}
+      y={y}
+      width={Math.round((height * LEN) / BOX_H)}
+      height={height}
       viewBox={`0 0 ${LEN} ${BOX_H}`}
       aria-hidden
       data-stitch-pictogram={brush}

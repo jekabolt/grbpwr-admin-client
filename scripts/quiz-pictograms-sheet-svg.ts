@@ -14,6 +14,7 @@ import {
   GARMENT_PARTS,
   PART_LABEL,
   PartPictogram,
+  SeamPartPictogram,
   partViewBox,
   type PartKey,
 } from '../src/components/managers/tech-card/components/design/garment-parts';
@@ -162,8 +163,8 @@ const LABEL_WIDTH = 92;
 const VIEW_ROW_HEIGHT = 82;
 const PART_ROW_HEIGHT = 122;
 const HARDWARE_ROW_HEIGHT = 122;
-const SEAM_CELL_WIDTH = 140;
-const SEAM_ROW_HEIGHT = 148;
+const SEAM_CELL_WIDTH = 180;
+const SEAM_ROW_HEIGHT = 184;
 const HEADER_HEIGHT = 34;
 const GAP_HEIGHT = 18;
 const familyPartCount = GARMENT_FAMILIES.reduce(
@@ -250,18 +251,23 @@ function labelCell(kind: LabelKind, x: number, y: number): string {
 }
 
 function seamCell(kind: SeamKind, x: number, y: number): string {
-  const icon64 = renderToStaticMarkup(createElement(SeamIcon, { kind, size: 64 }));
+  const composite = renderToStaticMarkup(createElement(SeamPartPictogram, { kind }));
+  const icon48 = renderToStaticMarkup(createElement(SeamIcon, { kind, size: 48, band: true }));
   const icon14 = renderToStaticMarkup(createElement(SeamIcon, { kind, size: 14 }));
   const words = SEAM_LABEL[kind].split(' ');
   const cut = Math.max(1, Math.ceil(words.length / 2));
   const lines = [words.slice(0, cut).join(' '), words.slice(cut).join(' ')].filter(Boolean);
-  return `<g transform="translate(${x + 18} ${y + 10})">${icon64}</g>
-    <g transform="translate(${x + 103} ${y + 55})">${icon14}</g>
-    <text x="${x + SEAM_CELL_WIDTH / 2}" y="${y + 103}" text-anchor="middle">${kind}</text>
+  return `<g transform="translate(${x + 7} ${y + 3})">${composite}</g>
+    <g transform="translate(${x + 82} ${y + 10})">${icon48}</g>
+    <g transform="translate(${x + 151} ${y + 18})">${icon14}</g>
+    <rect x="${x + 78}" y="${y + 50}" width="70" height="38" fill="#111"/>
+    <g transform="translate(${x + 89} ${y + 54})" color="#fff">${icon48}</g>
+    <text class="detail" x="${x + 110}" y="${y + 98}" text-anchor="middle">48 band · 14 · selected</text>
+    <text x="${x + SEAM_CELL_WIDTH / 2}" y="${y + 123}" text-anchor="middle">${kind}</text>
     ${lines
       .map(
         (line, index) =>
-          `<text class="detail" x="${x + SEAM_CELL_WIDTH / 2}" y="${y + 119 + index * 11}" text-anchor="middle">${escapeText(line)}</text>`,
+          `<text class="detail" x="${x + SEAM_CELL_WIDTH / 2}" y="${y + 140 + index * 11}" text-anchor="middle">${escapeText(line)}</text>`,
       )
       .join('')}`;
 }
@@ -269,10 +275,40 @@ function seamCell(kind: SeamKind, x: number, y: number): string {
 function paletteCell(x: number, y: number): string {
   const icon64 = renderToStaticMarkup(createElement(PaletteIcon, { size: 64 }));
   const icon14 = renderToStaticMarkup(createElement(PaletteIcon, { size: 14 }));
-  return `<g transform="translate(${x + 18} ${y + 10})">${icon64}</g>
-    <g transform="translate(${x + 103} ${y + 55})">${icon14}</g>
-    <text x="${x + SEAM_CELL_WIDTH / 2}" y="${y + 103}" text-anchor="middle">col_palette</text>
-    <text class="detail" x="${x + SEAM_CELL_WIDTH / 2}" y="${y + 119}" text-anchor="middle">colourway palette</text>`;
+  return `<g transform="translate(${x + 34} ${y + 19})">${icon64}</g>
+    <g transform="translate(${x + 125} ${y + 55})">${icon14}</g>
+    <text x="${x + SEAM_CELL_WIDTH / 2}" y="${y + 123}" text-anchor="middle">col_palette</text>
+    <text class="detail" x="${x + SEAM_CELL_WIDTH / 2}" y="${y + 140}" text-anchor="middle">colourway palette</text>`;
+}
+
+function seamRow(y: number, rowWidth: number): string[] {
+  return [
+    `<rect x="0" y="${y}" width="${rowWidth}" height="${SEAM_ROW_HEIGHT}" fill="#fff" stroke="#ccc"/>`,
+    `<text class="family" x="8" y="${y + 82}">seams · palette</text>`,
+    ...SEAM_KINDS.map((kind, index) => seamCell(kind, LABEL_WIDTH + index * SEAM_CELL_WIDTH, y)),
+    paletteCell(LABEL_WIDTH + SEAM_KINDS.length * SEAM_CELL_WIDTH, y),
+  ];
+}
+
+const SEAM_GRID_COLUMNS = 6;
+const seamGridWidth = LABEL_WIDTH + SEAM_GRID_COLUMNS * SEAM_CELL_WIDTH;
+const seamGridHeight = Math.ceil(SEAM_KINDS.length / SEAM_GRID_COLUMNS) * SEAM_ROW_HEIGHT;
+
+function seamGrid(): string[] {
+  const grid: string[] = [];
+  for (let row = 0; row < Math.ceil(SEAM_KINDS.length / SEAM_GRID_COLUMNS); row++) {
+    const y = row * SEAM_ROW_HEIGHT;
+    grid.push(
+      `<rect x="0" y="${y}" width="${seamGridWidth}" height="${SEAM_ROW_HEIGHT}" fill="#fff" stroke="#ccc"/>`,
+      `<text class="family" x="8" y="${y + 82}">seams ${row + 1}/3</text>`,
+    );
+  }
+  SEAM_KINDS.forEach((kind, index) => {
+    const column = index % SEAM_GRID_COLUMNS;
+    const row = Math.floor(index / SEAM_GRID_COLUMNS);
+    grid.push(seamCell(kind, LABEL_WIDTH + column * SEAM_CELL_WIDTH, row * SEAM_ROW_HEIGHT));
+  });
+  return grid;
 }
 
 const rows: string[] = [];
@@ -310,16 +346,13 @@ rows.push(
   ),
 );
 
-rows.push(
-  `<rect x="0" y="${seamsTop}" width="${width}" height="${SEAM_ROW_HEIGHT}" fill="#fff" stroke="#ccc"/>`,
-  `<text class="family" x="8" y="${seamsTop + 74}">seams · palette</text>`,
-  ...SEAM_KINDS.map((kind, index) =>
-    seamCell(kind, LABEL_WIDTH + index * SEAM_CELL_WIDTH, seamsTop),
-  ),
-  paletteCell(LABEL_WIDTH + SEAM_KINDS.length * SEAM_CELL_WIDTH, seamsTop),
-);
+rows.push(...seamRow(seamsTop, width));
 
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" color="#000">
+const seamsOnly = process.env.SEAMS_ONLY === '1';
+const outputWidth = seamsOnly ? seamGridWidth : width;
+const outputHeight = seamsOnly ? seamGridHeight : height;
+const outputRows = seamsOnly ? seamGrid() : rows;
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${outputWidth}" height="${outputHeight}" viewBox="0 0 ${outputWidth} ${outputHeight}" color="#000">
   <metadata data-families="${GARMENT_FAMILIES.length}" data-parts="${familyPartCount}" data-shapes="${Object.keys(GARMENT_SHAPES).length}" data-hardware="${HARDWARE_KINDS.length}" data-labels="${LABEL_KINDS.length}" data-seams="${SEAM_KINDS.length}" data-palettes="1"/>
   <!-- O6\n${partTable}\n-->
   <style>
@@ -328,8 +361,8 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${
     .family { fill: #000; font-weight: 700; }
   </style>
   <rect width="100%" height="100%" fill="#f2f2f2"/>
-  <text class="family" x="0" y="18">GARMENT PICTOGRAMS · ${GARMENT_FAMILIES.length} FAMILIES · ${familyPartCount} PART MARKS · ${HARDWARE_KINDS.length} HARDWARE · ${LABEL_KINDS.length} LABELS · ${SEAM_KINDS.length} SEAMS · 1 PALETTE</text>
-  ${rows.join('\n')}
+  ${seamsOnly ? '' : `<text class="family" x="0" y="18">GARMENT PICTOGRAMS · ${GARMENT_FAMILIES.length} FAMILIES · ${familyPartCount} PART MARKS · ${HARDWARE_KINDS.length} HARDWARE · ${LABEL_KINDS.length} LABELS · ${SEAM_KINDS.length} SEAMS · 1 PALETTE</text>`}
+  ${outputRows.join('\n')}
 </svg>`;
 
 process.stdout.write(svg);

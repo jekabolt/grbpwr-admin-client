@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 
+import { StitchPictogram } from 'ui/components/annotation/stitch-pictogram';
+
 import {
   GARMENT_FAMILIES,
   GARMENT_SHAPES,
@@ -14,7 +16,14 @@ import {
   isHardwareKind,
   isLabelKind,
 } from './hardware-icons';
-import { isPaletteKey, isSeamKind, PaletteIcon, SEAM_LABEL, SeamIcon } from './seam-icons';
+import {
+  isPaletteKey,
+  isSeamKind,
+  PaletteIcon,
+  SEAM_LABEL,
+  SeamIcon,
+  type SeamKind,
+} from './seam-icons';
 
 /** Every part name the quiz model may return (20-DESIGN O6). */
 export type PartKey =
@@ -688,6 +697,60 @@ export function partViewBox(d: string[]): { viewBox: string; zoom: number } {
   return { viewBox: `${r(x)} ${r(y)} ${r(w)} ${r(h)}`, zoom };
 }
 
+/** ISO 4915 top-view stitch classes paired with each ISO 4916 section in the large part slot. */
+const SEAM_STITCH_CLASSES: Record<SeamKind, readonly string[]> = {
+  sm_plain_open: ['301', '504'],
+  sm_plain_overlock: ['514'],
+  sm_safety: ['516'],
+  sm_french: ['301'],
+  sm_flat_felled: ['301 ×2'],
+  sm_mock_felled: ['301'],
+  sm_lapped: ['301'],
+  sm_hong_kong: ['301'],
+  sm_bound: ['301'],
+  sm_taped: ['301'],
+  sm_bonded: [],
+  sm_flatlock: ['607'],
+  sm_hem_turned: ['301'],
+  sm_hem_blind: ['103'],
+  sm_hem_cover: ['406'],
+  sm_hem_raw: [],
+  sm_hem_bound: ['301'],
+  sm_hem_faced: ['301'],
+};
+
+/** Style B for the 64×96 part slot: existing ISO 4915 strip(s), then the Style A section. */
+export function SeamPartPictogram({
+  kind,
+  size = 64,
+}: {
+  kind: SeamKind;
+  size?: number;
+}): JSX.Element {
+  const stitches = SEAM_STITCH_CLASSES[kind];
+  const sectionY = stitches.length ? 46 : 28;
+  const firstStripY = stitches.length > 1 ? 22 : 31;
+  return (
+    <svg
+      aria-hidden
+      focusable='false'
+      data-seam-composite={kind}
+      viewBox='0 0 64 96'
+      width={size}
+      height={Math.round(size * 1.5)}
+      color='currentColor'
+      overflow='visible'
+    >
+      {stitches.map((iso, index) => (
+        <StitchPictogram key={iso} iso={iso} x={3} y={firstStripY + index * 11} height={7} />
+      ))}
+      <g transform={`translate(0 ${sectionY})`}>
+        <SeamIcon kind={kind} size={64} band />
+      </g>
+    </svg>
+  );
+}
+
 /**
  * The slot shows the PART, not the garment: a close-up crop with the part filled. `whole` is the
  * plain garment (nothing for a `use` question); an unknown part is treated as `whole`.
@@ -741,7 +804,7 @@ export function PartPictogram({
           ...(className ? {} : { width: 64, height: 96 }),
         }}
       >
-        {seam ? <SeamIcon kind={seam} size={64} /> : <PaletteIcon size={64} />}
+        {seam ? <SeamPartPictogram kind={seam} /> : <PaletteIcon size={64} />}
       </span>
     );
   }
