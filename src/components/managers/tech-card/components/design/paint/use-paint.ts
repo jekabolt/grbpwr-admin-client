@@ -851,6 +851,7 @@ export class PaintSession {
             pictureId,
             flat,
             mapBox && saved ? { box: mapBox, mediaId: saved.baseMediaId } : null,
+            () => this.views.get(view) === v,
           );
           if (got.art > 0 || got.artLeft > 0) {
             const t = this.told(view);
@@ -930,6 +931,9 @@ export class PaintSession {
     pictureId: number,
     flat: FlatRegions,
     map: { box: FracBox; mediaId: number } | null,
+    /** False once the side moved on to yet another flat: a late write would pin the mark to a
+     *  picture no side holds any more — the newer round moves it instead. */
+    current: () => boolean,
   ): Promise<{ art: number; artLeft: number }> {
     const newBox = inkBox(flat);
     const boxes = new Map<number, Promise<FracBox | null>>();
@@ -958,6 +962,7 @@ export class PaintSession {
         const moved = pts.length > 0 ? transferPoints(ob, newBox, pts) : null;
         // No id would CREATE a second mark instead of moving this one.
         if (!ann || !moved || (p.id ?? 0) <= 0) throw new Error('nothing to align');
+        if (!current()) break;
         const hasLabel = !!ann.labelX?.value && !!ann.labelY?.value;
         const label = hasLabel
           ? transferPoints(ob, newBox, [{ x: num(ann.labelX), y: num(ann.labelY) }])?.[0]
