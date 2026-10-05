@@ -30,7 +30,7 @@ import { TooltipProvider } from 'ui/components/tooltip';
 declare global {
   interface Window {
     __api: Record<string, (body: unknown) => unknown>;
-    __form: () => TechCardFormData;
+    __rolesForm: () => TechCardFormData;
     __roundTrip: () => unknown;
   }
 }
@@ -72,7 +72,7 @@ function Card() {
       })),
     } as never,
   });
-  window.__form = () => form.getValues();
+  window.__rolesForm = () => form.getValues();
   window.__roundTrip = () => {
     const sent = mapFormToTechCardInsert(form.getValues());
     const back = mapTechCardToForm({ techCard: sent } as unknown as common_TechCard);

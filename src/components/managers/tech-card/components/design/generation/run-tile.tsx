@@ -1,5 +1,4 @@
 import type {
-  DesignBenchSlotRef,
   GetDesignBandResponse,
   common_DesignPicture,
   common_DesignRun,
@@ -8,14 +7,8 @@ import { cn } from 'lib/utility';
 import { useEffect, useState } from 'react';
 
 import { isPickablePicture } from '../band-feed';
-import {
-  COLORWAY_NONE,
-  benchKindOf,
-  colorwayOf,
-  pictureBenchKind,
-  type Representation,
-} from '../bench-kinds';
-import { displayDetailName, readBench, refBenchKind } from '../bench-slot';
+import { pictureBenchKind, type Representation } from '../bench-kinds';
+import { refBenchKind } from '../bench-slot';
 import { pictureHandle } from '../handles';
 import { VectorModal } from '../modals';
 import { usePickMode } from '../pick-mode';
@@ -25,13 +18,13 @@ import { RunRenderTile, useRenderHost } from '../render/render-tile';
 import { isModelUrl } from '../threed/media';
 import { useDesignWrites } from '../use-design-band';
 import { isPictureHidden } from '../visibility';
-import { isActiveView, isLegacyView, normaliseViewKey, viewLabel } from '../views';
 import { closeSurface, openSurface } from './bench-store';
 import { compositeTail, offersSplit, readComposite, readSplit, splitVerb } from './composite';
 import { deleteTitle, isDerivedPicture, useDeletePicture } from './delete-picture-modal';
 import { isUndoneEdit, successorStands } from './edit-chain';
 import { useEditChainDoors } from './edit-chain-doors';
-import { WorkbenchEditor } from './propagating-editor';
+import { slotOfPicture } from './picture-slot';
+import { ReplacingEditor } from './propagating-editor';
 import { useSlotMenu } from './slot-picker';
 import { thumbUrl } from './thumb';
 
@@ -48,73 +41,6 @@ import { thumbUrl } from './thumb';
  */
 
 /* ────────────────────────────── reading ────────────────────────────── */
-
-type SlotOfPicture = {
-  ref: DesignBenchSlotRef;
-  /**
-   * THE SLOT'S FULL NAME, FOR PROSE: `front`, or `render · front` — a bench other than the flat one
-   * says its name, because «FRONT» alone names two different slots. Read by `unmark`'s label and
-   * title, where the sentence has to be unambiguous on its own («take this picture out of …»).
-   * ⚠ NOT the badge — see `badge` below.
-   */
-  label: string;
-  /**
-   * THE WORD ON THE TILE'S BADGE — the side, and only the side (r3 п.33). Владелец, дословно: «в
-   * истории на FABRIC RENDER в миниатюрах не писать род RENDER FRONT». Род здесь сказан ДВАЖДЫ до
-   * того, как его прочтут: шаг, на котором открыта история, уже сузил её до своего рода, и подпись
-   * под кадром печатает его словом (`render · front`). Третье повторение на самом кадре — шум, и
-   * оно съедало ширину ярлыка, у которого есть свой потолок в примитиве.
-   * ⚠ ЭТО ПОЛЕ, А НЕ `label.split()` У ВЫЗЫВАЮЩЕГО: два имени одного слота обязаны считаться там
-   * же, где считается его адрес, иначе они разойдутся молча — ровно как разошлись роды верстаков.
-   */
-  badge: string;
-  rev: number;
-};
-
-/**
- * Which bench slot holds this picture, addressed the way a write to it must be addressed.
- *
- * THE ROW ITSELF NAMES ITS BENCH (L-1/L-5). This walks the raw rows: whatever bench the picture
- * actually stands on — its own, or the wrong one placed by the old defect — the unmark addresses
- * THAT row, with THAT row's kind and CAS token, which is the only ref the server will not refuse.
- * The kind is spelled from the row, never guessed from the picture.
- */
-function slotOfPicture(band: GetDesignBandResponse, pictureId: number): SlotOfPicture | null {
-  if (!pictureId) return null;
-  for (const row of band.bench ?? []) {
-    if ((row.pictureId ?? 0) !== pictureId) continue;
-    const view = normaliseViewKey(row.viewKey);
-    // A RETIRED THREE-QUARTER IS STILL A SIDE ROW, NOT A DETAIL (D-18, Codex M-11): it is addressed
-    // by its view key like any side, and prints «3/4 left (legacy)» — «not active» never means
-    // «address it as a detail by id».
-    if (isActiveView(view) || isLegacyView(view)) {
-      const kind = benchKindOf(row);
-      return {
-        /* И КОЛОРВЕЙ БЕРЁТСЯ У САМОЙ СТРОКИ, А НЕ У ЭКРАНА (L-2): снятие адресует ТУ строку, в
-           которой плита стоит, — со всеми тремя половинами её адреса. Разбор — один, `colorwayOf`
-           в `../bench-kinds`. */
-        ref: { viewKey: view, kind, colorwayId: colorwayOf(row) },
-        // The flat bench keeps its bare labels — the look every tile has always had; any other
-        // bench says its name, because «FRONT» alone now names two different slots. That is the
-        // PROSE name; the badge on the tile carries the side alone (r3 п.33).
-        label: kind === 'flat' ? viewLabel(view) : `${kind} · ${viewLabel(view)}`,
-        badge: viewLabel(view),
-        rev: row.slotRev ?? 0,
-      };
-    }
-    const name = displayDetailName(readBench(band, benchKindOf(row)).details, row);
-    return {
-      // A minted id already names its bench AND its colourway; both are ignored/deferred to beside
-      // a slot_id, so 0 here is «not stated» and lets the row's own value stand.
-      ref: { slotId: row.id, kind: undefined, colorwayId: COLORWAY_NONE },
-      // Именованная деталь рода не носила никогда — её имя и есть её адрес.
-      label: name,
-      badge: name,
-      rev: row.slotRev ?? 0,
-    };
-  }
-  return null;
-}
 
 /** The word for a run's kind on its own line: `flat · pattern · render · 3D · on model`. */
 export const REP_NOUN: Record<Representation, string> = {
@@ -137,11 +63,6 @@ function kindWord(run: Pick<common_DesignRun, 'kind'>, rep: Representation | nul
      tells a person less than the row already knows. */
   if (kind === 'cutout') return 'cut-out';
   return rep ? REP_NOUN[rep] : kind || 'run';
-}
-
-/** Where a picture stands on `band`'s bench, in prose — the editor's toast after an overwrite (D-55). */
-function slotLabelOf(band: GetDesignBandResponse, pictureId: number): string | null {
-  return slotOfPicture(band, pictureId)?.label ?? null;
 }
 
 /**
@@ -356,18 +277,29 @@ export function RunTile({
         deletePending={removal.pending}
       >
         {removal.modal}
-        {editing && (
-          <VectorModal
-            open
-            onOpenChange={setEditing}
-            techCardId={techCardId}
-            band={band}
-            base={picture}
-            slot={null}
-            replace={null}
-            disabled={disabled}
-          />
-        )}
+        {/* T59: a render's edit takes its place too — the slot holding it moves onto the edit. */}
+        {editing &&
+          (pictureId > 0 ? (
+            <ReplacingEditor
+              band={band}
+              techCardId={techCardId}
+              picture={picture}
+              siblings={siblings}
+              disabled={disabled}
+              onOpenChange={setEditing}
+            />
+          ) : (
+            <VectorModal
+              open
+              onOpenChange={setEditing}
+              techCardId={techCardId}
+              band={band}
+              base={picture}
+              slot={null}
+              replace={null}
+              disabled={disabled}
+            />
+          ))}
       </RunRenderTile>
     );
   }
@@ -434,7 +366,7 @@ export function RunTile({
   if (pick.target) {
     const targetKind = refBenchKind(band, pick.target.slot);
     const kindOk = pictureBenchKind(picture) === targetKind;
-    const pickable = isPickablePicture(picture) && kindOk;
+    const pickable = isPickablePicture(picture) && kindOk && !replaced;
     return (
       <button
         type='button'
@@ -569,9 +501,7 @@ export function RunTile({
                 onClick: openEditor,
                 ariaLabel: `edit ${handle} — draw over this picture`,
                 title:
-                  (workbench
-                    ? 'draw over this picture — the edit takes its place here and in its slot; undo brings this one back, and the history keeps both'
-                    : 'draw over this picture — saving makes a NEW picture in this same run row; the original is never overwritten') +
+                  'draw over this picture — the edit takes its place on the bench and in every slot it stands in; the history keeps both' +
                   (composite
                     ? '. This file holds several views at once, so the edit keeps them together — cut it into views first if you want them apart'
                     : '') +
@@ -596,14 +526,13 @@ export function RunTile({
           перерисовывала всю историю на каждую букву выноски. Тост после перезаписи называет слот
           по ПЕРЕЧИТАННОЙ полосе (`slotOf`), а не по вопросу. */}
       {editing &&
-        (workbench && pictureId > 0 ? (
-          <WorkbenchEditor
+        (pictureId > 0 ? (
+          /* T59: the edit takes the picture's place from the history too, not only on the bench. */
+          <ReplacingEditor
             band={band}
             techCardId={techCardId}
             picture={picture}
             siblings={siblings}
-            slotLabel={inSlot?.label ?? null}
-            slotOf={slotLabelOf}
             disabled={disabled}
             onOpenChange={setEditing}
           />

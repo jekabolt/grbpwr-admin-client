@@ -219,7 +219,7 @@ function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
       const q = px(selected.quad);
       const c = q.findIndex((v) => Math.hypot(v.x - p.x, v.y - p.y) <= HANDLE);
       if (c >= 0) return { key: selected.key, part: 'corner' };
-      const r = rotationHandle(q, ROT_OFF).at;
+      const r = rotationHandle(q, ROT_OFF, w, h).at;
       if (Math.hypot(r.x - p.x, r.y - p.y) <= HANDLE) return { key: selected.key, part: 'rotate' };
     }
     const hit = [...art.items].reverse().find((it) => insideQuad(p, px(it.quad)));
@@ -401,7 +401,7 @@ function ArtworkLayer({ art }: { art: SideArtwork }): JSX.Element {
           {selected &&
             (() => {
               const q = quadOf(selected);
-              const r = rotationHandle(q, ROT_OFF);
+              const r = rotationHandle(q, ROT_OFF, w, h);
               return (
                 <g data-artwork-handles=''>
                   <line x1={r.from.x} y1={r.from.y} x2={r.at.x} y2={r.at.y} stroke={stroke} />

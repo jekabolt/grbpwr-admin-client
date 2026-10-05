@@ -15,11 +15,11 @@ import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 
 import { serverSpeaksDesign } from '../capability';
+import { ReplacingEditor } from '../generation/propagating-editor';
 import { cropFamilies } from '../generation/composite';
 import { CropDeck } from '../generation/crop-deck';
 import { runStatus } from '../generation/run-state';
 import { useElapsed } from '../generation/use-generation';
-import { VectorModal } from '../modals';
 import { ModelSnapshotScope } from '../picture-tile';
 import { useSplitToInput } from '../split-to-input';
 import { threedResults } from '../threed/media';
@@ -270,7 +270,9 @@ export function OutputsSection({
   });
   /* КАКУЮ ИМЕННО КАРТИНКУ ПРАВИМ. Не булево `editing`: ячеек в полосе много, а модалка одна,
      и флаг открыл бы редактор сразу над всеми. Ноль — закрыто. */
-  const [editingId, setEditingId] = useState(0);
+  /* T59: the picture itself is held, not looked up in the list — the overwrite takes it off the
+     list (an original an edit replaced is offered nowhere) before its editor closes. */
+  const [editing, setEditing] = useState<common_DesignPicture | null>(null);
   /**
    * ОДНА ОТКРЫТАЯ КОЛОДА НА РАЗДЕЛ, тем же законом, что и в ленте: «нажимаешь на другой мультивью
    * старый колапсится обратно». Состояние из одного значения делает второе открытое невыразимым.
@@ -289,7 +291,7 @@ export function OutputsSection({
   if (shownCard.current !== techCardId) {
     shownCard.current = techCardId;
     if (openDeck !== null) setOpenDeck(null);
-    if (editingId) setEditingId(0);
+    if (editing) setEditing(null);
   }
 
 
@@ -633,10 +635,10 @@ export function OutputsSection({
         onEdit={
           !writesOff && !modelUrl && !composite
             ? {
-                onClick: () => setEditingId(picture.id ?? 0),
+                onClick: () => setEditing(picture),
                 ariaLabel: `edit ${spokenNoun} ${picture.ordinal ?? ''} — draw over this picture`.trim(),
                 title:
-                  'draw over this picture — saving makes a NEW picture; the original is never overwritten',
+                  'draw over this picture — the edit takes its place here and in every slot it stands in',
               }
             : undefined
         }
@@ -963,15 +965,14 @@ export function OutputsSection({
           бы столько модалок, сколько плиток; булев флаг открыл бы их разом над всеми.
           `slot={null}` — плитка полосы не слот верстака: машинная векторизация внутри честно
           откажет («the machine reads the bench»), а рисование поверх работает целиком. */}
-      {editingId > 0 && rows.some((r) => (r.picture.id ?? 0) === editingId) && (
-        <VectorModal
-          open
-          onOpenChange={(next: boolean) => !next && setEditingId(0)}
-          techCardId={techCardId}
+      {/* T59: the edit takes the picture's place — every slot holding it moves onto the edit. */}
+      {editing && (
+        <ReplacingEditor
           band={band}
-          base={rows.find((r) => (r.picture.id ?? 0) === editingId)!.picture}
-          slot={null}
+          techCardId={techCardId}
+          picture={editing}
           disabled={disabled}
+          onOpenChange={(next: boolean) => !next && setEditing(null)}
         />
       )}
 

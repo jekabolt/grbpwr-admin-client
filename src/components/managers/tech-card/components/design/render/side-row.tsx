@@ -20,6 +20,7 @@ import { COLORWAY_NONE, refColorwayFor } from '../bench-kinds';
 import { InertDoor, UndoRemoval, pictureUrl, useRemovalUndo } from '../bench-slot';
 import { archivedRef, colorwayLabel } from '../colorway-picker';
 import { PlaceOrDrawCell, EMPTY_WORD } from '../core';
+import { ReplacingEditor } from '../generation/propagating-editor';
 import { VectorModal } from '../modals';
 import { PictureTile } from '../picture-tile';
 import { readProvenance } from '../provenance';
@@ -712,7 +713,9 @@ export function SidesSection({
    * из `flats` при рендере.
    */
   const [editor, setEditor] = useState<
-    { mode: 'draw'; view: string } | { mode: 'edit'; pictureId: number } | null
+    | { mode: 'draw'; view: string }
+    | { mode: 'edit'; pictureId: number; picture: common_DesignPicture }
+    | null
   >(null);
 
   /**
@@ -828,7 +831,10 @@ export function SidesSection({
   const editing =
     editor?.mode === 'edit'
       ? columns.flatMap((c) => c.sides).find((s) => (s.picture?.id ?? 0) === editor.pictureId)
-          ?.picture ?? null
+          ?.picture ??
+        /* T59: the overwrite moves this side onto the edit before the editor closes — the picture
+           the editor was opened over is held, or the editor would unmount mid-save. */
+        editor.picture
       : null;
   /** Сторона, в которую сейчас рисуют, — ЖИВАЯ строка верстака, вместе со своим `slotRev`. */
   const drawing =
@@ -899,7 +905,10 @@ export function SidesSection({
           }
           onEdit={
             canWrite && (side.picture.id ?? 0) > 0
-              ? () => setEditor({ mode: 'edit', pictureId: side.picture?.id ?? 0 })
+              ? (
+                  (plate) => () =>
+                    setEditor({ mode: 'edit', pictureId: plate.id ?? 0, picture: plate })
+                )(side.picture)
               : undefined
           }
         />
@@ -1292,7 +1301,7 @@ export function SidesSection({
       )}
 
       {/* ОДИН РЕДАКТОР НА БЛОК, ПО ИМЕНИ ЦЕЛИ. `draw` пишет В СЛОТ (флэт-верстак, CAS этой
-          стороны); `edit` кладёт результат на карточку обычной картинкой и в слот не пишет. */}
+          стороны); `edit` (T59) занимает место плиты — сервер переводит на правку каждый слот с оригиналом. */}
       {drawing && (
         <VectorModal
           open
@@ -1309,15 +1318,14 @@ export function SidesSection({
           disabled={disabled}
         />
       )}
+      {/* T59: the edit takes the plate's place — in this side and wherever else it stands. */}
       {editing && (
-        <VectorModal
-          open
-          onOpenChange={(next: boolean) => !next && setEditor(null)}
-          techCardId={techCardId}
+        <ReplacingEditor
           band={band}
-          base={editing}
-          slot={null}
+          techCardId={techCardId}
+          picture={editing}
           disabled={disabled}
+          onOpenChange={(next: boolean) => !next && setEditor(null)}
         />
       )}
     </Section>

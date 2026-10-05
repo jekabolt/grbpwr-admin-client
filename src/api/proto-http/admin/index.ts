@@ -8199,10 +8199,9 @@ export type common_TechCardMediaItem = {
   mediaId: number | undefined;
   kind: common_TechCardMediaKind | undefined;
   caption: string | undefined;
-  // Role of a moodboard picture for the models: "target" (the garment we make), "detail" (a detail
-  // reference), "material" (fabric / colour / texture), "mood" (atmosphere only). "" = unassigned
-  // (read as mood). Technical media leave it empty.
-  role?: string | undefined;
+  // Moodboard picture role (0395): "target" (the garment we make) | "detail" | "material" | "mood";
+  // "" = unassigned. Only moodboard_media carries it; rides the full-replace card save.
+  role: string | undefined;
 };
 
 // TechCardMediaKind classifies a tech-card sketch image.
@@ -10324,6 +10323,7 @@ export type common_TechCardMediaFull = {
   media: common_MediaFull | undefined;
   kind: common_TechCardMediaKind | undefined;
   caption: string | undefined;
+  role: string | undefined;
 };
 
 // AdminColorwayRef is a derived, output-only reference to a colourway from its style (R1: GetStyle may
@@ -17716,6 +17716,9 @@ export type DesignQuizQuestion = {
   visualEvidence: string | undefined;
   clarifyQuestion: string | undefined;
   clarifyOptions: string[] | undefined;
+  // decision_key — snake_case key of the DECISION (not the wording), e.g. chest_room, collar_type;
+  // "" = none. A saved answer closes its key for later quizzes; saving an answer whose key matches a
+  // different saved question id forgets that older row (latest wins). Clients echo it on save.
   decisionKey: string | undefined;
 };
 
@@ -17747,6 +17750,8 @@ export type GetDesignQuizAnswersRequest = {
 
 export type GetDesignQuizAnswersResponse = {
   answers: DesignQuizAnswer[] | undefined;
+  // pending — the card's OPEN quiz session (the last GenerateDesignQuiz) minus every saved question
+  // id (answered or skipped), in the generated order; empty when no session is open. Resume source.
   pending: DesignQuizQuestion[] | undefined;
   pendingFamily: string | undefined;
 };
@@ -17755,6 +17760,7 @@ export type GetDesignQuizAnswersResponse = {
 export type SaveDesignQuizAnswersRequest = {
   techCardId: number | undefined;
   answers: DesignQuizAnswer[] | undefined;
+  // close_session — after the save, close the card's open quiz session (discard, or the quiz ended).
   closeSession: boolean | undefined;
 };
 
@@ -19482,8 +19488,10 @@ export interface AdminService {
   DraftDesignIdea(request: DraftDesignIdeaRequest): Promise<DraftDesignIdeaResponse>;
   // GenerateDesignQuiz (moodboard quiz) — one sync vision+JSON call: the model reads the board
   // pictures, the board words and the card facts, and asks 0..15 questions about what is still
-  // unclear or non-standard. Nothing is stored; ai_usage_event books the call. Questions already
-  // answered on the card (GetDesignQuizAnswers) are never returned again.
+  // unclear or non-standard. The generated list is stored as the card's OPEN quiz session (closing the
+  // previous one) so another tab or device can resume it (GetDesignQuizAnswers.pending); ai_usage_event
+  // books the call. Questions already answered on the card (by id, text or decision_key) are never
+  // returned again.
   // FailedPrecondition: nothing to ask about (no attached picture and no concept).
   GenerateDesignQuiz(request: GenerateDesignQuizRequest): Promise<GenerateDesignQuizResponse>;
   // SuggestDesignParts (auto parts) — one sync vision+JSON call: the model reads the side's flat cut
@@ -19502,12 +19510,15 @@ export interface AdminService {
   // has one from this call shape and !force.
   // FailedPrecondition: a side's flat changed, a side's region count is outside 2..60.
   SuggestDesignPartsCard(request: SuggestDesignPartsCardRequest): Promise<SuggestDesignPartsCardResponse>;
-  // GetDesignQuizAnswers — every quiz answer stored on the card, in display order.
+  // GetDesignQuizAnswers — every quiz answer stored on the card, in display order, plus the open
+  // session's questions not yet saved (pending).
   GetDesignQuizAnswers(request: GetDesignQuizAnswersRequest): Promise<GetDesignQuizAnswersResponse>;
   // SaveDesignQuizAnswers MERGES the sent answers into the card's stored list by question id: a sent
   // row is upserted (stamped with the card's current fingerprint, so it reads fresh), a row sent EMPTY
   // (no selection, no free text, not skipped) forgets that id, every stored row not sent stays.
-  // `stale` on a sent row is ignored. Returns the stored list.
+  // `stale` on a sent row is ignored. A saved row whose decision_key matches a DIFFERENT stored
+  // question id forgets that older row (latest wins). close_session closes the open quiz session after
+  // the save. Returns the stored list.
   SaveDesignQuizAnswers(request: SaveDesignQuizAnswersRequest): Promise<SaveDesignQuizAnswersResponse>;
   // GetWorkshopSettings returns «дом настроек цеха» (Ф2.5, 0272): the shop-floor constants that
   // belong to the ЦЕХ itself and not to any one card or раскладка. Первый жилец is the cutting

@@ -67,6 +67,7 @@ import { archivedRef, colorwayLabel } from './colorway-picker';
 import { EMPTY_WORD, GROUP_GAP } from './core';
 import { benchDoor } from './doors';
 import { pictureHandle } from './handles';
+import { ReplacingEditor } from './generation/propagating-editor';
 import { VectorModal } from './modals';
 import { recolorOutputs } from './recolor/model';
 // K-15 — ПЛИТКИ. Читатель ленты и раппорт прогона берутся у экрана паттернов: одно определение
@@ -2542,17 +2543,34 @@ export function ArtifactsPanel({
           вставать. Он рождается сиблингом основы (наследует её `run_id` или `batch_id`) и попадает
           в историю генераций или на полку загрузок — туда же, куда попадает правка из тех мест.
           Положить его на ЭТОТ лист — отдельное решение, и его принимает первое указание. */}
-      {rasterOn && (
-        <VectorModal
-          open
-          onOpenChange={(open) => !open && setRasterOn(null)}
-          techCardId={techCardId}
-          band={band}
-          base={bandPictureOfMedia.get(rasterOn.mediaId) ?? plateAsPicture(rasterOn)}
-          slot={null}
-          disabled={disabled}
-        />
-      )}
+      {/* T59: a plate that IS a band picture is edited in its place — every slot holding it moves
+          onto the edit, and a sheet row (with its callouts) follows it in the card form. A plate
+          the band does not know (a library upload) has nothing to be replaced in and goes as
+          before, beside. */}
+      {rasterOn &&
+        ((bandPictureOfMedia.get(rasterOn.mediaId)?.id ?? 0) > 0 ? (
+          <ReplacingEditor
+            band={band}
+            techCardId={techCardId}
+            picture={bandPictureOfMedia.get(rasterOn.mediaId)!}
+            disabled={disabled}
+            onOpenChange={(open) => !open && setRasterOn(null)}
+            onFlattened={(edit) => {
+              const full = edit.media;
+              if (full?.id) setPicked((prev) => [...prev, full]);
+            }}
+          />
+        ) : (
+          <VectorModal
+            open
+            onOpenChange={(open) => !open && setRasterOn(null)}
+            techCardId={techCardId}
+            band={band}
+            base={plateAsPicture(rasterOn)}
+            slot={null}
+            disabled={disabled}
+          />
+        ))}
 
       {/* ═══ ОКНО МОДЕЛИ — ТО ЖЕ, ЧТО ОТКРЫВАЕТ ПЛИТКА СТУДИИ (D-26) ═══════════════════════════════
           Одно окно на оба экрана, и снимок живёт в нём (довод в `threed/model-modal.tsx`).

@@ -66,3 +66,18 @@ export function chainSteps(picture: common_DesignPicture | null): ChainSteps {
     redoTo,
   };
 }
+
+/**
+ * AN EDIT TOOK THIS PICTURE'S PLACE (T59, 05.10) — read off the picture alone, for the lists that
+ * have no row at hand: a standing successor (`replaced_by`, and the server does not offer `redo`
+ * from here, i.e. the successor is not undone). Owner: the old picture stays only in the media
+ * library — no list of the bench offers it again.
+ */
+export function isReplacedPicture(picture: common_DesignPicture): boolean {
+  return successorStands(picture, []);
+}
+
+/** Neither replaced by an edit nor an undone edit — the pictures a bench list may draw (T59). */
+export function standsOnBench(picture: common_DesignPicture): boolean {
+  return !isUndoneEdit(picture) && !isReplacedPicture(picture);
+}

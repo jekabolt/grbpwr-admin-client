@@ -194,7 +194,7 @@ try {
       })),
     );
   const roles = () =>
-    page.evaluate(() => window.__form().moodboardMedia.map((i) => `${i.mediaId}:${i.role ?? ''}`));
+    page.evaluate(() => window.__rolesForm().moodboardMedia.map((i) => `${i.mediaId}:${i.role ?? ''}`));
 
   console.log('\nE3 · покой');
   const b0 = await badges();

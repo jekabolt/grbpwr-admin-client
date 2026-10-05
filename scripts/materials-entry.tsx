@@ -94,6 +94,42 @@ if (location.hash === '#making') {
   });
   (BAND as unknown as { runs: unknown[] }).runs = [live(701, 2), live(702, 4)];
 }
+/* `#r8` (round 8 minors): a shelf of 104 — 95 unused hardware pictures a manual replace left, and
+   six that must survive `clean unused` (placed, a parent, worn by a colourway, its pattern child,
+   an unbound fabric, one made a minute ago). `#r8-busy`: the same with a live run. `#r8-svglogo`: the composition label's logo is an
+   SVG, so it is not seeded. `#r8-noplace`: the same shelf on a band that does not say placements. */
+const R8 = location.hash.startsWith('#r8');
+if (R8) {
+  const b = BAND as unknown as {
+    assets: common_DesignAsset[];
+    assetPlacements?: unknown[];
+  };
+  const extra = (id: number, kind: string, more: Record<string, unknown> = {}) =>
+    ({ ...asset(id, kind, `rosso · old ${id}`, BUTTON), ...more }) as unknown as common_DesignAsset;
+  for (let i = 0; i < 95; i += 1) b.assets.push(extra(1000 + i, 'hardware'));
+  b.assets.push(
+    extra(1100, 'hardware'),
+    extra(1101, 'hardware'),
+    extra(1102, 'pattern', { derivedFromAssetId: 1101 }),
+    extra(1103, 'hardware', { colorwayId: 12 }),
+    extra(1104, 'fabric'),
+    // Created a minute ago: inside the undo / landing window, `clean unused` keeps it.
+    extra(1105, 'hardware', { createdAt: new Date(Date.now() - 60_000).toISOString() }),
+  );
+  // `#r8-busy`: a pattern run is live on the card, so `clean unused` waits for it.
+  if (location.hash === '#r8-busy')
+    (BAND as unknown as { runs: unknown[] }).runs = [
+      {
+        id: 790,
+        kind: 'pattern',
+        status: 'running',
+        startedAt: new Date().toISOString(),
+        params: { colorwayId: 11, pattern: { bomItemId: 2 } },
+      },
+    ];
+  if (location.hash !== '#r8-noplace')
+    b.assetPlacements = [{ id: 1, assetId: 1100, pictureId: 1, note: '' }];
+}
 (window as unknown as { __band: unknown }).__band = BAND;
 /* The library the picture slot opens: one horn button reference. */
 const HORN = svg(
@@ -101,13 +137,33 @@ const HORN = svg(
     `<circle cx='300' cy='300' r='200' fill='#1d1a17'/><circle cx='300' cy='300' r='160' fill='#2e2924'/>` +
     `<circle cx='270' cy='300' r='16' fill='#e8e4dc'/><circle cx='330' cy='300' r='16' fill='#e8e4dc'/>`,
 );
-/* A brand logo artwork: the label slot's `+ logo` picks it (second in the library). */
-const LOGO = svg(
+/* A brand logo artwork: the label slot's `+ logo` picks it (second in the library). A PNG — the
+   label logo and the artwork photo take raster pictures only. */
+const LOGO = (() => {
+  const c = document.createElement('canvas');
+  c.width = 600;
+  c.height = 600;
+  const g = c.getContext('2d');
+  if (!g) return '';
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, 600, 600);
+  g.fillStyle = '#111111';
+  g.font = '700 96px Helvetica, Arial';
+  g.textAlign = 'center';
+  g.fillText('GRBPWR', 300, 330);
+  return c.toDataURL('image/png');
+})();
+/* The same logo as an SVG (third in the library): refused by the label logo / artwork photo. */
+const LOGO_SVG = svg(
   `<rect width='600' height='600' fill='#ffffff'/>` +
     `<text x='300' y='330' font-family='Helvetica, Arial' font-size='96' font-weight='700' ` +
     `text-anchor='middle' fill='#111'>GRBPWR</text>`,
 );
-(window as unknown as { __library: unknown }).__library = [media(901, HORN), media(902, LOGO)];
+(window as unknown as { __library: unknown }).__library = [
+  media(901, HORN),
+  media(902, LOGO),
+  media(904, LOGO_SVG),
+];
 /* Card LABELS row of BRAND LABEL (BOM line 5): placement, fold, size seed its words. */
 const LABEL_SEEDS = new Map([
   [5, { placement: 'neckline, centre back', folding: 'flat', size: '50 × 20 mm' }],
@@ -158,7 +214,7 @@ const SLOTS: MaterialSlot[] = [
     1,
     'fabric',
     'fabric',
-    'MAIN FABRIC',
+    R8 ? 'MAIN FABRIC OUTER SHELL' : 'MAIN FABRIC',
     'main material',
     'TECH_CARD_BOM_SECTION_FABRIC',
     '100% wool twill 320 gsm',
@@ -214,6 +270,13 @@ function Harness() {
           onColorwayChange={setColorwayId}
           slots={[...SLOTS, ...born]}
           labelSeeds={LABEL_SEEDS}
+          labelLogo={
+            location.hash === '#r8-svglogo'
+              ? media(905, LOGO_SVG)
+              : R8
+                ? media(902, LOGO)
+                : undefined
+          }
           onGoStep={() => {}}
         />
       </div>

@@ -8,6 +8,7 @@ import type {
   common_MediaFull,
 } from 'api/proto-http/admin';
 
+import { standsOnBench } from '../generation/edit-chain';
 import { isRunLive } from '../generation/run-state';
 import { mixedInputNote, provenanceLabel, readProvenance } from '../provenance';
 import { isPictureHidden } from '../visibility';
@@ -475,6 +476,7 @@ export function outputsOfKind(
     for (const picture of run.pictures ?? []) {
       if (isPictureHidden(picture)) continue;
       if ((picture.id ?? 0) <= 0) continue;
+      if (!standsOnBench(picture)) continue; // T59, as in `cardOutputRows`
       out.push({ picture, run });
     }
   }

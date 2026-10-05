@@ -12,6 +12,7 @@ import { displayDetailName, readBench } from '../bench-slot';
 import { NewDetailModal } from '../modals';
 import { useDesignWrites } from '../use-design-band';
 import { isDetailView, normaliseViewKey, sidesLeadingWith, viewLabel } from '../views';
+import { isReplacedPicture } from './edit-chain';
 
 /**
  * THE SLOT MENU ON A TILE — «this picture goes into that slot», said from the picture's side.
@@ -166,7 +167,10 @@ export function useSlotMenu({
       ? rep === 'onmodel'
         ? ONMODEL_NO_SLOT
         : noBenchReason(picture)
-      : null;
+      : isReplacedPicture(picture)
+        ? // T59: the old picture stays in the library only — the edit that replaced it is the one to place.
+          'an edit replaced this picture — place the edit instead'
+        : null;
 
   const place = (value: string) => {
     if (disabled || reason || !pictureId) return;

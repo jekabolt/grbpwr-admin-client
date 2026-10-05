@@ -14,7 +14,7 @@
 // ONE write — `UndoDesignEdit` / `RedoDesignEdit` with the CAS on the version pressed.
 //
 //   node scripts/edit-chain-probe.mjs
-//   node scripts/edit-chain-probe.mjs --mutate=headstop|cardskip|hiddenundone|canredo|closed|corners|cas|splitgate|target
+//   node scripts/edit-chain-probe.mjs --mutate=headstop|cardskip|hiddenundone|canredo|closed|corners|cas|splitgate|target|outputs|pickable
 //   — each goes red
 
 import { createRequire } from 'node:module';
@@ -80,6 +80,18 @@ const MUTATIONS = {
     file: /generation\/edit-chain-doors\.ts$/,
     from: "expectedTargetId: step === 'undo' ? steps.undoTo : steps.redoTo,",
     to: 'expectedTargetId: 0,',
+  },
+  // T59: a render list offers the replaced original again, beside its edit
+  outputs: {
+    file: /render\/model\.ts$/,
+    from: '      if (!standsOnBench(picture)) continue; // T59, as in `cardOutputRows`\n',
+    to: '',
+  },
+  // T59: FLAT SLOTS' picker offers the replaced original again
+  pickable: {
+    file: /bench-slot\.tsx$/,
+    from: '      !successorStands(p, all) &&\n',
+    to: '',
   },
   // the step carries no CAS: a stale screen would step a chain it no longer sees
   cas: {
@@ -277,6 +289,32 @@ const check = (name, ok, detail = '') => {
       undefined,
       false,
     ) === null,
+  );
+
+  // T59: the old picture stays in the library only — no bench list offers it again
+  check('P23 a replaced original is replaced', a.isReplacedPicture(p(80, { replacedBy: 81 })));
+  check(
+    'P23b …not when its successor is undone (can_redo)',
+    !a.isReplacedPicture(p(80, { replacedBy: 81, canRedo: true })),
+  );
+  const rOrig = p(80, { replacedBy: 81, kind: 'render', media: { id: 180 } });
+  const rEdit = edit(81, 80, { kind: 'render', media: { id: 181 } });
+  const rUndone = edit(82, 81, { kind: 'render', undoneAt: H, media: { id: 182 } });
+  const bandR = { runs: [{ id: 8, kind: 'render', pictures: [rOrig, rEdit, rUndone] }] };
+  const shown = a.outputsOfKind(bandR, 'render').map((r) => r.picture.id);
+  check(
+    'P24 render outputs: the edit only',
+    JSON.stringify(shown) === '[81]',
+    JSON.stringify(shown),
+  );
+  const fOrig = p(90, { replacedBy: 91, kind: 'flat', media: { id: 190 } });
+  const fEdit = edit(91, 90, { kind: 'flat', media: { id: 191 } });
+  const bandF = { runs: [{ id: 9, kind: 'flat', pictures: [fOrig, fEdit] }], batches: [] };
+  const pick = a.pickableFlats(bandF).map((x) => x.id);
+  check(
+    'P25 FLAT SLOTS picker: the edit only',
+    JSON.stringify(pick) === '[91]',
+    JSON.stringify(pick),
   );
 }
 
