@@ -100,5 +100,57 @@ for (const file of readdirSync(FLATS).sort()) {
     `  1600 sheet ${W}x${H}: ${r.count} regions in ${Math.round(performance.now() - t0)} ms (r=${m.scaledRadius(W, H)})`,
   );
 }
+// v3 · DASHES (tmp/plans/flat-consistency/l5.py): the front view of a flare sheet whose inner V layer
+// is drawn as a light dashed line behind sheer cloth. Without the bridge the V is no region; with
+// it the V separates (~15 % of the silhouette, l5: 16 % / 15 %) and the bindings and side panels stay.
+{
+  const LAYERS = resolve(REPO, '../tmp/plans/flat-consistency/out/layers/test1');
+  for (const sheet of ['sheet-1', 'sheet-4']) {
+    const file = resolve(LAYERS, `${sheet}.png`);
+    if (!existsSync(file)) {
+      console.log(`  skip  ${sheet} (no ${file})`);
+      continue;
+    }
+    const full = rgbaOf(m.decodePng(readFileSync(file)));
+    const W = Math.round(full.w * 0.27);
+    const H = full.h;
+    const front = new Uint8ClampedArray(W * H * 4);
+    for (let y = 0; y < H; y += 1)
+      front.set(full.data.subarray(y * full.w * 4, (y * full.w + W) * 4), y * W * 4);
+    const shares = (r) => {
+      let sil = 0;
+      for (let i = 0; i < r.silhouette.length; i += 1) sil += r.silhouette[i];
+      const size = new Array(r.count + 1).fill(0);
+      const cx = new Array(r.count + 1).fill(0);
+      const cy = new Array(r.count + 1).fill(0);
+      for (let i = 0; i < r.labels.length; i += 1) {
+        const id = r.labels[i];
+        if (!id) continue;
+        size[id] += 1;
+        cx[id] += i % W;
+        cy[id] += Math.floor(i / W);
+      }
+      return size.slice(1).map((s, k) => ({
+        share: s / sil,
+        x: cx[k + 1] / s / W,
+        y: cy[k + 1] / s / H,
+      }));
+    };
+    const base = shares(m.analyseFlat(front, W, H, { dashes: false }));
+    const dash = shares(m.analyseFlat(front, W, H));
+    // The V: centred, upper half, 10–25 % of the silhouette. The binding at the neck: a region in
+    // the top fifth.
+    const isV = (g) => g.share >= 0.1 && g.share <= 0.25 && Math.abs(g.x - 0.5) < 0.1 && g.y < 0.5;
+    const isNeck = (g) => g.y < 0.25 && g.share < 0.1;
+    const vBase = base.some(isV);
+    const vDash = dash.find(isV);
+    const ok = !vBase && !!vDash && dash.some(isNeck) && dash.length >= base.length;
+    if (!ok) bad += 1;
+    const pct = (list) => list.map((g) => `${Math.round(g.share * 100)}%`).join(' ');
+    console.log(
+      `${ok ? '  ok  ' : '  FAIL'} ${sheet} front  base ${base.length} [${pct(base)}]  dash ${dash.length} [${pct(dash)}]  V ${vDash ? `${Math.round(vDash.share * 100)}%` : 'none'}`,
+    );
+  }
+}
 console.log(bad ? `\n${bad} FAIL` : '\nall ok');
 process.exit(bad ? 1 : 0);

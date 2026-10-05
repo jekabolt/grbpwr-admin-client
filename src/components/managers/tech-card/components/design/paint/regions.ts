@@ -11,6 +11,13 @@
  *              CHANNEL (long, max inscribed radius ≤ 6 px on a 1024 sheet — the strip between a
  *              seam and its topstitching) joins the neighbour it shares the longest border with,
  *              across the line (v2).
+ *   dashes     (v3, `tmp/plans/flat-consistency/l5.py`) a faint DASHED line — the edge of a layer
+ *              seen through sheer cloth — falls into the ink only as dots, so it never closed a
+ *              region. Light ink (grey < 215) in small pieces (≤ 40 px on a 1024 sheet) counts as
+ *              dashes; each is bridged by a 1-px line to its 2 nearest dashes and to the nearest big
+ *              stroke within 1.4 % of the long side. Light ink and bridges are walls for the
+ *              regions only, never `ink` (paint still covers them). A washed sketch (> 4 % of the
+ *              sheet light but not ink) is not bridged.
  *
  * Radii are measured on a 1024 sheet (Ф0: r = 3 closes gaps without eating thin parts) and scale
  * with the long side, never below 3.
@@ -32,7 +39,7 @@ export type FlatRegions = {
  * The cutter's revision: the numbers of the regions (and so a cached auto-parts answer) hold only
  * for the same algorithm on the same flat. Bump on ANY change to how `analyseFlat` numbers regions.
  */
-export const REGIONS_ALGO_REV = 'regions.v2';
+export const REGIONS_ALGO_REV = 'regions.v3';
 
 const INF = 1e20;
 
@@ -40,20 +47,29 @@ const INF = 1e20;
 export const scaledRadius = (w: number, h: number, at1024 = 3): number =>
   Math.max(at1024, Math.round((at1024 * Math.max(w, h)) / 1024));
 
-/** Ink mask of an RGBA raster (alpha composited over white). */
-export function inkMask(rgba: Uint8ClampedArray | Uint8Array, w: number, h: number): Uint8Array {
+/** Grey of an RGBA raster, alpha composited over white. */
+function greyOf(rgba: Uint8ClampedArray | Uint8Array, w: number, h: number): Uint8Array {
   const n = w * h;
   const grey = new Uint8Array(n);
-  const hist = new Float64Array(256);
   for (let i = 0, p = 0; i < n; i += 1, p += 4) {
     const a = rgba[p + 3] / 255;
     const r = rgba[p] * a + 255 * (1 - a);
     const g = rgba[p + 1] * a + 255 * (1 - a);
     const b = rgba[p + 2] * a + 255 * (1 - a);
-    const v = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-    grey[i] = v;
-    hist[v] += 1;
+    grey[i] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
   }
+  return grey;
+}
+
+/** Ink mask of an RGBA raster (alpha composited over white). */
+export function inkMask(rgba: Uint8ClampedArray | Uint8Array, w: number, h: number): Uint8Array {
+  return inkOfGrey(greyOf(rgba, w, h));
+}
+
+function inkOfGrey(grey: Uint8Array): Uint8Array {
+  const n = grey.length;
+  const hist = new Float64Array(256);
+  for (let i = 0; i < n; i += 1) hist[grey[i]] += 1;
   const t = otsu(hist, n);
   const thr = t > 30 && t < 230 ? t : 128;
   const ink = new Uint8Array(n);
@@ -374,9 +390,11 @@ export function regionsOf(
   h: number,
   r: number,
   silhouette?: Uint8Array,
+  /** What closes regions (default: the ink) — the ink plus the bridged dashes (v3). */
+  walls: Uint8Array = ink,
 ): { labels: Int32Array; count: number } {
   const n = w * h;
-  const wall = r > 0 ? dilate(ink, w, h, r) : ink;
+  const wall = r > 0 ? dilate(walls, w, h, r) : walls;
   const free = new Uint8Array(n);
   for (let i = 0; i < n; i += 1) free[i] = wall[i] ? 0 : 1;
   const { lab, n: total } = components(free, w, h);
@@ -436,12 +454,185 @@ export function analyseFlat(
   rgba: Uint8ClampedArray | Uint8Array,
   w: number,
   h: number,
-  opts: { r?: number } = {},
+  opts: { r?: number; dashes?: boolean } = {},
 ): FlatRegions {
-  const ink = inkMask(rgba, w, h);
+  const grey = greyOf(rgba, w, h);
+  const ink = inkOfGrey(grey);
+  const walls = opts.dashes === false ? ink : bridgeDashes(grey, ink, w, h);
   const rs = scaledRadius(w, h, 3);
-  const silhouette = silhouetteOf(ink, w, h, rs);
+  const silhouette = silhouetteOf(walls, w, h, rs);
   const r = opts.r ?? scaledRadius(w, h, 3);
-  const { labels, count } = regionsOf(ink, w, h, r, silhouette);
+  const { labels, count } = regionsOf(ink, w, h, r, silhouette, walls);
   return { w, h, ink, silhouette, labels, count };
+}
+
+/** Light ink: a faint dash is grey ~80–150, under Otsu only as dots. */
+const DASH_LIGHT = 215;
+/** A dash is a light-ink piece no bigger than this on a 1024 sheet (px²). */
+const DASH_AREA_AT_1024 = 40;
+/** How far a dash reaches for its neighbours, a share of the long side. */
+const DASH_GAP_SHARE = 0.014;
+/** More light-but-not-ink than this share of the sheet = a wash, not a line drawing. */
+const DASH_WASH_SHARE = 0.04;
+
+/**
+ * The ink plus the light ink plus 1-px bridges along every dashed line (l5.py `bridge_dashes`):
+ * each dash to its two nearest dashes and to the nearest big stroke, all within the gap. A sheet
+ * drawn light on dark (the ink inverted) or washed with tone is left as it is.
+ */
+export function bridgeDashes(grey: Uint8Array, ink: Uint8Array, w: number, h: number): Uint8Array {
+  const n = w * h;
+  let inkSum = 0;
+  let inkN = 0;
+  for (let i = 0; i < n; i += 1)
+    if (ink[i]) {
+      inkSum += grey[i];
+      inkN += 1;
+    }
+  if (inkN === 0 || inkSum / inkN > 128) return ink;
+
+  const out = new Uint8Array(n);
+  const light = new Uint8Array(n);
+  let wash = 0;
+  for (let i = 0; i < n; i += 1) {
+    light[i] = grey[i] < DASH_LIGHT ? 1 : 0;
+    if (light[i] && !ink[i]) wash += 1;
+    out[i] = ink[i] | light[i];
+  }
+  // A washed sketch (watercolour, a tinted fill) is light ink everywhere — no dashes to read there.
+  if (wash > n * DASH_WASH_SHARE) return ink;
+
+  // 8-connected pieces of light ink: area and centroid.
+  const lab = new Int32Array(n);
+  const stack = new Int32Array(n);
+  const area: number[] = [0];
+  const sx: number[] = [0];
+  const sy: number[] = [0];
+  let count = 0;
+  for (let s = 0; s < n; s += 1) {
+    if (!light[s] || lab[s]) continue;
+    count += 1;
+    let top = 0;
+    let a = 0;
+    let ax = 0;
+    let ay = 0;
+    lab[s] = count;
+    stack[top++] = s;
+    while (top > 0) {
+      const i = stack[--top];
+      const x = i % w;
+      const y = (i - x) / w;
+      a += 1;
+      ax += x;
+      ay += y;
+      for (let dy = -1; dy <= 1; dy += 1) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= w || (dx === 0 && dy === 0)) continue;
+          const j = yy * w + xx;
+          if (light[j] && !lab[j]) {
+            lab[j] = count;
+            stack[top++] = j;
+          }
+        }
+      }
+    }
+    area.push(a);
+    sx.push(ax / a);
+    sy.push(ay / a);
+  }
+
+  const long = Math.max(w, h);
+  const small = (DASH_AREA_AT_1024 * long * long) / (1024 * 1024);
+  const gap = Math.max(6, DASH_GAP_SHARE * long);
+  const dashes: number[] = [];
+  for (let id = 1; id <= count; id += 1) if (area[id] <= small) dashes.push(id);
+  if (!dashes.length) return out;
+
+  const line = (x0: number, y0: number, x1: number, y1: number) => {
+    let x = x0;
+    let y = y0;
+    const dx = Math.abs(x1 - x0);
+    const dy = -Math.abs(y1 - y0);
+    const stepX = x0 < x1 ? 1 : -1;
+    const stepY = y0 < y1 ? 1 : -1;
+    let err = dx + dy;
+    for (;;) {
+      if (x >= 0 && y >= 0 && x < w && y < h) out[y * w + x] = 1;
+      if (x === x1 && y === y1) return;
+      const e2 = 2 * err;
+      if (e2 >= dy) {
+        err += dy;
+        x += stepX;
+      }
+      if (e2 <= dx) {
+        err += dx;
+        y += stepY;
+      }
+    }
+  };
+  const px = (id: number) => Math.floor(sx[id]);
+  const py = (id: number) => Math.floor(sy[id]);
+
+  // Dash → its 2 nearest dashes within the gap (a grid of gap-sized cells).
+  const cols = Math.max(1, Math.ceil(w / gap));
+  const cells = new Map<number, number[]>();
+  for (const id of dashes) {
+    const key = Math.floor(sy[id] / gap) * cols + Math.floor(sx[id] / gap);
+    const list = cells.get(key);
+    if (list) list.push(id);
+    else cells.set(key, [id]);
+  }
+  for (const id of dashes) {
+    const cx = Math.floor(sx[id] / gap);
+    const cy = Math.floor(sy[id] / gap);
+    let b1 = 0;
+    let d1 = Infinity;
+    let b2 = 0;
+    let d2 = Infinity;
+    for (let gy = cy - 1; gy <= cy + 1; gy += 1)
+      for (let gx = cx - 1; gx <= cx + 1; gx += 1) {
+        if (gx < 0 || gx >= cols) continue;
+        for (const o of cells.get(gy * cols + gx) ?? []) {
+          if (o === id) continue;
+          const d = Math.hypot(sx[o] - sx[id], sy[o] - sy[id]);
+          if (d < d1) {
+            b2 = b1;
+            d2 = d1;
+            b1 = o;
+            d1 = d;
+          } else if (d < d2) {
+            b2 = o;
+            d2 = d;
+          }
+        }
+      }
+    if (b1 && d1 <= gap) line(px(id), py(id), px(b1), py(b1));
+    if (b2 && d2 <= gap) line(px(id), py(id), px(b2), py(b2));
+  }
+
+  // Dash → the nearest pixel of a big stroke within the gap: a dashed line attaches to the seam or
+  // band it ends at.
+  const big = new Uint8Array(n);
+  let anyBig = false;
+  for (let i = 0; i < n; i += 1)
+    if (lab[i] && area[lab[i]] > small) {
+      big[i] = 1;
+      anyBig = true;
+    }
+  if (anyBig) {
+    const { d2, nearest } = distanceTransform(big, w, h);
+    const lim = gap * gap;
+    for (const id of dashes) {
+      const x = px(id);
+      const y = py(id);
+      const i = y * w + x;
+      if (nearest[i] < 0 || d2[i] > lim) continue;
+      const j = nearest[i];
+      line(x, y, j % w, (j - (j % w)) / w);
+    }
+  }
+  return out;
 }
