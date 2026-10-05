@@ -6444,6 +6444,33 @@ export type SuggestPromptsResponse = {
   model: string | undefined;
 };
 
+export type SuggestCalloutsRequest = {
+  techCardId: number | undefined;
+  mediaIds: number[] | undefined;
+  dismissedSourceIds: string[] | undefined;
+};
+
+export type SuggestCalloutsResponse = {
+  suggestions: CalloutSuggestion[] | undefined;
+  model: string | undefined;
+};
+
+export type CalloutSuggestion = {
+  id: string | undefined;
+  sourceId: string | undefined;
+  sourceLabel: string | undefined;
+  mediaId: number | undefined;
+  kind: common_TechCardAnnotationKind | undefined;
+  points: common_TechCardAnnotationPoint[] | undefined;
+  posX: googletype_Decimal | undefined;
+  posY: googletype_Decimal | undefined;
+  spec: string | undefined;
+  description: string | undefined;
+  parts: string[] | undefined;
+  missing: string[] | undefined;
+  fromData: boolean | undefined;
+};
+
 export type UpdateTaskRequest = {
   id: number | undefined;
   task: common_TaskInsert | undefined;
@@ -18714,6 +18741,10 @@ export interface AdminService {
   // refusals; 4 in flight and 30 calls per admin per hour SHARED with EnhanceText → ResourceExhausted.
   // Classified as a WRITE on tech_cards, like EnhanceText (a press spends the AI key).
   SuggestPrompts(request: SuggestPromptsRequest): Promise<SuggestPromptsResponse>;
+  // SuggestCallouts — the `suggest ✦` door of the ARTIFACTS sheet: callouts the SAVED card's own data implies
+  // (BOM, operations, pieces, labels, details, STUDIO quiz) placed on its flats by the model, plus at most a few
+  // the model sees on the picture (from_data=false). Nothing is stored; accepting one is the client's ordinary write.
+  SuggestCallouts(request: SuggestCalloutsRequest): Promise<SuggestCalloutsResponse>;
   // GetFulfillmentBoard returns the three columns of cards (compact order +
   // annotation summary), oldest order first within each column.
   GetFulfillmentBoard(request: GetFulfillmentBoardRequest): Promise<GetFulfillmentBoardResponse>;
@@ -23722,6 +23753,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SuggestPrompts",
       }) as Promise<SuggestPromptsResponse>;
+    },
+    SuggestCallouts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/ai/suggest-callouts`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SuggestCallouts",
+      }) as Promise<SuggestCalloutsResponse>;
     },
     GetFulfillmentBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/board`; // eslint-disable-line quotes

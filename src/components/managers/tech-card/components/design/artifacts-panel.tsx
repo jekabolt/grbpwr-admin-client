@@ -9,7 +9,10 @@ import type {
   common_TechCard,
   common_TechCardMediaKind,
 } from 'api/proto-http/admin';
+import type { CalloutSuggestion } from 'api/proto-http/admin';
+import { abortableAdminService } from 'api/api';
 import { MediaSlot } from 'components/managers/media/components/media-slot';
+import { techCardErrorMessage } from 'components/managers/tech-cards/components/utils';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -36,6 +39,7 @@ import { parseSpec, placePurpose, sectionLetter } from 'ui/components/annotation
 import { AnnotationToolbar } from 'ui/components/annotation/toolbar';
 import { AnnotationZoomDialog } from 'ui/components/annotation/zoom-dialog';
 import { Button } from 'ui/components/button';
+import { Chip } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import { Toolbar } from 'ui/components/toolbar';
@@ -58,7 +62,17 @@ import {
   runRepresentation,
 } from './bench-kinds';
 import { readBench, type BenchRead } from './bench-slot';
+import { flushAllowsRun, flushRefusalSentence, useTechCardAutosave } from './autosave-contract';
 import { CalloutRail } from './callout-rail';
+import {
+  addDismissed,
+  ghostOf,
+  opNumberOf,
+  readDismissed,
+  seedOf,
+  type CalloutSeed,
+} from './callout-suggest';
+import { SuggestedCallouts } from './suggested-callouts';
 import { CalloutsPanel, useCalloutsPanel } from './callouts-panel';
 // ОДИН СЛОВАРЬ ИМЁН НА СТУДИЮ И НА ЛИСТ. `colorwayLabel` — та же лестница `devName → colorCode →
 // baseSku`, которой колорвей зовут в пикере и в столбцах SIDES; `archivedRef` — тот же предикат
@@ -1719,10 +1733,25 @@ export function ArtifactsPanel({
     pen: PenStyle,
     /** Чем ставили — приходит от поверхности; увеличенный вид держит свой инструмент (T08). */
     armed?: string | null,
-  ) {
-    if (pts.length === 0) return;
+    /**
+     * ПРИНЯТОЕ ПРЕДЛОЖЕНИЕ (T28, `suggest ✦` → ✓): фигура, маркер, `spec`, текст и детали уже
+     * решены сервером — `placePurpose` не зовётся. Номер выдаётся тем же счётом, что у руки.
+     */
+    seed?: CalloutSeed,
+  ): number {
+    if (pts.length === 0 && !seed) return 0;
     // НАЗНАЧЕНИЕ ВЗВЕДЕНО ЧИПОМ: фигура и `spec` — общим правилом (`placePurpose`, оно же у мудборда).
-    const placed = placePurpose(armed === undefined ? tool : armed, shape, pts);
+    const placed = seed
+      ? {
+          shape,
+          pts,
+          marker: seed.marker,
+          dashed: seed.dashed,
+          filled: seed.filled,
+          caps: seed.caps,
+          spec: seed.spec,
+        }
+      : placePurpose(armed === undefined ? tool : armed, shape, pts);
     shape = placed.shape;
     pts = placed.pts;
     /* ПЕРВОЕ УКАЗАНИЕ БЕРЁТ ПЛИТУ НА КАРТОЧКУ (D-18, довод у `canPlaceOn`). Плита ищется по
@@ -1730,24 +1759,27 @@ export function ArtifactsPanel({
     const plate = onScreen.find((p) => p.mediaId === mediaId);
     if (plate && plate.origin !== 'card') takeIntoCard(plate, { withCallout: true });
     const pin = shape === 'pin';
-    const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-    const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
-    const marker = pin
-      ? pts[0]
-      : (placed.marker ?? {
-          x: Math.min(0.96, Math.max(0.04, cx)),
-          y: Math.min(0.96, Math.max(0.06, cy - 0.08)),
-        });
+    const cx = pts.length ? pts.reduce((s, p) => s + p.x, 0) / pts.length : 0.5;
+    const cy = pts.length ? pts.reduce((s, p) => s + p.y, 0) / pts.length : 0.5;
+    const marker = seed
+      ? seed.marker
+      : pin
+        ? pts[0]
+        : placed.marker ?? {
+            x: Math.min(0.96, Math.max(0.04, cx)),
+            y: Math.min(0.96, Math.max(0.06, cy - 0.08)),
+          };
     const rows = (form.getValues('callouts') ?? []) as SheetCallout[];
+    const number = nextCalloutNumber();
     form.setValue(
       'callouts',
       [
         ...rows,
         {
-          number: nextCalloutNumber(),
-          part: '',
-          parts: [],
-          description: '',
+          number,
+          part: seed?.parts[0] ?? '',
+          parts: seed?.parts ?? [],
+          description: seed?.description ?? '',
           dimensions: '',
           mediaId,
           posX: marker.x.toFixed(3),
@@ -1763,6 +1795,7 @@ export function ArtifactsPanel({
       ],
       { shouldDirty: true },
     );
+    return number;
     // ВЫБОР ПОСТАВЛЕННОЙ ВЫНОСКИ ЗДЕСЬ НЕ ДЕЛАЕТСЯ, И ЭТО НЕ ЗАБЫВЧИВОСТЬ. Третий такт жеста
     // «клик — клик — напиши, что это» исполняет сама поверхность: она выбирает выноску, только что
     // выросшую в ЕЁ списке, и просит поставить в правку курсор. Написанный ещё и здесь, он открывал
@@ -2170,6 +2203,112 @@ export function ArtifactsPanel({
     prefsBase: SHEET_CALLOUTS_PREFS_KEY,
   });
 
+  /* ═══ SUGGEST ✦ (T28, R36) ════════════════════════════════════════════════════════════════════
+     Владелец: «кнопка отдельная где мы нажимаем … оно думает и подсказывает»; «сначала сохранить».
+     Нажатие: сейв карточки тем же путём, что у всех платных дверей (`autosave.flush`), затем
+     `SuggestCallouts` по всем карточным флэтам листа и отклонённым источникам этого компьютера.
+     Повторное нажатие во время прогона — отмена (соединение рвётся, `abortableAdminService`).
+     Новый прогон заменяет непринятые призраки; поставленные рукой указания не трогаются. */
+  const autosave = useTechCardAutosave();
+  const [suggestions, setSuggestions] = useState<CalloutSuggestion[]>([]);
+  const [suggestOpen, setSuggestOpen] = useState(true);
+  const [suggestHot, setSuggestHot] = useState<string | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const suggestAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => suggestAbort.current?.abort(), []);
+  // Другая карточка — другие предложения: призраки чужой карточки на этой были бы враньём.
+  useEffect(() => {
+    suggestAbort.current?.abort();
+    setSuggestions([]);
+  }, [techCardId]);
+  /** Карточные флэты листа — то, что сервер может прочесть и на что ляжет указание. */
+  const suggestMediaIds = useMemo(
+    () =>
+      segments.flat.plates
+        .filter((p) => p.origin === 'card' && !p.modelOnly && !!p.media)
+        .map((p) => p.mediaId),
+    [segments],
+  );
+  const runSuggest = async () => {
+    if (suggestAbort.current) {
+      suggestAbort.current.abort();
+      return;
+    }
+    const control = new AbortController();
+    suggestAbort.current = control;
+    setSuggesting(true);
+    try {
+      let flushed: Awaited<ReturnType<typeof autosave.flush>>;
+      try {
+        flushed = await autosave.flush('suggest-callouts');
+      } catch {
+        flushed = 'error';
+      }
+      if (control.signal.aborted) return;
+      if (!flushAllowsRun(flushed)) {
+        showMessage(flushRefusalSentence(flushed, autosave.errorsCount, autosave.refusal), 'error');
+        return;
+      }
+      const res = await abortableAdminService(control.signal).SuggestCallouts({
+        techCardId,
+        mediaIds: suggestMediaIds,
+        dismissedSourceIds: readDismissed(techCardId),
+      });
+      if (control.signal.aborted) return;
+      const onSheet = new Set(suggestMediaIds);
+      const next = (res.suggestions ?? []).filter((x) => !!x.id && onSheet.has(x.mediaId ?? 0));
+      setSuggestions(next);
+      setSuggestHot(null);
+      if (next.length === 0) {
+        showMessage('nothing to suggest', 'success');
+        return;
+      }
+      setSuggestOpen(true);
+      if (calloutsShell.collapsed) calloutsShell.hold();
+    } catch (error) {
+      if (!control.signal.aborted)
+        showMessage(techCardErrorMessage(error, 'suggest failed'), 'error');
+    } finally {
+      if (suggestAbort.current === control) suggestAbort.current = null;
+      setSuggesting(false);
+    }
+  };
+  const suggestionsOf = (mediaId: number): SurfaceCallout[] =>
+    kind === 'flat' ? suggestions.filter((x) => (x.mediaId ?? 0) === mediaId).map(ghostOf) : [];
+  /** ✓ — настоящее указание тем же путём, что у руки; источник-операция получает его номер. */
+  const acceptSuggestions = (ids: string[]) => {
+    const picked = suggestions.filter((x) => ids.includes(x.id ?? ''));
+    if (picked.length === 0) return;
+    calloutHistory?.record();
+    for (const x of picked) {
+      const seed = seedOf(x);
+      const number = addCalloutOn(
+        seed.mediaId,
+        seed.kind,
+        seed.points,
+        { color: '', dashed: false, filled: false, caps: '' } as PenStyle,
+        null,
+        seed,
+      );
+      const opNumber = opNumberOf(x.sourceId);
+      if (number > 0 && opNumber != null) {
+        const ops = form.getValues('operations') ?? [];
+        const at = ops.findIndex((o) => (o.operationNumber ?? 0) === opNumber);
+        if (at >= 0) form.setValue(`operations.${at}.calloutNumber`, number, { shouldDirty: true });
+      }
+    }
+    setSuggestions((list) => list.filter((x) => !ids.includes(x.id ?? '')));
+    setSuggestHot(null);
+  };
+  /** ✕ — источник больше не предлагается на этой карточке в этом браузере. */
+  const dismissSuggestion = (id: string) => {
+    const x = suggestions.find((s) => s.id === id);
+    if (!x) return;
+    addDismissed(techCardId, [x.sourceId ?? '']);
+    setSuggestions((list) => list.filter((s) => s.id !== id));
+    setSuggestHot(null);
+  };
+
   /** Read once, so the question and the act cannot disagree about how many are at stake. */
   const detachCount = detaching ? calloutsOn(detaching.mediaId) : 0;
 
@@ -2204,6 +2343,8 @@ export function ArtifactsPanel({
       onSlotMedia={!disabled ? placeInSlot : undefined}
       onView3d={setViewing3d}
       calloutsOf={calloutsOfPlate}
+      ghostsOf={suggestionsOf}
+      ghostHot={suggestHot}
       selected={selected}
       canPlaceOn={canPlaceOn}
       tool={tool}
@@ -2356,7 +2497,27 @@ export function ArtifactsPanel({
               такой дизайн»): виды и назначения одним рядом, без слова-заголовка. */}
           {drawableHere && (
             <Toolbar className={GROUP_GAP}>
-              <AnnotationToolbar purposes tool={tool} onTool={setTool} />
+              <AnnotationToolbar
+                purposes
+                tool={tool}
+                onTool={setTool}
+                trailing={
+                  kind === 'flat' && suggestMediaIds.length > 0 ? (
+                    <Chip
+                      className='ml-3'
+                      data-callout-suggest=''
+                      dashed={!suggesting}
+                      selected={suggesting}
+                      pressed={suggesting}
+                      aria-busy={suggesting || undefined}
+                      onClick={() => void runSuggest()}
+                      title={suggesting ? 'cancel' : 'suggest callouts from the card'}
+                    >
+                      {suggesting ? 'thinking…' : 'suggest ✦'}
+                    </Chip>
+                  ) : undefined
+                }
+              />
             </Toolbar>
           )}
 
@@ -2475,8 +2636,25 @@ export function ArtifactsPanel({
             focusToken={focusEditor}
             caps
             purposes
-            emptyLabel='none on this tab yet. A callout is placed on the picture itself — click a plate; the row appears here the moment it exists, and this is where its text is written.'
+            emptyLabel={
+              suggestions.length > 0 && kind === 'flat'
+                ? undefined
+                : 'none on this tab yet. A callout is placed on the picture itself — click a plate; the row appears here the moment it exists, and this is where its text is written.'
+            }
           />
+          {kind === 'flat' && (
+            <SuggestedCallouts
+              rows={suggestions}
+              open={suggestOpen}
+              onOpen={setSuggestOpen}
+              hot={suggestHot}
+              onHover={setSuggestHot}
+              disabled={disabled}
+              onAccept={(id) => acceptSuggestions([id])}
+              onAcceptAll={() => acceptSuggestions(suggestions.map((x) => x.id ?? ''))}
+              onDismiss={dismissSuggestion}
+            />
+          )}
         </CalloutsPanel>
       </SectionStack>
 
@@ -2939,6 +3117,8 @@ export function PlateGrid({
   onSlotMedia,
   onView3d,
   calloutsOf,
+  ghostsOf,
+  ghostHot,
   selected,
   canPlaceOn,
   tool,
@@ -2978,6 +3158,9 @@ export function PlateGrid({
   onView3d: (plate: DocumentPlate) => void;
   /** Указания одной плиты, уже в вью-модели поверхности. */
   calloutsOf: (mediaId: number) => SurfaceCallout[];
+  /** Непринятые предложения `suggest ✦` на этой плите — призраки (T28). */
+  ghostsOf?: (mediaId: number) => SurfaceCallout[];
+  ghostHot?: string | null;
   selected: number | null;
   /** Принимает ли эта плита указание — и, значит, заморожена её поверхность или нет. */
   canPlaceOn: (plate: DocumentPlate) => boolean;
@@ -3267,6 +3450,8 @@ export function PlateGrid({
                 frameClassName='w-auto'
                 frameStyle={{ height: PLATE_FRAME_HEIGHT }}
                 callouts={mine}
+                ghosts={ghostsOf?.(plate.mediaId)}
+                ghostHot={ghostHot}
                 selectedKey={selected == null ? null : String(selected)}
                 frozen={!drawable}
                 tool={drawable ? tool : null}
