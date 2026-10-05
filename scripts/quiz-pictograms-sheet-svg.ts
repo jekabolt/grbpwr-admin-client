@@ -29,6 +29,17 @@ import {
   type HardwareKind,
   type LabelKind,
 } from '../src/components/managers/tech-card/components/design/hardware-icons';
+import {
+  PaletteIcon,
+  SEAM_KINDS,
+  SEAM_LABEL,
+  SeamIcon,
+  isPaletteKey,
+  seamClassOf,
+  seamOf,
+  swatchOf,
+  type SeamKind,
+} from '../src/components/managers/tech-card/components/design/seam-icons';
 
 const familyCases: Array<[FamilyInput, GarmentFamily | '']> = [
   [{ top: 'outerwear', sub: 'coats' }, 'coat'],
@@ -101,6 +112,38 @@ for (const [label, expected] of labelCases) {
   }
 }
 
+const seamCases: Array<[string, SeamKind | null]> = [
+  ['Hong Kong finish (bias-bound edges)', 'sm_hong_kong'],
+  ['plain seam overlocked together', 'sm_plain_overlock'],
+  ['bound neckline', 'sm_hem_bound'],
+  ['seam allowance 1 cm', null],
+  ['corduroy', null],
+];
+for (const [label, expected] of seamCases) {
+  const actual = seamOf(label);
+  if (actual !== expected) {
+    throw new Error(`seamOf(${JSON.stringify(label)}) returned ${actual}, expected ${expected}`);
+  }
+}
+if (seamClassOf('sm_french') !== 'TECH_CARD_SEAM_CLASS_SS_FRENCH') {
+  throw new Error('seamClassOf(sm_french) did not return SS_FRENCH');
+}
+if (seamClassOf('sm_bonded') !== 'TECH_CARD_SEAM_CLASS_OTHER') {
+  throw new Error('seamClassOf(sm_bonded) did not return OTHER');
+}
+if (!isPaletteKey('col_palette') || isPaletteKey('palette')) {
+  throw new Error('isPaletteKey did not accept only col_palette');
+}
+for (const [label, expected] of [
+  ['olive drab', 'olivedrab'],
+  ['two', null],
+] as const) {
+  const actual = swatchOf(label);
+  if (actual !== expected) {
+    throw new Error(`swatchOf(${JSON.stringify(label)}) returned ${actual}, expected ${expected}`);
+  }
+}
+
 const genericLabel = renderToStaticMarkup(
   createElement(PartPictogram, { family: '', part: 'label' }),
 );
@@ -119,6 +162,8 @@ const LABEL_WIDTH = 92;
 const VIEW_ROW_HEIGHT = 82;
 const PART_ROW_HEIGHT = 122;
 const HARDWARE_ROW_HEIGHT = 122;
+const SEAM_CELL_WIDTH = 140;
+const SEAM_ROW_HEIGHT = 148;
 const HEADER_HEIGHT = 34;
 const GAP_HEIGHT = 18;
 const familyPartCount = GARMENT_FAMILIES.reduce(
@@ -129,6 +174,7 @@ const maxParts = Math.max(
   ...GARMENT_FAMILIES.map((family) => Object.keys(GARMENT_PARTS[family]).length),
 );
 const closeupCount = HARDWARE_KINDS.length + LABEL_KINDS.length;
+const seamCount = SEAM_KINDS.length + 1;
 const viewCode = { front: 'f', back: 'b', side_l: 's' } as const;
 const partTable = GARMENT_FAMILIES.map((family) => {
   const parts = Object.entries(GARMENT_PARTS[family]).map(
@@ -136,11 +182,14 @@ const partTable = GARMENT_FAMILIES.map((family) => {
   );
   return `${family} ${parts.join(' ')}`;
 }).join('\n');
-const width = LABEL_WIDTH + Math.max(maxParts, closeupCount, 4) * CELL_WIDTH;
+const width =
+  LABEL_WIDTH +
+  Math.max(Math.max(maxParts, closeupCount, 4) * CELL_WIDTH, seamCount * SEAM_CELL_WIDTH);
 const viewHeight = GARMENT_FAMILIES.length * VIEW_ROW_HEIGHT;
 const partsTop = HEADER_HEIGHT + viewHeight + GAP_HEIGHT;
 const hardwareTop = partsTop + GARMENT_FAMILIES.length * PART_ROW_HEIGHT;
-const height = hardwareTop + HARDWARE_ROW_HEIGHT;
+const seamsTop = hardwareTop + HARDWARE_ROW_HEIGHT;
+const height = seamsTop + SEAM_ROW_HEIGHT;
 const views: PictogramView[] = ['front', 'back', 'side_l', 'side_r'];
 
 const escapeText = (text: string): string =>
@@ -200,6 +249,32 @@ function labelCell(kind: LabelKind, x: number, y: number): string {
     <text x="${x + CELL_WIDTH / 2}" y="${y + 111}" text-anchor="middle">${escapeText(LABEL_LABEL[kind])}</text>`;
 }
 
+function seamCell(kind: SeamKind, x: number, y: number): string {
+  const icon64 = renderToStaticMarkup(createElement(SeamIcon, { kind, size: 64 }));
+  const icon14 = renderToStaticMarkup(createElement(SeamIcon, { kind, size: 14 }));
+  const words = SEAM_LABEL[kind].split(' ');
+  const cut = Math.max(1, Math.ceil(words.length / 2));
+  const lines = [words.slice(0, cut).join(' '), words.slice(cut).join(' ')].filter(Boolean);
+  return `<g transform="translate(${x + 18} ${y + 10})">${icon64}</g>
+    <g transform="translate(${x + 103} ${y + 55})">${icon14}</g>
+    <text x="${x + SEAM_CELL_WIDTH / 2}" y="${y + 103}" text-anchor="middle">${kind}</text>
+    ${lines
+      .map(
+        (line, index) =>
+          `<text class="detail" x="${x + SEAM_CELL_WIDTH / 2}" y="${y + 119 + index * 11}" text-anchor="middle">${escapeText(line)}</text>`,
+      )
+      .join('')}`;
+}
+
+function paletteCell(x: number, y: number): string {
+  const icon64 = renderToStaticMarkup(createElement(PaletteIcon, { size: 64 }));
+  const icon14 = renderToStaticMarkup(createElement(PaletteIcon, { size: 14 }));
+  return `<g transform="translate(${x + 18} ${y + 10})">${icon64}</g>
+    <g transform="translate(${x + 103} ${y + 55})">${icon14}</g>
+    <text x="${x + SEAM_CELL_WIDTH / 2}" y="${y + 103}" text-anchor="middle">col_palette</text>
+    <text class="detail" x="${x + SEAM_CELL_WIDTH / 2}" y="${y + 119}" text-anchor="middle">colourway palette</text>`;
+}
+
 const rows: string[] = [];
 GARMENT_FAMILIES.forEach((family, familyIndex) => {
   const y = HEADER_HEIGHT + familyIndex * VIEW_ROW_HEIGHT;
@@ -235,15 +310,25 @@ rows.push(
   ),
 );
 
+rows.push(
+  `<rect x="0" y="${seamsTop}" width="${width}" height="${SEAM_ROW_HEIGHT}" fill="#fff" stroke="#ccc"/>`,
+  `<text class="family" x="8" y="${seamsTop + 74}">seams · palette</text>`,
+  ...SEAM_KINDS.map((kind, index) =>
+    seamCell(kind, LABEL_WIDTH + index * SEAM_CELL_WIDTH, seamsTop),
+  ),
+  paletteCell(LABEL_WIDTH + SEAM_KINDS.length * SEAM_CELL_WIDTH, seamsTop),
+);
+
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" color="#000">
-  <metadata data-families="${GARMENT_FAMILIES.length}" data-parts="${familyPartCount}" data-shapes="${Object.keys(GARMENT_SHAPES).length}" data-hardware="${HARDWARE_KINDS.length}" data-labels="${LABEL_KINDS.length}"/>
+  <metadata data-families="${GARMENT_FAMILIES.length}" data-parts="${familyPartCount}" data-shapes="${Object.keys(GARMENT_SHAPES).length}" data-hardware="${HARDWARE_KINDS.length}" data-labels="${LABEL_KINDS.length}" data-seams="${SEAM_KINDS.length}" data-palettes="1"/>
   <!-- O6\n${partTable}\n-->
   <style>
     text { fill: #333; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .detail { fill: #666; font-size: 8px; }
     .family { fill: #000; font-weight: 700; }
   </style>
   <rect width="100%" height="100%" fill="#f2f2f2"/>
-  <text class="family" x="0" y="18">GARMENT PICTOGRAMS · ${GARMENT_FAMILIES.length} FAMILIES · ${familyPartCount} PART MARKS · ${HARDWARE_KINDS.length} HARDWARE · ${LABEL_KINDS.length} LABELS</text>
+  <text class="family" x="0" y="18">GARMENT PICTOGRAMS · ${GARMENT_FAMILIES.length} FAMILIES · ${familyPartCount} PART MARKS · ${HARDWARE_KINDS.length} HARDWARE · ${LABEL_KINDS.length} LABELS · ${SEAM_KINDS.length} SEAMS · 1 PALETTE</text>
   ${rows.join('\n')}
 </svg>`;
 

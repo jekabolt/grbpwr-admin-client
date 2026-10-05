@@ -49,15 +49,17 @@ try {
 }
 
 const metadata = svg.match(
-  /data-families="(\d+)" data-parts="(\d+)" data-shapes="(\d+)" data-hardware="(\d+)" data-labels="(\d+)"/,
+  /data-families="(\d+)" data-parts="(\d+)" data-shapes="(\d+)" data-hardware="(\d+)" data-labels="(\d+)" data-seams="(\d+)" data-palettes="(\d+)"/,
 );
 if (!metadata) throw new Error('contact-sheet metadata is missing');
-const [, families, parts, shapes, hardware, labels] = metadata;
+const [, families, parts, shapes, hardware, labels, seams, palettes] = metadata;
 if (families !== '30' || shapes !== '30') {
   throw new Error(`expected 30 families and shapes, got ${families} and ${shapes}`);
 }
 if (hardware !== '20') throw new Error(`expected 20 hardware icons, got ${hardware}`);
 if (labels !== '6') throw new Error(`expected 6 label icons, got ${labels}`);
+if (seams !== '18') throw new Error(`expected 18 seam icons, got ${seams}`);
+if (palettes !== '1') throw new Error(`expected 1 palette icon, got ${palettes}`);
 
 writeFileSync(svgPath, svg);
 const renderer = ['/opt/homebrew/bin/rsvg-convert', '/usr/local/bin/rsvg-convert'].find(existsSync);
@@ -65,7 +67,7 @@ if (!renderer) throw new Error('rsvg-convert not found');
 execFileSync(renderer, ['-o', pngPath, svgPath]);
 
 console.log(
-  `ok ${families} families · ${parts} part marks · ${hardware} hardware icons · ${labels} label icons`,
+  `ok ${families} families · ${parts} part marks · ${hardware} hardware icons · ${labels} label icons · ${seams} seam icons · ${palettes} palette icon`,
 );
 console.log(`svg ${svgPath}`);
 console.log(`png ${pngPath}`);
