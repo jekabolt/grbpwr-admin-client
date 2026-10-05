@@ -1192,7 +1192,7 @@ function MaterialBench({
     <Section
       id='design-pattern'
       title='materials'
-      question={cwName ? `· ${cwName}` : '· pick a colourway'}
+      question={cwName ? `· ${cwName.toUpperCase()}` : '· pick a colourway'}
       action={slots.length > 0 && cwId > 0 ? batchAside : undefined}
     >
       {slots.length === 0 ? (
