@@ -22,6 +22,14 @@ const MUTATIONS = {
   dismiss: { file: /design\/artifacts-panel\.tsx$/, from: 'dismissedSourceIds: readDismissed(techCardId)', to: 'dismissedSourceIds: []' },
   // Новый прогон дописывает к старым призракам вместо замены.
   replace: { file: /design\/artifacts-panel\.tsx$/, from: 'setSuggestions(next);', to: 'setSuggestions((l) => [...l, ...next]);' },
+  // Отмена только рвёт запрос — как до ревью: висящий сейв держит thinking….
+  cancel: { file: /design\/artifacts-panel\.tsx$/, from: 'const cancelSuggest = () => {\n    suggestRun.current += 1;', to: 'const cancelSuggest = () => {\n    suggestAbort.current?.abort();\n    return;' },
+  // Ответ без проверки.
+  normalize: { file: /design\/artifacts-panel\.tsx$/, from: 'const next = normalizeSuggestions(res.suggestions, liveFlats.current);', to: 'const next = (res.suggestions ?? []).filter((x) => !!x?.id);' },
+  // Двойной ✓ не помечен.
+  consumed: { file: /design\/artifacts-panel\.tsx$/, from: "!suggestConsumed.current.has(x.id ?? '') &&", to: '' },
+  // Снятый флэт не чистит предложения.
+  live: { file: /design\/artifacts-panel\.tsx$/, from: 'list.every((x) => live.has(x.mediaId ?? 0))', to: 'true' },
 };
 const mutation = MUTATE && {
   name: 'mutation',
@@ -103,6 +111,7 @@ const asked = [];
 let suggestDelay = 400;
 let suggestStatus = 200;
 let realBackend = 0;
+let override = null;
 await page.route('**/*', async (rt) => {
   const url = rt.request().url();
   if (!url.startsWith('http://probe.local/') && !url.startsWith('data:')) {
@@ -115,6 +124,7 @@ await page.route('**/*', async (rt) => {
     await new Promise((ok) => setTimeout(ok, suggestDelay));
     if (suggestStatus !== 200)
       return rt.fulfill({ status: suggestStatus, contentType: 'application/json', body: JSON.stringify({ message: 'model unavailable' }) }).catch(() => {});
+    if (override) return rt.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ suggestions: override }) }).catch(() => {});
     const dismissed = new Set(body.dismissedSourceIds ?? []);
     return rt
       .fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ suggestions: FIXTURE.filter((s) => !dismissed.has(s.sourceId)), model: 'stub' }) })
@@ -222,6 +232,62 @@ check('accept all → все указания с новыми номерами',
 check('accept all → зона арта пунктиром, 4 угла', f.callouts?.[2]?.kind === 'polygon' && f.callouts[2].points.length === 4 && f.callouts[2].dashed === true);
 check('accept all → группа исчезла', (await count('[data-callout-suggested]')) === 0 && (await count('[data-callout-ghost-shape]')) === 0);
 await shot('28-accept-all');
+
+// 7. Мусор в ответе: до экрана доходит только годное.
+const lbl = (id, media, extra = {}) => ({ id, sourceId: `pic:${id}`, sourceLabel: '', mediaId: media, kind: 'TECH_CARD_ANNOTATION_KIND_LABEL', points: [pt(0.4, 0.5)], posX: dec(0.2), posY: dec(0.2), spec: '{}', description: id, parts: [], missing: [], fromData: false, ...extra });
+override = [
+  lbl('ok', 11),
+  lbl('ok', 11, { description: 'dupe' }),
+  { ...lbl('pin', 12), kind: 'TECH_CARD_ANNOTATION_KIND_PIN', points: [pt(0.5, 0.5)] },
+  lbl('nan', 11, { points: [{ x: dec('NaN'), y: dec(0.3) }] }),
+  lbl('out', 11, { posX: dec(1.5) }),
+  lbl('poly2', 11, { kind: 'TECH_CARD_ANNOTATION_KIND_POLYGON', points: [pt(0.1, 0.1), pt(0.2, 0.2)] }),
+  lbl('nopts', 11, { points: [] }),
+  lbl('unknown', 11, { kind: 'TECH_CARD_ANNOTATION_KIND_WHATEVER' }),
+  lbl('gone', 99),
+  lbl('numx', 11, { points: [{ x: 0.3, y: dec(0.3) }] }),
+  lbl('', 11),
+  null,
+];
+await page.click('[data-callout-suggest]');
+await page.waitForFunction(() => document.querySelector('[data-callout-suggest]')?.textContent?.trim() === 'suggest ✦');
+await page.waitForTimeout(200);
+const ids7 = await page.$$eval('[data-callout-suggestion]', (els) => els.map((el) => el.getAttribute('data-callout-suggestion')));
+check('мусорный ответ: дошли только годные и без повторов', JSON.stringify(ids7) === '["ok","pin"]', JSON.stringify(ids7));
+check('мусорный ответ: призраков 2', (await count('[data-callout-ghost]')) === 2);
+override = null;
+
+// 8. Флэт сняли — его предложения уходят; двойной ✓ не рождает два указания.
+const before8 = (await form()).callouts.length;
+await page.evaluate(() => {
+  const f = window.__form;
+  f.setValue('technicalMedia', f.getValues('technicalMedia').filter((m) => m.mediaId !== 12), { shouldDirty: true });
+});
+await page.waitForTimeout(250);
+const ids8 = await page.$$eval('[data-callout-suggestion]', (els) => els.map((el) => el.getAttribute('data-callout-suggestion')));
+check('снятый флэт: его предложение ушло', JSON.stringify(ids8) === '["ok"]', JSON.stringify(ids8));
+await page.evaluate(() => {
+  const b = document.querySelector('[data-callout-accept="ok"]');
+  b.click();
+  b.click();
+});
+await page.waitForTimeout(200);
+f = await form();
+check('двойной ✓ → одно указание', f.callouts.length === before8 + 1, String(f.callouts.length - before8));
+check('ни одного указания на снятом флэте', f.callouts.every((c) => c.mediaId !== 12 || c.description !== 'pin'));
+
+// 9. Отмена, пока ещё идёт сейв: thinking… гаснет сразу, запроса нет.
+const asked9 = asked.length;
+await page.evaluate(() => { window.__flushGate = new Promise((ok) => { window.__openGate = ok; }); });
+await page.click('[data-callout-suggest]');
+await page.waitForTimeout(120);
+check('сейв висит → thinking…', (await chipText()) === 'thinking…');
+await page.click('[data-callout-suggest]');
+await page.waitForTimeout(60);
+check('отмена во время сейва → сразу suggest ✦', (await chipText()) === 'suggest ✦');
+await page.evaluate(() => { window.__flushGate = undefined; window.__openGate(); });
+await page.waitForTimeout(400);
+check('отменённый прогон после сейва не спрашивает и не трогает чип', asked.length === asked9 && (await chipText()) === 'suggest ✦', String(asked.length - asked9));
 
 check('ни одного запроса мимо заглушки', realBackend === 0, String(realBackend));
 await browser.close();

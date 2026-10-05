@@ -1,7 +1,8 @@
 import type { CalloutSuggestion } from 'api/proto-http/admin';
 import { parseSpec, writeSpec } from 'ui/components/annotation/purpose';
 import type { SurfaceCallout } from 'ui/components/annotation/surface';
-import { annotationKindFromWire } from 'ui/components/annotation/wire';
+import { kindDef } from 'ui/components/annotation/kinds';
+import { annotationKindFromWire, annotationKindToWire } from 'ui/components/annotation/wire';
 import { decimalToInput } from 'utils/decimal';
 
 /**
@@ -45,6 +46,67 @@ const frac = (d: CalloutSuggestion['posX']) => {
 
 const pointsOf = (s: CalloutSuggestion) =>
   (s.points ?? []).map((p) => ({ x: frac(p.x), y: frac(p.y) }));
+
+const unit = (d: unknown): number | null => {
+  const v = d && typeof d === 'object' ? (d as { value?: unknown }).value : undefined;
+  const raw = typeof v === 'string' ? v.trim() : '';
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : null;
+};
+const dec = (n: number) => ({ value: String(n) });
+
+/**
+ * ОТВЕТ СЕРВЕРА — ДАННЫЕ, А НЕ ОБЕЩАНИЕ. До экрана доходят только предложения с id (первое из
+ * повторов), на живом карточном флэте, с известным видом, координатами в 0..1 и числом якорей по
+ * правилу вида (`kindDef.points`; у пина якорей нет — точка живёт в позиции плашки).
+ */
+export function normalizeSuggestions(
+  list: readonly CalloutSuggestion[] | null | undefined,
+  liveMediaIds: readonly number[],
+): CalloutSuggestion[] {
+  const live = new Set(liveMediaIds);
+  const seen = new Set<string>();
+  const out: CalloutSuggestion[] = [];
+  for (const s of Array.isArray(list) ? list : []) {
+    if (!s || typeof s !== 'object') continue;
+    const id = typeof s.id === 'string' ? s.id.trim() : '';
+    if (!id || seen.has(id)) continue;
+    if (!live.has(Number(s.mediaId) || 0)) continue;
+    const kind = annotationKindFromWire(s.kind);
+    if (annotationKindToWire(kind) !== s.kind) continue;
+    const posX = unit(s.posX);
+    const posY = unit(s.posY);
+    if (posX == null || posY == null) continue;
+    const raw: Partial<NonNullable<CalloutSuggestion['points']>[number]>[] = Array.isArray(s.points)
+      ? s.points
+      : [];
+    const pts: (number | null)[][] = raw.map((p) =>
+      p && typeof p === 'object' ? [unit(p.x), unit(p.y)] : [null, null],
+    );
+    if (pts.some(([x, y]) => x == null || y == null)) continue;
+    const [lo, hi] = kindDef(kind).points;
+    if (kind !== 'pin' && (pts.length < lo || pts.length > hi)) continue;
+    seen.add(id);
+    out.push({
+      ...s,
+      id,
+      posX: dec(posX),
+      posY: dec(posY),
+      points: kind === 'pin' ? [] : pts.map(([x, y]) => ({ x: dec(x!), y: dec(y!) })),
+      parts: ((Array.isArray(s.parts) ? s.parts : []) as unknown[]).filter(
+        (x): x is string => typeof x === 'string' && !!x,
+      ),
+      missing: ((Array.isArray(s.missing) ? s.missing : []) as unknown[]).filter(
+        (x): x is string => typeof x === 'string' && !!x,
+      ),
+      sourceId: typeof s.sourceId === 'string' ? s.sourceId : '',
+      sourceLabel: typeof s.sourceLabel === 'string' ? s.sourceLabel : '',
+      description: typeof s.description === 'string' ? s.description : '',
+      spec: typeof s.spec === 'string' ? s.spec : '',
+    });
+  }
+  return out;
+}
 
 /** Призрак на плите: ключ — id предложения (уникален в ответе). */
 export function ghostOf(s: CalloutSuggestion): SurfaceCallout {

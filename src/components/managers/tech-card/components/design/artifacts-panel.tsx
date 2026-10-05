@@ -67,6 +67,7 @@ import { CalloutRail } from './callout-rail';
 import {
   addDismissed,
   ghostOf,
+  normalizeSuggestions,
   opNumberOf,
   readDismissed,
   seedOf,
@@ -2215,10 +2216,26 @@ export function ArtifactsPanel({
   const [suggestHot, setSuggestHot] = useState<string | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const suggestAbort = useRef<AbortController | null>(null);
+  /**
+   * ПОКОЛЕНИЕ ПРОГОНА. Отмена гасит `thinking…` СРАЗУ, даже если сейв перед запросом ещё висит, —
+   * и поднимает поколение: поздний ответ или `finally` старого прогона состояния не трогают.
+   */
+  const suggestRun = useRef(0);
+  /** Предложения, уже принятые этим экраном: двойной ✓ не рождает второе указание. */
+  const suggestConsumed = useRef(new Set<string>());
+  const cancelSuggest = () => {
+    suggestRun.current += 1;
+    suggestAbort.current?.abort();
+    suggestAbort.current = null;
+    setSuggesting(false);
+  };
   useEffect(() => () => suggestAbort.current?.abort(), []);
   // Другая карточка — другие предложения: призраки чужой карточки на этой были бы враньём.
   useEffect(() => {
+    suggestRun.current += 1;
     suggestAbort.current?.abort();
+    suggestAbort.current = null;
+    setSuggesting(false);
     setSuggestions([]);
   }, [techCardId]);
   /** Карточные флэты листа — то, что сервер может прочесть и на что ляжет указание. */
@@ -2229,14 +2246,29 @@ export function ArtifactsPanel({
         .map((p) => p.mediaId),
     [segments],
   );
+  const liveFlats = useRef<number[]>(suggestMediaIds);
+  liveFlats.current = suggestMediaIds;
+  // Флэт сняли или заменили — его предложения уходят: ✓ на снятой плите писал бы в карточку
+  // указание на медиа, которого у неё нет.
+  const liveFlatsKey = suggestMediaIds.join(',');
+  useEffect(() => {
+    const live = new Set(liveFlats.current);
+    setSuggestions((list) =>
+      list.every((x) => live.has(x.mediaId ?? 0))
+        ? list
+        : list.filter((x) => live.has(x.mediaId ?? 0)),
+    );
+  }, [liveFlatsKey]);
   const runSuggest = async () => {
     if (suggestAbort.current) {
-      suggestAbort.current.abort();
+      cancelSuggest();
       return;
     }
+    const gen = (suggestRun.current += 1);
     const control = new AbortController();
     suggestAbort.current = control;
     setSuggesting(true);
+    const stale = () => gen !== suggestRun.current;
     try {
       let flushed: Awaited<ReturnType<typeof autosave.flush>>;
       try {
@@ -2244,19 +2276,19 @@ export function ArtifactsPanel({
       } catch {
         flushed = 'error';
       }
-      if (control.signal.aborted) return;
+      if (stale()) return;
       if (!flushAllowsRun(flushed)) {
         showMessage(flushRefusalSentence(flushed, autosave.errorsCount, autosave.refusal), 'error');
         return;
       }
       const res = await abortableAdminService(control.signal).SuggestCallouts({
         techCardId,
-        mediaIds: suggestMediaIds,
+        mediaIds: liveFlats.current,
         dismissedSourceIds: readDismissed(techCardId),
       });
-      if (control.signal.aborted) return;
-      const onSheet = new Set(suggestMediaIds);
-      const next = (res.suggestions ?? []).filter((x) => !!x.id && onSheet.has(x.mediaId ?? 0));
+      if (stale()) return;
+      const next = normalizeSuggestions(res.suggestions, liveFlats.current);
+      suggestConsumed.current = new Set();
       setSuggestions(next);
       setSuggestHot(null);
       if (next.length === 0) {
@@ -2266,18 +2298,31 @@ export function ArtifactsPanel({
       setSuggestOpen(true);
       if (calloutsShell.collapsed) calloutsShell.hold();
     } catch (error) {
-      if (!control.signal.aborted)
-        showMessage(techCardErrorMessage(error, 'suggest failed'), 'error');
+      if (!stale()) showMessage(techCardErrorMessage(error, 'suggest failed'), 'error');
     } finally {
-      if (suggestAbort.current === control) suggestAbort.current = null;
-      setSuggesting(false);
+      if (!stale()) {
+        suggestAbort.current = null;
+        setSuggesting(false);
+      }
     }
   };
   const suggestionsOf = (mediaId: number): SurfaceCallout[] =>
     kind === 'flat' ? suggestions.filter((x) => (x.mediaId ?? 0) === mediaId).map(ghostOf) : [];
   /** ✓ — настоящее указание тем же путём, что у руки; источник-операция получает его номер. */
   const acceptSuggestions = (ids: string[]) => {
-    const picked = suggestions.filter((x) => ids.includes(x.id ?? ''));
+    const live = new Set(liveFlats.current);
+    const picked = suggestions.filter(
+      (x) =>
+        ids.includes(x.id ?? '') &&
+        !suggestConsumed.current.has(x.id ?? '') &&
+        live.has(x.mediaId ?? 0),
+    );
+    // Помечено ДО записи в форму: второй ✓ того же рендера уже ничего не найдёт.
+    for (const x of picked) suggestConsumed.current.add(x.id ?? '');
+    setSuggestions((list) =>
+      list.filter((x) => !ids.includes(x.id ?? '') && live.has(x.mediaId ?? 0)),
+    );
+    setSuggestHot(null);
     if (picked.length === 0) return;
     calloutHistory?.record();
     for (const x of picked) {
@@ -2298,8 +2343,6 @@ export function ArtifactsPanel({
         if (at >= 0) form.setValue(`operations.${at}.calloutNumber`, number, { shouldDirty: true });
       }
     }
-    setSuggestions((list) => list.filter((x) => !ids.includes(x.id ?? '')));
-    setSuggestHot(null);
   };
   /** ✕ — источник больше не предлагается на этой карточке в этом браузере. */
   const dismissSuggestion = (id: string) => {

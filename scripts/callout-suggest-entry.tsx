@@ -38,6 +38,9 @@ const autosave: AutosaveApi = {
   request: () => {},
   flush: async (reason) => {
     log.push(`flush:${reason}`);
+    // Проба может задержать сейв, чтобы отменить прогон, пока он ещё ждёт карточку.
+    const gate = (window as unknown as { __flushGate?: Promise<void> }).__flushGate;
+    if (gate) await gate;
     return 'ok';
   },
 };
