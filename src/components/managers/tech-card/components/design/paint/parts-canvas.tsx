@@ -52,7 +52,7 @@ import {
   type Quad,
 } from './artworks';
 import { tileSampler } from './mockup';
-import { concatIndices, partIndices } from './parts-model';
+import { concatIndices, openingRegion, partIndices } from './parts-model';
 import type { PaintSession, PaintSkin, PaintTool, PaintView } from './use-paint';
 
 /**
@@ -747,8 +747,10 @@ function PaintSide({
     if (px < 0 || py < 0 || px >= w || py >= h) return;
     const st = hoverState.current;
     const at = py * w + px;
-    const group = groupAt(px, py, alt);
     const region = flat.labels[at];
+    // Ф1 · an opening has no cloth: nothing to paint, nothing lit (erase still reaches it).
+    const shut = tool !== 'erase' && openingRegion(view.parts, region);
+    const group = shut ? -1 : groupAt(px, py, alt);
     if (
       st.mask &&
       st.mask[at] &&
@@ -760,8 +762,9 @@ function PaintSide({
     )
       return;
     const parts = view.parts;
-    const idx =
-      parts && group >= 0
+    const idx = shut
+      ? null
+      : parts && group >= 0
         ? partIndices(labels, flat, parts, group, { x: px, y: py })
         : componentAt(labels, flat.labels, w, h, px, py);
     st.group = group;
@@ -925,7 +928,10 @@ function PaintSide({
     if (px < 0 || py < 0 || px >= w || py >= h) return;
     // QW8 · the paper around the garment is not paint: its double click focuses the side.
     if (!flat.silhouette[py * w + px]) return;
-    const group = groupAt(px, py, e.altKey);
+    const inOpening = openingRegion(view.parts, flat.labels[py * w + px]);
+    if (tool !== 'erase' && inOpening) return;
+    // An opening is no part: the eraser takes the paint under the cursor as a plain region.
+    const group = inOpening ? -1 : groupAt(px, py, e.altKey);
     if (group >= 0) {
       session.paintPart(view.view, group, { x: px, y: py }, e.shiftKey);
       return;

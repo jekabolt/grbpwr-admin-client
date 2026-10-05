@@ -124,6 +124,31 @@ const open = await page.$eval(`${B('line')} [data-style-door]`, (d) => ({
 }));
 check('дверь раскрывает цвета, наконечники и пунктир', open.colors === 6 && open.caps > 1 && open.dashed, JSON.stringify(open));
 check('раскрытый ряд — одна строка', open.h <= open.doorH + 2, JSON.stringify(open));
+// R42 (T34, владелец: «тут вообще 3 разных размера блоков так не должно быть»): текущий цвет,
+// «···» и остальные цвета — ОДНА квадратная клетка (ширина, высота, рамка) с ОДНИМ свотчем;
+// текстовые чипы (наконечники, dashed, hatching) — той же высоты.
+const cells = await page.$eval(`${B('line')} [data-style-door]`, (d) => {
+  const row = d.parentElement;
+  const box = (el) => {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    return { w: +r.width.toFixed(2), h: +r.height.toFixed(2), bw: cs.borderTopWidth };
+  };
+  const sq = [...row.querySelectorAll('[data-color], [data-style-door]')].map(box);
+  const sw = [...row.querySelectorAll('[data-color] > span')].map((s) => box(s));
+  const text = [...row.children].filter((c) => c.matches('button, span[class*="border"]') && !c.matches('[data-color], [data-style-door]') && c.getBoundingClientRect().width > 2).map(box);
+  return { sq, sw, text };
+});
+const same = (xs, f) => xs.length > 0 && xs.every((x) => f(x) === f(xs[0]));
+check('R42 цвет, ··· и все цвета — одна клетка (w, h, рамка)', cells.sq.length === 7 && same(cells.sq, (x) => `${x.w}x${x.h}/${x.bw}`) && cells.sq[0].w === cells.sq[0].h, JSON.stringify(cells.sq));
+check('R42 свотч один размер во всех клетках', cells.sw.length === 6 && same(cells.sw, (x) => `${x.w}x${x.h}`), JSON.stringify(cells.sw));
+check('R42 текстовые чипы той же высоты', cells.text.length > 0 && cells.text.every((t) => t.h === cells.sq[0].h), JSON.stringify(cells.text));
+const SHOTS = (process.argv.find((a) => a.startsWith('--shots=')) ?? '').split('=')[1] ?? '';
+if (SHOTS) {
+  const row = await page.$(`${B('line')} [data-style-door]`);
+  const clip = await row.evaluate((d) => { const r = d.parentElement.getBoundingClientRect(); return { x: r.x - 8, y: r.y - 8, width: r.width + 16, height: r.height + 16 }; });
+  await page.screenshot({ path: `${SHOTS}`, clip });
+}
 check('объяснений в ряду нет', !/one style only/i.test(await page.evaluate(() => document.body.innerText)));
 
 // R28, R29.

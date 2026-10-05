@@ -53,8 +53,11 @@ import {
 } from './map-model';
 import {
   concatIndices,
+  dropOpenings,
+  fixSides,
   gestureLive,
   keyedSuggestion,
+  labelKeys,
   markFontPx,
   markPoints,
   marksTint,
@@ -64,6 +67,7 @@ import {
   partAcross,
   partNamesByLabel,
   partsOf,
+  PARTS_ALGO_REV,
   PARTS_REGIONS_MAX,
   PARTS_REGIONS_MIN,
   type Gesture,
@@ -505,8 +509,27 @@ export class PaintSession {
       (s) =>
         s.view === v.view &&
         (s.baseMediaId ?? 0) === v.baseMediaId &&
-        (s.algoRev ?? '') === REGIONS_ALGO_REV,
+        (s.algoRev ?? '') === PARTS_ALGO_REV,
     );
+  }
+
+  /** label → part_key over the band's rows of this cutter and labeller (the L/R check's twins). */
+  private bandKeys(): Map<string, string> {
+    return labelKeys(
+      (this.band?.partsSuggestions ?? []).filter((s) => (s.algoRev ?? '') === PARTS_ALGO_REV),
+    );
+  }
+
+  /** A row laid over the flat, then the Ф1 L/R check on the drawing (`fixSides`). */
+  private laid(
+    row: Parameters<typeof partsOf>[0],
+    flat: FlatRegions,
+    seeds: Int32Array,
+    view: string,
+    keys: ReadonlyMap<string, string>,
+  ): ViewParts | null {
+    const parts = partsOf(row, flat, seeds, view);
+    return parts && fixSides(view, parts, flat, keys);
   }
 
   /** The side has the card-level answer (Ф2.1 topology); an older side-by-side one is stale. */
@@ -527,7 +550,7 @@ export class PaintSession {
     const sig = JSON.stringify([row.parts, row.splitNeeded]);
     if (sig === v.partsSig) return false;
     v.partsSig = sig;
-    v.parts = partsOf(row, v.flat, v.parts?.seeds ?? markPoints(v.flat), v.view);
+    v.parts = this.laid(row, v.flat, v.parts?.seeds ?? markPoints(v.flat), v.view, this.bandKeys());
     this.partsGen += 1;
     return true;
   }
@@ -548,7 +571,7 @@ export class PaintSession {
     const key = `${sides
       .map((v) => `${v.view}:${v.baseMediaId}`)
       .sort()
-      .join('|')}|${REGIONS_ALGO_REV}`;
+      .join('|')}|${PARTS_ALGO_REV}`;
     if (this.asked.has(key) && !again) return;
     this.asked.add(key);
     this.partsFailed = '';
@@ -569,7 +592,7 @@ export class PaintSession {
         }
         const res = await adminService.SuggestDesignPartsCard({
           techCardId: this.techCardId,
-          algoRev: REGIONS_ALGO_REV,
+          algoRev: PARTS_ALGO_REV,
           force,
           views: sides.map((v, i) => ({
             view: v.view,
@@ -579,14 +602,15 @@ export class PaintSession {
           })),
         });
         let got = 0;
+        const keys = labelKeys(res.suggestions ?? []);
         for (const s of res.suggestions ?? []) {
           const i = sides.findIndex((v) => v.view === s.view);
           const v = sides[i];
           // Numbers mean something only for the cut that drew them: a suggestion for another
           // flat or algo rev would paint unrelated regions.
           if (!v || this.views.get(v.view) !== v) continue;
-          if ((s.baseMediaId ?? 0) !== v.baseMediaId || s.algoRev !== REGIONS_ALGO_REV) continue;
-          const parts = partsOf(s, v.flat, seeds[i], v.view);
+          if ((s.baseMediaId ?? 0) !== v.baseMediaId || s.algoRev !== PARTS_ALGO_REV) continue;
+          const parts = this.laid(s, v.flat, seeds[i], v.view, keys);
           if (!parts) continue;
           v.parts = parts;
           v.partsSig = JSON.stringify([s.parts, s.splitNeeded]);
@@ -1123,9 +1147,10 @@ export class PaintSession {
     if (paint === undefined && this.tool !== 'erase' && !value) return [];
     const ready = targets.flatMap((t) => {
       const v = this.views.get(t.view);
-      return v && v.status === 'ready' && v.labels && t.idx.length > 0
-        ? [{ view: t.view, base: v.baseMediaId, labels: v.labels, idx: t.idx }]
-        : [];
+      if (!v || v.status !== 'ready' || !v.labels) return [];
+      // Ф1 · an opening has no cloth: paint never lands on it (erase still clears it).
+      const idx = value && v.flat ? dropOpenings(t.idx, v.flat, v.parts) : t.idx;
+      return idx.length > 0 ? [{ view: t.view, base: v.baseMediaId, labels: v.labels, idx }] : [];
     });
     const gesture = paintGesture(ready, value);
     if (gesture.length === 0) return [];

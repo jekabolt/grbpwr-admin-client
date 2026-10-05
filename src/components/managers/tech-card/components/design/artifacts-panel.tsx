@@ -1813,6 +1813,19 @@ export function ArtifactsPanel({
     }
   };
 
+  /**
+   * ЯКОРЬ НА КАРТИНКУ (владелец, 05.10: «при клике на колаут нас должно анкорить на ту картинку, на
+   * которой он находится», «даже если он suggested»). Ряд кадров бывает и лентой, и сеткой — поэтому
+   * и `block`, и `inline`; `nearest` не дёргает страницу, если кадр уже виден.
+   */
+  function revealPlate(mediaId?: number | null) {
+    if (!mediaId) return;
+    const el = Array.from(
+      document.querySelectorAll<HTMLElement>(`[data-plate-media="${mediaId}"]`),
+    ).find((n) => n.offsetParent !== null);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }
+
   function removeCalloutAt(index: number) {
     calloutHistory?.record();
     const rows = (form.getValues('callouts') ?? []) as SheetCallout[];
@@ -2704,7 +2717,10 @@ export function ArtifactsPanel({
           <CalloutRail
             rows={sheetRows}
             selected={selected}
-            onSelect={setSelected}
+            onSelect={(i) => {
+              setSelected(i);
+              if (i != null) revealPlate(callouts[i]?.mediaId);
+            }}
             hoverIndex={hoverIndex}
             onHover={setHoverIndex}
             disabled={disabled}
@@ -2741,6 +2757,7 @@ export function ArtifactsPanel({
               onAccept={(id) => acceptSuggestions([id])}
               onAcceptAll={() => acceptSuggestions(suggestions.map((x) => x.id ?? ''))}
               onDismiss={dismissSuggestion}
+              onReveal={revealPlate}
             />
           )}
         </CalloutsPanel>
@@ -3415,9 +3432,6 @@ export function PlateGrid({
             data-plate-media={plate.mediaId}
             className='group relative w-fit max-w-full shrink-0'
           >
-            {/* ПОДСВЕТКА ВЫНОСКИ ИЗ СПИСКА (C-2) — накладка НАД кадром, прозрачная для указателя,
-                тем же законом, что ярлык: под ней поверхность постановки. */}
-            {hovered && <CalloutHighlight callout={hovered} />}
             {/* ЯРЛЫК ПЛИТЫ — НАКЛАДКОЙ НА КАДРЕ (K-2, довод у `PLATE_BADGE_BAR`). Кадр стоит первым
                 ребёнком плиты и начинается в её верхнем левом углу, поэтому `left-1 top-1` плиты и
                 `left-1 top-1` кадра — одна точка; отдельной позиционированной обёртки для этого не
@@ -3545,6 +3559,11 @@ export function PlateGrid({
                 ghostHot={ghostHot}
                 onFrameSize={onGhostFrame ? (sz) => onGhostFrame(plate.mediaId, sz) : undefined}
                 selectedKey={selected == null ? null : String(selected)}
+                /* ПОДСВЕТКА ВЫНОСКИ ИЗ СПИСКА (C-2) — изоляцией самой поверхности, как в мудборде.
+                   Прежняя накладка рисовала квадрат 32px на точке подписи и пунктир по габариту
+                   якорей — тот самый «толстый квадратик» и внешняя рамка (R43, R18): строка под
+                   курсором — это обычно и выбранная строка. */
+                hoveredKey={hovered?.key ?? null}
                 frozen={!drawable}
                 tool={drawable ? tool : null}
                 onToolDone={onToolDone}
@@ -3953,59 +3972,6 @@ function ModelPlateTile({
           no thumbnail came back — a snapshot from the 3D window makes one
         </Text>
       </button>
-    </div>
-  );
-}
-
-/**
- * ═══ ПОДСВЕТКА ВЫНОСКИ, НАД КОТОРОЙ СТОИТ КУРСОР В СПИСКЕ (C-2) ═════════════════════════════════
- *
- * Владелец: «на ховер в левом меню CALLOUTS должны подсвечивать тот колаут который заховерили».
- *
- * НАКЛАДКА ЛИСТА, А НЕ СОСТОЯНИЕ ПОВЕРХНОСТИ. У поверхности своё наведение (маркер под мышью
- * гасит соседей), но снаружи его не задать: пропа нет, а файл чужой и прямо сейчас переписывается
- * соседней волной. Накладка живёт в долях кадра — тех же, в которых хранится выноска, — и потому
- * стоит ровно там, где стоит плашка: `left/top` в процентах кадра, чья высота задана числом, а
- * ширина равна ширине плиты (`w-fit`).
- *
- * КВАДРАТ ВОКРУГ ПЛАШКИ И ПУНКТИРНАЯ РАМКА ПО ЯКОРЯМ ФИГУРЫ — та же геометрия, какой поверхность
- * показывает ВЫБОР (маркиза): человек уже знает этот язык. Белая подложка в 2px — чтобы чернильная
- * рамка читалась и на пёстром рендере, где линия тонет.
- */
-function CalloutHighlight({ callout }: { callout: SurfaceCallout }) {
-  const pts = callout.points ?? [];
-  const box =
-    pts.length >= 2
-      ? {
-          x0: Math.min(...pts.map((p) => p.x)),
-          y0: Math.min(...pts.map((p) => p.y)),
-          x1: Math.max(...pts.map((p) => p.x)),
-          y1: Math.max(...pts.map((p) => p.y)),
-        }
-      : null;
-  return (
-    <div
-      data-callout-highlight={callout.key}
-      aria-hidden='true'
-      className='pointer-events-none absolute left-0 top-0 z-[6] w-full'
-      style={{ height: PLATE_FRAME_HEIGHT }}
-    >
-      {box && (
-        <div
-          className='absolute border border-dashed border-textColor shadow-[0_0_0_2px_var(--color-bgColor)]'
-          style={{
-            left: `calc(${box.x0 * 100}% - 6px)`,
-            top: `calc(${box.y0 * 100}% - 6px)`,
-            width: `calc(${(box.x1 - box.x0) * 100}% + 12px)`,
-            height: `calc(${(box.y1 - box.y0) * 100}% + 12px)`,
-          }}
-        />
-      )}
-      <div
-        data-callout-highlight-mark=''
-        className='absolute h-8 w-8 -translate-x-1/2 -translate-y-1/2 border-2 border-textColor shadow-[0_0_0_2px_var(--color-bgColor)]'
-        style={{ left: `${callout.label.x * 100}%`, top: `${callout.label.y * 100}%` }}
-      />
     </div>
   );
 }

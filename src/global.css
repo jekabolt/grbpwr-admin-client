@@ -529,3 +529,44 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
     animation: none;
   }
 }
+
+/* Selected callout (annotation surface, R43): no thicker stroke, no frame; a soft halo that
+   breathes. `.callout-breathe` is an SVG halo group under the shape's own path;
+   `.callout-breathe-box` puts the same halo on a pin, plate or inset through ::after, so the
+   element's own outline and box-shadow stay untouched (focus ring rules live there).
+   Reduced motion: the halo stays, still. Print: never. */
+@keyframes calloutBreathe {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.callout-breathe {
+  animation: calloutBreathe 1.6s ease-in-out infinite alternate;
+}
+.callout-breathe-box::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 2px var(--color-bgColor),
+    0 0 6px 3px color-mix(in srgb, var(--color-textColor) 45%, transparent);
+  animation: calloutBreathe 1.6s ease-in-out infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) {
+  .callout-breathe,
+  .callout-breathe-box::after {
+    animation: none;
+    opacity: 0.8;
+  }
+}
+@media print {
+  .callout-breathe,
+  .callout-breathe-box::after {
+    display: none;
+  }
+}
