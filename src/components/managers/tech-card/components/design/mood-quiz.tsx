@@ -759,7 +759,9 @@ function QuestionView({
                     ) : closeup.type === 'label' ? (
                       <LabelIcon kind={closeup.kind} size={14} className='shrink-0' />
                     ) : closeup.type === 'seam' ? (
-                      <SeamIcon kind={closeup.kind} size={14} className='shrink-0' />
+                      // A seam cross-section is unreadable at 14 px (mock-fell, overlock and French
+                      // collapse into the same band): chips carry it 48 px wide, cropped to its band.
+                      <SeamIcon kind={closeup.kind} size={48} band className='shrink-0' />
                     ) : (
                       <span
                         aria-hidden

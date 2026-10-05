@@ -471,19 +471,23 @@ export function SeamIcon({
   kind,
   className,
   size = 64,
+  band = false,
 }: {
   kind: SeamKind;
   className?: string;
   size?: number;
+  /** Crop to the drawn band (y 12–52): a cross-section is wide and flat, a square frame wastes
+   *  its height — option chips use the band so the icon reads big without a tall chip. */
+  band?: boolean;
 }): JSX.Element {
   return (
     <svg
       aria-hidden
       focusable='false'
       data-seam-kind={kind}
-      viewBox='0 0 64 64'
+      viewBox={band ? '0 12 64 40' : '0 0 64 64'}
       width={size}
-      height={size}
+      height={band ? Math.round((size * 40) / 64) : size}
       fill='none'
       stroke='currentColor'
       strokeWidth={1.25}
