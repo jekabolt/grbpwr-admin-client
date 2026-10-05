@@ -81,7 +81,8 @@ import {
 } from './mockup';
 import { remainderCloth } from './plan-run';
 import { analyseFlat, REGIONS_ALGO_REV, type FlatRegions } from './regions';
-import { transferMap } from './transfer';
+import { dec, num, strayMarks, type StrayMark } from './artworks';
+import { inkBox, mapDrawBox, transferMap, transferPoints, type FracBox } from './transfer';
 import { viewLabel } from '../views';
 
 /** `artwork` (R7): the armed artwork is placed on the flats as a box; the paint stays as is. */
@@ -130,6 +131,10 @@ export type PaintSkin = { tile: ImageData | null; hex: string; repeatMm?: number
 const DEBOUNCE_MS = 1200;
 /** The canvas's copy of a cloth picture: its long side, px (the mockup reads it at 1024). */
 const TILE = 256;
+
+/** T29 · one artwork mark's move from its old picture onto a side's flat — tried once a session. */
+const markKey = (m: StrayMark, pictureId: number) =>
+  `art:${m.placement.id ?? 0}:${m.picture.id ?? 0}>${pictureId}`;
 
 async function pixelsOf(url: string, w?: number, h?: number): Promise<ImageData> {
   const blob = await fetchMediaBlob(url);
@@ -302,9 +307,12 @@ export class PaintSession {
    * one (`transfer.ts`). Such a side stays `loading` — not paintable — until the paint lands.
    */
   private moving = new Set<PaintView>();
-  /** The carries of this round, for ONE line once the last one lands: view → paint moved. */
-  private moved = new Map<string, boolean>();
-  /** `view:map:old>new` carried in this session — told once, never twice. */
+  /**
+   * The carries of this round, for ONE line once the last one lands: view → paint moved (null = no
+   * paint was carried), artwork marks moved, marks that could not be moved.
+   */
+  private moved = new Map<string, { paint: boolean | null; art: number; artLeft: number }>();
+  /** `view:map:old>new` / `art:mark:old>new` carried in this session — tried once, never twice. */
   private carried = new Set<string>();
 
   constructor(techCardId: number, qc: QueryClient) {
@@ -442,7 +450,17 @@ export class PaintSession {
 
     // Views: every side holding a flat.
     const seen = new Set<string>();
-    for (const side of benchSides(band)) {
+    const sides = benchSides(band);
+    // T29 · artwork marks left on a side's previous flat, moved with its paint when the side opens.
+    const strays = strayMarks(
+      band,
+      sides.map((side) => ({
+        view: side.view,
+        pictureId: side.picture?.id || side.slot?.pictureId || 0,
+        mapBaseMediaId: plan?.maps.find((m) => m.view === side.view)?.baseMediaId ?? 0,
+      })),
+    );
+    for (const side of sides) {
       const media = side.picture?.media;
       const id = media?.id ?? 0;
       const url = media?.media?.fullSize?.mediaUrl || media?.media?.compressed?.mediaUrl || '';
@@ -453,7 +471,15 @@ export class PaintSession {
       if (had?.dirty) void this.flush();
       const fw = media?.media?.fullSize?.width ?? 0;
       const fh = media?.media?.fullSize?.height ?? 0;
-      this.openView(side.view, id, url, plan, fw > 0 && fh > 0 ? fw / fh : 0.6);
+      this.openView(
+        side.view,
+        id,
+        url,
+        plan,
+        fw > 0 && fh > 0 ? fw / fh : 0.6,
+        side.picture?.id || side.slot?.pictureId || 0,
+        strays.get(side.view) ?? [],
+      );
       changed = true;
     }
     for (const view of [...this.views.keys()])
@@ -730,6 +756,8 @@ export class PaintSession {
     url: string,
     plan: ColourPlanDoc | undefined,
     aspect: number,
+    pictureId: number,
+    strays: readonly StrayMark[],
   ) {
     const v: PaintView = {
       view,
@@ -750,7 +778,12 @@ export class PaintSession {
     v.mapBase = saved?.mediaId ?? 0;
     // T28 · the side holds another flat than the one its map was painted on: the paint moves.
     const carry = !!saved && saved.baseMediaId !== baseMediaId;
-    if (carry) this.moving.add(v);
+    // T29 · marks of this side's artwork still standing on a previous flat move in the same round.
+    const marks =
+      pictureId > 0 ? strays.filter((x) => !this.carried.has(markKey(x, pictureId))) : [];
+    for (const m of marks) this.carried.add(markKey(m, pictureId));
+    const round = carry || marks.length > 0;
+    if (round) this.moving.add(v);
     void (async () => {
       try {
         const img = await pixelsOf(url);
@@ -769,10 +802,12 @@ export class PaintSession {
           );
         }
         let moved = false;
+        let mapBox: FracBox | null = null;
         if (saved && carry) {
           try {
             if (saved.gone || !saved.url) throw new Error('the old map has no picture');
             const map = await pixelsOf(saved.url);
+            mapBox = mapDrawBox({ rgba: map.data, w: map.width, h: map.height });
             const got = transferMap(
               {
                 rgba: map.data,
@@ -805,16 +840,31 @@ export class PaintSession {
           const key = `${view}:${saved?.mediaId ?? 0}:${saved?.baseMediaId ?? 0}>${baseMediaId}`;
           if (!this.carried.has(key)) {
             this.carried.add(key);
-            this.moved.set(view, moved);
+            this.told(view).paint = moved;
           }
         }
         this.takeParts(v);
+        if (marks.length > 0) {
+          this.bump();
+          const got = await this.moveMarks(
+            marks,
+            pictureId,
+            flat,
+            mapBox && saved ? { box: mapBox, mediaId: saved.baseMediaId } : null,
+            () => this.views.get(view) === v,
+          );
+          if (got.art > 0 || got.artLeft > 0) {
+            const t = this.told(view);
+            t.art += got.art;
+            t.artLeft += got.artLeft;
+          }
+        }
       } catch {
         // A view whose saved painting could not be read is NOT paintable: painting over it would
         // save a blank over somebody's work.
         if (this.views.get(view) === v) v.status = 'error';
       } finally {
-        if (carry) this.landed(v);
+        if (round) this.landed(v);
       }
       this.bump();
       if (this.views.get(view) === v) this.suggestCard();
@@ -832,14 +882,110 @@ export class PaintSession {
     this.moved.clear();
     if ([...this.views.values()].some((x) => x.dirty)) void this.flush();
     if (told.length === 0) return;
-    const line = (ok: boolean) => {
-      const views = told.filter(([, m]) => m === ok).map(([view]) => viewLabel(view));
-      if (views.length === 0) return '';
-      const flats = views.length === 1 ? 'flat' : 'flats';
-      return `${views.join(', ')}: ${flats} changed · ${ok ? 'paint moved' : 'repaint'}`;
+    // One phrase per side: what moved, then what is left to the person. Sides saying the same
+    // thing share it: «front, back: flats changed · paint and artwork moved».
+    const phrase = (t: { paint: boolean | null; art: number; artLeft: number }) => {
+      const went = [t.paint === true ? 'paint' : '', t.art > 0 ? 'artwork' : ''].filter(Boolean);
+      return [
+        went.length > 0 ? `${went.join(' and ')} moved` : '',
+        t.paint === false ? 'repaint' : '',
+        t.artLeft > 0 ? 'place artwork again' : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
     };
-    const text = [line(true), line(false)].filter(Boolean).join(' · ');
+    const groups = new Map<string, string[]>();
+    for (const [view, t] of told) {
+      const p = phrase(t);
+      if (!p) continue;
+      groups.set(p, [...(groups.get(p) ?? []), viewLabel(view)]);
+    }
+    if (groups.size === 0) return;
+    const text = [...groups]
+      .map(
+        ([p, views]) =>
+          `${views.join(', ')}: ${views.length === 1 ? 'flat' : 'flats'} changed · ${p}`,
+      )
+      .join(' · ');
     useSnackBarStore.getState().showMessage(text, 'success');
+  }
+
+  private told(view: string) {
+    let t = this.moved.get(view);
+    if (!t) {
+      t = { paint: null, art: 0, artLeft: 0 };
+      this.moved.set(view, t);
+    }
+    return t;
+  }
+
+  /**
+   * T29 · artwork marks still on a side's previous flat move onto the flat standing there now: the
+   * points (fractions of the old picture) are aligned box to box exactly as the paint is — the old
+   * frame's box is the old map's ink box when the map was painted on that picture, else the
+   * old picture's own ink box (`regions.ts`). The mark keeps its id, asset and note (the verb moves
+   * a mark when given its id). Anything unreadable leaves the mark where it is — never deleted.
+   */
+  private async moveMarks(
+    marks: readonly StrayMark[],
+    pictureId: number,
+    flat: FlatRegions,
+    map: { box: FracBox; mediaId: number } | null,
+    /** False once the side moved on to yet another flat: a late write would pin the mark to a
+     *  picture no side holds any more — the newer round moves it instead. */
+    current: () => boolean,
+  ): Promise<{ art: number; artLeft: number }> {
+    const newBox = inkBox(flat);
+    const boxes = new Map<number, Promise<FracBox | null>>();
+    const oldBox = (m: StrayMark): Promise<FracBox | null> => {
+      const media = m.picture.media;
+      if (map && (media?.id ?? 0) === map.mediaId) return Promise.resolve(map.box);
+      const id = m.picture.id ?? 0;
+      let got = boxes.get(id);
+      if (!got) {
+        const url = media?.media?.fullSize?.mediaUrl || media?.media?.compressed?.mediaUrl || '';
+        got = url
+          ? pixelsOf(url).then((img) => inkBox(analyseFlat(img.data, img.width, img.height)))
+          : Promise.resolve(null);
+        boxes.set(id, got);
+      }
+      return got;
+    };
+    let art = 0;
+    let artLeft = 0;
+    for (const m of marks) {
+      const p = m.placement;
+      try {
+        const ann = p.annotation;
+        const pts = (ann?.points ?? []).map((q) => ({ x: num(q.x), y: num(q.y) }));
+        const ob = await oldBox(m);
+        const moved = pts.length > 0 ? transferPoints(ob, newBox, pts) : null;
+        // No id would CREATE a second mark instead of moving this one.
+        if (!ann || !moved || (p.id ?? 0) <= 0) throw new Error('nothing to align');
+        if (!current()) break;
+        const hasLabel = !!ann.labelX?.value && !!ann.labelY?.value;
+        const label = hasLabel
+          ? transferPoints(ob, newBox, [{ x: num(ann.labelX), y: num(ann.labelY) }])?.[0]
+          : undefined;
+        await adminService.SetDesignAssetPlacement({
+          techCardId: this.techCardId,
+          placementId: p.id ?? 0,
+          assetId: p.assetId ?? 0,
+          pictureId,
+          annotation: {
+            ...ann,
+            points: moved.map((q) => ({ x: dec(q.x), y: dec(q.y) })),
+            ...(label ? { labelX: dec(label.x), labelY: dec(label.y) } : {}),
+          },
+          note: p.note ?? '',
+        });
+        art += 1;
+      } catch {
+        artLeft += 1;
+      }
+    }
+    if (art > 0) void this.qc.invalidateQueries({ queryKey: designKeys.band(this.techCardId) });
+    return { art, artLeft };
   }
 
   /* ─────────────────────────── gestures ─────────────────────────── */

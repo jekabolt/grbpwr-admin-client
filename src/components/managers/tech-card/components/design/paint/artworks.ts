@@ -15,13 +15,14 @@ import type {
   GetDesignBandResponse,
   common_DesignAsset,
   common_DesignAssetPlacement,
+  common_DesignPicture,
   common_TechCardAnnotation,
 } from 'api/proto-http/admin';
 
 import { assetFull, assetLabel, placementsOnPicture } from '../assets/model';
 import { boundAssetsByPair, pairKey, type ClothSlot } from '../pattern/slot-fabrics';
 import { benchSides } from '../render/model';
-import { viewLabel } from '../views';
+import { normaliseViewKey, viewLabel } from '../views';
 
 /** The server refuses a render with more placed artworks than this (`too_many_artworks`). */
 export const MAX_RENDER_ARTWORKS = 4;
@@ -102,9 +103,96 @@ export function flatPictureIds(band: GetDesignBandResponse): Map<string, number>
   return m;
 }
 
+/**
+ * T29 · ARTWORK MARKS LEFT ON A REPLACED FLAT. A mark hangs off a PICTURE; when a side's slot takes
+ * a new flat the mark stays on the old picture, nothing draws it on the side and the render leaves
+ * the artwork out. These are such marks of ONE side, each with the old picture it stands on:
+ *
+ *   stray   its picture stands in no bench row at all (any kind, any colourway) — a picture still
+ *           standing somewhere is that slot's own mark and is never moved;
+ *   known   its picture is in the band (bench, runs, batches, outputs) or rides with the mark
+ *           (`placement.picture`, T29b) — its pixels are needed;
+ *   mine    the side's saved colour map was painted on that picture (`mapBaseMediaId` = its media),
+ *           or the side's flat is an edit / crop of it (replaced_by, derived_from), or — the
+ *           weakest — its ghost view is this side. Several strong claims are narrowed by the ghost
+ *           view; a picture still claimed by several sides is nobody's.
+ */
+export type StrayMark = { placement: common_DesignAssetPlacement; picture: common_DesignPicture };
+
+export function strayMarks(
+  band: GetDesignBandResponse,
+  sides: readonly { view: string; pictureId: number; mapBaseMediaId: number }[],
+): Map<string, StrayMark[]> {
+  const out = new Map<string, StrayMark[]>();
+  const marks = band.assetPlacements ?? [];
+  if (marks.length === 0) return out;
+  const pics = new Map<number, common_DesignPicture>();
+  const add = (p?: common_DesignPicture | null) => {
+    const id = p?.id ?? 0;
+    if (id > 0 && !pics.has(id)) pics.set(id, p as common_DesignPicture);
+  };
+  const standing = new Set<number>();
+  for (const row of band.bench ?? []) {
+    const id = row.picture?.id || row.pictureId || 0;
+    if (id > 0) standing.add(id);
+    add(row.picture);
+  }
+  // The band's pictures (as `bandPictures` reads them — not imported: that module is a screen).
+  (band.runs ?? []).forEach((r) => (r.pictures ?? []).forEach(add));
+  (band.batches ?? []).forEach((b) => (b.pictures ?? []).forEach(add));
+  (band.outputs ?? []).forEach((o) => add(o.picture));
+  // T29b · the picture each mark sits on rides WITH the mark (GetDesignBand fills it), so a mark on an
+  // old flat that left the paged runs/batches lists is still known. Added LAST: a band row wins.
+  marks.forEach((m) => add(m.picture));
+
+  /** `old` is an ancestor of `cur` through edits (replaced_by) or crops/flattens (derived_from). */
+  const leadsTo = (old: common_DesignPicture, cur: number): boolean => {
+    let p: common_DesignPicture | undefined = old;
+    for (let i = 0; p && i < 16; i += 1) {
+      const next = p.replacedBy ?? 0;
+      if (next <= 0) break;
+      if (next === cur) return true;
+      p = pics.get(next);
+    }
+    let c = pics.get(cur);
+    for (let i = 0; c && i < 16; i += 1) {
+      const parent = c.derivedFrom ?? 0;
+      if (parent <= 0) break;
+      if (parent === old.id) return true;
+      c = pics.get(parent);
+    }
+    return false;
+  };
+
+  for (const placement of marks) {
+    const pid = placement.pictureId ?? 0;
+    if (pid <= 0 || standing.has(pid)) continue;
+    const picture = pics.get(pid) ?? placement.picture;
+    if (!picture || (picture.id ?? 0) <= 0) continue;
+    const media = picture.media?.id ?? 0;
+    const strong = sides.filter(
+      (s) =>
+        s.pictureId > 0 &&
+        ((media > 0 && s.mapBaseMediaId === media) || leadsTo(picture, s.pictureId)),
+    );
+    const ghost = normaliseViewKey(picture.ghostView);
+    const byGhost = (list: typeof sides) => list.filter((s) => s.pictureId > 0 && s.view === ghost);
+    // Several strong claims (e.g. the old flat is an ancestor of ONE sheet every side was cropped
+    // from) are narrowed by the ghost view before giving up; none falls back to the ghost view.
+    const claim =
+      strong.length === 1 ? strong : strong.length > 1 ? byGhost(strong) : byGhost(sides);
+    if (claim.length !== 1) continue;
+    const view = claim[0].view;
+    const list = out.get(view) ?? [];
+    list.push({ placement, picture });
+    out.set(view, list);
+  }
+  return out;
+}
+
 /* ─────────────────────────── wire ↔ quad ─────────────────────────── */
 
-const num = (d?: { value?: string } | null): number => {
+export const num = (d?: { value?: string } | null): number => {
   const v = parseFloat(d?.value ?? '');
   return Number.isFinite(v) ? v : 0;
 };
@@ -128,7 +216,7 @@ export function quadOfPlacement(p: common_DesignAssetPlacement): Quad | null {
 }
 
 /** Six decimals is the server's ceiling; four resolve a tenth of a millimetre on a flat. */
-const dec = (v: number) => ({ value: String(Number(clamp01(v).toFixed(4))) });
+export const dec = (v: number) => ({ value: String(Number(clamp01(v).toFixed(4))) });
 
 /** The annotation the server stores: POLYGON (3..40 points) of the four corners, in frame. */
 export function annotationOfQuad(q: Quad): common_TechCardAnnotation {
