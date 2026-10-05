@@ -1010,7 +1010,6 @@ function PaintSide({
             {partName}
           </Text>
         )}
-        {view.stale && <Pill tone='attention'>stale</Pill>}
         {view.status === 'error' && <Pill tone='warn'>not loaded</Pill>}
       </div>
     </div>
