@@ -317,6 +317,58 @@ try {
     await page.waitForTimeout(300);
     await shoot(page, 'r8-parts-top-handle-1440.png');
   }
+  // T66 · under a PAINT tool a placed box is still selectable and removable: CLICK tool on, a click
+  // on the back print (#41) selects it, its ✕ deletes the placement; another box goes by ⌫.
+  {
+    await page.click('[data-paint-tool="click"]');
+    const del0 = await page.evaluate(
+      () => window.__calls.filter((c) => c.name === 'DeleteDesignAssetPlacement').length,
+    );
+    const p41 = await at(page, 'back', 0.5, 0.38);
+    await page.mouse.click(p41.x, p41.y);
+    await page
+      .waitForSelector('[data-artwork-selected="p41"]', { timeout: 3000 })
+      .catch(() => errors.push('ASSERT T66: a click under the CLICK tool does not select #41'));
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(200);
+    await shoot(page, 't66-parts-selected-click-tool-1440.png');
+    const x = page.locator('[data-artwork-remove="41"]');
+    if ((await x.count()) !== 1) errors.push('ASSERT T66: no ✕ on the selected box #41');
+    else await x.click();
+    await page.waitForTimeout(300);
+    const del = await page.evaluate(() =>
+      window.__calls.filter((c) => c.name === 'DeleteDesignAssetPlacement').map((c) => c.body),
+    );
+    if (del.length !== del0 + 1 || del[del.length - 1]?.placementId !== 41)
+      errors.push(`ASSERT T66: ✕ did not delete #41 (${JSON.stringify(del)})`);
+    else console.log('assert ok T66: CLICK tool → click selects #41, ✕ deletes it');
+    // ⌫ on another box, still under the CLICK tool.
+    const ids = await page.evaluate(() =>
+      window.__band.assetPlacements.filter((p) => p.pictureId === 1).map((p) => p.id),
+    );
+    const before = await page.evaluate(() => window.__band.assetPlacements.length);
+    const chest = await at(page, 'front', 0.65, 0.3);
+    await page.mouse.click(chest.x, chest.y);
+    const sel = await page
+      .waitForSelector('[data-artwork-selected^="p"]', { timeout: 3000 })
+      .then((h) => h.getAttribute('data-artwork-selected'))
+      .catch(() => '');
+    if (!sel || !ids.includes(Number(sel.slice(1))))
+      errors.push(`ASSERT T66: chest box not selected under CLICK (${sel}; ${ids})`);
+    else {
+      await page.keyboard.press('Backspace');
+      await page.waitForTimeout(300);
+      const after = await page.evaluate(() => window.__band.assetPlacements.length);
+      if (after !== before - 1) errors.push(`ASSERT T66: ⌫ did not remove ${sel}`);
+      else console.log(`assert ok T66: ⌫ removes ${sel} under the CLICK tool`);
+    }
+    // A click beside every box still paints (and clears the selection).
+    const paper = await at(page, 'back', 0.5, 0.75);
+    await page.mouse.click(paper.x, paper.y);
+    await page.waitForTimeout(200);
+    if ((await page.locator('[data-artwork-selected]').count()) !== 0)
+      errors.push('ASSERT T66: a click beside the boxes keeps a selection');
+  }
   console.log(
     `band placements: ${JSON.stringify(await page.evaluate(() => window.__band.assetPlacements.map((p) => [p.id, p.assetId, p.pictureId, p.annotation.points.map((q) => [q.x.value, q.y.value])])))}`,
   );
