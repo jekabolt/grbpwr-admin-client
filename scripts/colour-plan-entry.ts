@@ -152,6 +152,7 @@ export function makeBand(input: {
     runKinds: undefined,
     suggestPromptsModel: undefined,
     partsSuggestions: [],
+    joins: undefined,
   };
 }
 

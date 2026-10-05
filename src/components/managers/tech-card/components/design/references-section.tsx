@@ -38,6 +38,7 @@ import {
   useFlatInput,
   wordsLocked,
 } from './flat-input';
+import { FlatJoins } from './flat-joins';
 import { FlatRunRow } from './flat-run-row';
 import { RecalledRunPrompt } from './history-recall';
 import { EmptyState, GROUP_GAP, PlaceOrDrawCell } from './core';
@@ -937,6 +938,14 @@ export function ReferencesSection({
           ⚠ НЕ ЗАВОРАЧИВАТЬ В СВОРАЧИВАНИЕ (`collapsible`/`Fold`): ниже смонтирован приёмник рекола
           `RecalledRunPrompt`, при размонтировании реестр стирает выбор (`recalled.delete`), и жест
           теряется молча. */}
+      {/* JOINS (flat route, 05.10): the construction the run freezes into its prompt — right above
+          GENERATE, as a group of this block (`flat-joins.tsx`). */}
+      <FlatJoins
+        techCardId={techCardId}
+        band={band}
+        disabled={disabled}
+        thumbOf={(id) => thumbUrl(mediaById.get(id))}
+      />
       <FlatRunRow band={band} techCardId={techCardId} disabled={disabled} />
 
       {/* ПРИЁМНИК РЕКОЛА (T-10). Видимого органа у него нет — он рисует только вопрос про описание

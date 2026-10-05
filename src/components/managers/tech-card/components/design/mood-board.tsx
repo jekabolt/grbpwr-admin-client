@@ -453,6 +453,8 @@ function pictureOfMedia(full: common_MediaFull): common_DesignPicture {
     canUndo: undefined,
     canRedo: undefined,
     undoToId: undefined,
+    // flat route (0397): no quality labels are read off a stand-in.
+    flags: undefined,
   };
 }
 

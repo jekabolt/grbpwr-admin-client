@@ -137,6 +137,8 @@ export const EMPTY_BAND: GetDesignBandResponse = {
   suggestPromptsModel: undefined,
   // AUTO PARTS (paint the parts Ф2): none yet — the canvas asks for a side it opens.
   partsSuggestions: [],
+  // THE JOIN LIST (flat route, 0397): absent = none yet; the FLAT step asks for it.
+  joins: undefined,
 };
 
 export type DesignBandState = {
@@ -225,6 +227,19 @@ export function serverSpeaksNow(qc: QueryClient, techCardId: number): boolean {
   if (techCardId <= 0) return false;
   const state = qc.getQueryState(designKeys.band(techCardId));
   return !!state?.data && !isUnimplemented(state.error);
+}
+
+/**
+ * THE BAND AS THE SERVER HAS IT NOW, for a CAS retry (the join list, `flat-joins.tsx`): a running
+ * read may have left before the write that beat ours, so it is cancelled and the band read afresh.
+ * The answer lands in the cache too — it is the newest there is.
+ */
+export async function rereadBandNow(
+  qc: QueryClient,
+  techCardId: number,
+): Promise<GetDesignBandResponse> {
+  await qc.cancelQueries({ queryKey: designKeys.band(techCardId) });
+  return qc.fetchQuery({ ...bandQuery(techCardId), staleTime: 0 });
 }
 
 /**

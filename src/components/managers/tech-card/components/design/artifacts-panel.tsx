@@ -2962,6 +2962,7 @@ function plateAsPicture(plate: DocumentPlate): common_DesignPicture {
     canUndo: undefined,
     canRedo: undefined,
     undoToId: undefined,
+    flags: undefined,
   };
 }
 
