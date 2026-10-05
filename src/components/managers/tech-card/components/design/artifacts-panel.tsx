@@ -1813,6 +1813,19 @@ export function ArtifactsPanel({
     }
   };
 
+  /**
+   * ЯКОРЬ НА КАРТИНКУ (владелец, 05.10: «при клике на колаут нас должно анкорить на ту картинку, на
+   * которой он находится», «даже если он suggested»). Ряд кадров бывает и лентой, и сеткой — поэтому
+   * и `block`, и `inline`; `nearest` не дёргает страницу, если кадр уже виден.
+   */
+  function revealPlate(mediaId?: number | null) {
+    if (!mediaId) return;
+    const el = Array.from(
+      document.querySelectorAll<HTMLElement>(`[data-plate-media="${mediaId}"]`),
+    ).find((n) => n.offsetParent !== null);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }
+
   function removeCalloutAt(index: number) {
     calloutHistory?.record();
     const rows = (form.getValues('callouts') ?? []) as SheetCallout[];
@@ -2704,7 +2717,10 @@ export function ArtifactsPanel({
           <CalloutRail
             rows={sheetRows}
             selected={selected}
-            onSelect={setSelected}
+            onSelect={(i) => {
+              setSelected(i);
+              if (i != null) revealPlate(callouts[i]?.mediaId);
+            }}
             hoverIndex={hoverIndex}
             onHover={setHoverIndex}
             disabled={disabled}
@@ -2741,6 +2757,7 @@ export function ArtifactsPanel({
               onAccept={(id) => acceptSuggestions([id])}
               onAcceptAll={() => acceptSuggestions(suggestions.map((x) => x.id ?? ''))}
               onDismiss={dismissSuggestion}
+              onReveal={revealPlate}
             />
           )}
         </CalloutsPanel>

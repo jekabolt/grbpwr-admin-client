@@ -85,6 +85,9 @@ function RuleSep() {
   return <span aria-hidden className='mx-0.5 inline-block h-3 w-px bg-borderColor' />;
 }
 
+/** Клетка текущего цвета и двери «···» — одной ширины. */
+const DOOR_CELL = 'w-8 justify-center';
+
 export function AnnotationStyleRow({
   kind,
   color,
@@ -135,8 +138,17 @@ export function AnnotationStyleRow({
   return (
     <ChipRow>
       {/* ТЕКУЩИЙ ЦВЕТ — ЗНАЧЕНИЕ, А НЕ ВЫБОР: сплошная рамка, без пунктира. */}
-      <Chip data-color={color || 'ink'} title={COLOR_LABEL[color] ?? COLOR_LABEL['']}>
-        {swatch(color)}
+      {/* ОДИН РАЗМЕР С ДВЕРЬЮ «···» (владелец, 05.10): обе — квадратные клетки одной ширины. */}
+      <Chip
+        data-color={color || 'ink'}
+        title={COLOR_LABEL[color] ?? COLOR_LABEL['']}
+        className={DOOR_CELL}
+      >
+        <span
+          aria-hidden
+          className='inline-block size-3 border border-borderColor'
+          style={{ background: color ? CALLOUT_COLOR_HEX[color] : 'var(--color-textColor)' }}
+        />
       </Chip>
       <Chip
         data-style-door=''
@@ -146,6 +158,7 @@ export function AnnotationStyleRow({
         aria-label={open ? 'fewer style options' : 'more style options'}
         title={open ? 'fewer style options' : 'colour, line ends, dashed, hatching'}
         onClick={() => setOpen((v) => !v)}
+        className={DOOR_CELL}
       >
         ···
       </Chip>

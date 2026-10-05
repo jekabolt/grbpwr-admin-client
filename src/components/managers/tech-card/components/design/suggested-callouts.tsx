@@ -25,6 +25,7 @@ export function SuggestedCallouts({
   onHover,
   onAccept,
   onDismiss,
+  onReveal,
   onAcceptAll,
   disabled,
 }: {
@@ -37,6 +38,8 @@ export function SuggestedCallouts({
   onHover: (id: string | null) => void;
   onAccept: (id: string) => void;
   onDismiss: (id: string) => void;
+  /** Клик по строке ведёт к картинке, на которой стоит предложение. */
+  onReveal?: (mediaId?: number) => void;
   onAcceptAll: () => void;
   disabled?: boolean;
 }) {
@@ -99,6 +102,7 @@ export function SuggestedCallouts({
                     )}
                     onPointerEnter={() => onHover(id)}
                     onPointerLeave={() => onHover(null)}
+                    onClick={() => onReveal?.(s.mediaId)}
                   >
                     <span className='shrink-0 opacity-70'>
                       <KindGlyph kind={annotationKindFromWire(s.kind)} spec={s.spec ?? ''} />

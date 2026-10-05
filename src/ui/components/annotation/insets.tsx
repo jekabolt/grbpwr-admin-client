@@ -134,7 +134,7 @@ export function DetailInset({
         ×{scale}
       </span>
       {text && (
-        <span className='absolute left-0 top-full mt-0.5 block max-w-full truncate bg-bgColor px-[3px] text-nano leading-tight'>
+        <span className='absolute left-0 top-full mt-0.5 block w-full whitespace-pre-wrap break-words bg-bgColor px-[3px] text-nano leading-tight'>
           {text}
         </span>
       )}
