@@ -42,7 +42,7 @@ import {
   assetThumb,
 } from '../assets/model';
 import { useAssetBindingWrites, useAssetWrites } from '../assets/use-assets';
-import { BENCH_CELL_STYLE, BENCH_FRAME_ASPECT, InertDoor, SlotCap } from '../bench-slot';
+import { BENCH_FRAME_ASPECT, FLAT_CELL_STYLE, InertDoor, SlotCap } from '../bench-slot';
 import { serverSpeaksDesign } from '../capability';
 import { flushRefusalSentence, useTechCardAutosave } from '../autosave-contract';
 import { archivedRef, colorwayLabel } from '../colorway-picker';
@@ -1214,7 +1214,9 @@ function MaterialBench({
         >
           {title}
         </GroupLabel>
-        <div className='flex flex-wrap items-start gap-2.5 pt-1.5'>
+        {/* T61: the FLAT SLOTS row — same 166px box, same gap-2 rhythm, wrapping instead of
+            scrolling (a materials group has no fixed count). */}
+        <div className='flex flex-wrap items-start gap-2 pt-1.5'>
           {list.map((slot) => {
             const key = pairKey(cwId, slot.bomItemId);
             const gate = cellGate(slot);
@@ -1227,7 +1229,7 @@ function MaterialBench({
             return (
               <div
                 key={born ? slot.lineKey : slot.bomItemId}
-                style={BENCH_CELL_STYLE}
+                style={FLAT_CELL_STYLE}
                 className='flex min-w-0 flex-col items-start gap-1'
                 data-fh-slot={born ? 'saving' : slot.bomItemId}
                 data-fh-born-line={born ? slot.lineKey : undefined}
@@ -1260,7 +1262,12 @@ function MaterialBench({
                   role='button'
                   tabIndex={0}
                   aria-pressed={isSelected}
-                  aria-label={`select ${slot.name}`}
+                  aria-label={`select ${slot.name} — generate makes it`}
+                  title={
+                    isSelected
+                      ? `${slot.name} · generate makes this one`
+                      : `choose ${slot.name} for generate`
+                  }
                   data-fh-cell={born ? 'saving' : slot.bomItemId}
                   className='group w-full min-w-0 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                   onClickCapture={() => pick(slot)}
@@ -1375,8 +1382,11 @@ function MaterialBench({
                 }
               >
                 generate ·{' '}
-                <span className='text-textColor' data-fh-subject=''>
-                  {selected.name}
+                {/* T61: the target wears the chosen cell's own inverted cap, ✦ included — the
+                    panel visibly continues the tile that was clicked. */}
+                <span className='inline-flex items-baseline gap-1 bg-textColor px-1 text-bgColor'>
+                  <span data-fh-subject=''>{selected.name}</span>
+                  <span aria-hidden>✦</span>
                 </span>
               </GroupLabel>
               <SpecPanel
@@ -1946,9 +1956,27 @@ function SlotCell({
       label={slot.name}
       title={[slot.name, slot.purposeLabel, slot.detail].filter(Boolean).join(' · ')}
       strong={selected}
+      chosen={selected}
       quiet
-      wrap
-      trailing={undo ?? null}
+      trailing={
+        <>
+          {undo ?? null}
+          {/* T61 · ✦ = the app's generate glyph (`ai ✦`). On the chosen cell it says «GENERATE
+              makes this»; on any other it surfaces on hover/focus as the promise of the click. */}
+          <span
+            aria-hidden
+            data-fh-target-mark={selected ? 'on' : 'hint'}
+            className={cn(
+              'shrink-0 text-nano',
+              !undo && 'ml-auto',
+              !selected &&
+                'text-labelColor opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
+            )}
+          >
+            ✦
+          </span>
+        </>
+      }
     />
   );
 
@@ -2229,37 +2257,35 @@ type BornLine = { lineKey: string; seq: number; name: string; technique: string 
  */
 function NewArtworkTile({ gate, onAdd }: { gate: Gate; onAdd: () => void }): JSX.Element {
   const off = !gate.ok;
+  // T61: the same box as every cell of the row (FLAT SLOTS' empty cell): dashed frame, square
+  // picture area, the word INSIDE the cap — no caption hanging under the box.
   return (
-    <div style={BENCH_CELL_STYLE} className='flex min-w-0 flex-col items-start gap-1'>
+    <div style={FLAT_CELL_STYLE} className='flex min-w-0 flex-col items-start gap-1'>
       <button
         type='button'
         disabled={off}
         onClick={onAdd}
         title={off ? gate.reason : 'a new artwork — a DECORATION line of the BOM'}
         data-fh-new-artwork={off ? 'inert' : 'live'}
-        className='group flex w-full flex-col gap-1 text-left disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+        className={cn(
+          'group flex w-full min-w-0 flex-col overflow-hidden border border-dashed border-borderColor bg-bgColor text-left',
+          'hover:border-solid hover:border-textColor disabled:cursor-not-allowed disabled:hover:border-dashed disabled:hover:border-borderColor',
+          'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+        )}
       >
         <span
           aria-hidden
           style={{ aspectRatio: BENCH_FRAME_ASPECT }}
           className={cn(
-            'flex w-full items-center justify-center border border-dashed border-borderColor bg-bgColor text-labelColor group-hover:border-textColor group-hover:text-textColor',
-            off && 'text-textInactiveColor group-hover:border-borderColor',
+            'flex w-full items-center justify-center',
+            off ? 'text-textInactiveColor' : 'text-labelColor group-hover:text-textColor',
           )}
         >
           <Text component='span' size='control' className='font-bold'>
             +
           </Text>
         </span>
-        <Text
-          size='micro'
-          variant={off ? 'inactive' : 'label'}
-          tracking='label'
-          component='span'
-          className='w-full truncate uppercase'
-        >
-          + artwork
-        </Text>
+        <SlotCap label='+ artwork' quiet />
       </button>
     </div>
   );

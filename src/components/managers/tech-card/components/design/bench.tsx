@@ -15,7 +15,8 @@ import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Button } from 'ui/components/button';
 import {
-  BENCH_CELL_PX,
+  FLAT_CELL_PX,
+  FLAT_CELL_STYLE,
   BenchSlot,
   LegacySlotCell,
   NewDetailCell,
@@ -103,8 +104,8 @@ const FLAT_BENCH: BenchKind = 'flat';
  * details, the mint cell, the legacy row) grows together and keeps its proportions. The box itself
  * (`BENCH_CELL_PX`) stays for the other steps that borrow it.
  */
-const CELL_PX = Math.round(BENCH_CELL_PX * 1.2);
-const CELL_STYLE: React.CSSProperties = { width: CELL_PX, flex: `0 0 ${CELL_PX}px` };
+const CELL_PX = FLAT_CELL_PX;
+const CELL_STYLE = FLAT_CELL_STYLE;
 
 /**
  * ═══ И КОЛОРВЕЯ У ЭТОГО ВЕРСТАКА НЕТ — L-4, И ЭТО ГРАНИЦА, А НЕ ПРОБЕЛ ════════════════════════

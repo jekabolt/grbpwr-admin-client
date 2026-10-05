@@ -575,6 +575,17 @@ export const BENCH_CELL_STYLE: React.CSSProperties = {
 };
 export const BENCH_FRAME_ASPECT = '1/1';
 
+/**
+ * T31 + T61 · THE FLAT SLOTS CELL — 20% wider than the shared box (166px). FLAT SLOTS owns it, and
+ * MATERIALS (owner T61: «блоки по аналогии с FLAT SLOTS») stands every cell in exactly this box, so
+ * the two steps cannot drift apart: one number, read by both.
+ */
+export const FLAT_CELL_PX = Math.round(BENCH_CELL_PX * 1.2);
+export const FLAT_CELL_STYLE: React.CSSProperties = {
+  width: FLAT_CELL_PX,
+  flex: `0 0 ${FLAT_CELL_PX}px`,
+};
+
 /*
  * ПУСТОГО КАДРА СВОЕЙ РУКОЙ ЭТОТ ФАЙЛ БОЛЬШЕ НЕ РИСУЕТ ВОВСЕ. Полосатая поверхность, квадрат с
  * нулевым минимумом (без него содержательная высота кнопки перебивала `aspect-ratio` — замерено,
@@ -602,6 +613,7 @@ export function SlotCap({
   strong,
   quiet,
   wrap,
+  chosen,
 }: {
   label: string;
   required?: boolean;
@@ -614,22 +626,33 @@ export function SlotCap({
   quiet?: boolean;
   /** The whole name on up to two lines instead of one truncated line (MATERIALS). */
   wrap?: boolean;
+  /**
+   * T61 · THE CHOSEN CELL of a selectable row (MATERIALS: what GENERATE will make). The cap goes
+   * inverted — the app's own selected grammar (`Text variant='selected'`, the chosen chip) — so the
+   * choice reads from across the screen, not only from a 2px frame.
+   */
+  chosen?: boolean;
 }) {
   return (
     <div
-      className='flex min-w-0 items-baseline gap-1 border-t border-hairline px-1.5 py-1'
+      className={cn(
+        'flex min-w-0 items-baseline gap-1 border-t px-1.5 py-1',
+        chosen
+          ? 'border-textColor bg-textColor text-bgColor [&_button]:text-bgColor [&_button:hover]:text-bgColor'
+          : 'border-hairline',
+      )}
       title={title || undefined}
       data-bench-cap={label}
     >
       <Text
         size='micro'
-        variant='uppercase'
+        variant={chosen ? 'selected' : 'uppercase'}
         tracking='label'
         component='span'
         className={cn(
           wrap ? 'line-clamp-2 min-w-0 flex-1 break-words' : 'min-w-0 truncate',
           strong && 'font-bold',
-          quiet && !strong && 'text-labelColor group-hover:text-textColor',
+          quiet && !strong && !chosen && 'text-labelColor group-hover:text-textColor',
         )}
       >
         {label}

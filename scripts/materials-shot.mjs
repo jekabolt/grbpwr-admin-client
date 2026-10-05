@@ -417,6 +417,49 @@ try {
     });
     await settle();
     await shoot(page, 'r5-label-selected-1440.png');
+    // T61 · every MATERIALS cell (and `+ artwork`) is the FLAT SLOTS box: 166 wide, one height;
+    // the chosen cell's cap is inverted with ✦; another cell shows ✦ on hover.
+    {
+      const boxes = await page.evaluate(() =>
+        [...document.querySelectorAll('[data-fh-slot] > *, [data-fh-new-artwork]')].map((el) => {
+          const r = el.getBoundingClientRect();
+          return { w: Math.round(r.width), h: Math.round(r.height) };
+        }),
+      );
+      const ws = new Set(boxes.map((b) => b.w));
+      const hs = new Set(boxes.map((b) => b.h));
+      const chosen = await page.locator('[data-fh-selected] [data-bench-cap]').evaluate((el) => ({
+        bg: getComputedStyle(el).backgroundColor,
+        mark: !!el.querySelector('[data-fh-target-mark="on"]'),
+      }));
+      await page.hover('[data-fh-cell="1"]');
+      await page.waitForTimeout(250);
+      const hint = await page
+        .locator('[data-fh-cell="1"] [data-fh-target-mark="hint"]')
+        .evaluate((el) => getComputedStyle(el).opacity);
+      if (
+        boxes.length < 6 ||
+        ws.size !== 1 ||
+        !ws.has(166) ||
+        hs.size !== 1 ||
+        chosen.bg !== 'rgb(0, 0, 0)' ||
+        !chosen.mark ||
+        hint !== '1'
+      )
+        errors.push(
+          `[1440] ASSERT T61: ${JSON.stringify({ ws: [...ws], hs: [...hs], chosen, hint })}`,
+        );
+      else
+        console.log(
+          `assert ok T61: ${boxes.length} cells 166×${[...hs][0]}, chosen inverted ✦, hover ✦`,
+        );
+      await page.locator('[data-fh-group="fabrics"]').scrollIntoViewIfNeeded();
+      const grid = await page.locator('#design-pattern').boundingBox();
+      const t61 = resolve(OUT, 't61-materials-1440.png');
+      await page.screenshot({ path: t61, clip: grid ?? undefined, fullPage: !!grid });
+      shots.push(t61);
+      await page.mouse.move(5, 5);
+    }
     await shoot(page, 'r6-label-open-1440.png');
     // The run body: mode `label`, the logo as the one picture, placement as «sewn at».
     const before = await page.evaluate(() => window.__calls.length);
@@ -753,7 +796,7 @@ try {
   {
     // Round 8 minors (C-m1…C-m4) on `#r8`: a long slot name, the undo word, the shelf, the logo.
     const { ctx, page } = await open(1440, 1000, '#r8');
-    // C-m1: the whole name on ≤ 2 lines, no purpose word in the cap, purpose in the title.
+    // C-m1 → T61: ONE line (the FLAT SLOTS cap), the whole name in the title with the purpose.
     {
       const cap = await page
         .locator('[data-fh-slot="1"] [data-bench-cap]')
@@ -762,20 +805,23 @@ try {
           const t = el.querySelector('span');
           const lh = parseFloat(getComputedStyle(t).lineHeight) || 12;
           return {
-            text: el.textContent.trim(),
+            text: t.textContent.trim(),
             title: el.getAttribute('title') ?? '',
             lines: Math.round(t.getBoundingClientRect().height / lh),
-            cut: t.scrollHeight > t.clientHeight + 1,
           };
         });
       if (
-        cap.text !== 'MAIN FABRIC OUTER SHELL' ||
-        cap.cut ||
-        cap.lines > 2 ||
-        !cap.title.includes('main material')
+        cap.text !== 'main fabric outer shell'.toUpperCase() &&
+        cap.text.toUpperCase() !== 'MAIN FABRIC OUTER SHELL'
       )
         errors.push(`[1440] ASSERT C-m1: cap ${JSON.stringify(cap)}`);
-      else console.log(`assert ok C-m1: full name on ${cap.lines} lines, purpose in the title`);
+      else if (
+        cap.lines !== 1 ||
+        !cap.title.toUpperCase().includes('MAIN FABRIC OUTER SHELL') ||
+        !cap.title.includes('main material')
+      )
+        errors.push(`[1440] ASSERT C-m1/T61: cap ${JSON.stringify(cap)}`);
+      else console.log('assert ok C-m1/T61: name on 1 line, full name + purpose in the title');
     }
     // C-m2: `clear` on FRONT BUTTON → `undo` inside the cell frame; the cell keeps its height.
     {
