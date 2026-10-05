@@ -14,6 +14,7 @@ import {
   isHardwareKind,
   isLabelKind,
 } from './hardware-icons';
+import { isPaletteKey, isSeamKind, PaletteIcon, SEAM_LABEL, SeamIcon } from './seam-icons';
 
 /** Every part name the quiz model may return (20-DESIGN O6). */
 export type PartKey =
@@ -720,6 +721,27 @@ export function PartPictogram({
         }}
       >
         <LabelIcon kind={kind} size={64} />
+      </span>
+    );
+  }
+  if (part.startsWith('sm_') || isPaletteKey(part)) {
+    const seam = isSeamKind(part) ? part : null;
+    if (!seam && !isPaletteKey(part)) return null;
+    return (
+      <span
+        role='img'
+        aria-label={seam ? SEAM_LABEL[seam] : 'colourways'}
+        data-zoom='1.0'
+        className={className}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          aspectRatio: '64 / 96',
+          ...(className ? {} : { width: 64, height: 96 }),
+        }}
+      >
+        {seam ? <SeamIcon kind={seam} size={64} /> : <PaletteIcon size={64} />}
       </span>
     );
   }

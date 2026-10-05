@@ -27,7 +27,7 @@ export const SEAM_KINDS = [
 export type SeamKind = (typeof SEAM_KINDS)[number];
 
 export const SEAM_LABEL: Record<SeamKind, string> = {
-  sm_plain_open: 'plain seam pressed open, edges overlocked separately',
+  sm_plain_open: 'plain seam pressed open, edges overlocked',
   sm_plain_overlock: 'plain seam overlocked together',
   sm_safety: 'safety stitch 516',
   sm_french: 'French seam',
@@ -51,66 +51,81 @@ export function isSeamKind(value: string): value is SeamKind {
   return (SEAM_KINDS as readonly string[]).includes(value);
 }
 
-const words = (value: string) =>
-  ` ${value
-    .trim()
-    .toLowerCase()
-    .replaceAll('&', ' and ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ')} `;
+/** Backend `designQuizSingular`: "edges" → "edge", "patches" → "patch"; short or non-s words stay. */
+const singular = (w: string): string => {
+  if (w.length < 3 || !w.endsWith('s')) return w;
+  if (/(?:sses|ches|shes|xes)$/.test(w)) return w.slice(0, -2);
+  if (w.endsWith('ss')) return w;
+  return w.slice(0, -1);
+};
 
+/** Backend `designQuizAliasWords`: `[a-z0-9]+` words (digits count), singularised. */
+const aliasWords = (value: string): string[] =>
+  (value.toLowerCase().match(/[a-z0-9]+/g) ?? []).map(singular);
+
+// Same table, same order as backend `designQuizSeams` (design_quiz.go) — the sort below is stable,
+// so within one word count the table order decides, exactly like the server.
 const SEAM_ALIASES: ReadonlyArray<readonly [SeamKind, readonly string[]]> = [
-  ['sm_hong_kong', ['hong kong finish', 'bias-bound edges', 'bias bound edges', 'hong kong']],
+  ['sm_hong_kong', ['hong kong', 'hong kong finish', 'bias-bound edges', 'bias bound edges']],
   ['sm_flat_felled', ['flat-felled', 'flat felled', 'felled seam', 'run and fell']],
   [
     'sm_mock_felled',
     ['mock flat-fell', 'mock felled', 'mock fell', 'welt seam', 'topstitched to one side'],
   ],
-  ['sm_french', ['french seams', 'french seam']],
+  ['sm_french', ['french seam', 'french seams']],
   ['sm_safety', ['safety stitch', '5-thread', '516']],
   [
     'sm_plain_overlock',
-    ['plain seam overlocked', 'overlocked together', '4-thread overlock', 'serged seam', '514'],
+    ['plain seam overlocked', 'overlocked together', '4-thread overlock', '514', 'serged seam'],
   ],
-  ['sm_plain_open', ['plain seam pressed open', 'open seam overlocked', 'pressed open']],
+  ['sm_plain_open', ['pressed open', 'plain seam pressed open', 'open seam overlocked']],
   ['sm_lapped', ['lapped seam', 'lapped']],
-  ['sm_bound', ['binding tape seam', 'bound together', 'bound seam']],
+  ['sm_bound', ['bound seam', 'bound together', 'binding tape seam']],
   ['sm_taped', ['taped seam', 'seam tape', 'seam-sealed', 'seam sealing', 'sealed seam', 'taped']],
-  ['sm_bonded', ['glued seam', 'no-sew', 'ultrasonic', 'bonded', 'welded']],
-  ['sm_flatlock', ['flat seam 607', 'flatlock', 'flatseam', '607']],
-  ['sm_hem_cover', ['coverstitched', 'coverstitch', '406', '602', '605']],
-  ['sm_hem_blind', ['blind-hemmed', 'blind hem', 'blindstitch', '103']],
+  ['sm_bonded', ['bonded', 'welded', 'ultrasonic', 'glued seam', 'no-sew']],
+  ['sm_flatlock', ['flatlock', 'flatseam', 'flat seam 607', '607']],
+  ['sm_hem_cover', ['coverstitch', 'coverstitched', '406', '602', '605']],
+  ['sm_hem_blind', ['blind hem', 'blind-hemmed', 'blindstitch', '103']],
   [
     'sm_hem_turned',
-    ['turned and topstitched', 'clean-finished hem', 'double-turned hem', 'turned twice'],
+    ['turned twice', 'double-turned hem', 'turned and topstitched', 'clean-finished hem'],
   ],
-  ['sm_hem_raw', ['unfinished edge', 'raw edge', 'raw hem', 'cut edge', 'pinked']],
+  ['sm_hem_raw', ['raw edge', 'raw hem', 'cut edge', 'unfinished edge', 'pinked']],
   [
     'sm_hem_bound',
     [
-      'self-fabric binding',
-      'bound neckline',
-      'bias binding',
-      'binding',
-      'bound edge',
       'bound hem',
+      'bound neckline',
+      'bound edge',
+      'binding',
+      'bias binding',
       'bias tape',
+      'self-fabric binding',
     ],
   ],
-  ['sm_hem_faced', ['understitched', 'facing', 'faced']],
+  ['sm_hem_faced', ['faced', 'facing', 'understitched']],
 ];
 
-const SORTED_ALIASES = SEAM_ALIASES.flatMap(([kind, aliases]) =>
-  aliases.map((alias) => ({ kind, alias, length: words(alias).trim().length })),
-).sort((a, b) => b.length - a.length);
+/** Backend `designQuizSeamAliases`: the "seam allowance" blocker, then longest first by WORD count. */
+const SORTED_ALIASES: ReadonlyArray<{ kind: SeamKind | null; words: string[] }> = [
+  { kind: null, words: aliasWords('seam allowance') },
+  ...SEAM_ALIASES.flatMap(([kind, aliases]) =>
+    aliases.map((alias) => ({ kind: kind as SeamKind | null, words: aliasWords(alias) })),
+  ).sort((a, b) => b.words.length - a.words.length),
+];
 
-/** Resolve complete seam words/phrases, with specific constructions winning over generic terms. */
+const containsRun = (haystack: readonly string[], needle: readonly string[]): boolean => {
+  for (let at = 0; at + needle.length <= haystack.length; at++) {
+    if (needle.every((w, i) => haystack[at + i] === w)) return true;
+  }
+  return false;
+};
+
+/** Backend `designQuizSeamOf`, one to one: the first alias found as a complete word run. */
 export function seamOf(label: string): SeamKind | null {
-  const haystack = words(label);
-  if (haystack.includes(words('seam allowance'))) return null;
-  for (const { kind, alias } of SORTED_ALIASES) {
-    if (haystack.includes(words(alias))) return kind;
+  const haystack = aliasWords(label);
+  for (const { kind, words } of SORTED_ALIASES) {
+    if (containsRun(haystack, words)) return kind;
   }
   return null;
 }

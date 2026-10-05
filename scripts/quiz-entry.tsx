@@ -23,6 +23,7 @@ import {
   insertClarify,
   QUIZ_MAX,
 } from 'components/managers/tech-card/components/design/quiz-model';
+import { seamOf, swatchOf } from 'components/managers/tech-card/components/design/seam-icons';
 import { requestBrief } from 'components/managers/tech-card/components/design/words-brief';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
 import { enhanceText } from 'ui/components/ai-enhance';
@@ -53,7 +54,7 @@ const q = (
   ...extra,
 });
 
-(window as unknown as { __quiz: unknown }).__quiz = {
+const defaultQuiz = {
   family: 'jacket',
   model: 'stub',
   questions: [
@@ -109,17 +110,27 @@ const q = (
     ]),
   ],
 };
-type Preset = { answers?: unknown[]; pictures?: number; session?: unknown };
+// 70-SEAMS: `quiz` — свой набор вопросов вместо фикстуры, `seamClass` — класс шва карточки в форме.
+type Preset = {
+  answers?: unknown[];
+  pictures?: number;
+  session?: unknown;
+  quiz?: unknown;
+  seamClass?: string;
+};
 const w = window as unknown as {
   __answers: unknown[];
   __session: unknown;
   __preset?: Preset;
   __model: unknown;
+  __quiz: unknown;
+  __form: unknown;
 };
+w.__quiz = w.__preset?.quiz ?? defaultQuiz;
 w.__answers = w.__preset?.answers ?? [];
 // E2: открытый прогон на «сервере» — `{ questions, family }` или null.
 w.__session = w.__preset?.session ?? null;
-w.__model = { clarifyOf, decisionLines, insertClarify, QUIZ_MAX };
+w.__model = { clarifyOf, decisionLines, insertClarify, QUIZ_MAX, seamOf, swatchOf };
 
 const always = () => true;
 function BriefProbe() {
@@ -151,7 +162,20 @@ function Concept() {
 }
 
 function Form({ children }: { children: React.ReactNode }) {
-  const form = useForm({ defaultValues: { concept: '' } as never });
+  const form = useForm({
+    defaultValues: {
+      concept: '',
+      construction: { defaultSeamClass: w.__preset?.seamClass ?? 'TECH_CARD_SEAM_CLASS_UNKNOWN' },
+    } as never,
+  });
+  // подписка прокси formState на dirtyFields — иначе RHF их не ведёт для чтения вне рендера
+  void form.formState.dirtyFields;
+  w.__form = {
+    seamClass: () => form.getValues('construction.defaultSeamClass' as never),
+    seamDirty: () =>
+      !!(form.formState.dirtyFields as { construction?: { defaultSeamClass?: boolean } })
+        .construction?.defaultSeamClass,
+  };
   return <FormProvider {...form}>{children}</FormProvider>;
 }
 

@@ -63,6 +63,7 @@ export const detailAspects: Array<{ key: string; label: string }> = [
   { key: 'pockets', label: 'pockets' },
   { key: 'sleeveCuff', label: 'sleeve / cuff' },
   { key: 'topstitching', label: 'topstitching' },
+  { key: 'seams', label: 'seams' },
   { key: 'extraDetails', label: 'extra details' },
   { key: 'auxMaterials', label: 'aux materials' },
 ];

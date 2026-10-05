@@ -751,6 +751,188 @@ try {
     await shoot(page, 'quiz-1440-stale-confirmed.png');
     await ctx.close();
   }
+  // 70-SEAMS D3: швы (sm_) и колорвеи (col_palette) — значки на чипах, большой значок детали,
+  // цветные точки, основной шов заполняет класс шва карточки только когда он не задан.
+  {
+    const sq = (id, category, part, kind, question, options, decisionKey) => ({
+      id,
+      category,
+      part,
+      family: 'jacket',
+      view: 'front',
+      kind,
+      question,
+      options,
+      contradicts: options.map(() => false),
+      visualEvidence: '',
+      clarifyQuestion: '',
+      clarifyOptions: [],
+      decisionKey,
+    });
+    const mainSeam = sq(
+      'main_seam',
+      'details',
+      'side_seam',
+      'single',
+      'Main seam construction for the body?',
+      [
+        'flat-felled',
+        'mock flat-fell (topstitched to one side)',
+        'plain seam overlocked together',
+        'Hong Kong finish (bias-bound edges)',
+        'French seam',
+      ],
+      'main_seam',
+    );
+    const seamQuiz = {
+      family: 'jacket',
+      model: 'stub',
+      questions: [
+        mainSeam,
+        sq(
+          'binding_width',
+          'details',
+          'sm_hong_kong',
+          'single',
+          'Binding width on the Hong Kong finish?',
+          ['8 mm', '10 mm', '12 mm'],
+          'binding_width',
+        ),
+        sq(
+          'colourway_colours',
+          'design',
+          'col_palette',
+          'multi',
+          'Main colours of the colourways?',
+          ['black', 'bone', 'olive drab', 'washed indigo'],
+          'colourway_colours',
+        ),
+      ],
+    };
+    const { ctx, page } = await open(1440, 900, {
+      quiz: seamQuiz,
+      seamClass: 'TECH_CARD_SEAM_CLASS_UNKNOWN',
+    });
+    await btn(page, 'ASK ME').click();
+    await page.waitForSelector('[data-quiz]');
+    const chipSeams = await page
+      .locator('[data-quiz] button [data-seam-kind]')
+      .evaluateAll((icons) => icons.map((icon) => icon.getAttribute('data-seam-kind')));
+    check(
+      chipSeams.join(',') ===
+        'sm_flat_felled,sm_mock_felled,sm_plain_overlock,sm_hong_kong,sm_french',
+      `seam question chips show distinct seam icons (${chipSeams.join(',')})`,
+    );
+    await shoot(page, 'quiz-1440-seams.png');
+    await btn(page, 'French seam').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('2 / 3'),
+    );
+    const prefilled = await page.evaluate(() => [
+      window.__form.seamClass(),
+      window.__form.seamDirty(),
+    ]);
+    check(
+      prefilled[0] === 'TECH_CARD_SEAM_CLASS_SS_FRENCH' && prefilled[1] === true,
+      `main_seam "French seam" prefills an UNKNOWN default seam class, dirty (${prefilled.join(',')})`,
+    );
+    check(
+      (await page.locator('[data-quiz] [role="img"] [data-seam-kind="sm_hong_kong"]').count()) ===
+        1,
+      'sm_hong_kong part shows the big seam icon',
+    );
+    await shoot(page, 'quiz-1440-seam-part.png');
+    await btn(page, '10 mm').click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('3 / 3'),
+    );
+    check(
+      (await page.locator('[data-quiz] [role="img"] [data-palette-key="col_palette"]').count()) ===
+        1,
+      'col_palette part shows the palette icon',
+    );
+    const swatches = await page
+      .locator('[data-quiz] button [data-swatch]')
+      .evaluateAll((dots) => dots.map((dot) => dot.getAttribute('data-swatch')));
+    check(
+      swatches.join(',') === 'black,olivedrab,indigo',
+      `colourway chips show colour dots (${swatches.join(',')})`,
+    );
+    await shoot(page, 'quiz-1440-colourways.png');
+    const lines = await page.evaluate(() =>
+      window.__model.decisionLines([
+        {
+          question: { part: 'sm_french', category: 'details', question: 'Seam width?' },
+          selected: ['1 cm'],
+        },
+        {
+          question: { part: 'col_palette', category: 'design', question: 'How many?' },
+          selected: ['two'],
+        },
+      ]),
+    );
+    check(
+      lines[0] === 'seam: French seam — Seam width? → 1 cm' &&
+        lines[1] === 'colourways — How many? → two',
+      `decision lines humanise sm_ / col_ (${lines.join(' | ')})`,
+    );
+    const matcher = await page.evaluate(() => {
+      const m = window.__model;
+      return [
+        m.seamOf('Hong Kong finish (bias-bound edges)'),
+        m.seamOf('plain seam overlocked together'),
+        m.seamOf('plain seam pressed open, edges overlocked'),
+        m.seamOf('bound neckline'),
+        m.seamOf('bound edges'),
+        m.seamOf('seam allowance 1 cm'),
+        m.seamOf('corduroy'),
+        m.swatchOf('olive drab'),
+        m.swatchOf('two'),
+      ];
+    });
+    check(
+      matcher.join(',') ===
+        'sm_hong_kong,sm_plain_overlock,sm_plain_open,sm_hem_bound,sm_hem_bound,,,olivedrab,',
+      `seamOf / swatchOf match the backend aliases (${matcher.join(',')})`,
+    );
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(1440, 900, {
+      quiz: {
+        family: 'jacket',
+        model: 'stub',
+        questions: [
+          {
+            id: 'main_seam',
+            category: 'details',
+            part: 'side_seam',
+            family: 'jacket',
+            view: 'front',
+            kind: 'single',
+            question: 'Main seam construction for the body?',
+            options: ['flat-felled', 'French seam'],
+            contradicts: [false, false],
+            visualEvidence: '',
+            clarifyQuestion: '',
+            clarifyOptions: [],
+            decisionKey: 'main_seam',
+          },
+        ],
+      },
+      seamClass: 'TECH_CARD_SEAM_CLASS_SS_PLAIN',
+    });
+    await btn(page, 'ASK ME').click();
+    await page.waitForSelector('[data-quiz]');
+    await btn(page, 'French seam').click();
+    await page.waitForFunction(() => !document.querySelector('[data-quiz]'));
+    const kept = await page.evaluate(() => [window.__form.seamClass(), window.__form.seamDirty()]);
+    check(
+      kept[0] === 'TECH_CARD_SEAM_CLASS_SS_PLAIN' && kept[1] === false,
+      `main_seam answer leaves a set default seam class alone (${kept.join(',')})`,
+    );
+    await ctx.close();
+  }
   {
     const { ctx, page } = await open(390, 844);
     await btn(page, 'ASK ME').click();

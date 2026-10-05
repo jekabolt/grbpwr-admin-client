@@ -23,6 +23,7 @@ import {
   type HardwareKind,
   type LabelKind,
 } from './hardware-icons';
+import { isPaletteKey, SeamIcon, seamClassOf, seamOf, swatchOf, type SeamKind } from './seam-icons';
 import { fillIdOf } from './head/draft-fills';
 import { LockedBar } from './head/mood-organs';
 import { useDraftMemory } from './head/use-draft-fills';
@@ -71,7 +72,20 @@ type Live = {
   mode: 'run' | 'edit';
 };
 
-type OptionCloseup = { type: 'hardware'; kind: HardwareKind } | { type: 'label'; kind: LabelKind };
+type OptionCloseup =
+  | { type: 'hardware'; kind: HardwareKind }
+  | { type: 'label'; kind: LabelKind }
+  | { type: 'seam'; kind: SeamKind }
+  | { type: 'swatch'; kind: string };
+
+/**
+ * 70-SEAMS B4: цветная точка — только у вопроса про цвет (деталь `col_palette` или ключ решения про
+ * цвет / отделку фурнитуры): иначе ткань `linen` или `chocolate` стала бы «цветом».
+ */
+const isColourQuestion = (q: DesignQuizQuestion) =>
+  isPaletteKey(q.part ?? '') ||
+  /colou?r/.test(q.decisionKey ?? '') ||
+  q.decisionKey === 'hardware_finish';
 
 const hhmm = () =>
   new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(
@@ -231,6 +245,19 @@ export function MoodQuiz({
     }
   };
 
+  /**
+   * 70-SEAMS A4.2: ответ на «основной шов» — класс шва карточки по умолчанию, ТОЛЬКО когда он не задан
+   * (UNKNOWN/пусто); заданный не трогается. Автосейв формы несёт его дальше (операции наследуют).
+   */
+  const prefillSeamClass = (q: DesignQuizQuestion, selected: string[], freeText: string) => {
+    if (q.decisionKey !== 'main_seam') return;
+    const kind = seamOf(selected[0] ?? '') ?? seamOf(freeText);
+    if (!kind) return;
+    const current = getValues('construction.defaultSeamClass');
+    if (current && current !== 'TECH_CARD_SEAM_CLASS_UNKNOWN') return;
+    setValue('construction.defaultSeamClass', seamClassOf(kind), { shouldDirty: true });
+  };
+
   /** Ответ уходит полным списком; вопрос стоит, пока запись не легла (отказ — снэкбар, вопрос тот же). */
   const commit = async (
     q: DesignQuizQuestion,
@@ -266,6 +293,7 @@ export function MoodQuiz({
       return;
     }
     if (shownCard.current !== card) return;
+    if (!skipped && !readOnly) prefillSeamClass(q, selected, freeText);
     if (live.mode === 'edit') {
       if (clarify && queue[next]?.id === clarify.id) {
         setLive({ queue, at: next, mode: 'edit' });
@@ -615,11 +643,16 @@ function QuestionView({
   onLater: (() => void) | null;
 }): JSX.Element {
   const options = question.options ?? [];
+  const colourQuestion = isColourQuestion(question);
   const optionCloseups = options.map((option): OptionCloseup | null => {
     const hardware = hardwareOf(option);
     if (hardware) return { type: 'hardware', kind: hardware };
     const label = labelOf(option);
-    return label ? { type: 'label', kind: label } : null;
+    if (label) return { type: 'label', kind: label };
+    const seam = seamOf(option);
+    if (seam) return { type: 'seam', kind: seam };
+    const swatch = colourQuestion ? swatchOf(option) : null;
+    return swatch ? { type: 'swatch', kind: swatch } : null;
   });
   const comparedKinds = new Set<string>();
   for (const closeup of optionCloseups) {
@@ -723,8 +756,17 @@ function QuestionView({
                   {showOptionCloseups && closeup ? (
                     closeup.type === 'hardware' ? (
                       <HardwareIcon kind={closeup.kind} size={14} className='shrink-0' />
-                    ) : (
+                    ) : closeup.type === 'label' ? (
                       <LabelIcon kind={closeup.kind} size={14} className='shrink-0' />
+                    ) : closeup.type === 'seam' ? (
+                      <SeamIcon kind={closeup.kind} size={14} className='shrink-0' />
+                    ) : (
+                      <span
+                        aria-hidden
+                        data-swatch={closeup.kind}
+                        className='size-[10px] shrink-0 rounded-full border border-borderColor'
+                        style={{ background: closeup.kind }}
+                      />
                     )
                   ) : null}
                   {o}
