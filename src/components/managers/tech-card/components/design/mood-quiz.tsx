@@ -32,7 +32,7 @@ import {
   answerText,
   clarifyOf,
   clearQuizSession,
-  followUpId,
+  followUpIds,
   forgetRow,
   insertClarify,
   partWords,
@@ -278,13 +278,15 @@ export function MoodQuiz({
     // W-C11: уточнение — и в правке; родитель ушёл от противоречия (или пропущен) — его прежнее
     // уточнение забывается и снимается с очереди.
     const clarify = skipped ? null : clarifyOf(q, selected);
-    const childId = followUpId(q);
+    // У edge_finish_main продолжений два id (новый + прежний `clarify_`): всё, кроме живого, — забыть.
+    const staleIds = new Set(followUpIds(q).filter((id) => id !== clarify?.id));
     const rows = [answer];
-    const staleChild = !clarify ? answers.find((a) => a.question?.id === childId) : undefined;
-    if (staleChild?.question) rows.push(forgetRow(staleChild.question));
-    const queue = clarify
-      ? insertClarify(live.queue, live.at, clarify)
-      : live.queue.filter((x, i) => i <= live.at || x.id !== childId);
+    for (const id of staleIds) {
+      const stale = answers.find((a) => a.question?.id === id);
+      if (stale?.question) rows.push(forgetRow(stale.question));
+    }
+    const kept = live.queue.filter((x, i) => i <= live.at || !staleIds.has(x.id ?? ''));
+    const queue = clarify ? insertClarify(kept, live.at, clarify) : kept;
     const next = live.at + 1;
     // E2: ответ на последний вопрос прогона закрывает его на сервере той же записью.
     const closeSession = live.mode === 'run' && next >= queue.length;
@@ -346,8 +348,10 @@ export function MoodQuiz({
   const forget = async (a: DesignQuizAnswer) => {
     if (readOnly || !ready || !a.question) return;
     const rows = [forgetRow(a.question)];
-    const child = answers.find((x) => x.question?.id === followUpId(a.question));
-    if (child?.question) rows.push(forgetRow(child.question));
+    for (const id of followUpIds(a.question)) {
+      const child = answers.find((x) => x.question?.id === id);
+      if (child?.question) rows.push(forgetRow(child.question));
+    }
     try {
       await save.mutateAsync({ rows });
     } catch {

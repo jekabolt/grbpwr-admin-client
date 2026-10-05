@@ -978,7 +978,10 @@ try {
     });
     await btn(page, 'ASK ME').click();
     await page.waitForSelector('[data-quiz]');
-    check((await page.textContent('[data-quiz]')).includes('1 / 2'), `[${path}] edges counter 1 / 2`);
+    check(
+      (await page.textContent('[data-quiz]')).includes('1 / 2'),
+      `[${path}] edges counter 1 / 2`,
+    );
     await btn(page, 'faced edge').click();
     await page.waitForFunction(() =>
       document.querySelector('[data-quiz]')?.textContent?.includes('2 / 3'),
@@ -1009,7 +1012,9 @@ try {
         exc?.question.decisionKey === 'edge_exceptions' &&
           exc.question.kind === 'multi' &&
           exc.selected.join('|') === 'neckline: rib band|pocket openings: piped edge (piping)' &&
-          lines.includes('edge exceptions: neckline: rib band; pocket openings: piped edge (piping)'),
+          lines.includes(
+            'edge exceptions: neckline: rib band; pocket openings: piped edge (piping)',
+          ),
         `two exceptions save edge_exceptions with both (${lines.join(' | ')})`,
       );
     else
@@ -1020,6 +1025,50 @@ try {
         `«none» path saves no exceptions (${lines.join(' | ')})`,
       );
     check(saved.length === 3, `[${path}] 3 answers saved (got ${saved.length})`);
+    await ctx.close();
+  }
+  {
+    // Q21: ответ edge_finish_main до 91-EDGE-KEYS мог оставить O2-уточнение `clarify_<id>` —
+    // forget родителя снимает и его (и новое edge_exceptions_<id>), строки забывания без дублей.
+    const q = (id, question, options, decisionKey) => ({
+      id,
+      category: 'details',
+      part: 'whole',
+      question,
+      options,
+      decisionKey,
+    });
+    const row = (question, selected) => ({ question, selected, freeText: '', skipped: false });
+    const { ctx, page } = await open(1440, 900, {
+      answers: [
+        row(
+          q('edges', 'Main finish of the edges?', ['faced edge', 'raw edge'], 'edge_finish_main'),
+          ['raw edge'],
+        ),
+        row(q('clarify_edges', 'Raw where exactly?', ['hem only', 'everywhere'], ''), ['hem only']),
+        row(q('season', 'Season?', ['summer', 'winter'], 'season'), ['summer']),
+      ],
+    });
+    await page.waitForFunction(
+      () => document.querySelector('[data-probe="quiz"] [data-inert]') === null,
+    );
+    await btn(page, 'answers ▾').click();
+    const parent = page.locator(`${quiz} li`, { hasText: 'Main finish of the edges?' });
+    await parent.hover();
+    await parent.locator('button', { hasText: 'forget' }).click();
+    await page.waitForTimeout(250);
+    const left = await page.evaluate(() => window.__answers.map((a) => a.question.id));
+    const sent = (await page.evaluate(() => window.__calls))
+      .filter((c) => c.name === 'SaveDesignQuizAnswers')
+      .pop();
+    const ids = sent.body.answers.map((a) => a.question.id);
+    check(
+      left.join('|') === 'season' &&
+        ids.length === 2 &&
+        ids.includes('edges') &&
+        ids.includes('clarify_edges'),
+      `forget of edge_finish_main forgets its legacy clarify_ child (sent ${ids.join(',')}, left ${left.join(',')})`,
+    );
     await ctx.close();
   }
   {

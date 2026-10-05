@@ -68,7 +68,19 @@ export const isFollowUpId = (id?: string | null) =>
 
 /** id продолжения вопроса: `edge_exceptions_<id>` у основной отделки краёв, иначе `clarify_<id>`. */
 export const followUpId = (q?: DesignQuizQuestion | null) =>
-  `${q?.decisionKey === EDGE_MAIN_KEY ? 'edge_exceptions_' : 'clarify_'}${q?.id ?? ''}`.slice(0, 64);
+  `${q?.decisionKey === EDGE_MAIN_KEY ? 'edge_exceptions_' : 'clarify_'}${q?.id ?? ''}`.slice(
+    0,
+    64,
+  );
+
+/**
+ * Все id продолжений вопроса, которые могли лечь на сервер: у `edge_finish_main` — новый
+ * `edge_exceptions_<id>` И прежний O2 `clarify_<id>` (ответы до 91-EDGE-KEYS); правка, пропуск
+ * или forget родителя каскадом снимают оба, иначе старое уточнение продолжает влиять на черновики.
+ */
+export const followUpIds = (q?: DesignQuizQuestion | null): string[] => [
+  ...new Set([followUpId(q), `clarify_${q?.id ?? ''}`.slice(0, 64)]),
+];
 
 /** `edge exceptions: neckline: rib band; pocket openings: piping`; только «none» — `edge exceptions: none`. */
 function edgeExceptionsLine(a: DesignQuizAnswer): string | null {
