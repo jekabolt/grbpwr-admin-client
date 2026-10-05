@@ -22,11 +22,10 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } 
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
-import { Chip, ChipRow } from 'ui/components/chip';
 import { Section } from 'ui/components/section';
 import { HeaderCount } from 'ui/components/section-header';
 import Text from 'ui/components/text';
-import Input from 'ui/components/input';
+import Select from 'ui/components/select';
 import Textarea from 'ui/components/text-area';
 
 import { kindLabel } from '../../bom-kind';
@@ -102,8 +101,8 @@ import { TrimPictogramBackdrop } from './trim-pictograms';
 /**
  * STEP 3 · MATERIALS — two blocks:
  *   · `colourways` — large swatch tiles on the studio's one colourway axis;
- *   · `materials` — one cell per material slot; ONE slot is selected, and the GENERATE panel
- *     under the cells is that slot's spec (colour · pictures · words). GENERATE makes that slot;
+ *   · `materials` — one cell per material slot; ONE slot is selected, and the `generate` block
+ *     under MATERIALS is that slot's spec (colour · pictures · dropdowns · words). GENERATE makes that slot;
  *     `all empty slots · N` makes every empty slot from its own spec.
  * A run lands server-side and binds itself to (colourway, slot); an own picture is
  * UpsertDesignAsset → SetDesignAssetBinding. Both carry the spec (`note` = words, colour code).
@@ -453,7 +452,7 @@ function MaterialBench({
 
   /* ─── born artworks (owner 04.10): a `+ artwork` line is a cell and selectable at once, before
      the autosave gives it an id. Until then it is a PENDING slot (negative id, never sent): its
-     cell, GENERATE and `use own picture` are inert with the reason below. ─── */
+     cell's halves and GENERATE are inert with the reason below. ─── */
   const [bornState, setBornState] = useState<{ card: number; rows: BornLine[] }>({
     card: techCardId,
     rows: [],
@@ -948,6 +947,26 @@ function MaterialBench({
     }
     autosave.request('materials · artwork line');
   };
+  /* T65 · «NAME генерируй сам потом на карточке можно будет поменять»: an artwork is born with its
+     default name (`artwork N`); renaming lives on the cell — the cap's ✎ (and `rename` in a filled
+     cell's MORE menu) turns the cap into one inline field. Enter / blur writes, Esc drops. */
+  const [renamingState, setRenamingState] = useState<{ card: number; lineKey: string }>({
+    card: techCardId,
+    lineKey: '',
+  });
+  const renaming = renamingState.card === techCardId ? renamingState.lineKey : '';
+  const renameKit = (slot: MaterialSlot): RenameKit | undefined =>
+    isArtworkSlot(slot) && lineWritable
+      ? {
+          editing: renaming === slot.lineKey,
+          onStart: () => setRenamingState({ card: techCardId, lineKey: slot.lineKey }),
+          onCommit: (name) => {
+            setRenamingState({ card: techCardId, lineKey: '' });
+            writeArtwork(slot, { name });
+          },
+          onCancel: () => setRenamingState({ card: techCardId, lineKey: '' }),
+        }
+      : undefined;
   const dressed = (list: MaterialSlot[]) =>
     list.filter((s) => byPair.has(pairKey(cwId, s.bomItemId))).length;
 
@@ -965,27 +984,14 @@ function MaterialBench({
     !!selSeed &&
     (selSpec.words.trim() !== selSeed.words.trim() ||
       selSpec.colourCode.trim() !== selSeed.colourCode.trim());
-  // `use own picture`: the library dialog for the SELECTED slot; placed with its spec.
-  const ownGate: Gate = !selected
-    ? { ok: false, reason: 'no slot' }
-    : selected.bomItemId <= 0
-      ? { ok: false, reason: bornReason }
-      : !writable
-        ? !baseGate.ok
-          ? baseGate
-          : { ok: false, reason: READ_ONLY_RUN_REASON }
-        : liveByPair.has(selKey) || launching.has(selKey) || saving.has(selKey)
-          ? { ok: false, reason: 'being made — it lands in the cell by itself' }
-          : !shelfRoom
-            ? { ok: false, reason: SHELF_REASON }
-            : { ok: true };
   const selName = selected ? selected.name.toUpperCase() : '';
   const verbName = selName.length > 24 ? `${selName.slice(0, 23)}…` : selName;
   const emptyN = emptyRunnable.length;
 
-  /* ─── `custom ▸`: the chip rows fold behind FLAT's door (owner 04.10: «это все скрывается как в
-     flat custom»). Closed by default; open state resets when the selected slot changes family
-     (label · hardware · fabric — fabric has no chips, so no door). ─── */
+  /* ─── T65 (owner 05.10): every choice is a dropdown up front (TECHNIQUE · LOOK · SEWN AT ·
+     MATERIAL); the free words fold behind FLAT's `custom ▸` door («ARTWORK текстфилда не должно
+     быть или скрыть его в custom»). Closed by default; open state resets when the selected slot
+     changes family. Fabric has no dropdowns: its cloth words stay in the open. ─── */
   const chipFamily = !selected
     ? ''
     : isArtworkSlot(selected)
@@ -999,9 +1005,12 @@ function MaterialBench({
     open: false,
   });
   const customOpen = customState.family === chipFamily && customState.open;
-  const litWords =
+  // `custom •` while the words say more than the dropdowns do.
+  const extraWords =
     selSpec && chipRows
-      ? chipRows.flatMap((r) => r.words.filter((w) => hasWord(selSpec.words, w)))
+      ? wordList(selSpec.words).filter(
+          (w) => !chipRows.some((r) => r.words.some((x) => sameWord(x, w))),
+        )
       : [];
 
   /* ─── cancel: a making cell's corner, and `cancel all` while ≥2 runs of this colourway live ─── */
@@ -1319,7 +1328,15 @@ function MaterialBench({
                     writable={writable && !born}
                     full={!shelfRoom}
                     fullReason={SHELF_REASON}
-                    onUpload={() => replace(slot)}
+                    onPlaceMedia={(media) => {
+                      pick(slot);
+                      void place(slot, media);
+                    }}
+                    onGenerateHalf={() => {
+                      pick(slot);
+                      anchorGenerate();
+                    }}
+                    rename={renameKit(slot)}
                     generateGate={gate}
                     onPick={() => pick(slot)}
                     liveCorner={
@@ -1365,194 +1382,195 @@ function MaterialBench({
       </div>
     );
 
-  return (
-    <Section
-      id='design-pattern'
-      title='materials'
-      question={cwName ? `· ${cwName.toUpperCase()}` : '· pick a colourway'}
-      action={slots.length > 0 && cwId > 0 ? batchAside : undefined}
-    >
-      {slots.length === 0 ? (
-        <EmptyState
-          action={
-            <Button
-              variant='underline'
-              size='xs'
-              className='text-labelColor hover:text-textColor'
-              onClick={() => onGoStep('mood')}
-            >
-              moodboard ›
-            </Button>
-          }
-        >
-          no materials yet
-        </EmptyState>
-      ) : (
-        <>
-          {group('fabrics', fabrics)}
-          {group('hardware', hardware)}
-          {group('artwork', artworkCells, {
-            tail: <NewArtworkTile gate={addGate} onAdd={addArtwork} />,
-          })}
-
-          {selected && selSpec && (
-            <div
-              ref={generateRef}
-              className='scroll-mt-24 outline outline-2 outline-offset-4 outline-transparent'
-              data-fh-generate={selGate.ok ? 'live' : 'inert'}
-              data-fh-for={selected.bomItemId > 0 ? selected.bomItemId : 'saving'}
-            >
-              <GroupLabel
-                action={
-                  <Text size='micro' variant='label' component='span'>
-                    {isArtworkSlot(selected)
-                      ? 'artwork'
-                      : isLabelSlot(selected)
-                        ? 'label'
-                        : selected.family}
-                  </Text>
-                }
-              >
-                generate ·{' '}
-                {/* T62: «BRAND LABEL ✦ это ту мач» — имя цели тем же стилем, что `generate ·`. */}
-                <span data-fh-subject=''>{selected.name}</span>
-              </GroupLabel>
-              <SpecPanel
-                key={selKey}
-                slot={selected}
-                spec={selSpec}
-                colour={selColour}
-                disabled={!writable || selected.bomItemId <= 0}
-                colorwayId={cwId}
-                colorwayName={cwName}
-                ownPantone={ownPantone}
-                onChange={(next) => setSpec(selected, next)}
-                head={
-                  isArtworkSlot(selected) ? (
-                    <ArtworkLineHead
-                      key={selected.lineKey}
-                      slot={selected}
-                      disabled={!lineWritable}
-                      onName={(name) => writeArtwork(selected, { name })}
-                      onTechnique={(technique) => writeArtwork(selected, { technique })}
-                    />
-                  ) : null
-                }
-              />
-              {!selGate.ok && (
-                <Text
-                  size='micro'
-                  variant='label'
-                  component='p'
-                  className='mt-2 normal-case'
-                  data-fh-generate-reason=''
-                >
-                  {selGate.reason}
-                </Text>
-              )}
-              <GenerateRow
-                gate={selGate}
-                pending={run.isPending}
-                label={`GENERATE ${verbName}`}
-                onGenerate={() => generate([selected])}
-                trailing={
-                  <MaybeCustom
-                    rows={chipRows}
-                    open={customOpen}
-                    onToggle={() => setCustomState({ family: chipFamily, open: !customOpen })}
-                    lit={litWords}
-                    spec={selSpec}
-                    disabled={!writable}
-                    onChange={(next) => setSpec(selected, next)}
-                  >
-                    <span className='flex flex-wrap items-center gap-2'>
-                      {ownGate.ok ? (
-                        <Button
-                          variant='secondary'
-                          size='sm'
-                          title='pick or upload a picture for this slot — it takes these words and colour'
-                          onClick={() => replace(selected)}
-                          data-fh-own-picture=''
-                        >
-                          use own picture
-                        </Button>
-                      ) : (
-                        <>
-                          <InertDoor label='use own picture' reason={ownGate.reason} size='sm' />
-                          {/* Said once: the GENERATE reason line above already says the same. */}
-                          {(selGate.ok || selGate.reason !== ownGate.reason) && (
-                            <Text
-                              size='micro'
-                              variant='label'
-                              component='span'
-                              className='normal-case'
-                              data-fh-own-reason=''
-                            >
-                              {ownGate.reason}
-                            </Text>
-                          )}
-                        </>
-                      )}
-                      <Money
-                        data-probe='run-price'
-                        note={
-                          isArtworkSlot(selected) && ARTWORK_CLIENT_CUTOUT
-                            ? 'artwork + cut-out · two runs'
-                            : null
-                        }
-                      />
-                      {wordsChanged && selAsset && writable && (
-                        <Button
-                          variant='underline'
-                          size='xs'
-                          disabled={saving.has(selKey) || cutting.has(wireInt(selAsset.id))}
-                          title={
-                            cutting.has(wireInt(selAsset.id))
-                              ? 'cutting…'
-                              : 'writes these words and colour onto the picture in the cell'
-                          }
-                          onClick={() => saveWords(selected, selAsset)}
-                          data-fh-save-words=''
-                        >
-                          save words
-                        </Button>
-                      )}
-                    </span>
-                  </MaybeCustom>
-                }
-              />
-            </div>
-          )}
-
-          <RunRefusal
-            refusal={refusal}
-            onDismiss={() => {
-              setShownRefusal(null);
-              run.dismissRefusal();
-            }}
-          />
-        </>
-      )}
-
-      <MediaSelector
-        label='replace'
-        purpose='design · a picture for this slot'
-        aspectRatio={['Custom']}
-        allowMultiple={false}
-        showVideos={false}
-        saveSelectedMedia={(media) => {
-          const target = replaceTarget.current;
-          const first = media[0];
-          if (!target || !first?.id) return;
-          if (target.cw !== cwId) {
-            showMessage('the colourway changed while the library was open · pick again', 'error');
-            return;
-          }
-          void place(target.slot, first);
+  // The dropdowns of the selected slot (T65 · «TECHNIQUE сделай селектором с дропдауном», «в
+  // пуговицах MATERIAL … как с TECHNIQUE», «все остальное тоже приведи к подобному виду»).
+  const fields =
+    !selected || !selSpec || !chipRows ? null : isArtworkSlot(selected) ? (
+      <FieldSelect
+        lead='technique'
+        options={ARTWORK_TECHNIQUES}
+        value={artworkTechniqueOf(selected.detail)}
+        disabled={!lineWritable}
+        onPick={(technique) => {
+          if (technique && !sameWord(technique, artworkTechniqueOf(selected.detail)))
+            writeArtwork(selected, { technique });
         }}
-        trigger={<button ref={replaceTrigger} type='button' hidden aria-hidden tabIndex={-1} />}
       />
-    </Section>
+    ) : (
+      chipRows.map((row) => (
+        <FieldSelect
+          key={row.lead}
+          lead={row.lead}
+          options={row.words}
+          none
+          value={row.words.find((w) => hasWord(selSpec.words, w)) ?? ''}
+          disabled={!writable}
+          onPick={(word) => {
+            const rest = wordList(selSpec.words).filter(
+              (w) => !row.words.some((x) => sameWord(x, w)),
+            );
+            setSpec(selected, { ...selSpec, words: (word ? [...rest, word] : rest).join(', ') });
+          }}
+        />
+      ))
+    );
+
+  return (
+    <>
+      <Section
+        id='design-pattern'
+        title='materials'
+        question={cwName ? `· ${cwName.toUpperCase()}` : '· pick a colourway'}
+        action={slots.length > 0 && cwId > 0 ? batchAside : undefined}
+      >
+        {slots.length === 0 ? (
+          <EmptyState
+            action={
+              <Button
+                variant='underline'
+                size='xs'
+                className='text-labelColor hover:text-textColor'
+                onClick={() => onGoStep('mood')}
+              >
+                moodboard ›
+              </Button>
+            }
+          >
+            no materials yet
+          </EmptyState>
+        ) : (
+          <>
+            {group('fabrics', fabrics)}
+            {group('hardware', hardware)}
+            {group('artwork', artworkCells, {
+              tail: <NewArtworkTile gate={addGate} onAdd={addArtwork} />,
+            })}
+          </>
+        )}
+
+        <MediaSelector
+          label='replace'
+          purpose='design · a picture for this slot'
+          aspectRatio={['Custom']}
+          allowMultiple={false}
+          showVideos={false}
+          saveSelectedMedia={(media) => {
+            const target = replaceTarget.current;
+            const first = media[0];
+            if (!target || !first?.id) return;
+            if (target.cw !== cwId) {
+              showMessage('the colourway changed while the library was open · pick again', 'error');
+              return;
+            }
+            void place(target.slot, first);
+          }}
+          trigger={<button ref={replaceTrigger} type='button' hidden aria-hidden tabIndex={-1} />}
+        />
+      </Section>
+
+      {/* T65 · «генерейт вынеси в отдельный блок»: GENERATE is its own block under MATERIALS (FLAT's
+          WORKBENCH / FLAT SLOTS separation). T63 still holds: picking a cell scrolls here and
+          blinks this block — the outline sits on the wrapper, around the block's white. */}
+      {slots.length > 0 && selected && selSpec && (
+        <div
+          ref={generateRef}
+          className='scroll-mt-24 outline outline-2 outline-offset-4 outline-transparent'
+          data-fh-generate={selGate.ok ? 'live' : 'inert'}
+          data-fh-for={selected.bomItemId > 0 ? selected.bomItemId : 'saving'}
+        >
+          <Section
+            id='design-materials-generate'
+            title='generate'
+            /* T62: «BRAND LABEL ✦ это ту мач» — the target in the header's own grey clause. */
+            question={
+              <>
+                · <span data-fh-subject=''>{selected.name}</span>
+              </>
+            }
+            action={
+              <Text size='micro' variant='label' component='span'>
+                {chipFamily}
+              </Text>
+            }
+          >
+            <SpecPanel
+              key={selKey}
+              slot={selected}
+              spec={selSpec}
+              colour={selColour}
+              disabled={!writable || selected.bomItemId <= 0}
+              colorwayId={cwId}
+              colorwayName={cwName}
+              ownPantone={ownPantone}
+              onChange={(next) => setSpec(selected, next)}
+              fields={fields}
+              words={!chipRows}
+            />
+            {!selGate.ok && (
+              <Text
+                size='micro'
+                variant='label'
+                component='p'
+                className='mt-2 normal-case'
+                data-fh-generate-reason=''
+              >
+                {selGate.reason}
+              </Text>
+            )}
+            <GenerateRow
+              gate={selGate}
+              pending={run.isPending}
+              label={`GENERATE ${verbName}`}
+              onGenerate={() => generate([selected])}
+              trailing={
+                <MaybeCustom
+                  fold={!!chipRows}
+                  open={customOpen}
+                  onToggle={() => setCustomState({ family: chipFamily, open: !customOpen })}
+                  extra={extraWords}
+                  words={
+                    <WordsField
+                      slot={selected}
+                      spec={selSpec}
+                      disabled={!writable || selected.bomItemId <= 0}
+                      onChange={(next) => setSpec(selected, next)}
+                    />
+                  }
+                >
+                  <span className='flex flex-wrap items-center gap-2'>
+                    <Money data-probe='run-price' />
+                    {wordsChanged && selAsset && writable && (
+                      <Button
+                        variant='underline'
+                        size='xs'
+                        disabled={saving.has(selKey) || cutting.has(wireInt(selAsset.id))}
+                        title={
+                          cutting.has(wireInt(selAsset.id))
+                            ? 'cutting…'
+                            : 'writes these words and colour onto the picture in the cell'
+                        }
+                        onClick={() => saveWords(selected, selAsset)}
+                        data-fh-save-words=''
+                      >
+                        save words
+                      </Button>
+                    )}
+                  </span>
+                </MaybeCustom>
+              }
+            />
+
+            <RunRefusal
+              refusal={refusal}
+              onDismiss={() => {
+                setShownRefusal(null);
+                run.dismissRefusal();
+              }}
+            />
+          </Section>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1584,7 +1602,7 @@ function uniqueWords(parts: string[]): string {
   return out.join(' · ');
 }
 
-/** Hardware material words: a chip toggles its word in the `, `-separated list. */
+/** Hardware material words: the MATERIAL dropdown puts one in the `, `-separated list. */
 const MATERIAL_WORDS = ['horn', 'metal', 'brass', 'resin', 'plastic', 'corozo', 'wood', 'woven'];
 const wordList = (words: string) =>
   words
@@ -1592,12 +1610,6 @@ const wordList = (words: string) =>
     .map((w) => w.trim())
     .filter(Boolean);
 const hasWord = (words: string, word: string) => wordList(words).some((w) => sameWord(w, word));
-const toggleWord = (words: string, word: string): string =>
-  hasWord(words, word)
-    ? wordList(words)
-        .filter((w) => !sameWord(w, word))
-        .join(', ')
-    : [...wordList(words), word].join(', ');
 
 const INPUT_CELL = 'w-24 shrink-0';
 
@@ -1620,7 +1632,8 @@ function SpecPanel({
   colorwayName,
   ownPantone,
   onChange,
-  head,
+  fields,
+  words,
 }: {
   slot: MaterialSlot;
   spec: Spec;
@@ -1630,8 +1643,10 @@ function SpecPanel({
   colorwayName: string;
   ownPantone: string;
   onChange: (spec: Spec) => void;
-  /** Drawn right above the words (artwork: its line name · technique). */
-  head?: React.ReactNode;
+  /** The slot's dropdowns, one row of one-size fields under the pictures. */
+  fields?: React.ReactNode;
+  /** The words in the open (fabric); otherwise they live behind `custom ▸`. */
+  words?: boolean;
 }): JSX.Element {
   const { showMessage } = useSnackBarStore();
   const hardware = slot.family === 'hardware';
@@ -1684,7 +1699,9 @@ function SpecPanel({
           <PantonePicker
             name={`fh-colour-${colorwayId}-${slot.bomItemId}`}
             value={spec.colourCode}
-            label={colour?.code || colour?.hex || (hardware ? 'no colour' : '+ colour')}
+            // T65 · «"NO COLOUR" текста быть не должно»: the tile face already says `+ colour`; the
+            // caption under it names a picked colour only (a blank line keeps the row's height).
+            label={colour?.code || colour?.hex || '\u00a0'}
             swatchHex={colour?.hex}
             suggested={
               ownPantone ? [{ code: ownPantone, label: `${colorwayName} · colourway` }] : []
@@ -1758,163 +1775,159 @@ function SpecPanel({
         )}
       </div>
 
-      {head}
-      {/* Words: label above, a real (vertical-resize) textarea capped in width, chips under it. */}
-      <div className='flex max-w-xl flex-col gap-1'>
-        <Text
-          size='micro'
-          variant='uppercase'
-          tracking='label'
-          component='label'
-          htmlFor={`fh-words-${slot.bomItemId}`}
-          className='text-labelColor'
-        >
-          {artwork ? 'artwork' : label ? 'label' : hardware ? 'material' : 'cloth'}
-        </Text>
-        <Textarea
-          id={`fh-words-${slot.bomItemId}`}
-          name={`fh-words-${slot.bomItemId}`}
-          value={spec.words}
-          maxLength={SLOT_WORDS_MAX}
-          disabled={disabled}
-          rows={2}
-          autoGrow={false}
-          placeholder={
-            artwork
-              ? 'embroidery'
-              : label
-                ? 'woven, centre back neck'
-                : hardware
-                  ? 'horn, black'
-                  : '100% cotton twill, 300 gsm'
-          }
-          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-            onChange({ ...spec, words: e.target.value })
-          }
-          style={{ minHeight: 44 }}
-          className='resize-y'
-          data-fh-words=''
-        />
-      </div>
+      {fields && (
+        <div className='flex flex-wrap items-end gap-2.5' data-fh-fields=''>
+          {fields}
+        </div>
+      )}
+      {words && <WordsField slot={slot} spec={spec} disabled={disabled} onChange={onChange} />}
     </div>
   );
 }
 
-/** `single`: picking a word drops the row's other words (technique — one at a time). */
-type ChipRowSpec = { lead?: string; words: readonly string[]; single?: boolean };
+/** The slot's free words: label above, a real (vertical-resize) textarea capped in width. */
+function WordsField({
+  slot,
+  spec,
+  disabled,
+  onChange,
+}: {
+  slot: MaterialSlot;
+  spec: Spec;
+  disabled?: boolean;
+  onChange: (spec: Spec) => void;
+}): JSX.Element {
+  const hardware = slot.family === 'hardware';
+  const label = isLabelSlot(slot);
+  const artwork = isArtworkSlot(slot);
+  return (
+    <div className='flex w-full max-w-xl basis-full flex-col gap-1'>
+      <Text
+        size='micro'
+        variant='uppercase'
+        tracking='label'
+        component='label'
+        htmlFor={`fh-words-${slot.bomItemId}`}
+        className='text-labelColor'
+      >
+        {artwork ? 'artwork' : label ? 'label' : hardware ? 'material' : 'cloth'}
+      </Text>
+      <Textarea
+        id={`fh-words-${slot.bomItemId}`}
+        name={`fh-words-${slot.bomItemId}`}
+        value={spec.words}
+        maxLength={SLOT_WORDS_MAX}
+        disabled={disabled}
+        rows={2}
+        autoGrow={false}
+        placeholder={
+          artwork
+            ? 'embroidery'
+            : label
+              ? 'woven, centre back neck'
+              : hardware
+                ? 'horn, black'
+                : '100% cotton twill, 300 gsm'
+        }
+        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+          onChange({ ...spec, words: e.target.value })
+        }
+        style={{ minHeight: 44 }}
+        className='resize-y'
+        data-fh-words=''
+      />
+    </div>
+  );
+}
 
-/** The chip rows a slot family offers; fabric has none (→ no `custom ▸` door). */
+/** One dropdown's words; `lead` is its label above. */
+type ChipRowSpec = { lead: string; words: readonly string[] };
+
+/** The dropdowns a slot family offers; fabric has none (→ its words stay in the open). */
 function chipRowsOf(family: string): ChipRowSpec[] | null {
-  // Artwork: its technique is the primary choice — chips stand in the panel itself, not behind ▸.
-  if (family === 'artwork') return null;
+  if (family === 'artwork') return [{ lead: 'technique', words: ARTWORK_TECHNIQUES }];
   if (family === 'label')
     return [
       { lead: 'look', words: LABEL_LOOKS },
       { lead: 'sewn at', words: LABEL_PLACES },
     ];
-  if (family === 'hardware') return [{ words: MATERIAL_WORDS }];
+  if (family === 'hardware') return [{ lead: 'material', words: MATERIAL_WORDS }];
   return null;
 }
 
 /**
- * The run row's tail, wrapped in FLAT's `custom ▸` door when the slot has chip rows: the door
- * stands right after GENERATE, `after` keeps the row's own doors, and open draws the chip rows on
- * their own line under the run row. `custom •` while any chip word sits in the words.
+ * The run row's tail, wrapped in FLAT's `custom ▸` door when the slot has dropdowns: the door
+ * stands right after GENERATE, `after` keeps the row's own doors, and open draws the free words
+ * on their own line under the run row. `custom •` while the words say more than the dropdowns.
  */
 function MaybeCustom({
-  rows,
+  fold,
   open,
   onToggle,
-  lit,
-  spec,
-  disabled,
-  onChange,
+  extra,
+  words,
   children,
 }: {
-  rows: ChipRowSpec[] | null;
+  fold: boolean;
   open: boolean;
   onToggle: () => void;
-  lit: string[];
-  spec: Spec | null;
-  disabled?: boolean;
-  onChange: (spec: Spec) => void;
+  extra: string[];
+  words: React.ReactNode;
   children: React.ReactNode;
 }): JSX.Element {
-  if (!rows || !spec) return <>{children}</>;
+  if (!fold) return <>{children}</>;
   return (
     <FlatCustom
       open={open}
       onToggle={onToggle}
-      modified={lit.length > 0}
-      summary={lit.join(', ')}
-      closedTitle='words to tick into the description'
+      modified={extra.length > 0}
+      summary={extra.join(', ')}
+      closedTitle='free words for the description'
       after={children}
     >
-      <div className='flex basis-full flex-col gap-2' data-fh-chips=''>
-        {rows.map((r) => (
-          <WordChips
-            key={r.lead ?? 'words'}
-            lead={r.lead}
-            words={r.words}
-            single={r.single}
-            spec={spec}
-            disabled={disabled}
-            onChange={onChange}
-          />
-        ))}
+      <div className='flex basis-full flex-col gap-2' data-fh-custom-words=''>
+        {words}
       </div>
     </FlatCustom>
   );
 }
 
-/** A chip row toggling words in the spec's `, `-list; `lead` names the row on its left. */
-function WordChips({
+/** Width of every dropdown: a row of fields is one size (owner rule, 04.10). */
+const FIELD_W = 'w-44';
+
+/** A labelled single-choice dropdown (the app's `Select`); `none` adds a `—` to clear it. */
+function FieldSelect({
   lead,
-  words,
-  single,
-  spec,
+  options,
+  value,
+  none,
   disabled,
-  onChange,
+  onPick,
 }: {
-  lead?: string;
-  words: readonly string[];
-  single?: boolean;
-  spec: Spec;
+  lead: string;
+  options: readonly string[];
+  value: string;
+  none?: boolean;
   disabled?: boolean;
-  onChange: (spec: Spec) => void;
+  onPick: (word: string) => void;
 }): JSX.Element {
-  const chips = (
-    <ChipRow className={lead ? 'min-w-0 flex-1' : 'max-w-xl'}>
-      {words.map((word) => (
-        <Chip
-          key={word}
-          selected={hasWord(spec.words, word)}
-          pressed={hasWord(spec.words, word)}
-          disabled={disabled}
-          onClick={() => {
-            // Single-select: the row's other words leave first, then the word toggles.
-            const base = single
-              ? wordList(spec.words)
-                  .filter((w) => sameWord(w, word) || !words.some((x) => sameWord(x, w)))
-                  .join(', ')
-              : spec.words;
-            onChange({ ...spec, words: toggleWord(base, word) });
-          }}
-          data-fh-chip={word}
-        >
-          {word}
-        </Chip>
-      ))}
-    </ChipRow>
-  );
-  if (!lead) return chips;
-  // The lead sits beside the row, so a wrapped chip line stays indented under the chips.
+  const items = [
+    ...(none ? [{ value: '', label: '—' }] : []),
+    ...options.map((w) => ({ value: w, label: w })),
+  ];
   return (
-    <div className='flex max-w-xl items-start gap-1'>
-      <Text size='micro' variant='label' component='span' className='w-16 shrink-0 pt-1'>
+    <div className={cn('flex shrink-0 flex-col gap-1', FIELD_W)} data-fh-select={lead}>
+      <Text size='micro' variant='uppercase' tracking='label' className='text-labelColor'>
         {lead}
       </Text>
-      {chips}
+      <Select
+        name={`fh-${lead}`}
+        items={items}
+        value={value}
+        placeholder='—'
+        disabled={disabled}
+        onValueChange={(v: string) => onPick(v)}
+      />
     </div>
   );
 }
@@ -1953,7 +1966,9 @@ function SlotCell({
   onReplace,
   onGenerate,
   onClear,
-  onUpload,
+  onPlaceMedia,
+  onGenerateHalf,
+  rename,
   undo,
 }: {
   slot: MaterialSlot;
@@ -1974,12 +1989,18 @@ function SlotCell({
   onReplace: () => void;
   onGenerate: () => void;
   onClear: () => void;
-  /** Opens the library dialog for THIS cell (empty face's `upload` word). */
-  onUpload: () => void;
+  /** Empty face, top half: a picture from the library / upload, placed in THIS cell. */
+  onPlaceMedia: (media: common_MediaFull) => void;
+  /** Empty face, bottom half: select this cell and anchor to the GENERATE block. */
+  onGenerateHalf: () => void;
+  /** Artwork: the cap renames the line (✎ → inline field). */
+  rename?: RenameKit;
   /** The pair's `undo` word: inside the frame, at the cap's right end. */
   undo?: React.ReactNode;
 }): JSX.Element {
-  const cap = (
+  const cap = rename?.editing ? (
+    <CapRename slot={slot} kit={rename} />
+  ) : (
     <SlotCap
       label={slot.name}
       title={[slot.name, slot.purposeLabel, slot.detail].filter(Boolean).join(' · ')}
@@ -1989,6 +2010,25 @@ function SlotCell({
       trailing={
         <>
           {undo ?? null}
+          {rename && (
+            <button
+              type='button'
+              title={`rename ${slot.name}`}
+              aria-label={`rename ${slot.name}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                rename.onStart();
+              }}
+              data-fh-rename={slot.bomItemId > 0 ? slot.bomItemId : slot.lineKey}
+              className={cn(
+                'shrink-0 cursor-pointer text-nano text-labelColor hover:text-textColor focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+                !undo && 'ml-auto',
+                !selected && 'opacity-0 group-hover:opacity-100',
+              )}
+            >
+              ✎
+            </button>
+          )}
           {/* T61 · ✦ = the app's generate glyph (`ai ✦`). On the chosen cell it says «GENERATE
               makes this»; on any other it surfaces on hover/focus as the promise of the click. */}
           <span
@@ -1996,7 +2036,7 @@ function SlotCell({
             data-fh-target-mark={selected ? 'on' : 'hint'}
             className={cn(
               'shrink-0 text-nano',
-              !undo && 'ml-auto',
+              !undo && !rename && 'ml-auto',
               !selected &&
                 'text-labelColor opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
             )}
@@ -2049,42 +2089,102 @@ function SlotCell({
         onReplace={onReplace}
         onGenerate={onGenerate}
         onClear={onClear}
+        onRename={rename?.onStart}
       />
     );
   }
 
-  // Empty face = the pictogram only: the cell is a selector, not an upload button.
+  // T65 · «кнопка аплоуд не очень понятная … делим импут на две части»: the empty face is FLAT
+  // SLOTS' two-half slot — top `from media` (library · upload · ⌘V · drop), bottom `generate ✦`
+  // (selects the cell and anchors to the GENERATE block). Read-only / full shelf: pictogram only.
+  const halves = writable && !full;
   return (
     <PlaceOrDrawCell
       label={slot.name}
       aspect={BENCH_FRAME_ASPECT}
-      purpose=''
+      purpose={`design · ${slot.name}`}
       selected={selected}
       className={HOVER_INK}
-      instead={
-        writable && !full ? (
-          // The cell's own capture click selects first; this word then opens the library.
-          <Button
-            variant='underline'
-            size='xs'
-            className={cn(
-              'relative z-10 mb-1 self-end',
-              !selected && 'opacity-0 focus-visible:opacity-100 group-hover:opacity-100',
-            )}
-            title='pick or upload a picture for this slot'
-            onClick={onUpload}
-            data-fh-upload={slot.bomItemId}
+      mediaLabel='from media'
+      onSelect={halves ? onPlaceMedia : undefined}
+      onDraw={halves ? onGenerateHalf : undefined}
+      drawLabel='generate'
+      drawGlyph={
+        <span
+          aria-hidden
+          className='flex size-5 items-center justify-center text-[15px] leading-none'
+        >
+          ✦
+        </span>
+      }
+      drawTitle={`make ${slot.name} with GENERATE below`}
+      drawAriaLabel={`generate ${slot.name}`}
+      instead={halves ? undefined : <span />}
+      // Under the two halves' words the pictogram steps back to half its strength, so `from
+      // media` / `generate` read over it; alone (read-only) it keeps its own. The wrapper is
+      // absolute too: a static one would take a track of the frame's two-row grid.
+      backdrop={
+        halves ? (
+          <span
+            aria-hidden
+            style={{ position: 'absolute', inset: 0, opacity: 0.5, pointerEvents: 'none' }}
           >
-            upload
-          </Button>
+            <TrimPictogramBackdrop slot={slot} />
+          </span>
         ) : (
-          <span />
+          <TrimPictogramBackdrop slot={slot} />
         )
       }
-      backdrop={<TrimPictogramBackdrop slot={slot} />}
       cap={cap}
       data-fh-empty={slot.bomItemId}
     />
+  );
+}
+
+/** Artwork rename on the cell (T65): `onStart` opens the cap's field, `onCommit` writes the line. */
+type RenameKit = {
+  editing: boolean;
+  onStart: () => void;
+  onCommit: (name: string) => void;
+  onCancel: () => void;
+};
+
+/** The cap as one inline name field: Enter / blur writes (a cleared name keeps the old), Esc drops. */
+function CapRename({ slot, kit }: { slot: MaterialSlot; kit: RenameKit }): JSX.Element {
+  const [draft, setDraft] = useState(slot.name);
+  const done = useRef(false);
+  const commit = () => {
+    if (done.current) return;
+    done.current = true;
+    const name = draft.trim();
+    if (name && name !== slot.name) kit.onCommit(name);
+    else kit.onCancel();
+  };
+  return (
+    <div className='flex min-w-0 items-center border-t border-textColor bg-bgColor px-1 py-0.5'>
+      <input
+        autoFocus
+        value={draft}
+        aria-label={`name of ${slot.name}`}
+        maxLength={120}
+        onChange={(e) => setDraft(e.target.value)}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commit();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            done.current = true;
+            kit.onCancel();
+          }
+        }}
+        data-fh-artwork-name=''
+        className='h-5 w-full min-w-0 bg-transparent px-0.5 text-micro uppercase tracking-label text-textColor outline-none'
+      />
+    </div>
   );
 }
 
@@ -2183,6 +2283,7 @@ function FilledCell({
   onReplace,
   onGenerate,
   onClear,
+  onRename,
 }: {
   slot: MaterialSlot;
   asset: common_DesignAsset;
@@ -2195,6 +2296,8 @@ function FilledCell({
   onReplace: () => void;
   onGenerate: () => void;
   onClear: () => void;
+  /** Artwork: `rename` in the MORE menu opens the cap's name field. */
+  onRename?: () => void;
 }): JSX.Element {
   const url = assetFull(asset);
   const label = assetLabel(asset);
@@ -2253,6 +2356,7 @@ function FilledCell({
                   { value: 'clear', label: 'clear' },
                 ]
               : []),
+            ...(onRename ? [{ value: 'rename', label: 'rename' }] : []),
           ],
           onPick: (v) =>
             v === 'zoom'
@@ -2261,7 +2365,9 @@ function FilledCell({
                 ? onReplace()
                 : v === 'generate'
                   ? onGenerate()
-                  : onClear(),
+                  : v === 'rename'
+                    ? onRename?.()
+                    : onClear(),
           'data-menu': `fh:${slot.bomItemId}`,
         }}
       />
@@ -2315,100 +2421,6 @@ function NewArtworkTile({ gate, onAdd }: { gate: Gate; onAdd: () => void }): JSX
         </span>
         <SlotCap label='+ artwork' quiet />
       </button>
-    </div>
-  );
-}
-
-/**
- * The selected artwork's own line, above its words: NAME (written to the BOM line on blur / Enter;
- * a cleared name keeps the old one) and TECHNIQUE chips, single-select, shown directly — the
- * technique is an artwork's primary choice. Both write the card form by line key.
- */
-function ArtworkLineHead({
-  slot,
-  disabled,
-  onName,
-  onTechnique,
-}: {
-  slot: MaterialSlot;
-  disabled?: boolean;
-  onName: (name: string) => void;
-  onTechnique: (technique: string) => void;
-}): JSX.Element {
-  const [draft, setDraft] = useState(slot.name);
-  // The line renamed elsewhere (or the write landed): the input follows unless it is being typed in.
-  const typing = useRef(false);
-  useEffect(() => {
-    if (!typing.current) setDraft(slot.name);
-  }, [slot.name]);
-  const technique = artworkTechniqueOf(slot.detail);
-  const commit = () => {
-    typing.current = false;
-    if (!draft.trim()) {
-      setDraft(slot.name);
-      return;
-    }
-    onName(draft);
-  };
-  return (
-    <div className='flex max-w-xl flex-col gap-2' data-fh-artwork-line=''>
-      <div className='flex flex-col gap-1'>
-        <Text
-          size='micro'
-          variant='uppercase'
-          tracking='label'
-          component='label'
-          htmlFor={`fh-artwork-name-${slot.lineKey}`}
-          className='text-labelColor'
-        >
-          name
-        </Text>
-        <div className='w-56'>
-          <Input
-            id={`fh-artwork-name-${slot.lineKey}`}
-            name={`fh-artwork-name-${slot.lineKey}`}
-            value={draft}
-            disabled={disabled}
-            aria-label='artwork name'
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-              typing.current = true;
-              setDraft(e.target.value);
-            }}
-            onBlur={commit}
-            onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                e.currentTarget.blur();
-              } else if (e.key === 'Escape') {
-                typing.current = false;
-                setDraft(slot.name);
-              }
-            }}
-            data-fh-artwork-name=''
-          />
-        </div>
-      </div>
-      <div className='flex flex-col gap-1'>
-        <Text size='micro' variant='uppercase' tracking='label' className='text-labelColor'>
-          technique
-        </Text>
-        <ChipRow className='max-w-xl'>
-          {ARTWORK_TECHNIQUES.map((t) => (
-            <Chip
-              key={t}
-              selected={sameWord(t, technique)}
-              pressed={sameWord(t, technique)}
-              disabled={disabled}
-              onClick={() => {
-                if (!sameWord(t, technique)) onTechnique(t);
-              }}
-              data-fh-technique={t}
-            >
-              {t}
-            </Chip>
-          ))}
-        </ChipRow>
-      </div>
     </div>
   );
 }

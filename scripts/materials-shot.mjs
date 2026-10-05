@@ -196,6 +196,24 @@ try {
     await page.waitForTimeout(600);
     return { ctx, page };
   };
+  // T65 · every choice is the app's dropdown: open it, pick the option by its text.
+  const pickSel = async (page, lead, word) => {
+    await page.click(`[data-fh-select="${lead}"] button`);
+    await page.getByRole('option', { name: word, exact: true }).click();
+    await page.waitForTimeout(150);
+  };
+  const selValue = (page, lead) =>
+    page
+      .locator(`[data-fh-select="${lead}"] button`)
+      .first()
+      .textContent()
+      .then((t) => (t ?? '').trim().toLowerCase());
+  // The free words live behind `custom ▸` (closed by default).
+  const openCustom = async (page) => {
+    if ((await page.getAttribute('[data-flat-custom]', 'aria-expanded')) !== 'true')
+      await page.click('[data-flat-custom]');
+    await page.waitForSelector('[data-fh-words]');
+  };
   const shoot = async (page, name) => {
     const path = resolve(OUT, name);
     await page.screenshot({ path, fullPage: true });
@@ -211,7 +229,7 @@ try {
     };
 
     // Round 4: an empty cell is a selector — a click selects it and opens NO dialog.
-    await page.click('[data-fh-cell="4"]');
+    await page.click('[data-fh-cell="4"] [data-bench-cap]');
     await page.waitForTimeout(500);
     if ((await page.locator('[role="dialog"]').count()) > 0) {
       errors.push('[1440] ASSERT: clicking an empty cell opened a dialog');
@@ -323,22 +341,35 @@ try {
     await page.hover('[data-fh-cell="5"]');
     await page.waitForTimeout(300);
     await shoot(page, 'r4-hover-1440.png');
-    // Round 6: an empty cell shows `upload` on hover; the word opens the library for that cell.
-    const upOpacity = await page
-      .locator('[data-fh-upload="5"]')
-      .evaluate((el) => getComputedStyle(el).opacity)
-      .catch(() => 'missing');
-    if (upOpacity !== '1') errors.push(`[1440] ASSERT: hover upload word opacity ${upOpacity}`);
+    // T65: an empty cell is FLAT SLOTS' two-half slot — `from media` on top, `generate ✦` below;
+    // no `upload` word.
+    if ((await page.locator('[data-fh-upload]').count()) !== 0)
+      errors.push('[1440] ASSERT T65: an `upload` word is still drawn');
+    if ((await page.locator('[data-fh-empty="5"] [data-place-or-draw-pen]').count()) !== 1)
+      errors.push('[1440] ASSERT T65: the empty cell has no `generate` half');
     await shoot(page, 'r6-upload-hover-1440.png');
-    await page.click('[data-fh-upload="5"]');
+    await page
+      .locator('[data-fh-empty="5"]')
+      .getByRole('button', { name: /from media/i })
+      .click();
     await page
       .waitForSelector('[role="dialog"]', { timeout: 5000 })
-      .then(() => console.log('assert ok: `upload` on an empty cell opens the library'))
-      .catch(() => errors.push('[1440] ASSERT: `upload` did not open the library'));
+      .then(() => console.log('assert ok: `from media` half opens the library'))
+      .catch(() => errors.push('[1440] ASSERT: `from media` half did not open the library'));
     if ((await page.locator('[data-fh-for="5"]').count()) !== 1)
-      errors.push('[1440] ASSERT: `upload` did not select its cell');
+      errors.push('[1440] ASSERT: `from media` half did not select its cell');
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
+    await page.click('[data-fh-empty="6"] [data-place-or-draw-pen]');
+    await page.waitForTimeout(400);
+    if (
+      (await page.locator('[data-fh-for="6"]').count()) !== 1 ||
+      (await page.locator('[role="dialog"]').count()) !== 0
+    )
+      errors.push(
+        '[1440] ASSERT T65: `generate` half did not select its cell (or opened a dialog)',
+      );
+    else console.log('assert ok: `generate` half selects its cell, no dialog');
 
     // Selected fabric: MAIN FABRIC (bound) — the panel is its spec.
     await page.click('[data-fh-cell="1"] [data-picture-tile]');
@@ -348,26 +379,36 @@ try {
     await settle();
     await shoot(page, 'r4-fabric-selected-1440.png');
 
-    // `use own picture` opens the library dialog for the selected slot.
-    await page.click('[data-fh-cell="2"]');
+    // T65: no `use own picture` beside GENERATE, no «no colour» caption, GENERATE its own block.
+    await page.click('[data-fh-cell="2"] [data-bench-cap]');
     await page.waitForSelector('[data-fh-for="2"]');
-    await page.click('[data-fh-own-picture]');
-    await page
-      .waitForSelector('[role="dialog"]', { timeout: 5000 })
-      .then(() => console.log('assert ok: use own picture opens the library'))
-      .catch(() => errors.push('[1440] ASSERT: use own picture did not open the library'));
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
+    {
+      const own = await page.locator('[data-fh-own-picture]').count();
+      const txt = (await page.textContent('[data-fh-generate]'))?.toLowerCase() ?? '';
+      const own_block =
+        (await page.locator('[data-fh-generate] #design-materials-generate').count()) === 1 &&
+        (await page.locator('#design-pattern [data-fh-generate]').count()) === 0;
+      if (own !== 0 || /no colour|two runs/.test(txt) || !own_block)
+        errors.push(`[1440] ASSERT T65: generate block ${JSON.stringify({ own, own_block })}`);
+      else
+        console.log('assert ok T65: GENERATE is its own block, no own-picture door, no captions');
+    }
 
     // Selected hardware: FRONT BUTTON, words «horn, black», one picture from the library.
     await page.click('[data-fh-cell="3"] [data-picture-tile]');
     await page.waitForSelector('[data-fh-for="3"]');
     if (
-      (await page.locator('[data-fh-chip]').count()) !== 0 ||
+      (await page.locator('[data-fh-select="material"]').count()) !== 1 ||
+      (await page.locator('[data-fh-words]').count()) !== 0 ||
       (await page.locator('[data-flat-custom]').count()) !== 1
     )
-      errors.push('[1440] ASSERT: hardware chips not folded behind `custom`');
+      errors.push('[1440] ASSERT T65: hardware MATERIAL not a dropdown / words not behind custom');
+    await openCustom(page);
     await page.fill('[data-fh-words]', 'horn, black');
+    if ((await selValue(page, 'material')) !== 'horn')
+      errors.push(
+        `[1440] ASSERT T65: MATERIAL dropdown reads «${await selValue(page, 'material')}»`,
+      );
     await page.click('[data-fh-look-door] button');
     await page.waitForSelector('[role="dialog"]');
     await page.waitForTimeout(500);
@@ -380,22 +421,25 @@ try {
     await shoot(page, 'r4-hardware-selected-1440.png');
 
     // Round 5: BRAND LABEL selected — seeded from its card row, `woven` look, a logo picture.
-    await page.click('[data-fh-cell="5"]');
+    await page.click('[data-fh-cell="5"] [data-bench-cap]');
     await page.waitForSelector('[data-fh-for="5"]');
+    // T65: LOOK / SEWN AT are dropdowns up front; the free words fold behind `custom ▸`, and
+    // words beyond the dropdowns (the size) light `custom •`.
+    if ((await page.locator('[data-fh-words]').count()) !== 0)
+      errors.push('[1440] ASSERT: label words visible with custom closed');
+    if ((await selValue(page, 'sewn at')) !== 'centre back neck')
+      errors.push(`[1440] ASSERT T65: SEWN AT reads «${await selValue(page, 'sewn at')}»`);
+    if ((await page.locator('[data-flat-custom="modified"]').count()) !== 1)
+      errors.push('[1440] ASSERT: extra seeded words do not mark the door `custom •`');
+    else console.log('assert ok: label dropdowns up front, door reads custom •');
+    await settle();
+    await shoot(page, 'r6-label-closed-1440.png');
+    await openCustom(page);
     const seeded = await page.inputValue('[data-fh-words]');
     if (seeded !== 'centre back neck, 50 × 20 mm')
       errors.push(`[1440] ASSERT: label seed is «${seeded}»`);
-    else console.log('assert ok: label seeds placement chip word and size, flat dropped');
-    // Round 6: chips fold behind `custom ▸` (closed by default); a seeded chip word lights `•`.
-    if ((await page.locator('[data-fh-chip]').count()) !== 0)
-      errors.push('[1440] ASSERT: label chips visible with custom closed');
-    if ((await page.locator('[data-flat-custom="modified"]').count()) !== 1)
-      errors.push('[1440] ASSERT: seeded chip word does not mark the door `custom •`');
-    else console.log('assert ok: label chips hidden, door reads custom •');
-    await settle();
-    await shoot(page, 'r6-label-closed-1440.png');
-    await page.click('[data-flat-custom]');
-    await page.click('[data-fh-chip="woven"]');
+    else console.log('assert ok: label seeds placement word and size, flat dropped');
+    await pickSel(page, 'look', 'woven');
     await page.click('[data-fh-look-door] button');
     await page.waitForSelector('[role="dialog"]');
     await page.waitForTimeout(500);
@@ -513,8 +557,8 @@ try {
         );
       const reason = (await page.textContent('[data-fh-generate-reason]'))?.trim();
       if (reason !== 'saving…') errors.push(`[1440] ASSERT r7b: pending reason «${reason}»`);
-      if ((await page.locator('[data-fh-own-picture]').count()) !== 0)
-        errors.push('[1440] ASSERT r7b: use own picture is live before the id landed');
+      if ((await page.locator('[data-fh-born-line] [data-place-or-draw-pen]').count()) !== 0)
+        errors.push('[1440] ASSERT r7b: the pending cell offers its halves before the id landed');
       if (
         (await page
           .locator(
@@ -540,8 +584,10 @@ try {
       .waitForSelector('[data-fh-generate="live"][data-fh-for="800"]', { timeout: 5000 })
       .then(() => console.log('assert ok: GENERATE goes live once the autosave stub gives id 800'))
       .catch(() => errors.push('[1440] ASSERT r7b: GENERATE not live after the id landed'));
-    if ((await page.locator('[data-fh-own-picture]').count()) !== 1)
-      errors.push('[1440] ASSERT r7b: use own picture still inert after the id landed');
+    if ((await page.locator('[data-fh-empty="800"] [data-place-or-draw-pen]').count()) !== 1)
+      errors.push('[1440] ASSERT r7b: the born cell has no halves after the id landed');
+    if ((await page.locator('[data-fh-generate] [data-fh-artwork-name]').count()) !== 0)
+      errors.push('[1440] ASSERT T65: a NAME field is still in GENERATE');
     // Second click: ARTWORK 2, selected at once; the first stays its own cell.
     await page.click('[data-fh-new-artwork="live"]');
     {
@@ -559,15 +605,23 @@ try {
       .catch(() => errors.push('[1440] ASSERT r7b: ARTWORK 2 not live after its id landed'));
     if ((await page.locator('[data-fh-group="artwork"] [data-fh-slot]').count()) !== 4)
       errors.push('[1440] ASSERT r7b: ARTWORK does not hold 2 + 2 born cells');
-    await page.click('[data-fh-cell="800"]');
+    await page.click('[data-fh-cell="800"] [data-bench-cap]');
     await page.waitForTimeout(450);
     if ((await panel()).for_ !== '800')
       errors.push('[1440] ASSERT r7b: the first born artwork is not selectable after the second');
+    // T65: the ARTWORK words fold behind `custom ▸` (closed by default).
+    if ((await page.locator('[data-fh-words]').count()) !== 0)
+      errors.push('[1440] ASSERT T65: artwork words visible with custom closed');
+    await settle();
+    await page.waitForTimeout(1000); // past the T63 blink
+    await shoot(page, 't65-materials-1440.png');
+    await openCustom(page);
     const seed = await page.inputValue('[data-fh-words]');
     if (seed !== 'embroidery') errors.push(`[1440] ASSERT: artwork seed is «${seed}»`);
-    if ((await page.getAttribute('[data-fh-technique="embroidery"]', 'aria-pressed')) !== 'true')
-      errors.push('[1440] ASSERT r7b: technique chip embroidery not lit');
-    // Rename (Enter / blur writes the line name).
+    if ((await selValue(page, 'technique')) !== 'embroidery')
+      errors.push('[1440] ASSERT r7b: TECHNIQUE dropdown does not read embroidery');
+    // T65 rename on the cell: ✎ in the cap → inline field (Enter / blur writes the line name).
+    await page.click('[data-fh-rename="800"]');
     await page.fill('[data-fh-artwork-name]', 'chest embroidery');
     await page.press('[data-fh-artwork-name]', 'Enter');
     await page.waitForTimeout(200);
@@ -578,31 +632,29 @@ try {
         errors.push(`[1440] ASSERT r7b: rename · subject «${subj}» line «${l?.name}»`);
       else console.log('assert ok: rename writes the BOM line name');
     }
-    // Technique chips: shown directly, single-select, write spec + kind, seed the words.
-    if ((await page.locator('[data-flat-custom]').count()) !== 0)
-      errors.push('[1440] ASSERT r7b: artwork still has a custom ▸ door');
-    await page.click('[data-fh-technique="patch"]');
+    // Technique dropdown: up front, writes spec + kind, seeds the words.
+    await pickSel(page, 'technique', 'patch');
     await page.waitForTimeout(150);
     {
       const l = (await lines()).find((x) => x.id === 800);
       const w = await page.inputValue('[data-fh-words]');
-      const lit = await page.locator('[data-fh-technique][aria-pressed="true"]').count();
+      const lit = await selValue(page, 'technique');
       if (
         l?.spec !== 'patch' ||
         l?.kind !== 'TECH_CARD_BOM_KIND_PATCH' ||
         w !== 'patch' ||
-        lit !== 1
+        lit !== 'patch'
       )
         errors.push(
           `[1440] ASSERT r7b: technique · ${JSON.stringify({ spec: l?.spec, kind: l?.kind, w, lit })}`,
         );
-      else console.log('assert ok: technique chip writes spec + kind and seeds the words');
+      else console.log('assert ok: technique dropdown writes spec + kind and seeds the words');
     }
-    await page.click('[data-fh-technique="embroidery"]');
+    await pickSel(page, 'technique', 'embroidery');
     await page.waitForTimeout(150);
     if ((await page.inputValue('[data-fh-words]')) !== 'embroidery')
       errors.push(
-        `[1440] ASSERT: technique chips not single-select · «${await page.inputValue('[data-fh-words]')}»`,
+        `[1440] ASSERT: technique not single-select · «${await page.inputValue('[data-fh-words]')}»`,
       );
     // `+ photo` (picture 1) — the GRBPWR logo of the library.
     await page.click('[data-fh-look-door] button');
@@ -646,7 +698,7 @@ try {
       if (how === 'enter') {
         await page.focus(`[data-fh-cell="${id}"]`);
         await page.keyboard.press('Enter');
-      } else await page.click(`[data-fh-cell="${id}"]`);
+      } else await page.click(`[data-fh-cell="${id}"] [data-bench-cap]`);
       // Past the tile's one-or-two-clicks window: a late single must not take the selection back.
       await page.waitForTimeout(450);
       const [for_, subj] = await subject();
@@ -661,7 +713,7 @@ try {
     // A quick second click: filled CHEST LOGO, then BACK PRINT inside the double-click window.
     await page.click('[data-fh-cell="7"]');
     await page.waitForTimeout(120);
-    await page.click('[data-fh-cell="8"]');
+    await page.click('[data-fh-cell="8"] [data-bench-cap]');
     await page.waitForTimeout(500);
     if ((await subject())[0] !== '8')
       errors.push('[1440] ASSERT T22: a filled cell took the selection back after a quick click');
@@ -683,6 +735,7 @@ try {
     const born = [];
     for (const name of ['one', 'two', 'three']) {
       await page.click('[data-fh-new-artwork="live"]');
+      await page.click('[data-fh-selected] [data-fh-rename]');
       await page.fill('[data-fh-artwork-name]', name);
       await page.press('[data-fh-artwork-name]', 'Enter');
       await page
@@ -746,7 +799,7 @@ try {
     if ((await page.locator('[data-fh-for="8"] [data-fh-look="1"]').count()) !== 1)
       errors.push('[1440] ASSERT T22: BACK PRINT lost its photo after switching slots');
     else console.log('assert ok: + photo / + ref land per artwork, specs stay per slot');
-    // (3) `use own picture` binds the picked picture to the selected artwork's cell.
+    // (3) T65: the `from media` half binds the picked picture to its artwork's cell.
     const bindsTo = async (id, act) => {
       const n = await page.evaluate(() => window.__calls.length);
       await act();
@@ -760,17 +813,20 @@ try {
     if (
       !(await bindsTo(born[0], async () => {
         await selects(born[0], 'one');
-        await pickIn('[data-fh-own-picture]', 1);
+        await pickIn(`[data-fh-empty="${born[0]}"] button:has-text("from media")`, 1);
       }))
     )
-      errors.push('[1440] ASSERT T22: use own picture did not bind on the artwork');
+      errors.push('[1440] ASSERT T22: `from media` did not bind on the artwork');
     if ((await page.locator(`[data-fh-slot="${born[0]}"] [data-fh-checker]`).count()) !== 1)
       errors.push('[1440] ASSERT T22: own picture not shown in the artwork cell');
-    // (4) the `upload` word on an empty artwork cell.
-    await page.hover(`[data-fh-cell="${born[2]}"]`);
-    if (!(await bindsTo(born[2], () => pickIn(`[data-fh-upload="${born[2]}"]`, 1))))
-      errors.push('[1440] ASSERT T22: `upload` on an empty artwork cell did not bind');
-    else console.log('assert ok: use own picture and `upload` bind on artwork cells');
+    // (4) the `from media` half of an unselected empty artwork cell.
+    if (
+      !(await bindsTo(born[2], () =>
+        pickIn(`[data-fh-empty="${born[2]}"] button:has-text("from media")`, 1),
+      ))
+    )
+      errors.push('[1440] ASSERT T22: `from media` on an empty artwork cell did not bind');
+    else console.log('assert ok: `from media` binds on artwork cells');
     await page.mouse.move(5, 5);
     await page.waitForTimeout(300);
     await shoot(page, 't22-artworks-1440.png');
@@ -786,7 +842,7 @@ try {
       errors.push('[1440] ASSERT: header aside does not say `making 2`');
     if ((await page.locator('[data-fh-generate] [data-fh-cancel-all]').count()) !== 0)
       errors.push('[1440] ASSERT: `cancel all` still in the GENERATE row');
-    await page.click('[data-fh-cell="2"]');
+    await page.click('[data-fh-cell="2"] [data-bench-cap]');
     await page.waitForSelector('[data-fh-for="2"]');
     await page.mouse.move(5, 5);
     await page.waitForTimeout(400);
@@ -854,7 +910,7 @@ try {
     }
     // C-m4: BRAND LABEL seeds the composition label's logo, captioned `logo`; it rides the run.
     {
-      await page.click('[data-fh-cell="5"]');
+      await page.click('[data-fh-cell="5"] [data-bench-cap]');
       await page.waitForSelector('[data-fh-for="5"]');
       const look = await page.locator('[data-fh-for="5"] [data-fh-look="1"]').count();
       const caption = await page
@@ -970,7 +1026,7 @@ try {
     // C-m4: an SVG composition-label logo is not seeded; an SVG picked by hand is refused, for the
     // label logo and the artwork photo alike.
     const { ctx, page } = await open(1440, 1000, '#r8-svglogo');
-    await page.click('[data-fh-cell="5"]');
+    await page.click('[data-fh-cell="5"] [data-bench-cap]');
     await page.waitForSelector('[data-fh-for="5"]');
     if ((await page.locator('[data-fh-for="5"] [data-fh-look="1"]').count()) !== 0)
       errors.push('[1440] ASSERT C-m4: an SVG label logo was seeded');
@@ -996,10 +1052,9 @@ try {
   {
     const { ctx, page } = await open(390, 844);
     await shoot(page, 'r4-390.png');
-    await page.click('[data-fh-cell="5"]');
+    await page.click('[data-fh-cell="5"] [data-bench-cap]');
     await page.waitForSelector('[data-fh-for="5"]');
-    await page.click('[data-flat-custom]');
-    await page.click('[data-fh-chip="woven"]');
+    await pickSel(page, 'look', 'woven');
     await page.mouse.move(5, 5);
     await page.waitForTimeout(300);
     await shoot(page, 'r5-label-selected-390.png');
