@@ -65,6 +65,24 @@ export function renderInputMediaIds(
   return out;
 }
 
+/**
+ * T27 · the sides that carry a placed artwork — the server adds ONE placement guide per such side
+ * when it fits. The guide is what puts the artwork at its true size and place, so it outranks a
+ * mockup: the mockups give way to make room for it (the server still drops a guide that does not fit).
+ */
+export function artworkGuideCount(
+  band: GetDesignBandResponse,
+  artworks: readonly CanvasArtwork[],
+): number {
+  if (artworks.length === 0) return 0;
+  const assets = artworks.map((a) => a.assetId);
+  let n = 0;
+  for (const pictureId of flatPictureIds(band).values()) {
+    if (placementsOnPicture(band, pictureId, assets).some((p) => quadOfPlacement(p))) n += 1;
+  }
+  return n;
+}
+
 export type MockupFit = {
   /** The views whose map takes its mockup (the rest go without). */
   keep: Set<string>;
@@ -86,6 +104,9 @@ export function fitMockups(
   inputIds: readonly number[],
   maps: readonly Pick<common_DesignColourMap, 'mediaId' | 'view'>[],
   ceiling: number,
+  /** Placement guides wanted (artworkGuideCount): room is made for them first, but they are
+   *  optional — a run without them is not over the ceiling. */
+  guides = 0,
 ): MockupFit {
   const inputs = new Set(inputIds.filter((id) => id > 0)).size;
   const sent = maps.filter((m) => (m.mediaId ?? 0) > 0);
@@ -99,7 +120,7 @@ export function fitMockups(
     };
     const order = [...keep].sort((a, b) => rank(a) - rank(b));
     for (const v of order) {
-      if (total() <= ceiling) break;
+      if (total() + guides <= ceiling) break;
       keep.delete(v);
       dropped.push(v);
     }
