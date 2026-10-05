@@ -9,6 +9,7 @@ import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 import { TILE_QUIET } from 'ui/components/tile-skin';
 
+import { detectSplitOf } from './generation/detect-split-image';
 import { newClientRequestId, useDesignWrites } from './use-design-band';
 import { DESIGN_VIEW_KEYS, normaliseViewKey, viewLabel } from './views';
 
@@ -199,6 +200,18 @@ export function useSplitCut({
     [compositeViews, mode],
   );
 
+  /**
+   * ═══ THE DETECTOR'S SEED (05.10, owner item 11, R19, T26) ═══════════════════════════════════════
+   * A sheet of N views is read once (`generation/detect-split.ts`: the empty columns between the
+   * views) and its frames replace the equal columns — while nobody has touched a frame yet. A
+   * CONFIDENT reading is what the bench's auto-cut presses `confirm` on (`inline-split.tsx`); an
+   * unsure one only seeds the editor. `reset` returns to the detector's frames, not the columns.
+   */
+  const [detected, setDetected] = useState<{
+    key: string;
+    confident: boolean;
+    frames: SplitFrameDraft[];
+  } | null>(null);
   const [frames, setFrames] = useState<SplitFrameDraft[]>(initial);
   const [selected, setSelected] = useState<number | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -225,9 +238,13 @@ export function useSplitCut({
    */
   const requestIdRef = useRef('');
 
+  /** A person moved, named, added or removed a frame since the seed — the detector stands back. */
+  const touchedRef = useRef(false);
+
   const editFrames = useCallback((next: (prev: SplitFrameDraft[]) => SplitFrameDraft[]) => {
     if (landedRef.current) return;
     requestIdRef.current = '';
+    touchedRef.current = true;
     touchRef.current?.();
     setFrames(next);
   }, []);
@@ -237,6 +254,7 @@ export function useSplitCut({
   useEffect(() => {
     if (!active) return;
     requestIdRef.current = '';
+    touchedRef.current = false;
     setFrames(initial);
     setSelected(null);
     setLanded(false);
@@ -245,6 +263,38 @@ export function useSplitCut({
   const media = picture.media?.media;
   const src =
     media?.fullSize?.mediaUrl || media?.compressed?.mediaUrl || media?.thumbnail?.mediaUrl || '';
+
+  /* The detector reads a SMALLER rendition, never the full size: the frames are normalised, so the
+     rendition does not move them, and a bench of sheets does not decode originals. */
+  const thumbW = media?.thumbnail?.width ?? 0;
+  const detectSrc =
+    media?.compressed?.mediaUrl || (thumbW >= 1000 ? media?.thumbnail?.mediaUrl : '') || '';
+  const viewCount = compositeViews.length;
+  const detectKey =
+    mode === 'split' && detectSrc && viewCount >= 2 ? `${pictureId}|${detectSrc}|${seed}` : '';
+  useEffect(() => {
+    if (!active || !detectKey) return;
+    const ac = new AbortController();
+    detectSplitOf(detectSrc, viewCount, ac.signal)
+      .then((found) => {
+        if (ac.signal.aborted || !found) return;
+        const seeded = found.frames.map((f, i) => ({
+          ...f,
+          viewKey: compositeViews[i] ?? '',
+        }));
+        setDetected({ key: detectKey, confident: found.confident, frames: seeded });
+        if (touchedRef.current || landedRef.current) return;
+        requestIdRef.current = '';
+        setFrames(seeded);
+      })
+      .catch(() => {
+        /* no pixels (network, decode) — the equal columns stand, the person cuts by hand */
+      });
+    return () => ac.abort();
+    // `compositeViews` and `viewCount` are spelled by `seed`, which `detectKey` carries.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, detectKey, detectSrc]);
+  const detection = detected && detected.key === detectKey ? detected : null;
 
   /**
    * The picture's own shape. Taken from the wire when the bucket knows it and re-read from the
@@ -293,6 +343,7 @@ export function useSplitCut({
     event.preventDefault();
     event.stopPropagation();
     requestIdRef.current = '';
+    touchedRef.current = true;
     touchRef.current?.();
     setSelected(index);
     setDrag({
@@ -337,7 +388,7 @@ export function useSplitCut({
    */
   const ready = mode === 'crop' ? frames.length === 1 : frames.length > 0 && viewless === 0;
 
-  const submit = () => {
+  const submit = (opts: { silent?: boolean } = {}) => {
     if (!ready || pending || landedRef.current) return;
     touchRef.current?.();
     if (!requestIdRef.current) requestIdRef.current = newClientRequestId();
@@ -352,6 +403,7 @@ export function useSplitCut({
         // место исходной. Флаг вызывающего здесь не спрашивается вовсе — иначе он был бы вторым
         // мнением о том, чем режим кропа является.
         forInput: mode === 'crop' ? false : forInput,
+        silent: opts.silent,
       },
       {
         onSuccess: (data) => {
@@ -379,11 +431,16 @@ export function useSplitCut({
     viewless,
     pending,
     landed,
+    /** The detector's reading of this sheet, once it is in (`null` before, or with no reading). */
+    detection,
+    /** The frames on screen are the detector's own, untouched by a person. */
+    untouched: () => !touchedRef.current,
     error: splitPicture.isError
       ? (splitPicture.error as Error | null)?.message || 'the server refused without saying why'
       : null,
-    submit,
-    reset: () => editFrames(() => initial),
+    submit: () => submit(),
+    autoSubmit: () => submit({ silent: true }),
+    reset: () => editFrames(() => detection?.frames ?? initial),
     addSide: () => editFrames((prev) => [...prev, { x: 0.4, y: 0.2, w: 0.2, h: 0.6, viewKey: '' }]),
     nameSide: (index: number, viewKey: string) =>
       editFrames((prev) => prev.map((f, j) => (j === index ? { ...f, viewKey } : f))),

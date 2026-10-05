@@ -500,18 +500,26 @@ export function useDesignWrites(techCardId?: number) {
   });
 
   const splitPicture = useMutation({
-    mutationFn: (input: {
-      pictureId: number;
-      clientRequestId: string;
-      frames: DesignSplitFrame[];
-      /**
-       * Просит ли ВЫЗЫВАЮЩИЙ показать кропы модели. Обязателен и без умолчания: разрез с верстака
-       * и разрез из блока входа — два разных намерения, и молчание одного из них означало бы
-       * умолчание, выбранное здесь, а не сказанное тем, кто режет. Сервер по лжи пишет роли
-       * промпта (`design_reference`), и снять их потом без гонки с человеком нечем.
-       */
-      forInput: boolean;
-    }) => adminService.SplitDesignPicture(input),
+    mutationFn: (
+      input: {
+        pictureId: number;
+        clientRequestId: string;
+        frames: DesignSplitFrame[];
+        /**
+         * Просит ли ВЫЗЫВАЮЩИЙ показать кропы модели. Обязателен и без умолчания: разрез с верстака
+         * и разрез из блока входа — два разных намерения, и молчание одного из них означало бы
+         * умолчание, выбранное здесь, а не сказанное тем, кто режет. Сервер по лжи пишет роли
+         * промпта (`design_reference`), и снять их потом без гонки с человеком нечем.
+         */
+        forInput: boolean;
+      } & SilentWrite,
+    ) =>
+      adminService.SplitDesignPicture({
+        pictureId: input.pictureId,
+        clientRequestId: input.clientRequestId,
+        frames: input.frames,
+        forInput: input.forInput,
+      }),
     onMutate,
     onSuccess: invalidateWritten,
     onError,
