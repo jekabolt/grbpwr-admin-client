@@ -42,8 +42,9 @@ const PAL: [number, number, number][] = [
  * labeller's prompt. Bump the second half on ANY change to the labeller's rules (backend
  * `designPartsCardSystemPrompt`): rows of the old rules are then neither applied nor reused.
  * Ф1 (`parts.f1`): openings / seen-through inside / no invented pieces / flank from the drawing.
+ * `parts.f2`: the labeller reads the card's join list and a closed part vocabulary built from it.
  */
-export const PARTS_ALGO_REV = `${REGIONS_ALGO_REV}+parts.f1`;
+export const PARTS_ALGO_REV = `${REGIONS_ALGO_REV}+parts.f2`;
 
 /** Regions the model is asked to name: fewer is nothing to group, more is unreadable. */
 export const PARTS_REGIONS_MIN = 2;
