@@ -86,6 +86,7 @@ export function WhatModelGetsModal({
   techCardId = 0,
   readOnly = false,
   detailSlotId = 0,
+  structure = [],
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -97,6 +98,9 @@ export function WhatModelGetsModal({
   /** The `target ▾` detail slot (`d:<id>`); 0 = the views run. A detail run sends only the
    * references tied to that detail (T74, `designFlatDetailOnlyItsRefs`). */
   detailSlotId?: number;
+  /** A «from my flat» press: the designer's own flats travel FIRST (front_flat, then back_flat), as the
+   *  server records them (designFlatStructureRefs). Empty on any other route. */
+  structure?: readonly { mediaId: number; role: string }[];
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
@@ -183,7 +187,16 @@ export function WhatModelGetsModal({
        once) — the board carries a reference twice (its MOODBOARD row and its REFERENCE row), and
        walking the board listed every photo twice. */
     const seen = new Set<number>();
+    const flats = [...structure].sort((a, b) =>
+      a.role === b.role ? 0 : a.role === 'front_flat' ? -1 : 1,
+    );
+    for (const f of flats) {
+      if (f.mediaId <= 0 || seen.has(f.mediaId)) continue;
+      seen.add(f.mediaId);
+      inPrompt.push({ mediaId: f.mediaId, role: f.role, note: '', callouts: [], number: ++n });
+    }
     for (const r of flatSentRefs(band.references ?? [], moodIds, detailSlotId)) {
+      if (seen.has(r.mediaId ?? 0)) continue;
       const mediaId = r.mediaId ?? 0;
       seen.add(mediaId);
       inPrompt.push({
@@ -206,7 +219,17 @@ export function WhatModelGetsModal({
       });
     }
     return { inPrompt, onCardOnly };
-  }, [items, band.references, moodIds, detailSlotId, roleOf, otherIds, noteOf, calloutsOf]);
+  }, [
+    items,
+    band.references,
+    moodIds,
+    detailSlotId,
+    structure,
+    roleOf,
+    otherIds,
+    noteOf,
+    calloutsOf,
+  ]);
 
   const moodCount = new Set(
     items

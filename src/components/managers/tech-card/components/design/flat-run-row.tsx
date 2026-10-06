@@ -1091,6 +1091,7 @@ export function FlatRunRow({
         techCardId={techCardId}
         readOnly={!!disabled}
         detailSlotId={detailId}
+        structure={route === 'hand_flat' ? structureNow : []}
       />
     </div>
   );
