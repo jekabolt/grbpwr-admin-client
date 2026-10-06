@@ -1,10 +1,9 @@
-// СТЕНД ФЛЭТ-МАРШРУТА ПОСЛЕ 82-INPUT-REDESIGN (06.10): настоящие `FlatRunRow`, `FlatJoins` (только
-// чтение), `LatestGeneration` и `Bench` над поддельной полосой.
-//   · construction (карточка 38) — список A, только чтение: ни правки, ни `+ join`, ни `confirm`;
-//   · auto      (карточка 49) — полоса без списка: GenerateDesignJoins уходит сам из ряда, GENERATE
-//                ждёт со строкой `generate without it ›`;
-//   · modes     (карточка 60) — список A (лямки): ASK · construction (Q1 три позиции, Q2, Q3), один
-//                SetDesignJoins с confirm; `from my flat`; маршрут в пилюле; авто-восстановление stale;
+// СТЕНД ФЛЭТ-МАРШРУТА ПОСЛЕ 82-INPUT-REDESIGN (06.10; M7 07.10 — конструкции на экране нет):
+// настоящие `FlatRunRow`, `LatestGeneration` и `Bench` над поддельной полосой.
+//   · auto      (карточка 49) — полоса без списка: GenerateDesignJoins уходит сам из ряда, молча,
+//                GENERATE не ждёт;
+//   · modes     (карточка 60) — список A (лямки): ни вопросов, ни пилюли маршрута, ни straps;
+//                `from my flat`;
 //   · bench-50  — один лист (волна 10, квиза кандидатов нет): сам режется и сам ложится в 4 слота;
 //   · bench-54  — старый прогон с 4 кандидатами: все листы стоят редакторами, ничего не режется
 //                 и не раскладывается само;
@@ -25,7 +24,6 @@ import {
 import { Section, SectionStack } from 'ui/components/section';
 import { DesignCapabilityProvider } from 'components/managers/tech-card/components/design/capability';
 import { PictureGalleryProvider } from 'components/managers/tech-card/components/design/picture-tile';
-import { FlatJoins } from 'components/managers/tech-card/components/design/flat-joins';
 import { Bench } from 'components/managers/tech-card/components/design/bench';
 import { LatestGeneration } from 'components/managers/tech-card/components/design/generation/latest-generation';
 import { useDesignBand } from 'components/managers/tech-card/components/design/use-design-band';
@@ -216,16 +214,6 @@ function RowFor({ card, technical }: { card: number; technical: boolean }) {
   );
 }
 
-function Construction({ card }: { card: number }) {
-  const { band } = useDesignBand(card);
-  if (!band.references) return null;
-  return (
-    <Section title='what the model gets' question='— the construction section, read-only'>
-      <FlatJoins techCardId={card} band={band} disabled title='construction' thumbOf={thumb} />
-    </Section>
-  );
-}
-
 function LatestBench({ card }: { card: number }) {
   const { band } = useDesignBand(card);
   if (!band.runs?.length) return null;
@@ -254,9 +242,6 @@ createRoot(document.getElementById('root') as HTMLElement).render(
           <DesignCapabilityProvider value>
             <div style={{ width: 1100, padding: 24, background: '#f2f2f2' }}>
               <SectionStack>
-                <div data-probe='construction'>
-                  <Construction card={38} />
-                </div>
                 <div data-probe='auto'>
                   <RowFor card={49} technical={false} />
                 </div>

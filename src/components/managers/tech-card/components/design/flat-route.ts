@@ -1,17 +1,19 @@
-import type { common_DesignBenchSlot, common_DesignJoins } from 'api/proto-http/admin';
+import type { common_DesignBenchSlot } from 'api/proto-http/admin';
 
-import { suggestsStraps, type FlatMode } from './flat-mode';
+import type { FlatMode } from './flat-mode';
 
 /**
  * ═══ ONE GENERATE, NO SETTINGS (flat-consistency 82-INPUT-REDESIGN, owner request 8, 06.10) ══════
  *
  * The run row is `GENERATE · target ▾ · (from my flat) · what the model gets ▸`. Everything that
  * used to be a choice is a constant or a rule here:
- *   · the views run is always the four sides on ONE picture (`VIEWS_PARAMS`);
+ *   · the views run is always the four sides on ONE picture (`VIEWS_ORDER`);
  *   · the target is `views` (or `views again`) first, then each detail not generated yet — the
  *     details stay disabled until FRONT and BACK hold a picture;
  *   · the route is chosen in code (`routeOf`): detail → photos n1; «from my flat» on → hand_flat;
- *     a strap or an opening that runs on → straps; else photos. The server owns the count.
+ *     else photos. The server owns the count.
+ * The construction (join list, ASK questions, the `straps & openings` route) is gone from the flat
+ * (owner 07.10, M7 — 100-CONSTRUCTION-DEADEND): nothing about it gates, asks or routes a press.
  */
 
 /** The target value of the select: `views`, or `d:<slot id>` for a detail. */
@@ -150,29 +152,7 @@ export function settleTarget(target: FlatTarget, items: readonly TargetItem[]): 
   return hit && !hit.disabled ? target : items[0]?.value ?? VIEWS_TARGET;
 }
 
-export type FlatRoute = 'photos' | 'hand_flat' | 'straps' | 'detail';
-
-export const ROUTE_WORD: Record<FlatRoute, string> = {
-  photos: 'photos',
-  hand_flat: 'from my flat',
-  straps: 'straps & openings',
-  detail: 'detail',
-};
-
-export const ROUTE_WHY: Record<FlatRoute, string> = {
-  photos: 'drawn from the reference photos',
-  hand_flat: 'your flats carry the construction; the list is not read',
-  straps: 'a strap or an opening runs on — the construction list is confirmed first',
-  detail: 'one sketch of the detail, agreeing with the front and back flats',
-};
-
-/**
- * ═══ THE CONSTRUCTION LIST DOES NOT GATE A FLAT (owner 06.10, wave 10, 100-CONSTRUCTION-DEADEND) ═══
- * The server no longer sends the join list to the image model (`designgen.FlatPromptCarriesConstruction`
- * = false), so GENERATE neither waits for the list, nor asks its questions, nor confirms it, and there is
- * no `straps & openings` route. Mirror of the server switch: flip both together.
- */
-export const FLAT_CONSTRUCTION_IN_PROMPT = false;
+export type FlatRoute = 'photos' | 'hand_flat' | 'detail';
 
 /**
  * THE ROUTE, IN CODE (§3.4). `structure` = the «from my flat» picks still on the card; the toggle
@@ -182,11 +162,9 @@ export function routeOf(input: {
   target: FlatTarget;
   fromMyFlat: boolean;
   structure: number;
-  joins: common_DesignJoins | null | undefined;
 }): FlatRoute {
   if (targetSlotId(input.target) > 0) return 'detail';
   if (input.fromMyFlat && input.structure > 0) return 'hand_flat';
-  if (FLAT_CONSTRUCTION_IN_PROMPT && suggestsStraps(input.joins)) return 'straps';
   return 'photos';
 }
 

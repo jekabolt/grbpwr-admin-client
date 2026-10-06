@@ -1,5 +1,5 @@
-// Точка входа `flat-ask-probe.mjs` (82-INPUT-REDESIGN, 06.10): чистые модели нового ряда FLAT —
-// цели `target ▾`, маршрут, вопросы ASK · construction, квиз кандидатов, правило stale — и дверь
+// Точка входа `flat-ask-probe.mjs` (82-INPUT-REDESIGN, 06.10; M7 07.10): чистые модели ряда FLAT —
+// цели `target ▾`, маршрут, правило stale, авто-раскладка, слова отказов — и дверь
 // `custom` (`flat-custom.tsx`), которую по-прежнему держит FABRICS AND HARDWARE. Разметка —
 // `renderToStaticMarkup`. Лежит в репозитории: react-dom/server разрешается относительно файла.
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -27,16 +27,6 @@ export {
   targetSlotId,
 } from '../src/components/managers/tech-card/components/design/flat-route';
 export {
-  QUESTION_CAP,
-  allQuestions,
-  answersEdit,
-  chainEdits,
-  doubtOwnAnswer,
-  pendingQuestions,
-  questionsKey,
-  sideOf,
-} from '../src/components/managers/tech-card/components/design/joins-questions';
-export {
   KEEP_REFUSAL_WORDS,
   staleShown,
 } from '../src/components/managers/tech-card/components/design/stale-details';
@@ -60,14 +50,7 @@ export function render(open: boolean, modified: boolean): string {
   );
 }
 
-// Review majors 06.10 (M4/c5, c2, c7): the join replay, the mood fingerprint, the run ledger.
-export {
-  dropItem,
-  editAbsence,
-  editItem,
-  keepPhotos,
-  replayEdit,
-} from '../src/components/managers/tech-card/components/design/joins-model';
+// Review majors 06.10 (c2, c7): the mood fingerprint, the run ledger; M7/M8 refusal words.
 export {
   flatRefusalWords,
   moodPictureIds,

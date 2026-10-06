@@ -1,11 +1,10 @@
 #!/usr/bin/env node
-// СТЕНД ФЛЭТ-МАРШРУТА ПОСЛЕ 82-INPUT-REDESIGN (06.10) — `scripts/flat-route-stand-entry.tsx`: ряд
-// `GENERATE · target ▾ · (from my flat) · route · what the model gets ▸`, ASK · construction (Q1 три
-// позиции, один SetDesignJoins с confirm, CAS-повтор), чтение списка из ряда (`generate without it ›`),
-// авто-восстановление stale, `from my flat`, construction только для чтения, один лист → авто-разрез
-// и авто-раскладка в слоты (квиз кандидатов снят, волна 10), `stale · discard` в FLAT SLOTS,
+// СТЕНД ФЛЭТ-МАРШРУТА ПОСЛЕ 82-INPUT-REDESIGN (06.10; M7 07.10) — `scripts/flat-route-stand-entry.tsx`:
+// ряд `GENERATE · target ▾ · (from my flat) · what the model gets ▸` без конструкции (ни ASK, ни
+// пилюли маршрута, ни straps, ни замка чтения списка), `from my flat`, один лист → авто-разрез и
+// авто-раскладка в слоты (квиз кандидатов снят, волна 10), `stale · discard` в FLAT SLOTS,
 // `timed out · retry`, `taking too long`, повтор `hand_flat`.
-// Снимки tmp/plans/flat-consistency/shots/redesign/*.png.
+// Снимки tmp/plans/flat-consistency/shots/redesign/*.png (или SHOTS_DIR).
 //
 //   node scripts/flat-route-shot.mjs     (нужен `yarn build` — CSS из dist)
 //
@@ -20,7 +19,9 @@ import { build as esbuild } from 'esbuild';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
-const SHOTS = resolve(REPO, '../tmp/plans/flat-consistency/shots/redesign');
+const SHOTS = process.env.SHOTS_DIR
+  ? resolve(process.env.SHOTS_DIR)
+  : resolve(REPO, '../tmp/plans/flat-consistency/shots/redesign');
 const LAYERS = resolve(REPO, '../tmp/plans/flat-consistency/out/layers');
 function resolvePlaywright() {
   const require = createRequire(import.meta.url);
@@ -380,33 +381,17 @@ try {
       .catch(() => {});
   };
 
-  // ── CONSTRUCTION, READ-ONLY (owner 06.10, answer 5) ──
-  const J = '[data-probe="construction"]';
-  await page.waitForSelector(`${J} [data-join-row]`, { timeout: 20000 });
-  check(
-    'J1 the list is shown under `construction`',
-    (await page.locator(`${J} [data-flat-joins]`).textContent())
-      .toLowerCase()
-      .includes('construction'),
-  );
-  check(
-    'J2 nothing to edit: no `+ join`, no ✕, no rejoin, no confirm',
-    (
-      await page.$$(
-        `${J} [data-joins-add], ${J} [aria-label="remove"], ${J} [data-joins-rejoin], ${J} [data-joins-confirm]`,
-      )
-    ).length === 0,
-  );
-  check('J3 layers still group the rows', (await page.$$(`${J} [data-join-layer]`)).length === 3);
-  await shot(J, 'construction-readonly.png');
-
   // ── WAVE 10: THE LIST DOES NOT GATE GENERATE (no lock, no questions, no straps route) ──
   const U = '[data-probe="auto"]';
   await page.waitForSelector(`${U} [data-flat-run]`, { timeout: 10000 });
   await page.waitForTimeout(1500);
   check(
-    'U1 no reading lock, no `generate without it ›`',
-    (await page.locator(`${U} [data-flat-reading], ${U} [data-flat-without-list]`).count()) === 0,
+    'U1 no reading lock, no `generate without it ›`, no route pill (M7)',
+    (await page
+      .locator(
+        `${U} [data-flat-reading], ${U} [data-flat-without-list], ${U} [data-flat-route-pill]`,
+      )
+      .count()) === 0,
   );
   check('U2 GENERATE is live while the list may still be read', await generateLive(U));
   const s0 = await nStarts();

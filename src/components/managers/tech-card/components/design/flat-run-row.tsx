@@ -13,7 +13,6 @@ import { flattenFieldErrors, revealField } from 'utils/field-errors';
 
 import type { TechCardFormData } from '../schema';
 
-import { AskConstruction, finishAsk, useAskBusy } from './ask-construction';
 import { AskReferences } from './ask-references';
 import {
   flushAllowsRun,
@@ -28,13 +27,7 @@ import { ControlLabel } from './core';
 import { moodMinimumGate, openGateDoor } from './core/chain';
 import { useDrafted } from './drafted-contract';
 import { markedPlatesOf } from './fix-markup';
-import {
-  confirmedNow,
-  joinsSavesSettled,
-  rereadForStale,
-  saveJoinsConfirmed,
-  useJoinsRead,
-} from './flat-joins';
+import { useJoinsRead } from './flat-joins';
 import {
   flatDraftOf,
   flatInputBusy,
@@ -51,17 +44,13 @@ import {
   liveStructure,
   moodPictureIds,
   pickStructure,
-  type FlatMode,
   type StructureRole,
 } from './flat-mode';
 import {
-  ROUTE_WHY,
-  ROUTE_WORD,
   VIEWS_ORDER,
   detailFlatSlotIds,
   flatTargets,
   modeOfRoute,
-  FLAT_CONSTRUCTION_IN_PROMPT,
   routeOf,
   settleTarget,
   targetSlotId,
@@ -70,7 +59,6 @@ import {
 import type { RunRefusal as ServerRefusal } from './generation/refusal';
 import { isRunLive } from './generation/run-state';
 import { useStartRun } from './generation/use-generation';
-import { pendingQuestions } from './joins-questions';
 import { WhatModelGetsModal } from './modals';
 import { isBoardRow, isInputRow, type BoardItem } from './mood-board';
 import {
@@ -90,23 +78,20 @@ import { settleSeedBrief } from './words-brief';
 import { materializeWords } from './words-seed';
 
 /**
- * ═══ РЯД ЗАПУСКА БЛОКА INPUT — REFERENCES (82-INPUT-REDESIGN, 06.10) ═══════════════════════════
+ * ═══ РЯД ЗАПУСКА БЛОКА INPUT — REFERENCES (82-INPUT-REDESIGN, 06.10; M7 07.10) ══════════════════
  *
- *   GENERATE · target ▾ · (from my flat) · route · what the model gets ▸
+ *   GENERATE · target ▾ · (from my flat) · what the model gets ▸
  *
  * Owner request 8: «always 4 views; first press = the views sheet; drop one picture / per view; drop
  * FRONT/BACK/SIDE toggles; a dropdown by GENERATE: views again first, then un-generated details; no
- * mode switch — route automatic, from-my-flat explicit; JOINS off the screen, 1–3 questions only
- * when unsure / straps; no confirm button».
+ * mode switch — route automatic, from-my-flat explicit».
  *   · `target ▾` (`flatTargets`): `views` / `views again`, then each detail not drawn yet (or stale
  *     and not kept) — disabled until FRONT and BACK hold a picture;
  *   · `from my flat` — a quiet toggle, drawn only when the card has technical flats and the target
- *     is the views; never automatic. On: the structure tiles under the row (front / back per flat);
- *   · the route pill — not a button: `photos` · `straps & openings` · `from my flat` · `detail`,
- *     chosen by `routeOf`, with the reason in its title;
- *   · above the row, while the list asks something: ASK · construction (`ask-construction.tsx`);
- *     GENERATE waits for it, with `skip all ›`; while the list is being read GENERATE waits with
- *     `generate without it ›`.
+ *     is the views; never automatic. On: the structure tiles under the row (front / back per flat).
+ * M7 (owner 07.10, 100-CONSTRUCTION-DEADEND): no construction on the row any more — no ASK ·
+ * construction questions, no route pill, no `straps & openings`, no «reading the construction» lock.
+ * The join list is still read silently in the background for PARTS (`useJoinsRead`).
  *
  * ⚠ ЦЕНЫ В РЯДУ НЕТ (26.09, O-37 / D-35): цена прогона живёт в истории, по факту.
  */
@@ -118,9 +103,6 @@ import { materializeWords } from './words-seed';
  */
 export const ROW_CONTROL_PX = 26;
 export const ROW_CONTROL_STYLE: React.CSSProperties = { height: ROW_CONTROL_PX };
-
-/** The lock while the first list is read — the one `generate without it ›` passes. */
-const READING = 'reading the construction';
 
 /** The native select of the row, styled as the neck-shape select of the joins list. */
 const STRUCTURE_ROLES: { role: StructureRole; label: string }[] = [
@@ -160,7 +142,6 @@ export function flatSnapshot(
   band: GetDesignBandResponse | undefined,
   now: TechCardFormData,
   detailSlotIds: readonly number[],
-  mode: FlatMode,
   /**
    * THE TARGET AND THE ROUTE (82-INPUT-REDESIGN §3.1): a different target or route is a different
    * intent; a detail run's FRONT/BACK slots travel with their pictures (owner 06.10, answer 3).
@@ -209,12 +190,8 @@ export function flatSnapshot(
     mood,
     callouts,
     details,
-    // The join list the run freezes (its rev, and whether that rev is confirmed — straps needs it).
-    // «from my flat» reads no list: a background read moving the rev is not a new intent there.
-    joins:
-      mode === 'hand_flat' || !FLAT_CONSTRUCTION_IN_PROMPT
-        ? null
-        : [band?.joins?.rev ?? 0, !!band?.joins?.confirmed],
+    // The join list is no input of a flat (M7): kept null so a fingerprint stays the one it was.
+    joins: null,
     ...(intent
       ? {
           target: intent.target,
@@ -464,38 +441,19 @@ export function FlatRunRow({
       ),
     [inputIds, band.references, boardRows, refChoices],
   );
-  /** The quiz is open: its queue (frozen at the press), for this card, and how GENERATE was pressed. */
-  const [refAsk, setRefAsk] = useState<{
-    card: number;
-    ids: number[];
-    opts: { withoutList?: boolean };
-  } | null>(null);
+  /** The quiz is open: its queue (frozen at the press), for this card. */
+  const [refAsk, setRefAsk] = useState<{ card: number; ids: number[] } | null>(null);
   const refAskHere = refAsk && refAsk.card === techCardId ? refAsk : null;
 
   /* ═══ THE ROUTE, IN CODE (§3.4) ═══ */
-  const route = routeOf({
-    target,
-    fromMyFlat,
-    structure: structureNow.length,
-    joins: band.joins,
-  });
+  const route = routeOf({ target, fromMyFlat, structure: structureNow.length });
 
   const writesOff = !!disabled || !speaks;
-  /* ═══ THE LIST: read from the row (the JOINS group left the screen) ═══ */
-  const joinsRead = useJoinsRead(techCardId, band, writesOff);
-  /* Wave 10: with the list out of the prompt it neither locks GENERATE nor asks (FLAT_CONSTRUCTION_IN_PROMPT). */
-  const readsList = FLAT_CONSTRUCTION_IN_PROMPT && (route === 'photos' || route === 'straps');
-  const listBuilding = readsList && !band.joins && joinsRead.reading;
-  const questions = useMemo(
-    () => (readsList && !joinsRead.reading ? pendingQuestions(band.joins, route) : []),
-    [readsList, joinsRead.reading, band.joins, route],
-  );
-  const askBusy = useAskBusy(techCardId);
-  /** The stale confirmation is being recovered (§3.3): «the photos changed — one more look». */
-  const [recovering, setRecovering] = useState(false);
+  /* THE LIST, SILENTLY: read once per card in the background for PARTS (M7) — it gates nothing. */
+  useJoinsRead(techCardId, band, writesOff);
 
   /* Выбор ряда заперт, пока ждём сохранения и пока запрос в полёте (ревью MAJOR), и пока CLEAR. */
-  const choiceOff = writesOff || busy || input.clearing || recovering;
+  const choiceOff = writesOff || busy || input.clearing;
   const gateReason = !speaks
     ? 'this server does not speak the design band yet — nothing can be generated here'
     : disabled
@@ -504,17 +462,9 @@ export function FlatRunRow({
         ? 'the prompt is being changed — generate once it is done'
         : moodReason
           ? moodReason
-          : recovering
-            ? 'the photos changed — one more look'
-            : listBuilding
-              ? READING
-              : questions.length > 0
-                ? `answer ${questions.length === 1 ? 'the question' : `${questions.length} questions`} first`
-                : askBusy
-                  ? 'saving the answers'
-                  : fromMyFlat && structureNow.length === 0
-                    ? 'pick a front or back flat'
-                    : null;
+          : fromMyFlat && structureNow.length === 0
+            ? 'pick a front or back flat'
+            : null;
 
   /** Карточка на экране СЕЙЧАС — для перепроверки после ожидания брифа (R2). */
   const cardNow = useRef(techCardId);
@@ -535,22 +485,15 @@ export function FlatRunRow({
     chip.querySelector<HTMLElement>('[aria-haspopup]')?.click();
   };
 
-  /**
-   * GENERATE. `withoutList` — `generate without it ›` while the list is still being read: the photos
-   * route, now. `recovered` — the one automatic retry after a stale confirmation was re-saved (§3.3);
-   * never a second.
-   */
-  const submit = async (opts: { withoutList?: boolean; recovered?: boolean } = {}) => {
+  /** GENERATE. */
+  const submit = async () => {
     const card = techCardId;
-    // `generate without it ›` passes the list lock only — never another one.
-    const bypass = !!opts.withoutList && gateReason === READING;
-    if ((gateReason && !bypass) || !mood.ok || card <= 0 || inFlight) return;
+    if (gateReason || !mood.ok || card <= 0 || inFlight) return;
     if (flatInputBusy(readFlatInput(card))) return;
     const wasOn = autosave.status !== 'off';
     const ask: FlatAsk = { target, fromMyFlat, structure: [...structureNow] };
     patchFlatInput(card, { run: 'saving', refused: null, serverRefusal: null, ask });
     let refusal: ServerRefusal | null = null;
-    let retryStale = false;
     try {
       const brief = await settleSeedBrief(card);
       if (brief === 'busy') return;
@@ -584,10 +527,7 @@ export function FlatRunRow({
         categoryId: now.categoryId,
       });
       if (!gateNow.ok) return;
-      if (
-        !(await bandWritesSettled(qc, card, BAND_WRITES_WAIT_MS)) ||
-        (FLAT_CONSTRUCTION_IN_PROMPT && !(await joinsSavesSettled(card, BAND_WRITES_WAIT_MS)))
-      ) {
+      if (!(await bandWritesSettled(qc, card, BAND_WRITES_WAIT_MS))) {
         if (cardOnScreen(card)) {
           showMessage('the input is still being saved — try again; nothing was started', 'error');
         }
@@ -609,12 +549,8 @@ export function FlatRunRow({
         }
         return;
       }
-      /* THE ROUTE ON THE FRESH BAND: the list may have landed or moved while the card saved. A press
-         made without the list stays on photos. */
       const fresh = readBench(freshBand, 'flat');
-      const freshRoute: FlatRoute = opts.withoutList
-        ? 'photos'
-        : routeOf({ target, fromMyFlat, structure: structureNow.length, joins: freshBand.joins });
+      const freshRoute: FlatRoute = routeOf({ target, fromMyFlat, structure: structureNow.length });
       if (freshRoute === 'hand_flat') {
         const onCard = new Set(
           ((form.getValues('technicalMedia') ?? []) as { mediaId?: number }[]).map(
@@ -623,32 +559,6 @@ export function FlatRunRow({
         );
         if (structureNow.some((r) => !onCard.has(r.mediaId))) {
           refusal = localRefusal('structure_gone');
-          return;
-        }
-      }
-      if (
-        FLAT_CONSTRUCTION_IN_PROMPT &&
-        !opts.withoutList &&
-        (freshRoute === 'photos' || freshRoute === 'straps') &&
-        pendingQuestions(freshBand.joins, freshRoute).length > 0
-      ) {
-        // The fresh list asks something: the questions stand above the row; nothing is sent.
-        return;
-      }
-      /* STRAPS RUNS ON A CONFIRMED LIST (the server gate stays, the button went): a list that asks
-         nothing is saved confirmed as it stands — the same save `skip all ›` makes. */
-      if (freshRoute === 'straps' && freshBand.joins && !confirmedNow(card, freshBand.joins)) {
-        const r = await saveJoinsConfirmed(qc, card, freshBand.joins, freshBand.joins.rev ?? 0);
-        if (!r.ok) {
-          if (cardOnScreen(card)) showMessage(`${r.why} — nothing was started`, 'error');
-          return;
-        }
-        try {
-          freshBand = await rereadBand(qc, card);
-        } catch {
-          if (cardOnScreen(card)) {
-            showMessage('could not re-read the input — nothing was started; try again', 'error');
-          }
           return;
         }
       }
@@ -699,7 +609,7 @@ export function FlatRunRow({
         // THE MODE (81-FINAL-MODES). Photos and a detail send nothing: an absent block is photos.
         flat: mode ? flatParamsFor(mode, structureNow) : undefined,
       };
-      // D5, last look: every re-read above (the straps confirmation re-reads too) is checked here.
+      // D5, last look on the fresh band (the server refuses a second one too: flat_run_in_flight).
       if (flatRunInFlight(freshBand)) {
         if (cardOnScreen(card)) {
           showMessage('a flat run is already drawing — nothing was started', 'error');
@@ -711,45 +621,20 @@ export function FlatRunRow({
         kind: 'flat',
         ask: '',
         params,
-        snapshot: flatSnapshot(
-          freshBand,
-          now,
-          params.detailSlotIds ?? [],
-          (mode ?? 'photos') as FlatMode,
-          { target, route: freshRoute, flatSlotIds, extras },
-        ),
+        snapshot: flatSnapshot(freshBand, now, params.detailSlotIds ?? [], {
+          target,
+          route: freshRoute,
+          flatSlotIds,
+          extras,
+        }),
       });
-      if (refusal?.reason === 'joins_unconfirmed') {
+      // M8: another tab started a flat run of this card — re-read, so GENERATE shows it drawing.
+      if (refusal?.reason === 'flat_run_in_flight') {
         void qc.invalidateQueries({ queryKey: designKeys.band(card) });
-        // STALE (other photos or another note since the confirmation): recovered without a pill.
-        if (refusal.meta?.reason === 'stale' && !opts.recovered) {
-          refusal = null;
-          retryStale = true;
-        }
       }
     } finally {
       patchFlatInput(card, { run: null, serverRefusal: refusal, ask: refusal ? ask : null });
     }
-    if (retryStale) void recoverStale(card);
-  };
-
-  /**
-   * §3.3: the list is asked for again the free way. Same rev (a cache hit) → it is re-saved
-   * confirmed and GENERATE is pressed once more; a new rev → its questions are asked.
-   */
-  const recoverStale = async (card: number) => {
-    setRecovering(true);
-    try {
-      const got = await rereadForStale(qc, card);
-      if (got !== 'same') return;
-      const joins = qc.getQueryData<GetDesignBandResponse>(designKeys.band(card))?.joins;
-      if (!joins) return;
-      const r = await saveJoinsConfirmed(qc, card, joins, joins.rev ?? 0);
-      if (!r.ok) return;
-    } finally {
-      setRecovering(false);
-    }
-    if (cardNow.current === card) void submit({ recovered: true });
   };
 
   /**
@@ -758,30 +643,23 @@ export function FlatRunRow({
    */
   const submitRef = useRef(submit);
   submitRef.current = submit;
-  const press = (opts: { withoutList?: boolean } = {}) => {
-    const bypass = !!opts.withoutList && gateReason === READING;
-    if ((gateReason && !bypass) || !mood.ok || techCardId <= 0 || inFlight) return;
+  const press = () => {
+    if (gateReason || !mood.ok || techCardId <= 0 || inFlight) return;
     if (flatInputBusy(readFlatInput(techCardId)) || refAskHere) return;
     if (toAsk.length > 0) {
-      setRefAsk({ card: techCardId, ids: [...toAsk], opts });
+      setRefAsk({ card: techCardId, ids: [...toAsk] });
       return;
     }
-    void submit(opts);
+    void submit();
   };
   const refAskDone = () => {
-    const opts = refAskHere?.opts ?? {};
     setRefAsk(null);
     // Next tick: the last role write released the input hold; the row reads it live.
     window.setTimeout(() => {
-      if (cardNow.current === techCardId) void submitRef.current(opts);
+      if (cardNow.current === techCardId) void submitRef.current();
     }, 0);
   };
   const ordinalOf = (mediaId: number) => Math.max(1, inputIds.indexOf(mediaId) + 1);
-
-  const skipAll = () => {
-    if (!band.joins || askBusy) return;
-    void finishAsk(qc, techCardId, band.joins, questions);
-  };
 
   const targetItems = targets;
   const selectTitle = targetItems.find((t) => t.value === target)?.title ?? '';
@@ -793,11 +671,6 @@ export function FlatRunRow({
           this server does not speak the design band yet — the controls are here, but nothing can be
           started against them.
         </CalloutBox>
-      )}
-
-      {/* Z2 · ASK — the questions the list raises, above the row whose GENERATE waits for them. */}
-      {questions.length > 0 && band.joins && !writesOff && (
-        <AskConstruction techCardId={techCardId} joins={band.joins} questions={questions} />
       )}
 
       {/* Z2' · ASK · REFERENCES (T70) — the pictures with no role, opened by GENERATE. */}
@@ -824,7 +697,7 @@ export function FlatRunRow({
                 ? { ok: false, reason: 'say what each picture is first' }
                 : { ok: true }
           }
-          pending={busy || recovering || inFlight}
+          pending={busy || inFlight}
           pendingLabel={inFlight && !busy ? 'drawing…' : undefined}
           onGenerate={() => press()}
           trailing={
@@ -864,20 +737,7 @@ export function FlatRunRow({
                   from my flat
                 </Chip>
               )}
-              {/* THE ROUTE — a word, not a button; «from my flat» says itself on the toggle. */}
-              {route !== 'hand_flat' && (
-                <Text
-                  size='micro'
-                  variant='label'
-                  component='span'
-                  className='uppercase tracking-label'
-                  data-flat-route-pill={route}
-                  title={ROUTE_WHY[route]}
-                >
-                  · {ROUTE_WORD[route]}
-                </Text>
-              )}
-              {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — рядом с GENERATE (R2 п.20); с 06.10 там же и конструкция. */}
+              {/* «ЧТО ПОЛУЧИТ МОДЕЛЬ» — рядом с GENERATE (R2 п.20). */}
               <Button variant='secondary' size='sm' onClick={() => setWmgOpen(true)}>
                 <ControlLabel>what the model gets ▸</ControlLabel>
               </Button>
@@ -942,64 +802,6 @@ export function FlatRunRow({
       </div>
 
       {/* Z4 · ONE LINE UNDER THE ROW: why GENERATE waits, and the one door that moves it on. */}
-      {speaks && !disabled && !moodReason && listBuilding && (
-        <div data-flat-reading=''>
-          <LockBar reason='reading the construction from the photos'>
-            <Button
-              variant='underline'
-              size='xs'
-              data-flat-without-list=''
-              disabled={busy || inFlight}
-              onClick={() => press({ withoutList: true })}
-            >
-              generate without it ›
-            </Button>
-          </LockBar>
-        </div>
-      )}
-      {speaks &&
-        !disabled &&
-        readsList &&
-        !band.joins &&
-        !joinsRead.reading &&
-        joinsRead.failed && (
-          <div data-flat-read-failed=''>
-            <LockBar reason='the construction could not be read'>
-              <Button
-                variant='underline'
-                size='xs'
-                data-flat-read-retry=''
-                title={joinsRead.failed}
-                onClick={joinsRead.retry}
-              >
-                retry ›
-              </Button>
-            </LockBar>
-          </div>
-        )}
-      {speaks && !disabled && !moodReason && questions.length > 0 && (
-        <div data-flat-asking={questions.length}>
-          <LockBar
-            reason={`answer ${questions.length === 1 ? 'the question' : `${questions.length} questions`} first`}
-          >
-            <Button
-              variant='underline'
-              size='xs'
-              data-flat-skip-all=''
-              disabled={askBusy}
-              title='the construction as the model read it'
-              onClick={skipAll}
-            >
-              skip all ›
-            </Button>
-          </LockBar>
-        </div>
-      )}
-      {recovering && (
-        <div data-flat-recovering=''>
-          <LockBar reason='the photos changed — one more look' />
-        </div>
-      )}
       {myFlatGone && (
         <div data-flat-myflat-gone=''>
           <LockBar reason='your flat was removed — drawing from photos' />
@@ -1059,7 +861,7 @@ export function FlatRunRow({
               ? { serverRefusal: null, ask: null }
               : { serverRefusal: null },
           );
-        const short = flatRefusalWords(input.serverRefusal?.reason, input.serverRefusal?.meta);
+        const short = flatRefusalWords(input.serverRefusal?.reason);
         return short ? (
           <CalloutBox tone='error'>
             <div

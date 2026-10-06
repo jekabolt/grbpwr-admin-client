@@ -17,7 +17,6 @@ import {
 import { useTechCardAutosave } from '../autosave-contract';
 import { openDoor } from '../doors';
 import type { BoardItem } from '../mood-board';
-import { FlatJoins } from '../flat-joins';
 import { moodPictureIds } from '../flat-mode';
 import { flatRefFate, flatSentRefs, flatWordsSent } from '../flat-route';
 import { FIT_WHERE, calloutWords, type CalloutLike } from '../render/what-model-gets';
@@ -440,20 +439,6 @@ export function WhatModelGetsModal({
           },
         ]}
       />
-
-      {/* THE CONSTRUCTION (82-INPUT-REDESIGN §1, owner 06.10 answer 5): the join list the run
-          freezes, READ-ONLY; since wave 10 it is not sent to the image model (server switch) — it is edited only by answering the questions above GENERATE. */}
-      {band.joins && (
-        <div data-wmg-construction=''>
-          <FlatJoins
-            techCardId={techCardId}
-            band={band}
-            disabled
-            title='construction · not sent to the image model'
-            thumbOf={(id) => thumbOf(mediaById.get(id))}
-          />
-        </div>
-      )}
 
       <WordsAsSent
         run={lastRun}

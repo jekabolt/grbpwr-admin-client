@@ -4,6 +4,7 @@
 // (`AUTOSAVE_OFF` → flush `off`, прогон пропускается) — GENERATE доходит до `StartDesignRun`.
 //   · карточка 31 — пустые стороны, деталь `pocket` (заперта до видов);
 //   · карточка 32 — FRONT и BACK заполнены, деталь `collar` пуста → `views again` + деталь открыта;
+//     у неё фото с ролью и нет списка стыков → фоновое чтение списка для PARTS (M7), молча;
 //   · карточка 33 — тот же верстак, те же id: ряд без пересева унёс бы сюда деталь карточки 32.
 // `window.__probe.setCard(n)` меняет карточку у ЖИВОГО ряда (без перемонтирования).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -54,6 +55,7 @@ const bands: Record<number, GetDesignBandResponse> = {
       })),
       { id: 21, viewKey: 'detail', detailName: 'collar', kind: 'flat', pictureId: 0, slotRev: 1 },
     ],
+    references: [{ techCardId: 32, mediaId: 7001, role: 'front', ordinal: 1 }],
     runs: [],
     totalRuns: 0,
   } as unknown as GetDesignBandResponse,
@@ -61,6 +63,7 @@ const bands: Record<number, GetDesignBandResponse> = {
 
 // card 33: the same bench as 32 (same slot ids) — a row that does not reseed would carry 32's detail.
 bands[33] = structuredClone(bands[32]);
+bands[33].references = [];
 
 window.__api = {
   GetDesignBand: (req) => structuredClone(bands[(req as { techCardId: number }).techCardId]),
