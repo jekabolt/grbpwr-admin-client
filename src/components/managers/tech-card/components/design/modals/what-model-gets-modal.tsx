@@ -19,7 +19,7 @@ import { openDoor } from '../doors';
 import type { BoardItem } from '../mood-board';
 import { FlatJoins } from '../flat-joins';
 import { moodPictureIds } from '../flat-mode';
-import { flatRefFate } from '../flat-route';
+import { flatRefFate, flatSentRefs, flatWordsSent } from '../flat-route';
 import { FIT_WHERE, calloutWords, type CalloutLike } from '../render/what-model-gets';
 import { viewLabel } from '../views';
 import { useShownWords } from '../words-seed';
@@ -179,39 +179,42 @@ export function WhatModelGetsModal({
     const inPrompt: Line[] = [];
     const onCardOnly: Line[] = [];
     let n = 0;
+    /* WAVE 10: the sent list IS the server's (`flatSentRefs`: references by ordinal, each media
+       once) — the board carries a reference twice (its MOODBOARD row and its REFERENCE row), and
+       walking the board listed every photo twice. */
     const seen = new Set<number>();
-    for (const item of items) {
-      if (otherIds.has(item.mediaId)) continue;
-      const role = roleOf.get(item.mediaId) ?? '';
-      if (item.kind !== REFERENCE_KIND && !role) continue;
-      seen.add(item.mediaId);
-      const line: Line = {
-        mediaId: item.mediaId,
-        role,
-        note: noteOf.get(item.mediaId) ?? '',
-        callouts: calloutsOf.get(item.mediaId) ?? [],
-      };
-      if (role) inPrompt.push({ ...line, number: ++n });
-      else onCardOnly.push(line);
-    }
-    // A role whose picture has fallen off the card. It still counts as «in the prompt» — the role
-    // row is what the model would be fed — and it is listed last so it can be found and cleared.
-    for (const [mediaId, role] of roleOf) {
-      if (seen.has(mediaId)) continue;
+    for (const r of flatSentRefs(band.references ?? [], moodIds, detailSlotId)) {
+      const mediaId = r.mediaId ?? 0;
+      seen.add(mediaId);
       inPrompt.push({
         mediaId,
-        role,
+        role: roleOf.get(mediaId) ?? (r.role ?? '').trim(),
         note: noteOf.get(mediaId) ?? '',
         callouts: calloutsOf.get(mediaId) ?? [],
         number: ++n,
       });
     }
+    for (const item of items) {
+      if (seen.has(item.mediaId) || otherIds.has(item.mediaId)) continue;
+      if (item.kind !== REFERENCE_KIND) continue;
+      seen.add(item.mediaId);
+      onCardOnly.push({
+        mediaId: item.mediaId,
+        role: '',
+        note: noteOf.get(item.mediaId) ?? '',
+        callouts: calloutsOf.get(item.mediaId) ?? [],
+      });
+    }
     return { inPrompt, onCardOnly };
-  }, [items, roleOf, otherIds, noteOf, calloutsOf]);
+  }, [items, band.references, moodIds, detailSlotId, roleOf, otherIds, noteOf, calloutsOf]);
 
-  const moodCount = items.filter(
-    (i) => i.kind !== REFERENCE_KIND && !roleOf.has(i.mediaId) && !otherIds.has(i.mediaId),
-  ).length;
+  const moodCount = new Set(
+    items
+      .filter(
+        (i) => i.kind !== REFERENCE_KIND && !roleOf.has(i.mediaId) && !otherIds.has(i.mediaId),
+      )
+      .map((i) => i.mediaId),
+  ).size;
   const total = lines.inPrompt.length + lines.onCardOnly.length + otherIds.size;
   /** Callouts that travel — the ones drawn on pictures in the prompt. */
   const sentCallouts = lines.inPrompt.reduce((acc, l) => acc + l.callouts.length, 0);
@@ -238,15 +241,17 @@ export function WhatModelGetsModal({
       ? 'the base instruction — each view’s paid call also received its own «view: …» line appended'
       : 'stored at dispatch — this is the text the provider received';
 
+  /** What the server sends of WORDS: the class line only (wave 10). */
+  const sentWords = flatWordsSent(garment);
   const words = useMemo(
     () =>
       [
-        `garment: ${garment.trim() || '—'}`,
+        sentWords || 'garment: —',
         `fit: not sent (a flat draws construction only)`,
         `references in the prompt: ${lines.inPrompt.length} of ${total}`,
         `callouts in the prompt: ${sentCallouts} (drawn on those pictures)`,
       ].join('\n'),
-    [garment, lines, total, sentCallouts],
+    [sentWords, lines, total, sentCallouts],
   );
 
   return (
@@ -295,15 +300,15 @@ export function WhatModelGetsModal({
       <WmgGroup
         label='words'
         aside='read from the card at dispatch'
-        note='construction only: material, colour, lining, inside, hidden finishing and fit words are dropped at dispatch, and so are the quiz answers'
+        note='only the garment class line is sent: the rest of WORDS (and the quiz answers) can be model-written, and the card does not record which'
       >
         <InventoryLine
           name='garment'
           origin='linked'
           text={
-            garment.trim() || (
+            sentWords || (
               <span className='text-error'>
-                the card states no description; the pictures go in unexplained
+                the card names no garment class; the pictures go in unexplained
               </span>
             )
           }

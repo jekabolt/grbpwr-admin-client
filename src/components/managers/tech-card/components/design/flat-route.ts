@@ -53,6 +53,39 @@ export function flatRefFate(
   return 'sent';
 }
 
+/**
+ * THE WORDS A FLAT RUN SENDS (wave 10): only the card's «garment: <class>» line — the description is
+ * model-seeded as often as human-written and nothing records which, so the server sends none of it
+ * (designgen.FlatWordsCarryDescription). Mirror of FlatConstructionNote: the first «garment:» line
+ * with a class, or ''.
+ */
+export function flatWordsSent(words: string): string {
+  for (const line of words.split('\n')) {
+    const m = /^\s*(?:- )?garment\s*:\s*(.*)$/i.exec(line);
+    if (m && m[1].trim()) return `garment: ${m[1].trim()}`;
+  }
+  return '';
+}
+
+/**
+ * THE PICTURES A FLAT RUN SENDS, IN THE SERVER'S ORDER (wave 10): the card's references by ordinal,
+ * each media once, kept by `flatRefFate` = 'sent' — the mirror of designAssembleInputs →
+ * designFlatOnlyRoledPhotos → designFlatDetailOnlyItsRefs. «what the model gets» lists exactly these.
+ */
+export function flatSentRefs<
+  R extends { mediaId?: number; role?: string; detailSlotId?: number; ordinal?: number },
+>(references: readonly R[], moodIds: Set<number>, detailSlotId: number): R[] {
+  const seen = new Set<number>();
+  return [...references]
+    .sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0))
+    .filter((r) => {
+      const id = r.mediaId ?? 0;
+      if (id <= 0 || seen.has(id)) return false;
+      seen.add(id);
+      return flatRefFate(r, moodIds, detailSlotId) === 'sent';
+    });
+}
+
 export type TargetItem = {
   value: FlatTarget;
   label: string;

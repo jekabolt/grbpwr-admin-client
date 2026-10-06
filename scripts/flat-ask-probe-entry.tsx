@@ -18,6 +18,8 @@ export {
   detailFlatSlotIds,
   detailTarget,
   flatRefFate,
+  flatSentRefs,
+  flatWordsSent,
   flatTargets,
   modeOfRoute,
   routeOf,

@@ -1038,6 +1038,22 @@ if (mut && !hit) {
   process.exit(2);
 }
 
+console.log('\nволна 10 · «what the model gets» = что шлёт сервер');
+{
+  const refs = [
+    { mediaId: 816, role: 'back', ordinal: 3 },
+    { mediaId: 813, role: 'front', ordinal: 1 },
+    { mediaId: 815, role: 'side_l', ordinal: 2 },
+    { mediaId: 813, role: 'front', ordinal: 1 },
+    { mediaId: 900, role: '', ordinal: 4 },
+    { mediaId: 901, role: 'front', ordinal: 5 },
+  ];
+  const sent = M.flatSentRefs(refs, new Set([901]), 0).map((r) => r.mediaId);
+  ck(sent.join() === '813,815,816', 'card 51: three photos, ordinal order, each once; mood and role-less out', sent.join());
+  ck(M.flatWordsSent('garment: blazer\nfit: regular\nSlim body.') === 'garment: blazer', 'words: the class line only');
+  ck(M.flatWordsSent('Slim body.') === '', 'no class line → nothing');
+}
+
 console.log(
   `\n${total - bad} / ${total}, failures ${bad}${MUTATE ? `  (--mutate=${MUTATE})` : ''}`,
 );
