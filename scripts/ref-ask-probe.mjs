@@ -23,11 +23,6 @@ const DESIGN = resolve(root, 'src/components/managers/tech-card/components/desig
 
 const MUTATIONS = {
   ask: { file: /design\/flat-run-row\.tsx$/, from: 'if (toAsk.length > 0) {', to: 'if (false) {' },
-  extras: {
-    file: /design\/flat-run-row\.tsx$/,
-    from: 'extraInputMediaIds: extras,',
-    to: 'extraInputMediaIds: [],',
-  },
 };
 const mut = MUTATE ? MUTATIONS[MUTATE] : null;
 if (MUTATE && !mut) {
@@ -101,11 +96,11 @@ console.log('\nT70 · модель');
     'answered pictures (figure / out) are not asked again',
   );
   ck(
-    JSON.stringify(M.figureIds([2, 3, 5], { 2: 'figure', 5: 'out' })) === '[2]',
-    'figure ids travel',
+    JSON.stringify(M.figureIds([2, 3, 5], { 2: 'figure', 5: 'out' })) === '[]',
+    'T73: no role-less picture travels (skip = not in the prompt)',
   );
-  M.rememberRefChoice(9, 7, 'figure');
-  ck(M.refChoiceOf(9, 7) === 'figure' && M.refChoiceOf(10, 7) === undefined, 'memory is per card');
+  M.rememberRefChoice(9, 7, 'out');
+  ck(M.refChoiceOf(9, 7) === 'out' && M.refChoiceOf(10, 7) === undefined, 'memory is per card');
   M.rememberRefChoice(9, 7, null);
   ck(M.refChoiceOf(9, 7) === undefined, 'forgetting clears');
 }
@@ -245,8 +240,12 @@ if (!chromium) {
       (await page.getAttribute('[data-ask-references]', 'data-ask-ref')) === '703',
       'the next picture comes into focus',
     );
-    // 703 → figure it out
-    await page.click('[data-ask-ref-option="figure"]');
+    // 703 → skip (T73: not in the prompt)
+    ck(
+      (await page.locator('[data-ask-ref-option="figure"]').count()) === 0,
+      'T73: no `figure it out` choice — a role or skip',
+    );
+    await page.click('[data-ask-ref-out]');
     await page
       .waitForFunction(
         () =>
@@ -255,7 +254,7 @@ if (!chromium) {
         { timeout: 3000 },
       )
       .catch(() => {});
-    ck((await calls('SetDesignReferenceRole')).length === 1, '`figure it out ✦` writes no role');
+    ck((await calls('SetDesignReferenceRole')).length === 1, 'skip writes no role');
     ck(
       (await calls('StartDesignRun')).length === 0,
       'still nothing started before the last answer',
@@ -276,8 +275,8 @@ if (!chromium) {
     ck((await page.locator('[data-ask-references]').count()) === 0, 'the quiz closes');
     const p = starts[0]?.params ?? {};
     ck(
-      JSON.stringify(p.extraInputMediaIds) === '[703]',
-      '`figure it out` picture travels role-less in extra_input_media_ids',
+      (p.extraInputMediaIds ?? []).length === 0,
+      'the skipped picture is not in the prompt (no extra_input_media_ids)',
       JSON.stringify(p.extraInputMediaIds),
     );
     ck(
@@ -288,7 +287,7 @@ if (!chromium) {
       () => !document.querySelector('[data-flat-generate] [aria-busy="true"]'),
     );
 
-    console.log('\nT70 · DOM: второй GENERATE — `figure it out` запомнен');
+    console.log('\nT70/T73 · DOM: второй GENERATE — skip запомнен');
     await page.click(gen);
     await page
       .waitForFunction(
@@ -302,8 +301,8 @@ if (!chromium) {
     ck((await page.locator('[data-ask-references]').count()) === 0, 'no quiz: nothing left to ask');
     const s2 = await calls('StartDesignRun');
     ck(
-      s2.length === 2 && JSON.stringify(s2[1]?.params?.extraInputMediaIds) === '[703]',
-      'the remembered picture travels again',
+      s2.length === 2 && (s2[1]?.params?.extraInputMediaIds ?? []).length === 0,
+      'the skipped picture stays out of the prompt',
       JSON.stringify(s2[1]?.params?.extraInputMediaIds),
     );
   } finally {

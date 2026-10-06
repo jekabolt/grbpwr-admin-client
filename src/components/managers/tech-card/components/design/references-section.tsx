@@ -150,7 +150,7 @@ const FIGURE_ITEM = '__figure';
 
 const ROLE_ITEMS: RoleItem[] = [
   { value: '', label: 'not sent' },
-  { value: FIGURE_ITEM, label: 'figure it out ✦' },
+  // T73: `figure it out ✦` снят — без роли картинка в промпт не идёт.
   // ЧЕТЫРЕ СТОРОНЫ И ДЕТАЛЬ (`views.ts`, `ACTIVE_VIEWS`): 3/4 сняты владельцем (D-18) и больше не
   // предлагаются. Слов макета «silhouette / stitching / hardware» на проводе НЕТ — список
   // остаётся продуктовым.

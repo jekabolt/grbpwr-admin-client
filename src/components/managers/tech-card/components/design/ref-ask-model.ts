@@ -32,7 +32,7 @@ function read(card: number): Record<number, RefChoice> {
     const parsed = raw ? (JSON.parse(raw) as unknown) : null;
     if (parsed && typeof parsed === 'object') {
       for (const [k, c] of Object.entries(parsed as Record<string, unknown>)) {
-        if (c === 'figure' || c === 'out') v[Number(k)] = c;
+        if (c === 'figure' || c === 'out') v[Number(k)] = 'out'; // T73: прежнее figure = skip
       }
     }
   } catch {
@@ -126,5 +126,8 @@ export function figureIds(
   unmarked: readonly number[],
   choices: Record<number, RefChoice>,
 ): number[] {
-  return unmarked.filter((id) => choices[id] === 'figure');
+  // T73: без роли в промпт не уходит ничего — прежние `figure` тоже больше не едут.
+  void unmarked;
+  void choices;
+  return [];
 }
