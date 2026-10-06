@@ -202,6 +202,40 @@ ck(
   );
   const strap = ans(wideIn, 'waistband');
   ck(m.fixBands(strap, wideIn) === strap, '"waistband" / "strap" are no band words');
+  // Order (use-paint `laid`): fixSides first, so the inside takes the owner's corrected name/key.
+  {
+    const SW2 = 120;
+    const lab = new Int32Array(SW2 * 70);
+    const sil = new Uint8Array(SW2 * 70);
+    for (let y = 10; y < 60; y++)
+      for (let x = 10; x < 110; x++) {
+        sil[y * SW2 + x] = 1;
+        const inner = x >= 80 && x <= 99 && y >= 25 && y <= 44;
+        const line = x >= 79 && x <= 100 && y >= 24 && y <= 45;
+        lab[y * SW2 + x] = inner ? 3 : line ? 0 : x < 60 ? 1 : 2;
+      }
+    const f = { w: SW2, h: 70, labels: lab, silhouette: sil, count: 3 };
+    const k2 = new Map([
+      ['left panel', 'left-panel'],
+      ['right panel', 'right-panel'],
+    ]);
+    // front: the wearer's left must sit picture-right — the answer has them mirrored.
+    const p = m.partsOf(
+      {
+        parts: [g('left panel', [1]), g('right panel', [2]), g('panel binding', [3])],
+        splitNeeded: [],
+      },
+      f,
+      new Int32Array([-1, 30 * SW2 + 30, 30 * SW2 + 70, 35 * SW2 + 90]),
+      'front',
+    );
+    const out = names(m.fixBands(m.fixSides('front', p, f, k2), f));
+    ck(
+      out.includes('left panel · inside[left-panel]:3') && out.includes('left panel[left-panel]:2'),
+      'inside follows the owner after the L/R swap',
+      out,
+    );
+  }
 }
 /* f3 · the live labels (tmp/plans/flat-consistency/shots/paint-qa/f3-labels.json) on real flats */
 {

@@ -522,8 +522,9 @@ export class PaintSession {
   }
 
   /**
-   * A row laid over the flat, then the f3 band check (`fixBands`: a wide "binding" is an opening or
-   * a part's inside) and the Ф1 L/R check on the drawing (`fixSides`).
+   * A row laid over the flat, then the Ф1 L/R check on the drawing (`fixSides`), then the f3 band
+   * check (`fixBands`: a wide "binding" is an opening or a part's inside) — last, so an inside takes
+   * its owner's name and key after the L/R swap (fixSides never moves an inside).
    */
   private laid(
     row: Parameters<typeof partsOf>[0],
@@ -533,7 +534,7 @@ export class PaintSession {
     keys: ReadonlyMap<string, string>,
   ): ViewParts | null {
     const parts = partsOf(row, flat, seeds, view);
-    return parts && fixSides(view, fixBands(parts, flat), flat, keys);
+    return parts && fixBands(fixSides(view, parts, flat, keys), flat);
   }
 
   /** The side has the card-level answer (Ф2.1 topology); an older side-by-side one is stale. */
