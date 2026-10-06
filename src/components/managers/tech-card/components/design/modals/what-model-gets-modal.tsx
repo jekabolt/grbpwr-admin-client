@@ -87,6 +87,7 @@ export function WhatModelGetsModal({
   readOnly = false,
   detailSlotId = 0,
   structure = [],
+  plates = [],
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -101,6 +102,8 @@ export function WhatModelGetsModal({
   /** A «from my flat» press: the designer's own flats travel FIRST (front_flat, then back_flat), as the
    *  server records them (designFlatStructureRefs). Empty on any other route. */
   structure?: readonly { mediaId: number; role: string }[];
+  /** A detail press: the accepted FRONT / BACK flats the server attaches as bench plates (T8). */
+  plates?: readonly { mediaId: number; role: string }[];
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
@@ -207,6 +210,11 @@ export function WhatModelGetsModal({
         number: ++n,
       });
     }
+    for (const p of plates) {
+      if (p.mediaId <= 0 || seen.has(p.mediaId)) continue;
+      seen.add(p.mediaId);
+      inPrompt.push({ mediaId: p.mediaId, role: p.role, note: '', callouts: [], number: ++n });
+    }
     for (const item of items) {
       if (seen.has(item.mediaId) || otherIds.has(item.mediaId)) continue;
       if (item.kind !== REFERENCE_KIND) continue;
@@ -225,6 +233,7 @@ export function WhatModelGetsModal({
     moodIds,
     detailSlotId,
     structure,
+    plates,
     roleOf,
     otherIds,
     noteOf,

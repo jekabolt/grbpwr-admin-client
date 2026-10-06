@@ -1092,6 +1092,14 @@ export function FlatRunRow({
         readOnly={!!disabled}
         detailSlotId={detailId}
         structure={route === 'hand_flat' ? structureNow : []}
+        plates={
+          detailId > 0
+            ? (['front', 'back'] as const).flatMap((v) => {
+                const id = bench.sides.find((x) => x.view === v)?.slot?.picture?.media?.id ?? 0;
+                return id > 0 ? [{ mediaId: id, role: `accepted ${v} flat` }] : [];
+              })
+            : []
+        }
       />
     </div>
   );
