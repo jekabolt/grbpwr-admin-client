@@ -7,7 +7,7 @@
 // Плюс дверь `custom` (её держит FABRICS AND HARDWARE) и мажоры ревью 06.10.
 //
 //   node scripts/flat-ask-probe.mjs                     прогон
-//   node scripts/flat-ask-probe.mjs --mutate=route      «from my flat» не побеждает лямки — красное
+//   node scripts/flat-ask-probe.mjs --mutate=route      маршрут лямок вернулся без рубильника — красное
 //   node scripts/flat-ask-probe.mjs --mutate=cap        вопросов больше трёх — красное
 //   node scripts/flat-ask-probe.mjs --mutate=stale      kept не гасит пилюлю — красное
 //   node scripts/flat-ask-probe.mjs --mutate=draft      ряд не пересеивает цель при смене карточки
@@ -33,8 +33,8 @@ const DESIGN = resolve(root, 'src/components/managers/tech-card/components/desig
 const MUTATIONS = {
   route: {
     file: /design\/flat-route\.ts$/,
-    from: "  if (input.fromMyFlat && input.structure > 0) return 'hand_flat';\n  if (suggestsStraps(input.joins)) return 'straps';",
-    to: "  if (suggestsStraps(input.joins)) return 'straps';\n  if (input.fromMyFlat && input.structure > 0) return 'hand_flat';",
+    from: "  if (FLAT_CONSTRUCTION_IN_PROMPT && suggestsStraps(input.joins)) return 'straps';",
+    to: "  if (suggestsStraps(input.joins)) return 'straps';",
   },
   cap: {
     file: /design\/joins-questions\.ts$/,
@@ -173,9 +173,13 @@ console.log('\n82 · маршрут в коде (routeOf)');
     M.routeOf({ target, fromMyFlat, structure, joins });
   ck(r('views', false, 0, TEE()) === 'photos', 'a tee → photos');
   ck(r('views', false, 0, null) === 'photos', 'no list yet → photos');
-  ck(r('views', false, 0, L38()) === 'straps', 'a strap that runs on → straps & openings');
+  // wave 10: the list is out of the prompt — a strap that runs on is the photos route (FLAT_CONSTRUCTION_IN_PROMPT)
+  ck(
+    r('views', false, 0, L38()) === 'photos',
+    'a strap that runs on → photos (no straps route, wave 10)',
+  );
   ck(r('views', true, 2, L38()) === 'hand_flat', '«from my flat» with a pick wins over straps');
-  ck(r('views', true, 0, L38()) === 'straps', '«from my flat» without a pick is not a route');
+  ck(r('views', true, 0, L38()) === 'photos', '«from my flat» without a pick is not a route');
   ck(
     r(M.detailTarget(7), true, 2, L38()) === 'detail',
     'a detail target is a detail run, whatever else',

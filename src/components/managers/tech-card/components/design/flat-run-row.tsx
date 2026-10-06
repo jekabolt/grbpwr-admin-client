@@ -61,6 +61,7 @@ import {
   detailFlatSlotIds,
   flatTargets,
   modeOfRoute,
+  FLAT_CONSTRUCTION_IN_PROMPT,
   routeOf,
   settleTarget,
   targetSlotId,
@@ -210,7 +211,10 @@ export function flatSnapshot(
     details,
     // The join list the run freezes (its rev, and whether that rev is confirmed — straps needs it).
     // «from my flat» reads no list: a background read moving the rev is not a new intent there.
-    joins: mode === 'hand_flat' ? null : [band?.joins?.rev ?? 0, !!band?.joins?.confirmed],
+    joins:
+      mode === 'hand_flat' || !FLAT_CONSTRUCTION_IN_PROMPT
+        ? null
+        : [band?.joins?.rev ?? 0, !!band?.joins?.confirmed],
     ...(intent
       ? {
           target: intent.target,
@@ -479,7 +483,8 @@ export function FlatRunRow({
   const writesOff = !!disabled || !speaks;
   /* ═══ THE LIST: read from the row (the JOINS group left the screen) ═══ */
   const joinsRead = useJoinsRead(techCardId, band, writesOff);
-  const readsList = route === 'photos' || route === 'straps';
+  /* Wave 10: with the list out of the prompt it neither locks GENERATE nor asks (FLAT_CONSTRUCTION_IN_PROMPT). */
+  const readsList = FLAT_CONSTRUCTION_IN_PROMPT && (route === 'photos' || route === 'straps');
   const listBuilding = readsList && !band.joins && joinsRead.reading;
   const questions = useMemo(
     () => (readsList && !joinsRead.reading ? pendingQuestions(band.joins, route) : []),
@@ -581,7 +586,7 @@ export function FlatRunRow({
       if (!gateNow.ok) return;
       if (
         !(await bandWritesSettled(qc, card, BAND_WRITES_WAIT_MS)) ||
-        !(await joinsSavesSettled(card, BAND_WRITES_WAIT_MS))
+        (FLAT_CONSTRUCTION_IN_PROMPT && !(await joinsSavesSettled(card, BAND_WRITES_WAIT_MS)))
       ) {
         if (cardOnScreen(card)) {
           showMessage('the input is still being saved — try again; nothing was started', 'error');
@@ -622,6 +627,7 @@ export function FlatRunRow({
         }
       }
       if (
+        FLAT_CONSTRUCTION_IN_PROMPT &&
         !opts.withoutList &&
         (freshRoute === 'photos' || freshRoute === 'straps') &&
         pendingQuestions(freshBand.joins, freshRoute).length > 0

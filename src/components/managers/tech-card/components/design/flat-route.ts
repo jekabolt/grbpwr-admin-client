@@ -109,6 +109,14 @@ export const ROUTE_WHY: Record<FlatRoute, string> = {
 };
 
 /**
+ * ═══ THE CONSTRUCTION LIST DOES NOT GATE A FLAT (owner 06.10, wave 10, 100-CONSTRUCTION-DEADEND) ═══
+ * The server no longer sends the join list to the image model (`designgen.FlatPromptCarriesConstruction`
+ * = false), so GENERATE neither waits for the list, nor asks its questions, nor confirms it, and there is
+ * no `straps & openings` route. Mirror of the server switch: flip both together.
+ */
+export const FLAT_CONSTRUCTION_IN_PROMPT = false;
+
+/**
  * THE ROUTE, IN CODE (§3.4). `structure` = the «from my flat» picks still on the card; the toggle
  * without a pick is not a route.
  */
@@ -120,7 +128,7 @@ export function routeOf(input: {
 }): FlatRoute {
   if (targetSlotId(input.target) > 0) return 'detail';
   if (input.fromMyFlat && input.structure > 0) return 'hand_flat';
-  if (suggestsStraps(input.joins)) return 'straps';
+  if (FLAT_CONSTRUCTION_IN_PROMPT && suggestsStraps(input.joins)) return 'straps';
   return 'photos';
 }
 

@@ -400,138 +400,47 @@ try {
   check('J3 layers still group the rows', (await page.$$(`${J} [data-join-layer]`)).length === 3);
   await shot(J, 'construction-readonly.png');
 
-  // ── THE FIRST READ, FROM THE ROW ──
+  // ── WAVE 10: THE LIST DOES NOT GATE GENERATE (no lock, no questions, no straps route) ──
   const U = '[data-probe="auto"]';
-  await page.waitForSelector(`${U} [data-flat-reading]`, { timeout: 10000 });
+  await page.waitForSelector(`${U} [data-flat-run]`, { timeout: 10000 });
+  await page.waitForTimeout(1500);
   check(
-    'U1 the row starts the read once',
-    (await calls(page, 'GenerateDesignJoins')).filter((c) => c.body.techCardId === 49).length === 1,
+    'U1 no reading lock, no `generate without it ›`',
+    (await page.locator(`${U} [data-flat-reading], ${U} [data-flat-without-list]`).count()) === 0,
   );
-  check('U2 GENERATE waits while the list is built', !(await generateLive(U)));
-  await shot(U, 'reading-locked.png');
+  check('U2 GENERATE is live while the list may still be read', await generateLive(U));
   const s0 = await nStarts();
-  await page.click(`${U} [data-flat-without-list]`);
-  await page
-    .waitForFunction(
-      (n) => window.__calls.filter((c) => c.name === 'StartDesignRun').length > n,
-      s0,
-      { timeout: 10000 },
-    )
-    .catch(() => {});
+  await pressGenerate(U);
   const w = await lastStart();
   check(
-    'U3 `generate without it ›` runs the photos route now',
+    'U3 GENERATE runs the photos route at once',
     (await nStarts()) === s0 + 1 && !w?.params?.flat && w?.params?.views?.length === 4,
     JSON.stringify(w?.params?.flat ?? null),
   );
-  await page.waitForSelector(`${U} [data-ask-construction]`, { timeout: 10000 });
-  check(
-    'U4 the landed list asks its questions',
-    (await page.locator(`${U} [data-ask-construction]`).count()) === 1,
-  );
-  await shot(U, 'reading-landed-asks.png');
+  await shot(U, 'no-construction-gate.png');
 
-  // ── ASK · CONSTRUCTION ──
   const M = '[data-probe="modes"]';
-  await page.waitForSelector(`${M} [data-ask-construction]`, { timeout: 10000 });
+  await page.waitForSelector(`${M} [data-flat-run]`, { timeout: 10000 });
+  await page.waitForTimeout(1500);
   check(
-    'A1 three questions (cap)',
-    (await page.getAttribute(`${M} [data-ask-construction]`, 'data-ask-construction')) === '3',
-  );
-  check('A2 GENERATE waits for the answers', !(await generateLive(M)));
-  check(
-    'A3 `skip all ›` under the row',
-    (await page.locator(`${M} [data-flat-skip-all]`).count()) === 1,
+    'A1 a strap list asks nothing and locks nothing',
+    (await page.locator(`${M} [data-ask-construction], ${M} [data-flat-skip-all]`).count()) === 0 &&
+      (await generateLive(M)),
   );
   check(
-    'A4 route pill: straps & openings',
-    (await page.textContent(`${M} [data-flat-route-pill]`)).includes('straps & openings'),
+    'A2 no `straps & openings` route',
+    !((await page.textContent(`${M} [data-flat-run]`)) ?? '').includes('straps & openings'),
   );
-  const q1 = await page.$$eval(`${M} [data-ask-option]`, (els) =>
-    els.map((e) => e.textContent.trim()),
-  );
-  check(
-    'A5 Q1 offers three strap positions',
-    q1.join('|') === 'at the neck|mid-shoulder|shoulder tip',
-    q1.join('|'),
-  );
-  check(
-    'A6 no custom ▸, no mode switch, no confirm joins',
-    (await page.$$(`${M} [data-flat-custom], ${M} [role="radiogroup"], ${M} [data-joins-confirm]`))
-      .length === 0,
-  );
-  await shot(M, 'ask-q1.png');
-  await page.click(`${M} [data-ask-option="mid"]`);
-  await page.waitForSelector(`${M} [data-ask-at="1"]`, { timeout: 5000 });
-  check(
-    'A7 a chip advances by itself',
-    (await page.textContent(`${M} [data-ask]`)).includes('cross'),
-  );
-  await shot(M, 'ask-q2.png');
-  await page.click(`${M} [data-ask-option="yes"]`);
-  await page.waitForSelector(`${M} [data-ask-at="2"]`, { timeout: 5000 });
-  await page.click(`${M} [data-ask-option="no"]`);
-  await page
-    .waitForFunction((s) => !document.querySelector(`${s} [data-ask-construction]`), M, {
-      timeout: 15000,
-    })
-    .catch(() => {});
-  const sets = (await calls(page, 'SetDesignJoins')).filter((c) => c.body.techCardId === 60);
-  const lastSet = sets.at(-1)?.body;
-  check(
-    'A8 the last answer saves the list once, confirmed (a CAS miss replays once)',
-    sets.length === 2 && sets.every((c) => c.body.confirm === true),
-    JSON.stringify(sets.map((c) => [c.body.expectedRev, c.body.confirm])),
-  );
-  const fromNow = (lastSet?.joins?.items ?? [])
-    .filter((i) => i.kind === 'strap')
-    .map((i) => i.from)
-    .join(',');
-  check(
-    'A9 the answer edited the list: straps start mid-shoulder',
-    fromNow === 'NP_L..SP_L:0.5,NP_R..SP_R:0.5',
-    fromNow,
-  );
-  check('A10 GENERATE is live once answered', await generateLive(M));
-  await shot(M, 'ask-done.png');
   const s1 = await nStarts();
   await pressGenerate(M);
   const st = await lastStart();
   check(
-    'A11 straps run: four views, one picture, mode straps',
+    'A3 the press is the photos route, one sheet, no list saved',
     (await nStarts()) === s1 + 1 &&
-      st?.params?.flat?.mode === 'straps' &&
-      st?.params?.layout === 'one',
-    JSON.stringify(st?.params?.flat),
-  );
-
-  // ── STALE CONFIRMATION, RECOVERED WITHOUT A BUTTON ──
-  await page.evaluate(() => {
-    window.__startRefusal = {
-      reason: 'joins_unconfirmed',
-      status: 400,
-      words: 'FailedPrecondition: joins_unconfirmed',
-      meta: { reason: 'stale', joins_rev: '9' },
-    };
-    window.__cacheHit = true;
-  });
-  const s2 = await nStarts();
-  await pressGenerate(M);
-  await page
-    .waitForFunction(
-      (n) => window.__calls.filter((c) => c.name === 'StartDesignRun').length >= n + 2,
-      s2,
-      { timeout: 15000 },
-    )
-    .catch(() => {});
-  check(
-    'R1 a stale refusal re-reads, re-confirms and presses once more',
-    (await nStarts()) === s2 + 2,
-    String((await nStarts()) - s2),
-  );
-  check(
-    'R2 no refusal stays on screen',
-    (await page.locator(`${M} [data-flat-refusal]`).count()) === 0,
+      !st?.params?.flat &&
+      st?.params?.layout === 'one' &&
+      (await calls(page, 'SetDesignJoins')).filter((c) => c.body.techCardId === 60).length === 0,
+    JSON.stringify(st?.params?.flat ?? null),
   );
 
   // ── FROM MY FLAT ──
