@@ -93,7 +93,7 @@ const reducedMotion = () =>
 export type QuizAnchor = { mediaId: number; spots: DesignQuizSpot[] };
 
 /** 99 §1.4: шкала мест `detail` — переключатель по итогам оценки; `false` — рисуем только `zone`. */
-export const SPOT_DETAIL = true;
+export const SPOT_DETAIL = false;
 
 /** Чистые места вопроса: в кадре, с подписью, ≤3; `detail` — только при `SPOT_DETAIL`. */
 export function spotsOf(q: DesignQuizQuestion | undefined): DesignQuizSpot[] {

@@ -1612,18 +1612,19 @@ try {
     }
     await ctx.close();
   }
+  // 99-SPOTS-EVAL: detail-шкала выключена (SPOT_DETAIL=false) — фикстуры на zone.
   // 99-SPOTS: места вопроса — нумерованные кольца в кадре якорной картинки, номера верхним индексом
   // на словах вопроса, легенда для слов, которых в вопросе нет, `hide spots` помнится в браузере.
   const spotTarget = [
     { label: 'inner strap edge', x: 300, y: 450, scale: 'zone', at: -1 },
-    { label: 'back neckline', x: 640, y: 160, scale: 'detail', at: -1 },
-    { label: 'hem tape', x: 500, y: 880, scale: 'detail', at: -1 },
+    { label: 'back neckline', x: 640, y: 160, scale: 'zone', at: -1 },
+    { label: 'hem tape', x: 500, y: 880, scale: 'zone', at: -1 },
   ];
   const cuffText = 'Where does the cuff tab from this picture go on our sleeve?';
   // `at` — байтовое смещение подписи, как считает сервер.
   const cuffAt = Buffer.byteLength(cuffText.slice(0, cuffText.indexOf('cuff tab')));
   const spotDetail = [
-    { label: 'cuff tab', x: 970, y: 520, scale: 'detail', at: cuffAt },
+    { label: 'cuff tab', x: 970, y: 520, scale: 'zone', at: cuffAt },
     { label: 'sleeve', x: 420, y: 40, scale: 'zone', at: -1 },
   ];
   const marksOf = (spots) => spots.map((p) => [p.x, p.y]);
