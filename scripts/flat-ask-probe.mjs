@@ -62,8 +62,8 @@ const MUTATIONS = {
   },
   'refusal-retry': {
     file: /design\/generation\/use-generation\.ts$/,
-    from: '      return failures < 1 && (status === 0 || status >= 500);',
-    to: '      return failures < 1;',
+    from: '    retry: (failures, error) => failures < 1 && !isDefinitiveRefusal(error),',
+    to: '    retry: (failures, error) => failures < 1,',
   },
   inflight: {
     file: /design\/flat-run-row\.tsx$/,
