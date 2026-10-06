@@ -12,6 +12,7 @@
 //   node scripts/flat-ask-probe.mjs --mutate=stale      kept не гасит пилюлю — красное
 //   node scripts/flat-ask-probe.mjs --mutate=draft      ряд не пересеивает цель при смене карточки
 //   node scripts/flat-ask-probe.mjs --mutate=place      деталь ложится поверх правки человека — красное
+//   node scripts/flat-ask-probe.mjs --mutate=detailref  деталь берёт чужие референсы — красное
 //   node scripts/flat-ask-probe.mjs --mutate=inflight   GENERATE не ждёт идущий прогон — красное
 //
 // DOM-часть: настоящий `FlatRunRow` в chromium (`flat-ask-dom-entry.tsx`). Playwright не в
@@ -31,6 +32,11 @@ const root = resolve(HERE, '..');
 const DESIGN = resolve(root, 'src/components/managers/tech-card/components/design');
 
 const MUTATIONS = {
+  detailref: {
+    file: /design\/flat-route\.ts$/,
+    from: "  if (detailSlotId > 0 && (role !== 'detail' || (ref.detailSlotId ?? 0) !== detailSlotId)) {",
+    to: "  if (detailSlotId > 0 && role !== 'detail') {",
+  },
   route: {
     file: /design\/flat-route\.ts$/,
     from: "  if (input.fromMyFlat && input.structure > 0) return 'hand_flat';\n  if (suggestsStraps(input.joins)) return 'straps';",
@@ -189,6 +195,25 @@ console.log('\n82 · маршрут в коде (routeOf)');
     'target ↔ slot id',
   );
   ck(M.VIEWS_ORDER.join() === 'front,back,side_l,side_r', 'the views run is always the four sides');
+  // T74: a detail target sends only the references of THAT detail.
+  const mood = new Set([9]);
+  const fate = (ref, slot) => M.flatRefFate(ref, mood, slot);
+  ck(
+    fate({ mediaId: 1, role: 'front' }, 0) === 'sent' &&
+      fate({ mediaId: 1, role: 'front' }, 7) === 'not_this_detail',
+    'T74 · a side photo travels with the views, not with a detail',
+  );
+  ck(
+    fate({ mediaId: 2, role: 'detail', detailSlotId: 7 }, 7) === 'sent' &&
+      fate({ mediaId: 3, role: 'detail', detailSlotId: 8 }, 7) === 'not_this_detail' &&
+      fate({ mediaId: 4, role: 'detail' }, 7) === 'not_this_detail',
+    'T74 · a detail run takes only the references tied to its slot',
+  );
+  ck(
+    fate({ mediaId: 9, role: 'detail', detailSlotId: 7 }, 7) === 'mood' &&
+      fate({ mediaId: 5, role: '' }, 7) === 'roleless',
+    'T74 · mood and roleless stay out on either target',
+  );
 }
 
 console.log('\n82 · target ▾ (flatTargets)');

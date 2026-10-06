@@ -28,6 +28,31 @@ export function targetSlotId(target: FlatTarget): number {
   return Number.isInteger(id) && id > 0 ? id : 0;
 }
 
+/**
+ * WHERE ONE REFERENCE GOES ON A FLAT RUN — the client half of the server's two filters, so «what the
+ * model gets ▸» lists exactly what is sent:
+ *   · `designFlatOnlyRoledPhotos` — a mood picture, a `mood` role and a roleless picture never travel;
+ *   · `designFlatDetailOnlyItsRefs` (T74, owner 06.10 «если генерим деталь — только картинки этой
+ *     детали»): on a detail target only a `detail` reference tied to THAT slot travels; the
+ *     accepted FRONT/BACK flats go with it as bench plates, not as references.
+ * `detailSlotId` 0 = the views run.
+ */
+export type FlatRefFate = 'sent' | 'mood' | 'roleless' | 'not_this_detail';
+
+export function flatRefFate(
+  ref: { mediaId?: number; role?: string; detailSlotId?: number },
+  moodIds: Set<number>,
+  detailSlotId: number,
+): FlatRefFate {
+  const role = (ref.role ?? '').trim();
+  if ((ref.mediaId != null && moodIds.has(ref.mediaId)) || role === 'mood') return 'mood';
+  if (!role) return 'roleless';
+  if (detailSlotId > 0 && (role !== 'detail' || (ref.detailSlotId ?? 0) !== detailSlotId)) {
+    return 'not_this_detail';
+  }
+  return 'sent';
+}
+
 export type TargetItem = {
   value: FlatTarget;
   label: string;

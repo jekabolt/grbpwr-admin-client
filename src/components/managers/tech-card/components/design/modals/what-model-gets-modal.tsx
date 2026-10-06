@@ -19,6 +19,7 @@ import { openDoor } from '../doors';
 import type { BoardItem } from '../mood-board';
 import { FlatJoins } from '../flat-joins';
 import { moodPictureIds } from '../flat-mode';
+import { flatRefFate } from '../flat-route';
 import { FIT_WHERE, calloutWords, type CalloutLike } from '../render/what-model-gets';
 import { viewLabel } from '../views';
 import { useShownWords } from '../words-seed';
@@ -84,6 +85,7 @@ export function WhatModelGetsModal({
   band,
   techCardId = 0,
   readOnly = false,
+  detailSlotId = 0,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -92,6 +94,9 @@ export function WhatModelGetsModal({
   techCardId?: number;
   /** Карточку нельзя писать — предложения WORDS не видно, слова = значение формы (MIN-4 c). */
   readOnly?: boolean;
+  /** The `target ▾` detail slot (`d:<id>`); 0 = the views run. A detail run sends only the
+   * references tied to that detail (T74, `designFlatDetailOnlyItsRefs`). */
+  detailSlotId?: number;
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
@@ -119,15 +124,20 @@ export function WhatModelGetsModal({
      передаём»), whatever role it carries in the references block, and neither does a reference
      without a role — the server drops both (`designFlatOnlyRoledPhotos`). */
   const moodIds = useMemo(() => moodPictureIds(items), [items]);
-  const roleOf = useMemo(() => {
+  const isDetail = detailSlotId > 0;
+  /* T74 (owner 06.10): on a detail target only the references tied to THAT detail travel; every
+     other roled reference is held here and listed under «not sent». */
+  const { roleOf, otherIds } = useMemo(() => {
     const map = new Map<number, string>();
+    const other = new Set<number>();
     for (const r of band.references ?? []) {
       if (r.mediaId == null) continue;
-      if (moodIds.has(r.mediaId) || (r.role ?? '').trim() === 'mood') continue;
-      if ((r.role ?? '').trim()) map.set(r.mediaId, (r.role as string).trim());
+      const fate = flatRefFate(r, moodIds, detailSlotId);
+      if (fate === 'not_this_detail') other.add(r.mediaId);
+      if (fate === 'sent') map.set(r.mediaId, (r.role as string).trim());
     }
-    return map;
-  }, [band.references, moodIds]);
+    return { roleOf: map, otherIds: other };
+  }, [band.references, moodIds, detailSlotId]);
 
   // The reference's note lives on `DesignReference.note`, beside the role, because it is a
   // statement about the INPUT and not about the picture. Reading the board row's `caption` would
@@ -171,6 +181,7 @@ export function WhatModelGetsModal({
     let n = 0;
     const seen = new Set<number>();
     for (const item of items) {
+      if (otherIds.has(item.mediaId)) continue;
       const role = roleOf.get(item.mediaId) ?? '';
       if (item.kind !== REFERENCE_KIND && !role) continue;
       seen.add(item.mediaId);
@@ -196,10 +207,12 @@ export function WhatModelGetsModal({
       });
     }
     return { inPrompt, onCardOnly };
-  }, [items, roleOf, noteOf, calloutsOf]);
+  }, [items, roleOf, otherIds, noteOf, calloutsOf]);
 
-  const moodCount = items.filter((i) => i.kind !== REFERENCE_KIND && !roleOf.has(i.mediaId)).length;
-  const total = lines.inPrompt.length + lines.onCardOnly.length;
+  const moodCount = items.filter(
+    (i) => i.kind !== REFERENCE_KIND && !roleOf.has(i.mediaId) && !otherIds.has(i.mediaId),
+  ).length;
+  const total = lines.inPrompt.length + lines.onCardOnly.length + otherIds.size;
   /** Callouts that travel — the ones drawn on pictures in the prompt. */
   const sentCallouts = lines.inPrompt.reduce((acc, l) => acc + l.callouts.length, 0);
   /** Callouts that stay — drawn on pictures the prompt never sees (mood tiles, roleless pictures). */
@@ -246,6 +259,13 @@ export function WhatModelGetsModal({
           <b>this is what the model is given.</b> Pressing GENERATE sends the pictures listed below
           — each with its role, its note and the callouts drawn on it — and the words under them. A
           picture marked <b>mood</b> does not travel: a flat is drawn from the garment’s own photos.
+          {isDetail && (
+            <>
+              {' '}
+              <b>This is a detail run:</b> only the pictures marked as this detail travel, with the
+              accepted FRONT and BACK flats beside them for the silhouette.
+            </>
+          )}{' '}
           Nothing absent from this list travels. The same inventory is what a studio outside would
           need to be handed.
         </>
@@ -260,7 +280,11 @@ export function WhatModelGetsModal({
         note='a callout travels with its picture, in words, as part of that picture’s caption'
       >
         {lines.inPrompt.length === 0 ? (
-          <Empty>no picture on this card carries a role, so none of them would be shown.</Empty>
+          <Empty>
+            {isDetail
+              ? 'no picture is marked as this detail — the run goes with the accepted FRONT and BACK flats only.'
+              : 'no picture on this card carries a role, so none of them would be shown.'}
+          </Empty>
         ) : (
           lines.inPrompt.map((line) => (
             <ReferenceLine key={line.mediaId} line={line} media={mediaById.get(line.mediaId)} />
@@ -312,6 +336,15 @@ export function WhatModelGetsModal({
 
       <NotSent
         items={[
+          ...(otherIds.size > 0
+            ? [
+                {
+                  label: `other references · ${otherIds.size}`,
+                  reason:
+                    'a detail run sends only the pictures marked as this detail — side photos and other details stay out',
+                },
+              ]
+            : []),
           {
             label: `moodboard · ${moodCount}`,
             reason: 'board pictures that are not references stay on the board',
