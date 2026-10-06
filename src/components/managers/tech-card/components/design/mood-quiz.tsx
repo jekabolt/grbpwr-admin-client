@@ -1,4 +1,4 @@
-import type { DesignQuizAnswer, DesignQuizQuestion, DesignQuizSpot } from 'api/proto-http/admin';
+import type { DesignQuizAnswer, DesignQuizQuestion } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
@@ -31,11 +31,8 @@ import {
   isRoleQuestion,
   MOOD_ROLES,
   ROLE_HINT,
-  readSpotsHidden,
   roleQuestion,
   spotsOf,
-  spotWords,
-  writeSpotsHidden,
   type QuizAnchor,
   type QuizPicture,
 } from './quiz-anchor';
@@ -53,6 +50,7 @@ import {
   readQuizSession,
   remainingOf,
   staleChangesOf,
+  toggleMulti,
   writeQuizSession,
   type QuizSession,
 } from './quiz-model';
@@ -127,8 +125,6 @@ export function MoodQuiz({
   conceptMax,
   pictureOf,
   onFocusPicture,
-  hotSpot = null,
-  onHotSpot,
   unmarked = [],
   onSetRole,
 }: {
@@ -145,9 +141,6 @@ export function MoodQuiz({
   pictureOf?: (mediaId: number) => QuizPicture | null;
   /** Вопрос на экране (или строка списка под курсором) — про эту картинку; `null` — ни про какую. */
   onFocusPicture?: (anchor: QuizAnchor | null) => void;
-  /** 99-SPOTS: номер места под курсором — общий с кольцами на доске. */
-  hotSpot?: number | null;
-  onHotSpot?: (n: number | null) => void;
   /** 97-ROLE-FIRST: картинки доски без роли, в порядке доски — о них квиз спрашивает первым. */
   unmarked?: number[];
   /** Роль картинке — та же запись, что у угол-меню плитки (`setBoardRole`). */
@@ -179,28 +172,16 @@ export function MoodQuiz({
   const [applying, setApplying] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [session, setSession] = useState<QuizSession | null>(() => readQuizSession(card));
-  const [hoverPic, setHoverPic] = useState<QuizAnchor | null>(null);
-  // 99 §1.5: «hide spots» — помнится в браузере; скрытые места не идут ни на доску, ни в вопрос.
-  const [spotsHidden, setSpotsHidden] = useState(readSpotsHidden);
-  const toggleSpots = () => {
-    writeSpotsHidden(!spotsHidden);
-    setSpotsHidden(!spotsHidden);
-  };
-  const shownSpots = (question: DesignQuizQuestion | undefined) =>
-    spotsHidden ? [] : spotsOf(question);
   const shownCard = useRef(card);
   shownCard.current = card;
 
   // 96: якорь доски — вопрос на экране про картинку, иначе строка открытого списка под курсором.
   // 99: вместе с id — места вопроса. Объект новый на каждый рендер, поэтому эффект ведёт ключ.
   const q = live ? live.queue[live.at] : undefined;
-  const anchor: QuizAnchor | null = live
-    ? q?.mediaId
-      ? { mediaId: q.mediaId, spots: shownSpots(q) }
-      : null
-    : listOpen
-      ? hoverPic
-      : null;
+  // T71 (06.10): «когда ховеришь на ответы с картинкой не нужно анкорить только на клик» — строка
+  // списка доску больше не двигает; щелчок открывает вопрос, и якорь ставит уже он.
+  const anchor: QuizAnchor | null =
+    live && q?.mediaId ? { mediaId: q.mediaId, spots: spotsOf(q) } : null;
   const anchorKey = JSON.stringify(anchor);
   const anchorRef = useRef(anchor);
   anchorRef.current = anchor;
@@ -570,13 +551,6 @@ export function MoodQuiz({
         question={q}
         picture={q.mediaId ? pictureOf?.(q.mediaId) ?? null : undefined}
         family={q.family || family}
-        spots={{
-          shown: shownSpots(q),
-          has: spotsOf(q).length > 0,
-          hot: hotSpot,
-          onHot: onHotSpot,
-          onToggle: toggleSpots,
-        }}
         position={live.mode === 'edit' ? null : { n: live.at + 1, of: live.queue.length }}
         prior={prior}
         busy={save.isPending || !ready}
@@ -715,13 +689,6 @@ export function MoodQuiz({
                   }
                   readOnly={readOnly}
                   onOpen={() => reopen(a)}
-                  onHover={(on) =>
-                    setHoverPic(
-                      on && a.question?.mediaId
-                        ? { mediaId: a.question.mediaId, spots: shownSpots(a.question) }
-                        : null,
-                    )
-                  }
                 />
                 <span className='flex items-baseline justify-end gap-3'>
                   {a.stale && !a.skipped && (
@@ -782,6 +749,9 @@ const pictureWords = (p: QuizPicture | null) =>
   p ? `${p.role || 'picture'} · picture ${p.n}` : 'picture · off the board';
 /** 97: над вопросом роли — `role · picture N`, а не нынешняя роль (её и спрашивают). */
 const roleWords = (p: QuizPicture | null) => (p ? `role · picture ${p.n}` : 'role');
+/** C3: двери строки заголовка (`‹`, `later`) — слово цвета подписи, без подчёркивания. */
+const headDoor =
+  'inline-flex cursor-pointer items-center justify-center text-labelColor hover:text-textColor disabled:cursor-not-allowed disabled:text-textInactiveColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor';
 
 /**
  * 96: вопрос про картинку доски несёт саму картинку на месте пиктограммы — тот же слот, кадр
@@ -841,14 +811,12 @@ function AnswerLine({
   picture,
   readOnly,
   onOpen,
-  onHover,
 }: {
   answer: DesignQuizAnswer;
   /** `undefined` — не вопрос про картинку; `null` — картинки на доске уже нет. */
   picture?: QuizPicture | null;
   readOnly: boolean;
   onOpen: () => void;
-  onHover: (on: boolean) => void;
 }): JSX.Element {
   const q = answer.question;
   const text = answerText(answer);
@@ -858,10 +826,6 @@ function AnswerLine({
       type='button'
       disabled={readOnly}
       onClick={onOpen}
-      onPointerEnter={() => onHover(true)}
-      onPointerLeave={() => onHover(false)}
-      onFocus={() => onHover(true)}
-      onBlur={() => onHover(false)}
       className='grid w-full grid-cols-[76px_minmax(0,1fr)_minmax(0,1fr)] items-baseline gap-3 py-1 text-left enabled:cursor-pointer enabled:hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-textColor'
     >
       {mediaId > 0 ? (
@@ -899,7 +863,6 @@ function QuestionView({
   question,
   picture,
   family,
-  spots,
   position,
   prior,
   busy,
@@ -913,17 +876,6 @@ function QuestionView({
   /** 96: `undefined` — обычный вопрос (пиктограмма); иначе картинка доски (`null` — её сняли). */
   picture?: QuizPicture | null;
   family: string;
-  /**
-   * 99-SPOTS: места вопроса на картинке — `shown` (пусто, когда скрыты), `has` — есть ли они вообще
-   * (тогда в ряду действий `hide spots` / `show spots`), `hot` — номер под курсором.
-   */
-  spots?: {
-    shown: DesignQuizSpot[];
-    has: boolean;
-    hot: number | null;
-    onHot?: (n: number | null) => void;
-    onToggle: () => void;
-  };
   /** Номер в прогоне; `null` — вопрос открыт из списка ответов. */
   position: { n: number; of: number } | null;
   prior?: DesignQuizAnswer;
@@ -993,7 +945,8 @@ function QuestionView({
     (option: string) => {
       if (busy) return;
       if (multi) {
-        setSelected((s) => (s.includes(option) ? s.filter((x) => x !== option) : [...s, option]));
+        // C2: «match as shown — no changes» исключает остальные варианты, и наоборот.
+        setSelected((s) => toggleMulti(s, option));
         return;
       }
       setSelected([option]);
@@ -1015,6 +968,10 @@ function QuestionView({
     if (busy || !canSend) return;
     confirmAs(selected, text);
   };
+  // C3: multi — кнопка стоит всегда (выключена, пока нечего подтвердить); single — только когда
+  // выбор удержан своим словом. Проход `N stale`: не тронуто — `keep`, тронуто — `confirm`.
+  const keepLabel = !!stale && unchanged(selected, text);
+  const showConfirm = !!stale || multi || held || text.trim() !== '';
   const sendRef = useRef(send);
   sendRef.current = send;
 
@@ -1063,18 +1020,51 @@ function QuestionView({
         </div>
       )}
       <div className='min-w-0 space-y-2'>
-        <Text size='micro' variant='label' tracking='label' component='p' className='uppercase'>
-          {roleStep
-            ? roleWords(picture ?? null)
-            : question.mediaId
-              ? pictureWords(picture ?? null)
-              : question.category || 'design'}
-          {position ? ` · ${position.n} / ${position.of}` : ''}
-        </Text>
+        {/* C3: `‹` (назад) висит в зазоре слева от колонки — подпись не прыгает между первым и
+            вторым вопросом; `later` — последним словом той же строки. Не подчёркнуты: подчёркнут
+            только `skip`. */}
+        <div className='relative flex items-baseline' data-quiz-head=''>
+          {onBack && (
+            <button
+              type='button'
+              aria-label='back'
+              title='back'
+              data-quiz-back=''
+              disabled={busy}
+              onClick={onBack}
+              className={cn(
+                headDoor,
+                'absolute top-1/2 -left-5 size-6 -translate-y-1/2 text-textBaseSize leading-none',
+              )}
+            >
+              ‹
+            </button>
+          )}
+          <Text size='micro' variant='label' tracking='label' component='p' className='uppercase'>
+            {roleStep
+              ? roleWords(picture ?? null)
+              : question.mediaId
+                ? pictureWords(picture ?? null)
+                : question.category || 'design'}
+            {position ? ` · ${position.n} / ${position.of}` : ''}
+            {onLater && (
+              <>
+                {' · '}
+                <button
+                  type='button'
+                  data-quiz-later=''
+                  onClick={onLater}
+                  className={cn(headDoor, 'uppercase')}
+                >
+                  later
+                </button>
+              </>
+            )}
+          </Text>
+        </div>
         <Text component='p' className='text-pretty' data-quiz-question=''>
-          <SpotText text={question.question ?? ''} spots={spots} />
+          {question.question}
         </Text>
-        {spots?.has && <SpotLegend spots={spots} text={question.question ?? ''} />}
         {stale && stale.changes.length > 0 && <StaleChanges changes={stale.changes} />}
         <div
           onPointerDownCapture={() => {
@@ -1118,7 +1108,9 @@ function QuestionView({
             })}
           </ChipRow>
         </div>
-        <div className='flex items-start gap-2'>
+        {/* C3: ОДНА обведённая кнопка в ряду своего слова, той же высоты, что поле (ряд тянет
+            их вровень); `skip` — единственное подчёркнутое слово. */}
+        <div className='flex items-stretch gap-2'>
           {!roleStep && (
             <Textarea
               name={ownName}
@@ -1138,151 +1130,32 @@ function QuestionView({
               className='max-h-40 min-h-0 flex-1 resize-none [field-sizing:content]'
             />
           )}
-          {stale ? (
-            <>
-              {canSend && !unchanged(selected, text) && (
-                <Button
-                  variant='underline'
-                  size='xs'
-                  className='mt-1'
-                  data-quiz-change=''
-                  disabled={busy}
-                  onClick={send}
-                >
-                  change ›
-                </Button>
-              )}
-              <Button
-                variant='underline'
-                size='xs'
-                className='mt-1'
-                data-quiz-keep=''
-                disabled={busy}
-                onClick={stale.onKeep}
-              >
-                keep
-              </Button>
-            </>
-          ) : (
-            (multi || held || text.trim() !== '') &&
-            canSend && (
-              <Button variant='underline' size='xs' className='mt-1' disabled={busy} onClick={send}>
-                next ›
-              </Button>
-            )
-          )}
-          {onBack && (
+          {showConfirm && (
             <Button
-              variant='underline'
-              size='xs'
-              className='mt-1 text-labelColor hover:text-textColor'
-              disabled={busy}
-              onClick={onBack}
+              variant='secondary'
+              size='sm'
+              className='shrink-0'
+              data-quiz-send=''
+              data-quiz-keep={keepLabel ? '' : undefined}
+              data-quiz-change={stale && !keepLabel ? '' : undefined}
+              disabled={busy || (!keepLabel && !canSend)}
+              onClick={keepLabel ? stale?.onKeep : send}
             >
-              back
+              {keepLabel ? 'keep' : 'confirm'}
             </Button>
           )}
           <Button
             variant='underline'
             size='xs'
-            className='mt-1 text-labelColor hover:text-textColor'
+            className='self-center text-labelColor hover:text-textColor'
             data-quiz-forget={stale ? '' : undefined}
             disabled={busy}
             onClick={stale ? stale.onForget : onSkip}
           >
             {stale ? 'forget' : 'skip'}
           </Button>
-          {onLater && (
-            <Button
-              variant='underline'
-              size='xs'
-              className='mt-1 text-labelColor hover:text-textColor'
-              onClick={onLater}
-            >
-              later
-            </Button>
-          )}
         </div>
       </div>
     </div>
-  );
-}
-
-type SpotsProp = NonNullable<Parameters<typeof QuestionView>[0]['spots']>;
-
-/** Номер места верхним индексом — те же цифры, что в коробке у кольца на доске. */
-function SpotSup({ n }: { n: number }): JSX.Element {
-  return (
-    <sup className='ml-px align-super text-nano leading-none tabular-nums' data-spot-sup={n}>
-      {n}
-    </sup>
-  );
-}
-
-/**
- * 99 §2: вопрос с номерами мест на словах — «inner strap¹». Наведение на слово зажигает кольцо на
- * доске, наведение на кольцо подчёркивает слово.
- */
-function SpotText({ text, spots }: { text: string; spots?: SpotsProp }): JSX.Element {
-  if (!spots?.shown.length) return <>{text}</>;
-  const { pieces } = spotWords(text, spots.shown);
-  return (
-    <>
-      {pieces.map((p, i) =>
-        p.n == null ? (
-          <span key={i}>{p.text}</span>
-        ) : (
-          <span
-            key={i}
-            data-spot-word={p.n}
-            onPointerEnter={() => spots.onHot?.(p.n ?? null)}
-            onPointerLeave={() => spots.onHot?.(null)}
-            className={cn('decoration-1 underline-offset-2', spots.hot === p.n && 'underline')}
-          >
-            {p.text}
-            <SpotSup n={p.n} />
-          </span>
-        ),
-      )}
-    </>
-  );
-}
-
-/**
- * Строка мест под вопросом: места, чьих слов в вопросе нет («³ hem tape»), и `hide spots` /
- * `show spots` (99 §1.5). В ряду ответа переключатель не живёт: на 390 он сжимал поле своего слова.
- */
-function SpotLegend({ text, spots }: { text: string; spots: SpotsProp }): JSX.Element {
-  const { unmatched } = spots.shown.length ? spotWords(text, spots.shown) : { unmatched: [] };
-  return (
-    <p className='flex flex-wrap items-baseline gap-x-3 gap-y-1' data-spot-legend=''>
-      {unmatched.map((u) => (
-        <Text
-          key={u.n}
-          size='micro'
-          variant='label'
-          component='span'
-          data-spot-chip={u.n}
-          onPointerEnter={() => spots.onHot?.(u.n)}
-          onPointerLeave={() => spots.onHot?.(null)}
-          className={cn(
-            'decoration-1 underline-offset-2',
-            spots.hot === u.n && 'underline text-textColor',
-          )}
-        >
-          <SpotSup n={u.n} /> {u.label}
-        </Text>
-      ))}
-      <Button
-        variant='underline'
-        size='xs'
-        className='text-labelColor hover:text-textColor'
-        data-quiz-spots-toggle=''
-        aria-pressed={spots.shown.length === 0}
-        onClick={spots.onToggle}
-      >
-        {spots.shown.length ? 'hide spots' : 'show spots'}
-      </Button>
-    </p>
   );
 }

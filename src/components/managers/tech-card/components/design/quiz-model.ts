@@ -9,10 +9,11 @@ import { isEdgeKind, isPaletteKey, isSeamKind, SEAM_LABEL } from './seam-icons';
  */
 
 /**
- * Страховочный потолок одного прогона, вместе с уточняющими — не цель (владелец 05.10: «можно не
- * ограничиваться 15 вопросами»; сервер режет на том же 30).
+ * Потолок одного прогона ВМЕСТЕ с уточняющими. T72 (владелец 06.10: «только то, что реально важно»):
+ * сервер отдаёт не больше 8 базовых вопросов (designQuizMaxQuestions, лучшие по ярусу); здесь 12 —
+ * запас на вставные уточнения и исключения краёв, чтобы уточнение не вытесняло базовый вопрос.
  */
-export const QUIZ_MAX = 30;
+export const QUIZ_MAX = 12;
 
 const clean = (s?: string | null) => (s ?? '').replace(/\s+/g, ' ').trim();
 
@@ -76,6 +77,22 @@ export const STALE_DECISIONS_HEADING =
 export const EDGE_MAIN_KEY = 'edge_finish_main';
 export const EDGE_EXCEPTIONS_KEY = 'edge_exceptions';
 export const EDGE_NONE = 'none — all the same';
+
+/**
+ * 102-QUICKWIN B2/C2: у вопроса «что меняем с картинки N» (target, multi) сервер первым ставит этот
+ * вариант — слово в слово. В multi он ИСКЛЮЧАЮЩИЙ: выбрать его — снять остальные, выбрать другой —
+ * снять его. Сравнение без регистра и по краям без пробелов.
+ */
+export const MATCH_AS_SHOWN = 'match as shown — no changes';
+export const isMatchAsShown = (option?: string | null) =>
+  clean(option).toLowerCase() === MATCH_AS_SHOWN;
+
+/** Щелчок по чипу multi: переключить вариант, «match as shown» исключает остальные (C2). */
+export function toggleMulti(selected: readonly string[], option: string): string[] {
+  if (selected.includes(option)) return selected.filter((x) => x !== option);
+  if (isMatchAsShown(option)) return [option];
+  return [...selected.filter((x) => !isMatchAsShown(x)), option];
+}
 
 /** Вставной вопрос-продолжение (уточнение O2 или исключения краёв): не базовый, сервер его не знает. */
 export const isFollowUpId = (id?: string | null) =>
