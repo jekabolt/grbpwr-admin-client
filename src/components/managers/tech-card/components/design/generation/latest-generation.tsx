@@ -553,6 +553,11 @@ export function LatestGeneration({
   const benchDrawn = drawnPlan;
   /** The run carries one garment sheet: only then does the bench cut and apply without a press. */
   const oneSheet = (run?.requestedOutputs ?? 1) <= 1;
+  /** FLAT cuts and applies by itself only the HIGHEST flat run — failed or empty newer runs included
+   *  (`newestFlatId`), so an older sheet never overwrites the slots after a newer press (Codex, wave
+   *  10). FABRIC RENDER keeps its auto-cut as before. */
+  const autoFlat = kind === 'flat' && oneSheet && runId > 0 && runId === newestFlatId;
+  const autoCut = kind === 'render' || autoFlat;
   const plan = useMemo(() => (benchDrawn ? piecesInPlace(benchDrawn) : null), [benchDrawn]);
   /**
    * THE UNCUT SHEETS, CUT HERE INLINE (owner item 19, T20). Every card the tile gate would give a
@@ -852,7 +857,7 @@ export function LatestGeneration({
       picture={picture}
       views={views}
       runId={runId}
-      auto={oneSheet}
+      auto={autoCut}
     />
   ));
 
@@ -899,7 +904,7 @@ export function LatestGeneration({
                     runId === newestId &&
                     !bare &&
                     !writesOff &&
-                    oneSheet &&
+                    autoFlat &&
                     (run.params?.views ?? []).length >= 4
                       ? run
                       : null

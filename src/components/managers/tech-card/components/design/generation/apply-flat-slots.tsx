@@ -161,9 +161,11 @@ export function ApplyFlatSlots({
   const approve = () => new Map(steps.map((s) => [s.view, s.displaces?.id ?? 0] as const));
 
   const autoId = autoRun?.id ?? 0;
-  const autoNow = !disabled && !busy && steps.length > 0 && autoApplies(autoRun, usable);
+  /* The claim is spent even when nothing is left to write (another operator already applied the
+     cut): a later manual change of a slot must never re-arm the automatic apply (Codex, wave 10). */
+  const autoNow = !disabled && !busy && autoApplies(autoRun, usable);
   useEffect(() => {
-    if (!autoNow || !claimAutoApply(autoId)) return;
+    if (!autoNow || !claimAutoApply(autoId) || steps.length === 0) return;
     void run(approve());
     // `run` and `approve` read this render's steps; the claim makes it once per run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
