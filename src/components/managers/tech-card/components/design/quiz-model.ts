@@ -48,9 +48,24 @@ export function partLabel(part?: string | null): string {
 
 /**
  * D1 (62-DEEP-FIXES): карточка изменилась после ответа — сервер помечает строку `stale`. Такие ответы
- * идут ПОСЛЕ свежих, под этим заголовком (слово в слово как у сервера); `confirm` в списке ответов
- * пересохраняет тот же ответ — он снова свежий.
+ * идут ПОСЛЕ свежих, под этим заголовком (слово в слово как у сервера); `keep` (в списке ответов и в
+ * проходе `N stale`) пересохраняет тот же ответ — он снова свежий.
  */
+/**
+ * 98-STALE: что изменилось в теме ответа (`stale_changes`, только у устаревшего); пусто — сервер ещё
+ * не знает тем, тогда строка говорит голым `stale`.
+ */
+export const staleChangesOf = (a?: DesignQuizAnswer | null): string[] =>
+  a?.stale ? (a.staleChanges ?? []).map(clean).filter(Boolean) : [];
+
+/** KEEP: тот же ответ уходит заново — сервер снимает с него отпечаток темы, строка свежая. */
+export const keepRow = (a: DesignQuizAnswer): DesignQuizAnswer => ({
+  ...a,
+  answeredAt: undefined,
+  stale: undefined,
+  staleChanges: undefined,
+});
+
 export const STALE_DECISIONS_HEADING =
   'earlier quiz answers — the card changed since; unconfirmed, current card facts win';
 

@@ -17906,6 +17906,10 @@ export type DesignQuizAnswer = {
   // fit, gender, details, BOM names/compositions, base-size measurements) changed since this answer
   // was saved. Downstream prompts treat it as unconfirmed; re-saving the same answer makes it fresh.
   stale: boolean | undefined;
+  // stale_changes — OUTPUT ONLY, ignored on save (98-STALE): what changed in the answer's topic since it
+  // was saved, one human line per fact ("main fabric: cotton twill → wool flannel"), max 4 then
+  // "+N more". Empty when not stale.
+  staleChanges?: string[] | undefined;
 };
 
 export type GetDesignQuizAnswersRequest = {

@@ -42,10 +42,12 @@ import {
   followUpIds,
   forgetRow,
   insertClarify,
+  keepRow,
   partWords,
   QUIZ_MAX,
   readQuizSession,
   remainingOf,
+  staleChangesOf,
   writeQuizSession,
   type QuizSession,
 } from './quiz-model';
@@ -79,8 +81,10 @@ type Live = {
   /**
    * `edit` — один вопрос, открытый из списка ответов; после ответа экран возвращается к списку.
    * `role` — 97-ROLE-FIRST: шаг ролей неразмеченных картинок, локальный; за ним `then`.
+   * `review` — 98-STALE: проход по устаревшим ответам (`N stale`), у каждого прежний ответ выбран,
+   * что изменилось — над вариантами; keep / change / forget. Сессии на сервере нет.
    */
-  mode: 'run' | 'edit' | 'role';
+  mode: 'run' | 'edit' | 'role' | 'review';
   /** Только у `role`: что идёт после шага — платный прогон или продолжение прежней очереди. */
   then?: 'generate' | 'resume';
 };
@@ -379,12 +383,12 @@ export function MoodQuiz({
     }
     if (next >= queue.length) {
       setLive(null);
-      dropSession();
+      if (live.mode === 'run') dropSession();
       setListOpen(true);
       return;
     }
-    setLive({ queue, at: next, mode: 'run' });
-    persist(queue, next, family);
+    setLive({ queue, at: next, mode: live.mode });
+    if (live.mode === 'run') persist(queue, next, family);
   };
 
   const reopen = (a: DesignQuizAnswer) => {
@@ -419,9 +423,9 @@ export function MoodQuiz({
     persist(remaining, 0, fam);
   };
 
-  /** W-C7: забыть ответ (и его уточнение) — пустая строка id, сервер удаляет. */
+  /** W-C7: забыть ответ (и его уточнение) — пустая строка id, сервер удаляет. `true` — легло. */
   const forget = async (a: DesignQuizAnswer) => {
-    if (readOnly || !ready || !a.question) return;
+    if (readOnly || !ready || !a.question) return false;
     const rows = [forgetRow(a.question)];
     for (const id of followUpIds(a.question)) {
       const child = answers.find((x) => x.question?.id === id);
@@ -429,19 +433,50 @@ export function MoodQuiz({
     }
     try {
       await save.mutateAsync({ rows });
+      return true;
     } catch {
       /* отказ сказан снэкбаром, строка вернулась */
+      return false;
     }
   };
 
-  /** D1: карточка изменилась после ответа — `confirm` пересохраняет тот же ответ, он снова свежий. */
-  const confirm = async (a: DesignQuizAnswer) => {
-    if (readOnly || !ready || !a.question) return;
+  /** D1: карточка изменилась после ответа — `keep` пересохраняет тот же ответ, он снова свежий. */
+  const keep = async (a: DesignQuizAnswer) => {
+    if (readOnly || !ready || !a.question) return false;
     try {
-      await save.mutateAsync({ rows: [{ ...a, answeredAt: undefined, stale: undefined }] });
+      await save.mutateAsync({ rows: [keepRow(a)] });
+      return true;
     } catch {
       /* отказ сказан снэкбаром */
+      return false;
     }
+  };
+
+  /**
+   * 98-STALE: `N stale` — проход только по устаревшим ответам, в порядке списка, обычной карточкой
+   * вопроса (пиктограмма или картинка доски, как всегда). Прогона на сервере он не открывает.
+   */
+  const review = () => {
+    if (readOnly || !ready) return;
+    const queue = answers
+      .filter((a) => a.stale && !a.skipped && a.question)
+      .map((a) => a.question as DesignQuizQuestion);
+    if (!queue.length) return;
+    setRefusal(null);
+    setNothingLeft(false);
+    setListOpen(false);
+    setLive({ queue, at: 0, mode: 'review' });
+  };
+  /** Шаг прохода после keep / forget: следующий устаревший, за последним — список ответов. */
+  const reviewStep = (ok: boolean) => {
+    if (!ok || !live || shownCard.current !== card) return;
+    const next = live.at + 1;
+    if (next < live.queue.length) {
+      setLive({ ...live, at: next });
+      return;
+    }
+    setLive(null);
+    setListOpen(true);
   };
 
   /**
@@ -497,6 +532,9 @@ export function MoodQuiz({
 
   if (live && q) {
     const prior = answers.find((a) => a.question?.id === q.id);
+    // 98: в проходе `N stale` устаревший ответ встаёт с keep / forget вместо skip / back; вставленное
+    // уточнение (свежий вопрос без ответа) — обычной карточкой.
+    const stale = live.mode === 'review' && prior?.stale && !prior.skipped ? prior : null;
     return (
       <QuestionView
         key={`${live.mode}:${q.id}`}
@@ -508,8 +546,17 @@ export function MoodQuiz({
         busy={save.isPending || !ready}
         onCommit={(selected, text) => commit(q, selected, text, false)}
         onSkip={() => commit(q, [], '', true)}
-        onBack={live.mode !== 'edit' && live.at > 0 ? back : null}
+        onBack={live.mode === 'run' || live.mode === 'role' ? (live.at > 0 ? back : null) : null}
         onLater={live.mode !== 'edit' ? later : null}
+        stale={
+          stale
+            ? {
+                changes: staleChangesOf(stale),
+                onKeep: () => void keep(stale).then(reviewStep),
+                onForget: () => void forget(stale).then(reviewStep),
+              }
+            : null
+        }
       />
     );
   }
@@ -580,14 +627,16 @@ export function MoodQuiz({
               <>
                 <Counter n={answered} noun='answer' />
                 {staleCount > 0 && (
-                  <Text
-                    size='micro'
-                    component='span'
+                  <Button
+                    variant='underline'
+                    size='xs'
                     className='text-warning'
                     data-quiz-stale-count={staleCount}
+                    disabled={readOnly}
+                    onClick={review}
                   >
                     {staleCount} stale
-                  </Text>
+                  </Button>
                 )}
                 <Button
                   variant='underline'
@@ -616,51 +665,72 @@ export function MoodQuiz({
       />
       {listOpen && answers.length > 0 && (
         <ul className='mt-1 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 border-t border-hairline'>
-          {answers.map((a) => (
-            <li
-              key={a.question?.id}
-              className='group col-span-2 grid grid-cols-subgrid items-baseline border-b border-hairline'
-            >
-              <AnswerLine
-                answer={a}
-                picture={a.question?.mediaId ? pictureOf?.(a.question.mediaId) ?? null : undefined}
-                readOnly={readOnly}
-                onOpen={() => reopen(a)}
-                onHover={(on) => setHoverPic(on && a.question?.mediaId ? a.question.mediaId : null)}
-              />
-              <span className='flex items-baseline justify-end gap-3'>
-                {a.stale && !a.skipped && (
-                  <>
-                    <Text size='micro' component='span' className='text-warning' data-quiz-stale=''>
-                      stale
-                    </Text>
-                    {!readOnly && (
-                      <Button
-                        variant='underline'
-                        size='xs'
-                        data-quiz-confirm=''
-                        disabled={save.isPending || !ready}
-                        onClick={() => void confirm(a)}
-                      >
-                        confirm
-                      </Button>
-                    )}
-                  </>
+          {answers.map((a) => {
+            const changes = a.skipped ? [] : staleChangesOf(a);
+            return (
+              <li
+                key={a.question?.id}
+                className='group col-span-2 grid grid-cols-subgrid items-baseline border-b border-hairline'
+              >
+                <AnswerLine
+                  answer={a}
+                  picture={
+                    a.question?.mediaId ? pictureOf?.(a.question.mediaId) ?? null : undefined
+                  }
+                  readOnly={readOnly}
+                  onOpen={() => reopen(a)}
+                  onHover={(on) =>
+                    setHoverPic(on && a.question?.mediaId ? a.question.mediaId : null)
+                  }
+                />
+                <span className='flex items-baseline justify-end gap-3'>
+                  {a.stale && !a.skipped && (
+                    <>
+                      {!changes.length && (
+                        <Text
+                          size='micro'
+                          component='span'
+                          className='text-warning'
+                          data-quiz-stale=''
+                        >
+                          stale
+                        </Text>
+                      )}
+                      {!readOnly && (
+                        <Button
+                          variant='underline'
+                          size='xs'
+                          data-quiz-confirm=''
+                          disabled={save.isPending || !ready}
+                          onClick={() => void keep(a)}
+                        >
+                          keep
+                        </Button>
+                      )}
+                    </>
+                  )}
+                  {!readOnly && (
+                    <Button
+                      variant='underline'
+                      size='xs'
+                      className='text-labelColor opacity-0 hover:text-textColor focus-visible:opacity-100 group-hover:opacity-100'
+                      disabled={save.isPending || !ready}
+                      onClick={() => void forget(a)}
+                    >
+                      forget
+                    </Button>
+                  )}
+                </span>
+                {changes.length > 0 && (
+                  <StaleChanges
+                    changes={changes}
+                    data-quiz-stale=''
+                    className='col-start-1 pb-1 pl-[88px]'
+                  />
                 )}
-                {!readOnly && (
-                  <Button
-                    variant='underline'
-                    size='xs'
-                    className='text-labelColor opacity-0 hover:text-textColor focus-visible:opacity-100 group-hover:opacity-100'
-                    disabled={save.isPending || !ready}
-                    onClick={() => void forget(a)}
-                  >
-                    forget
-                  </Button>
-                )}
-              </span>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -700,6 +770,29 @@ function PictureThumb({
         />
       ) : null}
     </span>
+  );
+}
+
+/** 98-STALE: что изменилось с ответа — строка на факт, мелко, цветом пометки `stale`. */
+function StaleChanges({
+  changes,
+  className,
+  ...rest
+}: {
+  changes: string[];
+  className?: string;
+  'data-quiz-stale'?: string;
+}): JSX.Element {
+  return (
+    <ul className={cn('text-warning', className)} data-quiz-changes='' {...rest}>
+      {changes.map((line) => (
+        <li key={line}>
+          <Text size='micro' component='span' className='text-warning'>
+            {line}
+          </Text>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -773,6 +866,7 @@ function QuestionView({
   onSkip,
   onBack,
   onLater,
+  stale,
 }: {
   question: DesignQuizQuestion;
   /** 96: `undefined` — обычный вопрос (пиктограмма); иначе картинка доски (`null` — её сняли). */
@@ -788,6 +882,11 @@ function QuestionView({
   onBack: (() => void) | null;
   /** W-C3: закрыть вопрос, очередь остаётся; `null` — правка из списка. */
   onLater: (() => void) | null;
+  /**
+   * 98-STALE: вопрос устаревшего ответа в проходе `N stale` — что изменилось (над вариантами),
+   * `keep` (K) пересохраняет прежний ответ, `forget` (F) снимает его; правка + Enter — `change ›`.
+   */
+  stale?: { changes: string[]; onKeep: () => void; onForget: () => void } | null;
 }): JSX.Element {
   const options = question.options ?? [];
   const colourQuestion = isColourQuestion(question);
@@ -809,11 +908,24 @@ function QuestionView({
   const multi = question.kind === 'multi';
   // 97: вопрос роли — выбор из четырёх; своё слово положить некуда (роль живёт на картинке).
   const roleStep = isRoleQuestion(question);
-  const [selected, setSelected] = useState<string[]>(() =>
+  const [initialSelected] = useState<string[]>(() =>
     prior && !prior.skipped ? (prior.selected ?? []).filter((s) => options.includes(s)) : [],
   );
-  const [text, setText] = useState(() => (prior && !prior.skipped ? prior.freeText ?? '' : ''));
+  const initialText = prior && !prior.skipped ? prior.freeText ?? '' : '';
+  const [selected, setSelected] = useState<string[]>(initialSelected);
+  const [text, setText] = useState(initialText);
+  // 98: ответ в проходе не тронут — подтверждение уходит как `keep` (тот же ответ, байт в байт).
+  const unchanged = (sel: readonly string[], txt: string) =>
+    sel.length === initialSelected.length &&
+    sel.every((x) => initialSelected.includes(x)) &&
+    txt.trim() === initialText.trim();
+  const confirmAs = (sel: string[], txt: string) => {
+    if (stale && unchanged(sel, txt)) stale.onKeep();
+    else onCommit(sel, txt);
+  };
   const advance = useRef<number | null>(null);
+  const confirmRef = useRef(confirmAs);
+  confirmRef.current = confirmAs;
   // W-C5: чип нажат, пока своё слово в фокусе (фокус уходит ДО клика — снимается на pointerdown).
   const ownFocused = useRef(false);
   const [held, setHeld] = useState(false);
@@ -841,17 +953,40 @@ function QuestionView({
         return;
       }
       // Одиночный выбор продвигает сам — через 150 мс, чтобы выбор успел стать видимым.
-      advance.current = window.setTimeout(() => onCommit([option], text), 150);
+      advance.current = window.setTimeout(() => confirmRef.current([option], text), 150);
     },
-    [busy, multi, onCommit, text],
+    [busy, multi, text],
   );
 
-  // Цифры 1–6 — варианты (вне поля ввода).
+  const canSend = selected.length > 0 || text.trim() !== '';
+  const send = () => {
+    if (busy || !canSend) return;
+    confirmAs(selected, text);
+  };
+  const sendRef = useRef(send);
+  sendRef.current = send;
+
+  // Цифры 1–6 — варианты (вне поля ввода). 98: в проходе `N stale` ещё K — keep, F — forget,
+  // Enter — подтвердить что выбрано (не тронуто — тот же keep).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
       const t = e.target as HTMLElement | null;
-      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(t.tagName))) {
+        if (!/^(BUTTON|A)$/.test(t.tagName)) return;
+        // На кнопке Enter — её собственный щелчок; буквы и цифры работают и там.
+        if (e.key === 'Enter') return;
+      }
+      if (stale && !busy) {
+        const k = e.key.toLowerCase();
+        if (k === 'k' || k === 'f' || e.key === 'Enter') {
+          e.preventDefault();
+          if (k === 'k') stale.onKeep();
+          else if (k === 'f') stale.onForget();
+          else sendRef.current();
+          return;
+        }
+      }
       const i = Number(e.key) - 1;
       if (!Number.isInteger(i) || i < 0 || i >= options.length) return;
       e.preventDefault();
@@ -859,13 +994,7 @@ function QuestionView({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [options, pick]);
-
-  const canSend = selected.length > 0 || text.trim() !== '';
-  const send = () => {
-    if (busy || !canSend) return;
-    onCommit(selected, text);
-  };
+  }, [options, pick, stale, busy]);
 
   return (
     <div className='grid grid-cols-[64px_minmax(0,1fr)] items-start gap-4 py-1' data-quiz=''>
@@ -893,6 +1022,7 @@ function QuestionView({
         <Text component='p' className='text-pretty'>
           {question.question}
         </Text>
+        {stale && stale.changes.length > 0 && <StaleChanges changes={stale.changes} />}
         <div
           onPointerDownCapture={() => {
             ownFocused.current = document.activeElement?.id === ownName;
@@ -955,10 +1085,38 @@ function QuestionView({
               className='max-h-40 min-h-0 flex-1 resize-none [field-sizing:content]'
             />
           )}
-          {(multi || held || text.trim() !== '') && canSend && (
-            <Button variant='underline' size='xs' className='mt-1' disabled={busy} onClick={send}>
-              next ›
-            </Button>
+          {stale ? (
+            <>
+              {canSend && !unchanged(selected, text) && (
+                <Button
+                  variant='underline'
+                  size='xs'
+                  className='mt-1'
+                  data-quiz-change=''
+                  disabled={busy}
+                  onClick={send}
+                >
+                  change ›
+                </Button>
+              )}
+              <Button
+                variant='underline'
+                size='xs'
+                className='mt-1'
+                data-quiz-keep=''
+                disabled={busy}
+                onClick={stale.onKeep}
+              >
+                keep
+              </Button>
+            </>
+          ) : (
+            (multi || held || text.trim() !== '') &&
+            canSend && (
+              <Button variant='underline' size='xs' className='mt-1' disabled={busy} onClick={send}>
+                next ›
+              </Button>
+            )
           )}
           {onBack && (
             <Button
@@ -975,10 +1133,11 @@ function QuestionView({
             variant='underline'
             size='xs'
             className='mt-1 text-labelColor hover:text-textColor'
+            data-quiz-forget={stale ? '' : undefined}
             disabled={busy}
-            onClick={onSkip}
+            onClick={stale ? stale.onForget : onSkip}
           >
-            skip
+            {stale ? 'forget' : 'skip'}
           </Button>
           {onLater && (
             <Button

@@ -731,7 +731,7 @@ try {
     await btn(page, 'answers ▾').click();
     check((await page.locator(`${quiz} [data-quiz-stale]`).count()) === 1, 'stale row shows stale');
     await shoot(page, 'quiz-1440-stale.png');
-    await btn(page, 'confirm').click();
+    await btn(page, 'keep').click();
     await page.waitForFunction(() => !document.querySelector('[data-quiz-stale]'));
     const sent = (await page.evaluate(() => window.__calls)).filter(
       (c) => c.name === 'SaveDesignQuizAnswers',
@@ -742,13 +742,209 @@ try {
         sent[0].body.answers[0].question.id === 'collar_type' &&
         sent[0].body.answers[0].selected[0] === 'stiff stand, 3 cm' &&
         !sent[0].body.answers[0].stale,
-      'confirm re-saves the same answer without stale',
+      'keep re-saves the same answer without stale',
     );
     check(
       (await page.locator(`${quiz} [data-quiz-stale-count]`).count()) === 0,
-      'confirm clears the stale counter',
+      'keep clears the stale counter',
     );
     await shoot(page, 'quiz-1440-stale-confirmed.png');
+    await ctx.close();
+  }
+  {
+    // 98-STALE §2: `N stale` — проход только по устаревшим, в порядке списка; прежний ответ выбран,
+    // что изменилось — над вариантами; K = keep (тот же ответ), смена чипа = change, F = forget.
+    const row = (id, key, question, options, selected, freeText, staleChanges) => ({
+      question: {
+        id,
+        category: 'details',
+        part: id.split('_')[0],
+        family: 'jacket',
+        kind: 'single',
+        question,
+        options,
+        decisionKey: key,
+      },
+      selected,
+      freeText,
+      skipped: false,
+      stale: staleChanges.length > 0,
+      staleChanges,
+    });
+    const answers = [
+      row(
+        'collar_type',
+        'collar_type',
+        'Which collar does it have?',
+        ['stiff stand, 3 cm', 'soft shirt collar', 'no collar'],
+        ['stiff stand, 3 cm'],
+        'fused',
+        ['detail: collar: stand collar → shirt collar', 'main fabric: cotton twill → wool flannel'],
+      ),
+      row(
+        'hem_length',
+        'hem_length',
+        'Where does the hem sit?',
+        ['mid-thigh', 'hip'],
+        ['mid-thigh'],
+        '',
+        [],
+      ),
+      row(
+        'pocket_style',
+        'pocket_style',
+        'Which hip pockets?',
+        ['patch', 'welt', 'none'],
+        ['patch'],
+        '',
+        ['detail: pockets: patch → —'],
+      ),
+      row(
+        'lining_type',
+        'lining_type',
+        'Is it lined?',
+        ['unlined', 'half lined', 'fully lined'],
+        ['unlined'],
+        '',
+        [
+          'lining: — → viscose twill',
+          'chest (base size M): 54 → 58',
+          'fit: regular → relaxed',
+          'main fabric: cotton twill → wool flannel',
+          '+1 more',
+        ],
+      ),
+    ];
+    const { ctx, page } = await open(1440, 900, { answers, pictures: 0 });
+    const count = page.locator(`${quiz} [data-quiz-stale-count]`);
+    check((await count.textContent()).trim() === '3 stale', 'row shows 3 stale');
+    check((await count.evaluate((el) => el.tagName)) === 'BUTTON', 'the stale counter is a button');
+    await btn(page, 'answers ▾').click();
+    const listLines = await page.locator(`${quiz} [data-quiz-changes] li`).allTextContents();
+    check(
+      listLines.length === 8 &&
+        listLines[0] === 'detail: collar: stand collar → shirt collar' &&
+        listLines.includes('+1 more'),
+      `answers list shows the change lines under stale rows (${listLines.length})`,
+    );
+    await shoot(page, 'quiz-1440-stale-list.png');
+    await btn(page, 'answers ▴').click();
+
+    await count.click();
+    await page.waitForSelector('[data-quiz]');
+    const card = page.locator('[data-quiz]');
+    const head = async () => (await card.textContent()) ?? '';
+    check(
+      (await head()).includes('Which collar does it have?') && (await head()).includes('1 / 3'),
+      'review opens the first stale answer, 1 / 3 (fresh answers skipped)',
+    );
+    check(
+      (await card.locator('[data-quiz-changes] li').allTextContents()).join('|') ===
+        'detail: collar: stand collar → shirt collar|main fabric: cotton twill → wool flannel',
+      'change lines above the options',
+    );
+    const selectedChips = await card
+      .locator('button')
+      .evaluateAll((els) =>
+        els.filter((b) => b.className.includes('bg-textColor')).map((b) => b.textContent.trim()),
+      );
+    check(
+      selectedChips.length === 1 && selectedChips[0] === 'stiff stand, 3 cm',
+      'previous answer pre-selected',
+    );
+    check((await card.locator('textarea').inputValue()) === 'fused', 'previous own words filled');
+    check(
+      (await card.locator('[data-quiz-keep]').count()) === 1 &&
+        (await card.locator('[data-quiz-forget]').count()) === 1 &&
+        (await card.locator('[data-quiz-change]').count()) === 0 &&
+        !(await head()).includes('skip'),
+      'review card: keep + forget, no skip, change hidden until edited',
+    );
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await shoot(page, 'quiz-1440-stale-review.png');
+
+    const saves = async () =>
+      (await page.evaluate(() => window.__calls)).filter((c) => c.name === 'SaveDesignQuizAnswers');
+    await page.locator('body').click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press('k');
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('2 / 3'),
+    );
+    let sent = await saves();
+    const kept = sent[0]?.body.answers ?? [];
+    check(
+      sent.length === 1 &&
+        kept.length === 1 &&
+        kept[0].question.id === 'collar_type' &&
+        kept[0].selected.join() === 'stiff stand, 3 cm' &&
+        kept[0].freeText === 'fused' &&
+        !kept[0].stale &&
+        !kept[0].staleChanges &&
+        !sent[0].body.closeSession,
+      'K keeps: the same answer re-sent, stale/staleChanges stripped, no session close',
+    );
+    check((await head()).includes('Which hip pockets?'), 'review order: pockets second');
+    await card.locator('button', { hasText: 'welt' }).click();
+    await page.waitForFunction(() =>
+      document.querySelector('[data-quiz]')?.textContent?.includes('3 / 3'),
+    );
+    sent = await saves();
+    const changed = sent[1]?.body.answers ?? [];
+    check(
+      changed.length >= 1 &&
+        changed[0].question.id === 'pocket_style' &&
+        changed[0].selected.join() === 'welt' &&
+        !changed[0].staleChanges,
+      'picking another chip saves the change',
+    );
+    check((await head()).includes('Is it lined?'), 'review order: lining third');
+    await page.keyboard.press('f');
+    await page.waitForFunction(() => !document.querySelector('[data-quiz]'));
+    sent = await saves();
+    const forgot = sent[2]?.body.answers ?? [];
+    check(
+      forgot[0]?.question.id === 'lining_type' &&
+        forgot[0].selected.length === 0 &&
+        forgot[0].freeText === '' &&
+        forgot[0].skipped === false,
+      'F forgets: an empty row for the id',
+    );
+    const left = await page.evaluate(() => window.__answers);
+    check(
+      left.length === 3 && left.every((a) => !a.stale),
+      'after the review no stale answers remain',
+    );
+    check(
+      (await page.locator(`${quiz} [data-quiz-stale-count]`).count()) === 0,
+      'stale counter gone after the review',
+    );
+    // §4: сервер переспрашивает устаревший ответ `clarify_<id>` с тем же decision_key — новый ответ
+    // вытесняет устаревший (E1), как сервер в той же транзакции.
+    const superseded = await page.evaluate(() =>
+      window.__model.applyRows(
+        [
+          {
+            question: { id: 'collar_type', decisionKey: 'collar_type' },
+            selected: ['stiff stand, 3 cm'],
+            freeText: '',
+            skipped: false,
+            stale: true,
+          },
+        ],
+        [
+          {
+            question: { id: 'clarify_collar_type', decisionKey: 'collar_type' },
+            selected: ['shirt collar'],
+            freeText: '',
+            skipped: false,
+          },
+        ],
+      ),
+    );
+    check(
+      superseded.length === 1 && superseded[0].question.id === 'clarify_collar_type',
+      'a re-question with the same decision_key supersedes the stale answer',
+    );
     await ctx.close();
   }
   // 70-SEAMS D3: швы (sm_) и колорвеи (col_palette) — значки на чипах, большой значок детали,

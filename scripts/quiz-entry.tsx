@@ -24,6 +24,7 @@ import {
   type QuizPicture,
 } from 'components/managers/tech-card/components/design/quiz-anchor';
 import {
+  applyRows,
   clarifyOf,
   decisionLines,
   insertClarify,
@@ -141,7 +142,7 @@ w.__quiz = w.__preset?.quiz ?? defaultQuiz;
 w.__answers = w.__preset?.answers ?? [];
 // E2: открытый прогон на «сервере» — `{ questions, family }` или null.
 w.__session = w.__preset?.session ?? null;
-w.__model = { clarifyOf, decisionLines, insertClarify, QUIZ_MAX, seamOf, swatchOf };
+w.__model = { applyRows, clarifyOf, decisionLines, insertClarify, QUIZ_MAX, seamOf, swatchOf };
 
 // Картинка-заглушка: серый кадр с крупной цифрой — монохром, как у доски.
 const picUrl = (n: number, shade: string, w: number, h: number) =>
