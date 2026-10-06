@@ -539,6 +539,40 @@ ck(
       'c38 live: the three runs come out identical',
       `${new Set(seen).size}`,
     );
+    // The f5 answers asked live on beta (c38-parts-f5-live0..2.json): the model now also swaps the
+    // two neck strips (binding [1], layer [2]) — the pair rule puts them back. Straps and the V layer
+    // only: the back triangles are the model's (opening or a seen-through inside).
+    const f5 = [0, 1, 2]
+      .map((k) => resolve(RUNS, `c38-parts-f5-live${k}.json`))
+      .filter((f) => existsSync(f));
+    for (const file of f5) {
+      const rows = JSON.parse(readFileSync(file, 'utf8'));
+      const layer = m.innerLayerPart(rows, layers);
+      const keys = m.labelKeys(rows);
+      const laid = {};
+      for (const r of rows) {
+        const f = flats[r.view];
+        laid[r.view] = m.fixBands(
+          m.fixSides(r.view, m.partsOf(r, f, undefined, r.view), f, keys),
+          f,
+          layer,
+        );
+      }
+      const sig = [
+        of(laid.back, 1),
+        of(laid.back, 7),
+        of(laid.back, 2),
+        of(laid.front, 1),
+        of(laid.front, 2),
+      ].join(' · ');
+      ck(
+        sig ===
+          'left strap[left-strap] · left strap[left-strap] · right strap[right-strap] · ' +
+            'inner front v-panel[inner-front-v-panel] · front neck binding[front-neck-binding]',
+        `c38 ${file.split('/').pop()}: straps + V layer`,
+        sig,
+      );
+    }
     // The V layer is no binding region on the front: the binding keeps region 2 only.
     const rows1 = JSON.parse(readFileSync(runs[0], 'utf8'));
     const fr1 = rows1.find((r) => r.view === 'front');

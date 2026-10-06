@@ -711,14 +711,20 @@ export function fixBands(
     if (v > 0 && v <= count) area[v] += 1;
   }
   const wide: number[] = [];
-  /** Regions of a several-region binding group that are strips: the stacked candidates. */
+  /** Strips of a binding group, and of this side's own layer group: the stacked candidates. */
   const stacked: number[] = [];
-  parts.groups.forEach((g) => {
-    if (!isBand(g)) return;
+  const layerAt = layer
+    ? parts.groups.findIndex(
+        (g) => g.key === layer.key && !g.label.endsWith(INSIDE_SUFFIX) && !isOpening(g),
+      )
+    : -1;
+  parts.groups.forEach((g, gi) => {
+    if (!isBand(g) && gi !== layerAt) return;
     for (const r of g.regions) {
       const d = bandWidth(r2[r]);
-      if (d > BAND_MAX_WIDTH * silW && area[r] / (d * d) < BAND_MIN_ELONGATION) wide.push(r);
-      else if (layer && g.regions.length > 1) stacked.push(r);
+      const blob = d > BAND_MAX_WIDTH * silW && area[r] / (d * d) < BAND_MIN_ELONGATION;
+      if (blob && isBand(g)) wide.push(r);
+      else if (!blob && layer) stacked.push(r);
     }
   });
   if (wide.length === 0 && stacked.length === 0) return parts;
@@ -839,31 +845,59 @@ export function fixBands(
     out.set(r, parts.groups[best]);
   }
 
-  // f5 · stacked strips: one that runs along its group's other strips and finishes no cloth.
+  // f5 · stacked strips: a binding and the layer showing past it run along each other. Over one
+  // binding group and the layer's strips that lie along it, the strip that finishes cloth (borders a
+  // part outside them, not an opening, along `STACK_FREE`) is the binding, one that finishes none is
+  // the layer — whichever of the two the answer put it in. The binding always keeps a region.
+  const moved = new Set<number>(wideSet);
   if (layer) {
     const groupOf = (r: number) => parts.regionGroup[r] ?? -1;
-    for (const r of stacked) {
-      const gi = groupOf(r);
-      const e = Math.max(1, edge.get(r) ?? 0);
-      let along = 0;
-      let cloth = 0;
-      for (const [u, c] of touch.get(r)!) {
-        if (groupOf(u) === gi) along += c;
-        else if (!opening.has(u)) cloth += c;
+    const stackSet = new Set(stacked);
+    parts.groups.forEach((g, gi) => {
+      if (!isBand(g)) return;
+      const own = g.regions.filter((r) => stackSet.has(r));
+      if (own.length === 0) return;
+      const ownSet = new Set(own);
+      const contact = (r: number, to: (u: number) => boolean) => {
+        let c = 0;
+        for (const [u, n] of touch.get(r) ?? []) if (to(u)) c += n;
+        return c / Math.max(1, edge.get(r) ?? 0);
+      };
+      // The layer's strips lying along this binding.
+      const lay =
+        layerAt >= 0
+          ? parts.groups[layerAt].regions.filter(
+              (r) =>
+                stackSet.has(r) &&
+                !out.has(r) /* one binding per layer strip */ &&
+                contact(r, (u) => ownSet.has(u)) >= STACK_CONTACT,
+            )
+          : [];
+      const pair = new Set([...own, ...lay]);
+      const finishes = (r: number) =>
+        contact(r, (u) => !pair.has(u) && !opening.has(u) && groupOf(u) !== gi) >= STACK_FREE;
+      const along = (r: number) => contact(r, (u) => pair.has(u)) >= STACK_CONTACT;
+      const leave = own.filter((r) => !finishes(r) && along(r));
+      const join = lay.filter((r) => finishes(r));
+      const keeps = own.filter((r) => !wideSet.has(r)).length - leave.length + join.length;
+      if (keeps < 1 || (leave.length === 0 && join.length === 0)) return;
+      for (const r of leave) {
+        out.set(r, layer);
+        moved.add(r);
       }
-      if (along / e < STACK_CONTACT || cloth / e >= STACK_FREE) continue;
-      // The group keeps at least one region: it is still the binding.
-      if (parts.groups[gi].regions.filter((x) => !wideSet.has(x)).length <= 1) continue;
-      out.set(r, layer);
-      wideSet.add(r);
-    }
+      for (const r of join) {
+        out.set(r, g);
+        moved.add(r);
+      }
+    });
   }
   if (out.size === 0) return parts;
 
   // Rebuild the groups: the wide regions leave their band, join the opening / the part's inside.
-  const groups: PartGroup[] = parts.groups
-    .map((g) => (isBand(g) ? { ...g, regions: g.regions.filter((r) => !wideSet.has(r)) } : g))
-    .map((g) => ({ ...g, regions: g.regions.slice() }));
+  const groups: PartGroup[] = parts.groups.map((g) => ({
+    ...g,
+    regions: g.regions.filter((r) => !moved.has(r)),
+  }));
   const findOrAdd = (label: string, key: string): PartGroup => {
     let g = groups.find((o) =>
       label === OPENING ? isOpening(o) : o.label === label && o.key === key,
@@ -880,7 +914,9 @@ export function fixBands(
         ? findOrAdd(OPENING, OPENING)
         : to === layer
           ? findOrAdd(layer.label, layer.key)
-          : findOrAdd(`${(to as PartGroup).label}${INSIDE_SUFFIX}`, (to as PartGroup).key);
+          : isBand(to as PartGroup)
+            ? findOrAdd((to as PartGroup).label, (to as PartGroup).key)
+            : findOrAdd(`${(to as PartGroup).label}${INSIDE_SUFFIX}`, (to as PartGroup).key);
     g.regions.push(r);
   }
   const kept = groups.filter((g) => g.regions.length > 0);
